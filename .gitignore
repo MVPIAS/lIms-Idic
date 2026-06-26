@@ -1,0 +1,71 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build artifacts
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+
+# Environment
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# IDE
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+
+# Prisma
+prisma/migrations/dev.db*
+
+# Docker
+docker/data/
+
+# Otros
+.cache/
+.turbo/
+.parcel-cache/
+*.tgz
+
+# =====================================================================
+# SEGURIDAD · datos sensibles del cliente (defensa) — NUNCA versionar
+# Este repo es SOLO CÓDIGO. Datos reales del IDIC van fuera de git cloud.
+# =====================================================================
+*.mdf
+*.bak
+*.XLS
+*.xls
+*.xlsx
+*.csv
+dumps/
+data-cliente/
+documentacion-cliente/
+*_extracted/
+seed-data-real/
+# Permitir explícitamente artefactos de código que sí deben ir:
+!package.json
+!tsconfig*.json
