@@ -1,0 +1,323 @@
+// LIMS IDIC · Prisma schema
+// Derivado de ../../../02_diseno/schema.sql
+// Para sincronizar: pnpm prisma db pull (lee de PostgreSQL) o regenerar manual
+//
+// Este archivo modela las tablas más utilizadas por la app. Para tablas legacy
+// menos usadas (audit_log particionado, etc.) se accede vía $queryRaw.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, citext, pg_trgm, btree_gin]
+}
+
+// ============================================================================
+// MULTI-TENANT
+// ============================================================================
+
+model Tenant {
+  id            String   @id @default(uuid()) @db.Uuid
+  codigo        String   @unique @db.VarChar(40)
+  nombre        String   @db.VarChar(200)
+  rut           String?  @db.VarChar(20)
+  zonaHoraria   String   @default("America/Santiago") @map("zona_horaria") @db.VarChar(40)
+  moneda        String   @default("CLP") @db.VarChar(3)
+  ivaPct        Decimal  @default(19.00) @map("iva_pct") @db.Decimal(5, 2)
+  config        Json     @default("{}")
+  activo        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  usuarios      Usuario[]
+  clientes      Cliente[]
+  cotizaciones  Cotizacion[]
+  ots           OrdenTrabajo[]
+
+  @@map("tenant")
+}
+
+// ============================================================================
+// ORGANIZACIÓN
+// ============================================================================
+
+model Sede {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  codigo    String   @db.VarChar(20)
+  nombre    String   @db.VarChar(120)
+  direccion String?
+  ciudad    String?  @db.VarChar(80)
+  region    String?  @db.VarChar(80)
+  pais      String   @default("Chile") @db.VarChar(40)
+  activa    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  unidades  Unidad[]
+
+  @@unique([tenantId, codigo])
+  @@map("sede")
+}
+
+model Unidad {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  sedeId          String   @map("sede_id") @db.Uuid
+  codigo          String   @db.VarChar(20)
+  nombre          String   @db.VarChar(200)
+  descripcion     String?
+  jefeUsuarioId   String?  @map("jefe_usuario_id") @db.Uuid
+  activa          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  sede            Sede     @relation(fields: [sedeId], references: [id])
+
+  @@unique([tenantId, codigo])
+  @@map("unidad")
+}
+
+// ============================================================================
+// USUARIOS · RBAC
+// ============================================================================
+
+model Usuario {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  username         String    @db.Citext
+  email            String?   @db.Citext
+  nombreCompleto   String    @map("nombre_completo") @db.VarChar(200)
+  passwordHash     String?   @map("password_hash") @db.VarChar(255)
+  totpSecret       String?   @map("totp_secret") @db.VarChar(120)
+  totpActivo       Boolean   @default(false) @map("totp_activo")
+  estado           String    @default("activo") @db.VarChar(20)
+  ultimoLoginAt    DateTime? @map("ultimo_login_at") @db.Timestamptz
+  ultimoLoginIp    String?   @map("ultimo_login_ip") @db.Inet
+  intentosFallidos Int       @default(0) @map("intentos_fallidos")
+  grado            String?   @db.VarChar(80)
+  cargo            String?   @db.VarChar(200)
+  userLims         String?   @map("user_lims") @db.VarChar(50)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz
+
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+  usuarioRoles     UsuarioRol[]
+  cotizacionesCreadas Cotizacion[] @relation("CotizacionCreada")
+
+  @@unique([tenantId, username])
+  @@unique([tenantId, email])
+  @@map("usuario")
+}
+
+model Rol {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  codigo        String   @db.VarChar(40)
+  nombre        String   @db.VarChar(120)
+  descripcion   String?
+  esSistema     Boolean  @default(false) @map("es_sistema")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  usuarioRoles  UsuarioRol[]
+
+  @@unique([tenantId, codigo])
+  @@map("rol")
+}
+
+model UsuarioRol {
+  usuarioId     String   @map("usuario_id") @db.Uuid
+  rolId         String   @map("rol_id") @db.Uuid
+  unidadId      String?  @map("unidad_id") @db.Uuid
+  vigenteDesde  DateTime @default(now()) @map("vigente_desde") @db.Timestamptz
+  vigenteHasta  DateTime? @map("vigente_hasta") @db.Timestamptz
+
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  rol           Rol      @relation(fields: [rolId], references: [id], onDelete: Cascade)
+
+  @@id([usuarioId, rolId, unidadId])
+  @@map("usuario_rol")
+}
+
+// ============================================================================
+// CLIENTES (con validación RUT chileno)
+// ============================================================================
+
+model Cliente {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  codigo          String?   @db.VarChar(20)
+  rut             String    @db.VarChar(20)
+  razonSocial     String    @map("razon_social") @db.VarChar(200)
+  nombreFantasia  String?   @map("nombre_fantasia") @db.VarChar(200)
+  giro            String?   @db.VarChar(200)
+  tipo            String?   @db.VarChar(30)
+  direccion       String?
+  ciudad          String?   @db.VarChar(80)
+  region          String?   @db.VarChar(80)
+  telefono        String?   @db.VarChar(40)
+  email           String?   @db.Citext
+  fechaRegistro   DateTime  @default(dbgenerated("CURRENT_DATE")) @map("fecha_registro") @db.Date
+  diasCredito     Int       @default(30) @map("dias_credito")
+  bloqueado       Boolean   @default(false)
+  motivoBloqueo   String?   @map("motivo_bloqueo")
+  saldoActual     Decimal   @default(0) @map("saldo_actual") @db.Decimal(14, 2)
+  notas           String?
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  plantas         Planta[]
+  cotizaciones    Cotizacion[]
+  ots             OrdenTrabajo[]
+
+  @@unique([tenantId, rut])
+  @@map("cliente")
+}
+
+model Planta {
+  id         String  @id @default(uuid()) @db.Uuid
+  clienteId  String  @map("cliente_id") @db.Uuid
+  codigo     String  @db.VarChar(20)
+  nombre     String  @db.VarChar(200)
+  direccion  String?
+  ciudad     String? @db.VarChar(80)
+  region     String? @db.VarChar(80)
+  telefono   String? @db.VarChar(40)
+  activa     Boolean @default(true)
+
+  cliente    Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@unique([clienteId, codigo])
+  @@map("planta")
+}
+
+// ============================================================================
+// COTIZACIÓN
+// ============================================================================
+
+model Cotizacion {
+  id                String              @id @default(uuid()) @db.Uuid
+  tenantId          String              @map("tenant_id") @db.Uuid
+  codigo            String              @db.VarChar(30)
+  clienteId         String              @map("cliente_id") @db.Uuid
+  plantaId          String?             @map("planta_id") @db.Uuid
+  fechaEmision      DateTime            @default(dbgenerated("CURRENT_DATE")) @map("fecha_emision") @db.Date
+  validezDias       Int                 @default(30) @map("validez_dias")
+  expiraAt          DateTime?           @map("expira_at") @db.Date
+  estado            String              @default("borrador") @db.VarChar(20)
+  subtotal          Decimal             @default(0) @db.Decimal(14, 2)
+  descuentoPct      Decimal             @default(0) @map("descuento_pct") @db.Decimal(5, 2)
+  descuentoMonto    Decimal             @default(0) @map("descuento_monto") @db.Decimal(14, 2)
+  gastosAdminPct    Decimal             @default(0) @map("gastos_admin_pct") @db.Decimal(5, 2)
+  gastosAdminMonto  Decimal             @default(0) @map("gastos_admin_monto") @db.Decimal(14, 2)
+  neto              Decimal             @default(0) @db.Decimal(14, 2)
+  ivaPct            Decimal             @default(19) @map("iva_pct") @db.Decimal(5, 2)
+  ivaMonto          Decimal             @default(0) @map("iva_monto") @db.Decimal(14, 2)
+  total             Decimal             @default(0) @db.Decimal(14, 2)
+  formato           String?             @db.VarChar(20)
+  formaPago         String?             @map("forma_pago") @db.VarChar(80)
+  ejecutivoId       String?             @map("ejecutivo_id") @db.Uuid
+  notas             String?
+  condicionesParticulares Json           @default("{}") @map("condiciones_particulares")
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime            @default(now()) @map("updated_at") @db.Timestamptz
+  createdBy         String?             @map("created_by") @db.Uuid
+
+  tenant            Tenant              @relation(fields: [tenantId], references: [id])
+  cliente           Cliente             @relation(fields: [clienteId], references: [id])
+  ejecutivo         Usuario?            @relation("CotizacionCreada", fields: [ejecutivoId], references: [id])
+  lineas            LineaCotizacion[]
+
+  @@unique([tenantId, codigo])
+  @@index([clienteId, estado])
+  @@map("cotizacion")
+}
+
+model LineaCotizacion {
+  id              String     @id @default(uuid()) @db.Uuid
+  cotizacionId    String     @map("cotizacion_id") @db.Uuid
+  tipo            String     @default("producto") @db.VarChar(30)
+  descripcion     String?
+  categoria       String?    @db.VarChar(80)
+  cantidad        Int        @default(1)
+  diasOHoras      Decimal?   @map("dias_o_horas") @db.Decimal(8, 2)
+  precioUnitario  Decimal    @map("precio_unitario") @db.Decimal(14, 2)
+  descuentoPct    Decimal    @default(0) @map("descuento_pct") @db.Decimal(5, 2)
+  subtotal        Decimal    @db.Decimal(14, 2)
+  tramo           String?    @db.VarChar(200)
+  orden           Int?
+
+  cotizacion      Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
+
+  @@map("linea_cotizacion")
+}
+
+// ============================================================================
+// ORDEN DE TRABAJO
+// ============================================================================
+
+model OrdenTrabajo {
+  id                    String    @id @default(uuid()) @db.Uuid
+  tenantId              String    @map("tenant_id") @db.Uuid
+  codigo                String    @db.VarChar(30)
+  cotizacionId          String?   @map("cotizacion_id") @db.Uuid
+  clienteId             String    @map("cliente_id") @db.Uuid
+  plantaId              String?   @map("planta_id") @db.Uuid
+  unidadPrincipal       String?   @map("unidad_principal") @db.Uuid
+  flujoInstanciaId      String?   @map("flujo_instancia_id") @db.Uuid
+  prioridad             String    @default("normal") @db.VarChar(20)
+  fechaRecepcion        DateTime? @map("fecha_recepcion") @db.Timestamptz
+  fechaCompromiso       DateTime? @map("fecha_compromiso") @db.Date
+  fechaCierre           DateTime? @map("fecha_cierre") @db.Timestamptz
+  solicitante           String?   @db.VarChar(200)
+  numeroLey             String?   @map("numero_ley") @db.VarChar(40)
+  origenTrabajo         String?   @map("origen_trabajo") @db.VarChar(120)
+  estado                String    @default("recepcionada") @db.VarChar(40)
+  subdireccionAsignada  String?   @map("subdireccion_asignada") @db.VarChar(255)
+  tipoTrabajo           String?   @map("tipo_trabajo") @db.VarChar(120)
+  documentoWord         String?   @map("documento_word") @db.VarChar(120)
+  fechaEntregaCliente   DateTime? @map("fecha_entrega_cliente") @db.Date
+  fechaRecepDco         DateTime? @map("fecha_recep_dco") @db.Date
+  diasAtraso            Int       @default(0) @map("dias_atraso")
+  medioEnvio            String?   @map("medio_envio") @db.VarChar(40)
+  estadoEnvio           String    @default("No enviado") @map("estado_envio") @db.VarChar(40)
+  descripcionTrabajo    String?   @map("descripcion_trabajo")
+  notas                 String?
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+
+  tenant                Tenant    @relation(fields: [tenantId], references: [id])
+  cliente               Cliente   @relation(fields: [clienteId], references: [id])
+
+  @@unique([tenantId, codigo])
+  @@index([clienteId, estado])
+  @@index([unidadPrincipal, estado])
+  @@map("orden_trabajo")
+}
+
+// ============================================================================
+// AUDIT LOG (acceso vía $queryRaw — está particionado por mes)
+// Modelo aquí solo para tipos de TypeScript
+// ============================================================================
+
+model AuditLog {
+  id            String   @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  ocurridoAt    DateTime @default(now()) @map("ocurrido_at") @db.Timestamptz
+  usuarioId     String?  @map("usuario_id") @db.Uuid
+  username      String?  @db.VarChar(80)
+  ip            String?  @db.Inet
+  userAgent     String?  @map("user_agent")
+  accion        String   @db.VarChar(60)
+  entidadTipo   String   @map("entidad_tipo") @db.VarChar(60)
+  entidadId     String?  @map("entidad_id") @db.Uuid
+  entidadCodigo String?  @map("entidad_codigo") @db.VarChar(60)
+  diff          Json?
+  motivo        String?
+  metadata      Json?
+
+  @@id([id, ocurridoAt])
+  @@map("audit_log")
+}

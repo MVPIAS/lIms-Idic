@@ -1,0 +1,8 @@
+# Normalizar finales de línea: texto en LF en el repo, checkout nativo
+* text=auto eol=lf
+*.sh text eol=lf
+*.{cmd,bat,ps1} text eol=crlf
+# Binarios
+*.png binary
+*.jpg binary
+*.ico binary

@@ -1,0 +1,35 @@
+{
+  "name": "lims-idic",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LIMS IDIC · Instituto de Investigaciones y Control del Ejército de Chile",
+  "license": "PROPRIETARY",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter './apps/*' dev",
+    "dev:api": "pnpm --filter @lims-idic/api dev",
+    "dev:web": "pnpm --filter @lims-idic/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "test:e2e": "pnpm --filter @lims-idic/web test:e2e",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\"",
+    "db:generate": "pnpm --filter @lims-idic/db generate",
+    "db:migrate": "pnpm --filter @lims-idic/db migrate",
+    "db:studio": "pnpm --filter @lims-idic/db studio",
+    "db:seed": "pnpm --filter @lims-idic/db seed",
+    "docker:up": "docker compose -f docker/docker-compose.yml up -d",
+    "docker:down": "docker compose -f docker/docker-compose.yml down",
+    "docker:logs": "docker compose -f docker/docker-compose.yml logs -f"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.4.0",
+    "turbo": "^1.13.0"
+  },
+  "packageManager": "pnpm@9.0.0"
+}
