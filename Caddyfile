@@ -1,0 +1,30 @@
+# Caddy · reverse proxy + HTTPS automático (Let's Encrypt)
+# Variables vienen del .env (DOMAIN, ACME_EMAIL)
+{
+	email {$ACME_EMAIL}
+}
+
+# App principal: web (Next.js) + API (NestJS) bajo /api
+{$DOMAIN} {
+	# /api/* -> backend NestJS (se elimina el prefijo /api)
+	handle_path /api/* {
+		reverse_proxy api:3001
+	}
+	# Todo lo demás -> frontend Next.js
+	handle {
+		reverse_proxy web:3000
+	}
+	encode gzip zstd
+	header -Server
+}
+
+# BI (Metabase) en subdominio
+bi.{$DOMAIN} {
+	reverse_proxy metabase:3000
+	encode gzip zstd
+}
+
+# Consola de MinIO (opcional) en subdominio — comentar si no se usa
+# s3.{$DOMAIN} {
+# 	reverse_proxy minio:9001
+# }
