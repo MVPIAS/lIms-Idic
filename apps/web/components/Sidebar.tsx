@@ -20,6 +20,7 @@ const NAV = [
     items: [
       { href: "/ot", label: "Órdenes Trabajo", icon: "▤" },
       { href: "/ot/nueva", label: "Nueva OT", icon: "+" },
+      { href: "/flujos", label: "Diseñador de Flujos", icon: "⛓" },
     ],
   },
   {

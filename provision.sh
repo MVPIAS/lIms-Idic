@@ -51,7 +51,7 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d --build
 echo ">> Esperando a PostgreSQL y aplicando schema + seeds..."
 set -a; source .env; set +a
 until docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; do sleep 3; done
-for f in packages/db/schema.sql packages/db/seed_catalogos_metodos.sql; do
+for f in packages/db/schema.sql packages/db/seed_catalogos_metodos.sql packages/db/seed_flujos.sql; do
   if [ -f "$f" ]; then
     echo "   aplicando $f"
     docker compose -f docker-compose.prod.yml exec -T postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" < "$f" || echo "   (aviso: $f ya aplicado o con avisos)"
