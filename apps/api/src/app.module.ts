@@ -7,6 +7,7 @@ import { AuthModule } from "./auth/auth.module";
 import { ClienteModule } from "./cliente/cliente.module";
 import { CotizacionModule } from "./cotizacion/cotizacion.module";
 import { OtModule } from "./ot/ot.module";
+import { FlujoModule } from "./flujo/flujo.module";
 import { HealthModule } from "./health/health.module";
 import { PrismaModule } from "./common/prisma.module";
 
@@ -28,6 +29,7 @@ import { PrismaModule } from "./common/prisma.module";
     ClienteModule,
     CotizacionModule,
     OtModule,
+    FlujoModule,
     HealthModule,
   ],
 })

@@ -7,7 +7,7 @@
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions", "fullTextSearchPostgres"]
+  previewFeatures = ["postgresqlExtensions", "fullTextSearch"]
 }
 
 datasource db {
@@ -135,7 +135,7 @@ model UsuarioRol {
   usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   rol           Rol      @relation(fields: [rolId], references: [id], onDelete: Cascade)
 
-  @@id([usuarioId, rolId, unidadId])
+  @@id([usuarioId, rolId])
   @@map("usuario_rol")
 }
 
@@ -320,4 +320,138 @@ model AuditLog {
 
   @@id([id, ocurridoAt])
   @@map("audit_log")
+}
+
+// =============================================================================
+// MOTOR BPM · flujos como datos (diseño + runtime)
+// =============================================================================
+
+model FlujoDef {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  codigo      String   @db.VarChar(40)
+  nombre      String   @db.VarChar(200)
+  categoria   String?  @db.VarChar(40)
+  unidadId    String?  @map("unidad_id") @db.Uuid
+  esPlantilla Boolean  @default(false) @map("es_plantilla")
+  descripcion String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  versiones   FlujoVersion[]
+
+  @@unique([tenantId, codigo])
+  @@map("flujo_def")
+}
+
+model FlujoVersion {
+  id           String    @id @default(uuid()) @db.Uuid
+  flujoDefId   String    @map("flujo_def_id") @db.Uuid
+  version      String    @db.VarChar(10)
+  bpmnXml      String?   @map("bpmn_xml")
+  estado       String?   @default("borrador") @db.VarChar(20)
+  vigenteDesde DateTime? @map("vigente_desde") @db.Timestamptz
+  vigenteHasta DateTime? @map("vigente_hasta") @db.Timestamptz
+  publicadoPor String?   @map("publicado_por") @db.Uuid
+  publicadoAt  DateTime? @map("publicado_at") @db.Timestamptz
+  notasCambio  String?   @map("notas_cambio")
+  def          FlujoDef  @relation(fields: [flujoDefId], references: [id])
+  pasos        FlujoPaso[]
+  transiciones FlujoTransicion[]
+  instancias   FlujoInstancia[]
+
+  @@unique([flujoDefId, version])
+  @@map("flujo_version")
+}
+
+model FlujoPaso {
+  id                String   @id @default(uuid()) @db.Uuid
+  flujoVersionId    String   @map("flujo_version_id") @db.Uuid
+  bpmnElementId     String   @map("bpmn_element_id") @db.VarChar(80)
+  numero            Int
+  tipo              String   @db.VarChar(20)
+  actividad         String   @db.VarChar(300)
+  responsableRolId  String?  @map("responsable_rol_id") @db.Uuid
+  sistema           String?  @db.VarChar(120)
+  entrada           String?
+  salida            String?
+  condicion         String?
+  slaMinutos        Int?     @map("sla_minutos")
+  escalamientoRolId String?  @map("escalamiento_rol_id") @db.Uuid
+  hitoPliego        String?  @map("hito_pliego") @db.VarChar(20)
+  configJson        Json?    @default("{}") @map("config_json")
+  notas             String?
+  version           FlujoVersion      @relation(fields: [flujoVersionId], references: [id], onDelete: Cascade)
+  salientes         FlujoTransicion[] @relation("TransOrigen")
+  entrantes         FlujoTransicion[] @relation("TransDestino")
+  ejecuciones       PasoEjecucion[]
+  instanciasActual  FlujoInstancia[]  @relation("PasoActual")
+
+  @@unique([flujoVersionId, bpmnElementId])
+  @@map("flujo_paso")
+}
+
+model FlujoTransicion {
+  id             String    @id @default(uuid()) @db.Uuid
+  flujoVersionId String    @map("flujo_version_id") @db.Uuid
+  origenPasoId   String    @map("origen_paso_id") @db.Uuid
+  destinoPasoId  String    @map("destino_paso_id") @db.Uuid
+  condicion      String?
+  etiqueta       String?   @db.VarChar(80)
+  orden          Int?      @default(0)
+  version        FlujoVersion @relation(fields: [flujoVersionId], references: [id], onDelete: Cascade)
+  origen         FlujoPaso    @relation("TransOrigen", fields: [origenPasoId], references: [id])
+  destino        FlujoPaso    @relation("TransDestino", fields: [destinoPasoId], references: [id])
+
+  @@map("flujo_transicion")
+}
+
+model FlujoInstancia {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  flujoVersionId String    @map("flujo_version_id") @db.Uuid
+  otId           String?   @map("ot_id") @db.Uuid
+  estado         String    @default("iniciado") @db.VarChar(20)
+  pasoActualId   String?   @map("paso_actual_id") @db.Uuid
+  iniciadoAt     DateTime  @default(now()) @map("iniciado_at") @db.Timestamptz
+  iniciadoPor    String?   @map("iniciado_por") @db.Uuid
+  completadoAt   DateTime? @map("completado_at") @db.Timestamptz
+  metadata       Json?     @default("{}")
+  version        FlujoVersion   @relation(fields: [flujoVersionId], references: [id])
+  pasoActual     FlujoPaso?     @relation("PasoActual", fields: [pasoActualId], references: [id])
+  ejecuciones    PasoEjecucion[]
+
+  @@map("flujo_instancia")
+}
+
+model PasoEjecucion {
+  id              String    @id @default(uuid()) @db.Uuid
+  instanciaId     String    @map("instancia_id") @db.Uuid
+  pasoId          String    @map("paso_id") @db.Uuid
+  estado          String?   @db.VarChar(20)
+  asignadoA       String?   @map("asignado_a") @db.Uuid
+  iniciadoAt      DateTime? @map("iniciado_at") @db.Timestamptz
+  completadoAt    DateTime? @map("completado_at") @db.Timestamptz
+  duracionRealMin Int?      @map("duracion_real_min")
+  excedioSla      Boolean?  @default(false) @map("excedio_sla")
+  resultado       Json?
+  error           String?
+  instancia       FlujoInstancia  @relation(fields: [instanciaId], references: [id], onDelete: Cascade)
+  paso            FlujoPaso       @relation(fields: [pasoId], references: [id])
+  tareas          TareaAsignada[]
+
+  @@map("paso_ejecucion")
+}
+
+model TareaAsignada {
+  id              String    @id @default(uuid()) @db.Uuid
+  pasoEjecucionId String    @map("paso_ejecucion_id") @db.Uuid
+  asignadoA       String    @map("asignado_a") @db.Uuid
+  estado          String?   @default("pendiente") @db.VarChar(20)
+  prioridad       Int?      @default(0)
+  venceAt         DateTime? @map("vence_at") @db.Timestamptz
+  iniciadaAt      DateTime? @map("iniciada_at") @db.Timestamptz
+  completadaAt    DateTime? @map("completada_at") @db.Timestamptz
+  notasUsuario    String?   @map("notas_usuario")
+  pasoEjecucion   PasoEjecucion @relation(fields: [pasoEjecucionId], references: [id], onDelete: Cascade)
+
+  @@map("tarea_asignada")
 }
