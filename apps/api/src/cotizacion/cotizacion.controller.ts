@@ -3,6 +3,40 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { z } from "zod";
 import { CotizacionService } from "./cotizacion.service";
+import { CosteoService } from "./costeo.service";
+
+const CosteoSchema = z.object({
+  lineas: z
+    .array(
+      z.object({
+        tipo: z.enum([
+          "viatico",
+          "hora_hombre_civil",
+          "hora_hombre_militar",
+          "hora_maquina",
+          "pasaje",
+          "insumo",
+          "otros",
+        ]),
+        descripcion: z.string().optional(),
+        cantidad: z.number().nonnegative(),
+        valorUnitario: z.number().nonnegative(),
+      }),
+    )
+    .min(1),
+  cfaPct: z.number().min(0).max(100).optional(),
+  margenParticularPct: z.number().min(0).max(100).optional(),
+  ivaPct: z.number().min(0).max(100).optional(),
+  redondeoClp: z.number().min(0).optional(),
+});
+
+const TasaSchema = z.object({
+  cifDivisa: z.number().positive(),
+  paridad: z.number().positive(),
+  divisa: z.string().optional(),
+  tasaPct: z.number().min(0).max(100).optional(),
+  ivaPct: z.number().min(0).max(100).optional(),
+});
 
 const LineaSchema = z.object({
   tipo: z.enum(["producto", "viatico", "pasaje", "hora_hombre", "hora_maquina", "otros", "extension"]),
@@ -33,7 +67,24 @@ const CrearCotSchema = z.object({
 @UseGuards(AuthGuard("jwt"))
 @Controller("cotizaciones")
 export class CotizacionController {
-  constructor(private readonly svc: CotizacionService) {}
+  constructor(
+    private readonly svc: CotizacionService,
+    private readonly costeo: CosteoService,
+  ) {}
+
+  /** Costeo Ejército: CDT → CFA → CT → 3 precios. No persiste; sirve al simulador. */
+  @Post("costeo")
+  calcularCosteo(@Body() body: unknown) {
+    const { lineas, ...params } = CosteoSchema.parse(body);
+    return this.costeo.calcular(lineas, params);
+  }
+
+  /** Tasa de internación 1,5% (servicios ligados a importación). */
+  @Post("tasa-internacion")
+  calcularTasa(@Body() body: unknown) {
+    const { cifDivisa, paridad, ...opts } = TasaSchema.parse(body);
+    return this.costeo.tasaInternacion(cifDivisa, paridad, opts);
+  }
 
   @Get()
   listar() {
