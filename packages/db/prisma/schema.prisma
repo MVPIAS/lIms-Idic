@@ -455,3 +455,430 @@ model TareaAsignada {
 
   @@map("tarea_asignada")
 }
+
+// =============================================================================
+// COMERCIAL · proveedores, contactos, listas de precio, facturación, adquisiciones
+// (FK a Cliente/OT/Rol como escalar Uuid para no acoplar los modelos existentes)
+// =============================================================================
+
+model Proveedor {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  rut           String    @db.VarChar(20)
+  razonSocial   String    @map("razon_social") @db.VarChar(200)
+  rubro         String?   @db.VarChar(200)
+  contacto      String?   @db.VarChar(120)
+  telefono      String?   @db.VarChar(40)
+  email         String?   @db.Citext
+  condicionPago String?   @map("condicion_pago") @db.VarChar(40)
+  estado        String    @default("habilitado") @db.VarChar(20)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
+
+  ordenesCompra OrdenCompra[]
+
+  @@unique([tenantId, rut])
+  @@map("proveedor")
+}
+
+model Contacto {
+  id          String    @id @default(uuid()) @db.Uuid
+  clienteId   String    @map("cliente_id") @db.Uuid
+  nombre      String    @db.VarChar(160)
+  cargo       String?   @db.VarChar(120)
+  email       String?   @db.Citext
+  telefono    String?   @db.VarChar(40)
+  principal   Boolean   @default(false)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@index([clienteId])
+  @@map("contacto")
+}
+
+model CentroCosto {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  codigo    String    @db.VarChar(30)
+  nombre    String    @db.VarChar(200)
+  laboratorio String? @db.VarChar(20)
+  activo    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@unique([tenantId, codigo])
+  @@map("centro_costo")
+}
+
+model ListaPrecio {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  codigo       String    @db.VarChar(30)
+  nombre       String    @db.VarChar(200)
+  moneda       String    @default("CLP") @db.VarChar(3)
+  vigenteDesde DateTime  @default(dbgenerated("CURRENT_DATE")) @map("vigente_desde") @db.Date
+  activa       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
+
+  items        ListaPrecioItem[]
+
+  @@unique([tenantId, codigo])
+  @@map("lista_precio")
+}
+
+model ListaPrecioItem {
+  id           String   @id @default(uuid()) @db.Uuid
+  listaPrecioId String  @map("lista_precio_id") @db.Uuid
+  codigo       String   @db.VarChar(30)
+  descripcion  String   @db.VarChar(300)
+  cc           String?  @db.VarChar(20)
+  tipo         String   @default("servicio") @db.VarChar(20)
+  precio       Decimal  @db.Decimal(14, 2)
+
+  lista        ListaPrecio @relation(fields: [listaPrecioId], references: [id], onDelete: Cascade)
+
+  @@index([listaPrecioId])
+  @@map("lista_precio_item")
+}
+
+model Factura {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  numero       String    @db.VarChar(30)
+  clienteId    String    @map("cliente_id") @db.Uuid
+  otId         String?   @map("ot_id") @db.Uuid
+  fechaEmision DateTime  @default(dbgenerated("CURRENT_DATE")) @map("fecha_emision") @db.Date
+  neto         Decimal   @default(0) @db.Decimal(14, 2)
+  ivaMonto     Decimal   @default(0) @map("iva_monto") @db.Decimal(14, 2)
+  total        Decimal   @default(0) @db.Decimal(14, 2)
+  estado       String    @default("emitida") @db.VarChar(20)
+  origen       String?   @db.VarChar(20)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
+
+  lineas       LineaFactura[]
+  pagos        Pago[]
+  notasCredito NotaCredito[]
+
+  @@unique([tenantId, numero])
+  @@index([clienteId, estado])
+  @@map("factura")
+}
+
+model LineaFactura {
+  id             String   @id @default(uuid()) @db.Uuid
+  facturaId      String   @map("factura_id") @db.Uuid
+  descripcion    String
+  cantidad       Decimal  @default(1) @db.Decimal(10, 2)
+  precioUnitario Decimal  @map("precio_unitario") @db.Decimal(14, 2)
+  subtotal       Decimal  @db.Decimal(14, 2)
+
+  factura        Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+
+  @@index([facturaId])
+  @@map("linea_factura")
+}
+
+model Pago {
+  id        String   @id @default(uuid()) @db.Uuid
+  facturaId String   @map("factura_id") @db.Uuid
+  fecha     DateTime @default(dbgenerated("CURRENT_DATE")) @db.Date
+  monto     Decimal  @db.Decimal(14, 2)
+  medio     String?  @db.VarChar(40)
+  referencia String? @db.VarChar(80)
+
+  factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+
+  @@index([facturaId])
+  @@map("pago")
+}
+
+model NotaCredito {
+  id        String   @id @default(uuid()) @db.Uuid
+  facturaId String   @map("factura_id") @db.Uuid
+  numero    String   @db.VarChar(30)
+  fecha     DateTime @default(dbgenerated("CURRENT_DATE")) @db.Date
+  monto     Decimal  @db.Decimal(14, 2)
+  motivo    String?
+
+  factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
+
+  @@index([facturaId])
+  @@map("nota_credito")
+}
+
+model OrdenCompra {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  numero      String    @db.VarChar(30)
+  proveedorId String    @map("proveedor_id") @db.Uuid
+  detalle     String?
+  monto       Decimal   @default(0) @db.Decimal(14, 2)
+  estado      String    @default("emitida") @db.VarChar(20)
+  fecha       DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  proveedor   Proveedor @relation(fields: [proveedorId], references: [id])
+  lineas      LineaOrdenCompra[]
+
+  @@unique([tenantId, numero])
+  @@map("orden_compra")
+}
+
+model LineaOrdenCompra {
+  id             String   @id @default(uuid()) @db.Uuid
+  ordenCompraId  String   @map("orden_compra_id") @db.Uuid
+  descripcion    String
+  cantidad       Decimal  @default(1) @db.Decimal(10, 2)
+  precioUnitario Decimal  @map("precio_unitario") @db.Decimal(14, 2)
+  subtotal       Decimal  @db.Decimal(14, 2)
+
+  ordenCompra    OrdenCompra @relation(fields: [ordenCompraId], references: [id], onDelete: Cascade)
+
+  @@index([ordenCompraId])
+  @@map("linea_orden_compra")
+}
+
+model Viatico {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  funcionario String    @db.VarChar(160)
+  destino     String?   @db.VarChar(120)
+  dias        Int       @default(1)
+  tipo        String?   @db.VarChar(20)
+  monto       Decimal   @db.Decimal(14, 2)
+  fecha       DateTime  @default(dbgenerated("CURRENT_DATE")) @db.Date
+  otId        String?   @map("ot_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@map("viatico")
+}
+
+// =============================================================================
+// NÚCLEO LIMS · muestras, ensayos/métodos, analitos, resultados, certificados
+// Ejes de clasificación: Producto (Gran Grupo→Grupo) + tipos de muestra
+// =============================================================================
+
+model GranGrupo {
+  id       String   @id @default(uuid()) @db.Uuid
+  tenantId String   @map("tenant_id") @db.Uuid
+  codigo   String   @db.VarChar(10)
+  nombre   String   @db.VarChar(120)
+  activo   Boolean  @default(true)
+
+  grupos   Grupo[]
+
+  @@unique([tenantId, codigo])
+  @@map("gran_grupo")
+}
+
+model Grupo {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  granGrupoId  String    @map("gran_grupo_id") @db.Uuid
+  cgrupo       String?   @db.VarChar(10)
+  nombre       String    @db.VarChar(160)
+  activo       Boolean   @default(true)
+
+  granGrupo    GranGrupo @relation(fields: [granGrupoId], references: [id])
+  muestras     Muestra[]
+
+  @@index([granGrupoId])
+  @@map("grupo")
+}
+
+model TipoMuestra {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  parentId  String?   @map("parent_id") @db.Uuid
+  codigo    String    @db.VarChar(60)
+  nombre    String    @db.VarChar(200)
+  activo    Boolean   @default(true)
+
+  parent    TipoMuestra?  @relation("TipoMuestraArbol", fields: [parentId], references: [id])
+  hijos     TipoMuestra[] @relation("TipoMuestraArbol")
+  muestras  Muestra[]
+
+  @@unique([tenantId, codigo])
+  @@map("tipo_muestra")
+}
+
+model Muestra {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  otId          String?   @map("ot_id") @db.Uuid
+  codigo        String    @db.VarChar(30)
+  nombre        String?   @db.VarChar(200)
+  tipoMuestraId String?   @map("tipo_muestra_id") @db.Uuid
+  granGrupoId   String?   @map("gran_grupo_id") @db.Uuid
+  grupoId       String?   @map("grupo_id") @db.Uuid
+  clienteId     String?   @map("cliente_id") @db.Uuid
+  codigoBarras  String?   @map("codigo_barras") @db.VarChar(60)
+  ubicacion     String?   @db.VarChar(80)
+  estado        String    @default("recibida") @db.VarChar(30)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
+
+  tipoMuestra   TipoMuestra? @relation(fields: [tipoMuestraId], references: [id])
+  grupo         Grupo?       @relation(fields: [grupoId], references: [id])
+  resultados    Resultado[]
+
+  @@unique([tenantId, codigo])
+  @@index([otId])
+  @@map("muestra")
+}
+
+model Metodo {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  codigo    String    @db.VarChar(60)
+  nombre    String    @db.VarChar(300)
+  norma     String?   @db.VarChar(120)
+  version   String    @default("v1") @db.VarChar(20)
+  area      String?   @db.VarChar(60)
+  estado    String    @default("vigente") @db.VarChar(20)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+
+  analitos  Analito[]
+
+  @@unique([tenantId, codigo])
+  @@map("metodo")
+}
+
+model Analito {
+  id        String    @id @default(uuid()) @db.Uuid
+  metodoId  String    @map("metodo_id") @db.Uuid
+  codigo    String    @db.VarChar(60)
+  nombre    String    @db.VarChar(200)
+  unidad    String?   @db.VarChar(30)
+  formula   String?
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+
+  metodo    Metodo    @relation(fields: [metodoId], references: [id], onDelete: Cascade)
+  limites   NormaLimite[]
+  resultados Resultado[]
+
+  @@index([metodoId])
+  @@map("analito")
+}
+
+model NormaLimite {
+  id        String   @id @default(uuid()) @db.Uuid
+  analitoId String   @map("analito_id") @db.Uuid
+  producto  String?  @db.VarChar(200)
+  limiteInf Decimal? @map("limite_inf") @db.Decimal(18, 6)
+  nominal   Decimal? @db.Decimal(18, 6)
+  limiteSup Decimal? @map("limite_sup") @db.Decimal(18, 6)
+  unidad    String?  @db.VarChar(30)
+
+  analito   Analito  @relation(fields: [analitoId], references: [id], onDelete: Cascade)
+
+  @@index([analitoId])
+  @@map("norma_limite")
+}
+
+model Resultado {
+  id         String    @id @default(uuid()) @db.Uuid
+  otId       String?   @map("ot_id") @db.Uuid
+  muestraId  String    @map("muestra_id") @db.Uuid
+  analitoId  String    @map("analito_id") @db.Uuid
+  replicas   Json      @default("[]")
+  promedio   Decimal?  @db.Decimal(18, 6)
+  desviacion Decimal?  @db.Decimal(18, 6)
+  cv         Decimal?  @db.Decimal(8, 2)
+  unidad     String?   @db.VarChar(30)
+  veredicto  String?   @db.VarChar(20)
+  analistaId String?   @map("analista_id") @db.Uuid
+  fecha      DateTime  @default(now()) @db.Timestamptz
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
+
+  muestra    Muestra   @relation(fields: [muestraId], references: [id], onDelete: Cascade)
+  analito    Analito   @relation(fields: [analitoId], references: [id])
+
+  @@index([otId])
+  @@index([muestraId])
+  @@map("resultado")
+}
+
+model PlantillaInforme {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  repid      String    @db.VarChar(20)
+  nombre     String    @db.VarChar(160)
+  tipo       String    @db.VarChar(20)
+  emision    String    @default("conjunto") @db.VarChar(12)
+  archivoRef String?   @map("archivo_ref") @db.VarChar(200)
+  version    String    @default("v1") @db.VarChar(10)
+  activo     Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
+
+  certificados Certificado[]
+
+  @@unique([tenantId, repid, nombre])
+  @@map("plantilla_informe")
+}
+
+model Certificado {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  otId            String    @map("ot_id") @db.Uuid
+  codigo          String    @db.VarChar(40)
+  tipo            String?   @db.VarChar(40)
+  plantillaId     String?   @map("plantilla_id") @db.Uuid
+  hashSha256      String?   @map("hash_sha256") @db.VarChar(64)
+  urlVerificacion String?   @map("url_verificacion") @db.VarChar(300)
+  fecha           DateTime  @default(now()) @db.Timestamptz
+  estado          String    @default("emitido") @db.VarChar(20)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+
+  plantilla       PlantillaInforme? @relation(fields: [plantillaId], references: [id])
+
+  @@unique([tenantId, codigo])
+  @@index([otId])
+  @@map("certificado")
+}
+
+// =============================================================================
+// RBAC · permisos (Rol ya existe; relación por escalar rol_id)
+// =============================================================================
+
+model Permiso {
+  id          String   @id @default(uuid()) @db.Uuid
+  codigo      String   @unique @db.VarChar(80)
+  modulo      String   @db.VarChar(40)
+  accion      String   @db.VarChar(40)
+  descripcion String?
+
+  rolPermisos RolPermiso[]
+
+  @@map("permiso")
+}
+
+model RolPermiso {
+  rolId     String  @map("rol_id") @db.Uuid
+  permisoId String  @map("permiso_id") @db.Uuid
+
+  permiso   Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([rolId, permisoId])
+  @@map("rol_permiso")
+}
+
+model Firma {
+  id           String   @id @default(uuid()) @db.Uuid
+  usuarioId    String   @unique @map("usuario_id") @db.Uuid
+  imagenRef    String?  @map("imagen_ref") @db.VarChar(200)
+  hashSha256   String?  @map("hash_sha256") @db.VarChar(64)
+  registradaAt DateTime @default(now()) @map("registrada_at") @db.Timestamptz
+
+  @@map("firma")
+}

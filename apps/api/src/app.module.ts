@@ -10,6 +10,12 @@ import { OtModule } from "./ot/ot.module";
 import { FlujoModule } from "./flujo/flujo.module";
 import { HealthModule } from "./health/health.module";
 import { PrismaModule } from "./common/prisma.module";
+import { ComercialModule } from "./comercial/comercial.module";
+import { FacturacionModule } from "./facturacion/facturacion.module";
+import { AdquisicionesModule } from "./adquisiciones/adquisiciones.module";
+import { LaboratorioModule } from "./laboratorio/laboratorio.module";
+import { CatalogoModule } from "./catalogo/catalogo.module";
+import { RbacModule } from "./rbac/rbac.module";
 
 @Module({
   imports: [
@@ -30,6 +36,12 @@ import { PrismaModule } from "./common/prisma.module";
     CotizacionModule,
     OtModule,
     FlujoModule,
+    ComercialModule,
+    FacturacionModule,
+    AdquisicionesModule,
+    LaboratorioModule,
+    CatalogoModule,
+    RbacModule,
     HealthModule,
   ],
 })
