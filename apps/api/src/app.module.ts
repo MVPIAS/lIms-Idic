@@ -16,6 +16,7 @@ import { AdquisicionesModule } from "./adquisiciones/adquisiciones.module";
 import { LaboratorioModule } from "./laboratorio/laboratorio.module";
 import { CatalogoModule } from "./catalogo/catalogo.module";
 import { RbacModule } from "./rbac/rbac.module";
+import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
 
 @Module({
   imports: [
@@ -42,6 +43,7 @@ import { RbacModule } from "./rbac/rbac.module";
     LaboratorioModule,
     CatalogoModule,
     RbacModule,
+    PlantillaRenderModule,
     HealthModule,
   ],
 })
