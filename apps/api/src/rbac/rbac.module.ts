@@ -1,0 +1,64 @@
+import { Body, Controller, Module, Post, UseGuards, Injectable } from "@nestjs/common";
+import { AuthGuard } from "@nestjs/passport";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { z } from "zod";
+import { PrismaService } from "../common/prisma.service";
+import { BaseCrudService } from "../common/base-crud.service";
+import { BaseCrudController } from "../common/base-crud.controller";
+
+/* ===================== PERMISOS ===================== */
+@Injectable()
+export class PermisoService extends BaseCrudService {
+  constructor(prisma: PrismaService) {
+    super(prisma, { model: "permiso", search: ["codigo", "modulo", "accion"], tenant: false, softDelete: false, orderBy: { codigo: "asc" } });
+  }
+}
+const PermisoCreate = z.object({
+  codigo: z.string().min(1).max(80),
+  modulo: z.string().min(1).max(40),
+  accion: z.string().min(1).max(40),
+  descripcion: z.string().optional(),
+});
+@ApiTags("permisos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("permisos")
+export class PermisoController extends BaseCrudController {
+  protected createSchema = PermisoCreate;
+  protected updateSchema = PermisoCreate.partial();
+  constructor(protected svc: PermisoService) { super(); }
+}
+
+/* ===================== FIRMAS (imagen + HASH por usuario) ===================== */
+@Injectable()
+export class FirmaService extends BaseCrudService {
+  constructor(prisma: PrismaService) {
+    super(prisma, { model: "firma", search: [], tenant: false, softDelete: false, orderBy: { registradaAt: "desc" } });
+  }
+  /** Registra/actualiza la firma de un usuario (upsert por usuario_id). */
+  async registrar(dto: any) {
+    return this.prisma.firma.upsert({
+      where: { usuarioId: dto.usuarioId },
+      create: { usuarioId: dto.usuarioId, imagenRef: dto.imagenRef, hashSha256: dto.hashSha256 },
+      update: { imagenRef: dto.imagenRef, hashSha256: dto.hashSha256, registradaAt: new Date() },
+    });
+  }
+}
+const FirmaCreate = z.object({
+  usuarioId: z.string().uuid(),
+  imagenRef: z.string().max(200),
+  hashSha256: z.string().max(64).optional(),
+});
+@ApiTags("firmas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("firmas")
+export class FirmaController extends BaseCrudController {
+  protected updateSchema = FirmaCreate.partial();
+  constructor(protected svc: FirmaService) { super(); }
+  // POST /firmas hace upsert por usuario (registrar/actualizar)
+  @Post()
+  crear(@Body() body: unknown) {
+    return (this.svc as FirmaService).registrar(FirmaCreate.parse(body));
+  }
+}
+
+@Module({
+  controllers: [PermisoController, FirmaController],
+  providers: [PermisoService, FirmaService],
+})
+export class RbacModule {}
