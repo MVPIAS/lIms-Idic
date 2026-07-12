@@ -2182,6 +2182,57 @@ FROM tenant t, (VALUES
 WHERE t.codigo='IDIC';
 
 -- =============================================================================
+-- EJE PRODUCTO (control de armas / DGMN) + MAESTRO DE PLANTILLAS DE INFORME
+-- Cierra los 3 GAP del mapeo de migración del LIMS (GGRUPO, GRUPO_ELEM, PLANTILLAS).
+-- Ver Diccionario_Datos_LIMS_IDIC_Aiuken.xlsx (hoja 05 · Migración) y modelo de datos maestro.
+-- =============================================================================
+
+-- Gran Grupo (nivel superior de producto): Explosivos, Armas, Municiones, Químicos...  (LIMS: GGRUPO)
+CREATE TABLE gran_grupo (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id   UUID NOT NULL REFERENCES tenant(id),
+  codigo      VARCHAR(10) NOT NULL,                          -- 'E','P','A','M'... (GGRUPO.CODIGO)
+  nombre      VARCHAR(120) NOT NULL,                         -- 'Armas y accesorios'
+  activo      BOOLEAN NOT NULL DEFAULT true,
+  UNIQUE (tenant_id, codigo)
+);
+
+-- Grupo de producto bajo el Gran Grupo (LIMS: GRUPO_ELEM)
+CREATE TABLE grupo (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      UUID NOT NULL REFERENCES tenant(id),
+  gran_grupo_id  UUID NOT NULL REFERENCES gran_grupo(id),
+  cgrupo         VARCHAR(10),                                -- correlativo dentro del gran grupo (GRUPO_ELEM.CGRUPO)
+  nombre         VARCHAR(160) NOT NULL,                      -- 'Dinamitas','Sustancias químicas'...
+  activo         BOOLEAN NOT NULL DEFAULT true,
+  UNIQUE (tenant_id, gran_grupo_id, nombre)
+);
+
+-- Maestro de plantillas de informe/certificado (LIMS: PLANTILLAS · 117 REPID en 7 tipos)
+CREATE TABLE plantilla_informe (
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id      UUID NOT NULL REFERENCES tenant(id),
+  repid          VARCHAR(20) NOT NULL,                       -- código estable del LIMS (PLANTILLAS.REPID): 'SCCCC','IVC01'...
+  nombre         VARCHAR(160) NOT NULL,                      -- 'SCC Certificado de Conformidad'
+  tipo           VARCHAR(20) NOT NULL,                       -- CERTIFICADO / I.ENSAYO / I.TECNICO / IVC / PLANILLA / BOLETIN
+  emision        VARCHAR(12) NOT NULL DEFAULT 'conjunto',    -- individual | conjunto
+  archivo_ref    VARCHAR(200),                               -- ruta a la plantilla física (_Estandar/...)
+  activo         BOOLEAN NOT NULL DEFAULT true,
+  UNIQUE (tenant_id, repid, nombre)
+);
+
+-- Eje PRODUCTO en la muestra (opcional; aplica a productos controlados armas/explosivos)
+ALTER TABLE muestra ADD COLUMN IF NOT EXISTS gran_grupo_id UUID REFERENCES gran_grupo(id);
+ALTER TABLE muestra ADD COLUMN IF NOT EXISTS grupo_id      UUID REFERENCES grupo(id);
+
+-- Plantilla asociada al certificado emitido (además del código de texto ya existente)
+ALTER TABLE certificado ADD COLUMN IF NOT EXISTS plantilla_id UUID REFERENCES plantilla_informe(id);
+
+CREATE INDEX idx_grupo_gg       ON grupo(gran_grupo_id);
+CREATE INDEX idx_muestra_grupo  ON muestra(grupo_id);
+CREATE INDEX idx_plantilla_tipo ON plantilla_informe(tipo);
+
+-- =============================================================================
 -- FIN DEL SCHEMA
 -- =============================================================================
 
