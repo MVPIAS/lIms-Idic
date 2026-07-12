@@ -51,12 +51,22 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d --build
 echo ">> Esperando a PostgreSQL y aplicando schema + seeds..."
 set -a; source .env; set +a
 until docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; do sleep 3; done
-for f in packages/db/schema.sql packages/db/seed_catalogos_metodos.sql packages/db/seed_flujos.sql; do
+for f in \
+  packages/db/schema.sql \
+  packages/db/seed_rbac.sql \
+  packages/db/seed_gran_grupo_grupo.sql \
+  packages/db/seed_plantillas.sql \
+  packages/db/seed_catalogos_metodos.sql \
+  packages/db/seed_flujos.sql \
+  packages/db/seed_preprod_demo.sql; do
   if [ -f "$f" ]; then
     echo "   aplicando $f"
     docker compose -f docker-compose.prod.yml exec -T postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" < "$f" || echo "   (aviso: $f ya aplicado o con avisos)"
   fi
 done
+
+echo ">> Creando usuario administrador (si no existe)..."
+docker compose -f docker-compose.prod.yml exec -T api node dist/cli/crear-admin.js --usuario admin --rol SUPERADMIN --nombre "Administrador Aiuken" || echo "   (crea el admin manualmente si la API aún no está lista)"
 
 echo ""
 echo ">> LISTO. Verifica: https://${DOMAIN}   ·  API en /api  ·  BI en bi.${DOMAIN}"

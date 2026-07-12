@@ -5,6 +5,8 @@ import { z } from "zod";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
+import { PermisoGuard } from "../auth/permiso.guard";
+import { RequierePermiso } from "../auth/permisos.decorator";
 
 /* ===================== PERMISOS ===================== */
 @Injectable()
@@ -19,7 +21,12 @@ const PermisoCreate = z.object({
   accion: z.string().min(1).max(40),
   descripcion: z.string().optional(),
 });
-@ApiTags("permisos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("permisos")
+// Ejemplo de RBAC por ruta: gestionar permisos exige 'admin.usuarios'.
+// (mismo patrón aplicable a cualquier controlador: @UseGuards(AuthGuard('jwt'), PermisoGuard) + @RequierePermiso)
+@ApiTags("permisos") @ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@RequierePermiso("admin.usuarios")
+@Controller("permisos")
 export class PermisoController extends BaseCrudController {
   protected createSchema = PermisoCreate;
   protected updateSchema = PermisoCreate.partial();

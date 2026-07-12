@@ -46,10 +46,15 @@ export class AuthService {
       },
     });
 
+    // Cargar roles y permisos efectivos del usuario para el RBAC
+    const { roles, permisos } = await this.rolesYPermisos(usuario.id);
+
     const payload = {
       sub: usuario.id,
       username: usuario.username,
       tenantId: usuario.tenantId,
+      roles,
+      permisos,
     };
 
     const accessToken = this.jwt.sign(payload);
@@ -71,13 +76,33 @@ export class AuthService {
     };
   }
 
+  /** Roles (códigos) y permisos efectivos de un usuario, para el RBAC del JWT. */
+  async rolesYPermisos(usuarioId: string): Promise<{ roles: string[]; permisos: string[] }> {
+    const usuarioRoles = await this.prisma.usuarioRol.findMany({
+      where: { usuarioId },
+      include: { rol: true },
+    });
+    const rolIds = usuarioRoles.map((ur) => ur.rolId);
+    const roles = usuarioRoles.map((ur) => ur.rol.codigo);
+    if (rolIds.length === 0) return { roles, permisos: [] };
+    const rp = await this.prisma.rolPermiso.findMany({
+      where: { rolId: { in: rolIds } },
+      include: { permiso: true },
+    });
+    const permisos = [...new Set(rp.map((x) => x.permiso.codigo))];
+    return { roles, permisos };
+  }
+
   async refresh(refreshToken: string) {
     try {
       const payload = this.jwt.verify(refreshToken);
+      const { roles, permisos } = await this.rolesYPermisos(payload.sub);
       const accessToken = this.jwt.sign({
         sub: payload.sub,
         username: payload.username,
         tenantId: payload.tenantId,
+        roles,
+        permisos,
       });
       return { accessToken };
     } catch {
