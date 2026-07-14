@@ -118,6 +118,9 @@ CREATE TABLE usuario (
   ultimo_login_at     TIMESTAMPTZ,
   ultimo_login_ip     INET,
   intentos_fallidos   INT DEFAULT 0,
+  grado               VARCHAR(80),                           -- grado militar (usado por el LIMS)
+  cargo               VARCHAR(200),                          -- cargo / función
+  user_lims           VARCHAR(50),                           -- usuario legacy del LIMS técnico
   created_at          TIMESTAMPTZ DEFAULT now(),
   updated_at          TIMESTAMPTZ DEFAULT now(),
   created_by          UUID,
@@ -161,7 +164,7 @@ CREATE TABLE usuario_rol (
   vigente_desde   TIMESTAMPTZ DEFAULT now(),
   vigente_hasta   TIMESTAMPTZ,                               -- delegación temporal (vacaciones)
   asignado_por    UUID REFERENCES usuario(id),
-  PRIMARY KEY (usuario_id, rol_id, unidad_id)
+  PRIMARY KEY (usuario_id, rol_id)                           -- alineado con el modelo Prisma (unidad_id opcional)
 );
 
 -- =============================================================================
