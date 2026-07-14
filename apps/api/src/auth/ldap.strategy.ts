@@ -1,6 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PassportStrategy } from "@nestjs/passport";
-import { Strategy } from "passport-ldapauth";
+import Strategy from "passport-ldapauth";
 
 @Injectable()
 export class LdapStrategy extends PassportStrategy(Strategy, "ldap") {
