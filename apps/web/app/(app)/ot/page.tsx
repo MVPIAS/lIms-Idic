@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
 const estadoBadge = (e: string) => {
   const map: Record<string, string> = {
@@ -60,7 +61,9 @@ export default function OtPage() {
           <tbody>
             {rows.map((r) => (
               <tr key={r.id} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="px-3 py-2 font-mono text-[13px]">{r.codigo ?? r.numero ?? r.id?.slice(0, 8)}</td>
+                <td className="px-3 py-2 font-mono text-[13px]">
+                  <Link href={`/ot/${r.id}` as any} className="text-accent hover:underline">{r.codigo ?? r.numero ?? r.id?.slice(0, 8)}</Link>
+                </td>
                 <td className="px-3 py-2">{r.cliente?.razonSocial ?? "—"}</td>
                 <td className="px-3 py-2">{r.fechaIngreso ? String(r.fechaIngreso).slice(0, 10) : r.createdAt ? String(r.createdAt).slice(0, 10) : "—"}</td>
                 <td className="px-3 py-2">{r.prioridad ?? "normal"}</td>
