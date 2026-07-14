@@ -133,12 +133,16 @@ export default function FlujosPage() {
   );
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16, padding: 16 }}>
+    <div>
+      <h1 className="page">Diseñador de Flujos</h1>
+      <p className="subtitle">Motor de proceso no-code: se crea el flujo que gobierna las fases del expediente. Los flujos viven como datos.</p>
+      {msg && <div className="alert info">{msg}</div>}
+      <div className="card" style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16 }}>
       {/* catálogo */}
-      <aside style={{ borderRight: "1px solid #e5e7eb", paddingRight: 12 }}>
+      <aside style={{ borderRight: "1px solid var(--line)", paddingRight: 12 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ fontSize: 15, fontWeight: 700 }}>Flujos</h2>
-          <button onClick={nuevoFlujo} style={btn}>+ Nuevo</button>
+          <button onClick={nuevoFlujo} className="btn outline sm">+ Nuevo</button>
         </div>
         <ul style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
           {defs.map((d) => (
@@ -165,12 +169,11 @@ export default function FlujosPage() {
             style={{ ...inp, width: 130, fontFamily: "monospace" }} placeholder="Código" />
           <input value={meta.nombre} onChange={(e) => setMeta({ ...meta, nombre: e.target.value })}
             style={{ ...inp, flex: 1, minWidth: 220 }} placeholder="Nombre del flujo" />
-          <button onClick={agregarPaso} style={btn}>+ Paso</button>
-          <button onClick={guardar} style={{ ...btn, background: "#1f3a5f", color: "#fff" }}>Guardar borrador</button>
-          <button onClick={publicar} style={{ ...btn, background: "#127d73", color: "#fff" }}>Publicar</button>
-          <button onClick={simular} style={btn}>▶ Simular</button>
+          <button onClick={agregarPaso} className="btn outline sm">+ Paso</button>
+          <button onClick={guardar} className="btn primary sm">Guardar borrador</button>
+          <button onClick={publicar} className="btn accent sm">Publicar</button>
+          <button onClick={simular} className="btn outline sm">▶ Simular</button>
         </div>
-        {msg && <p style={{ marginTop: 8, fontSize: 13, color: "#374151" }}>{msg}</p>}
 
         {/* lienzo: pasos en secuencia */}
         <div style={{ display: "flex", gap: 0, overflowX: "auto", padding: "18px 4px", alignItems: "flex-start" }}>
@@ -248,6 +251,7 @@ export default function FlujosPage() {
           </div>
         )}
       </main>
+      </div>
     </div>
   );
 }

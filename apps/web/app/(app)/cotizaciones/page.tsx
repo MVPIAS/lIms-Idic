@@ -28,12 +28,12 @@ const DEMO: Cot[] = [
   { id: "4", numero: "COT-2026-14388", cliente: "Aduanas Valparaíso", formato: "F2", estado: "rechazada", total: 288000, otNumero: null, fecha: "2026-06-20" },
 ];
 
-const ESTADO_STYLE: Record<Cot["estado"], string> = {
-  borrador: "bg-slate-100 text-slate-600",
-  enviada: "bg-blue-100 text-blue-700",
-  aceptada: "bg-green-100 text-green-700",
-  rechazada: "bg-red-100 text-red-700",
-  vencida: "bg-amber-100 text-amber-700",
+const ESTADO_PILL: Record<Cot["estado"], string> = {
+  borrador: "gray",
+  enviada: "blue",
+  aceptada: "green",
+  rechazada: "red",
+  vencida: "amber",
 };
 
 const clp = (n: number) =>
@@ -65,67 +65,58 @@ export default function CotizacionesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-bold">Cotizaciones</h1>
-        <Link
-          href="/cotizaciones/nueva"
-          className="bg-primary text-white text-sm font-semibold rounded-md px-3.5 py-2 hover:opacity-90"
-        >
-          ＋ Nueva Cotización
-        </Link>
-      </div>
-      <p className="text-sm text-slate-500 mb-4">
-        Una cotización aceptada genera la OT (expediente).{" "}
-        {origen === "demo" && <span className="text-amber-700">· Datos de muestra (backend no conectado)</span>}
+      <h1 className="page">Cotizaciones <span className="tag">≠ OT</span></h1>
+      <p className="subtitle">
+        Etapa comercial. Una cotización aceptada genera la OT (expediente). En contratos internos no hay cotización.{" "}
+        {origen === "demo" && <span style={{ color: "var(--amber)" }}>· Datos de muestra (backend no conectado)</span>}
       </p>
 
-      <input
-        className="mb-3 w-72 border rounded-md px-3 py-1.5 text-sm"
-        placeholder="Buscar por cliente o N°…"
-        value={filtro}
-        onChange={(e) => setFiltro(e.target.value)}
-      />
+      <div className="toolbar">
+        <input
+          placeholder="Buscar por cliente o N°…"
+          style={{ flex: 1 }}
+          value={filtro}
+          onChange={(e) => setFiltro(e.target.value)}
+        />
+        <Link href="/cotizaciones/nueva" className="btn primary sm">＋ Nueva Cotización</Link>
+      </div>
 
-      <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="card card--table">
+        <table className="data">
           <thead>
-            <tr className="text-left text-[11px] uppercase text-slate-500 bg-slate-50 border-b">
-              <th className="px-3 py-2">N° Cotización</th>
-              <th className="px-3 py-2">Cliente</th>
-              <th className="px-3 py-2">Formato</th>
-              <th className="px-3 py-2">Estado</th>
-              <th className="px-3 py-2 text-right">Total (c/ IVA)</th>
-              <th className="px-3 py-2">OT generada</th>
-              <th className="px-3 py-2">Fecha</th>
+            <tr>
+              <th>N° Cotización</th>
+              <th>Cliente</th>
+              <th>Formato</th>
+              <th>Estado</th>
+              <th className="num">Total (c/ IVA)</th>
+              <th>OT generada</th>
+              <th>Fecha</th>
             </tr>
           </thead>
           <tbody>
             {vis.map((c) => (
-              <tr key={c.id} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="px-3 py-2 font-medium">{c.numero}</td>
-                <td className="px-3 py-2">{c.cliente}</td>
-                <td className="px-3 py-2">{c.formato}</td>
-                <td className="px-3 py-2">
-                  <span className={`text-[11px] px-2 py-0.5 rounded-full font-semibold ${ESTADO_STYLE[c.estado]}`}>
-                    {c.estado}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right tabular-nums">{clp(c.total)}</td>
-                <td className="px-3 py-2">
+              <tr key={c.id}>
+                <td><span className="codigo">{c.numero}</span></td>
+                <td>{c.cliente}</td>
+                <td>{c.formato}</td>
+                <td><span className={`pill ${ESTADO_PILL[c.estado]}`}>{c.estado}</span></td>
+                <td className="num">{clp(c.total)}</td>
+                <td>
                   {c.otNumero ? (
-                    <Link href={"/ot" as any} className="text-primary hover:underline font-medium">
+                    <Link href={"/ot" as any} className="codigo" style={{ textDecoration: "underline" }}>
                       {c.otNumero}
                     </Link>
                   ) : (
-                    <span className="text-slate-400">—</span>
+                    <span style={{ color: "var(--muted)" }}>—</span>
                   )}
                 </td>
-                <td className="px-3 py-2 text-slate-500">{c.fecha}</td>
+                <td style={{ color: "var(--muted)" }}>{c.fecha}</td>
               </tr>
             ))}
             {vis.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                <td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
                   Sin resultados
                 </td>
               </tr>

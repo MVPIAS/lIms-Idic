@@ -36,58 +36,61 @@ export default function UsuariosPage() {
     } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
   }
 
-  const inp = "w-full border rounded px-2 py-1.5 text-sm";
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-bold">Usuarios y Roles</h1>
-        <button className="bg-primary text-white text-sm font-semibold rounded-md px-3.5 py-2" onClick={() => setShow((s) => !s)}>
+      <h1 className="page">Usuarios y Roles</h1>
+      <p className="subtitle">Control de acceso RBAC. Cada usuario recibe un rol que define sus permisos efectivos ({roles.length} roles disponibles).</p>
+      {error && <div className="alert warn">{error}</div>}
+
+      <div className="toolbar">
+        <div className="spacer"></div>
+        <button className="btn primary sm" onClick={() => setShow((s) => !s)}>
           {show ? "Cerrar" : "＋ Nuevo usuario"}
         </button>
       </div>
-      <p className="text-sm text-slate-500 mb-3">Control de acceso RBAC. Cada usuario recibe un rol que define sus permisos efectivos ({roles.length} roles disponibles).</p>
-      {error && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
 
       {show && (
-        <form onSubmit={crear} className="bg-white border rounded-lg p-4 mb-3 shadow-sm grid grid-cols-2 md:grid-cols-3 gap-3">
-          <label className="block"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Usuario *</span><input className={inp} required value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></label>
-          <label className="block"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Nombre completo *</span><input className={inp} required value={f.nombreCompleto} onChange={(e) => setF({ ...f, nombreCompleto: e.target.value })} /></label>
-          <label className="block"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Email</span><input type="email" className={inp} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></label>
-          <label className="block"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Contraseña *</span><input type="password" className={inp} required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></label>
-          <label className="block"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Grado / Cargo</span><input className={inp} value={f.grado} onChange={(e) => setF({ ...f, grado: e.target.value })} /></label>
-          <label className="block"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Rol</span>
-            <select className={inp} value={f.rolId} onChange={(e) => setF({ ...f, rolId: e.target.value })}>
-              <option value="">— sin rol —</option>
-              {roles.map((r) => <option key={r.id} value={r.id}>{r.codigo} · {r.nombre}</option>)}
-            </select>
-          </label>
-          <div className="col-span-full flex justify-end"><button className="bg-primary text-white text-sm font-semibold rounded-md px-3.5 py-2">Guardar usuario</button></div>
+        <form onSubmit={crear} className="card">
+          <div className="form-grid">
+            <div className="field"><label>Usuario <span className="req">*</span></label><input required value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
+            <div className="field"><label>Nombre completo <span className="req">*</span></label><input required value={f.nombreCompleto} onChange={(e) => setF({ ...f, nombreCompleto: e.target.value })} /></div>
+            <div className="field"><label>Email</label><input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
+            <div className="field"><label>Contraseña <span className="req">*</span></label><input type="password" required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+            <div className="field"><label>Grado / Cargo</label><input value={f.grado} onChange={(e) => setF({ ...f, grado: e.target.value })} /></div>
+            <div className="field"><label>Rol</label>
+              <select value={f.rolId} onChange={(e) => setF({ ...f, rolId: e.target.value })}>
+                <option value="">— sin rol —</option>
+                {roles.map((r) => <option key={r.id} value={r.id}>{r.codigo} · {r.nombre}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}><button className="btn primary sm">Guardar usuario</button></div>
         </form>
       )}
 
-      <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="card card--table">
+        <table className="data">
           <thead>
-            <tr className="text-left text-[11px] uppercase text-slate-500 bg-slate-50 border-b">
-              <th className="px-3 py-2">Usuario</th><th className="px-3 py-2">Nombre completo</th><th className="px-3 py-2">Grado/Cargo</th><th className="px-3 py-2">Roles</th><th className="px-3 py-2">Estado</th>
+            <tr>
+              <th>Usuario</th><th>Nombre completo</th><th>Grado/Cargo</th><th>Roles</th><th>Estado</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((u) => (
-              <tr key={u.id} className="border-b border-slate-100 hover:bg-slate-50">
-                <td className="px-3 py-2 font-medium">{u.username}</td>
-                <td className="px-3 py-2">{u.nombreCompleto}</td>
-                <td className="px-3 py-2">{u.grado ?? u.cargo ?? "—"}</td>
-                <td className="px-3 py-2">
-                  <div className="flex flex-wrap gap-1">
-                    {(u.usuarioRoles ?? []).map((ur: any) => <span key={ur.rolId} className="text-[11px] px-2 py-0.5 rounded-full bg-accent/10 text-accent font-medium">{ur.rol?.codigo}</span>)}
-                    {(!u.usuarioRoles || u.usuarioRoles.length === 0) && <span className="text-slate-400 text-xs">sin rol</span>}
+              <tr key={u.id}>
+                <td><span className="codigo">{u.username}</span></td>
+                <td>{u.nombreCompleto}</td>
+                <td>{u.grado ?? u.cargo ?? "—"}</td>
+                <td>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                    {(u.usuarioRoles ?? []).map((ur: any) => <span key={ur.rolId} className="tag">{ur.rol?.codigo}</span>)}
+                    {(!u.usuarioRoles || u.usuarioRoles.length === 0) && <span style={{ color: "var(--muted)", fontSize: 11 }}>sin rol</span>}
                   </div>
                 </td>
-                <td className="px-3 py-2"><span className={`text-[11px] px-2 py-0.5 rounded-full ${u.estado === "activo" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{u.estado}</span></td>
+                <td><span className={`pill ${u.estado === "activo" ? "green" : "gray"}`}>{u.estado}</span></td>
               </tr>
             ))}
-            {rows.length === 0 && <tr><td colSpan={5} className="px-3 py-6 text-center text-slate-400">Sin usuarios</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Sin usuarios</td></tr>}
           </tbody>
         </table>
       </div>

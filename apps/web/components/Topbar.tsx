@@ -1,8 +1,36 @@
 "use client";
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
 
+const CRUMB: Record<string, string> = {
+  "/dashboard": "Panel",
+  "/clientes": "Clientes",
+  "/proveedores": "Proveedores",
+  "/cotizaciones": "Cotizaciones",
+  "/cotizaciones/nueva": "Nueva Cotización",
+  "/listas-precio": "Listas de Precio",
+  "/facturas": "Facturas",
+  "/ot": "Expedientes / OT",
+  "/muestras": "Muestras",
+  "/captura": "Captura de Resultados",
+  "/metodos": "Catálogo / Métodos",
+  "/plantillas": "Plantillas de informe",
+  "/flujos": "Diseñador de Flujos",
+  "/usuarios": "Usuarios y Roles",
+};
+
+function crumbFor(pathname: string): string {
+  if (CRUMB[pathname]) return CRUMB[pathname];
+  if (pathname.startsWith("/ot/")) return "Expediente";
+  const best = Object.keys(CRUMB)
+    .filter((h) => pathname.startsWith(h))
+    .sort((a, b) => b.length - a.length)[0];
+  return best ? CRUMB[best] : "";
+}
+
 export default function Topbar() {
+  const pathname = usePathname() ?? "";
   const [user, setUser] = useState<{ nombreCompleto?: string; cargo?: string; grado?: string } | null>(null);
 
   useEffect(() => {
@@ -14,31 +42,22 @@ export default function Topbar() {
     : "AD";
 
   return (
-    <div className="flex items-center px-5 gap-4 h-full">
-      <div className="flex-1 text-sm text-slate-500">
-        <b className="text-slate-800">LIMS IDIC</b> · Sistema unificado Comercial + Laboratorio
+    <>
+      <div className="breadcrumb">
+        LIMS IDIC · <b>{crumbFor(pathname)}</b>
       </div>
-      <input
-        type="search"
-        placeholder="Buscar cliente, OT, muestra…"
-        className="w-72 px-3 py-1.5 border rounded text-sm bg-slate-50 focus:outline-none focus:ring-2 focus:ring-accent"
-      />
-      <div className="flex items-center gap-2.5">
-        <div className="w-8 h-8 rounded-full bg-accent text-white flex items-center justify-center font-semibold text-xs">
-          {iniciales}
+      <div className="user">
+        <div className="avatar">{iniciales}</div>
+        <div style={{ lineHeight: 1.2 }}>
+          <div style={{ fontWeight: 600 }}>{user?.nombreCompleto ?? "Administrador"}</div>
+          <div style={{ color: "var(--muted)", fontSize: "10.5px" }}>
+            {user?.grado ?? user?.cargo ?? "SUPERADMIN"}
+          </div>
         </div>
-        <div className="text-xs leading-tight">
-          <div className="font-semibold">{user?.nombreCompleto ?? "Administrador"}</div>
-          <div className="text-slate-500">{user?.grado ?? user?.cargo ?? "SUPERADMIN"}</div>
-        </div>
-        <button
-          onClick={() => api.logout()}
-          className="ml-2 text-xs text-slate-500 hover:text-danger border rounded px-2 py-1"
-          title="Cerrar sesión"
-        >
+        <button onClick={() => api.logout()} className="btn outline sm" style={{ marginLeft: 8 }} title="Cerrar sesión">
           Salir
         </button>
       </div>
-    </div>
+    </>
   );
 }

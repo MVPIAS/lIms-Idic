@@ -49,55 +49,59 @@ export default function CapturaPage() {
     } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
   }
 
-  const inp = "border rounded px-2 py-1.5 text-sm";
   const num = (x: any, d = 3) => Number(x ?? 0).toLocaleString("es-CL", { maximumFractionDigits: d });
 
   return (
-    <div className="max-w-4xl">
-      <h1 className="text-xl font-bold mb-1">Captura de resultados</h1>
-      <p className="text-sm text-slate-500 mb-4">Réplicas RN1..RNn → promedio, desviación estándar y CV. Al guardar, el sistema evalúa el veredicto contra el límite del producto.</p>
-      {error && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
+    <div>
+      <h1 className="page">Captura de resultados</h1>
+      <p className="subtitle">Réplicas RN1..RNn → promedio, desviación estándar y CV. Al guardar, el sistema evalúa el veredicto contra el límite del producto.</p>
+      {error && <div className="alert warn">{error}</div>}
 
-      <div className="bg-white border rounded-lg shadow-sm p-4 mb-4 grid md:grid-cols-2 gap-3">
-        <label className="block"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Muestra</span>
-          <select className={`${inp} w-full`} value={muestraId} onChange={(e) => setMuestraId(e.target.value)}>
-            <option value="">— seleccionar —</option>
-            {muestras.map((m) => <option key={m.id} value={m.id}>{m.codigo} · {m.nombre ?? ""}</option>)}
-          </select>
-        </label>
-        <label className="block"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Analito {analitos.length === 0 && <em className="text-slate-400 normal-case">(sin analitos cargados)</em>}</span>
-          <select className={`${inp} w-full`} value={analitoId} onChange={(e) => setAnalitoId(e.target.value)}>
-            <option value="">— seleccionar —</option>
-            {analitos.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre} {a.unidad ? `(${a.unidad})` : ""}</option>)}
-          </select>
-        </label>
-        <label className="block md:col-span-2"><span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">Réplicas (separadas por coma o espacio)</span>
-          <input className={`${inp} w-full font-mono`} value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="12.4, 12.6, 12.5" />
-        </label>
+      <div className="card">
+        <h2>Datos del ensayo</h2>
+        <div className="form-grid cols-2">
+          <div className="field">
+            <label>Muestra</label>
+            <select value={muestraId} onChange={(e) => setMuestraId(e.target.value)}>
+              <option value="">— seleccionar —</option>
+              {muestras.map((m) => <option key={m.id} value={m.id}>{m.codigo} · {m.nombre ?? ""}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>Analito {analitos.length === 0 && <span style={{ textTransform: "none", color: "var(--muted)", fontStyle: "italic" }}>(sin analitos cargados)</span>}</label>
+            <select value={analitoId} onChange={(e) => setAnalitoId(e.target.value)}>
+              <option value="">— seleccionar —</option>
+              {analitos.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre} {a.unidad ? `(${a.unidad})` : ""}</option>)}
+            </select>
+          </div>
+          <div className="field span-2">
+            <label>Réplicas (separadas por coma o espacio)</label>
+            <input style={{ fontFamily: "'JetBrains Mono', monospace" }} value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="12.4, 12.6, 12.5" />
+          </div>
+        </div>
       </div>
 
-      <div className="bg-white border rounded-lg shadow-sm p-4 mb-4">
-        <div className="grid grid-cols-4 gap-3 text-sm">
-          <div className="bg-slate-50 rounded p-3"><div className="text-[10px] uppercase text-slate-500 font-semibold">n réplicas</div><div className="text-lg font-bold tabular-nums">{st.n}</div></div>
-          <div className="bg-slate-50 rounded p-3"><div className="text-[10px] uppercase text-slate-500 font-semibold">Promedio</div><div className="text-lg font-bold tabular-nums">{num(st.promedio)}</div></div>
-          <div className="bg-slate-50 rounded p-3"><div className="text-[10px] uppercase text-slate-500 font-semibold">Desv. estándar</div><div className="text-lg font-bold tabular-nums">{num(st.desviacion)}</div></div>
-          <div className="bg-slate-50 rounded p-3"><div className="text-[10px] uppercase text-slate-500 font-semibold">CV %</div><div className="text-lg font-bold tabular-nums">{num(st.cv, 2)}</div></div>
-        </div>
-        <div className="flex justify-end mt-3">
-          <button onClick={guardar} className="bg-primary text-white text-sm font-semibold rounded-md px-4 py-2">Guardar resultado</button>
+      <div className="kpis">
+        <div className="kpi k-blue"><div className="lab">n réplicas</div><div className="val">{st.n}</div></div>
+        <div className="kpi"><div className="lab">Promedio</div><div className="val">{num(st.promedio)}</div></div>
+        <div className="kpi k-violet"><div className="lab">Desv. estándar</div><div className="val">{num(st.desviacion)}</div></div>
+        <div className="kpi k-amber"><div className="lab">CV %</div><div className="val">{num(st.cv, 2)}</div></div>
+      </div>
+
+      <div className="card">
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={guardar} className="btn primary sm">Guardar resultado</button>
         </div>
       </div>
 
       {saved && (
-        <div className="bg-white border rounded-lg shadow-sm p-4">
-          <h2 className="font-bold text-sm mb-2">Resultado persistido</h2>
-          <div className="flex items-center gap-4 text-sm">
+        <div className="card">
+          <h2>Resultado persistido</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", fontSize: 12.5 }}>
             <span>Promedio: <b>{num(saved.promedio)}</b> {saved.unidad}</span>
             <span>DE: <b>{num(saved.desviacion)}</b></span>
             <span>CV: <b>{num(saved.cv, 2)}%</b></span>
-            <span className={`text-[12px] px-2 py-1 rounded-full font-semibold ${saved.veredicto === "Cumple" ? "bg-emerald-100 text-emerald-700" : saved.veredicto === "No cumple" ? "bg-red-100 text-red-700" : "bg-slate-100 text-slate-600"}`}>
-              {saved.veredicto}
-            </span>
+            <span className={`pill ${saved.veredicto === "Cumple" ? "green" : saved.veredicto === "No cumple" ? "red" : "gray"}`}>{saved.veredicto}</span>
           </div>
         </div>
       )}

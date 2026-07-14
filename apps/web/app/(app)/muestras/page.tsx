@@ -9,11 +9,11 @@ export default function MuestrasPage() {
       titulo="Muestras"
       subtitulo="Maestro de muestras. A cada muestra se le asignan 1..n ensayos."
       columnas={[
-        { campo: "codigo", titulo: "Código" },
+        { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Muestra" },
-        { campo: "codigoBarras", titulo: "Cód. barras" },
+        { campo: "codigoBarras", titulo: "Cód. barras", render: (v) => (v ? <span className="codigo">{v}</span> : "—") },
         { campo: "ubicacion", titulo: "Ubicación" },
-        { campo: "estado", titulo: "Estado", render: (v) => <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100">{v}</span> },
+        { campo: "estado", titulo: "Estado", render: (v) => <span className={`pill ${v === "finalizada" ? "green" : v === "en_analisis" ? "amber" : "blue"}`}>{v ?? "—"}</span> },
       ]}
       campos={[
         { campo: "codigo", label: "Código", requerido: true },
