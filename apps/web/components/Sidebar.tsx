@@ -13,6 +13,7 @@ const NAV = [
       { href: "/clientes", label: "Clientes", icon: "🏛" },
       { href: "/proveedores", label: "Proveedores", icon: "🚚" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "$" },
+      { href: "/cotizaciones/nueva", label: "Nueva · Costeo", icon: "＋" },
       { href: "/listas-precio", label: "Listas de Precio", icon: "≣" },
       { href: "/facturas", label: "Facturas", icon: "📄" },
     ],
@@ -22,6 +23,7 @@ const NAV = [
     items: [
       { href: "/ot", label: "Órdenes de Trabajo", icon: "▤" },
       { href: "/muestras", label: "Muestras", icon: "🧪" },
+      { href: "/captura", label: "Captura de Resultados", icon: "📊" },
       { href: "/metodos", label: "Métodos / Catálogo", icon: "⚗" },
       { href: "/plantillas", label: "Plantillas Informe", icon: "🗎" },
       { href: "/flujos", label: "Diseñador de Flujos", icon: "⛓" },

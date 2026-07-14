@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Module, Post, UseGuards, Injectable } from "@nestjs/common";
+import { Body, Controller, Get, Module, Post, Req, UseGuards, Injectable } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
+import * as argon2 from "argon2";
 import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService } from "../common/base-crud.service";
@@ -66,6 +67,16 @@ export class FirmaController extends BaseCrudController {
 }
 
 /* ===================== USUARIOS y ROLES (lectura) ===================== */
+const UsuarioCreate = z.object({
+  username: z.string().min(2).max(60),
+  nombreCompleto: z.string().min(2).max(200),
+  email: z.string().email().optional().or(z.literal("")),
+  password: z.string().min(4).max(200),
+  grado: z.string().max(80).optional(),
+  cargo: z.string().max(200).optional(),
+  rolId: z.string().uuid().optional(),
+});
+
 @ApiTags("usuarios") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("usuarios")
 export class UsuarioController {
   private prisma = new PrismaClient();
@@ -78,6 +89,30 @@ export class UsuarioController {
       take: 200,
     });
     return { data, meta: { page: 1, limit: 200, total: data.length, totalPages: 1 } };
+  }
+
+  @Post()
+  async crear(@Body() body: unknown, @Req() req: any) {
+    const dto = UsuarioCreate.parse(body);
+    const tenantId = req.user?.tenantId ?? (await this.prisma.tenant.findFirst())?.id;
+    const passwordHash = await argon2.hash(dto.password);
+    const u = await this.prisma.usuario.create({
+      data: {
+        tenantId,
+        username: dto.username,
+        email: dto.email ? dto.email : null,
+        nombreCompleto: dto.nombreCompleto,
+        grado: dto.grado ?? null,
+        cargo: dto.cargo ?? null,
+        passwordHash,
+        estado: "activo",
+      },
+    });
+    if (dto.rolId) {
+      await this.prisma.usuarioRol.create({ data: { usuarioId: u.id, rolId: dto.rolId } });
+    }
+    const { passwordHash: _omit, ...safe } = u as any;
+    return safe;
   }
 }
 
