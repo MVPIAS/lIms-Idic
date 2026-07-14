@@ -7,6 +7,8 @@
 
 generator client {
   provider        = "prisma-client-js"
+  // "native" para dev local; "linux-musl-openssl-3.0.x" para el contenedor Alpine (OpenSSL 3).
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
   previewFeatures = ["postgresqlExtensions", "fullTextSearch"]
 }
 
