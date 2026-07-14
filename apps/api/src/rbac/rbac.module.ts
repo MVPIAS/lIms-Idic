@@ -1,7 +1,8 @@
-import { Body, Controller, Module, Post, UseGuards, Injectable } from "@nestjs/common";
+import { Body, Controller, Get, Module, Post, UseGuards, Injectable } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
+import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
@@ -64,8 +65,34 @@ export class FirmaController extends BaseCrudController {
   }
 }
 
+/* ===================== USUARIOS y ROLES (lectura) ===================== */
+@ApiTags("usuarios") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("usuarios")
+export class UsuarioController {
+  private prisma = new PrismaClient();
+  @Get()
+  async list() {
+    const data = await this.prisma.usuario.findMany({
+      where: { deletedAt: null },
+      include: { usuarioRoles: { include: { rol: true } } },
+      orderBy: { username: "asc" },
+      take: 200,
+    });
+    return { data, meta: { page: 1, limit: 200, total: data.length, totalPages: 1 } };
+  }
+}
+
+@ApiTags("roles") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("roles")
+export class RolController {
+  private prisma = new PrismaClient();
+  @Get()
+  async list() {
+    const data = await this.prisma.rol.findMany({ orderBy: { codigo: "asc" } });
+    return { data, meta: { page: 1, limit: data.length, total: data.length, totalPages: 1 } };
+  }
+}
+
 @Module({
-  controllers: [PermisoController, FirmaController],
+  controllers: [PermisoController, FirmaController, UsuarioController, RolController],
   providers: [PermisoService, FirmaService],
 })
 export class RbacModule {}

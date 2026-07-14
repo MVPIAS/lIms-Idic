@@ -53,10 +53,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
-    if (typeof window !== "undefined") localStorage.setItem("lims_token", r.accessToken);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("lims_token", r.accessToken);
+      localStorage.setItem("lims_user", JSON.stringify(r.user ?? {}));
+    }
     return r;
   },
   logout: () => {
-    if (typeof window !== "undefined") localStorage.removeItem("lims_token");
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("lims_token");
+      localStorage.removeItem("lims_user");
+      window.location.href = "/login";
+    }
   },
+  getUser: (): any | null => {
+    if (typeof window === "undefined") return null;
+    try { return JSON.parse(localStorage.getItem("lims_user") ?? "null"); } catch { return null; }
+  },
+  isAuth: () => typeof window !== "undefined" && !!localStorage.getItem("lims_token"),
 };
