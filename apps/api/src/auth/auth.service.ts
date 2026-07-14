@@ -23,19 +23,27 @@ export class AuthService {
       throw new UnauthorizedException("Credenciales inválidas");
     }
 
-    // En desarrollo (LDAP_ENABLED=false): cualquier password = "demo"
+    // Verificación de credenciales:
+    //  - Si el usuario tiene passwordHash local -> SIEMPRE se valida con argon2
+    //    (esto cubre al admin y a usuarios locales, tanto en pre-prod como prod).
+    //  - LDAP (ad.ejercito.cl) se resuelve en LdapStrategy por su ruta dedicada.
+    //  - Solo en desarrollo sin hash se admite el atajo password="demo".
     const ldapEnabled = process.env.LDAP_ENABLED === "true";
-    if (!ldapEnabled) {
-      if (process.env.NODE_ENV !== "production" && password !== "demo") {
-        throw new UnauthorizedException("En desarrollo: usar password 'demo'");
+    if (usuario.passwordHash) {
+      const valid = await argon2.verify(usuario.passwordHash, password);
+      if (!valid) {
+        await this.prisma.usuario.update({
+          where: { id: usuario.id },
+          data: { intentosFallidos: { increment: 1 } },
+        });
+        throw new UnauthorizedException("Credenciales inválidas");
       }
+    } else if (ldapEnabled) {
+      throw new UnauthorizedException("Usuario sin credenciales locales; use el ingreso LDAP");
+    } else if (process.env.NODE_ENV !== "production") {
+      if (password !== "demo") throw new UnauthorizedException('En desarrollo: use la contraseña "demo"');
     } else {
-      // Producción: pasa por LdapStrategy desde el controlador en otra ruta
-      // o usa el hash si es usuario local
-      if (usuario.passwordHash) {
-        const valid = await argon2.verify(usuario.passwordHash, password);
-        if (!valid) throw new UnauthorizedException("Credenciales inválidas");
-      }
+      throw new UnauthorizedException("Usuario sin contraseña configurada");
     }
 
     await this.prisma.usuario.update({

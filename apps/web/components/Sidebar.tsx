@@ -10,32 +10,26 @@ const NAV = [
   {
     title: "Comercial",
     items: [
+      { href: "/clientes", label: "Clientes", icon: "🏛" },
+      { href: "/proveedores", label: "Proveedores", icon: "🚚" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "$" },
-      { href: "/cotizaciones/nueva", label: "Nueva Cotización", icon: "+" },
       { href: "/listas-precio", label: "Listas de Precio", icon: "≣" },
+      { href: "/facturas", label: "Facturas", icon: "📄" },
     ],
   },
   {
-    title: "Operación",
+    title: "Laboratorio",
     items: [
-      { href: "/ot", label: "Órdenes Trabajo", icon: "▤" },
-      { href: "/ot/nueva", label: "Nueva OT", icon: "+" },
+      { href: "/ot", label: "Órdenes de Trabajo", icon: "▤" },
+      { href: "/muestras", label: "Muestras", icon: "🧪" },
+      { href: "/metodos", label: "Métodos / Catálogo", icon: "⚗" },
+      { href: "/plantillas", label: "Plantillas Informe", icon: "🗎" },
       { href: "/flujos", label: "Diseñador de Flujos", icon: "⛓" },
     ],
   },
   {
-    title: "Facturación",
-    items: [
-      { href: "/facturas", label: "Facturas", icon: "📄" },
-      { href: "/clientes-bloqueados", label: "Bloqueados", icon: "🚫" },
-    ],
-  },
-  {
     title: "Sistema",
-    items: [
-      { href: "/usuarios", label: "Usuarios", icon: "👥" },
-      { href: "/audit", label: "Audit Trail", icon: "⏚" },
-    ],
+    items: [{ href: "/usuarios", label: "Usuarios y Roles", icon: "👥" }],
   },
 ];
 
@@ -45,16 +39,16 @@ export default function Sidebar() {
   return (
     <div>
       <div className="flex items-center gap-2.5 p-3.5 border-b border-white/10">
-        <div className="w-8 h-8 bg-gradient-to-br from-primary-600 to-accent rounded-lg flex items-center justify-center text-white font-bold">
+        <div className="w-8 h-8 bg-gradient-to-br from-accent to-primary-600 rounded-lg flex items-center justify-center text-white font-bold">
           L
         </div>
         <div>
           <b className="text-white text-sm">LIMS IDIC</b>
-          <div className="text-[10px] text-slate-400">Comercial · v0.1</div>
+          <div className="text-[10px] text-slate-400">Aiuken · v0.1</div>
         </div>
       </div>
 
-      <nav>
+      <nav className="pb-6">
         {NAV.map((sect) => (
           <div key={sect.title}>
             <div className="px-4 pt-3 pb-1 text-[10px] tracking-widest uppercase text-slate-400 font-semibold">
@@ -66,7 +60,7 @@ export default function Sidebar() {
                 <Link
                   key={item.href}
                   href={item.href as any}
-                  className={`flex items-center gap-2.5 px-4 py-2 text-sm border-l-[3px] ${
+                  className={`flex items-center gap-2.5 px-4 py-2 text-sm border-l-[3px] transition ${
                     active
                       ? "bg-white/10 text-white border-accent"
                       : "border-transparent text-slate-300 hover:bg-white/5"
