@@ -13,7 +13,13 @@ export interface CrudOpts {
   include?: any;
   /** Orden por defecto. */
   orderBy?: any;
-  /** ¿El modelo tiene columna deleted_at? (soft delete). */
+  /**
+   * ¿El modelo tiene columna deleted_at? (soft delete). OPT-IN: por defecto NO
+   * se filtra por deleted_at. Solo poner `true` en modelos cuya tabla realmente
+   * tiene la columna deleted_at. Emitir `WHERE deleted_at IS NULL` contra una
+   * tabla que no la tiene provoca un error SQL y que el endpoint devuelva 500
+   * (era la causa de que el dashboard contara 0 en proveedores/métodos/etc.).
+   */
   softDelete?: boolean;
   /** ¿El modelo tiene tenant_id? (se inyecta al crear). */
   tenant?: boolean;
@@ -34,7 +40,7 @@ export abstract class BaseCrudService {
     const page = Math.max(1, q.page ?? 1);
     const limit = Math.min(100, Math.max(1, q.limit ?? 20));
     const where: any = { ...(q.where ?? {}) };
-    if (this.o.softDelete !== false) where.deletedAt = null;
+    if (this.o.softDelete === true) where.deletedAt = null;
     if (q.search && this.o.search?.length) {
       where.OR = this.o.search.map((f) => ({ [f]: { contains: q.search, mode: "insensitive" } }));
     }
@@ -53,7 +59,7 @@ export abstract class BaseCrudService {
 
   async detalle(id: string) {
     const r = await this.d.findFirst({
-      where: { id, ...(this.o.softDelete !== false ? { deletedAt: null } : {}) },
+      where: { id, ...(this.o.softDelete === true ? { deletedAt: null } : {}) },
       include: this.o.include,
     });
     if (!r) throw new NotFoundException(`${this.o.model} ${id} no encontrado`);
@@ -73,7 +79,7 @@ export abstract class BaseCrudService {
 
   async eliminar(id: string) {
     await this.detalle(id);
-    return this.o.softDelete !== false
+    return this.o.softDelete === true
       ? this.d.update({ where: { id }, data: { deletedAt: new Date() } })
       : this.d.delete({ where: { id } });
   }

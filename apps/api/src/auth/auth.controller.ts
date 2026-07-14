@@ -1,5 +1,6 @@
 import { Body, Controller, Post, UseGuards, Get, Req } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
+import { Throttle } from "@nestjs/throttler";
 import { ApiTags, ApiBearerAuth, ApiBody } from "@nestjs/swagger";
 import { z } from "zod";
 
@@ -21,6 +22,8 @@ export class AuthController {
    * Devuelve JWT + datos del usuario.
    */
   @Post("login")
+  // Límite estricto anti fuerza bruta: 5 intentos por minuto por IP.
+  @Throttle({ login: { ttl: 60_000, limit: 5 } })
   @ApiBody({ schema: { example: { username: "c.vargas", password: "demo" } } })
   async login(@Body() body: unknown) {
     const { username, password } = LoginSchema.parse(body);

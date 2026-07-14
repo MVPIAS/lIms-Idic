@@ -1,7 +1,8 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { LoggerModule } from "nestjs-pino";
-import { ThrottlerModule } from "@nestjs/throttler";
+import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 
 import { AuthModule } from "./auth/auth.module";
 import { ClienteModule } from "./cliente/cliente.module";
@@ -30,7 +31,12 @@ import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.modul
             : undefined,
       },
     }),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]),
+    // Rate limiting global. El límite "default" aplica a toda la API; el
+    // limitador "login" (más estricto) se referencia con @Throttle en el login.
+    ThrottlerModule.forRoot([
+      { name: "default", ttl: 60_000, limit: 100 },
+      { name: "login", ttl: 60_000, limit: 5 },
+    ]),
     PrismaModule,
     AuthModule,
     ClienteModule,
@@ -45,6 +51,10 @@ import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.modul
     RbacModule,
     PlantillaRenderModule,
     HealthModule,
+  ],
+  providers: [
+    // Activa el rate limiting de forma global para todas las rutas.
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}
