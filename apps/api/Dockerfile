@@ -7,8 +7,8 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml* ./
 COPY packages ./packages
 COPY apps/api ./apps/api
 RUN pnpm install --no-frozen-lockfile
-# Generar Prisma Client si el paquete db lo define (no falla si no aplica)
-RUN pnpm --filter @lims-idic/db exec prisma generate 2>/dev/null || true
+# Generar Prisma Client (obligatorio: la API tipa contra @prisma/client)
+RUN pnpm --filter @lims-idic/db exec prisma generate
 RUN pnpm --filter @lims-idic/api build
 
 FROM node:20-alpine AS run
