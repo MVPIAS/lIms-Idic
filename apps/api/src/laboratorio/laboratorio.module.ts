@@ -78,7 +78,8 @@ export class MetodoController extends BaseCrudController {
 @Injectable()
 export class AnalitoService extends BaseCrudService {
   constructor(prisma: PrismaService) {
-    super(prisma, { model: "analito", search: ["codigo", "nombre"], include: { limites: true } });
+    // Analito NO tiene columna tenant_id (cuelga de metodo); tenant:false para no filtrar por tenant.
+    super(prisma, { model: "analito", search: ["codigo", "nombre"], include: { limites: true }, tenant: false });
   }
 }
 const AnalitoCreate = z.object({

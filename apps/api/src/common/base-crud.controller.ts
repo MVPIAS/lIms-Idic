@@ -1,6 +1,11 @@
-import { Body, Delete, Get, Param, Patch, Post, Query, ParseUUIDPipe } from "@nestjs/common";
+import { Body, Delete, Get, Param, Patch, Post, Query, Req, ParseUUIDPipe } from "@nestjs/common";
 import { ZodTypeAny } from "zod";
 import { BaseCrudService } from "./base-crud.service";
+
+/** Extrae el tenant del usuario autenticado (lo inyecta JwtStrategy en req.user). */
+function tenantDe(req: any): string | undefined {
+  return req?.user?.tenantId;
+}
 
 /**
  * Controlador CRUD base. Las subclases decoran con @Controller/@UseGuards y
@@ -21,27 +26,28 @@ export abstract class BaseCrudController {
     @Query("page") page = "1",
     @Query("limit") limit = "20",
     @Query("search") search?: string,
+    @Req() req?: any,
   ) {
-    return this.svc.listar({ page: parseInt(page), limit: parseInt(limit), search });
+    return this.svc.listar({ page: parseInt(page), limit: parseInt(limit), search }, tenantDe(req));
   }
 
   @Get(":id")
-  detalle(@Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.detalle(id);
+  detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.detalle(id, tenantDe(req));
   }
 
   @Post()
-  crear(@Body() body: unknown) {
-    return this.svc.crear(this.createSchema ? this.createSchema.parse(body) : body);
+  crear(@Body() body: unknown, @Req() req: any) {
+    return this.svc.crear(this.createSchema ? this.createSchema.parse(body) : body, tenantDe(req));
   }
 
   @Patch(":id")
-  actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
-    return this.svc.actualizar(id, this.updateSchema ? this.updateSchema.parse(body) : body);
+  actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.actualizar(id, this.updateSchema ? this.updateSchema.parse(body) : body, tenantDe(req));
   }
 
   @Delete(":id")
-  eliminar(@Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.eliminar(id);
+  eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.eliminar(id, tenantDe(req));
   }
 }

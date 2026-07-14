@@ -81,9 +81,10 @@ const UsuarioCreate = z.object({
 export class UsuarioController {
   private prisma = new PrismaClient();
   @Get()
-  async list() {
+  async list(@Req() req: any) {
     const data = await this.prisma.usuario.findMany({
-      where: { deletedAt: null },
+      // Usuario tiene tenant_id: solo se listan los usuarios del tenant del solicitante.
+      where: { deletedAt: null, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
       include: { usuarioRoles: { include: { rol: true } } },
       orderBy: { username: "asc" },
       take: 200,
@@ -120,8 +121,12 @@ export class UsuarioController {
 export class RolController {
   private prisma = new PrismaClient();
   @Get()
-  async list() {
-    const data = await this.prisma.rol.findMany({ orderBy: { codigo: "asc" } });
+  async list(@Req() req: any) {
+    // Rol tiene tenant_id: solo los roles del tenant del solicitante.
+    const data = await this.prisma.rol.findMany({
+      where: { ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
+      orderBy: { codigo: "asc" },
+    });
     return { data, meta: { page: 1, limit: data.length, total: data.length, totalPages: 1 } };
   }
 }

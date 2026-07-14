@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, Param, Patch, Post, Query, UseGuards, ParseUUIDPipe,
+  Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards, ParseUUIDPipe,
 } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
@@ -37,45 +37,49 @@ export class ClienteController {
     @Query("limit") limit = "20",
     @Query("search") search?: string,
     @Query("tipo") tipo?: string,
+    @Req() req?: any,
   ) {
     return this.svc.listar({
       page: parseInt(page),
       limit: parseInt(limit),
       search,
       tipo,
+      tenantId: req?.user?.tenantId,
     });
   }
 
   @Get(":id")
-  async detalle(@Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.detalle(id);
+  async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.detalle(id, req?.user?.tenantId);
   }
 
   @Post()
-  async crear(@Body() body: unknown) {
+  async crear(@Body() body: unknown, @Req() req: any) {
     const data = CrearClienteSchema.parse(body);
-    return this.svc.crear(data);
+    return this.svc.crear(data, req?.user?.tenantId);
   }
 
   @Patch(":id")
-  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown) {
+  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const data = CrearClienteSchema.partial().parse(body);
-    return this.svc.actualizar(id, data);
+    return this.svc.actualizar(id, data, req?.user?.tenantId);
   }
 
   @Post(":id/bloquear")
   async bloquear(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() body: { motivo: string },
+    @Req() req: any,
   ) {
-    return this.svc.bloquear(id, body.motivo);
+    return this.svc.bloquear(id, body.motivo, req?.user?.tenantId);
   }
 
   @Post(":id/desbloquear")
   async desbloquear(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() body: { motivo: string },
+    @Req() req: any,
   ) {
-    return this.svc.desbloquear(id, body.motivo);
+    return this.svc.desbloquear(id, body.motivo, req?.user?.tenantId);
   }
 }

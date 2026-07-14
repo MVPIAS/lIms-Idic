@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Module, Param, Post, UseGuards, Injectable, ParseUUIDPipe } from "@nestjs/common";
+import { Body, Controller, Get, Module, Param, Post, Req, UseGuards, Injectable, ParseUUIDPipe } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -17,7 +17,8 @@ export class FacturaService extends BaseCrudService {
     });
   }
   /** Crea la factura con sus líneas, calculando neto/IVA/total. */
-  async crearConLineas(dto: any, tenantId = DEV_TENANT) {
+  async crearConLineas(dto: any, tenantId: string = DEV_TENANT) {
+    tenantId = tenantId ?? DEV_TENANT;
     const lineas = (dto.lineas ?? []).map((l: any) => ({
       descripcion: l.descripcion,
       cantidad: l.cantidad ?? 1,
@@ -44,8 +45,8 @@ export class FacturaService extends BaseCrudService {
     });
   }
   /** Saldo pendiente = total − pagos + notas de crédito. */
-  async saldo(id: string) {
-    const f = await this.detalle(id);
+  async saldo(id: string, tenantId?: string) {
+    const f = await this.detalle(id, tenantId); // scope por tenant (404 si es de otro)
     const pagado = f.pagos.reduce((a: number, p: any) => a + Number(p.monto), 0);
     const nc = f.notasCredito.reduce((a: number, n: any) => a + Number(n.monto), 0);
     return { total: Number(f.total), pagado, notasCredito: nc, saldo: Number(f.total) - pagado - nc };
@@ -71,12 +72,12 @@ export class FacturaController extends BaseCrudController {
   constructor(protected svc: FacturaService) { super(); }
 
   @Post()
-  crear(@Body() body: unknown) {
-    return this.svc.crearConLineas(FacturaCreate.parse(body));
+  crear(@Body() body: unknown, @Req() req: any) {
+    return this.svc.crearConLineas(FacturaCreate.parse(body), req?.user?.tenantId);
   }
   @Get(":id/saldo")
-  saldo(@Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.saldo(id);
+  saldo(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.saldo(id, req?.user?.tenantId);
   }
 }
 
