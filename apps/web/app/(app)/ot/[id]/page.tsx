@@ -38,69 +38,70 @@ export default function ExpedientePage() {
   }, [id]);
 
   const avance = ot ? idxEstado[ot.estado] ?? 0 : 0;
+  const codOt = ot?.codigo ?? ot?.numero ?? (typeof id === "string" ? id.slice(0, 8) : "");
   const tabBtn = (t: typeof tab, l: string) =>
-    <button onClick={() => setTab(t)} className={`px-3 py-2 text-sm border-b-2 ${tab === t ? "border-accent text-primary font-semibold" : "border-transparent text-slate-500 hover:text-slate-700"}`}>{l}</button>;
+    <button onClick={() => setTab(t)} className={`tab${tab === t ? " active" : ""}`}>{l}</button>;
 
   return (
-    <div className="max-w-5xl">
-      <Link href={"/ot" as any} className="text-sm text-accent hover:underline">← Órdenes de Trabajo</Link>
-      {error && <div className="my-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
+    <div>
+      <Link href={"/ot" as any} className="subtitle" style={{ display: "inline-block", color: "var(--accent)", textDecoration: "none" }}>← Expedientes / OT</Link>
+      {error && <div className="alert warn">{error}</div>}
 
-      <div className="flex items-center justify-between mt-2 mb-4">
-        <div>
-          <h1 className="text-xl font-bold">Expediente {ot?.codigo ?? ot?.numero ?? (typeof id === "string" ? id.slice(0, 8) : "")}</h1>
-          <p className="text-sm text-slate-500">{ot?.cliente?.razonSocial ?? "—"}</p>
+      <div className="exphead">
+        <div className="id">🗂 {codOt}</div>
+        <div className="meta">
+          Cliente: <b>{ot?.cliente?.razonSocial ?? "—"}</b>
+          {ot?.cliente?.rut ? <> ({ot.cliente.rut})</> : null} · Estado: <b>{ot?.estado ?? "—"}</b> · Prioridad: <b>{ot?.prioridad ?? "normal"}</b>
         </div>
-        <span className="text-[12px] px-3 py-1 rounded-full bg-accent/10 text-accent font-semibold">{ot?.estado ?? "—"}</span>
       </div>
 
-      {/* Stepper de 14 fases */}
-      <div className="bg-white border rounded-lg shadow-sm p-4 mb-4 overflow-x-auto">
-        <div className="flex items-center gap-1 min-w-max">
-          {FASES.map((f, i) => (
-            <div key={f} className="flex items-center">
-              <div className="flex flex-col items-center w-24 text-center">
-                <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold ${i < avance ? "bg-success text-white" : i === avance ? "bg-accent text-white" : "bg-slate-200 text-slate-500"}`}>{i + 1}</div>
-                <div className={`text-[10px] mt-1 leading-tight ${i <= avance ? "text-slate-700" : "text-slate-400"}`}>{f}</div>
+      <div className="expgrid">
+        {/* Stepper vertical de 14 fases */}
+        <div className="stepper">
+          {FASES.map((f, i) => {
+            const estado = i < avance ? "done" : i === avance ? "now" : "pend";
+            return (
+              <div key={f} className={`step ${estado === "done" ? "done" : estado === "now" ? "now" : "locked"}`}>
+                <div className="dot">{estado === "done" ? "✓" : i + 1}</div>
+                <div className="txt">{f}<small>Fase {i + 1}</small></div>
               </div>
-              {i < FASES.length - 1 && <div className={`h-0.5 w-3 ${i < avance ? "bg-success" : "bg-slate-200"}`} />}
-            </div>
-          ))}
+            );
+          })}
         </div>
-      </div>
 
-      <div className="bg-white border rounded-lg shadow-sm">
-        <div className="border-b px-3 flex gap-1">
-          {tabBtn("cabecera", "Cabecera")}
-          {tabBtn("muestras", `Muestras (${muestras.length})`)}
-          {tabBtn("resultados", "Resultados")}
-          {tabBtn("informe", "Informe")}
-        </div>
-        <div className="p-4 text-sm">
-          {tab === "cabecera" && (
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-2">
-              <div><dt className="text-[11px] uppercase text-slate-500 font-semibold">Código OT</dt><dd className="font-mono">{ot?.codigo ?? "—"}</dd></div>
-              <div><dt className="text-[11px] uppercase text-slate-500 font-semibold">Cliente</dt><dd>{ot?.cliente?.razonSocial ?? "—"}</dd></div>
-              <div><dt className="text-[11px] uppercase text-slate-500 font-semibold">RUT cliente</dt><dd>{ot?.cliente?.rut ?? "—"}</dd></div>
-              <div><dt className="text-[11px] uppercase text-slate-500 font-semibold">Estado</dt><dd>{ot?.estado ?? "—"}</dd></div>
-              <div><dt className="text-[11px] uppercase text-slate-500 font-semibold">Prioridad</dt><dd>{ot?.prioridad ?? "normal"}</dd></div>
-              <div><dt className="text-[11px] uppercase text-slate-500 font-semibold">Ingreso</dt><dd>{ot?.fechaIngreso ? String(ot.fechaIngreso).slice(0, 10) : ot?.createdAt ? String(ot.createdAt).slice(0, 10) : "—"}</dd></div>
-            </dl>
-          )}
-          {tab === "muestras" && (
-            muestras.length ? (
-              <table className="w-full">
-                <thead><tr className="text-left text-[11px] uppercase text-slate-500 border-b"><th className="py-1">Código</th><th className="py-1">Muestra</th><th className="py-1">Estado</th></tr></thead>
-                <tbody>{muestras.map((m) => <tr key={m.id} className="border-b border-slate-100"><td className="py-1 font-mono">{m.codigo}</td><td className="py-1">{m.nombre ?? "—"}</td><td className="py-1">{m.estado}</td></tr>)}</tbody>
-              </table>
-            ) : <p className="text-slate-400">Sin muestras asociadas a esta OT.</p>
-          )}
-          {tab === "resultados" && (
-            <p className="text-slate-500">Captura de réplicas y estadística en <Link href={"/captura" as any} className="text-accent hover:underline">Captura de resultados</Link>. Cada resultado calcula promedio/DE/CV y veredicto contra el límite del producto.</p>
-          )}
-          {tab === "informe" && (
-            <p className="text-slate-500">El informe/certificado se genera con las plantillas del repositorio (autorelleno con datos de la OT, cliente y resultados), con HASH y código de verificación. Ver <Link href={"/plantillas" as any} className="text-accent hover:underline">Plantillas de informe</Link>.</p>
-          )}
+        <div className="card" style={{ padding: 0 }}>
+          <div className="tabs" style={{ padding: "0 8px" }}>
+            {tabBtn("cabecera", "Cabecera")}
+            {tabBtn("muestras", `Muestras (${muestras.length})`)}
+            {tabBtn("resultados", "Resultados")}
+            {tabBtn("informe", "Informe")}
+          </div>
+          <div style={{ padding: 15 }}>
+            {tab === "cabecera" && (
+              <div className="form-grid">
+                <div className="field readonly"><label>Código OT</label><input value={ot?.codigo ?? "—"} readOnly /></div>
+                <div className="field readonly"><label>Cliente</label><input value={ot?.cliente?.razonSocial ?? "—"} readOnly /></div>
+                <div className="field readonly"><label>RUT cliente</label><input value={ot?.cliente?.rut ?? "—"} readOnly /></div>
+                <div className="field readonly"><label>Estado</label><input value={ot?.estado ?? "—"} readOnly /></div>
+                <div className="field readonly"><label>Prioridad</label><input value={ot?.prioridad ?? "normal"} readOnly /></div>
+                <div className="field readonly"><label>Ingreso</label><input value={ot?.fechaIngreso ? String(ot.fechaIngreso).slice(0, 10) : ot?.createdAt ? String(ot.createdAt).slice(0, 10) : "—"} readOnly /></div>
+              </div>
+            )}
+            {tab === "muestras" && (
+              muestras.length ? (
+                <table className="data">
+                  <thead><tr><th>Código</th><th>Muestra</th><th>Estado</th></tr></thead>
+                  <tbody>{muestras.map((m) => <tr key={m.id}><td><span className="codigo">{m.codigo}</span></td><td>{m.nombre ?? "—"}</td><td><span className="pill gray">{m.estado}</span></td></tr>)}</tbody>
+                </table>
+              ) : <p className="subtitle" style={{ margin: 0 }}>Sin muestras asociadas a esta OT.</p>
+            )}
+            {tab === "resultados" && (
+              <p className="subtitle" style={{ margin: 0 }}>Captura de réplicas y estadística en <Link href={"/captura" as any} style={{ color: "var(--accent)" }}>Captura de resultados</Link>. Cada resultado calcula promedio/DE/CV y veredicto contra el límite del producto.</p>
+            )}
+            {tab === "informe" && (
+              <p className="subtitle" style={{ margin: 0 }}>El informe/certificado se genera con las plantillas del repositorio (autorelleno con datos de la OT, cliente y resultados), con HASH y código de verificación. Ver <Link href={"/plantillas" as any} style={{ color: "var(--accent)" }}>Plantillas de informe</Link>.</p>
+            )}
+          </div>
         </div>
       </div>
     </div>

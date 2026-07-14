@@ -63,73 +63,77 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-1">
-        <h1 className="text-xl font-bold">{titulo}</h1>
+      <h1 className="page">{titulo}</h1>
+      {subtitulo && <p className="subtitle">{subtitulo}</p>}
+      {error && <div className="alert warn">{error}</div>}
+
+      <div className="toolbar">
+        <input
+          placeholder="Buscar…"
+          style={{ flex: 1 }}
+          value={search}
+          onChange={(e) => { setPage(1); setSearch(e.target.value); }}
+        />
         {campos && (
-          <button className="bg-primary text-white text-sm font-semibold rounded-md px-3.5 py-2" onClick={() => setShowForm((s) => !s)}>
+          <button className="btn primary sm" onClick={() => setShowForm((s) => !s)}>
             {showForm ? "Cerrar" : "＋ Nuevo"}
           </button>
         )}
       </div>
-      {subtitulo && <p className="text-sm text-slate-500 mb-3">{subtitulo}</p>}
-      {error && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
 
       {showForm && campos && (
-        <form onSubmit={crear} className="bg-white border rounded-lg p-4 mb-3 shadow-sm grid grid-cols-2 md:grid-cols-3 gap-3">
-          {campos.map((c) => (
-            <label key={c.campo} className="block">
-              <span className="block text-[11px] uppercase text-slate-500 font-semibold mb-1">{c.label}{c.requerido && " *"}</span>
-              {c.tipo === "select" ? (
-                <select className="w-full border rounded px-2 py-1.5 text-sm" required={c.requerido} value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })}>
-                  <option value="">—</option>
-                  {c.opciones?.map((o) => <option key={o} value={o}>{o}</option>)}
-                </select>
-              ) : (
-                <input type={c.tipo ?? "text"} className="w-full border rounded px-2 py-1.5 text-sm" required={c.requerido}
-                  value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })} />
-              )}
-            </label>
-          ))}
-          <div className="col-span-full flex justify-end">
-            <button className="bg-primary text-white text-sm font-semibold rounded-md px-3.5 py-2">Guardar</button>
+        <form onSubmit={crear} className="card">
+          <div className="form-grid">
+            {campos.map((c) => (
+              <div key={c.campo} className="field">
+                <label>{c.label}{c.requerido && <span className="req"> *</span>}</label>
+                {c.tipo === "select" ? (
+                  <select required={c.requerido} value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })}>
+                    <option value="">—</option>
+                    {c.opciones?.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                ) : (
+                  <input type={c.tipo ?? "text"} required={c.requerido}
+                    value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })} />
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
+            <button className="btn primary sm">Guardar</button>
           </div>
         </form>
       )}
 
-      <div className="mb-2">
-        <input className="w-72 border rounded-md px-3 py-1.5 text-sm" placeholder="Buscar…" value={search}
-          onChange={(e) => { setPage(1); setSearch(e.target.value); }} />
-      </div>
-
-      <div className="bg-white rounded-lg border shadow-sm overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="card card--table">
+        <table className="data">
           <thead>
-            <tr className="text-left text-[11px] uppercase text-slate-500 bg-slate-50 border-b">
-              {columnas.map((c) => <th key={c.campo} className={`px-3 py-2 ${c.right ? "text-right" : ""}`}>{c.titulo}</th>)}
+            <tr>
+              {columnas.map((c) => <th key={c.campo} className={c.right ? "num" : ""}>{c.titulo}</th>)}
             </tr>
           </thead>
           <tbody>
             {res?.data.map((row) => (
-              <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50">
+              <tr key={row.id}>
                 {columnas.map((c) => (
-                  <td key={c.campo} className={`px-3 py-2 ${c.right ? "text-right tabular-nums" : ""}`}>
+                  <td key={c.campo} className={c.right ? "num" : ""}>
                     {c.render ? c.render(row[c.campo], row) : (row[c.campo] ?? "—")}
                   </td>
                 ))}
               </tr>
             ))}
             {res && res.data.length === 0 && (
-              <tr><td colSpan={columnas.length} className="px-3 py-6 text-center text-slate-400">Sin resultados</td></tr>
+              <tr><td colSpan={columnas.length} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>Sin resultados</td></tr>
             )}
           </tbody>
         </table>
       </div>
 
       {res && res.meta.totalPages > 1 && (
-        <div className="flex items-center gap-2 mt-3 text-sm">
-          <button disabled={page <= 1} className="border rounded px-2 py-1 disabled:opacity-40" onClick={() => setPage((p) => p - 1)}>←</button>
-          <span>Página {res.meta.page} de {res.meta.totalPages} · {res.meta.total} registros</span>
-          <button disabled={page >= res.meta.totalPages} className="border rounded px-2 py-1 disabled:opacity-40" onClick={() => setPage((p) => p + 1)}>→</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5 }}>
+          <button disabled={page <= 1} className="btn outline sm" onClick={() => setPage((p) => p - 1)}>←</button>
+          <span className="subtitle" style={{ margin: 0 }}>Página {res.meta.page} de {res.meta.totalPages} · {res.meta.total} registros</span>
+          <button disabled={page >= res.meta.totalPages} className="btn outline sm" onClick={() => setPage((p) => p + 1)}>→</button>
         </div>
       )}
     </div>

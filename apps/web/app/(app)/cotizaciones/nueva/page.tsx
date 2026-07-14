@@ -50,80 +50,82 @@ export default function CosteoPage() {
     } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
   }
 
-  const inp = "border rounded px-2 py-1.5 text-sm";
   const conIva = (n: number) => n * (1 + Number(ivaPct) / 100);
+  const cellInput: React.CSSProperties = { width: "100%", border: "1px solid var(--line)", borderRadius: 4, padding: "3px 6px", font: "inherit", fontSize: 12.5 };
 
   return (
-    <div className="max-w-5xl">
-      <h1 className="text-xl font-bold mb-1">Cotización · Costeo Ejército</h1>
-      <p className="text-sm text-slate-500 mb-4">Costos directos → Costo Fijo Asociado (CFA) → Costo Total → tres precios de salida (Ejército, Institucional FFAA, Particular).</p>
-      {error && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded p-2">{error}</div>}
+    <div>
+      <h1 className="page">Nueva Cotización</h1>
+      <p className="subtitle">Wizard · costeo Ejército en vivo. Costos directos → CFA → Costo Total → tres precios de salida. Al aceptarse genera la OT/expediente.</p>
 
-      <div className="bg-white border rounded-lg shadow-sm p-4 mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-bold text-sm">1 · Costos directos</h2>
-          <button onClick={add} className="text-accent text-sm font-semibold">＋ Agregar línea</button>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+      <div className="wizard">
+        <div className="st done"><div className="n">1</div>Cliente</div>
+        <div className="st cur"><div className="n">2</div>Costeo</div>
+        <div className="st"><div className="n">3</div>Condiciones</div>
+        <div className="st"><div className="n">4</div>Revisión</div>
+      </div>
+
+      {error && <div className="alert warn">{error}</div>}
+
+      <div className="split-3-1">
+        <div className="card">
+          <h2>2 · Costo directo <span className="right">Costeo Ejército</span></h2>
+          <table className="data">
             <thead>
-              <tr className="text-left text-[11px] uppercase text-slate-500 border-b">
-                <th className="py-1">Tipo</th><th className="py-1">Descripción</th><th className="py-1 text-right">Cant.</th><th className="py-1 text-right">Valor unit.</th><th className="py-1 text-right">Subtotal</th><th></th>
+              <tr>
+                <th>Concepto</th><th>Detalle</th><th className="num">Cant.</th><th className="num">Valor u.</th><th className="num">Subtotal</th><th></th>
               </tr>
             </thead>
             <tbody>
               {lineas.map((l, i) => (
-                <tr key={i} className="border-b border-slate-100">
-                  <td className="py-1 pr-2">
-                    <select className={inp} value={l.tipo} onChange={(e) => set(i, "tipo", e.target.value)}>
+                <tr key={i}>
+                  <td>
+                    <select style={cellInput} value={l.tipo} onChange={(e) => set(i, "tipo", e.target.value)}>
                       {TIPOS.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
                     </select>
                   </td>
-                  <td className="py-1 pr-2"><input className={`${inp} w-full`} value={l.descripcion} onChange={(e) => set(i, "descripcion", e.target.value)} /></td>
-                  <td className="py-1 pr-2"><input type="number" className={`${inp} w-20 text-right`} value={l.cantidad} onChange={(e) => set(i, "cantidad", e.target.value)} /></td>
-                  <td className="py-1 pr-2"><input type="number" className={`${inp} w-28 text-right`} value={l.valorUnitario} onChange={(e) => set(i, "valorUnitario", e.target.value)} /></td>
-                  <td className="py-1 text-right tabular-nums">{clp((Number(l.cantidad) || 0) * (Number(l.valorUnitario) || 0))}</td>
-                  <td className="py-1 text-right"><button onClick={() => del(i)} className="text-danger text-xs">✕</button></td>
+                  <td><input style={cellInput} value={l.descripcion} onChange={(e) => set(i, "descripcion", e.target.value)} /></td>
+                  <td className="num"><input type="number" style={{ ...cellInput, width: 56, textAlign: "right" }} value={l.cantidad} onChange={(e) => set(i, "cantidad", e.target.value)} /></td>
+                  <td className="num"><input type="number" style={{ ...cellInput, width: 84, textAlign: "right" }} value={l.valorUnitario} onChange={(e) => set(i, "valorUnitario", e.target.value)} /></td>
+                  <td className="num">{clp((Number(l.cantidad) || 0) * (Number(l.valorUnitario) || 0))}</td>
+                  <td className="num"><span style={{ cursor: "pointer", color: "var(--muted)" }} onClick={() => del(i)}>✕</span></td>
                 </tr>
               ))}
             </tbody>
           </table>
-        </div>
-      </div>
-
-      <div className="bg-white border rounded-lg shadow-sm p-4 mb-4">
-        <h2 className="font-bold text-sm mb-2">2 · Parámetros</h2>
-        <div className="flex flex-wrap gap-4 items-end">
-          <label className="text-sm">CFA % <input type="number" className={`${inp} w-20 ml-1`} value={cfaPct} onChange={(e) => setCfaPct(+e.target.value)} /></label>
-          <label className="text-sm">Margen particular % <input type="number" className={`${inp} w-20 ml-1`} value={margenParticularPct} onChange={(e) => setMargen(+e.target.value)} /></label>
-          <label className="text-sm">IVA % <input type="number" className={`${inp} w-20 ml-1`} value={ivaPct} onChange={(e) => setIva(+e.target.value)} /></label>
-          <button onClick={calcular} className="bg-primary text-white text-sm font-semibold rounded-md px-4 py-2 ml-auto">Calcular costeo</button>
-        </div>
-      </div>
-
-      {res && (
-        <div className="bg-white border rounded-lg shadow-sm p-4">
-          <h2 className="font-bold text-sm mb-3">3 · Resultado</h2>
-          <div className="grid grid-cols-3 gap-3 mb-4 text-sm">
-            <div className="bg-slate-50 rounded p-3"><div className="text-[10px] uppercase text-slate-500 font-semibold">Costo Directo Total</div><div className="text-lg font-bold tabular-nums">{clp(res.cdt)}</div></div>
-            <div className="bg-slate-50 rounded p-3"><div className="text-[10px] uppercase text-slate-500 font-semibold">CFA ({res.cfaPct}%)</div><div className="text-lg font-bold tabular-nums">{clp(res.cfa)}</div></div>
-            <div className="bg-slate-50 rounded p-3"><div className="text-[10px] uppercase text-slate-500 font-semibold">Costo Total</div><div className="text-lg font-bold tabular-nums">{clp(res.ct)}</div></div>
+          <div style={{ marginTop: 9 }}>
+            <button onClick={add} className="btn outline sm">＋ Añadir línea</button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {[
-              { l: "Precio Ejército", v: res.precios?.ejercito, c: "border-l-primary" },
-              { l: "Institucional FFAA", v: res.precios?.institucional, c: "border-l-accent" },
-              { l: `Particular (+${res.margenParticularPct}%)`, v: res.precios?.particular, c: "border-l-warn" },
-            ].map((p) => (
-              <div key={p.l} className={`border border-l-4 ${p.c} rounded-lg p-3`}>
-                <div className="text-[11px] uppercase text-slate-500 font-semibold">{p.l}</div>
-                <div className="text-xl font-bold tabular-nums">{clp(p.v)}</div>
-                <div className="text-xs text-slate-500">c/IVA: {clp(conIva(Number(p.v)))}</div>
-              </div>
-            ))}
+
+          <div className="form-grid cols-4" style={{ marginTop: 12 }}>
+            <div className="field"><label>CFA %</label><input type="number" value={cfaPct} onChange={(e) => setCfaPct(+e.target.value)} /></div>
+            <div className="field"><label>Margen particular %</label><input type="number" value={margenParticularPct} onChange={(e) => setMargen(+e.target.value)} /></div>
+            <div className="field"><label>IVA %</label><input type="number" value={ivaPct} onChange={(e) => setIva(+e.target.value)} /></div>
+            <div className="field" style={{ justifyContent: "flex-end" }}><button onClick={calcular} className="btn primary sm" style={{ justifyContent: "center" }}>Calcular costeo</button></div>
           </div>
         </div>
-      )}
+
+        <div>
+          <div className="card">
+            <h2>Resumen</h2>
+            <div className="totals-box">
+              <div className="row"><span>CDT</span><b>{res ? clp(res.cdt) : "—"}</b></div>
+              <div className="row"><span>CFA {res ? `(${res.cfaPct}%)` : ""}</span><b>{res ? clp(res.cfa) : "—"}</b></div>
+              <div className="row total"><span>CT</span><b>{res ? clp(res.ct) : "—"}</b></div>
+            </div>
+            <div className="totals-box" style={{ marginTop: 6 }}>
+              <div className="row"><span>Ejército</span><b>{res ? clp(res.precios?.ejercito) : "—"}</b></div>
+              <div className="row"><span>Institucional</span><b>{res ? clp(res.precios?.institucional) : "—"}</b></div>
+              <div className="row"><span>Particular {res ? `(+${res.margenParticularPct}%)` : ""}</span><b>{res ? clp(res.precios?.particular) : "—"}</b></div>
+            </div>
+          </div>
+          <div className="card" style={{ background: "var(--primary)", color: "#fff" }}>
+            <div style={{ fontSize: 10, textTransform: "uppercase", opacity: 0.8 }}>Precio a cotizar (c/IVA · Ejército)</div>
+            <div style={{ fontSize: 24, fontWeight: 800 }}>{res ? clp(conIva(Number(res.precios?.ejercito ?? res.ct))) : "—"}</div>
+            <button className="btn success sm" style={{ width: "100%", marginTop: 8, justifyContent: "center" }}>Guardar borrador</button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

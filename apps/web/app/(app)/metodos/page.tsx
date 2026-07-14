@@ -3,9 +3,7 @@
 import CrudTable from "@/components/CrudTable";
 
 const estadoBadge = (v: string) => (
-  <span className={`text-[11px] px-2 py-0.5 rounded-full ${v === "vigente" ? "bg-emerald-100 text-emerald-700" : v === "en_validacion" ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600"}`}>
-    {v ?? "—"}
-  </span>
+  <span className={`pill ${v === "vigente" ? "green" : v === "en_validacion" ? "amber" : "gray"}`}>{v ?? "—"}</span>
 );
 
 export default function MetodosPage() {
@@ -15,9 +13,9 @@ export default function MetodosPage() {
       titulo="Métodos / Catálogo de ensayos"
       subtitulo="Catálogo técnico: cada método define norma, área y versión. 136 métodos cargados en 5 laboratorios (LQC, SVM, SEO, LES, LQA)."
       columnas={[
-        { campo: "codigo", titulo: "Código" },
+        { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Método / Ensayo" },
-        { campo: "norma", titulo: "Norma" },
+        { campo: "norma", titulo: "Norma", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
         { campo: "area", titulo: "Área / Lab" },
         { campo: "version", titulo: "Ver." },
         { campo: "estado", titulo: "Estado", render: estadoBadge },

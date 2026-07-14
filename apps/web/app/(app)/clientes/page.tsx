@@ -3,9 +3,7 @@
 import CrudTable from "@/components/CrudTable";
 
 const badge = (v: any) => (
-  <span className={`text-[11px] px-2 py-0.5 rounded-full ${v ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-700"}`}>
-    {v ? "bloqueado" : "activo"}
-  </span>
+  <span className={`pill ${v ? "red" : "green"}`}>{v ? "bloqueado" : "activo"}</span>
 );
 
 export default function ClientesPage() {
@@ -15,7 +13,7 @@ export default function ClientesPage() {
       titulo="Clientes"
       subtitulo="Instituciones y empresas que solicitan ensayos. El flujo comercial arranca aquí."
       columnas={[
-        { campo: "rut", titulo: "RUT" },
+        { campo: "rut", titulo: "RUT", render: (v) => <span className="codigo">{v}</span> },
         { campo: "razonSocial", titulo: "Razón social" },
         { campo: "tipo", titulo: "Tipo" },
         { campo: "ciudad", titulo: "Ciudad" },

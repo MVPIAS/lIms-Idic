@@ -9,10 +9,10 @@ export default function ProveedoresPage() {
       titulo="Proveedores"
       subtitulo="Maestro de proveedores para órdenes de compra e insumos."
       columnas={[
-        { campo: "rut", titulo: "RUT" },
+        { campo: "rut", titulo: "RUT", render: (v) => <span className="codigo">{v}</span> },
         { campo: "razonSocial", titulo: "Razón social" },
         { campo: "rubro", titulo: "Rubro" },
-        { campo: "estado", titulo: "Estado", render: (v) => <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100">{v}</span> },
+        { campo: "estado", titulo: "Estado", render: (v) => <span className={`pill ${v === "habilitado" ? "green" : v === "inhabilitado" ? "red" : "amber"}`}>{v ?? "—"}</span> },
       ]}
       campos={[
         { campo: "rut", label: "RUT", requerido: true },

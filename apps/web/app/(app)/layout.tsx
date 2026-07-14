@@ -25,14 +25,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="grid grid-cols-[230px_1fr] grid-rows-[52px_1fr] h-screen">
-      <aside className="row-span-2 bg-gradient-to-b from-[#0e2a32] to-primary text-slate-200 overflow-y-auto">
+    <div className="app">
+      <aside className="sidebar">
         <Sidebar />
       </aside>
-      <header className="bg-white border-b">
+      <header className="topbar">
         <Topbar />
       </header>
-      <main className="overflow-y-auto bg-slate-50 p-6">{children}</main>
+      <main className="mainarea">{children}</main>
     </div>
   );
 }

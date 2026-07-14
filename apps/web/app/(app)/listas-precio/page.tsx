@@ -9,9 +9,9 @@ export default function ListasPrecioPage() {
       titulo="Listas de Precio"
       subtitulo="Tarifario por método. Alimenta el costeo de las cotizaciones."
       columnas={[
-        { campo: "codigo", titulo: "Código" },
+        { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Nombre" },
-        { campo: "moneda", titulo: "Moneda" },
+        { campo: "moneda", titulo: "Moneda", render: (v) => <span className="tag">{v ?? "CLP"}</span> },
         { campo: "vigenteDesde", titulo: "Vigente desde", render: (v) => (v ? String(v).slice(0, 10) : "—") },
       ]}
       campos={[

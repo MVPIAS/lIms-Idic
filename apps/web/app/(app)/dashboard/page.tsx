@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
@@ -33,54 +34,51 @@ export default function DashboardPage() {
   }, []);
 
   const kpis = [
-    { label: "Clientes", val: k.clientes, href: "/clientes", color: "border-l-[#2b65d9]" },
-    { label: "Cotizaciones", val: k.cotizaciones, href: "/cotizaciones", color: "border-l-accent" },
-    { label: "Muestras", val: k.muestras, href: "/muestras", color: "border-l-success" },
-    { label: "Métodos catálogo", val: k.metodos, href: "/metodos", color: "border-l-warn" },
-    { label: "Plantillas informe", val: k.plantillas, href: "/plantillas", color: "border-l-[#7057c8]" },
-    { label: "Proveedores", val: k.proveedores, href: "/proveedores", color: "border-l-danger" },
+    { label: "Clientes", val: k.clientes, href: "/clientes", cls: "k-blue" },
+    { label: "Cotizaciones", val: k.cotizaciones, href: "/cotizaciones", cls: "" },
+    { label: "Muestras", val: k.muestras, href: "/muestras", cls: "k-green" },
+    { label: "Métodos catálogo", val: k.metodos, href: "/metodos", cls: "k-amber" },
+    { label: "Plantillas informe", val: k.plantillas, href: "/plantillas", cls: "k-violet" },
+    { label: "Proveedores", val: k.proveedores, href: "/proveedores", cls: "k-red" },
   ];
 
   return (
     <div>
-      <h1 className="text-xl font-bold mb-1">Dashboard</h1>
-      <p className="text-sm text-slate-500 mb-5">
-        LIMS IDIC · sistema unificado. Del cliente y la cotización, a la muestra, el análisis y el informe firmado.
+      <h1 className="page">Panel · sistema unificado</h1>
+      <p className="subtitle">
+        LIMS IDIC · Comercial y LIMS en un mismo sistema. Del cliente y la cotización, a la muestra, el análisis y el informe firmado.
       </p>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
+      <div className="kpis">
         {kpis.map((kpi) => (
-          <Link
-            key={kpi.label}
-            href={kpi.href as any}
-            className={`bg-white border border-l-4 ${kpi.color} rounded-lg p-3.5 shadow-sm hover:shadow transition`}
-          >
-            <div className="text-[10px] text-slate-500 uppercase font-semibold tracking-wider">{kpi.label}</div>
-            <div className="text-2xl font-bold mt-1 tabular-nums">{kpi.val ?? "…"}</div>
+          <Link key={kpi.label} href={kpi.href as any} className={`kpi ${kpi.cls}`} style={{ textDecoration: "none", color: "inherit" }}>
+            <div className="lab">{kpi.label}</div>
+            <div className="val">{kpi.val ?? "…"}</div>
           </Link>
         ))}
       </div>
 
-      <div className="bg-white rounded-lg border p-5 shadow-sm">
-        <h2 className="font-bold mb-3">Accesos rápidos</h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <Link href="/clientes" className="block bg-slate-50 hover:bg-slate-100 border rounded-lg p-4 transition">
-            <div className="text-2xl mb-1">🏛</div>
-            <h3 className="font-semibold text-sm">Clientes</h3>
-            <p className="text-xs text-slate-500">Alta y gestión de instituciones</p>
-          </Link>
-          <Link href="/ot" className="block bg-slate-50 hover:bg-slate-100 border rounded-lg p-4 transition">
-            <div className="text-2xl mb-1">▤</div>
-            <h3 className="font-semibold text-sm">Órdenes de Trabajo</h3>
-            <p className="text-xs text-slate-500">Expedientes de laboratorio</p>
-          </Link>
-          <Link href="/metodos" className="block bg-slate-50 hover:bg-slate-100 border rounded-lg p-4 transition">
-            <div className="text-2xl mb-1">⚗</div>
-            <h3 className="font-semibold text-sm">Catálogo de métodos</h3>
-            <p className="text-xs text-slate-500">Técnicas, normas y fórmulas</p>
-          </Link>
+      <div className="card">
+        <h2>Acciones rápidas</h2>
+        <div className="form-grid">
+          <QuickAction href="/cotizaciones/nueva" title="＋ Nueva Cotización" desc="Con costeo Ejército en vivo" />
+          <QuickAction href="/ot" title="🗂 Abrir expediente" desc="Órdenes de trabajo (14 fases)" />
+          <QuickAction href="/flujos" title="⛓ Crear un flujo" desc="Diseñador no-code" />
         </div>
       </div>
+    </div>
+  );
+}
+
+function QuickAction({ href, title, desc }: { href: string; title: string; desc: string }) {
+  const router = useRouter();
+  return (
+    <div
+      onClick={() => router.push(href as any)}
+      style={{ cursor: "pointer", border: "1px solid var(--line)", borderRadius: 9, padding: 13 }}
+    >
+      <b>{title}</b>
+      <div className="subtitle" style={{ margin: "4px 0 0" }}>{desc}</div>
     </div>
   );
 }
