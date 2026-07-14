@@ -1,4 +1,4 @@
-import { Body, Controller, Module, Post, UseGuards, Injectable } from "@nestjs/common";
+import { Body, Controller, Module, Post, Req, UseGuards, Injectable } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -12,7 +12,8 @@ export class OrdenCompraService extends BaseCrudService {
   constructor(prisma: PrismaService) {
     super(prisma, { model: "ordenCompra", search: ["numero", "detalle"], include: { proveedor: true, lineas: true } });
   }
-  async crearConLineas(dto: any, tenantId = DEV_TENANT) {
+  async crearConLineas(dto: any, tenantId: string = DEV_TENANT) {
+    tenantId = tenantId ?? DEV_TENANT;
     const lineas = (dto.lineas ?? []).map((l: any) => ({
       descripcion: l.descripcion,
       cantidad: l.cantidad ?? 1,
@@ -43,7 +44,7 @@ export class OrdenCompraController extends BaseCrudController {
   protected updateSchema = z.object({ estado: z.enum(["emitida", "en_curso", "recibida", "anulada"]), detalle: z.string().optional() });
   constructor(protected svc: OrdenCompraService) { super(); }
   @Post()
-  crear(@Body() body: unknown) { return this.svc.crearConLineas(OCCreate.parse(body)); }
+  crear(@Body() body: unknown, @Req() req: any) { return this.svc.crearConLineas(OCCreate.parse(body), req?.user?.tenantId); }
 }
 
 /* ===================== VIÁTICOS ===================== */

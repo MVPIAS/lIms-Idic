@@ -1,21 +1,24 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
+import { DEV_TENANT } from "../common/base-crud.service";
 
 @Injectable()
 export class CotizacionService {
   private prisma = new PrismaClient();
 
-  async listar() {
+  async listar(tenantId?: string) {
     return this.prisma.cotizacion.findMany({
+      // Cotizacion tiene tenant_id: solo las del tenant del usuario.
+      where: { ...(tenantId ? { tenantId } : {}) },
       take: 50,
       orderBy: { createdAt: "desc" },
       include: { cliente: true, lineas: true },
     });
   }
 
-  async detalle(id: string) {
-    const cot = await this.prisma.cotizacion.findUnique({
-      where: { id },
+  async detalle(id: string, tenantId?: string) {
+    const cot = await this.prisma.cotizacion.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
       include: {
         cliente: true,
         lineas: true,
@@ -34,8 +37,8 @@ export class CotizacionService {
    *   iva = neto * (ivaPct / 100)
    *   total = neto + iva
    */
-  async crear(data: any) {
-    const tenantIdFromJWT = "00000000-0000-0000-0000-000000000000";
+  async crear(data: any, tenantId?: string) {
+    const tenantIdFromJWT = tenantId ?? DEV_TENANT;
     const codigo = await this.generarCodigo();
 
     // Calcular subtotales y totales
@@ -83,7 +86,8 @@ export class CotizacionService {
     });
   }
 
-  async cambiarEstado(id: string, nuevoEstado: string) {
+  async cambiarEstado(id: string, nuevoEstado: string, tenantId?: string) {
+    await this.detalle(id, tenantId); // valida pertenencia al tenant
     return this.prisma.cotizacion.update({
       where: { id },
       data: { estado: nuevoEstado },
@@ -95,8 +99,8 @@ export class CotizacionService {
    * 1. Cambia su estado a 'aceptada'
    * 2. Dispara la generación de OT (placeholder · en producción dispara workflow BPM)
    */
-  async aceptar(id: string) {
-    const cot = await this.detalle(id);
+  async aceptar(id: string, tenantId?: string) {
+    const cot = await this.detalle(id, tenantId);
 
     await this.prisma.cotizacion.update({
       where: { id },
@@ -109,7 +113,8 @@ export class CotizacionService {
     return { ok: true, cotizacion: cot, mensaje: "Cotización aceptada. OT se generará automáticamente." };
   }
 
-  async rechazar(id: string, motivo: string) {
+  async rechazar(id: string, motivo: string, tenantId?: string) {
+    await this.detalle(id, tenantId); // valida pertenencia al tenant
     return this.prisma.cotizacion.update({
       where: { id },
       data: { estado: "rechazada", notas: motivo },

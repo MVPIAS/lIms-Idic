@@ -17,9 +17,7 @@
 	encode gzip zstd
 
 	# Cabeceras de seguridad para TODO el sitio (front Next + API).
-	# HSTS lo emite Caddy porque termina el TLS. No se fija una CSP restrictiva
-	# aquí para no romper el runtime de Next.js (inline scripts/estilos); la CSP
-	# de la API la aplica helmet. Endurecer la CSP del front es tarea pendiente.
+	# HSTS lo emite Caddy porque termina el TLS. La CSP de la API la aplica helmet.
 	header {
 		-Server
 		Strict-Transport-Security "max-age=15552000; includeSubDomains"
@@ -27,6 +25,10 @@
 		X-Frame-Options "SAMEORIGIN"
 		Referrer-Policy "no-referrer"
 		X-XSS-Protection "0"
+		# CSP CONSERVADORA compatible con Next.js 14 (usa estilos/scripts inline
+		# propios). 'unsafe-inline' en script/style es necesario para el runtime de
+		# Next; endurecerla con nonces/hashes es trabajo futuro.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
 	}
 }
 

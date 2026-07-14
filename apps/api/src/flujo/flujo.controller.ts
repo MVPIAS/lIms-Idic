@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { FlujoService } from "./flujo.service";
@@ -12,8 +12,8 @@ export class FlujoController {
 
   /** Catálogo de flujos (defs con su última versión). */
   @Get()
-  listar() {
-    return this.flujos.listarDefs();
+  listar(@Req() req: any) {
+    return this.flujos.listarDefs(req?.user?.tenantId);
   }
 
   /** Detalle de un flujo por código (versión vigente con pasos y transiciones). */
@@ -30,8 +30,8 @@ export class FlujoController {
 
   /** Guarda un borrador desde el diseñador visual (pasos + transiciones). */
   @Post()
-  guardar(@Body() body: any) {
-    return this.flujos.guardarBorrador(body);
+  guardar(@Body() body: any, @Req() req: any) {
+    return this.flujos.guardarBorrador(body, req?.user?.tenantId);
   }
 
   /** Publica una versión (archiva la publicada anterior). */

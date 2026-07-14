@@ -36,10 +36,28 @@ export abstract class BaseCrudService {
     return (this.prisma as any)[this.o.model];
   }
 
-  async listar(q: { page?: number; limit?: number; search?: string; where?: any } = {}) {
+  /** ¿Este modelo se aísla por tenant? (tiene columna tenant_id). */
+  protected get isTenantScoped(): boolean {
+    return this.o.tenant !== false;
+  }
+
+  /**
+   * Fragmento `where` para el aislamiento por tenant. Solo se aplica a modelos
+   * con columna tenant_id y cuando el tenant del usuario está presente (viene
+   * del JWT). Emitirlo contra un modelo sin tenant_id provocaría un error SQL,
+   * por eso se respeta el flag `tenant`.
+   */
+  protected tenantWhere(tenantId?: string): { tenantId: string } | Record<string, never> {
+    return this.isTenantScoped && tenantId ? { tenantId } : {};
+  }
+
+  async listar(
+    q: { page?: number; limit?: number; search?: string; where?: any } = {},
+    tenantId?: string,
+  ) {
     const page = Math.max(1, q.page ?? 1);
     const limit = Math.min(100, Math.max(1, q.limit ?? 20));
-    const where: any = { ...(q.where ?? {}) };
+    const where: any = { ...(q.where ?? {}), ...this.tenantWhere(tenantId) };
     if (this.o.softDelete === true) where.deletedAt = null;
     if (q.search && this.o.search?.length) {
       where.OR = this.o.search.map((f) => ({ [f]: { contains: q.search, mode: "insensitive" } }));
@@ -57,28 +75,39 @@ export abstract class BaseCrudService {
     return { data, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
 
-  async detalle(id: string) {
+  async detalle(id: string, tenantId?: string) {
     const r = await this.d.findFirst({
-      where: { id, ...(this.o.softDelete === true ? { deletedAt: null } : {}) },
+      where: {
+        id,
+        ...this.tenantWhere(tenantId),
+        ...(this.o.softDelete === true ? { deletedAt: null } : {}),
+      },
       include: this.o.include,
     });
+    // Nota: si el registro existe pero pertenece a otro tenant, findFirst no lo
+    // devuelve → 404 (no revelamos su existencia). Evita la fuga cross-tenant.
     if (!r) throw new NotFoundException(`${this.o.model} ${id} no encontrado`);
     return r;
   }
 
-  async crear(data: any, tenantId: string = DEV_TENANT) {
+  async crear(data: any, tenantId?: string) {
+    // Fuerza el tenant del usuario e ignora cualquier tenantId que venga en el body.
+    const { tenantId: _ignore, ...rest } = data ?? {};
+    const tid = tenantId ?? DEV_TENANT;
     return this.d.create({
-      data: { ...(this.o.tenant !== false ? { tenantId } : {}), ...data },
+      data: { ...(this.isTenantScoped ? { tenantId: tid } : {}), ...rest },
     });
   }
 
-  async actualizar(id: string, data: any) {
-    await this.detalle(id);
-    return this.d.update({ where: { id }, data });
+  async actualizar(id: string, data: any, tenantId?: string) {
+    await this.detalle(id, tenantId); // valida existencia + pertenencia al tenant
+    // Nunca se permite reasignar el tenant vía update.
+    const { tenantId: _ignore, ...rest } = data ?? {};
+    return this.d.update({ where: { id }, data: rest });
   }
 
-  async eliminar(id: string) {
-    await this.detalle(id);
+  async eliminar(id: string, tenantId?: string) {
+    await this.detalle(id, tenantId); // valida existencia + pertenencia al tenant
     return this.o.softDelete === true
       ? this.d.update({ where: { id }, data: { deletedAt: new Date() } })
       : this.d.delete({ where: { id } });

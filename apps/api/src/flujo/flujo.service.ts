@@ -19,8 +19,10 @@ export class FlujoService {
   private prisma = new PrismaClient();
 
   // ---------------------------------------------------------------- catálogo
-  async listarDefs() {
+  async listarDefs(tenantId?: string) {
     return this.prisma.flujoDef.findMany({
+      // FlujoDef tiene tenant_id: solo los flujos del tenant del usuario.
+      where: { ...(tenantId ? { tenantId } : {}) },
       orderBy: { codigo: "asc" },
       include: {
         versiones: {
@@ -75,7 +77,7 @@ export class FlujoService {
       origenTmp: string; destinoTmp: string; condicion?: string;
       etiqueta?: string; orden?: number;
     }>;
-  }) {
+  }, tenantIdArg?: string) {
     if (!body.pasos?.length) throw new BadRequestException("El flujo no tiene pasos");
     const tiposValidos = new Set(["INICIO","ACTIVIDAD","DECISION","AUTO","ESPERA","FIN","SUBPROCESO"]);
     for (const p of body.pasos)
@@ -86,7 +88,7 @@ export class FlujoService {
     if (!body.pasos.some((p) => p.tipo === "FIN"))
       throw new BadRequestException("El flujo debe tener al menos un paso FIN");
 
-    const tenantId = "00000000-0000-0000-0000-000000000000"; // TODO: del JWT
+    const tenantId = tenantIdArg ?? "00000000-0000-0000-0000-000000000000"; // del JWT (fallback DEV)
 
     return this.prisma.$transaction(async (tx) => {
       let def = await tx.flujoDef.findFirst({ where: { tenantId, codigo: body.codigo } });

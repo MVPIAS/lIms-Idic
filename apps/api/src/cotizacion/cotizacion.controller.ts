@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, UseGuards, ParseUUIDPipe } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Req, UseGuards, ParseUUIDPipe } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { z } from "zod";
@@ -87,33 +87,33 @@ export class CotizacionController {
   }
 
   @Get()
-  listar() {
-    return this.svc.listar();
+  listar(@Req() req: any) {
+    return this.svc.listar(req?.user?.tenantId);
   }
 
   @Get(":id")
-  detalle(@Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.detalle(id);
+  detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.detalle(id, req?.user?.tenantId);
   }
 
   @Post()
-  crear(@Body() body: unknown) {
+  crear(@Body() body: unknown, @Req() req: any) {
     const data = CrearCotSchema.parse(body);
-    return this.svc.crear(data);
+    return this.svc.crear(data, req?.user?.tenantId);
   }
 
   @Post(":id/enviar")
-  enviar(@Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.cambiarEstado(id, "enviada");
+  enviar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.cambiarEstado(id, "enviada", req?.user?.tenantId);
   }
 
   @Post(":id/aceptar")
-  aceptar(@Param("id", ParseUUIDPipe) id: string) {
-    return this.svc.aceptar(id);
+  aceptar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.aceptar(id, req?.user?.tenantId);
   }
 
   @Post(":id/rechazar")
-  rechazar(@Param("id", ParseUUIDPipe) id: string, @Body() body: { motivo: string }) {
-    return this.svc.rechazar(id, body.motivo);
+  rechazar(@Param("id", ParseUUIDPipe) id: string, @Body() body: { motivo: string }, @Req() req: any) {
+    return this.svc.rechazar(id, body.motivo, req?.user?.tenantId);
   }
 }
