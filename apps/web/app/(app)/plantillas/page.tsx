@@ -1,3 +1,5 @@
+"use client";
+
 import CrudTable from "@/components/CrudTable";
 
 export default function PlantillasPage() {

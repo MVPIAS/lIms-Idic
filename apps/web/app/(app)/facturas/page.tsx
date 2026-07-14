@@ -1,3 +1,5 @@
+"use client";
+
 import CrudTable from "@/components/CrudTable";
 
 const clp = (n: any) => "$ " + Number(n ?? 0).toLocaleString("es-CL");
