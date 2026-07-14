@@ -15,13 +15,31 @@
 		reverse_proxy web:3000
 	}
 	encode gzip zstd
-	header -Server
+
+	# Cabeceras de seguridad para TODO el sitio (front Next + API).
+	# HSTS lo emite Caddy porque termina el TLS. No se fija una CSP restrictiva
+	# aquí para no romper el runtime de Next.js (inline scripts/estilos); la CSP
+	# de la API la aplica helmet. Endurecer la CSP del front es tarea pendiente.
+	header {
+		-Server
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "no-referrer"
+		X-XSS-Protection "0"
+	}
 }
 
 # BI (Metabase) en subdominio
 bi.{$DOMAIN} {
 	reverse_proxy metabase:3000
 	encode gzip zstd
+	header {
+		-Server
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
 }
 
 # Consola de MinIO (opcional) en subdominio — comentar si no se usa

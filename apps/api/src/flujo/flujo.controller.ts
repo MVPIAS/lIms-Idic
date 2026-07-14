@@ -1,6 +1,11 @@
-import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { AuthGuard } from "@nestjs/passport";
+import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { FlujoService } from "./flujo.service";
 
+@ApiTags("flujos")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"))
 @Controller("flujos")
 export class FlujoController {
   constructor(private readonly flujos: FlujoService) {}
