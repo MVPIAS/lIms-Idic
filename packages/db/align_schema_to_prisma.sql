@@ -138,3 +138,12 @@ ALTER TABLE plantilla_informe ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 -- =============================================================================
 -- FIN
 -- =============================================================================
+
+-- ============================================================
+-- Defaults/backfill de updated_at: Prisma lo exige NON-NULL, pero ADD COLUMN
+-- dejó null en filas ya sembradas -> "Error converting field updatedAt ... null".
+-- ============================================================
+ALTER TABLE proveedor ALTER COLUMN updated_at SET DEFAULT now();
+UPDATE proveedor SET updated_at = now() WHERE updated_at IS NULL;
+ALTER TABLE factura   ALTER COLUMN updated_at SET DEFAULT now();
+UPDATE factura   SET updated_at = now() WHERE updated_at IS NULL;
