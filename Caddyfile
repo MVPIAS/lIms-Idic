@@ -6,8 +6,8 @@
 
 # App principal: web (Next.js) + API (NestJS) bajo /api
 {$DOMAIN} {
-	# /api/* -> backend NestJS (se elimina el prefijo /api)
-	handle_path /api/* {
+	# /api/* -> backend NestJS (se PRESERVA el prefijo /api; Nest usa setGlobalPrefix('api'))
+	handle /api/* {
 		reverse_proxy api:3001
 	}
 	# Todo lo demás -> frontend Next.js
