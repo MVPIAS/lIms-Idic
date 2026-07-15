@@ -589,6 +589,14 @@ export function validarFormula(
     const usadas = new Set<string>();
     const fns = new Set<string>();
     recorrer(ast, usadas, fns);
+    // Una función fuera de la lista blanca revienta al evaluar; validar debe
+    // decirlo AHORA y no dar un OK falso al catálogo (p.ej. `require(0)`).
+    const desconocidas = [...fns].filter((f) => !FUNCIONES.has(f.toUpperCase()));
+    if (desconocidas.length)
+      return {
+        ok: false,
+        error: `Función no permitida: ${desconocidas.map((f) => `'${f}'`).join(", ")}. Disponibles: ${[...FUNCIONES.keys()].join(", ")}`,
+      };
     if (variables) {
       const disponibles = new Set(variables.map((v) => v.toUpperCase()));
       const faltan = [...usadas].filter((v) => !disponibles.has(v.toUpperCase()));
