@@ -8,30 +8,55 @@ const NAV = [
     items: [{ href: "/dashboard", label: "Panel", icon: "⌂" }],
   },
   {
+    title: "CRM",
+    items: [{ href: "/crm", label: "Oportunidades", icon: "🎯" }],
+  },
+  {
     title: "Comercial",
     items: [
       { href: "/clientes", label: "Clientes", icon: "🏢" },
       { href: "/proveedores", label: "Proveedores", icon: "🚚" },
+      { href: "/contactos", label: "Contactos", icon: "👤" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "$" },
-      { href: "/cotizaciones/nueva", label: "Nueva Cotización", icon: "＋" },
+      { href: "/cotizaciones/nueva", label: "Nueva · Costeo", icon: "＋" },
       { href: "/listas-precio", label: "Listas de Precio", icon: "≣" },
+      { href: "/lista-precio-items", label: "Ítems de Lista", icon: "🏷" },
+      { href: "/centros-costo", label: "Centros de Costo", icon: "🏦" },
       { href: "/facturas", label: "Facturas", icon: "📄" },
+      { href: "/pagos", label: "Pagos", icon: "💵" },
+      { href: "/notas-credito", label: "Notas de Crédito", icon: "🧾" },
+      { href: "/ordenes-compra", label: "Órdenes de Compra", icon: "🛒" },
+      { href: "/viaticos", label: "Viáticos", icon: "✈" },
     ],
   },
   {
-    title: "Operación · LIMS",
+    title: "Laboratorio",
     items: [
-      { href: "/ot", label: "Expedientes / OT", icon: "🗂" },
+      { href: "/ot", label: "Órdenes de Trabajo", icon: "🗂" },
       { href: "/muestras", label: "Muestras", icon: "🧪" },
       { href: "/captura", label: "Captura de Resultados", icon: "📊" },
-      { href: "/metodos", label: "Catálogo / Métodos", icon: "🔬" },
-      { href: "/plantillas", label: "Plantillas de informe", icon: "📄" },
+      { href: "/metodos", label: "Métodos", icon: "🔬" },
+      { href: "/analitos", label: "Analitos", icon: "⚗" },
+      { href: "/limites", label: "Límites", icon: "📐" },
+      { href: "/tipos-muestra", label: "Tipos de Muestra", icon: "🌡" },
+      { href: "/plantillas", label: "Plantillas", icon: "📄" },
+      { href: "/certificados", label: "Certificados", icon: "📜" },
       { href: "/flujos", label: "Diseñador de Flujos", icon: "⛓" },
     ],
   },
   {
+    title: "Catálogo base",
+    items: [
+      { href: "/gran-grupos", label: "Grandes Grupos", icon: "🗃" },
+      { href: "/grupos", label: "Grupos", icon: "📁" },
+    ],
+  },
+  {
     title: "Sistema",
-    items: [{ href: "/usuarios", label: "Usuarios y Roles", icon: "👥" }],
+    items: [
+      { href: "/usuarios", label: "Usuarios y Roles", icon: "👥" },
+      { href: "/permisos", label: "Permisos", icon: "🔑" },
+    ],
   },
 ];
 

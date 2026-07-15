@@ -86,6 +86,21 @@ export class CotizacionService {
     });
   }
 
+  /** Editar campos permitidos (estado / notas) validando pertenencia al tenant. */
+  async actualizar(id: string, data: { estado?: string; notas?: string }, tenantId?: string) {
+    await this.detalle(id, tenantId); // valida existencia + pertenencia al tenant
+    return this.prisma.cotizacion.update({ where: { id }, data });
+  }
+
+  /**
+   * "Eliminar" cotización = anularla (estado 'anulada'). No se borra físicamente:
+   * el modelo no tiene deleted_at y puede estar referenciada por una OT (cotizacion_id).
+   */
+  async anular(id: string, tenantId?: string) {
+    await this.detalle(id, tenantId); // valida pertenencia al tenant
+    return this.prisma.cotizacion.update({ where: { id }, data: { estado: "anulada" } });
+  }
+
   async cambiarEstado(id: string, nuevoEstado: string, tenantId?: string) {
     await this.detalle(id, tenantId); // valida pertenencia al tenant
     return this.prisma.cotizacion.update({

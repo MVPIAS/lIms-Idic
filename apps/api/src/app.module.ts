@@ -18,6 +18,7 @@ import { LaboratorioModule } from "./laboratorio/laboratorio.module";
 import { CatalogoModule } from "./catalogo/catalogo.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
+import { CrmModule } from "./crm/crm.module";
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.modul
     CatalogoModule,
     RbacModule,
     PlantillaRenderModule,
+    CrmModule,
     HealthModule,
   ],
   providers: [
