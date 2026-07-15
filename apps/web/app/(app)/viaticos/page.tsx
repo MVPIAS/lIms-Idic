@@ -2,6 +2,9 @@
 
 import CrudTable from "@/components/CrudTable";
 
+/** La OT se identifica por su código, con el cliente como desempate. */
+const etiquetaOt = (o: any) => [o.codigo, o.cliente?.razonSocial].filter(Boolean).join(" · ");
+
 const num = (data: any) => ({
   ...data,
   dias: data.dias === "" || data.dias == null ? undefined : Number(data.dias),
@@ -28,8 +31,7 @@ export default function ViaticosPage() {
         { campo: "dias", label: "Días", tipo: "number" },
         { campo: "tipo", label: "Tipo" },
         { campo: "monto", label: "Monto", tipo: "number", requerido: true },
-        // otId es FK (uuid) opcional: id de la orden de trabajo asociada.
-        { campo: "otId", label: "OT (id)" },
+        { campo: "otId", label: "OT asociada", tipo: "ref", refRecurso: "ot", refLabel: etiquetaOt },
       ]}
     />
   );

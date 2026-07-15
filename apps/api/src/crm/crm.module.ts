@@ -17,6 +17,8 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { PermisoGuard } from "../auth/permiso.guard";
+import { RequierePermisoCrud } from "../auth/permisos.decorator";
 
 // ---------------------------------------------------------------------------
 // Módulo CRM · Oportunidades comerciales del LIMS.
@@ -66,9 +68,19 @@ const COLS: Record<string, string> = {
   notas: "notas",
 };
 
+/**
+ * El CRM es una extensión (no es un RF del SRS) y no tiene permisos propios
+ * sembrados: se gobierna con el dominio comercial más cercano, `cotizacion.*`.
+ */
 @ApiTags("oportunidades")
 @ApiBearerAuth()
-@UseGuards(AuthGuard("jwt"))
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@RequierePermisoCrud({
+  ver: "cotizacion.ver",
+  crear: "cotizacion.crear",
+  editar: "cotizacion.crear",
+  eliminar: "cotizacion.crear",
+})
 @Controller("oportunidades")
 export class OportunidadController {
   private prisma = new PrismaClient();

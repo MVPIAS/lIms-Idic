@@ -1,10 +1,13 @@
 "use client";
 
-import CrudTable from "@/components/CrudTable";
+import CrudTable, { renderRef } from "@/components/CrudTable";
 
 const estadoBadge = (v: string) => (
   <span className={`pill ${v === "anulado" ? "red" : "green"}`}>{v ?? "emitido"}</span>
 );
+
+/** La OT se identifica por su código, con el cliente como desempate. */
+const etiquetaOt = (o: any) => [o.codigo, o.cliente?.razonSocial].filter(Boolean).join(" · ");
 
 export default function CertificadosPage() {
   return (
@@ -15,15 +18,15 @@ export default function CertificadosPage() {
       columnas={[
         { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "tipo", titulo: "Tipo", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
-        { campo: "otId", titulo: "OT (id)", render: (v) => (v ? <span className="tag">{String(v).slice(0, 8)}…</span> : "—") },
+        { campo: "otId", titulo: "OT", render: renderRef("ot", etiquetaOt) },
+        { campo: "plantillaId", titulo: "Plantilla", render: renderRef("plantilla") },
         { campo: "estado", titulo: "Estado", render: estadoBadge },
       ]}
       campos={[
-        // otId y plantillaId son FK (uuid): por ahora se ingresan los ids a mano.
-        { campo: "otId", label: "OT (id)", requerido: true },
+        { campo: "otId", label: "OT", tipo: "ref", refRecurso: "ot", refLabel: etiquetaOt, requerido: true },
         { campo: "codigo", label: "Código", requerido: true },
         { campo: "tipo", label: "Tipo" },
-        { campo: "plantillaId", label: "Plantilla (id)" },
+        { campo: "plantillaId", label: "Plantilla", tipo: "ref", refRecurso: "plantillas" },
         { campo: "estado", label: "Estado", tipo: "select", opciones: ["emitido", "anulado"] },
       ]}
     />

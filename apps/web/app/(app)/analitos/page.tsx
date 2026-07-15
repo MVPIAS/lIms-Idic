@@ -1,6 +1,6 @@
 "use client";
 
-import CrudTable from "@/components/CrudTable";
+import CrudTable, { renderRef } from "@/components/CrudTable";
 
 export default function AnalitosPage() {
   return (
@@ -12,11 +12,10 @@ export default function AnalitosPage() {
         { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Analito" },
         { campo: "unidad", titulo: "Unidad", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
-        { campo: "metodoId", titulo: "Método (id)", render: (v) => (v ? <span className="tag">{String(v).slice(0, 8)}…</span> : "—") },
+        { campo: "metodoId", titulo: "Método", render: renderRef("metodo") },
       ]}
       campos={[
-        // metodoId es FK (uuid): por ahora se ingresa el id del método a mano.
-        { campo: "metodoId", label: "Método (id)", requerido: true },
+        { campo: "metodoId", label: "Método", tipo: "ref", refRecurso: "metodos", requerido: true },
         { campo: "codigo", label: "Código", requerido: true },
         { campo: "nombre", label: "Nombre", requerido: true },
         { campo: "unidad", label: "Unidad" },

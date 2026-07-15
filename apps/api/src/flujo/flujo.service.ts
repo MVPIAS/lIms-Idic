@@ -63,6 +63,50 @@ export class FlujoService {
     return this.detalleVersion(vigente.id, tenantId);
   }
 
+  /**
+   * Resuelve la versión PUBLICADA de una definición de flujo.
+   * Valida que la def pertenezca al tenant (404 si es de otro tenant, para no
+   * revelar su existencia). Lanza 400 si la def existe pero no tiene versión
+   * publicada (solo se instancian versiones publicadas).
+   */
+  async versionPublicadaDe(flujoDefId: string, tenantId?: string): Promise<string> {
+    const def = await this.prisma.flujoDef.findFirst({
+      where: { id: flujoDefId, ...(tenantId ? { tenantId } : {}) },
+      include: {
+        versiones: {
+          where: { estado: "publicado" },
+          orderBy: { version: "desc" },
+          take: 1,
+          select: { id: true },
+        },
+      },
+    });
+    if (!def) throw new NotFoundException("Flujo no encontrado");
+    const publicada = def.versiones[0];
+    if (!publicada)
+      throw new BadRequestException(`El flujo ${def.codigo} no tiene una versión publicada`);
+    return publicada.id;
+  }
+
+  /**
+   * Resuelve un `flujoVersionId` a partir de una referencia flexible
+   * (`flujoVersionId` directo o `flujoDefId` → su versión publicada).
+   * Toda la validación de tenant/existencia ocurre aquí, ANTES de que el
+   * llamador cree nada, para no dejar estados a medias.
+   */
+  async resolverVersionId(
+    ref: { flujoDefId?: string; flujoVersionId?: string },
+    tenantId?: string,
+  ): Promise<string> {
+    if (ref.flujoVersionId) {
+      // detalleVersion ya valida existencia + pertenencia al tenant vía su def.
+      const ver = await this.detalleVersion(ref.flujoVersionId, tenantId);
+      return ver.id;
+    }
+    if (ref.flujoDefId) return this.versionPublicadaDe(ref.flujoDefId, tenantId);
+    throw new BadRequestException("Se requiere flujoDefId o flujoVersionId");
+  }
+
   // ------------------------------------------------------- diseño (no-code)
   /**
    * Guarda un borrador desde el diseñador visual. Recibe pasos con ids

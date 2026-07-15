@@ -5,6 +5,8 @@ import { z } from "zod";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
+import { PermisoGuard } from "../auth/permiso.guard";
+import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 
 /* ===================== FACTURAS ===================== */
 @Injectable()
@@ -66,16 +68,34 @@ const FacturaCreate = z.object({
   origen: z.string().max(20).optional(),
   lineas: z.array(LineaFacturaDto).min(1),
 });
-@ApiTags("facturas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("facturas")
+/**
+ * `editar` usa `factura.cobrar`: el PATCH de una factura solo cambia su estado
+ * (emitida/pagada/anulada), que es el acto de cobranza.
+ *
+ * NOTA: la máquina de estados de factura (emitida → pagada | aviso_1 → aviso_2 →
+ * aviso_3 → prejudicial → cde, schema.sql:981) NO se implementa aquí: el enum Zod
+ * vigente solo admite emitida/pagada/anulada y el escalamiento de cobranza a CDE
+ * (RF-B06.3 / flujo F18) está ausente del producto. Ampliarlo es trabajo aparte;
+ * este cambio no toca ese contrato para no romper lo que hoy funciona.
+ */
+@ApiTags("facturas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("facturas")
+@RequierePermisoCrud({
+  ver: "factura.ver",
+  crear: "factura.emitir",
+  editar: "factura.cobrar",
+  eliminar: "factura.emitir",
+})
 export class FacturaController extends BaseCrudController {
   protected updateSchema = z.object({ estado: z.enum(["emitida", "pagada", "anulada"]) });
   constructor(protected svc: FacturaService) { super(); }
 
   @Post()
+  @RequierePermiso("factura.emitir")
   crear(@Body() body: unknown, @Req() req: any) {
     return this.svc.crearConLineas(FacturaCreate.parse(body), req?.user?.tenantId);
   }
   @Get(":id/saldo")
+  @RequierePermiso("factura.ver")
   saldo(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.saldo(id, req?.user?.tenantId);
   }
@@ -94,7 +114,13 @@ const PagoCreate = z.object({
   medio: z.string().max(40).optional(),
   referencia: z.string().max(80).optional(),
 });
-@ApiTags("pagos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("pagos")
+@ApiTags("pagos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("pagos")
+@RequierePermisoCrud({
+  ver: "factura.ver",
+  crear: "factura.cobrar",
+  editar: "factura.cobrar",
+  eliminar: "factura.cobrar",
+})
 export class PagoController extends BaseCrudController {
   protected createSchema = PagoCreate;
   protected updateSchema = PagoCreate.partial();
@@ -114,7 +140,20 @@ const NotaCreditoCreate = z.object({
   monto: z.number().positive(),
   motivo: z.string().optional(),
 });
-@ApiTags("notas-credito") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("notas-credito")
+/**
+ * OJO con `nc.gestionar`: NO es "nota de crédito". Está asignado a DIRECTOR,
+ * JEFE_LAB y CALIDAD (perfiles de calidad, no de finanzas), luego es
+ * "No Conformidad" (17025). Por eso la nota de crédito se protege con
+ * `factura.emitir` y no con `nc.gestionar`. Hoy `nc.gestionar` no protege ningún
+ * controlador porque el módulo de No Conformidades no existe: anotado.
+ */
+@ApiTags("notas-credito") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("notas-credito")
+@RequierePermisoCrud({
+  ver: "factura.ver",
+  crear: "factura.emitir",
+  editar: "factura.emitir",
+  eliminar: "factura.emitir",
+})
 export class NotaCreditoController extends BaseCrudController {
   protected createSchema = NotaCreditoCreate;
   protected updateSchema = NotaCreditoCreate.partial();

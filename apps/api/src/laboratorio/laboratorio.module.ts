@@ -5,12 +5,26 @@ import { z } from "zod";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
+import { PermisoGuard } from "../auth/permiso.guard";
+import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 
 /* ===================== TIPOS DE MUESTRA (árbol) ===================== */
 @Injectable()
 export class TipoMuestraService extends BaseCrudService {
   constructor(prisma: PrismaService) {
-    super(prisma, { model: "tipoMuestra", search: ["codigo", "nombre"], include: { hijos: true } });
+    // orderBy EXPLÍCITO. El de BaseCrudService es `{ createdAt: "desc" }`, y el
+    // modelo Prisma TipoMuestra no declara `createdAt`: Prisma valida contra el
+    // cliente generado (DMMF), no contra la BD, así que emitía
+    // PrismaClientValidationError y `GET /tipos-muestra` respondía HTTP 500.
+    // Se ordena por código (igual que GranGrupo/Grupo, y es lo natural en una
+    // taxonomía). No se toca el modelo Prisma: añadir ahí `createdAt` obligaría
+    // a regenerar el cliente para que el arreglo surtiese efecto.
+    super(prisma, {
+      model: "tipoMuestra",
+      search: ["codigo", "nombre"],
+      include: { hijos: true },
+      orderBy: { codigo: "asc" },
+    });
   }
 }
 const TipoMuestraCreate = z.object({
@@ -19,7 +33,16 @@ const TipoMuestraCreate = z.object({
   nombre: z.string().min(1).max(200),
   activo: z.boolean().default(true),
 });
-@ApiTags("tipos-muestra") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("tipos-muestra")
+// La taxonomía de tipos de muestra es catálogo: se lee con `muestra.ver` y se
+// gestiona con `catalogo.gestionar` (el permiso sembrado cubre expresamente
+// "grupos, familias, tipos de muestra, analitos").
+@ApiTags("tipos-muestra") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("tipos-muestra")
+@RequierePermisoCrud({
+  ver: "muestra.ver",
+  crear: "catalogo.gestionar",
+  editar: "catalogo.gestionar",
+  eliminar: "catalogo.gestionar",
+})
 export class TipoMuestraController extends BaseCrudController {
   protected createSchema = TipoMuestraCreate;
   protected updateSchema = TipoMuestraCreate.partial();
@@ -45,7 +68,13 @@ const MuestraCreate = z.object({
   ubicacion: z.string().max(80).optional(),
   estado: z.enum(["recibida", "en_analisis", "finalizada"]).default("recibida"),
 });
-@ApiTags("muestras") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("muestras")
+@ApiTags("muestras") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("muestras")
+@RequierePermisoCrud({
+  ver: "muestra.ver",
+  crear: "muestra.crear",
+  editar: "muestra.crear", // no existe `muestra.editar` en el RBAC sembrado
+  eliminar: "muestra.crear",
+})
 export class MuestraController extends BaseCrudController {
   protected createSchema = MuestraCreate;
   protected updateSchema = MuestraCreate.partial();
@@ -67,7 +96,15 @@ const MetodoCreate = z.object({
   area: z.string().max(60).optional(),
   estado: z.enum(["vigente", "obsoleto", "en_validacion"]).default("vigente"),
 });
-@ApiTags("metodos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("metodos")
+// `metodo.crear` (SUPERADMIN/ADMIN/JEFE_LAB) es más restrictivo que
+// `metodo.aprobar` (+DIRECTOR/CALIDAD), así que gobierna la edición y el borrado.
+@ApiTags("metodos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("metodos")
+@RequierePermisoCrud({
+  ver: "metodo.ver",
+  crear: "metodo.crear",
+  editar: "metodo.crear",
+  eliminar: "metodo.crear",
+})
 export class MetodoController extends BaseCrudController {
   protected createSchema = MetodoCreate;
   protected updateSchema = MetodoCreate.partial();
@@ -89,7 +126,13 @@ const AnalitoCreate = z.object({
   unidad: z.string().max(30).optional(),
   formula: z.string().optional(),
 });
-@ApiTags("analitos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("analitos")
+@ApiTags("analitos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("analitos")
+@RequierePermisoCrud({
+  ver: "metodo.ver", // el analito cuelga del método; no existe `analito.ver`
+  crear: "catalogo.gestionar",
+  editar: "catalogo.gestionar",
+  eliminar: "catalogo.gestionar",
+})
 export class AnalitoController extends BaseCrudController {
   protected createSchema = AnalitoCreate;
   protected updateSchema = AnalitoCreate.partial();
@@ -111,7 +154,13 @@ const NormaLimiteCreate = z.object({
   limiteSup: z.number().optional(),
   unidad: z.string().max(30).optional(),
 });
-@ApiTags("limites") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("limites")
+@ApiTags("limites") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("limites")
+@RequierePermisoCrud({
+  ver: "metodo.ver", // la especificación cuelga del analito/método
+  crear: "catalogo.gestionar",
+  editar: "catalogo.gestionar",
+  eliminar: "catalogo.gestionar",
+})
 export class NormaLimiteController extends BaseCrudController {
   protected createSchema = NormaLimiteCreate;
   protected updateSchema = NormaLimiteCreate.partial();
@@ -169,7 +218,29 @@ const ResultadoCreate = z.object({
   productoLimite: z.string().optional(),
   analistaId: z.string().uuid().optional(),
 });
-@ApiTags("resultados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("resultados")
+/**
+ * Separación de deberes (NCh-ISO/IEC 17025):
+ *   ver      · resultado.ver
+ *   crear    · resultado.crear     (era la brecha: un LECTOR podía fabricar resultados)
+ *   editar   · resultado.revisar   (tocar el veredicto a mano es un acto de revisión)
+ *   eliminar · resultado.aprobar   (el más restrictivo: SUPERADMIN, DIRECTOR, JEFE_LAB)
+ *
+ * SIN MÁQUINA DE ESTADOS. `schema.sql:873` define para `resultado` los estados
+ * capturado → revisado_n1 → aprobado (+rechazado/devuelto) y están en
+ * `common/estados.ts`, PERO el modelo Prisma `Resultado` NO declara la columna
+ * `estado` (ni `tenant_id`, ni los campos revisado_n1_por/aprobado_por de la
+ * tabla de schema.sql): el modelo Prisma y esa tabla son dos diseños distintos.
+ * La API escribe contra el contrato Prisma, así que hoy no hay dónde guardar el
+ * estado ni, por tanto, transición que validar. Habilitarlo exige migración
+ * (columna + modelo) y los endpoints revisar/aprobar/devolver: queda anotado.
+ */
+@ApiTags("resultados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("resultados")
+@RequierePermisoCrud({
+  ver: "resultado.ver",
+  crear: "resultado.crear",
+  editar: "resultado.revisar",
+  eliminar: "resultado.aprobar",
+})
 export class ResultadoController extends BaseCrudController {
   // Edición manual del resultado (veredicto/unidad/analista). El recálculo desde
   // réplicas se hace vía POST (capturar), no por PATCH.
@@ -180,6 +251,7 @@ export class ResultadoController extends BaseCrudController {
   });
   constructor(protected svc: ResultadoService) { super(); }
   @Post()
+  @RequierePermiso("resultado.crear")
   crear(@Body() body: unknown) {
     return (this.svc as ResultadoService).capturar(ResultadoCreate.parse(body));
   }

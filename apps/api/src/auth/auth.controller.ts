@@ -5,6 +5,7 @@ import { ApiTags, ApiBearerAuth, ApiBody } from "@nestjs/swagger";
 import { z } from "zod";
 
 import { AuthService } from "./auth.service";
+import { Public } from "./public.decorator";
 
 const LoginSchema = z.object({
   username: z.string().min(1).max(80),
@@ -22,6 +23,7 @@ export class AuthController {
    * Devuelve JWT + datos del usuario.
    */
   @Post("login")
+  @Public()
   // Límite estricto anti fuerza bruta: 5 intentos por minuto por IP.
   @Throttle({ login: { ttl: 60_000, limit: 5 } })
   @ApiBody({ schema: { example: { username: "c.vargas", password: "demo" } } })
@@ -35,6 +37,7 @@ export class AuthController {
    * Renueva el JWT usando el refresh token.
    */
   @Post("refresh")
+  @Public()
   async refresh(@Body() body: { refreshToken: string }) {
     return this.auth.refresh(body.refreshToken);
   }

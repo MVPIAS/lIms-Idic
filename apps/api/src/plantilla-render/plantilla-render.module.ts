@@ -3,25 +3,32 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
 import { PlantillaRenderService } from "./plantilla-render.service";
+import { PermisoGuard } from "../auth/permiso.guard";
+import { RequierePermiso } from "../auth/permisos.decorator";
 
 const PreviewSchema = z.object({ otId: z.string().uuid(), plantillaId: z.string().uuid() });
 const EmitirSchema = PreviewSchema.extend({ codigo: z.string().min(1).max(40) });
 
 @ApiTags("informes")
 @ApiBearerAuth()
-@UseGuards(AuthGuard("jwt"))
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("informes")
 export class PlantillaRenderController {
   constructor(private readonly svc: PlantillaRenderService) {}
 
-  /** Contexto de datos de una OT (para el autorelleno). */
+  /** Contexto de datos de una OT (para el autorelleno). Solo lee datos de la OT. */
   @Post("contexto/:otId")
+  @RequierePermiso("plantilla.ver")
   contexto(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
     return this.svc.contexto(otId, req?.user?.tenantId);
   }
 
-  /** Previsualiza el informe relleno (HTML + HASH), sin emitir. */
+  /**
+   * Previsualiza el informe relleno (HTML + HASH), sin emitir.
+   * Exige `certificado.emitir`: era la brecha verificada (un LECTOR obtenía 201).
+   */
   @Post("previsualizar")
+  @RequierePermiso("certificado.emitir")
   previsualizar(@Body() body: unknown, @Req() req: any) {
     const { otId, plantillaId } = PreviewSchema.parse(body);
     return this.svc.previsualizar(otId, plantillaId, req?.user?.tenantId);
@@ -29,6 +36,7 @@ export class PlantillaRenderController {
 
   /** Emite el informe/certificado: rellena, sella con HASH y registra Certificado. */
   @Post("emitir")
+  @RequierePermiso("certificado.emitir")
   emitir(@Body() body: unknown, @Req() req: any) {
     const { otId, plantillaId, codigo } = EmitirSchema.parse(body);
     // El Certificado se crea con el tenant del usuario autenticado (no DEV_TENANT).

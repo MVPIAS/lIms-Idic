@@ -6,6 +6,8 @@ import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { validaRut } from "../common/rut.validator";
+import { PermisoGuard } from "../auth/permiso.guard";
+import { RequierePermisoCrud } from "../auth/permisos.decorator";
 
 /* ===================== PROVEEDORES ===================== */
 @Injectable()
@@ -24,7 +26,16 @@ const ProveedorCreate = z.object({
   condicionPago: z.string().max(40).optional(),
   estado: z.enum(["habilitado", "en_evaluacion", "inhabilitado"]).default("habilitado"),
 });
-@ApiTags("proveedores") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("proveedores")
+// No hay permisos `proveedor.*` sembrados. Compras/proveedores es una función
+// económica: se lee con `factura.ver` y se gestiona con `factura.emitir`
+// (SUPERADMIN, ADMIN, COBRANZA). Anotado como permiso "prestado" del dominio.
+@ApiTags("proveedores") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("proveedores")
+@RequierePermisoCrud({
+  ver: "factura.ver",
+  crear: "factura.emitir",
+  editar: "factura.emitir",
+  eliminar: "factura.emitir",
+})
 export class ProveedorController extends BaseCrudController {
   protected createSchema = ProveedorCreate;
   protected updateSchema = ProveedorCreate.partial();
@@ -46,7 +57,14 @@ const ContactoCreate = z.object({
   telefono: z.string().max(40).optional(),
   principal: z.boolean().default(false),
 });
-@ApiTags("contactos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("contactos")
+// El contacto cuelga del cliente → permisos del dominio cliente.
+@ApiTags("contactos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("contactos")
+@RequierePermisoCrud({
+  ver: "cliente.ver",
+  crear: "cliente.editar",
+  editar: "cliente.editar",
+  eliminar: "cliente.editar",
+})
 export class ContactoController extends BaseCrudController {
   protected createSchema = ContactoCreate;
   protected updateSchema = ContactoCreate.partial();
@@ -66,7 +84,15 @@ const CentroCostoCreate = z.object({
   laboratorio: z.string().max(20).optional(),
   activo: z.boolean().default(true),
 });
-@ApiTags("centros-costo") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("centros-costo")
+// Centro de costo = dato maestro económico: lectura con `factura.ver`,
+// mantenimiento con `catalogo.gestionar`.
+@ApiTags("centros-costo") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("centros-costo")
+@RequierePermisoCrud({
+  ver: "factura.ver",
+  crear: "catalogo.gestionar",
+  editar: "catalogo.gestionar",
+  eliminar: "catalogo.gestionar",
+})
 export class CentroCostoController extends BaseCrudController {
   protected createSchema = CentroCostoCreate;
   protected updateSchema = CentroCostoCreate.partial();
@@ -86,7 +112,15 @@ const ListaPrecioCreate = z.object({
   moneda: z.enum(["CLP", "USD", "UF", "EUR"]).default("CLP"),
   activa: z.boolean().default(true),
 });
-@ApiTags("listas-precio") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("listas-precio")
+// Las listas de precio alimentan la cotización: se leen con `cotizacion.ver` y
+// se mantienen como dato maestro (`catalogo.gestionar`).
+@ApiTags("listas-precio") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("listas-precio")
+@RequierePermisoCrud({
+  ver: "cotizacion.ver",
+  crear: "catalogo.gestionar",
+  editar: "catalogo.gestionar",
+  eliminar: "catalogo.gestionar",
+})
 export class ListaPrecioController extends BaseCrudController {
   protected createSchema = ListaPrecioCreate;
   protected updateSchema = ListaPrecioCreate.partial();
@@ -108,7 +142,13 @@ const ItemCreate = z.object({
   tipo: z.enum(["servicio", "HH", "HM", "viatico", "insumo"]).default("servicio"),
   precio: z.number().nonnegative(),
 });
-@ApiTags("lista-precio-items") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("lista-precio-items")
+@ApiTags("lista-precio-items") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("lista-precio-items")
+@RequierePermisoCrud({
+  ver: "cotizacion.ver",
+  crear: "catalogo.gestionar",
+  editar: "catalogo.gestionar",
+  eliminar: "catalogo.gestionar",
+})
 export class ListaPrecioItemController extends BaseCrudController {
   protected createSchema = ItemCreate;
   protected updateSchema = ItemCreate.partial();
