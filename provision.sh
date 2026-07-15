@@ -62,7 +62,9 @@ for f in \
   packages/db/align_schema_to_prisma.sql \
   packages/db/seed_analitos_limites.sql \
   packages/db/crm_oportunidad.sql \
-  packages/db/seed_operacion_demo.sql; do
+  packages/db/seed_operacion_demo.sql \
+  packages/db/align_orden_compra.sql \
+  packages/db/align_final.sql; do
   if [ -f "$f" ]; then
     echo "   aplicando $f"
     docker compose -f docker-compose.prod.yml exec -T postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" < "$f" || echo "   (aviso: $f ya aplicado o con avisos)"

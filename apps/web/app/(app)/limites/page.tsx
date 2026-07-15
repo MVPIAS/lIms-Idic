@@ -24,8 +24,7 @@ export default function LimitesPage() {
         { campo: "unidad", titulo: "Unidad", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
       ]}
       campos={[
-        // analitoId es FK (uuid): por ahora se ingresa el id del analito a mano.
-        { campo: "analitoId", label: "Analito (id)", requerido: true },
+        { campo: "analitoId", label: "Analito", tipo: "ref", refRecurso: "analitos", requerido: true },
         { campo: "producto", label: "Producto" },
         { campo: "limiteInf", label: "Límite inferior", tipo: "number" },
         { campo: "nominal", label: "Nominal", tipo: "number" },

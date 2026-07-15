@@ -23,7 +23,7 @@ import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
-import { RequierePermiso } from "../auth/permisos.decorator";
+import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 
 /* ===================== PERMISOS ===================== */
 @Injectable()
@@ -70,12 +70,25 @@ const FirmaCreate = z.object({
   imagenRef: z.string().max(200),
   hashSha256: z.string().max(64).optional(),
 });
-@ApiTags("firmas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("firmas")
+/**
+ * Todo el dominio de firmas se gobierna con el único permiso sembrado,
+ * `firma.registrar` (no existen firma.ver/eliminar). La lectura también lo
+ * exige: el listado expone las firmas-imagen y sus hashes de todos los usuarios,
+ * así que no debe quedar al alcance de cualquier autenticado.
+ */
+@ApiTags("firmas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("firmas")
+@RequierePermisoCrud({
+  ver: "firma.registrar",
+  crear: "firma.registrar",
+  editar: "firma.registrar",
+  eliminar: "firma.registrar",
+})
 export class FirmaController extends BaseCrudController {
   protected updateSchema = FirmaCreate.partial();
   constructor(protected svc: FirmaService) { super(); }
   // POST /firmas hace upsert por usuario (registrar/actualizar)
   @Post()
+  @RequierePermiso("firma.registrar")
   crear(@Body() body: unknown) {
     return (this.svc as FirmaService).registrar(FirmaCreate.parse(body));
   }
@@ -101,7 +114,10 @@ const UsuarioUpdate = z.object({
   rolId: z.string().uuid().optional(),
 });
 
-@ApiTags("usuarios") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("usuarios")
+// Gestión de usuarios: `admin.usuarios` en los cuatro verbos (era la brecha
+// verificada: un LECTOR podía listar todos los usuarios).
+@ApiTags("usuarios") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("usuarios")
+@RequierePermiso("admin.usuarios")
 export class UsuarioController {
   private prisma = new PrismaClient();
   @Get()
@@ -190,7 +206,9 @@ const RolCreate = z.object({
 });
 const RolUpdate = RolCreate.partial();
 
-@ApiTags("roles") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("roles")
+// Los roles son la definición del RBAC: mismo permiso que usuarios/permisos.
+@ApiTags("roles") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("roles")
+@RequierePermiso("admin.usuarios")
 export class RolController {
   private prisma = new PrismaClient();
   @Get()

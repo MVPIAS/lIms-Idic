@@ -25,10 +25,15 @@
 		X-Frame-Options "SAMEORIGIN"
 		Referrer-Policy "no-referrer"
 		X-XSS-Protection "0"
-		# CSP CONSERVADORA compatible con Next.js 14 (usa estilos/scripts inline
-		# propios). 'unsafe-inline' en script/style es necesario para el runtime de
-		# Next; endurecerla con nonces/hashes es trabajo futuro.
-		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+		# NO se define Content-Security-Policy aquí. A propósito.
+		# El front la emite por request desde apps/web/middleware.ts con un nonce
+		# ('script-src 'self' 'nonce-<n>' 'strict-dynamic'', sin 'unsafe-inline').
+		# La API la emite helmet. Si Caddy añadiese además la suya, el navegador
+		# aplicaría AMBAS y una CSP es restrictiva por INTERSECCIÓN: la vieja
+		# política no tiene el nonce, así que bloquearía los scripts de Next y
+		# dejaría la app en blanco. Una sola CSP por respuesta.
+		# Se elimina también de aquí la CSP permisiva que llevaba 'unsafe-inline'
+		# en script-src (hallazgo de pentest).
 	}
 }
 

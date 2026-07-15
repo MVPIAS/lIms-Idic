@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
-import { PrismaClient } from "@prisma/client";
+import { PrismaService } from "../common/prisma.service";
 import { DEV_TENANT } from "../common/base-crud.service";
+import { validarTransicion } from "../common/estados";
+import { generarCodigoOt } from "../common/codigo";
 
 @Injectable()
 export class CotizacionService {
-  private prisma = new PrismaClient();
+  constructor(private readonly prisma: PrismaService) {}
 
   async listar(tenantId?: string) {
     return this.prisma.cotizacion.findMany({
@@ -86,9 +88,16 @@ export class CotizacionService {
     });
   }
 
-  /** Editar campos permitidos (estado / notas) validando pertenencia al tenant. */
+  /**
+   * Editar campos permitidos (estado / notas) validando pertenencia al tenant.
+   * Si el PATCH trae `estado`, se valida como transición: ya no se puede fijar
+   * un estado arbitrario (era la brecha "PATCH {estado:'INVENTADO'} → 200").
+   */
   async actualizar(id: string, data: { estado?: string; notas?: string }, tenantId?: string) {
-    await this.detalle(id, tenantId); // valida existencia + pertenencia al tenant
+    const actual = await this.detalle(id, tenantId); // valida existencia + pertenencia al tenant
+    if (data.estado !== undefined) {
+      validarTransicion("cotizacion", actual.estado, data.estado);
+    }
     return this.prisma.cotizacion.update({ where: { id }, data });
   }
 
@@ -97,12 +106,12 @@ export class CotizacionService {
    * el modelo no tiene deleted_at y puede estar referenciada por una OT (cotizacion_id).
    */
   async anular(id: string, tenantId?: string) {
-    await this.detalle(id, tenantId); // valida pertenencia al tenant
-    return this.prisma.cotizacion.update({ where: { id }, data: { estado: "anulada" } });
+    return this.cambiarEstado(id, "anulada", tenantId);
   }
 
   async cambiarEstado(id: string, nuevoEstado: string, tenantId?: string) {
-    await this.detalle(id, tenantId); // valida pertenencia al tenant
+    const actual = await this.detalle(id, tenantId); // valida pertenencia al tenant
+    validarTransicion("cotizacion", actual.estado, nuevoEstado);
     return this.prisma.cotizacion.update({
       where: { id },
       data: { estado: nuevoEstado },
@@ -110,26 +119,73 @@ export class CotizacionService {
   }
 
   /**
-   * Al aceptar una cotización:
-   * 1. Cambia su estado a 'aceptada'
-   * 2. Dispara la generación de OT (placeholder · en producción dispara workflow BPM)
+   * Aceptar una cotización (RF-B04.1 · flujo F03). En UNA transacción:
+   *   1. Valida la transición  → 'aceptada'.
+   *   2. Marca la cotización aceptada.
+   *   3. CREA la Orden de Trabajo asociada (esto era el `// TODO` que dejaba la
+   *      cadena Cotización → OT → Expediente rota: la OT había que crearla a mano).
+   *
+   * La OT hereda cliente, planta y tenant de la cotización, y queda enlazada por
+   * `cotizacionId`. El código se genera con el mismo helper que usa `POST /ot`.
+   *
+   * Idempotencia: si la cotización YA tiene una OT, no se crea una segunda; se
+   * devuelve la existente. Evita duplicar OT si se reintenta la petición.
+   *
+   * NOTA: no se instancia el flujo BPM aquí. `POST /ot` solo instancia flujo
+   * cuando el llamador indica flujoDefId/flujoVersionId, y no hay en el modelo
+   * ninguna regla `{laboratorio, tipoEnsayo} → flujo` que permita resolverlo
+   * automáticamente (el `resolverFlujoPlantilla` del diseño no existe en la BD).
+   * La OT queda lista para adjuntarle su flujo con `POST /ot/:id/flujo`.
    */
   async aceptar(id: string, tenantId?: string) {
     const cot = await this.detalle(id, tenantId);
+    validarTransicion("cotizacion", cot.estado, "aceptada");
 
-    await this.prisma.cotizacion.update({
-      where: { id },
-      data: { estado: "aceptada" },
+    const tenantIdOt = cot.tenantId ?? tenantId ?? DEV_TENANT;
+
+    const { cotizacion, ot } = await this.prisma.$transaction(async (tx) => {
+      const existente = await tx.ordenTrabajo.findFirst({
+        where: { cotizacionId: id, tenantId: tenantIdOt },
+        include: { cliente: true },
+      });
+
+      const cotizacion = await tx.cotizacion.update({
+        where: { id },
+        data: { estado: "aceptada" },
+        include: { cliente: true, lineas: true },
+      });
+
+      if (existente) return { cotizacion, ot: existente };
+
+      const ot = await tx.ordenTrabajo.create({
+        data: {
+          tenantId: tenantIdOt,
+          codigo: await generarCodigoOt(tx, tenantIdOt),
+          clienteId: cot.clienteId,
+          plantaId: cot.plantaId ?? null,
+          cotizacionId: cot.id,
+          prioridad: "normal",
+          estado: "recepcionada", // estado inicial real (default del modelo)
+          fechaRecepcion: new Date(),
+          notas: `Generada automáticamente al aceptar la cotización ${cot.codigo}.`,
+        },
+        include: { cliente: true },
+      });
+
+      return { cotizacion, ot };
     });
 
-    // TODO: disparar workflow F03 que crea la OT
-    // await this.workflowService.dispararEvento('cotizacion.aceptada', { cotizacionId: id });
-
-    return { ok: true, cotizacion: cot, mensaje: "Cotización aceptada. OT se generará automáticamente." };
+    return {
+      ok: true,
+      cotizacion,
+      ot,
+      mensaje: `Cotización aceptada. Orden de trabajo ${ot.codigo} creada.`,
+    };
   }
 
   async rechazar(id: string, motivo: string, tenantId?: string) {
-    await this.detalle(id, tenantId); // valida pertenencia al tenant
+    const actual = await this.detalle(id, tenantId); // valida pertenencia al tenant
+    validarTransicion("cotizacion", actual.estado, "rechazada");
     return this.prisma.cotizacion.update({
       where: { id },
       data: { estado: "rechazada", notas: motivo },

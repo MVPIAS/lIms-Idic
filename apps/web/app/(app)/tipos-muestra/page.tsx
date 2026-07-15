@@ -1,6 +1,6 @@
 "use client";
 
-import CrudTable from "@/components/CrudTable";
+import CrudTable, { renderRef } from "@/components/CrudTable";
 
 const activoBadge = (v: any) => (
   <span className={`pill ${v === false ? "gray" : "green"}`}>{v === false ? "inactivo" : "activo"}</span>
@@ -15,12 +15,12 @@ export default function TiposMuestraPage() {
       columnas={[
         { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Nombre" },
-        { campo: "parentId", titulo: "Padre (id)", render: (v) => (v ? <span className="tag">{String(v).slice(0, 8)}…</span> : "—") },
+        { campo: "parentId", titulo: "Padre", render: renderRef("parent") },
         { campo: "activo", titulo: "Estado", render: activoBadge },
       ]}
       campos={[
-        // parentId es FK (uuid) opcional: id del tipo de muestra padre.
-        { campo: "parentId", label: "Tipo padre (id)" },
+        // Auto-referencia: CrudTable excluye del combo el propio registro en edición.
+        { campo: "parentId", label: "Tipo padre", tipo: "ref", refRecurso: "tipos-muestra" },
         { campo: "codigo", label: "Código", requerido: true },
         { campo: "nombre", label: "Nombre", requerido: true },
       ]}

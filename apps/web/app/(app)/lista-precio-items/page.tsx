@@ -22,8 +22,7 @@ export default function ListaPrecioItemsPage() {
         { campo: "precio", titulo: "Precio", right: true },
       ]}
       campos={[
-        // listaPrecioId es FK (uuid): por ahora se ingresa el id de la lista a mano.
-        { campo: "listaPrecioId", label: "Lista de precio (id)", requerido: true },
+        { campo: "listaPrecioId", label: "Lista de precio", tipo: "ref", refRecurso: "listas-precio", requerido: true },
         { campo: "codigo", label: "Código", requerido: true },
         { campo: "descripcion", label: "Descripción", requerido: true },
         { campo: "cc", label: "Centro de costo" },

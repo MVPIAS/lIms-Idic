@@ -20,8 +20,7 @@ export default function ContactosPage() {
         { campo: "principal", titulo: "Rol", render: principalBadge },
       ]}
       campos={[
-        // clienteId es FK (uuid): por ahora se ingresa el id del cliente a mano.
-        { campo: "clienteId", label: "Cliente (id)", requerido: true },
+        { campo: "clienteId", label: "Cliente", tipo: "ref", refRecurso: "clientes", requerido: true },
         { campo: "nombre", label: "Nombre", requerido: true },
         { campo: "cargo", label: "Cargo" },
         { campo: "email", label: "Email", tipo: "email" },

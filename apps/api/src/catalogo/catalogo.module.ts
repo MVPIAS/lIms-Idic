@@ -5,6 +5,9 @@ import { z } from "zod";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
+import { PermisoGuard } from "../auth/permiso.guard";
+import { RequierePermisoCrud } from "../auth/permisos.decorator";
+import { estadosValidos, validarTransicion } from "../common/estados";
 
 /* ===================== GRAN GRUPO (eje producto) ===================== */
 @Injectable()
@@ -14,7 +17,15 @@ export class GranGrupoService extends BaseCrudService {
   }
 }
 const GranGrupoCreate = z.object({ codigo: z.string().min(1).max(10), nombre: z.string().min(1).max(120), activo: z.boolean().default(true) });
-@ApiTags("gran-grupos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("gran-grupos")
+// Clasificación de producto: la leen todos los roles operativos (se usa para
+// clasificar muestras) y solo la gestiona quien tiene `catalogo.gestionar`.
+@ApiTags("gran-grupos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("gran-grupos")
+@RequierePermisoCrud({
+  ver: "muestra.ver",
+  crear: "catalogo.gestionar",
+  editar: "catalogo.gestionar",
+  eliminar: "catalogo.gestionar",
+})
 export class GranGrupoController extends BaseCrudController {
   protected createSchema = GranGrupoCreate;
   protected updateSchema = GranGrupoCreate.partial();
@@ -29,7 +40,13 @@ export class GrupoService extends BaseCrudService {
   }
 }
 const GrupoCreate = z.object({ granGrupoId: z.string().uuid(), cgrupo: z.string().max(10).optional(), nombre: z.string().min(1).max(160), activo: z.boolean().default(true) });
-@ApiTags("grupos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("grupos")
+@ApiTags("grupos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("grupos")
+@RequierePermisoCrud({
+  ver: "muestra.ver",
+  crear: "catalogo.gestionar",
+  editar: "catalogo.gestionar",
+  eliminar: "catalogo.gestionar",
+})
 export class GrupoController extends BaseCrudController {
   protected createSchema = GrupoCreate;
   protected updateSchema = GrupoCreate.partial();
@@ -52,7 +69,13 @@ const PlantillaCreate = z.object({
   version: z.string().max(10).default("v1"),
   activo: z.boolean().default(true),
 });
-@ApiTags("plantillas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("plantillas")
+@ApiTags("plantillas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("plantillas")
+@RequierePermisoCrud({
+  ver: "plantilla.ver",
+  crear: "plantilla.gestionar",
+  editar: "plantilla.gestionar",
+  eliminar: "plantilla.gestionar",
+})
 export class PlantillaInformeController extends BaseCrudController {
   protected createSchema = PlantillaCreate;
   protected updateSchema = PlantillaCreate.partial();
@@ -65,6 +88,19 @@ export class CertificadoService extends BaseCrudService {
   constructor(prisma: PrismaService) {
     super(prisma, { model: "certificado", search: ["codigo", "tipo"], include: { plantilla: true } });
   }
+
+  /**
+   * Un certificado emitido es un documento con valor legal: no se "edita" de
+   * vuelta a emitido ni se reactiva una vez anulado. Se valida la transición
+   * emitido → anulado antes de tocar la fila.
+   */
+  async actualizar(id: string, data: any, tenantId?: string) {
+    if (data?.estado !== undefined) {
+      const actual = await this.detalle(id, tenantId); // valida tenant + existencia
+      validarTransicion("certificado", actual.estado, data.estado);
+    }
+    return super.actualizar(id, data, tenantId);
+  }
 }
 const CertificadoCreate = z.object({
   otId: z.string().uuid(),
@@ -73,9 +109,21 @@ const CertificadoCreate = z.object({
   plantillaId: z.string().uuid().optional(),
   hashSha256: z.string().max(64).optional(),
   urlVerificacion: z.string().max(300).optional(),
-  estado: z.enum(["emitido", "anulado"]).default("emitido"),
+  estado: z.enum(estadosValidos("certificado") as [string, ...string[]]).default("emitido"),
 });
-@ApiTags("certificados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("certificados")
+/**
+ * No existe `certificado.ver` en el RBAC sembrado: el certificado es el
+ * entregable de la OT, así que se lee con `ot.ver` (lo tienen todos los roles
+ * operativos). Emitir/editar → `certificado.emitir`; borrar → `certificado.firmar`,
+ * el más restrictivo del dominio (SUPERADMIN, DIRECTOR, JEFE_LAB).
+ */
+@ApiTags("certificados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("certificados")
+@RequierePermisoCrud({
+  ver: "ot.ver",
+  crear: "certificado.emitir",
+  editar: "certificado.emitir",
+  eliminar: "certificado.firmar",
+})
 export class CertificadoController extends BaseCrudController {
   protected createSchema = CertificadoCreate;
   protected updateSchema = CertificadoCreate.partial();

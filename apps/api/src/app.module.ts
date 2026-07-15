@@ -1,9 +1,13 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { LoggerModule } from "nestjs-pino";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 
+import { JwtAuthGuard } from "./auth/jwt-auth.guard";
+import { PermisoGuard } from "./auth/permiso.guard";
+import { AuditInterceptor } from "./common/audit.interceptor";
+import { AuditoriaModule } from "./auditoria/auditoria.module";
 import { AuthModule } from "./auth/auth.module";
 import { ClienteModule } from "./cliente/cliente.module";
 import { CotizacionModule } from "./cotizacion/cotizacion.module";
@@ -52,11 +56,24 @@ import { CrmModule } from "./crm/crm.module";
     RbacModule,
     PlantillaRenderModule,
     CrmModule,
+    AuditoriaModule,
     HealthModule,
   ],
   providers: [
-    // Activa el rate limiting de forma global para todas las rutas.
+    // --- Guards globales · EL ORDEN IMPORTA -------------------------------
+    // Nest ejecuta los guards globales en el orden en que se declaran aquí, y
+    // siempre ANTES de los guards de controlador/ruta.
+    //   1. ThrottlerGuard · rate limiting.
+    //   2. JwtAuthGuard   · autentica y puebla req.user (salvo rutas @Public()).
+    //   3. PermisoGuard   · RBAC; NECESITA req.user, por eso va después del JWT.
+    // Invertir 2 y 3 haría que PermisoGuard viese req.user vacío y respondiese
+    // 403 a todo el mundo, incluido el SUPERADMIN.
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PermisoGuard },
+
+    // Bitácora (RF-H04): escribe en audit_log toda mutación exitosa.
+    { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
   ],
 })
 export class AppModule {}
