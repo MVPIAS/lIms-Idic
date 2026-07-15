@@ -18,14 +18,14 @@ export class FlujoController {
 
   /** Detalle de un flujo por código (versión vigente con pasos y transiciones). */
   @Get("codigo/:codigo")
-  porCodigo(@Param("codigo") codigo: string) {
-    return this.flujos.detallePorCodigo(codigo);
+  porCodigo(@Param("codigo") codigo: string, @Req() req: any) {
+    return this.flujos.detallePorCodigo(codigo, req?.user?.tenantId);
   }
 
   /** Detalle de una versión concreta. */
   @Get("version/:versionId")
-  version(@Param("versionId") versionId: string) {
-    return this.flujos.detalleVersion(versionId);
+  version(@Param("versionId") versionId: string, @Req() req: any) {
+    return this.flujos.detalleVersion(versionId, req?.user?.tenantId);
   }
 
   /** Guarda un borrador desde el diseñador visual (pasos + transiciones). */
@@ -36,31 +36,31 @@ export class FlujoController {
 
   /** Publica una versión (archiva la publicada anterior). */
   @Post("version/:versionId/publicar")
-  publicar(@Param("versionId") versionId: string) {
-    return this.flujos.publicar(versionId);
+  publicar(@Param("versionId") versionId: string, @Req() req: any) {
+    return this.flujos.publicar(versionId, req?.user?.tenantId);
   }
 
   /** Instancia un flujo publicado (p. ej. al crear una OT). */
   @Post("version/:versionId/instanciar")
-  instanciar(@Param("versionId") versionId: string, @Body() body: any) {
-    return this.flujos.instanciar(versionId, body ?? {});
+  instanciar(@Param("versionId") versionId: string, @Body() body: any, @Req() req: any) {
+    return this.flujos.instanciar(versionId, body ?? {}, req?.user?.tenantId);
   }
 
   /** Estado e historial de una instancia. */
   @Get("instancia/:id")
-  instancia(@Param("id") id: string) {
-    return this.flujos.estadoInstancia(id);
+  instancia(@Param("id") id: string, @Req() req: any) {
+    return this.flujos.estadoInstancia(id, req?.user?.tenantId);
   }
 
   /** Bandeja de tareas pendientes (opcionalmente por usuario). */
   @Get("tareas/bandeja")
-  bandeja(@Query("usuario") usuario?: string) {
-    return this.flujos.bandeja(usuario);
+  bandeja(@Req() req: any, @Query("usuario") usuario?: string) {
+    return this.flujos.bandeja(usuario, req?.user?.tenantId);
   }
 
   /** Completa una tarea humana y avanza el flujo. */
   @Post("tareas/:pasoEjecucionId/completar")
-  completar(@Param("pasoEjecucionId") id: string, @Body() body: any) {
-    return this.flujos.completarTarea(id, body ?? {});
+  completar(@Param("pasoEjecucionId") id: string, @Body() body: any, @Req() req: any) {
+    return this.flujos.completarTarea(id, body ?? {}, req?.user?.tenantId);
   }
 }

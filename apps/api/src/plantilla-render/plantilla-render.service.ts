@@ -14,12 +14,16 @@ export class PlantillaRenderService {
   constructor(private readonly prisma: PrismaService) {}
 
   /** Ensambla el contexto de datos de una OT para rellenar la plantilla. */
-  async contexto(otId: string) {
+  async contexto(otId: string, tenantId?: string) {
     const ot = await this.prisma.ordenTrabajo.findUnique({
       where: { id: otId },
       include: { cliente: true },
     });
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
+    // Aislamiento por tenant: la OT lleva tenant_id directo.
+    // 404 (no 403) para no revelar la existencia de OTs de otro tenant.
+    if (tenantId && ot.tenantId !== tenantId)
+      throw new NotFoundException(`OT ${otId} no encontrada`);
 
     const muestras = await this.prisma.muestra.findMany({ where: { otId } });
     const resultados = await this.prisma.resultado.findMany({
@@ -62,10 +66,13 @@ export class PlantillaRenderService {
   }
 
   /** Previsualiza el documento relleno (sin emitir). Devuelve HTML + HASH. */
-  async previsualizar(otId: string, plantillaId: string) {
+  async previsualizar(otId: string, plantillaId: string, tenantId?: string) {
     const plantilla = await this.prisma.plantillaInforme.findUnique({ where: { id: plantillaId } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
-    const ctx = await this.contexto(otId);
+    // La plantilla lleva tenant_id directo: valida pertenencia antes de usarla.
+    if (tenantId && plantilla.tenantId !== tenantId)
+      throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
+    const ctx = await this.contexto(otId, tenantId);
     const base = `<h2>${plantilla.nombre} (${plantilla.repid})</h2>
       <p>O/T: {{ot}} · Cliente: {{cliente}} ({{rut}}) · Fecha: {{fecha_emision}}</p>
       <h3>Resultados</h3>{{tabla_resultados}}`;
@@ -76,7 +83,8 @@ export class PlantillaRenderService {
 
   /** Emite el documento: lo rellena, sella con HASH y registra el Certificado. */
   async emitir(otId: string, plantillaId: string, codigo: string, tenantId: string) {
-    const { html, hash } = await this.previsualizar(otId, plantillaId);
+    // previsualizar valida que la OT y la plantilla sean del tenant del usuario.
+    const { html, hash } = await this.previsualizar(otId, plantillaId, tenantId);
     const cert = await this.prisma.certificado.create({
       data: {
         tenantId,
