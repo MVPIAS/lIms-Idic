@@ -155,3 +155,9 @@ UPDATE factura   SET updated_at = now() WHERE updated_at IS NULL;
 -- ============================================================
 ALTER TABLE resultado ALTER COLUMN tenant_id DROP NOT NULL;
 ALTER TABLE resultado ALTER COLUMN analisis_programado_id DROP NOT NULL;
+
+-- contacto: el modelo Prisma usa principal/created_at/deleted_at (la tabla tenía es_principal).
+ALTER TABLE contacto ADD COLUMN IF NOT EXISTS principal BOOLEAN DEFAULT false;
+ALTER TABLE contacto ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+ALTER TABLE contacto ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+UPDATE contacto SET principal = COALESCE(principal, es_principal, false) WHERE principal IS NULL;
