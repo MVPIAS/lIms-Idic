@@ -86,7 +86,10 @@ export class PlantillaInformeController extends BaseCrudController {
 @Injectable()
 export class CertificadoService extends BaseCrudService {
   constructor(prisma: PrismaService) {
-    super(prisma, { model: "certificado", search: ["codigo", "tipo"], include: { plantilla: true } });
+    // `ot` anidado con su cliente: la etiqueta de la columna OT en /certificados
+    // es "código · razón social del cliente" (etiquetaOt), así que con `ot: true`
+    // a secas se quedaría sin el desempate del cliente.
+    super(prisma, { model: "certificado", search: ["codigo", "tipo"], include: { plantilla: true, ot: { include: { cliente: true } } } });
   }
 
   /**

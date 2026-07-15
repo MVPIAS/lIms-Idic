@@ -23,6 +23,8 @@ import { CatalogoModule } from "./catalogo/catalogo.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
 import { CrmModule } from "./crm/crm.module";
+import { SaecModule } from "./saec/saec.module";
+import { EquiposModule } from "./equipos/equipos.module";
 
 @Module({
   imports: [
@@ -56,6 +58,8 @@ import { CrmModule } from "./crm/crm.module";
     RbacModule,
     PlantillaRenderModule,
     CrmModule,
+    SaecModule,
+    EquiposModule,
     AuditoriaModule,
     HealthModule,
   ],

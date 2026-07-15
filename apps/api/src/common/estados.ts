@@ -18,13 +18,11 @@ import { BadRequestException } from "@nestjs/common";
  *                 que trata 'informada' como estado de OT.
  * · resultado   · schema.sql:873 → 'capturado, revisado_n1, aprobado, rechazado, devuelto'.
  *                 OJO: el estado intermedio real es `revisado_n1`, NO `revisado`.
- *                 ⚠️ DEFINIDO PERO NO APLICADO: el modelo Prisma `Resultado` no
- *                 declara la columna `estado` (el modelo Prisma y la tabla
- *                 `resultado` de schema.sql son dos diseños distintos: la API
- *                 escribe contra el de Prisma). No hay dónde guardar el estado,
- *                 así que no hay transición que validar. El mapa se deja listo
- *                 para cuando se migre la columna y se añadan los endpoints
- *                 revisar/aprobar/devolver (RF-E01).
+ *                 ✅ APLICADO (RF-E01). El modelo Prisma `Resultado` ya declara
+ *                 `estado` (+ revisadoPor/At, aprobadoPor/At, motivoDevolucion);
+ *                 la columna la habilita `packages/db/align_resultado_estado.sql`.
+ *                 Lo aplican POST /resultados/:id/{revisar,aprobar,devolver} en
+ *                 `laboratorio.module.ts`.
  * · certificado · enum Zod de `catalogo.module.ts:76` → 'emitido, anulado', que es
  *                 lo que escriben `plantilla-render.service.ts` y el modelo Prisma
  *                 (`@default("emitido")`). El comentario de schema.sql:956 dice
@@ -57,8 +55,13 @@ const TRANSICIONES: Record<DominioEstado, Record<string, readonly string[]>> = {
     anulada: [],
   },
   // capturado → revisado_n1 → aprobado, con rechazo/devolución que reabren la captura.
+  // `capturado → devuelto` se añadió al APLICAR el mapa (RF-E01): el revisor que
+  // detecta un error en una captura recién hecha tiene que poder devolverla con
+  // un motivo sin pasar antes por revisado_n1 (que sería certificar como
+  // revisado justo lo que está rechazando). Es el único cambio sobre el
+  // vocabulario de schema.sql:873, y no inventa ningún estado nuevo.
   resultado: {
-    capturado: ["revisado_n1", "rechazado"],
+    capturado: ["revisado_n1", "rechazado", "devuelto"],
     revisado_n1: ["aprobado", "rechazado", "devuelto"],
     aprobado: [],
     rechazado: ["capturado"],
