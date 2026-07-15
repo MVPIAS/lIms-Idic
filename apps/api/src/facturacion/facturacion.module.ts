@@ -105,7 +105,7 @@ export class FacturaController extends BaseCrudController {
 @Injectable()
 export class PagoService extends BaseCrudService {
   constructor(prisma: PrismaService) {
-    super(prisma, { model: "pago", search: ["referencia"], tenant: false, softDelete: false, orderBy: { fecha: "desc" } });
+    super(prisma, { model: "pago", search: ["referencia"], include: { factura: true }, tenant: false, softDelete: false, orderBy: { fecha: "desc" } });
   }
 }
 const PagoCreate = z.object({
@@ -131,7 +131,7 @@ export class PagoController extends BaseCrudController {
 @Injectable()
 export class NotaCreditoService extends BaseCrudService {
   constructor(prisma: PrismaService) {
-    super(prisma, { model: "notaCredito", search: ["numero"], tenant: false, softDelete: false, orderBy: { fecha: "desc" } });
+    super(prisma, { model: "notaCredito", search: ["numero"], include: { factura: true }, tenant: false, softDelete: false, orderBy: { fecha: "desc" } });
   }
 }
 const NotaCreditoCreate = z.object({

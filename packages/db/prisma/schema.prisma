@@ -292,6 +292,7 @@ model OrdenTrabajo {
 
   tenant                Tenant    @relation(fields: [tenantId], references: [id])
   cliente               Cliente   @relation(fields: [clienteId], references: [id])
+  certificados          Certificado[]
 
   @@unique([tenantId, codigo])
   @@index([clienteId, estado])
@@ -786,6 +787,10 @@ model NormaLimite {
   @@map("norma_limite")
 }
 
+/// Resultado de ensayo. Las columnas de estado/fórmula las habilita
+/// `packages/db/align_resultado_estado.sql` (aplicar ANTES de desplegar esta
+/// versión del modelo; el Dockerfile de la API corre `prisma generate` en el
+/// build, así que el cliente se regenera solo al redesplegar).
 model Resultado {
   id         String    @id @default(uuid()) @db.Uuid
   otId       String?   @map("ot_id") @db.Uuid
@@ -801,11 +806,32 @@ model Resultado {
   fecha      DateTime  @default(now()) @db.Timestamptz
   deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
 
+  /// RF-A06/D02.1 · Motor de fórmulas. `resultadoFinal` es el valor que
+  /// devolvió la fórmula del analito (NULL si el analito no tiene fórmula: en
+  /// ese caso el valor del ensayo es `promedio`). `formulaAplicada` es la copia
+  /// del texto de la fórmula en el instante de la captura — `Analito.formula`
+  /// es editable, y sin esta copia un resultado ya emitido dejaría de ser
+  /// reproducible en cuanto alguien corrigiese la fórmula del catálogo.
+  resultadoFinal   Decimal?  @map("resultado_final") @db.Decimal(18, 6)
+  formulaAplicada  String?   @map("formula_aplicada")
+
+  /// RF-E01 · Aprobación escalonada: capturado → revisado_n1 → aprobado
+  /// (+ rechazado / devuelto hacia atrás). El vocabulario y las transiciones
+  /// viven en `apps/api/src/common/estados.ts` (dominio "resultado").
+  /// Las columnas físicas conservan el sufijo `_n1` que ya usaba schema.sql.
+  estado           String    @default("capturado") @db.VarChar(20)
+  revisadoPor      String?   @map("revisado_n1_por") @db.Uuid
+  revisadoAt       DateTime? @map("revisado_n1_at") @db.Timestamptz
+  aprobadoPor      String?   @map("aprobado_por") @db.Uuid
+  aprobadoAt       DateTime? @map("aprobado_at") @db.Timestamptz
+  motivoDevolucion String?   @map("motivo_devolucion")
+
   muestra    Muestra   @relation(fields: [muestraId], references: [id], onDelete: Cascade)
   analito    Analito   @relation(fields: [analitoId], references: [id])
 
   @@index([otId])
   @@index([muestraId])
+  @@index([estado, fecha])
   @@map("resultado")
 }
 
@@ -817,6 +843,9 @@ model PlantillaInforme {
   tipo       String    @db.VarChar(20)
   emision    String    @default("conjunto") @db.VarChar(12)
   archivoRef String?   @map("archivo_ref") @db.VarChar(200)
+  // Cuerpo del documento en HTML con placeholders {{campo}} (align_certificado.sql).
+  // Sin él la plantilla es una cáscara y el motor cae a la plantilla por defecto.
+  cuerpoHtml String?   @map("cuerpo_html")
   version    String    @default("v1") @db.VarChar(10)
   activo     Boolean   @default(true)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
@@ -837,15 +866,27 @@ model Certificado {
   plantillaId     String?   @map("plantilla_id") @db.Uuid
   hashSha256      String?   @map("hash_sha256") @db.VarChar(64)
   urlVerificacion String?   @map("url_verificacion") @db.VarChar(300)
+  // --- Emisión real (align_certificado.sql) ---
+  // Correlativo CERT-AAAA-NNNN generado por el sistema. Se escribe también en
+  // `codigo`, cuyo UNIQUE(tenantId, codigo) cierra la unicidad a nivel de BD.
+  numero             String?   @db.VarChar(30)
+  // Código corto imprimible para validar el certificado en papel (anti-repudio).
+  codigoVerificacion String?   @map("codigo_verificacion") @db.VarChar(24)
+  // HTML canónico sellado: sha256(documentoHtml) == hashSha256. Es lo que hace
+  // la verificación reproducible aunque los resultados de la OT cambien luego.
+  documentoHtml      String?   @map("documento_html")
+  emitidoPor         String?   @map("emitido_por") @db.Uuid
   fecha           DateTime  @default(now()) @db.Timestamptz
   estado          String    @default("emitido") @db.VarChar(20)
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
 
   plantilla       PlantillaInforme? @relation(fields: [plantillaId], references: [id])
+  ot              OrdenTrabajo      @relation(fields: [otId], references: [id])
 
   @@unique([tenantId, codigo])
   @@index([otId])
+  @@index([codigoVerificacion])
   @@map("certificado")
 }
 

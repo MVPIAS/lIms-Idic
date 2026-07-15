@@ -1,12 +1,27 @@
-import { Body, Controller, Module, Post, UseGuards, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  Module,
+  NotFoundException,
+  Param,
+  ParseUUIDPipe,
+  Post,
+  Req,
+  UseGuards,
+  Injectable,
+} from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
-import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
+import { validarTransicion } from "../common/estados";
+import { evaluarFormula, validarFormula, FormulaError, NOMBRES_FUNCION } from "../common/formula";
 
 /* ===================== TIPOS DE MUESTRA (árbol) ===================== */
 @Injectable()
@@ -22,7 +37,7 @@ export class TipoMuestraService extends BaseCrudService {
     super(prisma, {
       model: "tipoMuestra",
       search: ["codigo", "nombre"],
-      include: { hijos: true },
+      include: { hijos: true, parent: true },
       orderBy: { codigo: "asc" },
     });
   }
@@ -116,16 +131,42 @@ export class MetodoController extends BaseCrudController {
 export class AnalitoService extends BaseCrudService {
   constructor(prisma: PrismaService) {
     // Analito NO tiene columna tenant_id (cuelga de metodo); tenant:false para no filtrar por tenant.
-    super(prisma, { model: "analito", search: ["codigo", "nombre"], include: { limites: true }, tenant: false });
+    super(prisma, { model: "analito", search: ["codigo", "nombre"], include: { limites: true, metodo: true }, tenant: false });
   }
 }
+/**
+ * La fórmula se valida SINTÁCTICAMENTE al guardar el analito (RF-A06). Guardar
+ * una fórmula rota no da error en el catálogo pero revienta meses después, en
+ * plena captura y a un analista que no la escribió: se rechaza aquí, que es
+ * donde está la persona que puede arreglarla.
+ *
+ * NO se validan los NOMBRES de variable: dependen del contexto del ensayo
+ * (masa, volumen, factor…), que no se conoce hasta la captura. Se comprueba
+ * sintaxis, funciones y límites. Cadena vacía = sin fórmula (comportamiento
+ * heredado: el campo es opcional y hay 3.118 analitos sin fórmula).
+ */
+const FormulaOpcional = z
+  .string()
+  .optional()
+  .refine((f) => {
+    if (f === undefined || f.trim() === "") return true;
+    return validarFormula(f).ok;
+  }, (f) => ({ message: `Fórmula no válida: ${validarFormula(f ?? "").error}` }));
+
 const AnalitoCreate = z.object({
   metodoId: z.string().uuid(),
   codigo: z.string().min(1).max(60),
   nombre: z.string().min(1).max(200),
   unidad: z.string().max(30).optional(),
-  formula: z.string().optional(),
+  formula: FormulaOpcional,
 });
+
+const ValidarFormulaDto = z.object({
+  formula: z.string(),
+  /** Opcional: si se envía, comprueba además que toda variable usada exista. */
+  variables: z.array(z.string()).max(200).optional(),
+});
+
 @ApiTags("analitos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("analitos")
 @RequierePermisoCrud({
   ver: "metodo.ver", // el analito cuelga del método; no existe `analito.ver`
@@ -137,6 +178,31 @@ export class AnalitoController extends BaseCrudController {
   protected createSchema = AnalitoCreate;
   protected updateSchema = AnalitoCreate.partial();
   constructor(protected svc: AnalitoService) { super(); }
+
+  /**
+   * POST /analitos/validar-formula · comprobación previa para el editor del
+   * catálogo (RF-A06: "validación de sintaxis y vista previa").
+   *
+   * Responde SIEMPRE 200 con {ok:false, error} cuando la fórmula es inválida:
+   * no es un fallo de la petición, es el resultado de la comprobación, y el
+   * editor necesita el mensaje para pintarlo bajo el campo. Los 400 quedan para
+   * el body mal formado.
+   *
+   * NO evalúa la fórmula: sólo la parsea (ver `formula.ts`, §seguridad).
+   */
+  @Post("validar-formula")
+  @RequierePermiso("catalogo.gestionar")
+  @ApiOperation({ summary: "Valida la sintaxis de una fórmula sin guardarla ni evaluarla" })
+  validarFormulaAnalito(@Body() body: unknown) {
+    const dto = ValidarFormulaDto.parse(body);
+    const r = validarFormula(dto.formula, dto.variables);
+    return {
+      ok: r.ok,
+      ...(r.error ? { error: r.error } : {}),
+      ...(r.ok ? { variables: r.variables, funciones: r.funciones } : {}),
+      funcionesDisponibles: NOMBRES_FUNCION,
+    };
+  }
 }
 
 /* ===================== LÍMITES / ESPECIFICACIONES ===================== */
@@ -185,7 +251,51 @@ export class ResultadoService extends BaseCrudService {
     if (inf == null && sup == null) return "Informativo";
     return "Cumple";
   }
-  /** Captura réplicas RN1..RNn → calcula promedio/DE/CV y evalúa contra el límite del producto. */
+
+  /**
+   * Contexto de variables que ve la fórmula del analito (RF-A06/D02.1):
+   *   RN1..RNn  · cada réplica, 1-indexada como en la hoja de captura
+   *   REPLICAS  · el vector completo → PROMEDIO(REPLICAS), MAX(REPLICAS)…
+   *   PROMEDIO  · media aritmética de las réplicas
+   *   DE        · desviación estándar muestral (n−1)
+   *   CV        · coeficiente de variación en %
+   *   N         · nº de réplicas
+   *   + las variables del ensayo que envíe el cliente (masa, volumen, factor…)
+   *
+   * Nótese que la estadística es un paso ANTERIOR a la fórmula, no un
+   * sustituto: la fórmula recibe el promedio ya calculado y lo transforma
+   * (`ppm = (C·F·100)/g`), o recalcula desde las réplicas si así se define.
+   */
+  private contextoFormula(rep: number[], st: { promedio: number; desviacion: number; cv: number }, extras?: Record<string, number>) {
+    const ctx: Record<string, number | number[]> = {
+      REPLICAS: rep,
+      PROMEDIO: st.promedio,
+      DE: st.desviacion,
+      CV: st.cv,
+      N: rep.length,
+    };
+    rep.forEach((v, i) => (ctx[`RN${i + 1}`] = v));
+    // Las variables del ensayo NO pueden pisar las calculadas: si una fórmula
+    // dice PROMEDIO, tiene que ser el promedio de las réplicas de este ensayo y
+    // no lo que venga en el body. Se rechaza explícitamente en vez de dejar que
+    // una gane en silencio.
+    for (const [k, v] of Object.entries(extras ?? {})) {
+      if (k.toUpperCase() in ctx || Object.keys(ctx).some((c) => c.toUpperCase() === k.toUpperCase()))
+        throw new BadRequestException(`La variable '${k}' es una variable reservada del ensayo (RN1..RNn, REPLICAS, PROMEDIO, DE, CV, N) y no puede redefinirse`);
+      ctx[k] = v;
+    }
+    return ctx;
+  }
+
+  /**
+   * Captura réplicas RN1..RNn → promedio/DE/CV → fórmula del analito (si tiene)
+   * → veredicto contra el límite del producto.
+   *
+   * El VALOR DEL ENSAYO es el que devuelve la fórmula cuando el analito tiene
+   * una; si no, sigue siendo el promedio crudo (comportamiento previo intacto,
+   * que es el de los 3.118 analitos sin fórmula). Ese valor es el que se
+   * contrasta con el límite y el que se informa.
+   */
   async capturar(dto: any, tenantId = DEV_TENANT) {
     const rep: number[] = dto.replicas;
     const st = this.estadistica(rep);
@@ -193,6 +303,30 @@ export class ResultadoService extends BaseCrudService {
       ? await this.prisma.normaLimite.findFirst({ where: { analitoId: dto.analitoId, producto: dto.productoLimite } })
       : await this.prisma.normaLimite.findFirst({ where: { analitoId: dto.analitoId } });
     const analito = await this.prisma.analito.findUnique({ where: { id: dto.analitoId } });
+    if (!analito) throw new NotFoundException(`Analito ${dto.analitoId} no encontrado`);
+
+    // --- Motor de fórmulas -------------------------------------------------
+    const formula = analito.formula?.trim();
+    let resultadoFinal: number | null = null;
+    if (formula) {
+      const ctx = this.contextoFormula(rep, st, dto.variables);
+      try {
+        resultadoFinal = evaluarFormula(formula, ctx);
+      } catch (e) {
+        // Una fórmula que falla es un problema del dato/catálogo, no del
+        // servidor: 400 con el motivo, y NO se persiste nada. Persistir un
+        // resultado con la fórmula sin aplicar sería peor que no tenerlo — se
+        // informaría el promedio crudo como si fuera el valor del ensayo.
+        if (e instanceof FormulaError)
+          throw new BadRequestException(
+            `No se pudo aplicar la fórmula del analito ${analito.codigo} ('${formula}'): ${e.message}`,
+          );
+        throw e;
+      }
+    }
+    const valorEnsayo = resultadoFinal ?? st.promedio;
+    // ----------------------------------------------------------------------
+
     return this.prisma.resultado.create({
       data: {
         otId: dto.otId ?? null,
@@ -202,21 +336,114 @@ export class ResultadoService extends BaseCrudService {
         promedio: st.promedio,
         desviacion: st.desviacion,
         cv: st.cv,
-        unidad: analito?.unidad ?? null,
-        veredicto: this.veredicto(st.promedio, limite?.limiteInf ? Number(limite.limiteInf) : null, limite?.limiteSup ? Number(limite.limiteSup) : null),
+        resultadoFinal,
+        // Copia de la fórmula tal y como estaba AL CAPTURAR: `analito.formula`
+        // es editable y el resultado tiene que seguir siendo reproducible.
+        formulaAplicada: formula || null,
+        unidad: analito.unidad ?? null,
+        veredicto: this.veredicto(valorEnsayo, limite?.limiteInf ? Number(limite.limiteInf) : null, limite?.limiteSup ? Number(limite.limiteSup) : null),
         analistaId: dto.analistaId ?? null,
+        // Todo resultado nace en 'capturado': el ciclo RF-E01 empieza aquí.
+        estado: "capturado",
       },
       include: { analito: true, muestra: true },
     });
+  }
+
+  /* ---------------------- RF-E01 · Aprobación escalonada ---------------------- */
+
+  /**
+   * Aplica una transición del ciclo de vida del resultado y sella quién y
+   * cuándo. Toda la política vive aquí para que los tres endpoints no puedan
+   * divergir.
+   *
+   * SEGREGACIÓN DE FUNCIONES (NCh-ISO/IEC 17025):
+   * quien captura un resultado NO puede revisarlo ni aprobarlo. La comprobación
+   * es `usuario != resultado.analistaId` → 409 Conflict si coinciden. Un 403
+   * sería engañoso: el usuario SÍ tiene el permiso, lo que no puede es
+   * ejercerlo sobre ESTE resultado — es un conflicto de estado, no falta de
+   * autorización. El encargo sólo exigía la regla en `aprobar`; se aplica
+   * también en `revisar` porque el circuito de RF-E01 es analista → jefe de
+   * laboratorio → jefe de departamento, y un revisor que se revisa a sí mismo
+   * vacía de contenido el primer escalón igual que lo haría en el segundo.
+   */
+  private async transitar(
+    id: string,
+    nuevo: "revisado_n1" | "aprobado" | "devuelto",
+    usuarioId: string | undefined,
+    opts: { motivo?: string; exigeIndependencia: boolean },
+  ) {
+    const actual = await this.prisma.resultado.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, estado: true, analistaId: true },
+    });
+    if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
+
+    // 1. ¿Permite la máquina de estados este paso? (common/estados.ts)
+    validarTransicion("resultado", actual.estado, nuevo);
+
+    // 2. Segregación de funciones.
+    if (opts.exigeIndependencia && usuarioId && actual.analistaId && usuarioId === actual.analistaId)
+      throw new ConflictException(
+        "Segregación de funciones (ISO/IEC 17025): quien captura un resultado no puede revisarlo ni aprobarlo. " +
+          "Debe hacerlo otro usuario con el permiso correspondiente.",
+      );
+
+    const ahora = new Date();
+    const data: Record<string, unknown> = { estado: nuevo };
+    if (nuevo === "revisado_n1") {
+      data.revisadoPor = usuarioId ?? null;
+      data.revisadoAt = ahora;
+      data.motivoDevolucion = null; // una devolución previa queda saldada
+    }
+    if (nuevo === "aprobado") {
+      data.aprobadoPor = usuarioId ?? null;
+      data.aprobadoAt = ahora;
+    }
+    if (nuevo === "devuelto") {
+      data.motivoDevolucion = opts.motivo ?? null;
+      // Se conserva revisadoPor/At: es el rastro de quién lo miró y lo devolvió.
+    }
+
+    return this.prisma.resultado.update({
+      where: { id },
+      data,
+      include: { analito: true, muestra: true },
+    });
+  }
+
+  revisar(id: string, usuarioId?: string) {
+    return this.transitar(id, "revisado_n1", usuarioId, { exigeIndependencia: true });
+  }
+  aprobar(id: string, usuarioId?: string) {
+    return this.transitar(id, "aprobado", usuarioId, { exigeIndependencia: true });
+  }
+  /** Devolver es un acto correctivo: no exige independencia, pero sí motivo. */
+  devolver(id: string, motivo: string, usuarioId?: string) {
+    return this.transitar(id, "devuelto", usuarioId, { motivo, exigeIndependencia: false });
   }
 }
 const ResultadoCreate = z.object({
   otId: z.string().uuid().optional(),
   muestraId: z.string().uuid(),
   analitoId: z.string().uuid(),
-  replicas: z.array(z.number()).min(1),
+  replicas: z.array(z.number().finite()).min(1),
   productoLimite: z.string().optional(),
   analistaId: z.string().uuid().optional(),
+  /**
+   * Variables extra del ensayo para la fórmula del analito (masa, volumen,
+   * factor, concentración del titulante…). Las claves deben ser identificadores
+   * válidos; los valores, números finitos. Las reservadas (RN1..RNn, REPLICAS,
+   * PROMEDIO, DE, CV, N) se rechazan en `contextoFormula`.
+   */
+  variables: z
+    .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Nombre de variable no válido"), z.number().finite())
+    .optional(),
+});
+
+const DevolverDto = z.object({
+  /** RF-E01 exige rechazo MOTIVADO: sin motivo el analista no sabe qué corregir. */
+  motivo: z.string().trim().min(5, "Indique el motivo de la devolución (mínimo 5 caracteres)").max(1000),
 });
 /**
  * Separación de deberes (NCh-ISO/IEC 17025):
@@ -225,14 +452,28 @@ const ResultadoCreate = z.object({
  *   editar   · resultado.revisar   (tocar el veredicto a mano es un acto de revisión)
  *   eliminar · resultado.aprobar   (el más restrictivo: SUPERADMIN, DIRECTOR, JEFE_LAB)
  *
- * SIN MÁQUINA DE ESTADOS. `schema.sql:873` define para `resultado` los estados
- * capturado → revisado_n1 → aprobado (+rechazado/devuelto) y están en
- * `common/estados.ts`, PERO el modelo Prisma `Resultado` NO declara la columna
- * `estado` (ni `tenant_id`, ni los campos revisado_n1_por/aprobado_por de la
- * tabla de schema.sql): el modelo Prisma y esa tabla son dos diseños distintos.
- * La API escribe contra el contrato Prisma, así que hoy no hay dónde guardar el
- * estado ni, por tanto, transición que validar. Habilitarlo exige migración
- * (columna + modelo) y los endpoints revisar/aprobar/devolver: queda anotado.
+ * MÁQUINA DE ESTADOS (RF-E01) · ACTIVA.
+ *   capturado ──revisar──▶ revisado_n1 ──aprobar──▶ aprobado (final)
+ *       ▲                       │
+ *       └──────devolver─────────┴──devolver──┐
+ *       └──────────── capturado ◀── devuelto ┘
+ *
+ *   POST /resultados/:id/revisar   · resultado.revisar  → revisado_n1
+ *   POST /resultados/:id/aprobar   · resultado.aprobar  → aprobado
+ *   POST /resultados/:id/devolver  · resultado.revisar  → devuelto (con motivo)
+ *
+ * Las transiciones las valida `validarTransicion("resultado", …)` contra el
+ * mapa de `common/estados.ts` (vocabulario de schema.sql:873; el estado
+ * intermedio es `revisado_n1`, no `revisado`). Un salto ilegal —aprobar algo
+ * que sigue en 'capturado', reabrir un 'aprobado'— da 400 explicando qué se
+ * permite desde el estado actual.
+ *
+ * SEGREGACIÓN DE FUNCIONES: revisar y aprobar exigen que el usuario NO sea el
+ * analista que capturó (409). Ver `ResultadoService.transitar`.
+ *
+ * `resultado.aprobar` lo tienen SUPERADMIN, DIRECTOR y JEFE_LAB; `resultado.revisar`,
+ * SUPERADMIN y ADMIN. Son los permisos ya sembrados en seed_rbac.sql: no se
+ * inventa ninguno.
  */
 @ApiTags("resultados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("resultados")
 @RequierePermisoCrud({
@@ -250,10 +491,53 @@ export class ResultadoController extends BaseCrudController {
     analistaId: z.string().uuid().optional(),
   });
   constructor(protected svc: ResultadoService) { super(); }
+
+  /**
+   * Captura. `analistaId` cae por defecto en el usuario autenticado: es quien
+   * está capturando, y sin ese dato la segregación de funciones de RF-E01 no
+   * tendría contra quién comparar (un resultado sin analista sería aprobable
+   * por cualquiera, incluido quien lo capturó).
+   */
   @Post()
   @RequierePermiso("resultado.crear")
-  crear(@Body() body: unknown) {
-    return (this.svc as ResultadoService).capturar(ResultadoCreate.parse(body));
+  crear(@Body() body: unknown, @Req() req: any) {
+    const dto = ResultadoCreate.parse(body);
+    return (this.svc as ResultadoService).capturar(
+      { ...dto, analistaId: dto.analistaId ?? req?.user?.sub },
+      req?.user?.tenantId ?? DEV_TENANT,
+    );
+  }
+
+  @Post(":id/revisar")
+  @RequierePermiso("resultado.revisar")
+  @ApiOperation({ summary: "Revisión N1: capturado → revisado_n1 (no puede ser el propio analista)" })
+  revisar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return (this.svc as ResultadoService).revisar(id, req?.user?.sub);
+  }
+
+  @Post(":id/aprobar")
+  @RequierePermiso("resultado.aprobar")
+  @ApiOperation({ summary: "Aprobación final: revisado_n1 → aprobado (no puede ser el propio analista)" })
+  aprobar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return (this.svc as ResultadoService).aprobar(id, req?.user?.sub);
+  }
+
+  /**
+   * Devolución motivada al analista. Exige `resultado.revisar` —el permiso del
+   * escalón más bajo del circuito— para que tanto el revisor como el aprobador
+   * puedan devolver: quien tiene `resultado.aprobar` sin `resultado.revisar`
+   * (DIRECTOR, JEFE_LAB) podría aprobar pero no rechazar, que es justo el
+   * incentivo perverso que la 17025 quiere evitar.
+   *   ⚠️ Requiere sembrar `resultado.revisar` a DIRECTOR y JEFE_LAB en
+   *   seed_rbac.sql (hoy sólo lo tienen SUPERADMIN y ADMIN); queda fuera del
+   *   alcance de este cambio porque el RBAC sembrado es de otro dominio.
+   */
+  @Post(":id/devolver")
+  @RequierePermiso("resultado.revisar")
+  @ApiOperation({ summary: "Devuelve el resultado al analista con un motivo → devuelto" })
+  devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = DevolverDto.parse(body);
+    return (this.svc as ResultadoService).devolver(id, dto.motivo, req?.user?.sub);
   }
 }
 

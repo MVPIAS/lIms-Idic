@@ -40,8 +40,20 @@ const NAV = [
       { href: "/limites", label: "Límites", icon: "📐" },
       { href: "/tipos-muestra", label: "Tipos de Muestra", icon: "🌡" },
       { href: "/plantillas", label: "Plantillas", icon: "📄" },
+      { href: "/informes", label: "Emitir Informe", icon: "🖨" },
+      { href: "/equipos", label: "Equipos y Calibración", icon: "⚙" },
+      { href: "/custodia", label: "Cadena de Custodia", icon: "🔗" },
       { href: "/certificados", label: "Certificados", icon: "📜" },
       { href: "/flujos", label: "Diseñador de Flujos", icon: "⛓" },
+    ],
+  },
+  {
+    title: "SAEC · Armas y Evidencias",
+    items: [
+      { href: "/saec", label: "Evidencias", icon: "🧷" },
+      { href: "/saec/armas", label: "Armas", icon: "🔫" },
+      { href: "/saec/ibis", label: "Importar IBIS", icon: "📥" },
+      { href: "/saec/verificar", label: "Verificar certificado", icon: "🔎" },
     ],
   },
   {
