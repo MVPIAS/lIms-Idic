@@ -34,7 +34,7 @@ export class FlujoService {
     });
   }
 
-  async detalleVersion(versionId: string) {
+  async detalleVersion(versionId: string, tenantId?: string) {
     const ver = await this.prisma.flujoVersion.findUnique({
       where: { id: versionId },
       include: {
@@ -44,18 +44,23 @@ export class FlujoService {
       },
     });
     if (!ver) throw new NotFoundException("Versión de flujo no encontrada");
+    // Aislamiento por tenant: la versión pertenece al tenant vía su def.
+    // 404 (no 403) para no revelar la existencia del recurso a otro tenant.
+    if (tenantId && ver.def.tenantId !== tenantId)
+      throw new NotFoundException("Versión de flujo no encontrada");
     return ver;
   }
 
-  async detallePorCodigo(codigo: string) {
+  async detallePorCodigo(codigo: string, tenantId?: string) {
     const def = await this.prisma.flujoDef.findFirst({
-      where: { codigo },
+      // Solo busca dentro del tenant del usuario.
+      where: { codigo, ...(tenantId ? { tenantId } : {}) },
       include: { versiones: { orderBy: { version: "desc" } } },
     });
     if (!def) throw new NotFoundException(`Flujo ${codigo} no existe`);
     const vigente =
       def.versiones.find((v) => v.estado === "publicado") ?? def.versiones[0];
-    return this.detalleVersion(vigente.id);
+    return this.detalleVersion(vigente.id, tenantId);
   }
 
   // ------------------------------------------------------- diseño (no-code)
@@ -133,9 +138,14 @@ export class FlujoService {
   }
 
   /** Publica una versión: pasa a 'publicado' y archiva la publicada anterior. */
-  async publicar(versionId: string) {
-    const ver = await this.prisma.flujoVersion.findUnique({ where: { id: versionId } });
+  async publicar(versionId: string, tenantId?: string) {
+    const ver = await this.prisma.flujoVersion.findUnique({
+      where: { id: versionId },
+      include: { def: true },
+    });
     if (!ver) throw new NotFoundException();
+    // Solo se publica una versión del propio tenant.
+    if (tenantId && ver.def.tenantId !== tenantId) throw new NotFoundException();
     await this.prisma.flujoVersion.updateMany({
       where: { flujoDefId: ver.flujoDefId, estado: "publicado" },
       data: { estado: "archivado", vigenteHasta: new Date() },
@@ -148,8 +158,8 @@ export class FlujoService {
 
   // ------------------------------------------------------------- ejecución
   /** Crea una instancia del flujo (p. ej. al generar una OT) y avanza lo automático. */
-  async instanciar(versionId: string, body: { otId?: string; metadata?: Record<string, any>; usuarioId?: string }) {
-    const ver = await this.detalleVersion(versionId);
+  async instanciar(versionId: string, body: { otId?: string; metadata?: Record<string, any>; usuarioId?: string }, tenantId?: string) {
+    const ver = await this.detalleVersion(versionId, tenantId);
     if (ver.estado !== "publicado")
       throw new BadRequestException("Solo se instancian versiones publicadas");
     const inicio = ver.pasos.find((p) => p.tipo === "INICIO");
@@ -169,16 +179,20 @@ export class FlujoService {
       },
     });
     await this.avanzarDesde(instancia.id, inicio.id);
-    return this.estadoInstancia(instancia.id);
+    // La instancia se creó con ver.def.tenantId, que ya coincide con el tenant validado.
+    return this.estadoInstancia(instancia.id, ver.def.tenantId);
   }
 
   /** Completa una tarea humana (ACTIVIDAD/ESPERA) y avanza el flujo. */
-  async completarTarea(pasoEjecucionId: string, body: { resultado?: Record<string, any>; usuarioId?: string; notas?: string }) {
+  async completarTarea(pasoEjecucionId: string, body: { resultado?: Record<string, any>; usuarioId?: string; notas?: string }, tenantId?: string) {
     const pe = await this.prisma.pasoEjecucion.findUnique({
       where: { id: pasoEjecucionId },
       include: { instancia: true, paso: true },
     });
     if (!pe) throw new NotFoundException("Ejecución de paso no encontrada");
+    // Aislamiento: la ejecución/tarea pertenece al tenant vía su instancia.
+    if (tenantId && pe.instancia.tenantId !== tenantId)
+      throw new NotFoundException("Ejecución de paso no encontrada");
     if (pe.estado === "completado") throw new BadRequestException("El paso ya está completado");
 
     const inicio = pe.iniciadoAt ?? new Date();
@@ -201,15 +215,17 @@ export class FlujoService {
     await this.prisma.flujoInstancia.update({ where: { id: pe.instanciaId }, data: { metadata: meta } });
 
     await this.avanzarDesde(pe.instanciaId, pe.pasoId);
-    return this.estadoInstancia(pe.instanciaId);
+    return this.estadoInstancia(pe.instanciaId, tenantId);
   }
 
   /** Bandeja de tareas pendientes (por usuario, o todas). */
-  async bandeja(usuarioId?: string) {
+  async bandeja(usuarioId?: string, tenantId?: string) {
     return this.prisma.tareaAsignada.findMany({
       where: {
         estado: { in: ["pendiente", "en_curso"] },
         ...(usuarioId ? { asignadoA: usuarioId } : {}),
+        // Solo tareas cuyo flujo pertenece al tenant del usuario.
+        ...(tenantId ? { pasoEjecucion: { instancia: { tenantId } } } : {}),
       },
       orderBy: [{ venceAt: "asc" }, { prioridad: "desc" }],
       include: {
@@ -220,7 +236,7 @@ export class FlujoService {
     });
   }
 
-  async estadoInstancia(instanciaId: string) {
+  async estadoInstancia(instanciaId: string, tenantId?: string) {
     const ins = await this.prisma.flujoInstancia.findUnique({
       where: { id: instanciaId },
       include: {
@@ -230,6 +246,9 @@ export class FlujoService {
       },
     });
     if (!ins) throw new NotFoundException("Instancia no encontrada");
+    // FlujoInstancia lleva tenant_id directo: valida pertenencia.
+    if (tenantId && ins.tenantId !== tenantId)
+      throw new NotFoundException("Instancia no encontrada");
     return ins;
   }
 
