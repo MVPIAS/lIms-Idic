@@ -147,3 +147,11 @@ ALTER TABLE proveedor ALTER COLUMN updated_at SET DEFAULT now();
 UPDATE proveedor SET updated_at = now() WHERE updated_at IS NULL;
 ALTER TABLE factura   ALTER COLUMN updated_at SET DEFAULT now();
 UPDATE factura   SET updated_at = now() WHERE updated_at IS NULL;
+
+-- ============================================================
+-- resultado: la captura por UI (ResultadoService.capturar) no setea tenant_id
+-- ni analisis_programado_id (columnas legacy NOT NULL). Se relajan para permitir
+-- capturas ad-hoc muestra->analito->replicas->veredicto.
+-- ============================================================
+ALTER TABLE resultado ALTER COLUMN tenant_id DROP NOT NULL;
+ALTER TABLE resultado ALTER COLUMN analisis_programado_id DROP NOT NULL;

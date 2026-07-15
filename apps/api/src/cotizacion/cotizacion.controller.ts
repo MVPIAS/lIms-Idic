@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards, ParseUUIDPipe } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards, ParseUUIDPipe } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { z } from "zod";
@@ -47,6 +47,11 @@ const LineaSchema = z.object({
   precioUnitario: z.number().positive(),
   descuentoPct: z.number().min(0).max(100).default(0),
   tramo: z.string().optional(),
+});
+
+const ActualizarCotSchema = z.object({
+  estado: z.string().min(1).max(20).optional(),
+  notas: z.string().optional(),
 });
 
 const CrearCotSchema = z.object({
@@ -100,6 +105,18 @@ export class CotizacionController {
   crear(@Body() body: unknown, @Req() req: any) {
     const data = CrearCotSchema.parse(body);
     return this.svc.crear(data, req?.user?.tenantId);
+  }
+
+  @Patch(":id")
+  actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const data = ActualizarCotSchema.parse(body);
+    return this.svc.actualizar(id, data, req?.user?.tenantId);
+  }
+
+  /** "Eliminar" = anular (estado 'anulada'); no hay borrado físico (referenciada por OT). */
+  @Delete(":id")
+  eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.anular(id, req?.user?.tenantId);
   }
 
   @Post(":id/enviar")

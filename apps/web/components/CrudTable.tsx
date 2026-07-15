@@ -15,6 +15,8 @@ export interface CampoForm {
   tipo?: "text" | "number" | "select" | "email";
   opciones?: string[];
   requerido?: boolean;
+  /** si es true, el input se deshabilita en modo edición (p. ej. un código/clave). */
+  soloLecturaEnEdicion?: boolean;
 }
 export interface CrudTableProps {
   recurso: string;
@@ -24,16 +26,20 @@ export interface CrudTableProps {
   campos?: CampoForm[];
   /** transforma el form antes de enviar (p. ej. castear números). */
   prepararCrear?: (data: any) => any;
+  /** mapea una fila al formulario de edición. Por defecto toma de la fila los valores de `campos` por su `campo`. */
+  prepararEditar?: (row: any) => Record<string, any>;
 }
 
-/** Tabla CRUD genérica: lista paginada + buscador + alta. Reutilizable por recurso. */
-export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos, prepararCrear }: CrudTableProps) {
+/** Tabla CRUD genérica: lista paginada + buscador + alta + edición + borrado. Reutilizable por recurso. */
+export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos, prepararCrear, prepararEditar }: CrudTableProps) {
   const [res, setRes] = useState<Paginado<any> | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({});
+  const [editId, setEditId] = useState<string | null>(null);
+  const [borrandoId, setBorrandoId] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -48,18 +54,64 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
     cargar();
   }, [cargar]);
 
-  async function crear(e: React.FormEvent) {
+  function abrirCrear() {
+    setEditId(null);
+    setForm({});
+    setShowForm(true);
+  }
+
+  function abrirEditar(row: any) {
+    const inicial = prepararEditar
+      ? prepararEditar(row)
+      : (campos ?? []).reduce((acc, c) => {
+          acc[c.campo] = row[c.campo] ?? "";
+          return acc;
+        }, {} as Record<string, any>);
+    setEditId(String(row.id));
+    setForm(inicial);
+    setShowForm(true);
+    setError("");
+  }
+
+  function cerrarForm() {
+    setShowForm(false);
+    setEditId(null);
+    setForm({});
+  }
+
+  async function guardar(e: React.FormEvent) {
     e.preventDefault();
     try {
       const payload = prepararCrear ? prepararCrear(form) : form;
-      await api.create(recurso, payload);
-      setShowForm(false);
-      setForm({});
+      if (editId != null) {
+        await api.update(recurso, editId, payload);
+      } else {
+        await api.create(recurso, payload);
+      }
+      cerrarForm();
       cargar();
     } catch (e: any) {
       setError(e.message);
     }
   }
+
+  async function eliminar(row: any) {
+    if (!confirm(`¿Eliminar este registro? Esta acción no se puede deshacer.`)) return;
+    setBorrandoId(String(row.id));
+    try {
+      await api.remove(recurso, String(row.id));
+      setError("");
+      // si borramos la fila que se estaba editando, cerramos el form
+      if (editId != null && editId === String(row.id)) cerrarForm();
+      cargar();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBorrandoId(null);
+    }
+  }
+
+  const editando = editId != null;
 
   return (
     <div>
@@ -75,32 +127,36 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
           onChange={(e) => { setPage(1); setSearch(e.target.value); }}
         />
         {campos && (
-          <button className="btn primary sm" onClick={() => setShowForm((s) => !s)}>
+          <button className="btn primary sm" onClick={() => (showForm ? cerrarForm() : abrirCrear())}>
             {showForm ? "Cerrar" : "＋ Nuevo"}
           </button>
         )}
       </div>
 
       {showForm && campos && (
-        <form onSubmit={crear} className="card">
+        <form onSubmit={guardar} className="card">
           <div className="form-grid">
-            {campos.map((c) => (
-              <div key={c.campo} className="field">
-                <label>{c.label}{c.requerido && <span className="req"> *</span>}</label>
-                {c.tipo === "select" ? (
-                  <select required={c.requerido} value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })}>
-                    <option value="">—</option>
-                    {c.opciones?.map((o) => <option key={o} value={o}>{o}</option>)}
-                  </select>
-                ) : (
-                  <input type={c.tipo ?? "text"} required={c.requerido}
-                    value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })} />
-                )}
-              </div>
-            ))}
+            {campos.map((c) => {
+              const deshabilitado = editando && !!c.soloLecturaEnEdicion;
+              return (
+                <div key={c.campo} className="field">
+                  <label>{c.label}{c.requerido && <span className="req"> *</span>}</label>
+                  {c.tipo === "select" ? (
+                    <select required={c.requerido} disabled={deshabilitado} value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })}>
+                      <option value="">—</option>
+                      {c.opciones?.map((o) => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  ) : (
+                    <input type={c.tipo ?? "text"} required={c.requerido} disabled={deshabilitado}
+                      value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })} />
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-            <button className="btn primary sm">Guardar</button>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button type="button" className="btn outline sm" onClick={cerrarForm}>Cancelar</button>
+            <button className="btn primary sm">{editando ? "Actualizar" : "Guardar"}</button>
           </div>
         </form>
       )}
@@ -110,6 +166,7 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
           <thead>
             <tr>
               {columnas.map((c) => <th key={c.campo} className={c.right ? "num" : ""}>{c.titulo}</th>)}
+              {campos && <th className="num">Acciones</th>}
             </tr>
           </thead>
           <tbody>
@@ -120,10 +177,20 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
                     {c.render ? c.render(row[c.campo], row) : (row[c.campo] ?? "—")}
                   </td>
                 ))}
+                {campos && (
+                  <td className="num">
+                    <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
+                      <button type="button" className="btn outline sm" onClick={() => abrirEditar(row)}>Editar</button>
+                      <button type="button" className="btn sm" style={{ color: "var(--danger, #c0392b)" }} disabled={borrandoId === String(row.id)} onClick={() => eliminar(row)}>
+                        {borrandoId === String(row.id) ? "Eliminando…" : "Eliminar"}
+                      </button>
+                    </div>
+                  </td>
+                )}
               </tr>
             ))}
             {res && res.data.length === 0 && (
-              <tr><td colSpan={columnas.length} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>Sin resultados</td></tr>
+              <tr><td colSpan={columnas.length + (campos ? 1 : 0)} style={{ textAlign: "center", padding: "24px", color: "var(--muted)" }}>Sin resultados</td></tr>
             )}
           </tbody>
         </table>

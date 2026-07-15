@@ -171,6 +171,13 @@ const ResultadoCreate = z.object({
 });
 @ApiTags("resultados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("resultados")
 export class ResultadoController extends BaseCrudController {
+  // Edición manual del resultado (veredicto/unidad/analista). El recálculo desde
+  // réplicas se hace vía POST (capturar), no por PATCH.
+  protected updateSchema = z.object({
+    veredicto: z.string().max(20).optional(),
+    unidad: z.string().max(30).optional(),
+    analistaId: z.string().uuid().optional(),
+  });
   constructor(protected svc: ResultadoService) { super(); }
   @Post()
   crear(@Body() body: unknown) {

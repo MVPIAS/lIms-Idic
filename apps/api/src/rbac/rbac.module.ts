@@ -1,4 +1,19 @@
-import { Body, Controller, Get, Module, Post, Req, UseGuards, Injectable } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Module,
+  Param,
+  Patch,
+  Post,
+  Req,
+  UseGuards,
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  ParseUUIDPipe,
+} from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -77,6 +92,15 @@ const UsuarioCreate = z.object({
   rolId: z.string().uuid().optional(),
 });
 
+const UsuarioUpdate = z.object({
+  nombreCompleto: z.string().min(2).max(200).optional(),
+  email: z.string().email().optional().or(z.literal("")),
+  grado: z.string().max(80).optional(),
+  cargo: z.string().max(200).optional(),
+  estado: z.enum(["activo", "inactivo", "bloqueado"]).optional(),
+  rolId: z.string().uuid().optional(),
+});
+
 @ApiTags("usuarios") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("usuarios")
 export class UsuarioController {
   private prisma = new PrismaClient();
@@ -115,7 +139,56 @@ export class UsuarioController {
     const { passwordHash: _omit, ...safe } = u as any;
     return safe;
   }
+
+  /** Editar datos del usuario (no toca passwordHash). Opcionalmente reasigna su rol. */
+  @Patch(":id")
+  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = UsuarioUpdate.parse(body);
+    const tenantId = req.user?.tenantId;
+    // Verifica existencia + pertenencia al tenant (no revela usuarios de otros tenants).
+    const actual = await this.prisma.usuario.findFirst({
+      where: { id, deletedAt: null, ...(tenantId ? { tenantId } : {}) },
+    });
+    if (!actual) throw new NotFoundException(`usuario ${id} no encontrado`);
+
+    const { rolId, email, ...campos } = dto;
+    const data: any = { ...campos };
+    if (email !== undefined) data.email = email ? email : null;
+
+    const u = await this.prisma.usuario.update({ where: { id }, data });
+
+    // Reasignar rol: reemplaza los roles vigentes por el indicado.
+    if (rolId) {
+      await this.prisma.usuarioRol.deleteMany({ where: { usuarioId: id } });
+      await this.prisma.usuarioRol.create({ data: { usuarioId: id, rolId } });
+    }
+    const { passwordHash: _omit, ...safe } = u as any;
+    return safe;
+  }
+
+  /** Soft-delete: marca deletedAt y deja el usuario en estado 'inactivo'. */
+  @Delete(":id")
+  async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const tenantId = req.user?.tenantId;
+    const actual = await this.prisma.usuario.findFirst({
+      where: { id, deletedAt: null, ...(tenantId ? { tenantId } : {}) },
+    });
+    if (!actual) throw new NotFoundException(`usuario ${id} no encontrado`);
+    const u = await this.prisma.usuario.update({
+      where: { id },
+      data: { deletedAt: new Date(), estado: "inactivo" },
+    });
+    const { passwordHash: _omit, ...safe } = u as any;
+    return safe;
+  }
 }
+
+const RolCreate = z.object({
+  codigo: z.string().min(1).max(40),
+  nombre: z.string().min(1).max(120),
+  descripcion: z.string().optional(),
+});
+const RolUpdate = RolCreate.partial();
 
 @ApiTags("roles") @ApiBearerAuth() @UseGuards(AuthGuard("jwt")) @Controller("roles")
 export class RolController {
@@ -128,6 +201,45 @@ export class RolController {
       orderBy: { codigo: "asc" },
     });
     return { data, meta: { page: 1, limit: data.length, total: data.length, totalPages: 1 } };
+  }
+
+  @Post()
+  async crear(@Body() body: unknown, @Req() req: any) {
+    const dto = RolCreate.parse(body);
+    const tenantId = req.user?.tenantId ?? (await this.prisma.tenant.findFirst())?.id;
+    return this.prisma.rol.create({
+      data: {
+        tenantId,
+        codigo: dto.codigo,
+        nombre: dto.nombre,
+        descripcion: dto.descripcion ?? null,
+      },
+    });
+  }
+
+  @Patch(":id")
+  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = RolUpdate.parse(body);
+    const tenantId = req.user?.tenantId;
+    const actual = await this.prisma.rol.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+    });
+    if (!actual) throw new NotFoundException(`rol ${id} no encontrado`);
+    return this.prisma.rol.update({ where: { id }, data: dto });
+  }
+
+  @Delete(":id")
+  async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const tenantId = req.user?.tenantId;
+    const actual = await this.prisma.rol.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+    });
+    if (!actual) throw new NotFoundException(`rol ${id} no encontrado`);
+    // Los roles de sistema no se pueden borrar (protegen el RBAC base).
+    if (actual.esSistema) throw new ForbiddenException("No se puede eliminar un rol de sistema");
+    // El modelo Rol no tiene deleted_at → borrado físico. usuario_rol se limpia en cascada (onDelete: Cascade).
+    await this.prisma.rol.delete({ where: { id } });
+    return { ok: true, id };
   }
 }
 
