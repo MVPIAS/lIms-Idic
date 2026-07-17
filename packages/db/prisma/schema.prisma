@@ -806,6 +806,16 @@ model Resultado {
   fecha      DateTime  @default(now()) @db.Timestamptz
   deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
 
+  /// RF-D04.1/D04.2 · Equipo con el que se ejecutó el ensayo. OPCIONAL: NULL en
+  /// resultados históricos y en capturas que no informan equipo. Cuando se
+  /// informa, ResultadoService.capturar() llama a EquiposService.verificarApto()
+  /// ANTES de persistir y BLOQUEA (409) si el equipo está descalibrado / fuera
+  /// de servicio; sólo un equipo apto llega a guardarse aquí. Sin relación
+  /// Prisma: la tabla `equipo` la gestiona equipos.module.ts vía SQL crudo
+  /// (fuera del schema), igual que otros enlaces cross-dominio. La columna la
+  /// añade packages/db/align_resultado_equipo.sql.
+  equipoId   String?   @map("equipo_id") @db.Uuid
+
   /// RF-A06/D02.1 · Motor de fórmulas. `resultadoFinal` es el valor que
   /// devolvió la fórmula del analito (NULL si el analito no tiene fórmula: en
   /// ese caso el valor del ensayo es `promedio`). `formulaAplicada` es la copia
@@ -832,6 +842,7 @@ model Resultado {
   @@index([otId])
   @@index([muestraId])
   @@index([estado, fecha])
+  @@index([equipoId])
   @@map("resultado")
 }
 

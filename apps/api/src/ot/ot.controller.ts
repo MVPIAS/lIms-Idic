@@ -95,13 +95,60 @@ export class OtController {
   @Get()
   @RequierePermiso("ot.ver")
   async listar(@Req() req: any) {
-    return this.prisma.ordenTrabajo.findMany({
+    const tenantId = req?.user?.tenantId;
+    const ots = await this.prisma.ordenTrabajo.findMany({
       // OrdenTrabajo tiene tenant_id: solo se listan las OT del tenant del usuario.
-      where: { ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
+      where: { ...(tenantId ? { tenantId } : {}) },
       take: 50,
       orderBy: { createdAt: "desc" },
       include: { cliente: true },
     });
+
+    // Resumen del flujo activo por OT (estado + paso actual) para pintarlo en la
+    // lista sin una llamada por fila. `flujo_instancia_id` es una columna suelta
+    // (no hay relación Prisma), así que se resuelve en una segunda consulta,
+    // acotada al tenant para no filtrar instancias ajenas.
+    const instanciaIds = ots
+      .map((o) => o.flujoInstanciaId)
+      .filter((x): x is string => Boolean(x));
+    if (!instanciaIds.length) return ots;
+
+    const instancias = await this.prisma.flujoInstancia.findMany({
+      where: { id: { in: instanciaIds }, ...(tenantId ? { tenantId } : {}) },
+      select: {
+        id: true,
+        estado: true,
+        pasoActual: { select: { numero: true, actividad: true, tipo: true } },
+      },
+    });
+    const porId = new Map(instancias.map((i) => [i.id, i]));
+    return ots.map((o) => ({
+      ...o,
+      flujo: o.flujoInstanciaId ? porId.get(o.flujoInstanciaId) ?? null : null,
+    }));
+  }
+
+  /**
+   * Estado del flujo de una OT: la instancia (con historial y paso actual) y sus
+   * tareas actuales. Reutiliza el motor (`estadoInstancia` + `bandejaDeInstancia`),
+   * no lo duplica. Devuelve `{ instancia: null, tareas: [] }` si la OT no tiene
+   * flujo, para que la UI ofrezca iniciar uno.
+   */
+  @Get(":id/flujo")
+  @RequierePermiso("ot.ver")
+  async flujoDeOt(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const tenantId = req.user?.tenantId;
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, flujoInstanciaId: true },
+    });
+    if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
+    if (!ot.flujoInstanciaId) return { instancia: null, tareas: [] };
+    const [instancia, tareas] = await Promise.all([
+      this.flujos.estadoInstancia(ot.flujoInstanciaId, tenantId),
+      this.flujos.bandejaDeInstancia(ot.flujoInstanciaId, tenantId),
+    ]);
+    return { instancia, tareas };
   }
 
   @Get(":id")

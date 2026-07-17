@@ -1,7 +1,15 @@
-import { Injectable, UnauthorizedException, Inject } from "@nestjs/common";
+import { Injectable, UnauthorizedException, BadRequestException, Inject } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { PrismaClient } from "@prisma/client";
 import * as argon2 from "argon2";
+import { authenticator } from "otplib";
+import * as QRCode from "qrcode";
+
+// Ventana de tolerancia ±1 período (30 s) para compensar el desfase de reloj
+// entre el servidor y la app autenticadora del usuario.
+authenticator.options = { window: 1 };
+
+const TOTP_ISSUER = "LIMS IDIC";
 
 @Injectable()
 export class AuthService {
@@ -10,7 +18,7 @@ export class AuthService {
 
   constructor(private readonly jwt: JwtService) {}
 
-  async login(username: string, password: string) {
+  async login(username: string, password: string, totp?: string) {
     const usuario = await this.prisma.usuario.findFirst({
       where: {
         username,
@@ -44,6 +52,24 @@ export class AuthService {
       if (password !== "demo") throw new UnauthorizedException('En desarrollo: use la contraseña "demo"');
     } else {
       throw new UnauthorizedException("Usuario sin contraseña configurada");
+    }
+
+    // Segundo factor (TOTP). Solo se exige a usuarios con 2FA activo, por lo que
+    // el flujo de quienes no lo tienen (p. ej. el admin actual) no cambia.
+    if (usuario.totpActivo) {
+      if (!usuario.totpSecret) {
+        // Estado inconsistente: activo pero sin secreto. No se puede validar.
+        throw new UnauthorizedException("2FA mal configurado; contacte al administrador");
+      }
+      if (!totp || !authenticator.verify({ token: String(totp), secret: usuario.totpSecret })) {
+        // Contraseña correcta pero falta/ falla el segundo factor: el cliente
+        // debe reintentar el login incluyendo el campo `totp`.
+        throw new UnauthorizedException({
+          statusCode: 401,
+          requiere2fa: true,
+          message: "Se requiere el código de verificación (2FA)",
+        });
+      }
     }
 
     await this.prisma.usuario.update({
@@ -129,6 +155,8 @@ export class AuthService {
         grado: true,
         cargo: true,
         estado: true,
+        // Nunca se expone `totpSecret`; solo el estado del segundo factor.
+        totpActivo: true,
         usuarioRoles: {
           include: { rol: true },
         },
@@ -136,6 +164,98 @@ export class AuthService {
     });
     if (!usuario) throw new UnauthorizedException();
     return usuario;
+  }
+
+  // ─── 2FA · TOTP ───────────────────────────────────────────────────────────
+
+  /** Estado del segundo factor del usuario autenticado. */
+  async estado2fa(usuarioId: string) {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: usuarioId },
+      select: { totpActivo: true },
+    });
+    if (!usuario) throw new UnauthorizedException();
+    return { activo: usuario.totpActivo };
+  }
+
+  /**
+   * Genera (o regenera) un secreto TOTP para el usuario y lo persiste SIN
+   * activarlo todavía. Devuelve el `otpauthUrl` y un QR en dataURL listo para
+   * escanear con Google Authenticator / Aegis / Authy. El secreto no vuelve a
+   * exponerse una vez activado el 2FA.
+   */
+  async setup2fa(usuarioId: string) {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: usuarioId },
+      select: { id: true, username: true, totpActivo: true },
+    });
+    if (!usuario) throw new UnauthorizedException();
+    if (usuario.totpActivo) {
+      throw new BadRequestException("El 2FA ya está activo; desactívelo antes de regenerarlo");
+    }
+
+    const secret = authenticator.generateSecret();
+    const otpauthUrl = authenticator.keyuri(usuario.username, TOTP_ISSUER, secret);
+    const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
+
+    // Se guarda el secreto pero totpActivo sigue en false hasta confirmar código.
+    await this.prisma.usuario.update({
+      where: { id: usuario.id },
+      data: { totpSecret: secret, totpActivo: false },
+    });
+
+    return { otpauthUrl, qrDataUrl };
+  }
+
+  /**
+   * Verifica el primer código TOTP contra el secreto guardado y, si es válido,
+   * activa el segundo factor.
+   */
+  async activar2fa(usuarioId: string, codigo: string) {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: usuarioId },
+      select: { id: true, totpSecret: true, totpActivo: true },
+    });
+    if (!usuario) throw new UnauthorizedException();
+    if (usuario.totpActivo) throw new BadRequestException("El 2FA ya está activo");
+    if (!usuario.totpSecret) {
+      throw new BadRequestException("No hay un secreto pendiente; ejecute primero /auth/2fa/setup");
+    }
+    if (!authenticator.verify({ token: String(codigo), secret: usuario.totpSecret })) {
+      throw new UnauthorizedException("Código 2FA inválido");
+    }
+
+    await this.prisma.usuario.update({
+      where: { id: usuario.id },
+      data: { totpActivo: true },
+    });
+
+    return { ok: true, activo: true };
+  }
+
+  /**
+   * Verifica un código válido y desactiva el segundo factor, limpiando el
+   * secreto para que no quede material sensible en la base.
+   */
+  async desactivar2fa(usuarioId: string, codigo: string) {
+    const usuario = await this.prisma.usuario.findUnique({
+      where: { id: usuarioId },
+      select: { id: true, totpSecret: true, totpActivo: true },
+    });
+    if (!usuario) throw new UnauthorizedException();
+    if (!usuario.totpActivo || !usuario.totpSecret) {
+      throw new BadRequestException("El 2FA no está activo");
+    }
+    if (!authenticator.verify({ token: String(codigo), secret: usuario.totpSecret })) {
+      throw new UnauthorizedException("Código 2FA inválido");
+    }
+
+    await this.prisma.usuario.update({
+      where: { id: usuario.id },
+      data: { totpActivo: false, totpSecret: null },
+    });
+
+    return { ok: true, activo: false };
   }
 
   async logout(usuarioId: string) {

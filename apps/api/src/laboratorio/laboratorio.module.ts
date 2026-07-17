@@ -22,6 +22,10 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { validarTransicion } from "../common/estados";
 import { evaluarFormula, validarFormula, FormulaError, NOMBRES_FUNCION } from "../common/formula";
+// RF-D04.2 · BLOQUEO por calibración vencida. Se IMPORTA EquiposModule (que
+// exporta EquiposService) para reutilizar su verificarApto() desde la captura de
+// resultados. El módulo de equipos NO se toca: sólo se consume.
+import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 
 /* ===================== TIPOS DE MUESTRA (árbol) ===================== */
 @Injectable()
@@ -236,7 +240,9 @@ export class NormaLimiteController extends BaseCrudController {
 /* ===================== RESULTADOS (con estadística y veredicto) ===================== */
 @Injectable()
 export class ResultadoService extends BaseCrudService {
-  constructor(prisma: PrismaService) {
+  // `equipos` se inyecta desde EquiposModule (importado por LaboratorioModule)
+  // para aplicar el BLOQUEO por calibración vencida (RF-D04.2) en `capturar()`.
+  constructor(prisma: PrismaService, private readonly equipos: EquiposService) {
     super(prisma, { model: "resultado", search: [], include: { analito: true, muestra: true }, tenant: false, orderBy: { fecha: "desc" } });
   }
   private estadistica(rep: number[]) {
@@ -297,6 +303,23 @@ export class ResultadoService extends BaseCrudService {
    * contrasta con el límite y el que se informa.
    */
   async capturar(dto: any, tenantId = DEV_TENANT) {
+    // --- RF-D04.2 · BLOQUEO POR CALIBRACIÓN VENCIDA ------------------------
+    // Se comprueba ANTES de calcular estadística/fórmula y ANTES de persistir:
+    // no se puede emitir un resultado con un equipo descalibrado o fuera de
+    // servicio (NCh-ISO/IEC 17025). Si el analista informa `equipoId`,
+    // `verificarApto` lanza 409 (ConflictException) con el motivo del bloqueo
+    // —calibración vencida / sin calibración / equipo no operativo— o 404 si el
+    // equipo no existe o es de otro tenant, y el POST no persiste nada. Sólo un
+    // equipo APTO deja continuar la captura y su id se guarda en el resultado.
+    //
+    // Si NO viene `equipoId`, el comportamiento previo queda intacto: la captura
+    // procede sin equipo asociado (los 3.118 analitos y los flujos que no
+    // informan equipo siguen funcionando igual). La obligatoriedad de informar
+    // equipo, cuando se decida, se impone en el DTO/flujo, no aquí.
+    if (dto.equipoId) {
+      await this.equipos.verificarApto(dto.equipoId, tenantId);
+    }
+    // ----------------------------------------------------------------------
     const rep: number[] = dto.replicas;
     const st = this.estadistica(rep);
     const limite = dto.productoLimite
@@ -343,6 +366,9 @@ export class ResultadoService extends BaseCrudService {
         unidad: analito.unidad ?? null,
         veredicto: this.veredicto(valorEnsayo, limite?.limiteInf ? Number(limite.limiteInf) : null, limite?.limiteSup ? Number(limite.limiteSup) : null),
         analistaId: dto.analistaId ?? null,
+        // Equipo APTO con el que se ejecutó el ensayo (RF-D04.1). Ya verificado
+        // arriba; NULL si no se informó equipo.
+        equipoId: dto.equipoId ?? null,
         // Todo resultado nace en 'capturado': el ciclo RF-E01 empieza aquí.
         estado: "capturado",
       },
@@ -430,6 +456,12 @@ const ResultadoCreate = z.object({
   replicas: z.array(z.number().finite()).min(1),
   productoLimite: z.string().optional(),
   analistaId: z.string().uuid().optional(),
+  /**
+   * RF-D04.1/D04.2 · Equipo con el que se ejecuta el ensayo. OPCIONAL. Si se
+   * informa, la captura verifica su aptitud (calibración vigente + operativo) y
+   * BLOQUEA con 409 si no es apto antes de persistir. Ver ResultadoService.capturar().
+   */
+  equipoId: z.string().uuid().optional(),
   /**
    * Variables extra del ensayo para la fórmula del analito (masa, volumen,
    * factor, concentración del titulante…). Las claves deben ser identificadores
@@ -542,6 +574,9 @@ export class ResultadoController extends BaseCrudController {
 }
 
 @Module({
+  // EquiposModule aporta EquiposService (exportado) para el BLOQUEO por
+  // calibración vencida en ResultadoService.capturar() (RF-D04.2).
+  imports: [EquiposModule],
   controllers: [TipoMuestraController, MuestraController, MetodoController, AnalitoController, NormaLimiteController, ResultadoController],
   providers: [TipoMuestraService, MuestraService, MetodoService, AnalitoService, NormaLimiteService, ResultadoService],
 })

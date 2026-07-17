@@ -17,6 +17,19 @@ const estadoBadge = (e: string) => {
   return <span className={`pill ${map[e] ?? "gray"}`}>{e ?? "—"}</span>;
 };
 
+// Indicador de flujo (BPM) activo: estado de la instancia + paso actual.
+const flujoBadge = (f: any) => {
+  if (!f) return <span className="pill gray">sin flujo</span>;
+  const color = f.estado === "completado" ? "green" : f.estado === "cancelado" ? "red" : "blue";
+  const paso = f.pasoActual;
+  return (
+    <span title={paso ? `${paso.tipo} · ${paso.actividad}` : f.estado}>
+      <span className={`pill ${color}`}>{f.estado}</span>
+      {paso ? <small style={{ marginLeft: 6, color: "var(--muted)" }}>#{paso.numero} {paso.actividad}</small> : null}
+    </span>
+  );
+};
+
 export default function OtPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -56,6 +69,7 @@ export default function OtPage() {
               <th>Ingreso</th>
               <th>Prioridad</th>
               <th>Estado</th>
+              <th>Flujo</th>
             </tr>
           </thead>
           <tbody>
@@ -68,13 +82,14 @@ export default function OtPage() {
                 <td>{r.fechaIngreso ? String(r.fechaIngreso).slice(0, 10) : r.createdAt ? String(r.createdAt).slice(0, 10) : "—"}</td>
                 <td>{r.prioridad ?? "normal"}</td>
                 <td>{estadoBadge(r.estado)}</td>
+                <td>{flujoBadge(r.flujo)}</td>
               </tr>
             ))}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={5} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Sin órdenes de trabajo todavía. Se generan al aceptar una cotización.</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Sin órdenes de trabajo todavía. Se generan al aceptar una cotización.</td></tr>
             )}
             {loading && (
-              <tr><td colSpan={5} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Cargando…</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Cargando…</td></tr>
             )}
           </tbody>
         </table>

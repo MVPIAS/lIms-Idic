@@ -67,6 +67,7 @@ const NAV = [
     title: "Sistema",
     items: [
       { href: "/usuarios", label: "Usuarios y Roles", icon: "👥" },
+      { href: "/perfil", label: "Mi Perfil · 2FA", icon: "🔐" },
       { href: "/permisos", label: "Permisos", icon: "🔑" },
     ],
   },
