@@ -107,6 +107,39 @@ export default function EvidenciaFichaPage() {
     }
   }
 
+  /**
+   * RF-K07.1 · descarga del certificado en PDF/A.
+   *
+   * No se puede usar un <a href> normal: el endpoint exige el Bearer y un enlace
+   * no lo manda. Se descarga con fetch y se abre el blob en una pestaña, que
+   * además evita meter el token en la URL (quedaría en el historial y en los
+   * logs del proxy).
+   */
+  async function descargarCertificado(certId: string, codigo: string) {
+    setError("");
+    let url: string | null = null;
+    try {
+      const res = await fetch(`${API}/saec/certificados/${certId}/pdf`, { headers: auth() });
+      if (!res.ok) {
+        const msg = (await res.json().catch(() => ({}))).message ?? `Error ${res.status}`;
+        throw new Error(Array.isArray(msg) ? msg.join(", ") : msg);
+      }
+      const blob = await res.blob();
+      url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${codigo}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err: any) {
+      setError(Array.isArray(err.message) ? err.message.join(", ") : err.message);
+    } finally {
+      // Sin revoke, el blob se queda en memoria hasta recargar la página.
+      if (url) setTimeout(() => URL.revokeObjectURL(url!), 10_000);
+    }
+  }
+
   if (loading) return <div className="card" style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>Cargando…</div>;
   if (!e) return <div className="alert warn">{error || "Evidencia no encontrada"}</div>;
 
@@ -333,7 +366,7 @@ export default function EvidenciaFichaPage() {
         <h3 style={{ marginTop: 0 }}>Certificados emitidos</h3>
         <table className="data">
           <thead>
-            <tr><th>Código</th><th>Cód. verificación</th><th>HASH (SHA-256)</th><th>Estado</th><th>Emitido</th></tr>
+            <tr><th>Código</th><th>Cód. verificación</th><th>HASH (SHA-256)</th><th>Estado</th><th>Emitido</th><th></th></tr>
           </thead>
           <tbody>
             {(e.certificados ?? []).map((c: any) => (
@@ -343,10 +376,15 @@ export default function EvidenciaFichaPage() {
                 <td style={{ fontSize: 10.5, wordBreak: "break-all", maxWidth: 260 }}>{c.hash_documento}</td>
                 <td><span className={`pill ${c.estado === "emitido" ? "green" : "red"}`}>{c.estado}</span></td>
                 <td>{fechaHora(c.emitido_at)}</td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  <button className="btn sm" onClick={() => descargarCertificado(c.id, c.codigo)}>
+                    Descargar PDF/A
+                  </button>
+                </td>
               </tr>
             ))}
             {(e.certificados ?? []).length === 0 && (
-              <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: 14 }}>Sin certificados.</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 14 }}>Sin certificados.</td></tr>
             )}
           </tbody>
         </table>

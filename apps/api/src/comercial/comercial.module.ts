@@ -131,7 +131,12 @@ export class ListaPrecioController extends BaseCrudController {
 @Injectable()
 export class ListaPrecioItemService extends BaseCrudService {
   constructor(prisma: PrismaService) {
-    super(prisma, { model: "listaPrecioItem", search: ["codigo", "descripcion"], tenant: false, softDelete: false, orderBy: { codigo: "asc" } });
+    // OJO: la relación se llama `lista` en el modelo Prisma (la FK es
+    // listaPrecioId, pero el campo de navegación NO es `listaPrecio`), así que
+    // el include y el renderRef del front tienen que usar `lista`.
+    // ListaPrecioItem no tiene relación a `metodo`: sus líneas son de texto
+    // libre (codigo/descripcion/tipo), no apuntan al catálogo de métodos.
+    super(prisma, { model: "listaPrecioItem", search: ["codigo", "descripcion"], include: { lista: true }, tenant: false, softDelete: false, orderBy: { codigo: "asc" } });
   }
 }
 const ItemCreate = z.object({

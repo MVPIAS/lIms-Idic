@@ -1,0 +1,263 @@
+# =============================================================================
+# LIMS IDIC · PRODUCCIÓN ON-PREMISE (Ejército de Chile) · Aiuken
+# =============================================================================
+# Diferencias frente a docker-compose.prod.yml (preproducción cloud):
+#
+#   1. SIN `build:`  -> las imágenes llegan pre-construidas en .tar y se cargan
+#      con `docker load`. El servidor de destino NO tiene salida a Internet y
+#      no podría resolver dependencias de pnpm ni descargar imágenes base.
+#   2. TLS con certificado propio (Ejército) montado desde el host. Sin ACME.
+#   3. `restart: always` (no `unless-stopped`): tras un corte de luz el stack
+#      debe volver solo, sin intervención del operador del laboratorio.
+#   4. Volúmenes con RUTA DE HOST bajo ${LIMS_DATA_DIR}. Los volúmenes con
+#      nombre de Docker viven en /var/lib/docker/volumes y hacen el respaldo
+#      opaco; con rutas de host el backup y la auditoría son triviales.
+#   5. Healthchecks en TODOS los servicios y límites de recursos.
+#
+# Arranque (lo hace instalar-onpremise.sh, no a mano):
+#   docker compose -f docker-compose.onpremise.yml --env-file .env up -d
+#
+# Puertos publicados: SOLO 80/443 de Caddy. Postgres/Redis/MinIO/Metabase
+# permanecen en la red interna de Docker, sin publicar.
+# =============================================================================
+
+x-logging: &logging
+  # Sin rotación, los logs JSON de Docker llenan el disco de un servidor que
+  # nadie vigila a diario. 3 ficheros x 20 MB por contenedor.
+  driver: json-file
+  options: { max-size: "20m", max-file: "3" }
+
+services:
+  caddy:
+    image: ${CADDY_IMAGE:-caddy:2-alpine}
+    container_name: lims-caddy
+    pull_policy: never
+    restart: always
+    logging: *logging
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.onpremise:/etc/caddy/Caddyfile:ro
+      # Certificado interno del Ejército (o autofirmado). Solo lectura.
+      - ${LIMS_DATA_DIR}/certs:/etc/caddy/certs:ro
+      - ${LIMS_DATA_DIR}/caddy/data:/data
+      - ${LIMS_DATA_DIR}/caddy/config:/config
+    environment:
+      DOMAIN: ${DOMAIN}
+    healthcheck:
+      # /api/health a través del proxy: valida Caddy + web + api de una vez.
+      test: ["CMD", "wget", "-q", "--no-check-certificate", "-O", "-", "https://localhost/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 256M }
+    depends_on:
+      web: { condition: service_started }
+      api: { condition: service_healthy }
+
+  web:
+    image: ${LIMS_REGISTRY:-lims-idic}/web:${LIMS_VERSION:?defina LIMS_VERSION en .env}
+    container_name: lims-web
+    pull_policy: never
+    restart: always
+    logging: *logging
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: https://${DOMAIN}/api
+      TZ: America/Santiago
+    expose: ["3000"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 1G }
+    depends_on:
+      api: { condition: service_healthy }
+
+  api:
+    image: ${LIMS_REGISTRY:-lims-idic}/api:${LIMS_VERSION:?defina LIMS_VERSION en .env}
+    container_name: lims-api
+    pull_policy: never
+    restart: always
+    logging: *logging
+    environment:
+      NODE_ENV: production
+      API_PORT: 3001
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?defina JWT_SECRET en .env}
+      # CORS restringido al dominio interno. Sin comodines.
+      CORS_ORIGINS: https://${DOMAIN}
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      TZ: America/Santiago
+    expose: ["3001"]
+    healthcheck:
+      # /api/health devuelve status=degraded si la BD no responde, pero HTTP 200
+      # igualmente; por eso se comprueba el contenido, no solo el código.
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:3001/api/health | grep -q '\"status\":\"ok\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 1536M }
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      minio: { condition: service_healthy }
+
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: lims-postgres
+    pull_policy: never
+    restart: always
+    logging: *logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: America/Santiago
+      PGTZ: America/Santiago
+      # Locale es-CL para ordenaciones y mensajes coherentes con el sitio.
+      LANG: es_CL.utf8
+    volumes:
+      # Ruta de host: el respaldo en frío es copiar este directorio.
+      - ${LIMS_DATA_DIR}/postgres:/var/lib/postgresql/data
+      # Los .sql del producto, disponibles dentro del contenedor para el
+      # instalador y para reaplicar alineaciones tras una actualización.
+      - ./packages/db:/opt/db:ro
+      # Directorio de respaldo montado en el contenedor: pg_dump escribe aquí
+      # directamente y pg_restore --list puede releer el fichero para verificarlo
+      # sin sacarlo del contenedor. (`docker compose exec` no admite montar
+      # volúmenes al vuelo, así que el montaje tiene que declararse aquí.)
+      - ${LIMS_BACKUP_DIR:-/srv/lims-backup}:/backup
+    # Sin "ports": jamás accesible desde la red del cuartel.
+    command:
+      # Ajustes conservadores para un servidor de 16 GB dedicado al LIMS.
+      # Revisar con el DBA del IDIC si el hardware final difiere.
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=2GB"
+      - "-c"
+      - "effective_cache_size=6GB"
+      - "-c"
+      - "work_mem=16MB"
+      - "-c"
+      - "maintenance_work_mem=512MB"
+      # Registro de conexiones y DDL: trazabilidad exigible en datos FFAA.
+      - "-c"
+      - "log_connections=on"
+      - "-c"
+      - "log_disconnections=on"
+      - "-c"
+      - "log_statement=ddl"
+      - "-c"
+      - "log_min_duration_statement=2000"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "4.0", memory: 8G }
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    container_name: lims-redis
+    pull_policy: never
+    restart: always
+    logging: *logging
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy noeviction
+    volumes:
+      - ${LIMS_DATA_DIR}/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 768M }
+
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:lims-idic}
+    container_name: lims-minio
+    pull_policy: never
+    restart: always
+    logging: *logging
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?defina MINIO_ROOT_PASSWORD en .env}
+      # Sin salida a Internet: que no pierda tiempo buscando actualizaciones.
+      MINIO_UPDATE: "off"
+      MINIO_BROWSER: "on"
+      TZ: America/Santiago
+    command: server /data --console-address ":9001"
+    volumes:
+      # Ruta de host: documentos, informes y certificados firmados del IDIC.
+      - ${LIMS_DATA_DIR}/minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+
+  metabase:
+    image: ${METABASE_IMAGE:-metabase/metabase:lims-idic}
+    container_name: lims-metabase
+    pull_policy: never
+    restart: always
+    logging: *logging
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: ${POSTGRES_DB}
+      MB_DB_PORT: 5432
+      MB_DB_USER: ${POSTGRES_USER}
+      MB_DB_PASS: ${POSTGRES_PASSWORD}
+      MB_DB_HOST: postgres
+      # Datos reales de FFAA: se corta TODA telemetría hacia el fabricante.
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      MB_SEND_NEW_SSO_USER_ADMIN_EMAIL: "false"
+      JAVA_TIMEZONE: America/Santiago
+      TZ: America/Santiago
+    volumes:
+      - ${LIMS_DATA_DIR}/metabase:/plugins
+    expose: ["3000"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    deploy:
+      resources:
+        limits: { cpus: "2.0", memory: 2G }
+    depends_on:
+      postgres: { condition: service_healthy }
+
+# Sin sección `volumes:` a propósito: todo el estado persistente vive en
+# ${LIMS_DATA_DIR} (rutas de host), que es lo que respalda scripts/backup/backup.sh
+# y lo que el IDIC debe incluir en su copia a cinta/NAS.
+networks:
+  default:
+    name: lims-idic

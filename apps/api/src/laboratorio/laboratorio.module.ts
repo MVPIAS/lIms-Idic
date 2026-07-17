@@ -213,7 +213,10 @@ export class AnalitoController extends BaseCrudController {
 @Injectable()
 export class NormaLimiteService extends BaseCrudService {
   constructor(prisma: PrismaService) {
-    super(prisma, { model: "normaLimite", search: ["producto"], tenant: false, softDelete: false, orderBy: { id: "asc" } });
+    // `analito: true` (no anidado): la columna Analito del listado se pinta con
+    // etiquetaRef → "código · nombre", que ya está en el propio Analito. Incluir
+    // además su `metodo` sería un JOIN de más por fila sin nada que mostrar.
+    super(prisma, { model: "normaLimite", search: ["producto"], include: { analito: true }, tenant: false, softDelete: false, orderBy: { id: "asc" } });
   }
 }
 const NormaLimiteCreate = z.object({

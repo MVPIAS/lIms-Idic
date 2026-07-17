@@ -1,6 +1,6 @@
 "use client";
 
-import CrudTable from "@/components/CrudTable";
+import CrudTable, { renderRef } from "@/components/CrudTable";
 
 const num = (data: any) => ({
   ...data,
@@ -17,6 +17,7 @@ export default function LimitesPage() {
       subtitulo="Rangos de aceptación (inf–nominal–sup) por analito y producto. Base del veredicto Cumple/No cumple."
       prepararCrear={num}
       columnas={[
+        { campo: "analitoId", titulo: "Analito", render: renderRef("analito") },
         { campo: "producto", titulo: "Producto" },
         { campo: "limiteInf", titulo: "Lím. inf.", right: true },
         { campo: "nominal", titulo: "Nominal", right: true },
