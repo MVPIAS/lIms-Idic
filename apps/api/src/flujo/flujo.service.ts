@@ -280,6 +280,25 @@ export class FlujoService {
     });
   }
 
+  /**
+   * Bandeja de tareas actuales (pendiente/en_curso) de UNA instancia concreta.
+   * Es la vista de tareas para el expediente de una OT: reutiliza el mismo filtro
+   * y `include` que `bandeja()`, pero acotado a la instancia. Valida antes la
+   * pertenencia al tenant vía `estadoInstancia` (404 si es de otro tenant), para
+   * no revelar tareas de instancias ajenas.
+   */
+  async bandejaDeInstancia(instanciaId: string, tenantId?: string) {
+    await this.estadoInstancia(instanciaId, tenantId);
+    return this.prisma.tareaAsignada.findMany({
+      where: {
+        estado: { in: ["pendiente", "en_curso"] },
+        pasoEjecucion: { instanciaId },
+      },
+      orderBy: [{ venceAt: "asc" }, { prioridad: "desc" }],
+      include: { pasoEjecucion: { include: { paso: true } } },
+    });
+  }
+
   async estadoInstancia(instanciaId: string, tenantId?: string) {
     const ins = await this.prisma.flujoInstancia.findUnique({
       where: { id: instanciaId },

@@ -30,8 +30,10 @@ const ESTADO: Record<string, { texto: string; pill: string }> = {
 export default function CapturaPage() {
   const [muestras, setMuestras] = useState<any[]>([]);
   const [analitos, setAnalitos] = useState<any[]>([]);
+  const [equipos, setEquipos] = useState<any[]>([]);
   const [muestraId, setMuestraId] = useState("");
   const [analitoId, setAnalitoId] = useState("");
+  const [equipoId, setEquipoId] = useState("");
   const [raw, setRaw] = useState("12.4, 12.6, 12.5");
   const [saved, setSaved] = useState<any>(null);
   const [error, setError] = useState("");
@@ -39,12 +41,14 @@ export default function CapturaPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [m, a] = await Promise.all([
+        const [m, a, eq] = await Promise.all([
           fetch(`${API}/muestras?limit=100`, { headers: auth() }).then((x) => x.json()),
           fetch(`${API}/analitos?limit=200`, { headers: auth() }).then((x) => x.json()),
+          fetch(`${API}/equipos?limit=200`, { headers: auth() }).then((x) => x.json()),
         ]);
         setMuestras(m.data ?? []);
         setAnalitos(a.data ?? []);
+        setEquipos(eq.data ?? []);
       } catch (e: any) { setError(e.message); }
     })();
   }, []);
@@ -60,11 +64,30 @@ export default function CapturaPage() {
   const analito = useMemo(() => analitos.find((a) => a.id === analitoId), [analitos, analitoId]);
   const formula: string = (analito?.formula ?? "").trim();
 
+  // Equipo seleccionado (RF-D04.2). La API marca cada equipo con `apto` /
+  // `calibracion_vencida` / `estado`; con ellos se avisa ANTES de guardar de que
+  // el equipo no puede usarse. El BLOQUEO real lo hace el servidor (409 al
+  // capturar): esto es sólo el aviso preventivo, la fuente de verdad es la API.
+  const equipo = useMemo(() => equipos.find((e) => e.id === equipoId), [equipos, equipoId]);
+  const motivoNoApto = (e: any): string | null => {
+    if (!e) return null;
+    if (e.estado === "en_calibracion") return "en calibración";
+    if (e.estado === "fuera_servicio") return "fuera de servicio";
+    if (e.estado !== "operativo") return `no operativo (${e.estado})`;
+    if (!e.proxima_calibracion) return "sin calibración registrada";
+    if (e.calibracion_vencida) return `calibración vencida (${String(e.proxima_calibracion).slice(0, 10)})`;
+    return null;
+  };
+  const equipoLabel = (e: any) => {
+    const m = motivoNoApto(e);
+    return `${e.codigo} · ${e.nombre}${m ? `  ⚠ ${m}` : ""}`;
+  };
+
   async function guardar() {
     setError(""); setSaved(null);
     if (!muestraId || !analitoId) { setError("Seleccione muestra y analito para persistir."); return; }
     try {
-      const r = await fetch(`${API}/resultados`, { method: "POST", headers: auth(), body: JSON.stringify({ muestraId, analitoId, replicas }) });
+      const r = await fetch(`${API}/resultados`, { method: "POST", headers: auth(), body: JSON.stringify({ muestraId, analitoId, replicas, ...(equipoId ? { equipoId } : {}) }) });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message ?? `Error ${r.status}`);
       setSaved(await r.json());
     } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
@@ -94,6 +117,32 @@ export default function CapturaPage() {
               <option value="">— seleccionar —</option>
               {analitos.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre} {a.unidad ? `(${a.unidad})` : ""}</option>)}
             </select>
+          </div>
+          <div className="field span-2">
+            <label>Equipo <span style={{ textTransform: "none", color: "var(--muted)", fontStyle: "italic" }}>(opcional · ISO 17025 RF-D04.2)</span></label>
+            <select value={equipoId} onChange={(e) => setEquipoId(e.target.value)}>
+              <option value="">— sin equipo —</option>
+              {equipos.map((e) => <option key={e.id} value={e.id}>{equipoLabel(e)}</option>)}
+            </select>
+            {equipo && motivoNoApto(equipo) ? (
+              <span style={{ marginTop: 6, display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span className="pill red">No apto</span>
+                <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                  Equipo {motivoNoApto(equipo)}. El servidor bloqueará la captura con este equipo (ISO/IEC 17025): recalíbrelo o elija otro.
+                </span>
+              </span>
+            ) : equipo ? (
+              <span style={{ marginTop: 6, display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span className="pill green">Apto</span>
+                {equipo.proxima_calibracion && (
+                  <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Calibración vigente hasta {String(equipo.proxima_calibracion).slice(0, 10)}.</span>
+                )}
+              </span>
+            ) : (
+              <span style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 4, display: "block" }}>
+                Sin equipo asociado. Informe un equipo para registrar con qué instrumento se ejecutó el ensayo; los descalibrados o fuera de servicio se bloquean al guardar.
+              </span>
+            )}
           </div>
           <div className="field span-2">
             <label>Réplicas (separadas por coma o espacio)</label>
@@ -154,6 +203,9 @@ export default function CapturaPage() {
             <span>CV: <b>{num(saved.cv, 2)}%</b></span>
             <span className={`pill ${saved.veredicto === "Cumple" ? "green" : saved.veredicto === "No cumple" ? "red" : "gray"}`}>{saved.veredicto}</span>
             <span className={`pill ${ESTADO[saved.estado]?.pill ?? "gray"}`}>{ESTADO[saved.estado]?.texto ?? saved.estado}</span>
+            {saved.equipoId && (
+              <span>Equipo: <b>{equipos.find((e) => e.id === saved.equipoId)?.codigo ?? saved.equipoId}</b></span>
+            )}
           </div>
           {saved.formulaAplicada && (
             <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 8 }}>

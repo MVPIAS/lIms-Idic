@@ -1,6 +1,12 @@
 -- ============================================================
 -- SEED RBAC · asignación rol_permiso + permisos nuevos · LIMS IDIC (Aiuken)
 -- Idempotente. Requiere schema.sql ya aplicado (roles y permisos base existen).
+-- Códigos de rol reales (13): SUPERADMIN, ADMIN, DIRECTOR, JEFE_LAB, ANALISTA_SR,
+--   ANALISTA, TECNICO, RECEPCION, COMERCIAL, COBRANZA, CALIDAD, LECTOR, CLIENTE.
+-- Matriz alineada con 06_entregables_cliente/RBAC_Roles_Permisos_LIMS_IDIC_Aiuken.xlsx.
+-- NOTA: los permisos de los módulos posteriores (SAEC: evidencia.*/arma.*/caso.*/
+--   ibis.*/peritaje.registrar/saec.certificado.emitir, y equipos) se siembran en sus
+--   propios scripts (saec.sql, equipos_custodia.sql). NO se duplican aquí.
 -- ============================================================
 
 -- 1) Permisos NUEVOS (plantillas, firma, catálogo)
@@ -102,6 +108,9 @@ SELECT r.id, p.id FROM (VALUES
   ('DIRECTOR','ot.ver'),
   ('DIRECTOR','plantilla.ver'),
   ('DIRECTOR','resultado.aprobar'),
+  -- ISO 17025: quien aprueba debe poder devolver/revisar. Sin esto, DIRECTOR
+  -- solo puede aprobar (incentivo perverso). Añadido sobre la matriz Excel v1.0.
+  ('DIRECTOR','resultado.revisar'),
   ('DIRECTOR','resultado.ver'),
   ('JEFE_LAB','audit.ver'),
   ('JEFE_LAB','catalogo.gestionar'),
