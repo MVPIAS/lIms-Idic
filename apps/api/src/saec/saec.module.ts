@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   Module,
   NotFoundException,
   Param,
@@ -12,16 +13,45 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UseGuards,
 } from "@nestjs/common";
+import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { Public } from "../auth/public.decorator";
+// RF-K07.1 · el certificado SAEC se renderiza y se sella con el MISMO motor,
+// el mismo envoltorio imprimible y el mismo generador de PDF/A que los informes.
+// Aquí solo vive el cuerpo propio del dominio (saec-certificado.plantilla.ts).
+import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-defecto";
+import { generarPdf } from "../plantilla-render/pdf.renderer";
+import { fmtFecha } from "../plantilla-render/html.util";
+import { cuerpoCertificadoSaec, tituloCertificadoSaec } from "./saec-certificado.plantilla";
+
+/**
+ * Código de verificación corto e imprimible del certificado SAEC.
+ *
+ * Alfabeto Crockford base32 sin I/L/O/U — mismo criterio que los informes
+ * (`PlantillaRenderService.nuevoCodigoVerificacion`): no se confunde 0/O ni 1/I
+ * al teclearlo desde el papel y no forma palabras. 10 símbolos ~= 51 bits: no es
+ * adivinable por fuerza bruta contra el endpoint público.
+ *
+ * Sustituye a `randomBytes(8).toString("hex")`, que daba 16 caracteres
+ * hexadecimales donde 0/O y 1/I sí se confunden al copiarlos de un papel — y un
+ * código mal tecleado en una fiscalía se lee como "certificado no auténtico".
+ * `randomInt` usa el CSPRNG del sistema (no Math.random).
+ */
+function nuevoCodigoVerificacionSaec(): string {
+  const A = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  let s = "";
+  for (let i = 0; i < 10; i++) s += A[randomInt(A.length)];
+  return `${s.slice(0, 5)}-${s.slice(5)}`;
+}
 
 // ---------------------------------------------------------------------------
 // Módulo SAEC · Armas, Evidencias y Certificados (bloque RF-K del SRS).
@@ -1067,7 +1097,32 @@ export class EvidenciaController extends SaecBase {
     return rows[0];
   }
 
-  /** RF-K07.1 / K07.2 · emisión del certificado con código de verificación y HASH. */
+  /**
+   * RF-K07.1 / K07.2 · emisión del certificado: RENDERIZA el documento, lo
+   * sella con SHA-256, le asigna correlativo y código de verificación.
+   *
+   * ---------------------------------------------------------------------------
+   * QUÉ SE SELLA (anti-repudio)
+   * ---------------------------------------------------------------------------
+   * `hash_documento = sha256(documento_html)`, donde `documento_html` es el
+   * CUERPO renderizado del certificado, guardado tal cual en la fila. Misma
+   * semántica exacta que los informes (`PlantillaRenderService.emitir`), para
+   * que haya UNA sola definición de "sello" en todo el LIMS.
+   *
+   * Antes el hash se calculaba sobre `JSON.stringify(contenido)`, lo que era
+   * un sello sobre un objeto que NO era el documento: no existía documento que
+   * verificar, y el orden de claves de `JSON.stringify` no está garantizado
+   * entre versiones de motor, así que el hash ni siquiera era estable por
+   * construcción. `contenido` se sigue guardando como snapshot legible por
+   * máquina, pero YA NO es lo que se sella.
+   *
+   * El pie con el hash y el código de verificación NO entra en lo sellado
+   * (sería circular: un texto no puede contener su propio hash). Lo añade la
+   * capa de presentación (`documentoCompleto` / `generarPdf`).
+   *
+   * Todo va en UNA transacción: reservar correlativo -> renderizar -> insertar.
+   * Un fallo al renderizar no debe dejar un correlativo quemado.
+   */
   @Post(":id/certificado")
   @RequierePermiso("saec.certificado.emitir")
   async emitirCertificado(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
@@ -1076,9 +1131,11 @@ export class EvidenciaController extends SaecBase {
 
     // RF-K07.1 · solo se certifica una vez registrados los resultados.
     const peritajes = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT * FROM peritaje_balistico
-        WHERE tenant_id = $1::uuid AND evidencia_id = $2::uuid AND deleted_at IS NULL
-        ORDER BY fecha_peritaje DESC`,
+      `SELECT p.*, u.nombre_completo AS perito_nombre
+         FROM peritaje_balistico p
+         LEFT JOIN usuario u ON u.id = p.perito_id
+        WHERE p.tenant_id = $1::uuid AND p.evidencia_id = $2::uuid AND p.deleted_at IS NULL
+        ORDER BY p.fecha_peritaje DESC`,
       tenantId, id,
     );
     if (!peritajes.length) {
@@ -1087,35 +1144,91 @@ export class EvidenciaController extends SaecBase {
       );
     }
 
-    const codigo = await this.siguienteCodigo("saec_certificado", "CERT-SAEC-2026-", tenantId);
-    // Snapshot inmutable de lo que se certifica.
-    const contenido = {
-      certificado: codigo,
-      emitidoAt: new Date().toISOString(),
-      evidencia: {
-        codigo: evidencia.codigo, tipo: evidencia.tipo, descripcion: evidencia.descripcion,
-        exhibitNumber: evidencia.exhibit_number, calibre: evidencia.calibre_texto,
-        caso: evidencia.caso?.numero_caso ?? null,
-      },
-      peritajes: peritajes.map((p) => ({
-        origen: p.origen, resultado: p.resultado, conclusiones: p.conclusiones,
-        fecha: p.fecha_peritaje, hitCount: p.hit_count,
-      })),
-      emisor: { tenant: tenantId, usuario: req?.user?.username ?? null },
-    };
-    const hash = createHash("sha256").update(JSON.stringify(contenido)).digest("hex");
-    // Código de verificación corto, aleatorio y no adivinable (no derivado del hash).
-    const codigoVerificacion = randomBytes(8).toString("hex").toUpperCase();
+    // Resto del expediente que va al documento. En paralelo: son lecturas
+    // independientes y el certificado las necesita todas.
+    const [movimientos, hits, armas] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT m.*, du.nombre_completo AS desde_usuario, hu.nombre_completo AS hacia_usuario
+           FROM evidencia_movimiento m
+           LEFT JOIN usuario du ON du.id = m.desde_usuario_id
+           LEFT JOIN usuario hu ON hu.id = m.hacia_usuario_id
+          WHERE m.tenant_id = $1::uuid AND m.evidencia_id = $2::uuid
+          ORDER BY m.fecha ASC`,
+        tenantId, id),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT h.*, ea.codigo AS evidencia_a_codigo, eb.codigo AS evidencia_b_codigo
+           FROM ibis_hit h
+           LEFT JOIN evidencia ea ON ea.id = h.evidencia_a_id
+           LEFT JOIN evidencia eb ON eb.id = h.evidencia_b_id
+          WHERE h.tenant_id = $1::uuid AND h.deleted_at IS NULL
+            AND (h.evidencia_a_id = $2::uuid OR h.evidencia_b_id = $2::uuid)
+          ORDER BY h.score DESC NULLS LAST`,
+        tenantId, id),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT * FROM arma
+          WHERE tenant_id = $1::uuid AND evidencia_id = $2::uuid AND deleted_at IS NULL
+          LIMIT 1`,
+        tenantId, id),
+    ]);
 
-    const rows = await this.prisma.$queryRawUnsafe<any[]>(
-      `INSERT INTO saec_certificado
-         (tenant_id, evidencia_id, codigo, codigo_verificacion, hash_documento, contenido, emitido_por)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7::uuid)
-       RETURNING *`,
-      tenantId, id, codigo, codigoVerificacion, hash, JSON.stringify(contenido), req?.user?.sub ?? null,
-    );
-    await this.auditar(req, "certificado", rows[0].id, "emitir", { codigo, evidenciaId: id });
-    return rows[0];
+    const fecha = new Date();
+    const codigoVerificacion = nuevoCodigoVerificacionSaec();
+
+    return this.prisma.$transaction(async (tx: ClienteSql) => {
+      const codigo = await this.siguienteCodigo("saec_certificado", "CERT-SAEC-2026-", tenantId, tx);
+
+      // El CUERPO imprime el número de certificado, así que el hash depende de
+      // él: no se puede sellar antes de haberlo reservado.
+      const { html: documentoHtml, faltantes } = cuerpoCertificadoSaec({
+        certificado: { codigo, codigoVerificacion, fecha },
+        evidencia,
+        caso: evidencia.caso ?? null,
+        arma: armas[0] ?? null,
+        peritajes,
+        movimientos,
+        hits,
+        emisor: {
+          nombre: req?.user?.nombreCompleto ?? req?.user?.username ?? null,
+          unidad: null,
+        },
+      });
+      const hash = createHash("sha256").update(documentoHtml, "utf8").digest("hex");
+
+      // Snapshot legible por máquina. Se conserva porque es útil para explotación
+      // y para la integración con terceros, pero NO es el sello.
+      const contenido = {
+        certificado: codigo,
+        emitidoAt: fecha.toISOString(),
+        evidencia: {
+          codigo: evidencia.codigo, tipo: evidencia.tipo, descripcion: evidencia.descripcion,
+          exhibitNumber: evidencia.exhibit_number, calibre: evidencia.calibre_texto,
+          caso: evidencia.caso?.numero_caso ?? null,
+        },
+        peritajes: peritajes.map((p) => ({
+          origen: p.origen, resultado: p.resultado, conclusiones: p.conclusiones,
+          fecha: p.fecha_peritaje, hitCount: p.hit_count,
+        })),
+        totales: { movimientos: movimientos.length, hits: hits.length },
+        emisor: { tenant: tenantId, usuario: req?.user?.username ?? null },
+      };
+
+      const rows = await tx.$queryRawUnsafe<any[]>(
+        `INSERT INTO saec_certificado
+           (tenant_id, evidencia_id, codigo, codigo_verificacion, hash_documento, contenido,
+            documento_html, emitido_por, emitido_at)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::jsonb, $7, $8::uuid, $9::timestamptz)
+         RETURNING *`,
+        tenantId, id, codigo, codigoVerificacion, hash, JSON.stringify(contenido),
+        documentoHtml, req?.user?.sub ?? null, fecha.toISOString(),
+      );
+
+      await this.auditar(
+        req, "certificado", rows[0].id, "emitir",
+        { codigo, evidenciaId: id, hash, faltantes: faltantes.length ? faltantes : undefined },
+        tx,
+      );
+      return rows[0];
+    });
   }
 }
 
@@ -2068,34 +2181,164 @@ export class SaecCertificadoController extends SaecBase {
     return { data, meta: { page: p, limit: l, total: Number(totalRows[0]?.total ?? 0) } };
   }
 
+  /** Carga un certificado validando tenant (404 en cross-tenant, no 403). */
+  private async certificadoDelTenant(id: string, tenantId: string) {
+    const rows = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT c.*, e.codigo AS evidencia_codigo
+         FROM saec_certificado c
+         JOIN evidencia e ON e.id = c.evidencia_id
+        WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid AND c.deleted_at IS NULL
+        LIMIT 1`,
+      id, tenantId,
+    );
+    if (!rows.length) throw new NotFoundException("Certificado no encontrado");
+    return rows[0];
+  }
+
+  /** El sello que va al pie del documento (fuera de lo hasheado). */
+  private sello(c: any): Sello {
+    return {
+      numero: c.codigo,
+      codigoVerificacion: c.codigo_verificacion ?? "—",
+      hash: c.hash_documento ?? "",
+      fecha: fmtFecha(c.emitido_at),
+      urlVerificacion: `${(process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "")}/${c.codigo_verificacion}`,
+    };
+  }
+
+  /**
+   * Documento sellado de un certificado, o 404 explicando por qué no lo hay.
+   * Un certificado sin `documento_html` es uno emitido antes de RF-K07.1: no se
+   * puede reconstruir sin re-renderizar (y re-renderizar rompería el sello).
+   */
+  private documentoSellado(c: any): string {
+    if (!c.documento_html) {
+      throw new NotFoundException(
+        `El certificado ${c.codigo} se emitió antes de que se guardara el documento sellado y no puede regenerarse. Emita uno nuevo.`,
+      );
+    }
+    return c.documento_html;
+  }
+
+  /**
+   * RF-K07.1 · PDF/A del certificado, generado desde el HTML SELLADO en la BD.
+   *
+   * No se re-renderiza a partir de la evidencia: el PDF de hoy y el de dentro de
+   * un año son el mismo documento aunque la cadena de custodia haya seguido
+   * creciendo o el peritaje se haya reabierto. Es lo que hace que el hash del
+   * pie siga cuadrando.
+   *
+   * `evidencia.ver` y no `saec.certificado.emitir`: descargar un certificado ya
+   * emitido es una LECTURA; quien consulta el expediente no tiene por qué poder
+   * emitir. Mismo criterio que `informes/:id/pdf`.
+   */
+  @Get(":id/pdf")
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard("jwt"), PermisoGuard)
+  @RequierePermiso("evidencia.ver")
+  async pdf(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
+    const tenantId = this.tenantId(req);
+    const c = await this.certificadoDelTenant(id, tenantId);
+    const buffer = await generarPdf(
+      this.documentoSellado(c),
+      this.sello(c),
+      tituloCertificadoSaec(c.codigo, c.evidencia_codigo),
+    );
+    // RF-K09.2 · quién se descarga el certificado de una evidencia forense es
+    // justo lo que una auditoría quiere poder reconstruir.
+    await this.auditar(req, "certificado", id, "descargar", { formato: "pdf", codigo: c.codigo });
+    // Nombre de fichero seguro: saneado a [A-Za-z0-9._-], sin ruta ni comillas,
+    // así no puede inyectar CRLF ni cerrar la cabecera.
+    const nombre = `${String(c.codigo).replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
+    res.set({
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="${nombre}"`,
+      "Content-Length": String(buffer.length),
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.end(buffer);
+  }
+
+  /** Mismo documento en HTML imprimible (`@media print` A4). Alternativa al PDF. */
+  @Get(":id/html")
+  @ApiBearerAuth()
+  @UseGuards(AuthGuard("jwt"), PermisoGuard)
+  @RequierePermiso("evidencia.ver")
+  @Header("Content-Type", "text/html; charset=utf-8")
+  @Header("Cache-Control", "private, no-store")
+  async html(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const c = await this.certificadoDelTenant(id, tenantId);
+    return documentoCompleto(
+      this.documentoSellado(c),
+      this.sello(c),
+      tituloCertificadoSaec(c.codigo, c.evidencia_codigo),
+    );
+  }
+
   /**
    * RF-K07.3 · verificación PÚBLICA de la autenticidad de un certificado.
    *
    * Es deliberadamente @Public(): un tercero (fiscal, tribunal) valida el
    * documento sin cuenta en el LIMS. Por eso NO filtra por tenant (el código de
-   * verificación es único global y aleatorio de 64 bits) y devuelve el mínimo
+   * verificación es único global y aleatorio) y devuelve el mínimo
    * imprescindible: nunca el contenido íntegro ni datos del caso.
+   *
+   * INTEGRIDAD: el hash se RECALCULA sobre el documento sellado en lugar de leer
+   * la columna `hash_documento`. Así el endpoint detecta también una
+   * manipulación del hash directamente en la base de datos: quien altere el
+   * documento tendría que alterar además la columna, y aun así no cuadraría con
+   * lo que dice el papel. Antes se devolvía la columna tal cual, que es
+   * autorreferencial y no prueba nada. Mismo criterio que
+   * `PlantillaRenderService.verificar`.
    */
   @Get("verificar/:codigoVerificacion")
   @Public()
   async verificar(@Param("codigoVerificacion") codigo: string) {
+    const limpio = (codigo ?? "").trim().toUpperCase();
+    // Filtro de forma antes de tocar la BD: el código es corto y de alfabeto
+    // conocido, no un UUID ni texto libre.
+    if (!/^[0-9A-Z-]{5,24}$/.test(limpio)) {
+      return { data: { valido: false, mensaje: "No existe ningún certificado con ese código de verificación." } };
+    }
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT c.codigo, c.codigo_verificacion, c.hash_documento, c.estado, c.emitido_at,
-              c.anulado_at, e.codigo AS evidencia_codigo, t.nombre AS emisor
+      `SELECT c.codigo, c.codigo_verificacion, c.hash_documento, c.documento_html, c.estado,
+              c.emitido_at, c.anulado_at, e.codigo AS evidencia_codigo, t.nombre AS emisor
          FROM saec_certificado c
          JOIN evidencia e ON e.id = c.evidencia_id
          JOIN tenant t    ON t.id = c.tenant_id
         WHERE c.codigo_verificacion = $1 AND c.deleted_at IS NULL
         LIMIT 1`,
-      (codigo ?? "").trim().toUpperCase(),
+      limpio,
     );
     if (!rows.length) {
       return { data: { valido: false, mensaje: "No existe ningún certificado con ese código de verificación." } };
     }
     const c = rows[0];
+
+    if (c.estado !== "emitido") {
+      return {
+        data: {
+          valido: false, estado: c.estado, certificado: c.codigo,
+          evidencia: c.evidencia_codigo, emisor: c.emisor,
+          emitidoAt: c.emitido_at, anuladoAt: c.anulado_at,
+          hashDocumento: c.hash_documento,
+          mensaje: "El certificado existe pero está ANULADO.",
+        },
+      };
+    }
+
+    // Sin documento no se puede afirmar integridad. NO se da por válido: un
+    // "válido" que no se ha comprobado es peor que un "no comprobable".
+    const hashReal = c.documento_html
+      ? createHash("sha256").update(c.documento_html, "utf8").digest("hex")
+      : null;
+    const integro = hashReal !== null && hashReal === c.hash_documento;
+
     return {
       data: {
-        valido: c.estado === "emitido",
+        valido: integro,
         estado: c.estado,
         certificado: c.codigo,
         evidencia: c.evidencia_codigo,
@@ -2103,9 +2346,11 @@ export class SaecCertificadoController extends SaecBase {
         emitidoAt: c.emitido_at,
         anuladoAt: c.anulado_at,
         hashDocumento: c.hash_documento,
-        mensaje: c.estado === "emitido"
-          ? "Certificado auténtico. Compare el HASH con el del documento en su poder."
-          : "El certificado existe pero está ANULADO.",
+        mensaje: integro
+          ? "Certificado auténtico. Compare el HASH con el impreso en el documento en su poder."
+          : hashReal === null
+            ? "Certificado registrado, pero se emitió sin documento sellado y su integridad NO puede comprobarse."
+            : "ALERTA: el sello de integridad del documento no coincide. El certificado puede haber sido manipulado.",
       },
     };
   }

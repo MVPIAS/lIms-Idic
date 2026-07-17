@@ -62,7 +62,7 @@ export default function VerificarCertificadoPage() {
               required
               value={codigo}
               onChange={(e) => setCodigo(e.target.value.toUpperCase())}
-              placeholder="Ej. 4F2A9C1B7E3D5A80"
+              placeholder="Ej. K7M2Q-9XTR4"
               style={{ fontFamily: "ui-monospace, Menlo, Consolas, monospace", letterSpacing: 1 }}
             />
           </div>

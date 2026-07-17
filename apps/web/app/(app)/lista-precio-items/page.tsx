@@ -1,6 +1,6 @@
 "use client";
 
-import CrudTable from "@/components/CrudTable";
+import CrudTable, { renderRef } from "@/components/CrudTable";
 
 const num = (data: any) => ({
   ...data,
@@ -15,6 +15,8 @@ export default function ListaPrecioItemsPage() {
       subtitulo="Líneas de tarifario: servicios, HH/HM, viáticos e insumos con su precio. Alimentan el costeo."
       prepararCrear={num}
       columnas={[
+        // La relación Prisma se llama `lista`, no `listaPrecio`.
+        { campo: "listaPrecioId", titulo: "Lista", render: renderRef("lista") },
         { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "descripcion", titulo: "Descripción" },
         { campo: "tipo", titulo: "Tipo", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
