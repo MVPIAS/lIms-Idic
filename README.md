@@ -42,7 +42,9 @@ lims-idic/
 ## Requisitos
 
 - **Node.js** 20.x LTS
-- **pnpm** 9.x (`npm install -g pnpm`)
+- **pnpm** 9.15+ — no hace falta instalarlo a mano: `corepack enable` activa la
+  versión exacta fijada en `packageManager` (raíz). Evitar `pnpm@9.0.0`: su
+  ejecución de lifecycle-scripts es incompatible con Node 24 y aborta el install.
 - **Docker Desktop** (para PostgreSQL, Redis, MinIO locales)
 - **Git** 2.40+
 
@@ -95,6 +97,30 @@ pnpm db:studio        # abre Prisma Studio (UI de BD)
 pnpm db:seed          # carga datos seed
 ```
 
+## Problemas conocidos
+
+### Windows · rutas largas rompen `prisma migrate`
+
+Prisma lanza `schema-engine-windows.exe` como proceso aparte, y `CreateProcess`
+no admite rutas de más de 260 caracteres (`MAX_PATH`) **aunque `LongPathsEnabled`
+esté activo en el registro**. Si el repo vive en una ruta profunda, `pnpm db:migrate`
+falla con un `ENOENT` que engaña, porque el binario sí existe:
+
+```
+Error: Schema engine exited. Error: Command failed with ENOENT:
+  ...\node_modules\.pnpm\@prisma+engines@5.22.0\...\schema-engine-windows.exe
+```
+
+Arrancar la API **no** se ve afectado: el query engine es una DLL que carga el
+propio Node, no un proceso aparte. Sólo golpea a los comandos de migración.
+
+Solución: clonar en una ruta corta (p. ej. `C:\dev\lims-idic`) y correr las
+migraciones desde ahí. Para medir la ruta del engine:
+
+```powershell
+(Resolve-Path "node_modules\.pnpm\@prisma+engines@*\node_modules\@prisma\engines\schema-engine-windows.exe").Path.Length
+```
+
 ## Convenciones de código
 
 - **TypeScript** estricto en todo (no JavaScript)
@@ -122,10 +148,18 @@ Ver `docs/adr/` para registro formal de decisiones. Las clave:
 
 ## Tests y CI
 
+- **CI**: GitHub Actions (`.github/workflows/ci.yml`), en cada PR y push a `main`:
+  `install --frozen-lockfile` → `db:generate` → `build` (api + web) → smoke test
+  que arranca la API contra un PostgreSQL de servicio y espera 200 en `/api/health`.
 - **Unit tests**: Jest (api + web)
 - **E2E tests**: Playwright comparando contra capturas del legacy PHP
-- **CI**: GitHub Actions (lint → test → build → docker)
 - **Coverage objetivo**: 70% líneas, 80% en módulos críticos (auth, cotización, OT)
+
+> ⚠️ **`pnpm lint` y `pnpm test` no corren hoy** y por eso el CI todavía no los
+> incluye: falta `eslint` en `apps/api` y `jest` en `apps/web` (los scripts los
+> invocan pero las dependencias no están declaradas), y la suite de `apps/api`
+> falla al transformar con Babel sin llegar a ejecutar ningún test. Arreglar eso
+> y sumarlos al workflow es trabajo pendiente.
 
 ## Despliegue
 
