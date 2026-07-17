@@ -10,6 +10,30 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
+/**
+ * fetch autenticado. TODA llamada del diseñador debe pasar por aquí: el API
+ * exige el JWT (flujo.ver/editar/publicar, ot.crear/ver) y sin la cabecera
+ * Authorization respondía 401 y el diseñador quedaba inservible. El token se
+ * guarda en localStorage tras el login (ver lib/api.ts). Si expiró (401),
+ * limpiamos y mandamos a /login como hace el cliente central.
+ */
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("lims_token") : null;
+  const res = await fetch(`${API}${path}`, {
+    ...init,
+    headers: {
+      ...(init.body ? { "Content-Type": "application/json" } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init.headers ?? {}),
+    },
+  });
+  if (res.status === 401 && typeof window !== "undefined") {
+    localStorage.removeItem("lims_token");
+    window.location.href = "/login";
+  }
+  return res;
+}
+
 type Paso = {
   tmpId: string; numero: number; tipo: string; actividad: string;
   slaMinutos?: number | null;
@@ -32,14 +56,14 @@ export default function FlujosPage() {
   const [simulacion, setSimulacion] = useState<any | null>(null);
 
   const cargarDefs = useCallback(async () => {
-    const r = await fetch(`${API}/flujos`);
+    const r = await authFetch(`/flujos`);
     if (r.ok) setDefs(await r.json());
   }, []);
   useEffect(() => { cargarDefs(); }, [cargarDefs]);
 
   async function abrir(codigo: string) {
     setMsg(""); setSimulacion(null);
-    const r = await fetch(`${API}/flujos/codigo/${codigo}`);
+    const r = await authFetch(`/flujos/codigo/${codigo}`);
     if (!r.ok) { setMsg("No se pudo cargar el flujo"); return; }
     const v = await r.json();
     setSel(v);
@@ -90,8 +114,8 @@ export default function FlujosPage() {
 
   async function guardar() {
     setMsg("Guardando…");
-    const r = await fetch(`${API}/flujos`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await authFetch(`/flujos`, {
+      method: "POST",
       body: JSON.stringify({ codigo: meta.codigo, nombre: meta.nombre, pasos, transiciones: trans }),
     });
     const data = await r.json();
@@ -103,15 +127,15 @@ export default function FlujosPage() {
 
   async function publicar() {
     if (!meta.versionId) { setMsg("Guarda primero un borrador"); return; }
-    const r = await fetch(`${API}/flujos/version/${meta.versionId}/publicar`, { method: "POST" });
+    const r = await authFetch(`/flujos/version/${meta.versionId}/publicar`, { method: "POST" });
     if (r.ok) { setMeta({ ...meta, estado: "publicado" }); setMsg("Versión publicada ✔"); cargarDefs(); }
     else setMsg("Error al publicar");
   }
 
   async function simular() {
     if (!meta.versionId || meta.estado !== "publicado") { setMsg("Publica la versión antes de simular"); return; }
-    const r = await fetch(`${API}/flujos/version/${meta.versionId}/instanciar`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await authFetch(`/flujos/version/${meta.versionId}/instanciar`, {
+      method: "POST",
       body: JSON.stringify({ metadata: { cumple: true } }),
     });
     const data = await r.json();
@@ -120,8 +144,8 @@ export default function FlujosPage() {
   }
 
   async function completar(peId: string) {
-    const r = await fetch(`${API}/flujos/tareas/${peId}/completar`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+    const r = await authFetch(`/flujos/tareas/${peId}/completar`, {
+      method: "POST",
       body: JSON.stringify({ resultado: { cumple: true } }),
     });
     if (r.ok) setSimulacion(await r.json());
