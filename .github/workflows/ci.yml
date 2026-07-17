@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancela ejecuciones viejas de la misma rama si llega un push nuevo.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Install + Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      # La API conecta a PostgreSQL al arrancar (PrismaService.onModuleInit),
+      # así que el smoke test necesita una base viva. No se aplican migraciones:
+      # sólo se comprueba el bootstrap y la conectividad.
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: lims
+          POSTGRES_PASSWORD: lims
+          POSTGRES_DB: lims_idic
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lims -d lims_idic"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # setup-node va ANTES de corepack: instala su propio Node y lo antepone
+      # al PATH, así que los shims de corepack deben crearse sobre ese Node.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # corepack lee "packageManager" del package.json raíz y activa esa versión
+      # exacta de pnpm. No fijar la versión acá: el pin vive en el package.json.
+      - name: Habilitar corepack
+        run: corepack enable
+
+      # --frozen-lockfile falla si pnpm-lock.yaml no concuerda con los
+      # package.json. Es la comprobación que habría cazado el lockfile
+      # desincronizado (declaraba pino-pretty sin tenerlo en el lock).
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Generar cliente Prisma
+        run: pnpm db:generate
+
+      - name: Build (api + web)
+        run: pnpm build
+
+      # Arranca la API compilada y espera 200 en /api/health. Cubre fallos que
+      # el build no ve: el transport de logging mal declarado abortaba el
+      # bootstrap sólo en modo dev, con el build en verde.
+      - name: Arranque en modo dev (smoke test)
+        working-directory: apps/api
+        env:
+          NODE_ENV: ""
+          JWT_SECRET: ci-secret-de-prueba-no-usar-en-produccion-1234
+          DATABASE_URL: postgresql://lims:lims@localhost:5432/lims_idic
+          PORT: "3001"
+        run: |
+          node dist/main.js > boot.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/api/health > /dev/null; then
+              echo "La API arrancó y responde:"
+              curl -s http://localhost:3001/api/health
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "La API no respondió en 60s. Log de arranque:"
+          cat boot.log
+          exit 1
