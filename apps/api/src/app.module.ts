@@ -26,16 +26,33 @@ import { CrmModule } from "./crm/crm.module";
 import { SaecModule } from "./saec/saec.module";
 import { EquiposModule } from "./equipos/equipos.module";
 
+/**
+ * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
+ * devDependency OPCIONAL: si no está instalada (install --prod con NODE_ENV sin
+ * fijar, un worktree recién creado, CI, etc.) pino exige el transport y Nest
+ * aborta en el InstanceLoader con
+ *   "unable to determine transport target for pino-pretty".
+ * Por eso comprobamos que el módulo se pueda resolver y, si falta, degradamos a
+ * logs JSON en vez de tumbar el arranque. `require.resolve` está disponible
+ * porque este paquete compila a CommonJS (tsconfig `module: "commonjs"`).
+ */
+function prettyTransport() {
+  if (process.env.NODE_ENV === "production") return undefined;
+  try {
+    require.resolve("pino-pretty");
+    return { target: "pino-pretty", options: { singleLine: true } };
+  } catch {
+    return undefined;
+  }
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     LoggerModule.forRoot({
       pinoHttp: {
         level: process.env.LOG_LEVEL ?? "info",
-        transport:
-          process.env.NODE_ENV !== "production"
-            ? { target: "pino-pretty", options: { singleLine: true } }
-            : undefined,
+        transport: prettyTransport(),
       },
     }),
     // Rate limiting global. El límite "default" aplica a toda la API; el
