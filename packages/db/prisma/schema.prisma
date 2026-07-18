@@ -936,3 +936,235 @@ model Firma {
 
   @@map("firma")
 }
+
+// =============================================================================
+// CATÁLOGO v2 · cascada real StarLIMS (tablas cat_*, ya creadas por
+// packages/db/catalogo_v2.sql y cargadas con datos maestros reales).
+//
+// Coexisten con gran_grupo / grupo / metodo (la app viva NO se toca). Se exponen
+// por API (apps/api/src/catalogo/catalogo-v2.module.ts). Igual que GranGrupo,
+// `tenantId` es un CAMPO PLANO sin @relation a Tenant (no se acopla el modelo
+// Tenant). Sí se declaran las relaciones padre/hijo entre modelos cat_ para
+// poder usar `include`. Todos tienen deleted_at → soft delete opt-in.
+//
+// EJE PRODUCTO (5 niveles): CatGranGrupo → CatGrupo → CatSubgrupo → CatElemento
+//                           (+ CatFamilia = laboratorio, dimensión lateral)
+// EJE ANÁLISIS (4 niveles): CatEnsayo → CatMetodo → CatAnalito → CatEspecificacion
+// BISAGRA:                  CatPanel (elemento ↔ metodo/ensayo)
+// =============================================================================
+
+model CatGranGrupo {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  codigo    String    @db.VarChar(20)
+  nombre    String    @db.VarChar(160)
+  activo    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+
+  grupos    CatGrupo[]
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId])
+  @@map("cat_gran_grupo")
+}
+
+model CatGrupo {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  granGrupoId String    @map("gran_grupo_id") @db.Uuid
+  cgrupo      String    @db.VarChar(20)
+  nombre      String    @db.VarChar(200)
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  granGrupo   CatGranGrupo   @relation(fields: [granGrupoId], references: [id])
+  subgrupos   CatSubgrupo[]
+
+  @@unique([tenantId, granGrupoId, cgrupo])
+  @@index([tenantId])
+  @@index([granGrupoId])
+  @@map("cat_grupo")
+}
+
+model CatSubgrupo {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  grupoId   String    @map("grupo_id") @db.Uuid
+  cntlroom  String    @db.VarChar(30)
+  nombre    String    @db.VarChar(240)
+  activo    Boolean   @default(true)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz
+
+  grupo     CatGrupo       @relation(fields: [grupoId], references: [id])
+  elementos CatElemento[]
+
+  @@unique([tenantId, cntlroom])
+  @@index([tenantId])
+  @@index([grupoId])
+  @@map("cat_subgrupo")
+}
+
+model CatFamilia {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  codsucdel    String    @db.VarChar(30)
+  nombre       String    @db.VarChar(200)
+  laboratorio  String?   @db.VarChar(200)
+  departamento String?   @db.VarChar(200)
+  subdireccion String?   @db.VarChar(200)
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
+
+  elementos    CatElemento[]
+  ensayos      CatEnsayo[]
+
+  @@unique([tenantId, codsucdel])
+  @@index([tenantId])
+  @@map("cat_familia")
+}
+
+model CatElemento {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  subgrupoId String    @map("subgrupo_id") @db.Uuid
+  familiaId  String?   @map("familia_id") @db.Uuid
+  codigo     String    @db.VarChar(30)
+  nombre     String    @db.VarChar(240)
+  servgrp    String?   @db.VarChar(240)
+  activo     Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
+
+  subgrupo   CatSubgrupo @relation(fields: [subgrupoId], references: [id])
+  familia    CatFamilia? @relation(fields: [familiaId], references: [id])
+  paneles    CatPanel[]
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId])
+  @@index([subgrupoId])
+  @@index([familiaId])
+  @@map("cat_elemento")
+}
+
+model CatEnsayo {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  codigo             String    @db.VarChar(30)
+  nombre             String    @db.VarChar(240)
+  precio             Decimal   @default(0) @db.Decimal(14, 2)
+  familiaId          String?   @map("familia_id") @db.Uuid
+  agrupado           String?   @db.VarChar(30)
+  objetivo           String?
+  instruccionTrabajo String?   @map("instruccion_trabajo")
+  activo             Boolean   @default(true)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt          DateTime? @map("deleted_at") @db.Timestamptz
+
+  familia            CatFamilia? @relation(fields: [familiaId], references: [id])
+  metodos            CatMetodo[]
+  paneles            CatPanel[]
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId])
+  @@index([familiaId])
+  @@map("cat_ensayo")
+}
+
+model CatMetodo {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  ensayoId    String?   @map("ensayo_id") @db.Uuid
+  codigo      String    @db.VarChar(30)
+  nombre      String    @db.VarChar(240)
+  norma       String?   @db.VarChar(240)
+  instrumento String?   @db.VarChar(160)
+  version     String?   @db.VarChar(30)
+  servgrp     String?   @db.VarChar(240)
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  ensayo      CatEnsayo?  @relation(fields: [ensayoId], references: [id])
+  analitos    CatAnalito[]
+  paneles     CatPanel[]
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId])
+  @@index([ensayoId])
+  @@map("cat_metodo")
+}
+
+model CatAnalito {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  metodoId      String    @map("metodo_id") @db.Uuid
+  codigo        String    @db.VarChar(120)
+  nombre        String    @db.VarChar(240)
+  unidad        String?   @db.VarChar(60)
+  formula       String?
+  rangoMin      String?   @map("rango_min") @db.VarChar(120)
+  rangoNominal  String?   @map("rango_nominal") @db.VarChar(120)
+  rangoMax      String?   @map("rango_max") @db.VarChar(120)
+  activo        Boolean   @default(true)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
+
+  metodo        CatMetodo            @relation(fields: [metodoId], references: [id])
+  especificaciones CatEspecificacion[]
+
+  @@unique([tenantId, metodoId, codigo])
+  @@index([tenantId])
+  @@index([metodoId])
+  @@map("cat_analito")
+}
+
+model CatEspecificacion {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  analitoId  String    @map("analito_id") @db.Uuid
+  ambito     String    @default("estandar") @db.VarChar(16)
+  limiteInf  String?   @map("limite_inf") @db.VarChar(120)
+  nominal    String?   @db.VarChar(120)
+  limiteSup  String?   @map("limite_sup") @db.VarChar(120)
+  requisitos String?
+  texto      String?
+  unidad     String?   @db.VarChar(60)
+  dedupeKey  String    @map("dedupe_key") @db.VarChar(40)
+  activo     Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
+
+  analito    CatAnalito @relation(fields: [analitoId], references: [id])
+
+  @@unique([tenantId, analitoId, dedupeKey])
+  @@index([tenantId])
+  @@index([analitoId])
+  @@map("cat_especificacion")
+}
+
+model CatPanel {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  elementoId String    @map("elemento_id") @db.Uuid
+  metodoId   String    @map("metodo_id") @db.Uuid
+  ensayoId   String?   @map("ensayo_id") @db.Uuid
+  inspecTipo String?   @map("inspec_tipo") @db.VarChar(30)
+  orden      Int?
+  activo     Boolean   @default(true)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt  DateTime? @map("deleted_at") @db.Timestamptz
+
+  elemento   CatElemento @relation(fields: [elementoId], references: [id])
+  metodo     CatMetodo   @relation(fields: [metodoId], references: [id])
+  ensayo     CatEnsayo?  @relation(fields: [ensayoId], references: [id])
+
+  @@unique([tenantId, elementoId, metodoId])
+  @@index([tenantId])
+  @@index([elementoId])
+  @@index([metodoId])
+  @@map("cat_panel")
+}

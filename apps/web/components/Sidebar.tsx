@@ -33,6 +33,7 @@ const NAV = [
     title: "Laboratorio",
     items: [
       { href: "/ot", label: "Órdenes de Trabajo", icon: "🗂" },
+      { href: "/ot/nueva", label: "Registrar OT", icon: "＋" },
       { href: "/muestras", label: "Muestras", icon: "🧪" },
       { href: "/captura", label: "Captura de Resultados", icon: "📊" },
       { href: "/metodos", label: "Métodos", icon: "🔬" },
@@ -57,10 +58,23 @@ const NAV = [
     ],
   },
   {
-    title: "Catálogo base",
+    title: "Catálogo · Clasificación",
     items: [
-      { href: "/gran-grupos", label: "Grandes Grupos", icon: "🗃" },
-      { href: "/grupos", label: "Grupos", icon: "📁" },
+      { href: "/catalogo", label: "Índice del catálogo", icon: "🧭" },
+      { href: "/catalogo/gran-grupos", label: "Grandes Grupos", icon: "🗃" },
+      { href: "/catalogo/grupos", label: "Grupos", icon: "📁" },
+      { href: "/catalogo/subgrupos", label: "Subgrupos", icon: "🗂" },
+      { href: "/catalogo/familias", label: "Familias · Laboratorios", icon: "🏛" },
+      { href: "/catalogo/elementos", label: "Elementos", icon: "🧱" },
+    ],
+  },
+  {
+    title: "Catálogo · Análisis",
+    items: [
+      { href: "/catalogo/ensayos", label: "Ensayos · Precios", icon: "🧪" },
+      { href: "/catalogo/metodos", label: "Métodos", icon: "🔬" },
+      { href: "/catalogo/analitos", label: "Analitos", icon: "⚗" },
+      { href: "/catalogo/especificaciones", label: "Especificaciones", icon: "📐" },
     ],
   },
   {
