@@ -141,7 +141,21 @@ services:
       # directamente y pg_restore --list puede releer el fichero para verificarlo
       # sin sacarlo del contenedor. (`docker compose exec` no admite montar
       # volúmenes al vuelo, así que el montaje tiene que declararse aquí.)
+      # Además, /backup/basebackups aloja los basebackups (los escribe pg_basebackup
+      # como root vía `docker compose exec`): todo el material de recuperación vive
+      # en el disco de respaldo y entra en la copia externa del IDIC.
       - ${LIMS_BACKUP_DIR:-/srv/lims-backup}:/backup
+      # Archivo de WAL en un punto de montaje PROPIO, no bajo /backup. Motivo: el
+      # archivador de PostgreSQL corre como el usuario `postgres` (uid 70 en la
+      # imagen alpine), no como root, y /backup es 700 de root: el archivador no
+      # podría ni entrar. Montando el subdirectorio wal directamente, sus permisos
+      # dependen solo de él. El instalador lo cede a `postgres` (ver instalar-
+      # onpremise.sh, paso 7). En el host sigue estando bajo ${LIMS_BACKUP_DIR}
+      # (700 root), así que entra en la copia externa igual que el resto.
+      - ${LIMS_BACKUP_DIR:-/srv/lims-backup}/wal:/walarchive
+      # Script de archivado de WAL, invocado por `archive_command` (ver abajo).
+      # Solo lectura: PostgreSQL únicamente lo ejecuta, nunca lo modifica.
+      - ./scripts/backup/archive-wal.sh:/usr/local/bin/archive-wal.sh:ro
     # Sin "ports": jamás accesible desde la red del cuartel.
     command:
       # Ajustes conservadores para un servidor de 16 GB dedicado al LIMS.
@@ -157,6 +171,39 @@ services:
       - "work_mem=16MB"
       - "-c"
       - "maintenance_work_mem=512MB"
+      # --- WAL archiving continuo (PITR) --------------------------------------
+      # Baja la ventana de pérdida de 24 h (pg_dump diario) a minutos. Ver PITR.md.
+      # wal_level=replica: nivel mínimo que permite archivar WAL y usar
+      # pg_basebackup. Es además el valor por defecto en PG16; se fija explícito.
+      - "-c"
+      - "wal_level=replica"
+      # archive_mode=on: PostgreSQL invoca archive_command por cada segmento WAL
+      # completado. Cambiar este parámetro exige REINICIAR el contenedor
+      # (un `docker compose up -d` lo recrea), no basta un reload.
+      - "-c"
+      - "archive_mode=on"
+      # archive_command: comprime y publica de forma atómica cada segmento en
+      # /walarchive. PostgreSQL lo ejecuta vía /bin/sh -c, así que no depende del
+      # bit de ejecución del fichero montado. Si devuelve error, PG retiene el WAL
+      # y lo reintenta: por eso el script nunca da un OK falso (ver archive-wal.sh
+      # y las alertas LimsWalArchivado* en monitorizacion/alertas.yml).
+      - "-c"
+      - "archive_command=/bin/sh /usr/local/bin/archive-wal.sh \"%p\" \"%f\" /walarchive"
+      # archive_timeout=300: fuerza el cambio de segmento cada 5 min aunque haya
+      # poco tráfico. Es lo que ACOTA el RPO: un commit se archiva en <=300 s.
+      # Bajarlo reduce el RPO pero genera más segmentos (más ficheros/día).
+      - "-c"
+      - "archive_timeout=300"
+      # wal_compression=on: comprime las imágenes de página completa DENTRO del
+      # WAL. Reduce el volumen de WAL generado (menos que archivar comprimido,
+      # pero se suma) y acelera el archivado.
+      - "-c"
+      - "wal_compression=on"
+      # max_wal_senders>=2: pg_basebackup con -Xstream abre 2 conexiones de
+      # replicación (datos + WAL). El valor por defecto (10) sobra; se fija por
+      # claridad y para dejar constancia de que el basebackup lo necesita.
+      - "-c"
+      - "max_wal_senders=10"
       # Registro de conexiones y DDL: trazabilidad exigible en datos FFAA.
       - "-c"
       - "log_connections=on"
