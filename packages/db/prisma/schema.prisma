@@ -214,6 +214,11 @@ model Cotizacion {
   descuentoMonto    Decimal             @default(0) @map("descuento_monto") @db.Decimal(14, 2)
   gastosAdminPct    Decimal             @default(0) @map("gastos_admin_pct") @db.Decimal(5, 2)
   gastosAdminMonto  Decimal             @default(0) @map("gastos_admin_monto") @db.Decimal(14, 2)
+  // D2 · segundo camino de costeo (estimación por laboratorio).
+  viaCosteo             String          @default("precio_fijo") @map("via_costeo") @db.VarChar(20)
+  utilidadPct           Decimal         @default(0) @map("utilidad_pct") @db.Decimal(5, 2)
+  utilidadMonto         Decimal         @default(0) @map("utilidad_monto") @db.Decimal(14, 2)
+  costosDirectosTotal   Decimal         @default(0) @map("costos_directos_total") @db.Decimal(14, 2)
   neto              Decimal             @default(0) @db.Decimal(14, 2)
   ivaPct            Decimal             @default(19) @map("iva_pct") @db.Decimal(5, 2)
   ivaMonto          Decimal             @default(0) @map("iva_monto") @db.Decimal(14, 2)
@@ -287,6 +292,15 @@ model OrdenTrabajo {
   estadoEnvio           String    @default("No enviado") @map("estado_envio") @db.VarChar(40)
   descripcionTrabajo    String?   @map("descripcion_trabajo")
   notas                 String?
+  // D1 · OT dual (Genérico/Comercial <-> Definitivo/Técnico) y estados reales.
+  faseRegistro          String    @default("generico") @map("fase_registro") @db.VarChar(20)
+  estadoOt              String    @default("en_espera") @map("estado_ot") @db.VarChar(30)
+  elementoGenerico      String?   @map("elemento_generico") @db.VarChar(240)
+  catElementoId         String?   @map("cat_elemento_id") @db.Uuid
+  ocNumero              String?   @map("oc_numero") @db.VarChar(40)
+  cotizacionNumero      String?   @map("cotizacion_numero") @db.VarChar(40)
+  enEsperaAt            DateTime? @map("en_espera_at") @db.Timestamptz
+  registradoAt         DateTime? @map("registrado_at") @db.Timestamptz
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz
 
@@ -1167,4 +1181,80 @@ model CatPanel {
   @@index([elementoId])
   @@index([metodoId])
   @@map("cat_panel")
+}
+
+// =============================================================================
+// FLUJO REAL · D2 costeo por laboratorio, D4 órdenes internas, D5 formatos/decisión
+// (FK como escalares planos, sin @relation, igual que los modelos cat_*)
+// =============================================================================
+
+model SolicitudCosteo {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  cotizacionId  String    @map("cotizacion_id") @db.Uuid
+  familiaId     String?   @map("familia_id") @db.Uuid
+  catElementoId String?   @map("cat_elemento_id") @db.Uuid
+  catEnsayoId   String?   @map("cat_ensayo_id") @db.Uuid
+  glosa         String?
+  horasHombre   Decimal   @default(0) @map("horas_hombre") @db.Decimal(10, 2)
+  costoDirecto  Decimal   @default(0) @map("costo_directo") @db.Decimal(14, 2)
+  estado        String    @default("solicitado") @db.VarChar(20)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@index([cotizacionId])
+  @@index([familiaId])
+  @@map("solicitud_costeo")
+}
+
+model OrdenInterna {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  otId        String    @map("ot_id") @db.Uuid
+  tipo        String    @default("interna") @db.VarChar(24)
+  numero      String    @db.VarChar(40)
+  origenLab   String?   @map("origen_lab") @db.Uuid
+  destinoLab  String?   @map("destino_lab") @db.Uuid
+  estado      String    @default("abierta") @db.VarChar(20)
+  detalle     String?
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@unique([tenantId, numero])
+  @@index([otId])
+  @@map("orden_interna")
+}
+
+model FormatoInforme {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  codigo      String    @db.VarChar(20)
+  descripcion String    @db.VarChar(200)
+  veredicto   String?   @db.VarChar(20)
+  organismo   String?   @db.VarChar(10)
+  destino     String?   @db.VarChar(20)
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@unique([tenantId, codigo])
+  @@map("formato_informe")
+}
+
+model DecisionConformidad {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  otId          String    @map("ot_id") @db.Uuid
+  veredicto     String    @db.VarChar(20)
+  organismo     String    @db.VarChar(10)
+  destino       String?   @db.VarChar(20)
+  formatoId     String?   @map("formato_id") @db.Uuid
+  atestadoPor   String?   @map("atestado_por") @db.VarChar(120)
+  atestadoAt    DateTime? @map("atestado_at") @db.Timestamptz
+  observaciones String?
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
+
+  @@index([otId])
+  @@map("decision_conformidad")
 }

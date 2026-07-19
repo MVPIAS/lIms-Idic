@@ -7,24 +7,25 @@
  * (`tx` de `$transaction`), para poder generar el código dentro de la misma
  * transacción que crea la OT.
  *
- * LIMITACIÓN CONOCIDA (heredada, fuera del alcance de este cambio): es un
- * read-then-write sin secuencia ni bloqueo, así que dos peticiones concurrentes
- * pueden calcular el mismo correlativo — el UNIQUE lo convierte en un 500 en la
- * segunda. Además `orderBy: codigo desc` es orden lexicográfico y se rompe al
- * pasar de 9999. Está documentado en `docs/AUDITORIA_FUNCIONAL.md` §5.15 y su
- * arreglo (secuencia PostgreSQL) es un trabajo aparte.
+ * CONCURRENCIA (arreglado): el correlativo se obtiene con un contador atómico
+ * `ot_correlativo(tenant_id, anio, ultimo)` mediante
+ *   INSERT ... ON CONFLICT DO UPDATE ... RETURNING
+ * que PostgreSQL serializa bajo alta concurrencia: dos altas simultáneas
+ * obtienen números distintos (no chocan con el UNIQUE) y la secuencia es
+ * numérica (no lexicográfica), por lo que no se rompe al pasar de 9999. La
+ * tabla y su siembra viven en packages/db/align_ot_correlativo.sql.
  */
 export async function generarCodigoOt(db: any, tenantId: string): Promise<string> {
   const anio = new Date().getFullYear();
-  const ultima = await db.ordenTrabajo.findFirst({
-    where: { tenantId, codigo: { startsWith: `OT-${anio}-` } },
-    orderBy: { codigo: "desc" },
-    select: { codigo: true },
-  });
-  let n = 1;
-  if (ultima) {
-    const partes = ultima.codigo.split("-");
-    n = parseInt(partes[2] ?? "0", 10) + 1;
-  }
+  // INSERT ... ON CONFLICT DO UPDATE ... RETURNING es atómico: incrementa y
+  // devuelve el nuevo valor en una sola sentencia, sin ventana read-then-write.
+  const filas = await db.$queryRaw<Array<{ ultimo: number }>>`
+    INSERT INTO ot_correlativo (tenant_id, anio, ultimo)
+    VALUES (${tenantId}::uuid, ${anio}, 1)
+    ON CONFLICT (tenant_id, anio)
+    DO UPDATE SET ultimo = ot_correlativo.ultimo + 1, updated_at = now()
+    RETURNING ultimo
+  `;
+  const n = Number(filas?.[0]?.ultimo ?? 1);
   return `OT-${anio}-${String(n).padStart(4, "0")}`;
 }
