@@ -127,10 +127,43 @@ function decodificar(s: string): string {
   });
 }
 
+/**
+ * Tamaño máximo del XML ESI aceptado. Defensa en profundidad contra DoS por
+ * payload gigante: aunque el body-parser de la API ya acota el JSON entrante,
+ * este límite protege al parser aunque se invoque desde otra ruta o suba el
+ * límite global. Un export ESI real de un caso balístico no llega a este orden.
+ */
+export const MAX_XML_BYTES = 10_000_000; // 10 MB
+/**
+ * Profundidad máxima de anidamiento de elementos. El parser es de descenso
+ * recursivo: sin este tope, un XML con decenas de miles de etiquetas anidadas
+ * (`<a><a>…`) desbordaría la pila del proceso (RangeError / DoS). La gramática
+ * ESI v3.2 (Export→Cases/Exhibits/Hits→campos) no supera ~6 niveles.
+ */
+export const MAX_PROFUNDIDAD_XML = 256;
+
 /** Parser de descenso recursivo. Lanza Error con posición si el XML no cierra bien. */
 export function parsearXml(xml: string): NodoXml {
+  // --- Guardas de seguridad previas al parseo (pentest RF-K03) ---
+  // 1) DoS por tamaño: se rechaza antes de recorrer nada.
+  if (Buffer.byteLength(xml, "utf8") > MAX_XML_BYTES) {
+    throw new Error(`XML demasiado grande (máx. ${MAX_XML_BYTES} bytes)`);
+  }
+  // 2) XXE / DTD / billion-laughs: la gramática ESI v3.2 es CERRADA y SIN DTD
+  //    (ver cabecera del módulo). Este parser nunca resuelve entidades externas
+  //    ni personalizadas — `decodificar()` sólo conoce las 5 built-in y refs
+  //    numéricas — por lo que no es vulnerable a XXE ni a expansión de entidades.
+  //    Aun así se rechaza EXPLÍCITAMENTE cualquier DOCTYPE/ENTITY: deja constancia
+  //    de la decisión, da un error claro y blinda el módulo frente a cambios
+  //    futuros en la decodificación. Un `<!DOCTYPE>`/`<!ENTITY>` no es parte
+  //    legítima de un export ESI.
+  if (/<!(?:DOCTYPE|ENTITY)/i.test(xml)) {
+    throw new Error("XML con DOCTYPE/ENTITY no permitido (posible XXE)");
+  }
+
   let i = 0;
   const n = xml.length;
+  let prof = 0; // profundidad de anidamiento en curso (tope MAX_PROFUNDIDAD_XML)
 
   const saltarEspacios = () => { while (i < n && /\s/.test(xml[i])) i++; };
 
@@ -184,13 +217,18 @@ export function parsearXml(xml: string): NodoXml {
 
   const leerElemento = (): NodoXml => {
     if (xml[i] !== "<") throw new Error(`Se esperaba '<' en la posición ${i}`);
+    // Tope de anidamiento: convierte un XML-bomb por profundidad en un error
+    // limpio en vez de un desbordamiento de pila (DoS).
+    if (++prof > MAX_PROFUNDIDAD_XML) {
+      throw new Error(`XML demasiado anidado (máx. ${MAX_PROFUNDIDAD_XML} niveles)`);
+    }
     i++;
     const nombre = leerNombre();
     const attrs = leerAtributos();
     saltarEspacios();
     const nodo: NodoXml = { nombre, attrs, hijos: [], texto: "" };
 
-    if (xml.startsWith("/>", i)) { i += 2; return nodo; }
+    if (xml.startsWith("/>", i)) { i += 2; prof--; return nodo; }
     if (xml[i] !== ">") throw new Error(`Etiqueta <${nombre}> mal formada`);
     i++;
 
@@ -206,6 +244,7 @@ export function parsearXml(xml: string): NodoXml {
         i++;
         if (cierre !== nombre) throw new Error(`Se esperaba </${nombre}> y se encontró </${cierre}>`);
         nodo.texto = decodificar(partesTexto.join("")).trim();
+        prof--;
         return nodo;
       }
       if (xml.startsWith("<![CDATA[", i)) {
@@ -447,7 +486,10 @@ const PeritajeManualSchema = z.object({
 });
 
 const ImportarIbisSchema = z.object({
-  xml: z.string().min(1, "El XML es obligatorio"),
+  // El tope de longitud es defensa en profundidad frente a DoS por payload
+  // gigante: da un 400 limpio antes de tocar el parser. (MAX_XML_BYTES cuenta
+  // bytes UTF-8; aquí se acota nº de caracteres, cota superior barata.)
+  xml: z.string().min(1, "El XML es obligatorio").max(MAX_XML_BYTES, "El XML es demasiado grande"),
   nombreArchivo: strOpt(260),
   /** Reprocesa aunque el hash ya exista (RF-K03.4 lo impide por defecto). */
   forzar: z.coerce.boolean().optional(),

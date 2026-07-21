@@ -13,7 +13,11 @@ import { getJwtSecret } from "../common/jwt-secret";
     PassportModule,
     JwtModule.register({
       secret: getJwtSecret(),
-      signOptions: { expiresIn: process.env.JWT_EXPIRES_IN ?? "8h" },
+      // Se fija explícitamente el algoritmo de firma (HS256, simétrico). Evita
+      // que un cambio de configuración o un token manipulado use otro algoritmo
+      // (p. ej. alg=none o confusión HS/RS). La verificación fija el mismo
+      // algoritmo en JwtStrategy (`algorithms: ["HS256"]`).
+      signOptions: { expiresIn: process.env.JWT_EXPIRES_IN ?? "8h", algorithm: "HS256" },
     }),
   ],
   controllers: [AuthController],

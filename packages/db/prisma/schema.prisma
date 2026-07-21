@@ -97,6 +97,7 @@ model Usuario {
   ultimoLoginAt    DateTime? @map("ultimo_login_at") @db.Timestamptz
   ultimoLoginIp    String?   @map("ultimo_login_ip") @db.Inet
   intentosFallidos Int       @default(0) @map("intentos_fallidos")
+  tokenVersion     Int       @default(0) @map("token_version")
   grado            String?   @db.VarChar(80)
   cargo            String?   @db.VarChar(200)
   userLims         String?   @map("user_lims") @db.VarChar(50)
