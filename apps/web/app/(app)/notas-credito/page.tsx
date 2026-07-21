@@ -1,6 +1,7 @@
 "use client";
 
 import CrudTable, { renderRef } from "@/components/CrudTable";
+import { clp } from "@/lib/format";
 
 const num = (data: any) => ({
   ...data,
@@ -17,7 +18,7 @@ export default function NotasCreditoPage() {
       columnas={[
         { campo: "numero", titulo: "Número", render: (v) => <span className="codigo">{v}</span> },
         { campo: "facturaId", titulo: "Factura", render: renderRef("factura") },
-        { campo: "monto", titulo: "Monto", right: true },
+        { campo: "monto", titulo: "Monto", right: true, render: (v) => clp(v) },
         { campo: "motivo", titulo: "Motivo" },
       ]}
       campos={[

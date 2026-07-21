@@ -2,11 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { fechaHora } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
-
-const fechaHora = (v: any) =>
-  v ? new Date(v).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" }) : "—";
 
 /**
  * RF-K07.3 · pantalla de verificación de la autenticidad de un certificado.

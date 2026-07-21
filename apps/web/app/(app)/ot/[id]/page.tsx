@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { fecha, fechaHora, rut } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}` });
@@ -121,7 +122,7 @@ export default function ExpedientePage() {
         <div className="id">🗂 {codOt}</div>
         <div className="meta">
           Cliente: <b>{ot?.cliente?.razonSocial ?? "—"}</b>
-          {ot?.cliente?.rut ? <> ({ot.cliente.rut})</> : null} · Estado: <b>{ot?.estado ?? "—"}</b> · Prioridad: <b>{ot?.prioridad ?? "normal"}</b>
+          {ot?.cliente?.rut ? <> ({rut(ot.cliente.rut)})</> : null} · Estado: <b>{ot?.estado ?? "—"}</b> · Prioridad: <b>{ot?.prioridad ?? "normal"}</b>
         </div>
       </div>
 
@@ -152,10 +153,10 @@ export default function ExpedientePage() {
               <div className="form-grid">
                 <div className="field readonly"><label>Código OT</label><input value={ot?.codigo ?? "—"} readOnly /></div>
                 <div className="field readonly"><label>Cliente</label><input value={ot?.cliente?.razonSocial ?? "—"} readOnly /></div>
-                <div className="field readonly"><label>RUT cliente</label><input value={ot?.cliente?.rut ?? "—"} readOnly /></div>
+                <div className="field readonly"><label>RUT cliente</label><input value={ot?.cliente?.rut ? rut(ot.cliente.rut) : "—"} readOnly /></div>
                 <div className="field readonly"><label>Estado</label><input value={ot?.estado ?? "—"} readOnly /></div>
                 <div className="field readonly"><label>Prioridad</label><input value={ot?.prioridad ?? "normal"} readOnly /></div>
-                <div className="field readonly"><label>Ingreso</label><input value={ot?.fechaIngreso ? String(ot.fechaIngreso).slice(0, 10) : ot?.createdAt ? String(ot.createdAt).slice(0, 10) : "—"} readOnly /></div>
+                <div className="field readonly"><label>Ingreso</label><input value={fecha(ot?.fechaIngreso ?? ot?.createdAt)} readOnly /></div>
               </div>
             )}
             {tab === "muestras" && (
@@ -240,7 +241,7 @@ export default function ExpedientePage() {
                                   <td>{p?.numero != null ? `${p.numero}. ` : ""}{p?.actividad ?? "—"}</td>
                                   <td>{p?.tipo ?? "—"}</td>
                                   <td><span className="codigo">{t.asignadoA ? String(t.asignadoA).slice(0, 8) : "—"}</span></td>
-                                  <td>{t.venceAt ? String(t.venceAt).slice(0, 16).replace("T", " ") : "—"}</td>
+                                  <td>{fechaHora(t.venceAt)}</td>
                                   <td><span className={`pill ${estadoPill[t.estado] ?? "gray"}`}>{t.estado}</span></td>
                                   <td style={{ textAlign: "right" }}>
                                     <button className="btn success sm" disabled={busy} onClick={() => completarTarea(t.pasoEjecucionId)}>

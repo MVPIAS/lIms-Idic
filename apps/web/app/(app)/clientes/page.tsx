@@ -1,6 +1,7 @@
 "use client";
 
 import CrudTable from "@/components/CrudTable";
+import { rut } from "@/lib/format";
 
 const badge = (v: any) => (
   <span className={`pill ${v ? "red" : "green"}`}>{v ? "bloqueado" : "activo"}</span>
@@ -13,7 +14,7 @@ export default function ClientesPage() {
       titulo="Clientes"
       subtitulo="Instituciones y empresas que solicitan ensayos. El flujo comercial arranca aquí."
       columnas={[
-        { campo: "rut", titulo: "RUT", render: (v) => <span className="codigo">{v}</span> },
+        { campo: "rut", titulo: "RUT", render: (v) => <span className="codigo">{rut(v)}</span> },
         { campo: "razonSocial", titulo: "Razón social" },
         { campo: "tipo", titulo: "Tipo" },
         { campo: "ciudad", titulo: "Ciudad" },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { fechaHora, num, pct } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -28,15 +29,6 @@ const EVENTOS: { key: string; label: string; pill: string; icono: string }[] = [
   { key: "destruccion", label: "Destrucción", pill: "red", icono: "🗑️" },
 ];
 const EVENTO_META = Object.fromEntries(EVENTOS.map((e) => [e.key, e]));
-
-const fechaHora = (d: any) => {
-  if (!d) return "—";
-  try {
-    return new Date(d).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" });
-  } catch {
-    return String(d).slice(0, 16).replace("T", " ");
-  }
-};
 
 const nombreUsuario = (u: any) =>
   u ? u.nombre_completo ?? u.nombreCompleto ?? u.username ?? "—" : "—";
@@ -436,8 +428,8 @@ export default function CustodiaPage() {
 
                   <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {c.sello_numero && <span>Sello {c.sello_numero}</span>}
-                    {c.temp_celsius != null && <span>{Number(c.temp_celsius)} °C</span>}
-                    {c.humedad_pct != null && <span>{Number(c.humedad_pct)} % HR</span>}
+                    {c.temp_celsius != null && <span>{num(c.temp_celsius, 1)} °C</span>}
+                    {c.humedad_pct != null && <span>{pct(c.humedad_pct)} HR</span>}
                     {c.registrado_por_usuario && <span>Registró: {nombreUsuario(c.registrado_por_usuario)}</span>}
                     {c.hash_registro && (
                       <span title={`hash: ${c.hash_registro}\nanterior: ${c.hash_prev ?? "— (génesis)"}`}>

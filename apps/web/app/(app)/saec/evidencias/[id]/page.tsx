@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { fechaHora } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -21,9 +22,6 @@ const EVENTOS: { key: string; label: string; pill: string }[] = [
   { key: "destruccion", label: "Destrucción", pill: "gray" },
 ];
 const EV_META = Object.fromEntries(EVENTOS.map((e) => [e.key, e]));
-
-const fechaHora = (v: any) =>
-  v ? new Date(v).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" }) : "—";
 
 const MOV_VACIO = {
   evento: "cambio_ubicacion",

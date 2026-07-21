@@ -1,6 +1,7 @@
 "use client";
 
 import CrudTable from "@/components/CrudTable";
+import { fecha } from "@/lib/format";
 
 export default function ListasPrecioPage() {
   return (
@@ -12,7 +13,7 @@ export default function ListasPrecioPage() {
         { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Nombre" },
         { campo: "moneda", titulo: "Moneda", render: (v) => <span className="tag">{v ?? "CLP"}</span> },
-        { campo: "vigenteDesde", titulo: "Vigente desde", render: (v) => (v ? String(v).slice(0, 10) : "—") },
+        { campo: "vigenteDesde", titulo: "Vigente desde", render: (v) => fecha(v) },
       ]}
       campos={[
         { campo: "codigo", label: "Código", requerido: true },

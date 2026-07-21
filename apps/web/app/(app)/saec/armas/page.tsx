@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { fecha } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -24,7 +25,6 @@ const REGISTRAL: { key: string; label: string; pill: string }[] = [
 const REG_META = Object.fromEntries(REGISTRAL.map((r) => [r.key, r]));
 
 const ESTADOS = ["en_custodia", "en_analisis", "prestada", "devuelta", "destruida"];
-const fecha = (v: any) => (v ? new Date(v).toLocaleDateString("es-CL") : "—");
 
 const FORM_VACIO = {
   serie: "",

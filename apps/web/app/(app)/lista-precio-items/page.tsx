@@ -1,6 +1,7 @@
 "use client";
 
 import CrudTable, { renderRef } from "@/components/CrudTable";
+import { monto } from "@/lib/format";
 
 const num = (data: any) => ({
   ...data,
@@ -21,7 +22,7 @@ export default function ListaPrecioItemsPage() {
         { campo: "descripcion", titulo: "Descripción" },
         { campo: "tipo", titulo: "Tipo", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
         { campo: "cc", titulo: "CC" },
-        { campo: "precio", titulo: "Precio", right: true },
+        { campo: "precio", titulo: "Precio", right: true, render: (v, row) => monto(v, row.lista?.moneda) },
       ]}
       campos={[
         { campo: "listaPrecioId", label: "Lista de precio", tipo: "ref", refRecurso: "listas-precio", requerido: true },

@@ -12,6 +12,7 @@
  * del dominio de este cambio). Se llega por /informes; añada el enlace al integrar.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { fecha } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -381,7 +382,7 @@ export default function InformesPage() {
                   {[c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · ") || "—"}
                 </td>
                 <td>{c.plantilla?.repid ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : "—"}</td>
-                <td>{c.fecha ? new Date(c.fecha).toLocaleDateString("es-CL") : "—"}</td>
+                <td>{fecha(c.fecha)}</td>
                 <td>
                   <span className={`pill ${PILL_ESTADO[c.estado] ?? "gray"}`}>{c.estado}</span>
                 </td>

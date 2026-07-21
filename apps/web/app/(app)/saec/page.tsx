@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { fecha } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -29,8 +30,6 @@ const ESTADOS: { key: string; label: string; pill: string }[] = [
   { key: "destruida", label: "Destruida", pill: "gray" },
 ];
 const ESTADO_META = Object.fromEntries(ESTADOS.map((e) => [e.key, e]));
-
-const fecha = (v: any) => (v ? new Date(v).toLocaleDateString("es-CL") : "—");
 
 const FORM_VACIO = {
   tipo: "vainilla",

@@ -7,6 +7,7 @@
  */
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { clp, fecha } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
@@ -35,9 +36,6 @@ const ESTADO_PILL: Record<Cot["estado"], string> = {
   rechazada: "red",
   vencida: "amber",
 };
-
-const clp = (n: number) =>
-  new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(n || 0);
 
 export default function CotizacionesPage() {
   const [cots, setCots] = useState<Cot[]>(DEMO);
@@ -111,7 +109,7 @@ export default function CotizacionesPage() {
                     <span style={{ color: "var(--muted)" }}>—</span>
                   )}
                 </td>
-                <td style={{ color: "var(--muted)" }}>{c.fecha}</td>
+                <td style={{ color: "var(--muted)" }}>{fecha(c.fecha)}</td>
               </tr>
             ))}
             {vis.length === 0 && (

@@ -1,9 +1,7 @@
 "use client";
 
 import CrudTable, { activoBadge, codigoCell } from "../_components/CrudTable";
-
-const precio = (v: any) =>
-  v == null || v === "" ? "—" : new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP", maximumFractionDigits: 0 }).format(Number(v));
+import { clp as precio } from "@/lib/format";
 
 export default function EnsayosPage() {
   return (
