@@ -11,6 +11,18 @@ authenticator.options = { window: 1 };
 
 const TOTP_ISSUER = "LIMS IDIC";
 
+// Bloqueo temporal de cuenta tras N intentos fallidos consecutivos. Complementa
+// (no sustituye) al rate-limit por IP del ThrottlerGuard. El bloqueo se auto-
+// expira pasada la ventana, evitando un DoS permanente sobre cuentas legítimas.
+const MAX_INTENTOS_FALLIDOS = Number(process.env.AUTH_MAX_INTENTOS ?? 5);
+const LOCK_MS = Number(process.env.AUTH_LOCK_MINUTES ?? 15) * 60_000;
+
+// Hash argon2 "señuelo" (de un valor fijo sin uso real). Se verifica contra él
+// cuando el usuario NO existe, para que el coste de CPU del login sea el mismo
+// exista o no la cuenta y no se pueda enumerar usuarios por diferencia de tiempo.
+const DUMMY_ARGON2_HASH =
+  "$argon2id$v=19$m=65536,t=3,p=4$bVDEyHCefeYR8WDf7p86gw$yf0s5YZ7VZvWIUpUYXcFgjJuUjU3b+HRjR7uOA6usHc";
+
 @Injectable()
 export class AuthService {
   // En módulo real se inyecta PrismaService; aquí instanciamos para simplicidad
@@ -28,7 +40,24 @@ export class AuthService {
     });
 
     if (!usuario) {
+      // El usuario no existe: se realiza igualmente una verificación argon2
+      // contra un hash señuelo para que el tiempo de respuesta sea equivalente
+      // al de una cuenta real con contraseña incorrecta (evita enumeración por
+      // temporización). El resultado se descarta.
+      await argon2.verify(DUMMY_ARGON2_HASH, password).catch(() => false);
       throw new UnauthorizedException("Credenciales inválidas");
+    }
+
+    // Bloqueo temporal por fuerza bruta: si se superó el umbral de intentos
+    // fallidos y aún estamos dentro de la ventana de bloqueo, se rechaza sin
+    // evaluar la contraseña. Pasada la ventana, se permite reintentar.
+    if (usuario.intentosFallidos >= MAX_INTENTOS_FALLIDOS) {
+      const ultimoIntento = usuario.updatedAt?.getTime() ?? 0;
+      if (Date.now() - ultimoIntento < LOCK_MS) {
+        throw new UnauthorizedException(
+          "Cuenta bloqueada temporalmente por múltiples intentos fallidos. Intente nuevamente más tarde.",
+        );
+      }
     }
 
     // Verificación de credenciales:
@@ -42,7 +71,9 @@ export class AuthService {
       if (!valid) {
         await this.prisma.usuario.update({
           where: { id: usuario.id },
-          data: { intentosFallidos: { increment: 1 } },
+          // `updatedAt` marca el instante del último fallo: sobre él se calcula
+          // la ventana de bloqueo temporal en el siguiente intento.
+          data: { intentosFallidos: { increment: 1 }, updatedAt: new Date() },
         });
         throw new UnauthorizedException("Credenciales inválidas");
       }
@@ -89,12 +120,20 @@ export class AuthService {
       tenantId: usuario.tenantId,
       roles,
       permisos,
+      // Versión de token: se incrementa en cada logout. El refresh token solo
+      // renueva si su `tv` coincide con el actual del usuario (invalida sesiones
+      // tras logout sin necesidad de blacklist en Redis).
+      tv: (usuario as any).tokenVersion ?? 0,
     };
 
     const accessToken = this.jwt.sign(payload);
-    const refreshToken = this.jwt.sign(payload, {
-      expiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? "7d",
-    });
+    // El refresh token se marca con `type: "refresh"`: JwtStrategy lo rechaza
+    // como Bearer de API (solo sirve en /auth/refresh), de modo que este token
+    // de larga duración (7d) no otorgue acceso completo a la API.
+    const refreshToken = this.jwt.sign(
+      { ...payload, type: "refresh" },
+      { expiresIn: process.env.JWT_REFRESH_EXPIRES_IN ?? "7d" },
+    );
 
     return {
       accessToken,
@@ -130,6 +169,20 @@ export class AuthService {
   async refresh(refreshToken: string) {
     try {
       const payload = this.jwt.verify(refreshToken);
+      // Solo un token de tipo refresh puede renovar. Impide encadenar access
+      // tokens indefinidamente para mintear nuevos access tokens.
+      if (payload.type !== "refresh") {
+        throw new UnauthorizedException("Refresh token inválido");
+      }
+      // Invalidación por logout: si el usuario cerró sesión (tokenVersion++),
+      // los refresh tokens previos dejan de renovar. Cierra la ventana de 7d.
+      const usuario = await this.prisma.usuario.findFirst({
+        where: { id: payload.sub, deletedAt: null, estado: "activo" },
+        select: { tokenVersion: true },
+      });
+      if (!usuario || (usuario.tokenVersion ?? 0) !== (payload.tv ?? 0)) {
+        throw new UnauthorizedException("Refresh token inválido");
+      }
       const { roles, permisos } = await this.rolesYPermisos(payload.sub);
       const accessToken = this.jwt.sign({
         sub: payload.sub,
@@ -137,6 +190,7 @@ export class AuthService {
         tenantId: payload.tenantId,
         roles,
         permisos,
+        tv: usuario.tokenVersion ?? 0,
       });
       return { accessToken };
     } catch {
@@ -259,7 +313,13 @@ export class AuthService {
   }
 
   async logout(usuarioId: string) {
-    // TODO: invalidar refresh tokens en Redis (lista negra)
+    // Invalida TODOS los refresh tokens previos del usuario incrementando su
+    // tokenVersion: cualquier refresh con `tv` anterior deja de renovar. Los
+    // access tokens ya emitidos caducan por su expiración corta. Sin Redis.
+    await this.prisma.usuario.update({
+      where: { id: usuarioId },
+      data: { tokenVersion: { increment: 1 } },
+    });
     return { ok: true };
   }
 }

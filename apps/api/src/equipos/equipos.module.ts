@@ -384,7 +384,7 @@ export class EquiposService {
          LEFT JOIN usuario r ON r.id = e.responsable_id
         WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL ${where}
         ORDER BY e.codigo ASC
-        LIMIT ${limit} OFFSET ${offset}`,
+        LIMIT ${Number(limit)} OFFSET ${Number(offset)}`,
       ...args,
     );
 
@@ -534,7 +534,7 @@ export class EquiposService {
          JOIN equipo e ON e.id = c.equipo_id
         WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL${filtro}
         ORDER BY c.fecha DESC, c.created_at DESC
-        LIMIT ${limit} OFFSET ${offset}`,
+        LIMIT ${Number(limit)} OFFSET ${Number(offset)}`,
       ...args,
     );
     const totalRows = await this.prisma.$queryRawUnsafe<any[]>(
@@ -796,7 +796,7 @@ export class EquiposService {
          LEFT JOIN usuario au ON au.id = c.a_usuario_id
         WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL
         ORDER BY c.fecha DESC, c.created_at DESC
-        LIMIT ${limit} OFFSET ${offset}`,
+        LIMIT ${Number(limit)} OFFSET ${Number(offset)}`,
       tenantId,
     );
     const totalRows = await this.prisma.$queryRawUnsafe<any[]>(

@@ -39,6 +39,18 @@ async function bootstrap() {
   // Eliminar la cabecera X-Powered-By: Express (fingerprinting).
   app.getHttpAdapter().getInstance().disable?.("x-powered-by");
 
+  // Permissions-Policy: helmet ya no emite esta cabecera por defecto (retiró
+  // Feature-Policy). La fijamos manualmente para desactivar APIs del navegador
+  // que la API no necesita. Defensa en profundidad por si el API se expusiera
+  // sin el proxy Caddy (que también la añade a nivel de sitio).
+  app.use((_req: unknown, res: { setHeader: (k: string, v: string) => void }, next: () => void) => {
+    res.setHeader(
+      "Permissions-Policy",
+      "geolocation=(), camera=(), microphone=(), payment=(), usb=()",
+    );
+    next();
+  });
+
   // --- CORS ---
   // En producción exige CORS_ORIGINS explícito (lista separada por comas).
   // Nunca se usa "*" cuando credentials=true.
