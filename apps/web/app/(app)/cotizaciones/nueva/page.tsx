@@ -1,9 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { clp, pct } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
-const clp = (n: any) => "$ " + Math.round(Number(n ?? 0)).toLocaleString("es-CL");
 
 const TIPOS = [
   { v: "viatico", l: "Viático" },
@@ -110,13 +110,13 @@ export default function CosteoPage() {
             <h2>Resumen</h2>
             <div className="totals-box">
               <div className="row"><span>CDT</span><b>{res ? clp(res.cdt) : "—"}</b></div>
-              <div className="row"><span>CFA {res ? `(${res.cfaPct}%)` : ""}</span><b>{res ? clp(res.cfa) : "—"}</b></div>
+              <div className="row"><span>CFA {res ? `(${pct(res.cfaPct)})` : ""}</span><b>{res ? clp(res.cfa) : "—"}</b></div>
               <div className="row total"><span>CT</span><b>{res ? clp(res.ct) : "—"}</b></div>
             </div>
             <div className="totals-box" style={{ marginTop: 6 }}>
               <div className="row"><span>Ejército</span><b>{res ? clp(res.precios?.ejercito) : "—"}</b></div>
               <div className="row"><span>Institucional</span><b>{res ? clp(res.precios?.institucional) : "—"}</b></div>
-              <div className="row"><span>Particular {res ? `(+${res.margenParticularPct}%)` : ""}</span><b>{res ? clp(res.precios?.particular) : "—"}</b></div>
+              <div className="row"><span>Particular {res ? `(+${pct(res.margenParticularPct)})` : ""}</span><b>{res ? clp(res.precios?.particular) : "—"}</b></div>
             </div>
           </div>
           <div className="card" style={{ background: "var(--primary)", color: "#fff" }}>

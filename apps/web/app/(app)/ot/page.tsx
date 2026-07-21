@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { fecha } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -79,7 +80,7 @@ export default function OtPage() {
                   <Link href={`/ot/${r.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{r.codigo ?? r.numero ?? r.id?.slice(0, 8)}</Link>
                 </td>
                 <td>{r.cliente?.razonSocial ?? "—"}</td>
-                <td>{r.fechaIngreso ? String(r.fechaIngreso).slice(0, 10) : r.createdAt ? String(r.createdAt).slice(0, 10) : "—"}</td>
+                <td>{fecha(r.fechaIngreso ?? r.createdAt)}</td>
                 <td>{r.prioridad ?? "normal"}</td>
                 <td>{estadoBadge(r.estado)}</td>
                 <td>{flujoBadge(r.flujo)}</td>

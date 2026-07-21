@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { fecha as fechaFmt } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -480,7 +481,7 @@ export default function EquiposPage() {
                       {ESTADO_META[r.estado]?.label ?? r.estado}
                     </span>
                   </td>
-                  <td>{fecha(r.proxima_calibracion)}</td>
+                  <td>{fechaFmt(r.proxima_calibracion)}</td>
                   <td>
                     <BadgeCalibracion e={r} />
                   </td>
@@ -539,7 +540,7 @@ export default function EquiposPage() {
             <div className="alert warn">
               <strong>Equipo no apto para ensayo.</strong>{" "}
               {detalle.calibracion_vencida
-                ? `Su calibración venció el ${fecha(detalle.proxima_calibracion)}. Registra una calibración conforme para reactivarlo.`
+                ? `Su calibración venció el ${fechaFmt(detalle.proxima_calibracion)}. Registra una calibración conforme para reactivarlo.`
                 : `Su estado es "${ESTADO_META[detalle.estado]?.label ?? detalle.estado}". Solo los equipos operativos con calibración vigente pueden usarse.`}
             </div>
           )}
@@ -567,11 +568,11 @@ export default function EquiposPage() {
             </div>
             <div className="field">
               <label>Última calibración</label>
-              <div>{fecha(detalle.fecha_ultima_calibracion)}</div>
+              <div>{fechaFmt(detalle.fecha_ultima_calibracion)}</div>
             </div>
             <div className="field">
               <label>Vigente hasta</label>
-              <div>{fecha(detalle.proxima_calibracion)}</div>
+              <div>{fechaFmt(detalle.proxima_calibracion)}</div>
             </div>
           </div>
 
@@ -662,13 +663,13 @@ export default function EquiposPage() {
             <tbody>
               {calibs.map((c) => (
                 <tr key={c.id}>
-                  <td>{fecha(c.fecha)}</td>
+                  <td>{fechaFmt(c.fecha)}</td>
                   <td>
                     <span className={`pill ${RESULTADO_META[c.resultado]?.pill ?? "gray"}`}>
                       {RESULTADO_META[c.resultado]?.label ?? c.resultado ?? "—"}
                     </span>
                   </td>
-                  <td>{fecha(c.proxima_fecha)}</td>
+                  <td>{fechaFmt(c.proxima_fecha)}</td>
                   <td>{c.ejecutada_por ?? "—"}</td>
                   <td style={{ color: "var(--muted)" }}>{c.norma_calibracion ?? "—"}</td>
                   <td>

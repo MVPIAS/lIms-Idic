@@ -3,7 +3,8 @@
 // Base de la API y helpers compartidos por la pantalla de Registro de O/T.
 export const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
-export const clp = (n: any) => "$ " + Math.round(Number(n ?? 0)).toLocaleString("es-CL");
+// Formateo canónico compartido (miles ".", símbolo $): re-exportado del util central.
+export { clp } from "@/lib/format";
 
 const authHeaders = (): Record<string, string> => ({
   Authorization: `Bearer ${typeof window !== "undefined" ? localStorage.getItem("lims_token") : ""}`,

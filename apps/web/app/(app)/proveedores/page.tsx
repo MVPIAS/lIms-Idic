@@ -1,6 +1,7 @@
 "use client";
 
 import CrudTable from "@/components/CrudTable";
+import { rut } from "@/lib/format";
 
 export default function ProveedoresPage() {
   return (
@@ -9,7 +10,7 @@ export default function ProveedoresPage() {
       titulo="Proveedores"
       subtitulo="Maestro de proveedores para órdenes de compra e insumos."
       columnas={[
-        { campo: "rut", titulo: "RUT", render: (v) => <span className="codigo">{v}</span> },
+        { campo: "rut", titulo: "RUT", render: (v) => <span className="codigo">{rut(v)}</span> },
         { campo: "razonSocial", titulo: "Razón social" },
         { campo: "rubro", titulo: "Rubro" },
         { campo: "estado", titulo: "Estado", render: (v) => <span className={`pill ${v === "habilitado" ? "green" : v === "inhabilitado" ? "red" : "amber"}`}>{v ?? "—"}</span> },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { fecha } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -75,7 +76,7 @@ export default function CapturaPage() {
     if (e.estado === "fuera_servicio") return "fuera de servicio";
     if (e.estado !== "operativo") return `no operativo (${e.estado})`;
     if (!e.proxima_calibracion) return "sin calibración registrada";
-    if (e.calibracion_vencida) return `calibración vencida (${String(e.proxima_calibracion).slice(0, 10)})`;
+    if (e.calibracion_vencida) return `calibración vencida (${fecha(e.proxima_calibracion)})`;
     return null;
   };
   const equipoLabel = (e: any) => {
@@ -135,7 +136,7 @@ export default function CapturaPage() {
               <span style={{ marginTop: 6, display: "inline-flex", alignItems: "center", gap: 8 }}>
                 <span className="pill green">Apto</span>
                 {equipo.proxima_calibracion && (
-                  <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Calibración vigente hasta {String(equipo.proxima_calibracion).slice(0, 10)}.</span>
+                  <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Calibración vigente hasta {fecha(equipo.proxima_calibracion)}.</span>
                 )}
               </span>
             ) : (

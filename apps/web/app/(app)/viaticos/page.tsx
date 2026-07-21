@@ -1,6 +1,7 @@
 "use client";
 
 import CrudTable from "@/components/CrudTable";
+import { clp, num as fmtNum } from "@/lib/format";
 
 /** La OT se identifica por su código, con el cliente como desempate. */
 const etiquetaOt = (o: any) => [o.codigo, o.cliente?.razonSocial].filter(Boolean).join(" · ");
@@ -21,9 +22,9 @@ export default function ViaticosPage() {
       columnas={[
         { campo: "funcionario", titulo: "Funcionario" },
         { campo: "destino", titulo: "Destino" },
-        { campo: "dias", titulo: "Días", right: true },
+        { campo: "dias", titulo: "Días", right: true, render: (v) => fmtNum(v) },
         { campo: "tipo", titulo: "Tipo", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
-        { campo: "monto", titulo: "Monto", right: true },
+        { campo: "monto", titulo: "Monto", right: true, render: (v) => clp(v) },
       ]}
       campos={[
         { campo: "funcionario", label: "Funcionario", requerido: true },

@@ -2,15 +2,13 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { fechaHora } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
   Authorization: `Bearer ${localStorage.getItem("lims_token")}`,
   "Content-Type": "application/json",
 });
-
-const fechaHora = (v: any) =>
-  v ? new Date(v).toLocaleString("es-CL", { dateStyle: "short", timeStyle: "short" }) : "—";
 
 const ESTADO_PILL: Record<string, string> = {
   procesado: "green",

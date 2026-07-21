@@ -1,12 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { clp, fecha as fmtFecha } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const IVA_PCT = 19;
-
-const clp = (n: any) => "$ " + Math.round(Number(n ?? 0)).toLocaleString("es-CL");
-const fmtFecha = (v: any) => (v ? new Date(v).toLocaleDateString("es-CL") : "—");
 
 const auth = () => ({
   "Content-Type": "application/json",

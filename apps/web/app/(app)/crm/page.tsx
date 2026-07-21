@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { monto as clp, pct } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -18,15 +19,6 @@ const ETAPAS: { key: string; label: string; pill: string }[] = [
   { key: "perdida", label: "Perdida", pill: "red" },
 ];
 const ETAPA_META = Object.fromEntries(ETAPAS.map((e) => [e.key, e]));
-
-const clp = (n: any, moneda = "CLP") => {
-  const v = Number(n ?? 0);
-  try {
-    return new Intl.NumberFormat("es-CL", { style: "currency", currency: moneda || "CLP", maximumFractionDigits: 0 }).format(v);
-  } catch {
-    return `$${v.toLocaleString("es-CL")}`;
-  }
-};
 
 const FORM_VACIO = {
   titulo: "",
@@ -229,7 +221,7 @@ export default function CrmPage() {
                       <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{r.cliente?.razon_social ?? "— sin cliente —"}</div>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                         <strong style={{ fontSize: 12.5 }}>{clp(r.monto_estimado, r.moneda)}</strong>
-                        <span style={{ fontSize: 11, color: "var(--muted)" }}>{r.probabilidad}%</span>
+                        <span style={{ fontSize: 11, color: "var(--muted)" }}>{pct(r.probabilidad)}</span>
                       </div>
                       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                         <button className="btn sm" onClick={() => abrirEditar(r)}>Editar</button>
