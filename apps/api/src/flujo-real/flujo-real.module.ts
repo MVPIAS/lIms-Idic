@@ -484,6 +484,252 @@ export class CosteoController {
   }
 }
 
+/* ============================ PUENTE · CATÁLOGO v2 -> FLUJO OPERATIVO ============================ */
+
+/**
+ * Puente entre el catálogo v2 (cascada: cat_metodo -> cat_analito ->
+ * cat_especificacion) y la captura operativa (`resultado`). Materializa los
+ * MÉTODOS elegidos del panel de una muestra como filas `resultado` por analizar
+ * —una por cada analito del método— arrastrando ESPECIFICACIÓN (Mín/Nominal/Máx)
+ * y FÓRMULA como copia congelada del catálogo, y habilita captura -> veredicto.
+ *
+ * Columnas físicas: packages/db/align_puente_catalogo.sql (resultado.cat_*,
+ * limite_*, formula; muestra.cat_elemento_id). Los resultados del puente dejan
+ * `analito_id` (legacy) en NULL y usan `cat_analito_id`.
+ */
+const GenerarAnalisisBody = z.object({
+  muestraId: z.string().uuid(),
+  metodoIds: z.array(z.string().uuid()).min(1),
+});
+const CapturarValorBody = z.object({
+  valor: z.union([z.number().finite(), z.string().min(1).max(120)]),
+});
+
+/** Parsea un texto de límite a número; NULL si no es numérico ('cumple', ''…). */
+function aNumero(v?: string | null): number | null {
+  if (v == null) return null;
+  const s = String(v).trim().replace(",", ".");
+  if (s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+@Injectable()
+export class PuenteAnalisisService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  private async muestraDeOt(otId: string, muestraId: string, tenantId: string) {
+    const muestra = await this.prisma.muestra.findFirst({
+      where: { id: muestraId, tenantId, deletedAt: null },
+    });
+    if (!muestra) throw new NotFoundException(`Muestra ${muestraId} no encontrada`);
+    if (muestra.otId !== otId)
+      throw new ConflictException(
+        `La muestra ${muestraId} no pertenece a la OT ${otId} (pertenece a ${muestra.otId ?? "ninguna"}).`,
+      );
+    return muestra;
+  }
+
+  /**
+   * Genera los resultados por analizar de una muestra a partir de los métodos
+   * (cat_metodo) elegidos del panel. Idempotente: no duplica un resultado ya
+   * existente para el par (muestra, cat_analito). Devuelve nº creados/omitidos.
+   */
+  async generarAnalisis(
+    otId: string,
+    body: z.infer<typeof GenerarAnalisisBody>,
+    tenantId: string,
+  ) {
+    // La OT debe existir en el tenant.
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    const muestra = await this.muestraDeOt(otId, body.muestraId, tenantId);
+
+    // Analitos de los métodos pedidos (validando que son del tenant).
+    const analitos = await this.prisma.catAnalito.findMany({
+      where: {
+        tenantId,
+        deletedAt: null,
+        activo: true,
+        metodoId: { in: body.metodoIds },
+      },
+    });
+
+    // Resultados del puente ya existentes para esta muestra (idempotencia).
+    const yaExisten = await this.prisma.resultado.findMany({
+      where: { muestraId: muestra.id, deletedAt: null, catAnalitoId: { not: null } },
+      select: { catAnalitoId: true },
+    });
+    const existentes = new Set(yaExisten.map((r) => r.catAnalitoId));
+
+    let creados = 0;
+    let omitidos = 0;
+    for (const a of analitos) {
+      if (existentes.has(a.id)) {
+        omitidos++;
+        continue;
+      }
+      // Especificación: preferimos la 'estandar'; si no, cualquiera; si no hay,
+      // caemos a los rangos del propio analito (cat_analito.rango_*).
+      const espec =
+        (await this.prisma.catEspecificacion.findFirst({
+          where: { analitoId: a.id, tenantId, deletedAt: null, activo: true, ambito: "estandar" },
+        })) ??
+        (await this.prisma.catEspecificacion.findFirst({
+          where: { analitoId: a.id, tenantId, deletedAt: null, activo: true },
+          orderBy: { createdAt: "asc" },
+        }));
+
+      const limiteInf = espec?.limiteInf ?? a.rangoMin ?? null;
+      const nominal = espec?.nominal ?? a.rangoNominal ?? null;
+      const limiteSup = espec?.limiteSup ?? a.rangoMax ?? null;
+      const unidad = espec?.unidad ?? a.unidad ?? null;
+
+      await this.prisma.resultado.create({
+        data: {
+          otId,
+          muestraId: muestra.id,
+          analitoId: null, // resultado del PUENTE: usa cat_analito_id
+          catMetodoId: a.metodoId,
+          catAnalitoId: a.id,
+          unidad,
+          formula: a.formula ?? null,
+          limiteInf,
+          nominal,
+          limiteSup,
+          veredicto: "pendiente",
+        },
+      });
+      existentes.add(a.id);
+      creados++;
+    }
+
+    return {
+      otId,
+      muestraId: muestra.id,
+      metodosSolicitados: body.metodoIds.length,
+      analitosEncontrados: analitos.length,
+      creados,
+      omitidos,
+    };
+  }
+
+  /**
+   * Captura el valor de un resultado del puente y calcula el veredicto:
+   *   · valor numérico y límites numéricos -> cumple / no_cumple según rango.
+   *   · valor o límites no numéricos ('cumple', 'Declarado'…) -> pendiente
+   *     (veredicto manual: no se puede decidir automáticamente).
+   * Un límite ausente equivale a "sin cota" por ese lado.
+   */
+  async capturarValor(id: string, valor: number | string, tenantId: string) {
+    const resultado = await this.prisma.resultado.findFirst({
+      where: { id, deletedAt: null, muestra: { tenantId } },
+      include: { muestra: { select: { tenantId: true } } },
+    });
+    if (!resultado) throw new NotFoundException(`Resultado ${id} no encontrado`);
+
+    const valorNum = typeof valor === "number" ? valor : aNumero(valor);
+    const inf = aNumero(resultado.limiteInf);
+    const sup = aNumero(resultado.limiteSup);
+
+    let veredicto: "cumple" | "no_cumple" | "pendiente";
+    if (valorNum == null || (inf == null && sup == null)) {
+      // Sin valor numérico o sin ninguna cota numérica -> decisión manual.
+      veredicto = "pendiente";
+    } else if ((inf != null && valorNum < inf) || (sup != null && valorNum > sup)) {
+      veredicto = "no_cumple";
+    } else {
+      veredicto = "cumple";
+    }
+
+    return this.prisma.resultado.update({
+      where: { id },
+      data: {
+        valorNumerico: valorNum,
+        valorTexto: String(valor),
+        veredicto,
+      },
+      include: { catAnalito: true, catMetodo: true },
+    });
+  }
+
+  /**
+   * Resultados de todas las muestras de una OT, con analito/método/
+   * especificación/valor/veredicto, más un resumen (cumple/no_cumple/pendiente)
+   * para el expediente/informe.
+   */
+  async resultadosDeOt(otId: string, tenantId: string) {
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+
+    const muestras = await this.prisma.muestra.findMany({
+      where: { otId, tenantId, deletedAt: null },
+      select: { id: true },
+    });
+    const muestraIds = muestras.map((m) => m.id);
+
+    const resultados = muestraIds.length
+      ? await this.prisma.resultado.findMany({
+          where: { muestraId: { in: muestraIds }, deletedAt: null },
+          include: {
+            muestra: { select: { id: true, codigo: true, nombre: true } },
+            catAnalito: { select: { id: true, codigo: true, nombre: true, unidad: true } },
+            catMetodo: { select: { id: true, codigo: true, nombre: true, norma: true } },
+            analito: { select: { id: true, codigo: true, nombre: true } },
+          },
+          orderBy: { fecha: "desc" },
+        })
+      : [];
+
+    const resumen = { total: resultados.length, cumple: 0, no_cumple: 0, pendiente: 0 };
+    for (const r of resultados) {
+      if (r.veredicto === "cumple") resumen.cumple++;
+      else if (r.veredicto === "no_cumple") resumen.no_cumple++;
+      else resumen.pendiente++;
+    }
+
+    return { otId, muestras: muestraIds.length, resumen, resultados };
+  }
+}
+
+@ApiTags("flujo-puente")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@Controller("flujo/ot")
+export class PuenteOtController {
+  constructor(private readonly svc: PuenteAnalisisService) {}
+
+  @Post(":id/generar-analisis")
+  @RequierePermiso("resultado.crear")
+  @ApiOperation({ summary: "Materializa los métodos del panel (cat_metodo) como resultados por analizar" })
+  generarAnalisis(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.generarAnalisis(id, GenerarAnalisisBody.parse(body), tenantDe(req));
+  }
+
+  @Get(":id/resultados")
+  @RequierePermiso("resultado.ver")
+  @ApiOperation({ summary: "Resultados de las muestras de la OT + resumen de veredictos" })
+  resultados(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.resultadosDeOt(id, tenantDe(req));
+  }
+}
+
+@ApiTags("flujo-puente")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@Controller("flujo/resultado")
+export class PuenteResultadoController {
+  constructor(private readonly svc: PuenteAnalisisService) {}
+
+  @Post(":id/valor")
+  @RequierePermiso("resultado.crear")
+  @ApiOperation({ summary: "Captura el valor de un resultado del puente y calcula su veredicto" })
+  capturarValor(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const { valor } = CapturarValorBody.parse(body);
+    return this.svc.capturarValor(id, valor, tenantDe(req));
+  }
+}
+
 /* ============================ MÓDULO ============================ */
 
 @Module({
@@ -495,6 +741,8 @@ export class CosteoController {
     FormatoInformeController,
     FlujoOtController,
     CosteoController,
+    PuenteOtController,
+    PuenteResultadoController,
   ],
   providers: [
     SolicitudCosteoService,
@@ -502,6 +750,7 @@ export class CosteoController {
     FormatoInformeService,
     FlujoOtService,
     CosteoService,
+    PuenteAnalisisService,
   ],
 })
 export class FlujoRealModule {}

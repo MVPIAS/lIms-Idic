@@ -76,6 +76,7 @@ for f in \
   packages/db/seed_catalogo_v2.sql \
   packages/db/align_ot_correlativo.sql \
   packages/db/align_flujo_real.sql \
+  packages/db/align_puente_catalogo.sql \
   packages/db/align_rbac_comercial_catalogo.sql \
   packages/db/align_seguridad.sql; do
   if [ -f "$f" ]; then

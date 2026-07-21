@@ -739,6 +739,9 @@ model Muestra {
   codigoBarras  String?   @map("codigo_barras") @db.VarChar(60)
   ubicacion     String?   @db.VarChar(80)
   estado        String    @default("recibida") @db.VarChar(30)
+  /// PUENTE catálogo v2 (align_puente_catalogo.sql): elemento del catálogo del
+  /// que procede la muestra. NULL en muestras legacy.
+  catElementoId String?   @map("cat_elemento_id") @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
 
@@ -810,7 +813,9 @@ model Resultado {
   id         String    @id @default(uuid()) @db.Uuid
   otId       String?   @map("ot_id") @db.Uuid
   muestraId  String    @map("muestra_id") @db.Uuid
-  analitoId  String    @map("analito_id") @db.Uuid
+  /// Analito LEGACY (tabla `analito`). Nullable: los resultados del PUENTE usan
+  /// catAnalitoId en su lugar y dejan analitoId en NULL (align_puente_catalogo.sql).
+  analitoId  String?   @map("analito_id") @db.Uuid
   replicas   Json      @default("[]")
   promedio   Decimal?  @db.Decimal(18, 6)
   desviacion Decimal?  @db.Decimal(18, 6)
@@ -851,13 +856,35 @@ model Resultado {
   aprobadoAt       DateTime? @map("aprobado_at") @db.Timestamptz
   motivoDevolucion String?   @map("motivo_devolucion")
 
+  /// PUENTE catálogo v2 (align_puente_catalogo.sql). Un resultado del puente se
+  /// materializa desde un cat_metodo/cat_analito del panel del elemento, con la
+  /// especificación (limiteInf/nominal/limiteSup) y la fórmula ARRASTRADAS —
+  /// copia congelada del catálogo en el instante de generar el análisis. En ese
+  /// caso analitoId es NULL. `unidad`/`veredicto` (arriba) se reutilizan.
+  catAnalitoId String? @map("cat_analito_id") @db.Uuid
+  catMetodoId  String? @map("cat_metodo_id") @db.Uuid
+  limiteInf    String? @map("limite_inf")
+  nominal      String?
+  limiteSup    String? @map("limite_sup")
+  formula      String?
+  /// Valor capturado del resultado del puente (columnas ya existentes en
+  /// schema.sql, ahora mapeadas). `valorNumerico` cuando el valor es numérico
+  /// (habilita el contraste con los límites); `valorTexto` guarda siempre la
+  /// forma textual (admite resultados cualitativos: 'cumple', 'Declarado'…).
+  valorNumerico Decimal? @map("valor_numerico") @db.Decimal(18, 6)
+  valorTexto    String?  @map("valor_texto") @db.VarChar(120)
+
   muestra    Muestra   @relation(fields: [muestraId], references: [id], onDelete: Cascade)
-  analito    Analito   @relation(fields: [analitoId], references: [id])
+  analito    Analito?  @relation(fields: [analitoId], references: [id])
+  catAnalito CatAnalito? @relation(fields: [catAnalitoId], references: [id])
+  catMetodo  CatMetodo?  @relation(fields: [catMetodoId], references: [id])
 
   @@index([otId])
   @@index([muestraId])
   @@index([estado, fecha])
   @@index([equipoId])
+  @@index([catAnalitoId])
+  @@index([catMetodoId])
   @@map("resultado")
 }
 
@@ -1106,6 +1133,7 @@ model CatMetodo {
   ensayo      CatEnsayo?  @relation(fields: [ensayoId], references: [id])
   analitos    CatAnalito[]
   paneles     CatPanel[]
+  resultados  Resultado[]
 
   @@unique([tenantId, codigo])
   @@index([tenantId])
@@ -1130,6 +1158,7 @@ model CatAnalito {
 
   metodo        CatMetodo            @relation(fields: [metodoId], references: [id])
   especificaciones CatEspecificacion[]
+  resultados    Resultado[]
 
   @@unique([tenantId, metodoId, codigo])
   @@index([tenantId])
