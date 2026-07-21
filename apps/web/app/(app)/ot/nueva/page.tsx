@@ -52,23 +52,31 @@ export default function NuevaOtPage() {
       const otCodigo = otResp?.codigo || otId?.slice(0, 8) || "OT";
       if (!otId) throw new ApiError("La API de OT no devolvió un id.", 500);
 
-      // c. Una muestra por cada elemento/línea agregado. codigo único y <=30 chars.
-      //    NOTA (limitación conocida): los métodos seleccionados del panel (catálogo v2)
-      //    NO se persisten aún como analitos/resultados —falta el puente catálogo v2 ↔
-      //    analitos/resultados—. Como paliativo, dejamos su referencia dentro de `nombre`
-      //    (único campo textual libre del contrato actual de POST /api/muestras).
+      // c. Una muestra por cada elemento/línea, y por cada muestra materializamos
+      //    los métodos elegidos del panel como resultados por analizar (con su
+      //    especificación Mín/Nom/Máx y fórmula) vía el puente catálogo v2 ↔ operativo
+      //    (POST /flujo/ot/:id/generar-analisis). Así el expediente llega listo para
+      //    captura → veredicto → informe.
       for (let i = 0; i < lineas.length; i++) {
         const l = lineas[i];
         const codigo = `${otCodigo}-M${i + 1}`.slice(0, 30);
         const refMetodos = l.metodos.map((m) => m.metodoCodigo).join(",");
         const nombre = `${l.elementoNombre}${refMetodos ? ` [${refMetodos}]` : ""}`.slice(0, 200);
-        await apiPost("/muestras", {
-          codigo,
-          otId,
-          clienteId: cliente.id,
-          nombre,
-          estado: "recibida",
-        });
+        const muestraResp = unwrap(
+          await apiPost("/muestras", {
+            codigo,
+            otId,
+            clienteId: cliente.id,
+            nombre,
+            estado: "recibida",
+          }),
+        );
+        const muestraId = muestraResp?.id;
+        const metodoIds = l.metodos.map((m) => m.metodoId).filter(Boolean);
+        if (muestraId && metodoIds.length) {
+          // Materializa resultados por analito de cada método seleccionado.
+          await apiPost(`/flujo/ot/${otId}/generar-analisis`, { muestraId, metodoIds });
+        }
       }
 
       // d. Todo OK → ficha de la OT recién creada.
