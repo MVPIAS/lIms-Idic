@@ -69,7 +69,11 @@ export class PlantillaRenderService {
     });
 
     // Límites de norma de los analitos implicados, en UNA consulta (no N+1).
-    const analitoIds = [...new Set(resultados.map((r) => r.analitoId))];
+    // `analitoId` es nullable (los resultados del puente lo dejan en NULL y usan
+    // cat_analito_id): se descartan los NULL de esta búsqueda por analito legacy.
+    const analitoIds = [
+      ...new Set(resultados.map((r) => r.analitoId).filter((x): x is string => x !== null)),
+    ];
     const limites = analitoIds.length
       ? await this.prisma.normaLimite.findMany({ where: { analitoId: { in: analitoIds } } })
       : [];
@@ -138,7 +142,7 @@ export class PlantillaRenderService {
   /** Filas de {{tabla_resultados}}: analito, unidad, promedio, DE, CV, límite, veredicto. */
   private filasResultados(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>): FilaResultado[] {
     return ctx.resultados.map((r) => {
-      const lim = ctx.limitePorAnalito.get(r.analitoId);
+      const lim = r.analitoId ? ctx.limitePorAnalito.get(r.analitoId) : undefined;
       return {
         analito: r.analito?.nombre ?? "",
         muestra: r.muestra?.codigo ?? r.muestra?.nombre ?? "",
