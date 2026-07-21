@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { API, clp, authHeaders } from "./_components/api";
+import { clp, apiPost, unwrap, ApiError } from "./_components/api";
+import ClienteSelector, { Cliente } from "./_components/ClienteSelector";
 import LineaBuilder, { LineaOT } from "./_components/LineaBuilder";
 
 const hoy = () => new Date().toISOString().slice(0, 10);
@@ -11,7 +12,7 @@ export default function NuevaOtPage() {
   const router = useRouter();
 
   // Cabecera de la OT.
-  const [cliente, setCliente] = useState("");
+  const [cliente, setCliente] = useState<Cliente | null>(null);
   const [fechaIngreso, setFechaIngreso] = useState(hoy());
   const [prioridad, setPrioridad] = useState("normal");
   const [observaciones, setObservaciones] = useState("");
@@ -23,57 +24,62 @@ export default function NuevaOtPage() {
   const [enviando, setEnviando] = useState(false);
   const [okMsg, setOkMsg] = useState("");
   const [errMsg, setErrMsg] = useState("");
-  const [payloadPreview, setPayloadPreview] = useState<any>(null);
+  const [errIssues, setErrIssues] = useState<string[]>([]);
 
   const totalEstimado = useMemo(() => lineas.reduce((s, l) => s + Number(l.subtotal ?? 0), 0), [lineas]);
 
   const addLinea = (l: LineaOT) => setLineas((ls) => [...ls, l]);
   const delLinea = (i: number) => setLineas((ls) => ls.filter((_, j) => j !== i));
 
-  const buildPayload = () => ({
-    cliente,
-    fechaIngreso,
-    prioridad,
-    observaciones,
-    lineas: lineas.map((l) => ({
-      elementoId: l.elementoId,
-      elementoCodigo: l.elementoCodigo,
-      elementoNombre: l.elementoNombre,
-      familia: l.familia,
-      analista: l.analista,
-      tipoInspeccion: l.tipoInspeccion,
-      prioridad: l.prioridad,
-      cantidad: l.cantidad,
-      numMuestras: l.numMuestras,
-      numPlanilla: l.numPlanilla,
-      metodos: l.metodos.map((m) => ({ metodoId: m.metodoId, ensayoId: m.ensayoId, precio: m.precio })),
-    })),
-    totalEstimado,
-  });
-
   async function registrar() {
-    setOkMsg(""); setErrMsg(""); setPayloadPreview(null);
-    if (!cliente.trim()) { setErrMsg("Indica el cliente de la OT."); return; }
+    setOkMsg(""); setErrMsg(""); setErrIssues([]);
+    // a. Validaciones locales.
+    if (!cliente?.id) { setErrMsg("Selecciona un cliente real de la lista."); return; }
     if (lineas.length === 0) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
 
-    const payload = buildPayload();
     setEnviando(true);
     try {
-      const res = await fetch(`${API}/ot`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify(payload),
-      });
-      if (res.ok) {
-        router.push("/ot");
-        return;
+      // b. Crear la OT. La respuesta puede venir plana {id,codigo} o envuelta {data:{...}}.
+      const otResp = unwrap<{ id: string; codigo?: string }>(
+        await apiPost("/ot", {
+          clienteId: cliente.id,
+          prioridad,
+          fechaIngreso: new Date(fechaIngreso).toISOString(),
+          notas: observaciones || undefined,
+        }),
+      );
+      const otId = otResp?.id;
+      const otCodigo = otResp?.codigo || otId?.slice(0, 8) || "OT";
+      if (!otId) throw new ApiError("La API de OT no devolvió un id.", 500);
+
+      // c. Una muestra por cada elemento/línea agregado. codigo único y <=30 chars.
+      //    NOTA (limitación conocida): los métodos seleccionados del panel (catálogo v2)
+      //    NO se persisten aún como analitos/resultados —falta el puente catálogo v2 ↔
+      //    analitos/resultados—. Como paliativo, dejamos su referencia dentro de `nombre`
+      //    (único campo textual libre del contrato actual de POST /api/muestras).
+      for (let i = 0; i < lineas.length; i++) {
+        const l = lineas[i];
+        const codigo = `${otCodigo}-M${i + 1}`.slice(0, 30);
+        const refMetodos = l.metodos.map((m) => m.metodoCodigo).join(",");
+        const nombre = `${l.elementoNombre}${refMetodos ? ` [${refMetodos}]` : ""}`.slice(0, 200);
+        await apiPost("/muestras", {
+          codigo,
+          otId,
+          clienteId: cliente.id,
+          nombre,
+          estado: "recibida",
+        });
       }
-      // El backend de OT aún no acepta este shape: mostramos el payload armado (esperado en v1).
-      setOkMsg("OT armada correctamente (pendiente de persistir en backend v2).");
-      setPayloadPreview(payload);
-    } catch {
-      setOkMsg("OT armada correctamente (pendiente de persistir en backend v2).");
-      setPayloadPreview(payload);
+
+      // d. Todo OK → ficha de la OT recién creada.
+      router.push(`/ot/${otId}`);
+    } catch (e) {
+      if (e instanceof ApiError) {
+        setErrMsg(e.message);
+        setErrIssues(e.issues);
+      } else {
+        setErrMsg(e instanceof Error ? e.message : "No se pudo registrar la OT.");
+      }
     } finally {
       setEnviando(false);
     }
@@ -93,16 +99,22 @@ export default function NuevaOtPage() {
       </div>
 
       {okMsg && <div className="alert success">{okMsg}</div>}
-      {errMsg && <div className="alert warn">{errMsg}</div>}
+      {errMsg && (
+        <div className="alert warn">
+          <div>{errMsg}</div>
+          {errIssues.length > 0 && (
+            <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+              {errIssues.map((it, i) => <li key={i}>{it}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* Cabecera de OT */}
       <div className="card">
         <h2>Cabecera de la Orden de Trabajo</h2>
         <div className="form-grid cols-4">
-          <div className="field span-2">
-            <label>Cliente <span className="req">*</span></label>
-            <input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="Razón social / unidad solicitante" />
-          </div>
+          <ClienteSelector value={cliente} onChange={setCliente} />
           <div className="field">
             <label>Fecha de ingreso</label>
             <input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} />
@@ -172,16 +184,6 @@ export default function NuevaOtPage() {
           </button>
         </div>
       </div>
-
-      {/* Preview del payload cuando el backend aún no persiste */}
-      {payloadPreview && (
-        <div className="card">
-          <h2>Payload armado <span className="right">para revisión / integración backend</span></h2>
-          <pre style={{ margin: 0, fontSize: 11.5, overflow: "auto", background: "#0f1720", color: "#d7e2ea", padding: 12, borderRadius: 8 }}>
-            {JSON.stringify(payloadPreview, null, 2)}
-          </pre>
-        </div>
-      )}
     </div>
   );
 }

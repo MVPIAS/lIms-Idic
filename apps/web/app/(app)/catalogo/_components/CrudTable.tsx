@@ -10,6 +10,7 @@
  */
 
 import { useCallback, useEffect, useId, useState } from "react";
+import { errorMensaje } from "@/lib/apiError";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -24,8 +25,10 @@ function authHeaders(): Record<string, string> {
 async function apiFetch(path: string, init: RequestInit = {}): Promise<any> {
   const res = await fetch(`${API}/${path}`, { ...init, headers: { ...authHeaders(), ...(init.headers ?? {}) } });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body?.message ?? `Error ${res.status}`);
+    // Traduce el error del API a un mensaje legible (incluye los `issues` de
+    // validación 400, p. ej. "RUT chileno inválido"), para que ningún 400 deje
+    // el formulario en silencio.
+    throw new Error(await errorMensaje(res));
   }
   return res.status === 204 ? undefined : res.json();
 }
@@ -282,7 +285,9 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
     <div>
       <h1 className="page">{titulo}</h1>
       {subtitulo && <p className="subtitle">{subtitulo}</p>}
-      {error && <div className="alert warn">{error}</div>}
+      {/* Errores de la lista (carga): solo cuando el formulario está cerrado; con
+          el formulario abierto, el error se muestra dentro de él (junto al usuario). */}
+      {error && !showForm && <div className="alert warn">{error}</div>}
 
       <div className="toolbar">
         <input
@@ -298,6 +303,10 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
 
       {showForm && (
         <form onSubmit={guardar} className="card">
+          {/* Error de guardado (p. ej. 400 de validación: "rut: RUT chileno inválido").
+              Se muestra dentro del formulario y NO lo cierra, para que el usuario
+              entienda por qué el botón "no hace nada". */}
+          {error && <div className="alert warn" style={{ marginBottom: 12 }}>{error}</div>}
           <div className="form-grid">
             {campos.map((c) => {
               const inputId = `${formId}-${c.name}`;
