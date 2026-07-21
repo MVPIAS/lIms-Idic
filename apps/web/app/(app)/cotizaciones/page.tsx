@@ -16,7 +16,7 @@ type Cot = {
   numero: string;
   cliente: string;
   formato: string;
-  estado: "borrador" | "enviada" | "aceptada" | "rechazada" | "vencida";
+  estado: "borrador" | "enviada" | "aceptada" | "rechazada" | "expirada" | "vencida";
   total: number;
   otNumero?: string | null;
   fecha: string;
@@ -34,6 +34,9 @@ const ESTADO_PILL: Record<Cot["estado"], string> = {
   enviada: "blue",
   aceptada: "green",
   rechazada: "red",
+  // La API expone "expirada" (common/estados.ts); el legacy la llama "Vencida".
+  // Se mapean ambas para no dejar sin color el estado que llega del backend.
+  expirada: "amber",
   vencida: "amber",
 };
 
@@ -87,7 +90,7 @@ export default function CotizacionesPage() {
               <th>Cliente</th>
               <th>Formato</th>
               <th>Estado</th>
-              <th className="num">Total (c/ IVA)</th>
+              <th className="num">Total (IVA exento)</th>
               <th>OT generada</th>
               <th>Fecha</th>
             </tr>

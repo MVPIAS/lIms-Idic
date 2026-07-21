@@ -49,15 +49,24 @@ export class CotizacionService {
       return { ...l, orden: i + 1, subtotal };
     });
 
+    // Réplica de SIS_COMERCIAL (ADM/imprimir.php:300-338):
+    //   total_pagar = SUMA(líneas) − (SUMA × descuento%/100)   [IVA EXENTO]
+    // El descuento se aplica sobre el gran total (suma de líneas), igual que el
+    // legacy. Gastos administrativos e IVA son 0 salvo que se pidan (el original
+    // no los tiene): así el total coincide 1:1 con la cotización original.
+    const descuentoPct = Number(data.descuentoPct ?? 0);
+    const gastosAdminPct = Number(data.gastosAdminPct ?? 0);
+    const ivaPct = Number(data.ivaPct ?? 0);
+
     const subtotal = lineasConSubtotal.reduce(
       (acc: number, l: any) => acc + l.subtotal,
       0,
     );
-    const descuentoMonto = subtotal * (data.descuentoPct / 100);
+    const descuentoMonto = subtotal * (descuentoPct / 100);
     const subtotalNeto = subtotal - descuentoMonto;
-    const gastosAdminMonto = subtotalNeto * (data.gastosAdminPct / 100);
+    const gastosAdminMonto = subtotalNeto * (gastosAdminPct / 100);
     const neto = subtotalNeto + gastosAdminMonto;
-    const ivaMonto = neto * (data.ivaPct / 100);
+    const ivaMonto = neto * (ivaPct / 100);
     const total = neto + ivaMonto;
 
     return this.prisma.cotizacion.create({
@@ -70,12 +79,12 @@ export class CotizacionService {
         formaPago: data.formaPago,
         validezDias: data.validezDias,
         subtotal,
-        descuentoPct: data.descuentoPct,
+        descuentoPct,
         descuentoMonto,
-        gastosAdminPct: data.gastosAdminPct,
+        gastosAdminPct,
         gastosAdminMonto,
         neto,
-        ivaPct: data.ivaPct,
+        ivaPct,
         ivaMonto,
         total,
         notas: data.notas,
