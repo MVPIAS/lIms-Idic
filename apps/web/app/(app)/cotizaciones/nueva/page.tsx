@@ -50,7 +50,6 @@ export default function CosteoPage() {
     } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
   }
 
-  const conIva = (n: number) => n * (1 + Number(ivaPct) / 100);
   const cellInput: React.CSSProperties = { width: "100%", border: "1px solid var(--line)", borderRadius: 4, padding: "3px 6px", font: "inherit", fontSize: 12.5 };
 
   return (
@@ -120,8 +119,10 @@ export default function CosteoPage() {
             </div>
           </div>
           <div className="card" style={{ background: "var(--primary)", color: "#fff" }}>
-            <div style={{ fontSize: 10, textTransform: "uppercase", opacity: 0.8 }}>Precio a cotizar (c/IVA · Ejército)</div>
-            <div style={{ fontSize: 24, fontWeight: 800 }}>{res ? clp(conIva(Number(res.precios?.ejercito ?? res.ct))) : "—"}</div>
+            {/* GAP-CHECK SIS_COMERCIAL: la cotización comercial es IVA EXENTO
+                (ADM/imprimir.php:337). El precio a cotizar no lleva IVA. */}
+            <div style={{ fontSize: 10, textTransform: "uppercase", opacity: 0.8 }}>Precio a cotizar (IVA exento · Ejército)</div>
+            <div style={{ fontSize: 24, fontWeight: 800 }}>{res ? clp(Number(res.precios?.ejercito ?? res.ct)) : "—"}</div>
             <button className="btn success sm" style={{ width: "100%", marginTop: 8, justifyContent: "center" }}>Guardar borrador</button>
           </div>
         </div>

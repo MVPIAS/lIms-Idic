@@ -66,8 +66,13 @@ const CrearCotSchema = z.object({
   formaPago: z.string().optional(),
   validezDias: z.number().int().positive().default(30),
   descuentoPct: z.number().min(0).max(100).default(0),
+  // GAP-CHECK SIS_COMERCIAL: la cotización comercial del legacy NO aplica gastos
+  // administrativos ni utilidad, y es IVA EXENTO (ADM/imprimir.php:337
+  // "impresion cotizacion IVA EXENTO"). El total real = SUMA(líneas) − descuento%.
+  // Por eso el default de IVA es 0 (exento); solo se calcula IVA si el llamador lo
+  // pide explícitamente. Antes el default 19 divergía del original.
   gastosAdminPct: z.number().min(0).max(100).default(0),
-  ivaPct: z.number().min(0).max(100).default(19),
+  ivaPct: z.number().min(0).max(100).default(0),
   notas: z.string().optional(),
   lineas: z.array(LineaSchema).min(1),
 });
