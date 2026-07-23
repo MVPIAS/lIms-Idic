@@ -47,11 +47,16 @@ async function main() {
     update: { passwordHash, estado: "activo" },
   });
 
-  await prisma.usuarioRol.upsert({
-    where: { usuarioId_rolId: { usuarioId: usuario.id, rolId: rol.id } as any },
-    create: { usuarioId: usuario.id, rolId: rol.id },
-    update: {},
+  // usuario_rol ya no tiene PK compuesta (usuario, rol): la clave es `id`
+  // sintética y la unicidad la da un índice único por expresión (unidad_id).
+  // Por eso el upsert se hace manual: si no existe el par (usuario, rol) global,
+  // se crea. Idempotente para el bootstrap del admin.
+  const yaAsignado = await prisma.usuarioRol.findFirst({
+    where: { usuarioId: usuario.id, rolId: rol.id },
   });
+  if (!yaAsignado) {
+    await prisma.usuarioRol.create({ data: { usuarioId: usuario.id, rolId: rol.id } });
+  }
 
   console.log("✔ Usuario administrador listo:");
   console.log(`  usuario: ${username}`);
