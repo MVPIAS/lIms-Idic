@@ -75,6 +75,7 @@ model Unidad {
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
 
   sede            Sede     @relation(fields: [sedeId], references: [id])
+  jefes           UnidadJefe[]
 
   @@unique([tenantId, codigo])
   @@map("unidad")
@@ -107,6 +108,7 @@ model Usuario {
 
   tenant           Tenant    @relation(fields: [tenantId], references: [id])
   usuarioRoles     UsuarioRol[]
+  jefaturas        UnidadJefe[]
   cotizacionesCreadas Cotizacion[] @relation("CotizacionCreada")
 
   @@unique([tenantId, username])
@@ -129,6 +131,12 @@ model Rol {
 }
 
 model UsuarioRol {
+  // PK sintética: permite el MISMO rol en varias unidades (JEFE_LAB en 2 labs).
+  // La unicidad real "no duplicar (usuario, rol, unidad)" la garantiza un ÍNDICE
+  // ÚNICO por expresión COALESCE(unidad_id,'000…') creado en
+  // packages/db/align_rbac_unidad.sql (Prisma no puede modelar índices por
+  // expresión, por eso no aparece como @@unique aquí).
+  id            String   @id @default(uuid()) @db.Uuid
   usuarioId     String   @map("usuario_id") @db.Uuid
   rolId         String   @map("rol_id") @db.Uuid
   unidadId      String?  @map("unidad_id") @db.Uuid
@@ -138,8 +146,26 @@ model UsuarioRol {
   usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   rol           Rol      @relation(fields: [rolId], references: [id], onDelete: Cascade)
 
-  @@id([usuarioId, rolId])
+  @@index([usuarioId])
+  @@index([rolId])
   @@map("usuario_rol")
+}
+
+// Hasta 2 Jefes de Laboratorio por unidad (titular + subrogante). Complementa
+// unidad.jefe_usuario_id (jefe titular legacy, mantenido por compatibilidad).
+// DDL: packages/db/align_rbac_unidad.sql
+model UnidadJefe {
+  tenantId    String   @map("tenant_id") @db.Uuid
+  unidadId    String   @map("unidad_id") @db.Uuid
+  usuarioId   String   @map("usuario_id") @db.Uuid
+  rol         String   @default("titular") @db.VarChar(20)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  unidad      Unidad   @relation(fields: [unidadId], references: [id], onDelete: Cascade)
+  usuario     Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@id([unidadId, usuarioId])
+  @@map("unidad_jefe")
 }
 
 // ============================================================================

@@ -514,6 +514,23 @@ function aNumero(v?: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Tolerancia numérica para las comparaciones de cota (evita falsos no_cumple por
+ * ruido de coma flotante en valores como 3600.0000001). */
+const TOL_NUMERICA = 1e-9;
+
+/**
+ * Referencia CUALITATIVA normalizada de un límite/nominal: devuelve el texto en
+ * minúsculas y sin espacios sobrantes SOLO si NO es numérico (p.ej. 'Cumple',
+ * 'Declarado', 'Ausente'). Si es numérico o vacío, devuelve NULL (no sirve como
+ * referencia cualitativa). */
+function refCualitativa(v?: string | null): string | null {
+  if (v == null) return null;
+  const s = String(v).trim();
+  if (s === "") return null;
+  if (aNumero(s) != null) return null; // es numérico -> no es referencia textual
+  return s.toLowerCase();
+}
+
 @Injectable()
 export class PuenteAnalisisService {
   constructor(private readonly prisma: PrismaService) {}
@@ -615,11 +632,19 @@ export class PuenteAnalisisService {
   }
 
   /**
-   * Captura el valor de un resultado del puente y calcula el veredicto:
-   *   · valor numérico y límites numéricos -> cumple / no_cumple según rango.
-   *   · valor o límites no numéricos ('cumple', 'Declarado'…) -> pendiente
-   *     (veredicto manual: no se puede decidir automáticamente).
-   * Un límite ausente equivale a "sin cota" por ese lado.
+   * Captura el valor de un resultado del puente y calcula el veredicto.
+   * Reglas (aditivas, compatibles con el comportamiento anterior):
+   *   NUMÉRICO (valor numérico + al menos una cota numérica):
+   *     · [inf, sup]  -> cumple si inf <= valor <= sup (doble cota, como antes).
+   *     · solo inf    -> cumple si valor >= inf; si no, no_cumple.
+   *     · solo sup    -> cumple si valor <= sup; si no, no_cumple.
+   *     (con tolerancia TOL_NUMERICA para evitar falsos no_cumple por redondeo).
+   *   CUALITATIVO (la referencia nominal/límite es texto no numérico y el valor
+   *     también es texto, p.ej. 'Cumple', 'Declarado', 'Ausente'):
+   *     · cumple si el valor coincide (case-insensitive, trim) con la referencia
+   *       esperada (nominal > limite_inf > limite_sup); si no, no_cumple.
+   *   PENDIENTE (revisión manual): cuando no hay forma de decidir —ni cota
+   *     numérica comparable ni referencia textual comparable—.
    */
   async capturarValor(id: string, valor: number | string, tenantId: string) {
     const resultado = await this.prisma.resultado.findFirst({
@@ -633,13 +658,24 @@ export class PuenteAnalisisService {
     const sup = aNumero(resultado.limiteSup);
 
     let veredicto: "cumple" | "no_cumple" | "pendiente";
-    if (valorNum == null || (inf == null && sup == null)) {
-      // Sin valor numérico o sin ninguna cota numérica -> decisión manual.
-      veredicto = "pendiente";
-    } else if ((inf != null && valorNum < inf) || (sup != null && valorNum > sup)) {
-      veredicto = "no_cumple";
+    if (valorNum != null && (inf != null || sup != null)) {
+      // --- Rama NUMÉRICA: una o dos cotas numéricas. ---
+      const bajoMinimo = inf != null && valorNum < inf - TOL_NUMERICA;
+      const sobreMaximo = sup != null && valorNum > sup + TOL_NUMERICA;
+      veredicto = bajoMinimo || sobreMaximo ? "no_cumple" : "cumple";
     } else {
-      veredicto = "cumple";
+      // --- Rama CUALITATIVA: referencia textual esperada vs valor textual. ---
+      const esperado =
+        refCualitativa(resultado.nominal) ??
+        refCualitativa(resultado.limiteInf) ??
+        refCualitativa(resultado.limiteSup);
+      const valorTxt = String(valor).trim().toLowerCase();
+      if (esperado != null && valorTxt !== "") {
+        veredicto = esperado === valorTxt ? "cumple" : "no_cumple";
+      } else {
+        // Sin cota numérica y sin referencia textual comparable -> manual.
+        veredicto = "pendiente";
+      }
     }
 
     return this.prisma.resultado.update({

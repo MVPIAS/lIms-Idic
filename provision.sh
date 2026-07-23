@@ -69,6 +69,7 @@ for f in \
   packages/db/align_certificado.sql \
   packages/db/equipos_custodia.sql \
   packages/db/align_rbac.sql \
+  packages/db/align_rbac_unidad.sql \
   packages/db/align_resultado_equipo.sql \
   packages/db/saec.sql \
   packages/db/align_saec_certificado.sql \
