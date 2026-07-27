@@ -36,6 +36,7 @@ const NAV = [
       { href: "/ot/nueva", label: "Registrar OT", icon: "＋" },
       { href: "/muestras", label: "Muestras", icon: "🧪" },
       { href: "/captura", label: "Captura de Resultados", icon: "📊" },
+      { href: "/captura-ot", label: "Captura por OT", icon: "📈" },
       { href: "/metodos", label: "Métodos", icon: "🔬" },
       { href: "/analitos", label: "Analitos", icon: "⚗" },
       { href: "/limites", label: "Límites", icon: "📐" },
