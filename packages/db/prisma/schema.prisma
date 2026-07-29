@@ -1314,3 +1314,28 @@ model DecisionConformidad {
   @@index([otId])
   @@map("decision_conformidad")
 }
+
+// ============================================================================
+// CONFIGURACIÓN DE SISTEMA
+// ============================================================================
+
+// Configuración SMTP del sistema. Una fila por tenant (unique tenant_id).
+// On-premise: `host` apunta al relay SMTP interno del IDIC (LAN, sin internet).
+// La tabla la crea packages/db/align_configuracion.sql; aquí se modela para
+// que la API la tipe vía Prisma Client.
+model ConfiguracionCorreo {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  host            String?  @db.VarChar(255)
+  puerto          Int      @default(587)
+  seguridad       String   @default("starttls") @db.VarChar(16) // none | starttls | tls
+  usuario         String?  @db.VarChar(255)
+  passwordCifrada String?  @map("password_cifrada")
+  remitenteNombre String?  @map("remitente_nombre") @db.VarChar(200)
+  remitenteEmail  String?  @map("remitente_email") @db.VarChar(255)
+  activo          Boolean  @default(false)
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId])
+  @@map("configuracion_correo")
+}

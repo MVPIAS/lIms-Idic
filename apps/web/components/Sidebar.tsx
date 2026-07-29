@@ -84,6 +84,7 @@ const NAV = [
       { href: "/usuarios", label: "Usuarios y Roles", icon: "👥" },
       { href: "/perfil", label: "Mi Perfil · 2FA", icon: "🔐" },
       { href: "/permisos", label: "Permisos", icon: "🔑" },
+      { href: "/config-correo", label: "Configuración de Correo", icon: "✉" },
     ],
   },
 ];
