@@ -27,6 +27,7 @@ import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.modul
 import { CrmModule } from "./crm/crm.module";
 import { SaecModule } from "./saec/saec.module";
 import { EquiposModule } from "./equipos/equipos.module";
+import { ConfiguracionModule } from "./configuracion/configuracion.module";
 
 /**
  * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
@@ -81,6 +82,7 @@ function prettyTransport() {
     CrmModule,
     SaecModule,
     EquiposModule,
+    ConfiguracionModule,
     AuditoriaModule,
     HealthModule,
   ],
