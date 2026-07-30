@@ -24,7 +24,9 @@ export default function ClientesPage() {
       campos={[
         { campo: "rut", label: "RUT", requerido: true },
         { campo: "razonSocial", label: "Razón social", requerido: true },
-        { campo: "tipo", label: "Tipo", tipo: "select", opciones: ["institucional", "gubernamental", "externo", "laboratorio_asociado"] },
+        // Tipo de cliente: leído de la maestra editable de parámetros de negocio
+        // (§5), no hardcodeado. Gestionable en /catalogo/parametros → tipo_cliente.
+        { campo: "tipo", label: "Tipo", tipo: "select", opcionesEndpoint: "parametros?categoria=tipo_cliente&activo=true" },
         { campo: "ciudad", label: "Ciudad" },
         { campo: "region", label: "Región" },
         { campo: "telefono", label: "Teléfono" },

@@ -21,6 +21,7 @@ import { AdquisicionesModule } from "./adquisiciones/adquisiciones.module";
 import { LaboratorioModule } from "./laboratorio/laboratorio.module";
 import { CatalogoModule } from "./catalogo/catalogo.module";
 import { CatalogoV2Module } from "./catalogo/catalogo-v2.module";
+import { ParametroModule } from "./catalogo/parametro.module";
 import { FlujoRealModule } from "./flujo-real/flujo-real.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
@@ -76,6 +77,7 @@ function prettyTransport() {
     LaboratorioModule,
     CatalogoModule,
     CatalogoV2Module,
+    ParametroModule,
     FlujoRealModule,
     RbacModule,
     PlantillaRenderModule,

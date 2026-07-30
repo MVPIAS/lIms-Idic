@@ -43,6 +43,8 @@ export const api = {
     return request<Paginado<T>>(`/${recurso}?${p.toString()}`);
   },
   get: <T = any>(recurso: string, id: string) => request<T>(`/${recurso}/${id}`),
+  /** GET a un path arbitrario (con query ya incluido), p. ej. "parametros?categoria=tipo_cliente". */
+  getRaw: <T = any>(path: string) => request<T>(`/${path}`),
   create: <T = any>(recurso: string, data: any) => request<T>(`/${recurso}`, { method: "POST", body: JSON.stringify(data) }),
   update: <T = any>(recurso: string, id: string, data: any) => request<T>(`/${recurso}/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   remove: (recurso: string, id: string) => request(`/${recurso}/${id}`, { method: "DELETE" }),
