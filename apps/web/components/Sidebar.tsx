@@ -67,6 +67,7 @@ const NAV = [
       { href: "/catalogo/subgrupos", label: "Subgrupos", icon: "🗂" },
       { href: "/catalogo/familias", label: "Familias · Laboratorios", icon: "🏛" },
       { href: "/catalogo/elementos", label: "Elementos", icon: "🧱" },
+      { href: "/catalogo/parametros", label: "Parámetros del sistema", icon: "🎛" },
     ],
   },
   {

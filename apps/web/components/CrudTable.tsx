@@ -15,6 +15,14 @@ export interface CampoForm {
   tipo?: "text" | "number" | "select" | "email" | "ref";
   /** opciones fijas para tipo "select". */
   opciones?: string[];
+  /**
+   * endpoint (path relativo con query, sin barra inicial) del que cargar las
+   * opciones de un "select". El valor guardado es el `codigo` de cada fila (no el
+   * id). Uso: parámetros de negocio editables → `parametros?categoria=tipo_cliente&activo=true`.
+   */
+  opcionesEndpoint?: string;
+  /** mapea una fila del endpoint a {value,label}. Por defecto codigo → etiqueta. */
+  opcionesMap?: (row: any) => { value: string; label: string };
   /** recurso de la API del que se cargan las opciones cuando tipo === "ref" (p. ej. "clientes", "metodos"). */
   refRecurso?: string;
   /** etiqueta legible de una opción; por defecto código/nombre/razón social. */
@@ -351,6 +359,65 @@ function RefField({ campo, inputId, value, onChange, disabled, excluirId }: RefF
   );
 }
 
+interface SelectRemotoProps {
+  campo: CampoForm;
+  inputId: string;
+  value: string;
+  disabled?: boolean;
+  onChange: (v: string) => void;
+}
+
+/**
+ * Select cuyas opciones se cargan de un endpoint de la API (parámetros de
+ * negocio editables). A diferencia de RefField, el valor que viaja al formulario
+ * es el `codigo` de la fila (un string estable como "institucional"), no un uuid,
+ * porque la columna de negocio guarda ese código. Si el endpoint falla, degrada a
+ * input de texto para no bloquear el formulario.
+ */
+function SelectRemoto({ campo, inputId, value, disabled, onChange }: SelectRemotoProps) {
+  const [opciones, setOpciones] = useState<{ value: string; label: string }[]>([]);
+  const [caido, setCaido] = useState(false);
+  const map = campo.opcionesMap ?? ((r: any) => ({ value: String(r.codigo ?? r.id ?? ""), label: r.etiqueta ?? etiquetaRef(r) }));
+
+  useEffect(() => {
+    if (!campo.opcionesEndpoint) return;
+    let vivo = true;
+    (async () => {
+      try {
+        const res: any = await api.getRaw(campo.opcionesEndpoint!);
+        if (vivo) {
+          setOpciones(filasDe(res).map(map));
+          setCaido(false);
+        }
+      } catch {
+        if (vivo) {
+          setOpciones([]);
+          setCaido(true);
+        }
+      }
+    })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campo.opcionesEndpoint]);
+
+  if (caido) {
+    return (
+      <>
+        <input id={inputId} type="text" required={campo.requerido} disabled={disabled} value={value ?? ""}
+          placeholder="Catálogo no disponible — valor" onChange={(e) => onChange(e.target.value)} />
+        <small style={{ color: "var(--muted)", fontSize: 10, marginTop: 2 }}>No se pudieron cargar las opciones.</small>
+      </>
+    );
+  }
+
+  return (
+    <select id={inputId} required={campo.requerido} disabled={disabled} value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
+      <option value="">—</option>
+      {opciones.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+}
+
 /** Tabla CRUD genérica: lista paginada + buscador + alta + edición + borrado. Reutilizable por recurso. */
 export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos, prepararCrear, prepararEditar }: CrudTableProps) {
   const [res, setRes] = useState<Paginado<any> | null>(null);
@@ -485,6 +552,14 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
                       disabled={deshabilitado}
                       // auto-referencia (p. ej. tipo de muestra padre): no puede apuntarse a sí mismo
                       excluirId={c.refRecurso === recurso ? editId : null}
+                      onChange={(v) => setForm({ ...form, [c.campo]: v })}
+                    />
+                  ) : c.tipo === "select" && c.opcionesEndpoint ? (
+                    <SelectRemoto
+                      campo={c}
+                      inputId={inputId}
+                      value={form[c.campo] ?? ""}
+                      disabled={deshabilitado}
                       onChange={(v) => setForm({ ...form, [c.campo]: v })}
                     />
                   ) : c.tipo === "select" ? (

@@ -1339,3 +1339,27 @@ model ConfiguracionCorreo {
   @@unique([tenantId])
   @@map("configuracion_correo")
 }
+
+// ============================================================================
+// PARÁMETROS DE NEGOCIO (§5) · maestra genérica de combos editables
+// ----------------------------------------------------------------------------
+// Un valor por (categoria, codigo). Reemplaza los combos que estaban
+// hardcodeados en el frontend (tipo_cliente, forma_pago, prioridad,
+// tipo_linea_costeo, tipo_inspeccion). Ver packages/db/align_parametros.sql.
+// ============================================================================
+
+model ParametroSistema {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  categoria String   @db.VarChar(60)
+  codigo    String   @db.VarChar(60)
+  etiqueta  String   @db.VarChar(160)
+  orden     Int      @default(0)
+  activo    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId, categoria, codigo])
+  @@index([tenantId, categoria, orden])
+  @@map("parametro_sistema")
+}
