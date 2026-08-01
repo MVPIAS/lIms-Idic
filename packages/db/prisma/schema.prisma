@@ -334,11 +334,47 @@ model OrdenTrabajo {
   tenant                Tenant    @relation(fields: [tenantId], references: [id])
   cliente               Cliente   @relation(fields: [clienteId], references: [id])
   certificados          Certificado[]
+  qcControles           QcControl[]
 
   @@unique([tenantId, codigo])
   @@index([clienteId, estado])
   @@index([unidadPrincipal, estado])
   @@map("orden_trabajo")
+}
+
+// ============================================================================
+// CONTROL DE CALIDAD (QC) del flujo real — DDL: packages/db/align_qc.sql
+// Blancos / estándares / curvas de calibración / duplicados por OT × cat_metodo.
+// Bloquea la emisión de informe si un método con qcRequerido no tiene un
+// control con resultado 'aprobado' para esa OT (contrato 4.3.7 / 4.3.8).
+// ============================================================================
+
+model QcControl {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  otId            String    @map("ot_id") @db.Uuid
+  catMetodoId     String    @map("cat_metodo_id") @db.Uuid
+  tipo            String    @db.VarChar(30) // blanco | estandar | curva | duplicado
+  valorEsperado   Decimal?  @map("valor_esperado") @db.Decimal
+  valorObtenido   Decimal?  @map("valor_obtenido") @db.Decimal
+  criterio        String?
+  resultado       String    @default("pendiente") @db.VarChar(20) // aprobado | rechazado | pendiente
+  rCuadrado       Decimal?  @map("r_cuadrado") @db.Decimal
+  recuperacionPct Decimal?  @map("recuperacion_pct") @db.Decimal
+  cvPct           Decimal?  @map("cv_pct") @db.Decimal
+  aprobadoPor     String?   @map("aprobado_por") @db.VarChar(120)
+  aprobadoAt      DateTime? @map("aprobado_at") @db.Timestamptz
+  observaciones   String?
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+
+  ot              OrdenTrabajo @relation(fields: [otId], references: [id])
+  catMetodo       CatMetodo    @relation(fields: [catMetodoId], references: [id])
+
+  @@index([otId])
+  @@index([catMetodoId])
+  @@index([tenantId])
+  @@map("qc_control")
 }
 
 // ============================================================================
@@ -1153,6 +1189,7 @@ model CatMetodo {
   version     String?   @db.VarChar(30)
   servgrp     String?   @db.VarChar(240)
   activo      Boolean   @default(true)
+  qcRequerido Boolean   @default(false) @map("qc_requerido")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
 
@@ -1160,6 +1197,7 @@ model CatMetodo {
   analitos    CatAnalito[]
   paneles     CatPanel[]
   resultados  Resultado[]
+  qcControles QcControl[]
 
   @@unique([tenantId, codigo])
   @@index([tenantId])

@@ -37,6 +37,8 @@ const NAV = [
       { href: "/muestras", label: "Muestras", icon: "🧪" },
       { href: "/captura", label: "Captura de Resultados", icon: "📊" },
       { href: "/captura-ot", label: "Captura por OT", icon: "📈" },
+      { href: "/qc", label: "Control de Calidad", icon: "✔" },
+      { href: "/spc", label: "Control Estadístico (SPC)", icon: "📉" },
       { href: "/metodos", label: "Métodos", icon: "🔬" },
       { href: "/analitos", label: "Analitos", icon: "⚗" },
       { href: "/limites", label: "Límites", icon: "📐" },
