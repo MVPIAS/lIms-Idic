@@ -23,12 +23,14 @@ import { CatalogoModule } from "./catalogo/catalogo.module";
 import { CatalogoV2Module } from "./catalogo/catalogo-v2.module";
 import { ParametroModule } from "./catalogo/parametro.module";
 import { FlujoRealModule } from "./flujo-real/flujo-real.module";
+import { SpcModule } from "./spc/spc.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
 import { CrmModule } from "./crm/crm.module";
 import { SaecModule } from "./saec/saec.module";
 import { EquiposModule } from "./equipos/equipos.module";
 import { ConfiguracionModule } from "./configuracion/configuracion.module";
+import { QcModule } from "./qc/qc.module";
 
 /**
  * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
@@ -79,6 +81,8 @@ function prettyTransport() {
     CatalogoV2Module,
     ParametroModule,
     FlujoRealModule,
+    SpcModule,
+    QcModule,
     RbacModule,
     PlantillaRenderModule,
     CrmModule,

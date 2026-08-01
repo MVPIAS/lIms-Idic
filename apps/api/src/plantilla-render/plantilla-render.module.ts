@@ -19,6 +19,7 @@ import { PlantillaRenderService } from "./plantilla-render.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { Public } from "../auth/public.decorator";
+import { QcModule } from "../qc/qc.module";
 
 const PreviewSchema = z.object({ otId: z.string().uuid(), plantillaId: z.string().uuid() });
 /**
@@ -137,6 +138,7 @@ export class VerificacionController {
 }
 
 @Module({
+  imports: [QcModule],
   controllers: [PlantillaRenderController, VerificacionController],
   providers: [PlantillaRenderService],
 })

@@ -11,6 +11,7 @@ import {
 import { fmtFecha, fmtFechaHora, fmtNum } from "./html.util";
 import { cuerpoPorDefecto, documentoCompleto, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
+import { QcService } from "../qc/qc.module";
 
 /**
  * Emisión real de informes/certificados del LIMS IDIC.
@@ -34,7 +35,10 @@ import { generarPdf } from "./pdf.renderer";
  */
 @Injectable()
 export class PlantillaRenderService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly qc: QcService,
+  ) {}
 
   /** URL pública de verificación; configurable por despliegue. */
   private get baseVerificacion(): string {
@@ -332,6 +336,12 @@ export class PlantillaRenderService {
    * El correlativo lo genera el SISTEMA (RF F02.1): ya no lo aporta el llamador.
    */
   async emitir(otId: string, plantillaId: string, tenantId: string, usuarioId?: string) {
+    // GATE de CONTROL DE CALIDAD (contrato 4.3.7 / 4.3.8): si algún método con
+    // qc_requerido=true presente en las muestras de la OT no tiene un qc_control
+    // 'aprobado', se aborta la emisión con 409 ANTES de reservar correlativo ni
+    // escribir nada. El QC va atado al FLUJO NUEVO (OT/muestra/puente/cat_metodo).
+    await this.qc.verificarGate(otId, tenantId);
+
     const fecha = new Date();
     const anio = fecha.getFullYear();
     const codigoVerificacion = this.nuevoCodigoVerificacion();
