@@ -41,18 +41,21 @@ const FORM_VACIO = {
   estado: "en_custodia",
   ubicacion: "",
   evidenciaId: "",
+  otId: "",
   observaciones: "",
 };
 
 export default function SaecArmasPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [evidencias, setEvidencias] = useState<any[]>([]);
+  const [ots, setOts] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [f, setF] = useState<any>({ ...FORM_VACIO });
   const [fReg, setFReg] = useState("");
+  const [fOt, setFOt] = useState("");
   const [q, setQ] = useState("");
 
   async function cargar() {
@@ -60,20 +63,23 @@ export default function SaecArmasPage() {
     try {
       const params = new URLSearchParams({ limit: "200" });
       if (fReg) params.set("estadoRegistral", fReg);
+      if (fOt) params.set("otId", fOt);
       if (q) params.set("q", q);
-      const [a, e] = await Promise.all([
+      const [a, e, o] = await Promise.all([
         fetch(`${API}/armas?${params}`, { headers: auth() }).then((x) => x.json()),
         fetch(`${API}/evidencias?tipo=arma&limit=200`, { headers: auth() }).then((x) => x.json()),
+        fetch(`${API}/ot`, { headers: auth() }).then((x) => x.json()).catch(() => []),
       ]);
       setRows(a.data ?? (Array.isArray(a) ? a : []));
       setEvidencias(e.data ?? (Array.isArray(e) ? e : []));
+      setOts(Array.isArray(o) ? o : o.data ?? []);
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
   }
-  useEffect(() => { cargar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [fReg]);
+  useEffect(() => { cargar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [fReg, fOt]);
 
   const kpis = useMemo(() => ({
     total: rows.length,
@@ -106,6 +112,7 @@ export default function SaecArmasPage() {
       estado: r.estado ?? "en_custodia",
       ubicacion: r.ubicacion ?? "",
       evidenciaId: r.evidencia_id ?? "",
+      otId: r.ot_id ?? "",
       observaciones: r.observaciones ?? "",
     });
     setShow(true);
@@ -130,6 +137,7 @@ export default function SaecArmasPage() {
       estado: f.estado,
       ubicacion: f.ubicacion || null,
       evidenciaId: f.evidenciaId || null,
+      otId: f.otId || null,
       observaciones: f.observaciones || null,
     };
     try {
@@ -149,8 +157,9 @@ export default function SaecArmasPage() {
     <div>
       <h1 className="page">SAEC · Registro de armas</h1>
       <p className="subtitle">
-        Ficha registral de cada arma: identificación, estado ante la DGMN e inscripción. Un arma puede reingresar como
-        evidencia en varios casos, por eso su ficha vive aparte del elemento que la originó.
+        Ficha registral de cada arma importada: identificación, estado ante la DGMN e inscripción. Cada arma se asocia a
+        su <strong>OT de importación</strong>; al llegar el XML de IBIS, su resultado balístico se adjunta a la OT (match
+        por nº de serie) y se refleja aquí en la columna «Resultado IBIS».
       </p>
       {error && <div className="alert warn">{error}</div>}
 
@@ -172,6 +181,10 @@ export default function SaecArmasPage() {
         <select value={fReg} onChange={(e) => setFReg(e.target.value)}>
           <option value="">Todo estado registral</option>
           {REGISTRAL.map((r) => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </select>
+        <select value={fOt} onChange={(e) => setFOt(e.target.value)}>
+          <option value="">Todas las OT</option>
+          {ots.map((o) => <option key={o.id} value={o.id}>{o.codigo}</option>)}
         </select>
         <button className="btn sm" onClick={() => cargar()}>Buscar</button>
         <div className="spacer" style={{ flex: 1 }}></div>
@@ -235,6 +248,13 @@ export default function SaecArmasPage() {
               <input placeholder="Bodega A · Estante 3" value={f.ubicacion} onChange={(e) => setF({ ...f, ubicacion: e.target.value })} />
             </div>
             <div className="field">
+              <label>OT de importación</label>
+              <select value={f.otId} onChange={(e) => setF({ ...f, otId: e.target.value })}>
+                <option value="">— sin OT (registro suelto) —</option>
+                {ots.map((o) => <option key={o.id} value={o.id}>{o.codigo} · {o.cliente?.razonSocial ?? o.cliente?.nombre ?? ""}</option>)}
+              </select>
+            </div>
+            <div className="field">
               <label>Evidencia de ingreso</label>
               <select value={f.evidenciaId} onChange={(e) => setF({ ...f, evidenciaId: e.target.value })}>
                 <option value="">— sin evidencia asociada —</option>
@@ -264,6 +284,8 @@ export default function SaecArmasPage() {
                 <th>Marca / modelo</th>
                 <th>Calibre</th>
                 <th>Estado registral</th>
+                <th>OT</th>
+                <th>Resultado IBIS</th>
                 <th>Inscripción DGMN</th>
                 <th>Evidencia</th>
                 <th>Alta</th>
@@ -282,6 +304,12 @@ export default function SaecArmasPage() {
                   <td>{[r.marca, r.modelo].filter(Boolean).join(" ") || "—"}</td>
                   <td>{r.calibre ?? "—"}</td>
                   <td><span className={`pill ${REG_META[r.estado_registral]?.pill ?? "gray"}`}>{REG_META[r.estado_registral]?.label ?? r.estado_registral}</span></td>
+                  <td>{r.ot_codigo ? <span className="codigo">{r.ot_codigo}</span> : "—"}</td>
+                  <td>
+                    {r.ibis_resultado
+                      ? <span className={`pill ${r.ibis_resultado === "concluyente" ? "green" : "gray"}`}>{r.ibis_resultado}{Number(r.ibis_hits) > 0 ? ` · ${r.ibis_hits} hit(s)` : ""}</span>
+                      : <span style={{ color: "var(--muted)" }}>pendiente</span>}
+                  </td>
                   <td>{r.inscripcion_dgmn ?? "—"}{r.fecha_inscripcion_dgmn ? ` · ${fecha(r.fecha_inscripcion_dgmn)}` : ""}</td>
                   <td>{r.evidencia_codigo ? <Link className="codigo" href={`/saec/evidencias/${r.evidencia_id}`}>{r.evidencia_codigo}</Link> : "—"}</td>
                   <td>{fecha(r.created_at)}</td>
@@ -289,7 +317,7 @@ export default function SaecArmasPage() {
                 </tr>
               ))}
               {rows.length === 0 && (
-                <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Sin armas registradas.</td></tr>
+                <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Sin armas registradas.</td></tr>
               )}
             </tbody>
           </table>
