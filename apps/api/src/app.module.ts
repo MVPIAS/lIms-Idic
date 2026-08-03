@@ -31,6 +31,9 @@ import { SaecModule } from "./saec/saec.module";
 import { EquiposModule } from "./equipos/equipos.module";
 import { ConfiguracionModule } from "./configuracion/configuracion.module";
 import { QcModule } from "./qc/qc.module";
+import { ConsumiblesModule } from "./consumibles/consumibles.module";
+import { MensajeriaModule } from "./mensajeria/mensajeria.module";
+import { ReportesModule } from "./reportes/reportes.module";
 
 /**
  * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
@@ -83,6 +86,9 @@ function prettyTransport() {
     FlujoRealModule,
     SpcModule,
     QcModule,
+    ConsumiblesModule,
+    MensajeriaModule,
+    ReportesModule,
     RbacModule,
     PlantillaRenderModule,
     CrmModule,
