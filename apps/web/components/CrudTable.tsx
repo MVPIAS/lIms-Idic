@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, Paginado } from "@/lib/api";
+import { validarFormulario, propsInput, type TipoCampo } from "@/lib/validate";
 
 export interface Columna {
   campo: string;
@@ -12,7 +13,9 @@ export interface Columna {
 export interface CampoForm {
   campo: string;
   label: string;
-  tipo?: "text" | "number" | "select" | "email" | "ref";
+  // Tipos de validación/formato: text, email, telefono, rut, url, number,
+  // entero, moneda, date, password, select, ref. Ver lib/validate.ts.
+  tipo?: TipoCampo;
   /** opciones fijas para tipo "select". */
   opciones?: string[];
   /**
@@ -426,6 +429,7 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<Record<string, any>>({});
+  const [errores, setErrores] = useState<Record<string, string>>({});
   const [editId, setEditId] = useState<string | null>(null);
   const [borrandoId, setBorrandoId] = useState<string | null>(null);
   const formId = useId();
@@ -466,6 +470,7 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
     setShowForm(false);
     setEditId(null);
     setForm({});
+    setErrores({});
   }
 
   /**
@@ -482,6 +487,13 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
+    // Validación de formato/obligatorios ANTES de llamar al backend.
+    const errs = validarFormulario(campos ?? [], form);
+    setErrores(errs);
+    if (Object.keys(errs).length > 0) {
+      setError("Revise los campos marcados en rojo.");
+      return;
+    }
     try {
       const base = normalizarRefs(form);
       const payload = prepararCrear ? prepararCrear(base) : base;
@@ -568,8 +580,18 @@ export default function CrudTable({ recurso, titulo, subtitulo, columnas, campos
                       {c.opciones?.map((o) => <option key={o} value={o}>{o}</option>)}
                     </select>
                   ) : (
-                    <input id={inputId} type={c.tipo ?? "text"} required={c.requerido} disabled={deshabilitado}
-                      value={form[c.campo] ?? ""} onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })} />
+                    <input
+                      id={inputId}
+                      {...propsInput(c.tipo)}
+                      required={c.requerido}
+                      disabled={deshabilitado}
+                      aria-invalid={!!errores[c.campo]}
+                      value={form[c.campo] ?? ""}
+                      onChange={(e) => setForm({ ...form, [c.campo]: e.target.value })}
+                    />
+                  )}
+                  {errores[c.campo] && (
+                    <span style={{ color: "var(--danger, #c0392b)", fontSize: 11 }}>{errores[c.campo]}</span>
                   )}
                 </div>
               );

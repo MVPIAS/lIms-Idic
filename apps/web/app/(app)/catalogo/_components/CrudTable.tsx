@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useId, useState } from "react";
 import { errorMensaje } from "@/lib/apiError";
+import { validarFormulario, propsInput } from "@/lib/validate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -40,7 +41,9 @@ export interface Columna {
   num?: boolean;
 }
 
-export type TipoCampo = "text" | "number" | "checkbox" | "select" | "textarea";
+export type TipoCampo =
+  | "text" | "number" | "checkbox" | "select" | "textarea"
+  | "email" | "telefono" | "rut" | "url" | "entero" | "moneda" | "date";
 
 export interface Campo {
   name: string;
@@ -157,6 +160,7 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, any>>({});
+  const [errores, setErrores] = useState<Record<string, string>>({});
   const [borrandoId, setBorrandoId] = useState<string | null>(null);
   const formId = useId();
 
@@ -216,6 +220,7 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
     setShowForm(false);
     setEditId(null);
     setForm({});
+    setErrores({});
   }
 
   /** Al cambiar un campo, limpia los que dependen de él (cascada). */
@@ -250,6 +255,16 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
+    // Validación de formato/obligatorios antes del backend (checkbox/select no validan formato).
+    const errs = validarFormulario(
+      campos.map((c) => ({ campo: c.name, tipo: c.tipo as any, requerido: c.requerido })),
+      form,
+    );
+    setErrores(errs);
+    if (Object.keys(errs).length > 0) {
+      setError("Revise los campos marcados en rojo.");
+      return;
+    }
     try {
       const payload = construirPayload();
       if (editId != null) {
@@ -343,9 +358,12 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
                         <textarea id={inputId} required={c.requerido} rows={3} value={form[c.name] ?? ""}
                           onChange={(e) => cambiar(c.name, e.target.value)} />
                       ) : (
-                        <input id={inputId} type={tipo === "number" ? "number" : "text"} step={tipo === "number" ? "any" : undefined}
-                          required={c.requerido} value={form[c.name] ?? ""}
+                        <input id={inputId} {...propsInput(tipo as any)}
+                          required={c.requerido} aria-invalid={!!errores[c.name]} value={form[c.name] ?? ""}
                           onChange={(e) => cambiar(c.name, e.target.value)} />
+                      )}
+                      {errores[c.name] && (
+                        <span style={{ color: "var(--danger, #c0392b)", fontSize: 11 }}>{errores[c.name]}</span>
                       )}
                     </>
                   )}
