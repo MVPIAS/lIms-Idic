@@ -1198,11 +1198,37 @@ model CatMetodo {
   paneles     CatPanel[]
   resultados  Resultado[]
   qcControles QcControl[]
+  pasos       PasoMetodo[]
 
   @@unique([tenantId, codigo])
   @@index([tenantId])
   @@index([ensayoId])
   @@map("cat_metodo")
+}
+
+/// PASOS / CAMPOS EDITABLES POR ENSAYO (método). Definición ordenada de los
+/// campos que el analista captura para un método (StarLIMS ANALFIELDS). Sembrado
+/// desde la data real; `instruccion` es texto de procedimiento libre y editable.
+model PasoMetodo {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  catMetodoId String    @map("cat_metodo_id") @db.Uuid
+  orden       Int       @default(0)
+  nombre      String    @db.VarChar(200)
+  tipoDato    String    @default("numero") @map("tipo_dato") @db.VarChar(30)
+  unidad      String?   @db.VarChar(40)
+  formato     String?   @db.VarChar(40)
+  instruccion String?
+  obligatorio Boolean   @default(true)
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
+
+  metodo      CatMetodo @relation(fields: [catMetodoId], references: [id])
+
+  @@unique([tenantId, catMetodoId, orden, nombre], map: "uq_paso_metodo_natural")
+  @@index([tenantId, catMetodoId, orden], map: "idx_paso_metodo_orden")
+  @@map("paso_metodo")
 }
 
 model CatAnalito {
