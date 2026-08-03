@@ -5,8 +5,11 @@ import {
   Delete,
   Get,
   Header,
+  Logger,
   Module,
   NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -2553,7 +2556,48 @@ const AsignarIbisSchema = z.object({
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("ibis")
-export class IbisEtlController extends SaecBase {
+export class IbisEtlController extends SaecBase implements OnModuleInit, OnModuleDestroy {
+  private readonly log = new Logger("IbisEtl");
+  private timerCron?: NodeJS.Timeout;
+
+  // ----- Barrido automático cada 24h (in-process, sin dependencias) ----------
+  onModuleInit() {
+    if (process.env.IBIS_CRON_HABILITADO !== "true") return;
+    this.log.log(`Barrido IBIS programado diario a las ${process.env.IBIS_CRON_HORA ?? "02:00"} (${process.env.TZ ?? "hora local"}).`);
+    this.programarSiguienteBarrido();
+  }
+  onModuleDestroy() { if (this.timerCron) clearTimeout(this.timerCron); }
+
+  private programarSiguienteBarrido() {
+    const [hh, mm] = (process.env.IBIS_CRON_HORA ?? "02:00").split(":").map((n) => parseInt(n, 10));
+    const ahora = new Date();
+    const prox = new Date(ahora);
+    prox.setHours(Number.isFinite(hh) ? hh : 2, Number.isFinite(mm) ? mm : 0, 0, 0);
+    if (prox <= ahora) prox.setDate(prox.getDate() + 1);
+    this.timerCron = setTimeout(async () => {
+      try { await this.barridoProgramado(); }
+      catch (e: any) { this.log.error(`Barrido IBIS falló: ${e?.message ?? e}`); }
+      this.programarSiguienteBarrido();
+    }, prox.getTime() - ahora.getTime());
+    if (typeof this.timerCron.unref === "function") this.timerCron.unref();
+  }
+
+  /** Ejecuta el barrido para todos los tenants con carpeta ETL activa. */
+  private async barridoProgramado() {
+    const configs = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT tenant_id FROM configuracion_ibis WHERE activo = true`,
+    );
+    for (const c of configs) {
+      const ctx = { user: { tenantId: c.tenant_id, sub: null, username: "sistema · barrido IBIS 24h" } };
+      try {
+        const r = await this.ejecutarBarrido(ctx);
+        this.log.log(`Barrido IBIS tenant ${c.tenant_id}: ${r.procesados}/${r.archivos} procesados, ${r.conError} con error.`);
+      } catch (e: any) {
+        this.log.error(`Barrido IBIS tenant ${c.tenant_id} falló: ${e?.message ?? e}`);
+      }
+    }
+  }
+
   // ----- Configuración de la carpeta ETL --------------------------------------
   private async cargarConfig(tenantId: string) {
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
@@ -2635,6 +2679,11 @@ export class IbisEtlController extends SaecBase {
   @Post("barrer")
   @RequierePermiso("ibis.barrer")
   async barrer(@Req() req: any) {
+    return { data: await this.ejecutarBarrido(req) };
+  }
+
+  /** Núcleo del barrido, reutilizable por el endpoint y por el cron (ctx sistema). */
+  private async ejecutarBarrido(req: any) {
     const tenantId = this.tenantId(req);
     const cfg = await this.cargarConfig(tenantId);
     let ficheros: string[];
@@ -2674,7 +2723,7 @@ export class IbisEtlController extends SaecBase {
       tenantId, JSON.stringify(resumen),
     ).catch(() => undefined);
     await this.auditar(req, "ibis", null, "importar", { barrido: resumen });
-    return { data: { ...resumen, resultados } };
+    return { ...resumen, resultados };
   }
 
   private async moverArchivo(ruta: string, destDir: string, nombre: string) {
