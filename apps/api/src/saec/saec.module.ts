@@ -438,6 +438,7 @@ const CrearArmaSchema = z.object({
   estado: z.enum(["en_custodia", "en_analisis", "prestada", "devuelta", "destruida"]).optional(),
   ubicacion: strOpt(120),
   evidenciaId: uuidOpt,
+  otId: uuidOpt,               // OT de importación a la que pertenece el arma
   observaciones: textOpt,
 });
 const ActualizarArmaSchema = CrearArmaSchema.partial();
@@ -448,10 +449,10 @@ const COLS_ARMA: Record<string, string> = {
   inscripcionDgmn: "inscripcion_dgmn", fechaInscripcionDgmn: "fecha_inscripcion_dgmn",
   propietarioRegistrado: "propietario_registrado", rutPropietario: "rut_propietario",
   estado: "estado", ubicacion: "ubicacion", evidenciaId: "evidencia_id",
-  observaciones: "observaciones",
+  otId: "ot_id", observaciones: "observaciones",
 };
 const CAST_ARMA: Record<string, string> = {
-  evidencia_id: "::uuid", fecha_inscripcion_dgmn: "::date",
+  evidencia_id: "::uuid", ot_id: "::uuid", fecha_inscripcion_dgmn: "::date",
 };
 
 const CrearMovimientoSchema = z.object({
@@ -1307,7 +1308,7 @@ export class ArmaController extends SaecBase {
   async listar(
     @Query("page") page?: string, @Query("limit") limit?: string,
     @Query("estadoRegistral") estadoRegistral?: string, @Query("tipo") tipo?: string,
-    @Query("q") q?: string, @Req() req?: any,
+    @Query("q") q?: string, @Query("otId") otId?: string, @Req() req?: any,
   ) {
     const tenantId = this.tenantId(req);
     const { p, l, offset } = this.paginacion(page, limit);
@@ -1316,6 +1317,7 @@ export class ArmaController extends SaecBase {
     const args: any[] = [tenantId];
     if (estadoRegistral) { args.push(estadoRegistral); filtros.push(`AND a.estado_registral = $${args.length}`); }
     if (tipo) { args.push(tipo); filtros.push(`AND a.tipo = $${args.length}`); }
+    if (otId) { args.push(otId); filtros.push(`AND a.ot_id = $${args.length}::uuid`); }
     if (q) {
       args.push(`%${q}%`);
       filtros.push(`AND (a.serie ILIKE $${args.length} OR a.marca ILIKE $${args.length}
@@ -1324,9 +1326,16 @@ export class ArmaController extends SaecBase {
     const where = filtros.join(" ");
 
     const data = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT a.*, e.codigo AS evidencia_codigo
+      `SELECT a.*, e.codigo AS evidencia_codigo, o.codigo AS ot_codigo,
+              ir.resultado AS ibis_resultado, ir.hit_count AS ibis_hits
          FROM arma a
          LEFT JOIN evidencia e ON e.id = a.evidencia_id
+         LEFT JOIN orden_trabajo o ON o.id = a.ot_id
+         LEFT JOIN LATERAL (
+           SELECT resultado, hit_count FROM ibis_resultado
+            WHERE arma_id = a.id AND deleted_at IS NULL
+            ORDER BY asignado_at DESC NULLS LAST LIMIT 1
+         ) ir ON true
         WHERE a.tenant_id = $1::uuid AND a.deleted_at IS NULL ${where}
         ORDER BY a.created_at DESC
         LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
@@ -1350,7 +1359,15 @@ export class ArmaController extends SaecBase {
         ORDER BY created_at DESC`,
       tenantId, id,
     );
-    return { ...arma, consultasDgmn };
+    // Resultados balísticos de IBIS adjuntados a esta arma (RF-K03).
+    const resultadosIbis = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, uuid_ibis, exhibit_number, calibre, hit_count, resultado, fecha_prueba, asignado_at, datos
+         FROM ibis_resultado
+        WHERE tenant_id = $1::uuid AND arma_id = $2::uuid AND deleted_at IS NULL
+        ORDER BY asignado_at DESC NULLS LAST`,
+      tenantId, id,
+    );
+    return { ...arma, consultasDgmn, resultadosIbis };
   }
 
   @Post()
@@ -1368,14 +1385,22 @@ export class ArmaController extends SaecBase {
       if (!ev.length) throw new NotFoundException("Evidencia no encontrada");
     }
 
+    if (d.otId) {
+      const ot = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT id FROM orden_trabajo WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+        d.otId, tenantId,
+      );
+      if (!ot.length) throw new NotFoundException("Orden de trabajo no encontrada");
+    }
+
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
       `INSERT INTO arma
-         (tenant_id, evidencia_id, serie, serie_borrada, marca, modelo, calibre, tipo,
+         (tenant_id, evidencia_id, ot_id, serie, serie_borrada, marca, modelo, calibre, tipo,
           estado_registral, inscripcion_dgmn, fecha_inscripcion_dgmn, propietario_registrado,
           rut_propietario, estado, ubicacion, observaciones, created_by)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11::date, $12, $13, $14, $15, $16, $17::uuid)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12::date, $13, $14, $15, $16, $17, $18::uuid)
        RETURNING *`,
-      tenantId, d.evidenciaId ?? null, d.serie ?? null, d.serieBorrada ?? false,
+      tenantId, d.evidenciaId ?? null, d.otId ?? null, d.serie ?? null, d.serieBorrada ?? false,
       d.marca ?? null, d.modelo ?? null, d.calibre ?? null, d.tipo,
       d.estadoRegistral ?? "no_inscrita", d.inscripcionDgmn ?? null, d.fechaInscripcionDgmn ?? null,
       d.propietarioRegistrado ?? null, d.rutPropietario ?? null, d.estado ?? "en_custodia",
