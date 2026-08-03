@@ -9,6 +9,8 @@ export interface JwtPayload {
   tenantId: string;
   roles?: string[];
   permisos?: string[];
+  unidades?: string[];
+  unidadGlobal?: boolean;
   // Tipo de token: "refresh" solo debe servir para renovar en /auth/refresh,
   // nunca como bearer de API. Los access token no llevan `type` (o "access").
   type?: string;
@@ -40,6 +42,9 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
       tenantId: payload.tenantId,
       roles: payload.roles ?? [],
       permisos: payload.permisos ?? [],
+      unidades: payload.unidades ?? [],
+      // Sin claim (tokens antiguos) → global, para no romper sesiones vigentes.
+      unidadGlobal: payload.unidadGlobal ?? true,
     };
   }
 }

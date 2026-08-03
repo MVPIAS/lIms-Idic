@@ -112,7 +112,7 @@ export class AuthService {
     });
 
     // Cargar roles y permisos efectivos del usuario para el RBAC
-    const { roles, permisos } = await this.rolesYPermisos(usuario.id);
+    const { roles, permisos, unidades, unidadGlobal } = await this.rolesYPermisos(usuario.id);
 
     const payload = {
       sub: usuario.id,
@@ -120,6 +120,10 @@ export class AuthService {
       tenantId: usuario.tenantId,
       roles,
       permisos,
+      // Alcance por laboratorio: los ids de unidad a los que el usuario está
+      // acotado. Si `unidadGlobal` es true (rol global o transversal) ve todo.
+      unidades,
+      unidadGlobal,
       // Versión de token: se incrementa en cada logout. El refresh token solo
       // renueva si su `tv` coincide con el actual del usuario (invalida sesiones
       // tras logout sin necesidad de blacklist en Redis).
@@ -149,21 +153,36 @@ export class AuthService {
     };
   }
 
-  /** Roles (códigos) y permisos efectivos de un usuario, para el RBAC del JWT. */
-  async rolesYPermisos(usuarioId: string): Promise<{ roles: string[]; permisos: string[] }> {
+  /** Roles globales que ven TODO (transversales, no acotados a un laboratorio). */
+  private static readonly ROLES_GLOBALES = ["SUPERADMIN", "ADMIN", "DIRECTOR"];
+
+  /** Roles (códigos), permisos y alcance por unidad del usuario, para el JWT. */
+  async rolesYPermisos(
+    usuarioId: string,
+  ): Promise<{ roles: string[]; permisos: string[]; unidades: string[]; unidadGlobal: boolean }> {
     const usuarioRoles = await this.prisma.usuarioRol.findMany({
       where: { usuarioId },
       include: { rol: true },
     });
     const rolIds = usuarioRoles.map((ur) => ur.rolId);
     const roles = usuarioRoles.map((ur) => ur.rol.codigo);
-    if (rolIds.length === 0) return { roles, permisos: [] };
+
+    // Alcance por laboratorio (unidad). Es GLOBAL (ve todo) si tiene algún rol
+    // transversal, o algún rol sin unidad acotada (unidadId NULL = global).
+    const unidades = [
+      ...new Set(usuarioRoles.map((ur) => ur.unidadId).filter((u): u is string => !!u)),
+    ];
+    const unidadGlobal =
+      roles.some((r) => AuthService.ROLES_GLOBALES.includes(r)) ||
+      usuarioRoles.some((ur) => !ur.unidadId);
+
+    if (rolIds.length === 0) return { roles, permisos: [], unidades, unidadGlobal: true };
     const rp = await this.prisma.rolPermiso.findMany({
       where: { rolId: { in: rolIds } },
       include: { permiso: true },
     });
     const permisos = [...new Set(rp.map((x) => x.permiso.codigo))];
-    return { roles, permisos };
+    return { roles, permisos, unidades, unidadGlobal };
   }
 
   async refresh(refreshToken: string) {
@@ -183,13 +202,15 @@ export class AuthService {
       if (!usuario || (usuario.tokenVersion ?? 0) !== (payload.tv ?? 0)) {
         throw new UnauthorizedException("Refresh token inválido");
       }
-      const { roles, permisos } = await this.rolesYPermisos(payload.sub);
+      const { roles, permisos, unidades, unidadGlobal } = await this.rolesYPermisos(payload.sub);
       const accessToken = this.jwt.sign({
         sub: payload.sub,
         username: payload.username,
         tenantId: payload.tenantId,
         roles,
         permisos,
+        unidades,
+        unidadGlobal,
         tv: usuario.tokenVersion ?? 0,
       });
       return { accessToken };
