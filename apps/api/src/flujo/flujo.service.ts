@@ -354,14 +354,19 @@ export class FlujoService {
         asignadoA: instancia.iniciadoPor,
       },
     });
-    await this.prisma.tareaAsignada.create({
-      data: {
-        pasoEjecucionId: pe.id,
-        asignadoA: instancia.iniciadoPor ?? "00000000-0000-0000-0000-000000000000",
-        estado: "pendiente",
-        venceAt: siguiente.slaMinutos ? new Date(Date.now() + siguiente.slaMinutos * 60000) : null,
-      },
-    });
+    // La tarea humana se asigna a quien inició la instancia. `asignado_a` es NOT
+    // NULL y FK a usuario: si no hay iniciador válido no se crea la tarea (evita
+    // el 500 por FK contra un UUID inexistente); el paso queda pendiente sin dueño.
+    if (instancia.iniciadoPor) {
+      await this.prisma.tareaAsignada.create({
+        data: {
+          pasoEjecucionId: pe.id,
+          asignadoA: instancia.iniciadoPor,
+          estado: "pendiente",
+          venceAt: siguiente.slaMinutos ? new Date(Date.now() + siguiente.slaMinutos * 60000) : null,
+        },
+      });
+    }
   }
 
   private async resolverSiguiente(versionId: string, origenId: string, contexto: Record<string, any>) {
