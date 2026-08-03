@@ -103,6 +103,8 @@ const UsuarioCreate = z.object({
   grado: z.string().max(80).optional(),
   cargo: z.string().max(200).optional(),
   rolId: z.string().uuid().optional(),
+  // Laboratorio (unidad) al que se acota el rol. Vacío = rol global (ve todo).
+  unidadId: z.string().uuid().optional().or(z.literal("")),
 });
 
 const UsuarioUpdate = z.object({
@@ -112,6 +114,7 @@ const UsuarioUpdate = z.object({
   cargo: z.string().max(200).optional(),
   estado: z.enum(["activo", "inactivo", "bloqueado"]).optional(),
   rolId: z.string().uuid().optional(),
+  unidadId: z.string().uuid().optional().or(z.literal("")),
 });
 
 // Gestión de usuarios: `admin.usuarios` en los cuatro verbos (era la brecha
@@ -150,7 +153,9 @@ export class UsuarioController {
       },
     });
     if (dto.rolId) {
-      await this.prisma.usuarioRol.create({ data: { usuarioId: u.id, rolId: dto.rolId } });
+      await this.prisma.usuarioRol.create({
+        data: { usuarioId: u.id, rolId: dto.rolId, unidadId: dto.unidadId ? dto.unidadId : null },
+      });
     }
     const { passwordHash: _omit, ...safe } = u as any;
     return safe;
@@ -167,16 +172,19 @@ export class UsuarioController {
     });
     if (!actual) throw new NotFoundException(`usuario ${id} no encontrado`);
 
-    const { rolId, email, ...campos } = dto;
+    const { rolId, unidadId, email, ...campos } = dto;
     const data: any = { ...campos };
     if (email !== undefined) data.email = email ? email : null;
 
     const u = await this.prisma.usuario.update({ where: { id }, data });
 
-    // Reasignar rol: reemplaza los roles vigentes por el indicado.
+    // Reasignar rol: reemplaza los roles vigentes por el indicado (acotado a la
+    // unidad/laboratorio si se especifica).
     if (rolId) {
       await this.prisma.usuarioRol.deleteMany({ where: { usuarioId: id } });
-      await this.prisma.usuarioRol.create({ data: { usuarioId: id, rolId } });
+      await this.prisma.usuarioRol.create({
+        data: { usuarioId: id, rolId, unidadId: unidadId ? unidadId : null },
+      });
     }
     const { passwordHash: _omit, ...safe } = u as any;
     return safe;
@@ -261,8 +269,25 @@ export class RolController {
   }
 }
 
+// Listado de unidades (laboratorios) para acotar roles a un laboratorio en la
+// pantalla de usuarios. Requiere gestionar usuarios (admin.usuarios).
+@ApiTags("unidades") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("unidades")
+@RequierePermiso("admin.usuarios")
+export class UnidadController {
+  private prisma = new PrismaClient();
+  @Get()
+  async list(@Req() req: any) {
+    const data = await this.prisma.unidad.findMany({
+      where: { ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
+      select: { id: true, codigo: true, nombre: true },
+      orderBy: { codigo: "asc" },
+    });
+    return { data, meta: { total: data.length } };
+  }
+}
+
 @Module({
-  controllers: [PermisoController, FirmaController, UsuarioController, RolController],
+  controllers: [PermisoController, FirmaController, UsuarioController, RolController, UnidadController],
   providers: [PermisoService, FirmaService],
 })
 export class RbacModule {}
