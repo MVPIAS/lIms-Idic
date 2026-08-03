@@ -16,7 +16,7 @@ type Cot = {
   numero: string;
   cliente: string;
   formato: string;
-  estado: "borrador" | "enviada" | "aceptada" | "rechazada" | "expirada" | "vencida";
+  estado: "borrador" | "enviada" | "aceptada" | "rechazada" | "expirada" | "vencida" | "anulada";
   total: number;
   otNumero?: string | null;
   fecha: string;
@@ -38,21 +38,28 @@ const ESTADO_PILL: Record<Cot["estado"], string> = {
   // Se mapean ambas para no dejar sin color el estado que llega del backend.
   expirada: "amber",
   vencida: "amber",
+  anulada: "gray",
 };
 
 export default function CotizacionesPage() {
   const [cots, setCots] = useState<Cot[]>(DEMO);
   const [origen, setOrigen] = useState<"api" | "demo">("demo");
   const [filtro, setFiltro] = useState("");
+  const [msg, setMsg] = useState<string>("");
 
-  useEffect(() => {
+  const authHeaders = (): Record<string, string> => {
     const token = typeof window !== "undefined" ? localStorage.getItem("lims_token") : null;
-    fetch(`${API}/cotizaciones`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    const h: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) h.Authorization = `Bearer ${token}`;
+    return h;
+  };
+
+  function cargar() {
+    fetch(`${API}/cotizaciones`, { headers: authHeaders() })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
         const arr = Array.isArray(data) ? data : data?.data ?? [];
         if (Array.isArray(arr) && arr.length) {
-          // Normaliza la forma del backend (codigo, cliente{}, createdAt) a la de la UI.
           setCots(arr.map((c: any): Cot => ({
             id: c.id,
             numero: c.codigo ?? c.numero ?? "—",
@@ -60,14 +67,29 @@ export default function CotizacionesPage() {
             formato: c.formato ?? "—",
             estado: c.estado,
             total: Number(c.total ?? 0),
-            otNumero: c.ot?.codigo ?? null,
+            otNumero: c.ot?.codigo ?? c.otCodigo ?? null,
             fecha: c.fecha ?? c.createdAt ?? c.created_at ?? "",
           })));
           setOrigen("api");
         }
       })
       .catch(() => setOrigen("demo"));
-  }, []);
+  }
+  useEffect(() => { cargar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
+
+  async function accion(id: string, verbo: "enviar" | "aceptar" | "rechazar") {
+    setMsg("");
+    try {
+      const body = verbo === "rechazar" ? JSON.stringify({ motivo: "Rechazada desde la lista" }) : undefined;
+      const r = await fetch(`${API}/cotizaciones/${id}/${verbo}`, { method: "POST", headers: authHeaders(), body });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message ?? `Error ${r.status}`);
+      setMsg(verbo === "aceptar" ? `Cotización aceptada · OT generada: ${j.ot?.codigo ?? j.otCodigo ?? "OK"}` : `Cotización ${verbo === "enviar" ? "enviada" : "rechazada"}.`);
+      cargar();
+    } catch (e: any) {
+      setMsg(Array.isArray(e.message) ? e.message.join(", ") : e.message);
+    }
+  }
 
   const vis = cots.filter(
     (c) =>
@@ -83,6 +105,8 @@ export default function CotizacionesPage() {
         Etapa comercial. Una cotización aceptada genera la OT (expediente). En contratos internos no hay cotización.{" "}
         {origen === "demo" && <span style={{ color: "var(--amber)" }}>· Datos de muestra (backend no conectado)</span>}
       </p>
+
+      {msg && <div className="alert info" style={{ marginBottom: 10 }}>{msg}</div>}
 
       <div className="toolbar">
         <input
@@ -105,6 +129,7 @@ export default function CotizacionesPage() {
               <th className="num">Total (IVA exento)</th>
               <th>OT generada</th>
               <th>Fecha</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -125,11 +150,31 @@ export default function CotizacionesPage() {
                   )}
                 </td>
                 <td style={{ color: "var(--muted)" }}>{fecha(c.fecha)}</td>
+                <td>
+                  {origen === "api" ? (
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {c.estado === "borrador" && (
+                        <button className="btn sm" onClick={() => accion(c.id, "enviar")}>Enviar</button>
+                      )}
+                      {(c.estado === "borrador" || c.estado === "enviada") && (
+                        <>
+                          <button className="btn primary sm" onClick={() => accion(c.id, "aceptar")}>Aceptar → OT</button>
+                          <button className="btn sm" onClick={() => accion(c.id, "rechazar")}>Rechazar</button>
+                        </>
+                      )}
+                      {["aceptada", "rechazada", "anulada"].includes(c.estado) && (
+                        <span style={{ color: "var(--muted)" }}>—</span>
+                      )}
+                    </div>
+                  ) : (
+                    <span style={{ color: "var(--muted)" }}>—</span>
+                  )}
+                </td>
               </tr>
             ))}
             {vis.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
+                <td colSpan={8} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
                   Sin resultados
                 </td>
               </tr>
