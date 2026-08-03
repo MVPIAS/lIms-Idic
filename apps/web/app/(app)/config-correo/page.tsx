@@ -14,6 +14,9 @@
 
 import { useEffect, useState } from "react";
 import { errorMensaje } from "@/lib/apiError";
+import { validarFormulario, validarCampo, propsInput, esEntero } from "@/lib/validate";
+
+const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -39,6 +42,7 @@ export default function ConfigCorreoPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
+  const [errores, setErrores] = useState<Record<string, string>>({});
   const [guardando, setGuardando] = useState(false);
 
   // Envío de prueba.
@@ -73,6 +77,20 @@ export default function ConfigCorreoPage() {
     if (!cfg) return;
     setError("");
     setOk("");
+    // Validación de negocio: host y email del remitente con sus reglas + puerto entero 1-65535.
+    const errs = validarFormulario(
+      [
+        { campo: "host", requerido: true },
+        { campo: "remitenteEmail", tipo: "email" },
+      ],
+      cfg,
+    );
+    const puertoStr = String(cfg.puerto ?? "").trim();
+    if (!puertoStr) errs.puerto = "Campo obligatorio";
+    else if (!esEntero(puertoStr) || Number(puertoStr) < 1 || Number(puertoStr) > 65535)
+      errs.puerto = "Puerto no válido (entero entre 1 y 65535)";
+    setErrores(errs);
+    if (Object.keys(errs).length) return;
     setGuardando(true);
     try {
       const body: any = {
@@ -109,6 +127,11 @@ export default function ConfigCorreoPage() {
     e.preventDefault();
     setError("");
     setResultadoPrueba(null);
+    const eDest = validarCampo("email", destinatario, true);
+    if (eDest) {
+      setResultadoPrueba({ ok: false, error: `Destinatario: ${eDest}` });
+      return;
+    }
     setProbando(true);
     try {
       const res = await fetch(`${API}/config/correo/probar`, {
@@ -147,19 +170,27 @@ export default function ConfigCorreoPage() {
                 Host <span className="req">*</span>
               </label>
               <input
+                required
                 value={cfg.host}
                 onChange={(e) => set("host", e.target.value)}
                 placeholder="smtp.idic.local"
               />
+              {errores.host && <small style={errStyle}>{errores.host}</small>}
             </div>
             <div className="field">
-              <label>Puerto</label>
+              <label>
+                Puerto <span className="req">*</span>
+              </label>
               <input
-                type="number"
+                {...propsInput("entero")}
+                required
+                min={1}
+                max={65535}
                 value={cfg.puerto}
                 onChange={(e) => set("puerto", Number(e.target.value))}
                 placeholder="587"
               />
+              {errores.puerto && <small style={errStyle}>{errores.puerto}</small>}
             </div>
             <div className="field">
               <label>Seguridad</label>
@@ -206,11 +237,12 @@ export default function ConfigCorreoPage() {
             <div className="field">
               <label>Correo del remitente</label>
               <input
-                type="email"
+                {...propsInput("email")}
                 value={cfg.remitenteEmail}
                 onChange={(e) => set("remitenteEmail", e.target.value)}
                 placeholder="no-reply@idic.local"
               />
+              {errores.remitenteEmail && <small style={errStyle}>{errores.remitenteEmail}</small>}
             </div>
           </div>
 

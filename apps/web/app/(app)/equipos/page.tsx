@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fecha as fechaFmt } from "@/lib/format";
+import { validarFormulario } from "@/lib/validate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -90,6 +91,8 @@ export default function EquiposPage() {
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [f, setF] = useState<any>({ ...FORM_VACIO });
+  const [errs, setErrs] = useState<Record<string, string>>({});
+  const [errsCal, setErrsCal] = useState<Record<string, string>>({});
 
   // Detalle + historial de calibraciones.
   const [detalle, setDetalle] = useState<any | null>(null);
@@ -148,6 +151,7 @@ export default function EquiposPage() {
     setDetalle(r);
     setShowCal(false);
     setCal({ ...CAL_VACIA });
+    setErrsCal({});
     try {
       const res = await fetch(`${API}/equipos/${r.id}/calibraciones`, { headers: auth() });
       const j = await res.json();
@@ -160,12 +164,14 @@ export default function EquiposPage() {
   function abrirNuevo() {
     setEditId(null);
     setF({ ...FORM_VACIO });
+    setErrs({});
     setShow(true);
     setError("");
   }
 
   function abrirEditar(r: any) {
     setEditId(r.id);
+    setErrs({});
     setF({
       codigo: r.codigo ?? "",
       nombre: r.nombre ?? "",
@@ -187,6 +193,19 @@ export default function EquiposPage() {
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    // Validación de negocio: código y nombre obligatorios; vigencia coherente.
+    const v = validarFormulario(
+      [
+        { campo: "codigo", tipo: "text", requerido: true },
+        { campo: "nombre", tipo: "text", requerido: true },
+      ],
+      f,
+    );
+    if (f.fechaUltimaCalibracion && f.proximaCalibracion && f.proximaCalibracion < f.fechaUltimaCalibracion) {
+      v.proximaCalibracion = "La vigencia debe ser posterior a la última calibración.";
+    }
+    setErrs(v);
+    if (Object.keys(v).length) return;
     const payload = {
       codigo: f.codigo,
       nombre: f.nombre,
@@ -234,6 +253,13 @@ export default function EquiposPage() {
   async function guardarCalibracion(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    const vc: Record<string, string> = {};
+    if (!cal.fecha) vc.fecha = "La fecha de calibración es obligatoria.";
+    if (cal.fecha && cal.proximaFecha && cal.proximaFecha < cal.fecha) {
+      vc.proximaFecha = "La vigencia debe ser posterior a la fecha de calibración.";
+    }
+    setErrsCal(vc);
+    if (Object.keys(vc).length) return;
     try {
       const res = await fetch(`${API}/calibraciones`, {
         method: "POST",
@@ -353,12 +379,14 @@ export default function EquiposPage() {
                 value={f.codigo}
                 onChange={(e) => setF({ ...f, codigo: e.target.value })}
               />
+              {errs.codigo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.codigo}</small>}
             </div>
             <div className="field" style={{ gridColumn: "span 2" }}>
               <label>
                 Nombre <span className="req">*</span>
               </label>
               <input required value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} />
+              {errs.nombre && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.nombre}</small>}
             </div>
             <div className="field">
               <label>Marca / fabricante</label>
@@ -370,7 +398,7 @@ export default function EquiposPage() {
             </div>
             <div className="field">
               <label>N° de serie</label>
-              <input value={f.serie} onChange={(e) => setF({ ...f, serie: e.target.value })} />
+              <input placeholder="p. ej. SN-2024-00123" value={f.serie} onChange={(e) => setF({ ...f, serie: e.target.value })} />
             </div>
             <div className="field">
               <label>Ubicación</label>
@@ -431,6 +459,7 @@ export default function EquiposPage() {
                 value={f.proximaCalibracion}
                 onChange={(e) => setF({ ...f, proximaCalibracion: e.target.value })}
               />
+              {errs.proximaCalibracion && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.proximaCalibracion}</small>}
             </div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>Descripción</label>
@@ -589,6 +618,7 @@ export default function EquiposPage() {
                     value={cal.fecha}
                     onChange={(e) => setCal({ ...cal, fecha: e.target.value })}
                   />
+                  {errsCal.fecha && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsCal.fecha}</small>}
                 </div>
                 <div className="field">
                   <label>
@@ -609,6 +639,7 @@ export default function EquiposPage() {
                     value={cal.proximaFecha}
                     onChange={(e) => setCal({ ...cal, proximaFecha: e.target.value })}
                   />
+                  {errsCal.proximaFecha && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsCal.proximaFecha}</small>}
                 </div>
                 <div className="field">
                   <label>Proveedor / laboratorio</label>

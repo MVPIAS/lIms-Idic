@@ -22,10 +22,10 @@ export default function MuestrasPage() {
       ]}
       campos={[
         { campo: "codigo", label: "Código", requerido: true },
-        { campo: "nombre", label: "Nombre de la muestra" },
+        { campo: "nombre", label: "Nombre de la muestra", requerido: true },
         { campo: "otId", label: "OT", tipo: "ref", refRecurso: "ot", refLabel: etiquetaOt },
         { campo: "clienteId", label: "Cliente", tipo: "ref", refRecurso: "clientes" },
-        { campo: "tipoMuestraId", label: "Tipo de muestra", tipo: "ref", refRecurso: "tipos-muestra" },
+        { campo: "tipoMuestraId", label: "Tipo de muestra", tipo: "ref", refRecurso: "tipos-muestra", requerido: true },
         // Eje Producto: Gran Grupo → Grupo (el backend no filtra el grupo por gran grupo; se eligen por separado).
         { campo: "granGrupoId", label: "Gran Grupo", tipo: "ref", refRecurso: "gran-grupos" },
         { campo: "grupoId", label: "Grupo", tipo: "ref", refRecurso: "grupos" },

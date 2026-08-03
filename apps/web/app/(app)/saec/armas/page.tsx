@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fecha } from "@/lib/format";
+import { validarCampo, propsInput } from "@/lib/validate";
+
+const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -53,6 +56,7 @@ export default function SaecArmasPage() {
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
+  const [errores, setErrores] = useState<Record<string, string>>({});
   const [f, setF] = useState<any>({ ...FORM_VACIO });
   const [fReg, setFReg] = useState("");
   const [fOt, setFOt] = useState("");
@@ -122,6 +126,16 @@ export default function SaecArmasPage() {
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    // Serie obligatoria salvo que se marque «serie borrada»; tipo obligatorio; RUT con formato.
+    const errs: Record<string, string> = {};
+    if (!f.serieBorrada && !String(f.serie ?? "").trim())
+      errs.serie = "Ingrese el nº de serie o marque «serie borrada»";
+    const eTipo = validarCampo("text", f.tipo, true);
+    if (eTipo) errs.tipo = eTipo;
+    const eRut = validarCampo("rut", f.rutPropietario, false);
+    if (eRut) errs.rutPropietario = eRut;
+    setErrores(errs);
+    if (Object.keys(errs).length) return;
     const payload = {
       serie: f.serie || null,
       serieBorrada: Boolean(f.serieBorrada),
@@ -198,13 +212,14 @@ export default function SaecArmasPage() {
         <form onSubmit={guardar} className="card" style={{ marginBottom: 12 }}>
           <div className="form-grid">
             <div className="field">
-              <label>Nº de serie</label>
+              <label>Nº de serie {!f.serieBorrada && <span className="req">*</span>}</label>
               <input
                 value={f.serie}
                 disabled={f.serieBorrada}
                 placeholder={f.serieBorrada ? "(serie limada)" : ""}
                 onChange={(e) => setF({ ...f, serie: e.target.value })}
               />
+              {errores.serie && <small style={errStyle}>{errores.serie}</small>}
             </div>
             <div className="field">
               <label>&nbsp;</label>
@@ -234,9 +249,9 @@ export default function SaecArmasPage() {
               </select>
             </div>
             <div className="field"><label>Nº inscripción DGMN</label><input value={f.inscripcionDgmn} onChange={(e) => setF({ ...f, inscripcionDgmn: e.target.value })} /></div>
-            <div className="field"><label>Fecha inscripción DGMN</label><input type="date" value={f.fechaInscripcionDgmn} onChange={(e) => setF({ ...f, fechaInscripcionDgmn: e.target.value })} /></div>
+            <div className="field"><label>Fecha inscripción DGMN</label><input {...propsInput("date")} value={f.fechaInscripcionDgmn} onChange={(e) => setF({ ...f, fechaInscripcionDgmn: e.target.value })} /></div>
             <div className="field"><label>Propietario registrado</label><input value={f.propietarioRegistrado} onChange={(e) => setF({ ...f, propietarioRegistrado: e.target.value })} /></div>
-            <div className="field"><label>RUT propietario</label><input placeholder="12.345.678-9" value={f.rutPropietario} onChange={(e) => setF({ ...f, rutPropietario: e.target.value })} /></div>
+            <div className="field"><label>RUT propietario</label><input {...propsInput("rut")} value={f.rutPropietario} onChange={(e) => setF({ ...f, rutPropietario: e.target.value })} />{errores.rutPropietario && <small style={errStyle}>{errores.rutPropietario}</small>}</div>
             <div className="field">
               <label>Estado operativo</label>
               <select value={f.estado} onChange={(e) => setF({ ...f, estado: e.target.value })}>

@@ -35,6 +35,7 @@ export default function NuevaOtPage() {
     setOkMsg(""); setErrMsg(""); setErrIssues([]);
     // a. Validaciones locales.
     if (!cliente?.id) { setErrMsg("Selecciona un cliente real de la lista."); return; }
+    if (!fechaIngreso || Number.isNaN(new Date(fechaIngreso).getTime())) { setErrMsg("Indica una fecha de ingreso válida."); return; }
     if (lineas.length === 0) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
 
     setEnviando(true);
@@ -124,8 +125,8 @@ export default function NuevaOtPage() {
         <div className="form-grid cols-4">
           <ClienteSelector value={cliente} onChange={setCliente} />
           <div className="field">
-            <label>Fecha de ingreso</label>
-            <input type="date" value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} />
+            <label>Fecha de ingreso <span className="req">*</span></label>
+            <input type="date" required value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} />
           </div>
           <div className="field">
             <label>Prioridad</label>

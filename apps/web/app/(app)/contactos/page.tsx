@@ -24,7 +24,7 @@ export default function ContactosPage() {
         { campo: "nombre", label: "Nombre", requerido: true },
         { campo: "cargo", label: "Cargo" },
         { campo: "email", label: "Email", tipo: "email" },
-        { campo: "telefono", label: "Teléfono" },
+        { campo: "telefono", label: "Teléfono", tipo: "telefono" },
       ]}
     />
   );

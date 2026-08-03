@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { clp, pct, rut as fmtRut } from "@/lib/format";
+import { propsInput, esMoneda, esNumero } from "@/lib/validate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -194,6 +195,16 @@ export default function NuevaCotizacionPage() {
     setIssues([]);
     if (!paso1Ok) return irA(1);
     if (!paso2Ok) return irA(2);
+    // Validación de formato de las líneas antes de enviar (cantidad numérica > 0, valor unitario monto ≥ 0).
+    const lineaMala = lineasValidas.find((l) => !esNumero(String(l.cantidad)) || !esMoneda(String(l.valorUnitario)));
+    if (lineaMala) {
+      setError("Revisa las líneas de costeo: la cantidad debe ser numérica y el valor unitario un monto válido (≥ 0).");
+      return irA(2);
+    }
+    if ((Number(descuentoPct) || 0) < 0 || (Number(descuentoPct) || 0) > 100) {
+      setError("El descuento debe estar entre 0 y 100 %.");
+      return irA(3);
+    }
     setSaving(true);
     try {
       const body: any = {
@@ -335,8 +346,8 @@ export default function NuevaCotizacionPage() {
                       </select>
                     </td>
                     <td><input style={cellInput} value={l.descripcion} onChange={(e) => set(i, "descripcion", e.target.value)} /></td>
-                    <td className="num"><input type="number" style={{ ...cellInput, width: 56, textAlign: "right" }} value={l.cantidad} onChange={(e) => set(i, "cantidad", e.target.value)} /></td>
-                    <td className="num"><input type="number" style={{ ...cellInput, width: 84, textAlign: "right" }} value={l.valorUnitario} onChange={(e) => set(i, "valorUnitario", e.target.value)} /></td>
+                    <td className="num"><input {...propsInput("number")} min="0" required style={{ ...cellInput, width: 56, textAlign: "right" }} value={l.cantidad} onChange={(e) => set(i, "cantidad", e.target.value)} /></td>
+                    <td className="num"><input {...propsInput("moneda")} required style={{ ...cellInput, width: 84, textAlign: "right" }} value={l.valorUnitario} onChange={(e) => set(i, "valorUnitario", e.target.value)} /></td>
                     <td className="num">{clp((Number(l.cantidad) || 0) * (Number(l.valorUnitario) || 0))}</td>
                     <td className="num"><span style={{ cursor: "pointer", color: "var(--muted)" }} onClick={() => del(i)}>✕</span></td>
                   </tr>
@@ -348,9 +359,9 @@ export default function NuevaCotizacionPage() {
             </div>
 
             <div className="form-grid cols-4" style={{ marginTop: 12 }}>
-              <div className="field"><label>CFA %</label><input type="number" value={cfaPct} onChange={(e) => setCfaPct(+e.target.value)} /></div>
-              <div className="field"><label>Margen particular %</label><input type="number" value={margenParticularPct} onChange={(e) => setMargen(+e.target.value)} /></div>
-              <div className="field"><label>IVA %</label><input type="number" value={ivaPct} onChange={(e) => setIva(+e.target.value)} /></div>
+              <div className="field"><label>CFA %</label><input type="number" inputMode="decimal" step="0.01" min={0} value={cfaPct} onChange={(e) => setCfaPct(+e.target.value)} /></div>
+              <div className="field"><label>Margen particular %</label><input type="number" inputMode="decimal" step="0.01" min={0} value={margenParticularPct} onChange={(e) => setMargen(+e.target.value)} /></div>
+              <div className="field"><label>IVA %</label><input type="number" inputMode="decimal" step="0.01" min={0} value={ivaPct} onChange={(e) => setIva(+e.target.value)} /></div>
               <div className="field" style={{ justifyContent: "flex-end" }}><button onClick={calcular} className="btn primary sm" style={{ justifyContent: "center" }}>Calcular costeo</button></div>
             </div>
 
@@ -397,11 +408,11 @@ export default function NuevaCotizacionPage() {
             </div>
             <div className="field">
               <label>Validez (días)</label>
-              <input type="number" min={1} value={validezDias} onChange={(e) => setValidezDias(+e.target.value)} />
+              <input type="number" inputMode="numeric" step={1} min={1} value={validezDias} onChange={(e) => setValidezDias(+e.target.value)} />
             </div>
             <div className="field">
               <label>Descuento %</label>
-              <input type="number" min={0} max={100} value={descuentoPct} onChange={(e) => setDescuentoPct(+e.target.value)} />
+              <input type="number" inputMode="decimal" step="0.01" min={0} max={100} value={descuentoPct} onChange={(e) => setDescuentoPct(+e.target.value)} />
             </div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>Notas</label>

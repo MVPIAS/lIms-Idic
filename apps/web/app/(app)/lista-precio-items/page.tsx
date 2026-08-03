@@ -30,7 +30,7 @@ export default function ListaPrecioItemsPage() {
         { campo: "descripcion", label: "Descripción", requerido: true },
         { campo: "cc", label: "Centro de costo" },
         { campo: "tipo", label: "Tipo", tipo: "select", opciones: ["servicio", "HH", "HM", "viatico", "insumo"] },
-        { campo: "precio", label: "Precio", tipo: "number", requerido: true },
+        { campo: "precio", label: "Precio", tipo: "moneda", requerido: true },
       ]}
     />
   );

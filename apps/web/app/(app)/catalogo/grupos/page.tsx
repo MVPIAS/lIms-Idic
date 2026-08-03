@@ -18,7 +18,7 @@ export default function GruposPage() {
       ]}
       campos={[
         { name: "granGrupoId", label: "Gran Grupo", tipo: "select", requerido: true, opcionesEndpoint: "cat/gran-grupos?limit=500" },
-        { name: "cgrupo", label: "Código" },
+        { name: "cgrupo", label: "Código", requerido: true },
         { name: "nombre", label: "Nombre", requerido: true },
         { name: "activo", label: "Activo", tipo: "checkbox" },
       ]}

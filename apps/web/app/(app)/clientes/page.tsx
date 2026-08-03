@@ -22,14 +22,14 @@ export default function ClientesPage() {
         { campo: "bloqueado", titulo: "Estado", render: badge },
       ]}
       campos={[
-        { campo: "rut", label: "RUT", requerido: true },
+        { campo: "rut", label: "RUT", tipo: "rut", requerido: true },
         { campo: "razonSocial", label: "Razón social", requerido: true },
         // Tipo de cliente: leído de la maestra editable de parámetros de negocio
         // (§5), no hardcodeado. Gestionable en /catalogo/parametros → tipo_cliente.
         { campo: "tipo", label: "Tipo", tipo: "select", opcionesEndpoint: "parametros?categoria=tipo_cliente&activo=true" },
         { campo: "ciudad", label: "Ciudad" },
         { campo: "region", label: "Región" },
-        { campo: "telefono", label: "Teléfono" },
+        { campo: "telefono", label: "Teléfono", tipo: "telefono" },
         { campo: "email", label: "Email", tipo: "email" },
       ]}
     />

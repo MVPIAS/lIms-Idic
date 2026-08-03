@@ -36,7 +36,7 @@ export default function ParametrosPage() {
         { name: "categoria", label: "Categoría", requerido: true, tipo: "select", opciones: CATEGORIAS },
         { name: "codigo", label: "Código (valor interno)", requerido: true },
         { name: "etiqueta", label: "Etiqueta (texto visible)", requerido: true, span: 2 },
-        { name: "orden", label: "Orden", tipo: "number" },
+        { name: "orden", label: "Orden", tipo: "entero" },
         { name: "activo", label: "Activo", tipo: "checkbox" },
       ]}
     />

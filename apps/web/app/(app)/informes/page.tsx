@@ -143,6 +143,10 @@ export default function InformesPage() {
   }
 
   async function previsualizar() {
+    if (!otId || !plantillaId) {
+      setError("Selecciona una Orden de Trabajo y una plantilla antes de previsualizar.");
+      return;
+    }
     setError("");
     setOcupado("preview");
     try {
@@ -156,6 +160,10 @@ export default function InformesPage() {
   }
 
   async function emitir() {
+    if (!otId || !plantillaId) {
+      setError("Selecciona una Orden de Trabajo y una plantilla antes de emitir el certificado.");
+      return;
+    }
     setError("");
     setOcupado("emitir");
     try {
