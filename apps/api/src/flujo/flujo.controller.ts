@@ -55,7 +55,14 @@ export class FlujoController {
   @Post("version/:versionId/instanciar")
   @RequierePermiso("ot.crear")
   instanciar(@Param("versionId") versionId: string, @Body() body: any, @Req() req: any) {
-    return this.flujos.instanciar(versionId, body ?? {}, req?.user?.tenantId);
+    // El usuario autenticado es quien inicia la instancia y recibe la 1ª tarea.
+    // Sin esto `iniciadoPor` quedaba null y la tarea se asignaba a un UUID
+    // inexistente (violación de FK → 500 al simular).
+    return this.flujos.instanciar(
+      versionId,
+      { ...(body ?? {}), usuarioId: body?.usuarioId ?? req?.user?.sub },
+      req?.user?.tenantId,
+    );
   }
 
   /** Estado e historial de una instancia. */
