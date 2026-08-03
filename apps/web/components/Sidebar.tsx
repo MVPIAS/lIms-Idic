@@ -13,7 +13,10 @@ type Sect = { title: string; items: Item[] };
 const NAV: Sect[] = [
   {
     title: "Inicio",
-    items: [{ href: "/dashboard", label: "Panel", icon: "⌂" }],
+    items: [
+      { href: "/dashboard", label: "Panel", icon: "⌂" },
+      { href: "/perfil", label: "Mi Perfil · 2FA", icon: "🔐" },
+    ],
   },
   {
     title: "CRM",
@@ -70,29 +73,6 @@ const NAV: Sect[] = [
     ],
   },
   {
-    title: "Catálogo · Clasificación",
-    items: [
-      { href: "/catalogo", label: "Índice del catálogo", icon: "🧭", perm: "catalogo.gestionar" },
-      { href: "/catalogo/gran-grupos", label: "Grandes Grupos", icon: "🗃", perm: "catalogo.gestionar" },
-      { href: "/catalogo/grupos", label: "Grupos", icon: "📁", perm: "catalogo.gestionar" },
-      { href: "/catalogo/subgrupos", label: "Subgrupos", icon: "🗂", perm: "catalogo.gestionar" },
-      { href: "/catalogo/familias", label: "Familias · Laboratorios", icon: "🏛", perm: "catalogo.gestionar" },
-      { href: "/catalogo/elementos", label: "Elementos", icon: "🧱", perm: "catalogo.gestionar" },
-      { href: "/catalogo/parametros", label: "Parámetros del sistema", icon: "🎛", perm: "catalogo.gestionar" },
-    ],
-  },
-  {
-    title: "Catálogo · Análisis",
-    items: [
-      { href: "/catalogo/ensayos", label: "Ensayos · Precios", icon: "🧪", perm: "catalogo.gestionar" },
-      { href: "/catalogo/metodos", label: "Métodos", icon: "🔬", perm: "catalogo.gestionar" },
-      { href: "/catalogo/analitos", label: "Analitos", icon: "⚗", perm: "catalogo.gestionar" },
-      { href: "/catalogo/especificaciones", label: "Especificaciones", icon: "📐", perm: "catalogo.gestionar" },
-      { href: "/catalogo/formulas", label: "Fórmulas de cálculo", icon: "𝑓", perm: "catalogo.gestionar" },
-      { href: "/catalogo/pasos", label: "Pasos por ensayo", icon: "🪜", perm: "catalogo.gestionar" },
-    ],
-  },
-  {
     title: "Reportes y Comunicación",
     items: [
       { href: "/reportes", label: "Reportes · Export CSV", icon: "📊", perm: "resultado.ver" },
@@ -101,10 +81,27 @@ const NAV: Sect[] = [
     ],
   },
   {
-    title: "Sistema",
+    title: "Administración · Tablas Maestras",
+    items: [
+      { href: "/catalogo", label: "Índice del catálogo", icon: "🧭", perm: "catalogo.gestionar" },
+      { href: "/catalogo/gran-grupos", label: "Grandes Grupos", icon: "🗃", perm: "catalogo.gestionar" },
+      { href: "/catalogo/grupos", label: "Grupos", icon: "📁", perm: "catalogo.gestionar" },
+      { href: "/catalogo/subgrupos", label: "Subgrupos", icon: "🗂", perm: "catalogo.gestionar" },
+      { href: "/catalogo/familias", label: "Familias · Laboratorios", icon: "🏛", perm: "catalogo.gestionar" },
+      { href: "/catalogo/elementos", label: "Elementos", icon: "🧱", perm: "catalogo.gestionar" },
+      { href: "/catalogo/ensayos", label: "Ensayos · Precios", icon: "🧪", perm: "catalogo.gestionar" },
+      { href: "/catalogo/metodos", label: "Métodos", icon: "🔬", perm: "catalogo.gestionar" },
+      { href: "/catalogo/analitos", label: "Analitos", icon: "⚗", perm: "catalogo.gestionar" },
+      { href: "/catalogo/especificaciones", label: "Especificaciones", icon: "📐", perm: "catalogo.gestionar" },
+      { href: "/catalogo/formulas", label: "Fórmulas de cálculo", icon: "𝑓", perm: "catalogo.gestionar" },
+      { href: "/catalogo/pasos", label: "Pasos por ensayo", icon: "🪜", perm: "catalogo.gestionar" },
+      { href: "/catalogo/parametros", label: "Parámetros del sistema", icon: "🎛", perm: "catalogo.gestionar" },
+    ],
+  },
+  {
+    title: "Administración · Sistema",
     items: [
       { href: "/usuarios", label: "Usuarios y Roles", icon: "👥", perm: "admin.usuarios" },
-      { href: "/perfil", label: "Mi Perfil · 2FA", icon: "🔐" },
       { href: "/permisos", label: "Permisos", icon: "🔑", perm: "admin.usuarios" },
       { href: "/config-correo", label: "Configuración de Correo", icon: "✉", perm: "admin.usuarios" },
     ],

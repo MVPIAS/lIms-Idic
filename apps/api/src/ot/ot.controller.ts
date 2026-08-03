@@ -96,9 +96,15 @@ export class OtController {
   @RequierePermiso("ot.ver")
   async listar(@Req() req: any) {
     const tenantId = req?.user?.tenantId;
+    // Alcance por laboratorio: si el usuario está acotado a unidades concretas
+    // (no es global), solo ve las OT de SUS laboratorios (unidad_principal).
+    const unidadGlobal: boolean = req?.user?.unidadGlobal ?? true;
+    const unidades: string[] = req?.user?.unidades ?? [];
+    const scopeUnidad =
+      !unidadGlobal && unidades.length ? { unidadPrincipal: { in: unidades } } : {};
     const ots = await this.prisma.ordenTrabajo.findMany({
       // OrdenTrabajo tiene tenant_id: solo se listan las OT del tenant del usuario.
-      where: { ...(tenantId ? { tenantId } : {}) },
+      where: { ...(tenantId ? { tenantId } : {}), ...scopeUnidad },
       take: 50,
       orderBy: { createdAt: "desc" },
       include: { cliente: true },

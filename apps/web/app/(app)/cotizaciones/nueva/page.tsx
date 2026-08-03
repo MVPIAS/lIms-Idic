@@ -143,7 +143,10 @@ export default function NuevaCotizacionPage() {
     [lineasValidas],
   );
   const montoDescuento = useMemo(() => (subtotal * (Number(descuentoPct) || 0)) / 100, [subtotal, descuentoPct]);
-  const total = subtotal - montoDescuento; // IVA EXENTO
+  // El precio a cotizar del Ejército es el Costo Total = CDT + CFA (gastos admin).
+  // El CFA se aplica sobre el neto (CDT − descuento), igual que el backend.
+  const montoCfa = useMemo(() => (subtotal - montoDescuento) * (Number(cfaPct) || 0) / 100, [subtotal, montoDescuento, cfaPct]);
+  const total = subtotal - montoDescuento + montoCfa; // IVA EXENTO · incluye CFA
 
   // --- Preview de precios (opcional, endpoint de costeo) ----------------------
   async function calcular() {
@@ -197,6 +200,7 @@ export default function NuevaCotizacionPage() {
         clienteId,
         formato,
         descuentoPct: Number(descuentoPct) || 0,
+        gastosAdminPct: Number(cfaPct) || 0, // CFA → gastos administrativos (precio Ejército = CDT + CFA)
         validezDias: Number(validezDias) || undefined,
         formaPago: formaPago || undefined,
         notas: notas || undefined,
@@ -405,9 +409,10 @@ export default function NuevaCotizacionPage() {
             </div>
           </div>
           <div className="totals-box" style={{ marginTop: 12 }}>
-            <div className="row"><span>Subtotal</span><b>{clp(subtotal)}</b></div>
+            <div className="row"><span>Costo directo (CDT)</span><b>{clp(subtotal)}</b></div>
             <div className="row"><span>Descuento ({pct(descuentoPct)})</span><b>− {clp(montoDescuento)}</b></div>
-            <div className="row total"><span>Total (IVA exento)</span><b>{clp(total)}</b></div>
+            <div className="row"><span>CFA ({pct(cfaPct)})</span><b>+ {clp(montoCfa)}</b></div>
+            <div className="row total"><span>Precio a cotizar (IVA exento)</span><b>{clp(total)}</b></div>
           </div>
           <div className="toolbar" style={{ marginTop: 12 }}>
             <button className="btn outline sm" onClick={() => irA(2)}>← Atrás</button>
