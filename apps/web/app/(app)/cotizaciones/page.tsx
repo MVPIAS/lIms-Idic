@@ -46,11 +46,23 @@ export default function CotizacionesPage() {
   const [filtro, setFiltro] = useState("");
 
   useEffect(() => {
-    fetch(`${API}/cotizaciones`)
+    const token = typeof window !== "undefined" ? localStorage.getItem("lims_token") : null;
+    fetch(`${API}/cotizaciones`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
-        if (Array.isArray(data) && data.length) {
-          setCots(data);
+        const arr = Array.isArray(data) ? data : data?.data ?? [];
+        if (Array.isArray(arr) && arr.length) {
+          // Normaliza la forma del backend (codigo, cliente{}, createdAt) a la de la UI.
+          setCots(arr.map((c: any): Cot => ({
+            id: c.id,
+            numero: c.codigo ?? c.numero ?? "—",
+            cliente: c.cliente?.razonSocial ?? c.cliente?.nombre ?? (typeof c.cliente === "string" ? c.cliente : "—"),
+            formato: c.formato ?? "—",
+            estado: c.estado,
+            total: Number(c.total ?? 0),
+            otNumero: c.ot?.codigo ?? null,
+            fecha: c.fecha ?? c.createdAt ?? c.created_at ?? "",
+          })));
           setOrigen("api");
         }
       })
