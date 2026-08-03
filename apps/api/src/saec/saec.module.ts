@@ -11,6 +11,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -21,6 +22,8 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
 import { createHash, randomInt } from "node:crypto";
+import { promises as fs } from "node:fs";
+import * as path from "node:path";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
@@ -2501,6 +2504,408 @@ export class SaecIntegracionController extends SaecBase {
   }
 }
 
+// ===========================================================================
+// MODELO IDIC · ETL de armas importadas desde IBIS por CARPETA + adjunte a OT
+// ---------------------------------------------------------------------------
+// A diferencia del CMS criminal (IbisController arriba, que crea Casos/Hits),
+// el IDIC NO gestiona casos policiales: controla las ARMAS QUE SE IMPORTAN al
+// país. Flujo real (confirmado con la spec ESI y los manuales de Forensic):
+//   1) IBIS deja UN XML DIARIO en una CARPETA (FTP/SFTP). Un XML trae MUCHAS
+//      armas de distinto origen. No hay subida visual.
+//   2) El ETL barre la carpeta y vuelca cada <Exhibit Type="Firearm"> a un POOL
+//      (ibis_resultado), identificado por <SerialNumber> y <UUID>. En
+//      administración queda el REGISTRO de qué XML se cargaron (ibis_importacion).
+//   3) Al hacer la prueba de una OT, el perito adjunta a la OT SÓLO las armas de
+//      esa OT: se cruza el pool por número de serie con las armas de la OT.
+// ===========================================================================
+
+/** Normaliza un nº de serie para el cruce: mayúsculas, sin separadores. */
+function normSerie(s?: string | null): string | null {
+  if (!s) return null;
+  const n = s.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return n || null;
+}
+
+/** Tipo de arma a partir del FirearmType del ESI (Code + texto). */
+function tipoFirearm(codigo: string | null, texto: string | null): string {
+  const t = `${codigo ?? ""} ${texto ?? ""}`.toLowerCase();
+  if (t.includes("pistol")) return "pistola";
+  if (t.includes("revolver")) return "revolver";
+  if (t.includes("submachine") || t.includes("subfusil")) return "subfusil";
+  if (t.includes("rifle") || t.includes("fusil") || t.includes("carbine")) return "fusil";
+  if (t.includes("shotgun") || t.includes("escopeta")) return "escopeta";
+  return "otro";
+}
+
+const ConfigIbisSchema = z.object({
+  carpetaEntrada: z.string().min(1).max(500),
+  carpetaProcesados: z.string().min(1).max(500),
+  carpetaErrores: z.string().min(1).max(500),
+  activo: z.boolean().optional(),
+});
+
+const AsignarIbisSchema = z.object({
+  // Si se omite, se adjuntan TODAS las coincidencias por nº de serie de la OT.
+  resultadoIds: z.array(z.string().uuid()).optional(),
+});
+
+@ApiTags("saec · ibis etl (armas importadas)")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@Controller("ibis")
+export class IbisEtlController extends SaecBase {
+  // ----- Configuración de la carpeta ETL --------------------------------------
+  private async cargarConfig(tenantId: string) {
+    const rows = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT * FROM configuracion_ibis WHERE tenant_id = $1::uuid`, tenantId,
+    );
+    return rows[0] ?? {
+      tenant_id: tenantId,
+      carpeta_entrada: "/data/ibis/entrada",
+      carpeta_procesados: "/data/ibis/procesados",
+      carpeta_errores: "/data/ibis/errores",
+      activo: true,
+    };
+  }
+
+  @Get("config")
+  @RequierePermiso("ibis.ver")
+  async verConfig(@Req() req: any) {
+    return this.cargarConfig(this.tenantId(req));
+  }
+
+  @Put("config")
+  @RequierePermiso("ibis.config")
+  async guardarConfig(@Body() body: unknown, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const d = ConfigIbisSchema.parse(body);
+    const rows = await this.prisma.$queryRawUnsafe<any[]>(
+      `INSERT INTO configuracion_ibis
+         (tenant_id, carpeta_entrada, carpeta_procesados, carpeta_errores, activo, updated_by)
+       VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid)
+       ON CONFLICT (tenant_id) DO UPDATE SET
+         carpeta_entrada = EXCLUDED.carpeta_entrada,
+         carpeta_procesados = EXCLUDED.carpeta_procesados,
+         carpeta_errores = EXCLUDED.carpeta_errores,
+         activo = EXCLUDED.activo, updated_at = now(), updated_by = EXCLUDED.updated_by
+       RETURNING *`,
+      tenantId, d.carpetaEntrada, d.carpetaProcesados, d.carpetaErrores, d.activo ?? true,
+      req?.user?.sub ?? null,
+    );
+    await this.auditar(req, "ibis", null, "editar", { config: "carpetas ETL" });
+    return rows[0];
+  }
+
+  // ----- POOL de resultados importados ---------------------------------------
+  @Get("pool")
+  @RequierePermiso("ibis.ver")
+  async listarPool(
+    @Query("estado") estado?: string,
+    @Query("serie") serie?: string,
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
+    @Req() req?: any,
+  ) {
+    const tenantId = this.tenantId(req);
+    const { p, l, offset } = this.paginacion(page, limit);
+    const args: any[] = [tenantId];
+    let filtro = "";
+    if (estado) { args.push(estado); filtro += ` AND r.estado = $${args.length}`; }
+    if (serie) { args.push(normSerie(serie)); filtro += ` AND r.serie = $${args.length}`; }
+    const data = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT r.*, o.codigo AS ot_codigo, i.nombre_archivo
+         FROM ibis_resultado r
+         LEFT JOIN orden_trabajo o ON o.id = r.ot_id
+         LEFT JOIN ibis_importacion i ON i.id = r.ibis_importacion_id
+        WHERE r.tenant_id = $1::uuid AND r.deleted_at IS NULL ${filtro}
+        ORDER BY r.created_at DESC
+        LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
+      ...args, l, offset,
+    );
+    const total = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT COUNT(*)::int AS total FROM ibis_resultado r
+        WHERE r.tenant_id = $1::uuid AND r.deleted_at IS NULL ${filtro}`,
+      ...args,
+    );
+    return { data, meta: { page: p, limit: l, total: Number(total[0]?.total ?? 0) } };
+  }
+
+  // ----- Barrido de la CARPETA ETL -------------------------------------------
+  /** RF-K03 · barre la carpeta configurada e importa en secuencia los XML nuevos. */
+  @Post("barrer")
+  @RequierePermiso("ibis.barrer")
+  async barrer(@Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const cfg = await this.cargarConfig(tenantId);
+    let ficheros: string[];
+    try {
+      ficheros = (await fs.readdir(cfg.carpeta_entrada))
+        .filter((f) => f.toLowerCase().endsWith(".xml"))
+        .sort(); // los incrementales se consumen en secuencia (nombre = timestamp)
+    } catch (e: any) {
+      throw new BadRequestException(
+        `No se puede leer la carpeta de entrada "${cfg.carpeta_entrada}": ${e?.message ?? e}`,
+      );
+    }
+
+    const resultados: any[] = [];
+    for (const f of ficheros) {
+      const ruta = path.join(cfg.carpeta_entrada, f);
+      try {
+        const xml = await fs.readFile(ruta, "utf8");
+        const r = await this.ingestarPool(xml, f, "carpeta", req);
+        resultados.push({ archivo: f, ...r });
+        await this.moverArchivo(ruta, cfg.carpeta_procesados, f);
+      } catch (e: any) {
+        resultados.push({ archivo: f, estado: "error", error: e?.message ?? String(e) });
+        await this.moverArchivo(ruta, cfg.carpeta_errores, f).catch(() => undefined);
+      }
+    }
+
+    const resumen = {
+      carpeta: cfg.carpeta_entrada,
+      archivos: ficheros.length,
+      procesados: resultados.filter((r) => r.estado !== "error").length,
+      conError: resultados.filter((r) => r.estado === "error").length,
+      at: new Date().toISOString(),
+    };
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE configuracion_ibis SET ultimo_barrido_at = now(), ultimo_barrido_res = $2::jsonb WHERE tenant_id = $1::uuid`,
+      tenantId, JSON.stringify(resumen),
+    ).catch(() => undefined);
+    await this.auditar(req, "ibis", null, "importar", { barrido: resumen });
+    return { data: { ...resumen, resultados } };
+  }
+
+  private async moverArchivo(ruta: string, destDir: string, nombre: string) {
+    await fs.mkdir(destDir, { recursive: true });
+    const dest = path.join(destDir, `${Date.now()}_${nombre}`);
+    try {
+      await fs.rename(ruta, dest);
+    } catch {
+      await fs.copyFile(ruta, dest);
+      await fs.unlink(ruta);
+    }
+  }
+
+  /**
+   * Núcleo del ETL: parsea un XML ESI y vuelca SÓLO los exhibits de tipo Firearm
+   * al pool `ibis_resultado`. NO crea casos criminales. Registra la importación
+   * en `ibis_importacion` (bitácora) con control anti-reproceso por SHA-256.
+   */
+  private async ingestarPool(
+    xml: string, nombreArchivo: string | null, origen: "manual" | "carpeta", req: any, forzar = false,
+  ) {
+    const tenantId = this.tenantId(req);
+    const clean = xml.trim();
+    const hash = createHash("sha256").update(clean, "utf8").digest("hex");
+
+    const previa = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, estado, created_at FROM ibis_importacion
+        WHERE tenant_id = $1::uuid AND hash_sha256 = $2 AND deleted_at IS NULL LIMIT 1`,
+      tenantId, hash,
+    );
+    if (previa.length && !forzar) {
+      return {
+        duplicado: true, importacionId: previa[0].id, estado: previa[0].estado,
+        mensaje: "Archivo ya procesado (anti-reproceso SHA-256).",
+      };
+    }
+
+    let raiz: NodoXml;
+    try {
+      raiz = parsearXml(clean);
+    } catch (e: any) {
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO ibis_importacion
+           (tenant_id, nombre_archivo, hash_sha256, xml_crudo, tamano_bytes, estado, errores, origen_barrido, importado_por, ip_origen)
+         VALUES ($1::uuid, $2, $3, $4, $5, 'error', $6::jsonb, $7, $8::uuid, $9::inet)
+         ON CONFLICT (tenant_id, hash_sha256) DO UPDATE SET estado = 'error', errores = EXCLUDED.errores`,
+        tenantId, nombreArchivo, hash, clean, Buffer.byteLength(clean, "utf8"),
+        JSON.stringify([{ tipo: "parseo", mensaje: e?.message ?? String(e) }]), origen,
+        req?.user?.sub ?? null, this.ip(req),
+      );
+      throw new BadRequestException(`XML ESI no válido: ${e?.message ?? e}`);
+    }
+    if (raiz.nombre !== "Export") {
+      throw new BadRequestException(`La raíz del XML ESI debe ser <Export> y es <${raiz.nombre}>.`);
+    }
+
+    const errores: any[] = [];
+    const bitacora: any[] = [];
+    let creados = 0, eliminados = 0;
+
+    const resumen = await this.prisma.$transaction(async (tx: ClienteSql) => {
+      const imp = await tx.$queryRawUnsafe<any[]>(
+        `INSERT INTO ibis_importacion
+           (tenant_id, nombre_archivo, hash_sha256, xml_crudo, tamano_bytes, version_esi, estado, origen_barrido, importado_por, ip_origen)
+         VALUES ($1::uuid, $2, $3, $4, $5, '3.2', 'procesado', $6, $7::uuid, $8::inet)
+         ON CONFLICT (tenant_id, hash_sha256) DO UPDATE SET estado = 'procesado', nombre_archivo = EXCLUDED.nombre_archivo
+         RETURNING id`,
+        tenantId, nombreArchivo, hash, clean, Buffer.byteLength(clean, "utf8"), origen,
+        req?.user?.sub ?? null, this.ip(req),
+      );
+      const impId = imp[0].id;
+
+      // Sólo armas: <Exhibit><Type>Firearm</Type>.
+      for (const x of buscarElementos(raiz, "Exhibits", "Exhibit")) {
+        const tipoEsi = (txt(x, "Type") ?? "").toLowerCase();
+        if (!tipoEsi.includes("firearm") && !tipoEsi.includes("weapon")) continue;
+        try {
+          const uuid = txt(x, "UUID");
+          const serieRaw = txt(x, "SerialNumber");
+          const make = codigoTexto(x, "Make");
+          const cal = codigoTexto(x, "Caliber");
+          const ftype = codigoTexto(x, "FirearmType");
+          const importer = hijo(x, "Importer");
+          const hi = hijo(x, "HitIndicator");
+          const hitCount = hi ? intEsi(hi.attrs?.Count ?? hi.texto) : intEsi(txt(x, "HitIndicator"));
+          const datos = JSON.stringify({
+            uuid, exhibitNumber: txt(x, "ExhibitNumber"), serialNumber: serieRaw,
+            make, model: txt(x, "Model"), caliber: cal, firearmType: ftype,
+            countryOfOrigin: codigoTexto(x, "CountryOfOrigin"),
+            importer: importer ? { state: importer.attrs?.State ?? null, name: importer.attrs?.Name ?? null } : null,
+            barrelLength: txt(x, "BarrelLength"), ammunitionCapacity: txt(x, "AmmunitionCapacity"),
+            finish: txt(x, "Finish"), registrationDate: txt(x, "RegistrationDate"), hitCount,
+          });
+          const n = await tx.$executeRawUnsafe(
+            `INSERT INTO ibis_resultado
+               (tenant_id, ibis_importacion_id, uuid_ibis, exhibit_number, serie, marca, modelo, calibre, tipo,
+                hit_count, resultado, fecha_prueba, datos)
+             VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::timestamptz, $13::jsonb)
+             ON CONFLICT (ibis_importacion_id, uuid_ibis) WHERE uuid_ibis IS NOT NULL AND deleted_at IS NULL
+               DO UPDATE SET serie = EXCLUDED.serie, marca = EXCLUDED.marca, modelo = EXCLUDED.modelo,
+                 calibre = EXCLUDED.calibre, tipo = EXCLUDED.tipo, hit_count = EXCLUDED.hit_count,
+                 resultado = EXCLUDED.resultado, datos = EXCLUDED.datos`,
+            tenantId, impId, uuid, txt(x, "ExhibitNumber"), normSerie(serieRaw),
+            make.texto ?? make.codigo, txt(x, "Model"), cal.texto ?? cal.codigo,
+            tipoFirearm(ftype.codigo, ftype.texto),
+            hitCount, hitCount > 0 ? "concluyente" : "sin_coincidencia",
+            fechaEsi(txt(x, "RegistrationDate")), datos,
+          );
+          creados += Number(n) || 0;
+          bitacora.push({ entidad: "Firearm", serie: serieRaw, uuid });
+        } catch (e: any) {
+          errores.push({ tipo: "firearm", mensaje: e?.message ?? String(e) });
+        }
+      }
+
+      // Bajas: <RemovedExhibits> → baja lógica del pool por UUID.
+      for (const rem of buscarTodos(raiz, "RemovedExhibits")) {
+        const uuids = [
+          ...(rem.texto ? [rem.texto] : []),
+          ...buscarTodos(rem, "UUID").map((u) => u.texto),
+        ].filter(Boolean);
+        for (const u of new Set(uuids)) {
+          const n = await tx.$executeRawUnsafe(
+            `UPDATE ibis_resultado SET deleted_at = now()
+              WHERE tenant_id = $1::uuid AND uuid_ibis = $2 AND deleted_at IS NULL`,
+            tenantId, u,
+          );
+          eliminados += Number(n) || 0;
+        }
+      }
+
+      const estado = errores.length === 0 ? "procesado" : (creados > 0 ? "parcial" : "error");
+      await tx.$executeRawUnsafe(
+        `UPDATE ibis_importacion
+            SET estado = $2, resultados_creados = $3, eliminados = $4,
+                errores = $5::jsonb, bitacora = $6::jsonb, resultado = $7::jsonb
+          WHERE id = $1::uuid`,
+        impId, estado, creados, eliminados,
+        JSON.stringify(errores), JSON.stringify(bitacora.slice(0, 500)),
+        JSON.stringify({ resultadosCreados: creados, eliminados, estado, hash }),
+      );
+      return { importacionId: impId, estado, resultadosCreados: creados, eliminados, errores };
+    }, { timeout: 120_000 });
+
+    await this.auditar(req, "ibis", resumen.importacionId, "importar",
+      { hash, resultadosCreados: resumen.resultadosCreados, origen });
+    return { duplicado: false, ...resumen };
+  }
+
+  /**
+   * Reproceso puntual de un XML (pegado o re-subido) sin depender de la carpeta.
+   * Es la vía de contingencia/administración: la vía normal es `barrer`.
+   */
+  @Post("pool/importar")
+  @RequierePermiso("ibis.barrer")
+  async importarManual(@Body() body: unknown, @Req() req: any) {
+    const d = z.object({
+      xml: z.string().min(1),
+      nombreArchivo: z.string().max(260).nullish(),
+      forzar: z.boolean().optional(),
+    }).parse(body);
+    return { data: await this.ingestarPool(d.xml, d.nombreArchivo ?? null, "manual", req, d.forzar ?? false) };
+  }
+
+  // ----- Adjunte a la OT (sólo las armas de esa OT) --------------------------
+  private paresSql = `
+    SELECT r.id AS resultado_id, r.serie, r.calibre, r.marca, r.modelo, r.tipo,
+           r.hit_count, r.resultado, r.uuid_ibis, r.exhibit_number,
+           a.id AS arma_id, a.serie AS arma_serie
+      FROM ibis_resultado r
+      JOIN arma a ON a.tenant_id = r.tenant_id AND a.ot_id = $2::uuid AND a.deleted_at IS NULL
+        AND upper(regexp_replace(coalesce(a.serie, ''), '[^A-Za-z0-9]', '', 'g')) = r.serie
+     WHERE r.tenant_id = $1::uuid AND r.deleted_at IS NULL AND r.estado = 'pool'`;
+
+  /** Candidatos: resultados del pool cuyo nº de serie coincide con un arma de la OT. */
+  @Get("ot/:otId/candidatos")
+  @RequierePermiso("ibis.ver")
+  async candidatos(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const data = await this.prisma.$queryRawUnsafe<any[]>(
+      `${this.paresSql} ORDER BY r.created_at DESC`, tenantId, otId,
+    );
+    return { data, meta: { total: data.length } };
+  }
+
+  /** Adjunta a la OT los resultados IBIS de SUS armas (match por nº de serie). */
+  @Post("ot/:otId/asignar")
+  @RequierePermiso("ibis.asignar")
+  async asignar(@Param("otId", ParseUUIDPipe) otId: string, @Body() body: unknown, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const d = AsignarIbisSchema.parse(body ?? {});
+    let pares = await this.prisma.$queryRawUnsafe<any[]>(this.paresSql, tenantId, otId);
+    if (d.resultadoIds?.length) {
+      const set = new Set(d.resultadoIds);
+      pares = pares.filter((p) => set.has(p.resultado_id));
+    }
+    if (!pares.length) {
+      throw new BadRequestException(
+        "No hay resultados IBIS en el pool que coincidan (por nº de serie) con las armas de esta OT.",
+      );
+    }
+    const asignados = await this.prisma.$transaction(async (tx: ClienteSql) => {
+      let n = 0;
+      for (const p of pares) {
+        const upd = await tx.$executeRawUnsafe(
+          `UPDATE ibis_resultado
+              SET estado = 'asignado', arma_id = $3::uuid, ot_id = $4::uuid,
+                  asignado_por = $5::uuid, asignado_at = now()
+            WHERE id = $1::uuid AND tenant_id = $2::uuid AND estado = 'pool'`,
+          p.resultado_id, tenantId, p.arma_id, otId, req?.user?.sub ?? null,
+        );
+        if (!Number(upd)) continue;
+        // Enriquecer la ficha del arma con lo que trae IBIS (sin pisar lo ya cargado).
+        await tx.$executeRawUnsafe(
+          `UPDATE arma
+              SET calibre = COALESCE(NULLIF(calibre, ''), $3),
+                  marca   = COALESCE(NULLIF(marca, ''),   $4),
+                  modelo  = COALESCE(NULLIF(modelo, ''),  $5),
+                  estado  = 'en_analisis', updated_at = now()
+            WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+          p.arma_id, tenantId, p.calibre, p.marca, p.modelo,
+        );
+        n++;
+      }
+      return n;
+    });
+    await this.auditar(req, "ibis", otId, "editar", { asignados, otId, accion: "adjuntar_ibis" });
+    return { data: { otId, asignados } };
+  }
+}
+
 @Module({
   controllers: [
     SaecCasoController,
@@ -2509,6 +2914,7 @@ export class SaecIntegracionController extends SaecBase {
     CustodiaEvidenciaController,
     PrestamoEvidenciaController,
     IbisController,
+    IbisEtlController,
     SaecCertificadoController,
     SaecIntegracionController,
   ],

@@ -57,7 +57,7 @@ const NAV = [
     items: [
       { href: "/saec", label: "Evidencias", icon: "🧷" },
       { href: "/saec/armas", label: "Armas", icon: "🔫" },
-      { href: "/saec/ibis", label: "Importar IBIS", icon: "📥" },
+      { href: "/saec/ibis", label: "IBIS · Armas importadas", icon: "📥" },
       { href: "/saec/verificar", label: "Verificar certificado", icon: "🔎" },
     ],
   },

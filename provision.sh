@@ -73,6 +73,7 @@ for f in \
   packages/db/align_resultado_equipo.sql \
   packages/db/saec.sql \
   packages/db/align_saec_certificado.sql \
+  packages/db/align_ibis_ot.sql \
   packages/db/catalogo_v2.sql \
   packages/db/seed_catalogo_v2.sql \
   packages/db/align_ot_correlativo.sql \
