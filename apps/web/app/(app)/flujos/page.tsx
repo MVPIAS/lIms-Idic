@@ -10,6 +10,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
+// Todas las llamadas al motor de flujos exigen JWT (PermisoGuard). Sin el Bearer
+// el backend responde 401 y el diseñador no puede guardar/publicar/simular.
+const authHeaders = (): Record<string, string> => {
+  const t = typeof window !== "undefined" ? localStorage.getItem("lims_token") : null;
+  return t ? { Authorization: `Bearer ${t}` } : {};
+};
+const jsonAuth = (): Record<string, string> => ({ "Content-Type": "application/json", ...authHeaders() });
+
 type Paso = {
   tmpId: string; numero: number; tipo: string; actividad: string;
   slaMinutos?: number | null;
@@ -32,14 +40,14 @@ export default function FlujosPage() {
   const [simulacion, setSimulacion] = useState<any | null>(null);
 
   const cargarDefs = useCallback(async () => {
-    const r = await fetch(`${API}/flujos`);
+    const r = await fetch(`${API}/flujos`, { headers: authHeaders() });
     if (r.ok) setDefs(await r.json());
   }, []);
   useEffect(() => { cargarDefs(); }, [cargarDefs]);
 
   async function abrir(codigo: string) {
     setMsg(""); setSimulacion(null);
-    const r = await fetch(`${API}/flujos/codigo/${codigo}`);
+    const r = await fetch(`${API}/flujos/codigo/${codigo}`, { headers: authHeaders() });
     if (!r.ok) { setMsg("No se pudo cargar el flujo"); return; }
     const v = await r.json();
     setSel(v);
@@ -91,7 +99,7 @@ export default function FlujosPage() {
   async function guardar() {
     setMsg("Guardando…");
     const r = await fetch(`${API}/flujos`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: jsonAuth(),
       body: JSON.stringify({ codigo: meta.codigo, nombre: meta.nombre, pasos, transiciones: trans }),
     });
     const data = await r.json();
@@ -103,7 +111,7 @@ export default function FlujosPage() {
 
   async function publicar() {
     if (!meta.versionId) { setMsg("Guarda primero un borrador"); return; }
-    const r = await fetch(`${API}/flujos/version/${meta.versionId}/publicar`, { method: "POST" });
+    const r = await fetch(`${API}/flujos/version/${meta.versionId}/publicar`, { method: "POST", headers: authHeaders() });
     if (r.ok) { setMeta({ ...meta, estado: "publicado" }); setMsg("Versión publicada ✔"); cargarDefs(); }
     else setMsg("Error al publicar");
   }
@@ -111,7 +119,7 @@ export default function FlujosPage() {
   async function simular() {
     if (!meta.versionId || meta.estado !== "publicado") { setMsg("Publica la versión antes de simular"); return; }
     const r = await fetch(`${API}/flujos/version/${meta.versionId}/instanciar`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: jsonAuth(),
       body: JSON.stringify({ metadata: { cumple: true } }),
     });
     const data = await r.json();
@@ -121,7 +129,7 @@ export default function FlujosPage() {
 
   async function completar(peId: string) {
     const r = await fetch(`${API}/flujos/tareas/${peId}/completar`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: jsonAuth(),
       body: JSON.stringify({ resultado: { cumple: true } }),
     });
     if (r.ok) setSimulacion(await r.json());
