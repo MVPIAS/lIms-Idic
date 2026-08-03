@@ -8,18 +8,21 @@ const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token"
 export default function UsuariosPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
+  const [unidades, setUnidades] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [show, setShow] = useState(false);
-  const [f, setF] = useState<any>({ username: "", nombreCompleto: "", email: "", password: "", grado: "", rolId: "" });
+  const [f, setF] = useState<any>({ username: "", nombreCompleto: "", email: "", password: "", grado: "", rolId: "", unidadId: "" });
 
   async function cargar() {
     try {
-      const [u, r] = await Promise.all([
+      const [u, r, un] = await Promise.all([
         fetch(`${API}/usuarios`, { headers: auth() }).then((x) => x.json()),
         fetch(`${API}/roles`, { headers: auth() }).then((x) => x.json()),
+        fetch(`${API}/unidades`, { headers: auth() }).then((x) => x.json()).catch(() => ({ data: [] })),
       ]);
       setRows(u.data ?? []);
       setRoles(r.data ?? []);
+      setUnidades(un.data ?? []);
     } catch (e: any) { setError(e.message); }
   }
   useEffect(() => { cargar(); }, []);
@@ -31,7 +34,7 @@ export default function UsuariosPage() {
       const res = await fetch(`${API}/usuarios`, { method: "POST", headers: auth(), body: JSON.stringify(f) });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
       setShow(false);
-      setF({ username: "", nombreCompleto: "", email: "", password: "", grado: "", rolId: "" });
+      setF({ username: "", nombreCompleto: "", email: "", password: "", grado: "", rolId: "", unidadId: "" });
       cargar();
     } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
   }
@@ -63,7 +66,16 @@ export default function UsuariosPage() {
                 {roles.map((r) => <option key={r.id} value={r.id}>{r.codigo} · {r.nombre}</option>)}
               </select>
             </div>
+            <div className="field"><label>Laboratorio / Unidad (acota el rol)</label>
+              <select value={f.unidadId} onChange={(e) => setF({ ...f, unidadId: e.target.value })}>
+                <option value="">— global (ve todo) —</option>
+                {unidades.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
+              </select>
+            </div>
           </div>
+          <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
+            Si asignas un laboratorio, el usuario solo verá las OT de ese laboratorio. Déjalo en «global» para roles transversales.
+          </p>
           <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}><button className="btn primary sm">Guardar usuario</button></div>
         </form>
       )}
