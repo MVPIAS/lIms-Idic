@@ -100,6 +100,18 @@ services:
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       TZ: America/Santiago
+      # ETL IBIS · barrido AUTOMÁTICO de la carpeta cada 24h (proceso interno de la API).
+      # IBIS deja el XML diario en IBIS_DIR/entrada; el ETL lo consume y lo mueve a
+      # IBIS_DIR/procesados (o /errores si falla). No requiere Internet ni credenciales.
+      IBIS_CRON_HABILITADO: ${IBIS_CRON_HABILITADO:-true}
+      IBIS_CRON_HORA: ${IBIS_CRON_HORA:-02:00}
+    volumes:
+      # Carpeta donde IBIS/SFTP deja el XML DIARIO (entrada) y donde se guarda el
+      # XML ya CONSUMIDO (procesados) + los que fallaron (errores). Monte aquí el
+      # punto de montaje del SFTP interno del IDIC apuntando a IBIS_DIR/entrada.
+      - ${IBIS_DIR:-./ibis}/entrada:/data/ibis/entrada
+      - ${IBIS_DIR:-./ibis}/procesados:/data/ibis/procesados
+      - ${IBIS_DIR:-./ibis}/errores:/data/ibis/errores
     expose: ["3001"]
     healthcheck:
       # /api/health devuelve status=degraded si la BD no responde, pero HTTP 200
