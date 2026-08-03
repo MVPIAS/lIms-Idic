@@ -81,6 +81,7 @@ const NAV = [
       { href: "/catalogo/analitos", label: "Analitos", icon: "⚗" },
       { href: "/catalogo/especificaciones", label: "Especificaciones", icon: "📐" },
       { href: "/catalogo/formulas", label: "Fórmulas de cálculo", icon: "𝑓" },
+      { href: "/catalogo/pasos", label: "Pasos por ensayo", icon: "🪜" },
     ],
   },
   {
@@ -88,6 +89,7 @@ const NAV = [
     items: [
       { href: "/reportes", label: "Reportes · Export CSV", icon: "📊" },
       { href: "/mensajeria", label: "Mensajería · Correo", icon: "📧" },
+      { href: "/documentos", label: "Buscador de Documentos", icon: "🗄" },
     ],
   },
   {

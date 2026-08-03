@@ -1,7 +1,70 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { apiGet, asArray, clp } from "./api";
+
+// Paso/campo de un método (definición editable · tabla paso_metodo).
+type PasoMetodo = {
+  id: string;
+  orden: number;
+  nombre: string;
+  tipoDato: string;
+  unidad?: string | null;
+  formato?: string | null;
+  instruccion?: string | null;
+  obligatorio: boolean;
+};
+
+/**
+ * Vista de sólo lectura de los PASOS/campos de un método dentro del wizard de
+ * O/T. No captura valores todavía (eso es la fase de captura): sólo muestra la
+ * definición sembrada desde ANALFIELDS y enlaza a la pantalla de gestión para
+ * editarla. Se carga bajo demanda al expandir el método.
+ */
+function PasosMetodo({ metodoId }: { metodoId: string }) {
+  const [pasos, setPasos] = useState<PasoMetodo[] | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let vivo = true;
+    apiGet(`/pasos-metodo?catMetodoId=${encodeURIComponent(metodoId)}&limit=100`)
+      .then((d) => { if (vivo) setPasos(asArray<PasoMetodo>(d)); })
+      .catch((e) => { if (vivo) setError(e.message); });
+    return () => { vivo = false; };
+  }, [metodoId]);
+
+  return (
+    <div style={{ padding: "8px 10px", background: "#fafbfc" }}>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 6 }}>
+        <strong style={{ flex: 1, fontSize: 12.5 }}>Pasos / campos del método</strong>
+        <a href="/catalogo/pasos" className="btn outline sm" target="_blank" rel="noopener noreferrer">Editar pasos ↗</a>
+      </div>
+      {error && <div className="alert warn" style={{ margin: 0 }}>{error}</div>}
+      {!pasos && !error && <div className="subtitle" style={{ margin: 0 }}>Cargando pasos…</div>}
+      {pasos && pasos.length === 0 && (
+        <div className="subtitle" style={{ margin: 0 }}>Este método no tiene pasos definidos todavía.</div>
+      )}
+      {pasos && pasos.length > 0 && (
+        <table className="data" style={{ fontSize: 12 }}>
+          <thead>
+            <tr><th className="num" style={{ width: 48 }}>#</th><th>Campo</th><th>Tipo</th><th>Unidad</th><th>Obl.</th></tr>
+          </thead>
+          <tbody>
+            {pasos.map((p) => (
+              <tr key={p.id}>
+                <td className="num">{p.orden}</td>
+                <td>{p.nombre}</td>
+                <td><span className="tag">{p.tipoDato}</span></td>
+                <td>{p.unidad || "—"}</td>
+                <td>{p.obligatorio ? "sí" : "no"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
 
 // ── Tipos de la cascada (shape devuelto por los endpoints cascada/*) ──────────
 type GranGrupo = { id: string; codigo: string; nombre: string };
@@ -62,6 +125,8 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
 
   // Selección de métodos del panel (metodoId marcados).
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  // Método expandido para ver sus pasos/campos (definición, sólo lectura).
+  const [expandido, setExpandido] = useState<string | null>(null);
 
   const [error, setError] = useState("");
   const [loadingPanel, setLoadingPanel] = useState(false);
@@ -104,7 +169,7 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
 
   // 6 · Panel de métodos al elegir Elemento.
   useEffect(() => {
-    setPanel([]); setChecked({});
+    setPanel([]); setChecked({}); setExpandido(null);
     if (!elemento) return;
     setLoadingPanel(true);
     apiGet(`/cascada/elementos/${encodeURIComponent(elemento.id)}/panel`)
@@ -287,18 +352,37 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
               </thead>
               <tbody>
                 {panel.map((m) => (
-                  <tr key={m.metodoId}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={!!checked[m.metodoId]}
-                        onChange={(e) => setChecked((c) => ({ ...c, [m.metodoId]: e.target.checked }))}
-                      />
-                    </td>
-                    <td><span className="codigo">{m.metodoCodigo}</span> {m.metodoNombre}</td>
-                    <td><span className="codigo">{m.ensayoCodigo}</span> {m.ensayoNombre}</td>
-                    <td className="num">{clp(m.precio)}</td>
-                  </tr>
+                  <Fragment key={m.metodoId}>
+                    <tr>
+                      <td>
+                        <input
+                          type="checkbox"
+                          checked={!!checked[m.metodoId]}
+                          onChange={(e) => setChecked((c) => ({ ...c, [m.metodoId]: e.target.checked }))}
+                        />
+                      </td>
+                      <td>
+                        <span className="codigo">{m.metodoCodigo}</span> {m.metodoNombre}
+                        <button
+                          type="button"
+                          className="btn outline sm"
+                          style={{ marginLeft: 8 }}
+                          onClick={() => setExpandido((x) => (x === m.metodoId ? null : m.metodoId))}
+                        >
+                          {expandido === m.metodoId ? "Ocultar pasos" : "Ver pasos"}
+                        </button>
+                      </td>
+                      <td><span className="codigo">{m.ensayoCodigo}</span> {m.ensayoNombre}</td>
+                      <td className="num">{clp(m.precio)}</td>
+                    </tr>
+                    {expandido === m.metodoId && (
+                      <tr>
+                        <td colSpan={4} style={{ padding: 0 }}>
+                          <PasosMetodo metodoId={m.metodoId} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
                 {loadingPanel && <tr><td colSpan={4} style={{ textAlign: "center", padding: 18, color: "var(--muted)" }}>Cargando panel…</td></tr>}
                 {!loadingPanel && panel.length === 0 && (

@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
+import IdleLogout from "@/components/IdleLogout";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -33,6 +34,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <Topbar />
       </header>
       <main className="mainarea">{children}</main>
+      <IdleLogout />
     </div>
   );
 }
