@@ -99,6 +99,9 @@ export default function OrdenesCompraPage() {
     if (!proveedorId) return setError("Seleccione un proveedor.");
     const validas = lineas.filter((l) => l.descripcion.trim() !== "");
     if (!validas.length) return setError("La OC debe tener al menos una línea con descripción.");
+    // Cada línea con descripción debe llevar cantidad ≥ 1 y precio unitario ≥ 0.
+    const malas = validas.filter((l) => !(num(l.cantidad) >= 1) || !(num(l.precioUnitario) >= 0));
+    if (malas.length) return setError("Cada línea debe tener cantidad (≥ 1) y precio unitario (≥ 0) válidos.");
 
     setGuardando(true);
     try {

@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { validarFormulario, propsInput } from "@/lib/validate";
+
+const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -11,6 +14,7 @@ export default function UsuariosPage() {
   const [unidades, setUnidades] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [show, setShow] = useState(false);
+  const [errores, setErrores] = useState<Record<string, string>>({});
   const [f, setF] = useState<any>({ username: "", nombreCompleto: "", email: "", password: "", grado: "", rolId: "", unidadId: "" });
 
   async function cargar() {
@@ -30,6 +34,18 @@ export default function UsuariosPage() {
   async function crear(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    const errs = validarFormulario(
+      [
+        { campo: "username", requerido: true },
+        { campo: "nombreCompleto", requerido: true },
+        { campo: "email", tipo: "email" },
+        { campo: "password", requerido: true },
+        { campo: "rolId", requerido: true },
+      ],
+      f,
+    );
+    setErrores(errs);
+    if (Object.keys(errs).length) return;
     try {
       const res = await fetch(`${API}/usuarios`, { method: "POST", headers: auth(), body: JSON.stringify(f) });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
@@ -55,16 +71,17 @@ export default function UsuariosPage() {
       {show && (
         <form onSubmit={crear} className="card">
           <div className="form-grid">
-            <div className="field"><label>Usuario <span className="req">*</span></label><input required value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} /></div>
-            <div className="field"><label>Nombre completo <span className="req">*</span></label><input required value={f.nombreCompleto} onChange={(e) => setF({ ...f, nombreCompleto: e.target.value })} /></div>
-            <div className="field"><label>Email</label><input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></div>
-            <div className="field"><label>Contraseña <span className="req">*</span></label><input type="password" required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></div>
+            <div className="field"><label>Usuario <span className="req">*</span></label><input required value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />{errores.username && <small style={errStyle}>{errores.username}</small>}</div>
+            <div className="field"><label>Nombre completo <span className="req">*</span></label><input required value={f.nombreCompleto} onChange={(e) => setF({ ...f, nombreCompleto: e.target.value })} />{errores.nombreCompleto && <small style={errStyle}>{errores.nombreCompleto}</small>}</div>
+            <div className="field"><label>Email</label><input {...propsInput("email")} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />{errores.email && <small style={errStyle}>{errores.email}</small>}</div>
+            <div className="field"><label>Contraseña <span className="req">*</span></label><input type="password" required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />{errores.password && <small style={errStyle}>{errores.password}</small>}</div>
             <div className="field"><label>Grado / Cargo</label><input value={f.grado} onChange={(e) => setF({ ...f, grado: e.target.value })} /></div>
-            <div className="field"><label>Rol</label>
-              <select value={f.rolId} onChange={(e) => setF({ ...f, rolId: e.target.value })}>
-                <option value="">— sin rol —</option>
+            <div className="field"><label>Rol <span className="req">*</span></label>
+              <select required value={f.rolId} onChange={(e) => setF({ ...f, rolId: e.target.value })}>
+                <option value="">— seleccione un rol —</option>
                 {roles.map((r) => <option key={r.id} value={r.id}>{r.codigo} · {r.nombre}</option>)}
               </select>
+              {errores.rolId && <small style={errStyle}>{errores.rolId}</small>}
             </div>
             <div className="field"><label>Laboratorio / Unidad (acota el rol)</label>
               <select value={f.unidadId} onChange={(e) => setF({ ...f, unidadId: e.target.value })}>

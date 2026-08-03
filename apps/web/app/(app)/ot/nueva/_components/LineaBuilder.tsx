@@ -192,10 +192,13 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
     setAnalista(""); setPrioridad("normal"); setTipoInspeccion(""); setCantidad(1); setNumMuestras(1); setNumPlanilla("");
   };
 
-  const puedeAgregar = !!elemento && metodosMarcados.length > 0;
+  const puedeAgregar = !!elemento && metodosMarcados.length > 0 && Number(numMuestras) >= 1;
 
   const agregar = () => {
     if (!elemento) return;
+    if (metodosMarcados.length === 0) { setError("Marca al menos un método del panel para agregar el elemento."); return; }
+    if (Number(numMuestras) < 1) { setError("El Nº de muestras debe ser al menos 1."); return; }
+    setError("");
     onAdd({
       elementoId: elemento.id,
       elementoCodigo: elemento.codigo,
@@ -330,11 +333,11 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
             </div>
             <div className="field">
               <label>Cantidad</label>
-              <input type="number" min={0} value={cantidad} onChange={(e) => setCantidad(+e.target.value)} />
+              <input type="number" inputMode="numeric" step={1} min={0} value={cantidad} onChange={(e) => setCantidad(+e.target.value)} />
             </div>
             <div className="field">
-              <label>Nº de Muestras</label>
-              <input type="number" min={0} value={numMuestras} onChange={(e) => setNumMuestras(+e.target.value)} />
+              <label>Nº de Muestras <span className="req">*</span></label>
+              <input type="number" inputMode="numeric" step={1} min={1} required value={numMuestras} onChange={(e) => setNumMuestras(+e.target.value)} />
             </div>
           </div>
 

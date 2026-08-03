@@ -15,6 +15,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { fecha } from "@/lib/format";
 import { errorMensaje } from "@/lib/apiError";
+import { esEmail, propsInput } from "@/lib/validate";
+
+const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -72,6 +75,7 @@ export default function MensajeriaPage() {
   const [envPlantilla, setEnvPlantilla] = useState("");
   const [envDest, setEnvDest] = useState("");
   const [envVeredicto, setEnvVeredicto] = useState("");
+  const [errDest, setErrDest] = useState("");
 
   async function cargar() {
     setLoading(true);
@@ -121,9 +125,22 @@ export default function MensajeriaPage() {
 
   async function enviar(e: React.FormEvent) {
     e.preventDefault();
+    setError("");
+    setErrDest("");
+    // El destinatario es opcional (vacío = email del cliente); si se indica, cada
+    // dirección separada por coma debe tener formato de email válido.
+    if (envDest.trim()) {
+      const invalidos = envDest
+        .split(",")
+        .map((d) => d.trim())
+        .filter((d) => d && !esEmail(d));
+      if (invalidos.length) {
+        setErrDest(`Email(s) no válido(s): ${invalidos.join(", ")}`);
+        return;
+      }
+    }
     setEnviando(true);
     setResultado(null);
-    setError("");
     try {
       const url =
         envTipo === "cotizacion"
@@ -221,10 +238,13 @@ export default function MensajeriaPage() {
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>Destinatarios (separados por coma)</label>
               <input
+                {...propsInput("email")}
+                type="text"
                 placeholder="Vacío = email del cliente registrado"
                 value={envDest}
-                onChange={(e) => setEnvDest(e.target.value)}
+                onChange={(e) => { setEnvDest(e.target.value); if (errDest) setErrDest(""); }}
               />
+              {errDest && <small style={errStyle}>{errDest}</small>}
             </div>
             {envTipo === "resultado" && (
               <div className="field" style={{ gridColumn: "1 / -1" }}>

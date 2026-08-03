@@ -18,6 +18,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { errorMensaje } from "@/lib/apiError";
+import { esNumero } from "@/lib/validate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -92,6 +93,7 @@ export default function QcPage() {
   const [fCriterio, setFCriterio] = useState("");
   const [fObs, setFObs] = useState("");
   const [saving, setSaving] = useState(false);
+  const [errs, setErrs] = useState<Record<string, string>>({});
 
   useEffect(() => {
     (async () => {
@@ -141,8 +143,19 @@ export default function QcPage() {
   }
 
   async function registrar() {
-    if (!fMetodo) {
-      setError("Elija el método al que pertenece el control.");
+    // Validación de campos antes de enviar (el servidor evalúa; aquí garantizamos números).
+    const v: Record<string, string> = {};
+    if (!fMetodo) v.metodo = "Elija el método al que pertenece el control.";
+    if (fObtenido.trim() === "" || !esNumero(fObtenido)) {
+      v.obtenido = fTipo === "curva" ? "Indique el R² obtenido (número)." : "Indique el valor obtenido (número).";
+    }
+    if ((fTipo === "estandar" || fTipo === "duplicado") && (fEsperado.trim() === "" || !esNumero(fEsperado))) {
+      v.esperado = "Indique el valor esperado (número).";
+    }
+    if (fEsperado.trim() !== "" && !esNumero(fEsperado)) v.esperado = "El valor esperado debe ser numérico.";
+    setErrs(v);
+    if (Object.keys(v).length) {
+      setError("");
       return;
     }
     setError("");
@@ -297,6 +310,7 @@ export default function QcPage() {
                   </option>
                 ))}
               </select>
+              {errs.metodo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.metodo}</small>}
             </div>
             <div className="field">
               <label>Tipo de control</label>
@@ -311,20 +325,24 @@ export default function QcPage() {
             <div className="field">
               <label>Valor esperado</label>
               <input
+                inputMode="decimal"
                 value={fEsperado}
                 onChange={(e) => setFEsperado(e.target.value)}
                 placeholder={fTipo === "curva" ? "(no aplica)" : "esperado"}
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               />
+              {errs.esperado && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.esperado}</small>}
             </div>
             <div className="field">
               <label>{fTipo === "curva" ? "R² obtenido" : "Valor obtenido"}</label>
               <input
+                inputMode="decimal"
                 value={fObtenido}
                 onChange={(e) => setFObtenido(e.target.value)}
                 placeholder={fTipo === "curva" ? "p. ej. 0.998" : "obtenido"}
                 style={{ fontFamily: "'JetBrains Mono', monospace" }}
               />
+              {errs.obtenido && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.obtenido}</small>}
             </div>
             <div className="field">
               <label>Criterio</label>

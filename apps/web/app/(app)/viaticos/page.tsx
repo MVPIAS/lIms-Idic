@@ -29,9 +29,9 @@ export default function ViaticosPage() {
       campos={[
         { campo: "funcionario", label: "Funcionario", requerido: true },
         { campo: "destino", label: "Destino" },
-        { campo: "dias", label: "Días", tipo: "number" },
+        { campo: "dias", label: "Días", tipo: "entero" },
         { campo: "tipo", label: "Tipo" },
-        { campo: "monto", label: "Monto", tipo: "number", requerido: true },
+        { campo: "monto", label: "Monto", tipo: "moneda", requerido: true },
         { campo: "otId", label: "OT asociada", tipo: "ref", refRecurso: "ot", refLabel: etiquetaOt },
       ]}
     />

@@ -19,7 +19,7 @@ export default function ListasPrecioPage() {
         { campo: "codigo", label: "Código", requerido: true },
         { campo: "nombre", label: "Nombre", requerido: true },
         { campo: "moneda", label: "Moneda", tipo: "select", opciones: ["CLP", "USD", "UF"] },
-        { campo: "vigenteDesde", label: "Vigente desde (AAAA-MM-DD)" },
+        { campo: "vigenteDesde", label: "Vigente desde", tipo: "date" },
       ]}
     />
   );

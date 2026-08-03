@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
+import { validarFormulario } from "@/lib/validate";
+
+const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -44,6 +47,7 @@ export default function EvidenciaFichaPage() {
   const [loading, setLoading] = useState(true);
   const [showMov, setShowMov] = useState(false);
   const [m, setM] = useState<any>({ ...MOV_VACIO });
+  const [erroresMov, setErroresMov] = useState<Record<string, string>>({});
 
   async function cargar() {
     setLoading(true);
@@ -64,6 +68,15 @@ export default function EvidenciaFichaPage() {
     ev.preventDefault();
     setError("");
     setAviso("");
+    const errs = validarFormulario(
+      [
+        { campo: "evento", requerido: true },
+        { campo: "motivo", requerido: true },
+      ],
+      m,
+    );
+    setErroresMov(errs);
+    if (Object.keys(errs).length) return;
     try {
       const res = await fetch(`${API}/custodia-evidencia`, {
         method: "POST",
@@ -213,6 +226,7 @@ export default function EvidenciaFichaPage() {
               <select required value={m.evento} onChange={(ev) => setM({ ...m, evento: ev.target.value })}>
                 {EVENTOS.map((x) => <option key={x.key} value={x.key}>{x.label}</option>)}
               </select>
+              {erroresMov.evento && <small style={errStyle}>{erroresMov.evento}</small>}
             </div>
             <div className="field">
               <label>Ubicación destino</label>
@@ -235,6 +249,7 @@ export default function EvidenciaFichaPage() {
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>Motivo <span className="req">*</span></label>
               <textarea required rows={2} value={m.motivo} onChange={(ev) => setM({ ...m, motivo: ev.target.value })} />
+              {erroresMov.motivo && <small style={errStyle}>{erroresMov.motivo}</small>}
             </div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>Observaciones</label>

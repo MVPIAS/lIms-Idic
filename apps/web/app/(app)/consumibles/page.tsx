@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { validarFormulario, esMoneda, esNumero } from "@/lib/validate";
 
 // Contrato §4.4.4 / §4.4.5 · CONSUMIBLES con lotes/stock/caducidad + KARDEX.
 // Un consumible se recibe en LOTES (stock, nº de lote, caducidad); cada ensayo
@@ -61,6 +62,9 @@ export default function ConsumiblesPage() {
   const [showCons, setShowCons] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [f, setF] = useState<any>({ ...CONS_VACIO });
+  const [errs, setErrs] = useState<Record<string, string>>({});
+  const [errsLote, setErrsLote] = useState<Record<string, string>>({});
+  const [errsMov, setErrsMov] = useState<Record<string, string>>({});
 
   // Detalle: consumible seleccionado + sus lotes.
   const [detalle, setDetalle] = useState<any | null>(null);
@@ -116,10 +120,12 @@ export default function ConsumiblesPage() {
   function abrirNuevoCons() {
     setEditId(null);
     setF({ ...CONS_VACIO });
+    setErrs({});
     setShowCons(true);
   }
   function abrirEditarCons(r: any) {
     setEditId(r.id);
+    setErrs({});
     setF({
       codigo: r.codigo ?? "",
       nombre: r.nombre ?? "",
@@ -132,6 +138,16 @@ export default function ConsumiblesPage() {
 
   async function guardarCons(e: React.FormEvent) {
     e.preventDefault();
+    const v = validarFormulario(
+      [
+        { campo: "codigo", tipo: "text", requerido: true },
+        { campo: "nombre", tipo: "text", requerido: true },
+      ],
+      f,
+    );
+    if (f.stockMinimo !== "" && !esMoneda(String(f.stockMinimo))) v.stockMinimo = "El stock mínimo debe ser un número ≥ 0.";
+    setErrs(v);
+    if (Object.keys(v).length) return;
     try {
       const payload = { ...f, stockMinimo: f.stockMinimo === "" ? null : Number(f.stockMinimo) };
       const url = editId ? `${API}/consumibles/${editId}` : `${API}/consumibles`;
@@ -174,6 +190,12 @@ export default function ConsumiblesPage() {
   async function guardarLote(e: React.FormEvent) {
     e.preventDefault();
     if (!detalle) return;
+    const v: Record<string, string> = {};
+    if (!lf.numeroLote.trim()) v.numeroLote = "El nº de lote es obligatorio.";
+    if (String(lf.cantidadInicial).trim() === "" || !esMoneda(String(lf.cantidadInicial))) v.cantidadInicial = "Cantidad inicial obligatoria (número ≥ 0).";
+    if (lf.fechaRecepcion && lf.fechaVencimiento && lf.fechaVencimiento < lf.fechaRecepcion) v.fechaVencimiento = "La caducidad debe ser posterior a la recepción.";
+    setErrsLote(v);
+    if (Object.keys(v).length) return;
     try {
       const payload = {
         consumibleId: detalle.id,
@@ -202,12 +224,20 @@ export default function ConsumiblesPage() {
 
   function abrirMov(loteId = "") {
     setMf({ ...MOV_VACIO, loteId });
+    setErrsMov({});
     setShowMov(true);
   }
 
   async function guardarMov(e: React.FormEvent) {
     e.preventDefault();
     if (!detalle) return;
+    const v: Record<string, string> = {};
+    if (String(mf.cantidad).trim() === "" || !esNumero(String(mf.cantidad)) || Number(mf.cantidad) === 0) {
+      v.cantidad = "Indica una cantidad numérica distinta de 0.";
+    }
+    if (mf.tipo !== "consumo" && !mf.loteId) v.loteId = "Selecciona el lote para entradas y ajustes.";
+    setErrsMov(v);
+    if (Object.keys(v).length) return;
     try {
       const payload: any = {
         tipo: mf.tipo,
@@ -296,10 +326,12 @@ export default function ConsumiblesPage() {
             <div className="field">
               <label>Código <span className="req">*</span></label>
               <input required placeholder="RC-METOH-01" value={f.codigo} onChange={(e) => setF({ ...f, codigo: e.target.value })} />
+              {errs.codigo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.codigo}</small>}
             </div>
             <div className="field" style={{ gridColumn: "span 2" }}>
               <label>Nombre <span className="req">*</span></label>
               <input required value={f.nombre} onChange={(e) => setF({ ...f, nombre: e.target.value })} />
+              {errs.nombre && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.nombre}</small>}
             </div>
             <div className="field">
               <label>Tipo</label>
@@ -311,7 +343,8 @@ export default function ConsumiblesPage() {
             </div>
             <div className="field">
               <label>Stock mínimo</label>
-              <input type="number" step="any" value={f.stockMinimo} onChange={(e) => setF({ ...f, stockMinimo: e.target.value })} />
+              <input type="number" inputMode="decimal" step="any" min="0" value={f.stockMinimo} onChange={(e) => setF({ ...f, stockMinimo: e.target.value })} />
+              {errs.stockMinimo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.stockMinimo}</small>}
             </div>
           </div>
           <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
@@ -388,10 +421,12 @@ export default function ConsumiblesPage() {
                 <div className="field">
                   <label>N° de lote <span className="req">*</span></label>
                   <input required value={lf.numeroLote} onChange={(e) => setLf({ ...lf, numeroLote: e.target.value })} />
+                  {errsLote.numeroLote && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsLote.numeroLote}</small>}
                 </div>
                 <div className="field">
                   <label>Cantidad inicial (stock) <span className="req">*</span></label>
-                  <input required type="number" step="any" min="0" value={lf.cantidadInicial} onChange={(e) => setLf({ ...lf, cantidadInicial: e.target.value })} />
+                  <input required type="number" inputMode="decimal" step="any" min="0" value={lf.cantidadInicial} onChange={(e) => setLf({ ...lf, cantidadInicial: e.target.value })} />
+                  {errsLote.cantidadInicial && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsLote.cantidadInicial}</small>}
                 </div>
                 <div className="field">
                   <label>Fecha recepción</label>
@@ -400,6 +435,7 @@ export default function ConsumiblesPage() {
                 <div className="field">
                   <label>Caducidad</label>
                   <input type="date" value={lf.fechaVencimiento} onChange={(e) => setLf({ ...lf, fechaVencimiento: e.target.value })} />
+                  {errsLote.fechaVencimiento && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsLote.fechaVencimiento}</small>}
                 </div>
               </div>
               <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
@@ -462,10 +498,12 @@ export default function ConsumiblesPage() {
                     </option>
                   ))}
                 </select>
+                {errsMov.loteId && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsMov.loteId}</small>}
               </div>
               <div className="field">
                 <label>Cantidad {mf.tipo === "ajuste" && <span style={{ color: "var(--muted)" }}>(+ suma / − resta)</span>}</label>
-                <input required type="number" step="any" value={mf.cantidad} onChange={(e) => setMf({ ...mf, cantidad: e.target.value })} />
+                <input required type="number" inputMode="decimal" step="any" value={mf.cantidad} onChange={(e) => setMf({ ...mf, cantidad: e.target.value })} />
+                {errsMov.cantidad && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsMov.cantidad}</small>}
               </div>
               <div className="field" style={{ gridColumn: "1 / -1" }}>
                 <label>Motivo</label>

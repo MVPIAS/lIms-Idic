@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fechaHora, num, pct } from "@/lib/format";
+import { esNumero } from "@/lib/validate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -62,6 +63,7 @@ export default function CustodiaPage() {
   const [loading, setLoading] = useState(true);
   const [show, setShow] = useState(false);
   const [f, setF] = useState<any>({ ...FORM_VACIO });
+  const [errs, setErrs] = useState<Record<string, string>>({});
 
   const safe = async (url: string) => {
     try {
@@ -120,6 +122,7 @@ export default function CustodiaPage() {
 
   function abrirNuevo() {
     setF({ ...FORM_VACIO, muestraId: sel || "" });
+    setErrs({});
     setShow(true);
     setError("");
     setOk("");
@@ -147,6 +150,21 @@ export default function CustodiaPage() {
     e.preventDefault();
     setError("");
     setOk("");
+    // Validación: muestra y motivo obligatorios; en transferencias exige receptor;
+    // temperatura/humedad numéricas y humedad 0–100.
+    const v: Record<string, string> = {};
+    if (!f.muestraId) v.muestraId = "Selecciona la muestra.";
+    if (!f.motivo.trim()) v.motivo = "Indica el motivo del traspaso.";
+    if (f.evento === "transferencia" && usuarios.length > 0 && !f.aUsuarioId) {
+      v.aUsuarioId = "Una transferencia requiere el responsable receptor.";
+    }
+    if (f.tempCelsius !== "" && !esNumero(String(f.tempCelsius))) v.tempCelsius = "Temperatura no numérica.";
+    if (f.humedadPct !== "") {
+      if (!esNumero(String(f.humedadPct))) v.humedadPct = "Humedad no numérica.";
+      else if (Number(f.humedadPct) < 0 || Number(f.humedadPct) > 100) v.humedadPct = "La humedad debe estar entre 0 y 100 %.";
+    }
+    setErrs(v);
+    if (Object.keys(v).length) return;
     const payload = {
       muestraId: f.muestraId,
       evento: f.evento,
@@ -253,6 +271,7 @@ export default function CustodiaPage() {
                   </option>
                 ))}
               </select>
+              {errs.muestraId && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.muestraId}</small>}
             </div>
             <div className="field">
               <label>
@@ -295,6 +314,7 @@ export default function CustodiaPage() {
                   </option>
                 ))}
               </select>
+              {errs.aUsuarioId && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.aUsuarioId}</small>}
             </div>
             <div className="field">
               <label>Fecha y hora</label>
@@ -320,21 +340,25 @@ export default function CustodiaPage() {
               <label>Temperatura (°C)</label>
               <input
                 type="number"
+                inputMode="decimal"
                 step="0.1"
                 value={f.tempCelsius}
                 onChange={(e) => setF({ ...f, tempCelsius: e.target.value })}
               />
+              {errs.tempCelsius && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.tempCelsius}</small>}
             </div>
             <div className="field">
               <label>Humedad (%)</label>
               <input
                 type="number"
+                inputMode="decimal"
                 step="0.1"
                 min={0}
                 max={100}
                 value={f.humedadPct}
                 onChange={(e) => setF({ ...f, humedadPct: e.target.value })}
               />
+              {errs.humedadPct && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.humedadPct}</small>}
             </div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>
@@ -346,6 +370,7 @@ export default function CustodiaPage() {
                 value={f.motivo}
                 onChange={(e) => setF({ ...f, motivo: e.target.value })}
               />
+              {errs.motivo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.motivo}</small>}
             </div>
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>Observaciones</label>

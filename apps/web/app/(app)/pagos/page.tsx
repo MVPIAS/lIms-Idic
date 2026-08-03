@@ -23,7 +23,7 @@ export default function PagosPage() {
       ]}
       campos={[
         { campo: "facturaId", label: "Factura", tipo: "ref", refRecurso: "facturas", requerido: true },
-        { campo: "monto", label: "Monto", tipo: "number", requerido: true },
+        { campo: "monto", label: "Monto", tipo: "moneda", requerido: true },
         { campo: "medio", label: "Medio de pago" },
         { campo: "referencia", label: "Referencia" },
       ]}

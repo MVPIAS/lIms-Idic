@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { monto as clp, pct } from "@/lib/format";
+import { validarFormulario, esMoneda } from "@/lib/validate";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -40,6 +41,7 @@ export default function CrmPage() {
   const [show, setShow] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [f, setF] = useState<any>({ ...FORM_VACIO });
+  const [errs, setErrs] = useState<Record<string, string>>({});
 
   async function cargar() {
     setLoading(true);
@@ -80,12 +82,14 @@ export default function CrmPage() {
   function abrirNueva() {
     setEditId(null);
     setF({ ...FORM_VACIO });
+    setErrs({});
     setShow(true);
     setError("");
   }
 
   function abrirEditar(r: any) {
     setEditId(r.id);
+    setErrs({});
     setF({
       titulo: r.titulo ?? "",
       clienteId: r.cliente_id ?? "",
@@ -104,6 +108,15 @@ export default function CrmPage() {
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    // Validación: título obligatorio; monto un valor ≥ 0; probabilidad 0–100.
+    const v = validarFormulario([{ campo: "titulo", tipo: "text", requerido: true }], f);
+    if (f.montoEstimado !== "" && !esMoneda(String(f.montoEstimado))) v.montoEstimado = "El monto debe ser un valor ≥ 0.";
+    if (f.probabilidad !== "") {
+      const p = Number(f.probabilidad);
+      if (Number.isNaN(p) || p < 0 || p > 100) v.probabilidad = "La probabilidad debe estar entre 0 y 100 %.";
+    }
+    setErrs(v);
+    if (Object.keys(v).length) return;
     const payload = {
       titulo: f.titulo,
       clienteId: f.clienteId || null,
@@ -168,6 +181,7 @@ export default function CrmPage() {
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>Título <span className="req">*</span></label>
               <input required value={f.titulo} onChange={(e) => setF({ ...f, titulo: e.target.value })} />
+              {errs.titulo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.titulo}</small>}
             </div>
             <div className="field">
               <label>Cliente</label>
@@ -179,14 +193,14 @@ export default function CrmPage() {
               </select>
             </div>
             <div className="field"><label>Contacto</label><input value={f.contacto} onChange={(e) => setF({ ...f, contacto: e.target.value })} /></div>
-            <div className="field"><label>Monto estimado (CLP)</label><input type="number" min={0} value={f.montoEstimado} onChange={(e) => setF({ ...f, montoEstimado: e.target.value })} /></div>
+            <div className="field"><label>Monto estimado (CLP)</label><input type="number" inputMode="decimal" step="0.01" min={0} value={f.montoEstimado} onChange={(e) => setF({ ...f, montoEstimado: e.target.value })} />{errs.montoEstimado && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.montoEstimado}</small>}</div>
             <div className="field">
               <label>Etapa</label>
               <select value={f.etapa} onChange={(e) => setF({ ...f, etapa: e.target.value })}>
                 {ETAPAS.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
               </select>
             </div>
-            <div className="field"><label>Probabilidad (%)</label><input type="number" min={0} max={100} value={f.probabilidad} onChange={(e) => setF({ ...f, probabilidad: e.target.value })} /></div>
+            <div className="field"><label>Probabilidad (%)</label><input type="number" inputMode="numeric" step={1} min={0} max={100} value={f.probabilidad} onChange={(e) => setF({ ...f, probabilidad: e.target.value })} />{errs.probabilidad && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.probabilidad}</small>}</div>
             <div className="field"><label>Origen</label><input placeholder="referido, licitación, web…" value={f.origen} onChange={(e) => setF({ ...f, origen: e.target.value })} /></div>
             <div className="field"><label>Fecha cierre estimada</label><input type="date" value={f.fechaCierreEstimada} onChange={(e) => setF({ ...f, fechaCierreEstimada: e.target.value })} /></div>
             <div className="field" style={{ gridColumn: "1 / -1" }}><label>Notas</label><textarea rows={2} value={f.notas} onChange={(e) => setF({ ...f, notas: e.target.value })} /></div>

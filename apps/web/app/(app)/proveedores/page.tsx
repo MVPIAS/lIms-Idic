@@ -16,7 +16,7 @@ export default function ProveedoresPage() {
         { campo: "estado", titulo: "Estado", render: (v) => <span className={`pill ${v === "habilitado" ? "green" : v === "inhabilitado" ? "red" : "amber"}`}>{v ?? "—"}</span> },
       ]}
       campos={[
-        { campo: "rut", label: "RUT", requerido: true },
+        { campo: "rut", label: "RUT", tipo: "rut", requerido: true },
         { campo: "razonSocial", label: "Razón social", requerido: true },
         { campo: "rubro", label: "Rubro" },
         { campo: "contacto", label: "Contacto" },

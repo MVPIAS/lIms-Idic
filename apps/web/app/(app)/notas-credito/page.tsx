@@ -24,7 +24,7 @@ export default function NotasCreditoPage() {
       campos={[
         { campo: "facturaId", label: "Factura", tipo: "ref", refRecurso: "facturas", requerido: true },
         { campo: "numero", label: "Número", requerido: true },
-        { campo: "monto", label: "Monto", tipo: "number", requerido: true },
+        { campo: "monto", label: "Monto", tipo: "moneda", requerido: true },
         { campo: "motivo", label: "Motivo" },
       ]}
     />
