@@ -1401,3 +1401,68 @@ model ParametroSistema {
   @@index([tenantId, categoria, orden])
   @@map("parametro_sistema")
 }
+
+// ============================================================================
+// CONSUMIBLES · inventario por lotes + KARDEX (contrato §4.4.4 / §4.4.5)
+// Alineado por packages/db/align_consumibles.sql. El acceso en tiempo de
+// ejecución es vía SQL crudo (apps/api/src/consumibles), estos modelos
+// documentan la forma de las tablas y las incluyen en `prisma generate`.
+// ============================================================================
+
+model Consumible {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  codigo       String   @db.VarChar(40)
+  nombre       String   @db.VarChar(200)
+  tipo         String?  @db.VarChar(40)
+  unidadMedida String?  @map("unidad_medida") @db.VarChar(20)
+  proveedorId  String?  @map("proveedor_id") @db.Uuid
+  stockMinimo  Decimal? @map("stock_minimo") @db.Decimal
+  activo       Boolean? @default(true)
+
+  lotes LoteConsumible[]
+
+  @@unique([tenantId, codigo])
+  @@map("consumible")
+}
+
+model LoteConsumible {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String?   @map("tenant_id") @db.Uuid
+  consumibleId     String    @map("consumible_id") @db.Uuid
+  numeroLote       String    @map("numero_lote") @db.VarChar(80)
+  fechaRecepcion   DateTime? @map("fecha_recepcion") @db.Date
+  fechaVencimiento DateTime? @map("fecha_vencimiento") @db.Date
+  cantidadInicial  Decimal?  @map("cantidad_inicial") @db.Decimal
+  cantidadActual   Decimal?  @map("cantidad_actual") @db.Decimal
+  ubicacionId      String?   @map("ubicacion_id") @db.Uuid
+  estado           String?   @default("disponible") @db.VarChar(30)
+
+  consumible   Consumible             @relation(fields: [consumibleId], references: [id])
+  movimientos  MovimientoConsumible[]
+
+  @@unique([consumibleId, numeroLote])
+  @@index([tenantId])
+  @@index([consumibleId])
+  @@map("lote_consumible")
+}
+
+model MovimientoConsumible {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  loteId      String   @map("lote_id") @db.Uuid
+  tipo        String   @db.VarChar(20) // entrada | consumo | ajuste
+  cantidad    Decimal  @db.Decimal
+  muestraId   String?  @map("muestra_id") @db.Uuid
+  catMetodoId String?  @map("cat_metodo_id") @db.Uuid
+  motivo      String?
+  createdBy   String?  @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  lote LoteConsumible @relation(fields: [loteId], references: [id])
+
+  @@index([tenantId])
+  @@index([loteId, createdAt])
+  @@index([muestraId])
+  @@map("movimiento_consumible")
+}

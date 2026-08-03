@@ -39,6 +39,7 @@ const NAV = [
       { href: "/captura-ot", label: "Captura por OT", icon: "📈" },
       { href: "/qc", label: "Control de Calidad", icon: "✔" },
       { href: "/spc", label: "Control Estadístico (SPC)", icon: "📉" },
+      { href: "/consumibles", label: "Consumibles · Kardex", icon: "🧴" },
       { href: "/metodos", label: "Métodos", icon: "🔬" },
       { href: "/analitos", label: "Analitos", icon: "⚗" },
       { href: "/limites", label: "Límites", icon: "📐" },
@@ -79,6 +80,14 @@ const NAV = [
       { href: "/catalogo/metodos", label: "Métodos", icon: "🔬" },
       { href: "/catalogo/analitos", label: "Analitos", icon: "⚗" },
       { href: "/catalogo/especificaciones", label: "Especificaciones", icon: "📐" },
+      { href: "/catalogo/formulas", label: "Fórmulas de cálculo", icon: "𝑓" },
+    ],
+  },
+  {
+    title: "Reportes y Comunicación",
+    items: [
+      { href: "/reportes", label: "Reportes · Export CSV", icon: "📊" },
+      { href: "/mensajeria", label: "Mensajería · Correo", icon: "📧" },
     ],
   },
   {
