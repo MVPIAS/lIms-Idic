@@ -156,13 +156,13 @@ export default function CotizacionesPage() {
                       {c.estado === "borrador" && (
                         <button className="btn sm" onClick={() => accion(c.id, "enviar")}>Enviar</button>
                       )}
-                      {(c.estado === "borrador" || c.estado === "enviada") && (
-                        <>
-                          <button className="btn primary sm" onClick={() => accion(c.id, "aceptar")}>Aceptar → OT</button>
-                          <button className="btn sm" onClick={() => accion(c.id, "rechazar")}>Rechazar</button>
-                        </>
+                      {c.estado === "enviada" && (
+                        <button className="btn primary sm" onClick={() => accion(c.id, "aceptar")}>Aceptar → OT</button>
                       )}
-                      {["aceptada", "rechazada", "anulada"].includes(c.estado) && (
+                      {(c.estado === "borrador" || c.estado === "enviada") && (
+                        <button className="btn sm" onClick={() => accion(c.id, "rechazar")}>Rechazar</button>
+                      )}
+                      {["aceptada", "rechazada", "anulada", "expirada", "vencida"].includes(c.estado) && (
                         <span style={{ color: "var(--muted)" }}>—</span>
                       )}
                     </div>
