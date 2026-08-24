@@ -64,6 +64,14 @@ const NAV: Sect[] = [
     ],
   },
   {
+    title: "Metrología · LMT",
+    items: [
+      { href: "/metrologia", label: "Calibraciones", icon: "⚖", perm: "metrologia.ver" },
+      { href: "/metrologia/nueva", label: "Nueva calibración", icon: "＋", perm: "metrologia.crear" },
+      { href: "/metrologia/config", label: "Configuración LMT", icon: "🎛", perm: "metrologia.config" },
+    ],
+  },
+  {
     title: "SAEC · Armas y Evidencias",
     items: [
       { href: "/saec", label: "Evidencias", icon: "🧷", perm: "evidencia.ver" },
