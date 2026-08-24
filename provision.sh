@@ -90,7 +90,8 @@ for f in \
   packages/db/seed_pasos_metodo.sql \
   packages/db/seed_informes_min20.sql \
   packages/db/seed_maestros_idic.sql \
-  packages/db/align_rbac_tecnico.sql; do
+  packages/db/align_rbac_tecnico.sql \
+  packages/db/align_metrologia.sql; do
   if [ -f "$f" ]; then
     echo "   aplicando $f"
     docker compose -f docker-compose.prod.yml exec -T postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" < "$f" || echo "   (aviso: $f ya aplicado o con avisos)"
