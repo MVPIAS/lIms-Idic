@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clp, apiPost, unwrap, ApiError } from "./_components/api";
+import { clp, apiGet, apiPost, unwrap, ApiError } from "./_components/api";
 import ClienteSelector, { Cliente } from "./_components/ClienteSelector";
 import LineaBuilder, { LineaOT } from "./_components/LineaBuilder";
 
@@ -16,6 +16,30 @@ export default function NuevaOtPage() {
   const [fechaIngreso, setFechaIngreso] = useState(hoy());
   const [prioridad, setPrioridad] = useState("normal");
   const [observaciones, setObservaciones] = useState("");
+
+  // Registro Definitivo: continuar una OT ya creada por Comercial (estado
+  // recepcionada) en vez de crear una nueva — como el flujo real del LIMS.
+  const [modo, setModo] = useState<"nueva" | "existente">("nueva");
+  const [otsPendientes, setOtsPendientes] = useState<any[]>([]);
+  const [otExistenteId, setOtExistenteId] = useState("");
+
+  useEffect(() => {
+    apiGet("/ot").then((d) => {
+      const arr = Array.isArray(d) ? d : (d as any)?.data ?? [];
+      setOtsPendientes(arr.filter((o: any) => o.estado === "recepcionada"));
+    }).catch(() => {});
+  }, []);
+
+  function elegirOt(id: string) {
+    setOtExistenteId(id);
+    const ot = otsPendientes.find((o) => o.id === id);
+    if (ot) {
+      setCliente({ id: ot.clienteId ?? ot.cliente?.id, razonSocial: ot.cliente?.razonSocial ?? ot.cliente?.nombre ?? "" } as Cliente);
+      if (ot.prioridad) setPrioridad(ot.prioridad);
+    } else {
+      setCliente(null);
+    }
+  }
 
   // Líneas / elementos agregados.
   const [lineas, setLineas] = useState<LineaOT[]>([]);
@@ -34,23 +58,33 @@ export default function NuevaOtPage() {
   async function registrar() {
     setOkMsg(""); setErrMsg(""); setErrIssues([]);
     // a. Validaciones locales.
+    if (modo === "existente" && !otExistenteId) { setErrMsg("Selecciona la OT comercial a completar."); return; }
     if (!cliente?.id) { setErrMsg("Selecciona un cliente real de la lista."); return; }
     if (!fechaIngreso || Number.isNaN(new Date(fechaIngreso).getTime())) { setErrMsg("Indica una fecha de ingreso válida."); return; }
     if (lineas.length === 0) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
 
     setEnviando(true);
     try {
-      // b. Crear la OT. La respuesta puede venir plana {id,codigo} o envuelta {data:{...}}.
-      const otResp = unwrap<{ id: string; codigo?: string }>(
-        await apiPost("/ot", {
-          clienteId: cliente.id,
-          prioridad,
-          fechaIngreso: new Date(fechaIngreso).toISOString(),
-          notas: observaciones || undefined,
-        }),
-      );
-      const otId = otResp?.id;
-      const otCodigo = otResp?.codigo || otId?.slice(0, 8) || "OT";
+      // b. La OT: o se REUTILIZA la comercial existente (Registro Definitivo),
+      //    o se crea una nueva. La respuesta puede venir plana o envuelta {data}.
+      let otId: string | undefined;
+      let otCodigo: string;
+      if (modo === "existente" && otExistenteId) {
+        const ot = otsPendientes.find((o) => o.id === otExistenteId);
+        otId = otExistenteId;
+        otCodigo = ot?.codigo || otId.slice(0, 8);
+      } else {
+        const otResp = unwrap<{ id: string; codigo?: string }>(
+          await apiPost("/ot", {
+            clienteId: cliente.id,
+            prioridad,
+            fechaIngreso: new Date(fechaIngreso).toISOString(),
+            notas: observaciones || undefined,
+          }),
+        );
+        otId = otResp?.id;
+        otCodigo = otResp?.codigo || otId?.slice(0, 8) || "OT";
+      }
       if (!otId) throw new ApiError("La API de OT no devolvió un id.", 500);
 
       // c. Una muestra por cada elemento/línea, y por cada muestra materializamos
@@ -122,8 +156,35 @@ export default function NuevaOtPage() {
       {/* Cabecera de OT */}
       <div className="card">
         <h2>Cabecera de la Orden de Trabajo</h2>
+        <div className="field" style={{ marginBottom: 10 }}>
+          <label>Modo de registro</label>
+          <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+              <input type="radio" name="modo" style={{ width: "auto" }} checked={modo === "nueva"} onChange={() => { setModo("nueva"); setOtExistenteId(""); setCliente(null); }} />
+              Nueva OT (alta directa)
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+              <input type="radio" name="modo" style={{ width: "auto" }} checked={modo === "existente"} onChange={() => setModo("existente")} />
+              Registro Definitivo sobre una OT comercial existente
+            </label>
+          </div>
+        </div>
         <div className="form-grid cols-4">
-          <ClienteSelector value={cliente} onChange={setCliente} />
+          {modo === "existente" ? (
+            <div className="field span-2">
+              <label>OT recepcionada (de Comercial) <span className="req">*</span></label>
+              <select value={otExistenteId} onChange={(e) => elegirOt(e.target.value)}>
+                <option value="">— Seleccione una OT —</option>
+                {otsPendientes.map((o) => (
+                  <option key={o.id} value={o.id}>{o.codigo} · {o.cliente?.razonSocial ?? o.cliente?.nombre ?? ""}</option>
+                ))}
+              </select>
+              {cliente?.id && <p className="hint" style={{ marginTop: 4 }}>Cliente precargado: <b>{cliente.razonSocial}</b></p>}
+              {otsPendientes.length === 0 && <p className="hint" style={{ marginTop: 4 }}>No hay OT en estado «recepcionada». Acepte una cotización o use el alta directa.</p>}
+            </div>
+          ) : (
+            <ClienteSelector value={cliente} onChange={setCliente} />
+          )}
           <div className="field">
             <label>Fecha de ingreso <span className="req">*</span></label>
             <input type="date" required value={fechaIngreso} onChange={(e) => setFechaIngreso(e.target.value)} />
