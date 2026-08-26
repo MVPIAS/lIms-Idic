@@ -2,8 +2,9 @@ import { Module } from "@nestjs/common";
 import { APP_GUARD, APP_INTERCEPTOR } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { LoggerModule } from "nestjs-pino";
-import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
+import { ThrottlerModule } from "@nestjs/throttler";
 
+import { UserThrottlerGuard } from "./common/user-throttler.guard";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { PermisoGuard } from "./auth/permiso.guard";
 import { AuditInterceptor } from "./common/audit.interceptor";
@@ -67,10 +68,13 @@ function prettyTransport() {
         transport: prettyTransport(),
       },
     }),
-    // Rate limiting global. El límite "default" aplica a toda la API; el
-    // limitador "login" (más estricto) se referencia con @Throttle en el login.
+    // Rate limiting global. La clave de cubeta es el USUARIO (sub del JWT), no la
+    // IP —ver UserThrottlerGuard—, por lo que el límite "default" es por analista.
+    // Una pantalla del LIMS puede disparar varias GET en cascada (sidebar, panel,
+    // listados), así que 300/min por usuario da margen holgado sin abrir la puerta
+    // a abuso. El limitador "login" (más estricto, por IP) se aplica con @Throttle.
     ThrottlerModule.forRoot([
-      { name: "default", ttl: 60_000, limit: 100 },
+      { name: "default", ttl: 60_000, limit: 300 },
       { name: "login", ttl: 60_000, limit: 5 },
     ]),
     PrismaModule,
@@ -113,7 +117,7 @@ function prettyTransport() {
     //   3. PermisoGuard   · RBAC; NECESITA req.user, por eso va después del JWT.
     // Invertir 2 y 3 haría que PermisoGuard viese req.user vacío y respondiese
     // 403 a todo el mundo, incluido el SUPERADMIN.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: UserThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermisoGuard },
 
