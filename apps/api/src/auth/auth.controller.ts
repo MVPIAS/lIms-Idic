@@ -32,8 +32,9 @@ export class AuthController {
    */
   @Post("login")
   @Public()
-  // Límite estricto anti fuerza bruta: 5 intentos por minuto por IP.
-  @Throttle({ login: { ttl: 60_000, limit: 5 } })
+  // Límite estricto anti fuerza bruta: sobre-escribe el throttler "default" SOLO
+  // en esta ruta a 5 intentos/min (por IP, ya que en login aún no hay JWT).
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   @ApiBody({ schema: { example: { username: "c.vargas", password: "demo", totp: "123456" } } })
   async login(@Body() body: unknown) {
     const { username, password, totp } = LoginSchema.parse(body);

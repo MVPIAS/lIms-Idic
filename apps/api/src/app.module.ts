@@ -68,14 +68,15 @@ function prettyTransport() {
         transport: prettyTransport(),
       },
     }),
-    // Rate limiting global. La clave de cubeta es el USUARIO (sub del JWT), no la
-    // IP —ver UserThrottlerGuard—, por lo que el límite "default" es por analista.
-    // Una pantalla del LIMS puede disparar varias GET en cascada (sidebar, panel,
-    // listados), así que 300/min por usuario da margen holgado sin abrir la puerta
-    // a abuso. El limitador "login" (más estricto, por IP) se aplica con @Throttle.
+    // Rate limiting global. UN SOLO throttler: en @nestjs/throttler v5 CADA
+    // throttler con nombre del array se aplica a TODAS las rutas, así que un
+    // segundo throttler "login" (limit 5) capaba todo el API a 5/min. En su lugar
+    // definimos solo "default" y el login lo endurece por sobre-escritura con
+    // @Throttle en su propia ruta. La clave de cubeta es el USUARIO (sub del JWT),
+    // no la IP —ver UserThrottlerGuard—, así que 300/min es por analista; una
+    // pantalla puede disparar varias GET en cascada sin agotar el cupo.
     ThrottlerModule.forRoot([
       { name: "default", ttl: 60_000, limit: 300 },
-      { name: "login", ttl: 60_000, limit: 5 },
     ]),
     PrismaModule,
     AuthModule,
