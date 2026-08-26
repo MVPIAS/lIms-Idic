@@ -39,6 +39,12 @@ async function bootstrap() {
   // Eliminar la cabecera X-Powered-By: Express (fingerprinting).
   app.getHttpAdapter().getInstance().disable?.("x-powered-by");
 
+  // Confiar en el primer proxy (Caddy termina TLS por delante). Sin esto Express
+  // reporta la IP del proxy en `req.ip`, con lo que el rate-limit de login y los
+  // logs de auditoría verían a todos los clientes como una única IP. Con
+  // `trust proxy = 1` resuelve la IP real desde X-Forwarded-For.
+  app.getHttpAdapter().getInstance().set?.("trust proxy", 1);
+
   // Permissions-Policy: helmet ya no emite esta cabecera por defecto (retiró
   // Feature-Policy). La fijamos manualmente para desactivar APIs del navegador
   // que la API no necesita. Defensa en profundidad por si el API se expusiera
