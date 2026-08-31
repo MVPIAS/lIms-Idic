@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { fecha } from "@/lib/format";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -31,7 +33,10 @@ const flujoBadge = (f: any) => {
   );
 };
 
+const codigoDe = (r: any) => r.codigo ?? r.numero ?? r.id?.slice(0, 8) ?? "";
+
 export default function OtPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -53,6 +58,22 @@ export default function OtPage() {
     })();
   }, []);
 
+  const columns: DataColumn[] = [
+    {
+      key: "codigo", label: "Código OT",
+      value: (r) => codigoDe(r),
+      render: (r) => (
+        <Link href={`/ot/${r.id}` as any} className="codigo" style={{ textDecoration: "underline" }}
+          onClick={(e) => e.stopPropagation()}>{codigoDe(r)}</Link>
+      ),
+    },
+    { key: "cliente", label: "Cliente", value: (r) => r.cliente?.razonSocial ?? "", render: (r) => r.cliente?.razonSocial ?? "—" },
+    { key: "fechaIngreso", label: "Ingreso", value: (r) => r.fechaIngreso ?? r.createdAt ?? "", render: (r) => fecha(r.fechaIngreso ?? r.createdAt) },
+    { key: "prioridad", label: "Prioridad", value: (r) => r.prioridad ?? "normal", render: (r) => r.prioridad ?? "normal" },
+    { key: "estado", label: "Estado", value: (r) => r.estado ?? "", render: (r) => estadoBadge(r.estado) },
+    { key: "flujo", label: "Flujo", sortable: false, filter: false, value: (r) => r.flujo?.estado ?? "", render: (r) => flujoBadge(r.flujo) },
+  ];
+
   return (
     <div>
       <h1 className="page">Expedientes / Órdenes de Trabajo</h1>
@@ -61,40 +82,14 @@ export default function OtPage() {
       </p>
       {error && <div className="alert warn">{error}</div>}
 
-      <div className="card card--table">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Código OT</th>
-              <th>Cliente</th>
-              <th>Ingreso</th>
-              <th>Prioridad</th>
-              <th>Estado</th>
-              <th>Flujo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id} className="row-action">
-                <td>
-                  <Link href={`/ot/${r.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{r.codigo ?? r.numero ?? r.id?.slice(0, 8)}</Link>
-                </td>
-                <td>{r.cliente?.razonSocial ?? "—"}</td>
-                <td>{fecha(r.fechaIngreso ?? r.createdAt)}</td>
-                <td>{r.prioridad ?? "normal"}</td>
-                <td>{estadoBadge(r.estado)}</td>
-                <td>{flujoBadge(r.flujo)}</td>
-              </tr>
-            ))}
-            {!loading && rows.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Sin órdenes de trabajo todavía. Se generan al aceptar una cotización.</td></tr>
-            )}
-            {loading && (
-              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Cargando…</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        searchKeys={["codigo", "cliente", "estado"]}
+        onRowClick={(r) => router.push(`/ot/${r.id}` as any)}
+        vacio="Sin órdenes de trabajo todavía. Se generan al aceptar una cotización."
+      />
     </div>
   );
 }

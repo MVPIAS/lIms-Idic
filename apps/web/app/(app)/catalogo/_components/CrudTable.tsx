@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { errorMensaje } from "@/lib/apiError";
 import { validarFormulario, propsInput } from "@/lib/validate";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -169,7 +170,7 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
     try {
       const p = new URLSearchParams();
       p.set("page", String(page));
-      p.set("limit", "20");
+      p.set("limit", "50");
       if (search) p.set("search", search);
       const res = await apiFetch(`${endpoint}?${p.toString()}`);
       setRows(filasDe(res));
@@ -378,52 +379,57 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
         </form>
       )}
 
-      <div className="card card--table">
-        <table className="data">
-          <thead>
-            <tr>
-              {columnas.map((c) => <th key={c.key} className={c.num ? "num" : ""}>{c.label}</th>)}
-              <th className="num">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.id}>
-                {columnas.map((c) => (
-                  <td key={c.key} className={c.num ? "num" : ""}>
-                    {c.render ? c.render(row[c.key], row) : (row[c.key] ?? "—")}
-                  </td>
-                ))}
-                <td className="num">
-                  <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
-                    <button type="button" className="btn outline sm" onClick={() => abrirEditar(row)}>Editar</button>
-                    <button type="button" className="btn sm" style={{ color: "var(--danger, #c0392b)" }}
-                      disabled={borrandoId === String(row.id)} onClick={() => eliminar(row)}>
-                      {borrandoId === String(row.id) ? "Eliminando…" : "Eliminar"}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!loading && rows.length === 0 && (
-              <tr><td colSpan={columnas.length + 1} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Sin resultados</td></tr>
-            )}
-            {loading && (
-              <tr><td colSpan={columnas.length + 1} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Cargando…</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* Tabla con orden y filtro por columna (client-side sobre la página actual).
+          El buscador de la barra superior busca en servidor (los 3 metadatos
+          principales de la maestra); la paginación es de servidor, numerada. */}
+      <DataTable
+        columns={columnas.map<DataColumn>((c) => ({
+          key: c.key,
+          label: c.label,
+          num: c.num,
+          render: (row) => (c.render ? c.render(row[c.key], row) : (row[c.key] ?? "—")),
+          value: (row) => row[c.key],
+        }))}
+        rows={rows}
+        loading={loading}
+        headerSearch={false}
+        paginate={false}
+        acciones={(row) => (
+          <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
+            <button type="button" className="btn outline sm" onClick={() => abrirEditar(row)}>Editar</button>
+            <button type="button" className="btn sm" style={{ color: "var(--danger, #c0392b)" }}
+              disabled={borrandoId === String(row.id)} onClick={() => eliminar(row)}>
+              {borrandoId === String(row.id) ? "Eliminando…" : "Eliminar"}
+            </button>
+          </div>
+        )}
+        vacio="Sin resultados"
+      />
 
       {meta && meta.totalPages > 1 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, fontSize: 12.5 }}>
-          <button disabled={page <= 1} className="btn outline sm" onClick={() => setPage((p) => p - 1)}>←</button>
-          <span className="subtitle" style={{ margin: 0 }}>Página {meta.page} de {meta.totalPages} · {meta.total} registros</span>
-          <button disabled={page >= meta.totalPages} className="btn outline sm" onClick={() => setPage((p) => p + 1)}>→</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 12, fontSize: 12.5, flexWrap: "wrap" }}>
+          <button disabled={page <= 1} className="btn outline sm" onClick={() => setPage((p) => Math.max(1, p - 1))}>← Anterior</button>
+          {paginasServidor(meta.page, meta.totalPages).map((p, i, arr) => (
+            <span key={p} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              {i > 0 && p - arr[i - 1] > 1 && <span style={{ color: "var(--muted)" }}>…</span>}
+              <button className={`btn sm ${p === meta.page ? "primary" : "outline"}`} onClick={() => setPage(p)}>{p}</button>
+            </span>
+          ))}
+          <button disabled={page >= meta.totalPages} className="btn outline sm" onClick={() => setPage((p) => p + 1)}>Siguiente →</button>
+          <span className="subtitle" style={{ margin: "0 0 0 8px" }}>{meta.total} registros</span>
         </div>
       )}
     </div>
   );
+}
+
+/** Ventana de páginas para el paginador de servidor (1 … n-1 [n] n+1 … total). */
+function paginasServidor(actual: number, total: number): number[] {
+  const out: number[] = [];
+  for (let p = 1; p <= total; p++) {
+    if (p === 1 || p === total || (p >= actual - 2 && p <= actual + 2)) out.push(p);
+  }
+  return out;
 }
 
 /** Badge activo/inactivo reutilizable por las páginas del catálogo. */
