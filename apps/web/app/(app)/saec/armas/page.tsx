@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fecha } from "@/lib/format";
 import { validarCampo, propsInput } from "@/lib/validate";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -167,6 +168,65 @@ export default function SaecArmasPage() {
     }
   }
 
+  const columns: DataColumn[] = [
+    {
+      key: "serie",
+      label: "Serie",
+      value: (r) => (r.serie_borrada ? "serie limada" : (r.serie ?? "")),
+      render: (r) =>
+        r.serie_borrada
+          ? <span className="pill amber">serie limada</span>
+          : <span className="codigo">{r.serie ?? "—"}</span>,
+    },
+    { key: "tipo", label: "Tipo", value: (r) => r.tipo ?? "" },
+    {
+      key: "marca_modelo",
+      label: "Marca / modelo",
+      value: (r) => [r.marca, r.modelo].filter(Boolean).join(" ") || "",
+      render: (r) => [r.marca, r.modelo].filter(Boolean).join(" ") || "—",
+    },
+    { key: "calibre", label: "Calibre", value: (r) => r.calibre ?? "", render: (r) => r.calibre ?? "—" },
+    {
+      key: "estado_registral",
+      label: "Estado registral",
+      value: (r) => REG_META[r.estado_registral]?.label ?? r.estado_registral ?? "",
+      render: (r) => <span className={`pill ${REG_META[r.estado_registral]?.pill ?? "gray"}`}>{REG_META[r.estado_registral]?.label ?? r.estado_registral}</span>,
+    },
+    {
+      key: "ot_codigo",
+      label: "OT",
+      value: (r) => r.ot_codigo ?? "",
+      render: (r) => (r.ot_codigo ? <span className="codigo">{r.ot_codigo}</span> : "—"),
+    },
+    {
+      key: "ibis_resultado",
+      label: "Resultado IBIS",
+      value: (r) => r.ibis_resultado ?? "",
+      render: (r) =>
+        r.ibis_resultado
+          ? <span className={`pill ${r.ibis_resultado === "concluyente" ? "green" : "gray"}`}>{r.ibis_resultado}{Number(r.ibis_hits) > 0 ? ` · ${r.ibis_hits} hit(s)` : ""}</span>
+          : <span style={{ color: "var(--muted)" }}>pendiente</span>,
+    },
+    {
+      key: "inscripcion",
+      label: "Inscripción DGMN",
+      value: (r) => r.inscripcion_dgmn ?? "",
+      render: (r) => <>{r.inscripcion_dgmn ?? "—"}{r.fecha_inscripcion_dgmn ? ` · ${fecha(r.fecha_inscripcion_dgmn)}` : ""}</>,
+    },
+    {
+      key: "evidencia",
+      label: "Evidencia",
+      value: (r) => r.evidencia_codigo ?? "",
+      render: (r) => (r.evidencia_codigo ? <Link className="codigo" href={`/saec/evidencias/${r.evidencia_id}`}>{r.evidencia_codigo}</Link> : "—"),
+    },
+    {
+      key: "created_at",
+      label: "Alta",
+      value: (r) => r.created_at ?? "",
+      render: (r) => fecha(r.created_at),
+    },
+  ];
+
   return (
     <div>
       <h1 className="page">SAEC · Registro de armas</h1>
@@ -287,57 +347,14 @@ export default function SaecArmasPage() {
         </form>
       )}
 
-      {loading && <div className="card" style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>Cargando…</div>}
-
-      {!loading && (
-        <div className="card card--table">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Serie</th>
-                <th>Tipo</th>
-                <th>Marca / modelo</th>
-                <th>Calibre</th>
-                <th>Estado registral</th>
-                <th>OT</th>
-                <th>Resultado IBIS</th>
-                <th>Inscripción DGMN</th>
-                <th>Evidencia</th>
-                <th>Alta</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td>
-                    {r.serie_borrada
-                      ? <span className="pill amber">serie limada</span>
-                      : <span className="codigo">{r.serie ?? "—"}</span>}
-                  </td>
-                  <td>{r.tipo}</td>
-                  <td>{[r.marca, r.modelo].filter(Boolean).join(" ") || "—"}</td>
-                  <td>{r.calibre ?? "—"}</td>
-                  <td><span className={`pill ${REG_META[r.estado_registral]?.pill ?? "gray"}`}>{REG_META[r.estado_registral]?.label ?? r.estado_registral}</span></td>
-                  <td>{r.ot_codigo ? <span className="codigo">{r.ot_codigo}</span> : "—"}</td>
-                  <td>
-                    {r.ibis_resultado
-                      ? <span className={`pill ${r.ibis_resultado === "concluyente" ? "green" : "gray"}`}>{r.ibis_resultado}{Number(r.ibis_hits) > 0 ? ` · ${r.ibis_hits} hit(s)` : ""}</span>
-                      : <span style={{ color: "var(--muted)" }}>pendiente</span>}
-                  </td>
-                  <td>{r.inscripcion_dgmn ?? "—"}{r.fecha_inscripcion_dgmn ? ` · ${fecha(r.fecha_inscripcion_dgmn)}` : ""}</td>
-                  <td>{r.evidencia_codigo ? <Link className="codigo" href={`/saec/evidencias/${r.evidencia_id}`}>{r.evidencia_codigo}</Link> : "—"}</td>
-                  <td>{fecha(r.created_at)}</td>
-                  <td><button className="btn sm" onClick={() => abrirEditar(r)}>Editar</button></td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Sin armas registradas.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        searchKeys={["serie", "marca_modelo", "inscripcion"]}
+        acciones={(r) => <button className="btn sm" onClick={() => abrirEditar(r)}>Editar</button>}
+        vacio={<>Sin armas registradas.</>}
+      />
     </div>
   );
 }

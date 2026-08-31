@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
 import { fmtN } from "@/lib/metrologia";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -33,6 +34,17 @@ export default function MetrologiaCalibracionesPage() {
     } catch (e: any) { setError(e.message); }
   }
 
+  const columns: DataColumn[] = [
+    { key: "codigo", label: "Código", value: (c) => c.codigo ?? "", render: (c) => <span className="codigo">{c.codigo}</span> },
+    { key: "proceso", label: "Proceso", value: (c) => `${c.proceso ?? ""} ${c.proceso_nombre ?? ""}`.trim(), render: (c) => <>{c.proceso} · {c.proceso_nombre}</> },
+    { key: "instrumento", label: "Instrumento", value: (c) => c.instrumento ?? "", render: (c) => c.instrumento ?? "—" },
+    { key: "cliente", label: "Cliente", value: (c) => c.cliente ?? "", render: (c) => c.cliente ?? "—" },
+    { key: "u_max", label: "Mayor U (k=2)", num: true, value: (c) => c.u_max, render: (c) => <>± {fmtN(c.u_max, 5)} {c.unidad}</> },
+    { key: "conforme", label: "Conforme", value: (c) => (c.conforme == null ? "" : c.conforme ? "Sí" : "No"), render: (c) => (c.conforme == null ? "—" : c.conforme ? <span className="pill green">Sí</span> : <span className="pill red">No</span>) },
+    { key: "estado", label: "Estado", value: (c) => c.estado ?? "", render: (c) => <span className={`pill ${PILL[c.estado] ?? "gray"}`}>{c.estado}</span> },
+    { key: "created_at", label: "Fecha", value: (c) => c.created_at ?? "", render: (c) => <span style={{ whiteSpace: "nowrap" }}>{fechaHora(c.created_at)}</span> },
+  ];
+
   return (
     <div>
       <h1 className="page">Metrología · Calibraciones</h1>
@@ -47,36 +59,15 @@ export default function MetrologiaCalibracionesPage() {
         <Link className="btn sm" href={"/metrologia/config" as any}>Configuración LMT</Link>
       </div>
 
-      <div className="card card--table">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Código</th><th>Proceso</th><th>Instrumento</th><th>Cliente</th>
-              <th className="num">Mayor U (k=2)</th><th>Conforme</th><th>Estado</th><th>Fecha</th><th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((c) => (
-              <tr key={c.id}>
-                <td><span className="codigo">{c.codigo}</span></td>
-                <td>{c.proceso} · {c.proceso_nombre}</td>
-                <td>{c.instrumento ?? "—"}</td>
-                <td>{c.cliente ?? "—"}</td>
-                <td className="num">± {fmtN(c.u_max, 5)} {c.unidad}</td>
-                <td>{c.conforme == null ? "—" : c.conforme ? <span className="pill green">Sí</span> : <span className="pill red">No</span>}</td>
-                <td><span className={`pill ${PILL[c.estado] ?? "gray"}`}>{c.estado}</span></td>
-                <td style={{ whiteSpace: "nowrap" }}>{fechaHora(c.created_at)}</td>
-                <td>
-                  <button className="btn sm" onClick={() => verCertificado(c.id)}>Certificado</button>
-                </td>
-              </tr>
-            ))}
-            {rows.length === 0 && (
-              <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Sin calibraciones. Cree la primera.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        searchKeys={["codigo", "instrumento", "cliente"]}
+        acciones={(c) => (
+          <button className="btn sm" onClick={() => verCertificado(c.id)}>Certificado</button>
+        )}
+        vacio={<>Sin calibraciones. Cree la primera.</>}
+      />
     </div>
   );
 }

@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fecha } from "@/lib/format";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -214,6 +215,47 @@ export default function InformesPage() {
   const doc = preview ?? emision;
   const avisos = doc?.avisos ?? [];
 
+  const columnas: DataColumn[] = [
+    {
+      key: "numero",
+      label: "Número",
+      value: (c: Certificado) => c.numero ?? c.codigo,
+      render: (c: Certificado) => <span className="codigo">{c.numero ?? c.codigo}</span>,
+    },
+    {
+      key: "tipo",
+      label: "Tipo",
+      value: (c: Certificado) => c.tipo ?? "",
+      render: (c: Certificado) => (c.tipo ? <span className="tag">{c.tipo}</span> : "—"),
+    },
+    {
+      key: "otcliente",
+      label: "OT · Cliente",
+      value: (c: Certificado) => [c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · "),
+      render: (c: Certificado) =>
+        [c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · ") || "—",
+    },
+    {
+      key: "plantilla",
+      label: "Plantilla",
+      value: (c: Certificado) => (c.plantilla?.repid ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : ""),
+      render: (c: Certificado) => (c.plantilla?.repid ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : "—"),
+    },
+    {
+      key: "fecha",
+      label: "Fecha",
+      value: (c: Certificado) => c.fecha ?? "",
+      render: (c: Certificado) => fecha(c.fecha),
+    },
+    {
+      key: "estado",
+      label: "Estado",
+      filter: false,
+      value: (c: Certificado) => c.estado ?? "",
+      render: (c: Certificado) => <span className={`pill ${PILL_ESTADO[c.estado] ?? "gray"}`}>{c.estado}</span>,
+    },
+  ];
+
   return (
     <>
       <h1 className="page">Emisión de informes y certificados</h1>
@@ -356,58 +398,27 @@ export default function InformesPage() {
       )}
 
       {/* -------------------------- Certificados emitidos ---------------------- */}
-      <div className="card card--table">
-        <div style={{ padding: "13px 15px 0" }}>
-          <h2>
-            Certificados emitidos <span className="right">{certs.length} últimos</span>
-          </h2>
-        </div>
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Número</th>
-              <th>Tipo</th>
-              <th>OT · Cliente</th>
-              <th>Plantilla</th>
-              <th>Fecha</th>
-              <th>Estado</th>
-              <th style={{ width: 110 }}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {certs.length === 0 && (
-              <tr>
-                <td colSpan={7} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>
-                  {cargando ? "Cargando…" : "Todavía no se ha emitido ningún certificado."}
-                </td>
-              </tr>
-            )}
-            {certs.map((c) => (
-              <tr key={c.id}>
-                <td><span className="codigo">{c.numero ?? c.codigo}</span></td>
-                <td>{c.tipo ? <span className="tag">{c.tipo}</span> : "—"}</td>
-                <td>
-                  {[c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · ") || "—"}
-                </td>
-                <td>{c.plantilla?.repid ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : "—"}</td>
-                <td>{fecha(c.fecha)}</td>
-                <td>
-                  <span className={`pill ${PILL_ESTADO[c.estado] ?? "gray"}`}>{c.estado}</span>
-                </td>
-                <td>
-                  <button
-                    className="btn outline sm"
-                    onClick={() => descargarPdf(c.id, c.numero ?? c.codigo)}
-                    disabled={!!ocupado}
-                  >
-                    PDF
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div style={{ padding: "13px 15px 0" }}>
+        <h2>
+          Certificados emitidos <span className="right">{certs.length} últimos</span>
+        </h2>
       </div>
+      <DataTable
+        columns={columnas}
+        rows={certs}
+        loading={cargando}
+        searchKeys={["numero", "otcliente", "plantilla"]}
+        acciones={(c: Certificado) => (
+          <button
+            className="btn outline sm"
+            onClick={() => descargarPdf(c.id, c.numero ?? c.codigo)}
+            disabled={!!ocupado}
+          >
+            PDF
+          </button>
+        )}
+        vacio={<>Todavía no se ha emitido ningún certificado.</>}
+      />
     </>
   );
 }

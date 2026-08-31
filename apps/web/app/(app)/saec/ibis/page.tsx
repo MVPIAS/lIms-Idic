@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -108,6 +109,25 @@ export default function IbisEtlPage() {
     } finally { setAsignando(false); }
   }
 
+  const historialCols: DataColumn[] = [
+    { key: "fecha", label: "Fecha", value: (h) => h.created_at ?? "",
+      render: (h) => <span style={{ whiteSpace: "nowrap" }}>{fechaHora(h.created_at)}</span> },
+    { key: "archivo", label: "Archivo", value: (h) => h.nombre_archivo ?? "",
+      render: (h) => <span title={h.hash_sha256}>{h.nombre_archivo ?? "—"}</span> },
+    { key: "origen", label: "Origen", value: (h) => h.origen_barrido ?? "" },
+    { key: "estado", label: "Estado", value: (h) => h.estado ?? "",
+      render: (h) => <span className={`pill ${ESTADO_PILL[h.estado] ?? "gray"}`}>{h.estado}</span> },
+    { key: "armas", label: "Armas", num: true, value: (h) => h.resultados_creados ?? 0,
+      render: (h) => h.resultados_creados ?? 0 },
+    { key: "bajas", label: "Bajas", num: true, value: (h) => h.eliminados ?? 0,
+      render: (h) => h.eliminados ?? 0 },
+    { key: "errores", label: "Errores", num: true,
+      value: (h) => (Array.isArray(h.errores) ? h.errores.length : 0),
+      render: (h) => (Array.isArray(h.errores) ? h.errores.length : 0) },
+    { key: "usuario", label: "Usuario", value: (h) => h.importado_por_nombre ?? "",
+      render: (h) => h.importado_por_nombre ?? "—" },
+  ];
+
   return (
     <div>
       <h1 className="page">SAEC · IBIS · Armas importadas (ETL por carpeta)</h1>
@@ -200,30 +220,14 @@ export default function IbisEtlPage() {
       </div>
 
       {/* Registro (bitácora) de XML cargados */}
-      <div className="card card--table" style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 12 }}>
         <h3 style={{ marginTop: 0 }}>Registro de XML cargados</h3>
-        <table className="data">
-          <thead>
-            <tr><th>Fecha</th><th>Archivo</th><th>Origen</th><th>Estado</th><th className="num">Armas</th><th className="num">Bajas</th><th className="num">Errores</th><th>Usuario</th></tr>
-          </thead>
-          <tbody>
-            {historial.map((h) => (
-              <tr key={h.id}>
-                <td style={{ whiteSpace: "nowrap" }}>{fechaHora(h.created_at)}</td>
-                <td title={h.hash_sha256}>{h.nombre_archivo ?? "—"}</td>
-                <td>{h.origen_barrido ?? "—"}</td>
-                <td><span className={`pill ${ESTADO_PILL[h.estado] ?? "gray"}`}>{h.estado}</span></td>
-                <td className="num">{h.resultados_creados ?? 0}</td>
-                <td className="num">{h.eliminados ?? 0}</td>
-                <td className="num">{Array.isArray(h.errores) ? h.errores.length : 0}</td>
-                <td>{h.importado_por_nombre ?? "—"}</td>
-              </tr>
-            ))}
-            {historial.length === 0 && (
-              <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>Sin importaciones registradas.</td></tr>
-            )}
-          </tbody>
-        </table>
+        <DataTable
+          columns={historialCols}
+          rows={historial}
+          searchKeys={["archivo", "estado", "usuario"]}
+          vacio={<>Sin importaciones registradas.</>}
+        />
       </div>
 
       {/* Pool de resultados */}

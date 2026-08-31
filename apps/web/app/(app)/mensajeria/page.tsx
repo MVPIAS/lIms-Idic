@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 import { fecha } from "@/lib/format";
 import { errorMensaje } from "@/lib/apiError";
 import { esEmail, propsInput } from "@/lib/validate";
@@ -163,6 +164,60 @@ export default function MensajeriaPage() {
     }
   }
 
+  const columns: DataColumn[] = [
+    {
+      key: "created_at",
+      label: "Fecha",
+      value: (r: Correo) => r.created_at,
+      render: (r: Correo) => <span style={{ whiteSpace: "nowrap" }}>{fecha(r.created_at)}</span>,
+    },
+    {
+      key: "tipo",
+      label: "Tipo",
+      value: (r: Correo) => TIPO_META[r.tipo]?.label ?? r.tipo,
+      render: (r: Correo) => (
+        <span className={`pill ${TIPO_META[r.tipo]?.pill ?? "gray"}`}>{TIPO_META[r.tipo]?.label ?? r.tipo}</span>
+      ),
+    },
+    {
+      key: "asunto",
+      label: "Asunto",
+      value: (r: Correo) => r.asunto ?? "",
+      render: (r: Correo) => <span style={{ maxWidth: 320, display: "inline-block" }}>{r.asunto ?? "—"}</span>,
+    },
+    {
+      key: "destinatarios",
+      label: "Destinatarios",
+      value: (r: Correo) => r.destinatarios,
+      render: (r: Correo) => (
+        <span style={{ maxWidth: 260, display: "inline-block", wordBreak: "break-all" }}>{r.destinatarios}</span>
+      ),
+    },
+    {
+      key: "referencia",
+      label: "Referencia",
+      value: (r: Correo) => r.cotizacion_codigo ?? r.ot_codigo ?? "",
+      render: (r: Correo) => <>{r.cotizacion_codigo ?? r.ot_codigo ?? "—"}</>,
+    },
+    {
+      key: "estado",
+      label: "Estado",
+      value: (r: Correo) => r.estado ?? "",
+      render: (r: Correo) =>
+        r.estado === "enviado" ? (
+          <span className="pill green">Enviado</span>
+        ) : (
+          <span className="pill red" title={r.error ?? ""}>Error</span>
+        ),
+    },
+    {
+      key: "enviado_por_nombre",
+      label: "Enviado por",
+      value: (r: Correo) => r.enviado_por_nombre ?? "",
+      render: (r: Correo) => <>{r.enviado_por_nombre ?? "—"}</>,
+    },
+  ];
+
   return (
     <div>
       <h1 className="page">Mensajería · Correo transaccional</h1>
@@ -272,47 +327,13 @@ export default function MensajeriaPage() {
         </form>
       )}
 
-      {loading && <div className="card" style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>Cargando…</div>}
-
-      {!loading && (
-        <div className="card card--table">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Tipo</th>
-                <th>Asunto</th>
-                <th>Destinatarios</th>
-                <th>Referencia</th>
-                <th>Estado</th>
-                <th>Enviado por</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id}>
-                  <td style={{ whiteSpace: "nowrap" }}>{fecha(r.created_at)}</td>
-                  <td><span className={`pill ${TIPO_META[r.tipo]?.pill ?? "gray"}`}>{TIPO_META[r.tipo]?.label ?? r.tipo}</span></td>
-                  <td style={{ maxWidth: 320 }}>{r.asunto ?? "—"}</td>
-                  <td style={{ maxWidth: 260, wordBreak: "break-all" }}>{r.destinatarios}</td>
-                  <td>{r.cotizacion_codigo ?? r.ot_codigo ?? "—"}</td>
-                  <td>
-                    {r.estado === "enviado" ? (
-                      <span className="pill green">Enviado</span>
-                    ) : (
-                      <span className="pill red" title={r.error ?? ""}>Error</span>
-                    )}
-                  </td>
-                  <td>{r.enviado_por_nombre ?? "—"}</td>
-                </tr>
-              ))}
-              {rows.length === 0 && (
-                <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Sin correos registrados que coincidan con el filtro.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        searchKeys={["asunto", "destinatarios", "referencia"]}
+        vacio={<>Sin correos registrados que coincidan con el filtro.</>}
+      />
     </div>
   );
 }

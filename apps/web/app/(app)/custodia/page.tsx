@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fechaHora, num, pct } from "@/lib/format";
 import { esNumero } from "@/lib/validate";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -206,6 +207,54 @@ export default function CustodiaPage() {
     }),
     [muestras, recientes, cadena],
   );
+
+  const columnasRecientes: DataColumn[] = [
+    {
+      key: "fecha",
+      label: "Fecha",
+      value: (c) => c.fecha ?? "",
+      render: (c) => <span style={{ whiteSpace: "nowrap" }}>{fechaHora(c.fecha)}</span>,
+    },
+    {
+      key: "muestra",
+      label: "Muestra",
+      value: (c) => c.muestra?.codigo ?? "",
+      render: (c) => <span className="codigo">{c.muestra?.codigo ?? "—"}</span>,
+    },
+    {
+      key: "evento",
+      label: "Evento",
+      value: (c) => (EVENTO_META[c.evento]?.label ?? c.evento) ?? "",
+      render: (c) => {
+        const meta = EVENTO_META[c.evento] ?? { label: c.evento, pill: "gray" };
+        return <span className={`pill ${meta.pill}`}>{meta.label}</span>;
+      },
+    },
+    {
+      key: "entrega",
+      label: "Entrega",
+      value: (c) => nombreUsuario(c.de_usuario),
+      render: (c) => nombreUsuario(c.de_usuario),
+    },
+    {
+      key: "recibe",
+      label: "Recibe",
+      value: (c) => nombreUsuario(c.a_usuario),
+      render: (c) => nombreUsuario(c.a_usuario),
+    },
+    {
+      key: "destino",
+      label: "Destino",
+      value: (c) => c.ubicacion_destino ?? "",
+      render: (c) => <span style={{ color: "var(--muted)" }}>{c.ubicacion_destino ?? "—"}</span>,
+    },
+    {
+      key: "motivo",
+      label: "Motivo",
+      value: (c) => c.motivo ?? "",
+      render: (c) => <span style={{ color: "var(--muted)" }}>{c.motivo ?? "—"}</span>,
+    },
+  ];
 
   return (
     <div>
@@ -476,46 +525,14 @@ export default function CustodiaPage() {
       {/* -------------------- Movimientos recientes (global) -------------------- */}
       <div className="card" style={{ marginTop: 14 }}>
         <h3 style={{ fontSize: 12.5, margin: "0 0 8px" }}>Movimientos recientes</h3>
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Muestra</th>
-              <th>Evento</th>
-              <th>Entrega</th>
-              <th>Recibe</th>
-              <th>Destino</th>
-              <th>Motivo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recientes.map((c) => {
-              const meta = EVENTO_META[c.evento] ?? { label: c.evento, pill: "gray" };
-              return (
-                <tr key={c.id} className="row-action" onClick={() => setSel(c.muestra_id)}>
-                  <td style={{ whiteSpace: "nowrap" }}>{fechaHora(c.fecha)}</td>
-                  <td>
-                    <span className="codigo">{c.muestra?.codigo ?? "—"}</span>
-                  </td>
-                  <td>
-                    <span className={`pill ${meta.pill}`}>{meta.label}</span>
-                  </td>
-                  <td>{nombreUsuario(c.de_usuario)}</td>
-                  <td>{nombreUsuario(c.a_usuario)}</td>
-                  <td style={{ color: "var(--muted)" }}>{c.ubicacion_destino ?? "—"}</td>
-                  <td style={{ color: "var(--muted)" }}>{c.motivo ?? "—"}</td>
-                </tr>
-              );
-            })}
-            {!recientes.length && (
-              <tr>
-                <td colSpan={7} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>
-                  Sin movimientos de custodia registrados.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <DataTable
+          columns={columnasRecientes}
+          rows={recientes}
+          loading={loading}
+          searchKeys={["muestra", "evento", "motivo"]}
+          onRowClick={(c) => setSel(c.muestra_id)}
+          vacio={<>Sin movimientos de custodia registrados.</>}
+        />
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { clp, fecha as fmtFecha } from "@/lib/format";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const IVA_PCT = 19;
@@ -300,46 +301,61 @@ export default function OrdenesCompraPage() {
         </div>
       )}
 
-      <div className="card card--table">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Número</th>
-              <th>Proveedor</th>
-              <th>Fecha</th>
-              <th>Detalle</th>
-              <th className="num">Líneas</th>
-              <th className="num">Neto</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {cargando ? (
-              <tr>
-                <td colSpan={7}>Cargando…</td>
-              </tr>
-            ) : ocs.length === 0 ? (
-              <tr>
-                <td colSpan={7}>Sin órdenes de compra.</td>
-              </tr>
-            ) : (
-              ocs.map((o) => (
-                <tr key={o.id}>
-                  <td>
-                    <span className="codigo">{o.numero}</span>
-                  </td>
-                  <td>{o.proveedor?.razonSocial ?? "—"}</td>
-                  <td>{fmtFecha(o.fecha)}</td>
-                  <td>{o.detalle ?? "—"}</td>
-                  <td className="num">{o.lineas?.length ?? 0}</td>
-                  <td className="num">{clp(o.monto)}</td>
-                  <td>{estadoBadge(o.estado)}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={ocColumns}
+        rows={ocs}
+        loading={cargando}
+        searchKeys={["numero", "proveedor", "estado"]}
+        vacio={<>Sin órdenes de compra.</>}
+      />
     </div>
   );
 }
+
+const ocColumns: DataColumn[] = [
+  {
+    key: "numero",
+    label: "Número",
+    render: (o) => <span className="codigo">{o.numero}</span>,
+    value: (o) => o.numero ?? "",
+  },
+  {
+    key: "proveedor",
+    label: "Proveedor",
+    render: (o) => o.proveedor?.razonSocial ?? "—",
+    value: (o) => o.proveedor?.razonSocial ?? "",
+  },
+  {
+    key: "fecha",
+    label: "Fecha",
+    render: (o) => fmtFecha(o.fecha),
+    value: (o) => o.fecha ?? "",
+  },
+  {
+    key: "detalle",
+    label: "Detalle",
+    render: (o) => o.detalle ?? "—",
+    value: (o) => o.detalle ?? "",
+  },
+  {
+    key: "lineas",
+    label: "Líneas",
+    num: true,
+    render: (o) => o.lineas?.length ?? 0,
+    value: (o) => o.lineas?.length ?? 0,
+  },
+  {
+    key: "monto",
+    label: "Neto",
+    num: true,
+    render: (o) => clp(o.monto),
+    value: (o) => num(o.monto),
+  },
+  {
+    key: "estado",
+    label: "Estado",
+    sortable: false,
+    render: (o) => estadoBadge(o.estado),
+    value: (o) => o.estado ?? "",
+  },
+];
