@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { validarFormulario, esMoneda, esNumero } from "@/lib/validate";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 // Contrato §4.4.4 / §4.4.5 · CONSUMIBLES con lotes/stock/caducidad + KARDEX.
 // Un consumible se recibe en LOTES (stock, nº de lote, caducidad); cada ensayo
@@ -50,6 +51,63 @@ function BadgeLote({ l }: { l: any }) {
   if (num(l.cantidad_actual) <= 0) return <span className="pill gray">Agotado</span>;
   return <span className="pill green">Disponible</span>;
 }
+
+const CONS_COLUMNS: DataColumn[] = [
+  {
+    key: "codigo",
+    label: "Código",
+    value: (r) => r.codigo ?? "",
+    render: (r) => <span className="codigo">{r.codigo}</span>,
+  },
+  {
+    key: "nombre",
+    label: "Nombre",
+    value: (r) => r.nombre ?? "",
+    render: (r) => (
+      <>
+        {r.nombre}
+        {r.activo === false && <span className="pill gray" style={{ marginLeft: 6 }}>inactivo</span>}
+      </>
+    ),
+  },
+  {
+    key: "tipo",
+    label: "Tipo",
+    value: (r) => r.tipo ?? "",
+    render: (r) => <span style={{ color: "var(--muted)" }}>{r.tipo ?? "—"}</span>,
+  },
+  {
+    key: "unidad_medida",
+    label: "Unidad",
+    value: (r) => r.unidad_medida ?? "",
+    render: (r) => <span style={{ color: "var(--muted)" }}>{r.unidad_medida ?? "—"}</span>,
+  },
+  {
+    key: "stock_total",
+    label: "Stock",
+    num: true,
+    value: (r) => num(r.stock_total),
+    render: (r) => (r.bajo_stock ? <span className="pill red">{fmt(r.stock_total)}</span> : fmt(r.stock_total)),
+  },
+  {
+    key: "stock_minimo",
+    label: "Mínimo",
+    num: true,
+    value: (r) => (r.stock_minimo != null ? num(r.stock_minimo) : ""),
+    render: (r) => <span style={{ color: "var(--muted)" }}>{r.stock_minimo != null ? fmt(r.stock_minimo) : "—"}</span>,
+  },
+  {
+    key: "lotes",
+    label: "Lotes",
+    value: (r) => num(r.lotes),
+    render: (r) => (
+      <>
+        {num(r.lotes)}
+        {num(r.lotes_caducados) > 0 && <span className="pill red" style={{ marginLeft: 6 }}>{num(r.lotes_caducados)} cad.</span>}
+      </>
+    ),
+  },
+];
 
 export default function ConsumiblesPage() {
   const [rows, setRows] = useState<any[]>([]);
@@ -353,52 +411,16 @@ export default function ConsumiblesPage() {
         </form>
       )}
 
-      {loading && (
-        <div className="card" style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>Cargando…</div>
-      )}
-
-      {!loading && (
-        <div className="card">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Código</th>
-                <th>Nombre</th>
-                <th>Tipo</th>
-                <th>Unidad</th>
-                <th style={{ textAlign: "right" }}>Stock</th>
-                <th style={{ textAlign: "right" }}>Mínimo</th>
-                <th>Lotes</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibles.map((r) => (
-                <tr key={r.id} className="row-action" onClick={() => abrirDetalle(r)}>
-                  <td><span className="codigo">{r.codigo}</span></td>
-                  <td>{r.nombre}{r.activo === false && <span className="pill gray" style={{ marginLeft: 6 }}>inactivo</span>}</td>
-                  <td style={{ color: "var(--muted)" }}>{r.tipo ?? "—"}</td>
-                  <td style={{ color: "var(--muted)" }}>{r.unidad_medida ?? "—"}</td>
-                  <td style={{ textAlign: "right" }}>
-                    {r.bajo_stock ? <span className="pill red">{fmt(r.stock_total)}</span> : fmt(r.stock_total)}
-                  </td>
-                  <td style={{ textAlign: "right", color: "var(--muted)" }}>{r.stock_minimo != null ? fmt(r.stock_minimo) : "—"}</td>
-                  <td>
-                    {num(r.lotes)}
-                    {num(r.lotes_caducados) > 0 && <span className="pill red" style={{ marginLeft: 6 }}>{num(r.lotes_caducados)} cad.</span>}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <button className="btn sm" onClick={() => abrirEditarCons(r)}>Editar</button>
-                  </td>
-                </tr>
-              ))}
-              {!visibles.length && (
-                <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: 20 }}>Sin consumibles.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={CONS_COLUMNS}
+        rows={visibles}
+        loading={loading}
+        headerSearch={false}
+        onRowClick={(r) => abrirDetalle(r)}
+        acciones={(r) => <button className="btn sm" onClick={() => abrirEditarCons(r)}>Editar</button>}
+        accionesLabel=""
+        vacio={<>Sin consumibles.</>}
+      />
 
       {/* ---- Detalle: lotes + movimientos + kardex ---- */}
       {detalle && (

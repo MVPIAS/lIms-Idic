@@ -8,6 +8,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { clp, fecha } from "@/lib/format";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 
@@ -44,7 +45,6 @@ const ESTADO_PILL: Record<Cot["estado"], string> = {
 export default function CotizacionesPage() {
   const [cots, setCots] = useState<Cot[]>(DEMO);
   const [origen, setOrigen] = useState<"api" | "demo">("demo");
-  const [filtro, setFiltro] = useState("");
   const [msg, setMsg] = useState<string>("");
 
   const authHeaders = (): Record<string, string> => {
@@ -91,12 +91,48 @@ export default function CotizacionesPage() {
     }
   }
 
-  const vis = cots.filter(
-    (c) =>
-      !filtro ||
-      c.cliente.toLowerCase().includes(filtro.toLowerCase()) ||
-      c.numero.toLowerCase().includes(filtro.toLowerCase()),
-  );
+  const columns: DataColumn[] = [
+    {
+      key: "numero",
+      label: "N° Cotización",
+      value: (c: Cot) => c.numero,
+      render: (c: Cot) => <span className="codigo">{c.numero}</span>,
+    },
+    { key: "cliente", label: "Cliente", value: (c: Cot) => c.cliente },
+    { key: "formato", label: "Formato", value: (c: Cot) => c.formato },
+    {
+      key: "estado",
+      label: "Estado",
+      value: (c: Cot) => c.estado,
+      render: (c: Cot) => <span className={`pill ${ESTADO_PILL[c.estado]}`}>{c.estado}</span>,
+    },
+    {
+      key: "total",
+      label: "Total (IVA exento)",
+      num: true,
+      value: (c: Cot) => c.total,
+      render: (c: Cot) => clp(c.total),
+    },
+    {
+      key: "otNumero",
+      label: "OT generada",
+      value: (c: Cot) => c.otNumero ?? "",
+      render: (c: Cot) =>
+        c.otNumero ? (
+          <Link href={"/ot" as any} className="codigo" style={{ textDecoration: "underline" }}>
+            {c.otNumero}
+          </Link>
+        ) : (
+          <span style={{ color: "var(--muted)" }}>—</span>
+        ),
+    },
+    {
+      key: "fecha",
+      label: "Fecha",
+      value: (c: Cot) => c.fecha,
+      render: (c: Cot) => <span style={{ color: "var(--muted)" }}>{fecha(c.fecha)}</span>,
+    },
+  ];
 
   return (
     <div>
@@ -108,80 +144,36 @@ export default function CotizacionesPage() {
 
       {msg && <div className="alert info" style={{ marginBottom: 10 }}>{msg}</div>}
 
-      <div className="toolbar">
-        <input
-          placeholder="Buscar por cliente o N°…"
-          style={{ flex: 1 }}
-          value={filtro}
-          onChange={(e) => setFiltro(e.target.value)}
-        />
+      <div className="toolbar" style={{ justifyContent: "flex-end" }}>
         <Link href="/cotizaciones/nueva" className="btn primary sm">＋ Nueva Cotización</Link>
       </div>
 
-      <div className="card card--table">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>N° Cotización</th>
-              <th>Cliente</th>
-              <th>Formato</th>
-              <th>Estado</th>
-              <th className="num">Total (IVA exento)</th>
-              <th>OT generada</th>
-              <th>Fecha</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {vis.map((c) => (
-              <tr key={c.id}>
-                <td><span className="codigo">{c.numero}</span></td>
-                <td>{c.cliente}</td>
-                <td>{c.formato}</td>
-                <td><span className={`pill ${ESTADO_PILL[c.estado]}`}>{c.estado}</span></td>
-                <td className="num">{clp(c.total)}</td>
-                <td>
-                  {c.otNumero ? (
-                    <Link href={"/ot" as any} className="codigo" style={{ textDecoration: "underline" }}>
-                      {c.otNumero}
-                    </Link>
-                  ) : (
-                    <span style={{ color: "var(--muted)" }}>—</span>
-                  )}
-                </td>
-                <td style={{ color: "var(--muted)" }}>{fecha(c.fecha)}</td>
-                <td>
-                  {origen === "api" ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {c.estado === "borrador" && (
-                        <button className="btn sm" onClick={() => accion(c.id, "enviar")}>Enviar</button>
-                      )}
-                      {c.estado === "enviada" && (
-                        <button className="btn primary sm" onClick={() => accion(c.id, "aceptar")}>Aceptar → OT</button>
-                      )}
-                      {(c.estado === "borrador" || c.estado === "enviada") && (
-                        <button className="btn sm" onClick={() => accion(c.id, "rechazar")}>Rechazar</button>
-                      )}
-                      {["aceptada", "rechazada", "anulada", "expirada", "vencida"].includes(c.estado) && (
-                        <span style={{ color: "var(--muted)" }}>—</span>
-                      )}
-                    </div>
-                  ) : (
-                    <span style={{ color: "var(--muted)" }}>—</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-            {vis.length === 0 && (
-              <tr>
-                <td colSpan={8} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
-                  Sin resultados
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={cots}
+        searchKeys={["numero", "cliente", "estado"]}
+        acciones={(c: Cot) =>
+          origen === "api" ? (
+            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+              {c.estado === "borrador" && (
+                <button className="btn sm" onClick={() => accion(c.id, "enviar")}>Enviar</button>
+              )}
+              {c.estado === "enviada" && (
+                <button className="btn primary sm" onClick={() => accion(c.id, "aceptar")}>Aceptar → OT</button>
+              )}
+              {(c.estado === "borrador" || c.estado === "enviada") && (
+                <button className="btn sm" onClick={() => accion(c.id, "rechazar")}>Rechazar</button>
+              )}
+              {["aceptada", "rechazada", "anulada", "expirada", "vencida"].includes(c.estado) && (
+                <span style={{ color: "var(--muted)" }}>—</span>
+              )}
+            </div>
+          ) : (
+            <span style={{ color: "var(--muted)" }}>—</span>
+          )
+        }
+        vacio={<>Sin resultados</>}
+      />
     </div>
   );
 }

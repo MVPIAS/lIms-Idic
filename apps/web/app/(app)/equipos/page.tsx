@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { fecha as fechaFmt } from "@/lib/format";
 import { validarFormulario } from "@/lib/validate";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -299,6 +300,64 @@ export default function EquiposPage() {
     );
   }, [rows, search]);
 
+  const columns: DataColumn[] = [
+    {
+      key: "codigo",
+      label: "Código",
+      value: (r) => r.codigo ?? "",
+      render: (r) => <span className="codigo">{r.codigo}</span>,
+    },
+    { key: "nombre", label: "Equipo", value: (r) => r.nombre ?? "" },
+    {
+      key: "marca",
+      label: "Marca / modelo",
+      value: (r) => [r.fabricante, r.modelo].filter(Boolean).join(" · "),
+      render: (r) => (
+        <span style={{ color: "var(--muted)" }}>
+          {[r.fabricante, r.modelo].filter(Boolean).join(" · ") || "—"}
+        </span>
+      ),
+    },
+    {
+      key: "ubicacion",
+      label: "Ubicación",
+      value: (r) => r.ubicacion ?? r.unidad?.codigo ?? "",
+      render: (r) => (
+        <span style={{ color: "var(--muted)" }}>{r.ubicacion ?? r.unidad?.codigo ?? "—"}</span>
+      ),
+    },
+    {
+      key: "estado",
+      label: "Estado",
+      value: (r) => ESTADO_META[r.estado]?.label ?? r.estado ?? "",
+      render: (r) => (
+        <span className={`pill ${ESTADO_META[r.estado]?.pill ?? "gray"}`}>
+          {ESTADO_META[r.estado]?.label ?? r.estado}
+        </span>
+      ),
+    },
+    {
+      key: "proxima_calibracion",
+      label: "Vigente hasta",
+      value: (r) => r.proxima_calibracion ?? "",
+      render: (r) => fechaFmt(r.proxima_calibracion),
+    },
+    {
+      key: "calibracion",
+      label: "Calibración",
+      filter: false,
+      value: (r) => diasParaVencer(r) ?? 999999,
+      render: (r) => <BadgeCalibracion e={r} />,
+    },
+    {
+      key: "apto",
+      label: "Apto",
+      value: (r) => (r.apto ? "Sí" : "No"),
+      render: (r) =>
+        r.apto ? <span className="pill green">Sí</span> : <span className="pill red">No</span>,
+    },
+  ];
+
   return (
     <div>
       <h1 className="page">Equipos y calibración</h1>
@@ -472,76 +531,24 @@ export default function EquiposPage() {
         </form>
       )}
 
-      {loading && (
-        <div className="card" style={{ textAlign: "center", color: "var(--muted)", padding: 24 }}>
-          Cargando…
-        </div>
-      )}
-
-      {!loading && (
-        <div className="card">
-          <table className="data">
-            <thead>
-              <tr>
-                <th>Código</th>
-                <th>Equipo</th>
-                <th>Marca / modelo</th>
-                <th>Ubicación</th>
-                <th>Estado</th>
-                <th>Vigente hasta</th>
-                <th>Calibración</th>
-                <th>Apto</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibles.map((r) => (
-                <tr key={r.id} className="row-action" onClick={() => abrirDetalle(r)}>
-                  <td>
-                    <span className="codigo">{r.codigo}</span>
-                  </td>
-                  <td>{r.nombre}</td>
-                  <td style={{ color: "var(--muted)" }}>
-                    {[r.fabricante, r.modelo].filter(Boolean).join(" · ") || "—"}
-                  </td>
-                  <td style={{ color: "var(--muted)" }}>{r.ubicacion ?? r.unidad?.codigo ?? "—"}</td>
-                  <td>
-                    <span className={`pill ${ESTADO_META[r.estado]?.pill ?? "gray"}`}>
-                      {ESTADO_META[r.estado]?.label ?? r.estado}
-                    </span>
-                  </td>
-                  <td>{fechaFmt(r.proxima_calibracion)}</td>
-                  <td>
-                    <BadgeCalibracion e={r} />
-                  </td>
-                  <td>
-                    {r.apto ? (
-                      <span className="pill green">Sí</span>
-                    ) : (
-                      <span className="pill red">No</span>
-                    )}
-                  </td>
-                  <td style={{ whiteSpace: "nowrap" }} onClick={(ev) => ev.stopPropagation()}>
-                    <button className="btn sm" onClick={() => abrirEditar(r)}>
-                      Editar
-                    </button>{" "}
-                    <button className="btn sm" onClick={() => eliminar(r)}>
-                      Baja
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {!visibles.length && (
-                <tr>
-                  <td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>
-                    No hay equipos que coincidan con el filtro.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={columns}
+        rows={visibles}
+        loading={loading}
+        searchKeys={["codigo", "nombre", "marca"]}
+        onRowClick={(r) => abrirDetalle(r)}
+        acciones={(r) => (
+          <span style={{ whiteSpace: "nowrap" }}>
+            <button className="btn sm" onClick={() => abrirEditar(r)}>
+              Editar
+            </button>{" "}
+            <button className="btn sm" onClick={() => eliminar(r)}>
+              Baja
+            </button>
+          </span>
+        )}
+        vacio={<>No hay equipos que coincidan con el filtro.</>}
+      />
 
       {/* ---------------- Detalle + historial de calibraciones ---------------- */}
       {detalle && (

@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fechaHora } from "@/lib/format";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -109,6 +110,72 @@ export default function DocumentosPage() {
 
   const hayFiltros = q || tipo || desde || hasta || clienteId;
 
+  const columns: DataColumn[] = [
+    {
+      key: "origen",
+      label: "Origen",
+      render: (d: Documento) => origenPill(d.origen),
+      value: (d: Documento) => d.origen ?? "",
+    },
+    {
+      key: "codigo",
+      label: "Código",
+      render: (d: Documento) => <span className="codigo">{d.codigo ?? "—"}</span>,
+      value: (d: Documento) => d.codigo ?? "",
+    },
+    {
+      key: "tipo",
+      label: "Tipo",
+      render: (d: Documento) => (d.tipo ? <span className="tag">{d.tipo}</span> : "—"),
+      value: (d: Documento) => d.tipo ?? "",
+    },
+    {
+      key: "otCodigo",
+      label: "OT",
+      render: (d: Documento) => (d.otCodigo ? <span className="codigo">{d.otCodigo}</span> : "—"),
+      value: (d: Documento) => d.otCodigo ?? "",
+    },
+    {
+      key: "cliente",
+      label: "Cliente",
+      render: (d: Documento) => d.cliente ?? "—",
+      value: (d: Documento) => d.cliente ?? "",
+    },
+    {
+      key: "fecha",
+      label: "Emisión",
+      render: (d: Documento) => fechaHora(d.fecha),
+      value: (d: Documento) => d.fecha ?? "",
+    },
+    {
+      key: "estado",
+      label: "Estado",
+      render: (d: Documento) => (
+        <span className={`pill ${d.estado === "anulado" ? "red" : "green"}`}>{d.estado ?? "emitido"}</span>
+      ),
+      value: (d: Documento) => d.estado ?? "emitido",
+    },
+    {
+      key: "verificacion",
+      label: "Verificación",
+      sortable: false,
+      filter: false,
+      render: (d: Documento) =>
+        d.urlVerificacion ? (
+          <a className="btn outline sm" href={d.urlVerificacion} target="_blank" rel="noreferrer">
+            Verificar
+          </a>
+        ) : d.codigoVerificacion ? (
+          <span className="tag" title="Código de verificación imprimible">
+            {d.codigoVerificacion}
+          </span>
+        ) : (
+          "—"
+        ),
+      value: (d: Documento) => d.codigoVerificacion ?? "",
+    },
+  ];
+
   return (
     <div>
       <h1 className="page">Buscador de documentos</h1>
@@ -165,68 +232,14 @@ export default function DocumentosPage() {
 
       {error && <div className="alert warn">{error}</div>}
 
-      <div className="card card--table">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Origen</th>
-              <th>Código</th>
-              <th>Tipo</th>
-              <th>OT</th>
-              <th>Cliente</th>
-              <th>Emisión</th>
-              <th>Estado</th>
-              <th>Verificación</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.map((d, i) => (
-              <tr key={`${d.origen}-${d.codigo}-${i}`}>
-                <td>{origenPill(d.origen)}</td>
-                <td>
-                  <span className="codigo">{d.codigo ?? "—"}</span>
-                </td>
-                <td>{d.tipo ? <span className="tag">{d.tipo}</span> : "—"}</td>
-                <td>{d.otCodigo ? <span className="codigo">{d.otCodigo}</span> : "—"}</td>
-                <td>{d.cliente ?? "—"}</td>
-                <td>{fechaHora(d.fecha)}</td>
-                <td>
-                  <span className={`pill ${d.estado === "anulado" ? "red" : "green"}`}>
-                    {d.estado ?? "emitido"}
-                  </span>
-                </td>
-                <td>
-                  {d.urlVerificacion ? (
-                    <a className="btn outline sm" href={d.urlVerificacion} target="_blank" rel="noreferrer">
-                      Verificar
-                    </a>
-                  ) : d.codigoVerificacion ? (
-                    <span className="tag" title="Código de verificación imprimible">
-                      {d.codigoVerificacion}
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-              </tr>
-            ))}
-            {!loading && data.length === 0 && (
-              <tr>
-                <td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: 22 }}>
-                  {hayFiltros ? "No hay documentos que coincidan con los filtros." : "No hay documentos emitidos."}
-                </td>
-              </tr>
-            )}
-            {loading && (
-              <tr>
-                <td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: 22 }}>
-                  Cargando…
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={data}
+        loading={loading}
+        rowKey={(d: Documento) => `${d.origen}-${d.codigo ?? ""}-${d.otCodigo ?? ""}-${d.fecha ?? ""}`}
+        searchKeys={["codigo", "otCodigo", "cliente"]}
+        vacio={hayFiltros ? "No hay documentos que coincidan con los filtros." : "No hay documentos emitidos."}
+      />
 
       {total > 0 && (
         <p className="subtitle" style={{ marginTop: 8 }}>

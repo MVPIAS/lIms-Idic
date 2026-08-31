@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { validarFormulario, propsInput } from "@/lib/validate";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -55,6 +56,44 @@ export default function UsuariosPage() {
     } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
   }
 
+  const columns: DataColumn[] = [
+    {
+      key: "username",
+      label: "Usuario",
+      value: (u) => u.username ?? "",
+      render: (u) => <span className="codigo">{u.username}</span>,
+    },
+    {
+      key: "nombreCompleto",
+      label: "Nombre completo",
+      value: (u) => u.nombreCompleto ?? "",
+    },
+    {
+      key: "grado",
+      label: "Grado/Cargo",
+      value: (u) => u.grado ?? u.cargo ?? "",
+      render: (u) => u.grado ?? u.cargo ?? "—",
+    },
+    {
+      key: "roles",
+      label: "Roles",
+      sortable: false,
+      value: (u) => (u.usuarioRoles ?? []).map((ur: any) => ur.rol?.codigo).join(" "),
+      render: (u) => (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+          {(u.usuarioRoles ?? []).map((ur: any) => <span key={ur.rolId} className="tag">{ur.rol?.codigo}</span>)}
+          {(!u.usuarioRoles || u.usuarioRoles.length === 0) && <span style={{ color: "var(--muted)", fontSize: 11 }}>sin rol</span>}
+        </div>
+      ),
+    },
+    {
+      key: "estado",
+      label: "Estado",
+      value: (u) => u.estado ?? "",
+      render: (u) => <span className={`pill ${u.estado === "activo" ? "green" : "gray"}`}>{u.estado}</span>,
+    },
+  ];
+
   return (
     <div>
       <h1 className="page">Usuarios y Roles</h1>
@@ -97,32 +136,12 @@ export default function UsuariosPage() {
         </form>
       )}
 
-      <div className="card card--table">
-        <table className="data">
-          <thead>
-            <tr>
-              <th>Usuario</th><th>Nombre completo</th><th>Grado/Cargo</th><th>Roles</th><th>Estado</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((u) => (
-              <tr key={u.id}>
-                <td><span className="codigo">{u.username}</span></td>
-                <td>{u.nombreCompleto}</td>
-                <td>{u.grado ?? u.cargo ?? "—"}</td>
-                <td>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                    {(u.usuarioRoles ?? []).map((ur: any) => <span key={ur.rolId} className="tag">{ur.rol?.codigo}</span>)}
-                    {(!u.usuarioRoles || u.usuarioRoles.length === 0) && <span style={{ color: "var(--muted)", fontSize: 11 }}>sin rol</span>}
-                  </div>
-                </td>
-                <td><span className={`pill ${u.estado === "activo" ? "green" : "gray"}`}>{u.estado}</span></td>
-              </tr>
-            ))}
-            {rows.length === 0 && <tr><td colSpan={5} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Sin usuarios</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        searchKeys={["username", "nombreCompleto", "grado"]}
+        vacio={<>Sin usuarios</>}
+      />
     </div>
   );
 }

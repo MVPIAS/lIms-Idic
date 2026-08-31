@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { errorMensaje } from "@/lib/apiError";
 import { esNumero } from "@/lib/validate";
+import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -74,6 +75,77 @@ function fmt(v: unknown): string {
   const n = Number(v);
   return Number.isFinite(n) ? String(Math.round(n * 10000) / 10000) : String(v);
 }
+
+const mono = { fontFamily: "'JetBrains Mono', monospace" } as const;
+
+/** Métrica derivada del control según su tipo (R², %recup., %CV). */
+function metricaDe(c: Control): string {
+  return c.tipo === "curva"
+    ? `R² ${fmt(c.rCuadrado)}`
+    : c.tipo === "estandar"
+      ? `${fmt(c.recuperacionPct)}%`
+      : c.tipo === "duplicado"
+        ? `CV ${fmt(c.cvPct)}%`
+        : "—";
+}
+
+const CONTROL_COLUMNS: DataColumn[] = [
+  {
+    key: "metodo",
+    label: "Método",
+    render: (c: Control) => c.catMetodo?.codigo ?? c.catMetodo?.nombre ?? "—",
+    value: (c: Control) => c.catMetodo?.codigo ?? c.catMetodo?.nombre ?? "",
+  },
+  {
+    key: "tipo",
+    label: "Tipo",
+    render: (c: Control) => TIPO_LABEL[c.tipo as Tipo] ?? c.tipo,
+    value: (c: Control) => TIPO_LABEL[c.tipo as Tipo] ?? String(c.tipo ?? ""),
+  },
+  {
+    key: "esperado",
+    label: "Esperado",
+    num: true,
+    render: (c: Control) => <span style={mono}>{fmt(c.valorEsperado)}</span>,
+    value: (c: Control) => c.valorEsperado ?? "",
+  },
+  {
+    key: "obtenido",
+    label: "Obtenido",
+    num: true,
+    render: (c: Control) => <span style={mono}>{fmt(c.valorObtenido)}</span>,
+    value: (c: Control) => c.valorObtenido ?? "",
+  },
+  {
+    key: "criterio",
+    label: "Criterio",
+    render: (c: Control) => <span style={mono}>{c.criterio ?? "—"}</span>,
+    value: (c: Control) => c.criterio ?? "",
+  },
+  {
+    key: "metrica",
+    label: "Métrica",
+    render: (c: Control) => <span style={mono}>{metricaDe(c)}</span>,
+    value: (c: Control) => metricaDe(c),
+  },
+  {
+    key: "resultado",
+    label: "Resultado",
+    render: (c: Control) => {
+      const rp = RESULTADO_PILL[c.resultado] ?? { texto: c.resultado, pill: "gray" };
+      return <span className={`pill ${rp.pill}`}>{rp.texto}</span>;
+    },
+    value: (c: Control) => c.resultado ?? "",
+  },
+  {
+    key: "aprobado",
+    label: "Aprobó",
+    render: (c: Control) => (
+      <span style={{ fontSize: 12, color: "var(--muted)" }}>{c.aprobadoPor ?? "—"}</span>
+    ),
+    value: (c: Control) => c.aprobadoPor ?? "",
+  },
+];
 
 export default function QcPage() {
   const [ots, setOts] = useState<Ot[]>([]);
@@ -369,66 +441,26 @@ export default function QcPage() {
       {otId && (
         <div className="card">
           <h2>Controles registrados</h2>
-          {controles.length === 0 ? (
-            <p className="subtitle">Aún no hay controles registrados para esta OT.</p>
-          ) : (
-            <table className="data">
-              <thead>
-                <tr>
-                  <th>Método</th>
-                  <th>Tipo</th>
-                  <th>Esperado</th>
-                  <th>Obtenido</th>
-                  <th>Criterio</th>
-                  <th>Métrica</th>
-                  <th>Resultado</th>
-                  <th>Aprobó</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {controles.map((c) => {
-                  const rp = RESULTADO_PILL[c.resultado] ?? { texto: c.resultado, pill: "gray" };
-                  const metrica =
-                    c.tipo === "curva"
-                      ? `R² ${fmt(c.rCuadrado)}`
-                      : c.tipo === "estandar"
-                        ? `${fmt(c.recuperacionPct)}%`
-                        : c.tipo === "duplicado"
-                          ? `CV ${fmt(c.cvPct)}%`
-                          : "—";
-                  return (
-                    <tr key={c.id}>
-                      <td>{c.catMetodo?.codigo ?? c.catMetodo?.nombre ?? "—"}</td>
-                      <td>{TIPO_LABEL[c.tipo as Tipo] ?? c.tipo}</td>
-                      <td style={{ fontFamily: "'JetBrains Mono', monospace" }}>{fmt(c.valorEsperado)}</td>
-                      <td style={{ fontFamily: "'JetBrains Mono', monospace" }}>{fmt(c.valorObtenido)}</td>
-                      <td style={{ fontFamily: "'JetBrains Mono', monospace" }}>{c.criterio ?? "—"}</td>
-                      <td style={{ fontFamily: "'JetBrains Mono', monospace" }}>{metrica}</td>
-                      <td>
-                        <span className={`pill ${rp.pill}`}>{rp.texto}</span>
-                      </td>
-                      <td style={{ fontSize: 12, color: "var(--muted)" }}>{c.aprobadoPor ?? "—"}</td>
-                      <td>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          {c.resultado !== "aprobado" && (
-                            <button className="btn sm" onClick={() => revisar(c.id, "aprobado")}>
-                              Aprobar
-                            </button>
-                          )}
-                          {c.resultado !== "rechazado" && (
-                            <button className="btn sm" onClick={() => revisar(c.id, "rechazado")}>
-                              Rechazar
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
+          <DataTable
+            columns={CONTROL_COLUMNS}
+            rows={controles}
+            searchKeys={["metodo", "tipo", "resultado"]}
+            acciones={(c: Control) => (
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+                {c.resultado !== "aprobado" && (
+                  <button className="btn sm" onClick={() => revisar(c.id, "aprobado")}>
+                    Aprobar
+                  </button>
+                )}
+                {c.resultado !== "rechazado" && (
+                  <button className="btn sm" onClick={() => revisar(c.id, "rechazado")}>
+                    Rechazar
+                  </button>
+                )}
+              </div>
+            )}
+            vacio={<>Aún no hay controles registrados para esta OT.</>}
+          />
         </div>
       )}
     </div>
