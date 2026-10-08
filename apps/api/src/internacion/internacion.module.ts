@@ -34,7 +34,7 @@ export interface FiltroInternacion {
 
 @Injectable()
 export class InternacionService {
-  private esquema?: { tasa: boolean; facturaOt: boolean; conCobro: boolean; numeroLey: boolean };
+  private esquema?: { tasa: boolean; facturaOt: boolean; facturaBorrado: boolean; conCobro: boolean; numeroLey: boolean };
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -49,6 +49,7 @@ export class InternacionService {
     this.esquema = {
       tasa: tiene("calculo_tasa_internacion", "ot_id") && tiene("calculo_tasa_internacion", "total_a_cancelar"),
       facturaOt: tiene("factura", "ot_id"),
+      facturaBorrado: tiene("factura", "deleted_at"),
       conCobro: tiene("orden_trabajo", "con_cobro"),
       numeroLey: tiene("orden_trabajo", "numero_ley"),
     };
@@ -85,7 +86,7 @@ export class InternacionService {
       ? `LEFT JOIN LATERAL (
            SELECT fa.id, fa.numero, fa.estado, fa.total
              FROM factura fa
-            WHERE fa.ot_id = ot.id AND fa.deleted_at IS NULL AND fa.estado <> 'anulada'
+            WHERE fa.ot_id = ot.id ${e.facturaBorrado ? "AND fa.deleted_at IS NULL" : ""} AND COALESCE(fa.estado, '') <> 'anulada'
             ORDER BY fa.fecha_emision DESC
             LIMIT 1) fac ON TRUE`
       : "";
