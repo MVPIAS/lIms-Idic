@@ -140,3 +140,119 @@ table.data tr.row-action{cursor:pointer}table.data tr.row-action:hover td{backgr
 /* ---- Login institucional ---- */
 .login-bg{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#0e2a32 0%,#12343f 45%,#1d4856 100%)}
 .login-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:100%;max-width:410px;padding:30px 28px}
+
+/* ==========================================================================
+   COMPONENTES COMPARTIDOS (menú por rol, cabecera, vacíos, esqueletos,
+   avisos, confirmación, tablas legibles). Usados por components/ui/* y
+   components/{Sidebar,CrudTable,DataTable}.tsx.
+   ========================================================================== */
+
+/* ---- Menú lateral ---- */
+aside.sidebar .sb{padding-bottom:18px}
+aside.sidebar .sb-perfil{margin:10px 14px 2px;display:flex;align-items:center;gap:7px;background:rgba(0,140,158,.18);border:1px solid rgba(0,140,158,.35);color:#dff3f6;border-radius:999px;padding:3px 10px;font-size:10.5px;font-weight:600;width:max-content;max-width:calc(100% - 28px)}
+aside.sidebar .sb-perfil-dot{width:7px;height:7px;border-radius:50%;background:#3fd0c9;flex-shrink:0}
+aside.sidebar .sb-perfil-txt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+aside.sidebar .sb-buscar{padding:9px 12px 4px}
+aside.sidebar .sb-buscar input{width:100%;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);color:#fff;border-radius:6px;padding:6px 9px;font:inherit;font-size:12px}
+aside.sidebar .sb-buscar input::placeholder{color:#8fb7c0}
+aside.sidebar .sb-buscar input:focus{outline:none;border-color:var(--accent);background:rgba(255,255,255,.1)}
+aside.sidebar .sb-vacio{padding:10px 16px;font-size:11.5px;color:#8fb7c0}
+aside.sidebar button.sb-sec-btn{display:flex;width:100%;justify-content:space-between;align-items:center;background:none;border:0;cursor:pointer;padding:11px 14px 4px 16px;text-align:left;font:inherit;font-size:9.5px;letter-spacing:1.4px;text-transform:uppercase;color:#7fb2bd}
+aside.sidebar button.sb-sec-btn:hover{color:#cfe2e6}
+aside.sidebar button.sb-sec-btn:disabled{cursor:default}
+aside.sidebar button.sb-sec-btn:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+aside.sidebar .sb-chev{font-size:10px;opacity:.8}
+aside.sidebar a.nav:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+/* ---- Cabecera de página ---- */
+.page-header{margin-bottom:13px}
+.page-header .migas{font-size:11.5px;color:var(--muted);margin-bottom:4px;display:flex;flex-wrap:wrap;gap:2px}
+.page-header .migas a{color:var(--accent);text-decoration:none}.page-header .migas a:hover{text-decoration:underline}
+.page-header .migas .sep{margin:0 5px;color:#a3afbd}
+.page-header-fila{display:flex;gap:12px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.page-header-acciones{display:flex;gap:7px;flex-wrap:wrap;align-items:center}
+.page-ico{margin-right:8px}
+
+/* ---- Estado vacío ---- */
+.empty{text-align:center;padding:34px 16px;color:var(--muted)}
+.empty.compacto{padding:18px 12px}
+.empty-ico{font-size:28px;line-height:1;margin-bottom:8px;opacity:.75}
+.empty-tit{font-weight:700;color:var(--ink);font-size:13.5px}
+.empty-txt{font-size:12px;margin-top:3px;max-width:460px;margin-left:auto;margin-right:auto}
+
+/* ---- Esqueletos de carga ---- */
+.skel{display:block;border-radius:4px;background:linear-gradient(90deg,#e9eef3 25%,#f4f7fa 37%,#e9eef3 63%);background-size:400% 100%;animation:skel 1.3s ease infinite}
+@keyframes skel{0%{background-position:100% 50%}100%{background-position:0 50%}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
+
+/* ---- Botones de peligro y foco visible ---- */
+.btn.danger{background:var(--red);color:#fff}
+.btn.ghost-danger{background:#fff;border:1px solid #f0c9c9;color:var(--red)}
+.btn.ghost-danger:hover{background:#fdecec}
+/* La utilidad `outline` de Tailwind (outline-style:solid) choca con la clase .btn.outline
+   y pintaba un borde negro grueso en todos los botones secundarios: se neutraliza. */
+.btn.outline:not(:focus-visible){outline:none}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ---- Avisos (toasts) ---- */
+.toasts{position:fixed;right:18px;bottom:18px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:min(420px,calc(100vw - 36px))}
+.toast{display:flex;align-items:flex-start;gap:9px;padding:10px 12px;border-radius:8px;border-left:4px solid;box-shadow:0 8px 24px rgba(24,33,47,.16);font-size:12.5px;animation:toast-in .18s ease-out}
+.toast-ico{width:18px;height:18px;border-radius:50%;color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.toast-x{background:none;border:0;cursor:pointer;color:inherit;opacity:.6;font-size:12px;padding:0 2px}
+@keyframes toast-in{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+
+/* ---- Diálogo de confirmación ---- */
+.modal-fondo{position:fixed;inset:0;background:rgba(14,42,50,.45);z-index:70;display:flex;align-items:center;justify-content:center;padding:16px}
+.modal{background:#fff;border-radius:11px;box-shadow:0 20px 60px rgba(0,0,0,.3);width:100%;max-width:440px;padding:20px 20px 16px}
+.modal h3{margin:0 0 8px;font-size:16px;font-weight:700}
+.modal-cuerpo{font-size:12.5px;color:var(--muted);line-height:1.55}
+.modal-acciones{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+
+/* ---- Sin acceso ---- */
+.sin-acceso{display:flex;gap:14px;align-items:flex-start;max-width:640px;border-left:4px solid var(--amber)}
+.sin-acceso-ico{font-size:26px;line-height:1}
+.sin-acceso.compacto{padding:11px 13px}
+
+/* ---- Tablas legibles: cabecera fija, cebra, hover, edición en celda ---- */
+.card.card--table{overflow:auto;max-height:calc(100vh - 170px)}
+table.data thead th{position:sticky;top:0;z-index:2}
+table.data thead tr:nth-child(2) th{top:31px}
+table.data tbody tr:nth-child(even) td{background:#fafcfd}
+table.data tbody tr:hover td{background:#f1f7f9}
+table.data tbody tr.skel-row:hover td{background:inherit}
+table.data td.num{white-space:nowrap}
+table.data td.editable{cursor:text}
+table.data td.editable:hover{box-shadow:inset 0 0 0 1px #b9d9de;background:#f3fafb}
+table.data td.editando{padding:3px 5px;background:#fff}
+table.data td.editando input,table.data td.editando select{width:100%;min-width:90px;padding:4px 6px;border:1px solid var(--accent);border-radius:4px;font:inherit;font-size:12.5px;box-shadow:0 0 0 3px rgba(0,140,158,.12)}
+table.data td.editando input:focus,table.data td.editando select:focus{outline:none}
+table.data td.guardando{opacity:.55}
+.celda-editable{cursor:text;border-bottom:1px dashed #9fc9cf;padding-bottom:1px}
+.celda-editable:hover{background:#e6f4f6;border-bottom-color:var(--accent)}
+.celda-input{width:100%;min-width:90px;padding:4px 6px;border:1px solid var(--accent);border-radius:4px;font:inherit;font-size:12.5px;box-shadow:0 0 0 3px rgba(0,140,158,.12)}
+.celda-input:focus{outline:none}
+
+/* ---- Bandeja / pendientes / accesos rápidos ---- */
+.bandeja{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:11px;margin-bottom:14px}
+.bandeja-item{display:block;background:#fff;border:1px solid var(--line);border-radius:10px;padding:12px 14px;box-shadow:var(--shadow);text-decoration:none;color:inherit;border-top:4px solid var(--blue);transition:transform .08s ease,box-shadow .08s ease}
+a.bandeja-item:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(24,33,47,.10)}
+.bandeja-item.warn{border-top-color:var(--amber)}.bandeja-item.alta{border-top-color:var(--red)}.bandeja-item.cero{border-top-color:var(--line);opacity:.8}
+.bandeja-num{font-size:26px;font-weight:800;line-height:1.1}
+.bandeja-tit{font-weight:700;font-size:13px;margin-top:2px}
+.bandeja-desc{font-size:11.5px;color:var(--muted);margin-top:3px}
+.acciones-rapidas{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.accion-rapida{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:9px;padding:11px 12px;text-decoration:none;color:inherit;background:#fff}
+.accion-rapida:hover{border-color:var(--accent);background:#f3fafb}
+.accion-rapida .ar-ico{font-size:18px;line-height:1.2;width:22px;text-align:center}
+.accion-rapida b{display:block;font-size:12.5px}
+.accion-rapida small{display:block;color:var(--muted);font-size:11px;margin-top:1px}
+.saludo{background:linear-gradient(135deg,#12343f,#1d4856);color:#fff;border-radius:12px;padding:16px 18px;margin-bottom:14px;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.saludo h1{margin:0;font-size:20px;font-weight:700}
+.saludo p{margin:3px 0 0;color:#bfe0e6;font-size:12.5px}
+.saludo .chip{display:inline-block;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:3px 10px;font-size:11px;font-weight:600;color:#fff}
+
+/* ---- KPI enlazable ---- */
+a.kpi{text-decoration:none;color:inherit;transition:box-shadow .08s ease}
+a.kpi:hover{box-shadow:0 8px 20px rgba(24,33,47,.10)}
+.kpi .kpi-top{display:flex;justify-content:space-between;align-items:center}
+.kpi .kpi-ico{font-size:15px;opacity:.7}

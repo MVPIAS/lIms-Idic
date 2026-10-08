@@ -5,6 +5,8 @@ import Link from "next/link";
 import { fecha } from "@/lib/format";
 import { validarCampo, propsInput } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import { toast, confirmar } from "@/components/ui/feedback";
+import { usePermisos } from "@/lib/permisos";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -62,6 +64,26 @@ export default function SaecArmasPage() {
   const [fReg, setFReg] = useState("");
   const [fOt, setFOt] = useState("");
   const [q, setQ] = useState("");
+  const { puede } = usePermisos();
+
+  /** DELETE /armas/:id: baja lógica (deleted_at) con registro en auditoría. */
+  async function eliminar(r: any) {
+    const ident = [r.marca, r.modelo, r.serie_borrada ? "serie limada" : r.serie].filter(Boolean).join(" · ");
+    const si = await confirmar({
+      titulo: "¿Eliminar este registro de arma?",
+      mensaje: <>{ident && <><b>{ident}</b><br /></>}El registro deja de aparecer en las listas. Queda constancia en la auditoría del SAEC.</>,
+      peligro: true,
+    });
+    if (!si) return;
+    try {
+      const res = await fetch(`${API}/armas/${r.id}`, { method: "DELETE", headers: auth() });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
+      toast.ok("Registro de arma eliminado.");
+      cargar();
+    } catch (e: any) {
+      toast.error(`No se pudo eliminar: ${e.message}`);
+    }
+  }
 
   async function cargar() {
     setLoading(true);
@@ -352,7 +374,12 @@ export default function SaecArmasPage() {
         rows={rows}
         loading={loading}
         searchKeys={["serie", "marca_modelo", "inscripcion"]}
-        acciones={(r) => <button className="btn sm" onClick={() => abrirEditar(r)}>Editar</button>}
+        acciones={(r) => (
+          <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
+            {puede("arma.editar") && <button className="btn outline sm" onClick={() => abrirEditar(r)}>Editar</button>}
+            {puede("arma.eliminar") && <button className="btn ghost-danger sm" onClick={() => eliminar(r)}>Eliminar</button>}
+          </div>
+        )}
         vacio={<>Sin armas registradas.</>}
       />
     </div>

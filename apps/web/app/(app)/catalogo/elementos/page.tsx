@@ -10,7 +10,7 @@ export default function ElementosPage() {
       endpoint="cat/elementos"
       columnas={[
         { key: "codigo", label: "Código", render: codigoCell },
-        { key: "nombre", label: "Nombre" },
+        { key: "nombre", label: "Nombre", editable: true },
         { key: "subgrupo", label: "SubGrupo", render: (_v, row) => row.subgrupo?.nombre ?? "—" },
         { key: "familia", label: "Familia", render: (_v, row) => row.familia?.nombre ?? "—" },
         { key: "activo", label: "Estado", render: activoBadge },

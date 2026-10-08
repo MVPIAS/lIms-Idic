@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import { errorMensaje } from "@/lib/apiError";
 import { validarFormulario, validarCampo, propsInput, esEntero } from "@/lib/validate";
+import RequierePermiso from "@/components/RequierePermiso";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -36,7 +37,7 @@ interface ConfigCorreo {
   activo: boolean;
 }
 
-export default function ConfigCorreoPage() {
+function ConfigCorreoContenido() {
   const [cfg, setCfg] = useState<ConfigCorreo | null>(null);
   // Contraseña que teclea el admin. Vacía => conservar la existente.
   const [password, setPassword] = useState("");
@@ -307,5 +308,14 @@ export default function ConfigCorreoPage() {
         </form>
       )}
     </div>
+  );
+}
+
+/** Solo para quien tiene admin.usuarios: sin permiso se muestra «Sin acceso» (y no se piden datos). */
+export default function ConfigCorreoPage() {
+  return (
+    <RequierePermiso perm="admin.usuarios" titulo="la configuración de correo">
+      <ConfigCorreoContenido />
+    </RequierePermiso>
   );
 }

@@ -28,8 +28,8 @@ export default function ParametrosPage() {
       columnas={[
         { key: "categoria", label: "Categoría" },
         { key: "codigo", label: "Código", render: codigoCell },
-        { key: "etiqueta", label: "Etiqueta" },
-        { key: "orden", label: "Orden", num: true },
+        { key: "etiqueta", label: "Etiqueta", editable: true },
+        { key: "orden", label: "Orden", num: true, editable: { tipo: "number" } },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}
       campos={[

@@ -13,6 +13,10 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { errorMensaje } from "@/lib/apiError";
 import { validarFormulario, propsInput } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import { usePermisos } from "@/lib/permisos";
+import { permisosDe, type PermisosCrud } from "@/lib/permisosRecurso";
+import { toast, confirmar } from "@/components/ui/feedback";
+import { PageHeader, EmptyState, type Miga } from "@/components/ui/PageHeader";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -40,6 +44,11 @@ export interface Columna {
   label: string;
   render?: (v: any, row: any) => React.ReactNode;
   num?: boolean;
+  /**
+   * Edición rápida: doble clic en la celda → Enter guarda (PATCH {key: valor}),
+   * Escape cancela. Requiere permiso de editar.
+   */
+  editable?: boolean | { tipo?: "text" | "number" | "select"; opciones?: string[] };
 }
 
 export type TipoCampo =
@@ -73,6 +82,14 @@ export interface CrudTableProps {
   endpoint: string;
   columnas: Columna[];
   campos: Campo[];
+  /** migas de pan de la cabecera. */
+  migas?: Miga[];
+  /** permisos por verbo; por defecto los del endpoint (lib/permisosRecurso.ts). */
+  permisos?: PermisosCrud;
+  /** fuerza mostrar/ocultar acciones (se combina con el permiso). */
+  permitirCrear?: boolean;
+  permitirEditar?: boolean;
+  permitirEliminar?: boolean;
 }
 
 const mapPorDefecto = (row: any) => {
@@ -150,7 +167,21 @@ function SelectField({ campo, inputId, value, endpoint, onChange }: SelectFieldP
   );
 }
 
-export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campos }: CrudTableProps) {
+export default function CrudTable({
+  titulo, subtitulo, endpoint, columnas, campos, migas, permisos,
+  permitirCrear, permitirEditar, permitirEliminar,
+}: CrudTableProps) {
+  const { puede, listo } = usePermisos();
+  const perms = permisos ?? permisosDe(endpoint) ?? {};
+  const permite = (explicito: boolean | undefined, perm?: string) =>
+    (explicito ?? true) && listo && (!perm || puede(perm));
+  const puedeCrear = permite(permitirCrear, perms.crear);
+  const puedeEditar = permite(permitirEditar, perms.editar);
+  const puedeEliminar = permite(permitirEliminar, perms.eliminar);
+  // edición rápida en celda
+  const [celda, setCelda] = useState<{ id: string; key: string } | null>(null);
+  const [valorCelda, setValorCelda] = useState("");
+  const [guardandoCelda, setGuardandoCelda] = useState(false);
   const [rows, setRows] = useState<any[]>([]);
   const [meta, setMeta] = useState<{ page: number; totalPages: number; total: number } | null>(null);
   const [page, setPage] = useState(1);
@@ -273,48 +304,135 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
       } else {
         await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) });
       }
+      toast.ok(editId != null ? "Cambios guardados." : "Registro creado.");
       cerrarForm();
       cargar();
     } catch (e: any) {
       setError(e.message);
+      toast.error(`No se pudo guardar: ${e.message}`);
     }
   }
 
   async function eliminar(row: any) {
-    if (!confirm("¿Eliminar este registro? Esta acción no se puede deshacer.")) return;
+    const nombre = mapPorDefecto(row).label;
+    const ok = await confirmar({
+      titulo: "¿Eliminar este registro?",
+      mensaje: (
+        <>
+          {nombre && nombre !== String(row.id) && <><b>{nombre}</b><br /></>}
+          Dejará de estar disponible en el catálogo. Si solo quieres dejar de usarlo, edítalo y desmarca «Activo».
+        </>
+      ),
+      peligro: true,
+    });
+    if (!ok) return;
     setBorrandoId(String(row.id));
     try {
       await apiFetch(`${endpoint}/${row.id}`, { method: "DELETE" });
       if (editId != null && editId === String(row.id)) cerrarForm();
       setError("");
+      toast.ok("Registro eliminado.");
       cargar();
     } catch (e: any) {
-      setError(e.message);
+      toast.error(`No se pudo eliminar: ${e.message}`);
     } finally {
       setBorrandoId(null);
     }
+  }
+
+  // --- edición rápida en celda ---------------------------------------------
+  const cfgCelda = (c: Columna) =>
+    !c.editable ? null : c.editable === true ? { tipo: "text" as const, opciones: undefined } : c.editable;
+
+  async function guardarCelda(row: any, c: Columna) {
+    const cfg = cfgCelda(c);
+    if (!cfg) return;
+    const original = row[c.key] == null ? "" : String(row[c.key]);
+    if (valorCelda === original) { setCelda(null); return; }
+    let valor: any = valorCelda;
+    if (cfg.tipo === "number") {
+      const n = Number(valorCelda.replace(",", "."));
+      if (valorCelda.trim() === "" || Number.isNaN(n)) { toast.error(`«${c.label}» debe ser un número.`); return; }
+      valor = n;
+    }
+    setGuardandoCelda(true);
+    try {
+      const upd = await apiFetch(`${endpoint}/${row.id}`, { method: "PATCH", body: JSON.stringify({ [c.key]: valor }) });
+      setRows((rs) => rs.map((x) => (String(x.id) === String(row.id) ? { ...x, [c.key]: upd?.[c.key] ?? valor } : x)));
+      setCelda(null);
+      toast.ok(`«${c.label}» actualizado.`);
+    } catch (e: any) {
+      toast.error(`No se pudo guardar «${c.label}»: ${e.message}`);
+    } finally {
+      setGuardandoCelda(false);
+    }
+  }
+
+  function celdaRender(row: any, c: Columna) {
+    const contenido = c.render ? c.render(row[c.key], row) : (row[c.key] ?? "—");
+    const cfg = cfgCelda(c);
+    if (!cfg || !puedeEditar) return contenido;
+    const enEdicion = celda?.id === String(row.id) && celda.key === c.key;
+    if (!enEdicion) {
+      return (
+        <span className="celda-editable" title="Doble clic para editar"
+          onDoubleClick={() => { setCelda({ id: String(row.id), key: c.key }); setValorCelda(row[c.key] == null ? "" : String(row[c.key])); }}>
+          {contenido}
+        </span>
+      );
+    }
+    const comunes = {
+      autoFocus: true,
+      disabled: guardandoCelda,
+      "aria-label": `Editar ${c.label}`,
+      className: "celda-input",
+      onBlur: () => { if (!guardandoCelda) setCelda(null); },
+      onKeyDown: (e: React.KeyboardEvent) => {
+        if (e.key === "Enter") { e.preventDefault(); guardarCelda(row, c); }
+        if (e.key === "Escape") { e.preventDefault(); setCelda(null); }
+      },
+    };
+    return cfg.tipo === "select" ? (
+      <select {...comunes} value={valorCelda} onChange={(e) => setValorCelda(e.target.value)}>
+        <option value="">—</option>
+        {(cfg.opciones ?? []).map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    ) : (
+      <input {...comunes} type={cfg.tipo === "number" ? "number" : "text"} step={cfg.tipo === "number" ? "any" : undefined}
+        value={valorCelda} onChange={(e) => setValorCelda(e.target.value)} />
+    );
   }
 
   const editando = editId != null;
 
   return (
     <div>
-      <h1 className="page">{titulo}</h1>
-      {subtitulo && <p className="subtitle">{subtitulo}</p>}
+      <PageHeader
+        titulo={titulo}
+        subtitulo={subtitulo}
+        migas={migas ?? [{ label: "Tablas maestras", href: "/catalogo" }, { label: titulo }]}
+        acciones={puedeCrear && (
+          <button className="btn primary sm" onClick={() => (showForm ? cerrarForm() : abrirCrear())}>
+            {showForm ? "Cerrar formulario" : "＋ Nuevo"}
+          </button>
+        )}
+      />
       {/* Errores de la lista (carga): solo cuando el formulario está cerrado; con
           el formulario abierto, el error se muestra dentro de él (junto al usuario). */}
       {error && !showForm && <div className="alert warn">{error}</div>}
 
       <div className="toolbar">
         <input
+          type="search"
           placeholder="Buscar…"
+          aria-label={`Buscar en ${titulo}`}
           style={{ flex: 1 }}
           value={search}
           onChange={(e) => { setPage(1); setSearch(e.target.value); }}
         />
-        <button className="btn primary sm" onClick={() => (showForm ? cerrarForm() : abrirCrear())}>
-          {showForm ? "Cerrar" : "＋ Nuevo"}
-        </button>
+        {puedeEditar && columnas.some((c) => c.editable) && (
+          <span className="subtitle" style={{ margin: 0, fontSize: 11 }}>✎ Doble clic en un valor subrayado para editarlo</span>
+        )}
       </div>
 
       {showForm && (
@@ -387,23 +505,27 @@ export default function CrudTable({ titulo, subtitulo, endpoint, columnas, campo
           key: c.key,
           label: c.label,
           num: c.num,
-          render: (row) => (c.render ? c.render(row[c.key], row) : (row[c.key] ?? "—")),
+          render: (row) => celdaRender(row, c),
           value: (row) => row[c.key],
         }))}
         rows={rows}
         loading={loading}
         headerSearch={false}
         paginate={false}
-        acciones={(row) => (
+        acciones={puedeEditar || puedeEliminar ? (row) => (
           <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
-            <button type="button" className="btn outline sm" onClick={() => abrirEditar(row)}>Editar</button>
-            <button type="button" className="btn sm" style={{ color: "var(--danger, #c0392b)" }}
-              disabled={borrandoId === String(row.id)} onClick={() => eliminar(row)}>
-              {borrandoId === String(row.id) ? "Eliminando…" : "Eliminar"}
-            </button>
+            {puedeEditar && <button type="button" className="btn outline sm" onClick={() => abrirEditar(row)}>Editar</button>}
+            {puedeEliminar && (
+              <button type="button" className="btn ghost-danger sm"
+                disabled={borrandoId === String(row.id)} onClick={() => eliminar(row)}>
+                {borrandoId === String(row.id) ? "Eliminando…" : "Eliminar"}
+              </button>
+            )}
           </div>
-        )}
-        vacio="Sin resultados"
+        ) : undefined}
+        vacio={search
+          ? <EmptyState compacto icono="🔍" titulo="Sin resultados" texto={`Nada coincide con «${search}».`} />
+          : <EmptyState compacto titulo="Aún no hay registros" texto={puedeCrear ? "Usa «＋ Nuevo» para crear el primero." : undefined} />}
       />
 
       {meta && meta.totalPages > 1 && (

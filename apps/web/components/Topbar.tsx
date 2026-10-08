@@ -2,31 +2,18 @@
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
+import { itemDeRuta } from "@/lib/navegacion";
+import { usePermisos, PERFIL_INFO } from "@/lib/permisos";
 
-const CRUMB: Record<string, string> = {
-  "/dashboard": "Panel",
-  "/clientes": "Clientes",
-  "/proveedores": "Proveedores",
-  "/cotizaciones": "Cotizaciones",
-  "/cotizaciones/nueva": "Nueva Cotización",
-  "/listas-precio": "Listas de Precio",
-  "/facturas": "Facturas",
-  "/ot": "Expedientes / OT",
-  "/muestras": "Muestras",
-  "/captura": "Captura de Resultados",
-  "/metodos": "Catálogo / Métodos",
-  "/plantillas": "Plantillas de informe",
-  "/flujos": "Diseñador de Flujos",
-  "/usuarios": "Usuarios y Roles",
-};
-
-function crumbFor(pathname: string): string {
-  if (CRUMB[pathname]) return CRUMB[pathname];
-  if (pathname.startsWith("/ot/")) return "Expediente";
-  const best = Object.keys(CRUMB)
-    .filter((h) => pathname.startsWith(h))
-    .sort((a, b) => b.length - a.length)[0];
-  return best ? CRUMB[best] : "";
+/** Migas de la barra superior a partir del mapa del menú (lib/navegacion.ts). */
+function crumbFor(pathname: string): { seccion: string; pagina: string } {
+  const m = itemDeRuta(pathname);
+  if (m) {
+    // Sub-rutas sin ítem propio (p. ej. /ot/<id>): se indica que es un detalle.
+    const detalle = pathname !== m.item.href && !pathname.endsWith("/nueva");
+    return { seccion: m.seccion.title, pagina: detalle ? `${m.item.label} · detalle` : m.item.label };
+  }
+  return { seccion: "", pagina: "" };
 }
 
 export default function Topbar() {
@@ -37,21 +24,23 @@ export default function Topbar() {
     setUser(api.getUser());
   }, []);
 
+  const crumb = crumbFor(pathname);
+  const { usuario, perfilJwt, listo } = usePermisos();
   const iniciales = user?.nombreCompleto
     ? user.nombreCompleto.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()
-    : "AD";
+    : (usuario.username ?? "U").slice(0, 2).toUpperCase();
 
   return (
     <>
       <div className="breadcrumb">
-        LIMS IDIC · <b>{crumbFor(pathname)}</b>
+        LIMS IDIC{crumb.seccion && <> · {crumb.seccion}</>}{crumb.pagina && <> · <b>{crumb.pagina}</b></>}
       </div>
       <div className="user">
         <div className="avatar">{iniciales}</div>
         <div style={{ lineHeight: 1.2 }}>
-          <div style={{ fontWeight: 600 }}>{user?.nombreCompleto ?? "Administrador"}</div>
+          <div style={{ fontWeight: 600 }}>{user?.nombreCompleto ?? usuario.nombre ?? usuario.username ?? "Usuario"}</div>
           <div style={{ color: "var(--muted)", fontSize: "10.5px" }}>
-            {user?.grado ?? user?.cargo ?? "SUPERADMIN"}
+            {user?.grado ?? user?.cargo ?? (listo ? PERFIL_INFO[perfilJwt]?.etiqueta : "")}
           </div>
         </div>
         <button onClick={() => api.logout()} className="btn outline sm" style={{ marginLeft: 8 }} title="Cerrar sesión">

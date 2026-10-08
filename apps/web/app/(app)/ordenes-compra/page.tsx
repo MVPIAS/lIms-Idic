@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { clp, fecha as fmtFecha } from "@/lib/format";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { toast, confirmar } from "@/components/ui/feedback";
+import { usePermisos } from "@/lib/permisos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const IVA_PCT = 19;
@@ -51,6 +54,55 @@ export default function OrdenesCompraPage() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
   const [guardando, setGuardando] = useState(false);
+
+  // Edición de una OC existente: el backend solo admite estado y notas (detalle).
+  const { puede } = usePermisos();
+  const puedeGestionar = puede("factura.emitir");
+  const [edit, setEdit] = useState<{ id: string; numero: string; estado: Estado; notas: string } | null>(null);
+  const [guardandoEdit, setGuardandoEdit] = useState(false);
+
+  async function guardarEdicion() {
+    if (!edit) return;
+    setGuardandoEdit(true);
+    try {
+      const r = await fetch(`${API}/ordenes-compra/${edit.id}`, {
+        method: "PATCH",
+        headers: auth(),
+        body: JSON.stringify({ estado: edit.estado, notas: edit.notas }),
+      });
+      if (!r.ok) throw new Error(await errorDe(r));
+      toast.ok(`OC ${edit.numero} actualizada.`);
+      setEdit(null);
+      await cargar();
+    } catch (e: any) {
+      toast.error(`No se pudo guardar: ${e.message}`);
+    } finally {
+      setGuardandoEdit(false);
+    }
+  }
+
+  /** «Eliminar» una OC = anularla: se conserva en el historial (sus líneas y monto). */
+  async function anular(o: any) {
+    const si = await confirmar({
+      titulo: `¿Anular la orden de compra ${o.numero}?`,
+      mensaje: "La OC queda en estado «anulada» y se conserva en el historial con sus líneas. No se borra.",
+      confirmarTexto: "Anular OC",
+      peligro: true,
+    });
+    if (!si) return;
+    try {
+      const r = await fetch(`${API}/ordenes-compra/${o.id}`, {
+        method: "PATCH",
+        headers: auth(),
+        body: JSON.stringify({ estado: "anulada" }),
+      });
+      if (!r.ok) throw new Error(await errorDe(r));
+      toast.ok(`OC ${o.numero} anulada.`);
+      await cargar();
+    } catch (e: any) {
+      toast.error(`No se pudo anular: ${e.message}`);
+    }
+  }
 
   const cargar = useCallback(async () => {
     setError("");
@@ -146,20 +198,44 @@ export default function OrdenesCompraPage() {
 
   return (
     <div>
-      <h1 className="page">Órdenes de Compra</h1>
-      <p className="subtitle">
-        OC a proveedores con sus líneas de detalle. El neto lo calcula el servidor a partir de las líneas; el IVA (
-        {IVA_PCT}%) y el total se muestran como referencia.
-      </p>
+      <PageHeader
+        titulo="Órdenes de compra"
+        migas={[{ label: "Comercial" }, { label: "Órdenes de compra" }]}
+        subtitulo={<>OC a proveedores con sus líneas de detalle. El neto lo calcula el servidor a partir de las líneas; el IVA ({IVA_PCT}%) y el total se muestran como referencia.</>}
+        acciones={puedeGestionar && (
+          <button className={`btn ${alta ? "outline" : "primary"} sm`} onClick={() => setAlta((v) => !v)}>
+            {alta ? "Cancelar" : "＋ Nueva orden de compra"}
+          </button>
+        )}
+      />
 
       {error && <div className="alert warn">{error}</div>}
       {ok && <div className="alert success">{ok}</div>}
 
-      <div style={{ marginBottom: 11 }}>
-        <button className={`btn ${alta ? "outline" : "primary"} sm`} onClick={() => setAlta((v) => !v)}>
-          {alta ? "Cancelar" : "＋ Nueva orden de compra"}
-        </button>
-      </div>
+      {edit && (
+        <div className="card" style={{ borderLeft: "4px solid var(--accent)" }}>
+          <h2>Editar OC <span className="codigo">{edit.numero}</span></h2>
+          <p className="subtitle" style={{ marginTop: -4 }}>Se pueden cambiar el estado y las notas. Las líneas y el monto no se modifican una vez emitida.</p>
+          <div className="form-grid">
+            <div className="field">
+              <label htmlFor="oc-edit-estado">Estado</label>
+              <select id="oc-edit-estado" value={edit.estado} onChange={(e) => setEdit({ ...edit, estado: e.target.value as Estado })}>
+                {ESTADOS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="field span-2">
+              <label htmlFor="oc-edit-notas">Notas</label>
+              <input id="oc-edit-notas" value={edit.notas} onChange={(e) => setEdit({ ...edit, notas: e.target.value })} placeholder="Detalle / referencia de la OC" />
+            </div>
+          </div>
+          <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <button type="button" className="btn outline sm" onClick={() => setEdit(null)}>Cancelar</button>
+            <button type="button" className="btn primary sm" disabled={guardandoEdit} onClick={guardarEdicion}>
+              {guardandoEdit ? "Guardando…" : "Guardar cambios"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {alta && (
         <div className="split-3-1" style={{ marginBottom: 13 }}>
@@ -306,7 +382,18 @@ export default function OrdenesCompraPage() {
         rows={ocs}
         loading={cargando}
         searchKeys={["numero", "proveedor", "estado"]}
-        vacio={<>Sin órdenes de compra.</>}
+        vacio="Sin órdenes de compra"
+        acciones={puedeGestionar ? (o) => (
+          <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
+            <button type="button" className="btn outline sm"
+              onClick={() => setEdit({ id: o.id, numero: o.numero, estado: (o.estado ?? "emitida") as Estado, notas: o.detalle ?? "" })}>
+              Editar
+            </button>
+            {o.estado !== "anulada" && (
+              <button type="button" className="btn ghost-danger sm" onClick={() => anular(o)}>Anular</button>
+            )}
+          </div>
+        ) : undefined}
       />
     </div>
   );

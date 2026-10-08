@@ -1,4 +1,7 @@
-import { Body, Controller, Get, Module, Param, Post, Req, UseGuards, Injectable, ParseUUIDPipe } from "@nestjs/common";
+import {
+  Body, Controller, Get, Module, Param, Patch, Post, Req, UseGuards, Injectable, ParseUUIDPipe,
+  ConflictException, ForbiddenException,
+} from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -53,6 +56,14 @@ export class FacturaService extends BaseCrudService {
     const nc = f.notasCredito.reduce((a: number, n: any) => a + Number(n.monto), 0);
     return { total: Number(f.total), pagado, notasCredito: nc, saldo: Number(f.total) - pagado - nc };
   }
+  /** ¿Otra factura del tenant ya usa ese número? (UNIQUE(tenant_id, numero)). */
+  async numeroOcupado(numero: string, exceptoId: string, tenantId?: string) {
+    const otra = await this.prisma.factura.findFirst({
+      where: { tenantId: tenantId ?? DEV_TENANT, numero, NOT: { id: exceptoId } },
+      select: { id: true },
+    });
+    return !!otra;
+  }
 }
 const LineaFacturaDto = z.object({
   descripcion: z.string().min(1),
@@ -69,8 +80,32 @@ const FacturaCreate = z.object({
   lineas: z.array(LineaFacturaDto).min(1),
 });
 /**
- * `editar` usa `factura.cobrar`: el PATCH de una factura solo cambia su estado
- * (emitida/pagada/anulada), que es el acto de cobranza.
+ * PATCH /facturas/:id · datos SEGUROS del documento (nunca montos: neto/IVA/total
+ * se derivan de las líneas al emitir).
+ *   - `estado` (emitida/pagada/anulada) → acto de cobranza: `factura.cobrar`.
+ *   - `numero`, `fechaEmision`, `origen` → corrección del documento emitido:
+ *     exige ADEMÁS `factura.emitir` (quien cobra no reescribe el folio).
+ */
+const FacturaUpdate = z
+  .object({
+    estado: z.enum(["emitida", "pagada", "anulada"]).optional(),
+    numero: z.string().trim().min(1).max(30).optional(),
+    fechaEmision: z.coerce.date().optional(),
+    origen: z.string().max(20).optional(),
+  })
+  .refine((d) => Object.values(d).some((v) => v !== undefined), {
+    message: "Nada que actualizar: indique estado, número, fecha u origen",
+  });
+
+/** ¿El usuario del request tiene el permiso? (SUPERADMIN siempre). */
+function tienePermiso(req: any, codigo: string): boolean {
+  const u = req?.user ?? {};
+  return (u.roles ?? []).includes("SUPERADMIN") || (u.permisos ?? []).includes(codigo);
+}
+
+/**
+ * `editar` usa `factura.cobrar`: el PATCH de estado (emitida/pagada/anulada) es
+ * el acto de cobranza. Ver FacturaUpdate para los campos del documento.
  *
  * NOTA: la máquina de estados de factura (emitida → pagada | aviso_1 → aviso_2 →
  * aviso_3 → prejudicial → cde, schema.sql:981) NO se implementa aquí: el enum Zod
@@ -86,8 +121,26 @@ const FacturaCreate = z.object({
   eliminar: "factura.emitir",
 })
 export class FacturaController extends BaseCrudController {
-  protected updateSchema = z.object({ estado: z.enum(["emitida", "pagada", "anulada"]) });
+  protected updateSchema = FacturaUpdate;
   constructor(protected svc: FacturaService) { super(); }
+
+  @Patch(":id")
+  @RequierePermiso("factura.cobrar")
+  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = FacturaUpdate.parse(body);
+    const tocaDocumento = dto.numero !== undefined || dto.fechaEmision !== undefined || dto.origen !== undefined;
+    if (tocaDocumento && !tienePermiso(req, "factura.emitir")) {
+      throw new ForbiddenException("Corregir número, fecha u origen de una factura requiere factura.emitir");
+    }
+    const tenantId = req?.user?.tenantId;
+    if (dto.numero !== undefined) {
+      // UNIQUE(tenant_id, numero): se responde 409 legible en vez de un 500 de Prisma.
+      if (await this.svc.numeroOcupado(dto.numero, id, tenantId)) {
+        throw new ConflictException(`Ya existe otra factura con el número ${dto.numero}`);
+      }
+    }
+    return this.svc.actualizar(id, dto, tenantId);
+  }
 
   @Post()
   @RequierePermiso("factura.emitir")

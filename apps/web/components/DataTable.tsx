@@ -11,11 +11,12 @@
  */
 
 import { useMemo, useState, useId, type ReactNode } from "react";
+import { EmptyState, SkeletonRows } from "@/components/ui/PageHeader";
 
 export interface DataColumn {
   key: string;
   label: string;
-  /** alinea a la derecha (números). */
+  /** alinea a la derecha (números). Si se omite, se deduce: todos los valores presentes son number. */
   num?: boolean;
   /** columna ordenable (por defecto true). */
   sortable?: boolean;
@@ -141,6 +142,24 @@ export default function DataTable({
   }
 
   const nCols = columns.length + (acciones ? 1 : 0);
+
+  // Alineación numérica: explícita (`num`) o deducida de los datos (todos number).
+  const esNum = useMemo(() => {
+    const out: Record<string, boolean> = {};
+    for (const c of columns) {
+      if (c.num !== undefined) { out[c.key] = c.num; continue; }
+      let alguno = false;
+      let todos = true;
+      for (const r of rows) {
+        const v = rawValue(c, r);
+        if (v == null || v === "") continue;
+        if (typeof v !== "number") { todos = false; break; }
+        alguno = true;
+      }
+      out[c.key] = alguno && todos;
+    }
+    return out;
+  }, [columns, rows]);
   const hayFiltrosCol = columns.some((c) => c.filter !== false);
 
   // ventana de botones de página (máx 7 visibles)
@@ -181,7 +200,7 @@ export default function DataTable({
                 const sortable = c.sortable !== false;
                 const activo = sortKey === c.key;
                 return (
-                  <th key={c.key} className={c.num ? "num" : ""}
+                  <th key={c.key} className={esNum[c.key] ? "num" : ""}
                     onClick={sortable ? () => ordenarPor(c.key) : undefined}
                     style={sortable ? { cursor: "pointer", userSelect: "none" } : undefined}
                     title={sortable ? "Ordenar" : undefined}>
@@ -199,7 +218,7 @@ export default function DataTable({
             {showFilters && hayFiltrosCol && (
               <tr>
                 {columns.map((c) => (
-                  <th key={c.key} className={c.num ? "num" : ""} style={{ paddingTop: 4, paddingBottom: 6 }}>
+                  <th key={c.key} className={esNum[c.key] ? "num" : ""} style={{ paddingTop: 4, paddingBottom: 6 }}>
                     {c.filter !== false ? (
                       <input
                         aria-label={`Filtrar ${c.label}`}
@@ -222,7 +241,7 @@ export default function DataTable({
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 style={onRowClick ? { cursor: "pointer" } : undefined}>
                 {columns.map((c) => (
-                  <td key={c.key} className={c.num ? "num" : ""}>
+                  <td key={c.key} className={esNum[c.key] ? "num" : ""}>
                     {c.render ? c.render(row) : (rawValue(c, row) ?? "—")}
                   </td>
                 ))}
@@ -230,13 +249,15 @@ export default function DataTable({
               </tr>
             ))}
             {!loading && total === 0 && (
-              <tr><td colSpan={nCols} style={{ textAlign: "center", padding: 28, color: "var(--muted)" }}>
-                {vacio ?? "Sin resultados"}
+              <tr><td colSpan={nCols} style={{ textAlign: "center", padding: 0, color: "var(--muted)" }}>
+                {rows.length > 0
+                  ? <EmptyState compacto icono="🔍" titulo="Sin resultados" texto="Ningún registro coincide con la búsqueda o los filtros." />
+                  : typeof vacio === "string" || vacio === undefined
+                    ? <EmptyState compacto titulo={vacio ?? "Sin registros"} />
+                    : <div style={{ padding: 22 }}>{vacio}</div>}
               </td></tr>
             )}
-            {loading && (
-              <tr><td colSpan={nCols} style={{ textAlign: "center", padding: 28, color: "var(--muted)" }}>Cargando…</td></tr>
-            )}
+            {loading && rows.length === 0 && <SkeletonRows cols={nCols} />}
           </tbody>
         </table>
       </div>
