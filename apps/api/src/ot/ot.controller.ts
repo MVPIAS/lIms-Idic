@@ -22,6 +22,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos, validarTransicion } from "../common/estados";
 import { generarCodigoOt } from "../common/codigo";
+import { AlcanceService } from "../rbac/alcance.service";
 
 const PrioridadEnum = z.enum(["baja", "normal", "alta", "urgente"]);
 
@@ -90,18 +91,23 @@ export class OtController {
   private prisma = new PrismaClient();
 
   // FlujoService llega vía OtModule → imports: [FlujoModule] (que lo exporta).
-  constructor(private readonly flujos: FlujoService) {}
+  // AlcanceService llega por AlcanceModule (@Global): acota la OT a las unidades
+  // (laboratorios) visibles del usuario según sus asignaciones de rol vigentes.
+  constructor(
+    private readonly flujos: FlujoService,
+    private readonly alcance: AlcanceService,
+  ) {}
 
   @Get()
   @RequierePermiso("ot.ver")
   async listar(@Req() req: any) {
     const tenantId = req?.user?.tenantId;
-    // Alcance por laboratorio: si el usuario está acotado a unidades concretas
-    // (no es global), solo ve las OT de SUS laboratorios (unidad_principal).
-    const unidadGlobal: boolean = req?.user?.unidadGlobal ?? true;
-    const unidades: string[] = req?.user?.unidades ?? [];
-    const scopeUnidad =
-      !unidadGlobal && unidades.length ? { unidadPrincipal: { in: unidades } } : {};
+    // Alcance por laboratorio (AlcanceService): un usuario acotado solo ve las OT
+    // cuya unidad_principal está en sus unidades visibles (unidad, o unidad +
+    // descendencia para jefaturas). Global (SUPERADMIN/ADMIN/DIRECTOR, roles
+    // GLOBAL) → sin filtro. Acotado sin unidades → no ve ninguna (antes veía todas).
+    const filtro = await this.alcance.filtroUnidades(req);
+    const scopeUnidad = filtro ? { unidadPrincipal: { in: filtro } } : {};
     const ots = await this.prisma.ordenTrabajo.findMany({
       // OrdenTrabajo tiene tenant_id: solo se listan las OT del tenant del usuario.
       where: { ...(tenantId ? { tenantId } : {}), ...scopeUnidad },
@@ -146,9 +152,10 @@ export class OtController {
     const tenantId = req.user?.tenantId;
     const ot = await this.prisma.ordenTrabajo.findFirst({
       where: { id, ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, flujoInstanciaId: true },
+      select: { id: true, flujoInstanciaId: true, unidadPrincipal: true },
     });
     if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${id}`);
     if (!ot.flujoInstanciaId) return { instancia: null, tareas: [] };
     const [instancia, tareas] = await Promise.all([
       this.flujos.estadoInstancia(ot.flujoInstanciaId, tenantId),
@@ -161,10 +168,13 @@ export class OtController {
   @RequierePermiso("ot.ver")
   async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     // findFirst con tenant compuesto: si la OT es de otro tenant, no se revela (null).
-    return this.prisma.ordenTrabajo.findFirst({
+    const ot = await this.prisma.ordenTrabajo.findFirst({
       where: { id, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
       include: { cliente: true },
     });
+    // Fuera del alcance por unidad → 403 (la OT existe pero no es de sus laboratorios).
+    if (ot) await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    return ot;
   }
 
   @Post()
@@ -240,9 +250,10 @@ export class OtController {
 
     const ot = await this.prisma.ordenTrabajo.findFirst({
       where: { id, tenantId },
-      select: { id: true, flujoInstanciaId: true },
+      select: { id: true, flujoInstanciaId: true, unidadPrincipal: true },
     });
     if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${id}`);
     // No se pisa un flujo en curso: dejaría la instancia anterior huérfana.
     if (ot.flujoInstanciaId)
       throw new BadRequestException("La OT ya tiene un flujo asociado");
@@ -289,9 +300,10 @@ export class OtController {
     // Verifica existencia + pertenencia al tenant antes de actualizar.
     const actual = await this.prisma.ordenTrabajo.findFirst({
       where: { id, ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, flujoInstanciaId: true, estado: true },
+      select: { id: true, flujoInstanciaId: true, estado: true, unidadPrincipal: true },
     });
     if (!actual) throw new NotFoundException(`OT ${id} no encontrada`);
+    await this.alcance.exigirUnidad(req, actual.unidadPrincipal, `la OT ${id}`);
 
     if (dto.estado !== undefined) {
       if (dto.estado === "cerrada") this.exigeCerrar(req);

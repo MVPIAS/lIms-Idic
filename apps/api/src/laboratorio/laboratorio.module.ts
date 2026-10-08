@@ -3,11 +3,13 @@ import {
   Body,
   ConflictException,
   Controller,
+  Get,
   Module,
   NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   UseGuards,
   Injectable,
@@ -26,6 +28,7 @@ import { evaluarFormula, validarFormula, FormulaError, NOMBRES_FUNCION } from ".
 // exporta EquiposService) para reutilizar su verificarApto() desde la captura de
 // resultados. El módulo de equipos NO se toca: sólo se consume.
 import { EquiposModule, EquiposService } from "../equipos/equipos.module";
+import { AlcanceService } from "../rbac/alcance.service";
 
 /* ===================== TIPOS DE MUESTRA (árbol) ===================== */
 @Injectable()
@@ -97,7 +100,46 @@ const MuestraCreate = z.object({
 export class MuestraController extends BaseCrudController {
   protected createSchema = MuestraCreate;
   protected updateSchema = MuestraCreate.partial();
-  constructor(protected svc: MuestraService) { super(); }
+  constructor(
+    protected svc: MuestraService,
+    private readonly prisma: PrismaService,
+    private readonly alcance: AlcanceService,
+  ) { super(); }
+
+  /**
+   * Listado acotado por alcance de unidad: un usuario no global solo ve las
+   * muestras de OT cuya unidad_principal está entre sus unidades visibles.
+   * (Se re-declara @Get porque al sobrescribir el método se pierde la ruta heredada.)
+   */
+  @Get()
+  async listar(
+    @Query("page") page = "1",
+    @Query("limit") limit = "20",
+    @Query("search") search?: string,
+    @Req() req?: any,
+  ) {
+    const filtro = await this.alcance.filtroUnidades(req);
+    let where: any;
+    if (filtro) {
+      const ots = await this.prisma.ordenTrabajo.findMany({
+        where: { unidadPrincipal: { in: filtro } },
+        select: { id: true },
+      });
+      where = { otId: { in: ots.map((o) => o.id) } };
+    }
+    return this.svc.listar({ page: parseInt(page), limit: parseInt(limit), search, where }, req?.user?.tenantId);
+  }
+
+  @Get(":id")
+  async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const m = await this.svc.detalle(id, req?.user?.tenantId);
+    const otId: string | null = (m as any)?.otId ?? null;
+    const ot = otId
+      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { unidadPrincipal: true } })
+      : null;
+    await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, "la muestra");
+    return m;
+  }
 }
 
 /* ===================== MÉTODOS ===================== */

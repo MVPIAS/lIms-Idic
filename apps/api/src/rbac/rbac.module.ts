@@ -1,29 +1,18 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Module,
-  Param,
-  Patch,
-  Post,
-  Req,
-  UseGuards,
-  Injectable,
-  NotFoundException,
-  ForbiddenException,
-  ParseUUIDPipe,
-} from "@nestjs/common";
+import { Body, Controller, Get, Module, Post, Req, UseGuards, Injectable } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
-import * as argon2 from "argon2";
-import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
+import { UnidadesController } from "./unidades.controller";
+import { UsuariosController } from "./usuarios.controller";
+import { RolesController } from "./roles.controller";
+import { FirmasMatrizController, FirmasMatrizService } from "./firmas-matriz.controller";
+import { MeController } from "./me.controller";
+import { BandejaService } from "./bandeja.service";
 
 /* ===================== PERMISOS ===================== */
 @Injectable()
@@ -47,7 +36,44 @@ const PermisoCreate = z.object({
 export class PermisoController extends BaseCrudController {
   protected createSchema = PermisoCreate;
   protected updateSchema = PermisoCreate.partial();
-  constructor(protected svc: PermisoService) { super(); }
+  constructor(protected svc: PermisoService, private readonly prisma: PrismaService) { super(); }
+
+  /**
+   * Matriz rol × permiso para la pantalla de roles. Declarada en ESTA clase para
+   * que se registre antes que la ruta heredada GET /permisos/:id (ParseUUIDPipe).
+   */
+  @Get("matriz")
+  @RequierePermiso("admin.roles")
+  async matriz(@Req() req: any) {
+    const tenantId: string | undefined = req?.user?.tenantId;
+    const [permisos, roles, rp] = await Promise.all([
+      this.prisma.permiso.findMany({ orderBy: [{ modulo: "asc" }, { codigo: "asc" }] }),
+      this.prisma.rol.findMany({
+        where: tenantId ? { tenantId } : {},
+        select: { id: true, codigo: true, nombre: true, nivel: true },
+        orderBy: [{ orden: "asc" }, { codigo: "asc" }],
+      }),
+      this.prisma.rolPermiso.findMany({
+        where: tenantId ? { rol: { tenantId } } : {},
+        select: { rolId: true, permiso: { select: { codigo: true } } },
+      }),
+    ]);
+    const porModulo = new Map<string, { id: string; codigo: string; accion: string; descripcion: string | null }[]>();
+    for (const p of permisos) {
+      const l = porModulo.get(p.modulo) ?? [];
+      l.push({ id: p.id, codigo: p.codigo, accion: p.accion, descripcion: p.descripcion ?? null });
+      porModulo.set(p.modulo, l);
+    }
+    const asignaciones: Record<string, string[]> = {};
+    for (const r of roles) asignaciones[r.id] = [];
+    for (const x of rp) (asignaciones[x.rolId] ??= []).push(x.permiso.codigo);
+    for (const k of Object.keys(asignaciones)) asignaciones[k].sort();
+    return {
+      modulos: [...porModulo.entries()].map(([modulo, permisos]) => ({ modulo, permisos })),
+      roles: roles.map((r) => ({ id: r.id, codigo: r.codigo, nombre: r.nombre, nivel: r.nivel ?? null })),
+      asignaciones,
+    };
+  }
 }
 
 /* ===================== FIRMAS (imagen + HASH por usuario) ===================== */
@@ -94,200 +120,25 @@ export class FirmaController extends BaseCrudController {
   }
 }
 
-/* ===================== USUARIOS y ROLES (lectura) ===================== */
-const UsuarioCreate = z.object({
-  username: z.string().min(2).max(60),
-  nombreCompleto: z.string().min(2).max(200),
-  email: z.string().email().optional().or(z.literal("")),
-  password: z.string().min(4).max(200),
-  grado: z.string().max(80).optional(),
-  cargo: z.string().max(200).optional(),
-  rolId: z.string().uuid().optional(),
-  // Laboratorio (unidad) al que se acota el rol. Vacío = rol global (ve todo).
-  unidadId: z.string().uuid().optional().or(z.literal("")),
-});
-
-const UsuarioUpdate = z.object({
-  nombreCompleto: z.string().min(2).max(200).optional(),
-  email: z.string().email().optional().or(z.literal("")),
-  grado: z.string().max(80).optional(),
-  cargo: z.string().max(200).optional(),
-  estado: z.enum(["activo", "inactivo", "bloqueado"]).optional(),
-  rolId: z.string().uuid().optional(),
-  unidadId: z.string().uuid().optional().or(z.literal("")),
-});
-
-// Gestión de usuarios: `admin.usuarios` en los cuatro verbos (era la brecha
-// verificada: un LECTOR podía listar todos los usuarios).
-@ApiTags("usuarios") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("usuarios")
-@RequierePermiso("admin.usuarios")
-export class UsuarioController {
-  private prisma = new PrismaClient();
-  @Get()
-  async list(@Req() req: any) {
-    const data = await this.prisma.usuario.findMany({
-      // Usuario tiene tenant_id: solo se listan los usuarios del tenant del solicitante.
-      where: { deletedAt: null, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
-      include: { usuarioRoles: { include: { rol: true } } },
-      orderBy: { username: "asc" },
-      take: 200,
-    });
-    return { data, meta: { page: 1, limit: 200, total: data.length, totalPages: 1 } };
-  }
-
-  @Post()
-  async crear(@Body() body: unknown, @Req() req: any) {
-    const dto = UsuarioCreate.parse(body);
-    const tenantId = req.user?.tenantId ?? (await this.prisma.tenant.findFirst())?.id;
-    const passwordHash = await argon2.hash(dto.password);
-    const u = await this.prisma.usuario.create({
-      data: {
-        tenantId,
-        username: dto.username,
-        email: dto.email ? dto.email : null,
-        nombreCompleto: dto.nombreCompleto,
-        grado: dto.grado ?? null,
-        cargo: dto.cargo ?? null,
-        passwordHash,
-        estado: "activo",
-      },
-    });
-    if (dto.rolId) {
-      await this.prisma.usuarioRol.create({
-        data: { usuarioId: u.id, rolId: dto.rolId, unidadId: dto.unidadId ? dto.unidadId : null },
-      });
-    }
-    const { passwordHash: _omit, ...safe } = u as any;
-    return safe;
-  }
-
-  /** Editar datos del usuario (no toca passwordHash). Opcionalmente reasigna su rol. */
-  @Patch(":id")
-  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    const dto = UsuarioUpdate.parse(body);
-    const tenantId = req.user?.tenantId;
-    // Verifica existencia + pertenencia al tenant (no revela usuarios de otros tenants).
-    const actual = await this.prisma.usuario.findFirst({
-      where: { id, deletedAt: null, ...(tenantId ? { tenantId } : {}) },
-    });
-    if (!actual) throw new NotFoundException(`usuario ${id} no encontrado`);
-
-    const { rolId, unidadId, email, ...campos } = dto;
-    const data: any = { ...campos };
-    if (email !== undefined) data.email = email ? email : null;
-
-    const u = await this.prisma.usuario.update({ where: { id }, data });
-
-    // Reasignar rol: reemplaza los roles vigentes por el indicado (acotado a la
-    // unidad/laboratorio si se especifica).
-    if (rolId) {
-      await this.prisma.usuarioRol.deleteMany({ where: { usuarioId: id } });
-      await this.prisma.usuarioRol.create({
-        data: { usuarioId: id, rolId, unidadId: unidadId ? unidadId : null },
-      });
-    }
-    const { passwordHash: _omit, ...safe } = u as any;
-    return safe;
-  }
-
-  /** Soft-delete: marca deletedAt y deja el usuario en estado 'inactivo'. */
-  @Delete(":id")
-  async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    const tenantId = req.user?.tenantId;
-    const actual = await this.prisma.usuario.findFirst({
-      where: { id, deletedAt: null, ...(tenantId ? { tenantId } : {}) },
-    });
-    if (!actual) throw new NotFoundException(`usuario ${id} no encontrado`);
-    const u = await this.prisma.usuario.update({
-      where: { id },
-      data: { deletedAt: new Date(), estado: "inactivo" },
-    });
-    const { passwordHash: _omit, ...safe } = u as any;
-    return safe;
-  }
-}
-
-const RolCreate = z.object({
-  codigo: z.string().min(1).max(40),
-  nombre: z.string().min(1).max(120),
-  descripcion: z.string().optional(),
-});
-const RolUpdate = RolCreate.partial();
-
-// Los roles son la definición del RBAC: mismo permiso que usuarios/permisos.
-@ApiTags("roles") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("roles")
-@RequierePermiso("admin.usuarios")
-export class RolController {
-  private prisma = new PrismaClient();
-  @Get()
-  async list(@Req() req: any) {
-    // Rol tiene tenant_id: solo los roles del tenant del solicitante.
-    const data = await this.prisma.rol.findMany({
-      where: { ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
-      orderBy: { codigo: "asc" },
-    });
-    return { data, meta: { page: 1, limit: data.length, total: data.length, totalPages: 1 } };
-  }
-
-  @Post()
-  async crear(@Body() body: unknown, @Req() req: any) {
-    const dto = RolCreate.parse(body);
-    const tenantId = req.user?.tenantId ?? (await this.prisma.tenant.findFirst())?.id;
-    return this.prisma.rol.create({
-      data: {
-        tenantId,
-        codigo: dto.codigo,
-        nombre: dto.nombre,
-        descripcion: dto.descripcion ?? null,
-      },
-    });
-  }
-
-  @Patch(":id")
-  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    const dto = RolUpdate.parse(body);
-    const tenantId = req.user?.tenantId;
-    const actual = await this.prisma.rol.findFirst({
-      where: { id, ...(tenantId ? { tenantId } : {}) },
-    });
-    if (!actual) throw new NotFoundException(`rol ${id} no encontrado`);
-    return this.prisma.rol.update({ where: { id }, data: dto });
-  }
-
-  @Delete(":id")
-  async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    const tenantId = req.user?.tenantId;
-    const actual = await this.prisma.rol.findFirst({
-      where: { id, ...(tenantId ? { tenantId } : {}) },
-    });
-    if (!actual) throw new NotFoundException(`rol ${id} no encontrado`);
-    // Los roles de sistema no se pueden borrar (protegen el RBAC base).
-    if (actual.esSistema) throw new ForbiddenException("No se puede eliminar un rol de sistema");
-    // El modelo Rol no tiene deleted_at → borrado físico. usuario_rol se limpia en cascada (onDelete: Cascade).
-    await this.prisma.rol.delete({ where: { id } });
-    return { ok: true, id };
-  }
-}
-
-// Listado de unidades (laboratorios) para acotar roles a un laboratorio en la
-// pantalla de usuarios. Requiere gestionar usuarios (admin.usuarios).
-@ApiTags("unidades") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("unidades")
-@RequierePermiso("admin.usuarios")
-export class UnidadController {
-  private prisma = new PrismaClient();
-  @Get()
-  async list(@Req() req: any) {
-    const data = await this.prisma.unidad.findMany({
-      where: { ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
-      select: { id: true, codigo: true, nombre: true },
-      orderBy: { codigo: "asc" },
-    });
-    return { data, meta: { total: data.length } };
-  }
-}
-
+/*
+ * USUARIOS · ROLES · UNIDADES · MATRIZ DE FIRMAS · /me
+ * Controladores en archivos propios (usuarios/roles/unidades/firmas-matriz/me
+ * .controller.ts). Todos usan el PrismaService compartido (antes cada uno
+ * instanciaba su propio PrismaClient = un pool de conexiones por controlador).
+ * AlcanceService llega por AlcanceModule (@Global, importado en AppModule).
+ * Contrato: docs/ADMIN_ROLES.md.
+ */
 @Module({
-  controllers: [PermisoController, FirmaController, UsuarioController, RolController, UnidadController],
-  providers: [PermisoService, FirmaService],
+  controllers: [
+    PermisoController,
+    FirmaController,
+    UsuariosController,
+    RolesController,
+    UnidadesController,
+    FirmasMatrizController,
+    MeController,
+  ],
+  providers: [PermisoService, FirmaService, FirmasMatrizService, BandejaService],
+  exports: [FirmasMatrizService],
 })
 export class RbacModule {}
