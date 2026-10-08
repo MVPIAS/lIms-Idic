@@ -1,8 +1,9 @@
 "use client";
 
 import CrudTable from "@/components/CrudTable";
+import RequierePermiso from "@/components/RequierePermiso";
 
-export default function PermisosPage() {
+function PermisosContenido() {
   return (
     <CrudTable
       recurso="permisos"
@@ -21,5 +22,14 @@ export default function PermisosPage() {
         { campo: "descripcion", label: "Descripción" },
       ]}
     />
+  );
+}
+
+/** Solo para quien tiene admin.usuarios: sin permiso se muestra «Sin acceso» (y no se piden datos). */
+export default function PermisosPage() {
+  return (
+    <RequierePermiso perm="admin.usuarios" titulo="el catálogo de permisos">
+      <PermisosContenido />
+    </RequierePermiso>
   );
 }
