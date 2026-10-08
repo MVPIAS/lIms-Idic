@@ -1,184 +1,154 @@
 "use client";
+
+/**
+ * Menú lateral según el rol.
+ *  · Ítems filtrados por permiso (lib/navegacion.ts · `perm`).
+ *  · Secciones plegables; el estado se recuerda en localStorage.
+ *  · La sección de la página actual se abre sola y el ítem activo se resalta.
+ *  · Buscador para filtrar el menú (sin tildes / mayúsculas).
+ *  · Insignia con el perfil del usuario (GET /me/alcance o, si no está, el JWT).
+ */
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { NAV, normalizar, type ItemNav } from "@/lib/navegacion";
+import { usePermisos, PERFIL_INFO, type Perfil } from "@/lib/permisos";
+import { useAlcance } from "@/lib/alcance";
 
-// Cada ítem puede declarar el permiso que lo habilita. Si el usuario no lo tiene
-// (y no es SUPERADMIN/ADMIN) el ítem se oculta del menú. La seguridad real la
-// impone el backend (PermisoGuard → 403); esto es sólo para no mostrar accesos
-// que el rol no puede usar (mínimo privilegio en la UI).
-type Item = { href: string; label: string; icon: string; perm?: string };
-type Sect = { title: string; items: Item[] };
+const CLAVE_PLEGADO = "lims_menu_plegado";
 
-const NAV: Sect[] = [
-  {
-    title: "Inicio",
-    items: [
-      { href: "/dashboard", label: "Panel", icon: "⌂" },
-      { href: "/perfil", label: "Mi Perfil · 2FA", icon: "🔐" },
-    ],
-  },
-  {
-    title: "CRM",
-    items: [{ href: "/crm", label: "Oportunidades", icon: "🎯", perm: "cliente.ver" }],
-  },
-  {
-    title: "Comercial",
-    items: [
-      { href: "/clientes", label: "Clientes", icon: "🏢", perm: "cliente.ver" },
-      { href: "/proveedores", label: "Proveedores", icon: "🚚", perm: "factura.ver" },
-      { href: "/contactos", label: "Contactos", icon: "👤", perm: "cliente.ver" },
-      { href: "/cotizaciones", label: "Cotizaciones", icon: "$", perm: "cotizacion.ver" },
-      { href: "/cotizaciones/nueva", label: "Nueva · Costeo", icon: "＋", perm: "cotizacion.crear" },
-      { href: "/listas-precio", label: "Listas de Precio", icon: "≣", perm: "cotizacion.ver" },
-      { href: "/lista-precio-items", label: "Ítems de Lista", icon: "🏷", perm: "cotizacion.ver" },
-      { href: "/centros-costo", label: "Centros de Costo", icon: "🏦", perm: "cotizacion.ver" },
-      { href: "/facturas", label: "Facturas", icon: "📄", perm: "factura.ver" },
-      { href: "/pagos", label: "Pagos", icon: "💵", perm: "factura.ver" },
-      { href: "/notas-credito", label: "Notas de Crédito", icon: "🧾", perm: "nc.gestionar" },
-      { href: "/ordenes-compra", label: "Órdenes de Compra", icon: "🛒", perm: "factura.ver" },
-      { href: "/viaticos", label: "Viáticos", icon: "✈", perm: "factura.ver" },
-    ],
-  },
-  {
-    title: "Laboratorio",
-    items: [
-      { href: "/ot", label: "Órdenes de Trabajo", icon: "🗂", perm: "ot.ver" },
-      { href: "/ot/nueva", label: "Registrar OT", icon: "＋", perm: "ot.crear" },
-      { href: "/muestras", label: "Muestras", icon: "🧪", perm: "muestra.ver" },
-      { href: "/captura", label: "Captura de Resultados", icon: "📊", perm: "resultado.crear" },
-      { href: "/captura-ot", label: "Captura por OT", icon: "📈", perm: "resultado.crear" },
-      { href: "/qc", label: "Control de Calidad", icon: "✔", perm: "resultado.revisar" },
-      { href: "/spc", label: "Control Estadístico (SPC)", icon: "📉", perm: "resultado.ver" },
-      { href: "/consumibles", label: "Consumibles · Kardex", icon: "🧴", perm: "equipo.ver" },
-      { href: "/metodos", label: "Métodos", icon: "🔬", perm: "metodo.ver" },
-      { href: "/analitos", label: "Analitos", icon: "⚗", perm: "metodo.ver" },
-      { href: "/limites", label: "Límites", icon: "📐", perm: "metodo.ver" },
-      { href: "/tipos-muestra", label: "Tipos de Muestra", icon: "🌡", perm: "muestra.ver" },
-      { href: "/plantillas", label: "Plantillas", icon: "📄", perm: "plantilla.ver" },
-      { href: "/informes", label: "Emitir Informe", icon: "🖨", perm: "certificado.emitir" },
-      { href: "/equipos", label: "Equipos y Calibración", icon: "⚙", perm: "equipo.ver" },
-      { href: "/custodia", label: "Cadena de Custodia", icon: "🔗", perm: "muestra.ver" },
-      { href: "/certificados", label: "Certificados", icon: "📜", perm: "ot.ver" },
-      { href: "/flujos", label: "Diseñador de Flujos", icon: "⛓", perm: "flujo.ver" },
-    ],
-  },
-  {
-    title: "Metrología · LMT",
-    items: [
-      { href: "/metrologia", label: "Calibraciones", icon: "⚖", perm: "metrologia.ver" },
-      { href: "/metrologia/nueva", label: "Nueva calibración", icon: "＋", perm: "metrologia.crear" },
-      { href: "/metrologia/config", label: "Configuración LMT", icon: "🎛", perm: "metrologia.config" },
-    ],
-  },
-  {
-    title: "SAEC · Armas y Evidencias",
-    items: [
-      { href: "/saec", label: "Evidencias", icon: "🧷", perm: "evidencia.ver" },
-      { href: "/saec/armas", label: "Armas", icon: "🔫", perm: "arma.ver" },
-      { href: "/saec/ibis", label: "IBIS · Armas importadas", icon: "📥", perm: "ibis.ver" },
-      { href: "/saec/verificar", label: "Verificar certificado", icon: "🔎" },
-    ],
-  },
-  {
-    title: "Reportes y Comunicación",
-    items: [
-      { href: "/reportes", label: "Reportes · Export CSV", icon: "📊", perm: "resultado.ver" },
-      { href: "/mensajeria", label: "Mensajería · Correo", icon: "📧", perm: "resultado.ver" },
-      { href: "/documentos", label: "Buscador de Documentos", icon: "🗄", perm: "ot.ver" },
-    ],
-  },
-  {
-    title: "Administración · Tablas Maestras",
-    items: [
-      { href: "/catalogo", label: "Índice del catálogo", icon: "🧭", perm: "catalogo.gestionar" },
-      { href: "/catalogo/gran-grupos", label: "Grandes Grupos", icon: "🗃", perm: "catalogo.gestionar" },
-      { href: "/catalogo/grupos", label: "Grupos", icon: "📁", perm: "catalogo.gestionar" },
-      { href: "/catalogo/subgrupos", label: "Subgrupos", icon: "🗂", perm: "catalogo.gestionar" },
-      { href: "/catalogo/familias", label: "Familias · Laboratorios", icon: "🏛", perm: "catalogo.gestionar" },
-      { href: "/catalogo/elementos", label: "Elementos", icon: "🧱", perm: "catalogo.gestionar" },
-      { href: "/catalogo/ensayos", label: "Ensayos · Precios", icon: "🧪", perm: "catalogo.gestionar" },
-      { href: "/catalogo/metodos", label: "Métodos", icon: "🔬", perm: "catalogo.gestionar" },
-      { href: "/catalogo/analitos", label: "Analitos", icon: "⚗", perm: "catalogo.gestionar" },
-      { href: "/catalogo/especificaciones", label: "Especificaciones", icon: "📐", perm: "catalogo.gestionar" },
-      { href: "/catalogo/formulas", label: "Fórmulas de cálculo", icon: "𝑓", perm: "catalogo.gestionar" },
-      { href: "/catalogo/pasos", label: "Pasos por ensayo", icon: "🪜", perm: "catalogo.gestionar" },
-      { href: "/catalogo/parametros", label: "Parámetros del sistema", icon: "🎛", perm: "catalogo.gestionar" },
-    ],
-  },
-  {
-    title: "Administración · Sistema",
-    items: [
-      { href: "/usuarios", label: "Usuarios y Roles", icon: "👥", perm: "admin.usuarios" },
-      { href: "/permisos", label: "Permisos", icon: "🔑", perm: "admin.usuarios" },
-      { href: "/config-correo", label: "Configuración de Correo", icon: "✉", perm: "admin.usuarios" },
-    ],
-  },
-];
-
-/** Lee permisos y roles del JWT guardado (claims `permisos` y `roles`). */
-function leerAcceso(): { permisos: Set<string>; admin: boolean } {
+function leerPlegado(): Record<string, boolean> {
   try {
-    const tok = localStorage.getItem("lims_token");
-    if (!tok) return { permisos: new Set(), admin: false };
-    const p = JSON.parse(atob(tok.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
-    const roles: string[] = p.roles ?? [];
-    return {
-      permisos: new Set<string>(p.permisos ?? []),
-      admin: roles.includes("SUPERADMIN") || roles.includes("ADMIN"),
-    };
+    return JSON.parse(localStorage.getItem(CLAVE_PLEGADO) ?? "{}") ?? {};
   } catch {
-    return { permisos: new Set(), admin: false };
+    return {};
   }
 }
 
 export default function Sidebar() {
   const pathname = usePathname() ?? "";
-  const [acceso, setAcceso] = useState<{ permisos: Set<string>; admin: boolean }>({ permisos: new Set(), admin: true });
+  const { listo, puede, perfilJwt } = usePermisos();
+  const { alcance } = useAlcance();
+  // El layout (app) solo monta el menú en el cliente (tras comprobar el token): leer storage aquí es seguro.
+  const [plegado, setPlegado] = useState<Record<string, boolean>>(() =>
+    typeof window === "undefined" ? {} : leerPlegado(),
+  );
+  const [q, setQ] = useState("");
 
-  // El JWT sólo existe en el cliente; se lee tras montar para no romper SSR.
-  useEffect(() => { setAcceso(leerAcceso()); }, [pathname]);
+  const perfil: Perfil = (alcance?.perfil as Perfil) ?? perfilJwt;
+  const infoPerfil = PERFIL_INFO[perfil] ?? { etiqueta: perfil, descripcion: "" };
 
-  const puede = (item: Item) => !item.perm || acceso.admin || acceso.permisos.has(item.perm);
+  // Antes de leer el token se muestra solo lo que no exige permiso (evita parpadeos de ítems prohibidos).
+  const visible = (i: ItemNav) => (listo ? puede(i.perm) : !i.perm);
 
-  // Filtra ítems por permiso y elimina secciones que quedan vacías.
-  const nav = NAV
-    .map((s) => ({ ...s, items: s.items.filter(puede) }))
-    .filter((s) => s.items.length > 0);
+  const nav = useMemo(() => {
+    const needle = normalizar(q.trim());
+    return NAV.map((s) => ({
+      ...s,
+      items: s.items.filter(visible).filter((i) =>
+        !needle || normalizar(`${i.label} ${s.title} ${i.claves ?? ""}`).includes(needle),
+      ),
+    })).filter((s) => s.items.length > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, listo, puede]);
 
-  const hrefs = nav.flatMap((s) => s.items.map((i) => i.href));
-  const activeHref = hrefs
-    .filter((h) => pathname === h || pathname.startsWith(h + "/"))
-    .sort((a, b) => b.length - a.length)[0];
+  const activeHref = useMemo(() => {
+    return nav
+      .flatMap((s) => s.items.map((i) => i.href))
+      .filter((h) => pathname === h || pathname.startsWith(h + "/"))
+      .sort((a, b) => b.length - a.length)[0];
+  }, [nav, pathname]);
+
+  const seccionActiva = nav.find((s) => s.items.some((i) => i.href === activeHref))?.id;
+
+  // Al navegar, la sección de la página actual se despliega (luego el usuario puede plegarla).
+  useEffect(() => {
+    if (seccionActiva && plegado[seccionActiva]) alternar(seccionActiva, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seccionActiva, pathname]);
+
+  function alternar(id: string, abiertaAhora: boolean) {
+    setPlegado((p) => {
+      const next = { ...p, [id]: abiertaAhora };
+      try { localStorage.setItem(CLAVE_PLEGADO, JSON.stringify(next)); } catch { /* sin storage: solo en memoria */ }
+      return next;
+    });
+  }
+
+  const buscando = q.trim().length > 0;
 
   return (
-    <div>
+    <div className="sb">
       <div className="brand">
         <div className="crest">I</div>
         <div>
           <b>LIMS IDIC</b>
-          <small>Comercial + LIMS · Aiuken</small>
+          <small>Instituto de Investigaciones y Control</small>
         </div>
       </div>
 
-      {nav.map((sect) => (
-        <div key={sect.title}>
-          <div className="sect">{sect.title}</div>
-          {sect.items.map((item) => {
-            const active = item.href === activeHref;
-            return (
-              <Link
-                key={item.href}
-                href={item.href as any}
-                className={`nav${active ? " active" : ""}`}
-              >
-                <span className="ico">{item.icon}</span>
-                {item.label}
-              </Link>
-            );
-          })}
+      {listo && (
+        <div className="sb-perfil" title={infoPerfil.descripcion}>
+          <span className="sb-perfil-dot" aria-hidden />
+          <span className="sb-perfil-txt">{infoPerfil.etiqueta}</span>
         </div>
-      ))}
+      )}
+
+      <div className="sb-buscar">
+        <input
+          type="search"
+          placeholder="Buscar en el menú…"
+          aria-label="Buscar en el menú"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setQ("");
+          }}
+        />
+      </div>
+
+      {nav.length === 0 && <div className="sb-vacio">Sin coincidencias para «{q}».</div>}
+
+      {nav.map((sect) => {
+        // Abierta si se está buscando o si el usuario no la plegó.
+        const abierta = buscando || !plegado[sect.id];
+        const panelId = `sb-sec-${sect.id}`;
+        return (
+          <div key={sect.id} className="sb-sec">
+            <button
+              type="button"
+              className={`sect sb-sec-btn${abierta ? " abierta" : ""}`}
+              aria-expanded={abierta}
+              aria-controls={panelId}
+              onClick={() => alternar(sect.id, abierta)}
+              disabled={buscando}
+            >
+              <span>{sect.title}</span>
+              <span className="sb-chev" aria-hidden>{abierta ? "▾" : "▸"}</span>
+            </button>
+            {abierta && (
+              <div id={panelId}>
+                {sect.items.map((item) => {
+                  const active = item.href === activeHref;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href as any}
+                      className={`nav${active ? " active" : ""}`}
+                      aria-current={active ? "page" : undefined}
+                      onClick={() => buscando && setQ("")}
+                    >
+                      <span className="ico">{item.icon}</span>
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
