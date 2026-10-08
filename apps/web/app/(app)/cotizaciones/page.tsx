@@ -1,121 +1,124 @@
 "use client";
 
 /**
- * Listado de Cotizaciones · Módulo Comercial LIMS IDIC
- * Lista las cotizaciones con su estado. Una cotización aceptada da origen a una OT
- * (columna "OT" enlaza al expediente cuando existe). Cotización ≠ OT.
+ * Cotizaciones · Módulo Comercial LIMS IDIC (Comercial rondas 1 y 2, oct-2026)
+ * -----------------------------------------------------------------------------
+ * Estados vigentes: Abierta → Aceptada | Anulada (no hay Vencida ni Revalidada).
+ * Las cotizaciones anteriores (borrador/enviada/rechazada/expirada) se muestran
+ * como HISTÓRICO de solo lectura.
+ *  · Detalle en panel lateral; si está Abierta se edita ahí mismo.
+ *  · «Registrar aceptación»: documento OPI/Resolución, OC, correo, pago por
+ *    adelantado o disposición del Director (+ con/sin cobro) → genera la OT.
+ *    Con disposición del Director y cobro, la OT queda con OPI pendiente.
+ *  · «Anular» con motivo obligatorio.
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { clp, fecha } from "@/lib/format";
+import { money, fecha, fechaDia, rut as fmtRut } from "@/lib/format";
+import Panel from "./_components/Panel";
+import CotizacionForm from "./_components/CotizacionForm";
+import {
+  pedir,
+  hoyISO,
+  ESTADO_PILL,
+  ESTADO_LABEL,
+  ACEPTACION_LABEL,
+  ORIGEN_LABEL,
+  ESTADOS_VIGENTES,
+  etiquetaDe,
+  type Opcion,
+} from "./_components/comercial";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+type Filtro = "todas" | "abierta" | "aceptada" | "anulada" | "historico";
 
-type Cot = {
-  id: string;
-  numero: string;
-  cliente: string;
-  formato: string;
-  estado: "borrador" | "enviada" | "aceptada" | "rechazada" | "expirada" | "vencida" | "anulada";
-  total: number;
-  otNumero?: string | null;
-  fecha: string;
-};
+const esHistorico = (e: string) => !(ESTADOS_VIGENTES as readonly string[]).includes(e);
 
-const DEMO: Cot[] = [
-  { id: "1", numero: "COT-2026-14397", cliente: "FAMAE", formato: "F3", estado: "aceptada", total: 934080, otNumero: "OT-2026-00142", fecha: "2026-06-28" },
-  { id: "2", numero: "COT-2026-14402", cliente: "DGMN", formato: "F1", estado: "enviada", total: 412300, otNumero: null, fecha: "2026-07-01" },
-  { id: "3", numero: "COT-2026-14410", cliente: "PDI · Lab. Criminalística", formato: "F4", estado: "borrador", total: 1207774, otNumero: null, fecha: "2026-07-03" },
-  { id: "4", numero: "COT-2026-14388", cliente: "Aduanas Valparaíso", formato: "F2", estado: "rechazada", total: 288000, otNumero: null, fecha: "2026-06-20" },
-];
-
-const ESTADO_PILL: Record<Cot["estado"], string> = {
-  borrador: "gray",
-  enviada: "blue",
-  aceptada: "green",
-  rechazada: "red",
-  // La API expone "expirada" (common/estados.ts); el legacy la llama "Vencida".
-  // Se mapean ambas para no dejar sin color el estado que llega del backend.
-  expirada: "amber",
-  vencida: "amber",
-  anulada: "gray",
-};
+function EstadoChip({ estado }: { estado: string }) {
+  return <span className={`pill ${ESTADO_PILL[estado] ?? "gray"}`}>{ESTADO_LABEL[estado] ?? estado}</span>;
+}
 
 export default function CotizacionesPage() {
-  const [cots, setCots] = useState<Cot[]>(DEMO);
-  const [origen, setOrigen] = useState<"api" | "demo">("demo");
-  const [filtro, setFiltro] = useState("");
-  const [msg, setMsg] = useState<string>("");
+  const [cots, setCots] = useState<any[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState("");
+  const [msg, setMsg] = useState("");
+  const [filtro, setFiltro] = useState<Filtro>("todas");
+  const [buscar, setBuscar] = useState("");
 
-  const authHeaders = (): Record<string, string> => {
-    const token = typeof window !== "undefined" ? localStorage.getItem("lims_token") : null;
-    const h: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) h.Authorization = `Bearer ${token}`;
-    return h;
-  };
+  const [detalle, setDetalle] = useState<any | null>(null);
+  const [editando, setEditando] = useState(false);
+  const [aceptando, setAceptando] = useState<any | null>(null);
+  const [anulando, setAnulando] = useState<any | null>(null);
+  // Etiquetas de los combos (forma de pago, medio de envío, tipo de cliente).
+  const [params, setParams] = useState<Record<string, Opcion[]>>({});
+  useEffect(() => {
+    pedir<any>("GET", "/cotizaciones/config").then((c) => setParams(c?.parametros ?? {})).catch(() => {});
+  }, []);
 
-  function cargar() {
-    fetch(`${API}/cotizaciones`, { headers: authHeaders() })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((data) => {
-        const arr = Array.isArray(data) ? data : data?.data ?? [];
-        if (Array.isArray(arr) && arr.length) {
-          setCots(arr.map((c: any): Cot => ({
-            id: c.id,
-            numero: c.codigo ?? c.numero ?? "—",
-            cliente: c.cliente?.razonSocial ?? c.cliente?.nombre ?? (typeof c.cliente === "string" ? c.cliente : "—"),
-            formato: c.formato ?? "—",
-            estado: c.estado,
-            total: Number(c.total ?? 0),
-            otNumero: c.ot?.codigo ?? c.otCodigo ?? null,
-            fecha: c.fecha ?? c.createdAt ?? c.created_at ?? "",
-          })));
-          setOrigen("api");
-        }
-      })
-      .catch(() => setOrigen("demo"));
-  }
-  useEffect(() => { cargar(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
-
-  async function accion(id: string, verbo: "enviar" | "aceptar" | "rechazar") {
-    setMsg("");
+  const cargar = useCallback(async () => {
+    setCargando(true);
     try {
-      const body = verbo === "rechazar" ? JSON.stringify({ motivo: "Rechazada desde la lista" }) : undefined;
-      const r = await fetch(`${API}/cotizaciones/${id}/${verbo}`, { method: "POST", headers: authHeaders(), body });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message ?? `Error ${r.status}`);
-      setMsg(verbo === "aceptar" ? `Cotización aceptada · OT generada: ${j.ot?.codigo ?? j.otCodigo ?? "OK"}` : `Cotización ${verbo === "enviar" ? "enviada" : "rechazada"}.`);
-      cargar();
+      const d = await pedir<any>("GET", "/cotizaciones");
+      setCots(Array.isArray(d) ? d : d?.data ?? []);
+      setError("");
     } catch (e: any) {
-      setMsg(Array.isArray(e.message) ? e.message.join(", ") : e.message);
+      setError(e.message);
+    } finally {
+      setCargando(false);
     }
-  }
+  }, []);
 
-  const vis = cots.filter(
-    (c) =>
-      !filtro ||
-      c.cliente.toLowerCase().includes(filtro.toLowerCase()) ||
-      c.numero.toLowerCase().includes(filtro.toLowerCase()),
-  );
+  const abrir = useCallback(async (id: string) => {
+    try {
+      setDetalle(await pedir("GET", `/cotizaciones/${id}`));
+      setEditando(false);
+    } catch (e: any) {
+      setMsg(e.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    cargar();
+    // ?abrir=<id> (al volver de «Nueva cotización») abre directamente el detalle.
+    const id = new URLSearchParams(window.location.search).get("abrir");
+    if (id) abrir(id);
+  }, [cargar, abrir]);
+
+  const conteo = (f: Filtro) =>
+    cots.filter((c) => (f === "todas" ? true : f === "historico" ? esHistorico(c.estado) : c.estado === f)).length;
+
+  const vis = cots.filter((c) => {
+    if (filtro === "historico" ? !esHistorico(c.estado) : filtro !== "todas" && c.estado !== filtro) return false;
+    const q = buscar.trim().toLowerCase();
+    return !q || `${c.codigo} ${c.cliente?.razonSocial ?? ""} ${c.referencia ?? ""}`.toLowerCase().includes(q);
+  });
+
+  const chips: { f: Filtro; l: string }[] = [
+    { f: "todas", l: "Todas" },
+    { f: "abierta", l: "Abiertas" },
+    { f: "aceptada", l: "Aceptadas" },
+    { f: "anulada", l: "Anuladas" },
+    { f: "historico", l: "Histórico" },
+  ];
 
   return (
     <div>
       <h1 className="page">Cotizaciones <span className="tag">≠ OT</span></h1>
       <p className="subtitle">
-        Etapa comercial. Una cotización aceptada genera la OT (expediente). En contratos internos no hay cotización.{" "}
-        {origen === "demo" && <span style={{ color: "var(--amber)" }}>· Datos de muestra (backend no conectado)</span>}
+        Abierta → Aceptada (documento de aceptación, genera la OT) o Anulada. Las cotizaciones anteriores al nuevo flujo quedan como histórico de solo lectura.
       </p>
 
+      {error && <div className="alert warn">{error}</div>}
       {msg && <div className="alert info" style={{ marginBottom: 10 }}>{msg}</div>}
 
-      <div className="toolbar">
-        <input
-          placeholder="Buscar por cliente o N°…"
-          style={{ flex: 1 }}
-          value={filtro}
-          onChange={(e) => setFiltro(e.target.value)}
-        />
-        <Link href="/cotizaciones/nueva" className="btn primary sm">＋ Nueva Cotización</Link>
+      <div className="toolbar" style={{ flexWrap: "wrap", gap: 6 }}>
+        {chips.map(({ f, l }) => (
+          <button key={f} className={`btn sm ${filtro === f ? "primary" : "outline"}`} onClick={() => setFiltro(f)}>
+            {l} <span style={{ opacity: 0.75, marginLeft: 4 }}>{conteo(f)}</span>
+          </button>
+        ))}
+        <input placeholder="Buscar por N°, cliente o referencia…" style={{ flex: 1, minWidth: 200 }} value={buscar} onChange={(e) => setBuscar(e.target.value)} />
+        <Link href={"/cotizaciones/nueva" as any} className="btn primary sm">＋ Nueva Cotización</Link>
       </div>
 
       <div className="card card--table">
@@ -127,61 +130,308 @@ export default function CotizacionesPage() {
               <th>Formato</th>
               <th>Estado</th>
               <th className="num">Total (IVA exento)</th>
-              <th>OT generada</th>
-              <th>Fecha</th>
+              <th>Válida hasta</th>
+              <th>OT</th>
+              <th>Emisión</th>
               <th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {vis.map((c) => (
               <tr key={c.id}>
-                <td><span className="codigo">{c.numero}</span></td>
-                <td>{c.cliente}</td>
-                <td>{c.formato}</td>
-                <td><span className={`pill ${ESTADO_PILL[c.estado]}`}>{c.estado}</span></td>
-                <td className="num">{clp(c.total)}</td>
                 <td>
-                  {c.otNumero ? (
-                    <Link href={"/ot" as any} className="codigo" style={{ textDecoration: "underline" }}>
-                      {c.otNumero}
-                    </Link>
+                  <button className="codigo" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textDecoration: "underline" }} onClick={() => abrir(c.id)}>
+                    {c.codigo}
+                  </button>
+                </td>
+                <td>{c.cliente?.razonSocial ?? "—"}</td>
+                <td>{c.formato ?? "—"}</td>
+                <td><EstadoChip estado={c.estado} /></td>
+                <td className="num">{money(c.total, c.moneda === "USD" ? "USD" : "CLP")}</td>
+                <td>{fechaDia(c.validaHasta ?? c.expiraAt)}</td>
+                <td>
+                  {c.ot ? (
+                    <>
+                      <Link href={`/ot/${c.ot.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{c.ot.codigo}</Link>
+                      {c.ot.opiPendiente && <span className="pill amber" style={{ marginLeft: 6 }}>OPI pendiente</span>}
+                    </>
                   ) : (
                     <span style={{ color: "var(--muted)" }}>—</span>
                   )}
                 </td>
-                <td style={{ color: "var(--muted)" }}>{fecha(c.fecha)}</td>
+                <td style={{ color: "var(--muted)" }}>{fechaDia(c.fechaEmision ?? c.createdAt)}</td>
                 <td>
-                  {origen === "api" ? (
-                    <div style={{ display: "flex", gap: 6 }}>
-                      {c.estado === "borrador" && (
-                        <button className="btn sm" onClick={() => accion(c.id, "enviar")}>Enviar</button>
-                      )}
-                      {c.estado === "enviada" && (
-                        <button className="btn primary sm" onClick={() => accion(c.id, "aceptar")}>Aceptar → OT</button>
-                      )}
-                      {(c.estado === "borrador" || c.estado === "enviada") && (
-                        <button className="btn sm" onClick={() => accion(c.id, "rechazar")}>Rechazar</button>
-                      )}
-                      {["aceptada", "rechazada", "anulada", "expirada", "vencida"].includes(c.estado) && (
-                        <span style={{ color: "var(--muted)" }}>—</span>
-                      )}
-                    </div>
-                  ) : (
-                    <span style={{ color: "var(--muted)" }}>—</span>
-                  )}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button className="btn outline sm" onClick={() => abrir(c.id)}>{c.estado === "abierta" ? "Ver / editar" : "Ver"}</button>
+                    {(c.estado === "abierta" || c.estado === "enviada") && (
+                      <button className="btn primary sm" onClick={() => setAceptando(c)}>Registrar aceptación</button>
+                    )}
+                    {c.estado === "abierta" && (
+                      <button className="btn outline sm" onClick={() => setAnulando(c)}>Anular</button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
-            {vis.length === 0 && (
-              <tr>
-                <td colSpan={8} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
-                  Sin resultados
-                </td>
-              </tr>
+            {!cargando && vis.length === 0 && (
+              <tr><td colSpan={9} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Sin cotizaciones para este filtro.</td></tr>
+            )}
+            {cargando && (
+              <tr><td colSpan={9} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Cargando…</td></tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* ---------- Detalle / edición ---------- */}
+      {detalle && (
+        <Panel
+          modo="drawer"
+          titulo={<>Cotización <span className="codigo">{detalle.codigo}</span> <EstadoChip estado={detalle.estado} /></>}
+          onCerrar={() => { setDetalle(null); setEditando(false); }}
+        >
+          {editando && detalle.estado === "abierta" ? (
+            <CotizacionForm
+              modo="editar"
+              inicial={detalle}
+              onCancelar={() => setEditando(false)}
+              onGuardado={async () => {
+                setMsg(`Cotización ${detalle.codigo} actualizada.`);
+                await cargar();
+                await abrir(detalle.id);
+              }}
+            />
+          ) : (
+            <DetalleCotizacion
+              cot={detalle}
+              params={params}
+              onEditar={() => setEditando(true)}
+              onAceptar={() => setAceptando(detalle)}
+              onAnular={() => setAnulando(detalle)}
+            />
+          )}
+        </Panel>
+      )}
+
+      {aceptando && (
+        <DialogoAceptacion
+          cot={aceptando}
+          onCerrar={() => setAceptando(null)}
+          onHecho={async (r) => {
+            setAceptando(null);
+            setMsg(r?.mensaje ?? "Aceptación registrada.");
+            await cargar();
+            if (detalle?.id === aceptando.id) await abrir(aceptando.id);
+          }}
+        />
+      )}
+
+      {anulando && (
+        <DialogoAnulacion
+          cot={anulando}
+          onCerrar={() => setAnulando(null)}
+          onHecho={async () => {
+            setAnulando(null);
+            setMsg(`Cotización ${anulando.codigo} anulada.`);
+            await cargar();
+            if (detalle?.id === anulando.id) await abrir(anulando.id);
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+ * Detalle de solo lectura (aceptadas, anuladas, históricas o Abierta sin editar)
+ * ------------------------------------------------------------------------ */
+function DetalleCotizacion({ cot, params, onEditar, onAceptar, onAnular }: { cot: any; params: Record<string, Opcion[]>; onEditar: () => void; onAceptar: () => void; onAnular: () => void }) {
+  const mon = cot.moneda === "USD" ? "USD" : "CLP";
+  const Campo = ({ l, v, full }: { l: string; v: React.ReactNode; full?: boolean }) => (
+    <div className="field readonly" style={full ? { gridColumn: "1 / -1" } : undefined}>
+      <label>{l}</label>
+      <div style={{ whiteSpace: "pre-wrap", padding: "4px 0" }}>{v ?? "—"}</div>
+    </div>
+  );
+  return (
+    <div>
+      {esHistorico(cot.estado) && (
+        <div className="alert info">Cotización histórica (estado «{cot.estado}»): se conserva de solo lectura.</div>
+      )}
+      {cot.ot?.opiPendiente && (
+        <div className="alert warn">La OT {cot.ot.codigo} está con <b>OPI pendiente</b> (disposición del Director con cobro). Registre la OPI en la OT.</div>
+      )}
+      <div className="toolbar" style={{ marginBottom: 10, gap: 6 }}>
+        {cot.estado === "abierta" && <button className="btn primary sm" onClick={onEditar}>Editar</button>}
+        {(cot.estado === "abierta" || cot.estado === "enviada") && <button className="btn success sm" onClick={onAceptar}>Registrar aceptación</button>}
+        {cot.estado === "abierta" && <button className="btn outline sm" onClick={onAnular}>Anular</button>}
+        <div className="spacer" />
+        {cot.ot && <Link href={`/ot/${cot.ot.id}` as any} className="btn outline sm">Ir a la OT {cot.ot.codigo}</Link>}
+      </div>
+
+      <div className="form-grid cols-3">
+        <Campo l="Cliente" v={<>{cot.cliente?.razonSocial}{cot.cliente?.rut ? ` · ${fmtRut(cot.cliente.rut)}` : ""}</>} />
+        <Campo l="Tipo de cliente (al emitir)" v={etiquetaDe(params.tipo_cliente, cot.tipoClienteCodigo)} />
+        <Campo l="Formato" v={cot.formato} />
+        <Campo l="Emisión" v={fechaDia(cot.fechaEmision)} />
+        <Campo l="Válida hasta" v={fechaDia(cot.validaHasta ?? cot.expiraAt)} />
+        <Campo l="Moneda" v={mon === "USD" ? `US$ · dólar ${cot.dolarValor} (${fechaDia(cot.dolarFecha)})` : "CLP"} />
+        {cot.dolarMotivo && <Campo l="Motivo cambio de dólar" v={cot.dolarMotivo} full />}
+        <Campo l="Forma de pago" v={etiquetaDe(params.forma_pago, cot.formaPago)} />
+        <Campo l="Medio de envío" v={etiquetaDe(params.medio_envio, cot.medioEnvio)} />
+        <Campo l="Referencia" v={cot.referencia} />
+        <Campo l="Descripción técnica y alcance" v={cot.descripcionTecnica} full />
+      </div>
+
+      <table className="data" style={{ margin: "10px 0" }}>
+        <thead><tr><th>Código</th><th>Descripción</th><th className="num">Cant.</th><th className="num">P. unitario</th><th className="num">Subtotal</th></tr></thead>
+        <tbody>
+          {(cot.lineas ?? []).map((l: any) => (
+            <tr key={l.id}>
+              <td><span className="codigo">{l.ensayoCodigo ?? l.tipo}</span></td>
+              <td>{l.descripcion ?? "—"}</td>
+              <td className="num">{l.cantidad}</td>
+              <td className="num">{money(l.precioUnitario, mon)}</td>
+              <td className="num">{money(l.subtotal, mon)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot><tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total (IVA exento)</td><td className="num" style={{ fontWeight: 800 }}>{money(cot.total, mon)}</td></tr></tfoot>
+      </table>
+
+      <div className="form-grid cols-2">
+        <Campo l="Condiciones adicionales (se imprimen)" v={cot.condicionesAdicionales} full />
+        <Campo l="Observaciones internas (no se imprimen)" v={cot.observacionesInternas} full />
+        {cot.aceptacionTipo && (
+          <>
+            <Campo l="Documento de aceptación" v={ACEPTACION_LABEL[cot.aceptacionTipo] ?? cot.aceptacionTipo} />
+            <Campo l="Número / fecha" v={`${cot.aceptacionNumero ?? "s/n"} · ${fechaDia(cot.aceptacionFecha)}`} />
+            <Campo l="Adjunto" v={cot.aceptacionAdjunto} />
+            <Campo l="Cobro" v={cot.conCobro ? "Con cobro" : "Sin cobro"} />
+          </>
+        )}
+        {cot.ot && <Campo l="OT generada" v={`${cot.ot.codigo} · ${ORIGEN_LABEL[cot.ot.origenTrabajo] ?? cot.ot.origenTrabajo ?? "—"}`} />}
+        {cot.estado === "anulada" && (
+          <Campo l="Anulación" v={`${cot.anulacionMotivo ?? "Sin motivo registrado"}${cot.anuladaAt ? ` · ${fecha(cot.anuladaAt)}` : ""}`} full />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------------------------------------------------
+ * Registrar aceptación (SVT6 / SVT7)
+ * ------------------------------------------------------------------------ */
+function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerrar: () => void; onHecho: (r: any) => void }) {
+  const [tipo, setTipo] = useState<string>(cot.tipoClienteCodigo === "ejercito" ? "OPI_RESOLUCION" : "OC");
+  const [numero, setNumero] = useState("");
+  const [fechaDoc, setFechaDoc] = useState(hoyISO());
+  const [adjunto, setAdjunto] = useState("");
+  const [conCobro, setConCobro] = useState(true);
+  const [error, setError] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const requiereNumero = tipo === "OPI_RESOLUCION" || tipo === "OC";
+
+  async function confirmar() {
+    setError("");
+    if (requiereNumero && !numero.trim()) return setError("Indique el número del documento.");
+    setEnviando(true);
+    try {
+      const r = await pedir("POST", `/cotizaciones/${cot.id}/aceptar`, {
+        tipo,
+        numero: numero.trim() || undefined,
+        fecha: fechaDoc,
+        adjunto: adjunto.trim() || undefined,
+        conCobro,
+      });
+      onHecho(r);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  return (
+    <Panel titulo={<>Registrar aceptación · <span className="codigo">{cot.codigo}</span></>} onCerrar={onCerrar}>
+      {error && <div className="alert warn">{error}</div>}
+      <div className="form-grid cols-2">
+        <div className="field" style={{ gridColumn: "1 / -1" }}>
+          <label>Documento de aceptación <span className="req">*</span></label>
+          <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
+            {Object.entries(ACEPTACION_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Número {requiereNumero && <span className="req">*</span>}</label>
+          <input value={numero} onChange={(e) => setNumero(e.target.value)} maxLength={60}
+            placeholder={tipo === "DISPOSICION_DIRECTOR" ? "Ref. de la disposición" : tipo === "CORREO" ? "Opcional" : ""} />
+        </div>
+        <div className="field">
+          <label>Fecha <span className="req">*</span></label>
+          <input type="date" value={fechaDoc} onChange={(e) => setFechaDoc(e.target.value)} />
+        </div>
+        <div className="field" style={{ gridColumn: "1 / -1" }}>
+          <label>Adjunto (referencia del archivo o ubicación)</label>
+          <input value={adjunto} onChange={(e) => setAdjunto(e.target.value)} maxLength={300} placeholder="p. ej. ruta del PDF en el repositorio documental" />
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, gridColumn: "1 / -1" }}>
+          <input type="checkbox" style={{ width: "auto" }} checked={conCobro} onChange={(e) => setConCobro(e.target.checked)} />
+          Con cobro
+        </label>
+      </div>
+      {tipo === "DISPOSICION_DIRECTOR" && (
+        <div className="alert warn" style={{ marginTop: 10 }}>
+          OT por disposición del Director (IDIC-PG03 6.4 g): {conCobro
+            ? <>la OT quedará con <b>OPI pendiente</b> hasta que se registre la OPI en la OT.</>
+            : <>sin cobro: no espera OPI, pero igual registra horas y costo.</>}
+        </div>
+      )}
+      <p className="subtitle" style={{ margin: "10px 0 0" }}>Al confirmar, la cotización pasa a <b>Aceptada</b> y se genera la Orden de Trabajo.</p>
+      <div className="toolbar" style={{ marginTop: 12 }}>
+        <button className="btn outline sm" onClick={onCerrar}>Cancelar</button>
+        <div className="spacer" />
+        <button className="btn success sm" disabled={enviando} onClick={confirmar}>{enviando ? "Registrando…" : "Confirmar aceptación"}</button>
+      </div>
+    </Panel>
+  );
+}
+
+/* --------------------------------------------------------------------------
+ * Anular (motivo obligatorio)
+ * ------------------------------------------------------------------------ */
+function DialogoAnulacion({ cot, onCerrar, onHecho }: { cot: any; onCerrar: () => void; onHecho: () => void }) {
+  const [motivo, setMotivo] = useState("");
+  const [error, setError] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  async function confirmar() {
+    setError("");
+    if (motivo.trim().length < 3) return setError("Indique el motivo de la anulación.");
+    setEnviando(true);
+    try {
+      await pedir("POST", `/cotizaciones/${cot.id}/anular`, { motivo: motivo.trim() });
+      onHecho();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setEnviando(false);
+    }
+  }
+  return (
+    <Panel titulo={<>Anular cotización · <span className="codigo">{cot.codigo}</span></>} onCerrar={onCerrar} ancho={480}>
+      {error && <div className="alert warn">{error}</div>}
+      <div className="field">
+        <label>Motivo <span className="req">*</span></label>
+        <textarea rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={1000} />
+      </div>
+      <p className="subtitle" style={{ margin: "8px 0 0" }}>La anulación no se puede deshacer. La cotización queda de solo lectura.</p>
+      <div className="toolbar" style={{ marginTop: 12 }}>
+        <button className="btn outline sm" onClick={onCerrar}>Cancelar</button>
+        <div className="spacer" />
+        <button className="btn sm" style={{ background: "var(--red)", color: "#fff" }} disabled={enviando} onClick={confirmar}>
+          {enviando ? "Anulando…" : "Anular cotización"}
+        </button>
+      </div>
+    </Panel>
   );
 }

@@ -3,6 +3,26 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fecha } from "@/lib/format";
+import { ORIGEN_LABEL } from "../cotizaciones/_components/comercial";
+
+/**
+ * Origen de la OT (Comercial R2) + marcas «OPI pendiente» y «Sin cobro».
+ * `origenTrabajo` guarda un código (COTIZACION, INTERNACION, DISPOSICION,
+ * INTERLABORATORIO, OT_INTERNA); las OT heredadas pueden traer texto libre.
+ */
+const origenBadges = (r: any) => (
+  <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+    {r.origenTrabajo ? (
+      <span className={ORIGEN_LABEL[r.origenTrabajo] ? "pill teal" : ""} title={r.origenTrabajo}>
+        {ORIGEN_LABEL[r.origenTrabajo] ?? r.origenTrabajo}
+      </span>
+    ) : (
+      <span style={{ color: "var(--muted)" }}>—</span>
+    )}
+    {r.opiPendiente && <span className="pill amber" title="Disposición del Director con cobro: falta registrar la OPI">OPI pendiente</span>}
+    {r.conCobro === false && <span className="pill gray" title="OT sin cobro: registra horas y costo">Sin cobro</span>}
+  </span>
+);
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -70,6 +90,7 @@ export default function OtPage() {
               <th>Ingreso</th>
               <th>Prioridad</th>
               <th>Estado</th>
+              <th>Origen</th>
               <th>Flujo</th>
             </tr>
           </thead>
@@ -83,14 +104,15 @@ export default function OtPage() {
                 <td>{fecha(r.fechaIngreso ?? r.createdAt)}</td>
                 <td>{r.prioridad ?? "normal"}</td>
                 <td>{estadoBadge(r.estado)}</td>
+                <td>{origenBadges(r)}</td>
                 <td>{flujoBadge(r.flujo)}</td>
               </tr>
             ))}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Sin órdenes de trabajo todavía. Se generan al aceptar una cotización.</td></tr>
+              <tr><td colSpan={7} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Sin órdenes de trabajo todavía. Se generan al aceptar una cotización.</td></tr>
             )}
             {loading && (
-              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Cargando…</td></tr>
+              <tr><td colSpan={7} style={{ textAlign: "center", padding: 32, color: "var(--muted)" }}>Cargando…</td></tr>
             )}
           </tbody>
         </table>
