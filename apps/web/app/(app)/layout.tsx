@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import IdleLogout from "@/components/IdleLogout";
+import { FeedbackHost } from "@/components/ui/feedback";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -35,6 +36,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       </header>
       <main className="mainarea">{children}</main>
       <IdleLogout />
+      <FeedbackHost />
     </div>
   );
 }

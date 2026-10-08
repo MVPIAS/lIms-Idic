@@ -20,6 +20,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { errorMensaje } from "@/lib/apiError";
 import { esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import { toast, confirmar } from "@/components/ui/feedback";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -277,6 +278,24 @@ export default function QcPage() {
     }
   }
 
+  /** DELETE /qc/control/:id: retira (soft delete) un control NO aprobado registrado por error. */
+  async function eliminarControl(c: Control) {
+    const si = await confirmar({
+      titulo: "¿Eliminar este control?",
+      mensaje: "Úsalo solo para controles registrados por error. El control deja de contar para el estado de QC de la OT (queda en el historial del sistema).",
+      peligro: true,
+    });
+    if (!si) return;
+    try {
+      const r = await fetch(`${API}/qc/control/${c.id}`, { method: "DELETE", headers: auth() });
+      if (!r.ok) throw new Error(await errorMensaje(r));
+      toast.ok("Control eliminado.");
+      await cargar(otId);
+    } catch (e: any) {
+      toast.error(`No se pudo eliminar: ${e.message}`);
+    }
+  }
+
   const otSel = useMemo(() => ots.find((o) => o.id === otId), [ots, otId]);
 
   return (
@@ -455,6 +474,11 @@ export default function QcPage() {
                 {c.resultado !== "rechazado" && (
                   <button className="btn sm" onClick={() => revisar(c.id, "rechazado")}>
                     Rechazar
+                  </button>
+                )}
+                {c.resultado !== "aprobado" && (
+                  <button className="btn ghost-danger sm" onClick={() => eliminarControl(c)}>
+                    Eliminar
                   </button>
                 )}
               </div>

@@ -16,7 +16,7 @@ export default function LoginPage() {
     setError(null);
     try {
       await api.login(username.trim(), password);
-      router.push("/dashboard");
+      router.push("/inicio");
     } catch (err: any) {
       setError(err.message ?? "Error al iniciar sesión");
     } finally {

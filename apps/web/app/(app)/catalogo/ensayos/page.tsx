@@ -11,8 +11,8 @@ export default function EnsayosPage() {
       endpoint="cat/ensayos"
       columnas={[
         { key: "codigo", label: "Código", render: codigoCell },
-        { key: "nombre", label: "Nombre" },
-        { key: "precio", label: "Precio", num: true, render: precio },
+        { key: "nombre", label: "Nombre", editable: true },
+        { key: "precio", label: "Precio", num: true, render: precio, editable: { tipo: "number" } },
         { key: "familia", label: "Familia", render: (_v, row) => row.familia?.nombre ?? "—" },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}

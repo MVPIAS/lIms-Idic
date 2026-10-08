@@ -3,13 +3,14 @@
 import { useEffect, useState } from "react";
 import { validarFormulario, propsInput } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import RequierePermiso from "@/components/RequierePermiso";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
 
-export default function UsuariosPage() {
+function UsuariosContenido() {
   const [rows, setRows] = useState<any[]>([]);
   const [roles, setRoles] = useState<any[]>([]);
   const [unidades, setUnidades] = useState<any[]>([]);
@@ -143,5 +144,14 @@ export default function UsuariosPage() {
         vacio={<>Sin usuarios</>}
       />
     </div>
+  );
+}
+
+/** Solo para quien tiene admin.usuarios: sin permiso se muestra «Sin acceso» (y no se piden datos). */
+export default function UsuariosPage() {
+  return (
+    <RequierePermiso perm="admin.usuarios" titulo="la gestión de usuarios">
+      <UsuariosContenido />
+    </RequierePermiso>
   );
 }

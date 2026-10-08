@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { validarFormulario, esMoneda, esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import { toast, confirmar } from "@/components/ui/feedback";
 
 // Contrato §4.4.4 / §4.4.5 · CONSUMIBLES con lotes/stock/caducidad + KARDEX.
 // Un consumible se recibe en LOTES (stock, nº de lote, caducidad); cada ensayo
@@ -223,6 +224,26 @@ export default function ConsumiblesPage() {
     }
   }
 
+  /** DELETE /consumibles/:id no borra: marca el consumible como inactivo (conserva lotes y kardex). */
+  async function desactivar(r: any) {
+    const si = await confirmar({
+      titulo: `¿Desactivar «${r.nombre}»?`,
+      mensaje: "El consumible deja de ofrecerse para nuevos consumos. Sus lotes y su kardex se conservan.",
+      confirmarTexto: "Desactivar",
+      peligro: true,
+    });
+    if (!si) return;
+    try {
+      const res = await fetch(`${API}/consumibles/${r.id}`, { method: "DELETE", headers: auth() });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
+      toast.ok(`«${r.nombre}» desactivado.`);
+      if (detalle?.id === r.id) setDetalle(null);
+      await cargar();
+    } catch (e: any) {
+      toast.error(`No se pudo desactivar: ${e.message}`);
+    }
+  }
+
   async function abrirDetalle(r: any) {
     setDetalle(r);
     setKardex(null);
@@ -417,7 +438,14 @@ export default function ConsumiblesPage() {
         loading={loading}
         headerSearch={false}
         onRowClick={(r) => abrirDetalle(r)}
-        acciones={(r) => <button className="btn sm" onClick={() => abrirEditarCons(r)}>Editar</button>}
+        acciones={(r) => (
+          <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
+            <button className="btn outline sm" onClick={() => abrirEditarCons(r)}>Editar</button>
+            {r.activo !== false && (
+              <button className="btn ghost-danger sm" onClick={() => desactivar(r)}>Desactivar</button>
+            )}
+          </div>
+        )}
         accionesLabel=""
         vacio={<>Sin consumibles.</>}
       />
