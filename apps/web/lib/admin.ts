@@ -187,6 +187,27 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 /** Acepta `[...]` o `{ data: [...] }`. */
+/**
+ * El backend responde el resolver como {tipoDocumento, unidad, origen, unidadRegla, pasos:[{…, responsables:[{usuarioId,nombre,via}]}]};
+ * la pantalla trabaja con una lista plana de pasos con `personas`. Acepta también la forma plana (datos de ejemplo).
+ */
+function adaptarResolver(x: any): PasoResuelto[] {
+  if (Array.isArray(x)) return x as PasoResuelto[];
+  const origen: PasoResuelto["origen"] = String(x?.origen ?? "").toUpperCase() === "DEFECTO" ? "defecto" : "override";
+  return (x?.pasos ?? []).map((p: any) => ({
+    orden: p.orden,
+    accion: p.accion,
+    rol: { codigo: p.rol?.codigo ?? "", nombre: p.rol?.nombre ?? "" },
+    nivelUnidad: p.nivelUnidad,
+    unidad: p.unidad ? { codigo: p.unidad.codigo, nombre: p.unidad.nombre } : null,
+    personas: (p.responsables ?? p.personas ?? []).map((r: any) => ({
+      usuarioId: r.usuarioId,
+      nombre: r.nombre,
+      rol: r.via === "titular" || r.via === "subrogante" ? r.via : r.rol,
+    })),
+    origen,
+  }));
+}
 function lista<T>(x: any): T[] {
   if (Array.isArray(x)) return x as T[];
   if (x && Array.isArray(x.data)) return x.data as T[];
@@ -245,7 +266,7 @@ export const adminApi = {
   actualizarFirma: (id: string, d: ReglaInput) => patch<ReglaFirma>(`/firmas-matriz/${id}`, d),
   eliminarFirma: (id: string) => del<void>(`/firmas-matriz/${id}`),
   resolverFirmas: (tipoDocumento: string, unidadId: string) =>
-    get<any>(`/firmas-matriz/resolver${qs({ tipoDocumento, unidadId })}`).then((x) => lista<PasoResuelto>(x)),
+    get<any>(`/firmas-matriz/resolver${qs({ tipoDocumento, unidadId })}`).then((x) => adaptarResolver(x)),
 
   // Alcance propio
   miAlcance: () => get<MiAlcance>("/me/alcance"),
