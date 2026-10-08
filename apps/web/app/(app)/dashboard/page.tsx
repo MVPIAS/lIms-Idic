@@ -100,7 +100,7 @@ export default function DashboardPage() {
           <h2 style={{ fontSize: 13, fontWeight: 700, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px", margin: "6px 0 8px" }}>
             {g.titulo}
           </h2>
-          <div className="kpis">
+          <div className="kpis" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" }}>
             {g.kpis.map((k) => {
               const v = valores[k.clave];
               return (
