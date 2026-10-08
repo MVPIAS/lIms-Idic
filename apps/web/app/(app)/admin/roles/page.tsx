@@ -55,7 +55,8 @@ function Roles() {
   const [nuevo, setNuevo] = useState(false);
   const [sucio, setSucio] = useState(false);
 
-  const lista: Rol[] = useMemo(() => ordenarPorNivel(roles.data ?? []), [roles.data]);
+  // Sin duplicados por id (una recarga puede llegar dos veces en modo desarrollo).
+  const lista: Rol[] = useMemo(() => ordenarPorNivel(Array.from(new Map((roles.data ?? []).map((r) => [r.id, r])).values())), [roles.data]);
   useEffect(() => { if (!selId && lista.length) setSelId(lista[0].id); }, [lista, selId]);
   const sel = lista.find((r) => r.id === selId) ?? null;
 

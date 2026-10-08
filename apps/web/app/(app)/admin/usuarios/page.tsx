@@ -175,7 +175,7 @@ function Usuarios() {
 
 function ChipAsignacion({ a }: { a: Asignacion }) {
   const v = vigente(a);
-  const temporal = !!(a.vigenteDesde || a.vigenteHasta);
+  const temporal = !!a.vigenteHasta /* el backend siempre fija vigenteDesde (alta); temporal = con fecha de término */;
   const m = a.unidad ? metaTipo(a.unidad.tipo) : null;
   return (
     <span className={`inline-flex items-center gap-1 rounded-full px-2 py-[1px] text-[11px] font-semibold border ${
@@ -345,7 +345,7 @@ function TabRoles({ usuario, roles, rolPorId, unidades, onCambio }: {
           {usuario.asignaciones.map((a) => {
             const r = rolPorId.get(a.rol.id);
             const v = vigente(a);
-            const temporal = !!(a.vigenteDesde || a.vigenteHasta);
+            const temporal = !!a.vigenteHasta /* el backend siempre fija vigenteDesde (alta); temporal = con fecha de término */;
             const nivel = NIVEL_ROL[a.rol.nivel];
             return (
               <div key={a.id} className="card flex gap-3 items-start" style={{ marginBottom: 0, padding: 12, opacity: v === "vencida" ? 0.6 : 1 }}>
