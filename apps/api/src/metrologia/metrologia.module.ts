@@ -13,10 +13,14 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { calcularCalibracion, type Componente, type Divisores, type Punto } from "./metrologia.calc";
+import { MOTORES, calcularConMotor, motorDeProceso, type ResumenMotor } from "./motores";
+import { CASOS_REFERENCIA, esClaveExcel, verificarParidad } from "./motores/paridad";
 
 // ---------------------------------------------------------------------------
-// Módulo Metrología (LMT) · 12 procesos de calibración con motor GUM
-// parametrizado. Todo por SQL crudo (las tablas met_* no están en Prisma).
+// Módulo Metrología (LMT). Las instrucciones de trabajo con caso real usan su
+// motor validado (./motores, idéntico al Excel del LMT); las que aún no tienen
+// caso real (ITM03, ITV05) usan el motor GUM parametrizado (metrologia.calc).
+// Todo por SQL crudo (las tablas met_* no están en Prisma).
 // ---------------------------------------------------------------------------
 const prisma = new PrismaClient();
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -36,8 +40,37 @@ const CrearSchema = z.object({
   ambiente: z.record(z.any()).default({}),
   cond: z.record(z.coerce.number()).default({}),
   intervaloMeses: z.coerce.number().default(12),
-  puntos: z.array(PuntoSchema).min(1, "Debe registrar al menos un punto de calibración"),
+  puntos: z.array(PuntoSchema).default([]),
+  /** Datos de entrada del motor validado de la IT y correcciones aplicadas (hallazgos). */
+  motor: z.object({ datos: z.record(z.any()), opciones: z.record(z.boolean()).default({}) }).optional(),
 });
+const CalcularSchema = z.object({ datos: z.record(z.any()), opciones: z.record(z.boolean()).default({}) });
+
+/** Código de acreditación del LMT por magnitud. */
+const ACREDITACION: Record<string, string> = {
+  masa: "LC 001", longitud: "LC 004", fuerza: "LC 005", presion: "LC 022", volumen: "LC 023", par: "LC 108", temperatura: "LC 155",
+};
+
+/** Quita los valores del Excel (x_, y_, z_, w_, x, xT) y deja solo las entradas. */
+function soloEntradas(v: any): any {
+  if (Array.isArray(v)) return v.map(soloEntradas);
+  if (v && typeof v === "object") return Object.fromEntries(Object.entries(v).filter(([k]) => !esClaveExcel(k)).map(([k, x]) => [k, soloEntradas(x)]));
+  return v;
+}
+
+/** Calcula con el motor y rechaza datos incompletos (el motor devolvería NaN). */
+function ejecutarMotor(it: string, datos: Record<string, any>, opciones: Record<string, boolean>) {
+  let out: ReturnType<typeof calcularConMotor>;
+  try {
+    out = calcularConMotor(it, datos, opciones);
+  } catch {
+    throw new BadRequestException(`Datos incompletos para ${it}: faltan entradas o alguna no es válida`);
+  }
+  const malos = out.resumen.puntos.filter((p) => !Number.isFinite(p.U));
+  if (!out.resumen.puntos.length || malos.length)
+    throw new BadRequestException(`Datos incompletos para ${it}: revise las lecturas (${malos.length} punto(s) sin resultado)`);
+  return out;
+}
 
 function tenantId(req: any): string {
   const id = req?.user?.tenantId;
@@ -117,6 +150,44 @@ export class MetrologiaController {
     return rows[0];
   }
 
+  /** Motores validados: IT, unidades, correcciones propuestas y casos de referencia. */
+  @Get("motores")
+  @RequierePermiso("metrologia.ver")
+  motores() {
+    return {
+      data: Object.values(MOTORES).map(({ calcular, resumen, ...m }) => ({
+        ...m, casos: CASOS_REFERENCIA.filter((c) => c.it === m.it).map((c) => ({ caso: c.caso, instrumento: c.instrumento })),
+      })),
+    };
+  }
+
+  /** Evidencia de validación: recalcula los 16 casos reales y los compara con los Excel. */
+  @Get("motores/paridad")
+  @RequierePermiso("metrologia.ver")
+  paridad() {
+    return verificarParidad();
+  }
+
+  /** Datos de entrada de un caso de referencia (sin los valores del Excel). */
+  @Get("motores/:it/ejemplo")
+  @RequierePermiso("metrologia.ver")
+  ejemplo(@Param("it") it: string, @Query("caso") caso?: string) {
+    const m = motorDeProceso(it);
+    if (!m) throw new NotFoundException(`No hay motor validado para ${it}`);
+    const c = CASOS_REFERENCIA.find((x) => x.it === m.it && (!caso || x.caso === caso));
+    if (!c) throw new NotFoundException(`Caso ${caso} no encontrado para ${m.it}`);
+    return { data: { caso: c.caso, instrumento: c.instrumento, datos: soloEntradas(c.datos) } };
+  }
+
+  /** Vista previa: calcula sin guardar (el mismo motor que usa el guardado). */
+  @Post("motores/:it/calcular")
+  @RequierePermiso("metrologia.ver")
+  calcular(@Param("it") it: string, @Body() body: unknown) {
+    if (!motorDeProceso(it)) throw new NotFoundException(`No hay motor validado para ${it}`);
+    const d = CalcularSchema.parse(body);
+    return { data: ejecutarMotor(it, d.datos, d.opciones) };
+  }
+
   @Get("patrones")
   @RequierePermiso("metrologia.ver")
   async patrones(@Req() req: any) {
@@ -133,7 +204,7 @@ export class MetrologiaController {
     const t = tenantId(req);
     const l = Math.min(200, Math.max(1, parseInt(limit ?? "50") || 50));
     const data = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT c.id, c.codigo, c.estado, c.u_max, c.conforme, c.created_at, c.emitido_at,
+      `SELECT c.id, c.codigo, c.estado, c.u_max, c.u_cert, c.motor, c.conforme, c.created_at, c.emitido_at,
               pr.codigo AS proceso, pr.nombre AS proceso_nombre, m.unidad,
               c.instrumento->>'item' AS instrumento, c.instrumento->>'cliente' AS cliente
          FROM met_calibracion c
@@ -141,7 +212,8 @@ export class MetrologiaController {
          JOIN met_magnitud m ON m.id = pr.magnitud_id
         WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL
         ORDER BY c.created_at DESC LIMIT $2`, t, l);
-    return { data };
+    // En fuerza y par la incertidumbre es relativa (%), no en la unidad de la magnitud.
+    return { data: data.map((c) => ({ ...c, unidad_u: (c.motor && MOTORES[c.motor]?.unidadU) || c.unidad })) };
   }
 
   @Get("calibraciones/:id")
@@ -166,6 +238,12 @@ export class MetrologiaController {
     const t = tenantId(req);
     const d = CrearSchema.parse(body);
     const proc = await cargarProceso(d.procesoCodigo);
+    const motor = motorDeProceso(proc.codigo);
+    if (motor) {
+      if (!d.motor) throw new BadRequestException(`${proc.codigo} se calcula con su motor validado: envíe los datos del motor`);
+      return this.crearConMotor(t, proc, motor.it, d, req);
+    }
+    if (!d.puntos.length) throw new BadRequestException("Debe registrar al menos un punto de calibración");
     const divs = await cargarDivisores();
     const puntos: Punto[] = d.puntos.map((p) => ({
       nominal: p.nominal, correccion: p.correccion, uPatron: p.uPatron, deriva: p.deriva, lecturas: p.lecturas,
@@ -232,6 +310,32 @@ export class MetrologiaController {
   }
 
   // ---- helpers --------------------------------------------------------------
+  /** Guarda una calibración calculada con el motor validado de su IT. */
+  private async crearConMotor(t: string, proc: any, it: string, d: z.infer<typeof CrearSchema>, req: any) {
+    const { datos, opciones } = d.motor!;
+    const { resultado, resumen } = ejecutarMotor(it, datos, opciones);
+    const codigo = await this.siguienteCodigo(t);
+    const cal = await prisma.$queryRawUnsafe<any[]>(
+      `INSERT INTO met_calibracion
+         (tenant_id, codigo, proceso_id, patron_id, instrumento, patron_snap, ambiente, cond,
+          u_max, u_cert, conforme, intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen)
+       VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5::jsonb,$6::jsonb,$7::jsonb,'{}'::jsonb,$8,$9,$10,$11,'calculada',$12::uuid,
+               $13,$14::jsonb,$15::jsonb,$16::jsonb,$17::jsonb)
+       RETURNING id, codigo`,
+      t, codigo, proc.id, d.patronId ?? null, JSON.stringify(d.instrumento), JSON.stringify(d.patronSnap), JSON.stringify(d.ambiente),
+      resumen.uMax, resumen.uCert, resumen.conforme, d.intervaloMeses, req?.user?.sub ?? null,
+      it, JSON.stringify(datos), JSON.stringify(opciones), JSON.stringify(resultado), JSON.stringify(resumen));
+    const calId = cal[0].id;
+    let orden = 0;
+    for (const p of resumen.puntos) {
+      await prisma.$executeRawUnsafe(
+        `INSERT INTO met_calibracion_punto (calibracion_id, orden, nominal, error, uc, u_exp, dentro)
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7)`,
+        calId, orden++, p.nominal, p.error, p.uc, p.U, p.conforme);
+    }
+    return { data: { id: calId, codigo, motor: it, resumen } };
+  }
+
   private async siguienteCodigo(t: string): Promise<string> {
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT COALESCE(MAX(NULLIF(regexp_replace(codigo,'^.*-',''),'')::int),0)+1 AS n
@@ -240,6 +344,7 @@ export class MetrologiaController {
   }
 
   private certificadoHtml(cal: any): string {
+    if (cal.motor && cal.resumen) return certificadoMotor(cal);
     const u = cal.unidad, dec = cal.decimales ?? 3;
     const f = (x: any, d = dec) => (x == null || isNaN(Number(x))) ? "—" : Number(x).toLocaleString("es-CL", { minimumFractionDigits: d, maximumFractionDigits: d });
     const ins = cal.instrumento ?? {}, pat = cal.patron_snap ?? {}, amb = cal.ambiente ?? {};
@@ -249,7 +354,7 @@ export class MetrologiaController {
        <td style="text-align:right">± ${f(p.u_exp ?? p.uExp)}</td><td>${p.dentro ? "Cumple" : "No cumple"}</td></tr>`).join("");
     return `
       <h2>CERTIFICADO DE CALIBRACIÓN ${cal.codigo}</h2>
-      <p><b>Laboratorio de Metrología · IDIC · Acreditación LC 001</b><br>Método ${cal.proceso} — ${cal.metodo ?? ""} · Norma ${cal.norma ?? ""}</p>
+      <p><b>Laboratorio de Metrología · IDIC · Acreditación ${ACREDITACION[cal.magnitud] ?? "—"}</b><br>Método ${cal.proceso} — ${cal.metodo ?? ""} · Norma ${cal.norma ?? ""}</p>
       <h3>Instrumento</h3><p>${ins.item ?? "—"} · ${ins.marca ?? ""} · N° serie ${ins.serie ?? "—"} · Cap. ${ins.cap ?? "—"} ${u} · Res. ${ins.res ?? "—"} ${u}<br>Cliente: ${ins.cliente ?? "—"}</p>
       <h3>Condiciones</h3><p>Temperatura (${amb.temp ?? "—"} ± ${amb.tempU ?? "—"}) °C · Humedad (${amb.hum ?? "—"} ± ${amb.humU ?? "—"}) %HR</p>
       <h3>Patrón</h3><p>${pat.nombre ?? "—"} · Clase ${pat.clase ?? "—"} · Cert. ${pat.cert ?? "—"} · Trazabilidad ${pat.trazab ?? "SI"}</p>
@@ -259,6 +364,29 @@ export class MetrologiaController {
         <tbody>${filas}</tbody></table>
       <p style="margin-top:10px"><b>Síntesis:</b> la mayor incertidumbre expandida es ± ${f(cal.u_max)} ${u} para un nivel de confianza del 95 % (k = 2).</p>`;
   }
+}
+
+/** Certificado de una calibración calculada con motor validado. */
+function certificadoMotor(cal: any): string {
+  const m = MOTORES[cal.motor], r: ResumenMotor = cal.resumen;
+  const f = (x: any, d = 4) => (x == null || isNaN(Number(x))) ? "—" : Number(x).toLocaleString("es-CL", { maximumFractionDigits: d });
+  const ins = cal.instrumento ?? {}, pat = cal.patron_snap ?? {}, amb = cal.ambiente ?? {};
+  const corr = Object.entries(cal.opciones ?? {}).filter(([, v]) => v).map(([k]) => m.opciones.find((o) => o.clave === k)?.hallazgo ?? k);
+  const filas = r.puntos.map((p) =>
+    `<tr><td style="text-align:right">${f(p.nominal)}</td><td style="text-align:right">${f(p.error, 6)}</td>
+     <td style="text-align:right">± ${f(p.Ucert ?? p.U, 6)}</td><td>${p.conforme == null ? "—" : p.conforme ? "Cumple" : "No cumple"}</td></tr>`).join("");
+  return `
+    <h2>CERTIFICADO DE CALIBRACIÓN ${cal.codigo}</h2>
+    <p><b>Laboratorio de Metrología · IDIC · Acreditación ${ACREDITACION[cal.magnitud] ?? "—"}</b><br>Método ${cal.proceso} — ${cal.metodo ?? ""}${cal.norma ? " · " + cal.norma : ""}</p>
+    <h3>Instrumento</h3><p>${ins.item ?? "—"} · ${ins.marca ?? ""} · N° serie ${ins.serie ?? "—"}<br>Cliente: ${ins.cliente ?? "—"}</p>
+    <h3>Condiciones</h3><p>Temperatura (${amb.temp ?? "—"} ± ${amb.tempU ?? "—"}) °C · Humedad (${amb.hum ?? "—"} ± ${amb.humU ?? "—"}) %HR</p>
+    <h3>Patrón</h3><p>${pat.nombre ?? "—"} · Clase ${pat.clase ?? "—"} · Cert. ${pat.cert ?? "—"} · Trazabilidad ${pat.trazab ?? "SI"}</p>
+    <h3>Resultados de la calibración</h3>
+    <table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:11px">
+      <thead><tr><th>Nominal ${m.unidad}</th><th>Error ${m.unidadU === "%" ? "%" : m.unidad}</th><th>U (k=2) ${m.unidadU}</th><th>Estado</th></tr></thead>
+      <tbody>${filas}</tbody></table>
+    <p style="margin-top:10px"><b>Síntesis:</b> la mayor incertidumbre expandida informada es ± ${f(r.uCert ?? r.uMax, 6)} ${m.unidadU} para un nivel de confianza del 95 % (k = 2).</p>
+    <p style="font-size:10px;color:#555">Cálculo según ${m.it} con el motor validado contra el libro de trabajo del laboratorio${corr.length ? ` · correcciones aplicadas: ${corr.join(", ")}` : ""}.</p>`;
 }
 
 @Module({ controllers: [MetrologiaController] })

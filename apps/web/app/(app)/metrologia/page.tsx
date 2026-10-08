@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
-import { fmtN } from "@/lib/metrologia";
+import { fmtG } from "@/lib/metrologia";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
@@ -39,7 +39,7 @@ export default function MetrologiaCalibracionesPage() {
     { key: "proceso", label: "Proceso", value: (c) => `${c.proceso ?? ""} ${c.proceso_nombre ?? ""}`.trim(), render: (c) => <>{c.proceso} · {c.proceso_nombre}</> },
     { key: "instrumento", label: "Instrumento", value: (c) => c.instrumento ?? "", render: (c) => c.instrumento ?? "—" },
     { key: "cliente", label: "Cliente", value: (c) => c.cliente ?? "", render: (c) => c.cliente ?? "—" },
-    { key: "u_max", label: "Mayor U (k=2)", num: true, value: (c) => c.u_max, render: (c) => <>± {fmtN(c.u_max, 5)} {c.unidad}</> },
+    { key: "u_max", label: "U informada (k=2)", num: true, value: (c) => c.u_cert ?? c.u_max, render: (c) => <>± {fmtG(c.u_cert ?? c.u_max)} {c.unidad_u ?? c.unidad}</> },
     { key: "conforme", label: "Conforme", value: (c) => (c.conforme == null ? "" : c.conforme ? "Sí" : "No"), render: (c) => (c.conforme == null ? "—" : c.conforme ? <span className="pill green">Sí</span> : <span className="pill red">No</span>) },
     { key: "estado", label: "Estado", value: (c) => c.estado ?? "", render: (c) => <span className={`pill ${PILL[c.estado] ?? "gray"}`}>{c.estado}</span> },
     { key: "created_at", label: "Fecha", value: (c) => c.created_at ?? "", render: (c) => <span style={{ whiteSpace: "nowrap" }}>{fechaHora(c.created_at)}</span> },
@@ -49,8 +49,8 @@ export default function MetrologiaCalibracionesPage() {
     <div>
       <h1 className="page">Metrología · Calibraciones</h1>
       <p className="subtitle">
-        Calibraciones del Laboratorio de Metrología (LMT). Cada calibración corre el motor de incertidumbre (GUM) del
-        proceso y, al emitirse, sella el Certificado de Calibración con HASH SHA-256.
+        Calibraciones del Laboratorio de Metrología (LMT). Cada instrucción de trabajo con caso real se calcula con su
+        motor validado contra el Excel del laboratorio; al emitirse, el Certificado de Calibración se sella con HASH SHA-256.
       </p>
       {error && <div className="alert warn">{error}</div>}
 

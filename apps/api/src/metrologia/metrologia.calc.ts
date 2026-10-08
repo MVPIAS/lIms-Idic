@@ -1,7 +1,10 @@
 /**
- * Motor de cálculo de incertidumbre (GUM) del módulo Metrología · Aiuken.
+ * Motor GUM parametrizado del módulo Metrología · Aiuken.
  *
- * Método Guía SIM 2009 / OIML R111, idéntico a los libros de trabajo del LMT:
+ * Solo para los procesos que aún no tienen caso real validado (ITM03, ITV05).
+ * Las 14 instrucciones de trabajo con caso real usan su motor en ./motores,
+ * que reproduce el Excel del LMT número a número (este motor genérico NO lo hace).
+ *
  *   uᵢ = |valor| / divisor          (divisor según la distribución del componente)
  *   u_c = √( Σ uᵢ² )                (incertidumbre combinada)
  *   U   = k · u_c   (k = 2, ≈95 %)  (incertidumbre expandida)
