@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { validarFormulario, propsInput } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import RequierePermiso from "@/components/RequierePermiso";
@@ -99,6 +100,10 @@ function UsuariosContenido() {
     <div>
       <h1 className="page">Usuarios y Roles</h1>
       <p className="subtitle">Control de acceso RBAC. Cada usuario recibe un rol que define sus permisos efectivos ({roles.length} roles disponibles).</p>
+      <div className="alert info">
+        ✨ <b>Nueva administración de usuarios.</b> Ahora puedes asignar varios roles por persona, cada uno en su unidad, con subrogancias y restablecimiento de contraseña.{" "}
+        <Link href="/admin/usuarios" style={{ fontWeight: 700, textDecoration: "underline" }}>Ir a Administración › Usuarios →</Link>
+      </div>
       {error && <div className="alert warn">{error}</div>}
 
       <div className="toolbar">
