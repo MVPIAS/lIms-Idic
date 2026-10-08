@@ -82,6 +82,10 @@ const CentroCostoCreate = z.object({
   codigo: z.string().min(1).max(30),
   nombre: z.string().min(1).max(200),
   laboratorio: z.string().max(20).optional(),
+  // Comercial R2: grupo del combo, texto base de condiciones y validez propia del lab.
+  tipo: z.enum(["laboratorio", "sucursal_bpch", "delegacion_bpch"]).optional(),
+  condicionesBase: z.string().max(2000).nullable().optional(),
+  validezParticularDias: z.coerce.number().int().positive().nullable().optional(),
   activo: z.boolean().default(true),
 });
 // Centro de costo = dato maestro económico: lectura con `factura.ver`,
