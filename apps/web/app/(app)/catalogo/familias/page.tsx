@@ -10,7 +10,7 @@ export default function FamiliasPage() {
       endpoint="cat/familias"
       columnas={[
         { key: "codsucdel", label: "Código", render: codigoCell },
-        { key: "nombre", label: "Nombre" },
+        { key: "nombre", label: "Nombre", editable: true },
         { key: "laboratorio", label: "Laboratorio" },
         { key: "departamento", label: "Departamento" },
         { key: "activo", label: "Estado", render: activoBadge },

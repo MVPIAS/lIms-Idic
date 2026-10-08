@@ -10,7 +10,7 @@ export default function SubgruposPage() {
       endpoint="cat/subgrupos"
       columnas={[
         { key: "cntlroom", label: "Código", render: codigoCell },
-        { key: "nombre", label: "Nombre" },
+        { key: "nombre", label: "Nombre", editable: true },
         { key: "grupo", label: "Grupo", render: (_v, row) => row.grupo?.nombre ?? "—" },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}

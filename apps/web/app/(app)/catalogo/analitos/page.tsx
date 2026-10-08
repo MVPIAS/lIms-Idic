@@ -10,7 +10,7 @@ export default function AnalitosPage() {
       endpoint="cat/analitos"
       columnas={[
         { key: "codigo", label: "Código", render: codigoCell },
-        { key: "nombre", label: "Nombre" },
+        { key: "nombre", label: "Nombre", editable: true },
         { key: "metodo", label: "Método", render: (_v, row) => row.metodo?.nombre ?? "—" },
         { key: "unidad", label: "Unidad" },
         { key: "rangoNominal", label: "Nominal", num: true },

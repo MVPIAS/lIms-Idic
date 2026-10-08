@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { monto as clp, pct } from "@/lib/format";
 import { validarFormulario, esMoneda } from "@/lib/validate";
+import { toast, confirmar } from "@/components/ui/feedback";
+import { usePermisos } from "@/lib/permisos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -42,6 +44,7 @@ export default function CrmPage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [f, setF] = useState<any>({ ...FORM_VACIO });
   const [errs, setErrs] = useState<Record<string, string>>({});
+  const { puede } = usePermisos();
 
   async function cargar() {
     setLoading(true);
@@ -138,6 +141,24 @@ export default function CrmPage() {
       cargar();
     } catch (e: any) {
       setError(Array.isArray(e.message) ? e.message.join(", ") : e.message);
+    }
+  }
+
+  /** DELETE /oportunidades/:id: baja lógica (deleted_at). */
+  async function eliminar(r: any) {
+    const si = await confirmar({
+      titulo: "¿Eliminar esta oportunidad?",
+      mensaje: <><b>{r.codigo} · {r.titulo}</b><br />Desaparece del pipeline. Si solo se perdió, usa «Perder» para conservarla en las estadísticas.</>,
+      peligro: true,
+    });
+    if (!si) return;
+    try {
+      const res = await fetch(`${API}/oportunidades/${r.id}`, { method: "DELETE", headers: auth() });
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      toast.ok("Oportunidad eliminada.");
+      cargar();
+    } catch (e: any) {
+      toast.error(`No se pudo eliminar: ${e.message}`);
     }
   }
 
@@ -245,6 +266,7 @@ export default function CrmPage() {
                             <button className="btn sm" onClick={() => accion(r.id, "perder")}>Perder</button>
                           </>
                         )}
+                        {puede("cotizacion.crear") && <button className="btn ghost-danger sm" onClick={() => eliminar(r)} title="Eliminar oportunidad">Eliminar</button>}
                       </div>
                     </div>
                   ))}

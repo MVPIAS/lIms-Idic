@@ -10,7 +10,7 @@ export default function MetodosCatPage() {
       endpoint="cat/metodos"
       columnas={[
         { key: "codigo", label: "Código", render: codigoCell },
-        { key: "nombre", label: "Nombre" },
+        { key: "nombre", label: "Nombre", editable: true },
         { key: "norma", label: "Norma", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
         { key: "instrumento", label: "Instrumento" },
         { key: "version", label: "Ver." },

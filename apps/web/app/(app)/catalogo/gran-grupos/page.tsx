@@ -10,7 +10,7 @@ export default function GranGruposPage() {
       endpoint="cat/gran-grupos"
       columnas={[
         { key: "codigo", label: "Código", render: codigoCell },
-        { key: "nombre", label: "Nombre" },
+        { key: "nombre", label: "Nombre", editable: true },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}
       campos={[

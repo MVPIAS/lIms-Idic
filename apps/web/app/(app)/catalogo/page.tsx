@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { PageHeader } from "@/components/ui/PageHeader";
 
 const productos = [
   { href: "/catalogo/gran-grupos", nivel: "Nivel 1", nombre: "Gran Grupos", desc: "Máxima agrupación de productos / matrices." },
@@ -17,6 +18,13 @@ const analisis = [
   { href: "/catalogo/especificaciones", nivel: "Nivel 4", nombre: "Especificaciones", desc: "Límites/requisitos de un Analito por ámbito." },
 ];
 
+const bisagra = [
+  { href: "/catalogo/paneles", nivel: "Bisagra", nombre: "Paneles de ensayo", desc: "Qué Métodos (y Ensayo) se aplican a cada Elemento. Es lo que ofrece el registro de OT." },
+  { href: "/catalogo/formulas", nivel: "Cálculo", nombre: "Fórmulas", desc: "Fórmulas de cálculo de los analitos, con validación." },
+  { href: "/catalogo/pasos", nivel: "Captura", nombre: "Pasos por método", desc: "Campos que el analista captura en cada método." },
+  { href: "/catalogo/parametros", nivel: "Sistema", nombre: "Parámetros", desc: "Listas y combos editables (tipo de cliente, forma de pago…)." },
+];
+
 function Tarjeta({ href, nivel, nombre, desc }: { href: string; nivel: string; nombre: string; desc: string }) {
   return (
     <Link href={href as any} className="card" style={{ textDecoration: "none", color: "inherit", display: "block", marginBottom: 0 }}>
@@ -30,11 +38,11 @@ function Tarjeta({ href, nivel, nombre, desc }: { href: string; nivel: string; n
 export default function CatalogoPage() {
   return (
     <div>
-      <h1 className="page">Catálogo maestro (v2)</h1>
-      <p className="subtitle">
-        Gestión de las 9 tablas maestras del catálogo, organizadas en dos ejes que se unen en la Muestra.
-        Cada maestra permite listar, crear, editar y eliminar registros.
-      </p>
+      <PageHeader
+        titulo="Catálogo maestro"
+        migas={[{ label: "Tablas maestras" }, { label: "Índice" }]}
+        subtitulo="Las tablas maestras del catálogo, organizadas en dos ejes que se unen en la Muestra. Cada maestra permite listar, crear, editar y eliminar registros."
+      />
 
       <div className="alert info">
         <strong>Cascada del catálogo.</strong>{" "}
@@ -50,6 +58,11 @@ export default function CatalogoPage() {
       <h2 style={{ fontSize: 14, fontWeight: 700, margin: "22px 0 10px" }}>Eje Análisis</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
         {analisis.map((t) => <Tarjeta key={t.href} {...t} />)}
+      </div>
+
+      <h2 style={{ fontSize: 14, fontWeight: 700, margin: "22px 0 10px" }}>Unión y configuración</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+        {bisagra.map((t) => <Tarjeta key={t.href} {...t} />)}
       </div>
     </div>
   );

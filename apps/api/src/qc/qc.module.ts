@@ -2,6 +2,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   Injectable,
   Module,
@@ -251,6 +252,24 @@ export class QcService {
   }
 
   /**
+   * Retira (soft delete) un control registrado por error. Queda en BD con
+   * deleted_at (trazabilidad); deja de contar para el estado de la OT y el gate.
+   * Un control APROBADO no se retira directamente: primero debe revisarse a
+   * «pendiente» o «rechazado» (así la aprobación firmada no desaparece sin rastro).
+   */
+  async eliminar(controlId: string, tenantId: string) {
+    const control = await this.prisma.qcControl.findFirst({
+      where: { id: controlId, tenantId, deletedAt: null },
+    });
+    if (!control) throw new NotFoundException(`Control de calidad ${controlId} no encontrado`);
+    if (control.resultado === "aprobado") {
+      throw new ConflictException("No se puede eliminar un control aprobado: cambie antes su resultado.");
+    }
+    await this.prisma.qcControl.update({ where: { id: controlId }, data: { deletedAt: new Date() } });
+    return { ok: true };
+  }
+
+  /**
    * Métodos con `qc_requerido=true` presentes en las muestras de la OT (vía los
    * resultados materializados por el puente) y si cada uno tiene ya un control
    * 'aprobado' para esta OT. Base del estado global y del GATE de emisión.
@@ -351,6 +370,13 @@ export class QcController {
   @ApiOperation({ summary: "Aprobación/rechazo manual del control (registra aprobado_por)" })
   revisar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.revisar(id, RevisarControlSchema.parse(body), tenantDe(req), usuarioDe(req));
+  }
+
+  @Delete("control/:id")
+  @RequierePermiso(PERM.gestionar)
+  @ApiOperation({ summary: "Retira (soft delete) un control no aprobado registrado por error" })
+  eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.eliminar(id, tenantDe(req));
   }
 }
 

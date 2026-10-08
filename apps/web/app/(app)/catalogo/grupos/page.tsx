@@ -12,7 +12,7 @@ export default function GruposPage() {
       endpoint="cat/grupos"
       columnas={[
         { key: "cgrupo", label: "Código", render: codigoCell },
-        { key: "nombre", label: "Nombre" },
+        { key: "nombre", label: "Nombre", editable: true },
         { key: "granGrupo", label: "Gran Grupo", render: (_v, row) => refNombre(row.granGrupo) },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}
