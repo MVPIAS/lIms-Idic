@@ -22,6 +22,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos, validarTransicion } from "../common/estados";
 import { generarCodigoOt } from "../common/codigo";
+import { ORIGENES_OT, calcularOpiPendiente, resolverCobro, validarOrigenOt } from "./reglas-ot";
 
 const PrioridadEnum = z.enum(["baja", "normal", "alta", "urgente"]);
 
@@ -50,16 +51,48 @@ const MSG_UN_SOLO_FLUJO =
  * Flujo (opcional): `flujoInstanciaId` adjunta una instancia existente;
  * `flujoDefId`/`flujoVersionId` hacen que el backend INSTANCIE el flujo y lo asocie.
  */
+const fechaDia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
+
+/**
+ * Comercial R2 · origen / cobro / OPI (ver reglas-ot.ts):
+ *  · origenTrabajo: COTIZACION | INTERNACION | DISPOSICION | INTERLABORATORIO | OT_INTERNA.
+ *  · DISPOSICION (IDIC-PG03 6.4 g) exige disposicionRef; con cobro y sin OPI → opi_pendiente.
+ *  · INTERLABORATORIO (SPC2.2): sin cotización, sin cobro, lab solicitante ≠ ejecutor;
+ *    clienteId opcional (se usa el cliente de tipo 'interlaboratorio').
+ *  · horasHombre / costoEstimado: el costo se registra aunque la OT sea sin cobro.
+ */
 const OtCreate = z
   .object({
-    clienteId: z.string().uuid(),
+    clienteId: z.string().uuid().optional(),
     cotizacionId: z.string().uuid().optional(),
     prioridad: PrioridadEnum.optional(),
     notas: z.string().optional(),
     fechaIngreso: z.coerce.date().optional(),
+    origenTrabajo: z.enum(ORIGENES_OT).optional(),
+    conCobro: z.boolean().optional(),
+    disposicionRef: z.string().max(120).optional(),
+    disposicionFecha: fechaDia.optional(),
+    opiNumero: z.string().max(60).optional(),
+    opiFecha: fechaDia.optional(),
+    resolucion: z.string().max(40).optional(),
+    centroCostoId: z.string().uuid().optional(),
+    labSolicitanteCcId: z.string().uuid().optional(),
+    horasHombre: z.number().min(0).optional(),
+    costoEstimado: z.number().min(0).optional(),
+    descripcionTrabajo: z.string().max(4000).optional(),
     ...FlujoRef,
   })
-  .refine(unSoloFlujo, { message: MSG_UN_SOLO_FLUJO });
+  .refine(unSoloFlujo, { message: MSG_UN_SOLO_FLUJO })
+  .refine((d) => d.origenTrabajo === "INTERLABORATORIO" || Boolean(d.clienteId), {
+    message: "clienteId es obligatorio (salvo en OT Interlaboratorio)",
+    path: ["clienteId"],
+  });
+
+/** Body de POST /ot/:id/registrar-opi (SVT7). */
+const OtRegistrarOpi = z.object({
+  numero: z.string().trim().min(1, "Indique el número de OPI").max(60),
+  fecha: fechaDia,
+});
 
 // `estado` deja de ser texto libre: solo los estados reales de la OT
 // (common/estados.ts). La transición la valida `actualizar()`.
@@ -68,6 +101,9 @@ const OtUpdate = z
     estado: z.enum(estadosValidos("ot") as [string, ...string[]]).optional(),
     prioridad: PrioridadEnum.optional(),
     notas: z.string().optional(),
+    // Costo por horas (también en OT sin cobro / interlaboratorio).
+    horasHombre: z.number().min(0).optional(),
+    costoEstimado: z.number().min(0).optional(),
     ...FlujoRef,
   })
   .refine(unSoloFlujo, { message: MSG_UN_SOLO_FLUJO });
@@ -173,9 +209,31 @@ export class OtController {
     const dto = OtCreate.parse(body);
     const tenantId = req.user?.tenantId ?? DEV_TENANT;
 
+    // Reglas de origen (Comercial R2): datos obligatorios por origen y cobro.
+    const origen = dto.origenTrabajo ?? (dto.cotizacionId ? "COTIZACION" : undefined);
+    const errores = validarOrigenOt({ ...dto, origen });
+    const cobro = resolverCobro(origen, dto.conCobro);
+    if (cobro.error) errores.push(cobro.error);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+
+    // Interlaboratorio sin cliente → el cliente interno de tipo 'interlaboratorio'.
+    let clienteId = dto.clienteId;
+    if (!clienteId && origen === "INTERLABORATORIO") {
+      const interno = await this.prisma.cliente.findFirst({
+        where: { tenantId, tipo: "interlaboratorio", deletedAt: null },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+      if (!interno)
+        throw new BadRequestException(
+          "No hay un cliente de tipo «Interlaboratorio». Registre el cliente interno (p. ej. IDIC) con ese tipo o indique clienteId.",
+        );
+      clienteId = interno.id;
+    }
+
     // El cliente debe pertenecer al tenant del solicitante (evita adjuntar clientes de otro tenant).
     const cliente = await this.prisma.cliente.findFirst({
-      where: { id: dto.clienteId, tenantId },
+      where: { id: clienteId!, tenantId },
       select: { id: true },
     });
     if (!cliente) throw new BadRequestException("clienteId no existe o no pertenece al tenant");
@@ -187,6 +245,13 @@ export class OtController {
         select: { id: true },
       });
       if (!cot) throw new BadRequestException("cotizacionId no existe o no pertenece al tenant");
+    }
+
+    // Centros de costo (lab ejecutor / solicitante) del mismo tenant.
+    for (const ccId of [dto.centroCostoId, dto.labSolicitanteCcId]) {
+      if (!ccId) continue;
+      const cc = await this.prisma.centroCosto.findFirst({ where: { id: ccId, tenantId }, select: { id: true } });
+      if (!cc) throw new BadRequestException(`Centro de costo ${ccId} no existe o no pertenece al tenant`);
     }
 
     // Si se adjunta una instancia YA existente, debe ser del mismo tenant
@@ -201,18 +266,33 @@ export class OtController {
         : null;
 
     const codigo = await this.generarCodigo(tenantId);
+    const opiNumero = dto.opiNumero?.trim() || null;
 
     const ot = await this.prisma.ordenTrabajo.create({
       data: {
         tenantId,
         codigo,
-        clienteId: dto.clienteId,
+        clienteId: cliente.id,
         cotizacionId: dto.cotizacionId ?? null,
         flujoInstanciaId: dto.flujoInstanciaId ?? null,
         prioridad: dto.prioridad ?? "normal",
         estado: "recepcionada",
         fechaRecepcion: dto.fechaIngreso ?? new Date(),
         notas: dto.notas ?? null,
+        descripcionTrabajo: dto.descripcionTrabajo ?? null,
+        origenTrabajo: origen ?? null,
+        conCobro: cobro.conCobro,
+        opiPendiente: calcularOpiPendiente({ origen, conCobro: cobro.conCobro, opiNumero }),
+        disposicionRef: dto.disposicionRef?.trim() || null,
+        disposicionFecha: dto.disposicionFecha ? new Date(`${dto.disposicionFecha}T00:00:00Z`) : null,
+        ...(opiNumero
+          ? { opiNumero, opiFecha: dto.opiFecha ? new Date(`${dto.opiFecha}T00:00:00Z`) : null, opiRegistradaAt: new Date() }
+          : {}),
+        numeroLey: dto.resolucion?.trim() || null,
+        centroCostoId: dto.centroCostoId ?? null,
+        labSolicitanteCcId: dto.labSolicitanteCcId ?? null,
+        horasHombre: dto.horasHombre ?? 0,
+        costoEstimado: dto.costoEstimado ?? 0,
       },
       include: { cliente: true },
     });
@@ -222,6 +302,32 @@ export class OtController {
     // La OT ya existe → se instancia el flujo con su otId y se cierra el enlace
     // inverso (orden_trabajo.flujo_instancia_id). Ambos extremos quedan ligados.
     return this.instanciarYEnlazar(ot.id, versionId, tenantId, req);
+  }
+
+  /**
+   * SVT7 · registra la OPI de una OT creada por disposición del Director:
+   * guarda número y fecha y LIMPIA `opi_pendiente`. Se permite también en una
+   * OT que no la tenía pendiente (corrección / registro tardío).
+   */
+  @Post(":id/registrar-opi")
+  @RequierePermiso("ot.crear")
+  async registrarOpi(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = OtRegistrarOpi.parse(body ?? {});
+    const tenantId = req.user?.tenantId ?? DEV_TENANT;
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id, tenantId }, select: { id: true, estado: true } });
+    if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
+    if (ot.estado === "anulada") throw new BadRequestException("La OT está anulada.");
+    return this.prisma.ordenTrabajo.update({
+      where: { id },
+      data: {
+        opiNumero: dto.numero,
+        opiFecha: new Date(`${dto.fecha}T00:00:00Z`),
+        opiRegistradaAt: new Date(),
+        opiPendiente: false,
+        updatedAt: new Date(),
+      },
+      include: { cliente: true },
+    });
   }
 
   /**

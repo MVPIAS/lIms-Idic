@@ -33,8 +33,11 @@ export type DominioEstado = "cotizacion" | "ot" | "resultado" | "certificado";
 
 /** estado actual → estados a los que puede transitar. */
 const TRANSICIONES: Record<DominioEstado, Record<string, readonly string[]>> = {
-  // borrador → enviada → aceptada | rechazada; anulable casi siempre.
+  // Comercial R1 (oct-2026): las cotizaciones NUEVAS solo viven en
+  // abierta → aceptada | anulada (sin Vencida/Revalidada). borrador, enviada,
+  // rechazada y expirada se conservan para el HISTÓRICO (solo lectura).
   cotizacion: {
+    abierta: ["aceptada", "anulada"],
     borrador: ["enviada", "anulada"],
     enviada: ["aceptada", "rechazada", "expirada", "anulada"],
     aceptada: ["anulada"],

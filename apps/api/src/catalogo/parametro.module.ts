@@ -33,6 +33,8 @@ const ParametroCreate = z.object({
   // El form envía `orden` como número (input number) o lo omite.
   orden: z.coerce.number().int().default(0),
   activo: z.boolean().default(true),
+  // Dato técnico del código (regla de validez del tipo de cliente, número de días…).
+  valor: z.string().max(4000).nullable().optional(),
 });
 
 /** Tenant del usuario autenticado (lo inyecta JwtStrategy en req.user). */

@@ -255,6 +255,28 @@ model Cotizacion {
   ejecutivoId       String?             @map("ejecutivo_id") @db.Uuid
   notas             String?
   condicionesParticulares Json           @default("{}") @map("condiciones_particulares")
+  // Comercial R1/R2 (oct-2026) · DDL: packages/db/align_comercial_r2.sql
+  centroCostoId          String?        @map("centro_costo_id") @db.Uuid
+  referencia             String?        @db.VarChar(300)
+  descripcionTecnica     String?        @map("descripcion_tecnica")
+  condicionesAdicionales String?        @map("condiciones_adicionales") @db.VarChar(2000)
+  observacionesInternas  String?        @map("observaciones_internas")
+  moneda                 String         @default("CLP") @db.VarChar(3)
+  dolarValor             Decimal?       @map("dolar_valor") @db.Decimal(12, 4)
+  dolarFecha             DateTime?      @map("dolar_fecha") @db.Date
+  dolarMotivo            String?        @map("dolar_motivo")
+  validaHasta            DateTime?      @map("valida_hasta") @db.Date
+  tipoClienteCodigo      String?        @map("tipo_cliente_codigo") @db.VarChar(60)
+  medioEnvio             String?        @map("medio_envio") @db.VarChar(40)
+  aceptacionTipo         String?        @map("aceptacion_tipo") @db.VarChar(30)
+  aceptacionNumero       String?        @map("aceptacion_numero") @db.VarChar(60)
+  aceptacionFecha        DateTime?      @map("aceptacion_fecha") @db.Date
+  aceptacionAdjunto      String?        @map("aceptacion_adjunto") @db.VarChar(300)
+  conCobro               Boolean        @default(true) @map("con_cobro")
+  aceptadaAt             DateTime?      @map("aceptada_at") @db.Timestamptz
+  aceptadaPor            String?        @map("aceptada_por") @db.Uuid
+  anulacionMotivo        String?        @map("anulacion_motivo")
+  anuladaAt              DateTime?      @map("anulada_at") @db.Timestamptz
   createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime            @default(now()) @map("updated_at") @db.Timestamptz
   createdBy         String?             @map("created_by") @db.Uuid
@@ -282,6 +304,9 @@ model LineaCotizacion {
   subtotal        Decimal    @db.Decimal(14, 2)
   tramo           String?    @db.VarChar(200)
   orden           Int?
+  // Línea = ensayo del catálogo (código EN) valorizado por su ficha (R1).
+  catEnsayoId     String?    @map("cat_ensayo_id") @db.Uuid
+  ensayoCodigo    String?    @map("ensayo_codigo") @db.VarChar(30)
 
   cotizacion      Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
 
@@ -328,6 +353,20 @@ model OrdenTrabajo {
   cotizacionNumero      String?   @map("cotizacion_numero") @db.VarChar(40)
   enEsperaAt            DateTime? @map("en_espera_at") @db.Timestamptz
   registradoAt         DateTime? @map("registrado_at") @db.Timestamptz
+  // Comercial R2 (oct-2026) · origen (en origenTrabajo: COTIZACION | INTERNACION |
+  // DISPOSICION | INTERLABORATORIO | OT_INTERNA; textos heredados se conservan),
+  // cobro y OPI pendiente. DDL: packages/db/align_comercial_r2.sql
+  conCobro              Boolean   @default(true) @map("con_cobro")
+  disposicionRef        String?   @map("disposicion_ref") @db.VarChar(120)
+  disposicionFecha      DateTime? @map("disposicion_fecha") @db.Date
+  opiPendiente          Boolean   @default(false) @map("opi_pendiente")
+  opiNumero             String?   @map("opi_numero") @db.VarChar(60)
+  opiFecha              DateTime? @map("opi_fecha") @db.Date
+  opiRegistradaAt       DateTime? @map("opi_registrada_at") @db.Timestamptz
+  centroCostoId         String?   @map("centro_costo_id") @db.Uuid
+  labSolicitanteCcId    String?   @map("lab_solicitante_cc_id") @db.Uuid
+  horasHombre           Decimal   @default(0) @map("horas_hombre") @db.Decimal(10, 2)
+  costoEstimado         Decimal   @default(0) @map("costo_estimado") @db.Decimal(14, 2)
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz
 
@@ -583,6 +622,10 @@ model CentroCosto {
   codigo    String    @db.VarChar(30)
   nombre    String    @db.VarChar(200)
   laboratorio String? @db.VarChar(20)
+  // Comercial R2 · laboratorio | sucursal_bpch | delegacion_bpch (align_comercial_r2.sql)
+  tipo      String?   @db.VarChar(30)
+  condicionesBase       String? @map("condiciones_base")
+  validezParticularDias Int?    @map("validez_particular_dias")
   activo    Boolean   @default(true)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
@@ -1420,6 +1463,9 @@ model ParametroSistema {
   etiqueta  String   @db.VarChar(160)
   orden     Int      @default(0)
   activo    Boolean  @default(true)
+  // Dato técnico del código (no visible en el combo): regla de validez del
+  // tipo_cliente (EJERCITO|PARTICULAR), números de validez_cotizacion…
+  valor     String?
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
 

@@ -1,12 +1,13 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Req, UseGuards, ParseUUIDPipe } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, ParseUUIDPipe, BadRequestException } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
-import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
+import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
 import { CotizacionService } from "./cotizacion.service";
 import { CosteoService } from "./costeo.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos } from "../common/estados";
+import { TIPOS_ACEPTACION } from "../ot/reglas-ot";
 
 const CosteoSchema = z.object({
   lineas: z
@@ -41,40 +42,96 @@ const TasaSchema = z.object({
   ivaPct: z.number().min(0).max(100).optional(),
 });
 
-const LineaSchema = z.object({
-  tipo: z.enum(["producto", "viatico", "pasaje", "hora_hombre", "hora_maquina", "otros", "extension"]),
-  descripcion: z.string().optional(),
-  categoria: z.string().optional(),
-  cantidad: z.number().int().positive().default(1),
-  diasOHoras: z.number().optional(),
-  precioUnitario: z.number().positive(),
-  descuentoPct: z.number().min(0).max(100).default(0),
-  tramo: z.string().optional(),
-});
+/**
+ * Línea de cotización. R1: la línea es un ENSAYO del catálogo (código EN,
+ * `catEnsayoId`) valorizado por su ficha de costos → `precioUnitario` es
+ * opcional (lo pone el backend desde cat_ensayo.precio). Las líneas libres
+ * (HH/HM/viático/…) se siguen aceptando por compatibilidad, aunque la UI ya
+ * no las ofrece; 'extension' sigue en el enum solo por datos heredados.
+ */
+const LineaSchema = z
+  .object({
+    tipo: z.enum(["producto", "viatico", "pasaje", "hora_hombre", "hora_maquina", "otros", "extension"]).optional(),
+    catEnsayoId: z.string().uuid().optional(),
+    descripcion: z.string().max(2000).optional(),
+    categoria: z.string().max(80).optional(),
+    cantidad: z.number().int().positive().default(1),
+    diasOHoras: z.number().optional(),
+    precioUnitario: z.number().positive().optional(),
+    tramo: z.string().max(200).optional(),
+    // Compatibilidad: el descuento por línea ya no existe (R1); solo se admite 0.
+    descuentoPct: z.number().min(0).max(0, "La cotización no admite descuento (decisión Comercial R1).").optional(),
+  })
+  .refine((l) => l.catEnsayoId || l.precioUnitario, {
+    message: "Cada línea debe indicar el ensayo del catálogo (catEnsayoId) o un precioUnitario.",
+  });
 
-// El estado ya no es texto libre: solo se admiten los estados reales del
-// dominio (common/estados.ts). La transición concreta la valida el servicio.
-const ActualizarCotSchema = z.object({
-  estado: z.enum(estadosValidos("cotizacion") as [string, ...string[]]).optional(),
-  notas: z.string().optional(),
-});
+const fecha = z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}/, "Fecha AAAA-MM-DD"), z.date()]);
 
-const CrearCotSchema = z.object({
-  clienteId: z.string().uuid(),
+/** Campos editables de cabecera (crear y editar). */
+const Cabecera = {
   plantaId: z.string().uuid().optional(),
-  formato: z.enum(["F1", "F2", "F3", "F4"]),
-  formaPago: z.string().optional(),
-  validezDias: z.number().int().positive().default(30),
-  descuentoPct: z.number().min(0).max(100).default(0),
-  // GAP-CHECK SIS_COMERCIAL: la cotización comercial del legacy NO aplica gastos
-  // administrativos ni utilidad, y es IVA EXENTO (ADM/imprimir.php:337
-  // "impresion cotizacion IVA EXENTO"). El total real = SUMA(líneas) − descuento%.
-  // Por eso el default de IVA es 0 (exento); solo se calcula IVA si el llamador lo
-  // pide explícitamente. Antes el default 19 divergía del original.
+  centroCostoId: z.string().uuid().nullable().optional(),
+  // R1: solo NORMAL y PERSONALIZADO (F1–F4 quedan en el histórico).
+  formato: z.enum(["NORMAL", "PERSONALIZADO"]),
+  // R1: «Contado 30 días» / «Por adelantado» (códigos de parametro_sistema forma_pago).
+  formaPago: z.string().max(80).nullable().optional(),
+  medioEnvio: z.string().max(40).nullable().optional(),
+  moneda: z.enum(["CLP", "USD"]).default("CLP"),
+  dolarValor: z.number().positive().nullable().optional(),
+  dolarFecha: fecha.nullable().optional(),
+  dolarMotivo: z.string().max(500).nullable().optional(),
+  referencia: z.string().max(300).nullable().optional(),
+  descripcionTecnica: z.string().max(20000).nullable().optional(),
+  condicionesAdicionales: z.string().max(2000, "Condiciones adicionales: máximo 2000 caracteres.").nullable().optional(),
+  observacionesInternas: z.string().max(20000).nullable().optional(),
+  notas: z.string().nullable().optional(),
+  // GAP-CHECK SIS_COMERCIAL: la cotización del legacy es IVA EXENTO y sin gastos
+  // administrativos (ADM/imprimir.php:337) → defaults 0.
   gastosAdminPct: z.number().min(0).max(100).default(0),
   ivaPct: z.number().min(0).max(100).default(0),
-  notas: z.string().optional(),
-  lineas: z.array(LineaSchema).min(1),
+  // R1: SIN descuento. Se admite el campo (solo 0) para no romper llamadores.
+  descuentoPct: z.number().min(0).max(0, "La cotización no admite descuento (decisión Comercial R1).").optional(),
+  // La validez es AUTOMÁTICA (IT DCO-PG01-P01-IT02); `validezDias` se ignora.
+  validezDias: z.number().int().positive().optional(),
+};
+
+const CrearCotSchema = z
+  .object({
+    clienteId: z.string().uuid(),
+    ...Cabecera,
+    fechaEmision: fecha.optional(),
+    lineas: z.array(LineaSchema).min(1),
+  })
+  .refine((d) => d.moneda !== "USD" || (d.dolarValor ?? 0) > 0, {
+    message: "Cotización en USD: indique el valor del dólar del día (dolarValor).",
+    path: ["dolarValor"],
+  });
+
+// El estado ya no es texto libre: solo los estados reales del dominio
+// (common/estados.ts). La transición concreta la valida el servicio, y la
+// aceptación/anulación van por sus endpoints (exigen documento / motivo).
+const ActualizarCotSchema = z.object({
+  estado: z.enum(estadosValidos("cotizacion") as [string, ...string[]]).optional(),
+  ...Cabecera,
+  formato: Cabecera.formato.optional(),
+  moneda: z.enum(["CLP", "USD"]).optional(),
+  gastosAdminPct: z.number().min(0).max(100).optional(),
+  ivaPct: z.number().min(0).max(100).optional(),
+  lineas: z.array(LineaSchema).min(1).optional(),
+});
+
+/** SVT6 · documento de aceptación (IDIC-PG03 6.3 n / 6.4 g). */
+const AceptarSchema = z.object({
+  tipo: z.enum(TIPOS_ACEPTACION).optional(),
+  numero: z.string().max(60).optional(),
+  fecha: fecha.optional(),
+  adjunto: z.string().max(300).optional(),
+  conCobro: z.boolean().default(true),
+});
+
+const AnularSchema = z.object({
+  motivo: z.string().trim().min(3, "Indique el motivo de la anulación.").max(1000),
 });
 
 @ApiTags("cotizaciones")
@@ -107,6 +164,37 @@ export class CotizacionController {
     return this.costeo.tasaInternacion(cifDivisa, paridad, opts);
   }
 
+  /**
+   * Configuración del formulario de cotización: combos activos (tipo de cliente,
+   * forma de pago, formato, moneda, medio de envío, documento de aceptación…),
+   * centros de costo agrupados («Laboratorios» / «Sucursales y Delegación BPCH»)
+   * con su texto base y validez propia, y los parámetros de validez.
+   */
+  @Get("config")
+  @RequierePermiso("cotizacion.ver")
+  @ApiOperation({ summary: "Combos y centros de costo del formulario de cotización" })
+  config(@Req() req: any) {
+    return this.svc.config(req?.user?.tenantId);
+  }
+
+  /** Vista previa de la validez automática (IT DCO-PG01-P01-IT02). */
+  @Get("validez")
+  @RequierePermiso("cotizacion.ver")
+  @ApiOperation({ summary: "Calcula 'válida hasta' para ?clienteId=&centroCostoId=&fecha=" })
+  async validez(
+    @Query("clienteId") clienteId: string,
+    @Query("centroCostoId") centroCostoId: string | undefined,
+    @Query("fecha") fechaQ: string | undefined,
+    @Req() req: any,
+  ) {
+    const uuid = z.string().uuid();
+    if (!uuid.safeParse(clienteId).success) throw new BadRequestException("clienteId (uuid) es obligatorio");
+    if (centroCostoId && !uuid.safeParse(centroCostoId).success) throw new BadRequestException("centroCostoId inválido");
+    if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
+    const tenantId = req?.user?.tenantId;
+    return this.svc.calcularValidezPara(tenantId, clienteId, centroCostoId || null, fechaQ || new Date());
+  }
+
   @Get()
   @RequierePermiso("cotizacion.ver")
   listar(@Req() req: any) {
@@ -123,21 +211,22 @@ export class CotizacionController {
   @RequierePermiso("cotizacion.crear")
   crear(@Body() body: unknown, @Req() req: any) {
     const data = CrearCotSchema.parse(body);
-    return this.svc.crear(data, req?.user?.tenantId);
+    return this.svc.crear(data as any, req?.user?.tenantId, req?.user?.sub);
   }
 
+  /** Editar: el contenido solo mientras la cotización está Abierta. */
   @Patch(":id")
   @RequierePermiso("cotizacion.crear")
   actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const data = ActualizarCotSchema.parse(body);
-    return this.svc.actualizar(id, data, req?.user?.tenantId);
+    return this.svc.actualizar(id, data as any, req?.user?.tenantId);
   }
 
   /**
    * "Eliminar" = anular (estado 'anulada'); no hay borrado físico (referenciada por OT).
    * Es la operación más destructiva del dominio → el permiso más restrictivo
-   * (`cotizacion.aprobar`: SUPERADMIN, ADMIN, DIRECTOR). Era la brecha verificada
-   * en la auditoría: un LECTOR podía anular cotizaciones.
+   * (`cotizacion.aprobar`: SUPERADMIN, ADMIN, DIRECTOR). Se conserva como alias
+   * de POST /:id/anular (sin motivo) por compatibilidad.
    */
   @Delete(":id")
   @RequierePermiso("cotizacion.aprobar")
@@ -145,17 +234,31 @@ export class CotizacionController {
     return this.svc.anular(id, req?.user?.tenantId);
   }
 
+  /** R1 · Abierta → Anulada, con motivo obligatorio. */
+  @Post(":id/anular")
+  @RequierePermiso("cotizacion.aprobar")
+  anular(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const { motivo } = AnularSchema.parse(body ?? {});
+    return this.svc.anular(id, req?.user?.tenantId, motivo);
+  }
+
+  /** Histórico: borrador → enviada (las nuevas nacen Abiertas y no pasan por aquí). */
   @Post(":id/enviar")
   @RequierePermiso("cotizacion.crear")
   enviar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.cambiarEstado(id, "enviada", req?.user?.tenantId);
   }
 
-  /** Aceptar = decisión comercial + genera la OT → `cotizacion.aprobar`. */
+  /**
+   * Registrar aceptación = decisión comercial + genera la OT → `cotizacion.aprobar`.
+   * Body: { tipo, numero?, fecha?, adjunto?, conCobro } (SVT6). Con
+   * DISPOSICION_DIRECTOR y conCobro=true la OT queda con OPI pendiente (SVT7).
+   */
   @Post(":id/aceptar")
   @RequierePermiso("cotizacion.aprobar")
-  aceptar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    return this.svc.aceptar(id, req?.user?.tenantId);
+  aceptar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const doc = AceptarSchema.parse(body ?? {});
+    return this.svc.aceptar(id, req?.user?.tenantId, doc, req?.user?.sub);
   }
 
   @Post(":id/rechazar")
