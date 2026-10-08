@@ -119,18 +119,34 @@ function cuerpoCotizacionHtml(cot: any): string {
   const razon = esc(cot.cliente?.razonSocial ?? cot.cliente?.razon_social ?? "—");
   const rut = esc(cot.cliente?.rut ?? "—");
   const lineas: any[] = Array.isArray(cot.lineas) ? cot.lineas : [];
+  // Comercial R1: moneda CLP o USD (dólar congelado al emitir).
+  const usd = cot.moneda === "USD";
+  const monto = (v: unknown) => (usd ? usdFmt(v) : clp(v));
   const filas = lineas
     .map(
       (l, i) => `<tr>
         <td class="num">${i + 1}</td>
         <td>${esc(l.descripcion ?? l.categoria ?? l.tipo ?? "—")}</td>
         <td class="num">${esc(l.cantidad ?? 1)}</td>
-        <td class="num">${clp(l.precioUnitario)}</td>
-        <td class="num">${clp(l.subtotal)}</td>
+        <td class="num">${monto(l.precioUnitario)}</td>
+        <td class="num">${monto(l.subtotal)}</td>
       </tr>`,
     )
     .join("");
+  const validez = cot.validaHasta
+    ? `hasta el ${fechaCorta(fechaUtc(cot.validaHasta))}`
+    : `${esc(cot.validezDias ?? 30)} días`;
+  // Texto con saltos de línea → párrafos (escapado).
+  const parrafos = (t: unknown) =>
+    String(t ?? "")
+      .split(/\r?\n/)
+      .map((x) => x.trim())
+      .filter(Boolean)
+      .map((x) => `<p>${esc(x)}</p>`)
+      .join("");
 
+  // OJO: `observacionesInternas` NO se imprime nunca (SVT3). Solo van al PDF
+  // la referencia, la descripción técnica y las condiciones adicionales.
   return `
 <div class="membrete">
   <div class="escudo">IDIC</div>
@@ -148,14 +164,18 @@ function cuerpoCotizacionHtml(cot: any): string {
 
 <table class="meta">
   <tr><th>Cliente</th><td>${razon}</td><th>RUT</th><td>${rut}</td></tr>
-  <tr><th>Código</th><td>${esc(cot.codigo)}</td><th>Fecha</th><td>${fechaCorta(new Date(cot.createdAt ?? Date.now()))}</td></tr>
-  <tr><th>Forma de pago</th><td>${esc(cot.formaPago ?? "—")}</td><th>Validez</th><td>${esc(cot.validezDias ?? 30)} días</td></tr>
+  <tr><th>Código</th><td>${esc(cot.codigo)}</td><th>Fecha</th><td>${fechaCorta(cot.fechaEmision ? fechaUtc(cot.fechaEmision) : new Date(cot.createdAt ?? Date.now()))}</td></tr>
+  <tr><th>Forma de pago</th><td>${esc(etiquetaFormaPago(cot.formaPago))}</td><th>Validez</th><td>${validez}</td></tr>
+  ${cot.referencia ? `<tr><th>Referencia</th><td colspan="3">${esc(cot.referencia)}</td></tr>` : ""}
+  ${usd ? `<tr><th>Moneda</th><td>US$</td><th>Dólar del día</th><td>${clp(cot.dolarValor)}${cot.dolarFecha ? ` (${fechaCorta(fechaUtc(cot.dolarFecha))})` : ""}</td></tr>` : ""}
 </table>
+
+${cot.descripcionTecnica ? `<h2>Descripción técnica y alcance</h2>${parrafos(cot.descripcionTecnica)}` : ""}
 
 <h2>Detalle</h2>
 <table class="rep">
   <thead>
-    <tr><th>#</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">P. unitario</th><th class="num">Subtotal</th></tr>
+    <tr><th>#</th><th>Ensayo / descripción</th><th class="num">Cantidad</th><th class="num">P. unitario</th><th class="num">Subtotal</th></tr>
   </thead>
   <tbody>
     ${filas || '<tr><td class="vacio" colspan="5">Sin líneas de detalle.</td></tr>'}
@@ -164,12 +184,32 @@ function cuerpoCotizacionHtml(cot: any): string {
 
 <h2>Totales</h2>
 <table class="meta">
-  <tr><th>Subtotal</th><td>${clp(cot.subtotal)}</td><th>Descuento</th><td>${clp(cot.descuentoMonto)}</td></tr>
-  <tr><th>Neto</th><td>${clp(cot.neto)}</td><th>IVA</th><td>${clp(cot.ivaMonto)}</td></tr>
-  <tr><th>TOTAL</th><td>${clp(cot.total)}</td><th></th><td></td></tr>
+  <tr><th>Subtotal</th><td>${monto(cot.subtotal)}</td><th>Neto</th><td>${monto(cot.neto)}</td></tr>
+  <tr><th>IVA</th><td>${monto(cot.ivaMonto)}</td><th>TOTAL</th><td>${monto(cot.total)}</td></tr>
 </table>
 
-<p class="nota">Documento generado por el sistema LIMS IDIC. Los valores están expresados en pesos chilenos (CLP).</p>`;
+${cot.condicionesAdicionales ? `<h2>Condiciones adicionales</h2>${parrafos(cot.condicionesAdicionales)}` : ""}
+
+<p class="nota">Documento generado por el sistema LIMS IDIC. Los valores están expresados en ${usd ? "dólares estadounidenses (US$)" : "pesos chilenos (CLP)"}.</p>`;
+}
+
+/** US$ con 2 decimales (convención es-CL). */
+function usdFmt(v: unknown): string {
+  const n = Number(v ?? 0);
+  if (!Number.isFinite(n)) return "US$ 0,00";
+  return "US$ " + n.toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Columnas DATE de Prisma llegan a medianoche UTC: se pasan a fecha local equivalente. */
+function fechaUtc(d: Date | string): Date {
+  const x = new Date(d);
+  return new Date(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate());
+}
+
+/** Etiqueta de las formas de pago R1 (los códigos históricos se muestran tal cual). */
+function etiquetaFormaPago(codigo?: string | null): string {
+  const m: Record<string, string> = { contado_30: "Contado 30 días", adelantado: "Por adelantado" };
+  return codigo ? m[codigo] ?? codigo : "—";
 }
 
 /* --- schemas Zod ---------------------------------------------------------- */

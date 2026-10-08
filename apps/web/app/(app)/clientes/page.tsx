@@ -26,7 +26,9 @@ export default function ClientesPage() {
         { campo: "razonSocial", label: "Razón social", requerido: true },
         // Tipo de cliente: leído de la maestra editable de parámetros de negocio
         // (§5), no hardcodeado. Gestionable en /catalogo/parametros → tipo_cliente.
-        { campo: "tipo", label: "Tipo", tipo: "select", opcionesEndpoint: "parametros?categoria=tipo_cliente&activo=true" },
+        // Comercial R2: lista única (Ley 17.798, Ejército, …, Interlaboratorio); los
+        // valores antiguos quedan inactivos y no se ofrecen (ver docs/COMERCIAL_RONDA2.md).
+        { campo: "tipo", label: "Tipo", tipo: "select", opcionesEndpoint: "parametros?categoria=tipo_cliente&activo=true&limit=100" },
         { campo: "ciudad", label: "Ciudad" },
         { campo: "region", label: "Región" },
         { campo: "telefono", label: "Teléfono", tipo: "telefono" },

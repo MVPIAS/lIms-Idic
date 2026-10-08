@@ -1,21 +1,93 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { validarTransicion } from "../common/estados";
 import { generarCodigoOt } from "../common/codigo";
+import {
+  calcularValidez,
+  reglaDeTipoCliente,
+  soloFecha,
+  DIAS_PARTICULAR_DEF,
+  MESES_EJERCITO_OCT_DIC_DEF,
+  type ResultadoValidez,
+} from "./validez";
+import { calcularOpiPendiente, origenDesdeAceptacion } from "../ot/reglas-ot";
+
+/** Estado inicial de toda cotización nueva (R1: Abierta / Aceptada / Anulada). */
+export const ESTADO_ABIERTA = "abierta";
+
+/** Grupo visible del combo de centros de costo (SVT2). */
+export function grupoCentroCosto(tipo?: string | null): string {
+  return tipo === "sucursal_bpch" || tipo === "delegacion_bpch" ? "Sucursales y Delegación BPCH" : "Laboratorios";
+}
+
+export interface LineaEntrada {
+  tipo?: string;
+  catEnsayoId?: string;
+  ensayoCodigo?: string;
+  descripcion?: string;
+  categoria?: string;
+  cantidad?: number;
+  diasOHoras?: number;
+  precioUnitario?: number;
+  tramo?: string;
+}
+
+/** Campos de cabecera comunes a crear/editar (ya validados por zod en el controller). */
+export interface CabeceraCotizacion {
+  clienteId?: string;
+  plantaId?: string;
+  centroCostoId?: string | null;
+  formato?: string;
+  formaPago?: string | null;
+  medioEnvio?: string | null;
+  moneda?: "CLP" | "USD";
+  dolarValor?: number | null;
+  dolarFecha?: string | Date | null;
+  dolarMotivo?: string | null;
+  referencia?: string | null;
+  descripcionTecnica?: string | null;
+  condicionesAdicionales?: string | null;
+  observacionesInternas?: string | null;
+  notas?: string | null;
+  gastosAdminPct?: number;
+  ivaPct?: number;
+  descuentoPct?: number;
+  validezDias?: number;
+  fechaEmision?: string | Date;
+  lineas?: LineaEntrada[];
+}
+
+export interface AceptacionEntrada {
+  tipo?: string;
+  numero?: string;
+  fecha?: string | Date;
+  adjunto?: string;
+  conCobro?: boolean;
+}
 
 @Injectable()
 export class CotizacionService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listar(tenantId?: string) {
-    return this.prisma.cotizacion.findMany({
+    const cots = await this.prisma.cotizacion.findMany({
       // Cotizacion tiene tenant_id: solo las del tenant del usuario.
       where: { ...(tenantId ? { tenantId } : {}) },
       take: 50,
       orderBy: { createdAt: "desc" },
       include: { cliente: true, lineas: true },
     });
+    // OT generada por cada cotización (sin relación Prisma): una sola consulta.
+    const ids = cots.map((c) => c.id);
+    const ots = ids.length
+      ? await this.prisma.ordenTrabajo.findMany({
+          where: { cotizacionId: { in: ids }, ...(tenantId ? { tenantId } : {}) },
+          select: { id: true, codigo: true, cotizacionId: true, opiPendiente: true, conCobro: true, origenTrabajo: true },
+        })
+      : [];
+    const porCot = new Map(ots.map((o) => [o.cotizacionId, o]));
+    return cots.map((c) => ({ ...c, ot: porCot.get(c.id) ?? null }));
   }
 
   async detalle(id: string, tenantId?: string) {
@@ -23,51 +95,219 @@ export class CotizacionService {
       where: { id, ...(tenantId ? { tenantId } : {}) },
       include: {
         cliente: true,
-        lineas: true,
-        ejecutivo: true,
+        lineas: { orderBy: { orden: "asc" } },
+        ejecutivo: { select: { id: true, nombreCompleto: true, username: true } },
       },
     });
     if (!cot) throw new NotFoundException();
-    return cot;
+    // OT generada (si la hay): la cotización no tiene relación Prisma hacia la OT.
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { cotizacionId: id, tenantId: cot.tenantId },
+      select: { id: true, codigo: true, estado: true, opiPendiente: true, conCobro: true, origenTrabajo: true },
+    });
+    return { ...cot, ot };
+  }
+
+  // --------------------------------------------------------------------------
+  // Configuración del formulario (combos + centros de costo agrupados)
+  // --------------------------------------------------------------------------
+
+  /** Valores de un combo de parámetros de negocio (solo activos por defecto). */
+  private async parametros(tenantId: string, categoria: string, soloActivos = true) {
+    return this.prisma.parametroSistema.findMany({
+      where: { tenantId, categoria, ...(soloActivos ? { activo: true } : {}) },
+      orderBy: { orden: "asc" },
+      select: { codigo: true, etiqueta: true, valor: true, activo: true },
+    });
+  }
+
+  private async numeroParametro(tenantId: string, codigo: string, def: number): Promise<number> {
+    const p = await this.prisma.parametroSistema.findFirst({
+      where: { tenantId, categoria: "validez_cotizacion", codigo, activo: true },
+      select: { valor: true },
+    });
+    const n = Number(p?.valor);
+    return Number.isFinite(n) && n > 0 ? n : def;
+  }
+
+  async config(tenantId?: string) {
+    const t = tenantId ?? DEV_TENANT;
+    const cats = ["tipo_cliente", "forma_pago", "formato_cotizacion", "moneda", "medio_envio", "aceptacion_tipo", "estado_cotizacion", "origen_trabajo"];
+    const parametros: Record<string, any[]> = {};
+    for (const c of cats) parametros[c] = await this.parametros(t, c, c !== "estado_cotizacion");
+
+    const centros = await this.prisma.centroCosto.findMany({
+      where: { tenantId: t, activo: true, deletedAt: null },
+      orderBy: [{ tipo: "asc" }, { codigo: "asc" }],
+    });
+    return {
+      parametros,
+      centrosCosto: centros.map((c) => ({
+        id: c.id,
+        codigo: c.codigo,
+        nombre: c.nombre,
+        tipo: c.tipo ?? "laboratorio",
+        grupo: grupoCentroCosto(c.tipo),
+        laboratorio: c.laboratorio,
+        condicionesBase: c.condicionesBase,
+        validezParticularDias: c.validezParticularDias,
+      })),
+      validez: {
+        particularDias: await this.numeroParametro(t, "particular_dias", DIAS_PARTICULAR_DEF),
+        ejercitoMesesOctDic: await this.numeroParametro(t, "ejercito_meses_oct_dic", MESES_EJERCITO_OCT_DIC_DEF),
+      },
+      condicionesMax: 2000,
+    };
   }
 
   /**
-   * Crea cotización + sus líneas + recalcula totales.
-   * Replica los cálculos del legacy comercial:
-   *   subtotal = SUMA(linea.subtotal)
-   *   neto = subtotal - descuentoMonto + gastosAdminMonto
-   *   iva = neto * (ivaPct / 100)
-   *   total = neto + iva
+   * Validez automática (IT DCO-PG01-P01-IT02) para un cliente y centro de costo.
+   * Lee la regla del tipo de cliente (parametro_sistema.valor) y la validez
+   * propia del laboratorio (centro_costo.validez_particular_dias).
    */
-  async crear(data: any, tenantId?: string) {
-    const tenantIdFromJWT = tenantId ?? DEV_TENANT;
-    const codigo = await this.generarCodigo();
-
-    // Calcular subtotales y totales
-    const lineasConSubtotal = data.lineas.map((l: any, i: number) => {
-      const subtotal = (l.cantidad ?? 1) * l.precioUnitario;
-      return { ...l, orden: i + 1, subtotal };
+  async calcularValidezPara(
+    tenantId: string,
+    clienteId: string,
+    centroCostoId?: string | null,
+    fechaEmision?: string | Date,
+  ): Promise<ResultadoValidez & { tipoClienteCodigo: string | null }> {
+    const cliente = await this.prisma.cliente.findFirst({
+      where: { id: clienteId, tenantId },
+      select: { tipo: true },
     });
+    if (!cliente) throw new BadRequestException("clienteId no existe o no pertenece al tenant");
+    const tipo = cliente.tipo ?? null;
+    const param = tipo
+      ? await this.prisma.parametroSistema.findFirst({
+          where: { tenantId, categoria: "tipo_cliente", codigo: tipo },
+          select: { valor: true },
+        })
+      : null;
+    let diasLab: number | null = null;
+    if (centroCostoId) {
+      const cc = await this.prisma.centroCosto.findFirst({
+        where: { id: centroCostoId, tenantId },
+        select: { validezParticularDias: true },
+      });
+      if (!cc) throw new BadRequestException("centroCostoId no existe o no pertenece al tenant");
+      diasLab = cc.validezParticularDias ?? null;
+    }
+    const r = calcularValidez({
+      fechaEmision: fechaEmision ?? new Date(),
+      regla: reglaDeTipoCliente(tipo, param?.valor),
+      diasParticular: await this.numeroParametro(tenantId, "particular_dias", DIAS_PARTICULAR_DEF),
+      diasParticularLab: diasLab,
+      mesesEjercitoOctDic: await this.numeroParametro(tenantId, "ejercito_meses_oct_dic", MESES_EJERCITO_OCT_DIC_DEF),
+    });
+    return { ...r, tipoClienteCodigo: tipo };
+  }
 
-    // Réplica de SIS_COMERCIAL (ADM/imprimir.php:300-338):
-    //   total_pagar = SUMA(líneas) − (SUMA × descuento%/100)   [IVA EXENTO]
-    // El descuento se aplica sobre el gran total (suma de líneas), igual que el
-    // legacy. Gastos administrativos e IVA son 0 salvo que se pidan (el original
-    // no los tiene): así el total coincide 1:1 con la cotización original.
-    const descuentoPct = Number(data.descuentoPct ?? 0);
-    const gastosAdminPct = Number(data.gastosAdminPct ?? 0);
-    const ivaPct = Number(data.ivaPct ?? 0);
+  // --------------------------------------------------------------------------
+  // Líneas: ensayo del catálogo (código EN) valorizado por su ficha
+  // --------------------------------------------------------------------------
 
-    const subtotal = lineasConSubtotal.reduce(
-      (acc: number, l: any) => acc + l.subtotal,
-      0,
-    );
-    const descuentoMonto = subtotal * (descuentoPct / 100);
-    const subtotalNeto = subtotal - descuentoMonto;
-    const gastosAdminMonto = subtotalNeto * (gastosAdminPct / 100);
-    const neto = subtotalNeto + gastosAdminMonto;
+  /**
+   * Resuelve las líneas: las que traen `catEnsayoId` toman código, descripción y
+   * PRECIO del catálogo (cat_ensayo.precio = valor de la ficha de costos) si no
+   * se indica precio; en USD se convierte con el dólar congelado de la cotización.
+   * Las líneas libres (HH/HM/viático…) se siguen aceptando por compatibilidad.
+   */
+  private async resolverLineas(tenantId: string, lineas: LineaEntrada[], moneda: string, dolar: number | null) {
+    const ids = lineas.map((l) => l.catEnsayoId).filter((x): x is string => Boolean(x));
+    const ensayos = ids.length
+      ? await this.prisma.catEnsayo.findMany({
+          where: { id: { in: ids }, tenantId, deletedAt: null },
+          select: { id: true, codigo: true, nombre: true, precio: true },
+        })
+      : [];
+    const porId = new Map(ensayos.map((e) => [e.id, e]));
+
+    return lineas.map((l, i) => {
+      let precio = l.precioUnitario;
+      let descripcion = l.descripcion;
+      let ensayoCodigo = l.ensayoCodigo;
+      if (l.catEnsayoId) {
+        const e = porId.get(l.catEnsayoId);
+        if (!e) throw new BadRequestException(`Línea ${i + 1}: el ensayo ${l.catEnsayoId} no existe en el catálogo.`);
+        ensayoCodigo = e.codigo;
+        descripcion = descripcion || `${e.codigo} · ${e.nombre}`;
+        if (precio === undefined || precio === null) {
+          const clp = Number(e.precio);
+          precio = moneda === "USD" ? Math.round((clp / (dolar || 1)) * 100) / 100 : clp;
+        }
+      }
+      if (!(Number(precio) > 0)) {
+        throw new BadRequestException(
+          `Línea ${i + 1}: sin precio. El ensayo no tiene valor en su ficha de costos; indique precioUnitario.`,
+        );
+      }
+      const cantidad = l.cantidad ?? 1;
+      return {
+        tipo: l.catEnsayoId ? "producto" : l.tipo ?? "producto",
+        descripcion: descripcion ?? null,
+        categoria: l.categoria ?? null,
+        cantidad,
+        diasOHoras: l.diasOHoras ?? null,
+        precioUnitario: Number(precio),
+        descuentoPct: 0,
+        subtotal: cantidad * Number(precio),
+        tramo: l.tramo ?? null,
+        orden: i + 1,
+        catEnsayoId: l.catEnsayoId ?? null,
+        ensayoCodigo: ensayoCodigo ?? null,
+      };
+    });
+  }
+
+  /**
+   * Totales (réplica de SIS_COMERCIAL, ADM/imprimir.php:300-338, IVA EXENTO):
+   *   total = SUMA(líneas) [+ gastos admin si se piden] [+ IVA si se pide].
+   * R1: la cotización ya NO tiene descuento (descuento = 0 siempre).
+   */
+  private totales(lineas: { subtotal: number }[], gastosAdminPct = 0, ivaPct = 0) {
+    const subtotal = lineas.reduce((a, l) => a + l.subtotal, 0);
+    const gastosAdminMonto = subtotal * (gastosAdminPct / 100);
+    const neto = subtotal + gastosAdminMonto;
     const ivaMonto = neto * (ivaPct / 100);
-    const total = neto + ivaMonto;
+    return {
+      subtotal,
+      descuentoPct: 0,
+      descuentoMonto: 0,
+      gastosAdminPct,
+      gastosAdminMonto,
+      neto,
+      ivaPct,
+      ivaMonto,
+      total: neto + ivaMonto,
+    };
+  }
+
+  private validarCondiciones(texto?: string | null) {
+    if (texto && texto.length > 2000)
+      throw new BadRequestException(`Condiciones adicionales: máximo 2000 caracteres (tiene ${texto.length}).`);
+  }
+
+  /**
+   * Crea la cotización en estado **Abierta** con sus líneas, totales y la
+   * validez automática calculada (y congelada) a la fecha de emisión.
+   */
+  async crear(data: CabeceraCotizacion & { clienteId: string; lineas: LineaEntrada[] }, tenantId?: string, usuarioId?: string) {
+    const tenantIdFromJWT = tenantId ?? DEV_TENANT;
+    this.validarCondiciones(data.condicionesAdicionales);
+    const moneda = data.moneda ?? "CLP";
+    const dolar = moneda === "USD" ? Number(data.dolarValor) : null;
+    if (moneda === "USD" && !(dolar && dolar > 0))
+      throw new BadRequestException("Cotización en USD: indique el valor del dólar del día (dolarValor).");
+
+    const fechaEmision = soloFecha(data.fechaEmision ?? new Date());
+    const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
+    const lineas = await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar);
+    const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0));
+    const codigo = await this.generarCodigo();
+    // Ejecutivo = usuario autenticado, solo si existe (FK a usuario).
+    const ejecutivo = usuarioId
+      ? await this.prisma.usuario.findFirst({ where: { id: usuarioId }, select: { id: true } })
+      : null;
 
     return this.prisma.cotizacion.create({
       data: {
@@ -75,47 +315,127 @@ export class CotizacionService {
         codigo,
         clienteId: data.clienteId,
         plantaId: data.plantaId,
+        centroCostoId: data.centroCostoId ?? null,
         formato: data.formato,
-        formaPago: data.formaPago,
-        validezDias: data.validezDias,
-        subtotal,
-        descuentoPct,
-        descuentoMonto,
-        gastosAdminPct,
-        gastosAdminMonto,
-        neto,
-        ivaPct,
-        ivaMonto,
-        total,
-        notas: data.notas,
-        estado: "borrador",
-        lineas: {
-          create: lineasConSubtotal,
-        },
+        formaPago: data.formaPago ?? null,
+        medioEnvio: data.medioEnvio ?? null,
+        moneda,
+        dolarValor: dolar,
+        dolarFecha: moneda === "USD" ? soloFecha(data.dolarFecha ?? fechaEmision) : null,
+        referencia: data.referencia ?? null,
+        descripcionTecnica: data.descripcionTecnica ?? null,
+        condicionesAdicionales: data.condicionesAdicionales ?? null,
+        observacionesInternas: data.observacionesInternas ?? null,
+        notas: data.notas ?? null,
+        fechaEmision,
+        validaHasta: soloFecha(validez.validaHasta),
+        expiraAt: soloFecha(validez.validaHasta),
+        validezDias: validez.dias,
+        tipoClienteCodigo: validez.tipoClienteCodigo,
+        ejecutivoId: ejecutivo?.id ?? null,
+        ...tot,
+        estado: ESTADO_ABIERTA,
+        lineas: { create: lineas },
       },
-      include: { lineas: true },
+      include: { lineas: true, cliente: true },
     });
   }
 
   /**
-   * Editar campos permitidos (estado / notas) validando pertenencia al tenant.
-   * Si el PATCH trae `estado`, se valida como transición: ya no se puede fijar
-   * un estado arbitrario (era la brecha "PATCH {estado:'INVENTADO'} → 200").
+   * Editar una cotización. El CONTENIDO solo se edita mientras está **Abierta**
+   * (las aceptadas, anuladas y las históricas son de solo lectura).
+   * `estado` se admite por compatibilidad, validado como transición; la
+   * aceptación y la anulación tienen sus propios endpoints con datos obligatorios.
    */
-  async actualizar(id: string, data: { estado?: string; notas?: string }, tenantId?: string) {
-    const actual = await this.detalle(id, tenantId); // valida existencia + pertenencia al tenant
-    if (data.estado !== undefined) {
-      validarTransicion("cotizacion", actual.estado, data.estado);
+  async actualizar(id: string, data: CabeceraCotizacion & { estado?: string }, tenantId?: string) {
+    const actual = await this.detalle(id, tenantId); // existencia + tenant
+    const { estado, ...resto } = data;
+    const tocaContenido = Object.values(resto).some((v) => v !== undefined);
+
+    if (estado !== undefined) {
+      if (estado === "aceptada") throw new BadRequestException("Use POST /cotizaciones/:id/aceptar (exige documento de aceptación).");
+      if (estado === "anulada") throw new BadRequestException("Use POST /cotizaciones/:id/anular (exige motivo).");
+      validarTransicion("cotizacion", actual.estado, estado);
     }
-    return this.prisma.cotizacion.update({ where: { id }, data });
+    if (!tocaContenido) {
+      return this.prisma.cotizacion.update({ where: { id }, data: { ...(estado ? { estado } : {}) } });
+    }
+    if (actual.estado !== ESTADO_ABIERTA) {
+      throw new ConflictException(
+        `Solo se puede editar una cotización Abierta (esta está '${actual.estado}'${["borrador", "enviada", "rechazada", "expirada"].includes(actual.estado) ? ", histórica de solo lectura" : ""}).`,
+      );
+    }
+    this.validarCondiciones(resto.condicionesAdicionales);
+
+    const moneda = resto.moneda ?? (actual.moneda as "CLP" | "USD");
+    const dolarActual = actual.dolarValor !== null && actual.dolarValor !== undefined ? Number(actual.dolarValor) : null;
+    let dolar = moneda === "USD" ? (resto.dolarValor !== undefined && resto.dolarValor !== null ? Number(resto.dolarValor) : dolarActual) : null;
+    if (moneda === "USD" && !(dolar && dolar > 0))
+      throw new BadRequestException("Cotización en USD: indique el valor del dólar del día (dolarValor).");
+    // El dólar queda CONGELADO al emitir: cambiarlo después exige motivo.
+    const cambiaDolar = moneda === "USD" && dolarActual !== null && dolar !== dolarActual;
+    if (cambiaDolar && !resto.dolarMotivo?.trim())
+      throw new BadRequestException("El valor del dólar quedó congelado al emitir: indique el motivo del cambio (dolarMotivo).");
+    if (moneda === "CLP") dolar = null;
+
+    const centroCostoId = resto.centroCostoId !== undefined ? resto.centroCostoId : actual.centroCostoId;
+    const validez = await this.calcularValidezPara(actual.tenantId, actual.clienteId, centroCostoId, actual.fechaEmision);
+
+    const upd: Record<string, any> = {
+      centroCostoId,
+      formato: resto.formato ?? undefined,
+      formaPago: resto.formaPago !== undefined ? resto.formaPago : undefined,
+      medioEnvio: resto.medioEnvio !== undefined ? resto.medioEnvio : undefined,
+      referencia: resto.referencia !== undefined ? resto.referencia : undefined,
+      descripcionTecnica: resto.descripcionTecnica !== undefined ? resto.descripcionTecnica : undefined,
+      condicionesAdicionales: resto.condicionesAdicionales !== undefined ? resto.condicionesAdicionales : undefined,
+      observacionesInternas: resto.observacionesInternas !== undefined ? resto.observacionesInternas : undefined,
+      notas: resto.notas !== undefined ? resto.notas : undefined,
+      moneda,
+      dolarValor: dolar,
+      dolarFecha: moneda === "USD" ? (resto.dolarFecha ? soloFecha(resto.dolarFecha) : actual.dolarFecha ?? actual.fechaEmision) : null,
+      ...(cambiaDolar ? { dolarMotivo: resto.dolarMotivo } : {}),
+      validaHasta: soloFecha(validez.validaHasta),
+      expiraAt: soloFecha(validez.validaHasta),
+      validezDias: validez.dias,
+      ...(estado ? { estado } : {}),
+      updatedAt: new Date(),
+    };
+
+    if (resto.lineas) {
+      if (!resto.lineas.length) throw new BadRequestException("La cotización debe tener al menos una línea.");
+      const lineas = await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar);
+      const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0));
+      return this.prisma.$transaction(async (tx) => {
+        await tx.lineaCotizacion.deleteMany({ where: { cotizacionId: id } });
+        return tx.cotizacion.update({
+          where: { id },
+          data: { ...upd, ...tot, lineas: { create: lineas } },
+          include: { lineas: true, cliente: true },
+        });
+      });
+    }
+    return this.prisma.cotizacion.update({ where: { id }, data: upd, include: { lineas: true, cliente: true } });
   }
 
   /**
-   * "Eliminar" cotización = anularla (estado 'anulada'). No se borra físicamente:
-   * el modelo no tiene deleted_at y puede estar referenciada por una OT (cotizacion_id).
+   * Anular (R1): Abierta → Anulada con motivo. Se conserva `DELETE /:id` como
+   * alias (sin motivo) por compatibilidad. No hay borrado físico.
    */
-  async anular(id: string, tenantId?: string) {
-    return this.cambiarEstado(id, "anulada", tenantId);
+  async anular(id: string, tenantId?: string, motivo?: string) {
+    const actual = await this.detalle(id, tenantId);
+    validarTransicion("cotizacion", actual.estado, "anulada");
+    if (actual.ot)
+      throw new ConflictException(`La cotización ya generó la OT ${actual.ot.codigo}: anule primero la OT.`);
+    return this.prisma.cotizacion.update({
+      where: { id },
+      data: {
+        estado: "anulada",
+        anulacionMotivo: motivo ?? null,
+        anuladaAt: new Date(),
+        updatedAt: new Date(),
+      },
+    });
   }
 
   async cambiarEstado(id: string, nuevoEstado: string, tenantId?: string) {
@@ -128,29 +448,32 @@ export class CotizacionService {
   }
 
   /**
-   * Aceptar una cotización (RF-B04.1 · flujo F03). En UNA transacción:
-   *   1. Valida la transición  → 'aceptada'.
-   *   2. Marca la cotización aceptada.
-   *   3. CREA la Orden de Trabajo asociada (esto era el `// TODO` que dejaba la
-   *      cadena Cotización → OT → Expediente rota: la OT había que crearla a mano).
+   * Registrar la aceptación (RF-B04.1 · flujo F03 · SVT6). En UNA transacción:
+   *   1. Valida la transición → 'aceptada' y el documento de aceptación.
+   *   2. Marca la cotización aceptada con su documento (tipo/número/fecha/adjunto)
+   *      y si lleva cobro.
+   *   3. CREA la OT asociada (idempotente: si ya existe, se devuelve la misma).
+   *      Hereda cliente/planta/tenant/centro de costo, `origen_trabajo`
+   *      (COTIZACION, o DISPOSICION si se aceptó por disposición del Director),
+   *      `con_cobro` y `opi_pendiente` (SVT7).
    *
-   * La OT hereda cliente, planta y tenant de la cotización, y queda enlazada por
-   * `cotizacionId`. El código se genera con el mismo helper que usa `POST /ot`.
-   *
-   * Idempotencia: si la cotización YA tiene una OT, no se crea una segunda; se
-   * devuelve la existente. Evita duplicar OT si se reintenta la petición.
-   *
-   * NOTA: no se instancia el flujo BPM aquí. `POST /ot` solo instancia flujo
-   * cuando el llamador indica flujoDefId/flujoVersionId, y no hay en el modelo
-   * ninguna regla `{laboratorio, tipoEnsayo} → flujo` que permita resolverlo
-   * automáticamente (el `resolverFlujoPlantilla` del diseño no existe en la BD).
-   * La OT queda lista para adjuntarle su flujo con `POST /ot/:id/flujo`.
+   * Compatibilidad: una cotización HISTÓRICA en estado 'enviada' se puede
+   * aceptar sin documento (comportamiento previo). Una 'abierta' exige `tipo`.
    */
-  async aceptar(id: string, tenantId?: string) {
+  async aceptar(id: string, tenantId?: string, doc: AceptacionEntrada = {}, usuarioId?: string) {
     const cot = await this.detalle(id, tenantId);
     validarTransicion("cotizacion", cot.estado, "aceptada");
+    if (cot.estado === ESTADO_ABIERTA && !doc.tipo)
+      throw new BadRequestException("Indique el documento de aceptación (tipo: OPI_RESOLUCION, OC, CORREO, PAGO_ADELANTADO o DISPOSICION_DIRECTOR).");
+    if ((doc.tipo === "OPI_RESOLUCION" || doc.tipo === "OC") && !doc.numero?.trim())
+      throw new BadRequestException(`El documento ${doc.tipo === "OC" ? "Orden de compra" : "OPI / Resolución"} requiere número.`);
 
+    const conCobro = doc.conCobro ?? true;
     const tenantIdOt = cot.tenantId ?? tenantId ?? DEV_TENANT;
+    const fechaDoc = doc.tipo ? soloFecha(doc.fecha ?? new Date()) : null;
+    const origen = origenDesdeAceptacion(doc.tipo);
+    const opiNumero = doc.tipo === "OPI_RESOLUCION" ? doc.numero?.trim() ?? null : null;
+    const opiPendiente = calcularOpiPendiente({ origen, aceptacionTipo: doc.tipo, conCobro, opiNumero });
 
     const { cotizacion, ot } = await this.prisma.$transaction(async (tx) => {
       const existente = await tx.ordenTrabajo.findFirst({
@@ -160,7 +483,21 @@ export class CotizacionService {
 
       const cotizacion = await tx.cotizacion.update({
         where: { id },
-        data: { estado: "aceptada" },
+        data: {
+          estado: "aceptada",
+          ...(doc.tipo
+            ? {
+                aceptacionTipo: doc.tipo,
+                aceptacionNumero: doc.numero?.trim() || null,
+                aceptacionFecha: fechaDoc,
+                aceptacionAdjunto: doc.adjunto?.trim() || null,
+              }
+            : {}),
+          conCobro,
+          aceptadaAt: new Date(),
+          aceptadaPor: usuarioId ?? null,
+          updatedAt: new Date(),
+        },
         include: { cliente: true, lineas: true },
       });
 
@@ -173,9 +510,19 @@ export class CotizacionService {
           clienteId: cot.clienteId,
           plantaId: cot.plantaId ?? null,
           cotizacionId: cot.id,
+          cotizacionNumero: cot.codigo,
+          centroCostoId: cot.centroCostoId ?? null,
           prioridad: "normal",
           estado: "recepcionada", // estado inicial real (default del modelo)
           fechaRecepcion: new Date(),
+          origenTrabajo: origen,
+          conCobro,
+          opiPendiente,
+          ...(doc.tipo === "OC" ? { ocNumero: doc.numero?.trim() ?? null } : {}),
+          ...(opiNumero ? { opiNumero, opiFecha: fechaDoc, opiRegistradaAt: new Date() } : {}),
+          ...(doc.tipo === "DISPOSICION_DIRECTOR"
+            ? { disposicionRef: doc.numero?.trim() || "Disposición del Director", disposicionFecha: fechaDoc }
+            : {}),
           notas: `Generada automáticamente al aceptar la cotización ${cot.codigo}.`,
         },
         include: { cliente: true },
@@ -184,14 +531,16 @@ export class CotizacionService {
       return { cotizacion, ot };
     });
 
+    const extra = ot.opiPendiente ? " Queda con OPI PENDIENTE (disposición del Director con cobro)." : "";
     return {
       ok: true,
       cotizacion,
       ot,
-      mensaje: `Cotización aceptada. Orden de trabajo ${ot.codigo} creada.`,
+      mensaje: `Cotización aceptada. Orden de trabajo ${ot.codigo} creada.${extra}`,
     };
   }
 
+  /** Rechazo: solo cotizaciones históricas ('enviada'); las nuevas se anulan. */
   async rechazar(id: string, motivo: string, tenantId?: string) {
     const actual = await this.detalle(id, tenantId); // valida pertenencia al tenant
     validarTransicion("cotizacion", actual.estado, "rechazada");

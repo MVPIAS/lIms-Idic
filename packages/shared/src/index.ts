@@ -5,8 +5,11 @@ import { z } from "zod";
 
 // ─── Enums (mirror del schema.sql) ────────────────────────────────────────────
 
+// Comercial R1 (oct-2026): las cotizaciones nuevas solo usan abierta/aceptada/anulada.
+// borrador, en_cotizacion, enviada, rechazada y expirada quedan para el histórico.
 export const CotizacionEstado = z.enum([
-  "borrador", "en_cotizacion", "enviada", "aceptada", "rechazada", "expirada",
+  "abierta", "aceptada", "anulada",
+  "borrador", "en_cotizacion", "enviada", "rechazada", "expirada",
 ]);
 export type CotizacionEstado = z.infer<typeof CotizacionEstado>;
 
@@ -21,14 +24,27 @@ export const OrdenCompraEstado = z.enum([
 ]);
 export type OrdenCompraEstado = z.infer<typeof OrdenCompraEstado>;
 
+// 'extension' y 'comprension' (Tipo cotización Extensión/Comprensión del Sistema
+// Comercial) se conservan SOLO para datos heredados: la UI ya no los ofrece (SVT1).
 export const LineaCotizacionTipo = z.enum([
   "producto", "viatico", "pasaje", "hora_hombre", "hora_maquina",
   "otros", "extension", "comprension",
 ]);
 export type LineaCotizacionTipo = z.infer<typeof LineaCotizacionTipo>;
 
-export const FormatoCotizacion = z.enum(["F1", "F2", "F3", "F4", "F5", "F6"]);
+// R1: formatos vigentes NORMAL y PERSONALIZADO; F1–F6 solo en el histórico.
+export const FormatoCotizacion = z.enum(["NORMAL", "PERSONALIZADO", "F1", "F2", "F3", "F4", "F5", "F6"]);
 export const Moneda = z.enum(["CLP", "USD", "UF", "EUR", "CLF"]);
+/** R1: la cotización solo se emite en CLP o USD. */
+export const MonedaCotizacion = z.enum(["CLP", "USD"]);
+
+/** SVT6 · documento de aceptación de la cotización (IDIC-PG03 6.3 n / 6.4 g). */
+export const AceptacionTipo = z.enum(["OPI_RESOLUCION", "OC", "CORREO", "PAGO_ADELANTADO", "DISPOSICION_DIRECTOR"]);
+export type AceptacionTipo = z.infer<typeof AceptacionTipo>;
+
+/** SVT7 / SPC2.2 · origen de la OT (orden_trabajo.origen_trabajo). */
+export const OrigenOt = z.enum(["COTIZACION", "INTERNACION", "DISPOSICION", "INTERLABORATORIO", "OT_INTERNA"]);
+export type OrigenOt = z.infer<typeof OrigenOt>;
 
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 

@@ -83,6 +83,7 @@ for f in \
   packages/db/align_seguridad.sql \
   packages/db/align_configuracion.sql \
   packages/db/align_parametros.sql \
+  packages/db/align_comercial_r2.sql \
   packages/db/align_qc.sql \
   packages/db/align_correo_log.sql \
   packages/db/align_consumibles.sql \

@@ -5,6 +5,26 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { fecha } from "@/lib/format";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import { ORIGEN_LABEL } from "../cotizaciones/_components/comercial";
+
+/**
+ * Origen de la OT (Comercial R2) + marcas «OPI pendiente» y «Sin cobro».
+ * `origenTrabajo` guarda un código (COTIZACION, INTERNACION, DISPOSICION,
+ * INTERLABORATORIO, OT_INTERNA); las OT heredadas pueden traer texto libre.
+ */
+const origenBadges = (r: any) => (
+  <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap", alignItems: "center" }}>
+    {r.origenTrabajo ? (
+      <span className={ORIGEN_LABEL[r.origenTrabajo] ? "pill teal" : ""} title={r.origenTrabajo}>
+        {ORIGEN_LABEL[r.origenTrabajo] ?? r.origenTrabajo}
+      </span>
+    ) : (
+      <span style={{ color: "var(--muted)" }}>—</span>
+    )}
+    {r.opiPendiente && <span className="pill amber" title="Disposición del Director con cobro: falta registrar la OPI">OPI pendiente</span>}
+    {r.conCobro === false && <span className="pill gray" title="OT sin cobro: registra horas y costo">Sin cobro</span>}
+  </span>
+);
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -71,6 +91,7 @@ export default function OtPage() {
     { key: "fechaIngreso", label: "Ingreso", value: (r) => r.fechaIngreso ?? r.createdAt ?? "", render: (r) => fecha(r.fechaIngreso ?? r.createdAt) },
     { key: "prioridad", label: "Prioridad", value: (r) => r.prioridad ?? "normal", render: (r) => r.prioridad ?? "normal" },
     { key: "estado", label: "Estado", value: (r) => r.estado ?? "", render: (r) => estadoBadge(r.estado) },
+    { key: "origen", label: "Origen", value: (r) => `${r.origenTrabajo ?? ""} ${r.opiPendiente ? "OPI pendiente" : ""} ${r.conCobro === false ? "Sin cobro" : ""}`, render: (r) => origenBadges(r) },
     { key: "flujo", label: "Flujo", sortable: false, filter: false, value: (r) => r.flujo?.estado ?? "", render: (r) => flujoBadge(r.flujo) },
   ];
 

@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { fecha, fechaHora, rut } from "@/lib/format";
+import { fecha, fechaHora, fechaDia, rut, clp, num } from "@/lib/format";
+import { ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}` });
@@ -87,6 +88,23 @@ export default function ExpedientePage() {
     finally { setBusy(false); }
   };
 
+  // ---- SVT7 · registrar OPI (limpia «OPI pendiente») ----
+  const [opiNumero, setOpiNumero] = useState("");
+  const [opiFecha, setOpiFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [opiMsg, setOpiMsg] = useState("");
+  const registrarOpi = async () => {
+    setBusy(true); setOpiMsg("");
+    try {
+      const res = await fetch(`${API}/ot/${id}/registrar-opi`, {
+        method: "POST", headers: authJson(), body: JSON.stringify({ numero: opiNumero.trim(), fecha: opiFecha }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.message ?? `Error ${res.status}`);
+      setOt((prev: any) => ({ ...prev, ...j }));
+    } catch (e: any) { setOpiMsg(String(e.message)); }
+    finally { setBusy(false); }
+  };
+
   const completarTarea = async (pasoEjecucionId: string) => {
     setBusy(true); setFlujoMsg("");
     try {
@@ -123,8 +141,26 @@ export default function ExpedientePage() {
         <div className="meta">
           Cliente: <b>{ot?.cliente?.razonSocial ?? "—"}</b>
           {ot?.cliente?.rut ? <> ({rut(ot.cliente.rut)})</> : null} · Estado: <b>{ot?.estado ?? "—"}</b> · Prioridad: <b>{ot?.prioridad ?? "normal"}</b>
+          {ot?.origenTrabajo ? <> · Origen: <b>{ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo}</b></> : null}
+          {ot?.opiPendiente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
+          {ot?.conCobro === false && <span className="pill gray" style={{ marginLeft: 8 }}>Sin cobro</span>}
         </div>
       </div>
+
+      {/* SVT7 · OT por disposición del Director con cobro: falta la OPI. */}
+      {ot?.opiPendiente && (
+        <div className="alert warn">
+          <div style={{ marginBottom: 6 }}>
+            OT creada por <b>disposición del Director</b>{ot.disposicionRef ? <> ({ot.disposicionRef})</> : null} con cobro: está <b>pendiente la OPI</b>.
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div className="field"><label>Nº OPI</label><input value={opiNumero} onChange={(e) => setOpiNumero(e.target.value)} maxLength={60} /></div>
+            <div className="field"><label>Fecha OPI</label><input type="date" value={opiFecha} onChange={(e) => setOpiFecha(e.target.value)} /></div>
+            <button className="btn primary sm" disabled={busy || !opiNumero.trim() || !opiFecha} onClick={registrarOpi}>Registrar OPI</button>
+          </div>
+          {opiMsg && <div style={{ marginTop: 6 }}>{opiMsg}</div>}
+        </div>
+      )}
 
       <div className="expgrid">
         {/* Stepper vertical de 14 fases */}
@@ -157,6 +193,13 @@ export default function ExpedientePage() {
                 <div className="field readonly"><label>Estado</label><input value={ot?.estado ?? "—"} readOnly /></div>
                 <div className="field readonly"><label>Prioridad</label><input value={ot?.prioridad ?? "normal"} readOnly /></div>
                 <div className="field readonly"><label>Ingreso</label><input value={fecha(ot?.fechaIngreso ?? ot?.createdAt)} readOnly /></div>
+                <div className="field readonly"><label>Origen</label><input value={ot?.origenTrabajo ? ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo : "—"} readOnly /></div>
+                <div className="field readonly"><label>Cobro</label><input value={ot ? (ot.conCobro === false ? "Sin cobro" : "Con cobro") : "—"} readOnly /></div>
+                <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : ot?.opiPendiente ? "Pendiente" : "—"} readOnly /></div>
+                {ot?.disposicionRef && <div className="field readonly"><label>Disposición del Director</label><input value={`${ot.disposicionRef}${ot.disposicionFecha ? ` · ${fechaDia(ot.disposicionFecha)}` : ""}`} readOnly /></div>}
+                {ot?.numeroLey && <div className="field readonly"><label>Resolución DGMN</label><input value={ot.numeroLey} readOnly /></div>}
+                <div className="field readonly"><label>Horas hombre</label><input value={num(ot?.horasHombre, 1)} readOnly /></div>
+                <div className="field readonly"><label>Costo estimado</label><input value={clp(ot?.costoEstimado)} readOnly /></div>
               </div>
             )}
             {tab === "muestras" && (

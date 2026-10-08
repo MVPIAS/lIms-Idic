@@ -81,6 +81,17 @@ export function fecha(v: unknown): string {
 }
 
 /** Fecha con hora: dd-mm-aaaa HH:MM. */
+/**
+ * Fecha de CALENDARIO (columnas DATE: válida hasta, fecha OPI…). Prisma las
+ * serializa como "aaaa-mm-ddT00:00:00.000Z"; con `fecha()` en Chile (UTC−3/−4)
+ * saldrían un día antes. Aquí se toma la parte aaaa-mm-dd tal cual.
+ */
+export function fechaDia(v: unknown): string {
+  if (!v) return GUION;
+  const m = String(v instanceof Date ? v.toISOString() : v).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : fecha(v);
+}
+
 export function fechaHora(v: unknown): string {
   if (!v) return GUION;
   const d = v instanceof Date ? v : new Date(String(v));
