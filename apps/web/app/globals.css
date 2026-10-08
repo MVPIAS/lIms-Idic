@@ -189,6 +189,9 @@ aside.sidebar a.nav:focus-visible{outline:2px solid var(--accent);outline-offset
 .btn.danger{background:var(--red);color:#fff}
 .btn.ghost-danger{background:#fff;border:1px solid #f0c9c9;color:var(--red)}
 .btn.ghost-danger:hover{background:#fdecec}
+/* La utilidad `outline` de Tailwind (outline-style:solid) choca con la clase .btn.outline
+   y pintaba un borde negro grueso en todos los botones secundarios: se neutraliza. */
+.btn.outline:not(:focus-visible){outline:none}
 .btn:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
 /* ---- Avisos (toasts) ---- */
