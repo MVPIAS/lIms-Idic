@@ -40,6 +40,14 @@ describe("estados · introspección", () => {
 });
 
 describe("estados · cotización", () => {
+  it("R1: abierta → aceptada | anulada, sin volver atrás", () => {
+    ok("cotizacion", "abierta", "aceptada");
+    ok("cotizacion", "abierta", "anulada");
+    ko("cotizacion", "abierta", "enviada");
+    ko("cotizacion", "abierta", "expirada");
+    ko("cotizacion", "aceptada", "abierta");
+    ko("cotizacion", "anulada", "abierta");
+  });
   it("permite el flujo feliz borrador → enviada → aceptada", () => {
     ok("cotizacion", "borrador", "enviada");
     ok("cotizacion", "enviada", "aceptada");

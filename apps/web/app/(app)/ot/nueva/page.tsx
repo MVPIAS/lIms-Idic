@@ -6,6 +6,25 @@ import { clp, apiGet, apiPost, unwrap, ApiError } from "./_components/api";
 import ClienteSelector, { Cliente } from "./_components/ClienteSelector";
 import LineaBuilder, { LineaOT } from "./_components/LineaBuilder";
 
+/**
+ * Origen de la OT en el alta directa (Comercial R2):
+ *  · ""                → alta directa sin origen comercial (comportamiento previo).
+ *  · DISPOSICION       → OT por disposición del Director (IDIC-PG03 6.4 g). Con
+ *                        cobro y sin OPI queda «OPI pendiente».
+ *  · INTERLABORATORIO  → la pide un laboratorio a otro sin OT padre (p. ej.
+ *                        calibración de un equipo): SIN cobro, costo por horas.
+ *  · INTERNACION       → resolución DGMN (tasa 1,5 % en /internaciones).
+ *  · OT_INTERNA        → OT interna.
+ */
+const ORIGENES = [
+  { v: "", l: "Alta directa" },
+  { v: "DISPOSICION", l: "Disposición del Director (sin OPI previa)" },
+  { v: "INTERLABORATORIO", l: "Interlaboratorio (sin cobro)" },
+  { v: "INTERNACION", l: "Internación (resolución DGMN)" },
+  { v: "OT_INTERNA", l: "OT interna" },
+];
+type CC = { id: string; codigo: string; nombre: string; tipo?: string | null };
+
 const hoy = () => new Date().toISOString().slice(0, 10);
 
 export default function NuevaOtPage() {
@@ -41,6 +60,32 @@ export default function NuevaOtPage() {
     }
   }
 
+  // Origen comercial de la OT (solo en alta directa).
+  const [origen, setOrigen] = useState("");
+  const [disposicionRef, setDisposicionRef] = useState("");
+  const [disposicionFecha, setDisposicionFecha] = useState(hoy());
+  const [conCobro, setConCobro] = useState(true);
+  const [opiNumero, setOpiNumero] = useState("");
+  const [resolucion, setResolucion] = useState("");
+  const [labSolicitante, setLabSolicitante] = useState("");
+  const [labEjecutor, setLabEjecutor] = useState("");
+  const [horas, setHoras] = useState("");
+  const [costo, setCosto] = useState("");
+  const [centros, setCentros] = useState<CC[]>([]);
+  const interlab = modo === "nueva" && origen === "INTERLABORATORIO";
+
+  useEffect(() => {
+    // Centros de costo: maestro (/centros-costo) o, si el rol no lo puede leer,
+    // la configuración comercial (/cotizaciones/config).
+    apiGet("/centros-costo?limit=200")
+      .then((d) => setCentros(((d as any)?.data ?? []) as CC[]))
+      .catch(() =>
+        apiGet("/cotizaciones/config")
+          .then((c: any) => setCentros(c?.centrosCosto ?? []))
+          .catch(() => setCentros([])),
+      );
+  }, []);
+
   // Líneas / elementos agregados.
   const [lineas, setLineas] = useState<LineaOT[]>([]);
 
@@ -59,9 +104,13 @@ export default function NuevaOtPage() {
     setOkMsg(""); setErrMsg(""); setErrIssues([]);
     // a. Validaciones locales.
     if (modo === "existente" && !otExistenteId) { setErrMsg("Selecciona la OT comercial a completar."); return; }
-    if (!cliente?.id) { setErrMsg("Selecciona un cliente real de la lista."); return; }
+    if (!cliente?.id && !interlab) { setErrMsg("Selecciona un cliente real de la lista."); return; }
+    if (modo === "nueva" && origen === "DISPOSICION" && !disposicionRef.trim()) { setErrMsg("Indica la referencia de la disposición del Director."); return; }
+    if (interlab && (!labSolicitante || !labEjecutor)) { setErrMsg("Indica el laboratorio solicitante y el ejecutor."); return; }
+    if (interlab && labSolicitante === labEjecutor) { setErrMsg("El laboratorio solicitante y el ejecutor deben ser distintos."); return; }
+    if (modo === "nueva" && origen === "INTERNACION" && !resolucion.trim()) { setErrMsg("Indica el Nº de resolución DGMN."); return; }
     if (!fechaIngreso || Number.isNaN(new Date(fechaIngreso).getTime())) { setErrMsg("Indica una fecha de ingreso válida."); return; }
-    if (lineas.length === 0) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
+    if (lineas.length === 0 && !interlab) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
 
     setEnviando(true);
     try {
@@ -69,21 +118,36 @@ export default function NuevaOtPage() {
       //    o se crea una nueva. La respuesta puede venir plana o envuelta {data}.
       let otId: string | undefined;
       let otCodigo: string;
+      let otClienteId: string | undefined = cliente?.id;
       if (modo === "existente" && otExistenteId) {
         const ot = otsPendientes.find((o) => o.id === otExistenteId);
         otId = otExistenteId;
         otCodigo = ot?.codigo || otId.slice(0, 8);
       } else {
-        const otResp = unwrap<{ id: string; codigo?: string }>(
+        const otResp = unwrap<{ id: string; codigo?: string; clienteId?: string }>(
           await apiPost("/ot", {
-            clienteId: cliente.id,
+            clienteId: cliente?.id || undefined,
             prioridad,
             fechaIngreso: new Date(fechaIngreso).toISOString(),
             notas: observaciones || undefined,
+            ...(origen
+              ? {
+                  origenTrabajo: origen,
+                  conCobro: interlab ? false : conCobro,
+                  ...(origen === "DISPOSICION"
+                    ? { disposicionRef: disposicionRef.trim(), disposicionFecha, opiNumero: opiNumero.trim() || undefined }
+                    : {}),
+                  ...(origen === "INTERNACION" ? { resolucion: resolucion.trim() } : {}),
+                  ...(interlab ? { labSolicitanteCcId: labSolicitante, centroCostoId: labEjecutor } : {}),
+                  ...(horas ? { horasHombre: Number(horas) } : {}),
+                  ...(costo ? { costoEstimado: Number(costo) } : {}),
+                }
+              : {}),
           }),
         );
         otId = otResp?.id;
         otCodigo = otResp?.codigo || otId?.slice(0, 8) || "OT";
+        otClienteId = otResp?.clienteId ?? otClienteId;
       }
       if (!otId) throw new ApiError("La API de OT no devolvió un id.", 500);
 
@@ -101,7 +165,7 @@ export default function NuevaOtPage() {
           await apiPost("/muestras", {
             codigo,
             otId,
-            clienteId: cliente.id,
+            clienteId: otClienteId,
             nombre,
             estado: "recibida",
           }),
@@ -169,6 +233,59 @@ export default function NuevaOtPage() {
             </label>
           </div>
         </div>
+        {modo === "nueva" && (
+          <div className="form-grid cols-4" style={{ marginBottom: 10 }}>
+            <div className="field span-2">
+              <label>Origen de la OT</label>
+              <select value={origen} onChange={(e) => setOrigen(e.target.value)}>
+                {ORIGENES.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+              </select>
+            </div>
+            {origen === "DISPOSICION" && (
+              <>
+                <div className="field"><label>Ref. disposición del Director <span className="req">*</span></label><input value={disposicionRef} maxLength={120} onChange={(e) => setDisposicionRef(e.target.value)} /></div>
+                <div className="field"><label>Fecha disposición</label><input type="date" value={disposicionFecha} onChange={(e) => setDisposicionFecha(e.target.value)} /></div>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                  <input type="checkbox" style={{ width: "auto" }} checked={conCobro} onChange={(e) => setConCobro(e.target.checked)} /> Con cobro
+                </label>
+                <div className="field"><label>Nº OPI (si ya existe)</label><input value={opiNumero} maxLength={60} onChange={(e) => setOpiNumero(e.target.value)} /></div>
+                <p className="hint" style={{ margin: 0, gridColumn: "span 2", alignSelf: "center" }}>
+                  {conCobro && !opiNumero.trim()
+                    ? "Con cobro y sin OPI: la OT quedará «OPI pendiente» hasta registrar la OPI."
+                    : "Sin OPI pendiente. La OT sin cobro igual registra horas y costo."}
+                </p>
+              </>
+            )}
+            {origen === "INTERNACION" && (
+              <div className="field span-2"><label>Nº resolución DGMN <span className="req">*</span></label><input value={resolucion} maxLength={40} onChange={(e) => setResolucion(e.target.value)} /></div>
+            )}
+            {interlab && (
+              <>
+                <div className="field">
+                  <label>Laboratorio solicitante <span className="req">*</span></label>
+                  <select value={labSolicitante} onChange={(e) => setLabSolicitante(e.target.value)}>
+                    <option value="">—</option>
+                    {centros.map((c) => <option key={c.id} value={c.id}>{c.nombre} ({c.codigo})</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Laboratorio ejecutor <span className="req">*</span></label>
+                  <select value={labEjecutor} onChange={(e) => setLabEjecutor(e.target.value)}>
+                    <option value="">—</option>
+                    {centros.map((c) => <option key={c.id} value={c.id}>{c.nombre} ({c.codigo})</option>)}
+                  </select>
+                </div>
+                <p className="hint" style={{ margin: 0, gridColumn: "span 2", alignSelf: "center" }}>Sin cobro y sin OT padre: el costo se registra por horas. El cliente es opcional (se usa el cliente de tipo «Interlaboratorio»).</p>
+              </>
+            )}
+            {origen && (
+              <>
+                <div className="field"><label>Horas hombre (estimadas)</label><input type="number" min={0} step="0.5" value={horas} onChange={(e) => setHoras(e.target.value)} /></div>
+                <div className="field"><label>Costo estimado (CLP)</label><input type="number" min={0} step={1} value={costo} onChange={(e) => setCosto(e.target.value)} /></div>
+              </>
+            )}
+          </div>
+        )}
         <div className="form-grid cols-4">
           {modo === "existente" ? (
             <div className="field span-2">
