@@ -71,13 +71,23 @@ export class CotizacionService {
   constructor(private readonly prisma: PrismaService) {}
 
   async listar(tenantId?: string) {
-    return this.prisma.cotizacion.findMany({
+    const cots = await this.prisma.cotizacion.findMany({
       // Cotizacion tiene tenant_id: solo las del tenant del usuario.
       where: { ...(tenantId ? { tenantId } : {}) },
       take: 50,
       orderBy: { createdAt: "desc" },
       include: { cliente: true, lineas: true },
     });
+    // OT generada por cada cotización (sin relación Prisma): una sola consulta.
+    const ids = cots.map((c) => c.id);
+    const ots = ids.length
+      ? await this.prisma.ordenTrabajo.findMany({
+          where: { cotizacionId: { in: ids }, ...(tenantId ? { tenantId } : {}) },
+          select: { id: true, codigo: true, cotizacionId: true, opiPendiente: true, conCobro: true, origenTrabajo: true },
+        })
+      : [];
+    const porCot = new Map(ots.map((o) => [o.cotizacionId, o]));
+    return cots.map((c) => ({ ...c, ot: porCot.get(c.id) ?? null }));
   }
 
   async detalle(id: string, tenantId?: string) {

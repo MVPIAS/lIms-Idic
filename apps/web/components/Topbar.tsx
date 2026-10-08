@@ -12,6 +12,8 @@ const CRUMB: Record<string, string> = {
   "/listas-precio": "Listas de Precio",
   "/facturas": "Facturas",
   "/ot": "Expedientes / OT",
+  "/internaciones": "Internaciones",
+  "/centros-costo": "Centros de Costo",
   "/muestras": "Muestras",
   "/captura": "Captura de Resultados",
   "/metodos": "Catálogo / Métodos",
