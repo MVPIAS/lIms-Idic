@@ -73,9 +73,24 @@ model Unidad {
   jefeUsuarioId   String?  @map("jefe_usuario_id") @db.Uuid
   activa          Boolean  @default(true)
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  // Árbol organizacional (packages/db/align_admin_roles.sql).
+  // tipo: DIRECCION | DEPARTAMENTO | SECCION | LABORATORIO | SUCURSAL | DELEGACION | APOYO
+  tipo            String?  @db.VarChar(20)
+  padreId         String?  @map("padre_id") @db.Uuid
+  sigla           String?  @db.VarChar(20)
+  icono           String?  @db.VarChar(8)
+  color           String?  @db.VarChar(20)
+  codsucdel       String?  @db.VarChar(40)
+  centroCosto     String?  @map("centro_costo") @db.VarChar(40)
+  orden           Int?     @default(0)
 
   sede            Sede     @relation(fields: [sedeId], references: [id])
+  padre           Unidad?  @relation("UnidadArbol", fields: [padreId], references: [id])
+  hijos           Unidad[] @relation("UnidadArbol")
   jefes           UnidadJefe[]
+  usuarioRoles    UsuarioRol[]
+  flujosFirma     FlujoFirma[] @relation("FlujoFirmaUnidad")
+  flujosFirmaDestino FlujoFirma[] @relation("FlujoFirmaDestino")
 
   @@unique([tenantId, codigo])
   @@map("unidad")
@@ -124,7 +139,15 @@ model Rol {
   descripcion   String?
   esSistema     Boolean  @default(false) @map("es_sistema")
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz
+  // align_admin_roles.sql · nivel: OPERATIVO|JEFATURA|DIRECCION|SOPORTE|SISTEMA
+  // alcance: UNIDAD|DESCENDENCIA|GLOBAL · aliasDe: código canónico (JEFELAB → JEFE_LAB)
+  nivel         String?  @db.VarChar(20)
+  alcance       String?  @db.VarChar(20)
+  orden         Int?     @default(0)
+  aliasDe       String?  @map("alias_de") @db.VarChar(40)
   usuarioRoles  UsuarioRol[]
+  rolPermisos   RolPermiso[]
+  flujosFirma   FlujoFirma[]
 
   @@unique([tenantId, codigo])
   @@map("rol")
@@ -145,6 +168,8 @@ model UsuarioRol {
 
   usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   rol           Rol      @relation(fields: [rolId], references: [id], onDelete: Cascade)
+  // FK usuario_rol_unidad_id_fkey (NOT VALID) creada en align_admin_roles.sql.
+  unidad        Unidad?  @relation(fields: [unidadId], references: [id], onDelete: Cascade)
 
   @@index([usuarioId])
   @@index([rolId])
@@ -1026,9 +1051,39 @@ model RolPermiso {
   permisoId String  @map("permiso_id") @db.Uuid
 
   permiso   Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+  rol       Rol     @relation(fields: [rolId], references: [id], onDelete: Cascade)
 
   @@id([rolId, permisoId])
   @@map("rol_permiso")
+}
+
+// Matriz de firmas por tipo de documento (align_admin_roles.sql). unidadId NULL =
+// regla por defecto; una unidad (lab/sección/depto) la sobrescribe para sí y su
+// descendencia. nivelUnidad indica dónde buscar al firmante relativo a la unidad
+// del documento (MISMA|SECCION|DEPARTAMENTO|DIRECCION|CALIDAD|COMERCIAL|FIJA);
+// FIJA usa unidadDestinoId.
+model FlujoFirma {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  tipoDocumento   String   @map("tipo_documento") @db.VarChar(40)
+  unidadId        String?  @map("unidad_id") @db.Uuid
+  orden           Int      @default(1)
+  accion          String   @db.VarChar(20)
+  rolId           String   @map("rol_id") @db.Uuid
+  nivelUnidad     String   @default("MISMA") @map("nivel_unidad") @db.VarChar(20)
+  unidadDestinoId String?  @map("unidad_destino_id") @db.Uuid
+  obligatorio     Boolean  @default(true)
+  activo          Boolean  @default(true)
+  descripcion     String?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  unidad          Unidad?  @relation("FlujoFirmaUnidad", fields: [unidadId], references: [id], onDelete: Cascade)
+  unidadDestino   Unidad?  @relation("FlujoFirmaDestino", fields: [unidadDestinoId], references: [id], onDelete: SetNull)
+  rol             Rol      @relation(fields: [rolId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, tipoDocumento, unidadId])
+  @@map("flujo_firma")
 }
 
 model Firma {
