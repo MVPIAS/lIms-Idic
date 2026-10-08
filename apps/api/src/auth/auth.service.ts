@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import * as argon2 from "argon2";
 import { authenticator } from "otplib";
 import * as QRCode from "qrcode";
+import { AlcanceService } from "../rbac/alcance.service";
 
 // Ventana de tolerancia ±1 período (30 s) para compensar el desfase de reloj
 // entre el servidor y la app autenticadora del usuario.
@@ -28,7 +29,11 @@ export class AuthService {
   // En módulo real se inyecta PrismaService; aquí instanciamos para simplicidad
   private prisma = new PrismaClient();
 
-  constructor(private readonly jwt: JwtService) {}
+  // AlcanceService (AlcanceModule @Global) calcula unidades visibles y perfil.
+  constructor(
+    private readonly jwt: JwtService,
+    private readonly alcance: AlcanceService,
+  ) {}
 
   async login(username: string, password: string, totp?: string) {
     const usuario = await this.prisma.usuario.findFirst({
@@ -112,7 +117,7 @@ export class AuthService {
     });
 
     // Cargar roles y permisos efectivos del usuario para el RBAC
-    const { roles, permisos, unidades, unidadGlobal } = await this.rolesYPermisos(usuario.id);
+    const { roles, permisos, unidades, unidadGlobal, perfil } = await this.rolesYPermisos(usuario.id, usuario.tenantId);
 
     const payload = {
       sub: usuario.id,
@@ -124,6 +129,8 @@ export class AuthService {
       // acotado. Si `unidadGlobal` es true (rol global o transversal) ve todo.
       unidades,
       unidadGlobal,
+      // Perfil de bandeja (DIRECTOR, JEFE_DEPTO, ..., ANALISTA, ADMIN, LECTOR).
+      perfil,
       // Versión de token: se incrementa en cada logout. El refresh token solo
       // renueva si su `tv` coincide con el actual del usuario (invalida sesiones
       // tras logout sin necesidad de blacklist en Redis).
@@ -153,36 +160,34 @@ export class AuthService {
     };
   }
 
-  /** Roles globales que ven TODO (transversales, no acotados a un laboratorio). */
-  private static readonly ROLES_GLOBALES = ["SUPERADMIN", "ADMIN", "DIRECTOR"];
-
-  /** Roles (códigos), permisos y alcance por unidad del usuario, para el JWT. */
+  /**
+   * Roles (códigos), permisos y alcance por unidad del usuario, para el JWT.
+   * Solo cuentan las asignaciones VIGENTES (vigente_desde/hasta). El alcance lo
+   * calcula AlcanceService con la misma regla que se aplica en vivo en /ot:
+   *   · unidades     = unidades VISIBLES (unidad, o unidad + descendencia para
+   *                    roles DESCENDENCIA y jefaturas). Vacío si unidadGlobal.
+   *   · unidadGlobal = rol GLOBAL (SUPERADMIN/ADMIN/DIRECTOR/... ) o asignación
+   *                    legada sin unidad.
+   */
   async rolesYPermisos(
     usuarioId: string,
-  ): Promise<{ roles: string[]; permisos: string[]; unidades: string[]; unidadGlobal: boolean }> {
-    const usuarioRoles = await this.prisma.usuarioRol.findMany({
-      where: { usuarioId },
-      include: { rol: true },
-    });
-    const rolIds = usuarioRoles.map((ur) => ur.rolId);
-    const roles = usuarioRoles.map((ur) => ur.rol.codigo);
-
-    // Alcance por laboratorio (unidad). Es GLOBAL (ve todo) si tiene algún rol
-    // transversal, o algún rol sin unidad acotada (unidadId NULL = global).
-    const unidades = [
-      ...new Set(usuarioRoles.map((ur) => ur.unidadId).filter((u): u is string => !!u)),
-    ];
-    const unidadGlobal =
-      roles.some((r) => AuthService.ROLES_GLOBALES.includes(r)) ||
-      usuarioRoles.some((ur) => !ur.unidadId);
-
-    if (rolIds.length === 0) return { roles, permisos: [], unidades, unidadGlobal: true };
+    tenantId?: string,
+  ): Promise<{ roles: string[]; permisos: string[]; unidades: string[]; unidadGlobal: boolean; perfil: string }> {
+    const ctx = await this.alcance.contexto(usuarioId, tenantId);
+    const vigentes = ctx.asignacionesVigentes;
+    const roles = [...new Set(vigentes.map((a) => a.rolCodigo))];
+    const rolIds = [...new Set(vigentes.map((a) => a.rolId))];
+    if (rolIds.length === 0) {
+      // Sin roles: sin permisos. Se mantiene unidadGlobal=true como antes para
+      // no alterar el comportamiento de tokens sin RBAC (no tiene permisos igual).
+      return { roles, permisos: [], unidades: ctx.unidadIds, unidadGlobal: ctx.esGlobal || ctx.unidadIds.length === 0, perfil: ctx.perfil };
+    }
     const rp = await this.prisma.rolPermiso.findMany({
       where: { rolId: { in: rolIds } },
       include: { permiso: true },
     });
     const permisos = [...new Set(rp.map((x) => x.permiso.codigo))];
-    return { roles, permisos, unidades, unidadGlobal };
+    return { roles, permisos, unidades: ctx.esGlobal ? [] : ctx.unidadIds, unidadGlobal: ctx.esGlobal, perfil: ctx.perfil };
   }
 
   async refresh(refreshToken: string) {
@@ -202,7 +207,7 @@ export class AuthService {
       if (!usuario || (usuario.tokenVersion ?? 0) !== (payload.tv ?? 0)) {
         throw new UnauthorizedException("Refresh token inválido");
       }
-      const { roles, permisos, unidades, unidadGlobal } = await this.rolesYPermisos(payload.sub);
+      const { roles, permisos, unidades, unidadGlobal, perfil } = await this.rolesYPermisos(payload.sub, payload.tenantId);
       const accessToken = this.jwt.sign({
         sub: payload.sub,
         username: payload.username,
@@ -211,6 +216,7 @@ export class AuthService {
         permisos,
         unidades,
         unidadGlobal,
+        perfil,
         tv: usuario.tokenVersion ?? 0,
       });
       return { accessToken };
