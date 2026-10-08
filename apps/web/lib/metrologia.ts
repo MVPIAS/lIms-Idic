@@ -57,3 +57,54 @@ export function calcularCalibracion(comps: Componente[], divs: Divisores, cond: 
 export const nd = (v: unknown) => { const n = parseFloat(String(v).replace(",", ".")); return Number.isNaN(n) ? 0 : n; };
 export const fmtN = (x: unknown, d = 3) =>
   x == null || Number.isNaN(Number(x)) ? "—" : Number(x).toLocaleString("es-CL", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+// ─── Motores validados por instrucción de trabajo (cálculo en el servidor) ────
+export type OpcionMotor = { clave: string; hallazgo: string; etiqueta: string };
+export type MotorInfo = {
+  it: string; magnitud: string; nombre: string; unidad: string; unidadU: string;
+  opciones: OpcionMotor[]; casos: { caso: string; instrumento: string }[];
+};
+export type PuntoResumen = { nominal: number; error: number | null; uc: number | null; U: number; Ucert: number | null; conforme: boolean | null };
+export type CalculoMotor = {
+  motor: string;
+  resultado: any;
+  resumen: { puntos: PuntoResumen[]; uMax: number; uCert: number | null; conforme: boolean | null };
+};
+
+/** Motor de un proceso (ITV02a/g/c comparten ITV02). */
+export const motorDe = (motores: MotorInfo[], codigo: string) =>
+  motores.find((m) => m.it === codigo) ?? motores.find((m) => m.it === codigo.replace(/[a-z]$/, ""));
+
+/** Número con 6 cifras significativas y coma decimal. */
+export const fmtG = (x: unknown) =>
+  x == null || Number.isNaN(Number(x)) ? "—" : Number(x).toLocaleString("es-CL", { maximumSignificantDigits: 6 });
+
+/** Texto del input → número si es numérico (acepta coma), null si vacío; si no, se conserva como texto. */
+export const parseEntrada = (t: string): number | string | null => {
+  const s = t.trim();
+  if (s === "") return null;
+  return /^-?\d+([.,]\d+)?([eE][-+]?\d+)?$/.test(s) ? Number(s.replace(",", ".")) : s;
+};
+export const verEntrada = (v: unknown) => (v == null ? "" : typeof v === "number" ? String(v).replace(".", ",") : String(v));
+
+/** Nombres de las entradas de las planillas del LMT (la clave técnica se muestra al lado). */
+export const ETIQUETA_ENTRADA: Record<string, string> = {
+  temp: "Temperatura ambiente (°C)", hum: "Humedad relativa (%)", patm: "Presión atmosférica (hPa)",
+  et: "Error del termómetro ambiental", eh: "Error del higrómetro", ebar: "Error del barómetro",
+  tcorr: "Corrección de temperatura", hcorr: "Corrección de humedad", res: "Resolución", div: "División de escala",
+  pU: "U del patrón", pU2: "U del patrón 2", der: "Deriva del patrón", pDer: "Deriva de los patrones", Up: "U del patrón",
+  pts: "Puntos", nom: "Nominal", s: "Lectura", p: "Patrón", comp: "Masa patrón", ecc: "Excentricidad (A–E)", cero: "Cero inicial / final",
+  pat: "Masas patrón", mcm: "CMC por rango", tipo: "Tipo", medio: "Medio de transmisión", fac: "Factor bar/MPa", pres: "Resolución del patrón",
+  pi0: "Cero inicial", asc: "Ascendente", desc: "Descendente", perr: "Error del patrón", hP: "Altura patrón (mm)", hI: "Altura instrumento (mm)",
+  gl: "Gravedad local (m/s²)", uAlt: "U de altura", A0: "Área efectiva A0", lam: "Coef. de distorsión λ", alpha: "Coef. de dilatación α",
+  urel: "U relativa de la balanza", umin: "U mínima", rhoN2: "Densidad del nitrógeno", rhoM: "Densidad de las masas", tp: "Temperatura del pistón",
+  pieces: "Masas del juego", r: "Serie 1 y 2 (asc / desc)", par: "Paralelismo", int: "Interiores", prof: "Profundidad", esc: "Escalón",
+  tolPar: "Tolerancia de paralelismo", tolPla: "Tolerancia de planitud", alin: "Alineación", n: "Lectura", c: "Corrección de la regla",
+  cap: "Capacidad", empty: "Recipiente vacío (g)", berr: "Error de la balanza", Ta: "T aire (°C)", Tw: "T agua (°C)", HR: "Humedad (%)", P: "Presión (hPa)",
+  ev: "Evaporación (g)", h: "Alturas del menisco", thA: "Termómetro de aire", thW: "Termómetro de agua", hr: "Higrómetro", pr: "Barómetro", bal: "Balanza",
+  hi: "Punto de hielo inicial", hf: "Punto de hielo final", blocks: "Puntos", B: "Display", E: "Termocupla centro", G: "Termocupla auxiliar",
+  eE: "Error termocupla centro", eG: "Error termocupla auxiliar", zero: "Cero por serie", f0: "Retorno a cero",
+  UP: "U del patrón", pcl: "Clase del patrón", rep: "Reproducibilidad", lp: "Punto de carga", geo: "Efectos geométricos", itf: "Interfaz",
+  curve: "Curva del transductor", WP: "W del patrón", cmc: "CMC", nomT: "Nominal (g)", L: "Lecturas p-m-m-p", cls: "Clase declarada",
+  T: "Temperatura inicio / término", H: "Humedad inicio / término", dmp: "Corrección de la masa de referencia", dev: "Desviación de la masa",
+};

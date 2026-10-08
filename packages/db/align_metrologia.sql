@@ -239,3 +239,32 @@ SELECT r.id, p.id FROM rol r
 JOIN permiso p ON p.codigo IN ('metrologia.ver','metrologia.crear')
 WHERE r.codigo IN ('ANALISTA','TECNICO')
 ON CONFLICT DO NOTHING;
+
+-- =============================================================================
+-- Motores validados (30-09-2026) · un motor por instrucción de trabajo que
+-- reproduce el Excel del LMT número a número (apps/api/src/metrologia/motores,
+-- 1531/1531 valores idénticos en 16 casos reales). La calibración guarda los
+-- datos de entrada, las correcciones aplicadas y el resultado completo.
+-- =============================================================================
+ALTER TABLE met_calibracion ADD COLUMN IF NOT EXISTS motor     VARCHAR(10);
+ALTER TABLE met_calibracion ADD COLUMN IF NOT EXISTS datos     JSONB;
+ALTER TABLE met_calibracion ADD COLUMN IF NOT EXISTS opciones  JSONB DEFAULT '{}';
+ALTER TABLE met_calibracion ADD COLUMN IF NOT EXISTS resultado JSONB;
+ALTER TABLE met_calibracion ADD COLUMN IF NOT EXISTS resumen   JSONB;
+ALTER TABLE met_calibracion ADD COLUMN IF NOT EXISTS u_cert    DOUBLE PRECISION;  -- U informada en el certificado
+
+INSERT INTO met_magnitud (codigo, nombre, unidad, decimales) VALUES
+ ('longitud','Longitud','mm',3),('par','Par torsional','lbf·ft',3)
+ON CONFLICT (codigo) DO NOTHING;
+
+INSERT INTO met_proceso (codigo, magnitud_id, nombre, metodo, norma)
+SELECT p.codigo, m.id, p.nombre, p.metodo, p.norma FROM (VALUES
+ ('ITL01','longitud','Pie de metro','LMT-PG01-P01-ITL01 · Pie de metro',NULL),
+ ('ITL02','longitud','Micrómetro de exteriores','LMT-PG01-P01-ITL02 · Micrómetro','ISO 3611'),
+ ('ITL06','longitud','Regla graduada','LMT-PG01-P01-ITL06 · Regla graduada',NULL),
+ ('ITL07','longitud','Flexómetro (cinta métrica)','LMT-PG01-P01-ITL07 · Flexómetro',NULL),
+ ('ITT01','temperatura','Termómetros por comparación','LMT-PG01-P01-ITT01 · Termómetros',NULL),
+ ('ITPT01','par','Llaves de torque','LMT-PG01-P01-ITPT01 · Herramientas de par','ISO 6789-1 / ISO 6789-2')
+) AS p(codigo,mag,nombre,metodo,norma)
+JOIN met_magnitud m ON m.codigo = p.mag
+ON CONFLICT (codigo) DO NOTHING;

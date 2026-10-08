@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { calcularCalibracion, nd, fmtN, type Componente, type Divisores } from "@/lib/metrologia";
+import { calcularCalibracion, nd, fmtN, motorDe, type Componente, type Divisores, type MotorInfo } from "@/lib/metrologia";
+import MotorPanel from "./MotorPanel";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -55,15 +56,21 @@ export default function NuevaCalibracionPage() {
   const [error, setError] = useState("");
   const [ok, setOk] = useState<{ codigo: string; id: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [motores, setMotores] = useState<MotorInfo[]>([]);
+  const [paridad, setParidad] = useState<{ casos: { it: string; identicos: number; comparados: number }[] } | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [p, c] = await Promise.all([
+        const [p, c, m, par] = await Promise.all([
           fetch(`${API}/metrologia/procesos`, { headers: auth() }).then((x) => x.json()),
           fetch(`${API}/metrologia/config`, { headers: auth() }).then((x) => x.json()),
+          fetch(`${API}/metrologia/motores`, { headers: auth() }).then((x) => x.json()),
+          fetch(`${API}/metrologia/motores/paridad`, { headers: auth() }).then((x) => x.json()).catch(() => null),
         ]);
         setProcs(p.data ?? []);
+        setMotores(m.data ?? []);
+        setParidad(par?.casos ? par : null);
         setDivs(Object.fromEntries((c.distribuciones ?? []).map((d: any) => [d.codigo, Number(d.divisor)])));
         const first = (p.data ?? [])[0];
         if (first) { setProcKey(first.codigo); setD(armar(first.codigo, first)); }
@@ -72,6 +79,11 @@ export default function NuevaCalibracionPage() {
   }, []);
 
   const proc = useMemo(() => procs.find((p) => p.codigo === procKey), [procs, procKey]);
+  const motor = useMemo(() => (procKey ? motorDe(motores, procKey) : undefined), [motores, procKey]);
+  const paridadMotor = useMemo(() => {
+    const cs = paridad?.casos.filter((c) => c.it === motor?.it) ?? [];
+    return cs.length ? { identicos: cs.reduce((s, c) => s + c.identicos, 0), comparados: cs.reduce((s, c) => s + c.comparados, 0) } : null;
+  }, [paridad, motor]);
   const componentes: Componente[] = proc?.componentes ?? [];
   const condKeys: string[] = useMemo(() => {
     const fromComp = componentes.map((c) => c.fuente).filter((f) => !["uPatron", "rep", "deriva", "hist"].includes(f));
@@ -148,7 +160,7 @@ export default function NuevaCalibracionPage() {
       <div className="card" style={{ padding: "12px 14px", marginBottom: 12 }}>
         <label style={{ display: "block", marginBottom: 6 }}>Proceso de calibración</label>
         <select value={procKey} onChange={(e) => cambiarProc(e.target.value)} style={{ maxWidth: 520 }}>
-          {procs.map((p) => <option key={p.codigo} value={p.codigo}>{p.codigo} · {p.nombre} ({p.unidad})</option>)}
+          {procs.map((p) => <option key={p.codigo} value={p.codigo}>{p.codigo} · {p.nombre} ({p.unidad}){motorDe(motores, p.codigo) ? " · motor validado" : ""}</option>)}
         </select>
       </div>
 
@@ -173,7 +185,7 @@ export default function NuevaCalibracionPage() {
           </div>
           <div className="card"><div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-2,#eee)" }}><b style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--muted)" }}>Condiciones y contribuciones</b></div>
             <div className="body" style={{ padding: 14 }}><div className="form-grid">
-              {condKeys.map((k) => fld(D.cond, k, (COND_LBL[k] ?? k) + " (" + u + ")"))}
+              {!motor && condKeys.map((k) => fld(D.cond, k, (COND_LBL[k] ?? k) + " (" + u + ")"))}
               <div className="field"><label>Intervalo (meses)</label>
                 <select value={D.intervalo} style={YEL} onChange={(e) => { D.intervalo = e.target.value; up(); }}><option>12</option><option>15</option><option>24</option></select></div>
             </div></div>
@@ -181,6 +193,16 @@ export default function NuevaCalibracionPage() {
         </div>
 
         {/* RESULTADOS */}
+        {motor ? (
+          <MotorPanel
+            key={motor.it + procKey}
+            procesoCodigo={procKey}
+            motor={motor}
+            paridad={paridadMotor}
+            cabecera={{ instrumento: D.ident, patronSnap: D.patron, ambiente: D.ambiente, intervaloMeses: nd(D.intervalo) || 12 }}
+            onGuardado={(c) => setOk(c)}
+          />
+        ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           <div className="card"><div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-2,#eee)", display: "flex", alignItems: "center" }}>
             <b style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: ".06em", color: "var(--muted)" }}>Puntos de calibración</b>
@@ -254,6 +276,7 @@ export default function NuevaCalibracionPage() {
             </div>
           )}
         </div>
+        )}
       </div>
     </div>
   );
