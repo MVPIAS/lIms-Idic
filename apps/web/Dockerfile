@@ -15,10 +15,13 @@ ENV NEXT_PUBLIC_IDLE_MINUTES=$NEXT_PUBLIC_IDLE_MINUTES
 RUN pnpm --filter @lims-idic/web build
 
 FROM node:20-alpine AS run
-RUN corepack enable
 ENV NODE_ENV=production
 WORKDIR /repo
 COPY --from=build /repo ./
 WORKDIR /repo/apps/web
 EXPOSE 3000
-CMD ["pnpm", "start"]
+# Se arranca Next con node directamente, SIN pnpm. Con `pnpm start`, corepack
+# descargaba pnpm de registry.npmjs.org en cada arranque: en el servidor aislado
+# del IDIC (sin Internet) el contenedor entraba en bucle de reinicio y la web
+# no llegaba a levantar. Detectado en el ensayo on-premise del 13-10-2026.
+CMD ["node", "node_modules/next/dist/bin/next", "start", "-p", "3000"]

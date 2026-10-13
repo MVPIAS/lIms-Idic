@@ -51,6 +51,12 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d --build
 echo ">> Esperando a PostgreSQL y aplicando schema + seeds..."
 set -a; source .env; set +a
 until docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; do sleep 3; done
+# Base propia de Metabase (en la del LIMS choca con la tabla `audit_log`).
+MB_DB="${METABASE_DB:-lims_metabase}"
+if [ "$(docker compose -f docker-compose.prod.yml exec -T postgres psql -U "${POSTGRES_USER}" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${MB_DB}'" </dev/null | tr -d '[:space:]')" != "1" ]; then
+  docker compose -f docker-compose.prod.yml exec -T postgres psql -U "${POSTGRES_USER}" -d postgres -c "CREATE DATABASE \"${MB_DB}\"" </dev/null
+  docker compose -f docker-compose.prod.yml restart metabase || true
+fi
 # El orden vive en packages/db/ORDEN_SQL.txt (fuente única, compartida con el
 # instalador on-premise). Preproducción = modo "demo": incluye datos sintéticos.
 bash scripts/verificar-orden-sql.sh

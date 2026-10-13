@@ -294,6 +294,19 @@ until $COMPOSE exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
 done
 ok "PostgreSQL operativo"
 
+# Base PROPIA de Metabase. No puede compartir la del LIMS: su migración crea una
+# tabla `audit_log` que choca con la del LIMS y el BI no arranca. Metabase se
+# reinicia solo hasta que la base existe (restart: always); se le da un empujón.
+MB_DB="${METABASE_DB:-lims_metabase}"
+if [ "$($COMPOSE exec -T postgres psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$MB_DB'" 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
+  ok "Base de Metabase ($MB_DB) ya existe"
+else
+  $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -q -c "CREATE DATABASE \"$MB_DB\"" >>"$LOG_FILE" 2>&1 \
+    || fatal "No se pudo crear la base de Metabase ($MB_DB). Detalle en $LOG_FILE"
+  ok "Base de Metabase ($MB_DB) creada"
+  $COMPOSE restart metabase >>"$LOG_FILE" 2>&1 || true
+fi
+
 # WAL archiving: ceder /walarchive al usuario postgres del contenedor. Hasta este
 # punto archive_command puede haber fallado unas veces (Permission denied) y el
 # WAL estará esperando en pg_wal; en cuanto el directorio es suyo, PostgreSQL
@@ -444,9 +457,49 @@ if [ -d "$KIT_DIR/conf/systemd" ]; then
     || warn "No se pudieron activar los temporizadores. Actívelos a mano (GUIA_ONPREMISE.md §7)."
 fi
 
-# =============================================================================
+# --- Verificación final: no se declara «completada» sin comprobarlo ----------
+# Antes el instalador terminaba con el mensaje de éxito aunque la web estuviera
+# en bucle de reinicio. Ahora espera a que cada servicio esté en marcha y sano,
+# y pide la pantalla de ingreso a través del proxy, como hará un usuario.
+log "Comprobando que todos los servicios quedaron operativos (hasta 6 min: Metabase tarda en su primer arranque)..."
+estado_de() {
+  docker inspect -f '{{.State.Status}}/{{if .State.Health}}{{.State.Health.Status}}{{else}}sin-sonda{{end}}' "$1" 2>/dev/null || echo ausente
+}
+NUCLEO="lims-postgres lims-redis lims-minio lims-api lims-web lims-caddy"
+PEND_NUCLEO=""; PEND_BI=""
+for _ in $(seq 1 72); do
+  PEND_NUCLEO=""
+  for c in $NUCLEO; do
+    e="$(estado_de "$c")"
+    case "$e" in running/healthy|running/sin-sonda) : ;; *) PEND_NUCLEO="$PEND_NUCLEO $c($e)" ;; esac
+  done
+  e="$(estado_de lims-metabase)"
+  case "$e" in running/healthy) PEND_BI="" ;; *) PEND_BI="lims-metabase($e)" ;; esac
+  [ -z "$PEND_NUCLEO" ] && [ -z "$PEND_BI" ] && break
+  sleep 5
+done
+WEB_OK="no"
+if docker exec lims-caddy wget -q --no-check-certificate -O /dev/null "https://$DOMAIN/login" 2>/dev/null; then WEB_OK="si"; fi
+
 echo | tee -a "$LOG_FILE"
 $COMPOSE ps | tee -a "$LOG_FILE"
+
+if [ -n "$PEND_NUCLEO" ] || [ "$WEB_OK" != "si" ]; then
+  [ -n "$PEND_NUCLEO" ] && warn "Servicios que NO están operativos:$PEND_NUCLEO"
+  [ "$WEB_OK" = "si" ] || warn "La pantalla de ingreso (https://$DOMAIN/login) NO responde a través del proxy."
+  fatal "INSTALACIÓN INCOMPLETA: el LIMS no está en condiciones de uso.
+   Revise los registros:  $COMPOSE logs --tail 80 <servicio>
+   y el detalle en $LOG_FILE. Corrija y vuelva a ejecutar este instalador."
+fi
+ok "Servicios del LIMS operativos y pantalla de ingreso accesible por HTTPS"
+if [ -n "$PEND_BI" ]; then
+  warn "Metabase (BI) todavía no está sano: $PEND_BI. El LIMS funciona; revise en unos
+   minutos con: $COMPOSE ps metabase   ·   $COMPOSE logs --tail 80 metabase"
+else
+  ok "Metabase (BI) operativo"
+fi
+
+# =============================================================================
 cat <<TXT | tee -a "$LOG_FILE"
 
 ╔══════════════════════════════════════════════════════════════════════╗

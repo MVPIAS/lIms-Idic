@@ -273,6 +273,8 @@ IDLE_MINUTES=15 ./exportar-imagenes.sh --version 1.0.0
 
 Genera `salida/kit-lims-idic-1.0.0.tar.gz` (≈ 2-3 GB) con las imágenes en `.tar.gz`, el código, los SQL, la configuración, esta guía y el `MANIFIESTO.txt` con el **SHA-256 de cada artefacto**.
 
+> **MinIO ya no se descarga de Internet.** Desde octubre de 2026 Docker Hub no entrega `minio/minio`: el fabricante retiró sus imágenes públicas. El exportador usa la copia local con el mismo digest que se validó en preproducción y lo anota en `MANIFIESTO.txt`. Si la máquina que construye el kit no la tiene, cárguela antes desde el resguardo que conserva Aiuken (`07_despliegue/imagenes_resguardo`): `docker load -i minio_minio__sha256-14cea493d9a3.tar.gz`.
+
 ### 5.2 Fase 2 · Traslado
 
 Copie el paquete y su `.sha256` a un **USB cifrado (LUKS)**.
@@ -311,6 +313,7 @@ sudo ./instalar-onpremise.sh
 7. **Arranque**: `docker compose up -d`, sin build y sin pull.
 8. **Base de datos**: aplica todos los SQL del manifiesto `packages/db/ORDEN_SQL.txt` en su orden (§5.5). Si falta alguno en el kit, **aborta**. Los errores SQL se cuentan y se listan al final; con `--estricto` el primero detiene la instalación.
 9. **Administrador y temporizadores**: crea el usuario `admin` y activa respaldo y chequeo.
+10. **Verificación final**: espera a que cada servicio esté en marcha y sano y pide la pantalla de ingreso a través del proxy. Si el LIMS no está en condiciones de uso termina con **INSTALACIÓN INCOMPLETA** y código de error; ya no muestra el mensaje de éxito con un servicio caído. Metabase tarda varios minutos en su primer arranque: si aún no está sano, avisa sin dar la instalación por fallida.
 
 > **Idempotente.** Se puede reejecutar sin miedo. Registra en la tabla `_lims_instalacion` qué SQL aplicó y con qué checksum, y omite los que ya están al día. Si un script cambia (actualización), lo detecta por el checksum y lo reaplica. La única excepción es `schema.sql`: crea la base desde cero y solo se aplica en la instalación inicial; los cambios posteriores del esquema llegan siempre por los `align_*.sql`.
 
@@ -732,6 +735,9 @@ docker exec -it lims-postgres psql -U lims -d lims_idic
 | Enlaces duros para el GFS | Tres niveles de retención al coste de uno |
 | Monitorización de nivel 1 por defecto | La API no expone `/metrics`; lo que falla se detecta mejor con 6 comprobaciones directas que con un TSDB (§8.1) |
 | `align_resultado_operacion.sql` propio | Separa la DDL imprescindible de los datos demo sin tocar preproducción (§5.5) |
+| Metabase en su propia base (`lims_metabase`) | En la base del LIMS su migración chocaba con la tabla `audit_log` y el BI no arrancaba (tampoco en preproducción). El respaldo diario la incluye (`metabase-<fecha>.dump`) |
+| La web arranca con `node`, sin `pnpm` | Con `pnpm start`, el contenedor descargaba pnpm de Internet en cada arranque: en el servidor aislado entraba en bucle de reinicio |
+| Sonda de Caddy por el nombre real | El sitio solo responde a `DOMAIN`; con `https://localhost` la sonda fallaba siempre y el contenedor figuraba «unhealthy» |
 | `ORDEN_SQL.txt` como fuente única del orden | La lista copiada en el instalador se quedó en 20 de 42 ficheros sin que nada avisara; con un manifiesto compartido y comprobado en la CI no puede repetirse |
 | Kit dentro del repositorio (`deploy/onpremise`) | El instalador se versiona junto al código que instala: cada kit sale de un commit identificable (figura en `MANIFIESTO.txt`) |
 | WAL archiving comprimido + basebackup semanal | Baja la ventana de pérdida de 24 h a ≈5 min sin licencias ni segundo servidor (§7.7, PITR.md) |
@@ -745,6 +751,8 @@ docker exec -it lims-postgres psql -U lims -d lims_idic
 3. **Servidor único.** Sin alta disponibilidad: una avería de hardware implica restaurar en otro equipo (§11.3). Un LIMS de laboratorio con horario de oficina lo admite; si el IDIC exige HA, es un cambio de alcance.
 4. **Copia externa manual.** El kit deja las copias en el propio servidor (§7.6).
 5. **Renovación del certificado manual.** Inevitable sin ACME. Mitigado con el aviso a 30 días.
+7. **MinIO sin actualizaciones.** La imagen empaquetada es la última pública que se validó (septiembre de 2025) y el fabricante ya no publica nuevas. Funciona y no está expuesta fuera de la red interna de Docker, pero no recibirá parches. Queda por decidir si se sustituye por otro almacén compatible con S3 mantenido.
+8. **Restaurar Metabase es manual.** `restore.sh` restaura la base del LIMS. Los paneles del BI se recuperan con `pg_restore -d lims_metabase metabase-<fecha>.dump`.
 6. **El volcado de MinIO es un `tar` en caliente.** Consistente por objeto; un fichero subido *durante* el volcado podría no entrar. Por eso el respaldo corre a las 02:15.
 
 ---
