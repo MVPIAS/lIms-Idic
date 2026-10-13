@@ -1,0 +1,19 @@
+# =============================================================================
+# LIMS IDIC · Temporizador del chequeo de salud · Aiuken
+# =============================================================================
+#   systemctl enable --now lims-chequeo.timer
+# =============================================================================
+[Unit]
+Description=LIMS IDIC · dispara el chequeo de salud cada 5 minutos
+Documentation=file:/opt/lims-idic/GUIA_ONPREMISE.md
+
+[Timer]
+# Primer chequeo 2 min tras arrancar: da tiempo a que el stack levante y evita
+# una falsa alarma en cada reinicio del servidor.
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=lims-chequeo.service
+
+[Install]
+WantedBy=timers.target

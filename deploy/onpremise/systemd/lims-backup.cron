@@ -1,0 +1,27 @@
+# =============================================================================
+# LIMS IDIC · Alternativa con cron · Aiuken
+# =============================================================================
+# SOLO si el servidor del IDIC no usa systemd (SO antiguo o política interna).
+# Se prefieren los timers de systemd: registran en el journal, sobreviven a un
+# apagón gracias a Persistent=true y permiten `systemctl list-timers`.
+#
+# Instalación:
+#   cp lims-backup.cron /etc/cron.d/lims-idic
+#   chmod 644 /etc/cron.d/lims-idic && systemctl restart cron
+# =============================================================================
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+MAILTO=soporte.idic@ejercito.cl
+
+# Copia diaria a las 02:15 (promociona sola a semanal los domingos y a mensual el día 1)
+15 2 * * *  root  /opt/lims-idic/scripts/backup/backup.sh --tipo auto >> /var/log/lims-backup.log 2>&1
+
+# Basebackup SEMANAL para PITR (domingos 03:00) + purga del WAL ya cubierto
+0 3 * * 0  root  /opt/lims-idic/scripts/backup/basebackup.sh >> /var/log/lims-basebackup.log 2>&1
+
+# Chequeo de salud cada 5 minutos
+*/5 * * * *  root  /opt/lims-idic/monitorizacion/chequeo-salud.sh >> /var/log/lims-chequeo.log 2>&1
+
+# Recordatorio: el simulacro de restauración es TRIMESTRAL y MANUAL, a propósito.
+# Un operador debe ejecutarlo y comprobar el resultado (GUIA_ONPREMISE.md §7.4):
+#   /opt/lims-idic/scripts/backup/restore.sh --desde <copia> --a-bd-temporal simulacro

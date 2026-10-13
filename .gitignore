@@ -45,6 +45,9 @@ prisma/migrations/dev.db*
 # Docker
 docker/data/
 
+# Kit on-premise generado por deploy/onpremise/exportar-imagenes.sh
+deploy/onpremise/salida/
+
 # Otros
 .cache/
 .turbo/

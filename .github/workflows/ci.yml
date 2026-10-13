@@ -54,6 +54,11 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
+      # Todo .sql de packages/db debe figurar en ORDEN_SQL.txt: lo que no está
+      # en el manifiesto no se aplica ni en preproducción ni en el IDIC.
+      - name: Manifiesto de SQL al día
+        run: bash scripts/verificar-orden-sql.sh
+
       - name: Generar cliente Prisma
         run: pnpm db:generate
 

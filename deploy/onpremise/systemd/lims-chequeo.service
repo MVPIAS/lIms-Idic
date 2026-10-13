@@ -1,0 +1,25 @@
+# =============================================================================
+# LIMS IDIC · Chequeo de salud · Aiuken
+# =============================================================================
+# Monitorización de nivel 1: siempre activa, consumo despreciable.
+# Lo dispara lims-chequeo.timer cada 5 minutos.
+#   journalctl -u lims-chequeo --since today
+# =============================================================================
+[Unit]
+Description=LIMS IDIC · chequeo de salud y alertas
+Documentation=file:/opt/lims-idic/GUIA_ONPREMISE.md
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lims-idic/monitorizacion/chequeo-salud.sh
+# Sale con código 1 cuando detecta alertas: es información, no un fallo del
+# servicio. Sin esto, systemd marcaría la unidad como "failed" en cada aviso.
+SuccessExitStatus=0 1
+TimeoutStartSec=4m
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

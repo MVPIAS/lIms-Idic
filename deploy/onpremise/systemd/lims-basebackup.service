@@ -1,0 +1,30 @@
+# =============================================================================
+# LIMS IDIC · Basebackup semanal para PITR · Aiuken
+# =============================================================================
+# Lo dispara lims-basebackup.timer. Crea la copia física base sobre la que se
+# aplica el WAL archivado para lograr recuperación a un instante (PITR).
+# No sustituye a lims-backup (pg_dump + MinIO + config): lo complementa.
+#   systemctl start lims-basebackup.service   # forzar un basebackup ahora
+#   journalctl -u lims-basebackup -f          # seguir la ejecución
+# =============================================================================
+[Unit]
+Description=LIMS IDIC · basebackup semanal para PITR (pg_basebackup + purga de WAL)
+Documentation=file:/opt/lims-idic/PITR.md
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lims-idic/scripts/backup/basebackup.sh
+# pg_basebackup de una base grande puede tardar; sin tope, un fallo al escribir
+# en el NAS dejaría el servicio colgado y bloquearía el basebackup siguiente.
+TimeoutStartSec=6h
+# Prioridad baja: nunca debe ralentizar el laboratorio si coincide con actividad.
+Nice=10
+IOSchedulingClass=idle
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

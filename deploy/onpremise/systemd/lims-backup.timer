@@ -1,0 +1,24 @@
+# =============================================================================
+# LIMS IDIC · Temporizador de la copia diaria · Aiuken
+# =============================================================================
+#   systemctl enable --now lims-backup.timer
+#   systemctl list-timers lims-*            # ver la próxima ejecución
+# =============================================================================
+[Unit]
+Description=LIMS IDIC · dispara la copia de seguridad diaria
+Documentation=file:/opt/lims-idic/GUIA_ONPREMISE.md
+
+[Timer]
+# 02:15, hora de Santiago: el laboratorio está cerrado y ningún analista está
+# subiendo resultados, así que el volcado de MinIO sale consistente.
+OnCalendar=*-*-* 02:15:00
+# Desfase aleatorio de hasta 5 min: evita que respaldo y tareas del SO arranquen
+# exactamente a la vez.
+RandomizedDelaySec=300
+# Si el servidor estaba apagado a las 02:15 (corte de luz), la copia se hace al
+# arrancar. Sin esto, un apagón nocturno = un día sin respaldo, en silencio.
+Persistent=true
+Unit=lims-backup.service
+
+[Install]
+WantedBy=timers.target

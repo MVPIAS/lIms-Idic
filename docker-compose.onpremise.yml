@@ -100,6 +100,28 @@ services:
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       TZ: America/Santiago
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      # --- Autenticación -------------------------------------------------------
+      # Sesión y bloqueo por intentos fallidos (valores por defecto de la API).
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-8h}
+      JWT_REFRESH_EXPIRES_IN: ${JWT_REFRESH_EXPIRES_IN:-7d}
+      AUTH_MAX_INTENTOS: ${AUTH_MAX_INTENTOS:-5}
+      AUTH_LOCK_MINUTES: ${AUTH_LOCK_MINUTES:-15}
+      # Directorio Activo del Ejército (LDAP). Apagado por defecto: con
+      # LDAP_ENABLED=false solo entran los usuarios locales del LIMS. Para
+      # activarlo, TI del IDIC debe aportar URL, cuenta de servicio y base de
+      # búsqueda (ver GUIA_ONPREMISE.md §5.6). Los usuarios con contraseña local
+      # (p. ej. el administrador) siguen entrando aunque el directorio no responda.
+      LDAP_ENABLED: ${LDAP_ENABLED:-false}
+      LDAP_URL: ${LDAP_URL:-}
+      LDAP_BIND_DN: ${LDAP_BIND_DN:-}
+      LDAP_BIND_CREDENTIALS: ${LDAP_BIND_CREDENTIALS:-}
+      LDAP_SEARCH_BASE: ${LDAP_SEARCH_BASE:-}
+      # Vacío = filtro por defecto de la API: (sAMAccountName={{username}})
+      LDAP_SEARCH_FILTER: ${LDAP_SEARCH_FILTER:-}
+      # URL que se imprime (y codifica en el QR) en informes y certificados para
+      # verificar su autenticidad. Por defecto, el propio servidor interno.
+      URL_VERIFICACION: ${URL_VERIFICACION:-https://${DOMAIN}/c}
       # ETL IBIS · barrido AUTOMÁTICO de la carpeta cada 24h (proceso interno de la API).
       # IBIS deja el XML diario en IBIS_DIR/entrada; el ETL lo consume y lo mueve a
       # IBIS_DIR/procesados (o /errores si falla). No requiere Internet ni credenciales.

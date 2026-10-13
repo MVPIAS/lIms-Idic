@@ -1,0 +1,31 @@
+# =============================================================================
+# LIMS IDIC · Copia de seguridad diaria · Aiuken
+# =============================================================================
+# Lo dispara lims-backup.timer. No se habilita este .service directamente.
+#   systemctl start lims-backup.service     # forzar una copia ahora
+#   journalctl -u lims-backup -f            # seguir la ejecución
+# =============================================================================
+[Unit]
+Description=LIMS IDIC · copia de seguridad (PostgreSQL + MinIO + configuración)
+Documentation=file:/opt/lims-idic/GUIA_ONPREMISE.md
+# El respaldo necesita el stack en pie: pg_dump corre dentro del contenedor.
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lims-idic/scripts/backup/backup.sh --tipo auto
+# Un pg_dump de una base grande puede tardar; sin tope, un fallo de red al NAS
+# dejaría el servicio colgado para siempre y bloquearía la copia del día
+# siguiente.
+TimeoutStartSec=3h
+# Prioridad baja: la copia nunca debe ralentizar el laboratorio en horario
+# de trabajo si alguna vez se lanza a mano a media mañana.
+Nice=10
+IOSchedulingClass=idle
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

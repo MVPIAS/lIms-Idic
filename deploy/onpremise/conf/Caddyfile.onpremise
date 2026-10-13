@@ -1,0 +1,100 @@
+# =============================================================================
+# LIMS IDIC · Caddy · PRODUCCIÓN ON-PREMISE (red aislada) · Aiuken
+# =============================================================================
+# Diferencia esencial con el Caddyfile de preproducción: NO hay ACME.
+# En el cuartel no hay salida a Internet, así que Let's Encrypt no puede
+# validar el dominio ni emitir nada. El certificado lo aporta el Ejército
+# (CA interna) o se genera autofirmado; se monta en /etc/caddy/certs.
+#
+# El instalador copia este fichero a /opt/lims-idic/Caddyfile.onpremise.
+# =============================================================================
+{
+	# Sin ACME: no hay emisor externo ni cuenta que registrar. Si esta línea
+	# faltara, Caddy intentaría contactar acme-v02.api.letsencrypt.org en cada
+	# arranque, fallaría tras varios minutos de reintentos y el sitio quedaría
+	# sin escuchar en 443. `auto_https disable_certs` mantiene la redirección
+	# 80->443 pero desactiva la gestión automática de certificados.
+	auto_https disable_certs
+
+	# La API de administración de Caddy solo en loopback del contenedor.
+	admin off
+
+	# El servidor no resuelve DNS externo: OCSP stapling solo añadiría timeouts
+	# en cada arranque. Los certificados de CA interna no suelen publicar OCSP.
+	ocsp_stapling off
+
+	# Sin telemetría de ningún tipo (dato real de FFAA).
+	# Caddy no envía telemetría por defecto; se deja constancia explícita.
+}
+
+# --- Aplicación principal: web (Next.js) + API (NestJS) bajo /api -------------
+{$DOMAIN} {
+	# Certificado interno del Ejército. Los ficheros los coloca el operador en
+	# ${LIMS_DATA_DIR}/certs (ver GUIA_ONPREMISE.md, sección 4).
+	#   lims.crt -> certificado del servidor + cadena intermedia concatenada
+	#   lims.key -> clave privada (chmod 600, propietario root)
+	tls /etc/caddy/certs/lims.crt /etc/caddy/certs/lims.key
+
+	# /api/* -> backend NestJS (se PRESERVA el prefijo /api; Nest usa
+	# setGlobalPrefix('api'), igual que en preproducción).
+	handle /api/* {
+		reverse_proxy api:3001
+	}
+
+	# Todo lo demás -> frontend Next.js
+	handle {
+		reverse_proxy web:3000
+	}
+
+	encode gzip zstd
+
+	# Cabeceras de seguridad para TODO el sitio (front Next + API).
+	header {
+		-Server
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "no-referrer"
+		X-XSS-Protection "0"
+		# NO se define Content-Security-Policy aquí. A propósito, igual que en
+		# preproducción: el front la emite por request desde
+		# apps/web/middleware.ts con un nonce, y la API la emite helmet. Una CSP
+		# se aplica por INTERSECCIÓN, así que una segunda política sin el nonce
+		# bloquearía los scripts de Next y dejaría la app en blanco.
+	}
+
+	# Registro de accesos en fichero, dentro del volumen de Caddy: en un sitio
+	# aislado el journal del contenedor es lo único que queda para auditar.
+	log {
+		output file /data/access.log {
+			roll_size 50MiB
+			roll_keep 10
+			roll_keep_for 720h
+		}
+		format json
+	}
+}
+
+# --- BI (Metabase) en subdominio ---------------------------------------------
+# Requiere que el certificado cubra también bi.<dominio> (SAN) o un certificado
+# comodín. Si el Ejército solo emite el certificado del dominio principal,
+# comente este bloque completo: Metabase quedará accesible solo por túnel SSH.
+bi.{$DOMAIN} {
+	tls /etc/caddy/certs/lims.crt /etc/caddy/certs/lims.key
+	reverse_proxy metabase:3000
+	encode gzip zstd
+	header {
+		-Server
+		Strict-Transport-Security "max-age=15552000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+}
+
+# --- Consola de MinIO (opcional) ---------------------------------------------
+# Descomentar solo si el IDIC necesita administrar los documentos a mano.
+# Requiere SAN s3.<dominio> en el certificado.
+# s3.{$DOMAIN} {
+# 	tls /etc/caddy/certs/lims.crt /etc/caddy/certs/lims.key
+# 	reverse_proxy minio:9001
+# }
