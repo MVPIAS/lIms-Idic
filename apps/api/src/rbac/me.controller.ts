@@ -5,6 +5,10 @@ import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { AlcanceService } from "./alcance.service";
 import { BandejaService } from "./bandeja.service";
+import { descendientes } from "./alcance";
+
+/** Raíces de ámbito que usan los módulos (SAEC, internaciones, Metrología). */
+const AMBITOS_DE_MODULO = ["D11", "BPCH", "DCO", "SAM"];
 
 /**
  * Contexto del usuario autenticado: alcance por unidad, perfil y bandeja de
@@ -53,6 +57,16 @@ export class MeController {
       perfil: ctx.perfil,
       esGlobal: ctx.esGlobal,
       unidadesVisibles,
+      // Ramas del organigrama a las que pertenecen módulos enteros
+      // (@AmbitoUnidad). El menú las usa para no ofrecer lo que daría 403.
+      ambitos: Object.fromEntries(
+        AMBITOS_DE_MODULO.map((codigo) => {
+          const raiz = arbol.porCodigo.get(codigo);
+          const dentro =
+            ctx.esGlobal || !raiz || descendientes(arbol, raiz.id, true).some((id) => ctx.unidadIds.includes(id));
+          return [codigo, dentro];
+        }),
+      ),
       // Campos adicionales (no rompen el contrato):
       jefaturas: ctx.jefaturas.map((j) => {
         const n = arbol.porId.get(j.unidadId);

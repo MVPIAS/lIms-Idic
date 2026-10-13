@@ -18,7 +18,9 @@ async function request<T = any>(path: string, init: RequestInit = {}): Promise<T
       ...(init.headers ?? {}),
     },
   });
-  if (res.status === 401 && typeof window !== "undefined") {
+  // Un 401 en el propio ingreso es «credenciales inválidas»: se muestra el
+  // mensaje en el formulario en vez de recargar la página y perderlo.
+  if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/login")) {
     localStorage.removeItem("lims_token");
     window.location.href = "/login";
   }

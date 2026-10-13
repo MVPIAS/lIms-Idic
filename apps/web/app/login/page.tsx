@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
+import AccesosDemo from "./AccesosDemo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -10,18 +11,34 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function entrar(usuario: string, clave: string) {
     setLoading(true);
     setError(null);
     try {
-      await api.login(username.trim(), password);
+      await api.login(usuario.trim(), clave);
       router.push("/inicio");
+      return true;
     } catch (err: any) {
       setError(err.message ?? "Error al iniciar sesión");
+      return false;
     } finally {
       setLoading(false);
     }
+  }
+
+  function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void entrar(username, password);
+  }
+
+  // Acceso de prueba: un clic entra con ese perfil (el usuario queda escrito
+  // en el formulario para que se vea con quién se ingresó).
+  function entrarDemo(usuario: string, clave: string) {
+    setUsername(usuario);
+    void entrar(usuario, clave).then((ok) => {
+      // Solo se recuerda (en esta pestaña) una clave que acaba de funcionar.
+      if (ok) { try { sessionStorage.setItem("lims_demo_clave", clave); } catch { /* sin almacenamiento */ } }
+    });
   }
 
   return (
@@ -60,8 +77,10 @@ export default function LoginPage() {
           {loading ? "Iniciando sesión…" : "Entrar al sistema"}
         </button>
 
+        <AccesosDemo claveEscrita={password} ocupado={loading} onEntrar={entrarDemo} />
+
         <p style={{ fontSize: 11, textAlign: "center", color: "var(--muted)", marginTop: 16 }}>
-          Aiuken · LIMS IDIC — Preproducción
+          Aiuken · LIMS IDIC
         </p>
       </form>
     </div>

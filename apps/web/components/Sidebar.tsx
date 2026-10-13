@@ -40,7 +40,13 @@ export default function Sidebar() {
   const infoPerfil = PERFIL_INFO[perfil] ?? { etiqueta: perfil, descripcion: "" };
 
   // Antes de leer el token se muestra solo lo que no exige permiso (evita parpadeos de ítems prohibidos).
-  const visible = (i: ItemNav) => (listo ? puede(i.perm) : !i.perm);
+  // Ámbito: mientras no llega /me/alcance no se oculta nada por este motivo (el
+  // backend responde 403 igualmente); cuando llega, se quita lo que no es suyo.
+  const enAmbito = (i: ItemNav) => {
+    if (!i.ambito || !alcance?.ambitos || alcance.esGlobal) return true;
+    return ([] as string[]).concat(i.ambito).some((c) => alcance.ambitos?.[c] !== false);
+  };
+  const visible = (i: ItemNav) => (listo ? puede(i.perm) : !i.perm) && enAmbito(i);
 
   const nav = useMemo(() => {
     const needle = normalizar(q.trim());
@@ -51,7 +57,7 @@ export default function Sidebar() {
       ),
     })).filter((s) => s.items.length > 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, listo, puede]);
+  }, [q, listo, puede, alcance]);
 
   const activeHref = useMemo(() => {
     return nav

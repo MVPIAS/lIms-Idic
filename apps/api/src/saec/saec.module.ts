@@ -30,6 +30,7 @@ import * as path from "node:path";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
+import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
 import { Public } from "../auth/public.decorator";
 // RF-K07.1 · el certificado SAEC se renderiza y se sella con el MISMO motor,
 // el mismo envoltorio imprimible y el mismo generador de PDF/A que los informes.
@@ -603,6 +604,7 @@ abstract class SaecBase {
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @RequierePermisoCrud({ ver: "caso.ver", crear: "caso.crear", editar: "caso.editar", eliminar: "caso.eliminar" })
+@AmbitoUnidad("D11")
 @Controller("saec/casos")
 export class SaecCasoController extends SaecBase {
   private async cargarPropio(id: string, tenantId: string) {
@@ -791,6 +793,7 @@ export class SaecCasoController extends SaecBase {
   ver: "evidencia.ver", crear: "evidencia.crear",
   editar: "evidencia.editar", eliminar: "evidencia.eliminar",
 })
+@AmbitoUnidad("D11")
 @Controller("evidencias")
 export class EvidenciaController extends SaecBase {
   private async cargarPropia(id: string, tenantId: string) {
@@ -1289,6 +1292,7 @@ export class EvidenciaController extends SaecBase {
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @RequierePermisoCrud({ ver: "arma.ver", crear: "arma.crear", editar: "arma.editar", eliminar: "arma.eliminar" })
+@AmbitoUnidad("D11")
 @Controller("armas")
 export class ArmaController extends SaecBase {
   private async cargarPropia(id: string, tenantId: string) {
@@ -1450,6 +1454,7 @@ export class ArmaController extends SaecBase {
 @ApiTags("saec · custodia")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
+@AmbitoUnidad("D11")
 @Controller("custodia-evidencia")
 export class CustodiaEvidenciaController extends SaecBase {
   /** RF-K05.1 · trazabilidad completa de una evidencia. */
@@ -1565,6 +1570,7 @@ export class CustodiaEvidenciaController extends SaecBase {
 @ApiTags("saec · préstamos")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
+@AmbitoUnidad("D11")
 @Controller("prestamos-evidencia")
 export class PrestamoEvidenciaController extends SaecBase {
   private async cargarPropio(id: string, tenantId: string) {
@@ -1729,6 +1735,7 @@ export class PrestamoEvidenciaController extends SaecBase {
 @ApiTags("saec · ibis")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
+@AmbitoUnidad("D11")
 @Controller("ibis")
 export class IbisController extends SaecBase {
   /** RF-K03.4 · bitácora de importación. */
@@ -2228,6 +2235,7 @@ export class IbisController extends SaecBase {
 // ===========================================================================
 
 @ApiTags("saec · certificados")
+@AmbitoUnidad("D11")
 @Controller("saec/certificados")
 export class SaecCertificadoController extends SaecBase {
   @Get()
@@ -2455,6 +2463,7 @@ export class SaecCertificadoController extends SaecBase {
 @ApiTags("saec · integraciones")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
+@AmbitoUnidad("D11")
 @Controller("saec/integraciones")
 export class SaecIntegracionController extends SaecBase {
   @Get()
@@ -2580,6 +2589,7 @@ const AsignarIbisSchema = z.object({
 @ApiTags("saec · ibis etl (armas importadas)")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
+@AmbitoUnidad("D11")
 @Controller("ibis")
 export class IbisEtlController extends SaecBase implements OnModuleInit, OnModuleDestroy {
   private readonly log = new Logger("IbisEtl");

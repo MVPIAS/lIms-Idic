@@ -60,3 +60,6 @@ seed_maestros_idic.sql
 align_rbac_tecnico.sql
 align_metrologia.sql
 align_admin_roles.sql
+align_accesos_demo.sql
+align_permisos_ambito.sql
+seed_accesos_demo.sql                demo

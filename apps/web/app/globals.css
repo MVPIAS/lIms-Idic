@@ -140,6 +140,33 @@ table.data tr.row-action{cursor:pointer}table.data tr.row-action:hover td{backgr
 /* ---- Login institucional ---- */
 .login-bg{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(135deg,#0e2a32 0%,#12343f 45%,#1d4856 100%)}
 .login-card{background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.35);width:100%;max-width:410px;padding:30px 28px}
+.login-card:has(.demo-accesos){max-width:560px}
+
+/* ---- Accesos de prueba por perfil (solo si el servidor los activa) ---- */
+.demo-accesos{margin-top:18px;padding-top:14px;border-top:1px dashed var(--line)}
+.demo-titulo{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);text-align:center;margin-bottom:10px}
+.demo-clave{font-family:ui-monospace,Consolas,monospace;letter-spacing:.02em;text-transform:none;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:1px 6px}
+.demo-pestanas{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
+.demo-pestana{flex:1 1 auto;padding:6px 9px;font-size:11.5px;font-weight:600;color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:6px;cursor:pointer;white-space:nowrap}
+.demo-pestana:hover{color:var(--ink)}
+.demo-pestana.activa{background:var(--primary);border-color:var(--primary);color:#fff}
+.demo-rejilla{display:grid;grid-template-columns:repeat(auto-fill,minmax(158px,1fr));gap:6px}
+.demo-perfil{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding:8px 10px;text-align:left;background:#fff;border:1px solid var(--line);border-radius:8px;cursor:pointer;min-width:0}
+.demo-perfil b{font-size:12.5px;color:var(--ink);font-weight:600}
+.demo-perfil span{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.demo-filas{display:flex;flex-direction:column;gap:5px;max-height:300px;overflow-y:auto;padding-right:2px}
+.demo-fila{display:flex;align-items:center;gap:8px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.demo-unidad{flex:0 0 132px;min-width:0;line-height:1.2}
+.demo-unidad b{display:block;font-size:12px;color:var(--primary)}
+.demo-unidad span{display:block;font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.demo-roles{display:flex;flex-wrap:wrap;gap:4px;flex:1}
+.demo-rol{padding:4px 9px;font-size:11.5px;font-weight:600;color:var(--primary-2);background:var(--bg);border:1px solid var(--line);border-radius:999px;cursor:pointer;white-space:nowrap}
+.demo-perfil:hover,.demo-rol:hover{border-color:var(--accent);background:#eef8fa}
+.demo-perfil:focus-visible,.demo-rol:focus-visible,.demo-pestana:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.demo-perfil:disabled,.demo-rol:disabled{opacity:.5;cursor:wait}
+.demo-aviso{margin:8px 0 0;font-size:11.5px;color:var(--amber);text-align:center}
+.demo-nota{margin:8px 0 0;font-size:10.5px;color:var(--muted);text-align:center}
+@media (max-width:480px){.demo-fila{flex-direction:column;align-items:stretch}.demo-unidad{flex:none}}
 
 /* ==========================================================================
    COMPONENTES COMPARTIDOS (menú por rol, cabecera, vacíos, esqueletos,
