@@ -1,0 +1,43 @@
+# =============================================================================
+# LIMS IDIC · Prometheus · servidor AISLADO · Aiuken
+# =============================================================================
+# Todos los objetivos son locales, por nombre de servicio de la red Docker.
+# NO hay remote_write ni federación: nada sale de este servidor.
+# =============================================================================
+global:
+  scrape_interval: 30s          # 30s basta: no es un sistema de alta frecuencia
+  evaluation_interval: 30s
+  external_labels:
+    entorno: produccion
+    sitio: idic-ejercito-chile
+
+rule_files:
+  - /etc/prometheus/alertas.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # Salud del propio Prometheus.
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Host: CPU, memoria, disco + las métricas del LIMS que deja chequeo-salud.sh
+  # en el directorio textfile (salud de API, certificado, copias).
+  - job_name: host
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # Contenedores: CPU/memoria/red por contenedor.
+  - job_name: contenedores
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+# NOTA · La API del LIMS no expone /metrics todavía. Su salud llega por la vía
+# del textfile (lims_api_salud, que escribe chequeo-salud.sh cada 5 minutos).
+# Mejora propuesta para v2: instrumentar la API con prom-client y añadir aquí un
+# job que raspe api:3001/metrics para obtener latencias y errores por endpoint.
+# Requiere tocar apps/api, fuera del alcance de este kit de despliegue.

@@ -1,0 +1,16 @@
+# Grafana · carga de paneles desde fichero · LIMS IDIC · Aiuken
+# Sin Internet no se pueden importar paneles desde grafana.com: el panel viaja
+# en el kit, como un fichero más.
+apiVersion: 1
+
+providers:
+  - name: LIMS IDIC
+    orgId: 1
+    folder: LIMS IDIC
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 60
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

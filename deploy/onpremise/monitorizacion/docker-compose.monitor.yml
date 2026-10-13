@@ -1,0 +1,150 @@
+# =============================================================================
+# LIMS IDIC · Monitorización de NIVEL 2 (opcional) · Aiuken
+# =============================================================================
+# OPCIONAL. El nivel 1 (chequeo-salud.sh + timer + correo interno) cubre la
+# detección de averías y no consume prácticamente nada. Este nivel 2 añade lo
+# que el nivel 1 no puede dar: HISTÓRICO y GRÁFICAS para ver tendencias (la
+# base creciendo, la memoria agotándose, el disco llenándose semana a semana).
+#
+# Actívelo SOLO si el servidor tiene ≥16 GB de RAM y el IDIC quiere paneles.
+# Coste aproximado: ~1,2 GB de RAM y ~5 GB de disco al año de histórico.
+#
+# TODO ES LOCAL: ni Prometheus, ni Grafana, ni Alertmanager salen a Internet.
+# Sin remote_write, sin telemetría, sin comprobación de actualizaciones y sin
+# plugins descargados. Requisito innegociable con datos reales de FFAA.
+#
+# Arranque:
+#   docker compose -f docker-compose.onpremise.yml \
+#                  -f monitorizacion/docker-compose.monitor.yml \
+#                  --env-file .env up -d
+#
+# Acceso a Grafana: NO se publica ningún puerto. Se entra por túnel SSH desde
+# el puesto del administrador:
+#   ssh -L 3000:localhost:3000 operador@<servidor>   →  http://localhost:3000
+# Así el panel no queda expuesto en la red del cuartel.
+# =============================================================================
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "2" }
+
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: lims-prometheus
+    pull_policy: never
+    restart: always
+    logging: *logging
+    user: "65534:65534"     # nobody: no necesita root
+    volumes:
+      - ./monitorizacion/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitorizacion/alertas.yml:/etc/prometheus/alertas.yml:ro
+      - ${LIMS_DATA_DIR}/prometheus:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      # 365 días: permite comparar la carga del laboratorio año contra año.
+      - "--storage.tsdb.retention.time=365d"
+      # Tope de tamaño: el histórico NUNCA debe llenar el disco de datos.
+      - "--storage.tsdb.retention.size=8GB"
+      - "--web.enable-lifecycle"
+    expose: ["9090"]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 1G }
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.1
+    container_name: lims-node-exporter
+    pull_policy: never
+    restart: always
+    logging: *logging
+    # Métricas del HOST (CPU, RAM, disco), no del contenedor: de ahí el pid host
+    # y el montaje de / en solo lectura.
+    pid: host
+    volumes:
+      - /:/host:ro,rslave
+      # Aquí escribe chequeo-salud.sh sus métricas (salud de API, certificado,
+      # copias). Es el puente entre el nivel 1 y el nivel 2.
+      - /var/lib/node_exporter/textfile:/textfile:ro
+    command:
+      - "--path.rootfs=/host"
+      - "--collector.textfile.directory=/textfile"
+      - "--collector.disable-defaults"
+      - "--collector.cpu"
+      - "--collector.meminfo"
+      - "--collector.filesystem"
+      - "--collector.loadavg"
+      - "--collector.diskstats"
+      - "--collector.textfile"
+      - "--collector.systemd"
+    expose: ["9100"]
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 128M }
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: lims-cadvisor
+    pull_policy: never
+    restart: always
+    logging: *logging
+    privileged: true      # cAdvisor necesita leer los cgroups del host
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    command:
+      - "--housekeeping_interval=30s"
+      - "--docker_only=true"
+      - "--store_container_labels=false"
+    expose: ["8080"]
+    deploy:
+      resources:
+        limits: { cpus: "0.5", memory: 256M }
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: lims-alertmanager
+    pull_policy: never
+    restart: always
+    logging: *logging
+    volumes:
+      - ./monitorizacion/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ${LIMS_DATA_DIR}/alertmanager:/alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+    expose: ["9093"]
+    deploy:
+      resources:
+        limits: { cpus: "0.3", memory: 128M }
+
+  grafana:
+    image: grafana/grafana-oss:11.1.0
+    container_name: lims-grafana
+    pull_policy: never
+    restart: always
+    logging: *logging
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-${MINIO_ROOT_PASSWORD}}
+      # Sin Internet y sin telemetría: si no se desactivan, Grafana intenta
+      # contactar grafana.com en cada arranque y tarda minutos en levantar.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_INSTALL_PLUGINS: ""
+      TZ: America/Santiago
+    volumes:
+      - ${LIMS_DATA_DIR}/grafana:/var/lib/grafana
+      - ./monitorizacion/grafana/provisioning:/etc/grafana/provisioning:ro
+    expose: ["3000"]
+    deploy:
+      resources:
+        limits: { cpus: "1.0", memory: 512M }
+    depends_on: [prometheus]

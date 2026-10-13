@@ -1,0 +1,23 @@
+# =============================================================================
+# LIMS IDIC · Temporizador del basebackup semanal · Aiuken
+# =============================================================================
+#   systemctl enable --now lims-basebackup.timer
+#   systemctl list-timers lims-*
+# =============================================================================
+[Unit]
+Description=LIMS IDIC · dispara el basebackup semanal para PITR
+Documentation=file:/opt/lims-idic/PITR.md
+
+[Timer]
+# Domingos a las 03:00, hora de Santiago: después de la copia lógica diaria
+# (02:15) y con el laboratorio cerrado. El pg_basebackup fuerza un checkpoint,
+# así que conviene que no coincida con actividad.
+OnCalendar=Sun *-*-* 03:00:00
+RandomizedDelaySec=300
+# Si el servidor estaba apagado el domingo (corte de luz), se hace al arrancar.
+# Sin esto, una semana sin basebackup en silencio y la ventana PITR se degrada.
+Persistent=true
+Unit=lims-basebackup.service
+
+[Install]
+WantedBy=timers.target

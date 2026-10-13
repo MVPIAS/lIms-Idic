@@ -1,0 +1,14 @@
+# Grafana · origen de datos · LIMS IDIC · Aiuken
+# Provisionado por fichero: en un servidor aislado nadie debería tener que
+# configurar el origen de datos a mano tras cada reinstalación.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus LIMS
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 30s

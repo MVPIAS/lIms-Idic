@@ -1,0 +1,54 @@
+# =============================================================================
+# LIMS IDIC · Alertmanager · Aiuken
+# =============================================================================
+# Único canal: el relay SMTP INTERNO del Ejército. Sin Slack, PagerDuty, Teams
+# ni ningún SaaS: el servidor no sale a Internet y los datos son de FFAA.
+#
+# Sustituya smtp_smarthost y las direcciones por los del cuartel (los mismos
+# valores que ALERTA_SMTP_* del .env).
+# =============================================================================
+global:
+  # El relay interno acepta correo sin TLS desde la IP del servidor. Si el del
+  # IDIC exige STARTTLS, ponga smtp_require_tls: true y añada las credenciales.
+  smtp_smarthost: "relay.interno.ejercito.cl:25"
+  smtp_from: "lims-idic@ejercito.cl"
+  smtp_require_tls: false
+  resolve_timeout: 5m
+
+route:
+  receiver: soporte-idic
+  group_by: [alertname, severidad]
+  group_wait: 1m          # margen para agrupar alertas del mismo suceso
+  group_interval: 10m
+  repeat_interval: 6h     # recordatorio cada 6 h mientras no se resuelva
+  routes:
+    # Lo crítico no espera al agrupamiento.
+    - matchers: [severidad = "critica"]
+      receiver: soporte-idic-urgente
+      group_wait: 10s
+      repeat_interval: 2h
+
+receivers:
+  - name: soporte-idic
+    email_configs:
+      - to: "soporte.idic@ejercito.cl"
+        send_resolved: true
+        headers:
+          Subject: "[LIMS IDIC] {{ .Status | toUpper }} · {{ .CommonAnnotations.resumen }}"
+
+  - name: soporte-idic-urgente
+    email_configs:
+      - to: "soporte.idic@ejercito.cl"
+        send_resolved: true
+        headers:
+          Subject: "[LIMS IDIC] CRITICO · {{ .CommonAnnotations.resumen }}"
+
+inhibit_rules:
+  # Si PostgreSQL está caído, la API también lo estará: se notifica la causa,
+  # no la consecuencia.
+  - source_matchers: [alertname = "LimsPostgresCaido"]
+    target_matchers: [alertname = "LimsApiCaida"]
+    equal: [entorno]
+  - source_matchers: [severidad = "critica"]
+    target_matchers: [severidad = "aviso"]
+    equal: [alertname]

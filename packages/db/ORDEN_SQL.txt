@@ -1,0 +1,62 @@
+# =============================================================================
+# LIMS IDIC · ORDEN DE APLICACIÓN DEL SQL · fuente única · Aiuken
+# =============================================================================
+# Lo leen los DOS despliegues, para que no vuelvan a divergir:
+#   · provision.sh                         (preproducción, nube, datos sintéticos)
+#   · deploy/onpremise/instalar-onpremise.sh   (producción, servidor del IDIC)
+#
+# Formato:  <fichero.sql>  [etiqueta]
+#   (sin etiqueta)  se aplica SIEMPRE
+#   demo            SOLO con datos de ejemplo (preproducción, o instalador con
+#                   --con-datos-demo). Contiene clientes, OT y resultados
+#                   INVENTADOS: nunca en la base real del IDIC.
+#   sin-demo        SOLO cuando NO se siembran datos de ejemplo. Aporta la DDL
+#                   que el seed demo de esa misma posición lleva embebida.
+#
+# EL ORDEN ES CRÍTICO: cada alineación depende de las anteriores.
+# Al añadir un .sql nuevo a packages/db hay que añadirlo AQUÍ (normalmente al
+# final). scripts/verificar-orden-sql.sh lo comprueba y la CI falla si falta.
+# =============================================================================
+schema.sql
+seed_rbac.sql
+seed_gran_grupo_grupo.sql
+seed_plantillas.sql
+seed_catalogos_metodos.sql
+seed_flujos.sql
+seed_preprod_demo.sql                demo
+align_schema_to_prisma.sql
+seed_analitos_limites.sql
+crm_oportunidad.sql
+seed_operacion_demo.sql              demo
+align_resultado_operacion.sql        sin-demo
+align_orden_compra.sql
+align_final.sql
+align_resultado_estado.sql
+align_certificado.sql
+equipos_custodia.sql
+align_rbac.sql
+align_rbac_unidad.sql
+align_resultado_equipo.sql
+saec.sql
+align_saec_certificado.sql
+align_ibis_ot.sql
+catalogo_v2.sql
+seed_catalogo_v2.sql
+align_ot_correlativo.sql
+align_flujo_real.sql
+align_puente_catalogo.sql
+align_rbac_comercial_catalogo.sql
+align_seguridad.sql
+align_configuracion.sql
+align_parametros.sql
+align_comercial_r2.sql
+align_qc.sql
+align_correo_log.sql
+align_consumibles.sql
+align_pasos_metodo.sql
+seed_pasos_metodo.sql
+seed_informes_min20.sql
+seed_maestros_idic.sql
+align_rbac_tecnico.sql
+align_metrologia.sql
+align_admin_roles.sql

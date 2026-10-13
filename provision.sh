@@ -51,49 +51,10 @@ docker compose -f docker-compose.prod.yml --env-file .env up -d --build
 echo ">> Esperando a PostgreSQL y aplicando schema + seeds..."
 set -a; source .env; set +a
 until docker compose -f docker-compose.prod.yml exec -T postgres pg_isready -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" >/dev/null 2>&1; do sleep 3; done
-for f in \
-  packages/db/schema.sql \
-  packages/db/seed_rbac.sql \
-  packages/db/seed_gran_grupo_grupo.sql \
-  packages/db/seed_plantillas.sql \
-  packages/db/seed_catalogos_metodos.sql \
-  packages/db/seed_flujos.sql \
-  packages/db/seed_preprod_demo.sql \
-  packages/db/align_schema_to_prisma.sql \
-  packages/db/seed_analitos_limites.sql \
-  packages/db/crm_oportunidad.sql \
-  packages/db/seed_operacion_demo.sql \
-  packages/db/align_orden_compra.sql \
-  packages/db/align_final.sql \
-  packages/db/align_resultado_estado.sql \
-  packages/db/align_certificado.sql \
-  packages/db/equipos_custodia.sql \
-  packages/db/align_rbac.sql \
-  packages/db/align_rbac_unidad.sql \
-  packages/db/align_resultado_equipo.sql \
-  packages/db/saec.sql \
-  packages/db/align_saec_certificado.sql \
-  packages/db/align_ibis_ot.sql \
-  packages/db/catalogo_v2.sql \
-  packages/db/seed_catalogo_v2.sql \
-  packages/db/align_ot_correlativo.sql \
-  packages/db/align_flujo_real.sql \
-  packages/db/align_puente_catalogo.sql \
-  packages/db/align_rbac_comercial_catalogo.sql \
-  packages/db/align_seguridad.sql \
-  packages/db/align_configuracion.sql \
-  packages/db/align_parametros.sql \
-  packages/db/align_comercial_r2.sql \
-  packages/db/align_qc.sql \
-  packages/db/align_correo_log.sql \
-  packages/db/align_consumibles.sql \
-  packages/db/align_pasos_metodo.sql \
-  packages/db/seed_pasos_metodo.sql \
-  packages/db/seed_informes_min20.sql \
-  packages/db/seed_maestros_idic.sql \
-  packages/db/align_rbac_tecnico.sql \
-  packages/db/align_metrologia.sql \
-  packages/db/align_admin_roles.sql; do
+# El orden vive en packages/db/ORDEN_SQL.txt (fuente única, compartida con el
+# instalador on-premise). Preproducción = modo "demo": incluye datos sintéticos.
+bash scripts/verificar-orden-sql.sh
+for f in $(bash scripts/orden-sql.sh demo | sed 's|^|packages/db/|'); do
   if [ -f "$f" ]; then
     echo "   aplicando $f"
     docker compose -f docker-compose.prod.yml exec -T postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" < "$f" || echo "   (aviso: $f ya aplicado o con avisos)"

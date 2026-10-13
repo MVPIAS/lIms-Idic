@@ -1,0 +1,160 @@
+# =============================================================================
+# LIMS IDIC · Reglas de alerta · Aiuken
+# =============================================================================
+# Se alerta SOLO de lo que exige actuar. Una alerta que nadie atiende enseña al
+# operador a ignorarlas todas.
+# =============================================================================
+groups:
+  - name: lims-disponibilidad
+    rules:
+      - alert: LimsApiCaida
+        expr: lims_api_salud == 0
+        for: 5m
+        labels: { severidad: critica }
+        annotations:
+          resumen: "La API del LIMS no responde"
+          detalle: "El LIMS no está operativo para el laboratorio. Revise: docker compose logs api"
+
+      - alert: LimsPostgresCaido
+        expr: lims_postgres_activo == 0
+        for: 2m
+        labels: { severidad: critica }
+        annotations:
+          resumen: "PostgreSQL no acepta conexiones"
+          detalle: "Sin base de datos no hay LIMS. Revise: docker compose logs postgres"
+
+      - alert: LimsContenedorCaido
+        expr: lims_contenedor_activo == 0
+        for: 5m
+        labels: { severidad: critica }
+        annotations:
+          resumen: "El contenedor {{ $labels.contenedor }} está caído"
+
+      - alert: LimsContenedorReiniciandose
+        expr: increase(lims_contenedor_reinicios[1h]) > 3
+        for: 10m
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "{{ $labels.contenedor }} se reinicia en bucle"
+          detalle: "Más de 3 reinicios en 1 hora: hay un fallo de fondo, no un corte puntual."
+
+  - name: lims-capacidad
+    rules:
+      - alert: LimsDiscoLlenandose
+        expr: lims_disco_uso_pct > 85
+        for: 30m
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "Disco {{ $labels.ruta }} al {{ $value }}%"
+          detalle: "Purgue copias antiguas o amplíe el volumen. Si llega al 100%, PostgreSQL se detiene."
+
+      - alert: LimsDiscoCritico
+        expr: lims_disco_uso_pct > 95
+        for: 5m
+        labels: { severidad: critica }
+        annotations:
+          resumen: "Disco {{ $labels.ruta }} al {{ $value }}%: parada inminente"
+
+      # Predictivo: avisa ANTES de que se llene, con margen para actuar.
+      - alert: LimsDiscoSeLlenaEn7Dias
+        expr: predict_linear(node_filesystem_avail_bytes{mountpoint="/host"}[24h], 7*24*3600) < 0
+        for: 6h
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "Al ritmo actual, el disco se llenará en menos de 7 días"
+
+      - alert: LimsPostgresConexiones
+        expr: lims_postgres_conexiones / lims_postgres_conexiones_max > 0.8
+        for: 15m
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "PostgreSQL al {{ $value | humanizePercentage }} de sus conexiones"
+
+  - name: lims-continuidad
+    rules:
+      - alert: LimsBackupFallido
+        expr: lims_backup_correcto == 0
+        for: 10m
+        labels: { severidad: critica }
+        annotations:
+          resumen: "La última copia de seguridad falló"
+          detalle: "Sin copias válidas no hay recuperación posible. Revise: journalctl -u lims-backup"
+
+      - alert: LimsBackupAntiguo
+        expr: lims_backup_horas_desde_ultimo > 26
+        for: 1h
+        labels: { severidad: critica }
+        annotations:
+          resumen: "Sin copia correcta desde hace {{ $value }} horas"
+          detalle: "Compruebe que lims-backup.timer sigue activo."
+
+      - alert: LimsCertificadoCaduca
+        expr: lims_certificado_dias_restantes < 30
+        for: 1h
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "El certificado TLS caduca en {{ $value }} días"
+          detalle: "No hay renovación automática (sin ACME). Tramite el nuevo certificado con la CA del Ejército: puede tardar días."
+
+      - alert: LimsCertificadoCaducado
+        expr: lims_certificado_dias_restantes < 1
+        labels: { severidad: critica }
+        annotations:
+          resumen: "El certificado TLS ha caducado: el LIMS es inaccesible"
+
+  - name: lims-pitr
+    rules:
+      # EL riesgo del WAL archiving: si el archivado se atasca, pg_wal crece sin
+      # límite y, al llenar el disco, PostgreSQL SE DETIENE. Es lo primero que hay
+      # que vigilar al activar PITR. Ver PITR.md §qué vigilar.
+      - alert: LimsWalArchivadoAtascado
+        expr: lims_wal_pendientes > 20
+        for: 15m
+        labels: { severidad: critica }
+        annotations:
+          resumen: "WAL archiving atascado: {{ $value }} segmentos pendientes"
+          detalle: "archive_command no consigue archivar. pg_wal crecerá hasta llenar el disco y detener PostgreSQL. Revise que /backup/wal exista, tenga espacio y pertenezca al uid 999. Ver PITR.md."
+
+      - alert: LimsWalArchivadoParado
+        expr: lims_wal_ultimo_archivado_hace_seg > 7200
+        for: 30m
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "Sin WAL archivado desde hace {{ $value | humanizeDuration }}"
+          detalle: "Con archive_timeout=300s debería archivarse un segmento cada 5 min. Si no llega, el archivado falla y el RPO deja de estar acotado. Revise pg_stat_archiver y PITR.md."
+
+      - alert: LimsWalFallosArchivado
+        expr: increase(lims_wal_fallos_total[1h]) > 3
+        for: 15m
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "archive_command acumula fallos ({{ $value }} en 1 h)"
+          detalle: "PostgreSQL reintenta el WAL fallido y lo retiene. Diagnostique antes de que pg_wal llene el disco."
+
+      - alert: LimsBasebackupFallido
+        expr: lims_basebackup_correcto == 0
+        for: 1h
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "El último basebackup para PITR falló o no existe"
+          detalle: "Sin basebackup fresco la ventana PITR se degrada. Revise: journalctl -u lims-basebackup"
+
+      - alert: LimsBasebackupAntiguo
+        expr: lims_basebackup_horas_desde_ultimo > 192
+        for: 6h
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "Sin basebackup correcto desde hace {{ $value | humanizeDuration }}"
+          detalle: "Se hace semanal (domingos 03:00). Compruebe que lims-basebackup.timer sigue activo."
+
+  - name: lims-monitorizacion
+    rules:
+      # Vigilar al vigilante: si el chequeo deja de correr, el silencio de
+      # alertas parecería "todo bien" cuando en realidad nadie está mirando.
+      - alert: LimsChequeoDetenido
+        expr: time() - lims_chequeo_ultimo > 1800
+        for: 10m
+        labels: { severidad: aviso }
+        annotations:
+          resumen: "El chequeo de salud lleva más de 30 minutos sin ejecutarse"
+          detalle: "Revise: systemctl status lims-chequeo.timer"
