@@ -140,6 +140,17 @@ $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
 [ -s "$DUMP_HOST" ] || fatal "pg_dump no generó el fichero esperado en $DUMP_HOST"
 log "  $(du -h "$DUMP_HOST" | cut -f1) volcados"
 
+# Base de Metabase (paneles, consultas guardadas y usuarios del BI). Vive en una
+# base aparte; si no existe todavía, se omite sin error.
+MB_DB="${METABASE_DB:-lims_metabase}"
+if [ "$($COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$MB_DB'" </dev/null 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
+  if $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres pg_dump -U "$POSTGRES_USER" -d "$MB_DB" -Fc -Z6 --no-owner --no-privileges -f "/backup/diarios/$FECHA/metabase-$FECHA.dump" </dev/null; then
+    log "  $(du -h "$DESTINO/metabase-$FECHA.dump" | cut -f1) de Metabase (base $MB_DB)"
+  else
+    log "  AVISO: no se pudo volcar la base de Metabase ($MB_DB). El respaldo del LIMS sigue siendo válido."
+  fi
+fi
+
 # --- 2. Verificación de integridad (antes de dar la copia por buena) ---------
 log "2/4 · Verificando la integridad del volcado..."
 verificar_dump "$DUMP_CONT" "$DUMP_HOST" \

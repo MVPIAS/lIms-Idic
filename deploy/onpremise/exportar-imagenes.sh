@@ -117,11 +117,25 @@ ok "lims-idic/web:$VERSION"
 
 # --- 2. Descargar imágenes de terceros por digest -----------------------------
 log "2/6 · Descargando imágenes de terceros (fijadas por digest)..."
+# Un digest fijado puede DESAPARECER del registro: en octubre de 2026 Docker Hub
+# ya no sirve minio/minio (el fabricante retiró sus imágenes públicas). Si el
+# registro no la entrega pero esta máquina conserva una copia con EXACTAMENTE
+# ese digest, se usa la copia local: es byte a byte la imagen validada. Si
+# tampoco está, se puede cargar antes desde un .tar guardado:
+#   docker load -i <copia>.tar.gz      (ver GUIA_ONPREMISE.md §5.1)
+SIN_REGISTRO=()
 descargar_y_etiquetar() {
-  local ref="$1" tag="$2"
-  docker pull --platform "$PLATAFORMA" "$ref" >/dev/null
+  local ref="$1" tag="$2" origen="registro"
+  if ! docker pull --platform "$PLATAFORMA" "$ref" >/dev/null 2>&1; then
+    docker image inspect "$ref" >/dev/null 2>&1 || fatal \
+      "El registro no entrega $ref y no hay copia local con ese digest.
+   Cárguela desde su .tar de resguardo (docker load -i ...) y repita."
+    origen="copia local"
+    SIN_REGISTRO+=("$tag")
+    warn "$tag: el registro ya no la entrega; se usa la copia local con el mismo digest."
+  fi
   docker tag "$ref" "$tag"
-  ok "$tag  <-  ${ref#*@}"
+  ok "$tag  <-  ${ref#*@}  ($origen)"
 }
 descargar_y_etiquetar "$CADDY_REF"    "$CADDY_TAG"
 descargar_y_etiquetar "$POSTGRES_REF" "$POSTGRES_TAG"
@@ -163,6 +177,11 @@ MANIFIESTO="$KIT_DIR/MANIFIESTO.txt"
   printf ' %-34s %s\n' "$METABASE_TAG" "$METABASE_REF"
   printf ' %-34s %s\n' "lims-idic/api:$VERSION"  "construida desde el monorepo"
   printf ' %-34s %s\n' "lims-idic/web:$VERSION"  "construida desde el monorepo"
+  if [ "${#SIN_REGISTRO[@]}" -gt 0 ]; then
+    echo
+    echo " AVISO: ya no disponibles en el registro público; empaquetadas desde la"
+    echo "        copia local con el mismo digest: ${SIN_REGISTRO[*]}"
+  fi
   echo
 } > "$MANIFIESTO"
 
@@ -202,6 +221,10 @@ ok "$(ls -1 "$KIT_DIR"/codigo/packages/db/*.sql | wc -l) ficheros SQL + ORDEN_SQ
 
 cp "$AQUI/conf/Caddyfile.onpremise"   "$KIT_DIR/conf/"
 cp "$AQUI/conf/env.onpremise.example" "$KIT_DIR/conf/"
+# La plantilla del kit lleva YA la versión de las imágenes que viajan con él.
+# Si se dejaba el valor genérico, la segunda pasada del instalador fallaba con
+# «la imagen lims-idic/api:<otra> no está cargada» hasta editar el .env a mano.
+sed -i "s|^LIMS_VERSION=.*|LIMS_VERSION=$VERSION|" "$KIT_DIR/conf/env.onpremise.example"
 cp -r "$AQUI/monitorizacion"          "$KIT_DIR/conf/"
 cp -r "$AQUI/systemd"                 "$KIT_DIR/conf/"
 cp "$AQUI/instalar-onpremise.sh"      "$KIT_DIR/"

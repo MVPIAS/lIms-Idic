@@ -153,7 +153,9 @@ else
 fi
 
 # A través de Caddy: valida además el TLS y el proxy, que es lo que ve el usuario.
-if curl -sk --max-time 10 "https://localhost/api/health" 2>/dev/null | grep -q '"status"'; then
+# Se pide por el nombre real (${DOMAIN}) resuelto a este mismo equipo: Caddy no
+# tiene sitio ni certificado para «localhost» y esa petición fallaría siempre.
+if curl -sk --max-time 10 --resolve "${DOMAIN}:443:127.0.0.1" "https://${DOMAIN}/api/health" 2>/dev/null | grep -q '"status"'; then
   bien "API accesible a través de Caddy (HTTPS)"
   metrica 'lims_proxy_salud 1'
 else

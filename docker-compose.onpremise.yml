@@ -45,9 +45,16 @@ services:
       - ${LIMS_DATA_DIR}/caddy/config:/config
     environment:
       DOMAIN: ${DOMAIN}
+    # El sitio de Caddy solo responde al nombre ${DOMAIN} (es el que lleva el
+    # certificado). Para que la sonda de salud lo pruebe DESDE DENTRO, ese nombre
+    # se resuelve a sí mismo. Con https://localhost la sonda fallaba siempre
+    # (sin sitio ni certificado para «localhost») y el contenedor figuraba
+    # «unhealthy» aunque el servicio funcionara.
+    extra_hosts:
+      - "${DOMAIN}:127.0.0.1"
     healthcheck:
-      # /api/health a través del proxy: valida Caddy + web + api de una vez.
-      test: ["CMD", "wget", "-q", "--no-check-certificate", "-O", "-", "https://localhost/api/health"]
+      # /api/health a través del proxy: valida Caddy + TLS + api de una vez.
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O - https://$$DOMAIN/api/health | grep -q '\"status\":\"ok\"'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -310,7 +317,11 @@ services:
     logging: *logging
     environment:
       MB_DB_TYPE: postgres
-      MB_DB_DBNAME: ${POSTGRES_DB}
+      # Base PROPIA para Metabase, en el mismo PostgreSQL. No puede compartir la
+      # del LIMS: Metabase crea una tabla `audit_log` y el LIMS ya tiene la suya,
+      # así que su migración fallaba y el BI no llegaba a arrancar. La crea el
+      # instalador (paso 7) y la incluye el respaldo diario.
+      MB_DB_DBNAME: ${METABASE_DB:-lims_metabase}
       MB_DB_PORT: 5432
       MB_DB_USER: ${POSTGRES_USER}
       MB_DB_PASS: ${POSTGRES_PASSWORD}
