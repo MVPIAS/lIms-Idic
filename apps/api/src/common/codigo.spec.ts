@@ -1,18 +1,17 @@
 /**
  * Tests de la generación de correlativos de OT (`codigo.ts`).
  *
- * Formato OT-AAAA-NNNN (año + secuencia de 4 dígitos con padding). El `db` se
- * mockea (Prisma/tx); el AÑO se fija con fake timers para que el test sea
- * determinista y no dependa del reloj real.
+ * Formato OT-AAAA-NNNN (año + secuencia de 4 dígitos con padding). El número
+ * lo entrega el contador atómico `ot_correlativo` (INSERT ... ON CONFLICT DO
+ * UPDATE ... RETURNING); aquí se mockea `db.$queryRaw` (Prisma/tx) y el AÑO se
+ * fija con fake timers para que el test sea determinista.
  */
 import { generarCodigoOt } from "./codigo";
 
-/** Mock mínimo del cliente Prisma: solo `ordenTrabajo.findFirst`. */
-function dbConUltima(codigo: string | null) {
+/** Mock mínimo del cliente Prisma: `$queryRaw` devuelve el `ultimo` ya incrementado. */
+function dbConContador(ultimo: number | bigint | null) {
   return {
-    ordenTrabajo: {
-      findFirst: jest.fn().mockResolvedValue(codigo ? { codigo } : null),
-    },
+    $queryRaw: jest.fn().mockResolvedValue(ultimo === null ? [] : [{ ultimo }]),
   };
 }
 
@@ -25,52 +24,47 @@ describe("generarCodigoOt", () => {
     jest.useRealTimers();
   });
 
-  it("arranca en NNNN=0001 cuando no hay OT previa del año", async () => {
-    const db = dbConUltima(null);
+  it("arranca en NNNN=0001 cuando el contador del año se crea en la misma sentencia", async () => {
+    const db = dbConContador(1);
     await expect(generarCodigoOt(db, "tenant-1")).resolves.toBe("OT-2026-0001");
   });
 
-  it("incrementa la secuencia a partir de la última OT del año", async () => {
-    const db = dbConUltima("OT-2026-0041");
+  it("usa el valor que devuelve el contador (ya incrementado por la base)", async () => {
+    const db = dbConContador(42);
     await expect(generarCodigoOt(db, "tenant-1")).resolves.toBe("OT-2026-0042");
   });
 
   it("mantiene el padding a 4 dígitos", async () => {
-    const db = dbConUltima("OT-2026-0009");
+    const db = dbConContador(10);
     await expect(generarCodigoOt(db, "tenant-1")).resolves.toBe("OT-2026-0010");
   });
 
-  it("consulta filtrada por tenant y por prefijo del año, orden descendente", async () => {
-    const db = dbConUltima("OT-2026-0100");
+  it("no se rompe al pasar de 9999: la secuencia es numérica, no lexicográfica", async () => {
+    const db = dbConContador(10000);
+    await expect(generarCodigoOt(db, "tenant-1")).resolves.toBe("OT-2026-10000");
+  });
+
+  it("acepta el bigint que PostgreSQL puede devolver para la columna", async () => {
+    const db = dbConContador(BigInt(7));
+    await expect(generarCodigoOt(db, "tenant-1")).resolves.toBe("OT-2026-0007");
+  });
+
+  it("hace UNA sola sentencia, parametrizada por tenant y por el año en curso", async () => {
+    const db = dbConContador(100);
     await generarCodigoOt(db, "tenant-XYZ");
-    expect(db.ordenTrabajo.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { tenantId: "tenant-XYZ", codigo: { startsWith: "OT-2026-" } },
-        orderBy: { codigo: "desc" },
-        select: { codigo: true },
-      }),
-    );
+    expect(db.$queryRaw).toHaveBeenCalledTimes(1);
+    // Tagged template: [strings, ...valores]. Los valores viajan como
+    // parámetros (nunca interpolados en el SQL).
+    const [strings, ...valores] = db.$queryRaw.mock.calls[0];
+    expect(valores).toEqual(["tenant-XYZ", 2026]);
+    const sql = (strings as string[]).join("?");
+    expect(sql).toContain("INSERT INTO ot_correlativo");
+    expect(sql).toContain("ON CONFLICT (tenant_id, anio)");
+    expect(sql).toContain("RETURNING ultimo");
   });
 
-  it("usa el año en curso del reloj (fake timer → 2026)", async () => {
-    const db = dbConUltima(null);
-    const codigo = await generarCodigoOt(db, "t");
-    expect(codigo.startsWith("OT-2026-")).toBe(true);
-  });
-
-  it("si el correlativo previo no es numérico, parseInt('NaN')+1 documenta comportamiento", async () => {
-    // partes[2] = "XXXX" → parseInt = NaN → NaN+1 = NaN → padStart('NaN').
-    // No es un caso real (los códigos los genera esta misma función), pero fija
-    // el comportamiento observable ante datos corruptos: NO lanza.
-    const db = dbConUltima("OT-2026-XXXX");
-    const codigo = await generarCodigoOt(db, "t");
-    expect(codigo).toBe("OT-2026-0NaN");
-  });
-
-  it("cruza el año: una OT de 2025 no se reutiliza (el findFirst la filtra por prefijo)", async () => {
-    // El where usa startsWith OT-2026-, así que aunque el mock devolviera null
-    // (no hay de 2026), arranca en 0001 aunque existan de 2025.
-    const db = dbConUltima(null);
+  it("si la base no devuelve fila, cae a 0001 en vez de lanzar", async () => {
+    const db = dbConContador(null);
     await expect(generarCodigoOt(db, "t")).resolves.toBe("OT-2026-0001");
   });
 });
