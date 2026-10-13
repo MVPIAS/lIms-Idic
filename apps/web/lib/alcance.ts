@@ -26,6 +26,8 @@ export interface Alcance {
   perfil: Perfil;
   esGlobal: boolean;
   unidadesVisibles: UnidadVisible[];
+  /** Ramas del organigrama en las que el usuario puede entrar (módulos por ámbito). */
+  ambitos?: Record<string, boolean>;
 }
 
 export type Severidad = "info" | "warn" | "alta";
@@ -85,6 +87,7 @@ function normalizarAlcance(raw: any): Alcance | null {
     perfil: (typeof raw.perfil === "string" ? raw.perfil : base.perfil) as Perfil,
     esGlobal: typeof raw.esGlobal === "boolean" ? raw.esGlobal : base.esGlobal,
     unidadesVisibles: Array.isArray(raw.unidadesVisibles) ? raw.unidadesVisibles : [],
+    ambitos: raw.ambitos && typeof raw.ambitos === "object" ? raw.ambitos : undefined,
   };
 }
 

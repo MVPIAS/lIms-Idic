@@ -15,6 +15,12 @@ export interface ItemNav {
   label: string;
   icon: string;
   perm?: Perm;
+  /**
+   * Rama del organigrama a la que pertenece el módulo (con array basta UNA).
+   * Si el usuario no trabaja en ella —ni la tiene bajo su mando— el ítem no se
+   * muestra. El backend lo impone con @AmbitoUnidad.
+   */
+  ambito?: string | string[];
   /** palabras extra para el buscador del menú. */
   claves?: string;
 }
@@ -48,7 +54,7 @@ export const NAV: SeccionNav[] = [
       { href: "/crm", label: "Oportunidades (CRM)", icon: "🎯", perm: "cotizacion.ver", claves: "crm pipeline" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "💲", perm: "cotizacion.ver" },
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
-      { href: "/internaciones", label: "Internaciones", icon: "🛃", perm: "cotizacion.ver", claves: "aduana importacion sdbpch" },
+      { href: "/internaciones", label: "Internaciones", icon: "🛃", perm: ["cotizacion.ver", "ot.ver"], ambito: ["BPCH", "DCO"], claves: "aduana importacion sdbpch" },
       { href: "/listas-precio", label: "Listas de precio", icon: "≣", perm: "cotizacion.ver" },
       { href: "/lista-precio-items", label: "Ítems de lista", icon: "🏷", perm: "cotizacion.ver" },
       { href: "/centros-costo", label: "Centros de costo", icon: "🏦", perm: "factura.ver" },
@@ -85,9 +91,9 @@ export const NAV: SeccionNav[] = [
     title: "Metrología · LMT",
     icon: "⚖",
     items: [
-      { href: "/metrologia", label: "Calibraciones", icon: "⚖", perm: "metrologia.ver" },
-      { href: "/metrologia/nueva", label: "Nueva calibración", icon: "＋", perm: "metrologia.crear" },
-      { href: "/metrologia/config", label: "Configuración LMT", icon: "🎛", perm: "metrologia.config" },
+      { href: "/metrologia", label: "Calibraciones", icon: "⚖", perm: "metrologia.ver", ambito: "SAM" },
+      { href: "/metrologia/nueva", label: "Nueva calibración", icon: "＋", perm: "metrologia.crear", ambito: "SAM" },
+      { href: "/metrologia/config", label: "Configuración LMT", icon: "🎛", perm: "metrologia.config", ambito: "SAM" },
     ],
   },
   {
@@ -95,9 +101,9 @@ export const NAV: SeccionNav[] = [
     title: "BPCH · SAEC",
     icon: "🛡",
     items: [
-      { href: "/saec", label: "Evidencias", icon: "🧷", perm: "evidencia.ver" },
-      { href: "/saec/armas", label: "Armas", icon: "🔫", perm: "arma.ver" },
-      { href: "/saec/ibis", label: "IBIS · armas importadas", icon: "📥", perm: "ibis.ver" },
+      { href: "/saec", label: "Evidencias", icon: "🧷", perm: "evidencia.ver", ambito: "D11" },
+      { href: "/saec/armas", label: "Armas", icon: "🔫", perm: "arma.ver", ambito: "D11" },
+      { href: "/saec/ibis", label: "IBIS · armas importadas", icon: "📥", perm: "ibis.ver", ambito: "D11" },
       { href: "/saec/verificar", label: "Verificar certificado", icon: "🔎" },
     ],
   },
@@ -106,7 +112,7 @@ export const NAV: SeccionNav[] = [
     title: "Reportes y comunicación",
     icon: "📊",
     items: [
-      { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: "resultado.ver", claves: "csv excel" },
+      { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "csv excel" },
       { href: "/documentos", label: "Buscador de documentos", icon: "🗄", perm: "ot.ver" },
       { href: "/mensajeria", label: "Mensajería · correo", icon: "📧", perm: "cotizacion.ver" },
       { href: "/mensajeria/plantillas", label: "Plantillas de correo", icon: "✉", perm: "cotizacion.ver" },

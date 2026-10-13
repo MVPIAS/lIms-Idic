@@ -182,7 +182,7 @@ abstract class ReportesBase {
 export class ReportesController extends ReportesBase {
   // --- §4.5.3 · Productividad ---------------------------------------------
   @Get("productividad")
-  @RequierePermiso("ot.ver")
+  @RequierePermiso("reporte.ver")
   async productividad(
     @Query("desde") desde?: string,
     @Query("hasta") hasta?: string,
@@ -243,7 +243,7 @@ export class ReportesController extends ReportesBase {
 
   // --- §4.5.3 · Conformidad (tasa de cumplimiento) ------------------------
   @Get("conformidad")
-  @RequierePermiso("resultado.ver")
+  @RequierePermiso("reporte.ver")
   async conformidad(
     @Query("desde") desde?: string,
     @Query("hasta") hasta?: string,
@@ -328,7 +328,7 @@ export class ReportesController extends ReportesBase {
 
   // --- §4.5.3 · Plazos (ingreso -> cierre) --------------------------------
   @Get("plazos")
-  @RequierePermiso("ot.ver")
+  @RequierePermiso("reporte.ver")
   async plazos(
     @Query("desde") desde?: string,
     @Query("hasta") hasta?: string,
@@ -386,7 +386,7 @@ export class ReportesController extends ReportesBase {
 
   // --- §4.5.3 · Comercial (cotizaciones) ----------------------------------
   @Get("comercial")
-  @RequierePermiso("ot.ver")
+  @RequierePermiso("reporte.comercial.ver")
   async comercial(
     @Query("desde") desde?: string,
     @Query("hasta") hasta?: string,
@@ -436,7 +436,7 @@ export class ReportesController extends ReportesBase {
   // --- §4.6.6 / §4.6.7 · Configurador de tabla + export CSV ---------------
   /** Descripción de la whitelist para que la UI pinte los checkboxes. */
   @Get("entidades")
-  @RequierePermiso("ot.ver")
+  @RequierePermiso("reporte.ver")
   entidades() {
     return Object.fromEntries(
       Object.entries(ENTIDADES).map(([k, def]) => [
@@ -447,7 +447,7 @@ export class ReportesController extends ReportesBase {
   }
 
   @Get("tabla")
-  @RequierePermiso("ot.ver")
+  @RequierePermiso("reporte.ver")
   @Header("Cache-Control", "no-store")
   async tabla(
     @Res({ passthrough: true }) res: Response,

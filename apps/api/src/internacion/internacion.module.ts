@@ -5,6 +5,7 @@ import { PrismaService } from "../common/prisma.service";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
+import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
 
 /**
  * SVT8 · Búsqueda de OT de INTERNACIÓN (IDIC-PG 24 Anexo 03) con la tasa del
@@ -167,6 +168,7 @@ export class InternacionService {
 @ApiTags("internaciones")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
+@AmbitoUnidad("BPCH", "DCO")
 @Controller("internaciones")
 export class InternacionController {
   constructor(private readonly svc: InternacionService) {}

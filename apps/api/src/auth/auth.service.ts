@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import * as argon2 from "argon2";
 import { authenticator } from "otplib";
 import * as QRCode from "qrcode";
+import { createHash, timingSafeEqual } from "crypto";
 import { AlcanceService } from "../rbac/alcance.service";
 
 // Ventana de tolerancia ±1 período (30 s) para compensar el desfase de reloj
@@ -23,6 +24,38 @@ const LOCK_MS = Number(process.env.AUTH_LOCK_MINUTES ?? 15) * 60_000;
 // exista o no la cuenta y no se pueda enumerar usuarios por diferencia de tiempo.
 const DUMMY_ARGON2_HASH =
   "$argon2id$v=19$m=65536,t=3,p=4$bVDEyHCefeYR8WDf7p86gw$yf0s5YZ7VZvWIUpUYXcFgjJuUjU3b+HRjR7uOA6usHc";
+
+/**
+ * Accesos de prueba por perfil (docs/ACCESOS_DEMO.md). Solo existen cuando el
+ * servidor declara ACCESOS_DEMO=true y una clave compartida de al menos 8
+ * caracteres. Sin ambas, los usuarios de prueba (usuario.es_demo) son inertes.
+ */
+export function accesosDemo(): { habilitado: boolean; clave: string; mostrarClave: boolean } {
+  const clave = process.env.ACCESOS_DEMO_CLAVE ?? "";
+  const habilitado = process.env.ACCESOS_DEMO === "true" && clave.length >= 8;
+  return { habilitado, clave, mostrarClave: habilitado && process.env.ACCESOS_DEMO_MOSTRAR_CLAVE === "true" };
+}
+
+/** Comparación en tiempo constante (sobre SHA-256, para igualar longitudes). */
+function mismaClave(a: string, b: string): boolean {
+  const ha = createHash("sha256").update(a).digest();
+  const hb = createHash("sha256").update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+export interface AccesoDemo {
+  username: string;
+  nombre: string;
+  cargo: string | null;
+  rol: string;
+  rolNombre: string;
+  unidad: string | null;
+  unidadNombre: string | null;
+  unidadTipo: string | null;
+  /** Departamento (o unidad de apoyo) del que cuelga la unidad; null = sin unidad. */
+  grupo: string | null;
+  grupoNombre: string | null;
+}
 
 @Injectable()
 export class AuthService {
@@ -71,7 +104,18 @@ export class AuthService {
     //  - LDAP (ad.ejercito.cl) se resuelve en LdapStrategy por su ruta dedicada.
     //  - Solo en desarrollo sin hash se admite el atajo password="demo".
     const ldapEnabled = process.env.LDAP_ENABLED === "true";
-    if (usuario.passwordHash) {
+    const demo = accesosDemo();
+    if (!usuario.passwordHash && demo.habilitado && (await this.esUsuarioDemo(usuario.id))) {
+      // Usuario de prueba: sin contraseña propia, entra con la clave compartida
+      // del servidor. Fuera de un entorno con ACCESOS_DEMO esta rama no existe.
+      if (!mismaClave(password, demo.clave)) {
+        await this.prisma.usuario.update({
+          where: { id: usuario.id },
+          data: { intentosFallidos: { increment: 1 }, updatedAt: new Date() },
+        });
+        throw new UnauthorizedException("Credenciales inválidas");
+      }
+    } else if (usuario.passwordHash) {
       const valid = await argon2.verify(usuario.passwordHash, password);
       if (!valid) {
         await this.prisma.usuario.update({
@@ -158,6 +202,65 @@ export class AuthService {
         cargo: usuario.cargo,
       },
     };
+  }
+
+  /** ¿Es un usuario de prueba? Tolera bases sin align_accesos_demo.sql. */
+  private async esUsuarioDemo(usuarioId: string): Promise<boolean> {
+    try {
+      const filas = await this.prisma.$queryRaw<Array<{ es_demo: boolean }>>`
+        SELECT es_demo FROM usuario WHERE id = ${usuarioId}::uuid`;
+      return filas[0]?.es_demo === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Lista pública de accesos de prueba para la pantalla de ingreso. Vacía y
+   * `habilitado: false` cuando el servidor no los tiene activados. La clave solo
+   * se devuelve si además se pidió expresamente mostrarla.
+   */
+  async accesosDemo(): Promise<{ habilitado: boolean; clave?: string; usuarios: AccesoDemo[] }> {
+    const cfg = accesosDemo();
+    if (!cfg.habilitado) return { habilitado: false, usuarios: [] };
+    let usuarios: AccesoDemo[] = [];
+    try {
+      usuarios = await this.prisma.$queryRaw<AccesoDemo[]>`
+        WITH RECURSIVE sube AS (
+          SELECT u.id AS origen, u.id, u.padre_id, u.codigo, u.nombre, u.tipo, 0 AS nivel
+            FROM unidad u
+          UNION ALL
+          SELECT s.origen, p.id, p.padre_id, p.codigo, p.nombre, p.tipo, s.nivel + 1
+            FROM sube s JOIN unidad p ON p.id = s.padre_id
+           WHERE s.nivel < 8
+        ), grupo AS (
+          -- El grupo es el ancestro de tipo DEPARTAMENTO o APOYO (o la propia unidad).
+          SELECT DISTINCT ON (origen) origen, codigo, nombre
+            FROM sube
+           WHERE tipo IN ('DEPARTAMENTO', 'APOYO', 'DIRECCION')
+           ORDER BY origen, (tipo = 'DIRECCION'), nivel
+        )
+        SELECT us.username::text       AS username,
+               us.nombre_completo      AS nombre,
+               us.cargo                AS cargo,
+               r.codigo                AS rol,
+               r.nombre                AS "rolNombre",
+               un.codigo               AS unidad,
+               un.nombre               AS "unidadNombre",
+               un.tipo                 AS "unidadTipo",
+               g.codigo                AS grupo,
+               g.nombre                AS "grupoNombre"
+          FROM usuario us
+          JOIN usuario_rol ur ON ur.usuario_id = us.id
+          JOIN rol r          ON r.id = ur.rol_id
+          LEFT JOIN unidad un ON un.id = ur.unidad_id
+          LEFT JOIN grupo g   ON g.origen = un.id
+         WHERE us.es_demo AND us.deleted_at IS NULL AND us.estado = 'activo'
+         ORDER BY g.codigo NULLS FIRST, un.codigo NULLS FIRST, r.orden NULLS LAST, us.username`;
+    } catch {
+      usuarios = [];
+    }
+    return { habilitado: true, ...(cfg.mostrarClave ? { clave: cfg.clave } : {}), usuarios };
   }
 
   /**

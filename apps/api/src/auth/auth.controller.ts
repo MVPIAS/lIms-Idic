@@ -34,7 +34,9 @@ export class AuthController {
   @Public()
   // Límite estricto anti fuerza bruta: sobre-escribe el throttler "default" SOLO
   // en esta ruta a 5 intentos/min (por IP, ya que en login aún no hay JWT).
-  @Throttle({ default: { ttl: 60_000, limit: 5 } })
+  // Con los accesos de prueba activos se sube a 30: quien valida permisos
+  // cambia de perfil muchas veces seguidas.
+  @Throttle({ default: { ttl: 60_000, limit: process.env.ACCESOS_DEMO === "true" ? 30 : 5 } })
   @ApiBody({ schema: { example: { username: "c.vargas", password: "demo", totp: "123456" } } })
   async login(@Body() body: unknown) {
     const { username, password, totp } = LoginSchema.parse(body);
@@ -42,6 +44,18 @@ export class AuthController {
     // envía (o falla) `totp`, el service responde 401 con { requiere2fa: true }
     // y el cliente reintenta el mismo POST añadiendo el código.
     return this.auth.login(username, password, totp);
+  }
+
+  /**
+   * GET /api/auth/accesos-demo
+   * Usuarios de prueba por perfil para la pantalla de ingreso. Responde
+   * { habilitado: false } salvo que el servidor defina ACCESOS_DEMO=true y
+   * ACCESOS_DEMO_CLAVE (docs/ACCESOS_DEMO.md).
+   */
+  @Get("accesos-demo")
+  @Public()
+  async accesosDemo() {
+    return this.auth.accesosDemo();
   }
 
   /**

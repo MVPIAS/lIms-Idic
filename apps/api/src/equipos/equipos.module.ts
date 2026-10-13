@@ -22,6 +22,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
+import { AlcanceService } from "../rbac/alcance.service";
 
 // ---------------------------------------------------------------------------
 // Módulo EQUIPOS · calibración y cadena de custodia de muestras.
@@ -347,13 +348,19 @@ export class EquiposService {
 
   async listarEquipos(
     tenantId: string,
-    opts: { page: number; limit: number; estado?: string; soloVencidos?: boolean; search?: string },
+    opts: { page: number; limit: number; estado?: string; soloVencidos?: boolean; search?: string; unidadIds?: string[] | null },
   ) {
-    const { page, limit, estado, soloVencidos, search } = opts;
+    const { page, limit, estado, soloVencidos, search, unidadIds } = opts;
     const offset = (page - 1) * limit;
 
     const filtros: string[] = [];
     const args: any[] = [tenantId];
+    // Alcance por laboratorio: quien no es global ve los equipos de sus unidades
+    // y los que no tienen unidad asignada (equipamiento común del instituto).
+    if (unidadIds) {
+      args.push(unidadIds);
+      filtros.push(`AND (e.unidad_id IS NULL OR e.unidad_id = ANY($${args.length}::uuid[]))`);
+    }
     if (estado) {
       args.push(estado);
       filtros.push(`AND e.estado = $${args.length}`);
@@ -516,16 +523,21 @@ export class EquiposService {
 
   async listarCalibraciones(
     tenantId: string,
-    opts: { page: number; limit: number; equipoId?: string },
+    opts: { page: number; limit: number; equipoId?: string; unidadIds?: string[] | null },
   ) {
-    const { page, limit, equipoId } = opts;
+    const { page, limit, equipoId, unidadIds } = opts;
     const offset = (page - 1) * limit;
 
     const args: any[] = [tenantId];
     let filtro = "";
+    // Mismo alcance que los equipos (ver listarEquipos).
+    if (unidadIds) {
+      args.push(unidadIds);
+      filtro += ` AND EXISTS (SELECT 1 FROM equipo ex WHERE ex.id = c.equipo_id AND (ex.unidad_id IS NULL OR ex.unidad_id = ANY($${args.length}::uuid[])))`;
+    }
     if (equipoId) {
       args.push(equipoId);
-      filtro = ` AND c.equipo_id = $${args.length}::uuid`;
+      filtro += ` AND c.equipo_id = $${args.length}::uuid`;
     }
 
     const data = await this.prisma.$queryRawUnsafe<any[]>(
@@ -829,7 +841,7 @@ const pag = (page: string, limit: string, max = 200, def = 100) => ({
 })
 @Controller("equipos")
 export class EquipoController {
-  constructor(private readonly svc: EquiposService) {}
+  constructor(private readonly svc: EquiposService, private readonly alcance: AlcanceService) {}
 
   @Get()
   async listar(
@@ -845,6 +857,7 @@ export class EquipoController {
       estado,
       soloVencidos: vencidos === "1" || vencidos === "true",
       search: search || undefined,
+      unidadIds: await this.alcance.filtroUnidades(req),
     });
   }
 
@@ -906,7 +919,7 @@ export class EquipoController {
 })
 @Controller("calibraciones")
 export class CalibracionController {
-  constructor(private readonly svc: EquiposService) {}
+  constructor(private readonly svc: EquiposService, private readonly alcance: AlcanceService) {}
 
   @Get()
   async listar(
@@ -918,6 +931,7 @@ export class CalibracionController {
     return this.svc.listarCalibraciones(this.svc.tenantId(req), {
       ...pag(page, limit),
       equipoId: equipoId || undefined,
+      unidadIds: await this.alcance.filtroUnidades(req),
     });
   }
 

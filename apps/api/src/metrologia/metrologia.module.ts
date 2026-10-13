@@ -10,6 +10,7 @@ import { createHash, randomInt } from "node:crypto";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
+import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
 import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { calcularCalibracion, type Componente, type Divisores, type Punto } from "./metrologia.calc";
@@ -99,6 +100,7 @@ async function cargarProceso(codigo: string) {
 @ApiTags("metrología")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
+@AmbitoUnidad("SAM")
 @Controller("metrologia")
 export class MetrologiaController {
   /** Los 12 procesos con su magnitud y componentes. */
