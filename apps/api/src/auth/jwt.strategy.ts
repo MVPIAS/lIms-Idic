@@ -13,6 +13,8 @@ export interface JwtPayload {
   unidadGlobal?: boolean;
   /** Perfil de bandeja calculado por AlcanceService (informativo). */
   perfil?: string;
+  /** true = contraseña temporal pendiente de cambio (PermisoGuard bloquea casi todo). */
+  cambioClave?: boolean;
   // Tipo de token: "refresh" solo debe servir para renovar en /auth/refresh,
   // nunca como bearer de API. Los access token no llevan `type` (o "access").
   type?: string;
@@ -48,6 +50,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, "jwt") {
       // Sin claim (tokens antiguos) → global, para no romper sesiones vigentes.
       unidadGlobal: payload.unidadGlobal ?? true,
       perfil: payload.perfil,
+      cambioClave: payload.cambioClave === true,
     };
   }
 }

@@ -1,4 +1,12 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+} from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { validarTransicion } from "../common/estados";
@@ -7,11 +15,17 @@ import {
   calcularValidez,
   reglaDeTipoCliente,
   soloFecha,
+  hoyEnChile,
+  ZONA_IDIC,
   DIAS_PARTICULAR_DEF,
   MESES_EJERCITO_OCT_DIC_DEF,
   type ResultadoValidez,
 } from "./validez";
 import { calcularOpiPendiente, origenDesdeAceptacion } from "../ot/reglas-ot";
+import { puedeRegistrarAceptacion } from "./permisos-cotizacion";
+
+/** Cada cuánto el proceso periódico pasa a «Vencida» las cotizaciones fuera de validez. */
+const INTERVALO_VENCIMIENTO_MS = Number(process.env.COTIZACION_VENCIMIENTO_MIN ?? 60) * 60_000;
 
 /** Estado inicial de toda cotización nueva (R1: Abierta / Aceptada / Anulada). */
 export const ESTADO_ABIERTA = "abierta";
@@ -67,10 +81,73 @@ export interface AceptacionEntrada {
 }
 
 @Injectable()
-export class CotizacionService {
+export class CotizacionService implements OnModuleInit, OnModuleDestroy {
+  private readonly log = new Logger(CotizacionService.name);
+  private temporizador?: NodeJS.Timeout;
+
   constructor(private readonly prisma: PrismaService) {}
 
+  // --------------------------------------------------------------------------
+  // Vencimiento: Abierta (o 'enviada' histórica) fuera de validez → 'expirada'
+  // (etiqueta «Vencida»). Lo hace el SISTEMA, no el usuario: por eso no pasa por
+  // el mapa de transiciones de common/estados.ts (que no permite abierta →
+  // expirada a mano). Se ejecuta al consultar (listar/detalle) y cada hora.
+  // --------------------------------------------------------------------------
+
+  onModuleInit() {
+    if (process.env.NODE_ENV === "test" || !(INTERVALO_VENCIMIENTO_MS > 0)) return;
+    this.temporizador = setInterval(() => void this.vencerFueraDeValidez().catch(() => undefined), INTERVALO_VENCIMIENTO_MS);
+    this.temporizador.unref?.();
+    void this.vencerFueraDeValidez().catch(() => undefined);
+  }
+
+  onModuleDestroy() {
+    if (this.temporizador) clearInterval(this.temporizador);
+  }
+
+  /**
+   * Pasa a 'expirada' las cotizaciones Abiertas/enviadas cuya validez
+   * (valida_hasta, inclusive; o expira_at en las históricas) terminó según la
+   * fecha de Chile. Deja traza en audit_log. Devuelve las cotizaciones vencidas.
+   */
+  async vencerFueraDeValidez(tenantId?: string | null, id?: string): Promise<{ id: string; codigo: string; tenant_id: string }[]> {
+    let vencidas: { id: string; codigo: string; tenant_id: string }[] = [];
+    try {
+      vencidas = await this.prisma.$queryRawUnsafe(
+        `UPDATE cotizacion c
+            SET estado = 'expirada', vencida_at = now(), updated_at = now()
+          WHERE c.estado IN ('abierta', 'enviada')
+            AND COALESCE(c.valida_hasta, c.expira_at) < (now() AT TIME ZONE '${ZONA_IDIC}')::date
+            AND ($1::uuid IS NULL OR c.tenant_id = $1::uuid)
+            AND ($2::uuid IS NULL OR c.id = $2::uuid)
+        RETURNING c.id, c.codigo, c.tenant_id`,
+        tenantId ?? null,
+        id ?? null,
+      );
+    } catch (e: any) {
+      // BD sin align_comercial_usuarios.sql (falta vencida_at): no se cae la consulta.
+      this.log.warn(`vencimiento de cotizaciones omitido: ${e?.message?.split("\n")[0]}`);
+      return [];
+    }
+    if (vencidas.length) {
+      this.log.log(`${vencidas.length} cotización(es) pasaron a Vencida: ${vencidas.map((v) => v.codigo).join(", ")}`);
+      try {
+        await this.prisma.$executeRawUnsafe(
+          `INSERT INTO audit_log (tenant_id, username, accion, entidad_tipo, entidad_id, entidad_codigo, motivo, metadata)
+           SELECT x.tenant_id, 'sistema', 'vencer', 'cotizaciones', x.id, x.codigo,
+                  'Fuera de validez (IT DCO-PG01-P01-IT02)', jsonb_build_object('estado', 'expirada')
+             FROM jsonb_to_recordset($1::jsonb) AS x(id uuid, codigo text, tenant_id uuid)`,
+          JSON.stringify(vencidas),
+        );
+      } catch (e: any) {
+        this.log.warn(`no se pudo registrar el vencimiento en audit_log: ${e?.message?.split("\n")[0]}`);
+      }
+    }
+    return vencidas;
+  }
+
   async listar(tenantId?: string) {
+    await this.vencerFueraDeValidez(tenantId ?? null);
     const cots = await this.prisma.cotizacion.findMany({
       // Cotizacion tiene tenant_id: solo las del tenant del usuario.
       where: { ...(tenantId ? { tenantId } : {}) },
@@ -91,6 +168,7 @@ export class CotizacionService {
   }
 
   async detalle(id: string, tenantId?: string) {
+    await this.vencerFueraDeValidez(tenantId ?? null, id);
     const cot = await this.prisma.cotizacion.findFirst({
       where: { id, ...(tenantId ? { tenantId } : {}) },
       include: {
@@ -461,7 +539,9 @@ export class CotizacionService {
    * aceptar sin documento (comportamiento previo). Una 'abierta' exige `tipo`.
    */
   async aceptar(id: string, tenantId?: string, doc: AceptacionEntrada = {}, usuarioId?: string) {
-    const cot = await this.detalle(id, tenantId);
+    const cot = await this.detalle(id, tenantId); // si venció, detalle ya la pasó a 'expirada'
+    const vigencia = puedeRegistrarAceptacion(cot, hoyEnChile());
+    if (!vigencia.ok) throw new ConflictException(vigencia.mensaje);
     validarTransicion("cotizacion", cot.estado, "aceptada");
     if (cot.estado === ESTADO_ABIERTA && !doc.tipo)
       throw new BadRequestException("Indique el documento de aceptación (tipo: OPI_RESOLUCION, OC, CORREO, PAGO_ADELANTADO o DISPOSICION_DIRECTOR).");

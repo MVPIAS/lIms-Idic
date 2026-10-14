@@ -1,10 +1,26 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
 import { DEV_TENANT } from "../common/base-crud.service";
+import { validarTipoCliente, type OpcionTipoCliente } from "./tipo-cliente";
 
 @Injectable()
 export class ClienteService {
   private prisma = new PrismaClient();
+
+  /** Lista parametrizable de tipos de cliente (activos e inactivos) del tenant. */
+  async tiposCliente(tenantId?: string): Promise<OpcionTipoCliente[]> {
+    return this.prisma.parametroSistema.findMany({
+      where: { categoria: "tipo_cliente", ...(tenantId ? { tenantId } : {}) },
+      orderBy: { orden: "asc" },
+      select: { codigo: true, etiqueta: true, activo: true },
+    });
+  }
+
+  /** Valida `tipo` contra la lista vigente (400 con mensaje claro si no vale). */
+  private async exigirTipo(tipo: string | null | undefined, tenantId?: string, tipoActual?: string | null) {
+    const r = validarTipoCliente(tipo, await this.tiposCliente(tenantId), tipoActual);
+    if (!r.ok) throw new BadRequestException(r.mensaje);
+  }
 
   async listar(opts: {
     page: number;
@@ -36,9 +52,15 @@ export class ClienteService {
       }),
       this.prisma.cliente.count({ where }),
     ]);
+    // Etiqueta legible del tipo (la lista guarda el código).
+    const tipos = new Map((await this.tiposCliente(opts.tenantId)).map((t) => [t.codigo, t]));
 
     return {
-      data,
+      data: data.map((c) => ({
+        ...c,
+        tipoEtiqueta: c.tipo ? tipos.get(c.tipo)?.etiqueta ?? c.tipo : null,
+        tipoVigente: c.tipo ? tipos.get(c.tipo)?.activo ?? false : false,
+      })),
       meta: {
         page: opts.page,
         limit: opts.limit,
@@ -70,6 +92,7 @@ export class ClienteService {
   async crear(data: any, tenantId?: string) {
     // tenantId sale del JWT; se ignora cualquier tenantId del body.
     const { tenantId: _ignore, ...rest } = data ?? {};
+    await this.exigirTipo(rest.tipo ?? null, tenantId ?? DEV_TENANT);
     return this.prisma.cliente.create({
       data: {
         ...rest,
@@ -79,8 +102,11 @@ export class ClienteService {
   }
 
   async actualizar(id: string, data: any, tenantId?: string) {
-    await this.detalle(id, tenantId); // valida existencia + pertenencia al tenant
+    const actual = await this.detalle(id, tenantId); // valida existencia + pertenencia al tenant
     const { tenantId: _ignore, ...rest } = data ?? {};
+    // Un cliente con tipo antiguo (pre-R2) se puede editar sin reclasificarlo;
+    // si se cambia el tipo, el nuevo debe estar vigente.
+    await this.exigirTipo(rest.tipo, actual.tenantId, actual.tipo);
     return this.prisma.cliente.update({
       where: { id },
       data: rest,

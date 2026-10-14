@@ -116,3 +116,39 @@ export function calcularValidez(e: EntradaValidez): ResultadoValidez {
     explicacion,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Vencimiento (la cotización Abierta fuera de validez pasa a «Vencida»)
+// ---------------------------------------------------------------------------
+
+/** Zona horaria del IDIC: el «hoy» comercial es el de Chile, no el del servidor (UTC). */
+export const ZONA_IDIC = "America/Santiago";
+
+/** Fecha de calendario de hoy en Chile, como fecha UTC a medianoche (comparable con valida_hasta). */
+export function hoyEnChile(ahora: Date = new Date()): Date {
+  // en-CA formatea AAAA-MM-DD.
+  const iso = new Intl.DateTimeFormat("en-CA", { timeZone: ZONA_IDIC, year: "numeric", month: "2-digit", day: "2-digit" }).format(ahora);
+  return soloFecha(iso);
+}
+
+/**
+ * ¿La validez ya terminó? `validaHasta` es INCLUSIVE: el último día de validez
+ * aún se puede aceptar; vence al día siguiente. Sin fecha → no vence.
+ */
+export function estaVencida(validaHasta: Date | string | null | undefined, hoy: Date): boolean {
+  if (!validaHasta) return false;
+  return soloFecha(validaHasta).getTime() < soloFecha(hoy).getTime();
+}
+
+/** Estados que pueden vencer: la Abierta vigente y la 'enviada' del histórico. */
+export const ESTADOS_QUE_VENCEN = ["abierta", "enviada"] as const;
+
+/** Días que faltan para el vencimiento (0 = vence hoy; negativo = ya vencida). */
+export function diasParaVencer(validaHasta: Date | string, hoy: Date): number {
+  return Math.round((soloFecha(validaHasta).getTime() - soloFecha(hoy).getTime()) / 86_400_000);
+}
+
+/** Texto legible de una fecha de validez (dd-mm-aaaa). */
+export function fechaLegible(d: Date | string): string {
+  return fmt(soloFecha(d));
+}

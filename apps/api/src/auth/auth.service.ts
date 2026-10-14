@@ -6,6 +6,7 @@ import { authenticator } from "otplib";
 import * as QRCode from "qrcode";
 import { createHash, timingSafeEqual } from "crypto";
 import { AlcanceService } from "../rbac/alcance.service";
+import { erroresNuevaClave } from "./clave";
 
 // Ventana de tolerancia ±1 período (30 s) para compensar el desfase de reloj
 // entre el servidor y la app autenticadora del usuario.
@@ -166,8 +167,27 @@ export class AuthService {
       },
     });
 
+    return this.emitirSesion(usuario);
+  }
+
+  /**
+   * JWT de acceso + refresh y datos del usuario. Lo usan el login y el cambio de
+   * contraseña (que re-emite la sesión ya sin la marca de cambio pendiente).
+   */
+  private async emitirSesion(usuario: {
+    id: string;
+    username: string;
+    tenantId: string;
+    nombreCompleto: string;
+    email: string | null;
+    grado: string | null;
+    cargo: string | null;
+    tokenVersion?: number | null;
+    debeCambiarPassword?: boolean | null;
+  }) {
     // Cargar roles y permisos efectivos del usuario para el RBAC
     const { roles, permisos, unidades, unidadGlobal, perfil } = await this.rolesYPermisos(usuario.id, usuario.tenantId);
+    const cambioClave = usuario.debeCambiarPassword === true;
 
     const payload = {
       sub: usuario.id,
@@ -181,10 +201,13 @@ export class AuthService {
       unidadGlobal,
       // Perfil de bandeja (DIRECTOR, JEFE_DEPTO, ..., ANALISTA, ADMIN, LECTOR).
       perfil,
+      // Contraseña temporal: hasta cambiarla, PermisoGuard solo deja usar las
+      // rutas de cambio de contraseña (@PermiteCambioClavePendiente).
+      ...(cambioClave ? { cambioClave: true } : {}),
       // Versión de token: se incrementa en cada logout. El refresh token solo
       // renueva si su `tv` coincide con el actual del usuario (invalida sesiones
       // tras logout sin necesidad de blacklist en Redis).
-      tv: (usuario as any).tokenVersion ?? 0,
+      tv: usuario.tokenVersion ?? 0,
     };
 
     const accessToken = this.jwt.sign(payload);
@@ -199,6 +222,8 @@ export class AuthService {
     return {
       accessToken,
       refreshToken,
+      // La pantalla de ingreso pide el cambio antes de entrar al sistema.
+      debeCambiarPassword: cambioClave,
       user: {
         id: usuario.id,
         username: usuario.username,
@@ -208,6 +233,47 @@ export class AuthService {
         cargo: usuario.cargo,
       },
     };
+  }
+
+  /**
+   * Cambio de contraseña por el propio usuario (Mi perfil y primer ingreso).
+   * Exige la contraseña actual y las reglas mínimas (auth/clave.ts). Quita la
+   * marca de cambio obligatorio, invalida los refresh tokens anteriores
+   * (tokenVersion++) y devuelve una sesión nueva.
+   */
+  async cambiarPassword(usuarioId: string, actual: string, nueva: string) {
+    const usuario = await this.prisma.usuario.findFirst({ where: { id: usuarioId, deletedAt: null, estado: "activo" } });
+    if (!usuario) throw new UnauthorizedException();
+    if (!usuario.passwordHash) {
+      if (await this.esUsuarioDemo(usuario.id)) {
+        throw new BadRequestException("Los usuarios de prueba comparten una contraseña fija y no pueden cambiarla.");
+      }
+      throw new BadRequestException(
+        "Su cuenta no tiene contraseña local (ingresa con la cuenta institucional): cámbiela en el directorio del Ejército.",
+      );
+    }
+    if (!(await argon2.verify(usuario.passwordHash, actual))) {
+      await this.prisma.usuario.update({
+        where: { id: usuario.id },
+        data: { intentosFallidos: { increment: 1 }, updatedAt: new Date() },
+      });
+      throw new BadRequestException("La contraseña actual no es correcta.");
+    }
+    const errores = erroresNuevaClave(nueva, { actual, username: usuario.username });
+    if (errores.length) throw new BadRequestException({ statusCode: 400, message: errores.join(" "), errores });
+
+    const actualizado = await this.prisma.usuario.update({
+      where: { id: usuario.id },
+      data: {
+        passwordHash: await argon2.hash(nueva),
+        debeCambiarPassword: false,
+        passwordCambiadaAt: new Date(),
+        intentosFallidos: 0,
+        tokenVersion: { increment: 1 },
+        updatedAt: new Date(),
+      },
+    });
+    return { ok: true, mensaje: "Contraseña actualizada.", ...(await this.emitirSesion(actualizado)) };
   }
 
   /** ¿Es un usuario de prueba? Tolera bases sin align_accesos_demo.sql. */
@@ -311,7 +377,7 @@ export class AuthService {
       // los refresh tokens previos dejan de renovar. Cierra la ventana de 7d.
       const usuario = await this.prisma.usuario.findFirst({
         where: { id: payload.sub, deletedAt: null, estado: "activo" },
-        select: { tokenVersion: true },
+        select: { tokenVersion: true, debeCambiarPassword: true },
       });
       if (!usuario || (usuario.tokenVersion ?? 0) !== (payload.tv ?? 0)) {
         throw new UnauthorizedException("Refresh token inválido");
@@ -326,6 +392,7 @@ export class AuthService {
         unidades,
         unidadGlobal,
         perfil,
+        ...(usuario.debeCambiarPassword ? { cambioClave: true } : {}),
         tv: usuario.tokenVersion ?? 0,
       });
       return { accessToken };
@@ -347,6 +414,8 @@ export class AuthService {
         estado: true,
         // Nunca se expone `totpSecret`; solo el estado del segundo factor.
         totpActivo: true,
+        debeCambiarPassword: true,
+        passwordCambiadaAt: true,
         usuarioRoles: {
           include: { rol: true },
         },

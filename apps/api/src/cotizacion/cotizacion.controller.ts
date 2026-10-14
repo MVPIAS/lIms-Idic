@@ -8,6 +8,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos } from "../common/estados";
 import { TIPOS_ACEPTACION } from "../ot/reglas-ot";
+import { PERMISO_ACEPTAR, PERMISO_ANULAR } from "./permisos-cotizacion";
 
 const CosteoSchema = z.object({
   lineas: z
@@ -224,19 +225,21 @@ export class CotizacionController {
 
   /**
    * "Eliminar" = anular (estado 'anulada'); no hay borrado físico (referenciada por OT).
-   * Es la operación más destructiva del dominio → el permiso más restrictivo
-   * (`cotizacion.aprobar`: SUPERADMIN, ADMIN, DIRECTOR). Se conserva como alias
-   * de POST /:id/anular (sin motivo) por compatibilidad.
+   * Alias de POST /:id/anular (sin motivo) por compatibilidad: mismo permiso,
+   * `cotizacion.anular` (Sección Ventas + quienes tenían cotizacion.aprobar).
    */
   @Delete(":id")
-  @RequierePermiso("cotizacion.aprobar")
+  @RequierePermiso(PERMISO_ANULAR)
   eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.anular(id, req?.user?.tenantId);
   }
 
-  /** R1 · Abierta → Anulada, con motivo obligatorio. */
+  /**
+   * R1 · Abierta → Anulada, con motivo obligatorio. La registra la Sección Ventas
+   * (el cliente desiste, error de emisión…) → `cotizacion.anular`.
+   */
   @Post(":id/anular")
-  @RequierePermiso("cotizacion.aprobar")
+  @RequierePermiso(PERMISO_ANULAR)
   anular(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const { motivo } = AnularSchema.parse(body ?? {});
     return this.svc.anular(id, req?.user?.tenantId, motivo);
@@ -250,19 +253,24 @@ export class CotizacionController {
   }
 
   /**
-   * Registrar aceptación = decisión comercial + genera la OT → `cotizacion.aprobar`.
+   * Registrar aceptación (docs/COMERCIAL_RONDA2.md): la Sección Ventas registra el
+   * documento con que el cliente acepta (OC, OPI/resolución, correo, pago
+   * adelantado, disposición del Director) y con ello nace la OT →
+   * `cotizacion.aceptar` (separado de `cotizacion.aprobar`, que el rol COMERCIAL
+   * no tiene). Una cotización fuera de validez → 409 «venció el …».
    * Body: { tipo, numero?, fecha?, adjunto?, conCobro } (SVT6). Con
    * DISPOSICION_DIRECTOR y conCobro=true la OT queda con OPI pendiente (SVT7).
    */
   @Post(":id/aceptar")
-  @RequierePermiso("cotizacion.aprobar")
+  @RequierePermiso(PERMISO_ACEPTAR)
   aceptar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const doc = AceptarSchema.parse(body ?? {});
     return this.svc.aceptar(id, req?.user?.tenantId, doc, req?.user?.sub);
   }
 
+  /** Rechazo de una cotización histórica ('enviada'): mismo permiso que anular. */
   @Post(":id/rechazar")
-  @RequierePermiso("cotizacion.aprobar")
+  @RequierePermiso(PERMISO_ANULAR)
   rechazar(@Param("id", ParseUUIDPipe) id: string, @Body() body: { motivo: string }, @Req() req: any) {
     return this.svc.rechazar(id, body.motivo, req?.user?.tenantId);
   }

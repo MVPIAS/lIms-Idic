@@ -24,17 +24,34 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { alcanceDe } from "./alcance";
 
-const UsuarioCreate = z.object({
-  username: z.string().min(2).max(60),
-  nombreCompleto: z.string().min(2).max(200),
-  email: z.string().email().optional().or(z.literal("")),
-  password: z.string().min(4).max(200),
-  grado: z.string().max(80).optional(),
-  cargo: z.string().max(200).optional(),
-  rolId: z.string().uuid().optional(),
-  // Unidad a la que se acota el rol. Vacío = sin unidad (solo válido para roles GLOBAL).
-  unidadId: z.string().uuid().optional().or(z.literal("")),
-});
+/**
+ * Alta de usuario. Lo usan las dos pantallas:
+ *   · Administración › Usuarios: envía `nombre` (alias de nombreCompleto), sin
+ *     contraseña → el servidor genera una TEMPORAL, la devuelve UNA vez
+ *     (`passwordTemporal`) y marca el cambio obligatorio en el primer ingreso.
+ *   · Vista clásica: envía `nombreCompleto` y `password` elegida por el
+ *     administrador; también queda con cambio obligatorio.
+ */
+const UsuarioCreate = z
+  .object({
+    username: z
+      .string()
+      .trim()
+      .min(3, "El usuario debe tener al menos 3 caracteres.")
+      .max(60)
+      .regex(/^[a-zA-Z0-9._-]+$/, "El usuario solo admite letras, números, punto, guion y guion bajo."),
+    nombreCompleto: z.string().trim().min(2).max(200).optional(),
+    /** Alias de nombreCompleto (pantalla de Administración). */
+    nombre: z.string().trim().min(2).max(200).optional(),
+    email: z.string().email("Correo no válido").optional().nullable().or(z.literal("")),
+    password: z.string().min(4).max(200).optional().or(z.literal("")),
+    grado: z.string().max(80).optional().nullable(),
+    cargo: z.string().max(200).optional().nullable(),
+    rolId: z.string().uuid().optional().or(z.literal("")),
+    // Unidad a la que se acota el rol. Vacío = sin unidad (solo válido para roles GLOBAL).
+    unidadId: z.string().uuid().optional().nullable().or(z.literal("")),
+  })
+  .refine((d) => d.nombreCompleto || d.nombre, { message: "Indique el nombre completo.", path: ["nombre"] });
 
 const UsuarioUpdate = z.object({
   nombreCompleto: z.string().min(2).max(200).optional(),
@@ -67,6 +84,7 @@ const SELECT_USUARIO = {
   cargo: true,
   estado: true,
   totpActivo: true,
+  debeCambiarPassword: true,
   ultimoLoginAt: true,
   createdAt: true,
   tenantId: true,
@@ -198,18 +216,26 @@ export class UsuariosController {
     if (!tenantId) throw new BadRequestException("No hay tenant");
     const dup = await this.prisma.usuario.findFirst({ where: { tenantId, username: dto.username } });
     if (dup) throw new ConflictException(`Ya existe el usuario ${dto.username}`);
+    if (dto.email) {
+      const dupMail = await this.prisma.usuario.findFirst({ where: { tenantId, email: dto.email } });
+      if (dupMail) throw new ConflictException(`El correo ${dto.email} ya está registrado para ${dupMail.username}`);
+    }
     if (dto.rolId) await this.validarAsignacion(dto.rolId, dto.unidadId || null, tenantId, false);
-    const passwordHash = await hashArgon2(dto.password);
+    // Sin contraseña elegida → temporal generada, que se devuelve UNA sola vez.
+    const temporal = dto.password ? null : passwordTemporal();
+    const passwordHash = await hashArgon2(dto.password || (temporal as string));
     const u = await this.prisma.usuario.create({
       data: {
         tenantId,
         username: dto.username,
         email: dto.email ? dto.email : null,
-        nombreCompleto: dto.nombreCompleto,
+        nombreCompleto: (dto.nombreCompleto ?? dto.nombre) as string,
         grado: dto.grado ?? null,
         cargo: dto.cargo ?? null,
         passwordHash,
         estado: "activo",
+        // «Deberá cambiarla en su primer ingreso»: lo impone PermisoGuard.
+        debeCambiarPassword: true,
       },
     });
     if (dto.rolId) {
@@ -217,7 +243,7 @@ export class UsuariosController {
         data: { usuarioId: u.id, rolId: dto.rolId, unidadId: dto.unidadId ? dto.unidadId : null },
       });
     }
-    return aDto(await this.cargar(u.id, tenantId));
+    return { ...aDto(await this.cargar(u.id, tenantId)), ...(temporal ? { passwordTemporal: temporal } : {}) };
   }
 
   /**
@@ -238,7 +264,12 @@ export class UsuariosController {
     if (dto.cargo !== undefined) data.cargo = dto.cargo;
     if (dto.estado !== undefined) data.estado = dto.estado;
     if (dto.activo !== undefined) data.estado = dto.activo ? "activo" : "inactivo";
+    if (data.estado && data.estado !== "activo" && req?.user?.sub === id) {
+      throw new BadRequestException("No puede desactivar su propia cuenta.");
+    }
     if (data.estado === "activo") data.intentosFallidos = 0;
+    // Desactivar/bloquear corta las sesiones abiertas (los refresh dejan de renovar).
+    if (data.estado && data.estado !== "activo" && actual.estado === "activo") data.tokenVersion = { increment: 1 };
     if (Object.keys(data).length) {
       data.updatedAt = new Date();
       await this.prisma.usuario.update({ where: { id }, data });
@@ -256,13 +287,19 @@ export class UsuariosController {
     return aDto(await this.cargar(id, tenantId));
   }
 
-  /** Soft-delete: marca deletedAt y deja el usuario en estado 'inactivo'. */
+  /**
+   * «Desactivar» (REVERSIBLE): estado 'inactivo' e invalida sus sesiones. NO
+   * marca deletedAt: el usuario sigue en la lista (filtro «Inactivos») y se
+   * reactiva con PATCH { activo: true }. Antes se borraba lógicamente y la
+   * persona desaparecía sin poder reactivarse. Su historial se conserva.
+   */
   @Delete(":id")
   async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    if (req?.user?.sub === id) throw new BadRequestException("No puede desactivar su propia cuenta.");
     await this.cargar(id, tenantDe(req));
     const u = await this.prisma.usuario.update({
       where: { id },
-      data: { deletedAt: new Date(), estado: "inactivo" },
+      data: { estado: "inactivo", tokenVersion: { increment: 1 }, updatedAt: new Date() },
       select: SELECT_USUARIO,
     });
     return u;
@@ -323,6 +360,8 @@ export class UsuariosController {
         passwordHash,
         intentosFallidos: 0,
         tokenVersion: { increment: 1 },
+        // La temporal solo sirve para entrar y elegir una propia.
+        debeCambiarPassword: true,
         updatedAt: new Date(),
       },
     });
