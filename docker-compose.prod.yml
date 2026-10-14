@@ -51,7 +51,7 @@ services:
       # SOLO preproducción: el compose on-premise no declara estas variables.
       ACCESOS_DEMO: ${ACCESOS_DEMO:-false}
       ACCESOS_DEMO_CLAVE: ${ACCESOS_DEMO_CLAVE:-}
-      ACCESOS_DEMO_MOSTRAR_CLAVE: ${ACCESOS_DEMO_MOSTRAR_CLAVE:-false}
+      ACCESOS_DEMO_MOSTRAR_CLAVE: ${ACCESOS_DEMO_MOSTRAR_CLAVE:-true}
       # ETL IBIS · barrido automático de la carpeta cada 24h (proceso interno de la API).
       IBIS_CRON_HABILITADO: ${IBIS_CRON_HABILITADO:-false}
       IBIS_CRON_HORA: ${IBIS_CRON_HORA:-02:00}
