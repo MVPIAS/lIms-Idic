@@ -24,19 +24,19 @@ interface Accion { href: string; titulo: string; desc: string; icono: string; pe
 const ACCIONES: Record<Perfil, Accion[]> = {
   ANALISTA: [
     { href: "/captura", titulo: "Capturar resultados", desc: "Registra las mediciones de tus ensayos", icono: "✍", perm: "resultado.crear" },
-    { href: "/ot", titulo: "Mis órdenes de trabajo", desc: "Lo que tienes asignado y su avance", icono: "🗂", perm: "ot.ver" },
-    { href: "/captura-ot", titulo: "Captura por OT", desc: "Todos los ensayos de una OT en una pantalla", icono: "📈", perm: "resultado.crear" },
+    { href: "/ot?mias=1&estado=abiertas", titulo: "Mis órdenes de trabajo", desc: "Lo que tienes asignado y su avance", icono: "🗂", perm: "ot.ver" },
+    { href: "/captura-ot?estado=pendiente,devuelto&asignados=1", titulo: "Captura por OT", desc: "Todos los ensayos de una OT en una pantalla", icono: "📈", perm: "resultado.crear" },
     { href: "/muestras", titulo: "Muestras", desc: "Busca una muestra y su estado", icono: "🧫", perm: "muestra.ver" },
     { href: "/qc", titulo: "Control de calidad", desc: "Blancos, estándares y duplicados", icono: "✔", perm: "resultado.ver" },
   ],
   REVISOR: [
-    { href: "/captura-ot", titulo: "Revisar resultados", desc: "Resultados capturados pendientes de revisión", icono: "🔍", perm: ["resultado.revisar", "resultado.crear"] },
+    { href: "/captura-ot?estado=capturado", titulo: "Revisar resultados", desc: "Resultados capturados pendientes de revisión", icono: "🔍", perm: ["resultado.revisar", "resultado.crear"] },
     { href: "/qc", titulo: "Control de calidad", desc: "Verifica los controles de cada OT", icono: "✔", perm: "resultado.ver" },
     { href: "/ot", titulo: "Órdenes de trabajo", desc: "Estado de las OT de tu laboratorio", icono: "🗂", perm: "ot.ver" },
   ],
   JEFE_LAB: [
-    { href: "/captura-ot", titulo: "Revisar y aprobar", desc: "Resultados listos para tu aprobación", icono: "✅", perm: ["resultado.aprobar", "resultado.revisar"] },
-    { href: "/ot", titulo: "Asignar trabajo", desc: "Distribuye las OT entre tus analistas", icono: "👥", perm: "ot.ver" },
+    { href: "/captura-ot?estado=revisado_n1", titulo: "Revisar y aprobar", desc: "Resultados listos para tu aprobación", icono: "✅", perm: ["resultado.aprobar", "resultado.revisar"] },
+    { href: "/ot?sinAsignar=1&estado=abiertas", titulo: "Asignar trabajo", desc: "Distribuye las OT entre tus analistas", icono: "👥", perm: "ot.asignar" },
     { href: "/qc", titulo: "Control de calidad", desc: "Controles aprobados y pendientes", icono: "✔", perm: "resultado.ver" },
     { href: "/equipos", titulo: "Equipos y calibración", desc: "Vencimientos y estado de equipos", icono: "⚙", perm: "equipo.ver" },
     { href: "/informes", titulo: "Emitir informe", desc: "Genera el informe de una OT terminada", icono: "🖨", perm: "certificado.emitir" },

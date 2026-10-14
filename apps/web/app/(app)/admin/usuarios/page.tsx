@@ -36,14 +36,18 @@ function Usuarios() {
   const [conDependientes, setConDependientes] = useState(true);
   const [fRol, setFRol] = useState("");
   const [fEstado, setFEstado] = useState<"todos" | "activos" | "inactivos">("activos");
+  const [fSinRol, setFSinRol] = useState(false);
   const [selId, setSelId] = useState<string | null>(null);
   const [creando, setCreando] = useState(false);
   const [tabInicial, setTabInicial] = useState<Tab>("datos");
 
-  // ?unidad=<id> (enlace desde Estructura)
+  // ?unidad=<id> (enlace desde Estructura) · ?sinRol=1 y ?estado=bloqueado (tarjetas de Mi bandeja;
+  // las cuentas bloqueadas figuran como inactivas).
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     if (p.get("unidad")) setFUnidad(p.get("unidad"));
+    if (p.get("sinRol") === "1") { setFSinRol(true); setFEstado("todos"); }
+    if (p.get("estado") === "bloqueado" || p.get("estado") === "inactivos") setFEstado("inactivos");
   }, []);
 
   const listaRoles: Rol[] = roles.data ?? [];
@@ -53,6 +57,7 @@ function Usuarios() {
   const filtrados = useMemo(() => {
     let out = usuarios.data ?? [];
     if (fEstado !== "todos") out = out.filter((u) => u.activo === (fEstado === "activos"));
+    if (fSinRol) out = out.filter((u) => u.asignaciones.length === 0);
     if (fRol) out = out.filter((u) => u.asignaciones.some((a) => a.rol.id === fRol));
     if (fUnidad) {
       const ids = conDependientes ? descendientes(fUnidad, listaUnidades) : new Set<string>();
@@ -60,7 +65,7 @@ function Usuarios() {
       out = out.filter((u) => u.asignaciones.some((a) => a.unidad && ids.has(a.unidad.id)));
     }
     return out;
-  }, [usuarios.data, fEstado, fRol, fUnidad, conDependientes, listaUnidades]);
+  }, [usuarios.data, fEstado, fRol, fSinRol, fUnidad, conDependientes, listaUnidades]);
 
   const sel = selId ? (usuarios.data ?? []).find((u) => u.id === selId) ?? null : null;
 
@@ -139,8 +144,14 @@ function Usuarios() {
                   Incluir unidades dependientes
                 </label>
               )}
-              {(fUnidad || fRol || fEstado !== "activos") && (
-                <button className="text-[var(--accent)] font-semibold" onClick={() => { setFUnidad(null); setFRol(""); setFEstado("activos"); }}>Limpiar filtros</button>
+              {fSinRol && (
+                <label className="inline-flex items-center gap-1 cursor-pointer">
+                  <input type="checkbox" checked={fSinRol} onChange={(e) => setFSinRol(e.target.checked)} />
+                  Solo personas sin rol
+                </label>
+              )}
+              {(fUnidad || fRol || fSinRol || fEstado !== "activos") && (
+                <button className="text-[var(--accent)] font-semibold" onClick={() => { setFUnidad(null); setFRol(""); setFSinRol(false); setFEstado("activos"); }}>Limpiar filtros</button>
               )}
               {unidades.error ? <span className="text-[var(--amber)]">No se pudo cargar la estructura para filtrar por unidad.</span> : null}
             </div>

@@ -20,8 +20,8 @@ import { toast } from "@/components/ui/feedback";
 import { ACCION_FIRMA, ESTADO_DOC, nombresResponsables } from "@/lib/documentos";
 import PanelDocumento from "@/components/documentos/PanelDocumento";
 import Modal from "@/components/documentos/Modal";
+import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 
-type Ot = { id: string; codigo: string; estado?: string; cliente?: { razonSocial?: string } };
 type Plantilla = { id: string; repid: string; nombre: string; tipo: string; version?: string; activo?: boolean };
 type Condiciones = {
   puedeEmitir: boolean;
@@ -45,11 +45,11 @@ const TIPOS_DOCUMENTO: { valor: string; texto: string }[] = [
 ];
 
 const lista = <T,>(r: any): T[] => (Array.isArray(r) ? r : (r?.data ?? []));
-const etiquetaOt = (o: Ot) => [o.codigo, o.cliente?.razonSocial].filter(Boolean).join(" · ");
 
 function InformesContenido() {
   const params = useSearchParams();
-  const [ots, setOts] = useState<Ot[]>([]);
+  // OT elegida con búsqueda en el servidor (GET /ot es paginado: no se carga una lista fija).
+  const [otSel, setOtSel] = useState<OtCorta | null>(null);
   const [plantillas, setPlantillas] = useState<Plantilla[]>([]);
   const [docs, setDocs] = useState<any[]>([]);
   const [otId, setOtId] = useState(params.get("otId") ?? "");
@@ -75,8 +75,12 @@ function InformesContenido() {
     (async () => {
       setCargando(true);
       try {
-        const [o, p] = await Promise.all([api.getRaw("ot"), api.getRaw("plantillas?limit=100")]);
-        setOts(lista<Ot>(o).filter((x) => x.estado !== "cerrada" && x.estado !== "anulada"));
+        const inicial = params.get("otId");
+        const [o, p] = await Promise.all([
+          inicial ? api.getRaw<OtCorta>(`ot/${inicial}`).catch(() => null) : Promise.resolve(null),
+          api.getRaw("plantillas?limit=100"),
+        ]);
+        if (o) setOtSel(o);
         setPlantillas(lista<Plantilla>(p).filter((x) => x.activo !== false));
       } catch (e: any) {
         setError(e?.message ?? "No se pudieron cargar los datos");
@@ -186,12 +190,12 @@ function InformesContenido() {
       <div className="card">
         <h2>1 · Documento a emitir</h2>
         <div className="form-grid">
-          <div className="field span-2">
-            <label>Orden de trabajo <span className="req">*</span></label>
-            <select value={otId} onChange={(e) => setOtId(e.target.value)} disabled={cargando}>
-              <option value="">{cargando ? "Cargando…" : "— Seleccione una OT —"}</option>
-              {ots.map((o) => <option key={o.id} value={o.id}>{etiquetaOt(o)}</option>)}
-            </select>
+          <div style={{ gridColumn: "span 2" }}>
+            <BuscadorOt
+              valor={otSel}
+              onCambio={(o) => { setOtSel(o); setOtId(o?.id ?? ""); }}
+              etiqueta="Orden de trabajo *"
+            />
           </div>
           <div className="field">
             <label>Tipo de plantilla</label>

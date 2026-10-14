@@ -95,13 +95,25 @@ export class BandejaService {
           tenant,
           unidades,
         ),
+      // Asignada = analista de la OT (ot_analista) o de un ensayo concreto
+      // (resultado.asignado_a). Misma regla que GET /ot?mias=1.
       otAsignadas: () =>
         this.contar(
-          `SELECT count(DISTINCT oa.ot_id) AS n FROM ot_analista oa JOIN orden_trabajo o ON o.id = oa.ot_id
-            WHERE oa.usuario_id = $3::uuid AND ${otScope} AND o.estado NOT IN ${OT_TERMINADA}`,
+          `SELECT count(*) AS n FROM orden_trabajo o
+            WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA}
+              AND (EXISTS (SELECT 1 FROM ot_analista oa WHERE oa.ot_id = o.id AND oa.usuario_id = $3::uuid)
+                   OR EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.asignado_a = $3::uuid AND r.deleted_at IS NULL))`,
           tenant,
           unidades,
           yo,
+        ),
+      otSinAsignar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM orden_trabajo o
+            WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA}
+              AND NOT EXISTS (SELECT 1 FROM ot_analista oa WHERE oa.ot_id = o.id)`,
+          tenant,
+          unidades,
         ),
       resultadosEstado: (estados: string[]) =>
         this.contar(
@@ -252,10 +264,17 @@ export class BandejaService {
       item("documentos_por_entregar", "Documentos por entregar", "Informes oficiales sin entrega registrada", await q.documentosPorEntregar(), "/certificados?estado=por_entregar", "warn");
     const abiertas = async () =>
       item("ot_abiertas", "OT abiertas", "OT en curso en su alcance (indicador)", await q.otAbiertas(), "/ot", "info");
+    // Las tarjetas de resultados abren «Captura y revisión por OT» ya filtrada.
     const porRevisar = async () =>
-      item("resultados_por_revisar", "Resultados por revisar", "Resultados capturados pendientes de revisión nivel 1", await q.resultadosEstado(["capturado"]), "/captura?estado=capturado", "warn");
+      item("resultados_por_revisar", "Resultados por revisar", "Resultados capturados pendientes de revisión nivel 1", await q.resultadosEstado(["capturado"]), "/captura-ot?estado=capturado", "warn");
     const porAprobar = async () =>
-      item("resultados_por_aprobar", "Resultados por aprobar", "Resultados revisados pendientes de aprobación", await q.resultadosEstado(["revisado_n1"]), "/captura?estado=revisado_n1", "warn");
+      item("resultados_por_aprobar", "Resultados por aprobar", "Resultados revisados pendientes de aprobación", await q.resultadosEstado(["revisado_n1"]), "/captura-ot?estado=revisado_n1", "warn");
+    const asignadas = async () =>
+      item("ot_asignadas", "OT asignadas a mí", "OT abiertas donde usted figura como analista (de la OT o de un ensayo)", await q.otAsignadas(), "/ot?mias=1&estado=abiertas", "warn");
+    const devueltos = async () =>
+      item("resultados_devueltos", "Resultados devueltos", "Resultados suyos devueltos o rechazados para corregir", await q.resultadosDevueltosMios(), "/captura-ot?estado=devuelto,rechazado&mios=1", "alta");
+    const sinAsignar = async () =>
+      item("ot_sin_asignar", "OT sin analista", "OT abiertas de su laboratorio a las que aún no se asignó analista", await q.otSinAsignar(), "/ot?sinAsignar=1&estado=abiertas", "warn");
     const porOficializar = async () =>
       item("informes_por_oficializar", "Informes por oficializar", "Boletines/informes en revisión en su ámbito", await q.boletinesEnRevision(), "/informes?estado=en_revision", "warn");
     const sinOt = async () =>
@@ -269,21 +288,15 @@ export class BandejaService {
     switch (perfil) {
       case "ANALISTA":
         return all([
-          async () => item("ot_asignadas", "OT asignadas a mí", "OT abiertas donde usted figura como analista", await q.otAsignadas(), "/captura-ot", "warn"),
-          async () => item("ot_en_curso", "OT en curso", "OT abiertas de sus laboratorios", await q.otAbiertas(), "/ot", "info"),
-          async () => item("resultados_devueltos", "Resultados devueltos", "Resultados suyos devueltos o rechazados para corregir", await q.resultadosDevueltosMios(), "/captura?estado=devuelto", "alta"),
+          asignadas,
+          async () => item("ot_en_curso", "OT en curso", "OT abiertas de sus laboratorios", await q.otAbiertas(), "/ot?estado=abiertas", "info"),
+          devueltos,
           firmas,
         ]);
       case "REVISOR":
-        return all([
-          porRevisar,
-          async () => item("ot_asignadas", "OT asignadas a mí", "OT abiertas donde usted figura como analista", await q.otAsignadas(), "/captura-ot", "warn"),
-          async () => item("resultados_devueltos", "Resultados devueltos", "Resultados suyos devueltos o rechazados para corregir", await q.resultadosDevueltosMios(), "/captura?estado=devuelto", "alta"),
-          porVencer,
-          firmas,
-        ]);
+        return all([porRevisar, asignadas, devueltos, porVencer, firmas]);
       case "JEFE_LAB":
-        return all([porRevisar, porAprobar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar]);
+        return all([sinAsignar, porRevisar, porAprobar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar]);
       case "JEFE_SECCION":
       case "JEFE_DEPTO":
         return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas]);
@@ -302,7 +315,7 @@ export class BandejaService {
         return all([
           async () => item("facturas_pendientes", "Pendientes de facturar", "Facturas en borrador generadas al cerrar OT con cobro: revíselas y emítalas", await q.facturasPendientes(), "/facturas?estado=pendiente", "alta"),
           async () => item("facturas_por_cobrar", "Facturas por cobrar", "Facturas emitidas, con pago parcial o con aviso de cobranza", await q.facturasPorCobrar(), "/facturas?estado=por_cobrar", "warn"),
-          async () => item("ot_cerradas_sin_factura", "OT cerradas sin factura", "OT con cobro cerradas sin factura (anteriores al cierre automático)", await q.otCerradasSinFactura(), "/ot", "warn"),
+          async () => item("ot_cerradas_sin_factura", "OT cerradas sin factura", "OT con cobro cerradas sin factura (anteriores al cierre automático)", await q.otCerradasSinFactura(), "/ot?estado=cerrada&sinFactura=1", "warn"),
         ]);
       case "ABASTECIMIENTO":
         return all([
@@ -312,9 +325,9 @@ export class BandejaService {
         return all([firmas, nc, porOficializar, vencidas]);
       case "ADMIN":
         return all([
-          async () => item("usuarios_sin_rol", "Usuarios sin rol", "Usuarios activos sin ninguna asignación de rol", await q.usuariosSinRol(), "/usuarios?sinRol=1", "warn"),
-          async () => item("usuarios_bloqueados", "Usuarios bloqueados", "Cuentas en estado bloqueado", await q.usuariosBloqueados(), "/usuarios?estado=bloqueado", "warn"),
-          async () => item("unidades_sin_jefe", "Unidades sin jefe", "Laboratorios, secciones o departamentos sin jefe asignado", await q.unidadesSinJefe(), "/usuarios?vista=estructura", "info"),
+          async () => item("usuarios_sin_rol", "Usuarios sin rol", "Usuarios activos sin ninguna asignación de rol", await q.usuariosSinRol(), "/admin/usuarios?sinRol=1", "warn"),
+          async () => item("usuarios_bloqueados", "Usuarios bloqueados", "Cuentas en estado bloqueado", await q.usuariosBloqueados(), "/admin/usuarios?estado=bloqueado", "warn"),
+          async () => item("unidades_sin_jefe", "Unidades sin jefe", "Laboratorios, secciones o departamentos sin jefe asignado", await q.unidadesSinJefe(), "/admin/estructura", "info"),
         ]);
       case "LECTOR":
       default:

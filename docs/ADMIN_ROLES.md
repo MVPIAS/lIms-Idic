@@ -92,6 +92,11 @@ Reglas del seed: las unidades existentes **no se duplican**; solo se completan l
 `cotizacion.aprobar`); `nc.ver` y `nc.crear` (roles con `nc.gestionar` + REVISOR,
 ANALISTA, ANALISTA_SR, TECNICO, METROLOGO, INSPECTOR; LECTOR solo `nc.ver`).
 
+**Flujo de laboratorio** (`align_flujo_laboratorio.sql`, ver `docs/FLUJO_LABORATORIO.md`):
+`ot.asignar` (asignar la OT, muestras o ensayos a analistas: ADMIN, DIRECTOR, SUBDIRECTOR, JEFE_DEPTO, JEFE_SECCION, JEFE_LAB) y
+`ot.cambiar_laboratorio` (fijar o cambiar el laboratorio responsable: los anteriores + PLANIFICACION). PLANIFICACION recibe
+además `muestra.crear` para registrar la OT con sus elementos.
+
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
 ---
@@ -317,9 +322,9 @@ Si `esGlobal`, `unidadesVisibles` trae todas las unidades activas.
 
 | Perfil | Claves |
 |---|---|
-| ANALISTA | `ot_asignadas` (ot_analista), `ot_en_curso`, `resultados_devueltos`, `firmas_pendientes` |
-| REVISOR | `resultados_por_revisar`, `ot_asignadas`, `resultados_devueltos`, `ot_por_vencer`, `firmas_pendientes` |
-| JEFE_LAB | `resultados_por_revisar`, `resultados_por_aprobar`, `firmas_pendientes`, `documentos_por_entregar`, `ot_listas_cerrar`, `ot_vencidas`, `ot_por_vencer`, `informes_por_oficializar` |
+| ANALISTA | `ot_asignadas` (ot_analista o ensayo asignado · abre `/ot?mias=1`), `ot_en_curso`, `resultados_devueltos` (abre `/captura-ot?estado=devuelto,rechazado&mios=1`), `firmas_pendientes` (ot_firma) |
+| REVISOR | `resultados_por_revisar` (abre `/captura-ot?estado=capturado`), `ot_asignadas`, `resultados_devueltos`, `ot_por_vencer`, `firmas_pendientes` |
+| JEFE_LAB | `ot_sin_asignar` (abre `/ot?sinAsignar=1`), `resultados_por_revisar`, `resultados_por_aprobar` (abre `/captura-ot?estado=revisado_n1`), `firmas_pendientes`, `ot_vencidas`, `ot_por_vencer`, `informes_por_oficializar` |
 | JEFE_SECCION / JEFE_DEPTO | `firmas_pendientes`, `informes_por_oficializar`, `resultados_por_aprobar`, `ot_vencidas`, `ot_vencidas_<LAB>` (una por laboratorio con atraso), `ot_abiertas` |
 | DIRECTOR | `firmas_pendientes`, `informes_por_oficializar`, `ot_vencidas`, `ot_vencidas_<LAB>`, `ot_abiertas`, `nc_abiertas`, `cotizaciones_aceptadas_sin_ot` |
 | COMERCIAL | `cotizaciones_por_vencer` (7 días), `cotizaciones_aceptadas_sin_ot`, `ot_por_vencer`, `documentos_por_entregar` |

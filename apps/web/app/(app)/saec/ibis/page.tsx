@@ -44,7 +44,7 @@ export default function IbisEtlPage() {
         fetch(`${API}/ibis/config`, { headers: auth() }).then((x) => x.json()).catch(() => null),
         fetch(`${API}/ibis/importaciones?limit=25`, { headers: auth() }).then((x) => x.json()).catch(() => ({})),
         fetch(`${API}/ibis/pool?limit=50`, { headers: auth() }).then((x) => x.json()).catch(() => ({})),
-        fetch(`${API}/ot`, { headers: auth() }).then((x) => x.json()).catch(() => []),
+        fetch(`${API}/ot?limit=200`, { headers: auth() }).then((x) => x.json()).catch(() => []),
       ]);
       if (c) setCfg(c);
       setHistorial(h.data ?? (Array.isArray(h) ? h : []));

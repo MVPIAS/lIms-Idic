@@ -96,8 +96,8 @@ configuración SMTP del tenant (la misma de Mensajería) y lo deja en la bitáco
   jefaturas): origen `manual`; no puede ser anterior a la recepción (o al alta) de la OT; el
   cambio y su motivo quedan en las notas de la OT.
 - **Semáforo** (OT no cerradas ni anuladas, día de Chile): vencida (fecha < hoy) · por vencer
-  (hoy a +3 días) · en plazo · sin fecha. `GET /ot/plazos?semaforo=&listasCierre=1&unidad=`
-  sirve la lista filtrada; la lista de OT muestra la columna «Plazo» y las tarjetas «OT
+  (hoy a +3 días) · en plazo · sin fecha. `GET /ot?semaforo=&listasCierre=1&unidad=`
+  (lista paginada) y `GET /ot/plazos` (con el semáforo calculado) sirven la lista filtrada; la lista de OT muestra la columna «Plazo» y las tarjetas «OT
   vencidas / por vencer / listas para cerrar» de Mi bandeja cuentan y filtran igual.
 
 ## 5. Cierre de la OT

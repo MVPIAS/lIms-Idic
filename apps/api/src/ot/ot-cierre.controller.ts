@@ -275,6 +275,35 @@ export class OtCierreService {
   }
 
   /**
+   * OT «listas para cerrar»: documento oficial, todos entregados, ninguno en
+   * firma ni devuelto y todos los resultados aprobados. Mismo criterio que la
+   * tarjeta de Mi bandeja (rbac/bandeja.service.ts) y que GET /ot?listasCierre=1.
+   */
+  async idsListasParaCerrar(tenantId?: string | null): Promise<string[]> {
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT o.id FROM orden_trabajo o
+        WHERE o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND o.estado NOT IN ('cerrada','anulada')
+          AND EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
+          AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
+                            AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
+          AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')`,
+      tenantId ?? null,
+    );
+    return filas.map((r) => r.id);
+  }
+
+  /** OT cerradas CON COBRO sin ninguna factura viva (tarjeta de Finanzas). */
+  async idsCerradasSinFactura(tenantId?: string | null): Promise<string[]> {
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT o.id FROM orden_trabajo o
+        WHERE o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND o.estado = 'cerrada' AND o.con_cobro
+          AND NOT EXISTS (SELECT 1 FROM factura f WHERE f.ot_id = o.id AND f.deleted_at IS NULL AND f.estado <> 'anulada')`,
+      tenantId ?? null,
+    );
+    return filas.map((r) => r.id);
+  }
+
+  /**
    * OT abiertas con su semáforo de plazo. `?semaforo=` filtra (vencida |
    * por_vencer | en_plazo | sin_fecha), con los mismos cortes que la bandeja.
    * Misma forma que GET /ot (con cliente), acotado por alcance.
@@ -291,19 +320,7 @@ export class OtCierreService {
       filtro = filtro ? filtro.filter((x) => x === id) : [id];
     }
     // «OT listas para cerrar»: mismo criterio que la tarjeta de la bandeja.
-    const listas = listasCierre
-      ? (
-          await this.prisma.$queryRawUnsafe<{ id: string }[]>(
-            `SELECT o.id FROM orden_trabajo o
-              WHERE o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND o.estado NOT IN ('cerrada','anulada')
-                AND EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
-                AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
-                                  AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
-                AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')`,
-            tenantId ?? null,
-          )
-        ).map((r) => r.id)
-      : null;
+    const listas = listasCierre ? await this.idsListasParaCerrar(tenantId) : null;
     const hoy = hoyCl();
     const d = (s: string) => new Date(`${s}T00:00:00Z`);
     const condFecha: any =

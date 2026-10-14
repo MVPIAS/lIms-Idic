@@ -3,11 +3,13 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   Module,
   NotFoundException,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -29,6 +31,22 @@ import { evaluarFormula, validarFormula, FormulaError, NOMBRES_FUNCION } from ".
 // resultados. El módulo de equipos NO se toca: sólo se consume.
 import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 import { AlcanceService } from "../rbac/alcance.service";
+import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./veredicto";
+import { leerReplicas } from "./replicas";
+import { AccionRevision, clasificarParaAccion, motivoNoCapturable } from "./flujo-resultado";
+import { veredictoMuestra } from "./especificacion";
+
+/**
+ * Recalcula y guarda el veredicto de la muestra (lote) a partir de sus
+ * ensayos: no_cumple si alguno no cumple, pendiente si falta alguno, cumple si
+ * todos cumplen (regla en especificacion.ts). Lo usan las dos capturas.
+ */
+export async function recalcularVeredictoMuestra(prisma: PrismaService, muestraId: string) {
+  const rs = await prisma.resultado.findMany({ where: { muestraId, deletedAt: null }, select: { veredicto: true } });
+  const v = veredictoMuestra(rs.map((r) => r.veredicto));
+  await prisma.muestra.update({ where: { id: muestraId }, data: { veredicto: v, veredictoAt: new Date() } });
+  return v;
+}
 
 /* ===================== TIPOS DE MUESTRA (árbol) ===================== */
 @Injectable()
@@ -116,6 +134,7 @@ export class MuestraController extends BaseCrudController {
     @Query("page") page = "1",
     @Query("limit") limit = "20",
     @Query("search") search?: string,
+    @Query("otId") otId?: string,
     @Req() req?: any,
   ) {
     const filtro = await this.alcance.filtroUnidades(req);
@@ -126,6 +145,11 @@ export class MuestraController extends BaseCrudController {
         select: { id: true },
       });
       where = { otId: { in: ots.map((o) => o.id) } };
+    }
+    // ?otId= · muestras de una OT (el expediente ya no trae 200 y filtra en el navegador).
+    if (otId) {
+      if (!/^[0-9a-f-]{36}$/i.test(otId)) throw new BadRequestException("otId inválido");
+      where = { AND: [where ?? {}, { otId }] };
     }
     return this.svc.listar({ page: parseInt(page), limit: parseInt(limit), search, where }, req?.user?.tenantId);
   }
@@ -283,6 +307,17 @@ export class NormaLimiteController extends BaseCrudController {
 }
 
 /* ===================== RESULTADOS (con estadística y veredicto) ===================== */
+
+/** Contexto de un resultado para alcance, segregación y estado. */
+export interface ContextoResultado {
+  id: string;
+  estado: string;
+  analistaId: string | null;
+  otId: string | null;
+  unidadPrincipal: string | null;
+  otCodigo: string | null;
+}
+
 @Injectable()
 export class ResultadoService extends BaseCrudService {
   // `equipos` se inyecta desde EquiposModule (importado por LaboratorioModule)
@@ -296,17 +331,20 @@ export class ResultadoService extends BaseCrudService {
     const s = n > 1 ? Math.sqrt(rep.reduce((a, b) => a + (b - m) ** 2, 0) / (n - 1)) : 0;
     return { promedio: m, desviacion: s, cv: m ? (s / Math.abs(m)) * 100 : 0 };
   }
+  /**
+   * Veredicto LEGIBLE contra los límites («Cumple / No cumple / Informativo»).
+   * Lo que se GUARDA es el código único de `veredicto.ts` (cumple / no_cumple /
+   * informativo): ver `capturar()`, que lo normaliza antes de persistir.
+   */
   private veredicto(m: number, inf?: number | null, sup?: number | null) {
-    if (inf != null && m < inf) return "No cumple";
-    if (sup != null && m > sup) return "No cumple";
-    if (inf == null && sup == null) return "Informativo";
-    return "Cumple";
+    return ETIQUETA_VEREDICTO[veredictoNumerico(m, inf, sup)];
   }
 
   /**
    * Contexto de variables que ve la fórmula del analito (RF-A06/D02.1):
    *   RN1..RNn  · cada réplica, 1-indexada como en la hoja de captura
    *   REPLICAS  · el vector completo → PROMEDIO(REPLICAS), MAX(REPLICAS)…
+   *   RN        · alias de REPLICAS («promedio(RN)»)
    *   PROMEDIO  · media aritmética de las réplicas
    *   DE        · desviación estándar muestral (n−1)
    *   CV        · coeficiente de variación en %
@@ -320,6 +358,11 @@ export class ResultadoService extends BaseCrudService {
   private contextoFormula(rep: number[], st: { promedio: number; desviacion: number; cv: number }, extras?: Record<string, number>) {
     const ctx: Record<string, number | number[]> = {
       REPLICAS: rep,
+      // `RN` = el vector de réplicas (alias de REPLICAS). Es la forma en que
+      // está escrita la fórmula sembrada de los analitos con límite
+      // («promedio(RN)», seed_analitos_limites.sql); sin el alias toda captura
+      // de esos analitos fallaba con «Variable no definida: 'RN'».
+      RN: rep,
       PROMEDIO: st.promedio,
       DE: st.desviacion,
       CV: st.cv,
@@ -332,22 +375,18 @@ export class ResultadoService extends BaseCrudService {
     // una gane en silencio.
     for (const [k, v] of Object.entries(extras ?? {})) {
       if (k.toUpperCase() in ctx || Object.keys(ctx).some((c) => c.toUpperCase() === k.toUpperCase()))
-        throw new BadRequestException(`La variable '${k}' es una variable reservada del ensayo (RN1..RNn, REPLICAS, PROMEDIO, DE, CV, N) y no puede redefinirse`);
+        throw new BadRequestException(`La variable '${k}' es una variable reservada del ensayo (RN, RN1..RNn, REPLICAS, PROMEDIO, DE, CV, N) y no puede redefinirse`);
       ctx[k] = v;
     }
     return ctx;
   }
 
   /**
-   * Captura réplicas RN1..RNn → promedio/DE/CV → fórmula del analito (si tiene)
-   * → veredicto contra el límite del producto.
-   *
-   * El VALOR DEL ENSAYO es el que devuelve la fórmula cuando el analito tiene
-   * una; si no, sigue siendo el promedio crudo (comportamiento previo intacto,
-   * que es el de los 3.118 analitos sin fórmula). Ese valor es el que se
-   * contrasta con el límite y el que se informa.
+   * Cálculo del resultado (sin persistir): estadística → fórmula del analito →
+   * veredicto contra el límite del producto. Lo comparten la captura y la
+   * corrección de un resultado devuelto.
    */
-  async capturar(dto: any, tenantId = DEV_TENANT) {
+  private async calcular(dto: { analitoId: string; replicas: number[]; productoLimite?: string; variables?: Record<string, number>; equipoId?: string }, tenantId: string) {
     // --- RF-D04.2 · BLOQUEO POR CALIBRACIÓN VENCIDA ------------------------
     // Se comprueba ANTES de calcular estadística/fórmula y ANTES de persistir:
     // no se puede emitir un resultado con un equipo descalibrado o fuera de
@@ -358,9 +397,7 @@ export class ResultadoService extends BaseCrudService {
     // equipo APTO deja continuar la captura y su id se guarda en el resultado.
     //
     // Si NO viene `equipoId`, el comportamiento previo queda intacto: la captura
-    // procede sin equipo asociado (los 3.118 analitos y los flujos que no
-    // informan equipo siguen funcionando igual). La obligatoriedad de informar
-    // equipo, cuando se decida, se impone en el DTO/flujo, no aquí.
+    // procede sin equipo asociado.
     if (dto.equipoId) {
       await this.equipos.verificarApto(dto.equipoId, tenantId);
     }
@@ -393,39 +430,114 @@ export class ResultadoService extends BaseCrudService {
       }
     }
     const valorEnsayo = resultadoFinal ?? st.promedio;
+    const inf = limite?.limiteInf != null ? Number(limite.limiteInf) : null;
+    const sup = limite?.limiteSup != null ? Number(limite.limiteSup) : null;
     // ----------------------------------------------------------------------
+    return {
+      replicas: rep,
+      promedio: st.promedio,
+      desviacion: st.desviacion,
+      cv: st.cv,
+      resultadoFinal,
+      // Copia de la fórmula tal y como estaba AL CAPTURAR: `analito.formula`
+      // es editable y el resultado tiene que seguir siendo reproducible.
+      formulaAplicada: formula || null,
+      unidad: analito.unidad ?? null,
+      // Se guarda el código único (cumple / no_cumple / informativo).
+      veredicto: normalizarVeredicto(this.veredicto(valorEnsayo, inf, sup)),
+    };
+  }
 
-    return this.prisma.resultado.create({
+  /**
+   * Captura réplicas RN1..RNn → promedio/DE/CV → fórmula del analito (si tiene)
+   * → veredicto contra el límite del producto.
+   *
+   * El VALOR DEL ENSAYO es el que devuelve la fórmula cuando el analito tiene
+   * una; si no, sigue siendo el promedio crudo. Ese valor es el que se
+   * contrasta con el límite y el que se informa. La OT se toma de la muestra si
+   * no viene (sin OT el resultado no aparecería en revisión ni en la bandeja).
+   */
+  async capturar(dto: any, tenantId = DEV_TENANT) {
+    const calc = await this.calcular(dto, tenantId);
+    let otId: string | null = dto.otId ?? null;
+    if (!otId && dto.muestraId) {
+      const m = await this.prisma.muestra.findUnique({ where: { id: dto.muestraId }, select: { otId: true } });
+      otId = m?.otId ?? null;
+    }
+    const creado = await this.prisma.resultado.create({
       data: {
-        otId: dto.otId ?? null,
+        otId,
         muestraId: dto.muestraId,
         analitoId: dto.analitoId,
-        replicas: rep,
-        promedio: st.promedio,
-        desviacion: st.desviacion,
-        cv: st.cv,
-        resultadoFinal,
-        // Copia de la fórmula tal y como estaba AL CAPTURAR: `analito.formula`
-        // es editable y el resultado tiene que seguir siendo reproducible.
-        formulaAplicada: formula || null,
-        unidad: analito.unidad ?? null,
-        veredicto: this.veredicto(valorEnsayo, limite?.limiteInf ? Number(limite.limiteInf) : null, limite?.limiteSup ? Number(limite.limiteSup) : null),
+        ...calc,
         analistaId: dto.analistaId ?? null,
         // Equipo APTO con el que se ejecutó el ensayo (RF-D04.1). Ya verificado
-        // arriba; NULL si no se informó equipo.
+        // en calcular(); NULL si no se informó equipo.
         equipoId: dto.equipoId ?? null,
         // Todo resultado nace en 'capturado': el ciclo RF-E01 empieza aquí.
         estado: "capturado",
       },
       include: { analito: true, muestra: true },
     });
+    await recalcularVeredictoMuestra(this.prisma as PrismaService, dto.muestraId);
+    return creado;
+  }
+
+  /**
+   * Corrección de un resultado por réplicas (típicamente uno DEVUELTO): se
+   * recalcula en el MISMO registro y vuelve a 'capturado' con el nuevo analista
+   * y fecha. No se puede sobre un resultado revisado o aprobado.
+   */
+  async recapturar(id: string, dto: any, usuarioId: string | undefined, tenantId = DEV_TENANT) {
+    const actual = await this.prisma.resultado.findFirst({
+      where: { id, deletedAt: null },
+      select: { id: true, estado: true, analitoId: true },
+    });
+    if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
+    if (!actual.analitoId)
+      throw new BadRequestException("Este resultado se captura por valor en «Captura y revisión por OT», no por réplicas.");
+    const motivo = motivoNoCapturable(actual.estado);
+    if (motivo) throw new ConflictException(motivo);
+    const calc = await this.calcular({ ...dto, analitoId: actual.analitoId }, tenantId);
+    const r = await this.prisma.resultado.update({
+      where: { id },
+      data: {
+        ...calc,
+        analistaId: usuarioId ?? null,
+        equipoId: dto.equipoId ?? null,
+        estado: "capturado",
+        fecha: new Date(),
+      },
+      include: { analito: true, muestra: true },
+    });
+    await recalcularVeredictoMuestra(this.prisma as PrismaService, r.muestraId);
+    return r;
+  }
+
+  /** OT, laboratorio y estado de un resultado (404 si no existe o es de otro tenant). */
+  async contexto(id: string, tenantId?: string): Promise<ContextoResultado> {
+    const filas = await this.prisma.$queryRawUnsafe<
+      { id: string; estado: string; analista_id: string | null; ot_id: string | null; unidad_principal: string | null; codigo: string | null }[]
+    >(
+      `SELECT r.id, r.estado, r.analista_id, o.id AS ot_id, o.unidad_principal, o.codigo
+         FROM resultado r
+         JOIN muestra m ON m.id = r.muestra_id
+         LEFT JOIN orden_trabajo o ON o.id = COALESCE(r.ot_id, m.ot_id)
+        WHERE r.id = $1::uuid AND r.deleted_at IS NULL
+          AND ($2::uuid IS NULL OR m.tenant_id = $2::uuid)`,
+      id,
+      tenantId ?? null,
+    );
+    const f = filas[0];
+    if (!f) throw new NotFoundException(`Resultado ${id} no encontrado`);
+    return { id: f.id, estado: f.estado, analistaId: f.analista_id, otId: f.ot_id, unidadPrincipal: f.unidad_principal, otCodigo: f.codigo };
   }
 
   /* ---------------------- RF-E01 · Aprobación escalonada ---------------------- */
 
   /**
    * Aplica una transición del ciclo de vida del resultado y sella quién y
-   * cuándo. Toda la política vive aquí para que los tres endpoints no puedan
+   * cuándo. Toda la política vive aquí para que los endpoints no puedan
    * divergir.
    *
    * SEGREGACIÓN DE FUNCIONES (NCh-ISO/IEC 17025):
@@ -433,10 +545,7 @@ export class ResultadoService extends BaseCrudService {
    * es `usuario != resultado.analistaId` → 409 Conflict si coinciden. Un 403
    * sería engañoso: el usuario SÍ tiene el permiso, lo que no puede es
    * ejercerlo sobre ESTE resultado — es un conflicto de estado, no falta de
-   * autorización. El encargo sólo exigía la regla en `aprobar`; se aplica
-   * también en `revisar` porque el circuito de RF-E01 es analista → jefe de
-   * laboratorio → jefe de departamento, y un revisor que se revisa a sí mismo
-   * vacía de contenido el primer escalón igual que lo haría en el segundo.
+   * autorización.
    */
   private async transitar(
     id: string,
@@ -473,7 +582,10 @@ export class ResultadoService extends BaseCrudService {
     }
     if (nuevo === "devuelto") {
       data.motivoDevolucion = opts.motivo ?? null;
-      // Se conserva revisadoPor/At: es el rastro de quién lo miró y lo devolvió.
+      // Quien devuelve queda como último revisor: es el rastro de quién lo
+      // miró y lo devolvió (y cuándo).
+      data.revisadoPor = usuarioId ?? null;
+      data.revisadoAt = ahora;
     }
 
     return this.prisma.resultado.update({
@@ -493,18 +605,61 @@ export class ResultadoService extends BaseCrudService {
   devolver(id: string, motivo: string, usuarioId?: string) {
     return this.transitar(id, "devuelto", usuarioId, { motivo, exigeIndependencia: false });
   }
+
+  /**
+   * Revisar / aprobar TODOS los resultados de una OT que estén en la etapa
+   * correspondiente, salvo los capturados por el propio usuario (segregación):
+   * esos se informan como omitidos, con el motivo.
+   */
+  async accionOt(otId: string, accion: AccionRevision, usuarioId: string | undefined) {
+    const filas = await this.prisma.resultado.findMany({
+      where: { otId, deletedAt: null },
+      select: { id: true, estado: true, analistaId: true },
+    });
+    const { aplicables, omitidos } = clasificarParaAccion(filas, accion, usuarioId);
+    const hechos: string[] = [];
+    for (const id of aplicables) {
+      try {
+        await (accion === "revisar" ? this.revisar(id, usuarioId) : this.aprobar(id, usuarioId));
+        hechos.push(id);
+      } catch (e: any) {
+        omitidos.push({ id, motivo: e?.message ?? "No se pudo aplicar." });
+      }
+    }
+    return { accion, hechos: hechos.length, omitidos };
+  }
+
+  /**
+   * Veredicto manual del revisor para un resultado que el sistema no pudo
+   * decidir (p. ej. un texto frente a límites numéricos). Solo sobre resultados
+   * capturados (antes de revisar).
+   */
+  async fijarVeredicto(id: string, veredicto: string) {
+    const v = normalizarVeredicto(veredicto);
+    if (!v || v === "pendiente") throw new BadRequestException("Veredicto no válido: cumple, no_cumple o informativo.");
+    const actual = await this.prisma.resultado.findFirst({ where: { id, deletedAt: null }, select: { estado: true } });
+    if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
+    if (actual.estado !== "capturado")
+      throw new ConflictException("Solo se puede fijar el veredicto de un resultado capturado y aún no revisado.");
+    const r = await this.prisma.resultado.update({ where: { id }, data: { veredicto: v } });
+    await recalcularVeredictoMuestra(this.prisma as PrismaService, r.muestraId);
+    return r;
+  }
 }
-const ResultadoCreate = z.object({
-  otId: z.string().uuid().optional(),
-  muestraId: z.string().uuid(),
-  analitoId: z.string().uuid(),
-  replicas: z.array(z.number().finite()).min(1),
+
+const ReplicasCampos = {
+  /** Réplicas ya numéricas … */
+  replicas: z.array(z.number().finite()).min(1).optional(),
+  /**
+   * … o el texto tal como lo escribió el analista («12,4 12,6; 12,5»). Se lee
+   * con la regla de `replicas.ts` (coma decimal chilena sin ambigüedad).
+   */
+  replicasTexto: z.string().max(4000).optional(),
   productoLimite: z.string().optional(),
-  analistaId: z.string().uuid().optional(),
   /**
    * RF-D04.1/D04.2 · Equipo con el que se ejecuta el ensayo. OPCIONAL. Si se
    * informa, la captura verifica su aptitud (calibración vigente + operativo) y
-   * BLOQUEA con 409 si no es apto antes de persistir. Ver ResultadoService.capturar().
+   * BLOQUEA con 409 si no es apto antes de persistir. Ver ResultadoService.calcular().
    */
   equipoId: z.string().uuid().optional(),
   /**
@@ -516,12 +671,181 @@ const ResultadoCreate = z.object({
   variables: z
     .record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, "Nombre de variable no válido"), z.number().finite())
     .optional(),
+};
+
+/** Réplicas finales: las numéricas o las leídas del texto (400 con el trozo que no se entiende). */
+function replicasDe(dto: { replicas?: number[]; replicasTexto?: string }): number[] {
+  if (dto.replicas?.length) return dto.replicas;
+  if (dto.replicasTexto != null) {
+    const { valores, invalidos } = leerReplicas(dto.replicasTexto);
+    if (invalidos.length)
+      throw new BadRequestException(
+        `No se entiende como número: ${invalidos.map((t) => `«${t}»`).join(", ")}. ` +
+          "Use coma o punto decimal (12,4 o 12.4) y separe las réplicas con espacio, punto y coma o «, ».",
+      );
+    if (valores.length) return valores;
+  }
+  throw new BadRequestException("Indique al menos una réplica.");
+}
+
+const ResultadoCreate = z.object({
+  otId: z.string().uuid().optional(),
+  muestraId: z.string().uuid(),
+  analitoId: z.string().uuid(),
+  analistaId: z.string().uuid().optional(),
+  ...ReplicasCampos,
 });
+
+const ResultadoRecaptura = z.object(ReplicasCampos);
 
 const DevolverDto = z.object({
   /** RF-E01 exige rechazo MOTIVADO: sin motivo el analista no sabe qué corregir. */
   motivo: z.string().trim().min(5, "Indique el motivo de la devolución (mínimo 5 caracteres)").max(1000),
 });
+
+const VeredictoDto = z.object({ veredicto: z.string().min(1).max(20) });
+
+/** Comprueba que el resultado es del tenant y de un laboratorio del alcance del usuario. */
+async function exigirAlcanceResultado(svc: ResultadoService, alcance: AlcanceService, id: string, req: any) {
+  const ctx = await svc.contexto(id, req?.user?.tenantId);
+  await alcance.exigirUnidad(req, ctx.unidadPrincipal, ctx.otCodigo ? `el resultado de la OT ${ctx.otCodigo}` : "el resultado");
+  return ctx;
+}
+
+/**
+ * Bandeja de revisión y acciones sobre la OT completa. Controlador PROPIO y
+ * declarado ANTES del CRUD de /resultados para que `GET /resultados/bandeja`
+ * gane al `GET /resultados/:id` heredado (si no, ParseUUIDPipe daría 400).
+ *
+ *   GET  /resultados/bandeja?estado=capturado|revisado_n1|devuelto|rechazado|pendiente
+ *        &mios=1 (capturados por mí) &asignados=1 (asignados a mí) &otId= &q= &page= &limit=
+ *   POST /resultados/ot/:otId/revisar · resultado.revisar
+ *   POST /resultados/ot/:otId/aprobar · resultado.aprobar
+ */
+@ApiTags("resultados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("resultados")
+export class ResultadoBandejaController {
+  constructor(
+    private readonly svc: ResultadoService,
+    private readonly prisma: PrismaService,
+    private readonly alcance: AlcanceService,
+  ) {}
+
+  @Get("bandeja")
+  @RequierePermiso("resultado.ver")
+  @ApiOperation({ summary: "Resultados por estado (por revisar, por aprobar, devueltos…) en el alcance del usuario" })
+  async bandeja(@Query() q: Record<string, string>, @Req() req: any) {
+    const tenantId = req?.user?.tenantId ?? null;
+    const unidades = await this.alcance.filtroUnidades(req);
+    const yo = req?.user?.sub ?? null;
+    const page = Math.max(1, Number(q.page) || 1);
+    const limit = Math.min(200, Math.max(1, Number(q.limit) || 50));
+    const estados = (q.estado ?? "capturado").split(",").map((s) => s.trim()).filter(Boolean);
+    const texto = (q.q ?? "").trim();
+    const where = `
+        r.deleted_at IS NULL
+        AND r.estado = ANY($1::text[])
+        AND ($2::uuid IS NULL OR m.tenant_id = $2::uuid)
+        AND ($3::uuid[] IS NULL OR o.unidad_principal = ANY($3::uuid[]))
+        AND ($4::boolean IS FALSE OR r.analista_id = $5::uuid)
+        AND ($6::boolean IS FALSE OR r.asignado_a = $5::uuid
+             OR (r.asignado_a IS NULL AND EXISTS (SELECT 1 FROM ot_analista oa WHERE oa.ot_id = o.id AND oa.usuario_id = $5::uuid)))
+        AND ($7::uuid IS NULL OR o.id = $7::uuid)
+        AND ($8::text = '' OR o.codigo ILIKE '%' || $8 || '%' OR m.codigo ILIKE '%' || $8 || '%'
+             OR COALESCE(ca.nombre, a.nombre, '') ILIKE '%' || $8 || '%')`;
+    const params = [
+      estados,
+      tenantId,
+      unidades,
+      q.mios === "1",
+      yo,
+      q.asignados === "1",
+      q.otId && /^[0-9a-f-]{36}$/i.test(q.otId) ? q.otId : null,
+      texto,
+    ];
+    const from = `
+         FROM resultado r
+         JOIN muestra m ON m.id = r.muestra_id
+         JOIN orden_trabajo o ON o.id = COALESCE(r.ot_id, m.ot_id)
+         LEFT JOIN cat_analito ca ON ca.id = r.cat_analito_id
+         LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
+         LEFT JOIN analito a ON a.id = r.analito_id
+         LEFT JOIN unidad un ON un.id = o.unidad_principal`;
+    const [filas, total] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT r.id, r.estado, r.veredicto, r.unidad, r.replicas, r.promedio, r.desviacion, r.cv, r.resultado_final AS "resultadoFinal",
+                r.valor_numerico AS "valorNumerico", r.valor_texto AS "valorTexto",
+                r.limite_inf AS "limiteInf", r.nominal, r.limite_sup AS "limiteSup",
+                r.fecha, r.analista_id AS "analistaId", r.revisado_n1_por AS "revisadoPor", r.revisado_n1_at AS "revisadoAt",
+                r.aprobado_por AS "aprobadoPor", r.aprobado_at AS "aprobadoAt", r.motivo_devolucion AS "motivoDevolucion",
+                r.asignado_a AS "asignadoA", r.analito_id AS "analitoId",
+                r.tipo_dato AS "tipoDato", r.requisito, r.observacion, r.formula, r.formula_aplicada AS "formulaAplicada",
+                r.espec_origen AS "especOrigen", r.espec_catalogo AS "especCatalogo",
+                r.espec_editada_por AS "especEditadaPor", r.espec_editada_at AS "especEditadaAt",
+                o.id AS "otId", o.codigo AS "otCodigo", un.codigo AS "unidadCodigo",
+                m.id AS "muestraId", m.codigo AS "muestraCodigo", m.nombre AS "muestraNombre",
+                COALESCE(ca.nombre, a.nombre) AS "analitoNombre", COALESCE(ca.codigo, a.codigo) AS "analitoCodigo",
+                cm.nombre AS "metodoNombre", cm.codigo AS "metodoCodigo"
+         ${from}
+         WHERE ${where}
+         ORDER BY o.codigo, m.codigo, r.fecha
+         LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
+        ...params,
+      ),
+      this.prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) AS n ${from} WHERE ${where}`, ...params),
+    ]);
+    const data = await conNombres(this.prisma, filas);
+    const n = Number(total[0]?.n ?? 0);
+    return { data, meta: { page, limit, total: n, totalPages: Math.max(1, Math.ceil(n / limit)) } };
+  }
+
+  @Post("ot/:otId/revisar")
+  @RequierePermiso("resultado.revisar")
+  @ApiOperation({ summary: "Revisa todos los resultados capturados de la OT (salvo los propios)" })
+  async revisarOt(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    await this.otEnAlcance(otId, req);
+    return this.svc.accionOt(otId, "revisar", req?.user?.sub);
+  }
+
+  @Post("ot/:otId/aprobar")
+  @RequierePermiso("resultado.aprobar")
+  @ApiOperation({ summary: "Aprueba todos los resultados revisados de la OT (salvo los propios)" })
+  async aprobarOt(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    await this.otEnAlcance(otId, req);
+    return this.svc.accionOt(otId, "aprobar", req?.user?.sub);
+  }
+
+  private async otEnAlcance(otId: string, req: any) {
+    const tenantId = req?.user?.tenantId;
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id: otId, ...(tenantId ? { tenantId } : {}) },
+      select: { codigo: true, unidadPrincipal: true },
+    });
+    if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+  }
+}
+
+/**
+ * Añade los nombres de quien capturó, revisó, aprobó y de a quién está asignado
+ * cada resultado (las columnas guardan solo el id del usuario).
+ */
+export async function conNombres<T extends Record<string, any>>(prisma: PrismaService, filas: T[]) {
+  const ids = new Set<string>();
+  for (const f of filas) for (const k of ["analistaId", "revisadoPor", "aprobadoPor", "asignadoA", "especEditadaPor"]) if (f[k]) ids.add(f[k]);
+  const usuarios = ids.size
+    ? await prisma.usuario.findMany({ where: { id: { in: [...ids] } }, select: { id: true, nombreCompleto: true } })
+    : [];
+  const nom = new Map(usuarios.map((u) => [u.id, u.nombreCompleto]));
+  return filas.map((f) => ({
+    ...f,
+    analistaNombre: f.analistaId ? nom.get(f.analistaId) ?? null : null,
+    revisadoPorNombre: f.revisadoPor ? nom.get(f.revisadoPor) ?? null : null,
+    aprobadoPorNombre: f.aprobadoPor ? nom.get(f.aprobadoPor) ?? null : null,
+    asignadoNombre: f.asignadoA ? nom.get(f.asignadoA) ?? null : null,
+    especEditadaPorNombre: f.especEditadaPor ? nom.get(f.especEditadaPor) ?? null : null,
+  }));
+}
+
 /**
  * Separación de deberes (NCh-ISO/IEC 17025):
  *   ver      · resultado.ver
@@ -530,27 +854,23 @@ const DevolverDto = z.object({
  *   eliminar · resultado.aprobar   (el más restrictivo: SUPERADMIN, DIRECTOR, JEFE_LAB)
  *
  * MÁQUINA DE ESTADOS (RF-E01) · ACTIVA.
- *   capturado ──revisar──▶ revisado_n1 ──aprobar──▶ aprobado (final)
- *       ▲                       │
- *       └──────devolver─────────┴──devolver──┐
- *       └──────────── capturado ◀── devuelto ┘
+ *   pendiente ─captura─▶ capturado ──revisar──▶ revisado_n1 ──aprobar──▶ aprobado (final)
+ *                            ▲                       │
+ *                            └──── devuelto ◀────────┴── devolver (también desde capturado)
  *
- *   POST /resultados/:id/revisar   · resultado.revisar  → revisado_n1
- *   POST /resultados/:id/aprobar   · resultado.aprobar  → aprobado
- *   POST /resultados/:id/devolver  · resultado.revisar  → devuelto (con motivo)
+ *   POST /resultados/:id/revisar     · resultado.revisar  → revisado_n1
+ *   POST /resultados/:id/aprobar     · resultado.aprobar  → aprobado
+ *   POST /resultados/:id/devolver    · resultado.revisar  → devuelto (con motivo)
+ *   POST /resultados/:id/recapturar  · resultado.crear    → capturado (corrige un devuelto por réplicas)
+ *   POST /resultados/:id/veredicto   · resultado.revisar  → veredicto manual de un capturado
  *
- * Las transiciones las valida `validarTransicion("resultado", …)` contra el
- * mapa de `common/estados.ts` (vocabulario de schema.sql:873; el estado
- * intermedio es `revisado_n1`, no `revisado`). Un salto ilegal —aprobar algo
- * que sigue en 'capturado', reabrir un 'aprobado'— da 400 explicando qué se
- * permite desde el estado actual.
+ * Todas comprueban que el resultado es de un laboratorio del alcance del
+ * usuario (403 si no). SEGREGACIÓN DE FUNCIONES: revisar y aprobar exigen que
+ * el usuario NO sea el analista que capturó (409). Ver `ResultadoService.transitar`.
  *
- * SEGREGACIÓN DE FUNCIONES: revisar y aprobar exigen que el usuario NO sea el
- * analista que capturó (409). Ver `ResultadoService.transitar`.
- *
- * `resultado.aprobar` lo tienen SUPERADMIN, DIRECTOR y JEFE_LAB; `resultado.revisar`,
- * SUPERADMIN y ADMIN. Son los permisos ya sembrados en seed_rbac.sql: no se
- * inventa ninguno.
+ * `resultado.revisar` lo tienen REVISOR, ANALISTA_SR, JEFE_LAB, JEFE_SECCION,
+ * JEFE_DEPTO, DIRECTOR, SUBDIRECTOR y ADMIN; `resultado.aprobar`, JEFE_LAB,
+ * JEFE_SECCION, JEFE_DEPTO, DIRECTOR y SUBDIRECTOR (más SUPERADMIN).
  */
 @ApiTags("resultados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("resultados")
 @RequierePermisoCrud({
@@ -561,68 +881,144 @@ const DevolverDto = z.object({
 })
 export class ResultadoController extends BaseCrudController {
   // Edición manual del resultado (veredicto/unidad/analista). El recálculo desde
-  // réplicas se hace vía POST (capturar), no por PATCH.
+  // réplicas se hace vía POST (capturar / recapturar), no por PATCH.
   protected updateSchema = z.object({
-    veredicto: z.string().max(20).optional(),
+    veredicto: z
+      .string()
+      .max(20)
+      .optional()
+      .transform((v) => (v === undefined ? undefined : normalizarVeredicto(v) ?? v)),
     unidad: z.string().max(30).optional(),
     analistaId: z.string().uuid().optional(),
   });
-  constructor(protected svc: ResultadoService) { super(); }
+  constructor(
+    protected svc: ResultadoService,
+    private readonly prisma: PrismaService,
+    private readonly alcance: AlcanceService,
+  ) { super(); }
 
   /**
    * Captura. `analistaId` cae por defecto en el usuario autenticado: es quien
    * está capturando, y sin ese dato la segregación de funciones de RF-E01 no
    * tendría contra quién comparar (un resultado sin analista sería aprobable
-   * por cualquiera, incluido quien lo capturó).
+   * por cualquiera, incluido quien lo capturó). La muestra debe ser de una OT
+   * del alcance del usuario.
    */
   @Post()
   @RequierePermiso("resultado.crear")
-  crear(@Body() body: unknown, @Req() req: any) {
+  async crear(@Body() body: unknown, @Req() req: any) {
     const dto = ResultadoCreate.parse(body);
+    const replicas = replicasDe(dto);
+    const muestra = await this.prisma.muestra.findFirst({
+      where: { id: dto.muestraId, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
+      select: { otId: true },
+    });
+    if (!muestra) throw new NotFoundException(`Muestra ${dto.muestraId} no encontrada`);
+    const otId = dto.otId ?? muestra.otId ?? null;
+    const ot = otId
+      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { unidadPrincipal: true } })
+      : null;
+    await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, "la muestra");
     return (this.svc as ResultadoService).capturar(
-      { ...dto, analistaId: dto.analistaId ?? req?.user?.sub },
+      { ...dto, otId, replicas, analistaId: dto.analistaId ?? req?.user?.sub },
       req?.user?.tenantId ?? DEV_TENANT,
     );
+  }
+
+  /** Listado acotado a los resultados de OT del alcance del usuario. */
+  @Get()
+  async listar(
+    @Query("page") page = "1",
+    @Query("limit") limit = "20",
+    @Query("search") search?: string,
+    @Req() req?: any,
+  ) {
+    const filtro = await this.alcance.filtroUnidades(req);
+    let where: any;
+    if (filtro) {
+      const ots = await this.prisma.ordenTrabajo.findMany({ where: { unidadPrincipal: { in: filtro } }, select: { id: true } });
+      where = { otId: { in: ots.map((o) => o.id) } };
+    }
+    return this.svc.listar({ page: parseInt(page), limit: parseInt(limit), search, where }, req?.user?.tenantId);
+  }
+
+  /** Detalle con alcance por laboratorio (antes cualquier lector abría cualquier resultado por id). */
+  @Get(":id")
+  async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return this.svc.detalle(id, req?.user?.tenantId);
+  }
+
+  /** Edición manual (veredicto/unidad) con alcance por laboratorio. */
+  @Patch(":id")
+  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return this.svc.actualizar(id, this.updateSchema.parse(body), req?.user?.tenantId);
+  }
+
+  @Delete(":id")
+  async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return this.svc.eliminar(id, req?.user?.tenantId);
+  }
+
+  @Post(":id/recapturar")
+  @RequierePermiso("resultado.crear")
+  @ApiOperation({ summary: "Corrige un resultado por réplicas (devuelto/capturado): recalcula y vuelve a capturado" })
+  async recapturar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = ResultadoRecaptura.parse(body ?? {});
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return (this.svc as ResultadoService).recapturar(id, { ...dto, replicas: replicasDe(dto) }, req?.user?.sub, req?.user?.tenantId ?? DEV_TENANT);
   }
 
   @Post(":id/revisar")
   @RequierePermiso("resultado.revisar")
   @ApiOperation({ summary: "Revisión N1: capturado → revisado_n1 (no puede ser el propio analista)" })
-  revisar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async revisar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
     return (this.svc as ResultadoService).revisar(id, req?.user?.sub);
   }
 
   @Post(":id/aprobar")
   @RequierePermiso("resultado.aprobar")
   @ApiOperation({ summary: "Aprobación final: revisado_n1 → aprobado (no puede ser el propio analista)" })
-  aprobar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async aprobar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
     return (this.svc as ResultadoService).aprobar(id, req?.user?.sub);
   }
 
   /**
    * Devolución motivada al analista. Exige `resultado.revisar` —el permiso del
    * escalón más bajo del circuito— para que tanto el revisor como el aprobador
-   * puedan devolver: quien tiene `resultado.aprobar` sin `resultado.revisar`
-   * (DIRECTOR, JEFE_LAB) podría aprobar pero no rechazar, que es justo el
-   * incentivo perverso que la 17025 quiere evitar.
-   *   ⚠️ Requiere sembrar `resultado.revisar` a DIRECTOR y JEFE_LAB en
-   *   seed_rbac.sql (hoy sólo lo tienen SUPERADMIN y ADMIN); queda fuera del
-   *   alcance de este cambio porque el RBAC sembrado es de otro dominio.
+   * puedan devolver (JEFE_LAB y DIRECTOR ya lo tienen sembrado).
    */
   @Post(":id/devolver")
   @RequierePermiso("resultado.revisar")
   @ApiOperation({ summary: "Devuelve el resultado al analista con un motivo → devuelto" })
-  devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+  async devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const dto = DevolverDto.parse(body);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
     return (this.svc as ResultadoService).devolver(id, dto.motivo, req?.user?.sub);
+  }
+
+  @Post(":id/veredicto")
+  @RequierePermiso("resultado.revisar")
+  @ApiOperation({ summary: "Veredicto manual de un resultado capturado que el sistema no pudo decidir" })
+  async veredicto(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = VeredictoDto.parse(body ?? {});
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return (this.svc as ResultadoService).fijarVeredicto(id, dto.veredicto);
   }
 }
 
 @Module({
   // EquiposModule aporta EquiposService (exportado) para el BLOQUEO por
-  // calibración vencida en ResultadoService.capturar() (RF-D04.2).
+  // calibración vencida en ResultadoService.calcular() (RF-D04.2).
   imports: [EquiposModule],
-  controllers: [TipoMuestraController, MuestraController, MetodoController, AnalitoController, NormaLimiteController, ResultadoController],
+  // ResultadoBandejaController ANTES que ResultadoController: su ruta estática
+  // /resultados/bandeja debe registrarse antes que /resultados/:id.
+  controllers: [TipoMuestraController, MuestraController, MetodoController, AnalitoController, NormaLimiteController, ResultadoBandejaController, ResultadoController],
   providers: [TipoMuestraService, MuestraService, MetodoService, AnalitoService, NormaLimiteService, ResultadoService],
+  exports: [ResultadoService],
 })
 export class LaboratorioModule {}

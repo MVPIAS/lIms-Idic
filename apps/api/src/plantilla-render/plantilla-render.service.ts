@@ -1,3 +1,4 @@
+import { etiquetaVeredicto } from "../laboratorio/veredicto";
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common";
 import { createHash, randomInt } from "crypto";
 import { PrismaService } from "../common/prisma.service";
@@ -174,7 +175,9 @@ export class PlantillaRenderService {
         desviacion: fmtNum(r.desviacion === null ? "" : String(r.desviacion)),
         cv: fmtNum(r.cv === null ? "" : String(r.cv), 2),
         limite: this.textoLimite(lim),
-        veredicto: r.veredicto ?? "",
+        // El veredicto se guarda como código (cumple / no_cumple / informativo):
+        // en el informe va su texto legible.
+        veredicto: etiquetaVeredicto(r.veredicto),
       };
     });
   }
