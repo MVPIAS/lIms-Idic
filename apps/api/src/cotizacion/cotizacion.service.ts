@@ -12,6 +12,12 @@ import {
   type ResultadoValidez,
 } from "./validez";
 import { calcularOpiPendiente, origenDesdeAceptacion } from "../ot/reglas-ot";
+import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
+import { paginacion } from "../ot/lista-ot";
+import { Prisma } from "@prisma/client";
+
+/** Estados del flujo comercial vigente (R1); el resto es histórico de solo lectura. */
+const ESTADOS_VIGENTES = ["abierta", "aceptada", "anulada"] as const;
 
 /** Estado inicial de toda cotización nueva (R1: Abierta / Aceptada / Anulada). */
 export const ESTADO_ABIERTA = "abierta";
@@ -64,30 +70,86 @@ export interface AceptacionEntrada {
   fecha?: string | Date;
   adjunto?: string;
   conCobro?: boolean;
+  /** Laboratorio responsable de la OT que se genera (si no se puede deducir, es obligatorio). */
+  unidadPrincipalId?: string;
 }
 
 @Injectable()
 export class CotizacionService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly labs: LaboratorioOtService,
+  ) {}
 
-  async listar(tenantId?: string) {
-    const cots = await this.prisma.cotizacion.findMany({
-      // Cotizacion tiene tenant_id: solo las del tenant del usuario.
-      where: { ...(tenantId ? { tenantId } : {}) },
-      take: 50,
-      orderBy: { createdAt: "desc" },
-      include: { cliente: true, lineas: true },
-    });
+  /**
+   * Lista paginada con búsqueda y filtros en el servidor (antes: las 50 más
+   * recientes, filtradas en el navegador). Devuelve `{ data, meta, conteos }`;
+   * `conteos` = nº por estado con la búsqueda aplicada (para los chips).
+   *   q        · N° de cotización, cliente (razón social) o referencia
+   *   estado   · estado exacto, o `historico` (borrador/enviada/rechazada/expirada)
+   *   sinOt    · 1 = aceptadas a las que aún no se les generó OT
+   *   porVencer· 1 = abiertas que vencen en los próximos 7 días
+   */
+  async listar(tenantId?: string, f: { q?: string; search?: string; estado?: string; sinOt?: string; porVencer?: string; page?: string; limit?: string } = {}) {
+    const { page, limit, skip } = paginacion(f.page, f.limit);
+    const base: Prisma.CotizacionWhereInput = tenantId ? { tenantId } : {};
+    const and: Prisma.CotizacionWhereInput[] = [base];
+    const texto = (f.q ?? f.search ?? "").trim();
+    if (texto) {
+      const c = { contains: texto, mode: "insensitive" as const };
+      and.push({ OR: [{ codigo: c }, { referencia: c }, { cliente: { razonSocial: c } }] });
+    }
+    const conBusqueda: Prisma.CotizacionWhereInput = { AND: [...and] };
+
+    if (f.estado === "historico") and.push({ estado: { notIn: [...ESTADOS_VIGENTES] } });
+    else if (f.estado) and.push({ estado: f.estado });
+    if (f.sinOt === "1") {
+      const conOt = await this.prisma.ordenTrabajo.findMany({
+        where: { cotizacionId: { not: null }, ...(tenantId ? { tenantId } : {}) },
+        select: { cotizacionId: true },
+      });
+      and.push({ estado: "aceptada", id: { notIn: conOt.map((o) => o.cotizacionId as string) } });
+    }
+    if (f.porVencer === "1") {
+      const hoy = new Date();
+      const en7 = new Date(hoy.getTime() + 7 * 86_400_000);
+      and.push({
+        estado: { in: ["abierta", "borrador", "enviada"] },
+        OR: [{ validaHasta: { gte: hoy, lte: en7 } }, { validaHasta: null, expiraAt: { gte: hoy, lte: en7 } }],
+      });
+    }
+    const where: Prisma.CotizacionWhereInput = { AND: and };
+
+    const [cots, total, porEstado] = await Promise.all([
+      this.prisma.cotizacion.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: { cliente: true, lineas: true },
+      }),
+      this.prisma.cotizacion.count({ where }),
+      this.prisma.cotizacion.groupBy({ by: ["estado"], where: conBusqueda, _count: { _all: true } }),
+    ]);
     // OT generada por cada cotización (sin relación Prisma): una sola consulta.
     const ids = cots.map((c) => c.id);
     const ots = ids.length
       ? await this.prisma.ordenTrabajo.findMany({
           where: { cotizacionId: { in: ids }, ...(tenantId ? { tenantId } : {}) },
-          select: { id: true, codigo: true, cotizacionId: true, opiPendiente: true, conCobro: true, origenTrabajo: true },
+          select: {
+            id: true, codigo: true, cotizacionId: true, opiPendiente: true, conCobro: true, origenTrabajo: true,
+            unidad: { select: { id: true, codigo: true, nombre: true } },
+          },
         })
       : [];
     const porCot = new Map(ots.map((o) => [o.cotizacionId, o]));
-    return cots.map((c) => ({ ...c, ot: porCot.get(c.id) ?? null }));
+    const conteos: Record<string, number> = {};
+    for (const g of porEstado) conteos[g.estado] = g._count._all;
+    return {
+      data: cots.map((c) => ({ ...c, ot: porCot.get(c.id) ?? null })),
+      meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+      conteos,
+    };
   }
 
   async detalle(id: string, tenantId?: string) {
@@ -456,6 +518,10 @@ export class CotizacionService {
    *      Hereda cliente/planta/tenant/centro de costo, `origen_trabajo`
    *      (COTIZACION, o DISPOSICION si se aceptó por disposición del Director),
    *      `con_cobro` y `opi_pendiente` (SVT7).
+   *   4. Fija el LABORATORIO RESPONSABLE de la OT (unidad_principal): el
+   *      indicado en `unidadPrincipalId` o el deducido del centro de costo y de
+   *      los ensayos de la cotización. Si no se puede deducir, 400 pidiendo
+   *      elegirlo (sin él ningún laboratorio vería la OT).
    *
    * Compatibilidad: una cotización HISTÓRICA en estado 'enviada' se puede
    * aceptar sin documento (comportamiento previo). Una 'abierta' exige `tipo`.
@@ -474,6 +540,17 @@ export class CotizacionService {
     const origen = origenDesdeAceptacion(doc.tipo);
     const opiNumero = doc.tipo === "OPI_RESOLUCION" ? doc.numero?.trim() ?? null : null;
     const opiPendiente = calcularOpiPendiente({ origen, aceptacionTipo: doc.tipo, conCobro, opiNumero });
+
+    // Laboratorio responsable: se resuelve ANTES de tocar nada (si falta, no se
+    // acepta a medias). Una OT ya generada (reintento) conserva el suyo.
+    const otPrevia = await this.prisma.ordenTrabajo.findFirst({
+      where: { cotizacionId: id, tenantId: tenantIdOt },
+      select: { id: true, unidadPrincipal: true },
+    });
+    const unidad =
+      otPrevia?.unidadPrincipal && !doc.unidadPrincipalId
+        ? null
+        : await this.labs.resolverParaAlta(tenantIdOt, doc.unidadPrincipalId, { cotizacionId: id });
 
     const { cotizacion, ot } = await this.prisma.$transaction(async (tx) => {
       const existente = await tx.ordenTrabajo.findFirst({
@@ -501,7 +578,12 @@ export class CotizacionService {
         include: { cliente: true, lineas: true },
       });
 
-      if (existente) return { cotizacion, ot: existente };
+      if (existente) {
+        // OT de un intento anterior sin laboratorio: se completa ahora.
+        if (!existente.unidadPrincipal && unidad)
+          await this.labs.fijar(tx, { tenantId: tenantIdOt, otId: existente.id, unidad, usuarioId, origen: "aceptacion_cotizacion" });
+        return { cotizacion, ot: existente };
+      }
 
       const ot = await tx.ordenTrabajo.create({
         data: {
@@ -527,16 +609,29 @@ export class CotizacionService {
         },
         include: { cliente: true },
       });
+      if (unidad)
+        await this.labs.fijar(tx, {
+          tenantId: tenantIdOt,
+          otId: ot.id,
+          unidad,
+          usuarioId,
+          origen: doc.unidadPrincipalId ? "aceptacion_indicado" : "aceptacion_deducido",
+        });
 
       return { cotizacion, ot };
     });
 
     const extra = ot.opiPendiente ? " Queda con OPI PENDIENTE (disposición del Director con cobro)." : "";
+    const otFinal = await this.prisma.ordenTrabajo.findUnique({
+      where: { id: ot.id },
+      include: { cliente: true, unidad: { select: { id: true, codigo: true, nombre: true, tipo: true } } },
+    });
+    const lab = otFinal?.unidad ? ` Laboratorio responsable: ${otFinal.unidad.codigo} · ${otFinal.unidad.nombre}.` : "";
     return {
       ok: true,
       cotizacion,
-      ot,
-      mensaje: `Cotización aceptada. Orden de trabajo ${ot.codigo} creada.${extra}`,
+      ot: otFinal ?? ot,
+      mensaje: `Cotización aceptada. Orden de trabajo ${ot.codigo} creada.${lab}${extra}`,
     };
   }
 

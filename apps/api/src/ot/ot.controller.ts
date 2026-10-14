@@ -6,6 +6,8 @@ import {
   Param,
   Patch,
   Post,
+  Put,
+  Query,
   Req,
   UseGuards,
   ParseUUIDPipe,
@@ -13,9 +15,12 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
-import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
-import { PrismaClient } from "@prisma/client";
+import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { PrismaService } from "../common/prisma.service";
+import { LaboratorioOtService, UnidadResumen } from "./laboratorio-ot.service";
+import { filtroListaOt, paginacion } from "./lista-ot";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { FlujoService } from "../flujo/flujo.service";
 import { PermisoGuard } from "../auth/permiso.guard";
@@ -81,6 +86,16 @@ const OtCreate = z
     horasHombre: z.number().min(0).optional(),
     costoEstimado: z.number().min(0).optional(),
     descripcionTrabajo: z.string().max(4000).optional(),
+    fechaCompromiso: fechaDia.optional(),
+    /**
+     * Laboratorio responsable (unidad). Si no se indica, se deduce del catálogo
+     * (cotización, centro de costo ejecutor, elementos y métodos elegidos); si
+     * no se puede deducir, la OT no se crea (400) y hay que elegirlo.
+     */
+    unidadPrincipalId: z.string().uuid().optional(),
+    /** Pistas del catálogo para deducir el laboratorio (registro con elementos). */
+    catElementoIds: z.array(z.string().uuid()).max(200).optional(),
+    catMetodoIds: z.array(z.string().uuid()).max(500).optional(),
     ...FlujoRef,
   })
   .refine(unSoloFlujo, { message: MSG_UN_SOLO_FLUJO })
@@ -105,9 +120,48 @@ const OtUpdate = z
     // Costo por horas (también en OT sin cobro / interlaboratorio).
     horasHombre: z.number().min(0).optional(),
     costoEstimado: z.number().min(0).optional(),
+    /** Fecha comprometida con el cliente (plazos: OT vencidas / por vencer). null la borra. */
+    fechaCompromiso: fechaDia.nullable().optional(),
     ...FlujoRef,
   })
   .refine(unSoloFlujo, { message: MSG_UN_SOLO_FLUJO });
+
+/** Body de PATCH /ot/:id/laboratorio. */
+const OtCambiarLaboratorio = z.object({
+  unidadPrincipalId: z.string().uuid(),
+  motivo: z.string().trim().max(500).optional(),
+});
+
+/** Body de PUT /ot/:id/analistas: la lista COMPLETA de analistas de la OT. */
+const OtAnalistas = z.object({
+  usuarioIds: z.array(z.string().uuid()).max(50),
+});
+
+/** Body de POST /ot/:id/asignar-ensayos: un analista para muestras o ensayos concretos. */
+const OtAsignarEnsayos = z
+  .object({
+    /** null = quitar la asignación concreta (queda para cualquiera de los asignados a la OT). */
+    usuarioId: z.string().uuid().nullable(),
+    muestraIds: z.array(z.string().uuid()).max(500).optional(),
+    resultadoIds: z.array(z.string().uuid()).max(2000).optional(),
+  })
+  .refine((d) => (d.muestraIds?.length ?? 0) + (d.resultadoIds?.length ?? 0) > 0, {
+    message: "Indique al menos una muestra o un ensayo.",
+  });
+
+/** Query de GET /ot/laboratorio-sugerido. */
+const csvUuids = z
+  .string()
+  .optional()
+  .transform((s) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean) : []))
+  .pipe(z.array(z.string().uuid()).max(500));
+const QuerySugerido = z.object({
+  cotizacionId: z.string().uuid().optional(),
+  centroCostoId: z.string().uuid().optional(),
+  elementoIds: csvUuids,
+  metodoIds: csvUuids,
+  ensayoIds: csvUuids,
+});
 
 /** Body de POST /ot/:id/flujo · adjunta/instancia un flujo en una OT existente. */
 const OtAdjuntarFlujo = z
@@ -119,48 +173,153 @@ const OtAdjuntarFlujo = z
     message: "Se requiere exactamente uno de: flujoDefId o flujoVersionId",
   });
 
+/** Usuario de la OT tal como se devuelve a la pantalla. */
+type AnalistaOt = { id: string; nombre: string; username?: string; asignadoAt: Date | null; asignadoPor: string | null };
+
+const SELECT_UNIDAD = { select: { id: true, codigo: true, nombre: true, tipo: true } } as const;
+
 @ApiTags("ot")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("ot")
 export class OtController {
-  private prisma = new PrismaClient();
-
   // FlujoService llega vía OtModule → imports: [FlujoModule] (que lo exporta).
   // AlcanceService llega por AlcanceModule (@Global): acota la OT a las unidades
   // (laboratorios) visibles del usuario según sus asignaciones de rol vigentes.
+  // LaboratorioOtService (@Global, LaboratorioOtModule): laboratorio responsable.
   constructor(
+    private readonly prisma: PrismaService,
     private readonly flujos: FlujoService,
     private readonly alcance: AlcanceService,
+    private readonly labs: LaboratorioOtService,
   ) {}
 
+  /**
+   * Lista paginada con búsqueda y filtros en el servidor → `{ data, meta }`.
+   *   q / search      · código OT, Nº cotización, resolución, OC, cliente o código del laboratorio
+   *   estado          · estado exacto, o `abiertas` (no cerradas/anuladas/finalizadas/informadas)
+   *   unidad          · laboratorio (código, p. ej. LQC, o id)
+   *   sinLaboratorio  · 1 = solo OT sin laboratorio responsable
+   *   mias            · 1 = OT asignadas al usuario (como analista de la OT o de un ensayo)
+   *   sinAsignar      · 1 = OT sin ningún analista asignado
+   *   vencidas / porVencer · plazos contra fecha_compromiso (por vencer = próximos 3 días)
+   *   page / limit    · paginación (limit máx. 200, por defecto 20)
+   * Alcance por laboratorio (AlcanceService): un usuario acotado solo ve las OT
+   * de sus unidades visibles; global (SUPERADMIN/ADMIN/DIRECTOR…) sin filtro.
+   */
   @Get()
   @RequierePermiso("ot.ver")
-  async listar(@Req() req: any) {
+  async listar(@Query() query: Record<string, string>, @Req() req: any) {
     const tenantId = req?.user?.tenantId;
-    // Alcance por laboratorio (AlcanceService): un usuario acotado solo ve las OT
-    // cuya unidad_principal está en sus unidades visibles (unidad, o unidad +
-    // descendencia para jefaturas). Global (SUPERADMIN/ADMIN/DIRECTOR, roles
-    // GLOBAL) → sin filtro. Acotado sin unidades → no ve ninguna (antes veía todas).
-    const filtro = await this.alcance.filtroUnidades(req);
-    const scopeUnidad = filtro ? { unidadPrincipal: { in: filtro } } : {};
-    const ots = await this.prisma.ordenTrabajo.findMany({
-      // OrdenTrabajo tiene tenant_id: solo se listan las OT del tenant del usuario.
-      where: { ...(tenantId ? { tenantId } : {}), ...scopeUnidad },
-      take: 50,
-      orderBy: { createdAt: "desc" },
-      include: { cliente: true },
-    });
+    const unidadesVisibles = await this.alcance.filtroUnidades(req);
+    const { page, limit, skip } = paginacion(query.page, query.limit);
+    const si = (v?: string) => v === "1" || v === "true";
 
-    // Resumen del flujo activo por OT (estado + paso actual) para pintarlo en la
-    // lista sin una llamada por fila. `flujo_instancia_id` es una columna suelta
-    // (no hay relación Prisma), así que se resuelve en una segunda consulta,
-    // acotada al tenant para no filtrar instancias ajenas.
-    const instanciaIds = ots
-      .map((o) => o.flujoInstanciaId)
-      .filter((x): x is string => Boolean(x));
-    if (!instanciaIds.length) return ots;
+    let unidadId: string | null = null;
+    if (query.unidad) {
+      const esUuid = /^[0-9a-f-]{36}$/i.test(query.unidad);
+      const u = await this.prisma.unidad.findFirst({
+        where: { ...(tenantId ? { tenantId } : {}), ...(esUuid ? { id: query.unidad } : { codigo: query.unidad }) },
+        select: { id: true },
+      });
+      // Unidad inexistente → lista vacía (no se ignora el filtro en silencio).
+      unidadId = u?.id ?? "00000000-0000-0000-0000-000000000000";
+    }
 
+    const idsMias = si(query.mias) ? await this.idsOtAsignadas(req?.user?.sub, tenantId) : null;
+    const idsConAnalista = si(query.sinAsignar)
+      ? (await this.prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT DISTINCT ot_id AS id FROM ot_analista`)).map((f) => f.id)
+      : null;
+
+    const where = filtroListaOt(
+      {
+        q: query.q,
+        search: query.search,
+        estado: query.estado,
+        unidadId,
+        sinLaboratorio: si(query.sinLaboratorio),
+        vencidas: si(query.vencidas),
+        porVencer: si(query.porVencer),
+        idsMias,
+        idsConAnalista,
+      },
+      { tenantId, unidadesVisibles, hoy: new Date() },
+    ) as Prisma.OrdenTrabajoWhereInput;
+
+    const [ots, total] = await Promise.all([
+      this.prisma.ordenTrabajo.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: "desc" },
+        include: { cliente: true, unidad: SELECT_UNIDAD },
+      }),
+      this.prisma.ordenTrabajo.count({ where }),
+    ]);
+
+    const ids = ots.map((o) => o.id);
+    const [porOtAnalistas, porIdFlujo] = await Promise.all([this.analistasDe(ids), this.flujosDe(ots, tenantId)]);
+
+    return {
+      data: ots.map((o) => ({
+        ...o,
+        analistas: porOtAnalistas.get(o.id) ?? [],
+        flujo: o.flujoInstanciaId ? porIdFlujo.get(o.flujoInstanciaId) ?? null : null,
+      })),
+      meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
+    };
+  }
+
+  /** OT donde el usuario figura como analista (de la OT o de un ensayo concreto). */
+  private async idsOtAsignadas(usuarioId: string | undefined, tenantId?: string): Promise<string[]> {
+    if (!usuarioId) return [];
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT oa.ot_id AS id FROM ot_analista oa
+         JOIN orden_trabajo o ON o.id = oa.ot_id
+        WHERE oa.usuario_id = $1::uuid AND ($2::uuid IS NULL OR o.tenant_id = $2::uuid)
+       UNION
+       SELECT r.ot_id AS id FROM resultado r
+         JOIN orden_trabajo o ON o.id = r.ot_id
+        WHERE r.asignado_a = $1::uuid AND r.deleted_at IS NULL AND ($2::uuid IS NULL OR o.tenant_id = $2::uuid)`,
+      usuarioId,
+      tenantId ?? null,
+    );
+    return filas.map((f) => f.id);
+  }
+
+  /** Analistas asignados por OT (una sola consulta para toda la página). */
+  private async analistasDe(otIds: string[]): Promise<Map<string, AnalistaOt[]>> {
+    const m = new Map<string, AnalistaOt[]>();
+    if (!otIds.length) return m;
+    const filas = await this.prisma.$queryRawUnsafe<
+      { ot_id: string; id: string; nombre: string; username: string; asignado_at: Date | null; asignado_por: string | null }[]
+    >(
+      `SELECT oa.ot_id, u.id, u.nombre_completo AS nombre, u.username::text AS username,
+              oa.asignado_at, ap.nombre_completo AS asignado_por
+         FROM ot_analista oa
+         JOIN usuario u ON u.id = oa.usuario_id
+         LEFT JOIN usuario ap ON ap.id = oa.asignado_por
+        WHERE oa.ot_id = ANY($1::uuid[])
+        ORDER BY u.nombre_completo`,
+      otIds,
+    );
+    for (const f of filas) {
+      const arr = m.get(f.ot_id) ?? [];
+      arr.push({ id: f.id, nombre: f.nombre, username: f.username, asignadoAt: f.asignado_at, asignadoPor: f.asignado_por });
+      m.set(f.ot_id, arr);
+    }
+    return m;
+  }
+
+  /**
+   * Resumen del flujo activo por OT (estado + paso actual) para pintarlo en la
+   * lista sin una llamada por fila. `flujo_instancia_id` es una columna suelta
+   * (no hay relación Prisma), así que se resuelve en una segunda consulta,
+   * acotada al tenant para no filtrar instancias ajenas.
+   */
+  private async flujosDe(ots: { flujoInstanciaId: string | null }[], tenantId?: string) {
+    const instanciaIds = ots.map((o) => o.flujoInstanciaId).filter((x): x is string => Boolean(x));
+    if (!instanciaIds.length) return new Map<string, any>();
     const instancias = await this.prisma.flujoInstancia.findMany({
       where: { id: { in: instanciaIds }, ...(tenantId ? { tenantId } : {}) },
       select: {
@@ -169,11 +328,36 @@ export class OtController {
         pasoActual: { select: { numero: true, actividad: true, tipo: true } },
       },
     });
-    const porId = new Map(instancias.map((i) => [i.id, i]));
-    return ots.map((o) => ({
-      ...o,
-      flujo: o.flujoInstanciaId ? porId.get(o.flujoInstanciaId) ?? null : null,
-    }));
+    return new Map<string, any>(instancias.map((i) => [i.id, i]));
+  }
+
+  /** Unidades que pueden ser responsables de una OT (selector «Laboratorio responsable»). */
+  @Get("laboratorios")
+  @RequierePermiso("ot.ver")
+  @ApiOperation({ summary: "Laboratorios, secciones técnicas, sucursales y delegaciones elegibles como responsables de una OT" })
+  laboratorios(@Req() req: any) {
+    return this.labs.laboratorios(req?.user?.tenantId);
+  }
+
+  /**
+   * Laboratorio que el sistema propone para una OT a partir del catálogo:
+   * cotización (centro de costo y ensayos), centro de costo ejecutor,
+   * elementos o métodos elegidos. `unidad: null` + `motivo` cuando hay que
+   * elegirlo a mano (sin pistas, o pistas de laboratorios distintos).
+   */
+  @Get("laboratorio-sugerido")
+  @RequierePermiso("ot.ver")
+  async laboratorioSugerido(@Query() query: unknown, @Req() req: any) {
+    const q = QuerySugerido.parse(query ?? {});
+    const tenantId = req.user?.tenantId ?? DEV_TENANT;
+    const d = await this.labs.deducir(tenantId, {
+      cotizacionId: q.cotizacionId,
+      centroCostoId: q.centroCostoId,
+      catElementoIds: q.elementoIds,
+      catMetodoIds: q.metodoIds,
+      catEnsayoIds: q.ensayoIds,
+    });
+    return { unidad: d.unidad, motivo: d.motivo, candidatos: d.candidatos, fuentes: d.fuentes };
   }
 
   /**
@@ -200,17 +384,44 @@ export class OtController {
     return { instancia, tareas };
   }
 
+  /** Historial de la OT: cambios de laboratorio y asignaciones (quién y cuándo). */
+  @Get(":id/historial")
+  @RequierePermiso("ot.ver")
+  async historial(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.otEnAlcance(id, req);
+    return this.prisma.$queryRawUnsafe(
+      `SELECT h.id, h.tipo, h.detalle, h.created_at AS "createdAt",
+              u.id AS "usuarioId", u.nombre_completo AS "usuarioNombre"
+         FROM ot_historial h LEFT JOIN usuario u ON u.id = h.usuario_id
+        WHERE h.ot_id = $1::uuid
+        ORDER BY h.created_at DESC
+        LIMIT 200`,
+      id,
+    );
+  }
+
   @Get(":id")
   @RequierePermiso("ot.ver")
   async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     // findFirst con tenant compuesto: si la OT es de otro tenant, no se revela (null).
     const ot = await this.prisma.ordenTrabajo.findFirst({
       where: { id, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
-      include: { cliente: true },
+      include: { cliente: true, unidad: SELECT_UNIDAD },
     });
+    if (!ot) return ot;
     // Fuera del alcance por unidad → 403 (la OT existe pero no es de sus laboratorios).
-    if (ot) await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
-    return ot;
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    const [analistas, asignador] = await Promise.all([
+      this.analistasDe([ot.id]),
+      ot.unidadAsignadaPor
+        ? this.prisma.usuario.findUnique({ where: { id: ot.unidadAsignadaPor }, select: { id: true, nombreCompleto: true } })
+        : null,
+    ]);
+    return {
+      ...ot,
+      analistas: analistas.get(ot.id) ?? [],
+      unidadAsignadaPorNombre: asignador?.nombreCompleto ?? null,
+    };
   }
 
   @Post()
@@ -264,6 +475,15 @@ export class OtController {
       if (!cc) throw new BadRequestException(`Centro de costo ${ccId} no existe o no pertenece al tenant`);
     }
 
+    // Laboratorio responsable: el indicado o el deducido del catálogo. Sin él
+    // la OT no la vería ningún laboratorio → 400 pidiendo elegirlo.
+    const unidad = await this.labs.resolverParaAlta(tenantId, dto.unidadPrincipalId, {
+      cotizacionId: dto.cotizacionId,
+      centroCostoId: dto.centroCostoId,
+      catElementoIds: dto.catElementoIds,
+      catMetodoIds: dto.catMetodoIds,
+    });
+
     // Si se adjunta una instancia YA existente, debe ser del mismo tenant
     // (si no, se estaría enganchando el flujo de otro tenant a esta OT).
     if (dto.flujoInstanciaId) await this.validarInstancia(dto.flujoInstanciaId, tenantId);
@@ -278,40 +498,271 @@ export class OtController {
     const codigo = await this.generarCodigo(tenantId);
     const opiNumero = dto.opiNumero?.trim() || null;
 
-    const ot = await this.prisma.ordenTrabajo.create({
-      data: {
+    const ot = await this.prisma.$transaction(async (tx) => {
+      const creada = await tx.ordenTrabajo.create({
+        data: {
+          tenantId,
+          codigo,
+          clienteId: cliente.id,
+          cotizacionId: dto.cotizacionId ?? null,
+          flujoInstanciaId: dto.flujoInstanciaId ?? null,
+          prioridad: dto.prioridad ?? "normal",
+          estado: "recepcionada",
+          fechaRecepcion: dto.fechaIngreso ?? new Date(),
+          fechaCompromiso: dto.fechaCompromiso ? new Date(`${dto.fechaCompromiso}T00:00:00Z`) : null,
+          notas: dto.notas ?? null,
+          descripcionTrabajo: dto.descripcionTrabajo ?? null,
+          origenTrabajo: origen ?? null,
+          conCobro: cobro.conCobro,
+          opiPendiente: calcularOpiPendiente({ origen, conCobro: cobro.conCobro, opiNumero }),
+          disposicionRef: dto.disposicionRef?.trim() || null,
+          disposicionFecha: dto.disposicionFecha ? new Date(`${dto.disposicionFecha}T00:00:00Z`) : null,
+          ...(opiNumero
+            ? { opiNumero, opiFecha: dto.opiFecha ? new Date(`${dto.opiFecha}T00:00:00Z`) : null, opiRegistradaAt: new Date() }
+            : {}),
+          numeroLey: dto.resolucion?.trim() || null,
+          centroCostoId: dto.centroCostoId ?? null,
+          labSolicitanteCcId: dto.labSolicitanteCcId ?? null,
+          horasHombre: dto.horasHombre ?? 0,
+          costoEstimado: dto.costoEstimado ?? 0,
+        },
+      });
+      await this.labs.fijar(tx, {
         tenantId,
-        codigo,
-        clienteId: cliente.id,
-        cotizacionId: dto.cotizacionId ?? null,
-        flujoInstanciaId: dto.flujoInstanciaId ?? null,
-        prioridad: dto.prioridad ?? "normal",
-        estado: "recepcionada",
-        fechaRecepcion: dto.fechaIngreso ?? new Date(),
-        notas: dto.notas ?? null,
-        descripcionTrabajo: dto.descripcionTrabajo ?? null,
-        origenTrabajo: origen ?? null,
-        conCobro: cobro.conCobro,
-        opiPendiente: calcularOpiPendiente({ origen, conCobro: cobro.conCobro, opiNumero }),
-        disposicionRef: dto.disposicionRef?.trim() || null,
-        disposicionFecha: dto.disposicionFecha ? new Date(`${dto.disposicionFecha}T00:00:00Z`) : null,
-        ...(opiNumero
-          ? { opiNumero, opiFecha: dto.opiFecha ? new Date(`${dto.opiFecha}T00:00:00Z`) : null, opiRegistradaAt: new Date() }
-          : {}),
-        numeroLey: dto.resolucion?.trim() || null,
-        centroCostoId: dto.centroCostoId ?? null,
-        labSolicitanteCcId: dto.labSolicitanteCcId ?? null,
-        horasHombre: dto.horasHombre ?? 0,
-        costoEstimado: dto.costoEstimado ?? 0,
-      },
-      include: { cliente: true },
+        otId: creada.id,
+        unidad,
+        usuarioId: req.user?.sub,
+        origen: dto.unidadPrincipalId ? "alta_indicado" : "alta_deducido",
+      });
+      return creada;
     });
 
-    if (!versionId) return ot;
+    if (!versionId) return this.otConCliente(ot.id);
 
     // La OT ya existe → se instancia el flujo con su otId y se cierra el enlace
     // inverso (orden_trabajo.flujo_instancia_id). Ambos extremos quedan ligados.
     return this.instanciarYEnlazar(ot.id, versionId, tenantId, req);
+  }
+
+  private otConCliente(id: string) {
+    return this.prisma.ordenTrabajo.findUnique({
+      where: { id },
+      include: { cliente: true, unidad: SELECT_UNIDAD },
+    });
+  }
+
+  /** OT del tenant y dentro del alcance del usuario (404 / 403). */
+  private async otEnAlcance(id: string, req: any) {
+    const tenantId = req.user?.tenantId;
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, codigo: true, tenantId: true, estado: true, unidadPrincipal: true },
+    });
+    if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    return ot;
+  }
+
+  /**
+   * Fija o cambia el laboratorio responsable (jefatura, planificación,
+   * administración: `ot.cambiar_laboratorio`). Quien lo hace debe ver la OT
+   * en su alcance. Cambiarlo exige motivo y deja constancia en el historial.
+   * Las asignaciones de analistas del laboratorio anterior se retiran: ese
+   * personal ya no ve la OT.
+   */
+  @Patch(":id/laboratorio")
+  @RequierePermiso("ot.cambiar_laboratorio")
+  async cambiarLaboratorio(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = OtCambiarLaboratorio.parse(body ?? {});
+    const ot = await this.otEnAlcance(id, req);
+    if (["cerrada", "anulada"].includes(ot.estado))
+      throw new BadRequestException(`La OT está ${ot.estado}: no se puede cambiar su laboratorio.`);
+    const destino = await this.labs.validarUnidad(ot.tenantId, dto.unidadPrincipalId);
+    if (ot.unidadPrincipal === destino.id)
+      throw new BadRequestException(`La OT ya es responsabilidad de ${destino.codigo}.`);
+    const anterior: UnidadResumen | null = ot.unidadPrincipal
+      ? await this.prisma.unidad.findUnique({ where: { id: ot.unidadPrincipal }, ...SELECT_UNIDAD })
+      : null;
+    if (anterior && (dto.motivo ?? "").length < 5)
+      throw new BadRequestException("Indique el motivo del cambio de laboratorio (mínimo 5 caracteres).");
+
+    await this.prisma.$transaction(async (tx) => {
+      const quitados = anterior
+        ? await tx.$queryRawUnsafe<{ usuario_id: string }[]>(`DELETE FROM ot_analista WHERE ot_id = $1::uuid RETURNING usuario_id`, id)
+        : [];
+      if (anterior)
+        await tx.$executeRawUnsafe(`UPDATE resultado SET asignado_a = NULL WHERE ot_id = $1::uuid AND asignado_a IS NOT NULL`, id);
+      await this.labs.fijar(tx, {
+        tenantId: ot.tenantId,
+        otId: id,
+        unidad: destino,
+        anterior,
+        usuarioId: req.user?.sub,
+        motivo: dto.motivo ?? null,
+        origen: anterior ? "cambio" : "asignacion_inicial",
+      });
+      if (quitados.length)
+        await this.labs.anotar(tx, {
+          tenantId: ot.tenantId,
+          otId: id,
+          tipo: "desasignacion",
+          usuarioId: req.user?.sub,
+          detalle: { motivo: "cambio de laboratorio", usuarios: quitados.map((q) => q.usuario_id) },
+        });
+    });
+    // Quien la movió puede quedarse sin verla (otro laboratorio): se devuelve
+    // el resumen sin volver a exigir alcance.
+    return this.otConCliente(id);
+  }
+
+  /**
+   * Asignación de la OT: analistas asignados, personal del laboratorio que se
+   * puede asignar, y muestras con sus ensayos (y a quién está cada uno).
+   */
+  @Get(":id/asignacion")
+  @RequierePermiso("ot.ver")
+  async asignacion(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const ot = await this.otEnAlcance(id, req);
+    const [analistas, personal, muestras, resultados] = await Promise.all([
+      this.analistasDe([id]),
+      ot.unidadPrincipal ? this.labs.personalDeUnidad(ot.unidadPrincipal) : Promise.resolve([]),
+      this.prisma.muestra.findMany({
+        where: { otId: id, deletedAt: null },
+        select: { id: true, codigo: true, nombre: true, estado: true },
+        orderBy: { codigo: "asc" },
+      }),
+      this.prisma.resultado.findMany({
+        where: { otId: id, deletedAt: null },
+        select: {
+          id: true,
+          muestraId: true,
+          estado: true,
+          asignadoA: true,
+          catAnalito: { select: { codigo: true, nombre: true } },
+          catMetodo: { select: { codigo: true, nombre: true } },
+          analito: { select: { codigo: true, nombre: true } },
+        },
+        orderBy: { fecha: "asc" },
+      }),
+    ]);
+    const asignados = analistas.get(id) ?? [];
+    const nombres = new Map<string, string>([
+      ...personal.map((p) => [p.id, p.nombre] as [string, string]),
+      ...asignados.map((a) => [a.id, a.nombre] as [string, string]),
+    ]);
+    const permisos: string[] = req.user?.permisos ?? [];
+    const roles: string[] = req.user?.roles ?? [];
+    return {
+      ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal },
+      puedeAsignar: roles.includes("SUPERADMIN") || permisos.includes("ot.asignar"),
+      analistas: asignados,
+      personal,
+      muestras: muestras.map((m) => ({
+        ...m,
+        ensayos: resultados
+          .filter((r) => r.muestraId === m.id)
+          .map((r) => ({
+            resultadoId: r.id,
+            estado: r.estado,
+            analito: r.catAnalito?.nombre ?? r.analito?.nombre ?? r.catAnalito?.codigo ?? r.analito?.codigo ?? "—",
+            metodo: r.catMetodo?.nombre ?? r.catMetodo?.codigo ?? null,
+            asignadoA: r.asignadoA,
+            asignadoNombre: r.asignadoA ? nombres.get(r.asignadoA) ?? null : null,
+          })),
+      })),
+    };
+  }
+
+  /**
+   * Fija la lista COMPLETA de analistas de la OT (añade y quita). Solo personal
+   * con rol vigente en el laboratorio responsable. Quitar a alguien libera los
+   * ensayos que tenía asignados en esta OT.
+   */
+  @Put(":id/analistas")
+  @RequierePermiso("ot.asignar")
+  async fijarAnalistas(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = OtAnalistas.parse(body ?? {});
+    const ot = await this.otEnAlcance(id, req);
+    if (!ot.unidadPrincipal)
+      throw new BadRequestException("La OT no tiene laboratorio responsable: fíjelo antes de asignar analistas.");
+    if (["cerrada", "anulada"].includes(ot.estado)) throw new BadRequestException(`La OT está ${ot.estado}.`);
+
+    const pedidos = [...new Set(dto.usuarioIds)];
+    const personal = await this.labs.personalDeUnidad(ot.unidadPrincipal);
+    const delLab = new Set(personal.map((p) => p.id));
+    if (pedidos.some((u) => !delLab.has(u)))
+      throw new BadRequestException(
+        "Solo se puede asignar personal con rol vigente en el laboratorio responsable de la OT (analista, técnico, metrólogo, inspector, revisor o jefe).",
+      );
+
+    const actuales = (await this.analistasDe([id])).get(id)?.map((a) => a.id) ?? [];
+    const agregar = pedidos.filter((u) => !actuales.includes(u));
+    const quitar = actuales.filter((u) => !pedidos.includes(u));
+    const yo = req.user?.sub ?? null;
+
+    await this.prisma.$transaction(async (tx) => {
+      for (const u of agregar)
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_analista (tenant_id, ot_id, usuario_id, asignado_por, asignado_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, now()) ON CONFLICT (ot_id, usuario_id) DO NOTHING`,
+          ot.tenantId, id, u, yo,
+        );
+      if (quitar.length) {
+        await tx.$executeRawUnsafe(`DELETE FROM ot_analista WHERE ot_id = $1::uuid AND usuario_id = ANY($2::uuid[])`, id, quitar);
+        await tx.$executeRawUnsafe(
+          `UPDATE resultado SET asignado_a = NULL WHERE ot_id = $1::uuid AND asignado_a = ANY($2::uuid[])`,
+          id, quitar,
+        );
+      }
+      if (agregar.length)
+        await this.labs.anotar(tx, { tenantId: ot.tenantId, otId: id, tipo: "asignacion", usuarioId: yo, detalle: { usuarios: agregar } });
+      if (quitar.length)
+        await this.labs.anotar(tx, { tenantId: ot.tenantId, otId: id, tipo: "desasignacion", usuarioId: yo, detalle: { usuarios: quitar } });
+    });
+    return this.asignacion(id, req);
+  }
+
+  /**
+   * Asigna muestras completas o ensayos concretos a un analista (o lo quita con
+   * `usuarioId: null`). El analista queda además asignado a la OT, para que la
+   * vea en «Mis OT». Los ensayos ya aprobados no se reasignan.
+   */
+  @Post(":id/asignar-ensayos")
+  @RequierePermiso("ot.asignar")
+  async asignarEnsayos(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = OtAsignarEnsayos.parse(body ?? {});
+    const ot = await this.otEnAlcance(id, req);
+    if (!ot.unidadPrincipal)
+      throw new BadRequestException("La OT no tiene laboratorio responsable: fíjelo antes de asignar.");
+    if (dto.usuarioId) {
+      const personal = await this.labs.personalDeUnidad(ot.unidadPrincipal);
+      if (!personal.some((p) => p.id === dto.usuarioId))
+        throw new BadRequestException("La persona elegida no tiene rol vigente en el laboratorio responsable de la OT.");
+    }
+    const yo = req.user?.sub ?? null;
+    const actualizados = await this.prisma.$transaction(async (tx) => {
+      const n = await tx.$executeRawUnsafe(
+        `UPDATE resultado SET asignado_a = $2::uuid
+          WHERE ot_id = $1::uuid AND deleted_at IS NULL AND estado <> 'aprobado'
+            AND (muestra_id = ANY($3::uuid[]) OR id = ANY($4::uuid[]))`,
+        id, dto.usuarioId, dto.muestraIds ?? [], dto.resultadoIds ?? [],
+      );
+      if (dto.usuarioId)
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_analista (tenant_id, ot_id, usuario_id, asignado_por, asignado_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, now()) ON CONFLICT (ot_id, usuario_id) DO NOTHING`,
+          ot.tenantId, id, dto.usuarioId, yo,
+        );
+      await this.labs.anotar(tx, {
+        tenantId: ot.tenantId,
+        otId: id,
+        tipo: "asignacion_ensayo",
+        usuarioId: yo,
+        detalle: { usuario: dto.usuarioId, muestras: dto.muestraIds ?? [], ensayos: dto.resultadoIds ?? [], actualizados: n },
+      });
+      return n;
+    });
+    return { actualizados, ...(await this.asignacion(id, req)) };
   }
 
   /**
@@ -336,7 +787,7 @@ export class OtController {
         opiPendiente: false,
         updatedAt: new Date(),
       },
-      include: { cliente: true },
+      include: { cliente: true, unidad: SELECT_UNIDAD },
     });
   }
 
@@ -378,7 +829,7 @@ export class OtController {
     return this.prisma.ordenTrabajo.update({
       where: { id: otId },
       data: { flujoInstanciaId: instancia.id },
-      include: { cliente: true },
+      include: { cliente: true, unidad: SELECT_UNIDAD },
     });
   }
 
@@ -397,6 +848,7 @@ export class OtController {
    * restrictivo: si el PATCH lleva `estado: 'cerrada'` se exige además
    * `ot.cerrar` (SUPERADMIN, ADMIN, DIRECTOR). Es la separación de deberes que
    * pide la 17025 y la razón de que ese permiso exista en el RBAC sembrado.
+   * El laboratorio responsable NO se cambia aquí: PATCH /ot/:id/laboratorio.
    */
   @Patch(":id")
   @RequierePermiso("ot.crear")
@@ -417,7 +869,7 @@ export class OtController {
     }
 
     // Los campos de flujo no son columnas: se separan de los datos escalares.
-    const { flujoInstanciaId, flujoDefId, flujoVersionId, ...campos } = dto;
+    const { flujoInstanciaId, flujoDefId, flujoVersionId, fechaCompromiso, ...campos } = dto;
     const pideFlujo = Boolean(flujoDefId || flujoVersionId);
 
     if (pideFlujo && actual.flujoInstanciaId)
@@ -431,8 +883,15 @@ export class OtController {
 
     const ot = await this.prisma.ordenTrabajo.update({
       where: { id },
-      data: { ...campos, ...(flujoInstanciaId ? { flujoInstanciaId } : {}) },
-      include: { cliente: true },
+      data: {
+        ...campos,
+        ...(fechaCompromiso !== undefined
+          ? { fechaCompromiso: fechaCompromiso ? new Date(`${fechaCompromiso}T00:00:00Z`) : null }
+          : {}),
+        ...(flujoInstanciaId ? { flujoInstanciaId } : {}),
+        updatedAt: new Date(),
+      },
+      include: { cliente: true, unidad: SELECT_UNIDAD },
     });
 
     if (!versionId) return ot;
