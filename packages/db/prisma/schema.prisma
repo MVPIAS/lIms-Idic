@@ -880,6 +880,9 @@ model Muestra {
   /// PUENTE catálogo v2 (align_puente_catalogo.sql): elemento del catálogo del
   /// que procede la muestra. NULL en muestras legacy.
   catElementoId String?   @map("cat_elemento_id") @db.Uuid
+  /// Veredicto de la muestra (agregado de sus ensayos). align_flujo_laboratorio.sql §7.
+  veredicto     String?   @db.VarChar(20)
+  veredictoAt   DateTime? @map("veredicto_at") @db.Timestamptz
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
 
@@ -995,6 +998,15 @@ model Resultado {
   motivoDevolucion String?   @map("motivo_devolucion")
   /// Analista al que la jefatura asignó este ensayo (align_flujo_laboratorio.sql).
   asignadoA        String?   @map("asignado_a") @db.Uuid
+  /// Formulario de captura estándar (align_flujo_laboratorio.sql §7).
+  tipoDato         String?   @map("tipo_dato") @db.VarChar(12)
+  requisito        String?
+  observacion      String?
+  lecturas         Json?
+  especOrigen      String    @default("catalogo") @map("espec_origen") @db.VarChar(10)
+  especCatalogo    Json?     @map("espec_catalogo")
+  especEditadaPor  String?   @map("espec_editada_por") @db.Uuid
+  especEditadaAt   DateTime? @map("espec_editada_at") @db.Timestamptz
 
   /// PUENTE catálogo v2 (align_puente_catalogo.sql). Un resultado del puente se
   /// materializa desde un cat_metodo/cat_analito del panel del elemento, con la

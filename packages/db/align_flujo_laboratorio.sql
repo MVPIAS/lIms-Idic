@@ -18,6 +18,9 @@
 --   5. Resultados del puente aún sin valor: estado 'pendiente' (no 'capturado').
 --   6. Permisos ot.asignar y ot.cambiar_laboratorio; muestra.crear para
 --      Planificación (registra la OT con sus elementos).
+--   7. Formulario de captura estándar: especificación por ensayo de la orden
+--      (catálogo u orden), tipo de dato numérico / atributo, lecturas de la
+--      fórmula y veredicto de la muestra.
 -- =============================================================================
 
 BEGIN;
@@ -129,5 +132,44 @@ SELECT r.id, p.id
   JOIN permiso p ON p.codigo = 'muestra.crear'
  WHERE r.codigo = 'PLANIFICACION'
 ON CONFLICT DO NOTHING;
+
+-- --- 7. Formulario de captura estándar ------------------------------------------
+-- Cada ensayo de la OT lleva su especificación (Mín / Nom / Máx, unidad,
+-- requisito de texto, fórmula) COPIADA del catálogo al generarse. Lo que el
+-- catálogo no trae queda vacío y se completa en la captura, solo para esa
+-- orden: el catálogo no se toca. espec_origen distingue «catalogo» de «orden».
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS tipo_dato         VARCHAR(12);
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS requisito         TEXT;
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS observacion       TEXT;
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS lecturas          JSONB;
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS espec_origen      VARCHAR(10) NOT NULL DEFAULT 'catalogo';
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS espec_catalogo    JSONB;
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS espec_editada_por UUID;
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS espec_editada_at  TIMESTAMPTZ;
+COMMENT ON COLUMN resultado.tipo_dato         IS 'numerico (veredicto automático contra Mín/Máx; sin límites = informativo) | atributo (Cumple/No cumple lo elige el analista).';
+COMMENT ON COLUMN resultado.requisito         IS 'Requisito de texto de la especificación (p. ej. «Tafetán», «Grado 4/5 mín.»).';
+COMMENT ON COLUMN resultado.observacion       IS 'Observación del analista (obligatoria en atributos No cumple).';
+COMMENT ON COLUMN resultado.lecturas          IS 'Lecturas con los campos del método (C1..Cn = paso_metodo) cuando el valor sale de una fórmula.';
+COMMENT ON COLUMN resultado.espec_origen      IS 'catalogo = especificación tal como vino del catálogo | orden = completada o cambiada para esta orden.';
+COMMENT ON COLUMN resultado.espec_catalogo    IS 'Copia de la especificación del catálogo al generar el ensayo (para comparar con la de la orden).';
+
+-- Ensayos ya generados: tipo de dato y copia de la especificación del catálogo.
+UPDATE resultado SET tipo_dato = CASE
+         WHEN COALESCE(limite_inf, '') ~ '^\s*[+-]?([0-9]+([.,][0-9]+)?|[.,][0-9]+)\s*$'
+           OR COALESCE(nominal, '')    ~ '^\s*[+-]?([0-9]+([.,][0-9]+)?|[.,][0-9]+)\s*$'
+           OR COALESCE(limite_sup, '') ~ '^\s*[+-]?([0-9]+([.,][0-9]+)?|[.,][0-9]+)\s*$' THEN 'numerico'
+         WHEN COALESCE(limite_inf, '') <> '' OR COALESCE(nominal, '') <> '' OR COALESCE(limite_sup, '') <> '' THEN 'atributo'
+         ELSE 'numerico' END
+ WHERE tipo_dato IS NULL AND cat_analito_id IS NOT NULL;
+UPDATE resultado SET espec_catalogo = jsonb_build_object(
+         'limiteInf', limite_inf, 'nominal', nominal, 'limiteSup', limite_sup,
+         'unidad', unidad, 'formula', formula, 'tipoDato', tipo_dato)
+ WHERE espec_catalogo IS NULL AND cat_analito_id IS NOT NULL;
+
+-- Veredicto de la muestra (lote): no_cumple si algún ensayo no cumple,
+-- pendiente si falta alguno, cumple si todos cumplen. Lo usa el informe.
+ALTER TABLE muestra ADD COLUMN IF NOT EXISTS veredicto    VARCHAR(20);
+ALTER TABLE muestra ADD COLUMN IF NOT EXISTS veredicto_at TIMESTAMPTZ;
+COMMENT ON COLUMN muestra.veredicto IS 'cumple | no_cumple | informativo | pendiente · agregado de los ensayos de la muestra (lo recalcula la API en cada captura).';
 
 COMMIT;

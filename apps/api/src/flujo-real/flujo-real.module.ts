@@ -28,8 +28,11 @@ import { generarNumeroOrdenInterna } from "../common/correlativo";
 import { AlcanceService } from "../rbac/alcance.service";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
 import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
-import { veredictoNumerico, type Veredicto } from "../laboratorio/veredicto";
-import { conNombres } from "../laboratorio/laboratorio.module";
+import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laboratorio.module";
+import { traducirFormula } from "../laboratorio/formula-legado";
+import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
+import { calcularCaptura, CapturaError } from "../laboratorio/captura-estandar";
+import { veredictoNumerico } from "../laboratorio/veredicto";
 
 /**
  * =============================================================================
@@ -517,8 +520,33 @@ const GenerarAnalisisBody = z.object({
   muestraId: z.string().uuid(),
   metodoIds: z.array(z.string().uuid()).min(1),
 });
-const CapturarValorBody = z.object({
-  valor: z.union([z.number().finite(), z.string().min(1).max(120)]),
+/**
+ * Captura estándar de un ensayo (ver laboratorio/captura-estandar.ts): valor
+ * directo, réplicas o lecturas con los campos del método; en atributos,
+ * Cumple / No cumple con observación.
+ */
+const celda = z.union([z.number().finite(), z.string().max(40), z.null()]);
+const CapturarValorBody = z
+  .object({
+    valor: z.union([z.number().finite(), z.string().max(120)]).optional(),
+    replicas: z.array(z.number().finite()).max(100).optional(),
+    replicasTexto: z.string().max(4000).optional(),
+    lecturas: z.array(z.record(z.string().regex(/^[Cc]\d{1,2}$/), celda)).max(100).optional(),
+    variables: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.number().finite()).optional(),
+    atributo: z.enum(["cumple", "no_cumple"]).optional(),
+    observacion: z.string().max(2000).optional(),
+  });
+
+/** Especificación de la orden (lo que el catálogo no trae, o lo que cambia la jefatura). */
+const texto120 = z.string().max(120).nullable().optional();
+const EspecificacionBody = z.object({
+  limiteInf: texto120,
+  nominal: texto120,
+  limiteSup: texto120,
+  unidad: z.string().max(30).nullable().optional(),
+  requisito: z.string().max(2000).nullable().optional(),
+  tipoDato: z.enum(["numerico", "atributo"]).optional(),
+  formula: z.string().max(500).nullable().optional(),
 });
 
 /** Parsea un texto de límite a número; NULL si no es numérico ('cumple', ''…). */
@@ -652,10 +680,22 @@ export class PuenteAnalisisService {
           orderBy: { createdAt: "asc" },
         }));
 
-      const limiteInf = espec?.limiteInf ?? a.rangoMin ?? null;
-      const nominal = espec?.nominal ?? a.rangoNominal ?? null;
-      const limiteSup = espec?.limiteSup ?? a.rangoMax ?? null;
-      const unidad = espec?.unidad ?? a.unidad ?? null;
+      const primero = (...vs: (string | null | undefined)[]) => {
+        for (const v of vs) if (v != null && String(v).trim() !== "") return String(v).trim();
+        return null;
+      };
+      const limiteInf = primero(espec?.limiteInf, a.rangoMin);
+      const nominal = primero(espec?.nominal, a.rangoNominal);
+      const limiteSup = primero(espec?.limiteSup, a.rangoMax);
+      const unidad = primero(espec?.unidad, a.unidad);
+      // Requisito de texto («Tafetán», «Grado 4/5 mín.») + su norma («Nch 1597»).
+      const requisito = primero(espec?.requisitos)
+        ? `${espec!.requisitos!.trim()}${primero(espec?.texto) ? ` (${espec!.texto!.trim()})` : ""}`
+        : null;
+      const tipoDato = tipoDatoDe({ limiteInf, nominal, limiteSup, requisito });
+      // La fórmula se guarda ya en la sintaxis del motor (traducida del LIMS
+      // antiguo cuando se puede); la original queda en la copia del catálogo.
+      const trad = traducirFormula(a.formula);
 
       await this.prisma.resultado.create({
         data: {
@@ -665,10 +705,18 @@ export class PuenteAnalisisService {
           catMetodoId: a.metodoId,
           catAnalitoId: a.id,
           unidad,
-          formula: a.formula ?? null,
+          formula: trad.expr,
           limiteInf,
           nominal,
           limiteSup,
+          requisito,
+          tipoDato,
+          especOrigen: "catalogo",
+          especCatalogo: {
+            limiteInf, nominal, limiteSup, unidad, requisito, tipoDato,
+            formula: trad.expr,
+            ...(a.formula && !trad.expr ? { formulaLegado: a.formula, formulaMotivo: trad.motivo ?? null } : {}),
+          },
           veredicto: "pendiente",
           // Pedido pero aún sin valor: no cuenta como «por revisar».
           estado: "pendiente",
@@ -678,6 +726,7 @@ export class PuenteAnalisisService {
       creados++;
     }
 
+    await recalcularVeredictoMuestra(this.prisma, muestra.id);
     return {
       otId,
       muestraId: muestra.id,
@@ -703,7 +752,8 @@ export class PuenteAnalisisService {
    *   PENDIENTE (revisión manual): cuando no hay forma de decidir —ni cota
    *     numérica comparable ni referencia textual comparable—.
    */
-  async capturarValor(id: string, valorEntrada: number | string, tenantId: string, req?: any) {
+  /** Resultado del puente, del tenant y del alcance del usuario. */
+  private async resultadoEnAlcance(id: string, tenantId: string, req: any) {
     const resultado = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null, muestra: { tenantId } },
       include: { muestra: { select: { tenantId: true, otId: true } } },
@@ -714,47 +764,50 @@ export class PuenteAnalisisService {
       ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { codigo: true, unidadPrincipal: true } })
       : null;
     await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, ot ? `el resultado de la OT ${ot.codigo}` : "el resultado");
+    return { resultado, otId };
+  }
 
-    // Lo revisado o aprobado no se sobrescribe: hay que devolverlo antes.
+  /**
+   * Formulario de captura estándar (laboratorio/captura-estandar.ts): valor,
+   * réplicas o lecturas con los campos del método (fórmula), o Cumple / No
+   * cumple en los atributos. Lo revisado o aprobado no se sobrescribe. Deja al
+   * usuario como analista (segregación) y recalcula el veredicto de la muestra.
+   */
+  async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any) {
+    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req);
+
     const bloqueo = motivoNoCapturable(resultado.estado);
     if (bloqueo) throw new ConflictException(bloqueo);
 
-    const valor = leerValorCaptura(valorEntrada);
-    const valorNum = typeof valor === "number" ? valor : null;
-    const inf = aNumero(resultado.limiteInf);
-    const sup = aNumero(resultado.limiteSup);
-
-    let veredicto: Veredicto;
-    if (valorNum != null && (inf != null || sup != null)) {
-      // --- Rama NUMÉRICA: una o dos cotas numéricas (tolerancia TOL_NUMERICA). ---
-      veredicto = veredictoNumerico(valorNum, inf, sup);
-    } else {
-      // --- Rama CUALITATIVA: referencia textual esperada vs valor textual. ---
-      const esperado =
-        refCualitativa(resultado.nominal) ??
-        refCualitativa(resultado.limiteInf) ??
-        refCualitativa(resultado.limiteSup);
-      const valorTxt = String(valor).trim().toLowerCase();
-      const sinEspecificacion =
-        !String(resultado.limiteInf ?? "").trim() && !String(resultado.limiteSup ?? "").trim() && !String(resultado.nominal ?? "").trim();
-      if (esperado != null && valorTxt !== "") {
-        veredicto = esperado === valorTxt ? "cumple" : "no_cumple";
-      } else if (sinEspecificacion) {
-        // Sin especificación: el valor se informa tal cual.
-        veredicto = "informativo";
-      } else {
-        // Hay especificación pero no se puede contrastar (texto frente a
-        // límites numéricos): lo decide el revisor.
-        veredicto = "pendiente";
-      }
+    const tipoDato: TipoDato =
+      (resultado.tipoDato as TipoDato) ??
+      tipoDatoDe({ limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, requisito: resultado.requisito });
+    let calc;
+    try {
+      calc = calcularCaptura(
+        { tipoDato, limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, formula: resultado.formula },
+        entrada,
+      );
+    } catch (e) {
+      if (e instanceof CapturaError) throw new BadRequestException(e.message);
+      throw e;
     }
 
-    return this.prisma.resultado.update({
+    const actualizado = await this.prisma.resultado.update({
       where: { id },
       data: {
-        valorNumerico: valorNum,
-        valorTexto: String(valor),
-        veredicto,
+        valorNumerico: calc.valorNumerico,
+        valorTexto: calc.valorTexto,
+        replicas: calc.replicas,
+        promedio: calc.promedio,
+        desviacion: calc.desviacion,
+        cv: calc.cv,
+        resultadoFinal: calc.resultadoFinal,
+        formulaAplicada: calc.formulaAplicada,
+        lecturas: calc.lecturas ?? undefined,
+        observacion: calc.observacion,
+        veredicto: calc.veredicto,
+        tipoDato,
         // Quien captura queda como analista (segregación: no podrá revisarlo).
         analistaId: req?.user?.sub ?? resultado.analistaId ?? null,
         estado: "capturado",
@@ -763,6 +816,75 @@ export class PuenteAnalisisService {
       },
       include: { catAnalito: true, catMetodo: true },
     });
+    const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
+    return { ...actualizado, veredictoMuestra: veredictoDeLaMuestra };
+  }
+
+  /**
+   * Especificación de la ORDEN: completa lo que el catálogo no trae (Mín / Nom
+   * / Máx, unidad, requisito, tipo de dato) o, si es la jefatura, cambia lo que
+   * vino del catálogo y la fórmula. Se guarda en el resultado de esta OT —el
+   * catálogo no se toca— marcado como «especificación de la orden», con quién
+   * y cuándo. Si el ensayo ya tiene valor, se recalcula su veredicto.
+   */
+  async editarEspecificacion(id: string, pedido: z.infer<typeof EspecificacionBody>, tenantId: string, req: any) {
+    const { resultado } = await this.resultadoEnAlcance(id, tenantId, req);
+    const bloqueo = motivoNoCapturable(resultado.estado);
+    if (bloqueo) throw new ConflictException(bloqueo.replace("corregirlo", "cambiar su especificación"));
+
+    const actual: Especificacion = {
+      limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup,
+      unidad: resultado.unidad, requisito: resultado.requisito, formula: resultado.formula,
+      tipoDato: resultado.tipoDato ?? tipoDatoDe({ ...resultado }),
+    };
+    const catalogo = (resultado.especCatalogo ?? {}) as Especificacion;
+    const plan = planEdicion(actual, catalogo, pedido as Especificacion);
+    if (!plan.campos.length) return resultado;
+
+    const roles: string[] = req?.user?.roles ?? [];
+    const permisos: string[] = req?.user?.permisos ?? [];
+    if (plan.requiereJefatura && !roles.includes("SUPERADMIN") && !permisos.includes("resultado.aprobar"))
+      throw new ForbiddenException(
+        "Cambiar un valor que vino del catálogo, el tipo de dato o la fórmula lo hace la jefatura del laboratorio. Usted puede completar los campos que el catálogo dejó vacíos.",
+      );
+    if (plan.cambios.formula) {
+      const t = traducirFormula(plan.cambios.formula);
+      if (t.origen !== "motor")
+        throw new BadRequestException(
+          "Fórmula no válida. Use los campos del método (C1, C2…), las réplicas (RN, PROMEDIO, DE, CV, N), números y funciones (RAIZ, PROMEDIO, ABS…). Ejemplo: (C1 - C2) / C3 * 100.",
+        );
+    }
+    const nueva = { ...actual, ...plan.cambios };
+
+    // Veredicto con la nueva especificación (si ya hay valor numérico).
+    let veredicto = resultado.veredicto;
+    if (nueva.tipoDato === "atributo" && actual.tipoDato !== "atributo" && resultado.estado !== "pendiente") veredicto = "pendiente";
+    else if (nueva.tipoDato !== "atributo" && resultado.valorNumerico != null) {
+      const n = (v?: string | null) => (v != null && /^\s*[+-]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(v) ? Number(v.replace(",", ".")) : null);
+      veredicto = veredictoNumerico(Number(resultado.valorNumerico), n(nueva.limiteInf), n(nueva.limiteSup));
+    }
+
+    const actualizado = await this.prisma.resultado.update({
+      where: { id },
+      data: {
+        ...("limiteInf" in plan.cambios ? { limiteInf: plan.cambios.limiteInf } : {}),
+        ...("nominal" in plan.cambios ? { nominal: plan.cambios.nominal } : {}),
+        ...("limiteSup" in plan.cambios ? { limiteSup: plan.cambios.limiteSup } : {}),
+        ...("unidad" in plan.cambios ? { unidad: plan.cambios.unidad } : {}),
+        ...("requisito" in plan.cambios ? { requisito: plan.cambios.requisito } : {}),
+        ...("tipoDato" in plan.cambios ? { tipoDato: plan.cambios.tipoDato } : {}),
+        ...("formula" in plan.cambios ? { formula: plan.cambios.formula } : {}),
+        // Copia del catálogo: se fija la primera vez (resultados anteriores a esta versión).
+        ...(resultado.especCatalogo ? {} : { especCatalogo: actual as any }),
+        especOrigen: "orden",
+        especEditadaPor: req?.user?.sub ?? null,
+        especEditadaAt: new Date(),
+        veredicto,
+      },
+      include: { catAnalito: true, catMetodo: true },
+    });
+    const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
+    return { ...actualizado, camposEditados: plan.campos, veredictoMuestra: veredictoDeLaMuestra };
   }
 
   /**
@@ -775,7 +897,8 @@ export class PuenteAnalisisService {
 
     const muestras = await this.prisma.muestra.findMany({
       where: { otId, tenantId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, codigo: true, nombre: true },
+      orderBy: { codigo: "asc" },
     });
     const muestraIds = muestras.map((m) => m.id);
 
@@ -804,13 +927,49 @@ export class PuenteAnalisisService {
       porEstado[r.estado] = (porEstado[r.estado] ?? 0) + 1;
     }
 
+    // Campos de captura de cada método (paso_metodo): son las variables C1..Cn
+    // de las fórmulas por lectura, con su nombre y unidad.
+    const metodoIds = [...new Set(resultados.map((r) => r.catMetodoId).filter((x): x is string => Boolean(x)))];
+    const pasos = metodoIds.length
+      ? await this.prisma.$queryRawUnsafe<{ cat_metodo_id: string; nombre: string; unidad: string | null; tipo_dato: string }[]>(
+          `SELECT cat_metodo_id, nombre, unidad, tipo_dato FROM paso_metodo
+            WHERE cat_metodo_id = ANY($1::uuid[]) AND activo AND deleted_at IS NULL
+            ORDER BY cat_metodo_id, orden, created_at`,
+          metodoIds,
+        )
+      : [];
+    const camposPorMetodo: Record<string, { nombre: string; unidad: string | null }[]> = {};
+    for (const p of pasos) (camposPorMetodo[p.cat_metodo_id] ??= []).push({ nombre: p.nombre, unidad: p.unidad });
+
+    // Veredicto de cada muestra (lote) y de la OT, con la misma regla.
+    const porMuestra = muestras.map((m) => ({
+      ...m,
+      veredicto: veredictoMuestra(resultados.filter((r) => r.muestraId === m.id).map((r) => r.veredicto)),
+    }));
+
+    const conNombre = await conNombres(this.prisma, resultados);
     return {
       otId,
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal },
       muestras: muestraIds.length,
+      veredictoOt: veredictoMuestra(porMuestra.filter((m) => resultados.some((r) => r.muestraId === m.id)).map((m) => m.veredicto)),
+      veredictosMuestra: porMuestra,
+      camposPorMetodo,
       resumen,
       porEstado,
-      resultados: await conNombres(this.prisma, resultados),
+      resultados: conNombre.map((r) => {
+        const t = traducirFormula(r.formula);
+        const cat = (r.especCatalogo ?? {}) as Record<string, any>;
+        return {
+          ...r,
+          tipoDato: r.tipoDato ?? tipoDatoDe({ ...r }),
+          formulaAplicable: t.expr,
+          nCampos: t.nCampos,
+          formulaLegado: cat.formulaLegado ?? null,
+          formulaMotivo: cat.formulaMotivo ?? (r.formula && !t.expr ? t.motivo ?? null : null),
+          campos: r.catMetodoId ? camposPorMetodo[r.catMetodoId] ?? [] : [],
+        };
+      }),
     };
   }
 }
@@ -850,12 +1009,23 @@ export class PuenteOtController {
 export class PuenteResultadoController {
   constructor(private readonly svc: PuenteAnalisisService) {}
 
+  /**
+   * Especificación de la orden: rellenar lo vacío lo hace quien captura;
+   * cambiar lo del catálogo, el tipo o la fórmula, la jefatura
+   * (resultado.aprobar, se comprueba en el servicio).
+   */
+  @Patch(":id/especificacion")
+  @RequierePermiso("resultado.crear")
+  @ApiOperation({ summary: "Especificación de la orden (Mín/Nom/Máx, unidad, requisito, tipo, fórmula) de un ensayo" })
+  especificacion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.editarEspecificacion(id, EspecificacionBody.parse(body ?? {}), tenantDe(req), req);
+  }
+
   @Post(":id/valor")
   @RequierePermiso("resultado.crear")
   @ApiOperation({ summary: "Captura el valor de un resultado del puente y calcula su veredicto" })
   capturarValor(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    const { valor } = CapturarValorBody.parse(body);
-    return this.svc.capturarValor(id, valor, tenantDe(req), req);
+    return this.svc.capturarValor(id, CapturarValorBody.parse(body ?? {}), tenantDe(req), req);
   }
 }
 
