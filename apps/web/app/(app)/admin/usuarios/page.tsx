@@ -481,6 +481,11 @@ function TabAcciones({ usuario, onCambio }: { usuario: Usuario; onCambio: () => 
       </div>
       <div className="card" style={{ marginBottom: 0 }}>
         <h2>Contraseña</h2>
+        {usuario.debeCambiarPassword && (
+          <div className="alert info" style={{ marginBottom: 8 }}>
+            Tiene una contraseña temporal: en su próximo ingreso deberá elegir una propia antes de usar el sistema.
+          </div>
+        )}
         <p className="text-[12px] text-[var(--muted)] mb-3">Si la persona olvidó su contraseña, genera una temporal y entrégasela por un canal seguro.</p>
         {clave ? <ClaveTemporal pass={clave} /> : (
           <button className="btn primary sm" disabled={ocupado || !usuario.activo} onClick={restablecer}>🔑 Restablecer contraseña</button>

@@ -1,5 +1,6 @@
 "use client";
 
+import { URL_PERSONAS, etiquetaPersona } from "@/lib/personas";
 import { useEffect, useMemo, useState } from "react";
 import { fecha as fechaFmt } from "@/lib/format";
 import { validarFormulario } from "@/lib/validate";
@@ -122,9 +123,9 @@ export default function EquiposPage() {
     }
   }
 
-  // Catálogos auxiliares del formulario. Son opcionales: si el usuario no tiene
-  // `admin.usuarios` la lista de responsables vendrá vacía y el campo queda
-  // deshabilitado, pero el alta de equipos sigue funcionando.
+  // Catálogos auxiliares del formulario. Los responsables salen de /personas
+  // (cualquier usuario autenticado, acotado a su alcance): antes se pedía
+  // /usuarios, que exige admin.usuarios, y el combo salía vacío.
   async function cargarAux() {
     const safe = async (url: string) => {
       try {
@@ -136,7 +137,7 @@ export default function EquiposPage() {
         return [];
       }
     };
-    const [u, us] = await Promise.all([safe(`${API}/equipos/catalogo/unidades`), safe(`${API}/usuarios`)]);
+    const [u, us] = await Promise.all([safe(`${API}/equipos/catalogo/unidades`), safe(`${API}${URL_PERSONAS}`)]);
     setUnidades(u);
     setUsuarios(us);
   }
@@ -496,9 +497,13 @@ export default function EquiposPage() {
                 onChange={(e) => setF({ ...f, responsableId: e.target.value })}
               >
                 <option value="">— sin responsable —</option>
+                {/* Responsable actual fuera de su alcance: se muestra para no perderlo al editar. */}
+                {f.responsableId && !usuarios.some((u) => u.id === f.responsableId) && (
+                  <option value={f.responsableId}>{detalle?.responsable?.nombre_completo ?? "Responsable actual"}</option>
+                )}
                 {usuarios.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {u.nombreCompleto ?? u.nombre_completo ?? u.username}
+                    {etiquetaPersona(u)}
                   </option>
                 ))}
               </select>

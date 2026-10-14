@@ -9,6 +9,31 @@ function token(): string | null {
   return localStorage.getItem("lims_token");
 }
 
+/**
+ * Error de la API con el estado HTTP y el cuerpo, para los casos en que la
+ * pantalla necesita más que el mensaje: `requiere2fa` en el ingreso, `codigo`
+ * CAMBIO_CLAVE_REQUERIDO, `errores` de validación…
+ */
+export class ApiError extends Error {
+  constructor(message: string | string[], public status: number, public body: any) {
+    super(Array.isArray(message) ? message.join(", ") : message);
+  }
+}
+
+export interface Sesion {
+  accessToken: string;
+  refreshToken?: string;
+  user: any;
+  /** Contraseña temporal: hay que cambiarla antes de entrar al sistema. */
+  debeCambiarPassword?: boolean;
+}
+
+function guardarSesion(r: Sesion) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("lims_token", r.accessToken);
+  localStorage.setItem("lims_user", JSON.stringify(r.user ?? {}));
+}
+
 async function request<T = any>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...init,
@@ -18,15 +43,15 @@ async function request<T = any>(path: string, init: RequestInit = {}): Promise<T
       ...(init.headers ?? {}),
     },
   });
-  // Un 401 en el propio ingreso es «credenciales inválidas»: se muestra el
-  // mensaje en el formulario en vez de recargar la página y perderlo.
+  // Un 401 en el propio ingreso es «credenciales inválidas» (o «falta el código
+  // 2FA»): se muestra en el formulario en vez de recargar la página y perderlo.
   if (res.status === 401 && typeof window !== "undefined" && !path.startsWith("/auth/login")) {
     localStorage.removeItem("lims_token");
     window.location.href = "/login";
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.message ?? `Error ${res.status}`);
+    throw new ApiError(body.message ?? `Error ${res.status}`, res.status, body);
   }
   return res.status === 204 ? (undefined as T) : res.json();
 }
@@ -51,16 +76,28 @@ export const api = {
   update: <T = any>(recurso: string, id: string, data: any) => request<T>(`/${recurso}/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
   remove: (recurso: string, id: string) => request(`/${recurso}/${id}`, { method: "DELETE" }),
   post: <T = any>(path: string, data: any) => request<T>(path, { method: "POST", body: JSON.stringify(data) }),
+  patch: <T = any>(path: string, data: any) => request<T>(path, { method: "PATCH", body: JSON.stringify(data) }),
 
-  login: async (username: string, password: string) => {
-    const r = await request<{ accessToken: string; user: any }>("/auth/login", {
+  /**
+   * Ingreso. Con 2FA activo, el primer intento responde 401 con
+   * `requiere2fa: true` (en ApiError.body): la pantalla pide el código y repite
+   * la llamada con `totp`. Con contraseña temporal llega `debeCambiarPassword`.
+   */
+  login: async (username: string, password: string, totp?: string) => {
+    const r = await request<Sesion>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify({ username, password, ...(totp ? { totp } : {}) }),
     });
-    if (typeof window !== "undefined") {
-      localStorage.setItem("lims_token", r.accessToken);
-      localStorage.setItem("lims_user", JSON.stringify(r.user ?? {}));
-    }
+    guardarSesion(r);
+    return r;
+  },
+  /** Cambio de la propia contraseña; guarda la sesión nueva que devuelve el servidor. */
+  cambiarPassword: async (actual: string, nueva: string) => {
+    const r = await request<Sesion & { mensaje?: string }>("/auth/cambiar-password", {
+      method: "POST",
+      body: JSON.stringify({ actual, nueva }),
+    });
+    guardarSesion(r);
     return r;
   },
   logout: () => {

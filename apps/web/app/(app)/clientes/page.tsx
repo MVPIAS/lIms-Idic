@@ -16,7 +16,21 @@ export default function ClientesPage() {
       columnas={[
         { campo: "rut", titulo: "RUT", render: (v) => <span className="codigo">{rut(v)}</span> },
         { campo: "razonSocial", titulo: "Razón social" },
-        { campo: "tipo", titulo: "Tipo" },
+        {
+          campo: "tipo",
+          titulo: "Tipo",
+          // Etiqueta de la lista vigente; un tipo antiguo (anterior a R2) se marca
+          // para reclasificarlo al editar la ficha o al cotizar.
+          render: (v, row) =>
+            v ? (
+              <>
+                {row?.tipoEtiqueta ?? v}
+                {row && row.tipoVigente === false && <span className="pill amber" style={{ marginLeft: 6 }}>tipo antiguo</span>}
+              </>
+            ) : (
+              <span className="pill amber">sin tipo</span>
+            ),
+        },
         { campo: "ciudad", titulo: "Ciudad" },
         { campo: "telefono", titulo: "Teléfono" },
         { campo: "bloqueado", titulo: "Estado", render: badge },
@@ -28,7 +42,7 @@ export default function ClientesPage() {
         // (§5), no hardcodeado. Gestionable en /catalogo/parametros → tipo_cliente.
         // Comercial R2: lista única (Ley 17.798, Ejército, …, Interlaboratorio); los
         // valores antiguos quedan inactivos y no se ofrecen (ver docs/COMERCIAL_RONDA2.md).
-        { campo: "tipo", label: "Tipo", tipo: "select", opcionesEndpoint: "parametros?categoria=tipo_cliente&activo=true&limit=100" },
+        { campo: "tipo", label: "Tipo de cliente", tipo: "select", requerido: true, opcionesEndpoint: "parametros?categoria=tipo_cliente&activo=true&limit=100" },
         { campo: "ciudad", label: "Ciudad" },
         { campo: "region", label: "Región" },
         { campo: "telefono", label: "Teléfono", tipo: "telefono" },

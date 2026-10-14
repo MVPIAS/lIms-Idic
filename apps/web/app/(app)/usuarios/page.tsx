@@ -16,6 +16,7 @@ function UsuariosContenido() {
   const [roles, setRoles] = useState<any[]>([]);
   const [unidades, setUnidades] = useState<any[]>([]);
   const [error, setError] = useState("");
+  const [temporal, setTemporal] = useState<{ usuario: string; clave: string } | null>(null);
   const [show, setShow] = useState(false);
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [f, setF] = useState<any>({ username: "", nombreCompleto: "", email: "", password: "", grado: "", rolId: "", unidadId: "" });
@@ -42,7 +43,6 @@ function UsuariosContenido() {
         { campo: "username", requerido: true },
         { campo: "nombreCompleto", requerido: true },
         { campo: "email", tipo: "email" },
-        { campo: "password", requerido: true },
         { campo: "rolId", requerido: true },
       ],
       f,
@@ -52,6 +52,9 @@ function UsuariosContenido() {
     try {
       const res = await fetch(`${API}/usuarios`, { method: "POST", headers: auth(), body: JSON.stringify(f) });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
+      const creado = await res.json().catch(() => ({}));
+      // Sin contraseña escrita, el servidor genera una temporal y la devuelve una sola vez.
+      setTemporal(creado?.passwordTemporal ? { usuario: f.username, clave: creado.passwordTemporal } : null);
       setShow(false);
       setF({ username: "", nombreCompleto: "", email: "", password: "", grado: "", rolId: "", unidadId: "" });
       cargar();
@@ -105,6 +108,12 @@ function UsuariosContenido() {
         <Link href="/admin/usuarios" style={{ fontWeight: 700, textDecoration: "underline" }}>Ir a Administración › Usuarios →</Link>
       </div>
       {error && <div className="alert warn">{error}</div>}
+      {temporal && (
+        <div className="alert info">
+          Contraseña temporal de <span className="codigo">{temporal.usuario}</span> (se muestra solo esta vez):{" "}
+          <b className="codigo" style={{ userSelect: "all" }}>{temporal.clave}</b>. Entréguela por un canal seguro; deberá cambiarla en su primer ingreso.
+        </div>
+      )}
 
       <div className="toolbar">
         <div className="spacer"></div>
@@ -119,7 +128,7 @@ function UsuariosContenido() {
             <div className="field"><label>Usuario <span className="req">*</span></label><input required value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />{errores.username && <small style={errStyle}>{errores.username}</small>}</div>
             <div className="field"><label>Nombre completo <span className="req">*</span></label><input required value={f.nombreCompleto} onChange={(e) => setF({ ...f, nombreCompleto: e.target.value })} />{errores.nombreCompleto && <small style={errStyle}>{errores.nombreCompleto}</small>}</div>
             <div className="field"><label>Email</label><input {...propsInput("email")} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />{errores.email && <small style={errStyle}>{errores.email}</small>}</div>
-            <div className="field"><label>Contraseña <span className="req">*</span></label><input type="password" required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />{errores.password && <small style={errStyle}>{errores.password}</small>}</div>
+            <div className="field"><label>Contraseña inicial (opcional: si la deja vacía se genera una temporal)</label><input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />{errores.password && <small style={errStyle}>{errores.password}</small>}</div>
             <div className="field"><label>Grado / Cargo</label><input value={f.grado} onChange={(e) => setF({ ...f, grado: e.target.value })} /></div>
             <div className="field"><label>Rol <span className="req">*</span></label>
               <select required value={f.rolId} onChange={(e) => setF({ ...f, rolId: e.target.value })}>

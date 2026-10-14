@@ -3,9 +3,12 @@
 /**
  * Cotizaciones · Módulo Comercial LIMS IDIC (Comercial rondas 1 y 2, oct-2026)
  * -----------------------------------------------------------------------------
- * Estados vigentes: Abierta → Aceptada | Anulada (no hay Vencida ni Revalidada).
- * Las cotizaciones anteriores (borrador/enviada/rechazada/expirada) se muestran
- * como HISTÓRICO de solo lectura.
+ * Estados vigentes: Abierta → Aceptada | Anulada. Una Abierta que supera su
+ * validez pasa sola a Vencida (no se acepta; se puede anular o emitir otra).
+ * Las cotizaciones anteriores (borrador/enviada/rechazada) se muestran como
+ * HISTÓRICO de solo lectura.
+ *  · Botones según permisos: editar/nueva (cotizacion.crear), registrar
+ *    aceptación (cotizacion.aceptar, Sección Ventas), anular (cotizacion.anular).
  *  · Detalle en panel lateral; si está Abierta se edita ahí mismo.
  *  · «Registrar aceptación»: documento OPI/Resolución, OC, correo, pago por
  *    adelantado o disposición del Director (+ con/sin cobro) → genera la OT.
@@ -15,6 +18,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { money, fecha, fechaDia, rut as fmtRut } from "@/lib/format";
+import { usePermisos } from "@/lib/permisos";
 import Panel from "./_components/Panel";
 import CotizacionForm from "./_components/CotizacionForm";
 import {
@@ -26,10 +30,24 @@ import {
   ORIGEN_LABEL,
   ESTADOS_VIGENTES,
   etiquetaDe,
+  fueraDeValidez,
+  porVencer,
   type Opcion,
 } from "./_components/comercial";
 
-type Filtro = "todas" | "abierta" | "aceptada" | "anulada" | "historico";
+type Filtro = "todas" | "abierta" | "porVencer" | "aceptada" | "anulada" | "expirada" | "historico";
+
+/** Qué puede hacer el usuario con una cotización (permiso + estado + validez). */
+interface Acciones { editar: boolean; aceptar: boolean; anular: boolean; motivoNoAceptar?: string }
+function accionesDe(c: any, puede: (p: string) => boolean): Acciones {
+  const vencida = c.estado === "expirada" || ((c.estado === "abierta" || c.estado === "enviada") && fueraDeValidez(c));
+  return {
+    editar: c.estado === "abierta" && !vencida && puede("cotizacion.crear"),
+    aceptar: (c.estado === "abierta" || c.estado === "enviada") && !vencida && puede("cotizacion.aceptar"),
+    anular: (c.estado === "abierta" || c.estado === "expirada") && puede("cotizacion.anular"),
+    motivoNoAceptar: vencida ? `Venció el ${fechaDia(c.validaHasta ?? c.expiraAt)}: emita una nueva cotización.` : undefined,
+  };
+}
 
 const esHistorico = (e: string) => !(ESTADOS_VIGENTES as readonly string[]).includes(e);
 
@@ -43,6 +61,7 @@ export default function CotizacionesPage() {
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [filtro, setFiltro] = useState<Filtro>("todas");
+  const { puede, listo } = usePermisos();
   const [buscar, setBuscar] = useState("");
 
   const [detalle, setDetalle] = useState<any | null>(null);
@@ -80,15 +99,20 @@ export default function CotizacionesPage() {
   useEffect(() => {
     cargar();
     // ?abrir=<id> (al volver de «Nueva cotización») abre directamente el detalle.
-    const id = new URLSearchParams(window.location.search).get("abrir");
+    const qs = new URLSearchParams(window.location.search);
+    const id = qs.get("abrir");
     if (id) abrir(id);
+    // Enlaces desde Mi bandeja: ?porVencer=1 · ?estado=aceptada|abierta|expirada…
+    if (qs.get("porVencer")) setFiltro("porVencer");
+    else if (qs.get("estado") && ["abierta", "aceptada", "anulada", "expirada"].includes(qs.get("estado")!)) setFiltro(qs.get("estado") as Filtro);
   }, [cargar, abrir]);
 
-  const conteo = (f: Filtro) =>
-    cots.filter((c) => (f === "todas" ? true : f === "historico" ? esHistorico(c.estado) : c.estado === f)).length;
+  const pasa = (c: any, f: Filtro) =>
+    f === "todas" ? true : f === "historico" ? esHistorico(c.estado) : f === "porVencer" ? porVencer(c) : c.estado === f;
+  const conteo = (f: Filtro) => cots.filter((c) => pasa(c, f)).length;
 
   const vis = cots.filter((c) => {
-    if (filtro === "historico" ? !esHistorico(c.estado) : filtro !== "todas" && c.estado !== filtro) return false;
+    if (!pasa(c, filtro)) return false;
     const q = buscar.trim().toLowerCase();
     return !q || `${c.codigo} ${c.cliente?.razonSocial ?? ""} ${c.referencia ?? ""}`.toLowerCase().includes(q);
   });
@@ -96,8 +120,10 @@ export default function CotizacionesPage() {
   const chips: { f: Filtro; l: string }[] = [
     { f: "todas", l: "Todas" },
     { f: "abierta", l: "Abiertas" },
+    { f: "porVencer", l: "Por vencer (7 días)" },
     { f: "aceptada", l: "Aceptadas" },
     { f: "anulada", l: "Anuladas" },
+    { f: "expirada", l: "Vencidas" },
     { f: "historico", l: "Histórico" },
   ];
 
@@ -105,7 +131,7 @@ export default function CotizacionesPage() {
     <div>
       <h1 className="page">Cotizaciones <span className="tag">≠ OT</span></h1>
       <p className="subtitle">
-        Abierta → Aceptada (documento de aceptación, genera la OT) o Anulada. Las cotizaciones anteriores al nuevo flujo quedan como histórico de solo lectura.
+        Abierta → Aceptada (documento de aceptación, genera la OT) o Anulada. Si supera su validez pasa a Vencida y ya no se puede aceptar. Las cotizaciones anteriores al nuevo flujo quedan como histórico de solo lectura.
       </p>
 
       {error && <div className="alert warn">{error}</div>}
@@ -118,7 +144,7 @@ export default function CotizacionesPage() {
           </button>
         ))}
         <input placeholder="Buscar por N°, cliente o referencia…" style={{ flex: 1, minWidth: 200 }} value={buscar} onChange={(e) => setBuscar(e.target.value)} />
-        <Link href={"/cotizaciones/nueva" as any} className="btn primary sm">＋ Nueva Cotización</Link>
+        {listo && puede("cotizacion.crear") && <Link href={"/cotizaciones/nueva" as any} className="btn primary sm">＋ Nueva Cotización</Link>}
       </div>
 
       <div className="card card--table">
@@ -137,7 +163,7 @@ export default function CotizacionesPage() {
             </tr>
           </thead>
           <tbody>
-            {vis.map((c) => (
+            {vis.map((c) => { const acc = accionesDe(c, puede); return (
               <tr key={c.id}>
                 <td>
                   <button className="codigo" style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textDecoration: "underline" }} onClick={() => abrir(c.id)}>
@@ -148,7 +174,10 @@ export default function CotizacionesPage() {
                 <td>{c.formato ?? "—"}</td>
                 <td><EstadoChip estado={c.estado} /></td>
                 <td className="num">{money(c.total, c.moneda === "USD" ? "USD" : "CLP")}</td>
-                <td>{fechaDia(c.validaHasta ?? c.expiraAt)}</td>
+                <td>
+                  {fechaDia(c.validaHasta ?? c.expiraAt)}
+                  {porVencer(c) && <span className="pill amber" style={{ marginLeft: 6 }}>por vencer</span>}
+                </td>
                 <td>
                   {c.ot ? (
                     <>
@@ -162,17 +191,17 @@ export default function CotizacionesPage() {
                 <td style={{ color: "var(--muted)" }}>{fechaDia(c.fechaEmision ?? c.createdAt)}</td>
                 <td>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    <button className="btn outline sm" onClick={() => abrir(c.id)}>{c.estado === "abierta" ? "Ver / editar" : "Ver"}</button>
-                    {(c.estado === "abierta" || c.estado === "enviada") && (
+                    <button className="btn outline sm" onClick={() => abrir(c.id)}>{acc.editar ? "Ver / editar" : "Ver"}</button>
+                    {acc.aceptar && (
                       <button className="btn primary sm" onClick={() => setAceptando(c)}>Registrar aceptación</button>
                     )}
-                    {c.estado === "abierta" && (
+                    {acc.anular && (
                       <button className="btn outline sm" onClick={() => setAnulando(c)}>Anular</button>
                     )}
                   </div>
                 </td>
               </tr>
-            ))}
+            ); })}
             {!cargando && vis.length === 0 && (
               <tr><td colSpan={9} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Sin cotizaciones para este filtro.</td></tr>
             )}
@@ -190,7 +219,7 @@ export default function CotizacionesPage() {
           titulo={<>Cotización <span className="codigo">{detalle.codigo}</span> <EstadoChip estado={detalle.estado} /></>}
           onCerrar={() => { setDetalle(null); setEditando(false); }}
         >
-          {editando && detalle.estado === "abierta" ? (
+          {editando && accionesDe(detalle, puede).editar ? (
             <CotizacionForm
               modo="editar"
               inicial={detalle}
@@ -205,6 +234,7 @@ export default function CotizacionesPage() {
             <DetalleCotizacion
               cot={detalle}
               params={params}
+              acciones={accionesDe(detalle, puede)}
               onEditar={() => setEditando(true)}
               onAceptar={() => setAceptando(detalle)}
               onAnular={() => setAnulando(detalle)}
@@ -245,7 +275,7 @@ export default function CotizacionesPage() {
 /* --------------------------------------------------------------------------
  * Detalle de solo lectura (aceptadas, anuladas, históricas o Abierta sin editar)
  * ------------------------------------------------------------------------ */
-function DetalleCotizacion({ cot, params, onEditar, onAceptar, onAnular }: { cot: any; params: Record<string, Opcion[]>; onEditar: () => void; onAceptar: () => void; onAnular: () => void }) {
+function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, onAnular }: { cot: any; params: Record<string, Opcion[]>; acciones: Acciones; onEditar: () => void; onAceptar: () => void; onAnular: () => void }) {
   const mon = cot.moneda === "USD" ? "USD" : "CLP";
   const Campo = ({ l, v, full }: { l: string; v: React.ReactNode; full?: boolean }) => (
     <div className="field readonly" style={full ? { gridColumn: "1 / -1" } : undefined}>
@@ -255,6 +285,9 @@ function DetalleCotizacion({ cot, params, onEditar, onAceptar, onAnular }: { cot
   );
   return (
     <div>
+      {acciones.motivoNoAceptar && (
+        <div className="alert warn">Cotización vencida. {acciones.motivoNoAceptar}{cot.vencidaAt ? ` (marcada vencida el ${fecha(cot.vencidaAt)})` : ""}</div>
+      )}
       {esHistorico(cot.estado) && (
         <div className="alert info">Cotización histórica (estado «{cot.estado}»): se conserva de solo lectura.</div>
       )}
@@ -262,9 +295,9 @@ function DetalleCotizacion({ cot, params, onEditar, onAceptar, onAnular }: { cot
         <div className="alert warn">La OT {cot.ot.codigo} está con <b>OPI pendiente</b> (disposición del Director con cobro). Registre la OPI en la OT.</div>
       )}
       <div className="toolbar" style={{ marginBottom: 10, gap: 6 }}>
-        {cot.estado === "abierta" && <button className="btn primary sm" onClick={onEditar}>Editar</button>}
-        {(cot.estado === "abierta" || cot.estado === "enviada") && <button className="btn success sm" onClick={onAceptar}>Registrar aceptación</button>}
-        {cot.estado === "abierta" && <button className="btn outline sm" onClick={onAnular}>Anular</button>}
+        {acciones.editar && <button className="btn primary sm" onClick={onEditar}>Editar</button>}
+        {acciones.aceptar && <button className="btn success sm" onClick={onAceptar}>Registrar aceptación</button>}
+        {acciones.anular && <button className="btn outline sm" onClick={onAnular}>Anular</button>}
         <div className="spacer" />
         {cot.ot && <Link href={`/ot/${cot.ot.id}` as any} className="btn outline sm">Ir a la OT {cot.ot.codigo}</Link>}
       </div>

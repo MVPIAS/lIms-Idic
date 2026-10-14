@@ -73,7 +73,7 @@ Reglas del seed: las unidades existentes **no se duplican**; solo se completan l
 | INSPECTOR | Inspector (LCA · BPCH) | OPERATIVO | UNIDAD | Base de laboratorio + transferir muestras. |
 | METROLOGO | Metrólogo | OPERATIVO | UNIDAD | Base de laboratorio + `metrologia.ver/crear`, `equipo.gestionar`. |
 | RECEPCION | Recepción de muestras | OPERATIVO | GLOBAL | Clientes (ver), muestras (ver/crear/transferir), OT (ver), evidencias SAEC (ver/crear/custodiar). |
-| COMERCIAL | Ejecutivo de Ventas | OPERATIVO | GLOBAL | Clientes (ver/crear/editar), cotizaciones (ver/crear), OT (ver/crear), muestras y facturas (ver). |
+| COMERCIAL | Ejecutivo de Ventas | OPERATIVO | GLOBAL | Clientes (ver/crear/editar), cotizaciones (ver/crear) y **registrar aceptación / anular** (`cotizacion.aceptar`, `cotizacion.anular`), OT (ver/crear), muestras y facturas (ver). |
 | PLANIFICACION | Planificación y Control | OPERATIVO | GLOBAL | Control de OT (ver/crear), costeo (`cotizacion.crear`), resultados (SPC), facturas, auditoría (lectura). |
 | MUESTREO | Muestreo | OPERATIVO | GLOBAL | OT (ver), muestras (ver/crear/transferir), clientes y cotizaciones (ver). |
 | FINANZAS | Finanzas | SOPORTE | GLOBAL | Facturas: ver/emitir/cobrar (incluye pagos y notas de crédito), clientes/cotizaciones/OT (ver). |
@@ -86,6 +86,11 @@ Reglas del seed: las unidades existentes **no se duplican**; solo se completan l
 **Alias legados** (BD antiguas): `JEFELAB ≈ JEFE_LAB`, `JEFEDCO ≈ JEFE_DEPTO`, `ANALISTA_SR ≈ REVISOR`. Heredan nivel/alcance y los permisos por defecto del canónico; el código conserva su fila (no se borra nada).
 
 **Permisos nuevos**: `admin.estructura`, `admin.roles`, `admin.firmas` (además de `admin.usuarios`). Se conceden a ADMIN (SUPERADMIN pasa siempre).
+
+**Permisos de `align_comercial_usuarios.sql`** (docs/FLUJO_COMERCIAL_USUARIOS.md):
+`cotizacion.aceptar` y `cotizacion.anular` (COMERCIAL + todo rol que ya tenía
+`cotizacion.aprobar`); `nc.ver` y `nc.crear` (roles con `nc.gestionar` + REVISOR,
+ANALISTA, ANALISTA_SR, TECNICO, METROLOGO, INSPECTOR; LECTOR solo `nc.ver`).
 
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
