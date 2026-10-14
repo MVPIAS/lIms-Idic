@@ -412,7 +412,12 @@ export class OtController {
     await this.alcance.exigirUnidad(req, actual.unidadPrincipal, `la OT ${id}`);
 
     if (dto.estado !== undefined) {
-      if (dto.estado === "cerrada") this.exigeCerrar(req);
+      if (dto.estado === "cerrada") {
+        this.exigeCerrar(req);
+        // El cierre exige documentos oficiales y entregados y genera la factura:
+        // va por POST /ot/:id/cerrar (ot-cierre.controller.ts), no por el PATCH.
+        throw new BadRequestException("Para cerrar la OT use «Cerrar OT» (POST /ot/:id/cerrar).");
+      }
       validarTransicion("ot", actual.estado, dto.estado);
     }
 

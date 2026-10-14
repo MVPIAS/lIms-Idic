@@ -1,6 +1,6 @@
 import {
-  Body, Controller, Get, Module, Param, Patch, Post, Req, UseGuards, Injectable, ParseUUIDPipe,
-  ConflictException, ForbiddenException,
+  Body, Controller, Get, Module, Param, Patch, Post, Put, Query, Req, UseGuards, Injectable, ParseUUIDPipe,
+  ConflictException, ForbiddenException, Delete, BadRequestException, NotFoundException,
 } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
@@ -10,6 +10,15 @@ import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
+import {
+  ESTADOS_FACTURA,
+  esNumeroBorrador,
+  estadoPorPagos,
+  lineasDesdeCotizacion,
+  numeroBorrador,
+  totales,
+  validarPago,
+} from "./reglas-factura";
 
 /* ===================== FACTURAS ===================== */
 @Injectable()
@@ -41,6 +50,7 @@ export class FacturaService extends BaseCrudService {
         otId: dto.otId ?? null,
         neto,
         ivaMonto,
+        ivaPct,
         total: neto + ivaMonto,
         estado: dto.estado ?? "emitida",
         origen: dto.origen ?? "sistema",
@@ -54,7 +64,7 @@ export class FacturaService extends BaseCrudService {
     const f = await this.detalle(id, tenantId); // scope por tenant (404 si es de otro)
     const pagado = f.pagos.reduce((a: number, p: any) => a + Number(p.monto), 0);
     const nc = f.notasCredito.reduce((a: number, n: any) => a + Number(n.monto), 0);
-    return { total: Number(f.total), pagado, notasCredito: nc, saldo: Number(f.total) - pagado - nc };
+    return { total: Number(f.total), pagado, notasCredito: nc, saldo: Number(f.total) - pagado - nc, estado: f.estado };
   }
   /** ¿Otra factura del tenant ya usa ese número? (UNIQUE(tenant_id, numero)). */
   async numeroOcupado(numero: string, exceptoId: string, tenantId?: string) {
@@ -63,6 +73,166 @@ export class FacturaService extends BaseCrudService {
       select: { id: true },
     });
     return !!otra;
+  }
+
+  /**
+   * Listado para Finanzas con filtro por estado (?estado=pendiente = «Pendiente
+   * de facturar», ?estado=por_cobrar = emitidas y con pago parcial) y, por fila,
+   * cliente, OT, lo pagado y el saldo.
+   */
+  async listarFinanzas(q: { page?: number; limit?: number; search?: string; estado?: string }, tenantId?: string) {
+    const where: any = {};
+    if (q.estado) where.estado = q.estado === "por_cobrar" ? { in: ["emitida", "parcial"] } : q.estado;
+    const r = await this.listar({ page: q.page, limit: q.limit, search: q.search, where }, tenantId);
+    const clienteIds = [...new Set(r.data.map((f: any) => f.clienteId).filter(Boolean))] as string[];
+    const otIds = [...new Set(r.data.map((f: any) => f.otId).filter(Boolean))] as string[];
+    const [clientes, ots] = await Promise.all([
+      clienteIds.length
+        ? this.prisma.cliente.findMany({ where: { id: { in: clienteIds } }, select: { id: true, razonSocial: true, rut: true } })
+        : Promise.resolve([] as { id: string; razonSocial: string; rut: string | null }[]),
+      otIds.length
+        ? this.prisma.ordenTrabajo.findMany({ where: { id: { in: otIds } }, select: { id: true, codigo: true } })
+        : Promise.resolve([] as { id: string; codigo: string }[]),
+    ]);
+    const cli = new Map<string, any>(clientes.map((c) => [c.id, c]));
+    const otm = new Map<string, any>(ots.map((o) => [o.id, o]));
+    return {
+      ...r,
+      data: r.data.map((f: any) => {
+        const pagado = (f.pagos ?? []).reduce((a: number, p: any) => a + Number(p.monto), 0);
+        const nc = (f.notasCredito ?? []).reduce((a: number, x: any) => a + Number(x.monto), 0);
+        return {
+          ...f,
+          cliente: cli.get(f.clienteId) ?? null,
+          ot: f.otId ? otm.get(f.otId) ?? null : null,
+          pagado,
+          saldo: Number(f.total) - pagado - nc,
+        };
+      }),
+    };
+  }
+
+  /**
+   * Factura en BORRADOR («pendiente») al cerrar una OT con cobro. Va dentro de
+   * la transacción del cierre (`tx`). Importes, moneda, IVA y centro de costo
+   * salen de la cotización ACEPTADA de la OT; si la OT no tiene cotización (o
+   * no está aceptada) el borrador nace sin líneas y Finanzas las completa antes
+   * de emitir. Idempotente: si ya existe la factura del cierre de esa OT, la devuelve.
+   */
+  async crearBorradorDesdeOt(
+    tx: any,
+    ot: { id: string; codigo: string; tenantId: string; clienteId: string; cotizacionId: string | null; centroCostoId: string | null },
+    usuarioId: string | null,
+  ) {
+    const existente = await tx.factura.findFirst({
+      where: { otId: ot.id, origen: "cierre_ot", deletedAt: null, NOT: { estado: "anulada" } },
+      include: { lineas: true },
+    });
+    if (existente) return existente;
+
+    const cot = ot.cotizacionId
+      ? await tx.cotizacion.findFirst({ where: { id: ot.cotizacionId, tenantId: ot.tenantId }, include: { lineas: true } })
+      : null;
+    const aceptada = cot && cot.estado === "aceptada" ? cot : null;
+    const moneda = aceptada?.moneda ?? "CLP";
+    const ivaPct = aceptada ? Number(aceptada.ivaPct) : 19;
+    const lineas = aceptada ? lineasDesdeCotizacion(aceptada) : [];
+    const t = totales(lineas, ivaPct, moneda);
+    const obs = aceptada
+      ? `Generada al cerrar la OT ${ot.codigo} con los importes de la cotización ${aceptada.codigo}.`
+      : cot
+        ? `Generada al cerrar la OT ${ot.codigo}. La cotización ${cot.codigo} no está aceptada (${cot.estado}): complete las líneas antes de emitir.`
+        : `Generada al cerrar la OT ${ot.codigo}, que no tiene cotización: complete las líneas antes de emitir.`;
+    return tx.factura.create({
+      data: {
+        tenantId: ot.tenantId,
+        numero: numeroBorrador(ot.codigo),
+        clienteId: ot.clienteId,
+        otId: ot.id,
+        cotizacionId: cot?.id ?? null,
+        centroCostoId: ot.centroCostoId ?? aceptada?.centroCostoId ?? null,
+        moneda,
+        ivaPct,
+        neto: t.neto,
+        ivaMonto: t.ivaMonto,
+        total: t.total,
+        estado: "pendiente",
+        origen: "cierre_ot",
+        observaciones: obs,
+        creadaPor: usuarioId,
+        lineas: { create: lineas },
+      },
+      include: { lineas: true },
+    });
+  }
+
+  /** Finanzas revisa el borrador y lo EMITE con el folio real. */
+  async emitir(id: string, dto: { numero: string; fechaEmision?: Date }, tenantId: string | undefined, usuarioId: string | null) {
+    const f = await this.detalle(id, tenantId);
+    if (f.estado !== "pendiente")
+      throw new ConflictException(`La factura ${f.numero} no está pendiente de emitir (estado: ${f.estado}).`);
+    if (esNumeroBorrador(dto.numero))
+      throw new BadRequestException("Indique el folio real de la factura (no el provisional PEND-).");
+    if (!f.lineas.length || Number(f.total) <= 0)
+      throw new ConflictException("La factura no tiene importes: complete las líneas antes de emitirla.");
+    if (await this.numeroOcupado(dto.numero, id, tenantId))
+      throw new ConflictException(`Ya existe otra factura con el número ${dto.numero}`);
+    return this.prisma.factura.update({
+      where: { id },
+      data: {
+        numero: dto.numero,
+        fechaEmision: dto.fechaEmision ?? new Date(),
+        estado: "emitida",
+        emitidaPor: usuarioId,
+        emitidaAt: new Date(),
+      },
+      include: { lineas: true, pagos: true, notasCredito: true },
+    });
+  }
+
+  /** Corrige las líneas de un borrador (solo «pendiente»): recalcula neto, IVA y total. */
+  async reemplazarLineas(
+    id: string,
+    dto: { lineas: { descripcion: string; cantidad: number; precioUnitario: number }[]; ivaPct?: number; observaciones?: string },
+    tenantId?: string,
+  ) {
+    const f = await this.detalle(id, tenantId);
+    if (f.estado !== "pendiente")
+      throw new ConflictException(`Solo se corrigen las líneas de una factura pendiente de emitir (estado: ${f.estado}).`);
+    const lineas = dto.lineas.map((l) => ({
+      descripcion: l.descripcion,
+      cantidad: l.cantidad,
+      precioUnitario: l.precioUnitario,
+      subtotal: l.cantidad * l.precioUnitario,
+    }));
+    const ivaPct = dto.ivaPct ?? Number(f.ivaPct ?? 19);
+    const t = totales(lineas, ivaPct, f.moneda);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.lineaFactura.deleteMany({ where: { facturaId: id } });
+      return tx.factura.update({
+        where: { id },
+        data: {
+          ivaPct,
+          neto: t.neto,
+          ivaMonto: t.ivaMonto,
+          total: t.total,
+          ...(dto.observaciones !== undefined ? { observaciones: dto.observaciones } : {}),
+          lineas: { create: lineas },
+        },
+        include: { lineas: true, pagos: true, notasCredito: true },
+      });
+    });
+  }
+
+  /** Recalcula el estado de una factura emitida según sus pagos y notas de crédito. */
+  async recalcularEstado(facturaId: string, tx: any = this.prisma) {
+    const f = await tx.factura.findUnique({ where: { id: facturaId }, include: { pagos: true, notasCredito: true } });
+    if (!f || !["emitida", "parcial", "pagada"].includes(f.estado)) return f;
+    const pagado = f.pagos.reduce((a: number, p: any) => a + Number(p.monto), 0);
+    const nc = f.notasCredito.reduce((a: number, x: any) => a + Number(x.monto), 0);
+    const estado = estadoPorPagos(Number(f.total), pagado, nc);
+    if (estado !== f.estado) await tx.factura.update({ where: { id: facturaId }, data: { estado } });
+    return { ...f, estado };
   }
 }
 const LineaFacturaDto = z.object({
@@ -75,20 +245,35 @@ const FacturaCreate = z.object({
   clienteId: z.string().uuid(),
   otId: z.string().uuid().optional(),
   ivaPct: z.number().min(0).max(100).default(19),
-  estado: z.enum(["emitida", "pagada", "anulada"]).default("emitida"),
+  // Una factura manual nace emitida (o pendiente, como borrador). Los estados
+  // parcial/pagada los fija el registro de pagos, no el alta.
+  estado: z.enum(["pendiente", "emitida"]).default("emitida"),
   origen: z.string().max(20).optional(),
   lineas: z.array(LineaFacturaDto).min(1),
+});
+const FacturaEmitir = z.object({
+  numero: z.string().trim().min(1, "Indique el folio de la factura").max(30),
+  fechaEmision: z.coerce.date().optional(),
+});
+/** Las líneas de ajuste (descuento) pueden ser negativas. */
+const FacturaLineas = z.object({
+  lineas: z
+    .array(z.object({ descripcion: z.string().trim().min(1), cantidad: z.number().positive(), precioUnitario: z.number() }))
+    .min(1, "La factura necesita al menos una línea"),
+  ivaPct: z.number().min(0).max(100).optional(),
+  observaciones: z.string().max(2000).optional(),
 });
 /**
  * PATCH /facturas/:id · datos SEGUROS del documento (nunca montos: neto/IVA/total
  * se derivan de las líneas al emitir).
- *   - `estado` (emitida/pagada/anulada) → acto de cobranza: `factura.cobrar`.
+ *   - `estado` → solo «anulada» (acto de cobranza: `factura.cobrar`). Emitir va
+ *     por POST /facturas/:id/emitir; parcial/pagada los calcula el registro de pagos.
  *   - `numero`, `fechaEmision`, `origen` → corrección del documento emitido:
  *     exige ADEMÁS `factura.emitir` (quien cobra no reescribe el folio).
  */
 const FacturaUpdate = z
   .object({
-    estado: z.enum(["emitida", "pagada", "anulada"]).optional(),
+    estado: z.enum(["anulada"]).optional(),
     numero: z.string().trim().min(1).max(30).optional(),
     fechaEmision: z.coerce.date().optional(),
     origen: z.string().max(20).optional(),
@@ -104,14 +289,11 @@ function tienePermiso(req: any, codigo: string): boolean {
 }
 
 /**
- * `editar` usa `factura.cobrar`: el PATCH de estado (emitida/pagada/anulada) es
- * el acto de cobranza. Ver FacturaUpdate para los campos del documento.
+ * `editar` usa `factura.cobrar`: el PATCH de estado (anular) es un acto de
+ * cobranza. Ver FacturaUpdate para los campos del documento.
  *
- * NOTA: la máquina de estados de factura (emitida → pagada | aviso_1 → aviso_2 →
- * aviso_3 → prejudicial → cde, schema.sql:981) NO se implementa aquí: el enum Zod
- * vigente solo admite emitida/pagada/anulada y el escalamiento de cobranza a CDE
- * (RF-B06.3 / flujo F18) está ausente del producto. Ampliarlo es trabajo aparte;
- * este cambio no toca ese contrato para no romper lo que hoy funciona.
+ * NOTA: el escalamiento de cobranza (aviso_1 → aviso_2 → aviso_3 → prejudicial
+ * → cde, schema.sql:981, RF-B06.3 / flujo F18) sigue fuera del producto.
  */
 @ApiTags("facturas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("facturas")
 @RequierePermisoCrud({
@@ -123,6 +305,20 @@ function tienePermiso(req: any, codigo: string): boolean {
 export class FacturaController extends BaseCrudController {
   protected updateSchema = FacturaUpdate;
   constructor(protected svc: FacturaService) { super(); }
+
+  /** Listado con filtro por estado (?estado=pendiente | por_cobrar | emitida | parcial | pagada | anulada). */
+  @Get()
+  @RequierePermiso("factura.ver")
+  listar(
+    @Query("page") page = "1",
+    @Query("limit") limit = "20",
+    @Query("search") search?: string,
+    @Req() req?: any,
+    @Query("estado") estado?: string,
+  ) {
+    const e = estado && ([...ESTADOS_FACTURA, "por_cobrar"] as string[]).includes(estado) ? estado : undefined;
+    return this.svc.listarFinanzas({ page: parseInt(page), limit: parseInt(limit), search, estado: e }, req?.user?.tenantId);
+  }
 
   @Patch(":id")
   @RequierePermiso("factura.cobrar")
@@ -139,6 +335,11 @@ export class FacturaController extends BaseCrudController {
         throw new ConflictException(`Ya existe otra factura con el número ${dto.numero}`);
       }
     }
+    if (dto.estado === "anulada") {
+      const s = await this.svc.saldo(id, tenantId);
+      if (s.pagado > 0)
+        throw new ConflictException("La factura tiene pagos registrados: no se anula. Emita una nota de crédito.");
+    }
     return this.svc.actualizar(id, dto, tenantId);
   }
 
@@ -152,13 +353,73 @@ export class FacturaController extends BaseCrudController {
   saldo(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.saldo(id, req?.user?.tenantId);
   }
+
+  /** Finanzas emite el borrador «Pendiente de facturar» con el folio real. */
+  @Post(":id/emitir")
+  @RequierePermiso("factura.emitir")
+  emitir(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.emitir(id, FacturaEmitir.parse(body ?? {}), req?.user?.tenantId, req?.user?.sub ?? null);
+  }
+
+  /** Corrige las líneas de un borrador antes de emitirlo. */
+  @Put(":id/lineas")
+  @RequierePermiso("factura.emitir")
+  lineas(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.reemplazarLineas(id, FacturaLineas.parse(body ?? {}), req?.user?.tenantId);
+  }
 }
 
 /* ===================== PAGOS ===================== */
 @Injectable()
 export class PagoService extends BaseCrudService {
-  constructor(prisma: PrismaService) {
+  constructor(
+    prisma: PrismaService,
+    private readonly facturas: FacturaService,
+  ) {
     super(prisma, { model: "pago", search: ["referencia"], include: { factura: true }, tenant: false, softDelete: false, orderBy: { fecha: "desc" } });
+  }
+
+  /** `pago` no tiene tenant_id: se acota por el tenant de su factura. */
+  async listar(q: { page?: number; limit?: number; search?: string; where?: any } = {}, tenantId?: string) {
+    return super.listar({ ...q, where: { ...(q.where ?? {}), ...(tenantId ? { factura: { tenantId } } : {}) } });
+  }
+  async detalle(id: string, tenantId?: string) {
+    const p = await super.detalle(id);
+    if (tenantId && p.factura?.tenantId !== tenantId) throw new NotFoundException(`pago ${id} no encontrado`);
+    return p;
+  }
+
+  /**
+   * Registra un pago: la factura debe estar emitida (o con pago parcial) y el
+   * monto no puede superar el saldo. Actualiza el estado (parcial / pagada).
+   */
+  async registrar(dto: { facturaId: string; monto: number; medio?: string; referencia?: string; fecha?: Date }, tenantId?: string) {
+    const s = await this.facturas.saldo(dto.facturaId, tenantId); // 404 si es de otro tenant
+    const motivo = validarPago(s.estado, s.saldo, dto.monto);
+    if (motivo) throw new ConflictException(motivo);
+    return this.prisma.$transaction(async (tx) => {
+      const pago = await tx.pago.create({
+        data: {
+          facturaId: dto.facturaId,
+          monto: dto.monto,
+          medio: dto.medio ?? null,
+          referencia: dto.referencia ?? null,
+          ...(dto.fecha ? { fecha: dto.fecha } : {}),
+        },
+      });
+      const factura = await this.facturas.recalcularEstado(dto.facturaId, tx);
+      return { ...pago, factura: factura ? { id: factura.id, numero: factura.numero, estado: factura.estado } : null };
+    });
+  }
+
+  /** Borrar un pago (corrección) recalcula el estado de la factura. */
+  async eliminar(id: string, tenantId?: string) {
+    const p = await this.detalle(id, tenantId);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.pago.delete({ where: { id } });
+      await this.facturas.recalcularEstado(p.facturaId, tx);
+      return { ok: true, id };
+    });
   }
 }
 const PagoCreate = z.object({
@@ -166,6 +427,7 @@ const PagoCreate = z.object({
   monto: z.number().positive(),
   medio: z.string().max(40).optional(),
   referencia: z.string().max(80).optional(),
+  fecha: z.coerce.date().optional(),
 });
 @ApiTags("pagos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("pagos")
 @RequierePermisoCrud({
@@ -178,6 +440,25 @@ export class PagoController extends BaseCrudController {
   protected createSchema = PagoCreate;
   protected updateSchema = PagoCreate.partial();
   constructor(protected svc: PagoService) { super(); }
+
+  @Post()
+  @RequierePermiso("factura.cobrar")
+  crear(@Body() body: unknown, @Req() req: any) {
+    return this.svc.registrar(PagoCreate.parse(body), req?.user?.tenantId);
+  }
+
+  /** Un pago no se edita (cambiaría el saldo sin rastro): se elimina y se registra de nuevo. */
+  @Patch(":id")
+  @RequierePermiso("factura.cobrar")
+  actualizar(): never {
+    throw new BadRequestException("Un pago no se modifica: elimínelo y regístrelo de nuevo.");
+  }
+
+  @Delete(":id")
+  @RequierePermiso("factura.cobrar")
+  eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.eliminar(id, req?.user?.tenantId);
+  }
 }
 
 /* ===================== NOTAS DE CRÉDITO ===================== */
@@ -216,5 +497,7 @@ export class NotaCreditoController extends BaseCrudController {
 @Module({
   controllers: [FacturaController, PagoController, NotaCreditoController],
   providers: [FacturaService, PagoService, NotaCreditoService],
+  // El cierre de la OT (ot/ot-cierre.controller.ts) crea el borrador de factura.
+  exports: [FacturaService],
 })
 export class FacturacionModule {}
