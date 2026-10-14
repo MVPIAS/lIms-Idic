@@ -25,6 +25,38 @@ const OT_CERRADA = `('cerrada','anulada')`;
 const HOY_CL = `(now() AT TIME ZONE 'America/Santiago')::date`;
 
 /**
+ * Permiso que exige la pantalla a la que lleva cada tarjeta (el mismo que el
+ * menú, apps/web/lib/navegacion.ts). Se busca el prefijo más largo de la ruta.
+ */
+const PERMISO_DE_RUTA: [string, string][] = [
+  ["/informes/por-firmar", "documento.firmar"],
+  ["/informes", "certificado.emitir"],
+  ["/captura-ot", "resultado.ver"],
+  ["/certificados", "ot.ver"],
+  ["/ot", "ot.ver"],
+  ["/cotizaciones", "cotizacion.ver"],
+  ["/facturas", "factura.ver"],
+  ["/ordenes-compra", "factura.ver"],
+  ["/no-conformidades", "nc.ver"],
+  ["/admin", "admin.usuarios"],
+];
+
+/**
+ * Quita las tarjetas que el usuario no podría abrir (p. ej. Recepción, perfil
+ * «analista», no ve «Resultados devueltos» porque no tiene `resultado.ver`).
+ * Sin lista de permisos no filtra; SUPERADMIN lo ve todo.
+ */
+export function filtrarPorPermiso(items: ItemBandeja[], permisos?: string[] | null, roles: string[] = []): ItemBandeja[] {
+  if (!permisos || roles.includes("SUPERADMIN")) return items;
+  const tiene = new Set(permisos);
+  return items.filter((i) => {
+    const ruta = i.ruta.split("?")[0];
+    const regla = PERMISO_DE_RUTA.filter(([p]) => ruta === p || ruta.startsWith(`${p}/`)).sort((a, b) => b[0].length - a[0].length)[0];
+    return !regla || tiene.has(regla[1]);
+  });
+}
+
+/**
  * Bandeja «qué tengo pendiente» por perfil. Cada conteo es una consulta SQL
  * independiente y DEFENSIVA: si la tabla o columna no existe en esta BD (BD
  * antigua sin algún align_*.sql), ese ítem vale 0 y no se cae la bandeja.
@@ -55,7 +87,18 @@ export class BandejaService {
     }
   }
 
-  async construir(ctx: ContextoAlcance, perfil: Perfil, tenantId: string | undefined): Promise<ItemBandeja[]> {
+  /** Bandeja del perfil, sin las tarjetas cuya pantalla el usuario no puede abrir (si se pasan sus permisos). */
+  async construir(
+    ctx: ContextoAlcance,
+    perfil: Perfil,
+    tenantId: string | undefined,
+    permisos?: string[] | null,
+    roles: string[] = [],
+  ): Promise<ItemBandeja[]> {
+    return filtrarPorPermiso(await this.tarjetas(ctx, perfil, tenantId), permisos, roles);
+  }
+
+  private async tarjetas(ctx: ContextoAlcance, perfil: Perfil, tenantId: string | undefined): Promise<ItemBandeja[]> {
     // $1 = tenant (o NULL), $2 = unidades visibles (o NULL = todas), $3 = usuario
     const tenant = tenantId ?? null;
     const unidades = ctx.esGlobal ? null : ctx.unidadIds;
@@ -263,7 +306,7 @@ export class BandejaService {
     const porEntregar = async () =>
       item("documentos_por_entregar", "Documentos por entregar", "Informes oficiales sin entrega registrada", await q.documentosPorEntregar(), "/certificados?estado=por_entregar", "warn");
     const abiertas = async () =>
-      item("ot_abiertas", "OT abiertas", "OT en curso en su alcance (indicador)", await q.otAbiertas(), "/ot", "info");
+      item("ot_abiertas", "OT abiertas", "OT en curso en su alcance (indicador)", await q.otAbiertas(), "/ot?estado=abiertas", "info");
     // Las tarjetas de resultados abren «Captura y revisión por OT» ya filtrada.
     const porRevisar = async () =>
       item("resultados_por_revisar", "Resultados por revisar", "Resultados capturados pendientes de revisión nivel 1", await q.resultadosEstado(["capturado"]), "/captura-ot?estado=capturado", "warn");
