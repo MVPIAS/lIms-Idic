@@ -82,6 +82,25 @@ export class FirmaService extends BaseCrudService {
   constructor(prisma: PrismaService) {
     super(prisma, { model: "firma", search: [], tenant: false, softDelete: false, orderBy: { registradaAt: "desc" } });
   }
+  /**
+   * La imagen de firma (firma.imagen_data, align_firma_cierre.sql) NO sale en el
+   * listado ni en el detalle: `firma.registrar` lo tiene casi todo el personal
+   * y no debe poder descargarse la firma de otro. Se informa solo si existe.
+   * Cada usuario ve la suya en GET /mi-firma (firmas-imagen.controller.ts).
+   */
+  private sinImagen(f: any) {
+    if (!f) return f;
+    const { imagenData, ...resto } = f;
+    return { ...resto, tieneImagen: !!imagenData };
+  }
+  async listar(q: any = {}, tenantId?: string) {
+    const r = await super.listar(q, tenantId);
+    return { ...r, data: r.data.map((f: any) => this.sinImagen(f)) };
+  }
+  async detalle(id: string, tenantId?: string) {
+    return this.sinImagen(await super.detalle(id, tenantId));
+  }
+
   /** Registra/actualiza la firma de un usuario (upsert por usuario_id). */
   async registrar(dto: any) {
     return this.prisma.firma.upsert({
