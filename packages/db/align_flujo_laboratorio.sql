@@ -21,6 +21,7 @@
 --   7. Formulario de captura estándar: especificación por ensayo de la orden
 --      (catálogo u orden), tipo de dato numérico / atributo, lecturas de la
 --      fórmula y veredicto de la muestra.
+--   8. Correlativo de OT al día con los códigos existentes (el SAEC lo adelantaba).
 -- =============================================================================
 
 BEGIN;
@@ -171,5 +172,18 @@ UPDATE resultado SET espec_catalogo = jsonb_build_object(
 ALTER TABLE muestra ADD COLUMN IF NOT EXISTS veredicto    VARCHAR(20);
 ALTER TABLE muestra ADD COLUMN IF NOT EXISTS veredicto_at TIMESTAMPTZ;
 COMMENT ON COLUMN muestra.veredicto IS 'cumple | no_cumple | informativo | pendiente · agregado de los ensayos de la muestra (lo recalcula la API en cada captura).';
+
+-- --- 8. Correlativo de OT al día ----------------------------------------------------
+-- El alta automática del SAEC numeraba sus OT con MAX()+1 propio, por delante
+-- del correlativo atómico (ot_correlativo); la siguiente OT normal chocaba con
+-- el código. Ahora el SAEC usa el correlativo común; aquí se pone al día con
+-- los códigos OT-AAAA-NNNN ya existentes. Solo sube, nunca baja.
+INSERT INTO ot_correlativo (tenant_id, anio, ultimo)
+SELECT o.tenant_id, substring(o.codigo FROM '^OT-(\d{4})-')::int, max(substring(o.codigo FROM '^OT-\d{4}-(\d+)$')::int)
+  FROM orden_trabajo o
+ WHERE o.codigo ~ '^OT-\d{4}-\d+$'
+ GROUP BY 1, 2
+ON CONFLICT (tenant_id, anio) DO UPDATE
+   SET ultimo = GREATEST(ot_correlativo.ultimo, EXCLUDED.ultimo), updated_at = now();
 
 COMMIT;
