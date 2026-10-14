@@ -95,7 +95,7 @@ export default function SaecArmasPage() {
       const [a, e, o] = await Promise.all([
         fetch(`${API}/armas?${params}`, { headers: auth() }).then((x) => x.json()),
         fetch(`${API}/evidencias?tipo=arma&limit=200`, { headers: auth() }).then((x) => x.json()),
-        fetch(`${API}/ot`, { headers: auth() }).then((x) => x.json()).catch(() => []),
+        fetch(`${API}/ot?limit=200`, { headers: auth() }).then((x) => x.json()).catch(() => []),
       ]);
       setRows(a.data ?? (Array.isArray(a) ? a : []));
       setEvidencias(e.data ?? (Array.isArray(e) ? e : []));

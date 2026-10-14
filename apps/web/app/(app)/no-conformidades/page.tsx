@@ -207,7 +207,7 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
 
   useEffect(() => {
     // Opcionales: si el perfil no ve OT o equipos, el campo queda vacío.
-    api.getRaw<any>("ot").then((r) => setOts(filas(r))).catch(() => undefined);
+    api.getRaw<any>("ot?limit=200").then((r) => setOts(filas(r))).catch(() => undefined);
     api.getRaw<any>("equipos?limit=500").then((r) => setEquipos(filas(r))).catch(() => undefined);
   }, []);
 

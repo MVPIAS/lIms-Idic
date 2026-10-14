@@ -129,6 +129,8 @@ const AceptarSchema = z.object({
   fecha: fecha.optional(),
   adjunto: z.string().max(300).optional(),
   conCobro: z.boolean().default(true),
+  /** Laboratorio responsable de la OT (obligatorio si no se deduce del centro de costo / ensayos). */
+  unidadPrincipalId: z.string().uuid().optional(),
 });
 
 const AnularSchema = z.object({
@@ -196,10 +198,14 @@ export class CotizacionController {
     return this.svc.calcularValidezPara(tenantId, clienteId, centroCostoId || null, fechaQ || new Date());
   }
 
+  /**
+   * Lista paginada con búsqueda en el servidor → `{ data, meta, conteos }`.
+   * q (N°, cliente o referencia) · estado (o `historico`) · sinOt=1 · porVencer=1 · page · limit.
+   */
   @Get()
   @RequierePermiso("cotizacion.ver")
-  listar(@Req() req: any) {
-    return this.svc.listar(req?.user?.tenantId);
+  listar(@Query() query: Record<string, string>, @Req() req: any) {
+    return this.svc.listar(req?.user?.tenantId, query ?? {});
   }
 
   @Get(":id")

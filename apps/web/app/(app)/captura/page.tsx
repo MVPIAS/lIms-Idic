@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { fecha } from "@/lib/format";
+import { leerReplicas, llamar, veredictoInfo, ESTADO_RESULTADO } from "@/lib/laboratorio";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -20,13 +22,7 @@ function stats(rep: number[]) {
  * `estado`. El vocabulario es el de `common/estados.ts`: el estado intermedio
  * es `revisado_n1`, no `revisado`.
  */
-const ESTADO: Record<string, { texto: string; pill: string }> = {
-  capturado: { texto: "Capturado", pill: "gray" },
-  revisado_n1: { texto: "Revisado N1", pill: "blue" },
-  aprobado: { texto: "Aprobado", pill: "green" },
-  devuelto: { texto: "Devuelto", pill: "amber" },
-  rechazado: { texto: "Rechazado", pill: "red" },
-};
+const ESTADO = ESTADO_RESULTADO;
 
 export default function CapturaPage() {
   const [muestras, setMuestras] = useState<any[]>([]);
@@ -35,26 +31,59 @@ export default function CapturaPage() {
   const [muestraId, setMuestraId] = useState("");
   const [analitoId, setAnalitoId] = useState("");
   const [equipoId, setEquipoId] = useState("");
-  const [raw, setRaw] = useState("12.4, 12.6, 12.5");
+  // Sin datos de ejemplo: el analista escribe sus lecturas.
+  const [raw, setRaw] = useState("");
   const [saved, setSaved] = useState<any>(null);
   const [error, setError] = useState("");
+  // Búsqueda en el servidor (antes se cargaban las 100 primeras muestras y 200 analitos).
+  const [buscaMuestra, setBuscaMuestra] = useState("");
+  const [buscaAnalito, setBuscaAnalito] = useState("");
+  // Corrección de un resultado devuelto (?corregir=<id>): se recalcula en el mismo registro.
+  const [corrigiendo, setCorrigiendo] = useState<any | null>(null);
 
   useEffect(() => {
     (async () => {
       try {
-        const [m, a, eq] = await Promise.all([
-          fetch(`${API}/muestras?limit=100`, { headers: auth() }).then((x) => x.json()),
-          fetch(`${API}/analitos?limit=200`, { headers: auth() }).then((x) => x.json()),
-          fetch(`${API}/equipos?limit=200`, { headers: auth() }).then((x) => x.json()),
-        ]);
-        setMuestras(m.data ?? []);
-        setAnalitos(a.data ?? []);
+        const eq = await fetch(`${API}/equipos?limit=200`, { headers: auth() }).then((x) => x.json());
         setEquipos(eq.data ?? []);
+        const id = new URLSearchParams(window.location.search).get("corregir");
+        if (id) {
+          const r = await llamar("GET", `/resultados/${id}`);
+          setCorrigiendo(r);
+          setMuestras(r?.muestra ? [r.muestra] : []);
+          setAnalitos(r?.analito ? [r.analito] : []);
+          setMuestraId(r?.muestraId ?? "");
+          setAnalitoId(r?.analitoId ?? "");
+          setEquipoId(r?.equipoId ?? "");
+          setRaw((Array.isArray(r?.replicas) ? r.replicas : []).map((x: number) => String(x).replace(".", ",")).join(" "));
+        }
       } catch (e: any) { setError(e.message); }
     })();
   }, []);
 
-  const replicas = useMemo(() => raw.split(/[,\s;]+/).map((x) => parseFloat(x)).filter((x) => Number.isFinite(x)), [raw]);
+  useEffect(() => {
+    if (corrigiendo) return;
+    const t = setTimeout(() => {
+      llamar("GET", `/muestras?limit=30${buscaMuestra.trim() ? `&search=${encodeURIComponent(buscaMuestra.trim())}` : ""}`)
+        .then((m) => setMuestras(m.data ?? []))
+        .catch((e) => setError(e.message));
+    }, buscaMuestra ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [buscaMuestra, corrigiendo]);
+
+  useEffect(() => {
+    if (corrigiendo) return;
+    const t = setTimeout(() => {
+      llamar("GET", `/analitos?limit=50${buscaAnalito.trim() ? `&search=${encodeURIComponent(buscaAnalito.trim())}` : ""}`)
+        .then((a) => setAnalitos(a.data ?? []))
+        .catch((e) => setError(e.message));
+    }, buscaAnalito ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [buscaAnalito, corrigiendo]);
+
+  // Coma decimal chilena: «12,4» es UNA lectura. Separan: espacio, «;» o «, ».
+  const lectura = useMemo(() => leerReplicas(raw), [raw]);
+  const replicas = lectura.valores;
   const st = useMemo(() => stats(replicas), [replicas]);
 
   // Analito seleccionado y su fórmula (RF-A06). La fórmula NO se evalúa aquí:
@@ -86,12 +115,17 @@ export default function CapturaPage() {
 
   async function guardar() {
     setError(""); setSaved(null);
-    if (!muestraId || !analitoId) { setError("Seleccione muestra y analito para persistir."); return; }
+    if (!muestraId || !analitoId) { setError("Seleccione la muestra y el analito."); return; }
+    if (lectura.invalidos.length) { setError(`No se entiende como número: ${lectura.invalidos.map((t) => `«${t}»`).join(", ")}. Use coma o punto decimal y separe las réplicas con espacio o punto y coma.`); return; }
+    if (!replicas.length) { setError("Ingrese al menos una réplica."); return; }
     try {
-      const r = await fetch(`${API}/resultados`, { method: "POST", headers: auth(), body: JSON.stringify({ muestraId, analitoId, replicas, ...(equipoId ? { equipoId } : {}) }) });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).message ?? `Error ${r.status}`);
-      setSaved(await r.json());
-    } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
+      const cuerpo = { replicasTexto: raw, ...(equipoId ? { equipoId } : {}) };
+      const r = corrigiendo
+        ? await llamar("POST", `/resultados/${corrigiendo.id}/recapturar`, cuerpo)
+        : await llamar("POST", "/resultados", { muestraId, analitoId, ...cuerpo });
+      setSaved(r);
+      if (corrigiendo) setCorrigiendo({ ...corrigiendo, ...r });
+    } catch (e: any) { setError(e.message); }
   }
 
   const num = (x: any, d = 3) => Number(x ?? 0).toLocaleString("es-CL", { maximumFractionDigits: d });
@@ -99,22 +133,41 @@ export default function CapturaPage() {
   return (
     <div>
       <h1 className="page">Captura de resultados</h1>
-      <p className="subtitle">Réplicas RN1..RNn → promedio, desviación estándar y CV → fórmula del analito (si tiene) → veredicto contra el límite del producto. El resultado nace en estado «capturado» y pasa por revisión y aprobación.</p>
+      <p className="subtitle">Réplicas RN1..RNn → promedio, desviación estándar y CV → fórmula del analito (si tiene) → veredicto contra el límite del producto. El resultado nace en estado «capturado» y pasa por revisión y aprobación. Los ensayos de una OT se capturan en <Link href={"/captura-ot" as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>.</p>
       {error && <div className="alert warn">{error}</div>}
+      {corrigiendo && (
+        <div className="alert warn">
+          Corrigiendo un resultado <b>{ESTADO[corrigiendo.estado]?.texto ?? corrigiendo.estado}</b>
+          {corrigiendo.motivoDevolucion ? <> · motivo: <b>{corrigiendo.motivoDevolucion}</b></> : null}.
+          Al guardar se recalcula en el mismo registro y vuelve a revisión.
+        </div>
+      )}
 
       <div className="card">
         <h2>Datos del ensayo</h2>
         <div className="form-grid cols-2">
+          {!corrigiendo && (
+            <>
+              <div className="field">
+                <label>Buscar muestra</label>
+                <input value={buscaMuestra} onChange={(e) => setBuscaMuestra(e.target.value)} placeholder="Código, nombre o código de barras" />
+              </div>
+              <div className="field">
+                <label>Buscar analito</label>
+                <input value={buscaAnalito} onChange={(e) => setBuscaAnalito(e.target.value)} placeholder="Código o nombre" />
+              </div>
+            </>
+          )}
           <div className="field">
             <label>Muestra</label>
-            <select value={muestraId} onChange={(e) => setMuestraId(e.target.value)}>
+            <select value={muestraId} disabled={!!corrigiendo} onChange={(e) => setMuestraId(e.target.value)}>
               <option value="">— seleccionar —</option>
               {muestras.map((m) => <option key={m.id} value={m.id}>{m.codigo} · {m.nombre ?? ""}</option>)}
             </select>
           </div>
           <div className="field">
             <label>Analito {analitos.length === 0 && <span style={{ textTransform: "none", color: "var(--muted)", fontStyle: "italic" }}>(sin analitos cargados)</span>}</label>
-            <select value={analitoId} onChange={(e) => setAnalitoId(e.target.value)}>
+            <select value={analitoId} disabled={!!corrigiendo} onChange={(e) => setAnalitoId(e.target.value)}>
               <option value="">— seleccionar —</option>
               {analitos.map((a) => <option key={a.id} value={a.id}>{a.codigo} · {a.nombre} {a.unidad ? `(${a.unidad})` : ""}</option>)}
             </select>
@@ -146,8 +199,13 @@ export default function CapturaPage() {
             )}
           </div>
           <div className="field span-2">
-            <label>Réplicas (separadas por coma o espacio)</label>
-            <input style={{ fontFamily: "'JetBrains Mono', monospace" }} value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="12.4, 12.6, 12.5" />
+            <label>Réplicas (separadas por espacio o punto y coma · coma decimal: 12,4)</label>
+            <input style={{ fontFamily: "'JetBrains Mono', monospace" }} value={raw} onChange={(e) => setRaw(e.target.value)} placeholder="12,4  12,6  12,5" />
+            {lectura.invalidos.length > 0 && (
+              <span style={{ fontSize: 11.5, color: "var(--red)", marginTop: 4 }}>
+                No se entiende como número: {lectura.invalidos.map((t) => `«${t}»`).join(", ")}. Escriba 12,4 o 12.4 y separe las réplicas con espacio.
+              </span>
+            )}
           </div>
           {analitoId && (
             <div className="field span-2">
@@ -188,7 +246,7 @@ export default function CapturaPage() {
 
       <div className="card">
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={guardar} className="btn primary sm">Guardar resultado</button>
+          <button onClick={guardar} className="btn primary sm">{corrigiendo ? "Guardar corrección" : "Guardar resultado"}</button>
         </div>
       </div>
 
@@ -202,7 +260,7 @@ export default function CapturaPage() {
             )}
             <span>DE: <b>{num(saved.desviacion)}</b></span>
             <span>CV: <b>{num(saved.cv, 2)}%</b></span>
-            <span className={`pill ${saved.veredicto === "Cumple" ? "green" : saved.veredicto === "No cumple" ? "red" : "gray"}`}>{saved.veredicto}</span>
+            <span className={`pill ${veredictoInfo(saved.veredicto).pill}`}>{veredictoInfo(saved.veredicto).texto}</span>
             <span className={`pill ${ESTADO[saved.estado]?.pill ?? "gray"}`}>{ESTADO[saved.estado]?.texto ?? saved.estado}</span>
             {saved.equipoId && (
               <span>Equipo: <b>{equipos.find((e) => e.id === saved.equipoId)?.codigo ?? saved.equipoId}</b></span>

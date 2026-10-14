@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Body,
   ConflictException,
+  ForbiddenException,
   Controller,
   Get,
   Injectable,
@@ -23,6 +25,14 @@ import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { generarNumeroOrdenInterna } from "../common/correlativo";
+import { AlcanceService } from "../rbac/alcance.service";
+import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
+import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
+import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laboratorio.module";
+import { traducirFormula } from "../laboratorio/formula-legado";
+import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
+import { calcularCaptura, CapturaError } from "../laboratorio/captura-estandar";
+import { veredictoNumerico } from "../laboratorio/veredicto";
 
 /**
  * =============================================================================
@@ -58,6 +68,15 @@ const PERM = {
   otGestionar: "ot.crear",
   decisionEmitir: "certificado.emitir",
 } as const;
+
+/** Exige al menos uno de los permisos (SUPERADMIN pasa siempre, como en PermisoGuard). */
+function exigirAlguno(req: any, permisos: string[]) {
+  const roles: string[] = req?.user?.roles ?? [];
+  if (roles.includes("SUPERADMIN")) return;
+  const tiene: string[] = req?.user?.permisos ?? [];
+  if (!permisos.some((p) => tiene.includes(p)))
+    throw new ForbiddenException(`Permiso insuficiente. Requiere uno de: ${permisos.join(", ")}`);
+}
 
 /** Extrae el tenant del usuario autenticado; en dev cae al tenant por defecto. */
 function tenantDe(req: any): string {
@@ -501,8 +520,33 @@ const GenerarAnalisisBody = z.object({
   muestraId: z.string().uuid(),
   metodoIds: z.array(z.string().uuid()).min(1),
 });
-const CapturarValorBody = z.object({
-  valor: z.union([z.number().finite(), z.string().min(1).max(120)]),
+/**
+ * Captura estándar de un ensayo (ver laboratorio/captura-estandar.ts): valor
+ * directo, réplicas o lecturas con los campos del método; en atributos,
+ * Cumple / No cumple con observación.
+ */
+const celda = z.union([z.number().finite(), z.string().max(40), z.null()]);
+const CapturarValorBody = z
+  .object({
+    valor: z.union([z.number().finite(), z.string().max(120)]).optional(),
+    replicas: z.array(z.number().finite()).max(100).optional(),
+    replicasTexto: z.string().max(4000).optional(),
+    lecturas: z.array(z.record(z.string().regex(/^[Cc]\d{1,2}$/), celda)).max(100).optional(),
+    variables: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.number().finite()).optional(),
+    atributo: z.enum(["cumple", "no_cumple"]).optional(),
+    observacion: z.string().max(2000).optional(),
+  });
+
+/** Especificación de la orden (lo que el catálogo no trae, o lo que cambia la jefatura). */
+const texto120 = z.string().max(120).nullable().optional();
+const EspecificacionBody = z.object({
+  limiteInf: texto120,
+  nominal: texto120,
+  limiteSup: texto120,
+  unidad: z.string().max(30).nullable().optional(),
+  requisito: z.string().max(2000).nullable().optional(),
+  tipoDato: z.enum(["numerico", "atributo"]).optional(),
+  formula: z.string().max(500).nullable().optional(),
 });
 
 /** Parsea un texto de límite a número; NULL si no es numérico ('cumple', ''…). */
@@ -514,9 +558,22 @@ function aNumero(v?: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Tolerancia numérica para las comparaciones de cota (evita falsos no_cumple por
- * ruido de coma flotante en valores como 3600.0000001). */
-const TOL_NUMERICA = 1e-9;
+/**
+ * Lee el valor capturado: número (admite coma decimal chilena «12,4») o texto
+ * cualitativo («Cumple», «Ausente»). Un texto que PARECE número pero no se
+ * entiende («1.234,5», «12,4,5») se rechaza en vez de guardarse como texto y
+ * quedar «pendiente» sin aviso.
+ */
+export function leerValorCaptura(valor: number | string): number | string {
+  if (typeof valor === "number") return valor;
+  const s = valor.trim();
+  if (/^[+-]?(\d+([.,]\d+)?|[.,]\d+)$/.test(s)) return Number(s.replace(",", "."));
+  if (/^[\d\s.,+-]+$/.test(s))
+    throw new BadRequestException(
+      `No se entiende «${s}» como número: use un solo separador decimal (coma o punto) y sin separador de miles.`,
+    );
+  return s;
+}
 
 /**
  * Referencia CUALITATIVA normalizada de un límite/nominal: devuelve el texto en
@@ -533,7 +590,19 @@ function refCualitativa(v?: string | null): string | null {
 
 @Injectable()
 export class PuenteAnalisisService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly alcance: AlcanceService,
+    private readonly labs: LaboratorioOtService,
+  ) {}
+
+  /** OT del tenant y dentro del alcance del usuario (404 / 403). */
+  private async otEnAlcance(otId: string, tenantId: string, req: any) {
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    return ot;
+  }
 
   private async muestraDeOt(otId: string, muestraId: string, tenantId: string) {
     const muestra = await this.prisma.muestra.findFirst({
@@ -556,11 +625,25 @@ export class PuenteAnalisisService {
     otId: string,
     body: z.infer<typeof GenerarAnalisisBody>,
     tenantId: string,
+    req?: any,
   ) {
-    // La OT debe existir en el tenant.
-    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
-    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    // La OT debe existir en el tenant y estar en el alcance del usuario.
+    const ot = await this.otEnAlcance(otId, tenantId, req);
     const muestra = await this.muestraDeOt(otId, body.muestraId, tenantId);
+
+    // Una OT que aún no tiene laboratorio (p. ej. creada antes de esta
+    // versión) lo toma de los métodos pedidos, si todos apuntan al mismo.
+    if (!ot.unidadPrincipal) {
+      const d = await this.labs.deducir(tenantId, { catMetodoIds: body.metodoIds });
+      if (d.unidad)
+        await this.labs.fijar(this.prisma, {
+          tenantId,
+          otId,
+          unidad: d.unidad,
+          usuarioId: req?.user?.sub,
+          origen: "metodos_de_la_muestra",
+        });
+    }
 
     // Analitos de los métodos pedidos (validando que son del tenant).
     const analitos = await this.prisma.catAnalito.findMany({
@@ -597,10 +680,22 @@ export class PuenteAnalisisService {
           orderBy: { createdAt: "asc" },
         }));
 
-      const limiteInf = espec?.limiteInf ?? a.rangoMin ?? null;
-      const nominal = espec?.nominal ?? a.rangoNominal ?? null;
-      const limiteSup = espec?.limiteSup ?? a.rangoMax ?? null;
-      const unidad = espec?.unidad ?? a.unidad ?? null;
+      const primero = (...vs: (string | null | undefined)[]) => {
+        for (const v of vs) if (v != null && String(v).trim() !== "") return String(v).trim();
+        return null;
+      };
+      const limiteInf = primero(espec?.limiteInf, a.rangoMin);
+      const nominal = primero(espec?.nominal, a.rangoNominal);
+      const limiteSup = primero(espec?.limiteSup, a.rangoMax);
+      const unidad = primero(espec?.unidad, a.unidad);
+      // Requisito de texto («Tafetán», «Grado 4/5 mín.») + su norma («Nch 1597»).
+      const requisito = primero(espec?.requisitos)
+        ? `${espec!.requisitos!.trim()}${primero(espec?.texto) ? ` (${espec!.texto!.trim()})` : ""}`
+        : null;
+      const tipoDato = tipoDatoDe({ limiteInf, nominal, limiteSup, requisito });
+      // La fórmula se guarda ya en la sintaxis del motor (traducida del LIMS
+      // antiguo cuando se puede); la original queda en la copia del catálogo.
+      const trad = traducirFormula(a.formula);
 
       await this.prisma.resultado.create({
         data: {
@@ -610,17 +705,28 @@ export class PuenteAnalisisService {
           catMetodoId: a.metodoId,
           catAnalitoId: a.id,
           unidad,
-          formula: a.formula ?? null,
+          formula: trad.expr,
           limiteInf,
           nominal,
           limiteSup,
+          requisito,
+          tipoDato,
+          especOrigen: "catalogo",
+          especCatalogo: {
+            limiteInf, nominal, limiteSup, unidad, requisito, tipoDato,
+            formula: trad.expr,
+            ...(a.formula && !trad.expr ? { formulaLegado: a.formula, formulaMotivo: trad.motivo ?? null } : {}),
+          },
           veredicto: "pendiente",
+          // Pedido pero aún sin valor: no cuenta como «por revisar».
+          estado: "pendiente",
         },
       });
       existentes.add(a.id);
       creados++;
     }
 
+    await recalcularVeredictoMuestra(this.prisma, muestra.id);
     return {
       otId,
       muestraId: muestra.id,
@@ -646,47 +752,139 @@ export class PuenteAnalisisService {
    *   PENDIENTE (revisión manual): cuando no hay forma de decidir —ni cota
    *     numérica comparable ni referencia textual comparable—.
    */
-  async capturarValor(id: string, valor: number | string, tenantId: string) {
+  /** Resultado del puente, del tenant y del alcance del usuario. */
+  private async resultadoEnAlcance(id: string, tenantId: string, req: any) {
     const resultado = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null, muestra: { tenantId } },
-      include: { muestra: { select: { tenantId: true } } },
+      include: { muestra: { select: { tenantId: true, otId: true } } },
     });
     if (!resultado) throw new NotFoundException(`Resultado ${id} no encontrado`);
+    const otId = resultado.otId ?? resultado.muestra.otId;
+    const ot = otId
+      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { codigo: true, unidadPrincipal: true } })
+      : null;
+    await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, ot ? `el resultado de la OT ${ot.codigo}` : "el resultado");
+    return { resultado, otId };
+  }
 
-    const valorNum = typeof valor === "number" ? valor : aNumero(valor);
-    const inf = aNumero(resultado.limiteInf);
-    const sup = aNumero(resultado.limiteSup);
+  /**
+   * Formulario de captura estándar (laboratorio/captura-estandar.ts): valor,
+   * réplicas o lecturas con los campos del método (fórmula), o Cumple / No
+   * cumple en los atributos. Lo revisado o aprobado no se sobrescribe. Deja al
+   * usuario como analista (segregación) y recalcula el veredicto de la muestra.
+   */
+  async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any) {
+    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req);
 
-    let veredicto: "cumple" | "no_cumple" | "pendiente";
-    if (valorNum != null && (inf != null || sup != null)) {
-      // --- Rama NUMÉRICA: una o dos cotas numéricas. ---
-      const bajoMinimo = inf != null && valorNum < inf - TOL_NUMERICA;
-      const sobreMaximo = sup != null && valorNum > sup + TOL_NUMERICA;
-      veredicto = bajoMinimo || sobreMaximo ? "no_cumple" : "cumple";
-    } else {
-      // --- Rama CUALITATIVA: referencia textual esperada vs valor textual. ---
-      const esperado =
-        refCualitativa(resultado.nominal) ??
-        refCualitativa(resultado.limiteInf) ??
-        refCualitativa(resultado.limiteSup);
-      const valorTxt = String(valor).trim().toLowerCase();
-      if (esperado != null && valorTxt !== "") {
-        veredicto = esperado === valorTxt ? "cumple" : "no_cumple";
-      } else {
-        // Sin cota numérica y sin referencia textual comparable -> manual.
-        veredicto = "pendiente";
-      }
+    const bloqueo = motivoNoCapturable(resultado.estado);
+    if (bloqueo) throw new ConflictException(bloqueo);
+
+    const tipoDato: TipoDato =
+      (resultado.tipoDato as TipoDato) ??
+      tipoDatoDe({ limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, requisito: resultado.requisito });
+    let calc;
+    try {
+      calc = calcularCaptura(
+        { tipoDato, limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, formula: resultado.formula },
+        entrada,
+      );
+    } catch (e) {
+      if (e instanceof CapturaError) throw new BadRequestException(e.message);
+      throw e;
     }
 
-    return this.prisma.resultado.update({
+    const actualizado = await this.prisma.resultado.update({
       where: { id },
       data: {
-        valorNumerico: valorNum,
-        valorTexto: String(valor),
+        valorNumerico: calc.valorNumerico,
+        valorTexto: calc.valorTexto,
+        replicas: calc.replicas,
+        promedio: calc.promedio,
+        desviacion: calc.desviacion,
+        cv: calc.cv,
+        resultadoFinal: calc.resultadoFinal,
+        formulaAplicada: calc.formulaAplicada,
+        lecturas: calc.lecturas ?? undefined,
+        observacion: calc.observacion,
+        veredicto: calc.veredicto,
+        tipoDato,
+        // Quien captura queda como analista (segregación: no podrá revisarlo).
+        analistaId: req?.user?.sub ?? resultado.analistaId ?? null,
+        estado: "capturado",
+        fecha: new Date(),
+        otId: otId ?? null,
+      },
+      include: { catAnalito: true, catMetodo: true },
+    });
+    const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
+    return { ...actualizado, veredictoMuestra: veredictoDeLaMuestra };
+  }
+
+  /**
+   * Especificación de la ORDEN: completa lo que el catálogo no trae (Mín / Nom
+   * / Máx, unidad, requisito, tipo de dato) o, si es la jefatura, cambia lo que
+   * vino del catálogo y la fórmula. Se guarda en el resultado de esta OT —el
+   * catálogo no se toca— marcado como «especificación de la orden», con quién
+   * y cuándo. Si el ensayo ya tiene valor, se recalcula su veredicto.
+   */
+  async editarEspecificacion(id: string, pedido: z.infer<typeof EspecificacionBody>, tenantId: string, req: any) {
+    const { resultado } = await this.resultadoEnAlcance(id, tenantId, req);
+    const bloqueo = motivoNoCapturable(resultado.estado);
+    if (bloqueo) throw new ConflictException(bloqueo.replace("corregirlo", "cambiar su especificación"));
+
+    const actual: Especificacion = {
+      limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup,
+      unidad: resultado.unidad, requisito: resultado.requisito, formula: resultado.formula,
+      tipoDato: resultado.tipoDato ?? tipoDatoDe({ ...resultado }),
+    };
+    const catalogo = (resultado.especCatalogo ?? {}) as Especificacion;
+    const plan = planEdicion(actual, catalogo, pedido as Especificacion);
+    if (!plan.campos.length) return resultado;
+
+    const roles: string[] = req?.user?.roles ?? [];
+    const permisos: string[] = req?.user?.permisos ?? [];
+    if (plan.requiereJefatura && !roles.includes("SUPERADMIN") && !permisos.includes("resultado.aprobar"))
+      throw new ForbiddenException(
+        "Cambiar un valor que vino del catálogo, el tipo de dato o la fórmula lo hace la jefatura del laboratorio. Usted puede completar los campos que el catálogo dejó vacíos.",
+      );
+    if (plan.cambios.formula) {
+      const t = traducirFormula(plan.cambios.formula);
+      if (t.origen !== "motor")
+        throw new BadRequestException(
+          "Fórmula no válida. Use los campos del método (C1, C2…), las réplicas (RN, PROMEDIO, DE, CV, N), números y funciones (RAIZ, PROMEDIO, ABS…). Ejemplo: (C1 - C2) / C3 * 100.",
+        );
+    }
+    const nueva = { ...actual, ...plan.cambios };
+
+    // Veredicto con la nueva especificación (si ya hay valor numérico).
+    let veredicto = resultado.veredicto;
+    if (nueva.tipoDato === "atributo" && actual.tipoDato !== "atributo" && resultado.estado !== "pendiente") veredicto = "pendiente";
+    else if (nueva.tipoDato !== "atributo" && resultado.valorNumerico != null) {
+      const n = (v?: string | null) => (v != null && /^\s*[+-]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(v) ? Number(v.replace(",", ".")) : null);
+      veredicto = veredictoNumerico(Number(resultado.valorNumerico), n(nueva.limiteInf), n(nueva.limiteSup));
+    }
+
+    const actualizado = await this.prisma.resultado.update({
+      where: { id },
+      data: {
+        ...("limiteInf" in plan.cambios ? { limiteInf: plan.cambios.limiteInf } : {}),
+        ...("nominal" in plan.cambios ? { nominal: plan.cambios.nominal } : {}),
+        ...("limiteSup" in plan.cambios ? { limiteSup: plan.cambios.limiteSup } : {}),
+        ...("unidad" in plan.cambios ? { unidad: plan.cambios.unidad } : {}),
+        ...("requisito" in plan.cambios ? { requisito: plan.cambios.requisito } : {}),
+        ...("tipoDato" in plan.cambios ? { tipoDato: plan.cambios.tipoDato } : {}),
+        ...("formula" in plan.cambios ? { formula: plan.cambios.formula } : {}),
+        // Copia del catálogo: se fija la primera vez (resultados anteriores a esta versión).
+        ...(resultado.especCatalogo ? {} : { especCatalogo: actual as any }),
+        especOrigen: "orden",
+        especEditadaPor: req?.user?.sub ?? null,
+        especEditadaAt: new Date(),
         veredicto,
       },
       include: { catAnalito: true, catMetodo: true },
     });
+    const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
+    return { ...actualizado, camposEditados: plan.campos, veredictoMuestra: veredictoDeLaMuestra };
   }
 
   /**
@@ -694,13 +892,13 @@ export class PuenteAnalisisService {
    * especificación/valor/veredicto, más un resumen (cumple/no_cumple/pendiente)
    * para el expediente/informe.
    */
-  async resultadosDeOt(otId: string, tenantId: string) {
-    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
-    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+  async resultadosDeOt(otId: string, tenantId: string, req?: any) {
+    const ot = await this.otEnAlcance(otId, tenantId, req);
 
     const muestras = await this.prisma.muestra.findMany({
       where: { otId, tenantId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, codigo: true, nombre: true },
+      orderBy: { codigo: "asc" },
     });
     const muestraIds = muestras.map((m) => m.id);
 
@@ -713,18 +911,66 @@ export class PuenteAnalisisService {
             catMetodo: { select: { id: true, codigo: true, nombre: true, norma: true } },
             analito: { select: { id: true, codigo: true, nombre: true } },
           },
-          orderBy: { fecha: "desc" },
+          orderBy: [{ muestraId: "asc" }, { fecha: "asc" }],
         })
       : [];
 
-    const resumen = { total: resultados.length, cumple: 0, no_cumple: 0, pendiente: 0 };
+    // Veredictos: cumple / no_cumple / informativo / pendiente (sin valor o sin
+    // decidir). Estados: el ciclo de revisión (pendiente → … → aprobado).
+    const resumen = { total: resultados.length, cumple: 0, no_cumple: 0, informativo: 0, pendiente: 0 };
+    const porEstado: Record<string, number> = {};
     for (const r of resultados) {
       if (r.veredicto === "cumple") resumen.cumple++;
       else if (r.veredicto === "no_cumple") resumen.no_cumple++;
+      else if (r.veredicto === "informativo") resumen.informativo++;
       else resumen.pendiente++;
+      porEstado[r.estado] = (porEstado[r.estado] ?? 0) + 1;
     }
 
-    return { otId, muestras: muestraIds.length, resumen, resultados };
+    // Campos de captura de cada método (paso_metodo): son las variables C1..Cn
+    // de las fórmulas por lectura, con su nombre y unidad.
+    const metodoIds = [...new Set(resultados.map((r) => r.catMetodoId).filter((x): x is string => Boolean(x)))];
+    const pasos = metodoIds.length
+      ? await this.prisma.$queryRawUnsafe<{ cat_metodo_id: string; nombre: string; unidad: string | null; tipo_dato: string }[]>(
+          `SELECT cat_metodo_id, nombre, unidad, tipo_dato FROM paso_metodo
+            WHERE cat_metodo_id = ANY($1::uuid[]) AND activo AND deleted_at IS NULL
+            ORDER BY cat_metodo_id, orden, created_at`,
+          metodoIds,
+        )
+      : [];
+    const camposPorMetodo: Record<string, { nombre: string; unidad: string | null }[]> = {};
+    for (const p of pasos) (camposPorMetodo[p.cat_metodo_id] ??= []).push({ nombre: p.nombre, unidad: p.unidad });
+
+    // Veredicto de cada muestra (lote) y de la OT, con la misma regla.
+    const porMuestra = muestras.map((m) => ({
+      ...m,
+      veredicto: veredictoMuestra(resultados.filter((r) => r.muestraId === m.id).map((r) => r.veredicto)),
+    }));
+
+    const conNombre = await conNombres(this.prisma, resultados);
+    return {
+      otId,
+      ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal },
+      muestras: muestraIds.length,
+      veredictoOt: veredictoMuestra(porMuestra.filter((m) => resultados.some((r) => r.muestraId === m.id)).map((m) => m.veredicto)),
+      veredictosMuestra: porMuestra,
+      camposPorMetodo,
+      resumen,
+      porEstado,
+      resultados: conNombre.map((r) => {
+        const t = traducirFormula(r.formula);
+        const cat = (r.especCatalogo ?? {}) as Record<string, any>;
+        return {
+          ...r,
+          tipoDato: r.tipoDato ?? tipoDatoDe({ ...r }),
+          formulaAplicable: t.expr,
+          nCampos: t.nCampos,
+          formulaLegado: cat.formulaLegado ?? null,
+          formulaMotivo: cat.formulaMotivo ?? (r.formula && !t.expr ? t.motivo ?? null : null),
+          campos: r.catMetodoId ? camposPorMetodo[r.catMetodoId] ?? [] : [],
+        };
+      }),
+    };
   }
 }
 
@@ -735,18 +981,24 @@ export class PuenteAnalisisService {
 export class PuenteOtController {
   constructor(private readonly svc: PuenteAnalisisService) {}
 
+  /**
+   * Registrar los análisis pedidos de una muestra es parte del registro de la
+   * OT (lo hace quien registra las muestras) o de la captura: basta
+   * `muestra.crear` O `resultado.crear`. Por eso no lleva @RequierePermiso
+   * (que exige TODOS los listados) y se comprueba aquí.
+   */
   @Post(":id/generar-analisis")
-  @RequierePermiso("resultado.crear")
   @ApiOperation({ summary: "Materializa los métodos del panel (cat_metodo) como resultados por analizar" })
   generarAnalisis(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    return this.svc.generarAnalisis(id, GenerarAnalisisBody.parse(body), tenantDe(req));
+    exigirAlguno(req, ["muestra.crear", "resultado.crear"]);
+    return this.svc.generarAnalisis(id, GenerarAnalisisBody.parse(body), tenantDe(req), req);
   }
 
   @Get(":id/resultados")
   @RequierePermiso("resultado.ver")
-  @ApiOperation({ summary: "Resultados de las muestras de la OT + resumen de veredictos" })
+  @ApiOperation({ summary: "Resultados de las muestras de la OT + resumen de veredictos y estados" })
   resultados(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    return this.svc.resultadosDeOt(id, tenantDe(req));
+    return this.svc.resultadosDeOt(id, tenantDe(req), req);
   }
 }
 
@@ -757,12 +1009,23 @@ export class PuenteOtController {
 export class PuenteResultadoController {
   constructor(private readonly svc: PuenteAnalisisService) {}
 
+  /**
+   * Especificación de la orden: rellenar lo vacío lo hace quien captura;
+   * cambiar lo del catálogo, el tipo o la fórmula, la jefatura
+   * (resultado.aprobar, se comprueba en el servicio).
+   */
+  @Patch(":id/especificacion")
+  @RequierePermiso("resultado.crear")
+  @ApiOperation({ summary: "Especificación de la orden (Mín/Nom/Máx, unidad, requisito, tipo, fórmula) de un ensayo" })
+  especificacion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.editarEspecificacion(id, EspecificacionBody.parse(body ?? {}), tenantDe(req), req);
+  }
+
   @Post(":id/valor")
   @RequierePermiso("resultado.crear")
   @ApiOperation({ summary: "Captura el valor de un resultado del puente y calcula su veredicto" })
   capturarValor(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    const { valor } = CapturarValorBody.parse(body);
-    return this.svc.capturarValor(id, valor, tenantDe(req));
+    return this.svc.capturarValor(id, CapturarValorBody.parse(body ?? {}), tenantDe(req), req);
   }
 }
 

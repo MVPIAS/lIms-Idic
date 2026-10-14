@@ -1,3 +1,5 @@
+import { CODIGO_UNIDAD_SAEC } from "../ot/laboratorio-ot";
+import { generarCodigoOt } from "../common/codigo";
 import {
   BadRequestException,
   Body,
@@ -980,18 +982,40 @@ export class EvidenciaController extends SaecBase {
       // RF-K02.4 · creación automática de la OT.
       let otId = d.otId ?? null;
       if (d.crearOt && !otId) {
-        const codOt = await this.siguienteCodigo("orden_trabajo", "OT-2026-", tenantId, tx);
+        // Mismo correlativo atómico que el resto de las OT (common/codigo.ts):
+        // con MAX()+1 propio, el SAEC y el alta normal se pisaban el código.
+        const codOt = await generarCodigoOt(tx, tenantId);
         // `orden_trabajo` viene del modelo Prisma: su id NO tiene DEFAULT
         // gen_random_uuid() y la tabla no tiene columna created_by.
+        // Laboratorio responsable: toda OT del SAEC nace en la Delegación Nº 11
+        // (unidad D11). Sin él, el personal de la Delegación no la vería.
+        const d11 = await tx.$queryRawUnsafe<{ id: string }[]>(
+          `SELECT id FROM unidad WHERE tenant_id = $1::uuid AND codigo = $2 AND activa LIMIT 1`,
+          tenantId, CODIGO_UNIDAD_SAEC,
+        );
+        if (!d11[0])
+          throw new BadRequestException(
+            `No existe la unidad ${CODIGO_UNIDAD_SAEC} (Delegación Nº 11) activa: no se puede crear la OT del SAEC sin laboratorio responsable.`,
+          );
         const ot = await tx.$queryRawUnsafe<any[]>(
           `INSERT INTO orden_trabajo (id, tenant_id, codigo, cliente_id, prioridad, fecha_recepcion,
-                                      solicitante, origen_trabajo, estado, notas, created_at, updated_at)
-           VALUES (gen_random_uuid(), $1::uuid, $2, $3::uuid, 'normal', now(), $4, 'SAEC', 'recepcionada', $5, now(), now())
+                                      solicitante, origen_trabajo, estado, notas, created_at, updated_at,
+                                      unidad_principal, unidad_asignada_por, unidad_asignada_at)
+           VALUES (gen_random_uuid(), $1::uuid, $2, $3::uuid, 'normal', now(), $4, 'SAEC', 'recepcionada', $5, now(), now(),
+                   $6::uuid, $7::uuid, now())
            RETURNING id`,
           tenantId, codOt, d.clienteId, d.organismoSolicitante ?? null,
           `OT generada automáticamente por el SAEC para la evidencia ${codigo} (RF-K02.4).`,
+          d11[0].id, req?.user?.sub ?? null,
         );
         otId = ot[0].id;
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
+           VALUES ($1::uuid, $2::uuid, 'laboratorio', $3::jsonb, $4::uuid)`,
+          tenantId, otId,
+          JSON.stringify({ origen: "saec", hacia: { id: d11[0].id, codigo: CODIGO_UNIDAD_SAEC } }),
+          req?.user?.sub ?? null,
+        );
       }
 
       // RF-K02.2 · código de barras único por elemento (por defecto, el NUE).
