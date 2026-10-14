@@ -75,6 +75,7 @@ WITH labs AS (
     FROM unidad u
     LEFT JOIN unidad p ON p.id = u.padre_id
    WHERE u.activa AND u.tipo = 'LABORATORIO'
+     AND u.padre_id IS NOT NULL  -- solo laboratorios del organigrama (no unidades sueltas de pruebas antiguas)
      AND u.codigo <> 'LCAD'      -- código duplicado, cubierto por LMT
 )
 INSERT INTO _demo (username, nombre, cargo, rol, unidad, es_jefe)
@@ -137,6 +138,12 @@ ON CONFLICT (tenant_id, username) DO UPDATE
        estado          = 'activo',
        deleted_at      = NULL,
        es_demo         = true;
+
+-- Usuarios de prueba de versiones anteriores que esta semilla ya no declara
+-- (p. ej. de unidades sueltas sin lugar en el organigrama): se inactivan.
+UPDATE usuario SET estado = 'inactivo', updated_at = now()
+ WHERE es_demo AND estado = 'activo'
+   AND username::text NOT IN (SELECT username FROM _demo);
 
 -- --- Rol + unidad -------------------------------------------------------------
 INSERT INTO usuario_rol (id, usuario_id, rol_id, unidad_id)
