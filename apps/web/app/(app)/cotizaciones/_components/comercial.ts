@@ -54,12 +54,17 @@ export type ConfigCotizacion = {
 
 export const GRUPOS_CC = ["Laboratorios", "Sucursales y Delegación BPCH"] as const;
 
-/** Estados vigentes (R1) y su color; el resto es histórico de solo lectura. */
-export const ESTADOS_VIGENTES = ["abierta", "aceptada", "anulada"] as const;
+/**
+ * Estados vigentes y su color; el resto es histórico de solo lectura.
+ * 'expirada' (Vencida) la pone el SISTEMA cuando una Abierta supera su validez
+ * (ya no se puede aceptar; sí anular).
+ */
+export const ESTADOS_VIGENTES = ["abierta", "aceptada", "anulada", "expirada"] as const;
 export const ESTADO_PILL: Record<string, string> = {
   abierta: "blue",
   aceptada: "green",
   anulada: "red",
+  expirada: "amber",
 };
 export const ESTADO_LABEL: Record<string, string> = {
   abierta: "Abierta",
@@ -68,7 +73,7 @@ export const ESTADO_LABEL: Record<string, string> = {
   borrador: "Borrador (histórico)",
   enviada: "Enviada (histórico)",
   rechazada: "Rechazada (histórico)",
-  expirada: "Vencida (histórico)",
+  expirada: "Vencida",
 };
 
 export const ACEPTACION_LABEL: Record<string, string> = {
@@ -91,6 +96,24 @@ export const hoyISO = () => {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+/** ¿La validez ya terminó? (valida_hasta es inclusive). Fechas AAAA-MM-DD comparables como texto. */
+export const fueraDeValidez = (c: { validaHasta?: string | null; expiraAt?: string | null }) => {
+  const f = String(c.validaHasta ?? c.expiraAt ?? "").slice(0, 10);
+  return !!f && f < hoyISO();
+};
+
+/** Vence entre hoy y dentro de `dias` días (seguimiento comercial). */
+export const porVencer = (c: { estado: string; validaHasta?: string | null; expiraAt?: string | null }, dias = 7) => {
+  if (c.estado !== "abierta") return false;
+  const f = String(c.validaHasta ?? c.expiraAt ?? "").slice(0, 10);
+  if (!f) return false;
+  const limite = new Date();
+  limite.setDate(limite.getDate() + dias);
+  const p = (n: number) => String(n).padStart(2, "0");
+  const lim = `${limite.getFullYear()}-${p(limite.getMonth() + 1)}-${p(limite.getDate())}`;
+  return f >= hoyISO() && f <= lim;
 };
 
 export const etiquetaDe = (ops: Opcion[] | undefined, codigo?: string | null) =>

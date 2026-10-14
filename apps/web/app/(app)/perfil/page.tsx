@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import CambioClave from "@/components/CambioClave";
+import { fechaHora } from "@/lib/format";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -125,8 +127,8 @@ export default function PerfilPage() {
     <div>
       <h1 className="page">Mi perfil · Seguridad</h1>
       <p className="subtitle">
-        Gestione la verificación en dos pasos (2FA) de su cuenta. Un segundo factor TOTP añade una capa de protección
-        adicional al ingreso con usuario y contraseña.
+        Cambie su contraseña y gestione la verificación en dos pasos (2FA) de su cuenta. Un segundo factor TOTP añade
+        una capa de protección adicional al ingreso con usuario y contraseña.
       </p>
 
       {error && <div className="alert warn">{error}</div>}
@@ -143,6 +145,15 @@ export default function PerfilPage() {
           </div>
         </div>
       )}
+
+      <div className="card">
+        <h2 style={{ margin: "0 0 4px", fontSize: 16 }}>Cambiar mi contraseña</h2>
+        <p className="subtitle" style={{ marginTop: 0 }}>
+          {me?.passwordCambiadaAt ? `Último cambio: ${fechaHora(me.passwordCambiadaAt)}. ` : ""}
+          Si ingresa con la cuenta institucional (directorio del Ejército), la contraseña se cambia allí.
+        </p>
+        <CambioClave username={me?.username} onCambiada={cargar} />
+      </div>
 
       <div className="card">
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>

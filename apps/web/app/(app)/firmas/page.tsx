@@ -15,6 +15,7 @@ import RequierePermiso from "@/components/RequierePermiso";
 import { api } from "@/lib/api";
 import { fechaHora } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
+import { RECURSO_PERSONAS } from "@/lib/personas";
 
 const etiquetaUsuario = (u: any) => [u?.username, u?.nombreCompleto].filter(Boolean).join(" · ");
 
@@ -22,10 +23,12 @@ export default function FirmasPage() {
   const { puede, listo } = usePermisos();
   const [usuarios, setUsuarios] = useState<Record<string, any>>({});
 
-  // Nombre legible del usuario (la tabla firma solo guarda su id). Requiere admin.usuarios.
+  // Nombre legible del usuario (la tabla firma solo guarda su id). Sale de
+  // /personas (sin datos sensibles, acotado al alcance), no de /usuarios, que
+  // exige admin.usuarios y dejaba la columna con ids para el resto de perfiles.
   useEffect(() => {
-    if (!listo || !puede("admin.usuarios")) return;
-    api.list<any>("usuarios", { limit: 100 })
+    if (!listo || !puede("firma.registrar")) return;
+    api.list<any>(RECURSO_PERSONAS, { limit: 500 })
       .then((r: any) => {
         const filas: any[] = Array.isArray(r) ? r : r?.data ?? [];
         setUsuarios(Object.fromEntries(filas.map((u) => [String(u.id), u])));
@@ -59,7 +62,7 @@ export default function FirmasPage() {
           { campo: "registradaAt", titulo: "Registrada", render: (v) => fechaHora(v) },
         ]}
         campos={[
-          { campo: "usuarioId", label: "Usuario", tipo: "ref", refRecurso: "usuarios", refLabel: etiquetaUsuario, requerido: true },
+          { campo: "usuarioId", label: "Usuario", tipo: "ref", refRecurso: RECURSO_PERSONAS, refLabel: etiquetaUsuario, requerido: true },
           { campo: "imagenRef", label: "Imagen de firma (ruta o referencia)", requerido: true, span: 2, ayuda: "p. ej. firmas/usuario.png en el almacén de documentos" },
           { campo: "hashSha256", label: "Huella SHA-256 (opcional)", span: 3 },
         ]}

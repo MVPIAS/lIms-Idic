@@ -18,7 +18,7 @@ producto real (API + web + BD).
 
 | Tema | Decisión | Implementación |
 |---|---|---|
-| Estados de la cotización | Solo **Abierta / Aceptada / Anulada**; sin Vencida ni Revalidada | Toda cotización nueva nace `abierta`. Transiciones `abierta → aceptada \| anulada` (`common/estados.ts`). Los estados antiguos (`borrador`, `enviada`, `rechazada`, `expirada`) se conservan como **histórico de solo lectura**. |
+| Estados de la cotización | Solo **Abierta / Aceptada / Anulada**; sin Vencida ni Revalidada (**actualizado:** desde `align_comercial_usuarios.sql` una Abierta fuera de validez pasa sola a **Vencida**, ver docs/FLUJO_COMERCIAL_USUARIOS.md §3) | Toda cotización nueva nace `abierta`. Transiciones `abierta → aceptada \| anulada` (`common/estados.ts`). Los estados antiguos (`borrador`, `enviada`, `rechazada`, `expirada`) se conservan como **histórico de solo lectura**. |
 | Formatos | Solo **NORMAL** y **PERSONALIZADO** | `formato` ∈ {NORMAL, PERSONALIZADO} al crear/editar. F1–F4 quedan en el histórico. Parámetro `formato_cotizacion`. |
 | Moneda | **CLP** y **USD**; el dólar del día se guarda y **congela** al emitir | `cotizacion.moneda`, `dolar_valor`, `dolar_fecha`. Cambiar el dólar de una cotización ya emitida exige `dolarMotivo` (se guarda en `dolar_motivo`). |
 | Forma de pago | Solo «Contado 30 días» y «Por adelantado» | Parámetros `forma_pago`: `contado_30`, `adelantado`. Los antiguos (`contado`, `credito`, `transferencia`, `cheque`, `tarjeta`) quedan **inactivos**. |
@@ -191,8 +191,8 @@ Todos bajo `/api`, con JWT. Permisos entre paréntesis.
 | GET | `/cotizaciones/:id` (`cotizacion.ver`) | Detalle (incluye `ot`). |
 | POST | `/cotizaciones` (`cotizacion.crear`) | Crea en estado **Abierta**. Body: `clienteId`, `formato` (NORMAL\|PERSONALIZADO), `centroCostoId?`, `formaPago?`, `medioEnvio?`, `moneda` (CLP\|USD), `dolarValor` (obligatorio en USD), `dolarFecha?`, `referencia?`, `descripcionTecnica?`, `condicionesAdicionales?` (≤ 2000), `observacionesInternas?`, `lineas[]` (`{catEnsayoId, cantidad}`; `precioUnitario` opcional = ficha). |
 | PATCH | `/cotizaciones/:id` (`cotizacion.crear`) | Edita los mismos campos **solo si está Abierta** (409 si no). Cambiar `dolarValor` exige `dolarMotivo`. |
-| POST | `/cotizaciones/:id/aceptar` (`cotizacion.aprobar`) | `{tipo, numero?, fecha?, adjunto?, conCobro=true}` → Aceptada + OT (idempotente). Devuelve `{cotizacion, ot, mensaje}`. |
-| POST | `/cotizaciones/:id/anular` (`cotizacion.aprobar`) | `{motivo}` → Anulada. `DELETE /cotizaciones/:id` se mantiene como alias sin motivo. |
+| POST | `/cotizaciones/:id/aceptar` (`cotizacion.aceptar`) | `{tipo, numero?, fecha?, adjunto?, conCobro=true}` → Aceptada + OT (idempotente). Devuelve `{cotizacion, ot, mensaje}`. Fuera de validez → 409. |
+| POST | `/cotizaciones/:id/anular` (`cotizacion.anular`) | `{motivo}` → Anulada. `DELETE /cotizaciones/:id` se mantiene como alias sin motivo. |
 | POST | `/cotizaciones/costeo`, `/cotizaciones/tasa-internacion` | Sin cambios. |
 | POST | `/cotizaciones/:id/enviar`, `/:id/rechazar` | Solo para cotizaciones históricas. |
 

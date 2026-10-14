@@ -104,7 +104,9 @@ Conviene saberlo antes de enseñarlo:
 - **Perfiles operativos globales**: recepción, ventas, muestreo, finanzas y
   abastecimiento ven todas las órdenes. Es lo que define hoy el catálogo de
   roles; falta que el IDIC confirme si abastecimiento y finanzas deben verlas.
-- **Auditoría**: las jefaturas ven la bitácora de todo el instituto.
+- ~~**Auditoría**: las jefaturas ven la bitácora de todo el instituto.~~ Resuelto:
+  una jefatura acotada solo ve lo hecho por las personas de sus unidades
+  (docs/FLUJO_COMERCIAL_USUARIOS.md).
 - **Reportes de gestión** (productividad, plazos, conformidad): los ven las
   jefaturas, pero con cifras de todo el instituto, no solo de su unidad.
 - **Oportunidades (CRM) y cotizaciones**: visibles para los jefes de laboratorio.

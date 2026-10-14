@@ -171,14 +171,18 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
   }
 
   async function cambiarTipoCliente(codigo: string) {
+    const anterior = tipoCliente;
     setTipoCliente(codigo);
     setMsgTipo("");
     if (!cliente?.id || !codigo) return;
     try {
-      await pedir("PATCH", `/clientes/${cliente.id}`, { tipo: codigo });
+      // Ruta propia de la reclasificación (exige cotizacion.crear, no la edición
+      // completa de la ficha): quien cotiza puede corregir el tipo en el momento.
+      await pedir("PATCH", `/clientes/${cliente.id}/tipo`, { tipo: codigo });
       setCliente({ ...cliente, tipo: codigo });
       setMsgTipo("Tipo de cliente actualizado en la ficha del cliente.");
     } catch (e: any) {
+      setTipoCliente(anterior);
       setMsgTipo(`No se pudo actualizar el tipo del cliente: ${e.message}`);
     }
   }

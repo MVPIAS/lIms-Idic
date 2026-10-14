@@ -61,6 +61,9 @@ export interface Usuario {
   cargo?: string | null;
   activo: boolean;
   asignaciones: Asignacion[];
+  /** Contraseña temporal pendiente de cambio (alta o restablecimiento). */
+  debeCambiarPassword?: boolean;
+  ultimoLoginAt?: string | null;
 }
 export interface Rol {
   id: string;
@@ -246,7 +249,8 @@ export const adminApi = {
   usuario: (id: string) => get<Usuario>(`/usuarios/${id}`),
   crearUsuario: (d: UsuarioInput) => post<Usuario & { passwordTemporal?: string }>("/usuarios", d),
   actualizarUsuario: (id: string, d: UsuarioInput) => patch<Usuario>(`/usuarios/${id}`, d),
-  desactivarUsuario: (id: string) => del<void>(`/usuarios/${id}`),
+  /** Reversible: deja la cuenta inactiva (se reactiva con { activo: true }). */
+  desactivarUsuario: (id: string) => patch<Usuario>(`/usuarios/${id}`, { activo: false }),
   agregarAsignacion: (id: string, d: { rolId: string; unidadId: string | null; vigenteDesde?: string | null; vigenteHasta?: string | null }) =>
     post<Asignacion>(`/usuarios/${id}/asignaciones`, d),
   quitarAsignacion: (id: string, asignacionId: string) => del<void>(`/usuarios/${id}/asignaciones/${asignacionId}`),

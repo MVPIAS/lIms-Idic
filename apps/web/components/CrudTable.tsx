@@ -462,6 +462,11 @@ function SelectRemoto({ campo, inputId, value, disabled, onChange }: SelectRemot
   return (
     <select id={inputId} required={campo.requerido} disabled={disabled} value={value ?? ""} onChange={(e) => onChange(e.target.value)}>
       <option value="">—</option>
+      {/* Valor guardado que ya no está en la lista vigente (p. ej. un tipo de
+          cliente antiguo): se muestra para no perderlo al editar otra cosa. */}
+      {value && opciones.length > 0 && !opciones.some((o) => o.value === String(value)) && (
+        <option value={String(value)}>{String(value)} (valor antiguo)</option>
+      )}
       {opciones.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { URL_PERSONAS, etiquetaPersona } from "@/lib/personas";
 import { useEffect, useMemo, useState } from "react";
 import { fechaHora, num, pct } from "@/lib/format";
 import { esNumero } from "@/lib/validate";
@@ -82,7 +83,7 @@ export default function CustodiaPage() {
     try {
       const [m, u, c] = await Promise.all([
         safe(`${API}/muestras?limit=200`),
-        safe(`${API}/usuarios`),
+        safe(`${API}${URL_PERSONAS}`),
         safe(`${API}/custodia?limit=50`),
       ]);
       setMuestras(m);
@@ -344,7 +345,7 @@ export default function CustodiaPage() {
                 <option value="">— sin responsable previo —</option>
                 {usuarios.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {nombreUsuario(u)}
+                    {etiquetaPersona(u)}
                   </option>
                 ))}
               </select>
@@ -359,7 +360,7 @@ export default function CustodiaPage() {
                 <option value="">— sin receptor —</option>
                 {usuarios.map((u) => (
                   <option key={u.id} value={u.id}>
-                    {nombreUsuario(u)}
+                    {etiquetaPersona(u)}
                   </option>
                 ))}
               </select>

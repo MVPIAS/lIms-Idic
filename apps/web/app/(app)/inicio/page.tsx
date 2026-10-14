@@ -60,7 +60,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
   ],
   COMERCIAL: [
     { href: "/cotizaciones/nueva", titulo: "Nueva cotización", desc: "Con costeo en vivo", icono: "＋", perm: "cotizacion.crear" },
-    { href: "/cotizaciones", titulo: "Cotizaciones por vencer", desc: "Haz seguimiento antes de que caduquen", icono: "⏳", perm: "cotizacion.ver" },
+    { href: "/cotizaciones?porVencer=1", titulo: "Cotizaciones por vencer", desc: "Haz seguimiento antes de que caduquen", icono: "⏳", perm: "cotizacion.ver" },
     { href: "/clientes", titulo: "Clientes", desc: "Fichas, contactos y condiciones", icono: "🏢", perm: "cliente.ver" },
     { href: "/internaciones", titulo: "Internaciones", desc: "Solicitudes de internación en curso", icono: "🛃", perm: "cotizacion.ver" },
     { href: "/crm", titulo: "Oportunidades", desc: "Pipeline comercial", icono: "🎯", perm: "cotizacion.ver" },
@@ -83,6 +83,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/proveedores", titulo: "Proveedores", desc: "Fichas de proveedores", icono: "🚚", perm: "factura.ver" },
   ],
   CALIDAD: [
+    { href: "/no-conformidades", titulo: "No conformidades", desc: "Tratamiento, plazos y cierre", icono: "⚠", perm: "nc.ver" },
     { href: "/qc", titulo: "Control de calidad", desc: "Controles por OT", icono: "✔", perm: "resultado.ver" },
     { href: "/spc", titulo: "Control estadístico", desc: "Cartas de control y tendencias", icono: "📉", perm: "resultado.ver" },
     { href: "/equipos", titulo: "Equipos y calibración", desc: "Calibraciones vencidas o próximas", icono: "⚙", perm: "equipo.ver" },

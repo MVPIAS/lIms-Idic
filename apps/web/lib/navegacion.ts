@@ -41,7 +41,7 @@ export const NAV: SeccionNav[] = [
     items: [
       { href: "/inicio", label: "Mi bandeja", icon: "📥", claves: "pendientes tareas inicio home" },
       { href: "/dashboard", label: "Panel de indicadores", icon: "📊", claves: "kpi resumen dashboard" },
-      { href: "/perfil", label: "Mi perfil · 2FA", icon: "🔐", claves: "contraseña seguridad" },
+      { href: "/perfil", label: "Mi perfil · contraseña y 2FA", icon: "🔐", claves: "contraseña clave seguridad cambiar" },
     ],
   },
   {
@@ -83,6 +83,7 @@ export const NAV: SeccionNav[] = [
       { href: "/equipos", label: "Equipos y calibración", icon: "⚙", perm: "equipo.ver" },
       { href: "/consumibles", label: "Consumibles · kardex", icon: "🧴", perm: "catalogo.gestionar", claves: "stock reactivos lotes" },
       { href: "/qc", label: "Control de calidad (QC)", icon: "✔", perm: "resultado.ver" },
+      { href: "/no-conformidades", label: "No conformidades", icon: "⚠", perm: "nc.ver", claves: "nc accion correctiva capa calidad reclamo" },
       { href: "/spc", label: "Control estadístico (SPC)", icon: "📉", perm: "resultado.ver" },
     ],
   },
@@ -114,6 +115,7 @@ export const NAV: SeccionNav[] = [
     items: [
       { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "csv excel" },
       { href: "/documentos", label: "Buscador de documentos", icon: "🗄", perm: "ot.ver" },
+      { href: "/auditoria", label: "Auditoría (bitácora)", icon: "🧾", perm: "audit.ver", claves: "audit log trazabilidad cambios quien" },
       { href: "/mensajeria", label: "Mensajería · correo", icon: "📧", perm: "cotizacion.ver" },
       { href: "/mensajeria/plantillas", label: "Plantillas de correo", icon: "✉", perm: "cotizacion.ver" },
     ],
