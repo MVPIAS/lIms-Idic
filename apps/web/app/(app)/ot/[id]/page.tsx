@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fecha, fechaHora, fechaDia, rut, clp, num } from "@/lib/format";
 import { ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
+import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}` });
@@ -181,7 +182,7 @@ export default function ExpedientePage() {
             {tabBtn("cabecera", "Cabecera")}
             {tabBtn("muestras", `Muestras (${muestras.length})`)}
             {tabBtn("resultados", "Resultados")}
-            {tabBtn("informe", "Informe")}
+            {tabBtn("informe", "Informe y cierre")}
             {tabBtn("flujo", `Flujo${tieneFlujo ? ` (${tareas.length})` : ""}`)}
           </div>
           <div style={{ padding: 15 }}>
@@ -193,6 +194,7 @@ export default function ExpedientePage() {
                 <div className="field readonly"><label>Estado</label><input value={ot?.estado ?? "—"} readOnly /></div>
                 <div className="field readonly"><label>Prioridad</label><input value={ot?.prioridad ?? "normal"} readOnly /></div>
                 <div className="field readonly"><label>Ingreso</label><input value={fecha(ot?.fechaIngreso ?? ot?.createdAt)} readOnly /></div>
+                <div className="field readonly"><label>Fecha de compromiso</label><input value={ot?.fechaCompromiso ? fechaDia(ot.fechaCompromiso) : "Sin fecha (ver «Informe y cierre»)"} readOnly /></div>
                 <div className="field readonly"><label>Origen</label><input value={ot?.origenTrabajo ? ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo : "—"} readOnly /></div>
                 <div className="field readonly"><label>Cobro</label><input value={ot ? (ot.conCobro === false ? "Sin cobro" : "Con cobro") : "—"} readOnly /></div>
                 <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : ot?.opiPendiente ? "Pendiente" : "—"} readOnly /></div>
@@ -213,8 +215,12 @@ export default function ExpedientePage() {
             {tab === "resultados" && (
               <p className="subtitle" style={{ margin: 0 }}>Captura de réplicas y estadística en <Link href={"/captura" as any} style={{ color: "var(--accent)" }}>Captura de resultados</Link>. Cada resultado calcula promedio/DE/CV y veredicto contra el límite del producto.</p>
             )}
+            {/* Frente B · fecha de compromiso, documentos (firma y entrega) y cierre de la OT. */}
             {tab === "informe" && (
-              <p className="subtitle" style={{ margin: 0 }}>El informe/certificado se genera con las plantillas del repositorio (autorelleno con datos de la OT, cliente y resultados), con HASH y código de verificación. Ver <Link href={"/plantillas" as any} style={{ color: "var(--accent)" }}>Plantillas de informe</Link>.</p>
+              <PanelCierreOt
+                otId={id}
+                onCambio={() => fetch(`${API}/ot/${id}`, { headers: auth() }).then((x) => x.json()).then(setOt).catch(() => {})}
+              />
             )}
             {tab === "flujo" && (
               <div>

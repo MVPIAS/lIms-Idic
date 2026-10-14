@@ -185,6 +185,14 @@ export const ESTILOS_DOCUMENTO = `
   .firmas { display:flex; gap:52px; margin-top:44px; }
   .firma { flex:1; text-align:center; font-size:10.5px; color:var(--suave); }
   .firma .linea { display:block; border-top:1px solid var(--tinta); margin-bottom:5px; height:34px; }
+  .firmas-e { flex-wrap:wrap; gap:28px; }
+  .firmas-e .firma { flex:1 1 30%; min-width:150px; display:flex; flex-direction:column; align-items:center; }
+  .firmas-e .firma .linea { height:0; width:100%; margin:4px 0 5px; }
+  .firmas-e .firma b { color:var(--tinta); font-size:11px; }
+  .firmas-e .img-firma { max-height:46px; max-width:150px; object-fit:contain; }
+  .firmas-e .pend { color:#9a5b00; font-style:italic; }
+  .aviso-estado { border:1.5px solid #9a5b00; color:#7a4700; background:#fff7e6; padding:7px 10px;
+                  font-weight:600; font-size:11px; margin-bottom:14px; text-align:center; }
   .pie { margin-top:26px; border-top:1px solid var(--linea); padding-top:9px;
          font-size:9px; color:var(--suave); }
   .pie .sello { font-family:Consolas,"Courier New",monospace; word-break:break-all; }
@@ -202,6 +210,22 @@ export const ESTILOS_DOCUMENTO = `
     .membrete { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   }`;
 
+/**
+ * Firma electrónica que se estampa en el documento (fuera del cuerpo sellado,
+ * igual que el pie). Viene de `documento_firma` (circuito según la matriz).
+ */
+export type FirmaEstampada = {
+  accion: string; // ELABORA | REVISA | FIRMA | OFICIALIZA | VB | APRUEBA
+  rol: string; // nombre del rol del paso
+  unidad?: string | null;
+  nombre?: string | null; // firmante (o responsables si está pendiente)
+  cargo?: string | null;
+  fecha?: string | null; // dd-mm-aaaa hh:mm
+  /** Imagen de firma en base64 (sin prefijo data:) y su tipo MIME. */
+  imagen?: { data: string; mime: string } | null;
+  pendiente: boolean;
+};
+
 /** Datos del sello que va al pie del documento (fuera del cuerpo sellado). */
 export type Sello = {
   numero: string;
@@ -210,7 +234,76 @@ export type Sello = {
   fecha: string;
   urlVerificacion: string;
   borrador?: boolean;
+  /**
+   * Estado del circuito de firma. Si no es oficial ('en_firma', 'devuelto',
+   * 'anulado'), el documento se marca como SIN VALIDEZ. Sin valor = documento
+   * previo al circuito (se trata como oficial).
+   */
+  estadoDocumento?: string;
+  /** Motivo de anulación o devolución, para el aviso del documento. */
+  motivoEstado?: string | null;
+  /** Firmas del circuito. Si hay, sustituyen al bloque de firmas de la plantilla. */
+  firmas?: FirmaEstampada[];
 };
+
+const ACCION_TEXTO: Record<string, string> = {
+  ELABORA: "Elaborado por",
+  REVISA: "Revisado por",
+  APRUEBA: "Aprobado por",
+  FIRMA: "Firmado por",
+  OFICIALIZA: "Oficializado por",
+  VB: "V.º B.º",
+};
+export const textoAccion = (a: string) => ACCION_TEXTO[a] ?? a;
+
+/** Aviso del estado del documento cuando NO es oficial. Null si es oficial. */
+export function avisoEstado(sello: Sello): string | null {
+  switch (sello.estadoDocumento) {
+    case "en_firma":
+      return "DOCUMENTO EN PROCESO DE FIRMA: todavía no es oficial y no tiene validez.";
+    case "devuelto":
+      return `DOCUMENTO DEVUELTO SIN FIRMAR: no tiene validez.${sello.motivoEstado ? ` Motivo: ${sello.motivoEstado}` : ""}`;
+    case "anulado":
+      return `DOCUMENTO ANULADO: no tiene validez.${sello.motivoEstado ? ` Motivo: ${sello.motivoEstado}` : ""}`;
+    default:
+      return null;
+  }
+}
+
+/** Bloque HTML con las firmas del circuito (presentación, fuera de lo sellado). */
+export function bloqueFirmasHtml(firmas: FirmaEstampada[]): string {
+  const celdas = firmas
+    .map((f) => {
+      const img =
+        f.imagen && /^image\/(png|jpeg)$/.test(f.imagen.mime) && /^[A-Za-z0-9+/=]+$/.test(f.imagen.data)
+          ? `<img src="data:${f.imagen.mime};base64,${f.imagen.data}" alt="Firma" class="img-firma">`
+          : "";
+      const estado = f.pendiente
+        ? `<span class="pend">Pendiente de firma</span>`
+        : `<span class="fecha">${escapar(f.fecha ?? "")}</span>`;
+      return `<div class="firma">${img}<span class="linea"></span>
+        <b>${escapar(f.nombre ?? "")}</b>
+        ${f.cargo ? `<span>${escapar(f.cargo)}</span>` : ""}
+        <span>${escapar(textoAccion(f.accion))} · ${escapar(f.rol)}${f.unidad ? ` · ${escapar(f.unidad)}` : ""}</span>
+        ${estado}</div>`;
+    })
+    .join("");
+  return `<div class="firmas firmas-e">${celdas}</div>`;
+}
+
+/** Bloque de firmas de las plantillas por defecto (líneas vacías). */
+const RE_BLOQUE_FIRMAS = /<div class="firmas">(?:\s*<div class="firma">[\s\S]*?<\/div>)*\s*<\/div>/;
+
+/**
+ * Inserta las firmas del circuito en una COPIA de presentación del cuerpo: en
+ * el lugar del bloque de firmas de la plantilla si lo tiene, o al final. No
+ * altera el cuerpo sellado (el hash se calcula sobre el original).
+ */
+export function cuerpoConFirmas(cuerpo: string, firmas: FirmaEstampada[] | undefined): string {
+  if (!firmas || !firmas.length) return cuerpo;
+  const bloque = bloqueFirmasHtml(firmas);
+  return RE_BLOQUE_FIRMAS.test(cuerpo) ? cuerpo.replace(RE_BLOQUE_FIRMAS, bloque) : `${cuerpo}${bloque}`;
+}
 
 /**
  * Envuelve el cuerpo renderizado en un documento HTML completo e imprimible.
@@ -221,6 +314,9 @@ export type Sello = {
  * contiene su propio hash) y la verificación sería imposible.
  */
 export function documentoCompleto(cuerpoRenderizado: string, sello: Sello, titulo: string): string {
+  const aviso = avisoEstado(sello);
+  const banda = aviso ? `<div class="aviso-estado">${escapar(aviso)}</div>` : "";
+  const cuerpo = cuerpoConFirmas(cuerpoRenderizado, sello.firmas);
   const pie = sello.borrador
     ? `<div class="pie"><b>PREVISUALIZACIÓN — DOCUMENTO NO EMITIDO.</b>
          Sin número correlativo ni código de verificación: no tiene validez.
@@ -241,7 +337,7 @@ export function documentoCompleto(cuerpoRenderizado: string, sello: Sello, titul
 <title>${escapar(titulo)}</title>
 <style>${ESTILOS_DOCUMENTO}</style>
 </head>
-<body><div class="hoja">${cuerpoRenderizado}${pie}</div></body>
+<body><div class="hoja">${banda}${cuerpo}${pie}</div></body>
 </html>`;
 }
 

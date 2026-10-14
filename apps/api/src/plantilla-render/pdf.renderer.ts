@@ -62,7 +62,7 @@
  */
 import PDFDocument from "pdfkit";
 import { decodeEntities } from "./html.util";
-import type { Sello } from "./plantilla-defecto";
+import { avisoEstado, textoAccion, type FirmaEstampada, type Sello } from "./plantilla-defecto";
 import {
   registrarFuentes,
   sanearParaFuente,
@@ -250,7 +250,65 @@ function dibujarMembrete(doc: Doc, nodo: Nodo): void {
   doc.fillColor(TINTA).lineWidth(1);
 }
 
+/**
+ * Firmas del circuito que se dibujan en vez del bloque de la plantilla. Se
+ * cuelgan del propio documento pdfkit (y no de una variable de módulo) para que
+ * dos PDF generados a la vez no se mezclen.
+ */
+type DocConFirmas = Doc & { _firmasCircuito?: FirmaEstampada[]; _firmasDibujadas?: boolean };
+
+/** Firmas electrónicas: imagen (si hay), línea, nombre, cargo, acción y fecha. */
+function dibujarFirmasCircuito(doc: Doc, firmas: FirmaEstampada[]): void {
+  const porFila = Math.min(3, Math.max(1, firmas.length));
+  const sep = 26;
+  const ancho = (anchoUtil(doc) - sep * (porFila - 1)) / porFila;
+  for (let i = 0; i < firmas.length; i += porFila) {
+    const fila = firmas.slice(i, i + porFila);
+    asegurar(doc, 96);
+    const y0 = doc.y + 8;
+    let maxY = y0;
+    fila.forEach((f, j) => {
+      const x = MARGEN + j * (ancho + sep);
+      const altoImg = 34;
+      if (f.imagen && !f.pendiente) {
+        try {
+          doc.image(Buffer.from(f.imagen.data, "base64"), x + 10, y0, {
+            fit: [ancho - 20, altoImg],
+            align: "center",
+            valign: "bottom",
+          });
+        } catch {
+          /* imagen ilegible: se firma sin imagen */
+        }
+      }
+      const yLinea = y0 + altoImg + 3;
+      doc.moveTo(x, yLinea).lineTo(x + ancho, yLinea).lineWidth(0.8).stroke(TINTA);
+      let y = yLinea + 4;
+      const linea = (texto: string, fuente: string, tam: number, color: string) => {
+        if (!texto) return;
+        doc.font(fuente).fontSize(tam).fillColor(color);
+        doc.text(sanearParaFuente(texto), x, y, { width: ancho, align: "center" });
+        y = doc.y + 0.5;
+      };
+      linea(f.nombre ?? "", NEGRITA, 8, TINTA);
+      linea(f.cargo ?? "", REGULAR, 7, SUAVE);
+      linea(`${textoAccion(f.accion)} · ${f.rol}${f.unidad ? ` · ${f.unidad}` : ""}`, REGULAR, 6.6, SUAVE);
+      linea(f.pendiente ? "Pendiente de firma" : `Firmado electrónicamente el ${f.fecha ?? ""}`, f.pendiente ? CURSIVA : REGULAR, 6.6, f.pendiente ? "#9a5b00" : VERDE);
+      if (y > maxY) maxY = y;
+    });
+    doc.y = maxY + 6;
+    doc.x = MARGEN;
+  }
+  doc.fillColor(TINTA);
+}
+
 function dibujarFirmas(doc: Doc, nodo: Nodo): void {
+  const conFirmas = doc as DocConFirmas;
+  if (conFirmas._firmasCircuito?.length) {
+    if (!conFirmas._firmasDibujadas) dibujarFirmasCircuito(doc, conFirmas._firmasCircuito);
+    conFirmas._firmasDibujadas = true;
+    return;
+  }
   const firmas = nodo.hijos.filter((h) => h.clase === "firma");
   if (firmas.length === 0) return;
   asegurar(doc, 70);
@@ -475,13 +533,23 @@ function dibujarPies(doc: Doc, sello: Sello): void {
   const rango = doc.bufferedPageRange();
   for (let i = rango.start; i < rango.start + rango.count; i++) {
     doc.switchToPage(i);
+    // El pie se escribe DENTRO del margen inferior. Con el margen puesto, el
+    // ajuste de línea de pdfkit (opción `width`) creía que el texto no cabía y
+    // abría una página nueva por cada línea del pie: todo PDF salía con 3
+    // páginas de más («Pagina 1 de 1» en la 3.ª). Se anula el margen mientras
+    // se dibuja el pie y se restaura después.
+    const margenInferior = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     const y = doc.page.height - MARGEN + 2;
     doc.moveTo(MARGEN, y - 6).lineTo(doc.page.width - MARGEN, y - 6).lineWidth(0.5).stroke(LINEA);
 
     doc.font(REGULAR).fontSize(6).fillColor(SUAVE);
+    const aviso = avisoEstado(sello);
     const izq = sello.borrador
       ? "PREVISUALIZACION - documento sin valor: no emitido"
-      : `${sello.numero}  |  Emitido el ${sello.fecha}  |  Cod. verificacion: ${sello.codigoVerificacion}  |  ${sello.urlVerificacion}`;
+      : aviso
+        ? `${sello.numero}  |  ${aviso}`
+        : `${sello.numero}  |  Emitido el ${sello.fecha}  |  Cod. verificacion: ${sello.codigoVerificacion}  |  ${sello.urlVerificacion}`;
     doc.text(sanearParaFuente(izq), MARGEN, y - 2, { width: anchoUtil(doc) - 60, lineBreak: false });
     doc.text(`Pagina ${i - rango.start + 1} de ${rango.count}`, doc.page.width - MARGEN - 60, y - 2, {
       width: 60,
@@ -490,6 +558,7 @@ function dibujarPies(doc: Doc, sello: Sello): void {
     });
     doc.font(MONO).fontSize(5).fillColor(SUAVE);
     doc.text(`SHA-256: ${sello.hash}`, MARGEN, y + 5.5, { width: anchoUtil(doc), lineBreak: false });
+    doc.page.margins.bottom = margenInferior;
   }
 }
 
@@ -590,9 +659,23 @@ export async function generarPdf(cuerpoHtml: string, sello: Sello, titulo: strin
     doc.on("error", reject);
   });
 
+  const aviso = avisoEstado(sello);
   if (sello.borrador) marcaDeAgua(doc);
+  else if (aviso) marcaDeAgua(doc, MARCA_ESTADO[sello.estadoDocumento ?? ""] ?? "SIN VALIDEZ");
+  // Si el documento no es oficial, la página se rotula para cada salto de página.
+  if (!sello.borrador && aviso) {
+    const texto = MARCA_ESTADO[sello.estadoDocumento ?? ""] ?? "SIN VALIDEZ";
+    doc.on("pageAdded", () => marcaDeAgua(doc, texto));
+    doc.font(NEGRITA).fontSize(8).fillColor("#7a4700");
+    doc.text(sanearParaFuente(aviso), MARGEN, doc.y, { width: anchoUtil(doc), align: "center" });
+    doc.moveDown(0.6);
+  }
   doc.fillColor(TINTA);
+  const conFirmas = doc as DocConFirmas;
+  conFirmas._firmasCircuito = sello.firmas;
   dibujarNodo(doc, parsearHtml(cuerpoHtml));
+  // Plantilla sin bloque de firmas: las del circuito van al final del cuerpo.
+  if (sello.firmas?.length && !conFirmas._firmasDibujadas) dibujarFirmasCircuito(doc, sello.firmas);
   dibujarPies(doc, sello);
 
   doc.end();
@@ -610,15 +693,27 @@ export async function generarPdf(cuerpoHtml: string, sello: Sello, titulo: strin
  * requisito de partida era emitir sin transparencia. El resultado visual es
  * equivalente: el texto ya era gris claro sobre blanco.
  */
-function marcaDeAgua(doc: Doc): void {
+const MARCA_ESTADO: Record<string, string> = {
+  en_firma: "EN FIRMA",
+  devuelto: "DEVUELTO",
+  anulado: "ANULADO",
+};
+
+function marcaDeAgua(doc: Doc, texto = "PREVISUALIZACION"): void {
+  const x0 = doc.x;
+  const y0 = doc.y;
   doc.save();
   doc.rotate(-45, { origin: [doc.page.width / 2, doc.page.height / 2] });
   doc.font(NEGRITA).fontSize(52).fillColor("#dfe6ec");
-  doc.text("PREVISUALIZACION", 0, doc.page.height / 2 - 26, {
+  doc.text(texto, 0, doc.page.height / 2 - 26, {
     width: doc.page.width,
     align: "center",
   });
   doc.restore();
-  doc.x = MARGEN;
-  doc.y = MARGEN;
+  // save/restore no devuelve la fuente: se deja la del cuerpo.
+  doc.font(REGULAR).fontSize(8.5).fillColor(TINTA);
+  // En la primera página se empieza arriba; en un salto, se respeta la posición
+  // que pdfkit fija para la página nueva (el margen superior).
+  doc.x = x0 || MARGEN;
+  doc.y = y0 || MARGEN;
 }

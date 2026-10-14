@@ -1,4 +1,4 @@
-import { Controller, Module, UseGuards, Injectable } from "@nestjs/common";
+import { BadRequestException, Controller, Module, UseGuards, Injectable } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -7,7 +7,7 @@ import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
-import { estadosValidos, validarTransicion } from "../common/estados";
+import { estadosValidos } from "../common/estados";
 
 /* ===================== GRAN GRUPO (eje producto) ===================== */
 @Injectable()
@@ -93,16 +93,30 @@ export class CertificadoService extends BaseCrudService {
   }
 
   /**
-   * Un certificado emitido es un documento con valor legal: no se "edita" de
-   * vuelta a emitido ni se reactiva una vez anulado. Se valida la transición
-   * emitido → anulado antes de tocar la fila.
+   * Un certificado emitido es un documento con valor legal: no se edita por el
+   * CRUD genérico. Este controlador queda de SOLO LECTURA.
    */
   async actualizar(id: string, data: any, tenantId?: string) {
-    if (data?.estado !== undefined) {
-      const actual = await this.detalle(id, tenantId); // valida tenant + existencia
-      validarTransicion("certificado", actual.estado, data.estado);
-    }
-    return super.actualizar(id, data, tenantId);
+    // Circuito de firma (plantilla-render/firma-documento.service.ts): un
+    // documento ya no se edita por el CRUD genérico. Se anula con motivo
+    // (POST /informes/:id/anular) y se reemite como nueva versión.
+    // Antes se validaba aquí la transición emitido → anulado (validarTransicion);
+    // ahora la anulación exige motivo y la hace el circuito.
+    await this.detalle(id, tenantId); // valida tenant + existencia (404 antes que 400)
+    void data;
+    throw new BadRequestException(
+      "Los informes y certificados no se modifican: anúlelos con motivo desde «Certificados» y reemítalos como nueva versión.",
+    );
+  }
+
+  /** Solo se emite por /informes/emitir (resultados aprobados + matriz de firmas). */
+  async crear(): Promise<never> {
+    throw new BadRequestException("Los informes y certificados se emiten desde «Emitir informe» (POST /informes/emitir).");
+  }
+
+  /** Un documento con valor legal no se borra: se anula. */
+  async eliminar(): Promise<never> {
+    throw new BadRequestException("Los informes y certificados no se eliminan: se anulan con motivo.");
   }
 }
 const CertificadoCreate = z.object({

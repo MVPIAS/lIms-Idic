@@ -711,6 +711,16 @@ model Factura {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz
   deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
+  // Factura en borrador al cerrar la OT (align_firma_cierre.sql).
+  // estado: pendiente -> emitida -> parcial -> pagada | anulada.
+  moneda        String    @default("CLP") @db.VarChar(3)
+  ivaPct        Decimal   @default(19) @map("iva_pct") @db.Decimal(5, 2)
+  centroCostoId String?   @map("centro_costo_id") @db.Uuid
+  cotizacionId  String?   @map("cotizacion_id") @db.Uuid
+  observaciones String?
+  creadaPor     String?   @map("creada_por") @db.Uuid
+  emitidaPor    String?   @map("emitida_por") @db.Uuid
+  emitidaAt     DateTime? @map("emitida_at") @db.Timestamptz
 
   lineas       LineaFactura[]
   pagos        Pago[]
@@ -1068,14 +1078,71 @@ model Certificado {
   estado          String    @default("emitido") @db.VarChar(20)
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
+  // --- Circuito de firma, versión, anulación y entrega (align_firma_cierre.sql) ---
+  // estado: en_firma -> oficial | devuelto | anulado ('emitido' = previo al circuito).
+  tipoDocumento        String?   @map("tipo_documento") @db.VarChar(40)
+  unidadId             String?   @map("unidad_id") @db.Uuid
+  version              Int       @default(1)
+  reemplazaId          String?   @map("reemplaza_id") @db.Uuid
+  oficialAt            DateTime? @map("oficial_at") @db.Timestamptz
+  devueltoAt           DateTime? @map("devuelto_at") @db.Timestamptz
+  devueltoPor          String?   @map("devuelto_por") @db.Uuid
+  devueltoMotivo       String?   @map("devuelto_motivo")
+  anuladoAt            DateTime? @map("anulado_at") @db.Timestamptz
+  anuladoPor           String?   @map("anulado_por") @db.Uuid
+  anuladoMotivo        String?   @map("anulado_motivo")
+  entregadoAt          DateTime? @map("entregado_at") @db.Timestamptz
+  entregaMedio         String?   @map("entrega_medio") @db.VarChar(40)
+  entregaDestinatario  String?   @map("entrega_destinatario") @db.VarChar(200)
+  entregaObservacion   String?   @map("entrega_observacion")
+  entregaRegistradaPor String?   @map("entrega_registrada_por") @db.Uuid
 
   plantilla       PlantillaInforme? @relation(fields: [plantillaId], references: [id])
   ot              OrdenTrabajo      @relation(fields: [otId], references: [id])
+  firmas          DocumentoFirma[]
 
   @@unique([tenantId, codigo])
   @@index([otId])
   @@index([codigoVerificacion])
   @@map("certificado")
+}
+
+/// Paso de firma de un informe/certificado, resuelto con la matriz flujo_firma
+/// al emitir. DDL: packages/db/align_firma_cierre.sql
+model DocumentoFirma {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  certificadoId  String    @map("certificado_id") @db.Uuid
+  orden          Int
+  accion         String    @db.VarChar(20)
+  rolCodigo      String    @map("rol_codigo") @db.VarChar(60)
+  rolNombre      String?   @map("rol_nombre") @db.VarChar(200)
+  unidadId       String?   @map("unidad_id") @db.Uuid
+  unidadCodigo   String?   @map("unidad_codigo") @db.VarChar(40)
+  unidadNombre   String?   @map("unidad_nombre") @db.VarChar(200)
+  obligatorio    Boolean   @default(true)
+  descripcion    String?
+  /// [{ usuarioId, nombre, via }] resueltos por la matriz al emitir.
+  responsables   Json      @default("[]")
+  /// pendiente | firmado | devuelto | anulado
+  estado         String    @default("pendiente") @db.VarChar(20)
+  firmadoPor     String?   @map("firmado_por") @db.Uuid
+  firmadoAt      DateTime? @map("firmado_at") @db.Timestamptz
+  firmanteNombre String?   @map("firmante_nombre") @db.VarChar(200)
+  firmanteCargo  String?   @map("firmante_cargo") @db.VarChar(200)
+  firmanteGrado  String?   @map("firmante_grado") @db.VarChar(80)
+  via            String?   @db.VarChar(20)
+  imagenData     String?   @map("imagen_data")
+  imagenHash     String?   @map("imagen_hash") @db.VarChar(64)
+  hashFirma      String?   @map("hash_firma") @db.VarChar(64)
+  motivo         String?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  certificado    Certificado @relation(fields: [certificadoId], references: [id], onDelete: Cascade)
+
+  @@index([certificadoId, orden])
+  @@index([tenantId, estado])
+  @@map("documento_firma")
 }
 
 // =============================================================================
@@ -1140,6 +1207,9 @@ model Firma {
   imagenRef    String?  @map("imagen_ref") @db.VarChar(200)
   hashSha256   String?  @map("hash_sha256") @db.VarChar(64)
   registradaAt DateTime @default(now()) @map("registrada_at") @db.Timestamptz
+  /// Imagen de firma (PNG/JPEG) en base64 sin prefijo data: (align_firma_cierre.sql).
+  imagenData   String?  @map("imagen_data")
+  imagenMime   String?  @map("imagen_mime") @db.VarChar(40)
 
   @@map("firma")
 }

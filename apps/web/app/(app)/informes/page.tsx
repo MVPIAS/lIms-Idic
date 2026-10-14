@@ -3,422 +3,305 @@
 /**
  * Emisión de informes / certificados · LIMS IDIC
  *
- * Elegir OT + plantilla -> previsualizar el documento renderizado -> emitir.
- * Al emitir, el sistema asigna el correlativo (CERT-AAAA-NNNN), sella el
- * documento con SHA-256 y devuelve el código de verificación; desde aquí se
- * descarga el PDF.
- *
- * NOTA DE INTEGRACIÓN: esta pantalla no está enlazada en `Sidebar.tsx` (fuera
- * del dominio de este cambio). Se llega por /informes; añada el enlace al integrar.
+ * Elegir OT + plantilla → el sistema comprueba las condiciones (resultados
+ * aprobados, control de calidad, laboratorio y matriz de firmas) y muestra
+ * quién firmará → previsualizar → emitir. El documento queda «En firma» y cada
+ * responsable lo firma desde «Documentos por firmar»; con la última firma pasa
+ * a oficial. Reglas: docs/FLUJO_FIRMA_CIERRE.md.
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { api } from "@/lib/api";
 import { fecha } from "@/lib/format";
 import DataTable, { type DataColumn } from "@/components/DataTable";
-
-const API = process.env.NEXT_PUBLIC_API_URL || "/api";
-const auth = () => ({
-  Authorization: `Bearer ${localStorage.getItem("lims_token")}`,
-  "Content-Type": "application/json",
-});
+import { PageHeader } from "@/components/ui/PageHeader";
+import { toast } from "@/components/ui/feedback";
+import { ACCION_FIRMA, ESTADO_DOC, nombresResponsables } from "@/lib/documentos";
+import PanelDocumento from "@/components/documentos/PanelDocumento";
+import Modal from "@/components/documentos/Modal";
 
 type Ot = { id: string; codigo: string; estado?: string; cliente?: { razonSocial?: string } };
 type Plantilla = { id: string; repid: string; nombre: string; tipo: string; version?: string; activo?: boolean };
-type Certificado = {
-  id: string;
-  numero?: string | null;
-  codigo: string;
-  tipo?: string | null;
-  estado: string;
-  fecha?: string;
-  hashSha256?: string | null;
-  codigoVerificacion?: string | null;
-  ot?: { codigo?: string; cliente?: { razonSocial?: string } };
-  plantilla?: { repid?: string; nombre?: string };
+type Condiciones = {
+  puedeEmitir: boolean;
+  faltantes: string[];
+  tipoDocumento: string;
+  resultados: { total: number; aprobados: number };
+  pasos: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; responsables: any[] }[];
 };
-type Emision = {
-  certificado: Certificado;
-  numero: string;
-  codigoVerificacion: string;
-  hash: string;
-  urlVerificacion: string;
-  usaPlantillaPorDefecto: boolean;
-  avisos: string[];
-  html: string;
-};
-type Preview = {
-  plantilla: string;
-  plantillaNombre: string;
-  tipo: string;
-  usaPlantillaPorDefecto: boolean;
-  avisos: string[];
-  hash: string;
-  html: string;
-};
+type Preview = { plantilla: string; tipo: string; avisos: string[]; html: string };
 
-const PILL_ESTADO: Record<string, string> = { emitido: "green", anulado: "red" };
+/** Tipos de documento de la matriz de firmas (rbac.constants.ts · TIPOS_DOCUMENTO) que se emiten desde aquí. */
+const TIPOS_DOCUMENTO: { valor: string; texto: string }[] = [
+  { valor: "", texto: "Según la plantilla" },
+  { valor: "INFORME_ENSAYO", texto: "Informe de ensayo" },
+  { valor: "IVC", texto: "Informe de verificación (IVC)" },
+  { valor: "INFORME_TECNICO", texto: "Informe técnico" },
+  { valor: "CERTIFICADO_CALIBRACION", texto: "Certificado de calibración" },
+  { valor: "INFORME_INSPECCION", texto: "Informe de inspección" },
+  { valor: "CERTIFICADO_CONFORMIDAD", texto: "Certificado de conformidad" },
+  { valor: "INFORME_INCUMPLIMIENTO", texto: "Informe de incumplimiento" },
+];
 
-/** Lee `{data:[]}` o un array pelado, según el endpoint. */
 const lista = <T,>(r: any): T[] => (Array.isArray(r) ? r : (r?.data ?? []));
-
 const etiquetaOt = (o: Ot) => [o.codigo, o.cliente?.razonSocial].filter(Boolean).join(" · ");
 
-export default function InformesPage() {
+function InformesContenido() {
+  const params = useSearchParams();
   const [ots, setOts] = useState<Ot[]>([]);
   const [plantillas, setPlantillas] = useState<Plantilla[]>([]);
-  const [certs, setCerts] = useState<Certificado[]>([]);
-
-  const [otId, setOtId] = useState("");
+  const [docs, setDocs] = useState<any[]>([]);
+  const [otId, setOtId] = useState(params.get("otId") ?? "");
   const [plantillaId, setPlantillaId] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("");
-
+  const [tipoDocumento, setTipoDocumento] = useState("");
+  const [cond, setCond] = useState<Condiciones | null>(null);
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [emision, setEmision] = useState<Emision | null>(null);
   const [error, setError] = useState("");
   const [cargando, setCargando] = useState(true);
-  const [ocupado, setOcupado] = useState<"" | "preview" | "emitir" | "pdf">("");
+  const [ocupado, setOcupado] = useState<"" | "cond" | "preview" | "emitir">("");
+  const [abierto, setAbierto] = useState<string | null>(null);
 
-  /** Certificados emitidos: se recarga tras emitir. */
-  const cargarCertificados = useCallback(async () => {
-    const r = await fetch(`${API}/certificados?limit=50`, { headers: auth() }).then((x) => x.json());
-    setCerts(lista<Certificado>(r));
-  }, []);
-
-  const cargar = useCallback(async () => {
-    setCargando(true);
+  const cargarDocs = useCallback(async () => {
     try {
-      const [o, p] = await Promise.all([
-        fetch(`${API}/ot?limit=200`, { headers: auth() }).then((x) => x.json()),
-        fetch(`${API}/plantillas?limit=200`, { headers: auth() }).then((x) => x.json()),
-      ]);
-      setOts(lista<Ot>(o));
-      setPlantillas(lista<Plantilla>(p).filter((x) => x.activo !== false));
-      await cargarCertificados();
+      setDocs(lista(await api.getRaw(`informes/documentos?limit=50${otId ? `&otId=${otId}` : ""}`)));
     } catch (e: any) {
-      setError(e?.message ?? "No se pudieron cargar los datos");
-    } finally {
-      setCargando(false);
+      setError(e.message);
     }
-  }, [cargarCertificados]);
+  }, [otId]);
 
   useEffect(() => {
-    cargar();
-  }, [cargar]);
+    (async () => {
+      setCargando(true);
+      try {
+        const [o, p] = await Promise.all([api.getRaw("ot"), api.getRaw("plantillas?limit=100")]);
+        setOts(lista<Ot>(o).filter((x) => x.estado !== "cerrada" && x.estado !== "anulada"));
+        setPlantillas(lista<Plantilla>(p).filter((x) => x.activo !== false));
+      } catch (e: any) {
+        setError(e?.message ?? "No se pudieron cargar los datos");
+      } finally {
+        setCargando(false);
+      }
+    })();
+  }, []);
 
-  const tipos = useMemo(
-    () => [...new Set(plantillas.map((p) => p.tipo))].sort(),
-    [plantillas],
-  );
-  const plantillasVisibles = useMemo(
-    () => plantillas.filter((p) => !filtroTipo || p.tipo === filtroTipo),
-    [plantillas, filtroTipo],
-  );
+  useEffect(() => {
+    cargarDocs();
+  }, [cargarDocs]);
 
-  /** Al cambiar el filtro, la plantilla elegida puede dejar de ser visible. */
+  const tipos = useMemo(() => [...new Set(plantillas.map((p) => p.tipo))].sort(), [plantillas]);
+  const plantillasVisibles = useMemo(() => plantillas.filter((p) => !filtroTipo || p.tipo === filtroTipo), [plantillas, filtroTipo]);
+
   useEffect(() => {
     if (plantillaId && !plantillasVisibles.some((p) => p.id === plantillaId)) setPlantillaId("");
   }, [plantillasVisibles, plantillaId]);
 
-  /** Cambiar OT/plantilla invalida lo que hubiera en pantalla. */
-  function elegirOt(v: string) {
-    setOtId(v);
-    setPreview(null);
-    setEmision(null);
-  }
-  function elegirPlantilla(v: string) {
-    setPlantillaId(v);
-    setPreview(null);
-    setEmision(null);
-  }
+  const listo = !!otId && !!plantillaId;
+  const cuerpo = () => ({ otId, plantillaId, ...(tipoDocumento ? { tipoDocumento } : {}) });
 
-  async function llamar<T>(ruta: string): Promise<T> {
-    const r = await fetch(`${API}/informes/${ruta}`, {
-      method: "POST",
-      headers: auth(),
-      body: JSON.stringify({ otId, plantillaId }),
-    });
-    if (!r.ok) {
-      const b = await r.json().catch(() => ({}));
-      throw new Error(b?.message ?? `Error ${r.status}`);
+  // Al elegir OT + plantilla, se comprueba qué falta y quién firmará.
+  const comprobar = useCallback(async () => {
+    if (!otId || !plantillaId) return setCond(null);
+    setOcupado("cond");
+    setError("");
+    try {
+      setCond(await api.post<Condiciones>("/informes/condiciones", { otId, plantillaId, ...(tipoDocumento ? { tipoDocumento } : {}) }));
+    } catch (e: any) {
+      setCond(null);
+      setError(e.message);
+    } finally {
+      setOcupado("");
     }
-    return r.json();
-  }
+  }, [otId, plantillaId, tipoDocumento]);
+
+  useEffect(() => {
+    setPreview(null);
+    comprobar();
+  }, [comprobar]);
 
   async function previsualizar() {
-    if (!otId || !plantillaId) {
-      setError("Selecciona una Orden de Trabajo y una plantilla antes de previsualizar.");
-      return;
-    }
-    setError("");
     setOcupado("preview");
+    setError("");
     try {
-      setEmision(null);
-      setPreview(await llamar<Preview>("previsualizar"));
+      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId }));
     } catch (e: any) {
-      setError(e?.message ?? "No se pudo previsualizar");
+      setError(e.message);
     } finally {
       setOcupado("");
     }
   }
 
   async function emitir() {
-    if (!otId || !plantillaId) {
-      setError("Selecciona una Orden de Trabajo y una plantilla antes de emitir el certificado.");
-      return;
-    }
-    setError("");
     setOcupado("emitir");
-    try {
-      const r = await llamar<Emision>("emitir");
-      setEmision(r);
-      setPreview(null);
-      await cargarCertificados();
-    } catch (e: any) {
-      setError(e?.message ?? "No se pudo emitir");
-    } finally {
-      setOcupado("");
-    }
-  }
-
-  /**
-   * El PDF va tras el guard JWT, así que un <a href> plano daría 401: hay que
-   * pedirlo con la cabecera y abrir el blob. Se revoca la URL al momento para
-   * no retener el documento en memoria.
-   */
-  async function descargarPdf(certificadoId: string, numero: string) {
     setError("");
-    setOcupado("pdf");
     try {
-      const r = await fetch(`${API}/informes/${certificadoId}/pdf`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("lims_token")}` },
-      });
-      if (!r.ok) {
-        const b = await r.json().catch(() => ({}));
-        throw new Error(b?.message ?? `Error ${r.status} al generar el PDF`);
-      }
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${numero || "informe"}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const r: any = await api.post("/informes/emitir", cuerpo());
+      toast.ok(`Documento ${r.numero} emitido: queda en firma.`);
+      setPreview(null);
+      setAbierto(r.certificado.id);
+      await Promise.all([cargarDocs(), comprobar()]);
     } catch (e: any) {
-      setError(e?.message ?? "No se pudo descargar el PDF");
+      setError(e.message);
     } finally {
       setOcupado("");
     }
   }
-
-  const listo = !!otId && !!plantillaId;
-  const doc = preview ?? emision;
-  const avisos = doc?.avisos ?? [];
 
   const columnas: DataColumn[] = [
+    { key: "numero", label: "Número", render: (c) => <span className="codigo">{c.numero}</span> },
+    { key: "otcliente", label: "OT · Cliente", value: (c) => [c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · ") },
+    { key: "plantilla", label: "Plantilla", value: (c) => (c.plantilla ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : "") },
+    { key: "fecha", label: "Emitido", value: (c) => c.fecha ?? "", render: (c) => fecha(c.fecha) },
     {
-      key: "numero",
-      label: "Número",
-      value: (c: Certificado) => c.numero ?? c.codigo,
-      render: (c: Certificado) => <span className="codigo">{c.numero ?? c.codigo}</span>,
+      key: "firmas", label: "Firmas", filter: false, value: (c) => c.firmasHechas,
+      render: (c) => (c.firmasTotal ? `${c.firmasHechas} de ${c.firmasTotal}` : "—"),
     },
     {
-      key: "tipo",
-      label: "Tipo",
-      value: (c: Certificado) => c.tipo ?? "",
-      render: (c: Certificado) => (c.tipo ? <span className="tag">{c.tipo}</span> : "—"),
-    },
-    {
-      key: "otcliente",
-      label: "OT · Cliente",
-      value: (c: Certificado) => [c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · "),
-      render: (c: Certificado) =>
-        [c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · ") || "—",
-    },
-    {
-      key: "plantilla",
-      label: "Plantilla",
-      value: (c: Certificado) => (c.plantilla?.repid ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : ""),
-      render: (c: Certificado) => (c.plantilla?.repid ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : "—"),
-    },
-    {
-      key: "fecha",
-      label: "Fecha",
-      value: (c: Certificado) => c.fecha ?? "",
-      render: (c: Certificado) => fecha(c.fecha),
-    },
-    {
-      key: "estado",
-      label: "Estado",
-      filter: false,
-      value: (c: Certificado) => c.estado ?? "",
-      render: (c: Certificado) => <span className={`pill ${PILL_ESTADO[c.estado] ?? "gray"}`}>{c.estado}</span>,
+      key: "estado", label: "Estado", value: (c) => ESTADO_DOC[c.estado]?.texto ?? c.estado,
+      render: (c) => {
+        const e = ESTADO_DOC[c.estado] ?? { texto: c.estado, pill: "gray" };
+        const pend = c.pendienteDe?.[0];
+        return (
+          <span>
+            <span className={`pill ${e.pill}`}>{e.texto}</span>
+            {pend && <small style={{ display: "block", color: "var(--muted)" }}>Le toca: {pend.rol} {pend.responsables?.join(" / ")}</small>}
+          </span>
+        );
+      },
     },
   ];
 
   return (
     <>
-      <h1 className="page">Emisión de informes y certificados</h1>
-      <p className="subtitle">
-        Rellena la plantilla con los datos del expediente (OT, cliente, muestras y resultados), sella el
-        documento con SHA-256 y le asigna el correlativo <span className="tag">CERT-AAAA-NNNN</span>.
-      </p>
+      <PageHeader
+        titulo="Emitir informe o certificado"
+        subtitulo={<>Rellena la plantilla con el expediente, sella el documento con SHA-256 y le asigna el correlativo. El documento queda <b>en firma</b> hasta que firman todos los responsables de la matriz de firmas.</>}
+        migas={[{ label: "Laboratorio" }, { label: "Emitir informe" }]}
+        acciones={<Link href={"/informes/por-firmar" as any} className="btn outline">Documentos por firmar</Link>}
+      />
 
-      {error && (
-        <div className="card" style={{ borderLeft: "3px solid var(--red)" }}>
-          <b style={{ color: "var(--red)" }}>Error:</b> {error}
-        </div>
-      )}
+      {error && <div className="alert warn">{error}</div>}
 
-      {/* ------------------------------ Selección ------------------------------ */}
       <div className="card">
-        <h2>
-          1 · Documento a emitir
-          <span className="right">{plantillas.length} plantillas · {ots.length} OT</span>
-        </h2>
+        <h2>1 · Documento a emitir</h2>
         <div className="form-grid">
           <div className="field span-2">
             <label>Orden de trabajo <span className="req">*</span></label>
-            <select value={otId} onChange={(e) => elegirOt(e.target.value)} disabled={cargando}>
+            <select value={otId} onChange={(e) => setOtId(e.target.value)} disabled={cargando}>
               <option value="">{cargando ? "Cargando…" : "— Seleccione una OT —"}</option>
-              {ots.map((o) => (
-                <option key={o.id} value={o.id}>{etiquetaOt(o)}</option>
-              ))}
+              {ots.map((o) => <option key={o.id} value={o.id}>{etiquetaOt(o)}</option>)}
             </select>
           </div>
           <div className="field">
             <label>Tipo de plantilla</label>
             <select value={filtroTipo} onChange={(e) => setFiltroTipo(e.target.value)} disabled={cargando}>
               <option value="">Todos los tipos</option>
-              {tipos.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
+              {tipos.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
-          <div className="field span-3">
+          <div className="field span-2">
             <label>Plantilla <span className="req">*</span></label>
-            <select value={plantillaId} onChange={(e) => elegirPlantilla(e.target.value)} disabled={cargando}>
-              <option value="">
-                {cargando ? "Cargando…" : `— Seleccione una plantilla (${plantillasVisibles.length}) —`}
-              </option>
+            <select value={plantillaId} onChange={(e) => setPlantillaId(e.target.value)} disabled={cargando}>
+              <option value="">{cargando ? "Cargando…" : `— Seleccione una plantilla (${plantillasVisibles.length}) —`}</option>
               {plantillasVisibles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.repid} · {p.nombre} ({p.tipo}{p.version ? ` · ${p.version}` : ""})
-                </option>
+                <option key={p.id} value={p.id}>{p.repid} · {p.nombre} ({p.tipo}{p.version ? ` · ${p.version}` : ""})</option>
               ))}
             </select>
           </div>
-        </div>
-        <div className="toolbar" style={{ marginTop: 12, marginBottom: 0 }}>
-          <button className="btn outline" onClick={previsualizar} disabled={!listo || !!ocupado}>
-            {ocupado === "preview" ? "Generando…" : "Previsualizar"}
-          </button>
-          <button className="btn primary" onClick={emitir} disabled={!listo || !!ocupado}>
-            {ocupado === "emitir" ? "Emitiendo…" : "Emitir certificado"}
-          </button>
-          <span className="spacer" />
-          {!listo && <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Elija OT y plantilla para continuar.</span>}
+          <div className="field">
+            <label>Tipo de documento (matriz de firmas)</label>
+            <select value={tipoDocumento} onChange={(e) => setTipoDocumento(e.target.value)}>
+              {TIPOS_DOCUMENTO.map((t) => <option key={t.valor} value={t.valor}>{t.texto}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 
-      {/* ------------------------------- Avisos -------------------------------- */}
-      {avisos.length > 0 && (
-        <div className="card" style={{ borderLeft: "3px solid var(--amber, #d97706)" }}>
-          <h2>Avisos del motor de plantillas</h2>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.6 }}>
-            {avisos.map((a, i) => (
-              <li key={i}>{a}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* ------------------------- Resultado de la emisión ---------------------- */}
-      {emision && (
-        <div className="card" style={{ borderLeft: "3px solid var(--green)" }}>
+      {listo && (
+        <div className="card" style={{ borderLeft: `3px solid ${cond?.puedeEmitir ? "var(--green)" : "var(--amber, #d97706)"}` }}>
           <h2>
-            Certificado emitido <span className="right"><span className="pill green">emitido</span></span>
+            2 · Condiciones de emisión
+            <span className="right">{ocupado === "cond" ? "Comprobando…" : cond ? `${cond.resultados.aprobados} de ${cond.resultados.total} resultados aprobados` : ""}</span>
           </h2>
-          <div className="form-grid cols-4">
-            <div className="field readonly">
-              <label>Número correlativo</label>
-              <input value={emision.numero} readOnly />
-            </div>
-            <div className="field readonly">
-              <label>Código de verificación</label>
-              <input value={emision.codigoVerificacion} readOnly style={{ letterSpacing: 1 }} />
-            </div>
-            <div className="field readonly span-2">
-              <label>Sello de integridad (SHA-256)</label>
-              <input
-                value={emision.hash}
-                readOnly
-                style={{ fontFamily: "'JetBrains Mono', Consolas, monospace", fontSize: 10.5 }}
-              />
-            </div>
-          </div>
-          <div className="toolbar" style={{ marginTop: 11, marginBottom: 0 }}>
-            <button
-              className="btn success"
-              onClick={() => descargarPdf(emision.certificado.id, emision.numero)}
-              disabled={!!ocupado}
-            >
-              {ocupado === "pdf" ? "Generando PDF…" : "Descargar PDF"}
+          {cond && !cond.puedeEmitir && (
+            <>
+              <p style={{ margin: "0 0 6px", fontWeight: 600 }}>Todavía no se puede emitir. Falta:</p>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6 }}>
+                {cond.faltantes.map((f, i) => <li key={i}>{f}</li>)}
+              </ul>
+              {otId && <p className="subtitle" style={{ marginBottom: 0 }}>Revise y apruebe los resultados en <Link href={"/captura-ot" as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>.</p>}
+            </>
+          )}
+          {cond?.puedeEmitir && <p style={{ margin: "0 0 6px" }}>Todo en orden: resultados aprobados y firmantes definidos.</p>}
+          {cond && cond.pasos.length > 0 && (
+            <>
+              <p style={{ margin: "10px 0 6px", fontWeight: 600 }}>Firmarán, en este orden:</p>
+              <table className="data">
+                <thead><tr><th>#</th><th>Acción</th><th>Rol · unidad</th><th>Responsables</th></tr></thead>
+                <tbody>
+                  {cond.pasos.map((p) => (
+                    <tr key={`${p.orden}-${p.rolNombre}`}>
+                      <td>{p.orden}</td>
+                      <td>{ACCION_FIRMA[p.accion] ?? p.accion}</td>
+                      <td>{p.rolNombre}{p.unidadCodigo ? ` · ${p.unidadCodigo}` : ""}</td>
+                      <td>{nombresResponsables(p.responsables)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
+          <div className="toolbar" style={{ marginTop: 12, marginBottom: 0 }}>
+            <button className="btn outline" onClick={previsualizar} disabled={!!ocupado}>
+              {ocupado === "preview" ? "Generando…" : "Previsualizar"}
             </button>
-            <span className="spacer" />
-            <span style={{ fontSize: 11, color: "var(--muted)" }}>
-              Verificable en {emision.urlVerificacion}
-            </span>
+            <button className="btn primary" onClick={emitir} disabled={!!ocupado || !cond?.puedeEmitir}>
+              {ocupado === "emitir" ? "Emitiendo…" : "Emitir y enviar a firma"}
+            </button>
           </div>
         </div>
       )}
 
-      {/* ----------------------------- Documento ------------------------------- */}
-      {doc && (
+      {preview && (
         <div className="card">
-          <h2>
-            {preview ? "2 · Previsualización (sin emitir)" : "Documento emitido"}
-            <span className="right">
-              {preview ? `${preview.plantilla} · ${preview.tipo}` : emision?.numero}
-            </span>
-          </h2>
-          {/*
-            sandbox="" : sin allow-scripts ni allow-same-origin. El documento se
-            pinta pero no puede ejecutar JS ni tocar la sesión, aunque una
-            plantilla llevara <script>. Los DATOS ya van escapados en el servidor;
-            esto es la segunda barrera.
-          */}
-          <iframe
-            title="Previsualización del informe"
-            srcDoc={doc.html}
-            sandbox=""
-            style={{ width: "100%", height: 620, border: "1px solid var(--line)", borderRadius: 6, background: "#fff" }}
-          />
+          <h2>Previsualización (sin emitir) <span className="right">{preview.plantilla} · {preview.tipo}</span></h2>
+          {preview.avisos.length > 0 && (
+            <ul style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 12, lineHeight: 1.6 }}>
+              {preview.avisos.map((a, i) => <li key={i}>{a}</li>)}
+            </ul>
+          )}
+          <iframe title="Previsualización del informe" srcDoc={preview.html} sandbox=""
+            style={{ width: "100%", height: 620, border: "1px solid var(--line)", borderRadius: 6, background: "#fff" }} />
         </div>
       )}
 
-      {/* -------------------------- Certificados emitidos ---------------------- */}
       <div style={{ padding: "13px 15px 0" }}>
-        <h2>
-          Certificados emitidos <span className="right">{certs.length} últimos</span>
-        </h2>
+        <h2>{otId ? "Documentos de la OT" : "Últimos documentos emitidos"} <span className="right">{docs.length}</span></h2>
       </div>
       <DataTable
         columns={columnas}
-        rows={certs}
+        rows={docs}
         loading={cargando}
         searchKeys={["numero", "otcliente", "plantilla"]}
-        acciones={(c: Certificado) => (
-          <button
-            className="btn outline sm"
-            onClick={() => descargarPdf(c.id, c.numero ?? c.codigo)}
-            disabled={!!ocupado}
-          >
-            PDF
-          </button>
-        )}
-        vacio={<>Todavía no se ha emitido ningún certificado.</>}
+        onRowClick={(c) => setAbierto(c.id)}
+        acciones={(c) => <button className="btn outline sm" onClick={(e) => { e.stopPropagation(); setAbierto(c.id); }}>Ver</button>}
+        vacio={<>Todavía no se ha emitido ningún documento.</>}
       />
+
+      {abierto && (
+        <Modal titulo="Documento" ancho={980} onCerrar={() => setAbierto(null)}>
+          <PanelDocumento documentoId={abierto} onCambio={cargarDocs} />
+        </Modal>
+      )}
     </>
+  );
+}
+
+export default function InformesPage() {
+  return (
+    <Suspense fallback={<p className="subtitle">Cargando…</p>}>
+      <InformesContenido />
+    </Suspense>
   );
 }
