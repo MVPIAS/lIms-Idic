@@ -105,7 +105,7 @@ export class FirmasImagenController {
   }
 
   @Get("usuario/:usuarioId")
-  @RequierePermiso("firma.registrar")
+  @RequierePermiso("admin.usuarios")
   async deUsuario(@Param("usuarioId", ParseUUIDPipe) usuarioId: string, @Req() req: any) {
     await this.usuarioDelTenant(usuarioId, req);
     return this.estado(usuarioId);
