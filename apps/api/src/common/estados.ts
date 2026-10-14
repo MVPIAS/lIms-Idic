@@ -63,7 +63,10 @@ const TRANSICIONES: Record<DominioEstado, Record<string, readonly string[]>> = {
   // un motivo sin pasar antes por revisado_n1 (que sería certificar como
   // revisado justo lo que está rechazando). Es el único cambio sobre el
   // vocabulario de schema.sql:873, y no inventa ningún estado nuevo.
+  // `pendiente` (align_flujo_laboratorio.sql): ensayo pedido al registrar la
+  // OT, aún sin valor. La captura lo lleva a `capturado`; no se revisa vacío.
   resultado: {
+    pendiente: ["capturado"],
     capturado: ["revisado_n1", "rechazado", "devuelto"],
     revisado_n1: ["aprobado", "rechazado", "devuelto"],
     aprobado: [],

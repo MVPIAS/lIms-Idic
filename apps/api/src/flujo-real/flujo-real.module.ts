@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Body,
   ConflictException,
+  ForbiddenException,
   Controller,
   Get,
   Injectable,
@@ -23,6 +25,11 @@ import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { generarNumeroOrdenInterna } from "../common/correlativo";
+import { AlcanceService } from "../rbac/alcance.service";
+import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
+import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
+import { veredictoNumerico, type Veredicto } from "../laboratorio/veredicto";
+import { conNombres } from "../laboratorio/laboratorio.module";
 
 /**
  * =============================================================================
@@ -58,6 +65,15 @@ const PERM = {
   otGestionar: "ot.crear",
   decisionEmitir: "certificado.emitir",
 } as const;
+
+/** Exige al menos uno de los permisos (SUPERADMIN pasa siempre, como en PermisoGuard). */
+function exigirAlguno(req: any, permisos: string[]) {
+  const roles: string[] = req?.user?.roles ?? [];
+  if (roles.includes("SUPERADMIN")) return;
+  const tiene: string[] = req?.user?.permisos ?? [];
+  if (!permisos.some((p) => tiene.includes(p)))
+    throw new ForbiddenException(`Permiso insuficiente. Requiere uno de: ${permisos.join(", ")}`);
+}
 
 /** Extrae el tenant del usuario autenticado; en dev cae al tenant por defecto. */
 function tenantDe(req: any): string {
@@ -514,9 +530,22 @@ function aNumero(v?: string | null): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Tolerancia numérica para las comparaciones de cota (evita falsos no_cumple por
- * ruido de coma flotante en valores como 3600.0000001). */
-const TOL_NUMERICA = 1e-9;
+/**
+ * Lee el valor capturado: número (admite coma decimal chilena «12,4») o texto
+ * cualitativo («Cumple», «Ausente»). Un texto que PARECE número pero no se
+ * entiende («1.234,5», «12,4,5») se rechaza en vez de guardarse como texto y
+ * quedar «pendiente» sin aviso.
+ */
+export function leerValorCaptura(valor: number | string): number | string {
+  if (typeof valor === "number") return valor;
+  const s = valor.trim();
+  if (/^[+-]?(\d+([.,]\d+)?|[.,]\d+)$/.test(s)) return Number(s.replace(",", "."));
+  if (/^[\d\s.,+-]+$/.test(s))
+    throw new BadRequestException(
+      `No se entiende «${s}» como número: use un solo separador decimal (coma o punto) y sin separador de miles.`,
+    );
+  return s;
+}
 
 /**
  * Referencia CUALITATIVA normalizada de un límite/nominal: devuelve el texto en
@@ -533,7 +562,19 @@ function refCualitativa(v?: string | null): string | null {
 
 @Injectable()
 export class PuenteAnalisisService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly alcance: AlcanceService,
+    private readonly labs: LaboratorioOtService,
+  ) {}
+
+  /** OT del tenant y dentro del alcance del usuario (404 / 403). */
+  private async otEnAlcance(otId: string, tenantId: string, req: any) {
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    return ot;
+  }
 
   private async muestraDeOt(otId: string, muestraId: string, tenantId: string) {
     const muestra = await this.prisma.muestra.findFirst({
@@ -556,11 +597,25 @@ export class PuenteAnalisisService {
     otId: string,
     body: z.infer<typeof GenerarAnalisisBody>,
     tenantId: string,
+    req?: any,
   ) {
-    // La OT debe existir en el tenant.
-    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
-    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    // La OT debe existir en el tenant y estar en el alcance del usuario.
+    const ot = await this.otEnAlcance(otId, tenantId, req);
     const muestra = await this.muestraDeOt(otId, body.muestraId, tenantId);
+
+    // Una OT que aún no tiene laboratorio (p. ej. creada antes de esta
+    // versión) lo toma de los métodos pedidos, si todos apuntan al mismo.
+    if (!ot.unidadPrincipal) {
+      const d = await this.labs.deducir(tenantId, { catMetodoIds: body.metodoIds });
+      if (d.unidad)
+        await this.labs.fijar(this.prisma, {
+          tenantId,
+          otId,
+          unidad: d.unidad,
+          usuarioId: req?.user?.sub,
+          origen: "metodos_de_la_muestra",
+        });
+    }
 
     // Analitos de los métodos pedidos (validando que son del tenant).
     const analitos = await this.prisma.catAnalito.findMany({
@@ -615,6 +670,8 @@ export class PuenteAnalisisService {
           nominal,
           limiteSup,
           veredicto: "pendiente",
+          // Pedido pero aún sin valor: no cuenta como «por revisar».
+          estado: "pendiente",
         },
       });
       existentes.add(a.id);
@@ -646,23 +703,31 @@ export class PuenteAnalisisService {
    *   PENDIENTE (revisión manual): cuando no hay forma de decidir —ni cota
    *     numérica comparable ni referencia textual comparable—.
    */
-  async capturarValor(id: string, valor: number | string, tenantId: string) {
+  async capturarValor(id: string, valorEntrada: number | string, tenantId: string, req?: any) {
     const resultado = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null, muestra: { tenantId } },
-      include: { muestra: { select: { tenantId: true } } },
+      include: { muestra: { select: { tenantId: true, otId: true } } },
     });
     if (!resultado) throw new NotFoundException(`Resultado ${id} no encontrado`);
+    const otId = resultado.otId ?? resultado.muestra.otId;
+    const ot = otId
+      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { codigo: true, unidadPrincipal: true } })
+      : null;
+    await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, ot ? `el resultado de la OT ${ot.codigo}` : "el resultado");
 
-    const valorNum = typeof valor === "number" ? valor : aNumero(valor);
+    // Lo revisado o aprobado no se sobrescribe: hay que devolverlo antes.
+    const bloqueo = motivoNoCapturable(resultado.estado);
+    if (bloqueo) throw new ConflictException(bloqueo);
+
+    const valor = leerValorCaptura(valorEntrada);
+    const valorNum = typeof valor === "number" ? valor : null;
     const inf = aNumero(resultado.limiteInf);
     const sup = aNumero(resultado.limiteSup);
 
-    let veredicto: "cumple" | "no_cumple" | "pendiente";
+    let veredicto: Veredicto;
     if (valorNum != null && (inf != null || sup != null)) {
-      // --- Rama NUMÉRICA: una o dos cotas numéricas. ---
-      const bajoMinimo = inf != null && valorNum < inf - TOL_NUMERICA;
-      const sobreMaximo = sup != null && valorNum > sup + TOL_NUMERICA;
-      veredicto = bajoMinimo || sobreMaximo ? "no_cumple" : "cumple";
+      // --- Rama NUMÉRICA: una o dos cotas numéricas (tolerancia TOL_NUMERICA). ---
+      veredicto = veredictoNumerico(valorNum, inf, sup);
     } else {
       // --- Rama CUALITATIVA: referencia textual esperada vs valor textual. ---
       const esperado =
@@ -670,10 +735,16 @@ export class PuenteAnalisisService {
         refCualitativa(resultado.limiteInf) ??
         refCualitativa(resultado.limiteSup);
       const valorTxt = String(valor).trim().toLowerCase();
+      const sinEspecificacion =
+        !String(resultado.limiteInf ?? "").trim() && !String(resultado.limiteSup ?? "").trim() && !String(resultado.nominal ?? "").trim();
       if (esperado != null && valorTxt !== "") {
         veredicto = esperado === valorTxt ? "cumple" : "no_cumple";
+      } else if (sinEspecificacion) {
+        // Sin especificación: el valor se informa tal cual.
+        veredicto = "informativo";
       } else {
-        // Sin cota numérica y sin referencia textual comparable -> manual.
+        // Hay especificación pero no se puede contrastar (texto frente a
+        // límites numéricos): lo decide el revisor.
         veredicto = "pendiente";
       }
     }
@@ -684,6 +755,11 @@ export class PuenteAnalisisService {
         valorNumerico: valorNum,
         valorTexto: String(valor),
         veredicto,
+        // Quien captura queda como analista (segregación: no podrá revisarlo).
+        analistaId: req?.user?.sub ?? resultado.analistaId ?? null,
+        estado: "capturado",
+        fecha: new Date(),
+        otId: otId ?? null,
       },
       include: { catAnalito: true, catMetodo: true },
     });
@@ -694,9 +770,8 @@ export class PuenteAnalisisService {
    * especificación/valor/veredicto, más un resumen (cumple/no_cumple/pendiente)
    * para el expediente/informe.
    */
-  async resultadosDeOt(otId: string, tenantId: string) {
-    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
-    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+  async resultadosDeOt(otId: string, tenantId: string, req?: any) {
+    const ot = await this.otEnAlcance(otId, tenantId, req);
 
     const muestras = await this.prisma.muestra.findMany({
       where: { otId, tenantId, deletedAt: null },
@@ -713,18 +788,30 @@ export class PuenteAnalisisService {
             catMetodo: { select: { id: true, codigo: true, nombre: true, norma: true } },
             analito: { select: { id: true, codigo: true, nombre: true } },
           },
-          orderBy: { fecha: "desc" },
+          orderBy: [{ muestraId: "asc" }, { fecha: "asc" }],
         })
       : [];
 
-    const resumen = { total: resultados.length, cumple: 0, no_cumple: 0, pendiente: 0 };
+    // Veredictos: cumple / no_cumple / informativo / pendiente (sin valor o sin
+    // decidir). Estados: el ciclo de revisión (pendiente → … → aprobado).
+    const resumen = { total: resultados.length, cumple: 0, no_cumple: 0, informativo: 0, pendiente: 0 };
+    const porEstado: Record<string, number> = {};
     for (const r of resultados) {
       if (r.veredicto === "cumple") resumen.cumple++;
       else if (r.veredicto === "no_cumple") resumen.no_cumple++;
+      else if (r.veredicto === "informativo") resumen.informativo++;
       else resumen.pendiente++;
+      porEstado[r.estado] = (porEstado[r.estado] ?? 0) + 1;
     }
 
-    return { otId, muestras: muestraIds.length, resumen, resultados };
+    return {
+      otId,
+      ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal },
+      muestras: muestraIds.length,
+      resumen,
+      porEstado,
+      resultados: await conNombres(this.prisma, resultados),
+    };
   }
 }
 
@@ -735,18 +822,24 @@ export class PuenteAnalisisService {
 export class PuenteOtController {
   constructor(private readonly svc: PuenteAnalisisService) {}
 
+  /**
+   * Registrar los análisis pedidos de una muestra es parte del registro de la
+   * OT (lo hace quien registra las muestras) o de la captura: basta
+   * `muestra.crear` O `resultado.crear`. Por eso no lleva @RequierePermiso
+   * (que exige TODOS los listados) y se comprueba aquí.
+   */
   @Post(":id/generar-analisis")
-  @RequierePermiso("resultado.crear")
   @ApiOperation({ summary: "Materializa los métodos del panel (cat_metodo) como resultados por analizar" })
   generarAnalisis(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    return this.svc.generarAnalisis(id, GenerarAnalisisBody.parse(body), tenantDe(req));
+    exigirAlguno(req, ["muestra.crear", "resultado.crear"]);
+    return this.svc.generarAnalisis(id, GenerarAnalisisBody.parse(body), tenantDe(req), req);
   }
 
   @Get(":id/resultados")
   @RequierePermiso("resultado.ver")
-  @ApiOperation({ summary: "Resultados de las muestras de la OT + resumen de veredictos" })
+  @ApiOperation({ summary: "Resultados de las muestras de la OT + resumen de veredictos y estados" })
   resultados(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    return this.svc.resultadosDeOt(id, tenantDe(req));
+    return this.svc.resultadosDeOt(id, tenantDe(req), req);
   }
 }
 
@@ -762,7 +855,7 @@ export class PuenteResultadoController {
   @ApiOperation({ summary: "Captura el valor de un resultado del puente y calcula su veredicto" })
   capturarValor(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const { valor } = CapturarValorBody.parse(body);
-    return this.svc.capturarValor(id, valor, tenantDe(req));
+    return this.svc.capturarValor(id, valor, tenantDe(req), req);
   }
 }
 

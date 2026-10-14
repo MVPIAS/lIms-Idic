@@ -91,6 +91,7 @@ model Unidad {
   usuarioRoles    UsuarioRol[]
   flujosFirma     FlujoFirma[] @relation("FlujoFirmaUnidad")
   flujosFirmaDestino FlujoFirma[] @relation("FlujoFirmaDestino")
+  ordenesTrabajo  OrdenTrabajo[] @relation("OtUnidadPrincipal")
 
   @@unique([tenantId, codigo])
   @@map("unidad")
@@ -392,11 +393,16 @@ model OrdenTrabajo {
   labSolicitanteCcId    String?   @map("lab_solicitante_cc_id") @db.Uuid
   horasHombre           Decimal   @default(0) @map("horas_hombre") @db.Decimal(10, 2)
   costoEstimado         Decimal   @default(0) @map("costo_estimado") @db.Decimal(14, 2)
+  // Laboratorio responsable: quién y cuándo lo fijó o cambió por última vez
+  // (historial completo en ot_historial). DDL: packages/db/align_flujo_laboratorio.sql
+  unidadAsignadaPor     String?   @map("unidad_asignada_por") @db.Uuid
+  unidadAsignadaAt      DateTime? @map("unidad_asignada_at") @db.Timestamptz
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz
 
   tenant                Tenant    @relation(fields: [tenantId], references: [id])
   cliente               Cliente   @relation(fields: [clienteId], references: [id])
+  unidad                Unidad?   @relation("OtUnidadPrincipal", fields: [unidadPrincipal], references: [id])
   certificados          Certificado[]
   qcControles           QcControl[]
 
@@ -651,6 +657,8 @@ model CentroCosto {
   tipo      String?   @db.VarChar(30)
   condicionesBase       String? @map("condiciones_base")
   validezParticularDias Int?    @map("validez_particular_dias")
+  // Unidad a la que corresponde (deduce el laboratorio de la OT). align_flujo_laboratorio.sql
+  unidadId  String?   @map("unidad_id") @db.Uuid
   activo    Boolean   @default(true)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
@@ -985,6 +993,8 @@ model Resultado {
   aprobadoPor      String?   @map("aprobado_por") @db.Uuid
   aprobadoAt       DateTime? @map("aprobado_at") @db.Timestamptz
   motivoDevolucion String?   @map("motivo_devolucion")
+  /// Analista al que la jefatura asignó este ensayo (align_flujo_laboratorio.sql).
+  asignadoA        String?   @map("asignado_a") @db.Uuid
 
   /// PUENTE catálogo v2 (align_puente_catalogo.sql). Un resultado del puente se
   /// materializa desde un cat_metodo/cat_analito del panel del elemento, con la
