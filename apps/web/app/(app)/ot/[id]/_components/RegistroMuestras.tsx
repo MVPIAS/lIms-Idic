@@ -65,8 +65,8 @@ export default function RegistroMuestras({ otId, onCambio }: { otId: string; onC
     if (!d) return;
     setMarcados(new Set(d.lineas.flatMap((l) => l.sugeridos)));
     // Tantas muestras como la mayor cantidad cotizada (mínimo 1); la descripción la escribe quien recibe.
-    const n = Math.max(1, Math.min(20, ...d.lineas.map((l) => l.cantidad || 1)));
-    setNombres(Array.from({ length: d.lineas.length ? n : 1 }, () => ""));
+    const n = d.lineas.length ? Math.max(1, Math.min(20, Math.max(...d.lineas.map((l) => l.cantidad || 1)))) : 1;
+    setNombres(Array.from({ length: n }, () => ""));
     setExtra([]);
     setBusqueda("");
     setEncontrados([]);
