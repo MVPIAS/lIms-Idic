@@ -13,6 +13,8 @@ import { calcularITV02 } from "./volumen";
 import { calcularITT01, calcularITT02 } from "./temperatura";
 import { calcularITF01, calcularITF03 } from "./fuerza";
 import { calcularITPT01 } from "./par";
+import { calcularLNF } from "./lnf";
+import { calcularPuntos, FORMULA_PUNTOS } from "./puntos";
 import type { Datos, Opciones } from "./util";
 
 export type { Datos, Opciones } from "./util";
@@ -24,12 +26,18 @@ export interface PuntoResumen {
   U: number;
   Ucert: number | null;
   conforme: boolean | null;
+  /** Clase del rango que empieza en este punto (ISO 376). */
+  clase?: string;
+  /** Unidad propia del punto (formulario por puntos: cada punto puede ser de otra función). */
+  unidad?: string;
 }
 export interface ResumenMotor {
   puntos: PuntoResumen[];
   uMax: number;
   uCert: number | null;
   conforme: boolean | null;
+  /** Datos adicionales para mostrar y certificar (clase, coeficientes, fórmula…). */
+  extra?: { etiqueta: string; valor: string }[];
 }
 export interface OpcionMotor { clave: string; hallazgo: string; etiqueta: string }
 export interface Motor {
@@ -41,6 +49,8 @@ export interface Motor {
   /** Unidad de la incertidumbre (difiere en fuerza y par, donde es relativa). */
   unidadU: string;
   opciones: OpcionMotor[];
+  /** false = cálculo estándar sin planilla real con la que compararse. */
+  validado?: boolean;
   calcular: (d: Datos, opt?: Opciones) => any;
   resumen: (r: any, d: Datos) => ResumenMotor;
 }
@@ -166,9 +176,67 @@ export const MOTORES: Record<string, Motor> = {
   },
 };
 
+const sci = (x: number) => x.toExponential(12).replace(".", ",");
+
+/** Motor del Laboratorio Nacional de Fuerza (ISO 376), validado contra la planilla LCPNF-010.26. */
+export const MOTOR_LNF: Motor = {
+  it: "LCPNF-IT01", magnitud: "fuerza", nombre: "Instrumentos de medida de fuerza (ISO 376)", unidad: "kN", unidadU: "%",
+  opciones: [
+    { clave: "k2", hallazgo: "G3", etiqueta: "Usar k = 2, como declara el texto del certificado" },
+    { clave: "creep", hallazgo: "G4", etiqueta: "Fluencia estimada sin el /100 adicional" },
+    { clave: "umin", hallazgo: "G6", etiqueta: "U mínima por clase leída de la fila correcta" },
+  ],
+  calcular: calcularLNF,
+  resumen: (r) => {
+    const puntos: PuntoResumen[] = r.rows.map((x: any) => ({
+      nominal: x.F, error: x.fc, uc: x.uc, U: x.U, Ucert: x.U, conforme: null, clase: x.etiqueta,
+    }));
+    const c = r.coef;
+    return {
+      puntos, uMax: Math.max(...puntos.map((p) => p.U)), uCert: Math.max(...puntos.map((p) => p.U)), conforme: null,
+      extra: [
+        { etiqueta: "Clase desde el primer punto", valor: r.clase },
+        { etiqueta: "S = a·F + b·F² + c·F³", valor: `a = ${sci(c.S3[0])} · b = ${sci(c.S3[1])} · c = ${sci(c.S3[2])}` },
+        { etiqueta: "F = t·S + u·S² + v·S³", valor: `t = ${sci(c.F3[0])} · u = ${sci(c.F3[1])} · v = ${sci(c.F3[2])}` },
+        { etiqueta: "Error de cero f₀ máx.", valor: `${r.f0max.toFixed(6).replace(".", ",")} %` },
+        { etiqueta: "Temperatura", valor: r.tMed == null ? "—" : `${String(r.tMed).replace(".", ",")} ± ${String(r.tRan).replace(".", ",")} °C · ${r.tEstado}` },
+        { etiqueta: "Factor de cobertura", valor: String(r.k).replace(".", ",") },
+      ],
+    };
+  },
+};
+
+/** Formulario estándar por puntos (eléctrica, tiempo y reserva para cualquier magnitud sin motor propio). */
+export const MOTOR_PUNTOS: Motor = {
+  it: "PUNTOS", magnitud: "general", nombre: "Calibración por puntos (formulario estándar)", unidad: "", unidadU: "",
+  opciones: [], validado: false,
+  calcular: calcularPuntos,
+  resumen: (r) => {
+    const puntos: PuntoResumen[] = r.rows.map((x: any) => ({
+      nominal: x.nom, error: x.err, uc: x.uc, U: x.U, Ucert: x.U, conforme: x.conforme, unidad: x.unidad,
+    }));
+    const conf = puntos.map((p) => p.conforme).filter((c): c is boolean => c !== null);
+    return {
+      puntos, uMax: Math.max(...puntos.map((p) => p.U)), uCert: null, conforme: conf.length ? conf.every(Boolean) : null,
+      extra: [
+        { etiqueta: "Series por punto", valor: String(r.n) },
+        { etiqueta: "Regla de decisión", valor: r.regla === "simple" ? "|ē| ≤ EMP" : "|ē| + U ≤ EMP" },
+        ...FORMULA_PUNTOS.map((f, i) => ({ etiqueta: i === 0 ? "Fórmula" : "", valor: f })),
+      ],
+    };
+  },
+};
+
+/** Todos los motores: los 14 del LMT validados por Excel + LNF + formulario por puntos. */
+export const REGISTRO_MOTORES: Record<string, Motor> = { ...MOTORES, [MOTOR_LNF.it]: MOTOR_LNF, [MOTOR_PUNTOS.it]: MOTOR_PUNTOS };
+
+/** Procesos sin planilla del IDIC que se calculan con el formulario estándar por puntos. */
+export const PROCESOS_POR_PUNTOS = ["ITME01", "ITE03", "PTS01"];
+
 /** Motor asociado a un código de proceso (ITV02a/g/c comparten ITV02). */
 export function motorDeProceso(codigo: string): Motor | undefined {
-  return MOTORES[codigo] ?? MOTORES[codigo.replace(/[a-z]$/, "")];
+  if (PROCESOS_POR_PUNTOS.includes(codigo)) return MOTOR_PUNTOS;
+  return REGISTRO_MOTORES[codigo] ?? REGISTRO_MOTORES[codigo.replace(/[a-z]$/, "")];
 }
 
 /** Calcula con el motor y devuelve el detalle (como el Excel) y el resumen normalizado. */
