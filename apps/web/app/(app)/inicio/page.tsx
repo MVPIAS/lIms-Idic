@@ -47,13 +47,13 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/dashboard", titulo: "Indicadores", desc: "Resumen de la sección", icono: "📊" },
   ],
   JEFE_DEPTO: [
-    { href: "/informes", titulo: "Firmar informes", desc: "Informes listos para tu firma", icono: "✒", perm: ["certificado.firmar", "certificado.emitir"] },
+    { href: "/informes/por-firmar", titulo: "Firmar informes", desc: "Informes listos para tu firma", icono: "✒", perm: "documento.firmar" },
     { href: "/dashboard", titulo: "Indicadores por laboratorio", desc: "Carga, plazos y resultados del departamento", icono: "📊" },
-    { href: "/certificados", titulo: "Certificados", desc: "Certificados emitidos y firmados", icono: "📜", perm: "ot.ver" },
+    { href: "/certificados", titulo: "Certificados", desc: "Firma, entrega y anulación de informes", icono: "📜", perm: "ot.ver" },
     { href: "/reportes", titulo: "Reportes", desc: "Exporta datos del departamento", icono: "📤", perm: "resultado.ver" },
   ],
   DIRECTOR: [
-    { href: "/informes", titulo: "Firmar", desc: "Documentos que requieren la firma de la Dirección", icono: "✒", perm: ["certificado.firmar", "certificado.emitir"] },
+    { href: "/informes/por-firmar", titulo: "Firmar", desc: "Documentos que requieren la firma de la Dirección", icono: "✒", perm: "documento.firmar" },
     { href: "/dashboard", titulo: "Indicadores por laboratorio", desc: "Visión general del instituto", icono: "📊" },
     { href: "/reportes", titulo: "Reportes", desc: "Información para la toma de decisiones", icono: "📤", perm: "resultado.ver" },
     { href: "/cotizaciones", titulo: "Cotizaciones", desc: "Propuestas comerciales en curso", icono: "💲", perm: "cotizacion.ver" },

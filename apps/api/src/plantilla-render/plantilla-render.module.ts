@@ -20,21 +20,51 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { Public } from "../auth/public.decorator";
 import { QcModule } from "../qc/qc.module";
+import { RbacModule } from "../rbac/rbac.module";
+import { ConfiguracionModule } from "../configuracion/configuracion.module";
+import { AlcanceService } from "../rbac/alcance.service";
+import { TIPOS_DOCUMENTO } from "../rbac/rbac.constants";
+import { FirmaDocumentoController } from "./firma-documento.controller";
+import { FirmaDocumentoService } from "./firma-documento.service";
+import { FirmasImagenController } from "../rbac/firmas-imagen.controller";
 
 const PreviewSchema = z.object({ otId: z.string().uuid(), plantillaId: z.string().uuid() });
 /**
  * `codigo` YA NO se acepta: el correlativo lo genera el sistema
  * (`PlantillaRenderService.siguienteNumero`, RF F02.1). Antes lo aportaba el
  * llamador de la API, que podía numerar a mano y colisionar.
+ * `tipoDocumento` (opcional): tipo de la matriz de firmas si no es el que
+ * corresponde por defecto a la plantilla (p. ej. CERTIFICADO_CALIBRACION).
  */
-const EmitirSchema = PreviewSchema;
+const EmitirSchema = PreviewSchema.extend({ tipoDocumento: z.enum(TIPOS_DOCUMENTO).optional() });
 
 @ApiTags("informes")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("informes")
 export class PlantillaRenderController {
-  constructor(private readonly svc: PlantillaRenderService) {}
+  constructor(
+    private readonly svc: PlantillaRenderService,
+    private readonly alcance: AlcanceService,
+  ) {}
+
+  /** La OT debe estar dentro del alcance por laboratorio de quien emite. */
+  private async exigirAlcanceOt(otId: string, req: any) {
+    const ctx = await this.svc.contexto(otId, req?.user?.tenantId);
+    await this.alcance.exigirUnidad(req, ctx.ot.unidadPrincipal, `la OT ${ctx.ot.codigo}`);
+  }
+
+  /**
+   * Qué falta para poder emitir (resultados aprobados, QC, laboratorio, matriz
+   * de firmas, documento duplicado) y los pasos de firma que tendrá. No escribe.
+   */
+  @Post("condiciones")
+  @RequierePermiso("certificado.emitir")
+  async condiciones(@Body() body: unknown, @Req() req: any) {
+    const { otId, plantillaId, tipoDocumento } = EmitirSchema.parse(body);
+    await this.exigirAlcanceOt(otId, req);
+    return this.svc.condicionesEmision(otId, plantillaId, req?.user?.tenantId, { tipoDocumento });
+  }
 
   /** Contexto de datos de una OT (para el autorelleno). Solo lee datos de la OT. */
   @Post("contexto/:otId")
@@ -57,10 +87,12 @@ export class PlantillaRenderController {
   /** Emite el informe/certificado: rellena, sella con HASH, numera y registra Certificado. */
   @Post("emitir")
   @RequierePermiso("certificado.emitir")
-  emitir(@Body() body: unknown, @Req() req: any) {
-    const { otId, plantillaId } = EmitirSchema.parse(body);
-    // El Certificado se crea con el tenant del usuario autenticado (no DEV_TENANT).
-    return this.svc.emitir(otId, plantillaId, req?.user?.tenantId, req?.user?.sub ?? req?.user?.id);
+  async emitir(@Body() body: unknown, @Req() req: any) {
+    const { otId, plantillaId, tipoDocumento } = EmitirSchema.parse(body);
+    await this.exigirAlcanceOt(otId, req);
+    // El Certificado se crea con el tenant del usuario autenticado (no DEV_TENANT),
+    // EN FIRMA: será oficial cuando firme el último paso de la matriz.
+    return this.svc.emitir(otId, plantillaId, req?.user?.tenantId, req?.user?.sub ?? req?.user?.id, { tipoDocumento });
   }
 
   /**
@@ -138,8 +170,13 @@ export class VerificacionController {
 }
 
 @Module({
-  imports: [QcModule],
-  controllers: [PlantillaRenderController, VerificacionController],
-  providers: [PlantillaRenderService],
+  // RbacModule exporta FirmasMatrizService (resolver de la matriz de firmas);
+  // ConfiguracionModule exporta MailService (envío del PDF por correo).
+  imports: [QcModule, RbacModule, ConfiguracionModule],
+  // FirmasImagenController (/mi-firma, imagen de firma del usuario) vive en
+  // rbac/ pero se registra aquí, junto al circuito de firma que la estampa.
+  controllers: [PlantillaRenderController, FirmaDocumentoController, FirmasImagenController, VerificacionController],
+  providers: [PlantillaRenderService, FirmaDocumentoService],
+  exports: [PlantillaRenderService],
 })
 export class PlantillaRenderModule {}

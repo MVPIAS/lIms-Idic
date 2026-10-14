@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ConflictException } from "@nestjs/common";
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common";
 import { createHash, randomInt } from "crypto";
 import { PrismaService } from "../common/prisma.service";
 import {
@@ -9,9 +9,27 @@ import {
   type FilaMuestra,
 } from "./template.engine";
 import { fmtFecha, fmtFechaHora, fmtNum } from "./html.util";
-import { cuerpoPorDefecto, documentoCompleto, type Sello } from "./plantilla-defecto";
+import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
 import { QcService } from "../qc/qc.module";
+import { FirmasMatrizService } from "../rbac/firmas-matriz.controller";
+import { TIPOS_DOCUMENTO } from "../rbac/rbac.constants";
+import {
+  esOficial,
+  esVigente,
+  faltantesParaEmitir,
+  numeroVersion,
+  pasosDesdeMatriz,
+  tipoDocumentoDePlantilla,
+  type PasoNuevo,
+} from "./reglas-emision";
+
+/** Opciones de emisión: tipo de documento de la matriz y documento al que reemplaza. */
+export interface OpcionesEmision {
+  tipoDocumento?: string;
+  /** Reemisión: id del documento devuelto o anulado que se sustituye (nueva versión). */
+  reemplazaId?: string;
+}
 
 /**
  * Emisión real de informes/certificados del LIMS IDIC.
@@ -38,6 +56,7 @@ export class PlantillaRenderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly qc: QcService,
+    private readonly matriz: FirmasMatrizService,
   ) {}
 
   /** URL pública de verificación; configurable por despliegue. */
@@ -326,31 +345,172 @@ export class PlantillaRenderService {
   }
 
   /* ====================================================================== */
+  /* Condiciones de emisión                                                 */
+  /* ====================================================================== */
+
+  /**
+   * Comprueba, SIN escribir nada, si la OT puede emitir este documento:
+   *   1. todos los resultados de la OT aprobados (reglas-emision.faltantesParaEmitir);
+   *   2. control de calidad aprobado (QcService.verificarGate);
+   *   3. laboratorio responsable de la OT (unidad_principal) para resolver la matriz;
+   *   4. matriz de firmas con responsables para cada paso obligatorio;
+   *   5. que no haya ya un documento vigente (en firma u oficial) de la misma plantilla.
+   * Devuelve la lista de lo que falta (vacía = se puede emitir) y los pasos de firma.
+   */
+  async condicionesEmision(otId: string, plantillaId: string, tenantId: string | undefined, opts: OpcionesEmision = {}) {
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id: otId, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, codigo: true, estado: true, unidadPrincipal: true, tenantId: true },
+    });
+    if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
+    const plantilla = await this.prisma.plantillaInforme.findFirst({
+      where: { id: plantillaId, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, repid: true, nombre: true, tipo: true },
+    });
+    if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
+
+    if (opts.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(opts.tipoDocumento))
+      throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
+    const tipoDocumento = opts.tipoDocumento ?? tipoDocumentoDePlantilla(plantilla.tipo);
+    const faltantes: string[] = [];
+
+    if (ot.estado === "anulada" || ot.estado === "cerrada")
+      faltantes.push(`La OT ${ot.codigo} está ${ot.estado}: no admite nuevos documentos.`);
+
+    // 1. Resultados aprobados.
+    const resultados = await this.prisma.resultado.findMany({
+      where: { otId, deletedAt: null },
+      select: {
+        estado: true,
+        muestra: { select: { codigo: true } },
+        analito: { select: { nombre: true } },
+        catAnalito: { select: { nombre: true } },
+      },
+    });
+    faltantes.push(
+      ...faltantesParaEmitir(
+        resultados.map((r) => ({
+          estado: r.estado,
+          muestra: r.muestra?.codigo ?? null,
+          analito: r.analito?.nombre ?? r.catAnalito?.nombre ?? null,
+        })),
+        plantilla.tipo,
+      ),
+    );
+
+    // 2. Control de calidad (el mismo gate de antes, convertido en mensaje).
+    try {
+      await this.qc.verificarGate(otId, ot.tenantId);
+    } catch (e: any) {
+      faltantes.push(String(e?.message ?? e));
+    }
+
+    // 3 y 4. Laboratorio responsable y matriz de firmas.
+    let pasos: PasoNuevo[] = [];
+    if (!ot.unidadPrincipal) {
+      faltantes.push(
+        `La OT ${ot.codigo} no tiene laboratorio responsable asignado: no se puede saber quién debe firmar el documento.`,
+      );
+    } else {
+      const res = await this.matriz.resolver(tipoDocumento, ot.unidadPrincipal, ot.tenantId);
+      const r = pasosDesdeMatriz(res);
+      pasos = r.pasos;
+      faltantes.push(...r.errores);
+    }
+
+    // 5. Documento vigente de la misma plantilla (salvo el que se reemplaza).
+    const vigentes = await this.prisma.certificado.findMany({
+      where: { otId, plantillaId, deletedAt: null, ...(opts.reemplazaId ? { NOT: { id: opts.reemplazaId } } : {}) },
+      select: { id: true, numero: true, codigo: true, estado: true },
+    });
+    const otro = vigentes.find((c) => esVigente(c.estado));
+    if (otro)
+      faltantes.push(
+        `Ya existe el documento ${otro.numero ?? otro.codigo} (${otro.estado === "en_firma" ? "en firma" : "oficial"}) con esta plantilla. ` +
+          "Para corregirlo, anúlelo (o pida que lo devuelvan) y reemítalo como nueva versión.",
+      );
+
+    return {
+      puedeEmitir: faltantes.length === 0,
+      faltantes,
+      tipoDocumento,
+      ot: { id: ot.id, codigo: ot.codigo, unidadId: ot.unidadPrincipal },
+      plantilla,
+      resultados: { total: resultados.length, aprobados: resultados.filter((r) => r.estado === "aprobado").length },
+      pasos,
+    };
+  }
+
+  /* ====================================================================== */
   /* Emisión                                                                */
   /* ====================================================================== */
 
   /**
-   * Emite el documento: rellena la plantilla, sella con SHA-256, reserva el
-   * correlativo y registra el Certificado.
+   * Emite el documento: comprueba las condiciones, rellena la plantilla, sella
+   * con SHA-256, reserva el correlativo y registra el Certificado EN FIRMA con
+   * los pasos que resuelve la matriz de firmas para su tipo y laboratorio. El
+   * documento no es oficial hasta que firma el último paso (FirmaDocumentoService).
    *
    * El correlativo lo genera el SISTEMA (RF F02.1): ya no lo aporta el llamador.
+   * Una REEMISIÓN (opts.reemplazaId) no consume correlativo: conserva el número
+   * con el sufijo de versión (CERT-2026-0007-V2) y anula el documento devuelto.
    */
-  async emitir(otId: string, plantillaId: string, tenantId: string, usuarioId?: string) {
-    // GATE de CONTROL DE CALIDAD (contrato 4.3.7 / 4.3.8): si algún método con
-    // qc_requerido=true presente en las muestras de la OT no tiene un qc_control
-    // 'aprobado', se aborta la emisión con 409 ANTES de reservar correlativo ni
-    // escribir nada. El QC va atado al FLUJO NUEVO (OT/muestra/puente/cat_metodo).
-    await this.qc.verificarGate(otId, tenantId);
+  async emitir(otId: string, plantillaId: string, tenantId: string, usuarioId?: string, opts: OpcionesEmision = {}) {
+    let previo: {
+      id: string;
+      numero: string | null;
+      codigo: string;
+      version: number;
+      estado: string;
+      plantillaId: string | null;
+      otId: string;
+      tipoDocumento: string | null;
+    } | null = null;
+    if (opts.reemplazaId) {
+      previo = await this.prisma.certificado.findFirst({
+        where: { id: opts.reemplazaId, tenantId, deletedAt: null },
+        select: { id: true, numero: true, codigo: true, version: true, estado: true, plantillaId: true, otId: true, tipoDocumento: true },
+      });
+      if (!previo) throw new NotFoundException(`Documento ${opts.reemplazaId} no encontrado`);
+      if (previo.estado !== "devuelto" && previo.estado !== "anulado")
+        throw new ConflictException(
+          `Solo se reemite un documento devuelto o anulado; ${previo.numero ?? previo.codigo} está ${previo.estado}.`,
+        );
+      if (!previo.plantillaId)
+        throw new ConflictException(`El documento ${previo.numero ?? previo.codigo} no tiene plantilla: emita uno nuevo.`);
+      // La nueva versión es del mismo expediente y la misma plantilla.
+      otId = previo.otId;
+      plantillaId = previo.plantillaId;
+      opts = { ...opts, tipoDocumento: opts.tipoDocumento ?? previo.tipoDocumento ?? undefined };
+      const masNueva = await this.prisma.certificado.findFirst({
+        where: { reemplazaId: previo.id, deletedAt: null },
+        select: { numero: true, codigo: true },
+      });
+      if (masNueva)
+        throw new ConflictException(`El documento ya fue reemitido como ${masNueva.numero ?? masNueva.codigo}.`);
+    }
+
+    // GATE (contrato 4.3.7 / 4.3.8 + flujo estándar): resultados aprobados, QC,
+    // laboratorio y matriz de firmas. Se aborta con 409 ANTES de reservar
+    // correlativo ni escribir nada, con el detalle de lo que falta.
+    const cond = await this.condicionesEmision(otId, plantillaId, tenantId, opts);
+    if (!cond.puedeEmitir) {
+      throw new ConflictException(`No se puede emitir el documento. ${cond.faltantes.join(" ")}`);
+    }
 
     const fecha = new Date();
     const anio = fecha.getFullYear();
     const codigoVerificacion = this.nuevoCodigoVerificacion();
+    const anterior = previo;
 
     // La transacción cubre: reservar correlativo -> renderizar con ese número
-    // -> insertar. El render va dentro porque el CUERPO IMPRIME el número, así
-    // que el hash depende de él: no se puede sellar antes de conocerlo.
+    // -> insertar documento y pasos de firma. El render va dentro porque el
+    // CUERPO IMPRIME el número, así que el hash depende de él.
     const emitido = await this.prisma.$transaction(async (tx) => {
-      const numero = await this.siguienteNumero(tx, tenantId, anio);
+      const version = anterior ? anterior.version + 1 : 1;
+      const numero = anterior
+        ? numeroVersion(anterior.numero ?? anterior.codigo, version)
+        : await this.siguienteNumero(tx, tenantId, anio);
 
       const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto } = await this.render(
         otId,
@@ -366,6 +526,10 @@ export class PlantillaRenderService {
           codigo: numero, // UNIQUE(tenant_id, codigo): cierre duro de la unicidad
           numero,
           tipo: plantilla.tipo,
+          tipoDocumento: cond.tipoDocumento,
+          unidadId: cond.ot.unidadId,
+          version,
+          reemplazaId: anterior?.id ?? null,
           plantillaId,
           hashSha256: hash,
           codigoVerificacion,
@@ -373,20 +537,49 @@ export class PlantillaRenderService {
           urlVerificacion: `${this.baseVerificacion}/${codigoVerificacion}`,
           emitidoPor: usuarioId ?? null,
           fecha,
-          estado: "emitido",
+          estado: "en_firma",
         },
       });
+
+      await tx.documentoFirma.createMany({
+        data: cond.pasos.map((p) => ({
+          tenantId,
+          certificadoId: cert.id,
+          orden: p.orden,
+          accion: p.accion,
+          rolCodigo: p.rolCodigo,
+          rolNombre: p.rolNombre,
+          unidadId: p.unidadId,
+          unidadCodigo: p.unidadCodigo,
+          unidadNombre: p.unidadNombre,
+          obligatorio: p.obligatorio,
+          descripcion: p.descripcion,
+          responsables: p.responsables as any,
+        })),
+      });
+
+      // Reemisión desde un documento devuelto: el devuelto queda anulado; la
+      // nueva versión apunta a él por reemplaza_id.
+      if (anterior && anterior.estado === "devuelto") {
+        await tx.certificado.update({
+          where: { id: anterior.id },
+          data: {
+            estado: "anulado",
+            anuladoAt: fecha,
+            anuladoPor: usuarioId ?? null,
+            anuladoMotivo: `Sustituido por la versión ${version} (${numero}).`,
+          },
+        });
+        await tx.documentoFirma.updateMany({
+          where: { certificadoId: anterior.id, estado: "pendiente" },
+          data: { estado: "anulado" },
+        });
+      }
 
       return { cert, plantilla, otCodigo: ctx.ot.codigo, cuerpoRenderizado, hash, avisos, usaDefecto };
     });
 
-    const sello: Sello = {
-      numero: emitido.cert.numero!,
-      codigoVerificacion,
-      hash: emitido.hash,
-      fecha: fmtFecha(fecha),
-      urlVerificacion: emitido.cert.urlVerificacion!,
-    };
+    const sello = await this.selloDe(emitido.cert.id);
 
     return {
       certificado: emitido.cert,
@@ -394,6 +587,9 @@ export class PlantillaRenderService {
       codigoVerificacion,
       hash: emitido.hash,
       urlVerificacion: emitido.cert.urlVerificacion,
+      estado: emitido.cert.estado,
+      tipoDocumento: cond.tipoDocumento,
+      pasos: cond.pasos,
       usaPlantillaPorDefecto: emitido.usaDefecto,
       avisos: emitido.avisos,
       html: documentoCompleto(
@@ -401,6 +597,49 @@ export class PlantillaRenderService {
         sello,
         this.titulo(sello.numero, emitido.plantilla.nombre, emitido.otCodigo),
       ),
+    };
+  }
+
+  /**
+   * Sello de presentación de un documento: número, código, hash, ESTADO del
+   * circuito y FIRMAS (firmadas y pendientes). Lo usan el PDF y el HTML.
+   */
+  async selloDe(certificadoId: string): Promise<Sello> {
+    const cert = await this.prisma.certificado.findUnique({
+      where: { id: certificadoId },
+      include: { firmas: { orderBy: [{ orden: "asc" }, { createdAt: "asc" }] } },
+    });
+    if (!cert) throw new NotFoundException(`Certificado ${certificadoId} no encontrado`);
+    const firmas: FirmaEstampada[] = cert.firmas
+      .filter((f) => f.estado === "firmado" || f.estado === "pendiente")
+      .map((f) => ({
+        accion: f.accion,
+        rol: f.rolNombre ?? f.rolCodigo,
+        unidad: f.unidadCodigo,
+        nombre:
+          f.estado === "firmado"
+            ? f.firmanteNombre
+            : (Array.isArray(f.responsables) ? (f.responsables as any[]) : [])
+                .map((r) => r?.nombre)
+                .filter(Boolean)
+                .join(" / "),
+        cargo: f.estado === "firmado" ? [f.firmanteGrado, f.firmanteCargo].filter(Boolean).join(" ") || null : null,
+        fecha: f.firmadoAt ? fmtFechaHora(f.firmadoAt) : null,
+        imagen: f.imagenData
+          ? { data: f.imagenData, mime: f.imagenData.startsWith("/9j/") ? "image/jpeg" : "image/png" }
+          : null,
+        pendiente: f.estado !== "firmado",
+      }));
+    return {
+      numero: cert.numero ?? cert.codigo,
+      codigoVerificacion: cert.codigoVerificacion ?? "—",
+      hash: cert.hashSha256 ?? "",
+      fecha: fmtFecha(cert.oficialAt ?? cert.fecha),
+      urlVerificacion: cert.urlVerificacion ?? this.baseVerificacion,
+      estadoDocumento: esOficial(cert.estado) ? undefined : cert.estado,
+      motivoEstado:
+        cert.estado === "anulado" ? cert.anuladoMotivo : cert.estado === "devuelto" ? cert.devueltoMotivo : null,
+      firmas: firmas.length ? firmas : undefined,
     };
   }
 
@@ -432,13 +671,7 @@ export class PlantillaRenderService {
         `El certificado ${cert.numero ?? cert.codigo} se emitió antes de que se guardara el documento sellado y no puede regenerarse. Emita uno nuevo.`,
       );
 
-    const sello: Sello = {
-      numero: cert.numero ?? cert.codigo,
-      codigoVerificacion: cert.codigoVerificacion ?? "—",
-      hash: cert.hashSha256 ?? "",
-      fecha: fmtFecha(cert.fecha),
-      urlVerificacion: cert.urlVerificacion ?? this.baseVerificacion,
-    };
+    const sello = await this.selloDe(cert.id);
     const titulo = this.titulo(sello.numero, cert.plantilla?.nombre ?? "Informe", cert.ot?.codigo ?? "");
     const buffer = await generarPdf(cert.documentoHtml, sello, titulo);
     // Nombre de fichero seguro: el correlativo es [A-Z0-9-], sin ruta ni comillas.
@@ -451,13 +684,7 @@ export class PlantillaRenderService {
     const cert = await this.certificadoDelTenant(certificadoId, tenantId);
     if (!cert.documentoHtml)
       throw new NotFoundException(`El certificado ${cert.numero ?? cert.codigo} no tiene documento sellado.`);
-    const sello: Sello = {
-      numero: cert.numero ?? cert.codigo,
-      codigoVerificacion: cert.codigoVerificacion ?? "—",
-      hash: cert.hashSha256 ?? "",
-      fecha: fmtFecha(cert.fecha),
-      urlVerificacion: cert.urlVerificacion ?? this.baseVerificacion,
-    };
+    const sello = await this.selloDe(cert.id);
     return documentoCompleto(
       cert.documentoHtml,
       sello,
@@ -494,12 +721,21 @@ export class PlantillaRenderService {
     });
     if (!cert) return { valido: false as const };
 
-    if (cert.estado !== "emitido")
+    // Solo vale un documento OFICIAL (firmado en todos los pasos de la matriz)
+    // o uno emitido antes del circuito ('emitido'). En firma, devuelto o
+    // anulado: el papel existe pero no tiene validez.
+    if (!esOficial(cert.estado))
       return {
         valido: false as const,
-        estado: cert.estado, // 'anulado': el papel existió pero ya no vale
+        estado: cert.estado,
         numero: cert.numero ?? cert.codigo,
         fecha: fmtFecha(cert.fecha),
+        motivo:
+          cert.estado === "en_firma"
+            ? "El documento está en proceso de firma: todavía no es oficial."
+            : cert.estado === "devuelto"
+              ? "El documento fue devuelto sin firmar."
+              : "El documento fue anulado.",
       };
 
     const hashReal = cert.documentoHtml
@@ -511,7 +747,7 @@ export class PlantillaRenderService {
       valido: integro,
       estado: cert.estado,
       numero: cert.numero ?? cert.codigo,
-      fecha: fmtFecha(cert.fecha),
+      fecha: fmtFecha(cert.oficialAt ?? cert.fecha),
       otCodigo: cert.ot?.codigo ?? null,
       hash: cert.hashSha256 ?? null,
       ...(integro ? {} : { motivo: "El sello de integridad del documento no coincide" }),

@@ -16,6 +16,13 @@ export interface ItemBandeja {
 
 /** Estados de OT que ya no requieren trabajo de laboratorio. */
 const OT_TERMINADA = `('cerrada','anulada','finalizada','informada')`;
+/**
+ * Plazos (fecha de compromiso con el cliente): cuentan todas las OT no cerradas
+ * ni anuladas, y «hoy» es el día en Chile. Mismos cortes que el semáforo de la
+ * lista de OT (apps/api/src/ot/plazos.ts: vencida / por vencer en 3 días).
+ */
+const OT_CERRADA = `('cerrada','anulada')`;
+const HOY_CL = `(now() AT TIME ZONE 'America/Santiago')::date`;
 
 /**
  * Bandeja «qué tengo pendiente» por perfil. Cada conteo es una consulta SQL
@@ -60,13 +67,31 @@ export class BandejaService {
         this.contar(`SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA}`, tenant, unidades),
       otVencidas: () =>
         this.contar(
-          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA} AND o.fecha_compromiso < CURRENT_DATE`,
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso < ${HOY_CL}`,
           tenant,
           unidades,
         ),
       otPorVencer: () =>
         this.contar(
-          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA} AND o.fecha_compromiso BETWEEN CURRENT_DATE AND CURRENT_DATE + 3`,
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso BETWEEN ${HOY_CL} AND ${HOY_CL} + 3`,
+          tenant,
+          unidades,
+        ),
+      otListasParaCerrar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA}
+              AND EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
+              AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
+                                AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
+              AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')`,
+          tenant,
+          unidades,
+        ),
+      documentosPorEntregar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM certificado c JOIN orden_trabajo o ON o.id = c.ot_id
+            WHERE ${otScope} AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL
+              AND o.estado NOT IN ${OT_CERRADA}`,
           tenant,
           unidades,
         ),
@@ -94,8 +119,24 @@ export class BandejaService {
           unidades,
           yo,
         ),
+      // Documentos (informes/certificados) cuyo paso ACTUAL de la matriz de
+      // firmas tiene al usuario como responsable (plantilla-render/firma-documento.service.ts).
       firmasPendientes: () =>
-        this.contar(`SELECT count(*) AS n FROM ot_firma f WHERE f.usuario_id = $1::uuid AND f.estado = 'pendiente'`, yo),
+        this.contar(
+          `SELECT count(DISTINCT df.certificado_id) AS n FROM documento_firma df JOIN certificado c ON c.id = df.certificado_id
+            WHERE c.estado = 'en_firma' AND c.deleted_at IS NULL AND c.tenant_id = COALESCE($1::uuid, c.tenant_id)
+              AND df.estado = 'pendiente'
+              AND df.responsables @> jsonb_build_array(jsonb_build_object('usuarioId', $2::text))
+              AND df.orden = (SELECT min(x.orden) FROM documento_firma x WHERE x.certificado_id = df.certificado_id AND x.estado = 'pendiente')`,
+          tenant,
+          yo,
+        ),
+      facturasPendientes: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM factura f WHERE f.tenant_id = COALESCE($1::uuid, f.tenant_id) AND f.deleted_at IS NULL
+              AND f.estado = 'pendiente'`,
+          tenant,
+        ),
       boletinesEnRevision: () =>
         this.contar(
           `SELECT count(*) AS n FROM boletin_analisis b JOIN orden_trabajo o ON o.id = b.ot_id
@@ -119,17 +160,19 @@ export class BandejaService {
               AND NOT EXISTS (SELECT 1 FROM orden_trabajo o WHERE o.cotizacion_id = c.id)`,
           tenant,
         ),
+      // OT cerradas CON COBRO sin ninguna factura viva (p. ej. cerradas antes
+      // de que el cierre generara el borrador). Las nuevas ya nacen con él.
       otCerradasSinFactura: () =>
         this.contar(
-          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado IN ('cerrada','finalizada','informada')
-              AND NOT EXISTS (SELECT 1 FROM factura f WHERE f.ot_id = o.id AND f.deleted_at IS NULL)`,
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado = 'cerrada' AND o.con_cobro
+              AND NOT EXISTS (SELECT 1 FROM factura f WHERE f.ot_id = o.id AND f.deleted_at IS NULL AND f.estado <> 'anulada')`,
           tenant,
           unidades,
         ),
       facturasPorCobrar: () =>
         this.contar(
           `SELECT count(*) AS n FROM factura f WHERE f.tenant_id = COALESCE($1::uuid, f.tenant_id) AND f.deleted_at IS NULL
-              AND f.estado IN ('emitida','aviso_1','aviso_2','aviso_3','prejudicial')`,
+              AND f.estado IN ('emitida','parcial','aviso_1','aviso_2','aviso_3','prejudicial')`,
           tenant,
         ),
       ocPendientes: () =>
@@ -180,7 +223,7 @@ export class BandejaService {
     const vencidasPorLab = async (): Promise<ItemBandeja[]> => {
       const filas = await this.filas<{ codigo: string; nombre: string; n: bigint | number }>(
         `SELECT u.codigo, u.nombre, count(*) AS n FROM orden_trabajo o JOIN unidad u ON u.id = o.unidad_principal
-          WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA} AND o.fecha_compromiso < CURRENT_DATE
+          WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso < ${HOY_CL}
           GROUP BY u.codigo, u.nombre ORDER BY n DESC LIMIT 10`,
         tenant,
         unidades,
@@ -191,18 +234,22 @@ export class BandejaService {
           `OT vencidas · ${f.codigo}`,
           `OT con fecha compromiso vencida en ${f.nombre}`,
           Number(f.n),
-          `/ot?unidad=${encodeURIComponent(f.codigo)}&vencidas=1`,
+          `/ot?semaforo=vencida&unidad=${encodeURIComponent(f.codigo)}`,
           "alta",
         ),
       );
     };
 
     const firmas = async () =>
-      item("firmas_pendientes", "Documentos por firmar", "Firmas de OT/informes asignadas a usted", await q.firmasPendientes(), "/informes", "warn");
+      item("firmas_pendientes", "Documentos por firmar", "Informes y certificados que esperan su firma", await q.firmasPendientes(), "/informes/por-firmar", "warn");
     const vencidas = async () =>
-      item("ot_vencidas", "OT vencidas", "OT abiertas con fecha compromiso vencida", await q.otVencidas(), "/ot?vencidas=1", "alta");
+      item("ot_vencidas", "OT vencidas", "OT abiertas con fecha compromiso vencida", await q.otVencidas(), "/ot?semaforo=vencida", "alta");
     const porVencer = async () =>
-      item("ot_por_vencer", "OT por vencer", "OT que vencen en los próximos 3 días", await q.otPorVencer(), "/ot?porVencer=1", "warn");
+      item("ot_por_vencer", "OT por vencer", "OT que vencen hoy o en los próximos 3 días", await q.otPorVencer(), "/ot?semaforo=por_vencer", "warn");
+    const listasCerrar = async () =>
+      item("ot_listas_cerrar", "OT listas para cerrar", "Documentos oficiales y entregados: falta cerrar la OT", await q.otListasParaCerrar(), "/ot?listasCierre=1", "warn");
+    const porEntregar = async () =>
+      item("documentos_por_entregar", "Documentos por entregar", "Informes oficiales sin entrega registrada", await q.documentosPorEntregar(), "/certificados?estado=por_entregar", "warn");
     const abiertas = async () =>
       item("ot_abiertas", "OT abiertas", "OT en curso en su alcance (indicador)", await q.otAbiertas(), "/ot", "info");
     const porRevisar = async () =>
@@ -236,7 +283,7 @@ export class BandejaService {
           firmas,
         ]);
       case "JEFE_LAB":
-        return all([porRevisar, porAprobar, firmas, vencidas, porVencer, porOficializar]);
+        return all([porRevisar, porAprobar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar]);
       case "JEFE_SECCION":
       case "JEFE_DEPTO":
         return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas]);
@@ -247,20 +294,22 @@ export class BandejaService {
           async () => item("cotizaciones_por_vencer", "Cotizaciones por vencer", "Cotizaciones abiertas que vencen en los próximos 7 días", await q.cotizacionesPorVencer(), "/cotizaciones?porVencer=1", "warn"),
           sinOt,
           porVencer,
+          porEntregar,
         ]);
       case "PLANIFICACION":
-        return all([vencidas, vencidasPorLab, porVencer, abiertas, sinOt]);
+        return all([vencidas, vencidasPorLab, porVencer, listasCerrar, porEntregar, abiertas, sinOt]);
       case "FINANZAS":
         return all([
-          async () => item("ot_cerradas_sin_factura", "OT cerradas sin factura", "OT terminadas que aún no tienen factura", await q.otCerradasSinFactura(), "/facturas?pendientes=1", "alta"),
-          async () => item("facturas_por_cobrar", "Facturas por cobrar", "Facturas emitidas o con aviso de cobranza", await q.facturasPorCobrar(), "/facturas?estado=emitida", "warn"),
+          async () => item("facturas_pendientes", "Pendientes de facturar", "Facturas en borrador generadas al cerrar OT con cobro: revíselas y emítalas", await q.facturasPendientes(), "/facturas?estado=pendiente", "alta"),
+          async () => item("facturas_por_cobrar", "Facturas por cobrar", "Facturas emitidas, con pago parcial o con aviso de cobranza", await q.facturasPorCobrar(), "/facturas?estado=por_cobrar", "warn"),
+          async () => item("ot_cerradas_sin_factura", "OT cerradas sin factura", "OT con cobro cerradas sin factura (anteriores al cierre automático)", await q.otCerradasSinFactura(), "/ot", "warn"),
         ]);
       case "ABASTECIMIENTO":
         return all([
           async () => item("oc_pendientes", "Órdenes de compra pendientes", "OC en borrador, aprobadas o en proceso", await q.ocPendientes(), "/ordenes-compra", "warn"),
         ]);
       case "CALIDAD":
-        return all([nc, porOficializar, vencidas]);
+        return all([firmas, nc, porOficializar, vencidas]);
       case "ADMIN":
         return all([
           async () => item("usuarios_sin_rol", "Usuarios sin rol", "Usuarios activos sin ninguna asignación de rol", await q.usuariosSinRol(), "/usuarios?sinRol=1", "warn"),
