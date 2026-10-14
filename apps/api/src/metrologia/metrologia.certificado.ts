@@ -12,6 +12,8 @@ const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&
 const f = (x: any, d = 4) => (x == null || isNaN(Number(x)) ? "—" : Number(x).toLocaleString("es-CL", { maximumFractionDigits: d }));
 const fx = (x: any, d: number) => (x == null || isNaN(Number(x)) ? "—" : Number(x).toLocaleString("es-CL", { minimumFractionDigits: d, maximumFractionDigits: d }));
 const fecha = (x: any) => (x ? new Date(x).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }) : "—");
+/** Fecha sin hora (columna DATE): se lee en UTC para no correrla un día. */
+const dia = (x: any) => (x ? new Date(x).toLocaleDateString("es-CL", { timeZone: "UTC" }) : "—");
 const TABLA = `border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:11px"`;
 
 function cabecera(cal: any): string {
@@ -21,7 +23,7 @@ function cabecera(cal: any): string {
     <h2>CERTIFICADO DE CALIBRACIÓN ${esc(cal.codigo)}</h2>
     <p><b>${esc(cal.laboratorio_nombre ?? "Sección Metrología")} · IDIC · ${acr}</b><br>Método ${esc(cal.proceso)} — ${esc(cal.metodo ?? "")}${cal.norma ? " · " + esc(cal.norma) : ""}</p>
     <h3>Instrumento</h3><p>${esc(ins.item ?? "—")} · ${esc(ins.marca ?? "")} · N° serie ${esc(ins.serie ?? "—")}${ins.cap ? ` · Capacidad ${esc(ins.cap)}` : ""}${ins.res ? ` · Resolución ${esc(ins.res)}` : ""}<br>Cliente: ${esc(ins.cliente ?? "—")}${ins.ot ? ` · OT ${esc(ins.ot)}` : ""}</p>
-    <h3>Condiciones</h3><p>Fecha de calibración ${fecha(cal.fecha_calibracion)} · Temperatura (${esc(amb.temp ?? "—")} ± ${esc(amb.tempU ?? "—")}) °C · Humedad (${esc(amb.hum ?? "—")} ± ${esc(amb.humU ?? "—")}) %HR</p>
+    <h3>Condiciones</h3><p>Fecha de calibración ${dia(cal.fecha_calibracion)} · Temperatura (${esc(amb.temp ?? "—")} ± ${esc(amb.tempU ?? "—")}) °C · Humedad (${esc(amb.hum ?? "—")} ± ${esc(amb.humU ?? "—")}) %HR</p>
     <h3>Patrón</h3><p>${esc(pat.nombre ?? "—")} · Clase ${esc(pat.clase ?? "—")} · Cert. ${esc(pat.cert ?? "—")} · Trazabilidad ${esc(pat.trazab ?? "—")}</p>`;
 }
 
@@ -82,7 +84,7 @@ function cuerpoLNF(cal: any): string {
   const p0 = R.tabla?.[0]?.F ?? 0;
   return `
     <h3>Resultados · calibración en ${sentido} · ISO 376:2011</h3>
-    <p>Rango calibrado ${f(rows[0]?.F, 3)} a ${f(rows[rows.length - 1]?.F, 3)} kN · Resolución ${fx(R.r, 3)} kN · Temperatura ${R.tMed == null ? "—" : `${f(R.tMed, 1)} ± ${f(R.tRan, 1)} °C (${esc(R.tEstado)})`} · f₀ máx. ${fx(R.f0max, 4)} %</p>
+    <p>Rango calibrado ${f(rows[0]?.F, 3)} a ${f(rows[rows.length - 1]?.F, 3)} kN · Resolución ${fx(R.r, 3)} kN · Temperatura ${R.tMed == null ? "—" : `${f(R.tMed, 1)} ± ${f(R.tRan, 1)} °C (${esc(R.tEstado)})`} · f0 máx. ${fx(R.f0max, 4)} %</p>
     <h3>Deformación durante la calibración (mV/V)</h3>
     <table ${TABLA}>
       <thead><tr><th>F kN</th><th>X1 0°</th><th>X2 0°</th><th>X3 120°</th><th>X4 120° desc.</th><th>X5 240°</th><th>X6 240° desc.</th></tr></thead>
@@ -116,8 +118,8 @@ function cuerpoPuntos(cal: any): string {
     <table ${TABLA}>
       <thead><tr><th>Función / rango</th><th>Nominal</th><th>Ind. patrón</th><th>Ind. instrumento</th><th>Error</th><th>U (k=2)</th><th>EMP</th><th>Estado</th></tr></thead>
       <tbody>${filas}</tbody></table>
-    <p style="font-size:10px;color:#555">Error = promedio de (lectura del instrumento − lectura del patrón). u_A = s/√n; u_patrón = U del certificado del patrón / k (${f(R.kPatron, 2)});
-      u_resolución = d/(2·√3) cuando se informa; U = 2 · √(u_A² + u_patrón² + u_resolución²), nivel de confianza aproximado del 95 %.
+    <p style="font-size:10px;color:#555">Error = promedio de (lectura del instrumento - lectura del patrón). u_A = s / raíz(n); u_patrón = U del certificado del patrón / k (${f(R.kPatron, 2)});
+      u_resolución = d / (2 · raíz(3)) cuando se informa; U = 2 · raíz(u_A² + u_patrón² + u_resolución²), nivel de confianza aproximado del 95 %.
       Regla de decisión (solo donde hay tolerancia): cumple si ${regla}.</p>`;
 }
 
