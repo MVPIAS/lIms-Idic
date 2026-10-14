@@ -1,30 +1,42 @@
 import {
-  BadRequestException, Body, Controller, Get, Module, NotFoundException,
+  BadRequestException, Body, Controller, ForbiddenException, Get, Module, NotFoundException,
   Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UseGuards,
 } from "@nestjs/common";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
-import { createHash, randomInt } from "node:crypto";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
+import { AlcanceService } from "../rbac/alcance.service";
+import { descendientes } from "../rbac/alcance";
 import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { calcularCalibracion, type Componente, type Divisores, type Punto } from "./metrologia.calc";
-import { MOTORES, calcularConMotor, motorDeProceso, type ResumenMotor } from "./motores";
+import { REGISTRO_MOTORES, calcularConMotor, motorDeProceso, PROCESOS_POR_PUNTOS } from "./motores";
 import { CASOS_REFERENCIA, esClaveExcel, verificarParidad } from "./motores/paridad";
+import { CASOS_LNF, verificarParidadLNF } from "./motores/paridad-lnf";
+import { certificadoHtml } from "./metrologia.certificado";
+import {
+  ESTADO_TRAS, accionesDisponibles, codigoCalibracion, estadoDe, fechaCalibracion, motivoRechazo, plantillaVacia,
+  type AccionCal, type ContextoCal,
+} from "./metrologia.flujo";
 
 // ---------------------------------------------------------------------------
-// Módulo Metrología (LMT). Las instrucciones de trabajo con caso real usan su
-// motor validado (./motores, idéntico al Excel del LMT); las que aún no tienen
-// caso real (ITM03, ITV05) usan el motor GUM parametrizado (metrologia.calc).
+// Módulo Metrología (Sección SAM: LMT, LMTE, LNF). Cada proceso se calcula
+// con su motor: los 14 validados contra los Excel del LMT, el ISO 376 del LNF,
+// el formulario estándar por puntos (eléctrica, tiempo y reserva) o, para los
+// procesos sin caso real (ITM03, ITV05), el motor GUM parametrizado.
+// Circuito: borrador → en revisión → emitida (metrologia.flujo.ts).
 // Todo por SQL crudo (las tablas met_* no están en Prisma).
 // ---------------------------------------------------------------------------
 const prisma = new PrismaClient();
-const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+
+/** Laboratorios de la Sección Metrología a los que puede pertenecer una calibración. */
+const LABS_SAM = ["LMT", "LMTE", "LNF", "LCAD"];
 
 const PuntoSchema = z.object({
   nominal: z.coerce.number(),
@@ -36,21 +48,21 @@ const PuntoSchema = z.object({
 const CrearSchema = z.object({
   procesoCodigo: z.string().min(2),
   patronId: z.string().uuid().nullish(),
+  /** Laboratorio (LMT, LMTE, LNF, LCAD): obligatorio solo en procesos sin laboratorio fijo (PTS01). */
+  laboratorio: z.string().max(10).nullish(),
+  /** Fecha de calibración AAAA-MM-DD (por defecto, hoy): da el año del código. */
+  fecha: z.string().max(10).nullish(),
   instrumento: z.record(z.any()).default({}),
   patronSnap: z.record(z.any()).default({}),
   ambiente: z.record(z.any()).default({}),
   cond: z.record(z.coerce.number()).default({}),
   intervaloMeses: z.coerce.number().default(12),
   puntos: z.array(PuntoSchema).default([]),
-  /** Datos de entrada del motor validado de la IT y correcciones aplicadas (hallazgos). */
+  /** Datos de entrada del motor de la IT y correcciones aplicadas (hallazgos). */
   motor: z.object({ datos: z.record(z.any()), opciones: z.record(z.boolean()).default({}) }).optional(),
 });
+type CrearDto = z.infer<typeof CrearSchema>;
 const CalcularSchema = z.object({ datos: z.record(z.any()), opciones: z.record(z.boolean()).default({}) });
-
-/** Código de acreditación del LMT por magnitud. */
-const ACREDITACION: Record<string, string> = {
-  masa: "LC 001", longitud: "LC 004", fuerza: "LC 005", presion: "LC 022", volumen: "LC 023", par: "LC 108", temperatura: "LC 155",
-};
 
 /** Quita los valores del Excel (x_, y_, z_, w_, x, xT) y deja solo las entradas. */
 function soloEntradas(v: any): any {
@@ -59,13 +71,14 @@ function soloEntradas(v: any): any {
   return v;
 }
 
-/** Calcula con el motor y rechaza datos incompletos (el motor devolvería NaN). */
+/** Calcula con el motor y rechaza datos incompletos (con el motivo si el motor lo da). */
 function ejecutarMotor(it: string, datos: Record<string, any>, opciones: Record<string, boolean>) {
   let out: ReturnType<typeof calcularConMotor>;
   try {
     out = calcularConMotor(it, datos, opciones);
-  } catch {
-    throw new BadRequestException(`Datos incompletos para ${it}: faltan entradas o alguna no es válida`);
+  } catch (e: any) {
+    const motivo = typeof e?.message === "string" && /^[A-ZÁÉÍÓÚ]/.test(e.message) && !/undefined|null|NaN|reading/.test(e.message) ? `: ${e.message}` : ": faltan entradas o alguna no es válida";
+    throw new BadRequestException(`Datos incompletos para ${it}${motivo}`);
   }
   const malos = out.resumen.puntos.filter((p) => !Number.isFinite(p.U));
   if (!out.resumen.puntos.length || malos.length)
@@ -78,6 +91,9 @@ function tenantId(req: any): string {
   if (!id) throw new NotFoundException("Tenant no resuelto");
   return id;
 }
+const permisosDe = (req: any): string[] => req?.user?.permisos ?? [];
+const esSuperadmin = (req: any) => (req?.user?.roles ?? []).includes("SUPERADMIN");
+const tiene = (req: any, p: string) => esSuperadmin(req) || permisosDe(req).includes(p);
 
 async function cargarDivisores(): Promise<Divisores> {
   const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT codigo, divisor FROM met_distribucion`);
@@ -85,8 +101,8 @@ async function cargarDivisores(): Promise<Divisores> {
 }
 async function cargarProceso(codigo: string) {
   const rows = await prisma.$queryRawUnsafe<any[]>(
-    `SELECT p.id, p.codigo, p.nombre, p.metodo, p.norma, m.codigo AS mag, m.nombre AS mag_nombre, m.unidad, m.decimales
-       FROM met_proceso p JOIN met_magnitud m ON m.id = p.magnitud_id WHERE p.codigo = $1`, codigo);
+    `SELECT p.id, p.codigo, p.nombre, p.metodo, p.norma, p.laboratorio, m.codigo AS mag, m.nombre AS mag_nombre, m.unidad, m.decimales
+       FROM met_proceso p JOIN met_magnitud m ON m.id = p.magnitud_id WHERE p.codigo = $1 AND p.activo`, codigo);
   if (!rows.length) throw new NotFoundException(`Proceso ${codigo} no encontrado`);
   const p = rows[0];
   const comps = await prisma.$queryRawUnsafe<any[]>(
@@ -103,19 +119,39 @@ async function cargarProceso(codigo: string) {
 @AmbitoUnidad("SAM")
 @Controller("metrologia")
 export class MetrologiaController {
-  /** Los 12 procesos con su magnitud y componentes. */
+  constructor(private readonly alcance: AlcanceService) {}
+
+  /** Códigos de laboratorio de la sección visibles para el usuario (null = todos). */
+  private async labsVisibles(req: any): Promise<Set<string> | null> {
+    const filtro = await this.alcance.filtroUnidades(req);
+    if (filtro === null) return null;
+    const arbol = await this.alcance.arbol(req.user?.tenantId);
+    const visibles = new Set(filtro);
+    return new Set(LABS_SAM.filter((c) => {
+      const n = arbol.porCodigo.get(c);
+      return n && descendientes(arbol, n.id, true).some((id) => visibles.has(id));
+    }));
+  }
+
+  /** Procesos con su magnitud, laboratorio, motor y componentes (solo los de los laboratorios del usuario). */
   @Get("procesos")
   @RequierePermiso("metrologia.ver")
-  async procesos() {
+  async procesos(@Req() req: any) {
     const procs = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT p.codigo, p.nombre, p.metodo, p.norma, m.codigo AS magnitud, m.unidad, m.decimales
-         FROM met_proceso p JOIN met_magnitud m ON m.id = p.magnitud_id WHERE p.activo ORDER BY m.codigo, p.codigo`);
+      `SELECT p.codigo, p.nombre, p.metodo, p.norma, p.laboratorio, p.acreditacion, m.codigo AS magnitud, m.nombre AS magnitud_nombre, m.unidad, m.decimales
+         FROM met_proceso p JOIN met_magnitud m ON m.id = p.magnitud_id WHERE p.activo ORDER BY p.laboratorio NULLS LAST, m.codigo, p.codigo`);
     const comps = await prisma.$queryRawUnsafe<any[]>(
       `SELECT m.codigo AS magnitud, c.simbolo, c.nombre, c.distribucion, c.fuente, c.orden
          FROM met_componente c JOIN met_magnitud m ON m.id = c.magnitud_id ORDER BY m.codigo, c.orden`);
     const byMag: Record<string, any[]> = {};
     comps.forEach((c) => { (byMag[c.magnitud] ??= []).push(c); });
-    return { data: procs.map((p) => ({ ...p, componentes: byMag[p.magnitud] ?? [] })) };
+    const labs = await this.labsVisibles(req);
+    return {
+      data: procs
+        .filter((p) => !labs || !p.laboratorio || labs.has(p.laboratorio))
+        .map((p) => ({ ...p, motor: motorDeProceso(p.codigo)?.it ?? null, componentes: byMag[p.magnitud] ?? [] })),
+      laboratorios: labs ? LABS_SAM.filter((c) => labs.has(c)) : LABS_SAM,
+    };
   }
 
   /** Configuración editable: magnitudes, distribuciones, componentes, OIML, patrones. */
@@ -152,40 +188,54 @@ export class MetrologiaController {
     return rows[0];
   }
 
-  /** Motores validados: IT, unidades, correcciones propuestas y casos de referencia. */
+  /** Motores: IT, unidades, correcciones propuestas, casos de referencia y si está validado contra planilla. */
   @Get("motores")
   @RequierePermiso("metrologia.ver")
   motores() {
+    const casos = [...CASOS_REFERENCIA, ...CASOS_LNF];
     return {
-      data: Object.values(MOTORES).map(({ calcular, resumen, ...m }) => ({
-        ...m, casos: CASOS_REFERENCIA.filter((c) => c.it === m.it).map((c) => ({ caso: c.caso, instrumento: c.instrumento })),
+      data: Object.values(REGISTRO_MOTORES).map(({ calcular, resumen, ...m }) => ({
+        ...m, validado: m.validado !== false,
+        casos: casos.filter((c) => c.it === m.it).map((c) => ({ caso: c.caso, instrumento: c.instrumento })),
       })),
+      procesosPorPuntos: PROCESOS_POR_PUNTOS,
     };
   }
 
-  /** Evidencia de validación: recalcula los 16 casos reales y los compara con los Excel. */
+  /** Evidencia de validación: recalcula los casos reales (16 del LMT + 1 del LNF) y los compara con las planillas. */
   @Get("motores/paridad")
   @RequierePermiso("metrologia.ver")
   paridad() {
-    return verificarParidad();
+    const lmt = verificarParidad(), lnf = verificarParidadLNF();
+    return { casos: [...lmt.casos, ...lnf.casos], identicos: lmt.identicos + lnf.identicos, comparados: lmt.comparados + lnf.comparados };
   }
 
-  /** Datos de entrada de un caso de referencia (sin los valores del Excel). */
+  /** Datos de entrada de un caso de referencia (sin los valores de la planilla), para formación. */
   @Get("motores/:it/ejemplo")
   @RequierePermiso("metrologia.ver")
   ejemplo(@Param("it") it: string, @Query("caso") caso?: string) {
     const m = motorDeProceso(it);
-    if (!m) throw new NotFoundException(`No hay motor validado para ${it}`);
-    const c = CASOS_REFERENCIA.find((x) => x.it === m.it && (!caso || x.caso === caso));
-    if (!c) throw new NotFoundException(`Caso ${caso} no encontrado para ${m.it}`);
+    if (!m) throw new NotFoundException(`No hay motor para ${it}`);
+    const c = [...CASOS_REFERENCIA, ...CASOS_LNF].find((x) => x.it === m.it && (!caso || x.caso === caso));
+    if (!c) throw new NotFoundException(`No hay caso de referencia para ${m.it}`);
     return { data: { caso: c.caso, instrumento: c.instrumento, datos: soloEntradas(c.datos) } };
+  }
+
+  /** Formulario vacío del motor: la estructura de su planilla sin ningún valor. */
+  @Get("motores/:it/plantilla")
+  @RequierePermiso("metrologia.ver")
+  plantilla(@Param("it") it: string) {
+    const m = motorDeProceso(it);
+    if (!m) throw new NotFoundException(`No hay motor para ${it}`);
+    const c = [...CASOS_REFERENCIA, ...CASOS_LNF].find((x) => x.it === m.it);
+    return { data: { datos: c ? plantillaVacia(soloEntradas(c.datos)) : null } };
   }
 
   /** Vista previa: calcula sin guardar (el mismo motor que usa el guardado). */
   @Post("motores/:it/calcular")
   @RequierePermiso("metrologia.ver")
   calcular(@Param("it") it: string, @Body() body: unknown) {
-    if (!motorDeProceso(it)) throw new NotFoundException(`No hay motor validado para ${it}`);
+    if (!motorDeProceso(it)) throw new NotFoundException(`No hay motor para ${it}`);
     const d = CalcularSchema.parse(body);
     return { data: ejecutarMotor(it, d.datos, d.opciones) };
   }
@@ -202,20 +252,40 @@ export class MetrologiaController {
   // ----- Calibraciones -------------------------------------------------------
   @Get("calibraciones")
   @RequierePermiso("metrologia.ver")
-  async listar(@Query("limit") limit?: string, @Req() req?: any) {
+  async listar(@Req() req: any, @Query("limit") limit?: string, @Query("estado") estado?: string) {
     const t = tenantId(req);
-    const l = Math.min(200, Math.max(1, parseInt(limit ?? "50") || 50));
+    const l = Math.min(500, Math.max(1, parseInt(limit ?? "100") || 100));
+    const filtro = await this.alcance.filtroUnidades(req);
+    const params: any[] = [t, l];
+    let where = `c.tenant_id = $1::uuid AND c.deleted_at IS NULL`;
+    if (filtro) { params.push(filtro); where += ` AND c.unidad_id = ANY($${params.length}::uuid[])`; }
+    if (estado) {
+      const e = estado === "borrador" ? ["borrador", "calculada"] : [estado];
+      params.push(e); where += ` AND c.estado = ANY($${params.length}::text[])`;
+    }
     const data = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT c.id, c.codigo, c.estado, c.u_max, c.u_cert, c.motor, c.conforme, c.created_at, c.emitido_at,
-              pr.codigo AS proceso, pr.nombre AS proceso_nombre, m.unidad,
-              c.instrumento->>'item' AS instrumento, c.instrumento->>'cliente' AS cliente
+      `SELECT c.id, c.codigo, c.estado, c.u_max, c.u_cert, c.motor, c.conforme, c.created_at, c.emitido_at, c.fecha_calibracion,
+              c.created_by, c.devuelto_motivo, (c.resumen IS NOT NULL OR c.u_max IS NOT NULL) AS calculada,
+              pr.codigo AS proceso, pr.nombre AS proceso_nombre, m.unidad, un.codigo AS laboratorio,
+              c.instrumento->>'item' AS instrumento, c.instrumento->>'cliente' AS cliente,
+              ua.nombre_completo AS autor_nombre
          FROM met_calibracion c
          JOIN met_proceso pr ON pr.id = c.proceso_id
          JOIN met_magnitud m ON m.id = pr.magnitud_id
-        WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL
-        ORDER BY c.created_at DESC LIMIT $2`, t, l);
-    // En fuerza y par la incertidumbre es relativa (%), no en la unidad de la magnitud.
-    return { data: data.map((c) => ({ ...c, unidad_u: (c.motor && MOTORES[c.motor]?.unidadU) || c.unidad })) };
+         LEFT JOIN unidad un ON un.id = c.unidad_id
+         LEFT JOIN usuario ua ON ua.id = c.created_by
+        WHERE ${where}
+        ORDER BY c.created_at DESC LIMIT $2`, ...params);
+    return {
+      data: data.map(({ created_by, calculada, ...c }) => ({
+        ...c,
+        estado: estadoDe(c.estado),
+        // En fuerza y par la incertidumbre es relativa (%), no en la unidad de la magnitud.
+        unidad_u: c.motor === "PUNTOS" ? "" : (c.motor && REGISTRO_MOTORES[c.motor]?.unidadU) || c.unidad,
+        es_mio: created_by === req.user?.sub,
+        acciones: accionesDisponibles(this.contexto(req, { ...c, created_by, calculada })),
+      })),
+    };
   }
 
   @Get("calibraciones/:id")
@@ -223,84 +293,149 @@ export class MetrologiaController {
   async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     const t = tenantId(req);
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT c.*, pr.codigo AS proceso, pr.nombre AS proceso_nombre, pr.metodo, pr.norma,
-              m.codigo AS magnitud, m.unidad, m.decimales
+      `SELECT c.*, pr.codigo AS proceso, pr.nombre AS proceso_nombre, pr.metodo, pr.norma, pr.acreditacion,
+              m.codigo AS magnitud, m.unidad, m.decimales, un.codigo AS laboratorio, un.nombre AS laboratorio_nombre,
+              ua.nombre_completo AS autor_nombre, ue.nombre_completo AS emisor_nombre
          FROM met_calibracion c JOIN met_proceso pr ON pr.id = c.proceso_id JOIN met_magnitud m ON m.id = pr.magnitud_id
+         LEFT JOIN unidad un ON un.id = c.unidad_id
+         LEFT JOIN usuario ua ON ua.id = c.created_by
+         LEFT JOIN usuario ue ON ue.id = c.emitido_by
         WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid AND c.deleted_at IS NULL LIMIT 1`, id, t);
     if (!rows.length) throw new NotFoundException("Calibración no encontrada");
-    const puntos = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT * FROM met_calibracion_punto WHERE calibracion_id = $1::uuid ORDER BY orden`, id);
-    return { ...rows[0], puntos };
+    const cal = rows[0];
+    if (cal.unidad_id) await this.alcance.exigirUnidad(req, cal.unidad_id, "la calibración");
+    const [puntos, eventos] = await Promise.all([
+      prisma.$queryRawUnsafe<any[]>(`SELECT * FROM met_calibracion_punto WHERE calibracion_id = $1::uuid ORDER BY orden`, id),
+      prisma.$queryRawUnsafe<any[]>(
+        `SELECT e.accion, e.estado_desde, e.estado_hasta, e.comentario, e.created_at, u.nombre_completo AS usuario
+           FROM met_calibracion_evento e LEFT JOIN usuario u ON u.id = e.usuario_id
+          WHERE e.calibracion_id = $1::uuid ORDER BY e.created_at`, id),
+    ]);
+    const calculada = cal.resumen != null || cal.u_max != null;
+    return {
+      ...cal, estado: estadoDe(cal.estado), calculada, puntos, eventos, es_mio: cal.created_by === req.user?.sub,
+      acciones: accionesDisponibles(this.contexto(req, { ...cal, calculada })),
+    };
   }
 
-  /** Crea y CALCULA una calibración (motor GUM en el servidor). */
+  /** Guarda una calibración nueva como BORRADOR, calculada en el servidor. */
   @Post("calibraciones")
   @RequierePermiso("metrologia.crear")
   async crear(@Body() body: unknown, @Req() req: any) {
     const t = tenantId(req);
     const d = CrearSchema.parse(body);
     const proc = await cargarProceso(d.procesoCodigo);
-    const motor = motorDeProceso(proc.codigo);
-    if (motor) {
-      if (!d.motor) throw new BadRequestException(`${proc.codigo} se calcula con su motor validado: envíe los datos del motor`);
-      return this.crearConMotor(t, proc, motor.it, d, req);
-    }
-    if (!d.puntos.length) throw new BadRequestException("Debe registrar al menos un punto de calibración");
-    const divs = await cargarDivisores();
-    const puntos: Punto[] = d.puntos.map((p) => ({
-      nominal: p.nominal, correccion: p.correccion, uPatron: p.uPatron, deriva: p.deriva, lecturas: p.lecturas,
-    }));
-    const calc = calcularCalibracion(proc.componentes, divs, d.cond, puntos);
+    const unidadId = await this.unidadDeCalibracion(req, t, proc, d.laboratorio);
+    const calc = await this.calcularDto(proc, d);
+    const fecha = fechaCalibracion(d.fecha);
 
-    const codigo = await this.siguienteCodigo(t);
-    const cal = await prisma.$queryRawUnsafe<any[]>(
-      `INSERT INTO met_calibracion
-         (tenant_id, codigo, proceso_id, patron_id, instrumento, patron_snap, ambiente, cond,
-          u_max, conforme, intervalo_meses, estado, created_by)
-       VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,'calculada',$12::uuid)
-       RETURNING id, codigo`,
-      t, codigo, proc.id, d.patronId ?? null, JSON.stringify(d.instrumento), JSON.stringify(d.patronSnap),
-      JSON.stringify(d.ambiente), JSON.stringify(d.cond), calc.uMax, calc.conforme, d.intervaloMeses,
-      req?.user?.sub ?? null);
-    const calId = cal[0].id;
-    let orden = 0;
-    for (const p of calc.puntos) {
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO met_calibracion_punto
-           (calibracion_id, orden, nominal, correccion, u_patron, deriva, lecturas, media, repetibilidad,
-            referencia, error, uc, u_exp, en_norm, dentro, componentes)
-         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)`,
-        calId, orden++, p.nominal, p.correccion, p.uPatron, p.deriva, JSON.stringify(p.lecturas),
-        p.media, p.repetibilidad, p.referencia, p.error, p.uc, p.uExp, p.en, p.dentro, JSON.stringify(p.componentes));
+    for (let intento = 0; ; intento++) {
+      const codigo = await this.siguienteCodigo(t, fecha);
+      try {
+        const id = await prisma.$transaction(async (tx) => {
+          const cal = await tx.$queryRawUnsafe<any[]>(
+            `INSERT INTO met_calibracion
+               (tenant_id, codigo, proceso_id, patron_id, unidad_id, fecha_calibracion, instrumento, patron_snap, ambiente, cond,
+                u_max, u_cert, conforme, intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen)
+             VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5::uuid,$6::date,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,
+                     $11,$12,$13,$14,'borrador',$15::uuid,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20::jsonb)
+             RETURNING id`,
+            t, codigo, proc.id, d.patronId ?? null, unidadId, fecha, JSON.stringify(d.instrumento), JSON.stringify(d.patronSnap),
+            JSON.stringify(d.ambiente), JSON.stringify(calc.cond), calc.uMax, calc.uCert, calc.conforme, d.intervaloMeses,
+            req?.user?.sub ?? null, calc.motor, calc.datos, calc.opciones, calc.resultado, calc.resumen);
+          await this.guardarPuntos(tx, cal[0].id, calc.puntos);
+          await this.evento(tx, cal[0].id, "CREADA", null, "borrador", req, null);
+          return cal[0].id as string;
+        });
+        return { data: { id, codigo, estado: "borrador", fecha, motor: calc.motor, resumen: calc.resumenObj, uMax: calc.uMax, conforme: calc.conforme, puntos: calc.puntosGum } };
+      } catch (e: any) {
+        // Dos guardados simultáneos pueden tomar el mismo correlativo: se reintenta con el siguiente.
+        if (intento < 4 && /unique|duplicate|23505/i.test(String(e?.message ?? e?.code ?? ""))) continue;
+        throw e;
+      }
     }
-    return { data: { id: calId, codigo, uMax: calc.uMax, enMax: calc.enMax, conforme: calc.conforme, puntos: calc.puntos } };
   }
 
-  /** Emite el Certificado de Calibración: sella con SHA-256 y correlativo. */
+  /** Corrige un borrador propio (por ejemplo, tras una devolución): recalcula y reemplaza los puntos. */
+  @Put("calibraciones/:id")
+  @RequierePermiso("metrologia.crear")
+  async editar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const cal = await this.detalle(id, req);
+    this.exigir("EDITAR", req, cal);
+    const d = CrearSchema.parse(body);
+    if (d.procesoCodigo !== cal.proceso) throw new BadRequestException("No se puede cambiar el proceso de una calibración guardada");
+    const proc = await cargarProceso(d.procesoCodigo);
+    const calc = await this.calcularDto(proc, d);
+    const fecha = d.fecha ? fechaCalibracion(d.fecha) : null;
+    await prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE met_calibracion SET patron_id = $2::uuid, instrumento = $3::jsonb, patron_snap = $4::jsonb, ambiente = $5::jsonb,
+                cond = $6::jsonb, u_max = $7, u_cert = $8, conforme = $9, intervalo_meses = $10, motor = $11, datos = $12::jsonb,
+                opciones = $13::jsonb, resultado = $14::jsonb, resumen = $15::jsonb, fecha_calibracion = COALESCE($16::date, fecha_calibracion),
+                estado = 'borrador', updated_at = now()
+          WHERE id = $1::uuid`,
+        id, d.patronId ?? null, JSON.stringify(d.instrumento), JSON.stringify(d.patronSnap), JSON.stringify(d.ambiente),
+        JSON.stringify(calc.cond), calc.uMax, calc.uCert, calc.conforme, d.intervaloMeses, calc.motor, calc.datos, calc.opciones,
+        calc.resultado, calc.resumen, fecha);
+      await tx.$executeRawUnsafe(`DELETE FROM met_calibracion_punto WHERE calibracion_id = $1::uuid`, id);
+      await this.guardarPuntos(tx, id, calc.puntos);
+      await this.evento(tx, id, "EDITADA", "borrador", "borrador", req, null);
+    });
+    return { data: { id, codigo: cal.codigo, estado: "borrador", resumen: calc.resumenObj, uMax: calc.uMax, conforme: calc.conforme } };
+  }
+
+  /** El metrólogo firma lo elaborado y lo envía a revisión del jefe del laboratorio. */
+  @Post("calibraciones/:id/enviar")
+  @RequierePermiso("metrologia.crear")
+  async enviar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const cal = await this.detalle(id, req);
+    this.exigir("ENVIAR", req, cal);
+    await this.transicion(id, "ENVIAR", cal.estado, req, null,
+      `enviado_at = now(), enviado_by = $4::uuid, devuelto_motivo = NULL`, []);
+    return { data: { id, codigo: cal.codigo, estado: ESTADO_TRAS.ENVIAR } };
+  }
+
+  /** El revisor devuelve la calibración al metrólogo para corregirla (motivo obligatorio). */
+  @Post("calibraciones/:id/devolver")
+  @RequierePermiso("metrologia.emitir")
+  async devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const { motivo } = z.object({ motivo: z.string().trim().min(5, "Indique el motivo de la devolución (mínimo 5 caracteres)").max(2000) }).parse(body ?? {});
+    const cal = await this.detalle(id, req);
+    this.exigir("DEVOLVER", req, cal);
+    await this.transicion(id, "DEVOLVER", cal.estado, req, motivo,
+      `devuelto_at = now(), devuelto_by = $4::uuid, devuelto_motivo = $5`, [motivo]);
+    return { data: { id, codigo: cal.codigo, estado: ESTADO_TRAS.DEVOLVER } };
+  }
+
+  /** Revisa, valida y emite el Certificado de Calibración: lo sella con SHA-256. */
   @Post("calibraciones/:id/emitir")
   @RequierePermiso("metrologia.emitir")
   async emitir(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     const cal = await this.detalle(id, req);
     if (cal.estado === "emitida") return { data: { codigo: cal.codigo, hash: cal.certificado_hash, yaEmitido: true } };
-    const contenido = JSON.stringify({ codigo: cal.codigo, proceso: cal.proceso, instrumento: cal.instrumento, puntos: cal.puntos, uMax: cal.u_max });
+    this.exigir("EMITIR", req, cal);
+    const contenido = JSON.stringify({
+      codigo: cal.codigo, proceso: cal.proceso, fecha: cal.fecha_calibracion, instrumento: cal.instrumento,
+      puntos: cal.puntos, uMax: cal.u_max, resumen: cal.resumen, autor: cal.created_by, emisor: req.user?.sub,
+    });
     const hash = createHash("sha256").update(contenido, "utf8").digest("hex");
-    await prisma.$executeRawUnsafe(
-      `UPDATE met_calibracion SET estado = 'emitida', certificado_hash = $2, emitido_at = now() WHERE id = $1::uuid`, id, hash);
-    return { data: { codigo: cal.codigo, hash, verificacion: hash.slice(0, 10).toUpperCase() } };
+    await this.transicion(id, "EMITIR", cal.estado, req, null,
+      `certificado_hash = $5, emitido_at = now(), emitido_by = $4::uuid`, [hash]);
+    return { data: { codigo: cal.codigo, estado: "emitida", hash, verificacion: hash.slice(0, 10).toUpperCase() } };
   }
 
-  /** PDF sellado del certificado (reutiliza el render de plantillas del sistema). */
+  /** PDF del certificado (BORRADOR hasta que se emite; reutiliza el render de plantillas del sistema). */
   @Get("calibraciones/:id/pdf")
   @RequierePermiso("metrologia.ver")
   async pdf(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
     const cal = await this.detalle(id, req);
-    const cuerpo = this.certificadoHtml(cal);
+    const cuerpo = certificadoHtml(cal);
     const hash = cal.certificado_hash ?? createHash("sha256").update(cuerpo, "utf8").digest("hex");
     const sello: Sello = {
       numero: cal.codigo.replace("CAL", "CERT-CAL"),
       codigoVerificacion: hash.slice(0, 10).toUpperCase(),
       hash,
-      fecha: new Date().toLocaleDateString("es-CL"),
+      fecha: new Date(cal.emitido_at ?? Date.now()).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }),
       urlVerificacion: "/saec/verificar",
       borrador: cal.estado !== "emitida",
     };
@@ -312,83 +447,107 @@ export class MetrologiaController {
   }
 
   // ---- helpers --------------------------------------------------------------
-  /** Guarda una calibración calculada con el motor validado de su IT. */
-  private async crearConMotor(t: string, proc: any, it: string, d: z.infer<typeof CrearSchema>, req: any) {
-    const { datos, opciones } = d.motor!;
-    const { resultado, resumen } = ejecutarMotor(it, datos, opciones);
-    const codigo = await this.siguienteCodigo(t);
-    const cal = await prisma.$queryRawUnsafe<any[]>(
-      `INSERT INTO met_calibracion
-         (tenant_id, codigo, proceso_id, patron_id, instrumento, patron_snap, ambiente, cond,
-          u_max, u_cert, conforme, intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen)
-       VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5::jsonb,$6::jsonb,$7::jsonb,'{}'::jsonb,$8,$9,$10,$11,'calculada',$12::uuid,
-               $13,$14::jsonb,$15::jsonb,$16::jsonb,$17::jsonb)
-       RETURNING id, codigo`,
-      t, codigo, proc.id, d.patronId ?? null, JSON.stringify(d.instrumento), JSON.stringify(d.patronSnap), JSON.stringify(d.ambiente),
-      resumen.uMax, resumen.uCert, resumen.conforme, d.intervaloMeses, req?.user?.sub ?? null,
-      it, JSON.stringify(datos), JSON.stringify(opciones), JSON.stringify(resultado), JSON.stringify(resumen));
-    const calId = cal[0].id;
-    let orden = 0;
-    for (const p of resumen.puntos) {
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO met_calibracion_punto (calibracion_id, orden, nominal, error, uc, u_exp, dentro)
-         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7)`,
-        calId, orden++, p.nominal, p.error, p.uc, p.U, p.conforme);
-    }
-    return { data: { id: calId, codigo, motor: it, resumen } };
+  private contexto(req: any, cal: any): ContextoCal {
+    return {
+      estado: cal.estado,
+      esAutor: !!cal.created_by && cal.created_by === req.user?.sub,
+      puedeCrear: tiene(req, "metrologia.crear"),
+      puedeEmitir: tiene(req, "metrologia.emitir"),
+      calculada: !!cal.calculada,
+    };
   }
 
-  private async siguienteCodigo(t: string): Promise<string> {
+  private exigir(accion: AccionCal, req: any, cal: any) {
+    const motivo = motivoRechazo(accion, this.contexto(req, cal));
+    if (motivo) throw new ForbiddenException(motivo);
+  }
+
+  /**
+   * Cambia el estado solo si sigue siendo el leído (evita dobles clics y carreras) y deja el evento.
+   * En `set`: $4 = usuario actual, $5… = `extras`.
+   */
+  private async transicion(id: string, accion: AccionCal, desde: string, req: any, comentario: string | null, set: string, extras: unknown[]) {
+    const hasta = ESTADO_TRAS[accion];
+    const desdeDb = desde === "borrador" ? ["borrador", "calculada"] : [desde];
+    await prisma.$transaction(async (tx) => {
+      const n = await tx.$executeRawUnsafe(
+        `UPDATE met_calibracion SET estado = $2, updated_at = now(), ${set}
+          WHERE id = $1::uuid AND estado = ANY($3::text[])`,
+        id, hasta, desdeDb, req.user?.sub ?? null, ...extras);
+      if (!n) throw new ForbiddenException("La calibración cambió de estado mientras tanto; recargue la lista");
+      const acc = { ENVIAR: "ENVIADA", DEVOLVER: "DEVUELTA", EMITIR: "EMITIDA", EDITAR: "EDITADA" }[accion];
+      await this.evento(tx, id, acc, desde, hasta, req, comentario);
+    });
+  }
+
+  private async evento(tx: any, id: string, accion: string, desde: string | null, hasta: string, req: any, comentario: string | null) {
+    await tx.$executeRawUnsafe(
+      `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
+       VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6)`, id, accion, desde, hasta, req.user?.sub ?? null, comentario);
+  }
+
+  /** Laboratorio de la calibración: el del proceso o, si el proceso no lo fija, el indicado; dentro del alcance del usuario. */
+  private async unidadDeCalibracion(req: any, t: string, proc: any, laboratorio?: string | null): Promise<string | null> {
+    const codigo = proc.laboratorio ?? laboratorio ?? null;
+    if (!codigo) throw new BadRequestException(`Indique el laboratorio que realiza la calibración (${LABS_SAM.join(", ")})`);
+    if (!LABS_SAM.includes(codigo)) throw new BadRequestException(`Laboratorio no válido: ${codigo}`);
+    const u = await prisma.$queryRawUnsafe<any[]>(`SELECT id FROM unidad WHERE tenant_id = $1::uuid AND codigo = $2 LIMIT 1`, t, codigo);
+    if (!u.length) return null; // instalación sin ese laboratorio en el organigrama: queda el control por permiso
+    await this.alcance.exigirUnidad(req, u[0].id, `el proceso ${proc.codigo}`);
+    return u[0].id;
+  }
+
+  /** Calcula en el servidor según el tipo de proceso y deja todo listo para persistir. */
+  private async calcularDto(proc: any, d: CrearDto) {
+    const motor = motorDeProceso(proc.codigo);
+    if (motor) {
+      if (!d.motor) throw new BadRequestException(`${proc.codigo} se calcula con su motor: envíe los datos del motor`);
+      const { datos, opciones } = d.motor;
+      const { resultado, resumen } = ejecutarMotor(proc.codigo, datos, opciones);
+      return {
+        motor: motor.it, cond: {}, datos: JSON.stringify(datos), opciones: JSON.stringify(opciones),
+        resultado: JSON.stringify(resultado), resumen: JSON.stringify(resumen), resumenObj: resumen,
+        uMax: resumen.uMax, uCert: resumen.uCert, conforme: resumen.conforme, puntosGum: undefined,
+        puntos: resumen.puntos.map((p) => ({ nominal: p.nominal, error: p.error, uc: p.uc, u_exp: p.U, dentro: p.conforme })),
+      };
+    }
+    if (!d.puntos.length) throw new BadRequestException("Debe registrar al menos un punto de calibración");
+    const divs = await cargarDivisores();
+    const puntos: Punto[] = d.puntos.map((p) => ({ nominal: p.nominal, correccion: p.correccion, uPatron: p.uPatron, deriva: p.deriva, lecturas: p.lecturas }));
+    const calc = calcularCalibracion(proc.componentes, divs, d.cond, puntos);
+    return {
+      motor: null, cond: d.cond, datos: null, opciones: null, resultado: null, resumen: null, resumenObj: null,
+      uMax: calc.uMax, uCert: null, conforme: calc.conforme, puntosGum: calc.puntos,
+      puntos: calc.puntos.map((p) => ({
+        nominal: p.nominal, correccion: p.correccion, u_patron: p.uPatron, deriva: p.deriva, lecturas: p.lecturas, media: p.media,
+        repetibilidad: p.repetibilidad, referencia: p.referencia, error: p.error, uc: p.uc, u_exp: p.uExp, en_norm: p.en, dentro: p.dentro,
+        componentes: p.componentes,
+      })),
+    };
+  }
+
+  private async guardarPuntos(tx: any, calId: string, puntos: any[]) {
+    let orden = 0;
+    for (const p of puntos) {
+      await tx.$executeRawUnsafe(
+        `INSERT INTO met_calibracion_punto
+           (calibracion_id, orden, nominal, correccion, u_patron, deriva, lecturas, media, repetibilidad,
+            referencia, error, uc, u_exp, en_norm, dentro, componentes)
+         VALUES ($1::uuid,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)`,
+        calId, orden++, p.nominal ?? null, p.correccion ?? null, p.u_patron ?? null, p.deriva ?? null, JSON.stringify(p.lecturas ?? []),
+        p.media ?? null, p.repetibilidad ?? null, p.referencia ?? null, p.error ?? null, p.uc ?? null, p.u_exp ?? null,
+        p.en_norm ?? null, p.dentro ?? null, JSON.stringify(p.componentes ?? []));
+    }
+  }
+
+  /** Siguiente correlativo del año de la fecha de calibración (CAL-AAAA-NNNN). */
+  private async siguienteCodigo(t: string, fecha: string): Promise<string> {
+    const prefijo = codigoCalibracion(fecha, 0).replace(/0+$/, "");
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT COALESCE(MAX(NULLIF(regexp_replace(codigo,'^.*-',''),'')::int),0)+1 AS n
-         FROM met_calibracion WHERE tenant_id = $1::uuid AND codigo LIKE 'CAL-2026-%'`, t);
-    return `CAL-2026-${String(Number(rows[0]?.n ?? 1)).padStart(4, "0")}`;
+         FROM met_calibracion WHERE tenant_id = $1::uuid AND codigo LIKE $2`, t, prefijo + "%");
+    return codigoCalibracion(fecha, Number(rows[0]?.n ?? 1));
   }
-
-  private certificadoHtml(cal: any): string {
-    if (cal.motor && cal.resumen) return certificadoMotor(cal);
-    const u = cal.unidad, dec = cal.decimales ?? 3;
-    const f = (x: any, d = dec) => (x == null || isNaN(Number(x))) ? "—" : Number(x).toLocaleString("es-CL", { minimumFractionDigits: d, maximumFractionDigits: d });
-    const ins = cal.instrumento ?? {}, pat = cal.patron_snap ?? {}, amb = cal.ambiente ?? {};
-    const filas = (cal.puntos ?? []).map((p: any) =>
-      `<tr><td style="text-align:right">${f(p.nominal, dec > 3 ? 2 : 1)}</td><td style="text-align:right">${f(p.referencia)}</td>
-       <td style="text-align:right">${f(p.media)}</td><td style="text-align:right">${f(p.error)}</td>
-       <td style="text-align:right">± ${f(p.u_exp ?? p.uExp)}</td><td>${p.dentro ? "Cumple" : "No cumple"}</td></tr>`).join("");
-    return `
-      <h2>CERTIFICADO DE CALIBRACIÓN ${cal.codigo}</h2>
-      <p><b>Laboratorio de Metrología · IDIC · Acreditación ${ACREDITACION[cal.magnitud] ?? "—"}</b><br>Método ${cal.proceso} — ${cal.metodo ?? ""} · Norma ${cal.norma ?? ""}</p>
-      <h3>Instrumento</h3><p>${ins.item ?? "—"} · ${ins.marca ?? ""} · N° serie ${ins.serie ?? "—"} · Cap. ${ins.cap ?? "—"} ${u} · Res. ${ins.res ?? "—"} ${u}<br>Cliente: ${ins.cliente ?? "—"}</p>
-      <h3>Condiciones</h3><p>Temperatura (${amb.temp ?? "—"} ± ${amb.tempU ?? "—"}) °C · Humedad (${amb.hum ?? "—"} ± ${amb.humU ?? "—"}) %HR</p>
-      <h3>Patrón</h3><p>${pat.nombre ?? "—"} · Clase ${pat.clase ?? "—"} · Cert. ${pat.cert ?? "—"} · Trazabilidad ${pat.trazab ?? "SI"}</p>
-      <h3>Resultados de la calibración</h3>
-      <table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:11px">
-        <thead><tr><th>Nominal ${u}</th><th>Ind. patrón</th><th>Ind. instrumento</th><th>Error</th><th>U (k=2)</th><th>Estado</th></tr></thead>
-        <tbody>${filas}</tbody></table>
-      <p style="margin-top:10px"><b>Síntesis:</b> la mayor incertidumbre expandida es ± ${f(cal.u_max)} ${u} para un nivel de confianza del 95 % (k = 2).</p>`;
-  }
-}
-
-/** Certificado de una calibración calculada con motor validado. */
-function certificadoMotor(cal: any): string {
-  const m = MOTORES[cal.motor], r: ResumenMotor = cal.resumen;
-  const f = (x: any, d = 4) => (x == null || isNaN(Number(x))) ? "—" : Number(x).toLocaleString("es-CL", { maximumFractionDigits: d });
-  const ins = cal.instrumento ?? {}, pat = cal.patron_snap ?? {}, amb = cal.ambiente ?? {};
-  const corr = Object.entries(cal.opciones ?? {}).filter(([, v]) => v).map(([k]) => m.opciones.find((o) => o.clave === k)?.hallazgo ?? k);
-  const filas = r.puntos.map((p) =>
-    `<tr><td style="text-align:right">${f(p.nominal)}</td><td style="text-align:right">${f(p.error, 6)}</td>
-     <td style="text-align:right">± ${f(p.Ucert ?? p.U, 6)}</td><td>${p.conforme == null ? "—" : p.conforme ? "Cumple" : "No cumple"}</td></tr>`).join("");
-  return `
-    <h2>CERTIFICADO DE CALIBRACIÓN ${cal.codigo}</h2>
-    <p><b>Laboratorio de Metrología · IDIC · Acreditación ${ACREDITACION[cal.magnitud] ?? "—"}</b><br>Método ${cal.proceso} — ${cal.metodo ?? ""}${cal.norma ? " · " + cal.norma : ""}</p>
-    <h3>Instrumento</h3><p>${ins.item ?? "—"} · ${ins.marca ?? ""} · N° serie ${ins.serie ?? "—"}<br>Cliente: ${ins.cliente ?? "—"}</p>
-    <h3>Condiciones</h3><p>Temperatura (${amb.temp ?? "—"} ± ${amb.tempU ?? "—"}) °C · Humedad (${amb.hum ?? "—"} ± ${amb.humU ?? "—"}) %HR</p>
-    <h3>Patrón</h3><p>${pat.nombre ?? "—"} · Clase ${pat.clase ?? "—"} · Cert. ${pat.cert ?? "—"} · Trazabilidad ${pat.trazab ?? "SI"}</p>
-    <h3>Resultados de la calibración</h3>
-    <table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse;font-size:11px">
-      <thead><tr><th>Nominal ${m.unidad}</th><th>Error ${m.unidadU === "%" ? "%" : m.unidad}</th><th>U (k=2) ${m.unidadU}</th><th>Estado</th></tr></thead>
-      <tbody>${filas}</tbody></table>
-    <p style="margin-top:10px"><b>Síntesis:</b> la mayor incertidumbre expandida informada es ± ${f(r.uCert ?? r.uMax, 6)} ${m.unidadU} para un nivel de confianza del 95 % (k = 2).</p>
-    <p style="font-size:10px;color:#555">Cálculo según ${m.it} con el motor validado contra el libro de trabajo del laboratorio${corr.length ? ` · correcciones aplicadas: ${corr.join(", ")}` : ""}.</p>`;
 }
 
 @Module({ controllers: [MetrologiaController] })

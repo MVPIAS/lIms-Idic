@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { fmtG, parseEntrada, verEntrada, ETIQUETA_ENTRADA, type MotorInfo, type CalculoMotor } from "@/lib/metrologia";
+import { fmtG, parseEntrada, verEntrada, ETIQUETA_ENTRADA, ETIQUETA_MOTOR, type MotorInfo, type CalculoMotor } from "@/lib/metrologia";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -13,7 +13,9 @@ const HEAD = { fontSize: 12, textTransform: "uppercase" as const, letterSpacing:
 const esObj = (v: any) => v && typeof v === "object" && !Array.isArray(v);
 const esFilaObj = (v: any) => Array.isArray(v) && v.length > 0 && v.every(esObj);
 const esMatriz = (v: any) => Array.isArray(v) && v.length > 0 && v.every(Array.isArray);
-const lbl = (k: string) => ETIQUETA_ENTRADA[k] ?? k;
+/** ¿El formulario tiene al menos un valor escrito? (si no, no se pide vista previa). */
+const tieneValores = (v: any): boolean =>
+  Array.isArray(v) ? v.some(tieneValores) : esObj(v) ? Object.values(v).some(tieneValores) : typeof v === "number" || (typeof v === "string" && v.trim() !== "");
 
 /** Aplana objetos anidados (p. ej. thA.err, pat["20 mg E2"].U) en rutas editables. */
 function hojas(o: any, pre: string[] = []): { ruta: string[]; v: any }[] {
@@ -26,43 +28,63 @@ function fijar(o: any, ruta: (string | number)[], v: any) {
 }
 
 interface Props {
-  procesoCodigo: string;
   motor: MotorInfo;
   paridad?: { identicos: number; comparados: number } | null;
-  cabecera: { instrumento: any; patronSnap: any; ambiente: any; intervaloMeses: number };
-  onGuardado: (c: { codigo: string; id: string }) => void;
+  /** Datos ya guardados (al editar un borrador). Sin ellos, el formulario abre vacío. */
+  inicial?: { datos: any; opciones: Record<string, boolean> } | null;
+  guardando: boolean;
+  onGuardar: (motor: { datos: any; opciones: Record<string, boolean> }) => void;
 }
 
-export default function MotorPanel({ procesoCodigo, motor, paridad, cabecera, onGuardado }: Props) {
+/**
+ * Toma de datos genérica de un motor validado: la forma del formulario sale de
+ * la planilla de la IT (GET /motores/:it/plantilla), abre VACÍO y el servidor
+ * calcula la vista previa con el mismo motor que usa al guardar. «Cargar
+ * ejemplo» trae las entradas de un caso real, solo para formación.
+ */
+export default function MotorPanel({ motor, paridad, inicial, guardando, onGuardar }: Props) {
   const [caso, setCaso] = useState(motor.casos[0]?.caso ?? "");
-  const [datos, setDatos] = useState<any>(null);
-  const [opciones, setOpciones] = useState<Record<string, boolean>>({});
+  const [datos, setDatos] = useState<any>(inicial?.datos ?? null);
+  const [opciones, setOpciones] = useState<Record<string, boolean>>(inicial?.opciones ?? {});
   const [calc, setCalc] = useState<CalculoMotor | null>(null);
-  const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [aviso, setAviso] = useState("");
+  const [esEjemplo, setEsEjemplo] = useState(false);
   const seq = useRef(0);
+  const lbl = (k: string) => ETIQUETA_MOTOR[motor.it]?.[k] ?? ETIQUETA_ENTRADA[k] ?? k;
 
-  // Carga el caso de referencia elegido (entradas reales, sin los valores del Excel).
+  // Formulario vacío con la forma de la planilla (si no se está editando un borrador).
   useEffect(() => {
+    if (inicial?.datos) return;
+    fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/plantilla`, { headers: auth() })
+      .then((r) => r.json()).then((j) => setDatos(j.data?.datos ?? {})).catch((e) => setAviso(e.message));
+  }, [motor.it]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function cargarEjemplo() {
     if (!caso) return;
-    setError(""); setOpciones({});
-    fetch(`${API}/metrologia/motores/${motor.it}/ejemplo?caso=${encodeURIComponent(caso)}`, { headers: auth() })
-      .then((r) => r.json()).then((j) => setDatos(j.data?.datos ?? null)).catch((e) => setError(e.message));
-  }, [motor.it, caso]);
+    setAviso("");
+    try {
+      const j = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/ejemplo?caso=${encodeURIComponent(caso)}`, { headers: auth() }).then((r) => r.json());
+      setDatos(j.data?.datos ?? null); setOpciones({}); setEsEjemplo(true);
+    } catch (e: any) { setAviso(e.message); }
+  }
+  async function vaciar() {
+    const j = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/plantilla`, { headers: auth() }).then((r) => r.json()).catch(() => null);
+    setDatos(j?.data?.datos ?? {}); setOpciones({}); setEsEjemplo(false); setCalc(null);
+  }
 
   // Vista previa: el servidor calcula con el mismo motor que usa al guardar.
   useEffect(() => {
-    if (!datos) return;
+    if (!datos || !tieneValores(datos)) { setCalc(null); setAviso(""); return; }
     const n = ++seq.current;
     const h = setTimeout(async () => {
       try {
-        const r = await fetch(`${API}/metrologia/motores/${motor.it}/calcular`, { method: "POST", headers: auth(), body: JSON.stringify({ datos, opciones }) });
+        const r = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/calcular`, { method: "POST", headers: auth(), body: JSON.stringify({ datos, opciones }) });
         const j = await r.json().catch(() => ({}));
         if (n !== seq.current) return;
-        if (!r.ok) { setCalc(null); setError(j.message ?? `Error ${r.status}`); return; }
-        setError(""); setCalc(j.data);
-      } catch (e: any) { if (n === seq.current) setError(e.message); }
-    }, 300);
+        if (!r.ok) { setCalc(null); setAviso(j.message ?? `Error ${r.status}`); return; }
+        setAviso(""); setCalc(j.data);
+      } catch (e: any) { if (n === seq.current) setAviso(e.message); }
+    }, 350);
     return () => clearTimeout(h);
   }, [datos, opciones, motor.it]);
 
@@ -87,26 +109,12 @@ export default function MotorPanel({ procesoCodigo, motor, paridad, cabecera, on
     setDatos(d);
   }
 
-  async function guardar() {
-    setSaving(true); setError("");
-    try {
-      const body = {
-        procesoCodigo, instrumento: cabecera.instrumento, patronSnap: cabecera.patronSnap, ambiente: cabecera.ambiente,
-        intervaloMeses: cabecera.intervaloMeses, motor: { datos, opciones },
-      };
-      const r = await fetch(`${API}/metrologia/calibraciones`, { method: "POST", headers: auth(), body: JSON.stringify(body) });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message ?? `Error ${r.status}`);
-      onGuardado({ codigo: j.data.codigo, id: j.data.id });
-    } catch (e: any) { setError(Array.isArray(e.message) ? e.message.join(", ") : e.message); }
-    finally { setSaving(false); }
-  }
-
   const inp = (ruta: (string | number)[], v: any, key?: string) => (
     <input key={key} value={verEntrada(v)} style={CELL} onChange={(e) => cambiar(ruta, e.target.value)} />
   );
   const r = calc?.resumen;
   const uu = motor.unidadU;
+  const conClase = !!r?.puntos.some((p) => p.clase);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -115,22 +123,27 @@ export default function MotorPanel({ procesoCodigo, motor, paridad, cabecera, on
           <b style={HEAD}>Motor {motor.it} · {motor.nombre}</b>
           {paridad && (
             <span className={`pill ${paridad.identicos === paridad.comparados ? "green" : "red"}`} style={{ marginLeft: "auto" }}>
-              Validado contra el Excel: {paridad.identicos}/{paridad.comparados} valores idénticos
+              Validado contra la planilla: {paridad.identicos}/{paridad.comparados} valores idénticos
             </span>
           )}
         </div>
         <div className="body" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-          <div className="form-grid">
-            <div className="field">
-              <label>Cargar caso de referencia</label>
-              <select value={caso} onChange={(e) => setCaso(e.target.value)}>
-                {motor.casos.map((c) => <option key={c.caso} value={c.caso}>{c.caso} · {c.instrumento}</option>)}
-              </select>
+          {motor.casos.length > 0 && (
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div className="field" style={{ minWidth: 260 }}>
+                <label>Caso real de la planilla (para formación)</label>
+                <select value={caso} onChange={(e) => setCaso(e.target.value)}>
+                  {motor.casos.map((c) => <option key={c.caso} value={c.caso}>{c.caso} · {c.instrumento}</option>)}
+                </select>
+              </div>
+              <button className="btn sm" onClick={cargarEjemplo}>Cargar ejemplo</button>
+              {esEjemplo && <button className="btn sm" onClick={vaciar}>Vaciar formulario</button>}
             </div>
-          </div>
+          )}
+          {esEjemplo && <div className="alert warn" style={{ margin: 0 }}>Está viendo los datos de un caso real de formación. Reemplácelos por los de su calibración antes de guardar.</div>}
           {motor.opciones.length > 0 && (
             <div>
-              <div style={{ ...HEAD, fontSize: 11, marginBottom: 6 }}>Correcciones propuestas (desactivadas = cálculo idéntico al Excel)</div>
+              <div style={{ ...HEAD, fontSize: 11, marginBottom: 6 }}>Correcciones propuestas (desactivadas = cálculo idéntico a la planilla)</div>
               {motor.opciones.map((o) => (
                 <label key={o.clave} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 4 }}>
                   <input type="checkbox" checked={!!opciones[o.clave]} onChange={(e) => setOpciones({ ...opciones, [o.clave]: e.target.checked })} />
@@ -147,7 +160,7 @@ export default function MotorPanel({ procesoCodigo, motor, paridad, cabecera, on
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-2,#eee)" }}><b style={HEAD}>Toma de datos</b></div>
           <div className="body" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
             {partes.escalares.length > 0 && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 8 }}>
                 {partes.escalares.map(({ ruta, v }) => (
                   <div className="field" key={ruta.join(".")} style={{ minWidth: 0 }}>
                     <label title={ruta.join(".")}>{ruta.length > 1 ? `${lbl(ruta[0])} · ${lbl(ruta.slice(1).join(" · "))}` : lbl(ruta[0])}</label>
@@ -195,12 +208,13 @@ export default function MotorPanel({ procesoCodigo, motor, paridad, cabecera, on
           )}
         </div>
         <div className="body" style={{ padding: 14 }}>
-          {error && <div className="alert warn">{error}</div>}
+          {!r && !aviso && <p style={{ color: "var(--muted)", margin: 0 }}>Complete la toma de datos: los resultados aparecen aquí a medida que escribe.</p>}
+          {aviso && <div className="alert info">{aviso}</div>}
           {r && (
             <>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 12 }}>
-                {[["Mayor U calculada (k=2)", `± ${fmtG(r.uMax)} ${uu}`], ["U informada en el certificado", r.uCert == null ? "—" : `± ${fmtG(r.uCert)} ${uu}`],
-                  ["Puntos conformes", r.conforme == null ? "Sin criterio" : `${r.puntos.filter((p) => p.conforme).length} / ${r.puntos.length}`]].map(([l, v]) => (
+                {[["Mayor U calculada", `± ${fmtG(r.uMax)} ${uu}`], ["U informada en el certificado", r.uCert == null ? "—" : `± ${fmtG(r.uCert)} ${uu}`],
+                  [conClase ? "Clase desde el primer punto" : "Puntos conformes", conClase ? r.puntos[0]?.clase ?? "—" : r.conforme == null ? "Sin criterio" : `${r.puntos.filter((p) => p.conforme).length} / ${r.puntos.length}`]].map(([l, v]) => (
                   <div key={l} style={{ ...BLUE, borderRadius: 8, padding: "8px 10px" }}>
                     <div style={{ fontSize: 10.5, color: "var(--muted)", textTransform: "uppercase" }}>{l}</div>
                     <div style={{ fontSize: 17, fontWeight: 600 }}>{v}</div>
@@ -209,21 +223,28 @@ export default function MotorPanel({ procesoCodigo, motor, paridad, cabecera, on
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table className="data">
-                  <thead><tr><th>Nominal {motor.unidad}</th><th>Error {uu === "%" ? "%" : motor.unidad}</th><th>u<sub>c</sub> {uu}</th><th>U (k=2) {uu}</th><th>U certificado {uu}</th><th>Estado</th></tr></thead>
+                  <thead><tr><th>Nominal {motor.unidad}</th><th>{conClase ? "fc %" : `Error ${uu === "%" ? "%" : motor.unidad}`}</th><th>u<sub>c</sub> {uu}</th><th>U {uu}</th><th>U certificado {uu}</th><th>{conClase ? "Clase del rango" : "Estado"}</th></tr></thead>
                   <tbody>
                     {r.puntos.map((p, i) => (
                       <tr key={i}>
                         {[fmtG(p.nominal), fmtG(p.error), fmtG(p.uc), fmtG(p.U), fmtG(p.Ucert)].map((v, j) => <td key={j} className="num" style={BLUE}>{v}</td>)}
-                        <td>{p.conforme == null ? "—" : p.conforme ? <span className="pill green">Cumple</span> : <span className="pill red">No cumple</span>}</td>
+                        <td>{conClase ? <span className="pill blue">{p.clase}</span> : p.conforme == null ? "—" : p.conforme ? <span className="pill green">Cumple</span> : <span className="pill red">No cumple</span>}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              {r.extra && r.extra.length > 0 && (
+                <table className="data" style={{ marginTop: 12 }}>
+                  <tbody>{r.extra.map((x, i) => <tr key={i}><th style={{ width: 240 }}>{x.etiqueta}</th><td style={BLUE}>{x.valor}</td></tr>)}</tbody>
+                </table>
+              )}
             </>
           )}
           <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
-            <button className="btn primary sm" disabled={saving || !r} onClick={guardar}>{saving ? "Guardando…" : "Guardar y calcular en el servidor"}</button>
+            <button className="btn primary sm" disabled={guardando || !r} onClick={() => onGuardar({ datos, opciones })}>
+              {guardando ? "Guardando…" : "Guardar borrador"}
+            </button>
           </div>
         </div>
       </div>
