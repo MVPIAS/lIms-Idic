@@ -337,6 +337,17 @@ Si `esGlobal`, `unidadesVisibles` trae todas las unidades activas.
 
 Cada conteo es defensivo: si la tabla/columna no existe en la BD, ese ítem vale 0.
 
+Solo se devuelven las tarjetas cuya pantalla el usuario puede abrir (mismo permiso
+que el menú: `/captura-ot` → `resultado.ver`, `/informes/por-firmar` →
+`documento.firmar`, `/facturas` → `factura.ver`, `/admin/…` → `admin.usuarios`…;
+`filtrarPorPermiso` en `rbac/bandeja.service.ts`). Así Recepción, que comparte el
+perfil «analista», no ve «Resultados devueltos». Cada tarjeta que abre una lista
+(`/ot?…`, `/cotizaciones?…`, `/facturas?…`, `/certificados?…`, `/captura-ot?…`,
+`/informes/por-firmar`) cuenta exactamente lo que esa lista muestra: lo comprueba
+`scripts/verificacion/flujo-completo.js`. «OT abiertas» abre `/ot?estado=abiertas`;
+«OT cerradas sin factura», `/ot?estado=cerrada&sinFactura=1`; las de administración,
+`/admin/usuarios?sinRol=1`, `/admin/usuarios?estado=bloqueado` y `/admin/estructura`.
+
 `firmas_pendientes` cuenta los informes/certificados cuyo **paso actual** de la matriz de firmas tiene al usuario como responsable (tabla `documento_firma`) y enlaza a `/informes/por-firmar`. `ot_vencidas` / `ot_por_vencer` usan el mismo semáforo que la lista de OT (OT no cerradas ni anuladas; vencida = fecha de compromiso anterior a hoy en Chile; por vencer = hoy a +3 días) y enlazan a `/ot?semaforo=vencida|por_vencer`. Detalle en `docs/FLUJO_FIRMA_CIERRE.md`.
 
 ---

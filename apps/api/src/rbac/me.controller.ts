@@ -79,6 +79,6 @@ export class MeController {
   @Get("bandeja")
   async miBandeja(@Req() req: any) {
     const ctx = await this.alcance.paraRequest(req);
-    return this.bandeja.construir(ctx, ctx.perfil, req.user?.tenantId);
+    return this.bandeja.construir(ctx, ctx.perfil, req.user?.tenantId, req.user?.permisos ?? [], req.user?.roles ?? []);
   }
 }
