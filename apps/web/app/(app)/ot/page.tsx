@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { fecha } from "@/lib/format";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { ORIGEN_LABEL } from "../cotizaciones/_components/comercial";
+import SemaforoPlazo from "@/components/documentos/SemaforoPlazo";
+import { SEMAFORO, semaforoDe } from "@/lib/documentos";
 
 /**
  * Origen de la OT (Comercial R2) + marcas «OPI pendiente» y «Sin cobro».
@@ -60,11 +62,19 @@ export default function OtPage() {
   const [rows, setRows] = useState<any[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  // Frente B · filtros de plazo que llegan desde Mi bandeja (?semaforo=vencida|por_vencer,
+  // ?listasCierre=1, &unidad=COD): se sirven desde GET /ot/plazos (mismos cortes que la bandeja).
+  const [filtroPlazo, setFiltroPlazo] = useState("");
 
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API}/ot`, {
+        const q = new URLSearchParams(window.location.search);
+        const fp = new URLSearchParams();
+        for (const k of ["semaforo", "listasCierre", "unidad"]) if (q.get(k)) fp.set(k, q.get(k)!);
+        const filtro = fp.toString();
+        setFiltroPlazo(filtro);
+        const res = await fetch(filtro ? `${API}/ot/plazos?${filtro}` : `${API}/ot`, {
           headers: { Authorization: `Bearer ${localStorage.getItem("lims_token")}` },
         });
         if (!res.ok) throw new Error(`Error ${res.status}`);
@@ -93,7 +103,21 @@ export default function OtPage() {
     { key: "estado", label: "Estado", value: (r) => r.estado ?? "", render: (r) => estadoBadge(r.estado) },
     { key: "origen", label: "Origen", value: (r) => `${r.origenTrabajo ?? ""} ${r.opiPendiente ? "OPI pendiente" : ""} ${r.conCobro === false ? "Sin cobro" : ""}`, render: (r) => origenBadges(r) },
     { key: "flujo", label: "Flujo", sortable: false, filter: false, value: (r) => r.flujo?.estado ?? "", render: (r) => flujoBadge(r.flujo) },
+    {
+      key: "plazo", label: "Plazo",
+      value: (r) => SEMAFORO[semaforoDe(r.fechaCompromiso, r.estado).semaforo]?.texto ?? "",
+      render: (r) => <SemaforoPlazo fechaCompromiso={r.fechaCompromiso} estado={r.estado} />,
+    },
   ];
+  const textoFiltro = (() => {
+    const q = new URLSearchParams(filtroPlazo);
+    const partes = [
+      q.get("semaforo") ? ({ vencida: "OT vencidas", por_vencer: "OT por vencer", en_plazo: "OT en plazo", sin_fecha: "OT sin fecha de compromiso" } as Record<string, string>)[q.get("semaforo")!] ?? "" : "",
+      q.get("listasCierre") ? "OT listas para cerrar" : "",
+      q.get("unidad") ? `laboratorio ${q.get("unidad")}` : "",
+    ].filter(Boolean);
+    return partes.join(" · ");
+  })();
 
   return (
     <div>
@@ -102,6 +126,11 @@ export default function OtPage() {
         Expediente por OT: recepción de muestras → análisis → resultados → informe/certificado. Núcleo del LIMS.
       </p>
       {error && <div className="alert warn">{error}</div>}
+      {filtroPlazo && (
+        <div className="alert info">
+          Mostrando: <b>{textoFiltro}</b> ({rows.length}) · <a href="/ot" style={{ color: "var(--accent)" }}>Quitar filtro</a>
+        </div>
+      )}
 
       <DataTable
         columns={columns}
