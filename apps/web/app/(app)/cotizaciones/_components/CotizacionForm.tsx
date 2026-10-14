@@ -70,6 +70,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
   const [referencia, setReferencia] = useState<string>(inicial?.referencia ?? "");
   const [descripcionTecnica, setDescripcionTecnica] = useState<string>(inicial?.descripcionTecnica ?? "");
   const [condiciones, setCondiciones] = useState<string>(inicial?.condicionesAdicionales ?? "");
+  // Plazo de entrega comprometido (días corridos desde la recepción): fija la fecha de compromiso de la OT.
+  const [plazoDias, setPlazoDias] = useState<string>(inicial?.plazoEntregaDias != null ? String(inicial.plazoEntregaDias) : "");
   const [obsInternas, setObsInternas] = useState<string>(inicial?.observacionesInternas ?? "");
 
   // Líneas
@@ -206,6 +208,9 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
     if (moneda === "USD" && !(dolarNum > 0)) return setError("Indique el valor del dólar del día.");
     if (cambiaDolar && !dolarMotivo.trim()) return setError("El dólar quedó congelado al emitir: indique el motivo del cambio.");
     if (condiciones.length > MAX_COND) return setError(`Condiciones adicionales: máximo ${MAX_COND} caracteres.`);
+    const plazo = plazoDias.trim() ? Number(plazoDias) : null;
+    if (plazo !== null && !(Number.isInteger(plazo) && plazo >= 1 && plazo <= 730))
+      return setError("Plazo de entrega: indique un número entero de días entre 1 y 730.");
 
     const body: any = {
       centroCostoId: centroCostoId || null,
@@ -219,6 +224,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
       referencia: referencia.trim() || null,
       descripcionTecnica: descripcionTecnica.trim() || null,
       condicionesAdicionales: condiciones.trim() || null,
+      plazoEntregaDias: plazo,
       observacionesInternas: obsInternas.trim() || null,
       lineas: lineas.map((l) =>
         l.heredada
@@ -439,6 +445,11 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
             <small style={{ textAlign: "right", color: condiciones.length >= MAX_COND ? "var(--red)" : "var(--muted)" }}>
               {condiciones.length} / {MAX_COND}
             </small>
+          </div>
+          <div className="field">
+            <label>Plazo de entrega (días corridos)</label>
+            <input type="number" min={1} max={730} step={1} value={plazoDias} onChange={(e) => setPlazoDias(e.target.value)} />
+            <small style={{ color: "var(--muted)" }}>Desde la recepción de las muestras. Fija la fecha de compromiso de la OT; si lo deja vacío, la fija Planificación.</small>
           </div>
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <label>Observaciones internas <small style={{ color: "var(--muted)" }}>(uso interno de Comercial · NO se imprimen)</small></label>
