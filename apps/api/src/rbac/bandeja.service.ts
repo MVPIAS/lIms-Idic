@@ -105,8 +105,11 @@ export class BandejaService {
         ),
       cotizacionesPorVencer: () =>
         this.contar(
+          // Abiertas (y 'enviada' del histórico) que vencen entre hoy y 7 días (fecha de Chile).
           `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id)
-              AND c.estado IN ('borrador','enviada') AND c.expira_at BETWEEN now() AND now() + interval '7 days'`,
+              AND c.estado IN ('abierta','enviada')
+              AND COALESCE(c.valida_hasta, c.expira_at) BETWEEN (now() AT TIME ZONE 'America/Santiago')::date
+                                                            AND (now() AT TIME ZONE 'America/Santiago')::date + 7`,
           tenant,
         ),
       cotizacionesSinOt: () =>
@@ -137,9 +140,12 @@ export class BandejaService {
         ),
       ncAbiertas: () =>
         this.contar(
+          // Acotadas al alcance: una NC sin unidad (transversal) la ven todos los que ven NC.
           `SELECT count(*) AS n FROM no_conformidad nc WHERE nc.tenant_id = COALESCE($1::uuid, nc.tenant_id)
-              AND nc.estado IN ('abierta','en_proceso','verificacion','reabierta')`,
+              AND nc.estado IN ('abierta','en_proceso','verificacion','reabierta')
+              AND ($2::uuid[] IS NULL OR nc.unidad_id IS NULL OR nc.unidad_id = ANY($2::uuid[]))`,
           tenant,
+          unidades,
         ),
       usuariosSinRol: () =>
         this.contar(
@@ -208,7 +214,7 @@ export class BandejaService {
     const sinOt = async () =>
       item("cotizaciones_aceptadas_sin_ot", "Cotizaciones aceptadas sin OT", "Cotizaciones aceptadas a las que aún no se les creó OT", await q.cotizacionesSinOt(), "/cotizaciones?estado=aceptada&sinOt=1", "warn");
     const nc = async () =>
-      item("nc_abiertas", "No conformidades abiertas", "NC abiertas, en proceso o en verificación", await q.ncAbiertas(), "/qc", "warn");
+      item("nc_abiertas", "No conformidades abiertas", "NC abiertas, en proceso o en verificación", await q.ncAbiertas(), "/no-conformidades", "warn");
 
     const all = (fs: (() => Promise<ItemBandeja | ItemBandeja[]>)[]) =>
       Promise.all(fs.map((f) => f())).then((r) => r.flat());
@@ -238,7 +244,7 @@ export class BandejaService {
         return all([firmas, porOficializar, vencidas, vencidasPorLab, abiertas, nc, sinOt]);
       case "COMERCIAL":
         return all([
-          async () => item("cotizaciones_por_vencer", "Cotizaciones por vencer", "Cotizaciones abiertas que expiran en 7 días", await q.cotizacionesPorVencer(), "/cotizaciones?porVencer=1", "warn"),
+          async () => item("cotizaciones_por_vencer", "Cotizaciones por vencer", "Cotizaciones abiertas que vencen en los próximos 7 días", await q.cotizacionesPorVencer(), "/cotizaciones?porVencer=1", "warn"),
           sinOt,
           porVencer,
         ]);

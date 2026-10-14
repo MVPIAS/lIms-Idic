@@ -6,6 +6,8 @@ import { z } from "zod";
 
 import { AuthService } from "./auth.service";
 import { Public } from "./public.decorator";
+import { PermiteCambioClavePendiente } from "./cambio-clave.decorator";
+import { CLAVE_MAX } from "./clave";
 
 const LoginSchema = z.object({
   username: z.string().min(1).max(80),
@@ -16,6 +18,13 @@ const LoginSchema = z.object({
 
 // Código TOTP de 6 dígitos (se admite hasta 8 por si el issuer usa longitudes
 // distintas). Se acepta string para no perder ceros a la izquierda.
+// Cambio de contraseña por el propio usuario. Las reglas de la nueva (largo,
+// letra + número, distinta, sin el usuario) las aplica el servicio (auth/clave.ts).
+const CambiarPasswordSchema = z.object({
+  actual: z.string().min(1, "Indique su contraseña actual.").max(CLAVE_MAX),
+  nueva: z.string().min(1, "Indique la nueva contraseña.").max(CLAVE_MAX),
+});
+
 const CodigoSchema = z.object({
   codigo: z.string().min(6).max(8),
 });
@@ -73,6 +82,7 @@ export class AuthController {
    * Devuelve el usuario autenticado.
    */
   @Get("me")
+  @PermiteCambioClavePendiente()
   @UseGuards(AuthGuard("jwt"))
   @ApiBearerAuth()
   async me(@Req() req: any) {
@@ -84,10 +94,28 @@ export class AuthController {
    * Invalida el refresh token.
    */
   @Post("logout")
+  @PermiteCambioClavePendiente()
   @UseGuards(AuthGuard("jwt"))
   @ApiBearerAuth()
   async logout(@Req() req: any) {
     return this.auth.logout(req.user.sub);
+  }
+
+  /**
+   * POST /api/auth/cambiar-password  { actual, nueva }
+   * Cambio de contraseña del usuario autenticado (Mi perfil, y obligatorio en el
+   * primer ingreso o tras un restablecimiento). Devuelve una sesión nueva
+   * (accessToken + refreshToken) sin la marca de cambio pendiente.
+   */
+  @Post("cambiar-password")
+  @PermiteCambioClavePendiente()
+  @UseGuards(AuthGuard("jwt"))
+  @ApiBearerAuth()
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  @ApiBody({ schema: { example: { actual: "Temporal123456", nueva: "NuevaClave2026" } } })
+  async cambiarPassword(@Req() req: any, @Body() body: unknown) {
+    const { actual, nueva } = CambiarPasswordSchema.parse(body);
+    return this.auth.cambiarPassword(req.user.sub, actual, nueva);
   }
 
   // ─── 2FA · TOTP ───────────────────────────────────────────────────────────

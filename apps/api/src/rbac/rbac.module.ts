@@ -9,6 +9,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { UnidadesController } from "./unidades.controller";
 import { UsuariosController } from "./usuarios.controller";
+import { PersonasController } from "./usuarios-personas.controller";
 import { RolesController } from "./roles.controller";
 import { FirmasMatrizController, FirmasMatrizService } from "./firmas-matriz.controller";
 import { MeController } from "./me.controller";
@@ -133,6 +134,7 @@ export class FirmaController extends BaseCrudController {
     PermisoController,
     FirmaController,
     UsuariosController,
+    PersonasController,
     RolesController,
     UnidadesController,
     FirmasMatrizController,

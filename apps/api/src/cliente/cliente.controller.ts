@@ -10,20 +10,34 @@ import { validaRut } from "../common/rut.validator";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 
+/** Texto opcional: "" (campo vacío del formulario) se trata como «no informado». */
+const opcional = (max?: number) =>
+  z.preprocess((v) => (v === "" ? undefined : v), (max ? z.string().max(max) : z.string()).optional());
+
+/**
+ * `tipo` es un código de la lista parametrizable `parametro_sistema` /
+ * tipo_cliente (Ley 17.798, Ejército, …). Aquí solo se valida la forma; que sea
+ * un valor vigente lo comprueba el servicio contra la lista (tipo-cliente.ts).
+ */
 const CrearClienteSchema = z.object({
   rut: z.string().refine((r) => validaRut(r), {
     message: "RUT chileno inválido (no pasa módulo 11)",
   }),
-  razonSocial: z.string().min(1).max(200),
-  nombreFantasia: z.string().max(200).optional(),
-  giro: z.string().max(200).optional(),
-  tipo: z.enum(["institucional", "externo", "gubernamental", "laboratorio_asociado"]),
-  direccion: z.string().optional(),
-  ciudad: z.string().max(80).optional(),
-  region: z.string().max(80).optional(),
-  telefono: z.string().max(40).optional(),
-  email: z.string().email().optional(),
+  razonSocial: z.string().trim().min(1, "Indique la razón social.").max(200),
+  nombreFantasia: opcional(200),
+  giro: opcional(200),
+  tipo: z.string({ required_error: "Indique el tipo de cliente." }).trim().min(1, "Indique el tipo de cliente.").max(30),
+  direccion: opcional(),
+  ciudad: opcional(80),
+  region: opcional(80),
+  telefono: opcional(40),
+  email: z.preprocess((v) => (v === "" ? undefined : v), z.string().email("Correo no válido").optional()),
   diasCredito: z.number().int().positive().default(30),
+});
+const TipoSchema = z.object({ tipo: CrearClienteSchema.shape.tipo });
+const ActualizarClienteSchema = CrearClienteSchema.partial().extend({
+  // En la edición diasCredito no debe volver al valor por defecto si no viene.
+  diasCredito: z.number().int().positive().optional(),
 });
 
 @ApiTags("clientes")
@@ -67,8 +81,21 @@ export class ClienteController {
   @Patch(":id")
   @RequierePermiso("cliente.editar")
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    const data = CrearClienteSchema.partial().parse(body);
+    const data = ActualizarClienteSchema.parse(body);
     return this.svc.actualizar(id, data, req?.user?.tenantId);
+  }
+
+  /**
+   * Reclasificar SOLO el tipo de cliente desde la cotización (Comercial R2: si el
+   * cliente tiene un tipo antiguo, la pantalla de cotización permite corregirlo).
+   * Exige `cotizacion.crear` y no `cliente.editar`: es parte de cotizar y no da
+   * acceso al resto de la ficha. El nuevo tipo debe estar vigente.
+   */
+  @Patch(":id/tipo")
+  @RequierePermiso("cotizacion.crear")
+  async cambiarTipo(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const { tipo } = TipoSchema.parse(body ?? {});
+    return this.svc.actualizar(id, { tipo }, req?.user?.tenantId);
   }
 
   /** Bloqueo/desbloqueo comercial = modificar la ficha del cliente → cliente.editar. */

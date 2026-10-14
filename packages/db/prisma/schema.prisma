@@ -114,6 +114,9 @@ model Usuario {
   ultimoLoginIp    String?   @map("ultimo_login_ip") @db.Inet
   intentosFallidos Int       @default(0) @map("intentos_fallidos")
   tokenVersion     Int       @default(0) @map("token_version")
+  // align_comercial_usuarios.sql · cambio de contraseña obligatorio (alta / restablecimiento)
+  debeCambiarPassword Boolean @default(false) @map("debe_cambiar_password")
+  passwordCambiadaAt  DateTime? @map("password_cambiada_at") @db.Timestamptz
   grado            String?   @db.VarChar(80)
   cargo            String?   @db.VarChar(200)
   userLims         String?   @map("user_lims") @db.VarChar(50)
@@ -302,6 +305,8 @@ model Cotizacion {
   aceptadaPor            String?        @map("aceptada_por") @db.Uuid
   anulacionMotivo        String?        @map("anulacion_motivo")
   anuladaAt              DateTime?      @map("anulada_at") @db.Timestamptz
+  // align_comercial_usuarios.sql · momento en que pasó a «Vencida» (estado expirada)
+  vencidaAt              DateTime?      @map("vencida_at") @db.Timestamptz
   createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime            @default(now()) @map("updated_at") @db.Timestamptz
   createdBy         String?             @map("created_by") @db.Uuid

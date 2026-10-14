@@ -8,6 +8,7 @@ import {
 import { Reflector } from "@nestjs/core";
 import { PERMISOS_CRUD_KEY, PERMISOS_KEY, PermisosCrud } from "./permisos.decorator";
 import { PUBLIC_KEY } from "./public.decorator";
+import { CODIGO_CAMBIO_CLAVE, PERMITE_CAMBIO_CLAVE_KEY } from "./cambio-clave.decorator";
 
 /** Verbo HTTP → clave del mapa @RequierePermisoCrud. */
 const VERBO_A_ACCION: Record<string, keyof PermisosCrud> = {
@@ -42,6 +43,23 @@ export class PermisoGuard implements CanActivate {
       ctx.getClass(),
     ]);
     if (esPublica) return true;
+
+    // Contraseña temporal (alta o restablecimiento): hasta cambiarla, el usuario
+    // solo puede usar las rutas marcadas con @PermiteCambioClavePendiente.
+    const usuario = ctx.switchToHttp().getRequest()?.user;
+    if (usuario?.cambioClave) {
+      const permitida = this.reflector.getAllAndOverride<boolean>(PERMITE_CAMBIO_CLAVE_KEY, [
+        ctx.getHandler(),
+        ctx.getClass(),
+      ]);
+      if (!permitida) {
+        throw new ForbiddenException({
+          statusCode: 403,
+          codigo: CODIGO_CAMBIO_CLAVE,
+          message: "Debe cambiar su contraseña temporal antes de continuar (Mi perfil › Cambiar contraseña).",
+        });
+      }
+    }
 
     const requeridos = this.resolverRequeridos(ctx);
     if (requeridos.length === 0) return true;
