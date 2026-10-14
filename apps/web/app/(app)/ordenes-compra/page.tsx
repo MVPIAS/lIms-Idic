@@ -57,7 +57,7 @@ export default function OrdenesCompraPage() {
 
   // Edición de una OC existente: el backend solo admite estado y notas (detalle).
   const { puede } = usePermisos();
-  const puedeGestionar = puede("factura.emitir");
+  const puedeGestionar = puede("compra.gestionar");
   const [edit, setEdit] = useState<{ id: string; numero: string; estado: Estado; notas: string } | null>(null);
   const [guardandoEdit, setGuardandoEdit] = useState(false);
 

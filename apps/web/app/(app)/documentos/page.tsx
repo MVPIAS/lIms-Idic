@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fechaHora } from "@/lib/format";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import { estadoDocumento } from "@/lib/documentos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -150,10 +151,11 @@ export default function DocumentosPage() {
     {
       key: "estado",
       label: "Estado",
-      render: (d: Documento) => (
-        <span className={`pill ${d.estado === "anulado" ? "red" : "green"}`}>{d.estado ?? "emitido"}</span>
-      ),
-      value: (d: Documento) => d.estado ?? "emitido",
+      render: (d: Documento) => {
+        const e = estadoDocumento(d.estado);
+        return <span className={`pill ${e.pill}`}>{e.texto}</span>;
+      },
+      value: (d: Documento) => estadoDocumento(d.estado).texto,
     },
     {
       key: "verificacion",
@@ -181,7 +183,8 @@ export default function DocumentosPage() {
       <h1 className="page">Buscador de documentos</h1>
       <p className="subtitle">
         Búsqueda global de los documentos emitidos por el sistema (certificados e informes de las OT y
-        certificados del SAEC) por título y filtros (§4.6.1 / §4.6.2). Solo lectura.
+        certificados del SAEC) por título y filtros (§4.6.1 / §4.6.2). Solo lectura. Se muestran los
+        documentos de los laboratorios de su alcance. Solo un documento «Oficial» tiene validez.
       </p>
 
       <div className="card" style={{ marginBottom: 12 }}>

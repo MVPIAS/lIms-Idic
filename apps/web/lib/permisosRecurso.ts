@@ -32,14 +32,14 @@ export const PERMISOS_RECURSO: Record<string, PermisosCrud> = {
   // Comercial / facturación
   clientes: { ver: "cliente.ver", crear: "cliente.crear", editar: "cliente.editar", eliminar: "cliente.editar" },
   contactos: todos("cliente.ver", "cliente.editar"),
-  proveedores: todos("factura.ver", "factura.emitir"),
+  proveedores: todos("compra.ver", "compra.gestionar"),
   "centros-costo": todos("factura.ver", "catalogo.gestionar"),
   "listas-precio": todos("cotizacion.ver", "catalogo.gestionar"),
   "lista-precio-items": todos("cotizacion.ver", "catalogo.gestionar"),
   facturas: { ver: "factura.ver", crear: "factura.emitir", editar: "factura.cobrar", eliminar: "factura.emitir" },
   pagos: todos("factura.ver", "factura.cobrar"),
   "notas-credito": todos("factura.ver", "factura.emitir"),
-  "ordenes-compra": todos("factura.ver", "factura.emitir"),
+  "ordenes-compra": todos("compra.ver", "compra.gestionar"),
   viaticos: todos("factura.ver", "factura.emitir"),
   oportunidades: todos("cotizacion.ver", "cotizacion.crear"),
   "solicitud-costeo": todos("cotizacion.ver", "cotizacion.crear"),
@@ -56,7 +56,7 @@ export const PERMISOS_RECURSO: Record<string, PermisosCrud> = {
   plantillas: todos("plantilla.ver", "plantilla.gestionar"),
   certificados: { ver: "ot.ver", crear: "certificado.emitir", editar: "certificado.emitir", eliminar: "certificado.firmar" },
   resultados: { ver: "resultado.ver", crear: "resultado.crear", editar: "resultado.revisar", eliminar: "resultado.aprobar" },
-  consumibles: todos("catalogo.gestionar", "catalogo.gestionar"),
+  consumibles: todos("consumible.gestionar", "consumible.gestionar"),
   "formatos-informe": CATALOGO,
 
   // Catálogo v2

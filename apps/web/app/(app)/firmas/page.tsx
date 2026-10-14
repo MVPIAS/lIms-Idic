@@ -8,7 +8,9 @@
  *    en la base de datos; al firmar un documento se congela una copia, así que
  *    cambiarla después no altera los documentos ya firmados.
  *  · «Firmas registradas»: listado para quien tiene `firma.registrar`; cargar la
- *    imagen de OTRO usuario exige `admin.usuarios`.
+ *    imagen de OTRO usuario exige `admin.usuarios`, y se puede hacer para
+ *    cualquier usuario activo (tenga o no firma registrada) con «Cargar la firma
+ *    de otro usuario».
  *
  * Distinto de la «Matriz de firmas» (/admin/firmas), que define QUIÉN debe
  * firmar cada tipo de documento.
@@ -131,11 +133,80 @@ function MiFirma() {
   );
 }
 
+/**
+ * Cargar la firma de cualquier usuario ACTIVO (admin.usuarios): elegir a la
+ * persona y la imagen. Antes solo se podía desde la fila de quien ya tenía firma.
+ */
+function FirmaDeOtroUsuario({ onCargada }: { onCargada: () => void }) {
+  const [usuarios, setUsuarios] = useState<any[]>([]);
+  const [usuarioId, setUsuarioId] = useState("");
+  const [filtro, setFiltro] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    api.getRaw<any>("usuarios?activo=true")
+      .then((r: any) => setUsuarios((Array.isArray(r) ? r : r?.data ?? []).filter((u: any) => u.activo !== false)))
+      .catch(() => setUsuarios([]));
+  }, []);
+
+  const visibles = usuarios.filter((u) => {
+    const t = filtro.trim().toLowerCase();
+    return !t || `${u.username} ${u.nombre ?? u.nombreCompleto ?? ""}`.toLowerCase().includes(t);
+  });
+
+  async function subir(f?: File | null) {
+    if (!f || !usuarioId) return;
+    setOcupado(true);
+    try {
+      await put(`/mi-firma/usuario/${usuarioId}`, { imagen: await leerImagen(f) });
+      const u = usuarios.find((x) => x.id === usuarioId);
+      toast.ok(`Firma de ${u?.nombre ?? u?.username ?? "la persona"} registrada.`);
+      setUsuarioId("");
+      onCargada();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(false);
+      if (input.current) input.current.value = "";
+    }
+  }
+
+  return (
+    <div className="card">
+      <h2>Cargar la firma de otro usuario</h2>
+      <p style={{ marginTop: 0, fontSize: 12.5 }}>
+        Para cualquier usuario activo, tenga o no una firma registrada. La imagen (PNG o JPEG, máximo {MAX_KB} KB) reemplaza
+        la que tuviera; los documentos ya firmados conservan su copia.
+      </p>
+      <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div className="field" style={{ minWidth: 200 }}>
+          <label>Buscar</label>
+          <input value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Usuario o nombre" />
+        </div>
+        <div className="field" style={{ minWidth: 280 }}>
+          <label>Usuario activo <span className="req">*</span></label>
+          <select value={usuarioId} onChange={(e) => setUsuarioId(e.target.value)}>
+            <option value="">— Elija a la persona ({visibles.length}) —</option>
+            {visibles.map((u) => <option key={u.id} value={u.id}>{etiquetaUsuario({ username: u.username, nombreCompleto: u.nombre ?? u.nombreCompleto })}</option>)}
+          </select>
+        </div>
+        <input ref={input} type="file" accept="image/png,image/jpeg" style={{ display: "none" }} onChange={(e) => subir(e.target.files?.[0])} />
+        <button className="btn primary" disabled={!usuarioId || ocupado} onClick={() => input.current?.click()}>
+          {ocupado ? "Cargando…" : "Elegir imagen y cargar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function FirmasPage() {
   const { puede, listo } = usePermisos();
   const [usuarios, setUsuarios] = useState<Record<string, any>>({});
   const inputOtro = useRef<HTMLInputElement>(null);
   const [destino, setDestino] = useState<{ id: string; recargar: () => void } | null>(null);
+  // Cambia al cargar la firma de otro usuario: vuelve a montar la tabla para que aparezca.
+  const [version, setVersion] = useState(0);
 
   // Nombre legible del usuario (la tabla firma solo guarda su id). Sale de
   // /personas (sin datos sensibles, acotado al alcance), no de /usuarios, que
@@ -174,14 +245,16 @@ export default function FirmasPage() {
         migas={[{ label: "Administración" }, { label: "Firmas" }]}
       />
       <MiFirma />
+      {listo && puede("admin.usuarios") && <FirmaDeOtroUsuario onCargada={() => setVersion((v) => v + 1)} />}
 
       {listo && puede("firma.registrar") && (
         <>
           <input ref={inputOtro} type="file" accept="image/png,image/jpeg" style={{ display: "none" }} onChange={(e) => subirOtro(e.target.files?.[0])} />
           <CrudTable
+            key={version}
             recurso="firmas"
             titulo="Firmas registradas"
-            subtitulo={`Firma de cada usuario y su huella digital (SHA-256). ${puede("admin.usuarios") ? "Puede cargar la imagen de otro usuario con «Cargar imagen»." : ""}`}
+            subtitulo={`Firma de cada usuario y su huella digital (SHA-256). ${puede("admin.usuarios") ? "Para un usuario que aún no figura aquí, use «Cargar la firma de otro usuario»." : ""}`}
             permitirCrear={false}
             permitirEditar={false}
             columnas={[

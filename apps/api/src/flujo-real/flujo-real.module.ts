@@ -33,6 +33,7 @@ import { traducirFormula } from "../laboratorio/formula-legado";
 import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
 import { calcularCaptura, CapturaError } from "../laboratorio/captura-estandar";
 import { veredictoNumerico } from "../laboratorio/veredicto";
+import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
 
 /**
  * =============================================================================
@@ -1029,6 +1030,188 @@ export class PuenteResultadoController {
   }
 }
 
+/* ============================ REGISTRO DE MUESTRAS DESDE EL EXPEDIENTE ============================ */
+
+/**
+ * Cuerpo de POST /flujo/ot/:id/muestras: las muestras recibidas y los métodos
+ * (cat_metodo) que se les aplican. Cada muestra puede llevar sus métodos.
+ */
+const RegistrarMuestrasBody = z.object({
+  muestras: z
+    .array(
+      z.object({
+        nombre: z.string().trim().max(200),
+        metodoIds: z.array(z.string().uuid()).max(200),
+        catElementoId: z.string().uuid().optional(),
+      }),
+    )
+    .min(1, "Indique al menos una muestra.")
+    .max(50, "Registre como máximo 50 muestras de una vez."),
+});
+
+/**
+ * Registro de las muestras recibidas de una OT ya creada (p. ej. la que nace
+ * al aceptar una cotización) con sus ensayos por analizar. Lo hace quien
+ * registra muestras (`muestra.crear`: Recepción, Planificación, jefaturas…)
+ * desde el expediente de la OT. Reglas: registro-muestras.ts.
+ */
+@Injectable()
+export class RegistroMuestrasService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly alcance: AlcanceService,
+    private readonly puente: PuenteAnalisisService,
+  ) {}
+
+  private async otEnAlcance(otId: string, tenantId: string, req: any) {
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    return ot;
+  }
+
+  /** Métodos del catálogo con su nº de analitos activos. */
+  private async metodos(tenantId: string, where: { ids?: string[]; ensayoIds?: string[] }): Promise<MetodoCatalogo[]> {
+    if (!where.ids?.length && !where.ensayoIds?.length) return [];
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT m.id, m.codigo, m.nombre, m.norma, m.ensayo_id AS "ensayoId",
+              (SELECT count(*) FROM cat_analito a WHERE a.metodo_id = m.id AND a.deleted_at IS NULL AND a.activo)::int AS analitos
+         FROM cat_metodo m
+        WHERE m.tenant_id = $1::uuid AND m.deleted_at IS NULL AND m.activo
+          AND (m.id = ANY($2::uuid[]) OR m.ensayo_id = ANY($3::uuid[]))
+        ORDER BY m.codigo`,
+      tenantId,
+      where.ids ?? [],
+      where.ensayoIds ?? [],
+    );
+    return filas.map((f) => ({ ...f, analitos: Number(f.analitos) }));
+  }
+
+  /**
+   * Lo que necesita la pantalla: la OT, sus muestras (con cuántos ensayos
+   * tiene cada una) y la propuesta de métodos desde la cotización aceptada.
+   */
+  async propuesta(otId: string, tenantId: string, req: any) {
+    const ot = await this.otEnAlcance(otId, tenantId, req);
+    const muestras = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT m.id, m.codigo, m.nombre, m.estado, m.veredicto,
+              (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL)::int AS ensayos,
+              COALESCE((SELECT array_agg(DISTINCT cm.codigo) FROM resultado r JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
+                         WHERE r.muestra_id = m.id AND r.deleted_at IS NULL), '{}') AS metodos
+         FROM muestra m
+        WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL
+        ORDER BY m.created_at, m.codigo`,
+      otId,
+    );
+    const cot = ot.cotizacionId
+      ? await this.prisma.cotizacion.findFirst({
+          where: { id: ot.cotizacionId, tenantId },
+          select: { id: true, codigo: true, estado: true, referencia: true, lineas: { orderBy: { orden: "asc" } } },
+        })
+      : null;
+    const lineas = cot?.lineas ?? [];
+    const ensayoIds = [...new Set(lineas.map((l) => l.catEnsayoId).filter((x): x is string => !!x))];
+    const ensayos = ensayoIds.length
+      ? await this.prisma.catEnsayo.findMany({ where: { id: { in: ensayoIds } }, select: { id: true, nombre: true } })
+      : [];
+    const nombreEnsayo = new Map(ensayos.map((e) => [e.id, e.nombre]));
+    const metodos = await this.metodos(tenantId, { ensayoIds });
+    const porEnsayo = new Map<string, MetodoCatalogo[]>();
+    for (const m of metodos) if (m.ensayoId) (porEnsayo.get(m.ensayoId) ?? porEnsayo.set(m.ensayoId, []).get(m.ensayoId)!).push(m);
+    return {
+      ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal, clienteId: ot.clienteId },
+      cotizacion: cot ? { id: cot.id, codigo: cot.codigo, estado: cot.estado, referencia: cot.referencia } : null,
+      muestras: muestras.map((m) => ({ ...m, ensayos: Number(m.ensayos) })),
+      lineas: proponerDesdeCotizacion(
+        lineas.map((l) => ({
+          id: l.id,
+          descripcion: l.descripcion,
+          cantidad: l.cantidad,
+          catEnsayoId: l.catEnsayoId,
+          ensayoCodigo: l.ensayoCodigo,
+          ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
+        })),
+        porEnsayo,
+      ),
+    };
+  }
+
+  /** Crea las muestras y genera sus ensayos por analizar (puente catálogo → resultado). */
+  async registrar(otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any) {
+    const ot = await this.otEnAlcance(otId, tenantId, req);
+    const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
+    const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
+    const errores = erroresRegistro(ot.estado, body.muestras, catalogo);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+
+    const existentes = await this.prisma.muestra.findMany({
+      where: { tenantId, codigo: { startsWith: ot.codigo } },
+      select: { codigo: true },
+    });
+    const codigos = siguientesCodigos(ot.codigo, existentes.map((e) => e.codigo), body.muestras.length);
+
+    const creadas: { id: string; codigo: string; nombre: string; ensayos: number; metodos: string[] }[] = [];
+    for (let i = 0; i < body.muestras.length; i++) {
+      const m = body.muestras[i];
+      const muestra = await this.prisma.muestra.create({
+        data: {
+          tenantId,
+          otId,
+          codigo: codigos[i],
+          nombre: m.nombre.trim(),
+          clienteId: ot.clienteId,
+          estado: "recibida",
+          catElementoId: m.catElementoId ?? ot.catElementoId ?? null,
+        },
+      });
+      const g = await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req);
+      creadas.push({
+        id: muestra.id,
+        codigo: muestra.codigo,
+        nombre: muestra.nombre ?? "",
+        ensayos: g.creados,
+        metodos: m.metodoIds.map((id) => catalogo.get(id)?.codigo ?? id),
+      });
+    }
+
+    // La OT recibe sus muestras: si aún no tenía fecha de recepción, es hoy.
+    if (!ot.fechaRecepcion)
+      await this.prisma.ordenTrabajo.update({ where: { id: otId }, data: { fechaRecepcion: new Date() } });
+
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
+       VALUES ($1::uuid, $2::uuid, 'registro_muestras', $3::jsonb, $4::uuid)`,
+      tenantId,
+      otId,
+      JSON.stringify({ muestras: creadas.map((c) => ({ codigo: c.codigo, nombre: c.nombre, ensayos: c.ensayos, metodos: c.metodos })) }),
+      req?.user?.sub ?? null,
+    );
+    return { otId, muestras: creadas, ensayos: creadas.reduce((s, c) => s + c.ensayos, 0) };
+  }
+}
+
+@ApiTags("flujo-puente")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@Controller("flujo/ot")
+export class RegistroMuestrasController {
+  constructor(private readonly svc: RegistroMuestrasService) {}
+
+  @Get(":id/registro-muestras")
+  @RequierePermiso("muestra.ver")
+  @ApiOperation({ summary: "Muestras de la OT y métodos propuestos desde la cotización aceptada" })
+  propuesta(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.propuesta(id, tenantDe(req), req);
+  }
+
+  @Post(":id/muestras")
+  @RequierePermiso("muestra.crear")
+  @ApiOperation({ summary: "Registra las muestras recibidas de la OT y genera sus ensayos por analizar" })
+  registrar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.registrar(id, RegistrarMuestrasBody.parse(body ?? {}), tenantDe(req), req);
+  }
+}
+
 /* ============================ MÓDULO ============================ */
 
 @Module({
@@ -1042,6 +1225,7 @@ export class PuenteResultadoController {
     CosteoController,
     PuenteOtController,
     PuenteResultadoController,
+    RegistroMuestrasController,
   ],
   providers: [
     SolicitudCosteoService,
@@ -1050,6 +1234,7 @@ export class PuenteResultadoController {
     FlujoOtService,
     CosteoService,
     PuenteAnalisisService,
+    RegistroMuestrasService,
   ],
 })
 export class FlujoRealModule {}

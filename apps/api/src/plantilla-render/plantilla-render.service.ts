@@ -21,7 +21,7 @@ import {
   faltantesParaEmitir,
   numeroVersion,
   pasosDesdeMatriz,
-  tipoDocumentoDePlantilla,
+  tipoDocumentoPorDefecto,
   type PasoNuevo,
 } from "./reglas-emision";
 
@@ -360,6 +360,29 @@ export class PlantillaRenderService {
    *   5. que no haya ya un documento vigente (en firma u oficial) de la misma plantilla.
    * Devuelve la lista de lo que falta (vacía = se puede emitir) y los pasos de firma.
    */
+  /**
+   * Tipo de documento por defecto de la unidad (`unidad.tipo_documento_defecto`),
+   * el de la propia unidad o el del ancestro más cercano que lo tenga.
+   */
+  private async tipoDocumentoDeUnidad(unidadId: string | null): Promise<{ tipo: string; unidadCodigo: string } | null> {
+    if (!unidadId) return null;
+    try {
+      const filas = await this.prisma.$queryRawUnsafe<{ tipo: string; codigo: string }[]>(
+        `WITH RECURSIVE cadena AS (
+           SELECT id, padre_id, codigo, tipo_documento_defecto, 0 AS nivel FROM unidad WHERE id = $1::uuid
+           UNION ALL
+           SELECT u.id, u.padre_id, u.codigo, u.tipo_documento_defecto, c.nivel + 1
+             FROM unidad u JOIN cadena c ON u.id = c.padre_id WHERE c.nivel < 20)
+         SELECT tipo_documento_defecto AS tipo, codigo FROM cadena
+          WHERE tipo_documento_defecto IS NOT NULL ORDER BY nivel LIMIT 1`,
+        unidadId,
+      );
+      return filas[0] ? { tipo: filas[0].tipo, unidadCodigo: filas[0].codigo } : null;
+    } catch {
+      return null; // BD sin align_correcciones_manuales.sql: se usa el de la plantilla
+    }
+  }
+
   async condicionesEmision(otId: string, plantillaId: string, tenantId: string | undefined, opts: OpcionesEmision = {}) {
     const ot = await this.prisma.ordenTrabajo.findFirst({
       where: { id: otId, ...(tenantId ? { tenantId } : {}) },
@@ -374,7 +397,14 @@ export class PlantillaRenderService {
 
     if (opts.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(opts.tipoDocumento))
       throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
-    const tipoDocumento = opts.tipoDocumento ?? tipoDocumentoDePlantilla(plantilla.tipo);
+    // Tipo de documento: el indicado, el propio de la plantilla o el de la unidad
+    // de la OT (heredado por la rama: BPCH, sucursales y D11 → informe de inspección).
+    const deUnidad = await this.tipoDocumentoDeUnidad(ot.unidadPrincipal);
+    const { tipo: tipoDocumento, origen: tipoDocumentoOrigen } = tipoDocumentoPorDefecto({
+      indicado: opts.tipoDocumento,
+      tipoPlantilla: plantilla.tipo,
+      tipoUnidad: deUnidad?.tipo ?? null,
+    });
     const faltantes: string[] = [];
 
     if (ot.estado === "anulada" || ot.estado === "cerrada")
@@ -437,6 +467,8 @@ export class PlantillaRenderService {
       puedeEmitir: faltantes.length === 0,
       faltantes,
       tipoDocumento,
+      tipoDocumentoOrigen,
+      tipoDocumentoUnidad: tipoDocumentoOrigen === "unidad" ? deUnidad?.unidadCodigo ?? null : null,
       ot: { id: ot.id, codigo: ot.codigo, unidadId: ot.unidadPrincipal },
       plantilla,
       resultados: { total: resultados.length, aprobados: resultados.filter((r) => r.estado === "aprobado").length },

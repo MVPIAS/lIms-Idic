@@ -2,6 +2,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
 import { ContextoAlcance } from "./alcance.service";
 import { Perfil } from "./rbac.constants";
+import { MAX_INTENTOS_FALLIDOS } from "../auth/bloqueo";
 
 export type Severidad = "info" | "warn" | "alta";
 
@@ -36,7 +37,7 @@ const PERMISO_DE_RUTA: [string, string][] = [
   ["/ot", "ot.ver"],
   ["/cotizaciones", "cotizacion.ver"],
   ["/facturas", "factura.ver"],
-  ["/ordenes-compra", "factura.ver"],
+  ["/ordenes-compra", "compra.ver"],
   ["/no-conformidades", "nc.ver"],
   ["/admin", "admin.usuarios"],
 ];
@@ -192,10 +193,15 @@ export class BandejaService {
               AND f.estado = 'pendiente'`,
           tenant,
         ),
-      boletinesEnRevision: () =>
+      // Documentos del circuito de firma que aún no son oficiales, en el ámbito
+      // del usuario (mismo alcance que GET /informes/documentos: la unidad del
+      // documento o, si no la tiene, la de su OT). Antes contaba registros del
+      // módulo antiguo de boletines, que el circuito nuevo ya no usa.
+      documentosEnFirma: () =>
         this.contar(
-          `SELECT count(*) AS n FROM boletin_analisis b JOIN orden_trabajo o ON o.id = b.ot_id
-            WHERE b.estado = 'en_revision' AND ${otScope}`,
+          `SELECT count(*) AS n FROM certificado c JOIN orden_trabajo o ON o.id = c.ot_id
+            WHERE c.estado = 'en_firma' AND c.deleted_at IS NULL AND c.tenant_id = COALESCE($1::uuid, c.tenant_id)
+              AND ($2::uuid[] IS NULL OR c.unidad_id = ANY($2::uuid[]) OR (c.unidad_id IS NULL AND o.unidad_principal = ANY($2::uuid[])))`,
           tenant,
           unidades,
         ),
@@ -253,8 +259,11 @@ export class BandejaService {
         ),
       usuariosBloqueados: () =>
         this.contar(
-          `SELECT count(*) AS n FROM usuario u WHERE u.tenant_id = COALESCE($1::uuid, u.tenant_id) AND u.deleted_at IS NULL AND u.estado = 'bloqueado'`,
+          // Bloqueadas por el administrador o por intentos fallidos (auth/bloqueo.ts).
+          `SELECT count(*) AS n FROM usuario u WHERE u.tenant_id = COALESCE($1::uuid, u.tenant_id) AND u.deleted_at IS NULL
+              AND (u.estado = 'bloqueado' OR u.intentos_fallidos >= $2::int)`,
           tenant,
+          MAX_INTENTOS_FALLIDOS,
         ),
       unidadesSinJefe: () =>
         this.contar(
@@ -319,7 +328,7 @@ export class BandejaService {
     const sinAsignar = async () =>
       item("ot_sin_asignar", "OT sin analista", "OT abiertas de su laboratorio a las que aún no se asignó analista", await q.otSinAsignar(), "/ot?sinAsignar=1&estado=abiertas", "warn");
     const porOficializar = async () =>
-      item("informes_por_oficializar", "Informes por oficializar", "Boletines/informes en revisión en su ámbito", await q.boletinesEnRevision(), "/informes?estado=en_revision", "warn");
+      item("informes_por_oficializar", "Informes por oficializar", "Informes y certificados de su ámbito que esperan firmas: aún no son oficiales", await q.documentosEnFirma(), "/certificados?estado=en_firma", "warn");
     const sinOt = async () =>
       item("cotizaciones_aceptadas_sin_ot", "Cotizaciones aceptadas sin OT", "Cotizaciones aceptadas a las que aún no se les creó OT", await q.cotizacionesSinOt(), "/cotizaciones?estado=aceptada&sinOt=1", "warn");
     const nc = async () =>
@@ -369,7 +378,7 @@ export class BandejaService {
       case "ADMIN":
         return all([
           async () => item("usuarios_sin_rol", "Usuarios sin rol", "Usuarios activos sin ninguna asignación de rol", await q.usuariosSinRol(), "/admin/usuarios?sinRol=1", "warn"),
-          async () => item("usuarios_bloqueados", "Usuarios bloqueados", "Cuentas en estado bloqueado", await q.usuariosBloqueados(), "/admin/usuarios?estado=bloqueado", "warn"),
+          async () => item("usuarios_bloqueados", "Usuarios bloqueados", "Cuentas bloqueadas por el administrador o por intentos fallidos de inicio de sesión", await q.usuariosBloqueados(), "/admin/usuarios?estado=bloqueado", "warn"),
           async () => item("unidades_sin_jefe", "Unidades sin jefe", "Laboratorios, secciones o departamentos sin jefe asignado", await q.unidadesSinJefe(), "/admin/estructura", "info"),
         ]);
       case "LECTOR":

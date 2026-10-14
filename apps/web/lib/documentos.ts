@@ -16,6 +16,18 @@ export const ESTADO_DOC: Record<string, { texto: string; pill: string }> = {
   anulado: { texto: "Anulado", pill: "gray" },
 };
 
+/**
+ * Estado legible y color de un documento: en firma (ámbar) ≠ oficial (verde) ≠
+ * devuelto (rojo) ≠ anulado (gris). Un estado desconocido se muestra legible
+ * («algo_nuevo» → «Algo nuevo»), en gris. Lo usa el buscador de documentos.
+ */
+export function estadoDocumento(estado: string | null | undefined): { texto: string; pill: string } {
+  const e = estado ?? "emitido";
+  if (ESTADO_DOC[e]) return ESTADO_DOC[e];
+  const t = e.replace(/_/g, " ");
+  return { texto: t.charAt(0).toUpperCase() + t.slice(1), pill: "gray" };
+}
+
 export const ACCION_FIRMA: Record<string, string> = {
   ELABORA: "Elabora",
   REVISA: "Revisa",

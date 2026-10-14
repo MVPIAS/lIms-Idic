@@ -114,16 +114,22 @@ export class FirmasImagenController {
   @Put("usuario/:usuarioId")
   @RequierePermiso("admin.usuarios")
   async registrarDeUsuario(@Param("usuarioId", ParseUUIDPipe) usuarioId: string, @Body() body: unknown, @Req() req: any) {
-    await this.usuarioDelTenant(usuarioId, req);
+    await this.usuarioDelTenant(usuarioId, req, true);
     return this.guardar(usuarioId, ImagenBody.parse(body ?? {}).imagen);
   }
 
-  private async usuarioDelTenant(usuarioId: string, req: any) {
+  /**
+   * El usuario debe existir en el tenant. Para CARGAR su firma, además debe
+   * estar activo (cualquier usuario activo, tenga o no firma registrada).
+   */
+  private async usuarioDelTenant(usuarioId: string, req: any, exigirActivo = false) {
     const tenantId = req?.user?.tenantId;
     const u = await this.prisma.usuario.findFirst({
       where: { id: usuarioId, deletedAt: null, ...(tenantId ? { tenantId } : {}) },
-      select: { id: true },
+      select: { id: true, estado: true },
     });
     if (!u) throw new NotFoundException(`Usuario ${usuarioId} no encontrado`);
+    if (exigirActivo && u.estado !== "activo")
+      throw new BadRequestException("Solo se carga la firma de un usuario activo. Reactive la cuenta antes.");
   }
 }

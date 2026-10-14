@@ -35,19 +35,20 @@ function Usuarios() {
   const [fUnidad, setFUnidad] = useState<string | null>(null);
   const [conDependientes, setConDependientes] = useState(true);
   const [fRol, setFRol] = useState("");
-  const [fEstado, setFEstado] = useState<"todos" | "activos" | "inactivos">("activos");
+  const [fEstado, setFEstado] = useState<"todos" | "activos" | "inactivos" | "bloqueados">("activos");
   const [fSinRol, setFSinRol] = useState(false);
   const [selId, setSelId] = useState<string | null>(null);
   const [creando, setCreando] = useState(false);
   const [tabInicial, setTabInicial] = useState<Tab>("datos");
 
-  // ?unidad=<id> (enlace desde Estructura) · ?sinRol=1 y ?estado=bloqueado (tarjetas de Mi bandeja;
-  // las cuentas bloqueadas figuran como inactivas).
+  // ?unidad=<id> (enlace desde Estructura) · ?sinRol=1 y ?estado=bloqueado (tarjetas de Mi bandeja:
+  // bloqueadas por el administrador o por intentos fallidos).
   useEffect(() => {
     const p = new URLSearchParams(window.location.search);
     if (p.get("unidad")) setFUnidad(p.get("unidad"));
     if (p.get("sinRol") === "1") { setFSinRol(true); setFEstado("todos"); }
-    if (p.get("estado") === "bloqueado" || p.get("estado") === "inactivos") setFEstado("inactivos");
+    if (p.get("estado") === "bloqueado") setFEstado("bloqueados");
+    else if (p.get("estado") === "inactivos") setFEstado("inactivos");
   }, []);
 
   const listaRoles: Rol[] = roles.data ?? [];
@@ -56,7 +57,8 @@ function Usuarios() {
 
   const filtrados = useMemo(() => {
     let out = usuarios.data ?? [];
-    if (fEstado !== "todos") out = out.filter((u) => u.activo === (fEstado === "activos"));
+    if (fEstado === "bloqueados") out = out.filter((u) => u.bloqueado);
+    else if (fEstado !== "todos") out = out.filter((u) => u.activo === (fEstado === "activos"));
     if (fSinRol) out = out.filter((u) => u.asignaciones.length === 0);
     if (fRol) out = out.filter((u) => u.asignaciones.some((a) => a.rol.id === fRol));
     if (fUnidad) {
@@ -95,8 +97,10 @@ function Usuarios() {
       ),
     },
     {
-      key: "activo", label: "Estado", value: (u: Usuario) => (u.activo ? "Activo" : "Inactivo"),
-      render: (u: Usuario) => <span className={`pill ${u.activo ? "green" : "gray"}`}>{u.activo ? "Activo" : "Inactivo"}</span>,
+      key: "activo", label: "Estado", value: (u: Usuario) => (u.bloqueado ? "Bloqueado" : u.activo ? "Activo" : "Inactivo"),
+      render: (u: Usuario) => u.bloqueado
+        ? <span className="pill red" title={u.motivoBloqueo ?? undefined}>Bloqueado</span>
+        : <span className={`pill ${u.activo ? "green" : "gray"}`}>{u.activo ? "Activo" : "Inactivo"}</span>,
     },
   ];
 
@@ -133,6 +137,7 @@ function Usuarios() {
                 <select value={fEstado} onChange={(e) => setFEstado(e.target.value as any)} aria-label="Filtrar por estado">
                   <option value="activos">Activos</option>
                   <option value="inactivos">Inactivos</option>
+                  <option value="bloqueados">Bloqueados</option>
                   <option value="todos">Todos</option>
                 </select>
               </Campo>
@@ -462,6 +467,14 @@ function TabAcciones({ usuario, onCambio }: { usuario: Usuario; onCambio: () => 
       await onCambio();
     } catch (e) { toast.error(e); } finally { setOcupado(false); }
   }
+  async function desbloquear() {
+    setOcupado(true);
+    try {
+      await adminApi.desbloquearUsuario(usuario.id);
+      toast.ok("Cuenta desbloqueada: ya puede volver a ingresar.");
+      await onCambio();
+    } catch (e) { toast.error(e); } finally { setOcupado(false); }
+  }
   async function restablecer() {
     const ok = await confirmar({
       titulo: "¿Restablecer la contraseña?", confirmar: "Generar contraseña temporal",
@@ -490,6 +503,19 @@ function TabAcciones({ usuario, onCambio }: { usuario: Usuario; onCambio: () => 
             disabled={ocupado} onClick={cambiarEstado}>{usuario.activo ? "Desactivar" : "Reactivar"}</button>
         </div>
       </div>
+      {usuario.bloqueado && (
+        <div className="card" style={{ marginBottom: 0 }}>
+          <h2>Cuenta bloqueada</h2>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="pill red">Bloqueada</span>
+            <span className="text-[12px] text-[var(--muted)] flex-1">
+              {usuario.motivoBloqueo ?? "La cuenta está bloqueada."} Desbloquéela si la persona confirma que fue ella; si no
+              recuerda la contraseña, restablézcala (también la desbloquea).
+            </span>
+            <button className="btn sm success" disabled={ocupado} onClick={desbloquear}>Desbloquear</button>
+          </div>
+        </div>
+      )}
       <div className="card" style={{ marginBottom: 0 }}>
         <h2>Contraseña</h2>
         {usuario.debeCambiarPassword && (

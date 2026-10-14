@@ -1,4 +1,4 @@
-import { clasificarParaAccion, motivoNoCapturable } from "./flujo-resultado";
+import { clasificarParaAccion, motivoNoCapturable, planReapertura } from "./flujo-resultado";
 
 describe("flujo del resultado · ¿se puede capturar?", () => {
   it("pendiente, capturado, devuelto y rechazado admiten (re)captura", () => {
@@ -37,5 +37,37 @@ describe("flujo del resultado · acción sobre la OT completa", () => {
 
   it("los pendientes (sin valor) nunca se revisan", () => {
     expect(clasificarParaAccion(filas, "revisar", "x").aplicables).not.toContain("d");
+  });
+});
+
+describe("reapertura de un resultado aprobado", () => {
+  const ot = { estado: "en_analisis", codigo: "OT-1" };
+
+  it("solo se reabre lo aprobado", () => {
+    expect(planReapertura("revisado_n1", ot, []).error).toMatch(/devuélvalo/);
+    expect(planReapertura("capturado", ot, []).error).toBeTruthy();
+    expect(planReapertura("aprobado", ot, []).error).toBeNull();
+  });
+
+  it("no se reabre en una OT cerrada o anulada", () => {
+    expect(planReapertura("aprobado", { estado: "cerrada", codigo: "OT-1" }, []).error).toMatch(/cerrada/);
+    expect(planReapertura("aprobado", { estado: "anulada", codigo: "OT-1" }, []).error).toMatch(/anulada/);
+  });
+
+  it("anula los documentos en firma u oficiales y avisa de los entregados", () => {
+    const r = planReapertura("aprobado", ot, [
+      { id: "a", numero: "CERT-1", estado: "en_firma" },
+      { id: "b", numero: "CERT-2", estado: "oficial", entregadoAt: "2026-10-01" },
+      { id: "c", numero: "CERT-3", estado: "anulado" },
+      { id: "d", numero: "CERT-4", estado: "devuelto" },
+      { id: "e", numero: "CERT-5", estado: "emitido" },
+    ]);
+    expect(r.anular.map((d: any) => d.numero)).toEqual(["CERT-1", "CERT-2", "CERT-5"]);
+    expect(r.avisos[0]).toMatch(/reemita/);
+    expect(r.avisos[1]).toMatch(/CERT-2 ya se entregó/);
+  });
+
+  it("sin documentos vigentes no hay nada que anular", () => {
+    expect(planReapertura("aprobado", ot, [{ id: "c", numero: "X", estado: "anulado" }])).toEqual({ error: null, anular: [], avisos: [] });
   });
 });

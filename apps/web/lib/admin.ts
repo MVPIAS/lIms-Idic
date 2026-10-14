@@ -60,6 +60,9 @@ export interface Usuario {
   email?: string | null;
   cargo?: string | null;
   activo: boolean;
+  /** Bloqueada por el administrador o por intentos fallidos de inicio de sesión. */
+  bloqueado?: boolean;
+  motivoBloqueo?: string | null;
   asignaciones: Asignacion[];
   /** Contraseña temporal pendiente de cambio (alta o restablecimiento). */
   debeCambiarPassword?: boolean;
@@ -255,6 +258,8 @@ export const adminApi = {
     post<Asignacion>(`/usuarios/${id}/asignaciones`, d),
   quitarAsignacion: (id: string, asignacionId: string) => del<void>(`/usuarios/${id}/asignaciones/${asignacionId}`),
   resetPassword: (id: string) => post<{ passwordTemporal: string }>(`/usuarios/${id}/reset-password`, {}),
+  /** Quita el bloqueo por intentos fallidos (o el del administrador). No cambia la contraseña. */
+  desbloquearUsuario: (id: string) => post<Usuario>(`/usuarios/${id}/desbloquear`, {}),
 
   // Roles y permisos
   roles: () => get<any>("/roles").then((x) => lista<Rol>(x)),

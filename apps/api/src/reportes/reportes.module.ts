@@ -16,6 +16,8 @@ import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
+import { AlcanceService } from "../rbac/alcance.service";
+import { condicionAlcance } from "./alcance-reportes";
 
 // ===========================================================================
 // Módulo REPORTES · KPIs (contrato §4.5.3) + exportación con filtros (§4.6.6 /
@@ -28,6 +30,12 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 // entrada del usuario en el SQL — los nombres de columna que sí van al texto de
 // la consulta salen SIEMPRE de whitelists internas (ENTIDADES), jamás del query
 // string, y todos los valores viajan como parámetros posicionales ($1, $2…).
+//
+// ALCANCE POR LABORATORIO (AlcanceService + alcance-reportes.ts): cada cifra se
+// calcula solo con las unidades que ve quien consulta (jefaturas: su rama;
+// perfiles globales: todo). Muestras, resultados y documentos cuentan por la OT
+// a la que pertenecen; las cotizaciones, por la unidad de su OT o de su centro
+// de costo.
 // ===========================================================================
 
 // --- catálogo de entidades exportables (whitelist estricta) ----------------
@@ -143,6 +151,13 @@ const ENTIDADES: Record<string, EntidadDef> = {
 abstract class ReportesBase {
   protected prisma = new PrismaClient();
 
+  constructor(protected readonly alcance: AlcanceService) {}
+
+  /** Unidades visibles de quien consulta (null = todas). */
+  protected unidades(req: any): Promise<string[] | null> {
+    return this.alcance.filtroUnidades(req);
+  }
+
   protected tenantId(req: any): string {
     const id = req?.user?.tenantId;
     if (!id) throw new NotFoundException("Tenant no resuelto en el token");
@@ -180,6 +195,10 @@ abstract class ReportesBase {
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("reportes")
 export class ReportesController extends ReportesBase {
+  constructor(alcance: AlcanceService) {
+    super(alcance);
+  }
+
   // --- §4.5.3 · Productividad ---------------------------------------------
   @Get("productividad")
   @RequierePermiso("reporte.ver")
@@ -189,9 +208,10 @@ export class ReportesController extends ReportesBase {
     @Req() req?: any,
   ) {
     const tenantId = this.tenantId(req);
+    const unidades = await this.unidades(req);
 
     const argsOt: any[] = [tenantId];
-    const rangoOt = this.rangoFechas("created_at", desde, hasta, argsOt);
+    const rangoOt = this.rangoFechas("created_at", desde, hasta, argsOt) + condicionAlcance("orden_trabajo", "orden_trabajo", unidades, argsOt);
 
     const porEstado = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT estado, COUNT(*)::int AS total
@@ -210,7 +230,7 @@ export class ReportesController extends ReportesBase {
     const totalOt = porEstado.reduce((s, r) => s + Number(r.total), 0);
 
     const argsMu: any[] = [tenantId];
-    const rangoMu = this.rangoFechas("created_at", desde, hasta, argsMu);
+    const rangoMu = this.rangoFechas("created_at", desde, hasta, argsMu) + condicionAlcance("muestra", "muestra", unidades, argsMu);
     const muestras = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT COUNT(*)::int AS total
          FROM muestra
@@ -219,10 +239,10 @@ export class ReportesController extends ReportesBase {
     );
 
     const argsCert: any[] = [tenantId];
-    const rangoCert = this.rangoFechas("created_at", desde, hasta, argsCert);
+    const rangoCert = this.rangoFechas("created_at", desde, hasta, argsCert) + condicionAlcance("certificado", "certificado", unidades, argsCert);
     const certificados = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT COUNT(*)::int AS total,
-              COUNT(*) FILTER (WHERE estado = 'emitido')::int AS emitidos
+              COUNT(*) FILTER (WHERE estado IN ('emitido', 'oficial'))::int AS emitidos
          FROM certificado
         WHERE tenant_id = $1::uuid AND deleted_at IS NULL ${rangoCert}`,
       ...argsCert,
@@ -250,9 +270,10 @@ export class ReportesController extends ReportesBase {
     @Req() req?: any,
   ) {
     const tenantId = this.tenantId(req);
+    const unidades = await this.unidades(req);
 
     const argsG: any[] = [tenantId];
-    const rangoG = this.rangoFechas("r.fecha", desde, hasta, argsG);
+    const rangoG = this.rangoFechas("r.fecha", desde, hasta, argsG) + condicionAlcance("resultado", "r", unidades, argsG);
     const globalRows = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT COALESCE(r.veredicto, 'pendiente') AS veredicto, COUNT(*)::int AS total
          FROM resultado r
@@ -263,7 +284,7 @@ export class ReportesController extends ReportesBase {
     const global = this.resumenVeredicto(globalRows);
 
     const argsM: any[] = [tenantId];
-    const rangoM = this.rangoFechas("r.fecha", desde, hasta, argsM);
+    const rangoM = this.rangoFechas("r.fecha", desde, hasta, argsM) + condicionAlcance("resultado", "r", unidades, argsM);
     const porMetodo = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT cm.codigo AS metodo_codigo, cm.nombre AS metodo_nombre,
               COUNT(*)::int AS total,
@@ -279,7 +300,7 @@ export class ReportesController extends ReportesBase {
     );
 
     const argsE: any[] = [tenantId];
-    const rangoE = this.rangoFechas("r.fecha", desde, hasta, argsE);
+    const rangoE = this.rangoFechas("r.fecha", desde, hasta, argsE) + condicionAlcance("resultado", "r", unidades, argsE);
     const porEnsayo = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT ce.codigo AS ensayo_codigo, ce.nombre AS ensayo_nombre,
               COUNT(*)::int AS total,
@@ -335,9 +356,10 @@ export class ReportesController extends ReportesBase {
     @Req() req?: any,
   ) {
     const tenantId = this.tenantId(req);
+    const unidades = await this.unidades(req);
 
     const args: any[] = [tenantId];
-    const rango = this.rangoFechas("created_at", desde, hasta, args);
+    const rango = this.rangoFechas("created_at", desde, hasta, args) + condicionAlcance("orden_trabajo", "orden_trabajo", unidades, args);
 
     // Métricas agregadas sobre OT cerradas con fecha de recepción conocida.
     const resumen = await this.prisma.$queryRawUnsafe<any[]>(
@@ -356,7 +378,7 @@ export class ReportesController extends ReportesBase {
 
     // Detalle por OT (acotado) para la tabla de la UI.
     const argsD: any[] = [tenantId];
-    const rangoD = this.rangoFechas("created_at", desde, hasta, argsD);
+    const rangoD = this.rangoFechas("created_at", desde, hasta, argsD) + condicionAlcance("orden_trabajo", "orden_trabajo", unidades, argsD);
     const detalle = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT codigo, estado, fecha_recepcion, fecha_cierre, fecha_compromiso,
               (EXTRACT(EPOCH FROM (fecha_cierre - fecha_recepcion)) / 86400.0)::float8 AS dias,
@@ -393,9 +415,10 @@ export class ReportesController extends ReportesBase {
     @Req() req?: any,
   ) {
     const tenantId = this.tenantId(req);
+    const unidades = await this.unidades(req);
 
     const argsE: any[] = [tenantId];
-    const rangoE = this.rangoFechas("created_at", desde, hasta, argsE);
+    const rangoE = this.rangoFechas("created_at", desde, hasta, argsE) + condicionAlcance("cotizacion", "cotizacion", unidades, argsE);
     const porEstado = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT estado, COUNT(*)::int AS total, COALESCE(SUM(total), 0)::float8 AS monto
          FROM cotizacion
@@ -405,7 +428,7 @@ export class ReportesController extends ReportesBase {
     );
 
     const argsM: any[] = [tenantId];
-    const rangoM = this.rangoFechas("created_at", desde, hasta, argsM);
+    const rangoM = this.rangoFechas("created_at", desde, hasta, argsM) + condicionAlcance("cotizacion", "cotizacion", unidades, argsM);
     const porMes = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS mes,
               COUNT(*)::int AS total, COALESCE(SUM(total), 0)::float8 AS monto
@@ -489,7 +512,8 @@ export class ReportesController extends ReportesBase {
 
     const args: any[] = [tenantId];
     const softClause = def.softDelete ? "AND deleted_at IS NULL" : "";
-    const rango = this.rangoFechas(def.fechaCol, desde, hasta, args);
+    const rango =
+      this.rangoFechas(def.fechaCol, desde, hasta, args) + condicionAlcance(def.tabla, def.tabla, await this.unidades(req), args);
     const max = Math.min(50000, Math.max(1, parseInt(limit ?? "10000") || 10000));
 
     const filas = await this.prisma.$queryRawUnsafe<any[]>(

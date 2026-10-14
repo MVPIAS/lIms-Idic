@@ -26,15 +26,15 @@ const ProveedorCreate = z.object({
   condicionPago: z.string().max(40).optional(),
   estado: z.enum(["habilitado", "en_evaluacion", "inhabilitado"]).default("habilitado"),
 });
-// No hay permisos `proveedor.*` sembrados. Compras/proveedores es una función
-// económica: se lee con `factura.ver` y se gestiona con `factura.emitir`
-// (SUPERADMIN, ADMIN, COBRANZA). Anotado como permiso "prestado" del dominio.
+// Proveedores = compras (Abastecimiento): `compra.ver` / `compra.gestionar`
+// (align_correcciones_manuales.sql). Antes usaban `factura.*`, lo que obligaba a
+// dar a Abastecimiento el permiso de emitir facturas.
 @ApiTags("proveedores") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("proveedores")
 @RequierePermisoCrud({
-  ver: "factura.ver",
-  crear: "factura.emitir",
-  editar: "factura.emitir",
-  eliminar: "factura.emitir",
+  ver: "compra.ver",
+  crear: "compra.gestionar",
+  editar: "compra.gestionar",
+  eliminar: "compra.gestionar",
 })
 export class ProveedorController extends BaseCrudController {
   protected createSchema = ProveedorCreate;

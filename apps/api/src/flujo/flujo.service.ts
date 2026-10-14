@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
+import { permisoParaCompletar } from "./permiso-paso";
 
 /**
  * Motor BPM · los flujos viven como DATOS (flujo_def/version/paso/transicion)
@@ -262,6 +263,31 @@ export class FlujoService {
     return this.estadoInstancia(pe.instanciaId, tenantId);
   }
 
+  /**
+   * Qué exige completar una tarea: el permiso del paso (permiso-paso.ts), el rol
+   * responsable si el paso lo define, y la OT (para el alcance por laboratorio).
+   */
+  async requisitosParaCompletar(pasoEjecucionId: string, tenantId?: string) {
+    const pe = await this.prisma.pasoEjecucion.findUnique({
+      where: { id: pasoEjecucionId },
+      include: { paso: true, instancia: { include: { version: { include: { def: true } } } } },
+    });
+    if (!pe || (tenantId && pe.instancia.tenantId !== tenantId))
+      throw new NotFoundException("Ejecución de paso no encontrada");
+    const rol = pe.paso.responsableRolId
+      ? await this.prisma.rol.findUnique({ where: { id: pe.paso.responsableRolId }, select: { codigo: true, nombre: true } })
+      : null;
+    const ot = pe.instancia.otId
+      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: pe.instancia.otId }, select: { id: true, codigo: true, unidadPrincipal: true } })
+      : null;
+    return {
+      permiso: permisoParaCompletar({ actividad: pe.paso.actividad, configJson: pe.paso.configJson }, pe.instancia.version.def.codigo),
+      rol,
+      ot,
+      actividad: pe.paso.actividad,
+    };
+  }
+
   /** Bandeja de tareas pendientes (por usuario, o todas). */
   async bandeja(usuarioId?: string, tenantId?: string) {
     return this.prisma.tareaAsignada.findMany({
@@ -288,8 +314,8 @@ export class FlujoService {
    * no revelar tareas de instancias ajenas.
    */
   async bandejaDeInstancia(instanciaId: string, tenantId?: string) {
-    await this.estadoInstancia(instanciaId, tenantId);
-    return this.prisma.tareaAsignada.findMany({
+    const ins = await this.estadoInstancia(instanciaId, tenantId);
+    const tareas = await this.prisma.tareaAsignada.findMany({
       where: {
         estado: { in: ["pendiente", "en_curso"] },
         pasoEjecucion: { instanciaId },
@@ -297,6 +323,14 @@ export class FlujoService {
       orderBy: [{ venceAt: "asc" }, { prioridad: "desc" }],
       include: { pasoEjecucion: { include: { paso: true } } },
     });
+    // Permiso que exige completar cada tarea (la pantalla oculta «Completar» a quien no lo tiene).
+    return tareas.map((t) => ({
+      ...t,
+      permisoRequerido: permisoParaCompletar(
+        { actividad: t.pasoEjecucion.paso.actividad, configJson: t.pasoEjecucion.paso.configJson },
+        ins.version.def.codigo,
+      ),
+    }));
   }
 
   async estadoInstancia(instanciaId: string, tenantId?: string) {

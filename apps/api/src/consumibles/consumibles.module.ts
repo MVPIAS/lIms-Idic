@@ -685,11 +685,15 @@ const pag = (page: string, limit: string, max = 500, def = 100) => ({
 @ApiTags("consumibles")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
+// Kardex de consumibles: `consumible.gestionar` (Abastecimiento y quienes
+// gestionan el catálogo; align_correcciones_manuales.sql). Antes exigía
+// `catalogo.gestionar`, que daba a Abastecimiento todo el catálogo y los
+// parámetros del sistema.
 @RequierePermisoCrud({
-  ver: "catalogo.gestionar",
-  crear: "catalogo.gestionar",
-  editar: "catalogo.gestionar",
-  eliminar: "catalogo.gestionar",
+  ver: "consumible.gestionar",
+  crear: "consumible.gestionar",
+  editar: "consumible.gestionar",
+  eliminar: "consumible.gestionar",
 })
 @Controller("consumibles")
 export class ConsumiblesController {
