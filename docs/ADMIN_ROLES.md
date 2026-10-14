@@ -78,7 +78,7 @@ Reglas del seed: las unidades existentes **no se duplican**; solo se completan l
 | MUESTREO | Muestreo | OPERATIVO | GLOBAL | OT (ver), muestras (ver/crear/transferir), clientes y cotizaciones (ver). |
 | FINANZAS | Finanzas | SOPORTE | GLOBAL | Facturas: ver/emitir/cobrar (incluye pagos y notas de crédito), clientes/cotizaciones/OT (ver). |
 | COBRANZA | Cobranza | SOPORTE | GLOBAL | Igual que Finanzas. |
-| ABASTECIMIENTO | Abastecimiento (SAB) | SOPORTE | GLOBAL | Órdenes de compra (`/adquisiciones` usa `factura.ver`/`factura.emitir`), equipos (ver), consumibles (`catalogo.gestionar`). |
+| ABASTECIMIENTO | Abastecimiento (SAB) | SOPORTE | GLOBAL | Proveedores y órdenes de compra (`compra.ver`/`compra.gestionar`), equipos (ver), kardex de consumibles (`consumible.gestionar`). **No** emite ni ve facturas, ni toca centros de costo, catálogo o parámetros del sistema (align_correcciones_manuales.sql). |
 | CALIDAD | Gestión de Calidad | SOPORTE | GLOBAL | NC, auditoría, métodos (aprobar), plantillas (gestionar), catálogo, QC/resultados (ver), `certificado.firmar` (firma de LME). |
 | LECTOR | Lector / Auditor | SOPORTE | GLOBAL | Todos los `*.ver`. |
 | CLIENTE | Cliente externo | SOPORTE | UNIDAD | Cotizaciones y OT (ver). El filtro por cliente es aparte (pendiente). |
@@ -332,7 +332,7 @@ Si `esGlobal`, `unidadesVisibles` trae todas las unidades activas.
 | FINANZAS | `facturas_pendientes` («Pendientes de facturar»), `facturas_por_cobrar` (emitidas y con pago parcial), `ot_cerradas_sin_factura` (con cobro, cerradas antes del cierre automático) |
 | ABASTECIMIENTO | `oc_pendientes` |
 | CALIDAD | `firmas_pendientes`, `nc_abiertas`, `informes_por_oficializar`, `ot_vencidas` |
-| ADMIN | `usuarios_sin_rol`, `usuarios_bloqueados`, `unidades_sin_jefe` |
+| ADMIN | `usuarios_sin_rol`, `usuarios_bloqueados` (por el administrador **o por intentos fallidos**: `intentos_fallidos >= AUTH_MAX_INTENTOS`), `unidades_sin_jefe` |
 | LECTOR | `ot_abiertas` |
 
 Cada conteo es defensivo: si la tabla/columna no existe en la BD, ese ítem vale 0.
@@ -347,6 +347,8 @@ perfil «analista», no ve «Resultados devueltos». Cada tarjeta que abre una l
 `scripts/verificacion/flujo-completo.js`. «OT abiertas» abre `/ot?estado=abiertas`;
 «OT cerradas sin factura», `/ot?estado=cerrada&sinFactura=1`; las de administración,
 `/admin/usuarios?sinRol=1`, `/admin/usuarios?estado=bloqueado` y `/admin/estructura`.
+
+`informes_por_oficializar` cuenta los informes/certificados **en firma** del ámbito del usuario (aún no oficiales, le toque o no firmar) y abre `/certificados?estado=en_firma`; antes contaba registros del módulo antiguo de boletines (docs/FLUJO_CORRECCIONES_MANUALES.md).
 
 `firmas_pendientes` cuenta los informes/certificados cuyo **paso actual** de la matriz de firmas tiene al usuario como responsable (tabla `documento_firma`) y enlaza a `/informes/por-firmar`. `ot_vencidas` / `ot_por_vencer` usan el mismo semáforo que la lista de OT (OT no cerradas ni anuladas; vencida = fecha de compromiso anterior a hoy en Chile; por vencer = hoy a +3 días) y enlazan a `/ot?semaforo=vencida|por_vencer`. Detalle en `docs/FLUJO_FIRMA_CIERRE.md`.
 

@@ -3,10 +3,13 @@
  * Recorrido de punta a punta del flujo estándar del LIMS contra una API real.
  *
  *   Cliente → Cotización (con plazo) → Aceptación (nace la OT con laboratorio) →
- *   Recepción de la muestra → Asignación → Captura (numérico con límites del
- *   catálogo, numérico con especificación de la orden, atributo) → Revisión →
- *   Aprobación → Emisión → Firma según la matriz → Entrega → Cierre → Factura →
- *   Emisión de la factura → Pago parcial → Pago total.
+ *   Recepción de la muestra (desde el expediente, con los ensayos de la
+ *   cotización: la misma ruta que la pestaña «Muestras») → Asignación → Captura
+ *   (numérico con límites del catálogo, numérico con especificación de la orden,
+ *   atributo) → Revisión → Aprobación → Emisión → Reapertura de un resultado
+ *   aprobado (anula el documento en firma) → corrección, revisión, aprobación y
+ *   reemisión → Firma según la matriz → Entrega → Cierre → Factura → Emisión de
+ *   la factura → Pago parcial → Pago total.
  *
  * Cada paso lo hace el perfil que corresponde y se comprueba también que un
  * perfil que NO debe poder, no puede (403/409). Además: un analista de otro
@@ -357,13 +360,40 @@ async function main() {
     afirmar(lista(j).length === 0, "la búsqueda de LPN encuentra la OT de LQC");
   });
 
-  /* ---------------- 4. Recepción de la muestra */
-  await paso("Recepción registra la muestra y sus análisis", async () => {
-    C.muestra = await ok(U.recepcion, "POST", "/muestras", { otId: C.ot.id, codigo: `M-${sello}`, nombre: "Muestra de prueba del flujo", clienteId: C.cliente.id });
-    const g = await ok(U.recepcion, "POST", `/flujo/ot/${C.ot.id}/generar-analisis`, {
-      muestraId: C.muestra.id, metodoIds: [C.mPh.id, C.mAzufre.id, C.mGrumos.id],
+  /* ---------------- 4. Recepción de la muestra (expediente › Muestras) */
+  await paso("El expediente propone los ensayos de la cotización aceptada", async () => {
+    // Lo mismo que pide la pestaña «Muestras» del expediente de la OT.
+    C.propuesta = await ok(U.recepcion, "GET", `/flujo/ot/${C.ot.id}/registro-muestras`);
+    afirmar(C.propuesta.cotizacion?.id === C.cot.id, "la propuesta no viene de la cotización aceptada");
+    afirmar(C.propuesta.muestras.length === 0, `la OT ya tiene ${C.propuesta.muestras.length} muestras`);
+    const ensayos = C.propuesta.lineas.map((l) => l.ensayoId);
+    for (const m of [C.mPh, C.mAzufre, C.mGrumos])
+      afirmar(ensayos.includes(m.ensayoId), `la propuesta no trae el ensayo de ${m.codigo}`);
+    const linea = (m) => C.propuesta.lineas.find((l) => l.ensayoId === m.ensayoId);
+    for (const m of [C.mPh, C.mAzufre, C.mGrumos])
+      afirmar(linea(m).metodos.some((x) => x.id === m.id), `el método ${m.codigo} no figura en su línea`);
+    const sugeridos = C.propuesta.lineas.flatMap((l) => l.sugeridos);
+    return `${C.propuesta.lineas.length} línea(s) de ${C.propuesta.cotizacion.codigo}; ${sugeridos.length} método(s) propuestos marcados`;
+  });
+  await paso("Ventas no registra muestras (403)", async () => {
+    await exigir(403, U.ventas, "POST", `/flujo/ot/${C.ot.id}/muestras`, { muestras: [{ nombre: "X", metodoIds: [C.mPh.id] }] });
+  });
+  await paso("Recepción registra la muestra y sus ensayos desde el expediente", async () => {
+    // Igual que la pantalla: los métodos marcados (propuestos) + los que la persona marca o busca.
+    // Los propuestos solo pueden ser métodos de los ensayos cotizados (aquí, los tres elegidos).
+    const nuestros = new Set([C.mPh.id, C.mAzufre.id, C.mGrumos.id]);
+    const marcados = new Set(C.propuesta.lineas.flatMap((l) => l.sugeridos));
+    afirmar([...marcados].every((id) => nuestros.has(id)), "la propuesta marca métodos que no son de los ensayos cotizados");
+    for (const id of nuestros) marcados.add(id);
+    await exigir(400, U.recepcion, "POST", `/flujo/ot/${C.ot.id}/muestras`, { muestras: [{ nombre: " ", metodoIds: [] }] });
+    const r = await ok(U.recepcion, "POST", `/flujo/ot/${C.ot.id}/muestras`, {
+      muestras: [{ nombre: "Muestra de prueba del flujo", metodoIds: [...marcados] }],
     });
-    afirmar(g.creados >= 3, `se crearon ${g.creados} análisis`);
+    afirmar(r.muestras.length === 1 && r.ensayos >= 3, `se crearon ${r.muestras.length} muestra(s) y ${r.ensayos} ensayo(s)`);
+    C.muestra = r.muestras[0];
+    afirmar(C.muestra.codigo === `${C.ot.codigo}-M1`, `código de muestra ${C.muestra.codigo}`);
+    const hist = await ok(U.jefe, "GET", `/ot/${C.ot.id}/historial`);
+    afirmar(hist.some((h) => h.tipo === "registro_muestras"), "el registro de muestras no quedó en el historial de la OT");
     const rs = await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/resultados`);
     const todos = rs.resultados ?? lista(rs);
     const deMetodo = (m) => todos.filter((r) => r.catMetodoId === m.id);
@@ -483,7 +513,43 @@ async function main() {
     C.pasosFirma = circ.pasos ?? [];
     afirmar((circ.documento?.estado ?? circ.estado ?? C.doc.estado) === "en_firma", "el documento no quedó en firma");
     afirmar(C.pasosFirma.length > 0, "el documento no tiene pasos de firma");
+    // «Informes por oficializar» cuenta los documentos en firma del ámbito (no los boletines antiguos).
+    await exigirBandeja(U.jefe, B0[U.jefe], { informes_por_oficializar: 1 });
     return `${C.doc.numero ?? C.doc.codigo ?? C.docId} · ${C.pasosFirma.length} paso(s): ${C.pasosFirma.map((p) => `${p.orden}:${(p.responsables ?? []).map((x) => x.nombre).join("/")}`).join(" → ")}`;
+  });
+
+  /* ---------------- 8b. Reapertura de un resultado aprobado */
+  await paso("Un analista no puede reabrir un resultado aprobado (403)", async () => {
+    await exigir(403, U.a1, "POST", `/resultados/${C.rPh.id}/reabrir`, { motivo: "Valor transcrito mal" });
+  });
+  await paso("Jefe LQC reabre pH: vuelve al analista y se anula el documento en firma", async () => {
+    await exigir(400, U.jefe, "POST", `/resultados/${C.rPh.id}/reabrir`, { motivo: "x" });
+    const r = await ok(U.jefe, "POST", `/resultados/${C.rPh.id}/reabrir`, { motivo: "El pH se transcribió mal del equipo" });
+    afirmar(r.estado === "devuelto", `estado ${r.estado}`);
+    afirmar((r.documentosAnulados ?? []).some((d) => d.id === C.docId), "el documento en firma no se anuló");
+    const circ = await ok(U.jefe, "GET", `/informes/${C.docId}/circuito`);
+    afirmar((circ.documento?.estado ?? circ.estado) === "anulado", `documento ${circ.documento?.estado ?? circ.estado}`);
+    await exigirBandeja(U.jefe, B0[U.jefe], { informes_por_oficializar: 0, resultados_por_aprobar: 0 });
+    await exigir(409, U.jefe, "POST", `/resultados/${C.rPh.id}/reabrir`, { motivo: "Otra vez, sin estar aprobado" });
+    const hist = await ok(U.jefe, "GET", `/ot/${C.ot.id}/historial`);
+    afirmar(hist.some((h) => h.tipo === "reapertura_resultado"), "la reapertura no quedó en el historial de la OT");
+    return (r.avisos ?? []).join(" ").slice(0, 120);
+  });
+  await paso("Se corrige, revisa y aprueba de nuevo; se reemite como nueva versión", async () => {
+    const c = await ok(U.a1, "POST", `/flujo/resultado/${C.rPh.id}/valor`, { valor: "7,3" });
+    afirmar(c.veredicto === "cumple", `veredicto ${c.veredicto}`);
+    await ok(U.rev, "POST", `/resultados/ot/${C.ot.id}/revisar`, {});
+    await ok(U.jefe, "POST", `/resultados/ot/${C.ot.id}/aprobar`, {});
+    const anterior = C.docId;
+    const r = await ok(U.jefe, "POST", `/informes/${anterior}/reemitir`, {});
+    const doc = r.certificado ?? r.documento ?? r;
+    C.docId = doc.id ?? r.certificadoId;
+    afirmar(C.docId && C.docId !== anterior, "la reemisión no creó un documento nuevo");
+    const circ = await ok(U.jefe, "GET", `/informes/${C.docId}/circuito`);
+    afirmar((circ.documento?.estado ?? circ.estado) === "en_firma", "la nueva versión no quedó en firma");
+    afirmar(circ.version === 2 || circ.documento?.version === 2, `versión ${circ.version ?? circ.documento?.version}`);
+    C.pasosFirma = circ.pasos ?? [];
+    return `${circ.numero ?? circ.documento?.numero} (V2) · ${C.pasosFirma.length} paso(s)`;
   });
 
   /* ---------------- 9. Firma según la matriz */
@@ -524,7 +590,7 @@ async function main() {
     const pe = lista(await ok(U.planif, "GET", "/informes/documentos?estado=por_entregar&limit=200"));
     afirmar(pe.some((d) => d.id === C.docId), "el documento no figura en «por entregar»");
     return [
-      await exigirBandeja(U.jefe, B0[U.jefe], { documentos_por_entregar: 1, ot_listas_cerrar: 0 }),
+      await exigirBandeja(U.jefe, B0[U.jefe], { documentos_por_entregar: 1, ot_listas_cerrar: 0, informes_por_oficializar: 0 }),
       await exigirBandeja(U.planif, B0[U.planif], { documentos_por_entregar: 1 }),
     ].join(" | ");
   });

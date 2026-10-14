@@ -25,9 +25,25 @@ aprobar: 2 de 5 (1 capturado (sin revisar), 1 revisado, sin aprobar). Pendientes
 `POST /informes/condiciones` devuelve lo mismo **sin escribir nada** (`puedeEmitir`,
 `faltantes[]`, `pasos[]` con sus responsables): es lo que usa la pantalla para avisar antes.
 
-Tipo de documento de la matriz: por defecto sale de la plantilla (I.ENSAYO / CERTIFICADO /
-PLANILLA / BOLETIN / OTRO → `INFORME_ENSAYO`; IVC → `IVC`; I.TECNICO → `INFORME_TECNICO`);
-quien emite puede indicar otro (`CERTIFICADO_CALIBRACION`, `INFORME_INSPECCION`…).
+Tipo de documento de la matriz (decide quién firma), por este orden
+(`reglas-emision.ts · tipoDocumentoPorDefecto`):
+
+1. el que indica quien emite (`CERTIFICADO_CALIBRACION`, `INFORME_INSPECCION`…);
+2. el propio de la plantilla si es de tipo específico (IVC → `IVC`; I.TECNICO → `INFORME_TECNICO`);
+3. el de la **unidad de la OT** (`unidad.tipo_documento_defecto`, heredado por la rama):
+   el Banco de Pruebas de Chile, sus sucursales y la Delegación Nº 11 → `INFORME_INSPECCION`
+   (align_correcciones_manuales.sql; se cambia por unidad con SQL, sin tocar código);
+4. el de la plantilla (I.ENSAYO / CERTIFICADO / PLANILLA / BOLETIN / OTRO → `INFORME_ENSAYO`).
+
+`POST /informes/condiciones` devuelve además `tipoDocumentoOrigen` (`indicado | plantilla | unidad`)
+y `tipoDocumentoUnidad`, y la pantalla lo muestra. Si un paso obligatorio de la matriz no tiene
+responsables, el mensaje dice cuál, en qué unidad y las salidas: «Paso 1 de la matriz de «Informe
+de ensayo» (revisa · Analista revisor): nadie tiene el rol «Analista revisor» en SSTGO. Para
+resolverlo: asigne ese rol a una persona de SSTGO (Administración › Usuarios), o cree una regla
+propia para SSTGO en Administración › Matriz de firmas, o emita con otro tipo de documento.»
+
+**Reapertura de un resultado aprobado** (docs/FLUJO_LABORATORIO.md §4): anula los documentos en
+firma u oficiales de la OT con el motivo; tras aprobar de nuevo se **reemiten** (nueva versión).
 
 ## 2. Circuito de firma
 
@@ -159,6 +175,7 @@ hay que volver a iniciar sesión para verlos.
 
 ## 9. Pendiente / fuera de este cambio
 
-- `nota_credito` arrastra la misma deriva que tenía `factura` (`tenant_id` y `codigo` NOT NULL
-  que Prisma no rellena): crear una nota de crédito desde la API sigue fallando.
+- ~~`nota_credito` arrastraba la misma deriva que `factura`~~: corregido en
+  `align_correcciones_manuales.sql` (disparador `trg_nota_credito_alinear`: `codigo` = `numero`,
+  `tenant_id` de la factura).
 - El envío por correo depende de que el SMTP del tenant esté configurado (`/config-correo`).

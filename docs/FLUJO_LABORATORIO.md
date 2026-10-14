@@ -35,6 +35,23 @@ Cambiarlo exige motivo; se retiran las asignaciones del personal del
 laboratorio anterior. Todo queda en `ot_historial` (quién, cuándo, desde,
 hacia, motivo) y se ve en la pestaña «Historial» del expediente.
 
+## 1b. Recepción de las muestras desde el expediente
+
+Pestaña «Muestras» del expediente de la OT (`ot/[id]/_components/RegistroMuestras.tsx`).
+Sirve para cualquier OT abierta, en especial la que nace al aceptar una cotización
+(antes solo «Registrar OT» generaba ensayos y «Muestras › + Nuevo» creaba la muestra vacía).
+
+- `GET /flujo/ot/:id/registro-muestras` (`muestra.ver`): muestras de la OT (con sus ensayos y
+  métodos) y, si viene de una cotización, sus líneas con los métodos del catálogo de cada ensayo.
+  Un ensayo con un solo método lo trae **marcado**; con varios, hay que elegir (no se adivina).
+- `POST /flujo/ot/:id/muestras` (`muestra.crear`: Recepción, Planificación, jefaturas…)
+  `{ muestras: [{ nombre, metodoIds[] }] }`: crea las muestras (`<OT>-M1`, `-M2`…, sin repetir) y
+  sus ensayos por analizar con la especificación y la fórmula del catálogo (el mismo puente que
+  `generar-analisis`). La pantalla permite además buscar otros métodos en el catálogo.
+- Valida OT abierta, descripción y métodos existentes con analitos (400 con la lista). Exige que la
+  OT sea del alcance del usuario. Queda en el historial de la OT (`registro_muestras`).
+- `flujo-completo.js` registra la muestra por esta misma ruta.
+
 ## 2. Asignación de analistas
 
 Permiso `ot.asignar` (jefaturas). Pestaña «Asignación» del expediente.
@@ -114,6 +131,16 @@ pendiente ─captura─▶ capturado ──revisar──▶ revisado_n1 ──ap
 | Corregir por réplicas | `resultado.crear` | `POST /resultados/:id/recapturar` |
 
 - Quien capturó un resultado no lo revisa ni lo aprueba (409). En la acción por OT completa esos resultados se omiten y se dice por qué.
+- **Reabrir un resultado aprobado** (`POST /resultados/:id/reabrir { motivo }`, permiso `resultado.reabrir`:
+  jefaturas y Dirección; botón «Reabrir» en «Captura y revisión por OT»): si al revisar o firmar el
+  informe se detecta un valor erróneo. El resultado vuelve a `devuelto` (el analista lo corrige y se
+  repite revisión y aprobación, con la misma segregación); los documentos de la OT **en firma u
+  oficiales se anulan** con el motivo y, tras aprobar de nuevo, se reemiten como nueva versión
+  (`FLUJO_FIRMA_CIERRE.md`). No se reabre en una OT cerrada o anulada (409). Traza: `resultado.reabierto_*`,
+  `reaperturas` y `ot_historial` (`reapertura_resultado`, con el valor y la aprobación anteriores).
+- **Control de calidad** (`/qc`): misma independencia. Al registrar, un control que cumple su
+  criterio queda **pendiente** (con su evaluación automática a la vista) y uno que no, rechazado.
+  Aprobarlo exige `resultado.revisar` y no haberlo registrado (409); todo exige el alcance de la OT.
 - Lo revisado o aprobado no se sobrescribe: hay que devolverlo antes (409).
 - Todas las acciones exigen que el resultado sea de un laboratorio del alcance del usuario (403).
 - Se registra quién capturó, revisó (o devolvió) y aprobó, y cuándo.
