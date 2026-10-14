@@ -33,12 +33,13 @@ export default function LoginPage() {
 
   // Acceso de prueba: un clic entra con ese perfil (el usuario queda escrito
   // en el formulario para que se vea con quién se ingresó).
+  // Acceso de prueba: el perfil elegido carga usuario y contraseña en el
+  // formulario; se entra con «Entrar al sistema».
   function entrarDemo(usuario: string, clave: string) {
     setUsername(usuario);
-    void entrar(usuario, clave).then((ok) => {
-      // Solo se recuerda (en esta pestaña) una clave que acaba de funcionar.
-      if (ok) { try { sessionStorage.setItem("lims_demo_clave", clave); } catch { /* sin almacenamiento */ } }
-    });
+    setPassword(clave);
+    setError(null);
+    setTimeout(() => document.getElementById("btn-entrar")?.focus(), 0);
   }
 
   return (
@@ -73,7 +74,7 @@ export default function LoginPage() {
 
         {error && <div className="alert warn" style={{ borderLeftColor: "var(--red)", background: "#fdecec", color: "#7d1f1f" }}>{error}</div>}
 
-        <button type="submit" disabled={loading} className="btn primary" style={{ width: "100%", justifyContent: "center", padding: "11px", marginTop: 4 }}>
+        <button id="btn-entrar" type="submit" disabled={loading} className="btn primary" style={{ width: "100%", justifyContent: "center", padding: "11px", marginTop: 4 }}>
           {loading ? "Iniciando sesión…" : "Entrar al sistema"}
         </button>
 

@@ -113,7 +113,7 @@ export default function AccesosDemo({
     <section className="demo-accesos" aria-label="Accesos de prueba">
       <div className="demo-titulo">
         Accesos de prueba (temporal)
-        {datos.clave ? <> · clave <span className="demo-clave">{datos.clave}</span></> : <> · use la clave de prueba</>}
+        {datos.clave ? <> · contraseña <span className="demo-clave">{datos.clave}</span></> : <> · use la clave de prueba</>}
       </div>
 
       <div className="demo-pestanas" role="tablist">
@@ -155,7 +155,7 @@ export default function AccesosDemo({
       )}
 
       {aviso && <p className="demo-aviso">{aviso}</p>}
-      <p className="demo-nota">Usuarios ficticios para validar qué ve cada perfil. No existen en la instalación del IDIC.</p>
+      <p className="demo-nota">Pulse un perfil: se cargan su usuario y contraseña; después «Entrar al sistema». Usuarios ficticios para validar qué ve cada perfil.</p>
     </section>
   );
 }

@@ -13,22 +13,21 @@ En el `.env` del servidor (preproducción usa `docker-compose.prod.yml`):
 
 ```
 ACCESOS_DEMO=true
-ACCESOS_DEMO_CLAVE=<clave compartida, mínimo 8 caracteres>
-ACCESOS_DEMO_MOSTRAR_CLAVE=false
 ```
 
-- `ACCESOS_DEMO_CLAVE` es la contraseña común de todos los usuarios de prueba.
-  Genere una propia; no se guarda en el repositorio ni en la base de datos.
-- Con `ACCESOS_DEMO_MOSTRAR_CLAVE=true` la clave queda escrita en la pantalla de
-  ingreso y basta un clic. Úselo solo si el entorno **no** es accesible desde
-  Internet: cualquiera que abra la página entraría con cualquier perfil.
-- Con `false`, quien prueba escribe la clave una vez en «Contraseña» y pulsa el
-  perfil; el navegador la recuerda mientras dure la pestaña.
+- Todos los usuarios de prueba comparten una contraseña **temporal embebida en
+  el código** (`CLAVE_DEMO_EMBEBIDA` en `apps/api/src/auth/auth.service.ts`).
+  Se muestra en la pantalla de ingreso: al pulsar un perfil se cargan su
+  usuario y su contraseña en el formulario y se entra con «Entrar al sistema».
+- Decisión de la fase de validación: se cambiará antes de producción.
+  `ACCESOS_DEMO_CLAVE` la sustituye sin tocar el código y
+  `ACCESOS_DEMO_MOSTRAR_CLAVE=false` la oculta de la pantalla.
 
 Después: `docker compose -f docker-compose.prod.yml --env-file .env up -d api`.
 
 Para desactivarlos basta `ACCESOS_DEMO=false`: los usuarios siguen existiendo
-pero no pueden entrar (no tienen contraseña propia).
+pero no pueden entrar (no tienen contraseña propia). En la instalación del IDIC
+la variable no existe y los usuarios de prueba no se siembran.
 
 ## Qué usuarios hay
 

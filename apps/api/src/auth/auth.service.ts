@@ -30,10 +30,16 @@ const DUMMY_ARGON2_HASH =
  * servidor declara ACCESOS_DEMO=true y una clave compartida de al menos 8
  * caracteres. Sin ambas, los usuarios de prueba (usuario.es_demo) son inertes.
  */
+// Contraseña TEMPORAL común de los usuarios de prueba (fase de validación).
+// Se muestra en la pantalla de ingreso y cada perfil la carga con un clic.
+// ACCESOS_DEMO_CLAVE la sustituye. Antes de producción se elimina todo esto.
+export const CLAVE_DEMO_EMBEBIDA = "LimsIdic2026";
+
 export function accesosDemo(): { habilitado: boolean; clave: string; mostrarClave: boolean } {
-  const clave = process.env.ACCESOS_DEMO_CLAVE ?? "";
+  const clave = process.env.ACCESOS_DEMO_CLAVE || CLAVE_DEMO_EMBEBIDA;
   const habilitado = process.env.ACCESOS_DEMO === "true" && clave.length >= 8;
-  return { habilitado, clave, mostrarClave: habilitado && process.env.ACCESOS_DEMO_MOSTRAR_CLAVE === "true" };
+  // Visible por defecto; ACCESOS_DEMO_MOSTRAR_CLAVE=false la oculta.
+  return { habilitado, clave, mostrarClave: habilitado && process.env.ACCESOS_DEMO_MOSTRAR_CLAVE !== "false" };
 }
 
 /** Comparación en tiempo constante (sobre SHA-256, para igualar longitudes). */
