@@ -312,20 +312,22 @@ Si `esGlobal`, `unidadesVisibles` trae todas las unidades activas.
 
 | Perfil | Claves |
 |---|---|
-| ANALISTA | `ot_asignadas` (ot_analista), `ot_en_curso`, `resultados_devueltos`, `firmas_pendientes` (ot_firma) |
+| ANALISTA | `ot_asignadas` (ot_analista), `ot_en_curso`, `resultados_devueltos`, `firmas_pendientes` |
 | REVISOR | `resultados_por_revisar`, `ot_asignadas`, `resultados_devueltos`, `ot_por_vencer`, `firmas_pendientes` |
-| JEFE_LAB | `resultados_por_revisar`, `resultados_por_aprobar`, `firmas_pendientes`, `ot_vencidas`, `ot_por_vencer`, `informes_por_oficializar` |
+| JEFE_LAB | `resultados_por_revisar`, `resultados_por_aprobar`, `firmas_pendientes`, `documentos_por_entregar`, `ot_listas_cerrar`, `ot_vencidas`, `ot_por_vencer`, `informes_por_oficializar` |
 | JEFE_SECCION / JEFE_DEPTO | `firmas_pendientes`, `informes_por_oficializar`, `resultados_por_aprobar`, `ot_vencidas`, `ot_vencidas_<LAB>` (una por laboratorio con atraso), `ot_abiertas` |
 | DIRECTOR | `firmas_pendientes`, `informes_por_oficializar`, `ot_vencidas`, `ot_vencidas_<LAB>`, `ot_abiertas`, `nc_abiertas`, `cotizaciones_aceptadas_sin_ot` |
-| COMERCIAL | `cotizaciones_por_vencer` (7 días), `cotizaciones_aceptadas_sin_ot`, `ot_por_vencer` |
-| PLANIFICACION | `ot_vencidas`, `ot_vencidas_<LAB>`, `ot_por_vencer`, `ot_abiertas`, `cotizaciones_aceptadas_sin_ot` |
-| FINANZAS | `ot_cerradas_sin_factura`, `facturas_por_cobrar` |
+| COMERCIAL | `cotizaciones_por_vencer` (7 días), `cotizaciones_aceptadas_sin_ot`, `ot_por_vencer`, `documentos_por_entregar` |
+| PLANIFICACION | `ot_vencidas`, `ot_vencidas_<LAB>`, `ot_por_vencer`, `ot_listas_cerrar`, `documentos_por_entregar`, `ot_abiertas`, `cotizaciones_aceptadas_sin_ot` |
+| FINANZAS | `facturas_pendientes` («Pendientes de facturar»), `facturas_por_cobrar` (emitidas y con pago parcial), `ot_cerradas_sin_factura` (con cobro, cerradas antes del cierre automático) |
 | ABASTECIMIENTO | `oc_pendientes` |
-| CALIDAD | `nc_abiertas`, `informes_por_oficializar`, `ot_vencidas` |
+| CALIDAD | `firmas_pendientes`, `nc_abiertas`, `informes_por_oficializar`, `ot_vencidas` |
 | ADMIN | `usuarios_sin_rol`, `usuarios_bloqueados`, `unidades_sin_jefe` |
 | LECTOR | `ot_abiertas` |
 
 Cada conteo es defensivo: si la tabla/columna no existe en la BD, ese ítem vale 0.
+
+`firmas_pendientes` cuenta los informes/certificados cuyo **paso actual** de la matriz de firmas tiene al usuario como responsable (tabla `documento_firma`) y enlaza a `/informes/por-firmar`. `ot_vencidas` / `ot_por_vencer` usan el mismo semáforo que la lista de OT (OT no cerradas ni anuladas; vencida = fecha de compromiso anterior a hoy en Chile; por vencer = hoy a +3 días) y enlazan a `/ot?semaforo=vencida|por_vencer`. Detalle en `docs/FLUJO_FIRMA_CIERRE.md`.
 
 ---
 
