@@ -62,18 +62,33 @@ export const fmtN = (x: unknown, d = 3) =>
 export type OpcionMotor = { clave: string; hallazgo: string; etiqueta: string };
 export type MotorInfo = {
   it: string; magnitud: string; nombre: string; unidad: string; unidadU: string;
+  /** false = cálculo estándar sin planilla real con la que compararse (formulario por puntos). */
+  validado?: boolean;
   opciones: OpcionMotor[]; casos: { caso: string; instrumento: string }[];
 };
-export type PuntoResumen = { nominal: number; error: number | null; uc: number | null; U: number; Ucert: number | null; conforme: boolean | null };
+export type PuntoResumen = {
+  nominal: number; error: number | null; uc: number | null; U: number; Ucert: number | null; conforme: boolean | null;
+  /** Clase ISO 376 del rango que empieza en el punto (LNF). */
+  clase?: string;
+  /** Unidad propia del punto (formulario por puntos). */
+  unidad?: string;
+};
 export type CalculoMotor = {
   motor: string;
   resultado: any;
-  resumen: { puntos: PuntoResumen[]; uMax: number; uCert: number | null; conforme: boolean | null };
+  resumen: { puntos: PuntoResumen[]; uMax: number; uCert: number | null; conforme: boolean | null; extra?: { etiqueta: string; valor: string }[] };
 };
 
-/** Motor de un proceso (ITV02a/g/c comparten ITV02). */
-export const motorDe = (motores: MotorInfo[], codigo: string) =>
+/** Motor de un proceso: el que indica el servidor o, si no, por código (ITV02a/g/c comparten ITV02). */
+export const motorDe = (motores: MotorInfo[], codigo: string, it?: string | null) =>
+  (it ? motores.find((m) => m.it === it) : undefined) ??
   motores.find((m) => m.it === codigo) ?? motores.find((m) => m.it === codigo.replace(/[a-z]$/, ""));
+
+/** Nombre visible de cada laboratorio de la Sección Metrología. */
+export const LAB_NOMBRE: Record<string, string> = {
+  LMT: "LMT · Calibración Área Mecánica", LMTE: "LMTE · Calibración Área Eléctrica",
+  LNF: "LNF · Laboratorio Nacional de Fuerza", LCAD: "LCAD · Metrología",
+};
 
 /** Número con 6 cifras significativas y coma decimal. */
 export const fmtG = (x: unknown) =>
@@ -107,4 +122,17 @@ export const ETIQUETA_ENTRADA: Record<string, string> = {
   UP: "U del patrón", pcl: "Clase del patrón", rep: "Reproducibilidad", lp: "Punto de carga", geo: "Efectos geométricos", itf: "Interfaz",
   curve: "Curva del transductor", WP: "W del patrón", cmc: "CMC", nomT: "Nominal (g)", L: "Lecturas p-m-m-p", cls: "Clase declarada",
   T: "Temperatura inicio / término", H: "Humedad inicio / término", dmp: "Corrección de la masa de referencia", dev: "Desviación de la masa",
+};
+
+/** Nombres propios de las entradas de un motor (tienen prioridad sobre ETIQUETA_ENTRADA). */
+export const ETIQUETA_MOTOR: Record<string, Record<string, string>> = {
+  "LCPNF-IT01": {
+    sentido: "Sentido (TRACCIÓN / COMPRESIÓN)", resInd: "Resolución del indicador (mV/V)", div: "N° de divisiones",
+    decRes: "Decimales de la resolución", conv: "Conversión a kN", fmin: "Rango mínimo (kN)", fmax: "Rango máximo (kN)",
+    urelSmp: "U relativa del SMP (UREL95)", grado: "Grado de interpolación (1, 2 o 3)", interp: "Incluir error de interpolación (SI / NO)",
+    dec: "Decimales de los promedios", tIni: "Temperatura al inicio (°C)", hr: "Humedad relativa (%)", hrU: "U de la humedad (%)",
+    temp: "Temperatura al final de cada serie (°C)", pre: "Precargas: 0 / Fmáx / 0 (mV/V)",
+    z0: "Cero inicial de I1, I2, I3 e I5 (mV/V)", zf: "Cero final de I1, I2 y tras I4 e I6 (mV/V)",
+    F: "Fuerza (kN)", s: "Serie I",
+  },
 };
