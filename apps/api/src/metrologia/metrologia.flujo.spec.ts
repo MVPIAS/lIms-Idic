@@ -20,10 +20,11 @@ describe("Circuito del certificado de calibración", () => {
     expect(accionesDisponibles(c)).toEqual(["DEVOLVER", "EMITIR"]);
   });
 
-  it("quien elaboró no puede emitir su propia calibración aunque tenga el permiso", () => {
+  it("quien elaboró la calibración puede emitirla si tiene metrologia.emitir", () => {
     const c = ctx({ estado: "en_revision", esAutor: true, puedeEmitir: true });
-    expect(motivoRechazo("EMITIR", c)).toMatch(/otra persona/);
-    expect(motivoRechazo("DEVOLVER", c)).toMatch(/otra persona/);
+    expect(motivoRechazo("EMITIR", c)).toBeNull();
+    expect(motivoRechazo("DEVOLVER", c)).toBeNull();
+    expect(accionesDisponibles(c)).toEqual(["DEVOLVER", "EMITIR"]);
   });
 
   it("sin metrologia.emitir no se emite", () => {

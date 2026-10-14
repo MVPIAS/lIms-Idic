@@ -70,8 +70,8 @@ borrador ──Enviar a revisión──▶ en_revision ──Emitir──▶ emi
 |---|---|---|
 | Guardar / editar borrador | `metrologia.crear` | Solo el autor edita su borrador |
 | Enviar a revisión | `metrologia.crear` | Solo el autor; la calibración debe estar calculada |
-| Devolver | `metrologia.emitir` | Motivo obligatorio (mín. 5 caracteres); no puede ser el autor |
-| Emitir | `metrologia.emitir` | Solo lo enviado a revisión; no puede ser el autor |
+| Devolver | `metrologia.emitir` | Motivo obligatorio (mín. 5 caracteres); puede ser el autor |
+| Emitir | `metrologia.emitir` | Solo lo enviado a revisión; puede ser el autor si tiene el permiso (decisión del 14-10-2026) |
 
 Corresponde al flujo del LMT (LMT-PG01-Anexo 01: el metrólogo elabora, el jefe
 del laboratorio revisa, valida y firma) y del LNF (Bizagi 4.2.10: firma del
