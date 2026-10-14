@@ -3,6 +3,7 @@ import {
   ConflictException,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Injectable,
   Module,
@@ -21,6 +22,8 @@ import { PrismaService } from "../common/prisma.service";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
+import { AlcanceService } from "../rbac/alcance.service";
+import { motivoNoRevisable, resultadoAlRegistrar } from "./reglas-qc";
 
 /**
  * =============================================================================
@@ -38,8 +41,13 @@ import { RequierePermiso } from "../auth/permisos.decorator";
  * un `qc_control` con resultado 'aprobado'.
  *
  * DDL: packages/db/align_qc.sql. Permisos RBAC reales del dominio laboratorio:
- *   · resultado.ver   → lectura del QC.
- *   · resultado.crear → registrar/aprobar/rechazar controles.
+ *   · resultado.ver     → lectura del QC.
+ *   · resultado.crear   → registrar, rechazar o retirar controles.
+ *   · resultado.revisar → APROBAR un control, nunca el que registró uno mismo
+ *     (segregación de funciones, como en resultados: reglas-qc.ts). Al
+ *     registrar, un control que cumple su criterio queda «pendiente» de esa
+ *     aprobación; uno que no lo cumple, «rechazado».
+ * Todas las acciones exigen que la OT sea del alcance del usuario.
  * =============================================================================
  */
 
@@ -104,9 +112,9 @@ const RegistrarControlSchema = z.object({
 });
 type RegistrarControl = z.infer<typeof RegistrarControlSchema>;
 
+// `aprobadoPor` ya no lo elige el cliente (se ignora si llega): es quien hace la acción.
 const RevisarControlSchema = z.object({
   resultado: z.enum(["aprobado", "rechazado", "pendiente"]),
-  aprobadoPor: z.string().max(120).optional(),
   observaciones: z.string().max(1000).optional(),
 });
 
@@ -197,8 +205,18 @@ export class QcService {
     return ot;
   }
 
-  /** Registra un control con su evaluación automática. */
-  async registrar(otId: string, body: RegistrarControl, tenantId: string) {
+  /** OT de un control (para comprobar el alcance por laboratorio). */
+  async otDeControl(controlId: string, tenantId: string) {
+    const c = await this.prisma.qcControl.findFirst({ where: { id: controlId, tenantId, deletedAt: null }, select: { otId: true } });
+    if (!c) throw new NotFoundException(`Control de calidad ${controlId} no encontrado`);
+    return this.otDelTenant(c.otId, tenantId);
+  }
+
+  /**
+   * Registra un control con su evaluación automática. Si cumple su criterio
+   * queda «pendiente» de que OTRA persona lo apruebe (reglas-qc.ts).
+   */
+  async registrar(otId: string, body: RegistrarControl, tenantId: string, usuarioId?: string) {
     await this.otDelTenant(otId, tenantId);
     const metodo = await this.prisma.catMetodo.findFirst({
       where: { id: body.catMetodoId, tenantId, deletedAt: null },
@@ -216,7 +234,9 @@ export class QcService {
         valorEsperado: body.valorEsperado ?? null,
         valorObtenido: body.valorObtenido ?? null,
         criterio: body.criterio ?? null,
-        resultado: ev.resultado,
+        resultado: resultadoAlRegistrar(ev.resultado),
+        evaluacion: ev.resultado,
+        registradoPor: usuarioId ?? null,
         rCuadrado: ev.rCuadrado,
         recuperacionPct: ev.recuperacionPct,
         cvPct: ev.cvPct,
@@ -226,25 +246,32 @@ export class QcService {
     });
   }
 
-  /** Aprobación/rechazo manual (deja aprobado_por/aprobado_at para no repudio). */
+  /**
+   * Aprobación/rechazo manual (deja aprobado_por/aprobado_at para no repudio).
+   * Aprobar exige `resultado.revisar` y no ser quien registró el control.
+   */
   async revisar(
     controlId: string,
     body: z.infer<typeof RevisarControlSchema>,
     tenantId: string,
-    usuario?: string,
+    usuario: { id?: string; nombre?: string; puedeRevisar: boolean },
   ) {
     const control = await this.prisma.qcControl.findFirst({
       where: { id: controlId, tenantId, deletedAt: null },
     });
     if (!control) throw new NotFoundException(`Control de calidad ${controlId} no encontrado`);
 
-    const aprobadoPor = body.aprobadoPor ?? usuario ?? null;
+    const bloqueo = motivoNoRevisable(body.resultado, { registradoPor: control.registradoPor ?? null }, usuario.id, usuario.puedeRevisar);
+    if (bloqueo) throw bloqueo.codigo === 403 ? new ForbiddenException(bloqueo.mensaje) : new ConflictException(bloqueo.mensaje);
+
+    const pendiente = body.resultado === "pendiente";
     return this.prisma.qcControl.update({
       where: { id: controlId },
       data: {
         resultado: body.resultado,
-        aprobadoPor: body.resultado === "pendiente" ? null : aprobadoPor,
-        aprobadoAt: body.resultado === "pendiente" ? null : new Date(),
+        aprobadoPor: pendiente ? null : usuario.nombre ?? usuario.id ?? null,
+        aprobadoPorId: pendiente ? null : usuario.id ?? null,
+        aprobadoAt: pendiente ? null : new Date(),
         ...(body.observaciones !== undefined ? { observaciones: body.observaciones } : {}),
       },
       include: { catMetodo: { select: { id: true, codigo: true, nombre: true } } },
@@ -349,33 +376,59 @@ export class QcService {
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("qc")
 export class QcController {
-  constructor(private readonly svc: QcService) {}
+  constructor(
+    private readonly svc: QcService,
+    private readonly prisma: PrismaService,
+    private readonly alcance: AlcanceService,
+  ) {}
+
+  /** La OT debe existir y ser de un laboratorio del alcance del usuario (404 / 403). */
+  private async exigirOt(otId: string, req: any) {
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id: otId, tenantId: tenantDe(req) },
+      select: { codigo: true, unidadPrincipal: true },
+    });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+  }
 
   @Get("ot/:otId")
   @RequierePermiso(PERM.ver)
   @ApiOperation({ summary: "Controles de QC de la OT + estado global {aprobado, faltantes}" })
-  estado(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+  async estado(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    await this.exigirOt(otId, req);
     return this.svc.estadoOt(otId, tenantDe(req));
   }
 
   @Post("ot/:otId/control")
   @RequierePermiso(PERM.gestionar)
-  @ApiOperation({ summary: "Registra un control (blanco/estandar/curva/duplicado) con evaluación automática" })
-  registrar(@Param("otId", ParseUUIDPipe) otId: string, @Body() body: unknown, @Req() req: any) {
-    return this.svc.registrar(otId, RegistrarControlSchema.parse(body), tenantDe(req));
+  @ApiOperation({ summary: "Registra un control con evaluación automática (si cumple, queda pendiente de aprobación por otra persona)" })
+  async registrar(@Param("otId", ParseUUIDPipe) otId: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirOt(otId, req);
+    return this.svc.registrar(otId, RegistrarControlSchema.parse(body), tenantDe(req), req?.user?.sub);
   }
 
   @Patch("control/:id")
   @RequierePermiso(PERM.gestionar)
-  @ApiOperation({ summary: "Aprobación/rechazo manual del control (registra aprobado_por)" })
-  revisar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    return this.svc.revisar(id, RevisarControlSchema.parse(body), tenantDe(req), usuarioDe(req));
+  @ApiOperation({ summary: "Aprobación (resultado.revisar, no quien lo registró) o rechazo manual del control" })
+  async revisar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const ot = await this.svc.otDeControl(id, tenantDe(req));
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    const roles: string[] = req?.user?.roles ?? [];
+    const puedeRevisar = roles.includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("resultado.revisar");
+    return this.svc.revisar(id, RevisarControlSchema.parse(body), tenantDe(req), {
+      id: req?.user?.sub,
+      nombre: usuarioDe(req),
+      puedeRevisar,
+    });
   }
 
   @Delete("control/:id")
   @RequierePermiso(PERM.gestionar)
   @ApiOperation({ summary: "Retira (soft delete) un control no aprobado registrado por error" })
-  eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const ot = await this.svc.otDeControl(id, tenantDe(req));
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return this.svc.eliminar(id, tenantDe(req));
   }
 }

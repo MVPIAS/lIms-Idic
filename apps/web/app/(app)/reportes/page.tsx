@@ -8,6 +8,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { clp, num, pct, fecha } from "@/lib/format";
+import { usePermisos } from "@/lib/permisos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -17,12 +18,13 @@ const auth = () => ({
 
 type Tab = "productividad" | "conformidad" | "plazos" | "comercial" | "exportador";
 
-const TABS: { key: Tab; label: string }[] = [
-  { key: "productividad", label: "Productividad" },
-  { key: "conformidad", label: "Conformidad" },
-  { key: "plazos", label: "Plazos" },
-  { key: "comercial", label: "Comercial" },
-  { key: "exportador", label: "Exportador CSV" },
+/** Cada pestaña con el permiso que exige su API (/reportes/*). */
+const TABS: { key: Tab; label: string; perm: string }[] = [
+  { key: "productividad", label: "Productividad", perm: "reporte.ver" },
+  { key: "conformidad", label: "Conformidad", perm: "reporte.ver" },
+  { key: "plazos", label: "Plazos", perm: "reporte.ver" },
+  { key: "comercial", label: "Comercial", perm: "reporte.comercial.ver" },
+  { key: "exportador", label: "Exportador CSV", perm: "reporte.ver" },
 ];
 
 async function getJson(path: string): Promise<any> {
@@ -32,7 +34,11 @@ async function getJson(path: string): Promise<any> {
 }
 
 export default function ReportesPage() {
-  const [tab, setTab] = useState<Tab>("productividad");
+  const { puede, listo, unidadGlobal } = usePermisos();
+  // Solo las pestañas que el perfil puede ver; abre en la primera permitida.
+  const tabs = useMemo(() => (listo ? TABS.filter((t) => puede(t.perm)) : []), [listo, puede]);
+  const [tabElegida, setTab] = useState<Tab | null>(null);
+  const tab: Tab | null = tabs.some((t) => t.key === tabElegida) ? tabElegida : tabs[0]?.key ?? null;
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
 
@@ -50,6 +56,7 @@ export default function ReportesPage() {
       <p className="subtitle">
         Indicadores de gestión (KPIs, §4.5.3) y exportación de datos a CSV con filtros (§4.6.6 / §4.6.7).
         Todos los reportes son de solo lectura y respetan el rango de fechas seleccionado.
+        {listo && !unidadGlobal && " Las cifras corresponden a los laboratorios de su alcance."}
       </p>
 
       <div className="card" style={{ marginBottom: 12 }}>
@@ -69,13 +76,14 @@ export default function ReportesPage() {
       </div>
 
       <div className="tabs" style={{ marginBottom: 14 }}>
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button key={t.key} className={`tab ${tab === t.key ? "active" : ""}`} onClick={() => setTab(t.key)}>
             {t.label}
           </button>
         ))}
       </div>
 
+      {listo && !tabs.length && <div className="alert warn">Su perfil no tiene acceso a ningún reporte.</div>}
       {tab === "productividad" && <Productividad rango={rango} />}
       {tab === "conformidad" && <Conformidad rango={rango} />}
       {tab === "plazos" && <Plazos rango={rango} />}

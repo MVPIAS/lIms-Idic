@@ -67,3 +67,58 @@ export function clasificarParaAccion(
   }
   return { aplicables, omitidos };
 }
+
+/* -------------------------------------------------------------------------- */
+/* Reapertura de un resultado aprobado (docs/FLUJO_LABORATORIO.md §4)          */
+/* -------------------------------------------------------------------------- */
+
+export interface DocumentoDeOt {
+  id: string;
+  numero: string | null;
+  estado: string;
+  entregadoAt?: Date | string | null;
+}
+
+/** Documentos que siguen valiendo para la OT: en firma u oficiales ('emitido' = oficial previo al circuito). */
+const ESTADOS_DOC_VIGENTE = new Set(["en_firma", "oficial", "emitido"]);
+
+/**
+ * Qué pasa al reabrir un resultado aprobado:
+ *  · solo se reabre lo `aprobado` (lo demás se corrige devolviéndolo);
+ *  · no se reabre en una OT cerrada o anulada (ya facturada / sin efecto);
+ *  · todo documento vigente de la OT (en firma u oficial) se ANULA: lleva el
+ *    valor que se va a corregir. Tras aprobar de nuevo se REEMITE como nueva
+ *    versión (docs/FLUJO_FIRMA_CIERRE.md: anular y reemitir);
+ *  · si alguno ya se entregó al cliente se avisa, para comunicarle la anulación.
+ */
+export function planReapertura(
+  estadoResultado: string | null | undefined,
+  ot: { estado: string; codigo: string } | null,
+  documentos: DocumentoDeOt[],
+): { error: string | null; anular: DocumentoDeOt[]; avisos: string[] } {
+  if (estadoResultado !== "aprobado")
+    return {
+      error: "Solo se reabre un resultado aprobado. Si aún no está aprobado, devuélvalo al analista con un motivo.",
+      anular: [],
+      avisos: [],
+    };
+  if (ot && (ot.estado === "cerrada" || ot.estado === "anulada"))
+    return {
+      error: `La OT ${ot.codigo} está ${ot.estado}: sus resultados ya no se pueden reabrir.`,
+      anular: [],
+      avisos: [],
+    };
+  const anular = documentos.filter((d) => ESTADOS_DOC_VIGENTE.has(d.estado));
+  const avisos: string[] = [];
+  if (anular.length)
+    avisos.push(
+      `Se anula${anular.length > 1 ? "n" : ""} ${anular.map((d) => d.numero ?? d.id).join(", ")}: ` +
+        "cuando el resultado se apruebe de nuevo, reemita el documento como nueva versión.",
+    );
+  const entregados = anular.filter((d) => d.entregadoAt);
+  if (entregados.length)
+    avisos.push(
+      `${entregados.map((d) => d.numero ?? d.id).join(", ")} ya se entregó al cliente: comuníquele la anulación y entréguele la nueva versión.`,
+    );
+  return { error: null, anular, avisos };
+}

@@ -36,6 +36,44 @@ export function tipoDocumentoDePlantilla(tipoPlantilla: string | null | undefine
   return TIPO_POR_PLANTILLA[(tipoPlantilla ?? "").toUpperCase()] ?? "INFORME_ENSAYO";
 }
 
+/** Plantillas cuyo tipo de documento es propio y no depende de la unidad. */
+const PLANTILLAS_TIPO_PROPIO = new Set(["IVC", "I.TECNICO"]);
+
+/** Nombre legible de cada tipo de documento de la matriz. */
+export const NOMBRE_TIPO_DOCUMENTO: Record<string, string> = {
+  INFORME_ENSAYO: "Informe de ensayo",
+  IVC: "Informe de verificación (IVC)",
+  INFORME_TECNICO: "Informe técnico",
+  CERTIFICADO_CALIBRACION: "Certificado de calibración",
+  INFORME_INSPECCION: "Informe de inspección",
+  CERTIFICADO_CONFORMIDAD: "Certificado de conformidad",
+  INFORME_INCUMPLIMIENTO: "Informe de incumplimiento",
+};
+const nombreTipo = (t: string) => NOMBRE_TIPO_DOCUMENTO[t] ?? t;
+
+export type OrigenTipoDocumento = "indicado" | "plantilla" | "unidad";
+
+/**
+ * Tipo de documento con el que se emite (y que decide quién firma):
+ *   1. el que indica quien emite;
+ *   2. el propio de la plantilla si es de un tipo específico (IVC, informe técnico);
+ *   3. el de la unidad de la OT (`unidad.tipo_documento_defecto`, heredado por la
+ *      rama: el Banco de Pruebas de Chile, sus sucursales y la Delegación Nº 11
+ *      emiten «Informe de inspección»);
+ *   4. el que corresponde a la plantilla (informe de ensayo).
+ */
+export function tipoDocumentoPorDefecto(p: {
+  indicado?: string | null;
+  tipoPlantilla?: string | null;
+  tipoUnidad?: string | null;
+}): { tipo: string; origen: OrigenTipoDocumento } {
+  if (p.indicado) return { tipo: p.indicado, origen: "indicado" };
+  const pl = (p.tipoPlantilla ?? "").toUpperCase();
+  if (PLANTILLAS_TIPO_PROPIO.has(pl)) return { tipo: tipoDocumentoDePlantilla(pl), origen: "plantilla" };
+  if (p.tipoUnidad) return { tipo: p.tipoUnidad, origen: "unidad" };
+  return { tipo: tipoDocumentoDePlantilla(pl), origen: "plantilla" };
+}
+
 /* ========================================================================== */
 /* Condición de emisión: resultados aprobados                                 */
 /* ========================================================================== */
@@ -115,21 +153,15 @@ export function pasosDesdeMatriz(res: ResolucionFirmas): { pasos: PasoNuevo[]; e
   const errores: string[] = [];
   if (res.origen === "SIN_REGLAS" || res.pasos.length === 0) {
     errores.push(
-      `La matriz de firmas no tiene reglas para el tipo de documento ${res.tipoDocumento}. ` +
-        "Configúrelas en Administración › Matriz de firmas.",
+      `La matriz de firmas no tiene reglas para «${nombreTipo(res.tipoDocumento)}». ` +
+        "Configúrelas en Administración › Matriz de firmas o elija otro tipo de documento.",
     );
     return { pasos: [], errores };
   }
   const pasos: PasoNuevo[] = [];
   for (const p of res.pasos) {
     if (!p.responsables.length) {
-      if (p.obligatorio) {
-        errores.push(
-          `Paso ${p.orden} (${p.accion} · ${p.rol.nombre}${p.unidad ? ` · ${p.unidad.codigo}` : ""}): ` +
-            (p.advertencia ?? "no hay responsables") +
-            ". Asigne el rol o la jefatura correspondiente.",
-        );
-      }
+      if (p.obligatorio) errores.push(mensajePasoSinResponsables(p, res.tipoDocumento));
       continue;
     }
     pasos.push({
@@ -147,6 +179,28 @@ export function pasosDesdeMatriz(res: ResolucionFirmas): { pasos: PasoNuevo[]; e
   }
   if (!pasos.length && !errores.length) errores.push("La matriz de firmas no resolvió ningún firmante.");
   return { pasos, errores };
+}
+
+/**
+ * Mensaje para un paso obligatorio de la matriz sin nadie que lo firme: dice
+ * cuál es el paso, en qué unidad falta la persona y las tres salidas posibles.
+ */
+export function mensajePasoSinResponsables(
+  p: { orden: number; accion: string; rol: { nombre: string }; unidad: { codigo: string; nombre?: string } | null; advertencia: string | null },
+  tipoDocumento: string,
+): string {
+  const paso = `Paso ${p.orden} de la matriz de «${nombreTipo(tipoDocumento)}» (${p.accion.toLowerCase()} · ${p.rol.nombre})`;
+  if (!p.unidad)
+    return (
+      `${paso}: ${p.advertencia ?? "no se encontró la unidad que debe firmar"}. ` +
+      "Revise la estructura en Administración › Estructura o ajuste la regla en Administración › Matriz de firmas."
+    );
+  const u = p.unidad.codigo;
+  return (
+    `${paso}: nadie tiene el rol «${p.rol.nombre}» en ${u}. Para resolverlo: asigne ese rol a una persona de ${u} ` +
+    `(Administración › Usuarios), o cree una regla propia para ${u} en Administración › Matriz de firmas, ` +
+    "o emita con otro tipo de documento."
+  );
 }
 
 /* ========================================================================== */

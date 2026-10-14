@@ -21,6 +21,7 @@ import { errorMensaje } from "@/lib/apiError";
 import { esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { toast, confirmar } from "@/components/ui/feedback";
+import { usePermisos } from "@/lib/permisos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -44,6 +45,10 @@ type Control = {
   recuperacionPct?: string | number | null;
   cvPct?: string | number | null;
   aprobadoPor?: string | null;
+  /** Evaluación automática contra el criterio (al registrar). */
+  evaluacion?: ResultadoQc | null;
+  /** Quien registró el control: no puede aprobarlo (segregación de funciones). */
+  registradoPor?: string | null;
   observaciones?: string | null;
   catMetodo?: { id: string; codigo?: string; nombre?: string } | null;
 };
@@ -134,7 +139,14 @@ const CONTROL_COLUMNS: DataColumn[] = [
     label: "Resultado",
     render: (c: Control) => {
       const rp = RESULTADO_PILL[c.resultado] ?? { texto: c.resultado, pill: "gray" };
-      return <span className={`pill ${rp.pill}`}>{rp.texto}</span>;
+      return (
+        <span>
+          <span className={`pill ${rp.pill}`}>{rp.texto}</span>
+          {c.resultado === "pendiente" && c.evaluacion === "aprobado" && (
+            <small style={{ display: "block", color: "var(--muted)" }}>Cumple el criterio · falta que lo apruebe otra persona</small>
+          )}
+        </span>
+      );
     },
     value: (c: Control) => c.resultado ?? "",
   },
@@ -149,6 +161,7 @@ const CONTROL_COLUMNS: DataColumn[] = [
 ];
 
 export default function QcPage() {
+  const { puede, usuario } = usePermisos();
   const [ots, setOts] = useState<Ot[]>([]);
   const [otId, setOtId] = useState("");
   const [metodos, setMetodos] = useState<Metodo[]>([]);
@@ -250,7 +263,11 @@ export default function QcPage() {
       });
       if (!r.ok) throw new Error(await errorMensaje(r));
       const c: Control = await r.json();
-      setOk(`Control registrado: ${RESULTADO_PILL[c.resultado]?.texto ?? c.resultado}.`);
+      setOk(
+        c.resultado === "pendiente" && c.evaluacion === "aprobado"
+          ? "Control registrado: cumple el criterio. Debe aprobarlo otra persona (revisor o jefatura)."
+          : `Control registrado: ${RESULTADO_PILL[c.resultado]?.texto ?? c.resultado}.`,
+      );
       setFEsperado("");
       setFObtenido("");
       setFObs("");
@@ -466,8 +483,10 @@ export default function QcPage() {
             searchKeys={["metodo", "tipo", "resultado"]}
             acciones={(c: Control) => (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-                {c.resultado !== "aprobado" && (
-                  <button className="btn sm" onClick={() => revisar(c.id, "aprobado")}>
+                {c.resultado !== "aprobado" && puede("resultado.revisar") && (
+                  <button className="btn sm" onClick={() => revisar(c.id, "aprobado")}
+                    disabled={!!c.registradoPor && c.registradoPor === usuario.id}
+                    title={c.registradoPor && c.registradoPor === usuario.id ? "Lo registró usted: debe aprobarlo otra persona" : "Aprobar el control"}>
                     Aprobar
                   </button>
                 )}

@@ -1,3 +1,4 @@
+import { LOCK_MS, MAX_INTENTOS_FALLIDOS } from "./bloqueo";
 import { Injectable, UnauthorizedException, BadRequestException, Inject } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { PrismaClient } from "@prisma/client";
@@ -17,8 +18,7 @@ const TOTP_ISSUER = "LIMS IDIC";
 // Bloqueo temporal de cuenta tras N intentos fallidos consecutivos. Complementa
 // (no sustituye) al rate-limit por IP del ThrottlerGuard. El bloqueo se auto-
 // expira pasada la ventana, evitando un DoS permanente sobre cuentas legítimas.
-const MAX_INTENTOS_FALLIDOS = Number(process.env.AUTH_MAX_INTENTOS ?? 5);
-const LOCK_MS = Number(process.env.AUTH_LOCK_MINUTES ?? 15) * 60_000;
+// Umbral y ventana: auth/bloqueo.ts (compartidos con la bandeja y la lista de usuarios).
 
 // Hash argon2 "señuelo" (de un valor fijo sin uso real). Se verifica contra él
 // cuando el usuario NO existe, para que el coste de CPU del login sea el mismo

@@ -83,6 +83,9 @@ model Unidad {
   codsucdel       String?  @db.VarChar(40)
   centroCosto     String?  @map("centro_costo") @db.VarChar(40)
   orden           Int?     @default(0)
+  /// Tipo de documento con que emite la unidad y su rama por defecto
+  /// (align_correcciones_manuales.sql; BPCH → INFORME_INSPECCION). NULL = el de la plantilla.
+  tipoDocumentoDefecto String? @map("tipo_documento_defecto") @db.VarChar(40)
 
   sede            Sede     @relation(fields: [sedeId], references: [id])
   padre           Unidad?  @relation("UnidadArbol", fields: [padreId], references: [id])
@@ -442,6 +445,11 @@ model QcControl {
   cvPct           Decimal?  @map("cv_pct") @db.Decimal
   aprobadoPor     String?   @map("aprobado_por") @db.VarChar(120)
   aprobadoAt      DateTime? @map("aprobado_at") @db.Timestamptz
+  /// Independencia (align_correcciones_manuales.sql): quién registró el control,
+  /// qué dio la evaluación automática y quién lo aprobó (id). Quien registra no aprueba.
+  registradoPor   String?   @map("registrado_por") @db.Uuid
+  evaluacion      String?   @db.VarChar(20)
+  aprobadoPorId   String?   @map("aprobado_por_id") @db.Uuid
   observaciones   String?
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz
@@ -1043,6 +1051,12 @@ model Resultado {
   /// forma textual (admite resultados cualitativos: 'cumple', 'Declarado'…).
   valorNumerico Decimal? @map("valor_numerico") @db.Decimal(18, 6)
   valorTexto    String?  @map("valor_texto") @db.VarChar(120)
+  /// Reapertura de un resultado aprobado (align_correcciones_manuales.sql):
+  /// quién, cuándo y por qué; `reaperturas` cuenta las veces. Traza completa en ot_historial.
+  reabiertoPor    String?   @map("reabierto_por") @db.Uuid
+  reabiertoAt     DateTime? @map("reabierto_at") @db.Timestamptz
+  reabiertoMotivo String?   @map("reabierto_motivo")
+  reaperturas     Int       @default(0)
 
   muestra    Muestra   @relation(fields: [muestraId], references: [id], onDelete: Cascade)
   analito    Analito?  @relation(fields: [analitoId], references: [id])

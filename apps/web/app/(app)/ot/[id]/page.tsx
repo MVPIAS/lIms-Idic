@@ -10,6 +10,7 @@ import { llamar, etiquetaUnidad } from "@/lib/laboratorio";
 import { toast } from "@/components/ui/feedback";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
+import RegistroMuestras from "./_components/RegistroMuestras";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 
 /** Texto legible de un hecho del historial de la OT. */
@@ -27,6 +28,16 @@ function textoHistorial(h: any): string {
       metodos_de_la_muestra: "deducido de los métodos de la muestra",
     };
     return `Laboratorio responsable: ${hacia}${como[d.origen] ? ` (${como[d.origen]})` : ""}`;
+  }
+  if (h.tipo === "registro_muestras") {
+    const ms: any[] = d.muestras ?? [];
+    const ensayos = ms.reduce((s, m) => s + Number(m.ensayos ?? 0), 0);
+    return `Se registraron ${ms.length} muestra(s) (${ms.map((m) => m.codigo).join(", ")}) con ${ensayos} ensayo(s) por analizar`;
+  }
+  if (h.tipo === "reapertura_resultado") {
+    const docs: any[] = d.documentosAnulados ?? [];
+    return `Resultado reabierto: ${d.muestra ?? ""} · ${d.ensayo ?? ""}${d.motivo ? ` · motivo: ${d.motivo}` : ""}` +
+      (docs.length ? ` · se anuló ${docs.map((x) => x.numero).join(", ")} (reemitir tras aprobar de nuevo)` : "");
   }
   const n = (d.usuarios ?? []).length;
   if (h.tipo === "asignacion") return `Se asignaron ${n} persona${n === 1 ? "" : "s"} a la OT`;
@@ -94,14 +105,18 @@ export default function ExpedientePage() {
     try { setHistorial(await llamar("GET", `/ot/${id}/historial`)); } catch { setHistorial([]); }
   };
 
+  const cargarMuestras = async () => {
+    try {
+      // Solo las muestras de ESTA OT (antes se traían 200 y se filtraban aquí).
+      const m = await llamar("GET", `/muestras?otId=${id}&limit=200`);
+      setMuestras(m.data ?? []);
+    } catch (e: any) { setError(e.message); }
+  };
+
   useEffect(() => {
     (async () => {
       await cargarOt();
-      try {
-        // Solo las muestras de ESTA OT (antes se traían 200 y se filtraban aquí).
-        const m = await llamar("GET", `/muestras?otId=${id}&limit=200`);
-        setMuestras(m.data ?? []);
-      } catch (e: any) { setError(e.message); }
+      await cargarMuestras();
     })();
     cargarFlujo();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -227,11 +242,15 @@ export default function ExpedientePage() {
           <div style={{ marginBottom: 6 }}>
             OT creada por <b>disposición del Director</b>{ot.disposicionRef ? <> ({ot.disposicionRef})</> : null} con cobro: está <b>pendiente la OPI</b>.
           </div>
+          {!puede("ot.crear") ? (
+            <div>La registra Comercial o Planificación cuando llegue la OPI.</div>
+          ) : (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div className="field"><label>Nº OPI</label><input value={opiNumero} onChange={(e) => setOpiNumero(e.target.value)} maxLength={60} /></div>
             <div className="field"><label>Fecha OPI</label><input type="date" value={opiFecha} onChange={(e) => setOpiFecha(e.target.value)} /></div>
             <button className="btn primary sm" disabled={busy || !opiNumero.trim() || !opiFecha} onClick={registrarOpi}>Registrar OPI</button>
           </div>
+          )}
           {opiMsg && <div style={{ marginTop: 6 }}>{opiMsg}</div>}
         </div>
       )}
@@ -335,13 +354,8 @@ export default function ExpedientePage() {
                 </table>
               ) : <p className="subtitle" style={{ margin: 0 }}>Sin movimientos registrados de laboratorio ni de asignación.</p>
             )}
-            {tab === "muestras" && (
-              muestras.length ? (
-                <table className="data">
-                  <thead><tr><th>Código</th><th>Muestra</th><th>Estado</th></tr></thead>
-                  <tbody>{muestras.map((m) => <tr key={m.id}><td><span className="codigo">{m.codigo}</span></td><td>{m.nombre ?? "—"}</td><td><span className="pill gray">{m.estado}</span></td></tr>)}</tbody>
-                </table>
-              ) : <p className="subtitle" style={{ margin: 0 }}>Sin muestras asociadas a esta OT.</p>
+            {tab === "muestras" && typeof id === "string" && (
+              <RegistroMuestras otId={id} onCambio={() => { cargarMuestras(); cargarOt(); }} />
             )}
             {tab === "resultados" && (
               <p className="subtitle" style={{ margin: 0 }}>
@@ -415,6 +429,8 @@ export default function ExpedientePage() {
                           <tbody>
                             {tareas.map((t) => {
                               const p = t.pasoEjecucion?.paso;
+                              const permiso: string | undefined = t.permisoRequerido;
+                              const habilitado = !permiso || puede(permiso);
                               return (
                                 <tr key={t.id}>
                                   <td>{p?.numero != null ? `${p.numero}. ` : ""}{p?.actividad ?? "—"}</td>
@@ -423,9 +439,13 @@ export default function ExpedientePage() {
                                   <td>{fechaHora(t.venceAt)}</td>
                                   <td><span className={`pill ${estadoPill[t.estado] ?? "gray"}`}>{t.estado}</span></td>
                                   <td style={{ textAlign: "right" }}>
-                                    <button className="btn success sm" disabled={busy} onClick={() => completarTarea(t.pasoEjecucionId)}>
-                                      {busy ? "…" : "Completar"}
-                                    </button>
+                                    {habilitado ? (
+                                      <button className="btn success sm" disabled={busy} onClick={() => completarTarea(t.pasoEjecucionId)}>
+                                        {busy ? "…" : "Completar"}
+                                      </button>
+                                    ) : (
+                                      <span className="pill gray" title={`Este paso lo completa quien tiene el permiso «${permiso}».`}>Sin permiso</span>
+                                    )}
                                   </td>
                                 </tr>
                               );

@@ -1,3 +1,4 @@
+import { cuentaBloqueada, motivoBloqueo } from "../auth/bloqueo";
 import {
   BadRequestException,
   Body,
@@ -83,6 +84,7 @@ const SELECT_USUARIO = {
   grado: true,
   cargo: true,
   estado: true,
+  intentosFallidos: true,
   totpActivo: true,
   debeCambiarPassword: true,
   ultimoLoginAt: true,
@@ -113,6 +115,9 @@ function aDto(u: any) {
     ...rest,
     nombre: rest.nombreCompleto,
     activo: rest.estado === "activo",
+    // Bloqueada por el administrador o por intentos fallidos (auth/bloqueo.ts).
+    bloqueado: cuentaBloqueada(rest),
+    motivoBloqueo: motivoBloqueo(rest),
     asignaciones,
     // Compatibilidad con la pantalla actual de usuarios (lee usuarioRoles[].rol).
     usuarioRoles: usuarioRoles.map((ur: any) => ({
@@ -346,6 +351,20 @@ export class UsuariosController {
     if (!a) throw new NotFoundException(`asignación ${asignacionId} no encontrada`);
     await this.prisma.usuarioRol.delete({ where: { id: asignacionId } });
     return { ok: true, id: asignacionId };
+  }
+
+  /**
+   * Desbloquea una cuenta bloqueada por intentos fallidos (pone los intentos a 0)
+   * o por el administrador (la deja activa). No cambia la contraseña.
+   */
+  @Post(":id/desbloquear")
+  async desbloquear(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const u = await this.cargar(id, tenantDe(req));
+    await this.prisma.usuario.update({
+      where: { id },
+      data: { intentosFallidos: 0, ...(u.estado === "bloqueado" ? { estado: "activo" } : {}), updatedAt: new Date() },
+    });
+    return aDto(await this.cargar(id, tenantDe(req)));
   }
 
   /** Genera una contraseña temporal (se devuelve UNA vez) e invalida sesiones. */

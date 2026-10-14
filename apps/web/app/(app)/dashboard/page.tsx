@@ -40,7 +40,7 @@ const GRUPOS: Grupo[] = [
       { clave: "clientes", label: "Clientes", recurso: "clientes", href: "/clientes", icono: "🏢", cls: "k-blue", perm: "cliente.ver", ayuda: "Clientes registrados" },
       { clave: "cotizaciones", label: "Cotizaciones", recurso: "cotizaciones", href: "/cotizaciones", icono: "💲", cls: "", perm: "cotizacion.ver", ayuda: "Cotizaciones emitidas" },
       { clave: "facturas", label: "Facturas", recurso: "facturas", href: "/facturas", icono: "📄", cls: "k-green", perm: "factura.ver", ayuda: "Facturas registradas" },
-      { clave: "proveedores", label: "Proveedores", recurso: "proveedores", href: "/proveedores", icono: "🚚", cls: "k-violet", perm: "factura.ver", ayuda: "Proveedores activos" },
+      { clave: "proveedores", label: "Proveedores", recurso: "proveedores", href: "/proveedores", icono: "🚚", cls: "k-violet", perm: "compra.ver", ayuda: "Proveedores activos" },
     ],
   },
   {

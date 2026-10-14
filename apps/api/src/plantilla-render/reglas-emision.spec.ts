@@ -10,6 +10,8 @@ import {
   puedeTransitarDocumento,
   quedaOficial,
   tipoDocumentoDePlantilla,
+  tipoDocumentoPorDefecto,
+  mensajePasoSinResponsables,
 } from "./reglas-emision";
 import type { ResolucionFirmas } from "../rbac/firmas-resolver";
 
@@ -177,5 +179,41 @@ describe("reglas-emision · estados del documento", () => {
     expect(numeroVersion("CERT-2026-0007", 2)).toBe("CERT-2026-0007-V2");
     expect(numeroVersion("CERT-2026-0007-V2", 3)).toBe("CERT-2026-0007-V3");
     expect(numeroVersion("CERT-2026-0007", 1)).toBe("CERT-2026-0007");
+  });
+});
+
+describe("tipo de documento por defecto según la unidad de la OT", () => {
+  it("lo indicado por quien emite manda", () => {
+    expect(tipoDocumentoPorDefecto({ indicado: "INFORME_TECNICO", tipoPlantilla: "BOLETIN", tipoUnidad: "INFORME_INSPECCION" }))
+      .toEqual({ tipo: "INFORME_TECNICO", origen: "indicado" });
+  });
+  it("en BPCH, sucursales y D11 una plantilla genérica emite informe de inspección", () => {
+    expect(tipoDocumentoPorDefecto({ tipoPlantilla: "BOLETIN", tipoUnidad: "INFORME_INSPECCION" }))
+      .toEqual({ tipo: "INFORME_INSPECCION", origen: "unidad" });
+    expect(tipoDocumentoPorDefecto({ tipoPlantilla: "I.ENSAYO", tipoUnidad: "INFORME_INSPECCION" }).tipo).toBe("INFORME_INSPECCION");
+  });
+  it("las plantillas de tipo propio (IVC, informe técnico) no cambian con la unidad", () => {
+    expect(tipoDocumentoPorDefecto({ tipoPlantilla: "IVC", tipoUnidad: "INFORME_INSPECCION" })).toEqual({ tipo: "IVC", origen: "plantilla" });
+    expect(tipoDocumentoPorDefecto({ tipoPlantilla: "i.tecnico", tipoUnidad: "INFORME_INSPECCION" }).tipo).toBe("INFORME_TECNICO");
+  });
+  it("sin tipo en la unidad sale de la plantilla (laboratorios)", () => {
+    expect(tipoDocumentoPorDefecto({ tipoPlantilla: "BOLETIN", tipoUnidad: null })).toEqual({ tipo: "INFORME_ENSAYO", origen: "plantilla" });
+  });
+  it("el mensaje de un paso sin firmantes dice cuál, dónde y cómo resolverlo", () => {
+    const m = mensajePasoSinResponsables(
+      { orden: 1, accion: "REVISA", rol: { nombre: "Revisor" }, unidad: { codigo: "SSTGO" }, advertencia: "Nadie tiene el rol REVISOR en SSTGO" },
+      "INFORME_ENSAYO",
+    );
+    expect(m).toContain("Paso 1 de la matriz de «Informe de ensayo»");
+    expect(m).toContain("nadie tiene el rol «Revisor» en SSTGO");
+    expect(m).toContain("Administración › Usuarios");
+    expect(m).toContain("Matriz de firmas");
+    expect(m).toContain("otro tipo de documento");
+    const sinUnidad = mensajePasoSinResponsables(
+      { orden: 3, accion: "OFICIALIZA", rol: { nombre: "Jefe de departamento" }, unidad: null, advertencia: "No se encontró una unidad de nivel DEPARTAMENTO para X" },
+      "INFORME_INSPECCION",
+    );
+    expect(sinUnidad).toContain("Informe de inspección");
+    expect(sinUnidad).toContain("Administración › Estructura");
   });
 });

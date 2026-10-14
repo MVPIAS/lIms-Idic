@@ -112,14 +112,14 @@ const OCCreate = z.object({
  * PATCH /ordenes-compra/:id  · estado/notas — heredado
  * POST /ordenes-compra       · alta con líneas (override)
  */
-// Sin permisos `compra.*` sembrados: se usan los del dominio económico
-// (`factura.ver` para leer, `factura.emitir` para comprometer gasto). Anotado.
+// Órdenes de compra = Abastecimiento: `compra.ver` / `compra.gestionar`
+// (align_correcciones_manuales.sql). Emitir facturas (`factura.emitir`) es de Finanzas.
 @ApiTags("ordenes-compra") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("ordenes-compra")
 @RequierePermisoCrud({
-  ver: "factura.ver",
-  crear: "factura.emitir",
-  editar: "factura.emitir",
-  eliminar: "factura.emitir",
+  ver: "compra.ver",
+  crear: "compra.gestionar",
+  editar: "compra.gestionar",
+  eliminar: "compra.gestionar",
 })
 export class OrdenCompraController extends BaseCrudController {
   // Ambos campos opcionales, pero al menos uno presente (un PATCH vacío es un error del cliente).
@@ -142,7 +142,7 @@ export class OrdenCompraController extends BaseCrudController {
   constructor(protected svc: OrdenCompraService) { super(); }
 
   @Post()
-  @RequierePermiso("factura.emitir")
+  @RequierePermiso("compra.gestionar")
   crear(@Body() body: unknown, @Req() req: any) {
     return this.svc.crearConLineas(OCCreate.parse(body), req?.user?.tenantId);
   }

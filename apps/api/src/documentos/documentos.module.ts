@@ -12,6 +12,7 @@ import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
+import { AlcanceService } from "../rbac/alcance.service";
 
 // ===========================================================================
 // Módulo DOCUMENTOS · Buscador global de documentos (contrato §4.6.1 / §4.6.2,
@@ -28,6 +29,12 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 // vía $queryRawUnsafe. Los únicos fragmentos que se concatenan al texto de la
 // consulta son cláusulas fijas escritas en el código (no vienen del query
 // string). Filtra por tenant_id y deleted_at. Permiso `ot.ver`.
+//
+// ALCANCE POR LABORATORIO: cada documento cuenta para la unidad que lo emite
+// (certificado.unidad_id o, si falta, el laboratorio de su OT; los del SAEC, el
+// laboratorio de la OT de la evidencia o la Delegación Nº 11). Quien consulta
+// solo ve los de su alcance (AlcanceService): las jefaturas su rama, los
+// perfiles globales todo.
 //
 // `saec_certificado` NO está en el schema de Prisma (vive en packages/db/
 // saec.sql). Puede no existir si el SAEC no se ha desplegado en un entorno, así
@@ -54,6 +61,8 @@ interface DocumentoResultado {
 @Controller("documentos")
 export class DocumentosController {
   private prisma = new PrismaClient();
+
+  constructor(private readonly alcance: AlcanceService) {}
 
   private tenantId(req: any): string {
     const id = req?.user?.tenantId;
@@ -113,7 +122,8 @@ export class DocumentosController {
              c.codigo_verificacion AS codigo_verificacion,
              c.url_verificacion   AS url_verificacion,
              ot.id                AS ot_id,
-             cl.id                AS cliente_id
+             cl.id                AS cliente_id,
+             COALESCE(c.unidad_id, ot.unidad_principal) AS unidad_id
         FROM certificado c
         JOIN orden_trabajo ot ON ot.id = c.ot_id
         LEFT JOIN cliente cl   ON cl.id = ot.cliente_id
@@ -131,7 +141,9 @@ export class DocumentosController {
              sc.codigo_verificacion AS codigo_verificacion,
              NULL::text            AS url_verificacion,
              ot2.id                AS ot_id,
-             COALESCE(e.cliente_id, ot2.cliente_id) AS cliente_id
+             COALESCE(e.cliente_id, ot2.cliente_id) AS cliente_id,
+             COALESCE(ot2.unidad_principal,
+                      (SELECT u.id FROM unidad u WHERE u.tenant_id = sc.tenant_id AND u.codigo = 'D11' LIMIT 1)) AS unidad_id
         FROM saec_certificado sc
         JOIN evidencia e        ON e.id = sc.evidencia_id
         LEFT JOIN orden_trabajo ot2 ON ot2.id = e.ot_id
@@ -143,6 +155,13 @@ export class DocumentosController {
     // --- Filtros del buscador, aplicados al conjunto unificado ---
     const args: any[] = [tenantId];
     const filtros: string[] = [];
+
+    // Alcance por laboratorio (null = perfil global, sin filtro).
+    const unidades = await this.alcance.filtroUnidades(req);
+    if (unidades) {
+      args.push(unidades);
+      filtros.push(`AND d.unidad_id = ANY($${args.length}::uuid[])`);
+    }
 
     if (tipo === "informe" || tipo === "saec") {
       args.push(tipo);

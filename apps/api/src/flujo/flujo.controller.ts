@@ -1,16 +1,21 @@
-import { Body, Controller, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { FlujoService } from "./flujo.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
+import { AlcanceService } from "../rbac/alcance.service";
+import { codigoCanonico } from "../rbac/rbac.constants";
 
 @ApiTags("flujos")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("flujos")
 export class FlujoController {
-  constructor(private readonly flujos: FlujoService) {}
+  constructor(
+    private readonly flujos: FlujoService,
+    private readonly alcance: AlcanceService,
+  ) {}
 
   /** Catálogo de flujos (defs con su última versión). */
   @Get()
@@ -89,10 +94,26 @@ export class FlujoController {
     return this.flujos.bandeja(usuario, req?.user?.tenantId);
   }
 
-  /** Completa una tarea humana y avanza el flujo. */
+  /**
+   * Completa una tarea humana y avanza el flujo. `ot.ver` solo deja llegar aquí:
+   * además se exige el permiso del paso (permiso-paso.ts: aprobar, revisar,
+   * registrar muestras, capturar, cotizar…), el rol responsable si el paso lo
+   * define y que la OT sea del alcance del usuario. Así el perfil de solo
+   * lectura ya no hace avanzar un flujo.
+   */
   @Post("tareas/:pasoEjecucionId/completar")
   @RequierePermiso("ot.ver")
-  completar(@Param("pasoEjecucionId") id: string, @Body() body: any, @Req() req: any) {
-    return this.flujos.completarTarea(id, body ?? {}, req?.user?.tenantId);
+  async completar(@Param("pasoEjecucionId") id: string, @Body() body: any, @Req() req: any) {
+    const tenantId = req?.user?.tenantId;
+    const r = await this.flujos.requisitosParaCompletar(id, tenantId);
+    const roles: string[] = (req?.user?.roles ?? []).map((x: string) => codigoCanonico(x));
+    const superadmin = roles.includes("SUPERADMIN");
+    if (!superadmin && !(req?.user?.permisos ?? []).includes(r.permiso))
+      throw new ForbiddenException(`El paso «${r.actividad}» lo completa quien tiene el permiso «${r.permiso}».`);
+    if (!superadmin && r.rol && !roles.includes(codigoCanonico(r.rol.codigo)))
+      throw new ForbiddenException(`El paso «${r.actividad}» le corresponde al rol «${r.rol.nombre}».`);
+    if (r.ot) await this.alcance.exigirUnidad(req, r.ot.unidadPrincipal, `la OT ${r.ot.codigo}`);
+    // Quien completa queda registrado (no lo elige el cliente).
+    return this.flujos.completarTarea(id, { ...(body ?? {}), usuarioId: req?.user?.sub }, tenantId);
   }
 }

@@ -27,6 +27,8 @@ type Condiciones = {
   puedeEmitir: boolean;
   faltantes: string[];
   tipoDocumento: string;
+  tipoDocumentoOrigen?: "indicado" | "plantilla" | "unidad";
+  tipoDocumentoUnidad?: string | null;
   resultados: { total: number; aprobados: number };
   pasos: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; responsables: any[] }[];
 };
@@ -34,7 +36,7 @@ type Preview = { plantilla: string; tipo: string; avisos: string[]; html: string
 
 /** Tipos de documento de la matriz de firmas (rbac.constants.ts · TIPOS_DOCUMENTO) que se emiten desde aquí. */
 const TIPOS_DOCUMENTO: { valor: string; texto: string }[] = [
-  { valor: "", texto: "Según la plantilla" },
+  { valor: "", texto: "Automático (según la unidad de la OT y la plantilla)" },
   { valor: "INFORME_ENSAYO", texto: "Informe de ensayo" },
   { valor: "IVC", texto: "Informe de verificación (IVC)" },
   { valor: "INFORME_TECNICO", texto: "Informe técnico" },
@@ -228,6 +230,16 @@ function InformesContenido() {
             2 · Condiciones de emisión
             <span className="right">{ocupado === "cond" ? "Comprobando…" : cond ? `${cond.resultados.aprobados} de ${cond.resultados.total} resultados aprobados` : ""}</span>
           </h2>
+          {cond && (
+            <p style={{ margin: "0 0 8px", fontSize: 12.5 }}>
+              Tipo de documento: <b>{TIPOS_DOCUMENTO.find((t) => t.valor === cond.tipoDocumento)?.texto ?? cond.tipoDocumento}</b>
+              <span style={{ color: "var(--muted)" }}>
+                {cond.tipoDocumentoOrigen === "unidad"
+                  ? ` · propio de ${cond.tipoDocumentoUnidad ?? "la unidad de la OT"}`
+                  : cond.tipoDocumentoOrigen === "indicado" ? " · elegido por usted" : " · según la plantilla"}
+              </span>
+            </p>
+          )}
           {cond && !cond.puedeEmitir && (
             <>
               <p style={{ margin: "0 0 6px", fontWeight: 600 }}>Todavía no se puede emitir. Falta:</p>

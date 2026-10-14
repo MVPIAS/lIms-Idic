@@ -181,6 +181,9 @@ export default function CapturaOtPage() {
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [devolviendo, setDevolviendo] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("");
+  // Reabrir un resultado aprobado (jefatura): fila abierta y su motivo.
+  const [reabriendo, setReabriendo] = useState<string | null>(null);
+  const [motivoReabrir, setMotivoReabrir] = useState("");
   const [omitidos, setOmitidos] = useState<{ id: string; motivo: string }[]>([]);
   const [abierto, setAbierto] = useState<string | null>(null);
   const [veredictosMuestra, setVeredictosMuestra] = useState<Record<string, string>>({});
@@ -286,6 +289,26 @@ export default function CapturaOtPage() {
       setDevolviendo(null);
       setMotivo("");
       toast.ok("Resultado devuelto al analista con el motivo.");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(null);
+    }
+  }
+
+  /**
+   * Reabre un resultado aprobado: vuelve al analista como «devuelto» y se anulan
+   * los documentos en firma u oficiales de la OT (se reemiten tras aprobar de nuevo).
+   */
+  async function reabrir(f: Fila) {
+    if (motivoReabrir.trim().length < 5) { toast.error("Indique el motivo de la reapertura (mínimo 5 caracteres)."); return; }
+    setOcupado(f.id);
+    try {
+      const r: any = await llamar("POST", `/resultados/${f.id}/reabrir`, { motivo: motivoReabrir.trim() });
+      actualizarFila(f.id, { ...r, revisadoPorNombre: acceso.usuario.nombre, aprobadoPorNombre: null });
+      setReabriendo(null);
+      setMotivoReabrir("");
+      toast.ok(["Resultado reabierto: vuelve al analista para corregirlo.", ...(r.avisos ?? [])].join(" "));
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -589,6 +612,10 @@ export default function CapturaOtPage() {
                                 {tiene("resultado.revisar") && ["capturado", "revisado_n1"].includes(f.estado) && (
                                   <button className="btn outline sm" disabled={busy} onClick={() => { setDevolviendo(devolviendo === f.id ? null : f.id); setMotivo(""); }}>Devolver</button>
                                 )}
+                                {tiene("resultado.reabrir") && f.estado === "aprobado" && (
+                                  <button className="btn outline sm" disabled={busy} title="Corregir un resultado ya aprobado (anula el informe en firma u oficial)"
+                                    onClick={() => { setReabriendo(reabriendo === f.id ? null : f.id); setMotivoReabrir(""); }}>Reabrir</button>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -602,6 +629,25 @@ export default function CapturaOtPage() {
                                   esJefatura={tiene("resultado.aprobar")}
                                   onGuardado={() => cargar()}
                                 />
+                              </td>
+                            </tr>
+                          )}
+                          {reabriendo === f.id && (
+                            <tr>
+                              <td colSpan={7} style={{ background: "#fff5f5" }}>
+                                <p style={{ margin: "0 0 6px", fontSize: 12 }}>
+                                  El resultado volverá al analista para corregirlo y repetir revisión y aprobación. Los informes de esta OT
+                                  que estén <b>en firma u oficiales se anularán</b>: después de aprobar de nuevo, reemítalos (nueva versión).
+                                </p>
+                                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                                  <div className="field" style={{ flex: 1, minWidth: 260 }}>
+                                    <label>Motivo de la reapertura <span className="req">*</span></label>
+                                    <input value={motivoReabrir} onChange={(e) => setMotivoReabrir(e.target.value)} maxLength={1000} autoFocus
+                                      placeholder="Qué valor está mal y por qué" />
+                                  </div>
+                                  <button className="btn outline sm" onClick={() => setReabriendo(null)}>Cancelar</button>
+                                  <button className="btn danger sm" disabled={busy} onClick={() => reabrir(f)}>Reabrir resultado</button>
+                                </div>
                               </td>
                             </tr>
                           )}

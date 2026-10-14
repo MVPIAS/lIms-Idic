@@ -33,7 +33,7 @@ import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 import { AlcanceService } from "../rbac/alcance.service";
 import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./veredicto";
 import { leerReplicas } from "./replicas";
-import { AccionRevision, clasificarParaAccion, motivoNoCapturable } from "./flujo-resultado";
+import { AccionRevision, clasificarParaAccion, motivoNoCapturable, planReapertura } from "./flujo-resultado";
 import { veredictoMuestra } from "./especificacion";
 
 /**
@@ -607,6 +607,103 @@ export class ResultadoService extends BaseCrudService {
   }
 
   /**
+   * Reabre un resultado APROBADO en el que se detectó un error (al revisar o
+   * firmar el informe). Lo hace la jefatura (`resultado.reabrir`) con motivo:
+   *  · el resultado vuelve a `devuelto` (el analista lo corrige y se repite
+   *    revisión y aprobación, con la misma segregación de funciones);
+   *  · los documentos vigentes de la OT (en firma u oficiales) se ANULAN con el
+   *    motivo: tras aprobar de nuevo se reemiten como nueva versión;
+   *  · queda la traza en la OT (historial) y en el resultado (quién, cuándo, por qué,
+   *    valor y aprobación anteriores).
+   * Reglas puras: flujo-resultado.ts · planReapertura.
+   */
+  async reabrir(id: string, motivo: string, usuarioId: string | undefined, tenantId?: string) {
+    const ctx = await this.contexto(id, tenantId);
+    const r = await this.prisma.resultado.findFirst({
+      where: { id, deletedAt: null },
+      include: { muestra: { select: { codigo: true, tenantId: true } }, analito: { select: { nombre: true } }, catAnalito: { select: { nombre: true } } },
+    });
+    if (!r) throw new NotFoundException(`Resultado ${id} no encontrado`);
+    const ot = ctx.otId
+      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: ctx.otId }, select: { id: true, codigo: true, estado: true, tenantId: true } })
+      : null;
+    const docs = ot
+      ? await this.prisma.certificado.findMany({
+          where: { otId: ot.id, deletedAt: null },
+          select: { id: true, numero: true, codigo: true, estado: true, entregadoAt: true },
+        })
+      : [];
+    const plan = planReapertura(
+      r.estado,
+      ot,
+      docs.map((d) => ({ id: d.id, numero: d.numero ?? d.codigo, estado: d.estado, entregadoAt: d.entregadoAt })),
+    );
+    if (plan.error) throw new ConflictException(plan.error);
+
+    const ahora = new Date();
+    const ensayo = r.catAnalito?.nombre ?? r.analito?.nombre ?? "ensayo";
+    const texto = motivo.trim();
+    const anterior = {
+      valorNumerico: r.valorNumerico ?? null,
+      valorTexto: r.valorTexto ?? null,
+      promedio: r.promedio,
+      veredicto: r.veredicto,
+      analistaId: r.analistaId,
+      revisadoPor: r.revisadoPor,
+      revisadoAt: r.revisadoAt,
+      aprobadoPor: r.aprobadoPor,
+      aprobadoAt: r.aprobadoAt,
+    };
+    await this.prisma.$transaction(async (tx) => {
+      await tx.resultado.update({
+        where: { id },
+        data: {
+          estado: "devuelto",
+          motivoDevolucion: `Reabierto tras su aprobación: ${texto}`,
+          revisadoPor: usuarioId ?? null,
+          revisadoAt: ahora,
+          aprobadoPor: null,
+          aprobadoAt: null,
+          reabiertoPor: usuarioId ?? null,
+          reabiertoAt: ahora,
+          reabiertoMotivo: texto,
+          reaperturas: { increment: 1 },
+        },
+      });
+      for (const d of plan.anular) {
+        await tx.certificado.update({
+          where: { id: d.id },
+          data: {
+            estado: "anulado",
+            anuladoAt: ahora,
+            anuladoPor: usuarioId ?? null,
+            anuladoMotivo: `Resultado reabierto (${r.muestra?.codigo ?? ""} · ${ensayo}): ${texto}`,
+          },
+        });
+        await tx.documentoFirma.updateMany({ where: { certificadoId: d.id, estado: "pendiente" }, data: { estado: "anulado" } });
+      }
+      if (ot)
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
+           VALUES ($1::uuid, $2::uuid, 'reapertura_resultado', $3::jsonb, $4::uuid)`,
+          ot.tenantId,
+          ot.id,
+          JSON.stringify({
+            resultadoId: id,
+            muestra: r.muestra?.codigo ?? null,
+            ensayo,
+            motivo: texto,
+            anterior,
+            documentosAnulados: plan.anular.map((d) => ({ id: d.id, numero: d.numero, estado: d.estado })),
+          }),
+          usuarioId ?? null,
+        );
+    });
+    const actualizado = await this.prisma.resultado.findFirst({ where: { id }, include: { analito: true, muestra: true } });
+    return { ...actualizado, documentosAnulados: plan.anular, avisos: plan.avisos };
+  }
+
+  /**
    * Revisar / aprobar TODOS los resultados de una OT que estén en la etapa
    * correspondiente, salvo los capturados por el propio usuario (segregación):
    * esos se informan como omitidos, con el motivo.
@@ -701,6 +798,10 @@ const ResultadoRecaptura = z.object(ReplicasCampos);
 const DevolverDto = z.object({
   /** RF-E01 exige rechazo MOTIVADO: sin motivo el analista no sabe qué corregir. */
   motivo: z.string().trim().min(5, "Indique el motivo de la devolución (mínimo 5 caracteres)").max(1000),
+});
+
+const ReabrirDto = z.object({
+  motivo: z.string().trim().min(5, "Indique el motivo de la reapertura (mínimo 5 caracteres)").max(1000),
 });
 
 const VeredictoDto = z.object({ veredicto: z.string().min(1).max(20) });
@@ -999,6 +1100,19 @@ export class ResultadoController extends BaseCrudController {
     const dto = DevolverDto.parse(body);
     await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
     return (this.svc as ResultadoService).devolver(id, dto.motivo, req?.user?.sub);
+  }
+
+  /**
+   * Reabre un resultado aprobado (jefatura, motivo obligatorio). Anula los
+   * documentos en firma u oficiales de la OT, que se reemiten tras aprobar de nuevo.
+   */
+  @Post(":id/reabrir")
+  @RequierePermiso("resultado.reabrir")
+  @ApiOperation({ summary: "Reabre un resultado aprobado → devuelto (anula los documentos vigentes de la OT)" })
+  async reabrir(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = ReabrirDto.parse(body ?? {});
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return (this.svc as ResultadoService).reabrir(id, dto.motivo, req?.user?.sub, req?.user?.tenantId);
   }
 
   @Post(":id/veredicto")
