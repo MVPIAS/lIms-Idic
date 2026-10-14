@@ -11,8 +11,9 @@
  * CERTIFICADO_CALIBRACION (ELABORA metrólogo → FIRMA jefe de laboratorio).
  *
  *  - Solo quien elaboró la calibración la edita y la envía (mientras es borrador).
- *  - Emite o devuelve quien tiene `metrologia.emitir` y NO la elaboró
- *    (la revisión la hace una persona distinta del autor).
+ *  - Emite o devuelve quien tiene `metrologia.emitir`, incluido quien la
+ *    elaboró (decisión del usuario, 14-10-2026: en laboratorios de dos
+ *    personas, como el LNF, exigir una persona distinta bloqueaba la emisión).
  *  - Una calibración emitida no cambia.
  */
 export type EstadoCal = "borrador" | "en_revision" | "emitida";
@@ -51,7 +52,6 @@ export function motivoRechazo(accion: AccionCal, c: ContextoCal): string | null 
     case "EMITIR":
       if (e !== "en_revision") return "La calibración debe estar enviada a revisión";
       if (!c.puedeEmitir) return "No tiene permiso para emitir certificados de calibración";
-      if (c.esAutor) return "Quien elaboró la calibración no puede revisarla ni emitirla: debe hacerlo otra persona";
       if (accion === "EMITIR" && !c.calculada) return "La calibración no tiene resultado calculado";
       return null;
   }
