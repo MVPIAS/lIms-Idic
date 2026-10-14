@@ -17,6 +17,7 @@ import Link from "next/link";
 import { money, fecha, fechaDia, rut as fmtRut } from "@/lib/format";
 import Panel from "./_components/Panel";
 import CotizacionForm from "./_components/CotizacionForm";
+import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import {
   pedir,
   hoyISO,
@@ -44,6 +45,13 @@ export default function CotizacionesPage() {
   const [msg, setMsg] = useState("");
   const [filtro, setFiltro] = useState<Filtro>("todas");
   const [buscar, setBuscar] = useState("");
+  // Búsqueda, filtro y paginación en el SERVIDOR (antes: 50 últimas filtradas aquí).
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [meta, setMeta] = useState<{ page: number; total: number; totalPages: number; limit: number } | null>(null);
+  const [conteos, setConteos] = useState<Record<string, number>>({});
+  const [extra, setExtra] = useState<{ sinOt?: boolean; porVencer?: boolean }>({});
+  const [listo, setListo] = useState(false);
 
   const [detalle, setDetalle] = useState<any | null>(null);
   const [editando, setEditando] = useState(false);
@@ -56,17 +64,27 @@ export default function CotizacionesPage() {
   }, []);
 
   const cargar = useCallback(async () => {
+    if (!listo) return;
     setCargando(true);
     try {
-      const d = await pedir<any>("GET", "/cotizaciones");
+      const p = new URLSearchParams();
+      if (q.trim()) p.set("q", q.trim());
+      if (filtro !== "todas") p.set("estado", filtro);
+      if (extra.sinOt) p.set("sinOt", "1");
+      if (extra.porVencer) p.set("porVencer", "1");
+      p.set("page", String(page));
+      p.set("limit", "50");
+      const d = await pedir<any>("GET", `/cotizaciones?${p.toString()}`);
       setCots(Array.isArray(d) ? d : d?.data ?? []);
+      setMeta(d?.meta ?? null);
+      setConteos(d?.conteos ?? {});
       setError("");
     } catch (e: any) {
       setError(e.message);
     } finally {
       setCargando(false);
     }
-  }, []);
+  }, [listo, q, filtro, extra, page]);
 
   const abrir = useCallback(async (id: string) => {
     try {
@@ -77,21 +95,36 @@ export default function CotizacionesPage() {
     }
   }, []);
 
+  // Filtros de la dirección (tarjetas de Mi bandeja): ?estado=aceptada&sinOt=1, ?porVencer=1.
+  useEffect(() => {
+    const u = new URLSearchParams(window.location.search);
+    const e = u.get("estado") as Filtro | null;
+    if (e && ["abierta", "aceptada", "anulada", "historico"].includes(e)) setFiltro(e);
+    setExtra({ sinOt: u.get("sinOt") === "1", porVencer: u.get("porVencer") === "1" });
+    setListo(true);
+    // ?abrir=<id> (al volver de «Nueva cotización») abre directamente el detalle.
+    const id = u.get("abrir");
+    if (id) abrir(id);
+  }, [abrir]);
+
   useEffect(() => {
     cargar();
-    // ?abrir=<id> (al volver de «Nueva cotización») abre directamente el detalle.
-    const id = new URLSearchParams(window.location.search).get("abrir");
-    if (id) abrir(id);
-  }, [cargar, abrir]);
+  }, [cargar]);
 
-  const conteo = (f: Filtro) =>
-    cots.filter((c) => (f === "todas" ? true : f === "historico" ? esHistorico(c.estado) : c.estado === f)).length;
+  // Búsqueda con espera breve (no consulta en cada tecla).
+  useEffect(() => {
+    const t = setTimeout(() => { setQ(buscar); setPage(1); }, 350);
+    return () => clearTimeout(t);
+  }, [buscar]);
 
-  const vis = cots.filter((c) => {
-    if (filtro === "historico" ? !esHistorico(c.estado) : filtro !== "todas" && c.estado !== filtro) return false;
-    const q = buscar.trim().toLowerCase();
-    return !q || `${c.codigo} ${c.cliente?.razonSocial ?? ""} ${c.referencia ?? ""}`.toLowerCase().includes(q);
-  });
+  const conteo = (f: Filtro) => {
+    const todos = Object.entries(conteos);
+    if (f === "todas") return todos.reduce((a, [, n]) => a + n, 0);
+    if (f === "historico") return todos.filter(([e]) => esHistorico(e)).reduce((a, [, n]) => a + n, 0);
+    return conteos[f] ?? 0;
+  };
+
+  const vis = cots;
 
   const chips: { f: Filtro; l: string }[] = [
     { f: "todas", l: "Todas" },
@@ -113,13 +146,19 @@ export default function CotizacionesPage() {
 
       <div className="toolbar" style={{ flexWrap: "wrap", gap: 6 }}>
         {chips.map(({ f, l }) => (
-          <button key={f} className={`btn sm ${filtro === f ? "primary" : "outline"}`} onClick={() => setFiltro(f)}>
+          <button key={f} className={`btn sm ${filtro === f ? "primary" : "outline"}`} onClick={() => { setFiltro(f); setPage(1); setExtra({}); }}>
             {l} <span style={{ opacity: 0.75, marginLeft: 4 }}>{conteo(f)}</span>
           </button>
         ))}
         <input placeholder="Buscar por N°, cliente o referencia…" style={{ flex: 1, minWidth: 200 }} value={buscar} onChange={(e) => setBuscar(e.target.value)} />
         <Link href={"/cotizaciones/nueva" as any} className="btn primary sm">＋ Nueva Cotización</Link>
       </div>
+      {(extra.sinOt || extra.porVencer) && (
+        <div className="alert info" style={{ marginBottom: 10 }}>
+          Filtro de la bandeja: {extra.sinOt ? "aceptadas sin OT" : "abiertas que vencen en 7 días"}.{" "}
+          <button className="btn outline sm" onClick={() => setExtra({})}>Quitar filtro</button>
+        </div>
+      )}
 
       <div className="card card--table">
         <table className="data">
@@ -182,6 +221,17 @@ export default function CotizacionesPage() {
           </tbody>
         </table>
       </div>
+      {meta && meta.totalPages > 1 && (
+        <div className="toolbar" style={{ marginTop: 8 }}>
+          <span style={{ fontSize: 12, color: "var(--muted)" }}>
+            {(meta.page - 1) * meta.limit + 1}–{Math.min(meta.page * meta.limit, meta.total)} de {meta.total}
+          </span>
+          <div className="spacer" />
+          <button className="btn outline sm" disabled={meta.page <= 1} onClick={() => setPage((n) => n - 1)}>← Anterior</button>
+          <span style={{ fontSize: 12 }}>Página {meta.page} de {meta.totalPages}</span>
+          <button className="btn outline sm" disabled={meta.page >= meta.totalPages} onClick={() => setPage((n) => n + 1)}>Siguiente →</button>
+        </div>
+      )}
 
       {/* ---------- Detalle / edición ---------- */}
       {detalle && (
@@ -328,6 +378,7 @@ function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerrar: () 
   const [fechaDoc, setFechaDoc] = useState(hoyISO());
   const [adjunto, setAdjunto] = useState("");
   const [conCobro, setConCobro] = useState(true);
+  const [labId, setLabId] = useState("");
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
   const requiereNumero = tipo === "OPI_RESOLUCION" || tipo === "OC";
@@ -335,6 +386,7 @@ function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerrar: () 
   async function confirmar() {
     setError("");
     if (requiereNumero && !numero.trim()) return setError("Indique el número del documento.");
+    if (!labId) return setError("Elija el laboratorio responsable de la OT que se generará.");
     setEnviando(true);
     try {
       const r = await pedir("POST", `/cotizaciones/${cot.id}/aceptar`, {
@@ -343,6 +395,7 @@ function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerrar: () 
         fecha: fechaDoc,
         adjunto: adjunto.trim() || undefined,
         conCobro,
+        unidadPrincipalId: labId,
       });
       onHecho(r);
     } catch (e: any) {
@@ -379,6 +432,9 @@ function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerrar: () 
           <input type="checkbox" style={{ width: "auto" }} checked={conCobro} onChange={(e) => setConCobro(e.target.checked)} />
           Con cobro
         </label>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <SelectorLaboratorio valor={labId} onCambio={setLabId} pistas={{ cotizacionId: cot.id }} etiqueta="Laboratorio responsable de la OT" />
+        </div>
       </div>
       {tipo === "DISPOSICION_DIRECTOR" && (
         <div className="alert warn" style={{ marginTop: 10 }}>

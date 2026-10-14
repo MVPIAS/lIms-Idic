@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { clp, apiGet, apiPost, unwrap, ApiError } from "./_components/api";
 import ClienteSelector, { Cliente } from "./_components/ClienteSelector";
 import LineaBuilder, { LineaOT } from "./_components/LineaBuilder";
+import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 
 /**
  * Origen de la OT en el alta directa (Comercial R2):
@@ -43,9 +44,11 @@ export default function NuevaOtPage() {
   const [otExistenteId, setOtExistenteId] = useState("");
 
   useEffect(() => {
-    apiGet("/ot").then((d) => {
+    // El servidor filtra por estado (antes se traían las 50 últimas y se
+    // filtraba aquí, con lo que las OT comerciales antiguas no aparecían).
+    apiGet("/ot?estado=recepcionada&limit=200").then((d) => {
       const arr = Array.isArray(d) ? d : (d as any)?.data ?? [];
-      setOtsPendientes(arr.filter((o: any) => o.estado === "recepcionada"));
+      setOtsPendientes(arr);
     }).catch(() => {});
   }, []);
 
@@ -89,6 +92,18 @@ export default function NuevaOtPage() {
   // Líneas / elementos agregados.
   const [lineas, setLineas] = useState<LineaOT[]>([]);
 
+  // Laboratorio responsable de la OT nueva: sugerido por el catálogo
+  // (elementos, métodos y laboratorio ejecutor) y siempre confirmable.
+  const [labId, setLabId] = useState("");
+  const pistasLab = useMemo(
+    () => ({
+      elementoIds: lineas.map((l) => l.elementoId),
+      metodoIds: lineas.flatMap((l) => l.metodos.map((m) => m.metodoId)),
+      centroCostoId: interlab && labEjecutor ? labEjecutor : undefined,
+    }),
+    [lineas, interlab, labEjecutor],
+  );
+
   // Estado de submit.
   const [enviando, setEnviando] = useState(false);
   const [okMsg, setOkMsg] = useState("");
@@ -111,6 +126,7 @@ export default function NuevaOtPage() {
     if (modo === "nueva" && origen === "INTERNACION" && !resolucion.trim()) { setErrMsg("Indica el Nº de resolución DGMN."); return; }
     if (!fechaIngreso || Number.isNaN(new Date(fechaIngreso).getTime())) { setErrMsg("Indica una fecha de ingreso válida."); return; }
     if (lineas.length === 0 && !interlab) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
+    if (modo === "nueva" && !labId) { setErrMsg("Elija el laboratorio responsable de la OT: sin él nadie del laboratorio la verá."); return; }
 
     setEnviando(true);
     try {
@@ -130,6 +146,9 @@ export default function NuevaOtPage() {
             prioridad,
             fechaIngreso: new Date(fechaIngreso).toISOString(),
             notas: observaciones || undefined,
+            unidadPrincipalId: labId,
+            catElementoIds: pistasLab.elementoIds.length ? pistasLab.elementoIds : undefined,
+            catMetodoIds: pistasLab.metodoIds.length ? pistasLab.metodoIds : undefined,
             ...(origen
               ? {
                   origenTrabajo: origen,
@@ -297,10 +316,21 @@ export default function NuevaOtPage() {
                 ))}
               </select>
               {cliente?.id && <p className="hint" style={{ marginTop: 4 }}>Cliente precargado: <b>{cliente.razonSocial}</b></p>}
+              {otExistenteId && (() => {
+                const o = otsPendientes.find((x) => x.id === otExistenteId);
+                return o?.unidad
+                  ? <p className="hint" style={{ marginTop: 4 }}>Laboratorio responsable: <b>{o.unidad.codigo} · {o.unidad.nombre}</b></p>
+                  : <p className="hint" style={{ marginTop: 4, color: "var(--red)" }}>Esta OT no tiene laboratorio responsable: se tomará de los métodos que agregue (si son de un solo laboratorio) o pídalo a Planificación.</p>;
+              })()}
               {otsPendientes.length === 0 && <p className="hint" style={{ marginTop: 4 }}>No hay OT en estado «recepcionada». Acepte una cotización o use el alta directa.</p>}
             </div>
           ) : (
             <ClienteSelector value={cliente} onChange={setCliente} />
+          )}
+          {modo === "nueva" && (
+            <div className="span-2" style={{ gridColumn: "span 2" }}>
+              <SelectorLaboratorio valor={labId} onCambio={setLabId} pistas={pistasLab} />
+            </div>
           )}
           <div className="field">
             <label>Fecha de ingreso <span className="req">*</span></label>

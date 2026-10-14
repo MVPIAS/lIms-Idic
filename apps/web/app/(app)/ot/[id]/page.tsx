@@ -5,6 +5,35 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fecha, fechaHora, fechaDia, rut, clp, num } from "@/lib/format";
 import { ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
+import { usePermisos } from "@/lib/permisos";
+import { llamar, etiquetaUnidad } from "@/lib/laboratorio";
+import { toast } from "@/components/ui/feedback";
+import SelectorLaboratorio from "@/components/SelectorLaboratorio";
+import Asignacion from "./_components/Asignacion";
+
+/** Texto legible de un hecho del historial de la OT. */
+function textoHistorial(h: any): string {
+  const d = h.detalle ?? {};
+  if (h.tipo === "laboratorio") {
+    const hacia = d.hacia?.codigo ?? "—";
+    if (d.desde) return `Laboratorio cambiado de ${d.desde.codigo} a ${hacia}${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
+    const como: Record<string, string> = {
+      alta_indicado: "indicado al registrar la OT",
+      alta_deducido: "deducido del catálogo al registrar la OT",
+      aceptacion_indicado: "indicado al aceptar la cotización",
+      aceptacion_deducido: "deducido de la cotización al aceptarla",
+      saec: "OT del SAEC (Delegación Nº 11)",
+      metodos_de_la_muestra: "deducido de los métodos de la muestra",
+    };
+    return `Laboratorio responsable: ${hacia}${como[d.origen] ? ` (${como[d.origen]})` : ""}`;
+  }
+  const n = (d.usuarios ?? []).length;
+  if (h.tipo === "asignacion") return `Se asignaron ${n} persona${n === 1 ? "" : "s"} a la OT`;
+  if (h.tipo === "desasignacion") return `Se retiraron ${n} persona${n === 1 ? "" : "s"} de la OT${d.motivo ? ` (${d.motivo})` : ""}`;
+  if (h.tipo === "asignacion_ensayo")
+    return d.usuario ? `Asignación de ${d.actualizados ?? ""} ensayo(s) a una persona concreta` : `Se retiró la asignación concreta de ${d.actualizados ?? ""} ensayo(s)`;
+  return h.tipo;
+}
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}` });
@@ -32,7 +61,13 @@ export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "muestras" | "resultados" | "informe" | "flujo">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestras" | "resultados" | "informe" | "flujo" | "historial">("cabecera");
+  const { puede } = usePermisos();
+  const [historial, setHistorial] = useState<any[]>([]);
+  const [cambiandoLab, setCambiandoLab] = useState(false);
+  const [labNuevo, setLabNuevo] = useState("");
+  const [labMotivo, setLabMotivo] = useState("");
+  const [compromiso, setCompromiso] = useState("");
   const [error, setError] = useState("");
 
   // ---- flujo (BPM) ----
@@ -49,17 +84,59 @@ export default function ExpedientePage() {
     } catch (e: any) { setFlujoMsg(e.message); }
   };
 
+  const cargarOt = async () => {
+    try {
+      const o = await llamar("GET", `/ot/${id}`);
+      setOt(o);
+      setCompromiso(o?.fechaCompromiso ? String(o.fechaCompromiso).slice(0, 10) : "");
+    } catch (e: any) { setError(e.message); }
+  };
+  const cargarHistorial = async () => {
+    try { setHistorial(await llamar("GET", `/ot/${id}/historial`)); } catch { setHistorial([]); }
+  };
+
   useEffect(() => {
     (async () => {
+      await cargarOt();
       try {
-        const o = await fetch(`${API}/ot/${id}`, { headers: auth() }).then((x) => x.json());
-        setOt(o);
-        const m = await fetch(`${API}/muestras?limit=200`, { headers: auth() }).then((x) => x.json());
-        setMuestras((m.data ?? []).filter((x: any) => x.otId === id));
+        // Solo las muestras de ESTA OT (antes se traían 200 y se filtraban aquí).
+        const m = await llamar("GET", `/muestras?otId=${id}&limit=200`);
+        setMuestras(m.data ?? []);
       } catch (e: any) { setError(e.message); }
     })();
     cargarFlujo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    if (tab === "historial") cargarHistorial();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  // ---- Laboratorio responsable (PATCH /ot/:id/laboratorio) ----
+  const guardarLaboratorio = async () => {
+    if (!labNuevo) return;
+    if (ot?.unidadPrincipal && labMotivo.trim().length < 5) { toast.error("Indique el motivo del cambio (mínimo 5 caracteres)."); return; }
+    setBusy(true);
+    try {
+      const r = await llamar("PATCH", `/ot/${id}/laboratorio`, { unidadPrincipalId: labNuevo, motivo: labMotivo.trim() || undefined });
+      toast.ok(`Laboratorio responsable: ${r?.unidad?.codigo ?? ""}.`);
+      setCambiandoLab(false); setLabNuevo(""); setLabMotivo("");
+      await cargarOt();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
+
+  // ---- Fecha de compromiso (PATCH /ot/:id) ----
+  const guardarCompromiso = async () => {
+    setBusy(true);
+    try {
+      await llamar("PATCH", `/ot/${id}`, { fechaCompromiso: compromiso || null });
+      toast.ok(compromiso ? `Fecha de compromiso: ${fechaDia(compromiso)}.` : "Fecha de compromiso borrada.");
+      await cargarOt();
+    } catch (e: any) { toast.error(e.message); }
+    finally { setBusy(false); }
+  };
 
   // Defs publicadas: solo se ofrecen las que tienen una versión publicada vigente.
   useEffect(() => {
@@ -142,10 +219,19 @@ export default function ExpedientePage() {
           Cliente: <b>{ot?.cliente?.razonSocial ?? "—"}</b>
           {ot?.cliente?.rut ? <> ({rut(ot.cliente.rut)})</> : null} · Estado: <b>{ot?.estado ?? "—"}</b> · Prioridad: <b>{ot?.prioridad ?? "normal"}</b>
           {ot?.origenTrabajo ? <> · Origen: <b>{ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo}</b></> : null}
+          {" · "}Laboratorio: {ot?.unidad ? <b title={ot.unidad.nombre}>{ot.unidad.codigo}</b> : <span className="pill amber">sin laboratorio</span>}
+          {ot?.fechaCompromiso ? <> · Compromiso: <b>{fechaDia(ot.fechaCompromiso)}</b></> : null}
           {ot?.opiPendiente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
           {ot?.conCobro === false && <span className="pill gray" style={{ marginLeft: 8 }}>Sin cobro</span>}
         </div>
       </div>
+
+      {ot && !ot.unidadPrincipal && (
+        <div className="alert warn">
+          Esta OT <b>no tiene laboratorio responsable</b>: nadie del laboratorio la ve.
+          {puede("ot.cambiar_laboratorio") ? " Fíjelo en la pestaña «Cabecera»." : " Pida a Planificación o a la jefatura que lo fije."}
+        </div>
+      )}
 
       {/* SVT7 · OT por disposición del Director con cobro: falta la OPI. */}
       {ot?.opiPendiente && (
@@ -179,13 +265,55 @@ export default function ExpedientePage() {
         <div className="card" style={{ padding: 0 }}>
           <div className="tabs" style={{ padding: "0 8px" }}>
             {tabBtn("cabecera", "Cabecera")}
+            {tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
             {tabBtn("muestras", `Muestras (${muestras.length})`)}
             {tabBtn("resultados", "Resultados")}
             {tabBtn("informe", "Informe")}
             {tabBtn("flujo", `Flujo${tieneFlujo ? ` (${tareas.length})` : ""}`)}
+            {tabBtn("historial", "Historial")}
           </div>
           <div style={{ padding: 15 }}>
             {tab === "cabecera" && (
+              <div style={{ display: "grid", gap: 12 }}>
+              <div className="card" style={{ padding: 10, margin: 0 }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>Laboratorio responsable</div>
+                    <div style={{ fontWeight: 700 }}>{ot?.unidad ? etiquetaUnidad(ot.unidad) : "Sin laboratorio"}</div>
+                    {ot?.unidadAsignadaAt && (
+                      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                        Fijado el {fechaHora(ot.unidadAsignadaAt)}{ot.unidadAsignadaPorNombre ? ` por ${ot.unidadAsignadaPorNombre}` : ""}. Ver «Historial».
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ flex: 1 }} />
+                  {puede("ot.cambiar_laboratorio") && !["cerrada", "anulada"].includes(ot?.estado) && !cambiandoLab && (
+                    <button className="btn outline sm" onClick={() => setCambiandoLab(true)}>
+                      {ot?.unidadPrincipal ? "Cambiar laboratorio" : "Fijar laboratorio"}
+                    </button>
+                  )}
+                </div>
+                {cambiandoLab && (
+                  <div className="form-grid cols-2" style={{ marginTop: 10 }}>
+                    <SelectorLaboratorio valor={labNuevo} onCambio={setLabNuevo} excluirId={ot?.unidadPrincipal} etiqueta="Nuevo laboratorio responsable" />
+                    {ot?.unidadPrincipal ? (
+                      <div className="field">
+                        <label>Motivo del cambio <span className="req">*</span></label>
+                        <input value={labMotivo} onChange={(e) => setLabMotivo(e.target.value)} maxLength={500} />
+                      </div>
+                    ) : <div />}
+                    <p className="hint" style={{ margin: 0, gridColumn: "1 / -1", fontSize: 11.5, color: "var(--muted)" }}>
+                      {ot?.unidadPrincipal
+                        ? "Al cambiar de laboratorio se retiran las asignaciones del personal del laboratorio anterior. Queda registrado quién y cuándo."
+                        : "Queda registrado quién lo fijó y cuándo."}
+                    </p>
+                    <div className="toolbar" style={{ gridColumn: "1 / -1", margin: 0 }}>
+                      <button className="btn outline sm" onClick={() => { setCambiandoLab(false); setLabNuevo(""); setLabMotivo(""); }}>Cancelar</button>
+                      <button className="btn primary sm" disabled={busy || !labNuevo} onClick={guardarLaboratorio}>Guardar</button>
+                    </div>
+                  </div>
+                )}
+              </div>
               <div className="form-grid">
                 <div className="field readonly"><label>Código OT</label><input value={ot?.codigo ?? "—"} readOnly /></div>
                 <div className="field readonly"><label>Cliente</label><input value={ot?.cliente?.razonSocial ?? "—"} readOnly /></div>
@@ -200,7 +328,32 @@ export default function ExpedientePage() {
                 {ot?.numeroLey && <div className="field readonly"><label>Resolución DGMN</label><input value={ot.numeroLey} readOnly /></div>}
                 <div className="field readonly"><label>Horas hombre</label><input value={num(ot?.horasHombre, 1)} readOnly /></div>
                 <div className="field readonly"><label>Costo estimado</label><input value={clp(ot?.costoEstimado)} readOnly /></div>
+                {puede("ot.crear") && !["cerrada", "anulada"].includes(ot?.estado) ? (
+                  <div className="field">
+                    <label>Fecha de compromiso</label>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input type="date" value={compromiso} onChange={(e) => setCompromiso(e.target.value)} style={{ flex: 1 }} />
+                      <button className="btn outline sm" disabled={busy || compromiso === (ot?.fechaCompromiso ? String(ot.fechaCompromiso).slice(0, 10) : "")} onClick={guardarCompromiso}>Guardar</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="field readonly"><label>Fecha de compromiso</label><input value={ot?.fechaCompromiso ? fechaDia(ot.fechaCompromiso) : "—"} readOnly /></div>
+                )}
               </div>
+              </div>
+            )}
+            {tab === "asignacion" && typeof id === "string" && <Asignacion otId={id} onCambio={cargarOt} />}
+            {tab === "historial" && (
+              historial.length ? (
+                <table className="data">
+                  <thead><tr><th>Fecha</th><th>Quién</th><th>Qué</th></tr></thead>
+                  <tbody>
+                    {historial.map((h) => (
+                      <tr key={h.id}><td style={{ whiteSpace: "nowrap" }}>{fechaHora(h.createdAt)}</td><td>{h.usuarioNombre ?? "—"}</td><td>{textoHistorial(h)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : <p className="subtitle" style={{ margin: 0 }}>Sin movimientos registrados de laboratorio ni de asignación.</p>
             )}
             {tab === "muestras" && (
               muestras.length ? (
@@ -211,7 +364,11 @@ export default function ExpedientePage() {
               ) : <p className="subtitle" style={{ margin: 0 }}>Sin muestras asociadas a esta OT.</p>
             )}
             {tab === "resultados" && (
-              <p className="subtitle" style={{ margin: 0 }}>Captura de réplicas y estadística en <Link href={"/captura" as any} style={{ color: "var(--accent)" }}>Captura de resultados</Link>. Cada resultado calcula promedio/DE/CV y veredicto contra el límite del producto.</p>
+              <p className="subtitle" style={{ margin: 0 }}>
+                Los resultados de esta OT se capturan, revisan y aprueban en{" "}
+                <Link href={`/captura-ot?otId=${id}` as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>:
+                ahí se ve quién capturó, revisó y aprobó cada valor, y cuándo.
+              </p>
             )}
             {tab === "informe" && (
               <p className="subtitle" style={{ margin: 0 }}>El informe/certificado se genera con las plantillas del repositorio (autorelleno con datos de la OT, cliente y resultados), con HASH y código de verificación. Ver <Link href={"/plantillas" as any} style={{ color: "var(--accent)" }}>Plantillas de informe</Link>.</p>
