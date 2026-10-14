@@ -90,6 +90,8 @@ configuración SMTP del tenant (la misma de Mensajería) y lo deja en la bitáco
 ## 4. Fecha de compromiso y plazos
 
 - `cotizacion.plazo_entrega_dias` (nuevo): plazo comprometido con el cliente, en días corridos.
+  Se informa en la cotización («Plazo de entrega (días corridos)», campo `plazoEntregaDias`
+  de `POST/PATCH /cotizaciones`, 1 a 730); vacío = la fecha la fija Planificación.
 - Al crear la OT o enlazarle la cotización, el disparador `trg_ot_fecha_compromiso` fija
   `fecha_compromiso = fecha de recepción + plazo` (origen `cotizacion`).
 - `PUT /ot/:id/fecha-compromiso { fecha, motivo? }` (`ot.planificar`: Planificación y
@@ -157,8 +159,6 @@ hay que volver a iniciar sesión para verlos.
 
 ## 9. Pendiente / fuera de este cambio
 
-- La pantalla de **cotización** no tiene todavía el campo «Plazo de entrega (días)»
-  (`cotizacion.plazo_entrega_dias`): mientras, la fecha de compromiso la fija Planificación.
 - `nota_credito` arrastra la misma deriva que tenía `factura` (`tenant_id` y `codigo` NOT NULL
   que Prisma no rellena): crear una nota de crédito desde la API sigue fallando.
 - El envío por correo depende de que el SMTP del tenant esté configurado (`/config-correo`).

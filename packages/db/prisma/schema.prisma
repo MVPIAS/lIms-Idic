@@ -289,6 +289,9 @@ model Cotizacion {
   referencia             String?        @db.VarChar(300)
   descripcionTecnica     String?        @map("descripcion_tecnica")
   condicionesAdicionales String?        @map("condiciones_adicionales") @db.VarChar(2000)
+  /// Plazo de entrega comprometido, días corridos desde la recepción (align_firma_cierre.sql).
+  /// La OT lo usa para su fecha de compromiso (disparador trg_ot_fecha_compromiso).
+  plazoEntregaDias       Int?           @map("plazo_entrega_dias")
   observacionesInternas  String?        @map("observaciones_internas")
   moneda                 String         @default("CLP") @db.VarChar(3)
   dolarValor             Decimal?       @map("dolar_valor") @db.Decimal(12, 4)

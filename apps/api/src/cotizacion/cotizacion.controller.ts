@@ -85,6 +85,9 @@ const Cabecera = {
   referencia: z.string().max(300).nullable().optional(),
   descripcionTecnica: z.string().max(20000).nullable().optional(),
   condicionesAdicionales: z.string().max(2000, "Condiciones adicionales: máximo 2000 caracteres.").nullable().optional(),
+  // Plazo de entrega comprometido (días corridos desde la recepción): fija la
+  // fecha de compromiso de la OT que nace al aceptar (docs/FLUJO_FIRMA_CIERRE.md §4).
+  plazoEntregaDias: z.number().int().min(1, "Plazo de entrega: mínimo 1 día.").max(730, "Plazo de entrega: máximo 730 días.").nullable().optional(),
   observacionesInternas: z.string().max(20000).nullable().optional(),
   notas: z.string().nullable().optional(),
   // GAP-CHECK SIS_COMERCIAL: la cotización del legacy es IVA EXENTO y sin gastos

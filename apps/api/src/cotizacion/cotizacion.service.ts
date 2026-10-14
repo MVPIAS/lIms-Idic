@@ -88,6 +88,7 @@ export interface CabeceraCotizacion {
   referencia?: string | null;
   descripcionTecnica?: string | null;
   condicionesAdicionales?: string | null;
+  plazoEntregaDias?: number | null;
   observacionesInternas?: string | null;
   notas?: string | null;
   gastosAdminPct?: number;
@@ -481,6 +482,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         referencia: data.referencia ?? null,
         descripcionTecnica: data.descripcionTecnica ?? null,
         condicionesAdicionales: data.condicionesAdicionales ?? null,
+        plazoEntregaDias: data.plazoEntregaDias ?? null,
         observacionesInternas: data.observacionesInternas ?? null,
         notas: data.notas ?? null,
         fechaEmision,
@@ -545,6 +547,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       referencia: resto.referencia !== undefined ? resto.referencia : undefined,
       descripcionTecnica: resto.descripcionTecnica !== undefined ? resto.descripcionTecnica : undefined,
       condicionesAdicionales: resto.condicionesAdicionales !== undefined ? resto.condicionesAdicionales : undefined,
+      plazoEntregaDias: resto.plazoEntregaDias !== undefined ? resto.plazoEntregaDias : undefined,
       observacionesInternas: resto.observacionesInternas !== undefined ? resto.observacionesInternas : undefined,
       notas: resto.notas !== undefined ? resto.notas : undefined,
       moneda,
