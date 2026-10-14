@@ -66,3 +66,4 @@ seed_accesos_demo.sql                demo
 align_comercial_usuarios.sql
 align_firma_cierre.sql
 align_flujo_laboratorio.sql
+align_metrologia_flujo.sql
