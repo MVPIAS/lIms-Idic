@@ -3,11 +3,13 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   Module,
   NotFoundException,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Req,
@@ -32,6 +34,19 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./veredicto";
 import { leerReplicas } from "./replicas";
 import { AccionRevision, clasificarParaAccion, motivoNoCapturable } from "./flujo-resultado";
+import { veredictoMuestra } from "./especificacion";
+
+/**
+ * Recalcula y guarda el veredicto de la muestra (lote) a partir de sus
+ * ensayos: no_cumple si alguno no cumple, pendiente si falta alguno, cumple si
+ * todos cumplen (regla en especificacion.ts). Lo usan las dos capturas.
+ */
+export async function recalcularVeredictoMuestra(prisma: PrismaService, muestraId: string) {
+  const rs = await prisma.resultado.findMany({ where: { muestraId, deletedAt: null }, select: { veredicto: true } });
+  const v = veredictoMuestra(rs.map((r) => r.veredicto));
+  await prisma.muestra.update({ where: { id: muestraId }, data: { veredicto: v, veredictoAt: new Date() } });
+  return v;
+}
 
 /* ===================== TIPOS DE MUESTRA (árbol) ===================== */
 @Injectable()
@@ -449,7 +464,7 @@ export class ResultadoService extends BaseCrudService {
       const m = await this.prisma.muestra.findUnique({ where: { id: dto.muestraId }, select: { otId: true } });
       otId = m?.otId ?? null;
     }
-    return this.prisma.resultado.create({
+    const creado = await this.prisma.resultado.create({
       data: {
         otId,
         muestraId: dto.muestraId,
@@ -464,6 +479,8 @@ export class ResultadoService extends BaseCrudService {
       },
       include: { analito: true, muestra: true },
     });
+    await recalcularVeredictoMuestra(this.prisma as PrismaService, dto.muestraId);
+    return creado;
   }
 
   /**
@@ -482,7 +499,7 @@ export class ResultadoService extends BaseCrudService {
     const motivo = motivoNoCapturable(actual.estado);
     if (motivo) throw new ConflictException(motivo);
     const calc = await this.calcular({ ...dto, analitoId: actual.analitoId }, tenantId);
-    return this.prisma.resultado.update({
+    const r = await this.prisma.resultado.update({
       where: { id },
       data: {
         ...calc,
@@ -493,6 +510,8 @@ export class ResultadoService extends BaseCrudService {
       },
       include: { analito: true, muestra: true },
     });
+    await recalcularVeredictoMuestra(this.prisma as PrismaService, r.muestraId);
+    return r;
   }
 
   /** OT, laboratorio y estado de un resultado (404 si no existe o es de otro tenant). */
@@ -622,7 +641,9 @@ export class ResultadoService extends BaseCrudService {
     if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
     if (actual.estado !== "capturado")
       throw new ConflictException("Solo se puede fijar el veredicto de un resultado capturado y aún no revisado.");
-    return this.prisma.resultado.update({ where: { id }, data: { veredicto: v } });
+    const r = await this.prisma.resultado.update({ where: { id }, data: { veredicto: v } });
+    await recalcularVeredictoMuestra(this.prisma as PrismaService, r.muestraId);
+    return r;
   }
 }
 
@@ -757,6 +778,9 @@ export class ResultadoBandejaController {
                 r.fecha, r.analista_id AS "analistaId", r.revisado_n1_por AS "revisadoPor", r.revisado_n1_at AS "revisadoAt",
                 r.aprobado_por AS "aprobadoPor", r.aprobado_at AS "aprobadoAt", r.motivo_devolucion AS "motivoDevolucion",
                 r.asignado_a AS "asignadoA", r.analito_id AS "analitoId",
+                r.tipo_dato AS "tipoDato", r.requisito, r.observacion, r.formula, r.formula_aplicada AS "formulaAplicada",
+                r.espec_origen AS "especOrigen", r.espec_catalogo AS "especCatalogo",
+                r.espec_editada_por AS "especEditadaPor", r.espec_editada_at AS "especEditadaAt",
                 o.id AS "otId", o.codigo AS "otCodigo", un.codigo AS "unidadCodigo",
                 m.id AS "muestraId", m.codigo AS "muestraCodigo", m.nombre AS "muestraNombre",
                 COALESCE(ca.nombre, a.nombre) AS "analitoNombre", COALESCE(ca.codigo, a.codigo) AS "analitoCodigo",
@@ -807,7 +831,7 @@ export class ResultadoBandejaController {
  */
 export async function conNombres<T extends Record<string, any>>(prisma: PrismaService, filas: T[]) {
   const ids = new Set<string>();
-  for (const f of filas) for (const k of ["analistaId", "revisadoPor", "aprobadoPor", "asignadoA"]) if (f[k]) ids.add(f[k]);
+  for (const f of filas) for (const k of ["analistaId", "revisadoPor", "aprobadoPor", "asignadoA", "especEditadaPor"]) if (f[k]) ids.add(f[k]);
   const usuarios = ids.size
     ? await prisma.usuario.findMany({ where: { id: { in: [...ids] } }, select: { id: true, nombreCompleto: true } })
     : [];
@@ -818,6 +842,7 @@ export async function conNombres<T extends Record<string, any>>(prisma: PrismaSe
     revisadoPorNombre: f.revisadoPor ? nom.get(f.revisadoPor) ?? null : null,
     aprobadoPorNombre: f.aprobadoPor ? nom.get(f.aprobadoPor) ?? null : null,
     asignadoNombre: f.asignadoA ? nom.get(f.asignadoA) ?? null : null,
+    especEditadaPorNombre: f.especEditadaPor ? nom.get(f.especEditadaPor) ?? null : null,
   }));
 }
 
@@ -898,6 +923,43 @@ export class ResultadoController extends BaseCrudController {
       { ...dto, otId, replicas, analistaId: dto.analistaId ?? req?.user?.sub },
       req?.user?.tenantId ?? DEV_TENANT,
     );
+  }
+
+  /** Listado acotado a los resultados de OT del alcance del usuario. */
+  @Get()
+  async listar(
+    @Query("page") page = "1",
+    @Query("limit") limit = "20",
+    @Query("search") search?: string,
+    @Req() req?: any,
+  ) {
+    const filtro = await this.alcance.filtroUnidades(req);
+    let where: any;
+    if (filtro) {
+      const ots = await this.prisma.ordenTrabajo.findMany({ where: { unidadPrincipal: { in: filtro } }, select: { id: true } });
+      where = { otId: { in: ots.map((o) => o.id) } };
+    }
+    return this.svc.listar({ page: parseInt(page), limit: parseInt(limit), search, where }, req?.user?.tenantId);
+  }
+
+  /** Detalle con alcance por laboratorio (antes cualquier lector abría cualquier resultado por id). */
+  @Get(":id")
+  async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return this.svc.detalle(id, req?.user?.tenantId);
+  }
+
+  /** Edición manual (veredicto/unidad) con alcance por laboratorio. */
+  @Patch(":id")
+  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return this.svc.actualizar(id, this.updateSchema.parse(body), req?.user?.tenantId);
+  }
+
+  @Delete(":id")
+  async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    return this.svc.eliminar(id, req?.user?.tenantId);
   }
 
   @Post(":id/recapturar")
