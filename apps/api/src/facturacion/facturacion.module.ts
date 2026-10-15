@@ -17,6 +17,7 @@ import {
   lineasDesdeCotizacion,
   numeroBorrador,
   totales,
+  validarNotaCredito,
   validarPago,
 } from "./reglas-factura";
 
@@ -464,8 +465,53 @@ export class PagoController extends BaseCrudController {
 /* ===================== NOTAS DE CRÉDITO ===================== */
 @Injectable()
 export class NotaCreditoService extends BaseCrudService {
-  constructor(prisma: PrismaService) {
+  constructor(prisma: PrismaService, private readonly facturas: FacturaService) {
     super(prisma, { model: "notaCredito", search: ["numero"], include: { factura: true }, tenant: false, softDelete: false, orderBy: { fecha: "desc" } });
+  }
+
+  /**
+   * Alta de nota de crédito: la factura debe estar emitida (o con pagos) y la
+   * nota no puede superar el saldo. Recalcula el estado de la factura en la
+   * misma transacción (una factura saldada solo con notas queda «pagada»).
+   */
+  async crear(data: any, tenantId?: string) {
+    const s = await this.facturas.saldo(data.facturaId, tenantId); // 404 si es de otro tenant
+    const motivo = validarNotaCredito(s.estado, s.saldo, Number(data.monto));
+    if (motivo) throw new ConflictException(motivo);
+    return this.prisma.$transaction(async (tx) => {
+      const nc = await tx.notaCredito.create({ data: { facturaId: data.facturaId, numero: data.numero, monto: data.monto, motivo: data.motivo ?? null } });
+      await this.facturas.recalcularEstado(data.facturaId, tx);
+      return nc;
+    });
+  }
+
+  /** Editar el monto o la factura revalida el saldo y recalcula ambas facturas. */
+  async actualizar(id: string, data: any, tenantId?: string) {
+    const actual: any = await this.detalle(id, tenantId);
+    const facturaId = data.facturaId ?? actual.facturaId;
+    const monto = data.monto !== undefined ? Number(data.monto) : Number(actual.monto);
+    const s = await this.facturas.saldo(facturaId, tenantId);
+    // El saldo ya descuenta la propia nota si sigue en la misma factura.
+    const saldoSinEsta = s.saldo + (facturaId === actual.facturaId ? Number(actual.monto) : 0);
+    const motivo = validarNotaCredito(s.estado, saldoSinEsta, monto);
+    if (motivo) throw new ConflictException(motivo);
+    return this.prisma.$transaction(async (tx) => {
+      const { tenantId: _t, ...rest } = data ?? {};
+      const nc = await tx.notaCredito.update({ where: { id }, data: rest });
+      await this.facturas.recalcularEstado(facturaId, tx);
+      if (facturaId !== actual.facturaId) await this.facturas.recalcularEstado(actual.facturaId, tx);
+      return nc;
+    });
+  }
+
+  /** Eliminar una nota de crédito (corrección) recalcula el estado de su factura. */
+  async eliminar(id: string, tenantId?: string) {
+    const actual: any = await this.detalle(id, tenantId);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.notaCredito.delete({ where: { id } });
+      await this.facturas.recalcularEstado(actual.facturaId, tx);
+      return { ok: true, id };
+    });
   }
 }
 const NotaCreditoCreate = z.object({
