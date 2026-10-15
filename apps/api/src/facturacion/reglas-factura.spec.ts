@@ -5,6 +5,7 @@ import {
   numeroBorrador,
   redondear,
   totales,
+  validarNotaCredito,
   validarPago,
 } from "./reglas-factura";
 import { validarImagenFirma } from "../rbac/firmas-imagen.controller";
@@ -74,6 +75,22 @@ describe("reglas-factura · pagos", () => {
     expect(validarPago("emitida", 1000, 1200)).toContain("supera el saldo");
     expect(validarPago("parcial", 600, 600)).toBeNull();
     expect(validarPago("emitida", 1000, 0)).toContain("mayor que cero");
+  });
+});
+
+describe("reglas-factura · notas de crédito", () => {
+  it("valida la nota contra el estado y el saldo", () => {
+    expect(validarNotaCredito("pendiente", 1000, 100)).toContain("pendiente de emitir");
+    expect(validarNotaCredito("anulada", 1000, 100)).toContain("anulada");
+    expect(validarNotaCredito("emitida", 1000, 0)).toContain("mayor que cero");
+    expect(validarNotaCredito("emitida", 1000, 1200)).toContain("supera el saldo");
+    expect(validarNotaCredito("parcial", 400, 400)).toBeNull();
+    expect(validarNotaCredito("pagada", 0, 1)).toContain("supera el saldo");
+  });
+
+  it("una factura saldada solo con notas de crédito queda pagada", () => {
+    expect(estadoPorPagos(1000, 0, 1000)).toBe("pagada");
+    expect(estadoPorPagos(1000, 0, 300)).toBe("parcial");
   });
 });
 

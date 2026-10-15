@@ -102,6 +102,19 @@ export function estadoPorPagos(total: number, pagado: number, notasCredito = 0):
   return "emitida";
 }
 
+/**
+ * ¿Se puede registrar esta nota de crédito? Devuelve el motivo si no.
+ * `saldo` es el saldo pendiente SIN contar la propia nota (al editarla, el
+ * llamador le suma su monto anterior).
+ */
+export function validarNotaCredito(estado: string, saldo: number, monto: number): string | null {
+  if (estado === "pendiente") return "La factura está pendiente de emitir: no admite notas de crédito hasta que Finanzas la emita.";
+  if (estado === "anulada") return "La factura está anulada: no admite notas de crédito.";
+  if (!(monto > 0)) return "El monto de la nota de crédito debe ser mayor que cero.";
+  if (monto - saldo > 0.005) return `La nota de crédito (${monto}) supera el saldo pendiente de la factura (${saldo}).`;
+  return null;
+}
+
 /** ¿Se puede registrar este pago? Devuelve el motivo si no. */
 export function validarPago(estado: string, saldo: number, monto: number): string | null {
   if (estado === "pendiente") return "La factura está pendiente de emitir: Finanzas debe emitirla antes de registrar pagos.";
