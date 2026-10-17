@@ -145,6 +145,7 @@ export function calcularITM03(d: Datos, opt: Opciones = {}) {
       else if (it.uAsignadaManual != null && it.uAsignadaManual !== "") { uAsig = Number(it.uAsignadaManual); origenU = "manual"; }
       else throw new Error(`Ítem ${it.id ?? it.nom}: nominal no normalizado (${nominal}); indique la U asignada (en la planilla se escribe a mano)`);
     }
+    if (uAsig == null) throw new Error(`Ítem ${it.id ?? it.nom}: sin U asignada`);
     const certU = uAsig >= 100 ? `${(uAsig / 1000).toFixed(2).replace(".", ",")} g` : `${Math.round(uAsig)} mg`;
     // Clase OIML a la que llega la desviación (informativa; el LMT no evalúa conformidad).
     let claseObtenida = "--";

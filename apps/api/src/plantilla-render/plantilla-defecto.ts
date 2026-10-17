@@ -193,6 +193,9 @@ export const ESTILOS_DOCUMENTO = `
   .firmas-e .pend { color:#9a5b00; font-style:italic; }
   .aviso-estado { border:1.5px solid #9a5b00; color:#7a4700; background:#fff7e6; padding:7px 10px;
                   font-weight:600; font-size:11px; margin-bottom:14px; text-align:center; }
+  .salto-pagina { page-break-before:always; break-before:page; height:0; margin:0; }
+  table.firmas-cert { margin-top:30px; }
+  table.firmas-cert td { width:50%; text-align:center; vertical-align:top; padding:34px 10px 6px; border:none; border-top:1px solid var(--tinta); font-size:10.5px; }
   .pie { margin-top:26px; border-top:1px solid var(--linea); padding-top:9px;
          font-size:9px; color:var(--suave); }
   .pie .sello { font-family:Consolas,"Courier New",monospace; word-break:break-all; }

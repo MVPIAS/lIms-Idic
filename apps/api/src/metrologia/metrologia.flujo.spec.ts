@@ -28,13 +28,13 @@ describe("Circuito del certificado de calibración", () => {
   });
 
   it("sin metrologia.emitir no se emite", () => {
-    expect(motivoRechazo("EMITIR", ctx({ estado: "en_revision", esAutor: false }))).toMatch(/permiso/);
+    expect(motivoRechazo("EMITIR", ctx({ estado: "en_revision", esAutor: false }))).toMatch(/no le corresponde/i);
   });
 
-  it("en revisión no se edita; emitida no admite nada", () => {
+  it("en revisión no se edita; emitida solo admite la reemisión", () => {
     expect(motivoRechazo("EDITAR", ctx({ estado: "en_revision" }))).toMatch(/borrador/);
     const e = ctx({ estado: "emitida", esAutor: false, puedeEmitir: true });
-    expect(accionesDisponibles(e)).toEqual([]);
+    expect(accionesDisponibles(e)).toEqual(["REEMITIR"]);
     expect(motivoRechazo("EMITIR", e)).toMatch(/ya fue emitida/);
   });
 

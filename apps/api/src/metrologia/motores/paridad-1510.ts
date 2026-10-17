@@ -73,7 +73,7 @@ export function verificarCaso1510(caso: CasoReferencia): Contador {
     c.igual(`(${exc(V.amb.t)} ± ${exc(V.amb.tU)}) °C`, C.D31, "D31");
     c.igual(`(${exc(V.amb.h)} ± ${exc(V.amb.hU)}) %`, C.D32, "D32");
     c.igual(`(${exc(V.amb.p)} ± ${exc(V.amb.pU)}) hPa`, C.D33, "D33");
-    c.igual(`la corrección respectiva es de  ±  ${exc(V.sintesis)}  μL, para un nivel de confianza del 95%`, C.D52, "D52");
+    c.igual(`la corrección respectiva es de  ±  ${exc(V.sintesis ?? NaN)}  μL, para un nivel de confianza del 95%`, C.D52, "D52");
     return c;
   }
   throw new Error(`Sin verificación de paridad para ${caso.it}`);
