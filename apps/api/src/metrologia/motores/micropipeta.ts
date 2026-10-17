@@ -38,7 +38,8 @@ export function calcularITV05(d: Datos, opt: Opciones = {}) {
   if (!mat) throw new Error("Indique el material del contenedor (1 a 13, tabla de la planilla)");
   const g = mat.gamma, ug = ((5 * g) / 100) / S3;
   const rB = d.rhoB ?? 8, urB = d.urhoB ?? 0.023;
-  const [a1, a2, a3, a4, a5] = (d.tan ?? TANAKA) as number[];
+  const tan = Array.isArray(d.tan) && d.tan.length === 5 && d.tan.every((x: any) => typeof x === "number") ? d.tan : TANAKA;
+  const [a1, a2, a3, a4, a5] = tan as number[];
   const uEqW = d.uEqW ?? 2.8e-6, uEqA = d.uEqA ?? 0.00024;
   const bal = d.bal, thA = d.thA, thW = d.thW, hr = d.hr, pr = d.pr;
   if (!bal || !thA || !thW || !hr || !pr) throw new Error("Faltan los datos de la balanza, los termómetros, el higrómetro o el barómetro");

@@ -48,8 +48,8 @@ const prisma = new PrismaClient();
 /** Laboratorios de la Sección Metrología a los que puede pertenecer una calibración. */
 const LABS_SAM = ["LMT", "LMTE", "LNF", "LCAD"];
 const TIPO_DOC = "CERTIFICADO_CALIBRACION";
-/** Entradas que salen de un maestro y no se escriben en el formulario (C5: CMC versionada). */
-const CAMPOS_MAESTRO: Record<string, string[]> = { ITM02: ["mcm"], ITV05: ["cmcTabla"] };
+/** Entradas que salen de un maestro (C5: CMC versionada) o son constantes del método: no se escriben en el formulario. */
+const CAMPOS_MAESTRO: Record<string, string[]> = { ITM02: ["mcm"], ITV05: ["cmcTabla", "tan", "uEqW", "uEqA"], ITM03: ["rho0", "rhoAl"] };
 /** Motores cuya U certificada es la ASIGNADA por clase (OIML R111), no la calculada. */
 const U_ASIGNADA = new Set(["ITM01", "ITM03"]);
 const URL_VERIFICACION = () => (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");

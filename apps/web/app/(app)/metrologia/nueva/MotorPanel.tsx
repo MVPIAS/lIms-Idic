@@ -33,6 +33,8 @@ interface Props {
   /** Datos ya guardados (al editar un borrador). Sin ellos, el formulario abre vacío. */
   inicial?: { datos: any; opciones: Record<string, boolean> } | null;
   guardando: boolean;
+  /** Fecha de calibración (AAAA-MM-DD): fija la versión vigente de la CMC en la vista previa. */
+  fecha?: string;
   onGuardar: (motor: { datos: any; opciones: Record<string, boolean> }) => void;
 }
 
@@ -42,10 +44,11 @@ interface Props {
  * calcula la vista previa con el mismo motor que usa al guardar. «Cargar
  * ejemplo» trae las entradas de un caso real, solo para formación.
  */
-export default function MotorPanel({ motor, paridad, inicial, guardando, onGuardar }: Props) {
+export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, onGuardar }: Props) {
   const [caso, setCaso] = useState(motor.casos[0]?.caso ?? "");
   const [datos, setDatos] = useState<any>(inicial?.datos ?? null);
-  const [opciones, setOpciones] = useState<Record<string, boolean>>(inicial?.opciones ?? {});
+  // Calibración nueva: las correcciones que el laboratorio pidió aplicar vienen activadas (C6).
+  const [opciones, setOpciones] = useState<Record<string, boolean>>(inicial?.opciones ?? motor.opcionesPorDefecto ?? {});
   const [calc, setCalc] = useState<CalculoMotor | null>(null);
   const [aviso, setAviso] = useState("");
   const [esEjemplo, setEsEjemplo] = useState(false);
@@ -64,12 +67,12 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
     setAviso("");
     try {
       const j = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/ejemplo?caso=${encodeURIComponent(caso)}`, { headers: auth() }).then((r) => r.json());
-      setDatos(j.data?.datos ?? null); setOpciones({}); setEsEjemplo(true);
+      setDatos(j.data?.datos ?? null); setOpciones(motor.opcionesPorDefecto ?? {}); setEsEjemplo(true);
     } catch (e: any) { setAviso(e.message); }
   }
   async function vaciar() {
     const j = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/plantilla`, { headers: auth() }).then((r) => r.json()).catch(() => null);
-    setDatos(j?.data?.datos ?? {}); setOpciones({}); setEsEjemplo(false); setCalc(null);
+    setDatos(j?.data?.datos ?? {}); setOpciones(motor.opcionesPorDefecto ?? {}); setEsEjemplo(false); setCalc(null);
   }
 
   // Vista previa: el servidor calcula con el mismo motor que usa al guardar.
@@ -78,7 +81,8 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
     const n = ++seq.current;
     const h = setTimeout(async () => {
       try {
-        const r = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/calcular`, { method: "POST", headers: auth(), body: JSON.stringify({ datos, opciones }) });
+        const q = fecha ? `?fecha=${encodeURIComponent(fecha)}` : "";
+        const r = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/calcular${q}`, { method: "POST", headers: auth(), body: JSON.stringify({ datos, opciones }) });
         const j = await r.json().catch(() => ({}));
         if (n !== seq.current) return;
         if (!r.ok) { setCalc(null); setAviso(j.message ?? `Error ${r.status}`); return; }
@@ -86,7 +90,7 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
       } catch (e: any) { if (n === seq.current) setAviso(e.message); }
     }, 350);
     return () => clearTimeout(h);
-  }, [datos, opciones, motor.it]);
+  }, [datos, opciones, motor.it, fecha]);
 
   const partes = useMemo(() => {
     if (!datos) return null;
@@ -95,10 +99,15 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
     const series = Object.entries(datos).filter(([k, v]) => k !== puntosKey && Array.isArray(v) && !esMatriz(v) && !v.some(esObj));
     const matrices = Object.entries(datos).filter(([k, v]) => k !== puntosKey && esMatriz(v)) as [string, any[][]][];
     const filas: any[] = puntosKey ? datos[puntosKey] : [];
-    const cols: { k: string; n: number }[] = [];
+    // Cada columna es una ruta dentro de la fila: los objetos anidados (p. ej. el patrón del ítem) se abren en sus campos.
+    const cols: { k: string; ruta: string[]; n: number }[] = [];
+    const agregar = (ruta: string[], v: any) => {
+      const k = ruta.join("."), n = Array.isArray(v) ? v.length : 0, c = cols.find((x) => x.k === k);
+      if (!c) cols.push({ k, ruta, n }); else c.n = Math.max(c.n, n);
+    };
     filas.forEach((f) => Object.entries(f).forEach(([k, v]) => {
-      const n = Array.isArray(v) ? v.length : 0, c = cols.find((x) => x.k === k);
-      if (!c) cols.push({ k, n }); else c.n = Math.max(c.n, n);
+      if (esObj(v)) Object.entries(v as any).forEach(([k2, v2]) => agregar([k, k2], v2));
+      else agregar([k], v);
     }));
     return { puntosKey, escalares, series, matrices, filas, cols };
   }, [datos]);
@@ -110,11 +119,15 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
   }
 
   const inp = (ruta: (string | number)[], v: any, key?: string) => (
-    <input key={key} value={verEntrada(v)} style={CELL} onChange={(e) => cambiar(ruta, e.target.value)} />
+    <input key={key} value={verEntrada(v)} style={CELL} onChange={(e) => cambiar(ruta, e.target.value)}
+      aria-label={ruta.map((x) => (typeof x === "number" ? `#${x + 1}` : lbl(x))).join(" · ")} />
   );
   const r = calc?.resumen;
   const uu = motor.unidadU;
   const conClase = !!r?.puntos.some((p) => p.clase);
+  // El LMT no evalúa conformidad (C1): solo el formulario por puntos indica si el error queda dentro de la tolerancia que se declare.
+  const conVeredicto = motor.it === "PUNTOS" && !!r?.puntos.some((p) => p.conforme != null);
+  const fuera = !!r?.puntos.some((p) => p.fueraAlcance);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -143,13 +156,22 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
           {esEjemplo && <div className="alert warn" style={{ margin: 0 }}>Está viendo los datos de un caso real de formación. Reemplácelos por los de su calibración antes de guardar.</div>}
           {motor.opciones.length > 0 && (
             <div>
-              <div style={{ ...HEAD, fontSize: 11, marginBottom: 6 }}>Correcciones propuestas (desactivadas = cálculo idéntico a la planilla)</div>
-              {motor.opciones.map((o) => (
-                <label key={o.clave} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, marginBottom: 4 }}>
-                  <input type="checkbox" checked={!!opciones[o.clave]} onChange={(e) => setOpciones({ ...opciones, [o.clave]: e.target.checked })} />
-                  <span className="codigo">{o.hallazgo}</span> {o.etiqueta}
-                </label>
-              ))}
+              <div style={{ ...HEAD, fontSize: 11, marginBottom: 6 }}>Correcciones a la planilla (todas desactivadas = cálculo idéntico a la planilla)</div>
+              {motor.opciones.map((o) => {
+                const rechazada = o.decision === "rechazada";
+                const etiqueta = o.decision === "aplicar" ? "Pedida por el laboratorio" : rechazada ? "Rechazada por el laboratorio" : "Pendiente de respuesta";
+                return (
+                  <label key={o.clave} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, marginBottom: 6, opacity: rechazada ? 0.65 : 1 }}>
+                    <input type="checkbox" disabled={rechazada} checked={!rechazada && !!opciones[o.clave]}
+                      onChange={(e) => setOpciones({ ...opciones, [o.clave]: e.target.checked })} style={{ marginTop: 3 }} />
+                    <span>
+                      <span className="codigo">{o.hallazgo}</span> {o.etiqueta}{" "}
+                      <span className={`pill ${o.decision === "aplicar" ? "green" : rechazada ? "gray" : "amber"}`} style={{ fontSize: 11 }}>{etiqueta}</span>
+                      {o.respuesta && <span style={{ display: "block", color: "var(--muted)", fontSize: 12 }}>Respuesta: {o.respuesta}</span>}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           )}
         </div>
@@ -163,8 +185,8 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 8 }}>
                 {partes.escalares.map(({ ruta, v }) => (
                   <div className="field" key={ruta.join(".")} style={{ minWidth: 0 }}>
-                    <label title={ruta.join(".")}>{ruta.length > 1 ? `${lbl(ruta[0])} · ${lbl(ruta.slice(1).join(" · "))}` : lbl(ruta[0])}</label>
-                    <input value={verEntrada(v)} style={{ ...YEL, fontFamily: "var(--mono,monospace)" }} onChange={(e) => cambiar(ruta, e.target.value)} />
+                    <label htmlFor={`m-${ruta.join("-")}`} title={ruta.join(".")}>{ruta.length > 1 ? `${lbl(ruta[0])} · ${lbl(ruta.slice(1).join(" · "))}` : lbl(ruta[0])}</label>
+                    <input id={`m-${ruta.join("-")}`} value={verEntrada(v)} style={{ ...YEL, fontFamily: "var(--mono,monospace)" }} onChange={(e) => cambiar(ruta, e.target.value)} />
                   </div>
                 ))}
               </div>
@@ -187,9 +209,12 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
                     {partes.filas.map((f, i) => (
                       <tr key={i}>
                         <td className="num">{i + 1}</td>
-                        {partes.cols.flatMap((c) => (c.n
-                          ? Array.from({ length: c.n }, (_, j) => <td key={c.k + j}>{Array.isArray(f[c.k]) && j < f[c.k].length ? inp([partes.puntosKey!, i, c.k, j], f[c.k][j]) : null}</td>)
-                          : [<td key={c.k}>{esObj(f[c.k]) ? "—" : inp([partes.puntosKey!, i, c.k], f[c.k])}</td>]))}
+                        {partes.cols.flatMap((c) => {
+                          const val = c.ruta.reduce((o: any, k) => (o == null ? undefined : o[k]), f);
+                          return c.n
+                            ? Array.from({ length: c.n }, (_, j) => <td key={c.k + j}>{Array.isArray(val) && j < val.length ? inp([partes.puntosKey!, i, ...c.ruta, j], val[j]) : null}</td>)
+                            : [<td key={c.k}>{c.ruta.length > 1 && val === undefined ? "—" : inp([partes.puntosKey!, i, ...c.ruta], val)}</td>];
+                        })}
                       </tr>
                     ))}
                   </tbody>
@@ -203,9 +228,7 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
       <div className="card">
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-2,#eee)", display: "flex", alignItems: "center", gap: 8 }}>
           <b style={HEAD}>Resultados en vivo</b>
-          {r && r.conforme != null && (
-            <span className={`pill ${r.conforme ? "green" : "red"}`} style={{ marginLeft: "auto" }}>{r.conforme ? "Conforme" : "No conforme"}</span>
-          )}
+
         </div>
         <div className="body" style={{ padding: 14 }}>
           {!r && !aviso && <p style={{ color: "var(--muted)", margin: 0 }}>Complete la toma de datos: los resultados aparecen aquí a medida que escribe.</p>}
@@ -214,7 +237,7 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
             <>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 12 }}>
                 {[["Mayor U calculada", `± ${fmtG(r.uMax)} ${uu}`], ["U informada en el certificado", r.uCert == null ? "—" : `± ${fmtG(r.uCert)} ${uu}`],
-                  [conClase ? "Clase desde el primer punto" : "Puntos conformes", conClase ? r.puntos[0]?.clase ?? "—" : r.conforme == null ? "Sin criterio" : `${r.puntos.filter((p) => p.conforme).length} / ${r.puntos.length}`]].map(([l, v]) => (
+                  [conClase ? "Clase desde el primer punto" : "Puntos", conClase ? r.puntos[0]?.clase ?? "—" : String(r.puntos.length)]].map(([l, v]) => (
                   <div key={l} style={{ ...BLUE, borderRadius: 8, padding: "8px 10px" }}>
                     <div style={{ fontSize: 10.5, color: "var(--muted)", textTransform: "uppercase" }}>{l}</div>
                     <div style={{ fontSize: 17, fontWeight: 600 }}>{v}</div>
@@ -223,17 +246,21 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, onGuard
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table className="data">
-                  <thead><tr><th>Nominal {motor.unidad}</th><th>{conClase ? "fc %" : `Error ${uu === "%" ? "%" : motor.unidad}`}</th><th>u<sub>c</sub> {uu}</th><th>U {uu}</th><th>U certificado {uu}</th><th>{conClase ? "Clase del rango" : "Estado"}</th></tr></thead>
+                  <thead><tr><th>Nominal {motor.unidad}</th><th>{motor.it === "LCPNF-IT01" ? "fc %" : `Error ${uu === "%" ? "%" : motor.unidad}`}</th><th>u<sub>c</sub> {uu}</th><th>U calculada {uu}</th><th>CMC {uu}</th><th>U certificada {uu}</th>{conClase && <th>Clase</th>}{conVeredicto && <th>Tolerancia</th>}</tr></thead>
                   <tbody>
                     {r.puntos.map((p, i) => (
                       <tr key={i}>
-                        {[fmtG(p.nominal), fmtG(p.error), fmtG(p.uc), fmtG(p.U), fmtG(p.Ucert)].map((v, j) => <td key={j} className="num" style={BLUE}>{v}</td>)}
-                        <td>{conClase ? <span className="pill blue">{p.clase}</span> : p.conforme == null ? "—" : p.conforme ? <span className="pill green">Cumple</span> : <span className="pill red">No cumple</span>}</td>
+                        {[fmtG(p.nominal), fmtG(p.error), fmtG(p.uc), fmtG(p.U), p.cmc == null ? "—" : fmtG(p.cmc)].map((v, j) => <td key={j} className="num" style={BLUE}>{v}</td>)}
+                        <td className="num" style={BLUE} title={p.fueraAlcance ? "Fuera del alcance acreditado: se marca con * en el certificado" : undefined}>{fmtG(p.uCertificado ?? p.Ucert)}{p.fueraAlcance ? " *" : ""}</td>
+                        {conClase && <td><span className="pill blue">{p.clase}</span></td>}
+                        {conVeredicto && <td>{p.conforme == null ? "—" : p.conforme ? "Dentro" : "Fuera"}</td>}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              {fuera && <p style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0 0" }}>* Punto fuera del alcance de acreditación: el certificado lo marca así.</p>}
+              {r.cmc && r.cmc.length > 0 && <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0 0" }}>CMC según {r.cmc.join(" · ")}. U certificada = máx(U calculada, CMC), con dos cifras significativas.</p>}
               {r.extra && r.extra.length > 0 && (
                 <table className="data" style={{ marginTop: 12 }}>
                   <tbody>{r.extra.map((x, i) => <tr key={i}><th style={{ width: 240 }}>{x.etiqueta}</th><td style={BLUE}>{x.valor}</td></tr>)}</tbody>
