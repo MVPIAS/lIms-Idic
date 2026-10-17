@@ -247,6 +247,11 @@ const CatMetodoCreate = z.object({
   version: z.string().max(30).optional(),
   servgrp: z.string().max(240).optional(),
   activo: z.boolean().default(true),
+  // Factor por defecto de la fórmula (align_quimicos_recepcion_calculo.sql): se copia
+  // a los ensayos de cada OT y la jefatura lo ajusta por OT. Ambos o ninguno.
+  factorValor: z.number().positive().max(1e9).nullable().optional(),
+  factorOperacion: z.enum(["multiplicar", "dividir"]).nullable().optional(),
+  factorDescripcion: z.string().max(120).nullable().optional(),
 });
 @ApiTags("cat-metodos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/metodos")
 @RequierePermisoCrud(PERMISOS_CATALOGO)

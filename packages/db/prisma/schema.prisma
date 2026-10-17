@@ -909,6 +909,19 @@ model Muestra {
   /// Veredicto de la muestra (agregado de sus ensayos). align_flujo_laboratorio.sql §7.
   veredicto     String?   @db.VarChar(20)
   veredictoAt   DateTime? @map("veredicto_at") @db.Timestamptz
+  /// Recepción (align_quimicos_recepcion_calculo.sql): toma de muestra (código de
+  /// parametro_sistema «toma_muestra»), condición Cumple / No cumple con
+  /// observación, sello, identificación dada por el cliente y otros laboratorios.
+  tomaMuestra           String?   @map("toma_muestra") @db.VarChar(60)
+  condicionRecepcion    String?   @map("condicion_recepcion") @db.VarChar(10)
+  condicionObservacion  String?   @map("condicion_observacion")
+  selloNumero           String?   @map("sello_numero") @db.VarChar(40)
+  identificacionCliente String?   @map("identificacion_cliente") @db.VarChar(300)
+  requiereOtrosLabs     Boolean   @default(false) @map("requiere_otros_labs")
+  otrosLabs             String[]  @default([]) @map("otros_labs") @db.Uuid
+  otrosLabsDetalle      String?   @map("otros_labs_detalle")
+  recepcionadaAt        DateTime? @map("recepcionada_at") @db.Timestamptz
+  recepcionadaPor       String?   @map("recepcionada_por") @db.Uuid
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
 
@@ -1057,6 +1070,19 @@ model Resultado {
   reabiertoAt     DateTime? @map("reabierto_at") @db.Timestamptz
   reabiertoMotivo String?   @map("reabierto_motivo")
   reaperturas     Int       @default(0)
+  /// Factor de la fórmula de este ensayo en la OT (align_quimicos_recepcion_calculo.sql):
+  /// copia del método (origen «metodo») o ajustado en la orden («orden», con quién,
+  /// cuándo y motivo). `valorSinFactor` es el valor calculado antes del factor.
+  factorValor       Decimal?  @map("factor_valor") @db.Decimal(18, 6)
+  factorOperacion   String?   @map("factor_operacion") @db.VarChar(12)
+  factorDescripcion String?   @map("factor_descripcion") @db.VarChar(120)
+  factorOrigen      String?   @map("factor_origen") @db.VarChar(10)
+  factorEditadoPor  String?   @map("factor_editado_por") @db.Uuid
+  factorEditadoAt   DateTime? @map("factor_editado_at") @db.Timestamptz
+  factorMotivo      String?   @map("factor_motivo")
+  valorSinFactor    Decimal?  @map("valor_sin_factor") @db.Decimal(18, 6)
+  /// Variables extra de la fórmula usadas en la captura (masa, volumen…).
+  variables         Json?
 
   muestra    Muestra   @relation(fields: [muestraId], references: [id], onDelete: Cascade)
   analito    Analito?  @relation(fields: [analitoId], references: [id])
@@ -1402,6 +1428,10 @@ model CatMetodo {
   servgrp     String?   @db.VarChar(240)
   activo      Boolean   @default(true)
   qcRequerido Boolean   @default(false) @map("qc_requerido")
+  /// Factor por defecto de la fórmula (align_quimicos_recepcion_calculo.sql).
+  factorValor       Decimal? @map("factor_valor") @db.Decimal(18, 6)
+  factorOperacion   String?  @map("factor_operacion") @db.VarChar(12)
+  factorDescripcion String?  @map("factor_descripcion") @db.VarChar(120)
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
 

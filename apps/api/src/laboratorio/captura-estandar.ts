@@ -13,12 +13,17 @@
  *         campos (p. ej. «PROMEDIO(RN) * 100») se aplica sobre ellas;
  *       - valor directo (número, con coma decimal) o texto cualitativo.
  *     Veredicto: Mín ≤ valor ≤ Máx; sin límites → «informativo».
+ *   · FACTOR (factor.ts): si el ensayo lleva factor, multiplica o divide el
+ *     valor CALCULADO (lecturas o réplicas). El valor directo no se toca.
+ *     `valorSinFactor` guarda el valor antes del factor para recalcular si el
+ *     factor cambia después.
  */
 import { evaluarFormula, FormulaError } from "../common/formula";
 import { leerReplicas } from "./replicas";
 import { traducirFormula } from "./formula-legado";
 import { esNumeroTexto, type TipoDato } from "./especificacion";
 import { veredictoNumerico, type Veredicto } from "./veredicto";
+import { aplicarFactor, expresionConFactor, type Factor } from "./factor";
 
 export class CapturaError extends Error {}
 
@@ -28,6 +33,7 @@ export interface EspecCaptura {
   nominal?: string | null;
   limiteSup?: string | null;
   formula?: string | null;
+  factor?: Factor | null;
 }
 
 export interface EntradaCaptura {
@@ -52,6 +58,10 @@ export interface CalculoCaptura {
   lecturas: Record<string, number>[] | null;
   observacion: string | null;
   veredicto: Veredicto;
+  /** Valor calculado antes del factor (NULL si no es un valor calculado). */
+  valorSinFactor: number | null;
+  /** ¿Se aplicó el factor del ensayo? */
+  factorAplicado: boolean;
 }
 
 const num = (v: string | null | undefined): number | null =>
@@ -96,7 +106,9 @@ export function calcularCaptura(espec: EspecCaptura, e: EntradaCaptura): Calculo
   const base: CalculoCaptura = {
     valorNumerico: null, valorTexto: null, replicas: [], promedio: null, desviacion: null, cv: null,
     resultadoFinal: null, formulaAplicada: null, lecturas: null, observacion: e.observacion?.trim() || null, veredicto: "pendiente",
+    valorSinFactor: null, factorAplicado: false,
   };
+  const factor = espec.factor ?? null;
 
   /* ---------------- ATRIBUTO ---------------- */
   if (espec.tipoDato === "atributo") {
@@ -138,10 +150,11 @@ export function calcularCaptura(espec: EspecCaptura, e: EntradaCaptura): Calculo
       return evaluar(trad.expr!, ctx, `Lectura ${i + 1}`);
     });
     const st = estadistica(valores);
-    valor = st.promedio;
+    valor = aplicarFactor(st.promedio, factor);
     Object.assign(out, {
       replicas: valores, promedio: st.promedio, desviacion: st.desviacion, cv: st.cv,
-      resultadoFinal: st.promedio, formulaAplicada: trad.expr, lecturas,
+      resultadoFinal: valor, formulaAplicada: expresionConFactor(trad.expr!, factor), lecturas,
+      valorSinFactor: st.promedio, factorAplicado: !!factor,
     });
   } else if (e.replicas?.length || (e.replicasTexto ?? "").trim()) {
     let rep = e.replicas ?? [];
@@ -160,8 +173,12 @@ export function calcularCaptura(espec: EspecCaptura, e: EntradaCaptura): Calculo
       const ctx: Record<string, number | number[]> = { ...(e.variables ?? {}), RN: rep, REPLICAS: rep, PROMEDIO: st.promedio, DE: st.desviacion, CV: st.cv, N: rep.length };
       rep.forEach((v, i) => (ctx[`RN${i + 1}`] = v));
       valor = evaluar(trad.expr, ctx, "Réplicas");
-      Object.assign(out, { resultadoFinal: valor, formulaAplicada: trad.expr });
     }
+    const sinFactor = valor as number;
+    valor = aplicarFactor(sinFactor, factor);
+    if (trad.expr && trad.nCampos === 0) Object.assign(out, { resultadoFinal: valor, formulaAplicada: expresionConFactor(trad.expr, factor) });
+    else if (factor) Object.assign(out, { resultadoFinal: valor, formulaAplicada: expresionConFactor("PROMEDIO(RN)", factor) });
+    Object.assign(out, { valorSinFactor: sinFactor, factorAplicado: !!factor });
   } else if (e.valor != null && String(e.valor).trim() !== "") {
     if (typeof e.valor === "number") valor = e.valor;
     else if (esNumeroTexto(e.valor)) valor = Number(e.valor.trim().replace(",", "."));
