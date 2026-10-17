@@ -234,7 +234,7 @@ export default function RegistroMuestras({ otId, onCambio }: { otId: string; onC
                               <div style={{ color: "var(--muted)", marginTop: 2 }}>{etiquetaToma(m.tomaMuestra)}</div>
                             </>
                           )}
-                          {m.condicionObservacion && <div style={{ color: "#8a1f1f", marginTop: 2 }}>{m.condicionObservacion}</div>}
+                          {m.condicionObservacion && <div style={{ color: "var(--red)", marginTop: 2 }}>{m.condicionObservacion}</div>}
                           {m.recepcionadaAt && (
                             <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>
                               {fechaHora(m.recepcionadaAt)}{m.recepcionadaPorNombre ? ` · ${m.recepcionadaPorNombre}` : ""}

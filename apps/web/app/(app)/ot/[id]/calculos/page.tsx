@@ -160,6 +160,7 @@ export default function PlanillaCalculosPage() {
           </div>
 
           <div className="card">
+            <h2>Ensayos{visibles.length ? ` (${visibles.length})` : ""}</h2>
             {!visibles.length ? (
               <EmptyState titulo="Sin ensayos" texto={p.ensayos.length ? "Ningún ensayo coincide con el filtro." : "La OT aún no tiene ensayos: se generan al registrar sus muestras."} />
             ) : (

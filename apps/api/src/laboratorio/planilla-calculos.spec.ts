@@ -35,6 +35,8 @@ describe("planilla de registros y cálculos", () => {
     expect(celdaCsv("=HYPERLINK(1)")).toBe("'=HYPERLINK(1)");
     expect(celdaCsv("-0,5")).toBe("-0,5");
     expect(celdaCsv("-cmd")).toBe("'-cmd");
+    expect(celdaCsv("-1+HYPERLINK(1)")).toBe("'-1+HYPERLINK(1)");
+    expect(celdaCsv("-12.5")).toBe("-12.5");
   });
   it("CSV con cálculos e historial, BOM y punto y coma", () => {
     const csv = csvPlanilla("OT-1", [ensayo]);
