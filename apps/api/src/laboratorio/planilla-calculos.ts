@@ -141,8 +141,9 @@ export function origenFormula(formula: string | null, especOrigen: string | null
 /** Celda CSV segura: comillas, saltos de línea y fórmulas de Excel neutralizadas. */
 export function celdaCsv(v: unknown): string {
   let s = v == null ? "" : String(v);
-  // Inyección de fórmulas (=, +, @, tabulador o «-» que no es un número).
-  if (/^[=+@\t\r]/.test(s) || /^-(?![\d,.])/.test(s)) s = `'${s}`;
+  // Inyección de fórmulas: =, +, @, tabulador, retorno o «-» salvo que la celda
+  // entera sea un número («-0,5»); «-1+HYPERLINK(…)» se neutraliza.
+  if (/^[=+@\t\r]/.test(s) || (s.startsWith("-") && !/^-\d+([.,]\d+)?$/.test(s))) s = `'${s}`;
   if (/[;"\n\r]/.test(s)) s = `"${s.replace(/"/g, '""')}"`;
   return s;
 }

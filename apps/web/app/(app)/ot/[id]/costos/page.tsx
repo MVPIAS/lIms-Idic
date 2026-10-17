@@ -102,6 +102,13 @@ export default function CostosRealesPage() {
     }
   }, [id, unidadId]);
   useEffect(() => { cargar(); }, [cargar]);
+  // Avisa antes de salir con cambios sin guardar.
+  useEffect(() => {
+    if (!sucio) return;
+    const aviso = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", aviso);
+    return () => window.removeEventListener("beforeunload", aviso);
+  }, [sucio]);
 
   const editable = !!v?.puedeGestionar && v.planilla?.estado !== "cerrada" && v.ot.estado !== "anulada";
   const cambiar = (k: string, p: Partial<Fila>) => { setFilas((fs) => fs.map((f) => (f.clave === k ? { ...f, ...p } : f))); setSucio(true); };
@@ -193,7 +200,7 @@ export default function CostosRealesPage() {
               {v.unidadesPosibles.length > 1 ? (
                 <div className="field" style={{ minWidth: 260 }}>
                   <label htmlFor="lab">Laboratorio</label>
-                  <select id="lab" value={v.unidad?.id ?? ""} onChange={(e) => setUnidadId(e.target.value)} disabled={sucio}>
+                  <select id="lab" value={v.unidad?.id ?? ""} onChange={(e) => setUnidadId(e.target.value)} disabled={sucio} title={sucio ? "Guarde los cambios antes de cambiar de laboratorio" : undefined}>
                     {v.unidadesPosibles.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}{u.principal ? " (responsable)" : " (orden interna)"}</option>)}
                   </select>
                 </div>
