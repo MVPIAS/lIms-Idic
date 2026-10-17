@@ -1,5 +1,15 @@
 import { NodoUnidad, construirArbol } from "./alcance";
-import { JefeUnidad, ReglaFirma, TenenciaRol, elegirReglas, resolverFirmas, unidadParaNivel } from "./firmas-resolver";
+import {
+  JefeUnidad,
+  MOTIVO_OT_INTERNA,
+  ReglaFirma,
+  TenenciaRol,
+  aplicarOtInterna,
+  elegirReglas,
+  esOtInterna,
+  resolverFirmas,
+  unidadParaNivel,
+} from "./firmas-resolver";
 
 const N = (id: string, padreId: string | null, tipo: string): NodoUnidad => ({
   id,
@@ -207,5 +217,41 @@ describe("firmas · resolverFirmas", () => {
     const r = resolverFirmas({ tipoDocumento: "INFORME_TECNICO", unidadId: "LRB", reglas, arbol, jefes: JEFES, tenencias: [], ahora: AHORA });
     expect(r.pasos[0].unidad).toBeNull();
     expect(r.pasos[0].advertencia).toMatch(/SECCION/);
+  });
+});
+
+describe("firmas · OT interna (sin oficialización del Jefe de Departamento)", () => {
+  it("reconoce la OT interna por su origen (código o texto heredado), no la interlaboratorio", () => {
+    expect(esOtInterna("OT_INTERNA")).toBe(true);
+    expect(esOtInterna("ot interna")).toBe(true);
+    expect(esOtInterna(" OT-Interna ")).toBe(true);
+    expect(esOtInterna("INTERLABORATORIO")).toBe(false);
+    expect(esOtInterna("COTIZACION")).toBe(false);
+    expect(esOtInterna(null)).toBe(false);
+  });
+
+  it("en una OT interna de LQC firman revisor y jefe LQC; el Jefe DQO queda omitido con el motivo", () => {
+    const r = resolverFirmas({
+      tipoDocumento: "INFORME_ENSAYO", unidadId: "LQC", reglas: REGLAS, arbol, jefes: JEFES, tenencias: TENENCIAS, ahora: AHORA,
+      otInterna: true,
+    });
+    expect(r.pasos.map((p) => p.accion)).toEqual(["REVISA", "FIRMA"]);
+    expect(r.pasos.some((p) => p.rol.codigo === "JEFE_DEPTO")).toBe(false);
+    expect(r.omitidos?.map((p) => [p.accion, p.unidad?.codigo, p.motivo])).toEqual([["OFICIALIZA", "DQO", MOTIVO_OT_INTERNA]]);
+  });
+
+  it("una OT que no es interna conserva la oficialización y no omite nada", () => {
+    const r = resolver("INFORME_ENSAYO", "LQC");
+    expect(r.pasos.map((p) => p.accion)).toEqual(["REVISA", "FIRMA", "OFICIALIZA"]);
+    expect(r.omitidos).toBeUndefined();
+  });
+
+  it("solo quita OFICIALIZA: las firmas de otros tipos y unidades no cambian", () => {
+    const base = resolver("CERTIFICADO_CALIBRACION", "LMT");
+    const interna = aplicarOtInterna(base);
+    expect(interna.pasos).toEqual(base.pasos);
+    expect(interna.omitidos).toEqual([]);
+    const lme = aplicarOtInterna(resolver("INFORME_ENSAYO", "LME"));
+    expect(lme.pasos.map((p) => `${p.accion}:${p.rol.codigo}`)).toEqual(["FIRMA:JEFE_LAB", "FIRMA:CALIDAD"]);
   });
 });

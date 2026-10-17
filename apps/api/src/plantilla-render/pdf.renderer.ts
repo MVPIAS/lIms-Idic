@@ -78,7 +78,7 @@ import {
 /* 1. Parser de un subconjunto de HTML                                         */
 /* ========================================================================== */
 
-type Nodo = { tag: string; clase: string; hijos: Nodo[]; texto?: string };
+type Nodo = { tag: string; clase: string; hijos: Nodo[]; texto?: string; src?: string; colspan?: number };
 
 const VACIOS = new Set(["br", "hr", "img", "meta", "link", "input", "col"]);
 /** Estos nunca deben llegar al PDF: se descarta su contenido entero. */
@@ -87,9 +87,16 @@ const IGNORADOS = new Set(["script", "style", "head", "title"]);
 const TAG = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9]*)((?:"[^"]*"|'[^']*'|[^>])*?)(\/?)>/g;
 
 function leerClase(attrs: string): string {
-  const m = /class\s*=\s*("([^"]*)"|'([^']*)')/i.exec(attrs);
+  return leerAtributo(attrs, "class");
+}
+
+function leerAtributo(attrs: string, nombre: string): string {
+  const m = new RegExp(`(?:^|\\s)${nombre}\\s*=\\s*("([^"]*)"|'([^']*)')`, "i").exec(attrs);
   return (m?.[2] ?? m?.[3] ?? "").trim();
 }
+
+/** Solo imágenes incrustadas PNG/JPEG en base64: nada de URLs ni ficheros. */
+const DATA_IMAGEN = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/;
 
 /**
  * Convierte HTML en un árbol. Tolerante: las etiquetas de cierre huérfanas se
@@ -134,6 +141,11 @@ export function parsearHtml(html: string): Nodo {
     }
 
     const nodo: Nodo = { tag, clase: leerClase(attrs ?? ""), hijos: [] };
+    if (tag === "img") nodo.src = leerAtributo(attrs ?? "", "src");
+    if (tag === "td" || tag === "th") {
+      const cs = Number(leerAtributo(attrs ?? "", "colspan"));
+      if (Number.isInteger(cs) && cs > 1 && cs <= 12) nodo.colspan = cs;
+    }
     cima().hijos.push(nodo);
     if (!autocierre && !VACIOS.has(tag)) pila.push(nodo);
   }
@@ -255,7 +267,66 @@ function dibujarMembrete(doc: Doc, nodo: Nodo): void {
  * cuelgan del propio documento pdfkit (y no de una variable de módulo) para que
  * dos PDF generados a la vez no se mezclen.
  */
-type DocConFirmas = Doc & { _firmasCircuito?: FirmaEstampada[]; _firmasDibujadas?: boolean };
+type DocConFirmas = Doc & {
+  _firmasCircuito?: FirmaEstampada[];
+  _firmasDibujadas?: boolean;
+  /** Celdas «N.º de páginas» pendientes de rellenar (portada del IVC). */
+  _nPaginas?: { pagina: number; x: number; y: number; w: number }[];
+};
+
+/** Rellena las celdas «N.º de páginas» con el total, ya conocido. */
+function rellenarNumeroPaginas(doc: Doc): void {
+  const pend = (doc as DocConFirmas)._nPaginas ?? [];
+  if (!pend.length) return;
+  const total = doc.bufferedPageRange().count;
+  for (const p of pend) {
+    doc.switchToPage(p.pagina);
+    const margen = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
+    doc.font(REGULAR).fontSize(8).fillColor(TINTA);
+    doc.text(String(total), p.x, p.y, { width: p.w, lineBreak: false });
+    doc.page.margins.bottom = margen;
+  }
+}
+
+/**
+ * Foto del anexo fotográfico: imagen (PNG/JPEG incrustada) ajustada al ancho
+ * útil y a 300 pt de alto, centrada, con su pie debajo. Una imagen ilegible no
+ * tumba el documento: se imprime el pie con el aviso.
+ */
+function dibujarFoto(doc: Doc, nodo: Nodo): void {
+  const img = nodo.hijos.find((h) => h.tag === "img");
+  const pie = nodo.hijos.filter((h) => h.tag !== "img").map(textoDe).filter(Boolean).join(" ");
+  const m = img?.src ? DATA_IMAGEN.exec(img.src) : null;
+  const maxW = anchoUtil(doc);
+  const maxH = 300;
+  let w = 0;
+  let h = 0;
+  let buf: Buffer | null = null;
+  if (m) {
+    try {
+      buf = Buffer.from(m[2], "base64");
+      const abierta = (doc as any).openImage(buf) as { width: number; height: number };
+      const k = Math.min(maxW / abierta.width, maxH / abierta.height, 1);
+      w = abierta.width * k;
+      h = abierta.height * k;
+    } catch {
+      buf = null;
+    }
+  }
+  asegurar(doc, (buf ? h : 0) + 30);
+  const y0 = doc.y + 4;
+  const x0 = MARGEN + (maxW - w) / 2;
+  if (buf) {
+    doc.image(buf, x0, y0, { width: w, height: h });
+    doc.rect(x0, y0, w, h).lineWidth(0.5).stroke(LINEA);
+  }
+  doc.font(CURSIVA).fontSize(7.4).fillColor(SUAVE);
+  doc.text(buf ? pie : `${pie} (imagen no disponible)`, MARGEN, y0 + (buf ? h : 0) + 4, { width: maxW, align: "center" });
+  doc.y += 6;
+  doc.x = MARGEN;
+  doc.fillColor(TINTA);
+}
 
 /** Firmas electrónicas: imagen (si hay), línea, nombre, cargo, acción y fecha. */
 function dibujarFirmasCircuito(doc: Doc, firmas: FirmaEstampada[]): void {
@@ -325,7 +396,7 @@ function dibujarFirmas(doc: Doc, nodo: Nodo): void {
   doc.fillColor(TINTA);
 }
 
-type Celda = { texto: string; th: boolean; num: boolean; clase: string };
+type Celda = { texto: string; th: boolean; num: boolean; clase: string; span: number };
 
 function filasDe(tabla: Nodo): Celda[][] {
   const filas: Celda[][] = [];
@@ -339,6 +410,7 @@ function filasDe(tabla: Nodo): Celda[][] {
             th: c.tag === "th",
             num: /\bnum\b/.test(c.clase),
             clase: c.clase,
+            span: c.colspan ?? 1,
           });
         } else c.hijos.forEach(verCelda);
       };
@@ -358,14 +430,19 @@ function filasDe(tabla: Nodo): Celda[][] {
  * estrechas: son etiquetas, no datos.
  */
 function anchosColumna(doc: Doc, filas: Celda[][], total: number): number[] {
-  const cols = Math.max(...filas.map((f) => f.length));
+  const cols = Math.max(...filas.map((f) => f.reduce((n, c) => n + c.span, 0)));
   const medidas = new Array(cols).fill(0);
   for (const fila of filas) {
-    fila.forEach((c, i) => {
-      doc.font(c.th ? NEGRITA : REGULAR).fontSize(c.th ? 6.8 : 8);
-      const w = Math.min(doc.widthOfString(c.texto || "-"), 190);
-      if (w > medidas[i]) medidas[i] = w;
-    });
+    let i = 0;
+    for (const c of fila) {
+      // Las celdas que abarcan varias columnas no fijan el ancho de ninguna.
+      if (c.span === 1) {
+        doc.font(c.th ? NEGRITA : REGULAR).fontSize(c.th ? 6.8 : 8);
+        const w = Math.min(doc.widthOfString(c.texto || "-"), 190);
+        if (w > medidas[i]) medidas[i] = w;
+      }
+      i += c.span;
+    }
   }
   const MIN = 34;
   const ajustadas = medidas.map((w) => Math.max(w + 10, MIN));
@@ -384,15 +461,26 @@ function dibujarTabla(doc: Doc, tabla: Nodo): void {
 
   const cabecera = filas[0]?.every((c) => c.th) && !meta ? filas[0] : null;
 
+  // Ancho de cada celda de una fila (suma de las columnas que abarca).
+  const anchosDe = (fila: Celda[]) => {
+    let i = 0;
+    return fila.map((c) => {
+      const w = anchos.slice(i, i + c.span).reduce((a, b) => a + b, 0) || anchos[anchos.length - 1];
+      i += c.span;
+      return w;
+    });
+  };
+
   const pintarFila = (fila: Celda[], esCabecera: boolean) => {
     const fuente = (c: Celda) => (c.th ? NEGRITA : REGULAR);
     const tam = (c: Celda) => (c.th && esCabecera ? 6.8 : c.th ? 7 : 8);
+    const anchoCelda = anchosDe(fila);
 
     // Alto = la celda más alta.
     let alto = 0;
     fila.forEach((c, i) => {
       doc.font(fuente(c)).fontSize(tam(c));
-      const h = doc.heightOfString(c.texto || " ", { width: anchos[i] - padX * 2 });
+      const h = doc.heightOfString(c.texto || " ", { width: anchoCelda[i] - padX * 2 });
       if (h > alto) alto = h;
     });
     alto += padY * 2;
@@ -405,7 +493,7 @@ function dibujarTabla(doc: Doc, tabla: Nodo): void {
     const y = doc.y;
     let x = MARGEN;
     fila.forEach((c, i) => {
-      const w = anchos[i];
+      const w = anchoCelda[i];
       if (esCabecera) doc.rect(x, y, w, alto).fill(AZUL);
       else if (c.th) doc.rect(x, y, w, alto).fill("#f1f5f8");
       doc.rect(x, y, w, alto).lineWidth(0.5).stroke(LINEA);
@@ -417,6 +505,14 @@ function dibujarTabla(doc: Doc, tabla: Nodo): void {
       else if (/\bno\b/.test(c.clase)) color = ROJO;
 
       const vacio = /\bvacio\b/.test(c.clase);
+      // «N.º de páginas» de la portada: se escribe al final, cuando se conoce el total.
+      if (/\bn-paginas\b/.test(c.clase)) {
+        const rango = doc.bufferedPageRange();
+        const d = doc as DocConFirmas;
+        d._nPaginas = [...(d._nPaginas ?? []), { pagina: rango.start + rango.count - 1, x: x + padX, y: y + padY, w: w - padX * 2 }];
+        x += w;
+        return;
+      }
       doc.font(vacio ? CURSIVA : fuente(c)).fontSize(tam(c)).fillColor(vacio ? SUAVE : color);
       doc.text(c.texto || " ", x + padX, y + padY, {
         width: w - padX * 2,
@@ -435,7 +531,7 @@ function dibujarTabla(doc: Doc, tabla: Nodo): void {
 }
 
 /** ¿El nodo contiene algún bloque? Si no, se trata como párrafo. */
-const BLOQUES = new Set(["h1", "h2", "h3", "p", "div", "table", "ul", "ol", "hr", "li"]);
+const BLOQUES = new Set(["h1", "h2", "h3", "h4", "p", "div", "table", "ul", "ol", "hr", "li"]);
 function tieneBloques(n: Nodo): boolean {
   return n.hijos.some((h) => BLOQUES.has(h.tag) || tieneBloques(h));
 }
@@ -450,6 +546,15 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
       doc.font(NEGRITA).fontSize(13).fillColor(TINTA);
       doc.text(textoDe(n), MARGEN, doc.y, { width: anchoUtil(doc), align: "center", characterSpacing: 0.8 });
       doc.moveDown(0.5);
+      return;
+    }
+    case "h4": {
+      asegurar(doc, 24);
+      doc.moveDown(0.35);
+      doc.font(NEGRITA).fontSize(8.4).fillColor(TINTA);
+      doc.text(textoDe(n), MARGEN, doc.y, { width: anchoUtil(doc) });
+      doc.moveDown(0.2);
+      doc.x = MARGEN;
       return;
     }
     case "h2":
@@ -513,6 +618,7 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
     default: {
       if (/\bmembrete\b/.test(n.clase)) return dibujarMembrete(doc, n);
       if (/\bfirmas\b/.test(n.clase)) return dibujarFirmas(doc, n);
+      if (/\bfoto\b/.test(n.clase)) return dibujarFoto(doc, n);
       if (tieneBloques(n) || n.tag === "#root") {
         n.hijos.forEach((h) => dibujarNodo(doc, h));
         return;
@@ -676,6 +782,7 @@ export async function generarPdf(cuerpoHtml: string, sello: Sello, titulo: strin
   dibujarNodo(doc, parsearHtml(cuerpoHtml));
   // Plantilla sin bloque de firmas: las del circuito van al final del cuerpo.
   if (sello.firmas?.length && !conFirmas._firmasDibujadas) dibujarFirmasCircuito(doc, sello.firmas);
+  rellenarNumeroPaginas(doc);
   dibujarPies(doc, sello);
 
   doc.end();

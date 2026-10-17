@@ -63,7 +63,12 @@ export class FirmasMatrizService {
     private readonly alcance: AlcanceService,
   ) {}
 
-  async resolver(tipoDocumento: string, unidadId: string | null, tenantId?: string): Promise<ResolucionFirmas> {
+  async resolver(
+    tipoDocumento: string,
+    unidadId: string | null,
+    tenantId?: string,
+    opts: { otInterna?: boolean } = {},
+  ): Promise<ResolucionFirmas> {
     const arbol = await this.alcance.arbol(tenantId);
     if (unidadId && !arbol.porId.has(unidadId)) throw new NotFoundException(`unidad ${unidadId} no encontrada`);
     const [reglas, jefes, tenencias] = await Promise.all([
@@ -90,6 +95,7 @@ export class FirmasMatrizService {
     return resolverFirmas({
       tipoDocumento,
       unidadId,
+      otInterna: opts.otInterna,
       arbol,
       reglas: reglas.map((r) => ({ ...r, rol: r.rol })),
       jefes: jefes
@@ -125,11 +131,18 @@ export class FirmasMatrizController {
 
   /** Pasos efectivos para un documento emitido por una unidad. */
   @Get("resolver")
-  async resolver(@Query("tipoDocumento") tipoDocumento: string, @Query("unidadId") unidadId: string, @Req() req: any) {
+  async resolver(
+    @Query("tipoDocumento") tipoDocumento: string,
+    @Query("unidadId") unidadId: string,
+    @Query("otInterna") otInterna: string | undefined,
+    @Req() req: any,
+  ) {
     const tipo = z.enum(TIPOS_DOCUMENTO).safeParse(tipoDocumento);
     if (!tipo.success) throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
     if (unidadId && !z.string().uuid().safeParse(unidadId).success) throw new BadRequestException("unidadId debe ser uuid");
-    return this.svc.resolver(tipo.data, unidadId || null, tenantDe(req));
+    // ?otInterna=1: la resolución para una OT interna (sin oficialización).
+    const interna = otInterna === "1" || otInterna === "true";
+    return this.svc.resolver(tipo.data, unidadId || null, tenantDe(req), { otInterna: interna });
   }
 
   @Get()

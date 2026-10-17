@@ -27,8 +27,33 @@ import { TIPOS_DOCUMENTO } from "../rbac/rbac.constants";
 import { FirmaDocumentoController } from "./firma-documento.controller";
 import { FirmaDocumentoService } from "./firma-documento.service";
 import { FirmasImagenController } from "../rbac/firmas-imagen.controller";
+import { InformeDatosController, InformeDatosService } from "./informe-datos.controller";
 
-const PreviewSchema = z.object({ otId: z.string().uuid(), plantillaId: z.string().uuid() });
+const texto = (max: number) => z.string().trim().max(max).nullable().optional();
+/** Portada del IVC: lo que la OT no sabe y se indica al emitir. */
+const PortadaSchema = z
+  .object({
+    proposito: texto(300),
+    opiOc: texto(80),
+    fechaOpi: texto(40),
+    contrato: texto(120),
+    fechaContrato: texto(40),
+    proyecto: texto(200),
+    proveedor: texto(200),
+    item: texto(240),
+    cantidad: texto(60),
+    fabricante: texto(200),
+    paisOrigen: texto(80),
+  })
+  .strict();
+/** Datos propios del documento (certificado.datos_informe). */
+const DatosInformeSchema = z.object({ conclusion: texto(4000), portada: PortadaSchema.nullable().optional() }).strict();
+const OtPlantilla = z.object({ otId: z.string().uuid(), plantillaId: z.string().uuid() });
+const PreviewSchema = OtPlantilla.extend({
+  /** cumplimiento (con requisito y veredicto) | solo_resultados. Sin valor: el sugerido. */
+  modalidad: z.enum(["cumplimiento", "solo_resultados"]).optional(),
+  datosInforme: DatosInformeSchema.optional(),
+});
 /**
  * `codigo` YA NO se acepta: el correlativo lo genera el sistema
  * (`PlantillaRenderService.siguienteNumero`, RF F02.1). Antes lo aportaba el
@@ -66,10 +91,25 @@ export class PlantillaRenderController {
     return this.svc.condicionesEmision(otId, plantillaId, req?.user?.tenantId, { tipoDocumento });
   }
 
+  /**
+   * Lo que se propone para el documento: formato de la plantilla, modalidad
+   * sugerida (cumplimiento si algún ensayo tiene requisito) y portada del IVC
+   * con los datos de la OT. No escribe.
+   */
+  @Post("propuesta")
+  @RequierePermiso("certificado.emitir")
+  async propuesta(@Body() body: unknown, @Req() req: any) {
+    const { otId, plantillaId } = OtPlantilla.parse(body);
+    await this.exigirAlcanceOt(otId, req);
+    return this.svc.propuestaDocumento(otId, plantillaId, req?.user?.tenantId);
+  }
+
   /** Contexto de datos de una OT (para el autorelleno). Solo lee datos de la OT. */
   @Post("contexto/:otId")
   @RequierePermiso("plantilla.ver")
-  contexto(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+  async contexto(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    // También aquí rige el alcance por laboratorio: el contexto trae resultados.
+    await this.exigirAlcanceOt(otId, req);
     return this.svc.contexto(otId, req?.user?.tenantId);
   }
 
@@ -79,20 +119,26 @@ export class PlantillaRenderController {
    */
   @Post("previsualizar")
   @RequierePermiso("certificado.emitir")
-  previsualizar(@Body() body: unknown, @Req() req: any) {
-    const { otId, plantillaId } = PreviewSchema.parse(body);
-    return this.svc.previsualizar(otId, plantillaId, req?.user?.tenantId);
+  async previsualizar(@Body() body: unknown, @Req() req: any) {
+    const { otId, plantillaId, modalidad, datosInforme } = PreviewSchema.parse(body);
+    // Antes no comprobaba el alcance: cualquier emisor previsualizaba OTs de otro laboratorio.
+    await this.exigirAlcanceOt(otId, req);
+    return this.svc.previsualizar(otId, plantillaId, req?.user?.tenantId, { modalidad, datos: datosInforme });
   }
 
   /** Emite el informe/certificado: rellena, sella con HASH, numera y registra Certificado. */
   @Post("emitir")
   @RequierePermiso("certificado.emitir")
   async emitir(@Body() body: unknown, @Req() req: any) {
-    const { otId, plantillaId, tipoDocumento } = EmitirSchema.parse(body);
+    const { otId, plantillaId, tipoDocumento, modalidad, datosInforme } = EmitirSchema.parse(body);
     await this.exigirAlcanceOt(otId, req);
     // El Certificado se crea con el tenant del usuario autenticado (no DEV_TENANT),
     // EN FIRMA: será oficial cuando firme el último paso de la matriz.
-    return this.svc.emitir(otId, plantillaId, req?.user?.tenantId, req?.user?.sub ?? req?.user?.id, { tipoDocumento });
+    return this.svc.emitir(otId, plantillaId, req?.user?.tenantId, req?.user?.sub ?? req?.user?.id, {
+      tipoDocumento,
+      modalidad,
+      datosInforme,
+    });
   }
 
   /**
@@ -175,8 +221,14 @@ export class VerificacionController {
   imports: [QcModule, RbacModule, ConfiguracionModule],
   // FirmasImagenController (/mi-firma, imagen de firma del usuario) vive en
   // rbac/ pero se registra aquí, junto al circuito de firma que la estampa.
-  controllers: [PlantillaRenderController, FirmaDocumentoController, FirmasImagenController, VerificacionController],
-  providers: [PlantillaRenderService, FirmaDocumentoService],
+  controllers: [
+    PlantillaRenderController,
+    InformeDatosController,
+    FirmaDocumentoController,
+    FirmasImagenController,
+    VerificacionController,
+  ],
+  providers: [PlantillaRenderService, FirmaDocumentoService, InformeDatosService],
   exports: [PlantillaRenderService],
 })
 export class PlantillaRenderModule {}

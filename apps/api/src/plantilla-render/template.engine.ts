@@ -181,7 +181,8 @@ export function tablaResultados(filas: FilaResultado[]): string {
   const cuerpo = filas
     .map((f) => {
       const v = (f.veredicto ?? "").toLowerCase();
-      const clase = v.startsWith("cumple") ? "ok" : v ? "no" : "";
+      // Solo «No cumple» va en rojo: «Informativo» o «Pendiente» no son un incumplimiento.
+      const clase = v.startsWith("cumple") ? "ok" : v.startsWith("no cumple") || v === "no_cumple" ? "no" : "";
       return (
         "<tr>" +
         celda(f.analito) +
