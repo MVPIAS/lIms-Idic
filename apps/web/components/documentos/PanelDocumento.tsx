@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { fecha, fechaHora } from "@/lib/format";
+import { textoModalidad } from "@/lib/informes";
 import { toast, confirmar } from "@/components/ui/feedback";
 import {
   ACCION_FIRMA,
@@ -150,6 +151,7 @@ export default function PanelDocumento({
             <span className="codigo">{doc.numero}</span>{" "}
             <span className={`pill ${est.pill}`}>{est.texto}</span>
             {doc.version > 1 && <span className="tag" style={{ marginLeft: 6 }}>versión {doc.version}</span>}
+            {textoModalidad(doc.modalidad) && <span className="tag" style={{ marginLeft: 6 }}>{textoModalidad(doc.modalidad)}</span>}
           </div>
           <div className="subtitle" style={{ margin: "4px 0 0" }}>
             {doc.plantilla?.nombre ?? doc.tipo} · OT{" "}

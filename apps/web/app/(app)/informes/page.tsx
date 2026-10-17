@@ -5,9 +5,11 @@
  *
  * Elegir OT + plantilla → el sistema comprueba las condiciones (resultados
  * aprobados, control de calidad, laboratorio y matriz de firmas) y muestra
- * quién firmará → previsualizar → emitir. El documento queda «En firma» y cada
- * responsable lo firma desde «Documentos por firmar»; con la última firma pasa
- * a oficial. Reglas: docs/FLUJO_FIRMA_CIERRE.md.
+ * quién firmará → elegir el contenido (cumplimiento o solo resultados,
+ * conclusión, portada del IVC, secciones y fotos) → previsualizar → emitir.
+ * El documento queda «En firma» y cada responsable lo firma desde «Documentos
+ * por firmar»; con la última firma pasa a oficial.
+ * Reglas: docs/FLUJO_FIRMA_CIERRE.md y docs/FLUJO_INFORME_ENSAYO.md.
  */
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -21,6 +23,11 @@ import { ACCION_FIRMA, ESTADO_DOC, nombresResponsables } from "@/lib/documentos"
 import PanelDocumento from "@/components/documentos/PanelDocumento";
 import Modal from "@/components/documentos/Modal";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
+import { usePermisos } from "@/lib/permisos";
+import { CAMPOS_PORTADA, MODALIDAD, textoModalidad, type Modalidad, type Portada, type Propuesta } from "@/lib/informes";
+import FotosInforme, { type EnsayoOt } from "@/components/informes/FotosInforme";
+import EstructuraInforme from "@/components/informes/EstructuraInforme";
+import FormatoPlantilla from "@/components/informes/FormatoPlantilla";
 
 type Plantilla = { id: string; repid: string; nombre: string; tipo: string; version?: string; activo?: boolean };
 type Condiciones = {
@@ -31,8 +38,10 @@ type Condiciones = {
   tipoDocumentoUnidad?: string | null;
   resultados: { total: number; aprobados: number };
   pasos: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; responsables: any[] }[];
+  otInterna?: boolean;
+  pasosOmitidos?: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; motivo: string }[];
 };
-type Preview = { plantilla: string; tipo: string; avisos: string[]; html: string };
+type Preview = { plantilla: string; tipo: string; modalidad?: Modalidad; avisos: string[]; html: string };
 
 /** Tipos de documento de la matriz de firmas (rbac.constants.ts · TIPOS_DOCUMENTO) que se emiten desde aquí. */
 const TIPOS_DOCUMENTO: { valor: string; texto: string }[] = [
@@ -64,6 +73,14 @@ function InformesContenido() {
   const [cargando, setCargando] = useState(true);
   const [ocupado, setOcupado] = useState<"" | "cond" | "preview" | "emitir">("");
   const [abierto, setAbierto] = useState<string | null>(null);
+  const { puede } = usePermisos();
+  // Contenido del documento (lo elige quien emite).
+  const [propuesta, setPropuesta] = useState<Propuesta | null>(null);
+  const [modalidad, setModalidad] = useState<Modalidad>("cumplimiento");
+  const [conclusion, setConclusion] = useState("");
+  const [portada, setPortada] = useState<Portada>({});
+  const [ensayos, setEnsayos] = useState<EnsayoOt[]>([]);
+  const [verFormato, setVerFormato] = useState(false);
 
   const cargarDocs = useCallback(async () => {
     try {
@@ -104,7 +121,37 @@ function InformesContenido() {
   }, [plantillasVisibles, plantillaId]);
 
   const listo = !!otId && !!plantillaId;
-  const cuerpo = () => ({ otId, plantillaId, ...(tipoDocumento ? { tipoDocumento } : {}) });
+  const datosInforme = () => ({
+    conclusion: conclusion.trim() || null,
+    ...(propuesta?.formato.portada === "ivc" ? { portada } : {}),
+  });
+  const cuerpo = () => ({ otId, plantillaId, modalidad, datosInforme: datosInforme(), ...(tipoDocumento ? { tipoDocumento } : {}) });
+
+  // Propuesta del servidor para esta OT y plantilla: formato, modalidad sugerida y portada.
+  const cargarPropuesta = useCallback(async () => {
+    if (!otId || !plantillaId) return setPropuesta(null);
+    try {
+      const p = await api.post<Propuesta>("/informes/propuesta", { otId, plantillaId });
+      setPropuesta(p);
+      setModalidad(p.modalidad);
+      setPortada(p.portada ?? {});
+    } catch (e: any) {
+      setPropuesta(null);
+      setError(e.message);
+    }
+  }, [otId, plantillaId]);
+
+  useEffect(() => {
+    setConclusion("");
+    cargarPropuesta();
+  }, [cargarPropuesta]);
+
+  // Ensayos de la OT (para ligar las fotos a un punto del informe).
+  useEffect(() => {
+    setEnsayos([]);
+    if (!otId) return;
+    api.getRaw<{ filas: EnsayoOt[] }>(`informes/ot/${otId}/estructura`).then((r) => setEnsayos(r.filas)).catch(() => setEnsayos([]));
+  }, [otId]);
 
   // Al elegir OT + plantilla, se comprueba qué falta y quién firmará.
   const comprobar = useCallback(async () => {
@@ -130,7 +177,7 @@ function InformesContenido() {
     setOcupado("preview");
     setError("");
     try {
-      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId }));
+      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId, modalidad, datosInforme: datosInforme() }));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -143,7 +190,7 @@ function InformesContenido() {
     setError("");
     try {
       const r: any = await api.post("/informes/emitir", cuerpo());
-      toast.ok(`Documento ${r.numero} emitido: queda en firma.`);
+      toast.ok(`Documento ${r.numero} (${MODALIDAD[r.modalidad as Modalidad]?.corto ?? "informe"}) emitido: queda en firma.`);
       setPreview(null);
       setAbierto(r.certificado.id);
       await Promise.all([cargarDocs(), comprobar()]);
@@ -158,6 +205,7 @@ function InformesContenido() {
     { key: "numero", label: "Número", render: (c) => <span className="codigo">{c.numero}</span> },
     { key: "otcliente", label: "OT · Cliente", value: (c) => [c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · ") },
     { key: "plantilla", label: "Plantilla", value: (c) => (c.plantilla ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : "") },
+    { key: "modalidad", label: "Informe", value: (c) => textoModalidad(c.modalidad) ?? "", render: (c) => textoModalidad(c.modalidad) ?? "—" },
     { key: "fecha", label: "Emitido", value: (c) => c.fecha ?? "", render: (c) => fecha(c.fecha) },
     {
       key: "firmas", label: "Firmas", filter: false, value: (c) => c.firmasHechas,
@@ -268,6 +316,104 @@ function InformesContenido() {
               </table>
             </>
           )}
+          {cond?.pasosOmitidos && cond.pasosOmitidos.length > 0 && (
+            <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--muted)" }}>
+              No firma:{" "}
+              {cond.pasosOmitidos.map((p) => `${p.rolNombre}${p.unidadCodigo ? ` · ${p.unidadCodigo}` : ""} (${(ACCION_FIRMA[p.accion] ?? p.accion).toLowerCase()})`).join(", ")}.{" "}
+              {cond.pasosOmitidos[0].motivo}
+            </p>
+          )}
+        </div>
+      )}
+
+      {listo && propuesta && (
+        <div className="card">
+          <h2>
+            3 · Contenido del documento
+            <span className="right">
+              {propuesta.conRequisito} de {propuesta.totalEnsayos} ensayo(s) con requisito
+            </span>
+          </h2>
+          <fieldset style={{ border: 0, padding: 0, margin: "0 0 12px" }}>
+            <legend style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Tipo de informe</legend>
+            <div style={{ display: "grid", gap: 8, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+              {(Object.keys(MODALIDAD) as Modalidad[]).map((m) => (
+                <label key={m} style={{
+                  display: "flex", gap: 8, alignItems: "flex-start", padding: "8px 10px", borderRadius: 7, cursor: "pointer",
+                  border: `1px solid ${modalidad === m ? "var(--accent)" : "var(--line)"}`, background: modalidad === m ? "#f0fafb" : "#fff",
+                }}>
+                  <input type="radio" name="modalidad" value={m} checked={modalidad === m} onChange={() => { setModalidad(m); setPreview(null); }} style={{ marginTop: 3 }} />
+                  <span>
+                    <b style={{ fontSize: 13 }}>{MODALIDAD[m].texto}</b>
+                    {propuesta.modalidad === m && <span className="pill teal" style={{ marginLeft: 6 }}>Sugerido</span>}
+                    <small style={{ display: "block", color: "var(--muted)", marginTop: 2 }}>{MODALIDAD[m].ayuda}</small>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {modalidad === "cumplimiento" && propuesta.conRequisito < propuesta.totalEnsayos && (
+              <p className="subtitle" style={{ margin: "6px 0 0" }}>
+                {propuesta.totalEnsayos - propuesta.conRequisito} ensayo(s) sin requisito saldrán como «No especificado» (informativo).
+                Puede fijar el requisito en <Link href={"/captura-ot" as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link> antes de aprobar.
+              </p>
+            )}
+          </fieldset>
+
+          {propuesta.formato.portada === "ivc" && (
+            <fieldset style={{ border: 0, padding: 0, margin: "0 0 12px" }}>
+              <legend style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Portada del IVC</legend>
+              <div className="form-grid">
+                {CAMPOS_PORTADA.map((c) => (
+                  <div className={`field${c.ancho === 2 ? " span-2" : ""}`} key={c.clave}>
+                    <label htmlFor={`portada-${c.clave}`}>{c.etiqueta}</label>
+                    <input id={`portada-${c.clave}`} maxLength={c.max} value={portada[c.clave] ?? ""}
+                      onChange={(e) => { setPortada({ ...portada, [c.clave]: e.target.value }); setPreview(null); }} />
+                  </div>
+                ))}
+              </div>
+              <small style={{ color: "var(--muted)" }}>Lo vacío se imprime «N/A». El N.º de O/T, su fecha, la fecha de elaboración y el N.º de páginas los pone el sistema.</small>
+            </fieldset>
+          )}
+
+          <div className="field" style={{ marginBottom: 12 }}>
+            <label htmlFor="conclusion-libre">Conclusión (texto libre)</label>
+            {propuesta.formato.conclusionFija && (
+              <small style={{ color: "var(--muted)", marginBottom: 4 }}>Texto fijo de la plantilla: «{propuesta.formato.conclusionFija}»</small>
+            )}
+            <textarea id="conclusion-libre" rows={3} maxLength={4000} value={conclusion}
+              onChange={(e) => { setConclusion(e.target.value); setPreview(null); }} />
+          </div>
+
+          {propuesta.formato.agrupacion === "seccion" && (
+            <details style={{ marginBottom: 10 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Secciones del informe (punto, sección y componente de cada ensayo)</summary>
+              <div style={{ marginTop: 8 }}>
+                <EstructuraInforme otId={otId} puedeEditar={puede(["certificado.emitir", "resultado.aprobar"])}
+                  onCargada={setEnsayos} onGuardada={() => setPreview(null)} />
+              </div>
+            </details>
+          )}
+
+          {propuesta.formato.anexoFotografico && (
+            <details style={{ marginBottom: 10 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Fotos para el anexo fotográfico</summary>
+              <div style={{ marginTop: 8 }}>
+                <FotosInforme otId={otId} ensayos={ensayos} puedeEditar={puede(["resultado.crear", "certificado.emitir"])} onCambio={() => setPreview(null)} />
+              </div>
+            </details>
+          )}
+
+          {puede("plantilla.gestionar") && (
+            <details open={verFormato} onToggle={(e) => setVerFormato((e.target as HTMLDetailsElement).open)}>
+              <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 13 }}>Formato de la plantilla (Administración)</summary>
+              {verFormato && (
+                <div style={{ marginTop: 8 }}>
+                  <FormatoPlantilla plantillaId={plantillaId} onGuardado={() => { setPreview(null); cargarPropuesta(); }} />
+                </div>
+              )}
+            </details>
+          )}
+
           <div className="toolbar" style={{ marginTop: 12, marginBottom: 0 }}>
             <button className="btn outline" onClick={previsualizar} disabled={!!ocupado}>
               {ocupado === "preview" ? "Generando…" : "Previsualizar"}

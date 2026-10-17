@@ -42,6 +42,11 @@ de ensayo» (revisa · Analista revisor): nadie tiene el rol «Analista revisor�
 resolverlo: asigne ese rol a una persona de SSTGO (Administración › Usuarios), o cree una regla
 propia para SSTGO en Administración › Matriz de firmas, o emita con otro tipo de documento.»
 
+**OT interna** (`origen_trabajo = OT_INTERNA`): no firma el Jefe de Departamento; los pasos
+`OFICIALIZA` de la matriz se omiten y `condiciones` los devuelve en `pasosOmitidos` con el
+motivo. Contenido del informe, modalidad (cumplimiento / solo resultados), formato por
+plantilla, fotos y portada del IVC: `FLUJO_INFORME_ENSAYO.md`.
+
 **Reapertura de un resultado aprobado** (docs/FLUJO_LABORATORIO.md §4): anula los documentos en
 firma u oficiales de la OT con el motivo; tras aprobar de nuevo se **reemiten** (nueva versión).
 
