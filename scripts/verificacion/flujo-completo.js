@@ -402,7 +402,9 @@ async function main() {
     C.rGrumos = deMetodo(C.mGrumos)[0];
     C.resultados = todos.map((r) => r.id);
     afirmar(C.rPh && C.rAzufre && C.rGrumos, "faltan resultados de algún método");
-    afirmar(C.rPh.limiteInf && C.rPh.limiteSup, `pH sin límites del catálogo (${C.rPh.limiteInf}–${C.rPh.limiteSup})`);
+    // Desde align_informe_ensayo.sql el pH ya no trae el 6,0–8,5 de la NCh 409 Of.84
+    // (retirado a pedido del laboratorio): llega sin requisito y se fija en la orden.
+    C.phDelCatalogo = Boolean(C.rPh.limiteInf && C.rPh.limiteSup);
     afirmar(!C.rAzufre.limiteInf && !C.rAzufre.limiteSup, "Azufre trae límites: se esperaba sin especificación");
     return `${C.muestra.codigo} · ${todos.length} análisis · pH ${C.rPh.limiteInf}–${C.rPh.limiteSup}`;
   });
@@ -434,13 +436,19 @@ async function main() {
     await exigir([403, 404], U.otroLab, "POST", `/flujo/resultado/${C.rPh.id}/valor`, { valor: "7" });
     await exigir([403, 404], U.otroLab, "GET", `/flujo/ot/${C.ot.id}/resultados`);
   });
-  await paso("Analista1 captura pH (límites del catálogo) → cumple", async () => {
+  await paso("Analista1 captura pH (límites del catálogo o de la orden) → cumple", async () => {
+    if (!C.phDelCatalogo) {
+      const e = await ok(U.a1, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { limiteInf: "6,5", limiteSup: "8,5" });
+      afirmar(e.especOrigen === "orden", `especOrigen ${e.especOrigen}`);
+      Object.assign(C.rPh, { limiteInf: e.limiteInf, limiteSup: e.limiteSup });
+    }
     const r = await ok(U.a1, "POST", `/flujo/resultado/${C.rPh.id}/valor`, { valor: "7,2" });
     afirmar(r.veredicto === "cumple", `veredicto ${r.veredicto}`);
     return `7,2 en [${C.rPh.limiteInf}; ${C.rPh.limiteSup}] → ${r.veredicto}`;
   });
-  await paso("Analista1 no puede cambiar un límite que vino del catálogo (403)", async () => {
-    await exigir(403, U.a1, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { limiteSup: "9" });
+  await paso("Analista1 no puede cambiar lo que es de la jefatura: límite del catálogo o fórmula (403)", async () => {
+    if (C.phDelCatalogo) await exigir(403, U.a1, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { limiteSup: "9" });
+    await exigir(403, U.a1, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { formula: "C1 * 2" });
   });
   await paso("Analista1 completa la especificación de Azufre en la orden y captura réplicas", async () => {
     const e = await ok(U.a1, "PATCH", `/flujo/resultado/${C.rAzufre.id}/especificacion`, { limiteInf: "0", limiteSup: "0,5", unidad: "%" });
