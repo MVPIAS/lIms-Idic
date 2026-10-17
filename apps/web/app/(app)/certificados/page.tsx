@@ -19,6 +19,7 @@ import { ESTADO_DOC, textoMedio } from "@/lib/documentos";
 import PanelDocumento from "@/components/documentos/PanelDocumento";
 import Modal from "@/components/documentos/Modal";
 import { usePermisos } from "@/lib/permisos";
+import { textoModalidad } from "@/lib/informes";
 
 const FILTROS: { valor: string; texto: string }[] = [
   { valor: "", texto: "Todos" },
@@ -70,6 +71,8 @@ function CertificadosContenido() {
         </span>
       ),
     },
+    // Cumplimiento (con requisito y veredicto) o solo resultados; «—» en los anteriores a esta distinción.
+    { key: "modalidad", label: "Informe", value: (c) => textoModalidad(c.modalidad) ?? "", render: (c) => textoModalidad(c.modalidad) ?? "—" },
     { key: "fecha", label: "Emitido", value: (c) => c.fecha ?? "", render: (c) => fecha(c.fecha) },
     {
       key: "estado", label: "Estado", value: (c) => ESTADO_DOC[c.estado]?.texto ?? c.estado,

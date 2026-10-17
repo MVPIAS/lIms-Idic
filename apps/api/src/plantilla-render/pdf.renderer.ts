@@ -444,10 +444,29 @@ function anchosColumna(doc: Doc, filas: Celda[][], total: number): number[] {
       i += c.span;
     }
   }
+  // Mínimo de cada columna: su palabra más larga (no se parte «Unidad» en «Unida d»).
+  const palabra = new Array(cols).fill(0);
+  for (const fila of filas) {
+    let i = 0;
+    for (const c of fila) {
+      if (c.span === 1) {
+        doc.font(c.th ? NEGRITA : REGULAR).fontSize(c.th ? 6.8 : 8);
+        for (const p of (c.texto || "").split(/\s+/)) palabra[i] = Math.max(palabra[i], Math.min(doc.widthOfString(p), 120));
+      }
+      i += c.span;
+    }
+  }
   const MIN = 34;
-  const ajustadas = medidas.map((w) => Math.max(w + 10, MIN));
+  const minimos = palabra.map((w) => Math.max(w + 10, MIN));
+  const ajustadas = medidas.map((w, i) => Math.max(w + 10, minimos[i]));
   const suma = ajustadas.reduce((a, b) => a + b, 0);
-  return ajustadas.map((w) => (w / suma) * total);
+  const anchos = ajustadas.map((w) => (w / suma) * total);
+  // Si al escalar alguna queda bajo su mínimo, se le da y se descuenta de las que sobran.
+  const faltan = anchos.reduce((a, w, i) => a + Math.max(0, minimos[i] - w), 0);
+  const holgura = anchos.reduce((a, w, i) => a + Math.max(0, w - minimos[i]), 0);
+  if (faltan > 0 && holgura > faltan)
+    return anchos.map((w, i) => (w < minimos[i] ? minimos[i] : w - ((w - minimos[i]) / holgura) * faltan));
+  return anchos;
 }
 
 function dibujarTabla(doc: Doc, tabla: Nodo): void {
