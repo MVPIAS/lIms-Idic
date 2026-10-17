@@ -2,18 +2,13 @@ import { etiquetaVeredicto } from "../laboratorio/veredicto";
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common";
 import { createHash, randomInt } from "crypto";
 import { PrismaService } from "../common/prisma.service";
-import {
-  renderizar,
-  tablaResultados,
-  tablaMuestras,
-  type FilaResultado,
-  type FilaMuestra,
-} from "./template.engine";
-import { fmtFecha, fmtFechaHora, fmtNum } from "./html.util";
+import { renderizar, tablaMuestras, type FilaMuestra } from "./template.engine";
+import { fmtFecha, fmtFechaHora } from "./html.util";
 import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
 import { QcService } from "../qc/qc.module";
 import { FirmasMatrizService } from "../rbac/firmas-matriz.controller";
+import { esOtInterna } from "../rbac/firmas-resolver";
 import { TIPOS_DOCUMENTO } from "../rbac/rbac.constants";
 import {
   esOficial,
@@ -24,12 +19,44 @@ import {
   tipoDocumentoPorDefecto,
   type PasoNuevo,
 } from "./reglas-emision";
+import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
+import {
+  armarInforme,
+  modalidadSugerida,
+  tieneRequisito,
+  NOMBRE_MODALIDAD,
+  type EstructuraInforme,
+  type Modalidad,
+  type ResultadoParaInforme,
+} from "./filas-informe";
+import {
+  bloqueAnexo,
+  bloqueConclusion,
+  bloquePortadaIvc,
+  bloqueReferencias,
+  bloqueResultados,
+  completarCuerpo,
+  type DatosPortada,
+  type FotoInforme,
+} from "./bloques-informe";
+
+/** Fotos como máximo en el anexo fotográfico de un documento. */
+export const MAX_FOTOS_INFORME = 24;
+
+/** Datos propios del documento, elegidos al emitir (certificado.datos_informe). */
+export interface DatosInforme {
+  conclusion?: string | null;
+  portada?: DatosPortada | null;
+}
 
 /** Opciones de emisión: tipo de documento de la matriz y documento al que reemplaza. */
 export interface OpcionesEmision {
   tipoDocumento?: string;
   /** Reemisión: id del documento devuelto o anulado que se sustituye (nueva versión). */
   reemplazaId?: string;
+  /** Informe de cumplimiento o de solo resultados (por defecto, el sugerido). */
+  modalidad?: Modalidad;
+  datosInforme?: DatosInforme;
 }
 
 /**
@@ -72,6 +99,13 @@ export class PlantillaRenderService {
   /**
    * Ensambla el contexto de datos de una OT para rellenar la plantilla.
    * Aislamiento por tenant: 404 (no 403) para no revelar OTs de otro tenant.
+   *
+   * `paraInforme` son los resultados ya normalizados para el informe
+   * (filas-informe.ts): el ensayo y el método salen del catálogo v2
+   * (`cat_analito`, `cat_metodo`) o, en los resultados antiguos, del analito
+   * legado; el requisito, de la especificación que guarda el propio resultado
+   * (la de la orden si se editó, la copiada del catálogo si no). Solo los
+   * resultados antiguos sin especificación propia caen a `norma_limite`.
    */
   async contexto(otId: string, tenantId?: string) {
     const ot = await this.prisma.ordenTrabajo.findUnique({
@@ -88,15 +122,24 @@ export class PlantillaRenderService {
     });
     const resultados = await this.prisma.resultado.findMany({
       where: { otId, deletedAt: null },
-      include: { analito: true, muestra: true },
-      orderBy: { fecha: "asc" },
+      include: {
+        analito: true,
+        muestra: true,
+        catAnalito: { select: { nombre: true, unidad: true } },
+        catMetodo: { select: { nombre: true, norma: true } },
+      },
+      orderBy: [{ fecha: "asc" }, { id: "asc" }],
     });
 
-    // Límites de norma de los analitos implicados, en UNA consulta (no N+1).
-    // `analitoId` es nullable (los resultados del puente lo dejan en NULL y usan
-    // cat_analito_id): se descartan los NULL de esta búsqueda por analito legacy.
+    // Límites de norma de los analitos LEGADOS, en UNA consulta (no N+1). Los
+    // resultados del puente (cat_analito_id) traen su propia especificación.
     const analitoIds = [
-      ...new Set(resultados.map((r) => r.analitoId).filter((x): x is string => x !== null)),
+      ...new Set(
+        resultados
+          .filter((r) => !r.catAnalitoId && !tieneRequisito(r))
+          .map((r) => r.analitoId)
+          .filter((x): x is string => x !== null),
+      ),
     ];
     const limites = analitoIds.length
       ? await this.prisma.normaLimite.findMany({ where: { analitoId: { in: analitoIds } } })
@@ -104,23 +147,98 @@ export class PlantillaRenderService {
     const limitePorAnalito = new Map<string, (typeof limites)[number]>();
     for (const l of limites) if (!limitePorAnalito.has(l.analitoId)) limitePorAnalito.set(l.analitoId, l);
 
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito };
+    const ubicaciones = await this.ubicaciones(otId);
+    const txt = (v: unknown) => (v === null || v === undefined ? null : String(v));
+    const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(String(v)));
+    const paraInforme: ResultadoParaInforme[] = resultados.map((r) => {
+      const legado = !r.catAnalitoId && !tieneRequisito(r) && r.analitoId ? limitePorAnalito.get(r.analitoId) : undefined;
+      const u = ubicaciones.get(r.id);
+      const replicas = Array.isArray(r.replicas) ? (r.replicas as unknown[]).length : 0;
+      return {
+        id: r.id,
+        muestraId: r.muestraId,
+        muestraCodigo: r.muestra?.codigo ?? "",
+        muestraNombre: r.muestra?.nombre ?? null,
+        ensayo: r.catAnalito?.nombre ?? r.analito?.nombre ?? null,
+        metodoNombre: r.catMetodo?.nombre ?? null,
+        metodoNorma: r.catMetodo?.norma ?? null,
+        unidad: r.unidad ?? r.catAnalito?.unidad ?? r.analito?.unidad ?? legado?.unidad ?? null,
+        limiteInf: legado ? txt(legado.limiteInf) : r.limiteInf,
+        nominal: legado ? txt(legado.nominal) : r.nominal,
+        limiteSup: legado ? txt(legado.limiteSup) : r.limiteSup,
+        requisito: r.requisito,
+        especOrigen: legado ? "catalogo" : r.especOrigen,
+        tipoDato: r.tipoDato,
+        valorNumerico: num(r.valorNumerico),
+        valorTexto: r.valorTexto,
+        resultadoFinal: num(r.resultadoFinal),
+        promedio: num(r.promedio),
+        desviacion: num(r.desviacion),
+        cv: num(r.cv),
+        nReplicas: replicas,
+        observacion: r.observacion,
+        veredicto: r.veredicto,
+        seccion: u?.seccion ?? null,
+        componente: u?.componente ?? null,
+        orden: u?.orden ?? null,
+      };
+    });
+
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme };
   }
 
-  /** Texto imprimible del límite de norma. Sin glifos fuera de WinAnsi (ver pdf.renderer). */
-  private textoLimite(
-    l: { limiteInf: unknown; limiteSup: unknown; nominal: unknown; unidad: string | null } | undefined,
-  ): string {
-    if (!l) return "";
-    const inf = l.limiteInf === null || l.limiteInf === undefined ? null : fmtNum(String(l.limiteInf));
-    const sup = l.limiteSup === null || l.limiteSup === undefined ? null : fmtNum(String(l.limiteSup));
-    const nom = l.nominal === null || l.nominal === undefined ? null : fmtNum(String(l.nominal));
-    const u = l.unidad ? ` ${l.unidad}` : "";
-    if (inf !== null && sup !== null) return `${inf} – ${sup}${u}`;
-    if (inf !== null) return `mín. ${inf}${u}`;
-    if (sup !== null) return `máx. ${sup}${u}`;
-    if (nom !== null) return `nominal ${nom}${u}`;
-    return "";
+  /** Sección / componente / orden de cada resultado de la OT (resultado_informe). */
+  private async ubicaciones(otId: string) {
+    const mapa = new Map<string, { seccion: string | null; componente: string | null; orden: number | null }>();
+    try {
+      const filas = await this.prisma.$queryRaw<
+        { resultado_id: string; seccion: string | null; componente: string | null; orden: number | null }[]
+      >`SELECT resultado_id, seccion, componente, orden FROM resultado_informe WHERE ot_id = ${otId}::uuid`;
+      for (const f of filas) mapa.set(f.resultado_id, { seccion: f.seccion, componente: f.componente, orden: f.orden });
+    } catch {
+      /* BD sin align_informe_ensayo.sql: sin estructura propia */
+    }
+    return mapa;
+  }
+
+  /** Formato efectivo del informe de una plantilla (tipo + config_informe). */
+  async configDePlantilla(plantillaId: string, tipo: string): Promise<ConfigInforme> {
+    try {
+      const filas = await this.prisma.$queryRaw<{ config_informe: unknown }[]>`
+        SELECT config_informe FROM plantilla_informe WHERE id = ${plantillaId}::uuid`;
+      return configEfectiva(tipo, filas[0]?.config_informe ?? null);
+    } catch {
+      return configPorTipo(tipo);
+    }
+  }
+
+  /** Fotos de la OT elegidas para el informe, en su orden. */
+  private async fotosDelInforme(
+    otId: string,
+    est: EstructuraInforme,
+    muestras: { id: string; codigo: string }[],
+  ): Promise<FotoInforme[]> {
+    try {
+      const filas = await this.prisma.$queryRaw<
+        { mime: string; datos: string; pie: string | null; resultado_id: string | null; muestra_id: string | null }[]
+      >`SELECT mime, datos, pie, resultado_id, muestra_id FROM ot_foto
+         WHERE ot_id = ${otId}::uuid AND en_informe AND deleted_at IS NULL
+         ORDER BY orden, created_at LIMIT ${MAX_FOTOS_INFORME}`;
+      const codigo = new Map(muestras.map((m) => [m.id, m.codigo]));
+      return filas.map((f) => {
+        const p = f.resultado_id ? est.puntoDe[f.resultado_id] : undefined;
+        const deMuestra = f.muestra_id ? codigo.get(f.muestra_id) : undefined;
+        return {
+          mime: f.mime,
+          datos: f.datos,
+          pie: f.pie,
+          punto: p?.punto ?? null,
+          titulo: p?.titulo ?? (deMuestra ? `Muestra ${deMuestra}` : null),
+        };
+      });
+    } catch {
+      return [];
+    }
   }
 
   /** Aplana el contexto a las rutas que ven las plantillas: {{cliente.razonSocial}}, {{ot.codigo}}… */
@@ -128,8 +246,10 @@ export class PlantillaRenderService {
     ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>,
     plantilla: { repid: string; nombre: string; tipo: string; version: string },
     cert: { numero: string; codigoVerificacion: string; fecha: Date },
+    est: EstructuraInforme,
   ) {
     const { ot, cliente, muestras, resultados } = ctx;
+    const veredictoOt = est.modalidad === "cumplimiento" ? etiquetaVeredicto(est.veredictoOt) : "";
     return {
       // --- rutas punteadas (las que usan los cuerpos sembrados) ---
       ot: {
@@ -147,6 +267,13 @@ export class PlantillaRenderService {
         fecha: fmtFecha(cert.fecha),
         tipo: plantilla.tipo,
       },
+      informe: {
+        modalidad: est.modalidad,
+        modalidad_texto: NOMBRE_MODALIDAD[est.modalidad],
+        cumplimiento: est.modalidad === "cumplimiento",
+        veredicto_ot: veredictoOt,
+      },
+      veredicto_ot: veredictoOt,
       fecha: fmtFecha(cert.fecha),
       fecha_hora: fmtFechaHora(cert.fecha),
       anio: String(cert.fecha.getFullYear()),
@@ -163,25 +290,6 @@ export class PlantillaRenderService {
     };
   }
 
-  /** Filas de {{tabla_resultados}}: analito, unidad, promedio, DE, CV, límite, veredicto. */
-  private filasResultados(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>): FilaResultado[] {
-    return ctx.resultados.map((r) => {
-      const lim = r.analitoId ? ctx.limitePorAnalito.get(r.analitoId) : undefined;
-      return {
-        analito: r.analito?.nombre ?? "",
-        muestra: r.muestra?.codigo ?? r.muestra?.nombre ?? "",
-        unidad: r.unidad ?? r.analito?.unidad ?? "",
-        promedio: fmtNum(r.promedio === null ? "" : String(r.promedio)),
-        desviacion: fmtNum(r.desviacion === null ? "" : String(r.desviacion)),
-        cv: fmtNum(r.cv === null ? "" : String(r.cv), 2),
-        limite: this.textoLimite(lim),
-        // El veredicto se guarda como código (cumple / no_cumple / informativo):
-        // en el informe va su texto legible.
-        veredicto: etiquetaVeredicto(r.veredicto),
-      };
-    });
-  }
-
   private filasMuestras(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>): FilaMuestra[] {
     return ctx.muestras.map((m) => ({
       codigo: m.codigo,
@@ -191,19 +299,55 @@ export class PlantillaRenderService {
     }));
   }
 
+  /**
+   * Lo que se propone al emitir: modalidad por defecto (cumplimiento si algún
+   * ensayo tiene requisito) y la portada del IVC con lo que ya sabe la OT.
+   */
+  sugerencias(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>, cfg: ConfigInforme) {
+    const { ot } = ctx;
+    const unaMuestra = ctx.muestras.length === 1 ? ctx.muestras[0] : null;
+    return {
+      modalidad: modalidadSugerida(ctx.paraInforme),
+      conRequisito: ctx.paraInforme.filter(tieneRequisito).length,
+      totalEnsayos: ctx.paraInforme.length,
+      portada:
+        cfg.portada === "ivc"
+          ? {
+              proposito: "Verificación de calidad de una muestra representativa del lote de producción.",
+              opiOc: ot.opiNumero ?? ot.ocNumero ?? null,
+              fechaOpi: ot.opiFecha ? fmtFecha(ot.opiFecha) : null,
+              contrato: null,
+              fechaContrato: null,
+              proyecto: null,
+              proveedor: null,
+              item: unaMuestra?.nombre ?? null,
+              cantidad: null,
+              fabricante: null,
+              paisOrigen: null,
+            }
+          : null,
+    };
+  }
+
   /* ====================================================================== */
   /* Render                                                                 */
   /* ====================================================================== */
 
   /**
    * Núcleo del renderizado. Devuelve el CUERPO (lo que se sella) y su hash.
-   * `avisos[]` reporta plantilla sin cuerpo y placeholders sin dato.
+   * `avisos[]` reporta plantilla sin cuerpo, placeholders sin dato y lo que el
+   * informe no puede mostrar bien (ensayos sin nombre, requisitos ausentes).
+   *
+   * La modalidad (cumplimiento / solo resultados), la conclusión libre y la
+   * portada son del DOCUMENTO: las elige quien emite. Sin modalidad, se usa la
+   * sugerida (cumplimiento si algún ensayo tiene requisito).
    */
   private async render(
     otId: string,
     plantillaId: string,
     tenantId: string | undefined,
     cert: { numero: string; codigoVerificacion: string; fecha: Date },
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme } = {},
   ) {
     const plantilla = await this.prisma.plantillaInforme.findUnique({ where: { id: plantillaId } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
@@ -211,6 +355,10 @@ export class PlantillaRenderService {
       throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
 
     const ctx = await this.contexto(otId, tenantId);
+    const cfg = await this.configDePlantilla(plantilla.id, plantilla.tipo);
+    const modalidad = opciones.modalidad ?? modalidadSugerida(ctx.paraInforme);
+    const datosDoc = opciones.datos ?? {};
+    const est = armarInforme(ctx.paraInforme, cfg, modalidad);
     const avisos: string[] = [];
 
     // 1. Cuerpo: el de la plantilla; si es una cáscara, el de su tipo + aviso.
@@ -224,12 +372,26 @@ export class PlantillaRenderService {
           `plantilla_informe.cuerpo_html para emitir con la maqueta oficial.`,
       );
     }
+    cuerpo = completarCuerpo(cuerpo, cfg);
 
     // 2. Datos + bloques generados.
-    const datos = this.datosPlantilla(ctx, plantilla, cert);
+    const datos = this.datosPlantilla(ctx, plantilla, cert, est);
+    const fotos = cfg.anexoFotografico ? await this.fotosDelInforme(otId, est, ctx.muestras) : [];
     const bloques = {
-      tabla_resultados: tablaResultados(this.filasResultados(ctx)),
+      tabla_resultados: bloqueResultados(est, cfg),
       tabla_muestras: tablaMuestras(this.filasMuestras(ctx)),
+      referencias: bloqueReferencias(est, cfg),
+      anexo_fotografico: bloqueAnexo(fotos, cfg),
+      conclusion: bloqueConclusion(cfg, datosDoc.conclusion),
+      portada:
+        cfg.portada === "ivc"
+          ? bloquePortadaIvc(datosDoc.portada ?? {}, {
+              numero: cert.numero,
+              ot: ctx.ot.codigo,
+              fechaOt: fmtFecha(ctx.ot.fechaRecepcion ?? ctx.ot.createdAt),
+              fecha: fmtFecha(cert.fecha),
+            })
+          : "",
     };
     const { html: cuerpoRenderizado, faltantes } = renderizar(cuerpo, datos, bloques);
 
@@ -237,11 +399,21 @@ export class PlantillaRenderService {
       avisos.push(`Placeholders sin dato en el expediente (se emiten vacíos): ${faltantes.join(", ")}.`);
     if (ctx.resultados.length === 0)
       avisos.push("La OT no tiene resultados registrados: la tabla de resultados sale vacía.");
+    const sinNombre = ctx.paraInforme.filter((r) => !r.ensayo || !r.ensayo.trim()).length;
+    if (sinNombre)
+      avisos.push(`${sinNombre} ensayo(s) sin nombre en el catálogo: se imprimen como «Ensayo sin nombre en el catálogo».`);
+    if (modalidad === "cumplimiento") {
+      const sinReq = ctx.paraInforme.filter((r) => !tieneRequisito(r)).length;
+      if (sinReq)
+        avisos.push(
+          `${sinReq} de ${ctx.paraInforme.length} ensayo(s) sin requisito: en el informe de cumplimiento salen como «No especificado» (informativo).`,
+        );
+    }
 
     // 3. Sello: hash del CUERPO (no del documento con pie -> sería circular).
     const hash = createHash("sha256").update(cuerpoRenderizado, "utf8").digest("hex");
 
-    return { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto };
+    return { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad, fotos: fotos.length };
   }
 
   /** Título legible del documento (metadatos del PDF y <title>). */
@@ -255,18 +427,24 @@ export class PlantillaRenderService {
    * de la previsualización no pueda confundirse con un certificado válido
    * (además de la marca de agua en el PDF).
    */
-  async previsualizar(otId: string, plantillaId: string, tenantId?: string) {
+  async previsualizar(
+    otId: string,
+    plantillaId: string,
+    tenantId?: string,
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme } = {},
+  ) {
     const fecha = new Date();
     const cert = {
       numero: `CERT-${fecha.getFullYear()}-XXXX`,
       codigoVerificacion: "SIN EMITIR",
       fecha,
     };
-    const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto } = await this.render(
+    const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad } = await this.render(
       otId,
       plantillaId,
       tenantId,
       cert,
+      opciones,
     );
 
     const sello: Sello = {
@@ -282,6 +460,7 @@ export class PlantillaRenderService {
       plantilla: plantilla.repid,
       plantillaNombre: plantilla.nombre,
       tipo: plantilla.tipo,
+      modalidad,
       usaPlantillaPorDefecto: usaDefecto,
       avisos,
       hash,
@@ -386,7 +565,7 @@ export class PlantillaRenderService {
   async condicionesEmision(otId: string, plantillaId: string, tenantId: string | undefined, opts: OpcionesEmision = {}) {
     const ot = await this.prisma.ordenTrabajo.findFirst({
       where: { id: otId, ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, codigo: true, estado: true, unidadPrincipal: true, tenantId: true },
+      select: { id: true, codigo: true, estado: true, unidadPrincipal: true, tenantId: true, origenTrabajo: true },
     });
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
     const plantilla = await this.prisma.plantillaInforme.findFirst({
@@ -438,16 +617,27 @@ export class PlantillaRenderService {
       faltantes.push(String(e?.message ?? e));
     }
 
-    // 3 y 4. Laboratorio responsable y matriz de firmas.
+    // 3 y 4. Laboratorio responsable y matriz de firmas. En una OT interna no
+    // hay oficialización (la aprobación administrativa del Jefe de Departamento
+    // no aplica): esos pasos se omiten y se informa por qué.
     let pasos: PasoNuevo[] = [];
+    let pasosOmitidos: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; motivo: string }[] = [];
+    const otInterna = esOtInterna(ot.origenTrabajo);
     if (!ot.unidadPrincipal) {
       faltantes.push(
         `La OT ${ot.codigo} no tiene laboratorio responsable asignado: no se puede saber quién debe firmar el documento.`,
       );
     } else {
-      const res = await this.matriz.resolver(tipoDocumento, ot.unidadPrincipal, ot.tenantId);
+      const res = await this.matriz.resolver(tipoDocumento, ot.unidadPrincipal, ot.tenantId, { otInterna });
       const r = pasosDesdeMatriz(res);
       pasos = r.pasos;
+      pasosOmitidos = (res.omitidos ?? []).map((p) => ({
+        orden: p.orden,
+        accion: p.accion,
+        rolNombre: p.rol.nombre,
+        unidadCodigo: p.unidad?.codigo ?? null,
+        motivo: p.motivo,
+      }));
       faltantes.push(...r.errores);
     }
 
@@ -473,7 +663,24 @@ export class PlantillaRenderService {
       plantilla,
       resultados: { total: resultados.length, aprobados: resultados.filter((r) => r.estado === "aprobado").length },
       pasos,
+      otInterna,
+      pasosOmitidos,
     };
+  }
+
+  /**
+   * Formato y datos que se proponen para el documento: formato de la
+   * plantilla, modalidad sugerida y portada (IVC). Solo lee.
+   */
+  async propuestaDocumento(otId: string, plantillaId: string, tenantId?: string) {
+    const plantilla = await this.prisma.plantillaInforme.findFirst({
+      where: { id: plantillaId, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, tipo: true },
+    });
+    if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
+    const ctx = await this.contexto(otId, tenantId);
+    const formato = await this.configDePlantilla(plantilla.id, plantilla.tipo);
+    return { formato, ...this.sugerencias(ctx, formato) };
   }
 
   /* ====================================================================== */
@@ -516,7 +723,15 @@ export class PlantillaRenderService {
       // La nueva versión es del mismo expediente y la misma plantilla.
       otId = previo.otId;
       plantillaId = previo.plantillaId;
-      opts = { ...opts, tipoDocumento: opts.tipoDocumento ?? previo.tipoDocumento ?? undefined };
+      // La nueva versión conserva la modalidad y los datos del documento
+      // (conclusión, portada) salvo que quien reemite indique otros.
+      const doc = await this.datosDeDocumento(previo.id);
+      opts = {
+        ...opts,
+        tipoDocumento: opts.tipoDocumento ?? previo.tipoDocumento ?? undefined,
+        modalidad: opts.modalidad ?? doc.modalidad ?? undefined,
+        datosInforme: opts.datosInforme ?? doc.datos ?? undefined,
+      };
       const masNueva = await this.prisma.certificado.findFirst({
         where: { reemplazaId: previo.id, deletedAt: null },
         select: { numero: true, codigo: true },
@@ -547,11 +762,12 @@ export class PlantillaRenderService {
         ? numeroVersion(anterior.numero ?? anterior.codigo, version)
         : await this.siguienteNumero(tx, tenantId, anio);
 
-      const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto } = await this.render(
+      const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad } = await this.render(
         otId,
         plantillaId,
         tenantId,
         { numero, codigoVerificacion, fecha },
+        { modalidad: opts.modalidad, datos: opts.datosInforme },
       );
 
       const cert = await tx.certificado.create({
@@ -575,6 +791,10 @@ export class PlantillaRenderService {
           estado: "en_firma",
         },
       });
+      // Modalidad y datos propios del documento (columnas de align_informe_ensayo.sql).
+      const datosJson = JSON.stringify(opts.datosInforme ?? {});
+      await tx.$executeRaw`UPDATE certificado SET modalidad = ${modalidad}, datos_informe = ${datosJson}::jsonb
+                            WHERE id = ${cert.id}::uuid`;
 
       await tx.documentoFirma.createMany({
         data: cond.pasos.map((p) => ({
@@ -611,7 +831,7 @@ export class PlantillaRenderService {
         });
       }
 
-      return { cert, plantilla, otCodigo: ctx.ot.codigo, cuerpoRenderizado, hash, avisos, usaDefecto };
+      return { cert, plantilla, otCodigo: ctx.ot.codigo, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad };
     });
 
     const sello = await this.selloDe(emitido.cert.id);
@@ -624,7 +844,9 @@ export class PlantillaRenderService {
       urlVerificacion: emitido.cert.urlVerificacion,
       estado: emitido.cert.estado,
       tipoDocumento: cond.tipoDocumento,
+      modalidad: emitido.modalidad,
       pasos: cond.pasos,
+      pasosOmitidos: cond.pasosOmitidos,
       usaPlantillaPorDefecto: emitido.usaDefecto,
       avisos: emitido.avisos,
       html: documentoCompleto(
@@ -633,6 +855,21 @@ export class PlantillaRenderService {
         this.titulo(sello.numero, emitido.plantilla.nombre, emitido.otCodigo),
       ),
     };
+  }
+
+  /** Modalidad y datos guardados de un documento (NULL en los anteriores a esta versión). */
+  async datosDeDocumento(certificadoId: string): Promise<{ modalidad: Modalidad | null; datos: DatosInforme | null }> {
+    try {
+      const f = await this.prisma.$queryRaw<{ modalidad: string | null; datos_informe: unknown }[]>`
+        SELECT modalidad, datos_informe FROM certificado WHERE id = ${certificadoId}::uuid`;
+      const m = f[0]?.modalidad;
+      return {
+        modalidad: m === "cumplimiento" || m === "solo_resultados" ? m : null,
+        datos: (f[0]?.datos_informe as DatosInforme) ?? null,
+      };
+    } catch {
+      return { modalidad: null, datos: null };
+    }
   }
 
   /**

@@ -7,7 +7,10 @@
  * CERTIFICADO / I.ENSAYO / I.TECNICO. Aquí viven como FALLBACK de runtime: si
  * una plantilla no tiene cuerpo (las 114 sembradas son cáscaras con nombre;
  * IVC/PLANILLA/BOLETIN/OTRO se dejan sin cuerpo a propósito), el motor usa el
- * de su tipo y lo AVISA en `avisos[]` de la respuesta.
+ * de su tipo y lo AVISA en `avisos[]` de la respuesta. El cuerpo del IVC solo
+ * vive aquí (no se siembra). Los bloques {{referencias}}, {{anexo_fotografico}}
+ * y {{conclusion}} se añaden solos a un cuerpo que no los nombre
+ * (bloques-informe.ts · completarCuerpo).
  *
  * Si cambia uno, cambie el otro.
  */
@@ -106,7 +109,7 @@ const I_TECNICO = `${MEMBRETE("Subdirección Técnica")}
 {{/si}}
 ${FIRMAS("Profesional responsable", "Jefe de Departamento")}`;
 
-/** Genérico: cualquier otro tipo (IVC, PLANILLA, BOLETIN, OTRO). */
+/** Genérico: cualquier otro tipo (PLANILLA, BOLETIN, OTRO). */
 const GENERICO = `${MEMBRETE("Laboratorio de Ensayo y Calibración")}
 
 <h1>{{plantilla.nombre}}</h1>
@@ -123,10 +126,39 @@ const GENERICO = `${MEMBRETE("Laboratorio de Ensayo y Calibración")}
 {{tabla_resultados}}
 ${FIRMAS("Analista responsable", "Jefe de Laboratorio")}`;
 
+/**
+ * IVC · Informe de Verificación de Calidad (IDIC-PG09 Anexo 01): portada con
+ * propósito, OT, OPI u OC, contrato, proyecto, proveedor, ítem, cantidad,
+ * fabricante, país y páginas; resultados por secciones numeradas, referencias,
+ * anexo fotográfico y conclusión (formato de la plantilla, config-informe.ts).
+ */
+const IVC = `${MEMBRETE("Laboratorio de Ensayo y Calibración")}
+
+<h1>INFORME DE VERIFICACIÓN DE CALIDAD</h1>
+{{portada}}
+
+<table class="meta">
+  <tr><th>Cliente</th><td>{{cliente.razonSocial}}</td><th>RUT</th><td>{{cliente.rut}}</td></tr>
+</table>
+
+<h2>Muestras verificadas</h2>
+{{tabla_muestras}}
+
+<h2>Resultados</h2>
+{{tabla_resultados}}
+
+{{referencias}}
+
+{{anexo_fotografico}}
+
+{{conclusion}}
+${FIRMAS("Aprobación técnica", "Oficialización")}`;
+
 const POR_TIPO: Record<string, string> = {
   CERTIFICADO,
   "I.ENSAYO": I_ENSAYO,
   "I.TECNICO": I_TECNICO,
+  IVC,
 };
 
 /** Cuerpo por defecto para un tipo de plantilla. Nunca devuelve vacío. */
@@ -180,6 +212,14 @@ export const ESTILOS_DOCUMENTO = `
   table.rep .vacio { text-align:center; color:var(--suave); font-style:italic; padding:12px; }
   table.rep td.ok { color:#155e3d; font-weight:600; }
   table.rep td.no { color:#7d1f1f; font-weight:600; }
+  h3 { font-size:11.5px; color:var(--azul); margin:14px 0 6px; }
+  h4 { font-size:11px; color:var(--tinta); margin:10px 0 5px; font-weight:600; }
+  table.rep .obs { font-size:10px; color:var(--suave); }
+  table.meta.portada th { width:24%; }
+  .veredicto-muestra { font-size:11px; margin:4px 0 10px; }
+  .foto { margin:10px 0 14px; text-align:center; page-break-inside:avoid; }
+  .foto img { max-width:100%; max-height:340px; border:1px solid var(--linea); }
+  .foto .pie-foto { font-size:10px; color:var(--suave); margin-top:4px; }
   .nota { font-size:10px; color:var(--suave); border-left:2.5px solid var(--linea);
           padding-left:9px; margin-top:14px; }
   .firmas { display:flex; gap:52px; margin-top:44px; }

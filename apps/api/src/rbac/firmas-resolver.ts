@@ -89,6 +89,43 @@ export interface ResolucionFirmas {
   origen: "UNIDAD" | "DEFECTO" | "SIN_REGLAS";
   unidadRegla: UnidadRef | null;
   pasos: PasoResuelto[];
+  /** Pasos de la matriz que no aplican a este documento (p. ej. oficialización en una OT interna). */
+  omitidos?: (PasoResuelto & { motivo: string })[];
+}
+
+/* ========================================================================== */
+/* OT interna: sin oficialización                                             */
+/* ========================================================================== */
+
+/**
+ * ¿La OT es interna? (`orden_trabajo.origen_trabajo` = OT_INTERNA; se aceptan
+ * también los textos heredados «OT interna».) La interlaboratorio NO cuenta:
+ * es otro origen y conserva su circuito completo.
+ */
+export function esOtInterna(origenTrabajo: string | null | undefined): boolean {
+  const s = String(origenTrabajo ?? "").trim().toUpperCase().replace(/[\s-]+/g, "_");
+  return s === "OT_INTERNA";
+}
+
+/** Acciones de la matriz que no aplican en una OT interna. */
+export const ACCIONES_SIN_OT_INTERNA = ["OFICIALIZA"] as const;
+
+export const MOTIVO_OT_INTERNA =
+  "OT interna: la oficialización (aprobación administrativa y liberación del Jefe de Departamento) no aplica.";
+
+/**
+ * Regla del IDIC (circuito de aprobación del informe, paso 4 «Jefe DQO ·
+ * Aprobación administrativa y liberación · No aplica si es OT interna»): en una
+ * OT interna se quitan los pasos OFICIALIZA de la resolución y se devuelven en
+ * `omitidos` con el motivo. El resto del circuito no cambia.
+ */
+export function aplicarOtInterna(res: ResolucionFirmas): ResolucionFirmas {
+  const quitar = (p: PasoResuelto) => (ACCIONES_SIN_OT_INTERNA as readonly string[]).includes(p.accion);
+  return {
+    ...res,
+    pasos: res.pasos.filter((p) => !quitar(p)),
+    omitidos: [...(res.omitidos ?? []), ...res.pasos.filter(quitar).map((p) => ({ ...p, motivo: MOTIVO_OT_INTERNA }))],
+  };
 }
 
 const ref = (n: NodoUnidad | null | undefined): UnidadRef | null =>
@@ -185,6 +222,8 @@ export function resolverFirmas(p: {
   jefes: JefeUnidad[];
   tenencias: TenenciaRol[];
   ahora?: Date;
+  /** OT interna: sin pasos de oficialización (aplicarOtInterna). */
+  otInterna?: boolean;
 }): ResolucionFirmas {
   const ahora = p.ahora ?? new Date();
   const unidad = p.unidadId ? p.arbol.porId.get(p.unidadId) ?? null : null;
@@ -214,11 +253,12 @@ export function resolverFirmas(p: {
       advertencia,
     };
   });
-  return {
+  const res: ResolucionFirmas = {
     tipoDocumento: p.tipoDocumento,
     unidad: ref(unidad),
     origen: elegidas.origen,
     unidadRegla: ref(elegidas.unidadRegla),
     pasos,
   };
+  return p.otInterna ? aplicarOtInterna(res) : res;
 }

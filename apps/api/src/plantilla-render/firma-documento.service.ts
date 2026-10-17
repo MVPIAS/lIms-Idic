@@ -141,7 +141,8 @@ export class FirmaDocumentoService {
       where: { reemplazaId: cert.id, deletedAt: null },
       select: { id: true, numero: true, estado: true },
     });
-    return { ...this.vista(cert, usuarioId, req), reemplazadoPor: reemplazo };
+    const { modalidad } = await this.render.datosDeDocumento(cert.id);
+    return { ...this.vista(cert, usuarioId, req), modalidad, reemplazadoPor: reemplazo };
   }
 
   /**
@@ -194,10 +195,23 @@ export class FirmaDocumentoService {
       }),
       this.prisma.certificado.count({ where }),
     ]);
+    // Modalidad del informe (cumplimiento / solo resultados): columna de
+    // align_informe_ensayo.sql, fuera del modelo Prisma.
+    const modalidades = new Map<string, string | null>();
+    if (filas.length) {
+      try {
+        const ms = await this.prisma.$queryRaw<{ id: string; modalidad: string | null }[]>`
+          SELECT id, modalidad FROM certificado WHERE id = ANY(${filas.map((c) => c.id)}::uuid[])`;
+        for (const m of ms) modalidades.set(m.id, m.modalidad);
+      } catch {
+        /* BD sin la columna: sin modalidad */
+      }
+    }
     const data = filas.map(({ firmas, ...c }) => {
       const actuales = c.estado === "en_firma" ? pasosActuales(firmas.map((x, i) => ({ ...x, id: String(i) }))) : [];
       return {
         ...c,
+        modalidad: modalidades.get(c.id) ?? null,
         numero: c.numero ?? c.codigo,
         firmasHechas: firmas.filter((x) => x.estado === "firmado").length,
         firmasTotal: firmas.filter((x) => x.estado !== "anulado").length,

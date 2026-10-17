@@ -1,0 +1,213 @@
+/**
+ * Bloques HTML del informe de ensayo que genera el motor (no la plantilla):
+ *   {{tabla_resultados}}   resultados agrupados por muestra o por sección › componente
+ *   {{referencias}}        cuadro con los No cumple citando el punto del informe
+ *   {{anexo_fotografico}}  fotos elegidas para el informe, con su pie
+ *   {{conclusion}}         texto fijo de la plantilla + texto libre del documento
+ *   {{portada}}            portada del IVC (propósito, OT, OPI/OC, contrato…)
+ *
+ * TODO valor que viene de la BD se escapa (`escapeHtml`); el HTML lo pone el
+ * motor. Solo se usan etiquetas que entiende el PDF (pdf.renderer.ts):
+ * h2/h3/h4, p, div, table, img (data URI PNG/JPEG).
+ */
+import { escapeHtml } from "./html.util";
+import type { ConfigInforme } from "./config-informe";
+import type { EstructuraInforme, FilaInforme } from "./filas-informe";
+
+const GUION = "—";
+const celda = (v: string, clase = "") =>
+  `<td${clase ? ` class="${clase}"` : ""}>${v && v.trim() !== "" ? escapeHtml(v) : GUION}</td>`;
+
+function cabecera(est: EstructuraInforme, cfg: ConfigInforme): string {
+  const e = cfg.etiquetas;
+  const th = (t: string, num = false) => `<th${num ? ' class="num"' : ""}>${escapeHtml(t)}</th>`;
+  const cumplimiento = est.modalidad === "cumplimiento";
+  return (
+    "<thead><tr>" +
+    (est.mostrarMuestra ? th("Muestra") : "") +
+    th(e.ensayo) +
+    (cfg.columnaMetodo ? th(e.metodo) : "") +
+    (cfg.columnaUnidad ? th(e.unidad) : "") +
+    (cumplimiento ? th(e.requisito) : "") +
+    th(e.resultado) +
+    (est.mostrarEstadisticas ? th("DE", true) + th("CV %", true) : "") +
+    (cumplimiento ? th(e.veredicto) : "") +
+    "</tr></thead>"
+  );
+}
+
+function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme): string {
+  const cumplimiento = est.modalidad === "cumplimiento";
+  const requisito = f.requisitoOrigen === "orden" ? `${f.requisito} *` : f.requisito;
+  const resultado =
+    `<td>${escapeHtml(f.resultado)}` +
+    (f.observacion ? `<br><span class="obs">Obs.: ${escapeHtml(f.observacion)}</span>` : "") +
+    "</td>";
+  const clase = f.veredicto === "cumple" ? "ok" : f.veredicto === "no_cumple" ? "no" : "";
+  return (
+    "<tr>" +
+    (est.mostrarMuestra ? celda(f.muestra) : "") +
+    celda(f.ensayo) +
+    (cfg.columnaMetodo ? celda(f.metodo) : "") +
+    (cfg.columnaUnidad ? celda(f.unidad) : "") +
+    (cumplimiento ? celda(requisito) : "") +
+    resultado +
+    (est.mostrarEstadisticas ? celda(f.desviacion, "num") + celda(f.cv, "num") : "") +
+    (cumplimiento ? celda(f.veredictoTexto, clase) : "") +
+    "</tr>"
+  );
+}
+
+const tabla = (filas: FilaInforme[], est: EstructuraInforme, cfg: ConfigInforme) =>
+  `<table class="rep">${cabecera(est, cfg)}<tbody>${filas.map((f) => filaHtml(f, est, cfg)).join("")}</tbody></table>`;
+
+const conNumero = (n: string | null, t: string) => escapeHtml(n ? `${n} ${t}` : t);
+
+/** `{{tabla_resultados}}` del informe de ensayo. */
+export function bloqueResultados(est: EstructuraInforme, cfg: ConfigInforme): string {
+  if (!est.secciones.length)
+    return `<table class="rep"><tbody><tr><td class="vacio">Sin resultados registrados para esta orden de trabajo.</td></tr></tbody></table>`;
+  const cumplimiento = est.modalidad === "cumplimiento";
+  const porMuestra = cfg.agrupacion === "muestra";
+  const veredictoDe = new Map(est.veredictosMuestra.map((v) => [v.codigo, v]));
+  let html = "";
+  for (const s of est.secciones) {
+    html += `<h3>${conNumero(s.numero, s.titulo)}</h3>`;
+    for (const c of s.componentes) {
+      if (c.titulo) html += `<h4>${conNumero(c.numero, c.titulo)}</h4>`;
+      html += tabla(c.filas, est, cfg);
+    }
+    // Agrupado por muestra: el veredicto de la muestra va bajo su tabla.
+    const codigo = s.componentes[0]?.filas[0]?.muestra;
+    const v = codigo ? veredictoDe.get(codigo) : undefined;
+    if (cumplimiento && porMuestra && v && s.titulo.startsWith(`Muestra ${codigo}`))
+      html += `<p class="veredicto-muestra">Veredicto de la muestra ${escapeHtml(v.codigo)}: <b>${escapeHtml(v.texto)}</b></p>`;
+  }
+  if (cumplimiento && !porMuestra && est.veredictosMuestra.length) {
+    html +=
+      `<p class="veredicto-muestra">` +
+      est.veredictosMuestra
+        .map((v) => `Veredicto de la muestra ${escapeHtml(v.codigo)}${v.nombre ? ` (${escapeHtml(v.nombre)})` : ""}: <b>${escapeHtml(v.texto)}</b>`)
+        .join("<br>") +
+      "</p>";
+  }
+  const notas: string[] = [];
+  if (est.hayRequisitoDeOrden)
+    notas.push("* Requisito fijado para esta orden de trabajo (completa o reemplaza el del catálogo).");
+  if (est.mostrarEstadisticas) notas.push("DE: desviación estándar; CV: coeficiente de variación de las réplicas.");
+  if (cumplimiento && est.secciones.some((s) => s.componentes.some((c) => c.filas.some((f) => f.requisitoOrigen === null))))
+    notas.push("«No especificado»: el ensayo no tiene requisito; el resultado es informativo.");
+  if (notas.length) html += `<p class="nota">${notas.map(escapeHtml).join("<br>")}</p>`;
+  return html;
+}
+
+/** `{{referencias}}`: los No cumple, citando el punto del informe. */
+export function bloqueReferencias(est: EstructuraInforme, cfg: ConfigInforme): string {
+  if (est.modalidad !== "cumplimiento" || !cfg.referencias || !est.referencias.length) return "";
+  return (
+    `<h2>Referencias</h2><table class="rep ref"><tbody>` +
+    est.referencias.map((r) => `<tr><td>${escapeHtml(r.texto)}</td></tr>`).join("") +
+    `</tbody></table>`
+  );
+}
+
+export interface FotoInforme {
+  mime: string;
+  datos: string; // base64
+  pie: string | null;
+  punto: string | null;
+  titulo: string | null;
+}
+
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+/** `{{anexo_fotografico}}`: fotos con su pie, que remite al punto del informe. */
+export function bloqueAnexo(fotos: FotoInforme[], cfg: ConfigInforme): string {
+  if (!cfg.anexoFotografico) return "";
+  const validas = fotos.filter((f) => /^image\/(png|jpeg)$/.test(f.mime) && BASE64.test(f.datos));
+  if (!validas.length) return "";
+  return (
+    `<h2>Anexo fotográfico</h2>` +
+    validas
+      .map((f, i) => {
+        const ref = [f.punto ? `Punto ${f.punto}` : "", f.titulo ?? ""].filter(Boolean).join(" ");
+        const pie = [`Foto ${i + 1}`, ref, f.pie ?? ""].filter((x) => x && x.trim()).join(" · ");
+        return `<div class="foto"><img src="data:${f.mime};base64,${f.datos}" alt="Foto ${i + 1}"><p class="pie-foto">${escapeHtml(pie)}</p></div>`;
+      })
+      .join("")
+  );
+}
+
+/** `{{conclusion}}`: texto fijo de la plantilla y texto libre del documento. */
+export function bloqueConclusion(cfg: ConfigInforme, libre: string | null | undefined): string {
+  const parrafos = [cfg.conclusionFija ?? "", ...(libre ?? "").split(/\r?\n+/)]
+    .map((p) => p.trim())
+    .filter(Boolean);
+  if (!parrafos.length) return "";
+  return `<h2>Conclusión</h2>${parrafos.map((p) => `<p>${escapeHtml(p)}</p>`).join("")}`;
+}
+
+/** Datos de la portada del IVC (elegidos al emitir; los de la OT vienen propuestos). */
+export interface DatosPortada {
+  proposito?: string | null;
+  opiOc?: string | null;
+  fechaOpi?: string | null;
+  contrato?: string | null;
+  fechaContrato?: string | null;
+  proyecto?: string | null;
+  proveedor?: string | null;
+  item?: string | null;
+  cantidad?: string | null;
+  fabricante?: string | null;
+  paisOrigen?: string | null;
+}
+
+/** `{{portada}}` del Informe de Verificación de Calidad. */
+export function bloquePortadaIvc(
+  d: DatosPortada,
+  fijos: { numero: string; ot: string; fechaOt: string; fecha: string },
+): string {
+  const v = (x: string | null | undefined) => (x && x.trim() ? escapeHtml(x.trim()) : "N/A");
+  return (
+    `<table class="meta portada">` +
+    `<tr><th>Propósito del documento</th><td colspan="3">${v(d.proposito)}</td></tr>` +
+    `<tr><th>Identificación del documento</th><td colspan="3">${escapeHtml(fijos.numero)}</td></tr>` +
+    `<tr><th>N.º O/T</th><td>${escapeHtml(fijos.ot)}</td><th>Fecha de O/T</th><td>${v(fijos.fechaOt)}</td></tr>` +
+    `<tr><th>N.º OPI / Orden de compra</th><td>${v(d.opiOc)}</td><th>Fecha OPI</th><td>${v(d.fechaOpi)}</td></tr>` +
+    `<tr><th>Contrato</th><td>${v(d.contrato)}</td><th>Fecha de contrato</th><td>${v(d.fechaContrato)}</td></tr>` +
+    `<tr><th>Nombre del proyecto</th><td colspan="3">${v(d.proyecto)}</td></tr>` +
+    `<tr><th>Proveedor</th><td colspan="3">${v(d.proveedor)}</td></tr>` +
+    `<tr><th>Identificación del ítem</th><td>${v(d.item)}</td><th>Cantidad</th><td>${v(d.cantidad)}</td></tr>` +
+    `<tr><th>Fabricante</th><td>${v(d.fabricante)}</td><th>País de origen</th><td>${v(d.paisOrigen)}</td></tr>` +
+    `<tr><th>Fecha de elaboración</th><td>${escapeHtml(fijos.fecha)}</td><th>N.º de páginas</th><td class="n-paginas">Ver pie de página</td></tr>` +
+    `</table>`
+  );
+}
+
+/** Bloque de firmas de las plantillas (el circuito lo sustituye al presentar). */
+const RE_FIRMAS = /<div class="firmas">/;
+
+/**
+ * Asegura que el cuerpo tenga los bloques que pide el formato aunque la
+ * plantilla (sembrada antes de esta versión) no los nombre: referencias, anexo
+ * y conclusión antes del bloque de firmas (o al final); la portada antes del
+ * primer título. Solo añade marcadores; el contenido lo pone el motor y queda
+ * vacío si no aplica.
+ */
+export function completarCuerpo(cuerpo: string, cfg: ConfigInforme): string {
+  let out = cuerpo;
+  const tiene = (t: string) => new RegExp(`\\{\\{\\s*${t}\\s*\\}\\}`).test(out);
+  const finales = ["referencias", "anexo_fotografico", "conclusion"].filter((t) => !tiene(t)).map((t) => `{{${t}}}`);
+  if (finales.length) {
+    const bloque = `\n${finales.join("\n")}\n`;
+    out = RE_FIRMAS.test(out) ? out.replace(RE_FIRMAS, `${bloque}<div class="firmas">`) : `${out}${bloque}`;
+  }
+  if (cfg.portada === "ivc" && !tiene("portada")) {
+    const i = out.search(/<h1[\s>]/i);
+    if (i >= 0) {
+      const fin = out.indexOf("</h1>", i);
+      out = fin >= 0 ? `${out.slice(0, fin + 5)}\n{{portada}}\n${out.slice(fin + 5)}` : `{{portada}}\n${out}`;
+    } else out = `{{portada}}\n${out}`;
+  }
+  return out;
+}
