@@ -25,6 +25,18 @@ import {
   type PasoNuevo,
 } from "./reglas-emision";
 
+/**
+ * Contexto adicional de un proceso (p. ej. BPCH · prototipos) para las
+ * plantillas: datos bajo su propia clave (`{{prototipo.elemento}}`) y bloques
+ * HTML ya escapados por quien los genera. Puede lanzar una excepción para
+ * impedir usar una plantilla propia del proceso en una OT que no le corresponde.
+ */
+export type ProveedorContexto = (
+  otId: string,
+  tenantId: string | undefined,
+  plantilla: { id: string; repid: string },
+) => Promise<{ datos?: Record<string, unknown>; bloques?: Record<string, string> } | null>;
+
 /** Opciones de emisión: tipo de documento de la matriz y documento al que reemplaza. */
 export interface OpcionesEmision {
   tipoDocumento?: string;
@@ -59,6 +71,17 @@ export class PlantillaRenderService {
     private readonly qc: QcService,
     private readonly matriz: FirmasMatrizService,
   ) {}
+
+  /** Proveedores de contexto adicional registrados por otros módulos (clave → proveedor). */
+  private readonly proveedores = new Map<string, ProveedorContexto>();
+
+  /**
+   * Registra un proveedor de contexto adicional. `clave` es el nombre con que
+   * sus datos llegan a la plantilla y no puede pisar las claves del motor.
+   */
+  registrarContexto(clave: string, proveedor: ProveedorContexto) {
+    this.proveedores.set(clave, proveedor);
+  }
 
   /** URL pública de verificación; configurable por despliegue. */
   private get baseVerificacion(): string {
@@ -226,11 +249,18 @@ export class PlantillaRenderService {
     }
 
     // 2. Datos + bloques generados.
-    const datos = this.datosPlantilla(ctx, plantilla, cert);
-    const bloques = {
+    const datos: Record<string, unknown> = this.datosPlantilla(ctx, plantilla, cert);
+    const bloques: Record<string, string> = {
       tabla_resultados: tablaResultados(this.filasResultados(ctx)),
       tabla_muestras: tablaMuestras(this.filasMuestras(ctx)),
     };
+    // Contexto de otros módulos: nunca pisa una clave del motor.
+    for (const [clave, proveedor] of this.proveedores) {
+      const extra = await proveedor(otId, tenantId, { id: plantilla.id, repid: plantilla.repid });
+      if (!extra) continue;
+      if (extra.datos && !(clave in datos)) datos[clave] = extra.datos;
+      for (const [k, v] of Object.entries(extra.bloques ?? {})) if (!(k in bloques)) bloques[k] = v;
+    }
     const { html: cuerpoRenderizado, faltantes } = renderizar(cuerpo, datos, bloques);
 
     if (faltantes.length)
