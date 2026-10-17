@@ -20,6 +20,10 @@
  * sobrescribe; devolver exige motivo; solo se actúa sobre OT del propio
  * laboratorio (alcance).
  *
+ * Corregir un valor ya capturado exige motivo; el factor de la fórmula lo ajusta
+ * quien tiene «resultado.factor». Todo cambio queda en el historial del ensayo,
+ * que se ve en la «Planilla de registros y cálculos» de la OT.
+ *
  * API: GET /flujo/ot/:id/resultados · POST /flujo/resultado/:id/valor ·
  *      GET /resultados/bandeja · POST /resultados/:id/{revisar,aprobar,devolver,veredicto} ·
  *      POST /resultados/ot/:otId/{revisar,aprobar}
@@ -31,7 +35,7 @@ import { usePermisos } from "@/lib/permisos";
 import { toast } from "@/components/ui/feedback";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 import { ESTADO_RESULTADO, llamar, qs, veredictoInfo, type Paginado } from "@/lib/laboratorio";
-import EditorEnsayo, { type EnsayoEditable } from "./_components/EditorEnsayo";
+import EditorEnsayo, { textoFactor, type EnsayoEditable } from "./_components/EditorEnsayo";
 
 /** Resultado en una forma común (viene de dos endpoints con forma distinta). */
 interface Fila extends EnsayoEditable {
@@ -113,8 +117,18 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     especEditadaAt: r.especEditadaAt ?? null,
     observacion: r.observacion ?? null,
     lecturas: Array.isArray(r.lecturas) ? r.lecturas : null,
+    factorValor: r.factorValor ?? null,
+    factorOperacion: r.factorOperacion ?? null,
+    factorDescripcion: r.factorDescripcion ?? null,
+    factorOrigen: r.factorOrigen ?? null,
+    factorEditadoAt: r.factorEditadoAt ?? null,
+    factorMotivo: r.factorMotivo ?? null,
+    valorSinFactor: r.valorSinFactor ?? null,
   };
 }
+
+/** Corregir un valor ya capturado (aún sin revisar) exige motivo. */
+const esCorreccion = (f: Fila) => f.estado === "capturado" && ((f.valorNumerico != null && f.valorNumerico !== "") || !!f.valorTexto);
 
 /** ¿Se captura con un solo campo en la tabla? (numérico, sin campos de fórmula, del puente) */
 const capturaRapida = (f: Fila) => f.tipoDato === "numerico" && f.nCampos === 0 && !f.porReplicas;
@@ -178,6 +192,8 @@ export default function CapturaOtPage() {
   const [page, setPage] = useState(1);
   const [filtroOt, setFiltroOt] = useState("todos");
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Motivo de la corrección de un valor ya capturado (captura rápida).
+  const [motivos, setMotivos] = useState<Record<string, string>>({});
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [devolviendo, setDevolviendo] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("");
@@ -249,10 +265,14 @@ export default function CapturaOtPage() {
   async function guardarValor(f: Fila) {
     const raw = (drafts[f.id] ?? "").trim();
     if (!raw) { toast.error("Escriba un valor antes de guardar."); return; }
+    const corrige = esCorreccion(f);
+    const motivo = (motivos[f.id] ?? "").trim();
+    if (corrige && motivo.length < 5) { toast.error("Este ensayo ya tiene un valor: indique el motivo de la corrección (mínimo 5 caracteres)."); return; }
     setOcupado(f.id);
     try {
       // El servidor decide si es número (admite «12,4») o texto («Ausente»).
-      const r = await llamar("POST", `/flujo/resultado/${f.id}/valor`, { valor: raw });
+      const r = await llamar("POST", `/flujo/resultado/${f.id}/valor`, { valor: raw, ...(corrige ? { motivo } : {}) });
+      setMotivos((m) => ({ ...m, [f.id]: "" }));
       actualizarFila(f.id, { ...r, analistaNombre: acceso.usuario.nombre });
       if (r.veredictoMuestra && f.muestraId) setVeredictosMuestra((m) => ({ ...m, [f.muestraId!]: r.veredictoMuestra }));
       setDrafts((d) => ({ ...d, [f.id]: valorBorrador(normalizar(r)) }));
@@ -463,6 +483,9 @@ export default function CapturaOtPage() {
                   Aprobar todo lo revisado ({porAprobarAjenos})
                 </button>
               )}
+              <Link href={`/ot/${ot.id}/calculos` as any} className="btn outline sm" title="Lecturas, fórmula aplicada, factor e historial de cambios de cada ensayo (solo lectura, exportable)">
+                Planilla de cálculos
+              </Link>
               <Link href={"/informes" as any} className={`btn sm ${todoAprobado ? "primary" : "outline"}`}
                 title={todoAprobado ? "Todos los resultados están aprobados" : "Aún hay resultados sin aprobar"}>
                 Emitir informe
@@ -529,6 +552,11 @@ export default function CapturaOtPage() {
                               <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{limiteTexto(f)}{f.unidad ? ` ${f.unidad}` : ""}</span>
                               {f.requisito && <div style={{ fontSize: 11, color: "var(--muted)" }}>{f.requisito}</div>}
                               {f.tipoDato === "atributo" && <div><span className="pill gray">atributo</span></div>}
+                              {textoFactor(f.factorOperacion, f.factorValor) && (
+                                <div><span className={`pill ${f.factorOrigen === "orden" ? "amber" : "gray"}`} title={f.factorOrigen === "orden" ? `Factor ajustado en la OT${f.factorMotivo ? `: ${f.factorMotivo}` : ""}` : "Factor del método"}>
+                                  factor {textoFactor(f.factorOperacion, f.factorValor)}
+                                </span></div>
+                              )}
                               {f.especOrigen === "orden" && (
                                 <div><span className="pill amber" title={`Especificación de la orden${f.especEditadaPorNombre ? ` · ${f.especEditadaPorNombre}` : ""}${f.especEditadaAt ? ` · ${fechaHora(f.especEditadaAt)}` : ""}. Catálogo: ${limiteTexto({ ...f, limiteInf: f.especCatalogo?.limiteInf ?? null, nominal: f.especCatalogo?.nominal ?? null, limiteSup: f.especCatalogo?.limiteSup ?? null } as Fila)}`}>de la orden</span></div>
                               )}
@@ -552,6 +580,7 @@ export default function CapturaOtPage() {
                                   )}
                                 </div>
                               ) : capturable && !f.porReplicas ? (
+                                <>
                                 <div style={{ display: "flex", gap: 6 }}>
                                   <input
                                     value={drafts[f.id] ?? ""}
@@ -564,6 +593,18 @@ export default function CapturaOtPage() {
                                   />
                                   <button className="btn sm" onClick={() => guardarValor(f)} disabled={busy}>{busy ? "…" : "Guardar"}</button>
                                 </div>
+                                {esCorreccion(f) && (drafts[f.id] ?? "").trim() !== valorBorrador(f) && (
+                                  <input
+                                    value={motivos[f.id] ?? ""}
+                                    onChange={(e) => setMotivos((m) => ({ ...m, [f.id]: e.target.value }))}
+                                    placeholder="Motivo de la corrección *"
+                                    aria-label={`Motivo de la corrección de ${f.analito}`}
+                                    maxLength={1000}
+                                    style={{ width: "100%", marginTop: 4, fontSize: 12 }}
+                                    disabled={busy}
+                                  />
+                                )}
+                                </>
                               ) : (
                                 <span style={{ fontFamily: "'JetBrains Mono', monospace" }} title={f.replicas.length ? `Réplicas: ${f.replicas.map((x) => num(x, 4)).join("; ")}` : undefined}>
                                   {valorTexto(f) || "—"}
@@ -627,6 +668,7 @@ export default function CapturaOtPage() {
                                   e={f}
                                   puedeCapturar={tiene("resultado.crear") && CAPTURABLES.includes(f.estado)}
                                   esJefatura={tiene("resultado.aprobar")}
+                                  puedeFactor={tiene("resultado.factor")}
                                   onGuardado={() => cargar()}
                                 />
                               </td>
