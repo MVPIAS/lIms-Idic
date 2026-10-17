@@ -118,6 +118,13 @@ la pantalla dice quién no firma y por qué. `GET /firmas-matriz/resolver?…&ot
 muestra la resolución para una OT interna. La OT **interlaboratorio** conserva el circuito
 completo (decisión pendiente de confirmar con el IDIC).
 
+**Quién puede marcar una OT como interna.** `origen_trabajo` solo se fija al crear la OT
+(`POST /ot`, permiso `ot.crear`: Administración, Comercial y Planificación; la aceptación de
+una cotización solo produce `COTIZACION` o `DISPOSICION`, y las internaciones
+`INTERNACION`). Después no se puede cambiar: `PATCH /ot/:id` no admite `origenTrabajo`
+(el esquema lo descarta). Ni el laboratorio ni quien emite el informe pueden convertir una
+OT de cliente en interna para saltarse la firma del Jefe de Departamento.
+
 ## 5. NCh 409 Of.84 · requisitos de agua retirados
 
 El laboratorio pidió eliminar los límites de agua potable de la NCh 409 Of.84 (versión
