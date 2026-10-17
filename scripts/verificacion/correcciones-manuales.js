@@ -330,8 +330,11 @@ async function main() {
 
   /* ---------------- 12 · Notas de crédito */
   await paso("12 · Finanzas guarda una nota de crédito; Abastecimiento no puede", async () => {
-    const f = lista(await ok("demo.finanzas", "GET", "/facturas?limit=1"))[0];
-    afirmar(f, "no hay facturas");
+    // Una factura con saldo para la nota de 100 (la última puede estar ya pagada:
+    // la nota de crédito valida el saldo desde 5d95239, p. ej. tras flujo-completo.js).
+    const fs_ = lista(await ok("demo.finanzas", "GET", "/facturas?limit=200"));
+    const f = fs_.find((x) => x.saldo === undefined || Number(x.saldo) >= 100);
+    afirmar(f, "no hay facturas con saldo para la nota de crédito");
     await exigir(403, "demo.abastecimiento", "POST", "/notas-credito", { facturaId: f.id, numero: `NCX-${sello}`, monto: 1 });
     const nc = await ok("demo.finanzas", "POST", "/notas-credito", { facturaId: f.id, numero: `NC-${sello}`, monto: 100, motivo: "Prueba" });
     afirmar(nc.id && nc.numero === `NC-${sello}`, JSON.stringify(nc).slice(0, 160));
