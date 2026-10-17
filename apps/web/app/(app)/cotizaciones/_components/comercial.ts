@@ -90,6 +90,8 @@ export const ORIGEN_LABEL: Record<string, string> = {
   DISPOSICION: "Disposición del Director",
   INTERLABORATORIO: "Interlaboratorio",
   OT_INTERNA: "OT interna",
+  PRODUCCION_NACIONAL: "Producción Nacional",
+  PROTOTIPO: "Prototipo",
 };
 
 export const hoyISO = () => {

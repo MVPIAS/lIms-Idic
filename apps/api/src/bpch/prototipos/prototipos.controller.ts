@@ -6,6 +6,7 @@ import { RequierePermiso } from "../../auth/permisos.decorator";
 import { DEV_TENANT } from "../../common/base-crud.service";
 import { AmbitoUnidad } from "../../rbac/ambito-unidad.guard";
 import { PrototiposService } from "./prototipos.service";
+import { ProduccionNacionalService } from "../produccion-nacional/produccion-nacional.service";
 
 const tenant = (req: any) => req?.user?.tenantId ?? DEV_TENANT;
 const usuario = (req: any): string | null => req?.user?.sub ?? null;
@@ -16,7 +17,10 @@ const usuario = (req: any): string | null => req?.user?.sub ?? null;
 @AmbitoUnidad("BPCH")
 @Controller("bpch/prototipos")
 export class PrototiposController {
-  constructor(private readonly svc: PrototiposService) {}
+  constructor(
+    private readonly svc: PrototiposService,
+    private readonly pn: ProduccionNacionalService,
+  ) {}
 
   @Get()
   @RequierePermiso("bpch.prototipo.ver")
@@ -37,6 +41,13 @@ export class PrototiposController {
   @ApiOperation({ summary: "Ingreso del prototipo (elemento nuevo, antecedentes técnicos, solicitud DGMN)" })
   crear(@Body() body: unknown, @Req() req: any) {
     return this.svc.crear(tenant(req), usuario(req), body);
+  }
+
+  @Post("fabricantes")
+  @RequierePermiso("bpch.prototipo.gestionar")
+  @ApiOperation({ summary: "Alta del fabricante del prototipo (se registra como cliente; mismas reglas que en Producción Nacional)" })
+  crearFabricante(@Body() body: unknown, @Req() req: any) {
+    return this.pn.crearFabricante(tenant(req), body);
   }
 
   @Patch(":id")
