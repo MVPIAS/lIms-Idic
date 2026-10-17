@@ -69,3 +69,4 @@ align_flujo_laboratorio.sql
 align_metrologia_flujo.sql
 align_correcciones_manuales.sql
 align_ajustes_1510.sql
+align_bpch_internacion_reinspeccion.sql

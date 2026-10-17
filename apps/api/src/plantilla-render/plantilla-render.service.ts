@@ -6,9 +6,12 @@ import {
   renderizar,
   tablaResultados,
   tablaMuestras,
+  tablaInspeccion,
   type FilaResultado,
   type FilaMuestra,
+  type FilaInspeccion,
 } from "./template.engine";
+import { condicionFinal, faltantesDocumentoFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
 import { fmtFecha, fmtFechaHora, fmtNum } from "./html.util";
 import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
@@ -88,7 +91,7 @@ export class PlantillaRenderService {
     });
     const resultados = await this.prisma.resultado.findMany({
       where: { otId, deletedAt: null },
-      include: { analito: true, muestra: true },
+      include: { analito: true, muestra: true, catAnalito: { select: { nombre: true } } },
       orderBy: { fecha: "asc" },
     });
 
@@ -104,7 +107,39 @@ export class PlantillaRenderService {
     const limitePorAnalito = new Map<string, (typeof limites)[number]>();
     for (const l of limites) if (!limitePorAnalito.has(l.analitoId)) limitePorAnalito.set(l.analitoId, l);
 
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito };
+    const bpch = await this.cabeceraBpch(otId, muestras);
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, bpch };
+  }
+
+  /**
+   * Cabecera de los documentos del Banco de Pruebas de Chile ({{bpch.*}}):
+   * vista v_bpch_cabecera_ot (internación, reinspección…) + condición final
+   * calculada con el veredicto de cada lote + Nº del Informe de Inspección.
+   * Si la OT no es de un proceso BPCH (o la base no tiene la vista), null.
+   */
+  private async cabeceraBpch(otId: string, muestras: { veredicto: string | null }[]) {
+    try {
+      const filas = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT * FROM v_bpch_cabecera_ot WHERE ot_id = $1::uuid LIMIT 1`,
+        otId,
+      );
+      if (!filas[0]) return null;
+      const informe = await this.prisma.certificado.findFirst({
+        where: { otId, tipoDocumento: "INFORME_INSPECCION", deletedAt: null, estado: { in: ["oficial", "emitido", "en_firma"] } },
+        orderBy: { createdAt: "desc" },
+        select: { numero: true, codigo: true },
+      });
+      const condicion = condicionFinal(muestras.map((m) => m.veredicto));
+      const datos: Record<string, string> = {};
+      for (const [k, v] of Object.entries(filas[0])) datos[k] = v === null || v === undefined ? "" : String(v);
+      return {
+        ...datos,
+        condicion_final: TEXTO_CONDICION[condicion],
+        informe_inspeccion: informe?.numero ?? informe?.codigo ?? "",
+      };
+    } catch {
+      return null; // BD sin align_bpch_internacion_reinspeccion.sql
+    }
   }
 
   /** Texto imprimible del límite de norma. Sin glifos fuera de WinAnsi (ver pdf.renderer). */
@@ -149,6 +184,8 @@ export class PlantillaRenderService {
       },
       fecha: fmtFecha(cert.fecha),
       fecha_hora: fmtFechaHora(cert.fecha),
+      // Documentos BPCH: cabecera del expediente (vacía en las demás OT).
+      bpch: ctx.bpch ?? {},
       anio: String(cert.fecha.getFullYear()),
       n_muestras: String(muestras.length),
       n_resultados: String(resultados.length),
@@ -168,16 +205,38 @@ export class PlantillaRenderService {
     return ctx.resultados.map((r) => {
       const lim = r.analitoId ? ctx.limitePorAnalito.get(r.analitoId) : undefined;
       return {
-        analito: r.analito?.nombre ?? "",
+        analito: r.analito?.nombre ?? r.catAnalito?.nombre ?? "",
         muestra: r.muestra?.codigo ?? r.muestra?.nombre ?? "",
         unidad: r.unidad ?? r.analito?.unidad ?? "",
         promedio: fmtNum(r.promedio === null ? "" : String(r.promedio)),
         desviacion: fmtNum(r.desviacion === null ? "" : String(r.desviacion)),
         cv: fmtNum(r.cv === null ? "" : String(r.cv), 2),
-        limite: this.textoLimite(lim),
+        limite: this.textoLimite(
+          lim ?? (r.limiteInf || r.limiteSup || r.nominal
+            ? { limiteInf: r.limiteInf || null, limiteSup: r.limiteSup || null, nominal: r.nominal || null, unidad: r.unidad ?? null }
+            : undefined),
+        ),
         // El veredicto se guarda como código (cumple / no_cumple / informativo):
         // en el informe va su texto legible.
         veredicto: etiquetaVeredicto(r.veredicto),
+      };
+    });
+  }
+
+  /** Filas de {{tabla_inspeccion}}: inspección, mínimo, máximo, resultado, unidad y condición. */
+  private filasInspeccion(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>): FilaInspeccion[] {
+    return ctx.resultados.map((r) => {
+      const lim = r.analitoId ? ctx.limitePorAnalito.get(r.analitoId) : undefined;
+      const num = (v: unknown) => (v === null || v === undefined || v === "" ? "" : fmtNum(String(v)));
+      const valor = r.promedio ?? r.valorNumerico ?? r.resultadoFinal;
+      return {
+        inspeccion: r.catAnalito?.nombre ?? r.analito?.nombre ?? "",
+        muestra: r.muestra?.codigo ?? "",
+        minimo: num(r.limiteInf ?? lim?.limiteInf),
+        maximo: num(r.limiteSup ?? lim?.limiteSup),
+        resultado: valor !== null && valor !== undefined ? num(valor) : r.valorTexto ?? "",
+        unidad: r.unidad ?? lim?.unidad ?? "",
+        condicion: etiquetaVeredicto(r.veredicto),
       };
     });
   }
@@ -230,6 +289,7 @@ export class PlantillaRenderService {
     const bloques = {
       tabla_resultados: tablaResultados(this.filasResultados(ctx)),
       tabla_muestras: tablaMuestras(this.filasMuestras(ctx)),
+      tabla_inspeccion: tablaInspeccion(this.filasInspeccion(ctx)),
     };
     const { html: cuerpoRenderizado, faltantes } = renderizar(cuerpo, datos, bloques);
 
@@ -449,6 +509,26 @@ export class PlantillaRenderService {
       const r = pasosDesdeMatriz(res);
       pasos = r.pasos;
       faltantes.push(...r.errores);
+    }
+
+    // 4b. Documento final de una inspección BPCH: el Certificado de Conformidad
+    // solo si la condición final es CUMPLE, el Informe de Incumplimiento solo
+    // si es NO CUMPLE, y ambos con el Informe de Inspección ya oficial.
+    if (tipoDocumento === "CERTIFICADO_CONFORMIDAD" || tipoDocumento === "INFORME_INCUMPLIMIENTO") {
+      const [lotes, informe] = await Promise.all([
+        this.prisma.muestra.findMany({ where: { otId, deletedAt: null }, select: { veredicto: true } }),
+        this.prisma.certificado.findFirst({
+          where: { otId, tipoDocumento: "INFORME_INSPECCION", deletedAt: null, estado: { in: ["oficial", "emitido"] } },
+          select: { id: true },
+        }),
+      ]);
+      faltantes.push(
+        ...faltantesDocumentoFinal({
+          tipoDocumento,
+          condicion: condicionFinal(lotes.map((m) => m.veredicto)),
+          informeInspeccionOficial: Boolean(informe),
+        }),
+      );
     }
 
     // 5. Documento vigente de la misma plantilla (salvo el que se reemplaza).

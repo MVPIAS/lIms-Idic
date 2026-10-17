@@ -1236,5 +1236,8 @@ export class RegistroMuestrasController {
     PuenteAnalisisService,
     RegistroMuestrasService,
   ],
+  // BPCH (internación / reinspección) registra cada lote como muestra de la OT
+  // con el mismo servicio que la pestaña «Muestras» del expediente.
+  exports: [RegistroMuestrasService],
 })
 export class FlujoRealModule {}
