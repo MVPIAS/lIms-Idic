@@ -511,6 +511,11 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
     case "div":
     case "#root":
     default: {
+      // Salto de página explícito (certificado de calibración de 2 páginas).
+      if (/\bsalto-pagina\b/.test(n.clase)) {
+        doc.addPage();
+        return;
+      }
       if (/\bmembrete\b/.test(n.clase)) return dibujarMembrete(doc, n);
       if (/\bfirmas\b/.test(n.clase)) return dibujarFirmas(doc, n);
       if (tieneBloques(n) || n.tag === "#root") {
