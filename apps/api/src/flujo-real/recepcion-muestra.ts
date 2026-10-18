@@ -94,3 +94,28 @@ export function enlaceOrdenesInternas(
     ordenes: ordenes.filter((o) => o.destinoLab === u).map((o) => ({ id: o.id, numero: o.numero, estado: o.estado })),
   }));
 }
+
+/** Quién y cuándo recibió la muestra y quién corrigió la recepción por última vez. */
+export interface SelloRecepcion {
+  recepcionadaAt: Date | null;
+  recepcionadaPor: string | null;
+  recepcionCorregidaAt: Date | null;
+  recepcionCorregidaPor: string | null;
+}
+
+/**
+ * Campos de quién/cuándo al guardar la recepción. La PRIMERA vez (registro o
+ * una muestra que aún no tenía recepción) queda quien la registra y ahora.
+ * Una CORRECCIÓN conserva quién y cuándo se recibió la muestra y anota aparte
+ * quién corrigió y cuándo (revisión r3, hallazgo 13).
+ */
+export function selloRecepcion(previo: SelloRecepcion | null, usuarioId: string | null, ahora: Date): SelloRecepcion {
+  if (!previo?.recepcionadaAt)
+    return { recepcionadaAt: ahora, recepcionadaPor: usuarioId, recepcionCorregidaAt: null, recepcionCorregidaPor: null };
+  return {
+    recepcionadaAt: previo.recepcionadaAt,
+    recepcionadaPor: previo.recepcionadaPor,
+    recepcionCorregidaAt: ahora,
+    recepcionCorregidaPor: usuarioId,
+  };
+}

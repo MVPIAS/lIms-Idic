@@ -16,6 +16,8 @@ import {
   UseGuards,
   Injectable,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
+import { variablesDeCaptura } from "./captura-estandar";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -506,7 +508,8 @@ export class ResultadoService extends BaseCrudService {
       where: { id },
       data: {
         ...calc,
-        variables: dto.variables && Object.keys(dto.variables).length ? dto.variables : undefined,
+        // Las variables de ESTA corrección o ninguna (no quedan las de la captura anterior).
+        variables: variablesDeCaptura(dto.variables) ?? Prisma.DbNull,
         analistaId: usuarioId ?? null,
         equipoId: dto.equipoId ?? null,
         estado: "capturado",

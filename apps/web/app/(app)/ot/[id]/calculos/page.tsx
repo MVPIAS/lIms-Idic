@@ -29,7 +29,7 @@ interface Ensayo {
   unidad: string | null; estado: string; veredicto: string | null; campos: { nombre: string; unidad: string | null }[];
   lecturas: Record<string, number>[]; replicas: number[]; variables: Record<string, number>;
   formula: string | null; formulaOrigen: "orden" | "catalogo" | "sin_formula"; formulaCatalogo: string | null; formulaAplicada: string | null;
-  factor: { valor: number; operacion: string; origen: string | null; descripcion: string | null; editadoPor: string | null; editadoAt: string | null; motivo: string | null } | null;
+  factor: { valor: number; operacion: string; origen: string | null; descripcion: string | null; editadoPor: string | null; editadoAt: string | null; motivo: string | null; aplicado?: boolean | null } | null;
   valorSinFactor: number | null; resultado: string | null; promedio: number | null; desviacion: number | null; cv: number | null;
   limiteInf: string | null; nominal: string | null; limiteSup: string | null; requisito: string | null;
   analista: string | null; revisor: string | null; aprobador: string | null; fecha: string | null; historial: Cambio[];
@@ -38,6 +38,8 @@ interface Planilla {
   ot: { id: string; codigo: string; estado: string };
   ensayos: Ensayo[];
   eliminados: { resultadoId: string; fecha: string; usuario: string | null; anterior: unknown; motivo: string | null }[];
+  /** El usuario trabaja en la OT por orden interna: solo ve los ensayos de su laboratorio. */
+  soloSuLaboratorio?: boolean;
 }
 
 const CAMPO: Record<string, string> = {
@@ -131,6 +133,7 @@ export default function PlanillaCalculosPage() {
         }
       />
       {error && <div className="alert warn" role="alert">{error}</div>}
+      {p?.soloSuLaboratorio && <div className="alert info">Su laboratorio trabaja en esta OT por orden interna: se muestran solo los ensayos de su laboratorio.</div>}
 
       {!p && !error && <div className="card"><table className="data"><tbody><SkeletonRows cols={6} /></tbody></table></div>}
 
@@ -184,7 +187,9 @@ export default function PlanillaCalculosPage() {
                             <td><span className="codigo">{e.muestra}</span></td>
                             <td>{e.ensayo}{e.metodo && <div style={{ fontSize: 11, color: "var(--muted)" }}>{e.metodo}{e.norma ? ` · ${e.norma}` : ""}</div>}</td>
                             <td><code style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{e.formulaAplicada ?? (e.formula ? "—" : "valor directo")}</code></td>
-                            <td>{e.factor ? <span className={`pill ${e.factor.origen === "orden" ? "amber" : "gray"}`} title={e.factor.origen === "orden" ? "Ajustado en esta OT" : "Del método"}>{e.factor.operacion === "dividir" ? "÷" : "×"} {n(e.factor.valor)}</span> : "—"}</td>
+                            <td>{e.factor ? (e.factor.aplicado === false
+                              ? <span className="pill gray" title="El valor se ingresó directo: el factor no se aplicó">no aplicado</span>
+                              : <span className={`pill ${e.factor.origen === "orden" ? "amber" : "gray"}`} title={e.factor.origen === "orden" ? "Ajustado en esta OT" : "Del método"}>{e.factor.operacion === "dividir" ? "÷" : "×"} {n(e.factor.valor)}</span>) : "—"}</td>
                             <td className="num" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{e.resultado != null ? valor(e.resultado) : "—"}{e.unidad ? ` ${e.unidad}` : ""}</td>
                             <td style={{ fontSize: 12 }}>{especTexto(e)}{e.requisito && <div style={{ color: "var(--muted)" }}>{e.requisito}</div>}</td>
                             <td><span className={`pill ${vd.pill}`}>{vd.texto}</span></td>
@@ -280,6 +285,7 @@ function DetalleEnsayo({ e }: { e: Ensayo }) {
                   {e.factor.operacion === "dividir" ? "÷" : "×"} {n(e.factor.valor)}{e.factor.descripcion ? ` (${e.factor.descripcion})` : ""}
                   {" · "}{e.factor.origen === "orden" ? `ajustado en la OT${e.factor.editadoPor ? ` por ${e.factor.editadoPor}` : ""}${e.factor.editadoAt ? ` el ${fechaHora(e.factor.editadoAt)}` : ""}` : "del método"}
                   {e.factor.motivo && <div style={{ color: "var(--muted)" }}>Motivo: {e.factor.motivo}</div>}
+                  {e.factor.aplicado === false && <div style={{ color: "var(--muted)" }}>No se aplicó: el valor se ingresó directo (sin réplicas ni lecturas).</div>}
                 </>
               ) : "sin factor"}
             </dd>

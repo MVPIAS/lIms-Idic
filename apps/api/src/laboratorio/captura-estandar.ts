@@ -202,3 +202,12 @@ export function calcularCaptura(espec: EspecCaptura, e: EntradaCaptura): Calculo
     veredicto: veredictoNumerico(valor!, inf, sup),
   };
 }
+
+/**
+ * Variables que se guardan con la captura: las de ESTA captura o ninguna. Una
+ * corrección sin variables las borra (no quedan las de una captura anterior en
+ * la planilla auditable; revisión r3, hallazgo 12). null = vaciar la columna.
+ */
+export function variablesDeCaptura(v: Record<string, number> | null | undefined): Record<string, number> | null {
+  return v && Object.keys(v).length ? v : null;
+}

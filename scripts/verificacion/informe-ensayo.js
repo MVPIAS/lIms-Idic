@@ -247,7 +247,16 @@ async function main() {
     const f = await ok(U.a1, "POST", `/informes/ot/${C.A.ot.id}/fotos`, formFoto(PNG_1x1, "ph.png", { pie: "Lectura del pH-metro", resultadoId: C.A.rPh.id }));
     C.fotoId = f.id;
     const fotos = await ok(U.jefe, "GET", `/informes/ot/${C.A.ot.id}/fotos`);
-    afirmar(fotos.length === 1 && fotos[0].enInforme && fotos[0].dataUrl.startsWith("data:image/png;base64,"), "la foto no quedó registrada");
+    afirmar(fotos.length === 1 && fotos[0].enInforme && fotos[0].mime === "image/png", "la foto no quedó registrada");
+    // Revisión r3 (hallazgo 18): el listado trae metadatos y la URL de cada foto, no su contenido.
+    afirmar(!("dataUrl" in fotos[0]) && !JSON.stringify(fotos).includes("base64"), "el listado de fotos trae el contenido de las imágenes");
+    afirmar(fotos[0].url === `informes/fotos/${C.fotoId}/imagen`, `url ${fotos[0].url}`);
+    const sJefe = await login(U.jefe);
+    const img = await fetch(`${BASE}/${fotos[0].url}`, { headers: { authorization: `Bearer ${sJefe.token}` } });
+    const bytes = Buffer.from(await img.arrayBuffer());
+    afirmar(img.status === 200 && img.headers.get("content-type") === "image/png" && bytes.equals(PNG_1x1), `imagen HTTP ${img.status} ${img.headers.get("content-type")}`);
+    await exigir(403, U.otroLab, "GET", `/${fotos[0].url}`);
+    await exigir(403, U.ventas, "GET", `/${fotos[0].url}`);
     // Una foto de esta OT no se puede ligar a un ensayo de otra OT.
     await exigir(400, U.a1, "PATCH", `/informes/fotos/${C.fotoId}`, { resultadoId: C.B.rPh.id });
     return `${fotos[0].bytes} bytes · ligada a ${fotos[0].ensayo}`;

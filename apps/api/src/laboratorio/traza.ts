@@ -21,15 +21,21 @@ type Tx = Prisma.TransactionClient;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Ejecuta `fn` en una transacción que deja quién, por qué y el origen para el historial. */
+/**
+ * Ejecuta `fn` en una transacción que deja quién, por qué y el origen para el
+ * historial. Si `prisma` ya es una transacción abierta (sin `$transaction`),
+ * se usa esa misma: el cambio queda dentro de la operación que la abrió.
+ */
 export async function conTraza<T>(prisma: PrismaClient | any, ctx: ContextoTraza, fn: (tx: Tx) => Promise<T>): Promise<T> {
-  return prisma.$transaction(async (tx: Tx) => {
+  const conContexto = async (tx: Tx) => {
     const usuario = ctx.usuarioId && UUID.test(ctx.usuarioId) ? ctx.usuarioId : "";
     await tx.$queryRaw`SELECT set_config('lims.usuario_id', ${usuario}, true),
                               set_config('lims.motivo', ${(ctx.motivo ?? "").slice(0, 2000)}, true),
                               set_config('lims.origen', ${ctx.origen.slice(0, 40)}, true)`;
     return fn(tx);
-  });
+  };
+  if (typeof prisma?.$transaction !== "function") return conContexto(prisma as Tx);
+  return prisma.$transaction(conContexto);
 }
 
 /**

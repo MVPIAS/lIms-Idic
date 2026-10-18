@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import {
   BadRequestException,
   Body,
@@ -31,11 +32,12 @@ import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
 import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laboratorio.module";
 import { traducirFormula } from "../laboratorio/formula-legado";
 import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
-import { calcularCaptura, CapturaError } from "../laboratorio/captura-estandar";
+import { calcularCaptura, CapturaError, variablesDeCaptura } from "../laboratorio/captura-estandar";
 import { veredictoNumerico } from "../laboratorio/veredicto";
 import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
-import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, type RecepcionNormalizada } from "./recepcion-muestra";
+import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion, type RecepcionNormalizada } from "./recepcion-muestra";
 import { aplicarFactor, erroresFactor, expresionConFactor, factorDe } from "../laboratorio/factor";
+import { planAjusteFactor } from "../laboratorio/ajuste-factor";
 import { conTraza, exigeMotivoCorreccion, teniaValor } from "../laboratorio/traza";
 
 /**
@@ -62,6 +64,9 @@ import { conTraza, exigeMotivoCorreccion, teniaValor } from "../laboratorio/traz
  *   · certificado.emitir                 → decisión/atestación de conformidad.
  * =============================================================================
  */
+
+/** Cliente con el que se escribe: el servicio o la transacción en curso. */
+type Db = PrismaService | Prisma.TransactionClient;
 
 /** Permisos RBAC reales usados por este módulo. */
 const PERM = {
@@ -622,8 +627,8 @@ export class PuenteAnalisisService {
     return ot;
   }
 
-  private async muestraDeOt(otId: string, muestraId: string, tenantId: string) {
-    const muestra = await this.prisma.muestra.findFirst({
+  private async muestraDeOt(otId: string, muestraId: string, tenantId: string, db: Db = this.prisma) {
+    const muestra = await db.muestra.findFirst({
       where: { id: muestraId, tenantId, deletedAt: null },
     });
     if (!muestra) throw new NotFoundException(`Muestra ${muestraId} no encontrada`);
@@ -644,17 +649,19 @@ export class PuenteAnalisisService {
     body: z.infer<typeof GenerarAnalisisBody>,
     tenantId: string,
     req?: any,
+    /** Transacción en curso (registro de muestras o de lotes BPCH): todo o nada. */
+    db: Db = this.prisma,
   ) {
     // La OT debe existir en el tenant y estar en el alcance del usuario.
     const ot = await this.otEnAlcance(otId, tenantId, req);
-    const muestra = await this.muestraDeOt(otId, body.muestraId, tenantId);
+    const muestra = await this.muestraDeOt(otId, body.muestraId, tenantId, db);
 
     // Una OT que aún no tiene laboratorio (p. ej. creada antes de esta
     // versión) lo toma de los métodos pedidos, si todos apuntan al mismo.
     if (!ot.unidadPrincipal) {
       const d = await this.labs.deducir(tenantId, { catMetodoIds: body.metodoIds });
       if (d.unidad)
-        await this.labs.fijar(this.prisma, {
+        await this.labs.fijar(db as PrismaService, {
           tenantId,
           otId,
           unidad: d.unidad,
@@ -664,7 +671,7 @@ export class PuenteAnalisisService {
     }
 
     // Analitos de los métodos pedidos (validando que son del tenant).
-    const analitos = await this.prisma.catAnalito.findMany({
+    const analitos = await db.catAnalito.findMany({
       where: {
         tenantId,
         deletedAt: null,
@@ -674,14 +681,14 @@ export class PuenteAnalisisService {
     });
 
     // Resultados del puente ya existentes para esta muestra (idempotencia).
-    const yaExisten = await this.prisma.resultado.findMany({
+    const yaExisten = await db.resultado.findMany({
       where: { muestraId: muestra.id, deletedAt: null, catAnalitoId: { not: null } },
       select: { catAnalitoId: true },
     });
     const existentes = new Set(yaExisten.map((r) => r.catAnalitoId));
 
     // Factor por defecto de cada método: se copia al ensayo (ajustable en la OT).
-    const metodosFactor = await this.prisma.catMetodo.findMany({
+    const metodosFactor = await db.catMetodo.findMany({
       where: { id: { in: body.metodoIds }, tenantId },
       select: { id: true, factorValor: true, factorOperacion: true, factorDescripcion: true },
     });
@@ -697,10 +704,10 @@ export class PuenteAnalisisService {
       // Especificación: preferimos la 'estandar'; si no, cualquiera; si no hay,
       // caemos a los rangos del propio analito (cat_analito.rango_*).
       const espec =
-        (await this.prisma.catEspecificacion.findFirst({
+        (await db.catEspecificacion.findFirst({
           where: { analitoId: a.id, tenantId, deletedAt: null, activo: true, ambito: "estandar" },
         })) ??
-        (await this.prisma.catEspecificacion.findFirst({
+        (await db.catEspecificacion.findFirst({
           where: { analitoId: a.id, tenantId, deletedAt: null, activo: true },
           orderBy: { createdAt: "asc" },
         }));
@@ -723,7 +730,7 @@ export class PuenteAnalisisService {
       const trad = traducirFormula(a.formula);
       const factor = factorMetodo.get(a.metodoId) ?? null;
 
-      await conTraza(this.prisma, { usuarioId: req?.user?.sub, origen: "registro" }, (tx) => tx.resultado.create({
+      await conTraza(db, { usuarioId: req?.user?.sub, origen: "registro" }, (tx) => tx.resultado.create({
         data: {
           ...(factor
             ? { factorValor: factor.valor, factorOperacion: factor.operacion, factorDescripcion: factor.descripcion ?? null, factorOrigen: "metodo" }
@@ -755,7 +762,7 @@ export class PuenteAnalisisService {
       creados++;
     }
 
-    await recalcularVeredictoMuestra(this.prisma, muestra.id);
+    await recalcularVeredictoMuestra(db as PrismaService, muestra.id);
     return {
       otId,
       muestraId: muestra.id,
@@ -840,7 +847,8 @@ export class PuenteAnalisisService {
       where: { id },
       data: {
         valorSinFactor: calc.valorSinFactor,
-        variables: entrada.variables && Object.keys(entrada.variables).length ? entrada.variables : undefined,
+        // Lo de ESTA captura: variables y lecturas que no vengan se vacían (no quedan las de una captura anterior).
+        variables: variablesDeCaptura(entrada.variables) ?? Prisma.DbNull,
         valorNumerico: calc.valorNumerico,
         valorTexto: calc.valorTexto,
         replicas: calc.replicas,
@@ -849,7 +857,7 @@ export class PuenteAnalisisService {
         cv: calc.cv,
         resultadoFinal: calc.resultadoFinal,
         formulaAplicada: calc.formulaAplicada,
-        lecturas: calc.lecturas ?? undefined,
+        lecturas: calc.lecturas ?? Prisma.DbNull,
         observacion: calc.observacion,
         veredicto: calc.veredicto,
         tipoDato,
@@ -893,6 +901,10 @@ export class PuenteAnalisisService {
       for (const r of objetivo) {
         const b = motivoNoCapturable(r.estado);
         if (b) { omitidos.push({ id: r.id, motivo: b }); continue; }
+        // Nunca queda un factor que no se aplicó: se recalcula desde las lecturas o
+        // réplicas guardadas; un valor ingresado directo no lleva factor (omitido).
+        const plan = planAjusteFactor(r, nuevo);
+        if (plan.accion === "omitir") { omitidos.push({ id: r.id, motivo: plan.motivo }); continue; }
         const data: Record<string, unknown> = {
           factorValor: nuevo?.valor ?? null,
           factorOperacion: nuevo?.operacion ?? null,
@@ -901,21 +913,8 @@ export class PuenteAnalisisService {
           factorEditadoPor: req?.user?.sub ?? null,
           factorEditadoAt: ahora,
           factorMotivo: body.motivo,
+          ...(plan.accion === "recalcular" ? plan.datos : {}),
         };
-        // Recalcula el valor ya capturado desde el valor sin factor.
-        if (r.valorSinFactor != null && (r.tipoDato ?? "numerico") !== "atributo") {
-          const base = Number(r.valorSinFactor);
-          const valor = aplicarFactor(base, nuevo);
-          const n = (v?: string | null) => (v != null && /^\s*[+-]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(v) ? Number(v.replace(",", ".")) : null);
-          const expr = r.formula ? traducirFormula(r.formula).expr : null;
-          Object.assign(data, {
-            valorNumerico: valor,
-            valorTexto: String(valor),
-            resultadoFinal: valor,
-            formulaAplicada: expr || nuevo ? expresionConFactor(expr ?? "PROMEDIO(RN)", nuevo) : null,
-            veredicto: veredictoNumerico(valor, n(r.limiteInf), n(r.limiteSup)),
-          });
-        }
         await tx.resultado.update({ where: { id: r.id }, data });
         hechos.push(r.id);
       }
@@ -1236,7 +1235,16 @@ export class RegistroMuestrasService {
     return { n, errores };
   }
 
-  private datosRecepcion(n: RecepcionNormalizada, usuarioId: string | null) {
+  /**
+   * Campos de la recepción. `previo` = quién/cuándo ya registrado: si la muestra
+   * ya tenía recepción, se conserva y la corrección queda aparte
+   * (recepcion_corregida_por/_at); ver selloRecepcion.
+   */
+  private datosRecepcion(
+    n: RecepcionNormalizada,
+    usuarioId: string | null,
+    previo: { recepcionadaAt: Date | null; recepcionadaPor: string | null; recepcionCorregidaAt: Date | null; recepcionCorregidaPor: string | null } | null = null,
+  ) {
     return {
       tomaMuestra: n.tomaMuestra,
       condicionRecepcion: n.condicionRecepcion,
@@ -1246,8 +1254,7 @@ export class RegistroMuestrasService {
       requiereOtrosLabs: n.requiereOtrosLabs,
       otrosLabs: n.otrosLabs,
       otrosLabsDetalle: n.otrosLabsDetalle,
-      recepcionadaAt: new Date(),
-      recepcionadaPor: usuarioId,
+      ...selloRecepcion(previo, usuarioId, new Date()),
     };
   }
 
@@ -1281,11 +1288,13 @@ export class RegistroMuestrasService {
               m.identificacion_cliente AS "identificacionCliente", m.requiere_otros_labs AS "requiereOtrosLabs",
               m.otros_labs AS "otrosLabs", m.otros_labs_detalle AS "otrosLabsDetalle",
               m.recepcionada_at AS "recepcionadaAt", u.nombre_completo AS "recepcionadaPorNombre",
+              m.recepcion_corregida_at AS "recepcionCorregidaAt", uc.nombre_completo AS "recepcionCorregidaPorNombre",
               (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL)::int AS ensayos,
               COALESCE((SELECT array_agg(DISTINCT cm.codigo) FROM resultado r JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
                          WHERE r.muestra_id = m.id AND r.deleted_at IS NULL), '{}') AS metodos
          FROM muestra m
          LEFT JOIN usuario u ON u.id = m.recepcionada_por
+         LEFT JOIN usuario uc ON uc.id = m.recepcion_corregida_por
         WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL
         ORDER BY m.created_at, m.codigo`,
       otId,
@@ -1349,8 +1358,17 @@ export class RegistroMuestrasService {
     };
   }
 
-  /** Crea las muestras y genera sus ensayos por analizar (puente catálogo → resultado). */
-  async registrar(otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any) {
+  /**
+   * Crea las muestras y genera sus ensayos por analizar (puente catálogo →
+   * resultado). Todo o nada: dentro de `db` si viene de otra operación (lotes
+   * BPCH) o en una transacción propia; si una muestra falla, no queda ninguna.
+   */
+  async registrar(otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any, db?: Db) {
+    if (db) return this.registrarEn(db, otId, body, tenantId, req);
+    return this.prisma.$transaction((tx) => this.registrarEn(tx, otId, body, tenantId, req), { maxWait: 15_000, timeout: 120_000 });
+  }
+
+  private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any) {
     const ot = await this.otEnAlcance(otId, tenantId, req);
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
@@ -1371,7 +1389,7 @@ export class RegistroMuestrasService {
     }
     if (errores.length) throw new BadRequestException(errores.join(" "));
 
-    const existentes = await this.prisma.muestra.findMany({
+    const existentes = await db.muestra.findMany({
       where: { tenantId, codigo: { startsWith: ot.codigo } },
       select: { codigo: true },
     });
@@ -1380,7 +1398,7 @@ export class RegistroMuestrasService {
     const creadas: { id: string; codigo: string; nombre: string; ensayos: number; metodos: string[] }[] = [];
     for (let i = 0; i < body.muestras.length; i++) {
       const m = body.muestras[i];
-      const muestra = await this.prisma.muestra.create({
+      const muestra = await db.muestra.create({
         data: {
           tenantId,
           otId,
@@ -1392,7 +1410,7 @@ export class RegistroMuestrasService {
           ...(recepciones[i] ? this.datosRecepcion(recepciones[i]!, req?.user?.sub ?? null) : {}),
         },
       });
-      const g = await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req);
+      const g = await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db);
       creadas.push({
         id: muestra.id,
         codigo: muestra.codigo,
@@ -1404,9 +1422,9 @@ export class RegistroMuestrasService {
 
     // La OT recibe sus muestras: si aún no tenía fecha de recepción, es hoy.
     if (!ot.fechaRecepcion)
-      await this.prisma.ordenTrabajo.update({ where: { id: otId }, data: { fechaRecepcion: new Date() } });
+      await db.ordenTrabajo.update({ where: { id: otId }, data: { fechaRecepcion: new Date() } });
 
-    await this.prisma.$executeRawUnsafe(
+    await db.$executeRawUnsafe(
       `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
        VALUES ($1::uuid, $2::uuid, 'registro_muestras', $3::jsonb, $4::uuid)`,
       tenantId,
@@ -1431,6 +1449,8 @@ export class RegistroMuestrasService {
     const opciones = (await this.opcionesToma(tenantId)).map((o) => o.codigo);
     const { n, errores } = await this.validarRecepcion(tenantId, body, ot.unidadPrincipal, "", opciones);
     if (errores.length) throw new BadRequestException(errores.join(" "));
+    // El historial guarda la recepción anterior COMPLETA, con quién y cuándo se
+    // recibió y la corrección previa si la hubo.
     const anterior = {
       tomaMuestra: m.tomaMuestra,
       condicionRecepcion: m.condicionRecepcion,
@@ -1440,19 +1460,24 @@ export class RegistroMuestrasService {
       requiereOtrosLabs: m.requiereOtrosLabs,
       otrosLabs: m.otrosLabs,
       otrosLabsDetalle: m.otrosLabsDetalle,
+      recepcionadaAt: m.recepcionadaAt,
+      recepcionadaPor: m.recepcionadaPor,
+      recepcionCorregidaAt: m.recepcionCorregidaAt,
+      recepcionCorregidaPor: m.recepcionCorregidaPor,
     };
-    const actualizada = await this.prisma.muestra.update({
-      where: { id: muestraId },
-      data: this.datosRecepcion(n, req?.user?.sub ?? null),
+    const datos = this.datosRecepcion(n, req?.user?.sub ?? null, m);
+    const actualizada = await this.prisma.$transaction(async (tx) => {
+      const u = await tx.muestra.update({ where: { id: muestraId }, data: datos });
+      await tx.$executeRawUnsafe(
+        `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
+         VALUES ($1::uuid, $2::uuid, 'recepcion_muestra', $3::jsonb, $4::uuid)`,
+        tenantId,
+        ot.id,
+        JSON.stringify({ muestra: m.codigo, anterior, nuevo: { ...n, ...datos } }),
+        req?.user?.sub ?? null,
+      );
+      return u;
     });
-    await this.prisma.$executeRawUnsafe(
-      `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
-       VALUES ($1::uuid, $2::uuid, 'recepcion_muestra', $3::jsonb, $4::uuid)`,
-      tenantId,
-      ot.id,
-      JSON.stringify({ muestra: m.codigo, anterior, nuevo: { ...n } }),
-      req?.user?.sub ?? null,
-    );
     return actualizada;
   }
 }

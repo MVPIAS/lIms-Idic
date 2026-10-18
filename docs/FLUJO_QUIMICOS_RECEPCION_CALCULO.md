@@ -29,18 +29,27 @@ Expediente de la OT › pestaña «Muestras» › «Registrar muestras recibidas
   identificación van por muestra.
 - `PATCH /flujo/muestras/:id/recepcion` (`muestra.crear` + alcance de la OT; no en OT cerrada o
   anulada) completa o corrige la recepción. Queda en el historial de la OT (`recepcion_muestra`)
-  con lo anterior y lo nuevo, y quién y cuándo (`recepcionada_por`, `recepcionada_at`).
+  con lo anterior COMPLETO (incluido quién y cuándo recibió) y lo nuevo. Corregir **no cambia**
+  quién y cuándo se recibió la muestra (`recepcionada_por`, `recepcionada_at`): se anota aparte
+  quién corrigió y cuándo (`recepcion_corregida_por`, `recepcion_corregida_at`,
+  `align_revision_r3.sql`). Si la muestra aún no tenía recepción, completarla es la recepción.
+- El registro de varias muestras es **todo o nada** (una transacción): si una falla, no queda
+  ninguna creada.
 - Las órdenes internas apuntan al laboratorio del catálogo (`cat_familia`); se corresponden con
   la unidad del organigrama por su código CODSUCDEL.
 
 ## 2. Planilla de registros y cálculos (auditable)
 
 `/ot/[id]/calculos` (enlace en «Resultados» del expediente y en «Captura y revisión por OT»).
-Solo lectura. `GET /laboratorio/ot/:id/planilla-calculos` (`resultado.ver` + alcance de la OT);
+Solo lectura. `GET /laboratorio/ot/:id/planilla-calculos` (`resultado.ver` + alcance de la OT;
+un laboratorio que trabaja en la OT por orden interna u «otros laboratorios» la abre con **solo
+sus ensayos** —`soloSuLaboratorio: true`—; el ensayo es del laboratorio de su método en el
+catálogo, o del responsable si no se sabe);
 `?formato=csv` descarga para Excel (punto y coma, coma decimal, BOM UTF-8; las celdas que Excel
 interpretaría como fórmula se neutralizan).
 
-Por ensayo: lecturas con los campos del método (C1..Cn y su nombre), réplicas, variables,
+Por ensayo: lecturas con los campos del método (C1..Cn y su nombre), réplicas, variables (las de
+la última captura: una corrección sin variables las vacía),
 fórmula y su origen (de la orden o del catálogo, y la del catálogo si se cambió), factor (del
 método o ajustado en la OT, con quién, cuándo y motivo), fórmula aplicada, valor sin factor,
 resultado, promedio/DE/CV, especificación, quién capturó, revisó y aprobó, y el historial.
@@ -76,8 +85,14 @@ Reglas nuevas de motivo:
   corregir. Lo revisado o aprobado no se toca (409).
 - Se aplica al valor **calculado** (lecturas con fórmula o réplicas): `formula_aplicada` queda
   como «(C1 / C2) / 10» o «PROMEDIO(RN) * 2». Un valor final ingresado directamente no se toca.
-  Si el factor cambia después de capturar, el valor se recalcula desde `valor_sin_factor` y se
-  vuelve a evaluar el veredicto (y el de la muestra).
+- Si el factor cambia después de capturar (`laboratorio/ajuste-factor.ts`): se **recalcula** desde
+  las lecturas o réplicas guardadas (o desde `valor_sin_factor`) y se vuelve a evaluar el
+  veredicto. Si el valor se ingresó directo (o es una captura antigua sin esos datos), el factor
+  **no se aplica**: el ensayo se devuelve en `omitidos` con el motivo y su resultado y factor
+  quedan como estaban. Nunca se muestra un factor que no se aplicó: la planilla marca
+  «no aplicado» (`factor.aplicado = false`) si hay valor directo con factor del método.
+- En el catálogo, factor y operación van juntos (ambos o ninguno): uno solo es 400 con el
+  motivo.
 - **Regla parametrizable**: por defecto `resultado.factor` lo tienen las jefaturas (SUPERADMIN,
   DIRECTOR, SUBDIRECTOR, JEFE_DEPTO, JEFE_SECCION, JEFE_LAB). Si el IDIC decide que también lo
   ajuste el analista, basta con asignar el permiso al rol ANALISTA en Administración › Roles.
@@ -94,16 +109,23 @@ recepción.
   (la planilla real no llegó; las siglas HRSS/HRST/HRSA/HRSM/HRSJLAB/HRSJDEP del LIMS antiguo no
   tienen significado ni tarifa documentados): se escriben en cada línea.
 - Sugerencias: equipos usados en los ensayos de la OT y consumos del kardex sobre sus muestras.
-- Comparación con la estimación de la cotización: costo directo del costeo consolidado, si no la
-  estimación de los laboratorios (`solicitud_costeo`), si no el costo estimado de la OT; horas
-  hombre estimadas; precio cotizado por bloque (referencia) y neto cotizado − costo real.
+- Comparación con la estimación (`estimacion.alcance`):
+  - OT de **un solo laboratorio** («ot»): costo directo del costeo consolidado, si no la estimación
+    de los laboratorios (`solicitud_costeo`), si no el costo estimado de la OT; horas hombre
+    estimadas; precio cotizado por bloque (referencia) y neto cotizado − costo real.
+  - OT con **varios laboratorios**: la planilla de cada uno se compara con **su** parte, sus
+    solicitudes de costeo (`solicitud_costeo.familia_id` → unidad por CODSUCDEL) («laboratorio»);
+    sin ellas no se compara con el total y se avisa («sin_estimacion_laboratorio»). El neto y el
+    precio por bloque son de la OT completa: no se usan por laboratorio.
 - `GET /laboratorio/ot/:id/costos-reales?unidadId=` (**`costo_real.ver`**: SUPERADMIN, ADMIN,
   DIRECTOR, SUBDIRECTOR, JEFE_DEPTO, JEFE_LAB, PLANIFICACION, FINANZAS) ·
   `PUT …` guarda el borrador · `POST …/cerrar` · `POST …/reabrir { motivo }`
   (**`costo_real.gestionar`**: JEFE_LAB y SUPERADMIN). Todas exigen el alcance del laboratorio.
-- Cerrar exige al menos un costo, horas hombre y, en el laboratorio responsable, todos los
-  ensayos de la OT aprobados. Cerrada no se edita; reabrir exige motivo. Cierre y reapertura
-  quedan en el historial de la OT (`costos_reales`).
+- Cerrar exige al menos un costo, horas hombre y todos los ensayos **de ese laboratorio**
+  aprobados (los suyos, no los de los demás: cada uno cierra al terminar su parte). Cerrada no se
+  edita; reabrir exige motivo. Cierre y reapertura quedan en el historial de la OT
+  (`costos_reales`), en una transacción con la planilla bloqueada: un doble clic da un cierre y
+  un 409, nunca dos eventos.
 - El Jefe de Sección no participa en la planilla (pedido del Depto. Químico: sacarlo de
   revisión, informe y planilla de costos).
 

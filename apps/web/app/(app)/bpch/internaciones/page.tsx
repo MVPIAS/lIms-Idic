@@ -12,7 +12,7 @@ import { PageHeader, EmptyState, SkeletonRows } from "@/components/ui/PageHeader
 import RequierePermiso from "@/components/RequierePermiso";
 import { usePermisos } from "@/lib/permisos";
 import { fecha } from "@/lib/format";
-import { DOC_ADM, ESTADO_INTERNACION, pedir } from "../_components/bpch";
+import { AVANCE_INTERNACION, DOC_ADM, ESTADO_INTERNACION, pedir } from "../_components/bpch";
 
 export default function InternacionesBpchPage() {
   return (
@@ -86,7 +86,7 @@ function Lista() {
                 <td>{f.empresa}<small style={{ display: "block", color: "var(--muted)" }}>{f.rut}</small></td>
                 <td>{f.elementos ?? "—"}</td>
                 <td title={f.unidadNombre}>{f.unidadCodigo}</td>
-                <td><span className={`pill ${ESTADO_INTERNACION[f.estado]?.c ?? "gray"}`}>{ESTADO_INTERNACION[f.estado]?.l ?? f.estado}</span></td>
+                <td><span className={`pill ${AVANCE_INTERNACION[f.avance ?? f.estado]?.c ?? "gray"}`}>{f.avanceTexto ?? AVANCE_INTERNACION[f.avance ?? f.estado]?.l ?? f.estado}</span></td>
                 <td>{f.otCodigo ? <>{f.otCodigo}<small style={{ display: "block", color: "var(--muted)" }}>{f.otEstado}</small></> : "—"}</td>
                 <td>{f.sujetaTasa ? (f.remitidaAt ? <span className="pill green">Remitida</span> : <small>{DOC_ADM[f.docAdmEstado] ?? f.docAdmEstado}</small>) : <small style={{ color: "var(--muted)" }}>Sin tasa</small>}</td>
               </tr>

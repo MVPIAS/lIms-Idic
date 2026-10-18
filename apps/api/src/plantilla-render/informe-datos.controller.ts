@@ -27,11 +27,13 @@ import {
   Post,
   Put,
   Req,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
+import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiConsumes, ApiTags } from "@nestjs/swagger";
 import { createHash } from "crypto";
@@ -130,10 +132,16 @@ export class InformeDatosService {
 
   /* ------------------------------------------------------------- fotos --- */
 
+  /**
+   * Listado de fotos de la OT: solo metadatos y la URL de cada imagen (no el
+   * contenido): 60 fotos de 2 MB serían ~160 MB de JSON en cada carga de la
+   * pantalla de informes (revisión r3, hallazgo 18). La imagen se pide aparte
+   * con GET /informes/fotos/:id/imagen, con las mismas reglas de acceso.
+   */
   async fotos(otId: string, req: any) {
     await this.ot(otId, req);
     const filas = await this.prisma.$queryRaw<any[]>`
-      SELECT f.id, f.nombre, f.mime, f.bytes, f.datos, f.pie, f.en_informe, f.orden, f.created_at,
+      SELECT f.id, f.nombre, f.mime, f.bytes, f.hash_sha256, f.pie, f.en_informe, f.orden, f.created_at,
              f.muestra_id, m.codigo AS muestra_codigo, f.resultado_id,
              COALESCE(ca.nombre, a.nombre) AS ensayo, u.nombre_completo AS subida_por
         FROM ot_foto f
@@ -157,8 +165,19 @@ export class InformeDatosService {
       resultadoId: f.resultado_id,
       ensayo: f.ensayo,
       subidaPor: f.subida_por,
-      dataUrl: `data:${f.mime};base64,${f.datos}`,
+      mime: f.mime,
+      hash: f.hash_sha256,
+      url: `informes/fotos/${f.id}/imagen`,
     }));
+  }
+
+  /** Imagen de una foto (bytes), con el alcance de su OT. */
+  async imagen(id: string, req: any): Promise<{ mime: string; datos: Buffer; nombre: string; hash: string | null }> {
+    await this.fotoDelTenant(id, req);
+    const [f] = await this.prisma.$queryRaw<{ mime: string; datos: string; nombre: string | null; hash_sha256: string | null }[]>`
+      SELECT mime, datos, nombre, hash_sha256 FROM ot_foto WHERE id = ${id}::uuid AND deleted_at IS NULL`;
+    if (!f) throw new NotFoundException(`Foto ${id} no encontrada`);
+    return { mime: f.mime, datos: Buffer.from(f.datos, "base64"), nombre: f.nombre ?? "foto", hash: f.hash_sha256 };
   }
 
   async subirFoto(otId: string, archivo: ArchivoSubido | undefined, cuerpo: unknown, req: any) {
@@ -309,6 +328,20 @@ export class InformeDatosController {
   fotos(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
     exigirAlguno(req, ["resultado.ver", "certificado.emitir"]);
     return this.svc.fotos(otId, req);
+  }
+
+  /** La imagen de una foto (PNG o JPEG), para mostrarla en la pantalla de informes. */
+  @Get("fotos/:id/imagen")
+  async imagen(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
+    exigirAlguno(req, ["resultado.ver", "certificado.emitir"]);
+    const f = await this.svc.imagen(id, req);
+    // Solo PNG o JPEG (validado por sus bytes al subirla); nunca se sirve otro tipo.
+    res.setHeader("Content-Type", f.mime === "image/png" ? "image/png" : "image/jpeg");
+    res.setHeader("Content-Length", String(f.datos.length));
+    res.setHeader("Cache-Control", "private, max-age=600");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    if (f.hash) res.setHeader("ETag", `"${f.hash}"`);
+    res.end(f.datos);
   }
 
   /** multipart/form-data: `archivo` (PNG o JPEG) + pie, muestraId, resultadoId, enInforme. */

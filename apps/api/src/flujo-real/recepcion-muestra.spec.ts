@@ -1,4 +1,4 @@
-import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta } from "./recepcion-muestra";
+import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion } from "./recepcion-muestra";
 
 const OPC = ["terreno_laboratorio", "entregada_cliente", "seccion_muestreo"];
 const LQC = "11111111-1111-1111-1111-111111111111";
@@ -46,5 +46,25 @@ describe("recepción de la muestra", () => {
       { unidadId: LCC, ordenes: [{ id: "o1", numero: "OI-2026-0001", estado: "abierta" }] },
       { unidadId: LQC, ordenes: [] },
     ]);
+  });
+});
+
+describe("quién y cuándo de la recepción (revisión r3, hallazgo 13)", () => {
+  const lunes = new Date("2026-10-12T10:00:00Z");
+  const miercoles = new Date("2026-10-14T15:00:00Z");
+  it("la primera recepción deja a quien la registra y la hora", () => {
+    expect(selloRecepcion(null, "recepcion", lunes)).toEqual({ recepcionadaAt: lunes, recepcionadaPor: "recepcion", recepcionCorregidaAt: null, recepcionCorregidaPor: null });
+  });
+  it("corregir el sello el miércoles no cambia quién ni cuándo se recibió: anota la corrección aparte", () => {
+    const previo = { recepcionadaAt: lunes, recepcionadaPor: "recepcion", recepcionCorregidaAt: null, recepcionCorregidaPor: null };
+    const s = selloRecepcion(previo, "jefe", miercoles);
+    expect(s.recepcionadaAt).toBe(lunes);
+    expect(s.recepcionadaPor).toBe("recepcion");
+    expect(s.recepcionCorregidaAt).toBe(miercoles);
+    expect(s.recepcionCorregidaPor).toBe("jefe");
+  });
+  it("una muestra registrada sin recepción la completa como primera recepción", () => {
+    const s = selloRecepcion({ recepcionadaAt: null, recepcionadaPor: null, recepcionCorregidaAt: null, recepcionCorregidaPor: null }, "jefe", miercoles);
+    expect([s.recepcionadaPor, s.recepcionCorregidaPor]).toEqual(["jefe", null]);
   });
 });

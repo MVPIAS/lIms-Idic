@@ -96,3 +96,15 @@ export async function enviarInforme(ruta: string, metodo: "PUT" | "POST", cuerpo
   if (!r.ok) throw new Error(Array.isArray(j.message) ? j.message.join(", ") : j.message ?? `Error ${r.status}`);
   return j;
 }
+
+/**
+ * Imagen protegida (p. ej. una foto de la OT: GET informes/fotos/:id/imagen)
+ * pedida con la sesión. Devuelve una URL local (blob:) que quien la usa debe
+ * liberar con URL.revokeObjectURL.
+ */
+export async function imagenConSesion(ruta: string): Promise<string> {
+  const token = typeof window === "undefined" ? null : localStorage.getItem("lims_token");
+  const r = await fetch(`${API}/${ruta.replace(/^\/+/, "")}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!r.ok) throw new Error(`Error ${r.status}`);
+  return URL.createObjectURL(await r.blob());
+}

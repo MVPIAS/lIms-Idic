@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { toast, confirmar } from "@/components/ui/feedback";
-import { enviarInforme } from "@/lib/informes";
+import { enviarInforme, imagenConSesion } from "@/lib/informes";
 
 const LADO_MAX = 1600;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -27,7 +27,9 @@ type Foto = {
   muestraCodigo: string | null;
   ensayo: string | null;
   subidaPor: string | null;
-  dataUrl: string;
+  mime: string;
+  /** Ruta de la imagen en la API (GET con la sesión): el listado no trae el contenido. */
+  url: string;
 };
 export type EnsayoOt = { resultadoId: string; muestraCodigo: string; ensayo: string | null; punto: string | null };
 
@@ -53,6 +55,62 @@ async function subir(otId: string, blob: Blob, nombre: string, campos: Record<st
   form.append("archivo", blob, nombre);
   for (const [k, v] of Object.entries(campos)) if (v) form.append(k, v);
   await enviarInforme(`/informes/ot/${otId}/fotos`, "POST", form);
+}
+
+/**
+ * Imagen de una foto: se pide a la API con la sesión solo cuando la tarjeta
+ * entra en pantalla (el listado ya no trae el contenido de las fotos) y se
+ * libera al salir de la pantalla de informes.
+ */
+function ImagenFoto({ url, alt }: { url: string; alt: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [src, setSrc] = useState<string | null>(null);
+  const [fallo, setFallo] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    let objeto: string | null = null;
+    const cargar = () =>
+      imagenConSesion(url)
+        .then((u) => {
+          objeto = u;
+          if (vivo) setSrc(u);
+          else URL.revokeObjectURL(u);
+        })
+        .catch(() => vivo && setFallo(true));
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      cargar();
+    } else {
+      const obs = new IntersectionObserver((entradas) => {
+        if (entradas.some((e) => e.isIntersecting)) {
+          obs.disconnect();
+          cargar();
+        }
+      }, { rootMargin: "200px" });
+      obs.observe(el);
+      return () => {
+        vivo = false;
+        obs.disconnect();
+        if (objeto) URL.revokeObjectURL(objeto);
+      };
+    }
+    return () => {
+      vivo = false;
+      if (objeto) URL.revokeObjectURL(objeto);
+    };
+  }, [url]);
+  const estilo = { width: "100%", height: 130, objectFit: "contain" as const, background: "#eef3f7", borderRadius: 5 };
+  return (
+    <div ref={ref} style={{ ...estilo, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      {src ? (
+        <a href={src} target="_blank" rel="noopener noreferrer" title="Ver la foto en tamaño completo" style={{ display: "block", width: "100%" }}>
+          <img src={src} alt={alt} style={estilo} />
+        </a>
+      ) : (
+        <small style={{ color: "var(--muted)" }}>{fallo ? "No se pudo cargar la foto." : "Cargando foto…"}</small>
+      )}
+    </div>
+  );
 }
 
 export default function FotosInforme({
@@ -184,8 +242,7 @@ export default function FotosInforme({
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
             {fotos.map((f, i) => (
               <li key={f.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 8, background: f.enInforme ? "#fff" : "#f6f8fa" }}>
-                <img src={f.dataUrl} loading="lazy" alt={f.pie || `Foto ${i + 1} de la OT`}
-                  style={{ width: "100%", height: 130, objectFit: "contain", background: "#eef3f7", borderRadius: 5 }} />
+                <ImagenFoto url={f.url} alt={f.pie || `Foto ${i + 1} de la OT`} />
                 <div className="field" style={{ marginTop: 6 }}>
                   <label htmlFor={`pie-${f.id}`}>Pie</label>
                   <input id={`pie-${f.id}`} defaultValue={f.pie ?? ""} maxLength={500} disabled={!puedeEditar}

@@ -1,4 +1,4 @@
-import { comparar, erroresCierrePlanilla, erroresLineas, estimacionDeCotizacion, resumenCostos, totalLinea, type LineaCostoReal } from "./costos-reales";
+import { comparar, erroresCierrePlanilla, erroresLineas, estimacionDeCotizacion, estimacionDelLaboratorio, laboratorioDeResultado, resumenCostos, totalLinea, type LineaCostoReal } from "./costos-reales";
 
 const CARGOS = new Set(["jefe_laboratorio", "analista"]);
 // Horas del ejemplo real de la maqueta LQC (NCh 409): 0,40 h Jefe de Laboratorio y
@@ -76,5 +76,41 @@ describe("planilla de costos reales", () => {
     expect(erroresCierrePlanilla({ estado: "borrador", lineas: [], resultadosSinAprobar: 0 })).toHaveLength(2);
     expect(erroresCierrePlanilla({ estado: "borrador", lineas, resultadosSinAprobar: 2 })[0]).toMatch(/2 ensayo/);
     expect(erroresCierrePlanilla({ estado: "cerrada", lineas, resultadosSinAprobar: 0 })[0]).toMatch(/ya está cerrada/);
+  });
+});
+
+describe("planilla de costos por laboratorio (revisión r3, hallazgos 7 y 8)", () => {
+  const fuentes = {
+    costosDirectosTotal: 1_000_000,
+    solicitudes: [{ horasHombre: 40, costoDirecto: 800_000 }, { horasHombre: 10, costoDirecto: 200_000 }],
+    neto: 1_500_000,
+  };
+  const lpn = [{ horasHombre: 10, costoDirecto: 200_000 }];
+  const real = resumenCostos([{ categoria: "horas_hombre", cargo: "analista", cantidad: 10, costoUnitario: 20_000 }]);
+
+  it("OT de un solo laboratorio: se compara con la cotización completa (como antes)", () => {
+    const e = estimacionDelLaboratorio(fuentes, { multiLaboratorio: false, solicitudesDelLaboratorio: [] });
+    expect([e.costoDirecto, e.alcance, e.neto]).toEqual([1_000_000, "ot", 1_500_000]);
+  });
+  it("OT multilaboratorio: la planilla de LPN (200.000) se compara con SU solicitud de costeo, sin margen del total", () => {
+    const e = estimacionDelLaboratorio(fuentes, { multiLaboratorio: true, solicitudesDelLaboratorio: lpn });
+    expect([e.costoDirecto, e.horasHombre, e.fuenteCosto, e.alcance, e.neto]).toEqual([200_000, 10, "estimacion_laboratorio", "laboratorio", null]);
+    const c = comparar(real, e);
+    expect(c.desviacionPct).toBe(0);
+    expect(c.margen).toBeNull();
+  });
+  it("OT multilaboratorio sin estimación del laboratorio: no compara con el total y lo dice", () => {
+    const e = estimacionDelLaboratorio(fuentes, { multiLaboratorio: true, solicitudesDelLaboratorio: [] });
+    expect([e.costoDirecto, e.alcance]).toEqual([null, "sin_estimacion_laboratorio"]);
+    expect(e.aviso).toMatch(/no se compara con el total/);
+    const c = comparar(real, e);
+    expect([c.diferencia, c.desviacionPct, c.margen]).toEqual([null, null, null]);
+  });
+  it("cada ensayo es del laboratorio de su método; si no se sabe, del responsable", () => {
+    const [LQC, LPN, LCC] = ["lqc", "lpn", "lcc"];
+    expect(laboratorioDeResultado([LPN], [LQC, LPN, LCC], LQC)).toBe(LPN);
+    expect(laboratorioDeResultado([LQC, LPN], [LQC, LPN], LQC)).toBe(LQC);
+    expect(laboratorioDeResultado([], [LQC, LPN], LQC)).toBe(LQC);
+    expect(laboratorioDeResultado(["otro"], [LQC, LPN], LQC)).toBe(LQC);
   });
 });

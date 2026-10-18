@@ -41,6 +41,21 @@ export function erroresFactor(f: { valor?: number | null; operacion?: string | n
   return e;
 }
 
+/**
+ * Factor por defecto de un método del catálogo (alta o cambio): valor y
+ * operación se indican juntos —ambos o ninguno— (revisión r3, hallazgo 19).
+ * Solo se mira lo que viene en el cuerpo; null si está bien.
+ */
+export function erroresFactorMetodo(d: { factorValor?: number | null; factorOperacion?: string | null }): string | null {
+  const vieneValor = d.factorValor !== undefined;
+  const vieneOperacion = d.factorOperacion !== undefined;
+  if (!vieneValor && !vieneOperacion) return null;
+  const msg = "Indique el factor y su operación (multiplicar o dividir) juntos, o deje ambos vacíos para quitarlo.";
+  if (vieneValor !== vieneOperacion) return msg;
+  if ((d.factorValor == null) !== (d.factorOperacion == null)) return msg;
+  return null;
+}
+
 /** Valor tras aplicar el factor. Sin factor, el mismo valor. */
 export function aplicarFactor(valor: number, f: Factor | null): number {
   if (!f) return valor;

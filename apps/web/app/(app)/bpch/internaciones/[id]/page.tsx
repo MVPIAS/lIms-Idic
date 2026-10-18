@@ -19,7 +19,7 @@ import { clp, fecha, fechaHora } from "@/lib/format";
 import { DocumentosYCierre, Fases } from "../../_components/Expediente";
 import { FormInternacion } from "../../_components/FormInternacion";
 import { SelectorPanel } from "../../_components/Buscadores";
-import { type ConfigBpch, DOC_ADM, ESTADO_COD, ESTADO_INTERNACION, LISTADOS, dia, hoy, pedir } from "../../_components/bpch";
+import { AVANCE_INTERNACION, type ConfigBpch, DOC_ADM, ESTADO_COD, ESTADO_INTERNACION, LISTADOS, dia, hoy, pedir } from "../../_components/bpch";
 
 type Pestana = "registro" | "inspeccion" | "documentos" | "tasa" | "codificacion";
 
@@ -73,7 +73,7 @@ function Detalle() {
   if (error) return <div className="alert warn" role="alert">{error}</div>;
   if (!d) return <Skeleton h={220} />;
 
-  const est = ESTADO_INTERNACION[d.estado] ?? { l: d.estado, c: "gray" };
+  const est = AVANCE_INTERNACION[d.avance ?? d.estado] ?? ESTADO_INTERNACION[d.estado] ?? { l: d.estado, c: "gray" };
   const tab = (k: Pestana, l: string) => (
     <button type="button" role="tab" aria-selected={pestana === k} className={`tab ${pestana === k ? "active" : ""}`} onClick={() => setPestana(k)}>{l}</button>
   );

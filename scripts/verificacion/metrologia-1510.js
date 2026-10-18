@@ -274,8 +274,13 @@ async function main() {
 
   await paso("Reemisión: el metrólogo no puede; el jefe reemite y el nuevo certificado reemplaza al anterior", async () => {
     await exigir(403, METRO, "POST", `/metrologia/calibraciones/${C.cal.id}/reemitir`, { motivo: "Corrección de la dirección del cliente" });
-    const r = await ok(JEFE, "POST", `/metrologia/calibraciones/${C.cal.id}/reemitir`, { motivo: "Corrección de la dirección del cliente" });
-    await exigir(409, JEFE, "POST", `/metrologia/calibraciones/${C.cal.id}/reemitir`, { motivo: "Segunda reemisión simultánea" });
+    // Revisión r3 (hallazgo 6): dos reemisiones simultáneas (doble clic) → una sola; la otra, 409.
+    const dobles = await Promise.all(["Corrección de la dirección del cliente", "Segunda reemisión simultánea"].map((motivo) =>
+      llamar(JEFE, "POST", `/metrologia/calibraciones/${C.cal.id}/reemitir`, { motivo })));
+    const est = dobles.map((x) => x.status).sort();
+    afirmar(est[0] >= 200 && est[0] < 300 && est[1] === 409, `reemisiones simultáneas → ${est.join(", ")}`);
+    const r = dobles.find((x) => x.status < 300).json;
+    await exigir(409, JEFE, "POST", `/metrologia/calibraciones/${C.cal.id}/reemitir`, { motivo: "Tercera reemisión, ya hay una en curso" });
     const nid = r.data.id;
     await ok(JEFE, "POST", `/metrologia/calibraciones/${nid}/enviar`);
     await ok(JEFE, "POST", `/metrologia/calibraciones/${nid}/firmar`); // el jefe titular firma su propia calibración (decisión 14-10)
@@ -325,6 +330,82 @@ async function main() {
     await exigir(409, "demo.admin", "PUT", "/metrologia/numeracion/M", { ultimo: n - 1 });
     await exigir(403, METRO, "PUT", "/metrologia/numeracion/M", { ultimo: n + 5 });
     return "registro y numeración protegidos";
+  });
+
+  await revisionR3(C);
+}
+
+/**
+ * Revisión r3 (hallazgos 4 y 5): reglas de la matriz para la unidad de la
+ * calibración, que se crean para la prueba y se borran al terminar.
+ */
+const MARCA_PRUEBA = "Prueba revisión r3";
+async function limpiarReglasPrueba() {
+  const reglas = (await ok("demo.admin", "GET", "/firmas-matriz?tipoDocumento=CERTIFICADO_CALIBRACION")).data ?? [];
+  for (const r of reglas.filter((x) => (x.descripcion ?? "").startsWith(MARCA_PRUEBA))) await ok("demo.admin", "DELETE", `/firmas-matriz/${r.id}`);
+}
+
+async function revisionR3(C) {
+  await paso("Revisión r3 · matriz sin ELABORA cuyo primer paso es el jefe del LMT: la firma del metrólogo no lo salta", async () => {
+    await limpiarReglasPrueba();
+    const reglas = (await ok("demo.admin", "GET", "/firmas-matriz?tipoDocumento=CERTIFICADO_CALIBRACION")).data ?? [];
+    const de = (rol) => reglas.find((x) => x.rol?.codigo === rol && !(x.descripcion ?? "").startsWith(MARCA_PRUEBA));
+    const jl = de("JEFE_LAB"), jd = de("JEFE_DEPTO");
+    afirmar(jl && jd, "la matriz no tiene los pasos del jefe del laboratorio y del departamento");
+    const d0 = await ok(METRO, "GET", `/metrologia/calibraciones/${C.calV.id}`);
+    const unidadId = d0.unidad_id;
+    afirmar(unidadId, "la calibración no tiene unidad");
+    const regla = (base, orden, extra = {}) => ({
+      tipoDocumento: "CERTIFICADO_CALIBRACION", unidadId, orden, accion: base.accion, rolId: base.rolId, nivelUnidad: base.nivelUnidad,
+      unidadDestinoId: base.unidadDestinoId ?? null, obligatorio: true, activo: true, descripcion: `${MARCA_PRUEBA}: ${base.rol.nombre}`, ...extra,
+    });
+    C.reglasR3 = [];
+    try {
+      C.reglasR3.push(await ok("demo.admin", "POST", "/firmas-matriz", regla(jl, 1)));
+      C.reglasR3.push(await ok("demo.admin", "POST", "/firmas-matriz", regla(jd, 2)));
+      const r = await ok(METRO, "POST", "/metrologia/calibraciones", {
+        procesoCodigo: "ITM03", fecha: "2026-07-24", instrumento: { item: "Pesas (prueba matriz sin ELABORA)" }, patronIds: [C.pF1.id, C.p500.id], motor: { datos: C.datosM, opciones: {} },
+      });
+      await ok(METRO, "POST", `/metrologia/calibraciones/${r.data.id}/enviar`);
+      const d = await ok(METRO, "GET", `/metrologia/calibraciones/${r.data.id}`);
+      afirmar(d.firmas.length === 1 && d.firmas[0].accion === "ELABORA", JSON.stringify(d.firmas));
+      afirmar(d.paso_pendiente?.orden === 1 && !d.paso_pendiente.emite, `paso pendiente ${JSON.stringify(d.paso_pendiente)}`);
+      await exigir(403, DEPTO, "POST", `/metrologia/calibraciones/${r.data.id}/firmar`);
+      await exigir(403, DEPTO, "POST", `/metrologia/calibraciones/${r.data.id}/emitir`);
+      const f = await ok(JEFE, "POST", `/metrologia/calibraciones/${r.data.id}/firmar`);
+      afirmar(f.data.estado === "en_firma", JSON.stringify(f));
+      const d2 = await ok(METRO, "GET", `/metrologia/calibraciones/${r.data.id}`);
+      afirmar(d2.paso_pendiente?.orden === 2 && d2.paso_pendiente.emite, `tras el jefe del LMT: ${JSON.stringify(d2.paso_pendiente)}`);
+      const circ = (await ok(METRO, "GET", `/metrologia/calibraciones/${r.data.id}/circuito`)).data;
+      afirmar(circ.pasos.find((x) => x.orden === 1)?.firma?.accion === "FIRMA", "el paso 1 muestra la firma del metrólogo como la del jefe");
+      return "ELABORA aparte · firma el jefe del LMT (paso 1) · pendiente el departamento (paso 2)";
+    } finally {
+      for (const x of C.reglasR3) await llamar("demo.admin", "DELETE", `/firmas-matriz/${x.id}`);
+    }
+  });
+
+  await paso("Revisión r3 · matriz sin pasos de firma después del metrólogo: no se envía (409) y no queda atascada", async () => {
+    const reglas = (await ok("demo.admin", "GET", "/firmas-matriz?tipoDocumento=CERTIFICADO_CALIBRACION")).data ?? [];
+    const metro = reglas.find((x) => x.accion === "ELABORA");
+    afirmar(metro, "la matriz no tiene el paso ELABORA");
+    const d0 = await ok(METRO, "GET", `/metrologia/calibraciones/${C.calV.id}`);
+    let creada = null;
+    try {
+      creada = await ok("demo.admin", "POST", "/firmas-matriz", {
+        tipoDocumento: "CERTIFICADO_CALIBRACION", unidadId: d0.unidad_id, orden: 1, accion: "ELABORA", rolId: metro.rolId, nivelUnidad: metro.nivelUnidad,
+        obligatorio: true, activo: true, descripcion: `${MARCA_PRUEBA}: solo el metrólogo`,
+      });
+      const r = await ok(METRO, "POST", "/metrologia/calibraciones", {
+        procesoCodigo: "ITM03", fecha: "2026-07-24", instrumento: { item: "Pesas (prueba matriz sin firmantes)" }, patronIds: [C.pF1.id, C.p500.id], motor: { datos: C.datosM, opciones: {} },
+      });
+      const e = await exigir(409, METRO, "POST", `/metrologia/calibraciones/${r.data.id}/enviar`);
+      afirmar(/ningún paso de firma/.test(msg(e)), msg(e));
+      const d = await ok(METRO, "GET", `/metrologia/calibraciones/${r.data.id}`);
+      afirmar(d.estado === "borrador" && d.firmas.length === 0, `estado ${d.estado}`);
+      return msg(e).slice(0, 90) + "…";
+    } finally {
+      if (creada) await llamar("demo.admin", "DELETE", `/firmas-matriz/${creada.id}`);
+    }
   });
 }
 

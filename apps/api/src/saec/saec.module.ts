@@ -26,7 +26,8 @@ import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
-import { createHash, randomInt } from "node:crypto";
+import { createHash } from "node:crypto";
+import { nuevoCodigoVerificacion } from "../common/codigo-verificacion";
 import { promises as fs } from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
@@ -55,12 +56,7 @@ import { cuerpoCertificadoSaec, tituloCertificadoSaec } from "./saec-certificado
  * código mal tecleado en una fiscalía se lee como "certificado no auténtico".
  * `randomInt` usa el CSPRNG del sistema (no Math.random).
  */
-function nuevoCodigoVerificacionSaec(): string {
-  const A = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-  let s = "";
-  for (let i = 0; i < 10; i++) s += A[randomInt(A.length)];
-  return `${s.slice(0, 5)}-${s.slice(5)}`;
-}
+const nuevoCodigoVerificacionSaec = (): string => nuevoCodigoVerificacion(); // generador único: common/codigo-verificacion.ts
 
 // ---------------------------------------------------------------------------
 // Módulo SAEC · Armas, Evidencias y Certificados (bloque RF-K del SRS).

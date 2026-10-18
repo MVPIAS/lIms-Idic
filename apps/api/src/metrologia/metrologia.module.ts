@@ -27,7 +27,8 @@ import { CASOS_LNF, verificarParidadLNF } from "./motores/paridad-lnf";
 import { CASOS_1510, verificarParidad1510 } from "./motores/paridad-1510";
 import { certificadoHtml, type ContextoCertificado, type FirmaCert } from "./metrologia.certificado";
 import {
-  ESTADO_TRAS, accionesDisponibles, codigoCalibracion, estadoDe, fechaCalibracion, motivoRechazo, pasoPendiente, pasosSinResponsable,
+  ESTADO_TRAS, accionesDisponibles, clavePaso, codigoCalibracion, estadoDe, fechaCalibracion, motivoNoEnviable, motivoRechazo, ordenElabora,
+  pasoPendiente, pasosSinResponsable,
   plantillaVacia, puedeFirmarPaso, type AccionCal, type ContextoCal, type FirmaHecha, type PasoFirmaCal,
 } from "./metrologia.flujo";
 import {
@@ -222,7 +223,11 @@ async function firmanteDe(usuarioId: string): Promise<{ nombre: string; grado: s
   return { nombre: r[0]?.nombre_completo ?? "—", grado: r[0]?.grado ?? null, cargo: r[0]?.cargo ?? null };
 }
 
-interface Circuito { pasos: PasoFirmaCal[] | null; firmas: any[]; actual: PasoFirmaCal | null; ultimo: boolean; jefes: PasoFirmaCal[]; elabora: PasoFirmaCal | null }
+interface Circuito {
+  pasos: PasoFirmaCal[] | null; firmas: any[]; actual: PasoFirmaCal | null; ultimo: boolean; jefes: PasoFirmaCal[]; elabora: PasoFirmaCal | null;
+  /** Motivo si la matriz no se pudo resolver o no devolvió pasos (entonces nadie firma ni se envía). */
+  errorMatriz: string | null;
+}
 
 // ===========================================================================
 @ApiTags("metrología")
@@ -617,8 +622,12 @@ export class MetrologiaController {
     const c = await this.circuito(tenantId(req), cal);
     return {
       data: {
-        pasos: (c.pasos ?? []).map((p) => ({ ...p, firma: c.firmas.find((f) => f.orden === p.orden) ?? null, pendiente: c.actual?.orden === p.orden })),
-        sinMatriz: !c.pasos, sinResponsable: c.pasos ? pasosSinResponsable(c.pasos) : [],
+        pasos: (c.pasos ?? []).map((p) => ({
+          ...p,
+          firma: c.firmas.find((f) => clavePaso(f) === clavePaso(p)) ?? null,
+          pendiente: !!c.actual && clavePaso(c.actual) === clavePaso(p),
+        })),
+        sinMatriz: !c.pasos, sinResponsable: c.pasos ? pasosSinResponsable(c.pasos) : [], errorMatriz: c.errorMatriz,
       },
     };
   }
@@ -711,17 +720,15 @@ export class MetrologiaController {
     const cal = await this.detalleCtx(id, req);
     this.exigir("ENVIAR", cal);
     const c = await this.circuito(t, cal);
-    if (c.pasos) {
-      const faltan = pasosSinResponsable(c.pasos);
-      if (faltan.length) throw new ConflictException(`No se puede enviar: la matriz de firmas no tiene quién firme. ${faltan.join(" ")}`);
-    }
+    const noEnviable = motivoNoEnviable(c.pasos, c.errorMatriz);
+    if (noEnviable) throw new ConflictException(noEnviable);
     const yo = await firmanteDe(req.user.sub);
     await this.transicion(id, "ENVIAR", cal.estado, req, null, `enviado_at = now(), enviado_by = $4::uuid, devuelto_motivo = NULL`, [], async (tx) => {
       await tx.$executeRawUnsafe(`DELETE FROM met_calibracion_firma WHERE calibracion_id = $1::uuid`, id);
       await tx.$executeRawUnsafe(
         `INSERT INTO met_calibracion_firma (calibracion_id, orden, accion, rol_codigo, rol_nombre, unidad_codigo, usuario_id, nombre, grado, cargo, via)
          VALUES ($1::uuid, $2, 'ELABORA', $3, $4, $5, $6::uuid, $7, $8, $9, 'registro')`,
-        id, c.elabora?.orden ?? 1, c.elabora?.rol.codigo ?? "METROLOGO", c.elabora?.rol.nombre ?? "Metrólogo", cal.laboratorio ?? null,
+        id, ordenElabora(c.elabora), c.elabora?.rol.codigo ?? "METROLOGO", c.elabora?.rol.nombre ?? "Metrólogo", cal.laboratorio ?? null,
         req.user.sub, yo.nombre, yo.grado, yo.cargo ?? "Metrólogo");
     });
     return { data: { id, codigo: cal.codigo, estado: ESTADO_TRAS.ENVIAR } };
@@ -832,6 +839,12 @@ export class MetrologiaController {
       const codigo = await this.siguienteCodigo(t, fecha);
       try {
         const nuevo = await prisma.$transaction(async (tx) => {
+          // Se bloquea la fila de la calibración ORIGINAL: un SELECT … FOR UPDATE sobre las
+          // reemisiones no bloquea nada si aún no hay ninguna, y dos peticiones simultáneas
+          // crearían dos borradores que reemplazarían al mismo certificado (revisión r3, hallazgo 6).
+          const original = await tx.$queryRawUnsafe<{ estado: string }[]>(
+            `SELECT estado FROM met_calibracion WHERE id = $1::uuid FOR UPDATE`, id);
+          if (original[0]?.estado !== "emitida") throw new ConflictException("Solo se reemite un certificado emitido");
           const curso = await tx.$queryRawUnsafe<any[]>(
             `SELECT 1 FROM met_calibracion WHERE reemplaza_id = $1::uuid AND deleted_at IS NULL AND estado <> 'reemplazada' FOR UPDATE`, id);
           if (curso.length) throw new ConflictException("Ya hay una reemisión en curso de este certificado");
@@ -906,6 +919,7 @@ export class MetrologiaController {
   /** Pasos de la matriz para la unidad de la calibración y las firmas ya hechas. */
   private async circuito(t: string, cal: any, cache?: Map<string, PasoFirmaCal[] | null>): Promise<Circuito> {
     let pasos: PasoFirmaCal[] | null = null;
+    let errorMatriz: string | null = null;
     if (cal.unidad_id) {
       if (cache?.has(cal.unidad_id)) pasos = cache.get(cal.unidad_id)!;
       else {
@@ -916,7 +930,11 @@ export class MetrologiaController {
             rol: { codigo: p.rol.codigo, nombre: p.rol.nombre }, unidad: p.unidad ? { codigo: p.unidad.codigo } : null,
             responsables: (p.responsables ?? []).map((x: any) => ({ usuarioId: x.usuarioId, nombre: x.nombre, via: x.via })),
           }));
-        } catch { pasos = []; } // si la matriz no se puede resolver, nadie firma (no se cae al modo sin matriz)
+        } catch (e: any) {
+          // Si la matriz no se puede resolver, nadie firma (no se cae al modo sin matriz) y no se envía.
+          pasos = [];
+          errorMatriz = String(e?.message ?? e).slice(0, 200);
+        }
         cache?.set(cal.unidad_id, pasos);
       }
     }
@@ -925,7 +943,8 @@ export class MetrologiaController {
          FROM met_calibracion_firma WHERE calibracion_id = $1::uuid ORDER BY orden`, cal.id);
     const hechas: FirmaHecha[] = firmas.map((f: any) => ({ orden: f.orden, usuarioId: f.usuario_id, accion: f.accion }));
     const p = pasos ? pasoPendiente(pasos, hechas) : { elabora: null, jefes: [], actual: null, ultimo: true };
-    return { pasos, firmas, actual: p.actual, ultimo: p.ultimo, jefes: p.jefes, elabora: p.elabora };
+    if (pasos && !pasos.length && !errorMatriz) errorMatriz = "la matriz no devolvió pasos";
+    return { pasos, firmas, actual: p.actual, ultimo: p.ultimo, jefes: p.jefes, elabora: p.elabora, errorMatriz };
   }
 
   /** Contexto de reglas de varias calibraciones (matriz por unidad en caché, firmas y registro en una consulta). */
@@ -967,8 +986,9 @@ export class MetrologiaController {
   /** Firmas por papel para imprimir en el certificado (hechas o pendientes con sus responsables). */
   private async contextoCertificado(t: string, cal: any, c: Circuito): Promise<ContextoCertificado> {
     const dep = await nombreDepartamento(this.alcance, t, cal.unidad_id ?? null);
+    // Firma de un paso por (orden, acción): la del metrólogo nunca se toma por la de un jefe.
     const hecha = (orden: number | undefined, accion?: string): FirmaCert | null => {
-      const f = c.firmas.find((x: any) => (orden != null ? x.orden === orden : x.accion === accion));
+      const f = c.firmas.find((x: any) => (orden == null || x.orden === orden) && (accion == null || x.accion === accion));
       return f ? { accion: f.accion, rol: f.rol_nombre ?? "", nombre: f.nombre, grado: f.grado, cargo: f.cargo, fecha: f.firmado_at, pendiente: false, via: f.via } : null;
     };
     const pendiente = (p: PasoFirmaCal | undefined): FirmaCert | null =>
@@ -977,8 +997,8 @@ export class MetrologiaController {
     return {
       departamento: dep.nombre,
       metrologo: hecha(undefined, "ELABORA") ?? { accion: "ELABORA", rol: "Metrólogo", nombre: cal.autor_nombre ?? "", pendiente: true, cargo: "Metrólogo" },
-      jefeLab: (jl && hecha(jl.orden)) ?? pendiente(jl) ?? (cal.emisor_nombre ? { accion: "FIRMA", rol: "Jefe", nombre: cal.emisor_nombre, fecha: cal.emitido_at, pendiente: false } : null),
-      jefeDepto: (jd && hecha(jd.orden)) ?? pendiente(jd),
+      jefeLab: (jl && hecha(jl.orden, jl.accion)) ?? pendiente(jl) ?? (cal.emisor_nombre ? { accion: "FIRMA", rol: "Jefe", nombre: cal.emisor_nombre, fecha: cal.emitido_at, pendiente: false } : null),
+      jefeDepto: (jd && hecha(jd.orden, jd.accion)) ?? pendiente(jd),
       reemplazaNumero: cal.reemplaza_numero ?? null,
     };
   }

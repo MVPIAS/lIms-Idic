@@ -111,8 +111,9 @@ export class CodificacionService {
   }
 
   /** Búsqueda exacta por código (normalizado): la usan internación y reinspección. */
-  async porCnc(tenantId: string, cnc: string) {
-    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+  /** Producto por su código CNC. Dentro de `sql` ve lo inscrito en la misma transacción. */
+  async porCnc(tenantId: string, cnc: string, sql: Sql = this.prisma) {
+    const filas = await sql.$queryRawUnsafe<any[]>(
       `SELECT ${COLUMNAS} ${DESDE} WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL AND c.cnc_normalizado = $2`,
       tenantId,
       normalizarCnc(cnc),
@@ -120,8 +121,8 @@ export class CodificacionService {
     return filas[0] ?? null;
   }
 
-  async uno(tenantId: string, id: string) {
-    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+  async uno(tenantId: string, id: string, sql: Sql = this.prisma) {
+    const filas = await sql.$queryRawUnsafe<any[]>(
       `SELECT ${COLUMNAS} ${DESDE} WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid AND c.deleted_at IS NULL`,
       id,
       tenantId,

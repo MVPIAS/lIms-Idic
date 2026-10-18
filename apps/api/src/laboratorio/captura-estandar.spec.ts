@@ -1,4 +1,4 @@
-import { calcularCaptura, CapturaError } from "./captura-estandar";
+import { calcularCaptura, CapturaError, variablesDeCaptura } from "./captura-estandar";
 
 const num = (o: object = {}) => ({ tipoDato: "numerico" as const, ...o });
 
@@ -76,5 +76,13 @@ describe("captura estándar · atributo", () => {
   it("sin elección: compara con una referencia de texto corta", () => {
     expect(calcularCaptura({ ...atr, nominal: "Ausencia" }, { valor: "ausencia" }).veredicto).toBe("cumple");
     expect(() => calcularCaptura(atr, { valor: "algo" })).toThrow(/Cumple o No cumple/);
+  });
+});
+
+describe("captura estándar · variables de la captura (revisión r3, hallazgo 12)", () => {
+  it("solo las de esta captura: sin variables se vacían (no quedan las de una captura anterior)", () => {
+    expect(variablesDeCaptura({ V: 25 })).toEqual({ V: 25 });
+    expect(variablesDeCaptura({})).toBeNull();
+    expect(variablesDeCaptura(undefined)).toBeNull();
   });
 });

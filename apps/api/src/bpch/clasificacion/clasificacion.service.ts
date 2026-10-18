@@ -1,7 +1,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
-import { createHash, randomInt } from "crypto";
+import { createHash } from "crypto";
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
+import { FORMATO_BPCH, nuevoCodigoVerificacion } from "../../common/codigo-verificacion";
 import { fmtFecha, fmtFechaHora } from "../../plantilla-render/html.util";
 import { documentoCompleto, type Sello } from "../../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../../plantilla-render/pdf.renderer";
@@ -361,13 +362,6 @@ export class ClasificacionService {
     return this.detalle(tenantId, id);
   }
 
-  private nuevoCodigoVerificacion(): string {
-    const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let s = "";
-    for (let i = 0; i < 12; i++) s += abc[randomInt(abc.length)];
-    return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}`;
-  }
-
   /** Aprueba (otra persona que quien clasificó) y sella el documento. */
   async aprobar(tenantId: string, id: string, usuarioId: string | null) {
     const r = await this.fila(tenantId, id);
@@ -380,7 +374,7 @@ export class ClasificacionService {
       ? await this.prisma.usuario.findUnique({ where: { id: usuarioId }, select: { nombreCompleto: true } })
       : null;
     const ahora = new Date();
-    const codigoVerificacion = this.nuevoCodigoVerificacion();
+    const codigoVerificacion = nuevoCodigoVerificacion(FORMATO_BPCH);
     const numero = r.version > 1 ? `${r.codigo}-V${r.version}` : r.codigo;
     const cuerpo = cuerpoDocumentoClasificacion({
       numero,

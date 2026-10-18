@@ -12,6 +12,9 @@
  *  · Paridad «Prototipos»: si cumple → certificado de TIPO (aprobación); si no → rechazo.
  */
 
+import { fmtNum } from "../../plantilla-render/html.util";
+import { valorInformado } from "../../plantilla-render/filas-informe";
+
 export type EstadoPrototipo = "ingresado" | "en_evaluacion" | "dictaminado" | "anulado";
 export type Dictamen = "aprobado" | "rechazado";
 export type VeredictoOt = "cumple" | "no_cumple" | "pendiente" | "sin_resultados";
@@ -118,4 +121,15 @@ export function etapaPrototipo(p: {
   if (p.otId) return "En evaluación (OT)";
   if (!p.sacTamanoMuestra) return "Ingresado · falta pronunciamiento SAC";
   return "Ingresado · listo para generar OT";
+}
+
+/**
+ * Resultado que se imprime en la tabla de ensayos del dictamen (PROTO-APR /
+ * PROTO-REC): el valor informado —resultado final con fórmula y factor, si no
+ * el valor capturado y solo al final el promedio— que es con el que se calculó
+ * el veredicto; si no hay número, el texto observado.
+ */
+export function resultadoDictamen(r: { resultado_final?: unknown; valor_numerico?: unknown; promedio?: unknown; valor_texto?: string | null }): string {
+  const n = valorInformado({ resultadoFinal: r.resultado_final, valorNumerico: r.valor_numerico, promedio: r.promedio });
+  return n !== null && n !== undefined && n !== "" ? fmtNum(String(n)) : r.valor_texto ?? "";
 }

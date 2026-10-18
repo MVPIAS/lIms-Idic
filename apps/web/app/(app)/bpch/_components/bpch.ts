@@ -25,8 +25,23 @@ export const ESTADO_COD: Record<string, { l: string; c: string }> = {
 export const ESTADO_INTERNACION: Record<string, { l: string; c: string }> = {
   registrada: { l: "Registrada · por analizar", c: "blue" },
   antecedentes_pendientes: { l: "Antecedentes pedidos a DGMN", c: "amber" },
-  ot_generada: { l: "OT generada", c: "teal" },
+  ot_generada: { l: "Con OT (en curso o cerrada)", c: "teal" },
   anulada: { l: "Anulada", c: "gray" },
+};
+
+/** Avance real que se muestra (revisión r3): sale de la OT, sus lotes, documentos y la tasa. */
+export const AVANCE_INTERNACION: Record<string, { l: string; c: string }> = {
+  registrada: { l: "Registrada · por analizar", c: "blue" },
+  antecedentes_pendientes: { l: "Antecedentes pedidos a DGMN", c: "amber" },
+  anulada: { l: "Anulada", c: "gray" },
+  ot_generada: { l: "OT generada · lotes por registrar", c: "teal" },
+  en_inspeccion: { l: "En inspección", c: "teal" },
+  informe_emitido: { l: "Informe de Inspección emitido", c: "violet" },
+  certificado_emitido: { l: "Certificado de Conformidad emitido", c: "green" },
+  incumplimiento_emitido: { l: "Informe de Incumplimiento emitido", c: "red" },
+  tasa_remitida: { l: "Tasa remitida a facturación", c: "green" },
+  ot_cerrada: { l: "OT cerrada", c: "gray" },
+  ot_anulada: { l: "OT anulada", c: "gray" },
 };
 
 export const DOC_ADM: Record<string, string> = {

@@ -89,7 +89,9 @@ emitido). Valores sembrados: los más altos vistos en los documentos del 15-10.
 **Reemisión**: `POST /calibraciones/:id/reemitir { motivo }` (`metrologia.emitir`
 y `metrologia.crear`) crea un borrador con los mismos datos; al emitirse, su
 certificado dice «Este certificado reemplaza al certificado N° …» y el anterior
-queda **reemplazado** (la verificación lo informa). Una reemisión a la vez (409).
+queda **reemplazado** (la verificación lo informa). Una reemisión a la vez (409):
+se bloquea la fila de la calibración original, así que dos peticiones simultáneas
+(doble clic) dejan un solo borrador.
 
 ### Circuito de firma (C4)
 
@@ -119,8 +121,16 @@ borrador ─enviar (metrólogo)─▶ en_revision ─firmar (jefe LMT o subrogan
   alias), `/devolver { motivo }` (responsable del paso pendiente),
   `GET /calibraciones/:id/circuito`. Cada firma queda en `met_calibracion_firma`
   (nombre, grado, cargo, vía) y cada paso en `met_calibracion_evento`.
-- Sin reglas en la matriz (instalación sin sembrar): basta `metrologia.emitir` y
-  la emisión es directa. Si la matriz no se puede resolver, nadie firma.
+- Cada paso se identifica por **(orden, acción)**. La firma ELABORA del metrólogo
+  se registra aparte (en el orden de su paso o, si la matriz no tiene ELABORA, con
+  orden 0) y nunca da por firmado un paso de jefe: si el primer paso de la matriz es
+  el jefe del laboratorio, él firma siempre. Unicidad en la base:
+  `(calibracion_id, orden, accion)` (`align_revision_r3.sql`).
+- **No se envía** sin matriz que resolver: sin reglas, con error al resolverla, sin
+  ningún paso de firma después del ELABORA o con un paso obligatorio sin
+  responsables, `enviar` responde 409 con qué falta (si se enviara, nadie podría
+  firmarla ni devolverla). Las calibraciones que ya estaban en el circuito sin
+  matriz las firma quien tiene `metrologia.emitir`.
 
 ### CMC (C5)
 Maestro versionado `met_cmc` con las CMC de **LC 001 Mod. 2**, **LC 004 Mod. 1** y
@@ -210,7 +220,7 @@ Edición (`metrologia.config`): `POST/PUT /metrologia/patrones`.
 
 Sin permisos nuevos: `metrologia.ver` (ver, vista previa, verificar, firmar el paso
 que la matriz le asigna), `metrologia.crear` (registrar y enviar),
-`metrologia.emitir` (reemitir; emitir sin matriz), `metrologia.config` (maestros).
+`metrologia.emitir` (reemitir; firmar las que quedaron en el circuito sin matriz), `metrologia.config` (maestros).
 
 ## 6. Pendiente del IDIC
 

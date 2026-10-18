@@ -359,3 +359,61 @@ export function erroresReinspeccion(d: {
   if (!d.elementoEspecifico?.trim()) e.push("Indique el elemento específico (producto) a reinspeccionar.");
   return e;
 }
+
+/* ------------------------------------------------- avance de la internación --- */
+
+export type AvanceInternacion =
+  | "registrada"
+  | "antecedentes_pendientes"
+  | "anulada"
+  | "ot_generada"
+  | "en_inspeccion"
+  | "informe_emitido"
+  | "certificado_emitido"
+  | "incumplimiento_emitido"
+  | "tasa_remitida"
+  | "ot_cerrada"
+  | "ot_anulada";
+
+export const TEXTO_AVANCE: Record<AvanceInternacion, string> = {
+  registrada: "Registrada · por analizar",
+  antecedentes_pendientes: "Antecedentes pedidos a DGMN",
+  anulada: "Anulada",
+  ot_generada: "OT generada · lotes por registrar",
+  en_inspeccion: "En inspección",
+  informe_emitido: "Informe de Inspección emitido",
+  certificado_emitido: "Certificado de Conformidad emitido",
+  incumplimiento_emitido: "Informe de Incumplimiento emitido",
+  tasa_remitida: "Tasa remitida a facturación",
+  ot_cerrada: "OT cerrada",
+  ot_anulada: "OT anulada",
+};
+
+/**
+ * Estado que se MUESTRA de una internación: el avance real del expediente
+ * (revisión r3, hallazgo 21). bpch_internacion.estado solo cambia hasta generar
+ * la OT; desde ahí el avance sale de la OT, sus lotes, sus documentos y la tasa,
+ * en el orden del flujo (docs/FLUJO_BPCH_INTERNACION_REINSPECCION_CODIFICACION.md §2).
+ */
+export function avanceInternacion(p: {
+  estado: string;
+  otEstado?: string | null;
+  lotes?: number;
+  lotesRegistrados?: number;
+  informeOficial?: boolean;
+  certificadoOficial?: boolean;
+  incumplimientoOficial?: boolean;
+  sujetaTasa?: boolean;
+  tasaRemitida?: boolean;
+}): AvanceInternacion {
+  if (p.estado === "anulada") return "anulada";
+  if (p.estado !== "ot_generada") return p.estado === "antecedentes_pendientes" ? "antecedentes_pendientes" : "registrada";
+  if (p.otEstado === "anulada") return "ot_anulada";
+  if (p.otEstado === "cerrada") return "ot_cerrada";
+  if (p.sujetaTasa && p.tasaRemitida) return "tasa_remitida";
+  if (p.incumplimientoOficial) return "incumplimiento_emitido";
+  if (p.certificadoOficial) return "certificado_emitido";
+  if (p.informeOficial) return "informe_emitido";
+  if ((p.lotes ?? 0) > 0 && (p.lotesRegistrados ?? 0) >= (p.lotes ?? 0)) return "en_inspeccion";
+  return "ot_generada";
+}

@@ -104,6 +104,9 @@ El registro se corrige (o se anula, con motivo) solo **antes** de generar la OT.
   (`RegistroMuestrasService`): ensayos del **panel del elemento** del catálogo
   (`cat_panel`), marcados de partida y editables, con su especificación del catálogo.
   El nombre de la muestra lleva el lote; `muestra.numero_lote` también.
+- Los lotes se registran **todos o ninguno** en una transacción con la fila del
+  expediente bloqueada: un doble envío espera al primero y recibe «ya está registrado»
+  (400); si un lote falla, no queda ninguna muestra creada. Igual en la reinspección (409).
 - Cabecera de inspección (lugar, fecha, inspectores por iniciales, procedimiento,
   vencimiento del producto, vigencia del informe, observaciones): editable mientras la OT
   esté abierta; es la que imprimen los documentos.
@@ -135,7 +138,9 @@ El registro se corrige (o se anula, con motivo) solo **antes** de generar la OT.
 ### 2.5 Codificación Única tras certificar
 
 Con el Certificado de Conformidad **oficial**: cada elemento se asocia a su producto del
-listado (si venía de él o si su código ya está inscrito) con el certificado, y queda
+listado (si venía de él o si su código ya está inscrito —también por otro lote de la
+misma petición: dos lotes del mismo producto nuevo se inscriben una sola vez—) con el
+certificado, y queda
 «certificación» en el historial; si no estaba inscrito, se inscribe (hay que elegir el
 listado) con el titular = importador. Un producto **en receso** recibe el certificado pero
 no cambia de estado solo (aviso: reactivarlo es una decisión de la Codificación Única).
@@ -331,3 +336,14 @@ la OT se cierra sin factura; las 6 fases quedan hechas.
 
 Estos casos los ejecuta automáticamente `scripts/verificacion/bpch-internacion-reinspeccion.js`
 (30 pasos; se puede repetir sobre la misma base).
+
+## Estado que muestran las listas de internaciones
+
+`bpch_internacion.estado` solo cambia hasta generar la OT (registrada → antecedentes
+pedidos → OT generada, o anulada). Lo que muestran el listado y la ficha (`avance`,
+`avanceTexto`, regla `avanceInternacion` en `comun/reglas-bpch.ts`) es el avance real,
+derivado de la OT, sus lotes, sus documentos y la tasa, en el orden del flujo:
+OT generada · lotes por registrar → En inspección → Informe de Inspección emitido →
+Certificado de Conformidad emitido / Informe de Incumplimiento emitido → Tasa remitida a
+facturación → OT cerrada (u OT anulada). El filtro por estado sigue usando el estado del
+expediente («Con OT» reúne las que están en curso y las cerradas).
