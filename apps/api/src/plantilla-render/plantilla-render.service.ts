@@ -741,6 +741,9 @@ export class PlantillaRenderService {
           tipoDocumento,
           condicion: condicionFinal(lotes.map((m) => m.veredicto)),
           informeInspeccionOficial: Boolean(informe),
+          // El prototipo dictamina sobre los ensayos de su OT (IT10): sin Informe
+          // de Inspección previo. Integración de los frentes G1 y G2 (18-10-2026).
+          exigeInformePrevio: ot.origenTrabajo !== "PROTOTIPO",
         }),
       );
     }

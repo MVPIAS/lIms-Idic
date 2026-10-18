@@ -167,6 +167,10 @@ async function main() {
     };
     C.mPh = await buscar("251");
     C.mAzufre = await buscar("258");
+    // Método con límite VIGENTE en el catálogo para probar que el analista no lo
+    // cambia. El pH (251) ya no sirve: su 6,0–8,5 era de la NCh 409 Of.84 y
+    // align_informe_ensayo.sql lo retiró (integración, 18-10-2026).
+    C.mLim = await buscar("243");
     C.factorOriginal = C.mAzufre.factorValor != null
       ? { valor: Number(C.mAzufre.factorValor), operacion: C.mAzufre.factorOperacion, descripcion: C.mAzufre.factorDescripcion }
       : null;
@@ -203,7 +207,7 @@ async function main() {
     for (const c of ["terreno_laboratorio", "entregada_cliente", "seccion_muestreo"]) afirmar(cods.includes(c), `falta la opción ${c}`);
     return (p.opcionesToma ?? []).map((o) => o.etiqueta).join(" · ");
   });
-  const base = (recepcion) => ({ muestras: [{ nombre: "Agua potable estanque", metodoIds: [C.mPh.id, C.mAzufre.id], recepcion }] });
+  const base = (recepcion) => ({ muestras: [{ nombre: "Agua potable estanque", metodoIds: [C.mPh.id, C.mAzufre.id, C.mLim.id], recepcion }] });
   await paso("1 · Reglas de la recepción: No cumple sin observación, otros laboratorios vacíos o el propio → 400", async () => {
     await exigir(400, U.recepcion, "POST", `/flujo/ot/${C.ot.id}/muestras`, base({ tomaMuestra: "entregada_cliente", condicionRecepcion: "no_cumple" }));
     await exigir(400, U.recepcion, "POST", `/flujo/ot/${C.ot.id}/muestras`, base({ tomaMuestra: "entregada_cliente", condicionRecepcion: "cumple", requiereOtrosLabs: true }));
@@ -255,6 +259,8 @@ async function main() {
     const rs = await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/resultados`);
     C.rPh = rs.resultados.find((r) => r.catMetodoId === C.mPh.id);
     C.rAz = rs.resultados.find((r) => r.catMetodoId === C.mAzufre.id);
+    C.rLim = rs.resultados.find((r) => r.catMetodoId === C.mLim.id);
+    afirmar(C.rLim && (C.rLim.limiteInf || C.rLim.limiteSup) && C.rLim.especOrigen === "catalogo", "el método 243 debería traer límite del catálogo");
     afirmar(C.rPh && C.rAz, "faltan resultados");
     afirmar(Number(C.rAz.factorValor) === 2 && C.rAz.factorOperacion === "multiplicar" && C.rAz.factorOrigen === "metodo", `factor ${C.rAz.factorValor} ${C.rAz.factorOperacion} ${C.rAz.factorOrigen}`);
     await restaurarFactorMetodo(); // el catálogo vuelve a como estaba; la OT conserva su copia
@@ -286,9 +292,12 @@ async function main() {
     await exigir(400, U.a1, "POST", `/flujo/resultado/${C.rPh.id}/valor`, { valor: "7,4" });
     const r = await ok(U.a1, "POST", `/flujo/resultado/${C.rPh.id}/valor`, { valor: "7,4", motivo: "Error de digitación en la lectura" });
     afirmar(Number(r.valorNumerico) === 7.4, `valor ${r.valorNumerico}`);
-    await exigir(403, U.a1, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { limiteSup: "9", motivo: "Requisito del cliente" });
-    await exigir(400, U.jefe, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { limiteSup: "9" });
-    await ok(U.jefe, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { limiteSup: "9", motivo: "Requisito del cliente para esta OT" });
+    // El 243 trae del catálogo el MÍNIMO (97) y el máximo vacío: el analista puede
+    // rellenar lo vacío, pero no cambiar lo que viene del catálogo.
+    afirmar(C.rLim.limiteInf, "el método 243 debería traer el mínimo del catálogo");
+    await exigir(403, U.a1, "PATCH", `/flujo/resultado/${C.rLim.id}/especificacion`, { limiteInf: "90", motivo: "Requisito del cliente" });
+    await exigir(400, U.jefe, "PATCH", `/flujo/resultado/${C.rLim.id}/especificacion`, { limiteInf: "90" });
+    await ok(U.jefe, "PATCH", `/flujo/resultado/${C.rLim.id}/especificacion`, { limiteInf: "90", motivo: "Requisito del cliente para esta OT" });
     return "7,2 → 7,4 con motivo; límite cambiado por la jefatura con motivo";
   });
 
@@ -306,7 +315,8 @@ async function main() {
     afirmar(az.historial.some((h) => h.campo === "alta" && h.origen === "registro"), "falta el alta del ensayo");
     const hv = ph.historial.filter((h) => h.campo === "valor_numerico");
     afirmar(hv.length >= 2 && hv.some((h) => h.origen === "correccion" && /digitación/.test(h.motivo) && Number(h.anterior) === 7.2), `historial del valor: ${JSON.stringify(hv)}`);
-    afirmar(ph.historial.some((h) => h.campo === "limite_sup" && h.origen === "especificacion" && /cliente/.test(h.motivo)), "falta el cambio de límite");
+    const lim = p.ensayos.find((e) => e.resultadoId === C.rLim.id);
+    afirmar(lim?.historial.some((h) => h.campo === "limite_inf" && h.origen === "especificacion" && /cliente/.test(h.motivo)), "falta el cambio de límite");
     return `${p.ensayos.length} ensayos · ${p.ensayos.reduce((s, e) => s + e.historial.length, 0)} cambios registrados`;
   });
   await paso("2 · Exportación a Excel (CSV con punto y coma y BOM)", async () => {
@@ -354,6 +364,12 @@ async function main() {
     afirmar(/sin aprobar/.test(msg(r)), msg(r));
   });
   await paso("4 · Se revisan y aprueban los ensayos; el Jefe de Laboratorio cierra la planilla", async () => {
+    // Los 6 ensayos del método 243 (el del límite del catálogo) también se capturan:
+    // la planilla solo se cierra con todos los ensayos del laboratorio aprobados.
+    const rs = await ok(U.a1, "GET", `/flujo/ot/${C.ot.id}/resultados`);
+    for (const r of rs.resultados.filter((x) => x.catMetodoId === C.mLim.id && !x.valorNumerico && x.resultadoFinal == null)) {
+      await ok(U.a1, "POST", `/flujo/resultado/${r.id}/valor`, { valor: "98" });
+    }
     await ok(U.revisor, "POST", `/resultados/ot/${C.ot.id}/revisar`);
     const a = await ok(U.jefe, "POST", `/resultados/ot/${C.ot.id}/aprobar`);
     afirmar(a.hechos >= 2, `aprobados ${a.hechos}: ${JSON.stringify(a.omitidos)}`);

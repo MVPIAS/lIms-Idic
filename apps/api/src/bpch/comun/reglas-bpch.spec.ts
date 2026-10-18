@@ -128,6 +128,9 @@ describe("Veredicto y documento final", () => {
     expect(faltantesDocumentoFinal({ tipoDocumento: "INFORME_INCUMPLIMIENTO", condicion: "no_cumple", informeInspeccionOficial: true })).toEqual([]);
     expect(faltantesDocumentoFinal({ tipoDocumento: "INFORME_INCUMPLIMIENTO", condicion: "cumple", informeInspeccionOficial: true })[0]).toMatch(/Certificado de Conformidad/);
     expect(faltantesDocumentoFinal({ tipoDocumento: "CERTIFICADO_CONFORMIDAD", condicion: "cumple", informeInspeccionOficial: false })[0]).toMatch(/Informe de Inspección/);
+    // Prototipo (IT10): el dictamen no exige Informe de Inspección previo, pero sí la condición.
+    expect(faltantesDocumentoFinal({ tipoDocumento: "CERTIFICADO_CONFORMIDAD", condicion: "cumple", informeInspeccionOficial: false, exigeInformePrevio: false })).toEqual([]);
+    expect(faltantesDocumentoFinal({ tipoDocumento: "CERTIFICADO_CONFORMIDAD", condicion: "no_cumple", informeInspeccionOficial: false, exigeInformePrevio: false })[0]).toMatch(/Informe de Incumplimiento/);
     expect(faltantesDocumentoFinal({ tipoDocumento: "INFORME_ENSAYO", condicion: "pendiente", informeInspeccionOficial: false })).toEqual([]);
   });
   it("la tasa se remite con documentación conforme, tasa calculada y documento final oficial", () => {
