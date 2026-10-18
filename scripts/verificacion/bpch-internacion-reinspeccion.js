@@ -527,6 +527,7 @@ async function main() {
     const p = C.ant.propuesta;
     afirmar(p.clienteId === C.importador.id && p.cnc === C.cnc && p.codificacionId === C.cod.id && p.identificacionLote === C.loteA, `propuesta ${JSON.stringify(p).slice(0, 200)}`);
     afirmar(C.ant.ot.condicion === "cumple", `condición original ${C.ant.ot.condicion}`);
+    await exigir(403, U.otraSucursal, "GET", `/bpch/reinspecciones/antecedente?otId=${C.A.otId}`);
     const x = await ok(U.sstgo, "GET", `/bpch/reinspecciones/antecedente?cnc=${encodeURIComponent("E-I/1/2/3/4/5")}`);
     afirmar(x.cncNoCodificado === true, "un código no codificado no se marca");
     return `${C.ant.ot.codigo} · ${p.elementoEspecifico}`;

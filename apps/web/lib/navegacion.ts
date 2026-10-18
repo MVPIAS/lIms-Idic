@@ -100,6 +100,17 @@ export const NAV: SeccionNav[] = [
     ],
   },
   {
+    // Frente BPCH G1 · Internación, Reinspección y Codificación Única (procesos sobre la OT).
+    id: "bpch",
+    title: "BPCH · Certificación",
+    icon: "✹",
+    items: [
+      { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: ["BPCH", "DCO"], claves: "resolucion dgmn tasa importacion" },
+      { href: "/bpch/reinspecciones", label: "Reinspecciones", icon: "↻", perm: "bpch.reinspeccion.ver", ambito: "BPCH", claves: "traspaso vencimiento rechazo" },
+      { href: "/bpch/codificacion", label: "Codificación Única", icon: "🗂", perm: "bpch.codificacion.ver", ambito: ["BPCH", "DCO"], claves: "cnc dgmn listado explosivos receso" },
+    ],
+  },
+  {
     id: "saec",
     title: "BPCH · SAEC",
     icon: "🛡",
