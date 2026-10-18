@@ -39,6 +39,12 @@ function textoHistorial(h: any): string {
     return `Resultado reabierto: ${d.muestra ?? ""} · ${d.ensayo ?? ""}${d.motivo ? ` · motivo: ${d.motivo}` : ""}` +
       (docs.length ? ` · se anuló ${docs.map((x) => x.numero).join(", ")} (reemitir tras aprobar de nuevo)` : "");
   }
+  if (h.tipo === "recepcion_muestra") {
+    const cond = (c?: string | null) => (c === "cumple" ? "Cumple" : c === "no_cumple" ? "No cumple" : "sin condición");
+    return `Recepción de ${d.muestra ?? "la muestra"} corregida: ${cond(d.anterior?.condicionRecepcion)} → ${cond(d.nuevo?.condicionRecepcion)}`;
+  }
+  if (h.tipo === "costos_reales")
+    return d.accion === "reabrir" ? `Planilla de costos reales reabierta · motivo: ${d.motivo ?? ""}` : `Planilla de costos reales cerrada · total $${Math.round(Number(d.total ?? 0)).toLocaleString("es-CL")}`;
   const n = (d.usuarios ?? []).length;
   if (h.tipo === "asignacion") return `Se asignaron ${n} persona${n === 1 ? "" : "s"} a la OT`;
   if (h.tipo === "desasignacion") return `Se retiraron ${n} persona${n === 1 ? "" : "s"} de la OT${d.motivo ? ` (${d.motivo})` : ""}`;
@@ -358,11 +364,17 @@ export default function ExpedientePage() {
               <RegistroMuestras otId={id} onCambio={() => { cargarMuestras(); cargarOt(); }} />
             )}
             {tab === "resultados" && (
-              <p className="subtitle" style={{ margin: 0 }}>
-                Los resultados de esta OT se capturan, revisan y aprueban en{" "}
-                <Link href={`/captura-ot?otId=${id}` as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>:
-                ahí se ve quién capturó, revisó y aprobó cada valor, y cuándo.
-              </p>
+              <div style={{ display: "grid", gap: 8 }}>
+                <p className="subtitle" style={{ margin: 0 }}>
+                  Los resultados de esta OT se capturan, revisan y aprueban en{" "}
+                  <Link href={`/captura-ot?otId=${id}` as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>:
+                  ahí se ve quién capturó, revisó y aprobó cada valor, y cuándo.
+                </p>
+                <div className="toolbar" style={{ margin: 0 }}>
+                  {puede("resultado.ver") && <Link href={`/ot/${id}/calculos` as any} className="btn outline sm">Planilla de registros y cálculos</Link>}
+                  {puede("costo_real.ver") && <Link href={`/ot/${id}/costos` as any} className="btn outline sm">Planilla de costos reales</Link>}
+                </div>
+              </div>
             )}
             {/* Fecha de compromiso, documentos (firma y entrega) y cierre de la OT. */}
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}

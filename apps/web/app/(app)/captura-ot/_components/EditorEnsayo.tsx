@@ -8,8 +8,12 @@
  *     y se completa aquí, SOLO para esta orden (queda marcado «de la orden»).
  *     Rellenar lo vacío lo hace quien captura; cambiar lo del catálogo, el
  *     tipo o la fórmula, la jefatura.
- *  2. Captura: numérico (valor, réplicas o lecturas con los campos del método
+ *  2. Factor de la fórmula (multiplicar o dividir): viene del método y lo
+ *     ajusta en la OT quien tiene «resultado.factor» (la jefatura por defecto),
+ *     con motivo. Se aplica al valor calculado (lecturas o réplicas).
+ *  3. Captura: numérico (valor, réplicas o lecturas con los campos del método
  *     si hay fórmula) o atributo (Cumple / No cumple con observación).
+ *     Corregir un valor ya capturado exige motivo (queda en el historial).
  *
  * El cálculo y el veredicto los hace el servidor
  * (apps/api/src/laboratorio/captura-estandar.ts).
@@ -45,7 +49,18 @@ export interface EnsayoEditable {
   observacion: string | null;
   lecturas: Record<string, number>[] | null;
   veredicto: string | null;
+  factorValor: number | string | null;
+  factorOperacion: "multiplicar" | "dividir" | null;
+  factorDescripcion: string | null;
+  factorOrigen: string | null;
+  factorEditadoAt: string | null;
+  factorMotivo: string | null;
+  valorSinFactor: number | string | null;
 }
+
+/** Texto del factor: «× 10», «÷ 2,5». */
+export const textoFactor = (op: string | null, v: number | string | null) =>
+  v == null || v === "" || !op ? "" : `${op === "dividir" ? "÷" : "×"} ${String(Number(v)).replace(".", ",")}`;
 
 const CAMPOS: { k: "limiteInf" | "nominal" | "limiteSup" | "unidad"; l: string }[] = [
   { k: "limiteInf", l: "Mín" },
@@ -60,12 +75,15 @@ export default function EditorEnsayo({
   e,
   puedeCapturar,
   esJefatura,
+  puedeFactor = false,
   onGuardado,
 }: {
   e: EnsayoEditable;
   puedeCapturar: boolean;
   /** resultado.aprobar: puede cambiar lo que vino del catálogo y la fórmula */
   esJefatura: boolean;
+  /** resultado.factor: puede ajustar el factor de la fórmula en esta OT */
+  puedeFactor?: boolean;
   onGuardado: (r: any) => void;
 }) {
   const cat = e.especCatalogo ?? {};
@@ -92,6 +110,17 @@ export default function EditorEnsayo({
     e.tipoDato === "atributo" && (e.veredicto === "cumple" || e.veredicto === "no_cumple") ? e.veredicto : "",
   );
   const [observacion, setObservacion] = useState(e.observacion ?? "");
+  const [motivoCaptura, setMotivoCaptura] = useState("");
+  const [motivoEsp, setMotivoEsp] = useState("");
+  // Factor
+  const [factorOp, setFactorOp] = useState<"" | "multiplicar" | "dividir">(e.factorOperacion ?? "");
+  const [factorValor, setFactorValor] = useState(e.factorValor != null && e.factorValor !== "" ? String(Number(e.factorValor)).replace(".", ",") : "");
+  const [factorDesc, setFactorDesc] = useState(e.factorDescripcion ?? "");
+  const [factorMotivo, setFactorMotivo] = useState("");
+  const [factorTodos, setFactorTodos] = useState(false);
+  // Corregir un valor ya capturado (aún sin revisar) exige motivo.
+  const tieneValor = (e.valorNumerico != null && e.valorNumerico !== "") || !!e.valorTexto;
+  const esCorreccion = e.estado === "capturado" && tieneValor;
 
   const editable = (k: string) =>
     puedeCapturar && (esJefatura || vacio(cat[k]) || (k === "tipoDato" && ["limiteInf", "nominal", "limiteSup", "requisito"].every((c) => vacio(cat[c]))));
@@ -106,11 +135,20 @@ export default function EditorEnsayo({
     return out;
   }, [esp, e]);
   const hayCambiosEsp = Object.keys(cambiosEsp).length > 0;
+  // Cambiar lo que trajo el catálogo, el tipo (con especificación) o la fórmula lo hace la jefatura con motivo.
+  const catalogoTraeEspec = ["limiteInf", "nominal", "limiteSup", "requisito"].some((k) => !vacio(cat[k]));
+  const espRequiereMotivo = Object.keys(cambiosEsp).some((k) =>
+    k === "formula" ? true : k === "tipoDato" ? catalogoTraeEspec : !vacio(cat[k]),
+  );
 
   async function guardarEspecificacion() {
     setGuardando(true);
     try {
-      const r = await llamar("PATCH", `/flujo/resultado/${e.id}/especificacion`, cambiosEsp);
+      if (espRequiereMotivo && motivoEsp.trim().length < 5) {
+        toast.error("Indique el motivo del cambio (mínimo 5 caracteres): queda en el historial del ensayo.");
+        return;
+      }
+      const r = await llamar("PATCH", `/flujo/resultado/${e.id}/especificacion`, { ...cambiosEsp, ...(espRequiereMotivo ? { motivo: motivoEsp.trim() } : {}) });
       toast.ok("Especificación de la orden guardada.");
       onGuardado(r);
     } catch (err: any) {
@@ -141,6 +179,10 @@ export default function EditorEnsayo({
       cuerpo = varias ? { replicasTexto: t } : { valor: t };
       if (observacion.trim()) cuerpo.observacion = observacion.trim();
     }
+    if (esCorreccion) {
+      if (motivoCaptura.trim().length < 5) { toast.error("Este ensayo ya tiene un valor: indique el motivo de la corrección (mínimo 5 caracteres)."); return; }
+      cuerpo.motivo = motivoCaptura.trim();
+    }
     setGuardando(true);
     try {
       const r = await llamar("POST", `/flujo/resultado/${e.id}/valor`, cuerpo);
@@ -152,6 +194,36 @@ export default function EditorEnsayo({
       setGuardando(false);
     }
   }
+
+  async function guardarFactor() {
+    const quitar = !factorValor.trim();
+    const valorNum = quitar ? null : Number(factorValor.trim().replace(",", "."));
+    if (!quitar && (!Number.isFinite(valorNum) || (valorNum as number) <= 0)) { toast.error("El factor debe ser un número mayor que 0 (coma decimal)."); return; }
+    if (!quitar && !factorOp) { toast.error("Indique si el factor multiplica o divide el resultado."); return; }
+    if (factorMotivo.trim().length < 5) { toast.error("Indique el motivo del ajuste del factor (mínimo 5 caracteres)."); return; }
+    setGuardando(true);
+    try {
+      const r: any = await llamar("PATCH", `/flujo/resultado/${e.id}/factor`, {
+        valor: valorNum,
+        operacion: quitar ? null : factorOp,
+        descripcion: factorDesc.trim() || null,
+        motivo: factorMotivo.trim(),
+        todoElMetodo: factorTodos,
+      });
+      toast.ok(`Factor guardado${r.actualizados > 1 ? ` en ${r.actualizados} ensayos` : ""}${r.omitidos?.length ? ` (${r.omitidos.length} ya revisado(s) o aprobado(s) no se cambiaron)` : ""}.`);
+      onGuardado(r);
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  const factorActual = textoFactor(e.factorOperacion, e.factorValor);
+  const factorCambiado =
+    (factorOp || null) !== (e.factorOperacion ?? null) ||
+    (factorValor.trim() ? Number(factorValor.trim().replace(",", ".")) : null) !== (e.factorValor != null && e.factorValor !== "" ? Number(e.factorValor) : null) ||
+    factorDesc.trim() !== (e.factorDescripcion ?? "");
 
   const etiquetaCampo = (i: number) => {
     const c = e.campos[i];
@@ -205,13 +277,75 @@ export default function EditorEnsayo({
           </p>
         )}
         {puedeCapturar && hayCambiosEsp && (
-          <div className="toolbar" style={{ marginTop: 6 }}>
+          <div className="toolbar" style={{ marginTop: 6, alignItems: "flex-end" }}>
+            {espRequiereMotivo && (
+              <div className="field" style={{ flex: 1, minWidth: 240, margin: 0 }}>
+                <label htmlFor={`me-${e.id}`}>Motivo del cambio <span className="req">*</span></label>
+                <input id={`me-${e.id}`} value={motivoEsp} maxLength={1000} onChange={(x) => setMotivoEsp(x.target.value)} placeholder="Por qué se cambia lo que vino del catálogo" />
+              </div>
+            )}
             <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Se guarda solo para esta orden.</span>
             <div className="spacer" />
             <button className="btn outline sm" disabled={guardando} onClick={guardarEspecificacion}>Guardar especificación de la orden</button>
           </div>
         )}
       </div>
+
+      {/* ---------------- Factor de la fórmula ---------------- */}
+      {e.tipoDato === "numerico" && (factorActual || (puedeFactor && puedeCapturar)) && (
+        <div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
+            <b style={{ fontSize: 12.5 }}>Factor de la fórmula</b>
+            {factorActual ? (
+              <span className={`pill ${e.factorOrigen === "orden" ? "amber" : "gray"}`}
+                title={e.factorOrigen === "orden" ? `Ajustado en esta OT${e.factorEditadoAt ? ` · ${fechaHora(e.factorEditadoAt)}` : ""}${e.factorMotivo ? ` · ${e.factorMotivo}` : ""}` : "Del método"}>
+                {factorActual}{e.factorDescripcion ? ` · ${e.factorDescripcion}` : ""} · {e.factorOrigen === "orden" ? "de la orden" : "del método"}
+              </span>
+            ) : <span className="pill gray">sin factor</span>}
+            {e.valorSinFactor != null && e.valorSinFactor !== "" && factorActual && (
+              <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Valor sin factor: {String(Number(e.valorSinFactor)).replace(".", ",")}</span>
+            )}
+          </div>
+          <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 0 6px" }}>
+            Se aplica al valor calculado (lecturas o réplicas). Un valor final ingresado directamente no se modifica.
+          </p>
+          {puedeFactor && puedeCapturar && (
+            <>
+              <div className="form-grid cols-4">
+                <div className="field">
+                  <label htmlFor={`fo-${e.id}`}>Operación</label>
+                  <select id={`fo-${e.id}`} value={factorOp} onChange={(x) => setFactorOp(x.target.value as any)}>
+                    <option value="">Sin factor</option>
+                    <option value="multiplicar">Multiplicar (×)</option>
+                    <option value="dividir">Dividir (÷)</option>
+                  </select>
+                </div>
+                <div className="field">
+                  <label htmlFor={`fv-${e.id}`}>Factor</label>
+                  <input id={`fv-${e.id}`} inputMode="decimal" value={factorValor} onChange={(x) => setFactorValor(x.target.value)} placeholder="p. ej. 10" style={{ fontFamily: "'JetBrains Mono', monospace" }} />
+                </div>
+                <div className="field span-2">
+                  <label htmlFor={`fd-${e.id}`}>Qué representa (opcional)</label>
+                  <input id={`fd-${e.id}`} value={factorDesc} maxLength={120} onChange={(x) => setFactorDesc(x.target.value)} placeholder="p. ej. dilución 1:10" />
+                </div>
+              </div>
+              {factorCambiado && (
+                <div className="toolbar" style={{ marginTop: 6, alignItems: "flex-end" }}>
+                  <div className="field" style={{ flex: 1, minWidth: 240, margin: 0 }}>
+                    <label htmlFor={`fm-${e.id}`}>Motivo del ajuste <span className="req">*</span></label>
+                    <input id={`fm-${e.id}`} value={factorMotivo} maxLength={1000} onChange={(x) => setFactorMotivo(x.target.value)} />
+                  </div>
+                  <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 400, textTransform: "none", fontSize: 12 }}>
+                    <input type="checkbox" style={{ width: "auto" }} checked={factorTodos} onChange={(x) => setFactorTodos(x.target.checked)} />
+                    Aplicar a todos los ensayos de este método en la OT
+                  </label>
+                  <button className="btn outline sm" disabled={guardando} onClick={guardarFactor}>Guardar factor</button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {/* ---------------- Captura ---------------- */}
       {puedeCapturar && (
@@ -288,6 +422,12 @@ export default function EditorEnsayo({
                 <label>Observación (opcional)</label>
                 <input value={observacion} onChange={(x) => setObservacion(x.target.value)} />
               </div>
+            </div>
+          )}
+          {esCorreccion && (
+            <div className="field" style={{ marginTop: 8, maxWidth: 520 }}>
+              <label htmlFor={`mc-${e.id}`}>Motivo de la corrección <span className="req">*</span></label>
+              <input id={`mc-${e.id}`} value={motivoCaptura} maxLength={1000} onChange={(x) => setMotivoCaptura(x.target.value)} placeholder="Este ensayo ya tiene un valor: indique por qué lo cambia" />
             </div>
           )}
           <div className="toolbar" style={{ marginTop: 8 }}>

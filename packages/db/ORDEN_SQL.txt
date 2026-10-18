@@ -70,3 +70,4 @@ align_metrologia_flujo.sql
 align_correcciones_manuales.sql
 align_ajustes_1510.sql
 align_informe_ensayo.sql
+align_quimicos_recepcion_calculo.sql
