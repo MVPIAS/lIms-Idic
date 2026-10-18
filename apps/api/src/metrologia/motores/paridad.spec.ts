@@ -45,18 +45,25 @@ describe("Resumen normalizado y valores certificados", () => {
     expect(r.uCert).toBe(8);
     expect(r.uMax).toBeCloseTo(2.503, 3);
   });
-  it("PT-0090: el LIMS evalúa la conformidad ISO 6789-1 y 10 lbf·ft no cumple (hallazgo PT1)", () => {
+  it("PT-0090: sin veredicto ISO 6789-1 en el resumen (C1: el LMT no evalúa conformidad); la tolerancia queda en el detalle", () => {
     const r = res("PT-0090");
-    expect(r.conforme).toBe(false);
-    expect(r.puntos.filter((p) => p.conforme === false)).toHaveLength(1);
+    expect(r.conforme).toBeNull();
+    expect(r.puntos.every((p) => p.conforme === null)).toBe(true);
+    const det = calcularConMotor("ITPT01", caso("PT-0090").datos).resultado;
+    expect(det.rows.filter((x: any) => !x.ok)).toHaveLength(1);
+  });
+  it("F-1556: en fuerza se informa la clase de cada punto, sin «cumple / no cumple» (C1)", () => {
+    const r = res("F-1556");
+    expect(r.conforme).toBeNull();
+    expect(r.puntos.every((p) => typeof p.clase === "string" && p.clase.length > 0)).toBe(true);
   });
   it("L-4351: sumar los empalmes en cuadratura baja la U certificada de 3 a 2 mm (hallazgo L17)", () => {
     expect(res("L-4351").uCert).toBe(3);
     expect(res("L-4351", { sqrt: true }).uCert).toBe(2);
   });
-  it("ITV02a/g/c usan el motor ITV02; procesos sin caso real no tienen motor", () => {
+  it("ITV02a/g/c usan el motor ITV02; ITM03 e ITV05 tienen motor propio desde los casos del 15-10", () => {
     expect(motorDeProceso("ITV02g")?.it).toBe("ITV02");
-    expect(motorDeProceso("ITV05")).toBeUndefined();
-    expect(motorDeProceso("ITM03")).toBeUndefined();
+    expect(motorDeProceso("ITV05")?.it).toBe("ITV05");
+    expect(motorDeProceso("ITM03")?.it).toBe("ITM03");
   });
 });

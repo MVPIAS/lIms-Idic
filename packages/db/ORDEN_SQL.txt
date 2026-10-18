@@ -73,3 +73,4 @@ align_informe_ensayo.sql
 align_quimicos_recepcion_calculo.sql
 align_bpch_internacion_reinspeccion.sql
 align_bpch_pn_prototipos_clasificacion.sql
+align_metrologia_1510.sql
