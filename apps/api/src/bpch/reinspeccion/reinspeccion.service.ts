@@ -103,7 +103,7 @@ export class ReinspeccionService {
         q.certificadoId,
         tenantId,
       );
-      if (!c) throw new BadRequestException("El certificado original indicado no existe.");
+      if (!c || !c.otId) throw new BadRequestException("El certificado original indicado no existe.");
       out.certificado = c;
       if (otId && otId !== c.otId) throw new BadRequestException("El certificado original no es de la OT original indicada.");
       otId = c.otId;
@@ -123,11 +123,19 @@ export class ReinspeccionService {
       const ramas = await this.comun.unidadesInspeccion(tenantId);
       if (!o.unidadId || !ramas.some((u) => u.id === o.unidadId))
         throw new BadRequestException(`La OT ${o.codigo} no es del Banco de Pruebas de Chile: no se puede reinspeccionar desde aquí.`);
+      // Sus antecedentes solo los hereda quien tiene esa unidad en su alcance (o la SCC / globales).
+      await this.comun.exigirExpediente(req, o.unidadId, `la OT ${o.codigo}`);
       const veredictos = await this.prisma.$queryRawUnsafe<{ veredicto: string | null; numero_lote: string | null }[]>(
         `SELECT veredicto, numero_lote FROM muestra WHERE ot_id = $1::uuid AND deleted_at IS NULL ORDER BY codigo`,
         o.id,
       );
       out.ot = { ...o, condicion: condicionFinal(veredictos.map((v) => v.veredicto)) };
+      out.documentos = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT c.id, c.numero, c.tipo_documento AS "tipoDocumento", c.estado
+           FROM certificado c WHERE c.ot_id = $1::uuid AND c.deleted_at IS NULL AND c.estado IN ('oficial', 'emitido')
+          ORDER BY c.created_at`,
+        o.id,
+      );
       const [int] = await this.prisma.$queryRawUnsafe<any[]>(
         `SELECT i.id, i.numero, i.procedimiento, i.esquema FROM bpch_internacion i WHERE i.ot_id = $1::uuid`,
         o.id,
