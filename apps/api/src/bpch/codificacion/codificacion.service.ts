@@ -239,6 +239,10 @@ export class CodificacionService {
     };
     const errores = erroresInscripcion({ ...nuevo, fabricanteNombre: fab.nombre });
     if (errores.length) throw new BadRequestException(errores.join(" "));
+    if (nuevo.catElementoId && nuevo.catElementoId !== actual.catElementoId) {
+      const e = await this.prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT id FROM cat_elemento WHERE id = $1::uuid AND tenant_id = $2::uuid`, nuevo.catElementoId, tenantId);
+      if (!e[0]) throw new BadRequestException("El elemento del catálogo indicado no existe.");
+    }
     const cambiaCodigo = normalizarCnc(nuevo.cnc) !== normalizarCnc(actual.cnc);
     if (cambiaCodigo) {
       if (!dto.motivo || dto.motivo.trim().length < 5) throw new BadRequestException("Para corregir el código CNC-DGMN indique el motivo (mínimo 5 caracteres).");
