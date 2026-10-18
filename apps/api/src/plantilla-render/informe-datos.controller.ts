@@ -45,7 +45,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { ConfigInformeSchema, configEfectiva, configPorTipo } from "./config-informe";
 import { armarInforme } from "./filas-informe";
 import { PlantillaRenderService } from "./plantilla-render.service";
-import { tipoImagen } from "./reglas-fotos";
+import { errorDimensionesFoto, tipoImagen } from "./reglas-fotos";
 
 /** Fichero que entrega multer (FileInterceptor, almacenamiento en memoria). */
 type ArchivoSubido = { buffer: Buffer; originalname?: string; size?: number; mimetype?: string };
@@ -188,6 +188,10 @@ export class InformeDatosService {
       throw new BadRequestException(`La foto no puede superar ${MAX_FOTO_BYTES / 1024 / 1024} MB.`);
     const mime = tipoImagen(archivo.buffer);
     if (!mime) throw new BadRequestException("El archivo no es una imagen PNG o JPEG válida.");
+    // Una imagen pequeña en bytes puede declarar decenas de miles de píxeles y agotar
+    // la memoria al descomprimirla para el PDF: se limita por su cabecera.
+    const errorDim = errorDimensionesFoto(archivo.buffer, mime);
+    if (errorDim) throw new BadRequestException(errorDim);
     const meta = FotoMeta.parse(cuerpo ?? {});
     const muestraId = await this.validarVinculos(otId, meta.muestraId, meta.resultadoId);
 

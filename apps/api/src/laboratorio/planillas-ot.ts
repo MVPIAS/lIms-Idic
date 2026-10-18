@@ -66,6 +66,13 @@ const tenantDe = (req: any): string => req?.user?.tenantId;
 /** unidad.codsucdel admite varios códigos («7003/7004»): ¿la familia del catálogo es de la unidad? */
 const FAMILIA_DE_UNIDAD = `f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))`;
 
+/** Ensayos del laboratorio que aún no están aprobados. */
+function contarSinAprobar(labs: Map<string, { unidadId: string | null; estado: string }>, unidadId: string): number {
+  let n = 0;
+  for (const r of labs.values()) if (r.unidadId === unidadId && r.estado !== "aprobado") n++;
+  return n;
+}
+
 type UnidadOt = { id: string; codigo: string; nombre: string; principal: boolean };
 
 /**
@@ -348,10 +355,7 @@ export class CostosRealesService {
    * los demás, y no se cierra con los suyos pendientes.
    */
   private async resultadosSinAprobar(otId: string, tenantId: string, unidadId: string, principal: string | null, posibles: string[]) {
-    const labs = await laboratoriosDeResultados(this.prisma, otId, tenantId, posibles, principal);
-    let n = 0;
-    for (const r of labs.values()) if (r.unidadId === unidadId && r.estado !== "aprobado") n++;
-    return n;
+    return contarSinAprobar(await laboratoriosDeResultados(this.prisma, otId, tenantId, posibles, principal), unidadId);
   }
 
   private async cargos(tenantId: string) {
@@ -398,25 +402,30 @@ export class CostosRealesService {
       solicitudesDelLaboratorio: solicitudes.filter((x) => x.delLaboratorio),
     });
     const resumen = resumenCostos(lineas);
-    const sinAprobar = await this.resultadosSinAprobar(ot.id, tenantId, unidad, ot.unidadPrincipal, posibles.map((u) => u.id));
+    const labs = await laboratoriosDeResultados(this.prisma, ot.id, tenantId, posibles.map((u) => u.id), ot.unidadPrincipal);
+    const sinAprobar = contarSinAprobar(labs, unidad);
+    // Ensayos de ESTE laboratorio: las sugerencias no muestran equipos ni consumos de otros.
+    const propios = [...labs].filter(([, x]) => x.unidadId === unidad).map(([id]) => id);
 
-    // Sugerencias para completar: equipos usados en los ensayos de la OT y
+    // Sugerencias para completar: equipos usados en los ensayos del laboratorio y
     // consumos registrados (kardex) sobre sus muestras. Horas y tarifas, a mano.
     const [equipos, consumos, cargos] = await Promise.all([
       this.prisma.$queryRawUnsafe<any[]>(
-        `SELECT DISTINCT e.id, e.codigo, e.nombre FROM resultado r JOIN muestra m ON m.id = r.muestra_id
+        `SELECT DISTINCT e.id, e.codigo, e.nombre FROM resultado r
            JOIN equipo e ON e.id = r.equipo_id
-          WHERE COALESCE(r.ot_id, m.ot_id) = $1::uuid AND r.deleted_at IS NULL ORDER BY e.codigo`,
-        ot.id,
+          WHERE r.id = ANY($1::uuid[]) ORDER BY e.codigo`,
+        propios,
       ),
       this.prisma.$queryRawUnsafe<any[]>(
         `SELECT c.id, c.codigo, c.nombre, c.unidad_medida AS unidad, sum(mc.cantidad)::float8 AS cantidad
            FROM movimiento_consumible mc JOIN lote_consumible l ON l.id = mc.lote_id
            JOIN consumible c ON c.id = l.consumible_id JOIN muestra m ON m.id = mc.muestra_id
           WHERE m.ot_id = $1::uuid AND mc.tipo = 'consumo' AND mc.tenant_id = $2::uuid
+            AND m.id IN (SELECT r.muestra_id FROM resultado r WHERE r.id = ANY($3::uuid[]))
           GROUP BY c.id, c.codigo, c.nombre, c.unidad_medida ORDER BY c.codigo`,
         ot.id,
         tenantId,
+        propios,
       ),
       this.cargos(tenantId),
     ]);
