@@ -34,7 +34,10 @@ UPDATE met_proceso p SET acreditacion = a.acr
   FROM (VALUES ('masa','LC 001'), ('longitud','LC 004'), ('fuerza','LC 005'), ('presion','LC 022'),
                ('volumen','LC 023'), ('par','LC 108'), ('temperatura','LC 155')) AS a(mag, acr),
        met_magnitud m
- WHERE m.id = p.magnitud_id AND m.codigo = a.mag AND p.acreditacion IS NULL AND p.laboratorio IN ('LMT', 'LMTE');
+ WHERE m.id = p.magnitud_id AND m.codigo = a.mag AND p.acreditacion IS NULL AND p.laboratorio IN ('LMT', 'LMTE')
+   -- ITM03 no figura en el alcance de LC 001 (align_metrologia_1510.sql la deja sin
+   -- acreditación); sin esta excepción, reaplicar este fichero se la volvía a poner.
+   AND p.codigo <> 'ITM03';
 
 INSERT INTO met_proceso (codigo, magnitud_id, nombre, metodo, norma, laboratorio)
 SELECT p.codigo, m.id, p.nombre, p.metodo, p.norma, p.lab FROM (VALUES

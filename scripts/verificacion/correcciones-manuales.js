@@ -11,7 +11,12 @@
  *
  * Mismas variables que flujo-completo.js (DATABASE_URL con --arrancar; CLAVE_DEMO
  * o la constante CLAVE_DEMO_EMBEBIDA). Deja datos de prueba en la base (OT en
- * SSTGO y D11, controles de QC, una nota de crédito): úsese en una base de pruebas.
+ * SSTGO, D11 y LQC, un informe de LQC, controles de QC, una factura y su nota de
+ * crédito): úsese en una base de pruebas.
+ *
+ * No depende de otros guiones: se prepara sus datos (si LQC aún no tiene ningún
+ * documento, emite uno; la nota de crédito va sobre una factura que crea). Funciona
+ * en una base recién creada y repetido.
  * Bloquea y desbloquea la cuenta demo.muestreo (5 intentos fallidos).
  */
 "use strict";
@@ -290,9 +295,29 @@ async function main() {
   });
 
   /* ---------------- 7 · Alcance del buscador de documentos y de los reportes */
-  await paso("7 · Buscador de documentos: un laboratorio no ve los de otro; Dirección ve todo", async () => {
+  /**
+   * Un documento de LQC para el buscador: el que haya o, en una base recién creada,
+   * uno propio (OT de LQC → muestra → captura → revisión → aprobación → emisión).
+   */
+  const documentoLqc = async () => {
+    const ya = lista(await ok("demo.lqc.jefe", "GET", "/informes/documentos?limit=1"))[0];
+    if (ya) return ya;
+    const ot = await otDe(C.LQC, "LQC");
+    await ok("demo.recepcion", "POST", `/flujo/ot/${ot.id}/muestras`, { muestras: [{ nombre: "Agua (prueba de correcciones)", metodoIds: [C.mPh.id] }] });
+    const a1 = await login("demo.lqc.analista1");
+    await ok("demo.lqc.jefe", "PUT", `/ot/${ot.id}/analistas`, { usuarioIds: [a1.id] });
+    for (const r of (await ok("demo.lqc.jefe", "GET", `/flujo/ot/${ot.id}/resultados`)).resultados)
+      await ok("demo.lqc.analista1", "POST", `/flujo/resultado/${r.id}/valor`, { valor: "7,2" });
+    await ok("demo.lqc.revisor", "POST", `/resultados/ot/${ot.id}/revisar`, {});
+    await ok("demo.lqc.jefe", "POST", `/resultados/ot/${ot.id}/aprobar`, {});
+    const r = await ok("demo.lqc.jefe", "POST", "/informes/emitir", { otId: ot.id, plantillaId: C.plantilla.id });
     const doc = lista(await ok("demo.lqc.jefe", "GET", "/informes/documentos?limit=1"))[0];
-    afirmar(doc, "LQC no tiene documentos (corra antes flujo-completo.js)");
+    afirmar(doc, `se emitió el informe ${JSON.stringify(r).slice(0, 120)} pero el buscador de LQC no lo muestra`);
+    return doc;
+  };
+
+  await paso("7 · Buscador de documentos: un laboratorio no ve los de otro; Dirección ve todo", async () => {
+    const doc = await documentoLqc();
     const num = encodeURIComponent(doc.numero);
     const lqc = await ok("demo.lqc.jefe", "GET", `/documentos?q=${num}`);
     const lpn = await ok("demo.lpn.analista1", "GET", `/documentos?q=${num}`);
@@ -330,13 +355,13 @@ async function main() {
 
   /* ---------------- 12 · Notas de crédito */
   await paso("12 · Finanzas guarda una nota de crédito; Abastecimiento no puede", async () => {
-    // Una factura con saldo para la nota de 100 (la última puede estar ya pagada:
-    // la nota de crédito valida el saldo desde 5d95239, p. ej. tras flujo-completo.js).
-    const fs_ = lista(await ok("demo.finanzas", "GET", "/facturas?limit=200"));
-    // Solo una factura ya emitida admite notas de crédito (una pendiente, p. ej. la de la
-    // tasa de internación que deja bpch-internacion-reinspeccion.js, responde 409).
-    const f = fs_.find((x) => !["pendiente", "anulada"].includes(x.estado) && (x.saldo === undefined || Number(x.saldo) >= 100));
-    afirmar(f, "no hay facturas con saldo para la nota de crédito");
+    // Factura propia, emitida y con saldo: la nota de crédito valida el saldo y solo se
+    // admite sobre facturas emitidas, así que no se depende de lo que dejen otros guiones.
+    const f = await ok("demo.finanzas", "POST", "/facturas", {
+      numero: `F-CORR-${sello}`, clienteId: C.cliente.id, estado: "emitida", ivaPct: 19,
+      lineas: [{ descripcion: "Servicio de prueba (correcciones manuales)", cantidad: 1, precioUnitario: 1000 }],
+    });
+    afirmar(f.id && f.estado === "emitida", `factura ${JSON.stringify(f).slice(0, 160)}`);
     await exigir(403, "demo.abastecimiento", "POST", "/notas-credito", { facturaId: f.id, numero: `NCX-${sello}`, monto: 1 });
     const nc = await ok("demo.finanzas", "POST", "/notas-credito", { facturaId: f.id, numero: `NC-${sello}`, monto: 100, motivo: "Prueba" });
     afirmar(nc.id && nc.numero === `NC-${sello}`, JSON.stringify(nc).slice(0, 160));
