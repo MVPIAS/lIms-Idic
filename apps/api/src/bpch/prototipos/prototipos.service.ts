@@ -67,7 +67,8 @@ const iso = (d: unknown) => (d ? new Date(d as any).toISOString().slice(0, 10) :
 const SELECT = `
   SELECT p.*, cl.razon_social AS cliente_nombre, cl.rut AS cliente_rut,
          u.codigo AS unidad_codigo, u.nombre AS unidad_nombre,
-         ot.codigo AS ot_codigo, ot.estado AS ot_estado, ot.con_cobro AS ot_con_cobro,
+         ot.codigo AS ot_codigo, ot.estado AS ot_estado, ot.con_cobro AS ot_con_cobro, ot.unidad_principal AS ot_unidad,
+         uo.codigo AS ot_unidad_codigo, uo.nombre AS ot_unidad_nombre,
          c.codigo AS clas_codigo, c.version AS clas_version, c.estado AS clas_estado, c.explosiva AS clas_explosiva,
          c.clase_division AS clas_clase, c.grupo_compatibilidad AS clas_grupo, c.numero_onu AS clas_onu,
          d.numero AS doc_numero, d.estado AS doc_estado, d.tipo_documento AS doc_tipo,
@@ -76,6 +77,7 @@ const SELECT = `
     JOIN cliente cl ON cl.id = p.cliente_id
     LEFT JOIN unidad u ON u.id = p.unidad_id
     LEFT JOIN orden_trabajo ot ON ot.id = p.ot_id
+    LEFT JOIN unidad uo ON uo.id = ot.unidad_principal
     LEFT JOIN bpch_clasificacion c ON c.id = p.clasificacion_id
     LEFT JOIN certificado d ON d.id = p.documento_id
     LEFT JOIN usuario ud ON ud.id = p.dictamen_por
@@ -434,7 +436,7 @@ export class PrototiposService implements OnModuleInit {
   async dictaminar(req: any, tenantId: string, usuarioId: string | null, id: string, body: unknown) {
     const d = DictamenDto.parse(body ?? {});
     const p = await this.fila(tenantId, id);
-    if (p.unidad_id) await this.comun.exigirOperarEnUnidad(req, { id: p.unidad_id, codigo: p.unidad_codigo, nombre: p.unidad_nombre, tipo: null });
+    await this.exigirAlcancePrototipo(req, p);
     const otViva = p.ot_id && p.ot_estado !== "anulada";
     const resultados = otViva ? await this.comun.resultadosDeOt(p.ot_id) : [];
     const faltan = faltantesDictamen({
@@ -491,11 +493,23 @@ export class PrototiposService implements OnModuleInit {
     };
   }
 
+  /** Alcance sobre la unidad ACTUAL de la OT del prototipo (o la de su alta si no hay OT). */
+  private async exigirAlcancePrototipo(req: any, p: any) {
+    const id = p.ot_unidad ?? p.unidad_id;
+    if (!id) return;
+    await this.comun.exigirOperarEnUnidad(req, {
+      id,
+      codigo: p.ot_unidad ? p.ot_unidad_codigo : p.unidad_codigo,
+      nombre: p.ot_unidad ? p.ot_unidad_nombre : p.unidad_nombre,
+      tipo: null,
+    });
+  }
+
   /** Código único CNC-DGMN del tipo aprobado (cuando su certificado es oficial). */
   async registrarCodigo(req: any, tenantId: string, usuarioId: string | null, id: string, body: unknown) {
     const { codigo } = CodigoCnc.parse(body ?? {});
     const p = await this.fila(tenantId, id);
-    if (p.unidad_id) await this.comun.exigirOperarEnUnidad(req, { id: p.unidad_id, codigo: p.unidad_codigo, nombre: p.unidad_nombre, tipo: null });
+    await this.exigirAlcancePrototipo(req, p);
     if (p.dictamen !== "aprobado" || p.estado !== "dictaminado")
       throw new ConflictException("Solo un prototipo aprobado recibe código único.");
     if (p.doc_estado !== "oficial" && p.doc_estado !== "emitido")

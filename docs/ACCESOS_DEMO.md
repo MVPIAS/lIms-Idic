@@ -72,6 +72,8 @@ Tres capas, las tres en el servidor (el menú solo las refleja):
 | SAEC: casos, evidencias, armas, custodia, préstamos, IBIS, certificados | Delegación Nº 11 | Delegación Nº 11, jefatura de BPCH y perfiles globales |
 | Metrología | Sección Metrología | LMT, LMTE, LNF, sus jefaturas y perfiles globales |
 | Internaciones | BPCH y Comercial | Certificación, sucursales, Delegación Nº 11, Comercial y perfiles globales |
+| Producción Nacional | BPCH y Comercial | Igual que Internaciones; Comercial solo consulta (docs/FLUJO_BPCH_PRODUCCION_PROTOTIPOS_CLASIFICACION.md) |
+| Prototipos · Clasificación de sustancias | BPCH | Certificación, sucursales, Delegación Nº 11, jefatura de BPCH y perfiles globales |
 
 ## Prueba del 13-10-2026 (26 perfiles, entorno local)
 
