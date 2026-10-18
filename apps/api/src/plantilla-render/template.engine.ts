@@ -206,6 +206,52 @@ export function tablaResultados(filas: FilaResultado[]): string {
   );
 }
 
+/** Fila de `{{tabla_inspeccion}}` (formato BPCH: Mínimo / Máximo / Resultado / Condición). */
+export type FilaInspeccion = {
+  inspeccion: string;
+  muestra: string;
+  minimo: string;
+  maximo: string;
+  resultado: string;
+  unidad: string;
+  condicion: string;
+};
+
+/**
+ * `{{tabla_inspeccion}}`: la tabla del Informe de Inspección, Certificado de
+ * Conformidad e Informe de Incumplimiento del Banco de Pruebas de Chile:
+ * Inspección · Mínimo · Máximo · Resultado · Unidad · Condición.
+ */
+export function tablaInspeccion(filas: FilaInspeccion[]): string {
+  if (filas.length === 0) {
+    return `<table class="rep"><tbody><tr><td class="vacio">Sin inspecciones registradas para esta orden de trabajo.</td></tr></tbody></table>`;
+  }
+  const variasMuestras = new Set(filas.map((f) => f.muestra)).size > 1;
+  const cuerpo = filas
+    .map((f) => {
+      const v = (f.condicion ?? "").toLowerCase();
+      const clase = v.startsWith("cumple") ? "ok" : v ? "no" : "";
+      return (
+        "<tr>" +
+        celda(f.inspeccion) +
+        (variasMuestras ? celda(f.muestra) : "") +
+        celda(f.minimo, "num") +
+        celda(f.maximo, "num") +
+        celda(f.resultado, "num") +
+        celda(f.unidad) +
+        `<td class="${clase}">${f.condicion ? escapeHtml(f.condicion) : GUION}</td>` +
+        "</tr>"
+      );
+    })
+    .join("");
+  return (
+    `<table class="rep"><thead><tr>` +
+    `<th>Inspección</th>${variasMuestras ? "<th>Lote / muestra</th>" : ""}<th class="num">Mínimo</th><th class="num">Máximo</th>` +
+    `<th class="num">Resultado</th><th>Unidad</th><th>Condición</th>` +
+    `</tr></thead><tbody>${cuerpo}</tbody></table>`
+  );
+}
+
 export type FilaMuestra = {
   codigo: string;
   nombre: string;

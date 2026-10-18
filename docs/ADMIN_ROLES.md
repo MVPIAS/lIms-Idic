@@ -97,6 +97,10 @@ ANALISTA, ANALISTA_SR, TECNICO, METROLOGO, INSPECTOR; LECTOR solo `nc.ver`).
 `ot.cambiar_laboratorio` (fijar o cambiar el laboratorio responsable: los anteriores + PLANIFICACION). PLANIFICACION recibe
 además `muestra.crear` para registrar la OT con sus elementos.
 
+**BPCH · Internación, Reinspección y Codificación Única** (`align_bpch_internacion_reinspeccion.sql`,
+ver `docs/FLUJO_BPCH_INTERNACION_REINSPECCION_CODIFICACION.md`): `bpch.internacion.ver/registrar/gestionar`,
+`bpch.tasa.gestionar`, `bpch.reinspeccion.ver/gestionar`, `bpch.codificacion.ver/gestionar`.
+
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
 ---

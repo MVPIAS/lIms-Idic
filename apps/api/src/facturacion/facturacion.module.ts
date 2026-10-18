@@ -125,8 +125,10 @@ export class FacturaService extends BaseCrudService {
     ot: { id: string; codigo: string; tenantId: string; clienteId: string; cotizacionId: string | null; centroCostoId: string | null },
     usuarioId: string | null,
   ) {
+    // Una sola factura por OT: la del cierre o la de la tasa de internación que
+    // BPCH ya remitió a facturación (bpch/internacion).
     const existente = await tx.factura.findFirst({
-      where: { otId: ot.id, origen: "cierre_ot", deletedAt: null, NOT: { estado: "anulada" } },
+      where: { otId: ot.id, origen: { in: ["cierre_ot", "tasa_internacion"] }, deletedAt: null, NOT: { estado: "anulada" } },
       include: { lineas: true },
     });
     if (existente) return existente;
