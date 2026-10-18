@@ -12,6 +12,7 @@ import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
 import RegistroMuestras from "./_components/RegistroMuestras";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
+import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
 
 /** Texto legible de un hecho del historial de la OT. */
 function textoHistorial(h: any): string {
@@ -234,6 +235,8 @@ export default function ExpedientePage() {
           {ot?.conCobro === false && <span className="pill gray" style={{ marginLeft: 8 }}>Sin cobro</span>}
         </div>
       </div>
+
+      {ot && <OrigenBpchOt otId={ot.id} origenTrabajo={ot.origenTrabajo} />}
 
       {ot && !ot.unidadPrincipal && (
         <div className="alert warn">
