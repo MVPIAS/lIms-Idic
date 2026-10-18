@@ -2,10 +2,13 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
 import { BpchComunService, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
+import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 import { CodificacionService } from "../codificacion/codificacion.service";
 import {
   ACCIONES_DOC_ADM,
   LISTADOS_CODIFICACION,
+  TEXTO_AVANCE,
+  avanceInternacion,
   calcularTasa,
   erroresAnalisis,
   erroresItems,
@@ -114,7 +117,8 @@ export const FiltroInternaciones = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 
-const ESTADOS_ABIERTOS_OT = ["cerrada", "anulada"];
+/** Estados en los que la OT ya no admite cambios del expediente. */
+const ESTADOS_CERRADOS_OT = ["cerrada", "anulada"];
 
 /**
  * Internación BPCH (IDIC-PG 24 Anexo 03): el expediente que nace con la
@@ -126,6 +130,7 @@ export class InternacionBpchService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly comun: BpchComunService,
+    private readonly ots: OtDesdeProcesoService,
     private readonly codificacion: CodificacionService,
   ) {}
 
@@ -154,11 +159,33 @@ export class InternacionBpchService {
               i.sujeta_tasa AS "sujetaTasa", i.doc_adm_estado AS "docAdmEstado", i.created_at AS "createdAt",
               cl.razon_social AS empresa, cl.rut, u.codigo AS "unidadCodigo", u.nombre AS "unidadNombre",
               o.id AS "otId", o.codigo AS "otCodigo", o.estado AS "otEstado", i.remitida_dco_at AS "remitidaAt",
-              (SELECT string_agg(it.elemento_especifico, ' / ' ORDER BY it.orden) FROM bpch_internacion_item it WHERE it.internacion_id = i.id) AS elementos
+              (SELECT string_agg(it.elemento_especifico, ' / ' ORDER BY it.orden) FROM bpch_internacion_item it WHERE it.internacion_id = i.id) AS elementos,
+              (SELECT count(*)::int FROM bpch_internacion_item it WHERE it.internacion_id = i.id) AS "nLotes",
+              (SELECT count(*)::int FROM bpch_internacion_item it WHERE it.internacion_id = i.id AND it.muestra_id IS NOT NULL) AS "nLotesRegistrados",
+              COALESCE(ARRAY(SELECT DISTINCT c.tipo_documento FROM certificado c
+                              WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial', 'emitido') AND c.tipo_documento IS NOT NULL), '{}') AS "documentosOficiales"
          ${desde}
         ORDER BY i.created_at DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}`,
       ...args,
     );
+    // Estado que se muestra: el avance real (OT, lotes, documentos, tasa), no solo
+    // el del expediente, que deja de cambiar al generar la OT (hallazgo 21).
+    for (const r of data) {
+      const docs: string[] = r.documentosOficiales ?? [];
+      r.avance = avanceInternacion({
+        estado: r.estado,
+        otEstado: r.otEstado,
+        lotes: r.nLotes,
+        lotesRegistrados: r.nLotesRegistrados,
+        informeOficial: docs.includes("INFORME_INSPECCION"),
+        certificadoOficial: docs.includes("CERTIFICADO_CONFORMIDAD"),
+        incumplimientoOficial: docs.includes("INFORME_INCUMPLIMIENTO"),
+        sujetaTasa: r.sujetaTasa,
+        tasaRemitida: Boolean(r.remitidaAt),
+      });
+      r.avanceTexto = TEXTO_AVANCE[r.avance as keyof typeof TEXTO_AVANCE];
+      delete r.documentosOficiales;
+    }
     return { data, meta: { page, limit, total: Number(total), totalPages: Math.max(1, Math.ceil(Number(total) / limit)) } };
   }
 
@@ -266,7 +293,28 @@ export class InternacionBpchService {
       anuladaMotivo: i.anulada_motivo,
       createdAt: i.created_at,
     };
-    return { ...exp, items, solicitudes, tasa, estadoOt, fases: this.fases(exp, items, tasa, estadoOt) };
+    const oficial = (d: { estado: string } | null | undefined) => Boolean(d && ["oficial", "emitido"].includes(d.estado));
+    const avance = avanceInternacion({
+      estado: i.estado,
+      otEstado: estadoOt?.ot?.estado ?? null,
+      lotes: items.length,
+      lotesRegistrados: items.filter((x) => x.muestraId).length,
+      informeOficial: oficial(estadoOt?.informeInspeccion),
+      certificadoOficial: oficial(estadoOt?.certificado),
+      incumplimientoOficial: oficial(estadoOt?.incumplimiento),
+      sujetaTasa: i.sujeta_tasa,
+      tasaRemitida: Boolean(i.remitida_dco_at),
+    });
+    return {
+      ...exp,
+      avance,
+      avanceTexto: TEXTO_AVANCE[avance],
+      items,
+      solicitudes,
+      tasa,
+      estadoOt,
+      fases: this.fases(exp, items, tasa, estadoOt),
+    };
   }
 
   /** Avance del expediente (lo que la pantalla pinta como pasos). */
@@ -373,7 +421,7 @@ export class InternacionBpchService {
     if (errores.length) throw new BadRequestException(errores.join(" "));
     const usuario = usuarioDe(req);
     const id = await this.prisma.$transaction(async (tx) => {
-      const numero = await this.comun.correlativo(tx, tenantId, "INT");
+      const numero = await this.ots.correlativo(tx, tenantId, "INT");
       const [fila] = await tx.$queryRawUnsafe<{ id: string }[]>(
         `INSERT INTO bpch_internacion (tenant_id, numero, resolucion_numero, resolucion_fecha, oficio, cliente_id, documento_aduanero, pais_origen,
                 esquema, procedimiento, unidad_inspeccion_id, sujeta_tasa, doc_adm_estado, created_by, updated_by)
@@ -510,7 +558,7 @@ export class InternacionBpchService {
       if (actual.ot_id) throw new ConflictException(`La internación ${i.numero} ya tiene OT.`);
       const elementos = items.map((x) => x.elementoEspecifico).join(" / ");
       const unico = items.length === 1 ? items[0] : null;
-      const ot = await this.comun.crearOt(tx, {
+      const ot = await this.ots.crearOt(tx, {
         tenantId,
         clienteId: i.cliente_id,
         unidad,
@@ -522,7 +570,8 @@ export class InternacionBpchService {
         elementoGenerico: unico?.elementoGenerico ?? null,
         catElementoId: unico?.catElementoId ?? null,
         usuarioId: usuario,
-        historial: { internacion: i.numero, resolucion: i.resolucion_numero, sujetaTasa: i.sujeta_tasa },
+        tipoHistorial: "bpch_internacion",
+        detalleHistorial: { internacion: i.numero, resolucion: i.resolucion_numero, sujetaTasa: i.sujeta_tasa },
       });
       await tx.$executeRawUnsafe(
         `UPDATE bpch_internacion SET estado = 'ot_generada', info_completa = TRUE, analista_id = $2::uuid, fecha_analisis = $3::date,
@@ -595,7 +644,7 @@ export class InternacionBpchService {
 
   private exigirOtAbierta(i: any, e: Awaited<ReturnType<BpchComunService["estadoOt"]>>) {
     if (!i.ot_id || !e) throw new ConflictException(`La internación ${i.numero} aún no tiene OT: complete el análisis técnico.`);
-    if (ESTADOS_ABIERTOS_OT.includes(e.ot.estado)) throw new ConflictException(`La OT ${e.ot.codigo} está ${e.ot.estado}.`);
+    if (ESTADOS_CERRADOS_OT.includes(e.ot.estado)) throw new ConflictException(`La OT ${e.ot.codigo} está ${e.ot.estado}.`);
   }
 
   async inspeccion(req: any, id: string, body: unknown) {
@@ -660,18 +709,41 @@ export class InternacionBpchService {
       else errores.push(...erroresLoteParaMuestra(actual, `Lote ${actual.orden}`));
     }
     if (errores.length) throw new BadRequestException(errores.join(" "));
-    const creadas: { lote: number; muestra: string; ensayos: number }[] = [];
-    for (const it of dto.items) {
-      const actual = porId.get(it.id)!;
-      const m = await this.comun.registrarLote(req, i.ot_id, {
-        nombre: `Lote ${actual.identificacionLote} · ${actual.elementoEspecifico}`,
-        metodoIds: it.metodoIds,
-        catElementoId: actual.catElementoId,
-        lote: actual.identificacionLote,
-      });
-      await this.prisma.$executeRawUnsafe(`UPDATE bpch_internacion_item SET muestra_id = $2::uuid WHERE id = $1::uuid`, it.id, m.id);
-      creadas.push({ lote: actual.orden, muestra: m.codigo, ensayos: m.ensayos });
-    }
+    // Todos los lotes o ninguno, con la fila del expediente bloqueada: un doble
+    // envío espera al primero y ve sus lotes ya registrados; si un lote falla,
+    // no queda ninguna muestra creada (revisión r3, hallazgo 10).
+    const creadas = await this.prisma.$transaction(
+      async (tx) => {
+        await tx.$queryRawUnsafe(`SELECT id FROM bpch_internacion WHERE id = $1::uuid FOR UPDATE`, id);
+        const ya = await tx.$queryRawUnsafe<{ orden: number; codigo: string | null }[]>(
+          `SELECT it.orden, m.codigo FROM bpch_internacion_item it LEFT JOIN muestra m ON m.id = it.muestra_id
+            WHERE it.internacion_id = $1::uuid AND it.id = ANY($2::uuid[]) AND it.muestra_id IS NOT NULL ORDER BY it.orden`,
+          id,
+          dto.items.map((x) => x.id),
+        );
+        if (ya.length)
+          throw new BadRequestException(ya.map((x) => `El lote ${x.orden} ya está registrado como muestra ${x.codigo ?? ""}.`).join(" "));
+        const hechas: { lote: number; muestra: string; ensayos: number }[] = [];
+        for (const it of dto.items) {
+          const actual = porId.get(it.id)!;
+          const m = await this.comun.registrarLote(
+            req,
+            i.ot_id,
+            {
+              nombre: `Lote ${actual.identificacionLote} · ${actual.elementoEspecifico}`,
+              metodoIds: it.metodoIds,
+              catElementoId: actual.catElementoId,
+              lote: actual.identificacionLote,
+            },
+            tx,
+          );
+          await tx.$executeRawUnsafe(`UPDATE bpch_internacion_item SET muestra_id = $2::uuid WHERE id = $1::uuid`, it.id, m.id);
+          hechas.push({ lote: actual.orden, muestra: m.codigo, ensayos: m.ensayos });
+        }
+        return hechas;
+      },
+      { maxWait: 15_000, timeout: 120_000 },
+    );
     return { ...(await this.detalle(req, id)), lotesRegistrados: creadas };
   }
 
@@ -825,12 +897,15 @@ export class InternacionBpchService {
         const it = porId.get(sel.id);
         if (!it) throw new BadRequestException(`El elemento ${sel.id} no es de esta internación.`);
         let codId: string | null = it.codificacionId;
+        // Dentro de la transacción: un CNC inscrito para un lote anterior de esta
+        // misma petición (mismo producto nuevo) se ve y se actualiza, no se vuelve
+        // a inscribir (revisión r3, hallazgo 3).
         if (!codId && it.cnc) {
-          const ya = await this.codificacion.porCnc(tenantId, it.cnc);
+          const ya = await this.codificacion.porCnc(tenantId, it.cnc, tx);
           codId = ya?.id ?? null;
         }
         if (codId) {
-          const actual = await this.codificacion.uno(tenantId, codId);
+          const actual = await this.codificacion.uno(tenantId, codId, tx);
           await tx.$executeRawUnsafe(
             `UPDATE bpch_codificacion SET certificado_id = $2::uuid, certificado_numero = NULL, updated_by = $3::uuid, updated_at = now() WHERE id = $1::uuid`,
             codId,

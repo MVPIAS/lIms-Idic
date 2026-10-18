@@ -2,7 +2,7 @@ import {
   avisosFechas, cmcPara, codigoVerificacionValido, convertir, decimales2cs, estadoPatron, motivoHabilitacion, nuevoCodigoVerificacion,
   numeroCertificado, revisarPatrones, u2cs, uCertificada, type FilaCmc, type Firmante,
 } from "./metrologia.reglas";
-import { accionesDisponibles, motivoRechazo, pasoPendiente, pasosSinResponsable, puedeFirmarPaso, type ContextoCal, type PasoFirmaCal } from "./metrologia.flujo";
+import { accionesDisponibles, motivoNoEnviable, motivoRechazo, ordenElabora, pasoPendiente, pasosSinResponsable, puedeFirmarPaso, type ContextoCal, type PasoFirmaCal } from "./metrologia.flujo";
 
 describe("C3 · numeración del certificado por magnitud y sin año", () => {
   it("prefijo de la magnitud y correlativo; par torsional con 4 cifras", () => {
@@ -161,5 +161,40 @@ describe("C4 · circuito con la matriz de firmas (metrólogo → jefe LMT → je
     expect(motivoRechazo("REEMITIR", { ...e, reemisionEnCurso: true })).toMatch(/en curso/);
     expect(motivoRechazo("REEMITIR", { ...e, puedeEmitir: false })).toMatch(/permiso/);
     expect(accionesDisponibles(ctx({ estado: "reemplazada" }))).toEqual([]);
+  });
+});
+
+describe("Revisión r3 · la firma ELABORA no cuenta como otro paso y sin matriz no se envía", () => {
+  const jefeLab: PasoFirmaCal = { orden: 1, accion: "FIRMA", obligatorio: true, rol: { codigo: "JEFE_LAB", nombre: "Jefe de laboratorio" }, unidad: { codigo: "LMT" },
+    responsables: [{ usuarioId: "jefe", nombre: "J", via: "titular" }] };
+  const jefeDepto: PasoFirmaCal = { orden: 2, accion: "FIRMA", obligatorio: true, rol: { codigo: "JEFE_DEPTO", nombre: "Jefe de departamento" }, unidad: { codigo: "DSA" },
+    responsables: [{ usuarioId: "depto", nombre: "D", via: "titular" }] };
+
+  it("matriz sin ELABORA cuyo primer paso es el jefe (orden 1): tras enviar sigue pendiente el jefe, no el departamento", () => {
+    const pasos = [jefeLab, jefeDepto];
+    const elabora = pasoPendiente(pasos, []).elabora;
+    expect(ordenElabora(elabora)).toBe(0);
+    // Aunque una firma ELABORA antigua hubiera quedado con orden 1, no da por firmado el paso del jefe.
+    for (const orden of [ordenElabora(elabora), 1]) {
+      const p = pasoPendiente(pasos, [{ orden, usuarioId: "metro", accion: "ELABORA" }]);
+      expect(p.actual?.rol.codigo).toBe("JEFE_LAB");
+      expect(p.ultimo).toBe(false);
+    }
+  });
+  it("dos pasos con el mismo orden y distinta acción se firman por separado", () => {
+    const p = pasoPendiente([jefeLab, { ...jefeDepto, orden: 1, accion: "APRUEBA" }], [{ orden: 1, usuarioId: "jefe", accion: "FIRMA" }]);
+    expect(p.actual?.accion).toBe("APRUEBA");
+    expect(p.ultimo).toBe(true);
+  });
+  it("con ELABORA en la matriz se registra en su orden", () => {
+    const elab: PasoFirmaCal = { ...jefeLab, orden: 1, accion: "ELABORA", rol: { codigo: "METROLOGO", nombre: "Metrólogo" }, responsables: [] };
+    expect(ordenElabora(pasoPendiente([elab, { ...jefeLab, orden: 2 }], []).elabora)).toBe(1);
+  });
+  it("no se envía si la matriz falla, no existe o no tiene pasos de firma después del ELABORA", () => {
+    expect(motivoNoEnviable([], "tabla inexistente")).toMatch(/no se pudo resolver/);
+    expect(motivoNoEnviable(null)).toMatch(/no hay matriz/);
+    expect(motivoNoEnviable([{ ...jefeLab, accion: "ELABORA", responsables: [] }])).toMatch(/ningún paso de firma/);
+    expect(motivoNoEnviable([jefeLab, { ...jefeDepto, responsables: [] }])).toMatch(/Paso 2/);
+    expect(motivoNoEnviable([jefeLab, jefeDepto])).toBeNull();
   });
 });

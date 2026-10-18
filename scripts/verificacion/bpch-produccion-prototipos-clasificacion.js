@@ -535,8 +535,15 @@ async function main() {
     await ok(U.scc, "PATCH", `/bpch/prototipos/${p.id}`, { clasificacionId: C.clas.id });
     await rechazo(409, /no cumplen/i, U.scc, "POST", `/bpch/prototipos/${p.id}/dictamen`, { dictamen: "aprobado" });
     await rechazo(409, /motivo/i, U.scc, "POST", `/bpch/prototipos/${p.id}/dictamen`, { dictamen: "rechazado" });
-    const d = await ok(U.scc, "POST", `/bpch/prototipos/${p.id}/dictamen`, { dictamen: "rechazado", motivo: "Defecto crítico en la inspección visual." });
+    // Revisión r3 (hallazgo 11): dos dictámenes simultáneos (doble clic) no emiten dos documentos.
+    const dobles = await Promise.all([U.scc, U.scc].map((u) =>
+      llamar(u, "POST", `/bpch/prototipos/${p.id}/dictamen`, { dictamen: "rechazado", motivo: "Defecto crítico en la inspección visual." })));
+    const estados = dobles.map((r) => r.status).sort();
+    afirmar(estados[0] >= 200 && estados[0] < 300 && estados[1] === 409, `dictámenes simultáneos → ${estados.join(", ")}`);
+    const d = dobles.find((r) => r.status < 300).json;
     afirmar(d.documento.tipoDocumento === "INFORME_INCUMPLIMIENTO" && d.prototipo.dictamen === "rechazado", `documento ${JSON.stringify(d.documento)}`);
+    const tras = await ok(U.scc, "GET", `/bpch/prototipos/${p.id}`);
+    afirmar(tras.documento?.id === d.documento.id, "el prototipo no quedó con el documento del dictamen que se aceptó");
     await rechazo(409, /aprobado/i, U.scc, "POST", `/bpch/prototipos/${p.id}/codigo-cnc`, { codigo: "E-I/1/2/3/4/5" });
     p = await ok(U.sccInsp2, "GET", `/bpch/prototipos/${p.id}`);
     return `${p.codigo} · ${p.etapa} · ${d.documento.numero}`;

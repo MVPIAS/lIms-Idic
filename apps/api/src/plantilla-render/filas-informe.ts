@@ -14,6 +14,7 @@ import { etiquetaVeredicto, normalizarVeredicto, type Veredicto } from "../labor
 import { esNumeroTexto, veredictoMuestra } from "../laboratorio/especificacion";
 import { fmtNum } from "./html.util";
 import type { ConfigInforme } from "./config-informe";
+import type { FilaInspeccion } from "./template.engine";
 
 export type Modalidad = "cumplimiento" | "solo_resultados";
 export const MODALIDADES: readonly Modalidad[] = ["cumplimiento", "solo_resultados"] as const;
@@ -158,11 +159,22 @@ export function textoRequisito(r: Pick<ResultadoParaInforme, "limiteInf" | "nomi
   return texto || cotas;
 }
 
+/**
+ * Valor numérico que se informa de un ensayo: el resultado final (fórmula y
+ * factor aplicados), si no el valor capturado y, solo a falta de ambos, el
+ * promedio de las réplicas. Es el mismo valor con el que se calculó el
+ * veredicto: el promedio crudo NUNCA va antes que el resultado final. Lo usan
+ * el informe de ensayo, la tabla de inspección BPCH y el dictamen de prototipos.
+ */
+export function valorInformado<T>(r: { resultadoFinal?: T | null; valorNumerico?: T | null; promedio?: T | null }): T | null {
+  return r.resultadoFinal ?? r.valorNumerico ?? r.promedio ?? null;
+}
+
 /** Valor que se informa: número (fórmula, valor o promedio) o el texto observado. */
 export function textoResultado(r: ResultadoParaInforme): string {
   const esAtributo = r.tipoDato === "atributo";
   if (!esAtributo) {
-    const n = r.resultadoFinal ?? r.valorNumerico ?? r.promedio;
+    const n = valorInformado(r);
     if (n !== null && n !== undefined && Number.isFinite(Number(n))) return fmtNum(Number(n));
   }
   if (!vacio(r.valorTexto)) return String(r.valorTexto).trim();
@@ -320,4 +332,38 @@ export function armarInforme(resultados: ResultadoParaInforme[], config: ConfigI
 export function unirY(xs: string[]): string {
   if (xs.length <= 1) return xs[0] ?? "";
   return `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`;
+}
+
+/** Lo que necesita una fila de {{tabla_inspeccion}} (documentos BPCH). */
+export interface ResultadoInspeccion {
+  catAnalito?: { nombre?: string | null } | null;
+  analito?: { nombre?: string | null } | null;
+  muestra?: { codigo?: string | null } | null;
+  limiteInf?: unknown;
+  limiteSup?: unknown;
+  unidad?: string | null;
+  valorTexto?: string | null;
+  veredicto?: string | null;
+  resultadoFinal?: unknown;
+  valorNumerico?: unknown;
+  promedio?: unknown;
+}
+
+/**
+ * Fila de la tabla de inspección BPCH: inspección, mínimo, máximo, resultado
+ * (el valor informado, el mismo con el que se calculó la condición), unidad y
+ * condición. `lim` = límites del analito si el ensayo no los trae.
+ */
+export function filaInspeccion(r: ResultadoInspeccion, lim?: { limiteInf?: unknown; limiteSup?: unknown; unidad?: string | null } | null): FilaInspeccion {
+  const num = (v: unknown) => (v === null || v === undefined || v === "" ? "" : fmtNum(String(v)));
+  const valor = valorInformado(r);
+  return {
+    inspeccion: r.catAnalito?.nombre ?? r.analito?.nombre ?? "",
+    muestra: r.muestra?.codigo ?? "",
+    minimo: num(r.limiteInf ?? lim?.limiteInf),
+    maximo: num(r.limiteSup ?? lim?.limiteSup),
+    resultado: valor !== null && valor !== undefined ? num(valor) : r.valorTexto ?? "",
+    unidad: r.unidad ?? lim?.unidad ?? "",
+    condicion: etiquetaVeredicto(r.veredicto),
+  };
 }

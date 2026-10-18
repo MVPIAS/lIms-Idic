@@ -17,8 +17,11 @@
  *    Quien elaboró puede firmar el paso del jefe si es su responsable (decisión del
  *    14-10-2026: laboratorios de dos personas).
  *  - Devuelve (con motivo) un responsable del paso pendiente.
- *  - Sin reglas en la matriz (instalación sin sembrar), basta `metrologia.emitir` y la
- *    emisión es directa (comportamiento anterior).
+ *  - Sin matriz resoluble (sin reglas, error al resolverla o sin pasos de firma después
+ *    del ELABORA) NO se envía: nadie podría firmar ni devolver (revisión r3, hallazgo 5).
+ *    Las que ya estaban en el circuito sin matriz las firma quien tiene `metrologia.emitir`.
+ *  - La firma ELABORA se registra aparte (orden 0 si la matriz no tiene paso ELABORA) y
+ *    nunca cuenta como otro paso: cada paso se identifica por (orden, acción) (hallazgo 4).
  *  - Una calibración emitida no cambia: se reemite (nuevo certificado que la reemplaza).
  */
 export type EstadoCal = "borrador" | "en_revision" | "en_firma" | "emitida" | "reemplazada";
@@ -111,9 +114,34 @@ export function pasoPendiente(pasos: PasoFirmaCal[], firmas: FirmaHecha[]) {
   const jefes = pasos
     .filter((p) => p.accion !== "ELABORA" && (p.obligatorio || p.responsables.length))
     .sort((a, b) => a.orden - b.orden);
-  const hechas = new Set(firmas.map((f) => f.orden));
-  const pendientes = jefes.filter((p) => !hechas.has(p.orden));
+  // Un paso está hecho si hay una firma con su MISMO (orden, acción): la del
+  // metrólogo (ELABORA) nunca da por firmado un paso de jefe con el mismo orden.
+  const hechas = new Set(firmas.filter((f) => f.accion !== "ELABORA").map((f) => clavePaso(f)));
+  const pendientes = jefes.filter((p) => !hechas.has(clavePaso(p)));
   return { elabora, jefes, actual: pendientes[0] ?? null, ultimo: pendientes.length === 1 };
+}
+
+/** Identidad de un paso de la matriz (o de su firma): orden y acción. */
+export const clavePaso = (p: { orden: number; accion: string }) => `${p.orden}|${p.accion}`;
+
+/** Orden con el que se registra la firma ELABORA: el de su paso en la matriz o 0 (aparte de los pasos 1..99). */
+export const ordenElabora = (elabora: PasoFirmaCal | null | undefined) => elabora?.orden ?? 0;
+
+/**
+ * Por qué no se puede enviar la calibración a revisión según su matriz de
+ * firmas (null = se puede). Sin matriz que resolver, con error al resolverla o
+ * sin ningún paso de firma después del ELABORA, nadie podría firmarla ni
+ * devolverla: quedaría atascada en revisión.
+ */
+export function motivoNoEnviable(pasos: PasoFirmaCal[] | null, errorMatriz?: string | null): string | null {
+  const ayuda = "Configúrela en Administración › Matriz de firmas (documento CERTIFICADO_CALIBRACION) para la unidad de la calibración o sus superiores.";
+  if (errorMatriz) return `No se puede enviar: la matriz de firmas no se pudo resolver (${errorMatriz}). ${ayuda}`;
+  if (!pasos) return `No se puede enviar: no hay matriz de firmas para el Certificado de Calibración. ${ayuda}`;
+  if (!pasoPendiente(pasos, []).jefes.length)
+    return `No se puede enviar: la matriz de firmas no tiene ningún paso de firma después del metrólogo (ELABORA). ${ayuda}`;
+  const faltan = pasosSinResponsable(pasos);
+  if (faltan.length) return `No se puede enviar: la matriz de firmas no tiene quién firme. ${faltan.join(" ")}`;
+  return null;
 }
 
 /**

@@ -103,6 +103,15 @@ export interface Estimacion {
   /** Precio cotizado por bloque (referencia; no es costo). */
   cotizadoPorCategoria: Record<CategoriaCosto, number>;
   neto: number | null;
+  /**
+   * De qué es la estimación: «ot» (la OT tiene un solo laboratorio: la de la
+   * cotización completa), «laboratorio» (la solicitud de costeo de ESTE
+   * laboratorio) o «sin_estimacion_laboratorio» (OT con varios laboratorios y
+   * ninguna estimación de este: no se compara con el total).
+   */
+  alcance?: "ot" | "laboratorio" | "sin_estimacion_laboratorio";
+  /** Aviso para la pantalla cuando no hay con qué comparar. */
+  aviso?: string | null;
 }
 
 const TIPO_A_CATEGORIA: Record<string, CategoriaCosto> = {
@@ -150,6 +159,52 @@ export function estimacionDeCotizacion(f: FuentesEstimacion): Estimacion {
     cotizadoPorCategoria,
     neto: pos(f.neto) != null ? r2(Number(f.neto)) : null,
   };
+}
+
+/**
+ * Estimación con la que se compara la planilla de UN laboratorio (revisión r3,
+ * hallazgo 7). Si la OT tiene un solo laboratorio, la de la cotización. Si tiene
+ * varios (responsable + órdenes internas u otros laboratorios), solo la parte de
+ * ese laboratorio: sus solicitudes de costeo; si no hay, se dice que no hay
+ * estimación por laboratorio en vez de comparar con el total de la OT. El neto
+ * de la cotización (margen) es de la OT completa: no se usa por laboratorio.
+ */
+export function estimacionDelLaboratorio(
+  f: FuentesEstimacion,
+  lab: { multiLaboratorio: boolean; solicitudesDelLaboratorio: { horasHombre: number; costoDirecto: number }[] },
+): Estimacion {
+  if (!lab.multiLaboratorio) return { ...estimacionDeCotizacion(f), alcance: "ot", aviso: null };
+  const vacio = Object.fromEntries(CATEGORIAS_COSTO.map((c) => [c, 0])) as Record<CategoriaCosto, number>;
+  const costo = lab.solicitudesDelLaboratorio.reduce((s, x) => s + (Number(x.costoDirecto) || 0), 0);
+  const horas = lab.solicitudesDelLaboratorio.reduce((s, x) => s + (Number(x.horasHombre) || 0), 0);
+  if (costo <= 0 && horas <= 0)
+    return {
+      costoDirecto: null, fuenteCosto: null, horasHombre: null, fuenteHoras: null, cotizadoPorCategoria: vacio, neto: null,
+      alcance: "sin_estimacion_laboratorio",
+      aviso: "La OT tiene varios laboratorios y la cotización no trae una estimación de costos de este laboratorio (solicitud de costeo): no se compara con el total de la OT.",
+    };
+  return {
+    costoDirecto: costo > 0 ? r2(costo) : null,
+    fuenteCosto: costo > 0 ? "estimacion_laboratorio" : null,
+    horasHombre: horas > 0 ? r2(horas) : null,
+    fuenteHoras: horas > 0 ? "estimacion_laboratorio" : null,
+    cotizadoPorCategoria: vacio,
+    neto: null,
+    alcance: "laboratorio",
+    aviso: null,
+  };
+}
+
+/**
+ * Laboratorio al que pertenece un ensayo de la OT (revisión r3, hallazgos 8 y
+ * 14): el del laboratorio de su método en el catálogo (cat_familia → unidad)
+ * si es uno de los que trabajan en la OT —el responsable si el método es
+ * suyo—; si no se puede saber, el responsable de la OT.
+ */
+export function laboratorioDeResultado(candidatas: string[], posibles: string[], principal: string | null): string | null {
+  if (principal && candidatas.includes(principal)) return principal;
+  const otro = posibles.find((u) => u !== principal && candidatas.includes(u));
+  return otro ?? principal;
 }
 
 export interface Comparacion {

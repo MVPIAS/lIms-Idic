@@ -9,21 +9,13 @@
  *  C12 U con dos cifras significativas (redondeo hacia arriba, REDONDEAR.MAS)
  *  Patrones: vigencia a la fecha de calibración (bloqueo si vencido, aviso si vence pronto)
  */
-import { randomInt } from "node:crypto";
 
 /* ------------------------------------------------------------------ C3 --- */
 /** Número del certificado: prefijo de la magnitud y correlativo sin año (relleno con ceros si corresponde). */
 export const numeroCertificado = (prefijo: string, n: number, relleno = 0) => `${prefijo}-${String(n).padStart(relleno, "0")}`;
 
-/** Código de verificación (Crockford base32 sin I/L/O/U, 10 caracteres en dos grupos). */
-export function nuevoCodigoVerificacion(): string {
-  const A = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-  let s = "";
-  for (let i = 0; i < 10; i++) s += A[randomInt(A.length)];
-  return `${s.slice(0, 5)}-${s.slice(5)}`;
-}
-/** Formato admitido por la verificación pública (evita consultas con texto arbitrario). */
-export const codigoVerificacionValido = (c: string) => /^[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}$/.test(c);
+/** Código de verificación y su formato: el generador único del sistema (common/codigo-verificacion.ts). */
+export { codigoVerificacionValido, nuevoCodigoVerificacion } from "../common/codigo-verificacion";
 
 /* ----------------------------------------------------------------- C12 --- */
 /** U con dos cifras significativas, redondeada hacia arriba (nunca informa menos de lo calculado). */

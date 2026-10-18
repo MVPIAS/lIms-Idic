@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
 import { BpchComunService, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
+import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 import { CodificacionService } from "../codificacion/codificacion.service";
 import { condicionFinal, erroresLote, erroresLoteParaMuestra, erroresReinspeccion } from "../comun/reglas-bpch";
 
@@ -81,6 +82,7 @@ export class ReinspeccionService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly comun: BpchComunService,
+    private readonly ots: OtDesdeProcesoService,
     private readonly codificacion: CodificacionService,
   ) {}
 
@@ -359,20 +361,22 @@ export class ReinspeccionService {
     await this.comun.exigirExpediente(req, unidad.id, "la reinspección");
     const usuario = usuarioDe(req);
     const id = await this.prisma.$transaction(async (tx) => {
-      const numero = await this.comun.correlativo(tx, tenantId, "REI");
+      const numero = await this.ots.correlativo(tx, tenantId, "REI");
       const motivo = prm.motivosReinspeccion.find((m) => m.codigo === dto.motivo)?.etiqueta ?? dto.motivo;
-      const ot = await this.comun.crearOt(tx, {
+      const ot = await this.ots.crearOt(tx, {
         tenantId,
         clienteId: d.clienteId!,
         unidad,
         origen: "REINSPECCION",
+        resolucion: null,
         conCobro: dto.conCobro,
         descripcion: `Reinspección ${numero} · ${motivo} · ${d.elementoEspecifico}${ant.ot ? ` · OT original ${ant.ot.codigo}` : ""}${ant.certificado ? ` · certificado ${ant.certificado.numero}` : ""}`.slice(0, 4000),
         tipoTrabajo: "REINSPECCION",
         elementoGenerico: d.elementoGenerico,
         catElementoId: d.catElementoId,
         usuarioId: usuario,
-        historial: { reinspeccion: numero, motivo: dto.motivo, origenOt: ant.ot?.codigo ?? null, certificado: ant.certificado?.numero ?? null },
+        tipoHistorial: "bpch_reinspeccion",
+        detalleHistorial: { reinspeccion: numero, motivo: dto.motivo, origenOt: ant.ot?.codigo ?? null, certificado: ant.certificado?.numero ?? null },
       });
       const [fila] = await tx.$queryRawUnsafe<{ id: string }[]>(
         `INSERT INTO bpch_reinspeccion (tenant_id, numero, motivo, motivo_detalle, solicitado_por, documento_solicitud, fecha_solicitud,
@@ -464,13 +468,29 @@ export class ReinspeccionService {
     if (r.muestra_id) throw new ConflictException("El lote ya está registrado como muestra de la OT.");
     const errores = erroresLoteParaMuestra({ identificacionLote: r.identificacion_lote, tamanoLote: r.tamano_lote, tamanoMuestra: r.tamano_muestra });
     if (errores.length) throw new BadRequestException(errores.join(" "));
-    const m = await this.comun.registrarLote(req, r.ot_id, {
-      nombre: `Lote ${r.identificacion_lote} · ${r.elemento_especifico} (reinspección)`,
-      metodoIds: dto.metodoIds,
-      catElementoId: r.cat_elemento_id,
-      lote: r.identificacion_lote,
-    });
-    await this.prisma.$executeRawUnsafe(`UPDATE bpch_reinspeccion SET muestra_id = $2::uuid, updated_at = now() WHERE id = $1::uuid`, id, m.id);
+    // Con la fila de la reinspección bloqueada: un doble envío no crea dos muestras (hallazgo 10).
+    await this.prisma.$transaction(
+      async (tx) => {
+        const [fila] = await tx.$queryRawUnsafe<{ muestra_id: string | null }[]>(
+          `SELECT muestra_id FROM bpch_reinspeccion WHERE id = $1::uuid FOR UPDATE`,
+          id,
+        );
+        if (fila?.muestra_id) throw new ConflictException("El lote ya está registrado como muestra de la OT.");
+        const m = await this.comun.registrarLote(
+          req,
+          r.ot_id,
+          {
+            nombre: `Lote ${r.identificacion_lote} · ${r.elemento_especifico} (reinspección)`,
+            metodoIds: dto.metodoIds,
+            catElementoId: r.cat_elemento_id,
+            lote: r.identificacion_lote,
+          },
+          tx,
+        );
+        await tx.$executeRawUnsafe(`UPDATE bpch_reinspeccion SET muestra_id = $2::uuid, updated_at = now() WHERE id = $1::uuid`, id, m.id);
+      },
+      { maxWait: 15_000, timeout: 120_000 },
+    );
     return this.detalle(req, id);
   }
 

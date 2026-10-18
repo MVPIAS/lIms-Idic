@@ -38,7 +38,7 @@ interface Vista {
   };
   lineas: (Linea & { total: number; consumibleNombre?: string | null; equipoNombre?: string | null; equipoCodigo?: string | null })[];
   resumen: { porCategoria: Record<Categoria, { cantidad: number; total: number; lineas: number }>; horasHombre: number; horasMaquina: number; total: number };
-  estimacion: { costoDirecto: number | null; fuenteCosto: string | null; horasHombre: number | null; fuenteHoras: string | null; cotizadoPorCategoria: Record<Categoria, number>; neto: number | null };
+  estimacion: { costoDirecto: number | null; fuenteCosto: string | null; horasHombre: number | null; fuenteHoras: string | null; cotizadoPorCategoria: Record<Categoria, number>; neto: number | null; alcance?: "ot" | "laboratorio" | "sin_estimacion_laboratorio"; aviso?: string | null };
   comparacion: { costoReal: number; costoEstimado: number | null; diferencia: number | null; desviacionPct: number | null; horasReales: number; horasEstimadas: number | null; diferenciaHoras: number | null; margen: number | null };
   cargos: { codigo: string; etiqueta: string }[];
   sugerencias: { equipos: { id: string; codigo: string; nombre: string }[]; consumos: { id: string; codigo: string; nombre: string; unidad: string | null; cantidad: number }[] };
@@ -234,6 +234,8 @@ export default function CostosRealesPage() {
               {est!.fuenteHoras && <div style={{ fontSize: 11, color: "var(--muted)" }}>{FUENTE_HORAS[est!.fuenteHoras]}</div>}</div>
             <div className="kpi k-amber"><div className="lab">Neto cotizado − costo real</div><div className="val">{c!.margen != null ? clp(c!.margen) : "—"}</div></div>
           </div>
+          {est!.aviso && <div className="alert info">{est!.aviso}</div>}
+          {est!.alcance === "laboratorio" && <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>Se compara con la estimación de este laboratorio (su solicitud de costeo), no con el total de la OT.</p>}
           {sucio && <div className="alert info">Hay cambios sin guardar: los indicadores del servidor se actualizan al guardar.</div>}
 
           {BLOQUES.map((b) => {

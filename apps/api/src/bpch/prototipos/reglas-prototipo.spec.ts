@@ -1,5 +1,5 @@
 import { puedeOperarEnUnidad } from "../alcance-bpch";
-import { etapaPrototipo, faltantesDictamen, faltantesGenerarOt, validarCodigoCnc, veredictoOt } from "./reglas-prototipo";
+import { etapaPrototipo, faltantesDictamen, faltantesGenerarOt, resultadoDictamen, validarCodigoCnc, veredictoOt } from "./reglas-prototipo";
 
 describe("Prototipos · veredicto del tipo", () => {
   it("no cumple si algún ensayo no cumple; pendiente si falta veredicto; cumple con informativos", () => {
@@ -76,5 +76,19 @@ describe("BPCH · alcance para programar y generar OT", () => {
     expect(puedeOperarEnUnidad(["scc"], "suc", "scc")).toBe(true);
     expect(puedeOperarEnUnidad(["otra"], "suc", "scc")).toBe(false);
     expect(puedeOperarEnUnidad(["otra"], "suc", null)).toBe(false);
+  });
+});
+
+describe("Prototipos · tabla de ensayos del dictamen (hallazgo 2 de la revisión r3)", () => {
+  it("imprime el resultado final (con fórmula o factor), no el promedio crudo", () => {
+    // Factor ÷2 con réplicas [10, 10]: promedio 10, resultado 5 (el veredicto se calculó con 5).
+    expect(resultadoDictamen({ promedio: "10", valor_numerico: "5", resultado_final: "5" })).toBe("5");
+    // Fórmula PROMEDIO(RN)*100 sobre [2, 2]: promedio 2, resultado 200.
+    expect(resultadoDictamen({ promedio: 2, resultado_final: 200, valor_numerico: 200 })).toBe("200");
+  });
+  it("sin resultado final usa el valor capturado; sin ninguno, el promedio; sin número, el texto", () => {
+    expect(resultadoDictamen({ valor_numerico: "7.25", promedio: "7" })).toBe("7,25");
+    expect(resultadoDictamen({ promedio: "3.5" })).toBe("3,5");
+    expect(resultadoDictamen({ valor_texto: "Sin defectos" })).toBe("Sin defectos");
   });
 });

@@ -1,4 +1,4 @@
-import { celdaCsv, csvPlanilla, numeroCl, origenFormula, textoLecturas, textoValor, type EnsayoPlanilla } from "./planilla-calculos";
+import { celdaCsv, csvPlanilla, factorAplicado, numeroCl, origenFormula, textoLecturas, textoValor, type EnsayoPlanilla } from "./planilla-calculos";
 import { exigeMotivoCorreccion, teniaValor } from "./traza";
 
 const ensayo: EnsayoPlanilla = {
@@ -54,5 +54,13 @@ describe("traza: motivo de corrección", () => {
     expect(exigeMotivoCorreccion("devuelto", true)).toBe(false);
     expect(teniaValor({ valorNumerico: null, valorTexto: "" })).toBe(false);
     expect(teniaValor({ valorNumerico: "7.2" })).toBe(true);
+  });
+});
+
+describe("planilla: factor aplicado o no (revisión r3, hallazgo 9)", () => {
+  it("con valor sin factor: aplicado; con valor directo: no aplicado; sin valor: aún no", () => {
+    expect(factorAplicado({ valorSinFactor: 0.3, tieneValor: true })).toBe(true);
+    expect(factorAplicado({ valorSinFactor: null, tieneValor: true })).toBe(false);
+    expect(factorAplicado({ valorSinFactor: null, tieneValor: false })).toBeNull();
   });
 });

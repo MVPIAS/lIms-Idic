@@ -1,3 +1,4 @@
+import { erroresFactorMetodo } from "../laboratorio/factor";
 import {
   Controller,
   Get,
@@ -238,7 +239,7 @@ export class CatMetodoService extends BaseCrudService {
     });
   }
 }
-const CatMetodoCreate = z.object({
+const CatMetodoBase = z.object({
   ensayoId: z.string().uuid().optional(),
   codigo: z.string().min(1).max(30),
   nombre: z.string().min(1).max(240),
@@ -253,11 +254,18 @@ const CatMetodoCreate = z.object({
   factorOperacion: z.enum(["multiplicar", "dividir"]).nullable().optional(),
   factorDescripcion: z.string().max(120).nullable().optional(),
 });
+/** El factor y su operación van juntos (ambos o ninguno): 400 con el motivo, no el 500 del CHECK de la base. */
+const factorCompleto = (d: { factorValor?: number | null; factorOperacion?: string | null }, ctx: z.RefinementCtx) => {
+  const e = erroresFactorMetodo(d);
+  if (e) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["factorOperacion"], message: e });
+};
+export const CatMetodoCreate = CatMetodoBase.superRefine(factorCompleto);
+export const CatMetodoUpdate = CatMetodoBase.partial().superRefine(factorCompleto);
 @ApiTags("cat-metodos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/metodos")
 @RequierePermisoCrud(PERMISOS_CATALOGO)
 export class CatMetodoController extends BaseCrudController {
   protected createSchema = CatMetodoCreate;
-  protected updateSchema = CatMetodoCreate.partial();
+  protected updateSchema = CatMetodoUpdate;
   constructor(protected svc: CatMetodoService) { super(); }
 }
 

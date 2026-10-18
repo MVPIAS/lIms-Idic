@@ -16,6 +16,12 @@
  *     Una planilla por OT y laboratorio (el responsable de la OT o uno que hace
  *     ensayos por orden interna). Todas las rutas exigen el alcance del
  *     laboratorio (AlcanceService). Reglas puras: costos-reales.ts.
+ *
+ *  Laboratorio de cada ensayo (revisión r3): el de su método en el catálogo
+ *  (cat_familia → unidad por CODSUCDEL) si trabaja en la OT; si no, el
+ *  responsable. Con eso, un laboratorio por orden interna ve en la planilla de
+ *  cálculos solo sus ensayos, y «sin aprobar» cuenta solo los del laboratorio
+ *  de la planilla de costos.
  */
 import {
   BadRequestException,
@@ -42,19 +48,70 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { factorDe } from "./factor";
-import { csvPlanilla, origenFormula, type EnsayoPlanilla } from "./planilla-calculos";
+import { csvPlanilla, factorAplicado, origenFormula, type EnsayoPlanilla } from "./planilla-calculos";
 import {
   CATEGORIAS_COSTO,
   comparar,
   erroresCierrePlanilla,
   erroresLineas,
-  estimacionDeCotizacion,
+  estimacionDelLaboratorio,
+  laboratorioDeResultado,
   resumenCostos,
   totalLinea,
   type LineaCostoReal,
 } from "./costos-reales";
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
+
+/** unidad.codsucdel admite varios códigos («7003/7004»): ¿la familia del catálogo es de la unidad? */
+const FAMILIA_DE_UNIDAD = `f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))`;
+
+type UnidadOt = { id: string; codigo: string; nombre: string; principal: boolean };
+
+/**
+ * Laboratorios que trabajan en la OT: el responsable, los destinos de sus
+ * órdenes internas (cat_familia → unidad por CODSUCDEL) y los «otros
+ * laboratorios» indicados en la recepción de sus muestras.
+ */
+async function unidadesPosiblesOt(prisma: PrismaService, otId: string, principal: string | null, tenantId: string): Promise<UnidadOt[]> {
+  return prisma.$queryRawUnsafe<UnidadOt[]>(
+    `SELECT u.id, u.codigo, u.nombre, (u.id = $2::uuid) AS principal
+       FROM unidad u
+      WHERE u.tenant_id = $3::uuid
+        AND (u.id = $2::uuid
+             OR u.codsucdel IN (SELECT f.codsucdel FROM orden_interna oi JOIN cat_familia f ON f.id = oi.destino_lab
+                                 WHERE oi.ot_id = $1::uuid AND oi.deleted_at IS NULL)
+             OR u.id IN (SELECT unnest(m.otros_labs) FROM muestra m WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL))
+      ORDER BY (u.id = $2::uuid) DESC, u.codigo`,
+    otId,
+    principal,
+    tenantId,
+  );
+}
+
+/** Laboratorio (laboratorioDeResultado) y estado de cada ensayo vivo de la OT. */
+async function laboratoriosDeResultados(
+  prisma: PrismaService,
+  otId: string,
+  tenantId: string,
+  posibles: string[],
+  principal: string | null,
+): Promise<Map<string, { unidadId: string | null; estado: string }>> {
+  const filas = await prisma.$queryRawUnsafe<{ id: string; estado: string; unidades: string[] }[]>(
+    `SELECT r.id, r.estado, COALESCE(array_agg(DISTINCT u.id) FILTER (WHERE u.id IS NOT NULL), '{}') AS unidades
+       FROM resultado r
+       JOIN muestra m ON m.id = r.muestra_id
+       LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
+       LEFT JOIN cat_ensayo ce ON ce.id = cm.ensayo_id
+       LEFT JOIN cat_familia f ON f.id = ce.familia_id
+       LEFT JOIN unidad u ON u.tenant_id = m.tenant_id AND f.codsucdel IS NOT NULL AND ${FAMILIA_DE_UNIDAD}
+      WHERE m.tenant_id = $2::uuid AND COALESCE(r.ot_id, m.ot_id) = $1::uuid AND r.deleted_at IS NULL
+      GROUP BY r.id, r.estado`,
+    otId,
+    tenantId,
+  );
+  return new Map(filas.map((f) => [f.id, { unidadId: laboratorioDeResultado(f.unidades ?? [], posibles, principal), estado: f.estado }]));
+}
 
 /* ============================== PLANILLA DE CÁLCULOS ============================== */
 
@@ -66,9 +123,21 @@ export class PlanillaCalculosService {
     const tenantId = tenantDe(req);
     const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId }, select: { id: true, codigo: true, estado: true, unidadPrincipal: true } });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    // Quien ve el laboratorio responsable ve toda la OT. Un laboratorio que
+    // trabaja en ella por orden interna (u «otros laboratorios») ve SOLO sus
+    // ensayos, como en la planilla de costos (revisión r3, hallazgo 14).
+    const filtro = await this.alcance.filtroUnidades(req);
+    let soloLabs: Set<string> | null = null;
+    let labDe: Map<string, { unidadId: string | null; estado: string }> | null = null;
+    if (filtro !== null && !(ot.unidadPrincipal && filtro.includes(ot.unidadPrincipal))) {
+      const posibles = (await unidadesPosiblesOt(this.prisma, ot.id, ot.unidadPrincipal, tenantId)).map((u) => u.id);
+      const mios = posibles.filter((u) => u !== ot.unidadPrincipal && filtro.includes(u));
+      if (!mios.length) await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+      soloLabs = new Set(mios);
+      labDe = await laboratoriosDeResultados(this.prisma, ot.id, tenantId, posibles, ot.unidadPrincipal);
+    }
 
-    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+    const todas = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT r.id, r.estado, r.veredicto, r.unidad, r.replicas, r.lecturas, r.variables, r.promedio, r.desviacion, r.cv,
               r.resultado_final, r.valor_numerico, r.valor_texto, r.valor_sin_factor, r.formula, r.formula_aplicada,
               r.espec_origen, r.espec_catalogo, r.limite_inf, r.nominal, r.limite_sup, r.requisito, r.fecha,
@@ -95,6 +164,7 @@ export class PlanillaCalculosService {
       tenantId,
       otId,
     );
+    const filas = soloLabs ? todas.filter((f) => soloLabs!.has(labDe!.get(f.id)?.unidadId ?? "")) : todas;
     const ids = filas.map((f) => f.id);
     const metodoIds = [...new Set(filas.map((f) => f.cat_metodo_id).filter(Boolean))];
     const [pasos, historial] = await Promise.all([
@@ -149,6 +219,10 @@ export class PlanillaCalculosService {
           ? {
               valor: factor.valor, operacion: factor.operacion, descripcion: factor.descripcion ?? null, origen: f.factor_origen,
               editadoPor: f.factor_editado_por, editadoAt: f.factor_editado_at, motivo: f.factor_motivo,
+              aplicado: factorAplicado({
+                valorSinFactor: f.valor_sin_factor,
+                tieneValor: f.valor_numerico != null || f.resultado_final != null || f.promedio != null || (f.valor_texto ?? "") !== "",
+              }),
             }
           : null,
         valorSinFactor: num(f.valor_sin_factor),
@@ -169,10 +243,11 @@ export class PlanillaCalculosService {
           .map((h) => ({ fecha: h.created_at, usuario: h.usuario, campo: h.campo, anterior: h.valor_anterior, nuevo: h.valor_nuevo, motivo: h.motivo, origen: h.origen })),
       };
     });
-    const eliminados = historial
+    // Los ensayos eliminados no tienen laboratorio que mostrar: solo en la vista completa.
+    const eliminados = (soloLabs ? [] : historial)
       .filter((h) => h.campo === "baja" && !ids.includes(h.resultado_id))
       .map((h) => ({ resultadoId: h.resultado_id, fecha: h.created_at, usuario: h.usuario, anterior: h.valor_anterior, motivo: h.motivo }));
-    return { ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado }, ensayos, eliminados };
+    return { ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado }, ensayos, eliminados, soloSuLaboratorio: !!soloLabs };
   }
 }
 
@@ -235,24 +310,8 @@ export class CostosRealesService {
     return { tenantId, ot, unidadId: unidad, posibles };
   }
 
-  /**
-   * Laboratorio responsable + destinos de órdenes internas (cat_familia → unidad por
-   * CODSUCDEL) + «otros laboratorios» indicados en la recepción de sus muestras.
-   */
-  private async unidadesPosibles(otId: string, principal: string | null, tenantId: string) {
-    return this.prisma.$queryRawUnsafe<{ id: string; codigo: string; nombre: string; principal: boolean }[]>(
-      `SELECT u.id, u.codigo, u.nombre, (u.id = $2::uuid) AS principal
-         FROM unidad u
-        WHERE u.tenant_id = $3::uuid
-          AND (u.id = $2::uuid
-               OR u.codsucdel IN (SELECT f.codsucdel FROM orden_interna oi JOIN cat_familia f ON f.id = oi.destino_lab
-                                   WHERE oi.ot_id = $1::uuid AND oi.deleted_at IS NULL)
-               OR u.id IN (SELECT unnest(m.otros_labs) FROM muestra m WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL))
-        ORDER BY (u.id = $2::uuid) DESC, u.codigo`,
-      otId,
-      principal,
-      tenantId,
-    );
+  private unidadesPosibles(otId: string, principal: string | null, tenantId: string) {
+    return unidadesPosiblesOt(this.prisma, otId, principal, tenantId);
   }
 
   private async planillaDe(otId: string, unidadId: string) {
@@ -283,14 +342,16 @@ export class CostosRealesService {
     return { p, lineas: lineas as (LineaCostoReal & { total: number })[] };
   }
 
-  private async resultadosSinAprobar(otId: string, unidadId: string, principal: string | null) {
-    if (unidadId !== principal) return 0;
-    const [r] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
-      `SELECT count(*)::int AS n FROM resultado r JOIN muestra m ON m.id = r.muestra_id
-        WHERE COALESCE(r.ot_id, m.ot_id) = $1::uuid AND r.deleted_at IS NULL AND r.estado <> 'aprobado'`,
-      otId,
-    );
-    return Number(r?.n ?? 0);
+  /**
+   * Ensayos de ESE laboratorio sin aprobar en la OT (revisión r3, hallazgo 8):
+   * la planilla de un laboratorio se cierra al terminar SU parte, sin esperar a
+   * los demás, y no se cierra con los suyos pendientes.
+   */
+  private async resultadosSinAprobar(otId: string, tenantId: string, unidadId: string, principal: string | null, posibles: string[]) {
+    const labs = await laboratoriosDeResultados(this.prisma, otId, tenantId, posibles, principal);
+    let n = 0;
+    for (const r of labs.values()) if (r.unidadId === unidadId && r.estado !== "aprobado") n++;
+    return n;
   }
 
   private async cargos(tenantId: string) {
@@ -311,19 +372,33 @@ export class CostosRealesService {
           select: { id: true, codigo: true, neto: true, costosDirectosTotal: true, lineas: { select: { tipo: true, cantidad: true, diasOHoras: true, subtotal: true } } },
         })
       : null;
+    // Solicitudes de costeo con su laboratorio (cat_familia → unidad de la planilla).
     const solicitudes = cot
-      ? await this.prisma.solicitudCosteo.findMany({ where: { cotizacionId: cot.id, tenantId, deletedAt: null }, select: { horasHombre: true, costoDirecto: true } })
+      ? await this.prisma.$queryRawUnsafe<{ horasHombre: number; costoDirecto: number; delLaboratorio: boolean }[]>(
+          `SELECT s.horas_hombre::float8 AS "horasHombre", s.costo_directo::float8 AS "costoDirecto",
+                  EXISTS (SELECT 1 FROM cat_familia f JOIN unidad u ON u.id = $3::uuid AND ${FAMILIA_DE_UNIDAD}
+                           WHERE f.id = s.familia_id) AS "delLaboratorio"
+             FROM solicitud_costeo s
+            WHERE s.cotizacion_id = $1::uuid AND s.tenant_id = $2::uuid AND s.deleted_at IS NULL`,
+          cot.id,
+          tenantId,
+          unidad,
+        )
       : [];
-    const estimacion = estimacionDeCotizacion({
+    // La planilla de UN laboratorio se compara con la estimación de SU parte (hallazgo 7).
+    const estimacion = estimacionDelLaboratorio({
       costosDirectosTotal: cot ? Number(cot.costosDirectosTotal) : null,
       solicitudes: solicitudes.map((s) => ({ horasHombre: Number(s.horasHombre), costoDirecto: Number(s.costoDirecto) })),
       otHorasHombre: Number(ot.horasHombre),
       otCostoEstimado: Number(ot.costoEstimado),
       lineasCotizacion: (cot?.lineas ?? []).map((l) => ({ tipo: l.tipo, cantidad: l.cantidad, diasOHoras: l.diasOHoras != null ? Number(l.diasOHoras) : null, subtotal: Number(l.subtotal) })),
       neto: cot ? Number(cot.neto) : null,
+    }, {
+      multiLaboratorio: posibles.length > 1,
+      solicitudesDelLaboratorio: solicitudes.filter((x) => x.delLaboratorio),
     });
     const resumen = resumenCostos(lineas);
-    const sinAprobar = await this.resultadosSinAprobar(ot.id, unidad, ot.unidadPrincipal);
+    const sinAprobar = await this.resultadosSinAprobar(ot.id, tenantId, unidad, ot.unidadPrincipal, posibles.map((u) => u.id));
 
     // Sugerencias para completar: equipos usados en los ensayos de la OT y
     // consumos registrados (kardex) sobre sus muestras. Horas y tarifas, a mano.
@@ -421,27 +496,45 @@ export class CostosRealesService {
     return this.ver(otId, unidadId, req);
   }
 
+  /**
+   * Cierra la planilla. Todo en una transacción con la fila de la planilla
+   * bloqueada (SELECT … FOR UPDATE): las líneas, el total y el evento del
+   * historial son los de la planilla que se cierra, y un segundo cierre
+   * simultáneo (doble clic) recibe 409 sin registrar otro evento (hallazgo 15).
+   */
   async cerrar(otId: string, unidadIdPedido: string | undefined, req: any) {
-    const { tenantId, ot, unidadId } = await this.contexto(otId, unidadIdPedido, req);
-    const { p, lineas } = await this.planillaDe(ot.id, unidadId);
-    const errores = erroresCierrePlanilla({
-      estado: p?.estado ?? "borrador",
-      lineas,
-      resultadosSinAprobar: await this.resultadosSinAprobar(ot.id, unidadId, ot.unidadPrincipal),
-    });
-    if (!p && !errores.length) errores.push("Guarde la planilla antes de cerrarla.");
-    if (errores.length) throw new ConflictException(errores.join(" "));
-    const resumen = resumenCostos(lineas);
-    await this.prisma.$transaction([
-      this.prisma.$executeRawUnsafe(
+    const { tenantId, ot, unidadId, posibles } = await this.contexto(otId, unidadIdPedido, req);
+    const sinAprobar = await this.resultadosSinAprobar(ot.id, tenantId, unidadId, ot.unidadPrincipal, posibles.map((u) => u.id));
+    const usuario = req?.user?.sub ?? null;
+    await this.prisma.$transaction(async (tx) => {
+      const [p] = await tx.$queryRawUnsafe<{ id: string; estado: string }[]>(
+        `SELECT id, estado FROM ot_costo_real WHERE ot_id = $1::uuid AND unidad_id = $2::uuid FOR UPDATE`,
+        ot.id,
+        unidadId,
+      );
+      const lineas = p
+        ? await tx.$queryRawUnsafe<LineaCostoReal[]>(
+            `SELECT categoria, cargo, consumible_id AS "consumibleId", equipo_id AS "equipoId", descripcion,
+                    cantidad::float8 AS cantidad, unidad, costo_unitario::float8 AS "costoUnitario"
+               FROM ot_costo_real_linea WHERE planilla_id = $1::uuid ORDER BY orden, id`,
+            p.id,
+          )
+        : [];
+      const errores = erroresCierrePlanilla({ estado: p?.estado ?? "borrador", lineas, resultadosSinAprobar: sinAprobar });
+      if (!p && !errores.length) errores.push("Guarde la planilla antes de cerrarla.");
+      if (errores.length) throw new ConflictException(errores.join(" "));
+      const resumen = resumenCostos(lineas);
+      const n = await tx.$executeRawUnsafe(
         `UPDATE ot_costo_real SET estado = 'cerrada', cerrada_por = $2::uuid, cerrada_at = now() WHERE id = $1::uuid AND estado = 'borrador'`,
-        p.id, req?.user?.sub ?? null,
-      ),
-      this.prisma.$executeRawUnsafe(
+        p!.id,
+        usuario,
+      );
+      if (!n) throw new ConflictException("La planilla ya está cerrada.");
+      await tx.$executeRawUnsafe(
         `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'costos_reales', $3::jsonb, $4::uuid)`,
-        tenantId, ot.id, JSON.stringify({ accion: "cerrar", unidadId, total: resumen.total, horasHombre: resumen.horasHombre }), req?.user?.sub ?? null,
-      ),
-    ]);
+        tenantId, ot.id, JSON.stringify({ accion: "cerrar", unidadId, total: resumen.total, horasHombre: resumen.horasHombre }), usuario,
+      );
+    });
     return this.ver(otId, unidadId, req);
   }
 
@@ -449,16 +542,18 @@ export class CostosRealesService {
     const { tenantId, ot, unidadId } = await this.contexto(otId, body.unidadId, req);
     const { p } = await this.planillaDe(ot.id, unidadId);
     if (!p || p.estado !== "cerrada") throw new ConflictException("La planilla no está cerrada.");
-    await this.prisma.$transaction([
-      this.prisma.$executeRawUnsafe(
-        `UPDATE ot_costo_real SET estado = 'borrador', reabierta_por = $2::uuid, reabierta_at = now(), reabierta_motivo = $3 WHERE id = $1::uuid`,
+    await this.prisma.$transaction(async (tx) => {
+      const n = await tx.$executeRawUnsafe(
+        `UPDATE ot_costo_real SET estado = 'borrador', reabierta_por = $2::uuid, reabierta_at = now(), reabierta_motivo = $3 WHERE id = $1::uuid AND estado = 'cerrada'`,
         p.id, req?.user?.sub ?? null, body.motivo,
-      ),
-      this.prisma.$executeRawUnsafe(
+      );
+      // Una reapertura simultánea no deja dos eventos.
+      if (!n) throw new ConflictException("La planilla ya fue reabierta.");
+      await tx.$executeRawUnsafe(
         `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'costos_reales', $3::jsonb, $4::uuid)`,
         tenantId, ot.id, JSON.stringify({ accion: "reabrir", unidadId, motivo: body.motivo }), req?.user?.sub ?? null,
-      ),
-    ]);
+      );
+    });
     return this.ver(otId, unidadId, req);
   }
 }

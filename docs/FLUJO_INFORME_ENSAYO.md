@@ -91,6 +91,10 @@ Color instrumental.» (una por componente con algún No cumple).
   `POST /informes/ot/:otId/fotos` (multipart: `archivo`, `pie`, `muestraId`, `resultadoId`,
   `enInforme`), `PATCH|DELETE /informes/fotos/:id` (`resultado.crear` o
   `certificado.emitir`). Todo exige el alcance de la OT.
+- El listado trae solo **metadatos** (nombre, bytes, tipo, hash, pie, ensayo, quién la
+  subió) y la `url` de cada imagen: `GET /informes/fotos/:id/imagen` (mismos permisos y
+  alcance; devuelve el PNG/JPEG). La pantalla pide cada imagen con la sesión cuando la
+  tarjeta entra en pantalla (60 fotos de 2 MB ya no viajan en cada carga).
 - PNG o JPEG validados **por sus bytes** (no por la extensión), máximo 2 MB (la pantalla
   reduce a 1600 px), 60 fotos vigentes por OT, 24 en un documento. Quitar es borrado lógico.
 - Una foto ligada a un ensayo lleva en el pie el punto del informe: «Foto 1 · Punto 4.1.1

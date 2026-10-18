@@ -1,10 +1,11 @@
 import { etiquetaVeredicto } from "../laboratorio/veredicto";
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common";
-import { createHash, randomInt } from "crypto";
+import { createHash } from "crypto";
 import { PrismaService } from "../common/prisma.service";
+import { nuevoCodigoVerificacion } from "../common/codigo-verificacion";
 import { renderizar, tablaMuestras, tablaInspeccion, type FilaMuestra, type FilaInspeccion } from "./template.engine";
 import { condicionFinal, faltantesDocumentoFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
-import { fmtFecha, fmtFechaHora, fmtNum } from "./html.util";
+import { fmtFecha, fmtFechaHora } from "./html.util";
 import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
 import { QcService } from "../qc/qc.module";
@@ -23,6 +24,7 @@ import {
 import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
 import {
   armarInforme,
+  filaInspeccion,
   modalidadSugerida,
   tieneRequisito,
   NOMBRE_MODALIDAD,
@@ -350,20 +352,7 @@ export class PlantillaRenderService {
 
   /** Filas de {{tabla_inspeccion}}: inspección, mínimo, máximo, resultado, unidad y condición. */
   private filasInspeccion(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>): FilaInspeccion[] {
-    return ctx.resultados.map((r) => {
-      const lim = r.analitoId ? ctx.limitePorAnalito.get(r.analitoId) : undefined;
-      const num = (v: unknown) => (v === null || v === undefined || v === "" ? "" : fmtNum(String(v)));
-      const valor = r.promedio ?? r.valorNumerico ?? r.resultadoFinal;
-      return {
-        inspeccion: r.catAnalito?.nombre ?? r.analito?.nombre ?? "",
-        muestra: r.muestra?.codigo ?? "",
-        minimo: num(r.limiteInf ?? lim?.limiteInf),
-        maximo: num(r.limiteSup ?? lim?.limiteSup),
-        resultado: valor !== null && valor !== undefined ? num(valor) : r.valorTexto ?? "",
-        unidad: r.unidad ?? lim?.unidad ?? "",
-        condicion: etiquetaVeredicto(r.veredicto),
-      };
-    });
+    return ctx.resultados.map((r) => filaInspeccion(r, r.analitoId ? ctx.limitePorAnalito.get(r.analitoId) : undefined));
   }
 
   private filasMuestras(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>): FilaMuestra[] {
@@ -596,19 +585,6 @@ export class PlantillaRenderService {
     return `CERT-${anio}-${String(n).padStart(4, "0")}`;
   }
 
-  /**
-   * Código de verificación corto e imprimible.
-   * Alfabeto Crockford base32 sin I/L/O/U: no se confunde 0/O ni 1/I al teclearlo
-   * desde el papel, y evita formar palabras. 10 símbolos ~= 51 bits de entropía:
-   * no es adivinable por fuerza bruta contra el endpoint público.
-   * `randomInt` usa el CSPRNG del sistema (no Math.random).
-   */
-  private nuevoCodigoVerificacion(): string {
-    const A = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-    let s = "";
-    for (let i = 0; i < 10; i++) s += A[randomInt(A.length)];
-    return `${s.slice(0, 5)}-${s.slice(5)}`;
-  }
 
   /* ====================================================================== */
   /* Condiciones de emisión                                                 */
@@ -857,7 +833,7 @@ export class PlantillaRenderService {
 
     const fecha = new Date();
     const anio = fecha.getFullYear();
-    const codigoVerificacion = this.nuevoCodigoVerificacion();
+    const codigoVerificacion = nuevoCodigoVerificacion();
     const anterior = previo;
 
     // La transacción cubre: reservar correlativo -> renderizar con ese número

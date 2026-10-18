@@ -15,15 +15,22 @@ export interface DatosOtProceso {
   usuarioId: string | null;
   clienteId: string;
   unidad: UnidadResumen;
-  /** PRODUCCION_NACIONAL | PROTOTIPO (parametro_sistema · origen_trabajo). */
-  origen: "PRODUCCION_NACIONAL" | "PROTOTIPO";
+  /** Origen de la OT (parametro_sistema · origen_trabajo). */
+  origen: "PRODUCCION_NACIONAL" | "PROTOTIPO" | "INTERNACION" | "REINSPECCION";
   conCobro: boolean;
   /** Resolución DGMN (RAF o solicitud del prototipo) → orden_trabajo.numero_ley. */
   resolucion: string | null;
   descripcion: string;
   elementoGenerico?: string | null;
   catElementoId?: string | null;
-  /** Hecho que queda en el historial de la OT (tipo 'origen_bpch'). */
+  /** orden_trabajo.tipo_trabajo (p. ej. CERTIFICACION, REINSPECCION). */
+  tipoTrabajo?: string | null;
+  /**
+   * Tipo del hecho en ot_historial. Por defecto 'origen_bpch' con
+   * { origen, ...detalleHistorial }; con un tipo propio (bpch_internacion,
+   * bpch_reinspeccion) se guarda detalleHistorial tal cual.
+   */
+  tipoHistorial?: string;
   detalleHistorial: Record<string, unknown>;
 }
 
@@ -31,7 +38,10 @@ export interface DatosOtProceso {
  * Piezas comunes de los procesos BPCH que se apoyan en el flujo general:
  * crean la OT (mismo correlativo OT-AAAA-NNNN y mismo alta del laboratorio
  * responsable que POST /ot), validan que la unidad sea del Banco de Pruebas y
- * aplican la regla de alcance de alcance-bpch.ts.
+ * aplican la regla de alcance de alcance-bpch.ts. Es el ÚNICO lugar donde se
+ * crean las OT de los procesos BPCH (Producción Nacional, Prototipos,
+ * Internación y Reinspección) y se toman sus correlativos (revisión r3,
+ * hallazgo 16).
  */
 @Injectable()
 export class OtDesdeProcesoService {
@@ -72,7 +82,7 @@ export class OtDesdeProcesoService {
       );
   }
 
-  /** Correlativo propio (PROTO / CLS / ITPN) por tenant y año: «PROTO-2026-0001». */
+  /** Correlativo propio (PROTO / CLS / ITPN / INT / REI) por tenant y año, atómico: «PROTO-2026-0001». */
   async correlativo(tx: Pick<PrismaService, "$queryRawUnsafe">, tenantId: string, tipo: string): Promise<string> {
     const anio = new Date().getFullYear();
     const filas = await tx.$queryRawUnsafe<{ ultimo: number }[]>(
@@ -107,9 +117,11 @@ export class OtDesdeProcesoService {
         descripcionTrabajo: d.descripcion.slice(0, 4000),
         elementoGenerico: d.elementoGenerico?.slice(0, 240) || null,
         catElementoId: d.catElementoId ?? null,
+        tipoTrabajo: d.tipoTrabajo?.slice(0, 120) || null,
       },
       select: { id: true, codigo: true },
     });
+    if (d.usuarioId) await tx.$executeRawUnsafe(`UPDATE orden_trabajo SET created_by = $2::uuid WHERE id = $1::uuid`, ot.id, d.usuarioId);
     await this.labs.fijar(tx as any, {
       tenantId: d.tenantId,
       otId: ot.id,
@@ -120,9 +132,9 @@ export class OtDesdeProcesoService {
     await this.labs.anotar(tx as any, {
       tenantId: d.tenantId,
       otId: ot.id,
-      tipo: "origen_bpch",
+      tipo: d.tipoHistorial ?? "origen_bpch",
       usuarioId: d.usuarioId,
-      detalle: { origen: d.origen, ...d.detalleHistorial },
+      detalle: d.tipoHistorial ? d.detalleHistorial : { origen: d.origen, ...d.detalleHistorial },
     });
     return ot;
   }

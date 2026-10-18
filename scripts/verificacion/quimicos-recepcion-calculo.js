@@ -134,6 +134,8 @@ const U = {
   dqo: "demo.dqo.jefe",
   otroJefe: "demo.lpn.jefe",
   otroAnalista: "demo.lpn.analista1",
+  lccJefe: "demo.lcc.jefe",
+  lccAnalista: "demo.lcc.analista1",
   finanzas: "demo.finanzas",
   admin: "demo.admin",
 };
@@ -182,6 +184,10 @@ async function main() {
   /* ---------------- Factor por defecto en el método (catálogo) */
   await paso("El método trae factor por defecto: lo fija quien gestiona el catálogo; un analista no (403)", async () => {
     await exigir(403, U.a1, "PATCH", `/cat/metodos/${C.mAzufre.id}`, { factorValor: 2, factorOperacion: "multiplicar" });
+    // Revisión r3 (hallazgo 19): el factor sin su operación (o al revés) es 400 con el motivo, no 500.
+    const e1 = await exigir(400, U.admin, "PATCH", `/cat/metodos/${C.mAzufre.id}`, { factorValor: 10 });
+    afirmar(/juntos/.test(JSON.stringify(e1)), JSON.stringify(e1).slice(0, 200));
+    await exigir(400, U.admin, "PATCH", `/cat/metodos/${C.mAzufre.id}`, { factorValor: null, factorOperacion: "dividir" });
     const m = await ok(U.admin, "PATCH", `/cat/metodos/${C.mAzufre.id}`, { factorValor: 2, factorOperacion: "multiplicar", factorDescripcion: "Dilución de prueba" });
     afirmar(Number(m.factorValor) === 2 && m.factorOperacion === "multiplicar", JSON.stringify(m).slice(0, 160));
     return "Azufre × 2";
@@ -235,6 +241,7 @@ async function main() {
     const familias = lista(await ok(U.planif, "GET", "/cat/familias?limit=200"));
     const fam = (u) => familias.find((f) => f.codsucdel && f.codsucdel === u.codsucdel);
     afirmar(fam(C.lqc) && fam(C.lcc), "LQC o LCC sin laboratorio en el catálogo (cat_familia)");
+    C.famLqc = fam(C.lqc);
     const oi = await ok(U.planif, "POST", "/ordenes-internas", { otId: C.ot.id, origenLab: fam(C.lqc).id, destinoLab: fam(C.lcc).id, detalle: "Cromo en cuero" });
     const p = await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/registro-muestras`);
     const e = p.muestras.find((x) => x.id === C.muestra.id).otrosLabsEnlace[0];
@@ -252,6 +259,33 @@ async function main() {
     const ev = h.find((x) => x.tipo === "recepcion_muestra");
     afirmar(ev && ev.detalle?.anterior?.condicionRecepcion === "no_cumple", "el historial no guarda lo anterior");
     return "no_cumple → cumple";
+  });
+
+  await paso("Revisión r3 · La jefatura corrige el sello: se conserva quién y cuándo recibió; queda quién corrigió (hallazgo 13)", async () => {
+    const antes = (await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/registro-muestras`)).muestras.find((x) => x.id === C.muestra.id);
+    afirmar(antes.recepcionadaPorNombre && antes.recepcionadaAt, "la muestra no tiene quién la recibió");
+    const cuerpo = { tomaMuestra: "seccion_muestreo", condicionRecepcion: "cumple", selloNumero: "15573", identificacionCliente: "Estanque Nº 3", requiereOtrosLabs: true, otrosLabs: [C.lcc.id] };
+    await ok(U.jefe, "PATCH", `/flujo/muestras/${C.muestra.id}/recepcion`, cuerpo);
+    const desp = (await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/registro-muestras`)).muestras.find((x) => x.id === C.muestra.id);
+    afirmar(desp.recepcionadaPorNombre === antes.recepcionadaPorNombre && desp.recepcionadaAt === antes.recepcionadaAt,
+      `la corrección cambió quién/cuándo recibió: ${antes.recepcionadaPorNombre} ${antes.recepcionadaAt} → ${desp.recepcionadaPorNombre} ${desp.recepcionadaAt}`);
+    afirmar(desp.recepcionCorregidaPorNombre && desp.recepcionCorregidaPorNombre !== antes.recepcionadaPorNombre && desp.recepcionCorregidaAt, "no quedó quién corrigió");
+    const h = await ok(U.jefe, "GET", `/ot/${C.ot.id}/historial`);
+    const ev = h.find((x) => x.tipo === "recepcion_muestra" && x.detalle?.nuevo?.selloNumero === "15573");
+    afirmar(ev && ev.detalle.anterior.selloNumero === "15572" && ev.detalle.anterior.recepcionadaPor && ev.detalle.anterior.recepcionadaAt,
+      `el historial no guarda lo anterior completo: ${JSON.stringify(ev?.detalle?.anterior)}`);
+    return `recibida por ${desp.recepcionadaPorNombre} · corregida por ${desp.recepcionCorregidaPorNombre}`;
+  });
+
+  await paso("Revisión r3 · LCC tiene un ensayo propio en la OT (método 993, por la orden interna)", async () => {
+    const m = lista(await ok(U.jefe, "GET", "/cat/metodos?search=993&limit=50")).find((x) => x.codigo === "993");
+    afirmar(m, "método 993 (LCC) no encontrado");
+    const r = await ok(U.recepcion, "POST", `/flujo/ot/${C.ot.id}/muestras`, { muestras: [{ nombre: "Cuero del calzado (LCC)", metodoIds: [m.id] }] });
+    C.muestraLcc = r.muestras[0];
+    const rs = (await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/resultados`)).resultados.filter((x) => x.muestraId === C.muestraLcc.id);
+    afirmar(rs.length >= 1, "el ensayo de LCC no se generó");
+    C.rLcc = rs.map((x) => x.id);
+    return `${C.muestraLcc.codigo} · ${rs.length} ensayo(s) de LCC sin capturar`;
   });
 
   /* ---------------- 2/3 · Factor y captura con historial */
@@ -300,6 +334,24 @@ async function main() {
     await ok(U.jefe, "PATCH", `/flujo/resultado/${C.rLim.id}/especificacion`, { limiteInf: "90", motivo: "Requisito del cliente para esta OT" });
     return "7,2 → 7,4 con motivo; límite cambiado por la jefatura con motivo";
   });
+  await paso("Revisión r3 · Factor sobre un valor ingresado directo: no se aplica, se informa como omitido y la planilla no lo muestra (hallazgo 9)", async () => {
+    const r = await ok(U.jefe, "PATCH", `/flujo/resultado/${C.rPh.id}/factor`, { valor: 10, operacion: "multiplicar", motivo: "Dilución informada por el analista", todoElMetodo: true });
+    afirmar(r.actualizados === 0 && r.omitidos.some((o) => o.id === C.rPh.id && /directo/.test(o.motivo)), JSON.stringify({ act: r.actualizados, om: r.omitidos }));
+    afirmar(Number(r.valorNumerico) === 7.4 && r.factorValor == null, `valor ${r.valorNumerico} · factor ${r.factorValor}`);
+    const p = await ok(U.a1, "GET", `/laboratorio/ot/${C.ot.id}/planilla-calculos`);
+    const ph = p.ensayos.find((e) => e.resultadoId === C.rPh.id);
+    afirmar(!ph.factor || ph.factor.aplicado !== true, `la planilla muestra un factor aplicado: ${JSON.stringify(ph.factor)}`);
+    return r.omitidos[0].motivo.slice(0, 80) + "…";
+  });
+  await paso("Revisión r3 · Una corrección sin variables no conserva las de la captura anterior (hallazgo 12)", async () => {
+    await ok(U.a1, "POST", `/flujo/resultado/${C.rPh.id}/valor`, { valor: "7,4", variables: { V: 25 }, motivo: "Se registra el volumen de la alícuota" });
+    let ph = (await ok(U.a1, "GET", `/laboratorio/ot/${C.ot.id}/planilla-calculos`)).ensayos.find((e) => e.resultadoId === C.rPh.id);
+    afirmar(ph.variables.V === 25, `variables ${JSON.stringify(ph.variables)}`);
+    await ok(U.a1, "POST", `/flujo/resultado/${C.rPh.id}/valor`, { replicasTexto: "7,3 7,5", motivo: "Corrección con las réplicas del pH-metro" });
+    ph = (await ok(U.a1, "GET", `/laboratorio/ot/${C.ot.id}/planilla-calculos`)).ensayos.find((e) => e.resultadoId === C.rPh.id);
+    afirmar(Object.keys(ph.variables).length === 0 && ph.replicas.length === 2, `quedaron variables de la captura anterior: ${JSON.stringify(ph.variables)}`);
+    return "V=25 en la primera captura · la corrección por réplicas la deja sin variables";
+  });
 
   /* ---------------- 2 · Planilla de registros y cálculos */
   await paso("2 · Planilla de cálculos: lecturas, fórmula aplicada, factor e historial (quién, cuándo, antes, después, motivo)", async () => {
@@ -319,6 +371,14 @@ async function main() {
     afirmar(lim?.historial.some((h) => h.campo === "limite_inf" && h.origen === "especificacion" && /cliente/.test(h.motivo)), "falta el cambio de límite");
     return `${p.ensayos.length} ensayos · ${p.ensayos.reduce((s, e) => s + e.historial.length, 0)} cambios registrados`;
   });
+  await paso("Revisión r3 · El analista de LCC (orden interna) abre la planilla de cálculos con SOLO sus ensayos (hallazgo 14)", async () => {
+    const p = await ok(U.lccAnalista, "GET", `/laboratorio/ot/${C.ot.id}/planilla-calculos`);
+    const ids = p.ensayos.map((e) => e.resultadoId);
+    afirmar(p.soloSuLaboratorio === true && ids.length === C.rLcc.length && ids.every((x) => C.rLcc.includes(x)), `ensayos visibles: ${ids.length}`);
+    afirmar(!ids.includes(C.rPh.id) && !ids.includes(C.rAz.id), "LCC ve ensayos de LQC");
+    await exigir(403, U.otroAnalista, "GET", `/laboratorio/ot/${C.ot.id}/planilla-calculos`);
+    return `${ids.length} ensayo(s) de LCC; LPN (sin trabajo en la OT) → 403`;
+  });
   await paso("2 · Exportación a Excel (CSV con punto y coma y BOM)", async () => {
     const s = await login(U.a1);
     const r = await fetch(`${BASE}/laboratorio/ot/${C.ot.id}/planilla-calculos?formato=csv`, { headers: { authorization: `Bearer ${s.token}` } });
@@ -332,6 +392,12 @@ async function main() {
   });
 
   /* ---------------- 4 · Planilla de costos reales */
+  await paso("Revisión r3 · Ventas registra la estimación de costos de LQC (solicitud de costeo por laboratorio)", async () => {
+    const ot = await ok(U.jefe, "GET", `/ot/${C.ot.id}`);
+    afirmar(ot.cotizacionId && C.famLqc, "la OT no tiene cotización o LQC no tiene laboratorio en el catálogo");
+    await ok(U.ventas, "POST", "/solicitud-costeo", { cotizacionId: ot.cotizacionId, familiaId: C.famLqc.id, horasHombre: 12, costoDirecto: 25000, estado: "estimado" });
+    return "LQC: 12 h·h · $25.000";
+  });
   await paso("4 · Costos reales: el analista, Ventas y la jefatura de otro laboratorio no la ven (403)", async () => {
     await exigir(403, U.a1, "GET", `/laboratorio/ot/${C.ot.id}/costos-reales`);
     await exigir(403, U.ventas, "GET", `/laboratorio/ot/${C.ot.id}/costos-reales`);
@@ -339,6 +405,9 @@ async function main() {
     const v = await ok(U.jefe, "GET", `/laboratorio/ot/${C.ot.id}/costos-reales`);
     afirmar(v.unidad?.codigo === "LQC" && v.puedeGestionar && v.cargos.length >= 3, JSON.stringify(v).slice(0, 200));
     afirmar(v.unidadesPosibles.some((u) => u.codigo === "LCC"), "LCC (orden interna) no figura como laboratorio posible");
+    // Revisión r3 (hallazgo 7): OT con dos laboratorios → se compara con la estimación de LQC, sin margen del total.
+    afirmar(v.estimacion.alcance === "laboratorio" && v.estimacion.costoDirecto === 25000 && v.estimacion.horasHombre === 12 && v.comparacion.margen === null,
+      `estimación ${JSON.stringify(v.estimacion)}`);
     C.cargos = v.cargos.map((c) => c.codigo);
     return `estimación: costo ${v.estimacion.costoDirecto ?? "—"} (${v.estimacion.fuenteCosto ?? "sin fuente"}), neto ${v.estimacion.neto ?? "—"}`;
   });
@@ -358,6 +427,17 @@ async function main() {
     const f = await ok(U.finanzas, "GET", `/laboratorio/ot/${C.ot.id}/costos-reales`);
     afirmar(f.resumen.total === 28363 && !f.puedeGestionar, "Finanzas no ve el total o figura como gestor");
     return `total ${v.resumen.total} · ${v.resumen.horasHombre} h·h · diferencia vs estimado ${v.comparacion.diferencia ?? "sin estimación"}`;
+  });
+  await paso("Revisión r3 · Planilla de LCC: sin estimación propia no se compara con el total; «sin aprobar» cuenta solo sus ensayos (hallazgos 7 y 8)", async () => {
+    const v = await ok(U.lccJefe, "GET", `/laboratorio/ot/${C.ot.id}/costos-reales?unidadId=${C.lcc.id}`);
+    afirmar(v.unidad?.codigo === "LCC", `unidad ${v.unidad?.codigo}`);
+    afirmar(v.estimacion.alcance === "sin_estimacion_laboratorio" && v.comparacion.costoEstimado === null && v.comparacion.margen === null && /no se compara/.test(v.estimacion.aviso),
+      `estimación ${JSON.stringify(v.estimacion)}`);
+    afirmar(v.resultadosSinAprobar === C.rLcc.length, `LCC sin aprobar: ${v.resultadosSinAprobar} (esperado ${C.rLcc.length})`);
+    await ok(U.lccJefe, "PUT", `/laboratorio/ot/${C.ot.id}/costos-reales`, { unidadId: C.lcc.id, lineas: [{ categoria: "horas_hombre", cargo: "analista", cantidad: 2, costoUnitario: 1000 }] });
+    const e = await exigir(409, U.lccJefe, "POST", `/laboratorio/ot/${C.ot.id}/costos-reales/cerrar`, { unidadId: C.lcc.id });
+    afirmar(/1 ensayo|ensayo\(s\) sin aprobar/.test(msg(e)), msg(e));
+    return v.estimacion.aviso.slice(0, 80) + "…";
   });
   await paso("4 · No se cierra con ensayos sin aprobar (409)", async () => {
     const r = await exigir(409, U.jefe, "POST", `/laboratorio/ot/${C.ot.id}/costos-reales/cerrar`, {});
@@ -388,8 +468,15 @@ async function main() {
     const l = lineas();
     l[1].cantidad = 16;
     await ok(U.jefe, "PUT", `/laboratorio/ot/${C.ot.id}/costos-reales`, { lineas: l });
-    const c = await ok(U.jefe, "POST", `/laboratorio/ot/${C.ot.id}/costos-reales/cerrar`, {});
+    // Revisión r3 (hallazgo 15): doble clic en «Cerrar» → un cierre y un 409, un solo evento en el historial.
+    const cerrarDos = await Promise.all([1, 2].map(() => llamar(U.jefe, "POST", `/laboratorio/ot/${C.ot.id}/costos-reales/cerrar`, {})));
+    const est = cerrarDos.map((x) => x.status).sort();
+    afirmar(est[0] >= 200 && est[0] < 300 && est[1] === 409, `cierres simultáneos → ${est.join(", ")}`);
+    const c = cerrarDos.find((x) => x.status < 300).json;
     afirmar(c.planilla.estado === "cerrada" && c.resumen.total === 29363, `total ${c.resumen.total}`);
+    const hist = await ok(U.jefe, "GET", `/ot/${C.ot.id}/historial`);
+    const cierres = hist.filter((x) => x.tipo === "costos_reales" && x.detalle?.accion === "cerrar" && x.detalle?.unidadId === C.lqc.id);
+    afirmar(cierres.length === 2, `${cierres.length} eventos de cierre de LQC (esperados 2: el primero y este)`);
     return `reabierta y cerrada de nuevo · total ${c.resumen.total}`;
   });
   await paso("2 · Lo aprobado ya no se corrige ni cambia de factor (409)", async () => {

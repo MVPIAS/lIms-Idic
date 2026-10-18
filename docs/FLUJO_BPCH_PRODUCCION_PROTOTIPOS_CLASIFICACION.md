@@ -106,7 +106,11 @@ Ingreso (fabricante · elemento nuevo · solicitud DGMN) ─► clasificación a
   `PROTO-REC`) y el tipo de documento de la matriz (`CERTIFICADO_CONFORMIDAD` /
   `INFORME_INCUMPLIMIENTO`, hoy firma el Jefe de la SCC). Se firma, entrega y la OT se cierra con
   el flujo general. Esas plantillas no se pueden emitir en otra OT ni con otro dictamen (409).
-  Con el documento anulado se puede volver a dictaminar.
+  Con el documento anulado se puede volver a dictaminar. El dictamen se toma con la fila del
+  prototipo bloqueada: dos dictámenes simultáneos (p. ej. aprobado y rechazado) → uno sigue y
+  el otro recibe 409; nunca se emiten dos documentos. La tabla de ensayos del documento
+  imprime el **resultado final** (con fórmula y factor), el mismo con el que se calculó el
+  veredicto, igual que la tabla de inspección de los documentos SCC.
 - **Código único CNC-DGMN**: solo con el certificado de aprobación **oficial**; seis partes
   separadas por «/» (forma E-I/n/n/n/n/n), único entre prototipos. La inscripción en el Listado de
   Codificación Única es de ese módulo.

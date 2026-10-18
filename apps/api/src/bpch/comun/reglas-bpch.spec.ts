@@ -1,4 +1,5 @@
 import {
+  avanceInternacion,
   calcularTasa,
   condicionFinal,
   errorCambioEstadoCodificacion,
@@ -160,5 +161,25 @@ describe("Reinspección · solicitud", () => {
   });
   it("un código que no está en la Codificación Única no es reinspección (corresponde Prototipo)", () => {
     expect(erroresReinspeccion({ ...base, cnc: "E-I/1/2/3/4/5", cncEnCodificacion: false }).join(" ")).toMatch(/Prototipo/);
+  });
+});
+
+describe("Internación · estado que se muestra = avance real (revisión r3, hallazgo 21)", () => {
+  const ot = { estado: "ot_generada", otEstado: "recepcionada", lotes: 1, lotesRegistrados: 0, sujetaTasa: true };
+  it("antes de la OT, el estado del expediente", () => {
+    expect(avanceInternacion({ estado: "registrada" })).toBe("registrada");
+    expect(avanceInternacion({ estado: "antecedentes_pendientes" })).toBe("antecedentes_pendientes");
+    expect(avanceInternacion({ estado: "anulada" })).toBe("anulada");
+  });
+  it("después avanza con los lotes, los documentos, la tasa y el cierre de la OT", () => {
+    expect(avanceInternacion(ot)).toBe("ot_generada");
+    expect(avanceInternacion({ ...ot, lotesRegistrados: 1 })).toBe("en_inspeccion");
+    expect(avanceInternacion({ ...ot, lotesRegistrados: 1, informeOficial: true })).toBe("informe_emitido");
+    expect(avanceInternacion({ ...ot, informeOficial: true, certificadoOficial: true })).toBe("certificado_emitido");
+    expect(avanceInternacion({ ...ot, informeOficial: true, incumplimientoOficial: true, sujetaTasa: false })).toBe("incumplimiento_emitido");
+    expect(avanceInternacion({ ...ot, certificadoOficial: true, tasaRemitida: true })).toBe("tasa_remitida");
+    // OT cerrada y tasa remitida: ya no figura como «OT generada».
+    expect(avanceInternacion({ ...ot, otEstado: "cerrada", certificadoOficial: true, tasaRemitida: true })).toBe("ot_cerrada");
+    expect(avanceInternacion({ ...ot, otEstado: "anulada" })).toBe("ot_anulada");
   });
 });

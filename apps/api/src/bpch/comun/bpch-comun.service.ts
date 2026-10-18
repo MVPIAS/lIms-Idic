@@ -1,10 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma.service";
 import { DEV_TENANT } from "../../common/base-crud.service";
-import { generarCodigoOt } from "../../common/codigo";
 import { AlcanceService } from "../../rbac/alcance.service";
 import { descendientes } from "../../rbac/alcance";
-import { LaboratorioOtService } from "../../ot/laboratorio-ot.service";
 import { RegistroMuestrasService } from "../../flujo-real/flujo-real.module";
 import { condicionFinal, TEXTO_CONDICION } from "./reglas-bpch";
 
@@ -34,33 +32,19 @@ export interface DocumentoOt {
 }
 
 /**
- * Piezas comunes de los procesos BPCH (internación, reinspección): correlativo
- * de expediente, parámetros, unidades de inspección, alcance del expediente,
- * creación de la OT ligada, panel de ensayos del catálogo y estado de la OT
- * (lotes, veredicto, documentos y factura) para mostrar el avance.
+ * Piezas comunes de los procesos BPCH (internación, reinspección): parámetros,
+ * unidades de inspección, alcance del expediente, panel de ensayos del
+ * catálogo y estado de la OT. La OT ligada y los correlativos de expediente
+ * los crea OtDesdeProcesoService, el mismo para todos los procesos BPCH. El
+ * estado de la OT (lotes, veredicto, documentos y factura) muestra el avance.
  */
 @Injectable()
 export class BpchComunService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
-    private readonly labs: LaboratorioOtService,
     private readonly registro: RegistroMuestrasService,
   ) {}
-
-  /** Siguiente número de expediente: INT-AAAA-NNNN / REI-AAAA-NNNN (atómico). */
-  async correlativo(tx: Sql, tenantId: string, tipo: "INT" | "REI"): Promise<string> {
-    const anio = new Date().getFullYear();
-    const filas = await tx.$queryRawUnsafe<{ ultimo: number }[]>(
-      `INSERT INTO bpch_correlativo (tenant_id, tipo, anio, ultimo) VALUES ($1::uuid, $2, $3, 1)
-       ON CONFLICT (tenant_id, tipo, anio) DO UPDATE SET ultimo = bpch_correlativo.ultimo + 1, updated_at = now()
-       RETURNING ultimo`,
-      tenantId,
-      tipo,
-      anio,
-    );
-    return `${tipo}-${anio}-${String(Number(filas[0]?.ultimo ?? 1)).padStart(4, "0")}`;
-  }
 
   /** Parámetros BPCH (Administración › Parámetros del sistema). */
   async parametros(tenantId: string) {
@@ -148,57 +132,6 @@ export class BpchComunService {
     return e[0];
   }
 
-  /**
-   * Crea la OT ligada al expediente (sin cotización ni aprobación), con su
-   * laboratorio responsable = la unidad que inspecciona. Dentro de `tx`.
-   */
-  async crearOt(
-    tx: any,
-    d: {
-      tenantId: string;
-      clienteId: string;
-      unidad: { id: string; codigo: string; nombre: string; tipo: string | null };
-      origen: "INTERNACION" | "REINSPECCION";
-      conCobro: boolean;
-      resolucion?: string | null;
-      descripcion: string;
-      tipoTrabajo?: string | null;
-      elementoGenerico?: string | null;
-      catElementoId?: string | null;
-      usuarioId: string | null;
-      historial: Record<string, unknown>;
-    },
-  ) {
-    const codigo = await generarCodigoOt(tx, d.tenantId);
-    const ot = await tx.ordenTrabajo.create({
-      data: {
-        tenantId: d.tenantId,
-        codigo,
-        clienteId: d.clienteId,
-        prioridad: "normal",
-        estado: "recepcionada",
-        fechaRecepcion: new Date(),
-        descripcionTrabajo: d.descripcion,
-        origenTrabajo: d.origen,
-        conCobro: d.conCobro,
-        opiPendiente: false,
-        numeroLey: d.resolucion?.slice(0, 40) ?? null,
-      },
-      select: { id: true, codigo: true },
-    });
-    await tx.$executeRawUnsafe(
-      `UPDATE orden_trabajo SET tipo_trabajo = $2, elemento_generico = $3, cat_elemento_id = $4::uuid, created_by = $5::uuid WHERE id = $1::uuid`,
-      ot.id,
-      d.tipoTrabajo ?? null,
-      d.elementoGenerico?.slice(0, 240) ?? null,
-      d.catElementoId ?? null,
-      d.usuarioId,
-    );
-    await this.labs.fijar(tx, { tenantId: d.tenantId, otId: ot.id, unidad: d.unidad, usuarioId: d.usuarioId, origen: "alta_indicado" });
-    await this.labs.anotar(tx, { tenantId: d.tenantId, otId: ot.id, tipo: d.origen === "INTERNACION" ? "bpch_internacion" : "bpch_reinspeccion", usuarioId: d.usuarioId, detalle: d.historial });
-    return ot as { id: string; codigo: string };
-  }
-
   /** Panel de ensayos del elemento del catálogo (cat_panel → métodos con analitos). */
   async panel(tenantId: string, catElementoId: string) {
     return this.prisma.$queryRawUnsafe<any[]>(
@@ -218,15 +151,22 @@ export class BpchComunService {
    * Registra un lote como muestra de la OT con sus ensayos (mismo servicio que
    * la pestaña «Muestras» del expediente) y le anota la identificación del lote.
    */
-  async registrarLote(req: any, otId: string, d: { nombre: string; metodoIds: string[]; catElementoId?: string | null; lote?: string | null }) {
+  async registrarLote(
+    req: any,
+    otId: string,
+    d: { nombre: string; metodoIds: string[]; catElementoId?: string | null; lote?: string | null },
+    /** Transacción del expediente: la muestra, sus ensayos y el enlace con el lote van juntos. */
+    tx: any,
+  ) {
     const r = await this.registro.registrar(
       otId,
       { muestras: [{ nombre: d.nombre.slice(0, 200), metodoIds: d.metodoIds, ...(d.catElementoId ? { catElementoId: d.catElementoId } : {}) }] },
       tenantDe(req),
       req,
+      tx,
     );
     const m = r.muestras[0];
-    if (d.lote) await this.prisma.$executeRawUnsafe(`UPDATE muestra SET numero_lote = $2 WHERE id = $1::uuid`, m.id, d.lote.slice(0, 80));
+    if (d.lote) await tx.$executeRawUnsafe(`UPDATE muestra SET numero_lote = $2 WHERE id = $1::uuid`, m.id, d.lote.slice(0, 80));
     return m;
   }
 

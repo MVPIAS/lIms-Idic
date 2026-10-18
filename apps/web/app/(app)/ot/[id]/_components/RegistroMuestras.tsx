@@ -40,6 +40,7 @@ interface MuestraOt {
   tomaMuestra: string | null; condicionRecepcion: "cumple" | "no_cumple" | null; condicionObservacion: string | null;
   selloNumero: string | null; identificacionCliente: string | null; requiereOtrosLabs: boolean; otrosLabs: string[];
   otrosLabsDetalle: string | null; recepcionadaAt: string | null; recepcionadaPorNombre: string | null;
+  recepcionCorregidaAt?: string | null; recepcionCorregidaPorNombre?: string | null;
   recepcionIncompleta: boolean; otrosLabsEnlace: EnlaceLab[];
 }
 interface Propuesta {
@@ -237,7 +238,12 @@ export default function RegistroMuestras({ otId, onCambio }: { otId: string; onC
                           {m.condicionObservacion && <div style={{ color: "var(--red)", marginTop: 2 }}>{m.condicionObservacion}</div>}
                           {m.recepcionadaAt && (
                             <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>
-                              {fechaHora(m.recepcionadaAt)}{m.recepcionadaPorNombre ? ` · ${m.recepcionadaPorNombre}` : ""}
+                              Recibida {fechaHora(m.recepcionadaAt)}{m.recepcionadaPorNombre ? ` · ${m.recepcionadaPorNombre}` : ""}
+                            </div>
+                          )}
+                          {m.recepcionCorregidaAt && (
+                            <div style={{ color: "var(--muted)", fontSize: 11 }}>
+                              Corregida {fechaHora(m.recepcionCorregidaAt)}{m.recepcionCorregidaPorNombre ? ` · ${m.recepcionCorregidaPorNombre}` : ""}
                             </div>
                           )}
                         </td>

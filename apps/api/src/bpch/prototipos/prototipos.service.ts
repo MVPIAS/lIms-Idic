@@ -20,6 +20,7 @@ import {
   faltantesDictamen,
   faltantesGenerarOt,
   validarCodigoCnc,
+  resultadoDictamen,
   veredictoOt,
   type Dictamen,
 } from "./reglas-prototipo";
@@ -143,7 +144,7 @@ export class PrototiposService implements OnModuleInit {
   private async tablaEnsayos(otId: string): Promise<string> {
     const filas = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT m.codigo AS muestra, COALESCE(ca.nombre, a.nombre, cm.nombre) AS ensayo, cm.codigo AS metodo,
-              r.limite_inf, r.limite_sup, r.requisito, r.unidad, r.valor_numerico, r.promedio, r.valor_texto, r.veredicto
+              r.limite_inf, r.limite_sup, r.requisito, r.unidad, r.valor_numerico, r.promedio, r.resultado_final, r.valor_texto, r.veredicto
          FROM resultado r
          LEFT JOIN muestra m ON m.id = r.muestra_id
          LEFT JOIN cat_analito ca ON ca.id = r.cat_analito_id
@@ -162,7 +163,7 @@ export class PrototiposService implements OnModuleInit {
           r.limite_inf || r.limite_sup
             ? `${r.limite_inf ?? "—"} – ${r.limite_sup ?? "—"}${r.unidad ? ` ${r.unidad}` : ""}`
             : r.requisito ?? "";
-        const valor = r.promedio ?? r.valor_numerico ?? r.valor_texto ?? "";
+        const valor = resultadoDictamen(r);
         const clase = r.veredicto === "cumple" ? "ok" : r.veredicto === "no_cumple" ? "no" : "";
         return `<tr>${celda(r.muestra)}${celda(r.ensayo)}${celda(r.metodo)}${celda(espec)}${celda(valor, "num")}${celda(etiquetaVeredicto(r.veredicto), clase)}</tr>`;
       })
@@ -459,13 +460,34 @@ export class PrototiposService implements OnModuleInit {
     if (!plantilla) throw new ConflictException(`Falta la plantilla ${doc.repid} (align_bpch_pn_prototipos_clasificacion.sql).`);
 
     const previo = { estado: p.estado, dictamen: p.dictamen, motivo: p.dictamen_motivo, por: p.dictamen_por, at: p.dictamen_at, documento: p.documento_id };
-    await this.prisma.$executeRawUnsafe(
-      `UPDATE bpch_prototipo SET dictamen = $2, dictamen_motivo = $3, dictamen_por = $4::uuid, dictamen_at = now(), updated_at = now() WHERE id = $1::uuid`,
-      id,
-      d.dictamen,
-      d.motivo ?? null,
-      usuarioId,
-    );
+    // El dictamen se «toma» con la fila del prototipo bloqueada: solo sigue quien
+    // la encuentra igual que cuando comprobó las condiciones. Un segundo dictamen
+    // simultáneo (p. ej. aprobado y rechazado a la vez) recibe 409 y no emite otro
+    // documento (revisión r3, hallazgo 11).
+    await this.prisma.$transaction(async (tx) => {
+      const [actual] = await tx.$queryRawUnsafe<{ estado: string; dictamen: string | null; documento_id: string | null; mismo_at: boolean }[]>(
+        `SELECT estado, dictamen, documento_id,
+                (date_trunc('milliseconds', dictamen_at) IS NOT DISTINCT FROM $2::timestamptz) AS mismo_at
+           FROM bpch_prototipo WHERE id = $1::uuid FOR UPDATE`,
+        id,
+        previo.at ?? null,
+      );
+      if (
+        !actual ||
+        actual.estado !== previo.estado ||
+        (actual.dictamen ?? null) !== (previo.dictamen ?? null) ||
+        (actual.documento_id ?? null) !== (previo.documento ?? null) ||
+        !actual.mismo_at
+      )
+        throw new ConflictException("Otra persona acaba de dictaminar este prototipo: vuelva a cargarlo.");
+      await tx.$executeRawUnsafe(
+        `UPDATE bpch_prototipo SET dictamen = $2, dictamen_motivo = $3, dictamen_por = $4::uuid, dictamen_at = now(), updated_at = now() WHERE id = $1::uuid`,
+        id,
+        d.dictamen,
+        d.motivo ?? null,
+        usuarioId,
+      );
+    });
     let emitido: Awaited<ReturnType<PlantillaRenderService["emitir"]>>;
     try {
       emitido = await this.render.emitir(p.ot_id, plantilla.id, tenantId, usuarioId ?? undefined, { tipoDocumento: doc.tipoDocumento });

@@ -1,4 +1,4 @@
-import { aplicarFactor, erroresFactor, expresionConFactor, factorDe, puedeAjustarFactor, textoFactor } from "./factor";
+import { aplicarFactor, erroresFactor, erroresFactorMetodo, expresionConFactor, factorDe, puedeAjustarFactor, textoFactor } from "./factor";
 import { calcularCaptura } from "./captura-estandar";
 
 describe("factor de la fórmula", () => {
@@ -62,5 +62,18 @@ describe("factor en la captura", () => {
     expect(r.valorNumerico).toBe(7.2);
     expect(r.factorAplicado).toBe(false);
     expect(r.valorSinFactor).toBeNull();
+  });
+});
+
+describe("factor por defecto del método (revisión r3, hallazgo 19)", () => {
+  it("valor y operación van juntos: uno solo → error (400, no el 500 del CHECK)", () => {
+    expect(erroresFactorMetodo({ factorValor: 10 })).toMatch(/juntos/);
+    expect(erroresFactorMetodo({ factorOperacion: "multiplicar" })).toMatch(/juntos/);
+    expect(erroresFactorMetodo({ factorValor: 10, factorOperacion: null })).toMatch(/juntos/);
+  });
+  it("ambos, ninguno o los dos vacíos (quitarlo) está bien", () => {
+    expect(erroresFactorMetodo({ factorValor: 10, factorOperacion: "multiplicar" })).toBeNull();
+    expect(erroresFactorMetodo({})).toBeNull();
+    expect(erroresFactorMetodo({ factorValor: null, factorOperacion: null })).toBeNull();
   });
 });

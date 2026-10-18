@@ -922,6 +922,9 @@ model Muestra {
   otrosLabsDetalle      String?   @map("otros_labs_detalle")
   recepcionadaAt        DateTime? @map("recepcionada_at") @db.Timestamptz
   recepcionadaPor       String?   @map("recepcionada_por") @db.Uuid
+  /// Última corrección de la recepción (align_revision_r3.sql): recepcionada_* no cambian al corregir.
+  recepcionCorregidaPor String?   @map("recepcion_corregida_por") @db.Uuid
+  recepcionCorregidaAt  DateTime? @map("recepcion_corregida_at") @db.Timestamptz
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
 

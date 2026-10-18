@@ -1,7 +1,8 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { createHash, randomInt } from "crypto";
+import { createHash } from "crypto";
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
+import { FORMATO_BPCH, nuevoCodigoVerificacion } from "../../common/codigo-verificacion";
 import { validaRut } from "../../common/rut.validator";
 import { ClienteService } from "../../cliente/cliente.service";
 import { diaDe, hoyCl } from "../../ot/plazos";
@@ -1079,13 +1080,6 @@ export class ProduccionNacionalService {
     return this.correlacion(tenantId, id);
   }
 
-  private nuevoCodigoVerificacion(): string {
-    const abc = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    let s = "";
-    for (let i = 0; i < 12; i++) s += abc[randomInt(abc.length)];
-    return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8)}`;
-  }
-
   /** Emite y sella el informe técnico a DCO (ITPN-AAAA-NNNN). */
   async emitirInforme(tenantId: string, usuarioId: string | null, id: string) {
     const c = await this.correlacionFila(tenantId, id);
@@ -1138,7 +1132,7 @@ export class ProduccionNacionalService {
         numero,
         cuerpo,
         hash,
-        this.nuevoCodigoVerificacion(),
+        nuevoCodigoVerificacion(FORMATO_BPCH),
         usuarioId,
         ahora,
       );

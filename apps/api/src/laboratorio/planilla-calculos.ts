@@ -37,7 +37,11 @@ export interface EnsayoPlanilla {
   formulaOrigen: "orden" | "catalogo" | "sin_formula";
   formulaCatalogo: string | null;
   formulaAplicada: string | null;
-  factor: { valor: number; operacion: string; origen: string | null; descripcion: string | null; editadoPor: string | null; editadoAt: string | Date | null; motivo: string | null } | null;
+  factor: {
+    valor: number; operacion: string; origen: string | null; descripcion: string | null; editadoPor: string | null; editadoAt: string | Date | null; motivo: string | null;
+    /** true = aplicado al resultado; false = el valor se ingresó directo y el factor NO se aplicó; null = aún sin valor. */
+    aplicado?: boolean | null;
+  } | null;
   valorSinFactor: number | null;
   resultado: string | null;
   promedio: number | null;
@@ -175,7 +179,7 @@ export function csvPlanilla(otCodigo: string, ensayos: EnsayoPlanilla[]): string
       Object.entries(e.variables).map(([k, v]) => `${k}=${numeroCl(v)}`).join(" "),
       e.formula, e.formulaOrigen === "orden" ? "Orden" : e.formulaOrigen === "catalogo" ? "Catálogo" : "Sin fórmula",
       e.formulaCatalogo, e.formulaAplicada,
-      e.factor ? `${e.factor.operacion === "dividir" ? "÷" : "×"} ${numeroCl(e.factor.valor)}` : "",
+      e.factor ? `${e.factor.operacion === "dividir" ? "÷" : "×"} ${numeroCl(e.factor.valor)}${e.factor.aplicado === false ? " (no aplicado: valor ingresado directo)" : ""}` : "",
       e.factor ? (e.factor.origen === "orden" ? "Orden" : "Método") : "",
       numeroCl(e.valorSinFactor), e.resultado, numeroCl(e.promedio), numeroCl(e.desviacion), numeroCl(e.cv, 2),
       e.limiteInf, e.nominal, e.limiteSup, e.requisito, e.veredicto, e.estado,
@@ -193,4 +197,14 @@ export function csvPlanilla(otCodigo: string, ensayos: EnsayoPlanilla[]): string
         h.motivo, ETIQUETA_ORIGEN[h.origen ?? ""] ?? h.origen,
       ]));
   return "﻿" + out.join("\r\n") + "\r\n";
+}
+
+/**
+ * ¿Se aplicó el factor al resultado? Sí si se guardó el valor antes del factor;
+ * no si hay valor pero no ese dato (se ingresó directo); null si aún no hay
+ * valor. La planilla no presenta como aplicado un factor que no lo fue.
+ */
+export function factorAplicado(r: { valorSinFactor: unknown; tieneValor: boolean }): boolean | null {
+  if (r.valorSinFactor != null) return true;
+  return r.tieneValor ? false : null;
 }

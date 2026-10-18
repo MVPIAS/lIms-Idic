@@ -17,6 +17,10 @@
  *   C · Reinspección del producto de A por traspaso: hereda antecedentes,
  *       inspección, Informe de Inspección, trazabilidad y cambio de titular en
  *       la Codificación Única → cierre.
+ *   D · Revisión r3: dos lotes del MISMO producto nuevo (mismo CNC, sin
+ *       codificar) se registran juntos y se inscriben juntos en la Codificación
+ *       Única (hallazgo 3); un doble envío de lotes no crea dos muestras
+ *       (hallazgo 10); el listado muestra el avance real (hallazgo 21).
  *
  * Cada regla se prueba con el perfil que debe poder y con uno que no.
  *
@@ -208,6 +212,13 @@ async function firmarTodo(docId) {
   throw new Error("el documento no quedó oficial");
 }
 
+/** Avance que muestra el listado de internaciones para un expediente (hallazgo 21). */
+async function avanceEnListado(usuario, id) {
+  const fila = lista(await ok(usuario, "GET", "/bpch/internaciones?limit=200")).find((x) => x.id === id);
+  afirmar(fila, "la internación no figura en el listado");
+  return fila.avance;
+}
+
 async function plantilla(cfg, tipo) {
   const p = cfg.plantillas?.[tipo]?.[0];
   afirmar(p, `no hay plantilla para ${tipo}`);
@@ -367,9 +378,17 @@ async function main() {
       items: [{ id: it.id, identificacionLote: C.loteA, tamanoLote: 1482, tamanoMuestra: 36 }],
     });
     await exigir(403, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/lotes`, { items: [{ id: it.id, metodoIds: C.metodos }] });
-    C.A = await ok(U.inspector, "POST", `/bpch/internaciones/${C.A.id}/lotes`, { items: [{ id: it.id, metodoIds: C.metodos }] });
+    afirmar((await avanceEnListado(U.scc, C.A.id)) === "ot_generada", "antes de los lotes el listado debería decir «OT generada»");
+    // Doble envío simultáneo (revisión r3, hallazgo 10): uno registra el lote y el otro recibe 400.
+    const dobles = await Promise.all([1, 2].map(() => llamar(U.inspector, "POST", `/bpch/internaciones/${C.A.id}/lotes`, { items: [{ id: it.id, metodoIds: C.metodos }] })));
+    const estados = dobles.map((r) => r.status).sort();
+    afirmar(estados[0] >= 200 && estados[0] < 300 && estados[1] === 400, `doble envío de lotes → ${estados.join(", ")}`);
+    C.A = dobles.find((r) => r.status < 300).json;
     C.muestraA = C.A.items[0].muestraId;
     afirmar(C.muestraA, "el lote no quedó registrado como muestra");
+    const regA = await ok(U.inspector, "GET", `/flujo/ot/${C.A.otId}/registro-muestras`);
+    afirmar(regA.muestras.length === 1, `el doble envío dejó ${regA.muestras.length} muestras`);
+    afirmar((await avanceEnListado(U.scc, C.A.id)) === "en_inspeccion", "con el lote registrado el listado debería decir «En inspección»");
     await exigir(400, U.inspector, "POST", `/bpch/internaciones/${C.A.id}/lotes`, { items: [{ id: it.id, metodoIds: C.metodos }] });
     return `${C.A.items[0].muestraCodigo} · ${C.A.lotesRegistrados?.[0]?.ensayos} ensayos`;
   });
@@ -447,6 +466,7 @@ async function main() {
     await exigir(409, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 1, paridad: 1 });
     const f = await ok(U.finanzas, "GET", `/facturas/${C.facturaA}`);
     afirmar(f.estado === "pendiente" && Number(f.total) === C.A.tasa.total && f.lineas.length === 1, `factura ${f.estado} ${f.total}`);
+    afirmar((await avanceEnListado(U.ventas, C.A.id)) === "tasa_remitida", "el listado no muestra la tasa remitida");
     return `tasa $${C.A.tasa.tasa} + IVA = $${C.A.tasa.total} · factura ${f.numero} pendiente`;
   });
 
@@ -458,7 +478,10 @@ async function main() {
     C.A = await ok(U.scc, "GET", `/bpch/internaciones/${C.A.id}`);
     const pend = C.A.fases.filter((f) => f.estado !== "hecho" && f.estado !== "no_aplica");
     afirmar(!pend.length, `fases sin completar: ${pend.map((f) => f.clave).join(", ")}`);
-    return `${C.A.fases.length} fases completas`;
+    // Revisión r3 (hallazgo 21): con la OT cerrada el listado ya no dice «OT generada».
+    afirmar(C.A.avance === "ot_cerrada", `avance del expediente ${C.A.avance}`);
+    afirmar((await avanceEnListado(U.scc, C.A.id)) === "ot_cerrada", "el listado sigue sin mostrar la OT cerrada");
+    return `${C.A.fases.length} fases completas · listado: ${C.A.avanceTexto}`;
   });
 
   /* ------------------------------------------------ B · Internación que no cumple */
@@ -521,6 +544,52 @@ async function main() {
     return "informado a DGMN · OT cerrada sin factura";
   });
 
+  /* ------------------------------------------------ D · Dos lotes del mismo producto nuevo (revisión r3) */
+  await paso("D · Dos lotes del mismo producto nuevo (mismo CNC, sin codificar): OT, lotes y resultados", async () => {
+    C.cncD = `E-I/9/${n6()}/1/2/${n6()}`;
+    const item = (lote) => ({ catElementoId: C.elemento.id, elementoGenerico: "Explosivo encartuchado", elementoEspecifico: `Tronex Plus D ${sello}`,
+      cnc: C.cncD, claseDivisionUn: "1.1D", numeroUn: "0241", cantidad: 100 + lote });
+    C.D = await ok(U.scc, "POST", "/bpch/internaciones", {
+      resolucionNumero: `Res. Ex. DGMN D${sello.slice(-4)}`, resolucionFecha: hoy(), clienteId: C.importador.id, esquema: "LOTES",
+      unidadInspeccionId: C.sstgo.id, sujetaTasa: false, items: [item(1), item(2)],
+    });
+    afirmar(C.D.items.length === 2 && C.D.items.every((x) => x.cnc === C.cncD && !x.codificacionId), "los dos lotes no quedaron con el mismo CNC sin codificar");
+    C.D = await ok(U.scc, "POST", `/bpch/internaciones/${C.D.id}/analisis`, { infoCompleta: true, fechaAnalisis: hoy() });
+    await ok(U.inspector, "PATCH", `/bpch/internaciones/${C.D.id}/inspeccion`, {
+      lugarInspeccion: "Bodega de prueba D", fechaInspeccion: hoy(), inspectores: "R. R.",
+      items: C.D.items.map((x, i) => ({ id: x.id, identificacionLote: `LD${i + 1}-${sello.slice(-6)}`, tamanoLote: 100, tamanoMuestra: 5 })),
+    });
+    C.D = await ok(U.inspector, "POST", `/bpch/internaciones/${C.D.id}/lotes`, { items: C.D.items.map((x) => ({ id: x.id, metodoIds: C.metodos })) });
+    afirmar(C.D.items.every((x) => x.muestraId), "no se registraron los dos lotes");
+    for (const x of C.D.items) await capturarLote(C.D.otId, x.muestraId);
+    await ok(U.sstgo, "POST", `/resultados/ot/${C.D.otId}/revisar`, {});
+    await ok(U.bpch, "POST", `/resultados/ot/${C.D.otId}/aprobar`, {});
+    return `${C.D.numero} · 2 lotes · CNC ${C.cncD}`;
+  });
+
+  await paso("D · Informe de Inspección y Certificado de Conformidad oficiales", async () => {
+    const pi = await plantilla(C.cfg, "INFORME_INSPECCION");
+    const r = await ok(U.sstgo, "POST", "/informes/emitir", { otId: C.D.otId, plantillaId: pi.id, tipoDocumento: "INFORME_INSPECCION" });
+    await firmarTodo((r.certificado ?? r).id);
+    const pc = await plantilla(C.cfg, "CERTIFICADO_CONFORMIDAD");
+    const c = await ok(U.sstgo, "POST", "/informes/emitir", { otId: C.D.otId, plantillaId: pc.id, tipoDocumento: "CERTIFICADO_CONFORMIDAD" });
+    C.certD = (c.certificado ?? c).id;
+    await firmarTodo(C.certD);
+    afirmar((await avanceEnListado(U.scc, C.D.id)) === "certificado_emitido", "el listado no muestra el certificado emitido");
+  });
+
+  await paso("D · Codificación Única: los dos lotes del mismo CNC se inscriben juntos, una sola vez (hallazgo 3)", async () => {
+    C.D = await ok(U.bpch, "POST", `/bpch/internaciones/${C.D.id}/codificacion`, { items: C.D.items.map((x) => ({ id: x.id, listado: "EXPLOSIVOS" })) });
+    const ids = [...new Set(C.D.items.map((x) => x.codificacionId))];
+    afirmar(ids.length === 1 && ids[0], `los lotes quedaron con ${ids.length} productos distintos`);
+    const cod = await ok(U.ventas, "GET", `/bpch/codificacion/${ids[0]}`);
+    const ev = cod.historial.map((h) => h.evento);
+    afirmar(cod.certificadoId === C.certD && ev.includes("alta_certificacion") && ev.includes("certificacion"), `historial ${ev.join(",")}`);
+    const enc = lista(await ok(U.ventas, "GET", `/bpch/codificacion?q=${encodeURIComponent(C.cncD)}`));
+    afirmar(enc.length === 1, `${enc.length} inscripciones con el mismo CNC`);
+    return `${cod.cnc} inscrito una vez · historial: ${ev.join(" ← ")}`;
+  });
+
   /* ------------------------------------------------ C · Reinspección */
   await paso("C · Antecedente: hereda de la OT original titular, producto, código y lote", async () => {
     C.ant = await ok(U.sstgo, "GET", `/bpch/reinspecciones/antecedente?otId=${C.A.otId}`);
@@ -562,8 +631,12 @@ async function main() {
       lugarInspeccion: "Ruta F-800 km 5", fechaInspeccion: hoy(), inspectores: "V. R. · N. C.", fechaVencimientoProducto: "2029-06-30", vigenciaInforme: "2027-01-29",
       observaciones: "Reinspección por traspaso entre empresas.",
     });
-    C.R = await ok(U.inspector, "POST", `/bpch/reinspecciones/${C.R.id}/lote`, { metodoIds: C.metodos.slice(0, 2) });
+    const dobles = await Promise.all([1, 2].map(() => llamar(U.inspector, "POST", `/bpch/reinspecciones/${C.R.id}/lote`, { metodoIds: C.metodos.slice(0, 2) })));
+    const est = dobles.map((r) => r.status).sort();
+    afirmar(est[0] >= 200 && est[0] < 300 && est[1] === 409, `doble envío del lote de reinspección → ${est.join(", ")}`);
+    C.R = dobles.find((r) => r.status < 300).json;
     afirmar(C.R.lote.muestraId, "el lote no quedó como muestra");
+    afirmar((await ok(U.inspector, "GET", `/flujo/ot/${C.R.otId}/registro-muestras`)).muestras.length === 1, "el doble envío dejó dos muestras");
     await capturarLote(C.R.otId, C.R.lote.muestraId);
     await ok(U.sstgo, "POST", `/resultados/ot/${C.R.otId}/revisar`, {});
     await ok(U.bpch, "POST", `/resultados/ot/${C.R.otId}/aprobar`, {});
