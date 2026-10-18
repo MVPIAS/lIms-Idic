@@ -41,6 +41,7 @@ import { PasoMetodoModule } from "./catalogo/paso-metodo.module";
 import { DocumentosModule } from "./documentos/documentos.module";
 import { MetrologiaModule } from "./metrologia/metrologia.module";
 import { InternacionModule } from "./internacion/internacion.module";
+import { BpchModule } from "./bpch/bpch.module";
 
 /**
  * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
@@ -106,6 +107,7 @@ function prettyTransport() {
     DocumentosModule,
     MetrologiaModule,
     InternacionModule,
+    BpchModule,
     RbacModule,
     PlantillaRenderModule,
     CrmModule,

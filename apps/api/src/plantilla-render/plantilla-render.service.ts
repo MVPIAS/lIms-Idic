@@ -2,8 +2,9 @@ import { etiquetaVeredicto } from "../laboratorio/veredicto";
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common";
 import { createHash, randomInt } from "crypto";
 import { PrismaService } from "../common/prisma.service";
-import { renderizar, tablaMuestras, type FilaMuestra } from "./template.engine";
-import { fmtFecha, fmtFechaHora } from "./html.util";
+import { renderizar, tablaMuestras, tablaInspeccion, type FilaMuestra, type FilaInspeccion } from "./template.engine";
+import { condicionFinal, faltantesDocumentoFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
+import { fmtFecha, fmtFechaHora, fmtNum } from "./html.util";
 import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
 import { QcService } from "../qc/qc.module";
@@ -184,7 +185,39 @@ export class PlantillaRenderService {
       };
     });
 
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme };
+    const bpch = await this.cabeceraBpch(otId, muestras);
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch };
+  }
+
+  /**
+   * Cabecera de los documentos del Banco de Pruebas de Chile ({{bpch.*}}):
+   * vista v_bpch_cabecera_ot (internación, reinspección…) + condición final
+   * calculada con el veredicto de cada lote + Nº del Informe de Inspección.
+   * Si la OT no es de un proceso BPCH (o la base no tiene la vista), null.
+   */
+  private async cabeceraBpch(otId: string, muestras: { veredicto: string | null }[]) {
+    try {
+      const filas = await this.prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT * FROM v_bpch_cabecera_ot WHERE ot_id = $1::uuid LIMIT 1`,
+        otId,
+      );
+      if (!filas[0]) return null;
+      const informe = await this.prisma.certificado.findFirst({
+        where: { otId, tipoDocumento: "INFORME_INSPECCION", deletedAt: null, estado: { in: ["oficial", "emitido", "en_firma"] } },
+        orderBy: { createdAt: "desc" },
+        select: { numero: true, codigo: true },
+      });
+      const condicion = condicionFinal(muestras.map((m) => m.veredicto));
+      const datos: Record<string, string> = {};
+      for (const [k, v] of Object.entries(filas[0])) datos[k] = v === null || v === undefined ? "" : String(v);
+      return {
+        ...datos,
+        condicion_final: TEXTO_CONDICION[condicion],
+        informe_inspeccion: informe?.numero ?? informe?.codigo ?? "",
+      };
+    } catch {
+      return null; // BD sin align_bpch_internacion_reinspeccion.sql
+    }
   }
 
   /** Sección / componente / orden de cada resultado de la OT (resultado_informe). */
@@ -276,6 +309,8 @@ export class PlantillaRenderService {
       veredicto_ot: veredictoOt,
       fecha: fmtFecha(cert.fecha),
       fecha_hora: fmtFechaHora(cert.fecha),
+      // Documentos BPCH: cabecera del expediente (vacía en las demás OT).
+      bpch: ctx.bpch ?? {},
       anio: String(cert.fecha.getFullYear()),
       n_muestras: String(muestras.length),
       n_resultados: String(resultados.length),
@@ -288,6 +323,24 @@ export class PlantillaRenderService {
       fecha_emision: fmtFecha(cert.fecha),
       ot_codigo: ot.codigo,
     };
+  }
+
+  /** Filas de {{tabla_inspeccion}}: inspección, mínimo, máximo, resultado, unidad y condición. */
+  private filasInspeccion(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>): FilaInspeccion[] {
+    return ctx.resultados.map((r) => {
+      const lim = r.analitoId ? ctx.limitePorAnalito.get(r.analitoId) : undefined;
+      const num = (v: unknown) => (v === null || v === undefined || v === "" ? "" : fmtNum(String(v)));
+      const valor = r.promedio ?? r.valorNumerico ?? r.resultadoFinal;
+      return {
+        inspeccion: r.catAnalito?.nombre ?? r.analito?.nombre ?? "",
+        muestra: r.muestra?.codigo ?? "",
+        minimo: num(r.limiteInf ?? lim?.limiteInf),
+        maximo: num(r.limiteSup ?? lim?.limiteSup),
+        resultado: valor !== null && valor !== undefined ? num(valor) : r.valorTexto ?? "",
+        unidad: r.unidad ?? lim?.unidad ?? "",
+        condicion: etiquetaVeredicto(r.veredicto),
+      };
+    });
   }
 
   private filasMuestras(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>): FilaMuestra[] {
@@ -392,6 +445,7 @@ export class PlantillaRenderService {
               fecha: fmtFecha(cert.fecha),
             })
           : "",
+      tabla_inspeccion: tablaInspeccion(this.filasInspeccion(ctx)),
     };
     const { html: cuerpoRenderizado, faltantes } = renderizar(cuerpo, datos, bloques);
 
@@ -639,6 +693,26 @@ export class PlantillaRenderService {
         motivo: p.motivo,
       }));
       faltantes.push(...r.errores);
+    }
+
+    // 4b. Documento final de una inspección BPCH: el Certificado de Conformidad
+    // solo si la condición final es CUMPLE, el Informe de Incumplimiento solo
+    // si es NO CUMPLE, y ambos con el Informe de Inspección ya oficial.
+    if (tipoDocumento === "CERTIFICADO_CONFORMIDAD" || tipoDocumento === "INFORME_INCUMPLIMIENTO") {
+      const [lotes, informe] = await Promise.all([
+        this.prisma.muestra.findMany({ where: { otId, deletedAt: null }, select: { veredicto: true } }),
+        this.prisma.certificado.findFirst({
+          where: { otId, tipoDocumento: "INFORME_INSPECCION", deletedAt: null, estado: { in: ["oficial", "emitido"] } },
+          select: { id: true },
+        }),
+      ]);
+      faltantes.push(
+        ...faltantesDocumentoFinal({
+          tipoDocumento,
+          condicion: condicionFinal(lotes.map((m) => m.veredicto)),
+          informeInspeccionOficial: Boolean(informe),
+        }),
+      );
     }
 
     // 5. Documento vigente de la misma plantilla (salvo el que se reemplaza).
