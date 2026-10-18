@@ -101,6 +101,10 @@ además `muestra.crear` para registrar la OT con sus elementos.
 ver `docs/FLUJO_BPCH_INTERNACION_REINSPECCION_CODIFICACION.md`): `bpch.internacion.ver/registrar/gestionar`,
 `bpch.tasa.gestionar`, `bpch.reinspeccion.ver/gestionar`, `bpch.codificacion.ver/gestionar`.
 
+**BPCH · Producción Nacional, Prototipos y Clasificación** (`align_bpch_pn_prototipos_clasificacion.sql`,
+ver `docs/FLUJO_BPCH_PRODUCCION_PROTOTIPOS_CLASIFICACION.md` §4): `bpch.pn.ver/gestionar/programar`,
+`bpch.prototipo.ver/gestionar/dictaminar`, `bpch.clasificacion.ver/registrar/aprobar`.
+
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
 ---
