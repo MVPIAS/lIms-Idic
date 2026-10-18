@@ -14,6 +14,11 @@ export default function MetodosCatPage() {
         { key: "norma", label: "Norma", render: (v) => (v ? <span className="tag">{v}</span> : "—") },
         { key: "instrumento", label: "Instrumento" },
         { key: "version", label: "Ver." },
+        {
+          key: "factorValor",
+          label: "Factor",
+          render: (v: any, row: any) => (v != null && row?.factorOperacion ? `${row.factorOperacion === "dividir" ? "÷" : "×"} ${String(Number(v)).replace(".", ",")}` : "—"),
+        },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}
       campos={[
@@ -24,6 +29,10 @@ export default function MetodosCatPage() {
         { name: "instrumento", label: "Instrumento" },
         { name: "version", label: "Versión" },
         { name: "servgrp", label: "Serv. grupo" },
+        // Factor por defecto de la fórmula: se copia a los ensayos de cada OT y la jefatura lo ajusta por OT.
+        { name: "factorOperacion", label: "Factor de la fórmula · operación", tipo: "select", opciones: ["multiplicar", "dividir"] },
+        { name: "factorValor", label: "Factor de la fórmula · valor", tipo: "number" },
+        { name: "factorDescripcion", label: "Factor · qué representa (p. ej. dilución 1:10)" },
         { name: "activo", label: "Activo", tipo: "checkbox" },
       ]}
     />

@@ -10,7 +10,7 @@ export default function MuestrasPage() {
     <CrudTable
       recurso="muestras"
       titulo="Muestras"
-      subtitulo="Maestro de muestras. A cada muestra se le asignan 1..n ensayos."
+      subtitulo="Maestro de muestras. A cada muestra se le asignan 1..n ensayos. La recepción (toma de muestra, condición, sello, identificación del cliente y otros laboratorios) se registra en el expediente de la OT, pestaña «Muestras»."
       columnas={[
         { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Muestra" },
@@ -18,6 +18,19 @@ export default function MuestrasPage() {
         { campo: "grupoId", titulo: "Grupo", render: renderRef("grupo") },
         { campo: "codigoBarras", titulo: "Cód. barras", render: (v) => (v ? <span className="codigo">{v}</span> : "—") },
         { campo: "ubicacion", titulo: "Ubicación" },
+        // Recepción (se registra o corrige desde el expediente de la OT, pestaña «Muestras»).
+        { campo: "identificacionCliente", titulo: "Id. del cliente", render: (v) => v || "—" },
+        { campo: "selloNumero", titulo: "Sello", render: (v) => (v ? <span className="codigo">{v}</span> : "—") },
+        {
+          campo: "condicionRecepcion",
+          titulo: "Recepción",
+          render: (v, row) =>
+            v ? (
+              <span className={`pill ${v === "cumple" ? "green" : "red"}`} title={row?.condicionObservacion ?? undefined}>{v === "cumple" ? "Cumple" : "No cumple"}</span>
+            ) : (
+              <span className="pill amber" title="Complete la recepción en el expediente de la OT">incompleta</span>
+            ),
+        },
         { campo: "estado", titulo: "Estado", render: (v) => <span className={`pill ${v === "finalizada" ? "green" : v === "en_analisis" ? "amber" : "blue"}`}>{v ?? "—"}</span> },
       ]}
       campos={[

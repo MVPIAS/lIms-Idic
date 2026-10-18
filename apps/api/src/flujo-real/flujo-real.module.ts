@@ -34,6 +34,9 @@ import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type Ti
 import { calcularCaptura, CapturaError } from "../laboratorio/captura-estandar";
 import { veredictoNumerico } from "../laboratorio/veredicto";
 import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
+import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, type RecepcionNormalizada } from "./recepcion-muestra";
+import { aplicarFactor, erroresFactor, expresionConFactor, factorDe } from "../laboratorio/factor";
+import { conTraza, exigeMotivoCorreccion, teniaValor } from "../laboratorio/traza";
 
 /**
  * =============================================================================
@@ -536,7 +539,19 @@ const CapturarValorBody = z
     variables: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.number().finite()).optional(),
     atributo: z.enum(["cumple", "no_cumple"]).optional(),
     observacion: z.string().max(2000).optional(),
+    /** Motivo de la corrección (obligatorio al cambiar un valor ya capturado). */
+    motivo: z.string().trim().max(1000).optional(),
   });
+
+/** Factor de la fórmula del ensayo en esta OT (resultado.factor). valor NULL = quitarlo. */
+const FactorBody = z.object({
+  valor: z.number().finite().nullable(),
+  operacion: z.enum(["multiplicar", "dividir"]).nullable().optional(),
+  descripcion: z.string().trim().max(120).nullable().optional(),
+  motivo: z.string().trim().min(5, "Indique el motivo del ajuste del factor (mínimo 5 caracteres).").max(1000),
+  /** Aplicar a todos los ensayos de la OT con el mismo método (que aún se puedan corregir). */
+  todoElMetodo: z.boolean().optional(),
+});
 
 /** Especificación de la orden (lo que el catálogo no trae, o lo que cambia la jefatura). */
 const texto120 = z.string().max(120).nullable().optional();
@@ -548,6 +563,8 @@ const EspecificacionBody = z.object({
   requisito: z.string().max(2000).nullable().optional(),
   tipoDato: z.enum(["numerico", "atributo"]).optional(),
   formula: z.string().max(500).nullable().optional(),
+  /** Motivo (obligatorio cuando la jefatura cambia lo que vino del catálogo o la fórmula). */
+  motivo: z.string().trim().max(1000).optional(),
 });
 
 /** Parsea un texto de límite a número; NULL si no es numérico ('cumple', ''…). */
@@ -663,6 +680,13 @@ export class PuenteAnalisisService {
     });
     const existentes = new Set(yaExisten.map((r) => r.catAnalitoId));
 
+    // Factor por defecto de cada método: se copia al ensayo (ajustable en la OT).
+    const metodosFactor = await this.prisma.catMetodo.findMany({
+      where: { id: { in: body.metodoIds }, tenantId },
+      select: { id: true, factorValor: true, factorOperacion: true, factorDescripcion: true },
+    });
+    const factorMetodo = new Map(metodosFactor.map((m) => [m.id, factorDe(m.factorValor, m.factorOperacion, m.factorDescripcion)]));
+
     let creados = 0;
     let omitidos = 0;
     for (const a of analitos) {
@@ -697,9 +721,13 @@ export class PuenteAnalisisService {
       // La fórmula se guarda ya en la sintaxis del motor (traducida del LIMS
       // antiguo cuando se puede); la original queda en la copia del catálogo.
       const trad = traducirFormula(a.formula);
+      const factor = factorMetodo.get(a.metodoId) ?? null;
 
-      await this.prisma.resultado.create({
+      await conTraza(this.prisma, { usuarioId: req?.user?.sub, origen: "registro" }, (tx) => tx.resultado.create({
         data: {
+          ...(factor
+            ? { factorValor: factor.valor, factorOperacion: factor.operacion, factorDescripcion: factor.descripcion ?? null, factorOrigen: "metodo" }
+            : {}),
           otId,
           muestraId: muestra.id,
           analitoId: null, // resultado del PUENTE: usa cat_analito_id
@@ -722,7 +750,7 @@ export class PuenteAnalisisService {
           // Pedido pero aún sin valor: no cuenta como «por revisar».
           estado: "pendiente",
         },
-      });
+      }));
       existentes.add(a.id);
       creados++;
     }
@@ -783,10 +811,21 @@ export class PuenteAnalisisService {
     const tipoDato: TipoDato =
       (resultado.tipoDato as TipoDato) ??
       tipoDatoDe({ limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, requisito: resultado.requisito });
+    // Corregir un valor ya capturado (aún sin revisar) exige motivo: queda en el historial.
+    const corrige = teniaValor(resultado);
+    const motivo = entrada.motivo?.trim() || null;
+    if (exigeMotivoCorreccion(resultado.estado, corrige) && (!motivo || motivo.length < 5))
+      throw new BadRequestException(
+        "Este ensayo ya tiene un valor capturado: indique el motivo de la corrección (mínimo 5 caracteres). Queda en el historial del resultado.",
+      );
+
     let calc;
     try {
       calc = calcularCaptura(
-        { tipoDato, limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, formula: resultado.formula },
+        {
+          tipoDato, limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, formula: resultado.formula,
+          factor: factorDe(resultado.factorValor, resultado.factorOperacion, resultado.factorDescripcion),
+        },
         entrada,
       );
     } catch (e) {
@@ -794,9 +833,14 @@ export class PuenteAnalisisService {
       throw e;
     }
 
-    const actualizado = await this.prisma.resultado.update({
+    const actualizado = await conTraza(
+      this.prisma,
+      { usuarioId: req?.user?.sub, motivo: motivo ?? (resultado.estado === "devuelto" ? resultado.motivoDevolucion : null), origen: corrige ? "correccion" : "captura" },
+      (tx) => tx.resultado.update({
       where: { id },
       data: {
+        valorSinFactor: calc.valorSinFactor,
+        variables: entrada.variables && Object.keys(entrada.variables).length ? entrada.variables : undefined,
         valorNumerico: calc.valorNumerico,
         valorTexto: calc.valorTexto,
         replicas: calc.replicas,
@@ -816,9 +860,70 @@ export class PuenteAnalisisService {
         otId: otId ?? null,
       },
       include: { catAnalito: true, catMetodo: true },
-    });
+    }));
     const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
     return { ...actualizado, veredictoMuestra: veredictoDeLaMuestra };
+  }
+
+  /**
+   * Ajusta el factor de la fórmula del ensayo en esta OT (permiso
+   * resultado.factor; motivo obligatorio). Si el ensayo ya tiene un valor
+   * calculado, se recalcula desde el valor sin factor y se vuelve a evaluar el
+   * veredicto. Con `todoElMetodo`, a todos los ensayos de la OT con el mismo
+   * método que aún se pueden corregir. Lo revisado o aprobado no se toca.
+   */
+  async ajustarFactor(id: string, body: z.infer<typeof FactorBody>, tenantId: string, req: any) {
+    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req);
+    const operacion = body.valor == null ? null : body.operacion ?? null;
+    const errores = erroresFactor({ valor: body.valor, operacion });
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    const nuevo = body.valor == null ? null : factorDe(body.valor, operacion, body.descripcion ?? null);
+
+    const objetivo =
+      body.todoElMetodo && resultado.catMetodoId && otId
+        ? await this.prisma.resultado.findMany({ where: { otId, catMetodoId: resultado.catMetodoId, deletedAt: null } })
+        : [resultado];
+    const bloqueo = motivoNoCapturable(resultado.estado);
+    if (bloqueo) throw new ConflictException(bloqueo.replace("corregirlo", "cambiar su factor"));
+
+    const ahora = new Date();
+    const hechos: string[] = [];
+    const omitidos: { id: string; motivo: string }[] = [];
+    await conTraza(this.prisma, { usuarioId: req?.user?.sub, motivo: body.motivo, origen: "factor" }, async (tx) => {
+      for (const r of objetivo) {
+        const b = motivoNoCapturable(r.estado);
+        if (b) { omitidos.push({ id: r.id, motivo: b }); continue; }
+        const data: Record<string, unknown> = {
+          factorValor: nuevo?.valor ?? null,
+          factorOperacion: nuevo?.operacion ?? null,
+          factorDescripcion: nuevo ? body.descripcion ?? r.factorDescripcion ?? null : null,
+          factorOrigen: "orden",
+          factorEditadoPor: req?.user?.sub ?? null,
+          factorEditadoAt: ahora,
+          factorMotivo: body.motivo,
+        };
+        // Recalcula el valor ya capturado desde el valor sin factor.
+        if (r.valorSinFactor != null && (r.tipoDato ?? "numerico") !== "atributo") {
+          const base = Number(r.valorSinFactor);
+          const valor = aplicarFactor(base, nuevo);
+          const n = (v?: string | null) => (v != null && /^\s*[+-]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(v) ? Number(v.replace(",", ".")) : null);
+          const expr = r.formula ? traducirFormula(r.formula).expr : null;
+          Object.assign(data, {
+            valorNumerico: valor,
+            valorTexto: String(valor),
+            resultadoFinal: valor,
+            formulaAplicada: expr || nuevo ? expresionConFactor(expr ?? "PROMEDIO(RN)", nuevo) : null,
+            veredicto: veredictoNumerico(valor, n(r.limiteInf), n(r.limiteSup)),
+          });
+        }
+        await tx.resultado.update({ where: { id: r.id }, data });
+        hechos.push(r.id);
+      }
+    });
+    const muestras = [...new Set(objetivo.filter((r) => hechos.includes(r.id)).map((r) => r.muestraId))];
+    for (const m of muestras) await recalcularVeredictoMuestra(this.prisma, m);
+    const actualizado = await this.prisma.resultado.findFirst({ where: { id }, include: { catAnalito: true, catMetodo: true } });
+    return { ...actualizado, actualizados: hechos.length, omitidos };
   }
 
   /**
@@ -848,6 +953,11 @@ export class PuenteAnalisisService {
       throw new ForbiddenException(
         "Cambiar un valor que vino del catálogo, el tipo de dato o la fórmula lo hace la jefatura del laboratorio. Usted puede completar los campos que el catálogo dejó vacíos.",
       );
+    const motivo = pedido.motivo?.trim() || null;
+    if (plan.requiereJefatura && (!motivo || motivo.length < 5))
+      throw new BadRequestException(
+        "Indique el motivo del cambio (mínimo 5 caracteres): se cambia lo que vino del catálogo o la fórmula, y queda en el historial del resultado.",
+      );
     if (plan.cambios.formula) {
       const t = traducirFormula(plan.cambios.formula);
       if (t.origen !== "motor")
@@ -865,7 +975,7 @@ export class PuenteAnalisisService {
       veredicto = veredictoNumerico(Number(resultado.valorNumerico), n(nueva.limiteInf), n(nueva.limiteSup));
     }
 
-    const actualizado = await this.prisma.resultado.update({
+    const actualizado = await conTraza(this.prisma, { usuarioId: req?.user?.sub, motivo, origen: "especificacion" }, (tx) => tx.resultado.update({
       where: { id },
       data: {
         ...("limiteInf" in plan.cambios ? { limiteInf: plan.cambios.limiteInf } : {}),
@@ -883,7 +993,7 @@ export class PuenteAnalisisService {
         veredicto,
       },
       include: { catAnalito: true, catMetodo: true },
-    });
+    }));
     const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
     return { ...actualizado, camposEditados: plan.campos, veredictoMuestra: veredictoDeLaMuestra };
   }
@@ -1022,6 +1132,17 @@ export class PuenteResultadoController {
     return this.svc.editarEspecificacion(id, EspecificacionBody.parse(body ?? {}), tenantDe(req), req);
   }
 
+  /**
+   * Factor de la fórmula del ensayo en esta OT. Por defecto lo ajusta la
+   * jefatura (resultado.factor); el IDIC puede dar el permiso al analista.
+   */
+  @Patch(":id/factor")
+  @RequierePermiso("resultado.factor")
+  @ApiOperation({ summary: "Ajusta el factor (multiplicar/dividir) de la fórmula de un ensayo en la OT, con motivo" })
+  factor(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.ajustarFactor(id, FactorBody.parse(body ?? {}), tenantDe(req), req);
+  }
+
   @Post(":id/valor")
   @RequierePermiso("resultado.crear")
   @ApiOperation({ summary: "Captura el valor de un resultado del puente y calcula su veredicto" })
@@ -1036,6 +1157,18 @@ export class PuenteResultadoController {
  * Cuerpo de POST /flujo/ot/:id/muestras: las muestras recibidas y los métodos
  * (cat_metodo) que se les aplican. Cada muestra puede llevar sus métodos.
  */
+/** Recepción e identificación de la muestra (recepcion-muestra.ts). */
+const RecepcionBody = z.object({
+  tomaMuestra: z.string().trim().max(60).nullable().optional(),
+  condicionRecepcion: z.enum(["cumple", "no_cumple"]).nullable().optional(),
+  condicionObservacion: z.string().max(2000).nullable().optional(),
+  selloNumero: z.string().max(40).nullable().optional(),
+  identificacionCliente: z.string().max(300).nullable().optional(),
+  requiereOtrosLabs: z.boolean().optional(),
+  otrosLabs: z.array(z.string().uuid()).max(20).optional(),
+  otrosLabsDetalle: z.string().max(2000).nullable().optional(),
+});
+
 const RegistrarMuestrasBody = z.object({
   muestras: z
     .array(
@@ -1043,6 +1176,8 @@ const RegistrarMuestrasBody = z.object({
         nombre: z.string().trim().max(200),
         metodoIds: z.array(z.string().uuid()).max(200),
         catElementoId: z.string().uuid().optional(),
+        /** Datos de recepción (la pantalla los envía siempre; la API los admite opcionales). */
+        recepcion: RecepcionBody.optional(),
       }),
     )
     .min(1, "Indique al menos una muestra.")
@@ -1061,6 +1196,7 @@ export class RegistroMuestrasService {
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
     private readonly puente: PuenteAnalisisService,
+    private readonly labs: LaboratorioOtService,
   ) {}
 
   private async otEnAlcance(otId: string, tenantId: string, req: any) {
@@ -1068,6 +1204,51 @@ export class RegistroMuestrasService {
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
     await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return ot;
+  }
+
+  /** Opciones vigentes de «Toma de muestra» (Catálogo › Parámetros, categoría toma_muestra). */
+  private opcionesToma(tenantId: string) {
+    return this.prisma.$queryRawUnsafe<{ codigo: string; etiqueta: string }[]>(
+      `SELECT codigo, etiqueta FROM parametro_sistema
+        WHERE tenant_id = $1::uuid AND categoria = 'toma_muestra' AND activo
+        ORDER BY orden, etiqueta`,
+      tenantId,
+    );
+  }
+
+  /** Normaliza y valida la recepción; los laboratorios deben existir y ser operativos. */
+  private async validarRecepcion(
+    tenantId: string,
+    r: z.infer<typeof RecepcionBody>,
+    labPrincipal: string | null,
+    prefijo: string,
+    opciones: string[],
+  ) {
+    const n = normalizarRecepcion(r);
+    const errores = erroresRecepcion(n, opciones, labPrincipal, prefijo);
+    for (const u of n.otrosLabs) {
+      try {
+        await this.labs.validarUnidad(tenantId, u);
+      } catch (e: any) {
+        errores.push(`${prefijo}${e?.message ?? "laboratorio no válido"}`);
+      }
+    }
+    return { n, errores };
+  }
+
+  private datosRecepcion(n: RecepcionNormalizada, usuarioId: string | null) {
+    return {
+      tomaMuestra: n.tomaMuestra,
+      condicionRecepcion: n.condicionRecepcion,
+      condicionObservacion: n.condicionObservacion,
+      selloNumero: n.selloNumero,
+      identificacionCliente: n.identificacionCliente,
+      requiereOtrosLabs: n.requiereOtrosLabs,
+      otrosLabs: n.otrosLabs,
+      otrosLabsDetalle: n.otrosLabsDetalle,
+      recepcionadaAt: new Date(),
+      recepcionadaPor: usuarioId,
+    };
   }
 
   /** Métodos del catálogo con su nº de analitos activos. */
@@ -1095,14 +1276,37 @@ export class RegistroMuestrasService {
     const ot = await this.otEnAlcance(otId, tenantId, req);
     const muestras = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT m.id, m.codigo, m.nombre, m.estado, m.veredicto,
+              m.toma_muestra AS "tomaMuestra", m.condicion_recepcion AS "condicionRecepcion",
+              m.condicion_observacion AS "condicionObservacion", m.sello_numero AS "selloNumero",
+              m.identificacion_cliente AS "identificacionCliente", m.requiere_otros_labs AS "requiereOtrosLabs",
+              m.otros_labs AS "otrosLabs", m.otros_labs_detalle AS "otrosLabsDetalle",
+              m.recepcionada_at AS "recepcionadaAt", u.nombre_completo AS "recepcionadaPorNombre",
               (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL)::int AS ensayos,
               COALESCE((SELECT array_agg(DISTINCT cm.codigo) FROM resultado r JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
                          WHERE r.muestra_id = m.id AND r.deleted_at IS NULL), '{}') AS metodos
          FROM muestra m
+         LEFT JOIN usuario u ON u.id = m.recepcionada_por
         WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL
         ORDER BY m.created_at, m.codigo`,
       otId,
     );
+    // Órdenes internas de la OT: se enlazan con los «otros laboratorios» de cada
+    // muestra. Su destino es un laboratorio del catálogo (cat_familia); se pasa a
+    // la unidad del organigrama por el código CODSUCDEL.
+    const ordenes = await this.prisma.$queryRawUnsafe<{ id: string; numero: string; destinoLab: string | null; estado: string }[]>(
+      `SELECT oi.id, oi.numero, oi.estado, u.id AS "destinoLab"
+         FROM orden_interna oi
+         LEFT JOIN cat_familia f ON f.id = oi.destino_lab
+         LEFT JOIN unidad u ON u.tenant_id = oi.tenant_id AND u.codsucdel = f.codsucdel
+        WHERE oi.ot_id = $1::uuid AND oi.tenant_id = $2::uuid AND oi.deleted_at IS NULL
+        ORDER BY oi.created_at`,
+      otId,
+      tenantId,
+    );
+    const labIds = [...new Set(muestras.flatMap((m) => (m.otrosLabs ?? []) as string[]))];
+    const labs = labIds.length
+      ? await this.prisma.unidad.findMany({ where: { id: { in: labIds } }, select: { id: true, codigo: true, nombre: true } })
+      : [];
     const cot = ot.cotizacionId
       ? await this.prisma.cotizacion.findFirst({
           where: { id: ot.cotizacionId, tenantId },
@@ -1121,7 +1325,16 @@ export class RegistroMuestrasService {
     return {
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal, clienteId: ot.clienteId },
       cotizacion: cot ? { id: cot.id, codigo: cot.codigo, estado: cot.estado, referencia: cot.referencia } : null,
-      muestras: muestras.map((m) => ({ ...m, ensayos: Number(m.ensayos) })),
+      muestras: muestras.map((m) => ({
+        ...m,
+        ensayos: Number(m.ensayos),
+        recepcionIncompleta: recepcionIncompleta(m),
+        otrosLabsEnlace: enlaceOrdenesInternas(m.otrosLabs ?? [], ordenes).map((e) => ({
+          ...e,
+          unidad: labs.find((l) => l.id === e.unidadId) ?? null,
+        })),
+      })),
+      opcionesToma: await this.opcionesToma(tenantId),
       lineas: proponerDesdeCotizacion(
         lineas.map((l) => ({
           id: l.id,
@@ -1142,6 +1355,20 @@ export class RegistroMuestrasService {
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
     const errores = erroresRegistro(ot.estado, body.muestras, catalogo);
+    // Recepción de cada muestra (si se envía): toma de muestra, condición, sello…
+    const opciones = (await this.opcionesToma(tenantId)).map((o) => o.codigo);
+    const recepciones: (RecepcionNormalizada | null)[] = [];
+    for (let i = 0; i < body.muestras.length; i++) {
+      const r = body.muestras[i].recepcion;
+      if (!r) {
+        recepciones.push(null);
+        continue;
+      }
+      const prefijo = body.muestras.length > 1 ? `Muestra ${i + 1}: ` : "";
+      const v = await this.validarRecepcion(tenantId, r, ot.unidadPrincipal, prefijo, opciones);
+      errores.push(...v.errores);
+      recepciones.push(v.n);
+    }
     if (errores.length) throw new BadRequestException(errores.join(" "));
 
     const existentes = await this.prisma.muestra.findMany({
@@ -1162,6 +1389,7 @@ export class RegistroMuestrasService {
           clienteId: ot.clienteId,
           estado: "recibida",
           catElementoId: m.catElementoId ?? ot.catElementoId ?? null,
+          ...(recepciones[i] ? this.datosRecepcion(recepciones[i]!, req?.user?.sub ?? null) : {}),
         },
       });
       const g = await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req);
@@ -1188,6 +1416,45 @@ export class RegistroMuestrasService {
     );
     return { otId, muestras: creadas, ensayos: creadas.reduce((s, c) => s + c.ensayos, 0) };
   }
+
+  /**
+   * Completa o corrige la recepción de una muestra ya registrada (toma de
+   * muestra, condición, sello, identificación del cliente, otros laboratorios).
+   * Queda en el historial de la OT con lo anterior y lo nuevo.
+   */
+  async actualizarRecepcion(muestraId: string, body: z.infer<typeof RecepcionBody>, tenantId: string, req: any) {
+    const m = await this.prisma.muestra.findFirst({ where: { id: muestraId, tenantId, deletedAt: null } });
+    if (!m || !m.otId) throw new NotFoundException(`Muestra ${muestraId} no encontrada`);
+    const ot = await this.otEnAlcance(m.otId, tenantId, req);
+    if (["cerrada", "anulada"].includes(ot.estado))
+      throw new ConflictException(`La OT está ${ot.estado}: no se modifica la recepción de sus muestras.`);
+    const opciones = (await this.opcionesToma(tenantId)).map((o) => o.codigo);
+    const { n, errores } = await this.validarRecepcion(tenantId, body, ot.unidadPrincipal, "", opciones);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    const anterior = {
+      tomaMuestra: m.tomaMuestra,
+      condicionRecepcion: m.condicionRecepcion,
+      condicionObservacion: m.condicionObservacion,
+      selloNumero: m.selloNumero,
+      identificacionCliente: m.identificacionCliente,
+      requiereOtrosLabs: m.requiereOtrosLabs,
+      otrosLabs: m.otrosLabs,
+      otrosLabsDetalle: m.otrosLabsDetalle,
+    };
+    const actualizada = await this.prisma.muestra.update({
+      where: { id: muestraId },
+      data: this.datosRecepcion(n, req?.user?.sub ?? null),
+    });
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
+       VALUES ($1::uuid, $2::uuid, 'recepcion_muestra', $3::jsonb, $4::uuid)`,
+      tenantId,
+      ot.id,
+      JSON.stringify({ muestra: m.codigo, anterior, nuevo: { ...n } }),
+      req?.user?.sub ?? null,
+    );
+    return actualizada;
+  }
 }
 
 @ApiTags("flujo-puente")
@@ -1212,6 +1479,21 @@ export class RegistroMuestrasController {
   }
 }
 
+@ApiTags("flujo-puente")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@Controller("flujo/muestras")
+export class RecepcionMuestraController {
+  constructor(private readonly svc: RegistroMuestrasService) {}
+
+  @Patch(":id/recepcion")
+  @RequierePermiso("muestra.crear")
+  @ApiOperation({ summary: "Completa o corrige la recepción de una muestra (toma, condición, sello, identificación, otros laboratorios)" })
+  recepcion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.actualizarRecepcion(id, RecepcionBody.parse(body ?? {}), tenantDe(req), req);
+  }
+}
+
 /* ============================ MÓDULO ============================ */
 
 @Module({
@@ -1226,6 +1508,7 @@ export class RegistroMuestrasController {
     PuenteOtController,
     PuenteResultadoController,
     RegistroMuestrasController,
+    RecepcionMuestraController,
   ],
   providers: [
     SolicitudCosteoService,

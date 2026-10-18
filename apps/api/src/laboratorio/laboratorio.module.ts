@@ -35,6 +35,8 @@ import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./ve
 import { leerReplicas } from "./replicas";
 import { AccionRevision, clasificarParaAccion, motivoNoCapturable, planReapertura } from "./flujo-resultado";
 import { veredictoMuestra } from "./especificacion";
+import { conTraza } from "./traza";
+import { CostosRealesController, CostosRealesService, PlanillaCalculosController, PlanillaCalculosService } from "./planillas-ot";
 
 /**
  * Recalcula y guarda el veredicto de la muestra (lote) a partir de sus
@@ -464,7 +466,7 @@ export class ResultadoService extends BaseCrudService {
       const m = await this.prisma.muestra.findUnique({ where: { id: dto.muestraId }, select: { otId: true } });
       otId = m?.otId ?? null;
     }
-    const creado = await this.prisma.resultado.create({
+    const creado = await conTraza(this.prisma, { usuarioId: dto.analistaId, origen: "captura_replicas" }, (tx) => tx.resultado.create({
       data: {
         otId,
         muestraId: dto.muestraId,
@@ -478,7 +480,7 @@ export class ResultadoService extends BaseCrudService {
         estado: "capturado",
       },
       include: { analito: true, muestra: true },
-    });
+    }));
     await recalcularVeredictoMuestra(this.prisma as PrismaService, dto.muestraId);
     return creado;
   }
@@ -491,7 +493,7 @@ export class ResultadoService extends BaseCrudService {
   async recapturar(id: string, dto: any, usuarioId: string | undefined, tenantId = DEV_TENANT) {
     const actual = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null },
-      select: { id: true, estado: true, analitoId: true },
+      select: { id: true, estado: true, analitoId: true, motivoDevolucion: true },
     });
     if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
     if (!actual.analitoId)
@@ -499,17 +501,19 @@ export class ResultadoService extends BaseCrudService {
     const motivo = motivoNoCapturable(actual.estado);
     if (motivo) throw new ConflictException(motivo);
     const calc = await this.calcular({ ...dto, analitoId: actual.analitoId }, tenantId);
-    const r = await this.prisma.resultado.update({
+    const traza = { usuarioId, motivo: dto.motivo?.trim() || actual.motivoDevolucion, origen: "correccion" };
+    const r = await conTraza(this.prisma, traza, (tx) => tx.resultado.update({
       where: { id },
       data: {
         ...calc,
+        variables: dto.variables && Object.keys(dto.variables).length ? dto.variables : undefined,
         analistaId: usuarioId ?? null,
         equipoId: dto.equipoId ?? null,
         estado: "capturado",
         fecha: new Date(),
       },
       include: { analito: true, muestra: true },
-    });
+    }));
     await recalcularVeredictoMuestra(this.prisma as PrismaService, r.muestraId);
     return r;
   }
@@ -588,11 +592,12 @@ export class ResultadoService extends BaseCrudService {
       data.revisadoAt = ahora;
     }
 
-    return this.prisma.resultado.update({
+    const origen = nuevo === "revisado_n1" ? "revision" : nuevo === "aprobado" ? "aprobacion" : "devolucion";
+    return conTraza(this.prisma, { usuarioId, motivo: opts.motivo ?? null, origen }, (tx) => tx.resultado.update({
       where: { id },
       data,
       include: { analito: true, muestra: true },
-    });
+    }));
   }
 
   revisar(id: string, usuarioId?: string) {
@@ -654,7 +659,7 @@ export class ResultadoService extends BaseCrudService {
       aprobadoPor: r.aprobadoPor,
       aprobadoAt: r.aprobadoAt,
     };
-    await this.prisma.$transaction(async (tx) => {
+    await conTraza(this.prisma, { usuarioId, motivo: texto, origen: "reapertura" }, async (tx) => {
       await tx.resultado.update({
         where: { id },
         data: {
@@ -731,14 +736,16 @@ export class ResultadoService extends BaseCrudService {
    * decidir (p. ej. un texto frente a límites numéricos). Solo sobre resultados
    * capturados (antes de revisar).
    */
-  async fijarVeredicto(id: string, veredicto: string) {
+  async fijarVeredicto(id: string, veredicto: string, usuarioId?: string) {
     const v = normalizarVeredicto(veredicto);
     if (!v || v === "pendiente") throw new BadRequestException("Veredicto no válido: cumple, no_cumple o informativo.");
     const actual = await this.prisma.resultado.findFirst({ where: { id, deletedAt: null }, select: { estado: true } });
     if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
     if (actual.estado !== "capturado")
       throw new ConflictException("Solo se puede fijar el veredicto de un resultado capturado y aún no revisado.");
-    const r = await this.prisma.resultado.update({ where: { id }, data: { veredicto: v } });
+    const r = await conTraza(this.prisma, { usuarioId, origen: "veredicto_manual" }, (tx) =>
+      tx.resultado.update({ where: { id }, data: { veredicto: v } }),
+    );
     await recalcularVeredictoMuestra(this.prisma as PrismaService, r.muestraId);
     return r;
   }
@@ -793,7 +800,11 @@ const ResultadoCreate = z.object({
   ...ReplicasCampos,
 });
 
-const ResultadoRecaptura = z.object(ReplicasCampos);
+const ResultadoRecaptura = z.object({
+  ...ReplicasCampos,
+  /** Motivo de la corrección (queda en el historial; si falta, el de la devolución). */
+  motivo: z.string().trim().max(1000).optional(),
+});
 
 const DevolverDto = z.object({
   /** RF-E01 exige rechazo MOTIVADO: sin motivo el analista no sabe qué corregir. */
@@ -1050,17 +1061,23 @@ export class ResultadoController extends BaseCrudController {
     return this.svc.detalle(id, req?.user?.tenantId);
   }
 
-  /** Edición manual (veredicto/unidad) con alcance por laboratorio. */
+  /** Edición manual (veredicto/unidad) con alcance por laboratorio. Queda en el historial del resultado. */
   @Patch(":id")
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
-    return this.svc.actualizar(id, this.updateSchema.parse(body), req?.user?.tenantId);
+    const datos = this.updateSchema.parse(body);
+    await this.svc.detalle(id, req?.user?.tenantId);
+    return conTraza(this.prisma, { usuarioId: req?.user?.sub, origen: "edicion_manual" }, (tx) =>
+      tx.resultado.update({ where: { id }, data: datos }),
+    );
   }
 
+  /** Eliminación (resultado.aprobar): el disparador deja la baja con lo que tenía en el historial. */
   @Delete(":id")
   async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
-    return this.svc.eliminar(id, req?.user?.tenantId);
+    await this.svc.detalle(id, req?.user?.tenantId);
+    return conTraza(this.prisma, { usuarioId: req?.user?.sub, origen: "eliminacion" }, (tx) => tx.resultado.delete({ where: { id } }));
   }
 
   @Post(":id/recapturar")
@@ -1121,7 +1138,7 @@ export class ResultadoController extends BaseCrudController {
   async veredicto(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const dto = VeredictoDto.parse(body ?? {});
     await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
-    return (this.svc as ResultadoService).fijarVeredicto(id, dto.veredicto);
+    return (this.svc as ResultadoService).fijarVeredicto(id, dto.veredicto, req?.user?.sub);
   }
 }
 
@@ -1131,8 +1148,12 @@ export class ResultadoController extends BaseCrudController {
   imports: [EquiposModule],
   // ResultadoBandejaController ANTES que ResultadoController: su ruta estática
   // /resultados/bandeja debe registrarse antes que /resultados/:id.
-  controllers: [TipoMuestraController, MuestraController, MetodoController, AnalitoController, NormaLimiteController, ResultadoBandejaController, ResultadoController],
-  providers: [TipoMuestraService, MuestraService, MetodoService, AnalitoService, NormaLimiteService, ResultadoService],
+  controllers: [
+    TipoMuestraController, MuestraController, MetodoController, AnalitoController, NormaLimiteController, ResultadoBandejaController, ResultadoController,
+    // Planilla de registros y cálculos (auditable) y de costos reales por OT (planillas-ot.ts).
+    PlanillaCalculosController, CostosRealesController,
+  ],
+  providers: [TipoMuestraService, MuestraService, MetodoService, AnalitoService, NormaLimiteService, ResultadoService, PlanillaCalculosService, CostosRealesService],
   exports: [ResultadoService],
 })
 export class LaboratorioModule {}
