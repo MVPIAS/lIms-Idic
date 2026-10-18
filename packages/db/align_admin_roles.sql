@@ -357,12 +357,17 @@ INSERT INTO _rp_idic VALUES
 -- Jefaturas en cascada: el Jefe de Sección tiene todo lo del Jefe de Laboratorio
 -- (lo sembrado aquí + lo que otros scripts ya le concedieron, p. ej. SAEC) y el
 -- Jefe de Departamento todo lo del Jefe de Sección. Lo que cambia es el ALCANCE.
+-- Excepción: la planilla de costos reales (costo_real.*) es solo del Jefe de
+-- Laboratorio (align_quimicos_recepcion_calculo.sql: el Depto. Químico pidió sacar al
+-- Jefe de Sección; el Jefe de Departamento solo la ve). Sin esta excepción, reaplicar
+-- este fichero después de aquel copiaba la gestión de costos a las demás jefaturas.
 INSERT INTO _rp_idic
-SELECT 'JEFE_SECCION', perm FROM _rp_idic WHERE rol = 'JEFE_LAB'
+SELECT 'JEFE_SECCION', perm FROM _rp_idic WHERE rol = 'JEFE_LAB' AND perm NOT LIKE 'costo\_real.%'
 UNION
 SELECT 'JEFE_SECCION', p.codigo
   FROM rol r JOIN rol_permiso rp ON rp.rol_id = r.id JOIN permiso p ON p.id = rp.permiso_id
  WHERE COALESCE(r.alias_de, r.codigo) = 'JEFE_LAB'
+   AND p.codigo NOT LIKE 'costo\_real.%'
    AND r.tenant_id = (SELECT id FROM tenant WHERE codigo = 'IDIC');
 INSERT INTO _rp_idic SELECT DISTINCT 'JEFE_DEPTO', perm FROM _rp_idic WHERE rol = 'JEFE_SECCION';
 
