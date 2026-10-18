@@ -122,3 +122,25 @@ export function planReapertura(
     );
   return { error: null, anular, avisos };
 }
+
+/**
+ * Edición manual de un resultado (PATCH /resultados/:id: veredicto, unidad).
+ * Revisión de seguridad r3: no sirve para saltarse la segregación de funciones.
+ *  · El analista no se cambia a mano: es quien capturó (400).
+ *  · Lo aprobado no se edita: se reabre (409).
+ *  · Quien capturó el ensayo no decide su veredicto (409), igual que no lo revisa ni aprueba.
+ * Devuelve { status, motivo } o null si procede.
+ */
+export function motivoEdicionManual(
+  r: { estado: string; analistaId: string | null },
+  usuarioId: string | null | undefined,
+  cuerpo: Record<string, unknown>,
+): { status: 400 | 409; motivo: string } | null {
+  if ("analistaId" in cuerpo)
+    return { status: 400, motivo: "El analista de un ensayo no se cambia a mano: es quien lo capturó (segregación de funciones)." };
+  if (r.estado === "aprobado")
+    return { status: 409, motivo: "El resultado está aprobado: para corregirlo, reábralo con motivo." };
+  if (cuerpo.veredicto !== undefined && usuarioId && r.analistaId === usuarioId)
+    return { status: 409, motivo: "Quien capturó el ensayo no decide su veredicto: lo hace otra persona (segregación de funciones)." };
+  return null;
+}

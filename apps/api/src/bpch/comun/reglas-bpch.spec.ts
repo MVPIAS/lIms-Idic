@@ -1,4 +1,5 @@
 import {
+  porcentajesTasaCambiados,
   avanceInternacion,
   calcularTasa,
   condicionFinal,
@@ -181,5 +182,17 @@ describe("Internación · estado que se muestra = avance real (revisión r3, hal
     // OT cerrada y tasa remitida: ya no figura como «OT generada».
     expect(avanceInternacion({ ...ot, otEstado: "cerrada", certificadoOficial: true, tasaRemitida: true })).toBe("ot_cerrada");
     expect(avanceInternacion({ ...ot, otEstado: "anulada" })).toBe("ot_anulada");
+  });
+});
+
+describe("Tasa · porcentajes del parámetro (revisión de seguridad r3)", () => {
+  const prm = { tasaPct: 1.5, ivaPct: 19 };
+  it("sin porcentajes, o con los del parámetro, no cambia nada", () => {
+    expect(porcentajesTasaCambiados({}, prm)).toEqual([]);
+    expect(porcentajesTasaCambiados({ tasaPct: 1.5, ivaPct: 19 }, prm)).toEqual([]);
+  });
+  it("otros porcentajes se informan (exigen el permiso de configuración)", () => {
+    expect(porcentajesTasaCambiados({ tasaPct: 2 }, prm)[0]).toMatch(/tasa 2 %/);
+    expect(porcentajesTasaCambiados({ ivaPct: 0 }, prm)[0]).toMatch(/IVA 0 %/);
   });
 });

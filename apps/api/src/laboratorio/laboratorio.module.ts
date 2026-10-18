@@ -35,7 +35,7 @@ import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 import { AlcanceService } from "../rbac/alcance.service";
 import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./veredicto";
 import { leerReplicas } from "./replicas";
-import { AccionRevision, clasificarParaAccion, motivoNoCapturable, planReapertura } from "./flujo-resultado";
+import { AccionRevision, clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, planReapertura } from "./flujo-resultado";
 import { veredictoMuestra } from "./especificacion";
 import { conTraza } from "./traza";
 import { CostosRealesController, CostosRealesService, PlanillaCalculosController, PlanillaCalculosService } from "./planillas-ot";
@@ -1004,8 +1004,7 @@ export class ResultadoController extends BaseCrudController {
       .optional()
       .transform((v) => (v === undefined ? undefined : normalizarVeredicto(v) ?? v)),
     unidad: z.string().max(30).optional(),
-    analistaId: z.string().uuid().optional(),
-  });
+  }).strict();
   constructor(
     protected svc: ResultadoService,
     private readonly prisma: PrismaService,
@@ -1034,8 +1033,12 @@ export class ResultadoController extends BaseCrudController {
       ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { unidadPrincipal: true } })
       : null;
     await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, "la muestra");
+    // El analista es SIEMPRE quien captura: si se pudiera indicar otro, el que
+    // capturó podría después revisar y aprobar su propio resultado.
+    if (dto.analistaId && dto.analistaId !== req?.user?.sub)
+      throw new BadRequestException("El analista de un ensayo es quien lo captura: no se puede registrar a nombre de otra persona.");
     return (this.svc as ResultadoService).capturar(
-      { ...dto, otId, replicas, analistaId: dto.analistaId ?? req?.user?.sub },
+      { ...dto, otId, replicas, analistaId: req?.user?.sub ?? null },
       req?.user?.tenantId ?? DEV_TENANT,
     );
   }
@@ -1064,10 +1067,20 @@ export class ResultadoController extends BaseCrudController {
     return this.svc.detalle(id, req?.user?.tenantId);
   }
 
-  /** Edición manual (veredicto/unidad) con alcance por laboratorio. Queda en el historial del resultado. */
+  /**
+   * Edición manual (veredicto/unidad) con alcance por laboratorio. Queda en el
+   * historial del resultado. No cambia el analista ni deja que quien capturó
+   * decida el veredicto, y lo aprobado no se toca (motivoEdicionManual).
+   */
   @Patch(":id")
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    const cuerpo = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+    const actual = await this.prisma.resultado.findFirst({ where: { id, deletedAt: null }, select: { estado: true, analistaId: true } });
+    if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
+    const bloqueo = motivoEdicionManual(actual, req?.user?.sub, cuerpo);
+    if (bloqueo?.status === 400) throw new BadRequestException(bloqueo.motivo);
+    if (bloqueo) throw new ConflictException(bloqueo.motivo);
     const datos = this.updateSchema.parse(body);
     await this.svc.detalle(id, req?.user?.tenantId);
     return conTraza(this.prisma, { usuarioId: req?.user?.sub, origen: "edicion_manual" }, (tx) =>

@@ -1,4 +1,4 @@
-import { clasificarParaAccion, motivoNoCapturable, planReapertura } from "./flujo-resultado";
+import { clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, planReapertura } from "./flujo-resultado";
 
 describe("flujo del resultado · ¿se puede capturar?", () => {
   it("pendiente, capturado, devuelto y rechazado admiten (re)captura", () => {
@@ -69,5 +69,20 @@ describe("reapertura de un resultado aprobado", () => {
 
   it("sin documentos vigentes no hay nada que anular", () => {
     expect(planReapertura("aprobado", ot, [{ id: "c", numero: "X", estado: "anulado" }])).toEqual({ error: null, anular: [], avisos: [] });
+  });
+});
+
+describe("edición manual del resultado (revisión de seguridad r3)", () => {
+  const capturado = { estado: "capturado", analistaId: "ana" };
+  it("el revisor ajusta unidad o veredicto de un ensayo que no capturó", () => {
+    expect(motivoEdicionManual(capturado, "rev", { unidad: "mg/L" })).toBeNull();
+    expect(motivoEdicionManual(capturado, "rev", { veredicto: "cumple" })).toBeNull();
+  });
+  it("no se cambia el analista (400) ni decide el veredicto quien capturó (409)", () => {
+    expect(motivoEdicionManual(capturado, "rev", { analistaId: "otro" })?.status).toBe(400);
+    expect(motivoEdicionManual(capturado, "ana", { veredicto: "cumple" })?.status).toBe(409);
+  });
+  it("lo aprobado no se edita: se reabre", () => {
+    expect(motivoEdicionManual({ estado: "aprobado", analistaId: "ana" }, "rev", { unidad: "x" })?.status).toBe(409);
   });
 });

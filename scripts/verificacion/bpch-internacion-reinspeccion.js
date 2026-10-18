@@ -456,6 +456,14 @@ async function main() {
   await paso("A · Tasa: cálculo con el parámetro (1,5 %) y remisión a facturación", async () => {
     await exigir(403, U.inspector, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2 });
     await exigir(400, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 0, paridad: 945.2 });
+    // Revisión de seguridad r3: los porcentajes son los del parámetro; otros solo con el
+    // permiso de configuración (catalogo.gestionar). Comercial no; la jefatura BPCH sí.
+    const e = await exigir(403, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, tasaPct: 2 });
+    afirmar(/catalogo\.gestionar/.test(msg(e)), msg(e));
+    await exigir(403, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, ivaPct: 0 });
+    const otra = await ok(U.bpch, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, tasaPct: 2 });
+    afirmar(otra.tasa.tasaPct === 2, `tasa con 2 %: ${otra.tasa.tasaPct}`);
+    await ok(U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, tasaPct: C.cfg.parametros.tasaPct });
     C.A = await ok(U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, pctAfecto: 100 });
     afirmar(C.A.tasa.tasa === 2615841, `tasa ${C.A.tasa.tasa} (esperado 2.615.841)`);
     const iva = Math.round(2615841 * (C.cfg.parametros.ivaPct / 100));
@@ -487,14 +495,25 @@ async function main() {
   /* ------------------------------------------------ B · Internación que no cumple */
   await paso("B · Registro por la Sección Certificación (elemento no codificado, sin tasa) y OT", async () => {
     C.cncB = `E-I/7/${n6()}/673/30365/${n6()}`;
-    C.B = await ok(U.scc, "POST", "/bpch/internaciones", {
-      resolucionNumero: `Res. Ex. DGMN B${sello.slice(-4)}`, resolucionFecha: hoy(), clienteId: C.importador.id, esquema: "LOTES",
+    const registroB = (clienteId) => ({
+      resolucionNumero: `Res. Ex. DGMN B${sello.slice(-4)}`, resolucionFecha: hoy(), clienteId, esquema: "LOTES",
       unidadInspeccionId: C.sstgo.id, sujetaTasa: false,
       items: [{ catElementoId: C.elemento.id, elementoGenerico: "Explosivo encartuchado", elementoEspecifico: `Tronex Plus lote B ${sello}`, cnc: C.cncB, claseDivisionUn: "1.1D", numeroUn: "0241", cantidad: 500 }],
     });
+    C.B = await ok(U.scc, "POST", "/bpch/internaciones", registroB(C.importador.id));
     afirmar(C.B.documentacion.estado === "no_aplica", `documentación ${C.B.documentacion.estado}`);
-    C.B = await ok(U.scc, "POST", `/bpch/internaciones/${C.B.id}/analisis`, { infoCompleta: true, fechaAnalisis: hoy() });
+    // Revisión de seguridad r3: corregir el registro mientras el análisis genera la OT. La
+    // corrección bloquea la fila: o entra antes (y la OT nace con el dato corregido) o
+    // responde 409; nunca deja una OT con un cliente distinto del expediente.
+    const [an, co] = await Promise.all([
+      llamar(U.scc, "POST", `/bpch/internaciones/${C.B.id}/analisis`, { infoCompleta: true, fechaAnalisis: hoy() }),
+      llamar(U.ventas, "PATCH", `/bpch/internaciones/${C.B.id}`, registroB(C.comprador.id)),
+    ]);
+    afirmar(an.status < 300 && (co.status < 300 || co.status === 409), `análisis ${an.status} · corrección ${co.status}: ${msg(co.json)}`);
+    C.B = await ok(U.scc, "GET", `/bpch/internaciones/${C.B.id}`);
     const ot = await ok(U.sstgo, "GET", `/ot/${C.B.otId}`);
+    afirmar(ot.clienteId === C.B.cliente.id, `la OT quedó con otro cliente que el expediente (${ot.clienteId} ≠ ${C.B.cliente.id})`);
+    await exigir(409, U.ventas, "PATCH", `/bpch/internaciones/${C.B.id}`, registroB(C.importador.id));
     afirmar(ot.conCobro === false, "una internación sin tasa nació con cobro");
     await exigir(409, U.scc, "POST", `/bpch/internaciones/${C.B.id}/documentacion`, { accion: "solicitar", fecha: hoy(), detalle: "x" });
     return `${C.B.numero} · ${ot.codigo} sin cobro`;

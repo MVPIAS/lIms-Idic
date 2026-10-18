@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
 import { BpchComunService, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
@@ -7,6 +7,8 @@ import { CodificacionService } from "../codificacion/codificacion.service";
 import {
   ACCIONES_DOC_ADM,
   LISTADOS_CODIFICACION,
+  PERMISO_CONFIGURACION,
+  porcentajesTasaCambiados,
   TEXTO_AVANCE,
   avanceInternacion,
   calcularTasa,
@@ -465,6 +467,14 @@ export class InternacionBpchService {
     const errores = erroresItems(items);
     if (errores.length) throw new BadRequestException(errores.join(" "));
     await this.prisma.$transaction(async (tx) => {
+      // Con la fila bloqueada se vuelve a mirar el estado: si el análisis técnico generó
+      // la OT mientras tanto, la corrección ya no procede (la OT nació con los datos de antes).
+      const [actual] = await tx.$queryRawUnsafe<{ estado: string; ot_id: string | null }[]>(
+        `SELECT estado, ot_id FROM bpch_internacion WHERE id = $1::uuid FOR UPDATE`,
+        id,
+      );
+      if (actual?.ot_id || !["registrada", "antecedentes_pendientes"].includes(actual?.estado ?? ""))
+        throw new ConflictException(`La internación ${i.numero} cambió mientras la corregía (${actual?.estado ?? "?"}): vuelva a cargarla.`);
       await tx.$executeRawUnsafe(
         `UPDATE bpch_internacion SET resolucion_numero = $2, resolucion_fecha = $3::date, oficio = $4, cliente_id = $5::uuid, documento_aduanero = $6,
                 pais_origen = $7, esquema = $8, procedimiento = $9, unidad_inspeccion_id = $10::uuid, sujeta_tasa = $11,
@@ -758,6 +768,13 @@ export class InternacionBpchService {
       throw new ConflictException(`La tasa se calcula con la documentación administrativa conforme (ahora: ${i.doc_adm_estado}).`);
     const dto = TasaBody.parse(body ?? {});
     const prm = await this.comun.parametros(tenantId);
+    // Los porcentajes son los del parámetro; otros solo con el permiso de configuración.
+    const cambiados = porcentajesTasaCambiados(dto, prm);
+    const permisos: string[] = req?.user?.permisos ?? [];
+    if (cambiados.length && !(req?.user?.roles ?? []).includes("SUPERADMIN") && !permisos.includes(PERMISO_CONFIGURACION))
+      throw new ForbiddenException(
+        `Los porcentajes de la tasa los fija Administración › Parámetros (bpch_tasa). Para calcular con ${cambiados.join(" y ")} hace falta el permiso ${PERMISO_CONFIGURACION}; deje los porcentajes vacíos para usar los vigentes.`,
+      );
     const entrada = {
       cifUsd: dto.cifUsd,
       paridad: dto.paridad,

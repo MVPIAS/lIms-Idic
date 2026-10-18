@@ -191,6 +191,15 @@ los documentos del prototipo imprimen Clase/División y Nº ONU. Lista para sele
 6. **Prototipos**: ¿la clasificación debe existir antes de ensayar o basta antes de aprobar? (hoy, antes de aprobar). ¿Quién firma el certificado de aprobación de tipo y el rechazo? (hoy, la matriz de Certificado de conformidad / Informe de incumplimiento: Jefe SCC). ¿Se puede rechazar un tipo que cumple todas las pruebas? (hoy sí, con motivo). Formato y prefijo exactos del código único (hoy, seis partes).
 7. **Clasificación**: ¿quién clasifica y quién aprueba? ¿Se clasifica a veces sin pruebas, por antecedentes? (hoy, con justificación). ¿Qué regla da la división 1.1–1.6? (las IT del BPCH no la fijan). ¿IT21 Serie 2 se hace siempre o solo si la Serie 1 es positiva? El criterio de IT23 dice «positivo si alcanza 2.070 kPa» y «negativo si en cualquiera de los ensayos es inferior»: hoy, positivo si alguno de los 3 ensayos alcanza 2.070 kPa.
 8. **Plantillas oficiales** editables (Word) del certificado de tipo, del rechazo, de la clasificación y del informe técnico a DCO: hoy son formatos propios con membrete IDIC.
+9. **Prototipos por sucursal (decisión pendiente, revisión de seguridad r3)**: hoy un prototipo es un
+   expediente transversal del BPCH. Quien tiene `bpch.prototipo.gestionar` dentro del ámbito BPCH puede
+   **editarlo, registrar el pronunciamiento SAC y anularlo** aunque su OT la inspeccione otra sucursal
+   (solo se comprueba el tenant y el ámbito BPCH). En cambio **generar la OT** exige poder operar en la
+   unidad elegida, y **dictaminar** y **registrar el código único** exigen alcance sobre la unidad
+   actual de la OT. ¿Debe un Jefe de Sucursal poder editar o anular el prototipo que inspecciona otra
+   sucursal, o esas tres acciones deben quedar para la SCC y la sucursal de la OT? Si el BPCH decide
+   acotarlo, basta con aplicar en `editar`, `pronunciamientoSac` y `anular` la misma comprobación que
+   el dictamen (`exigirAlcancePrototipo`).
 
 ## 7. Hallazgo en el flujo general (fuera de este frente)
 

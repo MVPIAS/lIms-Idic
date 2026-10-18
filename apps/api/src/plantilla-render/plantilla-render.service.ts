@@ -1002,6 +1002,20 @@ export class PlantillaRenderService {
   /* Descarga                                                               */
   /* ====================================================================== */
 
+  /**
+   * Unidad del documento (la suya o la del laboratorio de la OT) y quiénes son
+   * responsables de algún paso de su firma: lo que decide quién lo puede abrir.
+   */
+  async alcanceDocumento(certificadoId: string, tenantId?: string) {
+    const cert = await this.prisma.certificado.findFirst({
+      where: { id: certificadoId, deletedAt: null, ...(tenantId ? { tenantId } : {}) },
+      select: { numero: true, codigo: true, unidadId: true, ot: { select: { unidadPrincipal: true } }, firmas: { select: { responsables: true } } },
+    });
+    if (!cert) throw new NotFoundException(`Certificado ${certificadoId} no encontrado`);
+    const responsables = cert.firmas.flatMap((f) => (Array.isArray(f.responsables) ? (f.responsables as any[]) : []).map((r) => r?.usuarioId)).filter(Boolean);
+    return { etiqueta: cert.numero ?? cert.codigo, unidadId: cert.unidadId ?? cert.ot?.unidadPrincipal ?? null, responsables: responsables as string[] };
+  }
+
   /** Carga un certificado validando tenant (404 en cross-tenant, no 403). */
   private async certificadoDelTenant(certificadoId: string, tenantId?: string) {
     const cert = await this.prisma.certificado.findUnique({
