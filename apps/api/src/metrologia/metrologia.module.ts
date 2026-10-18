@@ -81,7 +81,8 @@ const CrearSchema = z.object({
   /** Fecha de calibración AAAA-MM-DD (por defecto, hoy). */
   fecha: z.string().max(10).nullish(),
   instrumento: InstrumentoSchema.default({}),
-  patronSnap: z.record(z.any()).default({}),
+  /** Obsoleto: el patrón sale del maestro (patronIds); se ignora para no imprimir patrones sin control de vigencia. */
+  patronSnap: z.record(z.any()).optional(),
   ambiente: z.record(z.union([z.string(), z.number()]).transform((x) => String(x).slice(0, 40))).default({}),
   cond: z.record(z.coerce.number()).default({}),
   intervaloMeses: z.coerce.number().int().min(0).max(120).default(12),
@@ -645,7 +646,7 @@ export class MetrologiaController {
              VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5::uuid,$6::date,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,
                      $11,$12,$13,$14,'borrador',$15::uuid,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20::jsonb,$21::jsonb)
              RETURNING id`,
-            t, codigo, proc.id, pat.patronId, unidadId, fecha, JSON.stringify(d.instrumento), JSON.stringify(d.patronSnap),
+            t, codigo, proc.id, pat.patronId, unidadId, fecha, JSON.stringify(d.instrumento), "{}",
             JSON.stringify(d.ambiente), JSON.stringify(calc.cond), calc.uMax, calc.uCert, calc.conforme, d.intervaloMeses,
             req?.user?.sub ?? null, calc.motor, calc.datos, calc.opciones, calc.resultado, calc.resumen, JSON.stringify(pat.snapshot));
           await this.guardarPuntos(tx, cal[0].id, calc.puntos);
@@ -686,7 +687,7 @@ export class MetrologiaController {
                 opciones = $13::jsonb, resultado = $14::jsonb, resumen = $15::jsonb, fecha_calibracion = $16::date, patrones = $17::jsonb,
                 estado = 'borrador', updated_at = now()
           WHERE id = $1::uuid AND estado IN ('borrador', 'calculada')`,
-        id, pat.patronId, JSON.stringify(d.instrumento), JSON.stringify(d.patronSnap), JSON.stringify(d.ambiente),
+        id, pat.patronId, JSON.stringify(d.instrumento), "{}", JSON.stringify(d.ambiente),
         JSON.stringify(calc.cond), calc.uMax, calc.uCert, calc.conforme, d.intervaloMeses, calc.motor, calc.datos, calc.opciones,
         calc.resultado, calc.resumen, fecha, JSON.stringify(pat.snapshot));
       if (!n) throw new ForbiddenException("La calibración cambió de estado mientras tanto; recargue la lista");
@@ -915,7 +916,7 @@ export class MetrologiaController {
             rol: { codigo: p.rol.codigo, nombre: p.rol.nombre }, unidad: p.unidad ? { codigo: p.unidad.codigo } : null,
             responsables: (p.responsables ?? []).map((x: any) => ({ usuarioId: x.usuarioId, nombre: x.nombre, via: x.via })),
           }));
-        } catch { pasos = null; }
+        } catch { pasos = []; } // si la matriz no se puede resolver, nadie firma (no se cae al modo sin matriz)
         cache?.set(cal.unidad_id, pasos);
       }
     }
