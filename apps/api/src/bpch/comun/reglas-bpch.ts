@@ -281,6 +281,13 @@ export function faltantesDocumentoFinal(p: {
   tipoDocumento: string;
   condicion: "cumple" | "no_cumple" | "pendiente";
   informeInspeccionOficial: boolean;
+  /**
+   * ¿Exige el Informe de Inspección oficial previo? Sí en las inspecciones
+   * (certificación, internación, reinspección: IDIC-PG 24). No en el dictamen
+   * de un prototipo (IT10), que emite su certificado de aprobación de tipo o su
+   * informe de rechazo directamente tras los ensayos aprobados. Por defecto sí.
+   */
+  exigeInformePrevio?: boolean;
 }): string[] {
   const f: string[] = [];
   if (p.tipoDocumento !== "CERTIFICADO_CONFORMIDAD" && p.tipoDocumento !== "INFORME_INCUMPLIMIENTO") return f;
@@ -294,7 +301,7 @@ export function faltantesDocumentoFinal(p: {
       `El Informe de Incumplimiento solo se emite si la condición final es NO CUMPLE (ahora: ${TEXTO_CONDICION[p.condicion]}).` +
         (p.condicion === "cumple" ? " Corresponde el Certificado de Conformidad." : ""),
     );
-  if (!p.informeInspeccionOficial)
+  if (p.exigeInformePrevio !== false && !p.informeInspeccionOficial)
     f.push("Antes debe estar oficial (firmado) el Informe de Inspección de la OT, al que este documento hace referencia.");
   return f;
 }
