@@ -59,12 +59,15 @@ export const fmtN = (x: unknown, d = 3) =>
   x == null || Number.isNaN(Number(x)) ? "—" : Number(x).toLocaleString("es-CL", { minimumFractionDigits: d, maximumFractionDigits: d });
 
 // ─── Motores validados por instrucción de trabajo (cálculo en el servidor) ────
-export type OpcionMotor = { clave: string; hallazgo: string; etiqueta: string };
+/** Corrección propuesta a la planilla con la decisión del laboratorio (respuesta del 15-10-2026). */
+export type OpcionMotor = { clave: string; hallazgo: string; etiqueta: string; decision?: "aplicar" | "rechazada" | "pendiente"; respuesta?: string };
 export type MotorInfo = {
   it: string; magnitud: string; nombre: string; unidad: string; unidadU: string;
   /** false = cálculo estándar sin planilla real con la que compararse (formulario por puntos). */
   validado?: boolean;
   opciones: OpcionMotor[]; casos: { caso: string; instrumento: string }[];
+  /** Correcciones activadas por defecto en una calibración nueva (las que pidió el laboratorio). */
+  opcionesPorDefecto?: Record<string, boolean>;
 };
 export type PuntoResumen = {
   nominal: number; error: number | null; uc: number | null; U: number; Ucert: number | null; conforme: boolean | null;
@@ -72,11 +75,16 @@ export type PuntoResumen = {
   clase?: string;
   /** Unidad propia del punto (formulario por puntos). */
   unidad?: string;
+  /** CMC del alcance acreditado para el punto (en la unidad de la U) y U que se certifica: máx(U, CMC), 2 cifras. */
+  cmc?: number | null;
+  uCertificado?: number | null;
+  /** El punto queda fuera del alcance acreditado (se marca «*» en el certificado). */
+  fueraAlcance?: boolean;
 };
 export type CalculoMotor = {
   motor: string;
   resultado: any;
-  resumen: { puntos: PuntoResumen[]; uMax: number; uCert: number | null; conforme: boolean | null; extra?: { etiqueta: string; valor: string }[] };
+  resumen: { puntos: PuntoResumen[]; uMax: number; uCert: number | null; conforme: boolean | null; extra?: { etiqueta: string; valor: string }[]; cmc?: string[] };
 };
 
 /** Motor de un proceso: el que indica el servidor o, si no, por código (ITV02a/g/c comparten ITV02). */
@@ -126,6 +134,20 @@ export const ETIQUETA_ENTRADA: Record<string, string> = {
 
 /** Nombres propios de las entradas de un motor (tienen prioridad sobre ETIQUETA_ENTRADA). */
 export const ETIQUETA_MOTOR: Record<string, Record<string, string>> = {
+  ITM03: {
+    items: "Ítems", id: "Identificación del ítem", nom: "Nominal", unidad: "Unidad (g, kg, mg)", rhoItem: "Densidad del ítem (kg/m³)",
+    clase: "Clase OIML asignada", comparador: "Comparador", fecha: "Fecha (AAAA-MM-DD)", "patron.nom": "Nominal del patrón", "patron.clase": "Clase del patrón",
+    "patron.rho": "Densidad del patrón", "patron.dmp": "Corrección del patrón (mg)", "patron.Up": "U del patrón (mg)", "patron.deriva": "Deriva del patrón (mg)",
+    T: "Temperatura inicio / término", H: "Humedad inicio / término", P: "Presión inicio / término", L: "Lecturas p-m-m-p (g)",
+    uAsignadaManual: "U asignada escrita (mg, nominal no normalizado)", termohig: "Termohigrómetro", barometro: "Barómetro",
+    corrT: "error de temperatura", uT: "U de temperatura", corrH: "error de humedad", uH: "U de humedad", corr: "error", u: "U", dec: "Decimales de la masa",
+  },
+  ITV05: {
+    cap: "Capacidad máxima (mL)", rango: "Rango calibrado (mL)", res: "Resolución (mL)", material: "Material del contenedor (1–13)", rhoB: "Densidad de las pesas (g/mL)",
+    urhoB: "U de la densidad de las pesas", bal: "Balanza", thA: "Termómetro del aire", thW: "Termómetro del agua", hr: "Higrómetro", pr: "Barómetro",
+    U: "U del certificado", res_: "resolución", err: "error", der: "deriva", empty: "Recipiente vacío (g)", Ta: "T aire inicio / medio / final", Tw: "T agua inicio / medio / final",
+    HR: "Humedad inicio / medio / final", P: "Presión inicio / medio / final", ev: "Evaporación: inicial, +20 s, final, +20 s (g) por serie", pts: "Puntos", nom: "Volumen nominal (mL)", s: "Pesada (g)", dec: "Decimales del certificado",
+  },
   "LCPNF-IT01": {
     sentido: "Sentido (TRACCIÓN / COMPRESIÓN)", resInd: "Resolución del indicador (mV/V)", div: "N° de divisiones",
     decRes: "Decimales de la resolución", conv: "Conversión a kN", fmin: "Rango mínimo (kN)", fmax: "Rango máximo (kN)",
