@@ -73,6 +73,19 @@ export class PlantillaRenderController {
     private readonly alcance: AlcanceService,
   ) {}
 
+  /**
+   * Abrir un documento (PDF o HTML) exige el mismo alcance que verlo en el listado:
+   * la unidad del documento (o la del laboratorio de su OT) dentro del alcance del
+   * usuario. Dirección y quien tiene alcance global lo ven todo; quien es
+   * responsable de un paso de su firma también (como en el circuito). La
+   * verificación pública por código no pasa por aquí.
+   */
+  private async exigirAlcanceDocumento(certificadoId: string, req: any) {
+    const d = await this.svc.alcanceDocumento(certificadoId, req?.user?.tenantId);
+    if (req?.user?.sub && d.responsables.includes(req.user.sub)) return;
+    await this.alcance.exigirUnidad(req, d.unidadId, `el documento ${d.etiqueta}`);
+  }
+
   /** La OT debe estar dentro del alcance por laboratorio de quien emite. */
   private async exigirAlcanceOt(otId: string, req: any) {
     const ctx = await this.svc.contexto(otId, req?.user?.tenantId);
@@ -155,6 +168,7 @@ export class PlantillaRenderController {
     @Req() req: any,
     @Res() res: Response,
   ) {
+    await this.exigirAlcanceDocumento(certificadoId, req);
     const { buffer, nombre } = await this.svc.pdf(certificadoId, req?.user?.tenantId);
     res.set({
       "Content-Type": "application/pdf",
@@ -177,7 +191,8 @@ export class PlantillaRenderController {
   @RequierePermiso("plantilla.ver")
   @Header("Content-Type", "text/html; charset=utf-8")
   @Header("Cache-Control", "private, no-store")
-  html(@Param("certificadoId", ParseUUIDPipe) certificadoId: string, @Req() req: any) {
+  async html(@Param("certificadoId", ParseUUIDPipe) certificadoId: string, @Req() req: any) {
+    await this.exigirAlcanceDocumento(certificadoId, req);
     return this.svc.html(certificadoId, req?.user?.tenantId);
   }
 }

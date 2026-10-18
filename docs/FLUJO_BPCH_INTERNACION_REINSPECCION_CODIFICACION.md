@@ -83,7 +83,9 @@ Entrega de los documentos → cierre de la OT (flujo general)
 | Oficio, documento aduanero (DIN), país, esquema (por lotes / tipo), procedimiento | Opcionales y editables |
 | Elementos (uno o más) | Elemento específico, Clase/División UN y Nº UN obligatorios; CNC con formato válido si se indica; cantidad y unidad opcionales; elemento del catálogo para el panel |
 
-El registro se corrige (o se anula, con motivo) solo **antes** de generar la OT.
+El registro se corrige (o se anula, con motivo) solo **antes** de generar la OT. La
+corrección bloquea la fila del expediente: si el análisis técnico genera la OT a la vez,
+o la corrección entra antes (y la OT nace con el dato corregido) o responde 409.
 
 ### 2.2 Análisis técnico y OT
 
@@ -155,7 +157,8 @@ Con NO CUMPLE no se toca la Codificación Única.
   documentación **conforme**:
   `tasa = CIF US$ × paridad × % afecto × % tasa` y `IVA = tasa × % IVA` (redondeo al peso).
   `% tasa` e `% IVA` son **parámetros** (Administración › Parámetros del sistema, categoría
-  `bpch_tasa`: 1,5 y 19 sembrados). Se guarda en `calculo_tasa_internacion` (con quién y
+  `bpch_tasa`: 1,5 y 19 sembrados). Calcular con otros porcentajes exige el permiso de
+  configuración `catalogo.gestionar` (403 a Comercial); sin indicarlos se usan los vigentes. Se guarda en `calculo_tasa_internacion` (con quién y
   cuándo); se puede recalcular hasta remitir.
 - **Remitir a facturación** exige: sujeta a tasa, documentación conforme, tasa calculada y
   el **documento final oficial** (certificado o incumplimiento: el diagrama une las dos

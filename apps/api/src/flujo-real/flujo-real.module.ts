@@ -5,6 +5,7 @@ import {
   ConflictException,
   ForbiddenException,
   Controller,
+  Delete,
   Get,
   Injectable,
   Module,
@@ -180,8 +181,56 @@ const OrdenInternaCreate = z.object({
 export class OrdenInternaController extends BaseCrudController {
   protected createSchema = OrdenInternaCreate;
   protected updateSchema = OrdenInternaCreate.partial();
-  constructor(protected svc: OrdenInternaService) {
+  constructor(
+    protected svc: OrdenInternaService,
+    private readonly prisma: PrismaService,
+    private readonly alcance: AlcanceService,
+  ) {
     super();
+  }
+
+  /**
+   * Una orden interna da al laboratorio de destino acceso a la OT (planillas de
+   * cálculos y de costos): solo la crea o cambia quien tiene la OT de origen en
+   * su alcance por laboratorio (revisión de seguridad r3). 404 si es de otro tenant.
+   */
+  private async exigirAlcanceOt(otId: string, req: any) {
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id: otId, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
+      select: { codigo: true, unidadPrincipal: true },
+    });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+  }
+
+  private async otDeOrden(id: string, req: any) {
+    const oi = await this.prisma.ordenInterna.findFirst({
+      where: { id, deletedAt: null, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
+      select: { otId: true },
+    });
+    if (!oi) throw new NotFoundException(`Orden interna ${id} no encontrada`);
+    return oi.otId;
+  }
+
+  @Post()
+  override async crear(@Body() body: unknown, @Req() req: any) {
+    const dto = OrdenInternaCreate.parse(body);
+    await this.exigirAlcanceOt(dto.otId, req);
+    return this.svc.crear(dto, tenantDe(req));
+  }
+
+  @Patch(":id")
+  override async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = OrdenInternaCreate.partial().parse(body);
+    await this.exigirAlcanceOt(await this.otDeOrden(id, req), req);
+    if (dto.otId) await this.exigirAlcanceOt(dto.otId, req);
+    return this.svc.actualizar(id, dto, tenantDe(req));
+  }
+
+  @Delete(":id")
+  override async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigirAlcanceOt(await this.otDeOrden(id, req), req);
+    return this.svc.eliminar(id, tenantDe(req));
   }
 }
 

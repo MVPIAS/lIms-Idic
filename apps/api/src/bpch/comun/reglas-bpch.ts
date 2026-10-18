@@ -417,3 +417,22 @@ export function avanceInternacion(p: {
   if ((p.lotes ?? 0) > 0 && (p.lotesRegistrados ?? 0) >= (p.lotes ?? 0)) return "en_inspeccion";
   return "ot_generada";
 }
+
+/** Permiso con el que se cambian los parámetros del sistema (Administración › Parámetros). */
+export const PERMISO_CONFIGURACION = "catalogo.gestionar";
+
+/**
+ * Porcentajes de la tasa que el cálculo pide distintos de los parámetros
+ * vigentes (bpch_tasa: tasa_pct, iva_pct). Cambiarlos para un cálculo exige el
+ * permiso de configuración (revisión de seguridad r3): quien solo calcula la
+ * tasa usa los del parámetro.
+ */
+export function porcentajesTasaCambiados(
+  pedido: { tasaPct?: number | null; ivaPct?: number | null },
+  parametros: { tasaPct: number | null; ivaPct: number | null },
+): string[] {
+  const out: string[] = [];
+  if (pedido.tasaPct != null && pedido.tasaPct !== parametros.tasaPct) out.push(`tasa ${pedido.tasaPct} % (parámetro: ${parametros.tasaPct ?? "sin fijar"} %)`);
+  if (pedido.ivaPct != null && pedido.ivaPct !== parametros.ivaPct) out.push(`IVA ${pedido.ivaPct} % (parámetro: ${parametros.ivaPct ?? "sin fijar"} %)`);
+  return out;
+}

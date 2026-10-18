@@ -117,3 +117,36 @@ Conviene saberlo antes de enseñarlo:
 - **Pantallas sin acceso**: si se escribe a mano la dirección de un módulo
   ajeno (p. ej. `/saec`), el servidor no entrega datos, pero la pantalla se
   muestra vacía en vez de decir «sin acceso».
+
+## Permisos por laboratorio reforzados en la revisión de seguridad r3 (18-10-2026)
+
+- **PDF y HTML de un documento** (`GET /informes/:id/pdf|html`): mismo alcance que el
+  listado de documentos (la unidad del documento o la del laboratorio de su OT).
+  Dirección y los perfiles de alcance global lo ven todo; quien es responsable de un
+  paso de su firma también. La verificación pública por código no cambia.
+- **Órdenes internas** (`POST|PATCH|DELETE /ordenes-internas`): exigen tener la OT de
+  origen en el alcance (una orden interna da acceso a la OT al laboratorio de destino).
+- **Edición manual de un resultado** (`PATCH /resultados/:id`): no cambia el analista
+  (400), no deja que quien capturó decida el veredicto (409) y no toca lo aprobado
+  (409: se reabre). `POST /resultados` registra siempre como analista a quien captura.
+- **Limitador de peticiones**: solo un token con firma válida da cupo por usuario; un
+  token inventado o caducado cuenta por la IP.
+- **Tasa de internación**: los porcentajes salen de Administración › Parámetros;
+  calcular con otros exige `catalogo.gestionar`.
+
+## Guiones de verificación sobre una base desde cero
+
+Base: `CREATE DATABASE <bd>` vacía y todos los ficheros de `bash scripts/orden-sql.sh demo`
+en orden con `psql -v ON_ERROR_STOP=1` (una segunda pasada completa deja la misma base:
+solo `schema.sql` no es reaplicable). Después `pnpm --filter @lims-idic/db generate`,
+`pnpm --filter @lims-idic/api build` y, con `DATABASE_URL` apuntando a esa base, cada guion
+con `--arrancar` (dejar unos segundos entre uno y otro para que se libere el puerto), en
+este orden fijo:
+
+1. `correcciones-manuales.js` 2. `flujo-completo.js` 3. `informe-ensayo.js`
+4. `quimicos-recepcion-calculo.js` 5. `bpch-internacion-reinspeccion.js`
+6. `bpch-produccion-prototipos-clasificacion.js` 7. `metrologia-1510.js`
+
+Ninguno depende de otro: cada uno se prepara sus datos (p. ej. `correcciones-manuales.js`
+emite su propio informe de LQC si la base no tiene ninguno y crea la factura de su nota de
+crédito). Pasan en una base recién creada y repetidos (verificado dos vueltas seguidas).

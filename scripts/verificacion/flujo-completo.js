@@ -478,6 +478,16 @@ async function main() {
   await paso("Analista1 NO puede revisar lo que capturó (403/409)", async () => {
     await exigir([403, 409], U.a1, "POST", `/resultados/${C.rPh.id}/revisar`, {});
   });
+  await paso("Revisión de seguridad r3 · Edición manual: el analista no se cambia (400); el revisor ajusta la unidad", async () => {
+    const r = await ok(U.rev, "GET", `/resultados/${C.rPh.id}`);
+    const e = await exigir(400, U.rev, "PATCH", `/resultados/${C.rPh.id}`, { analistaId: sesiones[U.a2].id });
+    afirmar(/analista/i.test(msg(e)), msg(e));
+    await exigir(403, U.a1, "PATCH", `/resultados/${C.rPh.id}`, { unidad: r.unidad ?? undefined });
+    await ok(U.rev, "PATCH", `/resultados/${C.rPh.id}`, r.unidad ? { unidad: r.unidad } : {});
+    const d = await ok(U.rev, "GET", `/resultados/${C.rPh.id}`);
+    afirmar(d.analistaId === sesiones[U.a1].id, "el analista del ensayo cambió");
+    return "analistaId → 400 · analista sin resultado.revisar → 403 · revisor → 200";
+  });
   await paso("No se emite el informe antes de aprobar (409)", async () => {
     const pl = lista(await ok(U.jefe, "GET", "/plantillas?limit=200"));
     C.plantilla = pl.find((p) => p.repid === "BolAn") ?? pl.find((p) => p.tipo === "BOLETIN" && p.activo !== false);
@@ -675,6 +685,16 @@ async function main() {
     const docs = lista(await llamar(U.otroLab, "GET", `/informes/documentos?otId=${C.ot.id}`).then((r) => r.json));
     afirmar(!docs.some((d) => d.id === C.docId), "LPN ve el documento de la OT de LQC");
     return await exigirBandeja(U.otroLab, B0[U.otroLab], { ot_en_curso: 0, ot_asignadas: 0 });
+  });
+  await paso("Revisión de seguridad r3 · PDF y HTML del documento: la jefatura de LPN no los abre (403); LQC y Dirección sí", async () => {
+    for (const f of ["pdf", "html"]) {
+      await exigir(403, "demo.lpn.jefe", "GET", `/informes/${C.docId}/${f}`);
+      await exigir(200, U.jefe, "GET", `/informes/${C.docId}/${f}`);
+      await exigir(200, "demo.director", "GET", `/informes/${C.docId}/${f}`);
+    }
+    // Lo aprobado no se edita a mano: se reabre.
+    await exigir(409, U.rev, "PATCH", `/resultados/${C.rPh.id}`, {});
+    return "lpn.jefe 403 · lqc.jefe 200 · director 200";
   });
 }
 
