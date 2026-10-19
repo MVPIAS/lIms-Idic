@@ -227,6 +227,8 @@ export class OrdenInternaService extends BaseCrudService {
          JOIN LATERAL (${UNIDAD_DE_FAMILIA}) u ON TRUE
         WHERE f.tenant_id = $1::uuid AND f.deleted_at IS NULL AND f.activo
           AND ($2::uuid IS NULL OR u.id <> $2::uuid)
+          -- Sin ensayos vigentes en el catálogo no hay nada que derivarle.
+          AND EXISTS (SELECT 1 FROM cat_ensayo e WHERE e.familia_id = f.id AND e.deleted_at IS NULL AND e.activo)
         ORDER BY u.codigo, f.nombre`,
       tenantId,
       excluirUnidad,
