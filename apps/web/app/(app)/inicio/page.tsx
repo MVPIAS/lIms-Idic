@@ -68,7 +68,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
   PLANIFICACION: [
     { href: "/ot/nueva", titulo: "Registrar OT", desc: "Abre una orden de trabajo", icono: "＋", perm: "ot.crear" },
     { href: "/ot", titulo: "Órdenes de trabajo", desc: "Distribución y plazos", icono: "🗂", perm: "ot.ver" },
-    { href: "/ordenes-internas", titulo: "Órdenes internas", desc: "Derivaciones entre laboratorios", icono: "🔀", perm: "cotizacion.ver" },
+    { href: "/ordenes-internas", titulo: "Órdenes internas", desc: "Derivaciones entre laboratorios", icono: "🔀", perm: "ot.ver" },
     { href: "/muestras", titulo: "Muestras", desc: "Recepción y ubicación", icono: "🧫", perm: "muestra.ver" },
   ],
   FINANZAS: [

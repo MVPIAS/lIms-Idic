@@ -1258,6 +1258,10 @@ model FlujoFirma {
   obligatorio     Boolean  @default(true)
   activo          Boolean  @default(true)
   descripcion     String?
+  /// Responsable alternativo del paso (align_frente_k.sql): otro rol que también puede firmarlo.
+  rolAlternativoId         String?   @map("rol_alternativo_id") @db.Uuid
+  nivelUnidadAlternativo   String?   @map("nivel_unidad_alternativo") @db.VarChar(20)
+  alternativoConfiguradoAt DateTime? @map("alternativo_configurado_at") @db.Timestamptz
   createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime @default(now()) @map("updated_at") @db.Timestamptz
 
@@ -1582,6 +1586,13 @@ model OrdenInterna {
   destinoLab  String?   @map("destino_lab") @db.Uuid
   estado      String    @default("abierta") @db.VarChar(20)
   detalle     String?
+  /// Ensayos del catálogo (cat_ensayo.id) derivados al laboratorio de destino (align_frente_k.sql).
+  ensayos         String[]  @default([]) @db.Uuid
+  createdBy       String?   @map("created_by") @db.Uuid
+  updatedAt       DateTime? @map("updated_at") @db.Timestamptz
+  anuladaAt       DateTime? @map("anulada_at") @db.Timestamptz
+  anuladaPor      String?   @map("anulada_por") @db.Uuid
+  motivoAnulacion String?   @map("motivo_anulacion")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
 

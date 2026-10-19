@@ -11,6 +11,7 @@ import { toast } from "@/components/ui/feedback";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
 import RegistroMuestras from "./_components/RegistroMuestras";
+import OrdenesInternasOt from "./_components/OrdenesInternasOt";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
 
@@ -80,7 +81,9 @@ export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestras" | "resultados" | "informe" | "flujo" | "historial">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestras" | "ordenes" | "resultados" | "informe" | "flujo" | "historial">("cabecera");
+  /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
+  const [destinoOi, setDestinoOi] = useState<string | null>(null);
   const { puede } = usePermisos();
   const [historial, setHistorial] = useState<any[]>([]);
   const [cambiandoLab, setCambiandoLab] = useState(false);
@@ -283,6 +286,7 @@ export default function ExpedientePage() {
             {tabBtn("cabecera", "Cabecera")}
             {tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
             {tabBtn("muestras", `Muestras (${muestras.length})`)}
+            {tabBtn("ordenes", "Órdenes internas")}
             {tabBtn("resultados", "Resultados")}
             {tabBtn("informe", "Informe y cierre")}
             {tabBtn("flujo", `Flujo${tieneFlujo ? ` (${tareas.length})` : ""}`)}
@@ -364,7 +368,12 @@ export default function ExpedientePage() {
               ) : <p className="subtitle" style={{ margin: 0 }}>Sin movimientos registrados de laboratorio ni de asignación.</p>
             )}
             {tab === "muestras" && typeof id === "string" && (
-              <RegistroMuestras otId={id} onCambio={() => { cargarMuestras(); cargarOt(); }} />
+              <RegistroMuestras otId={id} onCambio={() => { cargarMuestras(); cargarOt(); }}
+                onOrdenInterna={(unidadId) => { setDestinoOi(unidadId ?? null); setTab("ordenes"); }} />
+            )}
+            {tab === "ordenes" && typeof id === "string" && (
+              <OrdenesInternasOt otId={id} otCodigo={ot?.codigo} otEstado={ot?.estado}
+                destinoSugerido={destinoOi} onSugerenciaUsada={() => setDestinoOi(null)} />
             )}
             {tab === "resultados" && (
               <div style={{ display: "grid", gap: 8 }}>
