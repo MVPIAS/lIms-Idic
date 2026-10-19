@@ -87,7 +87,7 @@ async function unidadesPosiblesOt(prisma: PrismaService, otId: string, principal
       WHERE u.tenant_id = $3::uuid
         AND (u.id = $2::uuid
              OR u.codsucdel IN (SELECT f.codsucdel FROM orden_interna oi JOIN cat_familia f ON f.id = oi.destino_lab
-                                 WHERE oi.ot_id = $1::uuid AND oi.deleted_at IS NULL)
+                                 WHERE oi.ot_id = $1::uuid AND oi.deleted_at IS NULL AND oi.estado <> 'anulada')
              OR u.id IN (SELECT unnest(m.otros_labs) FROM muestra m WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL))
       ORDER BY (u.id = $2::uuid) DESC, u.codigo`,
     otId,

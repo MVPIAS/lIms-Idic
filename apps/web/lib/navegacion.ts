@@ -74,7 +74,7 @@ export const NAV: SeccionNav[] = [
     items: [
       { href: "/ot", label: "Órdenes de trabajo", icon: "🗂", perm: "ot.ver", claves: "ot expediente" },
       { href: "/ot/nueva", label: "Registrar OT", icon: "＋", perm: "ot.crear" },
-      { href: "/ordenes-internas", label: "Órdenes internas", icon: "🔀", perm: "cotizacion.ver", claves: "derivacion muestreo" },
+      { href: "/ordenes-internas", label: "Órdenes internas", icon: "🔀", perm: "ot.ver", claves: "derivacion muestreo otro laboratorio" },
       { href: "/muestras", label: "Muestras", icon: "🧫", perm: "muestra.ver" },
       { href: "/captura", label: "Captura de resultados", icon: "✍", perm: "resultado.crear" },
       { href: "/captura-ot", label: "Captura y revisión por OT", icon: "📈", perm: ["resultado.crear", "resultado.revisar", "resultado.aprobar"], claves: "revisar aprobar devolver especificación" },

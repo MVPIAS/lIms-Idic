@@ -64,7 +64,12 @@ const datosDe = (m: MuestraOt): DatosRecepcion => ({
   otrosLabsDetalle: m.otrosLabsDetalle ?? "",
 });
 
-export default function RegistroMuestras({ otId, onCambio }: { otId: string; onCambio?: () => void }) {
+export default function RegistroMuestras({ otId, onCambio, onOrdenInterna }: {
+  otId: string;
+  onCambio?: () => void;
+  /** Abre la pestaña «Órdenes internas» de la OT; con unidad, propone ese laboratorio de destino. */
+  onOrdenInterna?: (unidadId?: string) => void;
+}) {
   const { puede } = usePermisos();
   const [d, setD] = useState<Propuesta | null>(null);
   const [error, setError] = useState("");
@@ -253,8 +258,17 @@ export default function RegistroMuestras({ otId, onCambio }: { otId: string; onC
                             <div key={e.unidadId}>
                               <b title={e.unidad?.nombre}>{e.unidad?.codigo ?? "—"}</b>{" · "}
                               {e.ordenes.length
-                                ? e.ordenes.map((o) => <Link key={o.id} href={"/ordenes-internas" as any} style={{ color: "var(--accent)" }}>{o.numero} ({o.estado})</Link>)
-                                : <span className="pill amber" title="Emita la orden interna a ese laboratorio en «Órdenes internas»">sin orden interna</span>}
+                                ? e.ordenes.map((o) => onOrdenInterna
+                                    ? <button key={o.id} type="button" onClick={() => onOrdenInterna()} style={{ color: "var(--accent)", background: "none", border: 0, padding: 0, cursor: "pointer", textDecoration: "underline" }}>{o.numero} ({o.estado})</button>
+                                    : <Link key={o.id} href={"/ordenes-internas" as any} style={{ color: "var(--accent)" }}>{o.numero} ({o.estado})</Link>)
+                                : <>
+                                    <span className="pill amber">sin orden interna</span>
+                                    {onOrdenInterna && puede("ot.crear") && (
+                                      <button type="button" className="btn outline sm" style={{ marginLeft: 6 }} onClick={() => onOrdenInterna(e.unidadId)}>
+                                        Emitir orden interna
+                                      </button>
+                                    )}
+                                  </>}
                             </div>
                           ))}
                           {m.otrosLabsDetalle && <div style={{ color: "var(--muted)" }}>{m.otrosLabsDetalle}</div>}

@@ -26,7 +26,7 @@ import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
-import { generarNumeroOrdenInterna } from "../common/correlativo";
+import { OrdenInternaConsultaController, OrdenInternaController, OrdenInternaService } from "./orden-interna";
 import { AlcanceService } from "../rbac/alcance.service";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
 import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
@@ -136,103 +136,8 @@ export class SolicitudCosteoController extends BaseCrudController {
 }
 
 /* ============================ D4 · ORDEN INTERNA ============================ */
-
-@Injectable()
-export class OrdenInternaService extends BaseCrudService {
-  constructor(prisma: PrismaService) {
-    super(prisma, {
-      model: "ordenInterna",
-      search: ["numero", "tipo", "estado", "detalle"],
-      orderBy: { createdAt: "desc" },
-      tenant: true,
-      softDelete: true,
-    });
-  }
-
-  /**
-   * Al crear, si no viene `numero` lo genera atómico OI-AAAA-NNNN contra la
-   * tabla orden_interna_correlativo (INSERT ON CONFLICT DO UPDATE RETURNING).
-   */
-  override async crear(data: any, tenantId?: string) {
-    const tid = tenantId ?? DEV_TENANT;
-    const numero = data?.numero ?? (await generarNumeroOrdenInterna(this.prisma, tid));
-    return super.crear({ ...data, numero }, tenantId);
-  }
-}
-const OrdenInternaCreate = z.object({
-  otId: z.string().uuid(),
-  tipo: z.enum(["interna", "generica_interna", "muestreo"]).default("interna"),
-  numero: z.string().max(40).optional(),
-  origenLab: z.string().uuid().optional(),
-  destinoLab: z.string().uuid().optional(),
-  estado: z.enum(["abierta", "recibida", "cerrada"]).default("abierta"),
-  detalle: z.string().optional(),
-});
-@ApiTags("ordenes-internas")
-@ApiBearerAuth()
-@UseGuards(AuthGuard("jwt"), PermisoGuard)
-@Controller("ordenes-internas")
-@RequierePermisoCrud({
-  ver: PERM.costeoVer,
-  crear: PERM.otGestionar,
-  editar: PERM.otGestionar,
-  eliminar: PERM.otGestionar,
-})
-export class OrdenInternaController extends BaseCrudController {
-  protected createSchema = OrdenInternaCreate;
-  protected updateSchema = OrdenInternaCreate.partial();
-  constructor(
-    protected svc: OrdenInternaService,
-    private readonly prisma: PrismaService,
-    private readonly alcance: AlcanceService,
-  ) {
-    super();
-  }
-
-  /**
-   * Una orden interna da al laboratorio de destino acceso a la OT (planillas de
-   * cálculos y de costos): solo la crea o cambia quien tiene la OT de origen en
-   * su alcance por laboratorio (revisión de seguridad r3). 404 si es de otro tenant.
-   */
-  private async exigirAlcanceOt(otId: string, req: any) {
-    const ot = await this.prisma.ordenTrabajo.findFirst({
-      where: { id: otId, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
-      select: { codigo: true, unidadPrincipal: true },
-    });
-    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
-  }
-
-  private async otDeOrden(id: string, req: any) {
-    const oi = await this.prisma.ordenInterna.findFirst({
-      where: { id, deletedAt: null, ...(req?.user?.tenantId ? { tenantId: req.user.tenantId } : {}) },
-      select: { otId: true },
-    });
-    if (!oi) throw new NotFoundException(`Orden interna ${id} no encontrada`);
-    return oi.otId;
-  }
-
-  @Post()
-  override async crear(@Body() body: unknown, @Req() req: any) {
-    const dto = OrdenInternaCreate.parse(body);
-    await this.exigirAlcanceOt(dto.otId, req);
-    return this.svc.crear(dto, tenantDe(req));
-  }
-
-  @Patch(":id")
-  override async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    const dto = OrdenInternaCreate.partial().parse(body);
-    await this.exigirAlcanceOt(await this.otDeOrden(id, req), req);
-    if (dto.otId) await this.exigirAlcanceOt(dto.otId, req);
-    return this.svc.actualizar(id, dto, tenantDe(req));
-  }
-
-  @Delete(":id")
-  override async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    await this.exigirAlcanceOt(await this.otDeOrden(id, req), req);
-    return this.svc.eliminar(id, tenantDe(req));
-  }
-}
+// Servicio y controladores en ./orden-interna.ts (reglas en ./orden-interna.reglas.ts).
+export { OrdenInternaController, OrdenInternaConsultaController, OrdenInternaService };
 
 /* ============================ D5 · FORMATOS DE INFORME ============================ */
 
@@ -1356,7 +1261,7 @@ export class RegistroMuestrasService {
          FROM orden_interna oi
          LEFT JOIN cat_familia f ON f.id = oi.destino_lab
          LEFT JOIN unidad u ON u.tenant_id = oi.tenant_id AND u.codsucdel = f.codsucdel
-        WHERE oi.ot_id = $1::uuid AND oi.tenant_id = $2::uuid AND oi.deleted_at IS NULL
+        WHERE oi.ot_id = $1::uuid AND oi.tenant_id = $2::uuid AND oi.deleted_at IS NULL AND oi.estado <> 'anulada'
         ORDER BY oi.created_at`,
       otId,
       tenantId,
@@ -1573,6 +1478,8 @@ export class RecepcionMuestraController {
 @Module({
   controllers: [
     SolicitudCosteoController,
+    // Las rutas estáticas de órdenes internas (destinos, ot/:otId) van ANTES que el CRUD.
+    OrdenInternaConsultaController,
     OrdenInternaController,
     // El controlador de /sugerir va ANTES que el CRUD para ganar a `@Get(":id")`.
     FormatoInformeSugerirController,
