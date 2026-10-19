@@ -121,3 +121,11 @@ UPDATE flujo_firma f
    AND f.alternativo_configurado_at IS NULL
    AND j.id = f.rol_id AND COALESCE(j.alias_de, j.codigo) = 'JEFE_DEPTO'
    AND m.tenant_id = f.tenant_id AND m.codigo = 'METROLOGO';
+
+-- Internación con una sola puerta: Cobranza seguía el cobro de la tasa en la
+-- antigua «Comercial › Internaciones» (pedía cotizacion.ver u ot.ver). La pantalla
+-- única pide bpch.internacion.ver: se le concede la consulta, como a Finanzas.
+INSERT INTO rol_permiso (rol_id, permiso_id)
+SELECT r.id, p.id FROM rol r JOIN permiso p ON p.codigo = 'bpch.internacion.ver'
+ WHERE r.codigo = 'COBRANZA'
+ON CONFLICT DO NOTHING;
