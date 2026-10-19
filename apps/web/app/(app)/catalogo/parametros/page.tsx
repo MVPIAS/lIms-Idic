@@ -1,6 +1,7 @@
 "use client";
 
 import CrudTable, { activoBadge, codigoCell } from "../_components/CrudTable";
+import PorcentajesTasa from "@/components/parametros/PorcentajesTasa";
 
 /**
  * Parámetros del sistema (§5). Pantalla de gestión de la maestra genérica
@@ -21,9 +22,10 @@ const CATEGORIAS = [
 
 export default function ParametrosPage() {
   return (
+    <>
     <CrudTable
       titulo="Parámetros del sistema"
-      subtitulo="Combos de negocio editables: agrega, modifica o desactiva valores (tipo de cliente, forma de pago, prioridad, líneas de costeo, tipo de inspección) sin intervención técnica. §5 parametrización."
+      subtitulo="Combos de negocio editables: agrega, modifica o desactiva valores (tipo de cliente, forma de pago, prioridad, líneas de costeo, tipo de inspección) sin intervención técnica. Los porcentajes de la tasa de internación y del IVA se cambian, con motivo, en el recuadro al final de esta página."
       endpoint="parametros"
       columnas={[
         { key: "categoria", label: "Categoría" },
@@ -40,5 +42,8 @@ export default function ParametrosPage() {
         { name: "activo", label: "Activo", tipo: "checkbox" },
       ]}
     />
+    {/* Porcentajes de la tasa de internación (bpch_tasa): valor con motivo e historial. */}
+    <PorcentajesTasa />
+    </>
   );
 }
