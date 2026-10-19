@@ -97,6 +97,10 @@ export interface ReglaFirma {
   nivelUnidad: NivelUnidad;
   obligatorio: boolean;
   activo: boolean;
+  /** Responsable alternativo: otro rol que también puede firmar el paso (p. ej. el metrólogo que emite). */
+  rolAlternativoId?: string | null;
+  rolAlternativo?: { id: string; codigo: string; nombre: string } | null;
+  nivelUnidadAlternativo?: NivelUnidad | null;
 }
 export interface PasoResuelto {
   orden: number;
@@ -104,7 +108,7 @@ export interface PasoResuelto {
   rol: { codigo: string; nombre: string };
   nivelUnidad: NivelUnidad;
   unidad: { codigo: string; nombre: string } | null;
-  personas: { usuarioId: string; nombre: string; rol?: "titular" | "subrogante" }[];
+  personas: { usuarioId: string; nombre: string; rol?: "titular" | "subrogante" | "alternativo" }[];
   origen: "defecto" | "override";
 }
 export interface MiAlcance {
@@ -209,7 +213,7 @@ function adaptarResolver(x: any): PasoResuelto[] {
     personas: (p.responsables ?? p.personas ?? []).map((r: any) => ({
       usuarioId: r.usuarioId,
       nombre: r.nombre,
-      rol: r.via === "titular" || r.via === "subrogante" ? r.via : r.rol,
+      rol: r.via === "titular" || r.via === "subrogante" || r.via === "alternativo" ? r.via : r.rol,
     })),
     origen,
   }));
@@ -235,7 +239,7 @@ const del = <T,>(p: string) => request<T>("DELETE", p);
 export type UnidadInput = Partial<Omit<Unidad, "id">>;
 export type UsuarioInput = Partial<Pick<Usuario, "username" | "nombre" | "email" | "cargo" | "activo">>;
 export type RolInput = Partial<Pick<Rol, "codigo" | "nombre" | "nivel" | "alcance" | "descripcion">>;
-export type ReglaInput = Partial<Pick<ReglaFirma, "tipoDocumento" | "unidadId" | "orden" | "accion" | "rolId" | "nivelUnidad" | "obligatorio" | "activo">>;
+export type ReglaInput = Partial<Pick<ReglaFirma, "tipoDocumento" | "unidadId" | "orden" | "accion" | "rolId" | "nivelUnidad" | "obligatorio" | "activo" | "rolAlternativoId" | "nivelUnidadAlternativo">>;
 
 export const adminApi = {
   // Estructura

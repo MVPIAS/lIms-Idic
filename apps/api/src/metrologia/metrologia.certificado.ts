@@ -68,7 +68,9 @@ function firmaCelda(f: FirmaCert | null, cargoDefecto: string): string {
   if (!f) return `<td>${esc(cargoDefecto)}<br>Sin firmante en la matriz de firmas</td>`;
   const sub = f.via === "subrogante" ? " (S)" : "";
   const estado = f.pendiente ? "Pendiente de firma" : `Firmado electrónicamente el ${esc(fechaHora(f.fecha))}`;
-  return `<td><b>${esc(f.nombre ?? "")}</b><br>${f.grado ? ` · ${esc(f.grado)}<br>` : ""} · ${esc(cargoDefecto + sub)}<br> · ${estado}</td>`;
+  // Emisión por el metrólogo habilitado (responsable alternativo del paso en la matriz de firmas).
+  const cargo = f.via === "alternativo" && !f.pendiente ? `${f.rol || "Metrólogo"} habilitado para la magnitud (emite)` : cargoDefecto + sub;
+  return `<td><b>${esc(f.nombre ?? "")}</b><br>${f.grado ? ` · ${esc(f.grado)}<br>` : ""} · ${esc(cargo)}<br> · ${estado}</td>`;
 }
 const tablaFirmas = (izq: string, der: string) => `<table class="firmas-cert"><tbody><tr>${izq}${der}</tr></tbody></table>`;
 

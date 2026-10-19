@@ -32,7 +32,7 @@ import {
   plantillaVacia, puedeFirmarPaso, type AccionCal, type ContextoCal, type FirmaHecha, type PasoFirmaCal,
 } from "./metrologia.flujo";
 import {
-  avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, nuevoCodigoVerificacion, numeroCertificado,
+  avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, motivoNoEmiteMetrologo, nuevoCodigoVerificacion, numeroCertificado,
   revisarPatrones, uCertificada, type FilaCmc, type Firmante,
 } from "./metrologia.reglas";
 
@@ -774,11 +774,13 @@ export class MetrologiaController {
     const yo = await firmanteDe(req.user.sub);
     const paso = c.actual;
     const via = paso?.responsables.find((r) => r.usuarioId === req.user.sub)?.via ?? "permiso";
+    // Firma como responsable alternativo (metrólogo habilitado que emite): queda con su rol, no con el del jefe.
+    const rolFirma = via === "alternativo" && paso?.alternativo ? paso.alternativo.rol : paso?.rol;
     const registrarFirma = async (tx: any) => {
       await tx.$executeRawUnsafe(
         `INSERT INTO met_calibracion_firma (calibracion_id, orden, accion, rol_codigo, rol_nombre, unidad_codigo, usuario_id, nombre, grado, cargo, via)
          VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid, $8, $9, $10, $11)`,
-        id, paso?.orden ?? 99, paso?.accion ?? "FIRMA", paso?.rol.codigo ?? "JEFE_LAB", paso?.rol.nombre ?? "Jefe de laboratorio",
+        id, paso?.orden ?? 99, paso?.accion ?? "FIRMA", rolFirma?.codigo ?? "JEFE_LAB", rolFirma?.nombre ?? "Jefe de laboratorio",
         paso?.unidad?.codigo ?? cal.laboratorio ?? null, req.user.sub, yo.nombre, yo.grado, yo.cargo, via);
     };
     if (!ultimo) {
@@ -929,6 +931,7 @@ export class MetrologiaController {
             orden: p.orden, accion: p.accion, obligatorio: p.obligatorio, descripcion: p.descripcion,
             rol: { codigo: p.rol.codigo, nombre: p.rol.nombre }, unidad: p.unidad ? { codigo: p.unidad.codigo } : null,
             responsables: (p.responsables ?? []).map((x: any) => ({ usuarioId: x.usuarioId, nombre: x.nombre, via: x.via })),
+            alternativo: p.alternativo ? { rol: { codigo: p.alternativo.rol.codigo, nombre: p.alternativo.rol.nombre } } : null,
           }));
         } catch (e: any) {
           // Si la matriz no se puede resolver, nadie firma (no se cae al modo sin matriz) y no se envía.
@@ -951,7 +954,8 @@ export class MetrologiaController {
   private async contextos(req: any, cals: any[]) {
     const t = tenantId(req), yo = req.user?.sub;
     const cache = new Map<string, PasoFirmaCal[] | null>();
-    const registro = cals.some((c) => estadoDe(c.estado) === "borrador") ? await registroFirmas(t) : [];
+    // El registro de firmas: para enviar (borrador) y para emitir como metrólogo (en circuito).
+    const registro = cals.some((c) => ["borrador", "en_revision", "en_firma"].includes(estadoDe(c.estado))) ? await registroFirmas(t) : [];
     const ids = cals.map((c) => c.id);
     const firmas = ids.length ? await prisma.$queryRawUnsafe<any[]>(
       `SELECT calibracion_id, orden, accion, rol_codigo, rol_nombre, unidad_codigo, usuario_id, nombre, grado, cargo, via, firmado_at
@@ -963,13 +967,18 @@ export class MetrologiaController {
       const c = await this.circuito(t, { ...cal, __firmas: propias }, cache);
       const enCircuito = e === "en_revision" || e === "en_firma";
       const hechas: FirmaHecha[] = propias.map((f: any) => ({ orden: f.orden, usuarioId: f.usuario_id, accion: f.accion }));
+      // ¿El usuario es responsable del paso pendiente solo como alternativo (metrólogo que emite)?
+      const mias = c.actual?.responsables.filter((r) => r.usuarioId === yo) ?? [];
+      const esAlternativo = mias.length > 0 && mias.every((r) => r.via === "alternativo");
+      const habAlt = esAlternativo ? motivoNoEmiteMetrologo(registro, yo, cal.laboratorio ?? null, cal.magnitud) : null;
       const ctx: ContextoCal = {
         estado: cal.estado,
         esAutor: !!cal.created_by && cal.created_by === yo,
         puedeCrear: tiene(req, "metrologia.crear"),
         puedeEmitir: tiene(req, "metrologia.emitir"),
         calculada: !!cal.calculada,
-        responsablePaso: !enCircuito ? false : c.pasos ? puedeFirmarPaso(c.actual, yo, hechas) : tiene(req, "metrologia.emitir"),
+        responsablePaso: !enCircuito ? false : c.pasos ? puedeFirmarPaso(c.actual, yo, hechas, habAlt) : tiene(req, "metrologia.emitir"),
+        motivoPaso: enCircuito && esAlternativo && habAlt ? habAlt : null,
         ultimoPaso: c.pasos ? c.ultimo : true,
         habilitacion: e === "borrador" && yo ? motivoHabilitacion(registro, yo, cal.laboratorio ?? null, cal.magnitud) : null,
         reemisionEnCurso: !!cal.reemision_en_curso,

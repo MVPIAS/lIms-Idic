@@ -145,7 +145,11 @@ function Firmas() {
 
 // ───────────────────────────── Editor de cadena ─────────────────────────────
 
-interface PasoForm { accion: AccionFirma; rolId: string; nivelUnidad: NivelUnidad; obligatorio: boolean }
+interface PasoForm {
+  accion: AccionFirma; rolId: string; nivelUnidad: NivelUnidad; obligatorio: boolean;
+  /** Responsable alternativo (opcional): otro rol que también puede firmar este paso. "" = ninguno. */
+  rolAlternativoId: string; nivelUnidadAlternativo: NivelUnidad;
+}
 
 function EditorCadena({ reglas, tipo, unidadId, roles, onCambio }: {
   reglas: ReglaFirma[]; tipo: TipoDocumento; unidadId: string | null; roles: Rol[]; onCambio: () => Promise<void>;
@@ -184,8 +188,15 @@ function EditorCadena({ reglas, tipo, unidadId, roles, onCambio }: {
     if (!f.rolId) { toast.error("Elige el rol que realiza el paso."); return false; }
     setOcupado(true);
     try {
-      if (r) await adminApi.actualizarFirma(r.id, f);
-      else await adminApi.crearFirma({ ...f, tipoDocumento: tipo, unidadId, orden: (reglas[reglas.length - 1]?.orden ?? 0) + 1, activo: true });
+      const datos = {
+        accion: f.accion, rolId: f.rolId, nivelUnidad: f.nivelUnidad, obligatorio: f.obligatorio,
+        rolAlternativoId: f.rolAlternativoId || null,
+        nivelUnidadAlternativo: f.rolAlternativoId ? f.nivelUnidadAlternativo : null,
+      };
+      // Solo se envía el alternativo si cambió (así queda constancia de cuándo se fijó o quitó).
+      const mismoAlt = r && (r.rolAlternativoId ?? "") === f.rolAlternativoId && (!f.rolAlternativoId || (r.nivelUnidadAlternativo ?? "MISMA") === f.nivelUnidadAlternativo);
+      if (r) await adminApi.actualizarFirma(r.id, mismoAlt ? { accion: f.accion, rolId: f.rolId, nivelUnidad: f.nivelUnidad, obligatorio: f.obligatorio } : datos);
+      else await adminApi.crearFirma({ ...datos, ...(f.rolAlternativoId ? {} : { rolAlternativoId: undefined, nivelUnidadAlternativo: undefined }), tipoDocumento: tipo, unidadId, orden: (reglas[reglas.length - 1]?.orden ?? 0) + 1, activo: true });
       toast.ok(r ? "Paso actualizado." : "Paso agregado.");
       setEditId(null); setAgregando(false);
       await onCambio();
@@ -201,7 +212,7 @@ function EditorCadena({ reglas, tipo, unidadId, roles, onCambio }: {
       {reglas.map((r, i) => (
         <div key={r.id} className="flex items-center gap-2 shrink-0">
           {editId === r.id ? (
-            <FormPaso inicial={{ accion: r.accion, rolId: r.rolId, nivelUnidad: r.nivelUnidad, obligatorio: r.obligatorio }} roles={roles}
+            <FormPaso inicial={{ accion: r.accion, rolId: r.rolId, nivelUnidad: r.nivelUnidad, obligatorio: r.obligatorio, rolAlternativoId: r.rolAlternativoId ?? "", nivelUnidadAlternativo: r.nivelUnidadAlternativo ?? "MISMA" }} roles={roles}
               onCancelar={() => setEditId(null)} onGuardar={(f) => guardar(r, f)} />
           ) : (
             <TarjetaPaso r={r} primero={i === 0} ultimo={i === reglas.length - 1}
@@ -211,7 +222,7 @@ function EditorCadena({ reglas, tipo, unidadId, roles, onCambio }: {
         </div>
       ))}
       {agregando ? (
-        <FormPaso inicial={{ accion: "FIRMA", rolId: "", nivelUnidad: "MISMA", obligatorio: true }} roles={roles}
+        <FormPaso inicial={{ accion: "FIRMA", rolId: "", nivelUnidad: "MISMA", obligatorio: true, rolAlternativoId: "", nivelUnidadAlternativo: "MISMA" }} roles={roles}
           onCancelar={() => setAgregando(false)} onGuardar={(f) => guardar(null, f)} />
       ) : (
         <button onClick={() => { setAgregando(true); setEditId(null); }} disabled={!roles.length}
@@ -236,6 +247,11 @@ function TarjetaPaso({ r, primero, ultimo, onIzq, onDer, onEditar, onQuitar }: {
         </div>
         <div className="font-semibold text-[12.5px] leading-tight">{r.rol?.nombre ?? r.rol?.codigo}</div>
         <div className="text-[11px] text-[var(--muted)]">{NIVEL_UNIDAD[r.nivelUnidad]?.label ?? r.nivelUnidad}</div>
+        {r.rolAlternativo && (
+          <div className="text-[11px] mt-1" title="Responsable alternativo: también puede firmar este paso">
+            o bien: <b>{r.rolAlternativo.nombre}</b> ({NIVEL_UNIDAD[r.nivelUnidadAlternativo ?? "MISMA"]?.label ?? r.nivelUnidadAlternativo})
+          </div>
+        )}
         <div className="mt-1 flex gap-1 flex-wrap">
           {!r.obligatorio && <span className="pill gray">Opcional</span>}
           {r.activo === false && <span className="pill red">Inactivo</span>}
@@ -279,6 +295,22 @@ function FormPaso({ inicial, roles, onGuardar, onCancelar }: {
       <label className="inline-flex items-center gap-2 text-[12px] cursor-pointer">
         <input type="checkbox" checked={f.obligatorio} onChange={(e) => setF({ ...f, obligatorio: e.target.checked })} /> Obligatorio
       </label>
+      <Campo label="Responsable alternativo (opcional)" ayuda="Otro rol que también puede firmar este paso. Déjelo en «Ninguno» para quitarlo.">
+        <select value={f.rolAlternativoId} onChange={(e) => setF({ ...f, rolAlternativoId: e.target.value })}>
+          <option value="">Ninguno</option>
+          {NIVELES_ROL.map((n) => {
+            const rs = roles.filter((r) => r.nivel === n.value && r.id !== f.rolId);
+            return rs.length ? <optgroup key={n.value} label={n.grupo}>{rs.map((r) => <option key={r.id} value={r.id}>{r.nombre}</option>)}</optgroup> : null;
+          })}
+        </select>
+      </Campo>
+      {f.rolAlternativoId && (
+        <Campo label="¿De qué unidad el alternativo?">
+          <select value={f.nivelUnidadAlternativo} onChange={(e) => setF({ ...f, nivelUnidadAlternativo: e.target.value as NivelUnidad })}>
+            {NIVELES_UNIDAD.map((n) => <option key={n.value} value={n.value}>{n.label}</option>)}
+          </select>
+        </Campo>
+      )}
       <div className="flex gap-1">
         <button className="btn primary sm flex-1 justify-center" onClick={() => onGuardar(f)}>Guardar</button>
         <button className="btn outline sm" onClick={onCancelar}>Cancelar</button>
@@ -347,11 +379,12 @@ function NuevaExcepcion({ tipo, unidades, ocupadas, general, roles, onCambio }: 
       if (usarCopia) {
         // secuencial para conservar el orden
         for (const g of general) {
-          await adminApi.crearFirma({ tipoDocumento: tipo, unidadId, orden: g.orden, accion: g.accion, rolId: g.rolId, nivelUnidad: g.nivelUnidad, obligatorio: g.obligatorio, activo: true });
+          await adminApi.crearFirma({ tipoDocumento: tipo, unidadId, orden: g.orden, accion: g.accion, rolId: g.rolId, nivelUnidad: g.nivelUnidad, obligatorio: g.obligatorio, activo: true, ...(g.rolAlternativoId ? { rolAlternativoId: g.rolAlternativoId, nivelUnidadAlternativo: g.nivelUnidadAlternativo ?? "MISMA" } : {}) });
         }
         toast.ok("Excepción creada a partir de la regla general. Ábrela para ajustar sus pasos.");
       } else if (primerPaso) {
-        await adminApi.crearFirma({ ...primerPaso, tipoDocumento: tipo, unidadId, orden: 1, activo: true });
+        const { rolAlternativoId: alt, nivelUnidadAlternativo: nivelAlt, ...base } = primerPaso;
+        await adminApi.crearFirma({ ...base, ...(alt ? { rolAlternativoId: alt, nivelUnidadAlternativo: nivelAlt } : {}), tipoDocumento: tipo, unidadId, orden: 1, activo: true });
         toast.ok("Excepción creada. Ábrela para agregarle más pasos.");
       }
       setAbierto(false); setUnidadId(null); setCopiar(true);
@@ -380,7 +413,7 @@ function NuevaExcepcion({ tipo, unidades, ocupadas, general, roles, onCambio }: 
       ) : (
         <div className="mt-3">
           <div className="text-[12px] text-[var(--muted)] mb-2">Define el primer paso de la cadena (luego podrás agregar más):</div>
-          <FormPaso inicial={{ accion: "FIRMA", rolId: "", nivelUnidad: "MISMA", obligatorio: true }} roles={roles}
+          <FormPaso inicial={{ accion: "FIRMA", rolId: "", nivelUnidad: "MISMA", obligatorio: true, rolAlternativoId: "", nivelUnidadAlternativo: "MISMA" }} roles={roles}
             onCancelar={() => setAbierto(false)} onGuardar={(f) => crear(f)} />
         </div>
       )}

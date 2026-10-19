@@ -65,6 +65,21 @@ export function motivoHabilitacion(registro: Firmante[], usuarioId: string, labo
   return `No figura en el registro de firmas autorizadas del laboratorio para la magnitud «${magnitud}» (LMT-PG01 Anexo 11): no puede firmar esta calibración como metrólogo.`;
 }
 
+/**
+ * Habilitación para EMITIR como metrólogo (responsable alternativo del paso de
+ * emisión): el registro de firmas autorizadas debe incluirlo, vigente, para la
+ * magnitud y el laboratorio de la calibración. A diferencia del envío, una
+ * magnitud que el registro no declara NO habilita a nadie (null = habilitado).
+ */
+export function motivoNoEmiteMetrologo(registro: Firmante[], usuarioId: string, laboratorio: string | null, magnitud: string): string | null {
+  const propio = registro.some(
+    (r) => r.activo && r.funcion === "METROLOGO" && r.usuarioId === usuarioId && !!laboratorio && r.laboratorios.includes(laboratorio) && r.magnitudes.includes(magnitud),
+  );
+  return propio
+    ? null
+    : `Para emitir como metrólogo debe figurar en el registro de firmas autorizadas para la magnitud «${magnitud}» en ${laboratorio ?? "el laboratorio"} (LMT-PG01 Anexo 11).`;
+}
+
 /* --------------------------------------------------------- Patrones ------ */
 export type EstadoPatron = "vigente" | "por_vencer" | "vencido" | "sin_fecha";
 /** Estado del patrón a una fecha (por vencer = menos de 30 días). */

@@ -96,7 +96,7 @@ se bloquea la fila de la calibración original, así que dos peticiones simultá
 ### Circuito de firma (C4)
 
 ```
-borrador ─enviar (metrólogo)─▶ en_revision ─firmar (jefe LMT o subrogante)─▶ en_firma ─emitir (jefe de departamento)─▶ emitida
+borrador ─enviar (metrólogo)─▶ en_revision ─firmar (jefe LMT o subrogante)─▶ en_firma ─emitir (jefe de departamento o metrólogo habilitado*)─▶ emitida
    ▲                              │                                            │
    └──────────── devolver (motivo; se anulan las firmas hechas) ───────────────┘
 ```
@@ -126,6 +126,30 @@ borrador ─enviar (metrólogo)─▶ en_revision ─firmar (jefe LMT o subrogan
   orden 0) y nunca da por firmado un paso de jefe: si el primer paso de la matriz es
   el jefe del laboratorio, él firma siempre. Unicidad en la base:
   `(calibracion_id, orden, accion)` (`align_revision_r3.sql`).
+- **Emisión por el metrólogo · DECISIÓN PROVISIONAL (18-10-2026), pendiente de
+  confirmar con el IDIC.** Además del Jefe de Departamento, el **metrólogo
+  habilitado para la magnitud** puede firmar el paso de emisión:
+  - Se configura en la matriz de firmas como **responsable alternativo** del paso
+    (Administración › Matriz de firmas › Certificado de calibración › excepción
+    SAM › paso 3 › ✎ › «Responsable alternativo (opcional)» = Metrólogo, «¿De qué
+    unidad el alternativo?» = Misma unidad). `align_frente_k.sql` lo siembra **una
+    sola vez** (`flujo_firma.alternativo_configurado_at`).
+  - **Para quitarlo sin tocar código** (si el IDIC dice que no): en ese mismo paso,
+    «Responsable alternativo» = «Ninguno» y Guardar. Reaplicar los SQL no lo repone.
+  - El metrólogo debe figurar en el **registro de firmas autorizadas** vigente para
+    la magnitud y el laboratorio de la calibración (`met_firmante`). A diferencia del
+    envío, una magnitud que el registro no declara **no** habilita a nadie a emitir.
+    Uno no habilitado recibe 403 con el motivo.
+  - La **revisión del Jefe LMT o su subrogante sigue siendo obligatoria y anterior**:
+    los pasos se firman en orden; el metrólogo no puede emitir mientras el paso
+    pendiente sea el del jefe (403).
+  - Puede emitir también quien elaboró la calibración (coherente con la decisión del
+    14-10 para laboratorios de dos personas): la revisión del Jefe LMT queda entre
+    ambos. Si el IDIC prefiere que emita otro metrólogo, es una regla a añadir.
+  - La firma queda con `via = alternativo` y el rol Metrólogo; el certificado imprime
+    en esa casilla «Metrólogo habilitado para la magnitud (emite)».
+  - Lo prueban `emision-metrologo.spec.ts` y el paso «Emisión por el metrólogo
+    habilitado» de `scripts/verificacion/metrologia-1510.js`.
 - **No se envía** sin matriz que resolver: sin reglas, con error al resolverla, sin
   ningún paso de firma después del ELABORA o con un paso obligatorio sin
   responsables, `enviar` responde 409 con qué falta (si se enviara, nadie podría

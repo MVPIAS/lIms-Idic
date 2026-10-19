@@ -244,6 +244,35 @@ async function main() {
     return `${C.num} · verificación ${C.ver}`;
   });
 
+  await paso("Emisión por el metrólogo habilitado (decisión 18-10, a confirmar con el IDIC): tras la revisión del Jefe LMT; uno no habilitado no", async () => {
+    const ins = { item: "Juego de 4 pesos muertos (emisión por metrólogo)", marca: "No tiene", modelo: "No tiene", serie: "M39-E", idEspecial: "Según identificación del ítem",
+      cap: "(100 a 475) g", res: "--", rango: "(100 a 475) g", clase: "No tiene", cliente: "IDIC, Departamento Químico", solicitante: "Laboratorio Textil",
+      direccion: "Avenida Pedro Montt Nº 2136, Santiago", ot: C.controlM.ot, fechaOt: C.controlM.fechaOt, fechaRecepcion: C.controlM.fechaRecepcion, lugar: "instalaciones", desviacion: "No" };
+    const r = await ok(METRO, "POST", "/metrologia/calibraciones", {
+      procesoCodigo: "ITM03", fecha: "2026-07-24", instrumento: ins, intervaloMeses: 24, patronIds: [C.pF1.id, C.p500.id], motor: { datos: C.datosM, opciones: {} },
+    });
+    const id = r.data.id;
+    await ok(METRO, "POST", `/metrologia/calibraciones/${id}/enviar`);
+    // Nadie emite sin la revisión previa del Jefe LMT: ni el metrólogo habilitado se adelanta.
+    await exigir(403, METRO, "POST", `/metrologia/calibraciones/${id}/firmar`);
+    await exigir(403, METRO, "POST", `/metrologia/calibraciones/${id}/emitir`);
+    await ok(JEFE, "POST", `/metrologia/calibraciones/${id}/firmar`);
+    let d = await ok(METRO, "GET", `/metrologia/calibraciones/${id}`);
+    afirmar(d.estado === "en_firma" && d.paso_pendiente?.emite && d.paso_pendiente.responsables.length >= 2, `pendiente ${JSON.stringify(d.paso_pendiente)}`);
+    // Metrólogo del laboratorio pero no habilitado para la magnitud (masa): 403 con el motivo.
+    const e = await exigir(403, METRO_L, "POST", `/metrologia/calibraciones/${id}/firmar`);
+    afirmar(/registro de firmas autorizadas para la magnitud/.test(msg(e)), msg(e));
+    await exigir(403, SAM, "POST", `/metrologia/calibraciones/${id}/firmar`);
+    const em = await ok(METRO, "POST", `/metrologia/calibraciones/${id}/firmar`);
+    afirmar(/^M-\d{4,}$/.test(em.data.numero), `número ${em.data.numero}`);
+    d = await ok(METRO, "GET", `/metrologia/calibraciones/${id}`);
+    const f3 = d.firmas.find((f) => f.accion !== "ELABORA" && f.via === "alternativo");
+    afirmar(d.estado === "emitida" && d.firmas.length === 3 && f3 && f3.rol_codigo === "METROLOGO", `firmas ${JSON.stringify(d.firmas)}`);
+    const h = (await ok(METRO, "GET", `/metrologia/calibraciones/${id}/html`)).data.html;
+    afirmar(/habilitado para la magnitud \(emite\)/.test(h), "el certificado no dice que emitió el metrólogo habilitado");
+    return `${em.data.numero} emitido por demo.lmt.analista1 · analista2 (longitud) → 403`;
+  });
+
   await paso("Certificado oficial de 2 páginas: un solo número, sin «cumple», textos legales, firmas y departamento", async () => {
     const h = (await ok(METRO, "GET", `/metrologia/calibraciones/${C.cal.id}/html`)).data;
     afirmar(h.sellado, "el HTML no es el sellado");

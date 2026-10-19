@@ -11,6 +11,12 @@
  *   3. Busca a las personas que tienen ese rol allí: unidad_jefe
  *      (titular/subrogante) para roles de jefatura/dirección y usuario_rol
  *      vigente en esa unidad (o sin unidad si el rol es GLOBAL).
+ *   4. Si el paso tiene RESPONSABLE ALTERNATIVO (rol_alternativo_id en su
+ *      nivel_unidad_alternativo), suma a quienes tienen ese rol allí, con vía
+ *      «alternativo» (p. ej. el metrólogo que emite el Certificado de
+ *      Calibración además del Jefe de Departamento). Quitarlo en la matriz lo
+ *      desactiva sin tocar código. Cada módulo puede exigirles más (Metrología
+ *      exige la habilitación por magnitud).
  */
 import { Arbol, NodoUnidad, ancestroDeTipo, cadenaAncestros, esVigente } from "./alcance";
 import { UNIDADES_REFERENCIA, codigoCanonico } from "./rbac.constants";
@@ -37,6 +43,9 @@ export interface ReglaFirma {
   activo: boolean;
   descripcion?: string | null;
   rol: RolFirma;
+  /** Responsable alternativo del paso (otro rol que también puede firmarlo). */
+  rolAlternativo?: RolFirma | null;
+  nivelUnidadAlternativo?: string | null;
 }
 
 export interface JefeUnidad {
@@ -59,7 +68,7 @@ export interface TenenciaRol {
 export interface Responsable {
   usuarioId: string;
   nombre: string;
-  via: "titular" | "subrogante" | "asignacion";
+  via: "titular" | "subrogante" | "asignacion" | "alternativo";
 }
 
 export interface UnidadRef {
@@ -80,6 +89,8 @@ export interface PasoResuelto {
   unidad: UnidadRef | null;
   responsables: Responsable[];
   advertencia: string | null;
+  /** Responsable alternativo configurado en la matriz (rol y unidad donde se busca). */
+  alternativo?: { rol: { id: string; codigo: string; nombre: string }; unidad: UnidadRef | null } | null;
 }
 
 export interface ResolucionFirmas {
@@ -240,6 +251,17 @@ export function resolverFirmas(p: {
         advertencia = `Nadie tiene el rol ${r.rol.codigo} en ${destino.codigo}`;
       }
     }
+    let alternativo: PasoResuelto["alternativo"] = null;
+    if (r.rolAlternativo) {
+      const destinoAlt = unidadParaNivel(p.arbol, unidad?.id ?? null, r.nivelUnidadAlternativo ?? "MISMA", null);
+      alternativo = { rol: { id: r.rolAlternativo.id, codigo: r.rolAlternativo.codigo, nombre: r.rolAlternativo.nombre }, unidad: ref(destinoAlt) };
+      if (destinoAlt) {
+        const vistos = new Set(responsables.map((x) => x.usuarioId));
+        for (const a of responsablesDe(r.rolAlternativo, destinoAlt, p.jefes, p.tenencias, ahora))
+          if (!vistos.has(a.usuarioId)) responsables.push({ ...a, via: "alternativo" });
+        if (responsables.length) advertencia = null;
+      }
+    }
     return {
       id: r.id,
       orden: r.orden,
@@ -251,6 +273,7 @@ export function resolverFirmas(p: {
       unidad: ref(destino),
       responsables,
       advertencia,
+      alternativo,
     };
   });
   const res: ResolucionFirmas = {
