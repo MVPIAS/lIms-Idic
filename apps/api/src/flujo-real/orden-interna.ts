@@ -434,8 +434,10 @@ export class OrdenInternaController extends BaseCrudController {
     const ot = await this.exigirAlcanceOt(dto.otId, req);
     const ensayos = normalizarEnsayos(dto.ensayos);
     const { origen } = await this.validarContenido(tenantDe(req), ot.unidadPrincipal ?? null, dto.destinoLab, ensayos);
+    // El número lo da siempre el correlativo (OI-AAAA-NNNN): no se acepta uno escrito a mano.
+    const { numero: _numero, ...datos } = dto;
     return this.svc.crear(
-      { ...dto, ensayos, ...(dto.origenLab || !origen ? {} : { origenLab: origen }) },
+      { ...datos, ensayos, ...(dto.origenLab || !origen ? {} : { origenLab: origen }) },
       tenantDe(req),
       usuarioDe(req),
     );
