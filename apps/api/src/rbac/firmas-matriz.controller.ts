@@ -35,6 +35,9 @@ const ReglaBase = z.object({
   obligatorio: z.boolean().default(true),
   activo: z.boolean().default(true),
   descripcion: z.string().max(500).nullable().optional(),
+  /** Responsable alternativo del paso: otro rol que también puede firmarlo (null = sin alternativo). */
+  rolAlternativoId: z.string().uuid().nullable().optional(),
+  nivelUnidadAlternativo: z.enum(NIVELES_UNIDAD_FIRMA).exclude(["FIJA"]).nullable().optional(),
 });
 const ReglaCreate = ReglaBase.refine((d) => d.nivelUnidad !== "FIJA" || !!d.unidadDestinoId, {
   message: "nivelUnidad FIJA requiere unidadDestinoId",
@@ -92,12 +95,19 @@ export class FirmasMatrizService {
         },
       }),
     ]);
+    const idsAlt = [...new Set(reglas.map((r) => r.rolAlternativoId).filter((x): x is string => !!x))];
+    const rolesAlt = idsAlt.length
+      ? await this.prisma.rol.findMany({
+          where: { id: { in: idsAlt } },
+          select: { id: true, codigo: true, nombre: true, nivel: true, alcance: true, aliasDe: true },
+        })
+      : [];
     return resolverFirmas({
       tipoDocumento,
       unidadId,
       otInterna: opts.otInterna,
       arbol,
-      reglas: reglas.map((r) => ({ ...r, rol: r.rol })),
+      reglas: reglas.map((r) => ({ ...r, rol: r.rol, rolAlternativo: rolesAlt.find((x) => x.id === r.rolAlternativoId) ?? null })),
       jefes: jefes
         .filter((j) => !j.usuario.deletedAt && j.usuario.estado === "activo")
         .map((j) => ({ unidadId: j.unidadId, usuarioId: j.usuarioId, nombre: j.usuario.nombreCompleto, rol: j.rol })),
@@ -158,11 +168,12 @@ export class FirmasMatrizController {
     // unidadId=null|defecto → solo reglas por defecto
     if (unidadId === "null" || unidadId === "defecto") where.unidadId = null;
     else if (unidadId) where.unidadId = unidadId;
-    const data = await this.prisma.flujoFirma.findMany({
+    const filas = await this.prisma.flujoFirma.findMany({
       where,
       include: INCLUDE_REGLA,
       orderBy: [{ tipoDocumento: "asc" }, { unidadId: { sort: "asc", nulls: "first" } }, { orden: "asc" }],
     });
+    const data = await this.conAlternativo(filas);
     return { data, meta: { total: data.length } };
   }
 
@@ -186,9 +197,12 @@ export class FirmasMatrizController {
         obligatorio: dto.obligatorio,
         activo: dto.activo,
         descripcion: dto.descripcion ?? null,
+        rolAlternativoId: dto.rolAlternativoId ?? null,
+        nivelUnidadAlternativo: dto.rolAlternativoId ? dto.nivelUnidadAlternativo ?? "MISMA" : null,
+        ...(dto.rolAlternativoId !== undefined ? { alternativoConfiguradoAt: new Date() } : {}),
       },
       include: INCLUDE_REGLA,
-    });
+    }).then(async (r) => (await this.conAlternativo([r]))[0]);
   }
 
   @Patch(":id")
@@ -200,11 +214,30 @@ export class FirmasMatrizController {
     const destino = dto.unidadDestinoId !== undefined ? dto.unidadDestinoId : actual.unidadDestinoId;
     if (nivel === "FIJA" && !destino) throw new BadRequestException("nivelUnidad FIJA requiere unidadDestinoId");
     await this.validarRefs(dto, actual.tenantId);
-    return this.prisma.flujoFirma.update({
+    if (dto.rolAlternativoId && !(await this.prisma.rol.findFirst({ where: { id: dto.rolAlternativoId, tenantId: actual.tenantId } })))
+      throw new BadRequestException("rolAlternativoId no existe");
+    // Fijar o quitar el alternativo deja constancia de cuándo: reaplicar los SQL ya no lo repone.
+    const alt =
+      dto.rolAlternativoId !== undefined || dto.nivelUnidadAlternativo !== undefined
+        ? {
+            alternativoConfiguradoAt: new Date(),
+            ...(dto.rolAlternativoId === null ? { nivelUnidadAlternativo: null } : {}),
+            ...(dto.rolAlternativoId && !dto.nivelUnidadAlternativo && !actual.nivelUnidadAlternativo ? { nivelUnidadAlternativo: "MISMA" } : {}),
+          }
+        : {};
+    const r = await this.prisma.flujoFirma.update({
       where: { id },
-      data: { ...dto, updatedAt: new Date() },
+      data: { ...dto, ...alt, updatedAt: new Date() },
       include: INCLUDE_REGLA,
     });
+    return (await this.conAlternativo([r]))[0];
+  }
+
+  /** Añade a cada regla su rol alternativo ({ id, codigo, nombre } o null). */
+  private async conAlternativo<T extends { rolAlternativoId?: string | null }>(reglas: T[]) {
+    const ids = [...new Set(reglas.map((r) => r.rolAlternativoId).filter((x): x is string => !!x))];
+    const roles = ids.length ? await this.prisma.rol.findMany({ where: { id: { in: ids } }, select: { id: true, codigo: true, nombre: true } }) : [];
+    return reglas.map((r) => ({ ...r, rolAlternativo: roles.find((x) => x.id === r.rolAlternativoId) ?? null }));
   }
 
   @Delete(":id")

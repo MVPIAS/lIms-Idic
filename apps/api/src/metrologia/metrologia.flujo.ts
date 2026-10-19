@@ -23,6 +23,12 @@
  *  - La firma ELABORA se registra aparte (orden 0 si la matriz no tiene paso ELABORA) y
  *    nunca cuenta como otro paso: cada paso se identifica por (orden, acción) (hallazgo 4).
  *  - Una calibración emitida no cambia: se reemite (nuevo certificado que la reemplaza).
+ *  - Emisión por el metrólogo (decisión provisional del 18-10-2026, pendiente de
+ *    confirmar con el IDIC): si la matriz da al paso de emisión un responsable
+ *    ALTERNATIVO (rol Metrólogo), lo firma también un metrólogo HABILITADO para la
+ *    magnitud en el registro de firmas (no basta con que el registro no la declare).
+ *    La revisión del Jefe LMT o su subrogante sigue siendo obligatoria y anterior:
+ *    nadie se adelanta. Quitar el alternativo en la matriz lo desactiva.
  */
 export type EstadoCal = "borrador" | "en_revision" | "en_firma" | "emitida" | "reemplazada";
 export type AccionCal = "EDITAR" | "ENVIAR" | "DEVOLVER" | "FIRMAR" | "EMITIR" | "REEMITIR";
@@ -42,6 +48,8 @@ export interface ContextoCal {
   habilitacion?: string | null;
   /** Ya hay una reemisión en curso de esta calibración. */
   reemisionEnCurso?: boolean;
+  /** Por qué el usuario no puede firmar el paso pendiente (si lo sabemos), en lugar del mensaje genérico. */
+  motivoPaso?: string | null;
 }
 
 /** Normaliza estados antiguos («calculada» = borrador guardado). */
@@ -78,7 +86,7 @@ export function motivoRechazo(accion: AccionCal, c: ContextoCal): string | null 
     case "FIRMAR":
     case "EMITIR":
       if (!enCircuito(e)) return "La calibración debe estar enviada a revisión";
-      if (!(c.responsablePaso ?? c.puedeEmitir)) return "No le corresponde firmar el paso pendiente según la matriz de firmas";
+      if (!(c.responsablePaso ?? c.puedeEmitir)) return c.motivoPaso || "No le corresponde firmar el paso pendiente según la matriz de firmas";
       if (accion !== "DEVOLVER" && !c.calculada) return "La calibración no tiene resultado calculado";
       if (accion === "FIRMAR" && (c.ultimoPaso ?? true)) return "El paso pendiente emite el certificado: use «Emitir»";
       if (accion === "EMITIR" && !(c.ultimoPaso ?? true)) return "Faltan firmas anteriores a la emisión";
@@ -102,6 +110,8 @@ export interface PasoFirmaCal {
   orden: number; accion: string; obligatorio: boolean; descripcion?: string | null;
   rol: { codigo: string; nombre: string }; unidad: { codigo: string } | null;
   responsables: { usuarioId: string; nombre: string; via: string }[];
+  /** Responsable alternativo del paso según la matriz (p. ej. Metrólogo en la emisión). */
+  alternativo?: { rol: { codigo: string; nombre: string } } | null;
 }
 export interface FirmaHecha { orden: number; usuarioId: string | null; accion: string }
 
@@ -148,9 +158,18 @@ export function motivoNoEnviable(pasos: PasoFirmaCal[] | null, errorMatriz?: str
  * ¿Puede el usuario firmar el paso? Debe ser responsable; si ya firmó otro paso de jefe en
  * esta calibración, solo si es el único responsable posible (si no, quedaría bloqueada).
  */
-export function puedeFirmarPaso(paso: PasoFirmaCal | null, usuarioId: string, firmas: FirmaHecha[]): boolean {
+export function puedeFirmarPaso(
+  paso: PasoFirmaCal | null,
+  usuarioId: string,
+  firmas: FirmaHecha[],
+  /** Motivo por el que NO está habilitado para firmar como alternativo (null = habilitado). */
+  habilitacionAlternativo: string | null = null,
+): boolean {
   if (!paso) return false;
-  if (!paso.responsables.some((r) => r.usuarioId === usuarioId)) return false;
+  const mias = paso.responsables.filter((r) => r.usuarioId === usuarioId);
+  if (!mias.length) return false;
+  // Responsable SOLO como alternativo (p. ej. metrólogo en la emisión): exige su habilitación.
+  if (mias.every((r) => r.via === "alternativo") && habilitacionAlternativo) return false;
   const yaFirmoJefe = firmas.some((f) => f.usuarioId === usuarioId && f.accion !== "ELABORA");
   return !yaFirmoJefe || paso.responsables.length === 1;
 }
