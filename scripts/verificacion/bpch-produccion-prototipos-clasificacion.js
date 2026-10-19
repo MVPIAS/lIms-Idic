@@ -365,6 +365,25 @@ async function main() {
     afirmar(det.usos.productosPn.some((x) => x.id === C.pAnfo.id), "la clasificación no muestra su uso en Producción Nacional");
     return `${p.producto} → ${p.clasificacion.codigo}`;
   });
+  await paso("B4b · Asociar o cambiar la clasificación después de crear la O/C: con motivo, solo aprobada, queda en el historial (pauta P1 paso 4)", async () => {
+    const ruta = `/bpch/pn/oc/${C.oc.id}/productos/${C.pEmul.id}/clasificacion`;
+    await exigir(403, U.ventas, "POST", ruta, { clasificacionId: C.clas.id, motivo: "Comercial no clasifica productos" });
+    await exigir(403, U.stgoInsp, "POST", ruta, { clasificacionId: C.clas.id, motivo: "Sin permiso de gestión de la O/C" });
+    await exigir(400, U.scc, "POST", ruta, { clasificacionId: C.clas.id, motivo: "" });
+    await rechazo(400, /aprobada/i, U.scc, "POST", ruta, { clasificacionId: C.clasBorrador.id, motivo: "Probar con la clasificación en borrador" });
+    let o = await ok(U.scc, "POST", ruta, { clasificacionId: C.clas.id, motivo: "Clasificación aprobada del caso C1" });
+    let p = o.productos.find((x) => x.id === C.pEmul.id);
+    afirmar(p.clasificacion?.id === C.clas.id, "el producto no quedó con la clasificación aprobada");
+    afirmar(p.historialClasificacion.length === 1 && p.historialClasificacion[0].motivo === "Clasificación aprobada del caso C1" && !p.historialClasificacion[0].anterior,
+      `historial ${JSON.stringify(p.historialClasificacion)}`);
+    await exigir(409, U.scc, "POST", ruta, { clasificacionId: C.clas.id, motivo: "La misma clasificación otra vez" });
+    const det = await ok(U.scc, "GET", `/bpch/clasificaciones/${C.clas.id}`);
+    afirmar(det.usos.productosPn.some((x) => x.id === C.pEmul.id), "la clasificación no muestra su uso en la O/C");
+    o = await ok(U.bpch, "POST", ruta, { clasificacionId: null, motivo: "Se clasificará con la ficha del fabricante" });
+    p = o.productos.find((x) => x.id === C.pEmul.id);
+    afirmar(!p.clasificacion && p.historialClasificacion.length === 2, "quitar la clasificación no quedó en el historial");
+    return `${p.producto}: asociada y quitada, ${p.historialClasificacion.length} cambios en el historial`;
+  });
   await paso("B5 · Programa: la Sucursal Santiago programa lo suyo; Antofagasta no programa Santiago (403); la SCC programa cualquier sucursal", async () => {
     await exigir(403, U.antof, "POST", `/bpch/pn/oc/${C.oc.id}/programa`, { lineas: [{ ocProductoId: C.pAnfo.id, unidadId: C.unidades.SSTGO.id, mes }] });
     await rechazo(400, /no es del mes/i, U.stgo, "POST", `/bpch/pn/oc/${C.oc.id}/programa`, {

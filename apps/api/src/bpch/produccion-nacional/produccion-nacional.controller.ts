@@ -131,7 +131,21 @@ export class ProduccionNacionalController {
     @Body() body: unknown,
     @Req() req: any,
   ) {
-    return this.svc.editarProducto(tenant(req), id, productoId, body);
+    return this.svc.editarProducto(tenant(req), id, productoId, body, usuario(req));
+  }
+
+  /** Asociar, cambiar o quitar la clasificación del producto con motivo (queda en el historial). */
+  @Post("oc/:id/productos/:productoId/clasificacion")
+  @AmbitoUnidad("BPCH")
+  @RequierePermiso("bpch.pn.gestionar")
+  @ApiOperation({ summary: "Asociar o cambiar la clasificación (aprobada) de un producto de la O/C, con motivo e historial" })
+  cambiarClasificacion(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("productoId", ParseUUIDPipe) productoId: string,
+    @Body() body: unknown,
+    @Req() req: any,
+  ) {
+    return this.svc.cambiarClasificacion(tenant(req), id, productoId, usuario(req), body);
   }
 
   @Post("oc/:id/cerrar")
