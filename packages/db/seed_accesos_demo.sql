@@ -33,6 +33,26 @@
 
 BEGIN;
 
+-- --- Rol de PRUEBA con ot.crear y alcance de UN laboratorio --------------------
+-- Planificación y Control (PLANIFICACION) es de alcance global; para probar que
+-- registrar OT y emitir órdenes internas respetan el alcance por laboratorio hace
+-- falta un perfil con ot.crear acotado a su unidad (demo.lqc.planificador). Solo
+-- existe en demostración: se borra con los demás perfiles de prueba
+-- (docs/ACCESOS_DEMO.md, «Antes de producción»).
+INSERT INTO rol (id, tenant_id, codigo, nombre, descripcion, es_sistema, nivel, alcance, orden, created_at)
+SELECT gen_random_uuid(), t.id, 'PLANIFICADOR_LAB', 'Planificador de laboratorio (prueba)',
+       'Rol de PRUEBA (solo demostración): registra OT y emite órdenes internas de su laboratorio.',
+       FALSE, 'OPERATIVO', 'UNIDAD', 43, now()
+  FROM (SELECT id FROM tenant ORDER BY (codigo = 'IDIC') DESC, created_at LIMIT 1) t
+ON CONFLICT (tenant_id, codigo) DO NOTHING;
+
+INSERT INTO rol_permiso (rol_id, permiso_id)
+SELECT r.id, p.id
+  FROM rol r
+  JOIN permiso p ON p.codigo IN ('ot.ver', 'ot.crear', 'muestra.ver', 'cliente.ver', 'resultado.ver')
+ WHERE r.codigo = 'PLANIFICADOR_LAB'
+ON CONFLICT DO NOTHING;
+
 CREATE TEMP TABLE _demo (
   username text PRIMARY KEY,
   nombre   text NOT NULL,
@@ -92,6 +112,12 @@ SELECT 'demo.' || lower(l.codigo) || '.' || x.sufijo,
    ('analista1', 'Analista 1',          'ANALISTA'),
    ('analista2', 'Analista 2',          'ANALISTA')
  ) AS x(sufijo, titulo, rol)
+ON CONFLICT DO NOTHING;
+
+-- Perfil de prueba con ot.crear y alcance de UN laboratorio (LQC).
+INSERT INTO _demo (username, nombre, cargo, rol, unidad)
+SELECT 'demo.lqc.planificador', 'Planificador LQC (prueba)', 'Planificador de laboratorio', 'PLANIFICADOR_LAB', 'LQC'
+ WHERE EXISTS (SELECT 1 FROM unidad WHERE codigo = 'LQC' AND activa)
 ON CONFLICT DO NOTHING;
 
 -- --- BPCH: Certificación, sucursales y Delegación Nº 11 -----------------------

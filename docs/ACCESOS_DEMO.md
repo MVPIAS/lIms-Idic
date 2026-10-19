@@ -44,6 +44,14 @@ Los crea `packages/db/seed_accesos_demo.sql` (etiqueta `demo` en
 | BPCH · Certificación | `demo.scc.inspector1`, `demo.scc.inspector2` | Inspector |
 | BPCH · cada sucursal (6) | `demo.<sucursal>.jefe`, `demo.<sucursal>.inspector` | Jefe de sucursal, Inspector |
 | BPCH · Delegación Nº 11 | `demo.d11.jefe`, `demo.d11.inspector1`, `demo.d11.inspector2` | Jefe, Inspector |
+| Planificador de un laboratorio | `demo.lqc.planificador` (pestaña «Químico») | Planificador de laboratorio (prueba): `ot.crear` con alcance SOLO de LQC |
+
+`demo.lqc.planificador` existe para probar que registrar OT y emitir órdenes
+internas respetan el alcance por laboratorio (Planificación y Control es global):
+registra OT de LQC y emite órdenes internas desde OT de LQC; con una OT de LPN, o al
+registrar una OT para otro laboratorio, recibe 403; no ve OT de otros laboratorios.
+Su rol `PLANIFICADOR_LAB` también es solo de demostración (lo crea esta semilla).
+Lo recorre `scripts/verificacion/frente-k.js`.
 
 `<lab>` = lme, lqc, lpn, lqa, lmb, les, lcc, ltx, lrb, lam, seo, svm, lem, lmt,
 lmte, lnf. `<sucursal>` = sstgo, santof, sseren, scalam, scopiap, siquiqu.
@@ -98,6 +106,33 @@ calibraciones, los del laboratorio propio más los comunes.
 
 La prueba se repite con `scripts/verificacion/matriz-permisos.js` (entra con cada
 perfil y anota el código de respuesta y el número de filas de cada módulo).
+
+## Antes de producción: cómo se borran los perfiles de prueba
+
+En una instalación nueva del IDIC no hace nada: el instalador aplica
+`orden-sql.sh sin-demo`, que no siembra usuarios `demo.*` ni el rol
+`PLANIFICADOR_LAB`. Si la base viene de preproducción (o se sembró en modo `demo`):
+
+1. En el `.env` del servidor, `ACCESOS_DEMO=false` (o quitar la variable) y
+   reiniciar la API: los usuarios de prueba dejan de poder entrar y la pantalla de
+   ingreso deja de mostrarlos.
+2. Retirarlos de la base (una sola transacción; conserva la trazabilidad de lo que
+   hicieron, porque solo se inactivan y se marcan como borrados):
+
+   ```sql
+   BEGIN;
+   DELETE FROM usuario_rol ur USING usuario u WHERE ur.usuario_id = u.id AND u.es_demo;
+   DELETE FROM unidad_jefe j USING usuario u WHERE j.usuario_id = u.id AND u.es_demo;
+   UPDATE met_firmante SET usuario_id = NULL WHERE usuario_id IN (SELECT id FROM usuario WHERE es_demo);
+   UPDATE usuario SET estado = 'inactivo', deleted_at = now(), updated_at = now() WHERE es_demo;
+   -- Rol solo de demostración (perfil con ot.crear de un laboratorio):
+   DELETE FROM rol_permiso rp USING rol r WHERE rp.rol_id = r.id AND r.codigo = 'PLANIFICADOR_LAB';
+   DELETE FROM rol r WHERE r.codigo = 'PLANIFICADOR_LAB'
+     AND NOT EXISTS (SELECT 1 FROM usuario_rol ur WHERE ur.rol_id = r.id);
+   COMMIT;
+   ```
+3. Comprobar: `SELECT count(*) FROM usuario WHERE es_demo AND deleted_at IS NULL;` → 0.
+   Las jefaturas que quedaron sin titular se asignan en Administración › Estructura.
 
 ## Lo que todavía NO se filtra por laboratorio
 

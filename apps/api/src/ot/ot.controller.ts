@@ -498,6 +498,10 @@ export class OtController {
       catElementoIds: dto.catElementoIds,
       catMetodoIds: dto.catMetodoIds,
     });
+    // Quien registra OT con alcance acotado (p. ej. un planificador de un solo
+    // laboratorio) no la crea para un laboratorio ajeno: 403. Los perfiles
+    // globales (Comercial, Planificación y Control) no cambian.
+    await this.alcance.exigirUnidad(req, unidad.id, `el laboratorio ${unidad.codigo}`);
 
     // Si se adjunta una instancia YA existente, debe ser del mismo tenant
     // (si no, se estaría enganchando el flujo de otro tenant a esta OT).
