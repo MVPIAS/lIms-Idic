@@ -18,6 +18,7 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { rut } from "@/lib/format";
 import { ESTADO_CORRELACION, ESTADO_LINEA, ESTADO_OC, MESES, MESES_LARGOS, cant, dia, numeroCl } from "@/lib/bpchProcesos";
+import ClasificacionProducto from "./ClasificacionProducto";
 
 const vacioLinea = { ocProductoId: "", unidadId: "", mes: "", fechaProgramada: "", lugar: "", lote: "", cantidad: "", observaciones: "" };
 
@@ -36,6 +37,7 @@ export default function OcPage() {
   const [modalOc, setModalOc] = useState<"anular" | null>(null);
   const [corrModal, setCorrModal] = useState(false);
   const [producto, setProducto] = useState<{ producto: string; unidadMedida: string; cantidadAutorizada: string } | null>(null);
+  const [clasProducto, setClasProducto] = useState<any>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -170,7 +172,18 @@ export default function OcPage() {
                 return (
                   <tr key={c.ocProductoId}>
                     <td>{c.producto} <small style={{ color: "var(--muted)" }}>({c.unidadMedida})</small></td>
-                    <td>{p?.clasificacion ? <Link href={`/bpch/clasificaciones/${p.clasificacion.id}` as any}>{p.clasificacion.codigo}</Link> : <span style={{ color: "var(--muted)" }}>—</span>}</td>
+                    <td>
+                      {p?.clasificacion ? <Link href={`/bpch/clasificaciones/${p.clasificacion.id}` as any}>{p.clasificacion.codigo}</Link> : <span style={{ color: "var(--muted)" }}>Sin clasificación</span>}
+                      {gestionar && vigente && p && (
+                        <button type="button" className="btn outline sm" style={{ marginLeft: 6 }} onClick={() => setClasProducto(p)}
+                          aria-label={`${p.clasificacion ? "Cambiar" : "Asociar"} la clasificación de ${p.producto}`}>
+                          {p.clasificacion ? "Cambiar" : "Asociar"}
+                        </button>
+                      )}
+                      {!!p?.historialClasificacion?.length && (
+                        <small style={{ display: "block", color: "var(--muted)" }}>{p.historialClasificacion.length} cambio(s) · ver en «{p.clasificacion ? "Cambiar" : "Asociar"}»</small>
+                      )}
+                    </td>
                     <td className="num">{cant(c.autorizado)}</td>
                     <td className="num">{cant(c.planificado)}</td>
                     <td className="num">{cant(c.comprometido)}</td>
@@ -372,6 +385,11 @@ export default function OcPage() {
             <div className="field"><label htmlFor="p-c">Cantidad autorizada <span className="req">*</span></label><input id="p-c" inputMode="decimal" value={producto.cantidadAutorizada} onChange={(e) => setProducto({ ...producto, cantidadAutorizada: e.target.value })} /></div>
           </div>
         </Modal>
+      )}
+
+      {clasProducto && (
+        <ClasificacionProducto ocId={id} producto={clasProducto} onCerrar={() => setClasProducto(null)}
+          onGuardada={(x) => { setOc(x); setClasProducto(null); }} />
       )}
 
       {corrModal && <NuevaCorrelacion oc={oc} onCerrar={() => setCorrModal(false)} onCreada={(c) => router.push(`/bpch/produccion-nacional/correlacion/${c.id}` as any)} />}

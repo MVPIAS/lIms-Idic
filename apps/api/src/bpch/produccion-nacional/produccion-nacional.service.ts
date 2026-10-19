@@ -96,6 +96,13 @@ export const EditarOc = z
   })
   .strict();
 export const EditarProducto = ProductoDto.partial().strict();
+/** Asociar, cambiar o quitar la clasificación de un producto de la O/C después de crearla (con motivo). */
+export const CambiarClasificacion = z
+  .object({
+    clasificacionId: z.string().uuid().nullable(),
+    motivo: z.string().trim().min(5, "Indique el motivo del cambio de clasificación (al menos 5 caracteres).").max(2000),
+  })
+  .strict();
 
 const LineaDto = z
   .object({
@@ -512,7 +519,7 @@ export class ProduccionNacionalService {
 
   async ocDetalle(tenantId: string, id: string) {
     const o = await this.ocFila(tenantId, id);
-    const [productos, lineas, correlaciones] = await Promise.all([
+    const [productos, lineas, correlaciones, historialClas] = await Promise.all([
       this.productosDe(id),
       this.lineasDe(id),
       this.prisma.$queryRawUnsafe<any[]>(
@@ -520,6 +527,7 @@ export class ProduccionNacionalService {
            FROM bpch_pn_correlacion WHERE oc_id = $1::uuid ORDER BY periodo_desde DESC, created_at DESC`,
         id,
       ),
+      this.historialClasificaciones(id),
     ]);
     const lp = lineas.map((l) => this.aLinea(l));
     return {
@@ -541,6 +549,7 @@ export class ProduccionNacionalService {
               numeroOnu: p.clas_onu,
             }
           : null,
+        historialClasificacion: historialClas.filter((h) => h.ocProductoId === p.id),
       })),
       programa: lineas.map((l) => {
         const e = estadoLinea(this.aLinea(l));
@@ -672,11 +681,99 @@ export class ProduccionNacionalService {
     return this.ocDetalle(tenantId, ocId);
   }
 
-  async editarProducto(tenantId: string, ocId: string, productoId: string, body: unknown) {
+  /** Historial de la clasificación de los productos de la O/C (quién, cuándo, de cuál a cuál, motivo). */
+  private async historialClasificaciones(ocId: string) {
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT h.id, h.oc_producto_id, h.motivo, h.created_at, u.nombre_completo AS usuario,
+              ca.codigo AS anterior_codigo, ca.version AS anterior_version, cn.codigo AS nueva_codigo, cn.version AS nueva_version
+         FROM bpch_oc_producto_clasificacion_hist h
+         LEFT JOIN usuario u ON u.id = h.usuario_id
+         LEFT JOIN bpch_clasificacion ca ON ca.id = h.clasificacion_anterior
+         LEFT JOIN bpch_clasificacion cn ON cn.id = h.clasificacion_nueva
+        WHERE h.oc_id = $1::uuid ORDER BY h.created_at`,
+      ocId,
+    );
+    const cod = (c: string | null, v: number | null) => (c ? (Number(v) > 1 ? `${c}-V${v}` : c) : null);
+    return filas.map((h) => ({
+      id: h.id,
+      ocProductoId: h.oc_producto_id,
+      anterior: cod(h.anterior_codigo, h.anterior_version),
+      nueva: cod(h.nueva_codigo, h.nueva_version),
+      motivo: h.motivo,
+      usuario: h.usuario,
+      at: h.created_at,
+    }));
+  }
+
+  /**
+   * Asocia, cambia o quita la clasificación de un producto de la O/C después de
+   * crearla (pauta BPCH, caso P1, paso 4). Solo una clasificación APROBADA (400 si
+   * está en borrador u otro estado), con motivo, y queda en el historial. Mismos
+   * permisos que crear la O/C (los impone el controlador).
+   */
+  async cambiarClasificacion(tenantId: string, ocId: string, productoId: string, usuarioId: string | null, body: unknown) {
+    const d = CambiarClasificacion.parse(body ?? {});
+    const o = await this.ocFila(tenantId, ocId);
+    this.exigirOcVigente(o);
+    const actual = await this.prisma.$queryRawUnsafe<{ clasificacion_id: string | null }[]>(
+      `SELECT clasificacion_id FROM bpch_oc_producto WHERE id = $1::uuid AND oc_id = $2::uuid AND tenant_id = $3::uuid`,
+      productoId,
+      ocId,
+      tenantId,
+    );
+    if (!actual[0]) throw new NotFoundException("Producto no encontrado en esta O/C.");
+    if ((actual[0].clasificacion_id ?? null) === d.clasificacionId)
+      throw new ConflictException(d.clasificacionId ? "El producto ya tiene esa clasificación." : "El producto no tiene clasificación que quitar.");
+    if (d.clasificacionId) await this.clasificaciones.exigirAprobada(tenantId, d.clasificacionId);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE bpch_oc_producto SET clasificacion_id = $3::uuid WHERE id = $1::uuid AND oc_id = $2::uuid`,
+        productoId,
+        ocId,
+        d.clasificacionId,
+      );
+      await this.anotarClasificacion(tx, tenantId, ocId, productoId, actual[0].clasificacion_id, d.clasificacionId, d.motivo, usuarioId);
+    });
+    return this.ocDetalle(tenantId, ocId);
+  }
+
+  private async anotarClasificacion(
+    tx: Pick<PrismaService, "$executeRawUnsafe">,
+    tenantId: string,
+    ocId: string,
+    productoId: string,
+    anterior: string | null,
+    nueva: string | null,
+    motivo: string | null,
+    usuarioId: string | null,
+  ) {
+    await tx.$executeRawUnsafe(
+      `INSERT INTO bpch_oc_producto_clasificacion_hist (tenant_id, oc_id, oc_producto_id, clasificacion_anterior, clasificacion_nueva, motivo, usuario_id)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7::uuid)`,
+      tenantId,
+      ocId,
+      productoId,
+      anterior,
+      nueva,
+      motivo,
+      usuarioId,
+    );
+  }
+
+  async editarProducto(tenantId: string, ocId: string, productoId: string, body: unknown, usuarioId: string | null = null) {
     const p = EditarProducto.parse(body ?? {});
     const o = await this.ocFila(tenantId, ocId);
     this.exigirOcVigente(o);
     await this.validarProducto(tenantId, p);
+    // Un cambio de clasificación por esta vía (sin motivo) también queda en el historial.
+    const previa =
+      p.clasificacionId !== undefined
+        ? await this.prisma.$queryRawUnsafe<{ clasificacion_id: string | null }[]>(
+            `SELECT clasificacion_id FROM bpch_oc_producto WHERE id = $1::uuid AND oc_id = $2::uuid`,
+            productoId,
+            ocId,
+          )
+        : [];
     const cols: Record<string, unknown> = {};
     const tipos: Record<string, string> = { cat_elemento_id: "::uuid", clasificacion_id: "::uuid" };
     if (p.producto !== undefined) cols.producto = p.producto;
@@ -693,6 +790,8 @@ export class ProduccionNacionalService {
         ...s.valores,
       );
       if (n !== 1) throw new NotFoundException("Producto no encontrado en esta O/C.");
+      if (previa[0] && (previa[0].clasificacion_id ?? null) !== (p.clasificacionId ?? null))
+        await this.anotarClasificacion(this.prisma, tenantId, ocId, productoId, previa[0].clasificacion_id, p.clasificacionId ?? null, null, usuarioId);
     }
     return this.ocDetalle(tenantId, ocId);
   }
