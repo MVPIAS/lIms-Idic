@@ -62,7 +62,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/cotizaciones/nueva", titulo: "Nueva cotización", desc: "Con costeo en vivo", icono: "＋", perm: "cotizacion.crear" },
     { href: "/cotizaciones?porVencer=1", titulo: "Cotizaciones por vencer", desc: "Haz seguimiento antes de que caduquen", icono: "⏳", perm: "cotizacion.ver" },
     { href: "/clientes", titulo: "Clientes", desc: "Fichas, contactos y condiciones", icono: "🏢", perm: "cliente.ver" },
-    { href: "/internaciones", titulo: "Internaciones", desc: "Solicitudes de internación en curso", icono: "🛃", perm: "cotizacion.ver" },
+    { href: "/bpch/internaciones", titulo: "Internaciones", desc: "Solicitudes de internación en curso", icono: "🛃", perm: "bpch.internacion.ver" },
     { href: "/crm", titulo: "Oportunidades", desc: "Pipeline comercial", icono: "🎯", perm: "cotizacion.ver" },
   ],
   PLANIFICACION: [

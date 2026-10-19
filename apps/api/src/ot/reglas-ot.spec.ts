@@ -54,10 +54,10 @@ describe("Reglas OT · origen / cobro / OPI pendiente (Comercial R2)", () => {
       expect(validarOrigenOt({ origen: "INTERLABORATORIO", labSolicitanteCcId: "a", centroCostoId: "b", cotizacionId: "c" })).toHaveLength(1);
       expect(validarOrigenOt({ origen: "INTERLABORATORIO", labSolicitanteCcId: "a", centroCostoId: "b" })).toHaveLength(0);
     });
-    it("COTIZACION exige cotizacionId; INTERNACION exige resolución", () => {
+    it("COTIZACION exige cotizacionId; INTERNACION ya no se registra a mano (puerta única)", () => {
       expect(validarOrigenOt({ origen: "COTIZACION" })).toHaveLength(1);
       expect(validarOrigenOt({ origen: "INTERNACION" })).toHaveLength(1);
-      expect(validarOrigenOt({ origen: "INTERNACION", resolucion: "17.798-2026-0158" })).toHaveLength(0);
+      expect(validarOrigenOt({ origen: "INTERNACION", resolucion: "17.798-2026-0158" })[0]).toMatch(/resolución DGMN en Internaciones/);
     });
     it("sin origen no exige nada (compatibilidad)", () => {
       expect(validarOrigenOt({})).toHaveLength(0);

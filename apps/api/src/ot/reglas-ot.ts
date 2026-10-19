@@ -14,6 +14,10 @@
  */
 
 export const ORIGENES_OT = ["COTIZACION", "INTERNACION", "DISPOSICION", "INTERLABORATORIO", "OT_INTERNA"] as const;
+
+/** Por qué «Registrar OT» ya no admite el origen Internación. */
+export const MOTIVO_INTERNACION_PUERTA_UNICA =
+  "La OT de internación no se registra a mano: nace sola al registrar la resolución DGMN en Internaciones (BPCH · Comercial).";
 export type OrigenOt = (typeof ORIGENES_OT)[number];
 
 export const TIPOS_ACEPTACION = ["OPI_RESOLUCION", "OC", "CORREO", "PAGO_ADELANTADO", "DISPOSICION_DIRECTOR"] as const;
@@ -82,7 +86,9 @@ export function validarOrigenOt(d: {
         errores.push("El laboratorio solicitante y el ejecutor deben ser distintos.");
       break;
     case "INTERNACION":
-      if (!d.resolucion?.trim()) errores.push("Origen INTERNACION requiere el Nº de resolución DGMN (resolucion).");
+      // Puerta única: la OT de internación nace al registrar la resolución DGMN
+      // (BPCH · Comercial › Internaciones); las ya creadas con este origen se siguen mostrando.
+      errores.push(MOTIVO_INTERNACION_PUERTA_UNICA);
       break;
     default:
       break;

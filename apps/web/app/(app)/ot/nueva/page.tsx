@@ -14,14 +14,14 @@ import SelectorLaboratorio from "@/components/SelectorLaboratorio";
  *                        cobro y sin OPI queda «OPI pendiente».
  *  · INTERLABORATORIO  → la pide un laboratorio a otro sin OT padre (p. ej.
  *                        calibración de un equipo): SIN cobro, costo por horas.
- *  · INTERNACION       → resolución DGMN (tasa 1,5 % en /internaciones).
+ *  · Internación NO se ofrece: la OT de internación nace sola al registrar la
+ *    resolución DGMN en Internaciones (BPCH · Comercial). La API lo rechaza.
  *  · OT_INTERNA        → OT interna.
  */
 const ORIGENES = [
   { v: "", l: "Alta directa" },
   { v: "DISPOSICION", l: "Disposición del Director (sin OPI previa)" },
   { v: "INTERLABORATORIO", l: "Interlaboratorio (sin cobro)" },
-  { v: "INTERNACION", l: "Internación (resolución DGMN)" },
   { v: "OT_INTERNA", l: "OT interna" },
 ];
 type CC = { id: string; codigo: string; nombre: string; tipo?: string | null };
@@ -69,7 +69,6 @@ export default function NuevaOtPage() {
   const [disposicionFecha, setDisposicionFecha] = useState(hoy());
   const [conCobro, setConCobro] = useState(true);
   const [opiNumero, setOpiNumero] = useState("");
-  const [resolucion, setResolucion] = useState("");
   const [labSolicitante, setLabSolicitante] = useState("");
   const [labEjecutor, setLabEjecutor] = useState("");
   const [horas, setHoras] = useState("");
@@ -123,7 +122,6 @@ export default function NuevaOtPage() {
     if (modo === "nueva" && origen === "DISPOSICION" && !disposicionRef.trim()) { setErrMsg("Indica la referencia de la disposición del Director."); return; }
     if (interlab && (!labSolicitante || !labEjecutor)) { setErrMsg("Indica el laboratorio solicitante y el ejecutor."); return; }
     if (interlab && labSolicitante === labEjecutor) { setErrMsg("El laboratorio solicitante y el ejecutor deben ser distintos."); return; }
-    if (modo === "nueva" && origen === "INTERNACION" && !resolucion.trim()) { setErrMsg("Indica el Nº de resolución DGMN."); return; }
     if (!fechaIngreso || Number.isNaN(new Date(fechaIngreso).getTime())) { setErrMsg("Indica una fecha de ingreso válida."); return; }
     if (lineas.length === 0 && !interlab) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
     if (modo === "nueva" && !labId) { setErrMsg("Elija el laboratorio responsable de la OT: sin él nadie del laboratorio la verá."); return; }
@@ -156,7 +154,6 @@ export default function NuevaOtPage() {
                   ...(origen === "DISPOSICION"
                     ? { disposicionRef: disposicionRef.trim(), disposicionFecha, opiNumero: opiNumero.trim() || undefined }
                     : {}),
-                  ...(origen === "INTERNACION" ? { resolucion: resolucion.trim() } : {}),
                   ...(interlab ? { labSolicitanteCcId: labSolicitante, centroCostoId: labEjecutor } : {}),
                   ...(horas ? { horasHombre: Number(horas) } : {}),
                   ...(costo ? { costoEstimado: Number(costo) } : {}),
@@ -275,9 +272,7 @@ export default function NuevaOtPage() {
                 </p>
               </>
             )}
-            {origen === "INTERNACION" && (
-              <div className="field span-2"><label>Nº resolución DGMN <span className="req">*</span></label><input value={resolucion} maxLength={40} onChange={(e) => setResolucion(e.target.value)} /></div>
-            )}
+            {/* Internación: la OT nace al registrar la resolución DGMN (BPCH · Comercial › Internaciones). */}
             {interlab && (
               <>
                 <div className="field">

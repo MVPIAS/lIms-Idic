@@ -15,6 +15,8 @@ const nextConfig = {
       { source: "/analitos", destination: "/catalogo/analitos", permanent: false },
       { source: "/gran-grupos", destination: "/catalogo/gran-grupos", permanent: false },
       { source: "/grupos", destination: "/catalogo/grupos", permanent: false },
+      // Internaciones: una sola pantalla para BPCH y Comercial (la comercial antigua redirige).
+      { source: "/internaciones", destination: "/bpch/internaciones", permanent: false },
     ];
   },
   async rewrites() {
