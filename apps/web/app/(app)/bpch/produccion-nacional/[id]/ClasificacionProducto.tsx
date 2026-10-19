@@ -78,7 +78,7 @@ export default function ClasificacionProducto({
       acciones={
         <>
           <button type="button" className="btn outline sm" onClick={onCerrar}>Cancelar</button>
-          <button type="button" className="btn primary sm" disabled={busy || !cambia || motivo.trim().length < 5} onClick={guardar}>
+          <button type="button" className="btn primary sm" disabled={busy} onClick={guardar}>
             {busy ? "Guardando…" : sel ? (actual ? "Cambiar clasificación" : "Asociar clasificación") : "Quitar clasificación"}
           </button>
         </>

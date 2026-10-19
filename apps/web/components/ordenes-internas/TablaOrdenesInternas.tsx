@@ -115,15 +115,15 @@ export default function TablaOrdenesInternas({
                   <td style={{ whiteSpace: "nowrap" }}>{fechaHora(o.createdAt)}{o.creadaPor && <small style={{ display: "block", color: "var(--muted)" }}>{o.creadaPor}</small>}</td>
                   <td>
                     <span style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      <button type="button" className="btn outline sm" onClick={() => abrir(o)}>Ver</button>
+                      <button type="button" className="btn outline sm" onClick={() => abrir(o)} aria-label={`Ver la orden interna ${o.numero}`}>Ver</button>
                       {puedeGestionar && o.estado === "abierta" && (
-                        <button type="button" className="btn outline sm" onClick={() => setEditar(o)}>Editar</button>
+                        <button type="button" className="btn outline sm" onClick={() => setEditar(o)} aria-label={`Editar la orden interna ${o.numero}`}>Editar</button>
                       )}
                       {puedeGestionar && sig && (
-                        <button type="button" className="btn outline sm" disabled={ocupado} onClick={() => avanzar(o)}>{sig.boton}</button>
+                        <button type="button" className="btn outline sm" disabled={ocupado} onClick={() => avanzar(o)} aria-label={`${sig.boton}: orden interna ${o.numero}`}>{sig.boton}</button>
                       )}
                       {puedeGestionar && (o.estado === "abierta" || o.estado === "recibida") && (
-                        <button type="button" className="btn ghost-danger sm" onClick={() => { setMotivo(""); setAnular(o); }}>Anular</button>
+                        <button type="button" className="btn ghost-danger sm" onClick={() => { setMotivo(""); setAnular(o); }} aria-label={`Anular la orden interna ${o.numero}`}>Anular</button>
                       )}
                     </span>
                   </td>
