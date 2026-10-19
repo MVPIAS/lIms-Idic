@@ -156,6 +156,14 @@ Una regla = un paso: `(tipoDocumento, unidadId|null, orden, accion, rol, nivelUn
 - `accion` ∈ **ELABORA**, REVISA, APRUEBA, FIRMA, OFICIALIZA, VB.
 - `nivelUnidad` (dónde se busca al firmante, relativo a la unidad que emite): MISMA · SECCION / DEPARTAMENTO (ancestro de ese tipo) · DIRECCION (DIR) · CALIDAD (DGC) · COMERCIAL (DCO) · **FIJA** (= `unidadDestinoId`).
 
+**Responsable alternativo** (`rol_alternativo_id`, `nivel_unidad_alternativo`): un paso puede
+admitir además otro rol, buscado en su propio nivel (MISMA, SECCION, DEPARTAMENTO, DIRECCION,
+CALIDAD, COMERCIAL). Sus personas se suman a los responsables con vía `alternativo`. Se edita en
+Administración › Matriz de firmas › ✎ del paso › «Responsable alternativo (opcional)»; «Ninguno» lo
+quita sin tocar código y `alternativo_configurado_at` impide que reaplicar los SQL lo reponga.
+Sembrado una sola vez: Certificado de Calibración (SAM), paso 3, alternativo Metrólogo (misma
+unidad) — decisión provisional, ver docs/FLUJO_METROLOGIA.md.
+
 **Resolución** (`GET /firmas-matriz/resolver`): se sube desde la unidad por `padre_id`; el primer nivel que tenga reglas propias para ese tipo gana (override); si ninguno, se usan las reglas por defecto (`unidad_id NULL`). Para cada paso se resuelve la unidad concreta y los responsables: `unidad_jefe` (titular, luego subrogante) si el rol es de jefatura/dirección, más quienes tengan ese rol (o un alias) asignado y vigente en esa unidad (o sin unidad, si el rol es GLOBAL).
 
 ### 4.1 Reglas por defecto sembradas
@@ -166,7 +174,7 @@ Una regla = un paso: `(tipoDocumento, unidadId|null, orden, accion, rol, nivelUn
 | INFORME_ENSAYO | **LME** | 1 FIRMA JEFE_LAB (MISMA) → 2 OFICIALIZA JEFE_DEPTO (DEPARTAMENTO) → 3 FIRMA CALIDAD (CALIDAD = DGC) |
 | IVC | defecto | igual que INFORME_ENSAYO |
 | INFORME_TECNICO | defecto | 1 FIRMA JEFE_LAB (MISMA) → 2 OFICIALIZA JEFE_DEPTO (DEPARTAMENTO) |
-| CERTIFICADO_CALIBRACION | **SAM** (aplica a LMT, LMTE, LNF, LCAD) | 1 ELABORA METROLOGO (MISMA) → 2 FIRMA JEFE_LAB (MISMA, «revisa y firma») → 3 FIRMA JEFE_DEPTO (DEPARTAMENTO = DSA) |
+| CERTIFICADO_CALIBRACION | **SAM** (aplica a LMT, LMTE, LNF, LCAD) | 1 ELABORA METROLOGO (MISMA) → 2 FIRMA JEFE_LAB (MISMA, «revisa y firma») → 3 FIRMA JEFE_DEPTO (DEPARTAMENTO = DSA) **o, como alternativo, METROLOGO habilitado (MISMA)** |
 | INFORME_INSPECCION | defecto | 1 FIRMA JEFE_LAB (MISMA = Jefe de Sucursal) |
 | CERTIFICADO_CONFORMIDAD | defecto | 1 FIRMA JEFE_SECCION (FIJA = SCC) |
 | INFORME_INCUMPLIMIENTO | defecto | 1 FIRMA JEFE_SECCION (FIJA = SCC) → 2 VB DIRECTOR (DIRECCION, **opcional**) |

@@ -84,6 +84,16 @@ comprometido (OT en curso) · ejecutado (OT cerrada) · saldo · % ejecutado. El
 4. «Emitir informe técnico» sella el documento (`ITPN-AAAA-NNNN`, SHA-256, HTML y PDF) y bloquea la
    correlación; «Remitir a DCO» registra quién y cuándo. Comercial (DCO) lee Producción Nacional.
 
+**Clasificación de un producto después de crear la O/C** (pauta de pruebas BPCH, caso P1, paso 4).
+En la ficha de la O/C, columna «Clasificación», botón «Asociar» (o «Cambiar» si ya tiene): mismos
+permisos que crear la O/C (`bpch.pn.gestionar`, ámbito BPCH) y la O/C vigente. Solo se elige una
+clasificación **aprobada**: las de borrador o registradas aparecen en el desplegable pero no se
+pueden elegir, y la API las rechaza (400). Exige motivo (mínimo 5 caracteres); asociar, cambiar o
+quitar queda en `bpch_oc_producto_clasificacion_hist` (quién, cuándo, antes, después, motivo) y se
+ve en el mismo diálogo; la clasificación muestra su uso (O/C y producto). API:
+`POST /bpch/pn/oc/:id/productos/:productoId/clasificacion { clasificacionId | null, motivo }`.
+El `PATCH` del producto que cambie la clasificación también deja constancia (sin motivo).
+
 ## 2. Prototipos
 
 ```

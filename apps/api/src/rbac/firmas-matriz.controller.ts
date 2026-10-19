@@ -184,6 +184,8 @@ export class FirmasMatrizController {
     const tenantId = tenantDe(req) ?? (await this.prisma.tenant.findFirst())?.id;
     if (!tenantId) throw new BadRequestException("No hay tenant");
     await this.validarRefs(dto, tenantId);
+    if (dto.rolAlternativoId && !(await this.prisma.rol.findFirst({ where: { id: dto.rolAlternativoId, tenantId } })))
+      throw new BadRequestException("rolAlternativoId no existe");
     return this.prisma.flujoFirma.create({
       data: {
         tenantId,

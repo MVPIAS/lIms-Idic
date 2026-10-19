@@ -170,3 +170,27 @@ Integración con el frente de firma y cierre (docs/FLUJO_FIRMA_CIERRE.md):
   chip «Por vencer (7 días)».
 - Las pantallas que elegían OT de una lista fija (emitir informe) usan el
   buscador de OT; las demás piden `GET /ot?limit=200`.
+
+## Órdenes internas (derivación a otro laboratorio)
+
+Una orden interna deriva parte de una OT a OTRO laboratorio con los ensayos del
+catálogo que le corresponden (`orden_interna`, `align_frente_k.sql`).
+
+- **Dónde**: ficha de la OT › pestaña «Órdenes internas» › «＋ Nueva orden
+  interna»; desde «Muestras», en una muestra que pide otros laboratorios y aún
+  no tiene orden, botón «Emitir orden interna» (abre el formulario con ese
+  laboratorio); y Laboratorio › Órdenes internas › «＋ Nueva orden interna»
+  (primero se elige la OT).
+- **Quién**: emite, edita, avanza y anula quien tiene `ot.crear` y la OT de
+  origen en su alcance (403 si no). Ven las órdenes, con `ot.ver`, quienes tienen
+  en su alcance la OT de origen o el laboratorio de destino.
+- **Destino y ensayos**: el destino es un laboratorio del catálogo
+  (`cat_familia`, enlazado con su unidad por CODSUCDEL) con ensayos vigentes y
+  distinto del responsable de la OT; los ensayos deben ser de ese laboratorio
+  (400). Los que ya figuran en la OT se proponen primero («en la OT»).
+- **Ciclo**: abierta (se edita y se puede borrar) → recibida → cerrada. Recibida
+  ya no cambia de contenido (409): solo se cierra o se anula. Anular pide motivo
+  (mínimo 5 caracteres) y una anulada deja de dar acceso a la OT al laboratorio
+  de destino. Todo queda en `orden_interna_historial`.
+- **Alta de OT**: `POST /ot` exige que el laboratorio responsable esté en el
+  alcance de quien la registra (los perfiles globales no cambian).
