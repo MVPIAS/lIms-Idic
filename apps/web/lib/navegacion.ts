@@ -55,7 +55,8 @@ export const NAV: SeccionNav[] = [
       { href: "/crm", label: "Oportunidades (CRM)", icon: "🎯", perm: "cotizacion.ver", claves: "crm pipeline" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "💲", perm: "cotizacion.ver" },
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
-      { href: "/internaciones", label: "Internaciones", icon: "🛃", perm: ["cotizacion.ver", "ot.ver"], ambito: ["BPCH", "DCO"], claves: "aduana importacion sdbpch" },
+      // Misma pantalla que «BPCH · Certificación › Internaciones» (puerta única): Comercial registra la resolución y la tasa.
+      { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: ["BPCH", "DCO"], claves: "aduana importacion sdbpch resolucion dgmn tasa" },
       { href: "/listas-precio", label: "Listas de precio", icon: "≣", perm: "cotizacion.ver" },
       { href: "/lista-precio-items", label: "Ítems de lista", icon: "🏷", perm: "cotizacion.ver" },
       { href: "/centros-costo", label: "Centros de costo", icon: "🏦", perm: "factura.ver" },
