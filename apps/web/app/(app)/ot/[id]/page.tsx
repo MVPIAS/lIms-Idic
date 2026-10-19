@@ -12,6 +12,7 @@ import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
 import RegistroMuestras from "./_components/RegistroMuestras";
 import OrdenesInternasOt from "./_components/OrdenesInternasOt";
+import FotosOt from "./_components/FotosOt";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
 
@@ -81,7 +82,7 @@ export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestras" | "ordenes" | "resultados" | "informe" | "flujo" | "historial">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestras" | "ordenes" | "resultados" | "fotos" | "informe" | "flujo" | "historial">("cabecera");
   /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
   const [destinoOi, setDestinoOi] = useState<string | null>(null);
   const { puede } = usePermisos();
@@ -288,6 +289,7 @@ export default function ExpedientePage() {
             {tabBtn("muestras", `Muestras (${muestras.length})`)}
             {tabBtn("ordenes", "Órdenes internas")}
             {tabBtn("resultados", "Resultados")}
+            {puede(["resultado.ver", "certificado.emitir"]) && tabBtn("fotos", "Fotos")}
             {tabBtn("informe", "Informe y cierre")}
             {tabBtn("flujo", `Flujo${tieneFlujo ? ` (${tareas.length})` : ""}`)}
             {tabBtn("historial", "Historial")}
@@ -385,9 +387,11 @@ export default function ExpedientePage() {
                 <div className="toolbar" style={{ margin: 0 }}>
                   {puede("resultado.ver") && <Link href={`/ot/${id}/calculos` as any} className="btn outline sm">Planilla de registros y cálculos</Link>}
                   {puede("costo_real.ver") && <Link href={`/ot/${id}/costos` as any} className="btn outline sm">Planilla de costos reales</Link>}
+                  {puede(["resultado.ver", "certificado.emitir"]) && <button type="button" className="btn outline sm" onClick={() => setTab("fotos")}>Fotos del anexo</button>}
                 </div>
               </div>
             )}
+            {tab === "fotos" && typeof id === "string" && <FotosOt otId={id} otEstado={ot?.estado} />}
             {/* Fecha de compromiso, documentos (firma y entrega) y cierre de la OT. */}
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}
             {tab === "flujo" && (
