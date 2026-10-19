@@ -107,7 +107,7 @@ export default function FormOrdenInterna({
       acciones={
         <>
           <button type="button" className="btn outline sm" onClick={onCerrar}>Cancelar</button>
-          <button type="button" className="btn primary sm" disabled={guardando || !destino || !elegidos.size} onClick={guardar}>
+          <button type="button" className="btn primary sm" disabled={guardando} onClick={guardar}>
             {guardando ? "Guardando…" : orden ? "Guardar cambios" : "Emitir orden interna"}
           </button>
         </>
