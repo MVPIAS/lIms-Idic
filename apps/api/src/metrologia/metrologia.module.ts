@@ -31,6 +31,11 @@ import {
   pasoPendiente, pasosSinResponsable,
   plantillaVacia, puedeFirmarPaso, type AccionCal, type ContextoCal, type FirmaHecha, type PasoFirmaCal,
 } from "./metrologia.flujo";
+import { calibracionesDeOt, instrumentosDeOt } from "./metrologia-ot.datos";
+import {
+  correlativoDe, formatearNumero, formatoValido, instrumentoDesdeOt, motivoCalibrar, pasosFicha, siguienteCorrelativo,
+} from "./metrologia-ot.reglas";
+import { MetrologiaOtController, MetrologiaOtService } from "./metrologia-ot.controller";
 import {
   avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, motivoNoEmiteMetrologo, nuevoCodigoVerificacion, numeroCertificado,
   revisarPatrones, uCertificada, type FilaCmc, type Firmante,
@@ -74,6 +79,8 @@ const InstrumentoSchema = z.object({
 }).strip();
 const CrearSchema = z.object({
   procesoCodigo: z.string().min(2),
+  /** Ítem (instrumento) de la OT del que nace la calibración: obligatorio al crear (EP-04 P3.1). */
+  otInstrumentoId: z.string().uuid().nullish(),
   patronId: z.string().uuid().nullish(),
   /** Patrones usados (máximo 3) del maestro: se bloquea si alguno está vencido a la fecha de calibración. */
   patronIds: z.array(z.string().uuid()).max(3).default([]),
@@ -495,24 +502,124 @@ export class MetrologiaController {
   @Get("numeracion")
   @RequierePermiso("metrologia.ver")
   async numeracion(@Req() req: any) {
-    const data = await prisma.$queryRawUnsafe<any[]>(`SELECT prefijo, ultimo, relleno, updated_at FROM met_numeracion WHERE tenant_id = $1::uuid ORDER BY prefijo`, tenantId(req));
-    return { data };
+    const t = tenantId(req);
+    const data = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT n.prefijo, n.ultimo, n.relleno, n.formato, n.anual, n.anio, n.updated_at,
+              COALESCE((SELECT array_agg(p.codigo ORDER BY p.codigo) FROM met_proceso p WHERE p.prefijo_certificado = n.prefijo AND p.activo), '{}') AS procesos
+         FROM met_numeracion n WHERE n.tenant_id = $1::uuid ORDER BY n.prefijo`, t);
+    const anio = Number(hoyChile().slice(0, 4));
+    return {
+      data: data.map((n) => {
+        const sig = siguienteCorrelativo({ ultimo: Number(n.ultimo), anual: n.anual, anio: n.anio }, anio);
+        return { ...n, proximo: formatearNumero(n.formato, n.prefijo, sig.n, Number(n.relleno), sig.anio ?? anio) };
+      }),
+    };
   }
 
-  /** Fija el último número de un prefijo (puesta en marcha): no puede quedar por debajo de lo ya emitido en el LIMS. */
+  /** Mayor correlativo ya emitido en el LIMS con ese prefijo y formato (en los anuales, del año en curso). */
+  private async maxEmitido(t: string, prefijo: string, formato: string, anio: number | null): Promise<number> {
+    const nums = await prisma.$queryRawUnsafe<{ n: string }[]>(
+      `SELECT numero_certificado AS n FROM met_calibracion WHERE tenant_id = $1::uuid AND numero_certificado LIKE $2 AND deleted_at IS NULL`,
+      t, `${prefijo}%`);
+    return nums.reduce((m, x) => Math.max(m, correlativoDe(x.n, formato, prefijo, anio) ?? 0), 0);
+  }
+
+  /**
+   * Configura un prefijo (puesta en marcha): último número, ceros, formato y reinicio anual.
+   * El último número no puede quedar por debajo de lo ya emitido en el LIMS.
+   */
   @Put("numeracion/:prefijo")
   @RequierePermiso("metrologia.config")
   async fijarNumeracion(@Param("prefijo") prefijo: string, @Body() body: unknown, @Req() req: any) {
-    const d = z.object({ ultimo: z.coerce.number().int().min(0).max(9_999_999) }).parse(body);
+    const d = NumeracionSchema.partial({ formato: true, relleno: true, anual: true }).parse(body);
     const t = tenantId(req);
     if (!/^[A-Z]{1,6}$/.test(prefijo)) throw new BadRequestException("Prefijo no válido");
-    const max = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT COALESCE(MAX(NULLIF(regexp_replace(numero_certificado, '^[A-Z]+-', ''), '')::int), 0) AS n
-         FROM met_calibracion WHERE tenant_id = $1::uuid AND numero_certificado ~ ('^' || $2 || '-[0-9]+$')`, t, prefijo);
-    if (d.ultimo < Number(max[0]?.n ?? 0)) throw new ConflictException(`Ya se emitió el ${prefijo}-${max[0].n} en el LIMS: el último número no puede ser menor`);
-    const n = await prisma.$executeRawUnsafe(`UPDATE met_numeracion SET ultimo = $3, updated_at = now() WHERE tenant_id = $1::uuid AND prefijo = $2`, t, prefijo, d.ultimo);
-    if (!n) throw new NotFoundException(`Prefijo ${prefijo} no configurado`);
-    return { data: { prefijo, ultimo: d.ultimo } };
+    const act = await prisma.$queryRawUnsafe<any[]>(`SELECT formato, relleno, anual, anio FROM met_numeracion WHERE tenant_id = $1::uuid AND prefijo = $2`, t, prefijo);
+    if (!act.length) throw new NotFoundException(`Prefijo ${prefijo} no configurado`);
+    const formato = d.formato ?? act[0].formato;
+    if (!formatoValido(formato)) throw new BadRequestException("Formato no válido: debe llevar {N} y solo {P}, {N}, {AA}, {AAAA}, letras, números y . / - _");
+    const anual = d.anual ?? act[0].anual;
+    const anio = anual ? (act[0].anio ?? Number(hoyChile().slice(0, 4))) : null;
+    const max = await this.maxEmitido(t, prefijo, formato, anio);
+    if (d.ultimo < max) throw new ConflictException(`Ya se emitió el ${formatearNumero(formato, prefijo, max, d.relleno ?? act[0].relleno, anio)} en el LIMS: el último número no puede ser menor`);
+    await prisma.$executeRawUnsafe(
+      `UPDATE met_numeracion SET ultimo = $3, formato = $4, relleno = $5, anual = $6, anio = $7, updated_at = now() WHERE tenant_id = $1::uuid AND prefijo = $2`,
+      t, prefijo, d.ultimo, formato, d.relleno ?? act[0].relleno, anual, anio);
+    return { data: { prefijo, ultimo: d.ultimo, formato, anual } };
+  }
+
+  /** Nuevo prefijo de numeración (p. ej. HT- cuando exista el proceso de termohigrómetros). */
+  @Post("numeracion")
+  @RequierePermiso("metrologia.config")
+  async crearNumeracion(@Body() body: unknown, @Req() req: any) {
+    const d = NumeracionSchema.extend({ prefijo: z.string().regex(/^[A-Z]{1,6}$/, "Prefijo: 1 a 6 letras mayúsculas") }).parse(body);
+    if (!formatoValido(d.formato)) throw new BadRequestException("Formato no válido: debe llevar {N} y solo {P}, {N}, {AA}, {AAAA}, letras, números y . / - _");
+    const n = await prisma.$executeRawUnsafe(
+      `INSERT INTO met_numeracion (tenant_id, prefijo, ultimo, relleno, formato, anual, anio) VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (tenant_id, prefijo) DO NOTHING`,
+      tenantId(req), d.prefijo, d.ultimo, d.relleno, d.formato, d.anual, d.anual ? Number(hoyChile().slice(0, 4)) : null);
+    if (!n) throw new ConflictException(`El prefijo ${d.prefijo} ya existe`);
+    return { data: { prefijo: d.prefijo } };
+  }
+
+  /** Prefijo del certificado de un proceso (null = sin prefijo: sale con el código interno CAL-). */
+  @Put("procesos/:codigo/prefijo")
+  @RequierePermiso("metrologia.config")
+  async prefijoProceso(@Param("codigo") codigo: string, @Body() body: unknown, @Req() req: any) {
+    const d = z.object({ prefijo: z.string().regex(/^[A-Z]{1,6}$/).nullable() }).parse(body);
+    if (d.prefijo) {
+      const ex = await prisma.$queryRawUnsafe<any[]>(`SELECT 1 FROM met_numeracion WHERE tenant_id = $1::uuid AND prefijo = $2`, tenantId(req), d.prefijo);
+      if (!ex.length) throw new BadRequestException(`El prefijo ${d.prefijo} no está configurado en la numeración`);
+    }
+    const n = await prisma.$executeRawUnsafe(`UPDATE met_proceso SET prefijo_certificado = $2 WHERE codigo = $1`, codigo, d.prefijo);
+    if (!n) throw new NotFoundException(`Proceso ${codigo} no encontrado`);
+    return { data: { codigo, prefijo: d.prefijo } };
+  }
+
+  /**
+   * Instrumentos de las OT de los laboratorios del usuario que esperan su calibración
+   * (por recibir, o recibidos y calibrables sin calibración): entrada a «Calibrar».
+   */
+  @Get("instrumentos")
+  @RequierePermiso("metrologia.ver")
+  async instrumentosPendientes(@Req() req: any) {
+    const t = tenantId(req);
+    const filtro = await this.alcance.filtroUnidades(req);
+    const params: any[] = [t];
+    let where = `i.tenant_id = $1::uuid AND o.estado NOT IN ('cerrada', 'anulada')
+                 AND (i.estado = 'por_recibir' OR (i.estado = 'recibido' AND NOT EXISTS (
+                      SELECT 1 FROM met_calibracion c WHERE c.ot_instrumento_id = i.id AND c.deleted_at IS NULL AND c.estado <> 'reemplazada')))`;
+    if (filtro) { params.push(filtro); where += ` AND o.unidad_principal = ANY($${params.length}::uuid[])`; }
+    const data = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT i.id, i.ot_id, o.codigo AS ot_codigo, i.numero, i.descripcion, i.marca, i.modelo, i.serie, i.estado, i.proceso_codigo,
+              i.metrologo_id, um.nombre_completo AS metrologo_nombre, to_char(i.fecha_prevista, 'YYYY-MM-DD') AS fecha_prevista,
+              i.recibido_at, u.codigo AS laboratorio, to_char(o.fecha_compromiso, 'YYYY-MM-DD') AS termino_previsto
+         FROM met_ot_instrumento i JOIN orden_trabajo o ON o.id = i.ot_id
+         LEFT JOIN unidad u ON u.id = o.unidad_principal
+         LEFT JOIN usuario um ON um.id = i.metrologo_id
+        WHERE ${where}
+        ORDER BY (i.metrologo_id = $${params.length + 1}::uuid) DESC NULLS LAST, i.fecha_prevista NULLS LAST, o.codigo, i.numero
+        LIMIT 300`, ...params, req.user?.sub ?? null);
+    return { data: data.map((x) => ({ ...x, mio: !!x.metrologo_id && x.metrologo_id === req.user?.sub })) };
+  }
+
+  /** Calibración anterior emitida del mismo instrumento (serie o identificación) y proceso: error normalizado informativo. */
+  @Get("calibraciones/:id/anterior")
+  @RequierePermiso("metrologia.ver")
+  async anterior(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const cal = await this.cargar(id, req);
+    const serie = String(cal.instrumento?.serie ?? "").trim(), idEsp = String(cal.instrumento?.idEspecial ?? "").trim();
+    const sinDato = (s: string) => !s || /^(s\/s|no tiene|--|-)$/i.test(s);
+    if (sinDato(serie) && sinDato(idEsp)) return { data: null, motivo: "El instrumento no tiene número de serie ni identificación para buscar su calibración anterior." };
+    const rows = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT c.id, c.numero_certificado, c.emitido_at, c.fecha_calibracion
+         FROM met_calibracion c
+        WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL AND c.id <> $2::uuid AND c.proceso_id = $3::uuid
+          AND c.estado IN ('emitida', 'reemplazada') AND c.created_at < $4
+          AND (($5 <> '' AND c.instrumento->>'serie' = $5) OR ($6 <> '' AND c.instrumento->>'idEspecial' = $6))
+        ORDER BY c.emitido_at DESC NULLS LAST LIMIT 1`,
+      tenantId(req), id, cal.proceso_id, cal.created_at, sinDato(serie) ? "" : serie, sinDato(idEsp) ? "" : idEsp);
+    return { data: rows[0] ?? null, motivo: rows.length ? null : "Sin calibración anterior en el LIMS." };
   }
 
   /** Parámetros del certificado: nombre del departamento (y de dónde sale). */
@@ -540,6 +647,10 @@ export class MetrologiaController {
     const data = await prisma.$queryRawUnsafe<any[]>(
       `SELECT c.id, c.codigo, c.numero_certificado, c.estado, c.u_max, c.u_cert, c.motor, c.created_at, c.emitido_at, c.fecha_calibracion,
               c.created_by, c.devuelto_motivo, c.unidad_id, (c.resumen IS NOT NULL OR c.u_max IS NOT NULL) AS calculada,
+              c.ot_id, o.codigo AS ot_codigo, it.numero AS instrumento_numero, c.entregado_at,
+              CASE WHEN o.id IS NULL THEN NULL
+                   ELSE COALESCE(o.origen_trabajo, CASE WHEN o.cotizacion_id IS NOT NULL THEN 'COTIZACION' ELSE 'DIRECTA' END) END AS origen, um.nombre_completo AS metrologo_nombre,
+              to_char(o.fecha_compromiso, 'YYYY-MM-DD') AS termino_previsto,
               pr.codigo AS proceso, pr.nombre AS proceso_nombre, m.codigo AS magnitud, m.unidad, un.codigo AS laboratorio,
               c.instrumento->>'item' AS instrumento, c.instrumento->>'cliente' AS cliente,
               ua.nombre_completo AS autor_nombre, r.numero_certificado AS reemplaza_numero,
@@ -550,6 +661,9 @@ export class MetrologiaController {
          LEFT JOIN unidad un ON un.id = c.unidad_id
          LEFT JOIN usuario ua ON ua.id = c.created_by
          LEFT JOIN met_calibracion r ON r.id = c.reemplaza_id
+         LEFT JOIN orden_trabajo o ON o.id = c.ot_id
+         LEFT JOIN met_ot_instrumento it ON it.id = c.ot_instrumento_id
+         LEFT JOIN usuario um ON um.id = it.metrologo_id
         WHERE ${where}
         ORDER BY c.created_at DESC LIMIT $2`, ...params);
     const ctxs = await this.contextos(req, data);
@@ -573,8 +687,14 @@ export class MetrologiaController {
               m.codigo AS magnitud, m.nombre AS magnitud_nombre, m.unidad, m.decimales, un.codigo AS laboratorio, un.nombre AS laboratorio_nombre,
               ua.nombre_completo AS autor_nombre, ue.nombre_completo AS emisor_nombre, r.numero_certificado AS reemplaza_numero,
               (SELECT x.numero_certificado FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) AS reemplazada_por,
-              EXISTS (SELECT 1 FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.deleted_at IS NULL AND x.estado <> 'reemplazada') AS reemision_en_curso
+              EXISTS (SELECT 1 FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.deleted_at IS NULL AND x.estado <> 'reemplazada') AS reemision_en_curso,
+              o.codigo AS ot_codigo, o.estado AS ot_estado, it.numero AS instrumento_numero, it.estado AS instrumento_estado,
+              it.recibido_at AS instrumento_recibido_at, it.etiqueta AS instrumento_etiqueta, it.ubicacion AS instrumento_ubicacion,
+              it.metrologo_id AS instrumento_metrologo_id, ue2.nombre_completo AS entregado_por_nombre
          FROM met_calibracion c JOIN met_proceso pr ON pr.id = c.proceso_id JOIN met_magnitud m ON m.id = pr.magnitud_id
+         LEFT JOIN orden_trabajo o ON o.id = c.ot_id
+         LEFT JOIN met_ot_instrumento it ON it.id = c.ot_instrumento_id
+         LEFT JOIN usuario ue2 ON ue2.id = c.entregado_por
          LEFT JOIN unidad un ON un.id = c.unidad_id
          LEFT JOIN usuario ua ON ua.id = c.created_by
          LEFT JOIN usuario ue ON ue.id = c.emitido_by
@@ -608,6 +728,11 @@ export class MetrologiaController {
     const { documento_html, ...resto } = cal;
     return {
       ...resto, estado: estadoDe(cal.estado), calculada, puntos, eventos, es_mio: cal.created_by === req.user?.sub,
+      // Barra de 6 pasos de la ficha (maqueta de Metrología), deducida del estado.
+      barra: pasosFicha({
+        estado: cal.estado, calculada, entregado: !!cal.entregado_at, devuelta: estadoDe(cal.estado) === "borrador" && !!cal.devuelto_motivo,
+        recibido: !cal.ot_instrumento_id || !!cal.instrumento_recibido_at,
+      }),
       firmas: cx.firmas, paso_pendiente: cx.pendiente, pasos_sin_responsable: cx.sinResponsable,
       avisos: avisosFechas({ fechaOt: cal.instrumento?.fechaOt, fechaRecepcion: cal.instrumento?.fechaRecepcion, fechaCalibracion: fechaIso(cal.fecha_calibracion) }),
       acciones: accionesDisponibles(cx.ctx), __ctx: cx.ctx,
@@ -638,26 +763,47 @@ export class MetrologiaController {
   async crear(@Body() body: unknown, @Req() req: any) {
     const t = tenantId(req);
     const d = CrearSchema.parse(body);
+    // EP-04 P3.1: no hay calibración suelta. Nace del ítem RECIBIDO de una OT y hereda
+    // la OT, el cliente, las fechas, el instrumento y el proceso (IT) del ítem.
+    if (!d.otInstrumentoId)
+      throw new BadRequestException("La calibración se abre desde el instrumento recibido de una OT (OT › Instrumentos › Calibrar): indique otInstrumentoId.");
+    const origen = await this.origenOt(req, t, d.otInstrumentoId);
+    const noCalibra = motivoCalibrar({ ...origen.item, otEstado: origen.ot.estado }, await calibracionesDeOt(prisma, origen.ot.id));
+    if (noCalibra) throw new ConflictException(noCalibra);
+    if (origen.item.procesoCodigo && origen.item.procesoCodigo !== d.procesoCodigo)
+      throw new BadRequestException(`El proceso viene del ítem de la OT (${origen.item.procesoCodigo}); solo la jefatura lo cambia en el ítem antes de recibirlo.`);
     const proc = await cargarProceso(d.procesoCodigo);
-    const unidadId = await this.unidadDeCalibracion(req, t, proc, d.laboratorio);
+    if (proc.laboratorio && proc.laboratorio !== origen.ot.laboratorio)
+      throw new BadRequestException(`El proceso ${proc.codigo} es del ${proc.laboratorio}; la OT ${origen.ot.codigo} es del ${origen.ot.laboratorio}.`);
+    const unidadId = await this.unidadDeCalibracion(req, t, proc, origen.ot.laboratorio);
     const fecha = fechaCalibracion(d.fecha);
     const pat = await this.patronesDe(t, d, fecha);
     const calc = await this.calcularDto(proc, d, fecha);
+    const instrumento = instrumentoDesdeOt(d.instrumento, origen.item, origen.ot);
 
     for (let intento = 0; ; intento++) {
       const codigo = await this.siguienteCodigo(t, fecha);
       try {
         const id = await prisma.$transaction(async (tx) => {
+          // Un ítem, una calibración vigente: se bloquea el ítem y se vuelve a comprobar (doble clic).
+          await tx.$queryRawUnsafe(`SELECT 1 FROM met_ot_instrumento WHERE id = $1::uuid FOR UPDATE`, d.otInstrumentoId);
+          const item = (await instrumentosDeOt(tx, origen.ot.id)).find((x) => x.id === d.otInstrumentoId)!;
+          const motivo = motivoCalibrar({ ...item, otEstado: origen.ot.estado }, await calibracionesDeOt(tx, origen.ot.id));
+          if (motivo) throw new ConflictException(motivo);
+          if (!item.procesoCodigo)
+            await tx.$executeRawUnsafe(`UPDATE met_ot_instrumento SET proceso_codigo = $2, updated_at = now() WHERE id = $1::uuid`, item.id, proc.codigo);
           const cal = await tx.$queryRawUnsafe<any[]>(
             `INSERT INTO met_calibracion
                (tenant_id, codigo, proceso_id, patron_id, unidad_id, fecha_calibracion, instrumento, patron_snap, ambiente, cond,
-                u_max, u_cert, conforme, intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen, patrones)
+                u_max, u_cert, conforme, intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen, patrones,
+                ot_id, ot_instrumento_id)
              VALUES ($1::uuid,$2,$3::uuid,$4::uuid,$5::uuid,$6::date,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,
-                     $11,$12,$13,$14,'borrador',$15::uuid,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20::jsonb,$21::jsonb)
+                     $11,$12,$13,$14,'borrador',$15::uuid,$16,$17::jsonb,$18::jsonb,$19::jsonb,$20::jsonb,$21::jsonb,$22::uuid,$23::uuid)
              RETURNING id`,
-            t, codigo, proc.id, pat.patronId, unidadId, fecha, JSON.stringify(d.instrumento), "{}",
+            t, codigo, proc.id, pat.patronId, unidadId, fecha, JSON.stringify(instrumento), "{}",
             JSON.stringify(d.ambiente), JSON.stringify(calc.cond), calc.uMax, calc.uCert, calc.conforme, d.intervaloMeses,
-            req?.user?.sub ?? null, calc.motor, calc.datos, calc.opciones, calc.resultado, calc.resumen, JSON.stringify(pat.snapshot));
+            req?.user?.sub ?? null, calc.motor, calc.datos, calc.opciones, calc.resultado, calc.resumen, JSON.stringify(pat.snapshot),
+            origen.ot.id, d.otInstrumentoId);
           await this.guardarPuntos(tx, cal[0].id, calc.puntos);
           await this.evento(tx, cal[0].id, "CREADA", null, "borrador", req, null);
           return cal[0].id as string;
@@ -665,7 +811,7 @@ export class MetrologiaController {
         return {
           data: {
             id, codigo, estado: "borrador", fecha, motor: calc.motor, resumen: calc.resumenObj, uMax: calc.uMax, conforme: calc.conforme, puntos: calc.puntosGum,
-            avisos: [...avisosFechas({ ...d.instrumento, fechaCalibracion: fecha }), ...pat.avisos],
+            avisos: [...avisosFechas({ ...instrumento, fechaCalibracion: fecha }), ...pat.avisos],
           },
         };
       } catch (e: any) {
@@ -689,6 +835,10 @@ export class MetrologiaController {
     const fecha = d.fecha ? fechaCalibracion(d.fecha) : fechaIso(cal.fecha_calibracion);
     const pat = await this.patronesDe(t, d, fecha);
     const calc = await this.calcularDto(proc, d, fecha);
+    // Calibración ligada a la OT: la OT y la recepción siguen mandando sobre lo escrito.
+    const instrumento = cal.ot_instrumento_id
+      ? await this.origenOt(req, t, cal.ot_instrumento_id).then((o) => instrumentoDesdeOt(d.instrumento, o.item, o.ot))
+      : d.instrumento;
     await prisma.$transaction(async (tx) => {
       const n = await tx.$executeRawUnsafe(
         `UPDATE met_calibracion SET patron_id = $2::uuid, instrumento = $3::jsonb, patron_snap = $4::jsonb, ambiente = $5::jsonb,
@@ -696,7 +846,7 @@ export class MetrologiaController {
                 opciones = $13::jsonb, resultado = $14::jsonb, resumen = $15::jsonb, fecha_calibracion = $16::date, patrones = $17::jsonb,
                 estado = 'borrador', updated_at = now()
           WHERE id = $1::uuid AND estado IN ('borrador', 'calculada')`,
-        id, pat.patronId, JSON.stringify(d.instrumento), "{}", JSON.stringify(d.ambiente),
+        id, pat.patronId, JSON.stringify(instrumento), "{}", JSON.stringify(d.ambiente),
         JSON.stringify(calc.cond), calc.uMax, calc.uCert, calc.conforme, d.intervaloMeses, calc.motor, calc.datos, calc.opciones,
         calc.resultado, calc.resumen, fecha, JSON.stringify(pat.snapshot));
       if (!n) throw new ForbiddenException("La calibración cambió de estado mientras tanto; recargue la lista");
@@ -707,7 +857,7 @@ export class MetrologiaController {
     return {
       data: {
         id, codigo: cal.codigo, estado: "borrador", resumen: calc.resumenObj, uMax: calc.uMax, conforme: calc.conforme,
-        avisos: [...avisosFechas({ ...d.instrumento, fechaCalibracion: fecha }), ...pat.avisos],
+        avisos: [...avisosFechas({ ...instrumento, fechaCalibracion: fecha }), ...pat.avisos],
       },
     };
   }
@@ -793,10 +943,20 @@ export class MetrologiaController {
       await registrarFirma(tx);
       let numero = cal.codigo as string;
       if (cal.prefijo_certificado) {
+        // Correlativo atómico por prefijo (fila bloqueada); formato y reinicio anual configurables (LCPNF-NNN.AA).
         const r = await tx.$queryRawUnsafe<any[]>(
-          `UPDATE met_numeracion SET ultimo = ultimo + 1, updated_at = now() WHERE tenant_id = $1::uuid AND prefijo = $2 RETURNING ultimo, relleno`,
+          `SELECT ultimo, relleno, formato, anual, anio FROM met_numeracion WHERE tenant_id = $1::uuid AND prefijo = $2 FOR UPDATE`,
           t, cal.prefijo_certificado);
-        if (r.length) numero = numeroCertificado(cal.prefijo_certificado, Number(r[0].ultimo), Number(r[0].relleno));
+        if (r.length) {
+          const anioActual = Number(hoyChile().slice(0, 4));
+          const sig = siguienteCorrelativo({ ultimo: Number(r[0].ultimo), anual: r[0].anual, anio: r[0].anio }, anioActual);
+          await tx.$executeRawUnsafe(
+            `UPDATE met_numeracion SET ultimo = $3, anio = $4, updated_at = now() WHERE tenant_id = $1::uuid AND prefijo = $2`,
+            t, cal.prefijo_certificado, sig.n, sig.anio);
+          numero = r[0].formato && r[0].formato !== "{P}-{N}"
+            ? formatearNumero(r[0].formato, cal.prefijo_certificado, sig.n, Number(r[0].relleno), sig.anio ?? anioActual)
+            : numeroCertificado(cal.prefijo_certificado, sig.n, Number(r[0].relleno));
+        }
       }
       const codigoVer = nuevoCodigoVerificacion();
       const emitidoAt = new Date();
@@ -853,9 +1013,11 @@ export class MetrologiaController {
           const r = await tx.$queryRawUnsafe<any[]>(
             `INSERT INTO met_calibracion
                (tenant_id, codigo, proceso_id, patron_id, unidad_id, fecha_calibracion, instrumento, patron_snap, ambiente, cond, u_max, u_cert, conforme,
-                intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen, patrones, reemplaza_id, motivo_reemision)
+                intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen, patrones, reemplaza_id, motivo_reemision,
+                ot_id, ot_instrumento_id)
              SELECT tenant_id, $2, proceso_id, patron_id, unidad_id, fecha_calibracion, instrumento, patron_snap, ambiente, cond, u_max, u_cert, conforme,
-                    intervalo_meses, 'borrador', $3::uuid, motor, datos, opciones, resultado, resumen, patrones, id, $4
+                    intervalo_meses, 'borrador', $3::uuid, motor, datos, opciones, resultado, resumen, patrones, id, $4,
+                    ot_id, ot_instrumento_id
                FROM met_calibracion WHERE id = $1::uuid RETURNING id`,
             id, codigo, req.user.sub, motivo);
           const nid = r[0].id as string;
@@ -918,6 +1080,32 @@ export class MetrologiaController {
   }
 
   // ---- helpers --------------------------------------------------------------
+  /**
+   * Ítem de la OT del que nace (o al que pertenece) la calibración, con los datos de la OT
+   * que se imprimen. Exige el alcance de `metrologia.crear` sobre el laboratorio de la OT.
+   */
+  private async origenOt(req: any, t: string, itemId: string) {
+    const f = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT i.ot_id, o.codigo, o.estado, o.unidad_principal, u.codigo AS laboratorio, c.razon_social AS cliente, c.direccion AS cliente_direccion,
+              cc.nombre AS lab_solicitante,
+              to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha_ot
+         FROM met_ot_instrumento i JOIN orden_trabajo o ON o.id = i.ot_id
+         LEFT JOIN unidad u ON u.id = o.unidad_principal
+         LEFT JOIN cliente c ON c.id = o.cliente_id
+         LEFT JOIN centro_costo cc ON cc.id = o.lab_solicitante_cc_id
+        WHERE i.id = $1::uuid AND i.tenant_id = $2::uuid`, itemId, t);
+    if (!f.length) throw new NotFoundException("Instrumento de OT no encontrado");
+    await this.alcance.exigirUnidad(req, f[0].unidad_principal, `la OT ${f[0].codigo}`, "metrologia.crear");
+    const item = (await instrumentosDeOt(prisma, f[0].ot_id)).find((x) => x.id === itemId)!;
+    return {
+      item,
+      ot: {
+        id: f[0].ot_id as string, codigo: f[0].codigo as string, estado: f[0].estado as string, laboratorio: f[0].laboratorio as string | null,
+        fechaOt: f[0].fecha_ot as string | null, cliente: f[0].cliente, clienteDireccion: f[0].cliente_direccion, labSolicitante: f[0].lab_solicitante,
+      },
+    };
+  }
+
   /** Pasos de la matriz para la unidad de la calibración y las firmas ya hechas. */
   private async circuito(t: string, cal: any, cache?: Map<string, PasoFirmaCal[] | null>): Promise<Circuito> {
     let pasos: PasoFirmaCal[] | null = null;
@@ -1146,6 +1334,13 @@ const numero = (x: any): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
+const NumeracionSchema = z.object({
+  ultimo: z.coerce.number().int().min(0).max(9_999_999),
+  relleno: z.coerce.number().int().min(0).max(8).default(0),
+  formato: z.string().trim().max(40).default("{P}-{N}"),
+  anual: z.boolean().default(false),
+});
+
 const PatronSchema = z.object({
   nombre: z.string().trim().min(2).max(160).optional(),
   tipo: z.enum(["patron", "auxiliar"]).optional(),
@@ -1192,5 +1387,9 @@ export class VerificacionMetrologiaController {
   }
 }
 
-@Module({ imports: [RbacModule], controllers: [MetrologiaController, VerificacionMetrologiaController] })
+@Module({
+  imports: [RbacModule],
+  controllers: [MetrologiaController, VerificacionMetrologiaController, MetrologiaOtController],
+  providers: [MetrologiaOtService],
+})
 export class MetrologiaModule {}
