@@ -8,6 +8,7 @@ import DataTable, { type DataColumn } from "@/components/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { confirmar, toast } from "@/components/ui/feedback";
 import { usePermisos } from "@/lib/permisos";
+import { ORIGEN_OT } from "@/lib/metrologiaOt";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -91,11 +92,26 @@ export default function MetrologiaCalibracionesPage() {
   const pendientes = useMemo(() => rows.filter((r) => (r.acciones ?? []).some((a: string) => a === "EMITIR" || a === "FIRMAR")).length, [rows]);
 
   const columns: DataColumn[] = [
-    { key: "numero_certificado", label: "Certificado", value: (c) => c.numero_certificado ?? "", render: (c) => (c.numero_certificado ? <b className="codigo">{c.numero_certificado}</b> : <span style={{ color: "var(--muted)" }}>Sin emitir</span>) },
-    { key: "codigo", label: "Calibración", value: (c) => c.codigo ?? "", render: (c) => <span className="codigo">{c.codigo}</span> },
-    { key: "laboratorio", label: "Lab.", value: (c) => c.laboratorio ?? "", render: (c) => c.laboratorio ?? "—" },
-    { key: "proceso", label: "Proceso", value: (c) => `${c.proceso ?? ""} ${c.proceso_nombre ?? ""}`.trim(), render: (c) => <>{c.proceso} · {c.proceso_nombre}</> },
-    { key: "instrumento", label: "Instrumento", value: (c) => c.instrumento ?? "", render: (c) => c.instrumento ?? "—" },
+    {
+      key: "numero_certificado", label: "Certificado", value: (c) => `${c.numero_certificado ?? ""} ${c.codigo ?? ""}`,
+      render: (c) => (
+        <Link href={`/metrologia/${c.id}` as any} style={{ color: "inherit", textDecoration: "none" }}>
+          {c.numero_certificado ? <b className="codigo">{c.numero_certificado}</b> : <span style={{ color: "var(--muted)" }}>Sin emitir</span>}
+          <span className="codigo" style={{ display: "block", fontSize: 11, color: "var(--accent)", whiteSpace: "nowrap" }}>{c.codigo}</span>
+        </Link>
+      ),
+    },
+    {
+      key: "ot_codigo", label: "OT · ítem", value: (c) => c.ot_codigo ?? "",
+      render: (c) => (c.ot_id
+        ? <><Link href={`/ot/${c.ot_id}` as any} className="codigo" style={{ color: "var(--accent)", whiteSpace: "nowrap" }}>{c.ot_codigo}</Link>{c.instrumento_numero ? ` · ${c.instrumento_numero}` : ""}
+            {c.origen && <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>{ORIGEN_OT[c.origen] ?? c.origen}</span>}</>
+        : <span style={{ color: "var(--muted)" }} title="Calibración anterior a la OT ligada (OT en texto)">Sin OT ligada</span>),
+    },
+    {
+      key: "instrumento", label: "Instrumento · proceso", value: (c) => `${c.instrumento ?? ""} ${c.proceso ?? ""} ${c.proceso_nombre ?? ""} ${c.laboratorio ?? ""}`,
+      render: (c) => <>{c.instrumento ?? "—"}<span style={{ display: "block", fontSize: 11, color: "var(--muted)" }} title={c.proceso_nombre}>{c.laboratorio ? `${c.laboratorio} · ` : ""}{c.proceso}</span></>,
+    },
     { key: "cliente", label: "Cliente", value: (c) => c.cliente ?? "", render: (c) => c.cliente ?? "—" },
     { key: "u_max", label: "U certificada (k=2)", num: true, value: (c) => c.u_cert ?? c.u_max, render: (c) => (c.u_cert ?? c.u_max) == null ? "—" : <>± {fmtG(c.u_cert ?? c.u_max)} {c.unidad_u}</> },
     {
@@ -109,22 +125,31 @@ export default function MetrologiaCalibracionesPage() {
         </span>
       ),
     },
-    { key: "fecha_calibracion", label: "Fecha calibración", value: (c) => c.fecha_calibracion ?? "", render: (c) => <span style={{ whiteSpace: "nowrap" }}>{fecha(c.fecha_calibracion)}</span> },
-    { key: "autor_nombre", label: "Elaborada por", value: (c) => c.autor_nombre ?? "", render: (c) => c.autor_nombre ?? "—" },
-    { key: "emitido_at", label: "Emitida", value: (c) => c.emitido_at ?? "", render: (c) => (c.emitido_at ? <span style={{ whiteSpace: "nowrap" }}>{fechaHora(c.emitido_at)}</span> : "—") },
+    { key: "fecha_calibracion", label: "Calibración", value: (c) => c.fecha_calibracion ?? "", render: (c) => <span style={{ whiteSpace: "nowrap" }}>{fecha(c.fecha_calibracion)}</span> },
+    { key: "autor_nombre", label: "Metrólogo", value: (c) => c.metrologo_nombre ?? c.autor_nombre ?? "", render: (c) => c.metrologo_nombre ?? c.autor_nombre ?? "—" },
+    { key: "termino_previsto", label: "Término previsto", value: (c) => c.termino_previsto ?? "", render: (c) => (c.termino_previsto ? <span style={{ whiteSpace: "nowrap" }}>{fecha(c.termino_previsto)}</span> : "—") },
+    {
+      key: "emitido_at", label: "Emitida · entrega", value: (c) => c.emitido_at ?? "",
+      render: (c) => (c.emitido_at
+        ? <span style={{ whiteSpace: "nowrap" }}>{fechaHora(c.emitido_at)}{c.estado === "emitida" && (c.entregado_at
+            ? <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>Entregado {fecha(c.entregado_at)}</span>
+            : <span className="pill amber" style={{ display: "block", width: "fit-content" }}>Sin entregar</span>)}</span>
+        : "—"),
+    },
   ];
 
   return (
     <div>
       <PageHeader
         titulo="Metrología · Calibraciones"
-        subtitulo={<>Calibraciones de la Sección Metrología (LMT, área eléctrica y Laboratorio Nacional de Fuerza). El metrólogo habilitado
+        subtitulo={<>Calibraciones de la Sección Metrología (LMT, área eléctrica y Laboratorio Nacional de Fuerza). Cada una nace del instrumento
+          recibido de una OT («Instrumentos por calibrar»). El metrólogo habilitado
           para la magnitud firma y envía; el jefe del laboratorio (o su subrogante) revisa y firma; el jefe del departamento firma y emite el
           Certificado de Calibración, que recibe su número por magnitud y queda sellado con su código de verificación. Cualquiera de ellos puede
           devolverla con observaciones.</>}
         acciones={
           <div style={{ display: "flex", gap: 8 }}>
-            {puede("metrologia.crear") && <Link className="btn primary sm" href={"/metrologia/nueva" as any}>＋ Nueva calibración</Link>}
+            {puede("metrologia.crear") && <Link className="btn primary sm" href={"/metrologia/nueva" as any}>Instrumentos por calibrar</Link>}
             <Link className="btn sm" href={"/metrologia/verificar" as any}>Verificar un certificado</Link>
             {puede("metrologia.ver") && <Link className="btn sm" href={"/metrologia/config" as any}>Maestros y configuración</Link>}
           </div>
@@ -147,11 +172,12 @@ export default function MetrologiaCalibracionesPage() {
         columns={columns}
         rows={rows}
         loading={cargando}
-        searchKeys={["codigo", "numero_certificado", "instrumento", "cliente", "proceso"]}
+        searchKeys={["codigo", "numero_certificado", "instrumento", "cliente", "proceso", "ot_codigo"]}
         acciones={(c) => {
           const a: string[] = c.acciones ?? [];
           return (
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+              <Link className="btn sm primary" href={`/metrologia/${c.id}` as any}>Ficha</Link>
               <button className="btn sm" onClick={() => verCertificado(c.id)}>{c.estado === "emitida" ? "Certificado" : "Ver borrador"}</button>
               {a.includes("EDITAR") && <Link className="btn sm" href={`/metrologia/nueva?id=${c.id}` as any}>Editar</Link>}
               {a.includes("ENVIAR") && <button className="btn sm primary" disabled={!!ocupado} onClick={() => enviar(c)}>Firmar y enviar</button>}

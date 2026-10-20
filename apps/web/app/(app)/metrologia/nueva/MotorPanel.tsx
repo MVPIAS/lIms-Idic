@@ -246,14 +246,14 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
               </div>
               <div style={{ overflowX: "auto" }}>
                 <table className="data">
-                  <thead><tr><th>Nominal {motor.unidad}</th><th>{motor.it === "LCPNF-IT01" ? "fc %" : `Error ${uu === "%" ? "%" : motor.unidad}`}</th><th>u<sub>c</sub> {uu}</th><th>U calculada {uu}</th><th>CMC {uu}</th><th>U certificada {uu}</th>{conClase && <th>Clase</th>}{conVeredicto && <th>Tolerancia</th>}</tr></thead>
+                  <thead><tr><th>Nominal {motor.unidad}</th><th>{motor.it === "LCPNF-IT01" ? "fc %" : `Error ${uu === "%" ? "%" : motor.unidad}`}</th><th>u<sub>c</sub> {uu}</th><th>U calculada {uu}</th><th>CMC {uu}</th><th>U certificada {uu}</th>{conClase && <th>Clase</th>}{conVeredicto && <th title="Informativo: el laboratorio no evalúa conformidad">Tolerancia (informativa)</th>}</tr></thead>
                   <tbody>
                     {r.puntos.map((p, i) => (
                       <tr key={i}>
                         {[fmtG(p.nominal), fmtG(p.error), fmtG(p.uc), fmtG(p.U), p.cmc == null ? "—" : fmtG(p.cmc)].map((v, j) => <td key={j} className="num" style={BLUE}>{v}</td>)}
                         <td className="num" style={BLUE} title={p.fueraAlcance ? "Fuera del alcance acreditado: se marca con * en el certificado" : undefined}>{fmtG(p.uCertificado ?? p.Ucert)}{p.fueraAlcance ? " *" : ""}</td>
                         {conClase && <td><span className="pill blue">{p.clase}</span></td>}
-                        {conVeredicto && <td>{p.conforme == null ? "—" : p.conforme ? "Dentro" : "Fuera"}</td>}
+                        {conVeredicto && <td><span style={{ color: "var(--muted)" }}>{p.conforme == null ? "—" : p.conforme ? "Dentro" : "Fuera"}</span></td>}
                       </tr>
                     ))}
                   </tbody>
