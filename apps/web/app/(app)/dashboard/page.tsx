@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePermisos } from "@/lib/permisos";
+import { MOTOR_FLUJOS_VISIBLE } from "@/lib/motorFlujos";
 import { PageHeader, Skeleton } from "@/components/ui/PageHeader";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
@@ -133,7 +134,7 @@ export default function DashboardPage() {
           {puede("resultado.ver") && (
             <Link href="/reportes" className="accion-rapida"><span className="ar-ico">📊</span><span><b>Reportes</b><small>Exporta a CSV / Excel</small></span></Link>
           )}
-          {puede("flujo.ver") && (
+          {MOTOR_FLUJOS_VISIBLE && puede("flujo.ver") && (
             <Link href="/flujos" className="accion-rapida"><span className="ar-ico">⛓</span><span><b>Diseñador de flujos</b><small>Configura el recorrido de una OT</small></span></Link>
           )}
           <Link href="/inicio" className="accion-rapida"><span className="ar-ico">📥</span><span><b>Mi bandeja</b><small>Tus pendientes y accesos</small></span></Link>
