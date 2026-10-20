@@ -283,3 +283,29 @@ a.kpi{text-decoration:none;color:inherit;transition:box-shadow .08s ease}
 a.kpi:hover{box-shadow:0 8px 20px rgba(24,33,47,.10)}
 .kpi .kpi-top{display:flex;justify-content:space-between;align-items:center}
 .kpi .kpi-ico{font-size:15px;opacity:.7}
+
+/* ---- Ruta de la OT (components/ot/RutaOt.tsx) ---- */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.ruta-ot ol{list-style:none;margin:0;padding:0}
+.ruta-ot .ruta-tit{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:4px 9px 6px}
+.ruta-ot .ruta-cargando{font-size:12px;color:var(--muted);margin:4px 9px 8px}
+.ruta-ot .step{cursor:default}
+.ruta-ot .step:hover{background:transparent}
+.ruta-ot .step.now{background:#e6f4f6}
+.ruta-ot .step.now .txt{font-weight:700;color:var(--primary)}
+.ruta-ot .step.pend .txt{color:var(--muted)}
+.ruta-ot .step.na .txt,.ruta-ot .step.na .txt small{color:var(--muted)}
+.ruta-ot .step.na .dot{background:transparent;border-style:dashed}
+.ruta-ot .step.bloq{background:#fff6e8}
+.ruta-ot .step.bloq .dot{background:var(--amber);color:#fff;border-color:var(--amber)}
+.ruta-ot .step .txt small{font-weight:400}
+.siguiente-paso{background:#f2fafb;border:1px solid #b9dfe5;border-radius:9px;padding:10px 13px;margin-bottom:12px}
+.siguiente-paso.cerrada{background:#eef8f2;border-color:#b6dcc6}
+.siguiente-paso.bloq{background:#fff8ec;border-color:#ecd3a6}
+.siguiente-paso .sp-cierre{font-size:13px;color:#155e3d;margin-bottom:4px}
+.siguiente-paso .sp-fila{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.siguiente-paso .sp-texto{font-size:13px;line-height:1.45;min-width:0;flex:1 1 280px}
+.siguiente-paso .sp-etq{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-right:4px}
+.siguiente-paso .sp-quien{font-size:12.5px}
+.siguiente-paso .sp-espera{color:var(--muted)}
+.siguiente-paso .sp-avisos{margin:6px 0 0;padding-left:18px;font-size:11.5px;color:#7a4b00}

@@ -194,3 +194,118 @@ catálogo que le corresponden (`orden_interna`, `align_frente_k.sql`).
   de destino. Todo queda en `orden_interna_historial`.
 - **Alta de OT**: `POST /ot` exige que el laboratorio responsable esté en el
   alcance de quien la registra (los perfiles globales no cambian).
+
+## Ruta de la OT (barra de etapas y «Siguiente paso · Le toca a»)
+
+El expediente de la OT (`/ot/[id]`) muestra a la izquierda la **Ruta de la OT**
+(etapas hechas ✓, la actual resaltada, las pendientes en gris, las que no
+aplican con «–») y, encima de las pestañas, el recuadro **«Siguiente paso · Le
+toca a»** con qué falta, quién debe hacerlo (rol, laboratorio y, si están
+asignadas, las personas) y un botón que lleva a la pestaña o pantalla donde se
+hace. El botón solo aparece a quien puede hacerlo; los demás leen «Esperando a
+que lo haga…». Con la OT cerrada, el recuadro dice «OT cerrada el dd-mm-aaaa ·
+Factura F-… (pagada / pago pendiente / por emitir)». La cabecera del expediente
+muestra «Etapa: …» en lugar del estado interno de la OT.
+
+**Cómo se calcula.** `GET /ot/:id/avance` (permiso `ot.ver`, mismo alcance por
+laboratorio que la OT). La etapa NO se guarda en ninguna columna: se deduce en
+cada consulta de lo que ya existe y el servidor ya valida. Una sola función pura,
+`apps/api/src/ot/avance-ot.ts › calcularAvance`, da a la vez la barra y el
+siguiente paso, así que nunca se contradicen (pruebas: `avance-ot.spec.ts`;
+recorrido: `scripts/verificacion/flujo-completo.js`, que afirma la etapa en cada
+momento). La etapa actual es la primera que no está hecha ni «no aplica»; todo
+lo posterior se muestra pendiente (un solo punto actual, como en las maquetas).
+En una OT cerrada, lo que quedó atrás sin hacer se muestra «no aplica».
+
+`orden_trabajo.estado` ya no gobierna la barra: no conoce «recepcionada» (el
+estado con que nace toda OT) y solo cambia al cerrar. Por eso la barra anterior
+de 14 fases se quedaba en «Fase 1 · Recepción» hasta el cierre.
+
+### Etapas de una OT de laboratorio
+
+| # | Etapa | Hecha cuando… | Siguiente paso · le toca a · dónde |
+|---|---|---|---|
+| 1 | Apertura de la OT | tiene laboratorio responsable (detalle: cotización aceptada u origen) | Fijar el laboratorio · Planificación y Control · pestaña Cabecera (`ot.cambiar_laboratorio`) |
+| 2 | Recepción de muestras | hay al menos una muestra registrada (si la recepción está incompleta, se avisa) | Registrar muestras y ensayos · Recepción de muestras · pestaña Muestras (`muestra.crear`) |
+| 3 | Asignación | hay analistas en la OT o en sus ensayos, o ya hay capturas (la asignación ordena, no bloquea) | Asignar analistas · Jefe de Laboratorio · pestaña Asignación (`ot.asignar`) |
+| 4 | Análisis | hay ensayos y ninguno está pendiente, devuelto ni rechazado | Capturar N ensayos · Analista (personas asignadas) · Captura (`resultado.crear`) |
+| 5 | Revisión | ninguno queda «capturado» | Revisar N resultados · Analista revisor · Captura (`resultado.revisar`) |
+| 6 | Aprobación | todos «aprobado» | Aprobar N resultados · Jefe de Laboratorio · Captura (`resultado.aprobar`) |
+| 7 | Emisión del informe | hay un documento vigente (en firma u oficial) y ninguno devuelto | Emitir (o reemitir el devuelto) · Jefe de Laboratorio · pestaña Informe y cierre (`certificado.emitir`) |
+| 8 | Firmas | ningún documento en firma | Firmar X (paso de …) · el rol y las personas del paso pendiente según la matriz · Documentos por firmar (solo esas personas) |
+| 9 | Entrega al cliente | todos los oficiales tienen la entrega registrada | Registrar la entrega · Planificación y Control o Ventas · Informe y cierre (`certificado.entregar`) |
+| 10 | Cierre de la OT | `estado = cerrada` | Cerrar la OT, o lo que falte con el texto de `faltantesParaCerrar` (la MISMA regla que `POST /ot/:id/cerrar`) · Planificación y Control · Informe y cierre (`ot.cerrar`) |
+| 11 | Factura | la factura de la OT está emitida (o con pagos) | Emitir la factura con folio · Finanzas · Facturas (`factura.emitir`) |
+| 12 | Pago | la factura está pagada | Registrar el pago · Finanzas · Facturas (`factura.cobrar`) |
+
+**Fases que se quitaron y por qué.** La barra anterior tenía 14 fases. Se
+retiraron *Preparación*, *Captura RN*, *Cálculo* y *Validación técnica* porque
+no corresponden a ningún dato ni acción del producto (el cálculo ocurre dentro
+de la captura; la validación técnica es la revisión). *Registro* se funde con
+*Recepción* (registrar las muestras es recibirlas). *Emisión del informe* y
+*Firmas* se mantienen separadas porque tienen dato propio (documento vigente /
+documento oficial) y responsables distintos. Se añaden *Apertura* (OT sin
+laboratorio), *Factura* y *Pago*, que sí tienen dato propio. Resultado: 12
+etapas observables.
+
+### Variantes según el tipo de OT
+
+- **OT interna, interlaboratorio o sin cobro**: Factura y Pago «no aplican».
+- **Metrología** (laboratorio LMT, LMTE, LNF o LCAD que trabaja con
+  calibraciones; si usa la captura estándar sigue la ruta de laboratorio):
+  Apertura → Toma de datos y cálculo → Revisión técnica → Firma y emisión del
+  certificado → Entrega → Cierre → Factura → Pago, tomadas de
+  `met_calibracion.estado` de las calibraciones de la OT (por `ot_id` o por el
+  código de OT escrito en la calibración). Mientras la calibración no se ligue a
+  la OT (pendiente P7), la **Entrega queda «bloqueada»** y el siguiente paso lo
+  explica: el cierre sigue exigiendo un documento del flujo general.
+- **BPCH Internación**: las fases del expediente BPCH, con el mismo criterio que
+  `internacion-bpch.service › fases()`: Resolución DGMN y análisis técnico → OT y
+  lotes → Resultados de la inspección → Informe de Inspección → Certificado de
+  Conformidad o Informe de Incumplimiento → Codificación Única (no aplica si NO
+  CUMPLE) → Tasa → facturación (no aplica si no está sujeta) → Cierre.
+- **BPCH Reinspección**: Solicitud → OT y lote → Resultados → Informe de
+  Inspección (oficial y entregado) → Trazabilidad en Codificación Única (no
+  aplica sin codificación) → Cierre.
+
+Los avisos (OPI pendiente, muestras con la recepción incompleta) acompañan al
+siguiente paso; no cambian la etapa porque el servidor no bloquea por ellos.
+El botón es una ayuda: quien decide es siempre el servidor (403/409 con motivo).
+
+## Motor de flujos genérico (BPM): oculto de la interfaz
+
+**Qué había.** Además de la barra, la OT tenía una pestaña «Flujo» con «Iniciar
+flujo» sobre un motor de flujos configurables (`flujo_def`, `flujo_version`,
+`flujo_paso`, `flujo_transicion`, `flujo_instancia`, `/api/flujos`) y un
+«Diseñador de flujos» en el menú. Era un flujo dentro de otro flujo: completar
+una tarea del motor no cambiaba nada de la OT, y las acciones reales (recibir,
+capturar, aprobar, emitir, firmar, entregar, cerrar) no movían el motor. Sus
+tareas se asignaban a quien lo iniciaba y no llegaban a «Mi bandeja».
+
+**Por qué queda oculto.** El recorrido de cada laboratorio ya lo imponen las
+reglas del servidor (permisos, alcance por laboratorio, segregación de
+funciones, matriz de firmas, condiciones de emisión y de cierre) y la Ruta de la
+OT lo muestra. Un flujo dibujado aparte, que no controla esas reglas, duplica lo
+mismo y puede contradecirlo.
+
+**Qué se quitó de la vista (sin borrar nada).**
+- La pestaña «Flujo» del expediente (el código vive en `ot/[id]/_components/FlujoBpmOt.tsx`).
+- La columna «Flujo» de la lista de OT.
+- «Diseñador de flujos» del menú (`lib/navegacion.ts`) y de los accesos del panel.
+- `/flujos` muestra «Esta pantalla no está disponible» con enlaces a Órdenes de
+  trabajo y Mi bandeja (no da error).
+- Mi bandeja no lee tareas del motor (`rbac/bandeja.service.ts` no consulta `flujo_*`).
+
+El motor, sus tablas, sus datos y su API (`/api/flujos/*`, `GET|POST /ot/:id/flujo`)
+siguen intactos; los guiones que lo prueban por API pueden seguir haciéndolo. El
+flujo de prueba antiguo `FLUJO-E2E` se retira con `align_retiro_flujo_e2e.sql`
+(se borra si no tiene instancias; si las tiene, se archiva y se marca retirado).
+
+**Cómo se reactivaría.** Si el IDIC decide configurar sus propios procesos,
+compilar la web con `NEXT_PUBLIC_MOTOR_FLUJOS_VISIBLE=true` (variable de
+COMPILACIÓN de Next.js, `apps/web/lib/motorFlujos.ts`): vuelven el menú, el
+acceso del panel, la pantalla `/flujos` y la pestaña «Flujo» de la OT. Antes de
+hacerlo conviene decidir el papel del motor: la propuesta (v2) es que deje de ser
+un motor ejecutable y pase a **configurar** la Ruta por laboratorio (nombre
+visible de cada etapa, plazo objetivo, etapas que no aplican y rol responsable
+cuando la matriz no lo resuelve), leída por `avance-ot.ts`.

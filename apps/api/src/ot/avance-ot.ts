@@ -184,7 +184,7 @@ function etapasResultados(h: HechosOt): { analisis: Etapa; revision: Etapa; apro
       "analisis",
       "Análisis",
       analisisHecho ? "hecho" : hechos > 0 ? "en_curso" : "pendiente",
-      r.total === 0 ? "Sin ensayos" : `${hechos} de ${plural(r.total, "ensayo")} capturados${r.devueltos ? ` · ${r.devueltos} devuelto(s)` : ""}`,
+      r.total === 0 ? null : `${hechos} de ${plural(r.total, "ensayo")} capturados${r.devueltos ? ` · ${r.devueltos} devuelto(s)` : ""}`,
     ),
     revision: etapa(
       "revision",
@@ -699,7 +699,7 @@ export function calcularAvance(h: HechosOt): AvanceOt {
   const avisos: string[] = [];
   if (anulada) avisos.push("La OT está anulada.");
   if (h.opiPendiente) avisos.push("OPI pendiente: OT por disposición del Director con cobro.");
-  if (h.muestras.recepcionIncompleta) avisos.push(`${plural(h.muestras.recepcionIncompleta, "muestra")} con la recepción incompleta (toma de muestra o condición).`);
+  if (h.muestras.recepcionIncompleta && !cerrada && !anulada) avisos.push(`${plural(h.muestras.recepcionIncompleta, "muestra")} con la recepción incompleta (toma de muestra o condición).`);
 
   return {
     tipo,
