@@ -826,6 +826,7 @@ export class EquiposService {
 
     const data = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT c.*,
+              m.ot_id        AS "otId",
               to_jsonb(m.*)  AS muestra,
               to_jsonb(du.*) AS de_usuario,
               to_jsonb(au.*) AS a_usuario
