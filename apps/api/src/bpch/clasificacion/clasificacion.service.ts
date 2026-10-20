@@ -90,6 +90,15 @@ export const Motivo = z.object({ motivo: z.string().trim().min(5, "Indique el mo
 
 /* ------------------------------------------------------------- servicio --- */
 
+/** Unidades de cada clasificación (cid): la de su OT y las de los prototipos que la usan. */
+const UNIDADES_CLASIFICACION = `
+  SELECT c.id AS cid, o.unidad_principal AS id FROM bpch_clasificacion c JOIN orden_trabajo o ON o.id = c.ot_id
+   WHERE o.unidad_principal IS NOT NULL
+  UNION
+  SELECT p.clasificacion_id AS cid, COALESCE(op.unidad_principal, p.unidad_id) AS id
+    FROM bpch_prototipo p LEFT JOIN orden_trabajo op ON op.id = p.ot_id
+   WHERE p.clasificacion_id IS NOT NULL AND COALESCE(op.unidad_principal, p.unidad_id) IS NOT NULL`;
+
 const SELECT = `
   SELECT c.*, cl.razon_social AS cliente_nombre, cl.rut AS cliente_rut, ot.codigo AS ot_codigo,
          uc.nombre_completo AS clasificado_por_nombre, ua.nombre_completo AS aprobado_por_nombre,
@@ -188,13 +197,37 @@ export class ClasificacionService {
     return filas[0];
   }
 
-  async listar(tenantId: string, f: { q?: string; estado?: string; vigentes?: boolean; limit?: number }) {
+  /**
+   * Unidades de una clasificación para el alcance (frente L · C8): la de su OT
+   * y las de los prototipos que la usan (la de su OT o la de su alta). Vacío si
+   * no tiene ninguna: entonces solo la ven quienes ven todo (SCC, jefatura BPCH).
+   * 404 si no existe.
+   */
+  async unidadesDe(tenantId: string, id: string): Promise<string[]> {
+    await this.fila(tenantId, id);
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT x.id::text AS id FROM (${UNIDADES_CLASIFICACION}) x WHERE x.cid = $1::uuid`,
+      id,
+    );
+    return filas.map((f) => f.id);
+  }
+
+  /** Unidad de una OT del tenant (para crear o vincular una clasificación). 400 si no existe. */
+  async unidadDeOt(tenantId: string, otId: string): Promise<string | null> {
+    const o = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId }, select: { unidadPrincipal: true } });
+    if (!o) throw new BadRequestException("La OT indicada no existe.");
+    return o.unidadPrincipal ?? null;
+  }
+
+  /** `unidades`: null = todas; si no, solo las clasificaciones con alguna de esas unidades. */
+  async listar(tenantId: string, f: { q?: string; estado?: string; vigentes?: boolean; limit?: number }, unidades: string[] | null = null) {
     const args: unknown[] = [tenantId];
     const p = (v: unknown) => {
       args.push(v);
       return `$${args.length}`;
     };
     const where = ["c.tenant_id = $1::uuid"];
+    if (unidades) where.push(`c.id IN (SELECT x.cid FROM (${UNIDADES_CLASIFICACION}) x WHERE x.id = ANY(${p(unidades)}::uuid[]))`);
     if (f.q?.trim()) {
       const q = p(`%${f.q.trim()}%`);
       where.push(`(c.sustancia ILIKE ${q} OR c.codigo ILIKE ${q} OR c.numero_onu ILIKE ${q} OR cl.razon_social ILIKE ${q})`);

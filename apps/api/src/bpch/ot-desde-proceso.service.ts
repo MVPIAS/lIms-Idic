@@ -5,7 +5,7 @@ import { generarCodigoOt } from "../common/codigo";
 import { AlcanceService } from "../rbac/alcance.service";
 import { descendientes } from "../rbac/alcance";
 import { LaboratorioOtService, UnidadResumen } from "../ot/laboratorio-ot.service";
-import { CODIGO_BPCH, CODIGO_SCC, puedeOperarEnUnidad } from "./alcance-bpch";
+import { CODIGO_BPCH, CODIGO_SCC, puedeOperarEnUnidad, filtroExpedientesBpch, expedienteVisible } from "./alcance-bpch";
 
 /** Cliente con el que se escribe: el servicio o la transacción en curso. */
 type Tx = Prisma.TransactionClient | PrismaService;
@@ -69,6 +69,27 @@ export class OtDesdeProcesoService {
     if (!raiz) return todas;
     const rama = new Set(descendientes(arbol, raiz.id, true));
     return todas.filter((u) => rama.has(u.id));
+  }
+
+  /**
+   * Filtro de unidades para listar expedientes BPCH con unidad (prototipos,
+   * clasificaciones): null = todos (global, o la SCC en su alcance).
+   * Con el permiso de la ruta (alcance por asignación).
+   */
+  async filtroExpedientes(req: any): Promise<string[] | null> {
+    const visibles = await this.alcance.filtroUnidades(req);
+    const arbol = await this.alcance.arbol(req?.user?.tenantId);
+    return filtroExpedientesBpch(visibles, arbol.porCodigo.get(CODIGO_SCC)?.id ?? null);
+  }
+
+  /** 403 si el expediente (por su unidad) no está en el alcance del usuario. */
+  async exigirExpediente(req: any, unidadId: string | null | undefined, que: string) {
+    if (!expedienteVisible(await this.filtroExpedientes(req), unidadId))
+      throw new ForbiddenException(
+        unidadId
+          ? `Fuera de su alcance: ${que} es de una unidad que usted no tiene asignada.`
+          : `Fuera de su alcance: ${que} aún no tiene unidad asignada; lo gestionan la Sección Certificación de la Conformidad y la jefatura del BPCH.`,
+      );
   }
 
   /** 403 si el usuario no puede programar ni generar OT para esa unidad (alcance-bpch.ts). */
