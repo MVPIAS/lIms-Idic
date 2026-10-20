@@ -1,3 +1,4 @@
+import { RecursoDeLaboratorio } from "../rbac/alcance-catalogo.guard";
 import {
   Controller,
   Get,
@@ -83,6 +84,7 @@ function tenantDe(req: any): string | undefined {
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("pasos-metodo")
 @RequierePermisoCrud(PERMISOS_PASO)
+@RecursoDeLaboratorio("paso_metodo")
 export class PasoMetodoController extends BaseCrudController {
   protected createSchema = PasoMetodoCreate;
   // En update, catMetodoId no es reasignable desde el form (se omite en la UI),

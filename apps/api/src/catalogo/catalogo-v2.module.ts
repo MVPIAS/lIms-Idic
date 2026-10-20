@@ -18,6 +18,7 @@ import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
+import { RecursoDeLaboratorio } from "../rbac/alcance-catalogo.guard";
 
 /**
  * =============================================================================
@@ -36,6 +37,12 @@ import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator
  * (columna deleted_at). Permisos: se LEE con `muestra.ver` (todos los roles
  * operativos) y se GESTIONA con `catalogo.gestionar`, igual que el resto del
  * catálogo (grupos, familias, tipos de muestra, analitos).
+ *
+ * Alcance de las escrituras (AlcanceCatalogoGuard): una jefatura solo cambia
+ * los ensayos (y su precio), métodos, analitos, especificaciones y paneles de
+ * SU laboratorio (@RecursoDeLaboratorio); las tablas comunes (grandes grupos,
+ * grupos, subgrupos, familias, elementos) las mantienen Calidad y
+ * Administración, que tienen el permiso con alcance global.
  * =============================================================================
  */
 
@@ -219,6 +226,7 @@ const CatEnsayoCreate = z.object({
 });
 @ApiTags("cat-ensayos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/ensayos")
 @RequierePermisoCrud(PERMISOS_CATALOGO)
+@RecursoDeLaboratorio("cat_ensayo")
 export class CatEnsayoController extends BaseCrudController {
   protected createSchema = CatEnsayoCreate;
   protected updateSchema = CatEnsayoCreate.partial();
@@ -263,6 +271,7 @@ export const CatMetodoCreate = CatMetodoBase.superRefine(factorCompleto);
 export const CatMetodoUpdate = CatMetodoBase.partial().superRefine(factorCompleto);
 @ApiTags("cat-metodos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/metodos")
 @RequierePermisoCrud(PERMISOS_CATALOGO)
+@RecursoDeLaboratorio("cat_metodo")
 export class CatMetodoController extends BaseCrudController {
   protected createSchema = CatMetodoCreate;
   protected updateSchema = CatMetodoUpdate;
@@ -296,6 +305,7 @@ const CatAnalitoCreate = z.object({
 });
 @ApiTags("cat-analitos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/analitos")
 @RequierePermisoCrud(PERMISOS_CATALOGO)
+@RecursoDeLaboratorio("cat_analito")
 export class CatAnalitoController extends BaseCrudController {
   protected createSchema = CatAnalitoCreate;
   protected updateSchema = CatAnalitoCreate.partial();
@@ -329,6 +339,7 @@ const CatEspecificacionCreate = z.object({
 });
 @ApiTags("cat-especificaciones") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/especificaciones")
 @RequierePermisoCrud(PERMISOS_CATALOGO)
+@RecursoDeLaboratorio("cat_especificacion")
 export class CatEspecificacionController extends BaseCrudController {
   protected createSchema = CatEspecificacionCreate;
   protected updateSchema = CatEspecificacionCreate.partial();
@@ -359,6 +370,7 @@ const CatPanelCreate = z.object({
 });
 @ApiTags("cat-paneles") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/paneles")
 @RequierePermisoCrud(PERMISOS_CATALOGO)
+@RecursoDeLaboratorio("cat_panel")
 export class CatPanelController extends BaseCrudController {
   protected createSchema = CatPanelCreate;
   protected updateSchema = CatPanelCreate.partial();

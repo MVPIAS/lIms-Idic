@@ -1,3 +1,4 @@
+import { SinAlcanceDeEscritura } from "../rbac/alcance-catalogo.guard";
 import {
   BadRequestException,
   Body,
@@ -266,6 +267,7 @@ export class AnalitoController extends BaseCrudController {
    */
   @Post("validar-formula")
   @RequierePermiso("catalogo.gestionar")
+  @SinAlcanceDeEscritura()
   @ApiOperation({ summary: "Valida la sintaxis de una fórmula sin guardarla ni evaluarla" })
   validarFormulaAnalito(@Body() body: unknown) {
     const dto = ValidarFormulaDto.parse(body);

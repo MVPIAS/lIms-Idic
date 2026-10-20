@@ -27,6 +27,7 @@ import { FlujoRealModule } from "./flujo-real/flujo-real.module";
 import { SpcModule } from "./spc/spc.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { AlcanceModule } from "./rbac/alcance.service";
+import { AlcanceCatalogoGuard } from "./rbac/alcance-catalogo.guard";
 import { AmbitoUnidadGuard } from "./rbac/ambito-unidad.guard";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
 import { CrmModule } from "./crm/crm.module";
@@ -134,6 +135,11 @@ function prettyTransport() {
     //   4. AmbitoUnidadGuard · módulos que pertenecen a una rama del organigrama
     //      (@AmbitoUnidad). Va después del permiso: primero el rol, luego la unidad.
     { provide: APP_GUARD, useClass: AmbitoUnidadGuard },
+    //   5. AlcanceCatalogoGuard · catálogo por laboratorio: las escrituras con
+    //      permisos sin dimensión de laboratorio (catalogo.gestionar…) y el
+    //      detalle por id exigen que el registro sea de su laboratorio, o que el
+    //      permiso le valga con alcance global.
+    { provide: APP_GUARD, useClass: AlcanceCatalogoGuard },
 
     // Bitácora (RF-H04): escribe en audit_log toda mutación exitosa.
     { provide: APP_INTERCEPTOR, useClass: AuditInterceptor },
