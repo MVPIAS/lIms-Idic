@@ -112,7 +112,8 @@ export class FlujoController {
       throw new ForbiddenException(`El paso «${r.actividad}» lo completa quien tiene el permiso «${r.permiso}».`);
     if (!superadmin && r.rol && !roles.includes(codigoCanonico(r.rol.codigo)))
       throw new ForbiddenException(`El paso «${r.actividad}» le corresponde al rol «${r.rol.nombre}».`);
-    if (r.ot) await this.alcance.exigirUnidad(req, r.ot.unidadPrincipal, `la OT ${r.ot.codigo}`);
+    // Alcance por asignación: el permiso del paso tiene que valer en la unidad de la OT.
+    if (r.ot) await this.alcance.exigirUnidad(req, r.ot.unidadPrincipal, `la OT ${r.ot.codigo}`, superadmin ? null : r.permiso);
     // Quien completa queda registrado (no lo elige el cliente).
     return this.flujos.completarTarea(id, { ...(body ?? {}), usuarioId: req?.user?.sub }, tenantId);
   }

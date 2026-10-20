@@ -7,7 +7,6 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { PUBLIC_KEY } from "../auth/public.decorator";
-import { descendientes } from "./alcance";
 import { AlcanceService } from "./alcance.service";
 
 export const AMBITO_UNIDAD_KEY = "ambito_unidad";
@@ -23,10 +22,12 @@ export const AMBITO_UNIDAD_KEY = "ambito_unidad";
  * por rol, no por unidad: sin el ámbito, un analista del laboratorio químico
  * —que comparte rol con el de la Delegación Nº 11— veía las evidencias de armas.
  *
- * Pasa quien tiene alcance global (dirección, administración, calidad…) y quien
- * tiene entre sus unidades visibles la unidad declarada o alguna de las que
- * cuelgan de ella. Un jefe de departamento, por tanto, entra en los módulos de
- * sus laboratorios.
+ * Pasa quien, con los roles que conceden el permiso de la ruta, tiene alcance
+ * global o alguna unidad de la rama (la raíz o lo que cuelga de ella). Un jefe
+ * de departamento, por tanto, entra en los módulos de sus laboratorios.
+ * Los ámbitos se definen en rbac.constants.ts (AMBITOS): «D11» es estricto (el
+ * alcance global solo vale a Superadministración, Dirección, Subdirección y
+ * Lector/Auditor) y «BPCH_CERT» es la rama BPCH sin la Delegación Nº 11.
  */
 export const AmbitoUnidad = (...codigos: string[]) => SetMetadata(AMBITO_UNIDAD_KEY, codigos);
 
@@ -48,17 +49,15 @@ export class AmbitoUnidadGuard implements CanActivate {
     // Sin usuario no hay nada que acotar: la autenticación la exige JwtAuthGuard.
     if (!req?.user?.sub) return true;
 
-    const contexto = await this.alcance.paraRequest(req);
-    if (contexto.esGlobal) return true;
-
-    const arbol = await this.alcance.arbol(req.user.tenantId);
-    const visibles = new Set(contexto.unidadIds);
+    // Alcance por asignación: cuenta solo lo que dan los roles que conceden los
+    // permisos de la ruta. Los ámbitos estrictos (D11) no se pasan por tener un
+    // rol global, salvo los roles que la definición del ámbito admite.
     const nombres: string[] = [];
     for (const codigo of codigos) {
-      const raiz = arbol.porCodigo.get(codigo);
-      if (!raiz) continue;
-      nombres.push(raiz.nombre);
-      if (descendientes(arbol, raiz.id, true).some((id) => visibles.has(id))) return true;
+      const r = await this.alcance.entraEnAmbito(req, codigo);
+      if (!r) continue;
+      nombres.push(r.nombre);
+      if (r.entra) return true;
     }
     // Instalación sin esas unidades en el organigrama: el ámbito no se puede
     // evaluar y no se bloquea (queda el control por permiso).

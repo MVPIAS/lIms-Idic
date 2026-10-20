@@ -142,3 +142,31 @@ describe("PermisoGuard · @RequierePermisoCrud por verbo HTTP", () => {
     expect(() => guard.canActivate(ctx)).toThrow(ForbiddenException);
   });
 });
+
+describe("PermisoGuard · alcance por asignación", () => {
+  it("deja en el request los permisos exigidos por la ruta", () => {
+    const reflector = {
+      getAllAndOverride: jest.fn((key: string) => (key === PERMISOS_KEY ? ["resultado.crear"] : undefined)),
+    } as unknown as Reflector;
+    const req: any = { method: "POST", user: { roles: ["ANALISTA"], permisos: ["resultado.crear"] } };
+    const ctx = {
+      getHandler: () => () => undefined,
+      getClass: () => class {},
+      switchToHttp: () => ({ getRequest: () => req }),
+    } as unknown as ExecutionContext;
+    expect(new PermisoGuard(reflector).canActivate(ctx)).toBe(true);
+    expect(req.__permisosRuta).toEqual(["resultado.crear"]);
+  });
+
+  it("ruta sin permiso: lista vacía (rige el alcance por usuario)", () => {
+    const reflector = { getAllAndOverride: jest.fn(() => undefined) } as unknown as Reflector;
+    const req: any = { method: "GET", user: { sub: "u1" } };
+    const ctx = {
+      getHandler: () => () => undefined,
+      getClass: () => class {},
+      switchToHttp: () => ({ getRequest: () => req }),
+    } as unknown as ExecutionContext;
+    expect(new PermisoGuard(reflector).canActivate(ctx)).toBe(true);
+    expect(req.__permisosRuta).toEqual([]);
+  });
+});

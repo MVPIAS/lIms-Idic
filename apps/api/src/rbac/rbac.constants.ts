@@ -65,6 +65,32 @@ export const ALIAS_ROL: Record<string, string> = {
 /** Roles que SIEMPRE ven todo, con independencia de lo que diga rol.alcance. */
 export const ROLES_SIEMPRE_GLOBALES = ["SUPERADMIN", "ADMIN", "DIRECTOR", "SUBDIRECTOR"];
 
+/**
+ * Ámbitos de módulo (@AmbitoUnidad y menú). Un código que no esté aquí se
+ * interpreta como { raiz: código }.
+ *   · D11       · SAEC (evidencias, armas, IBIS). Estricto: el alcance global
+ *                 solo deja pasar a Superadministración, Dirección, Subdirección
+ *                 y Lector/Auditor (este, con permisos de solo lectura). El
+ *                 resto necesita una unidad de la Delegación Nº 11 (o que la
+ *                 tenga bajo su mando).
+ *   · BPCH      · procesos con unidad que inspecciona (internación, reinspección,
+ *                 prototipos, clasificación): la Delegación Nº 11 entra, pero
+ *                 los listados la dejan solo en lo que inspecciona ella.
+ *   · BPCH_CERT · registros nacionales de BPCH Certificación (Codificación
+ *                 Única, Producción Nacional): toda la rama BPCH menos la D11.
+ */
+export const AMBITOS: Record<string, { raiz: string; excluye?: string[]; globalSolo?: string[] }> = {
+  D11: { raiz: "D11", globalSolo: ["SUPERADMIN", "DIRECTOR", "SUBDIRECTOR", "LECTOR"] },
+  BPCH: { raiz: "BPCH" },
+  BPCH_CERT: { raiz: "BPCH", excluye: ["D11"] },
+  DCO: { raiz: "DCO" },
+  SAM: { raiz: "SAM" },
+};
+
+export function definicionAmbito(codigo: string) {
+  return AMBITOS[codigo] ?? { raiz: codigo };
+}
+
 /** Alcance por defecto si la BD no lo tiene (BD sin align_admin_roles.sql). */
 export const ALCANCE_POR_DEFECTO: Record<string, Alcance> = {
   SUPERADMIN: "GLOBAL",

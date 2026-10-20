@@ -56,7 +56,8 @@ export const NAV: SeccionNav[] = [
       { href: "/cotizaciones", label: "Cotizaciones", icon: "💲", perm: "cotizacion.ver" },
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
       // Misma pantalla que «BPCH · Certificación › Internaciones» (puerta única): Comercial registra la resolución y la tasa.
-      { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: ["BPCH", "DCO"], claves: "aduana importacion sdbpch resolucion dgmn tasa" },
+      // En Comercial solo para quien trabaja en el Depto. Comercial; el BPCH la tiene en su sección.
+      { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: "DCO", claves: "aduana importacion sdbpch resolucion dgmn tasa" },
       { href: "/listas-precio", label: "Listas de precio", icon: "≣", perm: "cotizacion.ver" },
       { href: "/lista-precio-items", label: "Ítems de lista", icon: "🏷", perm: "cotizacion.ver" },
       { href: "/centros-costo", label: "Centros de costo", icon: "🏦", perm: "factura.ver" },
@@ -102,16 +103,18 @@ export const NAV: SeccionNav[] = [
   },
   {
     // Frente BPCH G1 · Internación, Reinspección y Codificación Única (procesos sobre la OT).
+    // BPCH_CERT = rama BPCH sin la Delegación Nº 11; BPCH_ASIGNADO = lo mismo más
+    // las unidades con trabajo asignado (la D11 ve «Internaciones» si inspecciona alguna).
     id: "bpch",
     title: "BPCH · Certificación",
     icon: "✹",
     items: [
-      { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: ["BPCH", "DCO"], claves: "resolucion dgmn tasa importacion" },
-      { href: "/bpch/reinspecciones", label: "Reinspecciones", icon: "↻", perm: "bpch.reinspeccion.ver", ambito: "BPCH", claves: "traspaso vencimiento rechazo" },
-      { href: "/bpch/codificacion", label: "Codificación Única", icon: "🗂", perm: "bpch.codificacion.ver", ambito: ["BPCH", "DCO"], claves: "cnc dgmn listado explosivos receso" },
-      { href: "/bpch/produccion-nacional", label: "Producción Nacional", icon: "🏭", perm: "bpch.pn.ver", ambito: ["BPCH", "DCO"], claves: "raf fabricante o/c operativa programa inspecciones fiscalizacion" },
-      { href: "/bpch/prototipos", label: "Prototipos", icon: "◇", perm: "bpch.prototipo.ver", ambito: "BPCH", claves: "aprobacion de tipo elemento nuevo" },
-      { href: "/bpch/clasificaciones", label: "Clasificación de sustancias", icon: "⚛", perm: "bpch.clasificacion.ver", ambito: "BPCH", claves: "onu koenen tpt division explosiva" },
+      { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: ["BPCH_ASIGNADO", "DCO"], claves: "resolucion dgmn tasa importacion" },
+      { href: "/bpch/reinspecciones", label: "Reinspecciones", icon: "↻", perm: "bpch.reinspeccion.ver", ambito: "BPCH_ASIGNADO", claves: "traspaso vencimiento rechazo" },
+      { href: "/bpch/codificacion", label: "Codificación Única", icon: "🗂", perm: "bpch.codificacion.ver", ambito: ["BPCH_CERT", "DCO"], claves: "cnc dgmn listado explosivos receso" },
+      { href: "/bpch/produccion-nacional", label: "Producción Nacional", icon: "🏭", perm: "bpch.pn.ver", ambito: ["BPCH_CERT", "DCO"], claves: "raf fabricante o/c operativa programa inspecciones fiscalizacion" },
+      { href: "/bpch/prototipos", label: "Prototipos", icon: "◇", perm: "bpch.prototipo.ver", ambito: "BPCH_ASIGNADO", claves: "aprobacion de tipo elemento nuevo" },
+      { href: "/bpch/clasificaciones", label: "Clasificación de sustancias", icon: "⚛", perm: "bpch.clasificacion.ver", ambito: "BPCH_ASIGNADO", claves: "onu koenen tpt division explosiva" },
     ],
   },
   {
@@ -188,6 +191,32 @@ export const NAV: SeccionNav[] = [
     ],
   },
 ];
+
+/** Lo que el menú necesita de GET /me/alcance para decidir los ámbitos. */
+export interface AlcanceMenu {
+  ambitos?: Record<string, boolean>;
+  permisosPorAmbito?: Record<string, string[]>;
+}
+
+/**
+ * ¿El ítem cabe en el ámbito del usuario? Alcance por asignación: el permiso
+ * del ítem tiene que valer DENTRO de la rama (`permisosPorAmbito`); no basta
+ * con tenerlo por otro rol ni con ser «global» (SAEC solo admite el global de
+ * Dirección, Subdirección, Superadministración y Lector/Auditor).
+ * Mientras no llega /me/alcance no se oculta nada por este motivo (el backend
+ * responde 403 igualmente). Es la misma regla que aplica @AmbitoUnidad.
+ */
+export function itemEnAmbito(i: ItemNav, alcance: AlcanceMenu | null | undefined): boolean {
+  if (!i.ambito || !alcance?.ambitos) return true;
+  const porAmbito = alcance.permisosPorAmbito;
+  const perms = i.perm ? ([] as string[]).concat(i.perm) : [];
+  return ([] as string[]).concat(i.ambito).some((c) => {
+    if (alcance.ambitos?.[c] === false) return false;
+    const validos = porAmbito?.[c];
+    if (!validos || perms.length === 0) return true;
+    return perms.some((p) => validos.includes(p));
+  });
+}
 
 /** Busca el ítem de menú que mejor corresponde a una ruta (prefijo más largo). */
 export function itemDeRuta(pathname: string): { seccion: SeccionNav; item: ItemNav } | null {

@@ -41,6 +41,13 @@ export interface AsignacionAlcance {
   unidadId: string | null;
   vigenteDesde?: Date | string | null;
   vigenteHasta?: Date | string | null;
+  /**
+   * Permisos que concede el rol de esta asignación. Si falta (undefined), la
+   * asignación se trata como si concediera cualquier permiso: es el
+   * comportamiento por usuario anterior, y solo se usa en llamadas que no
+   * conocen los permisos (p. ej. el cálculo del perfil o de la bandeja).
+   */
+  permisos?: readonly string[] | null;
 }
 
 export interface JefaturaAlcance {
@@ -193,4 +200,176 @@ export function perfilDe(
 /** Primer ancestro (incluida la propia unidad) de un tipo dado. */
 export function ancestroDeTipo(arbol: Arbol, unidadId: string, tipo: string): NodoUnidad | null {
   return cadenaAncestros(arbol, unidadId).find((n) => n.tipo === tipo) ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Alcance POR ASIGNACIÓN
+//
+// Cada permiso vale con el alcance del rol que lo concede. Un usuario con
+// ANALISTA@LPN y COMERCIAL (global) captura resultados solo en LPN y ve las
+// cotizaciones de todo el IDIC. El alcance efectivo de un permiso es la UNIÓN
+// de los alcances de las asignaciones vigentes cuyo rol lo concede; el de una
+// ruta que exige varios permisos, la INTERSECCIÓN de los de cada uno.
+// Ver docs/ADMIN_ROLES.md › «Alcance por asignación».
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Alcance de un permiso (o de un conjunto de permisos) para un usuario. */
+export interface AlcancePermiso extends ResultadoAlcance {
+  /** Roles (código canónico) que dan alcance GLOBAL a este permiso. */
+  rolesGlobales: string[];
+  /**
+   * Unidades que dan las asignaciones ACOTADAS que conceden el permiso, aunque
+   * otra asignación lo vuelva global. Sirve a los ámbitos estrictos (SAEC),
+   * donde el «global» de un rol transversal no basta.
+   */
+  unidadesPropias: string[];
+}
+
+/** Niveles de rol cuyas asignaciones se amplían con las jefaturas (unidad_jefe). */
+const NIVELES_CON_JEFATURA = ["JEFATURA", "DIRECCION"];
+
+/** Alcance de UNA asignación (se supone vigente). */
+export function alcanceAsignacion(a: AsignacionAlcance, arbol: Arbol): ResultadoAlcance {
+  const alcance = alcanceDe(a);
+  // Asignación legada de un rol acotado SIN unidad: global, como el JWT antiguo.
+  if (alcance === "GLOBAL" || !a.unidadId) return { esGlobal: true, unidadIds: [] };
+  if (!arbol.porId.has(a.unidadId)) return { esGlobal: false, unidadIds: [] };
+  if (alcance === "DESCENDENCIA") return { esGlobal: false, unidadIds: descendientes(arbol, a.unidadId) };
+  return { esGlobal: false, unidadIds: [a.unidadId] };
+}
+
+/** ¿El rol de la asignación concede el permiso? Sin lista de permisos: sí (compatibilidad). */
+export function concede(a: AsignacionAlcance, permiso: string): boolean {
+  return !a.permisos || a.permisos.includes(permiso);
+}
+
+/**
+ * Alcance de UN permiso: unión de los alcances de las asignaciones vigentes
+ * cuyo rol lo concede. Las jefaturas (titular o subrogante) amplían el permiso
+ * cuando lo concede un rol acotado de jefatura o dirección; si el usuario no
+ * tiene ningún rol de ese nivel, amplían los permisos de todos sus roles
+ * acotados (así se comportaba el alcance por usuario con un solo rol).
+ * `superadmin` (rol SUPERADMIN en el token) vuelve global cualquier permiso.
+ */
+export function alcanceDePermiso(
+  asignaciones: AsignacionAlcance[],
+  jefaturas: JefaturaAlcance[],
+  arbol: Arbol,
+  permiso: string,
+  ahora: Date = new Date(),
+  superadmin = false,
+): AlcancePermiso {
+  const vigentes = asignaciones.filter((a) => esVigente(a, ahora));
+  const rolesGlobales = new Set<string>();
+  const propias = new Set<string>();
+  if (superadmin) rolesGlobales.add("SUPERADMIN");
+  const esNivelJefatura = (a: AsignacionAlcance) => NIVELES_CON_JEFATURA.includes((a.nivel ?? "").toUpperCase());
+  const tieneRolJefatura = vigentes.some(esNivelJefatura);
+  let ampliaConJefatura = false;
+  for (const a of vigentes) {
+    if (!concede(a, permiso)) continue;
+    const r = alcanceAsignacion(a, arbol);
+    if (r.esGlobal) {
+      rolesGlobales.add(codigoCanonico(a.rolCodigo, a.aliasDe));
+      continue;
+    }
+    r.unidadIds.forEach((i) => propias.add(i));
+    if (!tieneRolJefatura || esNivelJefatura(a)) ampliaConJefatura = true;
+  }
+  if (ampliaConJefatura) {
+    for (const j of jefaturas) descendientes(arbol, j.unidadId).forEach((i) => propias.add(i));
+  }
+  const esGlobal = rolesGlobales.size > 0;
+  return {
+    esGlobal,
+    unidadIds: esGlobal ? [] : [...propias],
+    rolesGlobales: [...rolesGlobales],
+    unidadesPropias: [...propias],
+  };
+}
+
+/** Intersección de dos alcances (ruta que exige los dos permisos). */
+export function intersecarAlcances(a: AlcancePermiso, b: AlcancePermiso): AlcancePermiso {
+  if (a.esGlobal && b.esGlobal) {
+    return {
+      esGlobal: true,
+      unidadIds: [],
+      rolesGlobales: a.rolesGlobales.filter((r) => b.rolesGlobales.includes(r)),
+      unidadesPropias: a.unidadesPropias.filter((i) => b.unidadesPropias.includes(i)),
+    };
+  }
+  if (a.esGlobal) return { esGlobal: false, unidadIds: b.unidadIds, rolesGlobales: [], unidadesPropias: b.unidadIds };
+  if (b.esGlobal) return { esGlobal: false, unidadIds: a.unidadIds, rolesGlobales: [], unidadesPropias: a.unidadIds };
+  const ids = a.unidadIds.filter((i) => b.unidadIds.includes(i));
+  return { esGlobal: false, unidadIds: ids, rolesGlobales: [], unidadesPropias: ids };
+}
+
+/**
+ * Alcance para una lista de permisos exigidos (todos). Lista vacía = la ruta
+ * solo exige estar autenticado: vale la unión de TODAS las asignaciones (el
+ * alcance por usuario de siempre).
+ */
+export function alcanceDePermisos(
+  asignaciones: AsignacionAlcance[],
+  jefaturas: JefaturaAlcance[],
+  arbol: Arbol,
+  permisos: readonly string[],
+  ahora: Date = new Date(),
+  superadmin = false,
+): AlcancePermiso {
+  if (permisos.length === 0) {
+    const todas = asignaciones.map((a) => ({ ...a, permisos: undefined }));
+    return alcanceDePermiso(todas, jefaturas, arbol, "*", ahora, superadmin);
+  }
+  return permisos
+    .map((p) => alcanceDePermiso(asignaciones, jefaturas, arbol, p, ahora, superadmin))
+    .reduce((acc, x) => intersecarAlcances(acc, x));
+}
+
+// ── Ámbitos de módulo (@AmbitoUnidad) ────────────────────────────────────────
+
+/**
+ * Rama del organigrama a la que pertenece un módulo.
+ *   raiz       · código de la unidad raíz (con su descendencia).
+ *   excluye    · ramas que NO forman parte del ámbito aunque cuelguen de la raíz.
+ *   globalSolo · si se indica, el alcance global solo deja pasar a estos roles
+ *                (ámbito estricto); el resto necesita una unidad dentro.
+ */
+export interface DefinicionAmbito {
+  raiz: string;
+  excluye?: readonly string[];
+  globalSolo?: readonly string[];
+}
+
+export interface AmbitoResuelto {
+  nombre: string;
+  unidades: Set<string>;
+  globalSolo?: readonly string[];
+}
+
+/**
+ * Unidades del ámbito en este árbol; null si la raíz no existe (no se puede
+ * evaluar). `extra` añade unidades sueltas (p. ej. las que tienen trabajo
+ * asignado en un proceso del módulo).
+ */
+export function resolverAmbito(arbol: Arbol, def: DefinicionAmbito, extra: readonly string[] = []): AmbitoResuelto | null {
+  const raiz = arbol.porCodigo.get(def.raiz);
+  if (!raiz) return null;
+  const unidades = new Set(descendientes(arbol, raiz.id, true));
+  for (const ex of def.excluye ?? []) {
+    const n = arbol.porCodigo.get(ex);
+    if (n) descendientes(arbol, n.id, true).forEach((i) => unidades.delete(i));
+  }
+  for (const i of extra) if (arbol.porId.has(i)) unidades.add(i);
+  return { nombre: raiz.nombre, unidades, globalSolo: def.globalSolo };
+}
+
+/** ¿Este alcance entra en el ámbito? */
+export function entraEnAmbito(alc: AlcancePermiso, ambito: AmbitoResuelto): boolean {
+  if (alc.esGlobal) {
+    if (!ambito.globalSolo) return true;
+    if (alc.rolesGlobales.some((r) => ambito.globalSolo!.includes(r))) return true;
+  }
+  const propias = alc.esGlobal ? alc.unidadesPropias : alc.unidadIds;
+  return propias.some((i) => ambito.unidades.has(i));
 }
