@@ -830,6 +830,22 @@ const pag = (page: string, limit: string, max = 200, def = 100) => ({
   limit: Math.min(max, Math.max(1, parseInt(limit) || def)),
 });
 
+/**
+ * Alcance por laboratorio de los equipos (frente L · C9). Un equipo sin unidad
+ * es equipamiento común: lo VE cualquiera con equipo.ver, pero solo lo cambia
+ * quien tiene equipo.gestionar con alcance global (Calidad). Uno con unidad se
+ * ve y se cambia solo dentro del alcance del permiso de la ruta.
+ */
+async function exigirEquipoEnAlcance(
+  alcance: AlcanceService,
+  req: any,
+  equipo: { unidad_id?: string | null; codigo?: string | null },
+  escritura: boolean,
+) {
+  if (!equipo.unidad_id && !escritura) return;
+  await alcance.exigirUnidad(req, equipo.unidad_id ?? null, `el equipo ${equipo.codigo ?? ""}`.trim());
+}
+
 @ApiTags("equipos")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
@@ -873,7 +889,9 @@ export class EquipoController {
 
   @Get(":id")
   async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    return this.svc.cargarEquipo(id, this.svc.tenantId(req));
+    const e = await this.svc.cargarEquipo(id, this.svc.tenantId(req));
+    await exigirEquipoEnAlcance(this.alcance, req, e, false);
+    return e;
   }
 
   /**
@@ -883,27 +901,39 @@ export class EquipoController {
    */
   @Get(":id/apto")
   async apto(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirEquipoEnAlcance(this.alcance, req, await this.svc.cargarEquipo(id, this.svc.tenantId(req)), false);
     return this.svc.evaluarApto(id, this.svc.tenantId(req));
   }
 
   @Get(":id/calibraciones")
   async calibraciones(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirEquipoEnAlcance(this.alcance, req, await this.svc.cargarEquipo(id, this.svc.tenantId(req)), false);
     return this.svc.calibracionesDeEquipo(id, this.svc.tenantId(req));
   }
 
   @Post()
   async crear(@Body() body: unknown, @Req() req: any) {
-    return this.svc.crearEquipo(this.svc.tenantId(req), CrearEquipoSchema.parse(body));
+    const d = CrearEquipoSchema.parse(body);
+    // Alta: en una unidad de su alcance (sin unidad = equipamiento común: solo alcance global).
+    await exigirEquipoEnAlcance(this.alcance, req, { unidad_id: d.unidadId ?? null, codigo: d.codigo }, true);
+    return this.svc.crearEquipo(this.svc.tenantId(req), d);
   }
 
   @Patch(":id")
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const d = ActualizarEquipoSchema.parse(body) as Record<string, unknown>;
+    const actual = await this.svc.cargarEquipo(id, this.svc.tenantId(req));
+    await exigirEquipoEnAlcance(this.alcance, req, actual, true);
+    // Cambiar de unidad: también la de destino tiene que ser suya.
+    if ("unidadId" in d && (d.unidadId ?? null) !== (actual.unidad_id ?? null)) {
+      await exigirEquipoEnAlcance(this.alcance, req, { unidad_id: (d.unidadId as string | null) ?? null, codigo: actual.codigo }, true);
+    }
     return this.svc.actualizarEquipo(id, this.svc.tenantId(req), d);
   }
 
   @Delete(":id")
   async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await exigirEquipoEnAlcance(this.alcance, req, await this.svc.cargarEquipo(id, this.svc.tenantId(req)), true);
     return this.svc.eliminarEquipo(id, this.svc.tenantId(req));
   }
 }
@@ -937,12 +967,15 @@ export class CalibracionController {
 
   @Get(":id")
   async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    return this.svc.cargarCalibracion(id, this.svc.tenantId(req));
+    const c = await this.svc.cargarCalibracion(id, this.svc.tenantId(req));
+    await exigirEquipoEnAlcance(this.alcance, req, c.equipo ?? {}, false);
+    return c;
   }
 
   @Post()
   async crear(@Body() body: unknown, @Req() req: any) {
     const d = CrearCalibracionSchema.parse(body);
+    await exigirEquipoEnAlcance(this.alcance, req, await this.svc.cargarEquipo(d.equipoId, this.svc.tenantId(req)), true);
     return this.svc.crearCalibracion(
       this.svc.tenantId(req),
       req?.user?.sub ?? req?.user?.id ?? null,
@@ -953,11 +986,15 @@ export class CalibracionController {
   @Patch(":id")
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const d = ActualizarCalibracionSchema.parse(body) as Record<string, unknown>;
+    const c = await this.svc.cargarCalibracion(id, this.svc.tenantId(req));
+    await exigirEquipoEnAlcance(this.alcance, req, c.equipo ?? {}, true);
     return this.svc.actualizarCalibracion(id, this.svc.tenantId(req), d);
   }
 
   @Delete(":id")
   async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const c = await this.svc.cargarCalibracion(id, this.svc.tenantId(req));
+    await exigirEquipoEnAlcance(this.alcance, req, c.equipo ?? {}, true);
     return this.svc.eliminarCalibracion(id, this.svc.tenantId(req));
   }
 }
