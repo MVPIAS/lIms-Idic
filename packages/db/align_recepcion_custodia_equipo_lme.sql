@@ -19,6 +19,9 @@
 --   3. Equipo usado en la captura: fecha y hora del ensayo, T, HR e
 --      incertidumbre por ensayo; «exige equipo» por método (cat_metodo).
 --   4. Parámetros por defecto (editables por el IDIC sin código).
+--   5. Plantillas de informe del LME (tabla de 5 columnas, informe interno e
+--      informe para cliente externo IDIC-PG09-ANEXO 02-02-REV05).
+--   6. Circuito de aprobación del informe del LME en la matriz de firmas.
 -- =============================================================================
 
 -- --- 1. Recepción e identificación de la muestra -----------------------------------
@@ -226,3 +229,190 @@ SELECT t.id, 'recepcion_campo', v.codigo, v.etiqueta, v.orden, v.valor
   ('SVM.identificador', 'PPU o Nº EJTO', 5, '{"tipo":"texto"}')
  ) AS v(codigo, etiqueta, orden, valor)
 ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
+
+-- --- 5. Informes del LME (respuestas del 20-10-2026) --------------------------------
+-- Tres plantillas de informe (tipo I.ENSAYO) con su formato (config-informe.ts):
+--   LME-IT03   informe que genera el LIMS: tabla de 5 columnas
+--              Análisis · Mínimo · Máximo · Resultado (unidad) · Condición, con «-.-».
+--   LME-INT    informe interno: Muestra · Ensayo · Requisito · Resultado · Condición.
+--   PG09A2-LME informe para cliente externo según IDIC-PG09-ANEXO 02-02-REV05:
+--              antecedentes, identificación, normas y métodos con la fecha del
+--              análisis, resultados con termograma, conclusiones y notas.
+-- Solo se insertan si no existen (no pisan ediciones de Gestión de Calidad).
+INSERT INTO plantilla_informe (tenant_id, repid, nombre, tipo, emision, version, activo, cuerpo_html, config_informe)
+SELECT t.id, v.repid, v.nombre, 'I.ENSAYO', 'conjunto', v.version, TRUE, v.cuerpo, v.config::jsonb
+  FROM tenant t
+ CROSS JOIN (VALUES
+  ('LME-IT03', 'Informe de ensayo LME · tabla Análisis / Mínimo / Máximo (LME-PG01-IT03)', 'rev04',
+$cuerpo$<div class="membrete">
+  <div class="escudo">IDIC</div>
+  <div class="org">
+    <b>INSTITUTO DE INVESTIGACIONES Y CONTROL</b>
+    <span>Ejército de Chile &middot; Lab. Materiales Energéticos (LME)</span>
+  </div>
+  <div class="doc">
+    <b>{{certificado.numero}}</b>
+    <span>LME-PG01-IT03 &middot; {{plantilla.version}}</span>
+  </div>
+</div>
+
+<h1>INFORME N.º {{certificado.numero}}</h1>
+<p>Santiago, {{fecha}}</p>
+
+{{#si bpch.empresa}}<table class="meta">
+  <tr><th>Empresa</th><td colspan="3">{{bpch.empresa}}</td></tr>
+  <tr><th>R.U.T.</th><td>{{bpch.rut}}</td><th>Orden de Trabajo</th><td>{{ot.codigo}}</td></tr>
+  <tr><th>Origen del trabajo</th><td>{{bpch.origen}}</td><th>Documento</th><td>{{bpch.documento}}</td></tr>
+  <tr><th>Elemento</th><td colspan="3">{{bpch.elemento_generico}} {{bpch.elemento_especifico}}</td></tr>
+  <tr><th>Lote</th><td>{{bpch.lote}}</td><th>Cantidad</th><td>{{bpch.tamano_lote_muestra}}</td></tr>
+</table>{{/si}}
+{{#no bpch.empresa}}<table class="meta">
+  <tr><th>Cliente</th><td colspan="3">{{cliente.razonSocial}}</td></tr>
+  <tr><th>R.U.T.</th><td>{{cliente.rut}}</td><th>Orden de Trabajo</th><td>{{ot.codigo}}</td></tr>
+  <tr><th>Fecha de recepción</th><td>{{ot.fechaRecepcion}}</td><th>Fecha de emisión</th><td>{{fecha}}</td></tr>
+</table>{{/no}}
+
+<h2>Identificación de la muestra</h2>
+{{identificacion_muestras}}
+
+<h2>Resultados</h2>
+{{tabla_resultados}}
+
+{{anexo_fotografico}}
+
+{{conclusion}}
+
+<div class="firmas">
+  <div class="firma"><span class="linea"></span>Jefe Lab. Materiales Energéticos</div>
+  <div class="firma"><span class="linea"></span>Jefe Departamento Químico</div>
+</div>$cuerpo$,
+   '{"agrupacion":"muestra","columnaMetodo":false,"columnaUnidad":false,"columnasRequisito":"min_max","unidadEnResultado":true,"textoSinCota":"-.-","referencias":false,"anexoFotografico":true,"etiquetas":{"ensayo":"Análisis","minimo":"Mínimo","maximo":"Máximo","resultado":"Resultado","veredicto":"Condición"}}'),
+  ('LME-INT', 'Informe interno LME · Muestra / Ensayo / Requisito / Resultado / Condición', 'rev04',
+$cuerpo$<div class="membrete">
+  <div class="escudo">IDIC</div>
+  <div class="org">
+    <b>INSTITUTO DE INVESTIGACIONES Y CONTROL</b>
+    <span>Ejército de Chile &middot; Lab. Materiales Energéticos (LME)</span>
+  </div>
+  <div class="doc">
+    <b>{{certificado.numero}}</b>
+    <span>Informe interno &middot; {{plantilla.version}}</span>
+  </div>
+</div>
+
+<h1>INFORME INTERNO N.º {{certificado.numero}}</h1>
+
+<table class="meta">
+  <tr><th>Orden de Trabajo</th><td>{{ot.codigo}}</td><th>Fecha de emisión</th><td>{{fecha}}</td></tr>
+  <tr><th>Solicitante</th><td colspan="3">{{cliente.razonSocial}}</td></tr>
+</table>
+
+<h2>Identificación de las muestras</h2>
+{{identificacion_muestras}}
+
+<h2>Resultados</h2>
+{{tabla_resultados}}
+
+{{anexo_fotografico}}
+
+{{conclusion}}
+
+<div class="firmas">
+  <div class="firma"><span class="linea"></span>Jefe Lab. Materiales Energéticos</div>
+</div>$cuerpo$,
+   '{"agrupacion":"unica","columnaMuestra":true,"columnaMetodo":false,"columnaUnidad":false,"unidadEnResultado":true,"referencias":false,"anexoFotografico":true,"etiquetas":{"muestra":"Muestra","ensayo":"Ensayo","requisito":"Requisito","resultado":"Resultado","veredicto":"Condición"}}'),
+  ('PG09A2-LME', 'Informe de ensayos LME · cliente externo (IDIC-PG09 Anexo 02-02 rev05)', 'rev05',
+$cuerpo$<div class="membrete">
+  <div class="escudo">IDIC</div>
+  <div class="org">
+    <b>INSTITUTO DE INVESTIGACIONES Y CONTROL</b>
+    <span>Ejército de Chile &middot; Departamento Químico</span>
+  </div>
+  <div class="doc">
+    <b>O/T N.º {{ot.codigo}}</b>
+    <span>IDIC-PG09-Anexo02-02 &middot; {{plantilla.version}}</span>
+  </div>
+</div>
+
+<h1>INFORME DE ENSAYOS N.º {{certificado.numero}}</h1>
+
+<h2>1. Antecedentes</h2>
+<table class="meta">
+  <tr><th>Cliente</th><td colspan="3">{{cliente.razonSocial}}</td></tr>
+  <tr><th>Atención</th><td>{{ot.solicitante}}</td><th>Contacto</th><td>{{cliente.telefono}}</td></tr>
+  <tr><th>Dirección</th><td colspan="3">{{cliente.direccion}}</td></tr>
+  <tr><th>Fecha O/T</th><td>{{ot.fechaRecepcion}}</td><th>Fecha y hora de muestreo</th><td>No aplica</td></tr>
+  <tr><th>Fecha de recepción del ítem</th><td>{{ot.fechaRecepcion}}</td><th>Fecha y hora del análisis</th><td>Ver punto 3.1</td></tr>
+  <tr><th>Fecha de emisión del informe</th><td colspan="3">{{fecha}}</td></tr>
+</table>
+
+<h2>2. Identificación de la muestra</h2>
+{{identificacion_muestras}}
+
+<h2>3. Identificación de normas, métodos y/o especificaciones técnicas</h2>
+<h3>3.1. Normas y métodos</h3>
+{{tabla_metodos}}
+<h3>3.2. Especificaciones técnicas</h3>
+{{#si ot.descripcionTrabajo}}<p>{{ot.descripcionTrabajo}}</p>{{/si}}
+{{#no ot.descripcionTrabajo}}<p>Las indicadas en la tabla de resultados; sin requisito, «No especificado».</p>{{/no}}
+
+<h2>4. Resultados</h2>
+{{tabla_resultados}}
+{{termograma}}
+
+<h2>5. Conclusiones y/u observaciones</h2>
+{{conclusion}}
+
+<h2>6. Notas aclaratorias</h2>
+<p>Los resultados del presente informe sólo son válidos para las muestras ensayadas por el Laboratorio.</p>
+
+{{anexo_fotografico}}
+
+<div class="firmas">
+  <div class="firma"><span class="linea"></span>Jefe Lab. Materiales Energéticos</div>
+  <div class="firma"><span class="linea"></span>Jefe Sección Química</div>
+  <div class="firma"><span class="linea"></span>Jefe Departamento Químico · Por orden del Director del IDIC</div>
+</div>$cuerpo$,
+   '{"agrupacion":"muestra","columnaMetodo":false,"columnaUnidad":false,"unidadEnResultado":true,"referencias":false,"anexoFotografico":true,"etiquetas":{"ensayo":"Ensayo","requisito":"Requisito","resultado":"Resultado","veredicto":"Condición"}}')
+ ) AS v(repid, nombre, version, cuerpo, config)
+ WHERE NOT EXISTS (SELECT 1 FROM plantilla_informe p WHERE p.tenant_id = t.id AND p.repid = v.repid);
+
+-- --- 6. Circuito de aprobación del informe del LME (20-10-2026) -----------------------
+-- Respuesta del LME: 1 Analista (evaluación) → 2 Jefe de Laboratorio (revisión y
+-- firma) → 3 aprobación técnica («Asesor Técnico» en el texto; Jefe de Sección
+-- en la imagen y en el informe real firmado) → 4 Jefe DQO (aprobación
+-- administrativa y liberación; no aplica a OT interna) → 5 DCO (despacho).
+-- La matriz sembrada para el LME ponía al final la firma de Gestión de Calidad,
+-- que no figura en el circuito: se desactiva y se agrega la aprobación técnica
+-- del Jefe de Sección antes de la oficialización del Jefe DQO. Solo si el LME
+-- conserva la matriz sembrada (no se tocan matrices editadas en Administración).
+DO $$
+DECLARE
+  t RECORD;
+  v_lme UUID;
+  v_calidad UUID;
+  v_depto UUID;
+BEGIN
+  FOR t IN SELECT id FROM tenant LOOP
+    v_lme := NULL; v_calidad := NULL; v_depto := NULL;
+    SELECT id INTO v_lme FROM unidad WHERE tenant_id = t.id AND codigo = 'LME';
+    IF v_lme IS NULL THEN CONTINUE; END IF;
+    SELECT f.id INTO v_calidad FROM flujo_firma f JOIN rol r ON r.id = f.rol_id
+     WHERE f.tenant_id = t.id AND f.unidad_id = v_lme AND f.tipo_documento = 'INFORME_ENSAYO'
+       AND f.activo AND f.orden = 3 AND f.accion = 'FIRMA' AND r.codigo = 'CALIDAD';
+    SELECT f.id INTO v_depto FROM flujo_firma f JOIN rol r ON r.id = f.rol_id
+     WHERE f.tenant_id = t.id AND f.unidad_id = v_lme AND f.tipo_documento = 'INFORME_ENSAYO'
+       AND f.activo AND f.orden = 2 AND f.accion = 'OFICIALIZA' AND r.codigo = 'JEFE_DEPTO';
+    IF v_calidad IS NULL OR v_depto IS NULL THEN CONTINUE; END IF;
+    UPDATE flujo_firma SET activo = FALSE, updated_at = now(),
+           descripcion = 'Firma de Gestión de Calidad (desactivada: no figura en el circuito del LME del 20-10-2026)'
+     WHERE id = v_calidad;
+    UPDATE flujo_firma SET orden = 3, updated_at = now() WHERE id = v_depto;
+    INSERT INTO flujo_firma (tenant_id, tipo_documento, unidad_id, orden, accion, rol_id, nivel_unidad, obligatorio, activo, descripcion)
+    SELECT t.id, 'INFORME_ENSAYO', v_lme, 2, 'APRUEBA', r.id, 'SECCION', TRUE, TRUE,
+           'Aprobación técnica (Jefe de Sección Química; el LME la nombra «Asesor Técnico»: por confirmar)'
+      FROM rol r WHERE r.codigo = 'JEFE_SECCION' AND (r.tenant_id = t.id OR r.tenant_id IS NULL)
+       AND NOT EXISTS (SELECT 1 FROM flujo_firma f WHERE f.tenant_id = t.id AND f.unidad_id = v_lme
+                          AND f.tipo_documento = 'INFORME_ENSAYO' AND f.activo AND f.accion = 'APRUEBA');
+  END LOOP;
+END $$;

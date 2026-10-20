@@ -22,9 +22,11 @@ import {
   type PasoNuevo,
 } from "./reglas-emision";
 import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
+import { camposDeLaboratorio } from "../recepcion/reglas-recepcion";
 import {
   armarInforme,
   filaInspeccion,
+  filasMetodos,
   modalidadSugerida,
   tieneRequisito,
   NOMBRE_MODALIDAD,
@@ -34,6 +36,9 @@ import {
 } from "./filas-informe";
 import {
   bloqueAnexo,
+  bloqueIdentificacion,
+  bloqueMetodos,
+  bloqueTermograma,
   bloqueConclusion,
   bloquePortadaIvc,
   bloqueReferencias,
@@ -41,6 +46,7 @@ import {
   completarCuerpo,
   type DatosPortada,
   type FotoInforme,
+  type IdentificacionMuestra,
 } from "./bloques-informe";
 
 /** Fotos como máximo en el anexo fotográfico de un documento. */
@@ -204,6 +210,7 @@ export class PlantillaRenderService {
         nReplicas: replicas,
         observacion: r.observacion,
         veredicto: r.veredicto,
+        fechaEnsayo: r.fechaEnsayo ?? null,
         seccion: u?.seccion ?? null,
         componente: u?.componente ?? null,
         orden: u?.orden ?? null,
@@ -211,7 +218,63 @@ export class PlantillaRenderService {
     });
 
     const bpch = await this.cabeceraBpch(otId, muestras);
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch };
+    const identificacion = await this.identificacionMuestras(ot.tenantId, ot.unidadPrincipal, muestras, ot.clienteId);
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion };
+  }
+
+  /**
+   * Identificación de las muestras para {{identificacion_muestras}}: Nº interno,
+   * producto, cliente (si no es el de la OT), identificación del cliente y los
+   * datos propios de la recepción con la etiqueta que les da el laboratorio
+   * (Catálogo › Parámetros · recepcion_campo).
+   */
+  private async identificacionMuestras(
+    tenantId: string,
+    unidadId: string | null,
+    muestras: { codigo: string; nombre: string | null; numeroInterno?: bigint | null; catElementoId: string | null; clienteId: string | null;
+      identificacionCliente: string | null; datosRecepcion?: unknown; ubicacion?: string | null }[],
+    clienteOt: string | null = null,
+  ): Promise<IdentificacionMuestra[]> {
+    try {
+      const elementos = [...new Set(muestras.map((m) => m.catElementoId).filter((x): x is string => !!x))];
+      const clientes = [...new Set(muestras.map((m) => m.clienteId).filter((x): x is string => !!x))];
+      const [prod, cli, lab, campos] = await Promise.all([
+        elementos.length ? this.prisma.catElemento.findMany({ where: { id: { in: elementos } }, select: { id: true, nombre: true } }) : [],
+        clientes.length ? this.prisma.cliente.findMany({ where: { id: { in: clientes } }, select: { id: true, razonSocial: true } }) : [],
+        unidadId ? this.prisma.$queryRawUnsafe<{ codigo: string }[]>(`SELECT codigo FROM unidad WHERE id = $1::uuid`, unidadId) : [],
+        this.prisma.$queryRawUnsafe<{ codigo: string; etiqueta: string; orden: number; valor: string | null; activo: boolean }[]>(
+          `SELECT codigo, etiqueta, orden, valor, activo FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'recepcion_campo'`,
+          tenantId,
+        ),
+      ]);
+      const defs = camposDeLaboratorio(campos, lab[0]?.codigo ?? null);
+      const nombreProd = new Map(prod.map((x) => [x.id, x.nombre]));
+      const nombreCli = new Map(cli.map((x) => [x.id, x.razonSocial]));
+      return muestras.map((m) => {
+        const d = (m.datosRecepcion ?? {}) as Record<string, unknown>;
+        const datos = defs
+          .filter((c) => c.tipo !== "casilla" && !["clase_custodia", "ubicacion"].includes(c.codigo))
+          .map((c) => {
+            const v = d[c.codigo];
+            if (v === null || v === undefined || v === "") return null;
+            const valor = c.tipo === "lista" ? c.opciones.find((o) => o.valor === v)?.etiqueta ?? String(v) : String(v);
+            return { etiqueta: c.etiqueta, valor };
+          })
+          .filter((x): x is { etiqueta: string; valor: string } => !!x);
+        return {
+          codigo: m.codigo,
+          nombre: m.nombre,
+          numeroInterno: m.numeroInterno != null ? String(m.numeroInterno) : null,
+          producto: m.catElementoId ? nombreProd.get(m.catElementoId) ?? null : null,
+          // El cliente de la muestra solo se imprime si no es el de la OT (p. ej. el importador).
+          cliente: m.clienteId && m.clienteId !== clienteOt ? nombreCli.get(m.clienteId) ?? null : null,
+          identificacionCliente: m.identificacionCliente,
+          datos,
+        };
+      });
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -280,7 +343,7 @@ export class PlantillaRenderService {
       const filas = await this.prisma.$queryRaw<
         { mime: string; datos: string; pie: string | null; resultado_id: string | null; muestra_id: string | null }[]
       >`SELECT mime, datos, pie, resultado_id, muestra_id FROM ot_foto
-         WHERE ot_id = ${otId}::uuid AND en_informe AND deleted_at IS NULL
+         WHERE ot_id = ${otId}::uuid AND en_informe AND deleted_at IS NULL AND tipo <> 'termograma'
          ORDER BY orden, created_at LIMIT ${MAX_FOTOS_INFORME}`;
       const codigo = new Map(muestras.map((m) => [m.id, m.codigo]));
       return filas.map((f) => {
@@ -294,6 +357,26 @@ export class PlantillaRenderService {
           titulo: p?.titulo ?? (deMuestra ? `Muestra ${deMuestra}` : null),
         };
       });
+    } catch {
+      return [];
+    }
+  }
+
+  /** Termogramas de la OT marcados para el informe ({{termograma}}), en su orden. */
+  private async termogramasDelInforme(otId: string, muestras: { id: string; codigo: string }[]): Promise<FotoInforme[]> {
+    try {
+      const filas = await this.prisma.$queryRaw<{ mime: string; datos: string; pie: string | null; muestra_id: string | null }[]>`
+        SELECT mime, datos, pie, muestra_id FROM ot_foto
+         WHERE ot_id = ${otId}::uuid AND en_informe AND deleted_at IS NULL AND tipo = 'termograma'
+         ORDER BY orden, created_at LIMIT ${MAX_FOTOS_INFORME}`;
+      const codigo = new Map(muestras.map((m) => [m.id, m.codigo]));
+      return filas.map((f) => ({
+        mime: f.mime,
+        datos: f.datos,
+        pie: f.pie,
+        punto: null,
+        titulo: f.muestra_id && codigo.get(f.muestra_id) ? `Muestra ${codigo.get(f.muestra_id)}` : null,
+      }));
     } catch {
       return [];
     }
@@ -458,6 +541,9 @@ export class PlantillaRenderService {
             })
           : "",
       tabla_inspeccion: tablaInspeccion(this.filasInspeccion(ctx)),
+      tabla_metodos: bloqueMetodos(filasMetodos(ctx.paraInforme)),
+      termograma: bloqueTermograma(await this.termogramasDelInforme(otId, ctx.muestras)),
+      identificacion_muestras: bloqueIdentificacion(ctx.identificacion),
     };
     // Contexto de otros módulos: nunca pisa una clave del motor.
     for (const [clave, proveedor] of this.proveedores) {

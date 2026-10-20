@@ -53,7 +53,7 @@ export const CAMPOS_PORTADA: { clave: keyof Portada; etiqueta: string; max: numb
 
 /** Formato del informe de una plantilla (config-informe.ts del servidor). */
 export interface FormatoInforme {
-  agrupacion: "muestra" | "seccion";
+  agrupacion: "muestra" | "seccion" | "unica";
   numeracion: string | null;
   columnaMetodo: boolean;
   columnaUnidad: boolean;
@@ -62,7 +62,15 @@ export interface FormatoInforme {
   anexoFotografico: boolean;
   conclusionFija: string | null;
   portada: "ninguna" | "ivc";
-  etiquetas: { ensayo: string; metodo: string; unidad: string; requisito: string; resultado: string; veredicto: string };
+  etiquetas: {
+    ensayo: string; metodo: string; unidad: string; requisito: string; resultado: string; veredicto: string;
+    minimo: string; maximo: string; muestra: string;
+  };
+  /** texto = columna «Requisito»; min_max = columnas Mínimo / Máximo (LME). */
+  columnasRequisito: "texto" | "min_max";
+  unidadEnResultado: boolean;
+  columnaMuestra: boolean;
+  textoSinCota: string;
 }
 
 /** Lo que el servidor propone para el documento (POST /informes/propuesta). */

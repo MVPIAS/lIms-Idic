@@ -20,6 +20,9 @@ const ETIQUETAS: { clave: keyof FormatoInforme["etiquetas"]; texto: string }[] =
   { clave: "requisito", texto: "Columna del requisito" },
   { clave: "resultado", texto: "Columna del resultado" },
   { clave: "veredicto", texto: "Columna del veredicto" },
+  { clave: "minimo", texto: "Columna del mínimo" },
+  { clave: "maximo", texto: "Columna del máximo" },
+  { clave: "muestra", texto: "Columna de la muestra" },
 ];
 
 export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantillaId: string; onGuardado?: () => void }) {
@@ -82,8 +85,22 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
           <select id="fmt-agrup" value={f.agrupacion} onChange={(e) => poner("agrupacion", e.target.value as FormatoInforme["agrupacion"])}>
             <option value="muestra">Una tabla por muestra</option>
             <option value="seccion">Secciones y componentes numerados</option>
+            <option value="unica">Una sola tabla con todas las muestras</option>
           </select>
         </div>
+        <div className="field">
+          <label htmlFor="fmt-req">Requisito</label>
+          <select id="fmt-req" value={f.columnasRequisito} onChange={(e) => poner("columnasRequisito", e.target.value as FormatoInforme["columnasRequisito"])}>
+            <option value="texto">Una columna «Requisito» (6,5 – 8,5; Máx. 0,05…)</option>
+            <option value="min_max">Dos columnas: Mínimo y Máximo</option>
+          </select>
+        </div>
+        {f.columnasRequisito === "min_max" && (
+          <div className="field">
+            <label htmlFor="fmt-sincota">Texto de una cota vacía</label>
+            <input id="fmt-sincota" maxLength={10} value={f.textoSinCota} onChange={(e) => poner("textoSinCota", e.target.value)} />
+          </div>
+        )}
         <div className="field">
           <label htmlFor="fmt-num">Punto donde empiezan los resultados</label>
           <input id="fmt-num" value={f.numeracion ?? ""} maxLength={8} inputMode="decimal"
@@ -113,6 +130,8 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
               ["columnaUnidad", "Columna de la unidad"],
               ["referencias", "Cuadro de referencias (No cumple)"],
               ["anexoFotografico", "Anexo fotográfico"],
+              ["unidadEnResultado", "Unidad junto al resultado"],
+              ["columnaMuestra", "Columna de la muestra siempre"],
             ] as const).map(([k, t]) => (
               <label key={k} style={{ display: "flex", gap: 5, alignItems: "center" }}>
                 <input type="checkbox" checked={f[k]} onChange={(e) => poner(k, e.target.checked)} /> {t}
