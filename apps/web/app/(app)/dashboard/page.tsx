@@ -49,7 +49,8 @@ const GRUPOS: Grupo[] = [
       { clave: "ot", label: "Órdenes de trabajo", recurso: "ot", href: "/ot", icono: "🗂", cls: "k-blue", perm: "ot.ver", ayuda: "OT registradas" },
       { clave: "muestras", label: "Muestras", recurso: "muestras", href: "/muestras", icono: "🧫", cls: "k-green", perm: "muestra.ver", ayuda: "Muestras registradas" },
       { clave: "equipos", label: "Equipos", recurso: "equipos", href: "/equipos", icono: "⚙", cls: "k-amber", perm: "equipo.ver", ayuda: "Equipos en inventario" },
-      { clave: "certificados", label: "Certificados", recurso: "certificados", href: "/certificados", icono: "📜", cls: "k-violet", perm: "ot.ver", ayuda: "Certificados emitidos" },
+      // Misma fuente que «Informes y certificados»: acotada al alcance por laboratorio (la ruta /certificados se retiró).
+      { clave: "certificados", label: "Informes y certificados", recurso: "informes/documentos", href: "/certificados", icono: "📜", cls: "k-violet", perm: "ot.ver", ayuda: "Documentos emitidos en su alcance" },
     ],
   },
   {
