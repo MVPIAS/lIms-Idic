@@ -8,6 +8,7 @@
  * Rutas legacy duplicadas del catálogo (/metodos, /analitos, /gran-grupos,
  * /grupos) ya no aparecen: redirigen a su equivalente v2 (next.config.js).
  */
+import { MOTOR_FLUJOS_VISIBLE } from "./motorFlujos";
 
 export type Perm = string | string[];
 export interface ItemNav {
@@ -171,7 +172,8 @@ export const NAV: SeccionNav[] = [
       { href: "/formatos-informe", label: "Formatos de informe", icon: "🧾", perm: "catalogo.gestionar", claves: "veredicto occ oi dgmn" },
       { href: "/tipos-muestra", label: "Tipos de muestra", icon: "🌡", perm: "muestra.ver" },
       { href: "/limites", label: "Límites (clásico)", icon: "📏", perm: "metodo.ver" },
-      { href: "/flujos", label: "Diseñador de flujos", icon: "⛓", perm: "flujo.ver" },
+      // Motor de flujos genérico: oculto salvo que se reactive (lib/motorFlujos.ts).
+      ...(MOTOR_FLUJOS_VISIBLE ? [{ href: "/flujos", label: "Diseñador de flujos", icon: "⛓", perm: "flujo.ver" }] : []),
     ],
   },
   {

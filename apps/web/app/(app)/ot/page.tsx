@@ -49,19 +49,6 @@ const estadoBadge = (e: string) => {
   return <span className={`pill ${map[e] ?? "gray"}`}>{e ?? "—"}</span>;
 };
 
-// Indicador de flujo (BPM) activo: estado de la instancia + paso actual.
-const flujoBadge = (f: any) => {
-  if (!f) return <span className="pill gray">sin flujo</span>;
-  const color = f.estado === "completado" ? "green" : f.estado === "cancelado" ? "red" : "blue";
-  const paso = f.pasoActual;
-  return (
-    <span title={paso ? `${paso.tipo} · ${paso.actividad}` : f.estado}>
-      <span className={`pill ${color}`}>{f.estado}</span>
-      {paso ? <small style={{ marginLeft: 6, color: "var(--muted)" }}>#{paso.numero} {paso.actividad}</small> : null}
-    </span>
-  );
-};
-
 const codigoDe = (r: any) => r.codigo ?? r.numero ?? r.id?.slice(0, 8) ?? "";
 
 /** Atajos de filtro. Cada uno equivale a parámetros de GET /ot. */
@@ -233,7 +220,6 @@ export default function OtPage() {
     { key: "prioridad", label: "Prioridad", value: (r) => r.prioridad ?? "normal", render: (r) => r.prioridad ?? "normal" },
     { key: "estado", label: "Estado", value: (r) => r.estado ?? "", render: (r) => estadoBadge(r.estado) },
     { key: "origen", label: "Origen", value: (r) => `${r.origenTrabajo ?? ""} ${r.opiPendiente ? "OPI pendiente" : ""} ${r.conCobro === false ? "Sin cobro" : ""}`, render: (r) => origenBadges(r) },
-    { key: "flujo", label: "Flujo", sortable: false, filter: false, value: (r) => r.flujo?.estado ?? "", render: (r) => flujoBadge(r.flujo) },
   ];
 
   const meta = res?.meta;
