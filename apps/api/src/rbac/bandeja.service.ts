@@ -275,6 +275,29 @@ export class BandejaService {
         ),
     };
 
+    // Órdenes internas (frente r1b): las que LLEGAN a sus laboratorios (destino) y
+    // las que volvieron con su informe a las OT de sus laboratorios (origen).
+    const destinoOi = `JOIN cat_familia f ON f.id = oi.destino_lab
+           JOIN unidad u ON u.tenant_id = f.tenant_id AND u.activa
+            AND f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))`;
+    const qOi = {
+      porAtender: () =>
+        this.contar(
+          `SELECT count(DISTINCT oi.id) AS n FROM orden_interna oi ${destinoOi}
+            WHERE oi.tenant_id = COALESCE($1::uuid, oi.tenant_id) AND oi.deleted_at IS NULL AND oi.estado IN ('abierta', 'recibida')
+              AND ($2::uuid[] IS NULL OR u.id = ANY($2::uuid[]))`,
+          tenant,
+          unidades,
+        ).catch(() => 0),
+      porIntegrar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM orden_interna oi JOIN orden_trabajo o ON o.id = oi.ot_id
+            WHERE ${otScope} AND oi.deleted_at IS NULL AND oi.estado = 'cerrada' AND oi.aceptada_at IS NULL`,
+          tenant,
+          unidades,
+        ).catch(() => 0),
+    };
+
     const item = (
       clave: string,
       titulo: string,
@@ -331,6 +354,10 @@ export class BandejaService {
       item("informes_por_oficializar", "Informes por oficializar", "Informes y certificados de su ámbito que esperan firmas: aún no son oficiales", await q.documentosEnFirma(), "/certificados?estado=en_firma", "warn");
     const sinOt = async () =>
       item("cotizaciones_aceptadas_sin_ot", "Cotizaciones aceptadas sin OT", "Cotizaciones aceptadas a las que aún no se les creó OT", await q.cotizacionesSinOt(), "/cotizaciones?estado=aceptada&sinOt=1", "warn");
+    const oiPorAtender = async () =>
+      item("oi_por_atender", "Órdenes internas por atender", "Órdenes internas de otros laboratorios por recibir o responder", await qOi.porAtender(), "/ordenes-internas", "warn");
+    const oiPorIntegrar = async () =>
+      item("oi_por_integrar", "Informes internos por integrar", "Órdenes internas que volvieron con su informe: déles por recibido", await qOi.porIntegrar(), "/ordenes-internas?vista=todas&estado=cerrada", "warn");
     const nc = async () =>
       item("nc_abiertas", "No conformidades abiertas", "NC abiertas, en proceso o en verificación", await q.ncAbiertas(), "/no-conformidades", "warn");
 
@@ -348,7 +375,7 @@ export class BandejaService {
       case "REVISOR":
         return all([porRevisar, asignadas, devueltos, porVencer, firmas]);
       case "JEFE_LAB":
-        return all([sinAsignar, porRevisar, porAprobar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar]);
+        return all([sinAsignar, porRevisar, porAprobar, oiPorAtender, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar]);
       case "JEFE_SECCION":
       case "JEFE_DEPTO":
         return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas]);
