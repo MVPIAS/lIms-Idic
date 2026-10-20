@@ -6,6 +6,7 @@ import { DEV_TENANT } from "../common/base-crud.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
+import { AlcanceService } from "../rbac/alcance.service";
 
 /**
  * SVT8 · Búsqueda de OT de INTERNACIÓN (IDIC-PG 24 Anexo 03) con la tasa del
@@ -31,6 +32,8 @@ export interface FiltroInternacion {
   estado?: string;
   cobro?: string;
   limit?: number;
+  /** Alcance: null = todas; si no, solo las OT cuyo laboratorio responsable está aquí. */
+  unidades?: string[] | null;
 }
 
 @Injectable()
@@ -111,6 +114,7 @@ export class InternacionService {
       where.push(`(cl.razon_social ILIKE ${q} OR cl.rut ILIKE ${q})`);
     }
     if (f.estado?.trim()) where.push(`ot.estado = ${p(f.estado.trim())}`);
+    if (f.unidades) where.push(`ot.unidad_principal = ANY(${p(f.unidades)}::uuid[])`);
     const limit = Math.min(Math.max(Number(f.limit) || 200, 1), 1000);
 
     const sql = `
@@ -171,12 +175,29 @@ export class InternacionService {
 @AmbitoUnidad("BPCH", "DCO")
 @Controller("internaciones")
 export class InternacionController {
-  constructor(private readonly svc: InternacionService) {}
+  constructor(
+    private readonly svc: InternacionService,
+    private readonly alcance: AlcanceService,
+  ) {}
 
+  /**
+   * Alcance de las OT de internación (frente L · C7): la unidad que inspecciona
+   * (laboratorio responsable de la OT) tiene que estar en el alcance. Quien
+   * tiene en su alcance la Sección Certificación de la Conformidad las ve todas
+   * (carril SCC del IDIC-PG 24), igual que en /bpch/internaciones.
+   */
+  private async unidadesVisibles(req: any): Promise<string[] | null> {
+    const filtro = await this.alcance.filtroUnidades(req);
+    if (filtro === null) return null;
+    const scc = (await this.alcance.arbol(req?.user?.tenantId)).porCodigo.get("SCC")?.id;
+    return scc && filtro.includes(scc) ? null : filtro;
+  }
+
+  // La usa /bpch/internaciones (tasa, cobro y «OT de internación sin expediente BPCH").
   @Get("ot")
   @RequierePermiso("ot.ver")
   @ApiOperation({ summary: "OT de internación con tasa 1,5 % y estado de cobro (?resolucion=&empresa=&estado=&cobro=)" })
-  buscar(
+  async buscar(
     @Query("resolucion") resolucion?: string,
     @Query("empresa") empresa?: string,
     @Query("estado") estado?: string,
@@ -190,6 +211,7 @@ export class InternacionController {
       estado,
       cobro,
       limit: limit ? Number(limit) : undefined,
+      unidades: await this.unidadesVisibles(req),
     });
   }
 }
