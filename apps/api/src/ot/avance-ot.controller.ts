@@ -37,12 +37,19 @@ export class AvanceOtService {
       ot.cotizacionId
         ? this.prisma.cotizacion.findFirst({ where: { id: ot.cotizacionId }, select: { codigo: true, estado: true } })
         : null,
+      // Recepción incompleta: sin toma o condición, o sin producto donde el laboratorio
+      // lo exige (parámetro recepcion_producto_obligatorio, recepción R1).
       this.prisma.$queryRawUnsafe<{ total: number; incompletas: number; veredictos: (string | null)[] | null }[]>(
         `SELECT count(*)::int AS total,
-                count(*) FILTER (WHERE m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL)::int AS incompletas,
+                count(*) FILTER (WHERE m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL
+                                    OR (m.cat_elemento_id IS NULL AND EXISTS (
+                                          SELECT 1 FROM parametro_sistema ps JOIN unidad u ON u.id = $2::uuid
+                                           WHERE ps.tenant_id = m.tenant_id AND ps.categoria = 'recepcion_producto_obligatorio'
+                                             AND ps.activo AND upper(ps.codigo) = upper(u.codigo))))::int AS incompletas,
                 array_agg(m.veredicto ORDER BY m.codigo) AS veredictos
            FROM muestra m WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL`,
         id,
+        ot.unidadPrincipal,
       ),
       // Asignados a la OT o a alguno de sus ensayos (mismo criterio que «Mis OT»).
       this.prisma.$queryRawUnsafe<{ nombre: string }[]>(
