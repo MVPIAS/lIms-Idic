@@ -25,3 +25,28 @@ export function puedeOperarEnUnidad(
   if (visibles.includes(unidadId)) return true;
   return Boolean(sccId && visibles.includes(sccId));
 }
+
+/**
+ * Expedientes BPCH con unidad (prototipos, clasificaciones, internaciones,
+ * reinspecciones) · frente L · C8. Filtro de unidades para listarlos:
+ *  · null (todos) con alcance global o con la SCC en el alcance: la Sección
+ *    Certificación de la Conformidad y la jefatura del BPCH ven y gestionan
+ *    todo;
+ *  · si no, las unidades visibles: cada sucursal y la Delegación Nº 11 ven y
+ *    gestionan solo los de su unidad.
+ */
+export function filtroExpedientesBpch(visibles: string[] | null, sccId: string | null): string[] | null {
+  if (visibles === null) return null;
+  if (sccId && visibles.includes(sccId)) return null;
+  return visibles;
+}
+
+/**
+ * ¿El expediente (por la unidad que lo inspecciona, o la de su OT) cabe en el
+ * filtro? Un expediente sin unidad todavía (prototipo recién ingresado,
+ * clasificación sin OT) solo lo ven quienes ven todo.
+ */
+export function expedienteVisible(filtro: string[] | null, unidadId: string | null | undefined): boolean {
+  if (filtro === null) return true;
+  return !!unidadId && filtro.includes(unidadId);
+}

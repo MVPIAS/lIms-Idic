@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
@@ -7,6 +7,7 @@ import { RequierePermiso } from "../../auth/permisos.decorator";
 import { DEV_TENANT } from "../../common/base-crud.service";
 import { AmbitoUnidad } from "../../rbac/ambito-unidad.guard";
 import { ClasificacionService } from "./clasificacion.service";
+import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 
 const tenant = (req: any) => req?.user?.tenantId ?? DEV_TENANT;
 const usuario = (req: any): string | null => req?.user?.sub ?? null;
@@ -17,7 +18,45 @@ const usuario = (req: any): string | null => req?.user?.sub ?? null;
 @AmbitoUnidad("BPCH")
 @Controller("bpch/clasificaciones")
 export class ClasificacionController {
-  constructor(private readonly svc: ClasificacionService) {}
+  constructor(
+    private readonly svc: ClasificacionService,
+    private readonly comun: OtDesdeProcesoService,
+  ) {}
+
+  /**
+   * Alcance por unidad (frente L · C8): las sucursales y la Delegación Nº 11 ven
+   * y gestionan solo las clasificaciones de su unidad (la de su OT o la de los
+   * prototipos que la usan); la Sección Certificación de la Conformidad y la
+   * jefatura del BPCH, todas. Listado, detalle, documentos y escrituras.
+   */
+  private async exigir(req: any, id: string) {
+    const filtro = await this.comun.filtroExpedientes(req);
+    if (filtro === null) return;
+    const unidades = await this.svc.unidadesDe(tenant(req), id);
+    if (!unidades.some((u) => filtro.includes(u)))
+      throw new ForbiddenException(
+        unidades.length
+          ? "Fuera de su alcance: la clasificación es de una unidad que usted no tiene asignada."
+          : "Fuera de su alcance: la clasificación no tiene unidad; la gestionan la Sección Certificación de la Conformidad y la jefatura del BPCH.",
+      );
+  }
+
+  /** Al crear o vincular una OT: la OT tiene que ser de su alcance (sin OT, solo quien ve todo). */
+  private async exigirOt(req: any, body: unknown, obligatoria: boolean) {
+    const filtro = await this.comun.filtroExpedientes(req);
+    if (filtro === null) return;
+    const otId = body && typeof body === "object" ? (body as { otId?: unknown }).otId : undefined;
+    if (!otId) {
+      if (obligatoria)
+        throw new ForbiddenException(
+          "Fuera de su alcance: indique la OT de su unidad; una clasificación sin OT la registran la Sección Certificación de la Conformidad y la jefatura del BPCH.",
+        );
+      return;
+    }
+    const unidad = typeof otId === "string" && /^[0-9a-f-]{36}$/i.test(otId) ? await this.svc.unidadDeOt(tenant(req), otId) : null;
+    if (!unidad || !filtro.includes(unidad))
+      throw new ForbiddenException("Fuera de su alcance: la OT indicada es de una unidad que usted no tiene asignada.");
+  }
 
   @Get("config")
   @RequierePermiso("bpch.clasificacion.ver")
@@ -29,13 +68,18 @@ export class ClasificacionController {
   @Get()
   @RequierePermiso("bpch.clasificacion.ver")
   @ApiOperation({ summary: "Clasificaciones (?q=&estado=&vigentes=1)" })
-  listar(@Query("q") q: string, @Query("estado") estado: string, @Query("vigentes") vigentes: string, @Query("limit") limit: string, @Req() req: any) {
-    return this.svc.listar(tenant(req), { q, estado, vigentes: vigentes === "1" || vigentes === "true", limit: Number(limit) || undefined });
+  async listar(@Query("q") q: string, @Query("estado") estado: string, @Query("vigentes") vigentes: string, @Query("limit") limit: string, @Req() req: any) {
+    return this.svc.listar(
+      tenant(req),
+      { q, estado, vigentes: vigentes === "1" || vigentes === "true", limit: Number(limit) || undefined },
+      await this.comun.filtroExpedientes(req),
+    );
   }
 
   @Get(":id")
   @RequierePermiso("bpch.clasificacion.ver")
-  detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
     return this.svc.detalle(tenant(req), id);
   }
 
@@ -43,6 +87,7 @@ export class ClasificacionController {
   @RequierePermiso("bpch.clasificacion.ver")
   @ApiOperation({ summary: "Documento de clasificación (HTML sellado)" })
   async documento(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
+    await this.exigir(req, id);
     const html = await this.svc.html(tenant(req), id);
     res.set({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:" });
     res.send(html);
@@ -52,6 +97,7 @@ export class ClasificacionController {
   @RequierePermiso("bpch.clasificacion.ver")
   @ApiOperation({ summary: "Documento de clasificación (PDF)" })
   async pdf(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
+    await this.exigir(req, id);
     const { buffer, nombre } = await this.svc.pdf(tenant(req), id);
     res.set({
       "Content-Type": "application/pdf",
@@ -64,46 +110,54 @@ export class ClasificacionController {
   @Post()
   @RequierePermiso("bpch.clasificacion.registrar")
   @ApiOperation({ summary: "Nueva sustancia (borrador) con sus pruebas ONU" })
-  crear(@Body() body: unknown, @Req() req: any) {
+  async crear(@Body() body: unknown, @Req() req: any) {
+    await this.exigirOt(req, body, true);
     return this.svc.crear(tenant(req), usuario(req), body);
   }
 
   @Patch(":id")
   @RequierePermiso("bpch.clasificacion.registrar")
-  editar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+  async editar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigir(req, id);
+    await this.exigirOt(req, body, false);
     return this.svc.editar(tenant(req), id, body);
   }
 
   @Post(":id/registrar")
   @RequierePermiso("bpch.clasificacion.registrar")
   @ApiOperation({ summary: "Registrar la clasificación (queda «registrada», a la espera de aprobación)" })
-  registrar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async registrar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
     return this.svc.registrar(tenant(req), id, usuario(req));
   }
 
   @Post(":id/reclasificar")
   @RequierePermiso("bpch.clasificacion.registrar")
   @ApiOperation({ summary: "Nueva versión (borrador) de una clasificación aprobada" })
-  reclasificar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async reclasificar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
     return this.svc.reclasificar(tenant(req), id, usuario(req));
   }
 
   @Post(":id/aprobar")
   @RequierePermiso("bpch.clasificacion.aprobar")
   @ApiOperation({ summary: "Aprobar (no quien clasificó) y generar el documento sellado" })
-  aprobar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async aprobar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
     return this.svc.aprobar(tenant(req), id, usuario(req));
   }
 
   @Post(":id/devolver")
   @RequierePermiso("bpch.clasificacion.aprobar")
-  devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+  async devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigir(req, id);
     return this.svc.devolver(tenant(req), id, usuario(req), body);
   }
 
   @Post(":id/anular")
   @RequierePermiso("bpch.clasificacion.aprobar")
-  anular(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+  async anular(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigir(req, id);
     return this.svc.anular(tenant(req), id, usuario(req), body);
   }
 }

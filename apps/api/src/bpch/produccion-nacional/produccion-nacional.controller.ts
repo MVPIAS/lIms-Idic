@@ -13,19 +13,23 @@ const usuario = (req: any): string | null => req?.user?.sub ?? null;
 const uuidOpcional = (v?: string) => (v && /^[0-9a-f-]{36}$/i.test(v) ? v : undefined);
 
 /**
- * Producción Nacional (BPCH). Lectura: ámbito BPCH y Comercial (DCO recibe el
- * informe técnico, base de la tasa). Escrituras: solo la rama BPCH (el ámbito del
- * método manda sobre el de la clase), además de su permiso.
+ * Producción Nacional (BPCH). Lectura: ámbito BPCH Certificación (la rama BPCH
+ * sin la Delegación Nº 11) y Comercial (DCO recibe el informe técnico, base de
+ * la tasa). Escrituras: solo BPCH Certificación (el ámbito del método manda
+ * sobre el de la clase), además de su permiso.
  */
 @ApiTags("bpch · producción nacional")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
-@AmbitoUnidad("BPCH", "DCO")
+@AmbitoUnidad("BPCH_CERT", "DCO")
 @Controller("bpch/pn")
 export class ProduccionNacionalController {
   constructor(private readonly svc: ProduccionNacionalService) {}
 
+  // Configuración y búsqueda de fabricantes: también las usan las fichas de
+  // prototipos y clasificaciones, que alcanzan a la unidad con trabajo asignado.
   @Get("config")
+  @AmbitoUnidad("BPCH", "DCO")
   @RequierePermiso("bpch.pn.ver")
   @ApiOperation({ summary: "Unidades de BPCH (sucursales, SCC, D11) y tipos de cliente vigentes" })
   config(@Req() req: any) {
@@ -35,6 +39,7 @@ export class ProduccionNacionalController {
   /* ------------------------------------------------------------ fabricantes */
 
   @Get("fabricantes")
+  @AmbitoUnidad("BPCH", "DCO")
   @RequierePermiso("bpch.pn.ver")
   @ApiOperation({ summary: "Fabricantes con RAF, o búsqueda de clientes (?q= RUT o razón social)" })
   fabricantes(@Query("q") q: string, @Req() req: any) {
@@ -42,7 +47,7 @@ export class ProduccionNacionalController {
   }
 
   @Post("fabricantes")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   @ApiOperation({ summary: "Alta del fabricante (se registra como cliente)" })
   crearFabricante(@Body() body: unknown, @Req() req: any) {
@@ -58,7 +63,7 @@ export class ProduccionNacionalController {
   }
 
   @Post("rafs")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   @ApiOperation({ summary: "Registrar la RAF DGMN (línea fija o móvil) con sus documentos legales" })
   crearRaf(@Body() body: unknown, @Req() req: any) {
@@ -66,14 +71,14 @@ export class ProduccionNacionalController {
   }
 
   @Patch("rafs/:id")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   editarRaf(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.editarRaf(tenant(req), id, body);
   }
 
   @Post("rafs/:id/anular")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   anularRaf(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.anularRaf(tenant(req), id, usuario(req), body);
@@ -101,7 +106,7 @@ export class ProduccionNacionalController {
   }
 
   @Post("oc")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   @ApiOperation({ summary: "Registrar la O/C operativa anual (vigencia, cobro, productos y cantidades)" })
   crearOc(@Body() body: unknown, @Req() req: any) {
@@ -109,21 +114,21 @@ export class ProduccionNacionalController {
   }
 
   @Patch("oc/:id")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   editarOc(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.editarOc(tenant(req), id, body);
   }
 
   @Post("oc/:id/productos")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   agregarProducto(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.agregarProducto(tenant(req), id, body);
   }
 
   @Patch("oc/:id/productos/:productoId")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   editarProducto(
     @Param("id", ParseUUIDPipe) id: string,
@@ -136,7 +141,7 @@ export class ProduccionNacionalController {
 
   /** Asociar, cambiar o quitar la clasificación del producto con motivo (queda en el historial). */
   @Post("oc/:id/productos/:productoId/clasificacion")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   @ApiOperation({ summary: "Asociar o cambiar la clasificación (aprobada) de un producto de la O/C, con motivo e historial" })
   cambiarClasificacion(
@@ -149,14 +154,14 @@ export class ProduccionNacionalController {
   }
 
   @Post("oc/:id/cerrar")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   cerrarOc(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.cerrarOc(tenant(req), id, usuario(req));
   }
 
   @Post("oc/:id/anular")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   anularOc(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.anularOc(tenant(req), id, usuario(req), body);
@@ -165,7 +170,7 @@ export class ProduccionNacionalController {
   /* -------------------------------------------------------------- programa */
 
   @Post("oc/:id/programa")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.programar")
   @ApiOperation({ summary: "Programar inspecciones (mes, unidad, producto, lugar, lote, cantidad)" })
   agregarLineas(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
@@ -173,21 +178,21 @@ export class ProduccionNacionalController {
   }
 
   @Patch("programa/:lineaId")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.programar")
   editarLinea(@Param("lineaId", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.editarLinea(req, tenant(req), id, body);
   }
 
   @Post("programa/:lineaId/anular")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.programar")
   anularLinea(@Param("lineaId", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.anularLinea(req, tenant(req), id, usuario(req), body);
   }
 
   @Post("programa/:lineaId/generar-ot")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.programar")
   @ApiOperation({ summary: "Generar la OT de la inspección (origen Producción Nacional; sigue el flujo general)" })
   generarOt(@Param("lineaId", ParseUUIDPipe) id: string, @Req() req: any) {
@@ -197,7 +202,7 @@ export class ProduccionNacionalController {
   /* ----------------------------------------------------------- correlación */
 
   @Post("oc/:id/correlaciones")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   @ApiOperation({ summary: "Registrar la relación de ventas de un período (correlación con lo inspeccionado)" })
   crearCorrelacion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
@@ -211,14 +216,14 @@ export class ProduccionNacionalController {
   }
 
   @Patch("correlaciones/:id")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   editarCorrelacion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.editarCorrelacion(tenant(req), id, body);
   }
 
   @Post("correlaciones/:id/emitir-informe")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   @ApiOperation({ summary: "Emitir y sellar el informe técnico de Producción Nacional" })
   emitirInforme(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
@@ -226,7 +231,7 @@ export class ProduccionNacionalController {
   }
 
   @Post("correlaciones/:id/remitir-dco")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @RequierePermiso("bpch.pn.gestionar")
   remitirDco(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.remitirDco(tenant(req), usuario(req), id);

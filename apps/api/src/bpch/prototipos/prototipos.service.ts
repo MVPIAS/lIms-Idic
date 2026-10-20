@@ -202,12 +202,27 @@ export class PrototiposService implements OnModuleInit {
     };
   }
 
-  async listar(tenantId: string, f: { q?: string; estado?: string }) {
+  /**
+   * Unidad del prototipo para el alcance: la ACTUAL de su OT o, si no la hay,
+   * la de su alta (null mientras no se genera la OT). 404 si no existe.
+   */
+  async unidadDe(tenantId: string, id: string): Promise<string | null> {
+    const p = await this.fila(tenantId, id);
+    return p.ot_unidad ?? p.unidad_id ?? null;
+  }
+
+  /** `unidades`: null = todos; si no, solo los prototipos de esas unidades (alcance-bpch.ts). */
+  async listar(tenantId: string, f: { q?: string; estado?: string }, unidades: string[] | null = null) {
     const args: unknown[] = [tenantId];
     const where = ["p.tenant_id = $1::uuid"];
+    if (unidades) {
+      args.push(unidades);
+      where.push(`COALESCE(ot.unidad_principal, p.unidad_id) = ANY($${args.length}::uuid[])`);
+    }
     if (f.q?.trim()) {
       args.push(`%${f.q.trim()}%`);
-      where.push(`(p.codigo ILIKE $2 OR p.elemento ILIKE $2 OR cl.razon_social ILIKE $2 OR cl.rut ILIKE $2 OR p.solicitud_dgmn ILIKE $2)`);
+      const q = `$${args.length}`;
+      where.push(`(p.codigo ILIKE ${q} OR p.elemento ILIKE ${q} OR cl.razon_social ILIKE ${q} OR cl.rut ILIKE ${q} OR p.solicitud_dgmn ILIKE ${q})`);
     }
     if (f.estado && ["ingresado", "en_evaluacion", "dictaminado", "anulado"].includes(f.estado)) {
       args.push(f.estado);

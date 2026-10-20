@@ -15,7 +15,7 @@ import { CodificacionService, FiltroCodificacion } from "./codificacion.service"
 @ApiTags("bpch-codificacion")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
-@AmbitoUnidad("BPCH", "DCO")
+@AmbitoUnidad("BPCH_CERT", "DCO")
 @Controller("bpch/codificacion")
 export class CodificacionController {
   constructor(private readonly svc: CodificacionService) {}
@@ -42,7 +42,7 @@ export class CodificacionController {
 
   @Post()
   @RequierePermiso("bpch.codificacion.gestionar")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @ApiOperation({ summary: "Inscribe un producto en la Codificación Única" })
   crear(@Body() body: unknown, @Req() req: any) {
     return this.svc.crear(req, body);
@@ -50,7 +50,7 @@ export class CodificacionController {
 
   @Patch(":id")
   @RequierePermiso("bpch.codificacion.gestionar")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @ApiOperation({ summary: "Corrige los datos de un producto (cambiar el código exige motivo)" })
   editar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.editar(req, id, body);
@@ -58,7 +58,7 @@ export class CodificacionController {
 
   @Post(":id/estado")
   @RequierePermiso("bpch.codificacion.gestionar")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @ApiOperation({ summary: "Pasa a receso o reactiva un producto { estado, motivo }" })
   estado(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.cambiarEstado(req, id, body);
@@ -66,7 +66,7 @@ export class CodificacionController {
 
   @Post(":id/titular")
   @RequierePermiso("bpch.codificacion.gestionar")
-  @AmbitoUnidad("BPCH")
+  @AmbitoUnidad("BPCH_CERT")
   @ApiOperation({ summary: "Cambia el titular del producto { clienteId | fabricanteNombre, motivo }" })
   async titular(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     await this.svc.cambiarTitular(req, id, body);
