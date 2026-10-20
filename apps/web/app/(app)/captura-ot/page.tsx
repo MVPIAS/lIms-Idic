@@ -35,7 +35,7 @@ import { usePermisos } from "@/lib/permisos";
 import { toast } from "@/components/ui/feedback";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 import { ESTADO_RESULTADO, llamar, qs, veredictoInfo, type Paginado } from "@/lib/laboratorio";
-import EditorEnsayo, { textoFactor, type EnsayoEditable } from "./_components/EditorEnsayo";
+import EditorEnsayo, { textoFactor, type EnsayoEditable, type EquipoCaptura } from "./_components/EditorEnsayo";
 
 /** Resultado en una forma común (viene de dos endpoints con forma distinta). */
 interface Fila extends EnsayoEditable {
@@ -124,6 +124,13 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     factorEditadoAt: r.factorEditadoAt ?? null,
     factorMotivo: r.factorMotivo ?? null,
     valorSinFactor: r.valorSinFactor ?? null,
+    equipoId: r.equipoId ?? null,
+    equipo: r.equipo ?? null,
+    equipoRequerido: !!r.equipoRequerido,
+    fechaEnsayo: r.fechaEnsayo ?? null,
+    temperatura: r.temperatura ?? null,
+    humedad: r.humedad ?? null,
+    incertidumbre: r.incertidumbre ?? null,
   };
 }
 
@@ -131,7 +138,8 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
 const esCorreccion = (f: Fila) => f.estado === "capturado" && ((f.valorNumerico != null && f.valorNumerico !== "") || !!f.valorTexto);
 
 /** ¿Se captura con un solo campo en la tabla? (numérico, sin campos de fórmula, del puente) */
-const capturaRapida = (f: Fila) => f.tipoDato === "numerico" && f.nCampos === 0 && !f.porReplicas;
+// Si el método exige el equipo, se captura en el formulario (equipo y condiciones del ensayo).
+const capturaRapida = (f: Fila) => f.tipoDato === "numerico" && f.nCampos === 0 && !f.porReplicas && !f.equipoRequerido;
 
 const esNumero = (v: any) => typeof v === "number" || (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v.replace(",", "."))));
 
@@ -207,6 +215,13 @@ export default function CapturaOtPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [inicial, setInicial] = useState(false);
+  // Equipos del laboratorio para la captura (contrato §4.4.2), con su aptitud.
+  const [equipos, setEquipos] = useState<EquipoCaptura[]>([]);
+  useEffect(() => {
+    if (!ot?.id || !tiene("resultado.crear")) { setEquipos([]); return; }
+    llamar<{ equipos: EquipoCaptura[] }>("GET", `/flujo/ot/${ot.id}/equipos`).then((r) => setEquipos(r.equipos)).catch(() => setEquipos([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ot?.id]);
 
   // Estado inicial desde la dirección (?otId=… o ?estado=…&mios=1).
   useEffect(() => {
@@ -573,7 +588,7 @@ export default function CapturaOtPage() {
                                   {valorTexto(f) && <div style={{ fontFamily: "'JetBrains Mono', monospace" }}>{valorTexto(f)}</div>}
                                   {ot ? (
                                     <button className="btn sm" onClick={() => setAbierto(abierto === f.id ? null : f.id)}>
-                                      {abierto === f.id ? "Cerrar" : f.tipoDato === "atributo" ? "Cumple / No cumple…" : "Capturar lecturas…"}
+                                      {abierto === f.id ? "Cerrar" : f.tipoDato === "atributo" ? "Cumple / No cumple…" : f.nCampos > 0 ? "Capturar lecturas…" : "Capturar con equipo…"}
                                     </button>
                                   ) : (
                                     <button className="btn sm" onClick={() => { setVistaBandeja(null); setOt({ id: f.otId!, codigo: f.otCodigo ?? "" }); }}>Abrir en la OT</button>
@@ -669,6 +684,7 @@ export default function CapturaOtPage() {
                                   puedeCapturar={tiene("resultado.crear") && CAPTURABLES.includes(f.estado)}
                                   esJefatura={tiene("resultado.aprobar")}
                                   puedeFactor={tiene("resultado.factor")}
+                                  equipos={equipos}
                                   onGuardado={() => cargar()}
                                 />
                               </td>

@@ -19,6 +19,7 @@ export default function MetodosCatPage() {
           label: "Factor",
           render: (v: any, row: any) => (v != null && row?.factorOperacion ? `${row.factorOperacion === "dividir" ? "÷" : "×"} ${String(Number(v)).replace(".", ",")}` : "—"),
         },
+        { key: "equipoRequerido", label: "Exige equipo", render: (v: any) => (v ? <span className="pill blue">Sí</span> : "—") },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}
       campos={[
@@ -33,6 +34,8 @@ export default function MetodosCatPage() {
         { name: "factorOperacion", label: "Factor de la fórmula · operación", tipo: "select", opciones: ["multiplicar", "dividir"] },
         { name: "factorValor", label: "Factor de la fórmula · valor", tipo: "number" },
         { name: "factorDescripcion", label: "Factor · qué representa (p. ej. dilución 1:10)" },
+        // Contrato §4.4.2: al capturar hay que informar el equipo usado; uno con la calibración vencida se bloquea.
+        { name: "equipoRequerido", label: "Exige informar el equipo al capturar", tipo: "checkbox" },
         { name: "activo", label: "Activo", tipo: "checkbox" },
       ]}
     />

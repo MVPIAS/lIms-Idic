@@ -14,6 +14,11 @@
  *  3. Captura: numérico (valor, réplicas o lecturas con los campos del método
  *     si hay fórmula) o atributo (Cumple / No cumple con observación).
  *     Corregir un valor ya capturado exige motivo (queda en el historial).
+ *  4. Equipo usado y condiciones del ensayo (contrato §4.4.2): equipo del
+ *     laboratorio con su estado de calibración —uno vencido no se puede
+ *     elegir—, fecha y hora del ensayo, T, HR e incertidumbre. Obligatorio en
+ *     los métodos que lo exigen (Catálogo › Métodos) o según el parámetro
+ *     captura_equipo.obligatorio.
  *
  * El cálculo y el veredicto los hace el servidor
  * (apps/api/src/laboratorio/captura-estandar.ts).
@@ -56,7 +61,38 @@ export interface EnsayoEditable {
   factorEditadoAt: string | null;
   factorMotivo: string | null;
   valorSinFactor: number | string | null;
+  /** Equipo usado y condiciones del ensayo (laboratorio/equipo-captura.ts). */
+  equipoId?: string | null;
+  equipo?: { codigo: string; nombre: string } | null;
+  equipoRequerido?: boolean;
+  fechaEnsayo?: string | null;
+  temperatura?: number | string | null;
+  humedad?: number | string | null;
+  incertidumbre?: string | null;
 }
+
+/** Equipo que se puede elegir en la captura (GET /flujo/ot/:id/equipos). */
+export interface EquipoCaptura {
+  id: string;
+  codigo: string;
+  nombre: string;
+  unidadCodigo: string | null;
+  estado: string;
+  proximaCalibracion: string | null;
+  apto: boolean;
+  motivo: string | null;
+}
+
+/** Fecha ISO → valor de <input type="datetime-local"> en hora local. */
+const aLocal = (iso?: string | null) => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+};
+const numTexto = (v: number | string | null | undefined) => (v === null || v === undefined || v === "" ? "" : String(Number(v)).replace(".", ","));
+const leerNum = (s: string) => (s.trim() === "" ? null : Number(s.trim().replace(",", ".")));
 
 /** Texto del factor: «× 10», «÷ 2,5». */
 export const textoFactor = (op: string | null, v: number | string | null) =>
@@ -76,9 +112,12 @@ export default function EditorEnsayo({
   puedeCapturar,
   esJefatura,
   puedeFactor = false,
+  equipos = [],
   onGuardado,
 }: {
   e: EnsayoEditable;
+  /** Equipos del laboratorio para la captura (con su aptitud). */
+  equipos?: EquipoCaptura[];
   puedeCapturar: boolean;
   /** resultado.aprobar: puede cambiar lo que vino del catálogo y la fórmula */
   esJefatura: boolean;
@@ -118,6 +157,13 @@ export default function EditorEnsayo({
   const [factorDesc, setFactorDesc] = useState(e.factorDescripcion ?? "");
   const [factorMotivo, setFactorMotivo] = useState("");
   const [factorTodos, setFactorTodos] = useState(false);
+  // Equipo y condiciones del ensayo
+  const [equipoId, setEquipoId] = useState(e.equipoId ?? "");
+  const [fechaEnsayo, setFechaEnsayo] = useState(aLocal(e.fechaEnsayo));
+  const [temperatura, setTemperatura] = useState(numTexto(e.temperatura));
+  const [humedad, setHumedad] = useState(numTexto(e.humedad));
+  const [incertidumbre, setIncertidumbre] = useState(e.incertidumbre ?? "");
+  const equipoSel = equipos.find((x) => x.id === equipoId);
   // Corregir un valor ya capturado (aún sin revisar) exige motivo.
   const tieneValor = (e.valorNumerico != null && e.valorNumerico !== "") || !!e.valorTexto;
   const esCorreccion = e.estado === "capturado" && tieneValor;
@@ -183,6 +229,17 @@ export default function EditorEnsayo({
       if (motivoCaptura.trim().length < 5) { toast.error("Este ensayo ya tiene un valor: indique el motivo de la corrección (mínimo 5 caracteres)."); return; }
       cuerpo.motivo = motivoCaptura.trim();
     }
+    // Equipo usado y condiciones del ensayo (el servidor bloquea un equipo no apto).
+    if (e.equipoRequerido && !equipoId) { toast.error("Indique el equipo con que se ejecutó el ensayo: este método lo exige."); return; }
+    if (equipoSel && !equipoSel.apto) { toast.error(`El equipo ${equipoSel.codigo} no se puede usar: ${equipoSel.motivo ?? "no está apto"}.`); return; }
+    const t = leerNum(temperatura);
+    const h = leerNum(humedad);
+    if ((t !== null && !Number.isFinite(t)) || (h !== null && !Number.isFinite(h))) { toast.error("La temperatura y la humedad deben ser números (coma decimal)."); return; }
+    if (equipoId !== (e.equipoId ?? "")) cuerpo.equipoId = equipoId || null;
+    if (fechaEnsayo) cuerpo.fechaEnsayo = new Date(fechaEnsayo).toISOString();
+    if (t !== null) cuerpo.temperatura = t;
+    if (h !== null) cuerpo.humedad = h;
+    if (incertidumbre.trim()) cuerpo.incertidumbre = incertidumbre.trim();
     setGuardando(true);
     try {
       const r = await llamar("POST", `/flujo/resultado/${e.id}/valor`, cuerpo);
@@ -424,6 +481,55 @@ export default function EditorEnsayo({
               </div>
             </div>
           )}
+          <fieldset style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px 8px", margin: "10px 0 0" }}>
+            <legend style={{ fontSize: 12, fontWeight: 600, padding: "0 4px" }}>
+              Equipo y condiciones del ensayo{e.equipoRequerido ? " · el método exige informar el equipo" : ""}
+            </legend>
+            <div className="form-grid cols-4">
+              <div className="field span-2">
+                <label htmlFor={`eq-${e.id}`}>Equipo usado {e.equipoRequerido && <span className="req">*</span>}</label>
+                <select id={`eq-${e.id}`} value={equipoId} onChange={(x) => setEquipoId(x.target.value)}>
+                  <option value="">{e.equipoRequerido ? "Elija el equipo…" : "Sin equipo"}</option>
+                  {e.equipoId && !equipos.some((x) => x.id === e.equipoId) && (
+                    <option value={e.equipoId}>{e.equipo ? `${e.equipo.codigo} · ${e.equipo.nombre}` : "Equipo registrado"}</option>
+                  )}
+                  {equipos.map((x) => (
+                    <option key={x.id} value={x.id} disabled={!x.apto && x.id !== e.equipoId}>
+                      {x.codigo} · {x.nombre}{x.unidadCodigo ? ` (${x.unidadCodigo})` : " (común)"}{x.apto ? "" : ` — ${x.motivo}`}
+                    </option>
+                  ))}
+                </select>
+                {equipoSel ? (
+                  equipoSel.apto ? (
+                    <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Calibración vigente hasta {String(equipoSel.proximaCalibracion ?? "").split("-").reverse().join("-")}.</span>
+                  ) : (
+                    <span role="alert" style={{ fontSize: 11.5, color: "var(--red)", marginTop: 3 }}>Bloqueado: {equipoSel.motivo}. Recalíbrelo o elija otro equipo.</span>
+                  )
+                ) : (
+                  <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+                    {equipos.length ? "Los equipos con la calibración vencida o fuera de servicio no se pueden elegir." : "El laboratorio no tiene equipos registrados en «Equipos y calibración»."}
+                  </span>
+                )}
+              </div>
+              <div className="field span-2">
+                <label htmlFor={`fe-${e.id}`}>Fecha y hora del ensayo</label>
+                <input id={`fe-${e.id}`} type="datetime-local" value={fechaEnsayo} onChange={(x) => setFechaEnsayo(x.target.value)} />
+                <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Vacía = ahora.</span>
+              </div>
+              <div className="field">
+                <label htmlFor={`te-${e.id}`}>T (°C)</label>
+                <input id={`te-${e.id}`} inputMode="decimal" value={temperatura} onChange={(x) => setTemperatura(x.target.value)} />
+              </div>
+              <div className="field">
+                <label htmlFor={`hr-${e.id}`}>HR (%)</label>
+                <input id={`hr-${e.id}`} inputMode="decimal" value={humedad} onChange={(x) => setHumedad(x.target.value)} />
+              </div>
+              <div className="field span-2">
+                <label htmlFor={`in-${e.id}`}>Incertidumbre</label>
+                <input id={`in-${e.id}`} value={incertidumbre} maxLength={60} onChange={(x) => setIncertidumbre(x.target.value)} placeholder="p. ej. ± 0,02 %" />
+              </div>
+            </div>
+          </fieldset>
           {esCorreccion && (
             <div className="field" style={{ marginTop: 8, maxWidth: 520 }}>
               <label htmlFor={`mc-${e.id}`}>Motivo de la corrección <span className="req">*</span></label>

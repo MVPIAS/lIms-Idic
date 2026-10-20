@@ -261,6 +261,9 @@ const CatMetodoBase = z.object({
   factorValor: z.number().positive().max(1e9).nullable().optional(),
   factorOperacion: z.enum(["multiplicar", "dividir"]).nullable().optional(),
   factorDescripcion: z.string().max(120).nullable().optional(),
+  // El método exige informar el equipo usado al capturar (contrato §4.4.2;
+  // align_recepcion_custodia_equipo_lme.sql). Con calibración vencida se bloquea.
+  equipoRequerido: z.boolean().optional(),
 });
 /** El factor y su operación van juntos (ambos o ninguno): 400 con el motivo, no el 500 del CHECK de la base. */
 const factorCompleto = (d: { factorValor?: number | null; factorOperacion?: string | null }, ctx: z.RefinementCtx) => {

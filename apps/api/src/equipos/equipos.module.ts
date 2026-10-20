@@ -444,7 +444,8 @@ export class EquiposService {
       tenantId,
       d.codigo,
       d.nombre,
-      d.descripcion ?? null,
+      // equipo.descripcion es NOT NULL en schema.sql: sin descripción, el nombre (antes, 500).
+      d.descripcion ?? d.nombre,
       d.fabricante ?? null,
       d.modelo ?? null,
       d.serie ?? null,

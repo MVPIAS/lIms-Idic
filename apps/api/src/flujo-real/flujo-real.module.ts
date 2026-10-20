@@ -41,6 +41,8 @@ import { aplicarFactor, erroresFactor, expresionConFactor, factorDe } from "../l
 import { planAjusteFactor } from "../laboratorio/ajuste-factor";
 import { conTraza, exigeMotivoCorreccion, teniaValor } from "../laboratorio/traza";
 import { RecepcionModule } from "../recepcion/recepcion.module";
+import { EquiposModule, EquiposService } from "../equipos/equipos.module";
+import { condicionesEnsayo, equipoObligatorio, equipoUsable, modoEquipo, type ModoEquipo } from "../laboratorio/equipo-captura";
 import { RecepcionService, type ConfigRecepcionLab } from "../recepcion/recepcion.service";
 import { retenerHasta, type RecepcionLabNormalizada } from "../recepcion/reglas-recepcion";
 
@@ -503,6 +505,16 @@ const CapturarValorBody = z
     observacion: z.string().max(2000).optional(),
     /** Motivo de la corrección (obligatorio al cambiar un valor ya capturado). */
     motivo: z.string().trim().max(1000).optional(),
+    /**
+     * Equipo usado y condiciones del ensayo (laboratorio/equipo-captura.ts):
+     * equipo apto del laboratorio (obligatorio según el método o el parámetro
+     * captura_equipo.obligatorio), fecha y hora del ensayo, T, HR e incertidumbre.
+     */
+    equipoId: z.string().uuid().nullable().optional(),
+    fechaEnsayo: z.string().max(40).nullable().optional(),
+    temperatura: z.number().finite().nullable().optional(),
+    humedad: z.number().finite().nullable().optional(),
+    incertidumbre: z.string().max(60).nullable().optional(),
   });
 
 /** Factor de la fórmula del ensayo en esta OT (resultado.factor). valor NULL = quitarlo. */
@@ -574,7 +586,61 @@ export class PuenteAnalisisService {
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
     private readonly labs: LaboratorioOtService,
+    private readonly equipos: EquiposService,
   ) {}
+
+  /** Modo de obligatoriedad del equipo en la captura (parámetro captura_equipo.obligatorio). */
+  private async modoEquipo(tenantId: string): Promise<ModoEquipo> {
+    const f = await this.prisma.$queryRawUnsafe<{ valor: string | null }[]>(
+      `SELECT valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'captura_equipo' AND codigo = 'obligatorio' AND activo`,
+      tenantId,
+    );
+    return modoEquipo(f[0]?.valor);
+  }
+
+  /**
+   * Equipos que se pueden elegir al capturar en la OT: los del laboratorio de la
+   * OT, los de los laboratorios de quien captura y el equipamiento común, con su
+   * aptitud (calibración vigente y operativo). Los no aptos se listan para
+   * explicar por qué no se pueden usar.
+   */
+  async equiposDeOt(otId: string, tenantId: string, req: any) {
+    const ot = await this.otEnAlcance(otId, tenantId, req);
+    const delUsuario = await this.alcance.filtroUnidades(req, "resultado.crear");
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT e.id, e.codigo, e.nombre, e.modelo, e.serie, e.estado, e.unidad_id AS "unidadId", u.codigo AS "unidadCodigo",
+              to_char(e.proxima_calibracion, 'YYYY-MM-DD') AS "proximaCalibracion",
+              (e.estado = 'operativo' AND e.proxima_calibracion IS NOT NULL AND e.proxima_calibracion >= CURRENT_DATE) AS apto,
+              (e.proxima_calibracion IS NOT NULL AND e.proxima_calibracion < CURRENT_DATE) AS vencida
+         FROM equipo e LEFT JOIN unidad u ON u.id = e.unidad_id
+        WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL
+          AND (e.unidad_id IS NULL OR e.unidad_id = $2::uuid OR $3::uuid[] IS NULL OR e.unidad_id = ANY($3::uuid[]))
+        ORDER BY (e.unidad_id = $2::uuid) DESC NULLS LAST, e.codigo
+        LIMIT 300`,
+      tenantId,
+      ot.unidadPrincipal,
+      delUsuario,
+    );
+    const motivo = (e: any) =>
+      e.apto
+        ? null
+        : e.estado === "en_calibracion"
+          ? "En calibración"
+          : e.estado === "fuera_servicio"
+            ? "Fuera de servicio"
+            : e.estado !== "operativo"
+              ? `No operativo (${e.estado})`
+              : e.vencida
+                ? `Calibración vencida el ${String(e.proximaCalibracion).split("-").reverse().join("-")}`
+                : "Sin calibración registrada";
+    return {
+      otId,
+      modo: await this.modoEquipo(tenantId),
+      equipos: filas
+        .filter((e) => equipoUsable(e.unidadId, ot.unidadPrincipal, delUsuario))
+        .map((e) => ({ ...e, apto: !!e.apto, vencida: !!e.vencida, motivo: motivo(e) })),
+    };
+  }
 
   /** OT del tenant y dentro del alcance del usuario (404 / 403). */
   private async otEnAlcance(otId: string, tenantId: string, req: any) {
@@ -783,6 +849,32 @@ export class PuenteAnalisisService {
         "Este ensayo ya tiene un valor capturado: indique el motivo de la corrección (mínimo 5 caracteres). Queda en el historial del resultado.",
       );
 
+    // Equipo usado (contrato §4.4.2) y condiciones del ensayo.
+    const otDelResultado = otId
+      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { unidadPrincipal: true } })
+      : null;
+    const metodoExige = resultado.catMetodoId
+      ? (await this.prisma.catMetodo.findFirst({ where: { id: resultado.catMetodoId }, select: { equipoRequerido: true } }))?.equipoRequerido ?? false
+      : false;
+    const equipoId = entrada.equipoId === undefined ? resultado.equipoId ?? null : entrada.equipoId;
+    if (equipoObligatorio(await this.modoEquipo(tenantId), metodoExige, tipoDato) && !equipoId)
+      throw new BadRequestException(
+        "Indique el equipo con que se ejecutó el ensayo: es obligatorio para este método (contrato §4.4.2). Los equipos con la calibración vencida no se pueden usar.",
+      );
+    if (entrada.equipoId) {
+      const eq = await this.equipos.cargarEquipo(entrada.equipoId, tenantId);
+      const delUsuario = await this.alcance.filtroUnidades(req, "resultado.crear");
+      if (!equipoUsable(eq.unidad_id ?? null, otDelResultado?.unidadPrincipal ?? null, delUsuario))
+        throw new BadRequestException(`El equipo ${eq.codigo} no es del laboratorio de la OT ni de sus laboratorios: elija uno de los suyos.`);
+      // Bloqueo: calibración vencida, sin calibración, en calibración o fuera de servicio (409).
+      await this.equipos.verificarApto(entrada.equipoId, tenantId);
+    }
+    const cond = condicionesEnsayo(
+      { fechaEnsayo: entrada.fechaEnsayo, temperatura: entrada.temperatura, humedad: entrada.humedad, incertidumbre: entrada.incertidumbre },
+      new Date(),
+    );
+    if (cond.errores.length) throw new BadRequestException(cond.errores.join(" "));
+
     let calc;
     try {
       calc = calcularCaptura(
@@ -823,6 +915,11 @@ export class PuenteAnalisisService {
         estado: "capturado",
         fecha: new Date(),
         otId: otId ?? null,
+        equipoId,
+        fechaEnsayo: cond.valor.fechaEnsayo,
+        temperatura: cond.valor.temperatura,
+        humedad: cond.valor.humedad,
+        incertidumbre: cond.valor.incertidumbre,
       },
       include: { catAnalito: true, catMetodo: true },
     }));
@@ -975,12 +1072,22 @@ export class PuenteAnalisisService {
           include: {
             muestra: { select: { id: true, codigo: true, nombre: true } },
             catAnalito: { select: { id: true, codigo: true, nombre: true, unidad: true } },
-            catMetodo: { select: { id: true, codigo: true, nombre: true, norma: true } },
+            catMetodo: { select: { id: true, codigo: true, nombre: true, norma: true, equipoRequerido: true } },
             analito: { select: { id: true, codigo: true, nombre: true } },
           },
           orderBy: [{ muestraId: "asc" }, { fecha: "asc" }],
         })
       : [];
+    // Equipo usado de cada ensayo (código y nombre) y si la captura lo exige.
+    const modo = await this.modoEquipo(tenantId);
+    const equipoIds = [...new Set(resultados.map((r) => r.equipoId).filter((x): x is string => !!x))];
+    const equipos = equipoIds.length
+      ? await this.prisma.$queryRawUnsafe<{ id: string; codigo: string; nombre: string }[]>(
+          `SELECT id, codigo, nombre FROM equipo WHERE id = ANY($1::uuid[])`,
+          equipoIds,
+        )
+      : [];
+    const equipoDe = new Map(equipos.map((e) => [e.id, e]));
 
     // Veredictos: cumple / no_cumple / informativo / pendiente (sin valor o sin
     // decidir). Estados: el ciclo de revisión (pendiente → … → aprobado).
@@ -1027,9 +1134,12 @@ export class PuenteAnalisisService {
       resultados: conNombre.map((r) => {
         const t = traducirFormula(r.formula);
         const cat = (r.especCatalogo ?? {}) as Record<string, any>;
+        const tipo = r.tipoDato ?? tipoDatoDe({ ...r });
         return {
           ...r,
-          tipoDato: r.tipoDato ?? tipoDatoDe({ ...r }),
+          tipoDato: tipo,
+          equipo: r.equipoId ? equipoDe.get(r.equipoId) ?? null : null,
+          equipoRequerido: equipoObligatorio(modo, !!r.catMetodo?.equipoRequerido, tipo),
           formulaAplicable: t.expr,
           nCampos: t.nCampos,
           formulaLegado: cat.formulaLegado ?? null,
@@ -1066,6 +1176,14 @@ export class PuenteOtController {
   @ApiOperation({ summary: "Resultados de las muestras de la OT + resumen de veredictos y estados" })
   resultados(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.resultadosDeOt(id, tenantDe(req), req);
+  }
+
+  /** Equipos que se pueden usar al capturar en la OT, con su aptitud (calibración). */
+  @Get(":id/equipos")
+  @RequierePermiso("resultado.crear")
+  @ApiOperation({ summary: "Equipos del laboratorio para la captura de la OT, con su estado de calibración" })
+  equipos(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.equiposDeOt(id, tenantDe(req), req);
   }
 }
 
@@ -1570,7 +1688,7 @@ export class RecepcionMuestraController {
 /* ============================ MÓDULO ============================ */
 
 @Module({
-  imports: [RecepcionModule],
+  imports: [RecepcionModule, EquiposModule],
   controllers: [
     SolicitudCosteoController,
     // Las rutas estáticas de órdenes internas (destinos, ot/:otId) van ANTES que el CRUD.
