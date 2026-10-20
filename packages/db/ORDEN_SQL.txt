@@ -76,3 +76,5 @@ align_bpch_pn_prototipos_clasificacion.sql
 align_metrologia_1510.sql
 align_revision_r3.sql
 align_frente_k.sql
+align_alcance_fase0.sql
+seed_alcance_fase0.sql               demo

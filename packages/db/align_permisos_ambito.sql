@@ -5,11 +5,10 @@
 -- (apps/api/src/rbac/ambito-unidad.guard.ts). Sale de la prueba de permisos por
 -- perfil del 13-10-2026 (docs/ACCESOS_DEMO.md):
 --
---   1. El INSPECTOR de la Delegación Nº 11 no podía entrar en SAEC (armas,
---      evidencias, IBIS) mientras que un analista de cualquier laboratorio sí.
---      El inspector recibe los permisos de consulta y peritaje de SAEC; el
---      ámbito restringe SAEC a la Delegación Nº 11 y su cadena de mando, así
---      que un inspector de sucursal o un analista químico ya no entran.
+--   1. (Sustituido en align_alcance_fase0.sql, frente L · fase 0.) El
+--      INSPECTOR recibía aquí la consulta y el peritaje de SAEC para que el de
+--      la Delegación Nº 11 entrara. Ahora el INSPECTOR genérico no tiene SAEC:
+--      el personal de la Delegación recibe el rol PERITO_SAEC.
 --   2. Los reportes pedían solo `ot.ver`, que tiene todo el personal técnico.
 --      Se crean `reporte.ver` (gestión del laboratorio) y
 --      `reporte.comercial.ver` (ingresos y cartera).
@@ -17,14 +16,7 @@
 
 BEGIN;
 
--- --- 1. Inspector: consulta y peritaje en SAEC --------------------------------
-INSERT INTO rol_permiso (rol_id, permiso_id)
-SELECT r.id, p.id
-  FROM rol r
-  JOIN permiso p ON p.codigo IN ('caso.ver', 'evidencia.ver', 'evidencia.custodiar',
-                                 'arma.ver', 'ibis.ver', 'peritaje.registrar')
- WHERE r.codigo = 'INSPECTOR'
-ON CONFLICT DO NOTHING;
+-- --- 1. Inspector: SAEC → rol PERITO_SAEC (align_alcance_fase0.sql) ---------
 
 -- --- 2. Permisos de reportes ---------------------------------------------------
 INSERT INTO permiso (id, codigo, modulo, accion, descripcion) VALUES
