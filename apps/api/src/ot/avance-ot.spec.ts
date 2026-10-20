@@ -390,3 +390,16 @@ describe("Ruta de la OT · órdenes internas (frente r1b · EP-01 3.7)", () => {
     expect(a.siguiente?.texto).toMatch(/^Capturar resultados/);
   });
 });
+
+describe("Ruta de la OT · cabecera de inspección BPCH (frente r1b · EP-10 10.11)", () => {
+  it("con todo aprobado y la cabecera incompleta, el siguiente paso es completar la cabecera", () => {
+    const a = calcularAvance(base({ ...conMuestra, unidad: { codigo: "SSTGO" }, resultados: res({ aprobados: 3 }), cabeceraBpch: ["La cabecera de inspección no tiene el lugar de inspección."] }));
+    expect(a.etapaActual).toBe("emision");
+    expect(a.siguiente?.texto).toMatch(/^Completar la cabecera de inspección/);
+    expect(a.siguiente?.accion).toMatchObject({ pestana: "cabecera", permisos: ["bpch.cabecera.gestionar"] });
+  });
+  it("con la cabecera completa, emitir", () => {
+    const a = calcularAvance(base({ ...conMuestra, resultados: res({ aprobados: 3 }), cabeceraBpch: [] }));
+    expect(a.siguiente?.texto).toBe("Emitir el informe con los resultados aprobados");
+  });
+});

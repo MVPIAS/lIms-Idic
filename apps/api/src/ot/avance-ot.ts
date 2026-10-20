@@ -125,6 +125,8 @@ export interface HechosOt {
   ordenesInternas?: OrdenInternaAvance[];
   /** Documentos por muestra, producto o laboratorio: lo que falta cubrir para cerrar. */
   coberturaPendiente?: string[];
+  /** OT del BPCH: lo que le falta a la cabecera de inspección para emitir el Informe de Inspección (EP-10 10.11). */
+  cabeceraBpch?: string[];
   internacion?: {
     id: string;
     numero: string;
@@ -303,6 +305,12 @@ function pasoDocumentos(h: HechosOt, clave: string): Omit<SiguientePaso, "etapa"
         texto: `El documento ${devuelto.numero} fue devuelto: corríjalo y reemítalo (o anúlelo)`,
         leToca: { rol: "Jefe de Laboratorio", unidad: u, personas: [] },
         accion: { texto: "Ir a Informe y cierre", pestana: "informe", permisos: ["certificado.emitir"] },
+      };
+    if (h.cabeceraBpch?.length)
+      return {
+        texto: `Completar la cabecera de inspección antes de emitir el Informe de Inspección: ${h.cabeceraBpch.join(" ")}`,
+        leToca: { rol: "Jefe de Sucursal o inspector", unidad: u, personas: h.analistas },
+        accion: { texto: "Ir a Cabecera", pestana: "cabecera", permisos: ["bpch.cabecera.gestionar"] },
       };
     return {
       texto: "Emitir el informe con los resultados aprobados",
