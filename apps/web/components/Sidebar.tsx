@@ -12,7 +12,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { NAV, normalizar, type ItemNav } from "@/lib/navegacion";
+import { NAV, itemEnAmbito, normalizar, type ItemNav } from "@/lib/navegacion";
 import { usePermisos, PERFIL_INFO, type Perfil } from "@/lib/permisos";
 import { useAlcance } from "@/lib/alcance";
 
@@ -42,10 +42,8 @@ export default function Sidebar() {
   // Antes de leer el token se muestra solo lo que no exige permiso (evita parpadeos de ítems prohibidos).
   // Ámbito: mientras no llega /me/alcance no se oculta nada por este motivo (el
   // backend responde 403 igualmente); cuando llega, se quita lo que no es suyo.
-  const enAmbito = (i: ItemNav) => {
-    if (!i.ambito || !alcance?.ambitos || alcance.esGlobal) return true;
-    return ([] as string[]).concat(i.ambito).some((c) => alcance.ambitos?.[c] !== false);
-  };
+  // Alcance por asignación (lib/navegacion.ts › itemEnAmbito).
+  const enAmbito = (i: ItemNav) => itemEnAmbito(i, alcance);
   const visible = (i: ItemNav) => (listo ? puede(i.perm) : !i.perm) && enAmbito(i);
 
   const nav = useMemo(() => {

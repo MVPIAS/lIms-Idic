@@ -28,6 +28,8 @@ export interface Alcance {
   unidadesVisibles: UnidadVisible[];
   /** Ramas del organigrama en las que el usuario puede entrar (módulos por ámbito). */
   ambitos?: Record<string, boolean>;
+  /** Permisos que valen dentro de cada rama (alcance por asignación). */
+  permisosPorAmbito?: Record<string, string[]>;
 }
 
 export type Severidad = "info" | "warn" | "alta";
@@ -88,6 +90,8 @@ function normalizarAlcance(raw: any): Alcance | null {
     esGlobal: typeof raw.esGlobal === "boolean" ? raw.esGlobal : base.esGlobal,
     unidadesVisibles: Array.isArray(raw.unidadesVisibles) ? raw.unidadesVisibles : [],
     ambitos: raw.ambitos && typeof raw.ambitos === "object" ? raw.ambitos : undefined,
+    permisosPorAmbito:
+      raw.permisosPorAmbito && typeof raw.permisosPorAmbito === "object" ? raw.permisosPorAmbito : undefined,
   };
 }
 

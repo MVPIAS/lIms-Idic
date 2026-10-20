@@ -31,6 +31,10 @@ const VERBO_A_ACCION: Record<string, keyof PermisosCrud> = {
  *
  * Sin metadata de permisos → deja pasar (la ruta solo exige estar autenticado).
  * SUPERADMIN pasa siempre.
+ *
+ * Deja los permisos exigidos en `req.__permisosRuta`: con ellos AlcanceService
+ * calcula el alcance POR ASIGNACIÓN (cada permiso vale en las unidades del rol
+ * que lo concede, no en la unión de todas las del usuario).
  */
 @Injectable()
 export class PermisoGuard implements CanActivate {
@@ -62,9 +66,13 @@ export class PermisoGuard implements CanActivate {
     }
 
     const requeridos = this.resolverRequeridos(ctx);
+    const req = ctx.switchToHttp().getRequest();
+    // Alcance por asignación: los servicios filtran con el alcance de las
+    // asignaciones cuyo rol concede ESTOS permisos (AlcanceService).
+    if (req) req.__permisosRuta = requeridos;
     if (requeridos.length === 0) return true;
 
-    const user = ctx.switchToHttp().getRequest().user;
+    const user = req.user;
     // Si la ruta exige permisos pero no hay usuario, el guard JWT no corrió
     // (orden de guards mal configurado). Se falla cerrado, nunca abierto.
     if (!user) throw new UnauthorizedException("No autenticado");
