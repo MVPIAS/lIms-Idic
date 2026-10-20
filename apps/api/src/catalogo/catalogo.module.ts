@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Module, UseGuards, Injectable } from "@nestjs/common";
+import { All, Controller, GoneException, Module, UseGuards, Injectable } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -7,7 +7,6 @@ import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
-import { estadosValidos } from "../common/estados";
 
 /* ===================== GRAN GRUPO (eje producto) ===================== */
 @Injectable()
@@ -82,73 +81,39 @@ export class PlantillaInformeController extends BaseCrudController {
   constructor(protected svc: PlantillaInformeService) { super(); }
 }
 
-/* ===================== CERTIFICADOS / INFORMES emitidos ===================== */
-@Injectable()
-export class CertificadoService extends BaseCrudService {
-  constructor(prisma: PrismaService) {
-    // `ot` anidado con su cliente: la etiqueta de la columna OT en /certificados
-    // es "código · razón social del cliente" (etiquetaOt), así que con `ot: true`
-    // a secas se quedaría sin el desempate del cliente.
-    super(prisma, { model: "certificado", search: ["codigo", "tipo"], include: { plantilla: true, ot: { include: { cliente: true } } } });
-  }
-
-  /**
-   * Un certificado emitido es un documento con valor legal: no se edita por el
-   * CRUD genérico. Este controlador queda de SOLO LECTURA.
-   */
-  async actualizar(id: string, data: any, tenantId?: string) {
-    // Circuito de firma (plantilla-render/firma-documento.service.ts): un
-    // documento ya no se edita por el CRUD genérico. Se anula con motivo
-    // (POST /informes/:id/anular) y se reemite como nueva versión.
-    // Antes se validaba aquí la transición emitido → anulado (validarTransicion);
-    // ahora la anulación exige motivo y la hace el circuito.
-    await this.detalle(id, tenantId); // valida tenant + existencia (404 antes que 400)
-    void data;
-    throw new BadRequestException(
-      "Los informes y certificados no se modifican: anúlelos con motivo desde «Certificados» y reemítalos como nueva versión.",
-    );
-  }
-
-  /** Solo se emite por /informes/emitir (resultados aprobados + matriz de firmas). */
-  async crear(): Promise<never> {
-    throw new BadRequestException("Los informes y certificados se emiten desde «Emitir informe» (POST /informes/emitir).");
-  }
-
-  /** Un documento con valor legal no se borra: se anula. */
-  async eliminar(): Promise<never> {
-    throw new BadRequestException("Los informes y certificados no se eliminan: se anulan con motivo.");
-  }
-}
-const CertificadoCreate = z.object({
-  otId: z.string().uuid(),
-  codigo: z.string().min(1).max(40),
-  tipo: z.string().max(40).optional(),
-  plantillaId: z.string().uuid().optional(),
-  hashSha256: z.string().max(64).optional(),
-  urlVerificacion: z.string().max(300).optional(),
-  estado: z.enum(estadosValidos("certificado") as [string, ...string[]]).default("emitido"),
-});
+/* ===================== CERTIFICADOS (ruta heredada, RETIRADA) ===================== */
 /**
- * No existe `certificado.ver` en el RBAC sembrado: el certificado es el
- * entregable de la OT, así que se lee con `ot.ver` (lo tienen todos los roles
- * operativos). Emitir/editar → `certificado.emitir`; borrar → `certificado.firmar`,
- * el más restrictivo del dominio (SUPERADMIN, DIRECTOR, JEFE_LAB).
+ * `/certificados` era un CRUD genérico de solo lectura sobre la tabla
+ * `certificado` que NO filtraba por laboratorio: cualquier perfil con `ot.ver`
+ * listaba y abría los informes de todo el instituto (auditoría de roles, C3).
+ * Ninguna pantalla lo usa: «Informes y certificados» lee
+ * `GET /informes/documentos` (acotado al alcance) y el Panel de indicadores
+ * también. Se retira y responde 410 Gone con la ruta que lo sustituye.
  */
 @ApiTags("certificados") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("certificados")
-@RequierePermisoCrud({
-  ver: "ot.ver",
-  crear: "certificado.emitir",
-  editar: "certificado.emitir",
-  eliminar: "certificado.firmar",
-})
-export class CertificadoController extends BaseCrudController {
-  protected createSchema = CertificadoCreate;
-  protected updateSchema = CertificadoCreate.partial();
-  constructor(protected svc: CertificadoService) { super(); }
+export class CertificadoRetiradoController {
+  @All()
+  raiz(): never {
+    throw retirada();
+  }
+
+  @All("*")
+  resto(): never {
+    throw retirada();
+  }
+}
+
+function retirada() {
+  return new GoneException({
+    statusCode: 410,
+    message:
+      "Esta ruta se retiró. Los informes y certificados se consultan en GET /informes/documentos (y el circuito de cada uno en GET /informes/:id/circuito), acotados a su alcance por laboratorio.",
+    sustituta: "/informes/documentos",
+  });
 }
 
 @Module({
-  controllers: [GranGrupoController, GrupoController, PlantillaInformeController, CertificadoController],
-  providers: [GranGrupoService, GrupoService, PlantillaInformeService, CertificadoService],
+  controllers: [GranGrupoController, GrupoController, PlantillaInformeController, CertificadoRetiradoController],
+  providers: [GranGrupoService, GrupoService, PlantillaInformeService],
 })
 export class CatalogoModule {}
