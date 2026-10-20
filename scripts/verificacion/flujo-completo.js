@@ -244,6 +244,20 @@ async function main() {
   const C = {}; // contexto del recorrido
   const sello = new Date().toISOString().replace(/\D/g, "").slice(2, 14);
 
+  /* Ruta de la OT (GET /ot/:id/avance): la etapa actual deducida del estado real
+     y el «Siguiente paso · Le toca a» con su botón solo para quien puede hacerlo. */
+  const ruta = (u = U.jefe) => ok(u, "GET", `/ot/${C.ot.id}/avance`);
+  async function exigirEtapa(clave, { puede = [], noPuede = [] } = {}) {
+    const a = await ruta();
+    afirmar(a.etapaActual === clave, `etapa actual «${a.etapaActual}», esperada «${clave}» (${a.etapas.map((e) => `${e.clave}:${e.estado}`).join(" ")})`);
+    afirmar(a.etapas.filter((e) => e.estado === "en_curso" || e.estado === "bloqueado").length <= 1, "más de una etapa actual");
+    for (const u of puede) afirmar((await ruta(u)).siguiente?.puedoActuar === true, `${u} debería tener el botón del siguiente paso`);
+    for (const u of noPuede) afirmar((await ruta(u)).siguiente?.puedoActuar !== true, `${u} no debería tener el botón del siguiente paso`);
+    const e = a.etapas.find((x) => x.clave === clave);
+    const s = a.siguiente;
+    return { a, texto: `${e?.titulo ?? "fin"}${s ? ` · «${s.texto}» · le toca a ${s.leToca?.rol ?? "—"}${s.leToca?.personas?.length ? ` (${s.leToca.personas.join(", ")})` : ""}` : ""}` };
+  }
+
   await paso("Inicio de sesión de todos los perfiles", async () => {
     for (const u of [...Object.values(U), ...POSIBLES_FIRMANTES]) await login(u).catch((e) => { if (Object.values(U).includes(u)) throw e; });
     return `${Object.keys(sesiones).length} sesiones`;
@@ -334,6 +348,14 @@ async function main() {
     return `${C.ot.codigo} · LQC · compromiso ${String(C.ot.fechaCompromiso).slice(0, 10)}`;
   });
 
+  await paso("Ruta de la OT · recién creada (recepcionada): Recepción de muestras, no «Fase 1» por defecto", async () => {
+    afirmar(C.ot.estado === "recepcionada", `estado ${C.ot.estado}`);
+    const { a, texto } = await exigirEtapa("recepcion", { puede: [U.recepcion], noPuede: [U.ventas] });
+    afirmar(a.etapas[0].clave === "apertura" && a.etapas[0].estado === "hecho", "la apertura no está hecha");
+    afirmar(!a.etapas.some((e) => ["preparacion", "calculo", "captura_rn", "validacion_tecnica"].includes(e.clave)), "quedan fases sin dato propio");
+    afirmar(a.siguiente?.accion?.pestana === "muestras", `acción ${JSON.stringify(a.siguiente?.accion)}`);
+    return texto;
+  });
   await paso("Mi bandeja tras nacer la OT", async () => {
     return [
       await exigirBandeja(U.jefe, B0[U.jefe], { ot_sin_asignar: 1, ot_por_vencer: 1 }),
@@ -409,6 +431,8 @@ async function main() {
     return `${C.muestra.codigo} · ${todos.length} análisis · pH ${C.rPh.limiteInf}–${C.rPh.limiteSup}`;
   });
 
+  await paso("Ruta de la OT · con muestras: Asignación", async () => (await exigirEtapa("asignacion", { puede: [U.jefe], noPuede: [U.a1] })).texto);
+
   /* ---------------- 5. Asignación */
   await paso("Un analista no puede asignar (403)", async () => {
     await exigir(403, U.a2, "PUT", `/ot/${C.ot.id}/analistas`, { usuarioIds: [sesiones[U.a2].id] });
@@ -417,6 +441,13 @@ async function main() {
     await ok(U.jefe, "PUT", `/ot/${C.ot.id}/analistas`, { usuarioIds: [sesiones[U.a1].id] });
     const ot = await ok(U.jefe, "GET", `/ot/${C.ot.id}`);
     afirmar((ot.analistas ?? []).some((a) => a.id === sesiones[U.a1].id), "analista1 no figura en la OT");
+  });
+  await paso("Ruta de la OT · asignada: Análisis, le toca al analista asignado", async () => {
+    const { a, texto } = await exigirEtapa("analisis", { puede: [U.a1, U.a2], noPuede: [U.ventas, U.planif] });
+    const ot = await ok(U.jefe, "GET", `/ot/${C.ot.id}`);
+    const nombre = ot.analistas.find((x) => x.id === sesiones[U.a1].id)?.nombre;
+    afirmar(nombre && a.siguiente?.leToca?.personas?.includes(nombre), `le toca a ${JSON.stringify(a.siguiente?.leToca)}`);
+    return texto;
   });
   await paso("No se puede asignar a alguien de otro laboratorio (400/403)", async () => {
     await exigir([400, 403], U.jefe, "PUT", `/ot/${C.ot.id}/analistas`, { usuarioIds: [sesiones[U.a1].id, sesiones[U.otroLab].id] });
@@ -446,6 +477,12 @@ async function main() {
     afirmar(r.veredicto === "cumple", `veredicto ${r.veredicto}`);
     return `7,2 en [${C.rPh.limiteInf}; ${C.rPh.limiteSup}] → ${r.veredicto}`;
   });
+  await paso("Ruta de la OT · con resultados a medias: sigue en Análisis", async () => {
+    const { a, texto } = await exigirEtapa("analisis");
+    const det = a.etapas.find((e) => e.clave === "analisis").detalle ?? "";
+    afirmar(/^1 de /.test(det), `detalle ${det}`);
+    return texto;
+  });
   await paso("Analista1 no puede cambiar lo que es de la jefatura: límite del catálogo o fórmula (403)", async () => {
     if (C.phDelCatalogo) await exigir(403, U.a1, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { limiteSup: "9" });
     await exigir(403, U.a1, "PATCH", `/flujo/resultado/${C.rPh.id}/especificacion`, { formula: "C1 * 2" });
@@ -464,6 +501,7 @@ async function main() {
     afirmar(r.veredicto === "cumple", `veredicto ${r.veredicto}`);
     return "«No cumple» sin observación rechazado (400); Cumple";
   });
+  await paso("Ruta de la OT · todo capturado (en revisión): Revisión", async () => (await exigirEtapa("revision", { puede: [U.rev], noPuede: [U.a1] })).texto);
   await paso("Tarjetas de Mi bandeja = total de la lista que abren (con resultados por revisar)", () => contrastarTarjetas(PERFILES_TARJETAS));
   await paso("Mi bandeja tras capturar", async () => {
     const pend = lista(await ok(U.rev, "GET", "/resultados/bandeja?estado=capturado&limit=500"));
@@ -503,6 +541,7 @@ async function main() {
     afirmar(rs.every((x) => x.estado === "revisado_n1"), `estados: ${rs.map((x) => x.estado).join(",")}`);
     return `${r.actualizados ?? r.procesados ?? rs.length} revisados`;
   });
+  await paso("Ruta de la OT · revisada: Aprobación", async () => (await exigirEtapa("aprobacion", { puede: [U.jefe], noPuede: [U.rev, U.a2] })).texto);
   await paso("Mi bandeja tras revisar", async () => {
     return [
       await exigirBandeja(U.rev, B0[U.rev], { resultados_por_revisar: 0 }),
@@ -519,6 +558,8 @@ async function main() {
     return await exigirBandeja(U.jefe, B0[U.jefe], { resultados_por_aprobar: 0 });
   });
 
+  await paso("Ruta de la OT · aprobada: Emisión del informe", async () => (await exigirEtapa("emision", { puede: [U.jefe], noPuede: [U.a1] })).texto);
+
   /* ---------------- 8. Emisión */
   await paso("Se emite el informe (queda en firma)", async () => {
     const cond = await ok(U.jefe, "POST", "/informes/condiciones", { otId: C.ot.id, plantillaId: C.plantilla.id });
@@ -534,6 +575,16 @@ async function main() {
     // «Informes por oficializar» cuenta los documentos en firma del ámbito (no los boletines antiguos).
     await exigirBandeja(U.jefe, B0[U.jefe], { informes_por_oficializar: 1 });
     return `${C.doc.numero ?? C.doc.codigo ?? C.docId} · ${C.pasosFirma.length} paso(s): ${C.pasosFirma.map((p) => `${p.orden}:${(p.responsables ?? []).map((x) => x.nombre).join("/")}`).join(" → ")}`;
+  });
+
+  await paso("Ruta de la OT · en firma: Firmas, le toca al firmante del primer paso (solo él tiene el botón)", async () => {
+    const porId = Object.fromEntries(Object.entries(sesiones).map(([u, x]) => [x.id, u]));
+    const primero = Math.min(...C.pasosFirma.map((p) => p.orden));
+    const resp = C.pasosFirma.filter((p) => p.orden === primero).flatMap((p) => p.responsables ?? []);
+    const firmantes = resp.map((r) => porId[r.usuarioId]).filter(Boolean);
+    const { a, texto } = await exigirEtapa("firmas", { puede: firmantes.slice(0, 1), noPuede: [U.a2] });
+    afirmar(resp.every((r) => a.siguiente?.leToca?.personas?.includes(r.nombre)), `le toca a ${JSON.stringify(a.siguiente?.leToca)}`);
+    return texto;
   });
 
   /* ---------------- 8b. Reapertura de un resultado aprobado */
@@ -553,6 +604,7 @@ async function main() {
     afirmar(hist.some((h) => h.tipo === "reapertura_resultado"), "la reapertura no quedó en el historial de la OT");
     return (r.avisos ?? []).join(" ").slice(0, 120);
   });
+  await paso("Ruta de la OT · resultado reabierto: vuelve a Análisis (el documento se anuló)", async () => (await exigirEtapa("analisis", { puede: [U.a1] })).texto);
   await paso("Se corrige, revisa y aprueba de nuevo; se reemite como nueva versión", async () => {
     const c = await ok(U.a1, "POST", `/flujo/resultado/${C.rPh.id}/valor`, { valor: "7,3" });
     afirmar(c.veredicto === "cumple", `veredicto ${c.veredicto}`);
@@ -613,6 +665,8 @@ async function main() {
     ].join(" | ");
   });
 
+  await paso("Ruta de la OT · emitida (oficial): Entrega al cliente", async () => (await exigirEtapa("entrega", { puede: [U.planif], noPuede: [U.a1] })).texto);
+
   /* ---------------- 10. Entrega */
   await paso("No se cierra la OT sin entregar el documento (409)", async () => {
     await exigir(409, U.planif, "POST", `/ot/${C.ot.id}/cerrar`, {});
@@ -629,6 +683,8 @@ async function main() {
     ].join(" | ");
   });
 
+  await paso("Ruta de la OT · entregada: Cierre (Planificación sí, el analista no)", async () => (await exigirEtapa("cierre", { puede: [U.planif], noPuede: [U.a1] })).texto);
+
   /* ---------------- 11. Cierre */
   await paso("Un analista no puede cerrar la OT (403)", async () => {
     await exigir(403, U.a1, "POST", `/ot/${C.ot.id}/cerrar`, {});
@@ -640,6 +696,12 @@ async function main() {
     const ot = await ok(U.planif, "GET", `/ot/${C.ot.id}`);
     afirmar(ot.estado === "cerrada", `estado ${ot.estado}`);
     return `${C.factura.numero} total ${C.factura.total} · recorrido ${(r.recorrido ?? []).join("→")}`;
+  });
+  await paso("Ruta de la OT · cerrada: Factura, con la línea «OT cerrada el … · Factura …»", async () => {
+    const { a, texto } = await exigirEtapa("factura", { puede: [U.finanzas], noPuede: [U.planif] });
+    afirmar(a.cierre?.fecha && a.cierre?.factura?.numero === C.factura.numero && a.cierre.factura.estado === "pendiente", `cierre ${JSON.stringify(a.cierre)}`);
+    afirmar(a.etapas.find((e) => e.clave === "cierre").estado === "hecho", "el cierre no figura hecho");
+    return texto;
   });
   await paso("Mi bandeja tras cerrar", async () => {
     const fp = lista(await ok(U.finanzas, "GET", "/facturas?estado=pendiente&limit=200"));
@@ -662,6 +724,7 @@ async function main() {
     afirmar(C.total > 0, `total ${f.total}`);
     return [`F-${sello} total ${C.total}`, await exigirBandeja(U.finanzas, B0[U.finanzas], { facturas_pendientes: 0, facturas_por_cobrar: 1 })].join(" | ");
   });
+  await paso("Ruta de la OT · facturada: Pago", async () => (await exigirEtapa("pago", { puede: [U.finanzas], noPuede: [U.ventas] })).texto);
   await paso("Pago parcial y pago total", async () => {
     const mitad = Math.round(C.total / 2);
     await ok(U.finanzas, "POST", "/pagos", { facturaId: C.factura.id, monto: mitad, medio: "transferencia", referencia: `P1-${sello}` });
@@ -674,6 +737,17 @@ async function main() {
     afirmar(fac.estado === "pagada", `estado ${fac.estado}`);
     afirmar(Number(s.saldo) === 0, `saldo ${s.saldo}`);
     return [`${mitad} + ${C.total - mitad} → pagada (sobrepago rechazado)`, await exigirBandeja(U.finanzas, B0[U.finanzas], { facturas_pendientes: 0, facturas_por_cobrar: 0 })].join(" | ");
+  });
+
+  await paso("Ruta de la OT · pagada: todas las etapas hechas, sin siguiente paso", async () => {
+    const a = await ruta();
+    afirmar(a.etapaActual === null && a.siguiente === null, `etapa ${a.etapaActual}`);
+    afirmar(a.etapas.every((e) => e.estado === "hecho"), a.etapas.map((e) => `${e.clave}:${e.estado}`).join(" "));
+    afirmar(a.cierre?.factura?.estado === "pagada", `factura ${JSON.stringify(a.cierre?.factura)}`);
+    return `${a.etapas.length} etapas hechas · ${a.cierre.factura.numero} pagada`;
+  });
+  await paso("Ruta de la OT · otro laboratorio no la consulta (403/404)", async () => {
+    await exigir([403, 404], U.otroLab, "GET", `/ot/${C.ot.id}/avance`);
   });
 
   await paso("Tarjetas de Mi bandeja = total de la lista que abren (final)", () => contrastarTarjetas(PERFILES_TARJETAS));

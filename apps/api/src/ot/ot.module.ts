@@ -4,6 +4,7 @@ import { OtCierreController, OtCierreService } from "./ot-cierre.controller";
 import { FlujoModule } from "../flujo/flujo.module";
 import { FacturacionModule } from "../facturacion/facturacion.module";
 import { LaboratorioOtModule } from "./laboratorio-ot.service";
+import { AvanceOtController, AvanceOtService } from "./avance-ot.controller";
 
 // FlujoModule exporta FlujoService: la OT lo usa para instanciar el flujo BPM
 // al crearse (flujoDefId/flujoVersionId) o al adjuntarlo vía POST /ot/:id/flujo.
@@ -11,10 +12,11 @@ import { LaboratorioOtModule } from "./laboratorio-ot.service";
 // LaboratorioOtModule es @Global: al importarlo aquí, LaboratorioOtService
 // queda disponible también para Cotización (aceptar) y el puente de captura.
 // OtCierreController va PRIMERO: su GET /ot/plazos debe registrarse antes que
-// el GET /ot/:id (ParseUUIDPipe) de OtController.
+// el GET /ot/:id (ParseUUIDPipe) de OtController. AvanceOtController sirve
+// GET /ot/:id/avance (Ruta de la OT, solo lectura).
 @Module({
   imports: [FlujoModule, FacturacionModule, LaboratorioOtModule],
-  controllers: [OtCierreController, OtController],
-  providers: [OtCierreService],
+  controllers: [OtCierreController, AvanceOtController, OtController],
+  providers: [OtCierreService, AvanceOtService],
 })
 export class OtModule {}
