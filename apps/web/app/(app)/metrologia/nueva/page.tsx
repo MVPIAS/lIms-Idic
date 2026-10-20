@@ -8,6 +8,8 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import MotorPanel from "./MotorPanel";
 import PuntosPanel from "./PuntosPanel";
+import { fechaDia, fechaHora } from "@/lib/format";
+import { ESTADO_INSTRUMENTO } from "@/lib/metrologiaOt";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -62,6 +64,10 @@ export default function NuevaCalibracionPage() {
   const [avisosServidor, setAvisosServidor] = useState<string[]>([]);
   const [ok, setOk] = useState<{ codigo: string; id: string } | null>(null);
   const [saving, setSaving] = useState(false);
+  /** Ítem de la OT del que nace la calibración (EP-04 P3.1: no hay calibración suelta). */
+  const [origen, setOrigen] = useState<{ ot: any; item: any } | null>(null);
+  /** Sin ítem ni borrador: lista de instrumentos por calibrar. */
+  const [pendientes, setPendientes] = useState<any[] | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -77,8 +83,14 @@ export default function NuevaCalibracionPage() {
         setParidad(par?.casos ? par : null);
         setDivs(Object.fromEntries((c.distribuciones ?? []).map((d: any) => [d.codigo, Number(d.divisor)])));
         // Edición de un borrador: /metrologia/nueva?id=…
-        const id = new URLSearchParams(window.location.search).get("id");
+        const q = new URLSearchParams(window.location.search);
+        const id = q.get("id"), instrumento = q.get("instrumento"), ot = q.get("ot");
         if (id) await cargarBorrador(id);
+        else if (instrumento && ot) await cargarItem(ot, instrumento, p.data ?? []);
+        else {
+          const r = await fetch(`${API}/metrologia/instrumentos`, { headers: auth() }).then((x) => x.json());
+          setPendientes(r.data ?? []);
+        }
       } catch (e: any) { setError(e.message); }
       finally { setCargado(true); }
     })();
@@ -91,12 +103,29 @@ export default function NuevaCalibracionPage() {
       .then((j) => setPatrones((j.data ?? []).filter((p: any) => p.activo !== false))).catch(() => setPatrones([]));
   }, [fechaCal]);
 
+  /** Abre la hoja de control desde el ítem recibido: OT, cliente, fechas, instrumento e IT heredados. */
+  async function cargarItem(otId: string, itemId: string, procesos: any[]) {
+    const r = await fetch(`${API}/ot/${otId}/metrologia`, { headers: auth() });
+    const m = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(m.message ?? `Error ${r.status}`);
+    const item = (m.instrumentos ?? []).find((x: any) => x.id === itemId);
+    if (!item) throw new Error("El instrumento no pertenece a esa OT.");
+    if (!(item.acciones ?? []).includes("CALIBRAR"))
+      throw new Error(item.calibracion
+        ? `El ítem ${item.numero} ya tiene la calibración ${item.calibracion.numeroCertificado ?? item.calibracion.codigo}.`
+        : item.estado === "por_recibir" ? `Primero registre la recepción del ítem ${item.numero} (OT › Instrumentos).` : `El ítem ${item.numero} no se puede calibrar (${ESTADO_INSTRUMENTO[item.estado]?.texto ?? item.estado}).`);
+    setOrigen({ ot: m.ot, item });
+    if (item.procesoCodigo && procesos.some((x: any) => x.codigo === item.procesoCodigo)) setProcKey(item.procesoCodigo);
+    setD({ ...vacio(), intervalo: item.intervaloMeses != null ? String(item.intervaloMeses) : "12", ident: { rango: item.rango ?? "", lugar: "instalaciones" } });
+  }
+
   async function cargarBorrador(id: string) {
     const r = await fetch(`${API}/metrologia/calibraciones/${id}`, { headers: auth() });
     const cal = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(cal.message ?? `Error ${r.status}`);
     if (!(cal.acciones ?? []).includes("EDITAR")) throw new Error(`La calibración ${cal.codigo} no se puede editar (estado: ${cal.estado}; solo su autor edita un borrador).`);
     setEditId(id); setProcKey(cal.proceso); setDevuelto(cal.devuelto_motivo ?? null); setReemplaza(cal.reemplaza_numero ?? null);
+    if (cal.ot_id) setOrigen({ ot: { id: cal.ot_id, codigo: cal.ot_codigo, laboratorio: cal.laboratorio }, item: { numero: cal.instrumento_numero, recibidoAt: cal.instrumento_recibido_at, etiqueta: cal.instrumento_etiqueta } });
     setInicialMotor(cal.motor ? { datos: cal.datos, opciones: cal.opciones ?? {} } : null);
     const ids: string[] = (cal.patrones ?? []).map((p: any) => p.id);
     setD({
@@ -147,7 +176,8 @@ export default function NuevaCalibracionPage() {
   }, [proc, motor, D, componentes, divs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function cambiarProc(code: string) {
-    setProcKey(code); setOk(null); setError(""); setInicialMotor(null); setD(vacio()); setAvisosServidor([]);
+    setProcKey(code); setOk(null); setError(""); setInicialMotor(null); setAvisosServidor([]);
+    setD(origen ? { ...vacio(), intervalo: D.intervalo, ident: { rango: D.ident.rango ?? "", lugar: D.ident.lugar ?? "instalaciones" } } : vacio());
   }
   function up() { setD({ ...D }); }
 
@@ -158,7 +188,8 @@ export default function NuevaCalibracionPage() {
     try {
       const cond: Record<string, number> = {}; Object.entries(D.cond).forEach(([k, v]) => { if (String(v).trim() !== "") cond[k] = nd(v); });
       const body: any = {
-        procesoCodigo: proc.codigo, fecha: D.fecha || null, laboratorio: proc.laboratorio ? null : D.laboratorio || null,
+        procesoCodigo: proc.codigo, fecha: D.fecha || null, laboratorio: proc.laboratorio || origen ? null : D.laboratorio || null,
+        ...(!editId && origen?.item?.id ? { otInstrumentoId: origen.item.id } : {}),
         instrumento: D.ident, ambiente: D.ambiente, intervaloMeses: D.intervalo === "" ? 12 : Number(D.intervalo),
         patronIds: (D.patrones as string[]).filter(Boolean),
         ...(extra.motor ? { motor: extra.motor } : { cond, puntos: gumPuntos() }),
@@ -181,11 +212,12 @@ export default function NuevaCalibracionPage() {
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.message ?? `Error ${r.status}`);
       toast.ok(`${ok.codigo} enviada al jefe del laboratorio`);
-      router.push("/metrologia" as any);
+      router.push(`/metrologia/${ok.id}` as any);
     } catch (e: any) { setError(e.message); }
   }
 
   if (!cargado) return <div className="card" style={{ padding: 24, textAlign: "center", color: "var(--muted)" }}>Cargando procesos…</div>;
+  if (pendientes) return <PorCalibrar filas={pendientes} />;
   const u = proc?.unidad ?? "", dec = proc?.decimales ?? 3;
   const maxL = Math.max(...D.pts.map((p: any) => p.lect.length), 1);
   const rp = calc?.puntos.reduce((a: any, r: any) => (Math.abs(r.error) > Math.abs(a.error) ? r : a), calc.puntos[0]);
@@ -205,11 +237,11 @@ export default function NuevaCalibracionPage() {
   return (
     <div>
       <PageHeader
-        titulo={editId ? "Metrología · Editar borrador" : "Metrología · Nueva calibración"}
-        migas={[{ label: "Calibraciones", href: "/metrologia" }, { label: editId ? "Editar borrador" : "Nueva" }]}
-        subtitulo={<>Elija el proceso y complete los datos (en amarillo); los resultados (en azul) se calculan mientras escribe. Al guardar,
-          el servidor recalcula y la calibración queda como <b>borrador</b>. Al enviarla usted la firma como metrólogo; después la firman
-          el jefe del laboratorio y el jefe del departamento, que emite el certificado.</>}
+        titulo={editId ? "Metrología · Editar borrador" : origen ? `Calibrar · ítem ${origen.item.numero} de la OT ${origen.ot.codigo}` : "Metrología · Calibración"}
+        migas={[{ label: "Calibraciones", href: "/metrologia" }, ...(origen ? [{ label: `OT ${origen.ot.codigo}`, href: `/ot/${origen.ot.id}` }] : []), { label: editId ? "Editar borrador" : "Hoja de control" }]}
+        subtitulo={<>Complete los datos (en amarillo); los resultados (en azul) se calculan mientras escribe. La OT, el cliente, las fechas y el
+          instrumento vienen de la OT y de su recepción. Al guardar, el servidor recalcula y la calibración queda como <b>borrador</b>. Al enviarla
+          usted la firma como metrólogo; después la firman el jefe del laboratorio y el jefe del departamento, que emite el certificado.</>}
       />
       {error && <div className="alert warn" role="alert">{error}</div>}
       {reemplaza && <div className="alert info">Reemisión: este certificado reemplazará al N° <b>{reemplaza}</b> al emitirse.</div>}
@@ -218,16 +250,16 @@ export default function NuevaCalibracionPage() {
       {ok && (
         <div className="alert success" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <span>Borrador <b>{ok.codigo}</b> guardado. Puede seguir corrigiéndolo o enviarlo al jefe del laboratorio.</span>
-          <button className="btn primary sm" onClick={enviar}>Firmar y enviar a revisión</button>
-          <Link className="btn sm" href={"/metrologia" as any}>Ir a Calibraciones</Link>
+          <button className="btn primary sm" onClick={enviar}>Firmar y enviar → Revisión Jefe Lab.</button>
+          <Link className="btn sm" href={`/metrologia/${ok.id}` as any}>Ver la ficha</Link>
         </div>
       )}
 
       <div className="card" style={{ padding: "12px 14px", marginBottom: 12 }}>
         <label htmlFor="f-proceso" style={{ display: "block", marginBottom: 6 }}>Proceso de calibración</label>
-        <select id="f-proceso" value={procKey} disabled={!!editId} onChange={(e) => cambiarProc(e.target.value)} style={{ maxWidth: 620 }}>
+        <select id="f-proceso" value={procKey} disabled={!!editId || !!origen?.item?.procesoCodigo} onChange={(e) => cambiarProc(e.target.value)} style={{ maxWidth: 620 }}>
           <option value="">Seleccione el proceso…</option>
-          {grupos.map(([lab, ps]) => (
+          {grupos.filter(([lab]) => !origen || !lab || lab === origen.ot.laboratorio).map(([lab, ps]) => (
             <optgroup key={lab} label={lab ? LAB_NOMBRE[lab] ?? lab : "Cualquier laboratorio de la sección"}>
               {ps.map((p) => {
                 const m = motorDe(motores, p.codigo, p.motor);
@@ -237,6 +269,9 @@ export default function NuevaCalibracionPage() {
             </optgroup>
           ))}
         </select>
+        {origen?.item?.procesoCodigo && !editId && (
+          <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>El proceso viene del ítem de la OT: solo la jefatura lo cambia, en el ítem y antes de recibirlo.</div>
+        )}
         {proc && (
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 6 }}>
             {proc.metodo}{proc.revision ? ` · ${proc.revision}` : ""}{proc.norma ? ` · ${proc.norma}` : ""} ·{" "}
@@ -257,7 +292,7 @@ export default function NuevaCalibracionPage() {
                   {["12", "15", "18", "24", "36", "48", "60"].map((m) => <option key={m} value={m}>{m} meses</option>)}
                   <option value="0">Según requerimiento del cliente</option>
                 </select></div>
-              {!proc.laboratorio && (
+              {!proc.laboratorio && !origen && (
                 <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="f-lab">Laboratorio que calibra</label>
                   <select id="f-lab" value={D.laboratorio} style={YEL} onChange={(e) => { D.laboratorio = e.target.value; up(); }}>
                     <option value="">Seleccione…</option>
@@ -268,10 +303,23 @@ export default function NuevaCalibracionPage() {
                 <input id="f-desv" value={D.ident.desviacion ?? ""} style={YEL} placeholder="No" onChange={(e) => { D.ident.desviacion = e.target.value; up(); }} /></div>
             </div>)}
             {tarjeta("Orden de trabajo y cliente", <div className="form-grid">
-              {fld(D.ident, "ot", "Orden de trabajo")}
-              {fld(D.ident, "fechaOt", "Fecha de la OT", false, "date")}
-              {fld(D.ident, "fechaRecepcion", "Fecha de recepción del instrumento", true, "date")}
-              {fld(D.ident, "cliente", "Cliente", true)}{fld(D.ident, "solicitante", "Solicitante")}{fld(D.ident, "contacto", "Contacto")}
+              {origen ? (
+                <div style={{ gridColumn: "1 / -1", fontSize: 12.5, display: "grid", gap: 3 }}>
+                  <div>OT <Link href={`/ot/${origen.ot.id}` as any} className="codigo" style={{ color: "var(--accent)" }}>{origen.ot.codigo}</Link>
+                    {origen.ot.fechaOt ? <> · {fechaDia(origen.ot.fechaOt)}</> : null} · ítem {origen.item.numero}{origen.item.etiqueta ? <> · etiqueta <span className="codigo">{origen.item.etiqueta}</span></> : null}</div>
+                  {origen.ot.cliente && <div>Cliente: <b>{origen.ot.cliente}</b></div>}
+                  {origen.item.recibidoAt && <div>Recibido el {fechaHora(origen.item.recibidoAt)}{origen.item.ubicacion ? ` · ${origen.item.ubicacion}` : ""}</div>}
+                  <small style={{ color: "var(--muted)" }}>Estos datos vienen de la OT y de la recepción: no se escriben a mano.</small>
+                </div>
+              ) : (
+                <>
+                  {fld(D.ident, "ot", "Orden de trabajo (calibración antigua)")}
+                  {fld(D.ident, "fechaOt", "Fecha de la OT", false, "date")}
+                  {fld(D.ident, "fechaRecepcion", "Fecha de recepción del instrumento", true, "date")}
+                  {fld(D.ident, "cliente", "Cliente", true)}
+                </>
+              )}
+              {fld(D.ident, "solicitante", "Solicitante")}{fld(D.ident, "contacto", "Contacto")}
               {fld(D.ident, "direccion", "Dirección", true)}
               <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="f-lugar">Lugar de la calibración</label>
                 <select id="f-lugar" value={D.ident.lugar ?? "instalaciones"} style={YEL} onChange={(e) => { D.ident.lugar = e.target.value; up(); }}>
@@ -280,9 +328,24 @@ export default function NuevaCalibracionPage() {
                 </select></div>
             </div>)}
             {tarjeta("Instrumento", <div className="form-grid">
-              {fld(D.ident, "item", "Descripción del ítem", true)}{fld(D.ident, "marca", "Marca")}{fld(D.ident, "modelo", "Modelo")}
-              {fld(D.ident, "serie", "N° de serie")}{fld(D.ident, "idEspecial", "Identificación especial")}
-              {fld(D.ident, "cap", "Capacidad / valor nominal")}{fld(D.ident, "res", "Resolución")}
+              {origen ? (
+                origen.item.descripcion !== undefined ? (
+                  <div style={{ gridColumn: "1 / -1", fontSize: 12.5 }}>
+                    <b>{origen.item.descripcion}</b> · {[origen.item.marca, origen.item.modelo].filter(Boolean).join(" · ") || "sin marca ni modelo"}
+                    {" · "}Serie {origen.item.serie || "s/s"}{origen.item.idEspecial ? ` · ${origen.item.idEspecial}` : ""}
+                    {origen.item.capacidad ? ` · Capacidad ${origen.item.capacidad}` : ""}{origen.item.resolucion ? ` · Resolución ${origen.item.resolucion}` : ""}
+                    <small style={{ display: "block", color: "var(--muted)" }}>De la recepción del instrumento (se corrige al recibirlo).</small>
+                  </div>
+                ) : (
+                  <small style={{ gridColumn: "1 / -1", color: "var(--muted)" }}>Descripción, marca, modelo, serie, capacidad y resolución vienen de la recepción del ítem {origen.item.numero}.</small>
+                )
+              ) : (
+                <>
+                  {fld(D.ident, "item", "Descripción del ítem", true)}{fld(D.ident, "marca", "Marca")}{fld(D.ident, "modelo", "Modelo")}
+                  {fld(D.ident, "serie", "N° de serie")}{fld(D.ident, "idEspecial", "Identificación especial")}
+                  {fld(D.ident, "cap", "Capacidad / valor nominal")}{fld(D.ident, "res", "Resolución")}
+                </>
+              )}
               {fld(D.ident, "rango", "Rango calibrado")}{fld(D.ident, "clase", "Clase")}
             </div>)}
             {tarjeta("Patrones utilizados (hasta 3)", <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -380,6 +443,48 @@ export default function NuevaCalibracionPage() {
               </div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Sin ítem ni borrador: los instrumentos de la OT que esperan su calibración (no hay calibración suelta). */
+function PorCalibrar({ filas }: { filas: any[] }) {
+  return (
+    <div>
+      <PageHeader
+        titulo="Metrología · Instrumentos por calibrar"
+        migas={[{ label: "Calibraciones", href: "/metrologia" }, { label: "Por calibrar" }]}
+        subtitulo={<>Toda calibración nace del instrumento <b>recibido</b> de una OT: hereda la OT, el cliente, las fechas y la IT. Los
+          instrumentos se registran y se reciben en la OT (pestaña «Instrumentos»). Primero, los asignados a usted.</>}
+      />
+      {filas.length === 0 ? (
+        <div className="card" style={{ padding: 24, color: "var(--muted)" }}>No hay instrumentos por calibrar en sus laboratorios.</div>
+      ) : (
+        <div className="card" style={{ padding: 0, overflowX: "auto" }}>
+          <table className="data">
+            <thead><tr><th>OT · ítem</th><th>Instrumento</th><th>IT</th><th>Lab.</th><th>Metrólogo</th><th>Estado</th><th>Término previsto</th><th /></tr></thead>
+            <tbody>
+              {filas.map((i) => (
+                <tr key={i.id}>
+                  <td><Link href={`/ot/${i.ot_id}` as any} className="codigo" style={{ color: "var(--accent)" }}>{i.ot_codigo}</Link> · {i.numero}</td>
+                  <td><b>{i.descripcion}</b><small style={{ display: "block", color: "var(--muted)" }}>{[i.marca, i.modelo].filter(Boolean).join(" · ") || "—"} · Serie {i.serie || "s/s"}</small></td>
+                  <td><span className="codigo">{i.proceso_codigo ?? "—"}</span></td>
+                  <td>{i.laboratorio}</td>
+                  <td>{i.metrologo_nombre ?? <span style={{ color: "var(--muted)" }}>Sin asignar</span>}{i.mio && <span className="pill teal" style={{ marginLeft: 6 }}>Suyo</span>}
+                    {i.fecha_prevista && <small style={{ display: "block", color: "var(--muted)" }}>Prevista {fechaDia(i.fecha_prevista)}</small>}</td>
+                  <td><span className={`pill ${ESTADO_INSTRUMENTO[i.estado]?.pill ?? "gray"}`}>{ESTADO_INSTRUMENTO[i.estado]?.texto ?? i.estado}</span></td>
+                  <td>{i.termino_previsto ? fechaDia(i.termino_previsto) : "—"}</td>
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                    {i.estado === "recibido"
+                      ? <Link className="btn primary sm" href={`/metrologia/nueva?instrumento=${i.id}&ot=${i.ot_id}` as any}>Calibrar →</Link>
+                      : <Link className="btn outline sm" href={`/ot/${i.ot_id}` as any}>Recibir en la OT →</Link>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

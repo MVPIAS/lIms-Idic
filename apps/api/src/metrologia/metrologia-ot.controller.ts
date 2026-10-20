@@ -71,12 +71,29 @@ const DevolucionSchema = z.object({
   guia: texto(80),
 });
 const EntregaSchema = z.object({
-  fecha: z.coerce.date().optional(),
+  /** AAAA-MM-DD (día de Chile) o fecha-hora; sin ella, ahora. */
+  fecha: z.string().trim().max(40).optional(),
   medio: z.enum(MEDIOS_ENTREGA_CAL),
   destinatario: z.string().trim().min(2, "Indique a quién se entregó").max(160),
   observacion: texto(1000),
 });
+const TEXTO_MEDIO: Record<string, string> = {
+  mano: "en mano", correo: "por correo electrónico", oficina_partes: "por oficina de partes", courier: "por courier", plataforma: "por la plataforma del cliente", otro: "otro medio",
+};
 const MotivoSchema = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres)").max(1000) });
+
+/**
+ * Instante de la entrega: un día AAAA-MM-DD se lee en hora de Chile (hoy → ahora; otro
+ * día → mediodía de ese día), para que «20-10» no se guarde como el 19 a las 21:00.
+ */
+export function fechaEntrega(f?: string | null, ahora = new Date()): Date {
+  if (!f) return ahora;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(f)) {
+    const hoy = ahora.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+    return f === hoy ? ahora : new Date(instanteChile(`${f}T12:00`));
+  }
+  return new Date(instanteChile(f));
+}
 
 const tiene = (req: any, p: string) => (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes(p);
 
@@ -427,7 +444,7 @@ export class MetrologiaOtService {
         `SELECT id, codigo, numero_certificado AS "numeroCertificado", estado, emitido_at AS "emitidoAt", entregado_at AS "entregadoAt"
            FROM met_calibracion WHERE id = $1::uuid AND ot_id = $2::uuid AND deleted_at IS NULL FOR UPDATE`, calId, otId);
       if (!filas.length) throw new NotFoundException("Calibración no encontrada en esta OT");
-      const fecha = d.fecha ?? new Date();
+      const fecha = fechaEntrega(d.fecha);
       const motivo = motivoEntrega(filas[0], fecha);
       if (motivo) throw new ConflictException(motivo);
       await tx.$executeRawUnsafe(
@@ -438,7 +455,7 @@ export class MetrologiaOtService {
       await tx.$executeRawUnsafe(
         `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
          VALUES ($1::uuid, 'ENTREGADA', 'emitida', 'emitida', $2::uuid, $3)`,
-        calId, req?.user?.sub ?? null, `Entregado a ${d.destinatario} (${d.medio.replace("_", " ")})${d.observacion ? `: ${d.observacion}` : ""}`);
+        calId, req?.user?.sub ?? null, `Entregado a ${d.destinatario} · ${TEXTO_MEDIO[d.medio] ?? d.medio}${d.observacion ? ` · ${d.observacion}` : ""}`);
     });
     return { data: { id: calId, entregado: true } };
   }

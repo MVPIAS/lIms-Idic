@@ -688,7 +688,9 @@ export class MetrologiaController {
               ua.nombre_completo AS autor_nombre, ue.nombre_completo AS emisor_nombre, r.numero_certificado AS reemplaza_numero,
               (SELECT x.numero_certificado FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) AS reemplazada_por,
               EXISTS (SELECT 1 FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.deleted_at IS NULL AND x.estado <> 'reemplazada') AS reemision_en_curso,
-              o.codigo AS ot_codigo, o.estado AS ot_estado, it.numero AS instrumento_numero, it.estado AS instrumento_estado,
+              o.codigo AS ot_codigo, o.estado AS ot_estado,
+              CASE WHEN o.id IS NULL THEN NULL
+                   ELSE COALESCE(o.origen_trabajo, CASE WHEN o.cotizacion_id IS NOT NULL THEN 'COTIZACION' ELSE 'DIRECTA' END) END AS origen, it.numero AS instrumento_numero, it.estado AS instrumento_estado,
               it.recibido_at AS instrumento_recibido_at, it.etiqueta AS instrumento_etiqueta, it.ubicacion AS instrumento_ubicacion,
               it.metrologo_id AS instrumento_metrologo_id, ue2.nombre_completo AS entregado_por_nombre
          FROM met_calibracion c JOIN met_proceso pr ON pr.id = c.proceso_id JOIN met_magnitud m ON m.id = pr.magnitud_id
@@ -1037,21 +1039,32 @@ export class MetrologiaController {
     }
   }
 
-  /** Cuerpo HTML del certificado (el sellado si está emitido): vista previa en pantalla. */
+  /**
+   * Certificado en pantalla. Por defecto, el cuerpo HTML (el sellado si está emitido); con
+   * ?completo=1, el documento completo con estilos, sello y pie: lo mismo que el PDF.
+   */
   @Get("calibraciones/:id/html")
   @RequierePermiso("metrologia.ver")
-  async html(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    const t = tenantId(req);
-    const cal = await this.cargar(id, req);
-    if ((cal.estado === "emitida" || cal.estado === "reemplazada") && cal.documento_html) return { data: { html: cal.documento_html, sellado: true } };
-    const c = await this.circuito(t, cal);
-    return { data: { html: certificadoHtml(cal, await this.contextoCertificado(t, cal, c)), sellado: false } };
+  async html(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Query("completo") completo?: string) {
+    const doc = await this.documento(id, req);
+    if (completo === "1" || completo === "true") return { data: { html: documentoCompleto(doc.cuerpo, doc.sello, doc.titulo), sellado: !doc.sello.borrador } };
+    return { data: { html: doc.cuerpo, sellado: !doc.sello.borrador } };
   }
 
   /** PDF del certificado: el documento sellado si está emitido; si no, BORRADOR con las firmas pendientes. */
   @Get("calibraciones/:id/pdf")
   @RequierePermiso("metrologia.ver")
   async pdf(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
+    const doc = await this.documento(id, req);
+    const html = documentoCompleto(doc.cuerpo, doc.sello, doc.titulo);
+    const buf = await generarPdf(html, doc.sello, doc.titulo);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${doc.sello.numero.replace(/[^A-Za-z0-9._-]/g, "_")}.pdf"`);
+    res.end(buf);
+  }
+
+  /** Cuerpo, sello y título del certificado (el sellado si está emitido o reemplazado). */
+  private async documento(id: string, req: any): Promise<{ cuerpo: string; sello: Sello; titulo: string }> {
     const t = tenantId(req);
     const cal = await this.cargar(id, req);
     const sellado = (cal.estado === "emitida" || cal.estado === "reemplazada") && cal.documento_html;
@@ -1072,11 +1085,7 @@ export class MetrologiaController {
       borrador: !sellado,
       ...(cal.estado === "reemplazada" ? { estadoDocumento: "anulado", motivoEstado: `Reemplazado por el certificado N° ${cal.reemplazada_por ?? ""}` } : {}),
     };
-    const html = documentoCompleto(cuerpo, sello, `Certificado de Calibración ${numero}`);
-    const buf = await generarPdf(html, sello, `Certificado de Calibración ${numero}`);
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `inline; filename="${numero.replace(/[^A-Za-z0-9._-]/g, "_")}.pdf"`);
-    res.end(buf);
+    return { cuerpo, sello, titulo: `Certificado de Calibración ${numero}` };
   }
 
   // ---- helpers --------------------------------------------------------------

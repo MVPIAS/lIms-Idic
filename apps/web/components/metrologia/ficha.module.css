@@ -1,0 +1,64 @@
+/* Ficha de calibración (maqueta de Metrología, EP-04 §4.0): barra de 6 pasos,
+   pestañas numeradas, circuito de firmas a la vista, certificado y bitácora. */
+
+.cabecera { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; margin: 4px 0 12px; }
+.cabecera h1 { font-size: 19px; margin: 0; line-height: 1.25; }
+.cabecera .sub { color: var(--muted); font-size: 12.5px; margin-top: 3px; }
+.crece { flex: 1; min-width: 240px; }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; border: 1px solid transparent; }
+.chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.chipBorrador { background: #eef3f7; color: #516071; border-color: #d9e0e8; }
+.chipRevision { background: #fff0d4; color: #7a4b00; border-color: #f0d49a; }
+.chipFirma { background: #e3edff; color: #1c4ba6; border-color: #c4d6fb; }
+.chipEmitido { background: #dcf5e6; color: #155e3d; border-color: #b4e3c6; }
+.chipDevuelto { background: #fdecec; color: #7d1f1f; border-color: #f3c6c6; }
+.chipReemplazado { background: #fff0d4; color: #7a4b00; border-color: #f0d49a; }
+
+.barra { display: flex; flex-wrap: wrap; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; margin: 0 0 14px; padding: 0; list-style: none; }
+.paso { flex: 1 1 120px; padding: 9px 12px; border-right: 1px solid var(--line); min-width: 110px; }
+.paso:last-child { border-right: 0; }
+.paso :global(.n) { font-size: 10px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; }
+.paso :global(.t) { font-size: 12.5px; font-weight: 600; margin-top: 2px; color: var(--ink); }
+.pasoHecho { background: #ecf8f1; }
+.pasoHecho :global(.n)::after { content: " ✓"; color: #1d7a4b; }
+.pasoActual { background: #e2f3f5; box-shadow: inset 0 -3px 0 var(--accent); }
+.pasoActual :global(.t) { color: var(--primary); }
+
+.pestanas { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-bottom: 14px; }
+.pestana { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-weight: 600; font-size: 12.5px; padding: 9px 13px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
+.pestana:hover { color: var(--ink); }
+.pestana:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pestana :global(.num) { width: 19px; height: 19px; border-radius: 50%; background: #eef3f7; border: 1px solid var(--line); font-size: 10.5px; display: grid; place-items: center; }
+.pestanaActiva { color: var(--primary); border-bottom-color: var(--accent); }
+.pestanaActiva :global(.num) { background: var(--primary); color: #fff; border-color: var(--primary); }
+
+.circuito { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 2px 0 10px; }
+.nodo { border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; background: #fff; position: relative; }
+.nodo :global(.estado) { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; color: var(--muted); }
+.nodo :global(.quien) { font-weight: 700; font-size: 13px; margin-top: 2px; }
+.nodo :global(.rol) { font-size: 11.5px; color: var(--muted); }
+.nodo :global(.cuando) { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.nodoOk { border-color: #9fd6b6; background: #f1faf5; }
+.nodoOk :global(.estado) { color: #1d7a4b; }
+.nodoActual { border-color: var(--accent); box-shadow: 0 0 0 2px #cdeaee; }
+.nodoActual :global(.estado) { color: var(--accent); }
+.nodoDevuelto { border-color: #f3c6c6; background: #fdf4f4; }
+.nodoDevuelto :global(.estado) { color: #7d1f1f; }
+
+.acciones { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 12px; }
+.espera { font-size: 12px; color: var(--muted); }
+
+.certificado { width: 100%; min-height: 900px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.bloque { border: 1px solid var(--line); border-radius: 9px; padding: 12px 14px; background: #fff; margin-bottom: 12px; }
+.bloque h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
+.datos { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 14px; margin: 0; }
+.datos div { min-width: 0; }
+.datos dt { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.datos dd { margin: 1px 0 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.calc { background: #e4eef9; color: #25567f; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 720px) {
+  .circuito { grid-template-columns: 1fr; }
+  .paso { flex-basis: 45%; }
+}

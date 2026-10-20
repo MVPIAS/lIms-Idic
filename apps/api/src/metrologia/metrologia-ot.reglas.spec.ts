@@ -159,3 +159,14 @@ describe("Fecha-hora de pantalla en hora de Chile (servidor en cualquier zona)",
     expect(Number.isNaN(instanteChile("ayer"))).toBe(true);
   });
 });
+
+describe("Fecha de entrega del certificado (día de Chile)", () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { fechaEntrega } = require("./metrologia-ot.controller");
+  const ahora = new Date("2026-10-20T15:00:00Z"); // 12:00 en Chile
+  it("hoy → ahora; otro día → mediodía de Chile (no el día anterior en UTC)", () => {
+    expect(fechaEntrega("2026-10-20", ahora).toISOString()).toBe(ahora.toISOString());
+    expect(fechaEntrega("2026-10-19", ahora).toISOString()).toBe("2026-10-19T15:00:00.000Z");
+    expect(fechaEntrega(undefined, ahora)).toBe(ahora);
+  });
+});
