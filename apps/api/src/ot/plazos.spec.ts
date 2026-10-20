@@ -105,3 +105,11 @@ describe("plazos · camino de la máquina de estados hasta «cerrada»", () => {
     expect(caminoEstadosOt("estado_raro")).toBeNull();
   });
 });
+
+describe("faltantesParaCerrar · certificado de calibración en borrador (Metrología, R1 r1a)", () => {
+  it("un borrador no es un documento emitido: lo dice y no basta para cerrar", () => {
+    const f = faltantesParaCerrar({ estado: "en_analisis", documentos: [{ numero: "CAL-2026-0001", estado: "borrador", entregadoAt: null }], resultadosNoAprobados: 0 });
+    expect(f).toContain("La OT no tiene informes ni certificados emitidos.");
+    expect(f.join(" ")).toMatch(/CAL-2026-0001 está en elaboración/);
+  });
+});

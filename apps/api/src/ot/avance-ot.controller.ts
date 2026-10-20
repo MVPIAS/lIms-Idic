@@ -7,6 +7,7 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { pasosActuales } from "../plantilla-render/reglas-emision";
 import { calcularAvance, puedeActuar, type DocumentoAvance, type HechosOt } from "./avance-ot";
+import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
 
 /** Laboratorios de la Sección Metrología (los mismos que usa el módulo de Metrología). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -66,18 +67,8 @@ export class AvanceOtService {
         orderBy: { createdAt: "desc" },
         select: { numero: true, estado: true },
       }),
-      ot.unidad && LABS_METROLOGIA.includes(ot.unidad.codigo)
-        ? this.prisma.$queryRawUnsafe<{ codigo: string; numeroCertificado: string | null; estado: string }[]>(
-            `SELECT c.codigo, c.numero_certificado AS "numeroCertificado", c.estado
-               FROM met_calibracion c
-              WHERE c.deleted_at IS NULL AND c.tenant_id = $2::uuid
-                AND (c.ot_id = $1::uuid OR upper(trim(c.datos->>'ot')) = upper($3))
-              ORDER BY c.created_at`,
-            id,
-            ot.tenantId,
-            ot.codigo,
-          )
-        : [],
+      // Metrología (EP-04): instrumentos y calibraciones ligados a la OT por su id.
+      ot.unidad && LABS_METROLOGIA.includes(ot.unidad.codigo) ? metrologiaParaCierre(this.prisma, id, ot.tenantId) : null,
       this.prisma.$queryRawUnsafe<any[]>(
         `SELECT i.id, i.numero, u.codigo AS unidad, i.sujeta_tasa AS "sujetaTasa", i.remitida_dco_at AS "remitidaAt",
                 i.doc_adm_estado AS documentacion,
@@ -146,7 +137,13 @@ export class AvanceOtService {
       },
       documentos,
       factura: factura ? { numero: factura.numero ?? "(sin número)", estado: factura.estado } : null,
-      calibraciones,
+      calibraciones: (calibraciones?.cals ?? []).map((c) => ({
+        id: c.id, instrumentoId: c.instrumentoId, codigo: c.codigo, numeroCertificado: c.numeroCertificado ?? null, estado: c.estado, entregadoAt: c.entregadoAt ?? null,
+      })),
+      instrumentos: (calibraciones?.items ?? []).map((x) => ({
+        id: x.id, numero: x.numero, descripcion: x.descripcion, estado: x.estado, metrologo: x.metrologoNombre, metrologoId: x.metrologoId,
+      })),
+      exigeDevolucion: calibraciones?.exigeDevolucion ?? true,
       internacion: i
         ? {
             id: i.id,
