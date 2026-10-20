@@ -62,6 +62,7 @@ export const NAV: SeccionNav[] = [
       { href: "/crm", label: "Oportunidades (CRM)", icon: "🎯", perm: "cotizacion.ver", claves: "crm pipeline" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "💲", perm: "cotizacion.ver" },
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
+      { href: "/encuestas", label: "Encuestas de satisfacción", icon: "☺", perm: "encuesta.ver", claves: "postventa satisfaccion cliente" },
       // Misma pantalla que «BPCH · Certificación › Internaciones» (puerta única): Comercial registra la resolución y la tasa.
       // En Comercial solo para quien trabaja en el Depto. Comercial; el BPCH la tiene en su sección.
       { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: "DCO", claves: "aduana importacion sdbpch resolucion dgmn tasa" },
@@ -84,6 +85,7 @@ export const NAV: SeccionNav[] = [
       { href: "/ot", label: "Órdenes de trabajo", icon: "🗂", perm: "ot.ver", claves: "ot expediente" },
       { href: "/ot/nueva", label: "Registrar OT", icon: "＋", perm: "ot.crear" },
       { href: "/ordenes-internas", label: "Órdenes internas", icon: "🔀", perm: "ot.ver", claves: "derivacion muestreo otro laboratorio" },
+      { href: "/cotizaciones/por-responder", label: "Cotizaciones por responder", icon: "💲", perm: "cotizacion.costear", claves: "costeo form05 form06 programa de trabajo fechas vb" },
       { href: "/muestras", label: "Muestras", icon: "🧫", perm: "muestra.ver" },
       { href: "/captura", label: "Captura de resultados", icon: "✍", perm: "resultado.crear" },
       { href: "/captura-ot", label: "Captura y revisión por OT", icon: "📈", perm: ["resultado.crear", "resultado.revisar", "resultado.aprobar"], claves: "revisar aprobar devolver especificación" },

@@ -23,11 +23,11 @@ export default function NuevaCotizacionPage() {
       </Link>
       <h1 className="page">Nueva Cotización</h1>
       <p className="subtitle">
-        Se emite en estado <b>Abierta</b>. Al registrar la aceptación (OPI, OC, correo, pago por adelantado o disposición del Director) se genera la OT.
+        Nace <b>Abierta</b>, con su número correlativo. Después, en su ficha: consulta al laboratorio (fechas y costo), V°B°, firma del Jefe DCO, envío al cliente y aceptación, que genera la OT.
       </p>
       <CotizacionForm
         modo="crear"
-        onGuardado={(c) => router.push(`/cotizaciones?abrir=${c?.id ?? ""}` as any)}
+        onGuardado={(c) => router.push(`/cotizaciones/${c?.id ?? ""}` as any)}
         onCancelar={() => router.push("/cotizaciones" as any)}
       />
     </div>
