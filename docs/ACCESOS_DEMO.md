@@ -192,6 +192,13 @@ este orden fijo:
 8. `frente-k.js` 9. `alcance-por-laboratorio.js` (todos los perfiles `demo.*`:
    ninguna fila fuera del alcance, detalle ajeno → 403/404, escrituras ajenas → 403
    y menú sin SAEC ni BPCH Certificación donde no corresponde)
+10. `r1-r1c.js` (cotización de punta a punta: costeo del laboratorio, V°B°, firma del
+    Jefe DCO, envío, aceptación, cierre de la OT y encuesta de satisfacción;
+    docs/FLUJO_COTIZACION_ENCUESTAS.md)
+
+Desde el frente r1c una cotización nueva se acepta **firmada por el Jefe DCO**: los
+guiones que aceptan cotizaciones la envían a firma (`demo.ventas`) y la firman
+(`demo.dco.jefe`) antes de registrar la aceptación.
 
 Ninguno depende de otro: cada uno se prepara sus datos (p. ej. `correcciones-manuales.js`
 emite su propio informe de LQC si la base no tiene ninguno y crea la factura de su nota de

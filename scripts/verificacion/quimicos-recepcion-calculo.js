@@ -198,6 +198,9 @@ async function main() {
       clienteId: C.cliente.id, formato: "NORMAL", referencia: `Químicos 15-10 ${sello}`,
       lineas: [{ catEnsayoId: C.mPh.ensayoId, cantidad: 1 }, { catEnsayoId: C.mAzufre.ensayoId, cantidad: 1 }],
     });
+    // Circuito de la cotización (frente r1c): se acepta firmada por el Jefe DCO.
+    await ok(U.ventas, "POST", `/cotizaciones/${cot.id}/enviar-a-firma`, {});
+    await ok("demo.dco.jefe", "POST", `/cotizaciones/${cot.id}/firmar`, {});
     const r = await ok(U.ventas, "POST", `/cotizaciones/${cot.id}/aceptar`, {
       tipo: "OC", numero: `OC-QUI-${sello}`, fecha: new Date().toISOString().slice(0, 10), conCobro: true, unidadPrincipalId: C.lqc.id,
     });

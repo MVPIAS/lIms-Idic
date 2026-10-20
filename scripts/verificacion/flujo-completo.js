@@ -335,6 +335,17 @@ async function main() {
     await exigir(403, U.a1, "POST", `/cotizaciones/${C.cot.id}/aceptar`, { tipo: "OC", numero: "X", unidadPrincipalId: C.lqc.id });
   });
 
+  /* ---------------- 2b. Firma de la cotización (circuito r1c, matriz COTIZACION) */
+  await paso("Sin la firma del Jefe DCO no se registra la aceptación (409); se envía a firma y la firma el Jefe DCO", async () => {
+    await exigir(409, U.ventas, "POST", `/cotizaciones/${C.cot.id}/aceptar`, { tipo: "OC", numero: "X", unidadPrincipalId: C.lqc.id });
+    await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/enviar-a-firma`, {});
+    await exigir(403, U.ventas, "POST", `/cotizaciones/${C.cot.id}/firmar`, {});
+    await ok("demo.dco.jefe", "POST", `/cotizaciones/${C.cot.id}/firmar`, {});
+    const c = await ok(U.ventas, "GET", `/cotizaciones/${C.cot.id}`);
+    afirmar(c.firmaEstado === "firmada", `firma ${c.firmaEstado}`);
+    return `${c.codigo} firmada por ${c.firmadaPorNombre}`;
+  });
+
   /* ---------------- 3. Aceptación → OT */
   await paso("Ventas registra la aceptación y nace la OT de LQC", async () => {
     const r = await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/aceptar`, {
