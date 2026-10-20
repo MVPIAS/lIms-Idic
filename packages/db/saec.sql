@@ -509,8 +509,12 @@ FROM (VALUES
 ON CONFLICT (codigo) DO NOTHING;
 
 -- Matriz rol_permiso del SAEC (tenant IDIC), en la línea de seed_rbac.sql.
--- Criterio: ANALISTA_SR actúa como perito de balística; RECEPCION y TECNICO
--- mueven evidencias en bodega pero no aprueban préstamos ni emiten certificados.
+-- Alcance por laboratorio (frente L · fase 0, align_alcance_fase0.sql): SAEC es
+-- de la Delegación Nº 11. Administración, Recepción, Calidad y los roles
+-- operativos genéricos (ANALISTA, ANALISTA_SR, TECNICO, INSPECTOR) ya NO reciben
+-- permisos SAEC: el personal de la Delegación los recibe por el rol PERITO_SAEC.
+-- Lector/Auditor conserva la consulta; Dirección y las jefaturas, los suyos (el
+-- ámbito D11 los limita a quien tiene la Delegación en su alcance).
 INSERT INTO rol_permiso (rol_id, permiso_id)
 SELECT r.id, p.id FROM (VALUES
   ('SUPERADMIN','evidencia.ver'), ('SUPERADMIN','evidencia.crear'), ('SUPERADMIN','evidencia.editar'),
@@ -520,13 +524,6 @@ SELECT r.id, p.id FROM (VALUES
   ('SUPERADMIN','caso.crear'), ('SUPERADMIN','caso.editar'), ('SUPERADMIN','caso.eliminar'),
   ('SUPERADMIN','ibis.ver'), ('SUPERADMIN','ibis.importar'), ('SUPERADMIN','peritaje.registrar'),
   ('SUPERADMIN','saec.certificado.emitir'),
-
-  ('ADMIN','evidencia.ver'), ('ADMIN','evidencia.crear'), ('ADMIN','evidencia.editar'),
-  ('ADMIN','evidencia.eliminar'), ('ADMIN','evidencia.custodiar'), ('ADMIN','evidencia.prestar'),
-  ('ADMIN','evidencia.aprobar'), ('ADMIN','arma.ver'), ('ADMIN','arma.crear'), ('ADMIN','arma.editar'),
-  ('ADMIN','arma.eliminar'), ('ADMIN','caso.ver'), ('ADMIN','caso.crear'), ('ADMIN','caso.editar'),
-  ('ADMIN','caso.eliminar'), ('ADMIN','ibis.ver'), ('ADMIN','ibis.importar'), ('ADMIN','peritaje.registrar'),
-  ('ADMIN','saec.certificado.emitir'),
 
   ('DIRECTOR','evidencia.ver'), ('DIRECTOR','evidencia.aprobar'), ('DIRECTOR','arma.ver'),
   ('DIRECTOR','caso.ver'), ('DIRECTOR','caso.editar'), ('DIRECTOR','ibis.ver'),
@@ -538,23 +535,6 @@ SELECT r.id, p.id FROM (VALUES
   ('JEFE_LAB','caso.ver'), ('JEFE_LAB','caso.crear'), ('JEFE_LAB','caso.editar'),
   ('JEFE_LAB','ibis.ver'), ('JEFE_LAB','ibis.importar'), ('JEFE_LAB','peritaje.registrar'),
   ('JEFE_LAB','saec.certificado.emitir'),
-
-  -- Perito de balística
-  ('ANALISTA_SR','evidencia.ver'), ('ANALISTA_SR','evidencia.editar'), ('ANALISTA_SR','evidencia.custodiar'),
-  ('ANALISTA_SR','arma.ver'), ('ANALISTA_SR','arma.editar'), ('ANALISTA_SR','caso.ver'),
-  ('ANALISTA_SR','ibis.ver'), ('ANALISTA_SR','ibis.importar'), ('ANALISTA_SR','peritaje.registrar'),
-
-  ('ANALISTA','evidencia.ver'), ('ANALISTA','evidencia.custodiar'), ('ANALISTA','arma.ver'),
-  ('ANALISTA','caso.ver'), ('ANALISTA','ibis.ver'), ('ANALISTA','peritaje.registrar'),
-
-  ('TECNICO','evidencia.ver'), ('TECNICO','evidencia.custodiar'), ('TECNICO','arma.ver'),
-  ('TECNICO','caso.ver'),
-
-  ('RECEPCION','evidencia.ver'), ('RECEPCION','evidencia.crear'), ('RECEPCION','evidencia.custodiar'),
-  ('RECEPCION','evidencia.prestar'), ('RECEPCION','arma.ver'), ('RECEPCION','arma.crear'),
-  ('RECEPCION','caso.ver'), ('RECEPCION','caso.crear'),
-
-  ('CALIDAD','evidencia.ver'), ('CALIDAD','arma.ver'), ('CALIDAD','caso.ver'), ('CALIDAD','ibis.ver'),
 
   ('LECTOR','evidencia.ver'), ('LECTOR','arma.ver'), ('LECTOR','caso.ver')
 ) AS m(rol_cod, perm_cod)

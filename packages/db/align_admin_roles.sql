@@ -282,7 +282,7 @@ INSERT INTO _rp_idic VALUES
   ('INSPECTOR','muestra.transferir'),
   ('METROLOGO','metrologia.ver'), ('METROLOGO','metrologia.crear'), ('METROLOGO','equipo.gestionar'),
   -- Revisor = analista + revisión nivel 1
-  ('REVISOR','resultado.revisar'), ('REVISOR','muestra.transferir'), ('REVISOR','metrologia.ver'),
+  ('REVISOR','resultado.revisar'), ('REVISOR','muestra.transferir'),
   -- Jefe de laboratorio / sucursal: aprueba y firma en su lab, asigna analistas
   ('JEFE_LAB','resultado.revisar'), ('JEFE_LAB','resultado.aprobar'),
   ('JEFE_LAB','certificado.emitir'), ('JEFE_LAB','certificado.firmar'),
@@ -309,8 +309,8 @@ INSERT INTO _rp_idic VALUES
   ('JEFE_DEPTO','evidencia.ver'), ('JEFE_DEPTO','saec.certificado.emitir'),
   -- Recepción
   ('RECEPCION','cliente.ver'), ('RECEPCION','muestra.ver'), ('RECEPCION','muestra.crear'),
-  ('RECEPCION','muestra.transferir'), ('RECEPCION','ot.ver'), ('RECEPCION','evidencia.ver'),
-  ('RECEPCION','evidencia.crear'), ('RECEPCION','evidencia.custodiar'),
+  ('RECEPCION','muestra.transferir'), ('RECEPCION','ot.ver'),
+  -- (sin SAEC: la recepción de evidencias es de la Delegación Nº 11 · align_alcance_fase0.sql)
   -- Comercial (Ejecutivo de Ventas)
   ('COMERCIAL','cliente.ver'), ('COMERCIAL','cliente.crear'), ('COMERCIAL','cliente.editar'),
   ('COMERCIAL','cotizacion.ver'), ('COMERCIAL','cotizacion.crear'), ('COMERCIAL','ot.ver'),
@@ -331,8 +331,9 @@ INSERT INTO _rp_idic VALUES
   ('COBRANZA','cliente.ver'), ('COBRANZA','cotizacion.ver'), ('COBRANZA','ot.ver'),
   -- Abastecimiento: órdenes de compra (el módulo /adquisiciones lee con factura.ver
   -- y emite OC con factura.emitir; no hay permiso propio todavía)
+  -- Sin ot.ver: Abastecimiento no ve OT ni informes (align_alcance_fase0.sql).
   ('ABASTECIMIENTO','factura.ver'), ('ABASTECIMIENTO','factura.emitir'), ('ABASTECIMIENTO','equipo.ver'),
-  ('ABASTECIMIENTO','ot.ver'), ('ABASTECIMIENTO','catalogo.gestionar'),
+  ('ABASTECIMIENTO','catalogo.gestionar'),
   -- Gestión de Calidad
   ('CALIDAD','audit.ver'), ('CALIDAD','nc.gestionar'), ('CALIDAD','metodo.ver'), ('CALIDAD','metodo.aprobar'),
   ('CALIDAD','plantilla.ver'), ('CALIDAD','plantilla.gestionar'), ('CALIDAD','catalogo.gestionar'),
@@ -350,7 +351,7 @@ INSERT INTO _rp_idic VALUES
   -- Administración del sistema
   ('ADMIN','admin.usuarios'), ('ADMIN','admin.estructura'), ('ADMIN','admin.roles'), ('ADMIN','admin.firmas'),
   ('ADMIN','audit.ver'), ('ADMIN','catalogo.gestionar'), ('ADMIN','plantilla.gestionar'),
-  ('ADMIN','flujo.editar'), ('ADMIN','flujo.publicar'), ('ADMIN','metrologia.config'), ('ADMIN','ibis.config'),
+  ('ADMIN','flujo.editar'), ('ADMIN','flujo.publicar'), ('ADMIN','metrologia.config'),
   -- Cliente externo (portal)
   ('CLIENTE','cotizacion.ver'), ('CLIENTE','ot.ver');
 
@@ -372,9 +373,12 @@ SELECT 'JEFE_SECCION', p.codigo
 INSERT INTO _rp_idic SELECT DISTINCT 'JEFE_DEPTO', perm FROM _rp_idic WHERE rol = 'JEFE_SECCION';
 
 -- Lectura total (*.ver) para Dirección, Administración y Lector/Auditor.
+-- Administración no consulta SAEC (evidencias, armas, casos, IBIS): es de la
+-- Delegación Nº 11 (align_alcance_fase0.sql, frente L · fase 0).
 INSERT INTO _rp_idic
 SELECT r, p.codigo FROM unnest(ARRAY['DIRECTOR','SUBDIRECTOR','ADMIN','LECTOR']) r
-CROSS JOIN permiso p WHERE p.accion = 'ver';
+CROSS JOIN permiso p WHERE p.accion = 'ver'
+   AND NOT (r = 'ADMIN' AND p.codigo ~ '^(evidencia|arma|caso|ibis)\.');
 -- SUPERADMIN: todos los permisos (el guard ya lo deja pasar; esto es para la matriz).
 INSERT INTO _rp_idic SELECT 'SUPERADMIN', p.codigo FROM permiso p;
 

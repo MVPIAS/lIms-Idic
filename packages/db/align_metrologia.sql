@@ -231,14 +231,11 @@ INSERT INTO rol_permiso (rol_id, permiso_id)
 SELECT r.id, p.id
 FROM rol r
 JOIN permiso p ON p.codigo IN ('metrologia.ver','metrologia.crear','metrologia.emitir','metrologia.config')
-WHERE r.codigo IN ('SUPERADMIN','ADMIN','DIRECTOR','JEFE_LAB','ANALISTA_SR')
+WHERE r.codigo IN ('SUPERADMIN','ADMIN','DIRECTOR','JEFE_LAB')
 ON CONFLICT DO NOTHING;
--- ANALISTA/TECNICO: ver + crear (no config ni emitir)
-INSERT INTO rol_permiso (rol_id, permiso_id)
-SELECT r.id, p.id FROM rol r
-JOIN permiso p ON p.codigo IN ('metrologia.ver','metrologia.crear')
-WHERE r.codigo IN ('ANALISTA','TECNICO')
-ON CONFLICT DO NOTHING;
+-- Los roles operativos genéricos (ANALISTA, ANALISTA_SR, TECNICO, REVISOR) ya no
+-- reciben Metrología: la tienen METROLOGO y, en las unidades de Metrología, el
+-- rol OPERADOR_METROLOGIA (align_alcance_fase0.sql, frente L · fase 0).
 
 -- =============================================================================
 -- Motores validados (30-09-2026) · un motor por instrucción de trabajo que
