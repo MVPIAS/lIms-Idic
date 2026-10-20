@@ -13,6 +13,7 @@ import { PrismaService } from "../common/prisma.service";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
+import { AlcanceService } from "../rbac/alcance.service";
 
 /**
  * =============================================================================
@@ -120,15 +121,33 @@ export class SpcService {
   constructor(private readonly prisma: PrismaService) {}
 
   /**
+   * Condición de alcance por laboratorio sobre `resultado` (frente L · C4):
+   * null = sin filtro (alcance global); si no, solo los resultados de las OT
+   * cuyo laboratorio responsable está en `unidades` (resultado.ot_id no tiene
+   * relación Prisma: se resuelve a la lista de OT visibles).
+   */
+  private async condicionAlcance(tenantId: string, unidades: string[] | null): Promise<Record<string, unknown>> {
+    if (unidades === null) return {};
+    if (unidades.length === 0) return { otId: { in: [] as string[] } };
+    const ots = await this.prisma.ordenTrabajo.findMany({
+      where: { tenantId, unidadPrincipal: { in: unidades } },
+      select: { id: true },
+    });
+    return { otId: { in: ots.map((o) => o.id) } };
+  }
+
+  /**
    * Analitos (cat_analito) que tienen ≥ MIN_RESULTADOS resultados numéricos
    * en el tenant, con su conteo y su método, para poblar el selector.
    * Agrupa por (cat_analito, cat_metodo): un mismo analito puede haberse
    * medido por distintos métodos, y la serie SPC se pide por ese par.
    */
-  async analitos(tenantId: string) {
+  async analitos(tenantId: string, unidades: string[] | null = null) {
+    const alcance = await this.condicionAlcance(tenantId, unidades);
     const grupos = await this.prisma.resultado.groupBy({
       by: ["catAnalitoId", "catMetodoId"],
       where: {
+        ...alcance,
         deletedAt: null,
         catAnalitoId: { not: null },
         valorNumerico: { not: null },
@@ -187,14 +206,17 @@ export class SpcService {
     catMetodoId?: string,
     desde?: string,
     hasta?: string,
+    unidades: string[] | null = null,
   ): Promise<SpcSeriesResponse> {
     const fechaDesde = desde ? new Date(desde) : null;
     const fechaHasta = hasta ? new Date(hasta) : null;
     const desdeOk = fechaDesde && !isNaN(fechaDesde.getTime()) ? fechaDesde : null;
     const hastaOk = fechaHasta && !isNaN(fechaHasta.getTime()) ? fechaHasta : null;
 
+    const alcance = await this.condicionAlcance(tenantId, unidades);
     const rows = await this.prisma.resultado.findMany({
       where: {
+        ...alcance,
         deletedAt: null,
         catAnalitoId,
         ...(catMetodoId ? { catMetodoId } : {}),
@@ -367,26 +389,30 @@ export class SpcService {
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("spc")
 export class SpcController {
-  constructor(private readonly svc: SpcService) {}
+  constructor(
+    private readonly svc: SpcService,
+    private readonly alcance: AlcanceService,
+  ) {}
 
   @Get("analitos")
   @RequierePermiso(PERM_VER)
   @ApiOperation({ summary: "Analitos con ≥N resultados numéricos (selector SPC)" })
-  analitos(@Req() req: any) {
-    return this.svc.analitos(tenantDe(req));
+  async analitos(@Req() req: any) {
+    return this.svc.analitos(tenantDe(req), await this.alcance.filtroUnidades(req));
   }
 
   @Get("series")
   @RequierePermiso(PERM_VER)
   @ApiOperation({ summary: "Serie temporal + estadísticos SPC (X̄, R, Cp/Cpk) de un analito/método" })
-  series(
+  async series(
     @Query("catAnalitoId") catAnalitoId: string,
     @Query("catMetodoId") catMetodoId: string | undefined,
     @Query("desde") desde: string | undefined,
     @Query("hasta") hasta: string | undefined,
     @Req() req: any,
   ) {
-    return this.svc.series(tenantDe(req), catAnalitoId, catMetodoId, desde, hasta);
+    // Solo los resultados de las OT de su alcance (antes: de todo el instituto).
+    return this.svc.series(tenantDe(req), catAnalitoId, catMetodoId, desde, hasta, await this.alcance.filtroUnidades(req));
   }
 }
 
