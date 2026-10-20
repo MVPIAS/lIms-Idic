@@ -148,6 +148,8 @@ m as (
  union all select 'orden_interna', oi.id, array_remove(array(select distinct x from unnest(array[ou.uc,
               (select c from famu where famu.fid = oi.origen_lab limit 1), (select c from famu where famu.fid = oi.destino_lab limit 1)]) x), null)
              from orden_interna oi left join ou on ou.id = oi.ot_id
+ union all select 'solicitud_costeo', s.id, array_remove(array[u.codigo], null) from solicitud_costeo s left join unidad u on u.id = s.unidad_id where s.deleted_at is null and s.unidad_id is not null
+ union all select 'encuesta', e.id, array_remove(array[u.codigo], null) from encuesta_satisfaccion e left join unidad u on u.id = e.unidad_id
  union all select 'met_calibracion', c.id, array_remove(array[coalesce(u.codigo, ou.uc)], null) from met_calibracion c left join unidad u on u.id = c.unidad_id left join ou on ou.id = c.ot_id
  union all select 'bpch_internacion', b.id, array_remove(array[u.codigo], null) from bpch_internacion b left join unidad u on u.id = b.unidad_inspeccion_id
  union all select 'bpch_reinspeccion', b.id, array_remove(array[u.codigo], null) from bpch_reinspeccion b left join unidad u on u.id = b.unidad_inspeccion_id
@@ -245,6 +247,9 @@ const LISTADOS = [
   { n: "BPCH clasificaciones", r: "/bpch/clasificaciones", p: "bpch.clasificacion.ver", t: "bpch_clasificacion", regla: "bpch", href: "/bpch/clasificaciones" },
   { n: "BPCH codificación única", r: "/bpch/codificacion?limit=50", p: "bpch.codificacion.ver", regla: "comun", href: "/bpch/codificacion" },
   { n: "BPCH producción nacional", r: "/bpch/pn/oc?limit=50", p: "bpch.pn.ver", regla: "comun", href: "/bpch/produccion-nacional" },
+  // Circuito de la cotización y encuestas (frente r1c).
+  { n: "Cotizaciones por responder (laboratorio)", r: "/cotizaciones/solicitudes-laboratorio", p: "cotizacion.costear", t: "solicitud_costeo", regla: "unidad", href: "/cotizaciones/por-responder" },
+  { n: "Encuestas de satisfacción", r: "/encuestas?limit=200", p: "encuesta.ver", t: "encuesta", regla: "unidad", href: "/encuestas" },
   { n: "SAEC casos", r: "/saec/casos?limit=200", p: "caso.ver", regla: "saec" },
   { n: "SAEC evidencias", r: "/evidencias?limit=200", p: "evidencia.ver", regla: "saec", href: "/saec" },
   { n: "SAEC armas", r: "/armas?limit=200", p: "arma.ver", regla: "saec", href: "/saec/armas" },
@@ -386,6 +391,7 @@ async function main() {
       ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}`],
       ["evidencia", "evidencia.ver", (id) => `/evidencias/${id}`, null, "saec"],
       ["cotizacion", "cotizacion.ver", (id) => `/cotizaciones/${id}`, null, "fase1"],
+      ["encuesta", "encuesta.ver", (id) => `/encuestas/${id}`],
     ];
     for (const [tipo, perm, ruta, codigos, regla] of DETALLE) {
       if (!tiene(perm)) continue;
@@ -475,6 +481,13 @@ async function main() {
     if (e.global) continue;
     const cot = (V.mapa || []).find((r) => r.t === "cotizacion" && (r.u || []).length && !(r.u || []).some((c) => e.unidades.has(c)));
     if (cot) await intentar(u, "POST", `/cotizaciones/${cot.id}/anular`, { motivo: "Prueba de alcance: no debe aplicarse" }, [403], `anular cotización de ${(cot.u || []).join(",")}`);
+  }
+  // Responder la solicitud de costeo de otro laboratorio (cotizacion.costear acotado: jefaturas).
+  for (const u of ["demo.lpn.jefe", "demo.dsa.jefe"]) {
+    const e = esperado(u, "cotizacion.costear");
+    if (e.global) continue;
+    const sol = (V.mapa || []).find((r) => r.t === "solicitud_costeo" && (r.u || []).length && !(r.u || []).some((c) => e.unidades.has(c)));
+    if (sol) await intentar(u, "POST", `/cotizaciones/solicitudes-laboratorio/${sol.id}/responder`, { respuesta: "rechazar", comentario: "Prueba de alcance: no debe aplicarse" }, [403], `responder la solicitud de costeo de ${(sol.u || []).join(",")}`);
   }
   // Prototipo de otra unidad (bpch.prototipo.gestionar acotado: inspectores de sucursal).
   for (const u of ["demo.santof.inspector", "demo.scalam.inspector", "demo.d11.inspector1"]) {

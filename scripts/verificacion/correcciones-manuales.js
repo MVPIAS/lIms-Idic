@@ -168,6 +168,9 @@ async function main() {
       clienteId: C.cliente.id, formato: "NORMAL", referencia: `Correcciones ${etiqueta} ${sello}`,
       lineas: [{ catEnsayoId: C.mPh.ensayoId, cantidad: 2 }],
     });
+    // Circuito de la cotización (frente r1c): se acepta firmada por el Jefe DCO.
+    await ok("demo.ventas", "POST", `/cotizaciones/${cot.id}/enviar-a-firma`, {});
+    await ok("demo.dco.jefe", "POST", `/cotizaciones/${cot.id}/firmar`, {});
     const r = await ok("demo.ventas", "POST", `/cotizaciones/${cot.id}/aceptar`, {
       tipo: "OC", numero: `OC-${etiqueta}-${sello}`, fecha: new Date().toISOString().slice(0, 10), conCobro: true, unidadPrincipalId: unidad.id,
     });
