@@ -1,0 +1,327 @@
+/**
+ * Metrología ligada a la OT · reglas PURAS (sin base de datos), probadas en
+ * metrologia-ot.reglas.spec.ts. Especificación: EP-04 (F2 recepción y custodia,
+ * F3 calibración desde el ítem, F8 entrega y devolución, F9 cierre).
+ * Contrato: docs/FLUJO_METROLOGIA.md §7.
+ *
+ *   ítem (instrumento de la OT):
+ *     por_recibir ─recibir (¿se puede calibrar? sí)─▶ recibido ─devolver─▶ devuelto
+ *          │                                                     ▲
+ *          ├─recibir (no se puede calibrar)─▶ no_apto ───devolver──┘
+ *          └─anular (motivo) ─▶ anulado
+ *
+ *   - Toda calibración nace de un ítem RECIBIDO y calibrable (no hay calibración suelta).
+ *   - Un ítem tiene una sola calibración vigente; la reemisión la reemplaza.
+ *   - Fecha de recepción ≥ fecha de la OT (R15 L2) y nunca futura.
+ *   - El certificado se entrega una vez, ya emitido, con fecha ≥ emisión.
+ *   - El instrumento calibrado se devuelve con el certificado ya emitido.
+ *   - Cierre: todos los ítems resueltos (calibración emitida y entregada, o no apto)
+ *     y, si el parámetro lo exige, todos devueltos.
+ */
+
+/* ------------------------------------------------------------ tipos --- */
+export type EstadoInstrumento = "por_recibir" | "recibido" | "no_apto" | "devuelto" | "anulado";
+export const ESTADOS_FISICOS = ["bueno", "con_observaciones", "danado"] as const;
+export type EstadoFisico = (typeof ESTADOS_FISICOS)[number];
+export const MEDIOS_ENTREGA_CAL = ["mano", "correo", "oficina_partes", "courier", "plataforma", "otro"] as const;
+
+export interface InstrumentoOt {
+  id: string;
+  numero: number;
+  descripcion: string;
+  estado: EstadoInstrumento | string;
+  calibrable?: boolean | null;
+  recibidoAt?: Date | string | null;
+  devueltoAt?: Date | string | null;
+}
+
+/** Calibración (o reemisión) ligada a un ítem. */
+export interface CalibracionOt {
+  id: string;
+  instrumentoId: string | null;
+  codigo: string;
+  numeroCertificado?: string | null;
+  /** borrador | calculada | en_revision | en_firma | emitida | reemplazada */
+  estado: string;
+  emitidoAt?: Date | string | null;
+  entregadoAt?: Date | string | null;
+}
+
+/* ------------------------------------------------------------ fechas --- */
+const dia = (v: Date | string | null | undefined): string | null => {
+  if (!v) return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+  return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
+};
+/**
+ * Instante de una fecha-hora escrita en pantalla («AAAA-MM-DDTHH:mm», sin zona) en hora
+ * de Chile, sea cual sea la zona del servidor. Si trae zona (Z o ±hh:mm), se respeta.
+ */
+export function instanteChile(s: string): number {
+  const x = String(s ?? "").trim();
+  if (/(Z|[+-]\d{2}:?\d{2})$/i.test(x) && x.includes("T")) return Date.parse(x);
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(x);
+  if (!m) return NaN;
+  const utc = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] ?? 0), +(m[5] ?? 0), +(m[6] ?? 0));
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Santiago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
+  const desfase = (t: number) => {
+    const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((q) => [q.type, q.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - t;
+  };
+  const t0 = utc - desfase(utc);
+  return utc - desfase(t0);
+}
+const dmy = (s: string) => `${s.slice(8, 10)}-${s.slice(5, 7)}-${s.slice(0, 4)}`;
+const nombreItem = (i: { numero: number; descripcion: string }) => `ítem ${i.numero} (${i.descripcion})`;
+
+/* ------------------------------------------------------- numeración --- */
+/**
+ * Número del certificado según el formato del prefijo (configurable en Maestros ›
+ * Numeración): {P} prefijo · {N} correlativo con ceros · {AA} año en 2 cifras · {AAAA} año.
+ *   «{P}-{N}» → M-3950 · PT-0091 (relleno 4) · «{P}-{N}.{AA}» → LCPNF-011.26 (relleno 3).
+ */
+export function formatearNumero(formato: string | null | undefined, prefijo: string, n: number, relleno = 0, anio?: number | null): string {
+  const f = formato && formato.includes("{N}") ? formato : "{P}-{N}";
+  const a = anio ?? new Date().getFullYear();
+  return f
+    .replace(/\{P\}/g, prefijo)
+    .replace(/\{N\}/g, String(n).padStart(relleno, "0"))
+    .replace(/\{AAAA\}/g, String(a))
+    .replace(/\{AA\}/g, String(a % 100).padStart(2, "0"));
+}
+
+/** Siguiente correlativo: los anuales vuelven a 1 al cambiar de año. */
+export function siguienteCorrelativo(fila: { ultimo: number; anual?: boolean | null; anio?: number | null }, anioActual: number): { n: number; anio: number | null } {
+  if (fila.anual) {
+    if (fila.anio !== anioActual) return { n: 1, anio: anioActual };
+    return { n: fila.ultimo + 1, anio: anioActual };
+  }
+  return { n: fila.ultimo + 1, anio: fila.anio ?? null };
+}
+
+/** Formato válido: lleva {N} y solo usa los comodines conocidos y caracteres seguros. */
+export function formatoValido(formato: string): boolean {
+  if (!formato.includes("{N}") || formato.length > 40) return false;
+  const sin = formato.replace(/\{(P|N|AA|AAAA)\}/g, "");
+  return /^[A-Za-z0-9./_ -]*$/.test(sin);
+}
+
+/**
+ * Correlativo de un número ya emitido con ese formato (null si no corresponde).
+ * Si el formato lleva año, solo cuentan los del año indicado.
+ */
+export function correlativoDe(numero: string, formato: string | null | undefined, prefijo: string, anio?: number | null): number | null {
+  const f = formato && formato.includes("{N}") ? formato : "{P}-{N}";
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const a = anio ?? null;
+  let patron = "";
+  for (const parte of f.split(/(\{P\}|\{N\}|\{AAAA\}|\{AA\})/)) {
+    if (parte === "{P}") patron += esc(prefijo);
+    else if (parte === "{N}") patron += "(\\d+)";
+    else if (parte === "{AAAA}") patron += a == null ? "\\d{4}" : String(a);
+    else if (parte === "{AA}") patron += a == null ? "\\d{2}" : String(a % 100).padStart(2, "0");
+    else patron += esc(parte);
+  }
+  const m = new RegExp(`^${patron}$`).exec(numero);
+  return m ? Number(m[1]) : null;
+}
+
+/* ---------------------------------------------------------- recepción --- */
+export interface DatosRecepcion {
+  fechaHora: string; // ISO o AAAA-MM-DDTHH:mm
+  entregadoPor: string;
+  estadoFisico: string;
+  estadoFisicoObs?: string | null;
+  ubicacion: string;
+  calibrable: boolean;
+  motivoNoCalibrable?: string | null;
+  sentido?: string | null;
+  acondicionamientoH?: number | null;
+  tempAmbiente?: number | null;
+}
+
+/** Por qué no se puede registrar la recepción (null = se puede). */
+export function motivoRecepcion(
+  item: { estado: string; descripcion: string; numero: number },
+  d: DatosRecepcion,
+  ctx: { fechaOt: Date | string | null; laboratorio: string | null; ahora?: Date },
+): string | null {
+  if (item.estado !== "por_recibir") return `El ${nombreItem(item)} ya fue recibido (estado: ${item.estado.replace("_", " ")}).`;
+  const t = instanteChile(d.fechaHora);
+  if (Number.isNaN(t)) return "Indique la fecha y hora de recepción.";
+  const ahora = ctx.ahora ?? new Date();
+  if (t > ahora.getTime() + 5 * 60_000) return "La fecha de recepción no puede ser futura.";
+  const rec = dia(new Date(t)), ot = dia(ctx.fechaOt);
+  if (ot && rec && rec < ot)
+    return `La recepción (${dmy(rec)}) no puede ser anterior a la fecha de la OT (${dmy(ot)}): según el laboratorio, la OT debe ser igual o anterior a la recepción del equipo.`;
+  if (!d.entregadoPor?.trim()) return "Indique quién entrega el instrumento.";
+  if (!(ESTADOS_FISICOS as readonly string[]).includes(d.estadoFisico)) return "Indique el estado físico del instrumento.";
+  if (d.estadoFisico !== "bueno" && !d.estadoFisicoObs?.trim()) return "Describa en la observación el estado del instrumento (no está en buen estado).";
+  if (!d.ubicacion?.trim()) return "Indique la ubicación de almacenamiento.";
+  if (!d.calibrable && (d.motivoNoCalibrable ?? "").trim().length < 5) return "Indique por qué no se puede calibrar (mínimo 5 caracteres).";
+  if (ctx.laboratorio === "LNF" && d.calibrable) {
+    if (!d.sentido || !["T", "C", "T+C"].includes(d.sentido)) return "LNF: indique el sentido solicitado (tracción, compresión o ambos).";
+    if (d.acondicionamientoH == null || !(d.acondicionamientoH >= 0)) return "LNF: indique el tiempo de acondicionamiento (horas).";
+    if (d.tempAmbiente == null || !Number.isFinite(d.tempAmbiente)) return "LNF: indique la temperatura ambiente del acondicionamiento.";
+  }
+  return null;
+}
+
+/** Etiqueta de custodia del instrumento: OT y número de ítem. */
+export const etiquetaInstrumento = (otCodigo: string, numero: number) => `${otCodigo}-I${String(numero).padStart(2, "0")}`;
+
+/* ------------------------------------------------- calibración del ítem --- */
+/** Calibración vigente del ítem: la última que no está reemplazada. */
+export function calibracionVigente<T extends CalibracionOt>(cals: T[], instrumentoId: string): T | null {
+  const del = cals.filter((c) => c.instrumentoId === instrumentoId && c.estado !== "reemplazada");
+  return del.length ? del[del.length - 1] : null;
+}
+
+/** Por qué no se puede abrir una calibración desde el ítem (null = se puede). */
+export function motivoCalibrar(item: InstrumentoOt & { otEstado?: string }, cals: CalibracionOt[]): string | null {
+  if (item.otEstado === "cerrada" || item.otEstado === "anulada") return `La OT está ${item.otEstado}.`;
+  if (item.estado === "por_recibir") return `Primero registre la recepción del ${nombreItem(item)}.`;
+  if (item.estado === "no_apto") return `El ${nombreItem(item)} se recibió como no calibrable.`;
+  if (item.estado !== "recibido") return `El ${nombreItem(item)} está ${String(item.estado).replace("_", " ")}: no se calibra.`;
+  const v = calibracionVigente(cals, item.id);
+  if (v) return `El ${nombreItem(item)} ya tiene la calibración ${v.numeroCertificado ?? v.codigo}${v.estado === "emitida" ? " emitida (si hay un error, reemítala)" : ""}.`;
+  return null;
+}
+
+/* ------------------------------------------------------------ entrega --- */
+/** Por qué no se puede registrar la entrega del certificado (null = se puede). */
+export function motivoEntrega(cal: { estado: string; codigo: string; numeroCertificado?: string | null; emitidoAt?: Date | string | null; entregadoAt?: Date | string | null }, fecha: Date, ahora = new Date()): string | null {
+  const nombre = cal.numeroCertificado ?? cal.codigo;
+  if (cal.estado !== "emitida") return `Solo se entrega un certificado emitido: ${nombre} está ${cal.estado === "reemplazada" ? "reemplazado" : "sin emitir"}.`;
+  if (cal.entregadoAt) return `La entrega del certificado ${nombre} ya está registrada (${dmy(dia(cal.entregadoAt)!)}).`;
+  if (Number.isNaN(fecha.getTime())) return "Fecha de entrega no válida.";
+  if (fecha.getTime() > ahora.getTime() + 60_000) return "La fecha de entrega no puede ser futura.";
+  const em = dia(cal.emitidoAt), f = dia(fecha);
+  if (em && f && f < em) return `La entrega (${dmy(f)}) no puede ser anterior a la emisión del certificado (${dmy(em)}).`;
+  return null;
+}
+
+/* ---------------------------------------------------------- devolución --- */
+export interface DatosDevolucion {
+  fechaHora: string;
+  recibidoPor: string;
+  estadoFisico: string;
+}
+
+/** Por qué no se puede registrar la devolución del instrumento (null = se puede). */
+export function motivoDevolucion(item: InstrumentoOt, cals: CalibracionOt[], d: DatosDevolucion, ahora = new Date()): string | null {
+  if (item.estado === "devuelto") return `El ${nombreItem(item)} ya fue devuelto.`;
+  if (item.estado === "por_recibir" || item.estado === "anulado") return `El ${nombreItem(item)} no está en custodia del laboratorio.`;
+  if (item.estado === "recibido") {
+    const v = calibracionVigente(cals, item.id);
+    if (!v || v.estado !== "emitida") return `El ${nombreItem(item)} se devuelve con su certificado emitido${v ? ` (${v.codigo} está ${v.estado === "calculada" ? "en borrador" : v.estado.replace("_", " ")})` : " (aún no tiene calibración)"}.`;
+  }
+  const t = instanteChile(d.fechaHora);
+  if (Number.isNaN(t)) return "Indique la fecha y hora de la devolución.";
+  if (t > ahora.getTime() + 5 * 60_000) return "La fecha de devolución no puede ser futura.";
+  if (item.recibidoAt && t < new Date(item.recibidoAt).getTime() - 60_000) return "La devolución no puede ser anterior a la recepción.";
+  if (!d.recibidoPor?.trim()) return "Indique quién recibe el instrumento.";
+  if (!(ESTADOS_FISICOS as readonly string[]).includes(d.estadoFisico)) return "Indique el estado del instrumento al devolverlo.";
+  return null;
+}
+
+/* ------------------------------------------------------------- cierre --- */
+/** Calibraciones como documentos para la regla general del cierre (plazos.faltantesParaCerrar). */
+export function documentosDeCalibraciones(cals: CalibracionOt[]): { numero: string; estado: string; entregadoAt: Date | string | null }[] {
+  return cals
+    .filter((c) => c.estado !== "reemplazada")
+    .map((c) => ({
+      numero: c.numeroCertificado ?? c.codigo,
+      estado: c.estado === "emitida" ? "emitido" : c.estado === "en_revision" || c.estado === "en_firma" ? "en_firma" : "borrador",
+      entregadoAt: c.estado === "emitida" ? c.entregadoAt ?? null : null,
+    }));
+}
+
+/**
+ * Qué falta en los instrumentos para cerrar la OT (además de la regla general de
+ * documentos): todos recibidos, los calibrables con su calibración y, si se exige,
+ * todos devueltos. Los mensajes de estado de cada certificado los da la regla general.
+ */
+export function faltantesInstrumentos(items: InstrumentoOt[], cals: CalibracionOt[], exigeDevolucion: boolean): string[] {
+  const f: string[] = [];
+  for (const i of items.filter((x) => x.estado !== "anulado")) {
+    if (i.estado === "por_recibir") { f.push(`El ${nombreItem(i)} no se ha recibido.`); continue; }
+    if (i.estado === "recibido" && !calibracionVigente(cals, i.id)) f.push(`El ${nombreItem(i)} no tiene calibración.`);
+    if (exigeDevolucion && (i.estado === "recibido" || i.estado === "no_apto"))
+      f.push(`El ${nombreItem(i)} sigue en custodia del laboratorio: registre su devolución.`);
+  }
+  return f;
+}
+
+/** Cierre técnico (Jefe de Laboratorio): todos los ítems con su documento emitido o no aptos. */
+export function motivoCierreTecnico(otEstado: string, items: InstrumentoOt[], cals: CalibracionOt[]): string | null {
+  if (["finalizada", "informada", "cerrada", "anulada"].includes(otEstado)) return `La OT ya está ${otEstado}.`;
+  const vivos = items.filter((x) => x.estado !== "anulado");
+  if (!vivos.length) return "La OT no tiene instrumentos registrados.";
+  const faltan = vivos.filter((i) => {
+    if (i.estado === "por_recibir") return true;
+    if (i.estado === "no_apto") return false;
+    const v = calibracionVigente(cals, i.id);
+    return !v || v.estado !== "emitida";
+  });
+  if (faltan.length) return `Faltan certificados emitidos: ${faltan.map((i) => `ítem ${i.numero}`).join(", ")}.`;
+  return null;
+}
+
+/* ---------------------------------------------------- barra de la ficha --- */
+export type EstadoPaso = "hecho" | "actual" | "pendiente";
+export const PASOS_FICHA = ["Recepción", "Toma de datos", "Cálculo GUM", "Revisión Jefe Lab.", "Firma y emisión", "Entrega"] as const;
+
+/**
+ * Barra de 6 pasos de la ficha de calibración (maqueta de Metrología), deducida del estado:
+ * Recepción → Toma de datos → Cálculo GUM → Revisión Jefe Lab. → Firma y emisión → Entrega.
+ * Devolver al metrólogo lleva la barra de vuelta a «Toma de datos».
+ */
+export function pasosFicha(c: { estado: string; calculada: boolean; recibido: boolean; entregado: boolean; devuelta?: boolean }): { paso: string; estado: EstadoPaso }[] {
+  const e = c.estado === "calculada" ? "borrador" : c.estado;
+  const emitida = e === "emitida" || e === "reemplazada";
+  const hechos = [
+    c.recibido,
+    c.calculada && !c.devuelta || ["en_revision", "en_firma"].includes(e) || emitida,
+    c.calculada && !c.devuelta || ["en_revision", "en_firma"].includes(e) || emitida,
+    e === "en_firma" || emitida,
+    emitida,
+    emitida && c.entregado,
+  ];
+  // En borrador calculado, el paso actual es la revisión (falta enviarla).
+  const actual = hechos.findIndex((h) => !h);
+  return PASOS_FICHA.map((paso, i) => ({ paso, estado: hechos[i] && (actual < 0 || i < actual) ? "hecho" : i === actual ? "actual" : "pendiente" }));
+}
+
+/* ------------------------------------------- hoja de control desde la OT --- */
+/**
+ * Datos del instrumento, del cliente y de la OT que se imprimen en el certificado: los
+ * de la OT y de la recepción mandan (no se escriben a mano); lo demás (clase, rango
+ * calibrado, contacto, lugar, desviaciones) viene del formulario.
+ */
+export function instrumentoDesdeOt(
+  form: Record<string, any>,
+  item: { descripcion: string; marca?: string | null; modelo?: string | null; serie?: string | null; idEspecial?: string | null; capacidad?: string | null; resolucion?: string | null; rango?: string | null; recibidoAt?: Date | string | null },
+  ot: { codigo: string; fechaOt: string | null; cliente?: string | null; clienteDireccion?: string | null; labSolicitante?: string | null },
+): Record<string, any> {
+  const de = (v: string | null | undefined, previo: any) => (v != null && String(v).trim() !== "" ? v : previo ?? null);
+  return {
+    ...form,
+    item: item.descripcion,
+    marca: de(item.marca, form.marca),
+    modelo: de(item.modelo, form.modelo),
+    serie: de(item.serie, form.serie),
+    idEspecial: de(item.idEspecial, form.idEspecial),
+    cap: de(item.capacidad, form.cap),
+    res: de(item.resolucion, form.res),
+    rango: de(form.rango, item.rango),
+    ot: ot.codigo,
+    fechaOt: ot.fechaOt,
+    fechaRecepcion: dia(item.recibidoAt ?? null),
+    cliente: de(ot.cliente, form.cliente),
+    solicitante: de(form.solicitante, ot.labSolicitante),
+    direccion: de(form.direccion, ot.clienteDireccion),
+  };
+}

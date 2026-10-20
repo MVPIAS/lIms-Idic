@@ -79,3 +79,4 @@ align_frente_k.sql
 align_alcance_fase0.sql
 seed_alcance_fase0.sql               demo
 align_retiro_flujo_e2e.sql
+align_metrologia_ot.sql
