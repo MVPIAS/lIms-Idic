@@ -17,6 +17,7 @@ import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
 import { MOTOR_FLUJOS_VISIBLE } from "@/lib/motorFlujos";
 import FlujoBpmOt from "./_components/FlujoBpmOt";
+import { EtapasOt, SiguientePasoOt, type AvanceOt } from "@/components/ot/RutaOt";
 
 /** Texto legible de un hecho del historial de la OT. */
 function textoHistorial(h: any): string {
@@ -62,18 +63,6 @@ const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}` });
 const authJson = () => ({ ...auth(), "Content-Type": "application/json" });
 
-const FASES = [
-  "Recepción", "Registro", "Asignación", "Preparación", "Análisis", "Captura RN",
-  "Cálculo", "Validación técnica", "Revisión", "Aprobación", "Emisión informe",
-  "Firma", "Entrega", "Cierre",
-];
-
-// mapea el estado de la OT a un índice de avance aproximado en el stepper
-const idxEstado: Record<string, number> = {
-  borrador: 0, recibida: 1, en_proceso: 4, en_analisis: 4, resultados: 6,
-  validacion: 8, aprobada: 9, informe: 10, finalizada: 12, cerrada: 13,
-};
-
 export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
@@ -90,11 +79,20 @@ export default function ExpedientePage() {
 
   const [busy, setBusy] = useState(false);
 
+  // Ruta de la OT: etapas y siguiente paso deducidos en el servidor del estado real.
+  const [avance, setAvance] = useState<AvanceOt | null>(null);
+  const [avanceError, setAvanceError] = useState(false);
+  const cargarAvance = async () => {
+    try { setAvance(await llamar<AvanceOt>("GET", `/ot/${id}/avance`)); setAvanceError(false); }
+    catch { setAvance(null); setAvanceError(true); }
+  };
+
   const cargarOt = async () => {
     try {
       const o = await llamar("GET", `/ot/${id}`);
       setOt(o);
     } catch (e: any) { setError(e.message); }
+    cargarAvance();
   };
   const cargarHistorial = async () => {
     try { setHistorial(await llamar("GET", `/ot/${id}/historial`)); } catch { setHistorial([]); }
@@ -152,7 +150,7 @@ export default function ExpedientePage() {
     finally { setBusy(false); }
   };
 
-  const avance = ot ? idxEstado[ot.estado] ?? 0 : 0;
+  const etapaActual = avance?.etapas.find((e) => e.clave === avance.etapaActual) ?? null;
   const codOt = ot?.codigo ?? ot?.numero ?? (typeof id === "string" ? id.slice(0, 8) : "");
   const tabBtn = (t: typeof tab, l: string) =>
     <button onClick={() => setTab(t)} className={`tab${tab === t ? " active" : ""}`}>{l}</button>;
@@ -166,7 +164,10 @@ export default function ExpedientePage() {
         <div className="id">🗂 {codOt}</div>
         <div className="meta">
           Cliente: <b>{ot?.cliente?.razonSocial ?? "—"}</b>
-          {ot?.cliente?.rut ? <> ({rut(ot.cliente.rut)})</> : null} · Estado: <b>{ot?.estado ?? "—"}</b> · Prioridad: <b>{ot?.prioridad ?? "normal"}</b>
+          {ot?.cliente?.rut ? <> ({rut(ot.cliente.rut)})</> : null}
+          {" · "}{ot?.estado === "cerrada" || ot?.estado === "anulada"
+            ? <>Estado: <b>{ot.estado}</b></>
+            : <>Etapa: <b>{etapaActual?.titulo ?? "—"}</b></>} · Prioridad: <b>{ot?.prioridad ?? "normal"}</b>
           {ot?.origenTrabajo ? <> · Origen: <b>{ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo}</b></> : null}
           {" · "}Laboratorio: {ot?.unidad ? <b title={ot.unidad.nombre}>{ot.unidad.codigo}</b> : <span className="pill amber">sin laboratorio</span>}
           {ot?.fechaCompromiso ? <> · Compromiso: <b>{fechaDia(ot.fechaCompromiso)}</b></> : null}
@@ -203,19 +204,11 @@ export default function ExpedientePage() {
         </div>
       )}
 
+      {typeof id === "string" && <SiguientePasoOt avance={avance} otId={id} onPestana={setTab} />}
+
       <div className="expgrid">
-        {/* Stepper vertical de 14 fases */}
-        <div className="stepper">
-          {FASES.map((f, i) => {
-            const estado = i < avance ? "done" : i === avance ? "now" : "pend";
-            return (
-              <div key={f} className={`step ${estado === "done" ? "done" : estado === "now" ? "now" : "locked"}`}>
-                <div className="dot">{estado === "done" ? "✓" : i + 1}</div>
-                <div className="txt">{f}<small>Fase {i + 1}</small></div>
-              </div>
-            );
-          })}
-        </div>
+        {/* Ruta de la OT: etapas deducidas del estado real (GET /ot/:id/avance). */}
+        <EtapasOt avance={avance} error={avanceError} />
 
         <div className="card" style={{ padding: 0 }}>
           <div className="tabs" style={{ padding: "0 8px" }}>
