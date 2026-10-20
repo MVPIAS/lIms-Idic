@@ -18,11 +18,12 @@
  */
 import { faltantesParaCerrar } from "./plazos";
 import { condicionFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
+import { calibracionVigente, documentosDeCalibraciones, faltantesInstrumentos } from "../metrologia/metrologia-ot.reglas";
 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
 export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion";
 /** Pestañas del expediente de la OT a las que puede llevar el «Siguiente paso». */
-export type PestanaOt = "cabecera" | "asignacion" | "muestras" | "resultados" | "informe";
+export type PestanaOt = "cabecera" | "asignacion" | "muestras" | "instrumentos" | "resultados" | "informe";
 
 export interface Etapa {
   clave: string;
@@ -84,10 +85,25 @@ export interface DocumentoAvance {
 }
 
 export interface CalibracionAvance {
+  id?: string;
+  /** Ítem (instrumento) de la OT del que nace la calibración. */
+  instrumentoId?: string | null;
   codigo: string;
   numeroCertificado?: string | null;
   /** borrador | calculada | en_revision | en_firma | emitida | reemplazada */
   estado: string;
+  entregadoAt?: Date | string | null;
+}
+
+/** Instrumento (ítem) de una OT de calibración (EP-04). */
+export interface InstrumentoAvance {
+  id: string;
+  numero: number;
+  descripcion: string;
+  /** por_recibir | recibido | no_apto | devuelto | anulado */
+  estado: string;
+  metrologo?: string | null;
+  metrologoId?: string | null;
 }
 
 export interface HechosOt {
@@ -106,8 +122,11 @@ export interface HechosOt {
   resultados: { total: number; pendientes: number; capturados: number; revisados: number; aprobados: number; devueltos: number };
   documentos: DocumentoAvance[];
   factura: { numero: string; estado: string } | null;
-  /** Calibraciones de Metrología ligadas a la OT (por id o por su código). */
+  /** Calibraciones de Metrología ligadas a la OT. */
   calibraciones?: CalibracionAvance[];
+  /** Instrumentos de la OT de calibración y si el cierre exige su devolución (parámetro). */
+  instrumentos?: InstrumentoAvance[];
+  exigeDevolucion?: boolean;
   internacion?: {
     id: string;
     numero: string;
@@ -145,7 +164,7 @@ export function tipoRuta(h: HechosOt): TipoRuta {
   if (h.reinspeccion) return "reinspeccion";
   // Metrología: laboratorio de la Sección Metrología que trabaja con calibraciones
   // (si la OT usa la captura estándar, sigue la ruta de laboratorio).
-  if (h.unidad?.esMetrologia && ((h.calibraciones?.length ?? 0) > 0 || h.resultados.total === 0)) return "metrologia";
+  if (h.unidad?.esMetrologia && ((h.calibraciones?.length ?? 0) > 0 || (h.instrumentos?.length ?? 0) > 0 || h.resultados.total === 0)) return "metrologia";
   if (h.origen && ORIGENES_INTERNOS.includes(h.origen)) return "interna";
   return "laboratorio";
 }
@@ -305,16 +324,29 @@ function pasoDocumentos(h: HechosOt, clave: string): Omit<SiguientePaso, "etapa"
   };
 }
 
+/** Calibraciones de la OT con la forma de las reglas de Metrología (metrologia-ot.reglas.ts). */
+const calsOt = (h: HechosOt) =>
+  (h.calibraciones ?? []).map((c, i) => ({
+    id: c.id ?? `cal-${i}`, instrumentoId: c.instrumentoId ?? null, codigo: c.codigo, numeroCertificado: c.numeroCertificado ?? null,
+    estado: c.estado, entregadoAt: c.entregadoAt ?? null,
+  }));
+
 /** Etapa Cierre y su siguiente paso: usa EXACTAMENTE la regla del cierre (plazos.ts). */
 function etapaCierre(h: HechosOt): { etapa: Etapa; paso: Omit<SiguientePaso, "etapa"> } {
   const cerrada = h.estado === "cerrada";
   const faltan = cerrada
     ? []
-    : faltantesParaCerrar({
-        estado: h.estado,
-        documentos: h.documentos.map((d) => ({ numero: d.numero, estado: d.estado, entregadoAt: d.entregadoAt })),
-        resultadosNoAprobados: h.resultados.total - h.resultados.aprobados,
-      });
+    : [
+        ...faltantesParaCerrar({
+          estado: h.estado,
+          documentos: [
+            ...h.documentos.map((d) => ({ numero: d.numero, estado: d.estado, entregadoAt: d.entregadoAt })),
+            ...documentosDeCalibraciones(calsOt(h)),
+          ],
+          resultadosNoAprobados: h.resultados.total - h.resultados.aprobados,
+        }),
+        ...faltantesInstrumentos(h.instrumentos ?? [], calsOt(h), h.exigeDevolucion ?? true),
+      ];
   return {
     etapa: etapa("cierre", "Cierre de la OT", cerrada ? "hecho" : "pendiente", cerrada ? "Cerrada" : faltan.length ? null : "Lista para cerrar"),
     paso: {
@@ -456,30 +488,60 @@ function rutaMetrologia(h: HechosOt): Ruta {
   const n = (e: string) => cals.filter((c) => est(c) === e).length;
   const nombre = (c: CalibracionAvance) => c.numeroCertificado || c.codigo;
   const lista = (e: string) => cals.filter((c) => est(c) === e).map(nombre).join(", ");
+  const primera = (e: string) => cals.find((c) => est(c) === e);
+  const ficha = (c?: CalibracionAvance) => (c?.id ? `/metrologia/${c.id}` : "/metrologia");
+  // Instrumentos (EP-04): un ítem por instrumento; los anulados no cuentan.
+  const items = (h.instrumentos ?? []).filter((i) => i.estado !== "anulado");
+  const porRecibir = items.filter((i) => i.estado === "por_recibir");
+  const calOt = calsOt(h);
+  const sinCalibrar = items.filter((i) => i.estado === "recibido" && !calibracionVigente(calOt, i.id));
+  const sinMetrologo = items.filter((i) => (i.estado === "por_recibir" || i.estado === "recibido") && !i.metrologoId && !calibracionVigente(calOt, i.id));
+  const enCustodia = items.filter((i) => i.estado === "recibido" || i.estado === "no_apto");
+  const exigeDevolucion = h.exigeDevolucion ?? true;
   const ninguna = cals.length === 0;
-  const todasEnviadas = !ninguna && n("borrador") === 0;
+  const todasEnviadas = !ninguna && n("borrador") === 0 && sinCalibrar.length === 0 && porRecibir.length === 0;
   const todasFirma = todasEnviadas && n("en_revision") === 0;
-  const todasEmitidas = !ninguna && n("emitida") === cals.length;
-  const docs = etapasDocumentos(h.documentos, "Informe del flujo general");
+  const todasEmitidas = !ninguna && n("emitida") === cals.length && sinCalibrar.length === 0 && porRecibir.length === 0;
+  const emitidas = cals.filter((c) => est(c) === "emitida");
+  const sinEntregar = emitidas.filter((c) => !c.entregadoAt);
+  const porDevolver = exigeDevolucion ? enCustodia : [];
   const cierre = etapaCierre(h);
   const fac = etapasFactura(h);
-  const oficialesEntregados = vivos(h.documentos).some((d) => esOficialDoc(d) && d.entregadoAt);
-  // El certificado de calibración aún no se liga a la OT: su entrega no se registra en
-  // la OT y el cierre sigue pidiendo un documento del flujo general (ver la doc).
-  const entrega = todasEmitidas && !oficialesEntregados && h.estado !== "cerrada"
-    ? etapa("entrega", "Entrega al cliente", "bloqueado", "La entrega del certificado de calibración aún no se registra en la OT")
-    : h.estado === "cerrada" ? etapa("entrega", "Entrega al cliente", "hecho", docs.entrega.detalle) : docs.entrega;
+  const cerrada = h.estado === "cerrada";
+  const item = (i: InstrumentoAvance) => `ítem ${i.numero} (${i.descripcion})`;
   const etapas = [
     etapa("apertura", "Apertura de la OT", h.unidad ? "hecho" : "pendiente", detalleApertura(h)),
-    etapa("calibracion", "Toma de datos y cálculo", todasEnviadas ? "hecho" : ninguna ? "pendiente" : "en_curso",
+    etapa(
+      "asignacion",
+      "Programación (metrólogo)",
+      items.length && !sinMetrologo.length ? "hecho" : "pendiente",
+      [...new Set(items.map((i) => i.metrologo).filter(Boolean))].join(", ") || null,
+    ),
+    etapa(
+      "recepcion",
+      "Recepción del instrumento",
+      items.length && !porRecibir.length ? "hecho" : items.length > porRecibir.length ? "en_curso" : "pendiente",
+      items.length ? `${items.length - porRecibir.length} de ${plural(items.length, "instrumento")} recibidos` : "Sin instrumentos registrados",
+    ),
+    etapa("calibracion", "Toma de datos y cálculo", todasEnviadas ? "hecho" : ninguna && !items.length ? "pendiente" : ninguna ? "pendiente" : "en_curso",
       ninguna ? "Sin calibración registrada" : cals.map((c) => `${nombre(c)} · ${TEXTO_CAL[est(c)] ?? est(c)}`).join("; ")),
     etapa("revision_tecnica", "Revisión técnica", todasFirma ? "hecho" : n("en_revision") ? "en_curso" : "pendiente", n("en_revision") ? lista("en_revision") : null),
     etapa("firma_emision", "Firma y emisión del certificado", todasEmitidas ? "hecho" : n("en_firma") ? "en_curso" : "pendiente", n("emitida") ? lista("emitida") : null),
-    entrega,
+    etapa(
+      "entrega",
+      "Entrega del certificado y devolución",
+      cerrada || (todasEmitidas && !sinEntregar.length && !porDevolver.length) ? "hecho" : emitidas.length > sinEntregar.length ? "en_curso" : "pendiente",
+      emitidas.length
+        ? `${emitidas.length - sinEntregar.length} de ${emitidas.length} entregados${exigeDevolucion ? ` · ${items.filter((i) => i.estado === "devuelto").length} de ${items.length} devueltos` : ""}`
+        : null,
+    ),
     cierre.etapa,
     fac.factura,
     fac.pago,
   ];
+  const instr = (texto: string, rol: string, permisos: string[], personas: string[] = []): Paso => ({
+    texto, leToca: { rol, unidad: u, personas }, accion: { texto: "Ir a Instrumentos", pestana: "instrumentos", permisos },
+  });
   return {
     etapas,
     paso: (clave) => {
@@ -490,34 +552,40 @@ function rutaMetrologia(h: HechosOt): Ruta {
             leToca: { rol: "Planificación y Control", unidad: null, personas: [] },
             accion: { texto: "Ir a Cabecera", pestana: "cabecera", permisos: ["ot.cambiar_laboratorio"] },
           };
-        case "calibracion":
+        case "recepcion":
+          if (!items.length)
+            return instr("Registrar los instrumentos de la OT (uno por instrumento)", "Jefe de Laboratorio de Metrología", ["ot.crear", "ot.asignar", "metrologia.crear"]);
+          return instr(`Registrar la recepción de ${porRecibir.map(item).join(", ")}`, "Metrólogo", ["metrologia.crear", "muestra.crear"]);
+        case "asignacion":
+          if (!items.length)
+            return instr("Registrar los instrumentos de la OT (uno por instrumento)", "Jefe de Laboratorio de Metrología", ["ot.crear", "ot.asignar", "metrologia.crear"]);
+          return instr(`Asignar el metrólogo de ${sinMetrologo.map(item).join(", ")}`, "Jefe de Laboratorio de Metrología", ["ot.asignar"]);
+        case "calibracion": {
+          if (sinCalibrar.length)
+            return instr(`Calibrar ${sinCalibrar.map(item).join(", ")}`, "Metrólogo", ["metrologia.crear"],
+              [...new Set(sinCalibrar.map((i) => i.metrologo).filter((x): x is string => !!x))]);
           return {
-            texto: ninguna
-              ? `Registrar la calibración indicando la OT ${h.codigo}`
-              : `Completar y enviar a revisión ${lista("borrador")}`,
+            texto: `Completar y enviar a revisión ${lista("borrador")}`,
             leToca: { rol: "Metrólogo", unidad: u, personas: h.analistas },
-            accion: { texto: ninguna ? "Ir a Nueva calibración" : "Ir a Calibraciones", ruta: ninguna ? "/metrologia/nueva" : "/metrologia", permisos: ["metrologia.crear"] },
+            accion: { texto: "Ir a la ficha de calibración", ruta: ficha(primera("borrador")), permisos: ["metrologia.crear"] },
           };
+        }
         case "revision_tecnica":
           return {
             texto: `Revisión técnica de ${lista("en_revision")}`,
             leToca: { rol: "Jefe de Laboratorio de Metrología", unidad: u, personas: [] },
-            accion: { texto: "Ir a Calibraciones", ruta: "/metrologia", permisos: ["metrologia.emitir"] },
+            accion: { texto: "Ir a la ficha de calibración", ruta: ficha(primera("en_revision")), permisos: ["metrologia.ver"] },
           };
         case "firma_emision":
           return {
             texto: `Firmar y emitir ${lista("en_firma") || "el certificado de calibración"}`,
             leToca: { rol: "Jefe de Departamento", unidad: null, personas: [] },
-            accion: { texto: "Ir a Calibraciones", ruta: "/metrologia", permisos: ["metrologia.emitir"] },
+            accion: { texto: "Ir a la ficha de calibración", ruta: ficha(primera("en_firma")), permisos: ["metrologia.ver"] },
           };
         case "entrega":
-          if (entrega.estado === "bloqueado")
-            return {
-              texto: "Entregar el certificado de calibración y cerrar la OT: el cierre aún exige un informe del flujo general (integración de Metrología con la OT pendiente)",
-              leToca: { rol: "Planificación y Control", unidad: null, personas: [] },
-              accion: { texto: "Ir a Informe y cierre", pestana: "informe", permisos: ["ot.cerrar", "certificado.entregar"] },
-            };
-          return pasoDocumentos(h, "entrega");
+          if (sinEntregar.length)
+            return instr(`Registrar la entrega del certificado ${sinEntregar.map(nombre).join(", ")}`, "Metrólogo o Comercial", ["certificado.entregar", "metrologia.crear"]);
+          return instr(`Registrar la devolución de ${porDevolver.map(item).join(", ")} (acta)`, "Metrólogo o Comercial", ["metrologia.crear", "certificado.entregar"]);
         case "cierre":
           return cierre.paso;
         case "factura":
