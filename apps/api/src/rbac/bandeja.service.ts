@@ -35,7 +35,9 @@ const PERMISO_DE_RUTA: [string, string][] = [
   ["/captura-ot", "resultado.ver"],
   ["/certificados", "ot.ver"],
   ["/ot", "ot.ver"],
+  ["/cotizaciones/por-responder", "cotizacion.costear"],
   ["/cotizaciones", "cotizacion.ver"],
+  ["/encuestas", "encuesta.ver"],
   ["/facturas", "factura.ver"],
   ["/ordenes-compra", "compra.ver"],
   ["/no-conformidades", "nc.ver"],
@@ -214,6 +216,48 @@ export class BandejaService {
                                                             AND (now() AT TIME ZONE 'America/Santiago')::date + 7`,
           tenant,
         ),
+      // Circuito de la cotización (frente r1c · align_cotizacion_circuito.sql).
+      // Solicitudes de Comercial a los laboratorios del alcance, por estado.
+      solicitudesLab: (estados: string[]) =>
+        this.contar(
+          `SELECT count(*) AS n FROM solicitud_costeo s JOIN cotizacion c ON c.id = s.cotizacion_id
+            WHERE s.deleted_at IS NULL AND c.estado = 'abierta' AND s.tenant_id = COALESCE($1::uuid, s.tenant_id)
+              AND s.estado = ANY($3::text[]) AND ($2::uuid[] IS NULL OR s.unidad_id = ANY($2::uuid[]))`,
+          tenant,
+          unidades,
+          estados,
+        ),
+      // Por firmar: solo para quien firma según la matriz COTIZACION por defecto
+      // (Jefe de Departamento del Depto. Comercial, titular, subrogante o asignado).
+      firmaCotizaciones: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM unidad d
+            WHERE d.codigo = 'DCO' AND d.tenant_id = COALESCE($1::uuid, d.tenant_id)
+              AND (EXISTS (SELECT 1 FROM unidad_jefe j WHERE j.unidad_id = d.id AND j.usuario_id = $2::uuid)
+                   OR EXISTS (SELECT 1 FROM usuario_rol ur JOIN rol r ON r.id = ur.rol_id
+                               WHERE ur.usuario_id = $2::uuid AND ur.unidad_id = d.id AND r.codigo = 'JEFE_DEPTO'))`,
+          tenant,
+          yo,
+        ),
+      cotizacionesPorFirmar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM cotizacion c
+            WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.estado = 'abierta' AND c.firma_estado = 'pendiente'`,
+          tenant,
+        ),
+      cotizacionesFirma: (estado: string, sinEnviar = false) =>
+        this.contar(
+          `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id)
+              AND c.estado = 'abierta' AND c.firma_estado = $2 AND ($3::boolean = FALSE OR c.enviada_at IS NULL)`,
+          tenant,
+          estado,
+          sinEnviar,
+        ),
+      encuestasPendientes: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM encuesta_satisfaccion e WHERE e.tenant_id = COALESCE($1::uuid, e.tenant_id) AND e.estado = 'pendiente'`,
+          tenant,
+        ),
       cotizacionesSinOt: () =>
         this.contar(
           `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id)
@@ -334,6 +378,18 @@ export class BandejaService {
     const nc = async () =>
       item("nc_abiertas", "No conformidades abiertas", "NC abiertas, en proceso o en verificación", await q.ncAbiertas(), "/no-conformidades", "warn");
 
+    const porResponder = async () =>
+      item("cotizaciones_por_responder", "Cotizaciones por responder", "Comercial pide fechas y costo a su laboratorio: responda con el programa y el costeo", await q.solicitudesLab(["solicitado", "devuelto"]), "/cotizaciones/por-responder?estado=por_responder", "warn");
+    const vbLab = async () =>
+      item("cotizaciones_vb_lab", "Costeos por dar V°B°", "Respuestas de costeo de su laboratorio que esperan el V°B° del Jefe de Laboratorio", await q.solicitudesLab(["respondido"]), "/cotizaciones/por-responder?estado=vb", "warn");
+    const vbDepto = async () =>
+      item("cotizaciones_vb_depto", "Costeos por dar V°B° del departamento", "Respuestas de costeo con V°B° del laboratorio que esperan el del Jefe de Departamento", await q.solicitudesLab(["vb_lab"]), "/cotizaciones/por-responder?estado=vb", "warn");
+    // Solo para quien firma según la matriz COTIZACION por defecto (Jefe del Depto. Comercial).
+    const porFirmarCot = async (): Promise<ItemBandeja[]> =>
+      (await q.firmaCotizaciones()) === 0 ? [] : [item("cotizaciones_por_firmar", "Cotizaciones por firmar", "Cotizaciones enviadas a su firma (Jefe del Departamento Comercial)", await q.cotizacionesPorFirmar(), "/cotizaciones?estado=abierta&firma=pendiente", "warn")];
+    const encuestas = async () =>
+      item("encuestas_pendientes", "Encuestas por registrar", "OT cerradas cuya encuesta de satisfacción aún no se registra", await q.encuestasPendientes(), "/encuestas?estado=pendiente", "info");
+
     const all = (fs: (() => Promise<ItemBandeja | ItemBandeja[]>)[]) =>
       Promise.all(fs.map((f) => f())).then((r) => r.flat());
 
@@ -348,10 +404,11 @@ export class BandejaService {
       case "REVISOR":
         return all([porRevisar, asignadas, devueltos, porVencer, firmas]);
       case "JEFE_LAB":
-        return all([sinAsignar, porRevisar, porAprobar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar]);
+        return all([sinAsignar, porRevisar, porAprobar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
       case "JEFE_SECCION":
+        return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
       case "JEFE_DEPTO":
-        return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas]);
+        return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porFirmarCot, vbDepto, porResponder]);
       case "DIRECTOR":
         return all([firmas, porOficializar, vencidas, vencidasPorLab, abiertas, nc, sinOt]);
       case "COMERCIAL":
@@ -360,9 +417,12 @@ export class BandejaService {
           sinOt,
           porVencer,
           porEntregar,
+          async () => item("cotizaciones_devueltas_firma", "Cotizaciones devueltas por el Jefe DCO", "Corrija lo observado y vuelva a enviarlas a firma", await q.cotizacionesFirma("devuelta"), "/cotizaciones?estado=abierta&firma=devuelta", "alta"),
+          async () => item("cotizaciones_firmadas_sin_enviar", "Cotizaciones firmadas sin enviar", "Firmadas por el Jefe DCO: envíelas al cliente", await q.cotizacionesFirma("firmada", true), "/cotizaciones?estado=abierta&firma=firmada&enviada=0", "warn"),
+          encuestas,
         ]);
       case "PLANIFICACION":
-        return all([vencidas, vencidasPorLab, porVencer, listasCerrar, porEntregar, abiertas, sinOt]);
+        return all([vencidas, vencidasPorLab, porVencer, listasCerrar, porEntregar, abiertas, sinOt, encuestas]);
       case "FINANZAS":
         return all([
           async () => item("facturas_pendientes", "Pendientes de facturar", "Facturas en borrador generadas al cerrar OT con cobro: revíselas y emítalas", await q.facturasPendientes(), "/facturas?estado=pendiente", "alta"),

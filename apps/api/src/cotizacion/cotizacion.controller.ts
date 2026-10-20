@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, ParseUUIDPipe, BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, ParseUUIDPipe, BadRequestException } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
@@ -9,7 +9,7 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos } from "../common/estados";
 import { TIPOS_ACEPTACION } from "../ot/reglas-ot";
 import { PERMISO_ACEPTAR, PERMISO_ANULAR } from "./permisos-cotizacion";
-import { SQL_UNIDADES_COTIZACION, cotizacionEnAlcance } from "./alcance-cotizacion";
+import { exigirCotizacionEnAlcance } from "./alcance-cotizacion";
 import { AlcanceService } from "../rbac/alcance.service";
 import { PrismaService } from "../common/prisma.service";
 
@@ -161,21 +161,7 @@ export class CotizacionController {
    * (alcance-cotizacion.ts). 404 si no existe en el tenant.
    */
   private async exigirCotizacion(req: any, id: string) {
-    const tenantId: string | undefined = req?.user?.tenantId;
-    const visibles = await this.alcance.filtroUnidades(req);
-    if (visibles === null) return;
-    const cot = await this.prisma.cotizacion.findFirst({
-      where: { id, ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, codigo: true },
-    });
-    if (!cot) throw new NotFoundException("Cotización no encontrada");
-    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(SQL_UNIDADES_COTIZACION, id);
-    const dco = (await this.alcance.arbol(tenantId)).porCodigo.get("DCO")?.id ?? null;
-    if (!cotizacionEnAlcance(visibles, filas.map((f) => f.id), dco)) {
-      throw new ForbiddenException(
-        `Fuera de su alcance: la cotización ${cot.codigo ?? ""} es de laboratorios que usted no tiene asignados.`.replace(/\s+/g, " "),
-      );
-    }
+    await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id);
   }
 
   /**

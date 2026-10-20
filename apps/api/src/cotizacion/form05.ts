@@ -1,0 +1,113 @@
+/**
+ * Formulario de cotización · costeo del laboratorio (DCO-PG01-P01-IT02-FORM05)
+ * y Programa de trabajo (FORM06). Reglas puras (form05.spec.ts). EP-00 2.5.
+ *
+ * Siete secciones: 1 Viáticos · 2 Horas hombre (civil / militar) · 3 Servicios
+ * estándar (EN de la lista) · 4 Horas máquina · 5 Pasajes · 6 Otros gastos ·
+ * 7 Condiciones técnicas y restricciones. Montos finales: CDT, CFA, CT, precio
+ * Ejército (= CT) y precio particular (CT + recargo).
+ *
+ * Viático = monto diario del país o zona × % del grado × días (tabla anual
+ * DFZ). CFA y recargo particular son parámetros (`circuito_cotizacion.cfa_pct`
+ * y `.margen_particular_pct`, por defecto 12 % y 20 % como el costeo que ya
+ * existía): la fórmula de precio vigente está POR CONFIRMAR (EP-00 §10 P1).
+ */
+
+export interface Viatico { ambito: "nacional" | "extranjero"; zona: string; grado: string; dias: number; montoDiario: number; porcentaje: number }
+export interface HoraHombre { tipo: "civil" | "militar"; categoria: string; horas: number; valorHora: number }
+export interface ServicioEstandar { codigo: string; descripcion?: string; cantidad: number; valorUnitario: number }
+export interface HoraMaquina { equipo: string; horas: number; valorHora: number }
+export interface Pasaje { ambito: "nacional" | "extranjero"; tramo: string; cantidad: number; valorUnitario: number }
+export interface OtroGasto { descripcion: string; monto: number; moneda: "CLP" | "USD" }
+
+export interface Form05Entrada {
+  viaticos?: Viatico[];
+  horasHombre?: HoraHombre[];
+  servicios?: ServicioEstandar[];
+  horasMaquina?: HoraMaquina[];
+  pasajes?: Pasaje[];
+  otros?: OtroGasto[];
+  /** Sección 7. */
+  condiciones?: string | null;
+  /** Valor del dólar para convertir los otros gastos en US$. */
+  dolar?: number | null;
+}
+
+export interface Form05Resultado {
+  secciones: { viaticos: number; horasHombre: number; servicios: number; horasMaquina: number; pasajes: number; otros: number };
+  horasHombreTotal: number;
+  cdt: number;
+  cfaPct: number;
+  cfa: number;
+  ct: number;
+  precioEjercito: number;
+  margenParticularPct: number;
+  precioParticular: number;
+}
+
+const r0 = (n: number) => Math.round(n);
+const suma = <T>(xs: T[] | undefined, f: (x: T) => number) => (xs ?? []).reduce((a, x) => a + f(x), 0);
+
+/** Viático de una fila: monto diario × % del grado × días. */
+export const montoViatico = (v: Viatico) => v.montoDiario * (v.porcentaje / 100) * v.dias;
+
+/** Errores de contenido del formulario (lo que zod no puede ver). */
+export function erroresForm05(f: Form05Entrada): string[] {
+  const e: string[] = [];
+  const filas =
+    (f.viaticos?.length ?? 0) + (f.horasHombre?.length ?? 0) + (f.servicios?.length ?? 0) +
+    (f.horasMaquina?.length ?? 0) + (f.pasajes?.length ?? 0) + (f.otros?.length ?? 0);
+  if (filas === 0) e.push("El formulario de costeo necesita al menos una fila en alguna de las secciones 1 a 6.");
+  if ((f.otros ?? []).some((o) => o.moneda === "USD") && !(Number(f.dolar) > 0))
+    e.push("Hay otros gastos en US$: indique el valor del dólar para convertirlos.");
+  return e;
+}
+
+export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenParticularPct: number }): Form05Resultado {
+  const dolar = Number(f.dolar) > 0 ? Number(f.dolar) : 0;
+  const secciones = {
+    viaticos: r0(suma(f.viaticos, montoViatico)),
+    horasHombre: r0(suma(f.horasHombre, (h) => h.horas * h.valorHora)),
+    servicios: r0(suma(f.servicios, (s) => s.cantidad * s.valorUnitario)),
+    horasMaquina: r0(suma(f.horasMaquina, (h) => h.horas * h.valorHora)),
+    pasajes: r0(suma(f.pasajes, (x) => x.cantidad * x.valorUnitario)),
+    otros: r0(suma(f.otros, (o) => (o.moneda === "USD" ? o.monto * dolar : o.monto))),
+  };
+  const cdt = Object.values(secciones).reduce((a, b) => a + b, 0);
+  const cfa = r0(cdt * (p.cfaPct / 100));
+  const ct = cdt + cfa;
+  return {
+    secciones,
+    horasHombreTotal: Math.round(suma(f.horasHombre, (h) => h.horas) * 100) / 100,
+    cdt,
+    cfaPct: p.cfaPct,
+    cfa,
+    ct,
+    precioEjercito: ct,
+    margenParticularPct: p.margenParticularPct,
+    precioParticular: r0(ct * (1 + p.margenParticularPct / 100)),
+  };
+}
+
+/* ------------------------------------------------------- Programa FORM06 --- */
+
+export interface EtapaPrograma { actividad: string; inicio?: string | null; termino?: string | null; recursos?: string | null }
+export interface ProgramaTrabajo {
+  etapas: EtapaPrograma[];
+  fechaInicio?: string | null;
+  fechaTermino?: string | null;
+  /** Plazo de entrega propuesto (días corridos). Obligatorio. */
+  plazoEntregaDias: number;
+}
+
+export function erroresPrograma(p: ProgramaTrabajo): string[] {
+  const e: string[] = [];
+  if (!(Number.isInteger(p.plazoEntregaDias) && p.plazoEntregaDias >= 1 && p.plazoEntregaDias <= 730))
+    e.push("Plazo de entrega propuesto: entre 1 y 730 días corridos.");
+  if (p.fechaInicio && p.fechaTermino && p.fechaTermino < p.fechaInicio)
+    e.push("Programa de trabajo: la fecha de término es anterior a la de inicio.");
+  p.etapas.forEach((x, i) => {
+    if (x.inicio && x.termino && x.termino < x.inicio) e.push(`Etapa ${i + 1} («${x.actividad}»): termina antes de empezar.`);
+  });
+  return e;
+}

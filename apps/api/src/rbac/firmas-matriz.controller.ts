@@ -21,7 +21,7 @@ import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "./alcance.service";
-import { ResolucionFirmas, resolverFirmas } from "./firmas-resolver";
+import { ReglaFirma, ResolucionFirmas, resolverFirmas } from "./firmas-resolver";
 import { ACCIONES_FIRMA, NIVELES_UNIDAD_FIRMA, TIPOS_DOCUMENTO } from "./rbac.constants";
 
 const ReglaBase = z.object({
@@ -70,15 +70,20 @@ export class FirmasMatrizService {
     tipoDocumento: string,
     unidadId: string | null,
     tenantId?: string,
-    opts: { otInterna?: boolean } = {},
+    opts: { otInterna?: boolean; reglasFijas?: ReglaFirma[] } = {},
   ): Promise<ResolucionFirmas> {
     const arbol = await this.alcance.arbol(tenantId);
     if (unidadId && !arbol.porId.has(unidadId)) throw new NotFoundException(`unidad ${unidadId} no encontrada`);
+    // `reglasFijas`: circuitos que no viven en la matriz editable (p. ej. el V°B°
+    // del laboratorio y del departamento a la respuesta de costeo de una
+    // cotización) resuelven a sus responsables con la misma lógica.
     const [reglas, jefes, tenencias] = await Promise.all([
-      this.prisma.flujoFirma.findMany({
-        where: { tipoDocumento, activo: true, ...(tenantId ? { tenantId } : {}) },
-        include: { rol: { select: { id: true, codigo: true, nombre: true, nivel: true, alcance: true, aliasDe: true } } },
-      }),
+      opts.reglasFijas
+        ? Promise.resolve(opts.reglasFijas as any[])
+        : this.prisma.flujoFirma.findMany({
+            where: { tipoDocumento, activo: true, ...(tenantId ? { tenantId } : {}) },
+            include: { rol: { select: { id: true, codigo: true, nombre: true, nivel: true, alcance: true, aliasDe: true } } },
+          }),
       this.prisma.unidadJefe.findMany({
         where: tenantId ? { tenantId } : {},
         select: { unidadId: true, usuarioId: true, rol: true, usuario: { select: { nombreCompleto: true, estado: true, deletedAt: true } } },
