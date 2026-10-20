@@ -77,11 +77,18 @@ Tres capas, las tres en el servidor (el menú solo las refleja):
 
 | Módulo | Ámbito | Quién entra |
 |---|---|---|
-| SAEC: casos, evidencias, armas, custodia, préstamos, IBIS, certificados | Delegación Nº 11 | Delegación Nº 11, jefatura de BPCH y perfiles globales |
-| Metrología | Sección Metrología | LMT, LMTE, LNF, sus jefaturas y perfiles globales |
-| Internaciones | BPCH y Comercial | Certificación, sucursales, Delegación Nº 11, Comercial y perfiles globales |
-| Producción Nacional | BPCH y Comercial | Igual que Internaciones; Comercial solo consulta (docs/FLUJO_BPCH_PRODUCCION_PROTOTIPOS_CLASIFICACION.md) |
-| Prototipos · Clasificación de sustancias | BPCH | Certificación, sucursales, Delegación Nº 11, jefatura de BPCH y perfiles globales |
+| SAEC: casos, evidencias, armas, custodia, préstamos, IBIS, certificados | Delegación Nº 11 (estricto) | Delegación Nº 11, jefatura de BPCH, Dirección, Subdirección y Lector/Auditor (consulta). **No** Recepción, Calidad ni Administración (fase 0) |
+| Metrología | Sección Metrología | LMT, LMTE, LNF, sus jefaturas y perfiles globales con permiso de Metrología |
+| Internaciones · Reinspecciones | BPCH y Comercial | Certificación, sucursales, Comercial y perfiles globales; la Delegación Nº 11 solo lo que inspecciona |
+| Codificación Única · Producción Nacional | BPCH sin la Delegación Nº 11, y Comercial | Comercial solo consulta (docs/FLUJO_BPCH_PRODUCCION_PROTOTIPOS_CLASIFICACION.md) |
+| Prototipos · Clasificación de sustancias | BPCH | Certificación y jefatura de BPCH, todos; cada sucursal y la Delegación Nº 11, solo los de su unidad |
+
+Desde la fase 0 (20-10-2026) el alcance va **por asignación**: cada permiso vale
+con el alcance del rol que lo concede (docs/ADMIN_ROLES.md › «Alcance por
+asignación»). Para probarlo hay tres perfiles con dos roles
+(`seed_alcance_fase0.sql`): `demo.multi.lpn_comercial` (Analista LPN + Comercial),
+`demo.multi.lqc_recepcion` (Analista LQC + Recepción) y `demo.multi.lam_lem` (Jefe
+LAM + Analista LEM).
 
 ## Prueba del 13-10-2026 (26 perfiles, entorno local)
 
@@ -138,17 +145,18 @@ En una instalación nueva del IDIC no hace nada: el instalador aplica
 
 Conviene saberlo antes de enseñarlo:
 
-- **Perfiles operativos globales**: recepción, ventas, muestreo, finanzas y
-  abastecimiento ven todas las órdenes. Es lo que define hoy el catálogo de
-  roles; falta que el IDIC confirme si abastecimiento y finanzas deben verlas.
+- **Perfiles operativos globales**: recepción, ventas, muestreo y finanzas ven
+  todas las órdenes. Abastecimiento ya no ve OT ni informes (fase 0).
 - ~~**Auditoría**: las jefaturas ven la bitácora de todo el instituto.~~ Resuelto:
   una jefatura acotada solo ve lo hecho por las personas de sus unidades
   (docs/FLUJO_COMERCIAL_USUARIOS.md).
 - **Reportes de gestión** (productividad, plazos, conformidad): los ven las
   jefaturas, pero con cifras de todo el instituto, no solo de su unidad.
-- **Oportunidades (CRM) y cotizaciones**: visibles para los jefes de laboratorio.
-- **Control estadístico, consumibles, documentos y mensajería**: sin filtro por
-  unidad.
+- **Oportunidades (CRM), cotizaciones, clientes y facturación** (lectura):
+  visibles para las jefaturas con todo el instituto. Queda para la fase 1; las
+  escrituras sobre cotizaciones ya exigen tenerlas en el alcance.
+- **Consumibles y mensajería**: sin filtro por unidad (el kardex no tiene
+  laboratorio). El control estadístico (SPC) ya se acota (fase 0).
 - **Pantallas sin acceso**: si se escribe a mano la dirección de un módulo
   ajeno (p. ej. `/saec`), el servidor no entrega datos, pero la pantalla se
   muestra vacía en vez de decir «sin acceso».
@@ -181,6 +189,9 @@ este orden fijo:
 1. `correcciones-manuales.js` 2. `flujo-completo.js` 3. `informe-ensayo.js`
 4. `quimicos-recepcion-calculo.js` 5. `bpch-internacion-reinspeccion.js`
 6. `bpch-produccion-prototipos-clasificacion.js` 7. `metrologia-1510.js`
+8. `frente-k.js` 9. `alcance-por-laboratorio.js` (todos los perfiles `demo.*`:
+   ninguna fila fuera del alcance, detalle ajeno → 403/404, escrituras ajenas → 403
+   y menú sin SAEC ni BPCH Certificación donde no corresponde)
 
 Ninguno depende de otro: cada uno se prepara sus datos (p. ej. `correcciones-manuales.js`
 emite su propio informe de LQC si la base no tiene ninguno y crea la factura de su nota de

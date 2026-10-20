@@ -61,26 +61,28 @@ Reglas del seed: las unidades existentes **no se duplican**; solo se completan l
 | Código | Nombre | Nivel | Alcance | Qué puede (permisos por defecto) |
 |---|---|---|---|---|
 | SUPERADMIN | Super Administrador | SISTEMA | GLOBAL | Todo (el guard lo deja pasar siempre). Sus permisos **no son editables**. |
-| ADMIN | Administrador del sistema | SISTEMA | GLOBAL | `admin.usuarios/estructura/roles/firmas`, toda la lectura (`*.ver`), catálogo, plantillas, flujos, `metrologia.config`, `ibis.config`, auditoría. |
+| ADMIN | Administrador del sistema | SISTEMA | GLOBAL | `admin.usuarios/estructura/roles/firmas`, toda la lectura (`*.ver`) **salvo SAEC**, catálogo, plantillas, flujos, `metrologia.config`, auditoría. Sin SAEC (fase 0). |
 | DIRECTOR | Director | DIRECCION | GLOBAL | Toda la lectura + firmar/emitir certificados, aprobar/revisar resultados, aprobar cotizaciones y métodos, NC, cerrar OT, VB/firma de oficios. |
 | SUBDIRECTOR | Subdirector | DIRECCION | GLOBAL | Igual que Director (subroga). |
 | JEFE_DEPTO | Jefe de Departamento | JEFATURA | DESCENDENCIA | Todo lo del Jefe de Sección + aprobar cotizaciones, ver facturación. Oficializa/firma en todo su departamento. |
 | JEFE_SECCION | Jefe de Sección | JEFATURA | DESCENDENCIA | Todo lo del Jefe de Laboratorio + ver clientes, `saec.certificado.emitir`. Ve y firma en sección + labs. |
 | JEFE_LAB | Jefe de Laboratorio / Sucursal | JEFATURA | UNIDAD | Base de laboratorio + revisar/aprobar resultados, emitir/firmar certificados, métodos (crear/aprobar), equipos, NC, catálogo, cerrar OT, metrología (crear/emitir), IBIS (ver/asignar analistas). Titular o subrogante vía `unidad_jefe`. |
-| REVISOR | Analista revisor | OPERATIVO | UNIDAD | Base de laboratorio + `resultado.revisar`, transferir muestras. (Alias legado: `ANALISTA_SR`.) |
-| ANALISTA | Analista | OPERATIVO | UNIDAD | **Base de laboratorio**: ver OT/muestras/resultados/métodos/equipos/plantillas/flujos, capturar resultados, crear muestras, registrar firma. |
+| REVISOR | Analista revisor | OPERATIVO | UNIDAD | Base de laboratorio + `resultado.revisar`, transferir muestras. Sin SAEC ni Metrología (fase 0). (Alias legado: `ANALISTA_SR`.) |
+| ANALISTA | Analista | OPERATIVO | UNIDAD | **Base de laboratorio**: ver OT/muestras/resultados/métodos/equipos/plantillas/flujos, capturar resultados, crear muestras, registrar firma. Sin SAEC ni Metrología (fase 0). |
 | TECNICO | Técnico de laboratorio | OPERATIVO | UNIDAD | Base de laboratorio + transferir muestras. |
-| INSPECTOR | Inspector (LCA · BPCH) | OPERATIVO | UNIDAD | Base de laboratorio + transferir muestras. |
+| INSPECTOR | Inspector (LCA · BPCH) | OPERATIVO | UNIDAD | Base de laboratorio + transferir muestras y los procesos BPCH. Sin SAEC (fase 0: el de la Delegación Nº 11 lleva además PERITO_SAEC). |
+| PERITO_SAEC | Perito SAEC (Delegación Nº 11) | OPERATIVO | UNIDAD | Complementario: `evidencia.ver/custodiar`, `arma.ver`, `caso.ver`, `ibis.ver`, `peritaje.registrar`. Solo en la Delegación Nº 11. |
+| OPERADOR_METROLOGIA | Operador de Metrología | OPERATIVO | UNIDAD | Complementario: `metrologia.ver/crear`, para el personal operativo de la Sección Metrología que no es metrólogo. |
 | METROLOGO | Metrólogo | OPERATIVO | UNIDAD | Base de laboratorio + `metrologia.ver/crear`, `equipo.gestionar`. |
-| RECEPCION | Recepción de muestras | OPERATIVO | GLOBAL | Clientes (ver), muestras (ver/crear/transferir), OT (ver), evidencias SAEC (ver/crear/custodiar). |
+| RECEPCION | Recepción de muestras | OPERATIVO | GLOBAL | Clientes (ver), muestras (ver/crear/transferir), OT (ver). Sin SAEC (fase 0: la recepción de evidencias es de la Delegación Nº 11). |
 | COMERCIAL | Ejecutivo de Ventas | OPERATIVO | GLOBAL | Clientes (ver/crear/editar), cotizaciones (ver/crear) y **registrar aceptación / anular** (`cotizacion.aceptar`, `cotizacion.anular`), OT (ver/crear), muestras y facturas (ver). |
 | PLANIFICACION | Planificación y Control | OPERATIVO | GLOBAL | Control de OT (ver/crear), costeo (`cotizacion.crear`), resultados (SPC), facturas, auditoría (lectura). |
 | MUESTREO | Muestreo | OPERATIVO | GLOBAL | OT (ver), muestras (ver/crear/transferir), clientes y cotizaciones (ver). |
 | FINANZAS | Finanzas | SOPORTE | GLOBAL | Facturas: ver/emitir/cobrar (incluye pagos y notas de crédito), clientes/cotizaciones/OT (ver). |
 | COBRANZA | Cobranza | SOPORTE | GLOBAL | Igual que Finanzas. |
-| ABASTECIMIENTO | Abastecimiento (SAB) | SOPORTE | GLOBAL | Proveedores y órdenes de compra (`compra.ver`/`compra.gestionar`), equipos (ver), kardex de consumibles (`consumible.gestionar`). **No** emite ni ve facturas, ni toca centros de costo, catálogo o parámetros del sistema (align_correcciones_manuales.sql). |
-| CALIDAD | Gestión de Calidad | SOPORTE | GLOBAL | NC, auditoría, métodos (aprobar), plantillas (gestionar), catálogo, QC/resultados (ver), `certificado.firmar` (firma de LME). |
-| LECTOR | Lector / Auditor | SOPORTE | GLOBAL | Todos los `*.ver`. |
+| ABASTECIMIENTO | Abastecimiento (SAB) | SOPORTE | GLOBAL | Proveedores y órdenes de compra (`compra.ver`/`compra.gestionar`), equipos (ver), kardex de consumibles (`consumible.gestionar`). **No** emite ni ve facturas, ni toca centros de costo, catálogo o parámetros del sistema (align_correcciones_manuales.sql), ni ve OT ni informes (`ot.ver` retirado en la fase 0). |
+| CALIDAD | Gestión de Calidad | SOPORTE | GLOBAL | NC, auditoría, métodos (aprobar), plantillas (gestionar), catálogo, QC/resultados (ver), `certificado.firmar` (firma de LME). Sin SAEC (fase 0). |
+| LECTOR | Lector / Auditor | SOPORTE | GLOBAL | Todos los `*.ver` (en SAEC entra por excepción, solo a consultar). |
 | CLIENTE | Cliente externo | SOPORTE | UNIDAD | Cotizaciones y OT (ver). El filtro por cliente es aparte (pendiente). |
 
 **Alias legados** (BD antiguas): `JEFELAB ≈ JEFE_LAB`, `JEFEDCO ≈ JEFE_DEPTO`, `ANALISTA_SR ≈ REVISOR`. Heredan nivel/alcance y los permisos por defecto del canónico; el código conserva su fila (no se borra nada).
@@ -145,6 +147,78 @@ await this.alcance.exigirUnidad(req, ot.unidadPrincipal);   // 403 si fuera de a
 ```
 
 **JWT** (login y refresh): `roles` (asignaciones vigentes), `permisos`, `unidades` = ids de unidades **visibles** (ya expandidas con descendencia; vacío si global), `unidadGlobal` = `esGlobal`, `perfil`. El backend no confía en `unidades` del token para filtrar: recalcula en vivo.
+
+## 3 bis. Alcance por asignación (fase 0 · 20-10-2026)
+
+**Cada permiso vale con el alcance del rol que lo concede**, no con la unión de
+todas las asignaciones del usuario. Antes bastaba un rol transversal (Comercial,
+Planificación, Recepción…) para que TODOS los permisos de la persona valieran en
+todos los laboratorios: con ANALISTA@LPN + COMERCIAL, el analista capturaba y veía
+resultados de cualquier laboratorio y entraba en SAEC y Metrología.
+
+**Regla**
+
+- Alcance de un permiso P = **unión** de los alcances de las asignaciones
+  **vigentes** cuyo rol concede P (GLOBAL → todo; DESCENDENCIA → la unidad y lo
+  que cuelga; UNIDAD → la unidad; asignación legada de un rol acotado sin unidad →
+  global, como antes).
+- Ruta que exige varios permisos: la **intersección** de sus alcances.
+- **Jefaturas** (`unidad_jefe`, titular o subrogante): amplían los permisos que
+  concede un rol acotado de nivel JEFATURA o DIRECCION. Si la persona no tiene
+  ningún rol de ese nivel, amplían los de todos sus roles acotados (así se
+  comportaba con un solo rol).
+- Ruta sin permiso (solo autenticada, p. ej. `/me/bandeja`): unión de todas las
+  asignaciones, como antes.
+- **Usuarios de un solo rol: nada cambia.**
+
+Ejemplo: ANALISTA@LPN + COMERCIAL@SVT → `resultado.crear` y `resultado.ver` solo en
+LPN; `cotizacion.ver`, `cotizacion.anular` y `ot.ver` en todo el IDIC (los concede
+Comercial, que es global). JEFE_LAB@LAM + ANALISTA@LEM → `resultado.aprobar` solo
+en LAM; `resultado.crear` en LAM y LEM.
+
+**Cómo se aplica**
+
+| Pieza | Qué hace |
+|---|---|
+| `rbac/alcance.ts` | Reglas puras: `alcanceDePermiso`, `alcanceDePermisos`, `intersecarAlcances`, `resolverAmbito`, `entraEnAmbito` (pruebas: `alcance-asignacion.spec.ts`). |
+| `PermisoGuard` | Además de comprobar el permiso, deja en el request los permisos que exige la ruta (`req.__permisosRuta`). |
+| `AlcanceService` | `filtroUnidades(req)`, `exigirUnidad(req, unidad)` y `paraRequest(req)` valen con el alcance de **los permisos de la ruta**. Si una acción exige otro permiso, se pasa explícito: `exigirUnidad(req, unidad, que, "resultado.aprobar")` (lo usa completar un paso de flujo). `contexto.usuario` conserva la unión. |
+| `AmbitoUnidadGuard` | El ámbito del módulo se evalúa con los roles que conceden el permiso de la ruta. |
+| `GET /me/alcance` | `permisosPorAmbito`: permisos que valen dentro de cada rama. El menú (`itemEnAmbito`, `lib/navegacion.ts`) exige que el permiso del ítem valga dentro de la rama del ítem. |
+| JWT | Sin cambios: `permisos` sigue siendo la unión (dice QUÉ puede hacer); el DÓNDE lo calcula la API en vivo. |
+
+**Ámbitos de módulo** (`rbac.constants.ts › AMBITOS`)
+
+| Ámbito | Rama | Regla |
+|---|---|---|
+| `D11` | Delegación Nº 11 | **Estricto**: el alcance global solo vale a Superadministración, Dirección, Subdirección y Lector/Auditor (este, con permisos de consulta). El resto necesita la Delegación (o lo que cuelga) en el alcance del permiso: su personal y la jefatura del BPCH. Recepción, Calidad y Administración ya no entran. |
+| `BPCH` | Banco de Pruebas | Internaciones, reinspecciones, prototipos y clasificación: la Delegación Nº 11 entra, pero los listados la dejan solo en lo que inspecciona ella. |
+| `BPCH_CERT` | BPCH sin la Delegación Nº 11 | Codificación Única y Producción Nacional (registros nacionales). |
+| `BPCH_ASIGNADO` | Solo menú | `BPCH_CERT` más las unidades con trabajo asignado en un proceso BPCH: la D11 ve «Internaciones», «Reinspecciones», «Prototipos» y «Clasificación» solo si inspecciona alguno. |
+| `DCO`, `SAM` | Comercial, Sección Metrología | Sin cambios. |
+
+**Registros acotados en la fase 0** (además de OT, muestras, resultados,
+informes, calibraciones y BPCH, que ya lo estaban)
+
+| Recurso | Regla |
+|---|---|
+| `/certificados` (ruta heredada) | Retirada: **410 Gone** (se usa `/informes/documentos`). El Panel de indicadores cuenta `/informes/documentos`. |
+| SPC (`/spc/series`, `/spc/analitos`) | Solo resultados de OT del alcance de `resultado.ver`. |
+| `/internaciones/ot` (heredada, la usa `/bpch/internaciones`) | Unidad que inspecciona en el alcance; con la SCC en el alcance, todas. |
+| Prototipos y clasificaciones BPCH | Sucursales y D11: los de su unidad. SCC y jefatura BPCH: todos. Listado, detalle y todas las escrituras (`alcance-bpch.ts`). |
+| Equipos y calibraciones | Detalle, alta, edición, baja y calibraciones dentro del alcance. Sin unidad = común: se ve, pero solo lo cambia el alcance global. |
+| Catálogo (`AlcanceCatalogoGuard`) | Escrituras con `catalogo.gestionar`, `metodo.crear` o `metodo.aprobar`: con alcance global (Calidad, Administración) todo; una jefatura, solo ensayos (y su precio), métodos, analitos, especificaciones, paneles y pasos de SU laboratorio (familia del catálogo → unidad por CODSUCDEL). Las tablas comunes (grupos, familias, elementos, tipos de muestra, parámetros, listas de precio, formatos…) solo con alcance global. El detalle por id de esos recursos también se acota; los listados siguen comunes. |
+| Cotizaciones (escrituras) | Editar, anular, enviar, aceptar y rechazar exigen la cotización en el alcance del permiso. Unidades de la cotización: su OT y las que nacieron de ella, su centro de costo, los laboratorios de sus líneas y el Depto. Comercial (`cotizacion/alcance-cotizacion.ts`). Ver cotizaciones: fase 1. |
+
+**Roles complementarios** (`align_alcance_fase0.sql`): `PERITO_SAEC` (consulta,
+custodia y peritaje SAEC) para el personal operativo de la Delegación Nº 11, y
+`OPERADOR_METROLOGIA` (`metrologia.ver/crear`) para el de la Sección Metrología
+que no es metrólogo. Ambos de alcance UNIDAD; el SQL los asigna solo a quien ya
+tenía un rol operativo en esas unidades. Al dar de alta a alguien nuevo en la
+Delegación o en Metrología hay que asignárselos en Administración › Usuarios.
+
+**Comprobación**: `scripts/verificacion/alcance-por-laboratorio.js` (todos los
+perfiles `demo.*`, incluidos los de dos roles `demo.multi.*`).
 
 ---
 
@@ -330,9 +404,13 @@ Validación: roles **UNIDAD/DESCENDENCIA exigen `unidadId`**; roles **GLOBAL exi
   "esGlobal": false,
   "unidadesVisibles": [ { "id": "uuid", "codigo": "LQA", "nombre": "…", "tipo": "LABORATORIO" } ],
   "jefaturas": [ { "rol": "titular", "unidad": { "id", "codigo", "nombre", "tipo" } } ],
+  "ambitos": { "D11": false, "BPCH": false, "BPCH_CERT": false, "BPCH_ASIGNADO": false, "DCO": false, "SAM": false },
+  "permisosPorAmbito": { "D11": [], "SAM": [], "…": ["…"] },
   "permisos": ["ot.ver", "…"] }
 ```
-Si `esGlobal`, `unidadesVisibles` trae todas las unidades activas.
+Si `esGlobal`, `unidadesVisibles` trae todas las unidades activas. `esGlobal` y
+`unidadesVisibles` son la unión de todas las asignaciones (para describir el
+alcance); el menú decide los ámbitos con `permisosPorAmbito` (§3 bis).
 
 **`GET /me/bandeja`** → `[{ "clave", "titulo", "descripcion", "cantidad", "ruta", "severidad": "info"|"warn"|"alta" }]`. Ítems por perfil (cantidades acotadas a las unidades visibles; `severidad` = `info` cuando `cantidad = 0`):
 
