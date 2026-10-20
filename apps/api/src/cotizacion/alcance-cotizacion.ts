@@ -1,3 +1,4 @@
+import { ForbiddenException, NotFoundException } from "@nestjs/common";
 /**
  * Alcance por laboratorio de las ESCRITURAS sobre cotizaciones (frente L · C2).
  * Regla pura, probada en alcance-cotizacion.spec.ts.
@@ -34,4 +35,35 @@ export function cotizacionEnAlcance(visibles: string[] | null, unidadesCotizacio
   if (visibles === null) return true;
   const propias = dcoId ? [...unidadesCotizacion, dcoId] : unidadesCotizacion;
   return propias.some((u) => visibles.includes(u));
+}
+
+/**
+ * Escritura sobre una cotización existente: 404 si no existe en el tenant y 403
+ * si sus unidades quedan fuera del alcance del permiso de la ruta (o del
+ * indicado). Lo usan el controlador de cotizaciones y el circuito (costeo,
+ * firma, envío). `prisma` = PrismaService, `alcance` = AlcanceService.
+ */
+export async function exigirCotizacionEnAlcance(
+  prisma: any,
+  alcance: { filtroUnidades(req: any, permiso?: string | null): Promise<string[] | null>; arbol(t?: string): Promise<{ porCodigo: Map<string, { id: string }> }> },
+  req: any,
+  id: string,
+  permiso?: string,
+): Promise<{ id: string; codigo: string }> {
+  const tenantId: string | undefined = req?.user?.tenantId;
+  const cot = await prisma.cotizacion.findFirst({
+    where: { id, ...(tenantId ? { tenantId } : {}) },
+    select: { id: true, codigo: true },
+  });
+  if (!cot) throw new NotFoundException("Cotización no encontrada");
+  const visibles = await alcance.filtroUnidades(req, permiso ?? null);
+  if (visibles === null) return cot;
+  const filas: { id: string }[] = await prisma.$queryRawUnsafe(SQL_UNIDADES_COTIZACION, id);
+  const dco = (await alcance.arbol(tenantId)).porCodigo.get("DCO")?.id ?? null;
+  if (!cotizacionEnAlcance(visibles, filas.map((f) => f.id), dco)) {
+    throw new ForbiddenException(
+      `Fuera de su alcance: la cotización ${cot.codigo ?? ""} es de laboratorios que usted no tiene asignados.`.replace(/\s+/g, " "),
+    );
+  }
+  return cot;
 }

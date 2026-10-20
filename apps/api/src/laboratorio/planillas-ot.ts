@@ -380,8 +380,9 @@ export class CostosRealesService {
     const solicitudes = cot
       ? await this.prisma.$queryRawUnsafe<{ horasHombre: number; costoDirecto: number; delLaboratorio: boolean }[]>(
           `SELECT s.horas_hombre::float8 AS "horasHombre", s.costo_directo::float8 AS "costoDirecto",
-                  EXISTS (SELECT 1 FROM cat_familia f JOIN unidad u ON u.id = $3::uuid AND ${FAMILIA_DE_UNIDAD}
-                           WHERE f.id = s.familia_id) AS "delLaboratorio"
+                  (COALESCE(s.unidad_id = $3::uuid, FALSE)
+                   OR EXISTS (SELECT 1 FROM cat_familia f JOIN unidad u ON u.id = $3::uuid AND ${FAMILIA_DE_UNIDAD}
+                               WHERE f.id = s.familia_id)) AS "delLaboratorio"
              FROM solicitud_costeo s
             WHERE s.cotizacion_id = $1::uuid AND s.tenant_id = $2::uuid AND s.deleted_at IS NULL`,
           cot.id,

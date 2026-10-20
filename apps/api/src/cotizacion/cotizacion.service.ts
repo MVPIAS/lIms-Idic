@@ -27,6 +27,9 @@ import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
 import { paginacion } from "../ot/lista-ot";
 import { hoyCl, sumarDias } from "../ot/plazos";
 import { Prisma } from "@prisma/client";
+import { generarNumeroCotizacion } from "./numeracion-cotizacion";
+import { motivoNoAceptable, motivoNoEditable } from "./circuito-cotizacion";
+import { estadoCircuitoDe, leerConfigCircuito } from "./circuito-config";
 
 /** Cada cuánto el proceso periódico pasa a «Vencida» las cotizaciones fuera de validez. */
 const INTERVALO_VENCIMIENTO_MS = Number(process.env.COTIZACION_VENCIMIENTO_MIN ?? 60) * 60_000;
@@ -187,7 +190,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    *   sinOt    · 1 = aceptadas a las que aún no se les generó OT
    *   porVencer· 1 = abiertas que vencen en los próximos 7 días (fecha de Chile)
    */
-  async listar(tenantId?: string, f: { q?: string; search?: string; estado?: string; sinOt?: string; porVencer?: string; page?: string; limit?: string } = {}) {
+  async listar(tenantId?: string, f: { q?: string; search?: string; estado?: string; sinOt?: string; porVencer?: string; firma?: string; enviada?: string; page?: string; limit?: string } = {}) {
     await this.vencerFueraDeValidez(tenantId ?? null);
     const { page, limit, skip } = paginacion(f.page, f.limit);
     const base: Prisma.CotizacionWhereInput = tenantId ? { tenantId } : {};
@@ -209,6 +212,19 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       and.push({ estado: "aceptada", id: { notIn: conOt.map((o) => o.cotizacionId as string) } });
     }
     if (f.porVencer === "1") and.push(filtroPorVencer());
+    // Circuito de firma y envío (columnas fuera del modelo Prisma): ?firma=pendiente|firmada|devuelta|sin_firma, ?enviada=0|1.
+    if (f.firma || f.enviada) {
+      const ids: { id: string }[] = await this.prisma.$queryRawUnsafe(
+        `SELECT id FROM cotizacion
+          WHERE ($1::uuid IS NULL OR tenant_id = $1::uuid)
+            AND ($2::text IS NULL OR ($2 = 'sin_firma' AND firma_estado IS NULL AND circuito = 'r1') OR firma_estado = $2)
+            AND ($3::text IS NULL OR ($3 = '1') = (enviada_at IS NOT NULL))`,
+        tenantId ?? null,
+        f.firma && ["pendiente", "firmada", "devuelta", "sin_firma"].includes(f.firma) ? f.firma : null,
+        f.enviada === "1" || f.enviada === "0" ? f.enviada : null,
+      );
+      and.push({ id: { in: ids.map((x) => x.id) } });
+    }
     const where: Prisma.CotizacionWhereInput = { AND: and };
 
     const [cots, total, porEstado, nPorVencer] = await Promise.all([
@@ -235,12 +251,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         })
       : [];
     const porCot = new Map(ots.map((o) => [o.cotizacionId, o]));
+    const circuito = await estadoCircuitoDe(this.prisma, ids);
     const conteos: Record<string, number> = {};
     for (const g of porEstado) conteos[g.estado] = g._count._all;
     // No es un estado: el chip «Por vencer (7 días)» de la lista.
     conteos.porVencer = nPorVencer;
     return {
-      data: cots.map((c) => ({ ...c, ot: porCot.get(c.id) ?? null })),
+      data: cots.map((c) => ({ ...c, ...(circuito.get(c.id) ?? {}), ot: porCot.get(c.id) ?? null })),
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
       conteos,
     };
@@ -262,7 +279,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       where: { cotizacionId: id, tenantId: cot.tenantId },
       select: { id: true, codigo: true, estado: true, opiPendiente: true, conCobro: true, origenTrabajo: true },
     });
-    return { ...cot, ot };
+    const circuito = (await estadoCircuitoDe(this.prisma, [id])).get(id);
+    return { ...cot, ...(circuito ?? {}), ot };
   }
 
   // --------------------------------------------------------------------------
@@ -314,6 +332,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         ejercitoMesesOctDic: await this.numeroParametro(t, "ejercito_meses_oct_dic", MESES_EJERCITO_OCT_DIC_DEF),
       },
       condicionesMax: 2000,
+      // Circuito de la cotización (V°B°, firma): la UI decide qué botones ofrece.
+      circuito: await leerConfigCircuito(this.prisma, t),
     };
   }
 
@@ -460,7 +480,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
     const lineas = await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar);
     const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0));
-    const codigo = await this.generarCodigo();
+    // Número real (EP-00 2.1 · «2026-14324»), correlativo atómico por tenant.
+    const codigo = await generarNumeroCotizacion(this.prisma, tenantIdFromJWT, fechaEmision);
     // Ejecutivo = usuario autenticado, solo si existe (FK a usuario).
     const ejecutivo = usuarioId
       ? await this.prisma.usuario.findFirst({ where: { id: usuarioId }, select: { id: true } })
@@ -518,6 +539,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (!tocaContenido) {
       return this.prisma.cotizacion.update({ where: { id }, data: { ...(estado ? { estado } : {}) } });
     }
+    const noEditable = motivoNoEditable((actual as any).firmaEstado ?? null);
+    if (noEditable && actual.estado === ESTADO_ABIERTA) throw new ConflictException(noEditable);
     if (actual.estado !== ESTADO_ABIERTA) {
       throw new ConflictException(
         `Solo se puede editar una cotización Abierta (esta está '${actual.estado}'${["borrador", "enviada", "rechazada", "expirada"].includes(actual.estado) ? ", histórica de solo lectura" : ""}).`,
@@ -628,6 +651,12 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const vigencia = puedeRegistrarAceptacion(cot, hoyEnChile());
     if (!vigencia.ok) throw new ConflictException(vigencia.mensaje);
     validarTransicion("cotizacion", cot.estado, "aceptada");
+    // Circuito R1: la aceptación exige la cotización firmada por el Jefe DCO (configurable).
+    const noAceptable = motivoNoAceptable(
+      { codigo: cot.codigo, estado: cot.estado, circuito: (cot as any).circuito ?? null, firmaEstado: (cot as any).firmaEstado ?? null, lineas: cot.lineas.length },
+      await leerConfigCircuito(this.prisma, cot.tenantId),
+    );
+    if (noAceptable) throw new ConflictException(noAceptable);
     if (cot.estado === ESTADO_ABIERTA && !doc.tipo)
       throw new BadRequestException("Indique el documento de aceptación (tipo: OPI_RESOLUCION, OC, CORREO, PAGO_ADELANTADO o DISPOSICION_DIRECTOR).");
     if ((doc.tipo === "OPI_RESOLUCION" || doc.tipo === "OC") && !doc.numero?.trim())
@@ -744,18 +773,4 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  private async generarCodigo(): Promise<string> {
-    const año = new Date().getFullYear();
-    const ultima = await this.prisma.cotizacion.findFirst({
-      where: { codigo: { startsWith: `COT-${año}-` } },
-      orderBy: { codigo: "desc" },
-      select: { codigo: true },
-    });
-    let n = 1;
-    if (ultima) {
-      const partes = ultima.codigo.split("-");
-      n = parseInt(partes[2] ?? "0", 10) + 1;
-    }
-    return `COT-${año}-${String(n).padStart(4, "0")}`;
-  }
 }
