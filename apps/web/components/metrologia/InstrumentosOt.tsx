@@ -15,6 +15,7 @@ import { fechaHora, fechaDia } from "@/lib/format";
 import { toast, confirmar } from "@/components/ui/feedback";
 import { MEDIOS_ENTREGA, textoMedio } from "@/lib/documentos";
 import Modal from "@/components/documentos/Modal";
+import css from "./ficha.module.css";
 import {
   ESTADO_CALIBRACION, ESTADO_INSTRUMENTO, ESTADOS_FISICOS, SENTIDOS, ahoraLocal, imprimirActaDevolucion, imprimirEtiqueta, imprimirRecepcion,
 } from "@/lib/metrologiaOt";
@@ -386,7 +387,7 @@ function DialogoRecepcion({ item, laboratorio, ocupado, onCerrar, onGuardar }: {
           <button type="button" className="btn outline sm" onClick={() => setAcc([...acc, { tipo: "", marca: "", modelo: "", serie: "", detalle: "" }])}>＋ Accesorio</button>
         </div>
         {acc.map((a, k) => (
-          <div key={k} style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr 1fr 1.4fr auto", gap: 6, marginTop: 6 }}>
+          <div key={k} className={css.accesorio}>
             {(["tipo", "marca", "modelo", "serie", "detalle"] as const).map((c) => (
               <input key={c} aria-label={`Accesorio ${k + 1} · ${c}`} placeholder={c === "tipo" ? "Tipo (cable, amplificador…)" : c === "detalle" ? "Detalle (largo, estado)" : c[0].toUpperCase() + c.slice(1)}
                 value={a[c]} onChange={(e) => setAcc(acc.map((x, j) => (j === k ? { ...x, [c]: e.target.value } : x)))} />

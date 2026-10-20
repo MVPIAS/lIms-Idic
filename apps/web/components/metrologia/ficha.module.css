@@ -22,8 +22,9 @@
 .paso :global(.t) { font-size: 12.5px; font-weight: 600; margin-top: 2px; color: var(--ink); }
 .pasoHecho { background: #ecf8f1; }
 .pasoHecho :global(.n)::after { content: " ✓"; color: #1d7a4b; }
-.pasoActual { background: #e2f3f5; box-shadow: inset 0 -3px 0 var(--accent); }
-.pasoActual :global(.t) { color: var(--primary); }
+.pasoActual { background: #d7eef1; }
+.pasoActual :global(.t) { color: var(--primary); font-weight: 700; }
+.pasoActual :global(.n) { color: var(--primary-2); }
 
 .pestanas { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-bottom: 14px; }
 .pestana { border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; font-weight: 600; font-size: 12.5px; padding: 9px 13px; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; }
@@ -62,3 +63,5 @@
   .circuito { grid-template-columns: 1fr; }
   .paso { flex-basis: 45%; }
 }
+
+.accesorio { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) auto; gap: 6px; margin-top: 6px; }

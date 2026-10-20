@@ -251,3 +251,67 @@ que la matriz le asigna), `metrologia.crear` (registrar y enviar),
 Ver la lista de preguntas abiertas del informe del frente H (respuesta del
 15-10). Además: LNF (G3, G4, G6, G7, G10), instrucciones ITME01/ITE03 y alcances
 LC 022, LC 023, LC 108 y LC 155.
+
+## 7. Calibración ligada a la OT (entrega R1, EP-04)
+
+Especificación: `09_gestion/especificacion_procesos/EP-04_Metrologia.md`. SQL:
+`packages/db/align_metrologia_ot.sql`. Reglas puras: `apps/api/src/metrologia/metrologia-ot.reglas.ts`
+(pruebas en `metrologia-ot.reglas.spec.ts`). Recorrido: `scripts/verificacion/r1-r1a.js`.
+
+### 7.1 Instrumentos de la OT (`met_ot_instrumento`)
+Un ítem por instrumento. Ciclo: `por_recibir → recibido | no_apto → devuelto`; `anulado` (con
+motivo) solo antes de recibir.
+
+| Paso (EP-04) | Pantalla y botón | Quién (basta un permiso, con alcance en el laboratorio de la OT) | Regla |
+|---|---|---|---|
+| P0.2/P0.3 Registrar | OT › Instrumentos › «＋ Registrar instrumento» o «Cargar desde la cotización» | `ot.crear`, `ot.asignar` o `metrologia.crear` | Solo en OT de LMT, LMTE, LNF o LCAD. Desde la cotización: un ítem por unidad de cada línea, sin duplicar. IT de otro laboratorio → 400. Enlace opcional al equipo del laboratorio dueño (código del maestro de Equipos) |
+| P1.3 Programar | «Asignar → metrólogo» | `ot.asignar` | Solo metrólogos del laboratorio de la OT y, si el registro de firmas declara la magnitud de la IT, habilitados para ella. Fecha prevista opcional |
+| P2.1/P2.2 Recibir | «Recibir →» (registro de custodia) | `metrologia.crear` o `muestra.crear` | Fecha-hora ≥ fecha de la OT (R15 L2, **ahora bloquea**) y no futura; entregado por, estado físico (observación obligatoria si no está en buen estado), ubicación, accesorios; LNF: sentido, acondicionamiento y temperatura. «¿Se puede calibrar? No» exige motivo → `no_apto`. La OT pasa a «en análisis». Etiqueta `OT-AAAA-NNNN-Ikk` imprimible |
+| P3.1 Calibrar | «Calibrar →» (abre la hoja de control) | `metrologia.crear` | **No hay calibración suelta**: `POST /metrologia/calibraciones` exige `otInstrumentoId` de un ítem recibido y calibrable; una calibración vigente por ítem. Hereda OT, cliente, fechas, instrumento e IT, que mandan sobre lo escrito. La IT la fija el ítem (la cambia quien registra antes de recibir) |
+| P8.1 Entregar el certificado | «Registrar entrega →» (OT o ficha) | `certificado.entregar` o `metrologia.crear` | Solo emitido, una vez, fecha ≥ emisión y no futura (AAAA-MM-DD = día de Chile). Queda en la bitácora |
+| P8.2 Devolver | «Devolver instrumento →» y «Acta» | `metrologia.crear` o `certificado.entregar` | El calibrable se devuelve con su certificado emitido; el no apto, sin él. Una vez |
+| P9.1 Cierre técnico | «Cerrar técnicamente → Comercial» | `ot.asignar` | Todos los ítems con certificado emitido o no aptos → OT `finalizada` |
+
+Rutas: `GET /ot/:id/metrologia`, `POST /ot/:id/instrumentos[/desde-cotizacion]`,
+`PUT /ot/:id/instrumentos/:item`, `POST …/:item/{anular,asignar,recepcion,devolucion}`,
+`GET …/:item/metrologos`, `POST /ot/:id/calibraciones/:cal/entregar`,
+`POST /ot/:id/metrologia/cierre-tecnico`, `GET /metrologia/instrumentos` (por calibrar).
+Van bajo `/ot` para que Comercial y Planificación trabajen sus OT sin pertenecer a SAM.
+
+### 7.2 Cierre y factura
+El cierre (`OtCierreService`, `faltantesParaCerrar`) cuenta cada certificado de calibración
+vigente como un documento: emitido y entregado = oficial y entregado; en revisión o firma =
+en firma; borrador = en elaboración. Además exige: instrumentos recibidos, los recibidos con
+calibración y, si el parámetro `metrologia.cierre_exige_devolucion` (Administración ›
+Parámetros, por defecto `si`) lo pide, todos devueltos. Las OT de calibración no tienen
+resultados de laboratorio. Con cobro, el cierre crea la factura pendiente como en cualquier
+OT. La reemisión tras el cierre conserva OT e ítem y no reabre la OT.
+
+### 7.3 Ruta de la OT de Metrología
+Apertura → Programación → Recepción del instrumento → Toma de datos y cálculo → Revisión
+técnica → Firma y emisión → **Entrega del certificado y devolución** (ya no bloqueada) →
+Cierre → Factura → Pago. El «Siguiente paso» lleva a la pestaña Instrumentos o a la ficha.
+
+### 7.4 Ficha de calibración (`/metrologia/[id]`)
+Chip de estado, barra de 6 pasos (Recepción · Toma de datos · Cálculo GUM · Revisión Jefe Lab.
+· Firma y emisión · Entrega, calculada en el servidor), pestañas 1–6, circuito de 3 firmas con
+sus botones, certificado en pantalla (`GET …/html?completo=1`, el mismo documento que el PDF,
+en un iframe sin scripts) y bitácora. Devolver lleva la barra a «Toma de datos».
+
+### 7.5 Numeración por laboratorio
+`met_numeracion` tiene formato (`{P}` prefijo, `{N}` correlativo, `{AA}`/`{AAAA}` año), ceros y
+correlativo anual. Sembrado: HT-, ME- (ITME01), TF- (ITE03) y LCPNF-NNN.AA anual (LNF, último
+010.26). Se editan en Maestros › Numeración; el prefijo de un proceso, con
+`PUT /metrologia/procesos/:codigo/prefijo` (`metrologia.config`). **Por confirmar con el IDIC**:
+últimos números reales de HT-, ME- y TF-, qué proceso usa HT- (ITT04 no se ha entregado) y si
+T- es común a LMT y LMTE.
+
+### 7.6 Formulario por puntos
+La tolerancia del fabricante queda como dato **informativo** («Dentro / Fuera» en gris, sin
+«Cumple / No cumple»): el LMT no evalúa conformidad (pregunta 14 de EP-04).
+
+### 7.7 Pendiente (fuera de R1 o a la espera del IDIC)
+Informe técnico del no calibrable (EP04-12, R3: hoy el ítem no apto se cierra con su motivo y
+devolución), servicio externo (EP04-13), envío del certificado por correo, actualización del
+equipo del laboratorio dueño (EP04-30), códigos EN de la lista de precios en el catálogo
+(EP04-01), Mi bandeja de Metrología (EP04-39) y el desglose uᵢ por punto de los motores (EP04-19).

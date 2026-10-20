@@ -168,12 +168,19 @@ export default function FichaCalibracionPage() {
 
       <div className={s.pestanas} role="tablist" aria-label="Secciones de la ficha">
         {PESTANAS.map(([k, l], i) => (
-          <button key={k} role="tab" aria-selected={tab === k} className={`${s.pestana} ${tab === k ? s.pestanaActiva : ""}`} onClick={() => setTab(k)}>
+          <button key={k} id={`tab-${k}`} role="tab" aria-selected={tab === k} aria-controls="panel-ficha" tabIndex={tab === k ? 0 : -1}
+            className={`${s.pestana} ${tab === k ? s.pestanaActiva : ""}`} onClick={() => setTab(k)}
+            onKeyDown={(e) => {
+              if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+              const sig = PESTANAS[(i + (e.key === "ArrowRight" ? 1 : PESTANAS.length - 1)) % PESTANAS.length][0];
+              setTab(sig); document.getElementById(`tab-${sig}`)?.focus();
+            }}>
             <span className="num">{i + 1}</span>{l}
           </button>
         ))}
       </div>
 
+      <div id="panel-ficha" role="tabpanel" aria-labelledby={`tab-${tab}`}>
       {tab === "control" && (
         <div>
           <section className={s.bloque}><h2>Identificación de la orden</h2><dl className={s.datos}>
@@ -352,6 +359,8 @@ export default function FichaCalibracionPage() {
             ) : <p style={{ margin: 0, fontSize: 12.5 }}>{anterior.motivo ?? "Sin calibración anterior en el LIMS."} Eₙ no se calcula.</p>}
         </section>
       )}
+
+      </div>
 
       <section className={s.bloque}>
         <h2>Bitácora</h2>
