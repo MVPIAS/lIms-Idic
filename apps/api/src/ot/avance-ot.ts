@@ -123,6 +123,8 @@ export interface HechosOt {
   calibraciones?: CalibracionAvance[];
   /** Órdenes internas emitidas desde la OT (sin las anuladas). */
   ordenesInternas?: OrdenInternaAvance[];
+  /** Documentos por muestra, producto o laboratorio: lo que falta cubrir para cerrar. */
+  coberturaPendiente?: string[];
   internacion?: {
     id: string;
     numero: string;
@@ -329,6 +331,7 @@ function etapaCierre(h: HechosOt): { etapa: Etapa; paso: Omit<SiguientePaso, "et
         estado: h.estado,
         documentos: h.documentos.map((d) => ({ numero: d.numero, estado: d.estado, entregadoAt: d.entregadoAt })),
         resultadosNoAprobados: h.resultados.total - h.resultados.aprobados,
+        coberturaPendiente: h.coberturaPendiente,
       });
   return {
     etapa: etapa("cierre", "Cierre de la OT", cerrada ? "hecho" : "pendiente", cerrada ? "Cerrada" : faltan.length ? null : "Lista para cerrar"),

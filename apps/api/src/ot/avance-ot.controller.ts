@@ -7,6 +7,7 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { pasosActuales } from "../plantilla-render/reglas-emision";
 import { calcularAvance, puedeActuar, type DocumentoAvance, type HechosOt } from "./avance-ot";
+import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 
 /** Laboratorios de la Sección Metrología (los mismos que usa el módulo de Metrología). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -158,6 +159,7 @@ export class AvanceOtService {
       documentos,
       factura: factura ? { numero: factura.numero ?? "(sin número)", estado: factura.estado } : null,
       calibraciones,
+      coberturaPendiente: await hechosCobertura(this.prisma, ot.id, ot.tenantId).then((x) => x.pendientes).catch(() => []),
       ordenesInternas: ordenesInternas.map((o: any) => ({
         id: o.id,
         numero: o.numero,
