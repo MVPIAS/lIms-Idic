@@ -18,6 +18,8 @@ const MAX_BYTES = 2 * 1024 * 1024;
 
 type Foto = {
   id: string;
+  /** anexo | recepcion (registro fotográfico de la recepción) | termograma */
+  tipo?: string;
   nombre: string | null;
   bytes: number;
   pie: string | null;
@@ -34,7 +36,7 @@ type Foto = {
 export type EnsayoOt = { resultadoId: string; muestraCodigo: string; ensayo: string | null; punto: string | null };
 
 /** Reduce la foto a LADO_MAX px (JPEG 85 %) si es más grande; si no, la deja igual. */
-async function prepararFoto(archivo: File): Promise<Blob> {
+export async function prepararFoto(archivo: File): Promise<Blob> {
   if (!/^image\/(png|jpeg)$/.test(archivo.type)) throw new Error("Solo se aceptan fotos PNG o JPEG.");
   const bitmap = await createImageBitmap(archivo).catch(() => null);
   if (!bitmap) throw new Error("No se pudo leer la imagen.");
@@ -50,7 +52,7 @@ async function prepararFoto(archivo: File): Promise<Blob> {
   return blob;
 }
 
-async function subir(otId: string, blob: Blob, nombre: string, campos: Record<string, string>) {
+export async function subir(otId: string, blob: Blob, nombre: string, campos: Record<string, string>) {
   const form = new FormData();
   form.append("archivo", blob, nombre);
   for (const [k, v] of Object.entries(campos)) if (v) form.append(k, v);
@@ -62,7 +64,7 @@ async function subir(otId: string, blob: Blob, nombre: string, campos: Record<st
  * entra en pantalla (el listado ya no trae el contenido de las fotos) y se
  * libera al salir de la pantalla de informes.
  */
-function ImagenFoto({ url, alt }: { url: string; alt: string }) {
+export function ImagenFoto({ url, alt }: { url: string; alt: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [src, setSrc] = useState<string | null>(null);
   const [fallo, setFallo] = useState(false);
@@ -130,6 +132,7 @@ export default function FotosInforme({
   const [subiendo, setSubiendo] = useState(false);
   const [pie, setPie] = useState("");
   const [resultadoId, setResultadoId] = useState("");
+  const [tipo, setTipo] = useState<"anexo" | "termograma">("anexo");
   const archivoRef = useRef<HTMLInputElement>(null);
 
   const cargar = useCallback(async () => {
@@ -155,8 +158,8 @@ export default function FotosInforme({
     setSubiendo(true);
     try {
       const blob = await prepararFoto(archivo);
-      await subir(otId, blob, archivo.name, { pie: pie.trim(), resultadoId });
-      toast.ok("Foto adjuntada a la OT.");
+      await subir(otId, blob, archivo.name, { pie: pie.trim(), resultadoId, tipo });
+      toast.ok(tipo === "termograma" ? "Termograma adjuntado a la OT." : "Foto adjuntada a la OT.");
       setPie("");
       setResultadoId("");
       if (archivoRef.current) archivoRef.current.value = "";
@@ -219,6 +222,13 @@ export default function FotosInforme({
             </select>
           </div>
           <div className="field">
+            <label htmlFor="foto-tipo">Tipo</label>
+            <select id="foto-tipo" value={tipo} onChange={(e) => setTipo(e.target.value as "anexo" | "termograma")} disabled={subiendo}>
+              <option value="anexo">Foto del anexo fotográfico</option>
+              <option value="termograma">Termograma u otro registro del instrumento</option>
+            </select>
+          </div>
+          <div className="field">
             <label htmlFor="foto-pie">Pie de foto</label>
             <input id="foto-pie" value={pie} maxLength={500} onChange={(e) => setPie(e.target.value)} disabled={subiendo}
               placeholder="Qué muestra la foto" />
@@ -242,6 +252,11 @@ export default function FotosInforme({
           <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
             {fotos.map((f, i) => (
               <li key={f.id} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 8, background: f.enInforme ? "#fff" : "#f6f8fa" }}>
+                {f.tipo && f.tipo !== "anexo" && (
+                  <span className={`pill ${f.tipo === "termograma" ? "teal" : "blue"}`} style={{ marginBottom: 4, display: "inline-block" }}>
+                    {f.tipo === "termograma" ? "Termograma" : `Recepción${f.muestraCodigo ? ` · ${f.muestraCodigo}` : ""}`}
+                  </span>
+                )}
                 <ImagenFoto url={f.url} alt={f.pie || `Foto ${i + 1} de la OT`} />
                 <div className="field" style={{ marginTop: 6 }}>
                   <label htmlFor={`pie-${f.id}`}>Pie</label>
