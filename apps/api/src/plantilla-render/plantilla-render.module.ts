@@ -54,7 +54,27 @@ const PreviewSchema = OtPlantilla.extend({
   /** cumplimiento (con requisito y veredicto) | solo_resultados. Sin valor: el sugerido. */
   modalidad: z.enum(["cumplimiento", "solo_resultados"]).optional(),
   datosInforme: DatosInformeSchema.optional(),
+  cobertura: z
+    .object({
+      cobertura: z.enum(["ot", "muestra", "producto", "laboratorio"]),
+      muestraIds: z.array(z.string().uuid()).max(200).optional(),
+      unidadId: z.string().uuid().nullable().optional(),
+    })
+    .strict()
+    .optional(),
 });
+/** «No emitido» de una muestra, producto o laboratorio (docs/FLUJO_DOCUMENTOS_POR_OT.md). */
+const NoEmitidoSchema = OtPlantilla.extend({
+  motivo: z.string().trim().min(5, "Indique por qué no se emite (mínimo 5 caracteres)").max(1000),
+  tipoDocumento: z.enum(TIPOS_DOCUMENTO).optional(),
+  cobertura: z
+    .object({
+      cobertura: z.enum(["muestra", "producto", "laboratorio"]),
+      muestraIds: z.array(z.string().uuid()).max(200).optional(),
+      unidadId: z.string().uuid().nullable().optional(),
+    })
+    .strict(),
+}).strict();
 /**
  * `codigo` YA NO se acepta: el correlativo lo genera el sistema
  * (`PlantillaRenderService.siguienteNumero`, RF F02.1). Antes lo aportaba el
@@ -88,8 +108,17 @@ export class PlantillaRenderController {
   }
 
   /** La OT debe estar dentro del alcance por laboratorio de quien emite. */
-  private async exigirAlcanceOt(otId: string, req: any) {
+  private async exigirAlcanceOt(otId: string, req: any, cobertura?: { cobertura?: string; unidadId?: string | null } | null) {
     const ctx = await this.svc.contexto(otId, req?.user?.tenantId);
+    // Documento de UN laboratorio (Alimentos: LQA, LMB, LES): basta con tener ese
+    // laboratorio en el alcance; su cobertura se valida después contra la OT.
+    if (
+      cobertura?.cobertura === "laboratorio" &&
+      cobertura.unidadId &&
+      (await this.alcance.puedeVerUnidad(req, cobertura.unidadId)) &&
+      (await this.svc.laboratorioTrabajaEnOt(otId, req?.user?.tenantId, cobertura.unidadId))
+    )
+      return;
     await this.alcance.exigirUnidad(req, ctx.ot.unidadPrincipal, `la OT ${ctx.ot.codigo}`);
   }
 
@@ -100,9 +129,9 @@ export class PlantillaRenderController {
   @Post("condiciones")
   @RequierePermiso("certificado.emitir")
   async condiciones(@Body() body: unknown, @Req() req: any) {
-    const { otId, plantillaId, tipoDocumento } = EmitirSchema.parse(body);
-    await this.exigirAlcanceOt(otId, req);
-    return this.svc.condicionesEmision(otId, plantillaId, req?.user?.tenantId, { tipoDocumento });
+    const { otId, plantillaId, tipoDocumento, cobertura } = EmitirSchema.parse(body);
+    await this.exigirAlcanceOt(otId, req, cobertura);
+    return this.svc.condicionesEmision(otId, plantillaId, req?.user?.tenantId, { tipoDocumento, cobertura });
   }
 
   /**
@@ -134,25 +163,50 @@ export class PlantillaRenderController {
   @Post("previsualizar")
   @RequierePermiso("certificado.emitir")
   async previsualizar(@Body() body: unknown, @Req() req: any) {
-    const { otId, plantillaId, modalidad, datosInforme } = PreviewSchema.parse(body);
+    const { otId, plantillaId, modalidad, datosInforme, cobertura } = PreviewSchema.parse(body);
     // Antes no comprobaba el alcance: cualquier emisor previsualizaba OTs de otro laboratorio.
-    await this.exigirAlcanceOt(otId, req);
-    return this.svc.previsualizar(otId, plantillaId, req?.user?.tenantId, { modalidad, datos: datosInforme });
+    await this.exigirAlcanceOt(otId, req, cobertura);
+    return this.svc.previsualizar(otId, plantillaId, req?.user?.tenantId, { modalidad, datos: datosInforme, cobertura });
   }
 
   /** Emite el informe/certificado: rellena, sella con HASH, numera y registra Certificado. */
   @Post("emitir")
   @RequierePermiso("certificado.emitir")
   async emitir(@Body() body: unknown, @Req() req: any) {
-    const { otId, plantillaId, tipoDocumento, modalidad, datosInforme } = EmitirSchema.parse(body);
-    await this.exigirAlcanceOt(otId, req);
+    const { otId, plantillaId, tipoDocumento, modalidad, datosInforme, cobertura } = EmitirSchema.parse(body);
+    await this.exigirAlcanceOt(otId, req, cobertura);
     // El Certificado se crea con el tenant del usuario autenticado (no DEV_TENANT),
     // EN FIRMA: será oficial cuando firme el último paso de la matriz.
     return this.svc.emitir(otId, plantillaId, req?.user?.tenantId, req?.user?.sub ?? req?.user?.id, {
       tipoDocumento,
       modalidad,
       datosInforme,
+      cobertura,
     });
+  }
+
+  /**
+   * Cobertura de los documentos de la OT: por muestra (con su producto) y por
+   * laboratorio, sus resultados aprobados, sus documentos y lo que falta cubrir.
+   */
+  @Get("ot/:otId/cobertura")
+  @RequierePermiso("certificado.emitir")
+  async cobertura(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    await this.exigirAlcanceOt(otId, req);
+    return this.svc.coberturaOt(otId, req?.user?.tenantId);
+  }
+
+  /**
+   * Registra que el documento de una muestra, producto o laboratorio NO se emite
+   * (LPN: «la muestra no forma película», EP-01 5.1): reserva su número y lo deja
+   * anulado con el motivo.
+   */
+  @Post("no-emitido")
+  @RequierePermiso("certificado.emitir")
+  async noEmitido(@Body() body: unknown, @Req() req: any) {
+    const { otId, plantillaId, motivo, tipoDocumento, cobertura } = NoEmitidoSchema.parse(body);
+    await this.exigirAlcanceOt(otId, req, cobertura);
+    return this.svc.registrarNoEmitido(otId, plantillaId, req?.user?.tenantId, req?.user?.sub ?? null, { motivo, tipoDocumento, cobertura });
   }
 
   /**

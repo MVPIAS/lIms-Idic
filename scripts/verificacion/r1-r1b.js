@@ -295,6 +295,140 @@ async function seccionOrdenesInternas(C) {
 
 
 
+const UD = {
+  planif: "demo.planificacion",
+  recepcion: "demo.recepcion",
+  jefe: "demo.lqc.jefe",
+  a1: "demo.lqc.analista1",
+  rev: "demo.lqc.revisor",
+  lpnJefe: "demo.lpn.jefe",
+};
+const FIRMANTES = [
+  "demo.lqc.jefe", "demo.lqc.revisor", "demo.lqc.analista1", "demo.lqc.analista2", "demo.dqo.jefe", "demo.director",
+  "demo.calidad", "demo.squ.jefe", "demo.dco.jefe",
+];
+const idDe = async (u) => JSON.parse(Buffer.from((await login(u)).token.split(".")[1], "base64url").toString("utf8")).sub;
+
+/** Firma un documento siguiendo la matriz (cada paso, con un responsable de prueba). */
+async function firmarTodo(docId) {
+  const porId = {};
+  for (const u of FIRMANTES) {
+    try { porId[await idDe(u)] = u; } catch { /* perfil opcional */ }
+  }
+  for (let vuelta = 0; vuelta < 8; vuelta++) {
+    const circ = await ok(UD.jefe, "GET", `/informes/${docId}/circuito`);
+    const estado = circ.documento?.estado ?? circ.estado;
+    if (estado === "oficial") return;
+    const pasosF = circ.pasos ?? circ.firmas ?? [];
+    const pend = pasosF.filter((p) => p.estado === "pendiente").sort((a, b) => a.orden - b.orden);
+    afirmar(pend.length, `documento ${estado} sin pasos pendientes`);
+    const actual = pend.filter((p) => p.orden === pend[0].orden);
+    for (const p of actual) {
+      const quien = (p.responsables ?? []).map((r) => porId[r.usuarioId]).find(Boolean);
+      afirmar(quien, `paso ${p.orden}: sin responsable de prueba (${(p.responsables ?? []).map((r) => r.nombre).join(", ")})`);
+      await ok(quien, "POST", `/informes/${docId}/firmar`, {});
+    }
+  }
+  throw new Error("el documento no quedó oficial");
+}
+
+async function seccionDocumentos(C) {
+  await paso("DOC · preparar: OT de LQC con dos muestras y sus resultados aprobados", async () => {
+    const buscar = async (codigo) => lista(await ok(UD.jefe, "GET", `/cat/metodos?search=${encodeURIComponent(codigo)}&limit=50`)).find((x) => x.codigo === codigo);
+    C.mPh = await buscar("251");
+    afirmar(C.mPh, "método pH (251) no encontrado");
+    const labs = await ok(UD.planif, "GET", "/ot/laboratorios");
+    C.lqcU = labs.find((u) => u.codigo === "LQC");
+    C.lpnU = labs.find((u) => u.codigo === "LPN");
+    const otLqc = lista(await ok(UD.planif, "GET", "/ot?unidad=LQC&limit=20")).find((o) => o.clienteId || o.cliente?.id);
+    const ot = await ok(UD.planif, "POST", "/ot", { clienteId: otLqc.clienteId ?? otLqc.cliente.id, unidadPrincipalId: C.lqcU.id, notas: "Varios documentos por OT (r1b)" });
+    C.docOt = ot;
+    const r = await ok(UD.recepcion, "POST", `/flujo/ot/${ot.id}/muestras`, {
+      muestras: [{ nombre: "Agua pozo A (r1b)", metodoIds: [C.mPh.id] }, { nombre: "Agua pozo B (r1b)", metodoIds: [C.mPh.id] }],
+    });
+    afirmar(r.muestras.length === 2, `muestras ${r.muestras.length}`);
+    C.m1 = r.muestras[0];
+    C.m2 = r.muestras[1];
+    const rs = (await ok(UD.jefe, "GET", `/flujo/ot/${ot.id}/resultados`)).resultados;
+    for (const x of rs) {
+      if (!(x.limiteInf && x.limiteSup)) await ok(UD.a1, "PATCH", `/flujo/resultado/${x.id}/especificacion`, { limiteInf: "6,5", limiteSup: "8,5" });
+      await ok(UD.a1, "POST", `/flujo/resultado/${x.id}/valor`, { valor: "7,1" });
+    }
+    await ok(UD.rev, "POST", `/resultados/ot/${ot.id}/revisar`, {});
+    await ok(UD.jefe, "POST", `/resultados/ot/${ot.id}/aprobar`, {});
+    const pl = lista(await ok(UD.jefe, "GET", "/plantillas?limit=200"));
+    C.plantilla = pl.find((p) => p.repid === "BolAn") ?? pl.find((p) => p.tipo === "BOLETIN" && p.activo !== false);
+    afirmar(C.plantilla, "no hay plantilla de boletín");
+    return `${ot.codigo} · ${C.m1.codigo}, ${C.m2.codigo} · ${rs.length} resultado(s) aprobados`;
+  });
+
+  await paso("DOC · cobertura: por muestra exige UNA muestra; la propuesta y el número salen de LQC", async () => {
+    const base = { otId: C.docOt.id, plantillaId: C.plantilla.id };
+    const mal = await ok(UD.jefe, "POST", "/informes/condiciones", { ...base, cobertura: { cobertura: "muestra", muestraIds: [C.m1.id, C.m2.id] } });
+    afirmar(!mal.puedeEmitir && mal.faltantes.some((f) => /exactamente una muestra/.test(f)), `faltantes ${mal.faltantes}`);
+    const c = await ok(UD.jefe, "POST", "/informes/condiciones", { ...base, cobertura: { cobertura: "muestra", muestraIds: [C.m1.id] } });
+    afirmar(c.puedeEmitir, `no se puede emitir: ${c.faltantes.join(" ")}`);
+    afirmar(/^IE LQC N° \d{3}\/\d{4}$/.test(c.numeracion?.numero ?? ""), `número propuesto ${c.numeracion?.numero}`);
+    afirmar(c.cobertura?.etiqueta === `Muestra ${C.m1.codigo}`, `etiqueta ${c.cobertura?.etiqueta}`);
+    const cob = await ok(UD.jefe, "GET", `/informes/ot/${C.docOt.id}/cobertura`);
+    afirmar(cob.muestras.length === 2 && cob.muestras.every((m) => m.aprobados === m.resultados && m.resultados > 0), JSON.stringify(cob.muestras).slice(0, 200));
+    await exigir(403, UD.lpnJefe, "GET", `/informes/ot/${C.docOt.id}/cobertura`);
+    // Un laboratorio que no trabaja en la OT no se cuela pidiendo «por laboratorio».
+    await exigir(403, UD.lpnJefe, "POST", "/informes/condiciones", { ...base, cobertura: { cobertura: "laboratorio", unidadId: C.lpnU.id } });
+    return `propuesto ${c.numeracion.numero} · ${c.cobertura.etiqueta}`;
+  });
+
+  await paso("DOC · emitir el informe de la muestra 1: el analista no (403); dos de la misma muestra o uno de toda la OT, no (409)", async () => {
+    const cuerpo = { otId: C.docOt.id, plantillaId: C.plantilla.id, cobertura: { cobertura: "muestra", muestraIds: [C.m1.id] } };
+    await exigir(403, UD.a1, "POST", "/informes/emitir", cuerpo);
+    const r = await ok(UD.jefe, "POST", "/informes/emitir", cuerpo);
+    C.doc1 = r.certificado;
+    afirmar(/^IE LQC N° \d{3}\/\d{4}$/.test(r.numero) && r.estado === "en_firma", `número ${r.numero} estado ${r.estado}`);
+    afirmar(r.html.includes(C.m1.codigo) && !r.html.includes(C.m2.codigo), "el documento de la muestra 1 imprime otra muestra (o no imprime la suya)");
+    await rechazo(409, /Ya existe el documento/, UD.jefe, "POST", "/informes/emitir", cuerpo);
+    await rechazo(409, /Ya existe el documento/, UD.jefe, "POST", "/informes/emitir", { otId: C.docOt.id, plantillaId: C.plantilla.id });
+    const docs = lista(await ok(UD.jefe, "GET", `/informes/documentos?otId=${C.docOt.id}`));
+    afirmar(docs.some((d) => d.id === C.doc1.id && d.cobertura === `Muestra ${C.m1.codigo}`), "la lista no dice qué cubre el documento");
+    return `${r.numero} · ${C.m1.codigo}`;
+  });
+
+  await paso("DOC · el cierre de la OT exige el documento de la muestra 2", async () => {
+    const e = await ok(UD.planif, "GET", `/ot/${C.docOt.id}/cierre`);
+    afirmar(e.faltantes.some((f) => f.includes(`La muestra ${C.m2.codigo} no tiene documento`)), `faltantes ${e.faltantes.join(" | ")}`);
+    const a = await ok(UD.jefe, "GET", `/ot/${C.docOt.id}/avance`);
+    afirmar(a.etapaActual !== "cierre" || /no tiene documento/.test(a.siguiente?.texto ?? ""), "la Ruta de la OT no lo dice");
+    return "falta la muestra 2";
+  });
+
+  await paso("DOC · «no emitido» de la muestra 2 (LPN: no forma película): reserva número, exige motivo y ocupa su cobertura", async () => {
+    const cuerpo = { otId: C.docOt.id, plantillaId: C.plantilla.id, cobertura: { cobertura: "muestra", muestraIds: [C.m2.id] } };
+    await exigir(403, UD.lpnJefe, "POST", "/informes/no-emitido", { ...cuerpo, motivo: "No forma película" });
+    await exigir(403, UD.a1, "POST", "/informes/no-emitido", { ...cuerpo, motivo: "No forma película" });
+    await exigir(400, UD.jefe, "POST", "/informes/no-emitido", { ...cuerpo, motivo: "no" });
+    await exigir(400, UD.jefe, "POST", "/informes/no-emitido", { ...cuerpo, cobertura: { cobertura: "ot" }, motivo: "Toda la OT no" });
+    const r = await ok(UD.jefe, "POST", "/informes/no-emitido", { ...cuerpo, motivo: "La muestra no forma película (prueba r1b)" });
+    afirmar(/^IE LQC N° \d{3}\/\d{4}$/.test(r.numero) && r.estado === "anulado" && r.noEmitido, JSON.stringify(r));
+    afirmar(r.numero !== C.doc1.numero, "reutilizó el número");
+    await rechazo(409, /no se emite/, UD.jefe, "POST", "/informes/emitir", cuerpo);
+    const cob = await ok(UD.jefe, "GET", `/informes/ot/${C.docOt.id}/cobertura`);
+    afirmar(cob.pendientes.length === 0, `pendientes ${cob.pendientes}`);
+    C.noEmitido = r.numero;
+    return `${r.numero} no emitido`;
+  });
+
+  await paso("DOC · el documento de la muestra 1: firmas de la matriz, entrega y cierre de la OT", async () => {
+    await firmarTodo(C.doc1.id);
+    await exigir(403, UD.a1, "POST", `/informes/${C.doc1.id}/entregar`, { medio: "mano", destinatario: "Cliente" });
+    await ok(UD.planif, "POST", `/informes/${C.doc1.id}/entregar`, { medio: "correo", destinatario: "cliente@example.cl" });
+    const e = await ok(UD.planif, "GET", `/ot/${C.docOt.id}/cierre`);
+    afirmar(e.puedeCerrar, `no se puede cerrar: ${e.faltantes.join(" | ")}`);
+    await ok(UD.planif, "POST", `/ot/${C.docOt.id}/cerrar`, {});
+    const ot = await ok(UD.planif, "GET", `/ot/${C.docOt.id}`);
+    afirmar(ot.estado === "cerrada", `estado ${ot.estado}`);
+    return `${C.doc1.numero} oficial y entregado · ${C.noEmitido} no emitido · OT cerrada`;
+  });
+}
+
 
 async function main() {
   console.log(`API ${BASE}`);
@@ -302,6 +436,7 @@ async function main() {
   await esperarApi();
   const C = {};
   await seccionOrdenesInternas(C);
+  await seccionDocumentos(C);
 }
 
 main()

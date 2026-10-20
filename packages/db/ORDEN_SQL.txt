@@ -81,3 +81,4 @@ seed_alcance_fase0.sql               demo
 align_retiro_flujo_e2e.sql
 align_r1b_numeracion.sql
 align_r1b_ordenes_internas.sql
+align_r1b_documentos_ot.sql
