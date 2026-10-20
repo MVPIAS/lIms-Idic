@@ -14,6 +14,8 @@
  *
  * Reactivación (si el IDIC decide configurar sus propios procesos): construir la
  * web con `NEXT_PUBLIC_MOTOR_FLUJOS_VISIBLE=true`. Es una variable de COMPILACIÓN
- * de Next.js (se fija en `next build`), no de ejecución.
+ * de Next.js (se fija en `next build`), no de ejecución. `lib/navegacion.ts`
+ * repite la misma comprobación sin importarla (ese fichero se carga suelto en
+ * scripts/verificacion/alcance-por-laboratorio.js).
  */
 export const MOTOR_FLUJOS_VISIBLE = process.env.NEXT_PUBLIC_MOTOR_FLUJOS_VISIBLE === "true";

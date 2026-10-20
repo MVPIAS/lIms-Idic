@@ -8,7 +8,13 @@
  * Rutas legacy duplicadas del catálogo (/metodos, /analitos, /gran-grupos,
  * /grupos) ya no aparecen: redirigen a su equivalente v2 (next.config.js).
  */
-import { MOTOR_FLUJOS_VISIBLE } from "./motorFlujos";
+/**
+ * Motor de flujos genérico: oculto salvo NEXT_PUBLIC_MOTOR_FLUJOS_VISIBLE=true.
+ * Es la misma regla que lib/motorFlujos.ts (ver su comentario); se repite aquí
+ * sin import porque este fichero se carga solo, sin dependencias, en
+ * scripts/verificacion/alcance-por-laboratorio.js.
+ */
+const MOTOR_FLUJOS_VISIBLE = process.env.NEXT_PUBLIC_MOTOR_FLUJOS_VISIBLE === "true";
 
 export type Perm = string | string[];
 export interface ItemNav {
