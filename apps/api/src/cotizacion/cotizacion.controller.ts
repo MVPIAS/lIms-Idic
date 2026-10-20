@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, ParseUUIDPipe, BadRequestException } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, ParseUUIDPipe, BadRequestException, ForbiddenException, NotFoundException } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
@@ -9,6 +9,9 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos } from "../common/estados";
 import { TIPOS_ACEPTACION } from "../ot/reglas-ot";
 import { PERMISO_ACEPTAR, PERMISO_ANULAR } from "./permisos-cotizacion";
+import { SQL_UNIDADES_COTIZACION, cotizacionEnAlcance } from "./alcance-cotizacion";
+import { AlcanceService } from "../rbac/alcance.service";
+import { PrismaService } from "../common/prisma.service";
 
 const CosteoSchema = z.object({
   lineas: z
@@ -148,7 +151,32 @@ export class CotizacionController {
   constructor(
     private readonly svc: CotizacionService,
     private readonly costeo: CosteoService,
+    private readonly alcance: AlcanceService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /**
+   * Escrituras sobre una cotización existente (frente L · C2): la cotización
+   * tiene que estar en el alcance de un rol que conceda el permiso de la ruta
+   * (alcance-cotizacion.ts). 404 si no existe en el tenant.
+   */
+  private async exigirCotizacion(req: any, id: string) {
+    const tenantId: string | undefined = req?.user?.tenantId;
+    const visibles = await this.alcance.filtroUnidades(req);
+    if (visibles === null) return;
+    const cot = await this.prisma.cotizacion.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, codigo: true },
+    });
+    if (!cot) throw new NotFoundException("Cotización no encontrada");
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(SQL_UNIDADES_COTIZACION, id);
+    const dco = (await this.alcance.arbol(tenantId)).porCodigo.get("DCO")?.id ?? null;
+    if (!cotizacionEnAlcance(visibles, filas.map((f) => f.id), dco)) {
+      throw new ForbiddenException(
+        `Fuera de su alcance: la cotización ${cot.codigo ?? ""} es de laboratorios que usted no tiene asignados.`.replace(/\s+/g, " "),
+      );
+    }
+  }
 
   /**
    * Costeo Ejército: CDT → CFA → CT → 3 precios. No persiste; sirve al simulador.
@@ -227,7 +255,8 @@ export class CotizacionController {
   /** Editar: el contenido solo mientras la cotización está Abierta. */
   @Patch(":id")
   @RequierePermiso("cotizacion.crear")
-  actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
     const data = ActualizarCotSchema.parse(body);
     return this.svc.actualizar(id, data as any, req?.user?.tenantId);
   }
@@ -239,7 +268,8 @@ export class CotizacionController {
    */
   @Delete(":id")
   @RequierePermiso(PERMISO_ANULAR)
-  eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
     return this.svc.anular(id, req?.user?.tenantId);
   }
 
@@ -249,7 +279,8 @@ export class CotizacionController {
    */
   @Post(":id/anular")
   @RequierePermiso(PERMISO_ANULAR)
-  anular(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+  async anular(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
     const { motivo } = AnularSchema.parse(body ?? {});
     return this.svc.anular(id, req?.user?.tenantId, motivo);
   }
@@ -257,7 +288,8 @@ export class CotizacionController {
   /** Histórico: borrador → enviada (las nuevas nacen Abiertas y no pasan por aquí). */
   @Post(":id/enviar")
   @RequierePermiso("cotizacion.crear")
-  enviar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async enviar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
     return this.svc.cambiarEstado(id, "enviada", req?.user?.tenantId);
   }
 
@@ -272,7 +304,8 @@ export class CotizacionController {
    */
   @Post(":id/aceptar")
   @RequierePermiso(PERMISO_ACEPTAR)
-  aceptar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+  async aceptar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
     const doc = AceptarSchema.parse(body ?? {});
     return this.svc.aceptar(id, req?.user?.tenantId, doc, req?.user?.sub);
   }
@@ -280,7 +313,8 @@ export class CotizacionController {
   /** Rechazo de una cotización histórica ('enviada'): mismo permiso que anular. */
   @Post(":id/rechazar")
   @RequierePermiso(PERMISO_ANULAR)
-  rechazar(@Param("id", ParseUUIDPipe) id: string, @Body() body: { motivo: string }, @Req() req: any) {
+  async rechazar(@Param("id", ParseUUIDPipe) id: string, @Body() body: { motivo: string }, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
     return this.svc.rechazar(id, body.motivo, req?.user?.tenantId);
   }
 }
