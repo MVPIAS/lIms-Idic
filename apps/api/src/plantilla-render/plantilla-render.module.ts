@@ -28,6 +28,7 @@ import { FirmaDocumentoController } from "./firma-documento.controller";
 import { FirmaDocumentoService } from "./firma-documento.service";
 import { FirmasImagenController } from "../rbac/firmas-imagen.controller";
 import { InformeDatosController, InformeDatosService } from "./informe-datos.controller";
+import { NumeracionController, NumeracionService } from "./numeracion.service";
 
 const texto = (max: number) => z.string().trim().max(max).nullable().optional();
 /** Portada del IVC: lo que la OT no sabe y se indica al emitir. */
@@ -242,8 +243,9 @@ export class VerificacionController {
     FirmaDocumentoController,
     FirmasImagenController,
     VerificacionController,
+    NumeracionController,
   ],
-  providers: [PlantillaRenderService, FirmaDocumentoService, InformeDatosService],
-  exports: [PlantillaRenderService],
+  providers: [PlantillaRenderService, FirmaDocumentoService, InformeDatosService, NumeracionService],
+  exports: [PlantillaRenderService, NumeracionService],
 })
 export class PlantillaRenderModule {}

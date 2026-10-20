@@ -22,6 +22,8 @@ import {
   type PasoNuevo,
 } from "./reglas-emision";
 import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
+import { NumeracionService } from "./numeracion.service";
+import { numeroGeneral } from "./numeracion";
 import {
   armarInforme,
   filaInspeccion,
@@ -100,6 +102,7 @@ export class PlantillaRenderService {
     private readonly prisma: PrismaService,
     private readonly qc: QcService,
     private readonly matriz: FirmasMatrizService,
+    private readonly numeracion: NumeracionService,
   ) {}
 
   /** Proveedores de contexto adicional registrados por otros módulos (clave → proveedor). */
@@ -508,7 +511,7 @@ export class PlantillaRenderService {
   ) {
     const fecha = new Date();
     const cert = {
-      numero: `CERT-${fecha.getFullYear()}-XXXX`,
+      numero: await this.numeroBorrador(otId, plantillaId, tenantId, fecha),
       codigoVerificacion: "SIN EMITIR",
       fecha,
     };
@@ -543,6 +546,36 @@ export class PlantillaRenderService {
         this.titulo(cert.numero, plantilla.nombre, ctx.ot.codigo),
       ),
     };
+  }
+
+  /**
+   * Número que se imprime en la vista previa: el que tendría el documento con
+   * la numeración de su laboratorio, marcado «BORRADOR» (no reserva nada).
+   */
+  private async numeroBorrador(otId: string, plantillaId: string, tenantId: string | undefined, fecha: Date): Promise<string> {
+    const general = `CERT-${fecha.getFullYear()}-XXXX`;
+    try {
+      const [ot, plantilla, primera] = await Promise.all([
+        this.prisma.ordenTrabajo.findFirst({ where: { id: otId, ...(tenantId ? { tenantId } : {}) }, select: { codigo: true, unidadPrincipal: true, tenantId: true } }),
+        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true } }),
+        this.prisma.muestra.findFirst({ where: { otId, deletedAt: null }, orderBy: { codigo: "asc" }, select: { codigo: true } }),
+      ]);
+      if (!ot || !plantilla) return general;
+      const deUnidad = await this.tipoDocumentoDeUnidad(ot.unidadPrincipal);
+      const { tipo } = tipoDocumentoPorDefecto({ tipoPlantilla: plantilla.tipo, tipoUnidad: deUnidad?.tipo ?? null });
+      const p = await this.numeracion.proximo({
+        tenantId: ot.tenantId,
+        unidadId: ot.unidadPrincipal,
+        tipo,
+        fecha,
+        ot: ot.codigo,
+        muestra: primera?.codigo ?? null,
+        numInforme: await this.numeroInformeInspeccion(otId),
+      });
+      return p.numero ? `${p.numero} (BORRADOR)` : general;
+    } catch {
+      return general;
+    }
   }
 
   /* ====================================================================== */
@@ -582,7 +615,49 @@ export class PlantillaRenderService {
     if (!n) throw new ConflictException("No se pudo reservar el correlativo del certificado");
     // padStart(4) da CERT-2026-0001; a partir de 10000 crece a 5 dígitos sin
     // romper nada (el contador es INTEGER, no hay orden lexicográfico).
-    return `CERT-${anio}-${String(n).padStart(4, "0")}`;
+    return numeroGeneral(anio, n);
+  }
+
+  /** Número del Informe de Inspección vigente de la OT (para {NUM_INFORME}). */
+  private async numeroInformeInspeccion(otId: string, db: any = this.prisma): Promise<string | null> {
+    const inf = await db.certificado.findFirst({
+      where: { otId, tipoDocumento: "INFORME_INSPECCION", deletedAt: null, estado: { in: ["oficial", "emitido", "en_firma"] } },
+      orderBy: { createdAt: "desc" },
+      select: { numero: true, codigo: true },
+    });
+    return inf?.numero ?? inf?.codigo ?? null;
+  }
+
+  /**
+   * Número oficial del documento (docs/FLUJO_NUMERACION_DOCUMENTOS.md): el de
+   * la regla del laboratorio y tipo de documento (numeracion_documento); si no
+   * hay regla o al formato le falta un dato, la numeración general
+   * CERT-AAAA-NNNN, con un aviso.
+   */
+  private async numeroOficial(
+    tx: any,
+    d: { tenantId: string; unidadId: string | null; tipoDocumento: string; fecha: Date; otId: string; otCodigo: string; muestraCodigo: string | null },
+  ): Promise<{ numero: string; aviso: string | null; formato: string | null }> {
+    const numInforme = await this.numeroInformeInspeccion(d.otId, tx);
+    const r = await this.numeracion.reservar(
+      tx,
+      {
+        tenantId: d.tenantId,
+        unidadId: d.unidadId,
+        tipo: d.tipoDocumento,
+        fecha: d.fecha,
+        ot: d.otCodigo,
+        muestra: d.muestraCodigo,
+        numInforme,
+      },
+      async (numero) => Boolean(await tx.certificado.findFirst({ where: { tenantId: d.tenantId, OR: [{ numero }, { codigo: numero }] }, select: { id: true } })),
+    );
+    if (r.numero) return { numero: r.numero, aviso: null, formato: r.regla.formato };
+    const numero = await this.siguienteNumero(tx, d.tenantId, d.fecha.getFullYear());
+    const aviso = r.regla
+      ? `Al formato de numeración «${r.regla.formato}» le faltan datos (${(r.faltan ?? []).join(", ")}): se usó la numeración general ${numero}.`
+      : null;
+    return { numero, aviso, formato: null };
   }
 
 
@@ -736,9 +811,37 @@ export class PlantillaRenderService {
           "Para corregirlo, anúlelo (o pida que lo devuelvan) y reemítalo como nueva versión.",
       );
 
+    // Número oficial que tendrá (orientativo: no se reserva hasta emitir).
+    const primera = await this.prisma.muestra.findFirst({
+      where: { otId, deletedAt: null },
+      orderBy: { codigo: "asc" },
+      select: { codigo: true },
+    });
+    const muestraCodigo = primera?.codigo ?? null;
+    const prox = await this.numeracion.proximo({
+      tenantId: ot.tenantId,
+      unidadId: ot.unidadPrincipal,
+      tipo: tipoDocumento,
+      fecha: new Date(),
+      ot: ot.codigo,
+      muestra: muestraCodigo,
+      numInforme: await this.numeroInformeInspeccion(otId),
+    });
+    const numeracion = {
+      numero: prox.numero,
+      formato: prox.formato,
+      porConfirmar: prox.porConfirmar,
+      general: !prox.numero,
+      aviso: prox.formato && !prox.numero
+        ? `Al formato «${prox.formato}» le faltan datos (${prox.faltan.join(", ")}): se usará la numeración general CERT-AAAA-NNNN.`
+        : null,
+    };
+
     return {
       puedeEmitir: faltantes.length === 0,
       faltantes,
+      numeracion,
+      muestraCodigo,
       tipoDocumento,
       tipoDocumentoOrigen,
       tipoDocumentoUnidad: tipoDocumentoOrigen === "unidad" ? deUnidad?.unidadCodigo ?? null : null,
@@ -832,7 +935,6 @@ export class PlantillaRenderService {
     }
 
     const fecha = new Date();
-    const anio = fecha.getFullYear();
     const codigoVerificacion = nuevoCodigoVerificacion();
     const anterior = previo;
 
@@ -841,9 +943,18 @@ export class PlantillaRenderService {
     // CUERPO IMPRIME el número, así que el hash depende de él.
     const emitido = await this.prisma.$transaction(async (tx) => {
       const version = anterior ? anterior.version + 1 : 1;
-      const numero = anterior
-        ? numeroVersion(anterior.numero ?? anterior.codigo, version)
-        : await this.siguienteNumero(tx, tenantId, anio);
+      const oficial = anterior
+        ? null
+        : await this.numeroOficial(tx, {
+            tenantId,
+            unidadId: cond.ot.unidadId,
+            tipoDocumento: cond.tipoDocumento,
+            fecha,
+            otId,
+            otCodigo: cond.ot.codigo,
+            muestraCodigo: cond.muestraCodigo,
+          });
+      const numero = anterior ? numeroVersion(anterior.numero ?? anterior.codigo, version) : oficial!.numero;
 
       const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad } = await this.render(
         otId,
@@ -914,6 +1025,7 @@ export class PlantillaRenderService {
         });
       }
 
+      if (oficial?.aviso) avisos.push(oficial.aviso);
       return { cert, plantilla, otCodigo: ctx.ot.codigo, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad };
     });
 

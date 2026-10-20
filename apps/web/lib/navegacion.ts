@@ -192,6 +192,7 @@ export const NAV: SeccionNav[] = [
       { href: "/admin/usuarios", label: "Usuarios", icon: "👥", perm: "admin.usuarios" },
       { href: "/admin/roles", label: "Roles y permisos", icon: "🔑", perm: ["admin.roles", "admin.usuarios"] },
       { href: "/admin/firmas", label: "Matriz de firmas", icon: "✒", perm: ["admin.firmas", "admin.usuarios"] },
+      { href: "/admin/numeracion", label: "Numeración de documentos", icon: "№", perm: "documento.numeracion", claves: "correlativo numero informe certificado" },
       { href: "/catalogo/parametros", label: "Parámetros del sistema", icon: "🎛", perm: "catalogo.gestionar", claves: "listas combos" },
       { href: "/config-correo", label: "Correo saliente", icon: "✉", perm: "admin.usuarios", claves: "smtp" },
       { href: "/usuarios", label: "Usuarios (vista clásica)", icon: "👤", perm: "admin.usuarios" },

@@ -1127,7 +1127,7 @@ model Certificado {
   id              String    @id @default(uuid()) @db.Uuid
   tenantId        String    @map("tenant_id") @db.Uuid
   otId            String    @map("ot_id") @db.Uuid
-  codigo          String    @db.VarChar(40)
+  codigo          String    @db.VarChar(80)
   tipo            String?   @db.VarChar(40)
   plantillaId     String?   @map("plantilla_id") @db.Uuid
   hashSha256      String?   @map("hash_sha256") @db.VarChar(64)
@@ -1135,7 +1135,7 @@ model Certificado {
   // --- Emisión real (align_certificado.sql) ---
   // Correlativo CERT-AAAA-NNNN generado por el sistema. Se escribe también en
   // `codigo`, cuyo UNIQUE(tenantId, codigo) cierra la unicidad a nivel de BD.
-  numero             String?   @db.VarChar(30)
+  numero             String?   @db.VarChar(80)
   // Código corto imprimible para validar el certificado en papel (anti-repudio).
   codigoVerificacion String?   @map("codigo_verificacion") @db.VarChar(24)
   // HTML canónico sellado: sha256(documentoHtml) == hashSha256. Es lo que hace
