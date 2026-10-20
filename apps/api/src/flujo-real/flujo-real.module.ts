@@ -40,6 +40,9 @@ import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcion
 import { aplicarFactor, erroresFactor, expresionConFactor, factorDe } from "../laboratorio/factor";
 import { planAjusteFactor } from "../laboratorio/ajuste-factor";
 import { conTraza, exigeMotivoCorreccion, teniaValor } from "../laboratorio/traza";
+import { RecepcionModule } from "../recepcion/recepcion.module";
+import { RecepcionService, type ConfigRecepcionLab } from "../recepcion/recepcion.service";
+import { retenerHasta, type RecepcionLabNormalizada } from "../recepcion/reglas-recepcion";
 
 /**
  * =============================================================================
@@ -1115,11 +1118,22 @@ const RecepcionBody = z.object({
   tomaMuestra: z.string().trim().max(60).nullable().optional(),
   condicionRecepcion: z.enum(["cumple", "no_cumple"]).nullable().optional(),
   condicionObservacion: z.string().max(2000).nullable().optional(),
-  selloNumero: z.string().max(40).nullable().optional(),
+  /** Uno o varios Nº de sello («15572, 15573»). */
+  selloNumero: z.string().max(200).nullable().optional(),
   identificacionCliente: z.string().max(300).nullable().optional(),
   requiereOtrosLabs: z.boolean().optional(),
   otrosLabs: z.array(z.string().uuid()).max(20).optional(),
   otrosLabsDetalle: z.string().max(2000).nullable().optional(),
+  /** Entrega R1 (recepcion/reglas-recepcion.ts): producto, cliente, sellos, destino, ubicación y campos del laboratorio. */
+  catElementoId: z.string().uuid().nullable().optional(),
+  clienteId: z.string().uuid().nullable().optional(),
+  sellosVerificados: z.boolean().nullable().optional(),
+  claseCustodia: z.string().max(20).nullable().optional(),
+  ubicacion: z.string().max(120).nullable().optional(),
+  datos: z
+    .record(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/), z.union([z.string().max(300), z.number().finite(), z.boolean(), z.null()]))
+    .refine((d) => Object.keys(d).length <= 40, "Demasiados campos de recepción.")
+    .optional(),
 });
 
 const RegistrarMuestrasBody = z.object({
@@ -1150,6 +1164,7 @@ export class RegistroMuestrasService {
     private readonly alcance: AlcanceService,
     private readonly puente: PuenteAnalisisService,
     private readonly labs: LaboratorioOtService,
+    private readonly recepcion: RecepcionService,
   ) {}
 
   private async otEnAlcance(otId: string, tenantId: string, req: any) {
@@ -1176,6 +1191,9 @@ export class RegistroMuestrasService {
     labPrincipal: string | null,
     prefijo: string,
     opciones: string[],
+    cfg: ConfigRecepcionLab,
+    /** Producto ya conocido (de la muestra o de la OT) cuando la recepción no lo trae. */
+    productoPrevio: string | null = null,
   ) {
     const n = normalizarRecepcion(r);
     const errores = erroresRecepcion(n, opciones, labPrincipal, prefijo);
@@ -1186,7 +1204,18 @@ export class RegistroMuestrasService {
         errores.push(`${prefijo}${e?.message ?? "laboratorio no válido"}`);
       }
     }
-    return { n, errores };
+    // Campos propios del laboratorio (Catálogo › Parámetros · recepcion_campo).
+    const lab = this.recepcion.validarCampos(cfg, { claseCustodia: n.claseCustodia, ubicacion: n.ubicacion, datos: n.datos }, prefijo);
+    errores.push(...lab.errores);
+    // Producto (matriz): obligatorio donde el laboratorio lo exige; si se indica, debe existir.
+    const producto = n.catElementoId ?? productoPrevio;
+    if (cfg.productoObligatorio && !producto)
+      errores.push(`${prefijo}indique el producto (matriz): es obligatorio en la recepción del ${cfg.laboratorio?.codigo ?? "laboratorio"}.`);
+    if (n.catElementoId && !(await this.recepcion.productoValido(tenantId, n.catElementoId)))
+      errores.push(`${prefijo}el producto indicado no existe en el catálogo o está inactivo.`);
+    if (n.clienteId && !(await this.recepcion.clienteValido(tenantId, n.clienteId)))
+      errores.push(`${prefijo}el cliente indicado no existe en el maestro de clientes.`);
+    return { n, errores, lab: lab.valor };
   }
 
   /**
@@ -1198,7 +1227,11 @@ export class RegistroMuestrasService {
     n: RecepcionNormalizada,
     usuarioId: string | null,
     previo: { recepcionadaAt: Date | null; recepcionadaPor: string | null; recepcionCorregidaAt: Date | null; recepcionCorregidaPor: string | null } | null = null,
+    lab: RecepcionLabNormalizada | null = null,
+    cfg: ConfigRecepcionLab | null = null,
   ) {
+    const sello = selloRecepcion(previo, usuarioId, new Date());
+    const retener = cfg && lab ? retenerHasta(lab.claseCustodia, sello.recepcionadaAt, cfg.plazos) : null;
     return {
       tomaMuestra: n.tomaMuestra,
       condicionRecepcion: n.condicionRecepcion,
@@ -1208,7 +1241,18 @@ export class RegistroMuestrasService {
       requiereOtrosLabs: n.requiereOtrosLabs,
       otrosLabs: n.otrosLabs,
       otrosLabsDetalle: n.otrosLabsDetalle,
-      ...selloRecepcion(previo, usuarioId, new Date()),
+      sellosVerificados: n.sellosVerificados,
+      ...(n.catElementoId ? { catElementoId: n.catElementoId } : {}),
+      ...(n.clienteId ? { clienteId: n.clienteId } : {}),
+      ...(lab
+        ? {
+            claseCustodia: lab.claseCustodia,
+            ubicacion: lab.ubicacion,
+            datosRecepcion: lab.datos as Prisma.InputJsonValue,
+            retenerHasta: retener ? new Date(`${retener}T00:00:00Z`) : null,
+          }
+        : {}),
+      ...sello,
     };
   }
 
@@ -1230,6 +1274,24 @@ export class RegistroMuestrasService {
   }
 
   /**
+   * Lo que falta de la recepción del laboratorio en una muestra ya registrada
+   * (producto obligatorio y campos propios obligatorios). Solo para avisar: una
+   * muestra registrada sin recepción no se bloquea (se completa con «Recepción…»).
+   */
+  private faltantesLab(cfg: ConfigRecepcionLab, m: any): string[] {
+    if (!m.tomaMuestra && !m.condicionRecepcion) return [];
+    const f: string[] = [];
+    if (cfg.productoObligatorio && !m.catElementoId) f.push("producto (matriz)");
+    const datos = (m.datos ?? {}) as Record<string, unknown>;
+    for (const c of cfg.campos) {
+      if (!c.obligatorio) continue;
+      const v = c.codigo === "clase_custodia" ? m.claseCustodia : c.codigo === "ubicacion" ? m.ubicacion : datos[c.codigo];
+      if (c.tipo === "casilla" ? v !== true : v === null || v === undefined || v === "") f.push(c.etiqueta);
+    }
+    return f;
+  }
+
+  /**
    * Lo que necesita la pantalla: la OT, sus muestras (con cuántos ensayos
    * tiene cada una) y la propuesta de métodos desde la cotización aceptada.
    */
@@ -1243,12 +1305,20 @@ export class RegistroMuestrasService {
               m.otros_labs AS "otrosLabs", m.otros_labs_detalle AS "otrosLabsDetalle",
               m.recepcionada_at AS "recepcionadaAt", u.nombre_completo AS "recepcionadaPorNombre",
               m.recepcion_corregida_at AS "recepcionCorregidaAt", uc.nombre_completo AS "recepcionCorregidaPorNombre",
+              m.numero_interno::text AS "numeroInterno", m.numero_interno_at AS "numeroInternoAt",
+              m.cat_elemento_id AS "catElementoId", el.nombre AS "productoNombre", el.codigo AS "productoCodigo",
+              m.cliente_id AS "clienteId", cl.razon_social AS "clienteNombre",
+              m.sellos_verificados AS "sellosVerificados", m.clase_custodia AS "claseCustodia",
+              to_char(m.retener_hasta, 'YYYY-MM-DD') AS "retenerHasta", m.ubicacion, m.datos_recepcion AS "datos",
+              (SELECT count(*) FROM ot_foto f WHERE f.muestra_id = m.id AND f.tipo = 'recepcion' AND f.deleted_at IS NULL)::int AS "fotosRecepcion",
               (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL)::int AS ensayos,
               COALESCE((SELECT array_agg(DISTINCT cm.codigo) FROM resultado r JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
                          WHERE r.muestra_id = m.id AND r.deleted_at IS NULL), '{}') AS metodos
          FROM muestra m
          LEFT JOIN usuario u ON u.id = m.recepcionada_por
          LEFT JOIN usuario uc ON uc.id = m.recepcion_corregida_por
+         LEFT JOIN cat_elemento el ON el.id = m.cat_elemento_id
+         LEFT JOIN cliente cl ON cl.id = m.cliente_id
         WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL
         ORDER BY m.created_at, m.codigo`,
       otId,
@@ -1283,15 +1353,24 @@ export class RegistroMuestrasService {
       : [];
     const nombreEnsayo = new Map(ensayos.map((e) => [e.id, e.nombre]));
     const metodos = await this.metodos(tenantId, { ensayoIds });
+    const cfg = await this.recepcion.configDeUnidad(tenantId, ot.unidadPrincipal);
+    const cliente = ot.clienteId
+      ? await this.prisma.cliente.findFirst({ where: { id: ot.clienteId }, select: { id: true, razonSocial: true } })
+      : null;
     const porEnsayo = new Map<string, MetodoCatalogo[]>();
     for (const m of metodos) if (m.ensayoId) (porEnsayo.get(m.ensayoId) ?? porEnsayo.set(m.ensayoId, []).get(m.ensayoId)!).push(m);
     return {
-      ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal, clienteId: ot.clienteId },
+      ot: {
+        id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal, clienteId: ot.clienteId,
+        clienteNombre: cliente?.razonSocial ?? null, catElementoId: ot.catElementoId ?? null,
+      },
+      configRecepcion: cfg,
       cotizacion: cot ? { id: cot.id, codigo: cot.codigo, estado: cot.estado, referencia: cot.referencia } : null,
       muestras: muestras.map((m) => ({
         ...m,
         ensayos: Number(m.ensayos),
-        recepcionIncompleta: recepcionIncompleta(m),
+        recepcionIncompleta: recepcionIncompleta(m) || this.faltantesLab(cfg, m).length > 0,
+        faltantesRecepcion: this.faltantesLab(cfg, m),
         otrosLabsEnlace: enlaceOrdenesInternas(m.otrosLabs ?? [], ordenes).map((e) => ({
           ...e,
           unidad: labs.find((l) => l.id === e.unidadId) ?? null,
@@ -1327,19 +1406,25 @@ export class RegistroMuestrasService {
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
     const errores = erroresRegistro(ot.estado, body.muestras, catalogo);
-    // Recepción de cada muestra (si se envía): toma de muestra, condición, sello…
+    // Recepción de cada muestra (si se envía): toma de muestra, condición, sello,
+    // producto, destino y campos propios del laboratorio de la OT.
     const opciones = (await this.opcionesToma(tenantId)).map((o) => o.codigo);
+    const cfg = await this.recepcion.configDeUnidad(tenantId, ot.unidadPrincipal, db);
     const recepciones: (RecepcionNormalizada | null)[] = [];
+    const labs: (RecepcionLabNormalizada | null)[] = [];
     for (let i = 0; i < body.muestras.length; i++) {
       const r = body.muestras[i].recepcion;
       if (!r) {
         recepciones.push(null);
+        labs.push(null);
         continue;
       }
       const prefijo = body.muestras.length > 1 ? `Muestra ${i + 1}: ` : "";
-      const v = await this.validarRecepcion(tenantId, r, ot.unidadPrincipal, prefijo, opciones);
+      const previo = body.muestras[i].catElementoId ?? ot.catElementoId ?? null;
+      const v = await this.validarRecepcion(tenantId, r, ot.unidadPrincipal, prefijo, opciones, cfg, previo);
       errores.push(...v.errores);
       recepciones.push(v.n);
+      labs.push(v.lab);
     }
     if (errores.length) throw new BadRequestException(errores.join(" "));
 
@@ -1361,7 +1446,7 @@ export class RegistroMuestrasService {
           clienteId: ot.clienteId,
           estado: "recibida",
           catElementoId: m.catElementoId ?? ot.catElementoId ?? null,
-          ...(recepciones[i] ? this.datosRecepcion(recepciones[i]!, req?.user?.sub ?? null) : {}),
+          ...(recepciones[i] ? this.datosRecepcion(recepciones[i]!, req?.user?.sub ?? null, null, labs[i], cfg) : {}),
         },
       });
       const g = await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db);
@@ -1401,7 +1486,10 @@ export class RegistroMuestrasService {
     if (["cerrada", "anulada"].includes(ot.estado))
       throw new ConflictException(`La OT está ${ot.estado}: no se modifica la recepción de sus muestras.`);
     const opciones = (await this.opcionesToma(tenantId)).map((o) => o.codigo);
-    const { n, errores } = await this.validarRecepcion(tenantId, body, ot.unidadPrincipal, "", opciones);
+    const cfg = await this.recepcion.configDeUnidad(tenantId, ot.unidadPrincipal);
+    const { n, errores, lab } = await this.validarRecepcion(
+      tenantId, body, ot.unidadPrincipal, "", opciones, cfg, m.catElementoId ?? ot.catElementoId ?? null,
+    );
     if (errores.length) throw new BadRequestException(errores.join(" "));
     // El historial guarda la recepción anterior COMPLETA, con quién y cuándo se
     // recibió y la corrección previa si la hubo.
@@ -1414,12 +1502,18 @@ export class RegistroMuestrasService {
       requiereOtrosLabs: m.requiereOtrosLabs,
       otrosLabs: m.otrosLabs,
       otrosLabsDetalle: m.otrosLabsDetalle,
+      catElementoId: m.catElementoId,
+      clienteId: m.clienteId,
+      sellosVerificados: m.sellosVerificados,
+      claseCustodia: m.claseCustodia,
+      ubicacion: m.ubicacion,
+      datos: m.datosRecepcion,
       recepcionadaAt: m.recepcionadaAt,
       recepcionadaPor: m.recepcionadaPor,
       recepcionCorregidaAt: m.recepcionCorregidaAt,
       recepcionCorregidaPor: m.recepcionCorregidaPor,
     };
-    const datos = this.datosRecepcion(n, req?.user?.sub ?? null, m);
+    const datos = this.datosRecepcion(n, req?.user?.sub ?? null, m, lab, cfg);
     const actualizada = await this.prisma.$transaction(async (tx) => {
       const u = await tx.muestra.update({ where: { id: muestraId }, data: datos });
       await tx.$executeRawUnsafe(
@@ -1476,6 +1570,7 @@ export class RecepcionMuestraController {
 /* ============================ MÓDULO ============================ */
 
 @Module({
+  imports: [RecepcionModule],
   controllers: [
     SolicitudCosteoController,
     // Las rutas estáticas de órdenes internas (destinos, ot/:otId) van ANTES que el CRUD.

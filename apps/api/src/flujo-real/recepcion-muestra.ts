@@ -13,6 +13,10 @@
  *  · ¿Requiere ensayos de otros laboratorios?: si se marca, hay que indicar
  *    cuál(es); queda constancia en la muestra y se enlaza con las órdenes
  *    internas de la OT hacia esos laboratorios.
+ *  · Entrega R1 (frente r1d): producto (matriz), cliente del maestro, sellos
+ *    verificados, destino de la muestra, ubicación y campos propios del
+ *    laboratorio. Los propios del laboratorio los valida
+ *    recepcion/reglas-recepcion.ts con la configuración de Catálogo › Parámetros.
  */
 
 export interface RecepcionMuestra {
@@ -24,6 +28,14 @@ export interface RecepcionMuestra {
   requiereOtrosLabs?: boolean;
   otrosLabs?: string[];
   otrosLabsDetalle?: string | null;
+  /** Producto (matriz): elemento del catálogo. */
+  catElementoId?: string | null;
+  /** Cliente de la muestra (maestro de clientes); por defecto, el de la OT. */
+  clienteId?: string | null;
+  sellosVerificados?: boolean | null;
+  claseCustodia?: string | null;
+  ubicacion?: string | null;
+  datos?: Record<string, string | number | boolean | null> | null;
 }
 
 export interface RecepcionNormalizada {
@@ -35,6 +47,12 @@ export interface RecepcionNormalizada {
   requiereOtrosLabs: boolean;
   otrosLabs: string[];
   otrosLabsDetalle: string | null;
+  catElementoId: string | null;
+  clienteId: string | null;
+  sellosVerificados: boolean | null;
+  claseCustodia: string | null;
+  ubicacion: string | null;
+  datos: Record<string, string | number | boolean | null>;
 }
 
 const limpio = (s?: string | null) => {
@@ -54,6 +72,12 @@ export function normalizarRecepcion(r: RecepcionMuestra): RecepcionNormalizada {
     requiereOtrosLabs: requiere,
     otrosLabs: requiere ? [...new Set(r.otrosLabs ?? [])] : [],
     otrosLabsDetalle: requiere ? limpio(r.otrosLabsDetalle) : null,
+    catElementoId: r.catElementoId ?? null,
+    clienteId: r.clienteId ?? null,
+    sellosVerificados: typeof r.sellosVerificados === "boolean" ? r.sellosVerificados : null,
+    claseCustodia: limpio(r.claseCustodia),
+    ubicacion: limpio(r.ubicacion),
+    datos: { ...(r.datos ?? {}) },
   };
 }
 
@@ -73,6 +97,8 @@ export function erroresRecepcion(r: RecepcionNormalizada, opcionesToma: string[]
   if (r.requiereOtrosLabs && !r.otrosLabs.length) e.push(`${prefijo}indique qué otro(s) laboratorio(s) deben ensayar la muestra.`);
   if (labPrincipal && r.otrosLabs.includes(labPrincipal))
     e.push(`${prefijo}el laboratorio responsable de la OT no es «otro laboratorio»: quítelo de la lista.`);
+  if (r.sellosVerificados === true && !r.selloNumero)
+    e.push(`${prefijo}indique el Nº de los sellos que verificó.`);
   return e;
 }
 

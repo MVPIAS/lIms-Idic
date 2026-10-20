@@ -68,3 +68,19 @@ describe("quién y cuándo de la recepción (revisión r3, hallazgo 13)", () => 
     expect([s.recepcionadaPor, s.recepcionCorregidaPor]).toEqual(["jefe", null]);
   });
 });
+
+describe("recepción R1 · producto, cliente, sellos y destino (frente r1d)", () => {
+  const OPC = ["entregada_cliente", "sucursal_santiago"];
+  it("normaliza los datos nuevos y deja los del laboratorio para su validación", () => {
+    const n = normalizarRecepcion({
+      tomaMuestra: "sucursal_santiago", condicionRecepcion: "cumple", selloNumero: " 15572, 15573 ",
+      sellosVerificados: true, claseCustodia: " testigo ", ubicacion: " Bodega ", datos: { lote: "L-1" },
+    });
+    expect(n).toMatchObject({ selloNumero: "15572, 15573", sellosVerificados: true, claseCustodia: "testigo", ubicacion: "Bodega", datos: { lote: "L-1" } });
+    expect(erroresRecepcion(n, OPC)).toEqual([]);
+  });
+  it("«sellos verificados» sin Nº de sello no se acepta", () => {
+    const n = normalizarRecepcion({ tomaMuestra: "entregada_cliente", condicionRecepcion: "cumple", sellosVerificados: true });
+    expect(erroresRecepcion(n, OPC).join(" ")).toContain("sellos que verificó");
+  });
+});

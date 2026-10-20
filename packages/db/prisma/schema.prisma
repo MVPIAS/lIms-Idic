@@ -901,7 +901,7 @@ model Muestra {
   grupoId       String?   @map("grupo_id") @db.Uuid
   clienteId     String?   @map("cliente_id") @db.Uuid
   codigoBarras  String?   @map("codigo_barras") @db.VarChar(60)
-  ubicacion     String?   @db.VarChar(80)
+  ubicacion     String?   @db.VarChar(120)
   estado        String    @default("recibida") @db.VarChar(30)
   /// PUENTE catálogo v2 (align_puente_catalogo.sql): elemento del catálogo del
   /// que procede la muestra. NULL en muestras legacy.
@@ -915,7 +915,7 @@ model Muestra {
   tomaMuestra           String?   @map("toma_muestra") @db.VarChar(60)
   condicionRecepcion    String?   @map("condicion_recepcion") @db.VarChar(10)
   condicionObservacion  String?   @map("condicion_observacion")
-  selloNumero           String?   @map("sello_numero") @db.VarChar(40)
+  selloNumero           String?   @map("sello_numero") @db.VarChar(200)
   identificacionCliente String?   @map("identificacion_cliente") @db.VarChar(300)
   requiereOtrosLabs     Boolean   @default(false) @map("requiere_otros_labs")
   otrosLabs             String[]  @default([]) @map("otros_labs") @db.Uuid
@@ -925,6 +925,17 @@ model Muestra {
   /// Última corrección de la recepción (align_revision_r3.sql): recepcionada_* no cambian al corregir.
   recepcionCorregidaPor String?   @map("recepcion_corregida_por") @db.Uuid
   recepcionCorregidaAt  DateTime? @map("recepcion_corregida_at") @db.Timestamptz
+  /// Recepción R1 (align_recepcion_custodia_equipo_lme.sql): Nº de muestra interno
+  /// (correlativo por tenant), sellos verificados, destino de la muestra
+  /// (analisis | testigo | custodia | contramuestra), fecha hasta la que se
+  /// retiene y campos propios del laboratorio (parametro_sistema recepcion_campo).
+  numeroInterno         BigInt?   @map("numero_interno")
+  numeroInternoPor      String?   @map("numero_interno_por") @db.Uuid
+  numeroInternoAt       DateTime? @map("numero_interno_at") @db.Timestamptz
+  sellosVerificados     Boolean?  @map("sellos_verificados")
+  claseCustodia         String?   @map("clase_custodia") @db.VarChar(20)
+  retenerHasta          DateTime? @map("retener_hasta") @db.Date
+  datosRecepcion        Json      @default("{}") @map("datos_recepcion")
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
 
@@ -1049,6 +1060,12 @@ model Resultado {
   especCatalogo    Json?     @map("espec_catalogo")
   especEditadaPor  String?   @map("espec_editada_por") @db.Uuid
   especEditadaAt   DateTime? @map("espec_editada_at") @db.Timestamptz
+  /// Ejecución del ensayo (align_recepcion_custodia_equipo_lme.sql): fecha y hora,
+  /// temperatura (°C), humedad relativa (%) e incertidumbre, junto al equipo usado.
+  fechaEnsayo      DateTime? @map("fecha_ensayo") @db.Timestamptz
+  temperatura      Decimal?  @db.Decimal(6, 2)
+  humedad          Decimal?  @db.Decimal(5, 2)
+  incertidumbre    String?   @db.VarChar(60)
 
   /// PUENTE catálogo v2 (align_puente_catalogo.sql). Un resultado del puente se
   /// materializa desde un cat_metodo/cat_analito del panel del elemento, con la
@@ -1435,6 +1452,8 @@ model CatMetodo {
   servgrp     String?   @db.VarChar(240)
   activo      Boolean   @default(true)
   qcRequerido Boolean   @default(false) @map("qc_requerido")
+  /// El método exige informar el equipo usado al capturar (align_recepcion_custodia_equipo_lme.sql).
+  equipoRequerido Boolean @default(false) @map("equipo_requerido")
   /// Factor por defecto de la fórmula (align_quimicos_recepcion_calculo.sql).
   factorValor       Decimal? @map("factor_valor") @db.Decimal(18, 6)
   factorOperacion   String?  @map("factor_operacion") @db.VarChar(12)
@@ -1750,4 +1769,14 @@ model MovimientoConsumible {
   @@index([loteId, createdAt])
   @@index([muestraId])
   @@map("movimiento_consumible")
+}
+
+/// Correlativo del Nº de muestra interno por tenant (align_recepcion_custodia_equipo_lme.sql).
+/// Se usa con UPDATE … RETURNING (SQL crudo) para que sea atómico.
+model CorrelativoMuestra {
+  tenantId  String   @id @map("tenant_id") @db.Uuid
+  ultimo    BigInt   @default(0)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+
+  @@map("correlativo_muestra")
 }
