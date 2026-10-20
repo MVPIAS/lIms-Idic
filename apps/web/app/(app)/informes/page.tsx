@@ -40,6 +40,8 @@ type Condiciones = {
   pasos: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; responsables: any[] }[];
   otInterna?: boolean;
   pasosOmitidos?: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; motivo: string }[];
+  /** Número oficial que tendrá (numeración del laboratorio y tipo; orientativo hasta emitir). */
+  numeracion?: { numero: string | null; formato: string | null; porConfirmar: boolean; general: boolean; aviso: string | null };
 };
 type Preview = { plantilla: string; tipo: string; modalidad?: Modalidad; avisos: string[]; html: string };
 
@@ -230,7 +232,7 @@ function InformesContenido() {
     <>
       <PageHeader
         titulo="Emitir informe o certificado"
-        subtitulo={<>Rellena la plantilla con el expediente, sella el documento con SHA-256 y le asigna el correlativo. El documento queda <b>en firma</b> hasta que firman todos los responsables de la matriz de firmas.</>}
+        subtitulo={<>Rellena la plantilla con el expediente, sella el documento con SHA-256 y le asigna el número oficial de su laboratorio. El documento queda <b>en firma</b> hasta que firman todos los responsables de la matriz de firmas.</>}
         migas={[{ label: "Laboratorio" }, { label: "Emitir informe" }]}
         acciones={<Link href={"/informes/por-firmar" as any} className="btn outline">Documentos por firmar</Link>}
       />
@@ -286,6 +288,20 @@ function InformesContenido() {
                   ? ` · propio de ${cond.tipoDocumentoUnidad ?? "la unidad de la OT"}`
                   : cond.tipoDocumentoOrigen === "indicado" ? " · elegido por usted" : " · según la plantilla"}
               </span>
+            </p>
+          )}
+          {cond?.numeracion && (
+            <p style={{ margin: "0 0 8px", fontSize: 12.5 }}>
+              Número oficial que tendrá:{" "}
+              {cond.numeracion.numero
+                ? <b className="codigo">{cond.numeracion.numero}</b>
+                : <b>CERT-AAAA-NNNN</b>}
+              <span style={{ color: "var(--muted)" }}>
+                {cond.numeracion.formato ? ` · formato ${cond.numeracion.formato}` : " · numeración general (el laboratorio no tiene formato propio)"}
+                {cond.numeracion.porConfirmar ? " · formato por confirmar con el IDIC" : ""}
+                {" · se asigna al emitir"}
+              </span>
+              {cond.numeracion.aviso && <small style={{ display: "block", color: "var(--amber, #b45309)" }}>{cond.numeracion.aviso}</small>}
             </p>
           )}
           {cond && !cond.puedeEmitir && (
