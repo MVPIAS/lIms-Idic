@@ -8,6 +8,8 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { pasosActuales } from "../plantilla-render/reglas-emision";
 import { calcularAvance, puedeActuar, type DocumentoAvance, type HechosOt } from "./avance-ot";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
+import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
+import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
 
 /** Laboratorios de la Sección Metrología (los mismos que usa el módulo de Metrología). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -160,6 +162,8 @@ export class AvanceOtService {
       factura: factura ? { numero: factura.numero ?? "(sin número)", estado: factura.estado } : null,
       calibraciones,
       coberturaPendiente: await hechosCobertura(this.prisma, ot.id, ot.tenantId).then((x) => x.pendientes).catch(() => []),
+      // OT directa o de Producción Nacional del BPCH (internación y reinspección tienen su ruta propia).
+      cabeceraBpch: !i && !r && (await otEsBpch(this.prisma, ot.unidadPrincipal)) ? faltantesParaEmitirInspeccion(await vistaCabecera(this.prisma, ot.id)) : [],
       ordenesInternas: ordenesInternas.map((o: any) => ({
         id: o.id,
         numero: o.numero,

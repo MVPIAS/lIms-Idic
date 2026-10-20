@@ -430,6 +430,93 @@ async function seccionDocumentos(C) {
 }
 
 
+const UB = {
+  planif: "demo.planificacion",
+  stgoJefe: "demo.sstgo.jefe",
+  stgoInsp: "demo.sstgo.inspector",
+  antofJefe: "demo.santof.jefe",
+  lqcJefe: "demo.lqc.jefe",
+  ventas: "demo.ventas",
+  admin: "demo.admin",
+};
+
+async function seccionCabeceraBpch(C) {
+  await paso("BPCH · OT directa de la Sucursal Santiago: sin cabecera no se emite el Informe de Inspección", async () => {
+    const labs = await ok(UB.planif, "GET", "/ot/laboratorios");
+    const sstgo = labs.find((u) => u.codigo === "SSTGO");
+    afirmar(sstgo, "SSTGO no figura entre los laboratorios");
+    const otRef = lista(await ok(UB.planif, "GET", "/ot?limit=20")).find((o) => o.clienteId || o.cliente?.id);
+    C.otB = await ok(UB.planif, "POST", "/ot", { clienteId: otRef.clienteId ?? otRef.cliente.id, unidadPrincipalId: sstgo.id, notas: "OT directa de inspección (r1b)" });
+    const f = await ok(UB.stgoJefe, "GET", `/bpch/cabecera-ot/${C.otB.id}`);
+    afirmar(f.esBpch && f.proceso === "DIRECTA" && f.editable && f.faltantesEmision.some((x) => /Registre la cabecera/.test(x)), JSON.stringify(f).slice(0, 240));
+    const pl = lista(await ok(UB.stgoJefe, "GET", "/plantillas?search=SCCII&limit=50"));
+    C.plSccii = pl.find((p) => p.repid === "SCCII");
+    afirmar(C.plSccii, "no hay plantilla SCCII");
+    const c = await ok(UB.stgoJefe, "POST", "/informes/condiciones", { otId: C.otB.id, plantillaId: C.plSccii.id, tipoDocumento: "INFORME_INSPECCION" });
+    afirmar(c.faltantes.some((x) => /cabecera de inspección/.test(x)), `faltantes ${c.faltantes.join(" | ")}`);
+    const a = await ok(UB.stgoJefe, "GET", `/ot/${C.otB.id}/avance`);
+    return `${C.otB.codigo} · etapa ${a.etapaActual}`;
+  });
+
+  await paso("BPCH · alcance y permisos: LQC 403; otra sucursal 403; Comercial no la registra (403); en una OT de LQC no aplica", async () => {
+    await exigir(403, UB.lqcJefe, "GET", `/bpch/cabecera-ot/${C.otB.id}`);
+    await exigir(403, UB.antofJefe, "PUT", `/bpch/cabecera-ot/${C.otB.id}`, { procedimiento: "SAC-PG01-P01" });
+    await exigir(403, UB.ventas, "PUT", `/bpch/cabecera-ot/${C.otB.id}`, { procedimiento: "SAC-PG01-P01" });
+    if (C.docOt) {
+      const lqc = await ok(UB.lqcJefe, "GET", `/bpch/cabecera-ot/${C.docOt.id}`);
+      afirmar(lqc.esBpch === false, "una OT de LQC dice tener cabecera BPCH");
+      await rechazo(400, /no es de una unidad del Banco de Pruebas/, UB.admin, "PUT", `/bpch/cabecera-ot/${C.docOt.id}`, { procedimiento: "SAC-PG01-P01" });
+    }
+    return "403 · 403 · 403 · no aplica en LQC";
+  });
+
+  await paso("BPCH · el inspector registra la cabecera (EP-10 10.3): validación, «Guardar cabecera → muestrear lotes» e historial", async () => {
+    const u = `/bpch/cabecera-ot/${C.otB.id}`;
+    await rechazo(400, /procedimiento de control/, UB.stgoInsp, "PUT", u, { lugarInspeccion: "Polvorín de prueba (r1b)" });
+    await rechazo(400, /CNC-DGMN/, UB.stgoInsp, "PUT", u, { procedimiento: "SAC-PG01-P01", cncDgmn: "123" });
+    await rechazo(400, /no puede superar/, UB.stgoInsp, "PUT", u, { procedimiento: "SAC-PG01-P01", tamanoLote: 5, tamanoMuestra: 8 });
+    const f = await ok(UB.stgoInsp, "PUT", u, {
+      procedimiento: "SAC-PG01-P01", lugarInspeccion: "Polvorín de prueba (r1b)", direccion: "Camino de prueba km 3", comuna: "Comuna de prueba",
+      fechaInspeccion: new Date().toISOString().slice(0, 10), inspectores: "R. R. · N. C.", documentoOrigen: "Solicitud de prueba 1/2026",
+      esquema: "LOTES", elementoEspecifico: "Emulsión de prueba", cncDgmn: "E-I/7/176/673/30365/3202", claseDivisionUn: "1.1D", numeroUn: "0241",
+      identificacionLote: "L-PRUEBA-01", tamanoLote: 100, tamanoMuestra: 8,
+    });
+    afirmar(f.faltantesEmision.length === 0, `faltan ${f.faltantesEmision}`);
+    afirmar(f.vista?.proceso === "DIRECTA" && f.vista.lugar_inspeccion === "Polvorín de prueba (r1b)" && f.vista.cnc_dgmn === "E-I/7/176/673/30365/3202", JSON.stringify(f.vista).slice(0, 240));
+    const g = await ok(UB.stgoJefe, "PUT", u, { lugarInspeccion: "Polvorín de prueba 2 (r1b)" });
+    afirmar(g.historial.length === 2 && g.historial[0].cambios.lugarInspeccion?.despues === "Polvorín de prueba 2 (r1b)", `historial ${JSON.stringify(g.historial).slice(0, 200)}`);
+    // Sin cambios no ensucia el historial.
+    const h = await ok(UB.stgoJefe, "PUT", u, { lugarInspeccion: "Polvorín de prueba 2 (r1b)" });
+    afirmar(h.historial.length === 2, "un guardado sin cambios quedó en el historial");
+    return `cabecera completa · ${g.historial.length} cambios en el historial`;
+  });
+
+  await paso("BPCH · la cabecera llega al Informe de Inspección (previsualización con {{bpch.*}})", async () => {
+    const c = await ok(UB.stgoJefe, "POST", "/informes/condiciones", { otId: C.otB.id, plantillaId: C.plSccii.id, tipoDocumento: "INFORME_INSPECCION" });
+    afirmar(!c.faltantes.some((x) => /cabecera de inspección/.test(x)), `aún falta la cabecera: ${c.faltantes.join(" | ")}`);
+    const p = await ok(UB.stgoJefe, "POST", "/informes/previsualizar", { otId: C.otB.id, plantillaId: C.plSccii.id });
+    const trozo = p.html.slice(Math.max(0, p.html.indexOf("Lugar de inspecci") - 40), p.html.indexOf("Lugar de inspecci") + 200);
+    afirmar(p.html.includes("Polvorín de prueba 2 (r1b)") && p.html.includes("E-I/7/176/673/30365/3202"), `el documento no imprime la cabecera de la OT directa: ${trozo}`);
+    afirmar(/3000\/\d{4}\/\d{5}\/\d{6}|CERT-/.test(p.html), "sin número en la vista previa");
+    return "lugar y CNC impresos";
+  });
+
+  await paso("BPCH · internación: la cabecera vive en el expediente; en la OT solo dirección, comuna y contacto", async () => {
+    const ints = lista(await ok(UB.admin, "GET", "/bpch/internaciones?limit=50"));
+    let otI = null;
+    for (const i of ints) {
+      if (!i.otId) continue;
+      const o = await ok(UB.admin, "GET", `/ot/${i.otId}`);
+      if (!["cerrada", "anulada"].includes(o.estado)) { otI = o; break; }
+    }
+    if (!otI) return "sin internación abierta en la base (lo recorre bpch-internacion-reinspeccion.js)";
+    await rechazo(400, /se registra en su expediente/, UB.admin, "PUT", `/bpch/cabecera-ot/${otI.id}`, { lugarInspeccion: "otro", direccion: "x" });
+    const f = await ok(UB.admin, "PUT", `/bpch/cabecera-ot/${otI.id}`, { direccion: "Puerto de prueba, sitio 4", contacto: "Jefe de bodega" });
+    afirmar(f.soloComplemento && f.vista?.proceso === "INTERNACION" && f.vista.direccion === "Puerto de prueba, sitio 4", JSON.stringify(f.vista).slice(0, 200));
+    return `${otI.codigo}: dirección en la cabecera de la internación`;
+  });
+}
+
 async function main() {
   console.log(`API ${BASE}`);
   if (ARRANCAR) arrancarApi();
@@ -437,6 +524,7 @@ async function main() {
   const C = {};
   await seccionOrdenesInternas(C);
   await seccionDocumentos(C);
+  await seccionCabeceraBpch(C);
 }
 
 main()

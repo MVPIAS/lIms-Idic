@@ -388,6 +388,8 @@ async function main() {
       ["evidencia", "evidencia.ver", (id) => `/evidencias/${id}`, null, "saec"],
       ["cotizacion", "cotizacion.ver", (id) => `/cotizaciones/${id}`, null, "fase1"],
       ["orden_interna", "ot.ver", (id) => `/ordenes-internas/${id}`],
+      ["ot", "ot.ver", (id) => `/bpch/cabecera-ot/${id}`],
+      ["ot", "certificado.emitir", (id) => `/informes/ot/${id}/cobertura`],
     ];
     for (const [tipo, perm, ruta, codigos, regla] of DETALLE) {
       if (!tiene(perm)) continue;

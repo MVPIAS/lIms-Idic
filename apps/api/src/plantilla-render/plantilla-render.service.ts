@@ -32,6 +32,8 @@ import {
   type CoberturaDoc,
 } from "./cobertura-documento";
 import { etiquetaDe, hechosCobertura, resultadosCubiertos } from "./cobertura-ot";
+import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
+import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
 import { escapeHtml } from "./html.util";
 import {
   armarInforme,
@@ -860,6 +862,12 @@ export class PlantillaRenderService {
       }));
       faltantes.push(...r.errores);
     }
+
+    // 4a. Informe de Inspección del BPCH (EP-10 10.11): la cabecera de inspección
+    // con lugar y fecha (registrada en la OT o en su expediente; en Producción
+    // Nacional, la del programa). La Delegación Nº 11 tiene su propio proceso.
+    if (tipoDocumento === "INFORME_INSPECCION" && (await otEsBpch(this.prisma, ot.unidadPrincipal)))
+      faltantes.push(...faltantesParaEmitirInspeccion(await vistaCabecera(this.prisma, otId)));
 
     // 4b. Documento final de una inspección BPCH: el Certificado de Conformidad
     // solo si la condición final es CUMPLE, el Informe de Incumplimiento solo
