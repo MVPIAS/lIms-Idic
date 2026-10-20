@@ -14,7 +14,7 @@ function cabeceras(): Record<string, string> {
 }
 
 /** Llamada a la API. Ante error lanza Error con el mensaje + los issues de zod. */
-export async function pedir<T = any>(metodo: "GET" | "POST" | "PATCH", ruta: string, cuerpo?: unknown): Promise<T> {
+export async function pedir<T = any>(metodo: "GET" | "POST" | "PATCH" | "PUT", ruta: string, cuerpo?: unknown): Promise<T> {
   const r = await fetch(`${API}${ruta}`, {
     method: metodo,
     headers: cabeceras(),
@@ -121,3 +121,30 @@ export const porVencer = (c: { estado: string; validaHasta?: string | null; expi
 
 export const etiquetaDe = (ops: Opcion[] | undefined, codigo?: string | null) =>
   (codigo && ops?.find((o) => o.codigo === codigo)?.etiqueta) || codigo || "—";
+
+/** GET que devuelve texto (vista previa HTML del documento). */
+export async function pedirTexto(ruta: string): Promise<string> {
+  const r = await fetch(`${API}${ruta}`, { headers: cabeceras() });
+  if (!r.ok) {
+    const j: any = await r.json().catch(() => ({}));
+    throw new Error(j?.message ?? `Error ${r.status}`);
+  }
+  return r.text();
+}
+
+/** Descarga el PDF de la cotización (protegido por JWT: un <a href> plano daría 401). */
+export async function descargarPdfCotizacion(id: string, codigo: string): Promise<void> {
+  const r = await fetch(`${API}/cotizaciones/${id}/pdf`, { headers: cabeceras() });
+  if (!r.ok) {
+    const j: any = await r.json().catch(() => ({}));
+    throw new Error(j?.message ?? `Error ${r.status} al generar el PDF`);
+  }
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `Cotizacion-${codigo.replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
