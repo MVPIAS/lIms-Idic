@@ -15,6 +15,7 @@ describe("órdenes internas · alcance sobre la OT de origen", () => {
     const prisma = {
       ordenTrabajo: { findFirst: jest.fn(async ({ where }: any) => (where.id === OT ? { codigo: "OT-1", unidadPrincipal: LQC } : null)) },
       ordenInterna: { findFirst: jest.fn(async () => ({ otId: OT })) },
+      muestra: { findFirst: jest.fn(async () => ({ otId: OT })) },
     };
     const alcance = {
       exigirUnidad: jest.fn(async (_req: any, unidad: string) => {
@@ -24,10 +25,12 @@ describe("órdenes internas · alcance sobre la OT de origen", () => {
     return { ctl: new OrdenInternaController(svc as any, prisma as any, alcance as any), svc };
   };
   const req = { user: { sub: "u", tenantId: "t" } };
+  // Datos obligatorios de la emisión (EP-01 2.2): muestra de origen, requisito y fecha de envío.
+  const emision = { muestraId: "44444444-4444-4444-4444-444444444444", requisito: "Cr ≤ 3 % (punto 4.2)", fechaEnvio: new Date().toISOString().slice(0, 10) };
 
   it("quien tiene la OT en su alcance crea, cambia y borra", async () => {
     const { ctl, svc } = crearCtl(true);
-    await ctl.crear({ otId: OT, detalle: "Cromo en cuero" }, req);
+    await ctl.crear({ otId: OT, detalle: "Cromo en cuero", ...emision }, req);
     await ctl.actualizar("22222222-2222-2222-2222-222222222222", { detalle: "x" }, req);
     await ctl.eliminar("22222222-2222-2222-2222-222222222222", req);
     expect(svc.crear).toHaveBeenCalled();

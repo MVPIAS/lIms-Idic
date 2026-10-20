@@ -1,10 +1,12 @@
 "use client";
 
 /**
- * Formulario de una orden interna (crear o editar mientras está abierta):
- * laboratorio de destino, ensayos del catálogo de ese laboratorio y detalle.
- * Los ensayos que ya figuran en la OT (resultados o cotización) aparecen
- * primero y marcados «en la OT».
+ * Formulario de una orden interna (crear o editar mientras está abierta),
+ * EP-01 2.2 «OT {código} · Órdenes internas · Nueva»: laboratorio de destino,
+ * muestra de origen, ensayos del catálogo de ese laboratorio, requisito y punto
+ * de la especificación, fecha de envío de la muestra y, si la hay, IE de
+ * referencia de la OT madre (LAL). Los ensayos que ya figuran en la OT
+ * (resultados o cotización) aparecen primero y marcados «en la OT».
  */
 import { useEffect, useMemo, useState } from "react";
 import Modal from "@/components/documentos/Modal";
@@ -13,12 +15,18 @@ import { toast } from "@/components/ui/feedback";
 import type { DestinoOi, EnsayoRef, OrdenInterna } from "./ordenesInternas";
 
 type EnsayoDestino = EnsayoRef & { enOt: boolean };
+type MuestraOt = { id: string; codigo: string; nombre: string | null };
+const hoyIso = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 export default function FormOrdenInterna({
   otId,
   otCodigo,
   orden,
   destinoUnidadSugerida,
+  muestraSugerida,
   onGuardada,
   onCerrar,
 }: {
@@ -28,6 +36,8 @@ export default function FormOrdenInterna({
   orden?: OrdenInterna | null;
   /** Unidad (laboratorio) que se propone como destino, p. ej. desde la recepción de la muestra. */
   destinoUnidadSugerida?: string | null;
+  /** Muestra que se propone como origen (p. ej. la que pidió otros laboratorios en la recepción). */
+  muestraSugerida?: string | null;
   onGuardada: (o: OrdenInterna) => void;
   onCerrar: () => void;
 }) {
@@ -37,6 +47,11 @@ export default function FormOrdenInterna({
   const [elegidos, setElegidos] = useState<Set<string>>(new Set(orden?.ensayos ?? []));
   const [filtro, setFiltro] = useState("");
   const [detalle, setDetalle] = useState(orden?.detalle ?? "");
+  const [muestras, setMuestras] = useState<MuestraOt[] | null>(null);
+  const [muestraId, setMuestraId] = useState(orden?.muestraId ?? muestraSugerida ?? "");
+  const [requisito, setRequisito] = useState(orden?.requisito ?? "");
+  const [fechaEnvio, setFechaEnvio] = useState(orden?.fechaEnvio ?? hoyIso());
+  const [ieReferencia, setIeReferencia] = useState(orden?.ieReferencia ?? "");
   const [error, setError] = useState("");
   const [guardando, setGuardando] = useState(false);
 
@@ -51,6 +66,17 @@ export default function FormOrdenInterna({
       })
       .catch((e) => { setDestinos([]); setError(e.message); });
   }, [otId, orden, destinoUnidadSugerida]);
+
+  // Muestras de la OT (la de origen viaja al laboratorio de destino).
+  useEffect(() => {
+    llamar<{ muestras?: MuestraOt[] }>("GET", `/flujo/ot/${otId}/registro-muestras`)
+      .then((r) => {
+        const ms = r.muestras ?? [];
+        setMuestras(ms);
+        if (!orden && !muestraSugerida && ms.length === 1) setMuestraId(ms[0].id);
+      })
+      .catch(() => setMuestras([]));
+  }, [otId, orden, muestraSugerida]);
 
   useEffect(() => {
     if (!destino) { setEnsayos(null); return; }
@@ -83,9 +109,20 @@ export default function FormOrdenInterna({
     setError("");
     if (!destino) { setError("Elija el laboratorio de destino."); return; }
     if (!elegidos.size) { setError("Marque al menos un ensayo que debe hacer el laboratorio de destino."); return; }
+    if (!muestraId) { setError("Elija la muestra de origen que se envía."); return; }
+    if (requisito.trim().length < 3) { setError("Indique el requisito y el punto de la especificación que debe evaluar el destino."); return; }
+    if (!fechaEnvio) { setError("Indique la fecha de envío de la muestra."); return; }
     setGuardando(true);
     try {
-      const cuerpo = { destinoLab: destino, ensayos: [...elegidos], detalle: detalle.trim() || (orden ? null : undefined) };
+      const cuerpo = {
+        destinoLab: destino,
+        ensayos: [...elegidos],
+        detalle: detalle.trim() || (orden ? null : undefined),
+        muestraId,
+        requisito: requisito.trim(),
+        fechaEnvio,
+        ieReferencia: ieReferencia.trim() || (orden ? null : undefined),
+      };
       const r = orden
         ? await llamar<OrdenInterna>("PATCH", `/ordenes-internas/${orden.id}`, cuerpo)
         : await llamar<OrdenInterna>("POST", "/ordenes-internas", { otId, tipo: "interna", ...cuerpo });
@@ -108,7 +145,7 @@ export default function FormOrdenInterna({
         <>
           <button type="button" className="btn outline sm" onClick={onCerrar}>Cancelar</button>
           <button type="button" className="btn primary sm" disabled={guardando} onClick={guardar}>
-            {guardando ? "Guardando…" : orden ? "Guardar cambios" : "Emitir orden interna"}
+            {guardando ? "Guardando…" : orden ? "Guardar cambios" : "Emitir OT interna → enviar muestra"}
           </button>
         </>
       }
@@ -119,6 +156,17 @@ export default function FormOrdenInterna({
       </p>
       {error && <div className="alert warn" role="alert">{error}</div>}
       <div className="form-grid cols-2">
+        <div className="field">
+          <label htmlFor="oi-muestra">Muestra de origen <span className="req">*</span></label>
+          <select id="oi-muestra" value={muestraId} onChange={(e) => setMuestraId(e.target.value)} disabled={muestras === null}>
+            <option value="">{muestras === null ? "Cargando muestras…" : muestras.length ? "— Seleccione —" : "La OT no tiene muestras registradas"}</option>
+            {(muestras ?? []).map((m) => <option key={m.id} value={m.id}>{m.codigo}{m.nombre ? ` · ${m.nombre}` : ""}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="oi-fecha">Fecha de envío de la muestra <span className="req">*</span></label>
+          <input id="oi-fecha" type="date" value={fechaEnvio} onChange={(e) => setFechaEnvio(e.target.value)} />
+        </div>
         <div className="field">
           <label htmlFor="oi-destino">Laboratorio de destino <span className="req">*</span></label>
           <select id="oi-destino" value={destino} onChange={(e) => cambiarDestino(e.target.value)} disabled={destinos === null}>
@@ -161,6 +209,20 @@ export default function FormOrdenInterna({
           </ul>
         )}
       </fieldset>
+
+      <div className="form-grid cols-2">
+        <div className="field span-2">
+          <label htmlFor="oi-requisito">Requisito y punto de la especificación <span className="req">*</span></label>
+          <input id="oi-requisito" maxLength={2000} value={requisito} onChange={(e) => setRequisito(e.target.value)}
+            aria-describedby="oi-requisito-ayuda" />
+          <small id="oi-requisito-ayuda" style={{ color: "var(--muted)" }}>Lo que debe evaluar el destino y de dónde sale, p. ej. «tafilete 0,6–0,8 mm IUP/4 · E.T. punto 4.2».</small>
+        </div>
+        <div className="field">
+          <label htmlFor="oi-ie">IE de referencia de la OT madre</label>
+          <input id="oi-ie" maxLength={80} value={ieReferencia} onChange={(e) => setIeReferencia(e.target.value)} aria-describedby="oi-ie-ayuda" />
+          <small id="oi-ie-ayuda" style={{ color: "var(--muted)" }}>Opcional (OT interna de LAL).</small>
+        </div>
+      </div>
 
       <div className="field">
         <label htmlFor="oi-detalle">Detalle para el laboratorio de destino</label>

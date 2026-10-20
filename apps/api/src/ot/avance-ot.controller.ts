@@ -33,7 +33,7 @@ export class AvanceOtService {
     if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
     await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
 
-    const [cotizacion, muestras, analistas, resultados, docs, factura, calibraciones, internacion, reinspeccion] = await Promise.all([
+    const [cotizacion, muestras, analistas, resultados, docs, factura, calibraciones, internacion, reinspeccion, ordenesInternas] = await Promise.all([
       ot.cotizacionId
         ? this.prisma.cotizacion.findFirst({ where: { id: ot.cotizacionId }, select: { codigo: true, estado: true } })
         : null,
@@ -100,6 +100,17 @@ export class AvanceOtService {
           ORDER BY r.created_at DESC LIMIT 1`,
         id,
       ),
+      // Órdenes internas de la OT (align_r1b_ordenes_internas.sql): las pendientes frenan el análisis.
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT oi.id, oi.numero, oi.estado, oi.respondida_at IS NOT NULL AS respondida, oi.aceptada_at IS NOT NULL AS aceptada,
+                (SELECT u.codigo FROM cat_familia f JOIN unidad u ON u.tenant_id = f.tenant_id AND u.activa
+                    AND f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))
+                  WHERE f.id = oi.destino_lab ORDER BY (u.tipo = 'LABORATORIO') DESC, u.codigo LIMIT 1) AS destino
+           FROM orden_interna oi
+          WHERE oi.ot_id = $1::uuid AND oi.deleted_at IS NULL AND oi.estado <> 'anulada'
+          ORDER BY oi.created_at`,
+        id,
+      ).catch(() => []),
     ]);
 
     const cuenta = (...estados: string[]) => resultados.filter((r) => estados.includes(r.estado ?? "")).reduce((s, r) => s + r._count._all, 0);
@@ -147,6 +158,14 @@ export class AvanceOtService {
       documentos,
       factura: factura ? { numero: factura.numero ?? "(sin número)", estado: factura.estado } : null,
       calibraciones,
+      ordenesInternas: ordenesInternas.map((o: any) => ({
+        id: o.id,
+        numero: o.numero,
+        estado: o.estado,
+        destino: o.destino ?? null,
+        respondida: Boolean(o.respondida),
+        aceptada: Boolean(o.aceptada),
+      })),
       internacion: i
         ? {
             id: i.id,

@@ -83,6 +83,19 @@ export interface DocumentoAvance {
   pendientes?: { rol: string; unidad: string | null; personas: { id: string; nombre: string }[] }[];
 }
 
+/** Orden interna de la OT (derivación a otro laboratorio): estado y si el solicitante ya la integró. */
+export interface OrdenInternaAvance {
+  id: string;
+  numero: string;
+  /** abierta | recibida | cerrada | anulada */
+  estado: string;
+  /** Código de la unidad de destino. */
+  destino: string | null;
+  respondida: boolean;
+  /** El solicitante la dio por recibida («Dar por recibido → evaluación»). */
+  aceptada: boolean;
+}
+
 export interface CalibracionAvance {
   codigo: string;
   numeroCertificado?: string | null;
@@ -108,6 +121,8 @@ export interface HechosOt {
   factura: { numero: string; estado: string } | null;
   /** Calibraciones de Metrología ligadas a la OT (por id o por su código). */
   calibraciones?: CalibracionAvance[];
+  /** Órdenes internas emitidas desde la OT (sin las anuladas). */
+  ordenesInternas?: OrdenInternaAvance[];
   internacion?: {
     id: string;
     numero: string;
@@ -368,9 +383,56 @@ interface Ruta {
   paso: (clave: string) => Paso | null;
 }
 
+/**
+ * Órdenes internas que frenan el análisis: las que el destino aún no cierra
+ * (abierta o recibida) y las cerradas que el solicitante no ha dado por
+ * recibidas (EP-01 3.7 «Dar por recibido → evaluación»).
+ */
+function ordenesPendientes(h: HechosOt) {
+  const oi = (h.ordenesInternas ?? []).filter((o) => o.estado !== "anulada");
+  return {
+    enDestino: oi.filter((o) => o.estado === "abierta" || o.estado === "recibida"),
+    porIntegrar: oi.filter((o) => o.estado === "cerrada" && !o.aceptada),
+  };
+}
+
+/** Siguiente paso de una orden interna pendiente: le toca al destino o al solicitante. */
+function pasoOrdenInterna(h: HechosOt): Paso | null {
+  const { enDestino, porIntegrar } = ordenesPendientes(h);
+  const o = enDestino[0];
+  if (o)
+    return {
+      texto:
+        o.estado === "abierta"
+          ? `Recibir la orden interna ${o.numero} en ${o.destino ?? "el laboratorio de destino"}`
+          : o.respondida
+            ? `Cerrar la orden interna ${o.numero} y devolver el informe`
+            : `Responder la orden interna ${o.numero}: resultados, horas y costo directo`,
+      leToca: { rol: "Jefe de Laboratorio", unidad: o.destino, personas: [] },
+      accion: { texto: "Ir a la orden interna", ruta: `/ordenes-internas/${o.id}`, permisos: ["orden_interna.responder"] },
+    };
+  const p = porIntegrar[0];
+  if (p)
+    return {
+      texto: `Dar por recibido el informe de la orden interna ${p.numero} e integrar sus resultados`,
+      leToca: { rol: "Jefe de Laboratorio", unidad: lab(h), personas: [] },
+      accion: { texto: "Ir a la orden interna", ruta: `/ordenes-internas/${p.id}`, permisos: ["orden_interna.emitir"] },
+    };
+  return null;
+}
+
 function rutaLaboratorio(h: HechosOt): Ruta {
   const u = lab(h);
   const res = etapasResultados(h);
+  // Una orden interna sin cerrar o sin integrar deja el análisis en curso.
+  const oiPend = ordenesPendientes(h);
+  const nOi = oiPend.enDestino.length + oiPend.porIntegrar.length;
+  if (nOi > 0 && res.analisis.estado === "hecho")
+    res.analisis = {
+      ...res.analisis,
+      estado: "en_curso",
+      detalle: `${res.analisis.detalle ?? ""}${res.analisis.detalle ? " · " : ""}${plural(nOi, "orden interna pendiente", "órdenes internas pendientes")}`,
+    };
   const docs = etapasDocumentos(h.documentos);
   const cierre = etapaCierre(h);
   const fac = etapasFactura(h);
@@ -423,6 +485,12 @@ function rutaLaboratorio(h: HechosOt): Ruta {
             accion: { texto: "Ir a Asignación", pestana: "asignacion", permisos: ["ot.asignar"] },
           };
         case "analisis":
+          // Con todo lo propio capturado, lo que falta es la orden interna.
+          if (h.resultados.pendientes + h.resultados.devueltos === 0 && h.resultados.total > 0) {
+            const oi = pasoOrdenInterna(h);
+            if (oi) return oi;
+          }
+          return pasoResultados(h, clave);
         case "revision":
         case "aprobacion":
           return pasoResultados(h, clave);
