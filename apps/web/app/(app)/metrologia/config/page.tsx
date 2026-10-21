@@ -206,28 +206,7 @@ export default function MetrologiaConfigPage() {
       )}
 
       {tab === "numeracion" && (
-        <div className="card card--table" style={{ maxWidth: 640 }}>
-          <div style={{ padding: "12px 16px" }}>
-            <h3 style={H3}>Numeración de certificados por magnitud (sin año)</h3>
-            <p style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 0" }}>Al emitir, el certificado toma el número siguiente de su magnitud. Antes de la puesta en marcha, fije el último número emitido fuera del LIMS.</p>
-          </div>
-          <table className="data">
-            <thead><tr><th>Prefijo</th><th className="num">Último emitido</th><th>Próximo</th>{editar && <th></th>}</tr></thead>
-            <tbody>
-              {num.map((n) => (
-                <tr key={n.prefijo}>
-                  <td className="codigo">{n.prefijo}-</td>
-                  <td className="num">{n.ultimo}</td>
-                  <td className="codigo">{n.prefijo}-{String(n.ultimo + 1).padStart(n.relleno, "0")}</td>
-                  {editar && <td><button className="btn sm" onClick={() => {
-                    const v = window.prompt(`Último número emitido con el prefijo ${n.prefijo}-`, String(n.ultimo));
-                    if (v != null && v.trim() !== "") guardar(() => pedir(`/metrologia/numeracion/${n.prefijo}`, { method: "PUT", body: JSON.stringify({ ultimo: Number(v) }) }), "Numeración actualizada");
-                  }}>Fijar</button></td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Numeracion filas={num} editar={editar} guardar={(prefijo, cuerpo) => guardar(() => pedir(`/metrologia/numeracion/${prefijo}`, { method: "PUT", body: JSON.stringify(cuerpo) }), `Numeración ${prefijo} actualizada`)} />
       )}
 
       {tab === "calculo" && (
@@ -281,6 +260,56 @@ export default function MetrologiaConfigPage() {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Numeración de certificados por laboratorio (EP-04 §6): prefijo, formato y
+ * correlativo continuo o anual (LCPNF-NNN.AA). El último número real lo fija el
+ * IDIC antes de la puesta en marcha; no puede quedar por debajo de lo ya emitido.
+ */
+function Numeracion({ filas, editar, guardar }: { filas: any[]; editar: boolean; guardar: (prefijo: string, cuerpo: any) => void }) {
+  const [ed, setEd] = useState<any>(null);
+  return (
+    <div className="card card--table" style={{ maxWidth: 900 }}>
+      <div style={{ padding: "12px 16px" }}>
+        <h3 style={H3}>Numeración de certificados por laboratorio y magnitud</h3>
+        <p style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 0" }}>
+          Al emitir, el certificado toma el número siguiente de su prefijo. Formato: {"{P}"} prefijo · {"{N}"} correlativo · {"{AA}"} año en dos cifras.
+          Los correlativos anuales vuelven a 1 cada año. Antes de la puesta en marcha, fije el último número emitido fuera del LIMS.
+        </p>
+      </div>
+      <table className="data">
+        <thead><tr><th>Prefijo</th><th>Procesos</th><th>Formato</th><th>Correlativo</th><th className="num">Último emitido</th><th>Próximo</th>{editar && <th></th>}</tr></thead>
+        <tbody>
+          {filas.map((n) => ed?.prefijo === n.prefijo ? (
+            <tr key={n.prefijo}>
+              <td className="codigo">{n.prefijo}</td>
+              <td>{(n.procesos ?? []).join(", ") || "—"}</td>
+              <td><input aria-label="Formato" value={ed.formato} onChange={(e) => setEd({ ...ed, formato: e.target.value })} style={{ width: 130 }} />
+                <input aria-label="Ceros a la izquierda" type="number" min={0} max={8} value={ed.relleno} onChange={(e) => setEd({ ...ed, relleno: e.target.value })} style={{ width: 52, marginLeft: 4 }} title="Ceros a la izquierda" /></td>
+              <td><label style={{ fontSize: 12 }}><input type="checkbox" checked={ed.anual} onChange={(e) => setEd({ ...ed, anual: e.target.checked })} /> Anual</label></td>
+              <td className="num"><input aria-label="Último emitido" type="number" min={0} value={ed.ultimo} onChange={(e) => setEd({ ...ed, ultimo: e.target.value })} style={{ width: 90 }} /></td>
+              <td>—</td>
+              <td style={{ whiteSpace: "nowrap" }}>
+                <button className="btn primary sm" onClick={() => { guardar(n.prefijo, { ultimo: Number(ed.ultimo), formato: ed.formato.trim(), relleno: Number(ed.relleno), anual: ed.anual }); setEd(null); }}>Guardar</button>{" "}
+                <button className="btn sm" onClick={() => setEd(null)}>Cancelar</button>
+              </td>
+            </tr>
+          ) : (
+            <tr key={n.prefijo}>
+              <td className="codigo">{n.prefijo}</td>
+              <td>{(n.procesos ?? []).join(", ") || <span style={{ color: "var(--muted)" }}>Sin proceso</span>}</td>
+              <td className="codigo">{n.formato}{n.relleno ? ` · ${n.relleno} cifras` : ""}</td>
+              <td>{n.anual ? `Anual${n.anio ? ` (${n.anio})` : ""}` : "Continuo"}</td>
+              <td className="num">{n.ultimo}</td>
+              <td className="codigo">{n.proximo}</td>
+              {editar && <td><button className="btn sm" onClick={() => setEd({ prefijo: n.prefijo, formato: n.formato, relleno: n.relleno, anual: !!n.anual, ultimo: n.ultimo })}>Editar</button></td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -152,6 +152,7 @@ m as (
  union all select 'solicitud_costeo', s.id, array_remove(array[u.codigo], null) from solicitud_costeo s left join unidad u on u.id = s.unidad_id where s.deleted_at is null and s.unidad_id is not null
  union all select 'encuesta', e.id, array_remove(array[u.codigo], null) from encuesta_satisfaccion e left join unidad u on u.id = e.unidad_id
  union all select 'met_calibracion', c.id, array_remove(array[coalesce(u.codigo, ou.uc)], null) from met_calibracion c left join unidad u on u.id = c.unidad_id left join ou on ou.id = c.ot_id
+ union all select 'met_ot_instrumento', i.id, array_remove(array[ou.uc], null) from met_ot_instrumento i left join ou on ou.id = i.ot_id
  union all select 'bpch_internacion', b.id, array_remove(array[u.codigo], null) from bpch_internacion b left join unidad u on u.id = b.unidad_inspeccion_id
  union all select 'bpch_reinspeccion', b.id, array_remove(array[u.codigo], null) from bpch_reinspeccion b left join unidad u on u.id = b.unidad_inspeccion_id
  union all select 'bpch_prototipo', id, array_remove(array[c], null) from proto
@@ -242,6 +243,7 @@ const LISTADOS = [
   { n: "Equipos", r: "/equipos?limit=200", p: "equipo.ver", t: "equipo", regla: "equipo", href: "/equipos" },
   { n: "Calibraciones de equipos", r: "/calibraciones?limit=200", p: "equipo.ver", t: "calibracion_equipo", regla: "equipo" },
   { n: "Metrología · calibraciones", r: "/metrologia/calibraciones?limit=200", p: "metrologia.ver", t: "met_calibracion", regla: "unidad", href: "/metrologia" },
+  { n: "Metrología · instrumentos por calibrar (R1 r1a)", r: "/metrologia/instrumentos", p: "metrologia.ver", t: "met_ot_instrumento", regla: "unidad" },
   { n: "BPCH internaciones", r: "/bpch/internaciones?limit=200", p: "bpch.internacion.ver", t: "bpch_internacion", regla: "bpch", href: "/bpch/internaciones" },
   { n: "Internaciones OT (heredada)", r: "/internaciones/ot?limit=200", p: "ot.ver", t: "ot", regla: "bpch" },
   { n: "BPCH reinspecciones", r: "/bpch/reinspecciones?limit=200", p: "bpch.reinspeccion.ver", t: "bpch_reinspeccion", regla: "bpch", href: "/bpch/reinspecciones" },
@@ -391,6 +393,7 @@ async function main() {
       ["bpch_prototipo", "bpch.prototipo.ver", (id) => `/bpch/prototipos/${id}`, null, "bpch"],
       ["bpch_clasificacion", "bpch.clasificacion.ver", (id) => `/bpch/clasificaciones/${id}`, null, "bpch"],
       ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}`],
+      ["ot", "ot.ver", (id) => `/ot/${id}/metrologia`],
       ["evidencia", "evidencia.ver", (id) => `/evidencias/${id}`, null, "saec"],
       ["cotizacion", "cotizacion.ver", (id) => `/cotizaciones/${id}`, null, "fase1"],
       ["encuesta", "encuesta.ver", (id) => `/encuestas/${id}`],

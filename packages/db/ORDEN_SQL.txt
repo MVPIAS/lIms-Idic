@@ -85,3 +85,4 @@ align_r1b_numeracion.sql
 align_r1b_ordenes_internas.sql
 align_r1b_documentos_ot.sql
 align_r1b_bpch_cabecera.sql
+align_metrologia_ot.sql

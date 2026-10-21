@@ -1,4 +1,4 @@
-import { calcularAvance, puedeActuar, tipoRuta, type DocumentoAvance, type HechosOt } from "./avance-ot";
+import { calcularAvance, puedeActuar, tipoRuta, type CalibracionAvance, type DocumentoAvance, type HechosOt, type InstrumentoAvance } from "./avance-ot";
 
 /** OT de laboratorio recién nacida de una cotización aceptada (estado «recepcionada»). */
 function base(p: Partial<HechosOt> = {}): HechosOt {
@@ -214,39 +214,86 @@ describe("Ruta de la OT · OT interna, interlaboratorio y sin cobro", () => {
   }
 });
 
-describe("Ruta de la OT · Metrología", () => {
+describe("Ruta de la OT · Metrología (EP-04: calibración ligada a la OT)", () => {
   const met = (p: Partial<HechosOt> = {}) => base({ unidad: { codigo: "LMT", esMetrologia: true }, origen: "OT_INTERNA", conCobro: false, cotizacion: null, ...p });
-  const cal = (estado: string, codigo = "CAL-1") => ({ codigo, estado, numeroCertificado: estado === "emitida" ? "M-001" : null });
+  const ins = (estado: string, p: Partial<InstrumentoAvance> = {}): InstrumentoAvance => ({ id: "i1", numero: 1, descripcion: "Balanza", estado, metrologo: "L. S.", metrologoId: "u-m", ...p });
+  const cal = (estado: string, p: Partial<CalibracionAvance> = {}): CalibracionAvance =>
+    ({ id: "c1", instrumentoId: "i1", codigo: "CAL-1", estado, numeroCertificado: estado === "emitida" ? "M-001" : null, ...p });
 
-  it("sin calibración: Toma de datos y cálculo, le toca al Metrólogo", () => {
+  it("sin instrumentos: etapas de Metrología y le toca registrar los instrumentos", () => {
     const h = met();
     const a = calcularAvance(h);
     expect(tipoRuta(h)).toBe("metrologia");
-    expect(a.etapas.map((e) => e.clave)).toEqual(["apertura", "calibracion", "revision_tecnica", "firma_emision", "entrega", "cierre", "factura", "pago"]);
-    expect(a.etapaActual).toBe("calibracion");
-    expect(a.siguiente?.texto).toBe("Registrar la calibración indicando la OT OT-2026-0001");
-    expect(a.siguiente?.accion).toMatchObject({ ruta: "/metrologia/nueva", permisos: ["metrologia.crear"] });
+    expect(a.etapas.map((e) => e.clave)).toEqual(["apertura", "asignacion", "recepcion", "calibracion", "revision_tecnica", "firma_emision", "entrega", "cierre", "factura", "pago"]);
+    expect(a.etapaActual).toBe("asignacion");
+    expect(a.siguiente?.texto).toContain("Registrar los instrumentos de la OT");
+    expect(a.siguiente?.accion).toMatchObject({ pestana: "instrumentos" });
   });
 
-  it("borrador (o «calculada» heredada): sigue en Toma de datos", () => {
-    expect(calcularAvance(met({ calibraciones: [cal("calculada")] })).siguiente?.texto).toBe("Completar y enviar a revisión CAL-1");
+  it("instrumento sin metrólogo: Programación del Jefe de Laboratorio", () => {
+    const a = calcularAvance(met({ instrumentos: [ins("por_recibir", { metrologo: null, metrologoId: null })] }));
+    expect(a.etapaActual).toBe("asignacion");
+    expect(a.siguiente?.accion?.permisos).toEqual(["ot.asignar"]);
+  });
+
+  it("asignado y por recibir: Recepción del instrumento (custodia)", () => {
+    const a = calcularAvance(met({ instrumentos: [ins("por_recibir")] }));
+    expect(a.etapaActual).toBe("recepcion");
+    expect(a.siguiente?.texto).toBe("Registrar la recepción de ítem 1 (Balanza)");
+  });
+
+  it("recibido sin calibración: Calibrar el ítem (no hay calibración suelta)", () => {
+    const a = calcularAvance(met({ instrumentos: [ins("recibido")] }));
+    expect(a.etapaActual).toBe("calibracion");
+    expect(a.siguiente?.texto).toBe("Calibrar ítem 1 (Balanza)");
+    expect(a.siguiente?.leToca?.personas).toEqual(["L. S."]);
+  });
+
+  it("borrador (o «calculada» heredada): sigue en Toma de datos y lleva a la ficha", () => {
+    const a = calcularAvance(met({ instrumentos: [ins("recibido")], calibraciones: [cal("calculada")] }));
+    expect(a.siguiente?.texto).toBe("Completar y enviar a revisión CAL-1");
+    expect(a.siguiente?.accion?.ruta).toBe("/metrologia/c1");
   });
 
   it("en revisión: Revisión técnica del Jefe de Laboratorio", () => {
-    const a = calcularAvance(met({ calibraciones: [cal("en_revision")] }));
+    const a = calcularAvance(met({ instrumentos: [ins("recibido")], calibraciones: [cal("en_revision")] }));
     expect(a.etapaActual).toBe("revision_tecnica");
     expect(a.siguiente?.leToca?.rol).toBe("Jefe de Laboratorio de Metrología");
   });
 
   it("en firma: Firma y emisión", () => {
-    expect(calcularAvance(met({ calibraciones: [cal("en_firma")] })).etapaActual).toBe("firma_emision");
+    expect(calcularAvance(met({ instrumentos: [ins("recibido")], calibraciones: [cal("en_firma")] })).etapaActual).toBe("firma_emision");
   });
 
-  it("emitida: la entrega queda bloqueada y se explica por qué", () => {
-    const a = calcularAvance(met({ calibraciones: [cal("emitida"), cal("reemplazada", "CAL-0")] }));
+  it("emitida: la Entrega ya NO está bloqueada; primero la entrega del certificado", () => {
+    const a = calcularAvance(met({ instrumentos: [ins("recibido")], calibraciones: [cal("reemplazada", { id: "c0", codigo: "CAL-0" }), cal("emitida")] }));
     expect(a.etapaActual).toBe("entrega");
-    expect(estados(a).entrega).toBe("bloqueado");
-    expect(a.siguiente?.texto).toContain("integración de Metrología con la OT pendiente");
+    expect(estados(a).entrega).toBe("en_curso");
+    expect(a.siguiente?.texto).toBe("Registrar la entrega del certificado M-001");
+    expect(a.siguiente?.accion).toMatchObject({ pestana: "instrumentos", permisos: ["certificado.entregar", "metrologia.crear"] });
+  });
+
+  it("entregado pero el instrumento sigue en custodia: devolución con acta", () => {
+    const a = calcularAvance(met({ instrumentos: [ins("recibido")], calibraciones: [cal("emitida", { entregadoAt: "2026-10-20" })] }));
+    expect(a.etapaActual).toBe("entrega");
+    expect(a.siguiente?.texto).toBe("Registrar la devolución de ítem 1 (Balanza) (acta)");
+  });
+
+  it("sin exigir devolución (parámetro): con el certificado entregado pasa al cierre", () => {
+    const a = calcularAvance(met({ exigeDevolucion: false, instrumentos: [ins("recibido")], calibraciones: [cal("emitida", { entregadoAt: "2026-10-20" })] }));
+    expect(a.etapaActual).toBe("cierre");
+    expect(a.siguiente?.texto).toBe("Cerrar la OT: todo está aprobado, oficial y entregado");
+  });
+
+  it("entregado y devuelto: Cierre de la OT, que cuenta el certificado de calibración como documento", () => {
+    const a = calcularAvance(met({ instrumentos: [ins("devuelto")], calibraciones: [cal("emitida", { entregadoAt: "2026-10-20" })] }));
+    expect(a.etapaActual).toBe("cierre");
+    expect(a.siguiente?.texto).not.toContain("no tiene informes");
+  });
+
+  it("con cobro y cerrada: factura pendiente", () => {
+    const a = calcularAvance(met({ conCobro: true, estado: "cerrada", instrumentos: [ins("devuelto")], calibraciones: [cal("emitida", { entregadoAt: "2026-10-20" })], factura: { numero: "PEND-1", estado: "pendiente" } }));
+    expect(a.etapaActual).toBe("factura");
   });
 
   it("un laboratorio de Metrología que usa la captura estándar sigue la ruta de laboratorio", () => {

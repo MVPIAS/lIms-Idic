@@ -162,7 +162,11 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
             </tbody>
           </table>
         ) : (
-          <p className="subtitle" style={{ margin: 0 }}>Todavía no se ha emitido ningún informe para esta OT.</p>
+          <p className="subtitle" style={{ margin: 0 }}>
+            {d.calibraciones?.length
+              ? "Sin informes del flujo general: los certificados de calibración de la OT se listan arriba y cuentan para el cierre."
+              : "Todavía no se ha emitido ningún informe para esta OT."}
+          </p>
         )}
       </div>
 
