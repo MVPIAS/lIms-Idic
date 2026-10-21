@@ -131,6 +131,7 @@ cot as (
      select ou.uc c from ou where ou.id = c.ot_id
      union select ou2.uc from orden_trabajo o2 join ou ou2 on ou2.id = o2.id where o2.cotizacion_id = c.id
      union select u.codigo from centro_costo cc join unidad u on u.id = cc.unidad_id where cc.id = c.centro_costo_id
+     union select u.codigo from solicitud_costeo s join unidad u on u.id = s.unidad_id where s.cotizacion_id = c.id and s.deleted_at is null
      union select famu.c from linea_cotizacion l join cat_ensayo e on e.id = l.cat_ensayo_id join famu on famu.fid = e.familia_id where l.cotizacion_id = c.id
   ) x on true group by c.id),
 proto as (select p.id, p.clasificacion_id, coalesce(uo.codigo, up.codigo) c from bpch_prototipo p
@@ -248,7 +249,7 @@ const LISTADOS = [
   { n: "BPCH codificación única", r: "/bpch/codificacion?limit=50", p: "bpch.codificacion.ver", regla: "comun", href: "/bpch/codificacion" },
   { n: "BPCH producción nacional", r: "/bpch/pn/oc?limit=50", p: "bpch.pn.ver", regla: "comun", href: "/bpch/produccion-nacional" },
   // Circuito de la cotización y encuestas (frente r1c).
-  { n: "Cotizaciones por responder (laboratorio)", r: "/cotizaciones/solicitudes-laboratorio", p: "cotizacion.costear", t: "solicitud_costeo", regla: "unidad", href: "/cotizaciones/por-responder" },
+  { n: "Cotizaciones por responder (laboratorio)", r: "/cotizaciones/solicitudes-laboratorio", p: "cotizacion.ver", t: "solicitud_costeo", regla: "unidad", href: "/cotizaciones/por-responder" },
   { n: "Encuestas de satisfacción", r: "/encuestas?limit=200", p: "encuesta.ver", t: "encuesta", regla: "unidad", href: "/encuestas" },
   { n: "SAEC casos", r: "/saec/casos?limit=200", p: "caso.ver", regla: "saec" },
   { n: "SAEC evidencias", r: "/evidencias?limit=200", p: "evidencia.ver", regla: "saec", href: "/saec" },

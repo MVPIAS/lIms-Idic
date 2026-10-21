@@ -209,7 +209,7 @@ function TarjetaSolicitud({ sol, c, puedeRetirar, onResponder, onVb, onRetirar }
         </div>
       )}
 
-      {vbExige !== "ninguno" && sol.estado !== "rechazado" && (
+      {vbExige !== "ninguno" && sol.respondidaAt && sol.estado !== "rechazado" && (
         <ol aria-label="V°B° de la respuesta" style={{ listStyle: "none", padding: 0, margin: "8px 0 0", display: "flex", gap: 14, flexWrap: "wrap", fontSize: 12.5 }}>
           <li>
             <b>V°B° laboratorio:</b>{" "}

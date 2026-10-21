@@ -124,11 +124,12 @@ function TablaSeccion({ sec, filas, onCambio }: { sec: (typeof SECCIONES)[number
                 {sec.cols.map((c) => (
                   <td key={c.k}>
                     {c.tipo === "opcion" ? (
-                      <select aria-label={`${c.l} · fila ${i + 1}`} value={f[c.k]} onChange={(e) => set(i, c.k, e.target.value)}>
+                      <select className="celda" aria-label={`${c.l} · fila ${i + 1}`} value={f[c.k]} onChange={(e) => set(i, c.k, e.target.value)}>
                         {c.ops!.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                     ) : (
                       <input
+                        className="celda"
                         aria-label={`${c.l} · fila ${i + 1}`}
                         inputMode={c.tipo === "numero" ? "decimal" : undefined}
                         value={f[c.k]}
@@ -295,10 +296,10 @@ export default function RespuestaLaboratorio({
             <tbody>
               {etapas.map((e, i) => (
                 <tr key={i}>
-                  <td><input aria-label={`Actividad ${i + 1}`} value={e.actividad} maxLength={300} onChange={(x) => setEtapas(etapas.map((y, j) => (j === i ? { ...y, actividad: x.target.value } : y)))} /></td>
-                  <td><input aria-label={`Inicio ${i + 1}`} type="date" value={e.inicio} onChange={(x) => setEtapas(etapas.map((y, j) => (j === i ? { ...y, inicio: x.target.value } : y)))} /></td>
-                  <td><input aria-label={`Término ${i + 1}`} type="date" value={e.termino} onChange={(x) => setEtapas(etapas.map((y, j) => (j === i ? { ...y, termino: x.target.value } : y)))} /></td>
-                  <td><input aria-label={`Recursos ${i + 1}`} value={e.recursos} maxLength={500} onChange={(x) => setEtapas(etapas.map((y, j) => (j === i ? { ...y, recursos: x.target.value } : y)))} /></td>
+                  <td><input className="celda" aria-label={`Actividad ${i + 1}`} value={e.actividad} maxLength={300} onChange={(x) => setEtapas(etapas.map((y, j) => (j === i ? { ...y, actividad: x.target.value } : y)))} /></td>
+                  <td><input className="celda" aria-label={`Inicio ${i + 1}`} type="date" value={e.inicio} onChange={(x) => setEtapas(etapas.map((y, j) => (j === i ? { ...y, inicio: x.target.value } : y)))} /></td>
+                  <td><input className="celda" aria-label={`Término ${i + 1}`} type="date" value={e.termino} onChange={(x) => setEtapas(etapas.map((y, j) => (j === i ? { ...y, termino: x.target.value } : y)))} /></td>
+                  <td><input className="celda" aria-label={`Recursos ${i + 1}`} value={e.recursos} maxLength={500} onChange={(x) => setEtapas(etapas.map((y, j) => (j === i ? { ...y, recursos: x.target.value } : y)))} /></td>
                   <td><button type="button" className="btn outline sm" aria-label={`Quitar etapa ${i + 1}`} onClick={() => setEtapas(etapas.filter((_, j) => j !== i))}>✕</button></td>
                 </tr>
               ))}

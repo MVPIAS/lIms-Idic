@@ -22,6 +22,8 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { ConfiguracionModule, MailService } from "../configuracion/configuracion.module";
 import { cotizacionOficial, datosFirmaCotizacion, nombrePdfCotizacion, pdfCotizacion } from "../cotizacion/cotizacion-documento";
+import { exigirCotizacionEnAlcance } from "../cotizacion/alcance-cotizacion";
+import { AlcanceService } from "../rbac/alcance.service";
 import {
   PLANTILLAS_CORREO,
   TipoCorreo,
@@ -131,7 +133,10 @@ const EnviarResultadoSchema = z.object({
 export class MensajeriaService {
   private prisma = new PrismaClient();
 
-  constructor(private readonly mail: MailService) {}
+  constructor(
+    private readonly mail: MailService,
+    private readonly alcance: AlcanceService,
+  ) {}
 
   tenantId(req: any): string {
     const id = req?.user?.tenantId;
@@ -260,6 +265,7 @@ export class MensajeriaService {
     opts: { pdf?: Buffer } = {},
   ) {
     const tenantId = this.tenantId(req);
+    await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, cotizacionId);
     const cot = await this.prisma.cotizacion.findFirst({
       where: { id: cotizacionId, tenantId },
       include: { cliente: true, lineas: true },
@@ -433,9 +439,13 @@ export class MensajeriaController {
     return this.svc.historial(req, { tipo, q, estado, page, limit });
   }
 
-  /** Envía la cotización con su PDF adjunto usando la plantilla elegida. */
+  /**
+   * Envía la cotización con su PDF adjunto usando la plantilla elegida. Enviar
+   * es tarea del ejecutivo (EP-00 3.4): `cotizacion.crear` y la cotización en su
+   * alcance (antes bastaba `cotizacion.ver`).
+   */
   @Post("cotizacion/:id")
-  @RequierePermiso("cotizacion.ver")
+  @RequierePermiso("cotizacion.crear")
   enviarCotizacion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const dto = EnviarCotizacionSchema.parse(body ?? {});
     return this.svc.enviarCotizacion(req, id, dto);

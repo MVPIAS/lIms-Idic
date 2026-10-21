@@ -147,7 +147,7 @@ function Lista({ modo, puedeRegistrar, onRegistrar, onCerrar }: { modo: "pendien
           <tbody>
             {filas.map((f) => (
               <tr key={f.id}>
-                <td>{f.otId ? <Link href={`/ot/${f.otId}` as any} className="codigo" style={{ textDecoration: "underline" }}>{f.otCodigo}</Link> : f.codigo}{f.cotizacionCodigo ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Cot. {f.cotizacionCodigo}</div> : null}</td>
+                <td style={{ whiteSpace: "nowrap" }}>{f.otId ? <Link href={`/ot/${f.otId}` as any} className="codigo" style={{ textDecoration: "underline" }}>{f.otCodigo}</Link> : f.codigo}{f.cotizacionCodigo ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Cot. {f.cotizacionCodigo}</div> : null}</td>
                 <td>{f.cliente ?? "—"}</td>
                 <td title={f.unidadNombre}>{f.unidadCodigo ?? "—"}</td>
                 <td>{fechaDia(f.fechaApertura ?? f.createdAt)}</td>
@@ -427,12 +427,12 @@ function Preguntas({ onMensaje }: { onMensaje: (m: string) => void }) {
         <tbody>
           {ps.map((p, i) => (
             <tr key={p.id ?? `n${i}`}>
-              <td><input aria-label={`Código ${i + 1}`} value={p.codigo} disabled={!!p.id} maxLength={20} onChange={(e) => set(i, { codigo: e.target.value.toUpperCase() })} /></td>
-              <td><input aria-label={`Texto ${i + 1}`} value={p.texto} maxLength={300} onChange={(e) => set(i, { texto: e.target.value })} /></td>
-              <td><input aria-label={`Escala ${i + 1}`} value={p.escala.join(",")} onChange={(e) => set(i, { escala: e.target.value.split(/[,;\s]+/).filter(Boolean).map(Number).filter((x) => Number.isInteger(x)) })} /></td>
-              <td><input aria-label={`Orden ${i + 1}`} inputMode="numeric" value={p.orden} onChange={(e) => set(i, { orden: Number(e.target.value.replace(/\D/g, "")) || 0 })} /></td>
-              <td><input aria-label={`Obligatoria ${i + 1}`} type="checkbox" style={{ width: "auto" }} checked={p.obligatoria} onChange={(e) => set(i, { obligatoria: e.target.checked })} /></td>
-              <td><input aria-label={`Activa ${i + 1}`} type="checkbox" style={{ width: "auto" }} checked={p.activo} onChange={(e) => set(i, { activo: e.target.checked })} /></td>
+              <td><input className="celda" aria-label={`Código ${i + 1}`} value={p.codigo} disabled={!!p.id} maxLength={20} onChange={(e) => set(i, { codigo: e.target.value.toUpperCase() })} /></td>
+              <td><input className="celda" aria-label={`Texto ${i + 1}`} value={p.texto} maxLength={300} onChange={(e) => set(i, { texto: e.target.value })} /></td>
+              <td><input className="celda" aria-label={`Escala ${i + 1}`} value={p.escala.join(",")} onChange={(e) => set(i, { escala: e.target.value.split(/[,;\s]+/).filter(Boolean).map(Number).filter((x) => Number.isInteger(x)) })} /></td>
+              <td><input className="celda" aria-label={`Orden ${i + 1}`} inputMode="numeric" value={p.orden} onChange={(e) => set(i, { orden: Number(e.target.value.replace(/\D/g, "")) || 0 })} /></td>
+              <td><input className="celda" aria-label={`Obligatoria ${i + 1}`} type="checkbox" style={{ width: "auto" }} checked={p.obligatoria} onChange={(e) => set(i, { obligatoria: e.target.checked })} /></td>
+              <td><input className="celda" aria-label={`Activa ${i + 1}`} type="checkbox" style={{ width: "auto" }} checked={p.activo} onChange={(e) => set(i, { activo: e.target.checked })} /></td>
             </tr>
           ))}
         </tbody>

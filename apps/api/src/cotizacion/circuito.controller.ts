@@ -74,8 +74,13 @@ const EnviarClienteSchema = z.object({
 export class CircuitoCotizacionController {
   constructor(private readonly svc: CircuitoCotizacionService) {}
 
+  /**
+   * Bandeja del laboratorio. Basta ver cotizaciones: cada uno ve las solicitudes
+   * de los laboratorios de su alcance (el Jefe de Laboratorio, las suyas; los
+   * perfiles globales, todas). Responder exige `cotizacion.costear`.
+   */
   @Get("solicitudes-laboratorio")
-  @RequierePermiso("cotizacion.costear")
+  @RequierePermiso("cotizacion.ver")
   @ApiOperation({ summary: "Bandeja del laboratorio: ?estado=por_responder|vb|todas" })
   bandeja(@Query("estado") estado: string | undefined, @Req() req: any) {
     return this.svc.bandejaLaboratorio(req, { estado });

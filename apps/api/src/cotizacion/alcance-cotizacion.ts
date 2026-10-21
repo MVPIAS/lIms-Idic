@@ -6,6 +6,8 @@ import { ForbiddenException, NotFoundException } from "@nestjs/common";
  * La tabla `cotizacion` no tiene unidad responsable. Sus unidades son:
  *   · las de su OT y de las OT que nacieron de ella (laboratorio responsable),
  *   · la de su centro de costo,
+ *   · las de los laboratorios a los que se pidió fecha y costo (solicitud_costeo,
+ *     frente r1c: el laboratorio consultado abre la ficha para responder),
  *   · las de los laboratorios de los ensayos de sus líneas (familia del
  *     catálogo → unidad por CODSUCDEL),
  *   · y el Departamento Comercial (DCO), que emite todas las cotizaciones.
@@ -22,6 +24,7 @@ export const SQL_UNIDADES_COTIZACION = `
     SELECT o.unidad_principal AS u FROM cotizacion c JOIN orden_trabajo o ON o.id = c.ot_id WHERE c.id = $1::uuid
     UNION SELECT o.unidad_principal FROM orden_trabajo o WHERE o.cotizacion_id = $1::uuid
     UNION SELECT cc.unidad_id FROM cotizacion c JOIN centro_costo cc ON cc.id = c.centro_costo_id WHERE c.id = $1::uuid
+    UNION SELECT s.unidad_id FROM solicitud_costeo s WHERE s.cotizacion_id = $1::uuid AND s.deleted_at IS NULL
     UNION SELECT un.id FROM linea_cotizacion l
             JOIN cat_ensayo e ON e.id = l.cat_ensayo_id
             JOIN cat_familia f ON f.id = e.familia_id

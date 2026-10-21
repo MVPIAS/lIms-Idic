@@ -82,7 +82,7 @@ export default function CotizacionesPorResponderPage() {
           <tbody>
             {filas.map((f) => (
               <tr key={f.id}>
-                <td><Link href={`/cotizaciones/${f.cotizacionId}?tab=laboratorio` as any} className="codigo" style={{ textDecoration: "underline" }}>{f.cotizacionCodigo}</Link></td>
+                <td style={{ whiteSpace: "nowrap" }}><Link href={`/cotizaciones/${f.cotizacionId}?tab=laboratorio` as any} className="codigo" style={{ textDecoration: "underline" }}>{f.cotizacionCodigo}</Link></td>
                 <td>{f.cliente ?? "—"}</td>
                 <td title={f.unidadNombre}>{f.unidadCodigo}</td>
                 <td>{f.numero ? <span className="codigo">{f.numero}</span> : "Solicitud de fechas"}{f.comentarioEjecutivo ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>«{f.comentarioEjecutivo}»</div> : null}</td>
@@ -90,7 +90,7 @@ export default function CotizacionesPorResponderPage() {
                 <td style={{ whiteSpace: "nowrap" }}>{fechaHora(f.solicitadaAt)}<div style={{ fontSize: 11.5, color: "var(--muted)" }}>{f.solicitadaPorNombre ?? ""}</div></td>
                 <td>{f.nivelVb ? `V°B° ${f.nivelVb === "lab" ? "laboratorio" : "departamento"}: ${f.vbResponsables.join(", ") || "sin jefatura asignada"}` : ["solicitado", "devuelto"].includes(f.estado) ? `Jefe de Laboratorio ${f.unidadCodigo}` : "—"}</td>
                 <td>
-                  <Link href={`/cotizaciones/${f.cotizacionId}?tab=laboratorio` as any} className={`btn sm ${f.meToca ? "primary" : "outline"}`}>
+                  <Link href={`/cotizaciones/${f.cotizacionId}?tab=laboratorio` as any} className={`btn sm ${f.meToca ? "primary" : "outline"}`} style={{ whiteSpace: "nowrap" }}>
                     {["solicitado", "devuelto"].includes(f.estado) ? "Responder →" : f.nivelVb ? "Revisar y dar V°B° →" : "Ver"}
                   </Link>
                 </td>

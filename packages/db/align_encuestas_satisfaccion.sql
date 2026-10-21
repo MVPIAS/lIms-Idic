@@ -108,6 +108,8 @@ SELECT r.id, p.id
     ('COMERCIAL', 'encuesta.ver'), ('PLANIFICACION', 'encuesta.ver'), ('JEFE_DEPTO', 'encuesta.ver'),
     ('JEFE_SECCION', 'encuesta.ver'), ('JEFE_LAB', 'encuesta.ver'), ('DIRECTOR', 'encuesta.ver'),
     ('SUBDIRECTOR', 'encuesta.ver'), ('CALIDAD', 'encuesta.ver'), ('LECTOR', 'encuesta.ver'),
+    -- Administración recibe todo *.ver por align_admin_roles.sql (segunda pasada): se siembra ya.
+    ('ADMIN', 'encuesta.ver'),
     ('COMERCIAL', 'encuesta.registrar'), ('PLANIFICACION', 'encuesta.registrar'),
     ('ADMIN', 'encuesta.configurar')
   ) AS m(rol, perm)

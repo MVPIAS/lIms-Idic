@@ -190,16 +190,16 @@ export default function CotizacionesPage() {
           <tbody>
             {cots.map((c) => { const acc = accionesDe(c, puede, exigirFirma); return (
               <tr key={c.id}>
-                <td><Link href={`/cotizaciones/${c.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{c.codigo}</Link></td>
+                <td style={{ whiteSpace: "nowrap" }}><Link href={`/cotizaciones/${c.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{c.codigo}</Link></td>
                 <td>{c.cliente?.razonSocial ?? "—"}</td>
                 <td><EstadoChip estado={c.estado} /></td>
                 <td><FirmaChip c={c} /></td>
                 <td className="num">{money(c.total, c.moneda === "USD" ? "USD" : "CLP")}</td>
-                <td>
+                <td style={{ whiteSpace: "nowrap" }}>
                   {fechaDia(c.validaHasta ?? c.expiraAt)}
                   {porVencer(c) && <span className="pill amber" style={{ marginLeft: 6 }}>por vencer</span>}
                 </td>
-                <td>
+                <td style={{ whiteSpace: "nowrap" }}>
                   {c.ot ? (
                     <>
                       <Link href={`/ot/${c.ot.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{c.ot.codigo}</Link>
@@ -209,7 +209,7 @@ export default function CotizacionesPage() {
                     <span style={{ color: "var(--muted)" }}>—</span>
                   )}
                 </td>
-                <td style={{ color: "var(--muted)" }}>{fechaDia(c.fechaEmision ?? c.createdAt)}</td>
+                <td style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{fechaDia(c.fechaEmision ?? c.createdAt)}</td>
                 <td>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <Link href={`/cotizaciones/${c.id}` as any} className="btn outline sm">Abrir</Link>
