@@ -12,6 +12,7 @@ import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
 import RegistroMuestras from "./_components/RegistroMuestras";
 import OrdenesInternasOt from "./_components/OrdenesInternasOt";
+import CabeceraInspeccionOt from "./_components/CabeceraInspeccionOt";
 import FotosOt from "./_components/FotosOt";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
@@ -282,6 +283,8 @@ export default function ExpedientePage() {
                     ahí queda registrado quién la fijó, cuándo y por qué se cambió. */}
                 <div className="field readonly"><label>Fecha de compromiso</label><input value={ot?.fechaCompromiso ? fechaDia(ot.fechaCompromiso) : "Sin fecha (ver «Informe y cierre»)"} readOnly /></div>
               </div>
+              {/* OT del BPCH: cabecera de inspección (EP-10 10.3); en otras unidades no se muestra. */}
+              {typeof id === "string" && <CabeceraInspeccionOt otId={id} />}
               </div>
             )}
             {tab === "asignacion" && typeof id === "string" && <Asignacion otId={id} onCambio={cargarOt} />}

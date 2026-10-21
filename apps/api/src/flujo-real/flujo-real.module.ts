@@ -28,6 +28,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { OrdenInternaConsultaController, OrdenInternaController, OrdenInternaService } from "./orden-interna";
 import { AlcanceService } from "../rbac/alcance.service";
+import { PlantillaRenderModule } from "../plantilla-render/plantilla-render.module";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
 import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
 import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laboratorio.module";
@@ -605,9 +606,19 @@ export class PuenteAnalisisService {
     req?: any,
     /** Transacción en curso (registro de muestras o de lotes BPCH): todo o nada. */
     db: Db = this.prisma,
+    /**
+     * `sinAlcanceOt`: quien llama ya comprobó otro alcance (el laboratorio de
+     * destino de una orden interna, que no tiene la OT de origen en su alcance).
+     */
+    opts: { sinAlcanceOt?: boolean } = {},
   ) {
     // La OT debe existir en el tenant y estar en el alcance del usuario.
-    const ot = await this.otEnAlcance(otId, tenantId, req);
+    const ot = opts.sinAlcanceOt
+      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } }).then((o) => {
+          if (!o) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+          return o;
+        })
+      : await this.otEnAlcance(otId, tenantId, req);
     const muestra = await this.muestraDeOt(otId, body.muestraId, tenantId, db);
 
     // Una OT que aún no tiene laboratorio (p. ej. creada antes de esta
@@ -743,7 +754,7 @@ export class PuenteAnalisisService {
    *     numérica comparable ni referencia textual comparable—.
    */
   /** Resultado del puente, del tenant y del alcance del usuario. */
-  private async resultadoEnAlcance(id: string, tenantId: string, req: any) {
+  private async resultadoEnAlcance(id: string, tenantId: string, req: any, opts: { destinoOrdenInterna?: boolean } = {}) {
     const resultado = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null, muestra: { tenantId } },
       include: { muestra: { select: { tenantId: true, otId: true } } },
@@ -753,7 +764,31 @@ export class PuenteAnalisisService {
     const ot = otId
       ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { codigo: true, unidadPrincipal: true } })
       : null;
-    await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, ot ? `el resultado de la OT ${ot.codigo}` : "el resultado");
+    const que = ot ? `el resultado de la OT ${ot.codigo}` : "el resultado";
+    if (opts.destinoOrdenInterna && otId && !(await this.alcance.puedeVerUnidad(req, ot?.unidadPrincipal ?? null))) {
+      // Laboratorio de destino de una orden interna RECIBIDA (frente r1b · EP-01 0.6/2.2):
+      // captura en la muestra de la OT de origen, pero solo los ensayos que se le
+      // derivaron y mientras la orden siga recibida (no después de cerrarla).
+      const destinos = await this.prisma.$queryRawUnsafe<{ unidad_id: string }[]>(
+        `SELECT DISTINCT ud.id AS unidad_id
+           FROM orden_interna oi
+           JOIN cat_metodo cm ON cm.id = $3::uuid AND cm.ensayo_id = ANY(oi.ensayos)
+           JOIN cat_familia f ON f.id = oi.destino_lab
+           JOIN LATERAL (
+             SELECT u.id FROM unidad u
+              WHERE u.tenant_id = f.tenant_id AND u.activa
+                AND f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))
+              ORDER BY (u.tipo = 'LABORATORIO') DESC, u.codigo LIMIT 1) ud ON TRUE
+          WHERE oi.ot_id = $1::uuid AND oi.tenant_id = $2::uuid AND oi.deleted_at IS NULL AND oi.estado = 'recibida'
+            AND (oi.muestra_id IS NULL OR oi.muestra_id = $4::uuid)`,
+        otId,
+        tenantId,
+        resultado.catMetodoId,
+        resultado.muestraId,
+      );
+      for (const d of destinos) if (await this.alcance.puedeVerUnidad(req, d.unidad_id)) return { resultado, otId };
+    }
+    await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, que);
     return { resultado, otId };
   }
 
@@ -764,7 +799,8 @@ export class PuenteAnalisisService {
    * usuario como analista (segregación) y recalcula el veredicto de la muestra.
    */
   async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any) {
-    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req);
+    // El laboratorio de destino de una orden interna recibida captura sus ensayos derivados.
+    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req, { destinoOrdenInterna: true });
 
     const bloqueo = motivoNoCapturable(resultado.estado);
     if (bloqueo) throw new ConflictException(bloqueo);
@@ -1476,6 +1512,8 @@ export class RecepcionMuestraController {
 /* ============================ MÓDULO ============================ */
 
 @Module({
+  // Numeración del informe de respuesta de una orden interna (RESPUESTA_OI).
+  imports: [PlantillaRenderModule],
   controllers: [
     SolicitudCosteoController,
     // Las rutas estáticas de órdenes internas (destinos, ot/:otId) van ANTES que el CRUD.

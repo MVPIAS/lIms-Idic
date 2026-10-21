@@ -103,6 +103,11 @@ export function faltantesParaCerrar(p: {
   estado: string;
   documentos: DocumentoCierre[];
   resultadosNoAprobados: number;
+  /**
+   * Documentos por muestra, producto o laboratorio (frente r1b): lo que falta
+   * cubrir (plantilla-render/cobertura-documento.ts › pendientesCobertura).
+   */
+  coberturaPendiente?: string[];
 }): string[] {
   if (p.estado === "cerrada") return ["La OT ya está cerrada."];
   if (p.estado === "anulada") return ["La OT está anulada."];
@@ -119,6 +124,7 @@ export function faltantesParaCerrar(p: {
       f.push(`El documento ${d.numero} fue devuelto sin firmar: reemítalo o anúlelo.`);
     else if (!d.entregadoAt) f.push(`El documento ${d.numero} es oficial pero falta registrar su entrega al cliente.`);
   }
+  f.push(...(p.coberturaPendiente ?? []));
   return f;
 }
 

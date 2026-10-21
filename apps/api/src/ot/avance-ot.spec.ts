@@ -356,3 +356,50 @@ describe("puedeActuar · el botón del siguiente paso", () => {
     expect(puedeActuar(null, { roles: ["SUPERADMIN"] })).toBe(false);
   });
 });
+
+describe("Ruta de la OT · órdenes internas (frente r1b · EP-01 3.7)", () => {
+  const oi = (p: Partial<NonNullable<HechosOt["ordenesInternas"]>[number]> = {}) =>
+    ({ id: "oi-1", numero: "OI-2026-0001", estado: "abierta", destino: "LCC", respondida: false, aceptada: false, ...p });
+
+  it("con lo propio capturado, una orden abierta deja el Análisis en curso y le toca al destino recibirla", () => {
+    const a = calcularAvance(base({ ...conMuestra, resultados: res({ capturados: 3 }), ordenesInternas: [oi()] }));
+    expect(a.etapaActual).toBe("analisis");
+    expect(a.etapas.find((e) => e.clave === "analisis")?.detalle).toContain("1 orden interna pendiente");
+    expect(a.siguiente?.texto).toBe("Recibir la orden interna OI-2026-0001 en LCC");
+    expect(a.siguiente?.leToca).toEqual({ rol: "Jefe de Laboratorio", unidad: "LCC", personas: [] });
+    expect(a.siguiente?.accion).toMatchObject({ ruta: "/ordenes-internas/oi-1", permisos: ["orden_interna.responder"] });
+  });
+
+  it("recibida: responder; respondida: cerrar; cerrada sin integrar: le toca al solicitante darla por recibida", () => {
+    const h = (o: ReturnType<typeof oi>) => calcularAvance(base({ ...conMuestra, resultados: res({ capturados: 3 }), ordenesInternas: [o] }));
+    expect(h(oi({ estado: "recibida" })).siguiente?.texto).toMatch(/^Responder la orden interna/);
+    expect(h(oi({ estado: "recibida", respondida: true })).siguiente?.texto).toMatch(/^Cerrar la orden interna/);
+    const c = h(oi({ estado: "cerrada", respondida: true }));
+    expect(c.siguiente?.texto).toMatch(/^Dar por recibido el informe/);
+    expect(c.siguiente?.leToca?.unidad).toBe("LQC");
+    expect(c.siguiente?.accion?.permisos).toEqual(["orden_interna.emitir"]);
+  });
+
+  it("integrada (o anulada) ya no frena: sigue la revisión", () => {
+    const a = calcularAvance(base({ ...conMuestra, resultados: res({ capturados: 3 }), ordenesInternas: [oi({ estado: "cerrada", aceptada: true }), oi({ id: "x", estado: "anulada" })] }));
+    expect(a.etapaActual).toBe("revision");
+  });
+
+  it("con ensayos propios por capturar, primero la captura", () => {
+    const a = calcularAvance(base({ ...conMuestra, resultados: res({ pendientes: 1, capturados: 2 }), ordenesInternas: [oi()] }));
+    expect(a.siguiente?.texto).toMatch(/^Capturar resultados/);
+  });
+});
+
+describe("Ruta de la OT · cabecera de inspección BPCH (frente r1b · EP-10 10.11)", () => {
+  it("con todo aprobado y la cabecera incompleta, el siguiente paso es completar la cabecera", () => {
+    const a = calcularAvance(base({ ...conMuestra, unidad: { codigo: "SSTGO" }, resultados: res({ aprobados: 3 }), cabeceraBpch: ["La cabecera de inspección no tiene el lugar de inspección."] }));
+    expect(a.etapaActual).toBe("emision");
+    expect(a.siguiente?.texto).toMatch(/^Completar la cabecera de inspección/);
+    expect(a.siguiente?.accion).toMatchObject({ pestana: "cabecera", permisos: ["bpch.cabecera.gestionar"] });
+  });
+  it("con la cabecera completa, emitir", () => {
+    const a = calcularAvance(base({ ...conMuestra, resultados: res({ aprobados: 3 }), cabeceraBpch: [] }));
+    expect(a.siguiente?.texto).toBe("Emitir el informe con los resultados aprobados");
+  });
+});

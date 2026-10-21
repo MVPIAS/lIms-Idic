@@ -1,13 +1,17 @@
 "use client";
 
 /**
- * Laboratorio › Órdenes internas: derivaciones de una OT a otro laboratorio
- * (tabla `orden_interna`). Cada perfil ve las de las OT de su alcance y las que
- * llegan a su laboratorio. Quien tiene «ot.crear» emite una nueva (eligiendo la
- * OT), la edita mientras está abierta, avanza su estado y la anula con motivo.
- * La misma gestión está en la ficha de la OT, pestaña «Órdenes internas».
+ * Laboratorio › Órdenes internas.
+ *  · «Bandeja de entrada»: las órdenes que LLEGAN a los laboratorios de su
+ *    alcance (EP-01 0.6 «Bandeja de entrada del laboratorio», origen «OT
+ *    interna»): Nº interno · OT y muestra de origen · laboratorio solicitante ·
+ *    ensayo pedido · requisito, con «Recibir →».
+ *  · «Todas»: las de las OT de su alcance y las que llegan a su laboratorio;
+ *    desde aquí se emite una nueva (eligiendo la OT).
+ * Cada orden se trabaja en su ficha (/ordenes-internas/[id]).
  */
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
 import Modal from "@/components/documentos/Modal";
 import { llamar } from "@/lib/laboratorio";
@@ -17,53 +21,83 @@ import TablaOrdenesInternas from "@/components/ordenes-internas/TablaOrdenesInte
 import { ESTADO_OI, type OrdenInterna } from "@/components/ordenes-internas/ordenesInternas";
 
 type OtCorta = { id: string; codigo: string; estado: string; unidad?: { codigo: string } | null; cliente?: { razonSocial: string } | null };
+type Vista = "entrada" | "todas";
 
 export default function OrdenesInternasPage() {
+  return (
+    <Suspense fallback={<p className="subtitle">Cargando…</p>}>
+      <OrdenesInternas />
+    </Suspense>
+  );
+}
+
+function OrdenesInternas() {
   const { puede } = usePermisos();
+  // ?vista=todas&estado=cerrada (enlace de «Informes internos por integrar» en Mi bandeja).
+  const params = useSearchParams();
+  const [vista, setVista] = useState<Vista>(params.get("vista") === "todas" ? "todas" : "entrada");
   const [filas, setFilas] = useState<OrdenInterna[] | null>(null);
   const [error, setError] = useState("");
-  const [estado, setEstado] = useState("");
+  const [estado, setEstado] = useState(params.get("estado") ?? "");
   const [buscar, setBuscar] = useState("");
   const [elegirOt, setElegirOt] = useState(false);
   const [ot, setOt] = useState<OtCorta | null>(null);
 
   const cargar = useCallback(async () => {
     setError("");
+    setFilas(null);
     try {
-      const qs = new URLSearchParams({ limit: "300" });
-      if (estado) qs.set("estado", estado);
-      if (buscar.trim()) qs.set("search", buscar.trim());
-      const r = await llamar<{ data: OrdenInterna[] }>("GET", `/ordenes-internas?${qs}`);
-      setFilas(r.data);
+      if (vista === "entrada") {
+        const qs = new URLSearchParams({ estado: estado || "pendientes" });
+        if (buscar.trim()) qs.set("search", buscar.trim());
+        setFilas(await llamar<OrdenInterna[]>("GET", `/ordenes-internas/bandeja?${qs}`));
+      } else {
+        const qs = new URLSearchParams({ limit: "300" });
+        if (estado) qs.set("estado", estado);
+        if (buscar.trim()) qs.set("search", buscar.trim());
+        const r = await llamar<{ data: OrdenInterna[] }>("GET", `/ordenes-internas?${qs}`);
+        setFilas(r.data);
+      }
     } catch (e: any) {
       setError(e.message);
       setFilas([]);
     }
-  }, [estado, buscar]);
+  }, [vista, estado, buscar]);
 
   useEffect(() => {
     cargar();
-    // Se recarga al cambiar el estado; el texto se busca con el botón / Enter.
+    // Se recarga al cambiar de vista o de estado; el texto se busca con el botón / Enter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estado]);
+  }, [vista, estado]);
 
-  const gestionar = puede("ot.crear");
+  const emitir = puede("orden_interna.emitir");
 
   return (
     <div>
       <PageHeader
         icono="🔀"
         titulo="Órdenes internas"
-        subtitulo="Derivaciones de una OT a otro laboratorio con los ensayos que le corresponden. Se emiten aquí o desde la ficha de la OT (pestaña «Órdenes internas»)."
+        subtitulo="Ensayos que un laboratorio pide a otro sobre la misma muestra. El laboratorio de destino la recibe, registra sus resultados, responde con su informe, horas y costo directo, y la cierra; el solicitante la da por recibida."
         migas={[{ label: "Laboratorio" }, { label: "Órdenes internas" }]}
-        acciones={gestionar ? <button type="button" className="btn primary" onClick={() => setElegirOt(true)}>＋ Nueva orden interna</button> : null}
+        acciones={emitir ? <button type="button" className="btn primary" onClick={() => setElegirOt(true)}>＋ Nueva orden interna</button> : null}
       />
+      <div role="tablist" aria-label="Vista de órdenes internas" className="tabs" style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {([
+          ["entrada", "Bandeja de entrada"],
+          ["todas", "Todas las de mi alcance"],
+        ] as [Vista, string][]).map(([v, t]) => (
+          <button key={v} type="button" role="tab" aria-selected={vista === v}
+            className={`btn sm ${vista === v ? "primary" : "outline"}`}
+            onClick={() => { setVista(v); setEstado(""); }}>{t}</button>
+        ))}
+      </div>
       {error && <div className="alert warn" role="alert">{error}</div>}
       <form className="toolbar" onSubmit={(e) => { e.preventDefault(); cargar(); }}>
-        <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Número, OT, laboratorio o detalle"
+        <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nº interno, OT, laboratorio o requisito"
           aria-label="Buscar órdenes internas" style={{ flex: 1, minWidth: 240 }} />
         <select value={estado} onChange={(e) => setEstado(e.target.value)} aria-label="Estado">
-          <option value="">Todos los estados</option>
+          <option value="">{vista === "entrada" ? "Pendientes (por recibir y en análisis)" : "Todos los estados"}</option>
+          {vista === "entrada" && <option value="todas">Todas</option>}
           {Object.entries(ESTADO_OI).map(([k, v]) => <option key={k} value={k}>{v.texto}</option>)}
         </select>
         <button type="submit" className="btn primary sm">Buscar</button>
@@ -77,11 +111,16 @@ export default function OrdenesInternasPage() {
           <TablaOrdenesInternas
             filas={filas}
             mostrarOt
-            puedeGestionar={gestionar}
+            bandeja={vista === "entrada"}
+            puedeEmitir={emitir}
+            puedeAnular={puede("orden_interna.anular")}
+            puedeResponder={puede("orden_interna.responder")}
             onCambio={cargar}
             vacio={<p className="subtitle" style={{ padding: 16, margin: 0, textAlign: "center" }}>
-              No hay órdenes internas{estado || buscar ? " con estos filtros" : " de las OT de su alcance"}.
-              {gestionar ? " Use «＋ Nueva orden interna» para derivar parte de una OT a otro laboratorio." : ""}
+              {vista === "entrada"
+                ? <>No hay órdenes internas pendientes para su laboratorio{buscar ? " con esta búsqueda" : ""}. Cuando otro laboratorio le derive ensayos, aparecerán aquí para recibirlas.</>
+                : <>No hay órdenes internas{estado || buscar ? " con estos filtros" : " de las OT de su alcance"}.
+                  {emitir ? " Use «＋ Nueva orden interna» para derivar parte de una OT a otro laboratorio." : ""}</>}
             </p>}
           />
         )}
@@ -90,7 +129,7 @@ export default function OrdenesInternasPage() {
       {elegirOt && <ElegirOt onCerrar={() => setElegirOt(false)} onElegida={(o) => { setElegirOt(false); setOt(o); }} />}
       {ot && (
         <FormOrdenInterna otId={ot.id} otCodigo={ot.codigo} onCerrar={() => setOt(null)}
-          onGuardada={() => { setOt(null); cargar(); }} />
+          onGuardada={() => { setOt(null); setVista("todas"); cargar(); }} />
       )}
     </div>
   );

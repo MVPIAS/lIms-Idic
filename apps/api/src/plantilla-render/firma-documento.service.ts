@@ -198,6 +198,8 @@ export class FirmaDocumentoService {
     // Modalidad del informe (cumplimiento / solo resultados): columna de
     // align_informe_ensayo.sql, fuera del modelo Prisma.
     const modalidades = new Map<string, string | null>();
+    // Cobertura del documento (align_r1b_documentos_ot.sql): muestra, producto o laboratorio.
+    const coberturas = new Map<string, { etiqueta: string | null; noEmitido: boolean }>();
     if (filas.length) {
       try {
         const ms = await this.prisma.$queryRaw<{ id: string; modalidad: string | null }[]>`
@@ -206,12 +208,21 @@ export class FirmaDocumentoService {
       } catch {
         /* BD sin la columna: sin modalidad */
       }
+      try {
+        const cs = await this.prisma.$queryRaw<{ id: string; cobertura_etiqueta: string | null; no_emitido: boolean }[]>`
+          SELECT id, cobertura_etiqueta, no_emitido FROM certificado WHERE id = ANY(${filas.map((c) => c.id)}::uuid[])`;
+        for (const c of cs) coberturas.set(c.id, { etiqueta: c.cobertura_etiqueta, noEmitido: Boolean(c.no_emitido) });
+      } catch {
+        /* BD sin las columnas: documento de toda la OT */
+      }
     }
     const data = filas.map(({ firmas, ...c }) => {
       const actuales = c.estado === "en_firma" ? pasosActuales(firmas.map((x, i) => ({ ...x, id: String(i) }))) : [];
       return {
         ...c,
         modalidad: modalidades.get(c.id) ?? null,
+        cobertura: coberturas.get(c.id)?.etiqueta ?? null,
+        noEmitido: coberturas.get(c.id)?.noEmitido ?? false,
         numero: c.numero ?? c.codigo,
         firmasHechas: firmas.filter((x) => x.estado === "firmado").length,
         firmasTotal: firmas.filter((x) => x.estado !== "anulado").length,

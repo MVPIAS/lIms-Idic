@@ -13,6 +13,7 @@ import { InternacionBpchService } from "./internacion/internacion-bpch.service";
 import { ReinspeccionController } from "./reinspeccion/reinspeccion.controller";
 import { ReinspeccionService } from "./reinspeccion/reinspeccion.service";
 import { OtDesdeProcesoService } from "./ot-desde-proceso.service";
+import { CabeceraOtController, CabeceraOtService } from "./cabecera/cabecera-ot";
 
 /** Datos de apoyo de los formularios BPCH: unidades, parámetros, plantillas y panel del catálogo. */
 @ApiTags("bpch")
@@ -50,7 +51,7 @@ export class BpchConfigController {
  */
 @Module({
   imports: [FlujoRealModule],
-  controllers: [BpchConfigController, CodificacionController, InternacionBpchController, ReinspeccionController],
-  providers: [BpchComunService, OtDesdeProcesoService, CodificacionService, InternacionBpchService, ReinspeccionService],
+  controllers: [BpchConfigController, CodificacionController, InternacionBpchController, ReinspeccionController, CabeceraOtController],
+  providers: [BpchComunService, OtDesdeProcesoService, CodificacionService, InternacionBpchService, ReinspeccionService, CabeceraOtService],
 })
 export class BpchModule {}

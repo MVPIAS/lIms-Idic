@@ -72,6 +72,7 @@ describe("órdenes internas · controlador (reglas y alcance)", () => {
   const E2 = "66666666-6666-6666-6666-666666666666";
   const LQC = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
   const req = { user: { sub: "u", tenantId: "t" } };
+  const emision = { muestraId: "44444444-4444-4444-4444-444444444444", requisito: "Pb ≤ 90 ppm (E.T. punto 5)", fechaEnvio: new Date().toISOString().slice(0, 10) };
 
   const crear = (opts: { alcanza?: boolean; estado?: string; principal?: boolean; delDestino?: string[] } = {}) => {
     const svc = {
@@ -85,6 +86,7 @@ describe("órdenes internas · controlador (reglas y alcance)", () => {
     const prisma = {
       ordenTrabajo: { findFirst: jest.fn(async () => ({ codigo: "OT-1", unidadPrincipal: LQC })) },
       ordenInterna: { findFirst: jest.fn(async () => ({ otId: OT, estado: opts.estado ?? "abierta", destinoLab: FAM, ensayos: [E1] })) },
+      muestra: { findFirst: jest.fn(async () => ({ otId: OT })) },
     };
     const alcance = {
       exigirUnidad: jest.fn(async () => {
@@ -96,7 +98,7 @@ describe("órdenes internas · controlador (reglas y alcance)", () => {
 
   it("crea con destino y ensayos del destino; propone la familia de origen", async () => {
     const { ctl, svc } = crear();
-    await ctl.crear({ otId: OT, destinoLab: FAM, ensayos: [E1, E1, E2] }, req);
+    await ctl.crear({ otId: OT, destinoLab: FAM, ensayos: [E1, E1, E2], ...emision }, req);
     expect(svc.crear).toHaveBeenCalledWith(expect.objectContaining({ ensayos: [E1, E2], origenLab: "fam-lqc" }), "t", "u");
   });
 
@@ -108,11 +110,18 @@ describe("órdenes internas · controlador (reglas y alcance)", () => {
     expect(svc.crear).not.toHaveBeenCalled();
   });
 
-  it("una orden recibida no cambia de contenido (409) pero sí avanza de estado", async () => {
+  it("una orden recibida no cambia de contenido (409) ni se cierra por PATCH: la cierra el destino con su respuesta", async () => {
     const { ctl, svc } = crear({ estado: "recibida" });
     await expect(ctl.actualizar(OI, { detalle: "x" }, req)).rejects.toBeInstanceOf(ConflictException);
-    await ctl.actualizar(OI, { estado: "cerrada" }, req);
-    expect(svc.actualizar).toHaveBeenCalledTimes(1);
+    await expect(ctl.actualizar(OI, { estado: "cerrada" }, req)).rejects.toThrow(/Cerrar OT interna/);
+    expect(svc.actualizar).not.toHaveBeenCalled();
+  });
+
+  it("emitir exige muestra de la OT, requisito y fecha de envío (400)", async () => {
+    const { ctl, svc } = crear();
+    await expect(ctl.crear({ otId: OT, destinoLab: FAM, ensayos: [E1] }, req)).rejects.toThrow(/muestra de origen/);
+    await expect(ctl.crear({ otId: OT, destinoLab: FAM, ensayos: [E1], ...emision, requisito: "" }, req)).rejects.toThrow(/requisito/);
+    expect(svc.crear).not.toHaveBeenCalled();
   });
 
   it("cambiar el destino sin indicar ensayos los vacía", async () => {

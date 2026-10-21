@@ -43,7 +43,7 @@ export const PERMISOS_RECURSO: Record<string, PermisosCrud> = {
   viaticos: todos("factura.ver", "factura.emitir"),
   oportunidades: todos("cotizacion.ver", "cotizacion.crear"),
   "solicitud-costeo": todos("cotizacion.ver", "cotizacion.crear"),
-  "ordenes-internas": todos("ot.ver", "ot.crear"),
+  "ordenes-internas": { ver: "ot.ver", crear: "orden_interna.emitir", editar: "orden_interna.emitir", eliminar: "orden_interna.anular" },
 
   // Laboratorio (legacy)
   muestras: todos("muestra.ver", "muestra.crear"),

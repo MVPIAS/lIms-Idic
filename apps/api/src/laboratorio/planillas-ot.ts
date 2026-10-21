@@ -73,14 +73,14 @@ function contarSinAprobar(labs: Map<string, { unidadId: string | null; estado: s
   return n;
 }
 
-type UnidadOt = { id: string; codigo: string; nombre: string; principal: boolean };
+export type UnidadOt = { id: string; codigo: string; nombre: string; principal: boolean };
 
 /**
  * Laboratorios que trabajan en la OT: el responsable, los destinos de sus
  * órdenes internas (cat_familia → unidad por CODSUCDEL) y los «otros
  * laboratorios» indicados en la recepción de sus muestras.
  */
-async function unidadesPosiblesOt(prisma: PrismaService, otId: string, principal: string | null, tenantId: string): Promise<UnidadOt[]> {
+export async function unidadesPosiblesOt(prisma: PrismaService, otId: string, principal: string | null, tenantId: string): Promise<UnidadOt[]> {
   return prisma.$queryRawUnsafe<UnidadOt[]>(
     `SELECT u.id, u.codigo, u.nombre, (u.id = $2::uuid) AS principal
        FROM unidad u
@@ -97,7 +97,7 @@ async function unidadesPosiblesOt(prisma: PrismaService, otId: string, principal
 }
 
 /** Laboratorio (laboratorioDeResultado) y estado de cada ensayo vivo de la OT. */
-async function laboratoriosDeResultados(
+export async function laboratoriosDeResultados(
   prisma: PrismaService,
   otId: string,
   tenantId: string,

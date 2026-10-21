@@ -454,3 +454,19 @@ perfil «analista», no ve «Resultados devueltos». Cada tarjeta que abre una l
 - `POST /usuarios` y `PATCH /usuarios/:id` con `rolId` (rutas legadas) no aplican la regla de alcance estricta (solo validan que rol y unidad existan) para no romper la pantalla actual; la regla estricta está en `POST /usuarios/:id/asignaciones`.
 - Una asignación sin unidad de un rol acotado (dato previo) se sigue tratando como global; `GET /usuarios` permite detectarlas (`asignaciones[].unidad = null` con rol de alcance UNIDAD/DESCENDENCIA).
 - Los controladores RBAC usan el `PrismaService` compartido (antes cada uno creaba su `PrismaClient`).
+
+---
+
+## 7. Permisos del frente r1b (20-10-2026)
+
+| Permiso | Para qué | Roles sembrados |
+|---|---|---|
+| `orden_interna.emitir` | Emitir una orden interna desde una OT de su alcance, editarla mientras está abierta y darla por recibida | SUPERADMIN, ADMIN, ANALISTA, ANALISTA_SR, JEFE_LAB, JEFE_SECCION, INSPECTOR, PLANIFICACION, PLANIFICADOR_LAB |
+| `orden_interna.responder` | Recibir, responder y cerrar las órdenes que llegan a su laboratorio (alcance sobre el DESTINO) | SUPERADMIN, ADMIN, JEFE_LAB, JEFE_SECCION |
+| `orden_interna.anular` | Anular con motivo o borrar una orden de una OT de su alcance | SUPERADMIN, ADMIN, COMERCIAL, PLANIFICACION, PLANIFICADOR_LAB, JEFE_LAB, JEFE_SECCION |
+| `documento.numeracion` | Administración › Numeración de documentos | SUPERADMIN, ADMIN, CALIDAD |
+| `bpch.cabecera.gestionar` | Cabecera de inspección de la OT directa y de Producción Nacional (EP-10 10.3) | SUPERADMIN, ADMIN, JEFE_LAB, JEFE_SECCION, INSPECTOR, SUBDIRECTOR, JEFE_DEPTO |
+
+Antes, las órdenes internas exigían `ot.crear` (que el Jefe de Laboratorio y el
+analista no tienen). Detalle: `docs/FLUJO_LABORATORIO.md` › «Órdenes internas»,
+`docs/FLUJO_NUMERACION_DOCUMENTOS.md`, `docs/FLUJO_DOCUMENTOS_POR_OT.md`.
