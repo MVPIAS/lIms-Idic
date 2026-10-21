@@ -103,7 +103,11 @@ export default function TablaOrdenesInternas({
                   </td>
                   {mostrarOt ? (
                     <td>
-                      <span className="codigo">{o.otCodigo}</span>{o.muestraCodigo ? <> · <span className="codigo">{o.muestraCodigo}</span></> : null}
+                      {/* El código de la muestra ya lleva el de la OT (OT-2026-0008-M1): se muestra una vez. */}
+                      <span className="codigo" style={{ whiteSpace: "nowrap" }}>{o.muestraCodigo ?? o.otCodigo}</span>
+                      {o.muestraCodigo && !o.muestraCodigo.startsWith(o.otCodigo) && (
+                        <small style={{ display: "block", color: "var(--muted)" }}>OT {o.otCodigo}</small>
+                      )}
                       {o.origenBpch && <small style={{ display: "block", color: "var(--muted)" }}>{o.origenBpch}</small>}
                     </td>
                   ) : (
@@ -123,7 +127,7 @@ export default function TablaOrdenesInternas({
                   <td>
                     <span style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
                       {bandeja && puedeResponder && o.estado === "abierta" && (
-                        <button type="button" className="btn primary sm" disabled={ocupado} onClick={() => recibir(o)}
+                        <button type="button" className="btn primary sm" style={{ whiteSpace: "nowrap" }} disabled={ocupado} onClick={() => recibir(o)}
                           aria-label={`Recibir la orden interna ${o.numero}`}>Recibir →</button>
                       )}
                       <Link href={`/ordenes-internas/${o.id}` as any} className="btn outline sm" aria-label={`Abrir la orden interna ${o.numero}`}>Abrir</Link>

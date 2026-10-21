@@ -349,7 +349,7 @@ function FormRespuesta({ f, ocupado, onGuardar }: { f: Ficha; ocupado: boolean; 
 function InformeRespuesta({ f }: { f: Ficha }) {
   const rs = f.resultados ?? [];
   return (
-    <article aria-label="Informe de análisis interno" style={{ marginTop: 12, border: "1px solid var(--line)", borderRadius: 8, padding: "14px 16px", background: "#fcfdfe" }}>
+    <article aria-label="Informe de análisis interno" style={{ marginTop: 12, border: "1px solid var(--line)", borderRadius: 8, padding: "14px 16px", background: "var(--panel)" }}>
       <header style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", borderBottom: "1px solid var(--line)", paddingBottom: 6, marginBottom: 8 }}>
         <div>
           <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em", color: "var(--muted)" }}>Informe de análisis interno</div>
