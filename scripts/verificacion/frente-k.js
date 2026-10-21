@@ -204,10 +204,20 @@ async function main() {
     return `${d.length} destinos · LCC con ${e.length} ensayos`;
   });
 
-  await paso("1 · crear: en OT de LQC sí; en OT de LPN 403; sin ot.crear 403; destino propio o ensayo ajeno 400", async () => {
-    const cuerpo = { otId: C.otLqc.id, destinoLab: C.destLcc.id, ensayos: C.ensLcc, detalle: "Cromo en cuero (frente K)" };
+  await paso("1 · crear: en OT de LQC sí; en OT de LPN 403; sin orden_interna.emitir 403; destino propio o ensayo ajeno 400", async () => {
+    // Desde r1b la emisión exige muestra de origen, requisito y fecha de envío (EP-01 2.2).
+    // Se usa una OT abierta de LQC que tenga muestras (la del paso 8 puede ser la recién creada, sin ellas).
+    const candidatas = [C.otLqc, ...(await ok(U.planLqc, "GET", "/ot?limit=100")).data.filter((o) => !["cerrada", "anulada"].includes(o.estado))];
+    for (const o of candidatas) {
+      const reg = await ok(U.admin, "GET", `/flujo/ot/${o.id}/registro-muestras`);
+      if ((reg.muestras ?? []).length) { C.otLqc = o; C.mLqc = reg.muestras[0]; break; }
+    }
+    afirmar(C.mLqc, "no hay OT abierta de LQC con muestras");
+    C.emision = { muestraId: C.mLqc.id, requisito: "Cr total según E.T. (frente K)", fechaEnvio: new Date().toISOString().slice(0, 10) };
+    const cuerpo = { otId: C.otLqc.id, destinoLab: C.destLcc.id, ensayos: C.ensLcc, detalle: "Cromo en cuero (frente K)", ...C.emision };
     await exigir(403, U.planLqc, "POST", "/ordenes-internas", { ...cuerpo, otId: C.otLpn.id });
-    await exigir(403, U.lqcA1, "POST", "/ordenes-internas", cuerpo);
+    // El analista sí emite desde r1b (orden_interna.emitir, EP-01 2.2); Calidad no.
+    await exigir(403, U.calidad, "POST", "/ordenes-internas", cuerpo);
     await rechazo(400, /OTRO laboratorio/, U.planLqc, "POST", "/ordenes-internas", { ...cuerpo, destinoLab: C.famLqc.id, ensayos: [] });
     await rechazo(400, /no son del laboratorio de destino/, U.planLqc, "POST", "/ordenes-internas", { ...cuerpo, ensayos: [C.ensLcc[0], C.ensLqc] });
     C.oi = await ok(U.planLqc, "POST", "/ordenes-internas", cuerpo);
@@ -243,7 +253,7 @@ async function main() {
     afirmar(a.estado === "anulada" && a.motivoAnulacion === "Laboratorio de destino equivocado", "no quedó anulada con su motivo");
     afirmar(a.historial.map((h) => h.accion).join(",") === "creada,editada,estado,anulada", `historial ${a.historial.map((h) => h.accion)}`);
     await exigir(409, U.planLqc, "POST", `/ordenes-internas/${C.oi.id}/anular`, { motivo: "Otra vez la misma" });
-    const otra = await ok(U.planif, "POST", "/ordenes-internas", { otId: C.otLqc.id, destinoLab: C.destLcc.id, ensayos: [C.ensLcc[1]] });
+    const otra = await ok(U.planif, "POST", "/ordenes-internas", { otId: C.otLqc.id, destinoLab: C.destLcc.id, ensayos: [C.ensLcc[1]], ...C.emision });
     await ok(U.planif, "DELETE", `/ordenes-internas/${otra.id}`);
     return `${C.oi.numero} anulada; ${otra.numero} borrada estando abierta`;
   });

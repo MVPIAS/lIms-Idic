@@ -28,6 +28,7 @@ import { CAMPOS_PORTADA, MODALIDAD, textoModalidad, type Modalidad, type Portada
 import FotosInforme, { type EnsayoOt } from "@/components/informes/FotosInforme";
 import EstructuraInforme from "@/components/informes/EstructuraInforme";
 import FormatoPlantilla from "@/components/informes/FormatoPlantilla";
+import CoberturaDocumento, { type CoberturaElegida } from "@/components/informes/CoberturaDocumento";
 
 type Plantilla = { id: string; repid: string; nombre: string; tipo: string; version?: string; activo?: boolean };
 type Condiciones = {
@@ -40,6 +41,8 @@ type Condiciones = {
   pasos: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; responsables: any[] }[];
   otInterna?: boolean;
   pasosOmitidos?: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; motivo: string }[];
+  /** Número oficial que tendrá (numeración del laboratorio y tipo; orientativo hasta emitir). */
+  numeracion?: { numero: string | null; formato: string | null; porConfirmar: boolean; general: boolean; aviso: string | null };
 };
 type Preview = { plantilla: string; tipo: string; modalidad?: Modalidad; avisos: string[]; html: string };
 
@@ -81,6 +84,10 @@ function InformesContenido() {
   const [portada, setPortada] = useState<Portada>({});
   const [ensayos, setEnsayos] = useState<EnsayoOt[]>([]);
   const [verFormato, setVerFormato] = useState(false);
+  // Qué cubre el documento: toda la OT, una muestra, un producto o un laboratorio.
+  const [cobertura, setCobertura] = useState<CoberturaElegida>({ cobertura: "ot" });
+  const [versionCob, setVersionCob] = useState(0);
+  const cobJson = JSON.stringify(cobertura);
 
   const cargarDocs = useCallback(async () => {
     try {
@@ -125,7 +132,8 @@ function InformesContenido() {
     conclusion: conclusion.trim() || null,
     ...(propuesta?.formato.portada === "ivc" ? { portada } : {}),
   });
-  const cuerpo = () => ({ otId, plantillaId, modalidad, datosInforme: datosInforme(), ...(tipoDocumento ? { tipoDocumento } : {}) });
+  const conCobertura = () => (cobertura.cobertura === "ot" ? {} : { cobertura });
+  const cuerpo = () => ({ otId, plantillaId, modalidad, datosInforme: datosInforme(), ...(tipoDocumento ? { tipoDocumento } : {}), ...conCobertura() });
 
   // Propuesta del servidor para esta OT y plantilla: formato, modalidad sugerida y portada.
   const cargarPropuesta = useCallback(async () => {
@@ -135,6 +143,7 @@ function InformesContenido() {
       setPropuesta(p);
       setModalidad(p.modalidad);
       setPortada(p.portada ?? {});
+      setCobertura({ cobertura: ((p.cobertura?.cobertura as CoberturaElegida["cobertura"]) ?? "ot") });
     } catch (e: any) {
       setPropuesta(null);
       setError(e.message);
@@ -159,14 +168,17 @@ function InformesContenido() {
     setOcupado("cond");
     setError("");
     try {
-      setCond(await api.post<Condiciones>("/informes/condiciones", { otId, plantillaId, ...(tipoDocumento ? { tipoDocumento } : {}) }));
+      setCond(await api.post<Condiciones>("/informes/condiciones", {
+        otId, plantillaId, ...(tipoDocumento ? { tipoDocumento } : {}), ...(cobertura.cobertura === "ot" ? {} : { cobertura }),
+      }));
     } catch (e: any) {
       setCond(null);
       setError(e.message);
     } finally {
       setOcupado("");
     }
-  }, [otId, plantillaId, tipoDocumento]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [otId, plantillaId, tipoDocumento, cobJson]);
 
   useEffect(() => {
     setPreview(null);
@@ -177,7 +189,7 @@ function InformesContenido() {
     setOcupado("preview");
     setError("");
     try {
-      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId, modalidad, datosInforme: datosInforme() }));
+      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId, modalidad, datosInforme: datosInforme(), ...conCobertura() }));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -193,6 +205,7 @@ function InformesContenido() {
       toast.ok(`Documento ${r.numero} (${MODALIDAD[r.modalidad as Modalidad]?.corto ?? "informe"}) emitido: queda en firma.`);
       setPreview(null);
       setAbierto(r.certificado.id);
+      setVersionCob((v) => v + 1);
       await Promise.all([cargarDocs(), comprobar()]);
     } catch (e: any) {
       setError(e.message);
@@ -203,6 +216,7 @@ function InformesContenido() {
 
   const columnas: DataColumn[] = [
     { key: "numero", label: "Número", render: (c) => <span className="codigo">{c.numero}</span> },
+    { key: "cobertura", label: "Cubre", value: (c) => c.cobertura ?? "Toda la OT", render: (c) => c.cobertura ?? <span style={{ color: "var(--muted)" }}>Toda la OT</span> },
     { key: "otcliente", label: "OT · Cliente", value: (c) => [c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · ") },
     { key: "plantilla", label: "Plantilla", value: (c) => (c.plantilla ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : "") },
     { key: "modalidad", label: "Informe", value: (c) => textoModalidad(c.modalidad) ?? "", render: (c) => textoModalidad(c.modalidad) ?? "—" },
@@ -212,9 +226,9 @@ function InformesContenido() {
       render: (c) => (c.firmasTotal ? `${c.firmasHechas} de ${c.firmasTotal}` : "—"),
     },
     {
-      key: "estado", label: "Estado", value: (c) => ESTADO_DOC[c.estado]?.texto ?? c.estado,
+      key: "estado", label: "Estado", value: (c) => (c.noEmitido ? "No emitido" : ESTADO_DOC[c.estado]?.texto ?? c.estado),
       render: (c) => {
-        const e = ESTADO_DOC[c.estado] ?? { texto: c.estado, pill: "gray" };
+        const e = c.noEmitido ? { texto: "No emitido", pill: "gray" } : ESTADO_DOC[c.estado] ?? { texto: c.estado, pill: "gray" };
         const pend = c.pendienteDe?.[0];
         return (
           <span>
@@ -230,7 +244,7 @@ function InformesContenido() {
     <>
       <PageHeader
         titulo="Emitir informe o certificado"
-        subtitulo={<>Rellena la plantilla con el expediente, sella el documento con SHA-256 y le asigna el correlativo. El documento queda <b>en firma</b> hasta que firman todos los responsables de la matriz de firmas.</>}
+        subtitulo={<>Rellena la plantilla con el expediente, sella el documento con SHA-256 y le asigna el número oficial de su laboratorio. El documento queda <b>en firma</b> hasta que firman todos los responsables de la matriz de firmas.</>}
         migas={[{ label: "Laboratorio" }, { label: "Emitir informe" }]}
         acciones={<Link href={"/informes/por-firmar" as any} className="btn outline">Documentos por firmar</Link>}
       />
@@ -270,6 +284,10 @@ function InformesContenido() {
             </select>
           </div>
         </div>
+        {listo && (
+          <CoberturaDocumento otId={otId} plantillaId={plantillaId} sugerida={propuesta?.cobertura ?? null}
+            valor={cobertura} onCambio={(c) => { setCobertura(c); setPreview(null); }} version={versionCob} />
+        )}
       </div>
 
       {listo && (
@@ -286,6 +304,20 @@ function InformesContenido() {
                   ? ` · propio de ${cond.tipoDocumentoUnidad ?? "la unidad de la OT"}`
                   : cond.tipoDocumentoOrigen === "indicado" ? " · elegido por usted" : " · según la plantilla"}
               </span>
+            </p>
+          )}
+          {cond?.numeracion && (
+            <p style={{ margin: "0 0 8px", fontSize: 12.5 }}>
+              Número oficial que tendrá:{" "}
+              {cond.numeracion.numero
+                ? <b className="codigo">{cond.numeracion.numero}</b>
+                : <b>CERT-AAAA-NNNN</b>}
+              <span style={{ color: "var(--muted)" }}>
+                {cond.numeracion.formato ? ` · formato ${cond.numeracion.formato}` : " · numeración general (el laboratorio no tiene formato propio)"}
+                {cond.numeracion.porConfirmar ? " · formato por confirmar con el IDIC" : ""}
+                {" · se asigna al emitir"}
+              </span>
+              {cond.numeracion.aviso && <small style={{ display: "block", color: "var(--amber, #b45309)" }}>{cond.numeracion.aviso}</small>}
             </p>
           )}
           {cond && !cond.puedeEmitir && (

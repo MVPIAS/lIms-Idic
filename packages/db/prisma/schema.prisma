@@ -1127,7 +1127,7 @@ model Certificado {
   id              String    @id @default(uuid()) @db.Uuid
   tenantId        String    @map("tenant_id") @db.Uuid
   otId            String    @map("ot_id") @db.Uuid
-  codigo          String    @db.VarChar(40)
+  codigo          String    @db.VarChar(80)
   tipo            String?   @db.VarChar(40)
   plantillaId     String?   @map("plantilla_id") @db.Uuid
   hashSha256      String?   @map("hash_sha256") @db.VarChar(64)
@@ -1135,7 +1135,7 @@ model Certificado {
   // --- Emisión real (align_certificado.sql) ---
   // Correlativo CERT-AAAA-NNNN generado por el sistema. Se escribe también en
   // `codigo`, cuyo UNIQUE(tenantId, codigo) cierra la unicidad a nivel de BD.
-  numero             String?   @db.VarChar(30)
+  numero             String?   @db.VarChar(80)
   // Código corto imprimible para validar el certificado en papel (anti-repudio).
   codigoVerificacion String?   @map("codigo_verificacion") @db.VarChar(24)
   // HTML canónico sellado: sha256(documentoHtml) == hashSha256. Es lo que hace
@@ -1593,6 +1593,25 @@ model OrdenInterna {
   anuladaAt       DateTime? @map("anulada_at") @db.Timestamptz
   anuladaPor      String?   @map("anulada_por") @db.Uuid
   motivoAnulacion String?   @map("motivo_anulacion")
+  /// Emisión, recepción, respuesta y cierre (align_r1b_ordenes_internas.sql · EP-01 2.2, 0.6, 3.7, 5.5).
+  muestraId           String?   @map("muestra_id") @db.Uuid
+  requisito           String?
+  fechaEnvio          DateTime? @map("fecha_envio") @db.Date
+  ieReferencia        String?   @map("ie_referencia") @db.VarChar(80)
+  recibidaAt          DateTime? @map("recibida_at") @db.Timestamptz
+  recibidaPor         String?   @map("recibida_por") @db.Uuid
+  respuestaNumero     String?   @map("respuesta_numero") @db.VarChar(80)
+  respuestaInforme    String?   @map("respuesta_informe")
+  respuestaHoras      Decimal?  @map("respuesta_horas") @db.Decimal(8, 2)
+  respuestaInsumos    String?   @map("respuesta_insumos")
+  costoDirecto        Decimal?  @map("costo_directo") @db.Decimal(14, 2)
+  respondidaAt        DateTime? @map("respondida_at") @db.Timestamptz
+  respondidaPor       String?   @map("respondida_por") @db.Uuid
+  cerradaAt           DateTime? @map("cerrada_at") @db.Timestamptz
+  cerradaPor          String?   @map("cerrada_por") @db.Uuid
+  aceptadaAt          DateTime? @map("aceptada_at") @db.Timestamptz
+  aceptadaPor         String?   @map("aceptada_por") @db.Uuid
+  aceptadaObservacion String?   @map("aceptada_observacion")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt   DateTime? @map("deleted_at") @db.Timestamptz
 

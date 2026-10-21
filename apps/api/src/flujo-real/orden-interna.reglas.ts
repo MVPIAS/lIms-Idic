@@ -27,7 +27,9 @@ const SIGUIENTE: Record<string, string[]> = {
 };
 
 /** Campos de contenido: solo cambian mientras la orden está abierta. */
-export const CAMPOS_CONTENIDO = ["tipo", "destinoLab", "origenLab", "ensayos", "detalle"] as const;
+export const CAMPOS_CONTENIDO = [
+  "tipo", "destinoLab", "origenLab", "ensayos", "detalle", "muestraId", "requisito", "fechaEnvio", "ieReferencia",
+] as const;
 
 export interface CambioOi {
   tipo?: string;
@@ -35,6 +37,10 @@ export interface CambioOi {
   origenLab?: string | null;
   ensayos?: string[];
   detalle?: string | null;
+  muestraId?: string | null;
+  requisito?: string | null;
+  fechaEnvio?: string | null;
+  ieReferencia?: string | null;
   estado?: string;
   otId?: string;
 }
@@ -109,4 +115,136 @@ export function codigosSucdel(codsucdel: string | null | undefined): string[] {
     .split(/[\s,;/]+/)
     .map((x) => x.trim())
     .filter(Boolean);
+}
+
+/* ========================================================================== */
+/* Emisión, recepción, respuesta y cierre (frente r1b · EP-01 2.2, 0.6, 3.7, 5.5) */
+/* ========================================================================== */
+
+/**
+ * Datos obligatorios al emitir (EP-01 2.2 «OT {código} · Órdenes internas ·
+ * Nueva»): muestra de origen, requisito y punto de la especificación, y fecha
+ * de envío de la muestra (no futura más allá de 60 días ni anterior a la OT).
+ */
+export function erroresEmision(d: {
+  muestraId?: string | null;
+  muestraDeLaOt?: boolean;
+  requisito?: string | null;
+  fechaEnvio?: string | null;
+  fechaOt?: Date | string | null;
+  hoy?: Date;
+}): string[] {
+  const e: string[] = [];
+  if (!d.muestraId) e.push("Indique la muestra de origen que se envía al laboratorio de destino.");
+  else if (d.muestraDeLaOt === false) e.push("La muestra de origen no es de esta OT.");
+  if ((d.requisito ?? "").trim().length < 3) e.push("Indique el requisito y el punto de la especificación que debe evaluar el destino.");
+  if (!d.fechaEnvio) e.push("Indique la fecha de envío de la muestra.");
+  else {
+    const f = new Date(`${String(d.fechaEnvio).slice(0, 10)}T12:00:00`);
+    if (Number.isNaN(f.getTime())) e.push("La fecha de envío no es válida.");
+    else {
+      const hoy = d.hoy ?? new Date();
+      const limite = new Date(hoy.getTime() + 60 * 86_400_000);
+      if (f > limite) e.push("La fecha de envío no puede estar a más de 60 días.");
+      if (d.fechaOt) {
+        const ot = new Date(d.fechaOt);
+        ot.setHours(0, 0, 0, 0);
+        if (!Number.isNaN(ot.getTime()) && f < ot) e.push("La fecha de envío no puede ser anterior a la apertura de la OT.");
+      }
+    }
+  }
+  return e;
+}
+
+/** ¿Puede el laboratorio de destino recibirla? Solo una orden abierta. */
+export function motivoNoRecibible(estado: string | null | undefined): string | null {
+  const a = estado ?? "abierta";
+  if (a === "abierta") return null;
+  if (a === "recibida") return "La orden interna ya fue recibida.";
+  return `La orden interna está ${a}: no se puede recibir.`;
+}
+
+export interface RespuestaOi {
+  informe?: string | null;
+  horas?: number | null;
+  insumos?: string | null;
+  costoDirecto?: number | null;
+}
+
+/** Errores de la respuesta del destino (horas y costo directo obligatorios, no negativos). */
+export function erroresRespuesta(estado: string | null | undefined, r: RespuestaOi): string[] {
+  const e: string[] = [];
+  if ((estado ?? "abierta") !== "recibida")
+    e.push(estado === "abierta" ? "Reciba primero la orden interna." : `La orden interna está ${estado}: no admite respuesta.`);
+  if (r.horas === null || r.horas === undefined || !Number.isFinite(r.horas)) e.push("Indique las horas dedicadas.");
+  else if (r.horas < 0 || r.horas > 9999) e.push("Las horas deben estar entre 0 y 9999.");
+  if (r.costoDirecto === null || r.costoDirecto === undefined || !Number.isFinite(r.costoDirecto)) e.push("Indique el costo directo.");
+  else if (r.costoDirecto < 0) e.push("El costo directo no puede ser negativo.");
+  return e;
+}
+
+/** Resultado de un ensayo derivado, en la muestra de la OT de origen. */
+export interface ResultadoDerivado {
+  ensayoId: string;
+  ensayo: string;
+  estado: string | null;
+  valor: number | null;
+  texto: string | null;
+  observacion: string | null;
+}
+
+const CAPTURADOS = ["capturado", "revisado_n1", "revisado", "aprobado"];
+
+/**
+ * Qué falta para que el destino cierre la orden y devuelva el informe
+ * («Cerrar OT interna → devolver al solicitante», EP-01 5.5):
+ *   · estar recibida y con la respuesta guardada (horas y costo directo);
+ *   · cada ensayo derivado con su resultado capturado en la muestra;
+ *   · ningún resultado en 0,00 sin observación: en el LIMS antiguo el destino
+ *     dejaba 0,00 como marcador y el IVC informaba otro valor (EP-03 3.5, EP-05 4.10).
+ */
+export function faltantesCierreOi(p: {
+  estado: string | null | undefined;
+  respondida: boolean;
+  ensayos: { id: string; nombre: string }[];
+  resultados: ResultadoDerivado[];
+}): string[] {
+  const f: string[] = [];
+  const estado = p.estado ?? "abierta";
+  if (estado !== "recibida") {
+    f.push(estado === "abierta" ? "La orden interna aún no se ha recibido." : `La orden interna está ${estado}.`);
+    return f;
+  }
+  if (!p.respondida) f.push("Guarde la respuesta (horas y costo directo) antes de cerrar.");
+  for (const e of p.ensayos) {
+    const rs = p.resultados.filter((r) => r.ensayoId === e.id);
+    if (!rs.length) {
+      f.push(`El ensayo ${e.nombre} no tiene resultado en la muestra.`);
+      continue;
+    }
+    const sin = rs.filter((r) => !CAPTURADOS.includes(r.estado ?? ""));
+    if (sin.length) f.push(`El ensayo ${e.nombre} tiene ${sin.length} resultado(s) sin capturar.`);
+    // El texto del valor no explica el cero si es solo el número («0», «0,00»).
+    const explica = (t: string | null) => Boolean((t ?? "").trim()) && !/^[\s\d.,+-]*$/.test(t ?? "");
+    const ceros = rs.filter((r) => CAPTURADOS.includes(r.estado ?? "") && r.valor === 0 && !explica(r.texto) && !(r.observacion ?? "").trim());
+    if (ceros.length)
+      f.push(`El ensayo ${e.nombre} tiene un resultado 0,00 sin observación: registre el valor real o explique el cero (p. ej. «< LD»).`);
+  }
+  return f;
+}
+
+/** ¿Puede el solicitante darla por recibida? Solo cerrada y una vez. */
+export function motivoNoAceptable(estado: string | null | undefined, aceptadaAt: Date | string | null | undefined): string | null {
+  if ((estado ?? "") !== "cerrada") return "El laboratorio de destino aún no ha cerrado la orden interna con su informe.";
+  if (aceptadaAt) return "La orden interna ya se dio por recibida.";
+  return null;
+}
+
+/** Paso del ciclo en que está la orden (para la barra de 5 pasos de la ficha). */
+export function pasoOi(o: { estado: string; respondidaAt?: unknown; aceptadaAt?: unknown }): number {
+  if (o.estado === "anulada") return 0;
+  if (o.estado === "abierta") return 1;
+  if (o.estado === "recibida") return o.respondidaAt ? 3 : 2;
+  if (o.estado === "cerrada") return o.aceptadaAt ? 5 : 4;
+  return 1;
 }

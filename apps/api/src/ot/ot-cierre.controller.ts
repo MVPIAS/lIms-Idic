@@ -35,6 +35,7 @@ import {
   sumarDias,
   validarFechaCompromiso,
 } from "./plazos";
+import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 
 const FechaCompromiso = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD"),
@@ -84,6 +85,18 @@ export class OtCierreService {
       id,
     );
     return f[0] ?? {};
+  }
+
+  /**
+   * Con documentos por muestra, producto o laboratorio, cada uno con resultados
+   * debe tener el suyo (o su «no emitido») para cerrar (docs/FLUJO_DOCUMENTOS_POR_OT.md).
+   */
+  private async coberturaPendiente(otId: string, tenantId: string, db: any = this.prisma): Promise<string[]> {
+    try {
+      return (await hechosCobertura(db, otId, tenantId)).pendientes;
+    } catch {
+      return []; // BD sin align_r1b_documentos_ot.sql: un documento por OT
+    }
   }
 
   /** Documentos de la OT con lo necesario para el cierre. */
@@ -145,6 +158,7 @@ export class OtCierreService {
       estado: ot.estado,
       documentos: documentos.map((d) => ({ numero: d.numero, estado: d.estado, entregadoAt: d.entregadoAt, pendienteDe: d.pendienteDe })),
       resultadosNoAprobados: totalRes - aprobados,
+      coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId),
     });
     const camino = caminoEstadosOt(ot.estado);
     if (!faltantes.length && camino === null)
@@ -235,6 +249,7 @@ export class OtCierreService {
         estado,
         documentos: docs.map((d) => ({ numero: d.numero ?? d.codigo, estado: d.estado, entregadoAt: d.entregadoAt })),
         resultadosNoAprobados: noAprobados,
+        coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId, tx),
       });
       const camino = caminoEstadosOt(estado);
       if (!faltantes.length && camino === null)

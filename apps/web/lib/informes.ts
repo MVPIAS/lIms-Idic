@@ -72,6 +72,8 @@ export interface Propuesta {
   conRequisito: number;
   totalEnsayos: number;
   portada: Portada | null;
+  /** Cobertura que propone el laboratorio de la OT (docs/FLUJO_DOCUMENTOS_POR_OT.md). */
+  cobertura?: { cobertura: string; porConfirmar: boolean; fuente: string | null } | null;
 }
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";

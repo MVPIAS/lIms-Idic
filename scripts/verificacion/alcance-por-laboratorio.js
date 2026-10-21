@@ -236,6 +236,7 @@ const LISTADOS = [
   { n: "Informes y certificados", r: "/informes/documentos?limit=200", p: "ot.ver", t: "certificado", regla: "unidad", href: "/certificados" },
   { n: "Certificados (ruta retirada)", r: "/certificados?limit=200", p: "ot.ver", regla: "retirada" },
   { n: "Órdenes internas", r: "/ordenes-internas?limit=200", p: "ot.ver", t: "orden_interna", regla: "unidad", href: "/ordenes-internas" },
+  { n: "Órdenes internas · bandeja de entrada (r1b)", r: "/ordenes-internas/bandeja?estado=todas", p: "ot.ver", t: "orden_interna", regla: "unidad" },
   { n: "Buscador de documentos", r: "/documentos?limit=200", p: "ot.ver", t: "certificado", regla: "unidad", href: "/documentos" },
   { n: "Control estadístico (SPC)", r: "/spc/series", p: "resultado.ver", t: "ot", regla: "unidad", href: "/spc" },
   { n: "Equipos", r: "/equipos?limit=200", p: "equipo.ver", t: "equipo", regla: "equipo", href: "/equipos" },
@@ -393,6 +394,9 @@ async function main() {
       ["evidencia", "evidencia.ver", (id) => `/evidencias/${id}`, null, "saec"],
       ["cotizacion", "cotizacion.ver", (id) => `/cotizaciones/${id}`, null, "fase1"],
       ["encuesta", "encuesta.ver", (id) => `/encuestas/${id}`],
+      ["orden_interna", "ot.ver", (id) => `/ordenes-internas/${id}`],
+      ["ot", "ot.ver", (id) => `/bpch/cabecera-ot/${id}`],
+      ["ot", "certificado.emitir", (id) => `/informes/ot/${id}/cobertura`],
     ];
     for (const [tipo, perm, ruta, codigos, regla] of DETALLE) {
       if (!tiene(perm)) continue;

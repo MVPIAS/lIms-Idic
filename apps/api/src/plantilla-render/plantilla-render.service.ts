@@ -22,6 +22,19 @@ import {
   type PasoNuevo,
 } from "./reglas-emision";
 import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
+import { NumeracionService } from "./numeracion.service";
+import { numeroGeneral } from "./numeracion";
+import {
+  documentoEnConflicto,
+  erroresCobertura,
+  motivoNoEmitido,
+  normalizarCobertura,
+  type CoberturaDoc,
+} from "./cobertura-documento";
+import { etiquetaDe, hechosCobertura, resultadosCubiertos } from "./cobertura-ot";
+import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
+import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
+import { escapeHtml } from "./html.util";
 import {
   armarInforme,
   filaInspeccion,
@@ -72,6 +85,19 @@ export interface OpcionesEmision {
   /** Informe de cumplimiento o de solo resultados (por defecto, el sugerido). */
   modalidad?: Modalidad;
   datosInforme?: DatosInforme;
+  /**
+   * Qué cubre el documento (docs/FLUJO_DOCUMENTOS_POR_OT.md): toda la OT (por
+   * defecto), una muestra, un producto (sus muestras) o un laboratorio.
+   */
+  cobertura?: { cobertura?: string | null; muestraIds?: string[] | null; unidadId?: string | null } | null;
+}
+
+/** Subconjunto de la OT que imprime un documento (null = todo). */
+export interface FiltroDocumento {
+  muestraIds: Set<string> | null;
+  resultadoIds: Set<string> | null;
+  /** Texto de la cobertura ({{documento.cobertura}}). */
+  etiqueta: string | null;
 }
 
 /**
@@ -100,6 +126,7 @@ export class PlantillaRenderService {
     private readonly prisma: PrismaService,
     private readonly qc: QcService,
     private readonly matriz: FirmasMatrizService,
+    private readonly numeracion: NumeracionService,
   ) {}
 
   /** Proveedores de contexto adicional registrados por otros módulos (clave → proveedor). */
@@ -133,7 +160,7 @@ export class PlantillaRenderService {
    * (la de la orden si se editó, la copiada del catálogo si no). Solo los
    * resultados antiguos sin especificación propia caen a `norma_limite`.
    */
-  async contexto(otId: string, tenantId?: string) {
+  async contexto(otId: string, tenantId?: string, filtro: FiltroDocumento | null = null) {
     const ot = await this.prisma.ordenTrabajo.findUnique({
       where: { id: otId },
       include: { cliente: true },
@@ -141,12 +168,13 @@ export class PlantillaRenderService {
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
     if (tenantId && ot.tenantId !== tenantId) throw new NotFoundException(`OT ${otId} no encontrada`);
 
-    const muestras = await this.prisma.muestra.findMany({
+    // Un documento por muestra, producto o laboratorio imprime solo lo que cubre.
+    const todasMuestras = await this.prisma.muestra.findMany({
       where: { otId, deletedAt: null },
       include: { tipoMuestra: true },
       orderBy: { codigo: "asc" },
     });
-    const resultados = await this.prisma.resultado.findMany({
+    const todosResultados = await this.prisma.resultado.findMany({
       where: { otId, deletedAt: null },
       include: {
         analito: true,
@@ -156,6 +184,13 @@ export class PlantillaRenderService {
       },
       orderBy: [{ fecha: "asc" }, { id: "asc" }],
     });
+    const resultados = filtro?.resultadoIds ? todosResultados.filter((r) => filtro.resultadoIds!.has(r.id)) : todosResultados;
+    const conResultado = new Set(resultados.map((r) => r.muestraId));
+    const muestras = filtro?.muestraIds
+      ? todasMuestras.filter((m) => filtro.muestraIds!.has(m.id))
+      : filtro?.resultadoIds
+        ? todasMuestras.filter((m) => conResultado.has(m.id))
+        : todasMuestras;
 
     // Límites de norma de los analitos LEGADOS, en UNA consulta (no N+1). Los
     // resultados del puente (cat_analito_id) traen su propia especificación.
@@ -211,7 +246,7 @@ export class PlantillaRenderService {
     });
 
     const bpch = await this.cabeceraBpch(otId, muestras);
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch };
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, cobertura: filtro?.etiqueta ?? null };
   }
 
   /**
@@ -336,6 +371,8 @@ export class PlantillaRenderService {
       fecha_hora: fmtFechaHora(cert.fecha),
       // Documentos BPCH: cabecera del expediente (vacía en las demás OT).
       bpch: ctx.bpch ?? {},
+      // Qué cubre el documento (vacío si cubre toda la OT).
+      documento: { cobertura: ctx.cobertura ?? "" },
       anio: String(cert.fecha.getFullYear()),
       n_muestras: String(muestras.length),
       n_resultados: String(resultados.length),
@@ -412,14 +449,14 @@ export class PlantillaRenderService {
     plantillaId: string,
     tenantId: string | undefined,
     cert: { numero: string; codigoVerificacion: string; fecha: Date },
-    opciones: { modalidad?: Modalidad; datos?: DatosInforme } = {},
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme; filtro?: FiltroDocumento | null } = {},
   ) {
     const plantilla = await this.prisma.plantillaInforme.findUnique({ where: { id: plantillaId } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
     if (tenantId && plantilla.tenantId !== tenantId)
       throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
 
-    const ctx = await this.contexto(otId, tenantId);
+    const ctx = await this.contexto(otId, tenantId, opciones.filtro ?? null);
     const cfg = await this.configDePlantilla(plantilla.id, plantilla.tipo);
     const modalidad = opciones.modalidad ?? modalidadSugerida(ctx.paraInforme);
     const datosDoc = opciones.datos ?? {};
@@ -472,6 +509,8 @@ export class PlantillaRenderService {
       avisos.push(`Placeholders sin dato en el expediente (se emiten vacíos): ${faltantes.join(", ")}.`);
     if (ctx.resultados.length === 0)
       avisos.push("La OT no tiene resultados registrados: la tabla de resultados sale vacía.");
+    if (ctx.cobertura)
+      avisos.push(`Documento de una parte de la OT: ${ctx.cobertura}. Imprime solo sus muestras y resultados.`);
     const sinNombre = ctx.paraInforme.filter((r) => !r.ensayo || !r.ensayo.trim()).length;
     if (sinNombre)
       avisos.push(`${sinNombre} ensayo(s) sin nombre en el catálogo: se imprimen como «Ensayo sin nombre en el catálogo».`);
@@ -495,6 +534,40 @@ export class PlantillaRenderService {
   }
 
   /**
+   * Cobertura del documento validada contra la OT (docs/FLUJO_DOCUMENTOS_POR_OT.md):
+   * qué muestras y resultados imprime, con qué laboratorio se resuelven sus
+   * firmas y su número, y la primera muestra (para {MUESTRA} del número).
+   */
+  async resolverCobertura(otId: string, tenantId: string, pedida: OpcionesEmision["cobertura"]) {
+    const cob = normalizarCobertura(pedida);
+    const hechos = await hechosCobertura(this.prisma, otId, tenantId);
+    const errores = erroresCobertura(cob, { muestras: hechos.muestras, laboratorios: hechos.laboratorios.map((l) => l.id) });
+    const etiqueta = cob.cobertura === "ot" ? null : etiquetaDe(cob, hechos);
+    const resultadoIds = resultadosCubiertos(cob, hechos);
+    const filtro: FiltroDocumento | null =
+      cob.cobertura === "ot"
+        ? null
+        : { muestraIds: cob.cobertura === "laboratorio" ? null : new Set(cob.muestraIds), resultadoIds, etiqueta };
+    const primera =
+      cob.cobertura === "muestra" || cob.cobertura === "producto"
+        ? hechos.muestras.find((m) => cob.muestraIds.includes(m.id))
+        : cob.cobertura === "laboratorio"
+          ? hechos.muestras.find((m) => [...(resultadoIds ?? [])].some((r) => hechos.muestraDe.get(r) === m.id))
+          : hechos.muestras[0];
+    return {
+      cob,
+      hechos,
+      errores,
+      etiqueta,
+      filtro,
+      resultadoIds,
+      /** Unidad con que se resuelven firmas y número: la cubierta si es por laboratorio. */
+      unidadDocumento: cob.cobertura === "laboratorio" ? cob.unidadId : hechos.principal,
+      muestraCodigo: primera?.codigo ?? null,
+    };
+  }
+
+  /**
    * Previsualiza el documento relleno SIN emitir: no consume correlativo ni
    * escribe nada. El número va marcado como borrador para que un PDF/impresión
    * de la previsualización no pueda confundirse con un certificado válido
@@ -504,11 +577,13 @@ export class PlantillaRenderService {
     otId: string,
     plantillaId: string,
     tenantId?: string,
-    opciones: { modalidad?: Modalidad; datos?: DatosInforme } = {},
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme; cobertura?: OpcionesEmision["cobertura"] } = {},
   ) {
     const fecha = new Date();
+    const cob = tenantId ? await this.resolverCobertura(otId, tenantId, opciones.cobertura) : null;
+    if (cob?.errores.length) throw new BadRequestException(cob.errores.join(" "));
     const cert = {
-      numero: `CERT-${fecha.getFullYear()}-XXXX`,
+      numero: await this.numeroBorrador(otId, plantillaId, tenantId, fecha, cob),
       codigoVerificacion: "SIN EMITIR",
       fecha,
     };
@@ -517,7 +592,7 @@ export class PlantillaRenderService {
       plantillaId,
       tenantId,
       cert,
-      opciones,
+      { modalidad: opciones.modalidad, datos: opciones.datos, filtro: cob?.filtro ?? null },
     );
 
     const sello: Sello = {
@@ -543,6 +618,43 @@ export class PlantillaRenderService {
         this.titulo(cert.numero, plantilla.nombre, ctx.ot.codigo),
       ),
     };
+  }
+
+  /**
+   * Número que se imprime en la vista previa: el que tendría el documento con
+   * la numeración de su laboratorio, marcado «BORRADOR» (no reserva nada).
+   */
+  private async numeroBorrador(
+    otId: string,
+    plantillaId: string,
+    tenantId: string | undefined,
+    fecha: Date,
+    cob: { unidadDocumento: string | null; muestraCodigo: string | null } | null = null,
+  ): Promise<string> {
+    const general = `CERT-${fecha.getFullYear()}-XXXX`;
+    try {
+      const [ot, plantilla, primera] = await Promise.all([
+        this.prisma.ordenTrabajo.findFirst({ where: { id: otId, ...(tenantId ? { tenantId } : {}) }, select: { codigo: true, unidadPrincipal: true, tenantId: true } }),
+        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true } }),
+        this.prisma.muestra.findFirst({ where: { otId, deletedAt: null }, orderBy: { codigo: "asc" }, select: { codigo: true } }),
+      ]);
+      if (!ot || !plantilla) return general;
+      const unidad = cob ? cob.unidadDocumento : ot.unidadPrincipal;
+      const deUnidad = await this.tipoDocumentoDeUnidad(unidad);
+      const { tipo } = tipoDocumentoPorDefecto({ tipoPlantilla: plantilla.tipo, tipoUnidad: deUnidad?.tipo ?? null });
+      const p = await this.numeracion.proximo({
+        tenantId: ot.tenantId,
+        unidadId: unidad,
+        tipo,
+        fecha,
+        ot: ot.codigo,
+        muestra: cob ? cob.muestraCodigo : primera?.codigo ?? null,
+        numInforme: await this.numeroInformeInspeccion(otId),
+      });
+      return p.numero ? `${p.numero} (BORRADOR)` : general;
+    } catch {
+      return general;
+    }
   }
 
   /* ====================================================================== */
@@ -582,7 +694,49 @@ export class PlantillaRenderService {
     if (!n) throw new ConflictException("No se pudo reservar el correlativo del certificado");
     // padStart(4) da CERT-2026-0001; a partir de 10000 crece a 5 dígitos sin
     // romper nada (el contador es INTEGER, no hay orden lexicográfico).
-    return `CERT-${anio}-${String(n).padStart(4, "0")}`;
+    return numeroGeneral(anio, n);
+  }
+
+  /** Número del Informe de Inspección vigente de la OT (para {NUM_INFORME}). */
+  private async numeroInformeInspeccion(otId: string, db: any = this.prisma): Promise<string | null> {
+    const inf = await db.certificado.findFirst({
+      where: { otId, tipoDocumento: "INFORME_INSPECCION", deletedAt: null, estado: { in: ["oficial", "emitido", "en_firma"] } },
+      orderBy: { createdAt: "desc" },
+      select: { numero: true, codigo: true },
+    });
+    return inf?.numero ?? inf?.codigo ?? null;
+  }
+
+  /**
+   * Número oficial del documento (docs/FLUJO_NUMERACION_DOCUMENTOS.md): el de
+   * la regla del laboratorio y tipo de documento (numeracion_documento); si no
+   * hay regla o al formato le falta un dato, la numeración general
+   * CERT-AAAA-NNNN, con un aviso.
+   */
+  private async numeroOficial(
+    tx: any,
+    d: { tenantId: string; unidadId: string | null; tipoDocumento: string; fecha: Date; otId: string; otCodigo: string; muestraCodigo: string | null },
+  ): Promise<{ numero: string; aviso: string | null; formato: string | null }> {
+    const numInforme = await this.numeroInformeInspeccion(d.otId, tx);
+    const r = await this.numeracion.reservar(
+      tx,
+      {
+        tenantId: d.tenantId,
+        unidadId: d.unidadId,
+        tipo: d.tipoDocumento,
+        fecha: d.fecha,
+        ot: d.otCodigo,
+        muestra: d.muestraCodigo,
+        numInforme,
+      },
+      async (numero) => Boolean(await tx.certificado.findFirst({ where: { tenantId: d.tenantId, OR: [{ numero }, { codigo: numero }] }, select: { id: true } })),
+    );
+    if (r.numero) return { numero: r.numero, aviso: null, formato: r.regla.formato };
+    const numero = await this.siguienteNumero(tx, d.tenantId, d.fecha.getFullYear());
+    const aviso = r.regla
+      ? `Al formato de numeración «${r.regla.formato}» le faltan datos (${(r.faltan ?? []).join(", ")}): se usó la numeración general ${numero}.`
+      : null;
+    return { numero, aviso, formato: null };
   }
 
 
@@ -636,9 +790,13 @@ export class PlantillaRenderService {
 
     if (opts.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(opts.tipoDocumento))
       throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
+    // Cobertura del documento (toda la OT, una muestra, un producto o un laboratorio):
+    // decide qué resultados deben estar aprobados, con qué laboratorio se firma y numera.
+    const cober = await this.resolverCobertura(otId, ot.tenantId, opts.cobertura);
+    const unidadDoc = cober.unidadDocumento;
     // Tipo de documento: el indicado, el propio de la plantilla o el de la unidad
     // de la OT (heredado por la rama: BPCH, sucursales y D11 → informe de inspección).
-    const deUnidad = await this.tipoDocumentoDeUnidad(ot.unidadPrincipal);
+    const deUnidad = await this.tipoDocumentoDeUnidad(unidadDoc);
     const { tipo: tipoDocumento, origen: tipoDocumentoOrigen } = tipoDocumentoPorDefecto({
       indicado: opts.tipoDocumento,
       tipoPlantilla: plantilla.tipo,
@@ -648,17 +806,20 @@ export class PlantillaRenderService {
 
     if (ot.estado === "anulada" || ot.estado === "cerrada")
       faltantes.push(`La OT ${ot.codigo} está ${ot.estado}: no admite nuevos documentos.`);
+    faltantes.push(...cober.errores);
 
-    // 1. Resultados aprobados.
-    const resultados = await this.prisma.resultado.findMany({
+    // 1. Resultados aprobados (los que cubre el documento).
+    const todos = await this.prisma.resultado.findMany({
       where: { otId, deletedAt: null },
       select: {
+        id: true,
         estado: true,
         muestra: { select: { codigo: true } },
         analito: { select: { nombre: true } },
         catAnalito: { select: { nombre: true } },
       },
     });
+    const resultados = cober.resultadoIds ? todos.filter((r) => cober.resultadoIds!.has(r.id)) : todos;
     faltantes.push(
       ...faltantesParaEmitir(
         resultados.map((r) => ({
@@ -683,12 +844,13 @@ export class PlantillaRenderService {
     let pasos: PasoNuevo[] = [];
     let pasosOmitidos: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; motivo: string }[] = [];
     const otInterna = esOtInterna(ot.origenTrabajo);
-    if (!ot.unidadPrincipal) {
+    if (!unidadDoc) {
       faltantes.push(
         `La OT ${ot.codigo} no tiene laboratorio responsable asignado: no se puede saber quién debe firmar el documento.`,
       );
     } else {
-      const res = await this.matriz.resolver(tipoDocumento, ot.unidadPrincipal, ot.tenantId, { otInterna });
+      // Documento por laboratorio: firma ese laboratorio (Alimentos: LQA, LMB o LES).
+      const res = await this.matriz.resolver(tipoDocumento, unidadDoc, ot.tenantId, { otInterna });
       const r = pasosDesdeMatriz(res);
       pasos = r.pasos;
       pasosOmitidos = (res.omitidos ?? []).map((p) => ({
@@ -700,6 +862,12 @@ export class PlantillaRenderService {
       }));
       faltantes.push(...r.errores);
     }
+
+    // 4a. Informe de Inspección del BPCH (EP-10 10.11): la cabecera de inspección
+    // con lugar y fecha (registrada en la OT o en su expediente; en Producción
+    // Nacional, la del programa). La Delegación Nº 11 tiene su propio proceso.
+    if (tipoDocumento === "INFORME_INSPECCION" && (await otEsBpch(this.prisma, ot.unidadPrincipal)))
+      faltantes.push(...faltantesParaEmitirInspeccion(await vistaCabecera(this.prisma, otId)));
 
     // 4b. Documento final de una inspección BPCH: el Certificado de Conformidad
     // solo si la condición final es CUMPLE, el Informe de Incumplimiento solo
@@ -724,25 +892,53 @@ export class PlantillaRenderService {
       );
     }
 
-    // 5. Documento vigente de la misma plantilla (salvo el que se reemplaza).
-    const vigentes = await this.prisma.certificado.findMany({
-      where: { otId, plantillaId, deletedAt: null, ...(opts.reemplazaId ? { NOT: { id: opts.reemplazaId } } : {}) },
-      select: { id: true, numero: true, codigo: true, estado: true },
-    });
-    const otro = vigentes.find((c) => esVigente(c.estado));
+    // 5. Documento vigente de la misma plantilla que se solape con este (salvo el
+    // que se reemplaza): varios por OT si cubren muestras, productos o laboratorios distintos.
+    const otro = documentoEnConflicto(
+      cober.cob,
+      cober.hechos.documentos.filter((d) => d.plantillaId === plantillaId && d.id !== opts.reemplazaId),
+    );
     if (otro)
       faltantes.push(
-        `Ya existe el documento ${otro.numero ?? otro.codigo} (${otro.estado === "en_firma" ? "en firma" : "oficial"}) con esta plantilla. ` +
-          "Para corregirlo, anúlelo (o pida que lo devuelvan) y reemítalo como nueva versión.",
+        otro.noEmitido
+          ? `Ya se registró que el documento ${otro.numero} (${otro.etiqueta ?? "esta cobertura"}) no se emite.`
+          : `Ya existe el documento ${otro.numero} (${otro.estado === "en_firma" ? "en firma" : "oficial"}${otro.etiqueta ? ` · ${otro.etiqueta}` : ""}) con esta plantilla. ` +
+              (cober.cob.cobertura === "ot" && otro.cobertura === "ot"
+                ? "Para corregirlo, anúlelo (o pida que lo devuelvan) y reemítalo como nueva versión."
+                : "Elija otra muestra, producto o laboratorio, o corrija ese documento."),
       );
+
+    // Número oficial que tendrá (orientativo: no se reserva hasta emitir).
+    const muestraCodigo = cober.muestraCodigo;
+    const prox = await this.numeracion.proximo({
+      tenantId: ot.tenantId,
+      unidadId: unidadDoc,
+      tipo: tipoDocumento,
+      fecha: new Date(),
+      ot: ot.codigo,
+      muestra: muestraCodigo,
+      numInforme: await this.numeroInformeInspeccion(otId),
+    });
+    const numeracion = {
+      numero: prox.numero,
+      formato: prox.formato,
+      porConfirmar: prox.porConfirmar,
+      general: !prox.numero,
+      aviso: prox.formato && !prox.numero
+        ? `Al formato «${prox.formato}» le faltan datos (${prox.faltan.join(", ")}): se usará la numeración general CERT-AAAA-NNNN.`
+        : null,
+    };
 
     return {
       puedeEmitir: faltantes.length === 0,
       faltantes,
+      numeracion,
+      muestraCodigo,
+      cobertura: { ...cober.cob, etiqueta: cober.etiqueta, unidadDocumento: unidadDoc },
       tipoDocumento,
       tipoDocumentoOrigen,
       tipoDocumentoUnidad: tipoDocumentoOrigen === "unidad" ? deUnidad?.unidadCodigo ?? null : null,
-      ot: { id: ot.id, codigo: ot.codigo, unidadId: ot.unidadPrincipal },
+      ot: { id: ot.id, codigo: ot.codigo, unidadId: unidadDoc },
       plantilla,
       resultados: { total: resultados.length, aprobados: resultados.filter((r) => r.estado === "aprobado").length },
       pasos,
@@ -763,7 +959,151 @@ export class PlantillaRenderService {
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
     const ctx = await this.contexto(otId, tenantId);
     const formato = await this.configDePlantilla(plantilla.id, plantilla.tipo);
-    return { formato, ...this.sugerencias(ctx, formato) };
+    return { formato, ...this.sugerencias(ctx, formato), cobertura: await this.coberturaSugerida(ctx.ot.unidadPrincipal) };
+  }
+
+  /**
+   * Cobertura que se propone al emitir (documento_cobertura_unidad): la de la
+   * unidad de la OT o la de su ancestro más cercano; si no hay, toda la OT.
+   */
+  async coberturaSugerida(unidadId: string | null): Promise<{ cobertura: string; porConfirmar: boolean; fuente: string | null }> {
+    const porDefecto = { cobertura: "ot", porConfirmar: false, fuente: null };
+    if (!unidadId) return porDefecto;
+    try {
+      const f = await this.prisma.$queryRawUnsafe<{ cobertura: string; por_confirmar: boolean; fuente: string | null }[]>(
+        `WITH RECURSIVE cadena AS (
+           SELECT id, padre_id, 0 AS nivel FROM unidad WHERE id = $1::uuid
+           UNION ALL
+           SELECT u.id, u.padre_id, c.nivel + 1 FROM unidad u JOIN cadena c ON u.id = c.padre_id WHERE c.nivel < 20)
+         SELECT d.cobertura, d.por_confirmar, d.fuente FROM cadena c JOIN documento_cobertura_unidad d ON d.unidad_id = c.id
+          ORDER BY c.nivel LIMIT 1`,
+        unidadId,
+      );
+      return f[0] ? { cobertura: f[0].cobertura, porConfirmar: f[0].por_confirmar, fuente: f[0].fuente } : porDefecto;
+    } catch {
+      return porDefecto;
+    }
+  }
+
+  /** ¿El laboratorio trabaja en la OT (responsable, destino de una orden interna u «otros laboratorios»)? */
+  async laboratorioTrabajaEnOt(otId: string, tenantId: string, unidadId: string): Promise<boolean> {
+    const h = await hechosCobertura(this.prisma, otId, tenantId);
+    return h.laboratorios.some((l) => l.id === unidadId);
+  }
+
+  /**
+   * Cobertura de los documentos de la OT para la pantalla de emisión: cada
+   * muestra (con su producto) y cada laboratorio que trabaja en la OT, sus
+   * resultados aprobados, sus documentos y lo que falta cubrir para cerrar.
+   */
+  async coberturaOt(otId: string, tenantId: string) {
+    const h = await hechosCobertura(this.prisma, otId, tenantId);
+    const docsDe = (pred: (d: (typeof h.documentos)[number]) => boolean) =>
+      h.documentos
+        .filter((d) => d.estado !== "anulado" || d.noEmitido)
+        .filter(pred)
+        .map((d) => ({ id: d.id, numero: d.numero, estado: d.noEmitido ? "no_emitido" : d.estado, cobertura: d.cobertura, etiqueta: d.etiqueta }));
+    return {
+      muestras: h.muestras.map((m) => ({
+        id: m.id,
+        codigo: m.codigo,
+        nombre: m.nombre,
+        elementoId: m.elementoId,
+        elementoNombre: m.elementoNombre ?? null,
+        resultados: m.resultados,
+        aprobados: m.aprobados,
+        documentos: docsDe((d) => d.cobertura === "ot" || d.muestraIds.includes(m.id)),
+      })),
+      laboratorios: h.laboratorios.map((l) => ({
+        id: l.id,
+        codigo: l.codigo,
+        nombre: l.nombre,
+        principal: l.principal,
+        resultados: l.resultados,
+        aprobados: l.aprobados,
+        documentos: docsDe((d) => d.cobertura === "ot" || d.unidadId === l.id),
+      })),
+      pendientes: h.pendientes,
+    };
+  }
+
+  /**
+   * Registra que un documento NO se emite (LPN: «la muestra no forma película»,
+   * EP-01 5.1): reserva su número oficial (no se reutiliza) y lo deja anulado
+   * con el motivo, cubriendo su muestra, producto o laboratorio para el cierre.
+   */
+  async registrarNoEmitido(
+    otId: string,
+    plantillaId: string,
+    tenantId: string,
+    usuarioId: string | null,
+    p: { motivo: string; tipoDocumento?: string; cobertura?: OpcionesEmision["cobertura"] },
+  ) {
+    const m = motivoNoEmitido(p.motivo);
+    if (m) throw new BadRequestException(m);
+    const cober = await this.resolverCobertura(otId, tenantId, p.cobertura);
+    if (cober.cob.cobertura === "ot")
+      throw new BadRequestException("El registro de «no emitido» es para un documento de una muestra, un producto o un laboratorio.");
+    if (cober.errores.length) throw new BadRequestException(cober.errores.join(" "));
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId }, select: { codigo: true, estado: true } });
+    if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
+    if (ot.estado === "anulada" || ot.estado === "cerrada") throw new ConflictException(`La OT ${ot.codigo} está ${ot.estado}.`);
+    const plantilla = await this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId, tenantId }, select: { id: true, tipo: true, nombre: true } });
+    if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
+    const otro = documentoEnConflicto(cober.cob, cober.hechos.documentos.filter((d) => d.plantillaId === plantillaId));
+    if (otro) throw new ConflictException(`Ya existe el documento ${otro.numero}${otro.etiqueta ? ` (${otro.etiqueta})` : ""} con esta plantilla.`);
+    if (p.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(p.tipoDocumento))
+      throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
+    const deUnidad = await this.tipoDocumentoDeUnidad(cober.unidadDocumento);
+    const { tipo: tipoDocumento } = tipoDocumentoPorDefecto({ indicado: p.tipoDocumento, tipoPlantilla: plantilla.tipo, tipoUnidad: deUnidad?.tipo ?? null });
+    const fecha = new Date();
+    const motivo = p.motivo.trim();
+    return this.prisma.$transaction(async (tx) => {
+      const { numero } = await this.numeroOficial(tx, {
+        tenantId,
+        unidadId: cober.unidadDocumento,
+        tipoDocumento,
+        fecha,
+        otId,
+        otCodigo: ot.codigo,
+        muestraCodigo: cober.muestraCodigo,
+      });
+      // Cuerpo mínimo sellado: el número queda registrado con su motivo y no se imprime.
+      const cuerpo = `<p><b>${escapeHtml(numero)}</b> · ${escapeHtml(plantilla.nombre)} · OT ${escapeHtml(ot.codigo)}</p>` +
+        `<p>Documento NO EMITIDO (${escapeHtml(cober.etiqueta ?? "")}). Motivo: ${escapeHtml(motivo)}</p>`;
+      const cert = await tx.certificado.create({
+        data: {
+          tenantId,
+          otId,
+          codigo: numero,
+          numero,
+          tipo: plantilla.tipo,
+          tipoDocumento,
+          unidadId: cober.unidadDocumento,
+          version: 1,
+          plantillaId,
+          hashSha256: createHash("sha256").update(cuerpo, "utf8").digest("hex"),
+          documentoHtml: cuerpo,
+          emitidoPor: usuarioId,
+          fecha,
+          estado: "anulado",
+          anuladoAt: fecha,
+          anuladoPor: usuarioId,
+          anuladoMotivo: `No emitido: ${motivo}`,
+        },
+        select: { id: true, numero: true, estado: true },
+      });
+      await tx.$executeRawUnsafe(
+        `UPDATE certificado SET cobertura = $2, muestra_ids = $3::uuid[], unidad_cobertura = $4::uuid, cobertura_etiqueta = $5, no_emitido = TRUE
+          WHERE id = $1::uuid`,
+        cert.id,
+        cober.cob.cobertura,
+        cober.cob.muestraIds,
+        cober.cob.unidadId,
+        cober.etiqueta,
+      );
+      return { ...cert, noEmitido: true, motivo, cobertura: cober.etiqueta };
+    });
   }
 
   /* ====================================================================== */
@@ -809,11 +1149,17 @@ export class PlantillaRenderService {
       // La nueva versión conserva la modalidad y los datos del documento
       // (conclusión, portada) salvo que quien reemite indique otros.
       const doc = await this.datosDeDocumento(previo.id);
+      // La nueva versión cubre lo mismo que la devuelta (muestra, producto o laboratorio).
+      const cob = await this.prisma.$queryRawUnsafe<{ cobertura: string; muestra_ids: string[]; unidad_cobertura: string | null }[]>(
+        `SELECT cobertura, muestra_ids, unidad_cobertura FROM certificado WHERE id = $1::uuid`,
+        previo.id,
+      ).catch(() => []);
       opts = {
         ...opts,
         tipoDocumento: opts.tipoDocumento ?? previo.tipoDocumento ?? undefined,
         modalidad: opts.modalidad ?? doc.modalidad ?? undefined,
         datosInforme: opts.datosInforme ?? doc.datos ?? undefined,
+        cobertura: cob[0] ? { cobertura: cob[0].cobertura, muestraIds: cob[0].muestra_ids ?? [], unidadId: cob[0].unidad_cobertura } : opts.cobertura,
       };
       const masNueva = await this.prisma.certificado.findFirst({
         where: { reemplazaId: previo.id, deletedAt: null },
@@ -830,9 +1176,9 @@ export class PlantillaRenderService {
     if (!cond.puedeEmitir) {
       throw new ConflictException(`No se puede emitir el documento. ${cond.faltantes.join(" ")}`);
     }
+    const cober = await this.resolverCobertura(otId, tenantId, opts.cobertura);
 
     const fecha = new Date();
-    const anio = fecha.getFullYear();
     const codigoVerificacion = nuevoCodigoVerificacion();
     const anterior = previo;
 
@@ -841,16 +1187,25 @@ export class PlantillaRenderService {
     // CUERPO IMPRIME el número, así que el hash depende de él.
     const emitido = await this.prisma.$transaction(async (tx) => {
       const version = anterior ? anterior.version + 1 : 1;
-      const numero = anterior
-        ? numeroVersion(anterior.numero ?? anterior.codigo, version)
-        : await this.siguienteNumero(tx, tenantId, anio);
+      const oficial = anterior
+        ? null
+        : await this.numeroOficial(tx, {
+            tenantId,
+            unidadId: cond.ot.unidadId,
+            tipoDocumento: cond.tipoDocumento,
+            fecha,
+            otId,
+            otCodigo: cond.ot.codigo,
+            muestraCodigo: cond.muestraCodigo,
+          });
+      const numero = anterior ? numeroVersion(anterior.numero ?? anterior.codigo, version) : oficial!.numero;
 
       const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad } = await this.render(
         otId,
         plantillaId,
         tenantId,
         { numero, codigoVerificacion, fecha },
-        { modalidad: opts.modalidad, datos: opts.datosInforme },
+        { modalidad: opts.modalidad, datos: opts.datosInforme, filtro: cober.filtro },
       );
 
       const cert = await tx.certificado.create({
@@ -878,6 +1233,16 @@ export class PlantillaRenderService {
       const datosJson = JSON.stringify(opts.datosInforme ?? {});
       await tx.$executeRaw`UPDATE certificado SET modalidad = ${modalidad}, datos_informe = ${datosJson}::jsonb
                             WHERE id = ${cert.id}::uuid`;
+      // Cobertura (align_r1b_documentos_ot.sql): qué parte de la OT cubre este documento.
+      await tx.$executeRawUnsafe(
+        `UPDATE certificado SET cobertura = $2, muestra_ids = $3::uuid[], unidad_cobertura = $4::uuid, cobertura_etiqueta = $5
+          WHERE id = $1::uuid`,
+        cert.id,
+        cober.cob.cobertura,
+        cober.cob.muestraIds,
+        cober.cob.unidadId,
+        cober.etiqueta,
+      );
 
       await tx.documentoFirma.createMany({
         data: cond.pasos.map((p) => ({
@@ -914,6 +1279,7 @@ export class PlantillaRenderService {
         });
       }
 
+      if (oficial?.aviso) avisos.push(oficial.aviso);
       return { cert, plantilla, otCodigo: ctx.ot.codigo, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad };
     });
 
@@ -927,6 +1293,7 @@ export class PlantillaRenderService {
       urlVerificacion: emitido.cert.urlVerificacion,
       estado: emitido.cert.estado,
       tipoDocumento: cond.tipoDocumento,
+      cobertura: cond.cobertura,
       modalidad: emitido.modalidad,
       pasos: cond.pasos,
       pasosOmitidos: cond.pasosOmitidos,

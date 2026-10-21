@@ -174,24 +174,65 @@ Integración con el frente de firma y cierre (docs/FLUJO_FIRMA_CIERRE.md):
 ## Órdenes internas (derivación a otro laboratorio)
 
 Una orden interna deriva parte de una OT a OTRO laboratorio con los ensayos del
-catálogo que le corresponden (`orden_interna`, `align_frente_k.sql`).
+catálogo que le corresponden (`orden_interna`, `align_frente_k.sql` y, desde el
+frente r1b, `align_r1b_ordenes_internas.sql`). Especificación: EP-01 0.6, 2.2,
+3.7 y 5.5; EP-02 0.6 y 5.4; EP-03 0.6, 2.2, 3.5 y 5.5; EP-05 4.10.
 
-- **Dónde**: ficha de la OT › pestaña «Órdenes internas» › «＋ Nueva orden
-  interna»; desde «Muestras», en una muestra que pide otros laboratorios y aún
-  no tiene orden, botón «Emitir orden interna» (abre el formulario con ese
-  laboratorio); y Laboratorio › Órdenes internas › «＋ Nueva orden interna»
-  (primero se elige la OT).
-- **Quién**: emite, edita, avanza y anula quien tiene `ot.crear` y la OT de
-  origen en su alcance (403 si no). Ven las órdenes, con `ot.ver`, quienes tienen
-  en su alcance la OT de origen o el laboratorio de destino.
+**Pantallas.**
+
+| Pantalla | Ruta | Qué se hace |
+|---|---|---|
+| Laboratorio › Órdenes internas · «Bandeja de entrada» | `/ordenes-internas` | Las que LLEGAN a sus laboratorios: Nº interno · OT y muestra de origen (y origen BPCH: internación con su resolución DGMN, Producción Nacional con su RAF, reinspección) · laboratorio solicitante · ensayos pedidos · requisito. Botón «Recibir →». |
+| Laboratorio › Órdenes internas · «Todas las de mi alcance» | `/ordenes-internas?vista=todas` | Las emitidas desde sus OT y las que llegan; «＋ Nueva orden interna» (primero se elige la OT). |
+| Ficha de la orden | `/ordenes-internas/[id]` | Barra de 5 pasos, «Siguiente paso · Le toca a», un bloque por paso con su botón «Verbo → siguiente», informe de respuesta renderizado y bitácora. |
+| Ficha de la OT › «Órdenes internas» | `/ot/[id]` | Las de la OT, su costo directo y el aviso de las que volvieron con informe. |
+| Mi bandeja (Jefe de Laboratorio) | `/inicio` | «Órdenes internas por atender» (destino) e «Informes internos por integrar» (origen). |
+
+**Ciclo (ficha de la orden).**
+
+1. **Emitida** · «OT {código} · Órdenes internas · Nueva» → botón «Emitir OT
+   interna → enviar muestra». Campos obligatorios: laboratorio de destino,
+   ensayos del destino, **muestra de origen** (de la OT), **requisito y punto de
+   la especificación**, **fecha de envío** (no anterior a la OT ni a más de 60
+   días); opcional el **IE de referencia** de la OT madre (LAL) y el detalle.
+   Emite el **analista** o la jefatura del laboratorio de la OT
+   (`orden_interna.emitir`, EP-01 2.2), con la OT en su alcance.
+2. **Recibida** · «Recibir OT interna → recepción»: la jefatura del laboratorio
+   de destino (`orden_interna.responder` con el DESTINO en su alcance). Al
+   recibirla se crean en la muestra de origen los ensayos derivados (método
+   vigente por defecto de cada ensayo; idempotente). Desde entonces la orden no
+   cambia de contenido.
+3. **Respondida** · «Guardar respuesta → cerrar»: Nº del informe de respuesta
+   (numeración `RESPUESTA_OI`, por defecto «I.E. N° {NI_N}/{AAAA}»; el destino
+   puede escribir otro, p. ej. «Boletín N° …»), informe, **horas**, insumos y
+   **costo directo** (obligatorios horas y costo, no negativos). El costo se
+   imputa a la OT de origen (se suma en la pestaña de la OT).
+   El **analista del destino captura sus resultados en la misma muestra**
+   (`POST /flujo/resultado/:id/valor`): solo los ensayos derivados y solo
+   mientras la orden está recibida.
+4. **Cerrada · informe devuelto** · «Cerrar OT interna → devolver al
+   solicitante»: exige la respuesta guardada y cada ensayo derivado con su
+   resultado capturado; **un resultado 0,00 sin observación no se acepta** (en
+   el LIMS antiguo el destino dejaba 0,00 como marcador, EP-03 3.5 y EP-05 4.10).
+   Cerrada, el destino ya no captura en la muestra.
+5. **Dada por recibida** · «Dar por recibido → evaluación»: el laboratorio
+   solicitante (`orden_interna.emitir` con la OT en su alcance) integra el
+   informe; sus resultados se evalúan y aprueban como los propios.
+
+Anular (con motivo) o borrar una abierta: `orden_interna.anular` (quien gestiona
+la OT de origen: jefaturas de laboratorio, planificación; el analista emite pero
+no anula). Una OT con órdenes sin cerrar o sin integrar mantiene la etapa
+**Análisis** de la Ruta de la OT en curso y el «Siguiente paso» dice a quién le
+toca (destino o solicitante). Todo queda en `orden_interna_historial`.
+
+**Compatibilidad.** `PATCH /ordenes-internas/:id { estado: "recibida" }` hace lo
+mismo que «Recibir» (historial «estado»); `{ estado: "cerrada" }` responde 409:
+el cierre lo hace el destino con su respuesta.
+
 - **Destino y ensayos**: el destino es un laboratorio del catálogo
   (`cat_familia`, enlazado con su unidad por CODSUCDEL) con ensayos vigentes y
   distinto del responsable de la OT; los ensayos deben ser de ese laboratorio
   (400). Los que ya figuran en la OT se proponen primero («en la OT»).
-- **Ciclo**: abierta (se edita y se puede borrar) → recibida → cerrada. Recibida
-  ya no cambia de contenido (409): solo se cierra o se anula. Anular pide motivo
-  (mínimo 5 caracteres) y una anulada deja de dar acceso a la OT al laboratorio
-  de destino. Todo queda en `orden_interna_historial`.
 - **Alta de OT**: `POST /ot` exige que el laboratorio responsable esté en el
   alcance de quien la registra (los perfiles globales no cambian).
 
