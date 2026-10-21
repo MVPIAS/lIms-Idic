@@ -294,7 +294,6 @@ async function seccionOrdenesInternas(C) {
 }
 
 
-
 const UD = {
   planif: "demo.planificacion",
   recepcion: "demo.recepcion",
@@ -430,6 +429,67 @@ async function seccionDocumentos(C) {
 }
 
 
+const UN = {
+  admin: "demo.admin",
+  calidad: "demo.calidad",      // documento.numeracion (Gestión de Calidad)
+  lqcJefe: "demo.lqc.jefe",     // sin documento.numeracion
+  ventas: "demo.ventas",
+};
+
+async function seccionNumeracion(C) {
+  await paso("NUM · reglas sembradas por especificación (LPN, SVE, DSA, BPCH, respuesta a OI); el permiso es de Administración/Calidad", async () => {
+    const r = await ok(UN.calidad, "GET", "/numeracion-documentos");
+    const de = (u, t) => r.reglas.find((x) => x.activo && x.unidadCodigo === u && x.tipoDocumento === t);
+    afirmar(de("LPN", "INFORME_ENSAYO")?.formato === "IE {LAB} N° {N:3}/{AAAA}", "falta la regla del IE de LPN");
+    afirmar(de("SVE", "IVC")?.formato === "IVC.DQO.{LAB} Nº {OT_N}/{AAAA}", "falta la regla del IVC de LCC/LTX");
+    afirmar(de("BPCH", "INFORME_INSPECCION")?.correlativoPorUnidad, "la regla del BPCH no numera por sucursal");
+    afirmar(r.reglas.some((x) => x.unidadCodigo === "LRB" && x.tipoDocumento === null), "falta la regla del LRB");
+    afirmar(r.reglas.some((x) => x.unidadCodigo === null && x.tipoDocumento === "RESPUESTA_OI"), "falta la regla general de la respuesta a OI");
+    afirmar(r.tokens.length >= 10 && r.tipos.some((t) => t.codigo === "RESPUESTA_OI"), "sin tokens o tipos");
+    await exigir(403, UN.lqcJefe, "GET", "/numeracion-documentos");
+    await exigir(403, UN.ventas, "POST", "/numeracion-documentos/probar", { formato: "{N}" });
+    return `${r.reglas.filter((x) => x.activo).length} reglas activas · ${r.reglas.filter((x) => x.porConfirmar).length} por confirmar`;
+  });
+
+  await paso("NUM · probar un formato: ejemplo en vivo y validación (token desconocido, sin dato variable)", async () => {
+    const lab = (await ok(UN.admin, "GET", "/unidades")).find?.((u) => u.codigo === "LME") ?? lista(await ok(UN.admin, "GET", "/unidades")).find((u) => u.codigo === "LME");
+    const p = await ok(UN.calidad, "POST", "/numeracion-documentos/probar", { formato: "IE {LAB} N° {N:3}/{AAAA}", unidadId: lab.id });
+    afirmar(p.numero === `IE LME N° 007/${new Date().getFullYear()}`, `ejemplo ${p.numero}`);
+    const m = await ok(UN.calidad, "POST", "/numeracion-documentos/probar", { formato: "IE {FOO}" });
+    afirmar(m.numero === null && /desconocidos/.test(m.errores.join(" ")), JSON.stringify(m));
+    await rechazo(400, /cambie por documento/, UN.calidad, "POST", "/numeracion-documentos", { formato: "IE {LAB}/{AAAA}" });
+    C.lme = lab;
+    return p.numero;
+  });
+
+  await paso("NUM · crear, editar y desactivar una regla (una activa por unidad y tipo: 409)", async () => {
+    // Regla de prueba para un tipo que el LME no usa (no altera los documentos de los otros guiones).
+    const previa = (await ok(UN.calidad, "GET", "/numeracion-documentos")).reglas.find((x) => x.activo && x.unidadCodigo === "LME" && x.tipoDocumento === "INFORME_TECNICO");
+    if (previa) await ok(UN.calidad, "POST", `/numeracion-documentos/${previa.id}/desactivar`);
+    await exigir(403, UN.lqcJefe, "POST", "/numeracion-documentos", { unidadId: C.lme.id, tipoDocumento: "INFORME_TECNICO", formato: "IT {LAB} {N}/{AAAA}" });
+    const r = await ok(UN.calidad, "POST", "/numeracion-documentos", {
+      unidadId: C.lme.id, tipoDocumento: "INFORME_TECNICO", formato: "IT {LAB} {N}/{AAAA}", reinicio: "anual", porConfirmar: true, fuente: "Prueba del guion r1b",
+    });
+    await rechazo(409, /Ya hay una regla activa/, UN.calidad, "POST", "/numeracion-documentos", { unidadId: C.lme.id, tipoDocumento: "INFORME_TECNICO", formato: "IT2 {N}" });
+    const e = await ok(UN.calidad, "PATCH", `/numeracion-documentos/${r.id}`, { formato: "IT.{LAB} N° {N:3}/{AAAA}" });
+    afirmar(e.formato === "IT.{LAB} N° {N:3}/{AAAA}", `formato ${e.formato}`);
+    await rechazo(400, /desconocidos/, UN.calidad, "PATCH", `/numeracion-documentos/${r.id}`, { formato: "IT {X}{N}" });
+    const d = await ok(UN.calidad, "POST", `/numeracion-documentos/${r.id}/desactivar`);
+    afirmar(d.activo === false, "no quedó desactivada");
+    await rechazo(409, /desactivada/, UN.calidad, "PATCH", `/numeracion-documentos/${r.id}`, { formato: "IT {N}" });
+    return "creada · editada · desactivada";
+  });
+
+  await paso("NUM · el informe emitido en LQC lleva el número de su laboratorio y no se repite", async () => {
+    afirmar(C.doc1 && C.noEmitido, "falta la sección DOC");
+    const a = Number(C.doc1.numero.match(/N° (\d{3})\//)[1]);
+    const b = Number(C.noEmitido.match(/N° (\d{3})\//)[1]);
+    afirmar(b === a + 1, `correlativo ${a} → ${b}`);
+    return `${C.doc1.numero} → ${C.noEmitido}`;
+  });
+}
+
+
 const UB = {
   planif: "demo.planificacion",
   stgoJefe: "demo.sstgo.jefe",
@@ -524,6 +584,7 @@ async function main() {
   const C = {};
   await seccionOrdenesInternas(C);
   await seccionDocumentos(C);
+  await seccionNumeracion(C);
   await seccionCabeceraBpch(C);
 }
 
