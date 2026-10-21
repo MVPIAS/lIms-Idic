@@ -211,7 +211,8 @@ export class NumeracionService {
       );
       return this.ficha(tenantId, f[0].id);
     } catch (err: any) {
-      if (String(err?.message ?? "").includes("ux_numeracion_documento_regla"))
+      const m = String(err?.message ?? "");
+      if (m.includes("ux_numeracion_documento_regla") || m.includes("23505"))
         throw new ConflictException("Ya hay una regla activa para esa unidad y ese tipo de documento: edítela.");
       throw err;
     }
