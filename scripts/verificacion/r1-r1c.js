@@ -264,7 +264,7 @@ async function main() {
     afirmar(lqc.some((s) => s.cotizacionId === C.cot.id && s.unidadCodigo === "LQC"), "LQC no ve su solicitud");
     afirmar(lqc.every((s) => s.unidadCodigo === "LQC"), "LQC ve solicitudes de otros laboratorios");
     afirmar(lpn.some((s) => s.cotizacionId === C.cot.id) && lpn.every((s) => s.unidadCodigo === "LPN"), "LPN no ve solo lo suyo");
-    await exigir(403, U.a1, "GET", "/cotizaciones/solicitudes-laboratorio");
+    await exigir(403, U.a1, "GET", "/cotizaciones/solicitudes-laboratorio"); // sin cotizacion.ver
     return t;
   });
 

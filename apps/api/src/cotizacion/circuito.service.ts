@@ -229,6 +229,7 @@ export class CircuitoCotizacionService {
   /** Todo lo que pinta la ficha de la cotización: ruta, solicitudes, V°B°, firma, envío y bitácora. */
   async estado(req: any, id: string) {
     const tenantId = this.tenant(req);
+    await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id, "cotizacion.ver");
     await this.cotizaciones.vencerFueraDeValidez(tenantId, id);
     const [c, sols, cfg, firmantes] = await Promise.all([
       this.cot(id, tenantId),
@@ -504,7 +505,7 @@ export class CircuitoCotizacionService {
   /** Bandeja del laboratorio: solicitudes de sus unidades (por responder, por V°B° o todas). */
   async bandejaLaboratorio(req: any, filtro: { estado?: string }) {
     const tenantId = this.tenant(req);
-    const unidades = await this.alcance.filtroUnidades(req, "cotizacion.costear");
+    const unidades = await this.alcance.filtroUnidades(req);
     const estados =
       filtro.estado === "por_responder" ? ["solicitado", "devuelto"] : filtro.estado === "vb" ? ["respondido", "vb_lab"] : null;
     const filas = await this.prisma.$queryRawUnsafe<any[]>(
@@ -630,6 +631,7 @@ export class CircuitoCotizacionService {
 
   private async documento(req: any, id: string) {
     const tenantId = this.tenant(req);
+    await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id, "cotizacion.ver");
     const cot = await this.cotizaciones.detalle(id, tenantId);
     const c = await this.cot(id, tenantId);
     const firmantes = c.firmaEstado === "firmada" ? [] : await this.firmantes(tenantId);
@@ -675,7 +677,7 @@ export class CircuitoCotizacionService {
         return {
           ok: false,
           error: resultado.error,
-          mensaje: `No se pudo enviar el correo (${resultado.error ?? "error del servidor de correo"}). El envío NO quedó registrado: reintente o registre la entrega por otro medio.`,
+          mensaje: `No se pudo enviar el correo: ${(resultado.error ?? "error del servidor de correo").replace(/\s*para este tenant\.?/i, " en esta instalación (Administración › Correo)").replace(/\.$/, "")}. El envío no quedó registrado: reintente o registre la entrega en mano o por courier.`,
         };
       }
     } else if (!obs) {

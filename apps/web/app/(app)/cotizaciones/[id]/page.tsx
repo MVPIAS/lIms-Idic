@@ -156,10 +156,10 @@ export default function FichaCotizacionPage() {
         <div className="card" style={{ padding: 0 }}>
           <div className="tabs" role="tablist" style={{ padding: "0 8px", flexWrap: "wrap" }}>
             {PESTANAS.map(([p, l]) => (
-              <button key={p} role="tab" aria-selected={tab === p} className={`tab${tab === p ? " active" : ""}`} onClick={() => irA(p)}>{l}</button>
+              <button key={p} id={`tab-${p}`} role="tab" aria-selected={tab === p} aria-controls="panel-cotizacion" className={`tab${tab === p ? " active" : ""}`} onClick={() => irA(p)}>{l}</button>
             ))}
           </div>
-          <div style={{ padding: 15 }} role="tabpanel">
+          <div style={{ padding: 15 }} role="tabpanel" id="panel-cotizacion" aria-labelledby={`tab-${tab}`}>
             {tab === "datos" && (
               editando && acc.editar ? (
                 <CotizacionForm modo="editar" inicial={cot} onCancelar={() => setEditando(false)} onGuardado={async () => { setEditando(false); await hecho(`Cotización ${k.codigo} actualizada.`); }} />

@@ -172,7 +172,9 @@ INSERT INTO rol_permiso (rol_id, permiso_id)
 SELECT r.id, p.id
   FROM (VALUES
     ('JEFE_LAB', 'cotizacion.costear'), ('JEFE_SECCION', 'cotizacion.costear'), ('JEFE_DEPTO', 'cotizacion.costear'),
-    ('JEFE_LAB', 'cotizacion.vb'), ('JEFE_DEPTO', 'cotizacion.vb'),
+    -- JEFE_SECCION recibe además lo del JEFE_LAB por la cascada de align_admin_roles.sql;
+    -- se siembra aquí para que una pasada deje lo mismo que dos.
+    ('JEFE_LAB', 'cotizacion.vb'), ('JEFE_SECCION', 'cotizacion.vb'), ('JEFE_DEPTO', 'cotizacion.vb'),
     ('JEFE_DEPTO', 'cotizacion.firmar')
   ) AS m(rol, perm)
   JOIN rol r     ON r.codigo = m.rol

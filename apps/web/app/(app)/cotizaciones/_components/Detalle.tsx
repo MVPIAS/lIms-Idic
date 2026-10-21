@@ -36,6 +36,8 @@ export function accionesDe(c: any, puede: (p: string) => boolean, exigirFirma = 
 /** Estado del circuito de firma y envío (columna de la lista y cabecera de la ficha). */
 export function FirmaChip({ c }: { c: any }) {
   if (c.circuito !== "r1") return <span className="pill gray">Histórica</span>;
+  // Anulada, vencida o aceptada sin firma: no hay circuito en curso que mostrar.
+  if (c.firmaEstado !== "firmada" && c.estado !== "abierta") return <span style={{ color: "var(--muted)" }}>—</span>;
   const f: Record<string, [string, string]> = {
     pendiente: ["En firma", "amber"],
     firmada: ["Firmada", "green"],

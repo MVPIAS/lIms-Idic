@@ -100,7 +100,8 @@ RETURNING`). Si un número ya existe (dato migrado), se salta. Parámetros en
 - En mano o por courier: exige a quién se entregó o el número de seguimiento.
 - Queda registrado el medio, la fecha, quién lo envió y a quién.
 - Mensajería (`POST /mensajeria/cotizacion/:id`) aplica la misma regla y también
-  registra el envío.
+  registra el envío. Desde r1c exige `cotizacion.crear` y la cotización en el alcance;
+  antes bastaba `cotizacion.ver`.
 
 **Aceptación (4.1).** Con `exigir_firma_para_aceptar = si`, una cotización del
 circuito nuevo sin firma no se acepta (409).
@@ -128,13 +129,24 @@ Decisión del usuario del 20-10-2026:
 | Permiso | Roles |
 |---|---|
 | `cotizacion.costear` | JEFE_LAB, JEFE_SECCION, JEFE_DEPTO |
-| `cotizacion.vb` | JEFE_LAB, JEFE_DEPTO |
+| `cotizacion.vb` | JEFE_LAB, JEFE_SECCION, JEFE_DEPTO (el V°B° además exige ser el jefe que resuelve el paso) |
 | `cotizacion.firmar` | JEFE_DEPTO (la matriz `COTIZACION` decide quién firma) |
 | `encuesta.ver` | COMERCIAL, PLANIFICACION, JEFE_DEPTO, JEFE_SECCION, JEFE_LAB, DIRECTOR, SUBDIRECTOR, CALIDAD, LECTOR |
 | `encuesta.registrar` | COMERCIAL, PLANIFICACION |
 | `encuesta.configurar` | ADMIN |
 
-## 5. Mi bandeja
+## 5. Alcance de lectura
+
+- La ficha (`GET /cotizaciones/:id/circuito`), la vista previa y el PDF exigen la
+  cotización en el alcance de `cotizacion.ver`.
+- Los laboratorios consultados (`solicitud_costeo.unidad_id`) cuentan como unidades de
+  la cotización (`SQL_UNIDADES_COTIZACION`), así el Jefe de Laboratorio consultado
+  abre la ficha para responder.
+- «Cotizaciones por responder» (`GET /cotizaciones/solicitudes-laboratorio`) exige
+  `cotizacion.ver` y muestra las solicitudes de los laboratorios del alcance.
+  Responder exige `cotizacion.costear`.
+
+## 6. Mi bandeja
 
 | Perfil | Tarjeta | Lleva a |
 |---|---|---|
@@ -144,7 +156,7 @@ Decisión del usuario del 20-10-2026:
 | Comercial | Cotizaciones devueltas por el Jefe DCO · Cotizaciones firmadas sin enviar · Encuestas por registrar | `/cotizaciones?…`, `/encuestas` |
 | Planificación | Encuestas por registrar | `/encuestas` |
 
-## 6. Por confirmar con el IDIC (configurable, con valor por defecto)
+## 7. Por confirmar con el IDIC (configurable, con valor por defecto)
 
 | Tema | Valor por defecto | Dónde se cambia | Pregunta EP-00 §10 |
 |---|---|---|---|
