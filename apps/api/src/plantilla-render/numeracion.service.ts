@@ -270,6 +270,7 @@ export class NumeracionService {
   async probar(tenantId: string, dto: z.infer<typeof Probar>) {
     const e = erroresFormato(dto.formato);
     if (e.length) return { numero: null, errores: e };
+    if (dto.unidadId) await this.exigirUnidad(tenantId, dto.unidadId);
     const u = await this.unidad(dto.unidadId ?? null);
     const r = formatearNumero(dto.formato, {
       fecha: new Date(),
