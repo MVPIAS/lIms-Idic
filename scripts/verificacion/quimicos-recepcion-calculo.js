@@ -242,7 +242,11 @@ async function main() {
     const fam = (u) => familias.find((f) => f.codsucdel && f.codsucdel === u.codsucdel);
     afirmar(fam(C.lqc) && fam(C.lcc), "LQC o LCC sin laboratorio en el catálogo (cat_familia)");
     C.famLqc = fam(C.lqc);
-    const oi = await ok(U.planif, "POST", "/ordenes-internas", { otId: C.ot.id, origenLab: fam(C.lqc).id, destinoLab: fam(C.lcc).id, detalle: "Cromo en cuero" });
+    // Desde r1b la emisión exige muestra de origen, requisito y fecha de envío (EP-01 2.2).
+    const oi = await ok(U.planif, "POST", "/ordenes-internas", {
+      otId: C.ot.id, origenLab: fam(C.lqc).id, destinoLab: fam(C.lcc).id, detalle: "Cromo en cuero",
+      muestraId: C.muestra.id, requisito: "Cromo total según E.T.", fechaEnvio: new Date().toISOString().slice(0, 10),
+    });
     const p = await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/registro-muestras`);
     const e = p.muestras.find((x) => x.id === C.muestra.id).otrosLabsEnlace[0];
     afirmar(e.ordenes.some((o) => o.id === oi.id), "la orden interna no aparece enlazada");
