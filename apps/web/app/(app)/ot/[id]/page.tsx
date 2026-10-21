@@ -19,6 +19,10 @@ import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
 import { MOTOR_FLUJOS_VISIBLE } from "@/lib/motorFlujos";
 import FlujoBpmOt from "./_components/FlujoBpmOt";
 import { EtapasOt, SiguientePasoOt, type AvanceOt } from "@/components/ot/RutaOt";
+import InstrumentosOt from "@/components/metrologia/InstrumentosOt";
+
+/** Laboratorios de la Sección Metrología: sus OT trabajan con instrumentos, no con muestras (EP-04). */
+const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
 
 /** Texto legible de un hecho del historial de la OT. */
 function textoHistorial(h: any): string {
@@ -68,7 +72,7 @@ export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestras" | "ordenes" | "resultados" | "fotos" | "informe" | "flujo" | "historial">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestras" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "informe" | "flujo" | "historial">("cabecera");
   /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
   const [destinoOi, setDestinoOi] = useState<string | null>(null);
   const { puede } = usePermisos();
@@ -152,6 +156,7 @@ export default function ExpedientePage() {
   };
 
   const etapaActual = avance?.etapas.find((e) => e.clave === avance.etapaActual) ?? null;
+  const esMetrologia = LABS_METROLOGIA.includes(ot?.unidad?.codigo ?? "");
   const codOt = ot?.codigo ?? ot?.numero ?? (typeof id === "string" ? id.slice(0, 8) : "");
   const tabBtn = (t: typeof tab, l: string) =>
     <button onClick={() => setTab(t)} className={`tab${tab === t ? " active" : ""}`}>{l}</button>;
@@ -215,7 +220,8 @@ export default function ExpedientePage() {
           <div className="tabs" style={{ padding: "0 8px" }}>
             {tabBtn("cabecera", "Cabecera")}
             {tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
-            {tabBtn("muestras", `Muestras (${muestras.length})`)}
+            {esMetrologia && tabBtn("instrumentos", "Instrumentos")}
+            {(!esMetrologia || muestras.length > 0) && tabBtn("muestras", `Muestras (${muestras.length})`)}
             {tabBtn("ordenes", "Órdenes internas")}
             {tabBtn("resultados", "Resultados")}
             {puede(["resultado.ver", "certificado.emitir"]) && tabBtn("fotos", "Fotos")}
@@ -304,6 +310,7 @@ export default function ExpedientePage() {
               <RegistroMuestras otId={id} onCambio={() => { cargarMuestras(); cargarOt(); }}
                 onOrdenInterna={(unidadId) => { setDestinoOi(unidadId ?? null); setTab("ordenes"); }} />
             )}
+            {tab === "instrumentos" && typeof id === "string" && <InstrumentosOt otId={id} onCambio={cargarOt} />}
             {tab === "ordenes" && typeof id === "string" && (
               <OrdenesInternasOt otId={id} otCodigo={ot?.codigo} otEstado={ot?.estado}
                 destinoSugerido={destinoOi} onSugerenciaUsada={() => setDestinoOi(null)} />
@@ -324,6 +331,7 @@ export default function ExpedientePage() {
             )}
             {tab === "fotos" && typeof id === "string" && <FotosOt otId={id} otEstado={ot?.estado} />}
             {/* Fecha de compromiso, documentos (firma y entrega) y cierre de la OT. */}
+            {tab === "informe" && typeof id === "string" && esMetrologia && <InstrumentosOt otId={id} onCambio={cargarOt} modo="cierre" />}
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}
             {MOTOR_FLUJOS_VISIBLE && tab === "flujo" && typeof id === "string" && <FlujoBpmOt otId={id} />}
           </div>

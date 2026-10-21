@@ -95,7 +95,7 @@ export default function PuntosPanel({ magnitud, unidadDefecto, inicial, guardand
             <table className="data">
               <thead>
                 <tr>
-                  <th>#</th><th>Función / rango</th><th>Nominal</th><th>Unidad</th><th>Resolución d</th><th>U patrón</th><th>Tolerancia EMP ±</th>
+                  <th>#</th><th>Función / rango</th><th>Nominal</th><th>Unidad</th><th>Resolución d</th><th>U patrón</th><th title="Tolerancia del fabricante: dato informativo para el cliente; el laboratorio no evalúa conformidad">Tolerancia del fabricante ± (informativa)</th>
                   {Array.from({ length: d.series }, (_, i) => <th key={"i" + i}>Instr. {i + 1}</th>)}
                   {Array.from({ length: d.series }, (_, i) => <th key={"p" + i}>Patrón {i + 1}</th>)}
                   <th></th>
@@ -122,7 +122,7 @@ export default function PuntosPanel({ magnitud, unidadDefecto, inicial, guardand
           </div>
           <p style={{ fontSize: 12, color: "var(--muted)", margin: 0 }}>
             U patrón: incertidumbre expandida del certificado del patrón (calibrador, multímetro o contador patrón) en el punto, con el k indicado arriba.
-            La resolución y la tolerancia son opcionales: sin resolución no se suma su contribución; sin tolerancia no se emite veredicto.
+            La resolución y la tolerancia son opcionales: sin resolución no se suma su contribución. La tolerancia del fabricante es solo informativa: el laboratorio no evalúa conformidad y el certificado no dice «cumple / no cumple» (EP-04 §5, pregunta 14 al IDIC).
           </p>
         </div>
       </div>
@@ -130,7 +130,7 @@ export default function PuntosPanel({ magnitud, unidadDefecto, inicial, guardand
       <div className="card">
         <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-2,#eee)", display: "flex", alignItems: "center", gap: 8 }}>
           <b style={HEAD}>Resultados en vivo</b>
-          {r && r.conforme != null && <span className={`pill ${r.conforme ? "green" : "red"}`} style={{ marginLeft: "auto" }}>{r.conforme ? "Conforme" : "No conforme"}</span>}
+          {r && r.conforme != null && <span className="pill gray" style={{ marginLeft: "auto" }} title="Informativo: no se certifica conformidad">Tolerancia: informativa</span>}
         </div>
         <div className="body" style={{ padding: 14 }}>
           {!r && !aviso && <p style={{ color: "var(--muted)", margin: 0 }}>Complete al menos un punto: los resultados aparecen aquí a medida que escribe.</p>}
@@ -138,13 +138,13 @@ export default function PuntosPanel({ magnitud, unidadDefecto, inicial, guardand
           {r && (
             <div style={{ overflowX: "auto" }}>
               <table className="data">
-                <thead><tr><th>Función</th><th>Nominal</th><th>Error ē</th><th>u<sub>A</sub></th><th>u<sub>p</sub></th><th>u<sub>r</sub></th><th>u<sub>c</sub></th><th>U (k=2)</th><th>EMP</th><th>Estado</th></tr></thead>
+                <thead><tr><th>Función</th><th>Nominal</th><th>Error ē</th><th>u<sub>A</sub></th><th>u<sub>p</sub></th><th>u<sub>r</sub></th><th>u<sub>c</sub></th><th>U (k=2)</th><th>Tolerancia ±</th><th title="Informativo: |ē| (+ U) frente a la tolerancia del fabricante; no es un veredicto">Frente a la tolerancia (informativo)</th></tr></thead>
                 <tbody>
                   {rows.map((x, i) => (
                     <tr key={i}>
                       <td>{x.funcion || "—"}</td>
                       {[`${fmtG(x.nom)} ${x.unidad}`, fmtG(x.err), fmtG(x.uA), fmtG(x.uP), fmtG(x.uR), fmtG(x.uc), "± " + fmtG(x.U), x.emp == null ? "—" : "± " + fmtG(x.emp)].map((v, j) => <td key={j} className="num" style={BLUE}>{v}</td>)}
-                      <td>{x.conforme == null ? <span className="pill gray">Sin tolerancia</span> : x.conforme ? <span className="pill green">Cumple</span> : <span className="pill red">No cumple</span>}</td>
+                      <td>{x.conforme == null ? <span style={{ color: "var(--muted)" }}>—</span> : <span className="pill gray">{x.conforme ? "Dentro" : "Fuera"}</span>}</td>
                     </tr>
                   ))}
                 </tbody>

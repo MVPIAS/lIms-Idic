@@ -106,7 +106,7 @@ export const NAV: SeccionNav[] = [
     icon: "⚖",
     items: [
       { href: "/metrologia", label: "Calibraciones", icon: "⚖", perm: "metrologia.ver", ambito: "SAM" },
-      { href: "/metrologia/nueva", label: "Nueva calibración", icon: "＋", perm: "metrologia.crear", ambito: "SAM" },
+      { href: "/metrologia/nueva", label: "Por calibrar", icon: "＋", perm: "metrologia.crear", ambito: "SAM" },
       { href: "/metrologia/config", label: "Configuración LMT", icon: "🎛", perm: "metrologia.config", ambito: "SAM" },
     ],
   },

@@ -88,7 +88,7 @@ export function validarFechaCompromiso(fecha: string, fechaRecepcion: Date | str
 
 export interface DocumentoCierre {
   numero: string;
-  estado: string; // en_firma | oficial | emitido | devuelto | anulado
+  estado: string; // en_firma | oficial | emitido | devuelto | anulado | borrador (calibración en elaboración)
   entregadoAt: Date | string | null;
   pendienteDe?: string | null;
 }
@@ -115,13 +115,15 @@ export function faltantesParaCerrar(p: {
   if (p.resultadosNoAprobados > 0)
     f.push(`Hay ${p.resultadosNoAprobados} resultado(s) sin aprobar.`);
   const vivos = p.documentos.filter((d) => d.estado !== "anulado");
-  if (!vivos.some((d) => d.estado !== "devuelto"))
+  if (!vivos.some((d) => d.estado !== "devuelto" && d.estado !== "borrador"))
     f.push("La OT no tiene informes ni certificados emitidos.");
   for (const d of vivos) {
     if (d.estado === "en_firma")
       f.push(`El documento ${d.numero} está en firma${d.pendienteDe ? ` (pendiente de ${d.pendienteDe})` : ""}.`);
     else if (d.estado === "devuelto")
       f.push(`El documento ${d.numero} fue devuelto sin firmar: reemítalo o anúlelo.`);
+    else if (d.estado === "borrador")
+      f.push(`El certificado ${d.numero} está en elaboración (borrador): falta enviarlo a revisión y emitirlo.`);
     else if (!d.entregadoAt) f.push(`El documento ${d.numero} es oficial pero falta registrar su entrega al cliente.`);
   }
   f.push(...(p.coberturaPendiente ?? []));

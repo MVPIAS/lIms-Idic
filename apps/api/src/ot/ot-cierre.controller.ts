@@ -36,6 +36,8 @@ import {
   validarFechaCompromiso,
 } from "./plazos";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
+import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
+import { documentosDeCalibraciones, faltantesInstrumentos } from "../metrologia/metrologia-ot.reglas";
 
 const FechaCompromiso = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD"),
@@ -142,7 +144,7 @@ export class OtCierreService {
   /** Estado de cierre de la OT: plazo, documentos, resultados, factura y qué falta. */
   async estadoCierre(id: string, req: any) {
     const ot = await this.cargarOt(id, req);
-    const [extras, documentos, resultados, factura] = await Promise.all([
+    const [extras, documentos, resultados, factura, metro] = await Promise.all([
       this.extrasOt(id),
       this.documentos(id),
       this.prisma.resultado.groupBy({ by: ["estado"], where: { otId: id, deletedAt: null }, _count: { _all: true } }),
@@ -151,15 +153,23 @@ export class OtCierreService {
         orderBy: { createdAt: "desc" },
         select: { id: true, numero: true, estado: true, total: true, moneda: true },
       }),
+      // Metrología (EP-04): los certificados de calibración y los instrumentos de la OT cuentan para el cierre.
+      metrologiaParaCierre(this.prisma, id, ot.tenantId),
     ]);
     const totalRes = resultados.reduce((a, r) => a + r._count._all, 0);
     const aprobados = resultados.find((r) => r.estado === "aprobado")?._count._all ?? 0;
-    const faltantes = faltantesParaCerrar({
-      estado: ot.estado,
-      documentos: documentos.map((d) => ({ numero: d.numero, estado: d.estado, entregadoAt: d.entregadoAt, pendienteDe: d.pendienteDe })),
-      resultadosNoAprobados: totalRes - aprobados,
-      coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId),
-    });
+    const faltantes = [
+      ...faltantesParaCerrar({
+        estado: ot.estado,
+        documentos: [
+          ...documentos.map((d) => ({ numero: d.numero, estado: d.estado, entregadoAt: d.entregadoAt, pendienteDe: d.pendienteDe })),
+          ...documentosDeCalibraciones(metro.cals),
+        ],
+        resultadosNoAprobados: totalRes - aprobados,
+        coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId),
+      }),
+      ...(ot.estado === "cerrada" ? [] : faltantesInstrumentos(metro.items, metro.cals, metro.exigeDevolucion)),
+    ];
     const camino = caminoEstadosOt(ot.estado);
     if (!faltantes.length && camino === null)
       faltantes.push(`La OT está en un estado ('${ot.estado}') desde el que no se puede llegar a «cerrada».`);
@@ -186,6 +196,9 @@ export class OtCierreService {
       },
       resultados: { total: totalRes, aprobados },
       documentos,
+      calibraciones: metro.cals
+        .filter((c) => c.estado !== "reemplazada")
+        .map((c) => ({ id: c.id, numero: c.numeroCertificado ?? c.codigo, estado: c.estado, entregadoAt: c.entregadoAt ?? null })),
       factura: factura ? { ...factura, total: Number(factura.total) } : null,
       faltantes,
       puedeCerrar: faltantes.length === 0,
@@ -245,12 +258,19 @@ export class OtCierreService {
         select: { numero: true, codigo: true, estado: true, entregadoAt: true },
       });
       const noAprobados = await tx.resultado.count({ where: { otId: id, deletedAt: null, NOT: { estado: "aprobado" } } });
-      const faltantes = faltantesParaCerrar({
-        estado,
-        documentos: docs.map((d) => ({ numero: d.numero ?? d.codigo, estado: d.estado, entregadoAt: d.entregadoAt })),
-        resultadosNoAprobados: noAprobados,
-        coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId, tx),
-      });
+      const metro = await metrologiaParaCierre(tx, id, ot.tenantId);
+      const faltantes = [
+        ...faltantesParaCerrar({
+          estado,
+          documentos: [
+            ...docs.map((d) => ({ numero: d.numero ?? d.codigo, estado: d.estado, entregadoAt: d.entregadoAt })),
+            ...documentosDeCalibraciones(metro.cals),
+          ],
+          resultadosNoAprobados: noAprobados,
+          coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId, tx),
+        }),
+        ...(estado === "cerrada" ? [] : faltantesInstrumentos(metro.items, metro.cals, metro.exigeDevolucion)),
+      ];
       const camino = caminoEstadosOt(estado);
       if (!faltantes.length && camino === null)
         faltantes.push(`La OT está en un estado ('${estado}') desde el que no se puede llegar a «cerrada».`);
@@ -298,10 +318,19 @@ export class OtCierreService {
     const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
       `SELECT o.id FROM orden_trabajo o
         WHERE o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND o.estado NOT IN ('cerrada','anulada')
-          AND EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
+          AND (EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
+               OR EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_id = o.id AND mc.deleted_at IS NULL AND mc.estado = 'emitida'))
           AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
                             AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
-          AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')`,
+          AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')
+          -- Metrología (EP-04): certificados de calibración emitidos y entregados; instrumentos recibidos, calibrados y devueltos.
+          AND NOT EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_id = o.id AND mc.deleted_at IS NULL
+                            AND (mc.estado IN ('borrador','calculada','en_revision','en_firma') OR (mc.estado = 'emitida' AND mc.entregado_at IS NULL)))
+          AND NOT EXISTS (SELECT 1 FROM met_ot_instrumento i WHERE i.ot_id = o.id
+                            AND (i.estado = 'por_recibir'
+                                 OR (i.estado = 'recibido' AND NOT EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_instrumento_id = i.id AND mc.deleted_at IS NULL AND mc.estado <> 'reemplazada'))
+                                 OR (i.estado IN ('recibido','no_apto') AND COALESCE((SELECT lower(trim(ps.valor)) NOT IN ('no','n','false','0') FROM parametro_sistema ps
+                                       WHERE ps.tenant_id = o.tenant_id AND ps.categoria = 'metrologia' AND ps.codigo = 'cierre_exige_devolucion' AND ps.activo), TRUE))))`,
       tenantId ?? null,
     );
     return filas.map((r) => r.id);

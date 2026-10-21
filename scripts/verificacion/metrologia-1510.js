@@ -119,12 +119,46 @@ const JEFE = "demo.lmt.jefe";         // titular del LMT
 const SUBR = "demo.sem.jefe";         // subrogante del LMT (como en el registro real)
 const DEPTO = "demo.dsa.jefe";        // jefe del departamento
 const SAM = "demo.sam.jefe";          // jefe de sección: no figura en la matriz del certificado
+const PLANIF = "demo.planificacion";  // registra las OT
+
+/*
+ * EP-04 (entrega R1): toda calibración nace del instrumento RECIBIDO de una OT
+ * (no hay calibración suelta). Cada calibración de este recorrido usa su propia
+ * OT del LMT con un ítem recibido en las fechas de la planilla.
+ */
+async function prepararOt(C) {
+  const labs = await ok(PLANIF, "GET", "/ot/laboratorios");
+  C.lmt = (Array.isArray(labs) ? labs : labs.data ?? []).find((u) => u.codigo === "LMT");
+  const cl = await ok("demo.admin", "GET", "/clientes?limit=5");
+  C.clienteId = (Array.isArray(cl) ? cl : cl.data ?? [])[0]?.id;
+  afirmar(C.lmt && C.clienteId, "faltan el LMT o un cliente");
+}
+async function itemRecibido(C, ins = {}, fechas = {}) {
+  const ot = await ok(PLANIF, "POST", "/ot", {
+    clienteId: C.clienteId, unidadPrincipalId: C.lmt.id, origenTrabajo: "OT_INTERNA", conCobro: false, descripcionTrabajo: "Prueba Metrología 15-10",
+    ...(fechas.fechaOt ? { fechaIngreso: `${fechas.fechaOt}T09:00:00-04:00` } : {}),
+  });
+  const it = await ok(JEFE, "POST", `/ot/${ot.id}/instrumentos`, {
+    descripcion: ins.item || "Instrumento de prueba", marca: ins.marca, modelo: ins.modelo, serie: ins.serie, idEspecial: ins.idEspecial,
+    capacidad: ins.cap, resolucion: ins.res, rango: ins.rango,
+  });
+  const recepcion = { fechaHora: fechas.fechaRecepcion ? `${fechas.fechaRecepcion}T10:00` : new Date().toISOString(), entregadoPor: "Cliente de prueba",
+    estadoFisico: "bueno", ubicacion: "Estante de recepción", calibrable: true };
+  if (fechas.recepcionPrevia) {
+    // R15 L2: la recepción no puede ser anterior a la fecha de la OT (antes solo era un aviso).
+    const e = await exigir(400, JEFE, "POST", `/ot/${ot.id}/instrumentos/${it.data.id}/recepcion`, { ...recepcion, fechaHora: `${fechas.recepcionPrevia}T10:00` });
+    afirmar(/anterior a la fecha de la OT/.test(msg(e)), msg(e));
+  }
+  await ok(JEFE, "POST", `/ot/${ot.id}/instrumentos/${it.data.id}/recepcion`, recepcion);
+  return it.data.id;
+}
 
 async function main() {
   console.log(`API ${BASE}`);
   if (ARRANCAR) arrancarApi();
   await esperarApi();
   const C = {};
+  await prepararOt(C);
 
   await paso("Paridad: 1531 + 239 + 483 valores idénticos a las planillas (M-3947 y V-5920 incluidos)", async () => {
     const p = await ok(METRO, "GET", "/metrologia/motores/paridad");
@@ -180,27 +214,31 @@ async function main() {
     C.pMic = p.find((x) => x.serie === "0138696"); // micrómetro (vence 24-11-2026)
     afirmar(C.pF1 && C.p500 && C.pMic, "faltan patrones del Anexo02");
     afirmar(p.filter((x) => x.fuente && /Anexo02/.test(x.fuente)).length === 87, "no están los 87 equipos de los Anexo02");
-    const base = { procesoCodigo: "ITM03", fecha: "2030-01-15", instrumento: { item: "Prueba" }, motor: { datos: C.datosM, opciones: {} } };
+    const base = { procesoCodigo: "ITM03", fecha: "2030-01-15", instrumento: { item: "Prueba" }, motor: { datos: C.datosM, opciones: {} },
+      otInstrumentoId: await itemRecibido(C, { item: "Prueba" }) };
     const r = await exigir(400, METRO, "POST", "/metrologia/calibraciones", { ...base, patronIds: [C.pF1.id] });
     afirmar(/venció/.test(msg(r)), msg(r));
+    // La OT de prueba es de hoy: la calibración del 10-11 queda posterior a la recepción.
     const r2 = await ok(METRO, "POST", "/metrologia/calibraciones", { ...base, fecha: "2026-11-10", patronIds: [C.pMic.id] });
     afirmar(r2.data.avisos.some((a) => /vence el 24-11-2026/.test(a)), JSON.stringify(r2.data.avisos));
     await exigir(400, METRO, "POST", "/metrologia/calibraciones", { ...base, fecha: "2026-07-24", patronIds: [C.pF1.id, C.pF1.id, C.p500.id, C.pMic.id] });
     return "vencido → 400 · por vencer → aviso · más de 3 → 400";
   });
 
-  await paso("C11: aviso si la fecha de la OT es posterior a la de recepción (caso V-5920)", async () => {
+  await paso("C11 (R15 L2): la recepción del instrumento no puede ser anterior a la OT (caso V-5920: ahora se bloquea al recibir)", async () => {
     const ins = { item: "Micropipeta", marca: "Brand", modelo: "Transferpette", serie: "No tiene", idEspecial: "MP_09", cap: "200 µL", res: "0,1 µL", rango: "(20 a 200) µL",
       cliente: "Cliente de prueba", ot: C.controlV.ot, fechaOt: C.controlV.fechaOt, fechaRecepcion: C.controlV.fechaRecepcion, lugar: "instalaciones" };
-    const r = await ok(METRO, "POST", "/metrologia/calibraciones", { procesoCodigo: "ITV05", fecha: "2026-09-03", instrumento: ins, intervaloMeses: 12, motor: { datos: C.datosV, opciones: {} } });
-    afirmar(r.data.avisos.length === 1 && /posterior a la de recepción/.test(r.data.avisos[0]), JSON.stringify(r.data.avisos));
+    const otInstrumentoId = await itemRecibido(C, ins, { fechaOt: C.controlV.fechaOt, fechaRecepcion: C.controlV.fechaOt, recepcionPrevia: C.controlV.fechaRecepcion });
+    const r = await ok(METRO, "POST", "/metrologia/calibraciones", { procesoCodigo: "ITV05", fecha: "2026-09-03", instrumento: ins, intervaloMeses: 12, motor: { datos: C.datosV, opciones: {} }, otInstrumentoId });
+    afirmar(r.data.avisos.length === 0, JSON.stringify(r.data.avisos));
     C.calV = r.data;
-    return r.data.avisos[0].slice(0, 80) + "…";
+    return "recepción del 02-09 en una OT del 03-09 → 400; recibida el 03-09 → sin avisos";
   });
 
   await paso("C4: un metrólogo no habilitado para la magnitud no envía (registro de firmas)", async () => {
     const r = await ok(METRO_L, "POST", "/metrologia/calibraciones", {
       procesoCodigo: "ITM03", fecha: "2026-07-24", instrumento: { item: "Juego de pesos (longitud no habilitado)" }, motor: { datos: C.datosM, opciones: {} },
+      otInstrumentoId: await itemRecibido(C, { item: "Juego de pesos (longitud no habilitado)" }, { fechaOt: C.controlM.fechaOt, fechaRecepcion: C.controlM.fechaRecepcion }),
     });
     const e = await exigir(403, METRO_L, "POST", `/metrologia/calibraciones/${r.data.id}/enviar`);
     afirmar(/registro de firmas/.test(msg(e)), msg(e));
@@ -213,6 +251,7 @@ async function main() {
       direccion: "Avenida Pedro Montt Nº 2136, Santiago", ot: C.controlM.ot, fechaOt: C.controlM.fechaOt, fechaRecepcion: C.controlM.fechaRecepcion, lugar: "instalaciones", desviacion: "No" };
     const r = await ok(METRO, "POST", "/metrologia/calibraciones", {
       procesoCodigo: "ITM03", fecha: "2026-07-24", instrumento: ins, intervaloMeses: 24, patronIds: [C.pF1.id, C.p500.id], motor: { datos: C.datosM, opciones: {} },
+      otInstrumentoId: await itemRecibido(C, ins, { fechaOt: C.controlM.fechaOt, fechaRecepcion: C.controlM.fechaRecepcion }),
     });
     afirmar(r.data.avisos.length === 0, JSON.stringify(r.data.avisos));
     C.cal = r.data;
@@ -250,6 +289,7 @@ async function main() {
       direccion: "Avenida Pedro Montt Nº 2136, Santiago", ot: C.controlM.ot, fechaOt: C.controlM.fechaOt, fechaRecepcion: C.controlM.fechaRecepcion, lugar: "instalaciones", desviacion: "No" };
     const r = await ok(METRO, "POST", "/metrologia/calibraciones", {
       procesoCodigo: "ITM03", fecha: "2026-07-24", instrumento: ins, intervaloMeses: 24, patronIds: [C.pF1.id, C.p500.id], motor: { datos: C.datosM, opciones: {} },
+      otInstrumentoId: await itemRecibido(C, ins, { fechaOt: C.controlM.fechaOt, fechaRecepcion: C.controlM.fechaRecepcion }),
     });
     const id = r.data.id;
     await ok(METRO, "POST", `/metrologia/calibraciones/${id}/enviar`);
@@ -394,6 +434,7 @@ async function revisionR3(C) {
       C.reglasR3.push(await ok("demo.admin", "POST", "/firmas-matriz", regla(jd, 2)));
       const r = await ok(METRO, "POST", "/metrologia/calibraciones", {
         procesoCodigo: "ITM03", fecha: "2026-07-24", instrumento: { item: "Pesas (prueba matriz sin ELABORA)" }, patronIds: [C.pF1.id, C.p500.id], motor: { datos: C.datosM, opciones: {} },
+        otInstrumentoId: await itemRecibido(C, { item: "Pesas (prueba matriz sin ELABORA)" }, { fechaOt: C.controlM.fechaOt, fechaRecepcion: C.controlM.fechaRecepcion }),
       });
       await ok(METRO, "POST", `/metrologia/calibraciones/${r.data.id}/enviar`);
       const d = await ok(METRO, "GET", `/metrologia/calibraciones/${r.data.id}`);
@@ -426,6 +467,7 @@ async function revisionR3(C) {
       });
       const r = await ok(METRO, "POST", "/metrologia/calibraciones", {
         procesoCodigo: "ITM03", fecha: "2026-07-24", instrumento: { item: "Pesas (prueba matriz sin firmantes)" }, patronIds: [C.pF1.id, C.p500.id], motor: { datos: C.datosM, opciones: {} },
+        otInstrumentoId: await itemRecibido(C, { item: "Pesas (prueba matriz sin firmantes)" }, { fechaOt: C.controlM.fechaOt, fechaRecepcion: C.controlM.fechaRecepcion }),
       });
       const e = await exigir(409, METRO, "POST", `/metrologia/calibraciones/${r.data.id}/enviar`);
       afirmar(/ningún paso de firma/.test(msg(e)), msg(e));
