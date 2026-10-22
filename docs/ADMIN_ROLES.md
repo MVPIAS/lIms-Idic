@@ -107,6 +107,11 @@ ver `docs/FLUJO_BPCH_INTERNACION_REINSPECCION_CODIFICACION.md`): `bpch.internaci
 ver `docs/FLUJO_BPCH_PRODUCCION_PROTOTIPOS_CLASIFICACION.md` §4): `bpch.pn.ver/gestionar/programar`,
 `bpch.prototipo.ver/gestionar/dictaminar`, `bpch.clasificacion.ver/registrar/aprobar`.
 
+**Especificaciones técnicas y muestreo** (`align_r2b_especificacion_tecnica.sql`, `align_r2b_muestreo.sql`,
+ver `docs/FLUJO_ESPECIFICACIONES_MUESTREO.md` §5): `et.ver` (laboratorio, jefaturas, Calidad, Comercial,
+Planificación, Muestreo, Recepción, Dirección, Lector), `et.gestionar` (jefaturas, Calidad, Administración; alcance
+por los laboratorios de la E.T.) y `muestreo.registrar` (Muestreo, personal de laboratorio, inspectores, jefaturas).
+
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
 ---

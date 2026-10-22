@@ -13,6 +13,8 @@ import Asignacion from "./_components/Asignacion";
 import RegistroMuestras from "./_components/RegistroMuestras";
 import OrdenesInternasOt from "./_components/OrdenesInternasOt";
 import CabeceraInspeccionOt from "./_components/CabeceraInspeccionOt";
+import EspecificacionTecnicaOt from "./_components/EspecificacionTecnicaOt";
+import MuestreoOt from "./_components/MuestreoOt";
 import FotosOt from "./_components/FotosOt";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
@@ -72,7 +74,7 @@ export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestras" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "informe" | "flujo" | "historial">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "informe" | "flujo" | "historial">("cabecera");
   /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
   const [destinoOi, setDestinoOi] = useState<string | null>(null);
   const { puede } = usePermisos();
@@ -122,7 +124,7 @@ export default function ExpedientePage() {
   // Pestaña inicial desde la URL (?tab=muestras: bandeja de entrada del laboratorio).
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && ["cabecera", "asignacion", "muestras", "ordenes", "resultados", "fotos", "informe", "historial"].includes(t)) setTab(t as typeof tab);
+    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "ordenes", "resultados", "fotos", "informe", "historial"].includes(t)) setTab(t as typeof tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -228,6 +230,7 @@ export default function ExpedientePage() {
             {tabBtn("cabecera", "Cabecera")}
             {tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
             {esMetrologia && tabBtn("instrumentos", "Instrumentos")}
+            {!esMetrologia && tabBtn("muestreo", "Muestreo")}
             {(!esMetrologia || muestras.length > 0) && tabBtn("muestras", `Muestras (${muestras.length})`)}
             {tabBtn("ordenes", "Órdenes internas")}
             {tabBtn("resultados", "Resultados")}
@@ -296,6 +299,8 @@ export default function ExpedientePage() {
                     ahí queda registrado quién la fijó, cuándo y por qué se cambió. */}
                 <div className="field readonly"><label>Fecha de compromiso</label><input value={ot?.fechaCompromiso ? fechaDia(ot.fechaCompromiso) : "Sin fecha (ver «Informe y cierre»)"} readOnly /></div>
               </div>
+              {/* Especificación técnica del cliente (EP-03 0.5, EP-05 5.1): la E.T. que rige la OT y sus muestras. */}
+              {typeof id === "string" && !esMetrologia && <EspecificacionTecnicaOt otId={id} onCambio={() => { cargarMuestras(); cargarAvance(); }} />}
               {/* OT del BPCH: cabecera de inspección (EP-10 10.3); en otras unidades no se muestra. */}
               {typeof id === "string" && <CabeceraInspeccionOt otId={id} />}
               </div>
@@ -319,6 +324,7 @@ export default function ExpedientePage() {
                 onRecepcionado={() => setTab("asignacion")} />
             )}
             {tab === "instrumentos" && typeof id === "string" && <InstrumentosOt otId={id} onCambio={cargarOt} />}
+            {tab === "muestreo" && typeof id === "string" && <MuestreoOt otId={id} onCambio={() => { cargarMuestras(); cargarAvance(); }} />}
             {tab === "ordenes" && typeof id === "string" && (
               <OrdenesInternasOt otId={id} otCodigo={ot?.codigo} otEstado={ot?.estado}
                 destinoSugerido={destinoOi} onSugerenciaUsada={() => setDestinoOi(null)}

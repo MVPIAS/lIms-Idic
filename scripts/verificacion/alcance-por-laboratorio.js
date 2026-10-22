@@ -164,6 +164,9 @@ m as (
  union all select 'calibracion_equipo', c.id, array_remove(array[u.codigo], null) from calibracion c join equipo e on e.id = c.equipo_id left join unidad u on u.id = e.unidad_id
  union all select 'cat_ensayo', e.id, array(select c from famu where famu.fid = e.familia_id) from cat_ensayo e where e.deleted_at is null
  union all select 'cat_metodo', mm.id, array(select c from famu join cat_ensayo e on e.familia_id = famu.fid where e.id = mm.ensayo_id) from cat_metodo mm where mm.deleted_at is null
+ -- r2b: especificaciones técnicas (sus laboratorios; vacío = general) y muestreos (el laboratorio de su OT).
+ union all select 'et', et.id, array(select un.codigo from unidad un where un.id = any(et.laboratorios)) from especificacion_tecnica et
+ union all select 'muestreo', mu.id, array_remove(array[ou.uc], null) from ot_muestreo mu left join ou on ou.id = mu.ot_id
 )
 select json_build_object(
  'mapa', (select json_agg(json_build_object('t', t, 'id', id, 'u', u)) from m),
@@ -181,6 +184,9 @@ select json_build_object(
    'equipos', (select json_agg(json_build_object('id', e.id, 'u', u.codigo, 'descripcion', e.descripcion)) from equipo e left join unidad u on u.id = e.unidad_id where e.deleted_at is null),
    'ensayos', (select json_agg(json_build_object('id', e.id, 'precio', e.precio, 'u', (select c from famu where famu.fid = e.familia_id limit 1)))
                  from cat_ensayo e where e.deleted_at is null and e.familia_id is not null and exists (select 1 from famu where famu.fid = e.familia_id)),
+   'ets', (select json_agg(json_build_object('id', et.id, 'u', (select un.codigo from unidad un where un.id = et.laboratorios[1])))
+             from especificacion_tecnica et where cardinality(et.laboratorios) = 1),
+   'muestreos', (select json_agg(json_build_object('id', mu.id, 'u', ou.uc, 'estado', mu.estado)) from ot_muestreo mu join ou on ou.id = mu.ot_id),
    'otsConResultados', (select json_agg(json_build_object('id', o.id, 'u', u.codigo)) from orden_trabajo o join unidad u on u.id = o.unidad_principal
                          where exists (select 1 from resultado r where r.ot_id = o.id)),
    -- r1g: ensayos derivados por orden interna (dueño = laboratorio de destino).
@@ -276,6 +282,8 @@ const LISTADOS = [
   { n: "BPCH clasificaciones", r: "/bpch/clasificaciones", p: "bpch.clasificacion.ver", t: "bpch_clasificacion", regla: "bpch", href: "/bpch/clasificaciones" },
   { n: "BPCH codificación única", r: "/bpch/codificacion?limit=50", p: "bpch.codificacion.ver", regla: "comun", href: "/bpch/codificacion" },
   { n: "BPCH producción nacional", r: "/bpch/pn/oc?limit=50", p: "bpch.pn.ver", regla: "comun", href: "/bpch/produccion-nacional" },
+  // Frente r2b: biblioteca de especificaciones técnicas del cliente (las generales, sin laboratorio, las ven todos).
+  { n: "Especificaciones técnicas (r2b)", r: "/especificaciones-tecnicas?estado=todas", p: "et.ver", t: "et", regla: "unidad", href: "/especificaciones" },
   // Circuito de la cotización y encuestas (frente r1c).
   { n: "Cotizaciones por responder (laboratorio)", r: "/cotizaciones/solicitudes-laboratorio", p: "cotizacion.ver", t: "solicitud_costeo", regla: "unidad", href: "/cotizaciones/por-responder" },
   { n: "Encuestas de satisfacción", r: "/encuestas?limit=200", p: "encuesta.ver", t: "encuesta", regla: "unidad", href: "/encuestas" },
@@ -435,6 +443,11 @@ async function main() {
       ["orden_interna", "ot.ver", (id) => `/ordenes-internas/${id}`],
       ["ot", "ot.ver", (id) => `/bpch/cabecera-ot/${id}`],
       ["ot", "certificado.emitir", (id) => `/informes/ot/${id}/cobertura`],
+      // r2b: E.T. de otro laboratorio, la E.T. y el muestreo de una OT ajena, la conclusión de un lote ajeno.
+      ["et", "et.ver", (id) => `/especificaciones-tecnicas/${id}`],
+      ["ot", "ot.ver", (id) => `/especificaciones-tecnicas/ot/${id}`],
+      ["ot", "ot.ver", (id) => `/muestreo/ot/${id}`],
+      ["muestreo", "ot.ver", (id) => `/muestreo/${id}/conclusion`],
     ];
     for (const [tipo, perm, ruta, codigos, regla] of DETALLE) {
       if (!tiene(perm)) continue;
@@ -517,6 +530,15 @@ async function main() {
     const ens = propio(D.ensayos, esperado(u, "catalogo.gestionar").unidades);
     if (ens) await intentar(u, "PATCH", `/cat/ensayos/${ens.id}`, { precio: Number(ens.precio) || 0 }, NO_403, `control: precio de ensayo propio (${ens.u}, mismo valor)`);
     await intentar("demo.lqc.jefe", "POST", "/cat/gran-grupos", { codigo: "ZZ", nombre: "Prueba de alcance" }, [403], "alta en tabla común del catálogo");
+  }
+  // r2b: editar una E.T. de otro laboratorio (et.gestionar acotado: jefaturas) y recibir un muestreo ajeno.
+  for (const u of ["demo.lqc.jefe", "demo.squ.jefe"]) {
+    const et = ajeno(D.ets, esperado(u, "et.gestionar").unidades);
+    if (et) await intentar(u, "PUT", `/especificaciones-tecnicas/${et.id}`, { observaciones: "Prueba de alcance" }, [403], `editar E.T. de ${et.u}`);
+  }
+  for (const u of ["demo.lqc.analista1"]) {
+    const mu = ajeno((D.muestreos || []).filter((x) => x.estado === "registrado"), esperado(u, "muestra.crear").unidades);
+    if (mu) await intentar(u, "POST", `/muestreo/${mu.id}/recibir`, { conforme: true }, [403], `recibir muestreo de ${mu.u}`);
   }
   // Anular una cotización de otro laboratorio (cotizacion.anular acotado: jefes de departamento técnico).
   for (const u of ["demo.dsa.jefe", "demo.bpch.jefe"]) {
