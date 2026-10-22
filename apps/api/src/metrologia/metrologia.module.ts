@@ -25,6 +25,7 @@ import {
 } from "./motores";
 import { CASOS_REFERENCIA, esClaveExcel, verificarParidad } from "./motores/paridad";
 import { CASOS_LNF, verificarParidadLNF } from "./motores/paridad-lnf";
+import { balancePorPunto } from "./motores/balance";
 import { CASOS_1510, verificarParidad1510 } from "./motores/paridad-1510";
 import { armarCertificado, certificadoHtml, datosCertificado, type ContextoCertificado, type FirmaCert } from "./metrologia.certificado";
 import { formatoDe } from "./certificado/formato-it";
@@ -755,6 +756,8 @@ export class MetrologiaController {
       }),
       firmas: cx.firmas, paso_pendiente: cx.pendiente, pasos_sin_responsable: cx.sinResponsable,
       avisos: avisosFechas({ fechaOt: cal.instrumento?.fechaOt, fechaRecepcion: cal.instrumento?.fechaRecepcion, fechaCalibracion: fechaIso(cal.fecha_calibracion) }),
+      // Pestaña 4: desglose uᵢ por punto del motor (vista del cálculo guardado, no recalcula).
+      balance: balancePorPunto(cal.motor, cal.resultado, cal.datos, cal.opciones),
       acciones: accionesDisponibles(cx.ctx), __ctx: cx.ctx,
       // La imagen del esquema no viaja en el detalle (puede pesar 2 MB): solo si existe.
       esquema_propio: !!esquema_datos, __esquema: esquema_datos as string | null,

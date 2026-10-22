@@ -19,6 +19,7 @@ import { ORIGEN_OT } from "@/lib/metrologiaOt";
 import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import PresentacionCertificado from "@/components/metrologia/PresentacionCertificado";
+import BalanceIncertidumbre from "@/components/metrologia/BalanceIncertidumbre";
 import s from "@/components/metrologia/ficha.module.css";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
@@ -56,7 +57,6 @@ export default function FichaCalibracionPage() {
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [dialogo, setDialogo] = useState<null | "devolver" | "reemitir" | "entregar">(null);
-  const [punto, setPunto] = useState(0);
 
   const cargar = useCallback(async () => {
     try {
@@ -267,33 +267,8 @@ export default function FichaCalibracionPage() {
 
       {tab === "balance" && (
         <section className={s.bloque}>
-          <h2>Balance de incertidumbre</h2>
-          {(c.puntos ?? []).some((p: any) => (p.componentes ?? []).length) ? (
-            <>
-              <div className="field" style={{ maxWidth: 260 }}><label htmlFor="bal-p">Punto</label>
-                <select id="bal-p" value={punto} onChange={(e) => setPunto(Number(e.target.value))}>
-                  {c.puntos.map((p: any, i: number) => <option key={p.id} value={i}>{fmtG(p.nominal)}</option>)}
-                </select></div>
-              {(() => {
-                const p = c.puntos[punto] ?? c.puntos[0];
-                const uc2 = (p.componentes ?? []).reduce((t: number, x: any) => t + (x.ui ?? 0) ** 2, 0);
-                return (
-                  <table className="data" style={{ marginTop: 8 }}>
-                    <thead><tr><th>Componente</th><th>Distribución</th><th>Divisor</th><th>u<sub>i</sub></th><th>Aporte %</th></tr></thead>
-                    <tbody>{(p.componentes ?? []).map((x: any) => (
-                      <tr key={x.simbolo}><td>{x.simbolo} · {x.nombre}</td><td>{x.distribucion}</td><td className="num">{fmtG(x.divisor)}</td>
-                        <td className={`num ${s.calc}`}>{fmtG(x.ui)}</td><td className={`num ${s.calc}`}>{uc2 ? ((x.ui ** 2 / uc2) * 100).toFixed(1) : "—"}</td></tr>
-                    ))}</tbody>
-                  </table>
-                );
-              })()}
-            </>
-          ) : (
-            <p style={{ margin: 0, fontSize: 12.5 }}>
-              Los motores validados entregan u<sub>c</sub>, U, CMC y U certificada por punto (pestaña 3). El desglose u<sub>i</sub> y su aporte por punto de cada
-              motor queda para una entrega posterior (backlog EP04-19).
-            </p>
-          )}
+          <h2>Balance de incertidumbre por punto</h2>
+          <BalanceIncertidumbre balance={c.balance ?? null} puntos={c.puntos ?? []} unidadNominal={c.unidad ?? undefined} />
         </section>
       )}
 
