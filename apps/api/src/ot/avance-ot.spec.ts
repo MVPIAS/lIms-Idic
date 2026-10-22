@@ -432,9 +432,11 @@ describe("Ruta de la OT · órdenes internas (frente r1b · EP-01 3.7)", () => {
     expect(a.etapaActual).toBe("revision");
   });
 
-  it("con ensayos propios por capturar, primero la captura", () => {
+  it("con ensayos propios por capturar, primero la captura, nombrando la orden interna pendiente (D02-22)", () => {
     const a = calcularAvance(base({ ...conMuestra, resultados: res({ pendientes: 1, capturados: 2 }), ordenesInternas: [oi()] }));
     expect(a.siguiente?.texto).toMatch(/^Capturar resultados/);
+    expect(a.siguiente?.texto).toContain("órdenes internas pendientes: OI-2026-0001 en LCC (por recibir)");
+    expect(a.etapas.find((e) => e.clave === "analisis")?.detalle).toContain("1 orden interna pendiente");
   });
 });
 

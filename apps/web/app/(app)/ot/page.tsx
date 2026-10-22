@@ -49,6 +49,24 @@ const estadoBadge = (e: string) => {
   return <span className={`pill ${map[e] ?? "gray"}`}>{e ?? "—"}</span>;
 };
 
+/** Situación en la ruta (GET /ot · situacion): lo que de verdad le falta a la OT (D02-21). */
+const SITUACION: Record<string, { texto: string; pill: string }> = {
+  por_recepcionar: { texto: "Por recepcionar", pill: "gray" },
+  en_analisis: { texto: "En análisis", pill: "blue" },
+  por_revisar: { texto: "Por revisar", pill: "amber" },
+  por_aprobar: { texto: "Por aprobar", pill: "amber" },
+  por_emitir: { texto: "Por emitir informe", pill: "amber" },
+  en_firma: { texto: "En firma", pill: "blue" },
+  por_entregar: { texto: "Por entregar", pill: "amber" },
+  lista_para_cerrar: { texto: "Lista para cerrar", pill: "green" },
+};
+const estadoCelda = (r: any) =>
+  r.situacion && SITUACION[r.situacion] ? (
+    <span className={`pill ${SITUACION[r.situacion].pill}`} title={`Estado de la OT: ${r.estado}`}>{SITUACION[r.situacion].texto}</span>
+  ) : (
+    estadoBadge(r.estado)
+  );
+
 const codigoDe = (r: any) => r.codigo ?? r.numero ?? r.id?.slice(0, 8) ?? "";
 
 /** Atajos de filtro. Cada uno equivale a parámetros de GET /ot. */
@@ -218,7 +236,7 @@ export default function OtPage() {
       render: (r) => <SemaforoPlazo fechaCompromiso={r.fechaCompromiso} estado={r.estado} />,
     },
     { key: "prioridad", label: "Prioridad", value: (r) => r.prioridad ?? "normal", render: (r) => r.prioridad ?? "normal" },
-    { key: "estado", label: "Estado", value: (r) => r.estado ?? "", render: (r) => estadoBadge(r.estado) },
+    { key: "estado", label: "Estado", value: (r) => (r.situacion && SITUACION[r.situacion]?.texto) || r.estado || "", render: (r) => estadoCelda(r) },
     { key: "origen", label: "Origen", value: (r) => `${r.origenTrabajo ?? ""} ${r.opiPendiente ? "OPI pendiente" : ""} ${r.conCobro === false ? "Sin cobro" : ""}`, render: (r) => origenBadges(r) },
   ];
 

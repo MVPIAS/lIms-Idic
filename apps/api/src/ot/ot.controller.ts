@@ -273,16 +273,55 @@ export class OtController {
     ]);
 
     const ids = ots.map((o) => o.id);
-    const [porOtAnalistas, porIdFlujo] = await Promise.all([this.analistasDe(ids), this.flujosDe(ots, tenantId)]);
+    const [porOtAnalistas, porIdFlujo, situaciones] = await Promise.all([
+      this.analistasDe(ids),
+      this.flujosDe(ots, tenantId),
+      this.situacionesDe(ids),
+    ]);
 
     return {
       data: ots.map((o) => ({
         ...o,
+        // Dónde está la OT en su ruta (el estado de la tabla casi no se mueve: D02-21).
+        situacion: ["cerrada", "anulada"].includes(o.estado) ? null : situaciones.get(o.id) ?? null,
         analistas: porOtAnalistas.get(o.id) ?? [],
         flujo: o.flujoInstanciaId ? porIdFlujo.get(o.flujoInstanciaId) ?? null : null,
       })),
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
+  }
+
+  /**
+   * Situación de cada OT abierta de la página según lo que ya tiene (recorrido
+   * MP-02, D02-21: la lista decía «recepcionada» con la OT lista para cerrar).
+   * Misma secuencia que la Ruta de la OT, resumida en una consulta.
+   */
+  private async situacionesDe(ids: string[]): Promise<Map<string, string>> {
+    if (!ids.length) return new Map();
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string; situacion: string }[]>(
+      `SELECT o.id,
+              CASE
+                WHEN NOT EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL) THEN 'por_recepcionar'
+                WHEN r.total = 0 THEN 'por_recepcionar'
+                WHEN r.por_capturar > 0 THEN 'en_analisis'
+                WHEN r.capturados > 0 THEN 'por_revisar'
+                WHEN r.revisados > 0 THEN 'por_aprobar'
+                WHEN NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado NOT IN ('anulado')) THEN 'por_emitir'
+                WHEN EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('en_firma','devuelto')) THEN 'en_firma'
+                WHEN EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL) THEN 'por_entregar'
+                ELSE 'lista_para_cerrar'
+              END AS situacion
+         FROM orden_trabajo o
+         CROSS JOIN LATERAL (
+           SELECT count(*) AS total,
+                  count(*) FILTER (WHERE r.estado IN ('pendiente','devuelto','rechazado')) AS por_capturar,
+                  count(*) FILTER (WHERE r.estado = 'capturado') AS capturados,
+                  count(*) FILTER (WHERE r.estado = 'revisado_n1') AS revisados
+             FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL) r
+        WHERE o.id = ANY($1::uuid[])`,
+      ids,
+    );
+    return new Map(filas.map((f) => [f.id, f.situacion]));
   }
 
   /** OT donde el usuario figura como analista (de la OT o de un ensayo concreto). */

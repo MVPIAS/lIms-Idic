@@ -470,10 +470,12 @@ function rutaLaboratorio(h: HechosOt): Ruta {
   // Una orden interna sin cerrar o sin integrar deja el análisis en curso.
   const oiPend = ordenesPendientes(h);
   const nOi = oiPend.enDestino.length + oiPend.porIntegrar.length;
-  if (nOi > 0 && res.analisis.estado === "hecho")
+  // La Ruta muestra siempre las órdenes internas pendientes (recorrido MP-02, D02-22),
+  // no solo cuando lo propio ya está capturado.
+  if (nOi > 0)
     res.analisis = {
       ...res.analisis,
-      estado: "en_curso",
+      estado: res.analisis.estado === "hecho" ? "en_curso" : res.analisis.estado,
       detalle: `${res.analisis.detalle ?? ""}${res.analisis.detalle ? " · " : ""}${plural(nOi, "orden interna pendiente", "órdenes internas pendientes")}`,
     };
   const docs = etapasDocumentos(h.documentos);
@@ -533,7 +535,17 @@ function rutaLaboratorio(h: HechosOt): Ruta {
             const oi = pasoOrdenInterna(h);
             if (oi) return oi;
           }
-          return pasoResultados(h, clave);
+          {
+            const p = pasoResultados(h, clave);
+            // Mientras se captura lo propio, se nombran las derivaciones en curso (D02-22).
+            const enCurso = [...oiPend.enDestino, ...oiPend.porIntegrar];
+            if (!enCurso.length) return p;
+            const lista = enCurso
+              .slice(0, 3)
+              .map((o) => `${o.numero}${o.destino ? ` en ${o.destino}` : ""} (${o.estado === "abierta" ? "por recibir" : o.estado === "recibida" ? "en análisis" : "por integrar"})`)
+              .join(", ");
+            return { ...p, texto: `${p.texto} · órdenes internas pendientes: ${lista}${enCurso.length > 3 ? "…" : ""}` };
+          }
         case "revision":
         case "aprobacion":
           return pasoResultados(h, clave);
