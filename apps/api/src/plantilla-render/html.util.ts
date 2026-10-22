@@ -8,6 +8,8 @@
  * también van escapadas.
  */
 
+import { fechaChile, fechaHoraChile } from "../common/fecha-chile";
+
 /**
  * Escapa los 5 metacaracteres de HTML.
  *
@@ -63,20 +65,15 @@ export function fmtNum(valor: unknown, decimales = 4): string {
     .replace(".", ",");
 }
 
-/** Fecha corta es-CL (dd-mm-aaaa) sin depender del locale del contenedor. */
+/**
+ * Fecha corta es-CL (dd-mm-aaaa) en Chile, sin depender del locale ni de la zona
+ * horaria del contenedor (D02-27). Las fechas de calendario (DATE), tal cual.
+ */
 export function fmtFecha(valor: unknown): string {
-  if (!valor) return "";
-  const d = valor instanceof Date ? valor : new Date(String(valor));
-  if (Number.isNaN(d.getTime())) return String(valor);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+  return fechaChile(valor);
 }
 
-/** Fecha + hora es-CL (dd-mm-aaaa HH:MM). */
+/** Fecha + hora es-CL (dd-mm-aaaa HH:MM) en hora de Chile (firmas, emisión, entrega…; D02-27). */
 export function fmtFechaHora(valor: unknown): string {
-  if (!valor) return "";
-  const d = valor instanceof Date ? valor : new Date(String(valor));
-  if (Number.isNaN(d.getTime())) return String(valor);
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${fmtFecha(d)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return fechaHoraChile(valor);
 }

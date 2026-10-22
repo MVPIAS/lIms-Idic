@@ -13,6 +13,8 @@
  *   · inicio   0             (último número usado en el Sistema Comercial)
  */
 
+import { anioChile } from "../common/fecha-chile";
+
 export interface ConfigNumeracion {
   formato: string;
   digitos: number;
@@ -67,7 +69,7 @@ export async function generarNumeroCotizacion(db: any, tenantId: string, fecha: 
     tenantId,
   );
   const cfg = configNumeracion(Object.fromEntries(filas.map((f) => [f.codigo, f.valor])));
-  const anio = fecha.getFullYear();
+  const anio = anioChile(fecha);
   const serie = serieDe(cfg, anio);
   for (let intento = 0; intento < 50; intento++) {
     const r: { ultimo: number }[] = await db.$queryRawUnsafe(

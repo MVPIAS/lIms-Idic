@@ -1,3 +1,5 @@
+import { anioChile } from "./fecha-chile";
+
 /**
  * Generación de correlativos de OT. Extraído tal cual de `ot.controller.ts`
  * para que `CotizacionService.aceptar()` cree la OT con el MISMO formato y la
@@ -16,7 +18,7 @@
  * tabla y su siembra viven en packages/db/align_ot_correlativo.sql.
  */
 export async function generarCodigoOt(db: any, tenantId: string): Promise<string> {
-  const anio = new Date().getFullYear();
+  const anio = anioChile();
   // INSERT ... ON CONFLICT DO UPDATE ... RETURNING es atómico: incrementa y
   // devuelve el nuevo valor en una sola sentencia, sin ventana read-then-write.
   const filas = await db.$queryRaw<Array<{ ultimo: number }>>`

@@ -1,3 +1,5 @@
+import { anioChile } from "./fecha-chile";
+
 /**
  * Generación del correlativo de Orden Interna (OI-AAAA-NNNN). Mismo patrón que
  * `generarCodigoOt` en `codigo.ts`: un contador atómico por (tenant_id, anio)
@@ -11,7 +13,7 @@
  * `db` acepta tanto PrismaService como el cliente de una transacción (`tx`).
  */
 export async function generarNumeroOrdenInterna(db: any, tenantId: string): Promise<string> {
-  const anio = new Date().getFullYear();
+  const anio = anioChile();
   const filas = await db.$queryRaw<Array<{ ultimo: number }>>`
     INSERT INTO orden_interna_correlativo (tenant_id, anio, ultimo)
     VALUES (${tenantId}::uuid, ${anio}, 1)

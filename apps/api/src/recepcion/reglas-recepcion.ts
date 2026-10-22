@@ -17,6 +17,8 @@
  *    custodia se devuelve: no se destruye.
  */
 
+import { hoyChile } from "../common/fecha-chile";
+
 export type TipoCampo = "texto" | "numero" | "entero" | "fecha" | "lista" | "casilla";
 export const TIPOS_CAMPO: readonly TipoCampo[] = ["texto", "numero", "entero", "fecha", "lista", "casilla"];
 
@@ -245,9 +247,8 @@ export function retenerHasta(clase: ClaseCustodia | null | undefined, recepcion:
   return d.toISOString().slice(0, 10);
 }
 
-/** Fecha local de hoy (AAAA-MM-DD) para comparar con DATE. */
-export const hoyIso = (ahora = new Date()) =>
-  `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, "0")}-${String(ahora.getDate()).padStart(2, "0")}`;
+/** Hoy en Chile (AAAA-MM-DD) para comparar con DATE, sin depender de la zona del servidor (D02-27). */
+export const hoyIso = (ahora = new Date()) => hoyChile(ahora);
 
 const fmtDma = (iso: string) => iso.split("-").reverse().join("-");
 

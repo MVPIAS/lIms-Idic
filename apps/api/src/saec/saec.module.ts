@@ -42,6 +42,7 @@ import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-def
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { fmtFecha } from "../plantilla-render/html.util";
 import { cuerpoCertificadoSaec, tituloCertificadoSaec } from "./saec-certificado.plantilla";
+import { anioChile } from "../common/fecha-chile";
 
 /**
  * Código de verificación corto e imprimible del certificado SAEC.
@@ -702,7 +703,7 @@ export class SaecCasoController extends SaecBase {
 
   /** CASO-<año>-NNNN por tenant. */
   private async correlativoCaso(tenantId: string) {
-    const anio = new Date().getFullYear();
+    const anio = anioChile();
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT COALESCE(MAX(split_part(numero_caso, '-', 3)::int), 0) + 1 AS next
          FROM saec_caso WHERE tenant_id = $1::uuid AND numero_caso LIKE $2`,

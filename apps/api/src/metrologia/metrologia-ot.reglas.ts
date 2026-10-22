@@ -20,6 +20,8 @@
  */
 
 /* ------------------------------------------------------------ tipos --- */
+import { anioChile } from "../common/fecha-chile";
+
 export type EstadoInstrumento = "por_recibir" | "recibido" | "no_apto" | "devuelto" | "anulado";
 export const ESTADOS_FISICOS = ["bueno", "con_observaciones", "danado"] as const;
 export type EstadoFisico = (typeof ESTADOS_FISICOS)[number];
@@ -84,7 +86,7 @@ const nombreItem = (i: { numero: number; descripcion: string }) => `ítem ${i.nu
  */
 export function formatearNumero(formato: string | null | undefined, prefijo: string, n: number, relleno = 0, anio?: number | null): string {
   const f = formato && formato.includes("{N}") ? formato : "{P}-{N}";
-  const a = anio ?? new Date().getFullYear();
+  const a = anio ?? anioChile();
   return f
     .replace(/\{P\}/g, prefijo)
     .replace(/\{N\}/g, String(n).padStart(relleno, "0"))

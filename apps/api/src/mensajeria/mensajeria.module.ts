@@ -31,6 +31,7 @@ import {
   plantillaPorClave,
   plantillaPorDefecto,
 } from "./correo-plantillas";
+import { fechaChile } from "../common/fecha-chile";
 
 // ---------------------------------------------------------------------------
 // Módulo MENSAJERÍA · correo transaccional con plantilla seleccionable.
@@ -72,10 +73,9 @@ function clp(v: unknown): string {
   return "$ " + Math.round(n).toLocaleString("es-CL");
 }
 
-/** dd-mm-aaaa. */
+/** dd-mm-aaaa en Chile (no en la zona del servidor; D02-27). */
 function fechaCorta(d: Date = new Date()): string {
-  const p = (x: number) => String(x).padStart(2, "0");
-  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+  return fechaChile(d);
 }
 
 /**
