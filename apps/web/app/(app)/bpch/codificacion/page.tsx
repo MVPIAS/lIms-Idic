@@ -15,7 +15,7 @@ import RequierePermiso from "@/components/RequierePermiso";
 import Modal from "@/components/documentos/Modal";
 import { toast } from "@/components/ui/feedback";
 import { usePermisos } from "@/lib/permisos";
-import { fecha, fechaHora } from "@/lib/format";
+import { fechaDia, fechaHora } from "@/lib/format";
 import { descargarGenerado } from "@/lib/bpchProcesos";
 import { hoyChile } from "@/lib/d11";
 import { BuscadorElemento, BuscadorEmpresa, type ElementoCatalogo, type Empresa } from "../_components/Buscadores";
@@ -402,7 +402,7 @@ function EmitirListado({ gestiona, inicial, onCerrar }: { gestiona: boolean; ini
               <td>{fechaHora(e.createdAt)}</td>
               <td>{TIPO_LISTADO[e.listado] ?? e.listado}</td>
               <td>{e.fabricante ?? "Todos"}</td>
-              <td>{fecha(e.fechaEdicion)}</td>
+              <td>{fechaDia(e.fechaEdicion)}</td>
               <td>{e.total}</td>
               <td>{e.formato === "pdf" ? "PDF" : "Excel"}</td>
               <td>{e.emitidoPor ?? "—"}</td>

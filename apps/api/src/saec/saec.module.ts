@@ -2,6 +2,7 @@ import { CODIGO_UNIDAD_SAEC } from "../ot/laboratorio-ot";
 import { generarCodigoOt } from "../common/codigo";
 import {
   BadRequestException,
+  ConflictException,
   Body,
   Controller,
   Delete,
@@ -20,8 +21,11 @@ import {
   Query,
   Req,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
@@ -42,7 +46,20 @@ import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-def
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { fmtFecha } from "../plantilla-render/html.util";
 import { cuerpoCertificadoSaec, tituloCertificadoSaec } from "./saec-certificado.plantilla";
-import { anioChile } from "../common/fecha-chile";
+import { anioChile, hoyChile } from "../common/fecha-chile";
+import { escapeHtml, fmtFechaHora } from "../plantilla-render/html.util";
+import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
+import {
+  NOMBRE_TIPO_PERITAJE,
+  RUC_RE,
+  TIPOS_PERITAJE,
+  erroresIngresoEvidencia,
+  erroresSolicitudPrestamo,
+  erroresTransicionCaso,
+  prestamoVencido,
+} from "./reglas-saec";
+
+const SUBIDA_ADJUNTO = FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ADJUNTO, files: 1, fields: 2 } });
 
 /**
  * Código de verificación corto e imprimible del certificado SAEC.
@@ -376,8 +393,11 @@ const CrearCasoSchema = z.object({
   restringido: z.coerce.boolean().optional(),
   altoPerfil: z.coerce.boolean().optional(),
   comentario: textOpt,
+  descripcion: textOpt,
 });
-const ActualizarCasoSchema = CrearCasoSchema.partial();
+/** El estado del caso solo cambia por la acción «estado» (transiciones controladas, 11.35). */
+const ActualizarCasoSchema = CrearCasoSchema.omit({ estado: true }).partial().strict();
+const EstadoCasoSchema = z.object({ estado: z.enum(ESTADOS_CASO), motivo: textOpt });
 
 const CrearEvidenciaSchema = z.object({
   tipo: z.enum(TIPOS_ELEMENTO),
@@ -403,6 +423,12 @@ const CrearEvidenciaSchema = z.object({
   peritoId: uuidOpt,
   procedencia: strOpt(200),
   organismoSolicitante: strOpt(200),
+  /** 11.31 · oficio, NUE y RUC de la causa (obligatorios al registrar: reglas-saec.ts). */
+  nue: strOpt(60),
+  oficioNumero: strOpt(60),
+  oficioFecha: z.preprocess(emptyToNull, z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha del oficio AAAA-MM-DD").nullable().optional()),
+  oficioUnidad: strOpt(200),
+  rucCausa: strOpt(20),
   /** RF-K02.4 · crea la OT automáticamente (exige clienteId). */
   crearOt: z.coerce.boolean().optional(),
 });
@@ -417,10 +443,11 @@ const COLS_EVIDENCIA: Record<string, string> = {
   ubicacion: "ubicacion", soporte: "soporte", documentoId: "documento_id",
   otId: "ot_id", muestraId: "muestra_id", clienteId: "cliente_id", peritoId: "perito_id",
   procedencia: "procedencia", organismoSolicitante: "organismo_solicitante",
+  nue: "nue", oficioNumero: "oficio_numero", oficioFecha: "oficio_fecha", oficioUnidad: "oficio_unidad", rucCausa: "ruc_causa",
 };
 const CAST_EVIDENCIA: Record<string, string> = {
   caso_id: "::uuid", documento_id: "::uuid", ot_id: "::uuid",
-  muestra_id: "::uuid", cliente_id: "::uuid", perito_id: "::uuid",
+  muestra_id: "::uuid", cliente_id: "::uuid", perito_id: "::uuid", oficio_fecha: "::date",
 };
 
 const CrearArmaSchema = z.object({
@@ -486,6 +513,7 @@ const CrearPrestamoSchema = z.object({
 });
 
 const PeritajeManualSchema = z.object({
+  tipo: z.enum(TIPOS_PERITAJE, { errorMap: () => ({ message: "Indique el tipo de peritaje." }) }),
   resultado: z.enum(["concluyente", "no_concluyente", "sin_coincidencia", "pendiente"]).optional(),
   conclusiones: textOpt,
   peritoId: uuidOpt,
@@ -568,6 +596,18 @@ abstract class SaecBase {
       this.ip(req),
       JSON.stringify(detalle ?? {}),
     );
+  }
+
+  /** Una evidencia no se asocia a un caso cerrado o archivado (11.35). */
+  protected async exigirCasoAbierto(tenantId: string, casoId: string | null) {
+    if (!casoId) return;
+    const [c] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT numero_caso, estado FROM saec_caso WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
+      casoId, tenantId,
+    );
+    if (!c) throw new BadRequestException("El caso indicado no existe.");
+    if (c.estado === "cerrado" || c.estado === "archivado")
+      throw new BadRequestException(`El caso ${c.numero_caso} está ${c.estado}: reábralo antes de asociarle evidencias.`);
   }
 
   /** Correlativo por tenant sobre un prefijo tipo EV-2026- (el año es el de emisión en Chile). */
@@ -672,13 +712,52 @@ export class SaecCasoController extends SaecBase {
         ORDER BY cc.created_at DESC`,
       tenantId, id,
     );
-    return { ...caso, evidencias, comentarios };
+    const transiciones = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT t.desde, t.hacia, t.motivo, t.created_at, u.nombre_completo AS usuario_nombre
+         FROM saec_caso_transicion t LEFT JOIN usuario u ON u.id = t.usuario_id
+        WHERE t.tenant_id = $1::uuid AND t.caso_id = $2::uuid ORDER BY t.created_at DESC`,
+      tenantId, id,
+    );
+    return { ...caso, evidencias, comentarios, transiciones };
+  }
+
+  /** 11.35 · cambio de estado controlado (abierto → en proceso → cerrado → archivado; reabrir con motivo). */
+  @Post(":id/estado")
+  @RequierePermiso("caso.editar")
+  async cambiarEstado(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const d = EstadoCasoSchema.parse(body);
+    return this.prisma.$transaction(async (tx: ClienteSql) => {
+      const [c] = await tx.$queryRawUnsafe<any[]>(
+        `SELECT id, estado FROM saec_caso WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL FOR UPDATE`,
+        id, tenantId,
+      );
+      if (!c) throw new NotFoundException("Caso no encontrado");
+      const [n] = await tx.$queryRawUnsafe<any[]>(
+        `SELECT COUNT(*)::int AS n FROM evidencia WHERE tenant_id = $1::uuid AND caso_id = $2::uuid AND deleted_at IS NULL AND estado = 'prestada'`,
+        tenantId, id,
+      );
+      const errores = erroresTransicionCaso(c.estado, d.estado, { motivo: (d.motivo as string) ?? null, evidenciasPrestadas: Number(n?.n ?? 0) });
+      if (errores.length) throw new BadRequestException(errores.join(" "));
+      const rows = await tx.$queryRawUnsafe<any[]>(
+        `UPDATE saec_caso SET estado = $3 WHERE id = $1::uuid AND tenant_id = $2::uuid RETURNING *`,
+        id, tenantId, d.estado,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO saec_caso_transicion (tenant_id, caso_id, desde, hacia, motivo, usuario_id)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid)`,
+        tenantId, id, c.estado, d.estado, (d.motivo as string) || null, req?.user?.sub ?? null,
+      );
+      await this.auditar(req, "caso", id, "editar", { estado: { desde: c.estado, hacia: d.estado }, motivo: d.motivo ?? null }, tx);
+      return rows[0];
+    });
   }
 
   @Post()
   async crear(@Body() body: unknown, @Req() req: any) {
     const tenantId = this.tenantId(req);
     const d = CrearCasoSchema.parse(body);
+    if (d.estado && d.estado !== "abierto") throw new BadRequestException("Un caso nuevo nace abierto; después se cambia su estado con la acción «estado».");
     // saec_caso no tiene columna `codigo`: su correlativo va sobre numero_caso.
     const numero = d.numeroCaso ?? (await this.correlativoCaso(tenantId));
 
@@ -686,16 +765,16 @@ export class SaecCasoController extends SaecBase {
       `INSERT INTO saec_caso
          (tenant_id, numero_caso, agencia_origen_ref, agencia_origen_nombre, tipo_evento_codigo,
           tipo_evento_texto, fecha_ocurrencia, investigador_id, supervisor_id, perito_balistico_id,
-          responsable_id, unidad_id, estado, restringido, alto_perfil, comentario, origen, created_by)
+          responsable_id, unidad_id, estado, restringido, alto_perfil, comentario, origen, created_by, descripcion)
        VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::timestamptz, $8::uuid, $9::uuid, $10::uuid,
-               $11::uuid, $12::uuid, $13, $14, $15, $16, 'manual', $17::uuid)
+               $11::uuid, $12::uuid, $13, $14, $15, $16, 'manual', $17::uuid, $18)
        RETURNING *`,
       tenantId, numero, d.agenciaOrigenRef ?? null, d.agenciaOrigenNombre ?? null,
       d.tipoEventoCodigo ?? null, d.tipoEventoTexto ?? null, d.fechaOcurrencia ?? null,
       d.investigadorId ?? null, d.supervisorId ?? null, d.peritoBalisticoId ?? null,
-      d.responsableId ?? null, d.unidadId ?? null, d.estado ?? "abierto",
+      d.responsableId ?? null, d.unidadId ?? null, "abierto",
       d.restringido ?? false, d.altoPerfil ?? false, d.comentario ?? null,
-      req?.user?.sub ?? null,
+      req?.user?.sub ?? null, d.descripcion ?? null,
     );
     await this.auditar(req, "caso", rows[0].id, "crear", { numeroCaso: numero });
     return rows[0];
@@ -715,6 +794,8 @@ export class SaecCasoController extends SaecBase {
   @Patch(":id")
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const tenantId = this.tenantId(req);
+    if (body && typeof body === "object" && "estado" in body)
+      throw new BadRequestException("El estado del caso se cambia con la acción «Cambiar estado» (POST /saec/casos/:id/estado).");
     const d = ActualizarCasoSchema.parse(body) as Record<string, unknown>;
     await this.cargarPropio(id, tenantId);
 
@@ -724,8 +805,8 @@ export class SaecCasoController extends SaecBase {
       tipoEventoTexto: "tipo_evento_texto", fechaOcurrencia: "fecha_ocurrencia",
       investigadorId: "investigador_id", supervisorId: "supervisor_id",
       peritoBalisticoId: "perito_balistico_id", responsableId: "responsable_id",
-      unidadId: "unidad_id", estado: "estado", restringido: "restringido",
-      altoPerfil: "alto_perfil", comentario: "comentario",
+      unidadId: "unidad_id", restringido: "restringido",
+      altoPerfil: "alto_perfil", comentario: "comentario", descripcion: "descripcion",
     };
     const casts: Record<string, string> = {
       fecha_ocurrencia: "::timestamptz", investigador_id: "::uuid", supervisor_id: "::uuid",
@@ -957,6 +1038,11 @@ export class EvidenciaController extends SaecBase {
           ORDER BY created_at DESC LIMIT 100`,
         tenantId, id),
     ]);
+    const adjuntos = await listarAdjuntos(this.prisma as any, tenantId, "peritaje", peritajes.map((p: any) => p.id));
+    for (const p of peritajes) p.adjuntos = adjuntos.filter((a: any) => a.entidadId === p.id);
+    const hoy = hoyChile();
+    for (const p of prestamos)
+      p.vencido = prestamoVencido({ estado: p.estado, fechaDevolucionPrevista: p.fecha_devolucion_prevista ? new Date(p.fecha_devolucion_prevista).toISOString().slice(0, 10) : null }, hoy);
 
     return {
       ...evidencia,
@@ -969,6 +1055,14 @@ export class EvidenciaController extends SaecBase {
   async crear(@Body() body: unknown, @Req() req: any) {
     const tenantId = this.tenantId(req);
     const d = CrearEvidenciaSchema.parse(body);
+    const faltan = erroresIngresoEvidencia(d, hoyChile());
+    if (faltan.length) throw new BadRequestException(faltan.join(" "));
+    const nueRepetido = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT codigo FROM evidencia WHERE tenant_id = $1::uuid AND upper(nue) = upper($2) AND deleted_at IS NULL LIMIT 1`,
+      tenantId, d.nue!.trim(),
+    );
+    if (nueRepetido[0]) throw new ConflictException(`El NUE ${d.nue} ya está registrado en la evidencia ${nueRepetido[0].codigo}.`);
+    await this.exigirCasoAbierto(tenantId, d.casoId ?? null);
     if (d.crearOt && !d.clienteId) {
       throw new BadRequestException("Para crear la OT automáticamente (RF-K02.4) hace falta un clienteId.");
     }
@@ -1016,23 +1110,26 @@ export class EvidenciaController extends SaecBase {
       }
 
       // RF-K02.2 · código de barras único por elemento (por defecto, el NUE).
-      const codigoBarras = d.codigoBarras ?? codigo;
+      const codigoBarras = d.codigoBarras ?? d.nue?.trim() ?? codigo;
 
       const rows = await tx.$queryRawUnsafe<any[]>(
         `INSERT INTO evidencia
            (tenant_id, codigo, caso_id, exhibit_number, tipo, descripcion, categoria_codigo,
             categoria_texto, calibre_codigo, calibre_texto, firing_pin_shape, breech_face_class,
             marca, composicion, estado, codigo_barras, ubicacion, soporte, documento_id,
-            ot_id, muestra_id, cliente_id, perito_id, procedencia, organismo_solicitante, created_by)
+            ot_id, muestra_id, cliente_id, perito_id, procedencia, organismo_solicitante, created_by,
+            nue, oficio_numero, oficio_fecha, oficio_unidad, ruc_causa)
          VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-                 $16, $17, $18, $19::uuid, $20::uuid, $21::uuid, $22::uuid, $23::uuid, $24, $25, $26::uuid)
+                 $16, $17, $18, $19::uuid, $20::uuid, $21::uuid, $22::uuid, $23::uuid, $24, $25, $26::uuid,
+                 $27, $28, $29::date, $30, $31)
          RETURNING *`,
         tenantId, codigo, d.casoId ?? null, d.exhibitNumber ?? null, d.tipo, d.descripcion ?? null,
         d.categoriaCodigo ?? null, d.categoriaTexto ?? null, d.calibreCodigo ?? null, d.calibreTexto ?? null,
         d.firingPinShape ?? null, d.breechFaceClass ?? null, d.marca ?? null, d.composicion ?? null,
         d.estado ?? "ingresada", codigoBarras, d.ubicacion ?? null, d.soporte ?? "fisica",
         d.documentoId ?? null, otId, d.muestraId ?? null, d.clienteId ?? null, d.peritoId ?? null,
-        d.procedencia ?? null, d.organismoSolicitante ?? null, req?.user?.sub ?? null,
+        d.procedencia ?? null, d.organismoSolicitante ?? d.oficioUnidad ?? null, req?.user?.sub ?? null,
+        d.nue!.trim(), d.oficioNumero!.trim(), d.oficioFecha ?? null, d.oficioUnidad!.trim(), d.rucCausa?.trim().toUpperCase() ?? null,
       );
       const evidencia = rows[0];
 
@@ -1042,8 +1139,8 @@ export class EvidenciaController extends SaecBase {
            (tenant_id, evidencia_id, evento, desde_organismo, hacia_organismo, ubicacion_destino,
             motivo, registrado_por, ip_origen)
          VALUES ($1::uuid, $2::uuid, 'entrada', $3, 'IDIC · Bodega de evidencias', $4, $5, $6::uuid, $7::inet)`,
-        tenantId, evidencia.id, d.organismoSolicitante ?? d.procedencia ?? null,
-        d.ubicacion ?? null, "Ingreso inicial de la evidencia al banco del SAEC.",
+        tenantId, evidencia.id, d.oficioUnidad ?? d.organismoSolicitante ?? d.procedencia ?? null,
+        d.ubicacion ?? null, `Ingreso de la evidencia por oficio Nº ${d.oficioNumero} (NUE ${d.nue}).`,
         req?.user?.sub ?? null, this.ip(req),
       );
 
@@ -1069,6 +1166,16 @@ export class EvidenciaController extends SaecBase {
     const tenantId = this.tenantId(req);
     const d = ActualizarEvidenciaSchema.parse(body) as Record<string, unknown>;
     const antes = await this.cargarPropia(id, tenantId);
+    if (typeof d.nue === "string" && d.nue.trim()) {
+      const otra = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT codigo FROM evidencia WHERE tenant_id = $1::uuid AND upper(nue) = upper($2) AND id <> $3::uuid AND deleted_at IS NULL LIMIT 1`,
+        tenantId, d.nue.trim(), id,
+      );
+      if (otra[0]) throw new ConflictException(`El NUE ${d.nue} ya está registrado en la evidencia ${otra[0].codigo}.`);
+    }
+    if (typeof d.casoId === "string" && d.casoId !== antes.caso_id) await this.exigirCasoAbierto(tenantId, d.casoId);
+    if (typeof d.rucCausa === "string" && d.rucCausa.trim() && !RUC_RE.test(d.rucCausa.trim()))
+      throw new BadRequestException("El RUC de la causa tiene la forma NNNNNNNNNN-D.");
 
     const args: any[] = [id, tenantId];
     const sets = this.construirSet(d, COLS_EVIDENCIA, CAST_EVIDENCIA, args);
@@ -1125,7 +1232,7 @@ export class EvidenciaController extends SaecBase {
        VALUES ($1::uuid, $2::uuid, 'manual', $3, $4, $5::uuid, $6::jsonb)
        RETURNING *`,
       tenantId, id, d.resultado ?? "pendiente", d.conclusiones ?? null,
-      d.peritoId ?? req?.user?.sub ?? null, JSON.stringify(d.datos ?? {}),
+      d.peritoId ?? req?.user?.sub ?? null, JSON.stringify({ ...(d.datos ?? {}), tipo: d.tipo, tipoNombre: NOMBRE_TIPO_PERITAJE[d.tipo] }),
     );
     await this.prisma.$executeRawUnsafe(
       `UPDATE evidencia SET estado = 'analizada'
@@ -1136,12 +1243,55 @@ export class EvidenciaController extends SaecBase {
     return rows[0];
   }
 
+  /** 11.34 · adjunto del peritaje (PDF, PNG o JPEG). */
+  @Post(":id/peritajes/:peritajeId/adjuntos")
+  @RequierePermiso("peritaje.registrar")
+  @UseInterceptors(SUBIDA_ADJUNTO)
+  async adjuntarPeritaje(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("peritajeId", ParseUUIDPipe) peritajeId: string,
+    @UploadedFile() archivo: ArchivoAdjunto | undefined,
+    @Req() req: any,
+  ) {
+    const tenantId = this.tenantId(req);
+    await this.cargarPropia(id, tenantId);
+    const [p] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id FROM peritaje_balistico WHERE id = $1::uuid AND evidencia_id = $2::uuid AND tenant_id = $3::uuid AND deleted_at IS NULL`,
+      peritajeId, id, tenantId,
+    );
+    if (!p) throw new NotFoundException("Peritaje no encontrado en esta evidencia.");
+    const a = await guardarAdjunto(this.prisma as any, { tenantId, entidad: "peritaje", entidadId: peritajeId, clase: "peritaje", archivo, usuarioId: req?.user?.sub ?? null });
+    await this.auditar(req, "evidencia", id, "editar", { adjuntoPeritaje: a.nombre, hash: a.hash });
+    return a;
+  }
+
+  @Get(":id/adjuntos/:adjuntoId")
+  async descargarAdjunto(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("adjuntoId", ParseUUIDPipe) adjuntoId: string,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    const tenantId = this.tenantId(req);
+    await this.cargarPropia(id, tenantId);
+    const a = await leerAdjunto(this.prisma as any, tenantId, ["peritaje"], adjuntoId);
+    const [p] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT 1 FROM peritaje_balistico WHERE id = $1::uuid AND evidencia_id = $2::uuid AND tenant_id = $3::uuid`,
+      a.entidadId, id, tenantId,
+    );
+    if (!p) throw new NotFoundException("Adjunto no encontrado.");
+    res.set(cabecerasAdjunto(a));
+    res.end(a.datos);
+  }
+
   /** RF-K06.1 · formulario de solicitud de entrega/devolución. */
   @Post(":id/prestamos")
   @RequierePermiso("evidencia.prestar")
   async solicitarPrestamo(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const tenantId = this.tenantId(req);
     const d = CrearPrestamoSchema.parse(body);
+    const faltan = erroresSolicitudPrestamo(d, hoyChile());
+    if (faltan.length) throw new BadRequestException(faltan.join(" "));
     const e = await this.cargarPropia(id, tenantId);
     if (d.tipo !== "devolucion" && e.estado === "prestada") {
       throw new BadRequestException("La evidencia ya está prestada.");
@@ -1618,7 +1768,7 @@ export class PrestamoEvidenciaController extends SaecBase {
   @RequierePermiso("evidencia.ver")
   async listar(
     @Query("estado") estado?: string, @Query("evidenciaId") evidenciaId?: string,
-    @Query("page") page?: string, @Query("limit") limit?: string, @Req() req?: any,
+    @Query("page") page?: string, @Query("limit") limit?: string, @Req() req?: any, @Query("vencidos") vencidos?: string,
   ) {
     const tenantId = this.tenantId(req);
     const { p, l, offset } = this.paginacion(page, limit);
@@ -1628,18 +1778,21 @@ export class PrestamoEvidenciaController extends SaecBase {
     if (evidenciaId) { args.push(evidenciaId); filtros.push(`AND p.evidencia_id = $${args.length}::uuid`); }
     const where = filtros.join(" ");
 
+    if (vencidos === "1") filtros.push(`AND p.estado = 'entregado' AND p.fecha_devolucion_prevista < (now() AT TIME ZONE 'America/Santiago')::date`);
+    const where2 = filtros.join(" ");
     const data = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT p.*, e.codigo AS evidencia_codigo, e.tipo AS evidencia_tipo
+      `SELECT p.*, e.codigo AS evidencia_codigo, e.tipo AS evidencia_tipo, e.nue AS evidencia_nue,
+              (p.estado = 'entregado' AND p.fecha_devolucion_prevista < (now() AT TIME ZONE 'America/Santiago')::date) AS vencido
          FROM evidencia_prestamo p
          JOIN evidencia e ON e.id = p.evidencia_id
-        WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ${where}
+        WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ${where2}
         ORDER BY p.created_at DESC
         LIMIT $${args.length + 1} OFFSET $${args.length + 2}`,
       ...args, l, offset,
     );
     const totalRows = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT COUNT(*)::int AS total FROM evidencia_prestamo p
-        WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ${where}`,
+        WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ${where2}`,
       ...args,
     );
     return { data, meta: { page: p, limit: l, total: Number(totalRows[0]?.total ?? 0) } };
@@ -1685,8 +1838,11 @@ export class PrestamoEvidenciaController extends SaecBase {
   /** RF-K06.3 · registro de salida + actualización de la ubicación. */
   @Post(":id/entregar")
   @RequierePermiso("evidencia.custodiar")
-  async entregar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  async entregar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const tenantId = this.tenantId(req);
+    const { receptorNombre } = z
+      .object({ receptorNombre: z.string({ required_error: "Indique quién recibe la evidencia (acta de salida)." }).trim().min(3, "Indique quién recibe la evidencia (acta de salida).").max(200) })
+      .parse(body ?? {});
     const p = await this.cargarPropio(id, tenantId);
     if (p.estado !== "aprobado") throw new BadRequestException("Solo se puede entregar una solicitud aprobada.");
 
@@ -1698,7 +1854,7 @@ export class PrestamoEvidenciaController extends SaecBase {
          VALUES ($1::uuid, $2::uuid, 'prestamo', 'IDIC · Bodega de evidencias', $3, $4, $5, $6, $7::uuid, $8::inet)
          RETURNING id`,
         tenantId, p.evidencia_id, p.organismo_solicitante, p.ubicacion ?? null,
-        `Entrega por solicitud ${p.codigo}: ${p.motivo}`, p.solicitante_nombre,
+        `Entrega por solicitud ${p.codigo}: ${p.motivo}`, receptorNombre,
         req?.user?.sub ?? null, this.ip(req),
       );
       await tx.$executeRawUnsafe(
@@ -1707,9 +1863,9 @@ export class PrestamoEvidenciaController extends SaecBase {
         p.evidencia_id, tenantId,
       );
       const rows = await tx.$queryRawUnsafe<any[]>(
-        `UPDATE evidencia_prestamo SET estado = 'entregado', movimiento_salida_id = $3::uuid
+        `UPDATE evidencia_prestamo SET estado = 'entregado', movimiento_salida_id = $3::uuid, receptor_nombre = $4, entregado_at = now()
           WHERE id = $1::uuid AND tenant_id = $2::uuid RETURNING *`,
-        id, tenantId, mov[0].id,
+        id, tenantId, mov[0].id, receptorNombre,
       );
       await this.auditar(req, "prestamo", id, "editar", { accion: "entregar", codigo: p.codigo }, tx);
       return rows[0];
@@ -1721,8 +1877,9 @@ export class PrestamoEvidenciaController extends SaecBase {
   @RequierePermiso("evidencia.custodiar")
   async devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const tenantId = this.tenantId(req);
-    const { ubicacionRetorno, observaciones } = z.object({
-      ubicacionRetorno: strOpt(120),
+    const { ubicacionRetorno, observaciones, estadoReingreso } = z.object({
+      ubicacionRetorno: z.string({ required_error: "Indique la nueva ubicación de la evidencia." }).trim().min(2, "Indique la nueva ubicación de la evidencia.").max(120),
+      estadoReingreso: z.string({ required_error: "Indique el estado en que vuelve la evidencia (sellos, integridad)." }).trim().min(2, "Indique el estado en que vuelve la evidencia (sellos, integridad).").max(200),
       observaciones: textOpt,
     }).parse(body ?? {});
     const p = await this.cargarPropio(id, tenantId);
@@ -1736,7 +1893,7 @@ export class PrestamoEvidenciaController extends SaecBase {
          VALUES ($1::uuid, $2::uuid, 'devolucion', $3, 'IDIC · Bodega de evidencias', $4, $5, $6, $7::uuid, $8::inet)
          RETURNING id`,
         tenantId, p.evidencia_id, p.organismo_solicitante, (ubicacionRetorno as string) ?? null,
-        `Devolución de la solicitud ${p.codigo}`, (observaciones as string) ?? null,
+        `Devolución de la solicitud ${p.codigo} · estado: ${estadoReingreso}`, (observaciones as string) ?? null,
         req?.user?.sub ?? null, this.ip(req),
       );
       await tx.$executeRawUnsafe(
@@ -1746,13 +1903,64 @@ export class PrestamoEvidenciaController extends SaecBase {
       );
       const rows = await tx.$queryRawUnsafe<any[]>(
         `UPDATE evidencia_prestamo
-            SET estado = 'devuelto', movimiento_retorno_id = $3::uuid, ubicacion_retorno = $4
+            SET estado = 'devuelto', movimiento_retorno_id = $3::uuid, ubicacion_retorno = $4, estado_reingreso = $5, devuelto_at = now()
           WHERE id = $1::uuid AND tenant_id = $2::uuid RETURNING *`,
-        id, tenantId, mov[0].id, (ubicacionRetorno as string) ?? null,
+        id, tenantId, mov[0].id, ubicacionRetorno, estadoReingreso,
       );
       await this.auditar(req, "prestamo", id, "editar", { accion: "devolver", codigo: p.codigo }, tx);
       return rows[0];
     });
+  }
+  /** 11.33 · acta de salida de la evidencia (imprimible, para firmar en papel). */
+  @Get(":id/acta")
+  @RequierePermiso("evidencia.ver")
+  @Header("Content-Type", "text/html; charset=utf-8")
+  @Header("Cache-Control", "private, no-store")
+  async acta(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const [p] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT p.*, e.codigo AS evidencia_codigo, e.nue, e.tipo AS evidencia_tipo, e.descripcion AS evidencia_descripcion,
+              e.ruc_causa, e.oficio_numero, u.nombre_completo AS entregado_por
+         FROM evidencia_prestamo p
+         JOIN evidencia e ON e.id = p.evidencia_id
+         LEFT JOIN evidencia_movimiento m ON m.id = p.movimiento_salida_id
+         LEFT JOIN usuario u ON u.id = m.registrado_por
+        WHERE p.id = $1::uuid AND p.tenant_id = $2::uuid AND p.deleted_at IS NULL`,
+      id, tenantId,
+    );
+    if (!p) throw new NotFoundException("Solicitud de préstamo no encontrada");
+    if (!["entregado", "devuelto"].includes(p.estado)) throw new BadRequestException("El acta de salida existe cuando la evidencia se entregó.");
+    const fila = (k: string, v: unknown) => `<tr><th>${k}</th><td>${escapeHtml(v == null || v === "" ? "—" : String(v))}</td></tr>`;
+    const plazo = p.fecha_devolucion_prevista ? new Date(p.fecha_devolucion_prevista).toISOString().slice(0, 10).split("-").reverse().join("-") : "—";
+    await this.auditar(req, "prestamo", id, "ver", { acta: true });
+    return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acta ${escapeHtml(p.codigo)}</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;margin:18mm;color:#111;font-size:12px}
+  h1{font-size:16px;margin:0 0 4px} .sub{color:#444;margin-bottom:12px}
+  table{border-collapse:collapse;width:100%;margin-top:10px} th,td{border:1px solid #999;padding:5px 7px;text-align:left;vertical-align:top}
+  th{background:#eef2f6;width:32%}
+  .firmas{display:grid;grid-template-columns:1fr 1fr;gap:30mm;margin-top:30mm;text-align:center}
+  .firmas div{border-top:1px solid #333;padding-top:4px}
+  .barra{margin-bottom:10px;color:#444} @media print{.barra{display:none} body{margin:12mm}}
+</style></head><body>
+<div class="barra">Imprima con Ctrl + P: una copia para quien recibe y otra para la cadena de custodia.</div>
+<h1>ACTA DE SALIDA DE EVIDENCIA · ${escapeHtml(p.codigo)}</h1>
+<div class="sub">Instituto de Investigaciones y Control · Delegación Nº 11 · Banco de evidencias (SAEC)</div>
+<table>
+${fila("Evidencia", `${p.evidencia_codigo} · NUE ${p.nue ?? "—"}`)}
+${fila("Tipo y descripción", `${p.evidencia_tipo}${p.evidencia_descripcion ? ` · ${p.evidencia_descripcion}` : ""}`)}
+${fila("Oficio de ingreso · RUC", `${p.oficio_numero ?? "—"} · ${p.ruc_causa ?? "—"}`)}
+${fila("Organismo solicitante", p.organismo_solicitante)}
+${fila("Solicitante · documento", `${p.solicitante_nombre}${p.solicitante_documento ? ` · ${p.solicitante_documento}` : ""}`)}
+${fila("Motivo", p.motivo)}
+${fila("Plazo de devolución", plazo)}
+${fila("Fecha y hora de salida", p.entregado_at ? fmtFechaHora(p.entregado_at) : "—")}
+${fila("Entrega (custodio)", p.entregado_por)}
+${fila("Recibe", p.receptor_nombre)}
+${p.estado === "devuelto" ? fila("Reingreso", `${p.devuelto_at ? fmtFechaHora(p.devuelto_at) : ""} · ${p.estado_reingreso ?? ""} · ${p.ubicacion_retorno ?? ""}`) : ""}
+</table>
+<div class="firmas"><div>Entrega · ${escapeHtml(p.entregado_por ?? "Custodio D11")}</div><div>Recibe · ${escapeHtml(p.receptor_nombre ?? "")}</div></div>
+</body></html>`;
   }
 }
 
