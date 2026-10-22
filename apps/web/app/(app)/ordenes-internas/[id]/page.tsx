@@ -36,8 +36,15 @@ const ESTADO_RESULTADO: Record<string, string> = {
   rechazado: "Devuelto",
 };
 
+/**
+ * Valor del resultado con coma decimal (es-CL). El número manda sobre el texto:
+ * en un ensayo numérico el texto guardado es el mismo número con punto («7.2»;
+ * recorrido MP-02, D02-29). El texto queda para atributos y «< LD».
+ */
 const valorResultado = (r: NonNullable<OrdenInterna["resultados"]>[number]) =>
-  r.texto?.trim() ? r.texto : r.valor === null || r.valor === undefined ? "—" : `${r.valor.toLocaleString("es-CL", { maximumFractionDigits: 6 })}${r.unidad ? ` ${r.unidad}` : ""}`;
+  r.valor !== null && r.valor !== undefined && Number.isFinite(Number(r.valor))
+    ? `${Number(r.valor).toLocaleString("es-CL", { maximumFractionDigits: 6 })}${r.unidad ? ` ${r.unidad}` : ""}`
+    : r.texto?.trim() || "—";
 
 export default function FichaOrdenInterna() {
   const { id } = useParams<{ id: string }>();
