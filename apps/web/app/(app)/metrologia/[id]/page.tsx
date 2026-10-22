@@ -222,7 +222,19 @@ export default function FichaCalibracionPage() {
             {dato("Temperatura", c.ambiente?.temp ? `${c.ambiente.temp} ± ${c.ambiente.tempU ?? "—"} °C` : "—")}
             {dato("Humedad relativa", c.ambiente?.hum ? `${c.ambiente.hum} ± ${c.ambiente.humU ?? "—"} %` : "—")}
             {dato("Presión", c.ambiente?.pres ? `${c.ambiente.pres} ± ${c.ambiente.presU ?? "—"} hPa` : "—")}
-          </dl></section>
+            {c.auxiliares?.termohigrometro && dato("Termohigrómetro", `${c.auxiliares.termohigrometro.codigo}${c.auxiliares.termohigrometro.n_certificado ? ` · cert. ${c.auxiliares.termohigrometro.n_certificado}` : ""}`)}
+            {c.auxiliares?.barometro && dato("Barómetro", `${c.auxiliares.barometro.codigo}${c.auxiliares.barometro.n_certificado ? ` · cert. ${c.auxiliares.barometro.n_certificado}` : ""}`)}
+          </dl>
+          {c.auxiliares && (
+            <p style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0 0" }}>
+              Valores corregidos: promedio de las lecturas menos el error del certificado del equipo auxiliar
+              {(["temp", "hum", "pres"] as const).map((k) => {
+                const x = c.auxiliares.corregidas?.[k];
+                return x ? ` · ${k === "temp" ? "T" : k === "hum" ? "HR" : "P"}: ${fmtG(x.promedio)} − (${fmtG(x.error)}) = ${fmtG(x.corregido)}` : "";
+              }).join("")}.
+            </p>
+          )}
+          </section>
         </div>
       )}
 

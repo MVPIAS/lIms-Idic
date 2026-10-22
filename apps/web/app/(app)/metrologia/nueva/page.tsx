@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { calcularCalibracion, nd, fmtN, motorDe, LAB_NOMBRE, type Componente, type Divisores, type MotorInfo } from "@/lib/metrologia";
+import { calcularCalibracion, nd, fmtN, fmtG, motorDe, LAB_NOMBRE, type Componente, type Divisores, type MotorInfo } from "@/lib/metrologia";
+import { corregida, numeroOVacio } from "@/lib/metrologiaFicha";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import MotorPanel from "./MotorPanel";
@@ -29,8 +30,10 @@ const ESTADO_PATRON: Record<string, { label: string; pill: string }> = {
 const dmy = (s: string) => `${s.slice(8, 10)}-${s.slice(5, 7)}-${s.slice(0, 4)}`;
 
 const ptoGum = () => ({ nominal: "", correccion: "", uPatron: "", deriva: "", lect: ["", "", "", ""] });
+/** Termohigrómetro y barómetro del maestro con sus lecturas inicial y final (EP-04 P3.4). */
+const auxVacio = () => ({ th: "", ba: "", t: ["", ""], h: ["", ""], p: ["", ""] });
 function vacio() {
-  return { ident: {} as any, ambiente: {} as any, cond: {} as any, intervalo: "12", fecha: "", laboratorio: "", patrones: ["", "", ""] as string[], pts: [ptoGum()] };
+  return { ident: {} as any, ambiente: {} as any, cond: {} as any, intervalo: "12", fecha: "", laboratorio: "", patrones: ["", "", ""] as string[], pts: [ptoGum()], aux: auxVacio() };
 }
 const txt = (v: any) => (v == null ? "" : typeof v === "number" ? String(v).replace(".", ",") : String(v));
 const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
@@ -128,7 +131,10 @@ export default function NuevaCalibracionPage() {
     if (cal.ot_id) setOrigen({ ot: { id: cal.ot_id, codigo: cal.ot_codigo, laboratorio: cal.laboratorio }, item: { numero: cal.instrumento_numero, recibidoAt: cal.instrumento_recibido_at, etiqueta: cal.instrumento_etiqueta } });
     setInicialMotor(cal.motor ? { datos: cal.datos, opciones: cal.opciones ?? {} } : null);
     const ids: string[] = (cal.patrones ?? []).map((p: any) => p.id);
+    const ax = cal.auxiliares;
+    const lec = (xs: any[] | undefined) => { const v = (xs ?? []).map(txt); return [v[0] ?? "", v[1] ?? ""]; };
     setD({
+      aux: ax ? { th: ax.termohigrometro?.id ?? "", ba: ax.barometro?.id ?? "", t: lec(ax.lecturas?.temp), h: lec(ax.lecturas?.hum), p: lec(ax.lecturas?.pres) } : auxVacio(),
       ident: cal.instrumento ?? {}, ambiente: cal.ambiente ?? {},
       cond: Object.fromEntries(Object.entries(cal.cond ?? {}).map(([k, v]) => [k, txt(v)])),
       intervalo: String(cal.intervalo_meses ?? 12), fecha: (cal.fecha_calibracion ?? "").slice(0, 10), laboratorio: cal.laboratorio ?? "",
@@ -161,6 +167,8 @@ export default function NuevaCalibracionPage() {
     return [...patrones].sort((a, b) => Number(b.magnitud === mag) - Number(a.magnitud === mag) || String(a.tipo).localeCompare(String(b.tipo)) || String(a.codigo).localeCompare(String(b.codigo)));
   }, [patrones, proc]);
   const elegidos = (D.patrones as string[]).map((id) => patrones.find((p) => p.id === id)).filter(Boolean);
+  // Equipos auxiliares del maestro (termohigrómetros, barómetros…) para las condiciones ambientales.
+  const auxiliares = useMemo(() => patrones.filter((p) => p.tipo === "auxiliar"), [patrones]);
   const avisos = [...avisosFechas(D.ident, fechaCal), ...elegidos.filter((p: any) => p.estado === "por_vencer").map((p: any) => `El patrón ${p.codigo} vence el ${dmy(String(p.vence).slice(0, 10))} (menos de 30 días).`)];
   const vencidos = elegidos.filter((p: any) => p.estado === "vencido");
 
@@ -192,6 +200,12 @@ export default function NuevaCalibracionPage() {
         ...(!editId && origen?.item?.id ? { otInstrumentoId: origen.item.id } : {}),
         instrumento: D.ident, ambiente: D.ambiente, intervaloMeses: D.intervalo === "" ? 12 : Number(D.intervalo),
         patronIds: (D.patrones as string[]).filter(Boolean),
+        ...(D.aux.th || D.aux.ba ? {
+          auxiliares: {
+            termohigrometroId: D.aux.th || null, barometroId: D.aux.ba || null,
+            lecturas: { temp: D.aux.th ? D.aux.t.map(numeroOVacio) : [], hum: D.aux.th ? D.aux.h.map(numeroOVacio) : [], pres: D.aux.ba ? D.aux.p.map(numeroOVacio) : [] },
+          },
+        } : {}),
         ...(extra.motor ? { motor: extra.motor } : { cond, puntos: gumPuntos() }),
       };
       const r = await fetch(`${API}/metrologia/calibraciones${editId ? `/${editId}` : ""}`, { method: editId ? "PUT" : "POST", headers: auth(), body: JSON.stringify(body) });
@@ -364,7 +378,10 @@ export default function NuevaCalibracionPage() {
                     </select>
                     {sel && (
                       <small><span className={`pill ${ESTADO_PATRON[sel.estado]?.pill ?? "gray"}`}>{ESTADO_PATRON[sel.estado]?.label ?? sel.estado}</span>{" "}
-                        Próxima calibración {sel.vence ? dmy(String(sel.vence).slice(0, 10)) : "—"} · {sel.emisor ?? "—"} · {sel.trazabilidad ?? "—"}</small>
+                        Próxima calibración {sel.vence ? dmy(String(sel.vence).slice(0, 10)) : "—"} · {sel.emisor ?? "—"} · {sel.trazabilidad ?? "—"}
+                        {sel.rango_min != null && sel.rango_max != null
+                          ? <> · Rango calibrado {fmtG(sel.rango_min)} a {fmtG(sel.rango_max)} {sel.unidad_rango}</>
+                          : sel.tipo !== "auxiliar" ? <> · Sin rango numérico en el maestro (no se controla el rango)</> : null}</small>
                     )}
                   </div>
                 );
@@ -372,9 +389,10 @@ export default function NuevaCalibracionPage() {
               <small style={{ color: "var(--muted)" }}>Los vencidos a la fecha de calibración no se pueden elegir. El maestro se mantiene en Metrología › Configuración.</small>
             </div>)}
             {tarjeta("Condiciones ambientales", <div className="form-grid">
-              {fld(D.ambiente, "temp", "Temperatura (°C)")}{fld(D.ambiente, "tempU", "U temperatura (°C)")}
-              {fld(D.ambiente, "hum", "Humedad (%HR)")}{fld(D.ambiente, "humU", "U humedad (%)")}
-              {fld(D.ambiente, "pres", "Presión (hPa)")}{fld(D.ambiente, "presU", "U presión (hPa)")}
+              <CondicionesAux D={D} up={up} auxiliares={auxiliares} />
+              {!D.aux.th && <>{fld(D.ambiente, "temp", "Temperatura (°C)")}{fld(D.ambiente, "tempU", "U temperatura (°C)")}
+                {fld(D.ambiente, "hum", "Humedad (%HR)")}{fld(D.ambiente, "humU", "U humedad (%)")}</>}
+              {!D.aux.ba && <>{fld(D.ambiente, "pres", "Presión (hPa)")}{fld(D.ambiente, "presU", "U presión (hPa)")}</>}
               {(motor?.it === "ITM03" || motor?.it === "ITV05") && (
                 <small style={{ gridColumn: "1 / -1", color: "var(--muted)" }}>En {motor.it} el certificado informa las condiciones corregidas que calcula la planilla.</small>
               )}
@@ -488,5 +506,52 @@ function PorCalibrar({ filas }: { filas: any[] }) {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Condiciones ambientales con los equipos auxiliares del maestro (EP-04 P3.4): se eligen el
+ * termohigrómetro y el barómetro, se anotan las lecturas inicial y final y se ve el valor
+ * corregido con el error de su certificado (se resta, R15 T1). Sin auxiliar, se escriben a mano.
+ */
+function CondicionesAux({ D, up, auxiliares }: { D: any; up: () => void; auxiliares: any[] }) {
+  const th = auxiliares.find((p) => p.id === D.aux.th), ba = auxiliares.find((p) => p.id === D.aux.ba);
+  const fila = (clave: "t" | "h" | "p", titulo: string, unidad: string, eq: any, c: "temp" | "hum" | "pres") => {
+    const r = corregida(D.aux[clave].map(numeroOVacio), eq?.correcciones?.[c]);
+    return (
+      <div key={clave} style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr", gap: 8, alignItems: "end" }}>
+        {[0, 1].map((i) => (
+          <div className="field" key={i} style={{ margin: 0 }}>
+            <label htmlFor={`aux-${clave}-${i}`}>{titulo} {i === 0 ? "inicial" : "final"} ({unidad})</label>
+            <input id={`aux-${clave}-${i}`} inputMode="decimal" value={D.aux[clave][i]} style={YEL} onChange={(e) => { D.aux[clave][i] = e.target.value; up(); }} />
+          </div>
+        ))}
+        <div aria-live="polite" style={{ ...BLUE, padding: "6px 8px", borderRadius: 6, fontSize: 12.5 }}>
+          {r ? <>{fmtG(r.corregido)}{r.U != null ? ` ± ${fmtG(r.U)}` : ""} {unidad}{r.sinCorreccion ? <span style={{ display: "block", fontSize: 11 }}>sin error de certificado en el maestro</span> : <span style={{ display: "block", fontSize: 11 }}>corregido (lectura − error {fmtG(eq?.correcciones?.[c]?.error)})</span>}</> : "—"}
+        </div>
+      </div>
+    );
+  };
+  const sel = (k: "th" | "ba", etiqueta: string) => (
+    <div className="field" style={{ gridColumn: "1 / -1" }}>
+      <label htmlFor={`aux-${k}`}>{etiqueta}</label>
+      <select id={`aux-${k}`} value={D.aux[k]} style={YEL} onChange={(e) => { D.aux[k] = e.target.value; up(); }}>
+        <option value="">(escribir las condiciones a mano)</option>
+        {auxiliares.map((p) => (
+          <option key={p.id} value={p.id} disabled={p.estado === "vencido"}>
+            {p.codigo} · {p.nombre}{p.serie ? ` · ${p.serie}` : ""}{p.estado === "vencido" ? " · VENCIDO" : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+  return (
+    <>
+      {sel("th", "Termohigrómetro (maestro de auxiliares)")}
+      {th && <>{fila("t", "Temperatura", "°C", th, "temp")}{fila("h", "Humedad", "%HR", th, "hum")}</>}
+      {sel("ba", "Barómetro (maestro de auxiliares)")}
+      {ba && fila("p", "Presión", "hPa", ba, "pres")}
+      {(th || ba) && <small style={{ gridColumn: "1 / -1", color: "var(--muted)" }}>El certificado informa el valor corregido con la U del certificado del equipo. El error se carga en Metrología › Maestros.</small>}
+    </>
   );
 }
