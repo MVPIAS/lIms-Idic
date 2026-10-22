@@ -283,6 +283,9 @@ const LISTADOS = [
   { n: "SAEC evidencias", r: "/evidencias?limit=200", p: "evidencia.ver", regla: "saec", href: "/saec" },
   { n: "SAEC armas", r: "/armas?limit=200", p: "arma.ver", regla: "saec", href: "/saec/armas" },
   { n: "SAEC IBIS", r: "/ibis/importaciones", p: "ibis.ver", regla: "saec", href: "/saec/ibis" },
+  // Frente r4b (EP-11): certificación de armas de la D11 y su catálogo, solo en el compartimento D11.
+  { n: "D11 · certificación de armas (r4b)", r: "/d11/ot", p: "arma.ver", regla: "saec", href: "/saec/ot" },
+  { n: "D11 · catálogo de armas (r4b)", r: "/d11/catalogos", p: "arma.ver", regla: "saec", href: "/saec/catalogos" },
   // Fase 1 (decisión del usuario): se mide y se informa, no cuenta como fallo.
   { n: "Cotizaciones (fase 1)", r: "/cotizaciones?limit=200", p: "cotizacion.ver", t: "cotizacion", regla: "unidad", fase1: true, href: "/cotizaciones" },
   { n: "Clientes (fase 1)", r: "/clientes?limit=200", p: "cliente.ver", t: "cliente", regla: "unidad", fase1: true, href: "/clientes" },
@@ -426,6 +429,9 @@ async function main() {
       ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}/esquema`],
       ["ot", "ot.ver", (id) => `/ot/${id}/metrologia`],
       ["evidencia", "evidencia.ver", (id) => `/evidencias/${id}`, null, "saec"],
+      // Frente r4b: expediente D11 de una OT (compartimento D11) y notificación a DGMN de una OT ajena.
+      ["ot", "arma.ver", (id) => `/d11/ot/${id}`, [403, 404], "saec"],
+      ["ot", "ot.ver", (id) => `/bpch/notificacion-dgmn/ot/${id}`, null, "bpch"],
       ["cotizacion", "cotizacion.ver", (id) => `/cotizaciones/${id}`, null, "fase1"],
       ["encuesta", "encuesta.ver", (id) => `/encuestas/${id}`],
       ["orden_interna", "ot.ver", (id) => `/ordenes-internas/${id}`],

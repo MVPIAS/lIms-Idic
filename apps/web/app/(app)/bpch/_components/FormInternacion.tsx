@@ -10,6 +10,7 @@ import { useState } from "react";
 import { toast } from "@/components/ui/feedback";
 import { BuscadorCodificacion, BuscadorElemento, BuscadorEmpresa, type ElementoCatalogo, type Empresa, type ProductoCodificado } from "./Buscadores";
 import { type ConfigBpch, pedir } from "./bpch";
+import ListadoArmas, { type ArmaListado, armasDesde } from "./ListadoArmas";
 
 type Item = {
   clave: number;
@@ -56,8 +57,11 @@ export function FormInternacion({ config, inicial, onGuardado, onCancelar }: { c
         }))
       : [itemVacio()],
   );
+  const [armas, setArmas] = useState<ArmaListado[]>(() => armasDesde(inicial?.armas));
   const [errores, setErrores] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  const esD11 = config.unidades.find((u) => u.id === f.unidadInspeccionId)?.codigo === "D11";
+  const vacio = (it: Item) => !it.cod && !it.elemento && ![it.elementoGenerico, it.elementoEspecifico, it.cnc, it.claseDivisionUn, it.numeroUn, it.cantidad].some((x) => x.trim());
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   const setItem = (clave: number, cambio: Partial<Item>) => setItems((xs) => xs.map((x) => (x.clave === clave ? { ...x, ...cambio } : x)));
 
@@ -82,6 +86,7 @@ export function FormInternacion({ config, inicial, onGuardado, onCancelar }: { c
     if (!f.resolucionFecha) faltan.push("la fecha de la resolución");
     if (!f.unidadInspeccionId) faltan.push("la unidad que inspecciona");
     if (!f.sujetaTasa) faltan.push("si está sujeta a la tasa");
+    if (esD11 && armas.some((a) => !a.tipo || !a.marca.trim())) faltan.push("el tipo y la marca de cada arma del listado");
     if (faltan.length) return setErrores(`Falta indicar ${faltan.join(", ")}.`);
     setErrores(null);
     setOcupado(true);
@@ -89,7 +94,13 @@ export function FormInternacion({ config, inicial, onGuardado, onCancelar }: { c
       ...f,
       clienteId: empresa!.id,
       sujetaTasa: f.sujetaTasa === "si",
-      items: items.map((it) => ({
+      armas: esD11
+        ? armas.map((a) => ({
+            tipo: a.tipo, marca: a.marca.trim(), modelo: a.modelo.trim() || null, calibre: a.calibre.trim() || null,
+            serie: a.serie.trim() || null, accesorios: a.accesorios.trim() || null, cantidad: Number(a.cantidad) || 1,
+          }))
+        : [],
+      items: items.filter((it) => !(esD11 && armas.length && vacio(it))).map((it) => ({
         codificacionId: it.cod?.id ?? null,
         catElementoId: it.elemento?.id ?? null,
         elementoGenerico: it.elementoGenerico || null,
@@ -146,8 +157,10 @@ export function FormInternacion({ config, inicial, onGuardado, onCancelar }: { c
         </div>
       </div>
 
+      {esD11 && <ListadoArmas armas={armas} onCambio={setArmas} />}
+
       <div className="card">
-        <h2>Elementos a internar <span className="right">División UN y Nº UN obligatorios</span></h2>
+        <h2>Elementos a internar <span className="right">{esD11 ? "Opcionales si hay listado de armas" : "División UN y Nº UN obligatorios"}</span></h2>
         {items.map((it, i) => (
           <fieldset key={it.clave} style={{ border: "1px solid var(--line)", borderRadius: 7, padding: 10, marginBottom: 10 }}>
             <legend style={{ fontSize: 12, fontWeight: 700, padding: "0 4px" }}>Elemento {i + 1}</legend>
@@ -157,8 +170,8 @@ export function FormInternacion({ config, inicial, onGuardado, onCancelar }: { c
               <div className="field"><label htmlFor={`gen${it.clave}`}>Elemento genérico</label><input id={`gen${it.clave}`} value={it.elementoGenerico} onChange={(e) => setItem(it.clave, { elementoGenerico: e.target.value })} maxLength={240} /></div>
               <div className="field span-2"><label htmlFor={`esp${it.clave}`}>Elemento específico (producto) <span className="req">*</span></label><input id={`esp${it.clave}`} value={it.elementoEspecifico} onChange={(e) => setItem(it.clave, { elementoEspecifico: e.target.value })} maxLength={240} /></div>
               <div className="field"><label htmlFor={`cnc${it.clave}`}>CNC-DGMN</label><input id={`cnc${it.clave}`} value={it.cnc} onChange={(e) => setItem(it.clave, { cnc: e.target.value })} maxLength={80} placeholder="E-I/n/n/n/n/n" /></div>
-              <div className="field"><label htmlFor={`cl${it.clave}`}>Clase/División UN <span className="req">*</span></label><input id={`cl${it.clave}`} value={it.claseDivisionUn} onChange={(e) => setItem(it.clave, { claseDivisionUn: e.target.value })} maxLength={20} /></div>
-              <div className="field"><label htmlFor={`un${it.clave}`}>Nº UN <span className="req">*</span></label><input id={`un${it.clave}`} value={it.numeroUn} onChange={(e) => setItem(it.clave, { numeroUn: e.target.value })} maxLength={10} /></div>
+              <div className="field"><label htmlFor={`cl${it.clave}`}>Clase/División UN {!esD11 && <span className="req">*</span>}</label><input id={`cl${it.clave}`} value={it.claseDivisionUn} onChange={(e) => setItem(it.clave, { claseDivisionUn: e.target.value })} maxLength={20} /></div>
+              <div className="field"><label htmlFor={`un${it.clave}`}>Nº UN {!esD11 && <span className="req">*</span>}</label><input id={`un${it.clave}`} value={it.numeroUn} onChange={(e) => setItem(it.clave, { numeroUn: e.target.value })} maxLength={10} /></div>
               <div className="field"><label htmlFor={`can${it.clave}`}>Cantidad</label><input id={`can${it.clave}`} inputMode="decimal" value={it.cantidad} onChange={(e) => setItem(it.clave, { cantidad: e.target.value })} /></div>
               <div className="field"><label htmlFor={`um${it.clave}`}>Unidad</label><input id={`um${it.clave}`} value={it.unidadMedida} onChange={(e) => setItem(it.clave, { unidadMedida: e.target.value })} maxLength={20} placeholder="uds, kg…" /></div>
             </div>
@@ -170,7 +183,7 @@ export function FormInternacion({ config, inicial, onGuardado, onCancelar }: { c
 
       {errores && <div className="alert warn" role="alert">{errores}</div>}
       <div className="toolbar">
-        <button type="submit" className="btn primary" disabled={ocupado}>{ocupado ? "Guardando…" : inicial ? "Guardar corrección" : "Registrar internación"}</button>
+        <button type="submit" className="btn primary" disabled={ocupado}>{ocupado ? "Guardando…" : inicial ? "Guardar corrección" : "Registrar internación → análisis técnico"}</button>
         {onCancelar && <button type="button" className="btn outline" onClick={onCancelar}>Cancelar</button>}
         <small style={{ color: "var(--muted)" }}>Sin cotización ni aprobación comercial: la OT se genera automáticamente al dar la información técnica por completa.</small>
       </div>

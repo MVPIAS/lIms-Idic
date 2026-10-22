@@ -131,6 +131,8 @@ export const NAV: SeccionNav[] = [
     title: "BPCH · SAEC",
     icon: "🛡",
     items: [
+      { href: "/saec/ot", label: "Certificación de armas", icon: "🎯", perm: "arma.ver", ambito: "D11", claves: "d11 internacion resolucion acta acunacion certificado por arma entrega" },
+      { href: "/saec/catalogos", label: "Catálogo de armas", icon: "🗂", perm: "arma.ver", ambito: "D11", claves: "marca modelo calibre cip pais" },
       { href: "/saec", label: "Evidencias", icon: "🧷", perm: "evidencia.ver", ambito: "D11" },
       { href: "/saec/armas", label: "Armas", icon: "🔫", perm: "arma.ver", ambito: "D11" },
       { href: "/saec/ibis", label: "IBIS · armas importadas", icon: "📥", perm: "ibis.ver", ambito: "D11" },
