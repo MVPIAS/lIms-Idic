@@ -111,7 +111,7 @@ function Contenido() {
             <div className="form-grid" style={{ maxWidth: 520 }}>
               <Campo id="tl" etiqueta="Tamaño del lote (unidades)" req><input id="tl" inputMode="numeric" value={tamano} onChange={(e) => setTamano(e.target.value)} /></Campo>
             </div>
-            <table className="data" style={{ marginTop: 10 }}>
+            <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ marginTop: 10 }}>
               <thead><tr><th>Inspección</th><th>AQL</th><th>Nivel</th><th>Letra</th><th className="num">n</th><th className="num">Ac</th><th className="num">Re</th><th className="num">Defectuosos</th><th>Cumplimiento</th><th /></tr></thead>
               <tbody>
                 {filas.map((f, i) => {
@@ -135,7 +135,7 @@ function Contenido() {
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
             {filas.some((f) => f.acManual !== "" && f.acManual != null) && (
               <div className="form-grid cols-2" style={{ marginTop: 8 }}>
                 {filas.map((f, i) => (f.acManual !== "" && f.acManual != null ? (
@@ -161,10 +161,10 @@ function Contenido() {
           {ev && v.tamanoLote ? (
             <>
               <p className="subtitle">Tamaño del lote: {v.tamanoLote.toLocaleString("es-CL")} unidades. Así se imprime en el Informe de Verificación de Calidad.</p>
-              <table className="data">
+              <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data">
                 <thead><tr><th>Inspección</th><th className="num">AQL</th><th>Nivel</th><th>Letra</th><th className="num">n</th><th className="num">Ac</th><th className="num">Re</th><th className="num">Defectuosos</th><th>Cumplimiento</th></tr></thead>
                 <tbody>{ev.filas.map((f: any, i: number) => <tr key={i}><td>{f.inspeccion}</td><td className="num">{f.aql}</td><td>{f.nivel}</td><td>{f.plan.letra}</td><td className="num">{f.plan.n}</td><td className="num">{f.ac}</td><td className="num">{f.re}</td><td className="num">{f.defectuosos ?? "—"}</td><td><Veredicto v={f.cumplimiento} /></td></tr>)}</tbody>
-              </table>
+              </table></div>
               <p className="subtitle" style={{ marginTop: 8 }}>Se emite en <Link href={`/ot/${otId}?tab=informe` as any}>OT › Informe y cierre</Link> con una plantilla IVC, tras revisar y aprobar los ensayos.</p>
             </>
           ) : <p className="subtitle" style={{ margin: 0 }}>Indique el lote y evalúe las inspecciones.</p>}

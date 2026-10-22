@@ -182,7 +182,7 @@ function PasoLote({ v, editable, ocupado, setOcupado, onListo }: { v: Vista; edi
         </div>
 
         <h3 style={{ fontSize: 13, margin: "14px 0 6px" }}>Nómina de series del lote por talla <small style={{ color: "var(--muted)", fontWeight: 400 }}>· total {total}{f.tamano && Number(f.tamano) !== total ? ` (el lote es de ${f.tamano})` : ""}</small></h3>
-        <table className="data" style={{ maxWidth: 520 }}>
+        <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ maxWidth: 520 }}>
           <thead><tr><th>Talla</th><th className="num">Cantidad</th><th /></tr></thead>
           <tbody>
             {comp.map((c, i) => (
@@ -193,7 +193,7 @@ function PasoLote({ v, editable, ocupado, setOcupado, onListo }: { v: Vista; edi
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
         {editable && <button type="button" className="btn outline sm" style={{ marginTop: 6 }} onClick={() => setComp((a) => [...a, { talla: "", cantidad: "" }])}>＋ Talla</button>}
 
         <h3 style={{ fontSize: 13, margin: "16px 0 6px" }}>Unidades muestreadas y sus paneles</h3>
@@ -211,7 +211,7 @@ function PasoLote({ v, editable, ocupado, setOcupado, onListo }: { v: Vista; edi
               </Campo>
               <Campo id={`r${i}`} etiqueta="Serie de reposición"><input id={`r${i}`} value={u.reemplazo ?? ""} onChange={(e) => setU(i, { reemplazo: e.target.value })} maxLength={60} /></Campo>
             </div>
-            <table className="data" style={{ marginTop: 8 }}>
+            <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ marginTop: 8 }}>
               <thead><tr><th>Panel / zona</th><th>Munición (tabla de amenazas)</th><th className="num">Disparos</th><th /></tr></thead>
               <tbody>
                 {u.paneles.map((p, j) => (
@@ -231,7 +231,7 @@ function PasoLote({ v, editable, ocupado, setOcupado, onListo }: { v: Vista; edi
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
             {editable && (
               <div className="toolbar" style={{ margin: "6px 0 0" }}>
                 <button type="button" className="btn outline sm" onClick={() => setU(i, { paneles: [...u.paneles, { id: nuevoId("p"), zona: u.paneles.length ? "posterior" : "anterior", amenaza: amenazaDefecto, disparos: [] }] })}>＋ Panel</button>
@@ -339,7 +339,7 @@ function PasoDisparos({ v, editable, onCambio, onFin }: { v: Vista; editable: bo
         <b>{u.serie}{u.talla ? ` (${u.talla})` : ""} · panel {p.zona}</b> · {a ? `${a.norma} ${a.nivel} · ${a.municion}${a.masa_g ? ` ${conComa(a.masa_g)} g` : ""} · ventana ${conComa(a.v_min, 1)}–${conComa(a.v_max, 1)} m/s · ${plan} disparos` : "munición fuera de la tabla"} ·{" "}
         {a?.criterio}{a?.trauma_max != null ? ` (trauma en los disparos 1 a ${a.disparos_trauma})` : ""}.
       </p>
-      <table className="data">
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data">
         <thead><tr><th className="num">Nº</th><th>Zona de impacto</th><th className="num">V1 (m/s)</th><th className="num">V2 (m/s)</th><th className="num">Trauma (mm)</th><th className="num">Láminas</th><th>Penetración</th>{a?.testigo && <th>Testigo</th>}<th>Condición</th><th /></tr></thead>
         <tbody>
           {filas.map((d, i) =>
@@ -364,7 +364,7 @@ function PasoDisparos({ v, editable, onCambio, onFin }: { v: Vista; editable: bo
             ),
           )}
         </tbody>
-      </table>
+      </table></div>
       {p.avisos.length > 0 && <div className="alert warn" style={{ marginTop: 8 }}>{p.avisos.join(" ")} Regla por confirmar con el IDIC (EP-05 P4).</div>}
 
       {puedeDisparar && (
@@ -416,7 +416,7 @@ function PasoRequisitos({ v }: { v: Vista }) {
     <div className="card">
       <h2>3 · Requisitos por norma <span className="right">Administración › Parámetros del sistema › LRB</span></h2>
       <p className="subtitle">Tabla de amenazas vigente. Son los valores de los informes reales del LRB, a la espera de la tabla oficial del IDIC (EP-05 P3). Se compara la velocidad {v.velocidadManda === "promedio" ? "promedio de V1 y V2" : v.velocidadManda.toUpperCase()} (P4).</p>
-      <table className="data">
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data">
         <thead><tr><th>Norma · nivel</th><th>Elemento</th><th>Munición</th><th className="num">Masa (g)</th><th>Ventana (m/s)</th><th className="num">Disparos</th><th>Trauma</th><th>Criterio</th></tr></thead>
         <tbody>
           {v.amenazas.map((a) => (
@@ -427,7 +427,7 @@ function PasoRequisitos({ v }: { v: Vista }) {
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }
@@ -478,10 +478,10 @@ function PasoConclusion({ v, otId, puede, onCambio }: { v: Vista; otId: string; 
         <div className="kpi"><div className="lab">Penetración completa</div><div className="val" style={{ fontSize: 16 }}>{ev.penetracion ? "Sí" : "No"}</div></div>
       </div>
       <p style={{ fontSize: 12.5 }}><b>Regla:</b> sin penetración completa y trauma dentro del máximo; una penetración completa rechaza el lote (EP-05 5.2).{ev.falla ? <> <b>Falla:</b> {ev.falla}.</> : null}</p>
-      <table className="data" style={{ maxWidth: 640, marginBottom: 10 }}>
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ maxWidth: 640, marginBottom: 10 }}>
         <thead><tr><th>Unidad</th><th>Paneles</th><th>Veredicto</th></tr></thead>
         <tbody>{ev.unidades.map((u) => <tr key={u.id}><td>{u.serie}{u.talla ? ` (${u.talla})` : ""}</td><td>{u.paneles.map((p) => p.zona).join(", ")}</td><td><Veredicto v={u.veredicto} /></td></tr>)}</tbody>
-      </table>
+      </table></div>
       <h3 style={{ fontSize: 13, margin: "8px 0 4px" }}>Documento que corresponde</h3>
       {ev.documentos.length ? (
         <ul style={{ margin: "0 0 8px 18px", fontSize: 12.5 }}>{ev.documentos.map((d) => <li key={d}>{DOC[d] ?? d}</li>)}</ul>
