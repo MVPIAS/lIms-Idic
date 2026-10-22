@@ -18,6 +18,11 @@ export interface ConsultaEscritura extends ConsultaCruda {
 
 const diaChile = (d: Date | string) => new Date(d).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const fechaIso = (d: any): string => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d ?? "").slice(0, 10));
+/** AAAA-MM-DD → DD-MM-AAAA para los textos de la bitácora. */
+const fechaCl = (iso: string | null | undefined): string => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "—";
+};
 const URL_VERIFICACION = () => (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
 
 /** Parámetros de la operación de la ficha (Administración › Parámetros del sistema, categoría metrologia_ficha). */
@@ -69,7 +74,7 @@ export async function actualizarEquipoDueno(db: ConsultaEscritura, calId: string
     `Certificado de calibración ${a.certificado} (OT ${c.ot ?? "—"}), registrado por el LIMS al ${momento === "emitir" ? "emitirse" : "entregarse"}. ` +
       "El Laboratorio de Metrología no evalúa conformidad: la aptitud del equipo la decide su laboratorio.",
     a.proxima, a.certificado, usuarioId);
-  const txt = `Equipo ${c.equipo} actualizado: última calibración ${a.ultima}${a.proxima ? `, próxima ${a.proxima}` : " (sin intervalo: la próxima no cambia)"}, certificado ${a.certificado}.`;
+  const txt = `Equipo ${c.equipo} actualizado: última calibración ${fechaCl(a.ultima)}${a.proxima ? `, próxima ${fechaCl(a.proxima)}` : " (sin intervalo: la próxima no cambia)"}, certificado ${a.certificado}.`;
   await evento(db, calId, "EQUIPO_ACTUALIZADO", txt, usuarioId);
   return txt;
 }
@@ -120,7 +125,7 @@ export async function actualizarPatronLnf(db: ConsultaEscritura, calId: string, 
      VALUES ($1::uuid, $2::uuid, $3::uuid, $4::jsonb, $5::jsonb, $6::uuid) ON CONFLICT (patron_id, calibracion_id) DO NOTHING`,
     c.tenant_id, p.id, calId, JSON.stringify(antes), JSON.stringify(d), usuarioId);
   const txt = `Maestro de patrones: ${p.codigo} toma ${d.clase}, t/u/v del certificado ${c.numero_certificado}` +
-    `${a.deriva != null ? `, deriva ${a.deriva.toLocaleString("es-CL", { maximumFractionDigits: 4 })} %` : ""}, U ${Number(d.u_expandida).toLocaleString("es-CL", { maximumFractionDigits: 4 })} % y vence ${d.vence ?? "—"}.`;
+    `${a.deriva != null ? `, deriva ${a.deriva.toLocaleString("es-CL", { maximumFractionDigits: 4 })} %` : ""}, U ${Number(d.u_expandida).toLocaleString("es-CL", { maximumFractionDigits: 4 })} % y vence ${fechaCl(d.vence)}.`;
   await evento(db, calId, "PATRON_ACTUALIZADO", txt, usuarioId);
   return txt;
 }
