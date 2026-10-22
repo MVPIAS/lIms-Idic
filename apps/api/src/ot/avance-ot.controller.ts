@@ -11,6 +11,7 @@ import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
 import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
+import { avanceArmasDeOt } from "../saec/d11/datos-d11";
 
 /** Laboratorios de la Sección Metrología (los mismos que usa el módulo de Metrología). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -45,11 +46,13 @@ export class AvanceOtService {
       // lo exige (parámetro recepcion_producto_obligatorio, recepción R1).
       this.prisma.$queryRawUnsafe<{ total: number; incompletas: number; veredictos: (string | null)[] | null }[]>(
         `SELECT count(*)::int AS total,
-                count(*) FILTER (WHERE m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL
+                count(*) FILTER (WHERE (m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL
                                     OR (m.cat_elemento_id IS NULL AND EXISTS (
                                           SELECT 1 FROM parametro_sistema ps JOIN unidad u ON u.id = $2::uuid
                                            WHERE ps.tenant_id = m.tenant_id AND ps.categoria = 'recepcion_producto_obligatorio'
-                                             AND ps.activo AND upper(ps.codigo) = upper(u.codigo))))::int AS incompletas,
+                                             AND ps.activo AND upper(ps.codigo) = upper(u.codigo))))
+                                   -- Las armas de la D11 se reciben con el acta de recepción (EP-11 11.6).
+                                   AND NOT EXISTS (SELECT 1 FROM d11_arma_ot a WHERE a.muestra_id = m.id))::int AS incompletas,
                 array_agg(m.veredicto ORDER BY m.codigo) AS veredictos
            FROM muestra m WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL`,
         id,
@@ -190,6 +193,7 @@ export class AvanceOtService {
             documentacion: i.documentacion ?? null,
           }
         : null,
+      armas: ot.unidad?.codigo === "D11" ? await avanceArmasDeOt(this.prisma, ot.id, ot.tenantId).catch(() => null) : null,
       reinspeccion: r
         ? { id: r.id, numero: r.numero, unidad: r.unidad ?? null, loteRegistrado: r.loteRegistrado, conCodificacion: r.conCodificacion, trazabilidadHecha: r.trazabilidadHecha }
         : null,
