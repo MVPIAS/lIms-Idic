@@ -46,7 +46,7 @@ import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 import { condicionesEnsayo, equipoObligatorio, equipoUsable, modoEquipo, type ModoEquipo } from "../laboratorio/equipo-captura";
 import { RecepcionService, type ConfigRecepcionLab } from "../recepcion/recepcion.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
-import { decidirAccionResultado, type AccionResultado } from "../rbac/alcance-resultado";
+import { decidirAccionResultado, motivoMismoRevisor, type AccionResultado } from "../rbac/alcance-resultado";
 import { retenerHasta, type RecepcionLabNormalizada } from "../recepcion/reglas-recepcion";
 
 /**
@@ -1107,6 +1107,10 @@ export class PuenteAnalisisService {
     const [veCapturar, veRevisar, veAprobar, veReabrir] = await Promise.all(
       ["resultado.crear", "resultado.revisar", "resultado.aprobar", "resultado.reabrir"].map((p) => this.alcanceResultado.veUnidad(req, p)),
     );
+    // Revisión ≠ aprobación según la configuración (Parámetros de la operación): la
+    // pantalla dice por qué no se aprueba lo que revisó uno mismo (D06-20).
+    const segregacion = await this.alcanceResultado.segregacion(tenantId);
+    const yo: string | null = req?.user?.sub ?? null;
 
     const muestras = await this.prisma.muestra.findMany({
       where: { otId, tenantId, deletedAt: null },
@@ -1192,8 +1196,11 @@ export class PuenteAnalisisService {
           ...r,
           // Laboratorio dueño del ensayo y lo que el usuario puede hacer con él (la pantalla no adivina).
           laboratorio: dueno?.unidadCodigo ?? null,
+          laboratorioId: dueno?.unidadId ?? null,
           derivado: dueno?.derivado ?? false,
           ordenInterna: dueno?.derivado ? { id: dueno.ordenInternaId, numero: dueno.oiNumero, estado: dueno.oiEstado } : null,
+          // Motivo por el que el usuario no aprueba este ensayo aunque tenga el permiso (lo revisó él).
+          bloqueoAprobar: motivoMismoRevisor({ revisadoPor: r.revisadoPor ?? null }, yo, segregacion, dueno?.unidadCodigo ?? null),
           puedo: {
             capturar: puede(veCapturar, "capturar"),
             revisar: puede(veRevisar, "revisar"),
