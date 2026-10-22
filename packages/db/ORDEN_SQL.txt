@@ -91,4 +91,5 @@ align_metrologia_certificado_nhojas.sql
 align_r1g_recorrido.sql
 seed_r1g_demo.sql                    demo
 align_r4b_d11.sql
+align_r4b_bpch.sql
 align_cierre_permisos.sql
