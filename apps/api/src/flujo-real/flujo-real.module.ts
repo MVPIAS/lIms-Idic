@@ -621,8 +621,17 @@ export class PuenteAnalisisService {
     // El laboratorio de destino de una orden interna también captura en la OT (con sus equipos).
     const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
-    await this.alcanceResultado.alcanceEnOt(req, ot, "resultado.crear");
+    const vista = await this.alcanceResultado.alcanceEnOt(req, ot, "resultado.crear");
     const delUsuario = await this.alcance.filtroUnidades(req, "resultado.crear");
+    // Laboratorios dueños de los ensayos que el usuario trabaja en esta OT (D02-28): cada
+    // ensayo ofrece los equipos de SU laboratorio y los comunes (equipoUsable).
+    const duenos = await this.alcanceResultado.labsDeOt(otId, tenantId);
+    const labs = new Set<string>();
+    // Solo los laboratorios donde el usuario captura (resultado.crear): el responsable de la OT
+    // ve los derivados en solo lectura y no recibe los equipos del destino.
+    for (const d of duenos.values())
+      if (d.unidadId && (vista.todo || vista.labs.has(d.unidadId)) && (delUsuario === null || delUsuario.includes(d.unidadId))) labs.add(d.unidadId);
+    if (!labs.size && ot.unidadPrincipal) labs.add(ot.unidadPrincipal);
     const filas = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT e.id, e.codigo, e.nombre, e.modelo, e.serie, e.estado, e.unidad_id AS "unidadId", u.codigo AS "unidadCodigo",
               to_char(e.proxima_calibracion, 'YYYY-MM-DD') AS "proximaCalibracion",
@@ -630,11 +639,13 @@ export class PuenteAnalisisService {
               (e.proxima_calibracion IS NOT NULL AND e.proxima_calibracion < CURRENT_DATE) AS vencida
          FROM equipo e LEFT JOIN unidad u ON u.id = e.unidad_id
         WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL
-          AND (e.unidad_id IS NULL OR e.unidad_id = $2::uuid OR $3::uuid[] IS NULL OR e.unidad_id = ANY($3::uuid[]))
-        ORDER BY (e.unidad_id = $2::uuid) DESC NULLS LAST, e.codigo
+          AND (e.unidad_id IS NULL OR e.unidad_id = ANY($2::uuid[]) OR ($3::boolean AND ($4::uuid[] IS NULL OR e.unidad_id = ANY($4::uuid[]))))
+        ORDER BY (e.unidad_id = ANY($2::uuid[])) DESC NULLS LAST, e.codigo
         LIMIT 300`,
       tenantId,
-      ot.unidadPrincipal,
+      [...labs],
+      // Sin laboratorio dueño (OT sin laboratorio): los equipos de quien captura.
+      !ot.unidadPrincipal,
       delUsuario,
     );
     const motivo = (e: any) =>
@@ -652,9 +663,8 @@ export class PuenteAnalisisService {
     return {
       otId,
       modo: await this.modoEquipo(tenantId),
-      equipos: filas
-        .filter((e) => equipoUsable(e.unidadId, ot.unidadPrincipal, delUsuario))
-        .map((e) => ({ ...e, apto: !!e.apto, vencida: !!e.vencida, motivo: motivo(e) })),
+      // Cada equipo lleva su unidad: la pantalla ofrece en cada ensayo los de su laboratorio (laboratorioId) y los comunes.
+      equipos: filas.map((e) => ({ ...e, apto: !!e.apto, vencida: !!e.vencida, motivo: motivo(e) })),
     };
   }
 
@@ -864,7 +874,7 @@ export class PuenteAnalisisService {
    */
   async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any) {
     // El laboratorio de destino de una orden interna recibida captura sus ensayos derivados.
-    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req);
+    const { resultado, otId, lab } = await this.resultadoEnAlcance(id, tenantId, req);
 
     const bloqueo = motivoNoCapturable(resultado.estado);
     if (bloqueo) throw new ConflictException(bloqueo);
@@ -895,8 +905,11 @@ export class PuenteAnalisisService {
     if (entrada.equipoId) {
       const eq = await this.equipos.cargarEquipo(entrada.equipoId, tenantId);
       const delUsuario = await this.alcance.filtroUnidades(req, "resultado.crear");
-      if (!equipoUsable(eq.unidad_id ?? null, otDelResultado?.unidadPrincipal ?? null, delUsuario))
-        throw new BadRequestException(`El equipo ${eq.codigo} no es del laboratorio de la OT ni de sus laboratorios: elija uno de los suyos.`);
+      // Equipo del laboratorio dueño del ensayo (el destino, si se derivó) o común (D02-28).
+      if (!equipoUsable(eq.unidad_id ?? null, lab.unidadId ?? otDelResultado?.unidadPrincipal ?? null, delUsuario))
+        throw new BadRequestException(
+          `El equipo ${eq.codigo} no es del laboratorio de este ensayo${lab.unidadCodigo ? ` (${lab.unidadCodigo})` : ""}: elija uno de ese laboratorio o un equipo común.`,
+        );
       // Bloqueo: calibración vencida, sin calibración, en calibración o fuera de servicio (409).
       await this.equipos.verificarApto(entrada.equipoId, tenantId);
     }
