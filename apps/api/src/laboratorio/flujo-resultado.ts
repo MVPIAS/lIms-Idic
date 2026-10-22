@@ -68,6 +68,22 @@ export function clasificarParaAccion(
   return { aplicables, omitidos };
 }
 
+/**
+ * Un resultado sin veredicto («pendiente» o vacío) no se revisa ni se aprueba
+ * (recorrido MP-02, D02-03): el informe saldría con la condición «Pendiente».
+ * Lo resuelve el revisor («Decidir…»: cumple, no cumple o informativo) o se
+ * devuelve al analista. null = se puede.
+ */
+export function motivoSinVeredicto(veredicto: string | null | undefined, accion: "revisado_n1" | "aprobado"): string | null {
+  const v = String(veredicto ?? "").trim().toLowerCase();
+  if (v && v !== "pendiente") return null;
+  const que = accion === "revisado_n1" ? "revisarlo" : "aprobarlo";
+  return (
+    `El resultado no tiene veredicto (Pendiente): decida Cumple, No cumple o Informativo con «Decidir…» antes de ${que}, ` +
+    "o devuélvalo al analista. Un informe no puede salir con la condición «Pendiente»."
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Reapertura de un resultado aprobado (docs/FLUJO_LABORATORIO.md §4)          */
 /* -------------------------------------------------------------------------- */

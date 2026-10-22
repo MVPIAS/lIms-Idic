@@ -135,6 +135,7 @@ const U = {
   lpnJefe: "demo.lpn.jefe",
   lccJefe: "demo.lcc.jefe",           // laboratorio de destino: recibe, responde y cierra
   lccA1: "demo.lcc.analista1",        // captura en el destino; no recibe ni cierra
+  lccRev: "demo.lcc.revisor",         // revisa en el destino (r1g: el destino revisa y aprueba lo suyo)
 };
 const hoy = () => new Date().toISOString().slice(0, 10);
 const lista = (j) => (Array.isArray(j) ? j : j?.data ?? []);
@@ -233,7 +234,7 @@ async function seccionOrdenesInternas(C) {
     return f.respuestaNumero;
   });
 
-  await paso("OI · 4 Cerrar: sin resultados 409; con 0,00 sin observación 409; capturado → cerrada", async () => {
+  await paso("OI · 4 Cerrar: sin resultados 409; con 0,00 sin observación 409; sin aprobar 409; aprobado por el destino → cerrada", async () => {
     await rechazo(409, /sin capturar|no tiene resultado/, U.lccJefe, "POST", `/ordenes-internas/${C.oi.id}/cerrar`, {});
     // El analista de LCC captura en la muestra de LQC (solo los ensayos derivados): primero un 0 sin explicar.
     for (const r of C.resultados) {
@@ -248,6 +249,10 @@ async function seccionOrdenesInternas(C) {
     for (const r of C.resultados)
       await ok(U.lccA1, "POST", `/flujo/resultado/${r.id}/valor`, { valor: "2,4", motivo: "Valor real; el 0 era una prueba", observacion: "Base seca" });
     await exigir(403, U.lccA1, "POST", `/ordenes-internas/${C.oi.id}/cerrar`, {});
+    // r1g (recorrido MP-02, D02-02): el destino revisa y aprueba lo suyo antes de devolverlo.
+    await rechazo(409, /sin aprobar/, U.lccJefe, "POST", `/ordenes-internas/${C.oi.id}/cerrar`, {});
+    await ok(U.lccRev, "POST", `/resultados/ot/${C.ot.id}/revisar`, {});
+    await ok(U.lccJefe, "POST", `/resultados/ot/${C.ot.id}/aprobar`, {});
     const f = await ok(U.lccJefe, "POST", `/ordenes-internas/${C.oi.id}/cerrar`, {});
     afirmar(f.estado === "cerrada" && f.cerradaAt, `estado ${f.estado}`);
     await rechazo(409, /cerrada/, U.lccJefe, "POST", `/ordenes-internas/${C.oi.id}/responder`, { horas: 1, costoDirecto: 1 });
@@ -269,7 +274,7 @@ async function seccionOrdenesInternas(C) {
   await paso("OI · 5 Dar por recibido: LCC 403 (OT ajena); el analista de LQC sí; no se repite (409)", async () => {
     await exigir(403, U.lccJefe, "POST", `/ordenes-internas/${C.oi.id}/dar-por-recibido`, {});
     // Cerrada: el destino ya no captura en la muestra de origen.
-    await exigir(403, U.lccA1, "POST", `/flujo/resultado/${C.resultados[0].id}/valor`, { valor: "2,5", motivo: "Intento tras el cierre" });
+    await exigir([403, 409], U.lccA1, "POST", `/flujo/resultado/${C.resultados[0].id}/valor`, { valor: "2,5", motivo: "Intento tras el cierre" });
     const f = await ok(U.lqcA1, "POST", `/ordenes-internas/${C.oi.id}/dar-por-recibido`, { observacion: "Integrado al informe de la OT" });
     afirmar(f.aceptadaAt && f.paso === 5, `paso ${f.paso}`);
     await rechazo(409, /ya se dio por recibida/, U.lqcA1, "POST", `/ordenes-internas/${C.oi.id}/dar-por-recibido`, {});

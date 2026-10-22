@@ -34,9 +34,11 @@ import { evaluarFormula, validarFormula, FormulaError, NOMBRES_FUNCION } from ".
 // resultados. El módulo de equipos NO se toca: sólo se consume.
 import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 import { AlcanceService } from "../rbac/alcance.service";
+import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
+import { decidirAccionResultado, motivoMismoRevisor, type AccionResultado } from "../rbac/alcance-resultado";
 import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./veredicto";
 import { leerReplicas } from "./replicas";
-import { AccionRevision, clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, planReapertura } from "./flujo-resultado";
+import { AccionRevision, clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, motivoSinVeredicto, planReapertura } from "./flujo-resultado";
 import { veredictoMuestra } from "./especificacion";
 import { conTraza, exigeMotivoCorreccion, teniaValor } from "./traza";
 import { CostosRealesController, CostosRealesService, PlanillaCalculosController, PlanillaCalculosService } from "./planillas-ot";
@@ -328,7 +330,12 @@ export interface ContextoResultado {
 export class ResultadoService extends BaseCrudService {
   // `equipos` se inyecta desde EquiposModule (importado por LaboratorioModule)
   // para aplicar el BLOQUEO por calibración vencida (RF-D04.2) en `capturar()`.
-  constructor(prisma: PrismaService, private readonly equipos: EquiposService) {
+  constructor(
+    prisma: PrismaService,
+    private readonly equipos: EquiposService,
+    // Alcance por ensayo (derivados por orden interna) y segregación revisión ≠ aprobación.
+    private readonly alcanceRes?: AlcanceResultadoService,
+  ) {
     super(prisma, { model: "resultado", search: [], include: { analito: true, muestra: true }, tenant: false, orderBy: { fecha: "desc" } });
   }
   private estadistica(rep: number[]) {
@@ -575,7 +582,7 @@ export class ResultadoService extends BaseCrudService {
   ) {
     const actual = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null },
-      select: { id: true, estado: true, analistaId: true },
+      select: { id: true, estado: true, analistaId: true, revisadoPor: true, veredicto: true, muestra: { select: { tenantId: true } } },
     });
     if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
 
@@ -588,6 +595,21 @@ export class ResultadoService extends BaseCrudService {
         "Segregación de funciones (ISO/IEC 17025): quien captura un resultado no puede revisarlo ni aprobarlo. " +
           "Debe hacerlo otro usuario con el permiso correspondiente.",
       );
+
+    // 3. Sin veredicto no se revisa ni se aprueba (recorrido MP-02, D02-03): un
+    //    «< 10» que no se puede decidir contra el requisito lo resuelve el revisor
+    //    con «Decidir…» o se devuelve al analista; si no, el informe saldría con
+    //    la condición «Pendiente».
+    if (nuevo !== "devuelto" && motivoSinVeredicto(actual.veredicto, nuevo))
+      throw new ConflictException(motivoSinVeredicto(actual.veredicto, nuevo)!);
+
+    // 4. Revisión y aprobación por personas distintas (recorrido MP-06, D06-05).
+    if (nuevo === "aprobado" && this.alcanceRes && actual.revisadoPor && actual.revisadoPor === usuarioId) {
+      const cfg = await this.alcanceRes.segregacion(actual.muestra?.tenantId);
+      const lab = (await this.alcanceRes.labs([id])).get(id)?.unidadCodigo ?? null;
+      const m = motivoMismoRevisor(actual, usuarioId, cfg, lab);
+      if (m) throw new ConflictException(m);
+    }
 
     const ahora = new Date();
     const data: Record<string, unknown> = { estado: nuevo };
@@ -664,6 +686,10 @@ export class ResultadoService extends BaseCrudService {
     const ahora = new Date();
     const ensayo = r.catAnalito?.nombre ?? r.analito?.nombre ?? "ensayo";
     const texto = motivo.trim();
+    // Ensayo derivado con la orden interna ya cerrada: la orden vuelve a «recibida»
+    // para que el destino lo corrija y lo apruebe de nuevo (alcance-resultado.ts).
+    const dueno = this.alcanceRes ? (await this.alcanceRes.labs([id])).get(id) : undefined;
+    const reabrirOi = dueno?.derivado && dueno.oiEstado === "cerrada" ? dueno : null;
     const anterior = {
       valorNumerico: r.valorNumerico ?? null,
       valorTexto: r.valorTexto ?? null,
@@ -691,6 +717,21 @@ export class ResultadoService extends BaseCrudService {
           reaperturas: { increment: 1 },
         },
       });
+      if (reabrirOi?.ordenInternaId) {
+        await tx.$executeRawUnsafe(
+          `UPDATE orden_interna SET estado = 'recibida', cerrada_at = NULL, cerrada_por = NULL,
+                  aceptada_at = NULL, aceptada_por = NULL, updated_at = now()
+            WHERE id = $1::uuid AND estado = 'cerrada'`,
+          reabrirOi.ordenInternaId,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO orden_interna_historial (tenant_id, orden_interna_id, accion, detalle, usuario_id)
+           SELECT tenant_id, id, 'estado', $2::jsonb, $3::uuid FROM orden_interna WHERE id = $1::uuid`,
+          reabrirOi.ordenInternaId,
+          JSON.stringify({ de: "cerrada", a: "recibida", motivo: `Resultado reabierto (${r.muestra?.codigo ?? ""} · ${ensayo}): ${texto}` }),
+          usuarioId ?? null,
+        );
+      }
       for (const d of plan.anular) {
         await tx.certificado.update({
           where: { id: d.id },
@@ -729,11 +770,25 @@ export class ResultadoService extends BaseCrudService {
    * correspondiente, salvo los capturados por el propio usuario (segregación):
    * esos se informan como omitidos, con el motivo.
    */
-  async accionOt(otId: string, accion: AccionRevision, usuarioId: string | undefined) {
-    const filas = await this.prisma.resultado.findMany({
+  async accionOt(otId: string, accion: AccionRevision, usuarioId: string | undefined, req?: any) {
+    const todas = await this.prisma.resultado.findMany({
       where: { otId, deletedAt: null },
       select: { id: true, estado: true, analistaId: true },
     });
+    // Solo los ensayos que el usuario puede revisar o aprobar: los derivados a otro
+    // laboratorio los trabaja ese laboratorio (recorrido MP-02, D02-04).
+    let filas = todas;
+    let deOtrosLaboratorios = 0;
+    if (this.alcanceRes && req) {
+      const duenos = await this.alcanceRes.labs(todas.map((r) => r.id));
+      const ve = await this.alcanceRes.veUnidad(req, accion === "revisar" ? "resultado.revisar" : "resultado.aprobar");
+      filas = todas.filter((r) => {
+        const d = duenos.get(r.id);
+        const ok = !d || decidirAccionResultado(d, accion as AccionResultado, ve).permitido;
+        if (!ok && r.estado === (accion === "revisar" ? "capturado" : "revisado_n1")) deOtrosLaboratorios++;
+        return ok;
+      });
+    }
     const { aplicables, omitidos } = clasificarParaAccion(filas, accion, usuarioId);
     const hechos: string[] = [];
     for (const id of aplicables) {
@@ -744,7 +799,7 @@ export class ResultadoService extends BaseCrudService {
         omitidos.push({ id, motivo: e?.message ?? "No se pudo aplicar." });
       }
     }
-    return { accion, hechos: hechos.length, omitidos };
+    return { accion, hechos: hechos.length, omitidos, deOtrosLaboratorios };
   }
 
   /**
@@ -755,10 +810,14 @@ export class ResultadoService extends BaseCrudService {
   async fijarVeredicto(id: string, veredicto: string, usuarioId?: string) {
     const v = normalizarVeredicto(veredicto);
     if (!v || v === "pendiente") throw new BadRequestException("Veredicto no válido: cumple, no_cumple o informativo.");
-    const actual = await this.prisma.resultado.findFirst({ where: { id, deletedAt: null }, select: { estado: true } });
+    const actual = await this.prisma.resultado.findFirst({ where: { id, deletedAt: null }, select: { estado: true, analistaId: true, veredicto: true } });
     if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
-    if (actual.estado !== "capturado")
+    // Lo decide el revisor (capturado) o, si quedó sin decidir, el aprobador (revisado).
+    const sinDecidir = normalizarVeredicto(actual.veredicto) == null || normalizarVeredicto(actual.veredicto) === "pendiente";
+    if (!(actual.estado === "capturado" || (actual.estado === "revisado_n1" && sinDecidir)))
       throw new ConflictException("Solo se puede fijar el veredicto de un resultado capturado y aún no revisado.");
+    if (usuarioId && actual.analistaId === usuarioId)
+      throw new ConflictException("Quien capturó el ensayo no decide su veredicto: lo hace otra persona (segregación de funciones).");
     const r = await conTraza(this.prisma, { usuarioId, origen: "veredicto_manual" }, (tx) =>
       tx.resultado.update({ where: { id }, data: { veredicto: v } }),
     );
@@ -833,10 +892,22 @@ const ReabrirDto = z.object({
 
 const VeredictoDto = z.object({ veredicto: z.string().min(1).max(20) });
 
-/** Comprueba que el resultado es del tenant y de un laboratorio del alcance del usuario. */
-async function exigirAlcanceResultado(svc: ResultadoService, alcance: AlcanceService, id: string, req: any) {
+/**
+ * Comprueba que el resultado es del tenant y que el usuario puede hacer la
+ * acción sobre él: alcance por ENSAYO (rbac/alcance-resultado.ts). Un derivado
+ * por orden interna lo trabaja el laboratorio de destino mientras la orden está
+ * recibida; el responsable de la OT lo ve en solo lectura.
+ */
+async function exigirAlcanceResultado(
+  svc: ResultadoService,
+  alcanceRes: AlcanceResultadoService,
+  id: string,
+  req: any,
+  accion: AccionResultado,
+  permiso?: string,
+) {
   const ctx = await svc.contexto(id, req?.user?.tenantId);
-  await alcance.exigirUnidad(req, ctx.unidadPrincipal, ctx.otCodigo ? `el resultado de la OT ${ctx.otCodigo}` : "el resultado");
+  await alcanceRes.exigir(req, id, accion, permiso, ctx.otCodigo ? `el resultado de la OT ${ctx.otCodigo}` : "el resultado");
   return ctx;
 }
 
@@ -856,6 +927,7 @@ export class ResultadoBandejaController {
     private readonly svc: ResultadoService,
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
+    private readonly alcanceRes: AlcanceResultadoService,
   ) {}
 
   @Get("bandeja")
@@ -873,7 +945,7 @@ export class ResultadoBandejaController {
         r.deleted_at IS NULL
         AND r.estado = ANY($1::text[])
         AND ($2::uuid IS NULL OR m.tenant_id = $2::uuid)
-        AND ($3::uuid[] IS NULL OR o.unidad_principal = ANY($3::uuid[]))
+        AND ($3::uuid[] IS NULL OR lr.unidad_id = ANY($3::uuid[]))
         AND ($4::boolean IS FALSE OR r.analista_id = $5::uuid)
         AND ($6::boolean IS FALSE OR r.asignado_a = $5::uuid
              OR (r.asignado_a IS NULL AND EXISTS (SELECT 1 FROM ot_analista oa WHERE oa.ot_id = o.id AND oa.usuario_id = $5::uuid)))
@@ -894,10 +966,12 @@ export class ResultadoBandejaController {
          FROM resultado r
          JOIN muestra m ON m.id = r.muestra_id
          JOIN orden_trabajo o ON o.id = COALESCE(r.ot_id, m.ot_id)
+         -- Laboratorio dueño del ensayo: el destino si se derivó por orden interna (D02-04).
+         JOIN LATERAL lims_lab_de_resultado(r.id) lr ON TRUE
          LEFT JOIN cat_analito ca ON ca.id = r.cat_analito_id
          LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
          LEFT JOIN analito a ON a.id = r.analito_id
-         LEFT JOIN unidad un ON un.id = o.unidad_principal`;
+         LEFT JOIN unidad un ON un.id = lr.unidad_id`;
     const [filas, total] = await Promise.all([
       this.prisma.$queryRawUnsafe<any[]>(
         `SELECT r.id, r.estado, r.veredicto, r.unidad, r.replicas, r.promedio, r.desviacion, r.cv, r.resultado_final AS "resultadoFinal",
@@ -930,26 +1004,27 @@ export class ResultadoBandejaController {
   @RequierePermiso("resultado.revisar")
   @ApiOperation({ summary: "Revisa todos los resultados capturados de la OT (salvo los propios)" })
   async revisarOt(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
-    await this.otEnAlcance(otId, req);
-    return this.svc.accionOt(otId, "revisar", req?.user?.sub);
+    await this.otEnAlcance(otId, req, "resultado.revisar");
+    return this.svc.accionOt(otId, "revisar", req?.user?.sub, req);
   }
 
   @Post("ot/:otId/aprobar")
   @RequierePermiso("resultado.aprobar")
   @ApiOperation({ summary: "Aprueba todos los resultados revisados de la OT (salvo los propios)" })
   async aprobarOt(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
-    await this.otEnAlcance(otId, req);
-    return this.svc.accionOt(otId, "aprobar", req?.user?.sub);
+    await this.otEnAlcance(otId, req, "resultado.aprobar");
+    return this.svc.accionOt(otId, "aprobar", req?.user?.sub, req);
   }
 
-  private async otEnAlcance(otId: string, req: any) {
+  /** La OT del laboratorio del usuario, o una OT con ensayos derivados a su laboratorio. */
+  private async otEnAlcance(otId: string, req: any, permiso: string) {
     const tenantId = req?.user?.tenantId;
     const ot = await this.prisma.ordenTrabajo.findFirst({
       where: { id: otId, ...(tenantId ? { tenantId } : {}) },
-      select: { codigo: true, unidadPrincipal: true },
+      select: { id: true, codigo: true, unidadPrincipal: true },
     });
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    await this.alcanceRes.alcanceEnOt(req, ot, permiso);
   }
 }
 
@@ -1022,6 +1097,7 @@ export class ResultadoController extends BaseCrudController {
     protected svc: ResultadoService,
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
+    private readonly alcanceRes: AlcanceResultadoService,
   ) { super(); }
 
   /**
@@ -1076,7 +1152,7 @@ export class ResultadoController extends BaseCrudController {
   /** Detalle con alcance por laboratorio (antes cualquier lector abría cualquier resultado por id). */
   @Get(":id")
   async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "ver");
     return this.svc.detalle(id, req?.user?.tenantId);
   }
 
@@ -1087,7 +1163,7 @@ export class ResultadoController extends BaseCrudController {
    */
   @Patch(":id")
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "revisar");
     const cuerpo = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
     const actual = await this.prisma.resultado.findFirst({ where: { id, deletedAt: null }, select: { estado: true, analistaId: true } });
     if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
@@ -1104,7 +1180,7 @@ export class ResultadoController extends BaseCrudController {
   /** Eliminación (resultado.aprobar): el disparador deja la baja con lo que tenía en el historial. */
   @Delete(":id")
   async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "aprobar");
     await this.svc.detalle(id, req?.user?.tenantId);
     return conTraza(this.prisma, { usuarioId: req?.user?.sub, origen: "eliminacion" }, (tx) => tx.resultado.delete({ where: { id } }));
   }
@@ -1114,7 +1190,7 @@ export class ResultadoController extends BaseCrudController {
   @ApiOperation({ summary: "Corrige un resultado por réplicas (devuelto/capturado): recalcula y vuelve a capturado" })
   async recapturar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const dto = ResultadoRecaptura.parse(body ?? {});
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "capturar");
     return (this.svc as ResultadoService).recapturar(id, { ...dto, replicas: replicasDe(dto) }, req?.user?.sub, req?.user?.tenantId ?? DEV_TENANT);
   }
 
@@ -1122,7 +1198,7 @@ export class ResultadoController extends BaseCrudController {
   @RequierePermiso("resultado.revisar")
   @ApiOperation({ summary: "Revisión N1: capturado → revisado_n1 (no puede ser el propio analista)" })
   async revisar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "revisar");
     return (this.svc as ResultadoService).revisar(id, req?.user?.sub);
   }
 
@@ -1130,7 +1206,7 @@ export class ResultadoController extends BaseCrudController {
   @RequierePermiso("resultado.aprobar")
   @ApiOperation({ summary: "Aprobación final: revisado_n1 → aprobado (no puede ser el propio analista)" })
   async aprobar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "aprobar");
     return (this.svc as ResultadoService).aprobar(id, req?.user?.sub);
   }
 
@@ -1144,7 +1220,7 @@ export class ResultadoController extends BaseCrudController {
   @ApiOperation({ summary: "Devuelve el resultado al analista con un motivo → devuelto" })
   async devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const dto = DevolverDto.parse(body);
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "revisar");
     return (this.svc as ResultadoService).devolver(id, dto.motivo, req?.user?.sub);
   }
 
@@ -1157,7 +1233,7 @@ export class ResultadoController extends BaseCrudController {
   @ApiOperation({ summary: "Reabre un resultado aprobado → devuelto (anula los documentos vigentes de la OT)" })
   async reabrir(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const dto = ReabrirDto.parse(body ?? {});
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "reabrir");
     return (this.svc as ResultadoService).reabrir(id, dto.motivo, req?.user?.sub, req?.user?.tenantId);
   }
 
@@ -1166,7 +1242,7 @@ export class ResultadoController extends BaseCrudController {
   @ApiOperation({ summary: "Veredicto manual de un resultado capturado que el sistema no pudo decidir" })
   async veredicto(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const dto = VeredictoDto.parse(body ?? {});
-    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcance, id, req);
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "revisar");
     return (this.svc as ResultadoService).fijarVeredicto(id, dto.veredicto, req?.user?.sub);
   }
 }

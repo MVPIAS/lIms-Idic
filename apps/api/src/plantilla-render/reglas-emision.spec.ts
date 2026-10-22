@@ -217,3 +217,14 @@ describe("tipo de documento por defecto según la unidad de la OT", () => {
     expect(sinUnidad).toContain("Administración › Estructura");
   });
 });
+
+describe("no se emite con resultados sin veredicto (D02-03)", () => {
+  it("aprobado pero «Pendiente» bloquea la emisión con el detalle", () => {
+    const f = faltantesParaEmitir(
+      [{ estado: "aprobado", veredicto: "cumple" }, { estado: "aprobado", veredicto: "pendiente", muestra: "OT-1-M1", analito: "Recuento E. coli" }],
+      "I.ENSAYO",
+    );
+    expect(f.join(" ")).toMatch(/1 resultado\(s\) sin veredicto.*OT-1-M1 · Recuento E. coli/);
+    expect(faltantesParaEmitir([{ estado: "aprobado", veredicto: "informativo" }], "I.ENSAYO")).toEqual([]);
+  });
+});

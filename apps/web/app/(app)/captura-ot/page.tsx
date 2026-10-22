@@ -35,7 +35,7 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { num, fechaHora } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
-import { toast } from "@/components/ui/feedback";
+import { confirmar, toast } from "@/components/ui/feedback";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 import { ESTADO_RESULTADO, llamar, qs, veredictoInfo, type Paginado } from "@/lib/laboratorio";
 import EditorEnsayo, { textoFactor, type EnsayoEditable, type EquipoCaptura } from "./_components/EditorEnsayo";
@@ -73,6 +73,13 @@ interface Fila extends EnsayoEditable {
   muestraNombre: string | null;
   analito: string;
   metodo: string | null;
+  revisadoPor: string | null;
+  /** Laboratorio dueño del ensayo (el destino si se derivó por orden interna). */
+  laboratorio: string | null;
+  derivado: boolean;
+  ordenInterna: { id: string | null; numero: string | null; estado: string | null } | null;
+  /** Lo que el usuario puede hacer con ESTE ensayo según la API (vista por OT); null en la bandeja. */
+  puedo: { capturar: boolean; revisar: boolean; aprobar: boolean; reabrir: boolean } | null;
 }
 
 function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
@@ -106,6 +113,11 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     muestraNombre: r.muestraNombre ?? r.muestra?.nombre ?? null,
     analito: r.analitoNombre ?? r.catAnalito?.nombre ?? r.analito?.nombre ?? r.catAnalito?.codigo ?? r.analito?.codigo ?? "—",
     metodo: r.metodoNombre ?? r.catMetodo?.nombre ?? r.catMetodo?.codigo ?? null,
+    revisadoPor: r.revisadoPor ?? null,
+    laboratorio: r.laboratorio ?? r.unidadCodigo ?? null,
+    derivado: !!r.derivado,
+    ordenInterna: r.ordenInterna ?? null,
+    puedo: r.puedo ?? null,
     tipoDato: r.tipoDato === "atributo" ? "atributo" : "numerico",
     requisito: r.requisito ?? null,
     formula: r.formula ?? null,
@@ -158,14 +170,26 @@ function limiteTexto(r: Fila): string {
   return "—";
 }
 
+/** Número tal como se capturó: hasta 4 decimales, sin ceros de relleno (13,3 y no 13,3000; D02-19). */
+function valorNum(v: number | string): string {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toLocaleString("es-CL", { minimumFractionDigits: 0, maximumFractionDigits: 4 }) : String(v);
+}
+
 /** Valor registrado, en formato chileno. */
 function valorTexto(r: Fila): string {
-  if (r.valorNumerico != null && r.valorNumerico !== "") return num(Number(r.valorNumerico), 4);
+  if (r.valorNumerico != null && r.valorNumerico !== "") return valorNum(r.valorNumerico);
   if (r.valorTexto) return r.valorTexto;
-  if (r.resultadoFinal != null) return num(Number(r.resultadoFinal), 4);
-  if (r.promedio != null) return num(Number(r.promedio), 4);
+  if (r.resultadoFinal != null) return valorNum(r.resultadoFinal);
+  if (r.promedio != null) return valorNum(r.promedio);
   return "";
 }
+
+/** ¿Sin veredicto? («Pendiente» con valor): no se revisa ni se aprueba hasta decidirlo (D02-03). */
+const sinVeredicto = (f: Fila) => String(f.veredicto ?? "pendiente").toLowerCase() === "pendiente";
+
+/** Varias réplicas escritas en la fila («1,18 1,17 1,19» o «1,18; 1,17»): se envían como réplicas (D06-14). */
+const pareceReplicas = (raw: string) => /^[\d.,+-]+(?:\s*;\s*|\s+)[\d.,+-]+(?:(?:\s*;\s*|\s+)[\d.,+-]+)*$/.test(raw.trim());
 
 /** Borrador inicial del campo de valor (con coma decimal). */
 function valorBorrador(r: Fila): string {
@@ -196,6 +220,13 @@ export default function CapturaOtPage() {
   const acceso = usePermisos();
   const yo = acceso.usuario.id;
   const tiene = (p: string) => acceso.roles.includes("SUPERADMIN") || acceso.permisos.has(p);
+  /**
+   * ¿Puede hacer la acción sobre ESTE ensayo? En la vista por OT lo dice la API
+   * (alcance por ensayo: un derivado por orden interna lo trabaja el laboratorio
+   * de destino; el responsable lo ve en solo lectura). En la bandeja, el permiso.
+   */
+  const PERM_ACCION = { capturar: "resultado.crear", revisar: "resultado.revisar", aprobar: "resultado.aprobar", reabrir: "resultado.reabrir" } as const;
+  const puede = (f: Fila, a: keyof typeof PERM_ACCION) => tiene(PERM_ACCION[a]) && (f.puedo ? f.puedo[a] : true);
 
   const [ot, setOt] = useState<OtCorta | null>(null);
   const [vistaBandeja, setVistaBandeja] = useState<{ estado: string; mios: boolean; asignados: boolean } | null>(null);
@@ -306,7 +337,8 @@ export default function CapturaOtPage() {
     setOcupado(f.id);
     try {
       // El servidor decide si es número (admite «12,4») o texto («Ausente»).
-      const r = await llamar("POST", `/flujo/resultado/${f.id}/valor`, { valor: raw, ...(corrige ? { motivo } : {}) });
+      const cuerpo = pareceReplicas(raw) ? { replicasTexto: raw } : { valor: raw };
+      const r = await llamar("POST", `/flujo/resultado/${f.id}/valor`, { ...cuerpo, ...(corrige ? { motivo } : {}) });
       setMotivos((m) => ({ ...m, [f.id]: "" }));
       actualizarFila(f.id, { ...r, analistaNombre: acceso.usuario.nombre });
       if (r.veredictoMuestra && f.muestraId) setVeredictosMuestra((m) => ({ ...m, [f.muestraId!]: r.veredictoMuestra }));
@@ -386,10 +418,20 @@ export default function CapturaOtPage() {
 
   async function accionOt(que: "revisar" | "aprobar") {
     if (!ot) return;
+    const n = que === "revisar" ? porRevisarAjenos : porAprobarAjenos;
+    const ok = await confirmar({
+      titulo: que === "revisar" ? `¿Revisar ${n} resultado(s) de la OT ${ot.codigo}?` : `¿Aprobar ${n} resultado(s) de la OT ${ot.codigo}?`,
+      mensaje:
+        que === "revisar"
+          ? "Quedan revisados con su nombre, fecha y hora. Lo revisado ya no se corrige sin devolverlo."
+          : "Quedan aprobados con su nombre, fecha y hora. Lo aprobado solo se corrige reabriéndolo con motivo (anula los informes emitidos).",
+      confirmarTexto: que === "revisar" ? "Revisar" : "Aprobar",
+    });
+    if (!ok) return;
     setOcupado("__ot");
     setOmitidos([]);
     try {
-      const r = await llamar<{ hechos: number; omitidos: { id: string; motivo: string }[] }>("POST", `/resultados/ot/${ot.id}/${que}`);
+      const r = await llamar<{ hechos: number; omitidos: { id: string; motivo: string }[]; deOtrosLaboratorios?: number }>("POST", `/resultados/ot/${ot.id}/${que}`);
       setOmitidos(r.omitidos ?? []);
       toast.ok(`${r.hechos} resultado${r.hechos === 1 ? "" : "s"} ${que === "revisar" ? "revisado" : "aprobado"}${r.hechos === 1 ? "" : "s"}.${r.omitidos?.length ? ` ${r.omitidos.length} omitido(s).` : ""}`);
       await cargar();
@@ -420,8 +462,14 @@ export default function CapturaOtPage() {
   }, [filas, filtroOt, ot]);
 
   const todoAprobado = ot != null && filas.length > 0 && filas.every((f) => f.estado === "aprobado");
-  const porRevisarAjenos = filas.filter((f) => f.estado === "capturado" && f.analistaId !== yo).length;
-  const porAprobarAjenos = filas.filter((f) => f.estado === "revisado_n1" && f.analistaId !== yo).length;
+  const porRevisarAjenos = filas.filter((f) => f.estado === "capturado" && f.analistaId !== yo && puede(f, "revisar") && !sinVeredicto(f)).length;
+  const porAprobarAjenos = filas.filter(
+    (f) => f.estado === "revisado_n1" && f.analistaId !== yo && f.revisadoPor !== yo && puede(f, "aprobar") && !sinVeredicto(f),
+  ).length;
+  // Ensayos de otro laboratorio en esta OT (derivados por orden interna): solo lectura.
+  const ajenos = ot ? filas.filter((f) => f.derivado && f.puedo && !f.puedo.capturar && !f.puedo.revisar && !f.puedo.aprobar && !f.puedo.reabrir) : [];
+  // El destino de una orden interna solo recibe los ensayos que se le derivaron.
+  const soloDerivados = ot != null && filas.length > 0 && filas.every((f) => f.derivado) && ajenos.length === 0;
 
   // Agrupación por muestra (vista por OT) o por OT + muestra (bandeja).
   const grupos = useMemo(() => {
@@ -521,7 +569,7 @@ export default function CapturaOtPage() {
               <Link href={`/ot/${ot.id}/calculos` as any} className="btn outline sm" title="Lecturas, fórmula aplicada, factor e historial de cambios de cada ensayo (solo lectura, exportable)">
                 Planilla de cálculos
               </Link>
-              <Link href={"/informes" as any} className={`btn sm ${todoAprobado ? "primary" : "outline"}`}
+              <Link href={`/informes?otId=${ot.id}` as any} className={`btn sm ${todoAprobado ? "primary" : "outline"}`}
                 title={todoAprobado ? "Todos los resultados están aprobados" : "Aún hay resultados sin aprobar"}>
                 Emitir informe
               </Link>
@@ -532,6 +580,19 @@ export default function CapturaOtPage() {
               </div>
             )}
             {todoAprobado && <div className="alert success" style={{ marginTop: 8 }}>Todos los resultados de la OT {ot.codigo} están aprobados.</div>}
+            {ajenos.length > 0 && (
+              <div className="alert info" style={{ marginTop: 8 }}>
+                {ajenos.length} ensayo(s) se derivaron a {[...new Set(ajenos.map((f) => f.laboratorio).filter(Boolean))].join(", ")} por orden interna:
+                los capturan, revisan y aprueban en ese laboratorio. Usted los ve en solo lectura.
+              </div>
+            )}
+            {soloDerivados && (
+              <div className="alert info" style={{ marginTop: 8 }}>
+                Usted ve solo los ensayos que las órdenes internas de esta OT derivaron a su laboratorio
+                ({[...new Set(filas.map((f) => f.ordenInterna?.numero).filter(Boolean))].join(", ")}). Se capturan, revisan y aprueban mientras la
+                orden está recibida; después se cierra en «Órdenes internas» y los resultados vuelven al laboratorio solicitante.
+              </div>
+            )}
           </div>
         </>
       )}
@@ -573,7 +634,8 @@ export default function CapturaOtPage() {
                       const vd = veredictoInfo(f.veredicto);
                       const est = ESTADO_RESULTADO[f.estado] ?? { texto: f.estado, pill: "gray" };
                       const propio = !!yo && f.analistaId === yo;
-                      const capturable = CAPTURABLES.includes(f.estado) && tiene("resultado.crear");
+                      const capturable = CAPTURABLES.includes(f.estado) && puede(f, "capturar");
+                      const lectura = !!f.puedo && !f.puedo.capturar && !f.puedo.revisar && !f.puedo.aprobar && !f.puedo.reabrir;
                       const busy = ocupado === f.id;
                       return (
                         <Fragment key={f.id}>
@@ -582,6 +644,14 @@ export default function CapturaOtPage() {
                               {f.analito}
                               {f.metodo && <div style={{ fontSize: 11, color: "var(--muted)" }}>{f.metodo}</div>}
                               {f.asignadoNombre && <div style={{ fontSize: 11, color: "var(--muted)" }}>Asignado a {f.asignadoNombre}</div>}
+                              {f.derivado && (
+                                <div style={{ marginTop: 2 }}>
+                                  <span className="pill teal" title={`Derivado por la orden interna ${f.ordenInterna?.numero ?? ""} (${f.ordenInterna?.estado ?? ""})`}>
+                                    {f.laboratorio ?? "Otro laboratorio"} · {f.ordenInterna?.numero ?? "orden interna"}
+                                  </span>
+                                  {lectura && <span className="pill gray" style={{ marginLeft: 4 }}>solo lectura</span>}
+                                </div>
+                              )}
                             </td>
                             <td>
                               <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{limiteTexto(f)}{f.unidad ? ` ${f.unidad}` : ""}</span>
@@ -664,7 +734,7 @@ export default function CapturaOtPage() {
                             </td>
                             <td>
                               <span className={`pill ${vd.pill}`}>{vd.texto}</span>
-                              {tiene("resultado.revisar") && f.estado === "capturado" && String(f.veredicto ?? "").toLowerCase() === "pendiente" && (valorTexto(f) !== "") && (
+                              {((f.estado === "capturado" && puede(f, "revisar")) || (f.estado === "revisado_n1" && puede(f, "aprobar"))) && !propio && sinVeredicto(f) && (valorTexto(f) !== "") && (
                                 <select aria-label="Veredicto del revisor" defaultValue="" style={{ marginTop: 4, display: "block" }} disabled={busy}
                                   onChange={(e) => { if (e.target.value) fijarVeredicto(f, e.target.value); }}>
                                   <option value="">Decidir…</option>
@@ -689,18 +759,18 @@ export default function CapturaOtPage() {
                             </td>
                             <td>
                               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                                {tiene("resultado.revisar") && f.estado === "capturado" && (
-                                  <button className="btn sm" disabled={busy || propio} onClick={() => accion(f, "revisar")}
-                                    title={propio ? "Lo capturó usted: debe revisarlo otra persona" : "Marcar como revisado"}>Revisar</button>
+                                {puede(f, "revisar") && f.estado === "capturado" && (
+                                  <button className="btn sm" disabled={busy || propio || sinVeredicto(f)} onClick={() => accion(f, "revisar")}
+                                    title={propio ? "Lo capturó usted: debe revisarlo otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de revisar, o devuélvalo" : "Marcar como revisado"}>Revisar</button>
                                 )}
-                                {tiene("resultado.aprobar") && f.estado === "revisado_n1" && (
-                                  <button className="btn success sm" disabled={busy || propio} onClick={() => accion(f, "aprobar")}
-                                    title={propio ? "Lo capturó usted: debe aprobarlo otra persona" : "Aprobar el resultado"}>Aprobar</button>
+                                {puede(f, "aprobar") && f.estado === "revisado_n1" && (
+                                  <button className="btn success sm" disabled={busy || propio || f.revisadoPor === yo || sinVeredicto(f)} onClick={() => accion(f, "aprobar")}
+                                    title={propio ? "Lo capturó usted: debe aprobarlo otra persona" : f.revisadoPor === yo ? "Lo revisó usted: la aprobación la hace otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de aprobar" : "Aprobar el resultado"}>Aprobar</button>
                                 )}
-                                {tiene("resultado.revisar") && ["capturado", "revisado_n1"].includes(f.estado) && (
+                                {puede(f, "revisar") && ["capturado", "revisado_n1"].includes(f.estado) && (
                                   <button className="btn outline sm" disabled={busy} onClick={() => { setDevolviendo(devolviendo === f.id ? null : f.id); setMotivo(""); }}>Devolver</button>
                                 )}
-                                {tiene("resultado.reabrir") && f.estado === "aprobado" && (
+                                {puede(f, "reabrir") && f.estado === "aprobado" && (
                                   <button className="btn outline sm" disabled={busy} title="Corregir un resultado ya aprobado (anula el informe en firma u oficial)"
                                     onClick={() => { setReabriendo(reabriendo === f.id ? null : f.id); setMotivoReabrir(""); }}>Reabrir</button>
                                 )}
@@ -713,7 +783,7 @@ export default function CapturaOtPage() {
                                 <EditorEnsayo
                                   key={`${f.id}-${f.especEditadaAt ?? ""}-${f.fecha ?? ""}-${f.estado}`}
                                   e={f}
-                                  puedeCapturar={tiene("resultado.crear") && CAPTURABLES.includes(f.estado)}
+                                  puedeCapturar={puede(f, "capturar") && CAPTURABLES.includes(f.estado)}
                                   esJefatura={tiene("resultado.aprobar")}
                                   puedeFactor={tiene("resultado.factor")}
                                   equipos={equipos}
