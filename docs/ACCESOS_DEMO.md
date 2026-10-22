@@ -195,6 +195,9 @@ este orden fijo:
 10. `r1-r1c.js` (cotización de punta a punta: costeo del laboratorio, V°B°, firma del
     Jefe DCO, envío, aceptación, cierre de la OT y encuesta de satisfacción;
     docs/FLUJO_COTIZACION_ENCUESTAS.md)
+11. `r1-r1g.js` (recorrido en pantalla MP-02/MP-06: Nº interno, orden interna con
+    captura, revisión y aprobación del destino, «< LD», revisión ≠ aprobación,
+    tarjetas de Mi bandeja; docs/FLUJO_R1G_RECORRIDO.md)
 
 Desde el frente r1c una cotización nueva se acepta **firmada por el Jefe DCO**: los
 guiones que aceptan cotizaciones la envían a firma (`demo.ventas`) y la firman
