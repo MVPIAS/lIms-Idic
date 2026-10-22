@@ -200,3 +200,91 @@ export function puntosFueraDeRango(
   }
   return { fuera, controlado: true };
 }
+
+/* ------------------------------------------------------- fechas y plazos --- */
+/** AAAA-MM-DD + n meses (el día se ajusta al último del mes: 31-01 + 1 = 28/29-02). */
+export function sumarMeses(fecha: string, meses: number): string {
+  const [a, m, d] = fecha.slice(0, 10).split("-").map(Number);
+  const total = (m - 1) + meses;
+  const anio = a + Math.floor(total / 12), mes = ((total % 12) + 12) % 12;
+  const ultimo = new Date(Date.UTC(anio, mes + 1, 0)).getUTCDate();
+  return `${anio}-${String(mes + 1).padStart(2, "0")}-${String(Math.min(d, ultimo)).padStart(2, "0")}`;
+}
+
+/* ------------------------------------- equipo del laboratorio dueño (P8.4) --- */
+/**
+ * Lo que se escribe en Equipos al emitir (o entregar) el certificado de un equipo de otro
+ * laboratorio del IDIC: última calibración = fecha de calibración, próxima = emisión +
+ * intervalo (P9.5) y el número del certificado. Sin intervalo («según el cliente») la
+ * próxima no se toca. El LMT no evalúa conformidad: la aptitud la decide el dueño.
+ */
+export function actualizacionEquipo(c: { numero: string; fechaCalibracion: string; fechaEmision: string; intervaloMeses: number | null }) {
+  return {
+    ultima: c.fechaCalibracion.slice(0, 10),
+    proxima: c.intervaloMeses && c.intervaloMeses > 0 ? sumarMeses(c.fechaEmision, c.intervaloMeses) : null,
+    certificado: c.numero,
+  };
+}
+
+/* ------------------------------------------- LNF → maestro de patrones (P8.5) --- */
+export interface PatronMaestro {
+  clase: string | null; coeficientes: any | null; deriva: number | null; u_expandida: number | null;
+  n_certificado: string | null; ultima_calibracion: string | null; vence: string | null; intervalo_meses: number | null; emisor: string | null;
+}
+/** Sensibilidad S = a·F + b·F² + c·F³ (mV/V) del ajuste del certificado. */
+const sensibilidad = (k: { a: number; b: number; c: number }, F: number) => k.a * F + k.b * F ** 2 + k.c * F ** 3;
+
+/**
+ * Al emitir un certificado del LNF de un transductor del propio IDIC, el maestro de patrones
+ * del LMT toma: clase, coeficientes t, u, v (F = t·S + u·S² + v·S³) y a, b, c, deriva frente
+ * al certificado anterior (cambio relativo de la sensibilidad a la fuerza máxima, en %), U
+ * (la mayor incertidumbre relativa del certificado, %), certificado, fechas y vencimiento.
+ * Sin coeficientes anteriores la deriva no cambia.
+ */
+export function actualizacionPatronLnf(
+  r: { clase: string; coef: { S3: number[]; F3: number[] }; rows: { F: number; Umin?: number; U: number }[]; rangos?: unknown },
+  c: { numero: string; fechaCalibracion: string; intervaloMeses: number | null },
+  antes: PatronMaestro,
+): { despues: Partial<PatronMaestro>; deriva: number | null } {
+  const Fmax = Math.max(...r.rows.map((x) => x.F));
+  const nuevo = { a: r.coef.S3[0], b: r.coef.S3[1], c: r.coef.S3[2] };
+  const prev = antes.coeficientes;
+  let deriva: number | null = null;
+  if (prev && [prev.a, prev.b, prev.c].every((x: unknown) => typeof x === "number" && Number.isFinite(x))) {
+    const s0 = sensibilidad(prev, Fmax), s1 = sensibilidad(nuevo, Fmax);
+    if (s0) deriva = Math.abs(s1 - s0) / Math.abs(s0) * 100;
+  }
+  const U = Math.max(...r.rows.map((x) => (typeof x.Umin === "number" ? x.Umin : x.U)));
+  return {
+    deriva,
+    despues: {
+      clase: r.clase === "N/C" ? "N/C" : `Clase ${r.clase}`,
+      coeficientes: {
+        t: r.coef.F3[0], u: r.coef.F3[1], v: r.coef.F3[2], ...nuevo, clase: r.clase, Fmax, rangos: r.rangos ?? null,
+        certificado: c.numero, fecha: c.fechaCalibracion.slice(0, 10),
+      },
+      deriva: deriva ?? antes.deriva,
+      u_expandida: Number.isFinite(U) ? U : antes.u_expandida,
+      n_certificado: c.numero,
+      ultima_calibracion: c.fechaCalibracion.slice(0, 10),
+      vence: c.intervaloMeses && c.intervaloMeses > 0 ? sumarMeses(c.fechaCalibracion, c.intervaloMeses) : antes.vence,
+      intervalo_meses: c.intervaloMeses && c.intervaloMeses > 0 ? c.intervaloMeses : antes.intervalo_meses,
+      emisor: "LCPN-F (IDIC)",
+    },
+  };
+}
+
+/* --------------------------------------------- aviso al emitir (P7.2) --- */
+const correoValido = (x: unknown): x is string => typeof x === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x.trim());
+
+/**
+ * A quién se avisa al emitir: en OT interna o interlaboratorio, al jefe del laboratorio dueño;
+ * si no, al contacto principal del cliente y, sin él, al correo del cliente.
+ */
+export function destinatariosAviso(d: { interna: boolean; jefesDueno: (string | null)[]; contacto: string | null; cliente: string | null }): { destinatarios: string[]; motivo: string | null } {
+  const lista = d.interna ? d.jefesDueno : [d.contacto, d.cliente];
+  const validos = [...new Set(lista.filter(correoValido).map((x) => x.trim()))];
+  const usar = d.interna ? validos : validos.slice(0, 1);
+  if (usar.length) return { destinatarios: usar, motivo: null };
+  return { destinatarios: [], motivo: d.interna ? "el laboratorio dueño no tiene jefe con correo" : "el cliente no tiene contacto principal ni correo" };
+}

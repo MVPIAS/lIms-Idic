@@ -1,4 +1,7 @@
+import { calcularLNF } from "./motores/lnf";
+import { CASOS_LNF } from "./motores/paridad-lnf";
 import {
+  actualizacionEquipo, actualizacionPatronLnf, destinatariosAviso, sumarMeses,
   CONFIG_FICHA_DEFECTO, condicionesCorregidas, configFicha, convertirRango, errorNormalizado, puntosFueraDeRango, uInformada, type Auxiliar, type PatronRango,
 } from "./ficha.reglas";
 import { defConfigurable, normalizarValor } from "../catalogo/parametro-configurable";
@@ -107,5 +110,58 @@ describe("Patrón fuera de su rango calibrado (P4.2, R15 P6)", () => {
     expect(convertirRango(100, "lbf·ft", "N·m")).toBeCloseTo(135.58179483314, 9);
     expect(convertirRango(2, "kN", "N")).toBeCloseTo(2000, 9);
     expect(convertirRango(1, "V", "MPa")).toBeNull();
+  });
+});
+
+describe("Fechas: emisión + intervalo (P9.5)", () => {
+  it("suma meses y ajusta al último día del mes", () => {
+    expect(sumarMeses("2026-10-22", 12)).toBe("2027-10-22");
+    expect(sumarMeses("2026-01-31", 1)).toBe("2026-02-28");
+    expect(sumarMeses("2028-01-31", 1)).toBe("2028-02-29");
+    expect(sumarMeses("2026-11-15", 24)).toBe("2028-11-15");
+  });
+});
+
+describe("Equipo del laboratorio dueño (P8.4)", () => {
+  it("última = fecha de calibración; próxima = emisión + intervalo; sin intervalo no cambia la próxima", () => {
+    expect(actualizacionEquipo({ numero: "P-900", fechaCalibracion: "2026-10-20", fechaEmision: "2026-10-22", intervaloMeses: 12 }))
+      .toEqual({ ultima: "2026-10-20", proxima: "2027-10-22", certificado: "P-900" });
+    expect(actualizacionEquipo({ numero: "P-901", fechaCalibracion: "2026-10-20", fechaEmision: "2026-10-22", intervaloMeses: 0 }).proxima).toBeNull();
+  });
+});
+
+describe("LNF → maestro de patrones (P8.5) con el caso real LCPNF-010.26", () => {
+  const r = calcularLNF(CASOS_LNF[0].datos, {});
+  const antes = { clase: "Clase 1", coeficientes: null, deriva: 0.02, u_expandida: 0.1, n_certificado: "LCPNF-005.25", ultima_calibracion: "2025-03-01", vence: "2026-03-01", intervalo_meses: 12, emisor: "LCPN-F" };
+
+  it("clase, t/u/v, U mayor del certificado, número, fechas y vencimiento; sin coeficientes anteriores la deriva no cambia", () => {
+    const a = actualizacionPatronLnf(r as any, { numero: "LCPNF-010.26", fechaCalibracion: "2026-03-23", intervaloMeses: 24 }, antes);
+    expect(a.deriva).toBeNull();
+    expect(a.despues.clase).toBe(`Clase ${r.clase}`);
+    expect(a.despues.coeficientes.t).toBeCloseTo(582.4989468061831, 9);
+    expect(a.despues.coeficientes.u).toBeCloseTo(-0.6168731795478379, 12);
+    expect(a.despues.coeficientes.v).toBeCloseTo(0.07537163824417803, 12);
+    expect(a.despues.u_expandida).toBeCloseTo(Math.max(...r.rows.map((x: any) => x.Umin)), 12);
+    expect(a.despues).toMatchObject({ deriva: 0.02, n_certificado: "LCPNF-010.26", ultima_calibracion: "2026-03-23", vence: "2028-03-23", intervalo_meses: 24 });
+  });
+
+  it("con coeficientes anteriores, deriva = cambio relativo de la sensibilidad a la fuerza máxima (%)", () => {
+    const prev = { a: r.coef.S3[0] * 1.001, b: r.coef.S3[1], c: r.coef.S3[2] };
+    const a = actualizacionPatronLnf(r as any, { numero: "X", fechaCalibracion: "2026-03-23", intervaloMeses: null }, { ...antes, coeficientes: prev });
+    const F = Math.max(...r.rows.map((x: any) => x.F));
+    const s = (k: any) => k.a * F + k.b * F ** 2 + k.c * F ** 3;
+    expect(a.deriva).toBeCloseTo(Math.abs(s({ a: r.coef.S3[0], b: r.coef.S3[1], c: r.coef.S3[2] }) - s(prev)) / s(prev) * 100, 12);
+    expect(a.despues.vence).toBe("2026-03-01");
+  });
+});
+
+describe("Aviso al emitir (P7.2)", () => {
+  it("OT interna: al jefe del laboratorio dueño; externa: contacto principal o, sin él, el cliente", () => {
+    expect(destinatariosAviso({ interna: true, jefesDueno: ["jefe@idic.cl", null], contacto: "c@x.cl", cliente: "x@x.cl" }).destinatarios).toEqual(["jefe@idic.cl"]);
+    expect(destinatariosAviso({ interna: false, jefesDueno: [], contacto: "c@x.cl", cliente: "x@x.cl" }).destinatarios).toEqual(["c@x.cl"]);
+    expect(destinatariosAviso({ interna: false, jefesDueno: [], contacto: null, cliente: "x@x.cl" }).destinatarios).toEqual(["x@x.cl"]);
+    const sin = destinatariosAviso({ interna: false, jefesDueno: [], contacto: "no-es-correo", cliente: null });
+    expect(sin.destinatarios).toEqual([]);
+    expect(sin.motivo).toMatch(/contacto principal/);
   });
 });

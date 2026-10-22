@@ -26,7 +26,9 @@ import {
 import { CASOS_REFERENCIA, esClaveExcel, verificarParidad } from "./motores/paridad";
 import { CASOS_LNF, verificarParidadLNF } from "./motores/paridad-lnf";
 import { balancePorPunto } from "./motores/balance";
-import { condicionesCorregidas, configFicha, errorNormalizado, puntosFueraDeRango, type Auxiliar, type ConfigFicha, type PatronRango } from "./ficha.reglas";
+import { condicionesCorregidas, errorNormalizado, puntosFueraDeRango, type Auxiliar, type ConfigFicha, type PatronRango } from "./ficha.reglas";
+import { actualizarEquipoDueno, actualizarPatronLnf, destinatariosDe, enviarCertificado, leerConfigFicha } from "./ficha.datos";
+import { ConfiguracionModule, MailService } from "../configuracion/configuracion.module";
 import { CASOS_1510, verificarParidad1510 } from "./motores/paridad-1510";
 import { armarCertificado, certificadoHtml, datosCertificado, type ContextoCertificado, type FirmaCert } from "./metrologia.certificado";
 import { formatoDe } from "./certificado/formato-it";
@@ -249,12 +251,6 @@ async function nombreDepartamento(alcance: AlcanceService, t: string, unidadId: 
   return { nombre: d?.nombre ?? "Departamento", origen: "organigrama" };
 }
 
-/** Parámetros de la operación de la ficha (Administración › Parámetros del sistema, categoría metrologia_ficha). */
-export async function leerConfigFicha(t: string): Promise<ConfigFicha> {
-  const filas = await prisma.$queryRawUnsafe<{ codigo: string; valor: string | null; activo: boolean }[]>(
-    `SELECT codigo, valor, activo FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'metrologia_ficha'`, t);
-  return configFicha(filas);
-}
 
 async function registroFirmas(t: string): Promise<(Firmante & { id: string })[]> {
   const rows = await prisma.$queryRawUnsafe<any[]>(
@@ -283,7 +279,7 @@ interface Circuito {
 @AmbitoUnidad("SAM")
 @Controller("metrologia")
 export class MetrologiaController {
-  constructor(private readonly alcance: AlcanceService, private readonly matriz: FirmasMatrizService) {}
+  constructor(private readonly alcance: AlcanceService, private readonly matriz: FirmasMatrizService, private readonly mail: MailService) {}
 
   /** Códigos de laboratorio de la sección visibles para el usuario (null = todos). */
   private async labsVisibles(req: any): Promise<Set<string> | null> {
@@ -663,7 +659,7 @@ export class MetrologiaController {
   async anterior(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     const t = tenantId(req);
     const cal = await this.cargar(id, req);
-    const cfg = await leerConfigFicha(t);
+    const cfg = await leerConfigFicha(prisma, t);
     const serie = String(cal.instrumento?.serie ?? "").trim(), idEsp = String(cal.instrumento?.idEspecial ?? "").trim();
     const sinDato = (s: string) => !s || /^(s\/s|no tiene|--|-)$/i.test(s);
     if (sinDato(serie) && sinDato(idEsp))
@@ -856,7 +852,7 @@ export class MetrologiaController {
     const pat = await this.patronesDe(t, d, fecha);
     const calc = await this.calcularDto(proc, d, fecha);
     const instrumento = instrumentoDesdeOt(d.instrumento, origen.item, origen.ot);
-    const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(t));
+    const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
     const amb = await this.ambienteDe(t, d, fecha);
 
     for (let intento = 0; ; intento++) {
@@ -914,7 +910,7 @@ export class MetrologiaController {
     const fecha = d.fecha ? fechaCalibracion(d.fecha) : fechaIso(cal.fecha_calibracion);
     const pat = await this.patronesDe(t, d, fecha);
     const calc = await this.calcularDto(proc, d, fecha);
-    const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(t));
+    const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
     const amb = await this.ambienteDe(t, d, fecha);
     // Calibración ligada a la OT: la OT y la recepción siguen mandando sobre lo escrito.
     const instrumento = cal.ot_instrumento_id
@@ -1056,9 +1052,37 @@ export class MetrologiaController {
         await tx.$executeRawUnsafe(`UPDATE met_calibracion SET estado = 'reemplazada', reemplazada_at = now(), updated_at = now() WHERE id = $1::uuid AND estado = 'emitida'`, cal.reemplaza_id);
         await this.evento(tx, cal.reemplaza_id, "REEMPLAZADA", "emitida", "reemplazada", req, `Reemplazado por el certificado N° ${numero}`);
       }
-      return { numero, codigoVer, hash };
+      // En la misma transacción: el maestro de patrones (LNF, P8.5) y el equipo del laboratorio dueño (P8.4).
+      const cfgTx = await leerConfigFicha(tx, t);
+      const patron = await actualizarPatronLnf(tx, id, req.user.sub);
+      const equipo = cfgTx.actualizarEquipo === "emitir" ? await actualizarEquipoDueno(tx, id, req.user.sub, "emitir") : null;
+      return { numero, codigoVer, hash, patron, equipo, notificar: cfgTx.notificarEmision };
     });
-    return { data: { codigo: cal.codigo, estado: "emitida", numero: resultado.numero, hash: resultado.hash, verificacion: resultado.codigoVer } };
+    // Aviso al solicitante (P7.2) fuera de la transacción: si el correo no sale, la emisión queda igual.
+    const aviso = resultado.notificar ? await this.avisarEmision(id, req) : null;
+    return {
+      data: {
+        codigo: cal.codigo, estado: "emitida", numero: resultado.numero, hash: resultado.hash, verificacion: resultado.codigoVer,
+        patron: resultado.patron, equipo: resultado.equipo, aviso,
+      },
+    };
+  }
+
+  /** Correo con el certificado al contacto de la OT (o al jefe del laboratorio dueño); queda en la bitácora. */
+  private async avisarEmision(id: string, req: any): Promise<{ ok: boolean; destinatarios: string[]; motivo: string | null }> {
+    try {
+      const d = await destinatariosDe(prisma, id);
+      if (!d.destinatarios.length) {
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
+           VALUES ($1::uuid, 'NOTIFICADA', 'emitida', 'emitida', $2::uuid, $3)`, id, req.user?.sub ?? null, `Sin aviso por correo: ${d.motivo}.`);
+        return { ok: false, destinatarios: [], motivo: d.motivo };
+      }
+      const r = await enviarCertificado(prisma, this.mail, id, d.destinatarios, { usuarioId: req.user?.sub ?? null, motivo: "aviso" });
+      return { ok: r.ok, destinatarios: r.destinatarios, motivo: r.error };
+    } catch (e: any) {
+      return { ok: false, destinatarios: [], motivo: String(e?.message ?? e).slice(0, 200) };
+    }
   }
 
   /** Alias del paso final (compatibilidad con la pantalla anterior): firma el paso pendiente. */
@@ -1713,7 +1737,7 @@ export class VerificacionMetrologiaController {
 }
 
 @Module({
-  imports: [RbacModule],
+  imports: [RbacModule, ConfiguracionModule],
   controllers: [MetrologiaController, VerificacionMetrologiaController, MetrologiaOtController],
   providers: [MetrologiaOtService],
 })
