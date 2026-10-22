@@ -63,6 +63,7 @@ Parametrizable por plantilla, no solo para Textil. Valor efectivo = el del tipo 
 | `conclusionFija` | Texto fijo de la conclusión | IVC y PG09A2: «Los registros y resultados… archivados… 5 años.» |
 | `portada` | `ninguna` · `ivc` | IVC: `ivc` |
 | `etiquetas` | Títulos de columna (ensayo, método, unidad, requisito, resultado, veredicto) | IVC: Característica / Método de verificación / Grado de cumplimiento |
+| `columnasRequisito`, `textoSinCota`, `unidadEnResultado`, `columnaMuestra`, agrupación `unica` | Requisito en Mínimo / Máximo, unidad junto al resultado y tabla única con la columna Muestra (LME, 20-10-2026). Ver `FLUJO_RECEPCION_CUSTODIA_EQUIPO.md` §5 | texto · «—» · no · no |
 
 - `GET /informes/plantillas/:id/formato` (`plantilla.ver`): guardado, efectivo y el del tipo.
 - `PUT /informes/plantillas/:id/formato { formato }` (`plantilla.gestionar`): guarda solo

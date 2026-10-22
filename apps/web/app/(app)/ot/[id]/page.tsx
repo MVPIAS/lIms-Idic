@@ -119,6 +119,13 @@ export default function ExpedientePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  // Pestaña inicial desde la URL (?tab=muestras: bandeja de entrada del laboratorio).
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t && ["cabecera", "asignacion", "muestras", "ordenes", "resultados", "fotos", "informe", "historial"].includes(t)) setTab(t as typeof tab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (tab === "historial") cargarHistorial();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -308,7 +315,8 @@ export default function ExpedientePage() {
             )}
             {tab === "muestras" && typeof id === "string" && (
               <RegistroMuestras otId={id} onCambio={() => { cargarMuestras(); cargarOt(); }}
-                onOrdenInterna={(unidadId) => { setDestinoOi(unidadId ?? null); setTab("ordenes"); }} />
+                onOrdenInterna={(unidadId) => { setDestinoOi(unidadId ?? null); setTab("ordenes"); }}
+                onRecepcionado={() => setTab("asignacion")} />
             )}
             {tab === "instrumentos" && typeof id === "string" && <InstrumentosOt otId={id} onCambio={cargarOt} />}
             {tab === "ordenes" && typeof id === "string" && (

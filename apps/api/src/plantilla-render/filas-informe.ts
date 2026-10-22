@@ -50,6 +50,8 @@ export interface ResultadoParaInforme {
   nReplicas?: number;
   observacion?: string | null;
   veredicto?: string | null;
+  /** Fecha y hora en que se ejecutó el ensayo (captura con equipo). */
+  fechaEnsayo?: Date | string | null;
   /** Estructura del informe (resultado_informe). */
   seccion?: string | null;
   componente?: string | null;
@@ -59,6 +61,9 @@ export interface ResultadoParaInforme {
 export interface FilaInforme {
   id: string;
   muestra: string;
+  /** Cotas por separado (columnas Mínimo / Máximo); vacías si no hay. */
+  minimo: string;
+  maximo: string;
   ensayo: string;
   metodo: string;
   unidad: string;
@@ -123,6 +128,10 @@ const fmtCota = (v: string | null | undefined): string => {
   const n = aNumero(v);
   return n === null ? String(v ?? "").trim() : fmtNum(n);
 };
+
+/** Cota tal como se escribió, con coma decimal («0.00» → «0,00»); vacía si no hay. */
+const textoCota = (v: string | null | undefined): string =>
+  vacio(v) ? "" : String(v).trim().replace(/^([+-]?\d+)\.(\d+)$/, "$1,$2");
 
 /** ¿El ensayo tiene requisito (alguna cota o texto)? */
 export function tieneRequisito(r: Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito">): boolean {
@@ -219,6 +228,9 @@ function fila(r: ResultadoParaInforme, modalidad: Modalidad): FilaInforme {
   return {
     id: r.id,
     muestra: r.muestraCodigo,
+    // Las cotas por separado se imprimen como se escribieron (decimales incluidos: «0,00»).
+    minimo: textoCota(r.limiteInf),
+    maximo: textoCota(r.limiteSup),
     ensayo: vacio(r.ensayo) ? "Ensayo sin nombre en el catálogo" : String(r.ensayo).trim(),
     metodo: textoMetodo(r),
     unidad: vacio(r.unidad) ? "" : String(r.unidad).trim(),
@@ -254,12 +266,13 @@ export function armarInforme(resultados: ResultadoParaInforme[], config: ConfigI
   const muestras = [...new Set(ordenados.map((r) => r.muestraId))];
   const varias = muestras.length > 1;
   const porSeccion = config.agrupacion === "seccion";
+  const unica = config.agrupacion === "unica";
 
   const secciones: { titulo: string; comps: Map<string, { titulo: string | null; rs: ResultadoParaInforme[] }> }[] = [];
   const indice = new Map<string, number>();
   for (const r of ordenados) {
-    const tituloSec = porSeccion && !vacio(r.seccion) ? String(r.seccion).trim() : etiquetaMuestra(r);
-    const claveSec = porSeccion && !vacio(r.seccion) ? `s:${tituloSec.toLowerCase()}` : `m:${r.muestraId}`;
+    const tituloSec = unica ? "" : porSeccion && !vacio(r.seccion) ? String(r.seccion).trim() : etiquetaMuestra(r);
+    const claveSec = unica ? "u" : porSeccion && !vacio(r.seccion) ? `s:${tituloSec.toLowerCase()}` : `m:${r.muestraId}`;
     let i = indice.get(claveSec);
     if (i === undefined) {
       i = secciones.push({ titulo: tituloSec, comps: new Map() }) - 1;
@@ -323,9 +336,60 @@ export function armarInforme(resultados: ResultadoParaInforme[], config: ConfigI
     referencias,
     hayRequisitoDeOrden: modalidad === "cumplimiento" && ordenados.some((r) => tieneRequisito(r) && r.especOrigen === "orden"),
     mostrarEstadisticas,
-    mostrarMuestra: porSeccion && varias,
+    mostrarMuestra: config.columnaMuestra || ((porSeccion || unica) && varias),
     puntoDe,
   };
+}
+
+/* ========================================================================== */
+/* Normas y métodos con la fecha del análisis (IDIC-PG09 Anexo 02-02, 3.1)     */
+/* ========================================================================== */
+
+export interface FilaMetodo {
+  analisis: string;
+  metodo: string;
+  /** Fechas y horas en que se ejecutó (desde – hasta), o «—» si no se registró. */
+  fechas: string;
+}
+
+const dosDigitos = (n: number) => String(n).padStart(2, "0");
+const MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"];
+/** «20.AGO.25 (08:30)» en hora de Chile, como el informe del LME. */
+function fechaAnalisis(d: Date): string {
+  const p = new Intl.DateTimeFormat("es-CL", {
+    timeZone: "America/Santiago", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(d);
+  const v = (t: string) => Number(p.find((x) => x.type === t)?.value ?? 0);
+  return `${dosDigitos(v("day"))}.${MESES[v("month") - 1]}.${String(v("year")).slice(-2)} (${dosDigitos(v("hour") % 24)}:${dosDigitos(v("minute"))})`;
+}
+
+/**
+ * Tabla «Análisis · Método · Fecha del análisis»: un renglón por ensayo y
+ * método, con la primera y la última fecha y hora en que se ejecutó (las
+ * registra la captura con equipo). Sin fecha registrada, «—».
+ */
+export function filasMetodos(resultados: ResultadoParaInforme[]): FilaMetodo[] {
+  const grupos = new Map<string, { analisis: string; metodo: string; fechas: Date[] }>();
+  for (const r of resultados) {
+    const analisis = vacio(r.ensayo) ? "Ensayo sin nombre en el catálogo" : String(r.ensayo).trim();
+    const metodo = textoMetodo(r);
+    const clave = `${analisis.toLowerCase()}|${metodo.toLowerCase()}`;
+    const g = grupos.get(clave) ?? { analisis, metodo, fechas: [] };
+    if (r.fechaEnsayo) {
+      const d = new Date(r.fechaEnsayo);
+      if (!Number.isNaN(d.getTime())) g.fechas.push(d);
+    }
+    grupos.set(clave, g);
+  }
+  return [...grupos.values()].map((g) => {
+    const orden = g.fechas.sort((a, b) => a.getTime() - b.getTime());
+    const fechas = !orden.length
+      ? "—"
+      : orden.length === 1 || orden[0].getTime() === orden[orden.length - 1].getTime()
+        ? fechaAnalisis(orden[0])
+        : `${fechaAnalisis(orden[0])} – ${fechaAnalisis(orden[orden.length - 1])}`;
+    return { analisis: g.analisis, metodo: g.metodo, fechas };
+  });
 }
 
 /** «a», «a y b», «a, b y c». */

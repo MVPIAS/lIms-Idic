@@ -85,7 +85,7 @@ table.data tr.row-action{cursor:pointer}table.data tr.row-action:hover td{backgr
 .toolbar select,.toolbar input{padding:6px 9px;border:1px solid var(--line);border-radius:5px;font:inherit;font-size:12px;background:#fff}.toolbar .spacer{flex:1}
 
 /* ---- Formularios ---- */
-.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.form-grid.cols-2{grid-template-columns:repeat(2,1fr)}.form-grid.cols-4{grid-template-columns:repeat(4,1fr)}
+.form-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.form-grid>.field,.form-grid>fieldset{min-width:0}.form-grid.cols-2{grid-template-columns:repeat(2,1fr)}.form-grid.cols-4{grid-template-columns:repeat(4,1fr)}
 .field{display:flex;flex-direction:column}
 .field label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:3px}.field label .req{color:var(--red)}
 .field input,.field select,.field textarea{padding:6px 9px;border:1px solid var(--line);border-radius:5px;font:inherit;font-size:12.5px;background:#fff}
@@ -117,7 +117,7 @@ table.data tr.row-action{cursor:pointer}table.data tr.row-action:hover td{backgr
 /* ---- Expediente ---- */
 .exphead{background:linear-gradient(135deg,#12343f,#1d4856);color:#fff;border-radius:11px;padding:14px 17px;margin-bottom:12px}
 .exphead .id{font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700}.exphead .meta{color:#bfe0e6;font-size:12px;margin-top:3px}.exphead .meta b{color:#fff}
-.expgrid{display:grid;grid-template-columns:250px 1fr;gap:14px}@media(max-width:1050px){.expgrid{grid-template-columns:1fr}}
+.expgrid{display:grid;grid-template-columns:250px 1fr;gap:14px}.expgrid>*{min-width:0}@media(max-width:1050px){.expgrid{grid-template-columns:1fr}}
 .stepper{background:#fff;border:1px solid var(--line);border-radius:9px;padding:8px;box-shadow:var(--shadow);align-self:start}
 .step{display:flex;gap:9px;align-items:flex-start;padding:7px 9px;border-radius:7px;cursor:pointer;position:relative}
 .step:hover{background:#f4f8fa}.step.active{background:#e6f4f6}
@@ -132,7 +132,7 @@ table.data tr.row-action{cursor:pointer}table.data tr.row-action:hover td{backgr
 .rolebanner.ok{background:#e9f6ee;border-color:var(--green);color:#155e3d}
 
 /* ---- Tabs (expediente / detalle) ---- */
-.tabs{display:flex;gap:2px;border-bottom:1px solid var(--line);margin-bottom:0}
+.tabs{display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid var(--line);margin-bottom:0}
 .tabs .tab{padding:8px 13px;font-size:12.5px;font-weight:600;color:var(--muted);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent}
 .tabs .tab:hover{color:var(--ink)}
 .tabs .tab.active{color:var(--primary);border-bottom-color:var(--accent)}

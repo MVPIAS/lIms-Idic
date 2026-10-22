@@ -517,7 +517,7 @@ function rutaLaboratorio(h: HechosOt): Ruta {
           };
         case "recepcion":
           return {
-            texto: "Registrar las muestras recibidas y sus ensayos",
+            texto: "Recepcionar las muestras: producto, condición de recepción, Nº interno y sus ensayos",
             leToca: { rol: "Recepción de muestras", unidad: u, personas: [] },
             accion: { texto: "Ir a Muestras", pestana: "muestras", permisos: ["muestra.crear"] },
           };
