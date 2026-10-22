@@ -139,3 +139,8 @@ CREATE INDEX IF NOT EXISTS idx_met_externo_ot ON met_servicio_externo (ot_id);
 INSERT INTO met_numeracion (tenant_id, prefijo, ultimo, relleno, formato, anual, anio)
 SELECT t.id, 'ITEC', 0, 4, 'IT-{N}', FALSE, NULL FROM tenant t
 ON CONFLICT (tenant_id, prefijo) DO NOTHING;
+
+-- --- 7 · Equipos auxiliares usados en la calibración ------------------------------
+-- {"termohigrometro": {id, codigo, ...}, "barometro": {...}, "lecturas": {temp: [], hum: [], pres: []},
+--  "corregidas": {temp: {promedio, error, corregido, U}, ...}}: copia, como los patrones.
+ALTER TABLE met_calibracion ADD COLUMN IF NOT EXISTS auxiliares JSONB;

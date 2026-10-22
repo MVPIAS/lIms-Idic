@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fmtN, fmtG } from "@/lib/metrologia";
+import { numeroOVacio } from "@/lib/metrologiaFicha";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
@@ -66,7 +67,12 @@ export default function MetrologiaConfigPage() {
 
   const colsPatron: DataColumn[] = [
     { key: "codigo", label: "Código", render: (p) => <span className="codigo">{p.codigo}</span> },
-    { key: "nombre", label: "Equipo", value: (p) => `${p.nombre} ${p.rango ?? ""}`, render: (p) => <>{p.nombre}{p.rango ? <span style={{ color: "var(--muted)" }}> · {p.rango}</span> : null}</> },
+    {
+      key: "nombre", label: "Equipo", value: (p) => `${p.nombre} ${p.rango ?? ""}`,
+      render: (p) => <>{p.nombre}{p.rango ? <span style={{ color: "var(--muted)" }}> · {p.rango}</span> : null}
+        {p.rango_min != null && p.rango_max != null && <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>Rango calibrado {fmtG(p.rango_min)} a {fmtG(p.rango_max)} {p.unidad_rango}</span>}
+        {p.correcciones && <span style={{ display: "block", fontSize: 11, color: "var(--muted)" }}>Errores del certificado cargados</span>}</>,
+    },
     { key: "tipo", label: "Tipo", value: (p) => (p.tipo === "auxiliar" ? "Auxiliar" : "Patrón") },
     { key: "magnitud", label: "Magnitud" },
     { key: "serie", label: "N° de serie" },
@@ -117,7 +123,14 @@ export default function MetrologiaConfigPage() {
       {tab === "patrones" && (
         <>
           <DataTable columns={colsPatron} rows={cfg.patrones ?? []} searchKeys={["codigo", "nombre", "serie", "n_certificado"]}
-            acciones={editar ? (p) => <button className="btn sm" onClick={() => setEditPat({ ...p, vence: p.vence?.slice(0, 10) ?? "", ultima_calibracion: p.ultima_calibracion?.slice(0, 10) ?? "" })}>Actualizar</button> : undefined}
+            acciones={editar ? (p) => <button className="btn sm" onClick={() => setEditPat({
+              ...p, vence: p.vence?.slice(0, 10) ?? "", ultima_calibracion: p.ultima_calibracion?.slice(0, 10) ?? "",
+              rango_min: p.rango_min == null ? "" : String(p.rango_min).replace(".", ","), rango_max: p.rango_max == null ? "" : String(p.rango_max).replace(".", ","),
+              corr: Object.fromEntries((["temp", "hum", "pres"] as const).map((k) => [k, {
+                error: p.correcciones?.[k]?.error == null ? "" : String(p.correcciones[k].error).replace(".", ","),
+                U: p.correcciones?.[k]?.U == null ? "" : String(p.correcciones[k].U).replace(".", ","),
+              }])),
+            })}>Actualizar</button> : undefined}
             vacio="No hay patrones en el maestro." />
           {editPat && (
             <div role="dialog" aria-modal="true" aria-labelledby="t-pat" onKeyDown={(e) => { if (e.key === "Escape") setEditPat(null); }} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.35)", display: "grid", placeItems: "center", zIndex: 50 }}>
@@ -130,6 +143,37 @@ export default function MetrologiaConfigPage() {
                     <div className="field" key={k}><label htmlFor={`p-${k}`}>{l}</label>
                       <input id={`p-${k}`} type={t} autoFocus={k === "n_certificado"} value={editPat[k] ?? ""} onChange={(e) => setEditPat({ ...editPat, [k]: e.target.value })} /></div>
                   ))}
+                  {editPat.tipo !== "auxiliar" ? (
+                    <fieldset style={{ gridColumn: "1 / -1", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", margin: 0 }}>
+                      <legend style={{ fontSize: 12, color: "var(--muted)", padding: "0 4px" }}>Rango calibrado (numérico) · «{editPat.rango || "sin texto"}»</legend>
+                      <div className="form-grid">
+                        {([["rango_min", "Mínimo"], ["rango_max", "Máximo"], ["unidad_rango", "Unidad (MPa, bar, kN, mm…)"]] as const).map(([k, l]) => (
+                          <div className="field" key={k}><label htmlFor={`p-${k}`}>{l}</label>
+                            <input id={`p-${k}`} inputMode={k === "unidad_rango" ? undefined : "decimal"} value={editPat[k] ?? ""} onChange={(e) => setEditPat({ ...editPat, [k]: e.target.value })} /></div>
+                        ))}
+                      </div>
+                      <small style={{ color: "var(--muted)" }}>Con el rango cargado, una calibración no puede medir un punto fuera de él con este patrón (R15 P6). Vacío = no se controla.</small>
+                    </fieldset>
+                  ) : (
+                    <fieldset style={{ gridColumn: "1 / -1", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", margin: 0 }}>
+                      <legend style={{ fontSize: 12, color: "var(--muted)", padding: "0 4px" }}>Error de su certificado (se resta de la lectura) y U (k = 2)</legend>
+                      <div className="form-grid cols-2">
+                        {([["temp", "Temperatura (°C)"], ["hum", "Humedad (%HR)"], ["pres", "Presión (hPa)"]] as const).flatMap(([k, l]) => [
+                          <div className="field" key={`${k}-e`}><label htmlFor={`p-${k}-e`}>{l} · error</label>
+                            <input id={`p-${k}-e`} inputMode="decimal" value={editPat.corr?.[k]?.error ?? ""} onChange={(e) => setEditPat({ ...editPat, corr: { ...editPat.corr, [k]: { ...editPat.corr?.[k], error: e.target.value } } })} /></div>,
+                          <div className="field" key={`${k}-u`}><label htmlFor={`p-${k}-u`}>{l} · U</label>
+                            <input id={`p-${k}-u`} inputMode="decimal" value={editPat.corr?.[k]?.U ?? ""} onChange={(e) => setEditPat({ ...editPat, corr: { ...editPat.corr, [k]: { ...editPat.corr?.[k], U: e.target.value } } })} /></div>,
+                        ])}
+                      </div>
+                      <small style={{ color: "var(--muted)" }}>Deje vacío lo que el equipo no mide. Las calibraciones informan la condición corregida con esta U.</small>
+                    </fieldset>
+                  )}
+                  {editPat.coeficientes && (
+                    <p style={{ gridColumn: "1 / -1", fontSize: 12, margin: 0, color: "var(--muted)" }}>
+                      Último certificado del LNF: clase {editPat.coeficientes.clase ?? "—"} · t = {fmtG(editPat.coeficientes.t)} · u = {fmtG(editPat.coeficientes.u)} · v = {fmtG(editPat.coeficientes.v)}
+                      {editPat.coeficientes.certificado ? ` · ${editPat.coeficientes.certificado}` : ""}
+                    </p>
+                  )}
                   <label style={{ display: "flex", gap: 8, alignItems: "center", gridColumn: "1 / -1" }}>
                     <input type="checkbox" checked={editPat.activo !== false} onChange={(e) => setEditPat({ ...editPat, activo: e.target.checked })} /> En uso (desmarque para darlo de baja)
                   </label>
@@ -141,6 +185,9 @@ export default function MetrologiaConfigPage() {
                       n_certificado: editPat.n_certificado || null, emisor: editPat.emisor || null, ultima_calibracion: editPat.ultima_calibracion || "",
                       intervalo_meses: editPat.intervalo_meses === "" || editPat.intervalo_meses == null ? null : Number(editPat.intervalo_meses),
                       vence: editPat.vence || "", trazabilidad: editPat.trazabilidad || null, activo: editPat.activo !== false,
+                      ...(editPat.tipo !== "auxiliar"
+                        ? { rango_min: numeroOVacio(editPat.rango_min ?? ""), rango_max: numeroOVacio(editPat.rango_max ?? ""), unidad_rango: String(editPat.unidad_rango ?? "").trim() || null }
+                        : { correcciones: Object.fromEntries((["temp", "hum", "pres"] as const).map((k) => [k, { error: numeroOVacio(editPat.corr?.[k]?.error ?? ""), U: numeroOVacio(editPat.corr?.[k]?.U ?? "") }])) }),
                     }) });
                     setEditPat(null);
                   }, "Patrón actualizado")}>Guardar</button>
