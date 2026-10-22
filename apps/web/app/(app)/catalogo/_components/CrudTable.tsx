@@ -90,6 +90,8 @@ export interface CrudTableProps {
   permitirCrear?: boolean;
   permitirEditar?: boolean;
   permitirEliminar?: boolean;
+  /** Botones o enlaces adicionales en la cabecera, junto a «＋ Nuevo». */
+  accionesExtra?: React.ReactNode;
 }
 
 const mapPorDefecto = (row: any) => {
@@ -168,7 +170,7 @@ function SelectField({ campo, inputId, value, endpoint, onChange }: SelectFieldP
 }
 
 export default function CrudTable({
-  titulo, subtitulo, endpoint, columnas, campos, migas, permisos,
+  titulo, subtitulo, endpoint, columnas, campos, migas, permisos, accionesExtra,
   permitirCrear, permitirEditar, permitirEliminar,
 }: CrudTableProps) {
   const { puede, listo } = usePermisos();
@@ -411,10 +413,15 @@ export default function CrudTable({
         titulo={titulo}
         subtitulo={subtitulo}
         migas={migas ?? [{ label: "Tablas maestras", href: "/catalogo" }, { label: titulo }]}
-        acciones={puedeCrear && (
-          <button className="btn primary sm" onClick={() => (showForm ? cerrarForm() : abrirCrear())}>
-            {showForm ? "Cerrar formulario" : "＋ Nuevo"}
-          </button>
+        acciones={(puedeCrear || accionesExtra) && (
+          <>
+            {accionesExtra}
+            {puedeCrear && (
+              <button className="btn primary sm" onClick={() => (showForm ? cerrarForm() : abrirCrear())}>
+                {showForm ? "Cerrar formulario" : "＋ Nuevo"}
+              </button>
+            )}
+          </>
         )}
       />
       {/* Errores de la lista (carga): solo cuando el formulario está cerrado; con

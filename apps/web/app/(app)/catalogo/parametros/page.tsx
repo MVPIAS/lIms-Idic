@@ -32,6 +32,12 @@ export default function ParametrosPage() {
       titulo="Parámetros del sistema"
       subtitulo="Combos de negocio editables: agrega, modifica o desactiva valores (tipo de cliente, forma de pago, prioridad, líneas de costeo, tipo de inspección) sin intervención técnica. El valor de las reglas de la operación (cotización, encuestas, recepción, captura, Metrología) y los porcentajes de la tasa de internación se cambian, con motivo, en los recuadros al final de esta página."
       endpoint="parametros"
+      accionesExtra={
+        <>
+          <a href="#parametros-operacion" className="btn outline sm">Parámetros de la operación ↓</a>
+          <a href="#porcentajes-tasa" className="btn outline sm">Porcentajes de la tasa ↓</a>
+        </>
+      }
       columnas={[
         { key: "categoria", label: "Categoría" },
         { key: "codigo", label: "Código", render: codigoCell },
