@@ -59,8 +59,12 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | Revisión y aprobación de resultados (`segregacion_resultado`) · por confirmar | Revisión y aprobación (`revisor_aprobador`) | Opción: por personas distintas · la misma persona puede | distintas | Aprobar un resultado y «Aprobar todo lo revisado» | `rbac/alcance-resultado.ts` (`configSegregacion`) |
 | | Laboratorios donde la misma persona revisa y aprueba (`excepciones`) | Casillas con los laboratorios, sucursales y delegaciones de la base (solo códigos que existen). Ninguno = la regla vale en todos | Ninguno | idem | idem |
 | Plazo de la OT de internación (`ot_plazo`) · por confirmar EP-06 | Plazo (`internacion_dias`) | Entero 1–365 días corridos | 10 | Fecha de compromiso de la OT al generarla desde la internación (las ya generadas no cambian) | `bpch/ot-desde-proceso.service.ts` |
+| Muestreo · plan NCh 44 (`muestreo_plan`) · por confirmar EP-05 §10 P6 y P15, EP-03 §0.4 y §3.7 | Nivel de inspección (`nivel`) | Opción: S-1…S-4, I, II, III | II | Plan con que se abre cada lote en OT › Muestreo (los registrados no cambian) | `muestreo/muestreo.module.ts` (`parametros`) |
+| | AQL crítico / mayor / menor (`aql_critico`, `aql_mayor`, `aql_menor`) | Opción: sin AQL o una columna de la tabla 2-A | ninguno · 2,5 · 4 | idem | idem |
+| Veredicto del lote (`veredicto_lote`) · por confirmar EP-05 §10 P15 y P19 | Clase sin Ac/Re en el plan (`regla_sin_plan`) | Opción: una NC de cualquier clase rechaza · solo crítica o mayor rechaza | cualquier_nc | OT › Muestreo › Conclusión del lote | idem (`nch44.ts` · `veredictoLote`) |
 
-Las tres últimas reglas las creó el frente r1g (recorrido MP-02/MP-06, `align_r1g_recorrido.sql`)
+Los grupos `muestreo_plan` y `veredicto_lote` los creó el frente r2b
+(`docs/FLUJO_ESPECIFICACIONES_MUESTREO.md`). Las reglas `captura_ld`, `segregacion_resultado` y `ot_plazo` las creó el frente r1g (recorrido MP-02/MP-06, `align_r1g_recorrido.sql`)
 y desde el frente r1h se editan aquí como las demás, con motivo e historial. Las
 excepciones de la segregación se guardan como antes (códigos separados por coma), así
 que el lector no cambia; la captura muestra en «Aprobar todo lo revisado» cuántos
