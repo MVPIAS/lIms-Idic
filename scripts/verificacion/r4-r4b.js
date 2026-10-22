@@ -176,6 +176,9 @@ const U = {
   director: "demo.director",
   lrb: "demo.lrb.analista1",
   lam: "demo.lam.analista1",
+  stgo: "demo.sstgo.jefe",
+  stgoInsp: "demo.sstgo.inspector",
+  antofInsp: "demo.santof.inspector",
 };
 const hoyCl = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 function rutValido(base) {
@@ -683,6 +686,47 @@ async function main() {
       return `${d.codigo} → ${cu.cnc} · certificado ${d.documento.numero}`;
     }
     return "sin prototipos aprobados con código por inscribir en esta BD (se omite)";
+  });
+
+  /* --------------------------------------------- EP-07 7.3 · revisión documental IT08 */
+  await paso("7.3 · Revisión documental IT08 en la OT de Producción Nacional: checklist y traslado al ensayo «Rev. Doc. Legal» (BL-177)", async () => {
+    const cfg = await ok(U.bpch, "GET", "/bpch/pn/config");
+    const stgo = cfg.unidades.find((u) => u.codigo === "SSTGO");
+    const tipo = (cfg.tiposCliente.find((t) => t.codigo === "ley_17798") ?? cfg.tiposCliente[0]).codigo;
+    const anio = Number(hoyCl().slice(0, 4));
+    const mes = Number(hoyCl().slice(5, 7));
+    const fab = await ok(U.scc, "POST", "/bpch/pn/fabricantes", { rut: rutValido(Number(sello.slice(-7)) + 7), razonSocial: `Fabricante ficticio r4b ${sello}`, tipo, ciudad: "Santiago" });
+    const raf = await ok(U.scc, "POST", "/bpch/pn/rafs", { clienteId: fab.id, numero: `RAF-R4B-${sello}`, fecha: `${anio}-01-10`, tipoLinea: "FIJA", planta: "Planta ficticia", vigenciaHasta: `${anio + 1}-12-31` });
+    const oc = await ok(U.bpch, "POST", "/bpch/pn/oc", {
+      rafId: raf.id, numero: `OC-R4B-${sello}`, anio, vigenciaDesde: `${anio}-01-01`, vigenciaHasta: `${anio}-12-31`, conCobro: false,
+      productos: [{ producto: "Emulsión ficticia", unidadMedida: "u", cantidadAutorizada: 100 }],
+    });
+    const o = await ok(U.scc, "POST", `/bpch/pn/oc/${oc.id}/programa`, { lineas: [{ ocProductoId: oc.productos[0].id, unidadId: stgo.id, mes, cantidad: 10 }] });
+    const ot = (await ok(U.stgo, "POST", `/bpch/pn/programa/${o.programa[0].id}/generar-ot`)).ot;
+    const ms = lista(await ok(U.stgo, "GET", "/cat/metodos?search=documentaci%C3%B3n%20legal&limit=50"));
+    const m = ms.find((x) => /documentaci[oó]n legal/i.test(x.nombre));
+    afirmar(m, "no hay método «Revisión de documentación legal» en el catálogo");
+    await ok(U.stgoInsp, "POST", `/flujo/ot/${ot.id}/muestras`, { muestras: [{ nombre: "Documentación de la planta", metodoIds: [m.id] }] });
+    const v = await ok(U.stgoInsp, "GET", `/bpch/pn/ot/${ot.id}/revision-documental`);
+    afirmar(v.aplica && v.ensayo.length >= 2, `ensayo Rev. Doc. Legal: ${v.ensayo.length} analitos`);
+    const items = [
+      { clave: "raf_linea", aplica: true, estado: "conforme" },
+      { clave: "raf_listado", aplica: true, estado: "no_conforme", defecto: "menor", observacion: "Nombre comercial abreviado en el listado (ficticio)" },
+      { clave: "inspeccion_linea", aplica: false },
+      { clave: "almacenamiento", aplica: true, estado: "conforme" },
+      { clave: "otro", aplica: false },
+    ];
+    await exigir(400, U.stgoInsp, "PUT", `/bpch/pn/ot/${ot.id}/revision-documental`, { items: items.map((i) => (i.clave === "raf_linea" ? { ...i, aplica: false } : i)) }, /siempre aplica/);
+    await exigir(403, U.ventas, "PUT", `/bpch/pn/ot/${ot.id}/revision-documental`, { items });
+    await exigir(403, U.antofInsp, "PUT", `/bpch/pn/ot/${ot.id}/revision-documental`, { items }, /alcance/);
+    const r = await ok(U.stgoInsp, "PUT", `/bpch/pn/ot/${ot.id}/revision-documental`, { items });
+    afirmar(r.resultado === "conforme" && r.criticos === 0 && r.menores === 1 && r.trasladados >= 2, `revisión ${JSON.stringify(r).slice(0, 200)}`);
+    const rs = (await ok(U.stgoInsp, "GET", `/flujo/ot/${ot.id}/resultados`)).resultados;
+    const txt = (x) => x.catAnalito?.nombre ?? x.analito?.nombre ?? "";
+    const crit = rs.find((x) => /cr[ií]tic/i.test(txt(x)));
+    const men = rs.find((x) => /menor/i.test(txt(x)));
+    afirmar(crit && men && Number(crit.valorNumerico ?? crit.valor) === 0 && Number(men.valorNumerico ?? men.valor) === 1, `valores ${JSON.stringify(rs.map((x) => [txt(x), x.valorNumerico ?? x.valor]))}`);
+    return `${ot.codigo}: 0 críticos · 1 menor → «Rev. Doc. Legal» capturado`;
   });
 }
 

@@ -15,6 +15,8 @@ import { ProduccionNacionalService } from "./produccion-nacional/produccion-naci
 import { PrototiposController } from "./prototipos/prototipos.controller";
 import { PrototiposService } from "./prototipos/prototipos.service";
 import { textoClasificacion } from "./clasificacion/reglas-clasificacion";
+import { FlujoRealModule } from "../flujo-real/flujo-real.module";
+import { RevisionDocumentalController, RevisionDocumentalService } from "./produccion-nacional/revision-documental.controller";
 
 /**
  * Origen BPCH de una OT (Producción Nacional o Prototipo), para el aviso del
@@ -79,8 +81,8 @@ export class OrigenOtBpchController {
  * Reglas y casos de prueba: docs/FLUJO_BPCH_PRODUCCION_PROTOTIPOS_CLASIFICACION.md.
  */
 @Module({
-  imports: [ClienteModule, PlantillaRenderModule],
-  controllers: [ClasificacionController, ProduccionNacionalController, PrototiposController, OrigenOtBpchController],
-  providers: [OtDesdeProcesoService, ClasificacionService, ProduccionNacionalService, PrototiposService],
+  imports: [ClienteModule, PlantillaRenderModule, FlujoRealModule],
+  controllers: [ClasificacionController, ProduccionNacionalController, PrototiposController, OrigenOtBpchController, RevisionDocumentalController],
+  providers: [OtDesdeProcesoService, ClasificacionService, ProduccionNacionalService, PrototiposService, RevisionDocumentalService],
 })
 export class BpchProduccionPrototiposClasificacionModule {}

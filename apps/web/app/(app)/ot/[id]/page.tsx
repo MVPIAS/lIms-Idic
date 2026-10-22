@@ -17,6 +17,7 @@ import FotosOt from "./_components/FotosOt";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
 import NotificacionDgmn from "@/components/bpch-procesos/NotificacionDgmn";
+import RevisionDocumental from "@/components/bpch-procesos/RevisionDocumental";
 import { MOTOR_FLUJOS_VISIBLE } from "@/lib/motorFlujos";
 import FlujoBpmOt from "./_components/FlujoBpmOt";
 import { EtapasOt, SiguientePasoOt, type AvanceOt } from "@/components/ot/RutaOt";
@@ -334,6 +335,7 @@ export default function ExpedientePage() {
                 /* Emitir, editar o anular una orden interna cambia la Ruta y el siguiente paso (D02-26). */
                 onCambio={cargarAvance} />
             )}
+            {tab === "resultados" && typeof id === "string" && ot?.origenTrabajo === "PRODUCCION_NACIONAL" && <RevisionDocumental otId={id} onCambio={cargarAvance} />}
             {tab === "resultados" && (
               <div style={{ display: "grid", gap: 8 }}>
                 <p className="subtitle" style={{ margin: 0 }}>
