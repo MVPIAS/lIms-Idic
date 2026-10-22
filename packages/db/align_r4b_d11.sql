@@ -284,11 +284,15 @@ CREATE INDEX IF NOT EXISTS ix_d11_cert_arma ON d11_certificado_arma (arma_ot_id)
 -- -----------------------------------------------------------------------------
 -- 7 · Tipos de documento de la D11 en la matriz de firmas (11.42) y numeración
 -- -----------------------------------------------------------------------------
+-- Lista completa (r2a: CRB e Informe de Rechazo; r4b: D11 y SAEC). Los dos ficheros
+-- recrean la restricción: deben llevar la misma lista o el último deja fuera filas ya
+-- insertadas por el otro y el ADD CONSTRAINT falla.
 ALTER TABLE flujo_firma DROP CONSTRAINT IF EXISTS flujo_firma_tipo_documento_check;
 ALTER TABLE flujo_firma ADD CONSTRAINT flujo_firma_tipo_documento_check CHECK (tipo_documento IN (
   'INFORME_ENSAYO','IVC','INFORME_TECNICO','CERTIFICADO_CALIBRACION',
   'INFORME_INSPECCION','CERTIFICADO_CONFORMIDAD','INFORME_INCUMPLIMIENTO',
   'COTIZACION','OT_DISPOSICION','SOLICITUD_ADQUISICION','OFICIO',
+  'CERTIFICADO_RESISTENCIA_BALISTICA','INFORME_RECHAZO',
   'CERTIFICADO_ARMA','INFORME_INCUMPLIMIENTO_ARMA','CERTIFICADO_EVIDENCIA','INFORME_PERICIAL','NOTA_NO_CONFORMIDAD'));
 
 CREATE TEMP TABLE IF NOT EXISTS _ff_d11 (
