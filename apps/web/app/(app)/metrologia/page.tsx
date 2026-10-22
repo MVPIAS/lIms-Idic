@@ -20,6 +20,10 @@ const ESTADO: Record<string, { label: string; pill: string }> = {
   emitida: { label: "Emitida", pill: "green" },
   reemplazada: { label: "Reemplazada", pill: "amber" },
 };
+const MAGNITUD: Record<string, string> = {
+  masa: "Masa", presion: "Presión", longitud: "Longitud", volumen: "Volumen", fuerza: "Fuerza", par: "Par torsional",
+  temperatura: "Temperatura", electrica: "Eléctrica", tiempo: "Tiempo y frecuencia", general: "Otra",
+};
 const FILTROS: [string, string][] = [["", "Todas"], ["borrador", "Borradores"], ["en_revision", "En firma"], ["emitida", "Emitidas"], ["reemplazada", "Reemplazadas"]];
 const fecha = (x?: string | null) => (x ? new Date(x).toLocaleDateString("es-CL", { timeZone: "UTC" }) : "—");
 
@@ -112,6 +116,7 @@ export default function MetrologiaCalibracionesPage() {
       key: "instrumento", label: "Instrumento · proceso", value: (c) => `${c.instrumento ?? ""} ${c.proceso ?? ""} ${c.proceso_nombre ?? ""} ${c.laboratorio ?? ""}`,
       render: (c) => <>{c.instrumento ?? "—"}<span style={{ display: "block", fontSize: 11, color: "var(--muted)" }} title={c.proceso_nombre}>{c.laboratorio ? `${c.laboratorio} · ` : ""}{c.proceso}</span></>,
     },
+    { key: "magnitud", label: "Magnitud", value: (c) => MAGNITUD[c.magnitud] ?? c.magnitud ?? "", render: (c) => MAGNITUD[c.magnitud] ?? c.magnitud ?? "—" },
     { key: "cliente", label: "Cliente", value: (c) => c.cliente ?? "", render: (c) => c.cliente ?? "—" },
     { key: "u_max", label: "U certificada (k=2)", num: true, value: (c) => c.u_cert ?? c.u_max, render: (c) => (c.u_cert ?? c.u_max) == null ? "—" : <>± {fmtG(c.u_cert ?? c.u_max)} {c.unidad_u}</> },
     {
@@ -172,7 +177,7 @@ export default function MetrologiaCalibracionesPage() {
         columns={columns}
         rows={rows}
         loading={cargando}
-        searchKeys={["codigo", "numero_certificado", "instrumento", "cliente", "proceso", "ot_codigo"]}
+        searchKeys={["codigo", "numero_certificado", "instrumento", "cliente", "proceso", "ot_codigo", "magnitud"]}
         acciones={(c) => {
           const a: string[] = c.acciones ?? [];
           return (
