@@ -63,9 +63,10 @@ describe("parámetros · el porcentaje solo cambia con motivo", () => {
   });
 
   it("leer los porcentajes: configuración o internaciones; los demás 403", async () => {
-    const p = new ParametroPorcentajeController(svc as any);
-    await p.porcentajes(req);
-    await p.porcentajes({ user: { tenantId: "t", permisos: ["bpch.internacion.ver"] } });
-    expect(() => p.porcentajes({ user: { tenantId: "t", permisos: ["resultado.crear"] } })).toThrow(ForbiddenException);
+    const p = new ParametroPorcentajeController(svc as any, { alcancePermisos: async () => ({ esGlobal: true, unidadIds: [] }) } as any);
+    expect((await p.porcentajes(req)).puedeEditar).toBe(true);
+    // Comercial lo ve (internaciones), pero no lo cambia.
+    expect((await p.porcentajes({ user: { tenantId: "t", permisos: ["bpch.internacion.ver"] } })).puedeEditar).toBe(false);
+    await expect(p.porcentajes({ user: { tenantId: "t", permisos: ["resultado.crear"] } })).rejects.toBeInstanceOf(ForbiddenException);
   });
 });

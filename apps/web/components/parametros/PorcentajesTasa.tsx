@@ -25,8 +25,9 @@ export const porcentajeCl = (v: string | number | null | undefined) => {
 
 export default function PorcentajesTasa({ compacto = false }: { compacto?: boolean }) {
   const { puede } = usePermisos();
-  const editable = puede("catalogo.gestionar");
-  const [datos, setDatos] = useState<{ valores: Valor[]; historial: Cambio[] } | null>(null);
+  const [datos, setDatos] = useState<{ valores: Valor[]; historial: Cambio[]; puedeEditar?: boolean } | null>(null);
+  // Los cambia catalogo.gestionar con alcance global (Calidad, Administración); lo dice el servidor.
+  const editable = datos?.puedeEditar ?? puede("catalogo.gestionar");
   const [error, setError] = useState("");
   const [editando, setEditando] = useState<Valor | null>(null);
   const [nuevo, setNuevo] = useState("");
@@ -89,7 +90,7 @@ export default function PorcentajesTasa({ compacto = false }: { compacto?: boole
 
   const etiquetaDe = (codigo: string) => datos.valores.find((v) => v.codigo === codigo)?.etiqueta ?? codigo;
   return (
-    <section className="card" style={{ padding: 14 }} aria-labelledby="pct-titulo">
+    <section className="card" style={{ padding: 14 }} aria-labelledby="pct-titulo" id="porcentajes-tasa">
       <h2 id="pct-titulo" style={{ fontSize: 14, margin: "0 0 4px" }}>Porcentajes de la tasa de internación</h2>
       <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 10px" }}>
         Se aplican al calcular la tasa de cada internación (IDIC-PG 24 Anexo 03). Un cambio vale para los cálculos que se hagan desde

@@ -29,7 +29,9 @@ no pasan por la firma y se aceptan como antes.
 **Numeración (2.1).** El formato es `AAAA-NNNNN` (real: `2026-14324`). El correlativo
 es atómico por tenant (`cotizacion_correlativo`, `INSERT … ON CONFLICT DO UPDATE …
 RETURNING`). Si un número ya existe (dato migrado), se salta. Parámetros en
-`numeracion_cotizacion`:
+`numeracion_cotizacion` (y los del circuito en `circuito_cotizacion`), editables con motivo
+e historial en Administración › Parámetros del sistema › «Parámetros de la operación»
+(`PARAMETROS_OPERACION.md`):
 
 | Parámetro | Por defecto | Para qué |
 |---|---|---|
@@ -120,7 +122,7 @@ Decisión del usuario del 20-10-2026:
 | Registro | `encuesta.registrar` (Comercial y Planificación). Exige todas las respuestas obligatorias dentro de la escala, quién respondió y su cargo, el medio (teléfono, correo, en persona o formulario en papel) y la fecha. Guarda una copia del texto de cada pregunta, así que editar las preguntas no altera lo registrado. Calcula el promedio |
 | Sin respuesta | «Cerrar sin respuesta» con motivo |
 | Una vez | Una encuesta registrada o cerrada no se vuelve a registrar (409) |
-| Orígenes excluidos | Parámetro `encuesta.excluir_origenes`. Por defecto `OT_INTERNA,INTERLABORATORIO`, porque no tienen cliente externo (EP-00 5.4) |
+| Orígenes excluidos | Parámetro `encuesta.excluir_origenes` (casillas en Administración › Parámetros del sistema › «Parámetros de la operación», `PARAMETROS_OPERACION.md`). Por defecto `OT_INTERNA,INTERLABORATORIO`, porque no tienen cliente externo (EP-00 5.4) |
 | Alcance | La encuesta es del laboratorio de la OT. Quien tiene el Departamento Comercial en su alcance, o alcance global, las ve todas; una jefatura técnica ve las de sus laboratorios (`encuesta.ver`) |
 | Reporte | Por laboratorio y período: total, pendientes, registradas, sin respuesta, tasa de respuesta, promedio general y promedio por pregunta |
 

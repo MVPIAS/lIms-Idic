@@ -38,7 +38,7 @@ import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./ve
 import { leerReplicas } from "./replicas";
 import { AccionRevision, clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, planReapertura } from "./flujo-resultado";
 import { veredictoMuestra } from "./especificacion";
-import { conTraza } from "./traza";
+import { conTraza, exigeMotivoCorreccion, teniaValor } from "./traza";
 import { CostosRealesController, CostosRealesService, PlanillaCalculosController, PlanillaCalculosService } from "./planillas-ot";
 
 /**
@@ -492,20 +492,31 @@ export class ResultadoService extends BaseCrudService {
   /**
    * Corrección de un resultado por réplicas (típicamente uno DEVUELTO): se
    * recalcula en el MISMO registro y vuelve a 'capturado' con el nuevo analista
-   * y fecha. No se puede sobre un resultado revisado o aprobado.
+   * y fecha. No se puede sobre un resultado revisado o aprobado. Misma regla de
+   * corrección que la captura por valor (traza.ts): si ya tenía un valor
+   * capturado sin revisar, exige motivo (mínimo 5 caracteres); tras una
+   * devolución el motivo, si no se indica, es el de la devolución.
    */
   async recapturar(id: string, dto: any, usuarioId: string | undefined, tenantId = DEV_TENANT) {
     const actual = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null },
-      select: { id: true, estado: true, analitoId: true, motivoDevolucion: true },
+      select: {
+        id: true, estado: true, analitoId: true, motivoDevolucion: true,
+        valorNumerico: true, valorTexto: true, resultadoFinal: true, promedio: true,
+      },
     });
     if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
     if (!actual.analitoId)
       throw new BadRequestException("Este resultado se captura por valor en «Captura y revisión por OT», no por réplicas.");
     const motivo = motivoNoCapturable(actual.estado);
     if (motivo) throw new ConflictException(motivo);
+    const motivoCorreccion = typeof dto.motivo === "string" ? dto.motivo.trim() : "";
+    if (exigeMotivoCorreccion(actual.estado, teniaValor(actual)) && motivoCorreccion.length < 5)
+      throw new BadRequestException(
+        "Este ensayo ya tiene un valor capturado: indique el motivo de la corrección (mínimo 5 caracteres). Queda en el historial del resultado.",
+      );
     const calc = await this.calcular({ ...dto, analitoId: actual.analitoId }, tenantId);
-    const traza = { usuarioId, motivo: dto.motivo?.trim() || actual.motivoDevolucion, origen: "correccion" };
+    const traza = { usuarioId, motivo: motivoCorreccion || actual.motivoDevolucion, origen: "correccion" };
     const r = await conTraza(this.prisma, traza, (tx) => tx.resultado.update({
       where: { id },
       data: {

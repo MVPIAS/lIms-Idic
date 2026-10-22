@@ -436,7 +436,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                                     : <Link key={o.id} href={"/ordenes-internas" as any} style={{ color: "var(--accent)" }}>{o.numero} ({o.estado})</Link>)
                                 : <>
                                     <span className="pill amber">sin orden interna</span>
-                                    {onOrdenInterna && puede("ot.crear") && (
+                                    {onOrdenInterna && puede("orden_interna.emitir") && (
                                       <button type="button" className="btn outline sm" style={{ marginLeft: 6 }} onClick={() => onOrdenInterna(e.unidadId)}>
                                         Emitir orden interna
                                       </button>

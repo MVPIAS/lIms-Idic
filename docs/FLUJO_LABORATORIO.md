@@ -128,9 +128,18 @@ pendiente ─captura─▶ capturado ──revisar──▶ revisado_n1 ──ap
 | Aprobar | `resultado.aprobar` | `POST /resultados/:id/aprobar` · OT completa: `POST /resultados/ot/:otId/aprobar` |
 | Devolver | `resultado.revisar` | `POST /resultados/:id/devolver` `{ motivo }` |
 | Veredicto manual (texto que no se pudo contrastar) | `resultado.revisar` | `POST /resultados/:id/veredicto` |
-| Corregir por réplicas | `resultado.crear` | `POST /resultados/:id/recapturar` |
+| Corregir por réplicas | `resultado.crear` | `POST /resultados/:id/recapturar` `{ replicasTexto, equipoId?, motivo }` |
 
 - Quien capturó un resultado no lo revisa ni lo aprueba (409). En la acción por OT completa esos resultados se omiten y se dice por qué.
+- **Una sola captura.** Todo se captura y corrige en «Captura y revisión por OT» (`/captura-ot`).
+  Los resultados por réplicas (analito del catálogo antiguo) se corrigen en su fila con
+  «Corregir réplicas…» (réplicas, equipo y motivo). Rige la misma regla de corrección que la
+  captura por valor (`traza.ts · exigeMotivoCorreccion`): si el ensayo ya tiene un valor capturado
+  sin revisar, el motivo es obligatorio (mínimo 5 caracteres, 400 si falta) y queda en el historial
+  del resultado; tras una devolución vale el motivo de la devolución. La antigua pantalla suelta
+  `/captura` redirige a `/captura-ot` (y `/captura?corregir=<id>` abre la OT del resultado con la
+  corrección abierta); su alta de un resultado suelto por muestra + analito, fuera de la OT, ya no
+  está en la interfaz ni en el menú.
 - **Reabrir un resultado aprobado** (`POST /resultados/:id/reabrir { motivo }`, permiso `resultado.reabrir`:
   jefaturas y Dirección; botón «Reabrir» en «Captura y revisión por OT»): si al revisar o firmar el
   informe se detecta un valor erróneo. El resultado vuelve a `devuelto` (el analista lo corrige y se
@@ -186,6 +195,7 @@ frente r1b, `align_r1b_ordenes_internas.sql`). Especificación: EP-01 0.6, 2.2,
 | Laboratorio › Órdenes internas · «Todas las de mi alcance» | `/ordenes-internas?vista=todas` | Las emitidas desde sus OT y las que llegan; «＋ Nueva orden interna» (primero se elige la OT). |
 | Ficha de la orden | `/ordenes-internas/[id]` | Barra de 5 pasos, «Siguiente paso · Le toca a», un bloque por paso con su botón «Verbo → siguiente», informe de respuesta renderizado y bitácora. |
 | Ficha de la OT › «Órdenes internas» | `/ot/[id]` | Las de la OT, su costo directo y el aviso de las que volvieron con informe. |
+| Ficha de la OT › «Muestras» · columna «Otros laboratorios» | `/ot/[id]` | Por cada laboratorio que la muestra necesita y aún no tiene orden: «Emitir orden interna» (lleva a la pestaña «Órdenes internas» con el destino propuesto). Se ve con `orden_interna.emitir`, el mismo permiso que exige la API (antes miraba `ot.crear`). |
 | Mi bandeja (Jefe de Laboratorio) | `/inicio` | «Órdenes internas por atender» (destino) e «Informes internos por integrar» (origen). |
 
 **Ciclo (ficha de la orden).**
@@ -295,11 +305,17 @@ etapas observables.
 - **Metrología** (laboratorio LMT, LMTE, LNF o LCAD que trabaja con
   calibraciones; si usa la captura estándar sigue la ruta de laboratorio):
   Apertura → Toma de datos y cálculo → Revisión técnica → Firma y emisión del
-  certificado → Entrega → Cierre → Factura → Pago, tomadas de
-  `met_calibracion.estado` de las calibraciones de la OT (por `ot_id` o por el
-  código de OT escrito en la calibración). Mientras la calibración no se ligue a
-  la OT (pendiente P7), la **Entrega queda «bloqueada»** y el siguiente paso lo
-  explica: el cierre sigue exigiendo un documento del flujo general.
+  certificado → Entrega → Cierre → Factura → Pago (con Programación y
+  Recepción del instrumento antes de la toma de datos), tomadas de los
+  instrumentos de la OT (`met_ot_instrumento`) y de `met_calibracion.estado` de
+  sus calibraciones, que ya están ligadas a la OT y al instrumento (entrega R1,
+  EP-04). La **Entrega ya no está bloqueada**: es «Entrega del certificado y
+  devolución» («Registrar entrega →» y «Devolver instrumento →» en la pestaña
+  Instrumentos o en la ficha de calibración), y el cierre cuenta cada
+  certificado de calibración emitido y entregado como documento de la OT
+  (detalle en `FLUJO_METROLOGIA.md` §7.2 y §7.3). Si el parámetro
+  `metrologia.cierre_exige_devolucion` está en «Sí», el cierre exige además la
+  devolución de cada instrumento (`PARAMETROS_OPERACION.md`).
 - **BPCH Internación**: las fases del expediente BPCH, con el mismo criterio que
   `internacion-bpch.service › fases()`: Resolución DGMN y análisis técnico → OT y
   lotes → Resultados de la inspección → Informe de Inspección → Certificado de

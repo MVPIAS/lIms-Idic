@@ -57,10 +57,13 @@ usan); la pantalla siempre la envía.
 
 ### 2.1 Campos propios de cada laboratorio (sin código)
 
-Catálogo › Parámetros, categoría `recepcion_campo`, código `<LAB>.<campo>`, etiqueta y
-valor JSON `{"tipo": "texto|numero|entero|fecha|lista|casilla", "obligatorio": true,
-"opciones": [...], "ayuda": "…"}`. Un JSON mal escrito no rompe la recepción: ese campo no
-se pide. `clase_custodia` y `ubicacion` van a columnas de la muestra; el resto a
+Administración › Parámetros del sistema › «Parámetros de la operación» › «Recepción ·
+campos propios de cada laboratorio» (`PARAMETROS_OPERACION.md`): un formulario por campo
+(tipo de dato, obligatorio, activo, ayuda y opciones), con motivo e historial, y «＋ Añadir
+campo». Se guarda en la categoría `recepcion_campo`, código `<LAB>.<campo>`, con valor JSON
+`{"tipo": "texto|numero|entero|fecha|lista|casilla", "obligatorio": true, "opciones": [...],
+"ayuda": "…"}`; la pantalla lo valida con el mismo lector de la recepción. Un JSON mal
+escrito (p. ej. cargado por SQL) no rompe la recepción: ese campo no se pide. `clase_custodia` y `ubicacion` van a columnas de la muestra; el resto a
 `muestra.datos_recepcion`. Un campo no definido para el laboratorio se rechaza (400).
 
 | Laboratorio | Campos sembrados (obligatorios en negrita) | Fuente |

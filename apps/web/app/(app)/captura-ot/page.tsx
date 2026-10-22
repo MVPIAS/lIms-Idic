@@ -21,11 +21,14 @@
  * laboratorio (alcance).
  *
  * Corregir un valor ya capturado exige motivo; el factor de la fórmula lo ajusta
- * quien tiene «resultado.factor». Todo cambio queda en el historial del ensayo,
+ * quien tiene «resultado.factor». Los resultados por réplicas (analito del
+ * catálogo antiguo) se corrigen aquí mismo con «Corregir réplicas…», con la
+ * misma regla de motivo (antes, en la pantalla suelta /captura, que ahora
+ * redirige aquí; ?corregir=<id> abre la OT del resultado con el editor abierto). Todo cambio queda en el historial del ensayo,
  * que se ve en la «Planilla de registros y cálculos» de la OT.
  *
  * API: GET /flujo/ot/:id/resultados · POST /flujo/resultado/:id/valor ·
- *      GET /resultados/bandeja · POST /resultados/:id/{revisar,aprobar,devolver,veredicto} ·
+ *      GET /resultados/bandeja · POST /resultados/:id/{revisar,aprobar,devolver,veredicto,recapturar} ·
  *      POST /resultados/ot/:otId/{revisar,aprobar}
  */
 import Link from "next/link";
@@ -36,6 +39,7 @@ import { toast } from "@/components/ui/feedback";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 import { ESTADO_RESULTADO, llamar, qs, veredictoInfo, type Paginado } from "@/lib/laboratorio";
 import EditorEnsayo, { textoFactor, type EnsayoEditable, type EquipoCaptura } from "./_components/EditorEnsayo";
+import EditorReplicas from "./_components/EditorReplicas";
 
 /** Resultado en una forma común (viene de dos endpoints con forma distinta). */
 interface Fila extends EnsayoEditable {
@@ -51,7 +55,7 @@ interface Fila extends EnsayoEditable {
   resultadoFinal: number | string | null;
   promedio: number | string | null;
   replicas: number[];
-  /** resultado por réplicas (analito del catálogo antiguo): se corrige en «Captura de resultados» */
+  /** resultado por réplicas (analito del catálogo antiguo): se corrige con «Corregir réplicas…» */
   porReplicas: boolean;
   fecha: string | null;
   analistaId: string | null;
@@ -210,6 +214,8 @@ export default function CapturaOtPage() {
   const [motivoReabrir, setMotivoReabrir] = useState("");
   const [omitidos, setOmitidos] = useState<{ id: string; motivo: string }[]>([]);
   const [abierto, setAbierto] = useState<string | null>(null);
+  // Resultado por réplicas con el editor de corrección abierto.
+  const [corrigiendo, setCorrigiendo] = useState<string | null>(null);
   const [veredictosMuestra, setVeredictosMuestra] = useState<Record<string, string>>({});
   const [veredictoOt, setVeredictoOt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -223,11 +229,25 @@ export default function CapturaOtPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ot?.id]);
 
-  // Estado inicial desde la dirección (?otId=… o ?estado=…&mios=1).
+  // Estado inicial desde la dirección (?otId=…, ?estado=…&mios=1 o ?corregir=<resultado>).
   useEffect(() => {
     const u = new URLSearchParams(window.location.search);
     const otId = u.get("otId");
     const estado = u.get("estado");
+    const corregir = u.get("corregir");
+    if (corregir && /^[0-9a-f-]{36}$/i.test(corregir)) {
+      // Enlaces antiguos a /captura?corregir=<id>: se abre la OT del resultado con la corrección.
+      llamar<any>("GET", `/resultados/${corregir}`)
+        .then((r) => {
+          const id = r?.otId ?? r?.muestra?.otId;
+          if (!id) { setError("Ese resultado no pertenece a una OT: no se puede corregir aquí."); return; }
+          setOt({ id, codigo: "" });
+          setCorrigiendo(corregir);
+        })
+        .catch((e) => setError(e.message))
+        .finally(() => setInicial(true));
+      return;
+    }
     if (otId) setOt({ id: otId, codigo: "" });
     else if (estado) setVistaBandeja({ estado, mios: u.get("mios") === "1", asignados: u.get("asignados") === "1" });
     setInicial(true);
@@ -626,8 +646,20 @@ export default function CapturaOtPage() {
                                   {f.porReplicas && f.replicas.length > 0 && <small style={{ color: "var(--muted)" }}> ({f.replicas.length} réplicas)</small>}
                                 </span>
                               )}
-                              {capturable && f.porReplicas && (
-                                <div><Link href={`/captura?corregir=${f.id}` as any} style={{ fontSize: 11.5, color: "var(--accent)" }}>Corregir réplicas</Link></div>
+                              {capturable && f.porReplicas && tiene("resultado.crear") && (
+                                <div>
+                                  {ot ? (
+                                    <button type="button" className="btn sm" style={{ marginTop: 4 }} aria-expanded={corrigiendo === f.id}
+                                      onClick={() => setCorrigiendo(corrigiendo === f.id ? null : f.id)}>
+                                      {corrigiendo === f.id ? "Cerrar" : "Corregir réplicas…"}
+                                    </button>
+                                  ) : (
+                                    <button type="button" className="btn sm" style={{ marginTop: 4 }}
+                                      onClick={() => { setVistaBandeja(null); setOt({ id: f.otId!, codigo: f.otCodigo ?? "" }); setCorrigiendo(f.id); }}>
+                                      Corregir en la OT
+                                    </button>
+                                  )}
+                                </div>
                               )}
                             </td>
                             <td>
@@ -686,6 +718,18 @@ export default function CapturaOtPage() {
                                   puedeFactor={tiene("resultado.factor")}
                                   equipos={equipos}
                                   onGuardado={() => cargar()}
+                                />
+                              </td>
+                            </tr>
+                          )}
+                          {corrigiendo === f.id && ot && f.porReplicas && capturable && tiene("resultado.crear") && (
+                            <tr>
+                              <td colSpan={7} style={{ background: "#f8fbfc" }}>
+                                <EditorReplicas
+                                  r={f}
+                                  equipos={equipos}
+                                  onCerrar={() => setCorrigiendo(null)}
+                                  onGuardado={() => { setCorrigiendo(null); cargar(); }}
                                 />
                               </td>
                             </tr>
