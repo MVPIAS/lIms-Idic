@@ -116,6 +116,24 @@ export class AlcanceResultadoService {
   }
 
   /**
+   * OT con órdenes internas vivas (no anuladas) derivadas a alguna de las
+   * unidades indicadas: el destino las encuentra en el buscador de la captura
+   * aunque la OT sea de otro laboratorio (recorrido MP-02, D02-25).
+   */
+  async otsConDerivadosA(unidades: string[], tenantId: string | null | undefined): Promise<string[]> {
+    if (!unidades.length) return [];
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT oi.ot_id AS id
+         FROM orden_interna oi ${UNIDAD_DESTINO}
+        WHERE oi.deleted_at IS NULL AND oi.estado <> 'anulada' AND ud.id = ANY($1::uuid[])
+          AND ($2::uuid IS NULL OR oi.tenant_id = $2::uuid)`,
+      unidades,
+      tenantId ?? null,
+    );
+    return filas.map((f) => f.id);
+  }
+
+  /**
    * Qué parte de la OT ve el usuario con el permiso indicado: toda (alcance sobre
    * el responsable) o solo los ensayos derivados a sus laboratorios. 403 si ninguna.
    */

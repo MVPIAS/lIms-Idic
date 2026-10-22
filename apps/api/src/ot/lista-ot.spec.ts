@@ -10,6 +10,14 @@ describe("lista de OT · filtroListaOt", () => {
     expect(and(filtroListaOt({}, { ...ctx, unidadesVisibles: ["U1"] }))).toContainEqual({ unidadPrincipal: { in: ["U1"] } });
   });
 
+  it("?derivadas=1 suma al alcance las OT con ensayos derivados a sus laboratorios (D02-25)", () => {
+    const w = and(filtroListaOt({}, { ...ctx, unidadesVisibles: ["LMB"], idsDerivadas: ["ot-lqa"] }));
+    expect(w).toContainEqual({ OR: [{ unidadPrincipal: { in: ["LMB"] } }, { id: { in: ["ot-lqa"] } }] });
+    // Sin derivadas, el alcance de siempre; con alcance global no se acota.
+    expect(and(filtroListaOt({}, { ...ctx, unidadesVisibles: ["LMB"], idsDerivadas: [] }))).toContainEqual({ unidadPrincipal: { in: ["LMB"] } });
+    expect(and(filtroListaOt({}, { ...ctx, idsDerivadas: ["ot-lqa"] }))).toEqual([{ tenantId: "T" }]);
+  });
+
   it("búsqueda por código, cotización, cliente o laboratorio (sin distinguir mayúsculas)", () => {
     const or = and(filtroListaOt({ q: " lqc " }, ctx)).find((c) => c.OR)?.OR;
     expect(or).toContainEqual({ codigo: { contains: "lqc", mode: "insensitive" } });

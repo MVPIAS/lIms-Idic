@@ -199,12 +199,17 @@ function valorBorrador(r: Fila): string {
 
 const CAPTURABLES = ["pendiente", "capturado", "devuelto", "rechazado"];
 
+/** El buscador también encuentra las OT de otros laboratorios con ensayos derivados a los suyos (D02-25). */
+const FILTRO_BUSCADOR = { derivadas: 1 };
+
 /** Vistas de la bandeja (sin OT elegida). */
-const BANDEJAS: { k: string; l: string; estado: string; mios?: boolean; asignados?: boolean; perm: string[] }[] = [
+const BANDEJAS: { k: string; l: string; estado: string; mios?: boolean; asignados?: boolean; derivados?: boolean; perm: string[] }[] = [
   { k: "por_revisar", l: "Por revisar", estado: "capturado", perm: ["resultado.revisar"] },
   { k: "por_aprobar", l: "Por aprobar", estado: "revisado_n1", perm: ["resultado.aprobar"] },
   { k: "devueltos", l: "Mis devueltos", estado: "devuelto,rechazado", mios: true, perm: ["resultado.crear"] },
   { k: "por_capturar", l: "Por capturar (asignados a mí)", estado: "pendiente,devuelto", asignados: true, perm: ["resultado.crear"] },
+  // Ensayos que otro laboratorio derivó a los suyos por orden interna recibida (D02-25).
+  { k: "derivados", l: "Derivados por capturar", estado: "pendiente,devuelto,rechazado", derivados: true, perm: ["resultado.crear"] },
 ];
 
 const FILTROS_OT: { k: string; l: string; estados: string[] | null }[] = [
@@ -229,7 +234,7 @@ export default function CapturaOtPage() {
   const puede = (f: Fila, a: keyof typeof PERM_ACCION) => tiene(PERM_ACCION[a]) && (f.puedo ? f.puedo[a] : true);
 
   const [ot, setOt] = useState<OtCorta | null>(null);
-  const [vistaBandeja, setVistaBandeja] = useState<{ estado: string; mios: boolean; asignados: boolean } | null>(null);
+  const [vistaBandeja, setVistaBandeja] = useState<{ estado: string; mios: boolean; asignados: boolean; derivados: boolean } | null>(null);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [meta, setMeta] = useState<{ total: number; page: number; totalPages: number } | null>(null);
   const [page, setPage] = useState(1);
@@ -280,7 +285,7 @@ export default function CapturaOtPage() {
       return;
     }
     if (otId) setOt({ id: otId, codigo: "" });
-    else if (estado) setVistaBandeja({ estado, mios: u.get("mios") === "1", asignados: u.get("asignados") === "1" });
+    else if (estado) setVistaBandeja({ estado, mios: u.get("mios") === "1", asignados: u.get("asignados") === "1", derivados: u.get("derivados") === "1" });
     setInicial(true);
   }, []);
 
@@ -303,13 +308,13 @@ export default function CapturaOtPage() {
       } else if (vistaBandeja) {
         const r = await llamar<Paginado<any>>(
           "GET",
-          `/resultados/bandeja${qs({ estado: vistaBandeja.estado, mios: vistaBandeja.mios, asignados: vistaBandeja.asignados, page, limit: 50 })}`,
+          `/resultados/bandeja${qs({ estado: vistaBandeja.estado, mios: vistaBandeja.mios, asignados: vistaBandeja.asignados, derivados: vistaBandeja.derivados, page, limit: 50 })}`,
         );
         const fs = r.data.map((x) => normalizar(x));
         setFilas(fs);
         setMeta(r.meta);
         setDrafts(Object.fromEntries(fs.map((f) => [f.id, valorBorrador(f)])));
-        window.history.replaceState(null, "", `/captura-ot${qs({ estado: vistaBandeja.estado, mios: vistaBandeja.mios, asignados: vistaBandeja.asignados })}`);
+        window.history.replaceState(null, "", `/captura-ot${qs({ estado: vistaBandeja.estado, mios: vistaBandeja.mios, asignados: vistaBandeja.asignados, derivados: vistaBandeja.derivados })}`);
       }
     } catch (e: any) {
       setError(e.message);
@@ -514,15 +519,17 @@ export default function CapturaOtPage() {
 
       <div className="card">
         <div className="form-grid cols-2">
-          <BuscadorOt valor={ot} onCambio={(o) => { setOt(o); setVistaBandeja(o ? null : vistaBandeja); setFiltroOt("todos"); setOmitidos([]); }} />
+          {/* derivadas: también encuentra la OT de origen de las órdenes internas derivadas a su laboratorio (D02-25). */}
+          <BuscadorOt valor={ot} filtros={FILTRO_BUSCADOR} onCambio={(o) => { setOt(o); setVistaBandeja(o ? null : vistaBandeja); setFiltroOt("todos"); setOmitidos([]); }} />
           <div className="field">
             <label>Bandejas</label>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {bandejasVisibles.map((b) => {
-                const activa = !ot && vistaBandeja?.estado === b.estado && !!vistaBandeja?.mios === !!b.mios && !!vistaBandeja?.asignados === !!b.asignados;
+                const activa = !ot && vistaBandeja?.estado === b.estado && !!vistaBandeja?.mios === !!b.mios && !!vistaBandeja?.asignados === !!b.asignados
+                  && !!vistaBandeja?.derivados === !!b.derivados;
                 return (
                   <button key={b.k} className={`btn sm ${activa ? "primary" : "outline"}`}
-                    onClick={() => { setOt(null); setPage(1); setVistaBandeja({ estado: b.estado, mios: !!b.mios, asignados: !!b.asignados }); }}>
+                    onClick={() => { setOt(null); setPage(1); setVistaBandeja({ estado: b.estado, mios: !!b.mios, asignados: !!b.asignados, derivados: !!b.derivados }); }}>
                     {b.l}
                   </button>
                 );
@@ -600,7 +607,7 @@ export default function CapturaOtPage() {
       {(ot || vistaBandeja) && (
         <div className="card">
           <h2>
-            {ot ? "Ensayos de la OT" : `Bandeja · ${BANDEJAS.find((b) => b.estado === vistaBandeja?.estado)?.l ?? vistaBandeja?.estado}`}
+            {ot ? "Ensayos de la OT" : `Bandeja · ${BANDEJAS.find((b) => b.estado === vistaBandeja?.estado && !!b.derivados === !!vistaBandeja?.derivados)?.l ?? vistaBandeja?.estado}`}
             {meta && <span className="right">{meta.total} resultado(s)</span>}
           </h2>
           {loading ? (

@@ -43,6 +43,12 @@ export interface ContextoListaOt {
   tenantId?: string;
   /** null = sin filtro (alcance global) */
   unidadesVisibles: string[] | null;
+  /**
+   * OT de otro laboratorio con ensayos derivados por orden interna a las
+   * unidades del usuario (?derivadas=1, buscador de «Captura y revisión por
+   * OT»; recorrido MP-02, D02-25). Solo amplía el alcance: no filtra.
+   */
+  idsDerivadas?: string[] | null;
   hoy: Date;
 }
 
@@ -60,7 +66,12 @@ export function semaforoPedido(q: Pick<QueryListaOt, "semaforo" | "vencidas" | "
 export function filtroListaOt(q: QueryListaOt, ctx: ContextoListaOt): Record<string, any> {
   const and: Record<string, any>[] = [];
   if (ctx.tenantId) and.push({ tenantId: ctx.tenantId });
-  if (ctx.unidadesVisibles) and.push({ unidadPrincipal: { in: ctx.unidadesVisibles } });
+  if (ctx.unidadesVisibles)
+    and.push(
+      ctx.idsDerivadas?.length
+        ? { OR: [{ unidadPrincipal: { in: ctx.unidadesVisibles } }, { id: { in: ctx.idsDerivadas } }] }
+        : { unidadPrincipal: { in: ctx.unidadesVisibles } },
+    );
 
   const texto = (q.q ?? q.search ?? "").trim();
   if (texto) {

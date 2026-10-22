@@ -25,4 +25,10 @@ describe("Mi bandeja · solo tarjetas que el usuario puede abrir", () => {
     expect(filtrarPorPermiso(items, undefined)).toHaveLength(items.length);
     expect(filtrarPorPermiso(items, [], ["SUPERADMIN"])).toHaveLength(items.length);
   });
+
+  it("«Ensayos derivados por capturar» lleva a la captura: la ve quien tiene resultado.ver (D02-25)", () => {
+    const d = item("derivados_por_capturar", "/captura-ot?estado=pendiente,devuelto,rechazado&derivados=1");
+    expect(filtrarPorPermiso([d], ["ot.ver", "resultado.ver", "resultado.crear"])).toHaveLength(1);
+    expect(filtrarPorPermiso([d], ["ot.ver", "muestra.crear"])).toEqual([]);
+  });
 });

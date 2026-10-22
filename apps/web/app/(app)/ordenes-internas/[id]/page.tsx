@@ -23,7 +23,7 @@ import {
   ACCION_HISTORIAL_OI, PASOS_OI, destinoTexto, estadoOi, fechaDia, pesos, type OrdenInterna,
 } from "@/components/ordenes-internas/ordenesInternas";
 
-type Puedo = { editar: boolean; anular: boolean; recibir: boolean; responder: boolean; cerrar: boolean; darPorRecibido: boolean };
+type Puedo = { editar: boolean; anular: boolean; recibir: boolean; responder: boolean; cerrar: boolean; darPorRecibido: boolean; capturar?: boolean };
 type Ficha = OrdenInterna & { puedo: Puedo };
 
 const ESTADO_RESULTADO: Record<string, string> = {
@@ -246,7 +246,11 @@ function siguientePaso(f: Ficha): { texto: string; quien: string; puedo: boolean
   const origen = `Jefatura o analista de ${f.otUnidadCodigo ?? "el laboratorio solicitante"}`;
   if (f.estado === "abierta") return { texto: "Recibir la muestra y la orden interna", quien: destino, puedo: f.puedo.recibir };
   if (f.estado === "recibida" && !f.respondidaAt)
-    return { texto: "Registrar los resultados en la muestra y guardar la respuesta (horas y costo directo)", quien: destino, puedo: f.puedo.responder };
+    return {
+      texto: "Registrar los resultados en la muestra (analista) y guardar la respuesta con horas y costo directo (jefatura)",
+      quien: `Analista y jefatura de ${f.destinoUnidadCodigo ?? "el laboratorio de destino"}`,
+      puedo: f.puedo.responder || !!f.puedo.capturar,
+    };
   if (f.estado === "recibida") return { texto: "Cerrar la orden interna y devolver el informe al solicitante", quien: destino, puedo: f.puedo.cerrar };
   if (f.estado === "cerrada" && !f.aceptadaAt) return { texto: "Dar por recibido el informe e integrar los resultados", quien: origen, puedo: f.puedo.darPorRecibido };
   return null;
@@ -260,7 +264,9 @@ function TablaResultados({ f }: { f: Ficha }) {
         <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)" }}>
           Resultados de los ensayos pedidos en la muestra {f.muestraCodigo ?? ""}. Se capturan en la planilla de la OT, como los propios.
         </p>
-        {f.estado === "recibida" && f.puedo.responder && (
+        {/* Jefatura o analista del destino (resultado.crear en su laboratorio): abre la captura de la OT de origen,
+            donde solo ve los ensayos que se le derivaron (D02-25). */}
+        {f.estado === "recibida" && (f.puedo.responder || f.puedo.capturar) && (
           <Link href={`/captura-ot?otId=${f.otId}` as any} className="btn outline sm">Registrar resultados</Link>
         )}
       </div>
