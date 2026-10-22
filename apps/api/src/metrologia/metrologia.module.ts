@@ -1,7 +1,8 @@
 import {
-  BadRequestException, Body, ConflictException, Controller, ForbiddenException, Get, Module, NotFoundException,
-  Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UseGuards,
+  BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Module, NotFoundException,
+  Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
@@ -25,7 +26,12 @@ import {
 import { CASOS_REFERENCIA, esClaveExcel, verificarParidad } from "./motores/paridad";
 import { CASOS_LNF, verificarParidadLNF } from "./motores/paridad-lnf";
 import { CASOS_1510, verificarParidad1510 } from "./motores/paridad-1510";
-import { certificadoHtml, type ContextoCertificado, type FirmaCert } from "./metrologia.certificado";
+import { armarCertificado, certificadoHtml, datosCertificado, type ContextoCertificado, type FirmaCert } from "./metrologia.certificado";
+import { formatoDe } from "./certificado/formato-it";
+import {
+  avisosPresentacion, leerPresentacion, MODOS_ESQUEMA, resumenCambios, validarPresentacion, type Presentacion,
+} from "./certificado/presentacion";
+import { CLAVE_LOGO, claveValida, clavesEsquema, esquemaEfectivo, imagenCert, MAX_IMAGEN_BYTES, revisarImagen, type FilaImagen } from "./certificado/imagenes";
 import {
   ESTADO_TRAS, accionesDisponibles, clavePaso, codigoCalibracion, estadoDe, fechaCalibracion, motivoNoEnviable, motivoRechazo, ordenElabora,
   pasoPendiente, pasosSinResponsable,
@@ -101,6 +107,18 @@ const CrearSchema = z.object({
 type CrearDto = z.infer<typeof CrearSchema>;
 const CalcularSchema = z.object({ datos: z.record(z.any()), opciones: z.record(z.boolean()).default({}) });
 const MotivoSchema = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres)").max(2000) });
+/** Presentación del certificado (respuesta del LMT del 21-10): solo se cambia lo que se envía. */
+const PresentacionSchema = z.object({
+  acreditado: z.boolean().nullable().optional(),
+  acreditadoMotivo: z.string().max(500).nullable().optional(),
+  reemplaza: z.string().max(40).nullable().optional(),
+  reemplazaMotivo: z.string().max(500).nullable().optional(),
+  observaciones: z.string().max(4000).nullable().optional(),
+  campos: z.record(z.string().max(200)).optional(),
+  esquemaModo: z.enum(MODOS_ESQUEMA as [string, ...string[]]).optional(),
+  esquemaPie: z.string().max(300).nullable().optional(),
+}).strict();
+type ArchivoSubido = { buffer: Buffer; originalname?: string; mimetype?: string; size?: number };
 
 /** Quita los valores del Excel (x_, y_, z_, w_, x, xT) y las entradas que vienen de un maestro. */
 function soloEntradas(v: any, it?: string): any {
@@ -711,7 +729,7 @@ export class MetrologiaController {
   @Get("calibraciones/:id")
   @RequierePermiso("metrologia.ver")
   async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    const { __ctx, ...d } = await this.detalleCtx(id, req);
+    const { __ctx, __esquema, ...d } = await this.detalleCtx(id, req);
     return d;
   }
 
@@ -727,7 +745,7 @@ export class MetrologiaController {
     ]);
     const calculada = cal.resumen != null || cal.u_max != null;
     const [cx] = await this.contextos(req, [{ ...cal, calculada }]);
-    const { documento_html, ...resto } = cal;
+    const { documento_html, esquema_datos, ...resto } = cal;
     return {
       ...resto, estado: estadoDe(cal.estado), calculada, puntos, eventos, es_mio: cal.created_by === req.user?.sub,
       // Barra de 6 pasos de la ficha (maqueta de Metrología), deducida del estado.
@@ -738,6 +756,8 @@ export class MetrologiaController {
       firmas: cx.firmas, paso_pendiente: cx.pendiente, pasos_sin_responsable: cx.sinResponsable,
       avisos: avisosFechas({ fechaOt: cal.instrumento?.fechaOt, fechaRecepcion: cal.instrumento?.fechaRecepcion, fechaCalibracion: fechaIso(cal.fecha_calibracion) }),
       acciones: accionesDisponibles(cx.ctx), __ctx: cx.ctx,
+      // La imagen del esquema no viaja en el detalle (puede pesar 2 MB): solo si existe.
+      esquema_propio: !!esquema_datos, __esquema: esquema_datos as string | null,
     };
   }
 
@@ -940,7 +960,7 @@ export class MetrologiaController {
       return { data: { id, codigo: cal.codigo, estado: ESTADO_TRAS.FIRMAR } };
     }
     // Emisión: número, código de verificación y documento sellado, en una transacción.
-    const ctxBase = await this.contextoCertificado(t, cal, c);
+    const ctxBase = await this.contextoCertificado(t, { ...cal, esquema_datos: cal.__esquema }, c);
     const resultado = await prisma.$transaction(async (tx) => {
       await registrarFirma(tx);
       let numero = cal.codigo as string;
@@ -1016,10 +1036,10 @@ export class MetrologiaController {
             `INSERT INTO met_calibracion
                (tenant_id, codigo, proceso_id, patron_id, unidad_id, fecha_calibracion, instrumento, patron_snap, ambiente, cond, u_max, u_cert, conforme,
                 intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen, patrones, reemplaza_id, motivo_reemision,
-                ot_id, ot_instrumento_id)
+                ot_id, ot_instrumento_id, presentacion, esquema_mime, esquema_datos, esquema_hash, esquema_nombre)
              SELECT tenant_id, $2, proceso_id, patron_id, unidad_id, fecha_calibracion, instrumento, patron_snap, ambiente, cond, u_max, u_cert, conforme,
                     intervalo_meses, 'borrador', $3::uuid, motor, datos, opciones, resultado, resumen, patrones, id, $4,
-                    ot_id, ot_instrumento_id
+                    ot_id, ot_instrumento_id, presentacion - 'reemplaza' - 'reemplazaMotivo', esquema_mime, esquema_datos, esquema_hash, esquema_nombre
                FROM met_calibracion WHERE id = $1::uuid RETURNING id`,
             id, codigo, req.user.sub, motivo);
           const nid = r[0].id as string;
@@ -1056,8 +1076,9 @@ export class MetrologiaController {
   @RequierePermiso("metrologia.ver")
   async pdf(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
     const doc = await this.documento(id, req);
-    const html = documentoCompleto(doc.cuerpo, doc.sello, doc.titulo);
-    const buf = await generarPdf(html, doc.sello, doc.titulo);
+    // El PDF dibuja el cuerpo sellado (el mismo sobre el que se calculó el SHA-256) y lo
+    // incrusta; número, código de verificación y hash van en el pie de cada hoja.
+    const buf = await generarPdf(doc.cuerpo, doc.sello, doc.titulo);
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${doc.sello.numero.replace(/[^A-Za-z0-9._-]/g, "_")}.pdf"`);
     res.end(buf);
@@ -1086,6 +1107,166 @@ export class MetrologiaController {
       ...(cal.estado === "reemplazada" ? { estadoDocumento: "anulado", motivoEstado: `Reemplazado por el certificado N° ${cal.reemplazada_por ?? ""}` } : {}),
     };
     return { cuerpo, sello, titulo: `Certificado de Calibración ${numero}` };
+  }
+
+  // ----- Presentación del certificado (respuesta del LMT del 21-10-2026) -------
+  /**
+   * Lo que el metrólogo decide sobre el documento: acreditación (logo y línea), «reemplaza
+   * al certificado N°» a mano, observaciones, condiciones de la IT y esquema; con los
+   * textos automáticos, las frases habituales del libro y las hojas que tendrá.
+   */
+  @Get("calibraciones/:id/certificado")
+  @RequierePermiso("metrologia.ver")
+  async presentacionDe(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const t = tenantId(req);
+    const cal = await this.detalleCtx(id, req);
+    const d = datosCertificado(cal);
+    const fmt = formatoDe(cal.proceso);
+    const conImagen = { ...cal, esquema_datos: cal.__esquema };
+    const ctx = await this.contextoCertificado(t, conImagen, await this.circuito(t, conImagen));
+    const defecto = await prisma.$queryRawUnsafe<{ clave: string; titulo: string | null }[]>(
+      `SELECT clave, titulo FROM met_imagen WHERE tenant_id = $1::uuid AND clave = ANY($2::text[])`, t, [CLAVE_LOGO, ...clavesEsquema(String(cal.proceso))]);
+    return {
+      data: {
+        presentacion: d.presentacion,
+        editable: (cal.acciones as AccionCal[]).includes("EDITAR"),
+        acreditacionProceso: cal.acreditacion ?? null,
+        acreditado: d.acred.acreditado,
+        logoConfigurado: defecto.some((x) => x.clave === CLAVE_LOGO),
+        reemision: cal.reemplaza_numero ?? null,
+        automaticas: d.automaticas,
+        observaciones: d.observaciones,
+        campos: fmt.campos,
+        frases: fmt.frases,
+        esquema: {
+          modo: d.presentacion.esquemaModo,
+          propio: cal.esquema_propio,
+          defecto: defecto.find((x) => x.clave !== CLAVE_LOGO)?.titulo ?? null,
+          imprime: ctx.esquema ? ctx.esquema.titulo : null,
+        },
+        hojas: armarCertificado(conImagen, ctx).hojas,
+        avisos: avisosPresentacion(d.presentacion, { fueraAlcance: d.res.fueraAlcance, acreditado: d.acred.acreditado }),
+      },
+    };
+  }
+
+  /** Guarda la presentación del certificado (solo el autor, en borrador). Cada cambio queda en la bitácora con su motivo. */
+  @Put("calibraciones/:id/certificado")
+  @RequierePermiso("metrologia.crear")
+  async guardarPresentacion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const cal = await this.detalleCtx(id, req);
+    this.exigir("EDITAR", cal);
+    const pedido = PresentacionSchema.parse(body ?? {});
+    const antes = leerPresentacion(cal.presentacion);
+    const nueva: Presentacion = { ...antes, ...(pedido as Partial<Presentacion>), campos: pedido.campos ?? antes.campos };
+    if (nueva.esquemaModo === "propio" && !cal.esquema_propio) throw new BadRequestException("Suba primero la imagen del esquema de esta calibración.");
+    const v = validarPresentacion(nueva, {
+      proceso: cal.proceso, acreditacionProceso: cal.acreditacion ?? null, reemisionDe: cal.reemplaza_numero ?? null, numeroPropio: cal.numero_certificado ?? null,
+    });
+    if ("error" in v) throw new BadRequestException(v.error);
+    const cambios = resumenCambios(antes, v.ok);
+    if (!cambios) return { data: { id, presentacion: antes, cambios: null } };
+    await prisma.$transaction(async (tx) => {
+      const n = await tx.$executeRawUnsafe(
+        `UPDATE met_calibracion SET presentacion = $2::jsonb, updated_at = now() WHERE id = $1::uuid AND estado IN ('borrador', 'calculada')`,
+        id, JSON.stringify(v.ok));
+      if (!n) throw new ForbiddenException("La calibración cambió de estado mientras tanto; recargue la ficha");
+      await this.evento(tx, id, "CERTIFICADO", "borrador", "borrador", req, cambios);
+    });
+    return { data: { id, presentacion: v.ok, cambios } };
+  }
+
+  /** Sube el esquema o imagen propia de la calibración (PNG o JPEG, máx. 2 MB) y la deja como la que se imprime. */
+  @Put("calibraciones/:id/esquema")
+  @RequierePermiso("metrologia.crear")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_IMAGEN_BYTES, files: 1, fields: 4 } }))
+  async subirEsquema(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoSubido | undefined, @Body() body: any, @Req() req: any) {
+    const cal = await this.detalleCtx(id, req);
+    this.exigir("EDITAR", cal);
+    const r = revisarImagen(archivo?.buffer);
+    if ("error" in r) throw new BadRequestException(r.error);
+    const pie = typeof body?.pie === "string" ? body.pie.trim().slice(0, 300) || null : null;
+    const p = { ...leerPresentacion(cal.presentacion), esquemaModo: "propio" as const, ...(pie != null ? { esquemaPie: pie } : {}) };
+    const nombre = (archivo!.originalname ?? "esquema").replace(/[^\p{L}\p{N} ._-]/gu, "_").slice(0, 200);
+    const hash = createHash("sha256").update(archivo!.buffer).digest("hex");
+    await prisma.$transaction(async (tx) => {
+      const n = await tx.$executeRawUnsafe(
+        `UPDATE met_calibracion SET esquema_mime = $2, esquema_datos = $3, esquema_hash = $4, esquema_nombre = $5, presentacion = $6::jsonb, updated_at = now()
+          WHERE id = $1::uuid AND estado IN ('borrador', 'calculada')`,
+        id, r.mime, archivo!.buffer.toString("base64"), hash, nombre, JSON.stringify(p));
+      if (!n) throw new ForbiddenException("La calibración cambió de estado mientras tanto; recargue la ficha");
+      await this.evento(tx, id, "CERTIFICADO", "borrador", "borrador", req, `Esquema propio: ${nombre} (${(archivo!.buffer.length / 1024).toFixed(0)} KB)`);
+    });
+    return { data: { id, mime: r.mime, bytes: archivo!.buffer.length, hash } };
+  }
+
+  /** Esquema que se imprimirá (propio o del proceso), para verlo en la ficha. */
+  @Get("calibraciones/:id/esquema")
+  @RequierePermiso("metrologia.ver")
+  async verEsquema(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
+    const cal = await this.cargar(id, req);
+    const img = await this.imagenesCertificado(tenantId(req), cal);
+    if (!img.esquema) throw new NotFoundException("La calibración no lleva esquema");
+    const [cab, b64] = img.esquema.src.split(",");
+    res.setHeader("Content-Type", cab.slice(5, cab.indexOf(";")));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.end(Buffer.from(b64, "base64"));
+  }
+
+  // ----- Imágenes de configuración: logo de acreditación y esquemas por proceso -----
+  @Get("imagenes")
+  @RequierePermiso("metrologia.ver")
+  async imagenes(@Req() req: any) {
+    const data = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT i.clave, i.titulo, i.mime, i.bytes, i.nombre, i.updated_at, u.nombre_completo AS actualizado_por
+         FROM met_imagen i LEFT JOIN usuario u ON u.id = i.actualizado_por
+        WHERE i.tenant_id = $1::uuid ORDER BY i.clave`, tenantId(req));
+    return { data };
+  }
+
+  @Get("imagenes/:clave")
+  @RequierePermiso("metrologia.ver")
+  async imagen(@Param("clave") clave: string, @Req() req: any, @Res() res: Response) {
+    if (!claveValida(clave)) throw new BadRequestException("Clave de imagen no válida");
+    const f = await prisma.$queryRawUnsafe<any[]>(`SELECT mime, datos FROM met_imagen WHERE tenant_id = $1::uuid AND clave = $2`, tenantId(req), clave);
+    if (!f.length) throw new NotFoundException("Imagen no configurada");
+    res.setHeader("Content-Type", f[0].mime);
+    res.setHeader("Cache-Control", "private, no-store");
+    res.end(Buffer.from(f[0].datos, "base64"));
+  }
+
+  /** Carga o reemplaza el logo de acreditación (`logo_acreditacion`) o el esquema por defecto de un proceso (`esquema:ITT02`). */
+  @Put("imagenes/:clave")
+  @RequierePermiso("metrologia.config")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_IMAGEN_BYTES, files: 1, fields: 4 } }))
+  async subirImagen(@Param("clave") clave: string, @UploadedFile() archivo: ArchivoSubido | undefined, @Body() body: any, @Req() req: any) {
+    const t = tenantId(req);
+    if (!claveValida(clave)) throw new BadRequestException("Clave de imagen no válida: logo_acreditacion o esquema:<proceso>");
+    if (clave.startsWith("esquema:")) {
+      const ex = await prisma.$queryRawUnsafe<any[]>(`SELECT 1 FROM met_proceso WHERE codigo = $1`, clave.slice(8));
+      if (!ex.length) throw new BadRequestException(`No existe el proceso ${clave.slice(8)}`);
+    }
+    const r = revisarImagen(archivo?.buffer);
+    if ("error" in r) throw new BadRequestException(r.error);
+    const titulo = typeof body?.titulo === "string" ? body.titulo.trim().slice(0, 200) || null : null;
+    const nombre = (archivo!.originalname ?? clave).replace(/[^\p{L}\p{N} ._-]/gu, "_").slice(0, 200);
+    const hash = createHash("sha256").update(archivo!.buffer).digest("hex");
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO met_imagen (tenant_id, clave, titulo, mime, bytes, datos, hash_sha256, nombre, actualizado_por, updated_at)
+       VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::uuid, now())
+       ON CONFLICT (tenant_id, clave) DO UPDATE SET titulo = COALESCE(EXCLUDED.titulo, met_imagen.titulo), mime = EXCLUDED.mime, bytes = EXCLUDED.bytes,
+         datos = EXCLUDED.datos, hash_sha256 = EXCLUDED.hash_sha256, nombre = EXCLUDED.nombre, actualizado_por = EXCLUDED.actualizado_por, updated_at = now()`,
+      t, clave, titulo, r.mime, archivo!.buffer.length, archivo!.buffer.toString("base64"), hash, nombre, req.user?.sub ?? null);
+    return { data: { clave, mime: r.mime, bytes: archivo!.buffer.length, hash } };
+  }
+
+  @Delete("imagenes/:clave")
+  @RequierePermiso("metrologia.config")
+  async quitarImagen(@Param("clave") clave: string, @Req() req: any) {
+    if (!claveValida(clave)) throw new BadRequestException("Clave de imagen no válida");
+    const n = await prisma.$executeRawUnsafe(`DELETE FROM met_imagen WHERE tenant_id = $1::uuid AND clave = $2`, tenantId(req), clave);
+    if (!n) throw new NotFoundException("Imagen no configurada");
+    return { data: { clave, quitada: true } };
   }
 
   // ---- helpers --------------------------------------------------------------
@@ -1200,13 +1381,27 @@ export class MetrologiaController {
     const pendiente = (p: PasoFirmaCal | undefined): FirmaCert | null =>
       p ? { accion: p.accion, rol: p.rol.nombre, nombre: p.responsables.map((r) => r.nombre).join(" / ") || "Sin responsable", pendiente: true } : null;
     const jl = c.jefes[0], jd = c.jefes.length > 1 ? c.jefes[c.jefes.length - 1] : undefined;
+    const img = await this.imagenesCertificado(t, cal);
     return {
+      ...img,
       departamento: dep.nombre,
       metrologo: hecha(undefined, "ELABORA") ?? { accion: "ELABORA", rol: "Metrólogo", nombre: cal.autor_nombre ?? "", pendiente: true, cargo: "Metrólogo" },
       jefeLab: (jl && hecha(jl.orden, jl.accion)) ?? pendiente(jl) ?? (cal.emisor_nombre ? { accion: "FIRMA", rol: "Jefe", nombre: cal.emisor_nombre, fecha: cal.emitido_at, pendiente: false } : null),
       jefeDepto: (jd && hecha(jd.orden, jd.accion)) ?? pendiente(jd),
       reemplazaNumero: cal.reemplaza_numero ?? null,
     };
+  }
+
+  /** Logo de acreditación y esquema (el propio, el del proceso o ninguno) que se imprimen. */
+  private async imagenesCertificado(t: string, cal: any): Promise<Pick<ContextoCertificado, "logo" | "esquema">> {
+    const claves = [CLAVE_LOGO, ...clavesEsquema(String(cal.proceso ?? ""))];
+    const filas = await prisma.$queryRawUnsafe<FilaImagen[]>(
+      `SELECT clave, titulo, mime, datos FROM met_imagen WHERE tenant_id = $1::uuid AND clave = ANY($2::text[])`, t, claves);
+    const logo = filas.find((f) => f.clave === CLAVE_LOGO);
+    const defecto = clavesEsquema(String(cal.proceso ?? "")).map((k) => filas.find((f) => f.clave === k)).find(Boolean) ?? null;
+    const p = leerPresentacion(cal.presentacion);
+    const esquema = esquemaEfectivo(p, { mime: cal.esquema_mime ?? null, datos: cal.esquema_datos ?? null }, defecto);
+    return { logo: logo ? imagenCert(logo.mime, logo.datos) : null, esquema };
   }
 
   private exigir(accion: AccionCal, cal: any) {

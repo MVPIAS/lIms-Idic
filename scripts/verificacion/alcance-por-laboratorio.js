@@ -401,6 +401,8 @@ async function main() {
       ["bpch_prototipo", "bpch.prototipo.ver", (id) => `/bpch/prototipos/${id}`, null, "bpch"],
       ["bpch_clasificacion", "bpch.clasificacion.ver", (id) => `/bpch/clasificaciones/${id}`, null, "bpch"],
       ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}`],
+      ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}/certificado`],
+      ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}/esquema`],
       ["ot", "ot.ver", (id) => `/ot/${id}/metrologia`],
       ["evidencia", "evidencia.ver", (id) => `/evidencias/${id}`, null, "saec"],
       ["cotizacion", "cotizacion.ver", (id) => `/cotizaciones/${id}`, null, "fase1"],

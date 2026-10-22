@@ -7,6 +7,7 @@ import DataTable, { type DataColumn } from "@/components/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import { usePermisos } from "@/lib/permisos";
+import ImagenesCertificado from "@/components/metrologia/ImagenesCertificado";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -19,7 +20,7 @@ const FUNCION: Record<string, string> = {
   METROLOGO: "Metrólogo", JEFE_LAB: "Jefe del laboratorio", JEFE_LAB_SUBROGANTE: "Jefe del laboratorio subrogante", JEFE_DEPTO: "Jefe del departamento",
 };
 const dmy = (x: any) => (x ? `${String(x).slice(8, 10)}-${String(x).slice(5, 7)}-${String(x).slice(0, 4)}` : "—");
-const PESTANAS = [["patrones", "Patrones y equipos"], ["firmas", "Registro de firmas"], ["cmc", "CMC acreditadas"], ["numeracion", "Numeración"], ["calculo", "Cálculo GUM"]] as const;
+const PESTANAS = [["patrones", "Patrones y equipos"], ["firmas", "Registro de firmas"], ["cmc", "CMC acreditadas"], ["numeracion", "Numeración"], ["certificado", "Certificado: logo y esquemas"], ["calculo", "Cálculo GUM"]] as const;
 
 async function pedir(url: string, init?: RequestInit) {
   const r = await fetch(`${API}${url}`, { headers: auth(), ...init });
@@ -208,6 +209,8 @@ export default function MetrologiaConfigPage() {
       {tab === "numeracion" && (
         <Numeracion filas={num} editar={editar} guardar={(prefijo, cuerpo) => guardar(() => pedir(`/metrologia/numeracion/${prefijo}`, { method: "PUT", body: JSON.stringify(cuerpo) }), `Numeración ${prefijo} actualizada`)} />
       )}
+
+      {tab === "certificado" && <ImagenesCertificado editar={editar} />}
 
       {tab === "calculo" && (
         <>
