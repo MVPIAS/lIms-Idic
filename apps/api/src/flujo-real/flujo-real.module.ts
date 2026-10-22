@@ -35,6 +35,9 @@ import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laborator
 import { traducirFormula } from "../laboratorio/formula-legado";
 import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
 import { calcularCaptura, CapturaError, variablesDeCaptura } from "../laboratorio/captura-estandar";
+import { leerCondicion2, leerPlanClases } from "../laboratorio/requisito-compuesto";
+import { aplicarEtAMuestra } from "../especificacion-tecnica/aplicar-et";
+import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { criterioIndeterminado, leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado } from "../laboratorio/veredicto";
 import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
 import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion, type RecepcionNormalizada } from "./recepcion-muestra";
@@ -506,6 +509,8 @@ const CapturarValorBody = z
     variables: z.record(z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/), z.number().finite()).optional(),
     atributo: z.enum(["cumple", "no_cumple"]).optional(),
     observacion: z.string().max(2000).optional(),
+    /** Valor de la segunda condición del requisito («X kgf con Y mm»), si el ensayo la tiene. */
+    valorCondicion2: z.union([z.number().finite(), z.string().max(40), z.null()]).optional(),
     /** Motivo de la corrección (obligatorio al cambiar un valor ya capturado). */
     motivo: z.string().trim().max(1000).optional(),
     /**
@@ -821,10 +826,15 @@ export class PuenteAnalisisService {
       creados++;
     }
 
+    // La E.T. del cliente que rige la muestra (o la OT) manda sobre el catálogo en
+    // los ensayos recién generados (EP-03 0.5, EP-05 5.1): especificacion-tecnica/aplicar-et.ts.
+    const et = creados ? await aplicarEtAMuestra(db, tenantId, muestra.id, { soloNuevos: true, usuarioId: req?.user?.sub ?? null }) : null;
+
     await recalcularVeredictoMuestra(db as PrismaService, muestra.id);
     return {
       otId,
       muestraId: muestra.id,
+      especificacionTecnica: et,
       metodosSolicitados: body.metodoIds.length,
       analitosEncontrados: analitos.length,
       creados,
@@ -926,6 +936,9 @@ export class PuenteAnalisisService {
           criterioLd: await this.criterioLd(tenantId),
           tipoDato, limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, formula: resultado.formula,
           factor: factorDe(resultado.factorValor, resultado.factorOperacion, resultado.factorDescripcion),
+          // Requisito compuesto desde la E.T. (plan de clases, segunda condición).
+          planClases: leerPlanClases(resultado.planClases),
+          condicion2: leerCondicion2(resultado.condicion2),
         },
         entrada,
       );
@@ -965,11 +978,12 @@ export class PuenteAnalisisService {
         temperatura: cond.valor.temperatura,
         humedad: cond.valor.humedad,
         incertidumbre: cond.valor.incertidumbre,
+        valorCondicion2: calc.valorCondicion2,
       },
       include: { catAnalito: true, catMetodo: true },
     }));
     const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
-    return { ...actualizado, veredictoMuestra: veredictoDeLaMuestra };
+    return { ...actualizado, veredictoMuestra: veredictoDeLaMuestra, explicacion: calc.explicacion };
   }
 
   /**
@@ -1346,11 +1360,57 @@ const RegistrarMuestrasBody = z.object({
         catElementoId: z.string().uuid().optional(),
         /** Datos de recepción (la pantalla los envía siempre; la API los admite opcionales). */
         recepcion: RecepcionBody.optional(),
+        /** E.T. del cliente propia de esta muestra (si no, rige la de la OT). */
+        etId: z.string().uuid().nullable().optional(),
+        /** Muestreo de la OT del que sale la muestra (sus sellos se verifican al recibirla). */
+        muestreoId: z.string().uuid().nullable().optional(),
       }),
     )
     .min(1, "Indique al menos una muestra.")
     .max(50, "Registre como máximo 50 muestras de una vez."),
 });
+
+/**
+ * La E.T. elegida para una muestra debe ser elegible para la OT (vigente, del
+ * cliente o reutilizable, del laboratorio) y el muestreo, de la misma OT y no
+ * anulado (especificacion-tecnica/reglas-et.ts · erroresAsignacion).
+ */
+async function erroresEtYMuestreo(
+  db: Db,
+  tenantId: string,
+  ot: { id: string; clienteId: string; unidadPrincipal: string | null },
+  muestras: { etId?: string | null; muestreoId?: string | null }[],
+): Promise<string[]> {
+  const errores: string[] = [];
+  const etIds = [...new Set(muestras.map((m) => m.etId).filter((x): x is string => !!x))];
+  const muIds = [...new Set(muestras.map((m) => m.muestreoId).filter((x): x is string => !!x))];
+  if (etIds.length) {
+    const ets = await db.$queryRawUnsafe<any[]>(
+      `SELECT id, codigo, version, estado, reutilizable, cliente_id AS "clienteId", laboratorios
+         FROM especificacion_tecnica WHERE tenant_id = $1::uuid AND id = ANY($2::uuid[])`,
+      tenantId,
+      etIds,
+    );
+    for (const id of etIds) {
+      const et = ets.find((e) => e.id === id);
+      if (!et) errores.push("La E.T. indicada para una muestra no existe.");
+      else errores.push(...erroresAsignacion({ ...et, laboratorios: et.laboratorios ?? [] }, { clienteId: ot.clienteId, unidadId: ot.unidadPrincipal }));
+    }
+  }
+  if (muIds.length) {
+    const mus = await db.$queryRawUnsafe<{ id: string; estado: string }[]>(
+      `SELECT id, estado FROM ot_muestreo WHERE ot_id = $1::uuid AND id = ANY($2::uuid[])`,
+      ot.id,
+      muIds,
+    );
+    for (const id of muIds) {
+      const mu = mus.find((x) => x.id === id);
+      if (!mu) errores.push("El muestreo indicado no es de esta OT.");
+      else if (mu.estado === "anulado") errores.push("El muestreo indicado está anulado.");
+    }
+  }
+  return errores;
+}
 
 /**
  * Registro de las muestras recibidas de una OT ya creada (p. ej. la que nace
@@ -1627,6 +1687,8 @@ export class RegistroMuestrasService {
       recepciones.push(v.n);
       labs.push(v.lab);
     }
+    // E.T. propia de la muestra y muestreo de origen (align_r2b_*.sql).
+    errores.push(...(await erroresEtYMuestreo(db, tenantId, ot, body.muestras)));
     if (errores.length) throw new BadRequestException(errores.join(" "));
 
     const existentes = await db.muestra.findMany({
@@ -1650,6 +1712,13 @@ export class RegistroMuestrasService {
           ...(recepciones[i] ? this.datosRecepcion(recepciones[i]!, req?.user?.sub ?? null, null, labs[i], cfg) : {}),
         },
       });
+      if (m.etId || m.muestreoId)
+        await db.$executeRawUnsafe(
+          `UPDATE muestra SET et_id = $2::uuid, muestreo_id = $3::uuid WHERE id = $1::uuid`,
+          muestra.id,
+          m.etId ?? null,
+          m.muestreoId ?? null,
+        );
       const g = await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db);
       creadas.push({
         id: muestra.id,
@@ -1799,6 +1868,7 @@ export class RecepcionMuestraController {
   ],
   // BPCH (internación / reinspección) registra cada lote como muestra de la OT
   // con el mismo servicio que la pestaña «Muestras» del expediente.
-  exports: [RegistroMuestrasService],
+  // Especificaciones técnicas (desglose en componentes) genera ensayos con el mismo puente.
+  exports: [RegistroMuestrasService, PuenteAnalisisService],
 })
 export class FlujoRealModule {}

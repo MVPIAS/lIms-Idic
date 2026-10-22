@@ -26,6 +26,13 @@ import { traducirFormula } from "./formula-legado";
 import { esNumeroTexto, type TipoDato } from "./especificacion";
 import { leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado, type Veredicto } from "./veredicto";
 import { aplicarFactor, expresionConFactor, type Factor } from "./factor";
+import {
+  combinarVeredictos,
+  veredictoCondicion2,
+  veredictoPlanClases,
+  type Condicion2,
+  type PlanClases,
+} from "./requisito-compuesto";
 
 export class CapturaError extends Error {}
 
@@ -38,6 +45,10 @@ export interface EspecCaptura {
   factor?: Factor | null;
   /** Veredicto de un «< LD» que no se puede decidir (parámetro captura_ld.indeterminado). */
   criterioLd?: CriterioIndeterminado;
+  /** Plan de 2 o 3 clases (n, c, m, M): cada réplica es una unidad (requisito-compuesto.ts). */
+  planClases?: PlanClases | null;
+  /** Segunda condición de la misma fila («X kgf con Y mm»). */
+  condicion2?: Condicion2 | null;
 }
 
 export interface EntradaCaptura {
@@ -48,6 +59,8 @@ export interface EntradaCaptura {
   variables?: Record<string, number>;
   atributo?: "cumple" | "no_cumple";
   observacion?: string;
+  /** Valor de la segunda condición (si el requisito la tiene). */
+  valorCondicion2?: number | string | null;
 }
 
 export interface CalculoCaptura {
@@ -66,6 +79,10 @@ export interface CalculoCaptura {
   valorSinFactor: number | null;
   /** ¿Se aplicó el factor del ensayo? */
   factorAplicado: boolean;
+  /** Valor capturado de la segunda condición (null si no aplica o no se indicó). */
+  valorCondicion2: number | null;
+  /** Cómo se decidió un requisito compuesto (plan de clases o segunda condición). */
+  explicacion: string | null;
 }
 
 const num = (v: string | null | undefined): number | null =>
@@ -106,11 +123,44 @@ function sinVariablesReservadas(vars: Record<string, number> | undefined) {
       throw new CapturaError(`La variable «${k}» está reservada (RN, RN1..RNn, REPLICAS, PROMEDIO, DE, CV, N, C1..Cn).`);
 }
 
+/**
+ * Calcula el resultado y, si el requisito es compuesto, ajusta el veredicto:
+ *   · plan de clases: las réplicas (o lecturas) son las n unidades; un valor
+ *     único no basta;
+ *   · segunda condición: cumple solo si cumplen las dos.
+ */
 export function calcularCaptura(espec: EspecCaptura, e: EntradaCaptura): CalculoCaptura {
+  const calc = calcularCapturaSimple(espec, e);
+  if (espec.tipoDato === "atributo") return calc;
+  let veredicto = calc.veredicto;
+  const explicaciones: string[] = [];
+  if (espec.planClases) {
+    if (!calc.replicas.length)
+      throw new CapturaError(
+        `Este ensayo se evalúa por un plan de ${espec.planClases.n} unidades (n, c, m, M): ingrese el valor de cada unidad como réplicas.`,
+      );
+    const unidades = calc.factorAplicado ? calc.replicas.map((v) => aplicarFactor(v, espec.factor ?? null)) : calc.replicas;
+    const ev = veredictoPlanClases(unidades, espec.planClases);
+    veredicto = ev.veredicto;
+    explicaciones.push(ev.explicacion);
+  }
+  let valorCondicion2: number | null = null;
+  if (espec.condicion2) {
+    const bruto = e.valorCondicion2;
+    if (bruto != null && String(bruto).trim() !== "") valorCondicion2 = numeroCelda(bruto, espec.condicion2.etiqueta);
+    const v2 = veredictoCondicion2(valorCondicion2, espec.condicion2);
+    if (v2 === "pendiente") explicaciones.push(`Falta el valor de ${espec.condicion2.etiqueta}.`);
+    else if (v2 === "no_cumple") explicaciones.push(`${espec.condicion2.etiqueta} fuera del requisito.`);
+    veredicto = combinarVeredictos(veredicto, v2);
+  }
+  return { ...calc, veredicto, valorCondicion2, explicacion: explicaciones.length ? explicaciones.join(" ") : null };
+}
+
+function calcularCapturaSimple(espec: EspecCaptura, e: EntradaCaptura): CalculoCaptura {
   const base: CalculoCaptura = {
     valorNumerico: null, valorTexto: null, replicas: [], promedio: null, desviacion: null, cv: null,
     resultadoFinal: null, formulaAplicada: null, lecturas: null, observacion: e.observacion?.trim() || null, veredicto: "pendiente",
-    valorSinFactor: null, factorAplicado: false,
+    valorSinFactor: null, factorAplicado: false, valorCondicion2: null, explicacion: null,
   };
   const factor = espec.factor ?? null;
 
