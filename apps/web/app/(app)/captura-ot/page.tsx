@@ -648,7 +648,9 @@ export default function CapturaOtPage() {
                 ? filas.length === 0
                   ? "Esta OT no tiene ensayos generados. Se generan al registrar sus muestras con los métodos del panel (Registro de OT)."
                   : "No hay resultados con este filtro."
-                : "No hay resultados en esta bandeja."}
+                : vistaBandeja?.derivados
+                  ? "No hay ensayos derivados por capturar: las órdenes internas recibidas por su laboratorio ya tienen sus valores. Las que aún no recibe están en «Órdenes internas»."
+                  : "No hay resultados en esta bandeja."}
             </p>
           ) : (
             <table className="data">
