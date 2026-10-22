@@ -69,3 +69,7 @@
 /* Presentación del certificado: opciones (radio) sin el estilo de rótulo de los campos. */
 .opciones label { font-size: 12.5px; text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 400; cursor: pointer; }
 .opciones :global(.field) label { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: var(--muted); font-weight: 600; }
+
+/* Balance por punto (pestaña 4): barra del aporte uᵢ²/uc². */
+.aporte { display: inline-block; width: 90px; height: 7px; border-radius: 4px; background: #eef3f7; margin-right: 8px; vertical-align: middle; overflow: hidden; }
+.aporte span { display: block; height: 100%; background: var(--accent); }
