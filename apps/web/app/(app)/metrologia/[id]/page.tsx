@@ -31,7 +31,9 @@ const PESTANAS: [Pestana, string][] = [
 const ACCION_EVENTO: Record<string, string> = {
   CREADA: "Creada", EDITADA: "Editada", ENVIADA: "Firmada y enviada a revisión", DEVUELTA: "Devuelta al metrólogo", FIRMADA: "Revisión técnica aprobada",
   EMITIDA: "Firmada y emitida", REEMISION: "Reemisión", REEMPLAZADA: "Reemplazada", ENTREGADA: "Certificado entregado",
-  CERTIFICADO: "Presentación del certificado",
+  CERTIFICADO: "Presentación del certificado", NOTIFICADA: "Aviso al solicitante", CORREO: "Enviado por correo",
+  EQUIPO_ACTUALIZADO: "Equipo del laboratorio dueño actualizado", PATRON_ACTUALIZADO: "Maestro de patrones actualizado",
+  PATRON_NO_ACTUALIZADO: "Maestro de patrones sin actualizar",
 };
 
 function chip(c: any): { texto: string; clase: string } {
@@ -56,7 +58,7 @@ export default function FichaCalibracionPage() {
   const [tab, setTab] = useState<Pestana | null>(null);
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
-  const [dialogo, setDialogo] = useState<null | "devolver" | "reemitir" | "entregar">(null);
+  const [dialogo, setDialogo] = useState<null | "devolver" | "reemitir" | "entregar" | "correo">(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -88,6 +90,9 @@ export default function FichaCalibracionPage() {
     try {
       const r = await llamar("POST", `/metrologia/calibraciones/${id}/${que}`, body);
       toast.ok(okTexto ?? (r?.data?.numero ? `Certificado ${r.data.numero} emitido.` : "Hecho."));
+      const av = r?.data?.aviso;
+      if (av && av.ok) toast.ok(`Aviso enviado por correo a ${av.destinatarios.join(", ")}.`);
+      else if (av && !av.ok) toast.error(`El certificado quedó emitido, pero no salió el aviso por correo: ${av.motivo ?? "sin destinatario"}. Puede enviarlo desde «Enviar por correo».`);
       setDialogo(null);
       if (que === "reemitir" && r?.data?.id) { window.location.href = `/metrologia/nueva?id=${r.data.id}`; return; }
       await cargar();
@@ -315,6 +320,9 @@ export default function FichaCalibracionPage() {
               {a.includes("EMITIR") && <button className="btn primary" disabled={ocupado} onClick={() => firmar(true)}>Firmar y emitir → Entrega</button>}
               {a.includes("DEVOLVER") && <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("devolver")}>Devolver al metrólogo…</button>}
               {puedeEntregar && <button className="btn primary" disabled={ocupado} onClick={() => setDialogo("entregar")}>Registrar entrega → Cierre de OT</button>}
+              {c.estado === "emitida" && c.ot_id && puede(["certificado.entregar", "metrologia.crear"]) && (
+                <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("correo")}>Enviar por correo…</button>
+              )}
               {a.includes("REEMITIR") && <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("reemitir")}>Reemitir…</button>}
               <button className="btn outline" onClick={verPdf}>{c.estado === "emitida" ? "Certificado (PDF)" : "Borrador (PDF)"}</button>
               {!a.some((x) => ["ENVIAR", "FIRMAR", "EMITIR"].includes(x)) && c.paso_pendiente && (
@@ -405,6 +413,18 @@ export default function FichaCalibracionPage() {
           ocupado={ocupado} onCerrar={() => setDialogo(null)}
           onGuardar={(motivo) => accion(dialogo, { motivo }, dialogo === "devolver" ? `${c.codigo} devuelta al metrólogo.` : "Reemisión creada.")} />
       )}
+      {dialogo === "correo" && (
+        <CorreoDialogo numero={nombre} entregado={!!c.entregado_at} ocupado={ocupado} onCerrar={() => setDialogo(null)} onEnviar={async (b) => {
+          setOcupado(true);
+          try {
+            const r = await llamar("POST", `/ot/${c.ot_id}/calibraciones/${c.id}/enviar-correo`, b);
+            if (r?.data?.ok) { toast.ok(`Certificado ${nombre} enviado a ${r.data.destinatarios.join(", ")}${r.data.entregado && !c.entregado_at ? " · entrega registrada" : ""}.`); setDialogo(null); }
+            else toast.error(r?.data?.error ?? "No se pudo enviar el correo.");
+            await cargar();
+          } catch (e: any) { toast.error(e.message); }
+          finally { setOcupado(false); }
+        }} />
+      )}
       {dialogo === "entregar" && (
         <EntregaDialogo numero={nombre} ocupado={ocupado} onCerrar={() => setDialogo(null)} onGuardar={async (b) => {
           setOcupado(true);
@@ -427,6 +447,25 @@ function MotivoDialogo({ titulo, texto, boton, ocupado, onCerrar, onGuardar }: {
       <p style={{ marginTop: 0, color: "var(--muted)" }}>{texto}</p>
       <div className="field"><label htmlFor="mf-m">Motivo <span className="req">*</span></label><textarea id="mf-m" rows={4} value={m} onChange={(e) => setM(e.target.value)} /></div>
       <small style={{ color: "var(--muted)" }}>Mínimo 5 caracteres.</small>
+    </Modal>
+  );
+}
+
+function CorreoDialogo({ numero, entregado, ocupado, onCerrar, onEnviar }: { numero: string; entregado: boolean; ocupado: boolean; onCerrar: () => void; onEnviar: (b: any) => void }) {
+  const [para, setPara] = useState("");
+  const [mensaje, setMensaje] = useState("");
+  const lista = para.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
+  const malos = lista.filter((x) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));
+  return (
+    <Modal titulo={`Enviar por correo el certificado ${numero}`} onCerrar={onCerrar} acciones={<>
+      <button className="btn outline" onClick={onCerrar}>Cancelar</button>
+      <button className="btn primary" disabled={ocupado || !lista.length || malos.length > 0} onClick={() => onEnviar({ destinatarios: lista, mensaje: mensaje.trim() || null })}>Enviar → registrar entrega</button>
+    </>}>
+      <p style={{ marginTop: 0, color: "var(--muted)" }}>Se adjunta el PDF sellado con su código de verificación.{entregado ? " La entrega ya está registrada: el envío queda en la bitácora." : " Si el correo sale, la entrega queda registrada con el medio «correo»."}</p>
+      <div className="field"><label htmlFor="cf-p">Para <span className="req">*</span></label>
+        <input id="cf-p" type="text" inputMode="email" autoComplete="off" value={para} onChange={(e) => setPara(e.target.value)} aria-describedby="cf-p-ayuda" />
+        <small id="cf-p-ayuda" style={{ color: malos.length ? "var(--danger, #b42318)" : "var(--muted)" }}>{malos.length ? `Revise: ${malos.join(", ")}` : "Uno o más correos separados por coma."}</small></div>
+      <div className="field"><label htmlFor="cf-m">Mensaje (opcional)</label><textarea id="cf-m" rows={3} maxLength={1000} value={mensaje} onChange={(e) => setMensaje(e.target.value)} /></div>
     </Modal>
   );
 }

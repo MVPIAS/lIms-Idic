@@ -144,3 +144,24 @@ ON CONFLICT (tenant_id, prefijo) DO NOTHING;
 -- {"termohigrometro": {id, codigo, ...}, "barometro": {...}, "lecturas": {temp: [], hum: [], pres: []},
 --  "corregidas": {temp: {promedio, error, corregido, U}, ...}}: copia, como los patrones.
 ALTER TABLE met_calibracion ADD COLUMN IF NOT EXISTS auxiliares JSONB;
+
+-- --- 8 · Acciones nuevas de la bitácora de la calibración ---------------------------
+-- Se AÑADEN a las que ya admita el CHECK (sin quitar las de otros frentes): se lee la
+-- definición vigente, se unen los valores y se vuelve a crear solo si falta alguno.
+DO $$
+DECLARE
+  def text;
+  actuales text[];
+  nuevas text[] := ARRAY['NOTIFICADA', 'CORREO', 'EQUIPO_ACTUALIZADO', 'PATRON_ACTUALIZADO', 'PATRON_NO_ACTUALIZADO'];
+  todas text[];
+BEGIN
+  SELECT pg_get_constraintdef(oid) INTO def FROM pg_constraint
+   WHERE conname = 'met_calibracion_evento_accion_check' AND conrelid = 'met_calibracion_evento'::regclass;
+  IF def IS NULL THEN RETURN; END IF;
+  SELECT array_agg(DISTINCT m[1]) INTO actuales FROM regexp_matches(def, '''([A-Z_]+)''', 'g') AS m;
+  IF actuales @> nuevas THEN RETURN; END IF;
+  SELECT array_agg(DISTINCT x ORDER BY x) INTO todas FROM unnest(actuales || nuevas) AS x;
+  ALTER TABLE met_calibracion_evento DROP CONSTRAINT met_calibracion_evento_accion_check;
+  EXECUTE format('ALTER TABLE met_calibracion_evento ADD CONSTRAINT met_calibracion_evento_accion_check CHECK (accion IN (%s))',
+                 (SELECT string_agg(quote_literal(x), ', ') FROM unnest(todas) AS x));
+END $$;

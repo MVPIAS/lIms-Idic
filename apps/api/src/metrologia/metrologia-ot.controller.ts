@@ -16,6 +16,8 @@ import {
   motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion,
 } from "./metrologia-ot.reglas";
 import { LABS_SAM, calibracionesDeOt, cierreExigeDevolucion, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
+import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha } from "./ficha.datos";
+import { MailService } from "../configuracion/configuracion.module";
 
 // ---------------------------------------------------------------------------
 // Metrología ligada a la OT (EP-04, entrega R1): ítems «instrumento» de la OT,
@@ -81,6 +83,10 @@ const TEXTO_MEDIO: Record<string, string> = {
   mano: "en mano", correo: "por correo electrónico", oficina_partes: "por oficina de partes", courier: "por courier", plataforma: "por la plataforma del cliente", otro: "otro medio",
 };
 const MotivoSchema = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres)").max(1000) });
+const CorreoSchema = z.object({
+  destinatarios: z.array(z.string().trim().email("Correo no válido").max(160)).min(1, "Indique al menos un correo").max(10),
+  mensaje: z.string().trim().max(1000).nullish(),
+});
 
 /**
  * Instante de la entrega: un día AAAA-MM-DD se lee en hora de Chile (hoy → ahora; otro
@@ -110,7 +116,7 @@ type Accion = keyof typeof PERMISOS_ACCION;
 
 @Injectable()
 export class MetrologiaOtService {
-  constructor(private readonly prisma: PrismaService, private readonly alcance: AlcanceService) {}
+  constructor(private readonly prisma: PrismaService, private readonly alcance: AlcanceService, private readonly mail: MailService) {}
 
   private tenant(req: any): string {
     const t = req?.user?.tenantId;
@@ -457,7 +463,38 @@ export class MetrologiaOtService {
          VALUES ($1::uuid, 'ENTREGADA', 'emitida', 'emitida', $2::uuid, $3)`,
         calId, req?.user?.sub ?? null, `Entregado a ${d.destinatario} · ${TEXTO_MEDIO[d.medio] ?? d.medio}${d.observacion ? ` · ${d.observacion}` : ""}`);
     });
-    return { data: { id: calId, entregado: true } };
+    // P8.4 con el parámetro «al entregar»: el equipo del laboratorio dueño toma el certificado ahora.
+    const cfg = await leerConfigFicha(this.prisma as any, ot.tenantId);
+    const equipo = cfg.actualizarEquipo === "entregar" ? await actualizarEquipoDueno(this.prisma as any, calId, req?.user?.sub ?? null, "entregar") : null;
+    return { data: { id: calId, entregado: true, equipo } };
+  }
+
+  /**
+   * «Enviar por correo» (EP-04 P8.1): el PDF sellado del certificado emitido a los correos
+   * indicados. Si sale y la entrega no estaba registrada, la registra (medio «correo»).
+   */
+  async enviarCorreo(otId: string, calId: string, body: unknown, req: any) {
+    const d = CorreoSchema.parse(body ?? {});
+    const ot = await this.cargarOt(otId, req);
+    await this.exigir(req, "entregar", ot);
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, estado, numero_certificado AS "numeroCertificado", codigo, emitido_at AS "emitidoAt", entregado_at AS "entregadoAt"
+         FROM met_calibracion WHERE id = $1::uuid AND ot_id = $2::uuid AND deleted_at IS NULL`, calId, otId);
+    if (!filas.length) throw new NotFoundException("Calibración no encontrada en esta OT");
+    if (filas[0].estado !== "emitida") throw new ConflictException(`Solo se envía un certificado emitido: ${filas[0].numeroCertificado ?? filas[0].codigo} está ${filas[0].estado}.`);
+    const destinatarios = [...new Set(d.destinatarios.map((x) => x.toLowerCase()))];
+    const r = await enviarCertificado(this.prisma as any, this.mail, calId, destinatarios, { mensaje: d.mensaje ?? null, usuarioId: req?.user?.sub ?? null, motivo: "envio" });
+    let entregado = !!filas[0].entregadoAt;
+    if (r.ok && !entregado) {
+      await this.entregar(otId, calId, { medio: "correo", destinatario: destinatarios.join(", ").slice(0, 160), observacion: "Enviado por correo desde el LIMS (PDF sellado adjunto)." }, req);
+      entregado = true;
+    }
+    return {
+      data: {
+        ok: r.ok, destinatarios, entregado,
+        error: r.ok ? null : `No se pudo enviar el correo: ${r.error}. Revise la configuración de correo o registre la entrega manualmente.`,
+      },
+    };
   }
 
   /* ------------------------------------------------------- cierre técnico --- */
@@ -545,6 +582,13 @@ export class MetrologiaOtController {
   @RequierePermiso("ot.ver")
   entregar(@Param("id", ParseUUIDPipe) id: string, @Param("cal", ParseUUIDPipe) cal: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.entregar(id, cal, body, req);
+  }
+
+  @Post(":id/calibraciones/:cal/enviar-correo")
+  @RequierePermiso("ot.ver")
+  @ApiOperation({ summary: "Envía por correo el certificado de calibración emitido (PDF sellado) y, si sale, registra la entrega" })
+  enviarCorreo(@Param("id", ParseUUIDPipe) id: string, @Param("cal", ParseUUIDPipe) cal: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.enviarCorreo(id, cal, body, req);
   }
 
   @Post(":id/metrologia/cierre-tecnico")
