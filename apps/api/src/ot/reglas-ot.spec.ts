@@ -64,3 +64,15 @@ describe("Reglas OT · origen / cobro / OPI pendiente (Comercial R2)", () => {
     });
   });
 });
+
+import { valorInicialOt } from "./reglas-ot";
+
+describe("valor inicial de la OT desde la cotización (D02-09)", () => {
+  it("costo estimado = total de la cotización; horas = las del costeo del laboratorio", () => {
+    expect(valorInicialOt(17896, [{ horas: 6, costo: 48000 }, { horas: null, costo: null }])).toEqual({ costoEstimado: 17896, horasHombre: 6 });
+  });
+  it("sin total ni costeo queda en 0", () => {
+    expect(valorInicialOt(0)).toEqual({ costoEstimado: 0, horasHombre: 0 });
+    expect(valorInicialOt(NaN, [{ horas: -1, costo: 0 }])).toEqual({ costoEstimado: 0, horasHombre: 0 });
+  });
+});

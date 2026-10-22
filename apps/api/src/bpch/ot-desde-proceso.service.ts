@@ -6,6 +6,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { descendientes } from "../rbac/alcance";
 import { LaboratorioOtService, UnidadResumen } from "../ot/laboratorio-ot.service";
 import { CODIGO_BPCH, CODIGO_SCC, puedeOperarEnUnidad, filtroExpedientesBpch, expedienteVisible } from "./alcance-bpch";
+import { fechaCompromisoDesdePlazo } from "../ot/plazos";
 
 /** Cliente con el que se escribe: el servicio o la transacción en curso. */
 type Tx = Prisma.TransactionClient | PrismaService;
@@ -124,6 +125,18 @@ export class OtDesdeProcesoService {
    */
   async crearOt(tx: Tx, d: DatosOtProceso): Promise<{ id: string; codigo: string }> {
     const codigo = await generarCodigoOt(tx, d.tenantId);
+    // La OT de internación nace con su fecha de compromiso (recorrido MP-06, D06-09):
+    // hoy en Chile + el plazo del parámetro ot_plazo.internacion_dias (días corridos).
+    let fechaCompromiso: Date | null = null;
+    if (d.origen === "INTERNACION") {
+      const [p] = await tx.$queryRawUnsafe<{ valor: string | null }[]>(
+        `SELECT valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'ot_plazo' AND codigo = 'internacion_dias' AND activo`,
+        d.tenantId,
+      );
+      const dias = Math.trunc(Number(p?.valor ?? 10));
+      const f = fechaCompromisoDesdePlazo(null, Number.isFinite(dias) && dias > 0 ? dias : 10);
+      fechaCompromiso = f ? new Date(`${f}T00:00:00Z`) : null;
+    }
     const ot = await tx.ordenTrabajo.create({
       data: {
         tenantId: d.tenantId,
@@ -139,6 +152,7 @@ export class OtDesdeProcesoService {
         elementoGenerico: d.elementoGenerico?.slice(0, 240) || null,
         catElementoId: d.catElementoId ?? null,
         tipoTrabajo: d.tipoTrabajo?.slice(0, 120) || null,
+        ...(fechaCompromiso ? { fechaCompromiso } : {}),
       },
       select: { id: true, codigo: true },
     });
