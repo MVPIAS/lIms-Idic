@@ -66,9 +66,32 @@ export function pct(v: unknown, decimales = 0): string {
   return s + NBSP + "%";
 }
 
-/** Fecha dd-mm-aaaa. Acepta Date, ISO string o "aaaa-mm-dd". */
+/**
+ * ¿Es una fecha de CALENDARIO (sin hora)? «aaaa-mm-dd» o como Prisma serializa
+ * las columnas DATE: «aaaa-mm-ddT00:00:00.000Z». Esas no se convierten a la hora
+ * de Chile: si no, en UTC−3/−4 se mostraban un día antes (recorrido MP-06, D06-01:
+ * resolución del 20-10 vista como 19-10).
+ */
+const SOLO_DIA = /^(\d{4})-(\d{2})-(\d{2})(?:T00:00:00(?:\.000)?Z)?$/;
+
+/** Hoy en Chile como «aaaa-mm-dd» (valor por defecto de los <input type="date">). */
+export function hoyISO(): string {
+  try {
+    return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+  } catch {
+    const d = new Date();
+    const p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  }
+}
+
+/** Fecha dd-mm-aaaa. Acepta Date, ISO string o "aaaa-mm-dd" (las fechas sin hora, tal cual). */
 export function fecha(v: unknown): string {
   if (!v) return GUION;
+  if (typeof v === "string") {
+    const m = SOLO_DIA.exec(v.trim());
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  }
   const d = v instanceof Date ? v : new Date(String(v));
   if (isNaN(d.getTime())) {
     // fallback: si viene "aaaa-mm-dd..." lo reordena sin construir Date (evita TZ).

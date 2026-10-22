@@ -15,7 +15,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
-import { fechaDia, monto } from "@/lib/format";
+import { fechaDia, monto, hoyISO } from "@/lib/format";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast, confirmar } from "@/components/ui/feedback";
@@ -32,7 +32,7 @@ const FILTROS = [
 ];
 
 type Linea = { descripcion: string; cantidad: string; precioUnitario: string };
-const hoy = () => new Date().toISOString().slice(0, 10);
+const hoy = () => hoyISO();
 
 function FacturasContenido() {
   const params = useSearchParams();

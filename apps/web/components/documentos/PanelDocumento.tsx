@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import { fecha, fechaHora } from "@/lib/format";
+import { fecha, fechaHora, hoyISO } from "@/lib/format";
 import { textoModalidad } from "@/lib/informes";
 import { toast, confirmar } from "@/components/ui/feedback";
 import {
@@ -253,7 +253,7 @@ export default function PanelDocumento({
         {p.entregar && (
           <>
             <button className="btn primary" disabled={ocupado} onClick={() => {
-              setEntrega({ fecha: new Date().toISOString().slice(0, 10), medio: "", destinatario: "", observacion: "" });
+              setEntrega({ fecha: hoyISO(), medio: "", destinatario: "", observacion: "" });
               setDialogo("entregar");
             }}>Registrar entrega</button>
             <button className="btn outline" disabled={ocupado} onClick={() => {
@@ -346,7 +346,7 @@ export default function PanelDocumento({
           }
         >
           <div className="form-grid">
-            <div className="field"><label>Fecha de entrega</label><input type="date" value={entrega.fecha} max={new Date().toISOString().slice(0, 10)} onChange={(e) => setEntrega({ ...entrega, fecha: e.target.value })} /></div>
+            <div className="field"><label>Fecha de entrega</label><input type="date" value={entrega.fecha} max={hoyISO()} onChange={(e) => setEntrega({ ...entrega, fecha: e.target.value })} /></div>
             <div className="field">
               <label>Medio <span className="req">*</span></label>
               <select value={entrega.medio} onChange={(e) => setEntrega({ ...entrega, medio: e.target.value })}>

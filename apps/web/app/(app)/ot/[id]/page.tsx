@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { fecha, fechaHora, fechaDia, rut, clp, num } from "@/lib/format";
+import { fecha, fechaHora, fechaDia, rut, clp, num, hoyISO } from "@/lib/format";
 import { ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
 import { usePermisos } from "@/lib/permisos";
 import { llamar, etiquetaUnidad } from "@/lib/laboratorio";
@@ -147,7 +147,7 @@ export default function ExpedientePage() {
 
   // ---- SVT7 · registrar OPI (limpia «OPI pendiente») ----
   const [opiNumero, setOpiNumero] = useState("");
-  const [opiFecha, setOpiFecha] = useState(() => new Date().toISOString().slice(0, 10));
+  const [opiFecha, setOpiFecha] = useState(() => hoyISO());
   const [opiMsg, setOpiMsg] = useState("");
   const registrarOpi = async () => {
     setBusy(true); setOpiMsg("");

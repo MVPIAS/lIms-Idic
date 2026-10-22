@@ -6,6 +6,7 @@ import { clp, apiGet, apiPost, unwrap, ApiError } from "./_components/api";
 import ClienteSelector, { Cliente } from "./_components/ClienteSelector";
 import LineaBuilder, { LineaOT } from "./_components/LineaBuilder";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
+import { hoyISO } from "@/lib/format";
 
 /**
  * Origen de la OT en el alta directa (Comercial R2):
@@ -26,7 +27,7 @@ const ORIGENES = [
 ];
 type CC = { id: string; codigo: string; nombre: string; tipo?: string | null };
 
-const hoy = () => new Date().toISOString().slice(0, 10);
+const hoy = () => hoyISO();
 
 export default function NuevaOtPage() {
   const router = useRouter();
