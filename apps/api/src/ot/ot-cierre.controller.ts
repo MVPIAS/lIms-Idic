@@ -1,3 +1,5 @@
+import { faltantesCierreArmas } from "../saec/d11/cierre-d11";
+import { faltantesNotificacionDgmn } from "../bpch/notificacion-dgmn/notificacion-dgmn.module";
 import {
   BadRequestException,
   Body,
@@ -169,6 +171,9 @@ export class OtCierreService {
         coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId),
       }),
       ...(ot.estado === "cerrada" ? [] : faltantesInstrumentos(metro.items, metro.cals, metro.exigeDevolucion)),
+      // EP-10 10.15/10.17: incumplimiento oficial notificado a DGMN; EP-11 11.27: armas entregadas.
+      ...(ot.estado === "cerrada" ? [] : await faltantesNotificacionDgmn(this.prisma, id)),
+      ...(ot.estado === "cerrada" ? [] : await faltantesCierreArmas(this.prisma, id)),
     ];
     const camino = caminoEstadosOt(ot.estado);
     if (!faltantes.length && camino === null)
@@ -272,6 +277,8 @@ export class OtCierreService {
           coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId, tx),
         }),
         ...(estado === "cerrada" ? [] : faltantesInstrumentos(metro.items, metro.cals, metro.exigeDevolucion)),
+        ...(estado === "cerrada" ? [] : await faltantesNotificacionDgmn(tx, id)),
+        ...(estado === "cerrada" ? [] : await faltantesCierreArmas(tx, id)),
       ];
       const camino = caminoEstadosOt(estado);
       if (!faltantes.length && camino === null)
