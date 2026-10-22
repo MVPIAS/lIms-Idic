@@ -48,6 +48,7 @@ import { BpchProduccionPrototiposClasificacionModule } from "./bpch/produccion-p
 import { EncuestaModule } from "./encuesta/encuesta.module";
 import { RecepcionModule } from "./recepcion/recepcion.module";
 import { EspecificacionTecnicaModule } from "./especificacion-tecnica/et.module";
+import { MuestreoModule } from "./muestreo/muestreo.module";
 
 /**
  * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
@@ -119,6 +120,7 @@ function prettyTransport() {
     BpchProduccionPrototiposClasificacionModule,
     RecepcionModule,
     EspecificacionTecnicaModule,
+    MuestreoModule,
     RbacModule,
     PlantillaRenderModule,
     CrmModule,

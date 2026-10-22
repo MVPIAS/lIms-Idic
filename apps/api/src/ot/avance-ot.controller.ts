@@ -165,6 +165,14 @@ export class AvanceOtService {
         id: x.id, numero: x.numero, descripcion: x.descripcion, estado: x.estado, metrologo: x.metrologoNombre, metrologoId: x.metrologoId,
       })),
       exigeDevolucion: calibraciones?.exigeDevolucion ?? true,
+      // Muestreo de la OT (align_r2b_muestreo.sql): el que aún no recibe el laboratorio guía la recepción.
+      muestreos: await this.prisma
+        .$queryRawUnsafe<any[]>(
+          `SELECT numero_formulario AS numero, estado, recibido_conforme AS "recibidoConforme" FROM ot_muestreo
+            WHERE ot_id = $1::uuid AND estado <> 'anulado' ORDER BY created_at`,
+          ot.id,
+        )
+        .catch(() => []),
       coberturaPendiente: await hechosCobertura(this.prisma, ot.id, ot.tenantId).then((x) => x.pendientes).catch(() => []),
       // OT directa o de Producción Nacional del BPCH (internación y reinspección tienen su ruta propia).
       cabeceraBpch: !i && !r && (await otEsBpch(this.prisma, ot.unidadPrincipal)) ? faltantesParaEmitirInspeccion(await vistaCabecera(this.prisma, ot.id)) : [],

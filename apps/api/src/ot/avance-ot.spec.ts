@@ -44,6 +44,18 @@ describe("Ruta de la OT · laboratorio (recorrido estándar)", () => {
     expect(a.cierre).toBeNull();
   });
 
+  it("con un muestreo en curso, la Recepción empieza por él (EP-01 1.1, EP-03 0.4)", () => {
+    const borrador = calcularAvance(base({ muestreos: [{ numero: "F-7", estado: "borrador", recibidoConforme: null }] }));
+    expect(borrador.siguiente?.texto).toBe("Completar el muestreo Nº F-7 y entregarlo al laboratorio");
+    expect(borrador.siguiente?.accion).toMatchObject({ pestana: "muestreo", permisos: ["muestreo.registrar"] });
+    const entregado = calcularAvance(base({ muestreos: [{ numero: "F-7", estado: "registrado", recibidoConforme: null }] }));
+    expect(entregado.siguiente?.texto).toMatch(/Recibir el muestreo Nº F-7/);
+    expect(entregado.siguiente?.accion).toMatchObject({ pestana: "muestreo", permisos: ["muestra.crear"] });
+    const recibido = calcularAvance(base({ muestreos: [{ numero: "F-7", estado: "recibido", recibidoConforme: false }] }));
+    expect(recibido.siguiente?.accion).toMatchObject({ pestana: "muestras" });
+    expect(recibido.avisos).toContain("Muestreo recibido no conforme: Nº F-7.");
+  });
+
   it("sin laboratorio responsable: Apertura (le toca a Planificación, en la Cabecera)", () => {
     const a = calcularAvance(base({ unidad: null }));
     expect(a.etapaActual).toBe("apertura");

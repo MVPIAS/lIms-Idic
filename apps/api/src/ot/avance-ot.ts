@@ -23,7 +23,7 @@ import { calibracionVigente, documentosDeCalibraciones, faltantesInstrumentos } 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
 export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion";
 /** Pestañas del expediente de la OT a las que puede llevar el «Siguiente paso». */
-export type PestanaOt = "cabecera" | "asignacion" | "muestras" | "instrumentos" | "resultados" | "informe";
+export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "instrumentos" | "resultados" | "informe";
 
 export interface Etapa {
   clave: string;
@@ -139,6 +139,8 @@ export interface HechosOt {
   calibraciones?: CalibracionAvance[];
   /** Órdenes internas emitidas desde la OT (sin las anuladas). */
   ordenesInternas?: OrdenInternaAvance[];
+  /** Muestreos de la OT (sin los anulados): borrador, registrado (entregado) o recibido. */
+  muestreos?: { numero: string; estado: string; recibidoConforme: boolean | null }[];
   /** Documentos por muestra, producto o laboratorio: lo que falta cubrir para cerrar. */
   coberturaPendiente?: string[];
   /** OT del BPCH: lo que le falta a la cabecera de inspección para emitir el Informe de Inspección (EP-10 10.11). */
@@ -517,12 +519,27 @@ function rutaLaboratorio(h: HechosOt): Ruta {
             leToca: { rol: "Planificación y Control", unidad: null, personas: [] },
             accion: { texto: "Ir a Cabecera", pestana: "cabecera", permisos: ["ot.cambiar_laboratorio"] },
           };
-        case "recepcion":
+        case "recepcion": {
+          // Un muestreo en curso va antes que la recepción (EP-01 1.1, EP-03 0.4).
+          const enCurso = (h.muestreos ?? []).find((x) => x.estado === "borrador" || x.estado === "registrado");
+          if (enCurso?.estado === "borrador")
+            return {
+              texto: `Completar el muestreo Nº ${enCurso.numero} y entregarlo al laboratorio`,
+              leToca: { rol: "Sección Muestreo", unidad: null, personas: [] },
+              accion: { texto: "Ir a Muestreo", pestana: "muestreo", permisos: ["muestreo.registrar"] },
+            };
+          if (enCurso)
+            return {
+              texto: `Recibir el muestreo Nº ${enCurso.numero} («recibido conforme») y recepcionar sus muestras`,
+              leToca: { rol: "Recepción de muestras", unidad: u, personas: [] },
+              accion: { texto: "Ir a Muestreo", pestana: "muestreo", permisos: ["muestra.crear"] },
+            };
           return {
             texto: "Recepcionar las muestras: producto, condición de recepción, Nº interno y sus ensayos",
             leToca: { rol: "Recepción de muestras", unidad: u, personas: [] },
             accion: { texto: "Ir a Muestras", pestana: "muestras", permisos: ["muestra.crear"] },
           };
+        }
         case "asignacion":
           return {
             texto: "Asignar los analistas de la OT",
@@ -858,7 +875,10 @@ export function calcularAvance(h: HechosOt): AvanceOt {
   const avisos: string[] = [];
   if (anulada) avisos.push("La OT está anulada.");
   if (h.opiPendiente) avisos.push("OPI pendiente: OT por disposición del Director con cobro.");
-  if (h.muestras.recepcionIncompleta && !cerrada && !anulada) avisos.push(`${plural(h.muestras.recepcionIncompleta, "muestra")} con la recepción incompleta (toma de muestra o condición).`);
+  const noConforme = (h.muestreos ?? []).filter((x) => x.estado === "recibido" && x.recibidoConforme === false);
+  if (noConforme.length && !cerrada && !anulada)
+    avisos.push(`Muestreo recibido no conforme: ${noConforme.map((x) => `Nº ${x.numero}`).join(", ")}.`);
+    if (h.muestras.recepcionIncompleta && !cerrada && !anulada) avisos.push(`${plural(h.muestras.recepcionIncompleta, "muestra")} con la recepción incompleta (toma de muestra o condición).`);
 
   return {
     tipo,

@@ -11,7 +11,7 @@ import Link from "next/link";
 import { fecha } from "@/lib/format";
 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
-export type PestanaOt = "cabecera" | "asignacion" | "muestras" | "instrumentos" | "resultados" | "informe";
+export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "instrumentos" | "resultados" | "informe";
 
 export interface AvanceOt {
   tipo: "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion";
