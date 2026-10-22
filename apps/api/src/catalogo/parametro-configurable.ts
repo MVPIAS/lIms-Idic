@@ -333,6 +333,13 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       metodos_completa: { tipo: "multiple", nombre: "Ensayos del camino «Sin cuño CIP · prueba completa»", opciones: METODOS_D11, porDefecto: "1213,1202,1203,3500" },
       metodos_accesorio: { tipo: "multiple", nombre: "Ensayos de un accesorio (directo al certificado)", opciones: METODOS_D11, porDefecto: "2322" },
       metodos_maquina: { tipo: "multiple", nombre: "Ensayos de una máquina recargadora (directo al certificado)", opciones: METODOS_D11, porDefecto: "3706" },
+      metodos_fuego: {
+        tipo: "multiple",
+        nombre: "Ensayos con fuego real (IT04) que gastan munición de prueba",
+        opciones: METODOS_D11,
+        ayuda: "Al guardar estos ensayos el armero indica el lote y los cartuchos usados; se descuentan del inventario de munición de prueba (EP-11 11.17).",
+        porDefecto: "1203",
+      },
       acunacion_cip: {
         tipo: "sino",
         nombre: "Un arma con cuño CIP también se acuña con el cuño BPCH",

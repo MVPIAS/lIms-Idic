@@ -369,7 +369,8 @@ SELECT t.id, 'd11', v.codigo, v.etiqueta, v.orden, v.valor
   ('metodos_accesorio', 'Métodos de un accesorio (IT10), sin camino CIP (códigos, separados por coma)', 4, '2322'),
   ('metodos_maquina',   'Métodos de una máquina recargadora (IT12), sin camino CIP (códigos, separados por coma)', 5, '3706'),
   ('acunacion_cip',     'Un arma con cuño CIP también se acuña con el cuño BPCH (si | no)', 6, 'no'),
-  ('vigencia_anios',    'Vigencia del certificado por arma, en años', 7, '4')
+  ('vigencia_anios',    'Vigencia del certificado por arma, en años', 7, '4'),
+  ('metodos_fuego',     'Ensayos con fuego real (IT04) que gastan munición de prueba (códigos, separados por coma)', 8, '1203')
  ) AS v(codigo, etiqueta, orden, valor)
 ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
 

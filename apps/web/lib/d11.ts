@@ -45,7 +45,7 @@ export const PILL_ETAPA: Record<string, string> = {
   en_ensayo: "blue",
   por_revisar: "amber",
   no_cumple: "red",
-  por_acunar: "violet",
+  por_acunar: "blue",
   por_certificar: "teal",
   certificado_en_firma: "amber",
   certificada: "green",
@@ -151,6 +151,8 @@ export interface FichaArma {
   etapa: string;
   etapaNombre: string;
   ensayos: EnsayoFicha[];
+  /** 11.17 · prueba de fuego: métodos que gastan munición y cartuchos ya descontados. */
+  fuego: { requiere: boolean; metodos: string[]; usos: { cantidad: number; lote: string; calibre: string; createdAt: string; usuario: string | null }[] };
   movimientos: { id: string; evento: string; fecha: string; ubicacion: string | null; motivo: string; receptor: string | null; responsable: string | null; entrega: string | null }[];
 }
 
@@ -163,3 +165,20 @@ export function hoyChile(): string {
 
 /** Acción del expediente: llama a la API, avisa y refresca la pantalla (null si falló). */
 export type Accion = (metodo: "POST" | "PUT", ruta: string, cuerpo: unknown, okTexto: string) => Promise<any | null>;
+
+/** Descarga un adjunto protegido por JWT (un <a href> plano daría 401). */
+export async function descargarAdjunto(ruta: string, nombre: string): Promise<void> {
+  const r = await fetch(`${API}${ruta}`, { headers: token() ? { Authorization: `Bearer ${token()}` } : {} });
+  if (!r.ok) {
+    const j = await r.json().catch(() => null);
+    throw new Error(errorMensajeDe(j, r.status));
+  }
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
