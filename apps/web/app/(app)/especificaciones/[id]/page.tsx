@@ -210,7 +210,7 @@ export default function FichaEtPage() {
       {et.estado === "anulada" && <div className="alert warn">Anulada{et.anuladaMotivo ? ` · ${et.anuladaMotivo}` : ""}. Ya no se puede elegir.</div>}
       {et.motivoVersion && <p className="subtitle" style={{ margin: "0 0 10px" }}>Motivo de esta versión: {et.motivoVersion}</p>}
 
-      <div className="split-2" style={{ display: "grid", gridTemplateColumns: "minmax(0, 2fr) minmax(260px, 1fr)", gap: 13, alignItems: "start" }}>
+      <div className="split-2" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 320px), 1fr))", gap: 13, alignItems: "start" }}>
         <DatosEt et={et} editable={editable} onGuardado={recibir} />
         <div className="card" style={{ margin: 0 }}>
           <h2>Documento de la E.T.</h2>
