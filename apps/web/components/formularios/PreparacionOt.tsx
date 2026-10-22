@@ -115,7 +115,7 @@ function TrabajoDsa({ otId, onCambio }: { otId: string; onCambio?: () => void })
                     {(c.tipo === "multiple" || c.tipo === "amenazas") && (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
                         {(c.tipo === "amenazas" ? t.opciones.amenazas : c.opciones).map((o: any) => (
-                          <label key={o.valor} style={{ fontSize: 12, display: "flex", gap: 5, alignItems: "center" }}>
+                          <label key={o.valor} style={{ fontSize: 12, display: "flex", gap: 5, alignItems: "center", textTransform: "none", letterSpacing: 0, fontWeight: 400, color: "var(--ink)", margin: 0 }}>
                             <input type="checkbox" style={{ width: "auto" }} checked={(val ?? []).includes(o.valor)} onChange={(e) => set(e.target.checked ? [...(val ?? []), o.valor] : (val ?? []).filter((x: string) => x !== o.valor))} />
                             {o.etiqueta}
                           </label>
@@ -242,8 +242,8 @@ export function ComisionEquipos({ otId, t, onListo }: { otId: string; t: any; on
           <Campo id="jc" etiqueta="Jefe de Comisión">
             <select id="jc" value={jefe} onChange={(e) => setJefe(e.target.value)}><option value="">—</option>{t.personal.map((p: any) => <option key={p.id} value={p.id}>{p.nombre}</option>)}</select>
           </Campo>
-          <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
-            <legend style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>Inspectores</legend>
+          <fieldset style={{ border: 0, padding: 0, margin: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+            <legend style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600, marginBottom: 3 }}>Inspectores</legend>
             {t.personal.map((p: any) => (
               <label key={p.id} style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}>
                 <input type="checkbox" style={{ width: "auto" }} checked={ins.has(p.id)} onChange={(e) => setIns((s) => { const n = new Set(s); if (e.target.checked) n.add(p.id); else n.delete(p.id); return n; })} /> {p.nombre}
