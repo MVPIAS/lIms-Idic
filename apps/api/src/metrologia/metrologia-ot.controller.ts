@@ -16,7 +16,7 @@ import {
   motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion,
 } from "./metrologia-ot.reglas";
 import { LABS_SAM, calibracionesDeOt, cierreExigeDevolucion, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
-import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha } from "./ficha.datos";
+import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, noAptoResueltos } from "./ficha.datos";
 import { MailService } from "../configuracion/configuracion.module";
 
 // ---------------------------------------------------------------------------
@@ -203,6 +203,12 @@ export class MetrologiaOtService {
     return e[0].id;
   }
 
+  /** Parámetro «el no calibrable exige su informe técnico o servicio externo» y los ítems que ya lo tienen. */
+  private async noAptoDe(tenantId: string, otId: string, db: any = this.prisma) {
+    const cfg = await leerConfigFicha(db, tenantId);
+    return { exige: cfg.noAptoExigeDocumento, resueltos: cfg.noAptoExigeDocumento ? await noAptoResueltos(db, otId) : new Set<string>() };
+  }
+
   /* ------------------------------------------------------------- lectura --- */
   /** Instrumentos, calibraciones, qué falta y qué puede hacer el usuario. */
   async resumen(otId: string, req: any) {
@@ -237,7 +243,8 @@ export class MetrologiaOtService {
           ...faltantesInstrumentos(items, cals, exige),
         ]
       : [];
-    const motivoCt = esMetrologia ? motivoCierreTecnico(ot.estado, items, cals) : "La OT no es de Metrología.";
+    const noApto = esMetrologia ? await this.noAptoDe(ot.tenantId, otId) : undefined;
+    const motivoCt = esMetrologia ? motivoCierreTecnico(ot.estado, items, cals, noApto) : "La OT no es de Metrología.";
     return {
       ot: { ...ot, esMetrologia },
       instrumentos,
@@ -505,7 +512,7 @@ export class MetrologiaOtService {
     const r = await this.prisma.$transaction(async (tx) => {
       const est = await tx.$queryRawUnsafe<{ estado: string }[]>(`SELECT estado FROM orden_trabajo WHERE id = $1::uuid FOR UPDATE`, otId);
       const estado = est[0]?.estado ?? ot.estado;
-      const motivo = motivoCierreTecnico(estado, await instrumentosDeOt(tx, otId), await calibracionesDeOt(tx, otId));
+      const motivo = motivoCierreTecnico(estado, await instrumentosDeOt(tx, otId), await calibracionesDeOt(tx, otId), await this.noAptoDe(ot.tenantId, otId, tx));
       if (motivo) throw new ConflictException(`No se puede cerrar técnicamente la OT ${ot.codigo}. ${motivo}`);
       const camino = caminoEstadosOt(estado, "finalizada");
       if (!camino) throw new ConflictException(`La OT está en un estado ('${estado}') desde el que no se llega a «finalizada».`);

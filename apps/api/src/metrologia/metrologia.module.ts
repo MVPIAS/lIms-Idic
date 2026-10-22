@@ -47,6 +47,7 @@ import {
   correlativoDe, formatearNumero, formatoValido, instrumentoDesdeOt, motivoCalibrar, pasosFicha, siguienteCorrelativo,
 } from "./metrologia-ot.reglas";
 import { MetrologiaOtController, MetrologiaOtService } from "./metrologia-ot.controller";
+import { MetrologiaDocumentosController, MetrologiaDocumentosService } from "./metrologia-documentos.controller";
 import {
   avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, motivoNoEmiteMetrologo, nuevoCodigoVerificacion, numeroCertificado,
   revisarPatrones, uCertificada, type FilaCmc, type Firmante,
@@ -1804,7 +1805,7 @@ export class VerificacionMetrologiaController {
 
 @Module({
   imports: [RbacModule, ConfiguracionModule],
-  controllers: [MetrologiaController, VerificacionMetrologiaController, MetrologiaOtController],
-  providers: [MetrologiaOtService],
+  controllers: [MetrologiaController, VerificacionMetrologiaController, MetrologiaOtController, MetrologiaDocumentosController],
+  providers: [MetrologiaOtService, MetrologiaDocumentosService],
 })
 export class MetrologiaModule {}
