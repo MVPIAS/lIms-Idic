@@ -59,6 +59,14 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | Revisión y aprobación de resultados (`segregacion_resultado`) · por confirmar | Revisión y aprobación (`revisor_aprobador`) | Opción: por personas distintas · la misma persona puede | distintas | Aprobar un resultado y «Aprobar todo lo revisado» | `rbac/alcance-resultado.ts` (`configSegregacion`) |
 | | Laboratorios donde la misma persona revisa y aprueba (`excepciones`) | Casillas con los laboratorios, sucursales y delegaciones de la base (solo códigos que existen). Ninguno = la regla vale en todos | Ninguno | idem | idem |
 | Plazo de la OT de internación (`ot_plazo`) · por confirmar EP-06 | Plazo (`internacion_dias`) | Entero 1–365 días corridos | 10 | Fecha de compromiso de la OT al generarla desde la internación (las ya generadas no cambian) | `bpch/ot-desde-proceso.service.ts` |
+| BPCH · prototipos (`bpch_prototipo`) · por confirmar EP-08 P4 | La OT de evaluación exige la parametrización validada (`exige_parametrizacion`) | Sí / No | No | «Generar OT» del prototipo (paso 5) | `bpch/prototipos/prototipos.service.ts` (`exigeParametrizacion`) |
+| Delegación Nº 11 (`d11`) · por confirmar EP-11 P1, P4, P11 | Ensayos del registro (`metodos_registro`) | Casillas con los métodos D11 | 1292 | Registro del arma como muestra (IT05) | `saec/d11/reglas-d11.ts` (`configD11`) |
+| | Ensayos del camino «Con cuño CIP» (`metodos_cip`) | idem | 1291, 3500 | Clasificación y camino del arma | idem |
+| | Ensayos del camino «Sin cuño CIP · prueba completa» (`metodos_completa`) | idem | 1213, 1202, 1203, 3500 | idem | idem |
+| | Ensayos de un accesorio (`metodos_accesorio`) / de una máquina recargadora (`metodos_maquina`) | idem | 2322 / 3706 | idem | idem |
+| | Ensayos con fuego real que gastan munición de prueba (`metodos_fuego`) | idem | 1203 | «Registrar ensayos» del arma: exige lote y cartuchos y los descuenta del inventario (EP-11 11.17) | idem y `saec/d11/municion.service.ts` |
+| | Un arma con cuño CIP también se acuña (`acunacion_cip`) | Sí / No | No | Acuñación IT08 | idem |
+| | Vigencia del certificado por arma (`vigencia_anios`) | Entero 1–10 años | 4 | Emisión del certificado por arma | idem |
 
 Las tres últimas reglas las creó el frente r1g (recorrido MP-02/MP-06, `align_r1g_recorrido.sql`)
 y desde el frente r1h se editan aquí como las demás, con motivo e historial. Las
