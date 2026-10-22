@@ -87,3 +87,4 @@ align_r1b_documentos_ot.sql
 align_r1b_bpch_cabecera.sql
 align_metrologia_ot.sql
 align_recepcion_custodia_equipo_lme.sql
+align_metrologia_certificado_nhojas.sql

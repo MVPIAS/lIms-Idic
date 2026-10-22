@@ -18,6 +18,7 @@ import { MEDIOS_ENTREGA, textoMedio } from "@/lib/documentos";
 import { ORIGEN_OT } from "@/lib/metrologiaOt";
 import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
+import PresentacionCertificado from "@/components/metrologia/PresentacionCertificado";
 import s from "@/components/metrologia/ficha.module.css";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
@@ -29,6 +30,7 @@ const PESTANAS: [Pestana, string][] = [
 const ACCION_EVENTO: Record<string, string> = {
   CREADA: "Creada", EDITADA: "Editada", ENVIADA: "Firmada y enviada a revisión", DEVUELTA: "Devuelta al metrólogo", FIRMADA: "Revisión técnica aprobada",
   EMITIDA: "Firmada y emitida", REEMISION: "Reemisión", REEMPLAZADA: "Reemplazada", ENTREGADA: "Certificado entregado",
+  CERTIFICADO: "Presentación del certificado",
 };
 
 function chip(c: any): { texto: string; clase: string } {
@@ -336,6 +338,12 @@ export default function FichaCalibracionPage() {
               </div>
             )}
           </section>
+          {!["emitida", "reemplazada"].includes(c.estado) && (
+            <section className={s.bloque}>
+              <h2>Presentación del certificado</h2>
+              <PresentacionCertificado id={id} magnitud={c.magnitud_nombre ?? c.magnitud ?? ""} onGuardado={() => { setDoc(""); cargar(); }} />
+            </section>
+          )}
           <section className={s.bloque}>
             <h2>{c.estado === "emitida" || c.estado === "reemplazada" ? "Certificado emitido (sellado)" : "Certificado en borrador · la fecha de emisión se fija al firmar"}</h2>
             {doc
