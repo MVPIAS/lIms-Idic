@@ -81,9 +81,9 @@ export default function BalanceIncertidumbre({ balance, puntos, unidadNominal }:
             ))}
           </tbody>
           <tfoot>
-            <tr><th colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Incertidumbre combinada u<sub>c</sub> = √Σu<sub>i</sub>²</th><td className={`num ${s.calc}`}>{fmtG(p.uc)}</td><td /></tr>
-            <tr><th colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Factor de cobertura k</th><td className="num">{fmtG(p.k)}</td><td /></tr>
-            <tr><th colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Incertidumbre expandida U = k·u<sub>c</sub></th><td className={`num ${s.calc}`}>{fmtG(p.U)}</td><td /></tr>
+            <tr><th scope="row" colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Incertidumbre combinada u<sub>c</sub> = √Σu<sub>i</sub>²</th><td className={`num ${s.calc}`}>{fmtG(p.uc)}</td><td /></tr>
+            <tr><th scope="row" colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Factor de cobertura k</th><td className="num">{fmtG(p.k)}</td><td /></tr>
+            <tr><th scope="row" colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Incertidumbre expandida U = k·u<sub>c</sub></th><td className={`num ${s.calc}`}>{fmtG(p.U)}</td><td /></tr>
           </tfoot>
         </table>
       </div>

@@ -519,15 +519,15 @@ function CondicionesAux({ D, up, auxiliares }: { D: any; up: () => void; auxilia
   const fila = (clave: "t" | "h" | "p", titulo: string, unidad: string, eq: any, c: "temp" | "hum" | "pres") => {
     const r = corregida(D.aux[clave].map(numeroOVacio), eq?.correcciones?.[c]);
     return (
-      <div key={clave} style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr", gap: 8, alignItems: "end" }}>
+      <div key={clave} style={{ gridColumn: "1 / -1", display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
         {[0, 1].map((i) => (
-          <div className="field" key={i} style={{ margin: 0 }}>
+          <div className="field" key={i} style={{ margin: 0, minWidth: 0 }}>
             <label htmlFor={`aux-${clave}-${i}`}>{titulo} {i === 0 ? "inicial" : "final"} ({unidad})</label>
-            <input id={`aux-${clave}-${i}`} inputMode="decimal" value={D.aux[clave][i]} style={YEL} onChange={(e) => { D.aux[clave][i] = e.target.value; up(); }} />
+            <input id={`aux-${clave}-${i}`} inputMode="decimal" value={D.aux[clave][i]} style={{ ...YEL, width: "100%", minWidth: 0 }} onChange={(e) => { D.aux[clave][i] = e.target.value; up(); }} />
           </div>
         ))}
-        <div aria-live="polite" style={{ ...BLUE, padding: "6px 8px", borderRadius: 6, fontSize: 12.5 }}>
-          {r ? <>{fmtG(r.corregido)}{r.U != null ? ` ± ${fmtG(r.U)}` : ""} {unidad}{r.sinCorreccion ? <span style={{ display: "block", fontSize: 11 }}>sin error de certificado en el maestro</span> : <span style={{ display: "block", fontSize: 11 }}>corregido (lectura − error {fmtG(eq?.correcciones?.[c]?.error)})</span>}</> : "—"}
+        <div aria-live="polite" style={{ ...BLUE, fontFamily: "inherit", gridColumn: "1 / -1", padding: "6px 8px", borderRadius: 6, fontSize: 12.5 }}>
+          Informado: {r ? <><strong>{fmtG(r.corregido)}{r.U != null ? ` ± ${fmtG(r.U)}` : ""} {unidad}</strong> · {r.sinCorreccion ? "sin error de certificado en el maestro (se informa el promedio)" : `promedio − error del certificado (${fmtG(eq?.correcciones?.[c]?.error)} ${unidad})`}</> : "escriba las lecturas inicial y final"}
         </div>
       </div>
     );
