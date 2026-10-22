@@ -21,7 +21,7 @@ import {
   MESES_EJERCITO_OCT_DIC_DEF,
   type ResultadoValidez,
 } from "./validez";
-import { calcularOpiPendiente, origenDesdeAceptacion } from "../ot/reglas-ot";
+import { calcularOpiPendiente, origenDesdeAceptacion, valorInicialOt } from "../ot/reglas-ot";
 import { puedeRegistrarAceptacion } from "./permisos-cotizacion";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
 import { paginacion } from "../ot/lista-ot";
@@ -476,7 +476,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (moneda === "USD" && !(dolar && dolar > 0))
       throw new BadRequestException("Cotización en USD: indique el valor del dólar del día (dolarValor).");
 
-    const fechaEmision = soloFecha(data.fechaEmision ?? new Date());
+    // «Hoy» es el de Chile (con new Date() a las 21:00 ya era mañana en UTC: D02-18).
+    const fechaEmision = soloFecha(data.fechaEmision ?? hoyEnChile());
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
     const lineas = await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar);
     const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0));
@@ -680,6 +681,15 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         ? null
         : await this.labs.resolverParaAlta(tenantIdOt, doc.unidadPrincipalId, { cotizacionId: id });
 
+    // Valor inicial de la OT (EP-00 4.2: VALORINICIAL = total de la cotización) y
+    // horas hombre de las respuestas de costeo del laboratorio (recorrido MP-02, D02-09).
+    const costeos = await this.prisma.$queryRawUnsafe<{ horas: number | null; costo: number | null }[]>(
+      `SELECT horas_hombre::float8 AS horas, costo_directo::float8 AS costo FROM solicitud_costeo
+        WHERE cotizacion_id = $1::uuid AND deleted_at IS NULL AND respondida_at IS NOT NULL`,
+      id,
+    ).catch(() => []);
+    const inicial = valorInicialOt(Number(cot.total ?? 0), costeos);
+
     const { cotizacion, ot } = await this.prisma.$transaction(async (tx) => {
       const existente = await tx.ordenTrabajo.findFirst({
         where: { cotizacionId: id, tenantId: tenantIdOt },
@@ -728,6 +738,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
           origenTrabajo: origen,
           conCobro,
           opiPendiente,
+          costoEstimado: inicial.costoEstimado,
+          horasHombre: inicial.horasHombre,
           ...(doc.tipo === "OC" ? { ocNumero: doc.numero?.trim() ?? null } : {}),
           ...(opiNumero ? { opiNumero, opiFecha: fechaDoc, opiRegistradaAt: new Date() } : {}),
           ...(doc.tipo === "DISPOSICION_DIRECTOR"

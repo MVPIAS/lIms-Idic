@@ -17,7 +17,7 @@ export const ORIGENES_OT = ["COTIZACION", "INTERNACION", "DISPOSICION", "INTERLA
 
 /** Por qué «Registrar OT» ya no admite el origen Internación. */
 export const MOTIVO_INTERNACION_PUERTA_UNICA =
-  "La OT de internación no se registra a mano: nace sola al registrar la resolución DGMN en Internaciones (BPCH · Comercial).";
+  "La OT de internación no se registra a mano: nace sola en Internaciones (BPCH · Comercial) cuando la SCC da por completa la información técnica de la resolución DGMN.";
 export type OrigenOt = (typeof ORIGENES_OT)[number];
 
 export const TIPOS_ACEPTACION = ["OPI_RESOLUCION", "OC", "CORREO", "PAGO_ADELANTADO", "DISPOSICION_DIRECTOR"] as const;
@@ -94,4 +94,20 @@ export function validarOrigenOt(d: {
       break;
   }
   return errores;
+}
+
+/**
+ * Valor inicial de la OT que nace de una cotización (EP-00 4.2: VALORINICIAL =
+ * total de la cotización; recorrido MP-02, D02-09). Las horas hombre son las que
+ * el laboratorio declaró al responder el costeo (FORM05/FORM06). Sin cotización
+ * o con total 0 queda en 0 (OT sin cobro: lo registra quien la crea).
+ */
+export function valorInicialOt(
+  totalCotizacion: number,
+  costeos: { horas: number | null; costo: number | null }[] = [],
+): { costoEstimado: number; horasHombre: number } {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const total = Number.isFinite(totalCotizacion) && totalCotizacion > 0 ? totalCotizacion : 0;
+  const horas = costeos.reduce((s, c) => s + (Number(c.horas) > 0 ? Number(c.horas) : 0), 0);
+  return { costoEstimado: r2(total), horasHombre: r2(horas) };
 }
