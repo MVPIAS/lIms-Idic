@@ -55,6 +55,16 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | Recepción · plazos de retención (`retencion_muestra`) | Testigo (`testigo`), contramuestra (`contramuestra`) | Entero 1–600 meses | 1 y 12 | Muestras recibidas desde el cambio: no se destruyen antes del plazo | idem |
 | Recepción · campos propios (`recepcion_campo`) | Uno por campo: `<LAB>.<campo>` (p. ej. `LME.lote`) | Formulario, no JSON: tipo de dato (texto, número, entero, fecha, lista, casilla), obligatorio, activo, ayuda (máx. 300) y, si es lista, sus opciones (valor y texto visible; al menos una, sin repetir, máx. 30). El destino de la muestra (`clase_custodia`) solo admite analisis, testigo, custodia o contramuestra. Se valida con el mismo lector que usa la recepción. «＋ Añadir campo» con laboratorio, código y nombre visible | Los de `align_recepcion_custodia_equipo_lme.sql` | Recepción de la muestra | `recepcion/reglas-recepcion.ts` |
 | Captura · equipo usado (`captura_equipo`) | Equipo obligatorio al capturar (`obligatorio`) | Opción: solo los métodos marcados · todo ensayo numérico · todo ensayo | metodo | Captura y revisión por OT | `laboratorio/equipo-captura.ts` |
+| Captura · «< LD» (`captura_ld`) · por confirmar EP-02 §10.2 | Veredicto de un «< LD» que no se puede decidir (`indeterminado`) | Opción: pendiente (lo decide el revisor) · no cumple · cumple | pendiente | Captura y revisión por OT (lo que se capture desde el cambio) | `laboratorio/veredicto.ts` (`criterioIndeterminado`) |
+| Revisión y aprobación de resultados (`segregacion_resultado`) · por confirmar | Revisión y aprobación (`revisor_aprobador`) | Opción: por personas distintas · la misma persona puede | distintas | Aprobar un resultado y «Aprobar todo lo revisado» | `rbac/alcance-resultado.ts` (`configSegregacion`) |
+| | Laboratorios donde la misma persona revisa y aprueba (`excepciones`) | Casillas con los laboratorios, sucursales y delegaciones de la base (solo códigos que existen). Ninguno = la regla vale en todos | Ninguno | idem | idem |
+| Plazo de la OT de internación (`ot_plazo`) · por confirmar EP-06 | Plazo (`internacion_dias`) | Entero 1–365 días corridos | 10 | Fecha de compromiso de la OT al generarla desde la internación (las ya generadas no cambian) | `bpch/ot-desde-proceso.service.ts` |
+
+Las tres últimas reglas las creó el frente r1g (recorrido MP-02/MP-06, `align_r1g_recorrido.sql`)
+y desde el frente r1h se editan aquí como las demás, con motivo e historial. Las
+excepciones de la segregación se guardan como antes (códigos separados por coma), así
+que el lector no cambia; la captura muestra en «Aprobar todo lo revisado» cuántos
+resultados deja fuera por esta regla.
 
 Los combos (tipo de cliente, forma de pago, toma de muestra, productos por
 laboratorio…) siguen en la tabla de arriba, como antes. Los porcentajes de la tasa
@@ -88,4 +98,5 @@ de internación (`bpch_tasa`) siguen en su recuadro propio (frente K).
 | `POST /parametros/configurables/:categoria` | `catalogo.gestionar` global | `recepcion_producto_obligatorio`: `{ laboratorio, valor: true/false, motivo }` · `recepcion_campo`: `{ laboratorio, campo, etiqueta, valor: {…}, motivo }` |
 
 Recorrido de prueba: `scripts/verificacion/r1-r1f.js` (con Calidad, que puede, y
-con el Jefe de LQC y Comercial, que no).
+con el Jefe de LQC y Comercial, que no) y, para las reglas de r1g,
+`scripts/verificacion/r1-r1h.js`.
