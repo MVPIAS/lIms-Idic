@@ -1108,6 +1108,18 @@ model Resultado {
   factorEditadoPor  String?   @map("factor_editado_por") @db.Uuid
   factorEditadoAt   DateTime? @map("factor_editado_at") @db.Timestamptz
   factorMotivo      String?   @map("factor_motivo")
+  /// Especificación técnica del cliente (align_r2b_especificacion_tecnica.sql):
+  /// punto de la E.T. del que vino el requisito (espec_origen = «et») y su texto
+  /// de fuente; segunda condición de la fila con su valor; plan de 2/3 clases
+  /// (n, c, m, M); clase de la no conformidad para el veredicto del lote.
+  etPuntoId         String?   @map("et_punto_id") @db.Uuid
+  especFuente       String?   @map("espec_fuente") @db.VarChar(240)
+  condicion2        Json?
+  valorCondicion2   Decimal?  @map("valor_condicion2") @db.Decimal(18, 6)
+  planClases        Json?     @map("plan_clases")
+  claseDefecto      String?   @map("clase_defecto") @db.VarChar(10)
+  claseDefectoPor   String?   @map("clase_defecto_por") @db.Uuid
+  claseDefectoAt    DateTime? @map("clase_defecto_at") @db.Timestamptz
   valorSinFactor    Decimal?  @map("valor_sin_factor") @db.Decimal(18, 6)
   /// Variables extra de la fórmula usadas en la captura (masa, volumen…).
   variables         Json?
