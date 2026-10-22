@@ -296,10 +296,10 @@ La tolerancia del fabricante queda como dato **informativo** («Dentro / Fuera»
 «Cumple / No cumple»): el LMT no evalúa conformidad (pregunta 14 de EP-04).
 
 ### 7.7 Pendiente (fuera de R1 o a la espera del IDIC)
-Informe técnico del no calibrable (EP04-12, R3: hoy el ítem no apto se cierra con su motivo y
-devolución), servicio externo (EP04-13), envío del certificado por correo, actualización del
-equipo del laboratorio dueño (EP04-30), códigos EN de la lista de precios en el catálogo
-(EP04-01), Mi bandeja de Metrología (EP04-39) y el desglose uᵢ por punto de los motores (EP04-19).
+Lo que estaba aquí se hizo en la entrega R4 (§9). Sigue pendiente: Proyecto de Párrafo (terreno),
+recepción en ventanilla del LNF, programa de recalibración, oficio conductor del LNF y la excepción
+de su matriz de firmas, trabajo no conforme desde la calibración, ítems de control de la Hoja de
+Control y adjuntos (planilla en papel escaneada).
 
 ## 8. Certificado de N hojas y presentación por certificado (respuesta del LMT del 21-10-2026, frente r1e)
 
@@ -365,3 +365,75 @@ certificado ASTM y LNF bilingüe quedan a la espera de casos o formatos del IDIC
 Ningún certificado ni vista lo dice. El formulario por puntos rotula la
 comparación con la tolerancia del fabricante como «informativa» («Dentro si …»).
 
+## 9. Ficha de calibración y cálculo (entrega R4, tema T28, frente r4a)
+
+Especificación: EP-04 (P0.1, P2.3, P2.4, P3.2, P3.4, P3.5, P4.2, P5.2, P5.3, P7.2, P8.1, P8.4, P8.5,
+PX.1 y PX.3). SQL: `packages/db/align_r4a_metrologia_ficha.sql` y `seed_r4a_servicios_calibracion.sql`
+(antes de `align_cierre_permisos.sql`). Reglas puras: `ficha.reglas.ts`, `motores/balance.ts`,
+`metrologia-documentos.reglas.ts`, `certificado/equivalencias.ts`, `certificado/lnf.ts` (con sus
+`*.spec.ts`). Recorrido: `scripts/verificacion/r4-r4a.js`. **Los motores no cambian**: la paridad sigue
+en 1531/1531, M-3947, V-5920 y LCPNF-010.26 (`balance.spec.ts` lo vuelve a exigir).
+
+### 9.1 Cálculo y hoja de control
+| Paso | Dónde | Regla |
+|---|---|---|
+| P5.2 Balance por punto | Ficha › 4 «Balance de incertidumbre» | Selector de punto; componente, fórmula, distribución, divisor, uᵢ y aporte uᵢ²/uc²; uc, k y U. Lee los términos que el motor ya calculó (vista, no otro cálculo): √Σuᵢ² = uc del motor en los 19 casos reales, con y sin correcciones |
+| P5.3 Error normalizado | Ficha › 6 | Eₙ = abs(E − E_ant) / √(U² + U_ant²) por punto (mismo nominal y unidad), con la U informada en cada certificado; la anterior es la última emitida del mismo instrumento (serie o identificación) y proceso, sin contar la que se reemite, y solo si el usuario la ve. Informativo: no bloquea. Criterio en el parámetro `criterio_en` |
+| P3.5 Fechas de control | Ficha › 1 | Solicitud del cliente, orden de compra (o «No tiene»), fecha OT, recepción, calibración, entrega a revisión, emisión, término previsto (compromiso de la OT) y término real (cierre de la OT) |
+| P3.4 Condiciones corregidas | Hoja de control › Condiciones ambientales | Termohigrómetro y barómetro del maestro (auxiliares) con lecturas inicial y final: se informa promedio − error de su certificado (R15 T1, siempre se resta), a un decimal, con la U del certificado; copia en `met_calibracion.auxiliares`. Auxiliar vencido → 400. Sin auxiliar, a mano. Los errores se cargan en Maestros › Patrones › Actualizar |
+| P4.2 Patrón fuera de rango | Al guardar la calibración | Si un punto cae fuera del rango calibrado numérico de todos los patrones elegidos de la magnitud → 400 (o aviso, parámetro `patron_fuera_rango`). Solo con patrones que tienen su rango numérico en el maestro (Maestros › Patrones: mínimo, máximo, unidad) |
+| PX.1 Bandeja | /metrologia | Columna Magnitud (OT, origen, metrólogo y término previsto ya estaban) |
+| PX.3 Mi bandeja | Inicio | Instrumentos por calibrar, calibraciones por enviar y devueltas (metrólogo), por revisar (quien la matriz pone en la revisión técnica), por firmar y emitir, certificados por entregar. Abren `/metrologia?pendiente=…`. Las calcula Metrología y se suman a `/me/bandeja` (registro de fuentes en `bandeja.service.ts`) |
+
+### 9.2 Emisión, entrega y documentos
+- **Aviso al emitir (P7.2)**: con `notificar_emision` = sí, al emitir se envía el PDF sellado al contacto
+  principal del cliente (o a su correo); en OT interna o interlaboratorio, al jefe titular del laboratorio
+  solicitante. Si no hay destinatario o el correo no sale, la emisión queda igual y la bitácora dice por qué.
+- **Enviar por correo (P8.1)**: ficha › «Enviar por correo…» (`POST /ot/:id/calibraciones/:cal/enviar-correo`,
+  `certificado.entregar` o `metrologia.crear` en el laboratorio de la OT). Si sale, registra la entrega (medio «correo»).
+- **Equipo del laboratorio dueño (P8.4)**: si el ítem está enlazado a un equipo del maestro de Equipos, al
+  emitir (o al entregar, parámetro `actualizar_equipo`) se actualizan su última calibración y la próxima
+  (emisión + intervalo) y queda la calibración en su historial con el número del certificado. El LMT no evalúa
+  conformidad: el historial lo dice y la aptitud la decide el laboratorio dueño.
+- **LNF → maestro de patrones (P8.5)**: el certificado del LNF de un transductor del maestro (misma serie,
+  magnitud fuerza) publica clase, t/u/v (y a/b/c), deriva frente al certificado anterior (cambio relativo de la
+  sensibilidad a la fuerza máxima), U mayor del certificado, número, fechas y vencimiento; antes y después en
+  `met_patron_actualizacion`. Dos patrones con la misma serie: no se toca ninguno (queda en la bitácora).
+- **Informe técnico del no calibrable (P2.3)**: OT › Instrumentos › «Instrumentos no calibrables». Lo elabora el
+  metrólogo (`metrologia.crear`: motivo, hallazgos, recomendación) y lo envía a firma; la jefatura del
+  laboratorio (`metrologia.emitir`) lo emite con número `IT-NNNN` (prefijo ITEC en Maestros › Numeración) y
+  documento sellado, o lo devuelve con motivo; entrega con `certificado.entregar` o `metrologia.crear`.
+- **Servicio externo (P2.4)**: solicita el Jefe del laboratorio (`ot.asignar`) con proveedor del maestro y
+  justificación; aprueba o rechaza el jefe (titular o subrogante) del Departamento del laboratorio; el Jefe del
+  laboratorio registra el envío (O/C, fecha) y valida el certificado externo (PDF validado por sus bytes, máx.
+  10 MB, con su número) como apto o no apto.
+- **Cierre técnico**: con `no_apto_exige_documento` = sí, el ítem no calibrable necesita su informe técnico
+  emitido o su servicio externo validado (por defecto no, como en R1).
+
+### 9.3 Certificado
+- **Equivalencias en el SI** (hoja 1): en presión (bar), fuerza (kgf) y par (lbf·ft), la capacidad, la
+  resolución y el rango que son números o rangos llevan su equivalencia (P-808: 4 bar = 0,4 MPa; F-1556:
+  200 kgf = 1961,33 N; PT-0090: 100 lbf·ft = 135,58 N·m) al final de la nota de condiciones, para que la
+  hoja 1 siga cabiendo en una página.
+- **ASTM (ITT01)**: presentación › «Formato del certificado»; imprime la tabla de la hoja «Certificado ASTM»
+  de T-2887 (sin la columna emergente). Solo los procesos con libro real admiten otro formato.
+- **LNF bilingüe**: 6 hojas más el anexo en tonf (factor 9,8067 de la planilla), como LCPNF-010.26, con
+  amplificador y cable de la recepción, deformaciones, ecuaciones, tabla de interpolación, U de Caso C y D,
+  clase por rango y firmas del Jefe del LNF y del Encargado. La marca DAkkS solo si el proceso tiene su
+  acreditación cargada.
+- **No se hicieron** (sus libros no traen datos): ITV02 contenedores (FORM03), ITF01 FORM02 e ITPT01 antihorario.
+
+### 9.4 Catálogo
+`seed_r4a_servicios_calibracion.sql`: 86 servicios vigentes de la lista de precios del Sistema Comercial
+(respaldo del 08-09-2026; Laboratorio de Metrología y LNF) en `cat_ensayo` con su código EN, precio,
+laboratorio e IT (62 la nombran). «Cargar desde la cotización» pone en el ítem la IT del servicio si es un
+proceso del laboratorio de la OT.
+
+### 9.5 Parámetros (Administración › Parámetros del sistema › metrologia_ficha) · por confirmar
+| Código | Por defecto | Pregunta EP-04 §10 |
+|---|---|---|
+| `criterio_en` | ≤ 1 | P13 |
+| `patron_fuera_rango` | bloquear | R15 P6 (decisión del laboratorio) |
+| `notificar_emision` | sí | P7.2 (texto y adjunto por confirmar) |
+| `actualizar_equipo` | al emitir | P9 |
+| `no_apto_exige_documento` | no | P5 y P6 |
