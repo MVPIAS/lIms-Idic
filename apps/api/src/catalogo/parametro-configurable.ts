@@ -25,6 +25,10 @@
 import { formatearNumeroCotizacion, configNumeracion } from "../cotizacion/numeracion-cotizacion";
 import { CLASES_CUSTODIA, TIPOS_CAMPO, leerCampo, type TipoCampo } from "../recepcion/reglas-recepcion";
 import { leerPorcentaje, valorGuardado } from "./parametro-porcentaje";
+import { AQLS, ETIQUETA_NIVEL, NIVELES } from "../muestreo/nch44";
+
+/** Columnas de AQL de la tabla 2-A como opciones (se guarda con punto, se muestra con coma). */
+const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: String(a).replace(".", ",") }));
 
 export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo";
 
@@ -302,6 +306,58 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         max: 365,
         unidad: "días corridos",
         porDefecto: "10",
+      },
+    },
+  },
+  // --- Muestreo y veredicto del lote (frente r2b, T13 y T11) ---
+  {
+    categoria: "muestreo_plan",
+    titulo: "Muestreo · plan NCh 44 con que se abre cada lote",
+    donde:
+      "OT › Muestreo › «Plan de muestreo del lote»: nivel de inspección y AQL por clase con que se propone el plan. Quien muestrea los cambia en cada lote; los planes ya registrados no cambian.",
+    porConfirmar: "Nivel de inspección y AQL por laboratorio y por clase de defecto (EP-05 §10 P6 y P15; EP-03 §0.4 y §3.7).",
+    codigos: {
+      nivel: {
+        tipo: "opcion",
+        nombre: "Nivel de inspección",
+        opciones: NIVELES.map((n) => ({ valor: n, etiqueta: ETIQUETA_NIVEL[n] })),
+        porDefecto: "II",
+      },
+      aql_critico: {
+        tipo: "opcion",
+        nombre: "AQL de los defectos críticos",
+        opciones: [{ valor: "ninguno", etiqueta: "Sin AQL: un defecto crítico rechaza el lote" }, ...OPCIONES_AQL],
+        porDefecto: "ninguno",
+      },
+      aql_mayor: {
+        tipo: "opcion",
+        nombre: "AQL de los defectos mayores",
+        opciones: [{ valor: "ninguno", etiqueta: "Sin AQL" }, ...OPCIONES_AQL],
+        porDefecto: "2.5",
+      },
+      aql_menor: {
+        tipo: "opcion",
+        nombre: "AQL de los defectos menores",
+        opciones: [{ valor: "ninguno", etiqueta: "Sin AQL" }, ...OPCIONES_AQL],
+        porDefecto: "4",
+      },
+    },
+  },
+  {
+    categoria: "veredicto_lote",
+    titulo: "Veredicto del lote por clase de defecto",
+    donde:
+      "OT › Muestreo › «Conclusión del lote»: cómo cuentan las no conformidades de una clase que no tiene Ac/Re en el plan. Con Ac/Re rige el plan (acepta con defectuosas ≤ Ac, rechaza con ≥ Re).",
+    porConfirmar: "Regla del lote y quién clasifica mayor/menor (EP-05 §10 P15 y P19; carta LEM-01 y SVM-02).",
+    codigos: {
+      regla_sin_plan: {
+        tipo: "opcion",
+        nombre: "Clase sin Ac/Re en el plan",
+        opciones: [
+          { valor: "cualquier_nc", etiqueta: "Una unidad no conforme de cualquier clase rechaza el lote" },
+          { valor: "critica_o_mayor", etiqueta: "Rechaza una no conformidad crítica o mayor; las menores se informan" },
+        ],
+        porDefecto: "cualquier_nc",
       },
     },
   },
