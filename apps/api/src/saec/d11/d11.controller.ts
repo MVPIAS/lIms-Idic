@@ -7,6 +7,7 @@ import { RequierePermiso } from "../../auth/permisos.decorator";
 import { AmbitoUnidad } from "../../rbac/ambito-unidad.guard";
 import { D11Service, type ArchivoSubido } from "./d11.service";
 import { MAX_BYTES_ARCHIVO } from "../../common/tabla-archivo";
+import { MunicionService } from "./municion.service";
 
 const SUBIDA = FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ARCHIVO, files: 1, fields: 2 } });
 
@@ -224,5 +225,117 @@ export class ResolucionArmasController {
   @ApiOperation({ summary: "Lee la planilla del listado de armas (.xlsx o .csv, campo «archivo») para la resolución" })
   leer(@UploadedFile() archivo: ArchivoSubido | undefined, @Req() req: any) {
     return this.svc.leerPlanilla(req, archivo);
+  }
+}
+
+/**
+ * Munición de prueba · lado D11 (EP-11 11.40): inventario por lote, entrega a
+ * los laboratorios y cierre del acta. Compartimento D11.
+ */
+@ApiTags("d11-municion")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@AmbitoUnidad("D11")
+@Controller("d11/municion")
+export class MunicionD11Controller {
+  constructor(private readonly svc: MunicionService) {}
+
+  @Get("lotes")
+  @RequierePermiso("arma.ver")
+  lotes(@Req() req: any) {
+    return this.svc.lotes(req);
+  }
+
+  @Post("lotes")
+  @RequierePermiso("municion.gestionar")
+  @ApiOperation({ summary: "Alta de un lote de munición de prueba con su cantidad inicial" })
+  crearLote(@Body() body: unknown, @Req() req: any) {
+    return this.svc.crearLote(req, body);
+  }
+
+  @Post("lotes/:id/movimientos")
+  @RequierePermiso("municion.gestionar")
+  @ApiOperation({ summary: "Entrada o baja (con motivo) de cartuchos en un lote" })
+  moverLote(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.moverLote(req, id, body);
+  }
+
+  @Get("lotes/:id/movimientos")
+  @RequierePermiso("arma.ver")
+  movimientos(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.movimientos(req, id);
+  }
+
+  @Get("solicitudes")
+  @RequierePermiso("arma.ver")
+  solicitudes(@Req() req: any) {
+    return this.svc.todasLasSolicitudes(req);
+  }
+
+  @Post("solicitudes/:id/entregar")
+  @RequierePermiso("municion.gestionar")
+  @ApiOperation({ summary: "Entregar munición → laboratorio solicitante (descuenta del lote)" })
+  entregar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.entregar(req, id, body);
+  }
+
+  @Post("solicitudes/:id/cerrar")
+  @RequierePermiso("municion.gestionar")
+  @ApiOperation({ summary: "Cerrar el acta: usados + devueltos = entregados (los devueltos vuelven al lote)" })
+  cerrar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.cerrar(req, id, body);
+  }
+
+  @Get("solicitudes/:id/acta")
+  @RequierePermiso("arma.ver")
+  @Header("Content-Type", "text/html; charset=utf-8")
+  @Header("Cache-Control", "private, no-store")
+  acta(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.acta(req, id, true);
+  }
+}
+
+/**
+ * Munición de prueba · lado del laboratorio (LRB, LAM): pide y ve solo las
+ * órdenes de sus unidades (el servicio aplica el alcance por unidad).
+ */
+@ApiTags("d11-municion")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@Controller("municion")
+export class MunicionLaboratorioController {
+  constructor(private readonly svc: MunicionService) {}
+
+  @Get("unidades")
+  @RequierePermiso("municion.solicitar")
+  unidades(@Req() req: any) {
+    return this.svc.unidadesSolicitantes(req);
+  }
+
+  @Get("solicitudes")
+  @RequierePermiso("municion.solicitar")
+  solicitudes(@Req() req: any) {
+    return this.svc.misSolicitudes(req);
+  }
+
+  @Post("solicitudes")
+  @RequierePermiso("municion.solicitar")
+  @ApiOperation({ summary: "Orden interna de munición de prueba a la D11 (norma, nivel, calibre, masa, velocidad ± tol., cantidad)" })
+  solicitar(@Body() body: unknown, @Req() req: any) {
+    return this.svc.solicitar(req, body);
+  }
+
+  @Post("solicitudes/:id/anular")
+  @RequierePermiso("municion.solicitar")
+  anular(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.anular(req, id);
+  }
+
+  @Get("solicitudes/:id/acta")
+  @RequierePermiso("municion.solicitar")
+  @Header("Content-Type", "text/html; charset=utf-8")
+  @Header("Cache-Control", "private, no-store")
+  acta(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.acta(req, id, false);
   }
 }

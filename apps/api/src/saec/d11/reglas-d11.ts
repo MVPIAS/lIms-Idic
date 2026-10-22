@@ -301,6 +301,8 @@ export interface ConfigD11 {
   metodosCompleta: string[];
   metodosAccesorio: string[];
   metodosMaquina: string[];
+  /** Ensayos con fuego real (IT04): gastan munición de prueba del inventario (11.17). */
+  metodosFuego: string[];
   /** ¿Un arma con cuño CIP también se acuña? (EP-11 P4) */
   acunacionCip: boolean;
   vigenciaAnios: number;
@@ -312,6 +314,7 @@ export const CONFIG_D11_DEFECTO: ConfigD11 = {
   metodosCompleta: ["1213", "1202", "1203", "3500"],
   metodosAccesorio: ["2322"],
   metodosMaquina: ["3706"],
+  metodosFuego: ["1203"],
   acunacionCip: false,
   vigenciaAnios: 4,
 };
@@ -334,6 +337,7 @@ export function configD11(filas: { codigo: string; valor: string | null; activo?
     metodosCompleta: lista(v("metodos_completa"), CONFIG_D11_DEFECTO.metodosCompleta),
     metodosAccesorio: lista(v("metodos_accesorio"), CONFIG_D11_DEFECTO.metodosAccesorio),
     metodosMaquina: lista(v("metodos_maquina"), CONFIG_D11_DEFECTO.metodosMaquina),
+    metodosFuego: lista(v("metodos_fuego"), CONFIG_D11_DEFECTO.metodosFuego),
     acunacionCip: v("acunacion_cip") === "si",
     vigenciaAnios: Number.isInteger(anios) && anios >= 1 && anios <= 10 ? anios : CONFIG_D11_DEFECTO.vigenciaAnios,
   };

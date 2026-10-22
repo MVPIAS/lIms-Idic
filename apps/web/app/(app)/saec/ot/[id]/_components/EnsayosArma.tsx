@@ -24,6 +24,8 @@ export default function EnsayosArma({ d, onCambio }: { d: ExpedienteD11; onCambi
   const [motivo, setMotivo] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [mov, setMov] = useState({ ubicacion: "", motivo: "" });
+  const [lotes, setLotes] = useState<{ id: string; lote: string; calibre: string; saldo: number; activo: boolean }[]>([]);
+  const [mun, setMun] = useState({ loteId: "", cartuchos: "" });
   const puede = d.puedo.registrar && d.ot.abierta;
 
   const cargar = useCallback(async () => {
@@ -38,6 +40,9 @@ export default function EnsayosArma({ d, onCambio }: { d: ExpedienteD11; onCambi
   useEffect(() => {
     cargar();
   }, [cargar]);
+  useEffect(() => {
+    if (f?.fuego?.requiere) pedir<any[]>("GET", "/d11/municion/lotes").then((l) => setLotes(l.filter((x) => x.activo && x.saldo > 0))).catch(() => setLotes([]));
+  }, [f?.fuego?.requiere]);
 
   const grupos = useMemo(() => {
     const m = new Map<string, EnsayoFicha[]>();
@@ -56,7 +61,10 @@ export default function EnsayosArma({ d, onCambio }: { d: ExpedienteD11; onCambi
   const incompletos = gruposTocados.filter(([, es]) => es.some((e) => e.estado === "pendiente" && !tocado(e)));
   const corrige = gruposTocados.some(([, es]) => es.some((e) => tocado(e) && e.estado !== "pendiente"));
   const enviables = gruposTocados.flatMap(([, es]) => es.filter(tocado));
-  const listo = enviables.length > 0 && incompletos.length === 0 && (!corrige || motivo.trim().length >= 5);
+  // 11.17 · la primera captura de la prueba de fuego exige lote y cartuchos usados (se descuentan del inventario).
+  const fuegoNuevo = enviables.some((e) => e.estado === "pendiente" && (f?.fuego?.metodos ?? []).includes(e.metodoCodigo ?? ""));
+  const municionLista = !fuegoNuevo || (!!mun.loteId && Number.isInteger(Number(mun.cartuchos)) && Number(mun.cartuchos) > 0);
+  const listo = enviables.length > 0 && incompletos.length === 0 && (!corrige || motivo.trim().length >= 5) && municionLista;
 
   async function registrar() {
     setOcupado(true);
@@ -64,7 +72,9 @@ export default function EnsayosArma({ d, onCambio }: { d: ExpedienteD11; onCambi
       const r = await pedir<any>("POST", `/d11/armas/${armaId}/ensayos`, {
         valores: enviables.map((e) => ({ resultadoId: e.resultadoId, valor: vals[e.resultadoId].valor ?? null, atributo: vals[e.resultadoId].atributo ?? null })),
         motivo: motivo.trim() || null,
+        municion: fuegoNuevo ? { loteId: mun.loteId, cartuchos: Number(mun.cartuchos) } : null,
       });
+      setMun({ loteId: "", cartuchos: "" });
       setF(r.ficha);
       setVals({});
       setMotivo("");
@@ -175,6 +185,28 @@ export default function EnsayosArma({ d, onCambio }: { d: ExpedienteD11; onCambi
         )}
         {puede && f && (
           <>
+            {fuegoNuevo && (
+              <fieldset className="card" style={{ border: "1px solid var(--line)", padding: "8px 12px", marginBottom: 10 }}>
+                <legend style={{ fontSize: 12, fontWeight: 700 }}>Prueba de fuego (IT04) · munición de prueba usada</legend>
+                <div className="form-grid">
+                  <div className="field">
+                    <label htmlFor="en-lote">Lote de munición <span className="req">*</span></label>
+                    <select id="en-lote" value={mun.loteId} onChange={(e) => setMun({ ...mun, loteId: e.target.value })}>
+                      <option value="">Elija…</option>
+                      {lotes.map((l) => <option key={l.id} value={l.id}>{l.lote} · {l.calibre} ({l.saldo} disponibles)</option>)}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="en-cart">Cartuchos usados <span className="req">*</span></label>
+                    <input id="en-cart" inputMode="numeric" value={mun.cartuchos} onChange={(e) => setMun({ ...mun, cartuchos: e.target.value })} />
+                  </div>
+                </div>
+                {!lotes.length && <small style={{ color: "var(--red)" }}>No hay lotes con saldo: dé de alta la munición en SAEC › Munición de prueba.</small>}
+              </fieldset>
+            )}
+            {(f.fuego?.usos ?? []).length > 0 && (
+              <p className="subtitle">Munición ya descontada: {f.fuego.usos.map((u) => `${u.cantidad} cartucho(s) del lote ${u.lote}`).join("; ")}.</p>
+            )}
             {corrige && (
               <div className="field" style={{ maxWidth: 520 }}>
                 <label htmlFor="en-motivo">Motivo de la corrección <span className="req">*</span></label>

@@ -10,7 +10,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { EmptyState, PageHeader, SkeletonRows } from "@/components/ui/PageHeader";
 import RequierePermiso from "@/components/RequierePermiso";
-import { fecha } from "@/lib/format";
+import { fecha, fechaDia } from "@/lib/format";
 import { pedir } from "@/lib/d11";
 
 export default function CertificacionArmasPage() {
@@ -50,6 +50,7 @@ function Lista() {
         migas={[{ label: "BPCH · SAEC" }, { label: "Certificación de armas" }]}
         acciones={<Link href={"/saec/catalogos" as any} className="btn outline sm">Catálogo de armas</Link>}
       />
+      <Calendario filas={filas ?? []} />
       <div className="card">
         <div className="toolbar" style={{ marginTop: 0 }}>
           <label className="sr-only" htmlFor="q-ot">Buscar</label>
@@ -79,7 +80,7 @@ function Lista() {
                   <td className="num">{f.segunResolucion || "—"}</td>
                   <td className="num">{f.armas}</td>
                   <td className="num">{f.certificados}</td>
-                  <td>{f.actaFirmadaAt ? `Acta ${fecha(f.actaFirmadaAt)}` : f.programadaPara ? `Programada ${fecha(f.programadaPara)}` : <span className="pill amber">Por programar</span>}</td>
+                  <td>{f.actaFirmadaAt ? `Acta ${fecha(f.actaFirmadaAt)}` : f.programadaPara ? `Programada ${fechaDia(f.programadaPara)}` : <span className="pill amber">Por programar</span>}</td>
                   <td><span className={`pill ${f.estado === "cerrada" ? "gray" : "teal"}`}>{f.estado}</span></td>
                 </tr>
               ))}
@@ -88,5 +89,52 @@ function Lista() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * EP-11 11.4 / 11.5 · calendario de recepción: las recepciones programadas
+ * con el importador que aún no tienen acta, por día, con el aviso de llegada
+ * (transportista, bultos, aviso previo) cuando ya se registró.
+ */
+function Calendario({ filas }: { filas: any[] }) {
+  const porRecibir = filas.filter((f) => f.estado !== "cerrada" && !f.actaFirmadaAt);
+  const programadas = porRecibir.filter((f) => f.programadaPara).sort((a, b) => String(a.programadaPara).localeCompare(String(b.programadaPara)));
+  const sinProgramar = porRecibir.length - programadas.length;
+  if (!porRecibir.length) return null;
+  const dias = new Map<string, any[]>();
+  for (const f of programadas) {
+    const k = String(f.programadaPara).slice(0, 10);
+    dias.set(k, [...(dias.get(k) ?? []), f]);
+  }
+  return (
+    <section className="card" aria-label="Calendario de recepción">
+      <h2>Calendario de recepción <span className="right">{programadas.length} programada(s){sinProgramar ? ` · ${sinProgramar} por programar` : ""}</span></h2>
+      {programadas.length === 0 ? (
+        <p className="subtitle">Ninguna recepción programada todavía: el Jefe de la Delegación la programa con el importador en el paso 1 de cada OT.</p>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
+          {[...dias.entries()].map(([dia, fs]) => (
+            <div key={dia} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px" }}>
+              <div style={{ fontWeight: 700, fontSize: 12.5, marginBottom: 4 }}>{fecha(dia)}</div>
+              {fs.map((f) => (
+                <div key={f.id} style={{ fontSize: 12, padding: "4px 0", borderTop: "1px dashed var(--line)" }}>
+                  <Link href={`/saec/ot/${f.id}` as any} className="codigo">{f.codigo}</Link> · {f.cliente ?? "—"}
+                  <div style={{ color: "var(--muted)" }}>{f.lugar ?? "lugar por definir"}{f.responsable ? ` · ${f.responsable}` : ""}</div>
+                  {f.llegadaFecha ? (
+                    <div>
+                      <span className={`pill ${f.avisoPrevio ? "green" : "amber"}`}>{f.avisoPrevio ? "Con aviso previo" : "Sin aviso previo"}</span>{" "}
+                      {f.transportista ?? "—"} · {f.bultos ?? "—"} bulto(s)
+                    </div>
+                  ) : (
+                    <div><span className="pill gray">Llegada sin registrar</span></div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }

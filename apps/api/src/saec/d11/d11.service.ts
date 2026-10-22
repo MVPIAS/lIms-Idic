@@ -11,6 +11,8 @@ import { anioChile, hoyChile } from "../../common/fecha-chile";
 import { svgCode128 } from "../../common/code128";
 import { leerTabla, TablaError } from "../../common/tabla-archivo";
 import { SELECT_ARMAS, estadoDe, type FilaArma } from "./datos-d11";
+import { MunicionService } from "./municion.service";
+import { UsoFuegoBody } from "./municion";
 import {
   CLASES,
   NOMBRE_CAMINO,
@@ -111,6 +113,8 @@ export const EnsayosBody = z.object({
     )
     .max(200),
   motivo: opcional(1000),
+  /** 11.17 · prueba de fuego (IT04): lote y cartuchos usados, obligatorio al capturarla por primera vez. */
+  municion: UsoFuegoBody.optional().nullable(),
 });
 export const AcunacionBody = z.object({
   items: z
@@ -176,6 +180,7 @@ export class D11Service implements OnModuleInit {
     private readonly puente: PuenteAnalisisService,
     private readonly render: PlantillaRenderService,
     private readonly firmas: FirmaDocumentoService,
+    private readonly municion: MunicionService,
   ) {}
 
   onModuleInit() {
@@ -296,11 +301,15 @@ export class D11Service implements OnModuleInit {
               (SELECT COALESCE(sum(r.cantidad), 0) FROM d11_resolucion_arma r WHERE r.internacion_id = i.id)::int AS "segunResolucion",
               (SELECT count(*) FROM certificado ce WHERE ce.ot_id = o.id AND ce.deleted_at IS NULL AND ce.tipo_documento = 'CERTIFICADO_ARMA'
                                                     AND ce.estado IN ('oficial', 'emitido'))::int AS certificados,
-              e.acta_firmada_at AS "actaFirmadaAt", e.programacion_fecha AS "programadaPara"
+              e.acta_firmada_at AS "actaFirmadaAt", e.programacion_fecha AS "programadaPara",
+              e.programacion_lugar AS "lugar", ur.nombre_completo AS "responsable",
+              e.llegada_fecha AS "llegadaFecha", e.llegada_transportista AS "transportista", e.llegada_bultos AS "bultos",
+              e.llegada_aviso_previo AS "avisoPrevio"
          FROM orden_trabajo o
          LEFT JOIN cliente c ON c.id = o.cliente_id
          LEFT JOIN bpch_internacion i ON i.ot_id = o.id
          LEFT JOIN d11_expediente e ON e.ot_id = o.id
+         LEFT JOIN usuario ur ON ur.id = e.programacion_responsable
         WHERE o.tenant_id = $1::uuid AND o.unidad_principal = ANY($2::uuid[]) AND o.estado <> 'anulada'
         ORDER BY o.created_at DESC
         LIMIT 200`,
@@ -848,9 +857,19 @@ export class D11Service implements OnModuleInit {
     const a0 = await this.armaOt(req, armaOtId);
     const cfg = await this.config(tenantDe(req));
     const [a] = await this.armas(a0.ot_id, this.prisma, [armaOtId]);
-    const [ensayos, movimientos] = await Promise.all([this.ensayosDe(a.muestra_id), this.movimientos(armaOtId)]);
+    const [ensayos, movimientos, usosMunicion] = await Promise.all([
+      this.ensayosDe(a.muestra_id),
+      this.movimientos(armaOtId),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT m.cantidad, l.lote, l.calibre, m.created_at AS "createdAt", u.nombre_completo AS usuario
+           FROM d11_municion_movimiento m JOIN d11_municion_lote l ON l.id = m.lote_id LEFT JOIN usuario u ON u.id = m.registrado_por
+          WHERE m.arma_ot_id = $1::uuid AND m.tipo = 'uso' ORDER BY m.created_at`,
+        armaOtId,
+      ),
+    ]);
     const est = estadoDe(a);
     return {
+      fuego: { requiere: ensayos.some((e) => cfg.metodosFuego.includes(e.metodoCodigo ?? "")), metodos: cfg.metodosFuego, usos: usosMunicion },
       id: a.id,
       otId: a0.ot_id,
       otCodigo: a0.ot_codigo,
@@ -1004,6 +1023,16 @@ export class D11Service implements OnModuleInit {
     const errores = erroresCapturaExplicita(ensayos, d.valores);
     if (errores.length) throw new BadRequestException(errores.join(" "));
     const tenantId = tenantDe(req);
+    const cfg = await this.config(tenantId);
+    const fuegoNuevo = d.valores.some((v) => {
+      const e = ensayos.find((x) => x.resultadoId === v.resultadoId);
+      return !!e && e.estado === "pendiente" && cfg.metodosFuego.includes(e.metodoCodigo ?? "");
+    });
+    if (fuegoNuevo && !d.municion)
+      throw new BadRequestException("Prueba de fuego (IT04): indique el lote de munición de prueba y los cartuchos usados.");
+    // Los cartuchos se gastaron al disparar: el movimiento se registra antes de la captura.
+    if (d.municion)
+      await this.prisma.$transaction((tx) => this.municion.usarEnPrueba(tx, req, { otId: a.ot_id, armaOtId, muestra: a.ot_codigo }, d.municion));
     let capturados = 0;
     for (const v of d.valores) {
       const e = ensayos.find((x) => x.resultadoId === v.resultadoId)!;
