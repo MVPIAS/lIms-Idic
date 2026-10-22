@@ -258,17 +258,23 @@ export function faltantesInstrumentos(items: InstrumentoOt[], cals: CalibracionO
 }
 
 /** Cierre técnico (Jefe de Laboratorio): todos los ítems con su documento emitido o no aptos. */
-export function motivoCierreTecnico(otEstado: string, items: InstrumentoOt[], cals: CalibracionOt[]): string | null {
+export function motivoCierreTecnico(
+  otEstado: string, items: InstrumentoOt[], cals: CalibracionOt[],
+  /** Parámetro metrologia_ficha.no_apto_exige_documento: el no calibrable necesita su informe técnico emitido o su servicio externo validado. */
+  noApto?: { exige: boolean; resueltos: Set<string> },
+): string | null {
   if (["finalizada", "informada", "cerrada", "anulada"].includes(otEstado)) return `La OT ya está ${otEstado}.`;
   const vivos = items.filter((x) => x.estado !== "anulado");
   if (!vivos.length) return "La OT no tiene instrumentos registrados.";
   const faltan = vivos.filter((i) => {
     if (i.estado === "por_recibir") return true;
-    if (i.estado === "no_apto") return false;
+    if (i.estado === "no_apto") return !!noApto?.exige && !noApto.resueltos.has(i.id);
     const v = calibracionVigente(cals, i.id);
     return !v || v.estado !== "emitida";
   });
-  if (faltan.length) return `Faltan certificados emitidos: ${faltan.map((i) => `ítem ${i.numero}`).join(", ")}.`;
+  const sinDoc = faltan.filter((i) => i.estado === "no_apto"), sinCert = faltan.filter((i) => i.estado !== "no_apto");
+  if (sinCert.length) return `Faltan certificados emitidos: ${sinCert.map((i) => `ítem ${i.numero}`).join(", ")}.`;
+  if (sinDoc.length) return `Falta el informe técnico emitido o el servicio externo validado del no calibrable: ${sinDoc.map((i) => `ítem ${i.numero}`).join(", ")}.`;
   return null;
 }
 

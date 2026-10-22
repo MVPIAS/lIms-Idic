@@ -209,3 +209,11 @@ export async function enviarCertificado(
     ok ? `Certificado enviado por correo a ${destinatarios.join(", ")}.` : `No se pudo enviar el correo a ${destinatarios.join(", ")}: ${error}`, o.usuarioId);
   return { ok, error, destinatarios };
 }
+
+/** Ítems no calibrables de la OT con su informe técnico emitido o su servicio externo validado. */
+export async function noAptoResueltos(db: ConsultaCruda, otId: string): Promise<Set<string>> {
+  const f = await db.$queryRawUnsafe<{ id: string }[]>(
+    `SELECT ot_instrumento_id AS id FROM met_informe_tecnico WHERE ot_id = $1::uuid AND estado = 'emitido'
+     UNION SELECT ot_instrumento_id FROM met_servicio_externo WHERE ot_id = $1::uuid AND estado = 'validado'`, otId);
+  return new Set(f.map((x) => x.id));
+}

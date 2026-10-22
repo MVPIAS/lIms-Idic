@@ -16,6 +16,7 @@ import { toast, confirmar } from "@/components/ui/feedback";
 import { MEDIOS_ENTREGA, textoMedio } from "@/lib/documentos";
 import Modal from "@/components/documentos/Modal";
 import css from "./ficha.module.css";
+import NoCalibrables from "./NoCalibrables";
 import {
   ESTADO_CALIBRACION, ESTADO_INSTRUMENTO, ESTADOS_FISICOS, SENTIDOS, ahoraLocal, imprimirActaDevolucion, imprimirEtiqueta, imprimirRecepcion,
 } from "@/lib/metrologiaOt";
@@ -196,6 +197,10 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
             </tbody>
           </table>
         </div>
+      )}
+
+      {vivos.some((i) => i.estado === "no_apto" || (i.estado === "devuelto" && i.calibrable === false)) && (
+        <NoCalibrables otId={otId} onCambio={() => { cargar(); onCambio?.(); }} />
       )}
 
       {vivos.length > 0 && d.ot.estado !== "cerrada" && (

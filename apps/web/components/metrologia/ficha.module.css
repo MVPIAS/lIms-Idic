@@ -73,3 +73,11 @@
 /* Balance por punto (pestaña 4): barra del aporte uᵢ²/uc². */
 .aporte { display: inline-block; width: 90px; height: 7px; border-radius: 4px; background: #eef3f7; margin-right: 8px; vertical-align: middle; overflow: hidden; }
 .aporte span { display: block; height: 100%; background: var(--accent); }
+
+/* Instrumentos no calibrables (OT › Instrumentos): informe técnico y servicio externo. */
+.nocal { border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 16px; }
+.nocalItem { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 2px; }
+.nocalItem small { color: var(--muted); font-size: 12px; }
+.nocalCol h3 { font-size: 12.5px; margin: 0 0 4px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.nocalCol p { margin: 0 0 6px; font-size: 12.5px; }
+@media (max-width: 720px) { .nocal { grid-template-columns: 1fr; } }
