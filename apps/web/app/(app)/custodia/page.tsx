@@ -2,7 +2,7 @@
 
 import { URL_PERSONAS, etiquetaPersona } from "@/lib/personas";
 import { useEffect, useMemo, useState } from "react";
-import { fechaHora, num, pct } from "@/lib/format";
+import { deInputHoraChile, fechaHora, num, pct } from "@/lib/format";
 import { esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import Retenciones from "./_components/Retenciones";
@@ -173,7 +173,7 @@ export default function CustodiaPage() {
       evento: f.evento,
       deUsuarioId: f.deUsuarioId || null,
       aUsuarioId: f.aUsuarioId || null,
-      fecha: f.fecha ? new Date(f.fecha).toISOString() : null,
+      fecha: f.fecha ? deInputHoraChile(f.fecha) : null,
       motivo: f.motivo || null,
       ubicacionOrigen: f.ubicacionOrigen || null,
       ubicacionDestino: f.ubicacionDestino || null,

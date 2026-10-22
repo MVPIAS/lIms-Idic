@@ -183,7 +183,8 @@ const esNumero = (v: any) => typeof v === "number" || (typeof v === "string" && 
 
 /** Texto legible del límite: "inf – sup", "≥ inf", "≤ sup", "= nominal" o "—". */
 function limiteTexto(r: Fila): string {
-  const fmt = (v: any) => (esNumero(v) ? num(Number(String(v).replace(",", ".")), 3) : String(v));
+  // Coma decimal y sin ceros de relleno: «≤ 50» y no «≤ 50,000», que se lee como cincuenta mil.
+  const fmt = (v: any) => (esNumero(v) ? valorNum(Number(String(v).replace(",", "."))) : String(v));
   const vacio = (v: any) => v == null || String(v).trim() === "";
   if (!vacio(r.limiteInf) && !vacio(r.limiteSup)) return `${fmt(r.limiteInf)} – ${fmt(r.limiteSup)}`;
   if (!vacio(r.limiteInf)) return `≥ ${fmt(r.limiteInf)}`;
