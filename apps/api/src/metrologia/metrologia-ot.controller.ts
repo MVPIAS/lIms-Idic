@@ -350,8 +350,13 @@ export class MetrologiaOtService {
     this.exigirMetrologia(ot); this.exigirAbierta(ot);
     await this.exigir(req, "registrar", ot);
     if (!ot.cotizacionId) throw new BadRequestException(`La OT ${ot.codigo} no viene de una cotización.`);
-    const lineas = await this.prisma.$queryRawUnsafe<{ id: string; descripcion: string | null; cantidad: number; ensayo_codigo: string | null }[]>(
-      `SELECT id, descripcion, cantidad, ensayo_codigo FROM linea_cotizacion WHERE cotizacion_id = $1::uuid ORDER BY orden NULLS LAST, id`, ot.cotizacionId);
+    // EP-04 P3.2 (BL-033): el servicio del catálogo (código EN) trae su IT; se hereda si es un proceso del laboratorio de la OT.
+    const lineas = await this.prisma.$queryRawUnsafe<{ id: string; descripcion: string | null; cantidad: number; ensayo_codigo: string | null; proceso: string | null }[]>(
+      `SELECT l.id, l.descripcion, l.cantidad, l.ensayo_codigo, p.codigo AS proceso
+         FROM linea_cotizacion l
+         LEFT JOIN cat_ensayo e ON e.id = l.cat_ensayo_id
+         LEFT JOIN met_proceso p ON p.codigo = e.instruccion_trabajo AND p.activo AND (p.laboratorio IS NULL OR p.laboratorio = $2)
+        WHERE l.cotizacion_id = $1::uuid ORDER BY l.orden NULLS LAST, l.id`, ot.cotizacionId, ot.laboratorio);
     const creados = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRawUnsafe(`SELECT 1 FROM orden_trabajo WHERE id = $1::uuid FOR UPDATE`, otId);
       const ya = new Set((await tx.$queryRawUnsafe<{ l: string }[]>(
@@ -364,9 +369,9 @@ export class MetrologiaOtService {
         for (let k = 0; k < cuantos; k++) {
           n += 1; total += 1;
           await tx.$executeRawUnsafe(
-            `INSERT INTO met_ot_instrumento (tenant_id, ot_id, numero, descripcion, linea_cotizacion_id, created_by)
-             VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid)`,
-            ot.tenantId, otId, n, (l.descripcion || l.ensayo_codigo || "Instrumento").slice(0, 300), l.id, req?.user?.sub ?? null);
+            `INSERT INTO met_ot_instrumento (tenant_id, ot_id, numero, descripcion, linea_cotizacion_id, proceso_codigo, created_by)
+             VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7::uuid)`,
+            ot.tenantId, otId, n, (l.descripcion || l.ensayo_codigo || "Instrumento").slice(0, 300), l.id, l.proceso ?? null, req?.user?.sub ?? null);
         }
       }
       return total;
