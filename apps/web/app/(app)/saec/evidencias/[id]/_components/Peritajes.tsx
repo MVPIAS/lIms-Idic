@@ -133,7 +133,7 @@ export default function Peritajes({ evidenciaId, peritajes, onCambio }: { eviden
                 {registra && p.origen !== "ibis" && (
                   <label className="btn sm ghost" style={{ cursor: "pointer" }}>
                     ＋ Adjunto
-                    <input type="file" accept="application/pdf,image/png,image/jpeg" hidden onChange={(e) => adjuntar(p.id, e.target.files?.[0])} />
+                    <input type="file" className="sr-only" accept="application/pdf,image/png,image/jpeg" onChange={(e) => adjuntar(p.id, e.target.files?.[0])} />
                   </label>
                 )}
                 {!(p.adjuntos ?? []).length && !registra && "—"}

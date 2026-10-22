@@ -494,7 +494,7 @@ export default function ClasificacionPage() {
                   {!nueva && (c?.estado === "borrador" || c?.estado === "registrada") && puede("bpch.clasificacion.registrar") && (
                     <label className="btn outline sm" style={{ cursor: "pointer", textTransform: "none", letterSpacing: 0 }}>
                       ＋ Adjuntar curva (PDF, PNG o JPEG)
-                      <input type="file" hidden accept="application/pdf,image/png,image/jpeg" onChange={(e) => subirCurva(e.target.files?.[0])} />
+                      <input type="file" className="sr-only" accept="application/pdf,image/png,image/jpeg" onChange={(e) => subirCurva(e.target.files?.[0])} />
                     </label>
                   )}
                   {nueva && <small style={{ color: "var(--muted)" }}>Guarde el borrador para adjuntar la curva.</small>}
