@@ -91,7 +91,13 @@ async function llamar(username, metodo, ruta, cuerpo) {
   try { json = texto ? JSON.parse(texto) : null; } catch { json = texto; }
   return { status: r.status, json, tipo: r.headers.get("content-type") ?? "" };
 }
-const msg = (j) => (typeof j === "string" ? j : j?.message ? (Array.isArray(j.message) ? j.message.join("; ") : j.message) : JSON.stringify(j)).slice(0, 400);
+const msg = (j) =>
+  (typeof j === "string"
+    ? j
+    : j?.message
+      ? `${Array.isArray(j.message) ? j.message.join("; ") : j.message}${Array.isArray(j.issues) ? ` · ${j.issues.map((i) => i.message).join("; ")}` : ""}`
+      : JSON.stringify(j)
+  ).slice(0, 400);
 async function exigir(esperado, username, metodo, ruta, cuerpo, patron) {
   const r = await llamar(username, metodo, ruta, cuerpo);
   const okk = Array.isArray(esperado) ? esperado.includes(r.status) : r.status === esperado;
@@ -112,6 +118,13 @@ async function paso(nombre, fn) {
     const detalle = await fn();
     pasos.push({ nombre, ok: true });
     console.log(`  OK    ${nombre}${detalle ? ` · ${detalle}` : ""} (${Date.now() - t0} ms)`);
+    // R4B_HASTA="11.11" deja la OT a medio camino (para recorrerla en el navegador).
+    if (process.env.R4B_HASTA && nombre.startsWith(process.env.R4B_HASTA)) {
+      console.log(`
+Detenido tras «${nombre}» (R4B_HASTA).`);
+      pararApi();
+      process.exit(0);
+    }
   } catch (e) {
     pasos.push({ nombre, ok: false });
     console.log(`  FALLO ${nombre} · ${e.message}`);
@@ -161,6 +174,8 @@ const U = {
   otroLab: "demo.lqc.analista1",
   planif: "demo.planificacion",
   director: "demo.director",
+  lrb: "demo.lrb.analista1",
+  lam: "demo.lam.analista1",
 };
 const hoyCl = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 function rutValido(base) {
@@ -367,7 +382,12 @@ async function main() {
       valor: x.entrada === "defecto" ? 0 : x.entrada === "valor" ? "2,3" : x.entrada === "texto" ? `EXH-PRUEBA-${sello.slice(-4)}` : undefined,
       atributo: x.entrada === "atributo" ? "cumple" : undefined,
     }));
-    const r1 = await ok(U.armero, "POST", `/d11/armas/${a1.id}/ensayos`, { valores: valores(pend) });
+    // 11.17 · la prueba de fuego (IT04) gasta munición de prueba: sin lote ni cartuchos no se registra.
+    C.lote = await ok(U.armero, "POST", "/d11/municion/lotes", { lote: `L-${S("M")}`, calibre: "9x19 mm", norma: "NIJ 0101.06", nivel: "IIIA", masaBalaG: 8, velocidadMs: 398, cantidad: 200 });
+    await exigir(400, U.armero, "POST", `/d11/armas/${a1.id}/ensayos`, { valores: valores(pend) }, /munición de prueba/);
+    await exigir(400, U.armero, "POST", `/d11/armas/${a1.id}/ensayos`, { valores: valores(pend), municion: { loteId: C.lote.id, cartuchos: 999 } }, /no alcanza/);
+    const r1 = await ok(U.armero, "POST", `/d11/armas/${a1.id}/ensayos`, { valores: valores(pend), municion: { loteId: C.lote.id, cartuchos: 6 } });
+    afirmar(r1.ficha.fuego.usos.length === 1 && r1.ficha.fuego.usos[0].cantidad === 6, "la prueba de fuego no descontó la munición");
     afirmar(r1.ficha.ensayos.every((x) => x.estado !== "pendiente"), "quedaron ensayos pendientes en el arma 1");
     const f2 = await ok(U.armero, "GET", `/d11/armas/${a2.id}`);
     const r2 = await ok(U.armero2, "POST", `/d11/armas/${a2.id}/ensayos`, { valores: valores(f2.ensayos.filter((x) => x.estado === "pendiente")) });
@@ -496,6 +516,104 @@ async function main() {
     await exigir(403, U.ventas, "POST", `/bpch/notificacion-dgmn/ot/${C.otId}`, { certificadoId: C.cert1.id, medio: "correo", fechaEnvio: hoyCl(), copiaInternador: true });
     await exigir(400, U.bpch, "POST", `/bpch/notificacion-dgmn/ot/${C.otId}`, { certificadoId: C.cert1.id, medio: "correo", fechaEnvio: hoyCl(), copiaInternador: true }, /no es un Informe de Incumplimiento/);
     return "sin incumplimiento · 3 destinatarios fijos";
+  });
+
+  /* --------------------------------------------- 11.40 · munición de prueba */
+  await paso("11.40 · Munición de prueba: el LRB pide, la D11 entrega del lote y cierra el acta cuadrada", async () => {
+    const [lrb] = await ok(U.lrb, "GET", "/municion/unidades");
+    afirmar(lrb?.codigo === "LRB", "el analista del LRB debe poder pedir para el LRB");
+    const pedido = { unidadId: lrb.id, norma: "NIJ 0101.06", nivel: "IIIA", calibre: "9X19MM", masaBalaG: 8, velocidadMs: 448, velocidadTolMs: 9.1, cantidadPedida: 40, itemHcp: "HCP-PRUEBA" };
+    await exigir(403, U.lam, "POST", "/municion/solicitudes", pedido, /alcance/);
+    const sol = await ok(U.lrb, "POST", "/municion/solicitudes", pedido);
+    await exigir(403, U.lrb, "POST", `/d11/municion/solicitudes/${sol.id}/entregar`, { loteId: C.lote.id, cantidad: 40 });
+    await exigir(403, U.auditor, "POST", `/d11/municion/solicitudes/${sol.id}/entregar`, { loteId: C.lote.id, cantidad: 40 });
+    await ok(U.armero, "POST", `/d11/municion/solicitudes/${sol.id}/entregar`, { loteId: C.lote.id, cantidad: 40 });
+    await exigir(400, U.armero, "POST", `/d11/municion/solicitudes/${sol.id}/cerrar`, { usados: 30, devueltos: 5 }, /No cuadra/);
+    const cerrada = await ok(U.armero, "POST", `/d11/municion/solicitudes/${sol.id}/cerrar`, { usados: 32, devueltos: 8 });
+    afirmar(cerrada.estado === "cerrada", `estado ${cerrada.estado}`);
+    const lote = (await ok(U.armero, "GET", "/d11/municion/lotes")).find((l) => l.id === C.lote.id);
+    afirmar(lote.saldo === 200 - 6 - 40 + 8, `saldo del lote ${lote.saldo}`);
+    const movs = await ok(U.armero, "GET", `/d11/municion/lotes/${C.lote.id}/movimientos`);
+    afirmar(movs.some((m) => m.tipo === "uso" && m.arma), "el uso en la prueba de fuego no aparece en el lote");
+    const acta = await llamar(U.lrb, "GET", `/municion/solicitudes/${sol.id}/acta`);
+    afirmar(acta.status === 200 && /Usados<\/th><td>32/.test(acta.json), "acta del laboratorio");
+    await exigir(403, U.lam, "GET", `/municion/solicitudes/${sol.id}/acta`);
+    afirmar((await ok(U.lam, "GET", "/municion/solicitudes")).every((x) => x.id !== sol.id), "el LAM no debe ver órdenes del LRB");
+    return `${sol.codigo}: 40 entregados = 32 usados + 8 devueltos · saldo ${lote.saldo}`;
+  });
+
+  /* --------------------------------------------- 11.31-11.35 · SAEC */
+  await paso("11.35 · Caso SAEC: nace abierto y su estado solo cambia por transiciones válidas", async () => {
+    C.caso = await ok(U.d11Jefe, "POST", "/saec/casos", { descripcion: "Caso ficticio de verificación r4b", agenciaOrigenNombre: "Fiscalía de prueba" });
+    afirmar(C.caso.estado === "abierto", `estado ${C.caso.estado}`);
+    await exigir(400, U.d11Jefe, "PATCH", `/saec/casos/${C.caso.id}`, { estado: "cerrado" }, /Cambiar estado/);
+    await exigir(400, U.d11Jefe, "POST", `/saec/casos/${C.caso.id}/estado`, { estado: "archivado" }, /no puede pasar a archivado/);
+    await exigir(403, U.auditor, "POST", `/saec/casos/${C.caso.id}/estado`, { estado: "en_proceso" });
+    await ok(U.d11Jefe, "POST", `/saec/casos/${C.caso.id}/estado`, { estado: "en_proceso" });
+    return `${C.caso.numero_caso}: abierto → en proceso`;
+  });
+
+  await paso("11.31 · Evidencia por oficio: Nº de oficio, unidad solicitante y NUE obligatorios; NUE único; RUC con forma", async () => {
+    const base = { tipo: "vainilla", casoId: C.caso.id, descripcion: "Vainilla ficticia", ubicacion: "Bodega de prueba" };
+    await exigir(400, U.d11Jefe, "POST", "/evidencias", base, /Nº del oficio/);
+    const datos = { ...base, nue: `NUE-${S("E")}`, oficioNumero: `OF-${S("O")}`, oficioFecha: hoyCl(), oficioUnidad: "Fiscalía de prueba", rucCausa: "2600123456-K" };
+    await exigir(400, U.d11Jefe, "POST", "/evidencias", { ...datos, rucCausa: "26-1" }, /RUC/);
+    C.ev = await ok(U.d11Jefe, "POST", "/evidencias", datos);
+    afirmar(C.ev.codigo_barras === datos.nue && C.ev.oficio_numero === datos.oficioNumero, "el código de barras por defecto es el NUE");
+    await exigir(409, U.d11Jefe, "POST", "/evidencias", { ...datos, nue: datos.nue.toLowerCase() }, /ya está registrado/);
+    await exigir(403, U.auditor, "POST", "/evidencias", { ...datos, nue: `NUE-${S("X")}` });
+    return `${C.ev.codigo} · NUE ${C.ev.nue}`;
+  });
+
+  await paso("11.34 · Peritaje con tipo y adjunto (se valida el contenido: solo PDF, PNG o JPEG)", async () => {
+    await exigir(400, U.armero, "POST", `/evidencias/${C.ev.id}/peritaje`, { resultado: "concluyente", conclusiones: "x" }, /tipo de peritaje/);
+    const p = await ok(U.armero, "POST", `/evidencias/${C.ev.id}/peritaje`, { tipo: "balistico_comparativo", resultado: "concluyente", conclusiones: "Conclusión ficticia de verificación." });
+    const malo = new FormData();
+    malo.append("archivo", new Blob(["<script>alert(1)</script>"], { type: "application/pdf" }), "informe.pdf");
+    await exigir(400, U.armero, "POST", `/evidencias/${C.ev.id}/peritajes/${p.id}/adjuntos`, malo, /PDF, PNG o JPEG/);
+    const bueno = new FormData();
+    bueno.append("archivo", new Blob(["%PDF-1.4\n% informe ficticio\n"], { type: "application/pdf" }), "informe pericial.pdf");
+    const a = await ok(U.armero, "POST", `/evidencias/${C.ev.id}/peritajes/${p.id}/adjuntos`, bueno);
+    const d = await llamar(U.d11Jefe, "GET", `/evidencias/${C.ev.id}/adjuntos/${a.id}`);
+    afirmar(d.status === 200 && d.tipo.startsWith("application/pdf"), `descarga ${d.status} ${d.tipo}`);
+    await exigir(403, U.otroLab, "GET", `/evidencias/${C.ev.id}/adjuntos/${a.id}`);
+    const ev = await ok(U.d11Jefe, "GET", `/evidencias/${C.ev.id}`);
+    afirmar(ev.estado === "analizada" && ev.peritajes[0].adjuntos.length === 1 && ev.peritajes[0].datos.tipo === "balistico_comparativo", "peritaje sin adjunto o evidencia no analizada");
+    return `peritaje balístico comparativo + ${a.nombre}`;
+  });
+
+  await paso("11.33 · Préstamo: plazo obligatorio; aprobar, entregar con acta de salida, devolver con estado; el caso no se cierra con la evidencia fuera", async () => {
+    const sol = { tipo: "entrega", organismoSolicitante: "Fiscalía de prueba", solicitanteNombre: "Fiscal adjunto (ficticio)", solicitanteDocumento: "OF-PRUEBA", motivo: "Exhibición en audiencia (ficticio)" };
+    await exigir(400, U.d11Jefe, "POST", `/evidencias/${C.ev.id}/prestamos`, sol, /plazo de devolución/);
+    const pr = await ok(U.d11Jefe, "POST", `/evidencias/${C.ev.id}/prestamos`, { ...sol, fechaDevolucionPrevista: hoyCl() });
+    await ok(U.d11Jefe, "POST", `/prestamos-evidencia/${pr.id}/aprobar`, {});
+    await exigir(400, U.d11Jefe, "POST", `/prestamos-evidencia/${pr.id}/entregar`, {}, /quién recibe/);
+    await ok(U.d11Jefe, "POST", `/prestamos-evidencia/${pr.id}/entregar`, { receptorNombre: "Receptor ficticio" });
+    await exigir(400, U.d11Jefe, "POST", `/saec/casos/${C.caso.id}/estado`, { estado: "cerrado" }, /prestada/);
+    const acta = await llamar(U.d11Jefe, "GET", `/prestamos-evidencia/${pr.id}/acta`);
+    afirmar(acta.status === 200 && /ACTA DE SALIDA/.test(acta.json) && /Receptor ficticio/.test(acta.json), "acta de salida");
+    await exigir(400, U.d11Jefe, "POST", `/prestamos-evidencia/${pr.id}/devolver`, { ubicacionRetorno: "Bodega A" }, /estado en que vuelve/);
+    await ok(U.d11Jefe, "POST", `/prestamos-evidencia/${pr.id}/devolver`, { ubicacionRetorno: "Bodega A", estadoReingreso: "Sellos íntegros" });
+    await ok(U.d11Jefe, "POST", `/saec/casos/${C.caso.id}/estado`, { estado: "cerrado" });
+    await exigir(400, U.d11Jefe, "POST", `/saec/casos/${C.caso.id}/estado`, { estado: "en_proceso" }, /motivo/);
+    await exigir(400, U.d11Jefe, "POST", "/evidencias", { tipo: "otro", casoId: C.caso.id, nue: `NUE-${S("C")}`, oficioNumero: "OF-1", oficioUnidad: "Fiscalía de prueba", ubicacion: "Bodega" }, /reábralo/);
+    return `${pr.codigo}: solicitado → aprobado → entregado → devuelto · caso cerrado`;
+  });
+
+  /* --------------------------------------------- EP-09 9.16 · listado oficial */
+  await paso("9.16 · Listado oficial de Codificación Única: PDF para firma (Certificación BPCH) y Excel; Comercial no genera el PDF", async () => {
+    const cuerpo = { listado: "EXPLOSIVOS", fabricante: null, fechaEdicion: hoyCl() };
+    const fabs = await ok(U.bpch, "GET", "/bpch/codificacion/listado-oficial/fabricantes?listado=EXPLOSIVOS");
+    if (!fabs.length) return "sin productos vigentes en la Codificación Única de esta BD (se omite)";
+    const pdf = await llamar(U.bpch, "POST", "/bpch/codificacion/listado-oficial/pdf", cuerpo);
+    afirmar(pdf.status === 201 && pdf.tipo.startsWith("application/pdf"), `PDF ${pdf.status}`);
+    const csv = await llamar(U.bpch, "POST", "/bpch/codificacion/listado-oficial/excel", { ...cuerpo, fabricante: fabs[0].fabricante });
+    afirmar(csv.status === 201 && /Fabricante;RUT;Grupo/.test(String(csv.json)), "Excel");
+    await exigir([403], U.ventas, "POST", "/bpch/codificacion/listado-oficial/pdf", cuerpo);
+    await exigir(400, U.bpch, "POST", "/bpch/codificacion/listado-oficial/pdf", { ...cuerpo, fechaEdicion: "2999-01-01" }, /futura/);
+    const em = await ok(U.bpch, "GET", "/bpch/codificacion/listado-oficial/emisiones");
+    afirmar(em.length >= 2, "las emisiones quedan registradas");
+    return `${fabs.length} fabricante(s) · PDF y Excel registrados`;
   });
 }
 

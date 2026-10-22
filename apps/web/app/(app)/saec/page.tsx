@@ -32,7 +32,12 @@ const ESTADOS: { key: string; label: string; pill: string }[] = [
 const ESTADO_META = Object.fromEntries(ESTADOS.map((e) => [e.key, e]));
 
 const FORM_VACIO = {
-  tipo: "vainilla",
+  oficioNumero: "",
+  oficioFecha: "",
+  oficioUnidad: "",
+  nue: "",
+  rucCausa: "",
+  tipo: "",
   descripcion: "",
   casoId: "",
   exhibitNumber: "",
@@ -62,6 +67,7 @@ export default function SaecEvidenciasPage() {
   const [fTipo, setFTipo] = useState("");
   const [fEstado, setFEstado] = useState("");
   const [q, setQ] = useState("");
+  const [vencidos, setVencidos] = useState<any[]>([]);
 
   async function cargar() {
     setLoading(true);
@@ -71,6 +77,10 @@ export default function SaecEvidenciasPage() {
       if (fEstado) params.set("estado", fEstado);
       if (q) params.set("q", q);
 
+      fetch(`${API}/prestamos-evidencia?vencidos=1&limit=50`, { headers: auth() })
+        .then((x) => (x.ok ? x.json() : { data: [] }))
+        .then((v) => setVencidos(v.data ?? []))
+        .catch(() => setVencidos([]));
       const [e, c, cl] = await Promise.all([
         fetch(`${API}/evidencias?${params}`, { headers: auth() }).then((x) => x.json()),
         fetch(`${API}/saec/casos?limit=200`, { headers: auth() }).then((x) => x.json()),
@@ -104,6 +114,11 @@ export default function SaecEvidenciasPage() {
   function abrirEditar(r: any) {
     setEditId(r.id);
     setF({
+      oficioNumero: r.oficio_numero ?? "",
+      oficioFecha: r.oficio_fecha ? String(r.oficio_fecha).slice(0, 10) : "",
+      oficioUnidad: r.oficio_unidad ?? "",
+      nue: r.nue ?? "",
+      rucCausa: r.ruc_causa ?? "",
       tipo: r.tipo ?? "otro",
       descripcion: r.descripcion ?? "",
       casoId: r.caso_id ?? "",
@@ -128,7 +143,20 @@ export default function SaecEvidenciasPage() {
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setError("");
+    const faltan = [
+      !editId && !f.oficioNumero.trim() && "el Nº del oficio",
+      !editId && !f.oficioUnidad.trim() && "la unidad solicitante",
+      !editId && !f.nue.trim() && "el NUE",
+      !f.tipo && "el tipo de elemento",
+      !editId && !f.ubicacion.trim() && "la ubicación",
+    ].filter(Boolean);
+    if (faltan.length) return setError(`Indique ${faltan.join(", ")}.`);
     const payload: any = {
+      oficioNumero: f.oficioNumero.trim() || null,
+      oficioFecha: f.oficioFecha || null,
+      oficioUnidad: f.oficioUnidad.trim() || null,
+      nue: f.nue.trim() || null,
+      rucCausa: f.rucCausa.trim() || null,
       tipo: f.tipo,
       descripcion: f.descripcion || null,
       casoId: f.casoId || null,
@@ -137,7 +165,6 @@ export default function SaecEvidenciasPage() {
       calibreTexto: f.calibreTexto || null,
       marca: f.marca || null,
       composicion: f.composicion || null,
-      estado: f.estado,
       codigoBarras: f.codigoBarras || null,
       ubicacion: f.ubicacion || null,
       soporte: f.soporte,
@@ -146,6 +173,7 @@ export default function SaecEvidenciasPage() {
       clienteId: f.clienteId || null,
     };
     if (!editId) payload.crearOt = Boolean(f.crearOt);
+    else payload.estado = f.estado;
 
     try {
       const url = editId ? `${API}/evidencias/${editId}` : `${API}/evidencias`;
@@ -188,6 +216,15 @@ export default function SaecEvidenciasPage() {
         <div className="kpi k-violet"><div className="lab">Con coincidencias IBIS</div><div className="val">{kpis.conHits}</div></div>
       </div>
 
+      {vencidos.length > 0 && (
+        <div className="alert warn" role="alert">
+          <b>{vencidos.length} préstamo(s) con el plazo de devolución vencido:</b>{" "}
+          {vencidos.map((v, i) => (
+            <span key={v.id}>{i > 0 && ", "}<Link href={`/saec/evidencias/${v.evidencia_id}`}>{v.evidencia_codigo}</Link> ({v.organismo_solicitante})</span>
+          ))}
+        </div>
+      )}
+
       <div className="toolbar" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
         <input
           placeholder="Buscar NUE, descripción, código de barras…"
@@ -206,6 +243,7 @@ export default function SaecEvidenciasPage() {
         </select>
         <button className="btn sm" onClick={() => cargar()}>Buscar</button>
         <div className="spacer" style={{ flex: 1 }}></div>
+        <Link className="btn sm" href="/saec/casos">Casos</Link>
         <Link className="btn sm" href="/saec/armas">Armas</Link>
         <Link className="btn sm" href="/saec/ibis">Importar IBIS</Link>
         <Link className="btn sm" href="/saec/verificar">Verificar certificado</Link>
@@ -215,11 +253,27 @@ export default function SaecEvidenciasPage() {
       </div>
 
       {show && (
-        <form onSubmit={guardar} className="card" style={{ marginBottom: 12 }}>
+        <form onSubmit={guardar} className="card" style={{ marginBottom: 12 }} aria-label={editId ? "Editar evidencia" : "Nueva evidencia"} noValidate>
+          <h3 style={{ marginTop: 0 }}>{editId ? "Editar evidencia" : "Nueva evidencia · recepción del oficio"}</h3>
+          <h4 style={{ margin: "4px 0 6px", fontSize: 12.5 }}>1 · Oficio</h4>
+          <div className="form-grid">
+            <div className="field"><label htmlFor="ev-of">Nº del oficio <span className="req">*</span></label>
+              <input id="ev-of" value={f.oficioNumero} onChange={(e) => setF({ ...f, oficioNumero: e.target.value })} maxLength={60} /></div>
+            <div className="field"><label htmlFor="ev-off">Fecha del oficio</label>
+              <input id="ev-off" type="date" value={f.oficioFecha} onChange={(e) => setF({ ...f, oficioFecha: e.target.value })} /></div>
+            <div className="field"><label htmlFor="ev-ofu">Unidad solicitante <span className="req">*</span></label>
+              <input id="ev-ofu" placeholder="Fiscalía Local, Brigada PDI, Tribunal…" value={f.oficioUnidad} onChange={(e) => setF({ ...f, oficioUnidad: e.target.value })} maxLength={200} /></div>
+            <div className="field"><label htmlFor="ev-nue">NUE <span className="req">*</span></label>
+              <input id="ev-nue" value={f.nue} onChange={(e) => setF({ ...f, nue: e.target.value })} maxLength={60} /></div>
+            <div className="field"><label htmlFor="ev-ruc">RUC de la causa</label>
+              <input id="ev-ruc" placeholder="NNNNNNNNNN-D" value={f.rucCausa} onChange={(e) => setF({ ...f, rucCausa: e.target.value })} maxLength={20} /></div>
+          </div>
+          <h4 style={{ margin: "12px 0 6px", fontSize: 12.5 }}>2 · Elemento</h4>
           <div className="form-grid">
             <div className="field">
-              <label>Tipo de elemento <span className="req">*</span></label>
-              <select required value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>
+              <label htmlFor="ev-tipo">Tipo de elemento <span className="req">*</span></label>
+              <select id="ev-tipo" value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>
+                <option value="">Elija…</option>
                 {TIPOS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
               </select>
             </div>
@@ -227,15 +281,17 @@ export default function SaecEvidenciasPage() {
               <label>Caso</label>
               <select value={f.casoId} onChange={(e) => setF({ ...f, casoId: e.target.value })}>
                 <option value="">— sin caso —</option>
-                {casos.map((c) => <option key={c.id} value={c.id}>{c.numero_caso}</option>)}
+                {casos.filter((c) => !["cerrado", "archivado"].includes(c.estado) || c.id === f.casoId).map((c) => <option key={c.id} value={c.id}>{c.numero_caso}</option>)}
               </select>
             </div>
-            <div className="field">
-              <label>Estado</label>
-              <select value={f.estado} onChange={(e) => setF({ ...f, estado: e.target.value })}>
-                {ESTADOS.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
-              </select>
-            </div>
+            {editId && (
+              <div className="field">
+                <label htmlFor="ev-est">Estado</label>
+                <select id="ev-est" value={f.estado} onChange={(e) => setF({ ...f, estado: e.target.value })}>
+                  {ESTADOS.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
+                </select>
+              </div>
+            )}
             <div className="field" style={{ gridColumn: "1 / -1" }}>
               <label>Descripción</label>
               <textarea rows={2} value={f.descripcion} onChange={(e) => setF({ ...f, descripcion: e.target.value })} />
@@ -250,7 +306,7 @@ export default function SaecEvidenciasPage() {
               <input placeholder="(por defecto, el NUE)" value={f.codigoBarras} onChange={(e) => setF({ ...f, codigoBarras: e.target.value })} />
             </div>
             <div className="field">
-              <label>Ubicación física</label>
+              <label>Ubicación física {!editId && <span className="req">*</span>}</label>
               <input placeholder="Bodega A · Estante 3" value={f.ubicacion} onChange={(e) => setF({ ...f, ubicacion: e.target.value })} />
             </div>
             <div className="field">
@@ -285,7 +341,7 @@ export default function SaecEvidenciasPage() {
             )}
           </div>
           <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
-            <button className="btn primary sm">{editId ? "Guardar cambios" : "Registrar evidencia"}</button>
+            <button className="btn primary sm">{editId ? "Guardar cambios" : "Registrar evidencia → custodia"}</button>
           </div>
         </form>
       )}
@@ -297,7 +353,7 @@ export default function SaecEvidenciasPage() {
           <table className="data">
             <thead>
               <tr>
-                <th>NUE</th>
+                <th>Código · NUE</th>
                 <th>Tipo</th>
                 <th>Descripción</th>
                 <th>Caso</th>
@@ -312,7 +368,7 @@ export default function SaecEvidenciasPage() {
             <tbody>
               {rows.map((r) => (
                 <tr key={r.id}>
-                  <td><Link className="codigo" href={`/saec/evidencias/${r.id}`}>{r.codigo}</Link></td>
+                  <td><Link className="codigo" href={`/saec/evidencias/${r.id}`}>{r.codigo}</Link>{r.nue && <small style={{ display: "block" }}>NUE {r.nue}</small>}</td>
                   <td><span className={`pill ${TIPO_META[r.tipo]?.pill ?? "gray"}`}>{TIPO_META[r.tipo]?.label ?? r.tipo}</span></td>
                   <td style={{ maxWidth: 320 }}>{r.descripcion ?? "—"}</td>
                   <td>{r.caso?.numero_caso ?? "—"}</td>
