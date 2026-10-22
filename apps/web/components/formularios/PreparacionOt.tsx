@@ -206,14 +206,14 @@ function DocumentoRenderizado({ t }: { t: any }) {
   return (
     <div style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 12, background: "#fafcfd" }}>
       <b style={{ fontSize: 13 }}>{f.titulo} · OT {t.ot.codigo}</b>
-      <table className="data" style={{ marginTop: 6 }}>
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ marginTop: 6 }}>
         <tbody>
           {f.campos.filter((c: any) => !c.si || t.documentacion[c.si] === true).map((c: any) => <tr key={c.campo}><th style={{ width: 260, textTransform: "none", fontSize: 11.5 }}>{c.etiqueta}</th><td>{texto(c, t.documentacion[c.campo])}</td></tr>)}
           <tr><th style={{ textTransform: "none", fontSize: 11.5 }}>Jefe de Comisión · inspectores</th><td>{t.comision.jefeComision ? persona(t.comision.jefeComision) : "—"} · {t.comision.inspectores.map(persona).join(", ") || "—"}</td></tr>
           <tr><th style={{ textTransform: "none", fontSize: 11.5 }}>Equipos reservados</th><td>{t.comision.equipos.map((e: any) => e.codigo).join(", ") || "—"}</td></tr>
           <tr><th style={{ textTransform: "none", fontSize: 11.5 }}>Adjuntos</th><td>{t.adjuntos.map((a: any) => a.nombre).join(", ") || "—"}</td></tr>
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }
@@ -254,7 +254,7 @@ export function ComisionEquipos({ otId, t, onListo }: { otId: string; t: any; on
             ))}
           </fieldset>
         </div>
-        <table className="data" style={{ marginTop: 10 }}>
+        <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ marginTop: 10 }}>
           <thead><tr><th style={{ width: 36 }} /><th>Equipo</th><th>Nº de serie</th><th>Próxima calibración</th><th>Estado</th></tr></thead>
           <tbody>
             {t.equipos.length === 0 && <tr><td colSpan={5} style={{ color: "var(--muted)" }}>El laboratorio no tiene equipos registrados.</td></tr>}
@@ -268,7 +268,7 @@ export function ComisionEquipos({ otId, t, onListo }: { otId: string; t: any; on
               </tr>
             ))}
           </tbody>
-        </table>
+        </table></div>
       </fieldset>
       {editable && (
         <div className="toolbar" style={{ marginTop: 10, marginBottom: 0 }}>
@@ -301,7 +301,7 @@ function PreparacionMuestras({ otId }: { otId: string }) {
       <h2>Preparación y acondicionamiento de muestras <span className="right">EP-01/02/03 3.1 · EP-05 3.3</span></h2>
       <p className="subtitle">Lo que registra cada laboratorio al preparar la muestra (campos en Administración › Parámetros del sistema). Una casilla de control sin marcar, una solución vencida o un equipo no apto bloquean la captura de esa muestra.</p>
       {v.filas.length === 0 && <p className="subtitle" style={{ margin: 0 }}>La OT aún no tiene muestras con ensayos.</p>}
-      <table className="data">
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data">
         <thead><tr><th>Muestra</th><th>Laboratorio</th><th>Estado</th><th>Probetas</th><th>Registró</th><th /></tr></thead>
         <tbody>
           {v.filas.map((f: any) => {
@@ -322,7 +322,7 @@ function PreparacionMuestras({ otId }: { otId: string }) {
             ];
           })}
         </tbody>
-      </table>
+      </table></div>
     </div>
   );
 }

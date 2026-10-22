@@ -275,7 +275,7 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
                   <button type="button" className="btn outline sm" style={{ marginLeft: 8 }} onClick={(e) => { e.preventDefault(); for (const it of its) if (!cuant(it) && !f.res[it.item]?.resultado) setRes(it.item, { resultado: "C" }); }}>Marcar pendientes como C</button>
                 )}
               </summary>
-              <table className="data" style={{ marginTop: 6 }}>
+              <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ marginTop: 6 }}>
                 <thead><tr><th style={{ width: 60 }}>Ítem</th><th>Requisito</th><th style={{ width: 50 }}>Clase</th><th style={{ width: 150 }}>Resultado</th><th style={{ width: 240 }}>Observación</th></tr></thead>
                 <tbody>
                   {vis.map((it) => {
@@ -294,7 +294,7 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
                               <small>{it.unidad} ({it.min != null ? `≥ ${conComa(it.min)}` : ""}{it.min != null && it.max != null ? " · " : ""}{it.max != null ? `≤ ${conComa(it.max)}` : ""})</small>
                             </span>
                           ) : (
-                            <span style={{ display: "flex", gap: 8 }}>
+                            <span role="radiogroup" aria-label={`Resultado del ítem ${it.item}`} style={{ display: "flex", gap: 8 }}>
                               <label style={{ fontSize: 12 }}><input type="radio" name={`r-${it.item}`} checked={r.resultado === "C"} onChange={() => setRes(it.item, { resultado: "C" })} style={{ width: "auto" }} /> C</label>
                               <label style={{ fontSize: 12 }}><input type="radio" name={`r-${it.item}`} checked={r.resultado === "NC"} onChange={() => setRes(it.item, { resultado: "NC" })} style={{ width: "auto" }} /> N/C</label>
                             </span>
@@ -305,7 +305,7 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
                     );
                   })}
                 </tbody>
-              </table>
+              </table></div>
             </details>
           );
         })}
@@ -355,7 +355,7 @@ function PasoNovedades({ v, editable, onCambio }: { v: Vista; editable: boolean;
   return (
     <div className="card">
       <h2>3 · Novedades del lote <span className="right">LVM-PG01-P02-IT02</span></h2>
-      <table className="data">
+      <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data">
         <thead><tr><th>Vehículo</th><th>Ítem</th><th>Clase</th><th>Descripción</th><th style={{ width: 260 }}>Acción del proveedor</th></tr></thead>
         <tbody>
           {v.novedades.length === 0 && <tr><td colSpan={5} style={{ color: "var(--muted)" }}>Sin no conformidades en los vehículos inspeccionados.</td></tr>}
@@ -372,14 +372,14 @@ function PasoNovedades({ v, editable, onCambio }: { v: Vista; editable: boolean;
             );
           })}
         </tbody>
-      </table>
+      </table></div>
       {ev && (
         <div style={{ marginTop: 12 }}>
           <h3 style={{ fontSize: 13, margin: "0 0 6px" }}>Evaluación del lote por clase de defecto <small style={{ color: "var(--muted)", fontWeight: 400 }}>· NCh 44 nivel {v.config.nivel}; AQL por clase por confirmar con el IDIC (EP-05 P15)</small></h3>
-          <table className="data" style={{ maxWidth: 720 }}>
+          <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ maxWidth: 720 }}>
             <thead><tr><th>Clase</th><th>AQL</th><th className="num">Vehículos con N/C</th><th className="num">Ac</th><th className="num">Re</th><th>Decisión</th></tr></thead>
             <tbody>{ev.clases.map((c: any) => <tr key={c.clase}><td>{c.clase}</td><td>{c.aql === "0" ? "Una N/C rechaza" : c.aql}</td><td className="num">{c.vehiculosConNc}</td><td className="num">{c.ac}</td><td className="num">{c.re}</td><td><span className={`pill ${c.decision === "acepta" ? "green" : "red"}`}>{c.decision === "acepta" ? "Acepta" : "Rechaza"}</span></td></tr>)}</tbody>
-          </table>
+          </table></div>
           <p style={{ fontSize: 12.5 }}>Vehículos inspeccionados: <b>{ev.inspeccionados} de {ev.muestra}</b> · veredicto del lote <Veredicto v={ev.veredicto} /></p>
           {ev.errores.length > 0 && <div className="alert warn">{ev.errores.join(" ")}</div>}
         </div>

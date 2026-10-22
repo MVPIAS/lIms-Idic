@@ -126,10 +126,10 @@ function Contenido() {
               <Campo id="ii" etiqueta="Inicio de la incubación" req><input id="ii" type="datetime-local" value={local(d.incubacion.inicio)} onChange={(e) => setD({ ...d, incubacion: { ...d.incubacion, inicio: iso(e.target.value) } })} /></Campo>
             </div>
             {v.programadas.length > 0 && (
-              <table className="data" style={{ marginTop: 10, maxWidth: 560 }}>
+              <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ marginTop: 10, maxWidth: 560 }}>
                 <thead><tr><th>Lectura</th><th>Programada</th><th>Estado</th></tr></thead>
                 <tbody>{v.programadas.map((p: any) => <tr key={p.horas}><td>{p.horas} h</td><td>{fechaHora(p.programada)}</td><td><span className={`pill ${p.estado === "registrada" ? "green" : p.estado === "vencida" ? "red" : "amber"}`}>{p.estado === "registrada" ? "Registrada" : p.estado === "vencida" ? "Vencida" : "Pendiente"}</span></td></tr>)}</tbody>
-              </table>
+              </table></div>
             )}
             {ed && <div className="toolbar" style={{ marginTop: 10, marginBottom: 0 }}><div className="spacer" /><button type="button" className="btn primary" disabled={ocupado || !d.incubacion.inicio} onClick={async () => { await guardar(false); setPaso("lecturas"); }}>Iniciar incubación → lecturas</button></div>}
           </>

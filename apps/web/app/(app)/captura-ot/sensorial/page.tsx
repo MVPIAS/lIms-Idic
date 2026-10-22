@@ -99,10 +99,10 @@ function Contenido() {
               <Campo id="mu" etiqueta="Muestras en la sesión" ayuda="La triangular presenta 3 (dos iguales y una distinta)."><input id="mu" inputMode="numeric" value={muestras} onChange={(e) => setMuestras(e.target.value)} /></Campo>
             </div>
             {v.plan && (
-              <table className="data" style={{ marginTop: 10, maxWidth: 520 }}>
+              <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data" style={{ marginTop: 10, maxWidth: 520 }}>
                 <thead><tr><th>Juez</th><th>Orden de presentación</th></tr></thead>
                 <tbody>{v.plan.orden.map((o: string[], i: number) => <tr key={i}><td>J{String(i + 1).padStart(2, "0")}</td><td className="codigo">{o.join(" · ")}</td></tr>)}</tbody>
-              </table>
+              </table></div>
             )}
             {ed && <div className="toolbar" style={{ marginTop: 10, marginBottom: 0 }}><div className="spacer" /><button type="button" className="btn primary" disabled={ocupado} onClick={() => enviar("plan", { jueces: Number(jueces), muestras: Number(muestras) })}>Generar cartillas → sesión</button></div>}
           </>
@@ -111,7 +111,7 @@ function Contenido() {
           <>
             <h2>2 · Cartillas del panel</h2>
             {!cart.length ? <p className="subtitle">Genere primero el plan de sesión.</p> : (
-              <table className="data">
+              <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data">
                 <thead><tr><th>Juez</th>{prueba === "escala" && v.atributos.map((a: string) => <th key={a} className="num">{a}</th>)}{prueba === "triangular" && <th>¿Identificó la distinta?</th>}{prueba === "coccion" && <th>Granos</th>}<th>Excluir (motivo)</th></tr></thead>
                 <tbody>
                   {cart.map((c, i) => (
@@ -127,7 +127,7 @@ function Contenido() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </table></div>
             )}
             {ed && cart.length > 0 && <div className="toolbar" style={{ marginTop: 10, marginBottom: 0 }}><button type="button" className="btn outline" disabled={ocupado} onClick={() => enviar("cartillas")}>Guardar cartillas</button><div className="spacer" /><button type="button" className="btn primary" disabled={ocupado} onClick={() => enviar("consolidar")}>Consolidar → evaluación</button></div>}
           </>
@@ -136,14 +136,14 @@ function Contenido() {
           <>
             <h2>3 · Consolidación del panel</h2>
             {v.consolidacion.atributos && (
-              <table className="data">
+              <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data">
                 <thead><tr><th>Atributo</th><th className="num">Jueces</th><th className="num">Media</th><th className="num">Mediana</th><th className="num">DE</th><th>Atípicos sugeridos</th><th>Rango</th><th>Veredicto</th></tr></thead>
                 <tbody>{v.consolidacion.atributos.map((a: any) => {
                   const r = v.config.rangos.find((x: any) => x.atributo.toLowerCase() === a.atributo.toLowerCase());
                   const ver = a.media == null ? "pendiente" : !r ? "informativo" : a.media >= r.min && a.media <= r.max ? "cumple" : "no_cumple";
                   return <tr key={a.atributo}><td>{a.atributo}</td><td className="num">{a.n}</td><td className="num">{conComa(a.media)}</td><td className="num">{conComa(a.mediana)}</td><td className="num">{conComa(a.de)}</td><td>{a.atipicos.join(", ") || "—"}</td><td>{r ? `${conComa(r.min)}–${conComa(r.max)}` : "—"}</td><td><Veredicto v={ver} /></td></tr>;
                 })}</tbody>
-              </table>
+              </table></div>
             )}
             {v.consolidacion.triangular && <p style={{ fontSize: 13 }}>{v.consolidacion.triangular.conclusion || "Registre las respuestas de los jueces."}{v.consolidacion.triangular.p != null ? <small style={{ color: "var(--muted)" }}> · P(X ≥ {v.consolidacion.triangular.correctas}) = {conComa(v.consolidacion.triangular.p, 4)}</small> : null}</p>}
             {consolidada && ed && <div style={{ maxWidth: 520 }}><Campo id="mo" etiqueta="Motivo para corregir el panel consolidado"><input id="mo" value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={500} /></Campo></div>}
