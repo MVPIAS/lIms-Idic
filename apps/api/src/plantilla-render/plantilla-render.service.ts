@@ -6,6 +6,7 @@ import { nuevoCodigoVerificacion } from "../common/codigo-verificacion";
 import { renderizar, tablaMuestras, tablaInspeccion, type FilaMuestra, type FilaInspeccion } from "./template.engine";
 import { condicionFinal, faltantesDocumentoFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
 import { fmtFecha, fmtFechaHora } from "./html.util";
+import { atencionInforme } from "./atencion";
 import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
 import { QcService } from "../qc/qc.module";
@@ -254,7 +255,16 @@ export class PlantillaRenderService {
 
     const bpch = await this.cabeceraBpch(otId, muestras);
     const identificacion = await this.identificacionMuestras(ot.tenantId, ot.unidadPrincipal, muestras, ot.clienteId);
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null };
+    // «Atención»: el solicitante de la OT o, si no lo trae, el contacto principal del cliente (D02-30).
+    const contactoPrincipal = ot.solicitante?.trim() || ot.cliente?.contactoNombre?.trim() || !ot.clienteId
+      ? null
+      : await this.prisma.contacto.findFirst({
+          where: { clienteId: ot.clienteId, principal: true, deletedAt: null },
+          select: { nombre: true, cargo: true },
+          orderBy: { createdAt: "asc" },
+        });
+    const atencion = atencionInforme({ solicitanteOt: ot.solicitante, fichaCliente: ot.cliente, contactoPrincipal });
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion };
   }
 
   /**
@@ -430,6 +440,8 @@ export class PlantillaRenderService {
       // --- rutas punteadas (las que usan los cuerpos sembrados) ---
       ot: {
         ...ot,
+        // «Atención» de los cuerpos sembrados ({{ot.solicitante}}): OT o contacto principal del cliente.
+        solicitante: ctx.atencion,
         fechaRecepcion: fmtFecha(ot.fechaRecepcion),
         fechaCompromiso: fmtFecha(ot.fechaCompromiso),
         fechaCierre: fmtFecha(ot.fechaCierre),
@@ -450,6 +462,7 @@ export class PlantillaRenderService {
         veredicto_ot: veredictoOt,
       },
       veredicto_ot: veredictoOt,
+      atencion: ctx.atencion,
       fecha: fmtFecha(cert.fecha),
       fecha_hora: fmtFechaHora(cert.fecha),
       // Documentos BPCH: cabecera del expediente (vacía en las demás OT).
