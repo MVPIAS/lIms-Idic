@@ -239,7 +239,9 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     if (filas.some((f) => !f.nombre.trim())) return toast.error("Escriba la descripción de cada muestra recibida.");
     if (cfg?.productoObligatorio && filas.some((f) => !f.productoId))
       return toast.error(`Elija el producto (matriz) de cada muestra: es obligatorio en el ${cfg.laboratorio?.codigo ?? "laboratorio"}.`);
-    const falta = faltantesRecepcion(comun, cfg);
+    // Los sellos van por muestra: «sellos verificados» exige el número en cada una.
+    const falta = faltantesRecepcion({ ...comun, selloNumero: comun.sellosVerificados ? "por muestra" : "" }, cfg);
+    if (comun.sellosVerificados && filas.some((f) => !f.sello.trim())) falta.push("indique el Nº de sello de cada muestra (marcó «sellos verificados»)");
     if (falta.length) return toast.error(`Recepción: ${falta.join("; ")}.`);
     if (!metodoIds.length) return toast.error("Marque al menos un método.");
     setGuardando(true);
@@ -351,7 +353,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                     <Fragment key={m.id}>
                       <tr>
                         <td>
-                          <span className="codigo">{m.codigo}</span>
+                          <span className="codigo" style={{ whiteSpace: "nowrap" }}>{m.codigo}</span>
                           <div style={{ marginTop: 3 }}>
                             {m.numeroInterno ? (
                               <span className="pill blue" title="Nº de muestra interno">Nº {m.numeroInterno}</span>
@@ -368,7 +370,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                           {m.clienteNombre && m.clienteId !== d.ot.clienteId && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Cliente: {m.clienteNombre}</div>}
                           {m.identificacionCliente && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Rótulo: «{m.identificacionCliente}»</div>}
                         </td>
-                        <td style={{ fontSize: 12 }}>
+                        <td style={{ fontSize: 12, minWidth: 200 }}>
                           {m.recepcionIncompleta && !m.condicionRecepcion ? (
                             <span className="pill amber">incompleta</span>
                           ) : (
@@ -387,9 +389,25 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                             </div>
                           )}
                           {m.ubicacion && <div style={{ color: "var(--muted)" }}>Ubicación: {m.ubicacion}</div>}
-                          {camposLab.filter((c) => m.datos && m.datos[c.codigo] !== undefined && m.datos[c.codigo] !== "").map((c) => (
-                            <div key={c.codigo} style={{ color: "var(--muted)" }}>{c.etiqueta}: {textoValor(c, m.datos?.[c.codigo])}</div>
-                          ))}
+                          {(() => {
+                            // Datos propios del laboratorio en una línea; las casillas, resumidas.
+                            const datos = camposLab.filter((c) => c.tipo !== "casilla" && m.datos && m.datos[c.codigo] !== undefined && m.datos[c.codigo] !== "");
+                            const casillas = camposLab.filter((c) => c.tipo === "casilla");
+                            const marcadas = casillas.filter((c) => m.datos?.[c.codigo] === true).length;
+                            return (
+                              <>
+                                {datos.length > 0 && (
+                                  <div style={{ color: "var(--muted)" }}>{datos.map((c) => `${c.etiqueta}: ${textoValor(c, m.datos?.[c.codigo])}`).join(" · ")}</div>
+                                )}
+                                {casillas.length > 0 && (
+                                  <div style={{ color: marcadas === casillas.length ? "var(--muted)" : "#7a4b00" }}
+                                    title={casillas.map((c) => `${c.etiqueta}: ${m.datos?.[c.codigo] === true ? "Sí" : "No"}`).join(" · ")}>
+                                    Verificaciones: {marcadas} de {casillas.length}
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
                           {m.fotosRecepcion > 0 && <div style={{ color: "var(--muted)" }}>{m.fotosRecepcion} foto(s) de recepción</div>}
                           {m.recepcionadaAt && (
                             <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>

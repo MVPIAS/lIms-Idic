@@ -507,6 +507,7 @@ async function main() {
       afirmar(html.includes(t), `falta «${t}»`);
     afirmar(html.includes("<th>Fecha del análisis</th>") && /\d{2}\.[A-Z]{3}\.\d{2} \(\d{2}:\d{2}\)/.test(html), "la tabla de métodos no trae la fecha y hora del análisis");
     afirmar(html.includes("Termograma 1") && html.includes("DSC nitrato de amonio"), "falta el termograma");
+    afirmar(!html.includes("<h2>Conclusión</h2>"), "título de conclusión duplicado bajo el punto 5");
     afirmar(!/Anexo fotográfico[\s\S]*DSC nitrato de amonio/.test(html), "el termograma salió en el anexo fotográfico");
     return "6 secciones · fecha del análisis · termograma";
   });

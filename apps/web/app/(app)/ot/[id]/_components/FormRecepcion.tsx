@@ -219,8 +219,8 @@ export default function FormRecepcion({
         <label htmlFor={`${id}-cli`}>Cliente de la muestra</label>
         <div style={{ display: "flex", gap: 6 }}>
           <input id={`${id}-cli-busca`} aria-label="Buscar cliente en el maestro" value={busqCliente} onChange={(e) => setBusqCliente(e.target.value)}
-            placeholder="Buscar…" style={{ maxWidth: 120 }} />
-          <select id={`${id}-cli`} value={valor.clienteId} onChange={(e) => set({ clienteId: e.target.value })} style={{ flex: 1 }}>
+            placeholder="Buscar…" style={{ flex: "0 0 110px", minWidth: 0 }} />
+          <select id={`${id}-cli`} value={valor.clienteId} onChange={(e) => set({ clienteId: e.target.value })} style={{ flex: 1, minWidth: 0, width: "100%" }}>
             <option value="">{clienteOt?.nombre ? `El de la OT · ${clienteOt.nombre}` : "El de la OT"}</option>
             {valor.clienteId && !elegido && <option value={valor.clienteId}>Cliente elegido</option>}
             {clientes.filter((c) => c.id !== clienteOt?.id).map((c) => (

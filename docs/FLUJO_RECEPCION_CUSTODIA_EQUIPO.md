@@ -126,7 +126,8 @@ Formato por plantilla (`config_informe`, pantalla «Plantillas de documentos»),
 
 Bloques nuevos: `{{tabla_metodos}}` (análisis · método · fecha y hora del análisis),
 `{{termograma}}` (fotos de tipo termograma, que no van al anexo) e
-`{{identificacion_muestras}}` (Nº interno, producto, cliente si difiere y datos propios).
+`{{identificacion_muestras}}` (Nº interno, producto, cliente si difiere y datos propios) y
+`{{conclusion_texto}}` (la conclusión sin su título, para plantillas que numeran la sección).
 
 | Plantilla | Para qué | Tabla de resultados |
 |---|---|---|

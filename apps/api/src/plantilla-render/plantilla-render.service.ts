@@ -531,6 +531,8 @@ export class PlantillaRenderService {
       referencias: bloqueReferencias(est, cfg),
       anexo_fotografico: bloqueAnexo(fotos, cfg),
       conclusion: bloqueConclusion(cfg, datosDoc.conclusion),
+      // Mismo contenido sin el título «Conclusión»: para plantillas que numeran su sección (PG09A2-LME).
+      conclusion_texto: bloqueConclusion(cfg, datosDoc.conclusion, false),
       portada:
         cfg.portada === "ivc"
           ? bloquePortadaIvc(datosDoc.portada ?? {}, {
