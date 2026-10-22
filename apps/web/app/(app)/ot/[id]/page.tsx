@@ -169,6 +169,10 @@ export default function ExpedientePage() {
 
   const etapaActual = avance?.etapas.find((e) => e.clave === avance.etapaActual) ?? null;
   const esMetrologia = LABS_METROLOGIA.includes(ot?.unidad?.codigo ?? "");
+  // «Muestreo» y «Preparación» las decide la Ruta de la OT (no aplican en BPCH, D11 ni Metrología);
+  // mientras carga, no se muestran para no hacerlas aparecer y desaparecer.
+  const conMuestreo = avance?.pestanas ? avance.pestanas.muestreo : false;
+  const conPreparacion = avance?.pestanas ? avance.pestanas.preparacion : false;
   const codOt = ot?.codigo ?? ot?.numero ?? (typeof id === "string" ? id.slice(0, 8) : "");
   const tabBtn = (t: typeof tab, l: string) =>
     <button onClick={() => setTab(t)} className={`tab${tab === t ? " active" : ""}`}>{l}</button>;
@@ -241,9 +245,9 @@ export default function ExpedientePage() {
             {tabBtn("cabecera", "Cabecera")}
             {tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
             {esMetrologia && tabBtn("instrumentos", "Instrumentos")}
-            {!esMetrologia && tabBtn("muestreo", "Muestreo")}
+            {conMuestreo && tabBtn("muestreo", "Muestreo")}
             {(!esMetrologia || muestras.length > 0) && tabBtn("muestras", `Muestras (${muestras.length})`)}
-            {!esMetrologia && tabBtn("preparacion", "Preparación")}
+            {conPreparacion && tabBtn("preparacion", "Preparación")}
             {tabBtn("ordenes", "Órdenes internas")}
             {tabBtn("resultados", "Resultados")}
             {puede(["resultado.ver", "certificado.emitir"]) && tabBtn("fotos", "Fotos")}
@@ -319,7 +323,7 @@ export default function ExpedientePage() {
             )}
             {tab === "asignacion" && typeof id === "string" && <Asignacion otId={id} onCambio={cargarOt} />}
             {/* Preparación del trabajo (DSA, EP-05 2.1–2.3) y de las muestras (T29). */}
-            {tab === "preparacion" && typeof id === "string" && <PreparacionOt otId={id} laboratorio={ot?.unidad?.codigo ?? null} onCambio={cargarAvance} />}
+            {tab === "preparacion" && conPreparacion && typeof id === "string" && <PreparacionOt otId={id} laboratorio={ot?.unidad?.codigo ?? null} onCambio={cargarAvance} />}
             {tab === "historial" && (
               historial.length ? (
                 <table className="data">
@@ -338,7 +342,7 @@ export default function ExpedientePage() {
                 onRecepcionado={() => setTab("asignacion")} />
             )}
             {tab === "instrumentos" && typeof id === "string" && <InstrumentosOt otId={id} onCambio={cargarOt} />}
-            {tab === "muestreo" && typeof id === "string" && <MuestreoOt otId={id} onCambio={() => { cargarMuestras(); cargarAvance(); }} />}
+            {tab === "muestreo" && conMuestreo && typeof id === "string" && <MuestreoOt otId={id} onCambio={() => { cargarMuestras(); cargarAvance(); }} />}
             {tab === "ordenes" && typeof id === "string" && (
               <OrdenesInternasOt otId={id} otCodigo={ot?.codigo} otEstado={ot?.estado}
                 destinoSugerido={destinoOi} onSugerenciaUsada={() => setDestinoOi(null)}

@@ -26,6 +26,8 @@ export interface AvanceOt {
   } | null;
   cierre: { fecha: string | null; conCobro: boolean; factura: { numero: string; estado: string } | null } | null;
   avisos: string[];
+  /** Pestañas «Muestreo» y «Preparación»: solo donde la especificación las pide (no en BPCH, D11 ni Metrología). */
+  pestanas?: { muestreo: boolean; preparacion: boolean };
 }
 
 const TIPO: Record<AvanceOt["tipo"], string> = {

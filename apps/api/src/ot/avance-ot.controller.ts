@@ -8,7 +8,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { pasosActuales } from "../plantilla-render/reglas-emision";
 import { calcularAvance, puedeActuar, type DocumentoAvance, type HechosOt } from "./avance-ot";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
-import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
+import { ramaDeUnidad, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
 import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
 import { trabajoDsaDe } from "../formularios/trabajo-avance";
@@ -39,6 +39,7 @@ export class AvanceOtService {
     if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
     await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
 
+    const rama = await ramaDeUnidad(this.prisma, ot.unidadPrincipal).catch(() => null);
     const [cotizacion, muestras, analistas, resultados, docs, factura, calibraciones, internacion, reinspeccion, ordenesInternas] = await Promise.all([
       ot.cotizacionId
         ? this.prisma.cotizacion.findFirst({ where: { id: ot.cotizacionId }, select: { codigo: true, estado: true } })
@@ -179,7 +180,8 @@ export class AvanceOtService {
         .catch(() => []),
       coberturaPendiente: await hechosCobertura(this.prisma, ot.id, ot.tenantId).then((x) => x.pendientes).catch(() => []),
       // OT directa o de Producción Nacional del BPCH (internación y reinspección tienen su ruta propia).
-      cabeceraBpch: !i && !r && (await otEsBpch(this.prisma, ot.unidadPrincipal)) ? faltantesParaEmitirInspeccion(await vistaCabecera(this.prisma, ot.id)) : [],
+      rama,
+      cabeceraBpch: !i && !r && rama === "bpch" ? faltantesParaEmitirInspeccion(await vistaCabecera(this.prisma, ot.id)) : [],
       ordenesInternas: ordenesInternas.map((o: any) => ({
         id: o.id,
         numero: o.numero,
@@ -202,7 +204,11 @@ export class AvanceOtService {
             documentacion: i.documentacion ?? null,
           }
         : null,
-      armas: ot.unidad?.codigo === "D11" ? await avanceArmasDeOt(this.prisma, ot.id, ot.tenantId).catch(() => null) : null,
+      // Toda OT de la D11 que no sea del SAEC sigue la ruta de armas desde que nace,
+      // aunque aún no tenga expediente ni armas registradas (antes caía en la ruta general).
+      armas: rama === "d11" && ot.origenTrabajo !== "SAEC"
+        ? await avanceArmasDeOt(this.prisma, ot.id, ot.tenantId, true).catch(() => null)
+        : null,
       reinspeccion: r
         ? { id: r.id, numero: r.numero, unidad: r.unidad ?? null, loteRegistrado: r.loteRegistrado, conCodificacion: r.conCodificacion, trazabilidadHecha: r.trazabilidadHecha }
         : null,

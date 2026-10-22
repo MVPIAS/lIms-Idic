@@ -510,3 +510,18 @@ describe("Ruta de la OT · armas de la Delegación Nº 11 (EP-11)", () => {
     expect(a.etapas.find((e) => e.clave === "tasa")?.estado).toBe("no_aplica");
   });
 });
+
+describe("Pestañas «Muestreo» y «Preparación» según la especificación", () => {
+  it("se ven en una OT de laboratorio fuera del BPCH", () => {
+    expect(calcularAvance(base()).pestanas).toEqual({ muestreo: true, preparacion: true });
+  });
+  it("no se ven en OT del BPCH (el muestreo NCh 44 es del expediente) ni de la D11", () => {
+    expect(calcularAvance(base({ rama: "bpch" })).pestanas).toEqual({ muestreo: false, preparacion: false });
+    expect(calcularAvance(base({ rama: "d11" })).pestanas).toEqual({ muestreo: false, preparacion: false });
+  });
+  it("no se ven en Metrología ni en la ruta de armas", () => {
+    expect(calcularAvance(base({ unidad: { codigo: "LMT", esMetrologia: true } })).pestanas.muestreo).toBe(false);
+    const pasos = ["programacion"].map((clave) => ({ clave, titulo: clave, boton: "", leToca: "", estado: "pendiente" as const, detalle: "" }));
+    expect(calcularAvance(base({ unidad: { codigo: "D11" }, armas: { pasos } })).pestanas.muestreo).toBe(false);
+  });
+});

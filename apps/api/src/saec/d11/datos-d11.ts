@@ -89,16 +89,17 @@ export async function configD11De(db: Sql, tenantId: string): Promise<ConfigD11>
 
 /**
  * Avance del expediente D11 de una OT (null si la OT no es de armas de la D11:
- * sin expediente, sin armas y sin listado de la resolución).
+ * sin expediente, sin armas y sin listado de la resolución). Con `siempre`, la OT
+ * de la D11 recién creada ya tiene su avance (todo pendiente desde la programación).
  */
-export async function avanceArmasDeOt(db: Sql, otId: string, tenantId: string) {
+export async function avanceArmasDeOt(db: Sql, otId: string, tenantId: string, siempre = false) {
   const [e] = await db.$queryRawUnsafe<any[]>(`SELECT * FROM d11_expediente WHERE ot_id = $1::uuid`, otId);
   const armas = await db.$queryRawUnsafe<FilaArma[]>(`${SELECT_ARMAS} WHERE a.ot_id = $1::uuid ORDER BY a.orden`, otId);
   const [l] = await db.$queryRawUnsafe<{ n: number }[]>(
     `SELECT count(*)::int AS n FROM d11_resolucion_arma r JOIN bpch_internacion i ON i.id = r.internacion_id WHERE i.ot_id = $1::uuid`,
     otId,
   );
-  if (!e && !armas.length && !Number(l?.n ?? 0)) return null;
+  if (!siempre && !e && !armas.length && !Number(l?.n ?? 0)) return null;
   const cfg = await configD11De(db, tenantId);
   return avanceD11(
     {
