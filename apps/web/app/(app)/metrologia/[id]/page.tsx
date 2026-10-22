@@ -334,11 +334,32 @@ export default function FichaCalibracionPage() {
           <h2>Error normalizado frente a la calibración anterior (informativo)</h2>
           {!anterior ? <p className="subtitle" style={{ margin: 0 }}>Buscando la calibración anterior…</p>
             : anterior.data ? (
-              <p style={{ margin: 0, fontSize: 12.5 }}>
-                Calibración anterior en el LIMS: <Link href={`/metrologia/${anterior.data.id}` as any} className="codigo" style={{ color: "var(--accent)" }}>{anterior.data.numero_certificado}</Link>
-                {anterior.data.emitido_at ? ` · emitida el ${fechaDia(anterior.data.emitido_at)}` : ""}. Eₙ = |E − E<sub>ant</sub>| / √(U² + U<sub>ant</sub>²) es de uso interno y no
-                bloquea el envío; el criterio (&lt; 1 o ≤ 1) está por confirmar con el IDIC.
-              </p>
+              <>
+                <p style={{ margin: "0 0 8px", fontSize: 12.5 }}>
+                  Calibración anterior en el LIMS: <Link href={`/metrologia/${anterior.data.id}` as any} className="codigo" style={{ color: "var(--accent)" }}>{anterior.data.numero_certificado}</Link>
+                  {anterior.data.emitido_at ? ` · emitida el ${fechaDia(anterior.data.emitido_at)}` : ""}. E<sub>n</sub> = |E − E<sub>ant</sub>| / √(U² + U<sub>ant</sub>²),
+                  con la U informada en cada certificado. Es de uso interno y no bloquea el envío. Criterio vigente: E<sub>n</sub> {anterior.criterio === "<1" ? "<" : "≤"} 1
+                  (Administración › Parámetros del sistema; por confirmar con el IDIC).
+                </p>
+                {anterior.motivo && <div className="alert info" style={{ margin: "0 0 8px" }}>{anterior.motivo}</div>}
+                {(anterior.filas ?? []).length > 0 && (
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="data">
+                      <thead><tr><th scope="col">Nominal</th><th scope="col">Error actual</th><th scope="col">U actual</th><th scope="col">Error anterior</th><th scope="col">U anterior</th><th scope="col">E<sub>n</sub></th><th scope="col">Criterio</th></tr></thead>
+                      <tbody>{anterior.filas.map((f: any, i: number) => (
+                        <tr key={i}>
+                          <td className="num">{fmtG(f.nominal)}{f.unidad ? ` ${f.unidad}` : ""}</td>
+                          {[f.error, f.U, f.errorAnterior, f.Uanterior].map((v: any, j: number) => <td key={j} className={`num ${s.calc}`}>{v == null ? "—" : fmtG(v)}</td>)}
+                          <td className={`num ${s.calc}`}>{f.en == null ? "—" : f.en.toLocaleString("es-CL", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}</td>
+                          <td>{f.criterio === "compatible" ? <span className="pill green">Compatible</span>
+                            : f.criterio === "revisar" ? <span className="pill amber">Revisar (informativo)</span>
+                            : <span style={{ color: "var(--muted)", fontSize: 12 }}>{f.criterio === "sin_punto_anterior" ? "Sin el mismo punto en la anterior" : "Faltan error o U"}</span>}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             ) : <p style={{ margin: 0, fontSize: 12.5 }}>{anterior.motivo ?? "Sin calibración anterior en el LIMS."} Eₙ no se calcula.</p>}
         </section>
       )}

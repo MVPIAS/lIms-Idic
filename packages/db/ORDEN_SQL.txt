@@ -90,4 +90,5 @@ align_recepcion_custodia_equipo_lme.sql
 align_metrologia_certificado_nhojas.sql
 align_r1g_recorrido.sql
 seed_r1g_demo.sql                    demo
+align_r4a_metrologia_ficha.sql
 align_cierre_permisos.sql
