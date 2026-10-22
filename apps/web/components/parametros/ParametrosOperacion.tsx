@@ -138,12 +138,13 @@ export default function ParametrosOperacion() {
             {filas.length === 0 ? (
               <p className="subtitle" style={{ margin: "0 0 6px" }}>Sin parámetros en esta instalación.</p>
             ) : (
+              <div style={{ overflowX: "auto" }}>
               <table className="data">
                 <thead>
                   <tr>
                     {g.alta ? <th style={{ width: 90 }}>Laboratorio</th> : null}
                     <th>{g.alta === "laboratorio" ? "Regla" : "Parámetro"}</th>
-                    <th>Valor vigente</th>
+                    <th style={{ width: "30%" }}>Valor vigente</th>
                     {g.alta === "campo" && <th>Estado</th>}
                     <th style={{ width: 150 }}>Último cambio</th>
                     {editable && <th style={{ width: 90 }} />}
@@ -190,6 +191,7 @@ export default function ParametrosOperacion() {
                   ))}
                 </tbody>
               </table>
+              </div>
             )}
           </section>
         );
@@ -203,6 +205,7 @@ export default function ParametrosOperacion() {
           datos.historial.length === 0 ? (
             <p className="subtitle" style={{ margin: "8px 0 0" }}>Sin cambios registrados: rigen los valores de la instalación.</p>
           ) : (
+            <div style={{ overflowX: "auto" }}>
             <table className="data" style={{ marginTop: 8 }}>
               <thead><tr><th>Fecha</th><th>Quién</th><th>Parámetro</th><th>Antes</th><th>Después</th><th>Motivo</th></tr></thead>
               <tbody>
@@ -218,6 +221,7 @@ export default function ParametrosOperacion() {
                 ))}
               </tbody>
             </table>
+            </div>
           )
         )}
       </div>
