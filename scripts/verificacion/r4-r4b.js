@@ -615,6 +615,75 @@ async function main() {
     afirmar(em.length >= 2, "las emisiones quedan registradas");
     return `${fabs.length} fabricante(s) · PDF y Excel registrados`;
   });
+
+  /* --------------------------------------------- EP-08 · prototipos y clasificación */
+  await paso("8.3 / 8.4 · Clasificación: masas del ensayo previo IT22, masa IT23 y curva del MCU adjunta (solo PDF/PNG/JPEG)", async () => {
+    const c = await ok(U.bpch, "POST", "/bpch/clasificaciones", {
+      sustancia: `Sustancia ficticia r4b ${S("K")}`,
+      pruebas: {
+        it22: { aplica: true, serie: 1, masaMuestraG: 28.5, pesoTuboG: 25.1, masaHasta55mmG: 31.2, pesoFinal15mmG: 9.4, ensayos: [{ orificioMm: 12, efecto: "A", tiempoS: 14, masaFragmentosG: 0 }] },
+        it23: { aplica: true, masaMuestraG: 5, ensayos: [{ presionMaxKpa: 300, tiempoMs: null }] },
+      },
+    });
+    afirmar(c.pruebas.it22.pesoTuboG === 25.1 && c.pruebas.it23.masaMuestraG === 5, "no se guardaron las masas");
+    const malo = new FormData();
+    malo.append("clase", "curva_it23");
+    malo.append("archivo", new Blob(["no es una imagen"], { type: "image/png" }), "curva.png");
+    await exigir(400, U.bpch, "POST", `/bpch/clasificaciones/${c.id}/adjuntos`, malo, /PDF, PNG o JPEG/);
+    const png = new FormData();
+    png.append("clase", "curva_it23");
+    png.append("archivo", new Blob([Buffer.from("89504e470d0a1a0a0000000d49484452", "hex")], { type: "image/png" }), "curva MCU.png");
+    const a = await ok(U.bpch, "POST", `/bpch/clasificaciones/${c.id}/adjuntos`, png);
+    const d = await ok(U.bpch, "GET", `/bpch/clasificaciones/${c.id}`);
+    afirmar(d.adjuntos.length === 1 && d.adjuntos[0].clase === "curva_it23", "la curva no quedó adjunta");
+    await exigir(403, U.ventas, "GET", `/bpch/clasificaciones/${c.id}/adjuntos/${a.id}`);
+    return `${c.codigo} · ensayo previo y masa IT23 · ${a.nombre}`;
+  });
+
+  await paso("8.6 · Una clasificación aprobada que usan prototipos u O/C no se anula (BL-178)", async () => {
+    const vig = lista(await ok(U.bpch, "GET", "/bpch/clasificaciones?estado=aprobada"));
+    for (const c of vig) {
+      const d = await ok(U.bpch, "GET", `/bpch/clasificaciones/${c.id}`);
+      const enUso = d.usos.prototipos.some((x) => x.estado !== "anulado") || d.usos.productosPn.some((x) => x.ocEstado !== "anulada");
+      if (!enUso) continue;
+      await exigir(409, U.bpch, "POST", `/bpch/clasificaciones/${c.id}/anular`, { motivo: "Prueba de anulación en uso (r4b)" }, /reclasifíquela/);
+      return `${d.codigo}: 409 por estar en uso`;
+    }
+    return "sin clasificaciones aprobadas en uso en esta BD (se omite)";
+  });
+
+  await paso("8.8 · Prototipo: «¿está codificado?» bloquea un elemento de la Codificación Única; ficha técnica adjunta (BL-179)", async () => {
+    const cu = lista(await ok(U.bpch, "GET", "/bpch/codificacion?limit=5"));
+    const fab = lista(await ok(U.bpch, "GET", "/clientes?limit=1"))[0];
+    afirmar(fab, "sin clientes para el fabricante");
+    if (cu[0]) {
+      const r = await ok(U.bpch, "GET", `/bpch/prototipos/codificado?elemento=${encodeURIComponent(cu[0].producto.toUpperCase())}`);
+      afirmar(r.codificado === true, "el producto de la Codificación Única debía detectarse");
+      await exigir(409, U.bpch, "POST", "/bpch/prototipos", { clienteId: fab.id, elemento: cu[0].producto, solicitudDgmn: `SOL-${S("P")}` }, /ya está codificado/);
+    }
+    const p = await ok(U.bpch, "POST", "/bpch/prototipos", { clienteId: fab.id, elemento: `Elemento ficticio r4b ${S("Q")}`, solicitudDgmn: `SOL-${S("R")}` });
+    const f = new FormData();
+    f.append("clase", "ficha_tecnica");
+    f.append("archivo", new Blob(["%PDF-1.4\n% ficha ficticia\n"], { type: "application/pdf" }), "ficha tecnica.pdf");
+    await ok(U.bpch, "POST", `/bpch/prototipos/${p.id}/adjuntos`, f);
+    const d = await ok(U.bpch, "GET", `/bpch/prototipos/${p.id}`);
+    afirmar(d.adjuntos.length === 1 && d.adjuntos[0].clase === "ficha_tecnica", "ficha técnica no adjunta");
+    return `${cu[0] ? "codificado → 409 · " : ""}${p.codigo} con ficha técnica`;
+  });
+
+  await paso("8.17 · Inscribir en la Codificación Única el tipo aprobado con sus datos heredados (BL-180)", async () => {
+    const protos = lista(await ok(U.bpch, "GET", "/bpch/prototipos?estado=dictaminado"));
+    for (const x of protos) {
+      const d = await ok(U.bpch, "GET", `/bpch/prototipos/${x.id}`);
+      if (d.dictamen !== "aprobado" || !d.codigoCnc || d.inscripcionCu.inscrito) continue;
+      await exigir(403, U.ventas, "POST", `/bpch/codificacion/desde-prototipo/${x.id}`, { listado: "EXPLOSIVOS" });
+      const cu = await ok(U.bpch, "POST", `/bpch/codificacion/desde-prototipo/${x.id}`, { listado: "EXPLOSIVOS" });
+      afirmar(cu.cnc === d.codigoCnc && cu.producto === d.elemento && cu.certificadoId === d.documento.id, `inscripción ${JSON.stringify(cu).slice(0, 200)}`);
+      await exigir(409, U.bpch, "POST", `/bpch/codificacion/desde-prototipo/${x.id}`, { listado: "EXPLOSIVOS" }, /ya está inscrito/);
+      return `${d.codigo} → ${cu.cnc} · certificado ${d.documento.numero}`;
+    }
+    return "sin prototipos aprobados con código por inscribir en esta BD (se omite)";
+  });
 }
 
 main()

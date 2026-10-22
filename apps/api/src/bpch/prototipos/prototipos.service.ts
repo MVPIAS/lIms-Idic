@@ -13,12 +13,21 @@ import { etiquetaVeredicto } from "../../laboratorio/veredicto";
 import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 import { ClasificacionService } from "../clasificacion/clasificacion.service";
 import { textoClasificacion } from "../clasificacion/reglas-clasificacion";
+import { normalizarCnc } from "../comun/reglas-bpch";
+import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../../common/adjuntos";
+
+/** Adjuntos del ingreso del prototipo (EP-08 8.8). */
+export const CLASES_ADJUNTO_PROTOTIPO = ["ficha_tecnica", "hoja_seguridad"] as const;
 import {
   DOCUMENTO_DICTAMEN,
   PLANTILLAS_PROTOTIPO,
   etapaPrototipo,
   faltantesDictamen,
   faltantesGenerarOt,
+  faltantesInscripcionCu,
+  mensajeCodificado,
+  revisarCodificado,
+  type CandidatoCodificado,
   validarCodigoCnc,
   resultadoDictamen,
   veredictoOt,
@@ -288,6 +297,8 @@ export class PrototiposService implements OnModuleInit {
         : null,
       documento: p.documento_id ? { id: p.documento_id, numero: p.doc_numero, estado: p.doc_estado, tipoDocumento: p.doc_tipo } : null,
       codigoCncDetalle: p.codigo_cnc ? { codigo: p.codigo_cnc, por: p.cnc_por_nombre, at: p.codigo_cnc_at } : null,
+      adjuntos: await listarAdjuntos(this.prisma as any, tenantId, "prototipo", [id]),
+      inscripcionCu: await this.inscripcionCu(tenantId, p),
       anulado: p.anulado_at ? { motivo: p.anulado_motivo, at: p.anulado_at } : null,
       faltantes: {
         generarOt: faltantesGenerarOt({
@@ -312,9 +323,39 @@ export class PrototiposService implements OnModuleInit {
     if (d.clasificacionId) await this.clasificaciones.exigirAprobada(tenantId, d.clasificacionId);
   }
 
+  /** 8.8 · ¿Está codificado? Busca el elemento en la Codificación Única y en el catálogo. */
+  async codificado(tenantId: string, elemento: string) {
+    const e = String(elemento ?? "").trim().slice(0, 240);
+    if (e.length < 2) return { codificado: false, exactos: [], parecidos: [] };
+    const patron = `%${e.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+    const [cu, cat] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT producto, cnc_dgmn, fabricante_nombre, estado FROM bpch_codificacion
+          WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND (producto ILIKE $2 OR $3 ILIKE '%' || producto || '%') LIMIT 50`,
+        tenantId,
+        patron,
+        e,
+      ),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT codigo, nombre FROM cat_elemento
+          WHERE tenant_id = $1::uuid AND activo AND (nombre ILIKE $2 OR $3 ILIKE '%' || nombre || '%') LIMIT 50`,
+        tenantId,
+        patron,
+        e,
+      ),
+    ]);
+    const candidatos: CandidatoCodificado[] = [
+      ...cu.map((c) => ({ origen: "codificacion" as const, nombre: c.producto, detalle: `${c.cnc_dgmn} · ${c.fabricante_nombre}${c.estado === "EN_RECESO" ? " (en receso)" : ""}` })),
+      ...cat.map((c) => ({ origen: "catalogo" as const, nombre: c.nombre, detalle: `${c.codigo} · ${c.nombre}` })),
+    ];
+    return revisarCodificado(e, candidatos);
+  }
+
   async crear(tenantId: string, usuarioId: string | null, body: unknown) {
     const d = CrearPrototipo.parse(body ?? {});
     await this.validarRefs(tenantId, d);
+    const rev = await this.codificado(tenantId, d.elemento);
+    if (rev.codificado) throw new ConflictException(mensajeCodificado(d.elemento, rev.exactos));
     const id = await this.prisma.$transaction(async (tx) => {
       const codigo = await this.comun.correlativo(tx, tenantId, "PROTO");
       const filas = await tx.$queryRawUnsafe<{ id: string }[]>(
@@ -583,6 +624,38 @@ export class PrototiposService implements OnModuleInit {
       usuarioId,
     );
     return this.detalle(tenantId, id);
+  }
+
+  /** 8.17 · inscripción del tipo en la Codificación Única (si ya existe) y lo que falta para hacerla. */
+  private async inscripcionCu(tenantId: string, p: any) {
+    const fila = p.codigo_cnc
+      ? (
+          await this.prisma.$queryRawUnsafe<any[]>(
+            `SELECT id, cnc_dgmn AS cnc, listado, estado FROM bpch_codificacion
+              WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND cnc_normalizado = $2 LIMIT 1`,
+            tenantId,
+            normalizarCnc(p.codigo_cnc),
+          )
+        )[0]
+      : null;
+    return {
+      inscrito: fila ?? null,
+      faltantes: faltantesInscripcionCu({ estado: p.estado, dictamen: p.dictamen, documentoEstado: p.doc_estado, codigoCnc: p.codigo_cnc, yaInscrito: !!fila }),
+    };
+  }
+
+  /** 8.8 · ficha técnica u hoja de datos de seguridad (PDF/PNG/JPEG). No con el prototipo anulado. */
+  async adjuntar(tenantId: string, id: string, usuarioId: string | null, clase: string, archivo: ArchivoAdjunto | undefined) {
+    if (!CLASES_ADJUNTO_PROTOTIPO.includes(clase as any)) throw new BadRequestException("Tipo de adjunto no admitido (ficha técnica u hoja de seguridad).");
+    const p = await this.fila(tenantId, id);
+    if (p.estado === "anulado") throw new ConflictException("El prototipo está anulado.");
+    return guardarAdjunto(this.prisma as any, { tenantId, entidad: "prototipo", entidadId: id, clase, archivo, usuarioId });
+  }
+
+  async adjunto(tenantId: string, id: string, adjuntoId: string) {
+    const a = await leerAdjunto(this.prisma as any, tenantId, ["prototipo"], adjuntoId);
+    if (a.entidadId !== id) throw new NotFoundException("Adjunto no encontrado.");
+    return a;
   }
 
   /** Datos de origen de una OT de prototipo (para el expediente de la OT). */

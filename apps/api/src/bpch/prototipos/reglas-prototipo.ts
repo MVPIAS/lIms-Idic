@@ -133,3 +133,56 @@ export function resultadoDictamen(r: { resultado_final?: unknown; valor_numerico
   const n = valorInformado({ resultadoFinal: r.resultado_final, valorNumerico: r.valor_numerico, promedio: r.promedio });
   return n !== null && n !== undefined && n !== "" ? fmtNum(String(n)) : r.valor_texto ?? "";
 }
+
+/* --------------------------------------------- 8.8 · ¿está codificado? --- */
+
+/** Nombre comparable: sin tildes, mayúsculas, sin signos y con espacios simples. */
+export function nombreComparable(s: string | null | undefined): string {
+  return String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
+export interface CandidatoCodificado {
+  origen: "codificacion" | "catalogo";
+  nombre: string;
+  detalle: string;
+}
+
+/**
+ * EP-08 8.8 (BL-179): un elemento que ya está en la Codificación Única o en el
+ * catálogo NO es prototipo (corresponde Internación, Producción Nacional o
+ * Reinspección). Coincidencia exacta = bloquea; parecida (uno contiene al otro,
+ * con al menos 4 caracteres) = aviso.
+ */
+export function revisarCodificado(elemento: string, candidatos: CandidatoCodificado[]) {
+  const e = nombreComparable(elemento);
+  const exactos: CandidatoCodificado[] = [];
+  const parecidos: CandidatoCodificado[] = [];
+  if (e.length < 2) return { codificado: false, exactos, parecidos };
+  for (const c of candidatos) {
+    const n = nombreComparable(c.nombre);
+    if (!n) continue;
+    if (n === e) exactos.push(c);
+    else if (Math.min(n.length, e.length) >= 4 && (n.includes(e) || e.includes(n))) parecidos.push(c);
+  }
+  return { codificado: exactos.length > 0, exactos, parecidos: parecidos.slice(0, 10) };
+}
+
+export function mensajeCodificado(elemento: string, exactos: CandidatoCodificado[]): string {
+  const donde = exactos.map((c) => (c.origen === "codificacion" ? `Codificación Única ${c.detalle}` : `catálogo ${c.detalle}`)).join("; ");
+  return `«${elemento}» ya está codificado (${donde}): no es un prototipo; corresponde Internación, Producción Nacional o Reinspección.`;
+}
+
+/** EP-08 8.17 (BL-180): condiciones para inscribir el tipo aprobado en la Codificación Única. */
+export function faltantesInscripcionCu(p: { estado: string; dictamen: string | null; documentoEstado: string | null; codigoCnc: string | null; yaInscrito: boolean }): string[] {
+  const f: string[] = [];
+  if (p.estado !== "dictaminado" || p.dictamen !== "aprobado") f.push("Solo se inscribe un prototipo con el tipo aprobado.");
+  else if (p.documentoEstado !== "oficial" && p.documentoEstado !== "emitido") f.push("El certificado de aprobación de tipo aún no es oficial.");
+  if (!p.codigoCnc) f.push("Falta el código único CNC-DGMN (paso 6).");
+  if (p.yaInscrito) f.push("El tipo ya está inscrito en la Codificación Única.");
+  return f;
+}

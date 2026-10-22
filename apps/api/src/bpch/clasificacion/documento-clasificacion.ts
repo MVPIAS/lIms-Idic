@@ -8,7 +8,7 @@
  */
 import { renderizar } from "../../plantilla-render/template.engine";
 import { escapeHtml } from "../../plantilla-render/html.util";
-import { evaluarPruebas, NOMBRE_PRUEBA, type Pruebas, type ResultadoPrueba } from "./reglas-clasificacion";
+import { evaluarPruebas, NOMBRE_PRUEBA, type Pruebas, type ResultadoPrueba, lecturasMasa } from "./reglas-clasificacion";
 
 const ETIQUETA: Record<ResultadoPrueba, string> = {
   positivo: "Positivo (+)",
@@ -94,10 +94,11 @@ export interface DatosDocumentoClasificacion {
 
 function tablaPruebas(pruebas: Pruebas): string {
   const ev = evaluarPruebas(pruebas);
+  const masas = lecturasMasa(pruebas);
   const filas: [string, string, string][] = [
     [NOMBRE_PRUEBA.it21, ev.it21.detalle, ETIQUETA[ev.it21.resultado]],
-    [NOMBRE_PRUEBA.it22, ev.it22.detalle, ETIQUETA[ev.it22.resultado]],
-    [NOMBRE_PRUEBA.it23, ev.it23.detalle, ETIQUETA[ev.it23.resultado]],
+    [NOMBRE_PRUEBA.it22, [ev.it22.detalle, masas.it22].filter(Boolean).join(" · "), ETIQUETA[ev.it22.resultado]],
+    [NOMBRE_PRUEBA.it23, [ev.it23.detalle, masas.it23].filter(Boolean).join(" · "), ETIQUETA[ev.it23.resultado]],
   ];
   const cuerpo = filas
     .map(([a, b, c]) => `<tr><td>${escapeHtml(a)}</td><td>${escapeHtml(b)}</td><td>${escapeHtml(c)}</td></tr>`)

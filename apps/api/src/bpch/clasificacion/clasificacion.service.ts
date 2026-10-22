@@ -8,8 +8,13 @@ import { documentoCompleto, type Sello } from "../../plantilla-render/plantilla-
 import { generarPdf } from "../../plantilla-render/pdf.renderer";
 import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 import { cuerpoDocumentoClasificacion } from "./documento-clasificacion";
+import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../../common/adjuntos";
+
+/** Adjuntos de la clasificación: la curva tiempo/presión del MCU (IT23, «registro permanente»). */
+export const CLASES_ADJUNTO_CLASIFICACION = ["curva_it23"] as const;
 import {
   EFECTOS_KOENEN,
+  erroresAnulacion,
   evaluarPruebas,
   normalizarNumeroOnu,
   textoClasificacion,
@@ -39,6 +44,9 @@ export const PruebasSchema = z
         aplica: z.boolean(),
         serie: z.union([z.literal(1), z.literal(2)]),
         masaMuestraG: num(0, 100000).nullable().optional(),
+        pesoTuboG: num(0, 100000).nullable().optional(),
+        masaHasta55mmG: num(0, 100000).nullable().optional(),
+        pesoFinal15mmG: num(0, 100000).nullable().optional(),
         ensayos: z
           .array(
             z.object({
@@ -55,6 +63,7 @@ export const PruebasSchema = z
     it23: z
       .object({
         aplica: z.boolean(),
+        masaMuestraG: num(0, 100000).nullable().optional(),
         ensayos: z
           .array(
             z.object({
@@ -260,7 +269,7 @@ export class ClasificacionService {
         id,
       ),
       this.prisma.$queryRawUnsafe<any[]>(
-        `SELECT p.id, p.producto, o.id AS oc_id, o.numero AS oc_numero
+        `SELECT p.id, p.producto, o.id AS oc_id, o.numero AS oc_numero, o.estado AS oc_estado
            FROM bpch_oc_producto p JOIN bpch_oc_operativa o ON o.id = p.oc_id
           WHERE p.clasificacion_id = $1::uuid ORDER BY o.numero`,
         id,
@@ -271,8 +280,9 @@ export class ClasificacionService {
       versiones: versiones.map((v) => ({ id: v.id, version: v.version, estado: v.estado, aprobadoAt: v.aprobado_at })),
       usos: {
         prototipos: prototipos.map((x) => ({ id: x.id, codigo: x.codigo, elemento: x.elemento, estado: x.estado })),
-        productosPn: productos.map((x) => ({ id: x.id, producto: x.producto, ocId: x.oc_id, ocNumero: x.oc_numero })),
+        productosPn: productos.map((x) => ({ id: x.id, producto: x.producto, ocId: x.oc_id, ocNumero: x.oc_numero, ocEstado: x.oc_estado })),
       },
+      adjuntos: await listarAdjuntos(this.prisma as any, tenantId, "clasificacion", [id]),
     };
   }
 
@@ -462,6 +472,8 @@ export class ClasificacionService {
     const r = await this.fila(tenantId, id);
     if (r.estado === "anulada" || r.estado === "reemplazada")
       throw new ConflictException(`La clasificación ya está ${r.estado}.`);
+    const enUso = erroresAnulacion(r.estado, (await this.detalle(tenantId, id)).usos);
+    if (enUso.length) throw new ConflictException(enUso.join(" "));
     await this.prisma.$executeRawUnsafe(
       `UPDATE bpch_clasificacion SET estado = 'anulada', anulada_motivo = $2, anulada_por = $3::uuid, anulada_at = now(), updated_at = now()
         WHERE id = $1::uuid`,
@@ -521,6 +533,20 @@ export class ClasificacionService {
   async pdf(tenantId: string, id: string) {
     const { r, sello, titulo } = await this.documento(tenantId, id);
     return { buffer: await generarPdf(r.documento_html, sello, titulo), nombre: `${r.documento_numero}.pdf` };
+  }
+
+  /** 8.4 · adjunto de la clasificación (curva tiempo/presión del MCU de la IT23). Solo mientras se edita. */
+  async adjuntar(tenantId: string, id: string, usuarioId: string | null, clase: string, archivo: ArchivoAdjunto | undefined) {
+    if (!CLASES_ADJUNTO_CLASIFICACION.includes(clase as any)) throw new BadRequestException("Tipo de adjunto no admitido.");
+    const r = await this.fila(tenantId, id);
+    if (r.estado !== "borrador" && r.estado !== "registrada") throw new ConflictException("La clasificación ya no se edita: adjunte en una nueva versión.");
+    return guardarAdjunto(this.prisma as any, { tenantId, entidad: "clasificacion", entidadId: id, clase, archivo, usuarioId });
+  }
+
+  async adjunto(tenantId: string, id: string, adjuntoId: string) {
+    const a = await leerAdjunto(this.prisma as any, tenantId, ["clasificacion"], adjuntoId);
+    if (a.entidadId !== id) throw new NotFoundException("Adjunto no encontrado.");
+    return a;
   }
 
   /** Clasificación aprobada (para prototipos y productos de la O/C). 400 si no lo está. */

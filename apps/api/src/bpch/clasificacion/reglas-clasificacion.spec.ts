@@ -1,4 +1,6 @@
 import {
+  erroresAnulacion,
+  lecturasMasa,
   evaluarIt21,
   evaluarIt22,
   evaluarIt23,
@@ -117,5 +119,29 @@ describe("Clasificación · conjunto y registro", () => {
     expect(textoClasificacion({ explosiva: true, claseDivision: "1.4", grupoCompatibilidad: "s", numeroOnu: "0456" })).toBe("1.4S · UN 0456");
     expect(textoClasificacion({ explosiva: false, claseDivision: "5.1", numeroOnu: "1942" })).toBe("No explosiva · 5.1 · UN 1942");
     expect(textoClasificacion({ explosiva: null })).toBe("Sin clasificar");
+  });
+});
+
+describe("EP-08 8.6 · no se anula una clasificación aprobada en uso (BL-178)", () => {
+  const sinUso = { prototipos: [], productosPn: [] };
+  it("solo bloquea si está aprobada y la usan prototipos vivos u O/C no anuladas", () => {
+    expect(erroresAnulacion("aprobada", sinUso)).toEqual([]);
+    expect(erroresAnulacion("registrada", { prototipos: [{ codigo: "PROTO-1", estado: "ingresado" }], productosPn: [] })).toEqual([]);
+    expect(erroresAnulacion("aprobada", { prototipos: [{ codigo: "PROTO-1", estado: "anulado" }], productosPn: [{ producto: "X", ocNumero: "OC-1", ocEstado: "anulada" }] })).toEqual([]);
+    const e = erroresAnulacion("aprobada", {
+      prototipos: [{ codigo: "PROTO-2026-0001", estado: "en_evaluacion" }],
+      productosPn: [{ producto: "A", ocNumero: "OC-9", ocEstado: "vigente" }, { producto: "B", ocNumero: "OC-9", ocEstado: "vigente" }],
+    });
+    expect(e[0]).toMatch(/prototipo\(s\) PROTO-2026-0001 y producto\(s\) de O\/C OC-9: reclasifíquela/);
+  });
+});
+
+describe("EP-08 8.3 / 8.4 · masas de IT22 e IT23 en el documento (BL-223, BL-224)", () => {
+  it("coma decimal y solo lo informado", () => {
+    expect(lecturasMasa({ it22: { aplica: true, serie: 1, pesoTuboG: 25.5, masaHasta55mmG: 30, ensayos: [] }, it23: { aplica: true, masaMuestraG: 5, ensayos: [] } })).toEqual({
+      it22: "Ensayo previo: tubo 25,5 g · hasta 55 mm 30 g",
+      it23: "Masa de muestra: 5 g",
+    });
+    expect(lecturasMasa({ it22: { aplica: false, serie: 1, pesoTuboG: 1, ensayos: [] } })).toEqual({ it22: null, it23: null });
   });
 });
