@@ -124,6 +124,21 @@ const TIPO_CAMPO_ETIQUETA: Record<TipoCampo, string> = {
 };
 export const OPCIONES_TIPO_CAMPO: Opcion[] = TIPOS_CAMPO.map((t) => ({ valor: t, etiqueta: TIPO_CAMPO_ETIQUETA[t] }));
 
+/** Métodos del catálogo de la D11 (DTCG-PG03) que puede cargar cada camino del arma. */
+export const METODOS_D11: Opcion[] = [
+  { valor: "1292", etiqueta: "1292 · Clasificación de armas (IT05)" },
+  { valor: "1291", etiqueta: "1291 · Reconocimiento de cuño (IT01)" },
+  { valor: "1213", etiqueta: "1213 · Inspección ocular antes y después del disparo (IT02)" },
+  { valor: "1202", etiqueta: "1202 · Tensión del disparador (IT03)" },
+  { valor: "1203", etiqueta: "1203 · Prueba de funcionamiento (IT04)" },
+  { valor: "3500", etiqueta: "3500 · Evidencia balística · IBIS (IT12)" },
+  { valor: "2755", etiqueta: "2755 · Acuñación de armas (IT08)" },
+  { valor: "3454", etiqueta: "3454 · Remarca de armas (IT09)" },
+  { valor: "2322", etiqueta: "2322 · Inspección ocular de accesorios (IT10)" },
+  { valor: "3706", etiqueta: "3706 · Inspección ocular de máquinas recargadoras (IT12)" },
+  { valor: "3455", etiqueta: "3455 · Emisión de certificado (IT11)" },
+];
+
 /** Registro de los parámetros R1 editables, en el orden de la pantalla. */
 export const GRUPOS_CONFIG: GrupoConfig[] = [
   {
@@ -623,6 +638,52 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
           { clave: "max", etiqueta: "Máx.", tipo: "numero", obligatoria: true, min: 0, max: 10 },
         ],
       },
+    },
+  },
+  // --- BPCH · prototipos (frente r4b, EP-08 8.11) ---
+  {
+    categoria: "bpch_prototipo",
+    titulo: "BPCH · Prototipos · parametrización del elemento",
+    donde: "BPCH › Prototipos: si la OT de evaluación exige el panel del elemento validado por la jefatura (paso 4).",
+    porConfirmar: "Quién es el «Analista Experto BPCH» y la «Sección Gestión y Control» y si el elemento entra al catálogo antes del dictamen (EP-08 P4).",
+    codigos: {
+      exige_parametrizacion: {
+        tipo: "sino",
+        nombre: "La OT de evaluación exige la parametrización validada",
+        opciones: SI_NO,
+        ayuda: "Con «sí», no se genera la OT del prototipo sin el panel (Mín/Nom/Máx, fórmula) validado.",
+        porDefecto: "no",
+      },
+    },
+  },
+  // --- Delegación Nº 11 · certificación de armas (frente r4b, EP-11) ---
+  {
+    categoria: "d11",
+    titulo: "Delegación Nº 11 · camino del arma, acuñación y vigencia del certificado",
+    donde:
+      "BPCH · SAEC › Certificación de armas: ensayos que carga cada camino al clasificar el arma, si el arma con cuño CIP se acuña y vigencia del certificado por arma. Rige para lo que se clasifique o emita desde el cambio.",
+    porConfirmar: "Ensayos de cada camino y si un arma con cuño CIP se dispara y se acuña (EP-11 P1, P4); vigencia al vencer (P11).",
+    codigos: {
+      metodos_registro: { tipo: "multiple", nombre: "Ensayos al registrar el arma (clasificación)", opciones: METODOS_D11, porDefecto: "1292" },
+      metodos_cip: { tipo: "multiple", nombre: "Ensayos del camino «Con cuño CIP · reconocimiento»", opciones: METODOS_D11, porDefecto: "1291,3500" },
+      metodos_completa: { tipo: "multiple", nombre: "Ensayos del camino «Sin cuño CIP · prueba completa»", opciones: METODOS_D11, porDefecto: "1213,1202,1203,3500" },
+      metodos_accesorio: { tipo: "multiple", nombre: "Ensayos de un accesorio (directo al certificado)", opciones: METODOS_D11, porDefecto: "2322" },
+      metodos_maquina: { tipo: "multiple", nombre: "Ensayos de una máquina recargadora (directo al certificado)", opciones: METODOS_D11, porDefecto: "3706" },
+      metodos_fuego: {
+        tipo: "multiple",
+        nombre: "Ensayos con fuego real (IT04) que gastan munición de prueba",
+        opciones: METODOS_D11,
+        ayuda: "Al guardar estos ensayos el armero indica el lote y los cartuchos usados; se descuentan del inventario de munición de prueba (EP-11 11.17).",
+        porDefecto: "1203",
+      },
+      acunacion_cip: {
+        tipo: "sino",
+        nombre: "Un arma con cuño CIP también se acuña con el cuño BPCH",
+        opciones: SI_NO,
+        ayuda: "El Bizagi de la D11 no acuña las armas con cuño CIP; el LIMS actual sí. Por defecto se sigue el Bizagi.",
+        porDefecto: "no",
+      },
+      vigencia_anios: { tipo: "entero", nombre: "Vigencia del certificado por arma", min: 1, max: 10, unidad: "años", porDefecto: "4" },
     },
   },
 ];

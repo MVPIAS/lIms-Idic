@@ -21,6 +21,7 @@ import { FormInternacion } from "../../_components/FormInternacion";
 import { SelectorPanel } from "../../_components/Buscadores";
 import { AVANCE_INTERNACION, type ConfigBpch, DOC_ADM, ESTADO_COD, ESTADO_INTERNACION, LISTADOS, dia, hoy, pedir } from "../../_components/bpch";
 import { ESTADO_FACTURA } from "@/lib/documentos";
+import { textoTipo } from "@/lib/d11";
 
 type Pestana = "registro" | "inspeccion" | "documentos" | "tasa" | "codificacion";
 
@@ -143,7 +144,7 @@ function Registro({ d, config, puede, accion, onCambio }: { d: any; config: Conf
             <div key={l} className="field readonly"><label>{l}</label><input value={v || "—"} readOnly /></div>
           ))}
         </div>
-        <table className="data" style={{ marginTop: 12 }}>
+        {d.items.length > 0 && <table className="data" style={{ marginTop: 12 }}>
           <thead><tr><th>#</th><th>Elemento específico</th><th>Genérico</th><th>CNC-DGMN</th><th>Clase · Nº UN</th><th className="num">Cantidad</th><th>Catálogo</th></tr></thead>
           <tbody>
             {d.items.map((it: any) => (
@@ -158,7 +159,31 @@ function Registro({ d, config, puede, accion, onCambio }: { d: any; config: Conf
               </tr>
             ))}
           </tbody>
-        </table>
+        </table>}
+        {d.armas?.length > 0 && (
+          <>
+            <h3 style={{ margin: "14px 0 6px", fontSize: 13 }}>
+              Listado de armas de la resolución · {d.armas.reduce((s: number, a: any) => s + (a.cantidad || 0), 0)} arma(s)
+            </h3>
+            <table className="data">
+              <thead><tr><th>#</th><th>Tipo</th><th>Marca</th><th>Modelo</th><th>Calibre</th><th>Nº de serie</th><th>Accesorios</th><th className="num">Cantidad</th></tr></thead>
+              <tbody>
+                {d.armas.map((a: any) => (
+                  <tr key={a.id}>
+                    <td>{a.orden}</td><td>{textoTipo(a.tipo)}</td><td>{a.marca}</td><td>{a.modelo ?? "—"}</td><td>{a.calibre ?? "—"}</td>
+                    <td>{a.serie ?? "—"}</td><td>{a.accesorios ?? "—"}</td><td className="num">{a.cantidad}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {d.otId && d.unidad.codigo === "D11" && puede("arma.ver") && (
+              <div className="alert info" style={{ marginTop: 8 }}>
+                La Delegación Nº 11 recibe, registra y certifica cada arma en{" "}
+                <Link href={`/saec/ot/${d.otId}` as any}>BPCH · SAEC › Certificación de armas</Link>.
+              </div>
+            )}
+          </>
+        )}
         {antesDeOt && puede("bpch.internacion.registrar") && (
           <div className="toolbar" style={{ marginTop: 10, marginBottom: 0 }}>
             <button type="button" className="btn outline sm" onClick={() => setEditar(true)} disabled={!config}>Corregir registro</button>

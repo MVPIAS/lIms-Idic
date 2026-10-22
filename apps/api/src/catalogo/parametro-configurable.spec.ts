@@ -265,3 +265,16 @@ describe("reglas del recorrido MP-02/MP-06 (r1g) editables desde la pantalla (r1
     expect(textoValor(defConfigurable("ot_plazo", "internacion_dias")!, "10")).toBe("10 días corridos");
   });
 });
+
+describe("Parámetros de la D11 (frente r4b)", () => {
+  it("se editan en «Parámetros de la operación» y el lector de la D11 entiende lo guardado", () => {
+    const { defConfigurable } = require("./parametro-configurable");
+    const { configD11 } = require("../saec/d11/reglas-d11");
+    expect(CATEGORIAS_CONFIGURABLES).toContain("d11");
+    expect(defConfigurable("d11", "metodos_cip")?.tipo).toBe("multiple");
+    expect(defConfigurable("d11", "acunacion_cip")?.porDefecto).toBe("no");
+    expect(defConfigurable("d11", "vigencia_anios")).toMatchObject({ tipo: "entero", min: 1, max: 10 });
+    const c = configD11([{ codigo: "metodos_cip", valor: "1291,3500,1203" }, { codigo: "acunacion_cip", valor: "si" }, { codigo: "vigencia_anios", valor: "5" }]);
+    expect(c).toMatchObject({ metodosCip: ["1291", "3500", "1203"], acunacionCip: true, vigenciaAnios: 5 });
+  });
+});

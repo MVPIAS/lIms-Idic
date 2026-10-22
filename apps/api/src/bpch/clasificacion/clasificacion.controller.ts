@@ -1,4 +1,6 @@
-import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, type ArchivoAdjunto } from "../../common/adjuntos";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
@@ -152,6 +154,24 @@ export class ClasificacionController {
   async devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     await this.exigir(req, id);
     return this.svc.devolver(tenant(req), id, usuario(req), body);
+  }
+
+  @Post(":id/adjuntos")
+  @RequierePermiso("bpch.clasificacion.registrar")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ADJUNTO, files: 1, fields: 2 } }))
+  @ApiOperation({ summary: "Adjuntar la curva tiempo/presión del MCU (IT23) · multipart: archivo + clase=curva_it23" })
+  async adjuntar(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoAdjunto | undefined, @Body() body: any, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.adjuntar(tenant(req), id, usuario(req), String(body?.clase ?? ""), archivo);
+  }
+
+  @Get(":id/adjuntos/:adjuntoId")
+  @RequierePermiso("bpch.clasificacion.ver")
+  async adjunto(@Param("id", ParseUUIDPipe) id: string, @Param("adjuntoId", ParseUUIDPipe) adjuntoId: string, @Req() req: any, @Res() res: Response) {
+    await this.exigir(req, id);
+    const a = await this.svc.adjunto(tenant(req), id, adjuntoId);
+    res.set(cabecerasAdjunto(a));
+    res.end(a.datos);
   }
 
   @Post(":id/anular")

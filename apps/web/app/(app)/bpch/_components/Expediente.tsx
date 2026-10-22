@@ -10,6 +10,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { toast } from "@/components/ui/feedback";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
+import NotificacionDgmn from "@/components/bpch-procesos/NotificacionDgmn";
 import { CONDICION, type ConfigBpch, type Fase, pedir } from "./bpch";
 
 const ICONO: Record<Fase["estado"], string> = { hecho: "✓", en_curso: "•", pendiente: "", no_aplica: "–" };
@@ -189,7 +190,8 @@ export function DocumentosYCierre({
           )}
           {incumplimiento && (
             <div className="alert warn" style={{ marginTop: 8 }}>
-              <b>No cumple → informar a DGMN.</b> Una vez oficial, registre la entrega del Informe de Incumplimiento {incumplimiento.numero} con destinatario «DGMN · DCAE» (y copia al internador en la observación). Lo hace la Subdirección BPCH.
+              <b>No cumple → informar a DGMN.</b> Cuando el Informe de Incumplimiento {incumplimiento.numero} sea oficial, la Subdirección BPCH registra la
+              notificación a DGMN y al internador en el recuadro de abajo; sin ella la OT no se cierra (EP-10 10.15).
             </div>
           )}
           {((documentoFinal && (certificado || incumplimiento)) || (!documentoFinal && informeInspeccion)) && (
@@ -197,6 +199,8 @@ export function DocumentosYCierre({
           )}
         </div>
       )}
+
+      {incumplimiento && <NotificacionDgmn key={`${incumplimiento.id ?? incumplimiento.numero}:${incumplimiento.estado}`} otId={ot.id} onCambio={onCambio} />}
 
       {/* Se vuelve a montar al emitir o firmar: la tabla «Informes y certificados» no queda desfasada (D06-12). */}
       <PanelCierreOt

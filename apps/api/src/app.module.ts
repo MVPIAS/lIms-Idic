@@ -33,6 +33,8 @@ import { AmbitoUnidadGuard } from "./rbac/ambito-unidad.guard";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
 import { CrmModule } from "./crm/crm.module";
 import { SaecModule } from "./saec/saec.module";
+import { D11Module } from "./saec/d11/d11.module";
+import { NotificacionDgmnModule } from "./bpch/notificacion-dgmn/notificacion-dgmn.module";
 import { EquiposModule } from "./equipos/equipos.module";
 import { ConfiguracionModule } from "./configuracion/configuracion.module";
 import { QcModule } from "./qc/qc.module";
@@ -130,6 +132,8 @@ function prettyTransport() {
     PlantillaRenderModule,
     CrmModule,
     SaecModule,
+    D11Module,
+    NotificacionDgmnModule,
     EquiposModule,
     ConfiguracionModule,
     AuditoriaModule,

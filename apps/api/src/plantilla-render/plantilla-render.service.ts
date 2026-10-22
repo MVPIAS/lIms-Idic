@@ -17,6 +17,7 @@ import {
   esOficial,
   esVigente,
   faltantesParaEmitir,
+  NOMBRE_TIPO_DOCUMENTO,
   numeroVersion,
   pasosDesdeMatriz,
   tipoDocumentoPorDefecto,
@@ -83,7 +84,21 @@ export type ProveedorContexto = (
   otId: string,
   tenantId: string | undefined,
   plantilla: { id: string; repid: string },
+  /** Documento que se renderiza: qué muestras cubre y su código de verificación (certificado por arma, D11). */
+  documento?: DocumentoEnRender,
 ) => Promise<{ datos?: Record<string, unknown>; bloques?: Record<string, string> } | null>;
+
+export interface DocumentoEnRender {
+  /** Muestras que cubre el documento (null = toda la OT). */
+  muestraIds: string[] | null;
+  numero: string;
+  codigoVerificacion: string;
+  urlVerificacion: string;
+  fecha: Date;
+}
+
+/** Datos públicos extra de la verificación de un tipo de documento (sin datos personales). */
+export type VerificacionExtra = (certificadoId: string) => Promise<Record<string, unknown> | null>;
 
 /** Opciones de emisión: tipo de documento de la matriz y documento al que reemplaza. */
 export interface OpcionesEmision {
@@ -155,6 +170,17 @@ export class PlantillaRenderService {
   private readonly validadores: ((otId: string, tipoDocumento: string, tenantId: string) => Promise<string[]>)[] = [];
   registrarValidadorEmision(v: (otId: string, tipoDocumento: string, tenantId: string) => Promise<string[]>) {
     this.validadores.push(v);
+  }
+
+  /** Verificación pública: datos extra por tipo de documento (p. ej. vigencia del certificado por arma). */
+  private readonly verificaciones = new Map<string, VerificacionExtra>();
+  registrarVerificacion(tipoDocumento: string, extra: VerificacionExtra) {
+    this.verificaciones.set(tipoDocumento, extra);
+  }
+
+  /** URL de verificación de un código (la que se imprime y la del QR). */
+  urlVerificacionDe(codigo: string): string {
+    return `${this.baseVerificacion}/${codigo}`;
   }
 
   /** URL pública de verificación; configurable por despliegue. */
@@ -609,7 +635,18 @@ export class PlantillaRenderService {
     };
     // Contexto de otros módulos: nunca pisa una clave del motor.
     for (const [clave, proveedor] of this.proveedores) {
-      const extra = await proveedor(otId, tenantId, { id: plantilla.id, repid: plantilla.repid });
+      const extra = await proveedor(
+        otId,
+        tenantId,
+        { id: plantilla.id, repid: plantilla.repid },
+        {
+          muestraIds: opciones.filtro?.muestraIds ? [...opciones.filtro.muestraIds] : null,
+          numero: cert.numero,
+          codigoVerificacion: cert.codigoVerificacion,
+          urlVerificacion: this.urlVerificacionDe(cert.codigoVerificacion),
+          fecha: cert.fecha,
+        },
+      );
       if (!extra) continue;
       if (extra.datos && !(clave in datos)) datos[clave] = extra.datos;
       for (const [k, v] of Object.entries(extra.bloques ?? {})) if (!(k in bloques)) bloques[k] = v;
@@ -1600,6 +1637,11 @@ export class PlantillaRenderService {
       ? createHash("sha256").update(cert.documentoHtml, "utf8").digest("hex")
       : null;
     const integro = hashReal !== null && hashReal === cert.hashSha256;
+    // Datos públicos propios del tipo (certificado por arma: arma con la serie
+    // oculta y vigencia). Nunca datos personales.
+    const tipo = cert.tipoDocumento ?? null;
+    const extraFn = tipo ? this.verificaciones.get(tipo) : undefined;
+    const extra = extraFn ? await extraFn(cert.id).catch(() => null) : null;
 
     return {
       valido: integro,
@@ -1608,6 +1650,9 @@ export class PlantillaRenderService {
       fecha: fmtFecha(cert.oficialAt ?? cert.fecha),
       otCodigo: cert.ot?.codigo ?? null,
       hash: cert.hashSha256 ?? null,
+      tipoDocumento: tipo,
+      tipoDocumentoNombre: tipo ? NOMBRE_TIPO_DOCUMENTO[tipo] ?? tipo : null,
+      ...(extra ?? {}),
       ...(integro ? {} : { motivo: "El sello de integridad del documento no coincide" }),
     };
   }

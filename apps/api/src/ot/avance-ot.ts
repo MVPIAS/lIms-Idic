@@ -23,7 +23,7 @@ import { condicionFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
 import { calibracionVigente, documentosDeCalibraciones, faltantesInstrumentos } from "../metrologia/metrologia-ot.reglas";
 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
-export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion";
+export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas";
 /** Pestañas del expediente de la OT a las que puede llevar el «Siguiente paso». */
 export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe";
 
@@ -180,6 +180,13 @@ export interface HechosOt {
     estado: string | null;
     texto: string;
   } | null;
+  /**
+   * OT de armas de la Delegación Nº 11 (EP-11): pasos del expediente D11
+   * (saec/d11/reglas-d11.ts › avanceD11). Con ellos la OT sigue su ruta propia.
+   */
+  armas?: {
+    pasos: { clave: string; titulo: string; boton: string; leToca: string; estado: "hecho" | "en_curso" | "pendiente"; detalle: string }[];
+  } | null;
 }
 
 /* ------------------------------------------------------------- reglas --- */
@@ -192,6 +199,7 @@ const ORIGENES_INTERNOS = ["OT_INTERNA", "INTERLABORATORIO"];
 
 /** Tipo de ruta que corresponde a la OT. */
 export function tipoRuta(h: HechosOt): TipoRuta {
+  if (h.armas) return "armas";
   if (h.internacion) return "internacion";
   if (h.reinspeccion) return "reinspeccion";
   // Metrología: laboratorio de la Sección Metrología que trabaja con calibraciones
@@ -881,6 +889,52 @@ function rutaReinspeccion(h: HechosOt): Ruta {
   };
 }
 
+/**
+ * OT de armas de la D11 (EP-11): las etapas son los pasos del expediente D11
+ * (recepción, registro, ensayos, revisión, acuñación, certificados por arma y
+ * entrega), más la tasa si la internación la lleva y el cierre. La revisión y
+ * aprobación es la del flujo general; lo demás se hace en Certificación de armas.
+ */
+function rutaArmas(h: HechosOt): Ruta {
+  const x = h.armas!;
+  const enlace = `/saec/ot/${h.id}`;
+  const cierre = etapaCierre(h);
+  const i = h.internacion;
+  const etapas: Etapa[] = [
+    ...(i ? [etapa("registro", "Resolución DGMN y análisis técnico", "hecho", i.numero)] : []),
+    ...x.pasos.map((p) => etapa(`d11_${p.clave}`, p.titulo, p.estado, p.detalle)),
+    ...(i
+      ? [etapa("tasa", "Tasa de internación → facturación", !i.sujetaTasa ? "no_aplica" : i.tasaRemitida ? "hecho" : i.tasaEnCurso ? "en_curso" : "pendiente",
+          i.sujetaTasa ? `Documentación: ${i.documentacion ?? "pendiente"}` : "No sujeta a tasa")]
+      : []),
+    cierre.etapa,
+  ];
+  return {
+    etapas,
+    paso: (clave) => {
+      if (clave === "cierre") return cierre.paso;
+      if (clave === "tasa")
+        return {
+          texto: "Calcular la tasa de internación y remitirla a facturación",
+          leToca: { rol: "Comercial (DCO)", unidad: null, personas: [] },
+          accion: { texto: "Ir al expediente BPCH", ruta: `/bpch/internaciones/${i!.id}`, permisos: ["bpch.tasa.gestionar"] },
+        };
+      if (clave === "d11_revision") return pasoResultados(h, "d11_revision");
+      const p = x.pasos.find((y) => `d11_${y.clave}` === clave);
+      if (!p) return null;
+      return {
+        texto: `${p.titulo} · ${p.boton}`,
+        leToca: { rol: p.leToca, unidad: lab(h), personas: [] },
+        accion: {
+          texto: "Ir a Certificación de armas",
+          ruta: enlace,
+          permisos: clave === "d11_programacion" ? ["arma.programar"] : clave === "d11_certificados" ? ["certificado.emitir"] : ["arma.registrar"],
+        },
+      };
+    },
+  };
+}
+
 /* ------------------------------------------------------------ principal --- */
 
 /**
@@ -892,7 +946,8 @@ function rutaReinspeccion(h: HechosOt): Ruta {
 export function calcularAvance(h: HechosOt): AvanceOt {
   const tipo = tipoRuta(h);
   const ruta =
-    tipo === "internacion" ? rutaInternacion(h)
+    tipo === "armas" ? rutaArmas(h)
+    : tipo === "internacion" ? rutaInternacion(h)
     : tipo === "reinspeccion" ? rutaReinspeccion(h)
     : tipo === "metrologia" ? rutaMetrologia(h)
     : rutaLaboratorio(h);

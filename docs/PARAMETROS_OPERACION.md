@@ -81,9 +81,20 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | LMB · microbiología (`micro`) · por confirmar EP-02 P3 | Lecturas programadas (`lecturas_h`) | Casillas de horas | 24, 48, 72 | Formulario «Siembra, incubación y lectura» (solo si se activa la variante) | `formularios/micro.ts` |
 | LMB · planes del RSA (`rsa_criterios`) · por confirmar EP-02 P2 | Planes por ensayo y producto (`tabla`) | Tabla (máx. 200): método, producto, n, c, m, M, artículo del RSA | Vacía (sin plan, el resultado es informativo) | idem | idem |
 | LES · panel sensorial (`sensorial`) · por confirmar EP-02 P4 | α (`alfa`), jueces mínimos (`jueces_min`), rangos por atributo (`rangos`) | Opción 0,05/0,01/0,001 · entero 1–60 · tabla prueba, atributo, mín., máx. (máx. 60 filas) | 0,05 · 6 · rangos del Listado LES | Formulario «Panel sensorial» (solo si se activa la variante) | `formularios/sensorial.ts` |
+| BPCH · prototipos (`bpch_prototipo`) · por confirmar EP-08 P4 | La OT de evaluación exige la parametrización validada (`exige_parametrizacion`) | Sí / No | No | «Generar OT» del prototipo (paso 5) | `bpch/prototipos/prototipos.service.ts` (`exigeParametrizacion`) |
+| Delegación Nº 11 (`d11`) · por confirmar EP-11 P1, P4, P11 | Ensayos del registro (`metodos_registro`) | Casillas con los métodos D11 | 1292 | Registro del arma como muestra (IT05) | `saec/d11/reglas-d11.ts` (`configD11`) |
+| | Ensayos del camino «Con cuño CIP» (`metodos_cip`) | idem | 1291, 3500 | Clasificación y camino del arma | idem |
+| | Ensayos del camino «Sin cuño CIP · prueba completa» (`metodos_completa`) | idem | 1213, 1202, 1203, 3500 | idem | idem |
+| | Ensayos de un accesorio (`metodos_accesorio`) / de una máquina recargadora (`metodos_maquina`) | idem | 2322 / 3706 | idem | idem |
+| | Ensayos con fuego real que gastan munición de prueba (`metodos_fuego`) | idem | 1203 | «Registrar ensayos» del arma: exige lote y cartuchos y los descuenta del inventario (EP-11 11.17) | idem y `saec/d11/municion.service.ts` |
+| | Un arma con cuño CIP también se acuña (`acunacion_cip`) | Sí / No | No | Acuñación IT08 | idem |
+| | Vigencia del certificado por arma (`vigencia_anios`) | Entero 1–10 años | 4 | Emisión del certificado por arma | idem |
 
 Los grupos `muestreo_plan` y `veredicto_lote` los creó el frente r2b
 (`docs/FLUJO_ESPECIFICACIONES_MUESTREO.md`).
+
+Los grupos `bpch_prototipo` y `d11` los creó el frente r4b
+(`align_r4b_bpch.sql`, `align_r4b_d11.sql`, ver `docs/FLUJO_D11_ARMAS.md`).
 
 Los grupos desde «Captura · formulario especializado» (`captura_variante_metodo` … `sensorial`) los creó el frente r2a
 (`align_r2a_formularios.sql`, ver `docs/FLUJO_FORMULARIOS_ESPECIALIZADOS.md`). Los

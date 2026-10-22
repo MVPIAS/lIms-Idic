@@ -1,7 +1,12 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
+import { createHash } from "node:crypto";
 import { Sql, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
+import { faltantesInscripcionCu } from "../prototipos/reglas-prototipo";
+import { generarPdf } from "../../plantilla-render/pdf.renderer";
+import { hoyChile } from "../../common/fecha-chile";
+import { TIPOS_LISTADO, agruparListado, csvListado, entraEnListado, htmlListado, type TipoListado } from "./listado-oficial";
 import {
   ESTADOS_CODIFICACION,
   LISTADOS_CODIFICACION,
@@ -25,6 +30,10 @@ export const InscripcionBody = z.object({
   catElementoId: z.string().uuid().optional().nullable(),
   certificadoNumero: texto(60).optional().nullable(),
   observaciones: texto(2000).optional().nullable(),
+  /** Modelos DGMN del listado oficial (EP-09 9.10 y 9.16): grupo («21 Semigelatina granulada»), EQ.DIN 60 % y PTN/PIN. */
+  grupoListado: texto(120).optional().nullable(),
+  eqDin60: z.number().min(0).max(100).optional().nullable(),
+  ptnPin: texto(10).optional().nullable(),
 });
 export type Inscripcion = z.infer<typeof InscripcionBody>;
 
@@ -40,6 +49,20 @@ export const CambioTitularBody = z.object({
   reinspeccionId: z.string().uuid().optional().nullable(),
 });
 
+export const DesdePrototipoBody = z.object({
+  listado: z.enum(["EXPLOSIVOS", "SUSTANCIAS_QUIMICAS"]),
+  grupoListado: texto(120).optional().nullable(),
+  eqDin60: z.number().min(0).max(100).optional().nullable(),
+  ptnPin: texto(10).optional().nullable(),
+});
+
+export const ListadoOficialBody = z.object({
+  listado: z.enum(TIPOS_LISTADO),
+  /** Nombre del fabricante tal como está en la Codificación Única; vacío = todos. */
+  fabricante: texto(200).optional().nullable(),
+  fechaEdicion: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha de edición AAAA-MM-DD"),
+});
+
 export const FiltroCodificacion = z.object({
   listado: z.enum(LISTADOS_CODIFICACION).optional(),
   estado: z.enum(ESTADOS_CODIFICACION).optional(),
@@ -53,7 +76,8 @@ const COLUMNAS = `c.id, c.listado, c.estado, c.cnc_dgmn AS cnc, c.cliente_id AS 
   c.elemento_generico AS "elementoGenerico", c.producto, c.clase_division_un AS "claseDivisionUn",
   c.numero_un AS "numeroUn", c.cat_elemento_id AS "catElementoId", ce.nombre AS "catElementoNombre",
   c.certificado_id AS "certificadoId", COALESCE(ct.numero, c.certificado_numero) AS "certificadoNumero",
-  c.observaciones, c.created_at AS "createdAt", c.updated_at AS "updatedAt"`;
+  c.observaciones, c.grupo_listado AS "grupoListado", c.eq_din_60::float8 AS "eqDin60", c.ptn_pin AS "ptnPin",
+  c.created_at AS "createdAt", c.updated_at AS "updatedAt"`;
 const DESDE = `FROM bpch_codificacion c
   LEFT JOIN cat_elemento ce ON ce.id = c.cat_elemento_id
   LEFT JOIN certificado ct ON ct.id = c.certificado_id`;
@@ -92,6 +116,88 @@ export class CodificacionService {
       ...args,
     );
     return { data, meta: { page, limit, total: Number(total), totalPages: Math.max(1, Math.ceil(Number(total) / limit)) }, conteos };
+  }
+
+  /* ------------------------------------------- EP-09 9.16 listado oficial --- */
+
+  private async productosListado(tenantId: string, tipo: TipoListado, fabricante?: string | null) {
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT ${COLUMNAS} ${DESDE}
+        WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL
+          AND ($2::text IS NULL OR upper(btrim(c.fabricante_nombre)) = upper(btrim($2::text)))`,
+      tenantId,
+      fabricante?.trim() || null,
+    );
+    return filas.filter((p) => entraEnListado(p, tipo));
+  }
+
+  /** Fabricantes con productos en el listado (para elegir a quién se emite). */
+  async fabricantesListado(req: any, listado: string) {
+    const tipo = (TIPOS_LISTADO as readonly string[]).includes(listado) ? (listado as TipoListado) : "EXPLOSIVOS";
+    const ps = await this.productosListado(tenantDe(req), tipo);
+    const m = new Map<string, { fabricante: string; rut: string | null; elementos: number }>();
+    for (const p of ps) {
+      const k = p.fabricanteNombre.trim();
+      const x = m.get(k) ?? { fabricante: k, rut: p.fabricanteRut ?? null, elementos: 0 };
+      x.elementos++;
+      m.set(k, x);
+    }
+    return [...m.values()].sort((a, b) => a.fabricante.localeCompare(b.fabricante, "es"));
+  }
+
+  /** Genera el listado oficial (PDF para firma, o Excel) y deja constancia de la emisión. */
+  async listadoOficial(req: any, body: unknown, formato: "pdf" | "csv") {
+    const tenantId = tenantDe(req);
+    const d = ListadoOficialBody.parse(body ?? {});
+    if (d.fechaEdicion > hoyChile()) throw new BadRequestException("La fecha de edición no puede ser futura.");
+    const secciones = agruparListado(await this.productosListado(tenantId, d.listado, d.fabricante), d.listado);
+    const total = secciones.reduce((s, x) => s + x.total, 0);
+    if (!total) throw new ConflictException("No hay productos en ese listado para el fabricante indicado.");
+    const base = `listado_${d.listado.toLowerCase()}_${(d.fabricante?.trim() || "todos").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 40)}_${d.fechaEdicion}`;
+    let contenido: Buffer;
+    if (formato === "csv") contenido = Buffer.from(csvListado(secciones), "utf8");
+    else {
+      // Firmantes por cargo: quién firma y cómo llega la firma de la DGMN está por confirmar (EP-09 P4).
+      const cuerpo = htmlListado(secciones, d.listado, d.fechaEdicion, {
+        subdirector: "Subdirector del Banco de Pruebas de Chile",
+        dgmn: "Jefe Depto. Control de Armas y Explosivos · DGMN",
+      });
+      const hash = createHash("sha256").update(cuerpo, "utf8").digest("hex");
+      contenido = await generarPdf(
+        cuerpo,
+        {
+          numero: `Listado ${d.listado.replace("_", " ").toLowerCase()} · ${total} elemento(s)`,
+          codigoVerificacion: "—",
+          hash,
+          fecha: d.fechaEdicion.split("-").reverse().join("-"),
+          urlVerificacion: "",
+        },
+        `Listado de Codificación Única · ${d.fabricante?.trim() || "todos los fabricantes"}`,
+      );
+    }
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO bpch_listado_emision (tenant_id, listado, fabricante, fecha_edicion, total_elementos, formato, hash_sha256, created_by)
+       VALUES ($1::uuid, $2, $3, $4::date, $5, $6, $7, $8::uuid)`,
+      tenantId,
+      d.listado,
+      d.fabricante?.trim() || null,
+      d.fechaEdicion,
+      total,
+      formato,
+      createHash("sha256").update(contenido).digest("hex"),
+      usuarioDe(req),
+    );
+    return { contenido, nombre: `${base}.${formato}`, tipo: formato === "pdf" ? "application/pdf" : "text/csv; charset=utf-8" };
+  }
+
+  async emisionesListado(req: any) {
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT e.id, e.listado, e.fabricante, e.fecha_edicion AS "fechaEdicion", e.total_elementos AS total, e.formato,
+              e.created_at AS "createdAt", u.nombre_completo AS "emitidoPor"
+         FROM bpch_listado_emision e LEFT JOIN usuario u ON u.id = e.created_by
+        WHERE e.tenant_id = $1::uuid ORDER BY e.created_at DESC LIMIT 50`,
+      tenantDe(req),
+    );
   }
 
   async detalle(req: any, id: string) {
@@ -179,8 +285,8 @@ export class CodificacionService {
     const [fila] = await sql.$queryRawUnsafe<{ id: string }[]>(
       `INSERT INTO bpch_codificacion (tenant_id, listado, estado, cnc_dgmn, cnc_normalizado, cliente_id, fabricante_nombre, fabricante_rut,
               elemento_generico, producto, clase_division_un, numero_un, cat_elemento_id, certificado_id, certificado_numero, observaciones,
-              created_by, updated_by)
-       VALUES ($1::uuid, $2, 'VIGENTE', $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12::uuid, $13::uuid, $14, $15, $16::uuid, $16::uuid)
+              created_by, updated_by, grupo_listado, eq_din_60, ptn_pin)
+       VALUES ($1::uuid, $2, 'VIGENTE', $3, $4, $5::uuid, $6, $7, $8, $9, $10, $11, $12::uuid, $13::uuid, $14, $15, $16::uuid, $16::uuid, $17, $18, $19)
        RETURNING id`,
       tenantId,
       body.listado,
@@ -198,6 +304,9 @@ export class CodificacionService {
       body.certificadoNumero?.trim() || null,
       body.observaciones?.trim() || null,
       usuarioDe(req),
+      body.grupoListado?.trim() || null,
+      body.eqDin60 ?? null,
+      body.ptnPin?.trim().toUpperCase() || null,
     );
     await this.anotar(sql, {
       tenantId,
@@ -213,6 +322,58 @@ export class CodificacionService {
 
   async crear(req: any, body: unknown) {
     const id = await this.inscribir(req, InscripcionBody.parse(body ?? {}));
+    return this.detalle(req, id);
+  }
+
+  /**
+   * EP-08 8.17 (BL-180): inscribe el tipo aprobado de un prototipo con sus datos
+   * heredados (fabricante, elemento, código CNC, clase/división y Nº ONU de su
+   * clasificación) y el certificado de aprobación de tipo asociado.
+   */
+  async desdePrototipo(req: any, prototipoId: string, body: unknown) {
+    const tenantId = tenantDe(req);
+    const d = DesdePrototipoBody.parse(body ?? {});
+    const [p] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT p.id, p.codigo, p.estado, p.dictamen, p.codigo_cnc, p.cliente_id, p.elemento, p.grupo_propuesto, p.ot_id, p.documento_id,
+              d.estado AS doc_estado, d.numero AS doc_numero, c.clase_division, c.grupo_compatibilidad, c.numero_onu
+         FROM bpch_prototipo p
+         LEFT JOIN certificado d ON d.id = p.documento_id
+         LEFT JOIN bpch_clasificacion c ON c.id = p.clasificacion_id
+        WHERE p.id = $1::uuid AND p.tenant_id = $2::uuid`,
+      prototipoId,
+      tenantId,
+    );
+    if (!p) throw new NotFoundException("Prototipo no encontrado.");
+    const ya = p.codigo_cnc
+      ? await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT id FROM bpch_codificacion WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND cnc_normalizado = $2`,
+          tenantId,
+          normalizarCnc(p.codigo_cnc),
+        )
+      : [];
+    const faltan = faltantesInscripcionCu({ estado: p.estado, dictamen: p.dictamen, documentoEstado: p.doc_estado, codigoCnc: p.codigo_cnc, yaInscrito: ya.length > 0 });
+    if (faltan.length) throw new ConflictException(faltan.join(" "));
+    const id = await this.prisma.$transaction((tx) =>
+      this.inscribir(
+        req,
+        {
+          listado: d.listado,
+          cnc: p.codigo_cnc,
+          clienteId: p.cliente_id,
+          producto: p.elemento,
+          elementoGenerico: p.grupo_propuesto ?? null,
+          claseDivisionUn: p.clase_division ? `${p.clase_division}${p.grupo_compatibilidad ?? ""}` : null,
+          numeroUn: p.numero_onu ?? null,
+          certificadoNumero: p.doc_numero ?? null,
+          grupoListado: d.grupoListado ?? null,
+          eqDin60: d.eqDin60 ?? null,
+          ptnPin: d.ptnPin ?? null,
+          observaciones: `Inscrito desde el prototipo ${p.codigo} (tipo aprobado).`,
+        } as Inscripcion,
+        tx as any,
+        { evento: "alta_certificacion", otId: p.ot_id, certificadoId: p.documento_id },
+      ),
+    );
     return this.detalle(req, id);
   }
 
@@ -237,6 +398,9 @@ export class CodificacionService {
       catElementoId: dto.catElementoId === undefined ? actual.catElementoId : dto.catElementoId,
       certificadoNumero: dto.certificadoNumero === undefined ? actual.certificadoNumero : dto.certificadoNumero,
       observaciones: dto.observaciones === undefined ? actual.observaciones : dto.observaciones,
+      grupoListado: dto.grupoListado === undefined ? actual.grupoListado : dto.grupoListado,
+      eqDin60: dto.eqDin60 === undefined ? actual.eqDin60 : dto.eqDin60,
+      ptnPin: dto.ptnPin === undefined ? actual.ptnPin : dto.ptnPin,
     };
     const errores = erroresInscripcion({ ...nuevo, fabricanteNombre: fab.nombre });
     if (errores.length) throw new BadRequestException(errores.join(" "));
@@ -259,13 +423,17 @@ export class CodificacionService {
     comparar("fabricante", actual.fabricanteNombre, fab.nombre);
     comparar("claseDivisionUn", actual.claseDivisionUn, nuevo.claseDivisionUn?.trim() || null);
     comparar("numeroUn", actual.numeroUn, nuevo.numeroUn?.trim() || null);
+    comparar("grupoListado", actual.grupoListado, nuevo.grupoListado?.trim() || null);
+    comparar("eqDin60", actual.eqDin60, nuevo.eqDin60 ?? null);
+    comparar("ptnPin", actual.ptnPin, nuevo.ptnPin?.trim().toUpperCase() || null);
     if (!Object.keys(cambios).length && nuevo.observaciones === actual.observaciones && nuevo.catElementoId === actual.catElementoId && nuevo.elementoGenerico === actual.elementoGenerico && nuevo.certificadoNumero === actual.certificadoNumero)
       return this.detalle(req, id);
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `UPDATE bpch_codificacion SET listado = $2, cnc_dgmn = $3, cnc_normalizado = $4, cliente_id = $5::uuid, fabricante_nombre = $6,
                 fabricante_rut = $7, elemento_generico = $8, producto = $9, clase_division_un = $10, numero_un = $11,
-                cat_elemento_id = $12::uuid, certificado_numero = $13, observaciones = $14, updated_by = $15::uuid, updated_at = now()
+                cat_elemento_id = $12::uuid, certificado_numero = $13, observaciones = $14, updated_by = $15::uuid, updated_at = now(),
+                grupo_listado = $16, eq_din_60 = $17, ptn_pin = $18
           WHERE id = $1::uuid`,
         id,
         nuevo.listado,
@@ -282,6 +450,9 @@ export class CodificacionService {
         nuevo.certificadoNumero?.trim() || null,
         nuevo.observaciones?.trim() || null,
         usuarioDe(req),
+        nuevo.grupoListado?.trim() || null,
+        nuevo.eqDin60 ?? null,
+        nuevo.ptnPin?.trim().toUpperCase() || null,
       );
       await this.anotar(tx, { tenantId, codificacionId: id, evento: "edicion", detalle: { cambios, motivo: dto.motivo?.trim() || null }, usuarioId: usuarioDe(req) });
     });

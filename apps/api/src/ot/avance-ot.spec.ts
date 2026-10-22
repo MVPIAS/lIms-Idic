@@ -477,3 +477,36 @@ describe("Ruta de la OT · recepción R1 (frente r1d)", () => {
     expect(a.avisos.join(" ")).toContain("recepción incompleta");
   });
 });
+
+describe("Ruta de la OT · armas de la Delegación Nº 11 (EP-11)", () => {
+  const paso = (clave: string, estado: "hecho" | "en_curso" | "pendiente" = "pendiente") => ({
+    clave, titulo: clave, boton: `${clave} → siguiente`, leToca: "Armero", estado, detalle: "",
+  });
+  const claves = ["programacion", "llegada", "acta", "registro", "clasificacion", "ensayos", "revision", "acunacion", "certificados", "entrega"];
+  const armas = (hechos: number) => ({ pasos: claves.map((c, i) => paso(c, i < hechos ? "hecho" : "pendiente")) });
+  const int = {
+    id: "int-9", numero: "INT-2026-0009", unidad: "D11", lotes: 0, lotesRegistrados: 0, codificacionCertificados: [],
+    sujetaTasa: false, tasaRemitida: false, tasaEnCurso: false, documentacion: null,
+  };
+  const d11 = (p: Partial<HechosOt> = {}) => base({ origen: "INTERNACION", cotizacion: null, unidad: { codigo: "D11" }, internacion: int, armas: armas(0), ...p });
+
+  it("la OT de armas sigue los pasos D11 y no los lotes de la internación", () => {
+    const a = calcularAvance(d11());
+    expect(a.tipo).toBe("armas");
+    expect(tipoRuta(d11())).toBe("armas");
+    expect(a.etapas.map((e) => e.clave)).toEqual(["registro", ...claves.map((c) => `d11_${c}`), "tasa", "cierre"]);
+    expect(a.etapaActual).toBe("d11_programacion");
+    expect(a.siguiente?.accion).toMatchObject({ ruta: "/saec/ot/ot-1", permisos: ["arma.programar"] });
+  });
+
+  it("la revisión lleva a la captura del flujo general; los certificados piden certificado.emitir", () => {
+    expect(calcularAvance(d11({ armas: armas(6), resultados: res({ capturados: 3 }) })).siguiente?.accion?.ruta).toBe("/captura-ot?otId=ot-1");
+    expect(calcularAvance(d11({ armas: armas(8) })).siguiente?.accion?.permisos).toEqual(["certificado.emitir"]);
+  });
+
+  it("todo hecho: el siguiente paso es cerrar la OT (la tasa no aplica)", () => {
+    const a = calcularAvance(d11({ armas: armas(10) }));
+    expect(a.etapaActual).toBe("cierre");
+    expect(a.etapas.find((e) => e.clave === "tasa")?.estado).toBe("no_aplica");
+  });
+});
