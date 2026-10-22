@@ -37,12 +37,12 @@ export default function PreparacionTrabajoPage() {
               {filas.length === 0 && <tr><td colSpan={6} style={{ color: "var(--muted)", padding: 16 }}>No hay documentación esperando su aprobación.</td></tr>}
               {filas.map((f) => (
                 <tr key={f.id}>
-                  <td className="codigo">{f.otCodigo}</td>
+                  <td className="codigo" style={{ whiteSpace: "nowrap" }}>{f.otCodigo}</td>
                   <td>{f.laboratorio}</td>
                   <td>{f.titulo}<span className={`pill ${f.estado === "validada" ? "blue" : "amber"}`} style={{ marginLeft: 6 }}>{f.estado === "validada" ? "Validada por la Sección" : "Pendiente"}</span></td>
                   <td>{f.paso}</td>
                   <td style={{ fontSize: 12 }}>{fechaHora(f.updatedAt)}{f.enviadoPor ? ` · ${f.enviadoPor}` : ""}</td>
-                  <td><Link className="btn primary sm" href={f.ruta as any}>{f.accion === "validar" ? "Validar →" : "Revisar y aprobar →"}</Link></td>
+                  <td style={{ whiteSpace: "nowrap" }}><Link className="btn primary sm" href={f.ruta as any}>{f.accion === "validar" ? "Validar →" : "Revisar y aprobar →"}</Link></td>
                 </tr>
               ))}
             </tbody>

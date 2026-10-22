@@ -99,7 +99,7 @@ export default function EditorTabla({ id, columnas, maxFilas, filas, onCambio }:
                   if (c.tipo === "opcion")
                     return (
                       <td key={c.clave}>
-                        <select className="celda" aria-label={etiqueta} value={comoTexto(v)} onChange={(e) => set(i, c.clave, e.target.value)}>
+                        <select className="celda" aria-label={etiqueta} value={comoTexto(v)} onChange={(e) => set(i, c.clave, e.target.value)} style={{ minWidth: 110 }}>
                           <option value="">—</option>
                           {(c.opciones ?? []).map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
                         </select>
