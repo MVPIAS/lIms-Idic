@@ -320,6 +320,22 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- BPCH · prototipos (frente r4b, EP-08 8.11) ---
+  {
+    categoria: "bpch_prototipo",
+    titulo: "BPCH · Prototipos · parametrización del elemento",
+    donde: "BPCH › Prototipos: si la OT de evaluación exige el panel del elemento validado por la jefatura (paso 4).",
+    porConfirmar: "Quién es el «Analista Experto BPCH» y la «Sección Gestión y Control» y si el elemento entra al catálogo antes del dictamen (EP-08 P4).",
+    codigos: {
+      exige_parametrizacion: {
+        tipo: "sino",
+        nombre: "La OT de evaluación exige la parametrización validada",
+        opciones: SI_NO,
+        ayuda: "Con «sí», no se genera la OT del prototipo sin el panel (Mín/Nom/Máx, fórmula) validado.",
+        porDefecto: "no",
+      },
+    },
+  },
   // --- Delegación Nº 11 · certificación de armas (frente r4b, EP-11) ---
   {
     categoria: "d11",

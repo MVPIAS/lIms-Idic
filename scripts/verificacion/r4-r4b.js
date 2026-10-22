@@ -728,6 +728,41 @@ async function main() {
     afirmar(crit && men && Number(crit.valorNumerico ?? crit.valor) === 0 && Number(men.valorNumerico ?? men.valor) === 1, `valores ${JSON.stringify(rs.map((x) => [txt(x), x.valorNumerico ?? x.valor]))}`);
     return `${ot.codigo}: 0 críticos · 1 menor → «Rev. Doc. Legal» capturado`;
   });
+
+  /* --------------------------------------------- EP-08 8.11 · parametrización del elemento */
+  await paso("8.11 · Parametrización del elemento: panel, validación de la jefatura (cuatro ojos) y aplicación a la OT (BL-060)", async () => {
+    const fab = lista(await ok(U.bpch, "GET", "/clientes?limit=1"))[0];
+    const cfg = await ok(U.bpch, "GET", "/bpch/pn/config");
+    const stgo = cfg.unidades.find((u) => u.codigo === "SSTGO");
+    const m = lista(await ok(U.bpch, "GET", "/cat/metodos?search=10019&limit=5")).find((x) => x.codigo === "10019");
+    afirmar(m, "falta el método 10019");
+    const p = await ok(U.bpch, "POST", "/bpch/prototipos", { clienteId: fab.id, elemento: `Elemento parametrizado r4b ${S("X")}`, solicitudDgmn: `SOL-${S("Y")}` });
+    const ruta = `/bpch/prototipos/${p.id}/parametros`;
+    await exigir(400, U.bpch, "PUT", ruta, { filas: [{ metodoId: m.id, ensayo: "Defecto crítico", minimo: 5, maximo: 1 }] }, /Mín no puede ser mayor/);
+    await exigir(403, U.ventas, "PUT", ruta, { filas: [] });
+    let d = await ok(U.bpch, "PUT", ruta, {
+      filas: [
+        { metodoId: m.id, ensayo: "Defecto crítico ( Inspección Visual )", minimo: 0, maximo: 0, unidad: "Obs." },
+        { metodoId: m.id, ensayo: "Defecto menor ( Inspección Visual )", minimo: 0, nominal: 1, maximo: 3, unidad: "Obs." },
+      ],
+    });
+    afirmar(d.parametrizacion.estado === "borrador" && d.parametrizacion.filas.length === 2, `estado ${d.parametrizacion.estado}`);
+    await ok(U.bpch, "POST", `${ruta}/enviar`, {});
+    await exigir(409, U.bpch, "POST", `${ruta}/validar`, {}, /cuatro ojos/);
+    await exigir(409, U.bpch, "PUT", ruta, { filas: [] }, /en validación/);
+    d = await ok(U.scc, "POST", `${ruta}/validar`, {});
+    afirmar(d.parametrizacion.estado === "validada", "no quedó validada");
+    await ok(U.bpch, "POST", `/bpch/prototipos/${p.id}/pronunciamiento-sac`, { tamanoMuestra: 1 });
+    const g = await ok(U.scc, "POST", `/bpch/prototipos/${p.id}/generar-ot`, { unidadId: stgo.id, conCobro: false });
+    await ok(U.stgoInsp, "POST", `/flujo/ot/${g.ot.id}/muestras`, { muestras: [{ nombre: "Prototipo", metodoIds: [m.id] }] });
+    await exigir(403, U.stgoInsp, "POST", `${ruta}/aplicar`, {});
+    const r = await ok(U.stgo, "POST", `${ruta}/aplicar`, {});
+    afirmar(r.aplicados === 2, `aplicados ${r.aplicados}`);
+    const rs = (await ok(U.stgo, "GET", `/flujo/ot/${g.ot.id}/resultados`)).resultados;
+    const menor = rs.find((x) => /menor/i.test(x.catAnalito?.nombre ?? ""));
+    afirmar(menor && String(menor.limiteSup) === "3" && menor.especOrigen === "orden", `menor ${JSON.stringify(menor && [menor.limiteInf, menor.limiteSup, menor.especOrigen])}`);
+    return `${p.codigo}: 2 ensayos validados por otra persona y aplicados a ${g.ot.codigo}`;
+  });
 }
 
 main()
