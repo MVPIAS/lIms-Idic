@@ -18,6 +18,18 @@ import { clavesCampos } from "./formato-it";
 export type ModoEsquema = "defecto" | "propio" | "ninguno";
 export const MODOS_ESQUEMA: ModoEsquema[] = ["defecto", "propio", "ninguno"];
 
+/**
+ * Formatos de certificado de un proceso, además del estándar (hojas «Certificado» de sus
+ * libros). Solo los que tienen un libro real con datos: ITT01 «Certificado ASTM» (T-2887).
+ */
+export const FORMATOS_CERTIFICADO: Record<string, { valor: string; etiqueta: string }[]> = {
+  ITT01: [
+    { valor: "estandar", etiqueta: "Estándar (hoja «Certificado» del libro)" },
+    { valor: "astm", etiqueta: "Termómetro de fabricación ASTM (hoja «Certificado ASTM»)" },
+  ],
+};
+export const formatosDe = (proceso: string) => FORMATOS_CERTIFICADO[proceso] ?? [];
+
 export interface Presentacion {
   /** null = según el proceso; true = con logo y «Acreditado»; false = sin logo. */
   acreditado: boolean | null;
@@ -31,10 +43,13 @@ export interface Presentacion {
   campos: Record<string, string>;
   esquemaModo: ModoEsquema;
   esquemaPie: string | null;
+  /** Formato del certificado del proceso («estandar» o uno de FORMATOS_CERTIFICADO). */
+  formato: string;
 }
 
 export const PRESENTACION_VACIA: Presentacion = {
   acreditado: null, acreditadoMotivo: null, reemplaza: null, reemplazaMotivo: null, observaciones: null, campos: {}, esquemaModo: "defecto", esquemaPie: null,
+  formato: "estandar",
 };
 
 /** Lee la columna JSONB `presentacion` (tolera nulos y claves viejas). */
@@ -51,6 +66,7 @@ export function leerPresentacion(x: any): Presentacion {
     campos,
     esquemaModo: MODOS_ESQUEMA.includes(o.esquemaModo) ? o.esquemaModo : "defecto",
     esquemaPie: o.esquemaPie ?? null,
+    formato: typeof o.formato === "string" && o.formato ? o.formato : "estandar",
   };
 }
 
@@ -138,6 +154,10 @@ export function validarPresentacion(p: Presentacion, c: ContextoPresentacion): {
     if (!t) delete out.campos[k];
     else out.campos[k] = t;
   }
+  // Formato del certificado (ASTM en termómetros)
+  out.formato = out.formato || "estandar";
+  if (out.formato !== "estandar" && !formatosDe(c.proceso).some((f) => f.valor === out.formato))
+    return { error: `El proceso ${c.proceso} no tiene el formato de certificado «${out.formato}».` };
   // 10 · esquema
   if (!MODOS_ESQUEMA.includes(out.esquemaModo)) return { error: "Modo de esquema no válido." };
   out.esquemaPie = out.esquemaPie?.trim().slice(0, 300) || null;
@@ -162,6 +182,8 @@ export function resumenCambios(antes: Presentacion, despues: Presentacion): stri
     c.push(despues.reemplaza ? `Reemplaza al certificado N° ${despues.reemplaza} (motivo: ${despues.reemplazaMotivo})` : "Sin «reemplaza al certificado»");
   if (antes.observaciones !== despues.observaciones) c.push(despues.observaciones == null ? "Observaciones: textos automáticos" : "Observaciones editadas");
   if (JSON.stringify(antes.campos) !== JSON.stringify(despues.campos)) c.push("Condiciones de la IT actualizadas");
+  if ((antes.formato ?? "estandar") !== (despues.formato ?? "estandar"))
+    c.push(`Formato del certificado: ${despues.formato === "astm" ? "termómetro de fabricación ASTM" : "estándar"}`);
   if (antes.esquemaModo !== despues.esquemaModo || antes.esquemaPie !== despues.esquemaPie)
     c.push(`Esquema: ${{ defecto: "el del proceso", propio: "propio de la calibración", ninguno: "sin esquema" }[despues.esquemaModo]}`);
   return c.join(" · ");

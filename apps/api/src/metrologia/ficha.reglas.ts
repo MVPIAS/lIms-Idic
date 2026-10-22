@@ -242,7 +242,7 @@ const sensibilidad = (k: { a: number; b: number; c: number }, F: number) => k.a 
  * Sin coeficientes anteriores la deriva no cambia.
  */
 export function actualizacionPatronLnf(
-  r: { clase: string; coef: { S3: number[]; F3: number[] }; rows: { F: number; Umin?: number; U: number }[]; rangos?: unknown },
+  r: { clase: string; coef: { S3: number[]; F3: number[] }; rows: { F: number; U: number }[]; rangos?: unknown },
   c: { numero: string; fechaCalibracion: string; intervaloMeses: number | null },
   antes: PatronMaestro,
 ): { despues: Partial<PatronMaestro>; deriva: number | null } {
@@ -254,7 +254,7 @@ export function actualizacionPatronLnf(
     const s0 = sensibilidad(prev, Fmax), s1 = sensibilidad(nuevo, Fmax);
     if (s0) deriva = Math.abs(s1 - s0) / Math.abs(s0) * 100;
   }
-  const U = Math.max(...r.rows.map((x) => (typeof x.Umin === "number" ? x.Umin : x.U)));
+  const U = Math.max(...r.rows.map((x) => x.U));
   return {
     deriva,
     despues: {
