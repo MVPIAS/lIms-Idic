@@ -361,7 +361,7 @@ $cuerpo$<div class="membrete">
 {{termograma}}
 
 <h2>5. Conclusiones y/u observaciones</h2>
-{{conclusion}}
+{{conclusion_texto}}
 
 <h2>6. Notas aclaratorias</h2>
 <p>Los resultados del presente informe sólo son válidos para las muestras ensayadas por el Laboratorio.</p>

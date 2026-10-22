@@ -114,6 +114,14 @@ describe("bloques · referencias, anexo, conclusión y portada", () => {
     expect(bloqueConclusion(configPorTipo("I.ENSAYO"), "  ")).toBe("");
   });
 
+  it("conclusion_texto: mismo contenido sin título, y completarCuerpo no añade otra conclusión", () => {
+    const html = bloqueConclusion(cfg, "Cumple.", false);
+    expect(html).not.toContain("<h2>");
+    expect(html).toContain("<p>Cumple.</p>");
+    const cuerpo = '<h2>5. Conclusiones y/u observaciones</h2>{{conclusion_texto}}<div class="firmas"></div>';
+    expect(completarCuerpo(cuerpo, cfg)).not.toContain("{{conclusion}}");
+  });
+
   it("portada del IVC con los datos del documento y N/A en lo vacío", () => {
     const html = bloquePortadaIvc(
       { proposito: "Verificación de calidad", opiOc: "1094080-32-SE26", proveedor: "Proveedor & Cía" },

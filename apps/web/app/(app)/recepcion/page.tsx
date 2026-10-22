@@ -78,7 +78,7 @@ export default function BandejaRecepcionPage() {
       value: (f) => f.numero,
       render: (f: FilaBandeja) => (
         <>
-          <span className="codigo">{f.tipo === "orden_interna" ? f.numero : f.ot.codigo}</span>
+          <span className="codigo" style={{ whiteSpace: "nowrap" }}>{f.tipo === "orden_interna" ? f.numero : f.ot.codigo}</span>
           {f.tipo === "orden_interna" && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>de la OT {f.ot.codigo}</div>}
         </>
       ),

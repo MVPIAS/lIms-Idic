@@ -202,12 +202,13 @@ export function bloqueIdentificacion(ms: IdentificacionMuestra[]): string {
 }
 
 /** `{{conclusion}}`: texto fijo de la plantilla y texto libre del documento. */
-export function bloqueConclusion(cfg: ConfigInforme, libre: string | null | undefined): string {
+export function bloqueConclusion(cfg: ConfigInforme, libre: string | null | undefined, conTitulo = true): string {
   const parrafos = [cfg.conclusionFija ?? "", ...(libre ?? "").split(/\r?\n+/)]
     .map((p) => p.trim())
     .filter(Boolean);
   if (!parrafos.length) return "";
-  return `<h2>Conclusión</h2>${parrafos.map((p) => `<p>${escapeHtml(p)}</p>`).join("")}`;
+  const cuerpo = parrafos.map((p) => `<p>${escapeHtml(p)}</p>`).join("");
+  return conTitulo ? `<h2>Conclusión</h2>${cuerpo}` : cuerpo;
 }
 
 /** Datos de la portada del IVC (elegidos al emitir; los de la OT vienen propuestos). */
@@ -260,7 +261,9 @@ const RE_FIRMAS = /<div class="firmas">/;
 export function completarCuerpo(cuerpo: string, cfg: ConfigInforme): string {
   let out = cuerpo;
   const tiene = (t: string) => new RegExp(`\\{\\{\\s*${t}\\s*\\}\\}`).test(out);
-  const finales = ["referencias", "anexo_fotografico", "conclusion"].filter((t) => !tiene(t)).map((t) => `{{${t}}}`);
+  const finales = ["referencias", "anexo_fotografico", "conclusion"]
+    .filter((t) => !tiene(t) && !(t === "conclusion" && tiene("conclusion_texto")))
+    .map((t) => `{{${t}}}`);
   if (finales.length) {
     const bloque = `\n${finales.join("\n")}\n`;
     out = RE_FIRMAS.test(out) ? out.replace(RE_FIRMAS, `${bloque}<div class="firmas">`) : `${out}${bloque}`;
