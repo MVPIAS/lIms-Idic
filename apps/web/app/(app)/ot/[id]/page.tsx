@@ -321,7 +321,9 @@ export default function ExpedientePage() {
             {tab === "instrumentos" && typeof id === "string" && <InstrumentosOt otId={id} onCambio={cargarOt} />}
             {tab === "ordenes" && typeof id === "string" && (
               <OrdenesInternasOt otId={id} otCodigo={ot?.codigo} otEstado={ot?.estado}
-                destinoSugerido={destinoOi} onSugerenciaUsada={() => setDestinoOi(null)} />
+                destinoSugerido={destinoOi} onSugerenciaUsada={() => setDestinoOi(null)}
+                /* Emitir, editar o anular una orden interna cambia la Ruta y el siguiente paso (D02-26). */
+                onCambio={cargarAvance} />
             )}
             {tab === "resultados" && (
               <div style={{ display: "grid", gap: 8 }}>
