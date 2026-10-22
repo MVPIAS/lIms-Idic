@@ -139,7 +139,8 @@ proto as (select p.id, p.clasificacion_id, coalesce(uo.codigo, up.codigo) c from
 m as (
  select 'ot' t, id, array_remove(array[uc], null) u from ou
  union all select 'muestra', mu.id, array_remove(array[ou.uc], null) from muestra mu left join ou on ou.id = mu.ot_id
- union all select 'resultado', r.id, array_remove(array[ou.uc], null) from resultado r left join ou on ou.id = r.ot_id
+ union all select 'resultado', r.id, array_remove(array[ou.uc, (select un.codigo from lims_lab_de_resultado(r.id) l join unidad un on un.id = l.unidad_id where l.derivado)], null)
+             from resultado r left join ou on ou.id = r.ot_id
  union all select 'certificado', c.id, array_remove(array[coalesce(u.codigo, ou.uc)], null) from certificado c left join unidad u on u.id = c.unidad_id left join ou on ou.id = c.ot_id
  union all select 'cotizacion', id, u from cot
  union all select 'factura', f.id, array_remove(array[(select uc from ou where ou.id = f.ot_id)] || coalesce((select u from cot where cot.id = f.cotizacion_id), '{}'), null) from factura f
@@ -181,7 +182,12 @@ select json_build_object(
    'ensayos', (select json_agg(json_build_object('id', e.id, 'precio', e.precio, 'u', (select c from famu where famu.fid = e.familia_id limit 1)))
                  from cat_ensayo e where e.deleted_at is null and e.familia_id is not null and exists (select 1 from famu where famu.fid = e.familia_id)),
    'otsConResultados', (select json_agg(json_build_object('id', o.id, 'u', u.codigo)) from orden_trabajo o join unidad u on u.id = o.unidad_principal
-                         where exists (select 1 from resultado r where r.ot_id = o.id))
+                         where exists (select 1 from resultado r where r.ot_id = o.id)),
+   -- r1g: ensayos derivados por orden interna (dueño = laboratorio de destino).
+   'derivados', (select json_agg(json_build_object('id', r.id, 'otId', r.ot_id, 'destino', ud.codigo, 'principal', up.codigo, 'oiEstado', l.oi_estado, 'estado', r.estado))
+                   from resultado r join lims_lab_de_resultado(r.id) l on l.derivado
+                   join unidad ud on ud.id = l.unidad_id join unidad up on up.id = l.principal_id
+                  where r.deleted_at is null and ud.id <> up.id)
  )
 )`;
 
@@ -525,6 +531,29 @@ async function main() {
     if (ot) await intentar(u, "POST", `/resultados/ot/${ot.id}/aprobar`, {}, [403], "aprobar resultados en LEM (allí solo es analista)");
     const ajena = (D.otsConResultados || []).find((o) => o.u && o.u !== "LPN");
     if (ajena) await intentar("demo.multi.lpn_comercial", "POST", `/resultados/ot/${ajena.id}/aprobar`, {}, [403], `aprobar resultados en ${ajena.u} (sin permiso de jefatura)`);
+  }
+
+  // r1g (recorrido MP-02, D02-02/D02-04): un ensayo derivado por orden interna es del
+  // laboratorio de destino. El responsable de la OT lo ve pero no lo revisa, aprueba
+  // ni captura (403); un tercer laboratorio no lo ve (403/404); el destino sí lo abre
+  // y en la vista de la OT solo ve lo que se le derivó.
+  {
+    const der = (D.derivados || []).find((d) => d.destino && d.principal && d.destino !== d.principal);
+    if (der) {
+      const jefe = (c) => `demo.${c.toLowerCase()}.jefe`;
+      const tercero = ["LQC", "LPN", "LES", "LCC", "LTX"].find((c) => c !== der.destino && c !== der.principal);
+      await intentar(jefe(der.principal), "GET", `/resultados/${der.id}`, undefined, [200], `control: el responsable (${der.principal}) ve el ensayo derivado a ${der.destino}`);
+      await intentar(jefe(der.principal), "POST", `/resultados/${der.id}/aprobar`, undefined, [403], `aprobar un ensayo derivado a ${der.destino} siendo ${der.principal}`);
+      await intentar(jefe(der.principal), "POST", `/resultados/${der.id}/revisar`, undefined, [403], `revisar un ensayo derivado a ${der.destino} siendo ${der.principal}`);
+      await intentar(jefe(der.principal), "POST", `/flujo/resultado/${der.id}/valor`, { valor: "1" }, [403], `capturar un ensayo derivado a ${der.destino} siendo ${der.principal}`);
+      if (tercero) await intentar(jefe(tercero), "GET", `/resultados/${der.id}`, undefined, [403, 404], `abrir un ensayo derivado a ${der.destino} siendo ${tercero}`);
+      await intentar(jefe(der.destino), "GET", `/resultados/${der.id}`, undefined, [200], `control: el destino (${der.destino}) abre su ensayo derivado`);
+      const otDer = await llamar(jefe(der.destino), "GET", `/flujo/ot/${der.otId}/resultados`);
+      const filas = otDer.status === 200 ? otDer.json.resultados : null;
+      R.comprobaciones++;
+      if (!filas || !filas.every((r) => r.derivado && r.laboratorio === der.destino))
+        R.fallos.push(`${jefe(der.destino)} ve en la OT ensayos que no se le derivaron (HTTP ${otDer.status})`);
+    }
   }
 
   /* ------------------------------------------------------------ resumen --- */
