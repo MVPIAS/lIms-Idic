@@ -155,6 +155,12 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     temperatura: r.temperatura ?? null,
     humedad: r.humedad ?? null,
     incertidumbre: r.incertidumbre ?? null,
+    // Requisito de la E.T. del cliente (punto, segunda condición, plan de clases, clase de defecto).
+    especFuente: r.especFuente ?? null,
+    condicion2: r.condicion2 ?? null,
+    valorCondicion2: r.valorCondicion2 ?? null,
+    planClases: r.planClases ?? null,
+    claseDefecto: r.claseDefecto ?? null,
   };
 }
 
@@ -170,7 +176,8 @@ const esCorreccion = (f: Fila) => f.estado === "capturado" && ((f.valorNumerico 
 
 /** ¿Se captura con un solo campo en la tabla? (numérico, sin campos de fórmula, del puente) */
 // Si el método exige el equipo, se captura en el formulario (equipo y condiciones del ensayo).
-const capturaRapida = (f: Fila) => f.tipoDato === "numerico" && f.nCampos === 0 && !f.porReplicas && !f.equipoRequerido;
+// Con segunda condición («X kgf con Y mm») se captura en el formulario: el campo rápido no la pide.
+const capturaRapida = (f: Fila) => f.tipoDato === "numerico" && f.nCampos === 0 && !f.porReplicas && !f.equipoRequerido && !f.condicion2;
 
 const esNumero = (v: any) => typeof v === "number" || (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v.replace(",", "."))));
 
@@ -701,6 +708,11 @@ export default function CapturaOtPage() {
                                   factor {textoFactor(f.factorOperacion, f.factorValor)}
                                 </span></div>
                               )}
+                              {f.especOrigen === "et" && (
+                                <div><span className="pill teal" title="Requisito de la especificación técnica del cliente elegida para la OT o la muestra">{f.especFuente ?? "E.T. del cliente"}</span></div>
+                              )}
+                              {f.condicion2 && <div style={{ fontSize: 11, color: "var(--muted)" }}>con {f.condicion2.etiqueta}{f.condicion2.inf != null ? ` ≥ ${String(f.condicion2.inf).replace(".", ",")}` : ""}{f.condicion2.sup != null ? ` ≤ ${String(f.condicion2.sup).replace(".", ",")}` : ""}{f.condicion2.unidad ? ` ${f.condicion2.unidad}` : ""}</div>}
+                              {f.planClases && <div style={{ fontSize: 11, color: "var(--muted)" }}>plan n {f.planClases.n} · c {f.planClases.c} · m {String(f.planClases.m).replace(".", ",")}{f.planClases.M != null ? ` · M ${String(f.planClases.M).replace(".", ",")}` : ""}</div>}
                               {f.especOrigen === "orden" && (
                                 <div><span className="pill amber" title={`Especificación de la orden${f.especEditadaPorNombre ? ` · ${f.especEditadaPorNombre}` : ""}${f.especEditadaAt ? ` · ${fechaHora(f.especEditadaAt)}` : ""}. Catálogo: ${limiteTexto({ ...f, limiteInf: f.especCatalogo?.limiteInf ?? null, nominal: f.especCatalogo?.nominal ?? null, limiteSup: f.especCatalogo?.limiteSup ?? null } as Fila)}`}>de la orden</span></div>
                               )}

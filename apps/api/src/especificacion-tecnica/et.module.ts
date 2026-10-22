@@ -172,7 +172,8 @@ export class EspecificacionTecnicaService {
 
   private async laboratorios(tenantId: string) {
     return this.prisma.$queryRawUnsafe<{ id: string; codigo: string; nombre: string }[]>(
-      `SELECT id, codigo, nombre FROM unidad WHERE tenant_id = $1::uuid AND activa ORDER BY codigo`,
+      `SELECT id, codigo, nombre FROM unidad WHERE tenant_id = $1::uuid AND activa
+          AND COALESCE(tipo, 'LABORATORIO') IN ('LABORATORIO', 'SUCURSAL', 'DELEGACION') ORDER BY codigo`,
       tenantId,
     );
   }
