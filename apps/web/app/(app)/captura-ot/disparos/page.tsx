@@ -379,8 +379,8 @@ function PasoDisparos({ v, editable, onCambio, onFin }: { v: Vista; editable: bo
             <fieldset className="field" style={{ border: 0, padding: 0, margin: 0 }}>
               <legend style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>Penetración completa <span className="req">*</span></legend>
               <div style={{ display: "flex", gap: 12, paddingTop: 6 }}>
-                <label style={{ fontSize: 12.5 }}><input type="radio" name="pen" checked={f.penetracion === "no"} onChange={() => setF({ ...f, penetracion: "no" })} style={{ width: "auto" }} /> No</label>
-                <label style={{ fontSize: 12.5 }}><input type="radio" name="pen" checked={f.penetracion === "si"} onChange={() => setF({ ...f, penetracion: "si" })} style={{ width: "auto" }} /> Sí</label>
+                <label style={{ fontSize: 12.5, textTransform: "none", letterSpacing: 0, color: "var(--ink)" }}><input type="radio" name="pen" checked={f.penetracion === "no"} onChange={() => setF({ ...f, penetracion: "no" })} style={{ width: "auto" }} /> No</label>
+                <label style={{ fontSize: 12.5, textTransform: "none", letterSpacing: 0, color: "var(--ink)" }}><input type="radio" name="pen" checked={f.penetracion === "si"} onChange={() => setF({ ...f, penetracion: "si" })} style={{ width: "auto" }} /> Sí</label>
               </div>
             </fieldset>
             {a?.testigo && (
