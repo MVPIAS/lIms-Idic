@@ -4,7 +4,7 @@
  *
  * Cada parámetro tiene un TIPO y el valor se valida según él antes de guardarse
  * en `parametro_sistema` con la forma que leen sus lectores (circuito-config.ts,
- * numeracion-cotizacion.ts, recepcion.service.ts, metrologia-ot.datos.ts,
+ * numeracion-cotizacion.ts, recepcion.service.ts, metrologia-ot.datos.ts, metrologia/ficha.reglas.ts,
  * equipo-captura.ts, veredicto.ts (criterioIndeterminado), alcance-resultado.ts
  * (configSegregacion), ot-desde-proceso.service.ts (plazo de la internación) y la
  * función fn_encuesta_al_cerrar_ot). Igual que los
@@ -183,6 +183,57 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         nombre: "El cierre exige registrar la devolución de cada instrumento",
         opciones: SI_NO,
         porDefecto: "si",
+      },
+    },
+  },
+  {
+    categoria: "metrologia_ficha",
+    titulo: "Metrología · ficha de calibración y certificado",
+    donde:
+      "Metrología › Ficha de calibración (error normalizado, patrones), emisión y entrega del certificado; OT de calibración › Cerrar técnicamente.",
+    porConfirmar: "Criterio de Eₙ, aviso al solicitante, equipo del laboratorio dueño e informe técnico o servicio externo del no calibrable (EP-04 §10 P5, P6, P9 y P13).",
+    codigos: {
+      criterio_en: {
+        tipo: "opcion",
+        nombre: "Criterio del error normalizado (informativo)",
+        opciones: [
+          { valor: "<=1", etiqueta: "Eₙ ≤ 1 (como P-808 y L-4359)" },
+          { valor: "<1", etiqueta: "Eₙ < 1 (como M-3889)" },
+        ],
+        porDefecto: "<=1",
+      },
+      patron_fuera_rango: {
+        tipo: "opcion",
+        nombre: "Punto medido con un patrón fuera de su rango calibrado",
+        opciones: [
+          { valor: "bloquear", etiqueta: "Bloquear el guardado (no se acepta extrapolar, R15 P6)" },
+          { valor: "avisar", etiqueta: "Solo avisar" },
+        ],
+        ayuda: "Solo se controla con los patrones que tienen su rango numérico en el maestro.",
+        porDefecto: "bloquear",
+      },
+      notificar_emision: {
+        tipo: "sino",
+        nombre: "Al emitir, enviar el certificado por correo al contacto de la OT",
+        opciones: SI_NO,
+        ayuda: "En OT interna, al jefe del laboratorio dueño. Si el correo no sale, la emisión no se detiene y queda en la bitácora de Mensajería.",
+        porDefecto: "si",
+      },
+      actualizar_equipo: {
+        tipo: "opcion",
+        nombre: "Actualizar el equipo del laboratorio dueño (OT interna)",
+        opciones: [
+          { valor: "emitir", etiqueta: "Al emitir el certificado" },
+          { valor: "entregar", etiqueta: "Al registrar la entrega del certificado" },
+          { valor: "no", etiqueta: "No actualizar (lo hace el laboratorio dueño)" },
+        ],
+        porDefecto: "emitir",
+      },
+      no_apto_exige_documento: {
+        tipo: "sino",
+        nombre: "El cierre técnico exige el informe técnico emitido o el servicio externo validado del ítem no calibrable",
+        opciones: SI_NO,
+        porDefecto: "no",
       },
     },
   },

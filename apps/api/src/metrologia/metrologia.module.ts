@@ -26,6 +26,7 @@ import {
 import { CASOS_REFERENCIA, esClaveExcel, verificarParidad } from "./motores/paridad";
 import { CASOS_LNF, verificarParidadLNF } from "./motores/paridad-lnf";
 import { balancePorPunto } from "./motores/balance";
+import { configFicha, errorNormalizado, type ConfigFicha } from "./ficha.reglas";
 import { CASOS_1510, verificarParidad1510 } from "./motores/paridad-1510";
 import { armarCertificado, certificadoHtml, datosCertificado, type ContextoCertificado, type FirmaCert } from "./metrologia.certificado";
 import { formatoDe } from "./certificado/formato-it";
@@ -233,6 +234,13 @@ async function nombreDepartamento(alcance: AlcanceService, t: string, unidadId: 
   const base = unidadId ?? arbol.porCodigo.get("SAM")?.id ?? null;
   const d = base ? ancestroDeTipo(arbol, base, "DEPARTAMENTO") : null;
   return { nombre: d?.nombre ?? "Departamento", origen: "organigrama" };
+}
+
+/** Parámetros de la operación de la ficha (Administración › Parámetros del sistema, categoría metrologia_ficha). */
+export async function leerConfigFicha(t: string): Promise<ConfigFicha> {
+  const filas = await prisma.$queryRawUnsafe<{ codigo: string; valor: string | null; activo: boolean }[]>(
+    `SELECT codigo, valor, activo FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'metrologia_ficha'`, t);
+  return configFicha(filas);
 }
 
 async function registroFirmas(t: string): Promise<(Firmante & { id: string })[]> {
@@ -622,23 +630,35 @@ export class MetrologiaController {
     return { data: data.map((x) => ({ ...x, mio: !!x.metrologo_id && x.metrologo_id === req.user?.sub })) };
   }
 
-  /** Calibración anterior emitida del mismo instrumento (serie o identificación) y proceso: error normalizado informativo. */
+  /**
+   * Calibración anterior emitida del mismo instrumento (serie o identificación) y proceso, y el
+   * error normalizado por punto frente a ella (P5.3, informativo: no bloquea el envío).
+   */
   @Get("calibraciones/:id/anterior")
   @RequierePermiso("metrologia.ver")
   async anterior(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const t = tenantId(req);
     const cal = await this.cargar(id, req);
+    const cfg = await leerConfigFicha(t);
     const serie = String(cal.instrumento?.serie ?? "").trim(), idEsp = String(cal.instrumento?.idEspecial ?? "").trim();
     const sinDato = (s: string) => !s || /^(s\/s|no tiene|--|-)$/i.test(s);
-    if (sinDato(serie) && sinDato(idEsp)) return { data: null, motivo: "El instrumento no tiene número de serie ni identificación para buscar su calibración anterior." };
+    if (sinDato(serie) && sinDato(idEsp))
+      return { data: null, filas: [], criterio: cfg.criterioEn, motivo: "El instrumento no tiene número de serie ni identificación para buscar su calibración anterior." };
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT c.id, c.numero_certificado, c.emitido_at, c.fecha_calibracion
+      `SELECT c.id, c.numero_certificado, c.emitido_at, c.fecha_calibracion, c.resumen, c.unidad_id
          FROM met_calibracion c
         WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL AND c.id <> $2::uuid AND c.proceso_id = $3::uuid
           AND c.estado IN ('emitida', 'reemplazada') AND c.created_at < $4
+          AND c.id IS DISTINCT FROM $7::uuid
           AND (($5 <> '' AND c.instrumento->>'serie' = $5) OR ($6 <> '' AND c.instrumento->>'idEspecial' = $6))
         ORDER BY c.emitido_at DESC NULLS LAST LIMIT 1`,
-      tenantId(req), id, cal.proceso_id, cal.created_at, sinDato(serie) ? "" : serie, sinDato(idEsp) ? "" : idEsp);
-    return { data: rows[0] ?? null, motivo: rows.length ? null : "Sin calibración anterior en el LIMS." };
+      t, id, cal.proceso_id, cal.created_at, sinDato(serie) ? "" : serie, sinDato(idEsp) ? "" : idEsp, cal.reemplaza_id ?? null);
+    if (!rows.length) return { data: null, filas: [], criterio: cfg.criterioEn, motivo: "Sin calibración anterior en el LIMS." };
+    const { resumen, unidad_id, ...ant } = rows[0];
+    // La anterior puede ser de otro laboratorio de la sección: solo se usan sus números si el usuario la ve.
+    const visible = !unidad_id || (await this.alcance.puedeVerUnidad(req, unidad_id, "metrologia.ver"));
+    const filas = visible ? errorNormalizado(cal.resumen?.puntos ?? [], resumen?.puntos ?? [], cfg.criterioEn) : [];
+    return { data: ant, filas, criterio: cfg.criterioEn, motivo: visible ? null : "La calibración anterior es de un laboratorio fuera de su alcance." };
   }
 
   /** Parámetros del certificado: nombre del departamento (y de dónde sale). */
