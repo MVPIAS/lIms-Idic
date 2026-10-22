@@ -87,6 +87,7 @@ export const NAV: SeccionNav[] = [
       { href: "/ordenes-internas", label: "Órdenes internas", icon: "🔀", perm: "ot.ver", claves: "derivacion muestreo otro laboratorio" },
       { href: "/cotizaciones/por-responder", label: "Cotizaciones por responder", icon: "💲", perm: "cotizacion.costear", claves: "costeo form05 form06 programa de trabajo fechas vb" },
       { href: "/muestras", label: "Muestras", icon: "🧫", perm: "muestra.ver" },
+      { href: "/especificaciones", label: "Especificaciones técnicas (E.T.)", icon: "📘", perm: "et.ver", claves: "eett et cliente requisito punto licitacion contrato rsa norma version" },
       { href: "/recepcion", label: "Bandeja de entrada del laboratorio", icon: "📬", perm: "muestra.crear", claves: "recepcion recepcionar muestras por recibir ot interna bpch" },
       { href: "/captura-ot", label: "Captura y revisión por OT", icon: "📈", perm: ["resultado.crear", "resultado.revisar", "resultado.aprobar"], claves: "revisar aprobar devolver especificación" },
       { href: "/informes", label: "Emitir informe", icon: "🖨", perm: "certificado.emitir" },

@@ -7,6 +7,8 @@ import ClienteSelector, { Cliente } from "./_components/ClienteSelector";
 import LineaBuilder, { LineaOT } from "./_components/LineaBuilder";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import { hoyISO } from "@/lib/format";
+import { llamar, qs } from "@/lib/laboratorio";
+import { usePermisos } from "@/lib/permisos";
 
 /**
  * Origen de la OT en el alta directa (Comercial R2):
@@ -105,6 +107,18 @@ export default function NuevaOtPage() {
   );
 
   // Estado de submit.
+  // Especificación técnica del cliente (EP-05 0.3, EP-03 0.5): vigente, del cliente o reutilizable, del laboratorio.
+  const { puede } = usePermisos();
+  const [etId, setEtId] = useState("");
+  const [etsElegibles, setEtsElegibles] = useState<{ id: string; codigo: string; version: number; nombre: string }[]>([]);
+  useEffect(() => {
+    if (!puede("et.ver") || !labId) { setEtsElegibles([]); return; }
+    llamar<{ data: { id: string; codigo: string; version: number; nombre: string }[] }>(
+      "GET", `/especificaciones-tecnicas${qs({ estado: "vigente", laboratorio: labId, clienteId: cliente?.id })}`,
+    ).then((r) => setEtsElegibles(r.data)).catch(() => setEtsElegibles([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labId, cliente?.id]);
+  useEffect(() => { if (etId && !etsElegibles.some((e) => e.id === etId)) setEtId(""); }, [etsElegibles, etId]);
   const [enviando, setEnviando] = useState(false);
   const [okMsg, setOkMsg] = useState("");
   const [errMsg, setErrMsg] = useState("");
@@ -167,6 +181,8 @@ export default function NuevaOtPage() {
         otClienteId = otResp?.clienteId ?? otClienteId;
       }
       if (!otId) throw new ApiError("La API de OT no devolvió un id.", 500);
+      // La E.T. elegida rige los ensayos que se generan a continuación.
+      if (etId) await llamar("PUT", `/especificaciones-tecnicas/ot/${otId}`, { etId });
 
       // c. Una muestra por cada elemento/línea, y por cada muestra materializamos
       //    los métodos elegidos del panel como resultados por analizar (con su
@@ -339,6 +355,15 @@ export default function NuevaOtPage() {
               <option value="urgente">Urgente</option>
             </select>
           </div>
+          {puede("et.ver") && modo === "nueva" && (
+            <div className="field">
+              <label htmlFor="ot-et">Especificación técnica del cliente (E.T.)</label>
+              <select id="ot-et" value={etId} onChange={(e) => setEtId(e.target.value)} disabled={!labId}>
+                <option value="">{labId ? (etsElegibles.length ? "Sin E.T." : "No hay E.T. vigentes para este cliente y laboratorio") : "Elija primero el laboratorio"}</option>
+                {etsElegibles.map((e) => <option key={e.id} value={e.id}>{e.codigo} v{e.version} · {e.nombre}</option>)}
+              </select>
+            </div>
+          )}
           <div className="field span-3">
             <label>Observaciones</label>
             <textarea rows={2} value={observaciones} onChange={(e) => setObservaciones(e.target.value)} />

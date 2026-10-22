@@ -69,6 +69,15 @@ export interface EnsayoEditable {
   temperatura?: number | string | null;
   humedad?: number | string | null;
   incertidumbre?: string | null;
+  /** Requisito de la E.T. del cliente (especificacion-tecnica): «E.T. … v… · punto …». */
+  especFuente?: string | null;
+  /** Segunda condición de la fila («X kgf con Y mm») y su valor capturado. */
+  condicion2?: { etiqueta: string; inf?: number | null; sup?: number | null; unidad?: string | null } | null;
+  valorCondicion2?: number | string | null;
+  /** Plan de 2/3 clases (n, c, m, M): cada réplica es una unidad. */
+  planClases?: { n: number; c: number; m: number; M?: number | null } | null;
+  /** Clase de la no conformidad (crítico, mayor, menor) para el veredicto del lote. */
+  claseDefecto?: string | null;
 }
 
 /** Equipo que se puede elegir en la captura (GET /flujo/ot/:id/equipos). */
@@ -151,6 +160,9 @@ export default function EditorEnsayo({
     e.tipoDato === "atributo" && (e.veredicto === "cumple" || e.veredicto === "no_cumple") ? e.veredicto : "",
   );
   const [observacion, setObservacion] = useState(e.observacion ?? "");
+  const [valorCond2, setValorCond2] = useState(e.valorCondicion2 != null && e.valorCondicion2 !== "" ? String(Number(e.valorCondicion2)).replace(".", ",") : "");
+  const [clase, setClase] = useState(e.claseDefecto ?? "");
+  const [motivoClase, setMotivoClase] = useState("");
   const [motivoCaptura, setMotivoCaptura] = useState("");
   const [motivoEsp, setMotivoEsp] = useState("");
   // Factor
@@ -227,6 +239,10 @@ export default function EditorEnsayo({
       cuerpo = varias ? { replicasTexto: t } : { valor: t };
       if (observacion.trim()) cuerpo.observacion = observacion.trim();
     }
+    if (e.condicion2 && e.tipoDato !== "atributo") {
+      if (!valorCond2.trim()) { toast.error(`Indique ${e.condicion2.etiqueta}: el requisito tiene dos condiciones.`); return; }
+      cuerpo.valorCondicion2 = valorCond2.trim();
+    }
     if (esCorreccion) {
       if (motivoCaptura.trim().length < 5) { toast.error("Este ensayo ya tiene un valor: indique el motivo de la corrección (mínimo 5 caracteres)."); return; }
       cuerpo.motivo = motivoCaptura.trim();
@@ -295,7 +311,11 @@ export default function EditorEnsayo({
       <div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
           <b style={{ fontSize: 12.5 }}>Especificación</b>
-          {e.especOrigen === "orden" ? (
+          {e.especOrigen === "et" ? (
+            <span className="pill teal" title={`Requisito de la especificación técnica del cliente${e.especEditadaAt ? ` · aplicado el ${fechaHora(e.especEditadaAt)}` : ""}`}>
+              {e.especFuente ?? "E.T. del cliente"}
+            </span>
+          ) : e.especOrigen === "orden" ? (
             <span className="pill amber" title="Completada o cambiada para esta orden; el catálogo no se modificó">
               De la orden{e.especEditadaPorNombre ? ` · ${e.especEditadaPorNombre}` : ""}{e.especEditadaAt ? ` · ${fechaHora(e.especEditadaAt)}` : ""}
             </span>
@@ -349,6 +369,40 @@ export default function EditorEnsayo({
           </div>
         )}
       </div>
+
+      {/* ---------------- Clase de la no conformidad (EP-05 5.2) ---------------- */}
+      {(e.claseDefecto || e.veredicto === "no_cumple") && (
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor={`cl-${e.id}`}>Clase de la no conformidad</label>
+            <select id={`cl-${e.id}`} value={clase} disabled={!esJefatura} onChange={(x) => setClase(x.target.value)}>
+              <option value="">Sin clase (cuenta como mayor)</option>
+              <option value="critico">Crítico</option>
+              <option value="mayor">Mayor</option>
+              <option value="menor">Menor</option>
+            </select>
+          </div>
+          {esJefatura && clase !== (e.claseDefecto ?? "") && (
+            <>
+              <div className="field" style={{ margin: 0, flex: 1, minWidth: 180 }}>
+                <label htmlFor={`clm-${e.id}`}>Motivo <span className="req">*</span></label>
+                <input id={`clm-${e.id}`} value={motivoClase} maxLength={1000} onChange={(x) => setMotivoClase(x.target.value)} />
+              </div>
+              <button type="button" className="btn outline sm" disabled={guardando || motivoClase.trim().length < 5}
+                onClick={async () => {
+                  setGuardando(true);
+                  try {
+                    await llamar("PUT", `/especificaciones-tecnicas/resultado/${e.id}/clase`, { clase: clase || null, motivo: motivoClase.trim() });
+                    toast.ok("Clase de la no conformidad guardada.");
+                    onGuardado({ ...e, claseDefecto: clase || null });
+                  } catch (err: any) { toast.error(err.message); }
+                  finally { setGuardando(false); }
+                }}>Clasificar → veredicto de lote</button>
+            </>
+          )}
+          {!esJefatura && <span style={{ fontSize: 11.5, color: "var(--muted)" }}>La clasifica la jefatura del laboratorio.</span>}
+        </div>
+      )}
 
       {/* ---------------- Factor de la fórmula ---------------- */}
       {e.tipoDato === "numerico" && (factorActual || (puedeFactor && puedeCapturar)) && (
@@ -468,8 +522,14 @@ export default function EditorEnsayo({
             </div>
           ) : (
             <div className="form-grid cols-2" style={{ marginTop: 6 }}>
+              {e.planClases && (
+                <p style={{ gridColumn: "1 / -1", fontSize: 11.5, color: "var(--muted)", margin: 0 }}>
+                  Plan de {e.planClases.M != null ? "3" : "2"} clases: ingrese el valor de cada una de las {e.planClases.n} unidades como réplicas.
+                  No cumple si {e.planClases.M != null ? `alguna supera M = ${String(e.planClases.M).replace(".", ",")} o ` : ""}más de {e.planClases.c} superan m = {String(e.planClases.m).replace(".", ",")}.
+                </p>
+              )}
               <div className="field">
-                <label>Valor o réplicas{esp.unidad ? ` (${esp.unidad})` : ""}</label>
+                <label>{e.planClases ? `Valores de las ${e.planClases.n} unidades` : "Valor o réplicas"}{esp.unidad ? ` (${esp.unidad})` : ""}</label>
                 <input value={valor} onChange={(x) => setValor(x.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace" }}
                   placeholder="12,4   ·   o réplicas: 12,4 12,6 12,5" />
                 <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
@@ -477,6 +537,17 @@ export default function EditorEnsayo({
                   {e.formulaAplicable && nCampos === 0 ? ` y se aplica la fórmula ${e.formulaAplicable}` : ""}.
                 </span>
               </div>
+              {e.condicion2 && (
+                <div className="field">
+                  <label htmlFor={`c2-${e.id}`}>
+                    {e.condicion2.etiqueta}{e.condicion2.unidad ? ` (${e.condicion2.unidad})` : ""} <span className="req">*</span>
+                  </label>
+                  <input id={`c2-${e.id}`} value={valorCond2} inputMode="decimal" onChange={(x) => setValorCond2(x.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace" }} />
+                  <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
+                    Segunda condición del requisito: {e.condicion2.inf != null ? `≥ ${String(e.condicion2.inf).replace(".", ",")}` : ""}{e.condicion2.inf != null && e.condicion2.sup != null ? " y " : ""}{e.condicion2.sup != null ? `≤ ${String(e.condicion2.sup).replace(".", ",")}` : ""}. Cumple solo si cumplen las dos.
+                  </span>
+                </div>
+              )}
               <div className="field">
                 <label>Observación (opcional)</label>
                 <input value={observacion} onChange={(x) => setObservacion(x.target.value)} />
