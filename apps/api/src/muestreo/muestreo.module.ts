@@ -725,13 +725,16 @@ export class MuestreoService {
     const conteo = contarDefectuosas(resultados);
     const plan: PlanGuardado | null = mu.plan ?? null;
     const conteos = CLASES_DEFECTO.map((c) => ({ clase: c, defectuosas: conteo[c], ac: plan?.clases?.[c]?.ac ?? null, re: plan?.clases?.[c]?.re ?? null }));
-    const propuesta = veredictoLote(conteos, { reglaSinPlan: prm.reglaSinPlan, pendientes: conteo.pendientes });
+    // Sin ensayos todavía no hay nada que concluir: queda pendiente.
+    const pendientes = resultados.length ? conteo.pendientes : 1;
+    const propuesta = veredictoLote(conteos, { reglaSinPlan: prm.reglaSinPlan, pendientes });
     return {
       prm,
       conteo,
       propuesta,
       noConformes: resultados.filter((r) => r.veredicto === "no_cumple"),
-      alcance: enlazadas[0].n ? "muestras del muestreo" : "todas las muestras de la OT (ninguna enlazada al muestreo)",
+      alcance: enlazadas[0].n ? "las muestras del muestreo" : "todas las muestras de la OT (ninguna está enlazada al muestreo)",
+      sinEnsayos: resultados.length === 0,
       plan,
     };
   }
@@ -744,6 +747,7 @@ export class MuestreoService {
       reglaSinPlan: d.prm.reglaSinPlan,
       alcance: d.alcance,
       pendientes: d.conteo.pendientes,
+      sinEnsayos: d.sinEnsayos,
       sinClase: d.conteo.sinClase,
       propuesta: d.propuesta,
       noConformes: d.noConformes,
@@ -768,6 +772,7 @@ export class MuestreoService {
       re: d.plan?.clases?.[c]?.re ?? null,
     }));
     const v = veredictoLote(conteos, { reglaSinPlan: d.prm.reglaSinPlan, pendientes: d.conteo.pendientes });
+    if (d.sinEnsayos) throw new ConflictException("Las muestras del lote aún no tienen ensayos: no hay nada que concluir.");
     if (v.veredicto === "pendiente")
       throw new ConflictException(`Quedan ${d.conteo.pendientes} ensayo(s) sin decidir: el lote se concluye cuando todos tienen veredicto.`);
     await this.prisma.$transaction(async (tx) => {
