@@ -104,10 +104,23 @@ function InformesContenido() {
         const inicial = params.get("otId");
         const [o, p] = await Promise.all([
           inicial ? api.getRaw<OtCorta>(`ot/${inicial}`).catch(() => null) : Promise.resolve(null),
-          api.getRaw("plantillas?limit=100"),
+          // Todas las páginas (la API entrega de a 100; hay más plantillas heredadas que eso).
+          (async () => {
+            const todas: any[] = [];
+            for (let pag = 1; pag <= 10; pag++) {
+              const r: any = await api.getRaw(`plantillas?limit=100&page=${pag}`);
+              todas.push(...lista<any>(r));
+              if (!r?.meta || pag >= (r.meta.totalPages ?? 1)) break;
+            }
+            return todas;
+          })(),
         ]);
         if (o) setOtSel(o);
-        setPlantillas(lista<Plantilla>(p).filter((x) => x.activo !== false));
+        // Lista depurada (recorrido MP-02, D02-05): fuera las plantillas de prueba heredadas
+        // («test», «NULL», «-») y todas las activas, no solo las 100 primeras.
+        const deVerdad = (x: Plantilla) =>
+          x.activo !== false && !/^\s*test\s*$/i.test(x.nombre ?? "") && !["-", "NULL", ""].includes(String(x.repid ?? "").trim().toUpperCase());
+        setPlantillas(lista<Plantilla>(p).filter(deVerdad).sort((a, b) => `${a.repid} ${a.nombre}`.localeCompare(`${b.repid} ${b.nombre}`, "es")));
       } catch (e: any) {
         setError(e?.message ?? "No se pudieron cargar los datos");
       } finally {

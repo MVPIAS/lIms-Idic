@@ -272,11 +272,17 @@ export default function PanelDocumento({
           {html === null ? (
             <p className="subtitle">Generando vista previa…</p>
           ) : (
-            // sandbox="": sin scripts ni acceso a la sesión (los datos ya van escapados en el servidor).
+            // sandbox sin scripts (los datos ya van escapados en el servidor). «allow-same-origin»
+            // solo para medir el alto y mostrar el documento completo, firmas incluidas (D02-20).
             <iframe
               title={`Vista previa de ${doc.numero}`}
               srcDoc={html}
-              sandbox=""
+              sandbox="allow-same-origin"
+              onLoad={(e) => {
+                const f = e.currentTarget;
+                const alto = f.contentDocument?.documentElement?.scrollHeight ?? 0;
+                if (alto > 0) f.style.height = `${Math.min(Math.max(alto + 24, 640), 6000)}px`;
+              }}
               style={{ width: "100%", height: 640, border: "1px solid var(--line)", borderRadius: 6, background: "#fff" }}
             />
           )}
