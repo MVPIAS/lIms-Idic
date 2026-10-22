@@ -21,12 +21,36 @@
  *   obligatorio Sí / No guardado en la columna `activo` (producto obligatorio por laboratorio)
  *   campo       definición JSON de un campo propio de la recepción
  *               {tipo, obligatorio, opciones, ayuda} + `activo`
+ *   variante    formulario de captura especializado de un método o laboratorio
+ *               (valor = variante; `activo` = si rige) — frente r2a
+ *   tabla       filas JSON con columnas tipadas (tabla de amenazas del LRB,
+ *               HCP por tipo de vehículo, planes n, c, m, M, rangos sensoriales)
+ *   campo_prep  campo de la preparación de muestras de un laboratorio
+ *               {tipo, obligatorio, bloquea, unidad, opciones, ayuda} + `activo`
  */
 import { formatearNumeroCotizacion, configNumeracion } from "../cotizacion/numeracion-cotizacion";
 import { CLASES_CUSTODIA, TIPOS_CAMPO, leerCampo, type TipoCampo } from "../recepcion/reglas-recepcion";
 import { leerPorcentaje, valorGuardado } from "./parametro-porcentaje";
+import { OPCIONES_VARIANTE, esVariante } from "../formularios/variantes";
+import { AQLS, NIVELES } from "../formularios/aql";
+import { jsonCampoPrep, normalizarCampoPrep } from "../formularios/preparacion";
 
-export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo";
+export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
+
+/** Columna de un parámetro de tipo «tabla» (tabla de amenazas, HCP, planes RSA…). */
+export interface ColumnaTabla {
+  clave: string;
+  etiqueta: string;
+  tipo: "texto" | "numero" | "entero" | "opcion" | "sino";
+  opciones?: Opcion[];
+  obligatoria?: boolean;
+  min?: number;
+  max?: number;
+  /** Largo máximo del texto. */
+  largo?: number;
+}
+
+export type AltaPatron = "laboratorio" | "campo" | "metodo" | "plantilla";
 
 export interface Opcion {
   valor: string;
@@ -50,6 +74,9 @@ export interface DefValor {
    * «laboratorios» = las unidades que reciben muestras (código · nombre).
    */
   opcionesDe?: "laboratorios";
+  /** Tipo «tabla»: columnas y máximo de filas. */
+  columnas?: ColumnaTabla[];
+  maxFilas?: number;
 }
 
 export interface GrupoConfig {
@@ -62,7 +89,7 @@ export interface GrupoConfig {
   /** Códigos fijos. */
   codigos?: Record<string, DefValor>;
   /** Cualquier código de la categoría (uno por laboratorio o por campo), con alta desde la pantalla. */
-  patron?: DefValor & { alta: "laboratorio" | "campo" };
+  patron?: DefValor & { alta: AltaPatron };
 }
 
 const SI_NO: Opcion[] = [
@@ -305,6 +332,191 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- Formularios especializados, preparación y trabajo DSA (frente r2a) ---
+  {
+    categoria: "captura_variante_metodo",
+    titulo: "Captura · formulario especializado por método",
+    donde:
+      "Captura y revisión por OT: el ensayo de este método se registra en su formulario (disparos del LRB, HCP del SVM, AQL, microbiología, sensorial) y su veredicto pasa al resultado. Sin fila, captura estándar.",
+    porConfirmar: "Microbiología y sensorial quedan inactivas hasta que el IDIC decida si quiere las etapas o solo el resultado (EP-02 P1).",
+    patron: { tipo: "variante", nombre: "Formulario de captura", opciones: OPCIONES_VARIANTE, alta: "metodo", porDefecto: "estandar" },
+  },
+  {
+    categoria: "captura_variante_laboratorio",
+    titulo: "Captura · formulario especializado por laboratorio",
+    donde: "Para los métodos de un laboratorio que no tengan su propia fila arriba (manda el método).",
+    patron: { tipo: "variante", nombre: "Formulario de captura del laboratorio", opciones: OPCIONES_VARIANTE, alta: "laboratorio", porDefecto: "estandar" },
+  },
+  {
+    categoria: "lrb",
+    titulo: "LRB · registro de disparos",
+    donde: "Registro de disparos, CRB e Informe de Ensayo de Rechazo del Laboratorio de Resistencia Balística (EP-05 4.1, 5.3, 7.1).",
+    porConfirmar: "Tabla oficial de amenazas (EP-05 P3), si manda V1, V2 o el promedio (P4), disparos con trauma (P5).",
+    codigos: {
+      amenazas: {
+        tipo: "tabla",
+        nombre: "Tabla de amenazas por norma y nivel",
+        ayuda: "Valores de los informes reales a la espera de la tabla oficial. La «clave» identifica la fila en los registros: no la cambie si ya se usó.",
+        maxFilas: 60,
+        columnas: [
+          { clave: "clave", etiqueta: "Clave", tipo: "texto", obligatoria: true, largo: 40 },
+          { clave: "norma", etiqueta: "Norma", tipo: "texto", obligatoria: true, largo: 40 },
+          { clave: "nivel", etiqueta: "Nivel", tipo: "texto", obligatoria: true, largo: 10 },
+          { clave: "elemento", etiqueta: "Elemento", tipo: "opcion", obligatoria: true, opciones: [{ valor: "chaleco", etiqueta: "Chaleco" }, { valor: "casco", etiqueta: "Casco" }, { valor: "probeta", etiqueta: "Probeta" }] },
+          { clave: "municion", etiqueta: "Munición", tipo: "texto", obligatoria: true, largo: 60 },
+          { clave: "masa_g", etiqueta: "Masa (g)", tipo: "numero", min: 0, max: 100 },
+          { clave: "v_min", etiqueta: "V mín. (m/s)", tipo: "numero", obligatoria: true, min: 0, max: 3000 },
+          { clave: "v_max", etiqueta: "V máx. (m/s)", tipo: "numero", obligatoria: true, min: 0, max: 3000 },
+          { clave: "disparos", etiqueta: "Disparos", tipo: "entero", obligatoria: true, min: 1, max: 20 },
+          { clave: "trauma_max", etiqueta: "Trauma máx. (mm)", tipo: "numero", min: 0, max: 200 },
+          { clave: "disparos_trauma", etiqueta: "Trauma en disparos 1 a", tipo: "entero", min: 0, max: 20 },
+          { clave: "testigo", etiqueta: "Testigo", tipo: "sino" },
+          { clave: "criterio", etiqueta: "Criterio", tipo: "texto", largo: 160 },
+        ],
+      },
+      velocidad_manda: {
+        tipo: "opcion",
+        nombre: "Velocidad que se compara con la ventana",
+        opciones: [
+          { valor: "v1", etiqueta: "V1" },
+          { valor: "v2", etiqueta: "V2" },
+          { valor: "promedio", etiqueta: "Promedio de V1 y V2" },
+        ],
+        porDefecto: "v1",
+      },
+      plazo_apelacion: { tipo: "entero", nombre: "Plazo de apelación del Informe de Rechazo", min: 1, max: 60, unidad: "días hábiles", porDefecto: "5" },
+    },
+  },
+  {
+    categoria: "inspeccion_aql",
+    titulo: "Inspección por atributos · nivel y AQL (NCh 44)",
+    donde:
+      "Inspección por atributos del IVC (EP-03 3.7) y regla del lote de la HCP del SVM por clase de defecto (EP-05 5.3). La tabla de la norma (letras, n, Ac/Re) está en el sistema.",
+    porConfirmar: "Nivel y AQL que aplica el IDIC (EP-03 P5) y AQL por clase A/B/C del SVM (EP-05 P15).",
+    codigos: {
+      nivel: { tipo: "opcion", nombre: "Nivel de inspección", opciones: NIVELES.map((n) => ({ valor: n, etiqueta: n })), porDefecto: "II" },
+      aql_inspeccion: { tipo: "opcion", nombre: "AQL por defecto de una inspección del IVC", opciones: AQLS.map((a) => ({ valor: a, etiqueta: a })), porDefecto: "2,5" },
+      aql_clase_a: { tipo: "opcion", nombre: "AQL clase A (crítico)", opciones: [{ valor: "0", etiqueta: "Una N/C rechaza (Ac 0 / Re 1)" }, ...AQLS.map((a) => ({ valor: a, etiqueta: a }))], porDefecto: "0" },
+      aql_clase_b: { tipo: "opcion", nombre: "AQL clase B (mayor)", opciones: [{ valor: "0", etiqueta: "Una N/C rechaza (Ac 0 / Re 1)" }, ...AQLS.map((a) => ({ valor: a, etiqueta: a }))], porDefecto: "2,5" },
+      aql_clase_c: { tipo: "opcion", nombre: "AQL clase C (menor)", opciones: [{ valor: "0", etiqueta: "Una N/C rechaza (Ac 0 / Re 1)" }, ...AQLS.map((a) => ({ valor: a, etiqueta: a }))], porDefecto: "6,5" },
+    },
+  },
+  {
+    categoria: "hcp_plantilla",
+    titulo: "SVM · Hoja de Control de Pruebas por tipo de vehículo",
+    donde:
+      "HCP por vehículo (EP-05 4.6): ítems agrupados con su clase A/B/C; «Método» lleva el veredicto de esos ítems al ensayo del catálogo; Mín/Máx hacen cuantitativo un ítem (giro, frenado, pendientes).",
+    porConfirmar: "HCP de los otros tipos de vehículo (EP-05 P16): se recibió solo la del VLCB.",
+    patron: {
+      tipo: "tabla",
+      nombre: "Ítems de la HCP",
+      alta: "plantilla",
+      maxFilas: 600,
+      columnas: [
+        { clave: "item", etiqueta: "Ítem", tipo: "texto", obligatoria: true, largo: 12 },
+        { clave: "grupo", etiqueta: "Grupo", tipo: "texto", obligatoria: true, largo: 80 },
+        { clave: "subgrupo", etiqueta: "Subgrupo", tipo: "texto", largo: 80 },
+        { clave: "requisito", etiqueta: "Requisito", tipo: "texto", obligatoria: true, largo: 700 },
+        { clave: "cantidad", etiqueta: "Cantidad", tipo: "texto", largo: 10 },
+        { clave: "clase", etiqueta: "Clase", tipo: "opcion", obligatoria: true, opciones: [{ valor: "A", etiqueta: "A" }, { valor: "B", etiqueta: "B" }, { valor: "C", etiqueta: "C" }] },
+        { clave: "metodo", etiqueta: "Método", tipo: "texto", largo: 30 },
+        { clave: "min", etiqueta: "Mín.", tipo: "numero" },
+        { clave: "max", etiqueta: "Máx.", tipo: "numero" },
+        { clave: "unidad", etiqueta: "Unidad", tipo: "texto", largo: 12 },
+      ],
+    },
+  },
+  {
+    categoria: "preparacion_campo",
+    titulo: "Preparación y acondicionamiento de muestras · campos por laboratorio",
+    donde:
+      "OT › Preparación: lo que registra cada laboratorio al preparar la muestra (EP-01/02/03 3.1, EP-05 3.3). «Bloquea»: una casilla sin marcar, una fecha vencida o un equipo no apto detienen la captura de esa muestra.",
+    patron: { tipo: "campo_prep", nombre: "Campo de preparación", alta: "campo" },
+  },
+  {
+    categoria: "preparacion_obligatoria",
+    titulo: "Preparación de muestras · obligatoria antes de capturar",
+    donde: "Captura y revisión por OT: el laboratorio marcado no captura una muestra sin registrar antes su preparación.",
+    patron: { tipo: "obligatorio", nombre: "Preparación obligatoria antes de capturar", opciones: SI_NO, alta: "laboratorio", porDefecto: "no" },
+  },
+  {
+    categoria: "preparacion_trabajo",
+    titulo: "DSA · aprobación de la documentación del trabajo",
+    donde:
+      "OT › Preparación (EP-05 2.2–2.3): qué laboratorios aprueban la documentación antes de ejecutar. El LEM la aprueba solo en terreno (Jefe de Sección valida, Jefe DSA aprueba).",
+    codigos: {
+      exige_aprobacion: {
+        tipo: "multiple",
+        nombre: "Laboratorios cuya documentación se aprueba antes de ejecutar",
+        opciones: [
+          { valor: "LRB", etiqueta: "LRB · Planilla de trabajo" },
+          { valor: "LAM", etiqueta: "LAM · Plan de trabajo" },
+          { valor: "SEO", etiqueta: "SEO · Plan de inspección" },
+          { valor: "SVM", etiqueta: "SVM · Paquete técnico" },
+        ],
+        porDefecto: "LRB,SVM",
+      },
+      bloquea_captura: { tipo: "sino", nombre: "La captura espera la aprobación", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
+  {
+    categoria: "micro",
+    titulo: "LMB · microbiología",
+    donde: "Formulario «Siembra, incubación y lectura» (EP-02 3.4): lecturas programadas desde el inicio de la incubación, con aviso de pendiente y vencida.",
+    porConfirmar: "Temperaturas, tiempos y medios por ensayo (EP-02 P3).",
+    codigos: {
+      lecturas_h: {
+        tipo: "multiple",
+        nombre: "Lecturas programadas (horas desde el inicio de la incubación)",
+        opciones: ["12", "24", "48", "72", "96", "120", "168"].map((h) => ({ valor: h, etiqueta: `${h} h` })),
+        porDefecto: "24,48,72",
+      },
+    },
+  },
+  {
+    categoria: "rsa_criterios",
+    titulo: "LMB · planes n, c, m, M del RSA",
+    donde:
+      "Formulario de microbiología: plan de 2 o 3 clases por método (código del catálogo) y, si se indica, por producto. Sin plan, rige el Máx del ensayo («según RSA vigente»).",
+    porConfirmar: "n, c, m, M por producto y artículo del RSA (EP-02 P2).",
+    codigos: {
+      tabla: {
+        tipo: "tabla",
+        nombre: "Planes por ensayo y producto",
+        maxFilas: 200,
+        columnas: [
+          { clave: "metodo", etiqueta: "Método", tipo: "texto", obligatoria: true, largo: 30 },
+          { clave: "producto", etiqueta: "Producto", tipo: "texto", largo: 120 },
+          { clave: "n", etiqueta: "n", tipo: "entero", obligatoria: true, min: 1, max: 60 },
+          { clave: "c", etiqueta: "c", tipo: "entero", obligatoria: true, min: 0, max: 60 },
+          { clave: "m", etiqueta: "m", tipo: "numero", obligatoria: true, min: 0 },
+          { clave: "M", etiqueta: "M", tipo: "numero", min: 0 },
+          { clave: "articulo", etiqueta: "Artículo RSA", tipo: "texto", largo: 60 },
+        ],
+      },
+    },
+  },
+  {
+    categoria: "sensorial",
+    titulo: "LES · panel sensorial",
+    donde: "Formulario «Panel sensorial» (EP-02 3.6–3.8): jueces mínimos, nivel α del estadístico y rangos por atributo.",
+    porConfirmar: "Nº de jueces, α y rangos vigentes por atributo (EP-02 P4: el Listado LES y el LIMS antiguo difieren).",
+    codigos: {
+      alfa: { tipo: "opcion", nombre: "Nivel de significancia α", opciones: [{ valor: "0,05", etiqueta: "0,05" }, { valor: "0,01", etiqueta: "0,01" }, { valor: "0,001", etiqueta: "0,001" }], porDefecto: "0,05" },
+      jueces_min: { tipo: "entero", nombre: "Jueces válidos mínimos", min: 1, max: 60, unidad: "jueces", porDefecto: "6" },
+      rangos: {
+        tipo: "tabla",
+        nombre: "Rangos por atributo",
+        maxFilas: 60,
+        columnas: [
+          { clave: "prueba", etiqueta: "Prueba", tipo: "texto", obligatoria: true, largo: 40 },
+          { clave: "atributo", etiqueta: "Atributo", tipo: "texto", obligatoria: true, largo: 40 },
+          { clave: "min", etiqueta: "Mín.", tipo: "numero", obligatoria: true, min: 0, max: 10 },
+          { clave: "max", etiqueta: "Máx.", tipo: "numero", obligatoria: true, min: 0, max: 10 },
+        ],
+      },
+    },
+  },
 ];
 
 export const CATEGORIAS_CONFIGURABLES = GRUPOS_CONFIG.map((g) => g.categoria);
@@ -330,8 +542,10 @@ export function conOpciones(def: DefValor, laboratorios: { codigo: string; nombr
 }
 
 /** Código válido de un parámetro por patrón: «LME» o «LME.lote». */
-export function codigoValido(alta: "laboratorio" | "campo", codigo: string): boolean {
+export function codigoValido(alta: AltaPatron, codigo: string): boolean {
   if (alta === "laboratorio") return /^[A-Z][A-Z0-9]{1,11}$/.test(codigo);
+  if (alta === "metodo") return /^[0-9A-Z][0-9A-Z._-]{0,29}$/.test(codigo);
+  if (alta === "plantilla") return /^[A-Z][A-Z0-9_]{1,19}$/.test(codigo);
   return /^[A-Z][A-Z0-9]{1,11}\.[a-z][a-z0-9_]{0,39}$/.test(codigo);
 }
 
@@ -412,7 +626,135 @@ export function valorFormulario(def: DefValor, f: Fila): unknown {
       return f.activo;
     case "campo":
       return campoDe(v, f.activo);
+    case "variante":
+      return { variante: esVariante(String(v ?? "").trim()) ? String(v).trim() : def.porDefecto ?? "estandar", activo: f.activo };
+    case "tabla":
+      return filasTabla(v);
+    case "campo_prep": {
+      let d: any = {};
+      try {
+        d = v ? JSON.parse(v) : {};
+      } catch {
+        d = {};
+      }
+      if (!d || typeof d !== "object" || Array.isArray(d)) d = {};
+      return {
+        tipo: typeof d.tipo === "string" ? d.tipo : "texto",
+        obligatorio: d.obligatorio === true,
+        bloquea: d.bloquea === true,
+        unidad: typeof d.unidad === "string" ? d.unidad : "",
+        opciones: Array.isArray(d.opciones) ? d.opciones : [],
+        ayuda: typeof d.ayuda === "string" ? d.ayuda : "",
+        activo: f.activo,
+      };
+    }
   }
+}
+
+/** Filas de un parámetro de tipo tabla (JSON); [] si no se entiende. */
+export function filasTabla(v: string | null | undefined): Record<string, unknown>[] {
+  try {
+    const f = JSON.parse(v ?? "[]");
+    return Array.isArray(f) ? f.filter((x) => x && typeof x === "object" && !Array.isArray(x)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Valida y normaliza las filas de una tabla según sus columnas: texto (largo),
+ * número con coma decimal, entero, opción y sí/no. Reglas de cada tabla
+ * (claves únicas, V máx. ≥ V mín., c < n, M ≥ m…) en `reglasTabla`.
+ */
+export function normalizarTabla(def: DefValor, entrada: unknown, categoria = ""): { errores: string[]; filas?: Record<string, unknown>[] } {
+  if (!Array.isArray(entrada)) return { errores: ["Las filas de la tabla van como una lista."] };
+  const cols = def.columnas ?? [];
+  const max = def.maxFilas ?? 200;
+  if (entrada.length > max) return { errores: [`La tabla admite como máximo ${max} filas.`] };
+  const e: string[] = [];
+  const filas = entrada.map((x, i) => {
+    const o = (x && typeof x === "object" && !Array.isArray(x) ? x : {}) as Record<string, unknown>;
+    const fila: Record<string, unknown> = {};
+    for (const c of cols) {
+      const v = o[c.clave];
+      const donde = `Fila ${i + 1} · ${c.etiqueta}`;
+      const vacio = v === undefined || v === null || (typeof v === "string" && v.trim() === "");
+      if (vacio) {
+        if (c.obligatoria) e.push(`${donde}: es obligatorio.`);
+        fila[c.clave] = c.tipo === "sino" ? false : null;
+        continue;
+      }
+      switch (c.tipo) {
+        case "texto": {
+          const t = String(v).trim();
+          if (t.length > (c.largo ?? 200)) e.push(`${donde}: máximo ${c.largo ?? 200} caracteres.`);
+          fila[c.clave] = t;
+          break;
+        }
+        case "numero":
+        case "entero": {
+          const t = typeof v === "number" ? String(v) : String(v).trim().replace(",", ".");
+          const n = Number(t);
+          if (!/^-?\d+(\.\d+)?$/.test(t) || !Number.isFinite(n)) e.push(`${donde}: escriba un número${c.tipo === "entero" ? " entero" : " (coma decimal)"}.`);
+          else if (c.tipo === "entero" && !Number.isInteger(n)) e.push(`${donde}: escriba un número entero.`);
+          else if ((c.min != null && n < c.min) || (c.max != null && n > c.max)) e.push(`${donde}: debe estar entre ${c.min ?? "—"} y ${c.max ?? "—"}.`);
+          fila[c.clave] = n;
+          break;
+        }
+        case "opcion": {
+          const t = String(v).trim();
+          if (!c.opciones?.some((op) => op.valor === t)) e.push(`${donde}: elija una de las opciones (${(c.opciones ?? []).map((op) => op.etiqueta).join(", ")}).`);
+          fila[c.clave] = t;
+          break;
+        }
+        case "sino":
+          fila[c.clave] = v === true || v === "si" || v === "sí" || v === "Sí";
+          break;
+      }
+    }
+    return fila;
+  });
+  if (e.length) return { errores: e.slice(0, 20).concat(e.length > 20 ? [`… y ${e.length - 20} errores más.`] : []) };
+  const reglas = reglasTabla(categoria, filas);
+  if (reglas.length) return { errores: reglas };
+  return { errores: [], filas };
+}
+
+/** Reglas propias de cada tabla configurable. */
+function reglasTabla(categoria: string, filas: Record<string, unknown>[]): string[] {
+  const e: string[] = [];
+  const repetidas = (clave: string) => {
+    const vistos = new Set<string>();
+    for (const f of filas) {
+      const k = String(f[clave] ?? "").toUpperCase();
+      if (vistos.has(k)) e.push(`«${f[clave]}» está repetido en la columna ${clave}.`);
+      vistos.add(k);
+    }
+  };
+  if (categoria === "lrb") {
+    if (!filas.length) e.push("La tabla de amenazas necesita al menos una fila.");
+    repetidas("clave");
+    filas.forEach((f, i) => {
+      if (Number(f.v_max) < Number(f.v_min)) e.push(`Fila ${i + 1}: la velocidad máxima es menor que la mínima.`);
+    });
+  }
+  if (categoria === "hcp_plantilla") {
+    if (!filas.length) e.push("La HCP necesita al menos un ítem.");
+    repetidas("item");
+    filas.forEach((f, i) => {
+      if (f.min != null && f.max != null && Number(f.max) < Number(f.min)) e.push(`Fila ${i + 1}: Máx. menor que Mín.`);
+    });
+  }
+  if (categoria === "rsa_criterios")
+    filas.forEach((f, i) => {
+      if (Number(f.c) >= Number(f.n)) e.push(`Fila ${i + 1}: c debe ser menor que n.`);
+      if (f.M != null && Number(f.M) < Number(f.m)) e.push(`Fila ${i + 1}: M debe ser mayor o igual que m.`);
+    });
+  if (categoria === "sensorial")
+    filas.forEach((f, i) => {
+      if (Number(f.max) < Number(f.min)) e.push(`Fila ${i + 1}: Máx. menor que Mín.`);
+    });
+  return e;
 }
 
 /* ---------------------------------------------------------- validación --- */
@@ -499,6 +841,8 @@ export function normalizarValor(
   def: DefValor,
   fila: { codigo: string; etiqueta: string },
   entrada: unknown,
+  /** Categoría del parámetro (reglas propias de cada tabla). */
+  categoria = "",
 ): { errores: string[]; valor?: ValorNormalizado } {
   switch (def.tipo) {
     case "entero": {
@@ -553,6 +897,26 @@ export function normalizarValor(
       const json = jsonCampo(r.def);
       return { errores: [], valor: { valor: json, activo: r.activo, historial: historialCampo(json, r.activo) } };
     }
+    case "variante": {
+      const d = (entrada && typeof entrada === "object" && !Array.isArray(entrada) ? entrada : { variante: entrada }) as Record<string, unknown>;
+      const v = texto(d.variante);
+      if (!esVariante(v)) return { errores: [`Elija el formulario: ${(def.opciones ?? []).map((o) => o.etiqueta).join(" · ")}.`] };
+      const activo = esSiNo(d.activo ?? true);
+      if (activo === null) return { errores: ["«Activo» es sí o no."] };
+      return { errores: [], valor: { valor: v, activo, historial: historialVariante(v, activo) } };
+    }
+    case "tabla": {
+      const r = normalizarTabla(def, entrada, categoria);
+      if (r.errores.length || !r.filas) return { errores: r.errores };
+      const json = JSON.stringify(r.filas);
+      return { errores: [], valor: { valor: json, activo: true, historial: json } };
+    }
+    case "campo_prep": {
+      const r = normalizarCampoPrep(entrada);
+      if (r.errores.length || !r.def) return { errores: r.errores };
+      const json = jsonCampoPrep(r.def);
+      return { errores: [], valor: { valor: json, activo: r.activo, historial: historialCampo(json, r.activo) } };
+    }
   }
 }
 
@@ -570,8 +934,14 @@ export function historialCampo(valor: string | null, activo: boolean): string {
 /** Representación actual de una fila para el historial (para comparar y registrar «antes»). */
 export function historialDeFila(def: DefValor, f: Fila): string {
   if (def.tipo === "obligatorio") return f.activo ? "si" : "no";
-  if (def.tipo === "campo") return historialCampo(f.valor, f.activo);
+  if (def.tipo === "campo" || def.tipo === "campo_prep") return historialCampo(f.valor, f.activo);
+  if (def.tipo === "variante") return historialVariante(f.valor ?? "", f.activo);
   return f.valor ?? "";
+}
+
+/** Representación de una variante en el historial: «lrb_disparos · activa». */
+export function historialVariante(valor: string, activo: boolean): string {
+  return `${valor} · ${activo ? "activa" : "inactiva"}`;
 }
 
 /** Errores del motivo (mismo criterio que los porcentajes de la tasa). */
@@ -605,6 +975,16 @@ export function textoValor(def: DefValor, guardado: string | null | undefined): 
     }
     case "formato":
       return v || "—";
+    case "variante": {
+      const [valor, estado] = v.split(" · ");
+      const etq = def.opciones?.find((o) => o.valor === valor.trim())?.etiqueta ?? (valor || "—");
+      return estado ? `${etq}${estado.trim() === "inactiva" ? " (inactiva)" : ""}` : etq;
+    }
+    case "tabla": {
+      const n = filasTabla(v).length;
+      return n === 1 ? "1 fila" : `${n.toLocaleString("es-CL")} filas`;
+    }
+    case "campo_prep":
     case "campo": {
       let d: any = {};
       try {
@@ -612,9 +992,10 @@ export function textoValor(def: DefValor, guardado: string | null | undefined): 
       } catch {
         return v || "—";
       }
-      const tipo = TIPO_CAMPO_ETIQUETA[d?.tipo as TipoCampo] ?? "Texto";
-      const partes = [tipo + (d?.tipo === "lista" && Array.isArray(d?.opciones) ? `: ${d.opciones.map((o: any) => o?.etiqueta ?? o?.valor ?? o).join(" / ")}` : "")];
+      const tipo = d?.tipo === "equipo" ? "Equipo del laboratorio" : TIPO_CAMPO_ETIQUETA[d?.tipo as TipoCampo] ?? "Texto";
+      const partes = [tipo + (d?.unidad ? ` (${d.unidad})` : "") + (d?.tipo === "lista" && Array.isArray(d?.opciones) ? `: ${d.opciones.map((o: any) => o?.etiqueta ?? o?.valor ?? o).join(" / ")}` : "")];
       partes.push(d?.obligatorio ? "obligatorio" : "opcional");
+      if (d?.bloquea) partes.push("bloquea la captura");
       if (d?.activo === false) partes.push("inactivo");
       return partes.join(" · ");
     }
