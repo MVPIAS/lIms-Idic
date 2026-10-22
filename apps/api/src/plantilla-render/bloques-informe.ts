@@ -264,6 +264,9 @@ export function completarCuerpo(cuerpo: string, cfg: ConfigInforme): string {
   const finales = ["referencias", "anexo_fotografico", "conclusion"]
     .filter((t) => !tiene(t) && !(t === "conclusion" && tiene("conclusion_texto")))
     .map((t) => `{{${t}}}`);
+  // IVC: sección V «Inspección por atributos (AQL)» si la OT la tiene (EP-03 3.7, frente r2a).
+  if (cfg.portada === "ivc" && !tiene("tabla_aql"))
+    finales.unshift("{{#si aql.hay}}<h2>V. Inspección por atributos (AQL)</h2>\n{{tabla_aql}}{{/si}}");
   if (finales.length) {
     const bloque = `\n${finales.join("\n")}\n`;
     out = RE_FIRMAS.test(out) ? out.replace(RE_FIRMAS, `${bloque}<div class="firmas">`) : `${out}${bloque}`;

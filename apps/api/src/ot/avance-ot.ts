@@ -14,7 +14,9 @@
  *   emision → firmas → entrega → cierre → factura → pago
  * Variantes: OT interna / interlaboratorio / sin cobro (factura y pago no
  * aplican), Metrología (calibración en vez de captura estándar), BPCH
- * Internación y Reinspección (las fases del expediente BPCH).
+ * Internación y Reinspección (las fases del expediente BPCH). En el DSA, si la
+ * documentación del trabajo se aprueba antes de ejecutar (EP-05 2.2–2.3), entre
+ * la asignación y el análisis va la etapa «Preparación del trabajo» (frente r2a).
  */
 import { faltantesParaCerrar } from "./plazos";
 import { condicionFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
@@ -23,7 +25,7 @@ import { calibracionVigente, documentosDeCalibraciones, faltantesInstrumentos } 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
 export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion";
 /** Pestañas del expediente de la OT a las que puede llevar el «Siguiente paso». */
-export type PestanaOt = "cabecera" | "asignacion" | "muestras" | "instrumentos" | "resultados" | "informe";
+export type PestanaOt = "cabecera" | "asignacion" | "preparacion" | "muestras" | "instrumentos" | "resultados" | "informe";
 
 export interface Etapa {
   clave: string;
@@ -166,6 +168,15 @@ export interface HechosOt {
     loteRegistrado: boolean;
     conCodificacion: boolean;
     trazabilidadHecha: boolean;
+  } | null;
+  /** Documentación del trabajo del DSA (formularios/trabajo-avance.ts); null fuera del DSA. */
+  trabajoDsa?: {
+    laboratorio: string;
+    titulo: string;
+    exige: boolean;
+    /** borrador | en_aprobacion | validada | aprobada | devuelta | registrada | null (sin preparar) */
+    estado: string | null;
+    texto: string;
   } | null;
 }
 
@@ -439,6 +450,33 @@ function ordenesPendientes(h: HechosOt) {
   };
 }
 
+/** Etapa «Preparación del trabajo» del DSA (EP-05 2.2–2.3): solo si la documentación se aprueba. */
+function etapaTrabajo(h: HechosOt): { etapa: Etapa; paso: Paso } | null {
+  const t = h.trabajoDsa;
+  if (!t?.exige) return null;
+  const estado: EstadoEtapa = t.estado === "aprobada" ? "hecho" : t.estado === "en_aprobacion" || t.estado === "validada" ? "en_curso" : "pendiente";
+  const lem = t.laboratorio === "LEM";
+  const paso: Paso =
+    t.estado === "en_aprobacion"
+      ? {
+          texto: lem ? `Validar la ${t.titulo} (Jefe de Sección) antes de la aprobación del Jefe DSA` : `Aprobar la ${t.titulo} antes de ejecutar`,
+          leToca: { rol: lem ? "Jefe de Sección Ensayos Mecánicos" : "Jefe de Laboratorio", unidad: lem ? "SEM" : t.laboratorio, personas: [] },
+          accion: { texto: "Ir a Preparación", pestana: "preparacion", permisos: ["ot.preparacion.aprobar"] },
+        }
+      : t.estado === "validada"
+        ? {
+            texto: `Aprobar la ${t.titulo} (validada por el Jefe de Sección)`,
+            leToca: { rol: "Jefe del Departamento Sistemas de Armas", unidad: "DSA", personas: [] },
+            accion: { texto: "Ir a Preparación", pestana: "preparacion", permisos: ["ot.preparacion.aprobar"] },
+          }
+        : {
+            texto: t.estado === "devuelta" ? `Corregir la ${t.titulo} devuelta y enviarla de nuevo a aprobación` : `Preparar la ${t.titulo} y enviarla a aprobación`,
+            leToca: { rol: lem ? "Jefe de Laboratorio" : "Analista", unidad: t.laboratorio, personas: h.analistas },
+            accion: { texto: "Ir a Preparación", pestana: "preparacion", permisos: ["resultado.crear", "ot.asignar"] },
+          };
+  return { etapa: etapa("preparacion", "Preparación del trabajo", estado, `${t.titulo}: ${t.texto}`), paso };
+}
+
 /** Siguiente paso de una orden interna pendiente: le toca al destino o al solicitante. */
 function pasoOrdenInterna(h: HechosOt): Paso | null {
   const { enDestino, porIntegrar } = ordenesPendientes(h);
@@ -483,6 +521,7 @@ function rutaLaboratorio(h: HechosOt): Ruta {
   const fac = etapasFactura(h);
   // La asignación ordena el trabajo pero no lo bloquea: si ya hay capturas, se da por hecha.
   const trabajoEmpezado = h.resultados.total - h.resultados.pendientes > 0;
+  const trabajo = etapaTrabajo(h);
   const etapas = [
     etapa("apertura", "Apertura de la OT", h.unidad ? "hecho" : "pendiente", detalleApertura(h)),
     etapa(
@@ -497,6 +536,7 @@ function rutaLaboratorio(h: HechosOt): Ruta {
       h.analistas.length || trabajoEmpezado ? "hecho" : "pendiente",
       h.analistas.length ? h.analistas.join(", ") : trabajoEmpezado ? "Sin asignación formal" : null,
     ),
+    ...(trabajo ? [trabajo.etapa] : []),
     res.analisis,
     res.revision,
     res.aprobacion,
@@ -529,6 +569,8 @@ function rutaLaboratorio(h: HechosOt): Ruta {
             leToca: { rol: "Jefe de Laboratorio", unidad: u, personas: [] },
             accion: { texto: "Ir a Asignación", pestana: "asignacion", permisos: ["ot.asignar"] },
           };
+        case "preparacion":
+          return trabajo?.paso ?? null;
         case "analisis":
           // Con todo lo propio capturado, lo que falta es la orden interna.
           if (h.resultados.pendientes + h.resultados.devueltos === 0 && h.resultados.total > 0) {
