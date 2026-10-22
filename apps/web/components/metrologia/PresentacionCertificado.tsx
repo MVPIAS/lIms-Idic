@@ -19,7 +19,10 @@ type Datos = {
   presentacion: {
     acreditado: boolean | null; acreditadoMotivo: string | null; reemplaza: string | null; reemplazaMotivo: string | null;
     observaciones: string | null; campos: Record<string, string>; esquemaModo: "defecto" | "propio" | "ninguno"; esquemaPie: string | null;
+    formato?: string;
   };
+  /** Formatos de certificado del proceso además del estándar (ITT01: ASTM). */
+  formatos?: { valor: string; etiqueta: string }[];
   editable: boolean; acreditacionProceso: string | null; acreditado: boolean; logoConfigurado: boolean; reemision: string | null;
   automaticas: string[]; observaciones: string[]; campos: Campo[]; frases: string[];
   esquema: { modo: string; propio: boolean; defecto: string | null; imprime: string | null };
@@ -43,6 +46,7 @@ export default function PresentacionCertificado({ id, magnitud, onGuardado }: { 
         reemplaza: r.presentacion.reemplaza ?? "", reemplazaMotivo: r.presentacion.reemplazaMotivo ?? "",
         observaciones: r.observaciones.join("\n"), propias: r.presentacion.observaciones != null,
         campos: { ...r.presentacion.campos }, esquemaModo: r.presentacion.esquemaModo, esquemaPie: r.presentacion.esquemaPie ?? "",
+        formato: r.presentacion.formato ?? "estandar",
       });
     } catch (e: any) { setError(e.message); }
   }, [id]);
@@ -86,6 +90,7 @@ export default function PresentacionCertificado({ id, magnitud, onGuardado }: { 
         campos: f.campos,
         esquemaModo: archivo ? "propio" : f.esquemaModo,
         esquemaPie: f.esquemaPie.trim() || null,
+        ...((d!.formatos ?? []).length ? { formato: f.formato } : {}),
       });
       toast.ok(r?.data?.cambios ? `Certificado actualizado: ${r.data.cambios}.` : "Sin cambios en la presentación.");
       await cargar();
@@ -100,6 +105,7 @@ export default function PresentacionCertificado({ id, magnitud, onGuardado }: { 
       <li>Línea de acreditación: «{lineaHoy}»{d.acreditado ? (d.logoConfigurado ? ", con el logo de acreditación." : ". El logo no está cargado: se imprime solo «Acreditación " + d.acreditacionProceso + "» (Metrología › Configuración).") : ", sin logo."}</li>
       {(d.reemision || d.presentacion.reemplaza) && <li>Reemplaza al certificado N° {d.reemision ?? d.presentacion.reemplaza}{d.reemision ? " (reemisión en el LIMS)" : ""}.</li>}
       <li>Esquema: {d.esquema.imprime ? `${d.esquema.imprime}${d.esquema.modo === "propio" ? " (imagen propia)" : " (el del proceso)"}` : "sin esquema"}.</li>
+      {(d.formatos ?? []).length > 0 && <li>Formato: {(d.formatos ?? []).find((x) => x.valor === (d.presentacion.formato ?? "estandar"))?.etiqueta ?? "Estándar"}.</li>}
     </ul>
   );
 
@@ -115,6 +121,16 @@ export default function PresentacionCertificado({ id, magnitud, onGuardado }: { 
     <div>
       {resumen}
       {d.avisos.map((a) => <div key={a} className="alert warn">{a}</div>)}
+      {(d.formatos ?? []).length > 0 && (
+        <fieldset className={s.opciones} style={{ border: 0, padding: 0, margin: "0 0 10px" }}>
+          <legend style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 4 }}>Formato del certificado</legend>
+          {(d.formatos ?? []).map((x) => (
+            <label key={x.valor} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="radio" name="pc-formato" checked={f.formato === x.valor} onChange={() => setF({ ...f, formato: x.valor })} /> {x.etiqueta}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <div className="form-grid cols-2">
         <fieldset className={s.opciones} style={{ border: 0, padding: 0, margin: 0 }}>
           <legend style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 4 }}>Logo de acreditado</legend>

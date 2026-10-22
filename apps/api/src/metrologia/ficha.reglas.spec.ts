@@ -141,7 +141,7 @@ describe("LNF → maestro de patrones (P8.5) con el caso real LCPNF-010.26", () 
     expect(a.despues.coeficientes.t).toBeCloseTo(582.4989468061831, 9);
     expect(a.despues.coeficientes.u).toBeCloseTo(-0.6168731795478379, 12);
     expect(a.despues.coeficientes.v).toBeCloseTo(0.07537163824417803, 12);
-    expect(a.despues.u_expandida).toBeCloseTo(Math.max(...r.rows.map((x: any) => x.Umin)), 12);
+    expect(a.despues.u_expandida).toBeCloseTo(Math.max(...r.rows.map((x: any) => x.U)), 12);
     expect(a.despues).toMatchObject({ deriva: 0.02, n_certificado: "LCPNF-010.26", ultima_calibracion: "2026-03-23", vence: "2028-03-23", intervalo_meses: 24 });
   });
 

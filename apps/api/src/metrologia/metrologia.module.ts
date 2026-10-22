@@ -33,7 +33,7 @@ import { CASOS_1510, verificarParidad1510 } from "./motores/paridad-1510";
 import { armarCertificado, certificadoHtml, datosCertificado, type ContextoCertificado, type FirmaCert } from "./metrologia.certificado";
 import { formatoDe } from "./certificado/formato-it";
 import {
-  avisosPresentacion, leerPresentacion, MODOS_ESQUEMA, resumenCambios, validarPresentacion, type Presentacion,
+  avisosPresentacion, formatosDe, leerPresentacion, MODOS_ESQUEMA, resumenCambios, validarPresentacion, type Presentacion,
 } from "./certificado/presentacion";
 import { CLAVE_LOGO, claveValida, clavesEsquema, esquemaEfectivo, imagenCert, MAX_IMAGEN_BYTES, revisarImagen, type FilaImagen } from "./certificado/imagenes";
 import {
@@ -134,6 +134,8 @@ const PresentacionSchema = z.object({
   campos: z.record(z.string().max(200)).optional(),
   esquemaModo: z.enum(MODOS_ESQUEMA as [string, ...string[]]).optional(),
   esquemaPie: z.string().max(300).nullable().optional(),
+  /** Formato del certificado del proceso (ITT01: «astm», termómetros de fabricación ASTM). */
+  formato: z.string().max(20).optional(),
 }).strict();
 type ArchivoSubido = { buffer: Buffer; originalname?: string; mimetype?: string; size?: number };
 
@@ -751,6 +753,7 @@ export class MetrologiaController {
               CASE WHEN o.id IS NULL THEN NULL
                    ELSE COALESCE(o.origen_trabajo, CASE WHEN o.cotizacion_id IS NOT NULL THEN 'COTIZACION' ELSE 'DIRECTA' END) END AS origen, it.numero AS instrumento_numero, it.estado AS instrumento_estado,
               it.recibido_at AS instrumento_recibido_at, it.etiqueta AS instrumento_etiqueta, it.ubicacion AS instrumento_ubicacion,
+              it.accesorios AS instrumento_accesorios, it.sentido AS instrumento_sentido,
               it.metrologo_id AS instrumento_metrologo_id, ue2.nombre_completo AS entregado_por_nombre,
               -- Fechas de control de la hoja (EP-04 P3.5): solicitud, O/C, término previsto y real.
               to_char(COALESCE(sol.created_at, cot.fecha_emision, cot.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha_solicitud,
@@ -1221,6 +1224,7 @@ export class MetrologiaController {
         observaciones: d.observaciones,
         campos: fmt.campos,
         frases: fmt.frases,
+        formatos: formatosDe(String(cal.proceso)),
         esquema: {
           modo: d.presentacion.esquemaModo,
           propio: cal.esquema_propio,

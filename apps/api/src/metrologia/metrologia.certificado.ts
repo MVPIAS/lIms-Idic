@@ -26,6 +26,8 @@ import {
   acreditacionEfectiva, lineaAcreditacion, leerPresentacion, observacionesAutomaticas, observacionesImpresas, type Presentacion,
 } from "./certificado/presentacion";
 import { altoObservaciones, paginar, type Bloque, type BloqueTabla } from "./certificado/paginacion";
+import { UNIDAD_SI, lineaEquivalenciasSI } from "./certificado/equivalencias";
+import { armarCertificadoLnf } from "./certificado/lnf";
 
 /** Texto de un párrafo: no hace falta escapar las comillas (así se lee «"--" = No aplica» tal cual). */
 const escTexto = (s: unknown) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
@@ -101,11 +103,6 @@ function firmaCelda(f: FirmaCert | null, cargoDefecto: string): string {
 const tablaFirmas = (izq: string, der: string) => `<table class="firmas-cert compacta"><tbody><tr>${izq}${der}</tr></tbody></table>`;
 
 /* ------------------------------------------------------- tablas de la IT --- */
-const UNIDAD_SI: Record<string, { unidad: string; factor: number }> = {
-  bar: { unidad: "MPa", factor: 0.1 },
-  kgf: { unidad: "N", factor: 9.80665 },
-  "lbf·ft": { unidad: "N·m", factor: 1.3558179483314 },
-};
 const tabla = (cabecera: string[], filas: string[][], titulo?: string): BloqueTabla => ({ tipo: "tabla", titulo, cabecera, filas });
 const at = (a: any, i: number) => (Array.isArray(a) ? a[i] : undefined);
 
@@ -207,6 +204,13 @@ export function tablasResultados(cal: any, acreditado: boolean, fmt: FormatoIT =
         fueraAlcance: fuera, sintesis: sintesisU(mayorU(), "mm"),
       };
     case "ITT01":
+      // Termómetros de fabricación ASTM: hoja «Certificado ASTM» del libro T-2887 (sin la columna emergente).
+      if (leerPresentacion(cal.presentacion).formato === "astm")
+        return {
+          bloques: [tabla(["Indicación del calibrando / °C", "Indicación del patrón / °C", "Error / °C", "Incertidumbre expandida / °C"],
+            rows.map((x, i) => [fx(x.Gc ?? x.G, dec), fx(x.Hc ?? x.H, dec), fx((x.Gc ?? x.G) - (x.Hc ?? x.H), dec), uc(i, x.Ucert ?? x.N)]))],
+          fueraAlcance: fuera, sintesis: sintesisU(mayorU(), "°C"),
+        };
       return {
         bloques: [tabla(["Indicación del calibrando / °C", "Indicación del patrón / °C", "Error / °C", "Temperatura promedio columna emergente / °C", "Incertidumbre expandida / °C"],
           rows.map((x, i) => [fx(x.Gc ?? x.G, dec), fx(x.Hc ?? x.H, dec), fx((x.Gc ?? x.G) - (x.Hc ?? x.H), dec), NA, uc(i, x.Ucert ?? x.N)]))],
@@ -382,6 +386,8 @@ export interface CertificadoArmado { html: string; hojas: number }
 
 /** Arma el certificado de N hojas. */
 export function armarCertificado(cal: any, ctx: ContextoCertificado): CertificadoArmado {
+  // LNF: certificado bilingüe propio (LCPNF-010.26: 6 hojas + anexo de unidades).
+  if (cal.motor === "LCPNF-IT01" && cal.resultado?.rows?.length) return armarCertificadoLnf(cal, ctx);
   const ins = cal.instrumento ?? {};
   const fmt = formatoDe(cal.proceso);
   const { presentacion: p, acred, res, observaciones } = datosCertificado(cal);
@@ -395,6 +401,8 @@ export function armarCertificado(cal: any, ctx: ContextoCertificado): Certificad
   const cargoLab = "Jefe Laboratorio de Metrología";
   const metodo = [cal.metodo, cal.revision].filter(Boolean).join(" · ");
   const campo = (k: string) => v(p.campos[k]);
+  // Equivalencia en el SI de la capacidad, la resolución y el rango (libros de presión, fuerza y par).
+  const unidadInstr = cal.motor ? REGISTRO_MOTORES[cal.motor]?.unidad : null;
 
   // Resultados repartidos en hojas (pregunta 12: N hojas).
   const bloques: Bloque[] = [...res.bloques];
@@ -425,6 +433,11 @@ ${membrete(numero, acred, ctx.logo)}
     ...(fmt.clase ? [[fmt.clase, v(ins.clase)] as [string, string]] : []),
     ...fmt.campos.filter((f) => f.seccion === "instrumento").map((f) => [f.etiqueta, campo(f.clave)] as [string, string]),
   ];
+  const equivalencias = lineaEquivalenciasSI([
+    ...(fmt.capacidad ? [[fmt.capacidad, ins.cap] as [string, any]] : []),
+    ...(fmt.capacidad === "Valor nominal" ? [] : [["Resolución", ins.res] as [string, any]]),
+    ...(fmt.rango ? [[fmt.rango, ins.rango] as [string, any]] : []),
+  ], unidadInstr);
   const condicionesIt = fmt.campos.filter((f) => f.seccion !== "instrumento").map((f) => [f.etiqueta, campo(f.clave)] as [string, string]);
 
   const hoja1 = `
@@ -446,7 +459,7 @@ ${pares([
     ...(fmt.presion ? [["Presión atmosférica promedio", c.p] as [string, string]] : []),
     ...condicionesIt,
   ])}
-<p class="nota legal">Los valores indicados corresponden a la temperatura y humedad relativa durante la calibración. Además, se indica los valores de incertidumbre del instrumento con que fue medido.</p>
+<p class="nota legal">Los valores indicados corresponden a la temperatura y humedad relativa durante la calibración. Además, se indica los valores de incertidumbre del instrumento con que fue medido.${equivalencias ? ` ${esc(equivalencias)}` : ""}</p>
 ${pares([["Método de calibración", v(metodo)], ["Desviaciones del método", v(ins.desviacion || "No")], ["Documento o norma base del método", v(cal.norma)]])}
 <h2 class="compacta">Identificación del patrón</h2>
 ${patronesHtml(cal)}
