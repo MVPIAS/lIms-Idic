@@ -199,7 +199,8 @@ const CAPTURADOS = ["capturado", "revisado_n1", "revisado", "aprobado"];
  * Qué falta para que el destino cierre la orden y devuelva el informe
  * («Cerrar OT interna → devolver al solicitante», EP-01 5.5):
  *   · estar recibida y con la respuesta guardada (horas y costo directo);
- *   · cada ensayo derivado con su resultado capturado en la muestra;
+ *   · cada ensayo derivado con su resultado capturado, revisado y APROBADO por el
+ *     destino en la muestra (cerrada la orden, el destino ya no lo trabaja);
  *   · ningún resultado en 0,00 sin observación: en el LIMS antiguo el destino
  *     dejaba 0,00 como marcador y el IVC informaba otro valor (EP-03 3.5, EP-05 4.10).
  */
@@ -224,6 +225,11 @@ export function faltantesCierreOi(p: {
     }
     const sin = rs.filter((r) => !CAPTURADOS.includes(r.estado ?? ""));
     if (sin.length) f.push(`El ensayo ${e.nombre} tiene ${sin.length} resultado(s) sin capturar.`);
+    // El destino revisa y aprueba lo suyo antes de devolverlo (EP-02 4.1; recorrido
+    // MP-02, D02-02): cerrada la orden, ya nadie puede aprobar un derivado.
+    const sinAprobar = rs.filter((r) => CAPTURADOS.includes(r.estado ?? "") && r.estado !== "aprobado");
+    if (sinAprobar.length)
+      f.push(`El ensayo ${e.nombre} tiene ${sinAprobar.length} resultado(s) sin aprobar: revíselos y apruébelos en «Captura y revisión por OT» antes de cerrar.`);
     // El texto del valor no explica el cero si es solo el número («0», «0,00»).
     const explica = (t: string | null) => Boolean((t ?? "").trim()) && !/^[\s\d.,+-]*$/.test(t ?? "");
     const ceros = rs.filter((r) => CAPTURADOS.includes(r.estado ?? "") && r.valor === 0 && !explica(r.texto) && !(r.observacion ?? "").trim());

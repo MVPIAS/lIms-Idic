@@ -27,6 +27,7 @@ import { FlujoRealModule } from "./flujo-real/flujo-real.module";
 import { SpcModule } from "./spc/spc.module";
 import { RbacModule } from "./rbac/rbac.module";
 import { AlcanceModule } from "./rbac/alcance.service";
+import { AlcanceResultadoModule } from "./rbac/alcance-resultado.service";
 import { AlcanceCatalogoGuard } from "./rbac/alcance-catalogo.guard";
 import { AmbitoUnidadGuard } from "./rbac/ambito-unidad.guard";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
@@ -89,6 +90,7 @@ function prettyTransport() {
     PrismaModule,
     // Alcance por unidad (laboratorio) · @Global: AlcanceService inyectable en cualquier módulo.
     AlcanceModule,
+    AlcanceResultadoModule,
     AuthModule,
     ClienteModule,
     CotizacionModule,

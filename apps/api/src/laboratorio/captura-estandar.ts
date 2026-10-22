@@ -12,7 +12,9 @@
  *       - réplicas: RN1..RNn → promedio, DE, CV; si hay fórmula que no usa
  *         campos (p. ej. «PROMEDIO(RN) * 100») se aplica sobre ellas;
  *       - valor directo (número, con coma decimal) o texto cualitativo.
- *     Veredicto: Mín ≤ valor ≤ Máx; sin límites → «informativo».
+ *     Veredicto: Mín ≤ valor ≤ Máx; sin límites → «informativo». Un valor bajo o
+ *     sobre el límite de detección («< 10», «> 2400») se decide contra Mín/Máx
+ *     cuando es determinable; si no, según `criterioLd` (veredicto.ts).
  *   · FACTOR (factor.ts): si el ensayo lleva factor, multiplica o divide el
  *     valor CALCULADO (lecturas o réplicas). El valor directo no se toca.
  *     `valorSinFactor` guarda el valor antes del factor para recalcular si el
@@ -22,7 +24,7 @@ import { evaluarFormula, FormulaError } from "../common/formula";
 import { leerReplicas } from "./replicas";
 import { traducirFormula } from "./formula-legado";
 import { esNumeroTexto, type TipoDato } from "./especificacion";
-import { veredictoNumerico, type Veredicto } from "./veredicto";
+import { leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado, type Veredicto } from "./veredicto";
 import { aplicarFactor, expresionConFactor, type Factor } from "./factor";
 
 export class CapturaError extends Error {}
@@ -34,6 +36,8 @@ export interface EspecCaptura {
   limiteSup?: string | null;
   formula?: string | null;
   factor?: Factor | null;
+  /** Veredicto de un «< LD» que no se puede decidir (parámetro captura_ld.indeterminado). */
+  criterioLd?: CriterioIndeterminado;
 }
 
 export interface EntradaCaptura {
@@ -188,6 +192,11 @@ export function calcularCaptura(espec: EspecCaptura, e: EntradaCaptura): Calculo
       // Texto en un ensayo numérico: se compara con una referencia de texto si la
       // hay; si no, lo decide el revisor.
       const t = e.valor.trim();
+      // «< 10», «≤ 1,8», «> 2400»: bajo o sobre el límite de detección. Se decide
+      // contra Mín/Máx cuando todo valor posible cae del mismo lado (veredicto.ts).
+      const censurado = leerCensurado(t);
+      if (censurado && (inf != null || sup != null))
+        return { ...out, valorTexto: t, veredicto: veredictoCensurado(censurado, inf, sup, espec.criterioLd ?? "pendiente") };
       const esperado = texto(espec.nominal) ?? texto(espec.limiteInf) ?? texto(espec.limiteSup);
       return { ...out, valorTexto: t, veredicto: esperado ? (t.toLowerCase() === esperado ? "cumple" : "no_cumple") : "pendiente" };
     }

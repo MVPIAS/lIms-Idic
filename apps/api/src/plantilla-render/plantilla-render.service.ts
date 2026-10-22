@@ -895,29 +895,35 @@ export class PlantillaRenderService {
     if (ot.estado === "anulada" || ot.estado === "cerrada")
       faltantes.push(`La OT ${ot.codigo} está ${ot.estado}: no admite nuevos documentos.`);
     faltantes.push(...cober.errores);
+    // Cobertura a medio elegir (p. ej. «Un laboratorio» sin laboratorio): solo se
+    // pide lo que falta elegir; lo demás se evalúa al completarla (recorrido MP-02, D02-07).
+    const coberturaIncompleta = cober.errores.length > 0;
 
-    // 1. Resultados aprobados (los que cubre el documento).
+    // 1. Resultados aprobados (los que cubre el documento) y con veredicto.
     const todos = await this.prisma.resultado.findMany({
       where: { otId, deletedAt: null },
       select: {
         id: true,
         estado: true,
+        veredicto: true,
         muestra: { select: { codigo: true } },
         analito: { select: { nombre: true } },
         catAnalito: { select: { nombre: true } },
       },
     });
     const resultados = cober.resultadoIds ? todos.filter((r) => cober.resultadoIds!.has(r.id)) : todos;
-    faltantes.push(
-      ...faltantesParaEmitir(
-        resultados.map((r) => ({
-          estado: r.estado,
-          muestra: r.muestra?.codigo ?? null,
-          analito: r.analito?.nombre ?? r.catAnalito?.nombre ?? null,
-        })),
-        plantilla.tipo,
-      ),
-    );
+    if (!coberturaIncompleta)
+      faltantes.push(
+        ...faltantesParaEmitir(
+          resultados.map((r) => ({
+            estado: r.estado,
+            veredicto: r.veredicto,
+            muestra: r.muestra?.codigo ?? null,
+            analito: r.analito?.nombre ?? r.catAnalito?.nombre ?? null,
+          })),
+          plantilla.tipo,
+        ),
+      );
 
     // 2. Control de calidad (el mismo gate de antes, convertido en mensaje).
     try {
@@ -933,7 +939,8 @@ export class PlantillaRenderService {
     let pasosOmitidos: { orden: number; accion: string; rolNombre: string; unidadCodigo: string | null; motivo: string }[] = [];
     const otInterna = esOtInterna(ot.origenTrabajo);
     if (!unidadDoc) {
-      faltantes.push(
+      if (!coberturaIncompleta)
+        faltantes.push(
         `La OT ${ot.codigo} no tiene laboratorio responsable asignado: no se puede saber quién debe firmar el documento.`,
       );
     } else {

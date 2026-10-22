@@ -80,6 +80,8 @@ export function tipoDocumentoPorDefecto(p: {
 
 export interface ResultadoEmision {
   estado: string | null;
+  /** Veredicto del ensayo: uno «pendiente» (sin decidir) no deja emitir (D02-03). */
+  veredicto?: string | null;
   muestra?: string | null;
   analito?: string | null;
 }
@@ -106,7 +108,17 @@ export function faltantesParaEmitir(resultados: ResultadoEmision[], tipoPlantill
       : ["La OT no tiene resultados registrados. Capture y apruebe los resultados antes de emitir."];
   }
   const pendientes = resultados.filter((r) => r.estado !== "aprobado");
-  if (!pendientes.length) return [];
+  if (!pendientes.length) {
+    // Aprobados pero sin veredicto (datos anteriores a la regla de revisión): no
+    // sale un informe con la condición «Pendiente» (recorrido MP-02, D02-03).
+    const sinVeredicto = resultados.filter((r) => r.veredicto !== undefined && (r.veredicto == null || String(r.veredicto).toLowerCase() === "pendiente"));
+    if (!sinVeredicto.length) return [];
+    return [
+      `Hay ${sinVeredicto.length} resultado(s) sin veredicto (Pendiente): ` +
+        sinVeredicto.slice(0, 8).map((r) => `${r.muestra ?? "muestra"} · ${r.analito ?? "ensayo"}`).join("; ") +
+        ". Reabra el resultado y decida su veredicto (Cumple, No cumple o Informativo) antes de emitir.",
+    ];
+  }
 
   const porEstado = new Map<string, number>();
   for (const r of pendientes) {

@@ -63,8 +63,12 @@ describe("órdenes internas · recepción, respuesta y cierre por el destino", (
 
   it("cierra con respuesta guardada y todos los ensayos capturados", () => {
     expect(
-      faltantesCierreOi({ estado: "recibida", respondida: true, ensayos, resultados: [res("e1", "aprobado", 2.1), res("e2", "capturado", 6.8)] }),
+      faltantesCierreOi({ estado: "recibida", respondida: true, ensayos, resultados: [res("e1", "aprobado", 2.1), res("e2", "aprobado", 6.8)] }),
     ).toEqual([]);
+    // Capturado pero sin aprobar: el destino lo aprueba antes de cerrar (D02-02).
+    expect(
+      faltantesCierreOi({ estado: "recibida", respondida: true, ensayos, resultados: [res("e1", "aprobado", 2.1), res("e2", "revisado_n1", 6.8)] }).join(" "),
+    ).toMatch(/pH tiene 1 resultado\(s\) sin aprobar/);
   });
 
   it("no cierra sin respuesta, con ensayos sin resultado o sin capturar", () => {
@@ -78,12 +82,12 @@ describe("órdenes internas · recepción, respuesta y cierre por el destino", (
     const f = faltantesCierreOi({ estado: "recibida", respondida: true, ensayos: [ensayos[0]], resultados: [res("e1", "capturado", 0)] });
     expect(f.join(" ")).toMatch(/0,00 sin observación/);
     expect(
-      faltantesCierreOi({ estado: "recibida", respondida: true, ensayos: [ensayos[0]], resultados: [res("e1", "capturado", 0, "< LD (0,05 %)")] }),
+      faltantesCierreOi({ estado: "recibida", respondida: true, ensayos: [ensayos[0]], resultados: [res("e1", "aprobado", 0, "< LD (0,05 %)")] }),
     ).toEqual([]);
     // El valor escrito «0,00» no es una explicación.
     const conTexto = { ...res("e1", "capturado", 0), texto: "0,00" };
     expect(faltantesCierreOi({ estado: "recibida", respondida: true, ensayos: [ensayos[0]], resultados: [conTexto] }).join(" ")).toMatch(/0,00 sin observación/);
-    const ausente = { ...res("e1", "capturado", 0), texto: "No detectado" };
+    const ausente = { ...res("e1", "aprobado", 0), texto: "No detectado" };
     expect(faltantesCierreOi({ estado: "recibida", respondida: true, ensayos: [ensayos[0]], resultados: [ausente] })).toEqual([]);
   });
 

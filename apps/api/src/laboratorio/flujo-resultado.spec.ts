@@ -86,3 +86,13 @@ describe("edición manual del resultado (revisión de seguridad r3)", () => {
     expect(motivoEdicionManual({ estado: "aprobado", analistaId: "ana" }, "rev", { unidad: "x" })?.status).toBe(409);
   });
 });
+
+import { motivoSinVeredicto } from "./flujo-resultado";
+
+describe("sin veredicto no se revisa ni se aprueba (D02-03)", () => {
+  it("pendiente o vacío bloquea; cumple, no cumple e informativo no", () => {
+    expect(motivoSinVeredicto("pendiente", "aprobado")).toMatch(/Pendiente.*aprobarlo/);
+    expect(motivoSinVeredicto(null, "revisado_n1")).toMatch(/revisarlo/);
+    for (const v of ["cumple", "no_cumple", "informativo", "Cumple"]) expect(motivoSinVeredicto(v, "aprobado")).toBeNull();
+  });
+});

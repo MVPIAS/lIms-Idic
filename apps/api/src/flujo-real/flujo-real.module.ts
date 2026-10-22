@@ -35,7 +35,7 @@ import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laborator
 import { traducirFormula } from "../laboratorio/formula-legado";
 import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
 import { calcularCaptura, CapturaError, variablesDeCaptura } from "../laboratorio/captura-estandar";
-import { veredictoNumerico } from "../laboratorio/veredicto";
+import { criterioIndeterminado, leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado } from "../laboratorio/veredicto";
 import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
 import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion, type RecepcionNormalizada } from "./recepcion-muestra";
 import { aplicarFactor, erroresFactor, expresionConFactor, factorDe } from "../laboratorio/factor";
@@ -45,6 +45,8 @@ import { RecepcionModule } from "../recepcion/recepcion.module";
 import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 import { condicionesEnsayo, equipoObligatorio, equipoUsable, modoEquipo, type ModoEquipo } from "../laboratorio/equipo-captura";
 import { RecepcionService, type ConfigRecepcionLab } from "../recepcion/recepcion.service";
+import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
+import { decidirAccionResultado, type AccionResultado } from "../rbac/alcance-resultado";
 import { retenerHasta, type RecepcionLabNormalizada } from "../recepcion/reglas-recepcion";
 
 /**
@@ -588,7 +590,17 @@ export class PuenteAnalisisService {
     private readonly alcance: AlcanceService,
     private readonly labs: LaboratorioOtService,
     private readonly equipos: EquiposService,
+    private readonly alcanceResultado: AlcanceResultadoService,
   ) {}
+
+  /** Veredicto de un «< LD» indeterminado (parámetro captura_ld.indeterminado; por defecto pendiente). */
+  private async criterioLd(tenantId: string): Promise<CriterioIndeterminado> {
+    const f = await this.prisma.$queryRawUnsafe<{ valor: string | null }[]>(
+      `SELECT valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'captura_ld' AND codigo = 'indeterminado' AND activo`,
+      tenantId,
+    );
+    return criterioIndeterminado(f[0]?.valor);
+  }
 
   /** Modo de obligatoriedad del equipo en la captura (parámetro captura_equipo.obligatorio). */
   private async modoEquipo(tenantId: string): Promise<ModoEquipo> {
@@ -606,7 +618,10 @@ export class PuenteAnalisisService {
    * explicar por qué no se pueden usar.
    */
   async equiposDeOt(otId: string, tenantId: string, req: any) {
-    const ot = await this.otEnAlcance(otId, tenantId, req);
+    // El laboratorio de destino de una orden interna también captura en la OT (con sus equipos).
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    await this.alcanceResultado.alcanceEnOt(req, ot, "resultado.crear");
     const delUsuario = await this.alcance.filtroUnidades(req, "resultado.crear");
     const filas = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT e.id, e.codigo, e.nombre, e.modelo, e.serie, e.estado, e.unidad_id AS "unidadId", u.codigo AS "unidadCodigo",
@@ -822,43 +837,23 @@ export class PuenteAnalisisService {
    *   PENDIENTE (revisión manual): cuando no hay forma de decidir —ni cota
    *     numérica comparable ni referencia textual comparable—.
    */
-  /** Resultado del puente, del tenant y del alcance del usuario. */
-  private async resultadoEnAlcance(id: string, tenantId: string, req: any, opts: { destinoOrdenInterna?: boolean } = {}) {
+  /**
+   * Resultado del puente, del tenant y del alcance del usuario para la acción.
+   * El dueño de cada ensayo lo da lims_lab_de_resultado (rbac/alcance-resultado.ts):
+   * un ensayo derivado por orden interna lo capturan solo el laboratorio de
+   * DESTINO y solo mientras la orden está recibida (EP-01 0.6/2.2, EP-02 2.2);
+   * el responsable de la OT lo ve en solo lectura (recorrido MP-02, D02-02/D02-04).
+   */
+  private async resultadoEnAlcance(id: string, tenantId: string, req: any, permiso = "resultado.crear") {
     const resultado = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null, muestra: { tenantId } },
       include: { muestra: { select: { tenantId: true, otId: true } } },
     });
     if (!resultado) throw new NotFoundException(`Resultado ${id} no encontrado`);
     const otId = resultado.otId ?? resultado.muestra.otId;
-    const ot = otId
-      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { codigo: true, unidadPrincipal: true } })
-      : null;
-    const que = ot ? `el resultado de la OT ${ot.codigo}` : "el resultado";
-    if (opts.destinoOrdenInterna && otId && !(await this.alcance.puedeVerUnidad(req, ot?.unidadPrincipal ?? null))) {
-      // Laboratorio de destino de una orden interna RECIBIDA (frente r1b · EP-01 0.6/2.2):
-      // captura en la muestra de la OT de origen, pero solo los ensayos que se le
-      // derivaron y mientras la orden siga recibida (no después de cerrarla).
-      const destinos = await this.prisma.$queryRawUnsafe<{ unidad_id: string }[]>(
-        `SELECT DISTINCT ud.id AS unidad_id
-           FROM orden_interna oi
-           JOIN cat_metodo cm ON cm.id = $3::uuid AND cm.ensayo_id = ANY(oi.ensayos)
-           JOIN cat_familia f ON f.id = oi.destino_lab
-           JOIN LATERAL (
-             SELECT u.id FROM unidad u
-              WHERE u.tenant_id = f.tenant_id AND u.activa
-                AND f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))
-              ORDER BY (u.tipo = 'LABORATORIO') DESC, u.codigo LIMIT 1) ud ON TRUE
-          WHERE oi.ot_id = $1::uuid AND oi.tenant_id = $2::uuid AND oi.deleted_at IS NULL AND oi.estado = 'recibida'
-            AND (oi.muestra_id IS NULL OR oi.muestra_id = $4::uuid)`,
-        otId,
-        tenantId,
-        resultado.catMetodoId,
-        resultado.muestraId,
-      );
-      for (const d of destinos) if (await this.alcance.puedeVerUnidad(req, d.unidad_id)) return { resultado, otId };
-    }
-    await this.alcance.exigirUnidad(req, ot?.unidadPrincipal ?? null, que);
-    return { resultado, otId };
+    const ot = otId ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { codigo: true } }) : null;
+    const lab = await this.alcanceResultado.exigir(req, id, "capturar", permiso, ot ? `el resultado de la OT ${ot.codigo}` : "el resultado");
+    return { resultado, otId, lab };
   }
 
   /**
@@ -869,7 +864,7 @@ export class PuenteAnalisisService {
    */
   async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any) {
     // El laboratorio de destino de una orden interna recibida captura sus ensayos derivados.
-    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req, { destinoOrdenInterna: true });
+    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req);
 
     const bloqueo = motivoNoCapturable(resultado.estado);
     if (bloqueo) throw new ConflictException(bloqueo);
@@ -915,6 +910,7 @@ export class PuenteAnalisisService {
     try {
       calc = calcularCaptura(
         {
+          criterioLd: await this.criterioLd(tenantId),
           tipoDato, limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, formula: resultado.formula,
           factor: factorDe(resultado.factorValor, resultado.factorOperacion, resultado.factorDescripcion),
         },
@@ -971,16 +967,19 @@ export class PuenteAnalisisService {
    * método que aún se pueden corregir. Lo revisado o aprobado no se toca.
    */
   async ajustarFactor(id: string, body: z.infer<typeof FactorBody>, tenantId: string, req: any) {
-    const { resultado, otId } = await this.resultadoEnAlcance(id, tenantId, req);
+    const { resultado, otId, lab } = await this.resultadoEnAlcance(id, tenantId, req, "resultado.factor");
     const operacion = body.valor == null ? null : body.operacion ?? null;
     const errores = erroresFactor({ valor: body.valor, operacion });
     if (errores.length) throw new BadRequestException(errores.join(" "));
     const nuevo = body.valor == null ? null : factorDe(body.valor, operacion, body.descripcion ?? null);
 
-    const objetivo =
+    // «Todo el método»: solo los ensayos del mismo laboratorio dueño (un derivado es del destino).
+    const delMetodo =
       body.todoElMetodo && resultado.catMetodoId && otId
         ? await this.prisma.resultado.findMany({ where: { otId, catMetodoId: resultado.catMetodoId, deletedAt: null } })
         : [resultado];
+    const duenos = delMetodo.length > 1 ? await this.alcanceResultado.labs(delMetodo.map((r) => r.id)) : null;
+    const objetivo = duenos ? delMetodo.filter((r) => r.id === id || duenos.get(r.id)?.unidadId === lab.unidadId) : delMetodo;
     const bloqueo = motivoNoCapturable(resultado.estado);
     if (bloqueo) throw new ConflictException(bloqueo.replace("corregirlo", "cambiar su factor"));
 
@@ -1062,6 +1061,11 @@ export class PuenteAnalisisService {
     else if (nueva.tipoDato !== "atributo" && resultado.valorNumerico != null) {
       const n = (v?: string | null) => (v != null && /^\s*[+-]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(v) ? Number(v.replace(",", ".")) : null);
       veredicto = veredictoNumerico(Number(resultado.valorNumerico), n(nueva.limiteInf), n(nueva.limiteSup));
+    } else if (nueva.tipoDato !== "atributo" && leerCensurado(resultado.valorTexto)) {
+      // «< 10» con la nueva especificación (D02-03).
+      const n = (v?: string | null) => (v != null && /^\s*[+-]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(v) ? Number(v.replace(",", ".")) : null);
+      const inf = n(nueva.limiteInf), sup = n(nueva.limiteSup);
+      if (inf != null || sup != null) veredicto = veredictoCensurado(leerCensurado(resultado.valorTexto)!, inf, sup, await this.criterioLd(tenantId));
     }
 
     const actualizado = await conTraza(this.prisma, { usuarioId: req?.user?.sub, motivo, origen: "especificacion" }, (tx) => tx.resultado.update({
@@ -1093,7 +1097,16 @@ export class PuenteAnalisisService {
    * para el expediente/informe.
    */
   async resultadosDeOt(otId: string, tenantId: string, req?: any) {
-    const ot = await this.otEnAlcance(otId, tenantId, req);
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    // Quien ve el laboratorio responsable ve todos los ensayos (los derivados a otro
+    // laboratorio, en solo lectura); el laboratorio de destino de una orden interna
+    // ve solo los que se le derivaron (recorrido MP-02, D02-02 y D02-04).
+    const vista = await this.alcanceResultado.alcanceEnOt(req, ot, "resultado.ver");
+    const duenos = await this.alcanceResultado.labsDeOt(otId, tenantId);
+    const [veCapturar, veRevisar, veAprobar, veReabrir] = await Promise.all(
+      ["resultado.crear", "resultado.revisar", "resultado.aprobar", "resultado.reabrir"].map((p) => this.alcanceResultado.veUnidad(req, p)),
+    );
 
     const muestras = await this.prisma.muestra.findMany({
       where: { otId, tenantId, deletedAt: null },
@@ -1102,7 +1115,7 @@ export class PuenteAnalisisService {
     });
     const muestraIds = muestras.map((m) => m.id);
 
-    const resultados = muestraIds.length
+    const todos = muestraIds.length
       ? await this.prisma.resultado.findMany({
           where: { muestraId: { in: muestraIds }, deletedAt: null },
           include: {
@@ -1114,6 +1127,7 @@ export class PuenteAnalisisService {
           orderBy: [{ muestraId: "asc" }, { fecha: "asc" }],
         })
       : [];
+    const resultados = vista.todo ? todos : todos.filter((r) => vista.labs.has(duenos.get(r.id)?.unidadId ?? ""));
     // Equipo usado de cada ensayo (código y nombre) y si la captura lo exige.
     const modo = await this.modoEquipo(tenantId);
     const equipoIds = [...new Set(resultados.map((r) => r.equipoId).filter((x): x is string => !!x))];
@@ -1171,8 +1185,21 @@ export class PuenteAnalisisService {
         const t = traducirFormula(r.formula);
         const cat = (r.especCatalogo ?? {}) as Record<string, any>;
         const tipo = r.tipoDato ?? tipoDatoDe({ ...r });
+        const dueno = duenos.get(r.id);
+        const puede = (ve: (u: string | null) => boolean, accion: AccionResultado) =>
+          !!dueno && decidirAccionResultado(dueno, accion, ve).permitido;
         return {
           ...r,
+          // Laboratorio dueño del ensayo y lo que el usuario puede hacer con él (la pantalla no adivina).
+          laboratorio: dueno?.unidadCodigo ?? null,
+          derivado: dueno?.derivado ?? false,
+          ordenInterna: dueno?.derivado ? { id: dueno.ordenInternaId, numero: dueno.oiNumero, estado: dueno.oiEstado } : null,
+          puedo: {
+            capturar: puede(veCapturar, "capturar"),
+            revisar: puede(veRevisar, "revisar"),
+            aprobar: puede(veAprobar, "aprobar"),
+            reabrir: puede(veReabrir, "reabrir"),
+          },
           tipoDato: tipo,
           equipo: r.equipoId ? equipoDe.get(r.equipoId) ?? null : null,
           equipoRequerido: equipoObligatorio(modo, !!r.catMetodo?.equipoRequerido, tipo),
