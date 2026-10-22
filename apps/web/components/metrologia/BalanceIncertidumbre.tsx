@@ -14,6 +14,8 @@ export interface ComponenteBalance { simbolo: string; nombre: string; formula: s
 export interface PuntoBalance { indice: number; nominal: number | null; componentes: ComponenteBalance[]; uc: number; ucMotor: number; k: number; U: number }
 export interface Balance { motor: string; unidad: string; unidadNominal?: string; puntos: PuntoBalance[] }
 
+/** Los símbolos (u, uc, g, mL) no se pasan a mayúsculas como el resto de las cabeceras. */
+const SIN_MAYUS = { textTransform: "none" as const, letterSpacing: 0 };
 const pct = (x: number) => `${x.toLocaleString("es-CL", { maximumFractionDigits: 1, minimumFractionDigits: 1 })} %`;
 
 /** Calibraciones antiguas sin motor: componentes guardados en cada punto (GUM parametrizado). */
@@ -61,7 +63,7 @@ export default function BalanceIncertidumbre({ balance, puntos, unidadNominal }:
           <caption className="sr-only">Balance de incertidumbre del punto {p.nominal == null ? "" : fmtG(p.nominal)}</caption>
           <thead>
             <tr><th scope="col">Componente</th><th scope="col">Fórmula</th><th scope="col">Distribución</th><th scope="col">Divisor</th>
-              <th scope="col" className="num">u<sub>i</sub>{u ? ` (${u})` : ""}</th><th scope="col" style={{ minWidth: 150 }}>Aporte u<sub>i</sub>²/u<sub>c</sub>²</th></tr>
+              <th scope="col" className="num" style={SIN_MAYUS}>u<sub>i</sub>{u ? ` (${u})` : ""}</th><th scope="col" style={{ ...SIN_MAYUS, minWidth: 170 }}>Aporte u<sub>i</sub>²/u<sub>c</sub>²</th></tr>
           </thead>
           <tbody>
             {p.componentes.map((x) => (
@@ -71,7 +73,7 @@ export default function BalanceIncertidumbre({ balance, puntos, unidadNominal }:
                 <td>{x.distribucion}</td>
                 <td className="num">{x.divisor}</td>
                 <td className={`num ${s.calc}`}>{fmtG(x.ui)}</td>
-                <td>
+                <td style={{ whiteSpace: "nowrap" }}>
                   <div className={s.aporte} aria-hidden="true"><span style={{ width: `${Math.min(100, Math.max(0, x.aporte))}%` }} /></div>
                   <span className="num" style={{ fontSize: 12 }}>{pct(x.aporte)}</span>
                 </td>
@@ -79,9 +81,9 @@ export default function BalanceIncertidumbre({ balance, puntos, unidadNominal }:
             ))}
           </tbody>
           <tfoot>
-            <tr><th colSpan={4} style={{ textAlign: "right" }}>Incertidumbre combinada u<sub>c</sub> = √Σu<sub>i</sub>²</th><td className={`num ${s.calc}`}>{fmtG(p.uc)}</td><td /></tr>
-            <tr><th colSpan={4} style={{ textAlign: "right" }}>Factor de cobertura k</th><td className="num">{fmtG(p.k)}</td><td /></tr>
-            <tr><th colSpan={4} style={{ textAlign: "right" }}>Incertidumbre expandida U = k·u<sub>c</sub></th><td className={`num ${s.calc}`}>{fmtG(p.U)}</td><td /></tr>
+            <tr><th colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Incertidumbre combinada u<sub>c</sub> = √Σu<sub>i</sub>²</th><td className={`num ${s.calc}`}>{fmtG(p.uc)}</td><td /></tr>
+            <tr><th colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Factor de cobertura k</th><td className="num">{fmtG(p.k)}</td><td /></tr>
+            <tr><th colSpan={4} style={{ textAlign: "right", ...SIN_MAYUS }}>Incertidumbre expandida U = k·u<sub>c</sub></th><td className={`num ${s.calc}`}>{fmtG(p.U)}</td><td /></tr>
           </tfoot>
         </table>
       </div>
