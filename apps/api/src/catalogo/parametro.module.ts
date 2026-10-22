@@ -199,7 +199,11 @@ export class ParametroSistemaService extends BaseCrudService {
             return f ? parametro(def, f) : { codigo, nombre: def.nombre, falta: true };
           })
         : delGrupo.filter((f) => codigoValido(g.patron!.alta, f.codigo)).map((f) => parametro(g.patron!, f, g.patron!.alta));
-      return { categoria: g.categoria, titulo: g.titulo, donde: g.donde, porConfirmar: g.porConfirmar ?? null, alta: g.patron?.alta ?? null, parametros };
+      // El tipo del patrón (para dar de alta aunque el grupo aún no tenga filas).
+      const patron = g.patron
+        ? { tipo: g.patron.tipo, opciones: g.patron.opciones ?? null, columnas: g.patron.columnas ?? null, maxFilas: g.patron.maxFilas ?? null, nombre: g.patron.nombre }
+        : null;
+      return { categoria: g.categoria, titulo: g.titulo, donde: g.donde, porConfirmar: g.porConfirmar ?? null, alta: g.patron?.alta ?? null, patron, parametros };
     });
     return {
       puedeEditar,
