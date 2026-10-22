@@ -72,7 +72,7 @@ function CertificadosContenido() {
       ),
     },
     // Cumplimiento (con requisito y veredicto) o solo resultados; «—» en los anteriores a esta distinción.
-    { key: "modalidad", label: "Informe", value: (c) => textoModalidad(c.modalidad) ?? "", render: (c) => textoModalidad(c.modalidad) ?? "—" },
+    { key: "modalidad", label: "Informe", value: (c) => textoModalidad(c.modalidad, c.tipoDocumento) ?? "", render: (c) => textoModalidad(c.modalidad, c.tipoDocumento) ?? "—" },
     { key: "fecha", label: "Emitido", value: (c) => c.fecha ?? "", render: (c) => fecha(c.fecha) },
     {
       key: "estado", label: "Estado", value: (c) => ESTADO_DOC[c.estado]?.texto ?? c.estado,

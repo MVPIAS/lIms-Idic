@@ -71,6 +71,11 @@ const DocumentacionBody = z.object({
   detalle: opcional(4000),
   facturaComercial: opcional(60),
   documentoAduanero: opcional(60),
+  // EP-06 6.8 (recorrido MP-06, D06-03): montos de la documentación recibida.
+  cifUsd: z.number().positive("El CIF debe ser mayor que 0.").max(1e12).optional().nullable(),
+  tipoCambio: z.number().positive("El tipo de cambio debe ser mayor que 0.").max(1e6).optional().nullable(),
+  ivaInternacion: z.number().min(0).max(1e13).optional().nullable(),
+  otrosDocumentos: opcional(2000),
 });
 
 const InspeccionBody = z.object({
@@ -200,11 +205,13 @@ export class InternacionBpchService {
   private async fila(tenantId: string, id: string) {
     const [i] = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT i.*, cl.razon_social AS empresa, cl.rut AS empresa_rut, u.codigo AS unidad_codigo, u.nombre AS unidad_nombre, u.tipo AS unidad_tipo,
-              an.nombre_completo AS analista_nombre
+              an.nombre_completo AS analista_nombre,
+              fa.numero AS factura_numero, fa.estado AS factura_estado, fa.total::float8 AS factura_total, fa.saldo::float8 AS factura_saldo
          FROM bpch_internacion i
          JOIN cliente cl ON cl.id = i.cliente_id
          JOIN unidad u ON u.id = i.unidad_inspeccion_id
          LEFT JOIN usuario an ON an.id = i.analista_id
+         LEFT JOIN factura fa ON fa.id = i.factura_id AND fa.deleted_at IS NULL
         WHERE i.id = $1::uuid AND i.tenant_id = $2::uuid`,
       id,
       tenantId,
@@ -287,6 +294,10 @@ export class InternacionBpchService {
         recibidaAt: i.doc_adm_recibida_at,
         detalle: i.doc_adm_detalle,
         facturaComercial: i.factura_comercial,
+        cifUsd: i.doc_cif_usd != null ? Number(i.doc_cif_usd) : null,
+        tipoCambio: i.doc_tipo_cambio != null ? Number(i.doc_tipo_cambio) : null,
+        ivaInternacion: i.doc_iva_internacion != null ? Number(i.doc_iva_internacion) : null,
+        otrosDocumentos: i.doc_otros,
       },
       inspeccion: {
         lugar: i.lugar_inspeccion,
@@ -298,6 +309,10 @@ export class InternacionBpchService {
       },
       remitidaAt: i.remitida_dco_at,
       facturaId: i.factura_id,
+      // Folio y cobro de la factura de la tasa (recorrido MP-06, D06-17).
+      factura: i.factura_id
+        ? { id: i.factura_id, numero: i.factura_numero, estado: i.factura_estado, total: i.factura_total, saldo: i.factura_saldo }
+        : null,
       anuladaMotivo: i.anulada_motivo,
       createdAt: i.created_at,
     };
@@ -642,6 +657,10 @@ export class InternacionBpchService {
               doc_adm_detalle = CASE WHEN $5::text IS NULL THEN doc_adm_detalle ELSE concat_ws(E'\n', doc_adm_detalle, $5::text) END,
               factura_comercial = COALESCE($6, factura_comercial),
               documento_aduanero = COALESCE($7, documento_aduanero),
+              doc_cif_usd = COALESCE($9::numeric, doc_cif_usd),
+              doc_tipo_cambio = COALESCE($10::numeric, doc_tipo_cambio),
+              doc_iva_internacion = COALESCE($11::numeric, doc_iva_internacion),
+              doc_otros = COALESCE($12, doc_otros),
               updated_by = $8::uuid, updated_at = now()
         WHERE id = $1::uuid`,
       id,
@@ -652,6 +671,10 @@ export class InternacionBpchService {
       dto.facturaComercial?.trim() || null,
       dto.documentoAduanero?.trim() || null,
       usuarioDe(req),
+      dto.cifUsd ?? null,
+      dto.tipoCambio ?? null,
+      dto.ivaInternacion ?? null,
+      dto.otrosDocumentos?.trim() || null,
     );
     return this.detalle(req, id);
   }
