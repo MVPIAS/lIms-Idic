@@ -63,6 +63,23 @@ function exigirAlguno(req: any, permisos: string[]) {
     throw new ForbiddenException(`Permiso insuficiente. Requiere uno de: ${permisos.join(", ")}`);
 }
 const tenantDe = (req: any): string => req?.user?.tenantId;
+/** ¿Tiene alguno de los permisos? (SUPERADMIN siempre). */
+function tieneAlguno(req: any, permisos: string[]) {
+  if ((req?.user?.roles ?? []).includes("SUPERADMIN")) return true;
+  const tiene: string[] = req?.user?.permisos ?? [];
+  return permisos.some((p) => tiene.includes(p));
+}
+/**
+ * Tipos de foto (align_recepcion_custodia_equipo_lme.sql): `anexo` (anexo
+ * fotográfico del informe), `recepcion` (registro fotográfico al recibir la
+ * muestra: la sube quien recepciona, muestra.crear) y `termograma` (curva del
+ * instrumento, bloque {{termograma}} del informe).
+ */
+export const TIPOS_FOTO = ["anexo", "recepcion", "termograma"] as const;
+const PERMISOS_FOTO_INFORME = ["resultado.crear", "certificado.emitir"];
+const PERMISOS_FOTO_RECEPCION = ["muestra.crear", ...PERMISOS_FOTO_INFORME];
+/** Ver solo el registro fotográfico de la recepción (quien no ve resultados ni emite). */
+const soloRecepcion = (req: any) => !tieneAlguno(req, ["resultado.ver", "certificado.emitir"]);
 const usuarioDe = (req: any): string | null => req?.user?.sub ?? req?.user?.id ?? null;
 
 const uuidOpcional = z
@@ -79,6 +96,7 @@ const FotoMeta = z.object({
     .optional()
     .transform((v) => (v === undefined ? undefined : v === true || v === "true" || v === "1")),
   orden: z.coerce.number().int().min(0).max(9999).optional(),
+  tipo: z.enum(TIPOS_FOTO).optional(),
 });
 
 const EstructuraBody = z.object({
@@ -140,8 +158,9 @@ export class InformeDatosService {
    */
   async fotos(otId: string, req: any) {
     await this.ot(otId, req);
+    const todas = !soloRecepcion(req);
     const filas = await this.prisma.$queryRaw<any[]>`
-      SELECT f.id, f.nombre, f.mime, f.bytes, f.hash_sha256, f.pie, f.en_informe, f.orden, f.created_at,
+      SELECT f.id, f.nombre, f.mime, f.bytes, f.hash_sha256, f.pie, f.en_informe, f.orden, f.created_at, f.tipo,
              f.muestra_id, m.codigo AS muestra_codigo, f.resultado_id,
              COALESCE(ca.nombre, a.nombre) AS ensayo, u.nombre_completo AS subida_por
         FROM ot_foto f
@@ -151,9 +170,11 @@ export class InformeDatosService {
         LEFT JOIN analito a    ON a.id = r.analito_id
         LEFT JOIN usuario u    ON u.id = f.subida_por
        WHERE f.ot_id = ${otId}::uuid AND f.deleted_at IS NULL
+         AND (${todas}::boolean OR f.tipo = 'recepcion')
        ORDER BY f.orden, f.created_at`;
     return filas.map((f) => ({
       id: f.id,
+      tipo: f.tipo ?? "anexo",
       nombre: f.nombre,
       bytes: f.bytes,
       pie: f.pie,
@@ -173,7 +194,8 @@ export class InformeDatosService {
 
   /** Imagen de una foto (bytes), con el alcance de su OT. */
   async imagen(id: string, req: any): Promise<{ mime: string; datos: Buffer; nombre: string; hash: string | null }> {
-    await this.fotoDelTenant(id, req);
+    const foto = await this.fotoDelTenant(id, req);
+    if (soloRecepcion(req) && foto.tipo !== "recepcion") throw new ForbiddenException("Solo puede ver el registro fotográfico de la recepción.");
     const [f] = await this.prisma.$queryRaw<{ mime: string; datos: string; nombre: string | null; hash_sha256: string | null }[]>`
       SELECT mime, datos, nombre, hash_sha256 FROM ot_foto WHERE id = ${id}::uuid AND deleted_at IS NULL`;
     if (!f) throw new NotFoundException(`Foto ${id} no encontrada`);
@@ -193,6 +215,15 @@ export class InformeDatosService {
     const errorDim = errorDimensionesFoto(archivo.buffer, mime);
     if (errorDim) throw new BadRequestException(errorDim);
     const meta = FotoMeta.parse(cuerpo ?? {});
+    const tipo = meta.tipo ?? "anexo";
+    if (tipo === "recepcion") {
+      // Registro fotográfico de la recepción (EP-03 §0.4, LME 20-10): de una muestra.
+      if (!tieneAlguno(req, PERMISOS_FOTO_RECEPCION))
+        throw new ForbiddenException(`Permiso insuficiente. Requiere uno de: ${PERMISOS_FOTO_RECEPCION.join(", ")}`);
+      if (!meta.muestraId) throw new BadRequestException("Indique la muestra de la foto de recepción.");
+    } else if (!tieneAlguno(req, PERMISOS_FOTO_INFORME)) {
+      throw new ForbiddenException(`Permiso insuficiente. Requiere uno de: ${PERMISOS_FOTO_INFORME.join(", ")}`);
+    }
     const muestraId = await this.validarVinculos(otId, meta.muestraId, meta.resultadoId);
 
     const [{ n }] = await this.prisma.$queryRaw<{ n: number }[]>`
@@ -202,24 +233,31 @@ export class InformeDatosService {
     const nombre = (archivo.originalname ?? "foto").replace(/[^\p{L}\p{N} ._-]/gu, "_").slice(0, 200);
     const hash = createHash("sha256").update(archivo.buffer).digest("hex");
     const filas = await this.prisma.$queryRaw<{ id: string }[]>`
-      INSERT INTO ot_foto (tenant_id, ot_id, muestra_id, resultado_id, nombre, mime, bytes, datos, hash_sha256, pie, en_informe, orden, subida_por)
+      INSERT INTO ot_foto (tenant_id, ot_id, muestra_id, resultado_id, nombre, mime, bytes, datos, hash_sha256, pie, en_informe, orden, subida_por, tipo)
       VALUES (${ot.tenantId}::uuid, ${otId}::uuid, ${muestraId}::uuid, ${meta.resultadoId ?? null}::uuid, ${nombre}, ${mime},
               ${archivo.buffer.length}, ${archivo.buffer.toString("base64")}, ${hash}, ${meta.pie || null},
-              ${meta.enInforme ?? true}, ${meta.orden ?? n}, ${usuarioDe(req)}::uuid)
+              ${meta.enInforme ?? tipo !== "recepcion"}, ${meta.orden ?? n}, ${usuarioDe(req)}::uuid, ${tipo})
       RETURNING id`;
-    return { id: filas[0].id, mime, bytes: archivo.buffer.length, hash };
+    return { id: filas[0].id, mime, bytes: archivo.buffer.length, hash, tipo };
   }
 
   private async fotoDelTenant(id: string, req: any) {
-    const f = await this.prisma.$queryRaw<{ id: string; ot_id: string }[]>`
-      SELECT id, ot_id FROM ot_foto WHERE id = ${id}::uuid AND tenant_id = ${tenantDe(req)}::uuid AND deleted_at IS NULL`;
+    const f = await this.prisma.$queryRaw<{ id: string; ot_id: string; tipo: string }[]>`
+      SELECT id, ot_id, tipo FROM ot_foto WHERE id = ${id}::uuid AND tenant_id = ${tenantDe(req)}::uuid AND deleted_at IS NULL`;
     if (!f[0]) throw new NotFoundException(`Foto ${id} no encontrada`);
     await this.ot(f[0].ot_id, req);
     return f[0];
   }
 
+  /** Cambiar o quitar una foto: las de recepción, también quien recepciona (muestra.crear). */
+  private exigirEdicion(req: any, tipo: string) {
+    const permisos = tipo === "recepcion" ? PERMISOS_FOTO_RECEPCION : PERMISOS_FOTO_INFORME;
+    if (!tieneAlguno(req, permisos)) throw new ForbiddenException(`Permiso insuficiente. Requiere uno de: ${permisos.join(", ")}`);
+  }
+
   async editarFoto(id: string, cuerpo: unknown, req: any) {
     const f = await this.fotoDelTenant(id, req);
+    this.exigirEdicion(req, f.tipo);
     const meta = FotoMeta.parse(cuerpo ?? {});
     let muestraId: string | null | undefined;
     if (meta.muestraId !== undefined || meta.resultadoId !== undefined)
@@ -236,7 +274,8 @@ export class InformeDatosService {
   }
 
   async quitarFoto(id: string, req: any) {
-    await this.fotoDelTenant(id, req);
+    const f = await this.fotoDelTenant(id, req);
+    this.exigirEdicion(req, f.tipo);
     await this.prisma.$executeRaw`UPDATE ot_foto SET deleted_at = now() WHERE id = ${id}::uuid`;
     return { ok: true };
   }
@@ -330,14 +369,15 @@ export class InformeDatosController {
 
   @Get("ot/:otId/fotos")
   fotos(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
-    exigirAlguno(req, ["resultado.ver", "certificado.emitir"]);
+    // Con muestra.ver solo, se listan las fotos de la recepción (registro fotográfico).
+    exigirAlguno(req, ["resultado.ver", "certificado.emitir", "muestra.ver"]);
     return this.svc.fotos(otId, req);
   }
 
   /** La imagen de una foto (PNG o JPEG), para mostrarla en la pantalla de informes. */
   @Get("fotos/:id/imagen")
   async imagen(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
-    exigirAlguno(req, ["resultado.ver", "certificado.emitir"]);
+    exigirAlguno(req, ["resultado.ver", "certificado.emitir", "muestra.ver"]);
     const f = await this.svc.imagen(id, req);
     // Solo PNG o JPEG (validado por sus bytes al subirla); nunca se sirve otro tipo.
     res.setHeader("Content-Type", f.mime === "image/png" ? "image/png" : "image/jpeg");
@@ -358,19 +398,20 @@ export class InformeDatosController {
     @Body() body: unknown,
     @Req() req: any,
   ) {
-    exigirAlguno(req, ["resultado.crear", "certificado.emitir"]);
+    // El permiso según el tipo de foto lo comprueba el servicio (recepción: también muestra.crear).
+    exigirAlguno(req, PERMISOS_FOTO_RECEPCION);
     return this.svc.subirFoto(otId, archivo, body, req);
   }
 
   @Patch("fotos/:id")
   editarFoto(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    exigirAlguno(req, ["resultado.crear", "certificado.emitir"]);
+    exigirAlguno(req, PERMISOS_FOTO_RECEPCION);
     return this.svc.editarFoto(id, body, req);
   }
 
   @Delete("fotos/:id")
   quitarFoto(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    exigirAlguno(req, ["resultado.crear", "certificado.emitir"]);
+    exigirAlguno(req, PERMISOS_FOTO_RECEPCION);
     return this.svc.quitarFoto(id, req);
   }
 

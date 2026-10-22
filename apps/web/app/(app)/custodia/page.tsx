@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fechaHora, num, pct } from "@/lib/format";
 import { esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import Retenciones from "./_components/Retenciones";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -282,6 +283,8 @@ export default function CustodiaPage() {
           <div className="val">{sel ? kpis.enCadena : "—"}</div>
         </div>
       </div>
+
+      <Retenciones onVerCadena={(id) => setSel(id)} />
 
       {!loading && !muestras.length && (
         <div className="alert info">

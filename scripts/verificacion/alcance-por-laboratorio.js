@@ -238,6 +238,11 @@ const LISTADOS = [
   { n: "Certificados (ruta retirada)", r: "/certificados?limit=200", p: "ot.ver", regla: "retirada" },
   { n: "Órdenes internas", r: "/ordenes-internas?limit=200", p: "ot.ver", t: "orden_interna", regla: "unidad", href: "/ordenes-internas" },
   { n: "Órdenes internas · bandeja de entrada (r1b)", r: "/ordenes-internas/bandeja?estado=todas", p: "ot.ver", t: "orden_interna", regla: "unidad" },
+  // Frente r1d: bandeja de entrada del laboratorio (OT por recepcionar y órdenes internas dirigidas al laboratorio),
+  // testigos y contramuestras retenidos y la cadena de custodia.
+  { n: "Bandeja de entrada del laboratorio", r: "/recepcion/bandeja", p: "muestra.crear", t: "orden_interna", regla: "unidad", href: "/recepcion" },
+  { n: "Retención de muestras", r: "/recepcion/retenciones", p: "muestra.ver", t: "muestra", regla: "unidad" },
+  { n: "Cadena de custodia", r: "/custodia?limit=200", p: "muestra.ver", t: "muestra", regla: "unidad", href: "/custodia" },
   { n: "Buscador de documentos", r: "/documentos?limit=200", p: "ot.ver", t: "certificado", regla: "unidad", href: "/documentos" },
   { n: "Control estadístico (SPC)", r: "/spc/series", p: "resultado.ver", t: "ot", regla: "unidad", href: "/spc" },
   { n: "Equipos", r: "/equipos?limit=200", p: "equipo.ver", t: "equipo", regla: "equipo", href: "/equipos" },
@@ -384,6 +389,9 @@ async function main() {
     const DETALLE = [
       ["ot", "ot.ver", (id) => `/ot/${id}`],
       ["muestra", "muestra.ver", (id) => `/muestras/${id}`],
+      ["muestra", "muestra.ver", (id) => `/custodia?muestraId=${id}`],
+      ["ot", "muestra.ver", (id) => `/recepcion/ot/${id}/productos`],
+      ["ot", "resultado.crear", (id) => `/flujo/ot/${id}/equipos`],
       ["resultado", "resultado.ver", (id) => `/resultados/${id}`],
       ["certificado", "ot.ver", (id) => `/informes/${id}/circuito`],
       ["certificado", "ot.ver", (id) => `/certificados/${id}`, [410]],

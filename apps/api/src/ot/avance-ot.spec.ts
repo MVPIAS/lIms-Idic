@@ -450,3 +450,16 @@ describe("Ruta de la OT · cabecera de inspección BPCH (frente r1b · EP-10 10.
     expect(a.siguiente?.texto).toBe("Emitir el informe con los resultados aprobados");
   });
 });
+
+describe("Ruta de la OT · recepción R1 (frente r1d)", () => {
+  it("el siguiente paso de la recepción nombra lo que se registra al recibir (producto, condición, Nº interno)", () => {
+    const a = calcularAvance(base());
+    expect(a.siguiente?.texto).toBe("Recepcionar las muestras: producto, condición de recepción, Nº interno y sus ensayos");
+    expect(a.siguiente?.accion).toMatchObject({ pestana: "muestras", permisos: ["muestra.crear"] });
+  });
+  it("una muestra sin el producto que exige el laboratorio cuenta como recepción incompleta (aviso, no bloquea)", () => {
+    const a = calcularAvance(base({ muestras: { total: 1, recepcionIncompleta: 1 }, resultados: res({ pendientes: 3 }) }));
+    expect(a.etapas.find((e) => e.clave === "recepcion")?.estado).toBe("hecho");
+    expect(a.avisos.join(" ")).toContain("recepción incompleta");
+  });
+});

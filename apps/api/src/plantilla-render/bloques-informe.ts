@@ -5,6 +5,9 @@
  *   {{anexo_fotografico}}  fotos elegidas para el informe, con su pie
  *   {{conclusion}}         texto fijo de la plantilla + texto libre del documento
  *   {{portada}}            portada del IVC (propósito, OT, OPI/OC, contrato…)
+ *   {{tabla_metodos}}      análisis · método · fecha del análisis (PG09 Anexo 02-02, 3.1)
+ *   {{termograma}}         termogramas u otros registros del instrumento (LME)
+ *   {{identificacion_muestras}} Nº interno, producto, cliente y datos de recepción
  *
  * TODO valor que viene de la BD se escapa (`escapeHtml`); el HTML lo pone el
  * motor. Solo se usan etiquetas que entiende el PDF (pdf.renderer.ts):
@@ -12,11 +15,13 @@
  */
 import { escapeHtml } from "./html.util";
 import type { ConfigInforme } from "./config-informe";
-import type { EstructuraInforme, FilaInforme } from "./filas-informe";
+import type { EstructuraInforme, FilaInforme, FilaMetodo } from "./filas-informe";
 
 const GUION = "—";
 const celda = (v: string, clase = "") =>
   `<td${clase ? ` class="${clase}"` : ""}>${v && v.trim() !== "" ? escapeHtml(v) : GUION}</td>`;
+
+const minMax = (cfg: ConfigInforme) => cfg.columnasRequisito === "min_max";
 
 function cabecera(est: EstructuraInforme, cfg: ConfigInforme): string {
   const e = cfg.etiquetas;
@@ -24,11 +29,11 @@ function cabecera(est: EstructuraInforme, cfg: ConfigInforme): string {
   const cumplimiento = est.modalidad === "cumplimiento";
   return (
     "<thead><tr>" +
-    (est.mostrarMuestra ? th("Muestra") : "") +
+    (est.mostrarMuestra ? th(e.muestra) : "") +
     th(e.ensayo) +
     (cfg.columnaMetodo ? th(e.metodo) : "") +
     (cfg.columnaUnidad ? th(e.unidad) : "") +
-    (cumplimiento ? th(e.requisito) : "") +
+    (cumplimiento ? (minMax(cfg) ? th(e.minimo, true) + th(e.maximo, true) : th(e.requisito)) : "") +
     th(e.resultado) +
     (est.mostrarEstadisticas ? th("DE", true) + th("CV %", true) : "") +
     (cumplimiento ? th(e.veredicto) : "") +
@@ -39,8 +44,11 @@ function cabecera(est: EstructuraInforme, cfg: ConfigInforme): string {
 function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme): string {
   const cumplimiento = est.modalidad === "cumplimiento";
   const requisito = f.requisitoOrigen === "orden" ? `${f.requisito} *` : f.requisito;
+  const marca = f.requisitoOrigen === "orden" ? " *" : "";
+  const cota = (v: string) => `<td class="num">${escapeHtml(v ? `${v}${marca}` : cfg.textoSinCota || GUION)}</td>`;
+  const conUnidad = cfg.unidadEnResultado && f.unidad && f.resultado !== "Sin resultado" ? `${f.resultado} ${f.unidad}` : f.resultado;
   const resultado =
-    `<td>${escapeHtml(f.resultado)}` +
+    `<td>${escapeHtml(conUnidad)}` +
     (f.observacion ? `<br><span class="obs">Obs.: ${escapeHtml(f.observacion)}</span>` : "") +
     "</td>";
   const clase = f.veredicto === "cumple" ? "ok" : f.veredicto === "no_cumple" ? "no" : "";
@@ -50,7 +58,7 @@ function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme): s
     celda(f.ensayo) +
     (cfg.columnaMetodo ? celda(f.metodo) : "") +
     (cfg.columnaUnidad ? celda(f.unidad) : "") +
-    (cumplimiento ? celda(requisito) : "") +
+    (cumplimiento ? (minMax(cfg) ? cota(f.minimo) + cota(f.maximo) : celda(requisito)) : "") +
     resultado +
     (est.mostrarEstadisticas ? celda(f.desviacion, "num") + celda(f.cv, "num") : "") +
     (cumplimiento ? celda(f.veredictoTexto, clase) : "") +
@@ -72,7 +80,7 @@ export function bloqueResultados(est: EstructuraInforme, cfg: ConfigInforme): st
   const veredictoDe = new Map(est.veredictosMuestra.map((v) => [v.codigo, v]));
   let html = "";
   for (const s of est.secciones) {
-    html += `<h3>${conNumero(s.numero, s.titulo)}</h3>`;
+    if (s.titulo) html += `<h3>${conNumero(s.numero, s.titulo)}</h3>`;
     for (const c of s.componentes) {
       if (c.titulo) html += `<h4>${conNumero(c.numero, c.titulo)}</h4>`;
       html += tabla(c.filas, est, cfg);
@@ -138,13 +146,69 @@ export function bloqueAnexo(fotos: FotoInforme[], cfg: ConfigInforme): string {
   );
 }
 
+/**
+ * `{{termograma}}`: termogramas (u otro registro gráfico del instrumento) de la
+ * OT marcados para el informe, con su pie. Vacío si no hay.
+ */
+export function bloqueTermograma(fotos: FotoInforme[]): string {
+  const validas = fotos.filter((f) => /^image\/(png|jpeg)$/.test(f.mime) && BASE64.test(f.datos));
+  if (!validas.length) return "";
+  return validas
+    .map((f, i) => {
+      const pie = [`Termograma ${i + 1}`, f.titulo ?? "", f.pie ?? ""].filter((x) => x && x.trim()).join(" · ");
+      return `<div class="foto termograma"><img src="data:${f.mime};base64,${f.datos}" alt="Termograma ${i + 1}"><p class="pie-foto">${escapeHtml(pie)}</p></div>`;
+    })
+    .join("");
+}
+
+/** `{{tabla_metodos}}`: análisis, método y fecha y hora del análisis. */
+export function bloqueMetodos(filas: FilaMetodo[]): string {
+  if (!filas.length) return `<table class="rep"><tbody><tr><td class="vacio">Sin ensayos registrados.</td></tr></tbody></table>`;
+  return (
+    `<table class="rep"><thead><tr><th>Análisis</th><th>Método</th><th>Fecha del análisis</th></tr></thead><tbody>` +
+    filas.map((f) => `<tr>${celda(f.analisis)}${celda(f.metodo)}${celda(f.fechas)}</tr>`).join("") +
+    `</tbody></table>`
+  );
+}
+
+/** Identificación de una muestra para el informe (recepción R1). */
+export interface IdentificacionMuestra {
+  codigo: string;
+  nombre: string | null;
+  numeroInterno: string | null;
+  producto: string | null;
+  cliente: string | null;
+  identificacionCliente: string | null;
+  /** Datos propios de la recepción ya con su etiqueta («Lote», «Fabricante»…). */
+  datos: { etiqueta: string; valor: string }[];
+}
+
+/** `{{identificacion_muestras}}`: un renglón por muestra con lo registrado al recibirla. */
+export function bloqueIdentificacion(ms: IdentificacionMuestra[]): string {
+  if (!ms.length) return `<p class="nota">Sin muestras registradas.</p>`;
+  return ms
+    .map((m) => {
+      const partes = [
+        m.nombre ?? "",
+        m.producto ? `Producto: ${m.producto}` : "",
+        m.identificacionCliente ? `Identificación del cliente: ${m.identificacionCliente}` : "",
+        m.cliente ? `Cliente: ${m.cliente}` : "",
+        ...m.datos.map((d) => `${d.etiqueta}: ${d.valor}`),
+      ].filter((x) => x.trim());
+      const cab = `Muestra ${m.codigo}${m.numeroInterno ? ` · Nº ${m.numeroInterno}` : ""}`;
+      return `<p><b>${escapeHtml(cab)}</b>${partes.length ? `<br>${escapeHtml(partes.join(". "))}.` : ""}</p>`;
+    })
+    .join("");
+}
+
 /** `{{conclusion}}`: texto fijo de la plantilla y texto libre del documento. */
-export function bloqueConclusion(cfg: ConfigInforme, libre: string | null | undefined): string {
+export function bloqueConclusion(cfg: ConfigInforme, libre: string | null | undefined, conTitulo = true): string {
   const parrafos = [cfg.conclusionFija ?? "", ...(libre ?? "").split(/\r?\n+/)]
     .map((p) => p.trim())
     .filter(Boolean);
   if (!parrafos.length) return "";
-  return `<h2>Conclusión</h2>${parrafos.map((p) => `<p>${escapeHtml(p)}</p>`).join("")}`;
+  const cuerpo = parrafos.map((p) => `<p>${escapeHtml(p)}</p>`).join("");
+  return conTitulo ? `<h2>Conclusión</h2>${cuerpo}` : cuerpo;
 }
 
 /** Datos de la portada del IVC (elegidos al emitir; los de la OT vienen propuestos). */
@@ -197,7 +261,9 @@ const RE_FIRMAS = /<div class="firmas">/;
 export function completarCuerpo(cuerpo: string, cfg: ConfigInforme): string {
   let out = cuerpo;
   const tiene = (t: string) => new RegExp(`\\{\\{\\s*${t}\\s*\\}\\}`).test(out);
-  const finales = ["referencias", "anexo_fotografico", "conclusion"].filter((t) => !tiene(t)).map((t) => `{{${t}}}`);
+  const finales = ["referencias", "anexo_fotografico", "conclusion"]
+    .filter((t) => !tiene(t) && !(t === "conclusion" && tiene("conclusion_texto")))
+    .map((t) => `{{${t}}}`);
   if (finales.length) {
     const bloque = `\n${finales.join("\n")}\n`;
     out = RE_FIRMAS.test(out) ? out.replace(RE_FIRMAS, `${bloque}<div class="firmas">`) : `${out}${bloque}`;

@@ -23,6 +23,7 @@ import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
+import { hoyIso, motivoNoDisponer } from "../recepcion/reglas-recepcion";
 
 // ---------------------------------------------------------------------------
 // Módulo EQUIPOS · calibración y cadena de custodia de muestras.
@@ -443,7 +444,8 @@ export class EquiposService {
       tenantId,
       d.codigo,
       d.nombre,
-      d.descripcion ?? null,
+      // equipo.descripcion es NOT NULL en schema.sql: sin descripción, el nombre (antes, 500).
+      d.descripcion ?? d.nombre,
       d.fabricante ?? null,
       d.modelo ?? null,
       d.serie ?? null,
@@ -675,13 +677,21 @@ export class EquiposService {
     return this.prisma.$transaction(async (tx) => {
       // La muestra debe ser del tenant (404 cross-tenant) y queda bloqueada.
       const muestras = await tx.$queryRawUnsafe<any[]>(
-        `SELECT id, codigo, ubicacion FROM muestra
+        `SELECT id, codigo, ubicacion, clase_custodia, to_char(retener_hasta, 'YYYY-MM-DD') AS retener_hasta FROM muestra
           WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL
           FOR UPDATE`,
         d.muestraId,
         tenantId,
       );
       if (!muestras.length) throw new NotFoundException("Muestra no encontrada");
+      // Retención (EP-01 §6.4, EP-03 §6.3): un testigo o una contramuestra no se
+      // destruyen antes de su plazo; una muestra en custodia se devuelve.
+      const bloqueo = motivoNoDisponer(
+        d.evento ?? "transferencia",
+        { codigo: muestras[0].codigo, claseCustodia: muestras[0].clase_custodia, retenerHasta: muestras[0].retener_hasta },
+        hoyIso(),
+      );
+      if (bloqueo) throw new ConflictException(bloqueo);
 
       const prev = await tx.$queryRawUnsafe<any[]>(
         `SELECT hash_registro FROM muestra_custodia
@@ -793,28 +803,53 @@ export class EquiposService {
     return { data, meta: { total: data.length } };
   }
 
-  async listarCustodia(tenantId: string, opts: { page: number; limit: number }) {
+  /** Unidad (laboratorio de la OT) de una muestra del tenant, para el alcance. 404 si no existe. */
+  async unidadDeMuestra(muestraId: string, tenantId: string): Promise<{ codigo: string; unidadId: string | null }> {
+    const f = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT m.codigo, o.unidad_principal AS unidad_id FROM muestra m LEFT JOIN orden_trabajo o ON o.id = m.ot_id
+        WHERE m.id = $1::uuid AND m.tenant_id = $2::uuid AND m.deleted_at IS NULL`,
+      muestraId,
+      tenantId,
+    );
+    if (!f.length) throw new NotFoundException("Muestra no encontrada");
+    return { codigo: f[0].codigo, unidadId: f[0].unidad_id ?? null };
+  }
+
+  /**
+   * Últimos traspasos de la cadena de custodia. Con `unidadIds` (alcance por
+   * laboratorio), solo los de muestras de OT de esas unidades.
+   */
+  async listarCustodia(tenantId: string, opts: { page: number; limit: number; unidadIds?: string[] | null }) {
     const { page, limit } = opts;
     const offset = (page - 1) * limit;
+    const unidades = opts.unidadIds ?? null;
 
     const data = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT c.*,
+              m.ot_id        AS "otId",
               to_jsonb(m.*)  AS muestra,
               to_jsonb(du.*) AS de_usuario,
               to_jsonb(au.*) AS a_usuario
          FROM muestra_custodia c
          JOIN muestra m ON m.id = c.muestra_id
+         LEFT JOIN orden_trabajo o ON o.id = m.ot_id
          LEFT JOIN usuario du ON du.id = c.de_usuario_id
          LEFT JOIN usuario au ON au.id = c.a_usuario_id
         WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL
+          AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
         ORDER BY c.fecha DESC, c.created_at DESC
         LIMIT ${Number(limit)} OFFSET ${Number(offset)}`,
       tenantId,
+      unidades,
     );
     const totalRows = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT COUNT(*)::int AS total FROM muestra_custodia
-        WHERE tenant_id = $1::uuid AND deleted_at IS NULL`,
+      `SELECT COUNT(*)::int AS total FROM muestra_custodia c
+         JOIN muestra m ON m.id = c.muestra_id
+         LEFT JOIN orden_trabajo o ON o.id = m.ot_id
+        WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL
+          AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))`,
       tenantId,
+      unidades,
     );
     const total = Number(totalRows[0]?.total ?? 0);
     return { data, meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) } };
@@ -1013,7 +1048,13 @@ export class CalibracionController {
 })
 @Controller("custodia")
 export class CustodiaController {
-  constructor(private readonly svc: EquiposService) {}
+  constructor(private readonly svc: EquiposService, private readonly alcance: AlcanceService) {}
+
+  /** La muestra es del laboratorio (de su OT) que el usuario tiene en su alcance (403 si no). */
+  private async exigirMuestra(req: any, muestraId: string, permiso: string) {
+    const m = await this.svc.unidadDeMuestra(muestraId, this.svc.tenantId(req));
+    await this.alcance.exigirUnidad(req, m.unidadId, `la muestra ${m.codigo}`, permiso);
+  }
 
   @Get()
   async listar(
@@ -1025,13 +1066,18 @@ export class CustodiaController {
     const tenantId = this.svc.tenantId(req);
     // Con ?muestraId= devuelve la trazabilidad cronológica completa de esa
     // muestra (sin paginar: la cadena se lee entera o no se lee).
-    if (muestraId) return this.svc.custodiaDeMuestra(muestraId, tenantId);
-    return this.svc.listarCustodia(tenantId, pag(page, limit));
+    if (muestraId) {
+      if (!/^[0-9a-f-]{36}$/i.test(muestraId)) throw new NotFoundException("Muestra no encontrada");
+      await this.exigirMuestra(req, muestraId, "muestra.ver");
+      return this.svc.custodiaDeMuestra(muestraId, tenantId);
+    }
+    return this.svc.listarCustodia(tenantId, { ...pag(page, limit), unidadIds: await this.alcance.filtroUnidades(req, "muestra.ver") });
   }
 
   @Post()
   async crear(@Body() body: unknown, @Req() req: any) {
     const d = CrearCustodiaSchema.parse(body);
+    await this.exigirMuestra(req, d.muestraId, "muestra.transferir");
     return this.svc.crearCustodia(
       this.svc.tenantId(req),
       req?.user?.sub ?? req?.user?.id ?? null,

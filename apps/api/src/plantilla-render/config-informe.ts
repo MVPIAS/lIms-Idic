@@ -6,7 +6,10 @@
  *     (Textil y LCC: «4.1 Materiales» › «4.1.1 Tela base»);
  *   · columnas (método, unidad, estadística de réplicas) y sus títulos;
  *   · cuadro de «Referencias» con los No cumple, anexo fotográfico,
- *     conclusión con texto fijo y portada del IVC.
+ *     conclusión con texto fijo y portada del IVC;
+ *   · (LME, 20-10-2026) requisito en dos columnas Mínimo / Máximo con «-.-»
+ *     donde no hay cota, la unidad junto al resultado y una tabla única con la
+ *     columna Muestra (informe interno).
  *
  * El valor efectivo = valores por defecto del TIPO de plantilla + lo que la
  * plantilla guarde. Funciones PURAS: config-informe.spec.ts.
@@ -21,14 +24,17 @@ const Etiquetas = z
     requisito: z.string().trim().min(1).max(40),
     resultado: z.string().trim().min(1).max(40),
     veredicto: z.string().trim().min(1).max(40),
+    minimo: z.string().trim().min(1).max(40),
+    maximo: z.string().trim().min(1).max(40),
+    muestra: z.string().trim().min(1).max(40),
   })
   .partial();
 
 /** Lo que se puede guardar en una plantilla (todo opcional: se completa con el tipo). */
 export const ConfigInformeSchema = z
   .object({
-    /** muestra = una tabla por muestra; seccion = secciones y componentes numerados. */
-    agrupacion: z.enum(["muestra", "seccion"]),
+    /** muestra = una tabla por muestra; seccion = secciones y componentes numerados; unica = una sola tabla. */
+    agrupacion: z.enum(["muestra", "seccion", "unica"]),
     /** Punto del informe donde empiezan los resultados («4» → 4.1, 4.1.1). Vacío = sin numerar. */
     numeracion: z
       .string()
@@ -44,6 +50,14 @@ export const ConfigInformeSchema = z
     conclusionFija: z.string().trim().max(2000).nullable(),
     portada: z.enum(["ninguna", "ivc"]),
     etiquetas: Etiquetas,
+    /** texto = una columna «Requisito»; min_max = dos columnas Mínimo / Máximo (LME). */
+    columnasRequisito: z.enum(["texto", "min_max"]),
+    /** La unidad va junto al valor del resultado («0,00 mg/L»). */
+    unidadEnResultado: z.boolean(),
+    /** Columna «Muestra» siempre (informe interno del LME). */
+    columnaMuestra: z.boolean(),
+    /** Texto de una cota vacía en las columnas Mínimo / Máximo (LME: «-.-»). */
+    textoSinCota: z.string().max(10),
   })
   .partial()
   .strict();
@@ -51,7 +65,7 @@ export const ConfigInformeSchema = z
 export type ConfigInformeGuardada = z.infer<typeof ConfigInformeSchema>;
 
 export interface ConfigInforme {
-  agrupacion: "muestra" | "seccion";
+  agrupacion: "muestra" | "seccion" | "unica";
   numeracion: string | null;
   columnaMetodo: boolean;
   columnaUnidad: boolean;
@@ -67,7 +81,14 @@ export interface ConfigInforme {
     requisito: string;
     resultado: string;
     veredicto: string;
+    minimo: string;
+    maximo: string;
+    muestra: string;
   };
+  columnasRequisito: "texto" | "min_max";
+  unidadEnResultado: boolean;
+  columnaMuestra: boolean;
+  textoSinCota: string;
 }
 
 /** Texto fijo de la conclusión del IVC y del informe de Textil / LCC. */
@@ -91,7 +112,14 @@ const BASE: ConfigInforme = {
     requisito: "Requisito",
     resultado: "Resultado",
     veredicto: "Veredicto",
+    minimo: "Mínimo",
+    maximo: "Máximo",
+    muestra: "Muestra",
   },
+  columnasRequisito: "texto",
+  unidadEnResultado: false,
+  columnaMuestra: false,
+  textoSinCota: "—",
 };
 
 const POR_TIPO: Record<string, Partial<ConfigInforme>> = {

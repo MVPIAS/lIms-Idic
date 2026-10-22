@@ -23,7 +23,7 @@ interface Accion { href: string; titulo: string; desc: string; icono: string; pe
 /** Accesos rápidos por perfil (se muestran solo los que el permiso permite). */
 const ACCIONES: Record<Perfil, Accion[]> = {
   ANALISTA: [
-    { href: "/captura", titulo: "Capturar resultados", desc: "Registra las mediciones de tus ensayos", icono: "✍", perm: "resultado.crear" },
+    { href: "/captura-ot", titulo: "Capturar resultados", desc: "Registra las mediciones de tus ensayos", icono: "✍", perm: "resultado.crear" },
     { href: "/ot?mias=1&estado=abiertas", titulo: "Mis órdenes de trabajo", desc: "Lo que tienes asignado y su avance", icono: "🗂", perm: "ot.ver" },
     { href: "/captura-ot?estado=pendiente,devuelto&asignados=1", titulo: "Captura por OT", desc: "Todos los ensayos de una OT en una pantalla", icono: "📈", perm: "resultado.crear" },
     { href: "/muestras", titulo: "Muestras", desc: "Busca una muestra y su estado", icono: "🧫", perm: "muestra.ver" },
