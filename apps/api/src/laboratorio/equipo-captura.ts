@@ -71,17 +71,27 @@ export function condicionesEnsayo(c: CondicionesEnsayo, ahora: Date): { errores:
 
 /**
  * ¿Se puede usar el equipo en este ensayo? Sin unidad = equipamiento común del
- * instituto (vale para cualquiera). Con unidad, debe ser el laboratorio de la
- * OT o uno de los laboratorios de quien captura (el destino de una orden
- * interna captura en la OT de origen con sus propios equipos). `delUsuario`
- * null = alcance global.
+ * instituto (vale para cualquiera). Con unidad, debe ser el laboratorio DUEÑO
+ * del ensayo: el responsable de la OT o, si el ensayo se derivó por orden
+ * interna, el laboratorio de destino (recorrido MP-02, D02-28: el analista del
+ * LMB veía también los equipos del LQA). Si el ensayo no tiene laboratorio
+ * dueño (OT sin laboratorio), valen los laboratorios de quien captura
+ * (`delUsuario`; null = alcance global).
  */
 export function equipoUsable(
   equipoUnidad: string | null | undefined,
-  unidadOt: string | null | undefined,
+  labDelEnsayo: string | null | undefined,
   delUsuario: string[] | null,
 ): boolean {
   if (!equipoUnidad) return true;
-  if (unidadOt && equipoUnidad === unidadOt) return true;
+  if (labDelEnsayo) return equipoUnidad === labDelEnsayo;
   return delUsuario === null || delUsuario.includes(equipoUnidad);
+}
+
+/**
+ * Equipos que ofrece el selector de un ensayo: los de su laboratorio dueño y
+ * los comunes (sin unidad). Misma regla que `equipoUsable`.
+ */
+export function equiposDelEnsayo<T extends { unidadId?: string | null }>(equipos: T[], labDelEnsayo: string | null | undefined, delUsuario: string[] | null): T[] {
+  return equipos.filter((e) => equipoUsable(e.unidadId ?? null, labDelEnsayo, delUsuario));
 }

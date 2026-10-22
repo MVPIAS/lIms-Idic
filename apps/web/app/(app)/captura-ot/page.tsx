@@ -38,7 +38,7 @@ import { usePermisos } from "@/lib/permisos";
 import { confirmar, toast } from "@/components/ui/feedback";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 import { ESTADO_RESULTADO, llamar, qs, veredictoInfo, type Paginado } from "@/lib/laboratorio";
-import EditorEnsayo, { textoFactor, type EnsayoEditable, type EquipoCaptura } from "./_components/EditorEnsayo";
+import EditorEnsayo, { equiposDelEnsayo, textoFactor, type EnsayoEditable, type EquipoCaptura } from "./_components/EditorEnsayo";
 import EditorReplicas from "./_components/EditorReplicas";
 
 /** Resultado en una forma común (viene de dos endpoints con forma distinta). */
@@ -823,7 +823,7 @@ export default function CapturaOtPage() {
                                   puedeCapturar={puede(f, "capturar") && CAPTURABLES.includes(f.estado)}
                                   esJefatura={tiene("resultado.aprobar")}
                                   puedeFactor={tiene("resultado.factor")}
-                                  equipos={equipos}
+                                  equipos={equiposDelEnsayo(equipos, f.laboratorioId)}
                                   onGuardado={() => cargar()}
                                 />
                               </td>
@@ -834,7 +834,7 @@ export default function CapturaOtPage() {
                               <td colSpan={7} style={{ background: "#f8fbfc" }}>
                                 <EditorReplicas
                                   r={f}
-                                  equipos={equipos}
+                                  equipos={equiposDelEnsayo(equipos, f.laboratorioId)}
                                   onCerrar={() => setCorrigiendo(null)}
                                   onGuardado={() => { setCorrigiendo(null); cargar(); }}
                                 />

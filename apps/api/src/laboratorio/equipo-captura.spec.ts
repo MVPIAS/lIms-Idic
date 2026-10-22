@@ -1,4 +1,4 @@
-import { condicionesEnsayo, equipoObligatorio, equipoUsable, modoEquipo } from "./equipo-captura";
+import { condicionesEnsayo, equipoObligatorio, equipoUsable, equiposDelEnsayo, modoEquipo } from "./equipo-captura";
 
 describe("Equipo usado en la captura (contrato §4.4.2)", () => {
   it("modo desde el parámetro; lo desconocido cae a «metodo»", () => {
@@ -16,12 +16,28 @@ describe("Equipo usado en la captura (contrato §4.4.2)", () => {
     expect(equipoObligatorio("siempre", false, "atributo")).toBe(true);
   });
 
-  it("equipo del laboratorio de la OT, común o de los laboratorios de quien captura", () => {
+  it("equipo del laboratorio dueño del ensayo o común (sin unidad)", () => {
     expect(equipoUsable(null, "LME", ["LME"])).toBe(true);
     expect(equipoUsable("LME", "LME", [])).toBe(true);
     expect(equipoUsable("LQC", "LME", ["LME"])).toBe(false);
-    expect(equipoUsable("LQC", "LME", ["LME", "LQC"])).toBe(true);
-    expect(equipoUsable("LQC", "LME", null)).toBe(true);
+    // Aunque quien captura también sea de LQC, el ensayo es de LME: solo equipos de LME.
+    expect(equipoUsable("LQC", "LME", ["LME", "LQC"])).toBe(false);
+    expect(equipoUsable("LQC", "LME", null)).toBe(false);
+    // Sin laboratorio dueño (OT sin laboratorio): los de quien captura.
+    expect(equipoUsable("LQC", null, ["LQC"])).toBe(true);
+    expect(equipoUsable("LQC", null, ["LME"])).toBe(false);
+  });
+
+  it("D02-28: el analista del LMB, en un ensayo derivado al LMB, no ve los equipos del LQA", () => {
+    const eq = [
+      { id: "balanza", unidadId: "LQA" },
+      { id: "estufa", unidadId: "LQA" },
+      { id: "incubadora", unidadId: "LMB" },
+      { id: "termometro", unidadId: null },
+    ];
+    expect(equiposDelEnsayo(eq, "LMB", ["LMB"]).map((e) => e.id)).toEqual(["incubadora", "termometro"]);
+    // El ensayo propio del LQA ofrece los del LQA y los comunes.
+    expect(equiposDelEnsayo(eq, "LQA", null).map((e) => e.id)).toEqual(["balanza", "estufa", "termometro"]);
   });
 });
 

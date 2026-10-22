@@ -76,6 +76,8 @@ export interface EquipoCaptura {
   id: string;
   codigo: string;
   nombre: string;
+  /** Laboratorio del equipo; null = equipo común del instituto. */
+  unidadId?: string | null;
   unidadCodigo: string | null;
   estado: string;
   proximaCalibracion: string | null;
@@ -545,4 +547,14 @@ export default function EditorEnsayo({
       )}
     </div>
   );
+}
+
+/**
+ * Equipos que se ofrecen en un ensayo: los de su laboratorio dueño (el destino,
+ * si se derivó por orden interna) y los comunes sin unidad (D02-28). Misma
+ * regla que valida la API al capturar.
+ */
+export function equiposDelEnsayo(equipos: EquipoCaptura[], laboratorioId: string | null | undefined): EquipoCaptura[] {
+  if (!laboratorioId) return equipos;
+  return equipos.filter((x) => !x.unidadId || x.unidadId === laboratorioId);
 }
