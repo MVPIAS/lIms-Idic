@@ -15,6 +15,7 @@ const num = (data: any) => ({
   monto: data.monto === "" || data.monto == null ? undefined : Number(data.monto),
   ...(data.medio ? { medio: String(data.medio).trim() } : {}),
   ...(data.referencia ? { referencia: String(data.referencia).trim() } : {}),
+  ...(data.numeroBoletin ? { numeroBoletin: String(data.numeroBoletin).trim() } : {}),
   ...(data.fecha ? { fecha: data.fecha } : {}),
 });
 
@@ -46,6 +47,7 @@ export default function PagosPage() {
         { campo: "fecha", titulo: "Fecha", render: (v) => fechaDia(v) },
         { campo: "monto", titulo: "Monto", right: true, render: (v, row) => monto(v, row.factura?.moneda) },
         { campo: "medio", titulo: "Medio" },
+        { campo: "numeroBoletin", titulo: "Boletín de ingreso", render: (v) => (v ? <span className="codigo">{v}</span> : "—") },
         { campo: "referencia", titulo: "Referencia", render: (v) => (v ? <span className="codigo">{v}</span> : "—") },
       ]}
       campos={[
@@ -56,7 +58,12 @@ export default function PagosPage() {
         },
         { campo: "monto", label: "Monto", tipo: "moneda", requerido: true },
         { campo: "fecha", label: "Fecha del pago", tipo: "date" },
-        { campo: "medio", label: "Medio de pago", ayuda: "transferencia, cheque, depósito…" },
+        {
+          campo: "medio", label: "Medio de pago", tipo: "select", requerido: true,
+          opcionesEndpoint: "parametros?categoria=medio_pago&activo=true&limit=50",
+          opcionesMap: (p: any) => ({ value: String(p.codigo), label: String(p.etiqueta) }),
+        },
+        { campo: "numeroBoletin", label: "Nº boletín de ingreso" },
         { campo: "referencia", label: "Referencia" },
       ]}
       etiquetaFila={(r) => `Pago de ${monto(r.monto, r.factura?.moneda)}`}

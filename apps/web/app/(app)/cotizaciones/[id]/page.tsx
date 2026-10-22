@@ -23,6 +23,7 @@ import LaboratorioCotizacion from "../_components/LaboratorioCotizacion";
 import Panel from "../_components/Panel";
 import { ACEPTACION_LABEL, descargarPdfCotizacion, pedir, pedirTexto, type Opcion } from "../_components/comercial";
 import { PESTANA_DE_ETAPA, TEXTO_EVENTO, TEXTO_MEDIO, type Circuito, type EstadoEtapa, type PestanaCot } from "../_components/circuito";
+import { confirmar } from "@/components/ui/feedback";
 
 const ICONO: Record<EstadoEtapa, string> = { hecho: "✓", en_curso: "", pendiente: "", no_aplica: "–", bloqueado: "!" };
 const CLASE: Record<EstadoEtapa, string> = { hecho: "done", en_curso: "now", pendiente: "pend", no_aplica: "na", bloqueado: "bloq" };
@@ -250,7 +251,18 @@ function DocumentoYFirma({ c, onHecho, onError }: { c: Circuito; onHecho: (m: st
         <div className="spacer" />
         {c.puedo.enviarAFirma && <button className="btn primary sm" disabled={busy} onClick={() => accion(`/cotizaciones/${k.id}/enviar-a-firma`)}>Enviar a firma → Jefe DCO</button>}
         {c.puedo.firmar && <button className="btn outline sm" disabled={busy} onClick={() => setDevolviendo(true)}>Devolver al ejecutivo</button>}
-        {c.puedo.firmar && <button className="btn success sm" disabled={busy} onClick={() => accion(`/cotizaciones/${k.id}/firmar`)}>Firmar → emitir</button>}
+        {c.puedo.firmar && (
+          <button className="btn success sm" disabled={busy}
+            onClick={async () => {
+              // Firmar emite la cotización y fija su validez: no se deshace (D02-23).
+              const ok = await confirmar({
+                titulo: `¿Firmar y emitir la cotización ${k.codigo}?`,
+                mensaje: "Su firma queda registrada con fecha y hora y la validez corre desde hoy. Revise antes la vista previa.",
+                confirmarTexto: "Firmar → emitir",
+              });
+              if (ok) await accion(`/cotizaciones/${k.id}/firmar`);
+            }}>Firmar → emitir</button>
+        )}
       </div>
       {errorDoc && <div className="alert warn" role="alert">{errorDoc}</div>}
       {html === null && !errorDoc && <p className="subtitle" aria-busy="true">Generando la vista previa…</p>}

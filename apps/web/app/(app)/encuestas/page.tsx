@@ -206,13 +206,13 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
     setError("");
     const faltan = preguntas.filter((p) => p.obligatoria && valorDe(p.codigo) === null);
     if (faltan.length) return setError(`Falta la respuesta de: ${faltan.map((p) => p.texto).join(" · ")}.`);
-    if (nombre.trim().length < 2 || cargo.trim().length < 2) return setError("Indique el nombre y el cargo de quien respondió.");
+    if (cargo.trim().length < 2) return setError("Indique el cargo de quien respondió.");
     setEnviando(true);
     try {
       const r = await pedir<any>("POST", `/encuestas/${encuestaId}/registrar`, {
         respuestas: preguntas.map((p) => ({ codigo: p.codigo, valor: valores[p.codigo] ?? null })),
         comentario: comentario.trim() || null,
-        nombreRespondente: nombre.trim(),
+        nombreRespondente: nombre.trim() || null,
         cargoRespondente: cargo.trim(),
         medio,
         fechaRespuesta: fecha,
@@ -265,7 +265,7 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
               <textarea id="enc-com" rows={3} maxLength={4000} value={comentario} onChange={(x) => setComentario(x.target.value)} />
             </div>
             <div className="field">
-              <label htmlFor="enc-nom">Nombre de quien respondió <span className="req">*</span></label>
+              <label htmlFor="enc-nom">Nombre de quien respondió (opcional)</label>
               <input id="enc-nom" maxLength={200} value={nombre} onChange={(x) => setNombre(x.target.value)} />
             </div>
             <div className="field">

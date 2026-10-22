@@ -47,7 +47,9 @@ const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const RegistrarSchema = z.object({
   respuestas: z.array(z.object({ codigo: z.string().max(20), valor: z.number().int().nullable().optional() })).max(30),
   comentario: z.string().trim().max(4000).nullable().optional(),
-  nombreRespondente: z.string().trim().min(2, "Indique quién respondió.").max(200),
+  // EP-00 9.1 pide el CARGO de quien responde; el nombre es un dato personal y queda
+  // opcional (recorrido MP-02, D02-14).
+  nombreRespondente: z.string().trim().max(200).optional().nullable().transform((v) => (v ? v : null)),
   cargoRespondente: z.string().trim().min(2, "Indique el cargo de quien respondió.").max(200),
   medio: z.enum(MEDIOS),
   fechaRespuesta: fecha,

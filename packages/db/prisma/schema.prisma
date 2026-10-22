@@ -220,6 +220,12 @@ model Cliente {
   email           String?   @db.Citext
   fechaRegistro   DateTime  @default(dbgenerated("CURRENT_DATE")) @map("fecha_registro") @db.Date
   diasCredito     Int       @default(30) @map("dias_credito")
+  /// EP-00 0.1 (align_r1g_recorrido.sql): forma de pago habitual y contacto principal.
+  formaPagoHabitual String? @map("forma_pago_habitual") @db.VarChar(30)
+  contactoNombre    String? @map("contacto_nombre") @db.VarChar(160)
+  contactoCargo     String? @map("contacto_cargo") @db.VarChar(120)
+  contactoEmail     String? @map("contacto_email") @db.VarChar(160)
+  contactoTelefono  String? @map("contacto_telefono") @db.VarChar(40)
   bloqueado       Boolean   @default(false)
   motivoBloqueo   String?   @map("motivo_bloqueo")
   saldoActual     Decimal   @default(0) @map("saldo_actual") @db.Decimal(14, 2)
@@ -771,6 +777,8 @@ model Pago {
   monto     Decimal  @db.Decimal(14, 2)
   medio     String?  @db.VarChar(40)
   referencia String? @db.VarChar(80)
+  /// Nº del boletín de ingreso (EP-00 8.4; align_r1g_recorrido.sql).
+  numeroBoletin String? @map("numero_boletin") @db.VarChar(40)
 
   factura   Factura  @relation(fields: [facturaId], references: [id], onDelete: Cascade)
 

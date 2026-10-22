@@ -43,10 +43,18 @@ export default function ClientesPage() {
         // Comercial R2: lista única (Ley 17.798, Ejército, …, Interlaboratorio); los
         // valores antiguos quedan inactivos y no se ofrecen (ver docs/COMERCIAL_RONDA2.md).
         { campo: "tipo", label: "Tipo de cliente", tipo: "select", requerido: true, opcionesEndpoint: "parametros?categoria=tipo_cliente&activo=true&limit=100" },
+        // EP-00 0.1 (recorrido MP-02, D02-16): giro, dirección, forma de pago habitual y contacto principal.
+        { campo: "giro", label: "Giro", requerido: true },
+        { campo: "direccion", label: "Dirección", requerido: true, span: 2 },
         { campo: "ciudad", label: "Ciudad" },
         { campo: "region", label: "Región" },
         { campo: "telefono", label: "Teléfono", tipo: "telefono" },
         { campo: "email", label: "Email", tipo: "email" },
+        { campo: "formaPagoHabitual", label: "Forma de pago habitual", tipo: "select", opcionesEndpoint: "parametros?categoria=forma_pago&activo=true&limit=50" },
+        { campo: "contactoNombre", label: "Contacto principal · nombre" },
+        { campo: "contactoCargo", label: "Contacto principal · cargo" },
+        { campo: "contactoEmail", label: "Contacto principal · correo", tipo: "email" },
+        { campo: "contactoTelefono", label: "Contacto principal · teléfono", tipo: "telefono" },
       ]}
     />
   );

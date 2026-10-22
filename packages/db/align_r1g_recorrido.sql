@@ -89,3 +89,32 @@ SELECT t.id, 'recepcion_campo', v.codigo, v.etiqueta, v.orden, v.valor
   ('LES.temperatura_llegada', 'Temperatura de llegada (°C)', 4, '{"tipo":"numero","ayuda":"Obligatoria en productos refrigerados o congelados (por confirmar con el IDIC)."}')
  ) AS v(codigo, etiqueta, orden, valor)
 ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
+
+-- --- 4 · Registro de pago: boletín de ingreso y medio de pago de una lista -----
+-- EP-00 8.4 / EP-06 6.22 (recorrido MP-02, D02-13). La lista se mantiene en
+-- Catálogo › Parámetros (categoría medio_pago).
+ALTER TABLE pago ADD COLUMN IF NOT EXISTS numero_boletin VARCHAR(40);
+COMMENT ON COLUMN pago.numero_boletin IS 'Nº del boletín de ingreso de Tesorería (EP-00 8.4).';
+INSERT INTO parametro_sistema (tenant_id, categoria, codigo, etiqueta, orden, valor)
+SELECT t.id, 'medio_pago', v.codigo, v.etiqueta, v.orden, NULL
+  FROM tenant t
+ CROSS JOIN (VALUES
+  ('caja', 'Caja (efectivo)', 1),
+  ('transferencia', 'Transferencia bancaria', 2),
+  ('deposito', 'Depósito bancario', 3),
+  ('cheque', 'Cheque', 4),
+  ('vale_vista', 'Vale vista', 5),
+  ('tarjeta', 'Tarjeta de débito o crédito', 6),
+  ('descuento_planilla', 'Descuento por planilla (institucional)', 7)
+ ) AS v(codigo, etiqueta, orden)
+ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
+
+-- --- 5 · Ficha del cliente: forma de pago habitual y contacto principal ---------
+-- EP-00 0.1 (recorrido MP-02, D02-16). Giro y dirección ya existían (solo en la
+-- API): ahora están en el formulario. Forma de pago = código de la lista forma_pago.
+ALTER TABLE cliente ADD COLUMN IF NOT EXISTS forma_pago_habitual VARCHAR(30);
+ALTER TABLE cliente ADD COLUMN IF NOT EXISTS contacto_nombre     VARCHAR(160);
+ALTER TABLE cliente ADD COLUMN IF NOT EXISTS contacto_cargo      VARCHAR(120);
+ALTER TABLE cliente ADD COLUMN IF NOT EXISTS contacto_email      VARCHAR(160);
+ALTER TABLE cliente ADD COLUMN IF NOT EXISTS contacto_telefono   VARCHAR(40);
+COMMENT ON COLUMN cliente.forma_pago_habitual IS 'Código de parametro_sistema forma_pago (EP-00 0.1).';
