@@ -56,6 +56,11 @@ export const NOMBRE_TIPO_DOCUMENTO: Record<string, string> = {
   INFORME_INCUMPLIMIENTO: "Informe de incumplimiento",
   CERTIFICADO_RESISTENCIA_BALISTICA: "Certificado de Resistencia Balística (CRB)",
   INFORME_RECHAZO: "Informe de Ensayo de Rechazo",
+  CERTIFICADO_ARMA: "Certificado por arma",
+  INFORME_INCUMPLIMIENTO_ARMA: "Informe de incumplimiento de armas",
+  CERTIFICADO_EVIDENCIA: "Certificado de evidencia",
+  INFORME_PERICIAL: "Informe técnico pericial",
+  NOTA_NO_CONFORMIDAD: "Nota de no conformidad",
 };
 const nombreTipo = (t: string) => NOMBRE_TIPO_DOCUMENTO[t] ?? t;
 

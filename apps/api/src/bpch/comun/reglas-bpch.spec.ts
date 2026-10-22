@@ -54,6 +54,11 @@ describe("Internación · elementos y lotes", () => {
     expect(erroresItems([ok])).toEqual([]);
     expect(erroresItems([{ elementoEspecifico: "X" }]).length).toBe(2);
   });
+  it("internación de armas (EP-11 11.1): con listado de armas los elementos son opcionales y sin Nº UN", () => {
+    expect(erroresItems([], { conArmas: true })).toEqual([]);
+    expect(erroresItems([{ elementoEspecifico: "Cargadores" }], { conArmas: true })).toEqual([]);
+    expect(erroresItems([{ elementoEspecifico: "" }], { conArmas: true })[0]).toMatch(/elemento específico/);
+  });
   it("tamaño de muestra ≤ tamaño de lote (NCh 44)", () => {
     expect(erroresItems([{ ...ok, tamanoLote: 1482, tamanoMuestra: 36 }])).toEqual([]);
     expect(erroresItems([{ ...ok, tamanoLote: 8, tamanoMuestra: 9 }]).join(" ")).toMatch(/no puede superar/);

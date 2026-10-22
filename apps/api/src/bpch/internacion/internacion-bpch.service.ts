@@ -22,6 +22,7 @@ import {
   transicionDocAdm,
 } from "../comun/reglas-bpch";
 import { numeroBorrador, totales } from "../../facturacion/reglas-factura";
+import { ListadoArmaBody, erroresListadoArmas, guardarListadoArmas, leerListadoArmas } from "../../saec/d11/listado-armas";
 
 const fechaDia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const texto = (max: number) => z.string().trim().max(max);
@@ -54,6 +55,8 @@ export const RegistroBody = z.object({
   unidadInspeccionId: z.string().uuid({ message: "Indique la sucursal o delegación que inspecciona" }),
   sujetaTasa: z.boolean({ required_error: "Indique si la internación está sujeta a la tasa" }),
   items: z.array(ItemBody).max(50),
+  /** EP-11 11.1 · listado de armas de la resolución (solo si inspecciona la Delegación Nº 11). */
+  armas: z.array(ListadoArmaBody).max(2000).optional(),
 });
 
 const AnalisisBody = z.object({
@@ -259,8 +262,9 @@ export class InternacionBpchService {
 
   async detalle(req: any, id: string) {
     const i = await this.cargar(req, id);
-    const [items, solicitudes, tasa, estadoOt] = await Promise.all([
+    const [items, armas, solicitudes, tasa, estadoOt] = await Promise.all([
       this.items(id),
+      leerListadoArmas(this.prisma, id),
       this.prisma.$queryRawUnsafe<any[]>(
         `SELECT s.id, s.destinatario, s.detalle, s.fecha_envio AS "fechaEnvio", s.fecha_respuesta AS "fechaRespuesta", s.respuesta,
                 s.created_at AS "createdAt", u.nombre_completo AS "creadaPorNombre"
@@ -333,6 +337,7 @@ export class InternacionBpchService {
       avance,
       avanceTexto: TEXTO_AVANCE[avance],
       items,
+      armas: armas.map((a) => ({ ...a, cantidad: Number(a.cantidad) })),
       solicitudes,
       tasa,
       estadoOt,
@@ -440,7 +445,11 @@ export class InternacionBpchService {
     await this.comun.validarUnidadInspeccion(tenantId, dto.unidadInspeccionId);
     await this.comun.exigirExpediente(req, dto.unidadInspeccionId, "la internación");
     const items = await Promise.all(dto.items.map((it) => this.completarItem(tenantId, it)));
-    const errores = erroresItems(items);
+    const armas = dto.armas ?? [];
+    const errores = [
+      ...erroresItems(items, { conArmas: armas.length > 0 }),
+      ...(await erroresListadoArmas(this.prisma, tenantId, dto.unidadInspeccionId, armas)),
+    ];
     if (errores.length) throw new BadRequestException(errores.join(" "));
     const usuario = usuarioDe(req);
     const id = await this.prisma.$transaction(async (tx) => {
@@ -465,6 +474,7 @@ export class InternacionBpchService {
         usuario,
       );
       await this.guardarItems(tx, tenantId, fila.id, items);
+      await guardarListadoArmas(tx, tenantId, fila.id, armas, usuario);
       return fila.id;
     });
     return this.detalle(req, id);
@@ -485,7 +495,11 @@ export class InternacionBpchService {
     await this.comun.validarUnidadInspeccion(tenantId, dto.unidadInspeccionId);
     await this.comun.exigirExpediente(req, dto.unidadInspeccionId, "la internación");
     const items = await Promise.all(dto.items.map((it) => this.completarItem(tenantId, it)));
-    const errores = erroresItems(items);
+    const armas = dto.armas ?? [];
+    const errores = [
+      ...erroresItems(items, { conArmas: armas.length > 0 }),
+      ...(await erroresListadoArmas(this.prisma, tenantId, dto.unidadInspeccionId, armas)),
+    ];
     if (errores.length) throw new BadRequestException(errores.join(" "));
     await this.prisma.$transaction(async (tx) => {
       // Con la fila bloqueada se vuelve a mirar el estado: si el análisis técnico generó
@@ -516,6 +530,7 @@ export class InternacionBpchService {
         usuarioDe(req),
       );
       await this.guardarItems(tx, tenantId, id, items);
+      await guardarListadoArmas(tx, tenantId, id, armas, usuarioDe(req));
     });
     return this.detalle(req, id);
   }
@@ -577,7 +592,8 @@ export class InternacionBpchService {
     }
 
     const items = await this.items(id);
-    const errItems = erroresItems(items);
+    const listadoArmas = await leerListadoArmas(this.prisma, id);
+    const errItems = erroresItems(items, { conArmas: listadoArmas.length > 0 });
     if (errItems.length) throw new BadRequestException(errItems.join(" "));
     const unidad = await this.comun.validarUnidadInspeccion(tenantId, i.unidad_inspeccion_id);
     await this.prisma.$transaction(async (tx) => {
@@ -587,7 +603,9 @@ export class InternacionBpchService {
         id,
       );
       if (actual.ot_id) throw new ConflictException(`La internación ${i.numero} ya tiene OT.`);
-      const elementos = items.map((x) => x.elementoEspecifico).join(" / ");
+      const elementos =
+      items.map((x) => x.elementoEspecifico).join(" / ") ||
+      `${listadoArmas.reduce((s, a) => s + Number(a.cantidad ?? 1), 0)} arma(s) según la resolución`;
       const unico = items.length === 1 ? items[0] : null;
       const ot = await this.ots.crearOt(tx, {
         tenantId,

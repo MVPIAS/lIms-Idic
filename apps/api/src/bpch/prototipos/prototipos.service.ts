@@ -13,12 +13,27 @@ import { etiquetaVeredicto } from "../../laboratorio/veredicto";
 import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 import { ClasificacionService } from "../clasificacion/clasificacion.service";
 import { textoClasificacion } from "../clasificacion/reglas-clasificacion";
+import { PuenteAnalisisService } from "../../flujo-real/flujo-real.module";
+import { normalizarCnc } from "../comun/reglas-bpch";
+import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../../common/adjuntos";
+
+/** Adjuntos del ingreso del prototipo (EP-08 8.8). */
+export const CLASES_ADJUNTO_PROTOTIPO = ["ficha_tecnica", "hoja_seguridad"] as const;
 import {
   DOCUMENTO_DICTAMEN,
   PLANTILLAS_PROTOTIPO,
   etapaPrototipo,
   faltantesDictamen,
   faltantesGenerarOt,
+  faltantesInscripcionCu,
+  faltantesParametrizacion,
+  erroresParametros,
+  NOMBRE_ESTADO_PARAMETRIZACION,
+  textoLimite,
+  type EstadoParametrizacion,
+  mensajeCodificado,
+  revisarCodificado,
+  type CandidatoCodificado,
   validarCodigoCnc,
   resultadoDictamen,
   veredictoOt,
@@ -61,6 +76,25 @@ export const DictamenDto = z
   .object({ dictamen: z.enum(["aprobado", "rechazado"]), motivo: texto(4000) })
   .strict();
 export const CodigoCnc = z.object({ codigo: z.string().trim().max(60) }).strict();
+const numOpc = z.number().finite().min(-1e12).max(1e12).nullable().optional();
+export const ParametrosBody = z
+  .object({
+    filas: z
+      .array(
+        z.object({
+          metodoId: z.string().uuid("Elija el método de cada fila."),
+          ensayo: z.string().trim().min(1, "Indique el ensayo.").max(200),
+          minimo: numOpc,
+          nominal: numOpc,
+          maximo: numOpc,
+          unidad: z.string().trim().max(30).nullable().optional(),
+          formula: z.string().trim().max(500).nullable().optional(),
+          tipoFormula: z.enum(["general", "especifica"]).nullable().optional(),
+        }),
+      )
+      .max(60),
+  })
+  .strict();
 export const Motivo = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (al menos 5 caracteres).").max(2000) });
 
 const iso = (d: unknown) => (d ? new Date(d as any).toISOString().slice(0, 10) : null);
@@ -97,6 +131,7 @@ export class PrototiposService implements OnModuleInit {
     private readonly comun: OtDesdeProcesoService,
     private readonly render: PlantillaRenderService,
     private readonly clasificaciones: ClasificacionService,
+    private readonly puente: PuenteAnalisisService,
   ) {}
 
   /** Las plantillas del dictamen leen los datos del prototipo de su OT. */
@@ -288,6 +323,9 @@ export class PrototiposService implements OnModuleInit {
         : null,
       documento: p.documento_id ? { id: p.documento_id, numero: p.doc_numero, estado: p.doc_estado, tipoDocumento: p.doc_tipo } : null,
       codigoCncDetalle: p.codigo_cnc ? { codigo: p.codigo_cnc, por: p.cnc_por_nombre, at: p.codigo_cnc_at } : null,
+      adjuntos: await listarAdjuntos(this.prisma as any, tenantId, "prototipo", [id]),
+      parametrizacion: await this.parametrizacion(tenantId, p),
+      inscripcionCu: await this.inscripcionCu(tenantId, p),
       anulado: p.anulado_at ? { motivo: p.anulado_motivo, at: p.anulado_at } : null,
       faltantes: {
         generarOt: faltantesGenerarOt({
@@ -297,6 +335,7 @@ export class PrototiposService implements OnModuleInit {
           sacTamanoMuestra: p.sac_tamano_muestra,
           unidadId: "-", // la unidad y el cobro se eligen al generar
           conCobro: true,
+          parametrizacion: { exige: await this.exigeParametrizacion(tenantId), estado: p.param_estado },
         }),
         aprobar: faltantesDictamen({ ...base, dictamen: "aprobado" }),
         rechazar: faltantesDictamen({ ...base, dictamen: "rechazado", motivo: "x" }),
@@ -312,9 +351,39 @@ export class PrototiposService implements OnModuleInit {
     if (d.clasificacionId) await this.clasificaciones.exigirAprobada(tenantId, d.clasificacionId);
   }
 
+  /** 8.8 · ¿Está codificado? Busca el elemento en la Codificación Única y en el catálogo. */
+  async codificado(tenantId: string, elemento: string) {
+    const e = String(elemento ?? "").trim().slice(0, 240);
+    if (e.length < 2) return { codificado: false, exactos: [], parecidos: [] };
+    const patron = `%${e.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+    const [cu, cat] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT producto, cnc_dgmn, fabricante_nombre, estado FROM bpch_codificacion
+          WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND (producto ILIKE $2 OR $3 ILIKE '%' || producto || '%') LIMIT 50`,
+        tenantId,
+        patron,
+        e,
+      ),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT codigo, nombre FROM cat_elemento
+          WHERE tenant_id = $1::uuid AND activo AND (nombre ILIKE $2 OR $3 ILIKE '%' || nombre || '%') LIMIT 50`,
+        tenantId,
+        patron,
+        e,
+      ),
+    ]);
+    const candidatos: CandidatoCodificado[] = [
+      ...cu.map((c) => ({ origen: "codificacion" as const, nombre: c.producto, detalle: `${c.cnc_dgmn} · ${c.fabricante_nombre}${c.estado === "EN_RECESO" ? " (en receso)" : ""}` })),
+      ...cat.map((c) => ({ origen: "catalogo" as const, nombre: c.nombre, detalle: `${c.codigo} · ${c.nombre}` })),
+    ];
+    return revisarCodificado(e, candidatos);
+  }
+
   async crear(tenantId: string, usuarioId: string | null, body: unknown) {
     const d = CrearPrototipo.parse(body ?? {});
     await this.validarRefs(tenantId, d);
+    const rev = await this.codificado(tenantId, d.elemento);
+    if (rev.codificado) throw new ConflictException(mensajeCodificado(d.elemento, rev.exactos));
     const id = await this.prisma.$transaction(async (tx) => {
       const codigo = await this.comun.correlativo(tx, tenantId, "PROTO");
       const filas = await tx.$queryRawUnsafe<{ id: string }[]>(
@@ -400,6 +469,7 @@ export class PrototiposService implements OnModuleInit {
       sacTamanoMuestra: p.sac_tamano_muestra,
       unidadId: d.unidadId,
       conCobro: d.conCobro,
+      parametrizacion: { exige: await this.exigeParametrizacion(tenantId), estado: p.param_estado },
     });
     if (faltan.length) throw new ConflictException(`No se puede generar la OT. ${faltan.join(" ")}`);
     const unidad = await this.comun.unidadDeBpch(tenantId, d.unidadId);
@@ -583,6 +653,208 @@ export class PrototiposService implements OnModuleInit {
       usuarioId,
     );
     return this.detalle(tenantId, id);
+  }
+
+  /* ------------------------------------------ 8.11 · parametrizar el elemento --- */
+
+  /** Parámetro de la operación: ¿la OT exige la parametrización validada? (por confirmar, EP-08 P4). */
+  private async exigeParametrizacion(tenantId: string) {
+    const [f] = await this.prisma.$queryRawUnsafe<{ valor: string | null; activo: boolean }[]>(
+      `SELECT valor, activo FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'bpch_prototipo' AND codigo = 'exige_parametrizacion'`,
+      tenantId,
+    );
+    return f?.activo !== false && f?.valor === "si";
+  }
+
+  private async parametrizacion(tenantId: string, p: any) {
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT pp.cat_metodo_id AS "metodoId", m.codigo AS "metodoCodigo", m.nombre AS "metodoNombre", pp.ensayo,
+              pp.minimo::float8 AS minimo, pp.nominal::float8 AS nominal, pp.maximo::float8 AS maximo, pp.unidad, pp.formula, pp.tipo_formula AS "tipoFormula"
+         FROM bpch_prototipo_parametro pp JOIN cat_metodo m ON m.id = pp.cat_metodo_id
+        WHERE pp.prototipo_id = $1::uuid AND pp.tenant_id = $2::uuid ORDER BY pp.orden`,
+      p.id,
+      tenantId,
+    );
+    const nombres = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT u1.nombre_completo AS enviada, u2.nombre_completo AS validada FROM bpch_prototipo b
+         LEFT JOIN usuario u1 ON u1.id = b.param_enviada_por LEFT JOIN usuario u2 ON u2.id = b.param_validada_por WHERE b.id = $1::uuid`,
+      p.id,
+    );
+    return {
+      estado: p.param_estado as EstadoParametrizacion,
+      estadoNombre: NOMBRE_ESTADO_PARAMETRIZACION[p.param_estado as EstadoParametrizacion] ?? p.param_estado,
+      exigeParaOt: await this.exigeParametrizacion(tenantId),
+      filas,
+      enviada: p.param_enviada_at ? { por: nombres[0]?.enviada ?? null, at: p.param_enviada_at } : null,
+      validada: p.param_validada_at ? { por: nombres[0]?.validada ?? null, at: p.param_validada_at } : null,
+      devueltaMotivo: p.param_devuelta_motivo ?? null,
+    };
+  }
+
+  private estadoParam(p: any, usuario: string | null, accion: "editar" | "enviar" | "validar" | "devolver", filas: number, motivo?: string | null) {
+    const f = faltantesParametrizacion(accion, {
+      prototipoEstado: p.estado,
+      otViva: Boolean(p.ot_id && p.ot_estado !== "anulada"),
+      estado: p.param_estado,
+      filas,
+      enviadaPor: p.param_enviada_por ?? null,
+      usuario,
+      motivo,
+    });
+    if (f.length) throw new ConflictException(f.join(" "));
+  }
+
+  async guardarParametros(tenantId: string, usuarioId: string | null, id: string, body: unknown) {
+    const d = ParametrosBody.parse(body ?? {});
+    const p = await this.fila(tenantId, id);
+    this.estadoParam(p, usuarioId, "editar", d.filas.length);
+    const errores = erroresParametros(d.filas);
+    if (d.filas.length && errores.length) throw new BadRequestException(errores.join(" "));
+    if (d.filas.length) {
+      const metodos = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT id FROM cat_metodo WHERE tenant_id = $1::uuid AND id = ANY($2::uuid[])`,
+        tenantId,
+        [...new Set(d.filas.map((x) => x.metodoId))],
+      );
+      if (metodos.length !== new Set(d.filas.map((x) => x.metodoId)).size) throw new BadRequestException("Algún método no existe en el catálogo.");
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`DELETE FROM bpch_prototipo_parametro WHERE prototipo_id = $1::uuid AND tenant_id = $2::uuid`, id, tenantId);
+      let orden = 0;
+      for (const x of d.filas)
+        await tx.$executeRawUnsafe(
+          `INSERT INTO bpch_prototipo_parametro (tenant_id, prototipo_id, orden, cat_metodo_id, ensayo, minimo, nominal, maximo, unidad, formula, tipo_formula)
+           VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11)`,
+          tenantId,
+          id,
+          orden++,
+          x.metodoId,
+          x.ensayo,
+          x.minimo ?? null,
+          x.nominal ?? null,
+          x.maximo ?? null,
+          x.unidad || null,
+          x.formula || null,
+          x.formula ? x.tipoFormula ?? null : null,
+        );
+      await tx.$executeRawUnsafe(
+        `UPDATE bpch_prototipo SET param_estado = CASE WHEN $2 > 0 THEN (CASE WHEN param_estado = 'devuelta' THEN 'devuelta' ELSE 'borrador' END) ELSE 'sin_parametros' END,
+                updated_at = now() WHERE id = $1::uuid`,
+        id,
+        d.filas.length,
+      );
+    });
+    return this.detalle(tenantId, id);
+  }
+
+  async enviarParametros(tenantId: string, usuarioId: string | null, id: string) {
+    const p = await this.fila(tenantId, id);
+    const [{ n }] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM bpch_prototipo_parametro WHERE prototipo_id = $1::uuid`, id);
+    this.estadoParam(p, usuarioId, "enviar", n);
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE bpch_prototipo SET param_estado = 'en_validacion', param_enviada_por = $2::uuid, param_enviada_at = now(), param_devuelta_motivo = NULL, updated_at = now() WHERE id = $1::uuid`,
+      id,
+      usuarioId,
+    );
+    return this.detalle(tenantId, id);
+  }
+
+  async validarParametros(tenantId: string, usuarioId: string | null, id: string) {
+    const p = await this.fila(tenantId, id);
+    this.estadoParam(p, usuarioId, "validar", 1);
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE bpch_prototipo SET param_estado = 'validada', param_validada_por = $2::uuid, param_validada_at = now(), updated_at = now() WHERE id = $1::uuid`,
+      id,
+      usuarioId,
+    );
+    return this.detalle(tenantId, id);
+  }
+
+  async devolverParametros(tenantId: string, usuarioId: string | null, id: string, body: unknown) {
+    const { motivo } = Motivo.parse(body ?? {});
+    const p = await this.fila(tenantId, id);
+    this.estadoParam(p, usuarioId, "devolver", 1, motivo);
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE bpch_prototipo SET param_estado = 'devuelta', param_devuelta_motivo = $2, updated_at = now() WHERE id = $1::uuid`,
+      id,
+      motivo,
+    );
+    return this.detalle(tenantId, id);
+  }
+
+  /**
+   * «El panel es el que carga la OT»: la especificación validada (Mín/Nom/Máx,
+   * unidad, fórmula) se aplica a los resultados de la OT del mismo método y
+   * ensayo. Lo hace la jefatura de la unidad de la OT (el flujo general exige
+   * resultado.aprobar para cambiar lo que vino del catálogo).
+   */
+  async aplicarParametros(req: any, tenantId: string, id: string) {
+    const p = await this.fila(tenantId, id);
+    if (p.param_estado !== "validada") throw new ConflictException("La parametrización no está validada.");
+    if (!p.ot_id || p.ot_estado === "anulada") throw new ConflictException("El prototipo no tiene OT vigente.");
+    const params = (await this.parametrizacion(tenantId, p)).filas;
+    const resultados = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT r.id, r.estado, r.cat_metodo_id, COALESCE(an.nombre, an.codigo, '') AS analito
+         FROM resultado r LEFT JOIN cat_analito an ON an.id = r.cat_analito_id
+        WHERE r.ot_id = $1::uuid AND r.deleted_at IS NULL`,
+      p.ot_id,
+    );
+    const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    let aplicados = 0;
+    for (const r of resultados) {
+      if (["revisado_n1", "aprobado"].includes(r.estado)) continue;
+      const delMetodo = params.filter((x: any) => x.metodoId === r.cat_metodo_id);
+      const par = delMetodo.length === 1 ? delMetodo[0] : delMetodo.find((x: any) => norm(x.ensayo) === norm(r.analito));
+      if (!par) continue;
+      await this.puente.editarEspecificacion(
+        r.id,
+        {
+          limiteInf: textoLimite(par.minimo),
+          nominal: textoLimite(par.nominal),
+          limiteSup: textoLimite(par.maximo),
+          unidad: par.unidad ?? undefined,
+          ...(par.formula ? { formula: par.formula } : {}),
+          motivo: `Parametrización validada del prototipo ${p.codigo} (EP-08 8.11)`,
+        } as any,
+        tenantId,
+        req,
+      );
+      aplicados++;
+    }
+    if (!aplicados) throw new ConflictException("Ningún resultado de la OT coincide con el panel parametrizado (registre primero la muestra con esos métodos).");
+    return { aplicados, prototipo: await this.detalle(tenantId, id) };
+  }
+
+  /** 8.17 · inscripción del tipo en la Codificación Única (si ya existe) y lo que falta para hacerla. */
+  private async inscripcionCu(tenantId: string, p: any) {
+    const fila = p.codigo_cnc
+      ? (
+          await this.prisma.$queryRawUnsafe<any[]>(
+            `SELECT id, cnc_dgmn AS cnc, listado, estado FROM bpch_codificacion
+              WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND cnc_normalizado = $2 LIMIT 1`,
+            tenantId,
+            normalizarCnc(p.codigo_cnc),
+          )
+        )[0]
+      : null;
+    return {
+      inscrito: fila ?? null,
+      faltantes: faltantesInscripcionCu({ estado: p.estado, dictamen: p.dictamen, documentoEstado: p.doc_estado, codigoCnc: p.codigo_cnc, yaInscrito: !!fila }),
+    };
+  }
+
+  /** 8.8 · ficha técnica u hoja de datos de seguridad (PDF/PNG/JPEG). No con el prototipo anulado. */
+  async adjuntar(tenantId: string, id: string, usuarioId: string | null, clase: string, archivo: ArchivoAdjunto | undefined) {
+    if (!CLASES_ADJUNTO_PROTOTIPO.includes(clase as any)) throw new BadRequestException("Tipo de adjunto no admitido (ficha técnica u hoja de seguridad).");
+    const p = await this.fila(tenantId, id);
+    if (p.estado === "anulado") throw new ConflictException("El prototipo está anulado.");
+    return guardarAdjunto(this.prisma as any, { tenantId, entidad: "prototipo", entidadId: id, clase, archivo, usuarioId });
+  }
+
+  async adjunto(tenantId: string, id: string, adjuntoId: string) {
+    const a = await leerAdjunto(this.prisma as any, tenantId, ["prototipo"], adjuntoId);
+    if (a.entidadId !== id) throw new NotFoundException("Adjunto no encontrado.");
+    return a;
   }
 
   /** Datos de origen de una OT de prototipo (para el expediente de la OT). */

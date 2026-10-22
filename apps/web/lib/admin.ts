@@ -24,7 +24,8 @@ export type AlcanceRol = "UNIDAD" | "DESCENDENCIA" | "GLOBAL";
 export type TipoDocumento =
   | "INFORME_ENSAYO" | "IVC" | "INFORME_TECNICO" | "CERTIFICADO_CALIBRACION" | "INFORME_INSPECCION"
   | "CERTIFICADO_CONFORMIDAD" | "INFORME_INCUMPLIMIENTO" | "COTIZACION" | "OT_DISPOSICION"
-  | "SOLICITUD_ADQUISICION" | "OFICIO" | "CERTIFICADO_RESISTENCIA_BALISTICA" | "INFORME_RECHAZO";
+  | "SOLICITUD_ADQUISICION" | "OFICIO" | "CERTIFICADO_RESISTENCIA_BALISTICA" | "INFORME_RECHAZO"
+  | "CERTIFICADO_ARMA" | "INFORME_INCUMPLIMIENTO_ARMA" | "CERTIFICADO_EVIDENCIA" | "INFORME_PERICIAL" | "NOTA_NO_CONFORMIDAD";
 export type AccionFirma = "REVISA" | "APRUEBA" | "FIRMA" | "OFICIALIZA" | "VB";
 export type NivelUnidad = "MISMA" | "SECCION" | "DEPARTAMENTO" | "DIRECCION" | "CALIDAD" | "COMERCIAL";
 
@@ -365,6 +366,12 @@ export const TIPOS_DOCUMENTO: { value: TipoDocumento; label: string; corto: stri
   { value: "OFICIO", label: "Oficio", corto: "Oficio" },
   { value: "CERTIFICADO_RESISTENCIA_BALISTICA", label: "Certificado de Resistencia Balística (CRB)", corto: "CRB" },
   { value: "INFORME_RECHAZO", label: "Informe de Ensayo de Rechazo", corto: "Inf. rechazo" },
+  // Delegación Nº 11 (EP-11 11.42)
+  { value: "CERTIFICADO_ARMA", label: "Certificado por arma (D11)", corto: "Cert. arma" },
+  { value: "INFORME_INCUMPLIMIENTO_ARMA", label: "Informe de incumplimiento de armas (D11)", corto: "Inf. incump. armas" },
+  { value: "CERTIFICADO_EVIDENCIA", label: "Certificado de evidencia (SAEC)", corto: "Cert. evidencia" },
+  { value: "INFORME_PERICIAL", label: "Informe técnico pericial (D11)", corto: "Inf. pericial" },
+  { value: "NOTA_NO_CONFORMIDAD", label: "Nota de no conformidad (D11)", corto: "Nota NC" },
 ];
 export const TIPO_DOCUMENTO = Object.fromEntries(TIPOS_DOCUMENTO.map((t) => [t.value, t])) as Record<TipoDocumento, (typeof TIPOS_DOCUMENTO)[number]>;
 

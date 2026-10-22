@@ -35,6 +35,12 @@ export const TIPOS_DOCUMENTO = [
   "OFICIO",
   "CERTIFICADO_RESISTENCIA_BALISTICA",
   "INFORME_RECHAZO",
+  // Delegación Nº 11 (EP-11 11.42, align_r4b_d11.sql)
+  "CERTIFICADO_ARMA",
+  "INFORME_INCUMPLIMIENTO_ARMA",
+  "CERTIFICADO_EVIDENCIA",
+  "INFORME_PERICIAL",
+  "NOTA_NO_CONFORMIDAD",
 ] as const;
 export type TipoDocumento = (typeof TIPOS_DOCUMENTO)[number];
 

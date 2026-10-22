@@ -94,14 +94,16 @@ export interface ItemInternacion {
  * División UN y Nº UN (obligatorios en el formulario de internación) y, si se
  * indican, tamaño de muestra ≤ tamaño de lote (SAC-PG01-IT10 · NCh 44).
  */
-export function erroresItems(items: ItemInternacion[]): string[] {
+export function erroresItems(items: ItemInternacion[], opts: { conArmas?: boolean } = {}): string[] {
   const e: string[] = [];
-  if (!items.length) e.push("Indique al menos un elemento a internar.");
+  // Internación de armas (EP-11 11.1): lo que se interna es el listado de armas
+  // de la resolución; los elementos son opcionales y un arma no lleva Nº UN.
+  if (!items.length && !opts.conArmas) e.push("Indique al menos un elemento a internar.");
   items.forEach((it, i) => {
     const n = `Elemento ${i + 1}`;
     if (!it.elementoEspecifico?.trim()) e.push(`${n}: indique el elemento específico (producto).`);
-    if (!it.claseDivisionUn?.trim()) e.push(`${n}: la Clase/División UN es obligatoria.`);
-    if (!it.numeroUn?.trim()) e.push(`${n}: el Nº UN es obligatorio.`);
+    if (!opts.conArmas && !it.claseDivisionUn?.trim()) e.push(`${n}: la Clase/División UN es obligatoria.`);
+    if (!opts.conArmas && !it.numeroUn?.trim()) e.push(`${n}: el Nº UN es obligatorio.`);
     if (it.cnc?.trim()) {
       const f = errorFormatoCnc(it.cnc);
       if (f) e.push(`${n}: ${f}`);

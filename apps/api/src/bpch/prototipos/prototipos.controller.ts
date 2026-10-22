@@ -1,4 +1,7 @@
-import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import type { Response } from "express";
+import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, type ArchivoAdjunto } from "../../common/adjuntos";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { PermisoGuard } from "../../auth/permiso.guard";
@@ -39,6 +42,70 @@ export class PrototiposController {
   @ApiOperation({ summary: "Prototipos (?q=&estado=)" })
   async listar(@Query("q") q: string, @Query("estado") estado: string, @Req() req: any) {
     return this.svc.listar(tenant(req), { q, estado }, await this.comun.filtroExpedientes(req));
+  }
+
+  @Get("codificado")
+  @RequierePermiso("bpch.prototipo.ver")
+  @ApiOperation({ summary: "8.8 · ¿Está codificado? (?elemento=): coincidencias en la Codificación Única y en el catálogo" })
+  codificado(@Query("elemento") elemento: string, @Req() req: any) {
+    return this.svc.codificado(tenant(req), elemento);
+  }
+
+  @Post(":id/adjuntos")
+  @RequierePermiso("bpch.prototipo.gestionar")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ADJUNTO, files: 1, fields: 2 } }))
+  @ApiOperation({ summary: "Ficha técnica u hoja de datos de seguridad · multipart: archivo + clase=ficha_tecnica|hoja_seguridad" })
+  async adjuntar(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoAdjunto | undefined, @Body() body: any, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.adjuntar(tenant(req), id, usuario(req), String(body?.clase ?? ""), archivo);
+  }
+
+  @Put(":id/parametros")
+  @RequierePermiso("bpch.prototipo.gestionar")
+  @ApiOperation({ summary: "8.11 · Panel del elemento (método, ensayo, Mín/Nom/Máx, unidad, fórmula)" })
+  async guardarParametros(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.guardarParametros(tenant(req), usuario(req), id, body);
+  }
+
+  @Post(":id/parametros/enviar")
+  @RequierePermiso("bpch.prototipo.gestionar")
+  @ApiOperation({ summary: "8.11 · Enviar la parametrización a validación" })
+  async enviarParametros(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.enviarParametros(tenant(req), usuario(req), id);
+  }
+
+  @Post(":id/parametros/validar")
+  @RequierePermiso("bpch.prototipo.dictaminar")
+  @ApiOperation({ summary: "8.11 · Validar la parametrización → ensayar (no quien la preparó)" })
+  async validarParametros(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.validarParametros(tenant(req), usuario(req), id);
+  }
+
+  @Post(":id/parametros/devolver")
+  @RequierePermiso("bpch.prototipo.dictaminar")
+  async devolverParametros(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.devolverParametros(tenant(req), usuario(req), id, body);
+  }
+
+  @Post(":id/parametros/aplicar")
+  @RequierePermiso("bpch.prototipo.ver")
+  @ApiOperation({ summary: "8.11 · Aplicar el panel validado como especificación de la OT (jefatura de la unidad de la OT)" })
+  async aplicarParametros(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.aplicarParametros(req, tenant(req), id);
+  }
+
+  @Get(":id/adjuntos/:adjuntoId")
+  @RequierePermiso("bpch.prototipo.ver")
+  async adjunto(@Param("id", ParseUUIDPipe) id: string, @Param("adjuntoId", ParseUUIDPipe) adjuntoId: string, @Req() req: any, @Res() res: Response) {
+    await this.exigir(req, id);
+    const a = await this.svc.adjunto(tenant(req), id, adjuntoId);
+    res.set(cabecerasAdjunto(a));
+    res.end(a.datos);
   }
 
   @Get(":id")

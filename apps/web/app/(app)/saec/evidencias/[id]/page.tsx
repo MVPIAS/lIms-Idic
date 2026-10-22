@@ -5,6 +5,8 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
 import { validarFormulario } from "@/lib/validate";
+import Peritajes from "./_components/Peritajes";
+import Prestamos from "./_components/Prestamos";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -181,6 +183,10 @@ export default function EvidenciaFichaPage() {
           <Dato lab="Tipo" val={e.tipo} />
           <Dato lab="Estado" val={e.estado} />
           <Dato lab="Caso" val={e.caso?.numero_caso} />
+          <Dato lab="NUE" val={e.nue} />
+          <Dato lab="Oficio · fecha" val={e.oficio_numero ? `${e.oficio_numero}${e.oficio_fecha ? ` · ${String(e.oficio_fecha).slice(0, 10).split("-").reverse().join("-")}` : ""}` : null} />
+          <Dato lab="Unidad solicitante del oficio" val={e.oficio_unidad} />
+          <Dato lab="RUC de la causa" val={e.ruc_causa} />
           <Dato lab="Nº evidencia (ESI)" val={e.exhibit_number} />
           <Dato lab="Categoría" val={e.categoria_texto} />
           <Dato lab="Calibre" val={e.calibre_texto} />
@@ -300,30 +306,8 @@ export default function EvidenciaFichaPage() {
         </table>
       </div>
 
-      {/* --- RF-K03.3 · peritajes --- */}
-      <div className="card card--table" style={{ marginBottom: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Peritajes</h3>
-        <table className="data">
-          <thead>
-            <tr><th>Origen</th><th>Resultado</th><th className="num">Hits</th><th>Conclusiones</th><th>Perito</th><th>Fecha</th></tr>
-          </thead>
-          <tbody>
-            {(e.peritajes ?? []).map((p: any) => (
-              <tr key={p.id}>
-                <td><span className={`pill ${p.origen === "ibis" ? "blue" : "gray"}`}>{p.origen}</span></td>
-                <td>{p.resultado ?? "—"}</td>
-                <td className="num">{p.hit_count ?? 0}</td>
-                <td style={{ maxWidth: 300 }}>{p.conclusiones ?? "—"}</td>
-                <td>{p.perito_nombre ?? "—"}</td>
-                <td>{fechaHora(p.fecha_peritaje)}</td>
-              </tr>
-            ))}
-            {(e.peritajes ?? []).length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 14 }}>Sin peritajes registrados.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* --- EP-11 11.34 · peritajes --- */}
+      <Peritajes evidenciaId={id} peritajes={e.peritajes ?? []} onCambio={cargar} />
 
       {/* --- RF-K03.2 · coincidencias IBIS --- */}
       <div className="card card--table" style={{ marginBottom: 12 }}>
@@ -349,30 +333,8 @@ export default function EvidenciaFichaPage() {
         </table>
       </div>
 
-      {/* --- RF-K06 · préstamos --- */}
-      <div className="card card--table" style={{ marginBottom: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Préstamos / devoluciones</h3>
-        <table className="data">
-          <thead>
-            <tr><th>Código</th><th>Tipo</th><th>Organismo</th><th>Solicitante</th><th>Estado</th><th>Solicitud</th></tr>
-          </thead>
-          <tbody>
-            {(e.prestamos ?? []).map((p: any) => (
-              <tr key={p.id}>
-                <td className="codigo">{p.codigo}</td>
-                <td>{p.tipo}</td>
-                <td>{p.organismo_solicitante}</td>
-                <td>{p.solicitante_nombre}</td>
-                <td><span className={`pill ${p.estado === "rechazado" ? "red" : p.estado === "devuelto" ? "green" : "amber"}`}>{p.estado}</span></td>
-                <td>{fechaHora(p.fecha_solicitud)}</td>
-              </tr>
-            ))}
-            {(e.prestamos ?? []).length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 14 }}>Sin solicitudes.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* --- EP-11 11.33 · préstamos --- */}
+      <Prestamos evidencia={e} onCambio={cargar} />
 
       {/* --- RF-K07 · certificados --- */}
       <div className="card card--table" style={{ marginBottom: 12 }}>

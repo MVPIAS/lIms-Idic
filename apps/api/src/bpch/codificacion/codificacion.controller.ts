@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { PermisoGuard } from "../../auth/permiso.guard";
@@ -32,6 +32,47 @@ export class CodificacionController {
   @ApiOperation({ summary: "Busca un producto por su código CNC-DGMN (?cnc=)" })
   async porCodigo(@Query("cnc") cnc: string, @Req() req: any) {
     return { producto: cnc?.trim() ? await this.svc.porCnc(tenantDe(req), cnc) : null };
+  }
+
+  /* EP-09 9.16 · listado oficial por fabricante (antes de «:id»). */
+  @Get("listado-oficial/fabricantes")
+  @RequierePermiso("bpch.codificacion.ver")
+  @ApiOperation({ summary: "Fabricantes con productos en el listado (?listado=EXPLOSIVOS|SUSTANCIAS_QUIMICAS|EN_RECESO)" })
+  fabricantesListado(@Query("listado") listado: string, @Req() req: any) {
+    return this.svc.fabricantesListado(req, listado);
+  }
+
+  @Get("listado-oficial/emisiones")
+  @RequierePermiso("bpch.codificacion.ver")
+  emisionesListado(@Req() req: any) {
+    return this.svc.emisionesListado(req);
+  }
+
+  @Post("listado-oficial/pdf")
+  @RequierePermiso("bpch.codificacion.gestionar")
+  @AmbitoUnidad("BPCH_CERT")
+  @ApiOperation({ summary: "Genera el listado oficial en PDF para la firma (Subdirector BPCH y Jefe Depto. Control de Armas y Explosivos)" })
+  async listadoPdf(@Body() body: unknown, @Req() req: any, @Res() res: any) {
+    const r = await this.svc.listadoOficial(req, body, "pdf");
+    res.set({ "Content-Type": r.tipo, "Content-Disposition": `attachment; filename="${r.nombre}"`, "Cache-Control": "private, no-store" });
+    res.send(r.contenido);
+  }
+
+  @Post("listado-oficial/excel")
+  @RequierePermiso("bpch.codificacion.ver")
+  @ApiOperation({ summary: "Exporta el listado oficial a Excel (CSV)" })
+  async listadoExcel(@Body() body: unknown, @Req() req: any, @Res() res: any) {
+    const r = await this.svc.listadoOficial(req, body, "csv");
+    res.set({ "Content-Type": r.tipo, "Content-Disposition": `attachment; filename="${r.nombre}"`, "Cache-Control": "private, no-store" });
+    res.send(r.contenido);
+  }
+
+  @Post("desde-prototipo/:prototipoId")
+  @RequierePermiso("bpch.codificacion.gestionar")
+  @AmbitoUnidad("BPCH_CERT")
+  @ApiOperation({ summary: "8.17 · Inscribir el tipo aprobado de un prototipo (datos heredados y certificado de tipo asociado)" })
+  desdePrototipo(@Param("prototipoId", ParseUUIDPipe) prototipoId: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.desdePrototipo(req, prototipoId, body);
   }
 
   @Get(":id")

@@ -300,6 +300,6 @@ export class VerificacionController {
     NumeracionController,
   ],
   providers: [PlantillaRenderService, FirmaDocumentoService, InformeDatosService, NumeracionService],
-  exports: [PlantillaRenderService, NumeracionService],
+  exports: [PlantillaRenderService, NumeracionService, FirmaDocumentoService],
 })
 export class PlantillaRenderModule {}
