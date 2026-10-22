@@ -305,11 +305,11 @@ async function main() {
     let p = await cert(METRO, C.cal.id);
     afirmar(p.esquema.modo === "propio" && p.esquema.propio && p.esquema.imprime, JSON.stringify(p.esquema));
     let h = await html(METRO, C.cal.id);
-    afirmar(h.includes('<div class="foto"><img src="data:image/png;base64,') && h.includes("Posición de las masas en el plato"), "no se imprime el esquema propio");
+    afirmar(h.includes('<div class="foto esquema"><img src="data:image/png;base64,') && h.includes("Posición de las masas en el plato"), "no se imprime el esquema propio");
     const e = await llamar(METRO, "GET", `/metrologia/calibraciones/${C.cal.id}/esquema`);
     afirmar(e.status === 200 && e.tipo.includes("image/png"), `GET esquema ${e.status}`);
     await ok(METRO, "PUT", `/metrologia/calibraciones/${C.cal.id}/certificado`, { esquemaModo: "ninguno" });
-    afirmar(!(await html(METRO, C.cal.id)).includes('class="foto"'), "«sin esquema» sigue imprimiéndolo");
+    afirmar(!(await html(METRO, C.cal.id)).includes("class=\"foto"), "«sin esquema» sigue imprimiéndolo");
     await ok("demo.admin", "PUT", "/metrologia/imagenes/esquema:ITM02", formulario(png(200, 120, [90, 160, 90]), "itm02.png", { titulo: "Posiciones de carga en el plato (prueba)" }));
     await ok(METRO, "PUT", `/metrologia/calibraciones/${C.cal.id}/certificado`, { esquemaModo: "defecto" });
     h = await html(METRO, C.cal.id);
