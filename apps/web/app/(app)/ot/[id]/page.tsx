@@ -16,6 +16,7 @@ import CabeceraInspeccionOt from "./_components/CabeceraInspeccionOt";
 import FotosOt from "./_components/FotosOt";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
+import NotificacionDgmn from "@/components/bpch-procesos/NotificacionDgmn";
 import { MOTOR_FLUJOS_VISIBLE } from "@/lib/motorFlujos";
 import FlujoBpmOt from "./_components/FlujoBpmOt";
 import { EtapasOt, SiguientePasoOt, type AvanceOt } from "@/components/ot/RutaOt";
@@ -191,6 +192,14 @@ export default function ExpedientePage() {
 
       {ot && <OrigenBpchOt otId={ot.id} origenTrabajo={ot.origenTrabajo} />}
 
+      {/* Delegación Nº 11 (EP-11): las armas se trabajan en su expediente propio. */}
+      {ot?.unidad?.codigo === "D11" && puede("arma.ver") && (
+        <div className="alert info" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ flex: 1 }}>OT de armas de la Delegación Nº 11: la recepción, el registro de cada arma, los ensayos, la acuñación, los certificados por arma y la entrega se hacen en su expediente.</span>
+          <Link href={`/saec/ot/${ot.id}` as any} className="btn outline sm">Ir a Certificación de armas</Link>
+        </div>
+      )}
+
       {ot && !ot.unidadPrincipal && (
         <div className="alert warn">
           Esta OT <b>no tiene laboratorio responsable</b>: nadie del laboratorio la ve.
@@ -342,6 +351,7 @@ export default function ExpedientePage() {
             {tab === "fotos" && typeof id === "string" && <FotosOt otId={id} otEstado={ot?.estado} />}
             {/* Fecha de compromiso, documentos (firma y entrega) y cierre de la OT. */}
             {tab === "informe" && typeof id === "string" && esMetrologia && <InstrumentosOt otId={id} onCambio={cargarOt} modo="cierre" />}
+            {tab === "informe" && typeof id === "string" && <NotificacionDgmn otId={id} onCambio={cargarOt} />}
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}
             {MOTOR_FLUJOS_VISIBLE && tab === "flujo" && typeof id === "string" && <FlujoBpmOt otId={id} />}
           </div>

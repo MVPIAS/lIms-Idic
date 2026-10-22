@@ -10,6 +10,7 @@ import { escapeHtml, fmtFecha, fmtFechaHora } from "../../plantilla-render/html.
 import { anioChile, hoyChile } from "../../common/fecha-chile";
 import { svgCode128 } from "../../common/code128";
 import { leerTabla, TablaError } from "../../common/tabla-archivo";
+import { SELECT_ARMAS, estadoDe, type FilaArma } from "./datos-d11";
 import {
   CLASES,
   NOMBRE_CAMINO,
@@ -157,76 +158,6 @@ const tiene = (req: any, p: string) => (req?.user?.roles ?? []).includes("SUPERA
 const OT_CERRADA = ["cerrada", "anulada"];
 
 type Db = Pick<PrismaService, "$queryRawUnsafe" | "$executeRawUnsafe">;
-
-/** Fila de arma de la OT tal como la necesitan las reglas y la pantalla. */
-interface FilaArma {
-  id: string;
-  orden: number;
-  tipo: TipoArma;
-  serie_normalizada: string | null;
-  sin_serie: boolean;
-  accesorios: string | null;
-  lote: string | null;
-  ubicacion: string | null;
-  clase: EstadoArma["clase"];
-  permisibilidad: EstadoArma["permisibilidad"];
-  camino: EstadoArma["camino"];
-  acunacion_numero: string | null;
-  acunacion_anio: number | null;
-  acunada_at: Date | null;
-  entrega_id: string | null;
-  resolucion_arma_id: string | null;
-  arma_id: string;
-  serie: string | null;
-  marca: string | null;
-  modelo: string | null;
-  calibre: string | null;
-  pais_origen: string | null;
-  muestra_id: string;
-  muestra: string;
-  codigo_barras: string | null;
-  veredicto: string | null;
-  ensayos: number;
-  pendientes: number;
-  aprobados: number;
-  certificado: { id: string; numero: string; estado: string; entregadoAt: string | null; vigenteHasta: string | null; vigenteDesde: string | null } | null;
-}
-
-const SELECT_ARMAS = `
-  SELECT a.id, a.orden, a.tipo, a.serie_normalizada, a.sin_serie, a.accesorios, a.lote, a.ubicacion,
-         a.clase, a.permisibilidad, a.camino, a.acunacion_numero, a.acunacion_anio, a.acunada_at,
-         a.entrega_id, a.resolucion_arma_id,
-         ar.id AS arma_id, ar.serie, ar.marca, ar.modelo, ar.calibre, ar.pais_origen,
-         m.id AS muestra_id, m.codigo AS muestra, m.codigo_barras, m.veredicto,
-         (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL)::int AS ensayos,
-         (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL
-                                              AND r.estado IN ('pendiente', 'devuelto'))::int AS pendientes,
-         (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL AND r.estado = 'aprobado')::int AS aprobados,
-         (SELECT json_build_object('id', c.id, 'numero', COALESCE(c.numero, c.codigo), 'estado', c.estado,
-                                   'entregadoAt', c.entregado_at, 'vigenteHasta', ca.vigente_hasta, 'vigenteDesde', ca.vigente_desde)
-            FROM certificado c
-            LEFT JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
-           WHERE c.ot_id = a.ot_id AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'
-             AND c.estado IN ('en_firma', 'oficial', 'emitido') AND c.muestra_ids @> ARRAY[m.id]
-           ORDER BY c.created_at DESC LIMIT 1) AS certificado
-    FROM d11_arma_ot a
-    JOIN arma ar   ON ar.id = a.arma_id
-    JOIN muestra m ON m.id = a.muestra_id AND m.deleted_at IS NULL`;
-
-function estadoDe(a: FilaArma): EstadoArma {
-  return {
-    clase: a.clase,
-    permisibilidad: a.permisibilidad,
-    camino: a.camino,
-    ensayos: Number(a.ensayos),
-    pendientes: Number(a.pendientes),
-    aprobados: Number(a.aprobados),
-    veredicto: a.veredicto,
-    acunada: Boolean(a.acunada_at),
-    certificado: a.certificado ? { estado: a.certificado.estado } : null,
-    entregada: Boolean(a.entrega_id),
-  };
-}
 
 /**
  * Delegación Nº 11 · certificación de armas internadas (EP-11, camino A). La
@@ -483,6 +414,7 @@ export class D11Service implements OnModuleInit {
         return {
           id: a.id,
           orden: a.orden,
+          resolucionArmaId: a.resolucion_arma_id,
           muestraId: a.muestra_id,
           muestra: a.muestra,
           codigoBarras: a.codigo_barras ?? a.muestra,
@@ -1330,7 +1262,7 @@ export class D11Service implements OnModuleInit {
     return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Etiquetas ${escapeHtml(ot.codigo)}</title>
 <style>
   body{font-family:Arial,Helvetica,sans-serif;margin:12px;color:#111}
-  .barra{margin-bottom:10px} .barra button{font-size:13px;padding:6px 12px}
+  .barra{margin-bottom:10px;font-size:12px;color:#444}
   .hoja{display:grid;grid-template-columns:repeat(auto-fill,minmax(70mm,1fr));gap:6mm}
   .etiqueta{border:1px dashed #888;padding:3mm;break-inside:avoid;page-break-inside:avoid}
   .etiqueta svg{display:block;max-width:100%;height:auto}
@@ -1338,7 +1270,7 @@ export class D11Service implements OnModuleInit {
   .txt{font-size:10.5px;margin-top:1mm}
   @media print{.barra{display:none} body{margin:0}}
 </style></head><body>
-<div class="barra"><button type="button" onclick="window.print()">Imprimir etiquetas</button> ${armas.length} etiqueta(s) · ${escapeHtml(fmtFechaHora(new Date()))}</div>
+<div class="barra">${armas.length} etiqueta(s) · ${escapeHtml(fmtFechaHora(new Date()))} · imprima con Ctrl + P</div>
 <div class="hoja">
 ${fichas}
 </div></body></html>`;
@@ -1455,9 +1387,9 @@ ${fichas}
   th{background:#eef2f6} .meta td{border:none;padding:2px 8px 2px 0}
   .firmas{display:grid;grid-template-columns:1fr 1fr;gap:30mm;margin-top:28mm;text-align:center}
   .firmas div{border-top:1px solid #333;padding-top:4px}
-  .barra{margin-bottom:10px} @media print{.barra{display:none} body{margin:12mm}}
+  .barra{margin-bottom:10px;font-size:12px;color:#444} @media print{.barra{display:none} body{margin:12mm}}
 </style></head><body>
-<div class="barra"><button type="button" onclick="window.print()">Imprimir guía</button></div>
+<div class="barra">Imprima con Ctrl + P (dos copias: una para el importador y otra para el expediente).</div>
 <h1>GUÍA DE ENTREGA DE ARMAS Nº ${escapeHtml(en.numero)}</h1>
 <div class="sub">Instituto de Investigaciones y Control · Banco de Pruebas de Chile · Delegación Nº 11</div>
 <table class="meta">
