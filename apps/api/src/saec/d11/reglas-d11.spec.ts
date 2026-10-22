@@ -301,6 +301,15 @@ describe("estado del arma y avance del expediente", () => {
     expect(a.completo).toBe(true);
     expect(a.pasos.every((p) => p.estado === "hecho")).toBe(true);
   });
+  it("la prohibida no se entrega: la entrega está hecha con las demás entregadas (coherente con el cierre)", () => {
+    const ok = arma({ acunada: true, certificado: { estado: "oficial" }, entregada: true });
+    const prohibida = arma({ permisibilidad: "prohibida", veredicto: null, ensayos: 0, aprobados: 0 });
+    const a = avanceD11({ programada: true, llegada: true, actaFirmada: true, recibidas: 3, armas: [ok, ok, prohibida] }, cfg);
+    const entrega = a.pasos.find((p) => p.clave === "entrega")!;
+    expect(entrega.estado).toBe("hecho");
+    expect(entrega.detalle).toBe("2 de 2 entregadas · 1 prohibida: no se entrega");
+    expect(a.completo).toBe(true);
+  });
   it("un paso no se marca hecho si el anterior no lo está", () => {
     const a = avanceD11({ programada: false, llegada: true, actaFirmada: true, recibidas: 1, armas: [arma({ acunada: true })] }, cfg);
     expect(a.actual).toBe(1);

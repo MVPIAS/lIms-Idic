@@ -71,6 +71,12 @@ export interface AvanceOt {
   /** Solo si la OT está cerrada: fecha y factura, para la línea «OT cerrada el …». */
   cierre: { fecha: string | null; conCobro: boolean; factura: { numero: string; estado: string } | null } | null;
   avisos: string[];
+  /**
+   * Pestañas del expediente que aplican a esta OT. «Muestreo» y «Preparación» son
+   * de los laboratorios (EP-01/02/03/05); en el BPCH el muestreo NCh 44 vive en el
+   * expediente de inspección (EP-10 10.4) y la D11 trabaja en Certificación de armas.
+   */
+  pestanas: { muestreo: boolean; preparacion: boolean };
 }
 
 /* ------------------------------------------------------------- entrada --- */
@@ -129,6 +135,8 @@ export interface HechosOt {
   conCobro: boolean;
   opiPendiente?: boolean;
   unidad: { codigo: string; esMetrologia?: boolean } | null;
+  /** Rama del organigrama de la unidad: BPCH (sin la D11), la D11 o ninguna. */
+  rama?: "bpch" | "d11" | null;
   cotizacion?: { codigo: string; estado: string } | null;
   fechaCierre?: Date | string | null;
   muestras: { total: number; recepcionIncompleta: number; veredictos?: (string | null)[] };
@@ -990,7 +998,14 @@ export function calcularAvance(h: HechosOt): AvanceOt {
         }
       : null,
     avisos,
+    pestanas: pestanasOt(h, tipo),
   };
+}
+
+/** Pestañas «Muestreo» y «Preparación»: solo en OT de laboratorio fuera del BPCH y la D11. */
+export function pestanasOt(h: HechosOt, tipo: TipoRuta = tipoRuta(h)): AvanceOt["pestanas"] {
+  const deLaboratorio = (tipo === "laboratorio" || tipo === "interna") && !h.rama && !h.unidad?.esMetrologia;
+  return { muestreo: deLaboratorio, preparacion: deLaboratorio };
 }
 
 /** ¿Puede este usuario hacer la acción del siguiente paso? (para mostrar el botón o «Esperando a…»). */

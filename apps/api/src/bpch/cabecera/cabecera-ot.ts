@@ -96,7 +96,12 @@ export const CabeceraSchema = z
 
 /** ¿La OT es de una unidad del BPCH (sucursales, SCC…) y no de la Delegación Nº 11 (proceso propio, EP-11)? */
 export async function otEsBpch(prisma: PrismaService | any, unidadId: string | null): Promise<boolean> {
-  if (!unidadId) return false;
+  return (await ramaDeUnidad(prisma, unidadId)) === "bpch";
+}
+
+/** Rama BPCH de una unidad: «bpch» (sin la D11), «d11» (la Delegación Nº 11 y lo que cuelga) o null. */
+export async function ramaDeUnidad(prisma: PrismaService | any, unidadId: string | null): Promise<"bpch" | "d11" | null> {
+  if (!unidadId) return null;
   const filas = (await prisma.$queryRawUnsafe(
     `WITH RECURSIVE cadena AS (
        SELECT id, padre_id, codigo, 0 AS nivel FROM unidad WHERE id = $1::uuid
@@ -106,7 +111,8 @@ export async function otEsBpch(prisma: PrismaService | any, unidadId: string | n
     unidadId,
   )) as { codigo: string }[];
   const codigos = filas.map((f) => f.codigo);
-  return codigos.includes("BPCH") && !codigos.includes("D11");
+  if (!codigos.includes("BPCH")) return null;
+  return codigos.includes("D11") ? "d11" : "bpch";
 }
 
 /** Fila de v_bpch_cabecera_ot de la OT (lo que imprimen los documentos), o null. */

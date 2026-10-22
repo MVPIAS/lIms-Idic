@@ -602,6 +602,10 @@ export function avanceD11(h: HechosExpediente, cfg: Pick<ConfigD11, "acunacionCi
   const certificadas = certificables.filter((a) => a.certificado).length;
   const oficiales = certificables.filter((a) => a.certificado && a.certificado.estado !== "en_firma").length;
   const entregadas = cuenta((e) => e === "entregada");
+  // Las prohibidas no se entregan al importador (su destino lo informa la DGMN, 11.24):
+  // la entrega está hecha cuando lo están todas las demás, igual que el cierre (faltantesCierreD11).
+  const prohibidas = n - activas.length;
+  const porEntregar = activas.length;
   const registroCompleto = h.recibidas != null && h.recibidas > 0 && n >= h.recibidas;
 
   const p = (clave: string, titulo: string, boton: string, leToca: string, hecho: boolean, enCurso: boolean, detalle: string): PasoD11 => ({
@@ -622,7 +626,15 @@ export function avanceD11(h: HechosExpediente, cfg: Pick<ConfigD11, "acunacionCi
     p("revision", "Revisión y aprobación", "Aprobar → acuñar y certificar", "Jefe D11", n > 0 && aprobadas === n && sinPendientes === n, aprobadas > 0, `${aprobadas} de ${n} aprobadas`),
     p("acunacion", "Acuñación BPCH (IT08)", "Acuñar → certificar", "Armero", n > 0 && aprobadas === n && acunadas === porAcunar.length, acunadas > 0, porAcunar.length ? `${acunadas} de ${porAcunar.length}` : "No aplica"),
     p("certificados", "Certificados por arma", "Emitir certificados → firma", "Jefe D11", n > 0 && aprobadas === n && certificables.length > 0 && oficiales === certificables.length, certificadas > 0, `${oficiales} oficiales de ${certificables.length}`),
-    p("entrega", "Entrega al importador", "Registrar entrega → cierre", "D11 / Comercial", n > 0 && entregadas === n, entregadas > 0, `${entregadas} de ${n} entregadas`),
+    p(
+      "entrega",
+      "Entrega al importador",
+      "Registrar entrega → cierre",
+      "D11 / Comercial",
+      n > 0 && entregadas >= porEntregar,
+      entregadas > 0,
+      `${entregadas} de ${porEntregar} entregadas${prohibidas ? ` · ${prohibidas} prohibida${prohibidas === 1 ? "" : "s"}: no se entrega${prohibidas === 1 ? "" : "n"}` : ""}`,
+    ),
   ];
   // Un paso solo cuenta como hecho si los anteriores lo están (la barra no salta).
   let corte = pasos.findIndex((x) => x.estado !== "hecho");
