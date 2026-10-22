@@ -15,7 +15,7 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { useAlcance, describirAlcance, type ItemBandeja } from "@/lib/alcance";
-import { usePermisos, PERFIL_INFO, type Perfil } from "@/lib/permisos";
+import { usePermisos, infoPerfil, type Perfil } from "@/lib/permisos";
 import { EmptyState, SkeletonCards } from "@/components/ui/PageHeader";
 
 interface Accion { href: string; titulo: string; desc: string; icono: string; perm?: string | string[] }
@@ -150,10 +150,10 @@ function TarjetaPendiente({ it }: { it: ItemBandeja }) {
 
 export default function InicioPage() {
   const { cargando, alcance, bandeja, fuente, bandejaDisponible } = useAlcance();
-  const { puede, listo, perfilJwt, usuario } = usePermisos();
+  const { puede, listo, perfilJwt, usuario, roles } = usePermisos();
 
   const perfil: Perfil = (alcance?.perfil as Perfil) ?? perfilJwt;
-  const info = PERFIL_INFO[perfil] ?? { etiqueta: perfil, descripcion: "" };
+  const info = infoPerfil(perfil, roles);
   const nombre = primerNombre(alcance?.usuario?.nombre ?? usuario.nombre ?? usuario.username);
 
   const acciones = useMemo(() => {

@@ -114,6 +114,8 @@ const AnularBody = z.object({ motivo: texto(500).min(5, "Indique el motivo (mín
 
 export const FiltroInternaciones = z.object({
   estado: z.string().max(30).optional(),
+  /** Tarjetas de Mi bandeja (EP-06 6.1 y 6.6): «analisis» = por analizar (SCC); «inspeccion» = lotes por inspeccionar. */
+  pendiente: z.enum(["analisis", "inspeccion"]).optional(),
   q: z.string().trim().max(120).optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
@@ -146,6 +148,10 @@ export class InternacionBpchService {
     const filtro = await this.comun.filtroExpedientes(req);
     if (filtro !== null) where.push(`i.unidad_inspeccion_id = ANY(${p(filtro)}::uuid[])`);
     if (f.estado) where.push(`i.estado = ${p(f.estado)}`);
+    if (f.pendiente === "analisis") where.push(`i.estado IN ('registrada', 'antecedentes_pendientes')`);
+    if (f.pendiente === "inspeccion")
+      where.push(`i.estado = 'ot_generada' AND o.estado NOT IN ('cerrada', 'anulada')
+                  AND NOT EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL)`);
     if (f.q) {
       const q = p(`%${f.q}%`);
       where.push(`(i.numero ILIKE ${q} OR i.resolucion_numero ILIKE ${q} OR cl.razon_social ILIKE ${q} OR cl.rut ILIKE ${q} OR o.codigo ILIKE ${q}

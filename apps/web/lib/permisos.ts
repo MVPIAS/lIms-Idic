@@ -41,6 +41,26 @@ export const PERFIL_INFO: Record<Perfil, { etiqueta: string; descripcion: string
   LECTOR: { etiqueta: "Consulta", descripcion: "Consulta información y reportes, sin modificar datos." },
 };
 
+/**
+ * Roles que comparten el perfil «Analista» de la bandeja pero hacen otro trabajo
+ * (recorrido MP-02, D02-11: Recepción se presentaba como «Realiza los ensayos…»).
+ */
+const PERFIL_POR_ROL: Record<string, { etiqueta: string; descripcion: string }> = {
+  RECEPCION: { etiqueta: "Recepción de muestras", descripcion: "Recibe las muestras de sus laboratorios, registra su condición y asigna el Nº interno." },
+  INSPECTOR: { etiqueta: "Inspección", descripcion: "Programa la inspección, registra los lotes y captura los resultados de la inspección." },
+  METROLOGO: { etiqueta: "Metrología", descripcion: "Calibra los instrumentos y registra las mediciones de sus órdenes de trabajo." },
+};
+
+/** Etiqueta y descripción del perfil, afinada por el rol cuando el perfil es genérico. */
+export function infoPerfil(perfil: Perfil | string, roles: string[] = []): { etiqueta: string; descripcion: string } {
+  const base = PERFIL_INFO[perfil as Perfil] ?? { etiqueta: String(perfil), descripcion: "" };
+  if (perfil !== "ANALISTA") return base;
+  const rs = roles.map((r) => String(r).toUpperCase());
+  if (rs.includes("ANALISTA")) return base;
+  const propio = Object.keys(PERFIL_POR_ROL).find((r) => rs.includes(r));
+  return propio ? PERFIL_POR_ROL[propio] : base;
+}
+
 export interface Acceso {
   /** true cuando ya se leyó el token (en el cliente, tras montar). */
   listo: boolean;

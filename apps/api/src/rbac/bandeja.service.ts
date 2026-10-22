@@ -1,7 +1,7 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
 import { ContextoAlcance } from "./alcance.service";
-import { Perfil } from "./rbac.constants";
+import { Perfil, codigoCanonico } from "./rbac.constants";
 import { MAX_INTENTOS_FALLIDOS } from "../auth/bloqueo";
 
 export type Severidad = "info" | "warn" | "alta";
@@ -42,6 +42,8 @@ const PERMISO_DE_RUTA: [string, string][] = [
   ["/ordenes-compra", "compra.ver"],
   ["/no-conformidades", "nc.ver"],
   ["/admin", "admin.usuarios"],
+  ["/recepcion", "muestra.crear"],
+  ["/bpch/internaciones", "bpch.internacion.ver"],
 ];
 
 /**
@@ -161,10 +163,15 @@ export class BandejaService {
           tenant,
           unidades,
         ),
+      // Por el laboratorio DUEÑO del ensayo (lims_lab_de_resultado): un derivado por
+      // orden interna cuenta para el destino, no para el responsable de la OT
+      // (recorrido MP-02, D02-04). Misma regla que GET /resultados/bandeja.
       resultadosEstado: (estados: string[]) =>
         this.contar(
           `SELECT count(*) AS n FROM resultado r JOIN orden_trabajo o ON o.id = r.ot_id
-            WHERE r.deleted_at IS NULL AND r.estado = ANY($3::text[]) AND ${otScope}`,
+             JOIN LATERAL lims_lab_de_resultado(r.id) lr ON TRUE
+            WHERE r.deleted_at IS NULL AND r.estado = ANY($3::text[])
+              AND o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND ($2::uuid[] IS NULL OR lr.unidad_id = ANY($2::uuid[]))`,
           tenant,
           unidades,
           estados,
@@ -172,10 +179,61 @@ export class BandejaService {
       resultadosDevueltosMios: () =>
         this.contar(
           `SELECT count(*) AS n FROM resultado r JOIN orden_trabajo o ON o.id = r.ot_id
-            WHERE r.deleted_at IS NULL AND r.estado IN ('devuelto','rechazado') AND r.analista_id = $3::uuid AND ${otScope}`,
+             JOIN LATERAL lims_lab_de_resultado(r.id) lr ON TRUE
+            WHERE r.deleted_at IS NULL AND r.estado IN ('devuelto','rechazado') AND r.analista_id = $3::uuid
+              AND o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND ($2::uuid[] IS NULL OR lr.unidad_id = ANY($2::uuid[]))`,
           tenant,
           unidades,
           yo,
+        ),
+      // Recepción (recorrido MP-02, D02-11): lo mismo que la «Bandeja de entrada del
+      // laboratorio» (recepcion.service.ts · bandeja): OT abiertas sin muestras o con
+      // la recepción incompleta, más las órdenes internas por recibir de sus laboratorios.
+      otPorRecepcionar: () =>
+        this.contar(
+          `SELECT (SELECT count(*) FROM orden_trabajo o
+                    WHERE o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND o.estado NOT IN ('cerrada', 'anulada')
+                      AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
+                      AND (NOT EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL)
+                           OR EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL
+                                        AND (m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL))))
+                + (SELECT count(*) FROM orden_interna oi
+                     JOIN cat_familia f ON f.id = oi.destino_lab
+                     JOIN unidad ud ON ud.tenant_id = oi.tenant_id AND ud.codsucdel = f.codsucdel
+                    WHERE oi.tenant_id = COALESCE($1::uuid, oi.tenant_id) AND oi.deleted_at IS NULL AND oi.estado = 'abierta'
+                      AND ($2::uuid[] IS NULL OR ud.id = ANY($2::uuid[]))) AS n`,
+          tenant,
+          unidades,
+        ),
+      // Internaciones BPCH (EP-06 6.1 y 6.6; recorrido MP-06, D06-02). La SCC
+      // analiza las de todas las sucursales (como bpch-comun.filtroExpedientes).
+      internacionesPorAnalizar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM bpch_internacion i
+            WHERE i.tenant_id = COALESCE($1::uuid, i.tenant_id) AND i.estado IN ('registrada', 'antecedentes_pendientes')
+              AND ($2::uuid[] IS NULL OR i.unidad_inspeccion_id = ANY($2::uuid[])
+                   OR EXISTS (SELECT 1 FROM unidad s WHERE s.codigo = 'SCC' AND s.tenant_id = i.tenant_id AND s.id = ANY($2::uuid[])))`,
+          tenant,
+          unidades,
+        ),
+      lotesPorInspeccionar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM bpch_internacion i JOIN orden_trabajo o ON o.id = i.ot_id
+            WHERE i.tenant_id = COALESCE($1::uuid, i.tenant_id) AND i.estado = 'ot_generada' AND o.estado NOT IN ${OT_TERMINADA}
+              AND ($2::uuid[] IS NULL OR i.unidad_inspeccion_id = ANY($2::uuid[]))
+              AND NOT EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL)`,
+          tenant,
+          unidades,
+        ),
+      // ¿El usuario trabaja en la rama del BPCH (o es global)? Solo entonces ve las tarjetas de internación.
+      enBpch: () =>
+        this.contar(
+          `WITH RECURSIVE r AS (
+             SELECT id FROM unidad WHERE codigo = 'BPCH' AND tenant_id = COALESCE($1::uuid, tenant_id)
+             UNION ALL SELECT u.id FROM unidad u JOIN r ON u.padre_id = r.id)
+           SELECT count(*) AS n FROM r WHERE $2::uuid[] IS NOT NULL AND r.id = ANY($2::uuid[])`,
+          tenant,
+          unidades,
         ),
       // Documentos (informes/certificados) cuyo paso ACTUAL de la matriz de
       // firmas tiene al usuario como responsable (plantilla-render/firma-documento.service.ts).
@@ -402,6 +460,21 @@ export class BandejaService {
       item("oi_por_atender", "Órdenes internas por atender", "Órdenes internas de otros laboratorios por recibir o responder", await qOi.porAtender(), "/ordenes-internas", "warn");
     const oiPorIntegrar = async () =>
       item("oi_por_integrar", "Informes internos por integrar", "Órdenes internas que volvieron con su informe: déles por recibido", await qOi.porIntegrar(), "/ordenes-internas?vista=todas&estado=cerrada", "warn");
+    // Tarjetas por rol dentro del perfil (RECEPCION e INSPECTOR comparten el perfil ANALISTA).
+    const rolesVigentes = new Set((ctx.asignacionesVigentes ?? []).map((a) => codigoCanonico(a.rolCodigo)));
+    const porRecepcionar = async (): Promise<ItemBandeja[]> =>
+      rolesVigentes.has("RECEPCION")
+        ? [item("ot_por_recepcionar", "OT por recepcionar", "OT y órdenes internas de sus laboratorios con muestras por recibir o con la recepción incompleta", await q.otPorRecepcionar(), "/recepcion", "warn")]
+        : [];
+    const enBpch = async () => (await q.enBpch()) > 0;
+    const internacionesPorAnalizar = async (): Promise<ItemBandeja[]> =>
+      (await enBpch())
+        ? [item("internaciones_por_analizar", "Internaciones por analizar", "Resoluciones DGMN registradas que esperan el análisis técnico de la SCC", await q.internacionesPorAnalizar(), "/bpch/internaciones?pendiente=analisis", "warn")]
+        : [];
+    const lotesPorInspeccionar = async (): Promise<ItemBandeja[]> =>
+      (await enBpch())
+        ? [item("lotes_por_inspeccionar", "Lotes por inspeccionar", "Internaciones con OT generada cuyos lotes aún no se programan ni registran", await q.lotesPorInspeccionar(), "/bpch/internaciones?pendiente=inspeccion", "warn")]
+        : [];
     const nc = async () =>
       item("nc_abiertas", "No conformidades abiertas", "NC abiertas, en proceso o en verificación", await q.ncAbiertas(), "/no-conformidades", "warn");
 
@@ -423,6 +496,8 @@ export class BandejaService {
     switch (perfil) {
       case "ANALISTA":
         return all([
+          porRecepcionar,
+          lotesPorInspeccionar,
           asignadas,
           async () => item("ot_en_curso", "OT en curso", "OT abiertas de sus laboratorios", await q.otAbiertas(), "/ot?estado=abiertas", "info"),
           devueltos,
@@ -431,9 +506,9 @@ export class BandejaService {
       case "REVISOR":
         return all([porRevisar, asignadas, devueltos, porVencer, firmas]);
       case "JEFE_LAB":
-        return all([sinAsignar, porRevisar, porAprobar, oiPorAtender, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
+        return all([internacionesPorAnalizar, lotesPorInspeccionar, sinAsignar, porRevisar, porAprobar, oiPorAtender, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
       case "JEFE_SECCION":
-        return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
+        return all([internacionesPorAnalizar, firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
       case "JEFE_DEPTO":
         return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porFirmarCot, vbDepto, porResponder]);
       case "DIRECTOR":
