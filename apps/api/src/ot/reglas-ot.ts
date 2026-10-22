@@ -17,7 +17,7 @@ export const ORIGENES_OT = ["COTIZACION", "INTERNACION", "DISPOSICION", "INTERLA
 
 /** Por qué «Registrar OT» ya no admite el origen Internación. */
 export const MOTIVO_INTERNACION_PUERTA_UNICA =
-  "La OT de internación no se registra a mano: nace sola en Internaciones (BPCH · Comercial) cuando la SCC da por completa la información técnica de la resolución DGMN.";
+  "La OT de internación no se registra a mano: nace sola cuando la SCC completa el análisis técnico de la resolución DGMN en Internaciones (BPCH · Comercial).";
 export type OrigenOt = (typeof ORIGENES_OT)[number];
 
 export const TIPOS_ACEPTACION = ["OPI_RESOLUCION", "OC", "CORREO", "PAGO_ADELANTADO", "DISPOSICION_DIRECTOR"] as const;
