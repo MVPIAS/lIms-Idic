@@ -11,6 +11,7 @@ import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
 import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
+import { trabajoDsaDe } from "../formularios/trabajo-avance";
 
 /** Laboratorios de la Sección Metrología (los mismos que usa el módulo de Metrología). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -193,6 +194,8 @@ export class AvanceOtService {
       reinspeccion: r
         ? { id: r.id, numero: r.numero, unidad: r.unidad ?? null, loteRegistrado: r.loteRegistrado, conCodificacion: r.conCodificacion, trazabilidadHecha: r.trazabilidadHecha }
         : null,
+      // DSA: documentación del trabajo que se aprueba antes de ejecutar (frente r2a).
+      trabajoDsa: await trabajoDsaDe(this.prisma as any, { id: ot.id, tenantId: ot.tenantId, laboratorio: ot.unidad?.codigo ?? null }),
     };
   }
 

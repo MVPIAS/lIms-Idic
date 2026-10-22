@@ -276,6 +276,8 @@ const LISTADOS = [
   { n: "BPCH clasificaciones", r: "/bpch/clasificaciones", p: "bpch.clasificacion.ver", t: "bpch_clasificacion", regla: "bpch", href: "/bpch/clasificaciones" },
   { n: "BPCH codificación única", r: "/bpch/codificacion?limit=50", p: "bpch.codificacion.ver", regla: "comun", href: "/bpch/codificacion" },
   { n: "BPCH producción nacional", r: "/bpch/pn/oc?limit=50", p: "bpch.pn.ver", regla: "comun", href: "/bpch/produccion-nacional" },
+  // Frente r2a: documentación del trabajo del DSA que espera aprobación (Mi bandeja · Preparación del trabajo).
+  { n: "Documentación del trabajo por aprobar (r2a)", r: "/formularios/pendientes-aprobacion", p: "ot.preparacion.aprobar", t: "ot", regla: "unidad", href: "/preparacion-trabajo" },
   // Circuito de la cotización y encuestas (frente r1c).
   { n: "Cotizaciones por responder (laboratorio)", r: "/cotizaciones/solicitudes-laboratorio", p: "cotizacion.ver", t: "solicitud_costeo", regla: "unidad", href: "/cotizaciones/por-responder" },
   { n: "Encuestas de satisfacción", r: "/encuestas?limit=200", p: "encuesta.ver", t: "encuesta", regla: "unidad", href: "/encuestas" },
@@ -431,6 +433,15 @@ async function main() {
       ["orden_interna", "ot.ver", (id) => `/ordenes-internas/${id}`],
       ["ot", "ot.ver", (id) => `/bpch/cabecera-ot/${id}`],
       ["ot", "certificado.emitir", (id) => `/informes/ot/${id}/cobertura`],
+      // Frente r2a: formularios especializados, preparación de muestras y del trabajo.
+      ["ot", "resultado.ver", (id) => `/formularios/ot/${id}`],
+      ["ot", "resultado.ver", (id) => `/formularios/ot/${id}/disparos`],
+      ["ot", "resultado.ver", (id) => `/formularios/ot/${id}/hcp`],
+      ["ot", "resultado.ver", (id) => `/formularios/ot/${id}/aql`],
+      ["ot", "resultado.ver", (id) => `/formularios/ot/${id}/preparacion`],
+      ["ot", "ot.ver", (id) => `/formularios/ot/${id}/trabajo`],
+      ["resultado", "resultado.ver", (id) => `/formularios/resultado/${id}/micro`],
+      ["resultado", "resultado.ver", (id) => `/formularios/resultado/${id}/sensorial`],
     ];
     for (const [tipo, perm, ruta, codigos, regla] of DETALLE) {
       if (!tiene(perm)) continue;

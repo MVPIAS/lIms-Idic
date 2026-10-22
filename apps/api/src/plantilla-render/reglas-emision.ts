@@ -39,6 +39,12 @@ export function tipoDocumentoDePlantilla(tipoPlantilla: string | null | undefine
 /** Plantillas cuyo tipo de documento es propio y no depende de la unidad. */
 const PLANTILLAS_TIPO_PROPIO = new Set(["IVC", "I.TECNICO"]);
 
+/** Plantillas de un documento propio de un laboratorio (por su código): CRB e Informe de Rechazo del LRB. */
+export const TIPO_POR_REPID: Record<string, string> = {
+  "LRB-CRB": "CERTIFICADO_RESISTENCIA_BALISTICA",
+  "LRB-RECH": "INFORME_RECHAZO",
+};
+
 /** Nombre legible de cada tipo de documento de la matriz. */
 export const NOMBRE_TIPO_DOCUMENTO: Record<string, string> = {
   INFORME_ENSAYO: "Informe de ensayo",
@@ -48,6 +54,8 @@ export const NOMBRE_TIPO_DOCUMENTO: Record<string, string> = {
   INFORME_INSPECCION: "Informe de inspección",
   CERTIFICADO_CONFORMIDAD: "Certificado de conformidad",
   INFORME_INCUMPLIMIENTO: "Informe de incumplimiento",
+  CERTIFICADO_RESISTENCIA_BALISTICA: "Certificado de Resistencia Balística (CRB)",
+  INFORME_RECHAZO: "Informe de Ensayo de Rechazo",
 };
 const nombreTipo = (t: string) => NOMBRE_TIPO_DOCUMENTO[t] ?? t;
 
@@ -65,9 +73,13 @@ export type OrigenTipoDocumento = "indicado" | "plantilla" | "unidad";
 export function tipoDocumentoPorDefecto(p: {
   indicado?: string | null;
   tipoPlantilla?: string | null;
+  /** Código de la plantilla: algunas son de un documento propio (CRB, Informe de Rechazo del LRB). */
+  repid?: string | null;
   tipoUnidad?: string | null;
 }): { tipo: string; origen: OrigenTipoDocumento } {
   if (p.indicado) return { tipo: p.indicado, origen: "indicado" };
+  const propio = p.repid ? TIPO_POR_REPID[p.repid.toUpperCase()] : undefined;
+  if (propio) return { tipo: propio, origen: "plantilla" };
   const pl = (p.tipoPlantilla ?? "").toUpperCase();
   if (PLANTILLAS_TIPO_PROPIO.has(pl)) return { tipo: tipoDocumentoDePlantilla(pl), origen: "plantilla" };
   if (p.tipoUnidad) return { tipo: p.tipoUnidad, origen: "unidad" };

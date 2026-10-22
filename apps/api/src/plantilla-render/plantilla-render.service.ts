@@ -148,6 +148,15 @@ export class PlantillaRenderService {
     this.proveedores.set(clave, proveedor);
   }
 
+  /**
+   * Condiciones de emisión aportadas por otros módulos (p. ej. el CRB solo si el
+   * lote del LRB cumple): cada validador devuelve los faltantes de su tipo.
+   */
+  private readonly validadores: ((otId: string, tipoDocumento: string, tenantId: string) => Promise<string[]>)[] = [];
+  registrarValidadorEmision(v: (otId: string, tipoDocumento: string, tenantId: string) => Promise<string[]>) {
+    this.validadores.push(v);
+  }
+
   /** URL pública de verificación; configurable por despliegue. */
   private get baseVerificacion(): string {
     return (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
@@ -737,13 +746,13 @@ export class PlantillaRenderService {
     try {
       const [ot, plantilla, primera] = await Promise.all([
         this.prisma.ordenTrabajo.findFirst({ where: { id: otId, ...(tenantId ? { tenantId } : {}) }, select: { codigo: true, unidadPrincipal: true, tenantId: true } }),
-        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true } }),
+        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true, repid: true } }),
         this.prisma.muestra.findFirst({ where: { otId, deletedAt: null }, orderBy: { codigo: "asc" }, select: { codigo: true } }),
       ]);
       if (!ot || !plantilla) return general;
       const unidad = cob ? cob.unidadDocumento : ot.unidadPrincipal;
       const deUnidad = await this.tipoDocumentoDeUnidad(unidad);
-      const { tipo } = tipoDocumentoPorDefecto({ tipoPlantilla: plantilla.tipo, tipoUnidad: deUnidad?.tipo ?? null });
+      const { tipo } = tipoDocumentoPorDefecto({ tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoUnidad: deUnidad?.tipo ?? null });
       const p = await this.numeracion.proximo({
         tenantId: ot.tenantId,
         unidadId: unidad,
@@ -902,6 +911,7 @@ export class PlantillaRenderService {
     const { tipo: tipoDocumento, origen: tipoDocumentoOrigen } = tipoDocumentoPorDefecto({
       indicado: opts.tipoDocumento,
       tipoPlantilla: plantilla.tipo,
+      repid: plantilla.repid,
       tipoUnidad: deUnidad?.tipo ?? null,
     });
     const faltantes: string[] = [];
@@ -1000,6 +1010,9 @@ export class PlantillaRenderService {
         }),
       );
     }
+
+    // 4c. Condiciones de otros módulos (CRB / Informe de Rechazo del LRB: formularios/).
+    for (const v of this.validadores) faltantes.push(...(await v(otId, tipoDocumento, ot.tenantId)));
 
     // 5. Documento vigente de la misma plantilla que se solape con este (salvo el
     // que se reemplaza): varios por OT si cubren muestras, productos o laboratorios distintos.
@@ -1157,14 +1170,14 @@ export class PlantillaRenderService {
     const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId }, select: { codigo: true, estado: true } });
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
     if (ot.estado === "anulada" || ot.estado === "cerrada") throw new ConflictException(`La OT ${ot.codigo} está ${ot.estado}.`);
-    const plantilla = await this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId, tenantId }, select: { id: true, tipo: true, nombre: true } });
+    const plantilla = await this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId, tenantId }, select: { id: true, tipo: true, nombre: true, repid: true } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
     const otro = documentoEnConflicto(cober.cob, cober.hechos.documentos.filter((d) => d.plantillaId === plantillaId));
     if (otro) throw new ConflictException(`Ya existe el documento ${otro.numero}${otro.etiqueta ? ` (${otro.etiqueta})` : ""} con esta plantilla.`);
     if (p.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(p.tipoDocumento))
       throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
     const deUnidad = await this.tipoDocumentoDeUnidad(cober.unidadDocumento);
-    const { tipo: tipoDocumento } = tipoDocumentoPorDefecto({ indicado: p.tipoDocumento, tipoPlantilla: plantilla.tipo, tipoUnidad: deUnidad?.tipo ?? null });
+    const { tipo: tipoDocumento } = tipoDocumentoPorDefecto({ indicado: p.tipoDocumento, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoUnidad: deUnidad?.tipo ?? null });
     const fecha = new Date();
     const motivo = p.motivo.trim();
     return this.prisma.$transaction(async (tx) => {
