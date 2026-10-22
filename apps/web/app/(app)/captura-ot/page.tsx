@@ -76,8 +76,14 @@ interface Fila extends EnsayoEditable {
   revisadoPor: string | null;
   /** Laboratorio dueño del ensayo (el destino si se derivó por orden interna). */
   laboratorio: string | null;
+  laboratorioId: string | null;
   derivado: boolean;
   ordenInterna: { id: string | null; numero: string | null; estado: string | null } | null;
+  /**
+   * Por qué el usuario no aprueba este ensayo aunque tenga el permiso (lo revisó él y la
+   * configuración exige personas distintas). Lo dice la API en la vista por OT; undefined en la bandeja.
+   */
+  bloqueoAprobar?: string | null;
   /** Lo que el usuario puede hacer con ESTE ensayo según la API (vista por OT); null en la bandeja. */
   puedo: { capturar: boolean; revisar: boolean; aprobar: boolean; reabrir: boolean } | null;
 }
@@ -115,9 +121,11 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     metodo: r.metodoNombre ?? r.catMetodo?.nombre ?? r.catMetodo?.codigo ?? null,
     revisadoPor: r.revisadoPor ?? null,
     laboratorio: r.laboratorio ?? r.unidadCodigo ?? null,
+    laboratorioId: r.laboratorioId ?? null,
     derivado: !!r.derivado,
     ordenInterna: r.ordenInterna ?? null,
     puedo: r.puedo ?? null,
+    bloqueoAprobar: r.bloqueoAprobar,
     tipoDato: r.tipoDato === "atributo" ? "atributo" : "numerico",
     requisito: r.requisito ?? null,
     formula: r.formula ?? null,
@@ -148,6 +156,13 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     humedad: r.humedad ?? null,
     incertidumbre: r.incertidumbre ?? null,
   };
+}
+
+/** «3 resultados que revisó usted» / «1 que capturó usted y 2 que revisó usted» (D06-20). */
+function textoOmitidos(capturados: number, revisados: number): string {
+  const parte = (n: number, que: string) => `${n} resultado${n === 1 ? "" : "s"} que ${que} usted`;
+  if (capturados && revisados) return `${parte(capturados, "capturó")} y ${parte(revisados, "revisó")}`;
+  return capturados ? parte(capturados, "capturó") : parte(revisados, "revisó");
 }
 
 /** Corregir un valor ya capturado (aún sin revisar) exige motivo. */
@@ -468,9 +483,14 @@ export default function CapturaOtPage() {
 
   const todoAprobado = ot != null && filas.length > 0 && filas.every((f) => f.estado === "aprobado");
   const porRevisarAjenos = filas.filter((f) => f.estado === "capturado" && f.analistaId !== yo && puede(f, "revisar") && !sinVeredicto(f)).length;
-  const porAprobarAjenos = filas.filter(
-    (f) => f.estado === "revisado_n1" && f.analistaId !== yo && f.revisadoPor !== yo && puede(f, "aprobar") && !sinVeredicto(f),
-  ).length;
+  // ¿Lo revisó el usuario y la regla «revisión y aprobación por personas distintas» le impide aprobarlo?
+  // La API lo dice por ensayo (respeta la configuración); en la bandeja, la regla por defecto.
+  const revisadoPorMi = (f: Fila) => (f.bloqueoAprobar !== undefined ? !!f.bloqueoAprobar : f.revisadoPor === yo);
+  const aprobablesEnBloque = filas.filter((f) => f.estado === "revisado_n1" && puede(f, "aprobar") && !sinVeredicto(f));
+  const porAprobarAjenos = aprobablesEnBloque.filter((f) => f.analistaId !== yo && !revisadoPorMi(f)).length;
+  // Los que «Aprobar todo» deja fuera por la segregación de funciones (D06-20).
+  const omitidosCaptura = aprobablesEnBloque.filter((f) => f.analistaId === yo).length;
+  const omitidosRevision = aprobablesEnBloque.filter((f) => f.analistaId !== yo && revisadoPorMi(f)).length;
   // Ensayos de otro laboratorio en esta OT (derivados por orden interna): solo lectura.
   const ajenos = ot ? filas.filter((f) => f.derivado && f.puedo && !f.puedo.capturar && !f.puedo.revisar && !f.puedo.aprobar && !f.puedo.reabrir) : [];
   // El destino de una orden interna solo recibe los ensayos que se le derivaron.
@@ -569,7 +589,11 @@ export default function CapturaOtPage() {
               )}
               {tiene("resultado.aprobar") && (
                 <button className="btn success sm" disabled={!porAprobarAjenos || ocupado === "__ot"} onClick={() => accionOt("aprobar")}
-                  title="Aprueba todos los resultados revisados de la OT, salvo los que capturó usted">
+                  aria-describedby={omitidosCaptura + omitidosRevision ? "aprobar-todo-omitidos" : undefined}
+                  title={
+                    "Aprueba todos los resultados revisados de la OT, salvo los que capturó usted y los que revisó usted: " +
+                    "la revisión y la aprobación las hacen personas distintas."
+                  }>
                   Aprobar todo lo revisado ({porAprobarAjenos})
                 </button>
               )}
@@ -581,6 +605,12 @@ export default function CapturaOtPage() {
                 Emitir informe
               </Link>
             </div>
+            {tiene("resultado.aprobar") && omitidosCaptura + omitidosRevision > 0 && (
+              <p id="aprobar-todo-omitidos" className="subtitle" style={{ margin: "8px 0 0" }}>
+                «Aprobar todo» deja fuera {textoOmitidos(omitidosCaptura, omitidosRevision)}: la revisión y la aprobación
+                las hacen personas distintas, así que debe aprobarlos otra persona con permiso de aprobación.
+              </p>
+            )}
             {omitidos.length > 0 && (
               <div className="alert info" style={{ marginTop: 8 }}>
                 {omitidos.length} resultado(s) no se procesaron: {[...new Set(omitidos.map((o) => o.motivo))].join(" ")}
@@ -771,8 +801,8 @@ export default function CapturaOtPage() {
                                     title={propio ? "Lo capturó usted: debe revisarlo otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de revisar, o devuélvalo" : "Marcar como revisado"}>Revisar</button>
                                 )}
                                 {puede(f, "aprobar") && f.estado === "revisado_n1" && (
-                                  <button className="btn success sm" disabled={busy || propio || f.revisadoPor === yo || sinVeredicto(f)} onClick={() => accion(f, "aprobar")}
-                                    title={propio ? "Lo capturó usted: debe aprobarlo otra persona" : f.revisadoPor === yo ? "Lo revisó usted: la aprobación la hace otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de aprobar" : "Aprobar el resultado"}>Aprobar</button>
+                                  <button className="btn success sm" disabled={busy || propio || revisadoPorMi(f) || sinVeredicto(f)} onClick={() => accion(f, "aprobar")}
+                                    title={propio ? "Lo capturó usted: debe aprobarlo otra persona" : revisadoPorMi(f) ? f.bloqueoAprobar ?? "Lo revisó usted: la aprobación la hace otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de aprobar" : "Aprobar el resultado"}>Aprobar</button>
                                 )}
                                 {puede(f, "revisar") && ["capturado", "revisado_n1"].includes(f.estado) && (
                                   <button className="btn outline sm" disabled={busy} onClick={() => { setDevolviendo(devolviendo === f.id ? null : f.id); setMotivo(""); }}>Devolver</button>
