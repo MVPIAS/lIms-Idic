@@ -183,25 +183,10 @@ del área con sesión, como la del SAEC).
 - U calculada con **dos cifras significativas**, redondeo hacia arriba. La U
   asignada por clase (ITM01, ITM03) se imprime como la planilla.
 
-### Plantilla oficial de 2 páginas
-Según las hojas «Certificado» de las planillas (`metrologia.certificado.ts`):
-
-- **Página 1**: membrete, «CERTIFICADO DE CALIBRACIÓN N° …», acreditación del
-  proceso, OT y fechas, instrumento (descripción, marca, modelo, serie,
-  identificación especial, clase, capacidad, resolución, rango), cliente
-  (cliente, solicitante, contacto, dirección), recepción y calibración, lugar,
-  intervalo, temperatura, humedad y presión (± U del instrumento), método con
-  revisión, desviaciones, norma base, hasta 3 patrones (marca, modelo, serie,
-  clase, certificado, próxima calibración, emisor, trazabilidad), síntesis,
-  firmas del jefe del departamento y del jefe del laboratorio (nombre, grado,
-  cargo, fecha) y los 5 textos legales.
-- **Página 2**: membrete, número, ítem, tabla de resultados propia de la
-  instrucción (ITM03, ITV05, ITM01, ITM02, fuerza con clase, genérica, LNF,
-  puntos), observaciones (intervalo, k = 2, 95 %, «"--" = No aplica», «*» fuera
-  del alcance), firmas del jefe del laboratorio y del metrólogo y «Fin del
-  certificado de calibración».
-- El salto de página es `<div class="salto-pagina">` (soportado por
-  `plantilla-render/pdf.renderer.ts`, cambio mínimo compartido).
+### Plantilla oficial de N hojas
+Ver §8 (respuesta del laboratorio del 21-10-2026). Hasta esa fecha la plantilla
+era fija de 2 páginas; ahora la hoja 1 es fija y los resultados ocupan las hojas
+2..N que hagan falta.
 
 ### Departamento que firma
 En los documentos oficiales del LMT figura «**Departamento Sistemas de Armas**»;
@@ -315,3 +300,68 @@ Informe técnico del no calibrable (EP04-12, R3: hoy el ítem no apto se cierra 
 devolución), servicio externo (EP04-13), envío del certificado por correo, actualización del
 equipo del laboratorio dueño (EP04-30), códigos EN de la lista de precios en el catálogo
 (EP04-01), Mi bandeja de Metrología (EP04-39) y el desglose uᵢ por punto de los motores (EP04-19).
+
+## 8. Certificado de N hojas y presentación por certificado (respuesta del LMT del 21-10-2026, frente r1e)
+
+El Laboratorio de Metrología revisó los certificados de la maqueta y envió 12
+observaciones. Reglas que quedan (código: `apps/api/src/metrologia/metrologia.certificado.ts`
+y `apps/api/src/metrologia/certificado/`; pruebas: `certificado.spec.ts`,
+`presentacion.spec.ts`; guion: `scripts/verificacion/r1-r1e.js`).
+
+### 8.1 Hojas
+- **Hoja 1** (fija): membrete con logo de acreditado si corresponde, número,
+  línea de acreditación con «Página 1 de N» a la derecha, «ESTE CERTIFICADO
+  REEMPLAZA AL CERTIFICADO N° …» si procede, OT y fechas, instrumento, cliente,
+  condiciones (con las propias de la IT), método, hasta 3 patrones (una fila por
+  dato, como sus libros) y síntesis. **Al pie**: firmas del Jefe de Departamento
+  y del Jefe de Laboratorio y los 5 textos legales (observación 8).
+- **Hojas 2..N**: la misma cabecera con «Página k de N», datos del ítem (los del
+  libro: rango calibrado, valor nominal, rango total o rango nominal según la
+  IT), tablas de resultados propias de la IT partidas por filas si no caben
+  (la cabecera de la tabla se repite; una tabla de hasta 12 filas no se parte) y
+  el esquema si lo hay. **Al pie**: firmas del Jefe de Laboratorio y del metrólogo.
+- **Última hoja**: OBSERVACIONES y «Fin del certificado de calibración».
+- El reparto lo calcula `certificado/paginacion.ts` con alturas conservadoras; el
+  PDF (`pdf.renderer.ts`) ancla el pie de cada hoja al fondo de la página
+  (`div.pie-hoja`) y escribe «Página X de N» con el total real del PDF
+  (`p.paginacion`). La prueba genera el PDF real de los 16 casos de sus libros y de
+  tablas de 1 a 90 filas y exige que las hojas declaradas coincidan con las del PDF.
+- El PDF dibuja el cuerpo sellado (el mismo del SHA-256); número, código de
+  verificación y hash van en el pie técnico de cada hoja.
+
+### 8.2 Presentación por certificado (`met_calibracion.presentacion`)
+Pestaña «Certificado» de la ficha › «Presentación del certificado». La cambia
+solo el autor de la calibración y solo en borrador (misma regla que editar la
+toma de datos); cada cambio queda en la bitácora (acción `CERTIFICADO`) con su motivo.
+
+| Dato | Regla |
+|---|---|
+| Logo de acreditado (obs. 1 y 2) | Por defecto, según la acreditación del proceso. Se puede quitar en un proceso acreditado (motivo obligatorio): la línea pasa a «Laboratorio de Calibración en la magnitud …», sin código ni logo y sin marcas «*». Nunca se pone en un proceso sin acreditación (400). |
+| Reemplaza al certificado N° (obs. 3) | A mano, con motivo (certificado del sistema anterior o en papel). Formato de número de certificado (M-3901, LCPNF-012.26…). La reemisión del LIMS prevalece: un borrador de reemisión no admite otro número. La reemisión copia la presentación sin el reemplazo a mano. |
+| Observaciones (obs. 5) | Valor inicial: los textos automáticos (intervalo, k, 95 %, «"--" = No aplica» y «*» si hay puntos fuera del alcance y el certificado sale acreditado). Editables: una por línea, máximo 25. Frases habituales del libro como sugerencia. Aviso si hay «*» y el texto no lo explica. |
+| Condiciones de la IT (obs. 4) | `certificado/formato-it.ts`: presión (secuencia, medio, posición, línea de referencia), fuerza (tracción / compresión), volumen e isotermos (condición), termómetros (inmersión, división de escala), longitud y par (accesorios). Un dato que no es de la IT se rechaza. |
+| Esquema (obs. 10) | «El del proceso» (por defecto; ITT02 trae sembrado el esquema de su libro), «propio de esta calibración» (PNG o JPEG, máx. 2 MB, validado por sus bytes) o «sin esquema». |
+
+### 8.3 Configuración (Metrología › Configuración › «Certificado: logo y esquemas»)
+- `met_imagen`: logo de acreditación (`logo_acreditacion`) y esquema por defecto
+  de cada proceso (`esquema:<proceso>`). Cargar o quitar exige `metrologia.config`.
+- **El logo del INN lo carga el IDIC** (no viene en el código). Sin logo, el
+  certificado acreditado imprime solo «Acreditación LC …».
+
+### 8.4 Formato de cada IT (observación 4)
+Rótulos y tablas tomados de la hoja «Certificado» de cada libro: ITM01 (masa
+convencional «nominal ± desviación», EMP de la clase, identificación), ITM02
+(tabla principal + excentricidad), ITV02 (nominal, patrón, instrumento, error,
+U), ITP01 (indicaciones por serie y resultados con b′, f₀, h), ITP02
+(indicaciones, resultados y tabla en SI), ITF01 (series, parámetros NCh 2598/1
+con clase, tabla en N), ITF03, ITT01, ITT02, ITL01/02/06/07 e ITPT01 (sentido
+horario y tabla en N·m). La presión atmosférica solo en masas patrón, volumen y
+presión; la clase del ítem solo en masas; el intervalo de calibración solo en
+OBSERVACIONES. Detalle de diferencias y lo que no se pudo corregir:
+análisis del 21-10 (ITV02 contenedores, ITF01 FORM02, ITPT01 antihorario,
+certificado ASTM y LNF bilingüe quedan a la espera de casos o formatos del IDIC).
+
+### 8.5 Sin «cumple / no cumple» (observación 11)
+Ningún certificado ni vista lo dice. El formulario por puntos rotula la
+comparación con la tolerancia del fabricante como «informativa» («Dentro si …»).
+
