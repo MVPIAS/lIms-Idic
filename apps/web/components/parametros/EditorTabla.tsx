@@ -99,7 +99,7 @@ export default function EditorTabla({ id, columnas, maxFilas, filas, onCambio }:
                   if (c.tipo === "opcion")
                     return (
                       <td key={c.clave}>
-                        <select aria-label={etiqueta} value={comoTexto(v)} onChange={(e) => set(i, c.clave, e.target.value)}>
+                        <select className="celda" aria-label={etiqueta} value={comoTexto(v)} onChange={(e) => set(i, c.clave, e.target.value)}>
                           <option value="">—</option>
                           {(c.opciones ?? []).map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
                         </select>
@@ -109,9 +109,9 @@ export default function EditorTabla({ id, columnas, maxFilas, filas, onCambio }:
                   return (
                     <td key={c.clave} className={c.tipo !== "texto" ? "num" : undefined}>
                       {c.tipo === "texto" && (c.largo ?? 0) > 100 ? (
-                        <textarea aria-label={etiqueta} rows={2} value={comoTexto(v)} maxLength={c.largo} onChange={(e) => set(i, c.clave, e.target.value)} style={{ width: ancho, fontSize: 12 }} />
+                        <textarea className="celda" aria-label={etiqueta} rows={2} value={comoTexto(v)} maxLength={c.largo} onChange={(e) => set(i, c.clave, e.target.value)} style={{ width: ancho, fontSize: 12 }} />
                       ) : (
-                        <input aria-label={etiqueta} value={comoTexto(v)} maxLength={c.largo} inputMode={c.tipo === "texto" ? undefined : "decimal"} onChange={(e) => set(i, c.clave, e.target.value)} style={{ width: ancho, textAlign: c.tipo === "texto" ? undefined : "right" }} />
+                        <input className="celda" aria-label={etiqueta} value={comoTexto(v)} maxLength={c.largo} inputMode={c.tipo === "texto" ? undefined : "decimal"} onChange={(e) => set(i, c.clave, e.target.value)} style={{ width: ancho, textAlign: c.tipo === "texto" ? undefined : "right" }} />
                       )}
                     </td>
                   );

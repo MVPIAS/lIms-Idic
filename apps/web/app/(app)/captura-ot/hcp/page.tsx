@@ -15,7 +15,7 @@
  */
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageHeader, SkeletonCards } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import { llamar } from "@/lib/laboratorio";
@@ -170,8 +170,18 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
   const [f, setF] = useState(base);
   const [motivo, setMotivo] = useState("");
   const [soloPend, setSoloPend] = useState(false);
+  // Filas que se están editando: siguen a la vista aunque ya estén respondidas (si no, desaparecerían al primer dígito).
+  const [editando, setEditando] = useState<Set<string>>(() => new Set());
   const [ocupado, setOcupado] = useState(false);
   useEffect(() => { setF(base()); setMotivo(""); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [vehiculo, v]);
+  // Al pasar al siguiente vehículo, la hoja vuelve a su encabezado (no queda al pie de 379 ítems).
+  const formRef = useRef<HTMLFormElement>(null);
+  const vehiculoPrevio = useRef(vehiculo);
+  useEffect(() => {
+    if (vehiculoPrevio.current !== vehiculo) formRef.current?.scrollIntoView({ block: "start", behavior: "smooth" });
+    vehiculoPrevio.current = vehiculo;
+    setEditando(new Set());
+  }, [vehiculo]);
   const grupos = useMemo(() => {
     const m = new Map<string, Item[]>();
     for (const it of items) {
@@ -223,7 +233,7 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
   }
 
   return (
-    <form className="card" onSubmit={guardar}>
+    <form ref={formRef} className="card" onSubmit={guardar}>
       <h2>2 · Hoja de Control de Pruebas · vehículo Nº {f.numero} de {v.lote?.datos.muestra ?? "—"}</h2>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }} role="tablist" aria-label="Vehículos de la muestra">
         {v.vehiculos.map((x, i) => (
@@ -250,11 +260,11 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
         </div>
         <div className="toolbar" style={{ margin: "12px 0 6px" }}>
           <b style={{ fontSize: 12.5 }}>{nResp} de {items.length} ítems respondidos</b>
-          <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={soloPend} onChange={(e) => setSoloPend(e.target.checked)} style={{ width: "auto" }} /> Solo pendientes</label>
+          <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center" }}><input type="checkbox" checked={soloPend} onChange={(e) => { setSoloPend(e.target.checked); setEditando(new Set()); }} style={{ width: "auto" }} /> Solo pendientes</label>
           <div className="spacer" />
         </div>
         {grupos.map(([g, its]) => {
-          const vis = soloPend ? its.filter((it) => !respondido(it)) : its;
+          const vis = soloPend ? its.filter((it) => !respondido(it) || editando.has(it.item)) : its;
           if (!vis.length) return null;
           const nc = its.filter((it) => f.res[it.item]?.resultado === "NC").length;
           return (
@@ -273,14 +283,14 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
                     const val = r.valorTxt !== undefined ? aNum(r.valorTxt) : r.valor ?? null;
                     const nc = cuant(it) && val != null && Number.isFinite(val) ? !((it.min == null || val >= it.min) && (it.max == null || val <= it.max)) : r.resultado === "NC";
                     return (
-                      <tr key={it.item} style={nc ? { background: "#fdecec" } : undefined}>
+                      <tr key={it.item} style={nc ? { background: "#fdecec" } : undefined} onFocus={() => { if (soloPend && !editando.has(it.item)) setEditando((x) => new Set(x).add(it.item)); }}>
                         <td className="codigo">{it.item}</td>
                         <td style={{ fontSize: 12 }}>{it.requisito}{it.cantidad ? <span className="pill gray" style={{ marginLeft: 4 }}>{it.cantidad} u.</span> : null}{it.metodo ? <span className="tag" style={{ marginLeft: 4 }} title="Método del catálogo al que pasa el veredicto">{it.metodo}</span> : null}</td>
                         <td><span className={`pill ${it.clase === "A" ? "red" : it.clase === "B" ? "amber" : "gray"}`}>{it.clase}</span></td>
                         <td>
                           {cuant(it) ? (
                             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                              <input aria-label={`Valor medido del ítem ${it.item}`} inputMode="decimal" style={{ width: 70 }} value={r.valorTxt ?? (r.valor != null ? conComa(r.valor) : "")} onChange={(e) => setRes(it.item, { valorTxt: e.target.value })} />
+                              <input className="celda" aria-label={`Valor medido del ítem ${it.item}`} inputMode="decimal" style={{ width: 70 }} value={r.valorTxt ?? (r.valor != null ? conComa(r.valor) : "")} onChange={(e) => setRes(it.item, { valorTxt: e.target.value })} />
                               <small>{it.unidad} ({it.min != null ? `≥ ${conComa(it.min)}` : ""}{it.min != null && it.max != null ? " · " : ""}{it.max != null ? `≤ ${conComa(it.max)}` : ""})</small>
                             </span>
                           ) : (
@@ -290,7 +300,7 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
                             </span>
                           )}
                         </td>
-                        <td><input aria-label={`Observación del ítem ${it.item}`} value={r.observacion ?? ""} onChange={(e) => setRes(it.item, { observacion: e.target.value })} maxLength={500} placeholder={nc ? "Obligatoria si no cumple" : ""} style={{ width: "100%", borderColor: nc && !r.observacion ? "var(--red)" : undefined }} /></td>
+                        <td><input className="celda" aria-label={`Observación del ítem ${it.item}`} value={r.observacion ?? ""} onChange={(e) => setRes(it.item, { observacion: e.target.value })} maxLength={500} placeholder={nc ? "Obligatoria si no cumple" : ""} style={{ width: "100%", borderColor: nc && !r.observacion ? "var(--red)" : undefined }} /></td>
                       </tr>
                     );
                   })}
@@ -357,7 +367,7 @@ function PasoNovedades({ v, editable, onCambio }: { v: Vista; editable: boolean;
                 <td className="codigo">{x.item}</td>
                 <td><span className={`pill ${x.clase === "A" ? "red" : x.clase === "B" ? "amber" : "gray"}`}>{x.clase}</span></td>
                 <td style={{ fontSize: 12 }}>{x.descripcion}</td>
-                <td>{editable ? <input aria-label={`Acción del proveedor para ${k}`} value={acc[k] ?? ""} onChange={(e) => setAcc({ ...acc, [k]: e.target.value })} maxLength={300} style={{ width: "100%" }} /> : x.accionProveedor ?? "—"}</td>
+                <td>{editable ? <input className="celda" aria-label={`Acción del proveedor para ${k}`} value={acc[k] ?? ""} onChange={(e) => setAcc({ ...acc, [k]: e.target.value })} maxLength={300} style={{ width: "100%" }} /> : x.accionProveedor ?? "—"}</td>
               </tr>
             );
           })}
