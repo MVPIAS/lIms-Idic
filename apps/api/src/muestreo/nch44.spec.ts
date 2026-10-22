@@ -1,4 +1,7 @@
 import {
+  AQLS,
+  LETRAS,
+  NIVELES,
   PlanError,
   indiceAql,
   letraCodigo,
@@ -6,8 +9,10 @@ import {
   planNormal,
   proponerPlan,
   seleccionSistematica,
+  textoAql,
   veredictoLote,
 } from "./nch44";
+import * as aql from "../formularios/aql";
 
 describe("NCh 44 · tabla 1 (letra código)", () => {
   it("SVM: lote 70, nivel II → E (EP-05 §5.5)", () => {
@@ -121,5 +126,35 @@ describe("Veredicto del lote por clase de defecto", () => {
   it("pendiente si quedan ensayos sin decidir y nada rechaza", () => {
     expect(veredictoLote([{ clase: "mayor", defectuosas: 0, ac: 1, re: 2 }], { pendientes: 2 }).veredicto).toBe("pendiente");
     expect(veredictoLote([{ clase: "mayor", defectuosas: 2, ac: 1, re: 2 }], { pendientes: 2 }).veredicto).toBe("rechaza");
+  });
+});
+
+describe("NCh 44 · una sola tabla para el muestreo del lote y la inspección por atributos", () => {
+
+  it("la inspección por atributos usa las mismas letras, n y Ac/Re en toda la tabla 2-A", () => {
+    for (const l of LETRAS)
+      for (const a of AQLS) {
+        const lote = planNormal(l, a);
+        const insp = aql.planSimpleNormal(l, textoAql(a));
+        // Único borde distinto (↓ desde la letra R con AQL 0,015): cada pantalla conserva su criterio.
+        if (l === "R" && a === 0.015) {
+          expect([lote.ac, lote.re]).toEqual([0, 1]);
+          expect([insp.ac, insp.re]).toEqual([1, 2]);
+          expect(planNormal(l, a, { borde: "plan_mas_cercano" })).toMatchObject({ ac: 1, re: 2 });
+          continue;
+        }
+        expect({ letra: insp.letraPlan, n: insp.n, ac: insp.ac, re: insp.re }).toEqual({ letra: lote.letra, n: lote.n, ac: lote.ac, re: lote.re });
+      }
+  });
+
+  it("la tabla 1 es la misma y los AQL se escriben con coma decimal", () => {
+    for (const nivel of NIVELES)
+      for (const lote of [2, 8, 9, 15, 16, 50, 51, 90, 91, 500, 501, 1200, 3201, 35001, 150001, 500001])
+        expect(aql.letraCodigo(lote, nivel)).toBe(letraCodigo(lote, nivel));
+    expect(aql.AQLS.slice(0, 3)).toEqual(["0,010", "0,015", "0,025"]);
+    expect(aql.AQLS).toContain("0,10");
+    expect(aql.AQLS).toContain("1,0");
+    expect(aql.AQLS).toContain("6,5");
+    expect(aql.AQLS[aql.AQLS.length - 1]).toBe("1000");
   });
 });

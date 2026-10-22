@@ -31,14 +31,21 @@
 import { formatearNumeroCotizacion, configNumeracion } from "../cotizacion/numeracion-cotizacion";
 import { CLASES_CUSTODIA, TIPOS_CAMPO, leerCampo, type TipoCampo } from "../recepcion/reglas-recepcion";
 import { leerPorcentaje, valorGuardado } from "./parametro-porcentaje";
-import { AQLS, ETIQUETA_NIVEL, NIVELES } from "../muestreo/nch44";
+import { AQLS, ETIQUETA_NIVEL, NIVELES, textoAql } from "../muestreo/nch44";
 import { OPCIONES_VARIANTE, esVariante } from "../formularios/variantes";
 // NCh 44 de los formularios especializados (frente r2a): AQL como texto con coma.
-import { AQLS as AQLS_FORM, NIVELES as NIVELES_FORM } from "../formularios/aql";
 import { jsonCampoPrep, normalizarCampoPrep } from "../formularios/preparacion";
 
 /** Columnas de AQL de la tabla 2-A como opciones (se guarda con punto, se muestra con coma). */
 const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: String(a).replace(".", ",") }));
+/*
+ * Las dos familias de parámetros AQL («Muestreo del lote» e «Inspección por
+ * atributos») toman sus opciones de la MISMA tabla (`muestreo/nch44.ts`). Se
+ * guardan con la escritura que ya tenían («2.5» en el muestreo, «2,5» en la
+ * inspección) para no cambiar lo configurado ni lo que leen sus pantallas.
+ */
+const AQLS_FORM: string[] = AQLS.map(textoAql);
+const NIVELES_FORM = NIVELES;
 
 export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
 
