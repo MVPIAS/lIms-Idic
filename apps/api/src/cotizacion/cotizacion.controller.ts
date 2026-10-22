@@ -3,6 +3,7 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
 import { CotizacionService } from "./cotizacion.service";
+import { hoyEnChile } from "./validez";
 import { CosteoService } from "./costeo.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
@@ -212,7 +213,7 @@ export class CotizacionController {
     if (centroCostoId && !uuid.safeParse(centroCostoId).success) throw new BadRequestException("centroCostoId inválido");
     if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
     const tenantId = req?.user?.tenantId;
-    return this.svc.calcularValidezPara(tenantId, clienteId, centroCostoId || null, fechaQ || new Date());
+    return this.svc.calcularValidezPara(tenantId, clienteId, centroCostoId || null, fechaQ || hoyEnChile());
   }
 
   /**

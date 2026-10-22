@@ -2,7 +2,7 @@
 
 import { URL_PERSONAS, etiquetaPersona } from "@/lib/personas";
 import { useEffect, useMemo, useState } from "react";
-import { fecha as fechaFmt } from "@/lib/format";
+import { fecha as fechaFmt, hoyISO } from "@/lib/format";
 import { validarFormulario } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 
@@ -33,7 +33,6 @@ const RESULTADO_META = Object.fromEntries(RESULTADOS.map((r) => [r.key, r]));
 
 const fecha = (d: any) => (d ? String(d).slice(0, 10) : "—");
 
-const hoyISO = () => new Date().toISOString().slice(0, 10);
 
 const FORM_VACIO = {
   codigo: "",

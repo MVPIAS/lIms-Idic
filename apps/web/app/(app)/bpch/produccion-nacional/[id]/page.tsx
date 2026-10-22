@@ -16,7 +16,7 @@ import { toast, confirmar } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
-import { rut } from "@/lib/format";
+import { rut, hoyISO } from "@/lib/format";
 import { ESTADO_CORRELACION, ESTADO_LINEA, ESTADO_OC, MESES, MESES_LARGOS, cant, dia, numeroCl } from "@/lib/bpchProcesos";
 import ClasificacionProducto from "./ClasificacionProducto";
 
@@ -139,7 +139,7 @@ export default function OcPage() {
       />
       {error && <div className="alert warn" role="alert">{error}</div>}
       {oc.raf.estado !== "vigente" && <div className="alert warn">La RAF {oc.raf.numero} está anulada.</div>}
-      {oc.raf.vigenciaHasta && oc.raf.vigenciaHasta < new Date().toISOString().slice(0, 10) && (
+      {oc.raf.vigenciaHasta && oc.raf.vigenciaHasta < hoyISO() && (
         <div className="alert warn">La RAF venció el {dia(oc.raf.vigenciaHasta)}: según SAC-PG01-IT08 es un defecto crítico de la inspección.</div>
       )}
       {oc.raf.tipoLinea === "MOVIL" && <div className="alert info">Línea móvil (camión fábrica): SAC-PG01-IT10 excluye estos productos del muestreo por atributos NCh 44.</div>}
@@ -399,7 +399,7 @@ export default function OcPage() {
 
 function NuevaCorrelacion({ oc, onCerrar, onCreada }: { oc: any; onCerrar: () => void; onCreada: (c: any) => void }) {
   const [desde, setDesde] = useState(oc.vigenciaDesde);
-  const [hasta, setHasta] = useState(new Date().toISOString().slice(0, 10) < oc.vigenciaHasta ? new Date().toISOString().slice(0, 10) : oc.vigenciaHasta);
+  const [hasta, setHasta] = useState(hoyISO() < oc.vigenciaHasta ? hoyISO() : oc.vigenciaHasta);
   const [ref, setRef] = useState("");
   const [fechaRef, setFechaRef] = useState("");
   const [ventas, setVentas] = useState<Record<string, string>>({});
