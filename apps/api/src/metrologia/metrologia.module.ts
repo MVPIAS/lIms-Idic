@@ -731,9 +731,16 @@ export class MetrologiaController {
               CASE WHEN o.id IS NULL THEN NULL
                    ELSE COALESCE(o.origen_trabajo, CASE WHEN o.cotizacion_id IS NOT NULL THEN 'COTIZACION' ELSE 'DIRECTA' END) END AS origen, it.numero AS instrumento_numero, it.estado AS instrumento_estado,
               it.recibido_at AS instrumento_recibido_at, it.etiqueta AS instrumento_etiqueta, it.ubicacion AS instrumento_ubicacion,
-              it.metrologo_id AS instrumento_metrologo_id, ue2.nombre_completo AS entregado_por_nombre
+              it.metrologo_id AS instrumento_metrologo_id, ue2.nombre_completo AS entregado_por_nombre,
+              -- Fechas de control de la hoja (EP-04 P3.5): solicitud, O/C, término previsto y real.
+              to_char(COALESCE(sol.created_at, cot.fecha_emision, cot.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha_solicitud,
+              COALESCE(NULLIF(o.oc_numero, ''), CASE WHEN cot.aceptacion_tipo = 'OC' THEN NULLIF(cot.aceptacion_numero, '') END) AS oc_numero,
+              to_char(cot.aceptacion_fecha, 'YYYY-MM-DD') AS oc_fecha,
+              to_char(o.fecha_compromiso, 'YYYY-MM-DD') AS termino_previsto, o.fecha_cierre AS termino_real
          FROM met_calibracion c JOIN met_proceso pr ON pr.id = c.proceso_id JOIN met_magnitud m ON m.id = pr.magnitud_id
          LEFT JOIN orden_trabajo o ON o.id = c.ot_id
+         LEFT JOIN cotizacion cot ON cot.id = o.cotizacion_id
+         LEFT JOIN solicitud sol ON sol.id = cot.solicitud_id
          LEFT JOIN met_ot_instrumento it ON it.id = c.ot_instrumento_id
          LEFT JOIN usuario ue2 ON ue2.id = c.entregado_por
          LEFT JOIN unidad un ON un.id = c.unidad_id

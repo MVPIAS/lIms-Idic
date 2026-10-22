@@ -187,7 +187,6 @@ export default function FichaCalibracionPage() {
         <div>
           <section className={s.bloque}><h2>Identificación de la orden</h2><dl className={s.datos}>
             {dato("Orden de trabajo", c.ot_id ? <Link href={`/ot/${c.ot_id}` as any} style={{ color: "var(--accent)" }}>{c.ot_codigo}</Link> : ins.ot)}
-            {dato("Fecha OT", ins.fechaOt ? fechaDia(ins.fechaOt) : "—")}
             {dato("N° de certificado", c.numero_certificado ?? "Se asigna al emitir")}
             {dato("Cliente", ins.cliente)}{dato("Solicitante", ins.solicitante)}{dato("Contacto", ins.contacto)}{dato("Dirección", ins.direccion)}
           </dl></section>
@@ -200,10 +199,15 @@ export default function FichaCalibracionPage() {
           <section className={s.bloque}><h2>Método, responsables y fechas de control</h2><dl className={s.datos}>
             {dato("IT", `${c.proceso}${c.revision ? ` · ${c.revision}` : ""}`)}{dato("Norma base", c.norma)}{dato("Desviaciones del método", ins.desviacion || "No")}
             {dato("Metrólogo", c.autor_nombre)}{dato("Laboratorio", c.laboratorio_nombre ?? c.laboratorio)}
+            {dato("Solicitud del cliente", c.fecha_solicitud ? fechaDia(c.fecha_solicitud) : "—")}
+            {dato("Orden de compra", c.oc_numero ? `${c.oc_numero}${c.oc_fecha ? ` · ${fechaDia(c.oc_fecha)}` : ""}` : "No tiene")}
+            {dato("Fecha OT", ins.fechaOt ? fechaDia(ins.fechaOt) : "—")}
             {dato("Recepción del instrumento", ins.fechaRecepcion ? fechaDia(ins.fechaRecepcion) : "—")}
             {dato("Calibración", c.fecha_calibracion ? fechaDia(c.fecha_calibracion) : "—")}
             {dato("Entrega a revisión", c.enviado_at ? fechaHora(c.enviado_at) : "Al enviar")}
             {dato("Emisión", c.emitido_at ? fechaHora(c.emitido_at) : "Se fija al firmar")}
+            {dato("Término previsto", c.termino_previsto ? fechaDia(c.termino_previsto) : "—")}
+            {dato("Término real", c.termino_real ? fechaHora(c.termino_real) : "Se fija al cerrar la OT")}
             {dato("Intervalo de calibración", c.intervalo_meses ? `${c.intervalo_meses} meses` : "Según el cliente")}
             {dato("Lugar", ins.lugar === "cliente" ? "Instalaciones del cliente" : "Instalaciones del IDIC")}
           </dl></section>
