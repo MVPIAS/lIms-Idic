@@ -271,9 +271,12 @@ export class EspecificacionTecnicaService {
       this.prisma.$queryRawUnsafe<any[]>(
         `SELECT DISTINCT o.id, o.codigo, o.estado FROM orden_trabajo o
           WHERE o.tenant_id = $1::uuid AND (o.et_id = $2::uuid OR o.id IN (SELECT m.ot_id FROM muestra m WHERE m.et_id = $2::uuid AND m.deleted_at IS NULL))
+            AND ($3::uuid[] IS NULL OR o.unidad_principal = ANY($3::uuid[]))
           ORDER BY o.codigo DESC LIMIT 50`,
         tenantId,
         id,
+        // Solo las OT que el usuario puede ver.
+        await this.alcance.filtroUnidades(req, "ot.ver"),
       ),
       this.laboratorios(tenantId),
     ]);
