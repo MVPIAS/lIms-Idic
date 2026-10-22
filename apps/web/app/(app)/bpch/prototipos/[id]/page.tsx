@@ -280,7 +280,7 @@ export default function PrototipoPage() {
               {!nuevo && gestionar && p?.estado !== "anulado" && Object.entries(CLASE_ADJUNTO).map(([k, v]) => (
                 <label key={k} className="btn ghost sm" style={{ cursor: "pointer", textTransform: "none", letterSpacing: 0 }}>
                   ＋ {v}
-                  <input type="file" hidden accept="application/pdf,image/png,image/jpeg" onChange={(e) => adjuntar(k, e.target.files?.[0])} />
+                  <input type="file" className="sr-only" accept="application/pdf,image/png,image/jpeg" onChange={(e) => adjuntar(k, e.target.files?.[0])} />
                 </label>
               ))}
               {nuevo && <small style={{ color: "var(--muted)" }}>Se adjuntan después de ingresar el prototipo.</small>}
