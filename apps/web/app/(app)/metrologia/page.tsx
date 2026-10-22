@@ -25,6 +25,14 @@ const MAGNITUD: Record<string, string> = {
   temperatura: "Temperatura", electrica: "Eléctrica", tiempo: "Tiempo y frecuencia", general: "Otra",
 };
 const FILTROS: [string, string][] = [["", "Todas"], ["borrador", "Borradores"], ["en_revision", "En firma"], ["emitida", "Emitidas"], ["reemplazada", "Reemplazadas"]];
+/** Filtros que abren las tarjetas de «Mi bandeja» de Metrología (?pendiente=…). */
+const PENDIENTE: Record<string, { texto: string; f: (c: any) => boolean }> = {
+  enviar: { texto: "Por enviar (borradores suyos)", f: (c) => (c.acciones ?? []).includes("ENVIAR") && !c.devuelto_motivo },
+  devueltas: { texto: "Devueltas al metrólogo", f: (c) => c.es_mio && c.estado === "borrador" && !!c.devuelto_motivo },
+  revisar: { texto: "Por revisar (le toca a usted)", f: (c) => (c.acciones ?? []).includes("FIRMAR") },
+  emitir: { texto: "Por firmar y emitir (le toca a usted)", f: (c) => (c.acciones ?? []).includes("EMITIR") },
+  entregar: { texto: "Emitidos sin entrega registrada", f: (c) => c.estado === "emitida" && !c.entregado_at && !!c.ot_id },
+};
 const fecha = (x?: string | null) => (x ? new Date(x).toLocaleDateString("es-CL", { timeZone: "UTC" }) : "—");
 
 export default function MetrologiaCalibracionesPage() {
@@ -35,6 +43,12 @@ export default function MetrologiaCalibracionesPage() {
   const [error, setError] = useState("");
   const [devolver, setDevolver] = useState<{ row: any; motivo: string; que: "devolver" | "reemitir" } | null>(null);
   const [ocupado, setOcupado] = useState("");
+  const [pendiente, setPendiente] = useState("");
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.search).get("pendiente") ?? "";
+    if (PENDIENTE[p]) setPendiente(p);
+  }, []);
+  const filas = useMemo(() => (pendiente && PENDIENTE[pendiente] ? rows.filter(PENDIENTE[pendiente].f) : rows), [rows, pendiente]);
 
   async function cargar() {
     setCargando(true);
@@ -167,15 +181,22 @@ export default function MetrologiaCalibracionesPage() {
         </div>
       )}
 
-      <div className="toolbar" style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+      <div className="toolbar" style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
         {FILTROS.map(([v, l]) => (
           <button key={v} className={`btn sm${estado === v ? " primary" : ""}`} onClick={() => setEstado(v)}>{l}</button>
         ))}
+        {pendiente && PENDIENTE[pendiente] && (
+          <span className="pill teal" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            Desde Mi bandeja: {PENDIENTE[pendiente].texto} ({filas.length})
+            <button type="button" className="btn sm" style={{ padding: "0 6px", minHeight: 0 }} aria-label="Quitar el filtro de Mi bandeja"
+              onClick={() => { setPendiente(""); window.history.replaceState(null, "", "/metrologia"); }}>✕</button>
+          </span>
+        )}
       </div>
 
       <DataTable
         columns={columns}
-        rows={rows}
+        rows={filas}
         loading={cargando}
         searchKeys={["codigo", "numero_certificado", "instrumento", "cliente", "proceso", "ot_codigo", "magnitud"]}
         acciones={(c) => {
