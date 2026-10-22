@@ -84,10 +84,10 @@ export default function PuntosPanel({ magnitud, unidadDefecto, inicial, guardand
               </select></div>
             <div className="field"><label>k del certificado del patrón</label>
               <input value={verEntrada(d.kPatron)} style={YEL} onChange={(e) => set((x) => { x.kPatron = num(e.target.value) ?? (null as any); })} /></div>
-            <div className="field"><label>Regla de decisión (si hay tolerancia)</label>
+            <div className="field"><label>Comparación informativa con la tolerancia</label>
               <select value={d.regla} style={YEL} onChange={(e) => set((x) => { x.regla = e.target.value as any; })}>
-                <option value="con_u">Cumple si |error| + U ≤ EMP</option>
-                <option value="simple">Cumple si |error| ≤ EMP</option>
+                <option value="con_u">Dentro si |error| + U ≤ tolerancia</option>
+                <option value="simple">Dentro si |error| ≤ tolerancia</option>
               </select></div>
           </div>
 

@@ -238,7 +238,7 @@ export const MOTOR_PUNTOS: Motor = {
       puntos, uMax: Math.max(...puntos.map((p) => p.U)), uCert: null, conforme: conf.length ? conf.every(Boolean) : null,
       extra: [
         { etiqueta: "Series por punto", valor: String(r.n) },
-        { etiqueta: "Regla de decisión", valor: r.regla === "simple" ? "|ē| ≤ EMP" : "|ē| + U ≤ EMP" },
+        { etiqueta: "Comparación con la tolerancia (informativa)", valor: r.regla === "simple" ? "|ē| ≤ tolerancia" : "|ē| + U ≤ tolerancia" },
         ...FORMULA_PUNTOS.map((f, i) => ({ etiqueta: i === 0 ? "Fórmula" : "", valor: f })),
       ],
     };
