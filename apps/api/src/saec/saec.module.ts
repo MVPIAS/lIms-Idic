@@ -570,7 +570,7 @@ abstract class SaecBase {
     );
   }
 
-  /** Correlativo por tenant sobre un prefijo tipo EV-2026-. */
+  /** Correlativo por tenant sobre un prefijo tipo EV-2026- (el año es el de emisión en Chile). */
   protected async siguienteCodigo(tabla: string, prefijo: string, tenantId: string, tx: ClienteSql = this.prisma) {
     const rows = await tx.$queryRawUnsafe<any[]>(
       `SELECT COALESCE(MAX(NULLIF(regexp_replace(codigo, '^.*-', ''), '')::int), 0) + 1 AS next
@@ -974,7 +974,7 @@ export class EvidenciaController extends SaecBase {
     }
 
     return this.prisma.$transaction(async (tx: ClienteSql) => {
-      const codigo = await this.siguienteCodigo("evidencia", "EV-2026-", tenantId, tx);
+      const codigo = await this.siguienteCodigo("evidencia", `EV-${anioChile()}-`, tenantId, tx);
 
       // RF-K02.4 · creación automática de la OT.
       let otId = d.otId ?? null;
@@ -1147,7 +1147,7 @@ export class EvidenciaController extends SaecBase {
       throw new BadRequestException("La evidencia ya está prestada.");
     }
 
-    const codigo = await this.siguienteCodigo("evidencia_prestamo", "PRE-2026-", tenantId);
+    const codigo = await this.siguienteCodigo("evidencia_prestamo", `PRE-${anioChile()}-`, tenantId);
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
       `INSERT INTO evidencia_prestamo
          (tenant_id, evidencia_id, codigo, tipo, organismo_solicitante, solicitante_nombre,
@@ -1246,9 +1246,15 @@ export class EvidenciaController extends SaecBase {
 
     const fecha = new Date();
     const codigoVerificacion = nuevoCodigoVerificacionSaec();
+    const [uEmisora] = await this.prisma.$queryRawUnsafe<{ nombre: string; padre: string | null }[]>(
+      `SELECT u.nombre, p.nombre AS padre FROM unidad u LEFT JOIN unidad p ON p.id = u.padre_id
+        WHERE u.tenant_id = $1::uuid AND u.codigo = 'D11' LIMIT 1`,
+      tenantId,
+    );
+    const unidadEmisora = uEmisora ? [uEmisora.nombre, uEmisora.padre].filter(Boolean).join(" · ") : null;
 
     return this.prisma.$transaction(async (tx: ClienteSql) => {
-      const codigo = await this.siguienteCodigo("saec_certificado", "CERT-SAEC-2026-", tenantId, tx);
+      const codigo = await this.siguienteCodigo("saec_certificado", `CERT-SAEC-${anioChile()}-`, tenantId, tx);
 
       // El CUERPO imprime el número de certificado, así que el hash depende de
       // él: no se puede sellar antes de haberlo reservado.
@@ -1262,7 +1268,8 @@ export class EvidenciaController extends SaecBase {
         hits,
         emisor: {
           nombre: req?.user?.nombreCompleto ?? req?.user?.username ?? null,
-          unidad: null,
+          // Unidad emisora (BL-189): la Delegación Nº 11 del Banco de Pruebas de Chile.
+          unidad: unidadEmisora,
         },
       });
       const hash = createHash("sha256").update(documentoHtml, "utf8").digest("hex");
@@ -2015,7 +2022,7 @@ export class IbisController extends SaecBase {
             contadores.evidenciasActualizadas++;
             bitacora.push({ entidad: "Exhibit", accion: "actualizado", exhibitNumber, uuid });
           } else {
-            const codigo = await this.siguienteCodigo("evidencia", "EV-2026-", tenantId, tx);
+            const codigo = await this.siguienteCodigo("evidencia", `EV-${anioChile()}-`, tenantId, tx);
             const ins = await tx.$queryRawUnsafe<any[]>(
               `INSERT INTO evidencia
                  (tenant_id, codigo, uuid_ibis, caso_id, exhibit_number, tipo, descripcion,
