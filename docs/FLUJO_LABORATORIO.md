@@ -217,17 +217,19 @@ frente r1b, `align_r1b_ordenes_internas.sql`). Especificación: EP-01 0.6, 2.2,
    puede escribir otro, p. ej. «Boletín N° …»), informe, **horas**, insumos y
    **costo directo** (obligatorios horas y costo, no negativos). El costo se
    imputa a la OT de origen (se suma en la pestaña de la OT).
-   El **analista del destino captura sus resultados en la misma muestra**
-   (`POST /flujo/resultado/:id/valor`): solo los ensayos derivados y solo
-   mientras la orden está recibida.
+   El **destino captura, revisa y aprueba sus resultados en la misma muestra**
+   (desde «Captura y revisión por OT»): solo los ensayos derivados y solo
+   mientras la orden está recibida. El laboratorio responsable los ve en solo
+   lectura (frente r1g · docs/FLUJO_R1G_RECORRIDO.md §1).
 4. **Cerrada · informe devuelto** · «Cerrar OT interna → devolver al
    solicitante»: exige la respuesta guardada y cada ensayo derivado con su
-   resultado capturado; **un resultado 0,00 sin observación no se acepta** (en
+   resultado capturado **y aprobado por el destino** (r1g); **un resultado 0,00 sin observación no se acepta** (en
    el LIMS antiguo el destino dejaba 0,00 como marcador, EP-03 3.5 y EP-05 4.10).
    Cerrada, el destino ya no captura en la muestra.
 5. **Dada por recibida** · «Dar por recibido → evaluación»: el laboratorio
    solicitante (`orden_interna.emitir` con la OT en su alcance) integra el
-   informe; sus resultados se evalúan y aprueban como los propios.
+   informe; sus resultados ya vienen aprobados por el destino y entran al
+   informe de la OT (r1g; EP-01 3.7 frente a EP-02 4.1, por confirmar).
 
 Anular (con motivo) o borrar una abierta: `orden_interna.anular` (quien gestiona
 la OT de origen: jefaturas de laboratorio, planificación; el analista emite pero
