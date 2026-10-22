@@ -42,6 +42,12 @@ function Lista() {
   const { puede } = usePermisos();
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("");
+  // Vista que abren las tarjetas de Mi bandeja: «analisis» (SCC) o «inspeccion» (unidad que inspecciona).
+  const [pendiente, setPendiente] = useState<"" | "analisis" | "inspeccion">("");
+  useEffect(() => {
+    const v = new URLSearchParams(window.location.search).get("pendiente");
+    if (v === "analisis" || v === "inspeccion") setPendiente(v);
+  }, []);
   const [filas, setFilas] = useState<any[] | null>(null);
   const [total, setTotal] = useState(0);
   const [error, setError] = useState("");
@@ -55,6 +61,7 @@ function Lista() {
       const qs = new URLSearchParams({ limit: "100" });
       if (q.trim()) qs.set("q", q.trim());
       if (estado) qs.set("estado", estado);
+      if (pendiente) qs.set("pendiente", pendiente);
       const r = await pedir<any>("GET", `/bpch/internaciones?${qs}`);
       setFilas(r.data);
       setTotal(r.meta.total);
@@ -62,12 +69,12 @@ function Lista() {
       setError(e.message);
       setFilas([]);
     }
-  }, [q, estado]);
+  }, [q, estado, pendiente]);
 
   useEffect(() => {
     buscar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estado]);
+  }, [estado, pendiente]);
 
   // Tasa y cobro: Comercial, Finanzas y quien gestiona la tasa (como la antigua pantalla comercial).
   const verCobro = puede("ot.ver") && puede(["cotizacion.ver", "factura.ver", "bpch.tasa.gestionar"]);
@@ -79,10 +86,10 @@ function Lista() {
   const cobroPorOt = useMemo(() => new Map((cobros ?? []).map((c) => [c.id, c])), [cobros]);
   /** OT de internación sin expediente BPCH (anteriores a la puerta única o creadas a mano). */
   const sinExpediente = useMemo(() => {
-    if (!cobros || filas === null || q.trim() || estado) return [];
+    if (!cobros || filas === null || q.trim() || estado || pendiente) return [];
     const conExpediente = new Set(filas.map((f) => f.otId).filter(Boolean));
     return cobros.filter((c) => !conExpediente.has(c.id));
-  }, [cobros, filas, q, estado]);
+  }, [cobros, filas, q, estado, pendiente]);
 
   return (
     <div>
@@ -91,7 +98,7 @@ function Lista() {
         titulo="Internaciones"
         subtitulo={<>
           Resolución DGMN → análisis técnico → OT automática → inspección → certificado o incumplimiento → tasa → cierre (IDIC-PG 24 Anexo 03).
-          La OT de internación nace sola al registrar la resolución: no se crea en «Registrar OT».{" "}
+          La OT de internación nace sola cuando la SCC da por completa la información técnica (análisis técnico): no se crea en «Registrar OT».{" "}
           <PorcentajesTasa compacto />
         </>}
         migas={[{ label: "BPCH · Comercial" }, { label: "Internaciones" }]}
@@ -105,6 +112,13 @@ function Lista() {
           {Object.entries(ESTADO_INTERNACION).map(([k, v]) => <option key={k} value={k}>{v.l}</option>)}
         </select>
         <button className="btn primary sm" type="submit">Buscar</button>
+        {pendiente && (
+          <span className="pill blue" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            {pendiente === "analisis" ? "Por analizar (SCC)" : "Lotes por inspeccionar"}
+            <button type="button" className="btn outline sm" style={{ padding: "0 6px" }} aria-label="Quitar el filtro de Mi bandeja"
+              onClick={() => { setPendiente(""); window.history.replaceState(null, "", "/bpch/internaciones"); }}>×</button>
+          </span>
+        )}
         <span className="spacer" />
         <small style={{ color: "var(--muted)" }}>{total} expediente(s)</small>
       </form>

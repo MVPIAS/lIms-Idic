@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
 import { itemDeRuta } from "@/lib/navegacion";
-import { usePermisos, PERFIL_INFO } from "@/lib/permisos";
+import { usePermisos, infoPerfil } from "@/lib/permisos";
 
 /** Migas de la barra superior a partir del mapa del menú (lib/navegacion.ts). */
 function crumbFor(pathname: string): { seccion: string; pagina: string } {
@@ -25,7 +25,7 @@ export default function Topbar() {
   }, []);
 
   const crumb = crumbFor(pathname);
-  const { usuario, perfilJwt, listo } = usePermisos();
+  const { usuario, perfilJwt, listo, roles } = usePermisos();
   const iniciales = user?.nombreCompleto
     ? user.nombreCompleto.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()
     : (usuario.username ?? "U").slice(0, 2).toUpperCase();
@@ -40,7 +40,7 @@ export default function Topbar() {
         <div style={{ lineHeight: 1.2 }}>
           <div style={{ fontWeight: 600 }}>{user?.nombreCompleto ?? usuario.nombre ?? usuario.username ?? "Usuario"}</div>
           <div style={{ color: "var(--muted)", fontSize: "10.5px" }}>
-            {user?.grado ?? user?.cargo ?? (listo ? PERFIL_INFO[perfilJwt]?.etiqueta : "")}
+            {user?.grado ?? user?.cargo ?? (listo ? infoPerfil(perfilJwt, roles).etiqueta : "")}
           </div>
         </div>
         <button onClick={() => api.logout()} className="btn outline sm" style={{ marginLeft: 8 }} title="Cerrar sesión">

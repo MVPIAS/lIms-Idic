@@ -13,7 +13,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { NAV, itemEnAmbito, normalizar, type ItemNav } from "@/lib/navegacion";
-import { usePermisos, PERFIL_INFO, type Perfil } from "@/lib/permisos";
+import { usePermisos, infoPerfil as infoDePerfil, type Perfil } from "@/lib/permisos";
 import { useAlcance } from "@/lib/alcance";
 
 const CLAVE_PLEGADO = "lims_menu_plegado";
@@ -28,7 +28,7 @@ function leerPlegado(): Record<string, boolean> {
 
 export default function Sidebar() {
   const pathname = usePathname() ?? "";
-  const { listo, puede, perfilJwt } = usePermisos();
+  const { listo, puede, perfilJwt, roles } = usePermisos();
   const { alcance } = useAlcance();
   // El layout (app) solo monta el menú en el cliente (tras comprobar el token): leer storage aquí es seguro.
   const [plegado, setPlegado] = useState<Record<string, boolean>>(() =>
@@ -37,7 +37,7 @@ export default function Sidebar() {
   const [q, setQ] = useState("");
 
   const perfil: Perfil = (alcance?.perfil as Perfil) ?? perfilJwt;
-  const infoPerfil = PERFIL_INFO[perfil] ?? { etiqueta: perfil, descripcion: "" };
+  const infoPerfil = infoDePerfil(perfil, roles);
 
   // Antes de leer el token se muestra solo lo que no exige permiso (evita parpadeos de ítems prohibidos).
   // Ámbito: mientras no llega /me/alcance no se oculta nada por este motivo (el
