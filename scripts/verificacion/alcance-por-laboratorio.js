@@ -425,6 +425,10 @@ async function main() {
       ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}/certificado`],
       ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}/esquema`],
       ["ot", "ot.ver", (id) => `/ot/${id}/metrologia`],
+      // Frente r4a: error normalizado (calibración anterior) y documentos del no calibrable.
+      ["met_calibracion", "metrologia.ver", (id) => `/metrologia/calibraciones/${id}/anterior`],
+      ["ot", "ot.ver", (id) => `/ot/${id}/metrologia/documentos`],
+      ["ot", "ot.ver", (id) => `/ot/${id}/metrologia/proveedores`],
       ["evidencia", "evidencia.ver", (id) => `/evidencias/${id}`, null, "saec"],
       ["cotizacion", "cotizacion.ver", (id) => `/cotizaciones/${id}`, null, "fase1"],
       ["encuesta", "encuesta.ver", (id) => `/encuestas/${id}`],
