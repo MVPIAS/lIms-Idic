@@ -242,9 +242,20 @@ function dibujarMembrete(doc: Doc, nodo: Nodo): void {
 
   const docB = docu?.hijos.find((h) => h.tag === "b");
   const docS = docu?.hijos.find((h) => h.tag === "span");
-  const anchoDer = 170;
-  const xDer = doc.page.width - MARGEN - anchoDer;
-  doc.font(MONO_NEGRITA).fontSize(10).fillColor(AZUL);
+  // Logo de acreditación (certificado de calibración): a la derecha del número.
+  const logo = docu?.hijos.find((h) => h.tag === "img" && /\blogo-acred\b/.test(h.clase));
+  const mLogo = logo?.src ? DATA_IMAGEN.exec(logo.src) : null;
+  const anchoLogo = mLogo ? 88 : 0;
+  if (mLogo) {
+    try {
+      doc.image(Buffer.from(mLogo[2], "base64"), doc.page.width - MARGEN - anchoLogo, y, { fit: [anchoLogo, 32], align: "right", valign: "center" });
+    } catch {
+      /* imagen ilegible: queda el texto «Acreditación LC …» */
+    }
+  }
+  const anchoDer = mLogo ? 125 : 170;
+  const xDer = doc.page.width - MARGEN - anchoLogo - (mLogo ? 6 : 0) - anchoDer;
+  doc.font(MONO_NEGRITA).fontSize(mLogo ? 9 : 10).fillColor(AZUL);
   doc.text(textoDe(docB ?? { tag: "", clase: "", hijos: [] }), xDer, y + 5, {
     width: anchoDer,
     align: "right",
@@ -299,7 +310,8 @@ function dibujarFoto(doc: Doc, nodo: Nodo): void {
   const pie = nodo.hijos.filter((h) => h.tag !== "img").map(textoDe).filter(Boolean).join(" ");
   const m = img?.src ? DATA_IMAGEN.exec(img.src) : null;
   const maxW = anchoUtil(doc);
-  const maxH = 300;
+  // Esquema del certificado de calibración: más bajo, como en sus libros (cabe con las observaciones).
+  const maxH = /\besquema\b/.test(nodo.clase) ? 220 : 300;
   let w = 0;
   let h = 0;
   let buf: Buffer | null = null;
@@ -429,7 +441,13 @@ function filasDe(tabla: Nodo): Celda[][] {
  * normalizados al ancho útil. Las cabeceras de `table.meta` (th) se dejan
  * estrechas: son etiquetas, no datos.
  */
-function anchosColumna(doc: Doc, filas: Celda[][], total: number): number[] {
+/** Tamaños de letra y relleno de una tabla; `compacta` (hoja 1 del certificado de calibración) es más densa. */
+type Escala = { th: number; td: number; padY: number };
+const ESCALA_NORMAL: Escala = { th: 6.8, td: 8, padY: 3.2 };
+const ESCALA_COMPACTA: Escala = { th: 6, td: 6.9, padY: 1.6 };
+const escalaDe = (tabla: Nodo): Escala => (/\bcompacta\b/.test(tabla.clase) ? ESCALA_COMPACTA : ESCALA_NORMAL);
+
+function anchosColumna(doc: Doc, filas: Celda[][], total: number, e: Escala = ESCALA_NORMAL): number[] {
   const cols = Math.max(...filas.map((f) => f.reduce((n, c) => n + c.span, 0)));
   const medidas = new Array(cols).fill(0);
   for (const fila of filas) {
@@ -437,7 +455,7 @@ function anchosColumna(doc: Doc, filas: Celda[][], total: number): number[] {
     for (const c of fila) {
       // Las celdas que abarcan varias columnas no fijan el ancho de ninguna.
       if (c.span === 1) {
-        doc.font(c.th ? NEGRITA : REGULAR).fontSize(c.th ? 6.8 : 8);
+        doc.font(c.th ? NEGRITA : REGULAR).fontSize(c.th ? e.th : e.td);
         const w = Math.min(doc.widthOfString(c.texto || "-"), 190);
         if (w > medidas[i]) medidas[i] = w;
       }
@@ -450,7 +468,7 @@ function anchosColumna(doc: Doc, filas: Celda[][], total: number): number[] {
     let i = 0;
     for (const c of fila) {
       if (c.span === 1) {
-        doc.font(c.th ? NEGRITA : REGULAR).fontSize(c.th ? 6.8 : 8);
+        doc.font(c.th ? NEGRITA : REGULAR).fontSize(c.th ? e.th : e.td);
         for (const p of (c.texto || "").split(/\s+/)) palabra[i] = Math.max(palabra[i], Math.min(doc.widthOfString(p), 120));
       }
       i += c.span;
@@ -474,9 +492,10 @@ function dibujarTabla(doc: Doc, tabla: Nodo): void {
   if (filas.length === 0) return;
   const meta = /\bmeta\b/.test(tabla.clase);
   const total = anchoUtil(doc);
-  const anchos = anchosColumna(doc, filas, total);
+  const e = escalaDe(tabla);
+  const anchos = anchosColumna(doc, filas, total, e);
   const padX = 4;
-  const padY = 3.2;
+  const padY = e.padY;
 
   const cabecera = filas[0]?.every((c) => c.th) && !meta ? filas[0] : null;
 
@@ -492,7 +511,7 @@ function dibujarTabla(doc: Doc, tabla: Nodo): void {
 
   const pintarFila = (fila: Celda[], esCabecera: boolean) => {
     const fuente = (c: Celda) => (c.th ? NEGRITA : REGULAR);
-    const tam = (c: Celda) => (c.th && esCabecera ? 6.8 : c.th ? 7 : 8);
+    const tam = (c: Celda) => (c.th && esCabecera ? e.th : c.th ? e.th + 0.2 : e.td);
     const anchoCelda = anchosDe(fila);
 
     // Alto = la celda más alta.
@@ -549,6 +568,133 @@ function dibujarTabla(doc: Doc, tabla: Nodo): void {
   doc.y += 4;
 }
 
+/**
+ * Alto que ocupará un nodo al dibujarse (estimación por exceso, con las mismas
+ * fuentes y anchos que `dibujarNodo`). Lo usa el pie de hoja anclado al fondo.
+ */
+function medirNodo(doc: Doc, n: Nodo): number {
+  switch (n.tag) {
+    case "#text":
+      return 0;
+    case "h1":
+      return 30;
+    case "h2":
+    case "h3":
+    case "h4":
+      return 24;
+    case "p": {
+      const t = textoDe(n);
+      if (!t) return 0;
+      const nota = /\bnota\b/.test(n.clase);
+      doc.font(nota ? CURSIVA : REGULAR).fontSize(/\blegal\b/.test(n.clase) ? 6.3 : nota ? 7.4 : 8.5);
+      return doc.heightOfString(t, { width: anchoUtil(doc) - (nota ? 8 : 0) }) + (/\blegal\b/.test(n.clase) ? 1 : 3);
+    }
+    case "table": {
+      if (/\bfirmas-cert\b/.test(n.clase)) return altoFirmasCert(doc, n);
+      const filas = filasDe(n);
+      if (!filas.length) return 0;
+      const e = escalaDe(n);
+      const anchos = anchosColumna(doc, filas, anchoUtil(doc), e);
+      let total = 4;
+      for (const fila of filas) {
+        let i = 0;
+        let alto = 0;
+        for (const c of fila) {
+          const w = anchos.slice(i, i + c.span).reduce((a, b) => a + b, 0) || anchos[anchos.length - 1];
+          i += c.span;
+          doc.font(c.th ? NEGRITA : REGULAR).fontSize(c.th ? e.th + 0.2 : e.td);
+          alto = Math.max(alto, doc.heightOfString(c.texto || " ", { width: w - 8 }));
+        }
+        total += alto + e.padY * 2;
+      }
+      return total;
+    }
+    default:
+      return n.hijos.reduce((t, h) => t + medirNodo(doc, h), 0);
+  }
+}
+
+/** Líneas de una celda de firma: cada <br> abre línea; la primera en negrita si viene en <b>. */
+function lineasFirma(td: Nodo): { texto: string; negrita: boolean }[] {
+  const out: { texto: string; negrita: boolean }[] = [{ texto: "", negrita: false }];
+  const visitar = (n: Nodo, b: boolean) => {
+    if (n.tag === "br") out.push({ texto: "", negrita: false });
+    else if (n.tag === "#text") {
+      const ult = out[out.length - 1];
+      ult.texto += n.texto ?? "";
+      ult.negrita = ult.negrita || b;
+    } else n.hijos.forEach((h) => visitar(h, b || n.tag === "b" || n.tag === "strong"));
+  };
+  visitar(td, false);
+  return out
+    .map((l) => ({ texto: sanearParaFuente(decodeEntities(l.texto)).replace(/\s+/g, " ").replace(/^\s*·\s*/, "").trim(), negrita: l.negrita }))
+    .filter((l) => l.texto);
+}
+const ESPACIO_FIRMA = 20;
+function altoFirmasCert(doc: Doc, tabla: Nodo): number {
+  const celdas = filasDe(tabla)[0] ?? [];
+  const tds: Nodo[] = [];
+  const buscar = (n: Nodo) => (n.tag === "td" ? tds.push(n) : n.hijos.forEach(buscar));
+  buscar(tabla);
+  const ancho = (anchoUtil(doc) - 30 * Math.max(0, celdas.length - 1)) / Math.max(1, celdas.length);
+  let max = 0;
+  for (const td of tds) {
+    let h = 0;
+    for (const l of lineasFirma(td)) {
+      doc.font(l.negrita ? NEGRITA : REGULAR).fontSize(l.negrita ? 8 : 7);
+      h += doc.heightOfString(l.texto, { width: ancho }) + 0.5;
+    }
+    max = Math.max(max, h);
+  }
+  return ESPACIO_FIRMA + 4 + max + 6;
+}
+/** Firmas del certificado de calibración: espacio para la firma, línea y, debajo, nombre, grado, cargo y estado. */
+function dibujarFirmasCert(doc: Doc, tabla: Nodo): void {
+  const tds: Nodo[] = [];
+  const buscar = (n: Nodo) => (n.tag === "td" ? tds.push(n) : n.hijos.forEach(buscar));
+  buscar(tabla);
+  if (!tds.length) return;
+  asegurar(doc, altoFirmasCert(doc, tabla));
+  const sep = 30;
+  const ancho = (anchoUtil(doc) - sep * (tds.length - 1)) / tds.length;
+  const y0 = doc.y + ESPACIO_FIRMA;
+  let maxY = y0;
+  tds.forEach((td, j) => {
+    const x = MARGEN + j * (ancho + sep);
+    doc.moveTo(x, y0).lineTo(x + ancho, y0).lineWidth(0.8).stroke(TINTA);
+    let y = y0 + 4;
+    for (const l of lineasFirma(td)) {
+      const pend = /^Pendiente de firma/.test(l.texto);
+      doc.font(l.negrita ? NEGRITA : pend ? CURSIVA : REGULAR).fontSize(l.negrita ? 8 : 7).fillColor(l.negrita ? TINTA : pend ? "#9a5b00" : SUAVE);
+      doc.text(l.texto, x, y, { width: ancho, align: "center" });
+      y = doc.y + 0.5;
+    }
+    maxY = Math.max(maxY, y);
+  });
+  doc.y = maxY + 6;
+  doc.x = MARGEN;
+  doc.fillColor(TINTA);
+}
+
+/** Número de la página en curso (1, 2, …). */
+const paginaActual = (doc: Doc) => doc.bufferedPageRange().count;
+
+/** «Página X de N» de la cabecera del certificado: se escribe al final, cuando se conoce N. */
+type DocConPaginacion = Doc & { _paginacion?: { pagina: number; x: number; y: number; w: number }[] };
+function rellenarPaginacion(doc: Doc): void {
+  const pend = (doc as DocConPaginacion)._paginacion ?? [];
+  if (!pend.length) return;
+  const r = doc.bufferedPageRange();
+  for (const p of pend) {
+    doc.switchToPage(r.start + p.pagina - 1);
+    const margen = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
+    doc.font(NEGRITA).fontSize(8).fillColor(TINTA);
+    doc.text(sanearParaFuente(`Página ${p.pagina} de ${r.count}`), p.x, p.y, { width: p.w, align: "right", lineBreak: false });
+    doc.page.margins.bottom = margen;
+  }
+}
+
 /** ¿El nodo contiene algún bloque? Si no, se trata como párrafo. */
 const BLOQUES = new Set(["h1", "h2", "h3", "h4", "p", "div", "table", "ul", "ol", "hr", "li"]);
 function tieneBloques(n: Nodo): boolean {
@@ -560,11 +706,12 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
     case "#text":
       return;
     case "h1": {
+      const compacta = /compacta/.test(n.clase);
       asegurar(doc, 30);
-      doc.moveDown(0.5);
-      doc.font(NEGRITA).fontSize(13).fillColor(TINTA);
+      doc.moveDown(compacta ? 0.2 : 0.5);
+      doc.font(NEGRITA).fontSize(compacta ? 12 : 13).fillColor(TINTA);
       doc.text(textoDe(n), MARGEN, doc.y, { width: anchoUtil(doc), align: "center", characterSpacing: 0.8 });
-      doc.moveDown(0.5);
+      doc.moveDown(compacta ? 0.25 : 0.5);
       return;
     }
     case "h4": {
@@ -578,13 +725,15 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
     }
     case "h2":
     case "h3": {
+      // «compacta»: hoja 1 del certificado de calibración (todo debe caber en una página).
+      const compacta = /compacta/.test(n.clase);
       asegurar(doc, 26);
-      doc.moveDown(0.55);
-      doc.font(NEGRITA).fontSize(8.6).fillColor(AZUL);
+      doc.moveDown(compacta ? 0.1 : 0.55);
+      doc.font(NEGRITA).fontSize(compacta ? 7.6 : 8.6).fillColor(AZUL);
       doc.text(textoDe(n).toUpperCase(), MARGEN, doc.y, { width: anchoUtil(doc), characterSpacing: 0.5 });
       const y = doc.y + 1.5;
       doc.moveTo(MARGEN, y).lineTo(doc.page.width - MARGEN, y).lineWidth(0.5).stroke(LINEA);
-      doc.y = y + 4;
+      doc.y = y + (compacta ? 2 : 4);
       doc.x = MARGEN;
       doc.fillColor(TINTA);
       return;
@@ -597,6 +746,7 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
       return;
     }
     case "table":
+      if (/\bfirmas-cert\b/.test(n.clase)) return dibujarFirmasCert(doc, n);
       dibujarTabla(doc, n);
       return;
     case "ul":
@@ -618,10 +768,25 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
     case "p": {
       const t = textoDe(n);
       if (!t) return;
+      if (/\bpaginacion\b/.test(n.clase)) {
+        // El número real lo pone el PDF al final: si una hoja desbordara, sigue siendo correcto.
+        const d = doc as DocConPaginacion;
+        // Va en la misma línea que la siguiente (la de acreditación, centrada), a la derecha: no avanza.
+        d._paginacion = [...(d._paginacion ?? []), { pagina: paginaActual(doc), x: MARGEN, y: doc.y + 0.5, w: anchoUtil(doc) }];
+        return;
+      }
+      if (/\b(linea-acred|reemplaza|fin)\b/.test(n.clase)) {
+        asegurar(doc, 16);
+        doc.font(NEGRITA).fontSize(9).fillColor(TINTA);
+        doc.text(t, MARGEN, doc.y, { width: anchoUtil(doc), align: "center" });
+        doc.moveDown(0.3);
+        return;
+      }
       const nota = /\bnota\b/.test(n.clase);
       asegurar(doc, 18);
-      doc.moveDown(0.2);
-      doc.font(nota ? CURSIVA : REGULAR).fontSize(nota ? 7.4 : 8.5).fillColor(nota ? SUAVE : TINTA);
+      // La leyenda legal del certificado va sin espacio entre líneas (cabe al pie de la hoja 1).
+      if (!/\blegal\b/.test(n.clase)) doc.moveDown(0.2);
+      doc.font(nota ? CURSIVA : REGULAR).fontSize(/\blegal\b/.test(n.clase) ? 6.3 : nota ? 7.4 : 8.5).fillColor(nota ? SUAVE : TINTA);
       const x = nota ? MARGEN + 8 : MARGEN;
       const y0 = doc.y;
       doc.text(t, x, y0, { width: anchoUtil(doc) - (nota ? 8 : 0), align: "left" });
@@ -641,6 +806,14 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
         return;
       }
       if (/\bmembrete\b/.test(n.clase)) return dibujarMembrete(doc, n);
+      // Pie de hoja (firmas por hoja del certificado de calibración): anclado al fondo de la página.
+      if (/\bpie-hoja\b/.test(n.clase)) {
+        const alto = medirNodo(doc, n) + 8;
+        if (doc.y + alto > fondo(doc)) doc.addPage();
+        doc.y = Math.max(doc.y, fondo(doc) - alto);
+        n.hijos.forEach((h) => dibujarNodo(doc, h));
+        return;
+      }
       if (/\bfirmas\b/.test(n.clase)) return dibujarFirmas(doc, n);
       if (/\bfoto\b/.test(n.clase)) return dibujarFoto(doc, n);
       if (tieneBloques(n) || n.tag === "#root") {
@@ -790,7 +963,10 @@ export async function generarPdf(cuerpoHtml: string, sello: Sello, titulo: strin
   });
 
   const aviso = avisoEstado(sello);
-  if (sello.borrador) marcaDeAgua(doc);
+  if (sello.borrador) {
+    marcaDeAgua(doc);
+    doc.on("pageAdded", () => marcaDeAgua(doc));
+  }
   else if (aviso) marcaDeAgua(doc, MARCA_ESTADO[sello.estadoDocumento ?? ""] ?? "SIN VALIDEZ");
   // Si el documento no es oficial, la página se rotula para cada salto de página.
   if (!sello.borrador && aviso) {
@@ -807,6 +983,7 @@ export async function generarPdf(cuerpoHtml: string, sello: Sello, titulo: strin
   // Plantilla sin bloque de firmas: las del circuito van al final del cuerpo.
   if (sello.firmas?.length && !conFirmas._firmasDibujadas) dibujarFirmasCircuito(doc, sello.firmas);
   rellenarNumeroPaginas(doc);
+  rellenarPaginacion(doc);
   dibujarPies(doc, sello);
 
   doc.end();
