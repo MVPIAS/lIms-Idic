@@ -355,7 +355,7 @@ async function main() {
     await ok(JEFE, "POST", `/metrologia/calibraciones/${nid}/firmar`); // el jefe titular firma su propia calibración (decisión 14-10)
     const e = await ok(DEPTO, "POST", `/metrologia/calibraciones/${nid}/firmar`);
     const h = (await ok(JEFE, "GET", `/metrologia/calibraciones/${nid}/html`)).data.html;
-    afirmar(h.includes(`reemplaza al certificado N° ${C.num}`), "el nuevo certificado no dice a cuál reemplaza");
+    afirmar(h.includes(`ESTE CERTIFICADO REEMPLAZA AL CERTIFICADO N° ${C.num}.`), "el nuevo certificado no dice a cuál reemplaza");
     const viejo = await ok(JEFE, "GET", `/metrologia/calibraciones/${C.cal.id}`);
     afirmar(viejo.estado === "reemplazada", `estado ${viejo.estado}`);
     const v = await ok(null, "GET", `/metrologia/verificar/${C.ver}`);
