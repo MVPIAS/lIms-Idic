@@ -211,6 +211,8 @@ export class PreparacionService {
       comision: { jefeComision: datos.jefeComision ?? null, inspectores: datos.inspectores ?? [], equipos: datos.equipos ?? [] },
       documentacion,
       exige,
+      /** Si la aprobación depende de una casilla del formulario (LEM: «en terreno»), cuál; la pantalla la recalcula al marcarla. */
+      exigeSi: lab === "LEM" ? "terreno" : null,
       bloqueaCaptura: cfg.bloqueaCaptura,
       pasos: pasosAprobacion(lab),
       personal,

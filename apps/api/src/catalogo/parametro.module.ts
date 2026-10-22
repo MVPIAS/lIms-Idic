@@ -150,7 +150,8 @@ export class ParametroSistemaService extends BaseCrudService {
     const filas = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT id, categoria, codigo, etiqueta, valor, activo, orden, updated_at AS "updatedAt"
          FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = ANY($2::text[])
-        ORDER BY categoria, orden, codigo`,
+        -- Campos de preparación: agrupados por laboratorio («LME.control_horno» → LME) y en su orden.
+        ORDER BY categoria, CASE WHEN categoria = 'preparacion_campo' THEN split_part(codigo, '.', 1) END, orden, codigo`,
       tenantId,
       CATEGORIAS_CONFIGURABLES,
     );
@@ -294,7 +295,7 @@ export class ParametroSistemaService extends BaseCrudService {
             codigo,
           )
         : [];
-      if (!m.length) errores.push("Indique el código de un método del catálogo.");
+      if (!m.length) errores.push(codigo ? `El método ${codigo.slice(0, 40)} no está en el catálogo (Catálogo › Métodos).` : "Indique el código de un método del catálogo.");
       else etiqueta = `${m[0].codigo} · ${m[0].nombre}`.slice(0, 160);
     }
     if (patron.alta === "plantilla") {

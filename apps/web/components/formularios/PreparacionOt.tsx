@@ -56,10 +56,13 @@ function TrabajoDsa({ otId, onCambio }: { otId: string; onCambio?: () => void })
 
   const f = t.formulario;
   const editableDoc = t.puedo.preparar;
+  // LEM: la aprobación depende de «en terreno»; mientras se edita, manda lo marcado en pantalla.
+  const exige: boolean = t.exigeSi && editableDoc ? doc[t.exigeSi] === true : t.exige;
+  const destino = t.pasos?.[0]?.rol === "JEFE_SECCION" ? "Jefe de Sección" : "Jefe";
   const pasos: PasoFormulario[] = [
     { clave: "asignacion", titulo: "Asignar personal y equipos", estado: t.comision.equipos.length || t.comision.inspectores.length ? "hecho" : "actual", detalle: `${t.comision.inspectores.length} inspector(es) · ${t.comision.equipos.length} equipo(s)` },
     { clave: "documentacion", titulo: `Preparar · ${f.titulo}`, estado: ["en_aprobacion", "validada", "aprobada", "registrada"].includes(t.estado) ? "hecho" : "actual", detalle: t.textoEstado },
-    { clave: "aprobacion", titulo: "Aprobar la documentación", estado: t.estado === "aprobada" ? "hecho" : t.exige ? "pendiente" : "hecho", detalle: t.exige ? t.pasos.map((p: any) => p.texto).join(" → ") : "No requiere aprobación" },
+    { clave: "aprobacion", titulo: "Aprobar la documentación", estado: t.estado === "aprobada" ? "hecho" : exige ? "pendiente" : "hecho", detalle: exige ? t.pasos.map((p: any) => p.texto).join(" → ") : "No requiere aprobación" },
   ];
   async function accion(ruta: string, cuerpo: any, ok: string, siguiente?: string) {
     setOcupado(true);
@@ -89,8 +92,8 @@ function TrabajoDsa({ otId, onCambio }: { otId: string; onCambio?: () => void })
       {paso === "asignacion" && <ComisionEquipos otId={otId} t={t} onListo={async () => { await cargar(); setPaso("documentacion"); }} />}
 
       {paso === "documentacion" && (
-        <form onSubmit={(e) => { e.preventDefault(); accion(`/formularios/ot/${otId}/trabajo/enviar`, { documentacion: doc }, t.exige ? "Enviada a aprobación." : "Documentación registrada.", "aprobacion"); }}>
-          <p className="subtitle">Prepara: {f.prepara}. {t.exige ? "Requiere aprobación antes de ejecutar." : "Este laboratorio no la aprueba antes de ejecutar (Parámetros de la operación)."}</p>
+        <form onSubmit={(e) => { e.preventDefault(); accion(`/formularios/ot/${otId}/trabajo/enviar`, { documentacion: doc }, exige ? "Enviada a aprobación." : "Documentación registrada.", "aprobacion"); }}>
+          <p className="subtitle">Prepara: {f.prepara}. {exige ? `Requiere aprobación antes de ejecutar: ${t.pasos.map((p: any) => p.texto).join(" → ")}.` : t.exigeSi ? "Sin aprobación previa salvo que el trabajo sea en terreno." : "Este laboratorio no la aprueba antes de ejecutar (Parámetros de la operación)."}</p>
           <fieldset disabled={!editableDoc} style={{ border: 0, padding: 0, margin: 0 }}>
             <div className="form-grid">
               {f.campos.filter(visible).map((c: any) => {
@@ -153,7 +156,7 @@ function TrabajoDsa({ otId, onCambio }: { otId: string; onCambio?: () => void })
             <div className="toolbar" style={{ marginTop: 12, marginBottom: 0 }}>
               <button type="button" className="btn outline" disabled={ocupado} onClick={() => accion(`/formularios/ot/${otId}/trabajo`, { documentacion: doc }, "Borrador guardado.")}>Guardar borrador</button>
               <div className="spacer" />
-              <button className="btn primary" disabled={ocupado}>{t.exige ? "Enviar a aprobación → Jefe" : "Registrar → ejecutar"}</button>
+              <button className="btn primary" disabled={ocupado}>{exige ? `Enviar a aprobación → ${destino}` : "Registrar → ejecutar"}</button>
             </div>
           )}
           {!editableDoc && ["en_aprobacion", "validada", "aprobada"].includes(t.estado) && <p className="subtitle" style={{ marginTop: 8 }}>{t.textoEstado}: la documentación no se modifica (si hay que cambiarla, que la devuelvan).</p>}
