@@ -107,6 +107,12 @@ ver `docs/FLUJO_BPCH_INTERNACION_REINSPECCION_CODIFICACION.md`): `bpch.internaci
 ver `docs/FLUJO_BPCH_PRODUCCION_PROTOTIPOS_CLASIFICACION.md` §4): `bpch.pn.ver/gestionar/programar`,
 `bpch.prototipo.ver/gestionar/dictaminar`, `bpch.clasificacion.ver/registrar/aprobar`.
 
+**Formularios especializados y preparación del trabajo** (`align_r2a_formularios.sql`,
+ver `docs/FLUJO_FORMULARIOS_ESPECIALIZADOS.md` §6): `ot.preparacion.aprobar` (aprobar,
+validar o devolver la Planilla de trabajo, el Paquete técnico o el Proyecto de Párrafo
+del DSA: SUPERADMIN, JEFE_LAB, JEFE_SECCION, JEFE_DEPTO; además, el paso exige el rol
+que corresponde en la rama del laboratorio).
+
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
 ---
