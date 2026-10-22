@@ -88,3 +88,26 @@ export function numeroCl(s: string): number {
   if ((t.match(/\./g) ?? []).length > 1) return Number(t.replace(/\./g, ""));
   return Number(t);
 }
+
+/** Pide a la API un fichero generado (POST con cuerpo JSON) y lo descarga con el nombre que da el servidor. */
+export async function descargarGenerado(ruta: string, cuerpo: unknown, nombrePorDefecto: string): Promise<string> {
+  const r = await fetch(`${API}${ruta}`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token()}`, "Content-Type": "application/json" },
+    body: JSON.stringify(cuerpo),
+  });
+  if (!r.ok) {
+    const b = await r.json().catch(() => null);
+    throw new Error(errorMensajeDe(b, r.status));
+  }
+  const nombre = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") ?? "")?.[1] ?? nombrePorDefecto;
+  const url = URL.createObjectURL(await r.blob());
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return nombre;
+}
