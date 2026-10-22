@@ -31,6 +31,7 @@ import {
   puedeEditarAnalisis,
   siguienteCodigoNc,
 } from "./no-conformidad.reglas";
+import { anioChile } from "../common/fecha-chile";
 
 /**
  * No conformidades (tabla `no_conformidad`, ISO/IEC 17025 §7.10 / §8.7).
@@ -214,9 +215,9 @@ export class NoConformidadController {
       const ultimo = await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(
         `SELECT codigo FROM no_conformidad WHERE tenant_id = $1::uuid AND codigo LIKE $2 ORDER BY codigo DESC LIMIT 1`,
         tenantId,
-        `NC-${new Date().getFullYear()}-%`,
+        `NC-${anioChile()}-%`,
       );
-      const codigo = siguienteCodigoNc(ultimo[0]?.codigo, new Date().getFullYear());
+      const codigo = siguienteCodigoNc(ultimo[0]?.codigo, anioChile());
       try {
         const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
           `INSERT INTO no_conformidad

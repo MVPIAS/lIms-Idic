@@ -7,6 +7,7 @@ import { descendientes } from "../rbac/alcance";
 import { LaboratorioOtService, UnidadResumen } from "../ot/laboratorio-ot.service";
 import { CODIGO_BPCH, CODIGO_SCC, puedeOperarEnUnidad, filtroExpedientesBpch, expedienteVisible } from "./alcance-bpch";
 import { fechaCompromisoDesdePlazo } from "../ot/plazos";
+import { anioChile } from "../common/fecha-chile";
 
 /** Cliente con el que se escribe: el servicio o la transacción en curso. */
 type Tx = Prisma.TransactionClient | PrismaService;
@@ -106,7 +107,7 @@ export class OtDesdeProcesoService {
 
   /** Correlativo propio (PROTO / CLS / ITPN / INT / REI) por tenant y año, atómico: «PROTO-2026-0001». */
   async correlativo(tx: Pick<PrismaService, "$queryRawUnsafe">, tenantId: string, tipo: string): Promise<string> {
-    const anio = new Date().getFullYear();
+    const anio = anioChile();
     const filas = await tx.$queryRawUnsafe<{ ultimo: number }[]>(
       `INSERT INTO bpch_correlativo (tenant_id, tipo, anio, ultimo) VALUES ($1::uuid, $2, $3, 1)
        ON CONFLICT (tenant_id, tipo, anio) DO UPDATE SET ultimo = bpch_correlativo.ultimo + 1, updated_at = now()

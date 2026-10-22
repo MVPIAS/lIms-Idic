@@ -13,6 +13,7 @@
 import { createHash } from "node:crypto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { documentoCompleto, type FirmaEstampada, type Sello } from "../plantilla-render/plantilla-defecto";
+import { fechaChile, fechaHoraChile } from "../common/fecha-chile";
 
 /** Escapa texto para incrustarlo en HTML. */
 export function esc(v: unknown): string {
@@ -31,20 +32,14 @@ export function clp(v: unknown): string {
   return "$ " + Math.round(n).toLocaleString("es-CL");
 }
 
-/** dd-mm-aaaa. */
-export function fechaCorta(d: Date = new Date()): string {
-  const p = (x: number) => String(x).padStart(2, "0");
-  return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()}`;
+/** dd-mm-aaaa en Chile (no en la zona del servidor; D02-27). Las fechas de calendario, tal cual. */
+export function fechaCorta(d: Date | string = new Date()): string {
+  return fechaChile(d);
 }
 
 /** dd-mm-aaaa hh:mm en hora de Chile. */
 export function fechaHoraCl(d: Date | string): string {
-  const x = new Date(d);
-  const f = new Intl.DateTimeFormat("es-CL", {
-    timeZone: "America/Santiago", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
-  }).formatToParts(x);
-  const v = (t: string) => f.find((p) => p.type === t)?.value ?? "";
-  return `${v("day")}-${v("month")}-${v("year")} ${v("hour")}:${v("minute")}`;
+  return fechaHoraChile(d);
 }
 
 /**
@@ -138,10 +133,11 @@ export function usdFmt(v: unknown): string {
   return "US$ " + n.toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-/** Columnas DATE de Prisma llegan a medianoche UTC: se pasan a fecha local equivalente. */
+/** Columnas DATE de Prisma llegan a medianoche UTC: se normalizan a la medianoche UTC de ese día (fecha de calendario). */
 export function fechaUtc(d: Date | string): Date {
   const x = new Date(d);
-  return new Date(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate());
+  // Medianoche UTC: fechaCorta la reconoce como fecha de calendario y la imprime tal cual.
+  return new Date(Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate()));
 }
 
 /** Etiqueta de las formas de pago R1 (los códigos históricos se muestran tal cual). */

@@ -7,6 +7,7 @@ import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
+import { anioChile } from "../common/fecha-chile";
 
 /* ===================== ÓRDENES DE COMPRA ===================== */
 /**
@@ -76,7 +77,7 @@ export class OrdenCompraService extends BaseCrudService {
 
   /** Genera 'OC-2026-NNNN' con secuencia por tenant y año (UNIQUE(tenant_id, numero)). */
   private async generarNumero(tenantId: string): Promise<string> {
-    const anio = new Date().getFullYear();
+    const anio = anioChile();
     const ultima = await this.prisma.ordenCompra.findFirst({
       where: { tenantId, numero: { startsWith: `OC-${anio}-` } },
       orderBy: { numero: "desc" },

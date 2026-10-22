@@ -62,6 +62,7 @@ import {
   type FotoInforme,
   type IdentificacionMuestra,
 } from "./bloques-informe";
+import { anioChile } from "../common/fecha-chile";
 
 /** Fotos como máximo en el anexo fotográfico de un documento. */
 export const MAX_FOTOS_INFORME = 24;
@@ -469,7 +470,7 @@ export class PlantillaRenderService {
       bpch: ctx.bpch ?? {},
       // Qué cubre el documento (vacío si cubre toda la OT).
       documento: { cobertura: ctx.cobertura ?? "" },
-      anio: String(cert.fecha.getFullYear()),
+      anio: String(anioChile(cert.fecha)),
       n_muestras: String(muestras.length),
       n_resultados: String(resultados.length),
       laboratorio: ot.subdireccionAsignada ?? "",
@@ -732,7 +733,7 @@ export class PlantillaRenderService {
     fecha: Date,
     cob: { unidadDocumento: string | null; muestraCodigo: string | null } | null = null,
   ): Promise<string> {
-    const general = `CERT-${fecha.getFullYear()}-XXXX`;
+    const general = `CERT-${anioChile(fecha)}-XXXX`;
     try {
       const [ot, plantilla, primera] = await Promise.all([
         this.prisma.ordenTrabajo.findFirst({ where: { id: otId, ...(tenantId ? { tenantId } : {}) }, select: { codigo: true, unidadPrincipal: true, tenantId: true } }),
@@ -833,7 +834,7 @@ export class PlantillaRenderService {
       async (numero) => Boolean(await tx.certificado.findFirst({ where: { tenantId: d.tenantId, OR: [{ numero }, { codigo: numero }] }, select: { id: true } })),
     );
     if (r.numero) return { numero: r.numero, aviso: null, formato: r.regla.formato };
-    const numero = await this.siguienteNumero(tx, d.tenantId, d.fecha.getFullYear());
+    const numero = await this.siguienteNumero(tx, d.tenantId, anioChile(d.fecha));
     const aviso = r.regla
       ? `Al formato de numeración «${r.regla.formato}» le faltan datos (${(r.faltan ?? []).join(", ")}): se usó la numeración general ${numero}.`
       : null;

@@ -18,6 +18,8 @@
  * la regla general (sin unidad). Sin regla aplicable: CERT-AAAA-NNNN de siempre.
  */
 
+import { anioChile } from "../common/fecha-chile";
+
 /** Tipos de documento que se numeran: los de la matriz de firmas y la respuesta a una orden interna. */
 export const TIPOS_NUMERABLES = [
   "INFORME_ENSAYO",
@@ -128,7 +130,7 @@ const relleno = (n: number, ancho?: string) => (ancho ? String(n).padStart(Numbe
  */
 export function formatearNumero(formato: string, v: VariablesNumero): { numero: string | null; faltan: string[] } {
   const faltan: string[] = [];
-  const anio = v.fecha.getFullYear();
+  const anio = anioChile(v.fecha);
   const numero = String(formato).replace(RE_TOKEN, (_m, token: string, ancho?: string) => {
     const texto = (x: string | null | undefined, nombre: string) => {
       if (x === null || x === undefined || String(x).trim() === "") {
@@ -186,7 +188,7 @@ export function elegirRegla<R extends Regla>(reglas: R[], cadena: string[], tipo
 }
 
 /** Período del correlativo: el año si se reinicia cada año, 0 si es continuo. */
-export const periodoDe = (r: Pick<Regla, "reinicio">, fecha: Date) => (r.reinicio === "continuo" ? 0 : fecha.getFullYear());
+export const periodoDe = (r: Pick<Regla, "reinicio">, fecha: Date) => (r.reinicio === "continuo" ? 0 : anioChile(fecha));
 
 /**
  * Número alternativo cuando el generado ya existe y el formato NO tiene {N}

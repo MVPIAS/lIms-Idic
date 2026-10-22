@@ -85,7 +85,26 @@ export function hoyISO(): string {
   }
 }
 
-/** Fecha dd-mm-aaaa. Acepta Date, ISO string o "aaaa-mm-dd" (las fechas sin hora, tal cual). */
+/**
+ * Día, mes, año, hora y minuto de un instante en la hora de CHILE, sea cual sea
+ * la zona del equipo (o del servidor, al pre-renderizar): la misma regla que los
+ * documentos y PDF (recorrido MP-02, D02-27).
+ */
+function partesChile(d: Date): { dd: string; mm: string; aaaa: string; hh: string; mi: string } {
+  try {
+    const p = Object.fromEntries(
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/Santiago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+      }).formatToParts(d).map((x) => [x.type, x.value]),
+    );
+    return { dd: p.day, mm: p.month, aaaa: p.year, hh: String(Number(p.hour) % 24).padStart(2, "0"), mi: p.minute };
+  } catch {
+    const p = (n: number) => String(n).padStart(2, "0");
+    return { dd: p(d.getDate()), mm: p(d.getMonth() + 1), aaaa: String(d.getFullYear()), hh: p(d.getHours()), mi: p(d.getMinutes()) };
+  }
+}
+
+/** Fecha dd-mm-aaaa en Chile. Acepta Date, ISO string o "aaaa-mm-dd" (las fechas sin hora, tal cual). */
 export function fecha(v: unknown): string {
   if (!v) return GUION;
   if (typeof v === "string") {
@@ -98,9 +117,8 @@ export function fecha(v: unknown): string {
     const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
     return m ? `${m[3]}-${m[2]}-${m[1]}` : GUION;
   }
-  const dd = String(d.getDate()).padStart(2, "0");
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  return `${dd}-${mm}-${d.getFullYear()}`;
+  const p = partesChile(d);
+  return `${p.dd}-${p.mm}-${p.aaaa}`;
 }
 
 /** Fecha con hora: dd-mm-aaaa HH:MM. */
@@ -119,9 +137,8 @@ export function fechaHora(v: unknown): string {
   if (!v) return GUION;
   const d = v instanceof Date ? v : new Date(String(v));
   if (isNaN(d.getTime())) return fecha(v);
-  const hh = String(d.getHours()).padStart(2, "0");
-  const mi = String(d.getMinutes()).padStart(2, "0");
-  return `${fecha(d)} ${hh}:${mi}`;
+  const p = partesChile(d);
+  return `${p.dd}-${p.mm}-${p.aaaa} ${p.hh}:${p.mi}`;
 }
 
 /** RUT chileno formateado 12.345.678-9 a partir de dígitos + DV. */

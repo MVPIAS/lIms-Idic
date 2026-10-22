@@ -7,6 +7,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { llamar } from "@/lib/laboratorio";
+import { fecha } from "@/lib/format";
 import { enviarInforme } from "@/lib/informes";
 import { imagenComoDato } from "./imagen";
 import { confirmar, toast } from "@/components/ui/feedback";
@@ -74,7 +75,7 @@ export default function ImagenesCertificado({ editar }: { editar: boolean }) {
               <td>{f.titulo ?? "—"}</td>
               <td><Vista clave={f.clave} version={f.updated_at} /></td>
               <td>{f.nombre ?? "—"} · {(f.bytes / 1024).toFixed(0)} KB</td>
-              <td>{new Date(f.updated_at).toLocaleDateString("es-CL")}{f.actualizado_por ? ` · ${f.actualizado_por}` : ""}</td>
+              <td>{fecha(f.updated_at)}{f.actualizado_por ? ` · ${f.actualizado_por}` : ""}</td>
               {editar && <td><button className="btn outline sm" onClick={() => quitar(f.clave)}>Quitar</button></td>}
             </tr>
           )) : <tr><td colSpan={editar ? 6 : 5} style={{ color: "var(--muted)" }}>Sin imágenes cargadas.</td></tr>}
