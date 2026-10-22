@@ -176,6 +176,18 @@ export class BandejaService {
           unidades,
           estados,
         ),
+      // Ensayos que una orden interna RECIBIDA derivó a sus laboratorios y aún
+      // esperan su valor (D02-25): el analista del destino llega así a su captura.
+      derivadosPorCapturar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM resultado r JOIN orden_trabajo o ON o.id = r.ot_id
+             JOIN LATERAL lims_lab_de_resultado(r.id) lr ON TRUE
+            WHERE r.deleted_at IS NULL AND r.estado IN ('pendiente','devuelto','rechazado')
+              AND lr.derivado AND lr.oi_estado = 'recibida'
+              AND o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND ($2::uuid[] IS NULL OR lr.unidad_id = ANY($2::uuid[]))`,
+          tenant,
+          unidades,
+        ),
       resultadosDevueltosMios: () =>
         this.contar(
           `SELECT count(*) AS n FROM resultado r JOIN orden_trabajo o ON o.id = r.ot_id
@@ -450,6 +462,15 @@ export class BandejaService {
       item("ot_asignadas", "OT asignadas a mí", "OT abiertas donde usted figura como analista (de la OT o de un ensayo)", await q.otAsignadas(), "/ot?mias=1&estado=abiertas", "warn");
     const devueltos = async () =>
       item("resultados_devueltos", "Resultados devueltos", "Resultados suyos devueltos o rechazados para corregir", await q.resultadosDevueltosMios(), "/captura-ot?estado=devuelto,rechazado&mios=1", "alta");
+    const derivados = async () =>
+      item(
+        "derivados_por_capturar",
+        "Ensayos derivados por capturar",
+        "Ensayos que otro laboratorio le pidió por orden interna (ya recibida) y esperan su resultado",
+        await q.derivadosPorCapturar(),
+        "/captura-ot?estado=pendiente,devuelto,rechazado&derivados=1",
+        "warn",
+      );
     const sinAsignar = async () =>
       item("ot_sin_asignar", "OT sin analista", "OT abiertas de su laboratorio a las que aún no se asignó analista", await q.otSinAsignar(), "/ot?sinAsignar=1&estado=abiertas", "warn");
     const porOficializar = async () =>
@@ -499,14 +520,15 @@ export class BandejaService {
           porRecepcionar,
           lotesPorInspeccionar,
           asignadas,
+          derivados,
           async () => item("ot_en_curso", "OT en curso", "OT abiertas de sus laboratorios", await q.otAbiertas(), "/ot?estado=abiertas", "info"),
           devueltos,
           firmas,
         ]);
       case "REVISOR":
-        return all([porRevisar, asignadas, devueltos, porVencer, firmas]);
+        return all([porRevisar, asignadas, derivados, devueltos, porVencer, firmas]);
       case "JEFE_LAB":
-        return all([internacionesPorAnalizar, lotesPorInspeccionar, sinAsignar, porRevisar, porAprobar, oiPorAtender, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
+        return all([internacionesPorAnalizar, lotesPorInspeccionar, sinAsignar, porRevisar, porAprobar, oiPorAtender, derivados, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
       case "JEFE_SECCION":
         return all([internacionesPorAnalizar, firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
       case "JEFE_DEPTO":

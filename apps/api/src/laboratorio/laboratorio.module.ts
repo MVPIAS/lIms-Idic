@@ -918,6 +918,7 @@ async function exigirAlcanceResultado(
  *
  *   GET  /resultados/bandeja?estado=capturado|revisado_n1|devuelto|rechazado|pendiente
  *        &mios=1 (capturados por mí) &asignados=1 (asignados a mí) &otId= &q= &page= &limit=
+ *        &derivados=1 (derivados a sus laboratorios por una orden interna recibida)
  *   POST /resultados/ot/:otId/revisar · resultado.revisar
  *   POST /resultados/ot/:otId/aprobar · resultado.aprobar
  */
@@ -951,7 +952,8 @@ export class ResultadoBandejaController {
              OR (r.asignado_a IS NULL AND EXISTS (SELECT 1 FROM ot_analista oa WHERE oa.ot_id = o.id AND oa.usuario_id = $5::uuid)))
         AND ($7::uuid IS NULL OR o.id = $7::uuid)
         AND ($8::text = '' OR o.codigo ILIKE '%' || $8 || '%' OR m.codigo ILIKE '%' || $8 || '%'
-             OR COALESCE(ca.nombre, a.nombre, '') ILIKE '%' || $8 || '%')`;
+             OR COALESCE(ca.nombre, a.nombre, '') ILIKE '%' || $8 || '%')
+        AND ($9::boolean IS FALSE OR (lr.derivado AND lr.oi_estado = 'recibida'))`;
     const params = [
       estados,
       tenantId,
@@ -961,6 +963,8 @@ export class ResultadoBandejaController {
       q.asignados === "1",
       q.otId && /^[0-9a-f-]{36}$/i.test(q.otId) ? q.otId : null,
       texto,
+      // Ensayos derivados a sus laboratorios por una orden interna recibida (D02-25).
+      q.derivados === "1",
     ];
     const from = `
          FROM resultado r

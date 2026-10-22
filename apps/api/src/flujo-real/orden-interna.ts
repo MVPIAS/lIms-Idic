@@ -770,10 +770,12 @@ export class OrdenInternaController extends BaseCrudController {
     // Qué puede hacer quien mira (permiso + alcance sobre la OT de origen o sobre el destino):
     // la ficha solo ofrece los botones que la API aceptará.
     const tiene = (p: string) => (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes(p);
-    const [enOrigen, enDestino, anulaEnOrigen] = await Promise.all([
+    const [enOrigen, enDestino, anulaEnOrigen, capturaEnDestino] = await Promise.all([
       tiene("orden_interna.emitir") ? this.alcance.puedeVerUnidad(req, f.otUnidadId, "orden_interna.emitir") : false,
       tiene("orden_interna.responder") && f.destinoUnidadId ? this.alcance.puedeVerUnidad(req, f.destinoUnidadId, "orden_interna.responder") : false,
       tiene("orden_interna.anular") ? this.alcance.puedeVerUnidad(req, f.otUnidadId, "orden_interna.anular") : false,
+      // El analista del destino captura los ensayos derivados (resultado.crear en el destino; D02-25).
+      tiene("resultado.crear") && f.destinoUnidadId ? this.alcance.puedeVerUnidad(req, f.destinoUnidadId, "resultado.crear") : false,
     ]);
     return {
       ...f,
@@ -784,6 +786,7 @@ export class OrdenInternaController extends BaseCrudController {
         responder: enDestino && f.estado === "recibida",
         cerrar: enDestino && f.estado === "recibida",
         darPorRecibido: enOrigen && f.estado === "cerrada" && !f.aceptadaAt,
+        capturar: capturaEnDestino && f.estado === "recibida",
       },
     };
   }

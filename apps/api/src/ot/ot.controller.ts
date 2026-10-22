@@ -29,6 +29,7 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos, validarTransicion } from "../common/estados";
 import { generarCodigoOt } from "../common/codigo";
 import { AlcanceService } from "../rbac/alcance.service";
+import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 import { ORIGENES_OT, calcularOpiPendiente, resolverCobro, validarOrigenOt } from "./reglas-ot";
 
 const PrioridadEnum = z.enum(["baja", "normal", "alta", "urgente"]);
@@ -194,6 +195,7 @@ export class OtController {
     private readonly alcance: AlcanceService,
     private readonly labs: LaboratorioOtService,
     private readonly cierre: OtCierreService,
+    private readonly alcanceResultado: AlcanceResultadoService,
   ) {}
 
   /**
@@ -209,6 +211,8 @@ export class OtController {
    *                     cortes que Mi bandeja). `vencidas=1` / `porVencer=1` son alias.
    *   listasCierre    · 1 = documentos oficiales y entregados, resultados aprobados: falta cerrar
    *   sinFactura      · 1 = OT cerradas con cobro sin factura viva (Finanzas)
+   *   derivadas       · 1 = suma las OT de otros laboratorios con ensayos derivados por orden
+   *                     interna a los suyos (buscador de «Captura y revisión por OT», D02-25)
    *   page / limit    · paginación (limit máx. 200, por defecto 20)
    * Alcance por laboratorio (AlcanceService): un usuario acotado solo ve las OT
    * de sus unidades visibles; global (SUPERADMIN/ADMIN/DIRECTOR…) sin filtro.
@@ -240,6 +244,12 @@ export class OtController {
     const idsListasCierre = si(query.listasCierre) ? await this.cierre.idsListasParaCerrar(tenantId) : null;
     const idsSinFactura = si(query.sinFactura) ? await this.cierre.idsCerradasSinFactura(tenantId) : null;
 
+    // ?derivadas=1 (buscador de la captura): también las OT de otros laboratorios
+    // con ensayos derivados por orden interna a los suyos (D02-25). Solo esas
+    // OT; dentro, la captura muestra solo los ensayos derivados (alcanceEnOt).
+    const idsDerivadas =
+      si(query.derivadas) && unidadesVisibles ? await this.alcanceResultado.otsConDerivadosA(unidadesVisibles, tenantId) : null;
+
     const where = filtroListaOt(
       {
         q: query.q,
@@ -255,7 +265,7 @@ export class OtController {
         idsListasCierre,
         idsSinFactura,
       },
-      { tenantId, unidadesVisibles, hoy: new Date() },
+      { tenantId, unidadesVisibles, idsDerivadas, hoy: new Date() },
     ) as Prisma.OrdenTrabajoWhereInput;
 
     const [ots, total] = await Promise.all([

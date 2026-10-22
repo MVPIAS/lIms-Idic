@@ -187,7 +187,15 @@ select json_build_object(
    'derivados', (select json_agg(json_build_object('id', r.id, 'otId', r.ot_id, 'destino', ud.codigo, 'principal', up.codigo, 'oiEstado', l.oi_estado, 'estado', r.estado))
                    from resultado r join lims_lab_de_resultado(r.id) l on l.derivado
                    join unidad ud on ud.id = l.unidad_id join unidad up on up.id = l.principal_id
-                  where r.deleted_at is null and ud.id <> up.id)
+                  where r.deleted_at is null and ud.id <> up.id),
+   -- r1h: destino de cada orden interna viva (el buscador de la captura con ?derivadas=1).
+   'oiDestinos', (select json_agg(json_build_object('otId', oi.ot_id, 'destino', ud.codigo))
+                    from orden_interna oi join cat_familia f on f.id = oi.destino_lab
+                    join lateral (select u.codigo from unidad u
+                                   where u.tenant_id = f.tenant_id and u.activa
+                                     and f.codsucdel = any(string_to_array(regexp_replace(coalesce(u.codsucdel, ''), '[\s,;]', '/', 'g'), '/'))
+                                   order by (u.tipo = 'LABORATORIO') desc, u.codigo limit 1) ud on true
+                   where oi.deleted_at is null and oi.estado <> 'anulada')
  )
 )`;
 
@@ -235,6 +243,7 @@ const enD11 = (e) => (e.global && [...e.rolesGlobales].some((r) => GLOBAL_EN_D11
 
 /* ----------------------------------------------------- listados del menú --- */
 // regla: unidad (fila en el alcance) · bpch (además, con la SCC todo) · equipo (sin unidad = común)
+//        derivadas (la OT es de su laboratorio o tiene una orden interna dirigida a él)
 //        saec (el listado solo si entra en la D11) · comun (no se comprueban filas) · retirada (410)
 const LISTADOS = [
   { n: "Órdenes de trabajo", r: "/ot?limit=200", p: "ot.ver", t: "ot", regla: "unidad", href: "/ot" },
@@ -244,6 +253,11 @@ const LISTADOS = [
   { n: "Certificados (ruta retirada)", r: "/certificados?limit=200", p: "ot.ver", regla: "retirada" },
   { n: "Órdenes internas", r: "/ordenes-internas?limit=200", p: "ot.ver", t: "orden_interna", regla: "unidad", href: "/ordenes-internas" },
   { n: "Órdenes internas · bandeja de entrada (r1b)", r: "/ordenes-internas/bandeja?estado=todas", p: "ot.ver", t: "orden_interna", regla: "unidad" },
+  // Frente r1h (D02-25): el buscador de la captura suma las OT con ensayos derivados a sus
+  // laboratorios (regla «derivadas»: la OT es suya o le derivaron algo); la bandeja de
+  // derivados por capturar, por laboratorio dueño del ensayo (el destino).
+  { n: "OT · buscador de la captura (?derivadas=1, r1h)", r: "/ot?derivadas=1&limit=200", p: "ot.ver", t: "ot", regla: "derivadas" },
+  { n: "Ensayos derivados por capturar (r1h)", r: "/resultados/bandeja?estado=pendiente,devuelto,rechazado&derivados=1&limit=200", p: "resultado.ver", t: "resultado", regla: "unidad" },
   // Frente r1d: bandeja de entrada del laboratorio (OT por recepcionar y órdenes internas dirigidas al laboratorio),
   // testigos y contramuestras retenidos y la cadena de custodia.
   { n: "Bandeja de entrada del laboratorio", r: "/recepcion/bandeja", p: "muestra.crear", t: "orden_interna", regla: "unidad", href: "/recepcion" },
@@ -380,6 +394,7 @@ async function main() {
           if (L.regla === "bpch" || L.fase1) { fuera++; ejemplo ||= `${f.codigo ?? f.id} [sin unidad]`; }
           continue;
         }
+        if (L.regla === "derivadas" && (V.datos?.oiDestinos || []).some((d) => d.otId === f.id && e.unidades.has(d.destino))) continue;
         if (!u.some((c) => e.unidades.has(c))) { fuera++; ejemplo ||= `${f.codigo ?? f.numero ?? f.otCodigo ?? f.id} [${u.join(",")}]`; }
       }
       if (L.fase1) {
