@@ -164,14 +164,15 @@ export class ParametroSistemaService extends BaseCrudService {
       CATEGORIAS_CONFIGURABLES,
     );
     const laboratorios = await this.laboratoriosRecepcion(tenantId);
-    const parametro = (defBase: DefValor, f: any) => {
+    const parametro = (defBase: DefValor, f: any, alta: string | null = null) => {
       // Opciones leídas de la base (p. ej. los laboratorios de la segregación revisión ≠ aprobación).
       const def = conOpciones(defBase, laboratorios);
       return {
       id: f.id as string,
       categoria: f.categoria as string,
       codigo: f.codigo as string,
-      nombre: def.tipo === "campo" ? (f.etiqueta as string) : def.tipo === "obligatorio" ? (f.codigo as string) : def.nombre,
+      // Filas por patrón (campo, método, plantilla…): su etiqueta; producto obligatorio: el laboratorio.
+      nombre: def.tipo === "obligatorio" ? (f.codigo as string) : alta ? (f.etiqueta as string) : def.nombre,
       def: {
         tipo: def.tipo,
         ayuda: def.ayuda ?? null,
@@ -180,11 +181,13 @@ export class ParametroSistemaService extends BaseCrudService {
         unidad: def.unidad ?? null,
         opciones: def.opciones ?? null,
         porDefecto: def.porDefecto ?? null,
+        columnas: def.columnas ?? null,
+        maxFilas: def.maxFilas ?? null,
       },
       valor: valorFormulario(def, f),
       texto: textoValor(def, def.tipo === "campo" ? f.valor : historialDeFila(def, f)),
       activo: f.activo as boolean,
-      laboratorio: def.tipo === "campo" || def.tipo === "obligatorio" ? laboratorioDe(f.codigo) : null,
+      laboratorio: alta === "laboratorio" || alta === "campo" ? laboratorioDe(f.codigo) : null,
       updatedAt: f.updatedAt,
       };
     };
@@ -195,7 +198,7 @@ export class ParametroSistemaService extends BaseCrudService {
             const f = delGrupo.find((x) => x.codigo === codigo);
             return f ? parametro(def, f) : { codigo, nombre: def.nombre, falta: true };
           })
-        : delGrupo.filter((f) => codigoValido(g.patron!.alta, f.codigo)).map((f) => parametro(g.patron!, f));
+        : delGrupo.filter((f) => codigoValido(g.patron!.alta, f.codigo)).map((f) => parametro(g.patron!, f, g.patron!.alta));
       return { categoria: g.categoria, titulo: g.titulo, donde: g.donde, porConfirmar: g.porConfirmar ?? null, alta: g.patron?.alta ?? null, parametros };
     });
     return {
@@ -209,7 +212,7 @@ export class ParametroSistemaService extends BaseCrudService {
           categoria: h.categoria,
           codigo: h.codigo,
           grupo: grupoDe(h.categoria)?.titulo ?? h.categoria,
-          parametro: def ? (def.tipo === "campo" || def.tipo === "obligatorio" ? h.codigo : def.nombre) : h.codigo,
+          parametro: def ? (grupoDe(h.categoria)?.patron ? h.codigo : def.nombre) : h.codigo,
           antes: h.valorAnterior == null ? "(alta)" : def ? textoValor(def, h.valorAnterior) : h.valorAnterior,
           despues: def ? textoValor(def, h.valorNuevo) : h.valorNuevo,
           motivo: h.motivo,
@@ -237,7 +240,7 @@ export class ParametroSistemaService extends BaseCrudService {
       );
       const fila = filas[0];
       if (!fila) throw new NotFoundException(`El parámetro ${categoria}.${codigo} no existe en esta instalación.`);
-      const r = normalizarValor(def, { codigo, etiqueta: fila.etiqueta }, b.valor);
+      const r = normalizarValor(def, { codigo, etiqueta: fila.etiqueta }, b.valor, categoria);
       const errores = [...r.errores, ...errMotivo];
       if (errores.length || !r.valor) throw new BadRequestException(errores.join(" "));
       const anterior = historialDeFila(def, { codigo, valor: fila.valor, activo: fila.activo });
@@ -262,10 +265,11 @@ export class ParametroSistemaService extends BaseCrudService {
     const g = grupoDe(categoria);
     if (!g?.patron) throw new NotFoundException(`En ${categoria} no se dan de alta parámetros desde esta pantalla.`);
     const patron = g.patron;
-    const b = (cuerpo ?? {}) as { laboratorio?: unknown; campo?: unknown; etiqueta?: unknown; valor?: unknown; motivo?: unknown };
+    const b = (cuerpo ?? {}) as { laboratorio?: unknown; campo?: unknown; etiqueta?: unknown; valor?: unknown; motivo?: unknown; codigo?: unknown };
     const lab = typeof b.laboratorio === "string" ? b.laboratorio.trim().toUpperCase() : "";
     const errores: string[] = [];
-    const existe = lab
+    const porLaboratorio = patron.alta === "laboratorio" || patron.alta === "campo";
+    const existe = porLaboratorio && lab
       ? await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(
           `SELECT codigo FROM unidad WHERE tenant_id = $1::uuid AND upper(codigo) = $2 AND tipo = ANY($3::text[]) LIMIT 1`,
           tenantId,
@@ -273,9 +277,28 @@ export class ParametroSistemaService extends BaseCrudService {
           UNIDADES_RECEPCION,
         )
       : [];
-    if (!existe.length) errores.push("Elija un laboratorio (o sucursal) que reciba muestras.");
+    if (porLaboratorio && !existe.length) errores.push("Elija un laboratorio (o sucursal) que reciba muestras.");
     let codigo = lab;
-    let etiqueta = `${lab} · producto obligatorio al recepcionar`;
+    let etiqueta = `${lab} · ${patron.nombre.charAt(0).toLowerCase()}${patron.nombre.slice(1)}`;
+    if (patron.alta === "metodo") {
+      // Un método del catálogo (por su código): la variante rige para sus ensayos.
+      codigo = typeof b.codigo === "string" ? b.codigo.trim().toUpperCase() : "";
+      const m = codigo
+        ? await this.prisma.$queryRawUnsafe<{ codigo: string; nombre: string }[]>(
+            `SELECT codigo, nombre FROM cat_metodo WHERE tenant_id = $1::uuid AND upper(codigo) = $2 AND deleted_at IS NULL LIMIT 1`,
+            tenantId,
+            codigo,
+          )
+        : [];
+      if (!m.length) errores.push("Indique el código de un método del catálogo.");
+      else etiqueta = `${m[0].codigo} · ${m[0].nombre}`.slice(0, 160);
+    }
+    if (patron.alta === "plantilla") {
+      codigo = typeof b.codigo === "string" ? b.codigo.trim().toUpperCase() : "";
+      if (!/^[A-Z][A-Z0-9_]{1,19}$/.test(codigo)) errores.push("El código de la plantilla va en mayúsculas, sin espacios (p. ej. REMOLQUE).");
+      etiqueta = typeof b.etiqueta === "string" ? b.etiqueta.trim() : "";
+      if (!etiqueta || etiqueta.length > 160) errores.push("Escriba el nombre visible de la plantilla (hasta 160 caracteres).");
+    }
     if (patron.alta === "campo") {
       const campo = typeof b.campo === "string" ? b.campo.trim() : "";
       if (!/^[a-z][a-z0-9_]{0,39}$/.test(campo)) errores.push("El código del campo va en minúsculas, sin espacios ni tildes (p. ej. lote_proveedor).");
@@ -284,7 +307,7 @@ export class ParametroSistemaService extends BaseCrudService {
       if (!etiqueta || etiqueta.length > 160) errores.push("Escriba el nombre visible del campo (hasta 160 caracteres).");
     }
     if (errores.length === 0 && !codigoValido(patron.alta, codigo)) errores.push("Código no válido.");
-    const r = errores.length ? null : normalizarValor(patron, { codigo, etiqueta }, b.valor);
+    const r = errores.length ? null : normalizarValor(patron, { codigo, etiqueta }, b.valor, categoria);
     errores.push(...(r?.errores ?? []), ...erroresMotivo(b.motivo));
     if (errores.length || !r?.valor) throw new BadRequestException(errores.join(" "));
     const nuevo = r.valor;
