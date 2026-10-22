@@ -29,6 +29,7 @@ export function Pasos({ pasos, activo, onElegir }: { pasos: PasoFormulario[]; ac
           onClick={() => onElegir(p.clave)}
           className={`st${p.estado === "hecho" ? " done" : ""}${p.clave === activo ? " cur" : ""}`}
           aria-current={p.clave === activo ? "step" : undefined}
+          aria-label={`Paso ${i + 1}: ${p.titulo}${p.estado === "hecho" ? " (hecho)" : ""}${p.detalle ? ` · ${p.detalle}` : ""}`}
           style={{ background: "none", border: 0, cursor: "pointer", textAlign: "left", padding: "2px 6px", minWidth: 150 }}
         >
           <span className="n" aria-hidden>{p.estado === "hecho" && p.clave !== activo ? "✓" : i + 1}</span>

@@ -82,7 +82,7 @@ function TrabajoDsa({ otId, onCambio }: { otId: string; onCambio?: () => void })
     <div className="card" style={{ margin: 0 }}>
       <h2>Preparación del trabajo · {t.ot.laboratorio} <span className="right">EP-05 2.1–2.3</span></h2>
       {t.exige && t.estado !== "aprobada" && t.bloqueaCaptura && (
-        <div className="alert warn">La ejecución (registro de disparos, HCP, captura) espera la aprobación de la {f.titulo}.</div>
+        <div className="alert warn">La ejecución (registro de disparos, HCP, captura) espera la aprobación de: {f.titulo}.</div>
       )}
       <Pasos pasos={pasos} activo={paso} onElegir={setPaso} />
 
@@ -246,7 +246,7 @@ export function ComisionEquipos({ otId, t, onListo }: { otId: string; t: any; on
             <legend style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600, marginBottom: 3 }}>Inspectores</legend>
             {t.personal.map((p: any) => (
               <label key={p.id} style={{ fontSize: 12.5, display: "flex", gap: 6, alignItems: "center" }}>
-                <input type="checkbox" style={{ width: "auto" }} checked={ins.has(p.id)} onChange={(e) => setIns((s) => { const n = new Set(s); if (e.target.checked) n.add(p.id); else n.delete(p.id); return n; })} /> {p.nombre}
+                <input type="checkbox" aria-label={`Inspector: ${p.nombre}`} style={{ width: "auto" }} checked={ins.has(p.id)} onChange={(e) => setIns((s) => { const n = new Set(s); if (e.target.checked) n.add(p.id); else n.delete(p.id); return n; })} /> {p.nombre}
               </label>
             ))}
           </fieldset>
@@ -332,7 +332,7 @@ function FormPreparacion({ otId, fila, equipos, onListo }: { otId: string; fila:
   const [eventos, setEventos] = useState<any[]>([]);
   useEffect(() => {
     if (fila.registro?.id) llamar<any[]>("GET", `/formularios/registro/${fila.registro.id}/eventos`).then(setEventos).catch(() => setEventos([]));
-  }, [fila.registro?.id]);
+  }, [fila.registro?.id, fila.registro?.updatedAt]);
   const ed = fila.puedeEditar;
   const corrige = !!fila.registro;
   async function guardar(e: React.FormEvent) {

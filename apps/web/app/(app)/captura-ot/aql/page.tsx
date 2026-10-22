@@ -119,16 +119,16 @@ function Contenido() {
                   return (
                     <tr key={i}>
                       <td>
-                        <input aria-label={`Inspección ${i + 1}`} value={f.inspeccion} onChange={(x) => setF(i, { inspeccion: x.target.value })} maxLength={160} style={{ width: "100%" }} />
+                        <input className="celda" aria-label={`Inspección ${i + 1}`} value={f.inspeccion} onChange={(x) => setF(i, { inspeccion: x.target.value })} maxLength={160} style={{ width: "100%" }} />
                         {f.resultadoId ? <small style={{ color: "var(--muted)" }}>Ensayo de la OT</small> : <small style={{ color: "var(--muted)" }}>Solo para el informe</small>}
                       </td>
-                      <td><select aria-label={`AQL de la inspección ${i + 1}`} value={f.aql} onChange={(x) => setF(i, { aql: x.target.value })}>{AQLS.map((a) => <option key={a}>{a}</option>)}</select></td>
-                      <td><select aria-label={`Nivel de la inspección ${i + 1}`} value={f.nivel} onChange={(x) => setF(i, { nivel: x.target.value })}>{NIVELES.map((a) => <option key={a}>{a}</option>)}</select></td>
+                      <td><select className="celda" aria-label={`AQL de la inspección ${i + 1}`} value={f.aql} onChange={(x) => setF(i, { aql: x.target.value })}>{AQLS.map((a) => <option key={a}>{a}</option>)}</select></td>
+                      <td><select className="celda" aria-label={`Nivel de la inspección ${i + 1}`} value={f.nivel} onChange={(x) => setF(i, { nivel: x.target.value })}>{NIVELES.map((a) => <option key={a}>{a}</option>)}</select></td>
                       <td>{e?.plan?.letra ?? "—"}{e?.plan && e.plan.letraPlan !== e.plan.letra ? <small style={{ display: "block", color: "var(--muted)" }}>→ {e.plan.letraPlan}</small> : null}</td>
                       <td className="num">{e?.plan?.n ?? "—"}</td>
-                      <td className="num"><input aria-label={`Ac manual ${i + 1}`} inputMode="numeric" placeholder={e ? String(e.plan.ac) : "tabla"} value={f.acManual ?? ""} onChange={(x) => setF(i, { acManual: x.target.value })} style={{ width: 52, textAlign: "right" }} /></td>
-                      <td className="num"><input aria-label={`Re manual ${i + 1}`} inputMode="numeric" placeholder={e ? String(e.plan.re) : "tabla"} value={f.reManual ?? ""} onChange={(x) => setF(i, { reManual: x.target.value })} style={{ width: 52, textAlign: "right" }} /></td>
-                      <td className="num"><input aria-label={`Defectuosos de la inspección ${i + 1}`} inputMode="numeric" value={f.defectuosos ?? ""} onChange={(x) => setF(i, { defectuosos: x.target.value })} style={{ width: 70, textAlign: "right" }} /></td>
+                      <td className="num"><input className="celda" aria-label={`Ac manual ${i + 1}`} inputMode="numeric" placeholder={e ? String(e.plan.ac) : "tabla"} value={f.acManual ?? ""} onChange={(x) => setF(i, { acManual: x.target.value })} style={{ width: 52, textAlign: "right" }} /></td>
+                      <td className="num"><input className="celda" aria-label={`Re manual ${i + 1}`} inputMode="numeric" placeholder={e ? String(e.plan.re) : "tabla"} value={f.reManual ?? ""} onChange={(x) => setF(i, { reManual: x.target.value })} style={{ width: 52, textAlign: "right" }} /></td>
+                      <td className="num"><input className="celda" aria-label={`Defectuosos de la inspección ${i + 1}`} inputMode="numeric" value={f.defectuosos ?? ""} onChange={(x) => setF(i, { defectuosos: x.target.value })} style={{ width: 70, textAlign: "right" }} /></td>
                       <td>{e ? <Veredicto v={e.cumplimiento} /> : "—"}</td>
                       <td>{editable && !f.resultadoId && <button type="button" className="btn outline sm" onClick={() => setFilas((a) => a.filter((_, k) => k !== i))}>Quitar</button>}</td>
                     </tr>

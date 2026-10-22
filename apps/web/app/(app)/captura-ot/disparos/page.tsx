@@ -187,8 +187,8 @@ function PasoLote({ v, editable, ocupado, setOcupado, onListo }: { v: Vista; edi
           <tbody>
             {comp.map((c, i) => (
               <tr key={i}>
-                <td><input aria-label={`Talla ${i + 1}`} value={c.talla} onChange={(e) => setComp((a) => a.map((x, k) => (k === i ? { ...x, talla: e.target.value } : x)))} maxLength={10} style={{ width: 90 }} /></td>
-                <td className="num"><input aria-label={`Cantidad ${i + 1}`} inputMode="numeric" value={c.cantidad} onChange={(e) => setComp((a) => a.map((x, k) => (k === i ? { ...x, cantidad: e.target.value } : x)))} style={{ width: 90, textAlign: "right" }} /></td>
+                <td><input className="celda" aria-label={`Talla ${i + 1}`} value={c.talla} onChange={(e) => setComp((a) => a.map((x, k) => (k === i ? { ...x, talla: e.target.value } : x)))} maxLength={10} style={{ width: 90 }} /></td>
+                <td className="num"><input className="celda" aria-label={`Cantidad ${i + 1}`} inputMode="numeric" value={c.cantidad} onChange={(e) => setComp((a) => a.map((x, k) => (k === i ? { ...x, cantidad: e.target.value } : x)))} style={{ width: 90, textAlign: "right" }} /></td>
                 <td>{editable && <button type="button" className="btn outline sm" onClick={() => setComp((a) => a.filter((_, k) => k !== i))} aria-label={`Quitar talla ${i + 1}`}>Quitar</button>}</td>
               </tr>
             ))}
@@ -217,12 +217,12 @@ function PasoLote({ v, editable, ocupado, setOcupado, onListo }: { v: Vista; edi
                 {u.paneles.map((p, j) => (
                   <tr key={p.id}>
                     <td>
-                      <select aria-label={`Zona del panel ${j + 1} de ${u.serie}`} value={p.zona} onChange={(e) => setU(i, { paneles: u.paneles.map((x, k) => (k === j ? { ...x, zona: e.target.value } : x)) })}>
+                      <select className="celda" aria-label={`Zona del panel ${j + 1} de ${u.serie}`} value={p.zona} onChange={(e) => setU(i, { paneles: u.paneles.map((x, k) => (k === j ? { ...x, zona: e.target.value } : x)) })}>
                         {ZONAS.map((z) => <option key={z} value={z}>{z}</option>)}
                       </select>
                     </td>
                     <td>
-                      <select aria-label={`Munición del panel ${j + 1} de ${u.serie}`} value={p.amenaza} onChange={(e) => setU(i, { paneles: u.paneles.map((x, k) => (k === j ? { ...x, amenaza: e.target.value } : x)) })}>
+                      <select className="celda" aria-label={`Munición del panel ${j + 1} de ${u.serie}`} value={p.amenaza} onChange={(e) => setU(i, { paneles: u.paneles.map((x, k) => (k === j ? { ...x, amenaza: e.target.value } : x)) })}>
                         {v.amenazas.map((a) => <option key={a.clave} value={a.clave}>{a.norma} {a.nivel} · {a.municion} ({conComa(a.v_min, 1)}–{conComa(a.v_max, 1)} m/s)</option>)}
                       </select>
                     </td>
@@ -295,7 +295,8 @@ function PasoDisparos({ v, editable, onCambio, onFin }: { v: Vista; editable: bo
       const pe = r.panel;
       if (pe.detenido) toast.error(`Panel detenido: ${pe.disparos.find((d: any) => d.condicion === "no_cumple")?.motivos?.join(", ")}. El lote no cumple.`);
       else toast.ok(corrigiendo != null ? `Disparo ${n} corregido.` : `Disparo ${n} guardado.`);
-      for (const av of pe.avisos ?? []) toast.error(av);
+      // Solo el aviso del disparo recién guardado; los anteriores ya están a la vista bajo la tabla.
+      for (const av of (pe.avisos ?? []).filter((x: string) => x.startsWith(`Disparo ${n}:`))) toast.error(av);
       setF({ ...vacio, zonaImpacto: f.zonaImpacto, laminasTotal: f.laminasTotal });
       setCorrigiendo(null);
       setMotivo("");

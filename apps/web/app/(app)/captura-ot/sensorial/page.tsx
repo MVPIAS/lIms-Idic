@@ -117,12 +117,12 @@ function Contenido() {
                   {cart.map((c, i) => (
                     <tr key={c.juez} style={c.excluido ? { opacity: 0.55 } : undefined}>
                       <td>{c.juez}</td>
-                      {prueba === "escala" && v.atributos.map((a: string) => <td key={a} className="num"><input aria-label={`${a} · ${c.juez}`} inputMode="decimal" style={{ width: 54, textAlign: "right" }} value={c.puntajes?.[a] ?? ""} onChange={(e) => setC(i, { puntajes: { ...(c.puntajes ?? {}), [a]: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) } })} /></td>)}
-                      {prueba === "triangular" && <td><select aria-label={`Respuesta de ${c.juez}`} value={c.correcta == null ? "" : c.correcta ? "si" : "no"} onChange={(e) => setC(i, { correcta: e.target.value === "" ? null : e.target.value === "si" })}><option value="">—</option><option value="si">Sí (correcta)</option><option value="no">No</option></select></td>}
-                      {prueba === "coccion" && <td><select aria-label={`Cocción · ${c.juez}`} value={c.coccion ?? ""} onChange={(e) => setC(i, { coccion: e.target.value || null })}><option value="">—</option><option value="blandas">Blandas</option><option value="duras">Duras</option></select></td>}
+                      {prueba === "escala" && v.atributos.map((a: string) => <td key={a} className="num"><input className="celda" aria-label={`${a} · ${c.juez}`} inputMode="decimal" style={{ width: 54, textAlign: "right" }} value={c.puntajes?.[a] ?? ""} onChange={(e) => setC(i, { puntajes: { ...(c.puntajes ?? {}), [a]: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) } })} /></td>)}
+                      {prueba === "triangular" && <td><select className="celda" aria-label={`Respuesta de ${c.juez}`} value={c.correcta == null ? "" : c.correcta ? "si" : "no"} onChange={(e) => setC(i, { correcta: e.target.value === "" ? null : e.target.value === "si" })}><option value="">—</option><option value="si">Sí (correcta)</option><option value="no">No</option></select></td>}
+                      {prueba === "coccion" && <td><select className="celda" aria-label={`Cocción · ${c.juez}`} value={c.coccion ?? ""} onChange={(e) => setC(i, { coccion: e.target.value || null })}><option value="">—</option><option value="blandas">Blandas</option><option value="duras">Duras</option></select></td>}
                       <td style={{ display: "flex", gap: 6, alignItems: "center" }}>
                         <input type="checkbox" aria-label={`Excluir a ${c.juez}`} checked={!!c.excluido} onChange={(e) => setC(i, { excluido: e.target.checked })} style={{ width: "auto" }} />
-                        {c.excluido && <input aria-label={`Motivo de exclusión de ${c.juez}`} value={c.motivoExclusion ?? ""} onChange={(e) => setC(i, { motivoExclusion: e.target.value })} placeholder="Motivo" />}
+                        {c.excluido && <input className="celda" aria-label={`Motivo de exclusión de ${c.juez}`} value={c.motivoExclusion ?? ""} onChange={(e) => setC(i, { motivoExclusion: e.target.value })} placeholder="Motivo" />}
                       </td>
                     </tr>
                   ))}
