@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Put, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, type ArchivoAdjunto } from "../../common/adjuntos";
@@ -58,6 +58,45 @@ export class PrototiposController {
   async adjuntar(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoAdjunto | undefined, @Body() body: any, @Req() req: any) {
     await this.exigir(req, id);
     return this.svc.adjuntar(tenant(req), id, usuario(req), String(body?.clase ?? ""), archivo);
+  }
+
+  @Put(":id/parametros")
+  @RequierePermiso("bpch.prototipo.gestionar")
+  @ApiOperation({ summary: "8.11 · Panel del elemento (método, ensayo, Mín/Nom/Máx, unidad, fórmula)" })
+  async guardarParametros(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.guardarParametros(tenant(req), usuario(req), id, body);
+  }
+
+  @Post(":id/parametros/enviar")
+  @RequierePermiso("bpch.prototipo.gestionar")
+  @ApiOperation({ summary: "8.11 · Enviar la parametrización a validación" })
+  async enviarParametros(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.enviarParametros(tenant(req), usuario(req), id);
+  }
+
+  @Post(":id/parametros/validar")
+  @RequierePermiso("bpch.prototipo.dictaminar")
+  @ApiOperation({ summary: "8.11 · Validar la parametrización → ensayar (no quien la preparó)" })
+  async validarParametros(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.validarParametros(tenant(req), usuario(req), id);
+  }
+
+  @Post(":id/parametros/devolver")
+  @RequierePermiso("bpch.prototipo.dictaminar")
+  async devolverParametros(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.devolverParametros(tenant(req), usuario(req), id, body);
+  }
+
+  @Post(":id/parametros/aplicar")
+  @RequierePermiso("bpch.prototipo.ver")
+  @ApiOperation({ summary: "8.11 · Aplicar el panel validado como especificación de la OT (jefatura de la unidad de la OT)" })
+  async aplicarParametros(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.aplicarParametros(req, tenant(req), id);
   }
 
   @Get(":id/adjuntos/:adjuntoId")

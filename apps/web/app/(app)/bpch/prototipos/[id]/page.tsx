@@ -5,11 +5,12 @@
  *  1. Ingreso y antecedentes técnicos (fabricante, elemento, solicitud DGMN).
  *  2. Clasificación de la sustancia (una aprobada; obligatoria para aprobar el tipo).
  *  3. Pronunciamiento SAC sobre el tamaño de muestra (SAC-PG01-IT10, «Para prototipos»).
- *  4. OT de evaluación: se ejecuta con el flujo general (muestras, captura,
+ *  4. Parametrización del elemento (panel validado por la jefatura, EP-08 8.11).
+ *  5. OT de evaluación: se ejecuta con el flujo general (muestras, captura,
  *     revisión, aprobación) en el expediente de la OT.
- *  5. Dictamen: aprobación o rechazo del tipo → documento al circuito de firmas.
- *  6. Código único CNC-DGMN del tipo aprobado (con el certificado oficial).
- *  7. Inscripción del tipo en la Codificación Única con sus datos heredados.
+ *  6. Dictamen: aprobación o rechazo del tipo → documento al circuito de firmas.
+ *  7. Código único CNC-DGMN del tipo aprobado (con el certificado oficial).
+ *  8. Inscripción del tipo en la Codificación Única con sus datos heredados.
  * En el ingreso se comprueba «¿está codificado?» (EP-08 8.8) y se adjuntan la
  * ficha técnica y la hoja de datos de seguridad.
  * /bpch/prototipos/nuevo = ingreso.
@@ -22,6 +23,7 @@ import { toast, confirmar } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import SelectorFabricante, { type Fabricante } from "@/components/bpch-procesos/SelectorFabricante";
 import SelectorClasificacion from "@/components/bpch-procesos/SelectorClasificacion";
+import ParametrizacionPrototipo from "@/components/bpch-procesos/ParametrizacionPrototipo";
 import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
@@ -337,7 +339,13 @@ export default function PrototipoPage() {
             )}
           </Paso>
 
-          <Paso n={4} titulo="OT de evaluación (flujo general)" hecho={conOt && p.evaluacion.resultados > 0 && p.evaluacion.aprobados === p.evaluacion.resultados}>
+          {p.parametrizacion && (
+            <Paso n={4} titulo="Parametrización del elemento (librería de pruebas)" hecho={p.parametrizacion.estado === "validada"}>
+              <ParametrizacionPrototipo key={`${p.parametrizacion.estado}-${(p.parametrizacion.filas ?? []).length}`} p={{ ...p, id }} onCambio={volcar} />
+            </Paso>
+          )}
+
+          <Paso n={5} titulo="OT de evaluación (flujo general)" hecho={conOt && p.evaluacion.resultados > 0 && p.evaluacion.aprobados === p.evaluacion.resultados}>
             {conOt ? (
               <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
                 <div>OT <Link href={`/ot/${p.ot.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{p.ot.codigo}</Link> · {p.unidad?.codigo} · estado <b>{p.ot.estado}</b></div>
@@ -377,7 +385,7 @@ export default function PrototipoPage() {
             )}
           </Paso>
 
-          <Paso n={5} titulo="Dictamen del tipo y documento" hecho={p.estado === "dictaminado"}>
+          <Paso n={6} titulo="Dictamen del tipo y documento" hecho={p.estado === "dictaminado"}>
             {p.dictamenDetalle && (
               <p style={{ margin: "0 0 8px", fontSize: 13 }}>
                 <b>{p.dictamenDetalle.dictamen === "aprobado" ? "Aprobado" : "Rechazado"}</b> por {p.dictamenDetalle.por} el {fechaHora(p.dictamenDetalle.at)}
@@ -423,7 +431,7 @@ export default function PrototipoPage() {
           </Paso>
 
           {p.dictamen === "aprobado" && (
-            <Paso n={6} titulo="Código único CNC-DGMN del tipo aprobado" hecho={Boolean(p.codigoCnc)}>
+            <Paso n={7} titulo="Código único CNC-DGMN del tipo aprobado" hecho={Boolean(p.codigoCnc)}>
               {p.codigoCncDetalle ? (
                 <p style={{ margin: 0, fontSize: 13 }}>
                   <b>{p.codigoCncDetalle.codigo}</b> · registrado por {p.codigoCncDetalle.por} el {fechaHora(p.codigoCncDetalle.at)}.
@@ -446,7 +454,7 @@ export default function PrototipoPage() {
             </Paso>
           )}
           {p.dictamen === "aprobado" && p.codigoCnc && (
-            <Paso n={7} titulo="Inscripción en la Codificación Única" hecho={Boolean(p.inscripcionCu?.inscrito)}>
+            <Paso n={8} titulo="Inscripción en la Codificación Única" hecho={Boolean(p.inscripcionCu?.inscrito)}>
               {p.inscripcionCu?.inscrito ? (
                 <p style={{ margin: 0, fontSize: 13 }}>
                   Inscrito como <b className="codigo">{p.inscripcionCu.inscrito.cnc}</b> · {p.inscripcionCu.inscrito.listado === "EXPLOSIVOS" ? "Explosivos" : "Sustancias químicas"} · {p.inscripcionCu.inscrito.estado === "VIGENTE" ? "vigente" : "en receso"}.{" "}

@@ -1,5 +1,5 @@
 import { puedeOperarEnUnidad } from "../alcance-bpch";
-import { etapaPrototipo, faltantesDictamen, faltantesGenerarOt, faltantesInscripcionCu, mensajeCodificado, resultadoDictamen, revisarCodificado, validarCodigoCnc, veredictoOt } from "./reglas-prototipo";
+import { erroresParametros, etapaPrototipo, faltantesDictamen, faltantesGenerarOt, faltantesInscripcionCu, faltantesParametrizacion, mensajeCodificado, resultadoDictamen, revisarCodificado, validarCodigoCnc, veredictoOt } from "./reglas-prototipo";
 
 describe("Prototipos · veredicto del tipo", () => {
   it("no cumple si algún ensayo no cumple; pendiente si falta veredicto; cumple con informativos", () => {
@@ -120,5 +120,29 @@ describe("EP-08 8.17 · inscribir el tipo en la Codificación Única (BL-180)", 
     expect(faltantesInscripcionCu({ ...ok, documentoEstado: "en_firma" })[0]).toMatch(/oficial/);
     expect(faltantesInscripcionCu({ ...ok, codigoCnc: null })[0]).toMatch(/CNC-DGMN/);
     expect(faltantesInscripcionCu({ ...ok, yaInscrito: true })[0]).toMatch(/ya está inscrito/);
+  });
+});
+
+describe("EP-08 8.11 · parametrizar el elemento (BL-060)", () => {
+  const fila = { metodoId: "m", ensayo: "Velocidad de detonación", minimo: 3000, nominal: 4000, maximo: 5000, unidad: "m/s" };
+  it("cada fila con ensayo, Mín o Máx coherentes y fórmula declarada", () => {
+    expect(erroresParametros([fila])).toEqual([]);
+    expect(erroresParametros([])[0]).toMatch(/al menos un ensayo/);
+    expect(erroresParametros([{ ...fila, minimo: null, maximo: null }])[0]).toMatch(/Mín o el Máx/);
+    expect(erroresParametros([{ ...fila, minimo: 6000 }])).toEqual(expect.arrayContaining([expect.stringMatching(/Mín no puede ser mayor/)]));
+    expect(erroresParametros([{ ...fila, nominal: 9000 }])[0]).toMatch(/Nom debe quedar/);
+    expect(erroresParametros([{ ...fila, formula: "C1 / C2" }])[0]).toMatch(/general o específica/);
+  });
+  it("estados y cuatro ojos", () => {
+    const base = { prototipoEstado: "ingresado", otViva: false, filas: 1, enviadaPor: "u1", usuario: "u2" };
+    expect(faltantesParametrizacion("enviar", { ...base, estado: "borrador" })).toEqual([]);
+    expect(faltantesParametrizacion("enviar", { ...base, estado: "borrador", filas: 0 })[0]).toMatch(/al menos un ensayo/);
+    expect(faltantesParametrizacion("editar", { ...base, estado: "en_validacion" })[0]).toMatch(/en validación/);
+    expect(faltantesParametrizacion("validar", { ...base, estado: "en_validacion" })).toEqual([]);
+    expect(faltantesParametrizacion("validar", { ...base, estado: "en_validacion", usuario: "u1" })[0]).toMatch(/cuatro ojos/);
+    expect(faltantesParametrizacion("devolver", { ...base, estado: "en_validacion", motivo: "no" })[0]).toMatch(/motivo/);
+    expect(faltantesParametrizacion("editar", { ...base, estado: "validada", otViva: true })[0]).toMatch(/OT/);
+    expect(faltantesGenerarOt({ estado: "ingresado", otId: null, sacTamanoMuestra: 3, unidadId: "u", conCobro: false, parametrizacion: { exige: true, estado: "borrador" } })[0]).toMatch(/parametrización/);
+    expect(faltantesGenerarOt({ estado: "ingresado", otId: null, sacTamanoMuestra: 3, unidadId: "u", conCobro: false, parametrizacion: { exige: false, estado: "borrador" } })).toEqual([]);
   });
 });
