@@ -76,6 +76,8 @@ export interface EnsayoEditable {
   valorCondicion2?: number | string | null;
   /** Plan de 2/3 clases (n, c, m, M): cada réplica es una unidad. */
   planClases?: { n: number; c: number; m: number; M?: number | null } | null;
+  /** Réplicas capturadas (en un plan de clases, el valor de cada unidad). */
+  replicas?: (number | string)[] | null;
   /** Clase de la no conformidad (crítico, mayor, menor) para el veredicto del lote. */
   claseDefecto?: string | null;
 }
@@ -155,7 +157,12 @@ export default function EditorEnsayo({
       ? e.lecturas.map((l) => Array.from({ length: nCampos }, (_, i) => String(l[`C${i + 1}`] ?? "").replace(".", ",")))
       : [Array.from({ length: nCampos }, () => "")],
   );
-  const [valor, setValor] = useState(() => (e.valorNumerico != null && e.valorNumerico !== "" ? String(e.valorNumerico).replace(".", ",") : e.valorTexto ?? ""));
+  const [valor, setValor] = useState(() =>
+    // En un plan de clases se corrigen las unidades, no su promedio.
+    e.planClases && e.replicas?.length
+      ? e.replicas.map((x) => String(x).replace(".", ",")).join(" ")
+      : e.valorNumerico != null && e.valorNumerico !== "" ? String(e.valorNumerico).replace(".", ",") : e.valorTexto ?? "",
+  );
   const [atributo, setAtributo] = useState<"" | "cumple" | "no_cumple">(
     e.tipoDato === "atributo" && (e.veredicto === "cumple" || e.veredicto === "no_cumple") ? e.veredicto : "",
   );
@@ -533,11 +540,18 @@ export default function EditorEnsayo({
                 <input value={valor} onChange={(x) => setValor(x.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace" }}
                   placeholder="12,4   ·   o réplicas: 12,4 12,6 12,5" />
                 <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
-                  Varias réplicas: sepárelas con espacio o punto y coma; se promedian
+                  {e.planClases ? "Sepárelas con espacio o punto y coma; cada valor es una unidad" : "Varias réplicas: sepárelas con espacio o punto y coma; se promedian"}
                   {e.formulaAplicable && nCampos === 0 ? ` y se aplica la fórmula ${e.formulaAplicable}` : ""}.
                 </span>
               </div>
-              {e.condicion2 && (
+              <div className="field">
+                <label>Observación (opcional)</label>
+                <input value={observacion} onChange={(x) => setObservacion(x.target.value)} />
+              </div>
+            </div>
+          )}
+          {e.condicion2 && e.tipoDato !== "atributo" && (
+            <div className="form-grid cols-2" style={{ marginTop: 6 }}>
                 <div className="field">
                   <label htmlFor={`c2-${e.id}`}>
                     {e.condicion2.etiqueta}{e.condicion2.unidad ? ` (${e.condicion2.unidad})` : ""} <span className="req">*</span>
@@ -547,11 +561,6 @@ export default function EditorEnsayo({
                     Segunda condición del requisito: {e.condicion2.inf != null ? `≥ ${String(e.condicion2.inf).replace(".", ",")}` : ""}{e.condicion2.inf != null && e.condicion2.sup != null ? " y " : ""}{e.condicion2.sup != null ? `≤ ${String(e.condicion2.sup).replace(".", ",")}` : ""}. Cumple solo si cumplen las dos.
                   </span>
                 </div>
-              )}
-              <div className="field">
-                <label>Observación (opcional)</label>
-                <input value={observacion} onChange={(x) => setObservacion(x.target.value)} />
-              </div>
             </div>
           )}
           <fieldset style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px 8px", margin: "10px 0 0" }}>

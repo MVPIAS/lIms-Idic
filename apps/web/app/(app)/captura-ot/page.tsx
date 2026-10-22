@@ -176,8 +176,8 @@ const esCorreccion = (f: Fila) => f.estado === "capturado" && ((f.valorNumerico 
 
 /** ¿Se captura con un solo campo en la tabla? (numérico, sin campos de fórmula, del puente) */
 // Si el método exige el equipo, se captura en el formulario (equipo y condiciones del ensayo).
-// Con segunda condición («X kgf con Y mm») se captura en el formulario: el campo rápido no la pide.
-const capturaRapida = (f: Fila) => f.tipoDato === "numerico" && f.nCampos === 0 && !f.porReplicas && !f.equipoRequerido && !f.condicion2;
+// Con segunda condición («X kgf con Y mm») o plan de clases (n unidades) se captura en el formulario.
+const capturaRapida = (f: Fila) => f.tipoDato === "numerico" && f.nCampos === 0 && !f.porReplicas && !f.equipoRequerido && !f.condicion2 && !f.planClases;
 
 const esNumero = (v: any) => typeof v === "number" || (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v.replace(",", "."))));
 
