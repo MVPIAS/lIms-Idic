@@ -22,20 +22,22 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
 import { ESTADO_CLASIFICACION, RESULTADO_PRUEBA, abrirDocumento } from "@/lib/bpchProcesos";
+import { descargarAdjunto, subirFormulario } from "@/lib/d11";
 
 type EnsayoIt21 = { tuboFragmentado: boolean; placaPerforada: boolean; observacion?: string | null };
-type EnsayoIt22 = { orificioMm: number | ""; efecto: string; tiempoS?: number | "" | null };
+type EnsayoIt22 = { orificioMm: number | ""; efecto: string; tiempoS?: number | "" | null; masaFragmentosG?: number | "" | null };
 type EnsayoIt23 = { presionMaxKpa: number | ""; tiempoMs?: number | "" | null };
+type Num = number | "" | null | undefined;
 interface Pruebas {
   it21: { aplica: boolean; serie1: { ensayos: EnsayoIt21[] } | null; serie2: { ensayos: EnsayoIt21[] } | null };
-  it22: { aplica: boolean; serie: 1 | 2; masaMuestraG?: number | "" | null; ensayos: EnsayoIt22[] };
-  it23: { aplica: boolean; ensayos: EnsayoIt23[] };
+  it22: { aplica: boolean; serie: 1 | 2; masaMuestraG?: Num; pesoTuboG?: Num; masaHasta55mmG?: Num; pesoFinal15mmG?: Num; ensayos: EnsayoIt22[] };
+  it23: { aplica: boolean; masaMuestraG?: Num; ensayos: EnsayoIt23[] };
 }
 
 const PRUEBAS_VACIAS: Pruebas = {
   it21: { aplica: false, serie1: null, serie2: null },
-  it22: { aplica: false, serie: 1, masaMuestraG: "", ensayos: [] },
-  it23: { aplica: false, ensayos: [] },
+  it22: { aplica: false, serie: 1, masaMuestraG: "", pesoTuboG: "", masaHasta55mmG: "", pesoFinal15mmG: "", ensayos: [] },
+  it23: { aplica: false, masaMuestraG: "", ensayos: [] },
 };
 
 const EFECTOS: Record<string, string> = {
@@ -54,12 +56,23 @@ const EFECTOS: Record<string, string> = {
 function aFormulario(p: any): Pruebas {
   return {
     it21: { aplica: Boolean(p?.it21?.aplica), serie1: p?.it21?.serie1 ?? null, serie2: p?.it21?.serie2 ?? null },
-    it22: { aplica: Boolean(p?.it22?.aplica), serie: p?.it22?.serie === 2 ? 2 : 1, masaMuestraG: p?.it22?.masaMuestraG ?? "", ensayos: p?.it22?.ensayos ?? [] },
-    it23: { aplica: Boolean(p?.it23?.aplica), ensayos: p?.it23?.ensayos ?? [] },
+    it22: {
+      aplica: Boolean(p?.it22?.aplica),
+      serie: p?.it22?.serie === 2 ? 2 : 1,
+      masaMuestraG: p?.it22?.masaMuestraG ?? "",
+      pesoTuboG: p?.it22?.pesoTuboG ?? "",
+      masaHasta55mmG: p?.it22?.masaHasta55mmG ?? "",
+      pesoFinal15mmG: p?.it22?.pesoFinal15mmG ?? "",
+      ensayos: p?.it22?.ensayos ?? [],
+    },
+    it23: { aplica: Boolean(p?.it23?.aplica), masaMuestraG: p?.it23?.masaMuestraG ?? "", ensayos: p?.it23?.ensayos ?? [] },
   };
 }
 
 const n = (v: unknown) => (v === "" || v === null || v === undefined ? null : Number(v));
+/** «25,5» → 25.5; vacío → "" (sin valores por defecto). */
+const decimal = (v: string): number | "" => (v.trim() === "" ? "" : Number(v.replace(",", ".")));
+const verNum = (v: Num) => (v === "" || v === null || v === undefined ? "" : String(v).replace(".", ","));
 
 /** Forma que acepta la API (números como número, vacíos fuera). */
 function aApi(p: Pruebas) {
@@ -69,10 +82,16 @@ function aApi(p: Pruebas) {
       aplica: p.it22.aplica,
       serie: p.it22.serie,
       masaMuestraG: n(p.it22.masaMuestraG),
-      ensayos: p.it22.ensayos.filter((e) => e.orificioMm !== "").map((e) => ({ orificioMm: Number(e.orificioMm), efecto: e.efecto, tiempoS: n(e.tiempoS) })),
+      pesoTuboG: n(p.it22.pesoTuboG),
+      masaHasta55mmG: n(p.it22.masaHasta55mmG),
+      pesoFinal15mmG: n(p.it22.pesoFinal15mmG),
+      ensayos: p.it22.ensayos
+        .filter((e) => e.orificioMm !== "")
+        .map((e) => ({ orificioMm: Number(e.orificioMm), efecto: e.efecto, tiempoS: n(e.tiempoS), masaFragmentosG: n(e.masaFragmentosG) })),
     },
     it23: {
       aplica: p.it23.aplica,
+      masaMuestraG: n(p.it23.masaMuestraG),
       ensayos: p.it23.ensayos.filter((e) => e.presionMaxKpa !== "").map((e) => ({ presionMaxKpa: Number(e.presionMaxKpa), tiempoMs: n(e.tiempoMs) })),
     },
   };
@@ -124,6 +143,20 @@ export default function ClasificacionPage() {
     setNombreEnvio(x.nombreEnvio ?? "");
     setJustificacion(x.justificacion ?? "");
   }, []);
+
+  async function subirCurva(archivo: File | undefined) {
+    if (!archivo) return;
+    try {
+      const f = new FormData();
+      f.append("clase", "curva_it23");
+      f.append("archivo", archivo, archivo.name);
+      await subirFormulario(`/bpch/clasificaciones/${id}/adjuntos`, f);
+      toast.ok("Curva del MCU adjunta.");
+      cargar();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
 
   const cargar = useCallback(async () => {
     if (nueva) return;
@@ -366,10 +399,30 @@ export default function ClasificacionPage() {
                 </div>
                 <div className="field">
                   <label htmlFor="k-masa">Masa de muestra (g)</label>
-                  <input id="k-masa" inputMode="decimal" value={pruebas.it22.masaMuestraG ?? ""} disabled={!editable}
-                    onChange={(e) => setPruebas((p) => ({ ...p, it22: { ...p.it22, masaMuestraG: e.target.value === "" ? "" : Number(e.target.value.replace(",", ".")) } }))} />
+                  <input id="k-masa" inputMode="decimal" value={verNum(pruebas.it22.masaMuestraG)} disabled={!editable}
+                    onChange={(e) => setPruebas((p) => ({ ...p, it22: { ...p.it22, masaMuestraG: decimal(e.target.value) } }))} />
                 </div>
               </div>
+              <fieldset style={{ border: "1px dashed var(--line)", borderRadius: 6, padding: "6px 10px" }}>
+                <legend style={{ fontSize: 12, fontWeight: 600 }}>Ensayo previo (IT22 §3 · FORM12)</legend>
+                <div className="form-grid cols-4">
+                  <div className="field">
+                    <label htmlFor="k-tubo">Peso del tubo (g)</label>
+                    <input id="k-tubo" inputMode="decimal" value={verNum(pruebas.it22.pesoTuboG)} disabled={!editable}
+                      onChange={(e) => setPruebas((p) => ({ ...p, it22: { ...p.it22, pesoTuboG: decimal(e.target.value) } }))} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="k-55">Masa hasta 55 mm (g)</label>
+                    <input id="k-55" inputMode="decimal" value={verNum(pruebas.it22.masaHasta55mmG)} disabled={!editable}
+                      onChange={(e) => setPruebas((p) => ({ ...p, it22: { ...p.it22, masaHasta55mmG: decimal(e.target.value) } }))} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor="k-15">Peso final hasta 15 mm (g)</label>
+                    <input id="k-15" inputMode="decimal" value={verNum(pruebas.it22.pesoFinal15mmG)} disabled={!editable}
+                      onChange={(e) => setPruebas((p) => ({ ...p, it22: { ...p.it22, pesoFinal15mmG: decimal(e.target.value) } }))} />
+                  </div>
+                </div>
+              </fieldset>
               {pruebas.it22.ensayos.map((e, i) => (
                 <div key={i} className="form-grid cols-4" style={{ alignItems: "end" }}>
                   <div className="field">
@@ -380,12 +433,24 @@ export default function ClasificacionPage() {
                       {[12, 5, 2, 1].map((d) => <option key={d} value={d}>{d} mm</option>)}
                     </select>
                   </div>
-                  <div className="field span-2">
+                  <div className="field">
                     <label htmlFor={`k-ef-${i}`}>Efecto observado</label>
                     <select id={`k-ef-${i}`} value={e.efecto} disabled={!editable}
                       onChange={(x) => setPruebas((p) => ({ ...p, it22: { ...p.it22, ensayos: p.it22.ensayos.map((y, j) => (j === i ? { ...y, efecto: x.target.value } : y)) } }))}>
                       {Object.entries(EFECTOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
+                  </div>
+                  <div className="field" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    <div>
+                      <label htmlFor={`k-ti-${i}`}>Tiempo (s)</label>
+                      <input id={`k-ti-${i}`} inputMode="decimal" value={verNum(e.tiempoS)} disabled={!editable}
+                        onChange={(x) => setPruebas((p) => ({ ...p, it22: { ...p.it22, ensayos: p.it22.ensayos.map((y, j) => (j === i ? { ...y, tiempoS: decimal(x.target.value) } : y)) } }))} />
+                    </div>
+                    <div>
+                      <label htmlFor={`k-mf-${i}`}>Fragmentos (g)</label>
+                      <input id={`k-mf-${i}`} inputMode="decimal" value={verNum(e.masaFragmentosG)} disabled={!editable}
+                        onChange={(x) => setPruebas((p) => ({ ...p, it22: { ...p.it22, ensayos: p.it22.ensayos.map((y, j) => (j === i ? { ...y, masaFragmentosG: decimal(x.target.value) } : y)) } }))} />
+                    </div>
                   </div>
                   {editable ? (
                     <button type="button" className="btn outline sm" aria-label={`Quitar ensayo ${i + 1}`}
@@ -413,6 +478,31 @@ export default function ClasificacionPage() {
             {ev?.it23?.resultado !== "no_aplica" && ev && <small style={{ color: "var(--muted)" }}>{ev.it23.detalle}</small>}
           </div>
           <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "4px 0 8px" }}>Tres ensayos. Positivo si la presión máxima alcanza 2.070 kPa; se informa el menor tiempo en pasar de 690 a 2.070 kPa.</p>
+          {pruebas.it23.aplica && (
+            <div className="form-grid cols-4" style={{ marginBottom: 6 }}>
+              <div className="field">
+                <label htmlFor="t-masa">Masa de muestra (g)</label>
+                <input id="t-masa" inputMode="decimal" placeholder="5,0 según IT23" value={verNum(pruebas.it23.masaMuestraG)} disabled={!editable}
+                  onChange={(e) => setPruebas((p) => ({ ...p, it23: { ...p.it23, masaMuestraG: decimal(e.target.value) } }))} />
+              </div>
+              <div className="field span-3">
+                <span style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>Curva tiempo/presión del MCU (registro permanente)</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  {(c?.adjuntos ?? []).filter((a: any) => a.clase === "curva_it23").map((a: any) => (
+                    <button key={a.id} type="button" className="btn outline sm" onClick={() => descargarAdjunto(`/bpch/clasificaciones/${id}/adjuntos/${a.id}`, a.nombre).catch((x) => toast.error(x.message))}>⭳ {a.nombre}</button>
+                  ))}
+                  {!nueva && (c?.estado === "borrador" || c?.estado === "registrada") && puede("bpch.clasificacion.registrar") && (
+                    <label className="btn outline sm" style={{ cursor: "pointer", textTransform: "none", letterSpacing: 0 }}>
+                      ＋ Adjuntar curva (PDF, PNG o JPEG)
+                      <input type="file" hidden accept="application/pdf,image/png,image/jpeg" onChange={(e) => subirCurva(e.target.files?.[0])} />
+                    </label>
+                  )}
+                  {nueva && <small style={{ color: "var(--muted)" }}>Guarde el borrador para adjuntar la curva.</small>}
+                  {!nueva && !(c?.adjuntos ?? []).some((a: any) => a.clase === "curva_it23") && !(c?.estado === "borrador" || c?.estado === "registrada") && <small style={{ color: "var(--muted)" }}>Sin curva adjunta.</small>}
+                </div>
+              </div>
+            </div>
+          )}
           {pruebas.it23.aplica && (
             <div className="form-grid cols-4">
               {pruebas.it23.ensayos.map((e, i) => (

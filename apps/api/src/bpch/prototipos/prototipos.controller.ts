@@ -1,4 +1,7 @@
-import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import type { Response } from "express";
+import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, type ArchivoAdjunto } from "../../common/adjuntos";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { PermisoGuard } from "../../auth/permiso.guard";
@@ -39,6 +42,31 @@ export class PrototiposController {
   @ApiOperation({ summary: "Prototipos (?q=&estado=)" })
   async listar(@Query("q") q: string, @Query("estado") estado: string, @Req() req: any) {
     return this.svc.listar(tenant(req), { q, estado }, await this.comun.filtroExpedientes(req));
+  }
+
+  @Get("codificado")
+  @RequierePermiso("bpch.prototipo.ver")
+  @ApiOperation({ summary: "8.8 · ¿Está codificado? (?elemento=): coincidencias en la Codificación Única y en el catálogo" })
+  codificado(@Query("elemento") elemento: string, @Req() req: any) {
+    return this.svc.codificado(tenant(req), elemento);
+  }
+
+  @Post(":id/adjuntos")
+  @RequierePermiso("bpch.prototipo.gestionar")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ADJUNTO, files: 1, fields: 2 } }))
+  @ApiOperation({ summary: "Ficha técnica u hoja de datos de seguridad · multipart: archivo + clase=ficha_tecnica|hoja_seguridad" })
+  async adjuntar(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoAdjunto | undefined, @Body() body: any, @Req() req: any) {
+    await this.exigir(req, id);
+    return this.svc.adjuntar(tenant(req), id, usuario(req), String(body?.clase ?? ""), archivo);
+  }
+
+  @Get(":id/adjuntos/:adjuntoId")
+  @RequierePermiso("bpch.prototipo.ver")
+  async adjunto(@Param("id", ParseUUIDPipe) id: string, @Param("adjuntoId", ParseUUIDPipe) adjuntoId: string, @Req() req: any, @Res() res: Response) {
+    await this.exigir(req, id);
+    const a = await this.svc.adjunto(tenant(req), id, adjuntoId);
+    res.set(cabecerasAdjunto(a));
+    res.end(a.datos);
   }
 
   @Get(":id")

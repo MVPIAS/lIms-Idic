@@ -67,6 +67,14 @@ export class CodificacionController {
     res.send(r.contenido);
   }
 
+  @Post("desde-prototipo/:prototipoId")
+  @RequierePermiso("bpch.codificacion.gestionar")
+  @AmbitoUnidad("BPCH_CERT")
+  @ApiOperation({ summary: "8.17 · Inscribir el tipo aprobado de un prototipo (datos heredados y certificado de tipo asociado)" })
+  desdePrototipo(@Param("prototipoId", ParseUUIDPipe) prototipoId: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.desdePrototipo(req, prototipoId, body);
+  }
+
   @Get(":id")
   @RequierePermiso("bpch.codificacion.ver")
   detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {

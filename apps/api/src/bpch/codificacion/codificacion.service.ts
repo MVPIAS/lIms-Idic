@@ -3,6 +3,7 @@ import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
 import { createHash } from "node:crypto";
 import { Sql, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
+import { faltantesInscripcionCu } from "../prototipos/reglas-prototipo";
 import { generarPdf } from "../../plantilla-render/pdf.renderer";
 import { hoyChile } from "../../common/fecha-chile";
 import { TIPOS_LISTADO, agruparListado, csvListado, entraEnListado, htmlListado, type TipoListado } from "./listado-oficial";
@@ -46,6 +47,13 @@ export const CambioTitularBody = z.object({
   fabricanteRut: texto(20).optional().nullable(),
   motivo: texto(500),
   reinspeccionId: z.string().uuid().optional().nullable(),
+});
+
+export const DesdePrototipoBody = z.object({
+  listado: z.enum(["EXPLOSIVOS", "SUSTANCIAS_QUIMICAS"]),
+  grupoListado: texto(120).optional().nullable(),
+  eqDin60: z.number().min(0).max(100).optional().nullable(),
+  ptnPin: texto(10).optional().nullable(),
 });
 
 export const ListadoOficialBody = z.object({
@@ -314,6 +322,58 @@ export class CodificacionService {
 
   async crear(req: any, body: unknown) {
     const id = await this.inscribir(req, InscripcionBody.parse(body ?? {}));
+    return this.detalle(req, id);
+  }
+
+  /**
+   * EP-08 8.17 (BL-180): inscribe el tipo aprobado de un prototipo con sus datos
+   * heredados (fabricante, elemento, código CNC, clase/división y Nº ONU de su
+   * clasificación) y el certificado de aprobación de tipo asociado.
+   */
+  async desdePrototipo(req: any, prototipoId: string, body: unknown) {
+    const tenantId = tenantDe(req);
+    const d = DesdePrototipoBody.parse(body ?? {});
+    const [p] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT p.id, p.codigo, p.estado, p.dictamen, p.codigo_cnc, p.cliente_id, p.elemento, p.grupo_propuesto, p.ot_id, p.documento_id,
+              d.estado AS doc_estado, d.numero AS doc_numero, c.clase_division, c.grupo_compatibilidad, c.numero_onu
+         FROM bpch_prototipo p
+         LEFT JOIN certificado d ON d.id = p.documento_id
+         LEFT JOIN bpch_clasificacion c ON c.id = p.clasificacion_id
+        WHERE p.id = $1::uuid AND p.tenant_id = $2::uuid`,
+      prototipoId,
+      tenantId,
+    );
+    if (!p) throw new NotFoundException("Prototipo no encontrado.");
+    const ya = p.codigo_cnc
+      ? await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT id FROM bpch_codificacion WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND cnc_normalizado = $2`,
+          tenantId,
+          normalizarCnc(p.codigo_cnc),
+        )
+      : [];
+    const faltan = faltantesInscripcionCu({ estado: p.estado, dictamen: p.dictamen, documentoEstado: p.doc_estado, codigoCnc: p.codigo_cnc, yaInscrito: ya.length > 0 });
+    if (faltan.length) throw new ConflictException(faltan.join(" "));
+    const id = await this.prisma.$transaction((tx) =>
+      this.inscribir(
+        req,
+        {
+          listado: d.listado,
+          cnc: p.codigo_cnc,
+          clienteId: p.cliente_id,
+          producto: p.elemento,
+          elementoGenerico: p.grupo_propuesto ?? null,
+          claseDivisionUn: p.clase_division ? `${p.clase_division}${p.grupo_compatibilidad ?? ""}` : null,
+          numeroUn: p.numero_onu ?? null,
+          certificadoNumero: p.doc_numero ?? null,
+          grupoListado: d.grupoListado ?? null,
+          eqDin60: d.eqDin60 ?? null,
+          ptnPin: d.ptnPin ?? null,
+          observaciones: `Inscrito desde el prototipo ${p.codigo} (tipo aprobado).`,
+        } as Inscripcion,
+        tx as any,
+        { evento: "alta_certificacion", otId: p.ot_id, certificadoId: p.documento_id },
+      ),
+    );
     return this.detalle(req, id);
   }
 

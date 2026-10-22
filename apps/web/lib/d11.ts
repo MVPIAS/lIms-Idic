@@ -10,14 +10,19 @@ export { pedir } from "../app/(app)/cotizaciones/_components/comercial";
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const token = () => (typeof window !== "undefined" ? localStorage.getItem("lims_token") : null);
 
-/** Sube una planilla (.xlsx o .csv) en multipart: campo «archivo». */
-export async function subirPlanilla<T = any>(ruta: string, archivo: File): Promise<T> {
-  const f = new FormData();
-  f.append("archivo", archivo, archivo.name);
+/** Envía un multipart ya armado (campos + «archivo»). */
+export async function subirFormulario<T = any>(ruta: string, f: FormData): Promise<T> {
   const r = await fetch(`${API}${ruta}`, { method: "POST", headers: token() ? { Authorization: `Bearer ${token()}` } : {}, body: f });
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error(errorMensajeDe(j, r.status));
   return j as T;
+}
+
+/** Sube una planilla (.xlsx o .csv) o un adjunto en multipart: campo «archivo». */
+export async function subirPlanilla<T = any>(ruta: string, archivo: File): Promise<T> {
+  const f = new FormData();
+  f.append("archivo", archivo, archivo.name);
+  return subirFormulario<T>(ruta, f);
 }
 
 export const TIPOS_ARMA: { valor: string; texto: string }[] = [

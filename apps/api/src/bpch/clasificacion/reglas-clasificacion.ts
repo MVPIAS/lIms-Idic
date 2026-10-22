@@ -55,6 +55,10 @@ export interface PruebaIt22 {
   aplica: boolean;
   serie: 1 | 2;
   masaMuestraG?: number | null;
+  /** Ensayo previo (IT22 §3 a–f, FORM12): peso del tubo, masa hasta 55 mm y peso final hasta 15 mm. */
+  pesoTuboG?: number | null;
+  masaHasta55mmG?: number | null;
+  pesoFinal15mmG?: number | null;
   ensayos: EnsayoIt22[];
 }
 
@@ -66,6 +70,8 @@ export interface EnsayoIt23 {
 }
 export interface PruebaIt23 {
   aplica: boolean;
+  /** Masa de muestra usada (la IT23 indica 5,0 g; se anota la que entró). */
+  masaMuestraG?: number | null;
   ensayos: EnsayoIt23[];
 }
 
@@ -319,3 +325,43 @@ export function textoClasificacion(d: DecisionClasificacion): string {
 
 /** Estados en que la clasificación se puede editar. */
 export const ESTADOS_EDITABLES = ["borrador"] as const;
+
+/* ------------------------------------------------- 8.6 · anular en uso --- */
+
+/**
+ * Una clasificación APROBADA que usan prototipos vivos o productos de O/C
+ * vigentes no se anula: se reclasifica (nueva versión) o se reemplaza en esos
+ * procesos antes (EP-08 8.6, BL-178).
+ */
+export function erroresAnulacion(
+  estado: string,
+  usos: { prototipos: { codigo: string; estado: string }[]; productosPn: { producto: string; ocNumero: string; ocEstado?: string | null }[] },
+): string[] {
+  if (estado !== "aprobada") return [];
+  const protos = usos.prototipos.filter((p) => p.estado !== "anulado");
+  const prods = usos.productosPn.filter((p) => p.ocEstado !== "anulada");
+  if (!protos.length && !prods.length) return [];
+  const quien = [
+    protos.length ? `prototipo(s) ${protos.map((p) => p.codigo).join(", ")}` : "",
+    prods.length ? `producto(s) de O/C ${[...new Set(prods.map((p) => p.ocNumero))].join(", ")}` : "",
+  ].filter(Boolean);
+  return [`La clasificación aprobada está en uso por ${quien.join(" y ")}: reclasifíquela (nueva versión) o reemplácela en esos procesos antes de anularla.`];
+}
+
+/** Lecturas de masa de IT22 / IT23 para el documento (coma decimal). */
+export function lecturasMasa(p: Pruebas): { it22: string | null; it23: string | null } {
+  const g = (n: number | null | undefined) => (typeof n === "number" && Number.isFinite(n) ? `${String(n).replace(".", ",")} g` : null);
+  const k = p.it22;
+  const partes22 = k?.aplica
+    ? [
+        g(k.masaMuestraG) && `muestra ${g(k.masaMuestraG)}`,
+        g(k.pesoTuboG) && `tubo ${g(k.pesoTuboG)}`,
+        g(k.masaHasta55mmG) && `hasta 55 mm ${g(k.masaHasta55mmG)}`,
+        g(k.pesoFinal15mmG) && `final hasta 15 mm ${g(k.pesoFinal15mmG)}`,
+      ].filter(Boolean)
+    : [];
+  return {
+    it22: partes22.length ? `Ensayo previo: ${partes22.join(" · ")}` : null,
+    it23: p.it23?.aplica && g(p.it23.masaMuestraG) ? `Masa de muestra: ${g(p.it23.masaMuestraG)}` : null,
+  };
+}

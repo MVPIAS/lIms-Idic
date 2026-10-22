@@ -9,6 +9,9 @@
  *     revisión, aprobación) en el expediente de la OT.
  *  5. Dictamen: aprobación o rechazo del tipo → documento al circuito de firmas.
  *  6. Código único CNC-DGMN del tipo aprobado (con el certificado oficial).
+ *  7. Inscripción del tipo en la Codificación Única con sus datos heredados.
+ * En el ingreso se comprueba «¿está codificado?» (EP-08 8.8) y se adjuntan la
+ * ficha técnica y la hoja de datos de seguridad.
  * /bpch/prototipos/nuevo = ingreso.
  */
 import { useCallback, useEffect, useState } from "react";
@@ -23,6 +26,9 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
 import { ESTADO_PROTOTIPO, dia } from "@/lib/bpchProcesos";
+import { descargarAdjunto, subirFormulario } from "@/lib/d11";
+
+const CLASE_ADJUNTO: Record<string, string> = { ficha_tecnica: "Ficha técnica", hoja_seguridad: "Hoja de datos de seguridad" };
 
 const VEREDICTO: Record<string, { t: string; pill: string }> = {
   cumple: { t: "Cumple", pill: "green" },
@@ -85,6 +91,9 @@ export default function PrototipoPage() {
   const [cnc, setCnc] = useState("");
   const [anular, setAnular] = useState(false);
   const [motivoAnular, setMotivoAnular] = useState("");
+  // ¿Está codificado? (8.8) e inscripción (8.17)
+  const [revision, setRevision] = useState<{ elemento: string; codificado: boolean; exactos: any[]; parecidos: any[] } | null>(null);
+  const [listadoCu, setListadoCu] = useState("");
 
   const volcar = useCallback((x: any) => {
     setP(x);
@@ -140,9 +149,34 @@ export default function PrototipoPage() {
     }
   }
 
+  async function revisarCodificado(): Promise<boolean> {
+    const e = elemento.trim();
+    if (e.length < 2) return true;
+    try {
+      const r = await llamar<any>("GET", `/bpch/prototipos/codificado?elemento=${encodeURIComponent(e)}`);
+      setRevision({ elemento: e, ...r });
+      return !r.codificado;
+    } catch {
+      return true; // la API vuelve a comprobarlo al guardar
+    }
+  }
+
+  async function adjuntar(clase: string, archivo: File | undefined) {
+    if (!archivo) return;
+    const f = new FormData();
+    f.append("clase", clase);
+    f.append("archivo", archivo, archivo.name);
+    const r = await ejecutar(() => subirFormulario(`/bpch/prototipos/${id}/adjuntos`, f), `${CLASE_ADJUNTO[clase]} adjunta.`);
+    if (r) cargar();
+  }
+
   async function guardarIngreso() {
     if (!fab || !elemento.trim() || !solicitud.trim()) {
       setError("Complete fabricante, elemento y solicitud o resolución DGMN.");
+      return;
+    }
+    if (nuevo && !(await revisarCodificado())) {
+      setError("El elemento ya está codificado: no corresponde ingresarlo como prototipo.");
       return;
     }
     const cuerpo: any = {
@@ -190,8 +224,25 @@ export default function PrototipoPage() {
           )}
           <div className="field">
             <label htmlFor="elem">Elemento nuevo <span className="req">*</span></label>
-            <input id="elem" value={elemento} onChange={(e) => setElemento(e.target.value)} maxLength={240} disabled={!gestionar || cerrado || conOt} />
+            <input id="elem" value={elemento} onChange={(e) => { setElemento(e.target.value); setRevision(null); }} onBlur={() => nuevo && revisarCodificado()} maxLength={240} disabled={!gestionar || cerrado || conOt} />
+            {nuevo && gestionar && (
+              <button type="button" className="btn ghost sm" style={{ marginTop: 4, alignSelf: "flex-start" }} disabled={elemento.trim().length < 2} onClick={revisarCodificado}>¿Está codificado?</button>
+            )}
           </div>
+          {revision && revision.elemento === elemento.trim() && (
+            <div role="status" style={{ gridColumn: "1 / -1" }}>
+              {revision.codificado ? (
+                <div className="alert warn" style={{ margin: 0 }}>
+                  <b>Ya está codificado:</b> {revision.exactos.map((x: any) => `${x.origen === "codificacion" ? "Codificación Única" : "catálogo"} ${x.detalle}`).join("; ")}. No es un prototipo: corresponde Internación, Producción Nacional o Reinspección.
+                </div>
+              ) : (
+                <div className="alert info" style={{ margin: 0 }}>
+                  No está en la Codificación Única ni en el catálogo.
+                  {revision.parecidos.length > 0 && <> Parecidos (revise que no sea el mismo): {revision.parecidos.map((x: any) => x.detalle).join("; ")}.</>}
+                </div>
+              )}
+            </div>
+          )}
           <div className="field">
             <label htmlFor="sol">Solicitud / resolución DGMN <span className="req">*</span></label>
             <input id="sol" value={solicitud} onChange={(e) => setSolicitud(e.target.value)} maxLength={120} disabled={!gestionar || cerrado || conOt} />
@@ -216,10 +267,28 @@ export default function PrototipoPage() {
             <label htmlFor="desc">Antecedentes técnicos</label>
             <textarea id="desc" rows={3} value={desc} onChange={(e) => setDesc(e.target.value)} disabled={!gestionar || cerrado} />
           </div>
+          <div className="field span-2">
+            <span style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>Documentos adjuntos (PDF, PNG o JPEG)</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 4 }}>
+              {(p?.adjuntos ?? []).map((a: any) => (
+                <button key={a.id} type="button" className="btn outline sm" onClick={() => descargarAdjunto(`/bpch/prototipos/${id}/adjuntos/${a.id}`, a.nombre).catch((x) => toast.error(x.message))}>
+                  ⭳ {CLASE_ADJUNTO[a.clase] ?? a.clase} · {a.nombre}
+                </button>
+              ))}
+              {!nuevo && gestionar && p?.estado !== "anulado" && Object.entries(CLASE_ADJUNTO).map(([k, v]) => (
+                <label key={k} className="btn ghost sm" style={{ cursor: "pointer", textTransform: "none", letterSpacing: 0 }}>
+                  ＋ {v}
+                  <input type="file" hidden accept="application/pdf,image/png,image/jpeg" onChange={(e) => adjuntar(k, e.target.files?.[0])} />
+                </label>
+              ))}
+              {nuevo && <small style={{ color: "var(--muted)" }}>Se adjuntan después de ingresar el prototipo.</small>}
+              {!nuevo && !(p?.adjuntos ?? []).length && !gestionar && <small style={{ color: "var(--muted)" }}>Sin adjuntos.</small>}
+            </div>
+          </div>
         </div>
         {gestionar && !cerrado && (
           <div className="toolbar" style={{ margin: "10px 0 0" }}>
-            <button className="btn primary sm" disabled={busy} onClick={guardarIngreso}>{nuevo ? "Ingresar prototipo" : "Guardar antecedentes"}</button>
+            <button className="btn primary sm" disabled={busy || (nuevo && revision?.elemento === elemento.trim() && revision.codificado)} onClick={guardarIngreso}>{nuevo ? "Guardar → clasificar" : "Guardar antecedentes"}</button>
           </div>
         )}
       </Paso>
@@ -357,7 +426,7 @@ export default function PrototipoPage() {
             <Paso n={6} titulo="Código único CNC-DGMN del tipo aprobado" hecho={Boolean(p.codigoCnc)}>
               {p.codigoCncDetalle ? (
                 <p style={{ margin: 0, fontSize: 13 }}>
-                  <b>{p.codigoCncDetalle.codigo}</b> · registrado por {p.codigoCncDetalle.por} el {fechaHora(p.codigoCncDetalle.at)}. La inscripción en el Listado de Codificación Única se hace en ese módulo.
+                  <b>{p.codigoCncDetalle.codigo}</b> · registrado por {p.codigoCncDetalle.por} el {fechaHora(p.codigoCncDetalle.at)}.
                 </p>
               ) : dictaminar ? (
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -373,6 +442,39 @@ export default function PrototipoPage() {
                 </div>
               ) : (
                 <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Pendiente de registrar.</p>
+              )}
+            </Paso>
+          )}
+          {p.dictamen === "aprobado" && p.codigoCnc && (
+            <Paso n={7} titulo="Inscripción en la Codificación Única" hecho={Boolean(p.inscripcionCu?.inscrito)}>
+              {p.inscripcionCu?.inscrito ? (
+                <p style={{ margin: 0, fontSize: 13 }}>
+                  Inscrito como <b className="codigo">{p.inscripcionCu.inscrito.cnc}</b> · {p.inscripcionCu.inscrito.listado === "EXPLOSIVOS" ? "Explosivos" : "Sustancias químicas"} · {p.inscripcionCu.inscrito.estado === "VIGENTE" ? "vigente" : "en receso"}.{" "}
+                  <Link href={"/bpch/codificacion" as any}>Ver la Codificación Única</Link>
+                </p>
+              ) : puede("bpch.codificacion.gestionar") ? (
+                <>
+                  <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>
+                    Se inscribe con los datos del prototipo: fabricante, elemento, código {p.codigoCnc}, clase/división y Nº ONU de su clasificación y el certificado de aprobación de tipo {p.documento?.numero}.
+                  </p>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                    <div className="field" style={{ minWidth: 220 }}>
+                      <label htmlFor="cu-l">Listado <span className="req">*</span></label>
+                      <select id="cu-l" value={listadoCu} onChange={(e) => setListadoCu(e.target.value)}>
+                        <option value="">Elija…</option>
+                        <option value="EXPLOSIVOS">Explosivos</option>
+                        <option value="SUSTANCIAS_QUIMICAS">Sustancias químicas</option>
+                      </select>
+                    </div>
+                    <button className="btn primary sm" disabled={busy || !listadoCu || (p.inscripcionCu?.faltantes ?? []).length > 0}
+                      onClick={async () => { const r = await ejecutar(() => llamar("POST", `/bpch/codificacion/desde-prototipo/${id}`, { listado: listadoCu }), "Tipo inscrito en la Codificación Única."); if (r) cargar(); }}>
+                      Inscribir en Codificación Única → listado oficial
+                    </button>
+                  </div>
+                  <Faltan lista={p.inscripcionCu?.faltantes ?? []} />
+                </>
+              ) : (
+                <p style={{ margin: 0, fontSize: 12, color: "var(--muted)" }}>Le toca inscribirlo a la Sección Certificación BPCH (Codificación Única).</p>
               )}
             </Paso>
           )}
