@@ -170,6 +170,9 @@ async function main() {
         { descripcion: "Calibración de balanza", cantidad: 1, precioUnitario: 38000 },
       ],
     });
+    // Circuito de la cotización (frente r1c): solo se acepta firmada por el Jefe DCO.
+    await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/enviar-a-firma`, {});
+    await ok("demo.dco.jefe", "POST", `/cotizaciones/${C.cot.id}/firmar`, {});
     const r = await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/aceptar`, {
       tipo: "OC", numero: `OC-${sello}`, fecha: ahoraIso().slice(0, 10), conCobro: true, unidadPrincipalId: C.lmt.id,
     });
