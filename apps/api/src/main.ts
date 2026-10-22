@@ -6,6 +6,11 @@ import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { ZodExceptionFilter } from "./common/zod-exception.filter";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
+import { instalarSerializacionBigInt } from "./common/bigint-json";
+
+// Las columnas bigint de Prisma (Nº interno de la muestra, correlativos, count(*))
+// se responden como texto: sin esto, JSON.stringify lanza y la API da 500.
+instalarSerializacionBigInt();
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
