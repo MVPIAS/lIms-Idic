@@ -1,6 +1,7 @@
 import { ConflictException, ForbiddenException } from "@nestjs/common";
 import {
   CATEGORIAS_CONFIGURABLES,
+  conOpciones,
   defConfigurable,
   ejemploFormato,
   erroresFormato,
@@ -15,6 +16,8 @@ import { configDesdeValores } from "../cotizacion/circuito-config";
 import { configNumeracion } from "../cotizacion/numeracion-cotizacion";
 import { camposDeLaboratorio, inicioNumeracion, plazosRetencion } from "../recepcion/reglas-recepcion";
 import { modoEquipo } from "../laboratorio/equipo-captura";
+import { criterioIndeterminado } from "../laboratorio/veredicto";
+import { configSegregacion, motivoMismoRevisor } from "../rbac/alcance-resultado";
 
 const fila = { codigo: "x", etiqueta: "X" };
 const guardar = (cat: string, cod: string, v: unknown) => normalizarValor(defConfigurable(cat, cod)!, { ...fila, codigo: cod }, v);
@@ -205,5 +208,60 @@ describe("parámetros de la operación · solo cambian con motivo", () => {
     await expect(
       new ParametroPorcentajeController(svc as any, global as any).configurables({ user: { tenantId: "t", permisos: ["cotizacion.crear"] } }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+});
+
+describe("reglas del recorrido MP-02/MP-06 (r1g) editables desde la pantalla (r1h)", () => {
+  const LABS = [
+    { codigo: "LMB", nombre: "Microbiología de Alimentos" },
+    { codigo: "LQA", nombre: "Química de Alimentos" },
+  ];
+
+  it("están en el registro: «< LD» indeterminado, revisión ≠ aprobación y plazo de la OT de internación", () => {
+    for (const [cat, cod] of [
+      ["captura_ld", "indeterminado"],
+      ["segregacion_resultado", "revisor_aprobador"],
+      ["segregacion_resultado", "excepciones"],
+      ["ot_plazo", "internacion_dias"],
+    ]) expect(defConfigurable(cat, cod)).not.toBeNull();
+    expect(CATEGORIAS_CONFIGURABLES).toEqual(expect.arrayContaining(["captura_ld", "segregacion_resultado", "ot_plazo"]));
+  });
+
+  it("«< LD» indeterminado: solo pendiente, no_cumple o cumple, y el lector de la captura lo entiende", () => {
+    for (const v of ["pendiente", "no_cumple", "cumple"]) {
+      const r = guardar("captura_ld", "indeterminado", v);
+      expect(r.errores).toEqual([]);
+      expect(criterioIndeterminado(r.valor!.valor)).toBe(v);
+    }
+    expect(guardar("captura_ld", "indeterminado", "quizas").errores[0]).toMatch(/Elija una de las opciones/);
+  });
+
+  it("revisión ≠ aprobación: el modo y las excepciones (laboratorios de la base) los entiende la regla", () => {
+    const modo = guardar("segregacion_resultado", "revisor_aprobador", "misma_persona");
+    expect(modo.valor!.valor).toBe("misma_persona");
+    expect(guardar("segregacion_resultado", "revisor_aprobador", "a_veces").errores).toHaveLength(1);
+
+    const def = conOpciones(defConfigurable("segregacion_resultado", "excepciones")!, LABS);
+    expect(def.opciones?.map((o) => o.valor)).toEqual(["LMB", "LQA"]);
+    const exc = normalizarValor(def, { codigo: "excepciones", etiqueta: "x" }, ["LQA"]);
+    expect(exc.valor!.valor).toBe("LQA");
+    // Un laboratorio que no existe no se guarda.
+    expect(normalizarValor(def, { codigo: "excepciones", etiqueta: "x" }, ["XYZ"]).errores[0]).toMatch(/desconocidas/);
+    // Lo guardado lo lee la regla de aprobación: en LQA la misma persona aprueba; en LMB no.
+    const cfg = configSegregacion("distintas", exc.valor!.valor);
+    expect(motivoMismoRevisor({ revisadoPor: "u1" }, "u1", cfg, "LQA")).toBeNull();
+    expect(motivoMismoRevisor({ revisadoPor: "u1" }, "u1", cfg, "LMB")).toMatch(/otra persona/);
+    // Sin ninguno marcado se guarda vacío («Ninguno»).
+    const vacio = normalizarValor(def, { codigo: "excepciones", etiqueta: "x" }, []);
+    expect(vacio.valor!.valor).toBe("");
+    expect(textoValor(def, "")).toBe("Ninguno");
+    expect(valorFormulario(def, { codigo: "excepciones", valor: "lqa, LMB", activo: true })).toEqual(["LMB", "LQA"]);
+  });
+
+  it("plazo de la OT de internación: entero de 1 a 365 días corridos", () => {
+    expect(guardar("ot_plazo", "internacion_dias", 15).valor!.valor).toBe("15");
+    expect(guardar("ot_plazo", "internacion_dias", 0).errores[0]).toMatch(/entre 1 y 365/);
+    expect(guardar("ot_plazo", "internacion_dias", "7,5").errores[0]).toMatch(/entero/);
+    expect(textoValor(defConfigurable("ot_plazo", "internacion_dias")!, "10")).toBe("10 días corridos");
   });
 });

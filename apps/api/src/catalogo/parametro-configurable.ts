@@ -5,7 +5,9 @@
  * Cada parámetro tiene un TIPO y el valor se valida según él antes de guardarse
  * en `parametro_sistema` con la forma que leen sus lectores (circuito-config.ts,
  * numeracion-cotizacion.ts, recepcion.service.ts, metrologia-ot.datos.ts,
- * equipo-captura.ts y la función fn_encuesta_al_cerrar_ot). Igual que los
+ * equipo-captura.ts, veredicto.ts (criterioIndeterminado), alcance-resultado.ts
+ * (configSegregacion), ot-desde-proceso.service.ts (plazo de la internación) y la
+ * función fn_encuesta_al_cerrar_ot). Igual que los
  * porcentajes de la tasa (parametro-porcentaje.ts): todo cambio exige motivo y
  * queda en `parametro_sistema_historial` (quién, cuándo, antes, después y por qué).
  *
@@ -43,6 +45,11 @@ export interface DefValor {
   opciones?: Opcion[];
   /** Valor que rige si la fila falta o no se entiende (lo que hacen los lectores). */
   porDefecto?: string;
+  /**
+   * Opciones que se leen de la base al servir la pantalla y al validar (no fijas):
+   * «laboratorios» = las unidades que reciben muestras (código · nombre).
+   */
+  opcionesDe?: "laboratorios";
 }
 
 export interface GrupoConfig {
@@ -238,6 +245,66 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- Reglas del recorrido MP-02 / MP-06 (frente r1g), editables desde r1h ---
+  {
+    categoria: "captura_ld",
+    titulo: "Captura · resultado bajo el límite de detección («< LD»)",
+    donde:
+      "Captura y revisión por OT: veredicto de un «< 10» que no se puede decidir contra el requisito (p. ej. «< 10» frente a Máx 5). Vale para lo que se capture desde el cambio.",
+    porConfirmar: "Criterio cuando el límite es menor que el LD (EP-02 §10.2).",
+    codigos: {
+      indeterminado: {
+        tipo: "opcion",
+        nombre: "Veredicto de un «< LD» que no se puede decidir",
+        opciones: [
+          { valor: "pendiente", etiqueta: "Pendiente: lo decide el revisor (bloquea la aprobación hasta entonces)" },
+          { valor: "no_cumple", etiqueta: "No cumple" },
+          { valor: "cumple", etiqueta: "Cumple" },
+        ],
+        porDefecto: "pendiente",
+      },
+    },
+  },
+  {
+    categoria: "segregacion_resultado",
+    titulo: "Revisión y aprobación de resultados",
+    donde: "Captura y revisión por OT: quien revisó un resultado no lo aprueba (también en «Aprobar todo lo revisado»).",
+    porConfirmar: "Laboratorios de dos personas donde la misma persona revisa y aprueba (no hay casos documentados para resultados).",
+    codigos: {
+      revisor_aprobador: {
+        tipo: "opcion",
+        nombre: "Revisión y aprobación de un resultado",
+        opciones: [
+          { valor: "distintas", etiqueta: "Por personas distintas" },
+          { valor: "misma_persona", etiqueta: "La misma persona puede revisar y aprobar" },
+        ],
+        porDefecto: "distintas",
+      },
+      excepciones: {
+        tipo: "multiple",
+        nombre: "Laboratorios donde la misma persona puede revisar y aprobar",
+        opcionesDe: "laboratorios",
+        ayuda: "Solo cuenta con «Por personas distintas». Ninguno marcado = la regla vale en todos los laboratorios.",
+        porDefecto: "",
+      },
+    },
+  },
+  {
+    categoria: "ot_plazo",
+    titulo: "Plazo de la OT de internación",
+    donde: "BPCH › Internaciones: fecha de compromiso de la OT al generarla (hoy en Chile + el plazo). Las OT ya generadas no cambian.",
+    porConfirmar: "Plazo real de la OT de internación (EP-06).",
+    codigos: {
+      internacion_dias: {
+        tipo: "entero",
+        nombre: "Plazo de la OT de internación",
+        min: 1,
+        max: 365,
+        unidad: "días corridos",
+        porDefecto: "10",
+      },
+    },
+  },
 ];
 
 export const CATEGORIAS_CONFIGURABLES = GRUPOS_CONFIG.map((g) => g.categoria);
@@ -251,6 +318,15 @@ export function defConfigurable(categoria: string, codigo: string): DefValor | n
   if (g.codigos) return g.codigos[codigo] ?? null;
   if (g.patron) return codigoValido(g.patron.alta, codigo) ? g.patron : null;
   return null;
+}
+
+/**
+ * Completa las opciones que se leen de la base (`opcionesDe`). Sin lista (o sin
+ * opciones dinámicas) devuelve la definición tal cual.
+ */
+export function conOpciones(def: DefValor, laboratorios: { codigo: string; nombre: string }[]): DefValor {
+  if (def.opcionesDe !== "laboratorios") return def;
+  return { ...def, opciones: laboratorios.map((l) => ({ valor: l.codigo.toUpperCase(), etiqueta: `${l.codigo} · ${l.nombre}` })) };
 }
 
 /** Código válido de un parámetro por patrón: «LME» o «LME.lote». */

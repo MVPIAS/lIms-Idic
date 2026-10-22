@@ -31,6 +31,7 @@ import {
   GRUPOS_CONFIG,
   CATEGORIAS_CONFIGURABLES,
   codigoValido,
+  conOpciones,
   defConfigurable,
   erroresMotivo,
   grupoDe,
@@ -132,6 +133,15 @@ export class ParametroSistemaService extends BaseCrudService {
 
   /* ------------------------------------------- parámetros de la operación (R1) --- */
 
+  /** Unidades que reciben muestras (laboratorios, sucursales y delegaciones), por código. */
+  private laboratoriosRecepcion(tenantId: string) {
+    return this.prisma.$queryRawUnsafe<{ codigo: string; nombre: string }[]>(
+      `SELECT codigo, nombre FROM unidad WHERE tenant_id = $1::uuid AND tipo = ANY($2::text[]) AND activa IS NOT FALSE ORDER BY codigo`,
+      tenantId,
+      UNIDADES_RECEPCION,
+    );
+  }
+
   /**
    * Parámetros R1 con su valor tipado, el texto legible, el historial y las
    * unidades que reciben muestras (para dar de alta los de recepción).
@@ -153,12 +163,11 @@ export class ParametroSistemaService extends BaseCrudService {
       tenantId,
       CATEGORIAS_CONFIGURABLES,
     );
-    const laboratorios = await this.prisma.$queryRawUnsafe<{ codigo: string; nombre: string }[]>(
-      `SELECT codigo, nombre FROM unidad WHERE tenant_id = $1::uuid AND tipo = ANY($2::text[]) AND activa IS NOT FALSE ORDER BY codigo`,
-      tenantId,
-      UNIDADES_RECEPCION,
-    );
-    const parametro = (def: DefValor, f: any) => ({
+    const laboratorios = await this.laboratoriosRecepcion(tenantId);
+    const parametro = (defBase: DefValor, f: any) => {
+      // Opciones leídas de la base (p. ej. los laboratorios de la segregación revisión ≠ aprobación).
+      const def = conOpciones(defBase, laboratorios);
+      return {
       id: f.id as string,
       categoria: f.categoria as string,
       codigo: f.codigo as string,
@@ -177,7 +186,8 @@ export class ParametroSistemaService extends BaseCrudService {
       activo: f.activo as boolean,
       laboratorio: def.tipo === "campo" || def.tipo === "obligatorio" ? laboratorioDe(f.codigo) : null,
       updatedAt: f.updatedAt,
-    });
+      };
+    };
     const grupos = GRUPOS_CONFIG.map((g) => {
       const delGrupo = filas.filter((f) => f.categoria === g.categoria);
       const parametros = g.codigos
@@ -212,8 +222,10 @@ export class ParametroSistemaService extends BaseCrudService {
 
   /** Cambia el valor de un parámetro R1 con motivo; deja el antes y el después en el historial (una transacción). */
   async cambiarConfigurable(tenantId: string, categoria: string, codigo: string, cuerpo: unknown, usuarioId: string | null) {
-    const def = defConfigurable(categoria, codigo);
-    if (!def) throw new NotFoundException(`El parámetro ${categoria}.${codigo} no se configura desde esta pantalla.`);
+    const defBase = defConfigurable(categoria, codigo);
+    if (!defBase) throw new NotFoundException(`El parámetro ${categoria}.${codigo} no se configura desde esta pantalla.`);
+    // Las opciones dinámicas se validan contra la base (solo laboratorios que existen).
+    const def = defBase.opcionesDe ? conOpciones(defBase, await this.laboratoriosRecepcion(tenantId)) : defBase;
     const b = (cuerpo ?? {}) as { valor?: unknown; motivo?: unknown };
     const errMotivo = erroresMotivo(b.motivo);
     return this.prisma.$transaction(async (tx) => {
