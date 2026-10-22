@@ -396,17 +396,30 @@ export class PagoService extends BaseCrudService {
    * Registra un pago: la factura debe estar emitida (o con pago parcial) y el
    * monto no puede superar el saldo. Actualiza el estado (parcial / pagada).
    */
-  async registrar(dto: { facturaId: string; monto: number; medio?: string; referencia?: string; fecha?: Date }, tenantId?: string) {
+  async registrar(
+    dto: { facturaId: string; monto: number; medio: string; referencia?: string; numeroBoletin?: string; fecha?: Date },
+    tenantId?: string,
+  ) {
     const s = await this.facturas.saldo(dto.facturaId, tenantId); // 404 si es de otro tenant
     const motivo = validarPago(s.estado, s.saldo, dto.monto);
     if (motivo) throw new ConflictException(motivo);
+    // Medio de pago de la lista (Catálogo › Parámetros · medio_pago; D02-13).
+    if (tenantId) {
+      const medios = await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(
+        `SELECT codigo FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'medio_pago' AND activo`,
+        tenantId,
+      );
+      if (medios.length && !medios.some((m) => m.codigo === dto.medio))
+        throw new BadRequestException(`Medio de pago no válido: elija uno de la lista (${medios.map((m) => m.codigo).join(", ")}).`);
+    }
     return this.prisma.$transaction(async (tx) => {
       const pago = await tx.pago.create({
         data: {
           facturaId: dto.facturaId,
           monto: dto.monto,
-          medio: dto.medio ?? null,
+          medio: dto.medio,
           referencia: dto.referencia ?? null,
+          numeroBoletin: dto.numeroBoletin?.trim() || null,
           ...(dto.fecha ? { fecha: dto.fecha } : {}),
         },
       });
@@ -428,8 +441,11 @@ export class PagoService extends BaseCrudService {
 const PagoCreate = z.object({
   facturaId: z.string().uuid(),
   monto: z.number().positive(),
-  medio: z.string().max(40).optional(),
+  /** Obligatorio, de la lista medio_pago (EP-00 8.4). */
+  medio: z.string().trim().min(1, "Indique el medio de pago.").max(40),
   referencia: z.string().max(80).optional(),
+  /** Nº del boletín de ingreso de Tesorería (EP-00 8.4). */
+  numeroBoletin: z.string().trim().max(40).optional(),
   fecha: z.coerce.date().optional(),
 });
 @ApiTags("pagos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("pagos")

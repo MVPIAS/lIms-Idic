@@ -33,6 +33,12 @@ const CrearClienteSchema = z.object({
   telefono: opcional(40),
   email: z.preprocess((v) => (v === "" ? undefined : v), z.string().email("Correo no válido").optional()),
   diasCredito: z.number().int().positive().default(30),
+  // EP-00 0.1 (recorrido MP-02, D02-16): forma de pago habitual y contacto principal.
+  formaPagoHabitual: opcional(30),
+  contactoNombre: opcional(160),
+  contactoCargo: opcional(120),
+  contactoEmail: z.preprocess((v) => (v === "" ? undefined : v), z.string().email("Correo del contacto no válido").max(160).optional()),
+  contactoTelefono: opcional(40),
 });
 const TipoSchema = z.object({ tipo: CrearClienteSchema.shape.tipo });
 const ActualizarClienteSchema = CrearClienteSchema.partial().extend({

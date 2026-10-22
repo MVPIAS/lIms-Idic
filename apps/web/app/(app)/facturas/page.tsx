@@ -50,7 +50,14 @@ function FacturasContenido() {
   const [ivaPct, setIvaPct] = useState("19");
   const [folio, setFolio] = useState({ numero: "", fecha: hoy() });
   const [pagar, setPagar] = useState<any | null>(null);
-  const [pago, setPago] = useState({ monto: "", medio: "", referencia: "", fecha: hoy() });
+  const [pago, setPago] = useState({ monto: "", medio: "", referencia: "", numeroBoletin: "", fecha: hoy() });
+  // Medios de pago de la lista (Catálogo › Parámetros · medio_pago; EP-00 8.4).
+  const [medios, setMedios] = useState<{ codigo: string; etiqueta: string }[]>([]);
+  useEffect(() => {
+    api.getRaw<any>("parametros?categoria=medio_pago&activo=true&limit=50")
+      .then((r) => setMedios((r?.data ?? r ?? []).map((p: any) => ({ codigo: p.codigo, etiqueta: p.etiqueta }))))
+      .catch(() => setMedios([]));
+  }, []);
   const [manual, setManual] = useState(false);
   const [clientes, setClientes] = useState<any[]>([]);
   const [nueva, setNueva] = useState({ numero: "", clienteId: "", descripcion: "", cantidad: "1", precioUnitario: "", ivaPct: "19" });
@@ -83,6 +90,15 @@ function FacturasContenido() {
   const netoEditado = lineas.reduce((a, l) => a + Number(l.cantidad || 0) * Number(l.precioUnitario || 0), 0);
 
   async function guardarYEmitir(soloGuardar: boolean) {
+    // Emitir no se deshace (D02-23): se confirma con el folio y el total.
+    if (!soloGuardar) {
+      const ok = await confirmar({
+        titulo: `¿Emitir la factura ${folio.numero.trim()}?`,
+        mensaje: `Queda emitida por ${monto(netoEditado * (1 + Number(ivaPct || 0) / 100), revisar.moneda)} y pasa a cobranza. Para corregirla después se usa una nota de crédito.`,
+        confirmarTexto: "Emitir factura",
+      });
+      if (!ok) return;
+    }
     setOcupado(true);
     try {
       const r: any = await fetchJson(`/facturas/${revisar.id}/lineas`, "PUT", {
@@ -111,8 +127,9 @@ function FacturasContenido() {
       const r: any = await api.post("/pagos", {
         facturaId: pagar.id,
         monto: Number(pago.monto),
-        ...(pago.medio.trim() ? { medio: pago.medio.trim() } : {}),
+        medio: pago.medio,
         ...(pago.referencia.trim() ? { referencia: pago.referencia.trim() } : {}),
+        ...(pago.numeroBoletin.trim() ? { numeroBoletin: pago.numeroBoletin.trim() } : {}),
         ...(pago.fecha ? { fecha: pago.fecha } : {}),
       });
       toast.ok(`Pago registrado. La factura queda ${ESTADO_FACTURA[r.factura?.estado]?.texto?.toLowerCase() ?? r.factura?.estado}.`);
@@ -197,7 +214,7 @@ function FacturasContenido() {
     <span style={{ display: "inline-flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
       {f.estado === "pendiente" && puede("factura.emitir") && <button className="btn primary sm" onClick={() => abrirRevision(f)}>Revisar y emitir</button>}
       {(f.estado === "emitida" || f.estado === "parcial") && puede("factura.cobrar") && (
-        <button className="btn success sm" onClick={() => { setPagar(f); setPago({ monto: String(Number(f.saldo ?? 0)), medio: "", referencia: "", fecha: hoy() }); }}>Registrar pago</button>
+        <button className="btn success sm" onClick={() => { setPagar(f); setPago({ monto: String(Number(f.saldo ?? 0)), medio: "", referencia: "", numeroBoletin: "", fecha: hoy() }); }}>Registrar pago</button>
       )}
       {f.estado !== "anulada" && f.estado !== "pagada" && Number(f.pagado ?? 0) === 0 && puede("factura.cobrar") && (
         <button className="btn ghost-danger sm" onClick={() => anular(f)}>Anular</button>
@@ -273,14 +290,20 @@ function FacturasContenido() {
           acciones={
             <>
               <button className="btn outline" onClick={() => setPagar(null)}>Cancelar</button>
-              <button className="btn success" disabled={ocupado || !(Number(pago.monto) > 0)} onClick={registrarPago}>Registrar pago</button>
+              <button className="btn success" disabled={ocupado || !(Number(pago.monto) > 0) || !pago.medio} onClick={registrarPago}>Registrar pago</button>
             </>
           }>
           <p style={{ marginTop: 0 }}>Total {monto(pagar.total, pagar.moneda)} · pagado {monto(pagar.pagado ?? 0, pagar.moneda)} · <b>saldo {monto(pagar.saldo ?? 0, pagar.moneda)}</b></p>
           <div className="form-grid">
             <div className="field"><label>Monto <span className="req">*</span></label><input type="number" min="0" step="any" value={pago.monto} onChange={(e) => setPago({ ...pago, monto: e.target.value })} /></div>
             <div className="field"><label>Fecha del pago</label><input type="date" value={pago.fecha} onChange={(e) => setPago({ ...pago, fecha: e.target.value })} /></div>
-            <div className="field"><label>Medio de pago</label><input value={pago.medio} maxLength={30} onChange={(e) => setPago({ ...pago, medio: e.target.value })} placeholder="transferencia, cheque…" /></div>
+            <div className="field"><label htmlFor="pago-medio">Medio de pago <span className="req">*</span></label>
+              <select id="pago-medio" value={pago.medio} onChange={(e) => setPago({ ...pago, medio: e.target.value })}>
+                <option value="">Elija…</option>
+                {medios.map((m) => <option key={m.codigo} value={m.codigo}>{m.etiqueta}</option>)}
+              </select>
+            </div>
+            <div className="field"><label htmlFor="pago-bol">Nº boletín de ingreso</label><input id="pago-bol" value={pago.numeroBoletin} maxLength={40} onChange={(e) => setPago({ ...pago, numeroBoletin: e.target.value })} /></div>
             <div className="field"><label>Referencia</label><input value={pago.referencia} maxLength={80} onChange={(e) => setPago({ ...pago, referencia: e.target.value })} /></div>
           </div>
         </Modal>
