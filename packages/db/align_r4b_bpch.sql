@@ -28,3 +28,23 @@ CREATE TABLE IF NOT EXISTS bpch_listado_emision (
 );
 COMMENT ON TABLE bpch_listado_emision IS 'Emisiones del listado oficial de Codificación Única (PDF para firma del Subdirector BPCH y del Jefe Depto. Control de Armas y Explosivos de la DGMN, o Excel).';
 CREATE INDEX IF NOT EXISTS ix_bpch_listado_emision ON bpch_listado_emision (tenant_id, created_at DESC);
+
+-- -----------------------------------------------------------------------------
+-- 2 · Revisión documental IT08 de una inspección de Producción Nacional
+--     (EP-07 7.3, BL-177): checklist por documento legal y defectos que se
+--     trasladan al ensayo «Rev. Doc. Legal» de la OT.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS bpch_revision_documental (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id       UUID         NOT NULL REFERENCES tenant(id),
+  ot_id           UUID         NOT NULL REFERENCES orden_trabajo(id),
+  items           JSONB        NOT NULL DEFAULT '[]'::jsonb,
+  criticos        INTEGER      NOT NULL DEFAULT 0 CHECK (criticos >= 0),
+  menores         INTEGER      NOT NULL DEFAULT 0 CHECK (menores >= 0),
+  resultado       VARCHAR(15)  NOT NULL DEFAULT 'pendiente' CHECK (resultado IN ('pendiente', 'conforme', 'no_conforme')),
+  registrado_por  UUID REFERENCES usuario(id),
+  registrado_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  trasladado_at   TIMESTAMPTZ,
+  CONSTRAINT ux_bpch_revision_documental UNIQUE (ot_id)
+);
+COMMENT ON TABLE bpch_revision_documental IS 'Registro y análisis de documentos DGMN / AF (SAC-PG01-IT08) de una OT de Producción Nacional; los defectos se trasladan al ensayo «Rev. Doc. Legal».';
