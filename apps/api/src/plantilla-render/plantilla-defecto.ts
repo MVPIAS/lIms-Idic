@@ -147,6 +147,11 @@ const IVC = `${MEMBRETE("Laboratorio de Ensayo y Calibración")}
 <h2>Resultados</h2>
 {{tabla_resultados}}
 
+{{#si aql.hay}}
+<h2>V. Inspección por atributos (AQL)</h2>
+{{tabla_aql}}
+{{/si}}
+
 {{referencias}}
 
 {{anexo_fotografico}}

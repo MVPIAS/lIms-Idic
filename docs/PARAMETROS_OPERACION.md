@@ -67,9 +67,31 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | Muestreo · plan NCh 44 (`muestreo_plan`) · por confirmar EP-05 §10 P6 y P15, EP-03 §0.4 y §3.7 | Nivel de inspección (`nivel`) | Opción: S-1…S-4, I, II, III | II | Plan con que se abre cada lote en OT › Muestreo (los registrados no cambian) | `muestreo/muestreo.module.ts` (`parametros`) |
 | | AQL crítico / mayor / menor (`aql_critico`, `aql_mayor`, `aql_menor`) | Opción: sin AQL o una columna de la tabla 2-A | ninguno · 2,5 · 4 | idem | idem |
 | Veredicto del lote (`veredicto_lote`) · por confirmar EP-05 §10 P15 y P19 | Clase sin Ac/Re en el plan (`regla_sin_plan`) | Opción: una NC de cualquier clase rechaza · solo crítica o mayor rechaza | cualquier_nc | OT › Muestreo › Conclusión del lote | idem (`nch44.ts` · `veredictoLote`) |
+| Captura · formulario especializado por método (`captura_variante_metodo`) · por confirmar EP-02 P1 | Una fila por método del catálogo (código del método) | Opción: estándar · registro de disparos (LRB) · HCP por vehículo (SVM) · inspección por atributos (AQL) · microbiología (LMB) · panel sensorial (LES); «Activa» (inactiva = rige la captura estándar). «＋ Añadir método» valida que el código exista en `cat_metodo` | LRB 8 métodos → disparos; SVM 16 → HCP; LCC 3704/3705 → AQL; LMB 12 y LES 6 **inactivas** | Captura y revisión por OT: el ensayo se registra en su formulario y la captura estándar lo rechaza (409 con el motivo) | `formularios/variantes.ts`, `formularios/reglas-captura.service.ts` |
+| Captura · formulario especializado por laboratorio (`captura_variante_laboratorio`) | Una fila por laboratorio | Igual que la anterior; solo para métodos sin fila propia (manda el método) | Ninguna | idem | idem |
+| LRB · registro de disparos (`lrb`) · por confirmar EP-05 P3, P4, P5 | Tabla de amenazas (`amenazas`) | **Tabla** (máx. 60 filas): clave, norma, nivel, elemento (chaleco/casco/probeta), munición, masa (g), V mín./máx. (m/s), disparos, trauma máx. (mm), trauma en disparos 1 a N, testigo, criterio. Buscar, páginas de 20, «＋ Fila», «Pegar desde Excel» (tabulado; la primera fila puede ser el encabezado). Errores por fila; claves únicas; V máx. ≥ V mín. | 9 filas de los informes reales del LRB (NIJ 0101.04/0101.06, UL 752) | Planilla de trabajo, registro de disparos, CRB e Informe de Rechazo | `formularios/lrb.ts` (`leerAmenazas`) |
+| | Velocidad que se compara (`velocidad_manda`) | Opción: V1 · V2 · promedio | V1 | Ventana de velocidad de cada disparo | `formularios/lrb.ts` |
+| | Plazo de apelación (`plazo_apelacion`) | Entero 1–60 días hábiles | 5 | Texto del Informe de Ensayo de Rechazo | idem |
+| Inspección por atributos (`inspeccion_aql`) · por confirmar EP-03 P5, EP-05 P15 | Nivel (`nivel`), AQL del IVC (`aql_inspeccion`), AQL por clase A/B/C del SVM (`aql_clase_a/b/c`) | Opción: nivel S-1…S-4, I, II, III; AQL de la tabla II-A de NCh 44 / ISO 2859-1; clase con «Una N/C rechaza (Ac 0 / Re 1)» | II · 2,5 · A 0, B 2,5, C 6,5 | Inspección AQL del LCC (sección V del IVC) y regla de lote de la HCP del SVM | `formularios/aql.ts`, `formularios/hcp.ts` |
+| SVM · HCP por tipo de vehículo (`hcp_plantilla`) · por confirmar EP-05 P16 | Una fila por tipo de vehículo (`VLCB`…) | Tabla de ítems (máx. 600): ítem, grupo, subgrupo, requisito, cantidad, clase A/B/C, método del catálogo al que pasa el veredicto, mín., máx., unidad (ítem cuantitativo si tiene mín. o máx.). «＋ Añadir plantilla» con código en mayúsculas y nombre | VLCB (LVM-PG01-IT03-FORM02 Rev03): 379 ítems; 4.2.1 ≤ 16 m, 4.3.1 ≤ 36,7 m, 4.4.1 25–35°, 4.5.1 14–18° | Paquete técnico y HCP por vehículo | `formularios/hcp.ts` (`leerPlantilla`) |
+| Preparación de muestras · campos (`preparacion_campo`) | Uno por campo: `<LAB>.<campo>` | Formulario: tipo (texto, número, entero, fecha, lista, casilla, equipo del laboratorio), obligatorio, activo, unidad, ayuda, opciones y **«Bloquea la captura»** (casilla sin marcar, fecha vencida o equipo no apto). Agrupados por laboratorio. «＋ Añadir campo» | 77 campos de 13 laboratorios (LQC, LPN, LME, LQA, LMB, LES, LCC, LTX, LRB, LEM, LAM, SEO, SVM) tomados de sus planillas | OT › Preparación › «Preparación y acondicionamiento de muestras» | `formularios/preparacion.ts` |
+| Preparación de muestras · obligatoria (`preparacion_obligatoria`) | Uno por laboratorio | Sí / No | No en los 13 laboratorios | Si es Sí, la muestra no se captura sin preparación registrada | `formularios/reglas-captura.service.ts` |
+| DSA · aprobación del trabajo (`preparacion_trabajo`) · por confirmar EP-05 P2 | Laboratorios que aprueban antes de ejecutar (`exige_aprobacion`) | Casillas LRB, LAM, SEO, SVM (LEM no figura: se aprueba solo si el trabajo es en terreno) | LRB, SVM | Planilla de trabajo / paquete técnico (EP-05 2.3) | `formularios/trabajo.ts` |
+| | La captura espera la aprobación (`bloquea_captura`) | Sí / No | Sí | Registro de disparos, HCP y captura estándar | idem |
+| LMB · microbiología (`micro`) · por confirmar EP-02 P3 | Lecturas programadas (`lecturas_h`) | Casillas de horas | 24, 48, 72 | Formulario «Siembra, incubación y lectura» (solo si se activa la variante) | `formularios/micro.ts` |
+| LMB · planes del RSA (`rsa_criterios`) · por confirmar EP-02 P2 | Planes por ensayo y producto (`tabla`) | Tabla (máx. 200): método, producto, n, c, m, M, artículo del RSA | Vacía (sin plan, el resultado es informativo) | idem | idem |
+| LES · panel sensorial (`sensorial`) · por confirmar EP-02 P4 | α (`alfa`), jueces mínimos (`jueces_min`), rangos por atributo (`rangos`) | Opción 0,05/0,01/0,001 · entero 1–60 · tabla prueba, atributo, mín., máx. (máx. 60 filas) | 0,05 · 6 · rangos del Listado LES | Formulario «Panel sensorial» (solo si se activa la variante) | `formularios/sensorial.ts` |
 
 Los grupos `muestreo_plan` y `veredicto_lote` los creó el frente r2b
-(`docs/FLUJO_ESPECIFICACIONES_MUESTREO.md`). Las reglas `captura_ld`, `segregacion_resultado` y `ot_plazo` las creó el frente r1g (recorrido MP-02/MP-06, `align_r1g_recorrido.sql`)
+(`docs/FLUJO_ESPECIFICACIONES_MUESTREO.md`).
+
+Los grupos desde «Captura · formulario especializado» (`captura_variante_metodo` … `sensorial`) los creó el frente r2a
+(`align_r2a_formularios.sql`, ver `docs/FLUJO_FORMULARIOS_ESPECIALIZADOS.md`). Los
+tipos nuevos son **variante**, **tabla** y **campo de preparación**; la tabla se valida
+fila a fila con el mismo lector que usa el formulario, y su historial guarda la tabla
+completa antes y después.
+
+Las reglas `captura_ld`, `segregacion_resultado` y `ot_plazo` las creó el frente r1g (recorrido MP-02/MP-06, `align_r1g_recorrido.sql`)
 y desde el frente r1h se editan aquí como las demás, con motivo e historial. Las
 excepciones de la segregación se guardan como antes (códigos separados por coma), así
 que el lector no cambia; la captura muestra en «Aprobar todo lo revisado» cuántos
@@ -105,7 +127,9 @@ de internación (`bpch_tasa`) siguen en su recuadro propio (frente K).
 | `GET /parametros/configurables` | `catalogo.gestionar` | — · devuelve `puedeEditar`, `grupos[].parametros[]` (valor tipado, texto, definición), `laboratorios` y `historial` |
 | `PUT /parametros/configurables/:categoria/:codigo` | `catalogo.gestionar` global | `{ valor, motivo }`; `valor` según el tipo: número o texto, `true/false`, opción, lista de opciones, o `{ tipo, obligatorio, opciones, ayuda, activo }` |
 | `POST /parametros/configurables/:categoria` | `catalogo.gestionar` global | `recepcion_producto_obligatorio`: `{ laboratorio, valor: true/false, motivo }` · `recepcion_campo`: `{ laboratorio, campo, etiqueta, valor: {…}, motivo }` |
+| (r2a) mismo `POST` | idem | `captura_variante_metodo`: `{ codigo, valor: { variante, activo }, motivo }` · `captura_variante_laboratorio` y `preparacion_obligatoria`: `{ laboratorio, valor, motivo }` · `hcp_plantilla`: `{ codigo, etiqueta, valor: [filas], motivo }` · `preparacion_campo`: `{ laboratorio, campo, etiqueta, valor: { tipo, obligatorio, bloquea, unidad, opciones, ayuda, activo }, motivo }` |
 
 Recorrido de prueba: `scripts/verificacion/r1-r1f.js` (con Calidad, que puede, y
 con el Jefe de LQC y Comercial, que no) y, para las reglas de r1g,
-`scripts/verificacion/r1-r1h.js`.
+`scripts/verificacion/r1-r1h.js`. Para los parámetros de r2a, `scripts/verificacion/r2-r2a.js`
+(paso 1: Calidad cambia la tabla de amenazas y una variante; el Jefe de LQC no).

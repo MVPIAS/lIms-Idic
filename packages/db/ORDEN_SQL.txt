@@ -94,4 +94,5 @@ align_r4a_metrologia_ficha.sql
 seed_r4a_servicios_calibracion.sql
 align_r2b_especificacion_tecnica.sql
 align_r2b_muestreo.sql
+align_r2a_formularios.sql
 align_cierre_permisos.sql

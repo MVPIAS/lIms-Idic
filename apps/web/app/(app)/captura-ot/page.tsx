@@ -281,6 +281,14 @@ export default function CapturaOtPage() {
   const [inicial, setInicial] = useState(false);
   // Equipos del laboratorio para la captura (contrato §4.4.2), con su aptitud.
   const [equipos, setEquipos] = useState<EquipoCaptura[]>([]);
+  // Formularios especializados de la OT (frente r2a): ensayos que se capturan en su propio formulario.
+  const [formularios, setFormularios] = useState<{ ensayos: { id: string; formulario: { nombre: string; paso: string; ruta: string } | null }[]; formularios: { variante: string; nombre: string; paso: string; ruta: string; ensayos: number; capturados: number; cerrado: boolean }[] } | null>(null);
+  useEffect(() => {
+    if (!ot?.id || !tiene("resultado.ver")) { setFormularios(null); return; }
+    llamar<any>("GET", `/formularios/ot/${ot.id}`).then(setFormularios).catch(() => setFormularios(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ot?.id]);
+  const formDe = (f: { id: string }) => formularios?.ensayos.find((x) => x.id === f.id)?.formulario ?? null;
   useEffect(() => {
     if (!ot?.id || !tiene("resultado.crear")) { setEquipos([]); return; }
     llamar<{ equipos: EquipoCaptura[] }>("GET", `/flujo/ot/${ot.id}/equipos`).then((r) => setEquipos(r.equipos)).catch(() => setEquipos([]));
@@ -566,6 +574,22 @@ export default function CapturaOtPage() {
         </div>
       </div>
 
+      {ot && formularios && formularios.formularios.length > 0 && (
+        <div className="card" style={{ borderLeft: "4px solid var(--accent)" }}>
+          <h2 style={{ fontSize: 13.5 }}>Formularios especializados de esta OT</h2>
+          <p className="subtitle" style={{ margin: "0 0 8px" }}>
+            Estos ensayos se registran en su formulario (dato primario por disparo, vehículo, inspección o lectura); su veredicto pasa aquí y sigue la revisión y la aprobación de siempre.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {formularios.formularios.map((x) => (
+              <Link key={x.variante} href={x.ruta as any} className="btn primary sm">
+                {x.nombre} · {x.capturados}/{x.ensayos} ensayos{x.cerrado ? " ✓" : ""} →
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+
       {ot && filas.length > 0 && (
         <>
           <div className="kpis">
@@ -724,7 +748,14 @@ export default function CapturaOtPage() {
                               )}
                             </td>
                             <td>
-                              {capturable && !capturaRapida(f) && !f.porReplicas ? (
+                              {formDe(f) ? (
+                                <div>
+                                  {valorTexto(f) && <div style={{ fontFamily: "'JetBrains Mono', monospace" }}>{valorTexto(f)}</div>}
+                                  <Link href={formDe(f)!.ruta as any} className={`btn sm ${capturable ? "" : "outline"}`} title={`${formDe(f)!.nombre} (${formDe(f)!.paso})`}>
+                                    {capturable ? `Capturar en «${formDe(f)!.nombre}» →` : `Ver «${formDe(f)!.nombre}»`}
+                                  </Link>
+                                </div>
+                              ) : capturable && !capturaRapida(f) && !f.porReplicas ? (
                                 <div>
                                   {valorTexto(f) && <div style={{ fontFamily: "'JetBrains Mono', monospace" }}>{valorTexto(f)}</div>}
                                   {ot ? (

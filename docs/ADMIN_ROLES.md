@@ -112,6 +112,12 @@ ver `docs/FLUJO_ESPECIFICACIONES_MUESTREO.md` §5): `et.ver` (laboratorio, jefat
 Planificación, Muestreo, Recepción, Dirección, Lector), `et.gestionar` (jefaturas, Calidad, Administración; alcance
 por los laboratorios de la E.T.) y `muestreo.registrar` (Muestreo, personal de laboratorio, inspectores, jefaturas).
 
+**Formularios especializados y preparación del trabajo** (`align_r2a_formularios.sql`,
+ver `docs/FLUJO_FORMULARIOS_ESPECIALIZADOS.md` §6): `ot.preparacion.aprobar` (aprobar,
+validar o devolver la Planilla de trabajo, el Paquete técnico o el Proyecto de Párrafo
+del DSA: SUPERADMIN, JEFE_LAB, JEFE_SECCION, JEFE_DEPTO; además, el paso exige el rol
+que corresponde en la rama del laboratorio).
+
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
 ---

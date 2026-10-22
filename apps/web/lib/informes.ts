@@ -27,6 +27,8 @@ const NATURALEZA_DOC: Record<string, string> = {
   INFORME_INSPECCION: "Inspección",
   CERTIFICADO_CONFORMIDAD: "Conformidad",
   INFORME_INCUMPLIMIENTO: "Incumplimiento",
+  CERTIFICADO_RESISTENCIA_BALISTICA: "CRB",
+  INFORME_RECHAZO: "Rechazo",
 };
 
 /** Etiqueta corta de la modalidad guardada en un documento (null en los anteriores a esta versión). */

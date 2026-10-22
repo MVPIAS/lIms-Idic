@@ -49,6 +49,8 @@ import { EncuestaModule } from "./encuesta/encuesta.module";
 import { RecepcionModule } from "./recepcion/recepcion.module";
 import { EspecificacionTecnicaModule } from "./especificacion-tecnica/et.module";
 import { MuestreoModule } from "./muestreo/muestreo.module";
+import { FormulariosModule } from "./formularios/formularios.module";
+import { ReglasCapturaModule } from "./formularios/reglas-captura.service";
 
 /**
  * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
@@ -105,6 +107,8 @@ function prettyTransport() {
     CatalogoModule,
     CatalogoV2Module,
     ParametroModule,
+    // Reglas de captura de los formularios especializados (global: las usa el puente de captura).
+    ReglasCapturaModule,
     FlujoRealModule,
     SpcModule,
     QcModule,
@@ -121,6 +125,7 @@ function prettyTransport() {
     RecepcionModule,
     EspecificacionTecnicaModule,
     MuestreoModule,
+    FormulariosModule,
     RbacModule,
     PlantillaRenderModule,
     CrmModule,

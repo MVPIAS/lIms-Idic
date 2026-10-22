@@ -45,6 +45,7 @@ const PERMISO_DE_RUTA: [string, string][] = [
   ["/recepcion", "muestra.crear"],
   ["/bpch/internaciones", "bpch.internacion.ver"],
   ["/metrologia", "metrologia.ver"],
+  ["/preparacion-trabajo", "ot.preparacion.aprobar"],
 ];
 
 /**
@@ -531,6 +532,25 @@ export class BandejaService {
     const encuestas = async () =>
       item("encuestas_pendientes", "Encuestas por registrar", "OT cerradas cuya encuesta de satisfacción aún no se registra", await q.encuestasPendientes(), "/encuestas?estado=pendiente", "info");
 
+    // Documentación del trabajo del DSA que espera la decisión de esta jefatura (EP-05 2.3, frente r2a):
+    // Jefe de Lab aprueba (LRB, SVM…); en el LEM en terreno valida la Sección y aprueba el Departamento.
+    const trabajoPorAprobar = (estado: "en_aprobacion" | "validada", lem: boolean, titulo: string) => async () =>
+      item(
+        `trabajo_${estado}${lem ? "_lem" : ""}`,
+        titulo,
+        "Documentación del trabajo (planilla, plan o Proyecto de Párrafo) que espera su decisión antes de ejecutar",
+        await this.contar(
+          `SELECT count(*) AS n FROM registro_especializado r JOIN orden_trabajo o ON o.id = r.ot_id
+            WHERE ${otScope} AND r.variante = 'trabajo' AND r.estado = $3 AND (r.clave = 'LEM') = $4::boolean`,
+          tenant,
+          unidades,
+          estado,
+          lem,
+        ).catch(() => 0),
+        "/preparacion-trabajo",
+        "warn",
+      );
+
     const all = (fs: (() => Promise<ItemBandeja | ItemBandeja[]>)[]) =>
       Promise.all(fs.map((f) => f())).then((r) => r.flat());
 
@@ -548,11 +568,11 @@ export class BandejaService {
       case "REVISOR":
         return all([porRevisar, asignadas, derivados, devueltos, porVencer, firmas]);
       case "JEFE_LAB":
-        return all([internacionesPorAnalizar, lotesPorInspeccionar, sinAsignar, porRevisar, porAprobar, oiPorAtender, derivados, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
+        return all([internacionesPorAnalizar, lotesPorInspeccionar, sinAsignar, trabajoPorAprobar("en_aprobacion", false, "Documentación del trabajo por aprobar"), porRevisar, porAprobar, oiPorAtender, derivados, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
       case "JEFE_SECCION":
-        return all([internacionesPorAnalizar, firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
+        return all([internacionesPorAnalizar, trabajoPorAprobar("en_aprobacion", true, "Proyectos de Párrafo por validar"), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
       case "JEFE_DEPTO":
-        return all([firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porFirmarCot, vbDepto, porResponder]);
+        return all([trabajoPorAprobar("validada", true, "Proyectos de Párrafo por aprobar"), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porFirmarCot, vbDepto, porResponder]);
       case "DIRECTOR":
         return all([firmas, porOficializar, vencidas, vencidasPorLab, abiertas, nc, sinOt]);
       case "COMERCIAL":
