@@ -953,6 +953,8 @@ export class PuenteAnalisisService {
         valorNumerico: r.valorNumerico ?? null, valorTexto: r.valorTexto, replicas: [] as number[], promedio: null, desviacion: null, cv: null,
         resultadoFinal: r.valorNumerico ?? null, formulaAplicada: null, lecturas: null, observacion: r.observacion, veredicto: r.veredicto,
         valorSinFactor: null, factorAplicado: false,
+        // La segunda condición de la E.T. (frente r2b) no la evalúa el formulario: se vacía.
+        valorCondicion2: null, explicacion: null,
       };
     } else try {
       calc = calcularCaptura(
