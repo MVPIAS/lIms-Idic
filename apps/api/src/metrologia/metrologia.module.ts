@@ -16,6 +16,7 @@ import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
 import { AlcanceService } from "../rbac/alcance.service";
 import { ancestroDeTipo, descendientes } from "../rbac/alcance";
 import { RbacModule } from "../rbac/rbac.module";
+import { registrarFuenteBandeja, type ItemBandeja } from "../rbac/bandeja.service";
 import { FirmasMatrizService } from "../rbac/firmas-matriz.controller";
 import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
@@ -282,6 +283,67 @@ interface Circuito {
 @Controller("metrologia")
 export class MetrologiaController {
   constructor(private readonly alcance: AlcanceService, private readonly matriz: FirmasMatrizService, private readonly mail: MailService) {}
+
+  /** Las tarjetas de Metrología se suman a «Mi bandeja» (GET /me/bandeja) de cualquier perfil. */
+  onModuleInit() {
+    registrarFuenteBandeja((req) => this.bandejaMetrologia(req));
+  }
+
+  /**
+   * «Mi bandeja» de Metrología (EP-04 PX.3, BL-156): lo que le toca al usuario según la
+   * matriz de firmas y su alcance: borradores por enviar y devueltas (metrólogo), por revisar
+   * (Jefe del laboratorio o subrogante), por firmar y emitir (Jefe de Departamento o
+   * metrólogo habilitado), certificados por entregar e instrumentos asignados por calibrar.
+   * Solo tarjetas con algo pendiente, salvo las del metrólogo, que siempre se ven.
+   */
+  async bandejaMetrologia(req: any): Promise<ItemBandeja[]> {
+    const t = req?.user?.tenantId, yo = req?.user?.sub;
+    if (!t || !yo || !tiene(req, "metrologia.ver")) return [];
+    const filtro = await this.alcance.filtroUnidades(req, "metrologia.ver");
+    const arbol = await this.alcance.arbol(t);
+    const sam = arbol.porCodigo.get("SAM");
+    const enSam = sam ? descendientes(arbol, sam.id, true) : [];
+    const unidades = filtro === null ? null : filtro.filter((u) => enSam.includes(u));
+    if (unidades && !unidades.length) return [];
+    const cals = await prisma.$queryRawUnsafe<any[]>(
+      `SELECT c.id, c.codigo, c.estado, c.created_by, c.devuelto_motivo, c.unidad_id, c.ot_id, c.entregado_at,
+              (c.resumen IS NOT NULL OR c.u_max IS NOT NULL) AS calculada, m.codigo AS magnitud, un.codigo AS laboratorio,
+              EXISTS (SELECT 1 FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.deleted_at IS NULL AND x.estado <> 'reemplazada') AS reemision_en_curso
+         FROM met_calibracion c JOIN met_proceso pr ON pr.id = c.proceso_id JOIN met_magnitud m ON m.id = pr.magnitud_id
+         LEFT JOIN unidad un ON un.id = c.unidad_id
+        WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL
+          AND (c.estado IN ('borrador', 'calculada', 'en_revision', 'en_firma') OR (c.estado = 'emitida' AND c.entregado_at IS NULL AND c.ot_id IS NOT NULL))
+          AND ($2::uuid[] IS NULL OR c.unidad_id = ANY($2::uuid[]))
+        ORDER BY c.created_at DESC LIMIT 500`, t, unidades);
+    const ctxs = cals.length ? await this.contextos(req, cals) : [];
+    const acc = (i: number) => accionesDisponibles(ctxs[i].ctx);
+    const contar = (f: (c: any, i: number) => boolean) => cals.reduce((n, c, i) => n + (f(c, i) ? 1 : 0), 0);
+    const porCalibrar = await prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM met_ot_instrumento i JOIN orden_trabajo o ON o.id = i.ot_id
+        WHERE i.tenant_id = $1::uuid AND i.metrologo_id = $2::uuid AND i.estado IN ('por_recibir', 'recibido') AND o.estado NOT IN ('cerrada', 'anulada')
+          AND NOT EXISTS (SELECT 1 FROM met_calibracion c WHERE c.ot_instrumento_id = i.id AND c.deleted_at IS NULL AND c.estado <> 'reemplazada')`, t, yo);
+    const item = (clave: string, titulo: string, descripcion: string, cantidad: number, ruta: string, sev: "warn" | "alta" = "warn"): ItemBandeja =>
+      ({ clave, titulo, descripcion, cantidad, ruta, severidad: cantidad > 0 ? sev : "info" });
+    const metrologo = tiene(req, "metrologia.crear");
+    const entrega = tiene(req, "certificado.entregar") || metrologo;
+    const tarjetas = [
+      item("met_por_calibrar", "Instrumentos por calibrar", "Instrumentos de OT asignados a usted, por recibir o recibidos sin calibración", porCalibrar[0]?.n ?? 0, "/metrologia/nueva"),
+      item("met_por_enviar", "Calibraciones por enviar", "Borradores suyos calculados: fírmelos y envíelos a revisión", contar((c, i) => acc(i).includes("ENVIAR") && !c.devuelto_motivo), "/metrologia?pendiente=enviar"),
+      item("met_devueltas", "Calibraciones devueltas", "Devueltas por el revisor: corrija la toma de datos y vuelva a enviarlas", contar((c) => c.created_by === yo && ["borrador", "calculada"].includes(c.estado) && !!c.devuelto_motivo), "/metrologia?pendiente=devueltas", "alta"),
+      item("met_por_revisar", "Calibraciones por revisar", "Revisión técnica que le asigna la matriz de firmas (Jefe del laboratorio o subrogante)", contar((_c, i) => acc(i).includes("FIRMAR")), "/metrologia?pendiente=revisar"),
+      item("met_por_emitir", "Certificados por firmar y emitir", "Certificados con la revisión técnica aprobada que esperan su firma", contar((_c, i) => acc(i).includes("EMITIR")), "/metrologia?pendiente=emitir"),
+      item("met_por_entregar", "Certificados por entregar", "Certificados emitidos sin entrega registrada", entrega ? contar((c) => c.estado === "emitida" && !c.entregado_at && !!c.ot_id) : 0, "/metrologia?pendiente=entregar"),
+    ];
+    const delMetrologo = new Set(["met_por_calibrar", "met_por_enviar", "met_devueltas"]);
+    return tarjetas.filter((x) => x.cantidad > 0 || (metrologo && delMetrologo.has(x.clave)));
+  }
+
+  /** La bandeja de Metrología del usuario (las mismas tarjetas que suma «Mi bandeja»). */
+  @Get("bandeja")
+  @RequierePermiso("metrologia.ver")
+  async miBandeja(@Req() req: any) {
+    return { data: await this.bandejaMetrologia(req) };
+  }
 
   /** Códigos de laboratorio de la sección visibles para el usuario (null = todos). */
   private async labsVisibles(req: any): Promise<Set<string> | null> {

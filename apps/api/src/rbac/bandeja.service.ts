@@ -44,7 +44,19 @@ const PERMISO_DE_RUTA: [string, string][] = [
   ["/admin", "admin.usuarios"],
   ["/recepcion", "muestra.crear"],
   ["/bpch/internaciones", "bpch.internacion.ver"],
+  ["/metrologia", "metrologia.ver"],
 ];
+
+/**
+ * Tarjetas que aporta otro módulo (p. ej. Metrología, que resuelve su matriz de firmas):
+ * se registran al iniciar y se suman a la bandeja de cualquier perfil. Cada fuente decide
+ * a quién le corresponde y devuelve [] si no aplica; si falla, no tumba la bandeja.
+ */
+export type FuenteBandeja = (req: any) => Promise<ItemBandeja[]>;
+const FUENTES_BANDEJA: FuenteBandeja[] = [];
+export function registrarFuenteBandeja(f: FuenteBandeja): void {
+  if (!FUENTES_BANDEJA.includes(f)) FUENTES_BANDEJA.push(f);
+}
 
 /**
  * Quita las tarjetas que el usuario no podría abrir (p. ej. Recepción, perfil
@@ -99,8 +111,16 @@ export class BandejaService {
     tenantId: string | undefined,
     permisos?: string[] | null,
     roles: string[] = [],
+    req?: any,
   ): Promise<ItemBandeja[]> {
-    return filtrarPorPermiso(await this.tarjetas(ctx, perfil, tenantId), permisos, roles);
+    const propias = await this.tarjetas(ctx, perfil, tenantId);
+    const extra = req
+      ? (await Promise.all(FUENTES_BANDEJA.map((f) => f(req).catch((e: any) => {
+          this.log.debug(`bandeja: fuente omitida (${e?.message?.split("\n")[0]})`);
+          return [] as ItemBandeja[];
+        })))).flat()
+      : [];
+    return filtrarPorPermiso([...propias, ...extra], permisos, roles);
   }
 
   private async tarjetas(ctx: ContextoAlcance, perfil: Perfil, tenantId: string | undefined): Promise<ItemBandeja[]> {
