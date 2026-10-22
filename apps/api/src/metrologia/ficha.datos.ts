@@ -29,8 +29,9 @@ export async function leerConfigFicha(db: ConsultaCruda, tenantId: string): Prom
 
 async function evento(db: ConsultaEscritura, calId: string, accion: string, comentario: string, usuarioId: string | null) {
   await db.$executeRawUnsafe(
-    `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
-     SELECT id, $2, estado, estado, $3::uuid, $4 FROM met_calibracion WHERE id = $1::uuid`,
+    // clock_timestamp(): dentro de la transacción de la emisión, el evento queda después de «Firmada y emitida».
+    `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario, created_at)
+     SELECT id, $2, estado, estado, $3::uuid, $4, clock_timestamp() FROM met_calibracion WHERE id = $1::uuid`,
     calId, accion, usuarioId, comentario.slice(0, 1000));
 }
 
