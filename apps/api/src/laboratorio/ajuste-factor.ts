@@ -18,6 +18,7 @@ import { aplicarFactor, expresionConFactor, type Factor } from "./factor";
 import { traducirFormula } from "./formula-legado";
 import { veredictoNumerico } from "./veredicto";
 import type { TipoDato } from "./especificacion";
+import { combinarVeredictos, leerCondicion2, leerPlanClases, veredictoCondicion2 } from "./requisito-compuesto";
 
 export interface ResultadoParaFactor {
   tipoDato?: string | null;
@@ -33,10 +34,14 @@ export interface ResultadoParaFactor {
   replicas?: unknown;
   lecturas?: unknown;
   variables?: unknown;
+  /** Requisito compuesto (E.T.): plan de clases y segunda condición con su valor. */
+  planClases?: unknown;
+  condicion2?: unknown;
+  valorCondicion2?: unknown;
 }
 
 /** Campos del resultado que cambian al recalcularlo con el factor nuevo. */
-export type DatosRecalculo = Partial<Omit<CalculoCaptura, "observacion" | "factorAplicado">>;
+export type DatosRecalculo = Partial<Omit<CalculoCaptura, "observacion" | "factorAplicado" | "explicacion" | "valorCondicion2">>;
 
 export type PlanFactor =
   | { accion: "solo_factor" }
@@ -60,13 +65,20 @@ export function planAjusteFactor(r: ResultadoParaFactor, nuevo: Factor | null): 
   const tieneValor = lleno(r.valorNumerico) || lleno(r.valorTexto) || lleno(r.resultadoFinal) || lleno(r.promedio);
   if (!tieneValor) return { accion: "solo_factor" };
 
-  const espec = { tipoDato, limiteInf: r.limiteInf, nominal: r.nominal, limiteSup: r.limiteSup, formula: r.formula, factor: nuevo };
+  const espec = {
+    tipoDato, limiteInf: r.limiteInf, nominal: r.nominal, limiteSup: r.limiteSup, formula: r.formula, factor: nuevo,
+    planClases: leerPlanClases(r.planClases), condicion2: leerCondicion2(r.condicion2),
+  };
+  const v2 = r.valorCondicion2 != null && Number.isFinite(Number(r.valorCondicion2)) ? Number(r.valorCondicion2) : null;
   const lecturas = Array.isArray(r.lecturas) && r.lecturas.length ? (r.lecturas as Record<string, number>[]) : null;
   const replicas = numeros(r.replicas);
   if (lecturas || replicas.length) {
     try {
-      const c = calcularCaptura(espec, lecturas ? { lecturas, variables: objeto(r.variables) } : { replicas, variables: objeto(r.variables) });
-      const { observacion: _o, factorAplicado: _f, lecturas: lect, ...resto } = c;
+      const c = calcularCaptura(
+        espec,
+        lecturas ? { lecturas, variables: objeto(r.variables), valorCondicion2: v2 } : { replicas, variables: objeto(r.variables), valorCondicion2: v2 },
+      );
+      const { observacion: _o, factorAplicado: _f, lecturas: lect, explicacion: _x, valorCondicion2: _v2, ...resto } = c;
       // Las lecturas se reescriben solo si el cálculo salió de ellas.
       const datos: DatosRecalculo = lect ? { ...resto, lecturas: lect } : resto;
       return { accion: "recalcular", datos };
@@ -85,7 +97,9 @@ export function planAjusteFactor(r: ResultadoParaFactor, nuevo: Factor | null): 
         valorTexto: String(valor),
         resultadoFinal: valor,
         formulaAplicada: expr || nuevo ? expresionConFactor(expr ?? "PROMEDIO(RN)", nuevo) : null,
-        veredicto: veredictoNumerico(valor, num(r.limiteInf), num(r.limiteSup)),
+        veredicto: espec.condicion2
+          ? combinarVeredictos(veredictoNumerico(valor, num(r.limiteInf), num(r.limiteSup)), veredictoCondicion2(v2, espec.condicion2))
+          : veredictoNumerico(valor, num(r.limiteInf), num(r.limiteSup)),
       },
     };
   }

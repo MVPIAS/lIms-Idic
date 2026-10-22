@@ -57,7 +57,10 @@ export function middleware(request: NextRequest) {
     // globals.css hace @import de fonts.googleapis.com; los .woff2 salen de gstatic.
     `font-src 'self' https://fonts.gstatic.com data:`,
 
-    `img-src 'self' data: https:`,
+    // blob: · las fotos de la OT, del muestreo y de los certificados se piden con
+    // la sesión y se muestran como URL local (imagenConSesion): sin blob: se
+    // ven rotas.
+    `img-src 'self' data: blob: https:`,
 
     // La API va bajo /api del MISMO dominio (Caddy la enruta a NestJS) => 'self'.
     // En dev, el websocket de HMR (ws://localhost:3000) es same-origin y 'self'
