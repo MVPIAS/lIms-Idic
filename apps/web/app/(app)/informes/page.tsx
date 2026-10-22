@@ -219,7 +219,7 @@ function InformesContenido() {
     { key: "cobertura", label: "Cubre", value: (c) => c.cobertura ?? "Toda la OT", render: (c) => c.cobertura ?? <span style={{ color: "var(--muted)" }}>Toda la OT</span> },
     { key: "otcliente", label: "OT · Cliente", value: (c) => [c.ot?.codigo, c.ot?.cliente?.razonSocial].filter(Boolean).join(" · ") },
     { key: "plantilla", label: "Plantilla", value: (c) => (c.plantilla ? `${c.plantilla.repid} · ${c.plantilla.nombre}` : "") },
-    { key: "modalidad", label: "Informe", value: (c) => textoModalidad(c.modalidad) ?? "", render: (c) => textoModalidad(c.modalidad) ?? "—" },
+    { key: "modalidad", label: "Informe", value: (c) => textoModalidad(c.modalidad, c.tipoDocumento) ?? "", render: (c) => textoModalidad(c.modalidad, c.tipoDocumento) ?? "—" },
     { key: "fecha", label: "Emitido", value: (c) => c.fecha ?? "", render: (c) => fecha(c.fecha) },
     {
       key: "firmas", label: "Firmas", filter: false, value: (c) => c.firmasHechas,

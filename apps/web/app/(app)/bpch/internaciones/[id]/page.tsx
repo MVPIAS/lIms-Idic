@@ -20,6 +20,7 @@ import { DocumentosYCierre, Fases } from "../../_components/Expediente";
 import { FormInternacion } from "../../_components/FormInternacion";
 import { SelectorPanel } from "../../_components/Buscadores";
 import { AVANCE_INTERNACION, type ConfigBpch, DOC_ADM, ESTADO_COD, ESTADO_INTERNACION, LISTADOS, dia, hoy, pedir } from "../../_components/bpch";
+import { ESTADO_FACTURA } from "@/lib/documentos";
 
 type Pestana = "registro" | "inspeccion" | "documentos" | "tasa" | "codificacion";
 
@@ -383,8 +384,13 @@ function Inspeccion({ d, puede, accion }: { d: any; puede: Puede; accion: Accion
 
 /* ---------------------------------------------------------------------- Tasa --- */
 function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null; puede: Puede; accion: Accion }) {
-  const [doc, setDoc] = useState({ fecha: hoy(), detalle: "", facturaComercial: "" });
-  const [t, setT] = useState({ cifUsd: "", paridad: "", pctAfecto: "100" });
+  const [doc, setDoc] = useState({ fecha: hoy(), detalle: "", facturaComercial: "", cifUsd: "", tipoCambio: "", ivaInternacion: "", otrosDocumentos: "" });
+  // El CIF y el tipo de cambio registrados con la documentación se proponen en el cálculo (EP-06 6.8; D06-03).
+  const [t, setT] = useState({
+    cifUsd: d.documentacion?.cifUsd != null ? String(d.documentacion.cifUsd).replace(".", ",") : "",
+    paridad: d.documentacion?.tipoCambio != null ? String(d.documentacion.tipoCambio).replace(".", ",") : "",
+    pctAfecto: "100",
+  });
   if (!d.sujetaTasa) return <div className="alert info">Esta internación no está sujeta a la tasa: no hay documentación administrativa ni cobro.</div>;
   const tasaPct = config?.parametros.tasaPct;
   const ivaPct = config?.parametros.ivaPct;
@@ -413,17 +419,37 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
           {d.documentacion.solicitadaAt && <> · solicitada {fecha(d.documentacion.solicitadaAt)}</>}
           {d.documentacion.recibidaAt && <> · recibida {fecha(d.documentacion.recibidaAt)}</>}
           {d.documentacion.facturaComercial && <> · factura comercial {d.documentacion.facturaComercial}</>}
+          {d.documentacion.cifUsd != null && <> · CIF US$ {Number(d.documentacion.cifUsd).toLocaleString("es-CL")}</>}
+          {d.documentacion.tipoCambio != null && <> · tipo de cambio {Number(d.documentacion.tipoCambio).toLocaleString("es-CL")}</>}
+          {d.documentacion.ivaInternacion != null && <> · IVA de internación {clp(d.documentacion.ivaInternacion)}</>}
         </p>
+        {d.documentacion.otrosDocumentos && <p style={{ fontSize: 12.5 }}>Otros documentos: {d.documentacion.otrosDocumentos}</p>}
         {d.documentacion.detalle && <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, background: "#f6f9fb", padding: 8, borderRadius: 6 }}>{d.documentacion.detalle}</pre>}
         {acciones.length > 0 && puede("bpch.internacion.gestionar") && (
           <div className="form-grid">
             <div className="field"><label htmlFor="dfe">Fecha</label><input id="dfe" type="date" value={doc.fecha} onChange={(e) => setDoc({ ...doc, fecha: e.target.value })} /></div>
             <div className="field span-2"><label htmlFor="ddt">Detalle (documentos pedidos u observación)</label><input id="ddt" value={doc.detalle} onChange={(e) => setDoc({ ...doc, detalle: e.target.value })} /></div>
-            {docEstado === "solicitada" && <div className="field"><label htmlFor="dfc">Nº factura comercial</label><input id="dfc" value={doc.facturaComercial} onChange={(e) => setDoc({ ...doc, facturaComercial: e.target.value })} /></div>}
+            {docEstado === "solicitada" && (
+              <>
+                <div className="field"><label htmlFor="dfc">Nº factura comercial</label><input id="dfc" value={doc.facturaComercial} onChange={(e) => setDoc({ ...doc, facturaComercial: e.target.value })} /></div>
+                <div className="field"><label htmlFor="dcif">Monto CIF (US$)</label><input id="dcif" inputMode="decimal" value={doc.cifUsd} onChange={(e) => setDoc({ ...doc, cifUsd: e.target.value })} /></div>
+                <div className="field"><label htmlFor="dtc">Tipo de cambio US$ → $</label><input id="dtc" inputMode="decimal" value={doc.tipoCambio} onChange={(e) => setDoc({ ...doc, tipoCambio: e.target.value })} /></div>
+                <div className="field"><label htmlFor="div">IVA de internación ($)</label><input id="div" inputMode="decimal" value={doc.ivaInternacion} onChange={(e) => setDoc({ ...doc, ivaInternacion: e.target.value })} /></div>
+                <div className="field span-2"><label htmlFor="dotr">Otros documentos recibidos</label><input id="dotr" maxLength={2000} placeholder="Facturas de transporte, Declaración de Ingreso…" value={doc.otrosDocumentos} onChange={(e) => setDoc({ ...doc, otrosDocumentos: e.target.value })} /></div>
+              </>
+            )}
             <div className="toolbar" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
               {acciones.map((x) => (
                 <button key={x.a} type="button" className={`btn ${x.a === "no_conforme" ? "ghost-danger" : "primary"} sm`} onClick={async () => {
-                  if (await accion("POST", "/documentacion", { accion: x.a, fecha: doc.fecha, detalle: doc.detalle || null, facturaComercial: doc.facturaComercial || null }, "Documentación actualizada.")) setDoc({ ...doc, detalle: "" });
+                  // «184.500,5» o «945,2» (coma decimal chilena) o «945.2».
+                  const n = (v: string) => (v.trim() ? Number(v.includes(",") ? v.replace(/\./g, "").replace(",", ".") : v) : null);
+                  const montos = x.a === "recibir"
+                    ? { cifUsd: n(doc.cifUsd), tipoCambio: n(doc.tipoCambio), ivaInternacion: n(doc.ivaInternacion), otrosDocumentos: doc.otrosDocumentos || null }
+                    : {};
+                  if (await accion("POST", "/documentacion", { accion: x.a, fecha: doc.fecha, detalle: doc.detalle || null, facturaComercial: doc.facturaComercial || null, ...montos }, "Documentación actualizada.")) {
+                    setDoc({ ...doc, detalle: "" });
+                    if (x.a === "recibir") setT((p) => ({ ...p, cifUsd: doc.cifUsd || p.cifUsd, paridad: doc.tipoCambio || p.paridad }));
+                  }
                 }}>{x.l}</button>
               ))}
             </div>
@@ -460,7 +486,16 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
       <div className="card">
         <h2>Remisión a facturación</h2>
         {d.remitidaAt ? (
-          <div className="alert success">Remitida el {fechaHora(d.remitidaAt)}. Factura pendiente de emitir en Finanzas: <Link href={`/facturas?estado=pendiente` as any}>ver facturas pendientes</Link>.</div>
+          d.factura && d.factura.estado !== "pendiente" ? (
+            // Folio y estado de cobro de la factura de la tasa (D06-17).
+            <div className={`alert ${d.factura.estado === "pagada" ? "success" : "info"}`}>
+              Remitida el {fechaHora(d.remitidaAt)}. Factura <b>{d.factura.numero}</b> · {ESTADO_FACTURA[d.factura.estado]?.texto ?? d.factura.estado}
+              {d.factura.estado !== "pagada" && d.factura.saldo != null && <> · saldo {clp(d.factura.saldo)}</>}
+              {" "}· <Link href={`/facturas` as any}>ver en Facturas</Link>.
+            </div>
+          ) : (
+            <div className="alert success">Remitida el {fechaHora(d.remitidaAt)}. Factura pendiente de emitir en Finanzas: <Link href={`/facturas?estado=pendiente` as any}>ver facturas pendientes</Link>.</div>
+          )
         ) : (
           <>
             <p className="subtitle" style={{ marginTop: 0 }}>Se une la rama de la tasa (documentación conforme y tasa calculada) con la del certificado: hace falta el documento final oficial ({final ? `${final.numero} · ${final.estado}` : "aún no emitido"}). Crea la factura pendiente de la OT con la línea de la tasa.</p>

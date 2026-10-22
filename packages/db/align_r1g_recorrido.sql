@@ -118,3 +118,14 @@ ALTER TABLE cliente ADD COLUMN IF NOT EXISTS contacto_cargo      VARCHAR(120);
 ALTER TABLE cliente ADD COLUMN IF NOT EXISTS contacto_email      VARCHAR(160);
 ALTER TABLE cliente ADD COLUMN IF NOT EXISTS contacto_telefono   VARCHAR(40);
 COMMENT ON COLUMN cliente.forma_pago_habitual IS 'Código de parametro_sistema forma_pago (EP-00 0.1).';
+
+-- --- 6 · Documentación de la tasa de internación ------------------------------
+-- EP-06 6.8 (recorrido MP-06, D06-03): al registrar la recepción de la
+-- documentación se anotan el CIF, el tipo de cambio, el IVA de internación y los
+-- otros documentos recibidos (transporte, Declaración de Ingreso…). El CIF y el
+-- tipo de cambio se proponen luego en el cálculo de la tasa. Los adjuntos como
+-- fichero quedan para el gestor documental (pendiente).
+ALTER TABLE bpch_internacion ADD COLUMN IF NOT EXISTS doc_cif_usd         NUMERIC(14,2);
+ALTER TABLE bpch_internacion ADD COLUMN IF NOT EXISTS doc_tipo_cambio     NUMERIC(12,4);
+ALTER TABLE bpch_internacion ADD COLUMN IF NOT EXISTS doc_iva_internacion NUMERIC(14,2);
+ALTER TABLE bpch_internacion ADD COLUMN IF NOT EXISTS doc_otros           TEXT;

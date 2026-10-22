@@ -203,6 +203,11 @@ export function SelectorPanel({ catElementoId, valor, onChange }: { catElementoI
   return (
     <fieldset style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 8, maxHeight: 260, overflowY: "auto" }}>
       <legend style={{ fontSize: 11, color: "var(--muted)", padding: "0 4px" }}>Ensayos del panel ({valor.length} de {panel.length} marcados)</legend>
+      {/* Marcar o desmarcar todo el panel de una vez (recorrido MP-06, D06-13). */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+        <button type="button" className="btn outline sm" onClick={() => onChange(panel.filter((m) => m.analitos > 0).map((m) => m.id))}>Marcar todos</button>
+        <button type="button" className="btn outline sm" onClick={() => onChange([])}>Desmarcar todos</button>
+      </div>
       {panel.map((m) => (
         <label key={m.id} style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 12.5, padding: "3px 0", opacity: m.analitos ? 1 : 0.55 }}>
           <input type="checkbox" checked={valor.includes(m.id)} disabled={!m.analitos} onChange={(e) => marcar(m.id, e.target.checked)} />

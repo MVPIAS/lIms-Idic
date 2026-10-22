@@ -18,9 +18,21 @@ export const MODALIDAD: Record<Modalidad, { texto: string; corto: string; ayuda:
   },
 };
 
+/**
+ * Documentos de inspección del BPCH: su etiqueta es su naturaleza, no la
+ * modalidad del informe de ensayo (un Informe de Incumplimiento decía
+ * «Cumplimiento»; recorrido MP-06, D06-18).
+ */
+const NATURALEZA_DOC: Record<string, string> = {
+  INFORME_INSPECCION: "Inspección",
+  CERTIFICADO_CONFORMIDAD: "Conformidad",
+  INFORME_INCUMPLIMIENTO: "Incumplimiento",
+};
+
 /** Etiqueta corta de la modalidad guardada en un documento (null en los anteriores a esta versión). */
-export const textoModalidad = (m: string | null | undefined) =>
-  m === "cumplimiento" || m === "solo_resultados" ? MODALIDAD[m].corto : null;
+export const textoModalidad = (m: string | null | undefined, tipoDocumento?: string | null) =>
+  (tipoDocumento && NATURALEZA_DOC[tipoDocumento]) ||
+  (m === "cumplimiento" || m === "solo_resultados" ? MODALIDAD[m].corto : null);
 
 /** Portada del Informe de Verificación de Calidad (IVC). */
 export interface Portada {

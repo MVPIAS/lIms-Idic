@@ -68,9 +68,14 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
   async function cerrar() {
     const ok = await confirmar({
       titulo: `¿Cerrar la OT ${d.ot.codigo}?`,
-      mensaje: d.ot.conCobro
-        ? "La OT queda cerrada y se genera la factura en borrador para Finanzas con los importes de la cotización aceptada."
-        : "La OT queda cerrada. Es una OT sin cobro: no se genera factura.",
+      // El texto depende de si la factura ya existe (p. ej. la de la tasa de internación) (D06-16).
+      mensaje: !d.ot.conCobro
+        ? "La OT queda cerrada. Es una OT sin cobro: no se genera factura."
+        : d.factura
+          ? `La OT queda cerrada. Su factura ${d.factura.numero} ya existe: no se genera otra.`
+          : d.ot.cotizacionId
+            ? "La OT queda cerrada y se genera la factura en borrador para Finanzas con los importes de la cotización aceptada."
+            : "La OT queda cerrada y se genera la factura en borrador para Finanzas.",
       confirmarTexto: "Cerrar OT",
     });
     if (!ok) return;

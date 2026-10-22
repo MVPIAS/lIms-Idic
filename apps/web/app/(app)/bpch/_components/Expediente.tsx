@@ -174,6 +174,19 @@ export function DocumentosYCierre({
             <EmitirDocumento otId={ot.id} tipo="INFORME_INCUMPLIMIENTO" plantillas={config?.plantillas.INFORME_INCUMPLIMIENTO ?? []} onEmitido={onCambio} />
           )}
           {documentoFinal && informeOficial && condicion === "pendiente" && <div className="alert warn">La condición final está pendiente: faltan resultados por capturar o aprobar.</div>}
+          {/* Qué documento final corresponde y por qué no se ofrece el otro (pautas IN-1 p. 8 e IN-2 p. 4; D06-11). */}
+          {documentoFinal && !informeOficial && condicion !== "pendiente" && (
+            <p className="subtitle" style={{ margin: "6px 0 0" }}>
+              Condición {cond.l}: después del Informe de Inspección oficial corresponde
+              {condicion === "cumple" ? " el Certificado de Conformidad (el Informe de Incumplimiento no aplica)." : " el Informe de Incumplimiento a DGMN (el Certificado de Conformidad no se emite)."}
+            </p>
+          )}
+          {documentoFinal && informeOficial && condicion === "no_cumple" && (
+            <p className="subtitle" style={{ margin: "6px 0 0" }}>Condición NO CUMPLE: no se emite Certificado de Conformidad; corresponde el Informe de Incumplimiento.</p>
+          )}
+          {documentoFinal && informeOficial && condicion === "cumple" && !certificado && (
+            <p className="subtitle" style={{ margin: "6px 0 0" }}>Condición CUMPLE: corresponde el Certificado de Conformidad; el Informe de Incumplimiento no aplica.</p>
+          )}
           {incumplimiento && (
             <div className="alert warn" style={{ marginTop: 8 }}>
               <b>No cumple → informar a DGMN.</b> Una vez oficial, registre la entrega del Informe de Incumplimiento {incumplimiento.numero} con destinatario «DGMN · DCAE» (y copia al internador en la observación). Lo hace la Subdirección BPCH.
@@ -185,7 +198,12 @@ export function DocumentosYCierre({
         </div>
       )}
 
-      <PanelCierreOt otId={ot.id} onCambio={onCambio} />
+      {/* Se vuelve a montar al emitir o firmar: la tabla «Informes y certificados» no queda desfasada (D06-12). */}
+      <PanelCierreOt
+        key={[informeInspeccion, certificado, incumplimiento].map((x: any) => (x ? `${x.id ?? x.numero}:${x.estado}` : "-")).join("|")}
+        otId={ot.id}
+        onCambio={onCambio}
+      />
     </>
   );
 }

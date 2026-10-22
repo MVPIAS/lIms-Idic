@@ -179,6 +179,8 @@ export class OtCierreService {
         codigo: ot.codigo,
         estado: ot.estado,
         conCobro: ot.conCobro,
+        cotizacionId: ot.cotizacionId ?? null,
+        origenTrabajo: ot.origenTrabajo ?? null,
         cliente: ot.cliente?.razonSocial ?? null,
         emailCliente: ot.cliente?.email ?? null,
         fechaRecepcion: ot.fechaRecepcion,
