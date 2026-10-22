@@ -51,6 +51,17 @@ import { RecepcionService, type ConfigRecepcionLab } from "../recepcion/recepcio
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 import { decidirAccionResultado, motivoMismoRevisor, type AccionResultado } from "../rbac/alcance-resultado";
 import { retenerHasta, type RecepcionLabNormalizada } from "../recepcion/reglas-recepcion";
+import { ReglasCapturaService } from "../formularios/reglas-captura.service";
+import type { Variante } from "../formularios/variantes";
+
+/**
+ * Valor que escribe un formulario especializado (frente r2a): el dato primario
+ * vive en su registro y aquí llega ya decidido (texto, número y veredicto).
+ */
+export interface OpcionesCapturaVariante {
+  variante: Variante;
+  registro: { valorTexto: string; valorNumerico?: number | null; veredicto: "cumple" | "no_cumple" | "pendiente" | "informativo"; observacion: string | null };
+}
 
 /**
  * =============================================================================
@@ -596,6 +607,7 @@ export class PuenteAnalisisService {
     private readonly labs: LaboratorioOtService,
     private readonly equipos: EquiposService,
     private readonly alcanceResultado: AlcanceResultadoService,
+    private readonly reglasCaptura: ReglasCapturaService,
   ) {}
 
   /** Veredicto de un «< LD» indeterminado (parámetro captura_ld.indeterminado; por defecto pendiente). */
@@ -882,12 +894,15 @@ export class PuenteAnalisisService {
    * cumple en los atributos. Lo revisado o aprobado no se sobrescribe. Deja al
    * usuario como analista (segregación) y recalcula el veredicto de la muestra.
    */
-  async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any) {
+  async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any, variante?: OpcionesCapturaVariante) {
     // El laboratorio de destino de una orden interna recibida captura sus ensayos derivados.
     const { resultado, otId, lab } = await this.resultadoEnAlcance(id, tenantId, req);
 
     const bloqueo = motivoNoCapturable(resultado.estado);
     if (bloqueo) throw new ConflictException(bloqueo);
+    // Formulario especializado del ensayo, preparación de la muestra y documentación
+    // del trabajo del DSA (formularios/reglas-captura.service.ts): 409 con el motivo.
+    await this.reglasCaptura.exigirCapturable(id, tenantId, variante?.variante ?? null);
 
     const tipoDato: TipoDato =
       (resultado.tipoDato as TipoDato) ??
@@ -908,7 +923,8 @@ export class PuenteAnalisisService {
       ? (await this.prisma.catMetodo.findFirst({ where: { id: resultado.catMetodoId }, select: { equipoRequerido: true } }))?.equipoRequerido ?? false
       : false;
     const equipoId = entrada.equipoId === undefined ? resultado.equipoId ?? null : entrada.equipoId;
-    if (equipoObligatorio(await this.modoEquipo(tenantId), metodoExige, tipoDato) && !equipoId)
+    // El formulario especializado registra el equipo en su propio registro (preparación / acondicionamiento).
+    if (!variante && equipoObligatorio(await this.modoEquipo(tenantId), metodoExige, tipoDato) && !equipoId)
       throw new BadRequestException(
         "Indique el equipo con que se ejecutó el ensayo: es obligatorio para este método (contrato §4.4.2). Los equipos con la calibración vencida no se pueden usar.",
       );
@@ -930,7 +946,15 @@ export class PuenteAnalisisService {
     if (cond.errores.length) throw new BadRequestException(cond.errores.join(" "));
 
     let calc;
-    try {
+    if (variante) {
+      // Valor ya decidido por el formulario especializado (su dato primario queda en su registro).
+      const r = variante.registro;
+      calc = {
+        valorNumerico: r.valorNumerico ?? null, valorTexto: r.valorTexto, replicas: [] as number[], promedio: null, desviacion: null, cv: null,
+        resultadoFinal: r.valorNumerico ?? null, formulaAplicada: null, lecturas: null, observacion: r.observacion, veredicto: r.veredicto,
+        valorSinFactor: null, factorAplicado: false,
+      };
+    } else try {
       calc = calcularCaptura(
         {
           criterioLd: await this.criterioLd(tenantId),
@@ -1869,6 +1893,7 @@ export class RecepcionMuestraController {
   // BPCH (internación / reinspección) registra cada lote como muestra de la OT
   // con el mismo servicio que la pestaña «Muestras» del expediente.
   // Especificaciones técnicas (desglose en componentes) genera ensayos con el mismo puente.
+  // Los formularios especializados (frente r2a) escriben su valor con el puente.
   exports: [RegistroMuestrasService, PuenteAnalisisService],
 })
 export class FlujoRealModule {}

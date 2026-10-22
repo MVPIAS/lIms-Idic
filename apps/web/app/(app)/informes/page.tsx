@@ -56,6 +56,8 @@ const TIPOS_DOCUMENTO: { valor: string; texto: string }[] = [
   { valor: "INFORME_INSPECCION", texto: "Informe de inspección" },
   { valor: "CERTIFICADO_CONFORMIDAD", texto: "Certificado de conformidad" },
   { valor: "INFORME_INCUMPLIMIENTO", texto: "Informe de incumplimiento" },
+  { valor: "CERTIFICADO_RESISTENCIA_BALISTICA", texto: "Certificado de Resistencia Balística (CRB)" },
+  { valor: "INFORME_RECHAZO", texto: "Informe de Ensayo de Rechazo (LRB)" },
 ];
 
 const lista = <T,>(r: any): T[] => (Array.isArray(r) ? r : (r?.data ?? []));

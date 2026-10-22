@@ -90,6 +90,7 @@ export const NAV: SeccionNav[] = [
       { href: "/especificaciones", label: "Especificaciones técnicas (E.T.)", icon: "📘", perm: "et.ver", claves: "eett et cliente requisito punto licitacion contrato rsa norma version" },
       { href: "/recepcion", label: "Bandeja de entrada del laboratorio", icon: "📬", perm: "muestra.crear", claves: "recepcion recepcionar muestras por recibir ot interna bpch" },
       { href: "/captura-ot", label: "Captura y revisión por OT", icon: "📈", perm: ["resultado.crear", "resultado.revisar", "resultado.aprobar"], claves: "revisar aprobar devolver especificación" },
+      { href: "/preparacion-trabajo", label: "Preparación del trabajo por aprobar", icon: "📝", perm: "ot.preparacion.aprobar", claves: "planilla de trabajo paquete tecnico proyecto de parrafo plan de inspeccion aprobar dsa" },
       { href: "/informes", label: "Emitir informe", icon: "🖨", perm: "certificado.emitir" },
       { href: "/informes/por-firmar", label: "Documentos por firmar", icon: "✒", perm: "documento.firmar", claves: "firma firmar oficializar revisar informe" },
       { href: "/certificados", label: "Informes y certificados", icon: "📜", perm: "ot.ver", claves: "entrega anular reemitir" },

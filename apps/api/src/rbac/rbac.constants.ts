@@ -33,6 +33,8 @@ export const TIPOS_DOCUMENTO = [
   "OT_DISPOSICION",
   "SOLICITUD_ADQUISICION",
   "OFICIO",
+  "CERTIFICADO_RESISTENCIA_BALISTICA",
+  "INFORME_RECHAZO",
 ] as const;
 export type TipoDocumento = (typeof TIPOS_DOCUMENTO)[number];
 

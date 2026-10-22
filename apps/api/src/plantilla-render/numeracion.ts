@@ -29,6 +29,8 @@ export const TIPOS_NUMERABLES = [
   "INFORME_INSPECCION",
   "CERTIFICADO_CONFORMIDAD",
   "INFORME_INCUMPLIMIENTO",
+  "CERTIFICADO_RESISTENCIA_BALISTICA",
+  "INFORME_RECHAZO",
   "RESPUESTA_OI",
 ] as const;
 
@@ -40,6 +42,8 @@ export const NOMBRE_TIPO_NUMERABLE: Record<string, string> = {
   INFORME_INSPECCION: "Informe de inspección",
   CERTIFICADO_CONFORMIDAD: "Certificado de conformidad",
   INFORME_INCUMPLIMIENTO: "Informe de incumplimiento",
+  CERTIFICADO_RESISTENCIA_BALISTICA: "Certificado de Resistencia Balística (CRB)",
+  INFORME_RECHAZO: "Informe de Ensayo de Rechazo",
   RESPUESTA_OI: "Respuesta a una orden interna",
 };
 

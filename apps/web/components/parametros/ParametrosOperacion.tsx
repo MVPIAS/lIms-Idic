@@ -9,23 +9,33 @@
  * según su tipo y un motivo, y cada cambio queda en el historial. El resto,
  * solo lectura. Mismo patrón que «Porcentajes de la tasa de internación».
  *
+ * Frente r2a: formulario especializado por método o laboratorio («variante»),
+ * tablas (amenazas del LRB, HCP por tipo de vehículo, planes RSA, rangos
+ * sensoriales) y campos de la preparación de muestras («campo_prep»).
+ *
  * API: GET /parametros/configurables · PUT /parametros/configurables/:categoria/:codigo
- *      POST /parametros/configurables/:categoria (alta por laboratorio)
+ *      POST /parametros/configurables/:categoria (alta por laboratorio, método o plantilla)
  */
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
 import { toast } from "@/components/ui/feedback";
+import EditorTabla, { type ColumnaTabla } from "./EditorTabla";
 
-type Tipo = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo";
+type Tipo = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
 interface Opcion { valor: string; etiqueta: string }
-interface Def { tipo: Tipo; ayuda: string | null; min: number | null; max: number | null; unidad: string | null; opciones: Opcion[] | null; porDefecto: string | null }
-interface DefCampo { tipo: string; obligatorio: boolean; opciones: Opcion[]; ayuda: string; activo: boolean }
+interface Def { tipo: Tipo; ayuda: string | null; min: number | null; max: number | null; unidad: string | null; opciones: Opcion[] | null; porDefecto: string | null; columnas?: ColumnaTabla[] | null; maxFilas?: number | null }
+interface DefCampo { tipo: string; obligatorio: boolean; opciones: Opcion[]; ayuda: string; activo: boolean; bloquea?: boolean; unidad?: string }
+interface Variante { variante: string; activo: boolean }
+type Alta = "laboratorio" | "campo" | "metodo" | "plantilla";
 interface Parametro {
   id?: string; categoria?: string; codigo: string; nombre: string; def?: Def; valor?: any; texto?: string;
   activo?: boolean; laboratorio?: string | null; updatedAt?: string | null; falta?: boolean;
 }
-interface Grupo { categoria: string; titulo: string; donde: string; porConfirmar: string | null; alta: "laboratorio" | "campo" | null; parametros: Parametro[] }
+interface Grupo {
+  categoria: string; titulo: string; donde: string; porConfirmar: string | null; alta: Alta | null; parametros: Parametro[];
+  patron?: { tipo: Tipo; opciones: Opcion[] | null; columnas: ColumnaTabla[] | null; maxFilas: number | null; nombre: string } | null;
+}
 interface Cambio { id: string; grupo: string; parametro: string; antes: string; despues: string; motivo: string; createdAt: string; usuarioNombre: string | null }
 interface Datos { puedeEditar: boolean; grupos: Grupo[]; laboratorios: { codigo: string; nombre: string }[]; historial: Cambio[] }
 
@@ -38,9 +48,10 @@ const TIPOS_CAMPO: Opcion[] = [
   { valor: "casilla", etiqueta: "Casilla (sí / no)" },
 ];
 const CAMPO_VACIO: DefCampo = { tipo: "texto", obligatorio: false, opciones: [], ayuda: "", activo: true };
+const TIPOS_CAMPO_PREP: Opcion[] = [...TIPOS_CAMPO, { valor: "equipo", etiqueta: "Equipo del laboratorio" }];
 
-/** Lo que se edita: un valor simple o la definición de un campo. */
-type Borrador = string | boolean | string[] | DefCampo;
+/** Lo que se edita: un valor simple, la definición de un campo, una variante o las filas de una tabla. */
+type Borrador = string | boolean | string[] | DefCampo | Variante | Record<string, unknown>[];
 
 function borradorDe(p: Parametro): Borrador {
   const t = p.def!.tipo;
@@ -48,7 +59,9 @@ function borradorDe(p: Parametro): Borrador {
   if (t === "porcentaje") return p.valor == null ? "" : Number(p.valor).toLocaleString("es-CL", { maximumFractionDigits: 4, useGrouping: false });
   if (t === "sino" || t === "obligatorio") return Boolean(p.valor);
   if (t === "multiple") return Array.isArray(p.valor) ? p.valor : [];
-  if (t === "campo") return { ...CAMPO_VACIO, ...(p.valor ?? {}), opciones: [...(p.valor?.opciones ?? [])] };
+  if (t === "campo" || t === "campo_prep") return { ...CAMPO_VACIO, ...(p.valor ?? {}), opciones: [...(p.valor?.opciones ?? [])] };
+  if (t === "variante") return { variante: p.valor?.variante ?? "estandar", activo: p.valor?.activo !== false };
+  if (t === "tabla") return Array.isArray(p.valor) ? p.valor.map((x: any) => ({ ...x })) : [];
   return String(p.valor ?? "");
 }
 
@@ -56,6 +69,14 @@ function borradorDe(p: Parametro): Borrador {
 function ejemplo(formato: string, digitos: number) {
   if (!formato.includes("{N}")) return null;
   return formato.replace(/\{AAAA\}/g, String(new Date().getFullYear())).replace(/\{N\}/g, "1".padStart(Math.max(1, Math.min(10, digitos || 1)), "0"));
+}
+
+const TEXTO_ALTA: Record<Alta, string> = { laboratorio: "＋ Añadir laboratorio", campo: "＋ Añadir campo", metodo: "＋ Añadir método", plantilla: "＋ Añadir plantilla" };
+const COLUMNA_ALTA: Record<Alta, string> = { laboratorio: "Laboratorio", campo: "Laboratorio", metodo: "Método", plantilla: "Código" };
+/** Nombre de la regla en las filas por patrón (el de producto obligatorio es el de siempre). */
+function nombreFila(g: Grupo, p: Parametro): string {
+  if (p.def?.tipo === "obligatorio") return g.categoria === "preparacion_obligatoria" ? "Preparación obligatoria antes de capturar" : "Producto obligatorio al recepcionar";
+  return p.nombre;
 }
 
 export default function ParametrosOperacion() {
@@ -123,7 +144,7 @@ export default function ParametrosOperacion() {
                 )}
                 {editable && g.alta && (
                   <button type="button" className="btn outline sm" onClick={() => { setAlta(g); setEditando(null); }}>
-                    {g.alta === "campo" ? "＋ Añadir campo" : "＋ Añadir laboratorio"}
+                    {TEXTO_ALTA[g.alta]}
                   </button>
                 )}
               </div>
@@ -142,7 +163,7 @@ export default function ParametrosOperacion() {
               <table className="data">
                 <thead>
                   <tr>
-                    {g.alta ? <th style={{ width: 90 }}>Laboratorio</th> : null}
+                    {g.alta ? <th style={{ width: 90 }}>{COLUMNA_ALTA[g.alta]}</th> : null}
                     <th>{g.alta === "laboratorio" ? "Regla" : "Parámetro"}</th>
                     <th style={{ width: "30%" }}>Valor vigente</th>
                     {g.alta === "campo" && <th>Estado</th>}
@@ -154,9 +175,9 @@ export default function ParametrosOperacion() {
                   {filas.map((p) => (
                     <Fragment key={p.codigo}>
                       <tr>
-                        {g.alta ? <td><b>{p.laboratorio}</b></td> : null}
+                        {g.alta ? <td><b>{g.alta === "metodo" || g.alta === "plantilla" ? p.codigo : p.laboratorio}</b></td> : null}
                         <td>
-                          {g.alta === "laboratorio" ? "Producto obligatorio al recepcionar" : p.nombre}
+                          {nombreFila(g, p)}
                           {p.def?.ayuda && g.alta !== "laboratorio" && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{p.def.ayuda}</div>}
                           {g.alta === "campo" && <div style={{ fontSize: 11, color: "var(--muted)" }}><code>{p.codigo}</code></div>}
                         </td>
@@ -172,7 +193,7 @@ export default function ParametrosOperacion() {
                           <td style={{ textAlign: "right" }}>
                             {!p.falta && (
                               <button type="button" className="btn outline sm" aria-expanded={editando?.id === p.id}
-                                aria-label={`Cambiar ${g.alta === "laboratorio" ? `${p.laboratorio}: producto obligatorio` : p.nombre}`}
+                                aria-label={`Cambiar ${g.alta === "laboratorio" ? `${p.laboratorio}: ${nombreFila(g, p)}` : g.alta === "metodo" || g.alta === "plantilla" ? `${p.codigo}: ${p.nombre}` : p.nombre}`}
                                 onClick={() => { setEditando(editando?.id === p.id ? null : p); setAlta(null); }}>
                                 {editando?.id === p.id ? "Cerrar" : "Cambiar"}
                               </button>
@@ -285,21 +306,28 @@ function FormAlta({ grupo, laboratorios, onCancelar, onListo }: {
   grupo: Grupo; laboratorios: { codigo: string; nombre: string }[]; onCancelar: () => void; onListo: (m: string) => Promise<void>;
 }) {
   const esCampo = grupo.alta === "campo";
+  const porCodigo = grupo.alta === "metodo" || grupo.alta === "plantilla";
   const yaEstan = new Set(grupo.parametros.map((p) => p.laboratorio));
   const opcionesLab = esCampo ? laboratorios : laboratorios.filter((l) => !yaEstan.has(l.codigo));
+  const tipo: Tipo = grupo.patron?.tipo ?? (esCampo ? "campo" : "obligatorio");
   const [lab, setLab] = useState("");
+  const [codigo, setCodigo] = useState("");
   const [campo, setCampo] = useState("");
   const [etiqueta, setEtiqueta] = useState("");
-  const [b, setB] = useState<Borrador>(esCampo ? { ...CAMPO_VACIO } : true);
+  const [b, setB] = useState<Borrador>(
+    tipo === "campo" || tipo === "campo_prep" ? { ...CAMPO_VACIO } : tipo === "variante" ? { variante: grupo.patron?.opciones?.[1]?.valor ?? "estandar", activo: true } : tipo === "tabla" ? [] : true,
+  );
   const [motivo, setMotivo] = useState("");
   const [err, setErr] = useState("");
   const [guardando, setGuardando] = useState(false);
   const id = `alta-${grupo.categoria}`;
-  const def: Def = { tipo: esCampo ? "campo" : "obligatorio", ayuda: null, min: null, max: null, unidad: null, opciones: null, porDefecto: null };
+  const def: Def = { tipo, ayuda: null, min: null, max: null, unidad: null, opciones: grupo.patron?.opciones ?? null, porDefecto: null, columnas: grupo.patron?.columnas ?? null, maxFilas: grupo.patron?.maxFilas ?? null };
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
-    if (!lab) { setErr("Elija el laboratorio."); return; }
+    if (!porCodigo && !lab) { setErr("Elija el laboratorio."); return; }
+    if (porCodigo && !codigo.trim()) { setErr(grupo.alta === "metodo" ? "Indique el código del método del catálogo." : "Indique el código de la plantilla."); return; }
+    if (grupo.alta === "plantilla" && !etiqueta.trim()) { setErr("Indique el nombre visible de la plantilla."); return; }
     if (esCampo && (!/^[a-z][a-z0-9_]{0,39}$/.test(campo) || !etiqueta.trim())) {
       setErr("Indique el código del campo (minúsculas, sin espacios ni tildes, p. ej. lote_proveedor) y su nombre visible.");
       return;
@@ -309,9 +337,11 @@ function FormAlta({ grupo, laboratorios, onCancelar, onListo }: {
     setErr("");
     try {
       await llamar("POST", `/parametros/configurables/${grupo.categoria}`, {
-        laboratorio: lab, ...(esCampo ? { campo, etiqueta: etiqueta.trim() } : {}), valor: b, motivo: motivo.trim(),
+        ...(porCodigo ? { codigo: codigo.trim().toUpperCase() } : { laboratorio: lab }),
+        ...(esCampo ? { campo, etiqueta: etiqueta.trim() } : grupo.alta === "plantilla" ? { etiqueta: etiqueta.trim() } : {}),
+        valor: b, motivo: motivo.trim(),
       });
-      await onListo(esCampo ? `Campo «${etiqueta.trim()}» añadido a ${lab}.` : `${lab}: regla añadida.`);
+      await onListo(esCampo ? `Campo «${etiqueta.trim()}» añadido a ${lab}.` : porCodigo ? `${codigo.trim().toUpperCase()}: añadido.` : `${lab}: regla añadida.`);
     } catch (x: any) {
       setErr(x.message);
     } finally {
@@ -321,15 +351,28 @@ function FormAlta({ grupo, laboratorios, onCancelar, onListo }: {
 
   return (
     <form onSubmit={guardar} style={{ display: "grid", gap: 10, border: "1px dashed var(--line)", borderRadius: 8, padding: 10, marginBottom: 10 }}
-      aria-label={esCampo ? "Añadir un campo de recepción" : "Añadir un laboratorio"}>
+      aria-label={esCampo ? "Añadir un campo" : grupo.alta === "metodo" ? "Añadir un método" : grupo.alta === "plantilla" ? "Añadir una plantilla" : "Añadir un laboratorio"}>
       <div className="form-grid cols-3" style={{ margin: 0 }}>
-        <div className="field">
-          <label htmlFor={`${id}-lab`}>Laboratorio <span className="req">*</span></label>
-          <select id={`${id}-lab`} value={lab} onChange={(e) => setLab(e.target.value)}>
-            <option value="">Elegir…</option>
-            {opcionesLab.map((l) => <option key={l.codigo} value={l.codigo}>{l.codigo} · {l.nombre}</option>)}
-          </select>
-        </div>
+        {porCodigo ? (
+          <div className="field">
+            <label htmlFor={`${id}-codigo`}>{grupo.alta === "metodo" ? "Código del método del catálogo" : "Código de la plantilla"} <span className="req">*</span></label>
+            <input id={`${id}-codigo`} value={codigo} maxLength={30} onChange={(e) => setCodigo(e.target.value)} placeholder={grupo.alta === "metodo" ? "p. ej. 3376" : "p. ej. REMOLQUE"} />
+          </div>
+        ) : (
+          <div className="field">
+            <label htmlFor={`${id}-lab`}>Laboratorio <span className="req">*</span></label>
+            <select id={`${id}-lab`} value={lab} onChange={(e) => setLab(e.target.value)}>
+              <option value="">Elegir…</option>
+              {opcionesLab.map((l) => <option key={l.codigo} value={l.codigo}>{l.codigo} · {l.nombre}</option>)}
+            </select>
+          </div>
+        )}
+        {grupo.alta === "plantilla" && (
+          <div className="field span-2">
+            <label htmlFor={`${id}-et`}>Nombre visible <span className="req">*</span></label>
+            <input id={`${id}-et`} value={etiqueta} maxLength={160} onChange={(e) => setEtiqueta(e.target.value)} />
+          </div>
+        )}
         {esCampo && (
           <>
             <div className="field">
@@ -352,7 +395,7 @@ function FormAlta({ grupo, laboratorios, onCancelar, onListo }: {
       {err && <div className="alert warn" role="alert" style={{ margin: 0 }}>{err}</div>}
       <div className="toolbar" style={{ margin: 0 }}>
         <button type="button" className="btn outline sm" onClick={onCancelar}>Cancelar</button>
-        <button type="submit" className="btn primary sm" disabled={guardando}>{guardando ? "Guardando…" : esCampo ? "Añadir campo" : "Añadir laboratorio"}</button>
+        <button type="submit" className="btn primary sm" disabled={guardando}>{guardando ? "Guardando…" : TEXTO_ALTA[grupo.alta ?? "laboratorio"].replace("＋ ", "")}</button>
       </div>
     </form>
   );
@@ -401,7 +444,7 @@ function EditorValor({ id, def, b, setB, digitos, codigo }: {
         </fieldset>
       );
     case "multiple": {
-      const marcados = Array.isArray(b) ? b : [];
+      const marcados = (Array.isArray(b) ? b : []) as string[];
       return (
         <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
           <legend style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>Marque los que correspondan</legend>
@@ -431,11 +474,31 @@ function EditorValor({ id, def, b, setB, digitos, codigo }: {
     }
     case "campo":
       return <EditorCampo id={id} c={b as DefCampo} setC={setB} esDestino={codigo.endsWith(".clase_custodia")} />;
+    case "campo_prep":
+      return <EditorCampo id={id} c={b as DefCampo} setC={setB} esDestino={false} preparacion />;
+    case "variante": {
+      const v = b as Variante;
+      return (
+        <div style={{ display: "grid", gap: 8 }}>
+          <div className="field" style={{ maxWidth: 520 }}>
+            <label htmlFor={`${id}-var`}>Formulario de captura <span className="req">*</span></label>
+            <select id={`${id}-var`} value={v.variante} onChange={(e) => setB({ ...v, variante: e.target.value })} autoFocus>
+              {(def.opciones ?? []).map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
+            </select>
+          </div>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+            <input type="checkbox" checked={v.activo} onChange={(e) => setB({ ...v, activo: e.target.checked })} /> Activa (si no, rige la captura estándar)
+          </label>
+        </div>
+      );
+    }
+    case "tabla":
+      return <EditorTabla id={id} columnas={def.columnas ?? []} maxFilas={def.maxFilas ?? 200} filas={b as Record<string, unknown>[]} onCambio={setB} />;
   }
 }
 
 /** Definición de un campo de recepción: tipo, obligatorio, activo, ayuda y opciones. */
-function EditorCampo({ id, c, setC, esDestino }: { id: string; c: DefCampo; setC: (c: DefCampo) => void; esDestino: boolean }) {
+function EditorCampo({ id, c, setC, esDestino, preparacion }: { id: string; c: DefCampo; setC: (c: DefCampo) => void; esDestino: boolean; preparacion?: boolean }) {
   const set = (cambios: Partial<DefCampo>) => setC({ ...c, ...cambios });
   const opcion = (i: number, cambios: Partial<Opcion>) => set({ opciones: c.opciones.map((o, j) => (j === i ? { ...o, ...cambios } : o)) });
   return (
@@ -444,18 +507,29 @@ function EditorCampo({ id, c, setC, esDestino }: { id: string; c: DefCampo; setC
         <div className="field">
           <label htmlFor={`${id}-tipo`}>Tipo de dato <span className="req">*</span></label>
           <select id={`${id}-tipo`} value={c.tipo} onChange={(e) => set({ tipo: e.target.value })} disabled={esDestino}>
-            {TIPOS_CAMPO.map((t) => <option key={t.valor} value={t.valor}>{t.etiqueta}</option>)}
+            {(preparacion ? TIPOS_CAMPO_PREP : TIPOS_CAMPO).map((t) => <option key={t.valor} value={t.valor}>{t.etiqueta}</option>)}
           </select>
         </div>
         <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, alignSelf: "end", paddingBottom: 6 }}>
-          <input type="checkbox" checked={c.obligatorio} onChange={(e) => set({ obligatorio: e.target.checked })} /> Obligatorio al recibir
+          <input type="checkbox" checked={c.obligatorio} onChange={(e) => set({ obligatorio: e.target.checked })} /> {preparacion ? "Obligatorio al preparar" : "Obligatorio al recibir"}
         </label>
         <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, alignSelf: "end", paddingBottom: 6 }}>
-          <input type="checkbox" checked={c.activo} onChange={(e) => set({ activo: e.target.checked })} /> Activo (se pide en la recepción)
+          <input type="checkbox" checked={c.activo} onChange={(e) => set({ activo: e.target.checked })} /> {preparacion ? "Activo (se pide en la preparación)" : "Activo (se pide en la recepción)"}
         </label>
       </div>
+      {preparacion && (
+        <div className="form-grid cols-3" style={{ margin: 0 }}>
+          <label className="span-2" style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+            <input type="checkbox" checked={!!c.bloquea} disabled={!["casilla", "fecha", "equipo"].includes(c.tipo)} onChange={(e) => set({ bloquea: e.target.checked })} /> Bloquea la captura (casilla sin marcar, fecha vencida o equipo no apto)
+          </label>
+          <div className="field">
+            <label htmlFor={`${id}-unidad`}>Unidad</label>
+            <input id={`${id}-unidad`} value={c.unidad ?? ""} maxLength={20} onChange={(e) => set({ unidad: e.target.value })} placeholder="g, mL, °C, %…" />
+          </div>
+        </div>
+      )}
       <div className="field">
-        <label htmlFor={`${id}-ayuda`}>Ayuda para quien recibe</label>
+        <label htmlFor={`${id}-ayuda`}>{preparacion ? "Ayuda para quien prepara" : "Ayuda para quien recibe"}</label>
         <input id={`${id}-ayuda`} value={c.ayuda} maxLength={300} onChange={(e) => set({ ayuda: e.target.value })} />
       </div>
       {c.tipo === "lista" && (
