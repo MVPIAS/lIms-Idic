@@ -551,13 +551,23 @@ async function main() {
     return firmarTodo(C.incumpB);
   });
 
-  await paso("B · Se informa a DGMN (entrega del incumplimiento) y la OT se cierra sin factura", async () => {
+  await paso("B · Se informa a DGMN (notificación registrada, EP-10 10.15) y la OT se cierra sin factura", async () => {
     await exigir(409, U.bpch, "POST", `/bpch/internaciones/${C.B.id}/codificacion`, { items: [{ id: C.B.items[0].id, listado: "EXPLOSIVOS" }] });
     await exigir(409, U.ventas, "POST", `/bpch/internaciones/${C.B.id}/tasa`, { cifUsd: 1, paridad: 1 });
     await ok(U.planif, "POST", `/informes/${C.informeB}/entregar`, { medio: "mano", destinatario: "BPCH SCC (archivo)" });
     await ok(U.bpch, "POST", `/informes/${C.incumpB}/entregar`, { medio: "oficina_partes", destinatario: "DGMN · DCAE", observacion: "Copia al internador" });
     C.B = await ok(U.scc, "GET", `/bpch/internaciones/${C.B.id}`);
     afirmar(C.B.fases.find((f) => f.clave === "documento_final").estado === "hecho", "la fase del incumplimiento no quedó hecha");
+    // EP-10 10.15 (frente r4b): sin la notificación a DGMN registrada, la OT no se cierra.
+    const bloqueo = await llamar(U.planif, "POST", `/ot/${C.B.otId}/cerrar`, {});
+    afirmar(bloqueo.status === 409 && /notificación a DGMN/.test(msg(bloqueo.json)), `cierre sin notificación → ${bloqueo.status}: ${msg(bloqueo.json)}`);
+    const hoyCl = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    const notif = { certificadoId: C.incumpB, medio: "oficina_partes", oficioNumero: `Of. ${sello.slice(-4)}`, fechaEnvio: hoyCl, copiaInternador: true };
+    await exigir(403, U.planif, "POST", `/bpch/notificacion-dgmn/ot/${C.B.otId}`, notif);
+    await exigir(400, U.bpch, "POST", `/bpch/notificacion-dgmn/ot/${C.B.otId}`, { ...notif, oficioNumero: "" });
+    const n = await ok(U.bpch, "POST", `/bpch/notificacion-dgmn/ot/${C.B.otId}`, notif);
+    afirmar(n.incumplimientos[0].notificacion?.destinatarios?.length === 3, "la notificación no lleva los destinatarios fijos");
+    await exigir(409, U.bpch, "POST", `/bpch/notificacion-dgmn/ot/${C.B.otId}`, notif);
     const r = await ok(U.planif, "POST", `/ot/${C.B.otId}/cerrar`, {});
     afirmar(!r.facturaCreada, "se creó factura para una internación sin tasa");
     return "informado a DGMN · OT cerrada sin factura";

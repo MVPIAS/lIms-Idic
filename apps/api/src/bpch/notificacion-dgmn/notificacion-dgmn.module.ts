@@ -160,11 +160,11 @@ export class NotificacionDgmnService {
 @ApiTags("bpch-notificacion-dgmn")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
-@AmbitoUnidad("BPCH", "DCO")
 @Controller("bpch/notificacion-dgmn")
 export class NotificacionDgmnController {
   constructor(private readonly svc: NotificacionDgmnService) {}
 
+  /** Consulta con el alcance de la OT (la ficha de cualquier OT la pide; sin incumplimiento responde aplica: false). */
   @Get("ot/:otId")
   @RequierePermiso("ot.ver")
   @ApiOperation({ summary: "Incumplimientos de la OT y su notificación a DGMN" })
