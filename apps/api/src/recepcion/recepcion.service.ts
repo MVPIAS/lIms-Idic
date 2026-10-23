@@ -186,6 +186,31 @@ export class RecepcionService {
     };
   }
 
+  /**
+   * B-012: productos con panel propio del laboratorio de un elemento genérico
+   * («Lab. Materiales Energéticos» → Nitrato de amonio, Nitrocelulosa…, lista
+   * producto_lab). «Registrar OT» los ofrece al elegir el elemento del
+   * laboratorio, para que el panel venga del producto y no del elemento
+   * genérico: un único panel por producto, el mismo que en la recepción.
+   */
+  async productosDeElemento(tenantId: string, elementoId: string) {
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string; codigo: string; nombre: string; metodos: number; laboratorio: string }[]>(
+      `SELECT pe.id, pe.codigo, ps.etiqueta AS nombre, u.codigo AS laboratorio,
+              (SELECT count(*) FROM cat_panel p WHERE p.elemento_id = pe.id AND p.deleted_at IS NULL AND p.activo)::int AS metodos
+         FROM cat_elemento e
+         JOIN cat_familia f ON f.id = e.familia_id
+         JOIN unidad u ON u.tenant_id = e.tenant_id AND ${FAMILIA_DE_UNIDAD}
+         JOIN parametro_sistema ps ON ps.tenant_id = e.tenant_id AND ps.categoria = 'producto_lab' AND ps.activo
+                                  AND upper(ps.codigo) LIKE upper(u.codigo) || '.%'
+         JOIN cat_elemento pe ON pe.tenant_id = e.tenant_id AND pe.codigo = ps.valor AND pe.deleted_at IS NULL AND pe.activo
+        WHERE e.id = $1::uuid AND e.tenant_id = $2::uuid
+        ORDER BY ps.orden, ps.etiqueta`,
+      elementoId,
+      tenantId,
+    );
+    return { productos: filas.map((f) => ({ ...f, metodos: Number(f.metodos) })) };
+  }
+
   /** Métodos del panel del producto (cat_panel), con su nº de analitos: «carga el panel». */
   async panel(otId: string, elementoId: string, tenantId: string, req: any) {
     await this.otEnAlcance(otId, tenantId, req, "muestra.ver");
