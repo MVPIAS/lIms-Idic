@@ -312,7 +312,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   // EP-05 0.2: el lote del LRB se cotiza con unidades de reposición (parámetro cotizacion_lrb.reposicion).
   const reposicionLrb = Number((cfg as any)?.reposicionLrb ?? 4);
   const esLrb = (cc?.codigo ?? "").toUpperCase() === "LRB" || (cc?.laboratorio ?? "").toUpperCase() === "LRB";
-  const esMetrologia = LABS_METROLOGIA.includes((cc?.codigo ?? "").toUpperCase()) || LABS_METROLOGIA.includes((cc?.laboratorio ?? "").toUpperCase());
+  // El código del centro de costo puede llevar sufijo («LMT-001», «LMT-AE»): cuenta el prefijo.
+  const esMetrologia = LABS_METROLOGIA.includes((cc?.codigo ?? "").toUpperCase().split(/[-_ ]/)[0]) || LABS_METROLOGIA.includes((cc?.laboratorio ?? "").toUpperCase());
   const setInst = (i: number, x: Partial<Instrumento>) => setLineas((ls) => ls.map((l, j) => (j === i ? { ...l, inst: { ...(l.inst ?? INST_VACIO), ...x } } : l)));
   const [reposicionAplicada, setReposicionAplicada] = useState(false);
   function sumarReposicion() {
