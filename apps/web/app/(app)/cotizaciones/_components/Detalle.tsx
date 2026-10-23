@@ -156,7 +156,7 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
             </ul>
           } />
         )}
-        {cot.ot && <Campo l="OT generada" v={`${cot.ot.codigo} · ${ORIGEN_LABEL[cot.ot.origenTrabajo] ?? cot.ot.origenTrabajo ?? "—"}`} />}
+        {cot.ot && <Campo l="OT generada" v={<><Link href={`/ot/${cot.ot.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{cot.ot.codigo}</Link> · {ORIGEN_LABEL[cot.ot.origenTrabajo] ?? cot.ot.origenTrabajo ?? "—"}</>} />}
         {cot.estado === "anulada" && (
           <Campo l="Anulación" v={`${cot.anulacionMotivo ?? "Sin motivo registrado"}${cot.anuladaAt ? ` · ${fecha(cot.anuladaAt)}` : ""}`} full />
         )}

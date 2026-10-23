@@ -851,6 +851,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     });
     // EP-00 5.1 (BL-159): la OT hereda moneda, forma de pago, referencia, descripción técnica, valor y paridad.
     await heredarDeCotizacion(this.prisma, tenantIdOt, ot.id, id);
+    // B-086: la bitácora deja la aceptación y la OT generada (con su enlace).
+    await this.hito(cot.tenantId, id, "aceptada", usuarioId, null, {
+      tipoDocumento: doc.tipo ?? null,
+      numero: doc.numero?.trim() || null,
+      otId: ot.id,
+      otCodigo: ot.codigo,
+    });
     if (oc.aplica)
       await this.hito(cot.tenantId, id, oc.hayDiscrepancia ? "discrepancia_oc" : "oc_conforme", usuarioId, doc.discrepancia?.trim() || null, {
         numero: doc.numero?.trim() ?? null,
