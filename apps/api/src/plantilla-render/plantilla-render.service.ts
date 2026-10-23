@@ -1,3 +1,4 @@
+import { portadaDesdeEncargo } from "../ot/encargo/reglas-encargo";
 import { etiquetaVeredicto } from "../laboratorio/veredicto";
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common";
 import { createHash } from "crypto";
@@ -537,7 +538,7 @@ export class PlantillaRenderService {
    * Lo que se propone al emitir: modalidad por defecto (cumplimiento si algún
    * ensayo tiene requisito) y la portada del IVC con lo que ya sabe la OT.
    */
-  sugerencias(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>, cfg: ConfigInforme) {
+  sugerencias(ctx: Awaited<ReturnType<PlantillaRenderService["contexto"]>>, cfg: ConfigInforme, encargo: Record<string, string | null> = {}) {
     const { ot } = ctx;
     const unaMuestra = ctx.muestras.length === 1 ? ctx.muestras[0] : null;
     return {
@@ -558,9 +559,22 @@ export class PlantillaRenderService {
               cantidad: null,
               fabricante: null,
               paisOrigen: null,
+              // Datos del encargo de la OT (contrato o lote, BL-161) precargan la portada.
+              ...encargo,
             }
           : null,
     };
+  }
+
+  /** Portada del IVC desde los datos del encargo de la OT (ot_encargo, frente r4d). */
+  private async portadaEncargo(otId: string): Promise<Record<string, string | null>> {
+    const f = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT contrato, to_char(contrato_fecha, 'YYYY-MM-DD') AS "contratoFecha", proyecto, proveedor, fabricante,
+              pais_origen AS "paisOrigen", item, cantidad::float8 AS cantidad, unidad_cantidad AS "unidadCantidad"
+         FROM ot_encargo WHERE ot_id = $1::uuid`,
+      otId,
+    ).catch(() => []);
+    return portadaDesdeEncargo(f[0] ?? null, (d) => `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}`);
   }
 
   /* ====================================================================== */
@@ -1118,7 +1132,8 @@ export class PlantillaRenderService {
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
     const ctx = await this.contexto(otId, tenantId);
     const formato = await this.configDePlantilla(plantilla.id, plantilla.tipo);
-    return { formato, ...this.sugerencias(ctx, formato), cobertura: await this.coberturaSugerida(ctx.ot.unidadPrincipal) };
+    const encargo = formato.portada === "ivc" ? await this.portadaEncargo(ctx.ot.id) : {};
+    return { formato, ...this.sugerencias(ctx, formato, encargo), cobertura: await this.coberturaSugerida(ctx.ot.unidadPrincipal) };
   }
 
   /**

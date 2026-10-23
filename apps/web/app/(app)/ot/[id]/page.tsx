@@ -1,5 +1,6 @@
 "use client";
 
+import DatosEncargoOt from "./_components/DatosEncargoOt";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -311,6 +312,8 @@ export default function ExpedientePage() {
                     ahí queda registrado quién la fijó, cuándo y por qué se cambió. */}
                 <div className="field readonly"><label>Fecha de compromiso</label><input value={ot?.fechaCompromiso ? fechaDia(ot.fechaCompromiso) : "Sin fecha (ver «Informe y cierre»)"} readOnly /></div>
               </div>
+              {/* Datos del encargo y recepción en el laboratorio (frente r4d · EP-00 5.1, EP-05 0.3/1.2). */}
+              {typeof id === "string" && <DatosEncargoOt otId={id} onCambio={cargarOt} />}
               {/* Especificación técnica del cliente (EP-03 0.5, EP-05 5.1): la E.T. que rige la OT y sus muestras. */}
               {typeof id === "string" && !esMetrologia && <EspecificacionTecnicaOt otId={id} onCambio={() => { cargarMuestras(); cargarAvance(); }} />}
               {/* OT del BPCH: cabecera de inspección (EP-10 10.3); en otras unidades no se muestra. */}

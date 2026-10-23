@@ -18,6 +18,8 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
+import { NIVELES_TECNOLOGICOS, TIPOS_TRABAJO } from "./encargo/reglas-encargo";
+import { sino, valoresCategoria } from "../common/parametros-r4d";
 import { PrismaService } from "../common/prisma.service";
 import { LaboratorioOtService, UnidadResumen } from "./laboratorio-ot.service";
 import { filtroListaOt, paginacion, semaforoPedido } from "./lista-ot";
@@ -87,6 +89,14 @@ const OtCreate = z
     labSolicitanteCcId: z.string().uuid().optional(),
     horasHombre: z.number().min(0).optional(),
     costoEstimado: z.number().min(0).optional(),
+    // EP-01/02 0.5 y EP-00 5.1 (frente r4d): oficio de la OT institucional,
+    // laboratorios que intervienen y clasificación del trabajo (ot_encargo).
+    oficioNumero: z.string().trim().max(80).optional(),
+    oficioFecha: fechaDia.optional(),
+    laboratoriosIntervienen: z.array(z.string().uuid()).max(20).optional(),
+    tipoTrabajo: z.enum(TIPOS_TRABAJO).optional(),
+    nivelTecnologico: z.enum(NIVELES_TECNOLOGICOS).optional(),
+    requiereMuestreo: z.boolean().optional(),
     descripcionTrabajo: z.string().max(4000).optional(),
     fechaCompromiso: fechaDia.optional(),
     /**
@@ -496,7 +506,8 @@ export class OtController {
 
     // Reglas de origen (Comercial R2): datos obligatorios por origen y cobro.
     const origen = dto.origenTrabajo ?? (dto.cotizacionId ? "COTIZACION" : undefined);
-    const errores = validarOrigenOt({ ...dto, origen });
+    const exigeOficio = sino((await valoresCategoria(this.prisma, tenantId, "ot_institucional")).exige_oficio, true);
+    const errores = validarOrigenOt({ ...dto, origen, exigeOficio });
     const cobro = resolverCobro(origen, dto.conCobro);
     if (cobro.error) errores.push(cobro.error);
     if (errores.length) throw new BadRequestException(errores.join(" "));
@@ -593,8 +604,23 @@ export class OtController {
           labSolicitanteCcId: dto.labSolicitanteCcId ?? null,
           horasHombre: dto.horasHombre ?? 0,
           costoEstimado: dto.costoEstimado ?? 0,
+          tipoTrabajo: dto.tipoTrabajo ?? null,
         },
       });
+      // Datos del encargo que se conocen al registrar (frente r4d, ot_encargo).
+      if (dto.oficioNumero || dto.oficioFecha || dto.laboratoriosIntervienen?.length || dto.nivelTecnologico || dto.requiereMuestreo !== undefined)
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_encargo (ot_id, tenant_id, oficio_numero, oficio_fecha, laboratorios, nivel_tecnologico, requiere_muestreo, actualizado_por)
+           VALUES ($1::uuid, $2::uuid, $3, $4::date, $5::uuid[], $6, $7, $8::uuid)`,
+          creada.id,
+          tenantId,
+          dto.oficioNumero?.trim() || null,
+          dto.oficioFecha ?? null,
+          dto.laboratoriosIntervienen ?? [],
+          dto.nivelTecnologico ?? null,
+          dto.requiereMuestreo ?? null,
+          req?.user?.sub ?? null,
+        );
       await this.labs.fijar(tx, {
         tenantId,
         otId: creada.id,

@@ -32,6 +32,7 @@ import { AlcanceCatalogoGuard } from "./rbac/alcance-catalogo.guard";
 import { AmbitoUnidadGuard } from "./rbac/ambito-unidad.guard";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
 import { CrmModule } from "./crm/crm.module";
+import { EncargoModule } from "./ot/encargo/encargo.module";
 import { SaecModule } from "./saec/saec.module";
 import { D11Module } from "./saec/d11/d11.module";
 import { NotificacionDgmnModule } from "./bpch/notificacion-dgmn/notificacion-dgmn.module";
@@ -131,6 +132,7 @@ function prettyTransport() {
     RbacModule,
     PlantillaRenderModule,
     CrmModule,
+    EncargoModule,
     SaecModule,
     D11Module,
     NotificacionDgmnModule,
