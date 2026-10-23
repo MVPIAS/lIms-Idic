@@ -486,6 +486,10 @@ function DialogoMotivo({ titulo, texto, boton, ocupado, onCerrar, onGuardar }: {
   );
 }
 
+const ESTADO_DOC_NOCAL: Record<string, string> = {
+  borrador: "Borrador", en_firma: "En firma", emitido: "Emitido", solicitado: "Solicitado", aprobado: "Aprobado", enviado: "En el laboratorio externo", validado: "Validado",
+};
+
 /** B-029: informe técnico o certificado externo del ítem no calibrable, con su estado de entrega. */
 function DocsNoCalibrable({ docs }: { docs: { tipo: string; numero: string | null; estado: string; entregadoAt: string | null; entregaMedio: string | null }[] }) {
   return (
@@ -495,7 +499,7 @@ function DocsNoCalibrable({ docs }: { docs: { tipo: string; numero: string | nul
         return (
           <div key={`${x.tipo}-${x.numero}`} style={{ fontSize: 12 }}>
             {x.tipo === "informe_tecnico" ? "Informe técnico" : "Certificado externo"} <span className="codigo">{x.numero ?? "(sin número)"}</span>{" "}
-            <span className={`pill ${listo ? "green" : "gray"}`}>{x.estado}</span>
+            <span className={`pill ${listo ? "green" : "gray"}`}>{ESTADO_DOC_NOCAL[x.estado] ?? x.estado}</span>
             {listo && (x.entregadoAt
               ? <small style={{ display: "block", color: "var(--muted)" }}>Entregado {fechaDia(x.entregadoAt)} · {textoMedio(x.entregaMedio)}</small>
               : <small style={{ display: "block" }}><span className="pill amber">Sin entregar</span></small>)}
