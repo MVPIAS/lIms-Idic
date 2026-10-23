@@ -196,6 +196,16 @@ describe("tipo de documento por defecto según la unidad de la OT", () => {
     expect(tipoDocumentoPorDefecto({ tipoPlantilla: "IVC", tipoUnidad: "INFORME_INSPECCION" })).toEqual({ tipo: "IVC", origen: "plantilla" });
     expect(tipoDocumentoPorDefecto({ tipoPlantilla: "i.tecnico", tipoUnidad: "INFORME_INSPECCION" }).tipo).toBe("INFORME_TECNICO");
   });
+  it("B-022: «Automático» toma el tipo guardado en la plantilla (SCCII, SCCCC, CERTARMA)", () => {
+    expect(tipoDocumentoPorDefecto({ tipoPlantilla: "I.TECNICO", repid: "SCCII", tipoDePlantilla: "INFORME_INSPECCION", tipoUnidad: "INFORME_INSPECCION" }))
+      .toEqual({ tipo: "INFORME_INSPECCION", origen: "plantilla" });
+    expect(tipoDocumentoPorDefecto({ tipoPlantilla: "CERTIFICADO", repid: "SCCCC", tipoDePlantilla: "CERTIFICADO_CONFORMIDAD", tipoUnidad: "INFORME_INSPECCION" }).tipo)
+      .toBe("CERTIFICADO_CONFORMIDAD");
+    expect(tipoDocumentoPorDefecto({ tipoPlantilla: "CERTIFICADO", repid: "CERTARMA", tipoDePlantilla: "CERTIFICADO_ARMA", tipoUnidad: "INFORME_INSPECCION" }).tipo)
+      .toBe("CERTIFICADO_ARMA");
+    // Lo indicado por quien emite sigue mandando.
+    expect(tipoDocumentoPorDefecto({ indicado: "INFORME_TECNICO", tipoDePlantilla: "INFORME_INSPECCION" }).origen).toBe("indicado");
+  });
   it("sin tipo en la unidad sale de la plantilla (laboratorios)", () => {
     expect(tipoDocumentoPorDefecto({ tipoPlantilla: "BOLETIN", tipoUnidad: null })).toEqual({ tipo: "INFORME_ENSAYO", origen: "plantilla" });
   });
