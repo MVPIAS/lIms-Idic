@@ -164,7 +164,15 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             precioClp: inicial?.moneda === "USD" ? Number(l.precioUnitario) * (dolarInicial ?? 1) : Number(l.precioUnitario),
             guardada: true,
           }
-        : {
+        : TIPOS_GASTO.some((g) => g.v === l.tipo)
+          ? {
+              // B-090: un gasto (viático, pasaje, traslado) sigue siendo gasto al editar, con su tipo.
+              codigo: TIPOS_GASTO.find((g) => g.v === l.tipo)!.l,
+              descripcion: l.descripcion ?? "",
+              cantidad: l.cantidad ?? 1,
+              gasto: { tipo: l.tipo, precio: Number(l.precioUnitario) },
+            }
+          : {
             descripcion: l.descripcion ?? l.tipo,
             cantidad: l.cantidad ?? 1,
             heredada: { tipo: l.tipo, precioUnitario: Number(l.precioUnitario) },

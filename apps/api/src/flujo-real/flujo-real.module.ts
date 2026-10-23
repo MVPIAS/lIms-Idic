@@ -1684,6 +1684,7 @@ export class RegistroMuestrasService {
           catEnsayoId: l.catEnsayoId,
           ensayoCodigo: l.ensayoCodigo,
           ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
+          tipo: l.tipo ?? null,
         })),
         porEnsayo,
       ),
