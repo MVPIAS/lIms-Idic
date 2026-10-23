@@ -850,12 +850,21 @@ export class MetrologiaController {
   /** Detalle con el contexto de reglas (para exigir cada acción con su motivo exacto). */
   private async detalleCtx(id: string, req: any) {
     const cal = await this.cargar(id, req);
-    const [puntos, eventos] = await Promise.all([
+    const [puntos, eventos, correo] = await Promise.all([
       prisma.$queryRawUnsafe<any[]>(`SELECT * FROM met_calibracion_punto WHERE calibracion_id = $1::uuid ORDER BY orden`, id),
       prisma.$queryRawUnsafe<any[]>(
         `SELECT e.accion, e.estado_desde, e.estado_hasta, e.comentario, e.created_at, u.nombre_completo AS usuario
            FROM met_calibracion_evento e LEFT JOIN usuario u ON u.id = e.usuario_id
           WHERE e.calibracion_id = $1::uuid ORDER BY e.created_at`, id),
+      // B-081: correo que se propone en «Enviar por correo»: el contacto principal del cliente de la OT o el de su ficha.
+      cal.ot_id
+        ? prisma.$queryRawUnsafe<{ email: string | null }[]>(
+            `SELECT COALESCE(
+                      (SELECT ct.email FROM contacto ct WHERE ct.cliente_id = o.cliente_id AND ct.deleted_at IS NULL AND ct.principal
+                          AND COALESCE(ct.email, '') <> '' ORDER BY ct.created_at LIMIT 1),
+                      NULLIF(cl.contacto_email, ''), NULLIF(cl.email, '')) AS email
+               FROM orden_trabajo o LEFT JOIN cliente cl ON cl.id = o.cliente_id WHERE o.id = $1::uuid`, cal.ot_id).catch(() => [])
+        : Promise.resolve([] as { email: string | null }[]),
     ]);
     const calculada = cal.resumen != null || cal.u_max != null;
     const [cx] = await this.contextos(req, [{ ...cal, calculada }]);
@@ -872,6 +881,7 @@ export class MetrologiaController {
       // Pestaña 4: desglose uᵢ por punto del motor (vista del cálculo guardado, no recalcula).
       balance: balancePorPunto(cal.motor, cal.resultado, cal.datos, cal.opciones),
       acciones: accionesDisponibles(cx.ctx), __ctx: cx.ctx,
+      correo_propuesto: correo[0]?.email ?? null,
       // La imagen del esquema no viaja en el detalle (puede pesar 2 MB): solo si existe.
       esquema_propio: !!esquema_datos, __esquema: esquema_datos as string | null,
     };

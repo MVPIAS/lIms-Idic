@@ -77,3 +77,12 @@ describe("Cierre técnico con el parámetro «el no calibrable exige su document
     expect(noAptoResuelto({ estado: "en_firma" }, { estado: "enviado" })).toBe(false);
   });
 });
+
+describe("B-081 · texto del error de correo", () => {
+  const { textoErrorCorreo } = require("./ficha.datos");
+  it("sin «para este tenant» ni doble punto", () => {
+    expect(textoErrorCorreo("No hay configuración de correo para este tenant.")).toBe("No hay configuración de correo en esta instalación (Administración › Correo)");
+    expect(`No se pudo enviar el correo: ${textoErrorCorreo("Conexión rechazada.")}.`).toBe("No se pudo enviar el correo: Conexión rechazada.");
+    expect(textoErrorCorreo(null)).toBe("error del servidor de correo");
+  });
+});

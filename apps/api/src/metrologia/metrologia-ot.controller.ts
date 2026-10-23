@@ -16,7 +16,7 @@ import {
   motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion,
 } from "./metrologia-ot.reglas";
 import { LABS_SAM, calibracionesDeOt, cierreExigeDevolucion, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
-import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, noAptoResueltos } from "./ficha.datos";
+import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, noAptoResueltos, textoErrorCorreo } from "./ficha.datos";
 import { MailService } from "../configuracion/configuracion.module";
 
 // ---------------------------------------------------------------------------
@@ -504,7 +504,7 @@ export class MetrologiaOtService {
     return {
       data: {
         ok: r.ok, destinatarios, entregado,
-        error: r.ok ? null : `No se pudo enviar el correo: ${r.error}. Revise la configuración de correo o registre la entrega manualmente.`,
+        error: r.ok ? null : `No se pudo enviar el correo: ${textoErrorCorreo(r.error)}. Revise la configuración de correo o registre la entrega manualmente.`,
       },
     };
   }
