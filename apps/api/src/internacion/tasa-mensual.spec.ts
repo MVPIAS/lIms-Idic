@@ -30,3 +30,10 @@ describe("Tasa 1,5 % · informe mensual (EP-06 6.23, BL-164)", () => {
     expect(c).toContain(";1190;;Sin facturar;0");
   });
 });
+
+describe("CSV de la tasa · fórmulas", () => {
+  it("un texto que empieza con = no se abre como fórmula", () => {
+    const { csvTasa: csv } = require("./tasa-mensual");
+    expect(csv("2026-10", [{ internacion: "I", ot: "O", otId: "o", resolucion: "R", cliente: "=HYPERLINK(1)", centroCosto: "C", calculadaAt: "", tasa: 1, iva: 0, total: 1, factura: null, estadoFactura: null, pagado: 0, estadoPago: "sin_facturar" }])).toContain("'=HYPERLINK(1)");
+  });
+});

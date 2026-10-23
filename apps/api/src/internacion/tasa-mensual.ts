@@ -83,7 +83,9 @@ const ETIQUETA_PAGO: Record<FilaTasa["estadoPago"], string> = {
 export function csvTasa(mes: string, filas: FilaTasa[]): string {
   const num = (n: number) => String(Math.round(n)).replace(".", ",");
   const esc = (v: unknown) => {
-    const t = String(v ?? "");
+    // Un texto que empieza con = + - @ se abre en Excel como fórmula: se antepone «'».
+    const t0 = String(v ?? "");
+    const t = /^[=+\-@]/.test(t0) ? `'${t0}` : t0;
     return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
   };
   const cab = ["Mes", "Internación", "OT", "Resolución DGMN", "Cliente", "Centro de costo", "Tasa (CLP)", "IVA (CLP)", "Total a cancelar (CLP)", "Factura", "Estado de pago", "Pagado (CLP)"];
