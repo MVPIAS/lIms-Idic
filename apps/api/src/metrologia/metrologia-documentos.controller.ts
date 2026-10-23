@@ -100,6 +100,7 @@ export class MetrologiaDocumentosService {
               to_char(e.fecha_envio, 'YYYY-MM-DD') AS fecha_envio, to_char(e.fecha_retorno, 'YYYY-MM-DD') AS fecha_retorno,
               e.certificado_numero, e.certificado_nombre, (e.certificado_datos IS NOT NULL) AS tiene_certificado, e.certificado_hash,
               e.aptitud, e.aptitud_comentario, e.rechazo_motivo, e.aprobado_at, e.validado_at, e.created_at,
+              e.entregado_at, e.entrega_medio, e.entrega_destinatario, e.entrega_observacion,
               us.nombre_completo AS solicitado_nombre, ua.nombre_completo AS aprobado_nombre, uv.nombre_completo AS validado_nombre
          FROM met_servicio_externo e LEFT JOIN proveedor p ON p.id = e.proveedor_id
          LEFT JOIN usuario us ON us.id = e.solicitado_por LEFT JOIN usuario ua ON ua.id = e.aprobado_por LEFT JOIN usuario uv ON uv.id = e.validado_por
@@ -109,7 +110,7 @@ export class MetrologiaDocumentosService {
   }
   private docInforme = (x: any): InformeDoc | null => (x ? { estado: x.estado, entregadoAt: x.entregado_at, elaboradoPor: x.elaborado_por } : null);
   private docExterno = (x: any): ExternoDoc | null =>
-    (x ? { estado: x.estado, certificadoNumero: x.certificado_numero, tieneCertificado: !!x.tiene_certificado, fechaEnvio: x.fecha_envio } : null);
+    (x ? { estado: x.estado, certificadoNumero: x.certificado_numero, tieneCertificado: !!x.tiene_certificado, fechaEnvio: x.fecha_envio, entregadoAt: x.entregado_at } : null);
 
   /* ------------------------------------------------------------ lectura --- */
   /** Informe técnico y servicio externo de cada ítem no calibrable, con lo que el usuario puede hacer. */
@@ -135,6 +136,7 @@ export class MetrologiaDocumentosService {
       if (asigna && ext?.estado === "aprobado") accExt.push("ENVIO");
       if ((asigna || crea) && ext?.estado === "enviado") accExt.push("CERTIFICADO");
       if (asigna && ext?.estado === "enviado" && ext.tiene_certificado) accExt.push("VALIDAR");
+      if (entrega && !motivoExterno("ENTREGAR", base, e)) accExt.push("ENTREGAR");
       const { documento_html, ...infSinHtml } = inf ?? {};
       data.push({
         instrumento: { id: i.id, numero: i.numero, descripcion: i.descripcion, serie: i.serie, estado: i.estado, motivoNoCalibrable: i.motivoNoCalibrable, requiereExterno: i.requiereExterno },
@@ -236,6 +238,27 @@ export class MetrologiaDocumentosService {
       await tx.$executeRawUnsafe(
         `UPDATE met_informe_tecnico SET entregado_at = $2, entrega_medio = $3, entrega_destinatario = $4, entrega_observacion = $5, entregado_por = $6::uuid, updated_at = now()
           WHERE id = $1::uuid AND entregado_at IS NULL`, inf.id, fecha, d.medio, d.destinatario, d.observacion ?? null, req.user.sub);
+    });
+    return { data: { entregado: true } };
+  }
+
+  /** B-029 · Entrega al cliente del certificado externo validado (EP-04 §8.1). */
+  async entregarExterno(otId: string, itemId: string, body: unknown, req: any) {
+    const d = EntregaSchema.parse(body ?? {});
+    const ot = await this.ot.cargarOt(otId, req);
+    await this.exigirPermiso(req, ["certificado.entregar", "metrologia.crear"], ot, "registrar la entrega del certificado externo");
+    await this.prisma.$transaction(async (tx) => {
+      const it = await this.itemDe(otId, itemId, tx);
+      const ext = await this.externoDe(itemId, tx, true);
+      const m = motivoExterno("ENTREGAR", { numero: it.numero, estado: it.estado, otEstado: ot.estado, calibrable: it.calibrable }, this.docExterno(ext));
+      if (m) throw new ConflictException(m);
+      const fecha = fechaEntrega(d.fecha);
+      if (Number.isNaN(fecha.getTime()) || fecha.getTime() > Date.now() + 60_000) throw new BadRequestException("Fecha de entrega no válida o futura.");
+      if (ext.validado_at && fecha.getTime() < new Date(ext.validado_at).getTime() - 86_400_000)
+        throw new BadRequestException("La entrega no puede ser anterior a la validación del certificado externo.");
+      await tx.$executeRawUnsafe(
+        `UPDATE met_servicio_externo SET entregado_at = $2, entrega_medio = $3, entrega_destinatario = $4, entrega_observacion = $5, entregado_por = $6::uuid, updated_at = now()
+          WHERE id = $1::uuid AND entregado_at IS NULL`, ext.id, fecha, d.medio, d.destinatario, d.observacion ?? null, req.user.sub);
     });
     return { data: { entregado: true } };
   }
@@ -463,6 +486,10 @@ export class MetrologiaDocumentosController {
   @Get(":id/instrumentos/:item/servicio-externo/certificado")
   @RequierePermiso("ot.ver")
   pdfExterno(@Param("id", ParseUUIDPipe) id: string, @Param("item", ParseUUIDPipe) item: string, @Req() req: any, @Res() res: Response) { return this.svc.pdfExterno(id, item, req, res); }
+
+  @Post(":id/instrumentos/:item/servicio-externo/entregar")
+  @RequierePermiso("ot.ver")
+  entregarExterno(@Param("id", ParseUUIDPipe) id: string, @Param("item", ParseUUIDPipe) item: string, @Body() b: unknown, @Req() req: any) { return this.svc.entregarExterno(id, item, b, req); }
 
   @Post(":id/instrumentos/:item/servicio-externo/validar")
   @RequierePermiso("ot.ver")
