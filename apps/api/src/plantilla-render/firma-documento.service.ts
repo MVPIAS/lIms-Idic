@@ -1,4 +1,5 @@
 import { emitirEvento } from "../common/eventos";
+import { faltaOficio, seguimientoDocumento } from "../seguimiento/datos-seguimiento";
 import {
   BadRequestException,
   ConflictException,
@@ -143,7 +144,21 @@ export class FirmaDocumentoService {
       select: { id: true, numero: true, estado: true },
     });
     const { modalidad } = await this.render.datosDeDocumento(cert.id);
-    return { ...this.vista(cert, usuarioId, req), modalidad, reemplazadoPor: reemplazo };
+    const v = this.vista(cert, usuarioId, req);
+    // Despacho, guía, oficios (frente r4c): se suman sin cambiar la forma anterior.
+    const seguimiento = await seguimientoDocumento(this.prisma, cert.id);
+    return {
+      ...v,
+      modalidad,
+      reemplazadoPor: reemplazo,
+      seguimiento,
+      puedo: {
+        ...v.puedo,
+        despachar: tienePermiso(req, "certificado.despachar") && esOficial(cert.estado) && !seguimiento.despacho,
+        recibirDespacho: tienePermiso(req, "certificado.entregar") && !!seguimiento.despacho && !seguimiento.despacho.recibidoAt,
+        oficio: tienePermiso(req, "oficio.crear") && esOficial(cert.estado),
+      },
+    };
   }
 
   /**
@@ -391,11 +406,41 @@ export class FirmaDocumentoService {
 
   async entregar(
     id: string,
-    dto: { fecha?: Date; medio: string; destinatario: string; observacion?: string },
+    dto: {
+      fecha?: Date;
+      medio: string;
+      destinatario: string;
+      observacion?: string;
+      guia?: string;
+      ejemplares?: number;
+      copias?: string;
+      oficioId?: string;
+      devolucionMuestras?: boolean;
+    },
     req: any,
   ) {
     const cert = await this.cargar(id, req);
     await this.alcance.exigirUnidad(req, cert.unidadId ?? cert.ot?.unidadPrincipal, `el documento ${cert.numero ?? cert.codigo}`);
+    // EP-05 7.2: IVC, Informe Técnico y Rechazo del DSA salen con oficio conductor firmado (parámetro).
+    const sinOficio = esOficial(cert.estado) && !cert.entregadoAt
+      ? await faltaOficio(this.prisma, {
+          id: cert.id,
+          tenantId: cert.tenantId,
+          tipoDocumento: cert.tipoDocumento,
+          unidadId: cert.unidadId ?? cert.ot?.unidadPrincipal ?? null,
+          numero: cert.numero ?? cert.codigo,
+        })
+      : null;
+    if (sinOficio) throw new ConflictException(sinOficio);
+    if (dto.oficioId) {
+      const [o] = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT id FROM oficio WHERE id = $1::uuid AND tenant_id = $2::uuid AND $3::uuid = ANY(documentos) AND estado IN ('firmado', 'despachado')`,
+        dto.oficioId,
+        cert.tenantId,
+        cert.id,
+      );
+      if (!o) throw new BadRequestException("El oficio indicado no conduce este documento o aún no está firmado.");
+    }
     if (!esOficial(cert.estado))
       throw new ConflictException(
         `Solo se entrega un documento oficial. ${cert.numero ?? cert.codigo} está ${cert.estado === "en_firma" ? "en firma" : cert.estado}.`,
@@ -414,6 +459,18 @@ export class FirmaDocumentoService {
         entregaRegistradaPor: usuarioDe(req),
       },
     });
+    // Guía, ejemplares, copias, oficio y devolución de muestras (EP-05 8.1, frente r4c).
+    if (dto.guia || dto.ejemplares || dto.copias || dto.oficioId || dto.devolucionMuestras !== undefined)
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE certificado SET entrega_guia = $2, entrega_ejemplares = $3, entrega_copias = $4, entrega_oficio_id = $5::uuid,
+                entrega_devolucion_muestras = $6 WHERE id = $1::uuid`,
+        cert.id,
+        dto.guia?.trim() || null,
+        dto.ejemplares ?? null,
+        dto.copias?.trim() || null,
+        dto.oficioId ?? null,
+        dto.devolucionMuestras ?? null,
+      );
     return this.circuito(id, req);
   }
 

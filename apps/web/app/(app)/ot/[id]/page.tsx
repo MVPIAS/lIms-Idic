@@ -17,6 +17,7 @@ import EspecificacionTecnicaOt from "./_components/EspecificacionTecnicaOt";
 import MuestreoOt from "./_components/MuestreoOt";
 import FotosOt from "./_components/FotosOt";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
+import SeguimientoOt from "@/components/documentos/SeguimientoOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
 import NotificacionDgmn from "@/components/bpch-procesos/NotificacionDgmn";
 import RevisionDocumental from "@/components/bpch-procesos/RevisionDocumental";
@@ -379,6 +380,8 @@ export default function ExpedientePage() {
             {tab === "informe" && typeof id === "string" && esMetrologia && <InstrumentosOt otId={id} onCambio={cargarOt} modo="cierre" />}
             {tab === "informe" && typeof id === "string" && <NotificacionDgmn otId={id} onCambio={cargarOt} />}
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}
+            {/* Plazo al cliente, recepción DCO, documentos no-informe y envío (frente r4c). */}
+            {tab === "informe" && typeof id === "string" && <div style={{ marginTop: 16 }}><SeguimientoOt otId={id} onCambio={cargarOt} /></div>}
             {MOTOR_FLUJOS_VISIBLE && tab === "flujo" && typeof id === "string" && <FlujoBpmOt otId={id} />}
           </div>
         </div>
