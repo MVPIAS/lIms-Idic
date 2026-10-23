@@ -5,6 +5,10 @@ import { monto as clp, pct } from "@/lib/format";
 import { validarFormulario, esMoneda } from "@/lib/validate";
 import { toast, confirmar } from "@/components/ui/feedback";
 import { usePermisos } from "@/lib/permisos";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import SelectorLaboratorio from "@/components/SelectorLaboratorio";
+import Modal from "@/components/documentos/Modal";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -33,6 +37,7 @@ const FORM_VACIO = {
   origen: "",
   fechaCierreEstimada: "",
   notas: "",
+  unidadId: "",
 };
 
 export default function CrmPage() {
@@ -45,6 +50,9 @@ export default function CrmPage() {
   const [f, setF] = useState<any>({ ...FORM_VACIO });
   const [errs, setErrs] = useState<Record<string, string>>({});
   const { puede } = usePermisos();
+  const router = useRouter();
+  const [perdiendo, setPerdiendo] = useState<any | null>(null);
+  const [motivoPerdida, setMotivoPerdida] = useState("");
 
   async function cargar() {
     setLoading(true);
@@ -103,6 +111,7 @@ export default function CrmPage() {
       origen: r.origen ?? "",
       fechaCierreEstimada: r.fecha_cierre_estimada ? String(r.fecha_cierre_estimada).slice(0, 10) : "",
       notas: r.notas ?? "",
+      unidadId: r.unidad_id ?? "",
     });
     setShow(true);
     setError("");
@@ -130,6 +139,7 @@ export default function CrmPage() {
       origen: f.origen || null,
       fechaCierreEstimada: f.fechaCierreEstimada || null,
       notas: f.notas || null,
+      unidadId: f.unidadId || null,
     };
     try {
       const url = editId ? `${API}/oportunidades/${editId}` : `${API}/oportunidades`;
@@ -162,12 +172,27 @@ export default function CrmPage() {
     }
   }
 
-  async function accion(id: string, verbo: "ganar" | "perder") {
+  async function accion(id: string, verbo: "ganar" | "perder", cuerpo?: object) {
     setError("");
     try {
-      const res = await fetch(`${API}/oportunidades/${id}/${verbo}`, { method: "POST", headers: auth() });
-      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const res = await fetch(`${API}/oportunidades/${id}/${verbo}`, { method: "POST", headers: auth(), body: cuerpo ? JSON.stringify(cuerpo) : undefined });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
       cargar();
+      return true;
+    } catch (e: any) {
+      setError(Array.isArray(e.message) ? e.message.join(", ") : e.message);
+      return false;
+    }
+  }
+
+  /** «Crear cotización →» (EP-00 0.3): abre «Nueva cotización» precargada y enlazada a la oportunidad. */
+  async function crearCotizacion(r: any) {
+    setError("");
+    try {
+      const res = await fetch(`${API}/oportunidades/${r.id}/convertir`, { method: "POST", headers: auth() });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.message ?? `Error ${res.status}`);
+      router.push(j.ruta);
     } catch (e: any) {
       setError(e.message);
     }
@@ -213,6 +238,10 @@ export default function CrmPage() {
                 ))}
               </select>
             </div>
+            <div className="field" style={{ gridColumn: "span 2" }}>
+              <SelectorLaboratorio valor={f.unidadId} onCambio={(v: string) => setF({ ...f, unidadId: v })} etiqueta="Laboratorio o centro de costo" />
+              <small style={{ color: "var(--muted)" }}>Define qué jefatura técnica ve la oportunidad. Comercial las ve todas.</small>
+            </div>
             <div className="field"><label>Contacto</label><input value={f.contacto} onChange={(e) => setF({ ...f, contacto: e.target.value })} /></div>
             <div className="field"><label>Monto estimado (CLP)</label><input type="number" inputMode="decimal" step="0.01" min={0} value={f.montoEstimado} onChange={(e) => setF({ ...f, montoEstimado: e.target.value })} />{errs.montoEstimado && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.montoEstimado}</small>}</div>
             <div className="field">
@@ -254,6 +283,14 @@ export default function CrmPage() {
                       </div>
                       <div style={{ fontWeight: 600, fontSize: 13, margin: "4px 0" }}>{r.titulo}</div>
                       <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{r.cliente?.razon_social ?? "— sin cliente —"}</div>
+                      {r.unidad_codigo && <div style={{ fontSize: 11, color: "var(--muted)" }} title={r.unidad_nombre}>Laboratorio: {r.unidad_codigo}</div>}
+                      {r.cotizacion_id && (
+                        <div style={{ fontSize: 11.5, marginTop: 4 }}>
+                          Cotización <Link href={`/cotizaciones/${r.cotizacion_id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{r.cotizacion_codigo}</Link>
+                          {r.ot_id && <> · OT <Link href={`/ot/${r.ot_id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{r.ot_codigo}</Link></>}
+                        </div>
+                      )}
+                      {r.estado === "perdida" && r.motivo_perdida && <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Motivo: {r.motivo_perdida}</div>}
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 6 }}>
                         <strong style={{ fontSize: 12.5 }}>{clp(r.monto_estimado, r.moneda)}</strong>
                         <span style={{ fontSize: 11, color: "var(--muted)" }}>{pct(r.probabilidad)}</span>
@@ -262,8 +299,14 @@ export default function CrmPage() {
                         <button className="btn sm" onClick={() => abrirEditar(r)}>Editar</button>
                         {r.estado === "viva" && (
                           <>
+                            {puede("cotizacion.crear") && (!r.cotizacion_id || r.cotizacion_estado === "anulada") && (
+                              <button className="btn primary sm" onClick={() => crearCotizacion(r)} disabled={!r.cliente_id}
+                                title={r.cliente_id ? "Abre «Nueva cotización» con el cliente y enlaza la cotización a esta oportunidad" : "Indique primero el cliente"}>
+                                Crear cotización →
+                              </button>
+                            )}
                             <button className="btn sm" onClick={() => accion(r.id, "ganar")}>Ganar</button>
-                            <button className="btn sm" onClick={() => accion(r.id, "perder")}>Perder</button>
+                            <button className="btn sm" onClick={() => { setPerdiendo(r); setMotivoPerdida(""); }}>Perder</button>
                           </>
                         )}
                         {puede("cotizacion.crear") && <button className="btn ghost-danger sm" onClick={() => eliminar(r)} title="Eliminar oportunidad">Eliminar</button>}
@@ -278,6 +321,23 @@ export default function CrmPage() {
             );
           })}
         </div>
+      )}
+
+      {perdiendo && (
+        <Modal titulo={`Perder ${perdiendo.codigo}`} onCerrar={() => setPerdiendo(null)}
+          acciones={<>
+            <button type="button" className="btn outline sm" onClick={() => setPerdiendo(null)}>Cancelar</button>
+            <button type="button" className="btn sm" style={{ background: "var(--red)", color: "#fff" }} disabled={motivoPerdida.trim().length < 3}
+              onClick={async () => { if (await accion(perdiendo.id, "perder", { motivo: motivoPerdida.trim() })) setPerdiendo(null); }}>
+              Marcar perdida
+            </button>
+          </>}>
+          <div className="field">
+            <label htmlFor="opp-motivo">Motivo de la pérdida <span className="req">*</span></label>
+            <textarea id="opp-motivo" rows={3} maxLength={1000} value={motivoPerdida} onChange={(e) => setMotivoPerdida(e.target.value)}
+              placeholder="p. ej. el cliente eligió otro laboratorio, sin presupuesto…" />
+          </div>
+        </Modal>
       )}
     </div>
   );

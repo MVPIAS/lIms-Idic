@@ -130,6 +130,17 @@ export class ClienteService {
     });
   }
 
+  /** Contactos vigentes del cliente (solicitante de la cotización, EP-01 0.1). */
+  async contactos(clienteId: string, tenantId?: string) {
+    await this.detalle(clienteId, tenantId);
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, nombre, cargo, email, telefono, COALESCE(principal, es_principal, false) AS principal
+         FROM contacto WHERE cliente_id = $1::uuid AND deleted_at IS NULL AND COALESCE(activo, true)
+        ORDER BY COALESCE(principal, es_principal, false) DESC, nombre`,
+      clienteId,
+    );
+  }
+
   /* ------------------------------------------------ plantas (EP-00 0.1, BL-172) --- */
 
   /** Plantas del cliente (activas primero). */

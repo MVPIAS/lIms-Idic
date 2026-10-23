@@ -30,6 +30,8 @@ import { Prisma } from "@prisma/client";
 import { generarNumeroCotizacion } from "./numeracion-cotizacion";
 import { motivoNoAceptable, motivoNoEditable } from "./circuito-cotizacion";
 import { estadoCircuitoDe, leerConfigCircuito } from "./circuito-config";
+import { claveLibre, precioDeLinea, type Existentes } from "./precio-ficha";
+import { validarOportunidad, enlazarOportunidad, ganarOportunidadDeCotizacion, guardarDatosSolicitud, leerDatosSolicitud, type DatosSolicitud } from "./cotizacion-extra";
 
 /** Cada cuánto el proceso periódico pasa a «Vencida» las cotizaciones fuera de validez. */
 const INTERVALO_VENCIMIENTO_MS = Number(process.env.COTIZACION_VENCIMIENTO_MIN ?? 60) * 60_000;
@@ -100,6 +102,10 @@ export interface CabeceraCotizacion {
   validezDias?: number;
   fechaEmision?: string | Date;
   lineas?: LineaEntrada[];
+  /** Solicitante y documento de solicitud (EP-01 0.1). */
+  solicitud?: DatosSolicitud;
+  /** Oportunidad del CRM desde la que se cotiza (EP-00 0.3). */
+  oportunidadId?: string | null;
 }
 
 export interface AceptacionEntrada {
@@ -280,7 +286,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       select: { id: true, codigo: true, estado: true, opiPendiente: true, conCobro: true, origenTrabajo: true },
     });
     const circuito = (await estadoCircuitoDe(this.prisma, [id])).get(id);
-    return { ...cot, ...(circuito ?? {}), ot };
+    const solicitud = await leerDatosSolicitud(this.prisma, id).catch(() => null);
+    return { ...cot, ...(circuito ?? {}), ot, solicitud };
   }
 
   // --------------------------------------------------------------------------
@@ -389,7 +396,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * se indica precio; en USD se convierte con el dólar congelado de la cotización.
    * Las líneas libres (HH/HM/viático…) se siguen aceptando por compatibilidad.
    */
-  private async resolverLineas(tenantId: string, lineas: LineaEntrada[], moneda: string, dolar: number | null) {
+  private async resolverLineas(tenantId: string, lineas: LineaEntrada[], moneda: string, dolar: number | null, existentes?: Existentes) {
     const ids = lineas.map((l) => l.catEnsayoId).filter((x): x is string => Boolean(x));
     const ensayos = ids.length
       ? await this.prisma.catEnsayo.findMany({
@@ -400,24 +407,21 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const porId = new Map(ensayos.map((e) => [e.id, e]));
 
     return lineas.map((l, i) => {
-      let precio = l.precioUnitario;
       let descripcion = l.descripcion;
       let ensayoCodigo = l.ensayoCodigo;
+      let precioFicha: number | null = null;
       if (l.catEnsayoId) {
         const e = porId.get(l.catEnsayoId);
         if (!e) throw new BadRequestException(`Línea ${i + 1}: el ensayo ${l.catEnsayoId} no existe en el catálogo.`);
         ensayoCodigo = e.codigo;
         descripcion = descripcion || `${e.codigo} · ${e.nombre}`;
-        if (precio === undefined || precio === null) {
-          const clp = Number(e.precio);
-          precio = moneda === "USD" ? Math.round((clp / (dolar || 1)) * 100) / 100 : clp;
-        }
+        const clp = e.precio != null ? Number(e.precio) : null;
+        precioFicha = clp != null && clp > 0 ? (moneda === "USD" ? Math.round((clp / (dolar || 1)) * 100) / 100 : clp) : null;
       }
-      if (!(Number(precio) > 0)) {
-        throw new BadRequestException(
-          `Línea ${i + 1}: sin precio. El ensayo no tiene valor en su ficha de costos; indique precioUnitario.`,
-        );
-      }
+      // EP-00 2.2 (BL-149): el ensayo se valoriza con su ficha; sin ensayo, solo gastos tipificados.
+      const r = precioDeLinea({ ...l, ensayoCodigo, descripcion }, precioFicha, i + 1, existentes);
+      if (r.error !== undefined) throw new BadRequestException(r.error);
+      const precio = r.precio;
       const cantidad = l.cantidad ?? 1;
       return {
         tipo: l.catEnsayoId ? "producto" : l.tipo ?? "producto",
@@ -479,6 +483,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     // «Hoy» es el de Chile (con new Date() a las 21:00 ya era mañana en UTC: D02-18).
     const fechaEmision = soloFecha(data.fechaEmision ?? hoyEnChile());
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
+    if (data.oportunidadId) await validarOportunidad(this.prisma, tenantIdFromJWT, data.clienteId, data.oportunidadId);
     const lineas = await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar);
     const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0));
     // Número real (EP-00 2.1 · «2026-14324»), correlativo atómico por tenant.
@@ -488,7 +493,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       ? await this.prisma.usuario.findFirst({ where: { id: usuarioId }, select: { id: true } })
       : null;
 
-    return this.prisma.cotizacion.create({
+    const creada = await this.prisma.cotizacion.create({
       data: {
         tenantId: tenantIdFromJWT,
         codigo,
@@ -519,6 +524,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       },
       include: { lineas: true, cliente: true },
     });
+    if (data.solicitud) await guardarDatosSolicitud(this.prisma, creada.id, data.solicitud);
+    if (data.oportunidadId) await enlazarOportunidad(this.prisma, tenantIdFromJWT, creada.id, data.clienteId, data.oportunidadId);
+    return creada;
   }
 
   /**
@@ -530,12 +538,17 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
   async actualizar(id: string, data: CabeceraCotizacion & { estado?: string }, tenantId?: string) {
     const actual = await this.detalle(id, tenantId); // existencia + tenant
     const { estado, ...resto } = data;
-    const tocaContenido = Object.values(resto).some((v) => v !== undefined);
+    const { solicitud, oportunidadId: _o, ...restoCab } = resto;
+    const tocaContenido = Object.values(restoCab).some((v) => v !== undefined);
 
     if (estado !== undefined) {
       if (estado === "aceptada") throw new BadRequestException("Use POST /cotizaciones/:id/aceptar (exige documento de aceptación).");
       if (estado === "anulada") throw new BadRequestException("Use POST /cotizaciones/:id/anular (exige motivo).");
       validarTransicion("cotizacion", actual.estado, estado);
+    }
+    if (solicitud) {
+      if (actual.estado !== ESTADO_ABIERTA) throw new ConflictException("Solo se corrigen los datos de la solicitud de una cotización Abierta.");
+      await guardarDatosSolicitud(this.prisma, id, solicitud);
     }
     if (!tocaContenido) {
       return this.prisma.cotizacion.update({ where: { id }, data: { ...(estado ? { estado } : {}) } });
@@ -587,7 +600,12 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
 
     if (resto.lineas) {
       if (!resto.lineas.length) throw new BadRequestException("La cotización debe tener al menos una línea.");
-      const lineas = await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar);
+      // Las líneas ya cotizadas conservan su precio aunque la ficha cambie (precio-ficha.ts).
+      const existentes: Existentes = {
+        ensayos: new Map(actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, Number(x.precioUnitario)])),
+        libres: new Set(actual.lineas.filter((x: any) => !x.catEnsayoId).map((x: any) => claveLibre(x.tipo, x.descripcion, Number(x.precioUnitario)))),
+      };
+      const lineas = await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar, existentes);
       const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0));
       return this.prisma.$transaction(async (tx) => {
         await tx.lineaCotizacion.deleteMany({ where: { cotizacionId: id } });
@@ -760,6 +778,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
 
       return { cotizacion, ot };
     });
+    // CRM (EP-00 0.3): la oportunidad de la cotización queda «ganada» con su OT.
+    await ganarOportunidadDeCotizacion(this.prisma, id, ot.id).catch(() => undefined);
 
     const extra = ot.opiPendiente ? " Queda con OPI PENDIENTE (disposición del Director con cobro)." : "";
     const otFinal = await this.prisma.ordenTrabajo.findUnique({

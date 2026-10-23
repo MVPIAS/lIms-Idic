@@ -166,8 +166,8 @@ async function main() {
     C.cot = await ok(U.ventas, "POST", "/cotizaciones", {
       clienteId: C.clienteId, formato: "NORMAL", plazoEntregaDias: 15, referencia: `R1a Metrología ${sello}`,
       lineas: [
-        { descripcion: "Calibración de juego de pesas (ITM03)", cantidad: 1, precioUnitario: 45000 },
-        { descripcion: "Calibración de balanza", cantidad: 1, precioUnitario: 38000 },
+        { tipo: "otros", descripcion: "Calibración de juego de pesas (ITM03)", cantidad: 1, precioUnitario: 45000 },
+        { tipo: "otros", descripcion: "Calibración de balanza", cantidad: 1, precioUnitario: 38000 },
       ],
     });
     // Circuito de la cotización (frente r1c): solo se acepta firmada por el Jefe DCO.
