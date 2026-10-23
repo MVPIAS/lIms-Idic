@@ -32,6 +32,7 @@ import { motivoNoAceptable, motivoNoEditable } from "./circuito-cotizacion";
 import { estadoCircuitoDe, leerConfigCircuito } from "./circuito-config";
 import { claveLibre, precioDeLinea, type Existentes } from "./precio-ficha";
 import { revisarOc } from "./aceptacion-oc";
+import { heredarDeCotizacion } from "../ot/encargo/encargo.module";
 import { entero, valoresCategoria } from "../common/parametros-r4d";
 import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 import { validarOportunidad, enlazarOportunidad, ganarOportunidadDeCotizacion, guardarDatosSolicitud, leerDatosSolicitud, type DatosSolicitud } from "./cotizacion-extra";
@@ -806,6 +807,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
 
       return { cotizacion, ot };
     });
+    // EP-00 5.1 (BL-159): la OT hereda moneda, forma de pago, referencia, descripción técnica, valor y paridad.
+    await heredarDeCotizacion(this.prisma, tenantIdOt, ot.id, id);
     if (oc.aplica)
       await this.hito(cot.tenantId, id, oc.hayDiscrepancia ? "discrepancia_oc" : "oc_conforme", usuarioId, doc.discrepancia?.trim() || null, {
         numero: doc.numero?.trim() ?? null,
