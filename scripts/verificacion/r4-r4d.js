@@ -496,6 +496,36 @@ async function main() {
     await exigir(409, U.director, "POST", `/apelaciones/${a.id}/resolver`, { decision: "acoge", resolucionFecha: hoyCl(), resolucionTexto: "x x x x" }, /inapelable/);
     return `${a.codigo} fuera de plazo (vencía ${a.venceEl}) · rechazada por el Director`;
   });
+
+  /* ------------------------------------------------------------ T19 */
+  await paso("BL-167 · QC por método: tipos exigidos (MRC), criterio del método y aprobación por otra persona", async () => {
+    const ruta = `/qc/metodos/${C.mPh.id}`;
+    const antes = await ok(U.lqcJefe, "GET", ruta);
+    try {
+      await exigir(403, U.lqcAnalista, "PUT", ruta, { qcRequerido: true, qcTipos: ["mrc"] });
+      await exigir(403, U.lpnJefe, "PUT", ruta, { qcRequerido: true, qcTipos: ["mrc"] });
+      await exigir(400, U.calidad, "PUT", ruta, { qcRequerido: true, qcTipos: ["mrc", "otro"] }, /desconocido/);
+      await exigir(400, U.calidad, "PUT", ruta, { qcRequerido: false, qcTipos: ["mrc"] }, /QC requerido/);
+      const cfg = await ok(U.calidad, "PUT", ruta, { qcRequerido: true, qcTipos: ["mrc"], qcCriterios: { mrc: "95-105" } });
+      afirmar(cfg.qcRequerido && cfg.qcTipos.join() === "mrc" && cfg.qcCriterios.mrc === "95-105", `cfg ${JSON.stringify(cfg)}`);
+      let e = await ok(U.lqcJefe, "GET", `/qc/ot/${C.ot.id}`);
+      const m = e.metodos.find((x) => x.id === C.mPh.id);
+      afirmar(m && !m.aprobado && m.tiposFaltantes.join() === "mrc", `faltan ${JSON.stringify(m)}`);
+      await exigir(400, U.lqcAnalista, "POST", `/qc/ot/${C.ot.id}/control`, { catMetodoId: C.mPh.id, tipo: "mrc", valorObtenido: 9.8 }, /valor certificado/);
+      const c = await ok(U.lqcAnalista, "POST", `/qc/ot/${C.ot.id}/control`, { catMetodoId: C.mPh.id, tipo: "mrc", valorEsperado: 10, valorObtenido: 9.8, mrcReferencia: "MRC pH 7 lote 123" });
+      afirmar(c.criterio === "95-105" && c.evaluacion === "aprobado" && c.resultado === "pendiente", `control ${JSON.stringify([c.criterio, c.evaluacion, c.resultado])}`);
+      const malo = await ok(U.lqcAnalista, "POST", `/qc/ot/${C.ot.id}/control`, { catMetodoId: C.mPh.id, tipo: "mrc", valorEsperado: 10, valorObtenido: 8.9 });
+      afirmar(malo.resultado === "rechazado", "89 % fuera de 95-105");
+      await exigir(403, U.lqcAnalista, "PATCH", `/qc/control/${c.id}`, { resultado: "aprobado" }, /resultado.revisar/);
+      await ok(U.lqcRevisor, "PATCH", `/qc/control/${c.id}`, { resultado: "aprobado" });
+      e = await ok(U.lqcJefe, "GET", `/qc/ot/${C.ot.id}`);
+      afirmar(e.metodos.find((x) => x.id === C.mPh.id).aprobado === true, "aprobado");
+      return "MRC 98 % con criterio 95-105 del método · aprobado por el revisor";
+    } finally {
+      // Deja el método como estaba: otros guiones emiten informes con él.
+      await ok(U.calidad, "PUT", ruta, { qcRequerido: !!antes.qcRequerido, qcTipos: antes.qcTipos ?? [], qcCriterios: antes.qcCriterios ?? {} });
+    }
+  });
 }
 
 main()

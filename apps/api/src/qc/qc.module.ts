@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   ConflictException,
   Controller,
@@ -12,9 +13,11 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { RecursoDeLaboratorio } from "../rbac/alcance-catalogo.guard";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -23,7 +26,7 @@ import { DEV_TENANT } from "../common/base-crud.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
-import { motivoNoRevisable, resultadoAlRegistrar } from "./reglas-qc";
+import { motivoNoRevisable, resultadoAlRegistrar, CRITERIO_DEFECTO, TIPOS_QC, criterioAplicable, erroresConfigQc, tiposQcFaltantes } from "./reglas-qc";
 
 /**
  * =============================================================================
@@ -101,7 +104,7 @@ function parseCriterio(criterio?: string | null): { min?: number; max?: number }
 /** Cuerpo de registro de un control (con métricas ya calculadas opcionales). */
 const RegistrarControlSchema = z.object({
   catMetodoId: z.string().uuid(),
-  tipo: z.enum(["blanco", "estandar", "curva", "duplicado"]),
+  tipo: z.enum(TIPOS_QC),
   valorEsperado: z.number().finite().optional(),
   valorObtenido: z.number().finite().optional(),
   criterio: z.string().max(200).optional(),
@@ -109,10 +112,18 @@ const RegistrarControlSchema = z.object({
   cvPct: z.number().finite().optional(),
   recuperacionPct: z.number().finite().optional(),
   observaciones: z.string().max(1000).optional(),
+  /** MRC o patrón usado (identificación, lote, certificado). */
+  mrcReferencia: z.string().trim().max(160).optional(),
 });
 type RegistrarControl = z.infer<typeof RegistrarControlSchema>;
 
 // `aprobadoPor` ya no lo elige el cliente (se ignora si llega): es quien hace la acción.
+const ConfigQcSchema = z.object({
+  qcRequerido: z.boolean(),
+  qcTipos: z.array(z.string().max(20)).max(6).optional(),
+  qcCriterios: z.record(z.string().max(20), z.string().max(40)).optional(),
+});
+
 const RevisarControlSchema = z.object({
   resultado: z.enum(["aprobado", "rechazado", "pendiente"]),
   observaciones: z.string().max(1000).optional(),
@@ -159,6 +170,8 @@ export class QcService {
         }
         break;
       }
+      case "mrc":
+      case "patron":
       case "estandar": {
         if (recuperacionPct === null && esperado !== null && esperado !== 0 && obtenido !== null) {
           recuperacionPct = (obtenido / esperado) * 100;
@@ -223,7 +236,15 @@ export class QcService {
     });
     if (!metodo) throw new NotFoundException(`Método de catálogo ${body.catMetodoId} no encontrado`);
 
-    const ev = this.evaluar(body);
+    // Criterio: el del control, el del método para ese tipo (BL-167) o el por defecto.
+    const crit = await this.prisma.$queryRawUnsafe<{ qc_criterios: Record<string, string> | null }[]>(
+      `SELECT qc_criterios FROM cat_metodo WHERE id = $1::uuid`,
+      body.catMetodoId,
+    ).catch(() => []);
+    const criterio = criterioAplicable(body.tipo, body.criterio, crit[0]?.qc_criterios ?? null);
+    if ((body.tipo === "mrc" || body.tipo === "patron") && !(body.valorEsperado != null && body.valorObtenido != null))
+      throw new BadRequestException(`Un control con ${body.tipo === "mrc" ? "MRC" : "patrón"} necesita el valor certificado (esperado) y el obtenido.`);
+    const ev = this.evaluar({ ...body, criterio: criterio ?? undefined });
 
     return this.prisma.qcControl.create({
       data: {
@@ -233,7 +254,7 @@ export class QcService {
         tipo: body.tipo,
         valorEsperado: body.valorEsperado ?? null,
         valorObtenido: body.valorObtenido ?? null,
-        criterio: body.criterio ?? null,
+        criterio: criterio ?? null,
         resultado: resultadoAlRegistrar(ev.resultado),
         evaluacion: ev.resultado,
         registradoPor: usuarioId ?? null,
@@ -243,6 +264,10 @@ export class QcService {
         observaciones: body.observaciones ?? null,
       },
       include: { catMetodo: { select: { id: true, codigo: true, nombre: true } } },
+    }).then(async (c) => {
+      if (body.mrcReferencia)
+        await this.prisma.$executeRawUnsafe(`UPDATE qc_control SET mrc_referencia = $2 WHERE id = $1::uuid`, c.id, body.mrcReferencia);
+      return { ...c, mrcReferencia: body.mrcReferencia ?? null };
     });
   }
 
@@ -317,7 +342,7 @@ export class QcService {
     for (const r of resultados) if (r.catMetodo) porId.set(r.catMetodo.id, r.catMetodo);
     const metodoIds = [...porId.keys()];
 
-    // Métodos con al menos un control aprobado para esta OT.
+    // Controles aprobados de esta OT por método y tipo, y tipos exigidos por cada método (BL-167).
     const aprobados = metodoIds.length
       ? await this.prisma.qcControl.findMany({
           where: {
@@ -327,12 +352,22 @@ export class QcService {
             resultado: "aprobado",
             catMetodoId: { in: metodoIds },
           },
-          select: { catMetodoId: true },
+          select: { catMetodoId: true, tipo: true },
         })
       : [];
-    const aprobadoSet = new Set(aprobados.map((a) => a.catMetodoId));
+    const exigidos = metodoIds.length
+      ? await this.prisma.$queryRawUnsafe<{ id: string; qc_tipos: string[] | null; qc_criterios: Record<string, string> | null }[]>(
+          `SELECT id, qc_tipos, qc_criterios FROM cat_metodo WHERE id = ANY($1::uuid[])`,
+          metodoIds,
+        ).catch(() => [])
+      : [];
+    const cfg = new Map(exigidos.map((x) => [x.id, x]));
 
-    return [...porId.values()].map((m) => ({ ...m, aprobado: aprobadoSet.has(m.id) }));
+    return [...porId.values()].map((m) => {
+      const tipos = cfg.get(m.id)?.qc_tipos ?? [];
+      const faltan = tiposQcFaltantes(tipos, aprobados.filter((a) => a.catMetodoId === m.id).map((a) => a.tipo));
+      return { ...m, aprobado: faltan.length === 0, tiposExigidos: tipos, tiposFaltantes: faltan.filter((t) => t !== "cualquiera"), criterios: cfg.get(m.id)?.qc_criterios ?? {} };
+    });
   }
 
   /** Estado global del QC de la OT: {aprobado, faltantes[]} + métodos + controles. */
@@ -363,7 +398,7 @@ export class QcService {
     const metodos = await this.metodosQcRequerido(otId, tenantId);
     const faltantes = metodos.filter((m) => !m.aprobado);
     if (faltantes.length) {
-      const lista = faltantes.map((m) => `${m.codigo} · ${m.nombre}`).join("; ");
+      const lista = faltantes.map((m) => `${m.codigo} · ${m.nombre}${m.tiposFaltantes.length ? ` (falta: ${m.tiposFaltantes.join(", ")})` : ""}`).join("; ");
       throw new ConflictException(
         `No se puede emitir: control de calidad pendiente para el método ${lista}.`,
       );
@@ -421,6 +456,47 @@ export class QcController {
       nombre: usuarioDe(req),
       puedeRevisar,
     });
+  }
+
+  /**
+   * QC del método (contrato §4.2.3, EP-01 3.5, BL-167): si lo exige, qué tipos
+   * de control (blanco, estándar, curva, duplicado, MRC, patrón) y el criterio
+   * de aceptación de cada uno. Lo edita quien gestiona el catálogo del
+   * laboratorio del método (la guarda de alcance del catálogo lo comprueba).
+   */
+  @Get("metodos/:id")
+  @RequierePermiso(PERM.ver)
+  async configMetodo(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const f = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, codigo, nombre, qc_requerido AS "qcRequerido", qc_tipos AS "qcTipos", qc_criterios AS "qcCriterios"
+         FROM cat_metodo WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
+      id,
+      tenantDe(req),
+    );
+    if (!f[0]) throw new NotFoundException("Método no encontrado.");
+    return { ...f[0], tipos: TIPOS_QC, criteriosPorDefecto: CRITERIO_DEFECTO };
+  }
+
+  @Put("metodos/:id")
+  @RequierePermiso("catalogo.gestionar")
+  @RecursoDeLaboratorio("cat_metodo")
+  async guardarConfigMetodo(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const d = ConfigQcSchema.parse(body ?? {});
+    const e = erroresConfigQc(d);
+    if (d.qcTipos?.length && d.qcRequerido === false) e.push("Para exigir tipos de control, marque «QC requerido».");
+    if (e.length) throw new BadRequestException(e.join(" "));
+    const criterios = Object.fromEntries(Object.entries(d.qcCriterios ?? {}).filter(([, v]) => v && String(v).trim()).map(([k, v]) => [k, String(v).trim().replace(/,/g, ".")]));
+    const n = await this.prisma.$executeRawUnsafe(
+      `UPDATE cat_metodo SET qc_requerido = $3, qc_tipos = $4::text[], qc_criterios = $5::jsonb
+        WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
+      id,
+      tenantDe(req),
+      d.qcRequerido,
+      [...new Set(d.qcTipos ?? [])],
+      JSON.stringify(criterios),
+    );
+    if (!n) throw new NotFoundException("Método no encontrado.");
+    return this.configMetodo(id, req);
   }
 
   @Delete("control/:id")
