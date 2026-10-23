@@ -103,4 +103,5 @@ align_r4c_oficio.sql
 align_r4d_comercial.sql
 align_lp26_lista_precios.sql
 seed_lp26_lista_precios_2026.sql
+align_c2_nombre_ficticio.sql
 align_cierre_permisos.sql
