@@ -225,6 +225,7 @@ informes, calibraciones y BPCH, que ya lo estaban)
 
 | Recurso | Regla |
 |---|---|
+| Circuito de un documento (`/informes/:id/circuito`) | Laboratorio del documento en el alcance; además lo abre quien es **responsable de alguno de sus pasos de firma**, aunque el documento sea de otra unidad (p. ej. el Jefe de la SCC en el Certificado de Conformidad o el Informe de Incumplimiento de una sucursal). El listado `/informes/documentos` no tiene esa excepción. |
 | `/certificados` (ruta heredada) | Retirada: **410 Gone** (se usa `/informes/documentos`). El Panel de indicadores cuenta `/informes/documentos`. |
 | SPC (`/spc/series`, `/spc/analitos`) | Solo resultados de OT del alcance de `resultado.ver`. |
 | `/internaciones/ot` (heredada, la usa `/bpch/internaciones`) | Unidad que inspecciona en el alcance; con la SCC en el alcance, todas. |

@@ -9,7 +9,7 @@
  *   3. Documentos y envío (EP-00 6.4, EP-06 6.18): documentos no-informe (cartas,
  *      oficios, copias) con versión y archivo, y el envío conjunto de documentos y
  *      factura (por correo adjunta los PDF). «Registrar envío».
- * API: GET /ot/:id/seguimiento, POST notificar-plazo, recepcion-dco, documentos-registro, envios.
+ * API: GET /ot/:id/seguimiento, POST notificar-plazo, recepcion-informe-dco, documentos-registro, envios.
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -258,7 +258,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
           acciones={
             <>
               <button className="btn outline" onClick={() => setDialogo(null)}>Cancelar</button>
-              <button className="btn primary" disabled={ocupado || !recepcion} onClick={() => enviar(() => llamar("POST", `/ot/${otId}/recepcion-dco`, { fecha: recepcion }), (r) => `Recepción registrada: ${r.recepcionDco?.estado ?? ""}.`)}>
+              <button className="btn primary" disabled={ocupado || !recepcion} onClick={() => enviar(() => llamar("POST", `/ot/${otId}/recepcion-informe-dco`, { fecha: recepcion }), (r) => `Recepción registrada: ${r.recepcionDco?.estado ?? ""}.`)}>
                 Registrar recepción → enviar al cliente
               </button>
             </>

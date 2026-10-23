@@ -95,7 +95,7 @@ export class SeguimientoController {
     return this.svc.notificarPlazo(id, Plazo.parse(body ?? {}), req);
   }
 
-  @Post("ot/:id/recepcion-dco")
+  @Post("ot/:id/recepcion-informe-dco")
   @RequierePermiso("ot.seguimiento")
   recepcionDco(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.recepcionDco(id, RecepcionDco.parse(body ?? {}).fecha, req);
