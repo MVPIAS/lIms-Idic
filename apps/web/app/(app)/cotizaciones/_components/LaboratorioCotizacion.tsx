@@ -33,7 +33,7 @@ const SECCION: Record<string, string> = {
 
 function FormSolicitud({ cotId, onHecho }: { cotId: string; onHecho: (m: string) => void }) {
   const [unidadId, setUnidadId] = useState("");
-  const [tipo, setTipo] = useState<"estandar" | "no_estandar">("estandar");
+  const [tipo, setTipo] = useState<"estandar" | "no_estandar" | "comision">("estandar");
   const [comentario, setComentario] = useState("");
   const [conCopia, setConCopia] = useState("");
   const [error, setError] = useState("");
@@ -74,6 +74,10 @@ function FormSolicitud({ cotId, onHecho }: { cotId: string; onHecho: (m: string)
           <label style={{ display: "flex", gap: 6, fontWeight: 400 }}>
             <input type="radio" name="tipo-servicio" style={{ width: "auto" }} checked={tipo === "no_estandar"} onChange={() => setTipo("no_estandar")} />
             No estandarizado · abre el Formulario de costeo (FORM05) con número
+          </label>
+          <label style={{ display: "flex", gap: 6, fontWeight: 400 }}>
+            <input type="radio" name="tipo-servicio" style={{ width: "auto" }} checked={tipo === "comision"} onChange={() => setTipo("comision")} />
+            Comisión en terreno o en el extranjero · el laboratorio costea horas por rol, viáticos, pasajes, traslados y arriendo (FORM05)
           </label>
         </fieldset>
         <div className="field">
@@ -178,6 +182,8 @@ function TarjetaSolicitud({ sol, c, puedeRetirar, onResponder, onVb, onRetirar }
                 Plazo de entrega propuesto: <b>{sol.programa.plazoEntregaDias} días corridos</b>
                 {sol.programa.fechaInicio ? <> · inicio {fechaDia(sol.programa.fechaInicio)}</> : null}
                 {sol.programa.fechaTermino ? <> · término {fechaDia(sol.programa.fechaTermino)}</> : null}
+                {sol.programa.puntosEt ? <> · puntos de la E.T.: <b>{sol.programa.puntosEt}</b></> : null}
+                {sol.programa.numItems ? <> · {sol.programa.numItems} ítems</> : null}
               </div>
               {sol.programa.etapas?.length > 0 && (
                 <table className="data" style={{ marginTop: 4 }}>

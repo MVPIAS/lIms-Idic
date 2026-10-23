@@ -16,7 +16,7 @@ export interface Solicitud {
   unidadCodigo: string | null;
   unidadNombre: string | null;
   numero: string | null;
-  tipoServicio: "estandar" | "no_estandar" | null;
+  tipoServicio: "estandar" | "no_estandar" | "comision" | null;
   estado: string;
   etiquetaEstado: string;
   comentarioEjecutivo: string | null;
@@ -25,7 +25,7 @@ export interface Solicitud {
   solicitadaPorNombre: string | null;
   respuesta: string | null;
   comentarioLab: string | null;
-  programa: { etapas: { actividad: string; inicio?: string | null; termino?: string | null; recursos?: string | null }[]; fechaInicio?: string | null; fechaTermino?: string | null; plazoEntregaDias: number } | null;
+  programa: { etapas: { actividad: string; inicio?: string | null; termino?: string | null; recursos?: string | null }[]; fechaInicio?: string | null; fechaTermino?: string | null; plazoEntregaDias: number; puntosEt?: string | null; numItems?: number | null } | null;
   costeo: any;
   plazoEntregaDias: number | null;
   respondidaAt: string | null;
