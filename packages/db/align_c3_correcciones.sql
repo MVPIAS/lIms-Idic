@@ -146,3 +146,17 @@ SELECT cl.id, LEFT(trim(cl.contacto_nombre), 160), NULLIF(cl.contacto_cargo, '')
    AND NOT EXISTS (SELECT 1 FROM contacto x
                     WHERE x.cliente_id = cl.id AND x.deleted_at IS NULL
                       AND lower(trim(x.nombre)) = lower(trim(cl.contacto_nombre)));
+
+-- -----------------------------------------------------------------------------
+-- B-034 · Devolución del excedente del lote (EP-03 6.3, 7.2).
+--   El excedente es una porción propia en la cadena de custodia: su devolución
+--   no dispone de la contramuestra (que sigue «En retención»).
+-- -----------------------------------------------------------------------------
+ALTER TABLE muestra_custodia ADD COLUMN IF NOT EXISTS porcion varchar(20);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_muestra_custodia_porcion') THEN
+    ALTER TABLE muestra_custodia ADD CONSTRAINT ck_muestra_custodia_porcion CHECK (porcion IS NULL OR porcion IN ('muestra', 'excedente'));
+  END IF;
+END $$;
+COMMENT ON COLUMN muestra_custodia.porcion IS
+  'Qué porción mueve el eslabón: la muestra (NULL o «muestra») o el excedente del lote («excedente»), que se devuelve sin disponer de la muestra ni de la contramuestra.';
