@@ -507,6 +507,17 @@ async function main() {
     afirmar(v.includes("cotizaciones_por_vencer"), `Comercial perdió sus tarjetas: ${v}`);
     return `Muestreo: ${claves.join(", ")} · Comercial conserva las suyas`;
   });
+
+  /* ------------------------------------------------------------ B-071 */
+  await paso("B-071 · el Jefe LCC crea una E.T. para LCC y LTX (misma sección); solo LTX u otra sección → 403", async () => {
+    const cab = (labs, sufijo) => ({ codigo: `ET-C1-${sello}-${sufijo}`, nombre: "E.T. de prueba · calzado y textil (frente c1)", laboratorios: labs, clienteId: C.cliente.id });
+    const et = await ok("demo.lcc.jefe", "POST", "/especificaciones-tecnicas", cab([C.u.LCC.id, C.u.LTX.id], "a"));
+    afirmar(et.id, JSON.stringify(et).slice(0, 200));
+    await rechazo(403, /alcance/, "demo.lcc.jefe", "POST", "/especificaciones-tecnicas", cab([C.u.LTX.id], "b"));
+    await rechazo(403, /alcance/, "demo.lcc.jefe", "POST", "/especificaciones-tecnicas", cab([C.u.LCC.id, C.u.LPN.id], "c"));
+    await exigir(403, U.lpnJefe, "POST", "/especificaciones-tecnicas", cab([C.u.LCC.id, C.u.LTX.id], "d"));
+    return `${et.codigo ?? cab([], "a").codigo} (LCC + LTX) creada por el Jefe LCC; solo LTX, LCC + LPN y el Jefe LPN → 403`;
+  });
 //PASOS
 }
 

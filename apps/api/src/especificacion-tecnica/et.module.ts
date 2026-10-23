@@ -67,7 +67,7 @@ import {
   erroresPunto,
   motivoNoPermitido,
   planDesglose,
-  puedeGestionar,
+  puedeGestionarConSeccion,
   puedeVer,
   siguienteVersion,
   type EstadoEt,
@@ -182,6 +182,7 @@ export class EspecificacionTecnicaService {
     const tenantId = tenantDe(req);
     const filtroVer = await this.alcance.filtroUnidades(req, "et.ver");
     const filtroGestion = tiene(req, "et.gestionar") ? await this.alcance.filtroUnidades(req, "et.gestionar") : undefined;
+    const seccionGestion = filtroGestion ? await this.labsDeSeccion(filtroGestion) : [];
     const params: unknown[] = [tenantId];
     const cond: string[] = ["et.tenant_id = $1::uuid"];
     if (q.estado && ["borrador", "vigente", "reemplazada", "anulada"].includes(q.estado)) {
@@ -216,9 +217,28 @@ export class EspecificacionTecnicaService {
       data: filas.map((f) => ({
         ...f,
         laboratoriosCodigos: (f.laboratorios ?? []).map((l: string) => nombreLab.get(l) ?? "?"),
-        puedeGestionar: filtroGestion !== undefined && puedeGestionar(f.laboratorios ?? [], filtroGestion),
+        puedeGestionar: filtroGestion !== undefined && puedeGestionarConSeccion(f.laboratorios ?? [], filtroGestion, seccionGestion),
       })),
     };
+  }
+
+  /** Laboratorios de la misma sección que los indicados (hermanos de tipo LABORATORIO, B-071). */
+  private async labsDeSeccion(unidades: string[]): Promise<string[]> {
+    if (!unidades.length) return [];
+    const f = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT h.id FROM unidad u
+         JOIN unidad s ON s.id = u.padre_id AND s.tipo = 'SECCION'
+         JOIN unidad h ON h.padre_id = s.id AND h.tipo = 'LABORATORIO' AND h.activa
+        WHERE u.id = ANY($1::uuid[])`,
+      unidades,
+    );
+    return f.map((x) => x.id);
+  }
+
+  /** ¿Gestiona la E.T. con estos laboratorios? Sus laboratorios y los de su misma sección (B-071). */
+  private async gestiona(req: any, labs: string[]): Promise<boolean> {
+    const filtro = await this.alcance.filtroUnidades(req, "et.gestionar");
+    return puedeGestionarConSeccion(labs, filtro, filtro ? await this.labsDeSeccion(filtro) : []);
   }
 
   /** E.T. del tenant y visible para el usuario (404 / 403). */
@@ -234,7 +254,7 @@ export class EspecificacionTecnicaService {
   /** E.T. que el usuario gestiona (et.gestionar con alcance sobre todos sus laboratorios). */
   private async cargarGestion(req: any, id: string) {
     const et = await this.cargar(req, id);
-    if (!puedeGestionar(et.laboratorios ?? [], await this.alcance.filtroUnidades(req, "et.gestionar")))
+    if (!(await this.gestiona(req, et.laboratorios ?? [])))
       throw new ForbiddenException(
         (et.laboratorios ?? []).length
           ? "Fuera de su alcance: la E.T. incluye laboratorios que usted no tiene asignados."
@@ -281,7 +301,8 @@ export class EspecificacionTecnicaService {
       this.laboratorios(tenantId),
     ]);
     const filtroGestion = tiene(req, "et.gestionar") ? await this.alcance.filtroUnidades(req, "et.gestionar") : undefined;
-    const gestiona = filtroGestion !== undefined && puedeGestionar(et.laboratorios ?? [], filtroGestion);
+    const seccionGestion = filtroGestion ? await this.labsDeSeccion(filtroGestion) : [];
+    const gestiona = filtroGestion !== undefined && puedeGestionarConSeccion(et.laboratorios ?? [], filtroGestion, seccionGestion);
     const esUltima = versiones[0]?.id === et.id;
     const nombreLab = new Map(labs.map((l) => [l.id, l.codigo]));
     return {
@@ -349,7 +370,7 @@ export class EspecificacionTecnicaService {
       );
       if (ok[0].n !== new Set(labs).size) throw new BadRequestException("Algún laboratorio indicado no existe.");
     }
-    if (!puedeGestionar(labs, await this.alcance.filtroUnidades(req, "et.gestionar")))
+    if (!(await this.gestiona(req, labs)))
       throw new ForbiddenException(
         labs.length
           ? "Solo puede gestionar E.T. de los laboratorios de su alcance."
