@@ -315,6 +315,16 @@ export async function heredarDeCotizacion(db: any, tenantId: string, otId: strin
     tenantId,
     cotizacionId,
   );
+  // B-038: el solicitante de la cotización (contacto elegido o nombre escrito) pasa a la OT y de ahí al informe.
+  await db.$executeRawUnsafe(
+    `UPDATE orden_trabajo o
+        SET solicitante = LEFT(COALESCE(NULLIF(trim(ct.nombre || COALESCE(', ' || NULLIF(ct.cargo, ''), '')), ''), NULLIF(trim(c.solicitante_nombre), '')), 200)
+       FROM cotizacion c LEFT JOIN contacto ct ON ct.id = c.solicitante_contacto_id
+      WHERE o.id = $1::uuid AND c.id = $2::uuid AND COALESCE(o.solicitante, '') = ''
+        AND COALESCE(ct.nombre, c.solicitante_nombre, '') <> ''`,
+    otId,
+    cotizacionId,
+  );
 }
 
 @ApiTags("ot")
