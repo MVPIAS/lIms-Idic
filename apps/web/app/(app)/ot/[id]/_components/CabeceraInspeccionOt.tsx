@@ -9,6 +9,7 @@
  * agregan dirección, comuna y contacto. No se muestra en OT de otras unidades.
  * API: GET/PUT /bpch/cabecera-ot/:otId (docs/FLUJO_BPCH_CABECERA_OT.md).
  */
+import { avisarCambioOt } from "@/lib/refresco";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { llamar } from "@/lib/laboratorio";
@@ -100,6 +101,7 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
       setF({ ...f, ...r });
       setForm(r.cabecera ?? {});
       toast.ok(r.faltantesEmision?.length ? "Cabecera guardada. Aún falta para emitir el Informe de Inspección." : "Cabecera guardada: siga con el muestreo de los lotes.");
+      avisarCambioOt(otId); // B-041: la ruta deja de decir «Cabecera · etapa actual».
     } catch (err: any) {
       setError(err.message);
     } finally {

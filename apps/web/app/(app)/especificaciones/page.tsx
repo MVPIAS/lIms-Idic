@@ -143,7 +143,7 @@ export default function BibliotecaEtPage() {
         <DataTable columns={columnas} rows={filas} rowKey={(f) => f.id} headerSearch searchKeys={["codigo", "nombre", "origen", "laboratorios"]}
           onRowClick={(f) => router.push(`/especificaciones/${f.id}` as any)} />
       )}
-      {nueva && <NuevaEt labs={labs} conClientes={puede("cliente.ver")} onCerrar={() => setNueva(false)} onCreada={(id) => router.push(`/especificaciones/${id}` as any)} />}
+      {nueva && <NuevaEt labs={labs} conClientes={puede("cliente.ver")} onCerrar={() => setNueva(false)} onCreada={(id) => { setNueva(false); cargar(); router.push(`/especificaciones/${id}` as any); }} />}
     </div>
   );
 }

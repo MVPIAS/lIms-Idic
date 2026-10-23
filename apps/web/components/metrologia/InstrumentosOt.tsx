@@ -8,6 +8,7 @@
  * (pestaña «Informe y cierre»). Todo lo decide el servidor (GET /ot/:id/metrologia):
  * aquí solo se pinta lo que devuelve y se ofrecen las acciones que permite.
  */
+import { avisarCambioOt, useCambiosOt } from "@/lib/refresco";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { llamar } from "@/lib/laboratorio";
@@ -42,6 +43,7 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
     catch (e: any) { setError(e.message); }
   }, [otId]);
   useEffect(() => { cargar(); }, [cargar]);
+  useCambiosOt(otId, cargar);
 
   async function hacer(metodo: "POST" | "PUT", ruta: string, cuerpo: unknown, okTexto: string) {
     setOcupado(true);
@@ -51,6 +53,7 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
       setDlg(null);
       await cargar();
       onCambio?.();
+      avisarCambioOt(otId);
       return true;
     } catch (e: any) { toast.error(e.message); return false; }
     finally { setOcupado(false); }
@@ -61,7 +64,7 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
     try {
       const r = await llamar("POST", `/ot/${otId}/instrumentos/desde-cotizacion`);
       toast.ok(r.data.creados ? `Se registraron ${r.data.creados} instrumento(s) desde la cotización.` : "Las líneas de la cotización ya estaban cargadas.");
-      await cargar(); onCambio?.();
+      await cargar(); onCambio?.(); avisarCambioOt(otId);
     } catch (e: any) { toast.error(e.message); }
     finally { setOcupado(false); }
   }
@@ -200,7 +203,7 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
       )}
 
       {vivos.some((i) => i.estado === "no_apto" || (i.estado === "devuelto" && i.calibrable === false)) && (
-        <NoCalibrables otId={otId} onCambio={() => { cargar(); onCambio?.(); }} />
+        <NoCalibrables otId={otId} onCambio={() => { cargar(); onCambio?.(); avisarCambioOt(otId); }} />
       )}
 
       {vivos.length > 0 && d.ot.estado !== "cerrada" && (

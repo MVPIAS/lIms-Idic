@@ -8,6 +8,7 @@
  *     si la OT es con cobro).
  * Reglas: docs/FLUJO_FIRMA_CIERRE.md.
  */
+import { avisarCambioOt, useCambiosOt } from "@/lib/refresco";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { fecha, fechaDia, fechaHora, monto } from "@/lib/format";
@@ -50,6 +51,7 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
   useEffect(() => {
     cargar();
   }, [cargar]);
+  useCambiosOt(otId, cargar);
 
   async function guardarFecha() {
     setOcupado(true);
@@ -58,6 +60,7 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
       toast.ok("Fecha de compromiso guardada.");
       setEditFecha(false);
       onCambio?.();
+      avisarCambioOt(otId);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -85,6 +88,7 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
       setD(r);
       toast.ok(r.facturaCreada ? `OT cerrada. Factura ${r.facturaCreada.numero} pendiente de facturar.` : "OT cerrada.");
       onCambio?.();
+      avisarCambioOt(otId);
     } catch (e: any) {
       toast.error(e.message);
       cargar();
