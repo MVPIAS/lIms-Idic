@@ -412,6 +412,29 @@ async function main() {
     afirmar(!lqc.some((a) => /Producción Nacional remitido a DCO/.test(a.titulo ?? "")), "el aviso llegó a un laboratorio");
     return `${pn.length} aviso(s) «${pn[0].titulo}» al Jefe DCO; LQC no lo recibe`;
   });
+
+  /* ------------------------------------------------------------ B-019 / B-008 BPCH */
+  await paso("B-019/B-008 · la OT de PN o de prototipo trae a la cabecera lo conocido y a la recepción su panel", async () => {
+    const ots = (await ok(U.admin, "GET", "/ot?limit=200")).data;
+    const proto = ots.find((o) => o.origenTrabajo === "PROTOTIPO" && !["cerrada", "anulada"].includes(o.estado));
+    const pnOt = ots.find((o) => o.origenTrabajo === "PRODUCCION_NACIONAL");
+    const hechos = [];
+    if (pnOt) {
+      const f = await ok("demo.bpch.jefe", "GET", `/bpch/cabecera-ot/${pnOt.id}`);
+      if (!f.cabecera?.documentoOrigen) afirmar(/RAF/.test(f.heredados?.documentoOrigen ?? ""), `heredados PN ${JSON.stringify(f.heredados)}`);
+      hechos.push(`PN ${pnOt.codigo}: ${Object.keys(f.heredados ?? {}).join(", ") || "cabecera ya completa"}`);
+    }
+    if (proto) {
+      const f = await ok("demo.bpch.jefe", "GET", `/bpch/cabecera-ot/${proto.id}`);
+      if (!f.cabecera?.esquema) afirmar(f.heredados?.esquema === "TIPO" && f.heredados?.documentoOrigen, `heredados prototipo ${JSON.stringify(f.heredados)}`);
+      const reg = await ok("demo.bpch.jefe", "GET", `/flujo/ot/${proto.id}/registro-muestras`);
+      if (reg.panelOt) afirmar(reg.panelOt.origen === "prototipo" && reg.panelOt.metodos.length > 0, `panel ${JSON.stringify(reg.panelOt).slice(0, 200)}`);
+      hechos.push(`prototipo ${proto.codigo}: ${Object.keys(f.heredados ?? {}).join(", ") || "cabecera ya completa"}${reg.panelOt ? ` · panel con ${reg.panelOt.metodos.length} método(s)` : ""}`);
+    }
+    if (!hechos.length) return "sin OT de PN ni de prototipo en esta base (corra antes bpch-produccion-prototipos-clasificacion.js)";
+    await exigir(403, U.lqcJefe, "GET", `/bpch/cabecera-ot/${(pnOt ?? proto).id}`);
+    return hechos.join(" · ");
+  });
 //PASOS
 }
 
