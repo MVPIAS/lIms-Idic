@@ -108,3 +108,15 @@ export function valoresPatronAlMotor<T extends Record<string, any>>(
     : null;
   return { datos: { ...datos, pat } as T, cargados, editados, error };
 }
+
+/** Claves de los datos del motor que alimenta la hoja de control (B-027), para el aviso de la toma de datos. */
+export function clavesDeLaHoja(datos: Record<string, any>, c: CondicionesHoja): string[] {
+  const hay = (x: unknown) => x !== null && x !== undefined && (!Array.isArray(x) || x.length > 0);
+  const fuente: Record<string, unknown> = {
+    temp: c.temp, T: c.temp, hum: c.hum, H: c.hum, patm: c.pres, P: c.pres,
+    tcorr: c.errT, et: c.errT, hcorr: c.errH, eh: c.errH, ebar: c.errP,
+    corr: [c.errT, c.errH, c.errP].some((x) => x != null) ? 1 : null,
+    termohig: c.errT ?? c.errH, barometro: c.errP,
+  };
+  return Object.keys(fuente).filter((k) => k in datos && hay(fuente[k]));
+}

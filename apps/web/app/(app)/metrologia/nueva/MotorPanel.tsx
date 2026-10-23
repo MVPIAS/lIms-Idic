@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtG, parseEntrada, verEntrada, ETIQUETA_ENTRADA, ETIQUETA_MOTOR, type MotorInfo, type CalculoMotor } from "@/lib/metrologia";
-import { condicionesAlMotor, valoresPatronAlMotor, type CondicionesHoja, type ValoresPatron } from "@/lib/metrologiaFicha";
+import { clavesDeLaHoja, condicionesAlMotor, valoresPatronAlMotor, type CondicionesHoja, type ValoresPatron } from "@/lib/metrologiaFicha";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -60,14 +60,14 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
   const seq = useRef(0);
   // B-027: las condiciones de la hoja de control se copian a los datos del motor (una sola captura).
   const condJson = JSON.stringify(condiciones ?? null);
-  const [deHoja, setDeHoja] = useState<string[]>([]);
   useEffect(() => {
     if (!condiciones || !datos) return;
     const r = condicionesAlMotor(datos, condiciones);
     if (r.campos.length) setDatos(r.datos);
-    setDeHoja((prev) => [...new Set([...prev, ...r.campos])]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [condJson, datos === null]);
+  // Claves del motor que alimenta la hoja (aunque ya coincidan), para avisar de dónde salen.
+  const deHoja = condiciones && datos ? clavesDeLaHoja(datos, condiciones) : [];
   // B-043: los valores del patrón (corrección, U y deriva de cada pieza) salen del maestro; cambiarlos pide motivo.
   const valJson = JSON.stringify(valoresPatron ?? null);
   const [motivoPat, setMotivoPat] = useState("");
