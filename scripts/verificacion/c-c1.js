@@ -299,6 +299,23 @@ async function main() {
     await exigir(403, U.lmbJefe, "PUT", `/ot/${C.otLqa.id}/analistas`, { usuarioIds: [] });
     return `${C.otLqa.codigo} (LQA) · ${C.oiLmb.numero} → LMB abre expediente, ruta, muestras y cobertura; LPN 403`;
   });
+
+  /* ------------------------------------------------------------ B-005 */
+  await paso("B-005 · «Quitar ensayo» con motivo: la jefatura del laboratorio sí; el analista y otro laboratorio no; queda en «Ensayos eliminados»", async () => {
+    const res = await ok(U.lmeJefe, "GET", `/flujo/ot/${C.otLme.id}/resultados`);
+    const r = res.resultados[0];
+    afirmar(r, "la OT no tiene ensayos");
+    await rechazo(400, /mínimo 5/, U.lmeJefe, "POST", `/resultados/${r.id}/quitar`, { motivo: "no" });
+    await exigir(403, U.lmeAnalista, "POST", `/resultados/${r.id}/quitar`, { motivo: "No aplica a la matriz" });
+    await exigir(403, U.lpnJefe, "POST", `/resultados/${r.id}/quitar`, { motivo: "No aplica a la matriz" });
+    const q = await ok(U.lmeJefe, "POST", `/resultados/${r.id}/quitar`, { motivo: "Analito de otra matriz (frente c1)" });
+    afirmar(q.quitado, JSON.stringify(q));
+    const despues = await ok(U.lmeJefe, "GET", `/flujo/ot/${C.otLme.id}/resultados`);
+    afirmar(!despues.resultados.some((x) => x.id === r.id), "el ensayo sigue en la OT");
+    const pl = await ok(U.lmeJefe, "GET", `/laboratorio/ot/${C.otLme.id}/planilla-calculos`);
+    afirmar(pl.eliminados.some((e) => e.resultadoId === r.id && e.motivo === "Analito de otra matriz (frente c1)"), "no figura en «Ensayos eliminados» con su motivo");
+    return `${r.analito ?? r.id} quitado con motivo; analista y LPN → 403`;
+  });
 //PASOS
 }
 
