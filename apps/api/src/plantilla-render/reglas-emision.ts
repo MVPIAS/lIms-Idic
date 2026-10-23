@@ -69,20 +69,26 @@ export type OrigenTipoDocumento = "indicado" | "plantilla" | "unidad";
 /**
  * Tipo de documento con el que se emite (y que decide quién firma):
  *   1. el que indica quien emite;
- *   2. el propio de la plantilla si es de un tipo específico (IVC, informe técnico);
- *   3. el de la unidad de la OT (`unidad.tipo_documento_defecto`, heredado por la
+ *   2. el que tiene guardado la plantilla (`plantilla_informe.tipo_documento`,
+ *      B-022: SCCII → informe de inspección, SCCCC → certificado de conformidad,
+ *      CERTARMA → certificado por arma…);
+ *   3. el propio de la plantilla si es de un tipo específico (IVC, informe técnico);
+ *   4. el de la unidad de la OT (`unidad.tipo_documento_defecto`, heredado por la
  *      rama: el Banco de Pruebas de Chile, sus sucursales y la Delegación Nº 11
  *      emiten «Informe de inspección»);
- *   4. el que corresponde a la plantilla (informe de ensayo).
+ *   5. el que corresponde a la plantilla (informe de ensayo).
  */
 export function tipoDocumentoPorDefecto(p: {
   indicado?: string | null;
   tipoPlantilla?: string | null;
   /** Código de la plantilla: algunas son de un documento propio (CRB, Informe de Rechazo del LRB). */
   repid?: string | null;
+  /** Tipo de documento guardado en la plantilla (`plantilla_informe.tipo_documento`). */
+  tipoDePlantilla?: string | null;
   tipoUnidad?: string | null;
 }): { tipo: string; origen: OrigenTipoDocumento } {
   if (p.indicado) return { tipo: p.indicado, origen: "indicado" };
+  if (p.tipoDePlantilla) return { tipo: p.tipoDePlantilla, origen: "plantilla" };
   const propio = p.repid ? TIPO_POR_REPID[p.repid.toUpperCase()] : undefined;
   if (propio) return { tipo: propio, origen: "plantilla" };
   const pl = (p.tipoPlantilla ?? "").toUpperCase();

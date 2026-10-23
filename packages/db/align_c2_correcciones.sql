@@ -5,6 +5,7 @@
 -- Backlog_Correcciones_Recorrido_Aiuken.xlsx, pestaña «Plan», frente 2.
 --   B-003 · El oficio conductor tiene su propia serie: no repite el número de
 --           un documento emitido (disparador de unicidad oficio ↔ documento).
+--   B-022 · La plantilla guarda su tipo de documento («Automático» lo toma de ella).
 -- Aditivo e idempotente. Va ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
@@ -41,3 +42,34 @@ UPDATE oficio o
    AND o.numero IS NOT NULL
    AND EXISTS (SELECT 1 FROM certificado c
                 WHERE c.tenant_id = o.tenant_id AND (c.numero = o.numero OR c.codigo = o.numero));
+
+-- -----------------------------------------------------------------------------
+-- B-022 · El tipo de documento lo define la plantilla
+-- -----------------------------------------------------------------------------
+-- «Automático» deducía el tipo del tipo genérico de la plantilla (SCCII es
+-- «I.TECNICO» → Informe técnico, con firmas y numeración de otro documento).
+-- Ahora la plantilla guarda su tipo de documento de la matriz y «Automático» lo
+-- toma de ella. Se edita en Configuración del laboratorio › Plantillas de informe.
+ALTER TABLE plantilla_informe ADD COLUMN IF NOT EXISTS tipo_documento VARCHAR(40);
+COMMENT ON COLUMN plantilla_informe.tipo_documento IS
+  'Tipo de documento de la matriz de firmas y de la numeración que emite la plantilla (INFORME_INSPECCION, CERTIFICADO_CONFORMIDAD...). NULL = se deduce del tipo de plantilla y de la unidad de la OT.';
+
+-- Solo rellena las que aún no lo tienen: respeta lo que haya cambiado Calidad.
+UPDATE plantilla_informe p
+   SET tipo_documento = v.tipo
+  FROM (VALUES
+    ('SCCII',     NULL::text,                   'INFORME_INSPECCION'),
+    ('ASTEC',     'SCC Informe de Inspección',  'INFORME_INSPECCION'),
+    ('SCCCC',     NULL,                         'CERTIFICADO_CONFORMIDAD'),
+    ('SCCDG',     NULL,                         'CERTIFICADO_CONFORMIDAD'),
+    ('SCCIN',     NULL,                         'INFORME_INCUMPLIMIENTO'),
+    ('SCCID',     NULL,                         'INFORME_INCUMPLIMIENTO'),
+    ('CERTARMA',  NULL,                         'CERTIFICADO_ARMA'),
+    ('LRB-CRB',   NULL,                         'CERTIFICADO_RESISTENCIA_BALISTICA'),
+    ('LRB-RECH',  NULL,                         'INFORME_RECHAZO'),
+    ('PROTO-APR', NULL,                         'CERTIFICADO_CONFORMIDAD'),
+    ('PROTO-REC', NULL,                         'INFORME_INCUMPLIMIENTO')
+  ) AS v(repid, nombre, tipo)
+ WHERE p.repid = v.repid
+   AND (v.nombre IS NULL OR p.nombre = v.nombre)
+   AND p.tipo_documento IS NULL;

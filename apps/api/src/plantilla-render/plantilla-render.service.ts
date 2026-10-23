@@ -800,13 +800,13 @@ export class PlantillaRenderService {
     try {
       const [ot, plantilla, primera] = await Promise.all([
         this.prisma.ordenTrabajo.findFirst({ where: { id: otId, ...(tenantId ? { tenantId } : {}) }, select: { codigo: true, unidadPrincipal: true, tenantId: true } }),
-        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true, repid: true } }),
+        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true, repid: true, tipoDocumento: true } }),
         this.prisma.muestra.findFirst({ where: { otId, deletedAt: null }, orderBy: { codigo: "asc" }, select: { codigo: true } }),
       ]);
       if (!ot || !plantilla) return general;
       const unidad = cob ? cob.unidadDocumento : ot.unidadPrincipal;
       const deUnidad = await this.tipoDocumentoDeUnidad(unidad);
-      const { tipo } = tipoDocumentoPorDefecto({ tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoUnidad: deUnidad?.tipo ?? null });
+      const { tipo } = tipoDocumentoPorDefecto({ tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoDePlantilla: plantilla.tipoDocumento, tipoUnidad: deUnidad?.tipo ?? null });
       const p = await this.numeracion.proximo({
         tenantId: ot.tenantId,
         unidadId: unidad,
@@ -952,7 +952,7 @@ export class PlantillaRenderService {
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
     const plantilla = await this.prisma.plantillaInforme.findFirst({
       where: { id: plantillaId, ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, repid: true, nombre: true, tipo: true },
+      select: { id: true, repid: true, nombre: true, tipo: true, tipoDocumento: true },
     });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
 
@@ -969,6 +969,7 @@ export class PlantillaRenderService {
       indicado: opts.tipoDocumento,
       tipoPlantilla: plantilla.tipo,
       repid: plantilla.repid,
+      tipoDePlantilla: plantilla.tipoDocumento,
       tipoUnidad: deUnidad?.tipo ?? null,
     });
     const faltantes: string[] = [];
@@ -1228,14 +1229,14 @@ export class PlantillaRenderService {
     const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId }, select: { codigo: true, estado: true } });
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
     if (ot.estado === "anulada" || ot.estado === "cerrada") throw new ConflictException(`La OT ${ot.codigo} está ${ot.estado}.`);
-    const plantilla = await this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId, tenantId }, select: { id: true, tipo: true, nombre: true, repid: true } });
+    const plantilla = await this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId, tenantId }, select: { id: true, tipo: true, nombre: true, repid: true, tipoDocumento: true } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
     const otro = documentoEnConflicto(cober.cob, cober.hechos.documentos.filter((d) => d.plantillaId === plantillaId));
     if (otro) throw new ConflictException(`Ya existe el documento ${otro.numero}${otro.etiqueta ? ` (${otro.etiqueta})` : ""} con esta plantilla.`);
     if (p.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(p.tipoDocumento))
       throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
     const deUnidad = await this.tipoDocumentoDeUnidad(cober.unidadDocumento);
-    const { tipo: tipoDocumento } = tipoDocumentoPorDefecto({ indicado: p.tipoDocumento, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoUnidad: deUnidad?.tipo ?? null });
+    const { tipo: tipoDocumento } = tipoDocumentoPorDefecto({ indicado: p.tipoDocumento, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoDePlantilla: plantilla.tipoDocumento, tipoUnidad: deUnidad?.tipo ?? null });
     const fecha = new Date();
     const motivo = p.motivo.trim();
     return this.prisma.$transaction(async (tx) => {
