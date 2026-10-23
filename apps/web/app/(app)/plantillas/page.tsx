@@ -2,6 +2,14 @@
 
 import CrudTable from "@/components/CrudTable";
 
+/** Nombre legible del tipo de documento de la matriz (B-022). */
+const NOMBRE_DOC: Record<string, string> = {
+  INFORME_ENSAYO: "Informe de ensayo", IVC: "IVC", INFORME_TECNICO: "Informe técnico", CERTIFICADO_CALIBRACION: "Certificado de calibración",
+  INFORME_INSPECCION: "Informe de inspección", CERTIFICADO_CONFORMIDAD: "Certificado de conformidad", INFORME_INCUMPLIMIENTO: "Informe de incumplimiento",
+  CERTIFICADO_RESISTENCIA_BALISTICA: "Certificado de Resistencia Balística", INFORME_RECHAZO: "Informe de Ensayo de Rechazo", CERTIFICADO_ARMA: "Certificado por arma",
+  INFORME_INCUMPLIMIENTO_ARMA: "Informe de incumplimiento de armas", CERTIFICADO_EVIDENCIA: "Certificado de evidencia", INFORME_PERICIAL: "Informe técnico pericial",
+};
+
 export default function PlantillasPage() {
   return (
     <CrudTable
@@ -12,7 +20,7 @@ export default function PlantillasPage() {
         { campo: "repid", titulo: "REPID", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Plantilla" },
         { campo: "tipo", titulo: "Tipo", render: (v) => <span className={`pill ${v === "CERTIFICADO" ? "teal" : String(v).startsWith("I.") ? "blue" : "gray"}`}>{v}</span> },
-        { campo: "tipoDocumento", titulo: "Documento (firmas y numeración)", render: (v) => (v ? String(v) : "Automático") },
+        { campo: "tipoDocumento", titulo: "Documento (firmas y numeración)", render: (v) => (v ? NOMBRE_DOC[String(v)] ?? String(v) : <span style={{ color: "var(--muted)" }}>Automático</span>) },
         { campo: "emision", titulo: "Emisión" },
         { campo: "version", titulo: "Ver." },
       ]}
