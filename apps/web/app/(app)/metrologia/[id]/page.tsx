@@ -324,6 +324,10 @@ export default function FichaCalibracionPage() {
                 <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("correo")}>Enviar por correo…</button>
               )}
               {a.includes("REEMITIR") && <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("reemitir")}>Reemitir…</button>}
+              {/* B-082: la reemisión sigue disponible tras la entrega, pero solo para quien firma y emite. */}
+              {c.estado === "emitida" && !a.includes("REEMITIR") && (
+                <span className={s.espera}>La reemisión de un certificado emitido (también después de entregarlo) la hace quien puede firmar y emitir: el Jefe del laboratorio.</span>
+              )}
               {/* EP-04 P6.3 (frente r4d): trabajo no conforme con la calibración precargada. */}
               {devuelta && puede("nc.crear") && (
                 <Link className="btn outline" href={`/no-conformidades?nueva=1&clase=TNC&calibracionId=${c.id}&titulo=${encodeURIComponent(`TNC · calibración ${c.codigo}`)}` as any}>
