@@ -3,7 +3,7 @@
 import { URL_PERSONAS, etiquetaPersona } from "@/lib/personas";
 import { useEffect, useMemo, useState } from "react";
 import { deInputHoraChile, fechaHora, num, pct } from "@/lib/format";
-import { esNumero } from "@/lib/validate";
+import { esNumero, errorNumeroEnLinea } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import Retenciones from "./_components/Retenciones";
 
@@ -168,7 +168,7 @@ export default function CustodiaPage() {
     }
     if (f.tempCelsius !== "" && !esNumero(String(f.tempCelsius))) v.tempCelsius = "Temperatura no numérica.";
     if (f.evento === "devolucion") {
-      if (!(Number(String(f.cantidadDevuelta).replace(",", ".")) > 0)) v.cantidadDevuelta = "Indique la cantidad devuelta.";
+      if (!(Number(String(f.cantidadDevuelta).replace(",", ".")) > 0)) v.cantidadDevuelta = errorNumeroEnLinea(f.cantidadDevuelta, "numero", { positivo: true }) || "Indique la cantidad devuelta.";
       if (!String(f.guiaDespacho).trim()) v.guiaDespacho = "Indique el Nº de la guía de despacho.";
     }
     if (f.humedadPct !== "") {
@@ -176,7 +176,7 @@ export default function CustodiaPage() {
       else if (Number(f.humedadPct) < 0 || Number(f.humedadPct) > 100) v.humedadPct = "La humedad debe estar entre 0 y 100 %.";
     }
     setErrs(v);
-    if (Object.keys(v).length) return;
+    if (Object.keys(v).length) { setError("Revise los campos marcados en rojo: el traspaso no se registró."); return; }
     const payload = {
       muestraId: f.muestraId,
       evento: f.evento,
@@ -409,8 +409,12 @@ export default function CustodiaPage() {
                 </div>
                 <div className="field">
                   <label htmlFor="cu-cant">Cantidad devuelta <span className="req">*</span></label>
-                  <input id="cu-cant" inputMode="decimal" value={f.cantidadDevuelta} onChange={(e) => setF({ ...f, cantidadDevuelta: e.target.value })} />
-                  {errs.cantidadDevuelta && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.cantidadDevuelta}</small>}
+                  <input id="cu-cant" inputMode="decimal" value={f.cantidadDevuelta} aria-invalid={errorNumeroEnLinea(f.cantidadDevuelta, "numero", { positivo: true }) || errs.cantidadDevuelta ? true : undefined}
+                    onChange={(e) => { setF({ ...f, cantidadDevuelta: e.target.value }); setErrs((x) => ({ ...x, cantidadDevuelta: "" })); }} />
+                  {/* B-088: aviso al escribir texto o un cero, no solo al registrar. */}
+                  {(errorNumeroEnLinea(f.cantidadDevuelta, "numero", { positivo: true }) || errs.cantidadDevuelta) && (
+                    <small role="alert" style={{ color: "var(--red)", fontSize: 11 }}>{errorNumeroEnLinea(f.cantidadDevuelta, "numero", { positivo: true }) || errs.cantidadDevuelta}</small>
+                  )}
                 </div>
                 <div className="field">
                   <label htmlFor="cu-guia">Guía de despacho Nº <span className="req">*</span></label>
@@ -474,6 +478,7 @@ export default function CustodiaPage() {
             </span>
             <button className="btn primary sm">Registrar traspaso</button>
           </div>
+          {error && <div className="alert warn" role="alert" style={{ marginTop: 8, marginBottom: 0 }}>{error}</div>}
         </form>
       )}
 
