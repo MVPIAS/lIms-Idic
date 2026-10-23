@@ -235,8 +235,8 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
           <p style={{ marginTop: 0 }}>Se informa al cliente que la entrega será a más tardar el <b>{fechaDia(d.plazo.fechaCompromiso)}</b>. Queda en el historial de la OT.</p>
           <div className="form-grid">
             <div className="field">
-              <label>Medio <span className="req">*</span></label>
-              <select value={plazo.medio} onChange={(e) => setPlazo({ ...plazo, medio: e.target.value })}>
+              <label htmlFor="seg-1">Medio <span className="req">*</span></label>
+              <select id="seg-1" value={plazo.medio} onChange={(e) => setPlazo({ ...plazo, medio: e.target.value })}>
                 <option value="correo">Correo electrónico</option>
                 <option value="oficio">Oficio</option>
                 <option value="telefono">Teléfono</option>
@@ -244,9 +244,9 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
               </select>
             </div>
             {plazo.medio === "correo" && (
-              <div className="field"><label>Correo del cliente <span className="req">*</span></label><input value={plazo.destinatarios} onChange={(e) => setPlazo({ ...plazo, destinatarios: e.target.value })} /></div>
+              <div className="field"><label htmlFor="seg-2">Correo del cliente <span className="req">*</span></label><input id="seg-2" value={plazo.destinatarios} onChange={(e) => setPlazo({ ...plazo, destinatarios: e.target.value })} /></div>
             )}
-            <div className="field span-2"><label>Mensaje adicional</label><textarea rows={2} maxLength={2000} value={plazo.mensaje} onChange={(e) => setPlazo({ ...plazo, mensaje: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="seg-3">Mensaje adicional</label><textarea id="seg-3" rows={2} maxLength={2000} value={plazo.mensaje} onChange={(e) => setPlazo({ ...plazo, mensaje: e.target.value })} /></div>
           </div>
         </Modal>
       )}
@@ -265,7 +265,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
           }
         >
           <p style={{ marginTop: 0 }}>Los días de atraso se calculan contra la fecha de compromiso ({d.plazo.fechaCompromiso ? fechaDia(d.plazo.fechaCompromiso) : "sin fecha"}).</p>
-          <div className="field"><label>Fecha de recepción en DCO <span className="req">*</span></label><input type="date" value={recepcion} max={hoyISO()} onChange={(e) => setRecepcion(e.target.value)} /></div>
+          <div className="field"><label htmlFor="seg-4">Fecha de recepción en DCO <span className="req">*</span></label><input id="seg-4" type="date" value={recepcion} max={hoyISO()} onChange={(e) => setRecepcion(e.target.value)} /></div>
         </Modal>
       )}
 
@@ -299,18 +299,18 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
           <p style={{ marginTop: 0 }}>Cartas, oficios en papel, copias o planillas que acompañan a la OT. Si ya existe uno con el mismo tipo y número, queda como nueva versión.</p>
           <div className="form-grid">
             <div className="field">
-              <label>Tipo <span className="req">*</span></label>
-              <select value={registro.tipo} onChange={(e) => setRegistro({ ...registro, tipo: e.target.value })}>
+              <label htmlFor="seg-5">Tipo <span className="req">*</span></label>
+              <select id="seg-5" value={registro.tipo} onChange={(e) => setRegistro({ ...registro, tipo: e.target.value })}>
                 {TIPOS_REGISTRO.map((t) => <option key={t} value={t}>{t.charAt(0) + t.slice(1).toLowerCase()}</option>)}
               </select>
             </div>
-            <div className="field"><label>Nº <span className="req">*</span></label><input value={registro.numero} maxLength={80} onChange={(e) => setRegistro({ ...registro, numero: e.target.value })} /></div>
-            <div className="field"><label>Copias</label><input type="number" min={0} max={50} value={registro.copias} onChange={(e) => setRegistro({ ...registro, copias: e.target.value })} /></div>
-            <div className="field"><label>Fecha</label><input type="date" value={registro.fecha} max={hoyISO()} onChange={(e) => setRegistro({ ...registro, fecha: e.target.value })} /></div>
-            <div className="field span-2"><label>Descripción</label><input value={registro.descripcion} maxLength={500} onChange={(e) => setRegistro({ ...registro, descripcion: e.target.value })} /></div>
+            <div className="field"><label htmlFor="seg-6">Nº <span className="req">*</span></label><input id="seg-6" value={registro.numero} maxLength={80} onChange={(e) => setRegistro({ ...registro, numero: e.target.value })} /></div>
+            <div className="field"><label htmlFor="seg-7">Copias</label><input id="seg-7" type="number" min={0} max={50} value={registro.copias} onChange={(e) => setRegistro({ ...registro, copias: e.target.value })} /></div>
+            <div className="field"><label htmlFor="seg-8">Fecha</label><input id="seg-8" type="date" value={registro.fecha} max={hoyISO()} onChange={(e) => setRegistro({ ...registro, fecha: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="seg-9">Descripción</label><input id="seg-9" value={registro.descripcion} maxLength={500} onChange={(e) => setRegistro({ ...registro, descripcion: e.target.value })} /></div>
             <div className="field span-2">
-              <label>Archivo (PDF, imagen, Word o Excel; máx. 5 MB)</label>
-              <input type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx" onChange={(e) => setRegistro({ ...registro, archivo: e.target.files?.[0] ?? null })} />
+              <label htmlFor="seg-10">Archivo (PDF, imagen, Word o Excel; máx. 5 MB)</label>
+              <input id="seg-10" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx,.xlsx" onChange={(e) => setRegistro({ ...registro, archivo: e.target.files?.[0] ?? null })} />
             </div>
           </div>
         </Modal>
@@ -380,22 +380,22 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
           </fieldset>
           <div className="form-grid">
             <div className="field">
-              <label>Medio <span className="req">*</span></label>
-              <select value={envio.medio} onChange={(e) => setEnvio({ ...envio, medio: e.target.value })}>
+              <label htmlFor="seg-11">Medio <span className="req">*</span></label>
+              <select id="seg-11" value={envio.medio} onChange={(e) => setEnvio({ ...envio, medio: e.target.value })}>
                 <option value="">— Seleccione —</option>
                 {MEDIOS_ENVIO.map((m) => <option key={m.valor} value={m.valor}>{m.texto}</option>)}
               </select>
             </div>
-            <div className="field"><label>Fecha <span className="req">*</span></label><input type="date" value={envio.fecha} max={hoyISO()} onChange={(e) => setEnvio({ ...envio, fecha: e.target.value })} /></div>
-            <div className="field span-2"><label>Destinatario <span className="req">*</span></label><input value={envio.destinatario} maxLength={300} onChange={(e) => setEnvio({ ...envio, destinatario: e.target.value })} /></div>
+            <div className="field"><label htmlFor="seg-12">Fecha <span className="req">*</span></label><input id="seg-12" type="date" value={envio.fecha} max={hoyISO()} onChange={(e) => setEnvio({ ...envio, fecha: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="seg-13">Destinatario <span className="req">*</span></label><input id="seg-13" value={envio.destinatario} maxLength={300} onChange={(e) => setEnvio({ ...envio, destinatario: e.target.value })} /></div>
             {envio.medio === "correo" && (
               <>
-                <div className="field span-2"><label>Correos <span className="req">*</span></label><input value={envio.correos} onChange={(e) => setEnvio({ ...envio, correos: e.target.value })} /></div>
-                <div className="field span-2"><label>Mensaje</label><textarea rows={2} maxLength={2000} value={envio.mensaje} onChange={(e) => setEnvio({ ...envio, mensaje: e.target.value })} /></div>
+                <div className="field span-2"><label htmlFor="seg-14">Correos <span className="req">*</span></label><input id="seg-14" value={envio.correos} onChange={(e) => setEnvio({ ...envio, correos: e.target.value })} /></div>
+                <div className="field span-2"><label htmlFor="seg-15">Mensaje</label><textarea id="seg-15" rows={2} maxLength={2000} value={envio.mensaje} onChange={(e) => setEnvio({ ...envio, mensaje: e.target.value })} /></div>
               </>
             )}
-            <div className="field"><label>Nº de guía</label><input value={envio.guia} maxLength={60} onChange={(e) => setEnvio({ ...envio, guia: e.target.value })} /></div>
-            <div className="field"><label>Observación</label><input value={envio.observacion} maxLength={1000} onChange={(e) => setEnvio({ ...envio, observacion: e.target.value })} /></div>
+            <div className="field"><label htmlFor="seg-16">Nº de guía</label><input id="seg-16" value={envio.guia} maxLength={60} onChange={(e) => setEnvio({ ...envio, guia: e.target.value })} /></div>
+            <div className="field"><label htmlFor="seg-17">Observación</label><input id="seg-17" value={envio.observacion} maxLength={1000} onChange={(e) => setEnvio({ ...envio, observacion: e.target.value })} /></div>
           </div>
         </Modal>
       )}

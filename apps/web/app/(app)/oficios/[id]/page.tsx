@@ -110,10 +110,10 @@ export default function OficioPage() {
         </h2>
         {editar ? (
           <div className="form-grid cols-2">
-            <div className="field span-2"><label>Destinatario <span className="req">*</span></label><input value={f.destinatario} maxLength={300} onChange={(ev) => setF({ ...f, destinatario: ev.target.value })} /></div>
-            <div className="field span-2"><label>Materia <span className="req">*</span></label><input value={f.materia} maxLength={500} onChange={(ev) => setF({ ...f, materia: ev.target.value })} /></div>
-            <div className="field span-2"><label>Texto</label><textarea rows={5} maxLength={8000} value={f.cuerpo} onChange={(ev) => setF({ ...f, cuerpo: ev.target.value })} /></div>
-            <div className="field span-2"><label>Distribución (una línea por destinatario, ejemplares al final)</label><textarea rows={3} maxLength={2000} value={f.distribucion} onChange={(ev) => setF({ ...f, distribucion: ev.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="ofd-1">Destinatario <span className="req">*</span></label><input id="ofd-1" value={f.destinatario} maxLength={300} onChange={(ev) => setF({ ...f, destinatario: ev.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="ofd-2">Materia <span className="req">*</span></label><input id="ofd-2" value={f.materia} maxLength={500} onChange={(ev) => setF({ ...f, materia: ev.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="ofd-3">Texto</label><textarea id="ofd-3" rows={5} maxLength={8000} value={f.cuerpo} onChange={(ev) => setF({ ...f, cuerpo: ev.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="ofd-4">Distribución (una línea por destinatario, ejemplares al final)</label><textarea id="ofd-4" rows={3} maxLength={2000} value={f.distribucion} onChange={(ev) => setF({ ...f, distribucion: ev.target.value })} /></div>
             <div className="toolbar" style={{ gridColumn: "1 / -1", margin: 0 }}>
               <button type="button" className="btn outline" onClick={() => setEditar(false)}>Cancelar</button>
               <button
@@ -133,13 +133,13 @@ export default function OficioPage() {
           </div>
         ) : (
           <div className="form-grid cols-2">
-            <div className="field readonly"><label>Nº de oficio</label><input readOnly value={o.numero ?? "Se asigna al enviarlo a firmas"} /></div>
-            <div className="field readonly"><label>Fecha</label><input readOnly value={fechaDia(o.fecha)} /></div>
-            <div className="field readonly span-2"><label>Destinatario</label><input readOnly value={o.destinatario} /></div>
-            <div className="field readonly"><label>Unidad que lo emite</label><input readOnly value={`${o.unidad.codigo} · ${o.unidad.nombre}`} /></div>
-            <div className="field readonly"><label>Conduce</label><input readOnly value={o.cotizacion ? `Cotización ${o.cotizacion.codigo}` : o.ot ? `OT ${o.ot.codigo}` : "—"} /></div>
-            <div className="field readonly span-2"><label>Distribución</label><input readOnly value={(o.distribucion ?? []).map((d: any) => `${d.destinatario} (${d.ejemplares})`).join(" · ") || "—"} /></div>
-            {o.despacho && <div className="field readonly span-2"><label>Despacho</label><input readOnly value={`Nº ${o.despacho.numero} del ${fechaDia(o.despacho.fecha)}${o.despacho.por ? ` · ${o.despacho.por}` : ""}`} /></div>}
+            <div className="field readonly"><label htmlFor="ofd-5">Nº de oficio</label><input id="ofd-5" readOnly value={o.numero ?? "Se asigna al enviarlo a firmas"} /></div>
+            <div className="field readonly"><label htmlFor="ofd-6">Fecha</label><input id="ofd-6" readOnly value={fechaDia(o.fecha)} /></div>
+            <div className="field readonly span-2"><label htmlFor="ofd-7">Destinatario</label><input id="ofd-7" readOnly value={o.destinatario} /></div>
+            <div className="field readonly"><label htmlFor="ofd-8">Unidad que lo emite</label><input id="ofd-8" readOnly value={`${o.unidad.codigo} · ${o.unidad.nombre}`} /></div>
+            <div className="field readonly"><label htmlFor="ofd-9">Conduce</label><input id="ofd-9" readOnly value={o.cotizacion ? `Cotización ${o.cotizacion.codigo}` : o.ot ? `OT ${o.ot.codigo}` : "—"} /></div>
+            <div className="field readonly span-2"><label htmlFor="ofd-10">Distribución</label><input id="ofd-10" readOnly value={(o.distribucion ?? []).map((d: any) => `${d.destinatario} (${d.ejemplares})`).join(" · ") || "—"} /></div>
+            {o.despacho && <div className="field readonly span-2"><label htmlFor="ofd-11">Despacho</label><input id="ofd-11" readOnly value={`Nº ${o.despacho.numero} del ${fechaDia(o.despacho.fecha)}${o.despacho.por ? ` · ${o.despacho.por}` : ""}`} /></div>}
           </div>
         )}
         {o.documentos.length > 0 && (
@@ -216,7 +216,7 @@ export default function OficioPage() {
             </>
           }
         >
-          <div className="field"><label>Motivo <span className="req">*</span></label><textarea rows={3} maxLength={1000} value={motivo} onChange={(ev) => setMotivo(ev.target.value)} /></div>
+          <div className="field"><label htmlFor="ofd-12">Motivo <span className="req">*</span></label><textarea id="ofd-12" rows={3} maxLength={1000} value={motivo} onChange={(ev) => setMotivo(ev.target.value)} /></div>
         </Modal>
       )}
       {dialogo === "despachar" && (
@@ -235,8 +235,8 @@ export default function OficioPage() {
         >
           <p style={{ marginTop: 0 }}>Oficina de partes: registre el número y la fecha de despacho del oficio y de lo que conduce.</p>
           <div className="form-grid">
-            <div className="field"><label>Nº de despacho <span className="req">*</span></label><input value={despacho.numero} maxLength={60} onChange={(ev) => setDespacho({ ...despacho, numero: ev.target.value })} /></div>
-            <div className="field"><label>Fecha de despacho <span className="req">*</span></label><input type="date" max={hoyISO()} value={despacho.fecha} onChange={(ev) => setDespacho({ ...despacho, fecha: ev.target.value })} /></div>
+            <div className="field"><label htmlFor="ofd-13">Nº de despacho <span className="req">*</span></label><input id="ofd-13" value={despacho.numero} maxLength={60} onChange={(ev) => setDespacho({ ...despacho, numero: ev.target.value })} /></div>
+            <div className="field"><label htmlFor="ofd-14">Fecha de despacho <span className="req">*</span></label><input id="ofd-14" type="date" max={hoyISO()} value={despacho.fecha} onChange={(ev) => setDespacho({ ...despacho, fecha: ev.target.value })} /></div>
           </div>
         </Modal>
       )}
