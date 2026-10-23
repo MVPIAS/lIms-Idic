@@ -287,7 +287,7 @@ async function main() {
     const pub = await ok(U.lccJefe, "POST", `/especificaciones-tecnicas/${et.id}/publicar`);
     C.otLcc = await ok(U.planif, "POST", "/ot", { clienteId: C.cliente.id, unidadPrincipalId: C.LCC.id, conCobro: false, descripcionTrabajo: `c3 ${sello}: botas` });
     await ok(U.ventas, "PUT", `/especificaciones-tecnicas/ot/${C.otLcc.id}`, { etId: pub.id ?? et.id });
-    const reg = await ok(U.lccA1, "POST", `/flujo/ot/${C.otLcc.id}/muestras`, { muestras: [{ nombre: "Par de botas c3", metodoIds: [mHilo.id], claseCustodia: "contramuestra" }] });
+    const reg = await ok(U.lccA1, "POST", `/flujo/ot/${C.otLcc.id}/muestras`, { muestras: [{ nombre: "Par de botas c3", metodoIds: [mHilo.id], recepcion: { tomaMuestra: "entregada_cliente", condicionRecepcion: "cumple", claseCustodia: "contramuestra", ubicacion: "Bodega de contramuestras", datos: { unidades_recibidas: 6 } } }] });
     C.mBota = reg.muestras[0];
     const plan = await ok(U.lccA1, "GET", `/especificaciones-tecnicas/muestra/${C.mBota.id}/desglose`);
     afirmar(plan.plan.inspecciones.puntos.length === 1 && plan.plan.inspecciones.sinEnsayo.length === 1 && plan.plan.sinEnsayo.length === 0, `plan ${JSON.stringify(plan.plan).slice(0, 200)}`);
@@ -309,11 +309,11 @@ async function main() {
     await exigir(403, U.ventas, "POST", "/custodia", cuerpo);
     const c = await ok(U.lccJefe, "POST", "/custodia", cuerpo);
     const ret = lista(await ok(U.lccJefe, "GET", "/recepcion/retenciones")).find((x) => x.id === C.mBota.id);
-    afirmar(!ret || (ret.estado !== "dispuesta" && !ret.disposicion), `contramuestra tras devolver el excedente: ${JSON.stringify(ret && [ret.estado, ret.disposicion])}`);
+    afirmar(ret && ret.claseCustodia === "contramuestra" && ret.estado !== "dispuesta" && !ret.disposicion, `contramuestra tras devolver el excedente: ${JSON.stringify(ret && [ret.claseCustodia, ret.estado, ret.disposicion])}`);
     const cadena = lista(await ok(U.lccJefe, "GET", `/custodia?muestraId=${C.mBota.id}&limit=50`));
     const dev = cadena.find((x) => x.id === c.id);
     afirmar(dev?.porcion === "excedente", `eslabón ${dev?.porcion}`);
-    return `eslabón «excedente» · contramuestra ${ret ? ret.estado : "sin retención"}`;
+    return `eslabón «excedente» · contramuestra ${ret.estado} (no «dispuesta»)`;
   });
 
   /* ------------------------------------------------------------ B-035 */
@@ -511,6 +511,22 @@ async function main() {
     const lineas = f.lineas ?? [];
     afirmar(lineas.length === 2 && Number(f.neto) > 0 && lineas.every((l) => /^\d+ · /.test(l.descripcion) && !/^(\d+) · \1 ·/.test(l.descripcion)), `factura ${JSON.stringify(lineas.map((l) => [l.descripcion, l.subtotal]))}`);
     return `${fac.numero}: ${lineas.map((l) => `${l.descripcion} $${Number(l.subtotal)}`).join(" · ")} · neto $${Number(f.neto)} · analista no cierra (403)`;
+  });
+
+  /* ------------------------------------------------------------ B-083 */
+  await paso("B-083 · La encuesta de la OT cerrada se registra y el aviso dice el promedio con coma decimal; un analista no (403)", async () => {
+    const ot = await ok(U.planif, "GET", `/ot/${C.otLqa.id}`);
+    const enc = lista(await ok(U.ventas, "GET", "/encuestas?estado=pendiente&limit=200")).find((e) => e.codigo === `ENC-${ot.codigo}`);
+    afirmar(enc, `sin encuesta pendiente de ${ot.codigo}`);
+    const preg = (await ok(U.ventas, "GET", "/encuestas/preguntas")).filter((q) => q.activo !== false);
+    const respuestas = preg.map((q, i) => ({ codigo: q.codigo, valor: i === 0 ? 5 : 7 }));
+    const cuerpo = { respuestas, cargoRespondente: "Jefa de calidad", medio: "telefono", fechaRespuesta: hoyCl() };
+    await exigir(403, U.lqaA1, "POST", `/encuestas/${enc.id}/registrar`, cuerpo);
+    const r = await ok(U.ventas, "POST", `/encuestas/${enc.id}/registrar`, cuerpo);
+    const prom = 7 - 2 / preg.length;
+    afirmar(Number.isInteger(prom) || /promedio \d+,\d+\)/.test(r.mensaje), `aviso «${r.mensaje}»`);
+    afirmar(!/promedio \d+\.\d/.test(r.mensaje), `aviso con punto decimal «${r.mensaje}»`);
+    return r.mensaje;
   });
 
   /* ------------------------------------------------------------ B-097 */
