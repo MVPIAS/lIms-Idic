@@ -397,6 +397,21 @@ async function main() {
     await ok(jefe, "POST", `/ot/${ot.id}/instrumentos/${i2}/informe-tecnico/emitir`);
     return `${ot.codigo}: con metrólogo deja de estar «sin analista» · informe técnico → Jefe LMT · servicio externo → Jefe DSA`;
   });
+
+  /* ------------------------------------------------------------ B-018 */
+  await paso("B-018 · «Remitir a DCO» de Producción Nacional avisa al Jefe DCO (y la OT directa del BPCH tiene el bloque de remisión)", async () => {
+    // La correlación de PN la recorre bpch-produccion-prototipos-clasificacion.js (que se corre antes):
+    // aquí se comprueba que su remisión dejó el aviso al Departamento Comercial.
+    const av = lista(await ok("demo.dco.jefe", "GET", "/avisos?limite=200"));
+    const pn = av.filter((a) => /Producción Nacional remitido a DCO/.test(a.titulo ?? ""));
+    const s = await login("demo.bpch.jefe");
+    afirmar(s.permisos.includes("certificado.despachar"), "la jefatura BPCH no puede remitir a DCO (certificado.despachar)");
+    if (!pn.length) return `sin correlación de PN remitida en esta base (corra antes bpch-produccion-prototipos-clasificacion.js)`;
+    afirmar(pn[0].ruta && /\/bpch\/produccion-nacional\/correlacion\//.test(pn[0].ruta), `ruta del aviso ${pn[0].ruta}`);
+    const lqc = lista(await ok(U.lqcJefe, "GET", "/avisos?limite=200"));
+    afirmar(!lqc.some((a) => /Producción Nacional remitido a DCO/.test(a.titulo ?? "")), "el aviso llegó a un laboratorio");
+    return `${pn.length} aviso(s) «${pn[0].titulo}» al Jefe DCO; LQC no lo recibe`;
+  });
 //PASOS
 }
 

@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { AvisosService } from "../../avisos/avisos.service";
 import { createHash } from "crypto";
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
@@ -180,6 +181,7 @@ export class ProduccionNacionalService {
     private readonly comun: OtDesdeProcesoService,
     private readonly clientes: ClienteService,
     private readonly clasificaciones: ClasificacionService,
+    private readonly avisos?: AvisosService,
   ) {}
 
   private get baseVerificacion(): string {
@@ -1249,6 +1251,23 @@ export class ProduccionNacionalService {
       id,
       usuarioId,
     );
+    // B-018 (EP-07 7.18): el Departamento Comercial recibe el aviso en Mi bandeja, como la
+    // remisión del expediente de internación (Ventas, Planificación y Jefe DCO).
+    const oc = await this.ocFila(tenantId, c.oc_id).catch(() => null);
+    await this.avisos
+      ?.emitir(
+        tenantId,
+        {
+          tipo: "despacho",
+          titulo: `Informe técnico${c.informe_numero ? ` ${c.informe_numero}` : ""} de Producción Nacional remitido a DCO`,
+          mensaje: `La correlación de ventas de la O/C ${oc?.numero ?? ""}${oc?.cliente_nombre ? ` (${oc.cliente_nombre})` : ""} fue remitida al Departamento Comercial con su informe técnico.`,
+          ruta: `/bpch/produccion-nacional/correlacion/${id}`,
+          clave: `pn_remision_dco:${id}`,
+          creadoPor: usuarioId,
+        },
+        { roles: [{ rol: "COMERCIAL" }, { rol: "PLANIFICACION" }, { rol: "JEFE_DEPTO", unidadCodigo: "DCO" }] },
+      )
+      .catch(() => undefined);
     return this.correlacion(tenantId, id);
   }
 
