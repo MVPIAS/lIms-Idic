@@ -64,7 +64,7 @@ export const NAV: SeccionNav[] = [
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
       { href: "/encuestas", label: "Encuestas de satisfacción", icon: "☺", perm: "encuesta.ver", claves: "postventa satisfaccion cliente" },
       // EP-00 9.2 (frente r4d): reclamos de clientes.
-      { href: "/reclamos", label: "Reclamos", icon: "📣", perm: "reclamo.gestionar", claves: "postventa reclamo cliente queja" },
+      { href: "/reclamos", label: "Reclamos", icon: "📣", perm: ["reclamo.ver", "reclamo.gestionar"], claves: "postventa reclamo cliente queja" },
       // Misma pantalla que «BPCH · Certificación › Internaciones» (puerta única): Comercial registra la resolución y la tasa.
       // En Comercial solo para quien trabaja en el Depto. Comercial; el BPCH la tiene en su sección.
       { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: "DCO", claves: "aduana importacion sdbpch resolucion dgmn tasa" },

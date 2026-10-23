@@ -341,6 +341,8 @@ INSERT INTO permiso (id, codigo, modulo, accion, descripcion) VALUES
    'Registrar la apelación de un Informe de Rechazo presentada por el cliente (Jefe de Departamento o de Laboratorio).'),
   (gen_random_uuid(), 'apelacion.resolver', 'apelacion', 'resolver',
    'Resolver la apelación (Director): acoge o rechaza, decisión inapelable.'),
+  (gen_random_uuid(), 'reclamo.ver', 'reclamo', 'ver',
+   'Ver los reclamos de clientes.'),
   (gen_random_uuid(), 'reclamo.gestionar', 'reclamo', 'gestionar',
    'Comercial (SVT/SPC): registrar reclamos de clientes, asignar el responsable, responder y cerrar.'),
   (gen_random_uuid(), 'ot.recepcion_dco', 'ot', 'recepcion_dco',
@@ -354,6 +356,7 @@ SELECT r.id, p.id
     ('JEFE_LAB', 'apelacion.ver'), ('JEFE_DEPTO', 'apelacion.ver'), ('COMERCIAL', 'apelacion.ver'), ('CALIDAD', 'apelacion.ver'),
     ('JEFE_LAB', 'apelacion.registrar'), ('JEFE_DEPTO', 'apelacion.registrar'),
     ('DIRECTOR', 'apelacion.resolver'), ('SUPERADMIN', 'apelacion.registrar'), ('SUPERADMIN', 'apelacion.resolver'),
+    ('COMERCIAL', 'reclamo.ver'), ('PLANIFICACION', 'reclamo.ver'), ('CALIDAD', 'reclamo.ver'),
     ('COMERCIAL', 'reclamo.gestionar'), ('PLANIFICACION', 'reclamo.gestionar'), ('CALIDAD', 'reclamo.gestionar'), ('SUPERADMIN', 'reclamo.gestionar'),
     ('COMERCIAL', 'ot.recepcion_dco'), ('PLANIFICACION', 'ot.recepcion_dco'), ('RECEPCION', 'ot.recepcion_dco'), ('SUPERADMIN', 'ot.recepcion_dco')
   ) AS m(rol, perm)
