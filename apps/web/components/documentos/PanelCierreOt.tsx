@@ -139,7 +139,7 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
           Informes y certificados
           <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 12 }}>· resultados aprobados {d.resultados.aprobados} de {d.resultados.total}</span>
           <span style={{ flex: 1 }} />
-          {d.puedo.emitir && !cerrada && <Link href={`/informes?otId=${otId}` as any} className="btn outline sm">Emitir informe</Link>}
+          {d.puedo.emitir && !cerrada && <Link href={`/informes?otId=${otId}` as any} className="btn outline sm" aria-label="Emitir informe de esta OT">Emitir informe</Link>}
         </h2>
         {d.documentos.length ? (
           <table className="data">
