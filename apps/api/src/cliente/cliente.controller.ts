@@ -40,6 +40,16 @@ const CrearClienteSchema = z.object({
   contactoEmail: z.preprocess((v) => (v === "" ? undefined : v), z.string().email("Correo del contacto no válido").max(160).optional()),
   contactoTelefono: opcional(40),
 });
+/** Planta del cliente (EP-00 0.1: «Planta(s) [nombre, dirección]»). */
+const PlantaSchema = z.object({
+  codigo: z.preprocess((v) => (v === "" ? undefined : v), z.string().trim().max(20).regex(/^[A-Za-z0-9_-]+$/, "El código solo admite letras, dígitos, - y _.").optional()),
+  nombre: z.string({ required_error: "Indique el nombre de la planta." }).trim().min(1, "Indique el nombre de la planta.").max(200),
+  direccion: opcional(300),
+  ciudad: opcional(80),
+  region: opcional(80),
+  telefono: opcional(40),
+});
+const PlantaActualizarSchema = PlantaSchema.omit({ codigo: true }).partial().extend({ activa: z.boolean().optional() });
 const TipoSchema = z.object({ tipo: CrearClienteSchema.shape.tipo });
 const ActualizarClienteSchema = CrearClienteSchema.partial().extend({
   // En la edición diasCredito no debe volver al valor por defecto si no viene.
@@ -123,5 +133,30 @@ export class ClienteController {
     @Req() req: any,
   ) {
     return this.svc.desbloquear(id, body.motivo, req?.user?.tenantId);
+  }
+
+  /* --- Plantas del cliente (EP-00 0.1, BL-172) --- */
+
+  @Get(":id/plantas")
+  @RequierePermiso("cliente.ver")
+  async plantas(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.plantas(id, req?.user?.tenantId);
+  }
+
+  @Post(":id/plantas")
+  @RequierePermiso("cliente.editar")
+  async crearPlanta(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.crearPlanta(id, PlantaSchema.parse(body ?? {}), req?.user?.tenantId);
+  }
+
+  @Patch(":id/plantas/:plantaId")
+  @RequierePermiso("cliente.editar")
+  async actualizarPlanta(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("plantaId", ParseUUIDPipe) plantaId: string,
+    @Body() body: unknown,
+    @Req() req: any,
+  ) {
+    return this.svc.actualizarPlanta(id, plantaId, PlantaActualizarSchema.parse(body ?? {}), req?.user?.tenantId);
   }
 }
