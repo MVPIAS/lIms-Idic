@@ -87,6 +87,7 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
 
   if (modo === "cierre") {
     const cals = vivos.filter((i) => i.calibracion);
+    const noCal = vivos.filter((i) => !i.calibracion && (i.documentosNoCalibrable ?? []).length);
     return (
       <div style={{ marginBottom: 14 }}>
         <h2 style={{ fontSize: 13, margin: "0 0 6px", display: "flex", alignItems: "center", gap: 8 }}>
@@ -118,6 +119,24 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
             </tbody>
           </table>
         ) : <p className="subtitle" style={{ margin: 0 }}>Aún no hay calibraciones en esta OT (pestaña «Instrumentos»).</p>}
+        {noCal.length > 0 && (
+          <>
+            <h3 style={{ fontSize: 12.5, margin: "10px 0 4px" }}>Instrumentos no calibrables · informe técnico o certificado externo</h3>
+            <table className="data">
+              <thead><tr><th>Instrumento</th><th>Documento</th><th>Custodia</th></tr></thead>
+              <tbody>
+                {noCal.map((i) => (
+                  <tr key={i.id}>
+                    <td>Ítem {i.numero} · {i.descripcion}</td>
+                    <td><DocsNoCalibrable docs={i.documentosNoCalibrable} /></td>
+                    <td><span className={`pill ${ESTADO_INSTRUMENTO[i.estado]?.pill ?? "gray"}`}>{ESTADO_INSTRUMENTO[i.estado]?.texto ?? i.estado}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="subtitle" style={{ margin: "4px 0 0" }}>La entrega de estos documentos se registra en la pestaña «Instrumentos» (no calibrables).</p>
+          </>
+        )}
         {dlg?.tipo === "entregar" && <DialogoEntrega item={dlg.item} ocupado={ocupado} onCerrar={() => setDlg(null)}
           onGuardar={(b) => hacer("POST", `/ot/${otId}/calibraciones/${dlg.item.calibracion.id}/entregar`, b, `Entrega de ${dlg.item.calibracion.numeroCertificado} registrada.`)} />}
       </div>
@@ -177,6 +196,8 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
                             ? <small style={{ display: "block", color: "var(--muted)" }}>Entregado {fechaDia(c.entregadoAt)} · {textoMedio(c.entregaMedio)}</small>
                             : <small style={{ display: "block" }}><span className="pill amber">Sin entregar</span></small>)}
                         </>
+                      ) : (i.documentosNoCalibrable ?? []).length ? (
+                        <DocsNoCalibrable docs={i.documentosNoCalibrable} />
                       ) : <span style={{ color: "var(--muted)" }}>—</span>}
                     </td>
                     <td style={{ textAlign: "right" }}>
@@ -462,5 +483,25 @@ function DialogoMotivo({ titulo, texto, boton, ocupado, onCerrar, onGuardar }: {
       <p style={{ marginTop: 0, color: "var(--muted)" }}>{texto}</p>
       <div className="field"><label htmlFor="mo-m">Motivo <Req /></label><textarea id="mo-m" rows={3} value={m} onChange={(e) => setM(e.target.value)} /></div>
     </Modal>
+  );
+}
+
+/** B-029: informe técnico o certificado externo del ítem no calibrable, con su estado de entrega. */
+function DocsNoCalibrable({ docs }: { docs: { tipo: string; numero: string | null; estado: string; entregadoAt: string | null; entregaMedio: string | null }[] }) {
+  return (
+    <>
+      {docs.map((x) => {
+        const listo = x.tipo === "informe_tecnico" ? x.estado === "emitido" : x.estado === "validado";
+        return (
+          <div key={`${x.tipo}-${x.numero}`} style={{ fontSize: 12 }}>
+            {x.tipo === "informe_tecnico" ? "Informe técnico" : "Certificado externo"} <span className="codigo">{x.numero ?? "(sin número)"}</span>{" "}
+            <span className={`pill ${listo ? "green" : "gray"}`}>{x.estado}</span>
+            {listo && (x.entregadoAt
+              ? <small style={{ display: "block", color: "var(--muted)" }}>Entregado {fechaDia(x.entregadoAt)} · {textoMedio(x.entregaMedio)}</small>
+              : <small style={{ display: "block" }}><span className="pill amber">Sin entregar</span></small>)}
+          </div>
+        );
+      })}
+    </>
   );
 }

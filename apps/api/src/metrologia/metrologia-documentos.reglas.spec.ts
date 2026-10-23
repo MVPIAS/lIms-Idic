@@ -86,3 +86,15 @@ describe("B-081 · texto del error de correo", () => {
     expect(textoErrorCorreo(null)).toBe("error del servidor de correo");
   });
 });
+
+describe("B-029 · entrega del certificado externo validado", () => {
+  const { motivoExterno } = require("./metrologia-documentos.reglas");
+  const devuelto = { numero: 2, estado: "devuelto", otEstado: "en_analisis", calibrable: false };
+  it("se entrega una vez, validado, aunque el instrumento ya se haya devuelto o la OT esté cerrada", () => {
+    expect(motivoExterno("ENTREGAR", devuelto, { estado: "validado" })).toBeNull();
+    expect(motivoExterno("ENTREGAR", { ...devuelto, otEstado: "cerrada" }, { estado: "validado" })).toBeNull();
+    expect(motivoExterno("ENTREGAR", devuelto, { estado: "validado", entregadoAt: "2026-10-23" })).toMatch(/ya está registrada/);
+    expect(motivoExterno("ENTREGAR", devuelto, { estado: "enviado" })).toMatch(/validado/);
+    expect(motivoExterno("ENTREGAR", devuelto, null)).toMatch(/validado/);
+  });
+});

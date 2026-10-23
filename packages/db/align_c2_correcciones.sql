@@ -8,6 +8,7 @@
 --   B-022 · La plantilla guarda su tipo de documento («Automático» lo toma de ella).
 --   B-026 · Cuerpo de la plantilla IVCOR según IDIC-PG09 Anexo 01.
 --   B-075 · Membrete «Laboratorio Químico Central» en el informe del LQC.
+--   B-029 · Entrega del certificado externo validado de Metrología.
 -- Aditivo e idempotente. Va ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
@@ -151,3 +152,14 @@ UPDATE plantilla_informe
 UPDATE plantilla_informe
    SET cuerpo_html = replace(cuerpo_html, 'Laboratorio de Química (LQC)', 'Laboratorio Químico Central')
  WHERE repid = 'PG09A2-LQC' AND cuerpo_html LIKE '%Laboratorio de Química (LQC)%';
+
+-- -----------------------------------------------------------------------------
+-- B-029 · Entrega del certificado externo validado (EP-04 §8.1)
+-- -----------------------------------------------------------------------------
+-- Cada ítem termina con su documento emitido y entregado: el certificado
+-- externo validado se entrega al cliente igual que el informe técnico.
+ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entregado_at         TIMESTAMPTZ;
+ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entrega_medio        VARCHAR(30);
+ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entrega_destinatario VARCHAR(160);
+ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entrega_observacion  TEXT;
+ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entregado_por        UUID REFERENCES usuario(id);

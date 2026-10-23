@@ -223,6 +223,14 @@ export class MetrologiaOtService {
     );
     const puedeCalibrar = tiene(req, "metrologia.crear") && (await this.alcance.puedeVerUnidad(req, ot.unidadId, "metrologia.crear"));
     const yo = req?.user?.sub;
+    // B-029: documento de cada ítem no calibrable (informe técnico o certificado externo) para la tabla y el cierre.
+    const docsNoCal = await this.prisma.$queryRawUnsafe<{ itemId: string; tipo: string; numero: string | null; estado: string; entregadoAt: Date | null; entregaMedio: string | null }[]>(
+      `SELECT ot_instrumento_id AS "itemId", 'informe_tecnico' AS tipo, numero, estado, entregado_at AS "entregadoAt", entrega_medio AS "entregaMedio"
+         FROM met_informe_tecnico WHERE ot_id = $1::uuid AND estado <> 'anulado'
+       UNION ALL
+       SELECT ot_instrumento_id, 'certificado_externo', certificado_numero, estado, entregado_at, entrega_medio
+         FROM met_servicio_externo WHERE ot_id = $1::uuid AND estado NOT IN ('anulado', 'rechazado')`, otId,
+    ).catch(() => []);
     const instrumentos = items.map((i) => {
       const v = calibracionVigente(cals, i.id);
       const acciones: string[] = [];
@@ -234,7 +242,7 @@ export class MetrologiaOtService {
         if (devolver && (i.estado === "no_apto" || (i.estado === "recibido" && v?.estado === "emitida"))) acciones.push("DEVOLVER");
         if (v && v.estado === "emitida" && !v.entregadoAt && entregar) acciones.push("ENTREGAR");
       }
-      return { ...i, calibracion: v, acciones };
+      return { ...i, calibracion: v, acciones, documentosNoCalibrable: docsNoCal.filter((x) => x.itemId === i.id) };
     });
     const faltantes = esMetrologia && items.length
       ? [

@@ -28,7 +28,8 @@ const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sa
 
 type Dlg =
   | { tipo: "informe"; fila: any } | { tipo: "devolverInforme"; fila: any } | { tipo: "entregarInforme"; fila: any }
-  | { tipo: "solicitar"; fila: any } | { tipo: "rechazar"; fila: any } | { tipo: "envio"; fila: any } | { tipo: "certificado"; fila: any } | { tipo: "validar"; fila: any };
+  | { tipo: "solicitar"; fila: any } | { tipo: "rechazar"; fila: any } | { tipo: "envio"; fila: any } | { tipo: "certificado"; fila: any } | { tipo: "validar"; fila: any }
+  | { tipo: "entregarExterno"; fila: any };
 
 async function abrirPdf(ruta: string) {
   try {
@@ -108,7 +109,10 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
                     {ext.fecha_envio ? ` · enviado el ${fechaDia(ext.fecha_envio)}` : ""}{ext.fecha_retorno ? ` · volvió el ${fechaDia(ext.fecha_retorno)}` : ""}
                     {ext.certificado_numero ? <> · certificado externo <span className="codigo">{ext.certificado_numero}</span></> : null}
                     {ext.estado === "validado" ? ` · ${ext.aptitud === "apto" ? "apto" : "no apto"}${ext.aptitud_comentario ? `: ${ext.aptitud_comentario}` : ""}` : ""}
-                    {ext.estado === "rechazado" && ext.rechazo_motivo ? <span style={{ display: "block" }}>Rechazado: {ext.rechazo_motivo}</span> : null}</p>
+                    {ext.estado === "rechazado" && ext.rechazo_motivo ? <span style={{ display: "block" }}>Rechazado: {ext.rechazo_motivo}</span> : null}
+                    {ext.estado === "validado" && (ext.entregado_at
+                      ? <span style={{ display: "block" }}>Entregado al cliente el {fechaDia(ext.entregado_at)} · {ext.entrega_destinatario}</span>
+                      : <span style={{ display: "block" }}><span className="pill amber">Sin entregar al cliente</span></span>)}</p>
                 ) : <p>No se ha solicitado.</p>}
                 <div className={css.acciones}>
                   {ae.includes("SOLICITAR") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "solicitar", fila: f })}>Solicitar servicio externo → Jefe de Departamento</button>}
@@ -117,6 +121,7 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
                   {ae.includes("ENVIO") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "envio", fila: f })}>Registrar envío al proveedor →</button>}
                   {ae.includes("CERTIFICADO") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "certificado", fila: f })}>{ext?.tiene_certificado ? "Reemplazar el certificado externo" : "Adjuntar el certificado externo"}</button>}
                   {ae.includes("VALIDAR") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "validar", fila: f })}>Validar el certificado externo → Entrega</button>}
+                  {ae.includes("ENTREGAR") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "entregarExterno", fila: f })}>Registrar entrega → Cierre</button>}
                   {ext?.tiene_certificado && <button className="btn outline sm" onClick={() => abrirPdf(`${base(f)}/servicio-externo/certificado`)}>Certificado externo (PDF)</button>}
                 </div>
               </div>
@@ -133,6 +138,8 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
         onGuardar={(motivo) => hacer("POST", `${base(dlg.fila)}/servicio-externo/rechazar`, { motivo }, "Solicitud rechazada.")} />}
       {dlg?.tipo === "entregarInforme" && <DialogoEntrega ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/informe-tecnico/entregar`, b, "Entrega del informe técnico registrada.")} />}
+      {dlg?.tipo === "entregarExterno" && <DialogoEntrega ocupado={ocupado} onCerrar={() => setDlg(null)}
+        onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/servicio-externo/entregar`, b, "Entrega del certificado externo registrada.")} />}
       {dlg?.tipo === "solicitar" && <DialogoSolicitud otId={otId} ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/servicio-externo`, b, "Servicio externo solicitado: espera la aprobación del Jefe de Departamento.")} />}
       {dlg?.tipo === "envio" && <DialogoEnvio costo={dlg.fila.externo?.costo} ocupado={ocupado} onCerrar={() => setDlg(null)}
