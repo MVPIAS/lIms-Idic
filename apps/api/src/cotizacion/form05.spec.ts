@@ -32,6 +32,19 @@ describe("Formulario de costeo FORM05 (EP-00 2.5)", () => {
     expect(r.horasHombreTotal).toBe(7);
   });
 
+  it("con la fórmula oficial 2026 (CI 20 %, recargo 30 %, IVA 19 %) reproduce la lista: EN1214 y EN1150", () => {
+    const oficial = { cfaPct: 20, margenParticularPct: 30, ivaPct: 19 };
+    const a = calcularForm05({ servicios: [{ codigo: "EN1214", cantidad: 1, valorUnitario: 329820 }] }, oficial);
+    expect([a.cdt, a.cfa, a.ct, a.recargo, a.precioParticular, a.iva, a.precioParticularIvaIncluido]).toEqual([329820, 65964, 395784, 118735, 514519, 97759, 612278]);
+    expect(a.precioEjercito).toBe(395784);
+    // EN1150 (LCNF): CD 264.275 → CI 52.855 · CT 317.130 · recargo 95.139 · neto 412.269 · IVA 78.331 · 490.600
+    const b = calcularForm05({ horasHombre: [{ tipo: "civil", categoria: "Metrólogo", horas: 1, valorHora: 264275 }] }, oficial);
+    expect([b.cfa, b.ct, b.recargo, b.precioParticular, b.iva, b.precioParticularIvaIncluido]).toEqual([52855, 317130, 95139, 412269, 78331, 490600]);
+    // EN412 (LEM): la lista se armó hacia atrás desde el precio particular; desde el CD entero 38.153 el CT y el neto salen 1 peso arriba.
+    const c = calcularForm05({ servicios: [{ codigo: "EN412", cantidad: 1, valorUnitario: 38153 }] }, oficial);
+    expect([c.ct, c.precioParticular, c.precioParticularIvaIncluido]).toEqual([45784, 59519, 70827]);
+  });
+
   it("exige al menos una fila y el dólar si hay gastos en US$", () => {
     expect(erroresForm05({})).toHaveLength(1);
     expect(erroresForm05({ otros: [{ descripcion: "x", monto: 1, moneda: "USD" }] })[0]).toMatch(/dólar/);

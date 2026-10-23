@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { CI_PCT_DEF, RECARGO_PCT_DEF } from "./circuito-config";
 
 /**
  * Costeo del módulo comercial IDIC (Ejército de Chile).
@@ -38,9 +39,9 @@ export interface LineaCosto {
 }
 
 export interface ParametrosCosteo {
-  /** Costo Fijo Asociado: % sobre el Costo Directo Total. Def. 12%. */
+  /** Costo indirecto (CFA): % sobre el Costo Directo Total. Def. 20 % (lista oficial 2026). */
   cfaPct?: number;
-  /** Margen comercial para clientes particulares: % sobre Costo Total. Def. 20%. */
+  /** Recargo para clientes particulares: % sobre Costo Total. Def. 30 % (lista oficial 2026). */
   margenParticularPct?: number;
   /** IVA vigente. Def. 19%. */
   ivaPct?: number;
@@ -99,8 +100,8 @@ export class CosteoService {
    * Calcula el costeo completo a partir de las líneas de costo directo.
    */
   calcular(lineas: LineaCosto[], params: ParametrosCosteo = {}): DesgloseCosteo {
-    const cfaPct = params.cfaPct ?? 12;
-    const margenParticularPct = params.margenParticularPct ?? 20;
+    const cfaPct = params.cfaPct ?? CI_PCT_DEF;
+    const margenParticularPct = params.margenParticularPct ?? RECARGO_PCT_DEF;
     const redondeo = params.redondeoClp ?? 0;
 
     const costoDirecto: Record<string, number> = {};

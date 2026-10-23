@@ -43,11 +43,13 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | | Dígitos mínimos (`digitos`) | Entero 1–10 | 5 | idem | idem |
 | | Reinicio (`reinicio`) | Opción: nunca (global) · cada año (anual) | global | idem | idem |
 | | Último número ya usado (`inicio`) | Entero 0–999.999.999. El siguiente es este + 1; bajarlo no reutiliza números | 0 | idem | idem |
-| Circuito de la cotización (`circuito_cotizacion`) · por confirmar EP-00 §10 P1–P2 | V°B° de la respuesta del laboratorio (`vb_niveles`) | Opción: laboratorio y departamento · solo laboratorio · ninguno | lab_depto | Costeo con el laboratorio | `cotizacion/circuito-config.ts` |
+| Circuito de la cotización (`circuito_cotizacion`) · por confirmar EP-00 §10 P2 (y P1 solo para el precio Ejército) | V°B° de la respuesta del laboratorio (`vb_niveles`) | Opción: laboratorio y departamento · solo laboratorio · ninguno | lab_depto | Costeo con el laboratorio | `cotizacion/circuito-config.ts` |
 | | Exigir consulta al laboratorio antes de firmar (`exigir_consulta_laboratorio`) | Sí / No | No | Firma de la cotización | idem |
 | | Exigir la firma del Jefe DCO para aceptar (`exigir_firma_para_aceptar`) | Sí / No | Sí | «Registrar aceptación» de la cotización: con «No» se acepta sin firma | idem |
-| | CFA del Formulario de costeo (`cfa_pct`) | Porcentaje 0–100, coma decimal, hasta 4 decimales | 12 | FORM05 | `cotizacion/form05.ts` |
-| | Recargo del precio particular (`margen_particular_pct`) | Porcentaje 0–100 | 20 | FORM05 | idem |
+| | Costo indirecto (CI) sobre el costo directo (`cfa_pct`, antes «CFA») | Porcentaje 0–100, coma decimal, hasta 4 decimales | 20 (lista oficial 2026; antes 12) | FORM05 y simulador de costeo | `cotizacion/form05.ts`, `cotizacion/estructura-precio.ts` |
+| | Recargo del precio particular sobre el costo total (`margen_particular_pct`) | Porcentaje 0–100 | 30 (lista oficial 2026; antes 20) | idem | idem |
+| | IVA sobre el neto (`iva_pct`) | Porcentaje 0–100 | 19 | FORM05: IVA y precio particular con IVA | idem |
+| | Precio de la lista que toma un cliente Ejército (`precio_ejercito`) · **por confirmar** EP-00 §10 P1 | Opción: ficha (no usa la lista) · costo total (CD + CI) · neto | ficha | Precio de cada ensayo al cotizar a un cliente con regla EJERCITO (un particular toma siempre el neto de la lista vigente) | `lista-precio/precio-lista.ts` |
 | Encuestas de satisfacción (`encuesta`) | Orígenes de OT que NO generan encuesta (`excluir_origenes`) | Casillas: Cotización, Disposición, Interlaboratorio, OT interna, Internación, Reinspección, Producción Nacional, Prototipo. Ninguna marcada = toda OT genera encuesta | OT interna, Interlaboratorio | Al cerrar o finalizar la OT | `fn_encuesta_al_cerrar_ot` (`align_encuestas_satisfaccion.sql`) |
 | Metrología · cierre (`metrologia`) | El cierre exige la devolución de cada instrumento (`cierre_exige_devolucion`) | Sí / No | Sí | Cerrar la OT de calibración y la lista «OT por cerrar» | `metrologia/metrologia-ot.datos.ts`, `ot/ot-cierre.controller.ts` |
 | Metrología · ficha de calibración y certificado (`metrologia_ficha`) · por confirmar EP-04 §10 P5, P6, P9, P13 | Criterio del error normalizado (`criterio_en`) | Opción: ≤ 1 · < 1 | ≤ 1 | Ficha › Error normalizado | `metrologia/ficha.reglas.ts` (`configFicha`) |
@@ -163,3 +165,11 @@ Recorrido de prueba: `scripts/verificacion/r1-r1f.js` (con Calidad, que puede, y
 con el Jefe de LQC y Comercial, que no) y, para las reglas de r1g,
 `scripts/verificacion/r1-r1h.js`. Para los parámetros de r2a, `scripts/verificacion/r2-r2a.js`
 (paso 1: Calidad cambia la tabla de amenazas y una variante; el Jefe de LQC no).
+
+Frente lp26: la lista de precios oficial 2026 del IDIC (22-10-2026) fijó la fórmula
+del precio: CI 20 % del costo directo, CT = CD + CI, recargo 30 % del CT, neto = CT +
+recargo, IVA 19 % del neto. `align_lp26_lista_precios.sql` cambia `cfa_pct` (12 → 20) y
+`margen_particular_pct` (20 → 30) solo donde seguían con el valor anterior y nadie los
+había cambiado a mano, y lo deja en el historial; crea `iva_pct` y `precio_ejercito`.
+La lista se carga con `seed_lp26_lista_precios_2026.sql`, generado por
+`scripts/datos/lista-precios-2026/generar-seed.ts` (ver `informe-carga.csv` en esa carpeta).

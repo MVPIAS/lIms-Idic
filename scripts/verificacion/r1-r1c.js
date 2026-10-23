@@ -296,7 +296,10 @@ async function main() {
     const r = await ok(U.lqcJefe, "POST", `/cotizaciones/solicitudes-laboratorio/${s.id}/responder`, { respuesta: "aceptar", programa, costeo });
     afirmar(r.estado === "respondido", `estado ${r.estado}`);
     afirmar(r.resultado.cdt === 4 * 18500 + 2 * 12000 + 15000, `CDT ${r.resultado.cdt}`);
-    afirmar(r.resultado.cfa === Math.round(r.resultado.cdt * 0.12) && r.resultado.precioParticular === Math.round(r.resultado.ct * 1.2), JSON.stringify(r.resultado));
+    // Fórmula oficial de la lista de precios 2026 (lp26): CI 20 % del CDT, recargo 30 % del CT (parámetros).
+    const { cdt, cfaPct, margenParticularPct } = r.resultado;
+    afirmar(cfaPct === 20 && margenParticularPct === 30, `parámetros CI ${cfaPct} % · recargo ${margenParticularPct} %`);
+    afirmar(r.resultado.cfa === Math.round(cdt * cfaPct / 100) && r.resultado.precioParticular === Math.round(cdt * (1 + cfaPct / 100) * (1 + margenParticularPct / 100)), JSON.stringify(r.resultado));
     await exigir(409, U.lqcJefe, "POST", `/cotizaciones/solicitudes-laboratorio/${s.id}/responder`, { respuesta: "aceptar", programa, costeo });
     return `CDT ${r.resultado.cdt} · CFA ${r.resultado.cfa} · CT ${r.resultado.ct} · particular ${r.resultado.precioParticular}`;
   });

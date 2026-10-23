@@ -299,7 +299,7 @@ export class CircuitoCotizacionService {
     const editable = c.estado === "abierta" && !motivoNoEditable(c.firmaEstado);
     return {
       cotizacion: c,
-      config: { niveles: cfg.niveles, exigirConsulta: cfg.exigirConsulta, exigirFirma: cfg.exigirFirma, cfaPct: cfg.cfaPct, margenParticularPct: cfg.margenParticularPct },
+      config: { niveles: cfg.niveles, exigirConsulta: cfg.exigirConsulta, exigirFirma: cfg.exigirFirma, cfaPct: cfg.cfaPct, margenParticularPct: cfg.margenParticularPct, ivaPct: cfg.ivaPct },
       ruta: { ...ruta, siguiente: ruta.siguiente ? { ...ruta.siguiente, puedoActuar } : null },
       solicitudes: conVb.map((s) => ({ ...s, etiquetaEstado: ETIQUETA_SOLICITUD[s.estado] ?? s.estado })),
       firmantes: firmantes.map((f) => f.nombre),

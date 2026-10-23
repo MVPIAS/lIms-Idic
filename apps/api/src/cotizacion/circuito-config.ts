@@ -7,10 +7,25 @@
  */
 import { nivelesVb, siNo, type ConfigCircuito } from "./circuito-cotizacion";
 
+export type PrecioEjercito = "ficha" | "costo_total" | "neto";
+
 export interface ConfigCircuitoCompleta extends ConfigCircuito {
+  /** Costo indirecto (CI) sobre el costo directo, %. Lista oficial 2026: 20. */
   cfaPct: number;
+  /** Recargo del precio particular sobre el costo total, %. Lista oficial 2026: 30. */
   margenParticularPct: number;
+  /** IVA sobre el neto, %. */
+  ivaPct: number;
+  /** Qué precio de la lista vigente toma un cliente Ejército (POR CONFIRMAR): ficha = no usa la lista. */
+  precioEjercito: PrecioEjercito;
 }
+
+/** Valores por defecto de la fórmula oficial (lista de precios IDIC 2026). */
+export const CI_PCT_DEF = 20;
+export const RECARGO_PCT_DEF = 30;
+export const IVA_PCT_DEF = 19;
+export const precioEjercitoDe = (v: string | null | undefined): PrecioEjercito =>
+  v === "costo_total" || v === "neto" ? v : "ficha";
 
 const pct = (v: string | null | undefined, def: number) => {
   const n = Number(String(v ?? "").replace(",", "."));
@@ -22,8 +37,10 @@ export function configDesdeValores(v: Record<string, string | null | undefined>)
     niveles: nivelesVb(v.vb_niveles),
     exigirConsulta: siNo(v.exigir_consulta_laboratorio, false),
     exigirFirma: siNo(v.exigir_firma_para_aceptar, true),
-    cfaPct: pct(v.cfa_pct, 12),
-    margenParticularPct: pct(v.margen_particular_pct, 20),
+    cfaPct: pct(v.cfa_pct, CI_PCT_DEF),
+    margenParticularPct: pct(v.margen_particular_pct, RECARGO_PCT_DEF),
+    ivaPct: pct(v.iva_pct, IVA_PCT_DEF),
+    precioEjercito: precioEjercitoDe(v.precio_ejercito),
   };
 }
 
