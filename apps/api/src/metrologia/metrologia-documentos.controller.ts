@@ -276,7 +276,7 @@ export class MetrologiaDocumentosService {
 <h1 class="compacta">INFORME TÉCNICO N° ${esc(inf.numero ?? "BORRADOR")}</h1>
 <p class="linea-acred"><b>Instrumento no calibrable · ${esc(ot.laboratorioNombre ?? ot.laboratorio ?? "")}</b></p>
 <table class="meta compacta"><tbody>
-${fila("Orden de trabajo", ot.codigo)}${fila("Fecha de la OT", ot.fechaOt)}${fila("Cliente", ot.cliente)}${fila("Solicitante", ot.labSolicitante)}
+${fila("Orden de trabajo", ot.codigo)}${fila("Fecha de la OT", /^\d{4}-\d{2}-\d{2}$/.test(String(ot.fechaOt ?? "")) ? String(ot.fechaOt).split("-").reverse().join("-") : ot.fechaOt)}${fila("Cliente", ot.cliente)}${fila("Solicitante", ot.labSolicitante)}
 ${fila("Instrumento", it.descripcion)}${fila("Marca y modelo", [it.marca, it.modelo].filter(Boolean).join(" · "))}${fila("Número de serie", it.serie)}
 ${fila("Identificación especial", it.idEspecial)}${fila("Capacidad", it.capacidad)}${fila("Etiqueta de custodia", it.etiqueta)}
 ${fila("Recepción", fechaHora(it.recibidoAt))}${fila("Fecha de emisión", inf.emitido_at ? fechaHora(inf.emitido_at) : "Se fija al emitir")}
@@ -286,7 +286,7 @@ ${fila("Recepción", fechaHora(it.recibidoAt))}${fila("Fecha de emisión", inf.e
 <h2 class="compacta">Recomendación</h2>${par(inf.recomendacion)}
 <div class="pie-hoja">
 <table class="firmas-cert compacta"><tbody><tr>
-<td><b>${esc(inf.elaborado_nombre ?? "")}</b><br>Metrólogo (elabora)</td>
+<td><b>${esc(inf.elaborado_nombre ?? "")}</b><br>Metrólogo (elabora)<br>${inf.enviado_at ? `Firmado electrónicamente el ${esc(fechaHora(inf.enviado_at))}` : "Pendiente de firma"}</td>
 <td><b>${esc(inf.emitido_nombre ?? "")}</b><br>${esc(inf.emitido_cargo ?? "Jefatura del laboratorio")} (emite)<br>${inf.emitido_at ? `Firmado electrónicamente el ${esc(fechaHora(inf.emitido_at))}` : "Pendiente de firma"}</td>
 </tr></tbody></table>
 <p class="fin"><b>Fin del informe técnico</b></p>

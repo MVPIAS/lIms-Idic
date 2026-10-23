@@ -12,7 +12,7 @@ import { llamar } from "@/lib/laboratorio";
 import { enviarInforme } from "@/lib/informes";
 import { fechaDia, fechaHora } from "@/lib/format";
 import { MEDIOS_ENTREGA, textoMedio } from "@/lib/documentos";
-import { toast } from "@/components/ui/feedback";
+import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import css from "./ficha.module.css";
 
@@ -95,8 +95,15 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
                 ) : <p>Aún no se elabora.</p>}
                 <div className={css.acciones}>
                   {ai.includes("GUARDAR") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "informe", fila: f })}>{inf ? "Editar informe" : "Elaborar informe técnico"}</button>}
-                  {ai.includes("ENVIAR") && <button className="btn primary sm" disabled={ocupado} onClick={() => hacer("POST", `${base(f)}/informe-tecnico/enviar`, undefined, "Informe técnico enviado a firma.")}>Enviar a firma → emitir</button>}
-                  {ai.includes("EMITIR") && <button className="btn primary sm" disabled={ocupado} onClick={() => hacer("POST", `${base(f)}/informe-tecnico/emitir`, undefined, "Informe técnico emitido con su número.")}>Firmar y emitir → Entrega</button>}
+                  {ai.includes("ENVIAR") && <button className="btn primary sm" disabled={ocupado} onClick={async () => {
+                    // B-074: enviar a firma un documento que se sellará pide confirmación.
+                    if (await confirmar({ titulo: "¿Enviar el informe técnico a firma?", mensaje: "Queda en firma de la jefatura del laboratorio: ya no se puede editar salvo que lo devuelvan.", confirmarTexto: "Enviar a firma" }))
+                      hacer("POST", `${base(f)}/informe-tecnico/enviar`, undefined, "Informe técnico enviado a firma.");
+                  }}>Enviar a firma → emitir</button>}
+                  {ai.includes("EMITIR") && <button className="btn primary sm" disabled={ocupado} onClick={async () => {
+                    if (await confirmar({ titulo: "¿Firmar y emitir el informe técnico?", mensaje: "Recibe su número, queda sellado y su fecha de emisión se congela.", confirmarTexto: "Firmar y emitir" }))
+                      hacer("POST", `${base(f)}/informe-tecnico/emitir`, undefined, "Informe técnico emitido con su número.");
+                  }}>Firmar y emitir → Entrega</button>}
                   {ai.includes("DEVOLVER") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "devolverInforme", fila: f })}>Devolver…</button>}
                   {ai.includes("ENTREGAR") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "entregarInforme", fila: f })}>Registrar entrega → Cierre</button>}
                   {inf && <button className="btn outline sm" onClick={() => abrirPdf(`${base(f)}/informe-tecnico/pdf`)}>{inf.estado === "emitido" ? "Informe (PDF)" : "Borrador (PDF)"}</button>}
