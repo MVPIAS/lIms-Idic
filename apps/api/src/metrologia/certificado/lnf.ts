@@ -81,7 +81,8 @@ export function armarCertificadoLnf(cal: any, ctx: ContextoCertificado): Certifi
 <p class="linea-acred"><b>${pag}</b></p>`;
   const pagina = (n: number) => `Página ${n} de ${N} <i>(Page ${n} of ${N})</i>`;
 
-  const hoja1 = `
+  // El certificado numera sus hojas (el anexo aparte): el pie del PDF no añade otra cuenta (B-074).
+  const hoja1 = `<!-- paginacion-propia -->
 ${cabecera(pagina(1))}
 <h1 class="compacta">CERTIFICADO DE CALIBRACIÓN N° ${esc(numero)} <i>(CALIBRATION CERTIFICATE)</i></h1>
 ${acred ? `<p class="linea-acred">${bi(`Acreditado como laboratorio de calibración: ${acred}`, `Accredited calibration laboratory: ${acred}`)}</p>` : ""}
