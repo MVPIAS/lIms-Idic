@@ -91,19 +91,19 @@ export function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerr
       {error && <div className="alert warn">{error}</div>}
       <div className="form-grid cols-2">
         <div className="field" style={{ gridColumn: "1 / -1" }}>
-          <label>Documento de aceptación <span className="req">*</span></label>
-          <select value={tipo} onChange={(e) => setTipo(e.target.value)}>
+          <label htmlFor="acep-tipo">Documento de aceptación <span className="req">*</span></label>
+          <select id="acep-tipo" value={tipo} onChange={(e) => setTipo(e.target.value)}>
             {Object.entries(ACEPTACION_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>
         </div>
         <div className="field">
-          <label>Número {requiereNumero && <span className="req">*</span>}</label>
-          <input value={numero} onChange={(e) => setNumero(e.target.value)} maxLength={60}
+          <label htmlFor="acep-num">Número {requiereNumero && <span className="req">*</span>}</label>
+          <input id="acep-num" value={numero} onChange={(e) => setNumero(e.target.value)} maxLength={60}
             placeholder={tipo === "DISPOSICION_DIRECTOR" ? "Ref. de la disposición" : tipo === "CORREO" ? "Opcional" : ""} />
         </div>
         <div className="field">
-          <label>Fecha <span className="req">*</span></label>
-          <input type="date" value={fechaDoc} onChange={(e) => setFechaDoc(e.target.value)} />
+          <label htmlFor="acep-fecha">Fecha <span className="req">*</span></label>
+          <input id="acep-fecha" type="date" value={fechaDoc} onChange={(e) => setFechaDoc(e.target.value)} />
         </div>
         {tipo === "OC" && (
           <div className="field" style={{ gridColumn: "1 / -1" }}>
@@ -112,7 +112,7 @@ export function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerr
             {diferencia != null && (
               <small style={{ color: difiere ? "var(--red)" : "var(--muted)" }}>
                 {difiere
-                  ? `O/C vs cotización: diferencia de ${money(diferencia, cot.moneda === "USD" ? "USD" : "CLP")}. Registre la discrepancia o anule la orden del cliente.`
+                  ? `La O/C es ${money(Math.abs(diferencia), cot.moneda === "USD" ? "USD" : "CLP")} ${diferencia < 0 ? "menor" : "mayor"} que el total cotizado. Registre la discrepancia o anule la orden del cliente.`
                   : "La O/C coincide con el total cotizado."}
               </small>
             )}

@@ -544,7 +544,7 @@ async function main() {
     return "analistaId → 400 · analista sin resultado.revisar → 403 · revisor → 200";
   });
   await paso("No se emite el informe antes de aprobar (409)", async () => {
-    const pl = lista(await ok(U.jefe, "GET", "/plantillas?limit=200"));
+    const pl = [...lista(await ok(U.jefe, "GET", "/plantillas?limit=100&search=BolAn")), ...lista(await ok(U.jefe, "GET", "/plantillas?limit=200"))];
     C.plantilla = pl.find((p) => p.repid === "BolAn") ?? pl.find((p) => p.tipo === "BOLETIN" && p.activo !== false);
     afirmar(C.plantilla, "no hay plantilla de boletín");
     const cond = await ok(U.jefe, "POST", "/informes/condiciones", { otId: C.ot.id, plantillaId: C.plantilla.id });
