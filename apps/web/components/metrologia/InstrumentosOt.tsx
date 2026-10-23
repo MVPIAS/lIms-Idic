@@ -10,6 +10,7 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora, fechaDia } from "@/lib/format";
 import { toast, confirmar } from "@/components/ui/feedback";
@@ -32,6 +33,7 @@ type Dialogo =
 const vacioItem = () => ({ descripcion: "", marca: "", modelo: "", serie: "", idEspecial: "", capacidad: "", resolucion: "", rango: "", procesoCodigo: "", sentido: "", puntos: "", intervaloMeses: "", equipoCodigo: "" });
 
 export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }: { otId: string; onCambio?: () => void; modo?: "instrumentos" | "cierre" }) {
+  const router = useRouter();
   const [d, setD] = useState<any>(null);
   const [error, setError] = useState("");
   const [dlg, setDlg] = useState<Dialogo | null>(null);
@@ -221,7 +223,12 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
       {dlg?.tipo === "asignar" && <DialogoAsignar otId={otId} item={dlg.item} ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `/ot/${otId}/instrumentos/${dlg.item.id}/asignar`, b, `Metrólogo asignado al ítem ${dlg.item.numero}.`)} />}
       {dlg?.tipo === "recibir" && <DialogoRecepcion item={dlg.item} laboratorio={d.ot.laboratorio} ocupado={ocupado} onCerrar={() => setDlg(null)}
-        onGuardar={(b) => hacer("POST", `/ot/${otId}/instrumentos/${dlg.item.id}/recepcion`, b, b.calibrable ? `Ítem ${dlg.item.numero} recibido y en custodia: ya se puede calibrar.` : `Ítem ${dlg.item.numero} recibido como no calibrable.`)} />}
+        onGuardar={async (b) => {
+          const item = dlg.item;
+          const ok = await hacer("POST", `/ot/${otId}/instrumentos/${item.id}/recepcion`, b, b.calibrable ? `Ítem ${item.numero} recibido y en custodia: ya se puede calibrar.` : `Ítem ${item.numero} recibido como no calibrable.`);
+          // B-080: «Registrar recepción → Hoja de control» abre la hoja de control de la calibración del ítem.
+          if (ok && b.calibrable && d.puedo?.calibrar) router.push(`/metrologia/nueva?instrumento=${item.id}&ot=${otId}` as any);
+        }} />}
       {dlg?.tipo === "entregar" && <DialogoEntrega item={dlg.item} ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `/ot/${otId}/calibraciones/${dlg.item.calibracion.id}/entregar`, b, `Entrega de ${dlg.item.calibracion.numeroCertificado} registrada.`)} />}
       {dlg?.tipo === "devolver" && <DialogoDevolucion item={dlg.item} ocupado={ocupado} onCerrar={() => setDlg(null)}
