@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Module, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Module, OnModuleInit, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
@@ -8,6 +8,7 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { RbacModule } from "../rbac/rbac.module";
 import { PlantillaRenderModule } from "../plantilla-render/plantilla-render.module";
 import { OficioService } from "./oficio.service";
+import { registrarFuenteBandeja, type ItemBandeja } from "../rbac/bandeja.service";
 
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const Distribucion = z.array(z.object({ destinatario: z.string().trim().min(1).max(200), ejemplares: z.coerce.number().int().min(1).max(50) })).max(20);
@@ -113,4 +114,37 @@ export class OficioController {
   controllers: [OficioController],
   providers: [OficioService],
 })
-export class OficioModule {}
+export class OficioModule implements OnModuleInit {
+  constructor(private readonly svc: OficioService) {}
+
+  /** Mi bandeja: oficios que esperan mi V°B° o firma, por despachar (Oficina de partes) y devueltos a su autor. */
+  onModuleInit() {
+    registrarFuenteBandeja(async (req) => {
+      if (!req?.user?.tenantId) return [];
+      const out: ItemBandeja[] = [];
+      const todos = (await this.svc.listar(req, {}).catch(() => ({ data: [] as any[] }))).data;
+      const tarjeta = (clave: string, titulo: string, descripcion: string, ruta: string, filas: any[], severidad: "info" | "warn" | "alta") => {
+        if (!filas.length) return;
+        out.push({
+          clave, titulo, descripcion, cantidad: filas.length, ruta, severidad,
+          elementos: filas.slice(0, 5).map((o) => ({
+            id: o.id,
+            texto: `Oficio ${o.numero ?? "(borrador)"}`,
+            detalle: [o.materia, o.destinatario].filter(Boolean).join(" · "),
+            ruta: `/oficios/${o.id}`,
+            fecha: o.fecha,
+          })),
+        });
+      };
+      tarjeta("oficios_por_firmar", "Oficios por firmar", "Oficios conductores que esperan su V°B° o su firma (matriz OFICIO)", "/oficios?vista=por_firmar",
+        todos.filter((o) => o.estado === "en_firma" && o.meToca), "warn");
+      const permisos: string[] = req.user.permisos ?? [];
+      if (permisos.includes("oficio.despachar") || (req.user.roles ?? []).includes("SUPERADMIN"))
+        tarjeta("oficios_por_despachar", "Oficios por despachar", "Oficios firmados: registre el Nº y la fecha de despacho (Oficina de partes)", "/oficios?vista=por_despachar",
+          todos.filter((o) => o.estado === "firmado"), "warn");
+      const mios = await this.svc.devueltosDe(req).catch(() => [] as any[]);
+      tarjeta("oficios_devueltos", "Oficios devueltos", "Oficios que elaboró y le devolvieron: corríjalos y vuelva a enviarlos a firmas", "/oficios?estado=devuelto", mios, "alta");
+      return out;
+    });
+  }
+}

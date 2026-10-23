@@ -121,8 +121,17 @@ export class AvanceOtService {
 
     const cuenta = (...estados: string[]) => resultados.filter((r) => estados.includes(r.estado ?? "")).reduce((s, r) => s + r._count._all, 0);
     const totalRes = resultados.reduce((s, r) => s + r._count._all, 0);
+    // Despacho de cada documento (frente r4c · documento_despacho): «Remitir a DCO» del BPCH.
+    const despachos = new Map(
+      (
+        await this.prisma
+          .$queryRawUnsafe<{ certificado_id: string; destino: string }[]>(`SELECT certificado_id, destino FROM documento_despacho WHERE ot_id = $1::uuid`, id)
+          .catch(() => [] as { certificado_id: string; destino: string }[])
+      ).map((x) => [x.certificado_id, x.destino]),
+    );
     const documentos: DocumentoAvance[] = docs.map(({ firmas, ...d }) => ({
       id: d.id,
+      despachadoA: despachos.get(d.id) ?? null,
       numero: d.numero ?? d.codigo ?? d.id.slice(0, 8),
       estado: d.estado,
       tipoDocumento: d.tipoDocumento,

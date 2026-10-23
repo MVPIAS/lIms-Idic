@@ -525,3 +525,38 @@ describe("Pestañas «Muestreo» y «Preparación» según la especificación", 
     expect(calcularAvance(base({ unidad: { codigo: "D11" }, armas: { pasos } })).pestanas.muestreo).toBe(false);
   });
 });
+
+describe("Ruta de la OT · OT directa y Producción Nacional del BPCH (BL-158)", () => {
+  const bpch = (p: Partial<HechosOt> = {}) => base({ origen: "DIRECTA", unidad: { codigo: "SSTGO" }, rama: "bpch", cotizacion: null, ...p });
+  const lotes = { muestras: { total: 2, recepcionIncompleta: 0, veredictos: ["cumple", "cumple"] } };
+  it("fases de la inspección en vez de las del laboratorio", () => {
+    const a = calcularAvance(bpch({ cabeceraBpch: ["Falta el lugar."] }));
+    expect(a.tipo).toBe("bpch");
+    expect(a.etapas.map((e) => e.clave)).toEqual([
+      "apertura", "cabecera", "lotes", "resultados", "informe", "documento_final", "remision_dco", "entrega", "cierre", "factura", "pago",
+    ]);
+    expect(a.etapaActual).toBe("cabecera");
+    expect(a.siguiente?.accion?.pestana).toBe("cabecera");
+  });
+  it("con el Informe de Inspección oficial y CUMPLE, toca el Certificado de Conformidad", () => {
+    const a = calcularAvance(bpch({ ...lotes, cabeceraBpch: [], resultados: res({ aprobados: 3 }), documentos: [doc({ tipoDocumento: "INFORME_INSPECCION", estado: "oficial" })] }));
+    expect(a.etapaActual).toBe("documento_final");
+    expect(a.siguiente?.texto).toMatch(/Certificado de Conformidad/);
+  });
+  it("documento final oficial sin remitir: «Remitir a DCO»; remitido, pasa a la entrega", () => {
+    const docs = [doc({ id: "i", tipoDocumento: "INFORME_INSPECCION", estado: "oficial" }), doc({ id: "c", numero: "CC-1", tipoDocumento: "CERTIFICADO_CONFORMIDAD", estado: "oficial" })];
+    const h = { ...lotes, cabeceraBpch: [], resultados: res({ aprobados: 3 }) };
+    const a = calcularAvance(bpch({ ...h, documentos: docs }));
+    expect(a.etapaActual).toBe("remision_dco");
+    expect(a.siguiente?.accion?.permisos).toEqual(["certificado.despachar"]);
+    const b = calcularAvance(bpch({ ...h, documentos: [docs[0], { ...docs[1], despachadoA: "DCO" }] }));
+    expect(b.etapaActual).toBe("entrega");
+  });
+  it("Producción Nacional: el documento final no aplica (el informe técnico va en la correlación); se remite el Informe de Inspección", () => {
+    const a = calcularAvance(bpch({ origen: "PRODUCCION_NACIONAL", ...lotes, cabeceraBpch: [], resultados: res({ aprobados: 3 }),
+      documentos: [doc({ tipoDocumento: "INFORME_INSPECCION", estado: "oficial", numero: "II-1" })] }));
+    expect(a.etapas.find((e) => e.clave === "documento_final")?.estado).toBe("no_aplica");
+    expect(a.etapaActual).toBe("remision_dco");
+    expect(a.siguiente?.texto).toMatch(/II-1/);
+  });
+});

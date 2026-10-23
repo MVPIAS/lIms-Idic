@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Module, Param, ParseUUIDPipe, Post, Req, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Module, OnModuleInit, Param, ParseUUIDPipe, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
@@ -8,7 +8,8 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { ConfiguracionModule } from "../configuracion/configuracion.module";
 import { PlantillaRenderModule } from "../plantilla-render/plantilla-render.module";
 import { DESTINOS_DESPACHO } from "../avisos/reglas-avisos";
-import { SeguimientoService } from "./seguimiento.service";
+import { SeguimientoService, VISTAS_PENDIENTE, type VistaPendiente } from "./seguimiento.service";
+import { registrarFuenteBandeja, type ItemBandeja } from "../rbac/bandeja.service";
 
 const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const Despacho = z.object({
@@ -65,6 +66,21 @@ const Archivar = z.object({ ubicacion: z.string().trim().max(200).optional() });
 @Controller()
 export class SeguimientoController {
   constructor(private readonly svc: SeguimientoService) {}
+
+  /** Listas del seguimiento (pantalla «Seguimiento y envío»; las tarjetas de Mi bandeja cuentan estas mismas filas). */
+  @Get("seguimiento/pendientes")
+  @RequierePermiso("ot.ver")
+  async pendientes(@Req() req: any, @Query("vista") vista?: string) {
+    if (!vista || !(VISTAS_PENDIENTE as readonly string[]).includes(vista)) throw new BadRequestException(`Vista: ${VISTAS_PENDIENTE.join(", ")}.`);
+    const data = await this.svc.pendientes(req, vista as VistaPendiente);
+    return { data, total: data.length };
+  }
+
+  @Get("ot/:id/estado-laboratorios")
+  @RequierePermiso("ot.ver")
+  estadoLaboratorios(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.estadoLaboratorios(id, req);
+  }
 
   @Get("ot/:id/seguimiento")
   @RequierePermiso("ot.ver")
@@ -142,4 +158,41 @@ export class SeguimientoController {
   providers: [SeguimientoService],
   exports: [SeguimientoService],
 })
-export class SeguimientoModule {}
+export class SeguimientoModule implements OnModuleInit {
+  constructor(private readonly svc: SeguimientoService) {}
+
+  /** Tarjetas de Mi bandeja del seguimiento (T14/T20): solo las que tienen algo pendiente. */
+  onModuleInit() {
+    registrarFuenteBandeja(async (req) => {
+      const out: ItemBandeja[] = [];
+      for (const [vista, titulo, descripcion, severidad] of TARJETAS) {
+        const filas = await this.svc.pendientes(req, vista).catch(() => []);
+        if (!filas.length) continue;
+        out.push({
+          clave: `seguimiento_${vista}`,
+          titulo,
+          descripcion,
+          cantidad: filas.length,
+          ruta: `/seguimiento?vista=${vista}`,
+          severidad,
+          elementos: filas.slice(0, 5).map((f) => ({
+            id: f.id,
+            texto: f.numero === f.ot ? `OT ${f.ot}` : `${f.numero} · OT ${f.ot}`,
+            detalle: [f.cliente, f.detalle].filter(Boolean).join(" · ") || null,
+            ruta: `/ot/${f.otId}?tab=informe`,
+            fecha: f.fecha,
+          })),
+        });
+      }
+      return out;
+    });
+  }
+}
+
+const TARJETAS: [VistaPendiente, string, string, "info" | "warn" | "alta"][] = [
+  ["por_despachar", "Documentos por despachar", "Documentos oficiales de su laboratorio que aún no salen al DCO, al solicitante o al BPCH", "warn"],
+  ["por_recibir", "Despachos por recibir", "Documentos despachados a su unidad: déles por recibido y regístrelos en su entrega", "warn"],
+  ["plazo_por_informar", "Plazos por informar al cliente", "OT con fecha de compromiso que aún no se informa al cliente", "info"],
+  ["recepcion_dco", "Informes por recibir en DCO", "OT con documento oficial sin la recepción en DCO (días de atraso)", "warn"],
+  ["por_enviar", "Por enviar al cliente", "OT recibidas en DCO que aún no se envían al cliente", "warn"],
+];

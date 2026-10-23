@@ -18,6 +18,7 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { rut, hoyISO } from "@/lib/format";
 import { ESTADO_CORRELACION, ESTADO_LINEA, ESTADO_OC, MESES, MESES_LARGOS, cant, dia, numeroCl } from "@/lib/bpchProcesos";
+import BarraFases from "@/components/bpch-procesos/BarraFases";
 import ClasificacionProducto from "./ClasificacionProducto";
 
 const vacioLinea = { ocProductoId: "", unidadId: "", mes: "", fechaProgramada: "", lugar: "", lote: "", cantidad: "", observaciones: "" };
@@ -143,6 +144,31 @@ export default function OcPage() {
         <div className="alert warn">La RAF venció el {dia(oc.raf.vigenciaHasta)}: según SAC-PG01-IT08 es un defecto crítico de la inspección.</div>
       )}
       {oc.raf.tipoLinea === "MOVIL" && <div className="alert info">Línea móvil (camión fábrica): SAC-PG01-IT10 excluye estos productos del muestreo por atributos NCh 44.</div>}
+
+      {/* EP-07 7.22 (BL-216): RAF → O/C → programa → inspecciones → planillas → correlación → informe → DCO. */}
+      {(() => {
+        const lineas = (oc.programa ?? []).filter((l: any) => l.estado !== "anulada");
+        const conOt = lineas.filter((l: any) => l.ot && l.ot.estado !== "anulada");
+        const cerradas = conOt.filter((l: any) => l.ot.estado === "cerrada");
+        const corr = oc.correlaciones ?? [];
+        const emitido = corr.some((c: any) => c.informeNumero);
+        const remitido = corr.some((c: any) => c.remitidoDcoAt);
+        return (
+          <BarraFases
+            etiqueta="Avance de la O/C"
+            fases={[
+              { clave: "raf", titulo: "RAF", hecho: oc.raf.estado === "vigente", detalle: oc.raf.numero, leToca: "SCC" },
+              { clave: "oc", titulo: "O/C operativa", hecho: true, detalle: oc.numero },
+              { clave: "programa", titulo: "Programa", hecho: lineas.length > 0, detalle: lineas.length ? `${lineas.length} inspección(es)` : null, leToca: "SCC (programación)", accion: "Programar las inspecciones del año por sucursal" },
+              { clave: "inspecciones", titulo: "Inspecciones (OT)", hecho: lineas.length > 0 && conOt.length === lineas.length, detalle: lineas.length ? `${conOt.length} de ${lineas.length} con OT` : null, leToca: "Sucursal", accion: "Generar la OT de cada inspección programada" },
+              { clave: "planillas", titulo: "Planillas de actividades", hecho: conOt.length > 0 && cerradas.length === conOt.length, detalle: conOt.length ? `${cerradas.length} de ${conOt.length} OT cerradas` : null, leToca: "Sucursal (inspector)", accion: "Ejecutar las inspecciones y cerrar sus OT" },
+              { clave: "correlacion", titulo: "Correlación con ventas", hecho: corr.length > 0, leToca: "SCC", accion: "Registrar la relación de ventas del período" },
+              { clave: "informe", titulo: "Informe técnico", hecho: emitido, leToca: "SCC", accion: "Emitir el informe técnico de la correlación" },
+              { clave: "dco", titulo: "Remitido a DCO", hecho: remitido, leToca: "SCC", accion: "Remitir el informe técnico a DCO" },
+            ]}
+          />
+        );
+      })()}
 
       <div className="kpis" aria-label="Avance del programa">
         <div className="kpi"><div className="lab">Inspecciones programadas</div><div className="val">{r.total}</div></div>

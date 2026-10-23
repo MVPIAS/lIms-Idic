@@ -17,6 +17,7 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora, rut } from "@/lib/format";
 import { ESTADO_CORRELACION, abrirDocumento, cant, dia, numeroCl } from "@/lib/bpchProcesos";
+import RespuestaSucursal from "@/components/bpch-procesos/RespuestaSucursal";
 
 export default function CorrelacionPage() {
   const { id } = useParams<{ id: string }>();
@@ -192,6 +193,9 @@ export default function CorrelacionPage() {
           </p>
         )}
       </div>
+
+      {/* EP-07 7.14: el Jefe de la Sucursal responde aquí el requerimiento (tarea en su bandeja). */}
+      {typeof id === "string" && <RespuestaSucursal key={c.respuestaSucursal ?? "sin"} correlacionId={id} onCambio={cargar} />}
 
       <div className="toolbar" style={{ gap: 8 }}>
         {editable && (

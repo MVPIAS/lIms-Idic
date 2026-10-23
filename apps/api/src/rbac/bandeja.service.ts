@@ -3,8 +3,19 @@ import { PrismaService } from "../common/prisma.service";
 import { ContextoAlcance } from "./alcance.service";
 import { Perfil, codigoCanonico } from "./rbac.constants";
 import { MAX_INTENTOS_FALLIDOS } from "../auth/bloqueo";
+import { LISTAS_BANDEJA, LISTA_VENCIDAS_LAB, MAX_ELEMENTOS } from "./bandeja-listas";
 
 export type Severidad = "info" | "warn" | "alta";
+
+/** Una fila de «lo que le toca» dentro de una tarjeta (las primeras de su lista). */
+export interface ElementoBandeja {
+  id: string;
+  texto: string;
+  detalle?: string | null;
+  ruta: string;
+  /** Fecha relevante (AAAA-MM-DD): compromiso, emisión, despacho… */
+  fecha?: string | null;
+}
 
 export interface ItemBandeja {
   clave: string;
@@ -13,6 +24,8 @@ export interface ItemBandeja {
   cantidad: number;
   ruta: string;
   severidad: Severidad;
+  /** Las primeras filas de la lista que abre la tarjeta (T14: «lo que le toca», no solo el contador). */
+  elementos?: ElementoBandeja[];
 }
 
 /** Estados de OT que ya no requieren trabajo de laboratorio. */
@@ -46,6 +59,10 @@ const PERMISO_DE_RUTA: [string, string][] = [
   ["/bpch/internaciones", "bpch.internacion.ver"],
   ["/metrologia", "metrologia.ver"],
   ["/preparacion-trabajo", "ot.preparacion.aprobar"],
+  ["/oficios", "oficio.ver"],
+  ["/seguimiento", "ot.ver"],
+  ["/bpch/produccion-nacional", "bpch.pn.ver"],
+  ["/bpch/prototipos", "bpch.prototipo.ver"],
 ];
 
 /**
@@ -114,7 +131,7 @@ export class BandejaService {
     roles: string[] = [],
     req?: any,
   ): Promise<ItemBandeja[]> {
-    const propias = await this.tarjetas(ctx, perfil, tenantId);
+    const propias = await this.conElementos(ctx, tenantId, await this.tarjetas(ctx, perfil, tenantId));
     const extra = req
       ? (await Promise.all(FUENTES_BANDEJA.map((f) => f(req).catch((e: any) => {
           this.log.debug(`bandeja: fuente omitida (${e?.message?.split("\n")[0]})`);
@@ -122,6 +139,31 @@ export class BandejaService {
         })))).flat()
       : [];
     return filtrarPorPermiso([...propias, ...extra], permisos, roles);
+  }
+
+  /**
+   * «Lo que le toca» (T14): a cada tarjeta con pendientes se le suman sus primeras
+   * filas (bandeja-listas.ts), con el mismo criterio y alcance que su conteo.
+   */
+  private async conElementos(ctx: ContextoAlcance, tenantId: string | undefined, items: ItemBandeja[]): Promise<ItemBandeja[]> {
+    const tenant = tenantId ?? null;
+    const unidades = ctx.esGlobal ? null : ctx.unidadIds;
+    return Promise.all(
+      items.map(async (it) => {
+        if (it.cantidad <= 0 || it.elementos) return it;
+        const lab = it.clave.startsWith("ot_vencidas_") ? it.clave.slice("ot_vencidas_".length) : null;
+        const def = lab ? { sql: LISTA_VENCIDAS_LAB, extra: "lab" as const } : LISTAS_BANDEJA[it.clave];
+        if (!def) return it;
+        const params: unknown[] = [tenant, unidades];
+        if (def.extra === "yo") params.push(ctx.usuarioId);
+        if (def.extra === "lab") params.push(lab);
+        const filas = await this.filas<{ id: string; texto: string; detalle: string | null; ruta: string; fecha: string | null }>(
+          `${def.sql} LIMIT ${MAX_ELEMENTOS}`,
+          ...params,
+        );
+        return filas.length ? { ...it, elementos: filas.map((f) => ({ id: f.id, texto: f.texto, detalle: f.detalle || null, ruta: f.ruta, fecha: f.fecha })) } : it;
+      }),
+    );
   }
 
   private async tarjetas(ctx: ContextoAlcance, perfil: Perfil, tenantId: string | undefined): Promise<ItemBandeja[]> {
@@ -143,6 +185,58 @@ export class BandejaService {
       otPorVencer: () =>
         this.contar(
           `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso BETWEEN ${HOY_CL} AND ${HOY_CL} + 3`,
+          tenant,
+          unidades,
+        ),
+      // BL-168: OT abiertas sin fecha de compromiso (el laboratorio asigna el plazo). Igual que /ot?semaforo=sin_fecha.
+      otSinPlazo: () =>
+        this.contar(`SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso IS NULL`, tenant, unidades),
+      // BL-157: correlaciones de Producción Nacional con requerimiento técnico a una sucursal de la que es jefe, sin respuesta.
+      requerimientosSucursal: () =>
+        this.filas<{ id: string; texto: string; detalle: string | null; fecha: string | null }>(
+          `SELECT c.id::text AS id, 'O/C ' || oc.numero AS texto,
+                  concat_ws(' · ', cl.razon_social, 'periodo ' || to_char(c.periodo_desde, 'DD-MM-YYYY') || ' a ' || to_char(c.periodo_hasta, 'DD-MM-YYYY')) AS detalle,
+                  c.requerimiento_sucursal_at::text AS fecha
+             FROM bpch_pn_correlacion c JOIN bpch_oc_operativa oc ON oc.id = c.oc_id LEFT JOIN cliente cl ON cl.id = oc.cliente_id
+            WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.estado = 'borrador'
+              AND COALESCE(btrim(c.requerimiento_sucursal), '') <> '' AND COALESCE(btrim(c.respuesta_sucursal), '') = ''
+              AND EXISTS (SELECT 1 FROM bpch_pn_inspeccion i WHERE i.oc_id = oc.id AND NOT i.anulada
+                            AND ($2::uuid[] IS NULL OR i.unidad_id = ANY($2::uuid[]))
+                            AND (EXISTS (SELECT 1 FROM unidad_jefe j WHERE j.unidad_id = i.unidad_id AND j.usuario_id = $3::uuid)
+                                 OR EXISTS (SELECT 1 FROM usuario_rol ur JOIN rol r ON r.id = ur.rol_id
+                                             WHERE ur.usuario_id = $3::uuid AND ur.unidad_id = i.unidad_id AND COALESCE(r.alias_de, r.codigo) = 'JEFE_LAB')))
+            ORDER BY c.requerimiento_sucursal_at NULLS LAST`,
+          tenant,
+          unidades,
+          yo,
+        ),
+      // BL-158: OT del BPCH (sin la D11) con todos los resultados aprobados y sin Informe de Inspección vigente.
+      informesBpchPorEmitir: () =>
+        this.filas<{ id: string; texto: string; detalle: string | null; fecha: string | null }>(
+          `WITH RECURSIVE rama AS (
+             SELECT id FROM unidad WHERE codigo = 'BPCH' AND tenant_id = COALESCE($1::uuid, tenant_id)
+             UNION ALL SELECT u.id FROM unidad u JOIN rama r ON u.padre_id = r.id WHERE u.codigo <> 'D11')
+           SELECT o.id::text AS id, o.codigo AS texto, concat_ws(' · ', u.codigo, cl.razon_social) AS detalle, o.fecha_compromiso::text AS fecha
+             FROM orden_trabajo o JOIN rama ON rama.id = o.unidad_principal
+             LEFT JOIN unidad u ON u.id = o.unidad_principal LEFT JOIN cliente cl ON cl.id = o.cliente_id
+            WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA}
+              AND EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL)
+              AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')
+              AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
+                                AND c.tipo_documento = 'INFORME_INSPECCION' AND c.estado IN ('en_firma','oficial','emitido'))
+            ORDER BY o.fecha_compromiso NULLS LAST`,
+          tenant,
+          unidades,
+        ),
+      // Sección Muestreo: muestreos en preparación o entregados sin recibir (EP-03 0.4, EP-02 1.1).
+      muestreosPendientes: () =>
+        this.filas<{ id: string; texto: string; detalle: string | null; fecha: string | null }>(
+          `SELECT o.id::text AS id, 'Muestreo Nº ' || m.numero_formulario AS texto,
+                  concat_ws(' · ', 'OT ' || o.codigo, CASE WHEN m.estado = 'borrador' THEN 'por completar' ELSE 'entregado, por recibir' END) AS detalle,
+                  m.fecha_toma::date::text AS fecha
+             FROM ot_muestreo m JOIN orden_trabajo o ON o.id = m.ot_id
+            WHERE ${otScope} AND m.estado IN ('borrador', 'registrado') AND o.estado NOT IN ${OT_CERRADA}
+            ORDER BY m.created_at`,
           tenant,
           unidades,
         ),
@@ -517,6 +611,55 @@ export class BandejaService {
       (await enBpch())
         ? [item("lotes_por_inspeccionar", "Lotes por inspeccionar", "Internaciones con OT generada cuyos lotes aún no se programan ni registran", await q.lotesPorInspeccionar(), "/bpch/internaciones?pendiente=inspeccion", "warn")]
         : [];
+    const sinPlazo = async () =>
+      item("ot_sin_plazo", "OT sin plazo · Asignar plazo", "OT abiertas sin fecha de compromiso: fije la fecha de entrega (la cotización no la trajo)", await q.otSinPlazo(), "/ot?semaforo=sin_fecha", "warn");
+    /** Tarjeta con su lista ya calculada (no hay otra consulta de conteo). */
+    const conLista = (
+      clave: string,
+      titulo: string,
+      descripcion: string,
+      ruta: string,
+      rutaElemento: (id: string) => string,
+      sev: Severidad,
+      filas: { id: string; texto: string; detalle: string | null; fecha: string | null }[],
+    ): ItemBandeja[] =>
+      filas.length
+        ? [{ ...item(clave, titulo, descripcion, filas.length, ruta, sev), elementos: filas.slice(0, 5).map((f) => ({ ...f, ruta: rutaElemento(f.id) })) }]
+        : [];
+    const requerimientos = async () =>
+      conLista(
+        "requerimientos_sucursal",
+        "Requerimientos técnicos por responder",
+        "Producción Nacional: la SCC pide información técnica a su sucursal; responda con su informe y la fecha",
+        "/bpch/produccion-nacional",
+        (id) => `/bpch/produccion-nacional/correlacion/${id}`,
+        "warn",
+        await q.requerimientosSucursal(),
+      );
+    const informesBpch = async () =>
+      (await enBpch())
+        ? conLista(
+            "informes_bpch_por_emitir",
+            "Informes de inspección por emitir",
+            "OT de inspección con todos los resultados aprobados y sin Informe de Inspección",
+            "/ot?estado=abiertas",
+            (id) => `/ot/${id}?tab=informe`,
+            "warn",
+            await q.informesBpchPorEmitir(),
+          )
+        : [];
+    const muestreos = async () =>
+      rolesVigentes.has("MUESTREO")
+        ? conLista(
+            "muestreos_pendientes",
+            "Muestreos por completar o entregar",
+            "Formularios de muestreo en preparación o entregados al laboratorio sin recibir",
+            "/ot?estado=abiertas",
+            (id) => `/ot/${id}?tab=muestreo`,
+            "warn",
+            await q.muestreosPendientes(),
+          )
+        : [];
     const nc = async () =>
       item("nc_abiertas", "No conformidades abiertas", "NC abiertas, en proceso o en verificación", await q.ncAbiertas(), "/no-conformidades", "warn");
 
@@ -559,6 +702,7 @@ export class BandejaService {
         return all([
           porRecepcionar,
           lotesPorInspeccionar,
+          async () => (rolesVigentes.has("INSPECTOR") ? informesBpch() : []),
           asignadas,
           derivados,
           async () => item("ot_en_curso", "OT en curso", "OT abiertas de sus laboratorios", await q.otAbiertas(), "/ot?estado=abiertas", "info"),
@@ -568,9 +712,9 @@ export class BandejaService {
       case "REVISOR":
         return all([porRevisar, asignadas, derivados, devueltos, porVencer, firmas]);
       case "JEFE_LAB":
-        return all([internacionesPorAnalizar, lotesPorInspeccionar, sinAsignar, trabajoPorAprobar("en_aprobacion", false, "Documentación del trabajo por aprobar"), porRevisar, porAprobar, oiPorAtender, derivados, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
+        return all([internacionesPorAnalizar, lotesPorInspeccionar, informesBpch, requerimientos, sinPlazo, sinAsignar, trabajoPorAprobar("en_aprobacion", false, "Documentación del trabajo por aprobar"), porRevisar, porAprobar, oiPorAtender, derivados, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
       case "JEFE_SECCION":
-        return all([internacionesPorAnalizar, trabajoPorAprobar("en_aprobacion", true, "Proyectos de Párrafo por validar"), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
+        return all([internacionesPorAnalizar, informesBpch, sinPlazo, trabajoPorAprobar("en_aprobacion", true, "Proyectos de Párrafo por validar"), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
       case "JEFE_DEPTO":
         return all([trabajoPorAprobar("validada", true, "Proyectos de Párrafo por aprobar"), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porFirmarCot, vbDepto, porResponder]);
       case "DIRECTOR":
@@ -584,9 +728,10 @@ export class BandejaService {
           async () => item("cotizaciones_devueltas_firma", "Cotizaciones devueltas por el Jefe DCO", "Corrija lo observado y vuelva a enviarlas a firma", await q.cotizacionesFirma("devuelta"), "/cotizaciones?estado=abierta&firma=devuelta", "alta"),
           async () => item("cotizaciones_firmadas_sin_enviar", "Cotizaciones firmadas sin enviar", "Firmadas por el Jefe DCO: envíelas al cliente", await q.cotizacionesFirma("firmada", true), "/cotizaciones?estado=abierta&firma=firmada&enviada=0", "warn"),
           encuestas,
+          muestreos,
         ]);
       case "PLANIFICACION":
-        return all([vencidas, vencidasPorLab, porVencer, listasCerrar, porEntregar, abiertas, sinOt, encuestas]);
+        return all([vencidas, vencidasPorLab, porVencer, sinPlazo, listasCerrar, porEntregar, abiertas, sinOt, encuestas]);
       case "FINANZAS":
         return all([
           async () => item("facturas_pendientes", "Pendientes de facturar", "Facturas en borrador generadas al cerrar OT con cobro: revíselas y emítalas", await q.facturasPendientes(), "/facturas?estado=pendiente", "alta"),
