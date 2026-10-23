@@ -292,3 +292,12 @@ export function leerConfigTrabajo(filas: { codigo: string; valor: string | null;
     bloqueaCaptura: bloquea ? !["no", "false", "0"].includes(String(bloquea.valor ?? "").trim().toLowerCase()) : true,
   };
 }
+
+/**
+ * Concordancia del documento de trabajo en los textos (B-085: «Preparar la
+ * Paquete técnico»). Masculinos: «Plan …», «Paquete …», «Proyecto …».
+ */
+export function generoDocumentoTrabajo(titulo: string): { art: "el" | "la"; o: "o" | "a"; lo: "lo" | "la" } {
+  const m = /^(plan|paquete|proyecto)\b/i.test(String(titulo ?? "").trim());
+  return m ? { art: "el", o: "o", lo: "lo" } : { art: "la", o: "a", lo: "la" };
+}

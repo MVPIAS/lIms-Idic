@@ -195,6 +195,7 @@ function Ficha({ inicial, gestiona, onCerrar, onGuardado }: { inicial: any | nul
   }
 
   async function cambiarEstado() {
+    setErrores("");
     try {
       const r = await pedir("POST", `/bpch/codificacion/${d.id}/estado`, { estado: d.estado === "VIGENTE" ? "EN_RECESO" : "VIGENTE", motivo: estadoMotivo });
       setD(r);

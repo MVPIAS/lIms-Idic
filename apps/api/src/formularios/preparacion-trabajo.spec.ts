@@ -127,3 +127,12 @@ describe("preparación del trabajo DSA (T26)", () => {
     expect(motivoBloqueoTrabajo({ lab: "LRB", exige: true, estado: "aprobada", bloqueaCaptura: true })).toBeNull();
   });
 });
+
+describe("concordancia del documento de trabajo (B-085)", () => {
+  const { generoDocumentoTrabajo } = require("./trabajo");
+  it("Paquete técnico y Plan de trabajo son masculinos; Planilla, femenina", () => {
+    expect(generoDocumentoTrabajo("Paquete técnico").art).toBe("el");
+    expect(generoDocumentoTrabajo("Plan de inspección").lo).toBe("lo");
+    expect(generoDocumentoTrabajo("Planilla de trabajo")).toEqual({ art: "la", o: "a", lo: "la" });
+  });
+});
