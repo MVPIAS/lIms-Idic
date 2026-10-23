@@ -422,6 +422,18 @@ export class PlantillaRenderService {
     } catch {
       /* BD sin align_informe_ensayo.sql: sin estructura propia */
     }
+    // B-087: sin estructura escrita, el ensayo de una submuestra va con el componente que ya
+    // sabe la submuestra (desglose de la E.T.); no hay que escribirlo a mano.
+    const deSubmuestra = await this.prisma.$queryRaw<{ id: string; componente: string }[]>`
+      SELECT r.id, m.et_componente AS componente
+        FROM resultado r JOIN muestra m ON m.id = r.muestra_id
+       WHERE COALESCE(r.ot_id, m.ot_id) = ${otId}::uuid AND r.deleted_at IS NULL
+         AND m.parent_muestra_id IS NOT NULL AND COALESCE(m.et_componente, '') <> ''`;
+    for (const f of deSubmuestra) {
+      const u = mapa.get(f.id);
+      if (!u) mapa.set(f.id, { seccion: null, componente: f.componente, orden: null });
+      else if (!u.componente) mapa.set(f.id, { ...u, componente: f.componente });
+    }
     return mapa;
   }
 
