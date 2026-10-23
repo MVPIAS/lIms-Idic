@@ -8,6 +8,7 @@ import { BaseCrudController } from "../common/base-crud.controller";
 import { validaRut } from "../common/rut.validator";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
+import { ListaPrecioDetalleController, ListaPrecioDetalleService } from "../lista-precio/lista-precio-detalle.controller";
 
 /* ===================== PROVEEDORES ===================== */
 @Injectable()
@@ -165,7 +166,7 @@ export class ListaPrecioItemController extends BaseCrudController {
 }
 
 @Module({
-  controllers: [ProveedorController, ContactoController, CentroCostoController, ListaPrecioController, ListaPrecioItemController],
-  providers: [ProveedorService, ContactoService, CentroCostoService, ListaPrecioService, ListaPrecioItemService],
+  controllers: [ProveedorController, ContactoController, CentroCostoController, ListaPrecioController, ListaPrecioItemController, ListaPrecioDetalleController],
+  providers: [ProveedorService, ContactoService, CentroCostoService, ListaPrecioService, ListaPrecioItemService, ListaPrecioDetalleService],
 })
 export class ComercialModule {}

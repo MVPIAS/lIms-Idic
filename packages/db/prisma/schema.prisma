@@ -696,6 +696,9 @@ model ListaPrecio {
   nombre       String    @db.VarChar(200)
   moneda       String    @default("CLP") @db.VarChar(3)
   vigenteDesde DateTime  @default(dbgenerated("CURRENT_DATE")) @map("vigente_desde") @db.Date
+  vigenteHasta DateTime? @map("vigente_hasta") @db.Date
+  // Origen de los datos (lista oficial del IDIC). align_lp26_lista_precios.sql
+  fuente       String?   @db.VarChar(200)
   activa       Boolean   @default(true)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt    DateTime? @map("deleted_at") @db.Timestamptz
@@ -714,6 +717,21 @@ model ListaPrecioItem {
   cc           String?  @db.VarChar(20)
   tipo         String   @default("servicio") @db.VarChar(20)
   precio       Decimal  @db.Decimal(14, 2)
+  // Estructura de costos de la lista oficial (align_lp26_lista_precios.sql):
+  // CI 20 % del CD · CT = CD + CI · recargo 30 % del CT · neto = CT + recargo
+  // (= precio) · IVA 19 % del neto · precio particular con IVA.
+  costoDirecto      Decimal? @map("costo_directo") @db.Decimal(14, 2)
+  costoIndirecto    Decimal? @map("costo_indirecto") @db.Decimal(14, 2)
+  costoTotal        Decimal? @map("costo_total") @db.Decimal(14, 2)
+  recargo           Decimal? @db.Decimal(14, 2)
+  neto              Decimal? @db.Decimal(14, 2)
+  iva               Decimal? @db.Decimal(14, 2)
+  precioIvaIncluido Decimal? @map("precio_iva_incluido") @db.Decimal(14, 2)
+  // Ensayo del catálogo enlazado (codigo | nombre | nombre_base | manual).
+  catEnsayoId       String?  @map("cat_ensayo_id") @db.Uuid
+  enlace            String?  @db.VarChar(20)
+  centroCostoId     String?  @map("centro_costo_id") @db.Uuid
+  unidadId          String?  @map("unidad_id") @db.Uuid
 
   lista        ListaPrecio @relation(fields: [listaPrecioId], references: [id], onDelete: Cascade)
 
