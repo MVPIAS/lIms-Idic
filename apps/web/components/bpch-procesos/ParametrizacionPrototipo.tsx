@@ -28,7 +28,7 @@ export default function ParametrizacionPrototipo({ p, onCambio }: { p: any; onCa
     (par.filas ?? []).map((f: any) => ({ ...f, minimo: aTexto(f.minimo), nominal: aTexto(f.nominal), maximo: aTexto(f.maximo), unidad: f.unidad ?? "", formula: f.formula ?? "", tipoFormula: f.tipoFormula ?? "" })),
   );
   const [buscar, setBuscar] = useState<Record<number, string>>({});
-  const [opciones, setOpciones] = useState<Record<number, { id: string; codigo: string; nombre: string }[]>>({});
+  const [opciones, setOpciones] = useState<Record<number, { id: string; codigo: string; nombre: string; detalle: string }[]>>({});
   const [motivo, setMotivo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -40,7 +40,18 @@ export default function ParametrizacionPrototipo({ p, onCambio }: { p: any; onCa
     if (q.length < 2) return;
     try {
       const r = await llamar<any>("GET", `/cat/metodos?search=${encodeURIComponent(q)}&limit=20`);
-      setOpciones((o) => ({ ...o, [i]: (r.data ?? r ?? []).map((m: any) => ({ id: m.id, codigo: m.codigo, nombre: m.nombre })) }));
+      // B-091: código, laboratorio, ensayo y norma para distinguir métodos con el mismo nombre.
+      setOpciones((o) => ({
+        ...o,
+        [i]: (r.data ?? r ?? []).map((m: any) => ({
+          id: m.id,
+          codigo: m.codigo,
+          nombre: m.nombre,
+          detalle: [m.ensayo?.familia?.laboratorio || m.ensayo?.familia?.nombre, m.ensayo?.codigo ? `ensayo ${m.ensayo.codigo}` : null, m.norma]
+            .filter((x: any) => x && String(x).trim())
+            .join(" · "),
+        })),
+      }));
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -109,7 +120,7 @@ export default function ParametrizacionPrototipo({ p, onCambio }: { p: any; onCa
                       {(opciones[i] ?? []).length > 0 && (
                         <select aria-label={`Método de la fila ${i + 1}`} defaultValue="" onChange={(e) => { const m = opciones[i].find((x) => x.id === e.target.value); if (m) poner(i, { metodoId: m.id, metodoCodigo: m.codigo, metodoNombre: m.nombre }); }}>
                           <option value="">Elija el método…</option>
-                          {opciones[i].map((m) => <option key={m.id} value={m.id}>{m.codigo} · {m.nombre}</option>)}
+                          {opciones[i].map((m) => <option key={m.id} value={m.id}>{m.codigo} · {m.nombre}{m.detalle ? ` — ${m.detalle}` : ""}</option>)}
                         </select>
                       )}
                     </div>

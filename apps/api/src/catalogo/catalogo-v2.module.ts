@@ -240,7 +240,8 @@ export class CatMetodoService extends BaseCrudService {
     super(prisma, {
       model: "catMetodo",
       search: ["codigo", "nombre", "norma"],
-      include: { ensayo: true },
+      // B-091: el laboratorio (familia del ensayo) distingue métodos con el mismo nombre en los buscadores.
+      include: { ensayo: { include: { familia: { select: { codsucdel: true, nombre: true, laboratorio: true } } } } },
       orderBy: { codigo: "asc" },
       tenant: true,
       softDelete: true,
