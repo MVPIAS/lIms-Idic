@@ -115,6 +115,17 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
           </select>
         </div>
         <div className="field">
+          <label htmlFor="fmt-sello">Secciones con «Sello N.º»</label>
+          <input id="fmt-sello" defaultValue={(f.seccionesConSello ?? []).join(", ")} maxLength={300} aria-describedby="fmt-secc-ayuda"
+            onBlur={(e) => poner("seccionesConSello", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} />
+        </div>
+        <div className="field">
+          <label htmlFor="fmt-sinmet">Secciones sin columna de método</label>
+          <input id="fmt-sinmet" defaultValue={(f.seccionesSinMetodo ?? []).join(", ")} maxLength={300} aria-describedby="fmt-secc-ayuda"
+            onBlur={(e) => poner("seccionesSinMetodo", e.target.value.split(",").map((x) => x.trim()).filter(Boolean))} />
+          <small id="fmt-secc-ayuda" style={{ color: "var(--muted)" }}>Nombres separados por coma; basta que el título de la sección los contenga (p. ej. Dimensiones).</small>
+        </div>
+        <div className="field">
           <label htmlFor="fmt-est">Desviación estándar y CV</label>
           <select id="fmt-est" value={f.estadisticas} onChange={(e) => poner("estadisticas", e.target.value as FormatoInforme["estadisticas"])}>
             <option value="auto">Solo si hay réplicas</option>
@@ -132,6 +143,7 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
               ["anexoFotografico", "Anexo fotográfico"],
               ["unidadEnResultado", "Unidad junto al resultado"],
               ["columnaMuestra", "Columna de la muestra siempre"],
+              ["productoTerminado", "Verificación del producto terminado (IVC)"],
             ] as const).map(([k, t]) => (
               <label key={k} style={{ display: "flex", gap: 5, alignItems: "center" }}>
                 <input type="checkbox" checked={f[k]} onChange={(e) => poner(k, e.target.checked)} /> {t}

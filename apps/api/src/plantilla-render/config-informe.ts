@@ -58,6 +58,16 @@ export const ConfigInformeSchema = z
     columnaMuestra: z.boolean(),
     /** Texto de una cota vacía en las columnas Mínimo / Máximo (LME: «-.-»). */
     textoSinCota: z.string().max(10),
+    /**
+     * Tablas del 15-10 de Textil y LCC (EP-03 3.4, frente r4d): secciones cuya
+     * tabla lleva la columna «Sello Nº» (Dimensiones) y secciones sin la columna
+     * del método (Confección, Dimensiones, Etiquetado, Empaque). Se comparan con
+     * el título de la sección o del componente, sin mayúsculas ni tildes.
+     */
+    seccionesConSello: z.array(z.string().trim().min(1).max(60)).max(20),
+    seccionesSinMetodo: z.array(z.string().trim().min(1).max(60)).max(20),
+    /** Tabla «Verificación del producto terminado» (ítems defectuosos), solo IVC. */
+    productoTerminado: z.boolean(),
   })
   .partial()
   .strict();
@@ -89,6 +99,9 @@ export interface ConfigInforme {
   unidadEnResultado: boolean;
   columnaMuestra: boolean;
   textoSinCota: string;
+  seccionesConSello: string[];
+  seccionesSinMetodo: string[];
+  productoTerminado: boolean;
 }
 
 /** Texto fijo de la conclusión del IVC y del informe de Textil / LCC. */
@@ -120,7 +133,14 @@ const BASE: ConfigInforme = {
   unidadEnResultado: false,
   columnaMuestra: false,
   textoSinCota: "—",
+  seccionesConSello: [],
+  seccionesSinMetodo: [],
+  productoTerminado: false,
 };
+
+/** Secciones del 15-10 (LABORATORIO TEXTIL.docx) que comparten el IE PG09 Anexo 02-02 y el IVC. */
+export const SECCIONES_CON_SELLO_15_10 = ["Dimensiones"];
+export const SECCIONES_SIN_METODO_15_10 = ["Confección", "Dimensiones", "Etiquetado", "Empaque"];
 
 const POR_TIPO: Record<string, Partial<ConfigInforme>> = {
   IVC: {
@@ -129,8 +149,18 @@ const POR_TIPO: Record<string, Partial<ConfigInforme>> = {
     portada: "ivc",
     conclusionFija: CONCLUSION_REGISTROS_5_ANIOS,
     etiquetas: { ...BASE.etiquetas, ensayo: "Característica", metodo: "Método de verificación", veredicto: "Grado de cumplimiento" },
+    seccionesConSello: SECCIONES_CON_SELLO_15_10,
+    seccionesSinMetodo: SECCIONES_SIN_METODO_15_10,
+    productoTerminado: true,
   },
 };
+
+/** Compara un título de sección con una lista (sin mayúsculas ni tildes; basta que lo contenga). */
+export function seccionCoincide(titulos: (string | null | undefined)[], lista: string[]): boolean {
+  const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const ts = titulos.filter((t): t is string => !!t && !!t.trim()).map(norm);
+  return lista.some((x) => ts.some((t) => t.includes(norm(x))));
+}
 
 /** Formato por defecto de un tipo de plantilla. */
 export function configPorTipo(tipo: string | null | undefined): ConfigInforme {

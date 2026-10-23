@@ -57,6 +57,7 @@ import {
   bloqueTermograma,
   bloqueConclusion,
   bloquePortadaIvc,
+  bloqueProductoTerminado,
   bloqueReferencias,
   bloqueResultados,
   completarCuerpo,
@@ -284,6 +285,7 @@ export class PlantillaRenderService {
         observacion: r.observacion,
         veredicto: r.veredicto,
         fechaEnsayo: r.fechaEnsayo ?? null,
+        selloNumero: (r.muestra as any)?.selloNumero ?? null,
         seccion: u?.seccion ?? null,
         componente: u?.componente ?? null,
         orden: u?.orden ?? null,
@@ -633,6 +635,7 @@ export class PlantillaRenderService {
       conclusion: bloqueConclusion(cfg, datosDoc.conclusion),
       // Mismo contenido sin el título «Conclusión»: para plantillas que numeran su sección (PG09A2-LME).
       conclusion_texto: bloqueConclusion(cfg, datosDoc.conclusion, false),
+      producto_terminado: bloqueProductoTerminado((datosDoc as any).productoTerminado, cfg),
       portada:
         cfg.portada === "ivc"
           ? bloquePortadaIvc(datosDoc.portada ?? {}, {

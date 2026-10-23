@@ -20,6 +20,8 @@
 --   8 · Recepción de ítems en DCO, distribución de porciones y devolución de
 --       excedente (EP-00 5.7, EP-02 1.3, EP-03 7.2; BL-211, 212, 213).
 --   9 · Listas (combos) y parámetros de la operación nuevos; permisos.
+--  10 · Plantillas IDIC-PG09 Anexo 02-02 del LQC y del LPN y tablas del 15-10
+--       de Textil y LCC (EP-01 5.1, EP-03 3.4; BL-205, BL-206).
 -- Aditivo e idempotente. Va ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
@@ -358,3 +360,137 @@ SELECT r.id, p.id
   JOIN rol r     ON r.codigo = m.rol
   JOIN permiso p ON p.codigo = m.perm
 ON CONFLICT DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 10 · Plantillas oficiales por laboratorio (T32 · EP-01 5.1, EP-03 3.4)
+-- -----------------------------------------------------------------------------
+-- IDIC-PG09 Anexo 02-02 rev05 «Informe de ensayos» para el LQC y el IE del LPN,
+-- según el formato real del levantamiento (IDIC-PG09-Anexo02-02 de LCC y el IE
+-- N.º 79636/032 del Laboratorio de Pinturas del Sistema Comercial): 1
+-- Antecedentes, 2 Identificación de la muestra, 3 Normas (3.1 normas y métodos,
+-- 3.2 norma de evaluación), 4 Resultados (Análisis · Requisito · Resultado ·
+-- Condición), 5 Conclusiones, 6 Notas aclaratorias y firma «Por orden del
+-- Director del IDIC». Solo se insertan si no existen (no pisan lo que edite
+-- Gestión de Calidad). El LME ya tiene LME-IT03, LME-INT y PG09A2-LME.
+INSERT INTO plantilla_informe (tenant_id, repid, nombre, tipo, emision, version, activo, cuerpo_html, config_informe)
+SELECT t.id, v.repid, v.nombre, 'I.ENSAYO', 'conjunto', 'rev05', TRUE, v.cuerpo, v.config::jsonb
+  FROM tenant t
+ CROSS JOIN (VALUES
+  ('PG09A2-LQC', 'Informe de ensayos LQC (IDIC-PG09 Anexo 02-02 rev05)',
+$cuerpo$<div class="membrete">
+  <div class="escudo">IDIC</div>
+  <div class="org">
+    <b>INSTITUTO DE INVESTIGACIONES Y CONTROL</b>
+    <span>Ejército de Chile &middot; Departamento Químico &middot; Laboratorio de Química (LQC)</span>
+  </div>
+  <div class="doc">
+    <b>O/T N.º {{ot.codigo}}</b>
+    <span>IDIC-PG09-Anexo02-02 &middot; {{plantilla.version}}</span>
+  </div>
+</div>
+
+<h1>INFORME DE ENSAYOS N.º {{certificado.numero}}</h1>
+
+<h2>1. Antecedentes</h2>
+<table class="meta">
+  <tr><th>Cliente</th><td colspan="3">{{cliente.razonSocial}}</td></tr>
+  <tr><th>Atención</th><td>{{ot.solicitante}}</td><th>Contacto</th><td>{{cliente.telefono}}</td></tr>
+  <tr><th>Dirección</th><td colspan="3">{{cliente.direccion}}</td></tr>
+  <tr><th>Fecha O/T</th><td>{{ot.fechaRecepcion}}</td><th>Fecha y hora de muestreo</th><td>No aplica</td></tr>
+  <tr><th>Fecha de recepción del ítem</th><td>{{ot.fechaRecepcion}}</td><th>Fecha y hora del análisis</th><td>Ver punto 3.1</td></tr>
+  <tr><th>Fecha de emisión del informe</th><td colspan="3">{{fecha}}</td></tr>
+</table>
+
+<h2>2. Identificación de la muestra</h2>
+{{identificacion_muestras}}
+
+<h2>3. Identificación de normas, métodos y/o especificaciones técnicas</h2>
+<h3>3.1. Normas y métodos</h3>
+{{tabla_metodos}}
+<h3>3.2. Norma de evaluación</h3>
+{{#si ot.descripcionTrabajo}}<p>{{ot.descripcionTrabajo}}</p>{{/si}}
+{{#no ot.descripcionTrabajo}}<p>Las indicadas en la tabla de resultados; sin requisito, «No especificado».</p>{{/no}}
+
+<h2>4. Resultados</h2>
+{{tabla_resultados}}
+
+<h2>5. Conclusiones</h2>
+{{conclusion_texto}}
+
+<h2>6. Notas aclaratorias</h2>
+<p>Los resultados del presente informe corresponden sólo a la muestra enviada por el cliente al laboratorio y no representan un lote de fabricación o partida.</p>
+<p>Los resultados de este informe no pueden ser reproducidos en forma parcial o total sin la autorización escrita del laboratorio.</p>
+<p>La identificación de la muestra fue proporcionada por el cliente; el laboratorio no tiene responsabilidad sobre dicha información.</p>
+<p>Los resultados son válidos para la muestra en las condiciones en que fue recepcionada por el laboratorio.</p>
+
+{{anexo_fotografico}}
+
+<div class="firmas">
+  <div class="firma"><span class="linea"></span>Jefe Laboratorio de Química</div>
+  <div class="firma"><span class="linea"></span>Jefe Departamento Químico · Por orden del Director del IDIC</div>
+</div>$cuerpo$,
+   '{"agrupacion":"muestra","columnaMetodo":false,"columnaUnidad":false,"unidadEnResultado":true,"referencias":false,"anexoFotografico":true,"etiquetas":{"ensayo":"Análisis","requisito":"Requisito","resultado":"Resultado","veredicto":"Condición"}}'),
+  ('PG09A2-LPN', 'Informe de ensayos LPN · Pinturas (IDIC-PG09 Anexo 02-02 rev05)',
+$cuerpo$<div class="membrete">
+  <div class="escudo">IDIC</div>
+  <div class="org">
+    <b>INSTITUTO DE INVESTIGACIONES Y CONTROL</b>
+    <span>Ejército de Chile &middot; Departamento Químico &middot; Laboratorio de Pinturas (LPN)</span>
+  </div>
+  <div class="doc">
+    <b>O/T N.º {{ot.codigo}}</b>
+    <span>IDIC-PG09-Anexo02-02 &middot; {{plantilla.version}}</span>
+  </div>
+</div>
+
+<h1>INFORME DE ENSAYOS N.º {{certificado.numero}}</h1>
+
+<h2>1. Antecedentes</h2>
+<table class="meta">
+  <tr><th>Cliente</th><td colspan="3">{{cliente.razonSocial}}</td></tr>
+  <tr><th>Atención</th><td>{{ot.solicitante}}</td><th>Contacto</th><td>{{cliente.telefono}}</td></tr>
+  <tr><th>Dirección</th><td colspan="3">{{cliente.direccion}}</td></tr>
+  <tr><th>Fecha O/T</th><td>{{ot.fechaRecepcion}}</td><th>Fecha y hora de muestreo</th><td>No aplica</td></tr>
+  <tr><th>Fecha de recepción del ítem</th><td>{{ot.fechaRecepcion}}</td><th>Fecha de emisión del informe</th><td>{{fecha}}</td></tr>
+</table>
+
+<h2>2. Identificación de la muestra</h2>
+{{identificacion_muestras}}
+
+<h2>3. Identificación de normas, métodos y/o especificaciones técnicas</h2>
+<h3>3.1. Normas</h3>
+{{tabla_metodos}}
+<h3>3.2. Norma de evaluación</h3>
+{{#si ot.descripcionTrabajo}}<p>{{ot.descripcionTrabajo}}</p>{{/si}}
+{{#no ot.descripcionTrabajo}}<p>Las indicadas en la tabla de resultados; sin requisito, «No especificado».</p>{{/no}}
+
+<h2>4. Resultados</h2>
+{{tabla_resultados}}
+
+<h2>5. Conclusiones</h2>
+{{conclusion_texto}}
+
+<h2>6. Notas aclaratorias</h2>
+<p>Los resultados indicados en el presente informe de ensayo corresponden sólo a la muestra enviada por el cliente al laboratorio y no representan un lote de fabricación o partida.</p>
+<p>Los resultados de este informe no pueden ser reproducidos en forma parcial o total sin la autorización escrita del laboratorio.</p>
+<p>La identificación de la muestra fue proporcionada por el cliente; el laboratorio no tiene responsabilidad sobre dicha información.</p>
+<p>Los resultados obtenidos son válidos para la muestra en las condiciones en que fue recepcionada por el laboratorio.</p>
+<p>Las muestras de pinturas se destruyen al término de los análisis, salvo que el cliente solicite lo contrario.</p>
+
+{{anexo_fotografico}}
+
+<div class="firmas">
+  <div class="firma"><span class="linea"></span>Jefe Laboratorio Pinturas · Por orden del Director del IDIC</div>
+</div>$cuerpo$,
+   '{"agrupacion":"muestra","columnaMetodo":false,"columnaUnidad":false,"unidadEnResultado":true,"referencias":false,"anexoFotografico":true,"etiquetas":{"ensayo":"Análisis","requisito":"Requisito","resultado":"Resultado","veredicto":"Condición"}}')
+ ) AS v(repid, nombre, cuerpo, config)
+ WHERE NOT EXISTS (SELECT 1 FROM plantilla_informe p WHERE p.tenant_id = t.id AND p.repid = v.repid);
+
+-- Tablas del 15-10 (EP-03 3.4): el IE PG09 Anexo 02-02 de Textil y LCC usa las
+-- mismas tablas que el IVC: «Sello N.º» en Dimensiones y sin método en
+-- Confección, Dimensiones, Etiquetado y Empaque. Solo si la plantilla no lo
+-- tiene ya configurado (no pisa lo editado en «Formato del informe»).
+UPDATE plantilla_informe
+   SET config_informe = COALESCE(config_informe, '{}'::jsonb)
+       || '{"seccionesConSello":["Dimensiones"],"seccionesSinMetodo":["Confección","Dimensiones","Etiquetado","Empaque"]}'::jsonb
+ WHERE repid = 'PG09A2' AND NOT (COALESCE(config_informe, '{}'::jsonb) ? 'seccionesConSello');

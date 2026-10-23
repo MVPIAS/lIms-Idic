@@ -570,6 +570,27 @@ async function main() {
     afirmar(Number(dev.cantidad_devuelta) === 8 && dev.guia_despacho === `GD-${sello.slice(-5)}`, `devolución ${JSON.stringify([dev.cantidad_devuelta, dev.guia_despacho])}`);
     return `8 unidades · guía GD-${sello.slice(-5)}`;
   });
+
+  /* ------------------------------------------------------------ T32 */
+  await paso("BL-205/206 · Plantillas PG09 Anexo 02-02 de LQC y LPN; IVC con producto terminado y tablas del 15-10", async () => {
+    const pls = lista(await ok(U.lqcJefe, "GET", "/plantillas?limit=100&search=PG09A2"));
+    const lqc = pls.find((p) => p.repid === "PG09A2-LQC");
+    const lpn = pls.find((p) => p.repid === "PG09A2-LPN");
+    afirmar(lqc && lpn, `plantillas ${pls.map((p) => p.repid).join(",")}`);
+    const pv = await ok(U.lqcJefe, "POST", "/informes/previsualizar", { otId: C.ot.id, plantillaId: lqc.id });
+    const html = pv.html ?? "";
+    afirmar(/INFORME DE ENSAYOS N\.º/.test(html) && /Notas aclaratorias/.test(html) && /Por orden del Director del IDIC/.test(html), "cuerpo PG09A2-LQC");
+    const ivc = lista(await ok(U.lqcJefe, "GET", "/plantillas?limit=100&search=IVC")).find((x) => x.tipo === "IVC");
+    if (!ivc) return "PG09A2-LQC y PG09A2-LPN · sin plantilla IVC en la base";
+    const pr = await ok(U.lqcJefe, "POST", "/informes/propuesta", { otId: C.ot.id, plantillaId: ivc.id });
+    afirmar(pr.formato.productoTerminado === true && pr.formato.seccionesConSello.includes("Dimensiones"), `formato ${JSON.stringify(pr.formato).slice(0, 200)}`);
+    await exigir(400, U.lqcJefe, "POST", "/informes/previsualizar", { otId: C.ot.id, plantillaId: ivc.id, datosInforme: { productoTerminado: [{ items: "1", otro: "x" }] } });
+    const p2 = await ok(U.lqcJefe, "POST", "/informes/previsualizar", {
+      otId: C.ot.id, plantillaId: ivc.id, datosInforme: { productoTerminado: [{ items: "1", descripcion: "Material con piquete N.º registro 16309", numeracion: "1" }] },
+    });
+    afirmar(/Verificación del producto terminado/.test(p2.html) && /16309/.test(p2.html), "tabla de producto terminado en el IVC");
+    return `PG09A2-LQC, PG09A2-LPN · IVC ${ivc.repid} con producto terminado`;
+  });
 }
 
 main()
