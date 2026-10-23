@@ -19,8 +19,11 @@ import {
   ZONA_IDIC,
   DIAS_PARTICULAR_DEF,
   MESES_EJERCITO_OCT_DIC_DEF,
+  isoFecha,
   type ResultadoValidez,
+  type ReglaValidez,
 } from "./validez";
+import { elegirPrecio, itemsListaVigente } from "../lista-precio/precio-lista";
 import { calcularOpiPendiente, origenDesdeAceptacion, valorInicialOt } from "../ot/reglas-ot";
 import { puedeRegistrarAceptacion } from "./permisos-cotizacion";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
@@ -405,11 +408,20 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
 
   /**
    * Resuelve las líneas: las que traen `catEnsayoId` toman código, descripción y
-   * PRECIO del catálogo (cat_ensayo.precio = valor de la ficha de costos) si no
-   * se indica precio; en USD se convierte con el dólar congelado de la cotización.
-   * Las líneas libres (HH/HM/viático…) se siguen aceptando por compatibilidad.
+   * PRECIO: el de la lista de precios vigente a la fecha de emisión si el ensayo
+   * está en ella (neto para un particular; para el Ejército según el parámetro
+   * `precio_ejercito`) y, si no, la ficha (cat_ensayo.precio). En USD se
+   * convierte con el dólar congelado de la cotización. Las líneas libres
+   * (HH/HM/viático…) se siguen aceptando por compatibilidad.
    */
-  private async resolverLineas(tenantId: string, lineas: LineaEntrada[], moneda: string, dolar: number | null, existentes?: Existentes) {
+  private async resolverLineas(
+    tenantId: string,
+    lineas: LineaEntrada[],
+    moneda: string,
+    dolar: number | null,
+    existentes: Existentes | undefined,
+    ctx: { regla: ReglaValidez; fecha: string },
+  ) {
     const ids = lineas.map((l) => l.catEnsayoId).filter((x): x is string => Boolean(x));
     const ensayos = ids.length
       ? await this.prisma.catEnsayo.findMany({
@@ -418,21 +430,26 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         })
       : [];
     const porId = new Map(ensayos.map((e) => [e.id, e]));
+    const lista = await itemsListaVigente(this.prisma, tenantId, [...porId.keys()], ctx.fecha);
+    const cfg = ids.length ? await leerConfigCircuito(this.prisma, tenantId) : null;
 
     return lineas.map((l, i) => {
       let descripcion = l.descripcion;
       let ensayoCodigo = l.ensayoCodigo;
       let precioFicha: number | null = null;
+      let fuente: string | undefined;
       if (l.catEnsayoId) {
         const e = porId.get(l.catEnsayoId);
         if (!e) throw new BadRequestException(`Línea ${i + 1}: el ensayo ${l.catEnsayoId} no existe en el catálogo.`);
         ensayoCodigo = e.codigo;
         descripcion = descripcion || `${e.codigo} · ${e.nombre}`;
-        const clp = e.precio != null ? Number(e.precio) : null;
+        const elegido = elegirPrecio(lista.get(e.id), e.precio != null ? Number(e.precio) : null, ctx.regla, cfg!.precioEjercito);
+        const clp = elegido?.precio ?? null;
+        if (elegido?.origen === "lista") fuente = `la lista de precios vigente (${elegido.lista!.nombre}, ${elegido.lista!.itemCodigo})`;
         precioFicha = clp != null && clp > 0 ? (moneda === "USD" ? Math.round((clp / (dolar || 1)) * 100) / 100 : clp) : null;
       }
-      // EP-00 2.2 (BL-149): el ensayo se valoriza con su ficha; sin ensayo, solo gastos tipificados.
-      const r = precioDeLinea({ ...l, ensayoCodigo, descripcion }, precioFicha, i + 1, existentes);
+      // EP-00 2.2 (BL-149): el ensayo se valoriza con la lista vigente o su ficha; sin ensayo, solo gastos tipificados.
+      const r = precioDeLinea({ ...l, ensayoCodigo, descripcion }, precioFicha, i + 1, existentes, fuente);
       if (r.error !== undefined) throw new BadRequestException(r.error);
       const precio = r.precio;
       const cantidad = l.cantidad ?? 1;
@@ -451,6 +468,31 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         ensayoCodigo: ensayoCodigo ?? null,
       };
     });
+  }
+
+  /**
+   * Precio de cada ensayo para un cliente (vista previa del formulario de la
+   * cotización; misma regla que al guardar). GET /cotizaciones/precios-ensayo.
+   */
+  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string) {
+    const fechaEmision = isoFecha(soloFecha(fecha ?? hoyEnChile()));
+    const validez = await this.calcularValidezPara(tenantId, clienteId, null, fechaEmision);
+    const ensayos = catEnsayoIds.length
+      ? await this.prisma.catEnsayo.findMany({ where: { id: { in: catEnsayoIds }, tenantId, deletedAt: null }, select: { id: true, codigo: true, precio: true } })
+      : [];
+    const lista = await itemsListaVigente(this.prisma, tenantId, ensayos.map((e) => e.id), fechaEmision);
+    const cfg = await leerConfigCircuito(this.prisma, tenantId);
+    return {
+      regla: validez.regla,
+      fecha: fechaEmision,
+      precioEjercito: cfg.precioEjercito,
+      precios: Object.fromEntries(
+        ensayos.map((e) => {
+          const p = elegirPrecio(lista.get(e.id), e.precio != null ? Number(e.precio) : null, validez.regla, cfg.precioEjercito);
+          return [e.id, p ? { precio: p.precio, origen: p.origen, columna: p.columna ?? null, lista: p.lista ?? null } : { precio: null, origen: null, columna: null, lista: null }];
+        }),
+      ),
+    };
   }
 
   /**
@@ -497,7 +539,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const fechaEmision = soloFecha(data.fechaEmision ?? hoyEnChile());
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
     if (data.oportunidadId) await validarOportunidad(this.prisma, tenantIdFromJWT, data.clienteId, data.oportunidadId);
-    const lineas = await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar);
+    const lineas = await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, { regla: validez.regla, fecha: isoFecha(fechaEmision) });
     const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0));
     // Número real (EP-00 2.1 · «2026-14324»), correlativo atómico por tenant.
     const codigo = await generarNumeroCotizacion(this.prisma, tenantIdFromJWT, fechaEmision);
@@ -618,7 +660,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         ensayos: new Map(actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, Number(x.precioUnitario)])),
         libres: new Set(actual.lineas.filter((x: any) => !x.catEnsayoId).map((x: any) => claveLibre(x.tipo, x.descripcion, Number(x.precioUnitario)))),
       };
-      const lineas = await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar, existentes);
+      const lineas = await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar, existentes, { regla: validez.regla, fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())) });
       const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0));
       return this.prisma.$transaction(async (tx) => {
         await tx.lineaCotizacion.deleteMany({ where: { cotizacionId: id } });
