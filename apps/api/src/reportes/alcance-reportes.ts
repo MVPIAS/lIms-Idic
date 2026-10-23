@@ -14,6 +14,7 @@ export const UNIDAD_DE: Record<string, (t: string) => string> = {
   resultado: (t) =>
     `(SELECT o.unidad_principal FROM orden_trabajo o WHERE o.id = COALESCE(${t}.ot_id, (SELECT m.ot_id FROM muestra m WHERE m.id = ${t}.muestra_id)))`,
   certificado: (t) => `COALESCE(${t}.unidad_id, (SELECT o.unidad_principal FROM orden_trabajo o WHERE o.id = ${t}.ot_id))`,
+  factura: (t) => `(SELECT o.unidad_principal FROM orden_trabajo o WHERE o.id = ${t}.ot_id)`,
 };
 
 /**

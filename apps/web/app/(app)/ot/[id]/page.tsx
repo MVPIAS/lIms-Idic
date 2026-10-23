@@ -17,6 +17,7 @@ import EspecificacionTecnicaOt from "./_components/EspecificacionTecnicaOt";
 import MuestreoOt from "./_components/MuestreoOt";
 import FotosOt from "./_components/FotosOt";
 import EstadoPorLaboratorio from "./_components/EstadoPorLaboratorio";
+import CarpetaOt from "./_components/CarpetaOt";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import SeguimientoOt from "@/components/documentos/SeguimientoOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
@@ -89,7 +90,7 @@ export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "informe" | "flujo" | "historial">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "informe" | "carpeta" | "flujo" | "historial">("cabecera");
   /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
   const [destinoOi, setDestinoOi] = useState<string | null>(null);
   const { puede } = usePermisos();
@@ -139,7 +140,7 @@ export default function ExpedientePage() {
   // Pestaña inicial desde la URL (?tab=muestras: bandeja de entrada del laboratorio).
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "ordenes", "resultados", "fotos", "informe", "historial"].includes(t)) setTab(t as typeof tab);
+    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "ordenes", "resultados", "fotos", "informe", "carpeta", "historial"].includes(t)) setTab(t as typeof tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -264,6 +265,7 @@ export default function ExpedientePage() {
             {tabBtn("resultados", "Resultados")}
             {puede(["resultado.ver", "certificado.emitir"]) && tabBtn("fotos", "Fotos")}
             {tabBtn("informe", "Informe y cierre")}
+            {tabBtn("carpeta", "Carpeta de trabajo")}
             {MOTOR_FLUJOS_VISIBLE && tabBtn("flujo", "Flujo")}
             {tabBtn("historial", "Historial")}
           </div>
@@ -385,6 +387,7 @@ export default function ExpedientePage() {
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}
             {/* Plazo al cliente, recepción DCO, documentos no-informe y envío (frente r4c). */}
             {tab === "informe" && typeof id === "string" && <div style={{ marginTop: 16 }}><SeguimientoOt otId={id} onCambio={cargarOt} /></div>}
+            {tab === "carpeta" && typeof id === "string" && <CarpetaOt otId={id} />}
             {MOTOR_FLUJOS_VISIBLE && tab === "flujo" && typeof id === "string" && <FlujoBpmOt otId={id} />}
           </div>
         </div>

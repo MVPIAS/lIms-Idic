@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Controller,
+  ForbiddenException,
   Get,
   Header,
   Module,
@@ -18,6 +19,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { condicionAlcance } from "./alcance-reportes";
+import { ReportesGestionController } from "./reportes-gestion.controller";
 
 // ===========================================================================
 // Módulo REPORTES · KPIs (contrato §4.5.3) + exportación con filtros (§4.6.6 /
@@ -125,6 +127,26 @@ const ENTIDADES: Record<string, EntidadDef> = {
       iva_monto: "iva_monto",
       total: "total",
       forma_pago: "forma_pago",
+      created_at: "created_at",
+    },
+  },
+  // Facturas en el exportador (EP-00 9.4, BL-174, frente r4c): cuentan por la unidad de su OT.
+  factura: {
+    tabla: "factura",
+    fechaCol: "created_at",
+    softDelete: true,
+    columnas: {
+      numero: "numero",
+      codigo: "codigo",
+      estado: "estado",
+      origen: "origen",
+      fecha_emision: "fecha_emision",
+      fecha_vencimiento: "fecha_vencimiento",
+      moneda: "moneda",
+      neto: "neto",
+      iva_monto: "iva_monto",
+      total: "total",
+      saldo: "saldo",
       created_at: "created_at",
     },
   },
@@ -490,6 +512,10 @@ export class ReportesController extends ReportesBase {
         `entidad inválida. Válidas: ${Object.keys(ENTIDADES).join(", ")}`,
       );
     }
+    // Las facturas solo para quien ve facturación (Finanzas, Comercial, Planificación, Dirección).
+    const u = req?.user ?? {};
+    if (entidad === "factura" && !(u.roles ?? []).includes("SUPERADMIN") && !(u.permisos ?? []).includes("factura.ver"))
+      throw new ForbiddenException("Exportar facturas exige el permiso factura.ver.");
 
     // Resolución de columnas: SOLO claves de la whitelist. Si no se piden campos,
     // se devuelven todos los de la entidad (orden estable del objeto).
@@ -569,6 +595,7 @@ function toCsv(claves: string[], filas: any[]): string {
 }
 
 @Module({
-  controllers: [ReportesController],
+  // ReportesGestionController (frente r4c) va antes: «gestion.xlsx» no debe caer en otra ruta.
+  controllers: [ReportesGestionController, ReportesController],
 })
 export class ReportesModule {}

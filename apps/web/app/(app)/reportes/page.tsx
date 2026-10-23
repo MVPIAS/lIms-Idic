@@ -6,6 +6,7 @@
 // son SVG a mano (barras), sin librerías externas.
 // ===========================================================================
 
+import Gestion from "./_components/Gestion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { clp, num, pct, fecha } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
@@ -16,10 +17,11 @@ const auth = () => ({
   "Content-Type": "application/json",
 });
 
-type Tab = "productividad" | "conformidad" | "plazos" | "comercial" | "exportador";
+type Tab = "gestion" | "productividad" | "conformidad" | "plazos" | "comercial" | "exportador";
 
 /** Cada pestaña con el permiso que exige su API (/reportes/*). */
 const TABS: { key: Tab; label: string; perm: string }[] = [
+  { key: "gestion", label: "Gestión", perm: "reporte.ver" },
   { key: "productividad", label: "Productividad", perm: "reporte.ver" },
   { key: "conformidad", label: "Conformidad", perm: "reporte.ver" },
   { key: "plazos", label: "Plazos", perm: "reporte.ver" },
@@ -84,6 +86,7 @@ export default function ReportesPage() {
       </div>
 
       {listo && !tabs.length && <div className="alert warn">Su perfil no tiene acceso a ningún reporte.</div>}
+      {tab === "gestion" && <Gestion rango={rango} />}
       {tab === "productividad" && <Productividad rango={rango} />}
       {tab === "conformidad" && <Conformidad rango={rango} />}
       {tab === "plazos" && <Plazos rango={rango} />}
