@@ -159,7 +159,7 @@ export class ClasificacionController {
   @Post(":id/adjuntos")
   @RequierePermiso("bpch.clasificacion.registrar")
   @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ADJUNTO, files: 1, fields: 2 } }))
-  @ApiOperation({ summary: "Adjuntar la curva tiempo/presión del MCU (IT23) · multipart: archivo + clase=curva_it23" })
+  @ApiOperation({ summary: "Adjuntar la curva tiempo/presión del MCU (IT23) o el registro de la prueba IT21 · multipart: archivo + clase=curva_it23|registro_it21" })
   async adjuntar(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoAdjunto | undefined, @Body() body: any, @Req() req: any) {
     await this.exigir(req, id);
     return this.svc.adjuntar(tenant(req), id, usuario(req), String(body?.clase ?? ""), archivo);
