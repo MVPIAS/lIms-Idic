@@ -195,6 +195,8 @@ async function main() {
     const labs = await ok(U.ventas, "GET", "/ot/laboratorios");
     C.lqc = labs.find((u) => u.codigo === "LQC");
     C.lpn = labs.find((u) => u.codigo === "LPN");
+    // Laboratorio de OTRA sección (B-021: los de la misma sección del LQC se ofrecen como previstos).
+    C.lcc = labs.find((u) => u.codigo === "LCC");
     afirmar(C.lqc && C.lpn, "LQC/LPN no figuran en /ot/laboratorios");
     const buscar = async (codigo) => lista(await ok(U.lqcJefe, "GET", `/cat/metodos?search=${codigo}&limit=50`)).find((x) => x.codigo === codigo);
     C.mPh = await buscar("251");
@@ -556,7 +558,7 @@ async function main() {
     const lqc = d.laboratorios.find((l) => l.codigo === "LQC");
     afirmar(lqc && /251/.test(lqc.ensayos), `laboratorios ${JSON.stringify(d.laboratorios)}`);
     const fila = { unidadId: lqc.unidadId, porcion: "500 mL", fechaHora: new Date().toISOString(), recibidoPor: "E. F." };
-    await exigir(400, U.recepcion, "PUT", ruta, { filas: [{ ...fila, unidadId: C.lpn.id }] }, /no tiene ensayos/);
+    await exigir(400, U.recepcion, "PUT", ruta, { filas: [{ ...fila, unidadId: C.lcc.id }] }, /no tiene ensayos/);
     await exigir(403, "demo.lpn.analista1", "PUT", ruta, { filas: [fila] });
     await exigir(403, U.ventas, "PUT", ruta, { filas: [fila] });
     const r = await ok(U.recepcion, "PUT", ruta, { filas: [fila] });
