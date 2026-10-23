@@ -61,6 +61,7 @@ COMMENT ON COLUMN plantilla_informe.tipo_documento IS
   'Tipo de documento de la matriz de firmas y de la numeración que emite la plantilla (INFORME_INSPECCION, CERTIFICADO_CONFORMIDAD...). NULL = se deduce del tipo de plantilla y de la unidad de la OT.';
 
 -- Solo rellena las que aún no lo tienen: respeta lo que haya cambiado Calidad.
+-- PROTO-APR y PROTO-REC no se tocan: el dictamen de prototipos fija su tipo al emitir.
 UPDATE plantilla_informe p
    SET tipo_documento = v.tipo
   FROM (VALUES
@@ -72,9 +73,7 @@ UPDATE plantilla_informe p
     ('SCCID',     NULL,                         'INFORME_INCUMPLIMIENTO'),
     ('CERTARMA',  NULL,                         'CERTIFICADO_ARMA'),
     ('LRB-CRB',   NULL,                         'CERTIFICADO_RESISTENCIA_BALISTICA'),
-    ('LRB-RECH',  NULL,                         'INFORME_RECHAZO'),
-    ('PROTO-APR', NULL,                         'CERTIFICADO_CONFORMIDAD'),
-    ('PROTO-REC', NULL,                         'INFORME_INCUMPLIMIENTO')
+    ('LRB-RECH',  NULL,                         'INFORME_RECHAZO')
   ) AS v(repid, nombre, tipo)
  WHERE p.repid = v.repid
    AND (v.nombre IS NULL OR p.nombre = v.nombre)
