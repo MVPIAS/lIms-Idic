@@ -48,6 +48,8 @@ export interface ContextoCal {
   habilitacion?: string | null;
   /** Ya hay una reemisión en curso de esta calibración. */
   reemisionEnCurso?: boolean;
+  /** B-028: la calibración tiene al menos un patrón del maestro (undefined = no se sabe; no bloquea). */
+  tienePatron?: boolean;
   /** Por qué el usuario no puede firmar el paso pendiente (si lo sabemos), en lugar del mensaje genérico. */
   motivoPaso?: string | null;
 }
@@ -81,6 +83,8 @@ export function motivoRechazo(accion: AccionCal, c: ContextoCal): string | null 
       if (!c.esAutor) return "Solo quien elaboró la calibración puede enviarla a revisión";
       if (!c.calculada) return "La calibración no tiene resultado calculado";
       if (c.habilitacion) return c.habilitacion;
+      if (c.tienePatron === false)
+        return "Elija al menos un patrón vigente del maestro en la hoja de control: el certificado imprime su trazabilidad (EP-04 P3.3)";
       return null;
     case "DEVOLVER":
     case "FIRMAR":

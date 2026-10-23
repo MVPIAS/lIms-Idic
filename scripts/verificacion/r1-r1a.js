@@ -396,8 +396,12 @@ async function main() {
     await rechazo(400, /LNF: indique el sentido|acondicionamiento/, U.lnfA, "POST", `/ot/${ot.id}/instrumentos/${it.data.id}/recepcion`, rec);
     await ok(U.lnfA, "POST", `/ot/${ot.id}/instrumentos/${it.data.id}/recepcion`, { ...rec, sentido: "C", acondicionamientoH: 24, tempAmbiente: 20.2 });
     const ej = (await ok(U.lnfA, "GET", "/metrologia/motores/LCPNF-IT01/ejemplo")).data;
+    // B-028 (frente c2): sin patrón del maestro la calibración no se envía a firma.
+    const pf = (await ok(U.lnfA, "GET", `/metrologia/patrones?fecha=${ahoraIso().slice(0, 10)}`)).data
+      .find((x) => x.magnitud === "fuerza" && x.estado === "vigente" && x.activo !== false && x.tipo !== "auxiliar" && x.rango_min == null);
+    afirmar(pf, "no hay un patrón de fuerza vigente en el maestro");
     const cal = await ok(U.lnfA, "POST", "/metrologia/calibraciones", {
-      otInstrumentoId: it.data.id, procesoCodigo: "LCPNF-IT01", fecha: ahoraIso().slice(0, 10), motor: { datos: ej.datos, opciones: {} },
+      otInstrumentoId: it.data.id, procesoCodigo: "LCPNF-IT01", fecha: ahoraIso().slice(0, 10), motor: { datos: ej.datos, opciones: {} }, patronIds: [pf.id],
     });
     await ok(U.lnfA, "POST", `/metrologia/calibraciones/${cal.data.id}/enviar`);
     await ok(U.lnfJefe, "POST", `/metrologia/calibraciones/${cal.data.id}/firmar`);
