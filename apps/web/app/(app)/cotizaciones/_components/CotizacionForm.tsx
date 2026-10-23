@@ -31,7 +31,17 @@ export type LineaForm = {
   precioClp?: number;
   /** Línea heredada (HH/HM/…): se conserva con su precio, no se puede editar. */
   heredada?: { tipo: string; precioUnitario: number };
+  /** Gasto tipificado (viático, pasaje, traslado): precio a mano, en la moneda de la cotización (EP-00 2.2). */
+  gasto?: { tipo: string; precio: number };
 };
+
+/** Gastos que se pueden cotizar sin ensayo del catálogo (la API rechaza cualquier otra línea libre). */
+const TIPOS_GASTO = [
+  { v: "viatico", l: "Viático" },
+  { v: "pasaje", l: "Pasaje" },
+  { v: "otros", l: "Traslado u otro gasto" },
+];
+type Contacto = { id: string; nombre: string; cargo: string | null; principal: boolean };
 
 type Props = {
   modo: "crear" | "editar";
@@ -39,11 +49,15 @@ type Props = {
   inicial?: any;
   onGuardado: (cot: any) => void;
   onCancelar?: () => void;
+  /** Cotización que nace de una oportunidad del CRM (EP-00 0.3): se enlaza al guardar. */
+  oportunidadId?: string;
+  /** Cliente con que se precarga (el de la oportunidad). */
+  clienteInicialId?: string;
 };
 
 const MAX_COND = 2000;
 
-export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }: Props) {
+export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, oportunidadId, clienteInicialId }: Props) {
   const [cfg, setCfg] = useState<ConfigCotizacion | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -73,6 +87,49 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
   // Plazo de entrega comprometido (días corridos desde la recepción): fija la fecha de compromiso de la OT.
   const [plazoDias, setPlazoDias] = useState<string>(inicial?.plazoEntregaDias != null ? String(inicial.plazoEntregaDias) : "");
   const [obsInternas, setObsInternas] = useState<string>(inicial?.observacionesInternas ?? "");
+  // Solicitud (EP-01/02 0.1): quién pide y con qué documento.
+  const sol0 = inicial?.solicitud ?? {};
+  const [contactos, setContactos] = useState<Contacto[]>([]);
+  const [solContactoId, setSolContactoId] = useState<string>(sol0.solicitanteContactoId ?? "");
+  const [solNombre, setSolNombre] = useState<string>(sol0.solicitanteNombre ?? "");
+  const [solMedio, setSolMedio] = useState<string>(sol0.solicitudMedio ?? "");
+  const [solNumero, setSolNumero] = useState<string>(sol0.solicitudNumero ?? "");
+  const [solFecha, setSolFecha] = useState<string>(sol0.solicitudFecha ?? "");
+  // Gasto tipificado por agregar.
+  const [gTipo, setGTipo] = useState("viatico");
+  const [gDesc, setGDesc] = useState("");
+  const [gValor, setGValor] = useState("");
+
+  // Cliente de la oportunidad (CRM).
+  useEffect(() => {
+    if (!clienteInicialId || cliente) return;
+    pedir<any>("GET", `/clientes/${clienteInicialId}`)
+      .then((c) => { setCliente({ id: c.id, razonSocial: c.razonSocial, rut: c.rut, tipo: c.tipo }); setTipoCliente(c.tipo ?? ""); })
+      .catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteInicialId]);
+
+  // Contactos del cliente para elegir al solicitante.
+  useEffect(() => {
+    if (!cliente?.id) { setContactos([]); return; }
+    pedir<Contacto[]>("GET", `/clientes/${cliente.id}/contactos`).then(setContactos).catch(() => setContactos([]));
+  }, [cliente?.id]);
+
+  /** Referencia sugerida por el documento de solicitud (EP-00 1.1): «OF Nº …» o «Correo de fecha …». */
+  function referenciaSugerida(medio: string, numero: string, fechaSol: string): string {
+    // «OF 1234», «Oficio Nº 1234» o «1234» dan la misma referencia: «OF Nº 1234».
+    const n = numero.trim().replace(/^(of(icio)?\.?\s*)?(n[º°o]\.?\s*)?/i, "").trim();
+    if (medio === "oficio" && n) return `OF Nº ${n}`;
+    if (medio === "correo" && fechaSol) return `Correo de fecha ${fechaSol.slice(8, 10)}-${fechaSol.slice(5, 7)}-${fechaSol.slice(0, 4)}`;
+    return "";
+  }
+  function cambiarSolicitud(medio: string, numero: string, fechaSol: string) {
+    const anterior = referenciaSugerida(solMedio, solNumero, solFecha);
+    setSolMedio(medio); setSolNumero(numero); setSolFecha(fechaSol);
+    const nueva = referenciaSugerida(medio, numero, fechaSol);
+    // Solo se completa la referencia si estaba vacía o era la sugerida antes.
+    if (nueva && (!referencia.trim() || referencia === anterior)) setReferencia(nueva);
+  }
 
   // Líneas
   const [lineas, setLineas] = useState<LineaForm[]>(() =>
@@ -153,6 +210,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
   const precioEnMoneda = (l: LineaForm) =>
     l.heredada
       ? l.heredada.precioUnitario
+      : l.gasto
+        ? l.gasto.precio
       : moneda === "USD"
         ? dolarNum > 0 ? Math.round(((l.precioClp ?? 0) / dolarNum) * 100) / 100 : 0
         : l.precioClp ?? 0;
@@ -162,6 +221,14 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
     [lineas, moneda, dolarNum],
   );
   const cc = cfg?.centrosCosto.find((c) => c.id === centroCostoId);
+  // EP-05 0.2: el lote del LRB se cotiza con unidades de reposición (parámetro cotizacion_lrb.reposicion).
+  const reposicionLrb = Number((cfg as any)?.reposicionLrb ?? 4);
+  const esLrb = (cc?.codigo ?? "").toUpperCase() === "LRB" || (cc?.laboratorio ?? "").toUpperCase() === "LRB";
+  const [reposicionAplicada, setReposicionAplicada] = useState(false);
+  function sumarReposicion() {
+    setLineas((ls) => ls.map((l) => (l.catEnsayoId ? { ...l, cantidad: (Number(l.cantidad) || 0) + reposicionLrb } : l)));
+    setReposicionAplicada(true);
+  }
   const cambiaDolar = modo === "editar" && moneda === "USD" && dolarInicial != null && dolarNum !== dolarInicial;
   const tipoInactivo = !!tipoCliente && !!cfg && !opts("tipo_cliente").some((o) => o.codigo === tipoCliente);
 
@@ -195,6 +262,15 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
       { catEnsayoId: e.id, codigo: e.codigo, descripcion: `${e.codigo} · ${e.nombre}`, cantidad: 1, precioClp: Number(e.precio) || 0 },
     ]);
   }
+  function agregarGasto() {
+    const valor = Number(String(gValor).replace(",", "."));
+    if (!gDesc.trim()) return setError("Describa el gasto (p. ej. «Viático Arica, 2 días»).");
+    if (!(valor > 0)) return setError("Indique el valor del gasto.");
+    setError("");
+    const etiqueta = TIPOS_GASTO.find((t) => t.v === gTipo)?.l ?? gTipo;
+    setLineas((ls) => [...ls, { codigo: etiqueta, descripcion: gDesc.trim(), cantidad: 1, gasto: { tipo: gTipo, precio: valor } }]);
+    setGDesc(""); setGValor("");
+  }
   const setCant = (i: number, v: number) => setLineas((ls) => ls.map((l, j) => (j === i ? { ...l, cantidad: v } : l)));
   const quitar = (i: number) => setLineas((ls) => ls.filter((_, j) => j !== i));
 
@@ -203,7 +279,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
     setError("");
     if (!cliente?.id) return setError("Seleccione el cliente.");
     if (!lineas.length) return setError("Agregue al menos un ensayo del catálogo.");
-    if (lineas.some((l) => !l.heredada && !(Number(l.precioClp) > 0)))
+    if (lineas.some((l) => !l.heredada && !l.gasto && !(Number(l.precioClp) > 0)))
       return setError("Hay ensayos sin valor en su ficha de costos: complete la ficha en el catálogo antes de cotizarlos.");
     if (moneda === "USD" && !(dolarNum > 0)) return setError("Indique el valor del dólar del día.");
     if (cambiaDolar && !dolarMotivo.trim()) return setError("El dólar quedó congelado al emitir: indique el motivo del cambio.");
@@ -226,8 +302,18 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
       condicionesAdicionales: condiciones.trim() || null,
       plazoEntregaDias: plazo,
       observacionesInternas: obsInternas.trim() || null,
+      solicitud: {
+        solicitanteContactoId: solContactoId || null,
+        solicitanteNombre: solNombre.trim() || null,
+        solicitudMedio: solMedio || null,
+        solicitudNumero: solNumero.trim() || null,
+        solicitudFecha: solFecha || null,
+      },
+      ...(modo === "crear" && oportunidadId ? { oportunidadId } : {}),
       lineas: lineas.map((l) =>
-        l.heredada
+        l.gasto
+          ? { tipo: l.gasto.tipo, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: l.gasto.precio }
+          : l.heredada
           ? { tipo: l.heredada.tipo === "comprension" ? "otros" : l.heredada.tipo, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: l.heredada.precioUnitario }
           : l.catEnsayoId
             ? { catEnsayoId: l.catEnsayoId, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: precioEnMoneda(l) }
@@ -365,6 +451,38 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
             </div>
           )}
 
+          <fieldset className="field" style={{ gridColumn: "1 / -1", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", margin: 0 }}>
+            <legend style={{ fontSize: 12, fontWeight: 600, padding: "0 4px" }}>Solicitud del cliente</legend>
+            <div className="form-grid cols-4">
+              <div className="field">
+                <label htmlFor="sol-contacto">Solicitante (contacto)</label>
+                <select id="sol-contacto" value={solContactoId} disabled={!cliente} onChange={(e) => setSolContactoId(e.target.value)}>
+                  <option value="">{cliente ? (contactos.length ? "— elija el contacto —" : "El cliente no tiene contactos") : "Elija primero el cliente"}</option>
+                  {contactos.map((c) => <option key={c.id} value={c.id}>{c.nombre}{c.cargo ? ` · ${c.cargo}` : ""}{c.principal ? " (principal)" : ""}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="sol-nombre">o nombre y cargo</label>
+                <input id="sol-nombre" value={solNombre} maxLength={160} onChange={(e) => setSolNombre(e.target.value)} placeholder="Si no está en los contactos" />
+              </div>
+              <div className="field">
+                <label htmlFor="sol-medio">Medio de la solicitud</label>
+                <select id="sol-medio" value={solMedio} onChange={(e) => cambiarSolicitud(e.target.value, solNumero, solFecha)}>
+                  <option value="">— sin especificar —</option>
+                  <option value="oficio">Oficio</option>
+                  <option value="correo">Correo</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="sol-num">{solMedio === "correo" ? "Fecha del correo" : "Nº y fecha del oficio"}</label>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {solMedio !== "correo" && <input id="sol-num" aria-label="Número del oficio" value={solNumero} maxLength={80} onChange={(e) => cambiarSolicitud(solMedio, e.target.value, solFecha)} style={{ flex: 1, minWidth: 0 }} />}
+                  <input type="date" aria-label={solMedio === "correo" ? "Fecha del correo" : "Fecha del oficio"} value={solFecha} onChange={(e) => cambiarSolicitud(solMedio, solNumero, e.target.value)} style={{ width: 140 }} />
+                </div>
+              </div>
+            </div>
+            <small style={{ color: "var(--muted)" }}>La referencia de la cotización se completa con el documento: «OF Nº …» u «Correo de fecha …».</small>
+          </fieldset>
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <label>Referencia</label>
             <input value={referencia} onChange={(e) => setReferencia(e.target.value)} maxLength={300} placeholder="Referencia del cliente / solicitud" />
@@ -395,6 +513,34 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
             {msgEnsayo && <small style={{ color: "var(--red)" }}>Catálogo no disponible: {msgEnsayo}</small>}
           </div>
         </div>
+        <div className="form-grid cols-4" style={{ marginTop: 8 }}>
+          <div className="field">
+            <label htmlFor="g-tipo">Gasto no incluido en la ficha</label>
+            <select id="g-tipo" value={gTipo} onChange={(e) => setGTipo(e.target.value)}>
+              {TIPOS_GASTO.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="g-desc">Detalle</label>
+            <input id="g-desc" value={gDesc} maxLength={200} onChange={(e) => setGDesc(e.target.value)} placeholder="p. ej. Viático Arica, 2 días" />
+          </div>
+          <div className="field">
+            <label htmlFor="g-valor">Valor ({moneda})</label>
+            <input id="g-valor" inputMode="decimal" value={gValor} onChange={(e) => setGValor(e.target.value)} />
+          </div>
+          <div className="field" style={{ justifyContent: "flex-end" }}>
+            <button type="button" className="btn outline sm" onClick={agregarGasto}>Agregar gasto</button>
+          </div>
+        </div>
+        <small style={{ color: "var(--muted)" }}>Los ensayos se valorizan con su ficha de costos; el precio no se escribe a mano. Solo los gastos (viáticos, pasajes, traslados) llevan valor manual.</small>
+        {esLrb && reposicionLrb > 0 && lineas.some((l) => l.catEnsayoId) && (
+          <div className="alert info" style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
+            <span style={{ flex: 1 }}>LRB: el lote se cotiza con <b>{reposicionLrb} unidades de reposición</b> además de las del lote.</span>
+            <button type="button" className="btn outline sm" disabled={reposicionAplicada} onClick={sumarReposicion}>
+              {reposicionAplicada ? "Reposición sumada" : `Sumar ${reposicionLrb} a cada ensayo`}
+            </button>
+          </div>
+        )}
         <table className="data" style={{ marginTop: 10 }}>
           <thead>
             <tr><th>Código</th><th>Ensayo</th><th className="num">Cant.</th><th className="num">P. unitario ({moneda})</th><th className="num">Subtotal</th><th></th></tr>
@@ -406,7 +552,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar }
                 <td>
                   {l.descripcion}
                   {l.heredada && <small style={{ display: "block", color: "var(--muted)" }}>Línea heredada (se conserva tal cual)</small>}
-                  {!l.heredada && !(Number(l.precioClp) > 0) && <small style={{ display: "block", color: "var(--red)" }}>Sin valor en la ficha de costos</small>}
+                  {l.gasto && <small style={{ display: "block", color: "var(--muted)" }}>Gasto · valor manual</small>}
+                  {!l.heredada && !l.gasto && !(Number(l.precioClp) > 0) && <small style={{ display: "block", color: "var(--red)" }}>Sin valor en la ficha de costos</small>}
                 </td>
                 <td className="num">
                   <input type="number" min={1} step={1} value={l.cantidad} onChange={(e) => setCant(i, Math.max(1, Math.round(Number(e.target.value) || 1)))} style={{ width: 64, textAlign: "right" }} />

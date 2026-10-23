@@ -1,4 +1,7 @@
 import { Controller, Get, Module, Query, Req, UseGuards } from "@nestjs/common";
+import { LaboratorioModule } from "../laboratorio/laboratorio.module";
+import { ReclamoController } from "./reclamo.controller";
+import { ApelacionController } from "./apelacion.controller";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -116,5 +119,5 @@ export class AuditoriaController {
   }
 }
 
-@Module({ controllers: [AuditoriaController, NoConformidadController] })
+@Module({ imports: [LaboratorioModule], controllers: [AuditoriaController, NoConformidadController, ReclamoController, ApelacionController] })
 export class AuditoriaModule {}

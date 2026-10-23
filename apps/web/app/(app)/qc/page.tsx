@@ -22,6 +22,8 @@ import { esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { toast, confirmar } from "@/components/ui/feedback";
 import { usePermisos } from "@/lib/permisos";
+import Modal from "@/components/documentos/Modal";
+import { llamar } from "@/lib/laboratorio";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -30,8 +32,8 @@ const auth = () => ({
 });
 
 type Ot = { id: string; codigo: string; cliente?: { razonSocial?: string } };
-type Metodo = { id: string; codigo: string; nombre: string; aprobado: boolean };
-type Tipo = "blanco" | "estandar" | "curva" | "duplicado";
+type Metodo = { id: string; codigo: string; nombre: string; aprobado: boolean; tiposExigidos?: string[]; tiposFaltantes?: string[]; criterios?: Record<string, string> };
+type Tipo = "blanco" | "estandar" | "curva" | "duplicado" | "mrc" | "patron";
 type ResultadoQc = "aprobado" | "rechazado" | "pendiente" | string;
 
 type Control = {
@@ -66,6 +68,8 @@ const TIPO_LABEL: Record<Tipo, string> = {
   estandar: "Estándar",
   curva: "Curva de calibración",
   duplicado: "Duplicado",
+  mrc: "Material de referencia certificado (MRC)",
+  patron: "Patrón de verificación",
 };
 
 /** Pista del criterio esperado según el tipo (solo ayuda de UI). */
@@ -74,6 +78,8 @@ const CRITERIO_HINT: Record<Tipo, string> = {
   estandar: "rango %recup., p. ej. 80-120",
   curva: "umbral R², p. ej. 0.995",
   duplicado: "umbral %CV, p. ej. 10",
+  mrc: "rango %recup., p. ej. 90-110",
+  patron: "rango % del valor, p. ej. 95-105",
 };
 
 function fmt(v: unknown): string {
@@ -88,7 +94,7 @@ const mono = { fontFamily: "'JetBrains Mono', monospace" } as const;
 function metricaDe(c: Control): string {
   return c.tipo === "curva"
     ? `R² ${fmt(c.rCuadrado)}`
-    : c.tipo === "estandar"
+    : c.tipo === "estandar" || c.tipo === "mrc" || c.tipo === "patron"
       ? `${fmt(c.recuperacionPct)}%`
       : c.tipo === "duplicado"
         ? `CV ${fmt(c.cvPct)}%`
@@ -178,6 +184,8 @@ export default function QcPage() {
   const [fObtenido, setFObtenido] = useState("");
   const [fCriterio, setFCriterio] = useState("");
   const [fObs, setFObs] = useState("");
+  const [fRef, setFRef] = useState("");
+  const [configurando, setConfigurando] = useState<Metodo | null>(null);
   const [saving, setSaving] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
 
@@ -235,7 +243,7 @@ export default function QcPage() {
     if (fObtenido.trim() === "" || !esNumero(fObtenido)) {
       v.obtenido = fTipo === "curva" ? "Indique el R² obtenido (número)." : "Indique el valor obtenido (número).";
     }
-    if ((fTipo === "estandar" || fTipo === "duplicado") && (fEsperado.trim() === "" || !esNumero(fEsperado))) {
+    if ((fTipo === "estandar" || fTipo === "duplicado" || fTipo === "mrc" || fTipo === "patron") && (fEsperado.trim() === "" || !esNumero(fEsperado))) {
       v.esperado = "Indique el valor esperado (número).";
     }
     if (fEsperado.trim() !== "" && !esNumero(fEsperado)) v.esperado = "El valor esperado debe ser numérico.";
@@ -255,6 +263,7 @@ export default function QcPage() {
       if (fObtenido.trim() !== "" && Number.isFinite(obt)) body.valorObtenido = obt;
       if (fCriterio.trim() !== "") body.criterio = fCriterio.trim();
       if (fObs.trim() !== "") body.observaciones = fObs.trim();
+      if ((fTipo === "mrc" || fTipo === "patron") && fRef.trim() !== "") body.mrcReferencia = fRef.trim();
 
       const r = await fetch(`${API}/qc/ot/${otId}/control`, {
         method: "POST",
@@ -329,8 +338,8 @@ export default function QcPage() {
 
       <div className="card">
         <div className="field">
-          <label>Orden de Trabajo</label>
-          <select value={otId} onChange={(e) => onSelectOt(e.target.value)}>
+          <label htmlFor="qc-ot">Orden de Trabajo</label>
+          <select id="qc-ot" value={otId} onChange={(e) => onSelectOt(e.target.value)}>
             <option value="">— seleccionar —</option>
             {ots.map((o) => (
               <option key={o.id} value={o.id}>
@@ -383,7 +392,9 @@ export default function QcPage() {
                 <tr>
                   <th>Código</th>
                   <th>Método</th>
+                  <th>Exige</th>
                   <th>Estado QC</th>
+                  {puede("catalogo.gestionar") && <th aria-label="Configurar" />}
                 </tr>
               </thead>
               <tbody>
@@ -391,11 +402,20 @@ export default function QcPage() {
                   <tr key={m.id}>
                     <td style={{ fontFamily: "'JetBrains Mono', monospace" }}>{m.codigo}</td>
                     <td>{m.nombre}</td>
+                    <td style={{ fontSize: 12 }}>
+                      {(m.tiposExigidos ?? []).length ? m.tiposExigidos!.map((t) => TIPO_LABEL[t as Tipo] ?? t).join(", ") : "Un control aprobado de cualquier tipo"}
+                    </td>
                     <td>
                       <span className={`pill ${m.aprobado ? "green" : "gray"}`}>
                         {m.aprobado ? "Aprobado" : "Pendiente"}
                       </span>
+                      {!m.aprobado && (m.tiposFaltantes ?? []).length > 0 && (
+                        <div style={{ fontSize: 11, color: "var(--muted)" }}>Falta: {m.tiposFaltantes!.map((t) => TIPO_LABEL[t as Tipo] ?? t).join(", ")}</div>
+                      )}
                     </td>
+                    {puede("catalogo.gestionar") && (
+                      <td><button className="btn outline sm" onClick={() => setConfigurando(m)}>Tipos y criterios…</button></td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -409,8 +429,8 @@ export default function QcPage() {
           <h2>Registrar control</h2>
           <div className="form-grid cols-2">
             <div className="field">
-              <label>Método</label>
-              <select value={fMetodo} onChange={(e) => setFMetodo(e.target.value)}>
+              <label htmlFor="qc-metodo">Método</label>
+              <select id="qc-metodo" value={fMetodo} onChange={(e) => setFMetodo(e.target.value)}>
                 <option value="">— seleccionar —</option>
                 {metodos.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -421,8 +441,8 @@ export default function QcPage() {
               {errs.metodo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.metodo}</small>}
             </div>
             <div className="field">
-              <label>Tipo de control</label>
-              <select value={fTipo} onChange={(e) => setFTipo(e.target.value as Tipo)}>
+              <label htmlFor="qc-tipo">Tipo de control</label>
+              <select id="qc-tipo" value={fTipo} onChange={(e) => setFTipo(e.target.value as Tipo)}>
                 {(Object.keys(TIPO_LABEL) as Tipo[]).map((t) => (
                   <option key={t} value={t}>
                     {TIPO_LABEL[t]}
@@ -431,8 +451,8 @@ export default function QcPage() {
               </select>
             </div>
             <div className="field">
-              <label>Valor esperado</label>
-              <input
+              <label htmlFor="qc-esperado">Valor esperado</label>
+              <input id="qc-esperado"
                 inputMode="decimal"
                 value={fEsperado}
                 onChange={(e) => setFEsperado(e.target.value)}
@@ -442,8 +462,8 @@ export default function QcPage() {
               {errs.esperado && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.esperado}</small>}
             </div>
             <div className="field">
-              <label>{fTipo === "curva" ? "R² obtenido" : "Valor obtenido"}</label>
-              <input
+              <label htmlFor="qc-obtenido">{fTipo === "curva" ? "R² obtenido" : "Valor obtenido"}</label>
+              <input id="qc-obtenido"
                 inputMode="decimal"
                 value={fObtenido}
                 onChange={(e) => setFObtenido(e.target.value)}
@@ -465,6 +485,17 @@ export default function QcPage() {
               <label>Observaciones</label>
               <input value={fObs} onChange={(e) => setFObs(e.target.value)} placeholder="opcional" />
             </div>
+            {(fTipo === "mrc" || fTipo === "patron") && (
+              <div className="field">
+                <label htmlFor="qc-ref">{fTipo === "mrc" ? "MRC usado (identificación, lote, certificado)" : "Patrón usado"}</label>
+                <input id="qc-ref" value={fRef} maxLength={160} onChange={(e) => setFRef(e.target.value)} />
+              </div>
+            )}
+            {fMetodo && (() => {
+              const m = metodos.find((x) => x.id === fMetodo);
+              const c = m?.criterios?.[fTipo];
+              return c ? <p style={{ gridColumn: "1 / -1", margin: 0, fontSize: 12, color: "var(--muted)" }}>Criterio del método para este tipo: <b>{c}</b> (se aplica si deja «Criterio» vacío).</p> : null;
+            })()}
           </div>
           <div style={{ marginTop: 10 }}>
             <button className="btn primary" onClick={registrar} disabled={saving}>
@@ -472,6 +503,10 @@ export default function QcPage() {
             </button>
           </div>
         </div>
+      )}
+
+      {configurando && (
+        <ConfigQcMetodo metodo={configurando} onCerrar={() => setConfigurando(null)} onGuardado={async () => { setConfigurando(null); await cargar(otId); }} />
       )}
 
       {otId && (
@@ -507,5 +542,70 @@ export default function QcPage() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * QC del método (contrato §4.2.3, EP-01 3.5): tipos de control exigidos y su
+ * criterio de aceptación. Los criterios por ensayo los entrega el IDIC; vacío
+ * = criterio general del sistema.
+ */
+function ConfigQcMetodo({ metodo, onCerrar, onGuardado }: { metodo: Metodo; onCerrar: () => void; onGuardado: () => void }) {
+  const [cfg, setCfg] = useState<{ qcRequerido: boolean; qcTipos: string[]; qcCriterios: Record<string, string>; criteriosPorDefecto: Record<string, string> } | null>(null);
+  const [error, setError] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  useEffect(() => {
+    llamar<any>("GET", `/qc/metodos/${metodo.id}`)
+      .then((c) => setCfg({ qcRequerido: !!c.qcRequerido, qcTipos: c.qcTipos ?? [], qcCriterios: c.qcCriterios ?? {}, criteriosPorDefecto: c.criteriosPorDefecto ?? {} }))
+      .catch((e) => setError(e.message));
+  }, [metodo.id]);
+  async function guardar() {
+    if (!cfg) return;
+    setOcupado(true);
+    setError("");
+    try {
+      await llamar("PUT", `/qc/metodos/${metodo.id}`, { qcRequerido: cfg.qcRequerido, qcTipos: cfg.qcTipos, qcCriterios: cfg.qcCriterios });
+      toast.ok("QC del método guardado.");
+      onGuardado();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
+  return (
+    <Modal titulo={`QC del método ${metodo.codigo}`} onCerrar={onCerrar} ancho={620}
+      acciones={<>
+        <button className="btn outline sm" onClick={onCerrar}>Cancelar</button>
+        <button className="btn primary sm" disabled={!cfg || ocupado} onClick={guardar}>{ocupado ? "Guardando…" : "Guardar QC del método"}</button>
+      </>}>
+      {error && <div className="alert warn" role="alert">{error}</div>}
+      {!cfg ? <p>Cargando…</p> : (
+        <>
+          <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600, margin: "4px 0 10px" }}>
+            <input type="checkbox" style={{ width: "auto" }} checked={cfg.qcRequerido} onChange={(e) => setCfg({ ...cfg, qcRequerido: e.target.checked })} />
+            QC requerido: el informe no se emite sin control de calidad aprobado
+          </label>
+          <table className="data">
+            <thead><tr><th>Exigir</th><th>Tipo de control</th><th>Criterio de aceptación</th></tr></thead>
+            <tbody>
+              {(Object.keys(TIPO_LABEL) as Tipo[]).map((t) => (
+                <tr key={t}>
+                  <td><input type="checkbox" aria-label={`Exigir ${TIPO_LABEL[t]}`} style={{ width: "auto" }} disabled={!cfg.qcRequerido}
+                    checked={cfg.qcTipos.includes(t)} onChange={(e) => setCfg({ ...cfg, qcTipos: e.target.checked ? [...cfg.qcTipos, t] : cfg.qcTipos.filter((x) => x !== t) })} /></td>
+                  <td>{TIPO_LABEL[t]}</td>
+                  <td><input aria-label={`Criterio de ${TIPO_LABEL[t]}`} value={cfg.qcCriterios[t] ?? ""} maxLength={40}
+                    placeholder={cfg.criteriosPorDefecto[t] ? `por defecto ${cfg.criteriosPorDefecto[t]}` : CRITERIO_HINT[t]}
+                    onChange={(e) => setCfg({ ...cfg, qcCriterios: { ...cfg.qcCriterios, [t]: e.target.value } })} style={{ fontFamily: "'JetBrains Mono', monospace" }} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0 0" }}>
+            Sin tipos marcados basta un control aprobado de cualquier tipo. Los criterios por ensayo están por confirmar con el IDIC: vacío = criterio general.
+          </p>
+        </>
+      )}
+    </Modal>
   );
 }

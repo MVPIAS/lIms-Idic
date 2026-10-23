@@ -360,7 +360,7 @@ async function seccionDocumentos(C) {
     }
     await ok(UD.rev, "POST", `/resultados/ot/${ot.id}/revisar`, {});
     await ok(UD.jefe, "POST", `/resultados/ot/${ot.id}/aprobar`, {});
-    const pl = lista(await ok(UD.jefe, "GET", "/plantillas?limit=200"));
+    const pl = [...lista(await ok(UD.jefe, "GET", "/plantillas?limit=100&search=BolAn")), ...lista(await ok(UD.jefe, "GET", "/plantillas?limit=200"))];
     C.plantilla = pl.find((p) => p.repid === "BolAn") ?? pl.find((p) => p.tipo === "BOLETIN" && p.activo !== false);
     afirmar(C.plantilla, "no hay plantilla de boletín");
     return `${ot.codigo} · ${C.m1.codigo}, ${C.m2.codigo} · ${rs.length} resultado(s) aprobados`;

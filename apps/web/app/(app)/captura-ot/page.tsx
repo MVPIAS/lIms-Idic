@@ -183,7 +183,8 @@ const esNumero = (v: any) => typeof v === "number" || (typeof v === "string" && 
 
 /** Texto legible del límite: "inf – sup", "≥ inf", "≤ sup", "= nominal" o "—". */
 function limiteTexto(r: Fila): string {
-  const fmt = (v: any) => (esNumero(v) ? num(Number(String(v).replace(",", ".")), 3) : String(v));
+  // Coma decimal y sin ceros de relleno: «≤ 50» y no «≤ 50,000», que se lee como cincuenta mil.
+  const fmt = (v: any) => (esNumero(v) ? valorNum(Number(String(v).replace(",", "."))) : String(v));
   const vacio = (v: any) => v == null || String(v).trim() === "";
   if (!vacio(r.limiteInf) && !vacio(r.limiteSup)) return `${fmt(r.limiteInf)} – ${fmt(r.limiteSup)}`;
   if (!vacio(r.limiteInf)) return `≥ ${fmt(r.limiteInf)}`;
@@ -855,6 +856,13 @@ export default function CapturaOtPage() {
                                 {puede(f, "reabrir") && f.estado === "aprobado" && (
                                   <button className="btn outline sm" disabled={busy} title="Corregir un resultado ya aprobado (anula el informe en firma u oficial)"
                                     onClick={() => { setReabriendo(reabriendo === f.id ? null : f.id); setMotivoReabrir(""); }}>Reabrir</button>
+                                )}
+                                {/* EP-01/03 4.2, EP-05 6.2 (frente r4d): producto o trabajo no conforme con la OT y el ensayo precargados. */}
+                                {tiene("nc.crear") && (f.otId ?? ot?.id) && ["capturado", "revisado_n1", "aprobado", "devuelto"].includes(f.estado) && (
+                                  <Link className="btn outline sm" title="Registrar un producto o trabajo no conforme (IDIC-PG12) con este ensayo"
+                                    href={`/no-conformidades?nueva=1&clase=PNC&otId=${f.otId ?? ot?.id}&resultadoId=${f.id}&titulo=${encodeURIComponent(`PNC · ${f.analito ?? "ensayo"}`)}` as any}>
+                                    No conforme → PNC
+                                  </Link>
                                 )}
                               </div>
                             </td>

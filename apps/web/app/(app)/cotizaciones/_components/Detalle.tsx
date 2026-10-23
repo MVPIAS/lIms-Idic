@@ -8,6 +8,8 @@
 import Link from "next/link";
 import { money, fecha, fechaDia, rut as fmtRut } from "@/lib/format";
 import { ESTADO_PILL, ESTADO_LABEL, ACEPTACION_LABEL, ORIGEN_LABEL, ESTADOS_VIGENTES, etiquetaDe, fueraDeValidez, type Opcion } from "./comercial";
+import { descargarAdjunto } from "@/lib/d11";
+import { toast } from "@/components/ui/feedback";
 
 export interface Acciones { editar: boolean; aceptar: boolean; anular: boolean; motivoNoAceptar?: string; motivoNoEditar?: string }
 
@@ -130,6 +132,29 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
             <Campo l="Adjunto" v={cot.aceptacionAdjunto} />
             <Campo l="Cobro" v={cot.conCobro ? "Con cobro" : "Sin cobro"} />
           </>
+        )}
+        {cot.solicitud && (cot.solicitud.solicitudMedio || cot.solicitud.solicitanteContacto || cot.solicitud.solicitanteNombre) && (
+          <Campo l="Solicitud del cliente" v={[
+            cot.solicitud.solicitanteContacto ? `${cot.solicitud.solicitanteContacto}${cot.solicitud.solicitanteCargo ? ` (${cot.solicitud.solicitanteCargo})` : ""}` : cot.solicitud.solicitanteNombre,
+            cot.solicitud.solicitudMedio === "oficio" ? `Oficio ${cot.solicitud.solicitudNumero ?? ""}` : cot.solicitud.solicitudMedio === "correo" ? "Correo" : null,
+            cot.solicitud.solicitudFecha ? fechaDia(cot.solicitud.solicitudFecha) : null,
+          ].filter(Boolean).join(" · ")} />
+        )}
+        {cot.solicitud?.oportunidadCodigo && <Campo l="Oportunidad (CRM)" v={cot.solicitud.oportunidadCodigo} />}
+        {(cot.adjuntos ?? []).length > 0 && (
+          <Campo l="Documentos adjuntos" full v={
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {cot.adjuntos.map((a: any) => (
+                <li key={a.id}>
+                  <button type="button" className="btn-link" style={{ background: "none", border: 0, padding: 0, color: "var(--accent)", textDecoration: "underline", cursor: "pointer" }}
+                    onClick={() => descargarAdjunto(`/cotizaciones/${cot.id}/adjuntos/${a.id}`, a.nombre).catch((e) => toast.error(e.message))}>
+                    {a.nombre}
+                  </button>{" "}
+                  <small style={{ color: "var(--muted)" }}>{a.clase === "aceptacion" ? "aceptación" : "solicitud"} · {fecha(a.createdAt)}</small>
+                </li>
+              ))}
+            </ul>
+          } />
         )}
         {cot.ot && <Campo l="OT generada" v={`${cot.ot.codigo} · ${ORIGEN_LABEL[cot.ot.origenTrabajo] ?? cot.ot.origenTrabajo ?? "—"}`} />}
         {cot.estado === "anulada" && (

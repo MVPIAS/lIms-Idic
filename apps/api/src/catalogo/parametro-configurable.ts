@@ -31,14 +31,22 @@
 import { formatearNumeroCotizacion, configNumeracion } from "../cotizacion/numeracion-cotizacion";
 import { CLASES_CUSTODIA, TIPOS_CAMPO, leerCampo, type TipoCampo } from "../recepcion/reglas-recepcion";
 import { leerPorcentaje, valorGuardado } from "./parametro-porcentaje";
-import { AQLS, ETIQUETA_NIVEL, NIVELES } from "../muestreo/nch44";
+import { AQLS, ETIQUETA_NIVEL, NIVELES, textoAql } from "../muestreo/nch44";
+import { DIFUSION_TASA } from "../common/parametros-r4d";
 import { OPCIONES_VARIANTE, esVariante } from "../formularios/variantes";
 // NCh 44 de los formularios especializados (frente r2a): AQL como texto con coma.
-import { AQLS as AQLS_FORM, NIVELES as NIVELES_FORM } from "../formularios/aql";
 import { jsonCampoPrep, normalizarCampoPrep } from "../formularios/preparacion";
 
 /** Columnas de AQL de la tabla 2-A como opciones (se guarda con punto, se muestra con coma). */
 const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: String(a).replace(".", ",") }));
+/*
+ * Las dos familias de parámetros AQL («Muestreo del lote» e «Inspección por
+ * atributos») toman sus opciones de la MISMA tabla (`muestreo/nch44.ts`). Se
+ * guardan con la escritura que ya tenían («2.5» en el muestreo, «2,5» en la
+ * inspección) para no cambiar lo configurado ni lo que leen sus pantallas.
+ */
+const AQLS_FORM: string[] = AQLS.map(textoAql);
+const NIVELES_FORM = NIVELES;
 
 export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
 
@@ -452,6 +460,43 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         ],
         porDefecto: "DSA",
       },
+    },
+  },
+  // --- Comercial, cobro y OT (frente r4d) ---
+  {
+    categoria: "aceptacion_oc",
+    titulo: "Aceptación por orden de compra · discrepancias",
+    donde: "Registrar aceptación de la cotización con O/C: compara el monto de la O/C con el total cotizado (EP-00 4.2).",
+    porConfirmar: "Margen que el DCO acepta sin registrar discrepancia (EP-00 4.2; no consta en DCO-PG01-P01).",
+    codigos: {
+      tolerancia: { tipo: "entero", nombre: "Diferencia que no se considera discrepancia", min: 0, max: 100000000, unidad: "CLP", ayuda: "0 = cualquier diferencia exige registrar la discrepancia o anular la orden del cliente.", porDefecto: "0" },
+    },
+  },
+  {
+    categoria: "cotizacion_lrb",
+    titulo: "Cotización del LRB · unidades de reposición",
+    donde: "Nueva cotización del LRB: el lote cotizado suma estas unidades de reposición (EP-05 0.2).",
+    porConfirmar: "Regla de +4 unidades de reposición del LRB (EP-05 0.2, LRB R02).",
+    codigos: {
+      reposicion: { tipo: "entero", nombre: "Unidades de reposición que se suman al lote", min: 0, max: 50, unidad: "unidades", porDefecto: "4" },
+    },
+  },
+  {
+    categoria: "ot_institucional",
+    titulo: "OT institucional sin cobro",
+    donde: "Registrar OT con origen «Institucional sin cobro» (EP-01/02 0.5).",
+    porConfirmar: "Quién abre la OT institucional y con qué documento (EP-01 §10 P17).",
+    codigos: {
+      exige_oficio: { tipo: "sino", nombre: "Exigir el Nº y la fecha del oficio", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
+  {
+    categoria: "tasa_informe",
+    titulo: "Informe mensual de la tasa 1,5 %",
+    donde: "Internaciones › Tasa 1,5 % mensual › «Emitir informe mensual → difusión» (EP-06 6.23).",
+    porConfirmar: "Destinatarios de la difusión del informe mensual (EP-06 6.23).",
+    codigos: {
+      difusion: { tipo: "multiple", nombre: "Destinatarios de la difusión", opciones: DIFUSION_TASA, porDefecto: "DIRECCION,SUBDIRECCION,BPCH,CONTRALORIA,DFZ" },
     },
   },
   // --- Muestreo y veredicto del lote (frente r2b, T13 y T11) ---

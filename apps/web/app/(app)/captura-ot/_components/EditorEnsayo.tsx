@@ -24,7 +24,7 @@
  * (apps/api/src/laboratorio/captura-estandar.ts).
  */
 import { useMemo, useState } from "react";
-import { fechaHora } from "@/lib/format";
+import { aInputHoraChile, deInputHoraChile, fechaHora } from "@/lib/format";
 import { toast } from "@/components/ui/feedback";
 import { llamar, leerReplicas } from "@/lib/laboratorio";
 
@@ -96,14 +96,9 @@ export interface EquipoCaptura {
   motivo: string | null;
 }
 
-/** Fecha ISO → valor de <input type="datetime-local"> en hora local. */
-const aLocal = (iso?: string | null) => {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-};
+/** Fecha ISO → valor de <input type="datetime-local"> en hora de Chile. */
+/** La fecha y hora del ensayo se escriben y se leen en hora de Chile, no en la del equipo. */
+const aLocal = (iso?: string | null) => aInputHoraChile(iso);
 const numTexto = (v: number | string | null | undefined) => (v === null || v === undefined || v === "" ? "" : String(Number(v)).replace(".", ","));
 const leerNum = (s: string) => (s.trim() === "" ? null : Number(s.trim().replace(",", ".")));
 
@@ -261,7 +256,7 @@ export default function EditorEnsayo({
     const h = leerNum(humedad);
     if ((t !== null && !Number.isFinite(t)) || (h !== null && !Number.isFinite(h))) { toast.error("La temperatura y la humedad deben ser números (coma decimal)."); return; }
     if (equipoId !== (e.equipoId ?? "")) cuerpo.equipoId = equipoId || null;
-    if (fechaEnsayo) cuerpo.fechaEnsayo = new Date(fechaEnsayo).toISOString();
+    if (fechaEnsayo) cuerpo.fechaEnsayo = deInputHoraChile(fechaEnsayo);
     if (t !== null) cuerpo.temperatura = t;
     if (h !== null) cuerpo.humedad = h;
     if (incertidumbre.trim()) cuerpo.incertidumbre = incertidumbre.trim();
@@ -596,7 +591,7 @@ export default function EditorEnsayo({
               <div className="field span-2">
                 <label htmlFor={`fe-${e.id}`}>Fecha y hora del ensayo</label>
                 <input id={`fe-${e.id}`} type="datetime-local" value={fechaEnsayo} onChange={(x) => setFechaEnsayo(x.target.value)} />
-                <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Vacía = ahora.</span>
+                <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Hora de Chile. Vacía = ahora.</span>
               </div>
               <div className="field">
                 <label htmlFor={`te-${e.id}`}>T (°C)</label>

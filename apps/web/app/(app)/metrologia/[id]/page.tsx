@@ -324,6 +324,12 @@ export default function FichaCalibracionPage() {
                 <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("correo")}>Enviar por correo…</button>
               )}
               {a.includes("REEMITIR") && <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("reemitir")}>Reemitir…</button>}
+              {/* EP-04 P6.3 (frente r4d): trabajo no conforme con la calibración precargada. */}
+              {devuelta && puede("nc.crear") && (
+                <Link className="btn outline" href={`/no-conformidades?nueva=1&clase=TNC&calibracionId=${c.id}&titulo=${encodeURIComponent(`TNC · calibración ${c.codigo}`)}` as any}>
+                  Registrar trabajo no conforme
+                </Link>
+              )}
               <button className="btn outline" onClick={verPdf}>{c.estado === "emitida" ? "Certificado (PDF)" : "Borrador (PDF)"}</button>
               {!a.some((x) => ["ENVIAR", "FIRMAR", "EMITIR"].includes(x)) && c.paso_pendiente && (
                 <span className={s.espera}>Esperando a {c.paso_pendiente.rol}{c.paso_pendiente.responsables?.length ? ` (${c.paso_pendiente.responsables.join(" / ")})` : ""}.</span>

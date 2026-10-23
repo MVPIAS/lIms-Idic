@@ -14,7 +14,7 @@
  * h2/h3/h4, p, div, table, img (data URI PNG/JPEG).
  */
 import { escapeHtml } from "./html.util";
-import type { ConfigInforme } from "./config-informe";
+import { seccionCoincide, type ConfigInforme } from "./config-informe";
 import type { EstructuraInforme, FilaInforme, FilaMetodo } from "./filas-informe";
 
 const GUION = "—";
@@ -23,15 +23,23 @@ const celda = (v: string, clase = "") =>
 
 const minMax = (cfg: ConfigInforme) => cfg.columnasRequisito === "min_max";
 
-function cabecera(est: EstructuraInforme, cfg: ConfigInforme): string {
+/** Columnas de una tabla según su sección (tablas del 15-10, EP-03 3.4). */
+interface ColsSeccion { sello: boolean; metodo: boolean }
+const colsDe = (cfg: ConfigInforme, titulos: (string | null | undefined)[]): ColsSeccion => ({
+  sello: seccionCoincide(titulos, cfg.seccionesConSello ?? []),
+  metodo: cfg.columnaMetodo && !seccionCoincide(titulos, cfg.seccionesSinMetodo ?? []),
+});
+
+function cabecera(est: EstructuraInforme, cfg: ConfigInforme, cols: ColsSeccion = { sello: false, metodo: cfg.columnaMetodo }): string {
   const e = cfg.etiquetas;
   const th = (t: string, num = false) => `<th${num ? ' class="num"' : ""}>${escapeHtml(t)}</th>`;
   const cumplimiento = est.modalidad === "cumplimiento";
   return (
     "<thead><tr>" +
     (est.mostrarMuestra ? th(e.muestra) : "") +
+    (cols.sello ? th("Sello N.º") : "") +
     th(e.ensayo) +
-    (cfg.columnaMetodo ? th(e.metodo) : "") +
+    (cols.metodo ? th(e.metodo) : "") +
     (cfg.columnaUnidad ? th(e.unidad) : "") +
     (cumplimiento ? (minMax(cfg) ? th(e.minimo, true) + th(e.maximo, true) : th(e.requisito)) : "") +
     th(e.resultado) +
@@ -41,7 +49,7 @@ function cabecera(est: EstructuraInforme, cfg: ConfigInforme): string {
   );
 }
 
-function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme): string {
+function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme, cols: ColsSeccion = { sello: false, metodo: cfg.columnaMetodo }, conSello = true): string {
   const cumplimiento = est.modalidad === "cumplimiento";
   const requisito = f.requisitoOrigen === "orden" ? `${f.requisito} *` : f.requisito;
   const marca = f.requisitoOrigen === "orden" ? " *" : "";
@@ -55,8 +63,9 @@ function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme): s
   return (
     "<tr>" +
     (est.mostrarMuestra ? celda(f.muestra) : "") +
+    (cols.sello ? (conSello ? celda(f.sello) : "<td></td>") : "") +
     celda(f.ensayo) +
-    (cfg.columnaMetodo ? celda(f.metodo) : "") +
+    (cols.metodo ? celda(f.metodo) : "") +
     (cfg.columnaUnidad ? celda(f.unidad) : "") +
     (cumplimiento ? (minMax(cfg) ? cota(f.minimo) + cota(f.maximo) : celda(requisito)) : "") +
     resultado +
@@ -66,8 +75,11 @@ function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme): s
   );
 }
 
-const tabla = (filas: FilaInforme[], est: EstructuraInforme, cfg: ConfigInforme) =>
-  `<table class="rep">${cabecera(est, cfg)}<tbody>${filas.map((f) => filaHtml(f, est, cfg)).join("")}</tbody></table>`;
+/** Tabla de resultados; el «Sello N.º» se escribe en la primera fila de cada muestra (como en el IVC real). */
+const tabla = (filas: FilaInforme[], est: EstructuraInforme, cfg: ConfigInforme, cols?: ColsSeccion) =>
+  `<table class="rep">${cabecera(est, cfg, cols)}<tbody>${filas
+    .map((f, i) => filaHtml(f, est, cfg, cols, i === 0 || filas[i - 1].muestra !== f.muestra))
+    .join("")}</tbody></table>`;
 
 const conNumero = (n: string | null, t: string) => escapeHtml(n ? `${n} ${t}` : t);
 
@@ -83,7 +95,7 @@ export function bloqueResultados(est: EstructuraInforme, cfg: ConfigInforme): st
     if (s.titulo) html += `<h3>${conNumero(s.numero, s.titulo)}</h3>`;
     for (const c of s.componentes) {
       if (c.titulo) html += `<h4>${conNumero(c.numero, c.titulo)}</h4>`;
-      html += tabla(c.filas, est, cfg);
+      html += tabla(c.filas, est, cfg, colsDe(cfg, [s.titulo, c.titulo]));
     }
     // Agrupado por muestra: el veredicto de la muestra va bajo su tabla.
     const codigo = s.componentes[0]?.filas[0]?.muestra;
@@ -248,6 +260,29 @@ export function bloquePortadaIvc(
   );
 }
 
+/** Fila de la «Verificación del producto terminado» del IVC (EP-03 3.4). */
+export interface ItemDefectuoso {
+  items: string | null;
+  descripcion: string | null;
+  numeracion: string | null;
+}
+
+/**
+ * `{{producto_terminado}}` (solo IVC): N.º de ítems defectuosos · descripción
+ * de los defectos por ítem (con su N.º de registro) · numeración de los
+ * defectos. Sin filas no imprime nada.
+ */
+export function bloqueProductoTerminado(filas: ItemDefectuoso[] | null | undefined, cfg: ConfigInforme): string {
+  const fs = (filas ?? []).filter((f) => [f.items, f.descripcion, f.numeracion].some((x) => x && String(x).trim()));
+  if (!cfg.productoTerminado || !fs.length) return "";
+  return (
+    `<h3>Verificación del producto terminado</h3>` +
+    `<table class="rep"><thead><tr><th>N.º de ítems defectuosos</th><th>Descripción de los defectos verificados por ítem</th><th>Numeración de los defectos por ítem</th></tr></thead><tbody>` +
+    fs.map((f) => `<tr>${celda(f.items ?? "")}${celda(f.descripcion ?? "")}${celda(f.numeracion ?? "")}</tr>`).join("") +
+    `</tbody></table>`
+  );
+}
+
 /** Bloque de firmas de las plantillas (el circuito lo sustituye al presentar). */
 const RE_FIRMAS = /<div class="firmas">/;
 
@@ -261,7 +296,7 @@ const RE_FIRMAS = /<div class="firmas">/;
 export function completarCuerpo(cuerpo: string, cfg: ConfigInforme): string {
   let out = cuerpo;
   const tiene = (t: string) => new RegExp(`\\{\\{\\s*${t}\\s*\\}\\}`).test(out);
-  const finales = ["referencias", "anexo_fotografico", "conclusion"]
+  const finales = [...(cfg.productoTerminado ? ["producto_terminado"] : []), "referencias", "anexo_fotografico", "conclusion"]
     .filter((t) => !tiene(t) && !(t === "conclusion" && tiene("conclusion_texto")))
     .map((t) => `{{${t}}}`);
   // IVC: sección V «Inspección por atributos (AQL)» si la OT la tiene (EP-03 3.7, frente r2a).

@@ -23,6 +23,7 @@ import { usePermisos } from "@/lib/permisos";
  */
 const ORIGENES = [
   { v: "", l: "Alta directa" },
+  { v: "INSTITUCIONAL", l: "Institucional sin cobro (oficio)" },
   { v: "DISPOSICION", l: "Disposición del Director (sin OPI previa)" },
   { v: "INTERLABORATORIO", l: "Interlaboratorio (sin cobro)" },
   { v: "OT_INTERNA", l: "OT interna" },
@@ -78,6 +79,18 @@ export default function NuevaOtPage() {
   const [costo, setCosto] = useState("");
   const [centros, setCentros] = useState<CC[]>([]);
   const interlab = modo === "nueva" && origen === "INTERLABORATORIO";
+  const institucional = modo === "nueva" && origen === "INSTITUCIONAL";
+  // EP-01/02 0.5 (BL-160): oficio y laboratorios que intervienen; EP-00 5.1: clasificación del trabajo.
+  const [oficioNumero, setOficioNumero] = useState("");
+  const [oficioFecha, setOficioFecha] = useState(hoy());
+  const [labsInterv, setLabsInterv] = useState<string[]>([]);
+  const [labsTodos, setLabsTodos] = useState<{ id: string; codigo: string; nombre: string }[]>([]);
+  const [tipoTrabajo, setTipoTrabajo] = useState("");
+  const [nivelTec, setNivelTec] = useState("");
+  const [requiereMuestreo, setRequiereMuestreo] = useState<"" | "si" | "no">("");
+  useEffect(() => {
+    llamar<{ id: string; codigo: string; nombre: string }[]>("GET", "/ot/laboratorios").then(setLabsTodos).catch(() => setLabsTodos([]));
+  }, []);
 
   useEffect(() => {
     // Centros de costo: maestro (/centros-costo) o, si el rol no lo puede leer,
@@ -137,6 +150,7 @@ export default function NuevaOtPage() {
     if (modo === "nueva" && origen === "DISPOSICION" && !disposicionRef.trim()) { setErrMsg("Indica la referencia de la disposición del Director."); return; }
     if (interlab && (!labSolicitante || !labEjecutor)) { setErrMsg("Indica el laboratorio solicitante y el ejecutor."); return; }
     if (interlab && labSolicitante === labEjecutor) { setErrMsg("El laboratorio solicitante y el ejecutor deben ser distintos."); return; }
+    if (institucional && (!oficioNumero.trim() || !oficioFecha)) { setErrMsg("OT institucional: indique el Nº y la fecha del oficio."); return; }
     if (!fechaIngreso || Number.isNaN(new Date(fechaIngreso).getTime())) { setErrMsg("Indica una fecha de ingreso válida."); return; }
     if (lineas.length === 0 && !interlab) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
     if (modo === "nueva" && !labId) { setErrMsg("Elija el laboratorio responsable de la OT: sin él nadie del laboratorio la verá."); return; }
@@ -162,10 +176,16 @@ export default function NuevaOtPage() {
             unidadPrincipalId: labId,
             catElementoIds: pistasLab.elementoIds.length ? pistasLab.elementoIds : undefined,
             catMetodoIds: pistasLab.metodoIds.length ? pistasLab.metodoIds : undefined,
+            ...(tipoTrabajo ? { tipoTrabajo } : {}),
+            ...(nivelTec ? { nivelTecnologico: nivelTec } : {}),
+            ...(requiereMuestreo ? { requiereMuestreo: requiereMuestreo === "si" } : {}),
+            // Alta directa: la casilla «Con cobro» manda (EP-01/02 0.5).
+            ...(!origen ? { conCobro } : {}),
+            ...(institucional ? { oficioNumero: oficioNumero.trim(), oficioFecha, laboratoriosIntervienen: labsInterv.length ? labsInterv : undefined } : {}),
             ...(origen
               ? {
                   origenTrabajo: origen,
-                  conCobro: interlab ? false : conCobro,
+                  conCobro: interlab || institucional ? false : conCobro,
                   ...(origen === "DISPOSICION"
                     ? { disposicionRef: disposicionRef.trim(), disposicionFecha, opiNumero: opiNumero.trim() || undefined }
                     : {}),
@@ -289,6 +309,30 @@ export default function NuevaOtPage() {
                 </p>
               </>
             )}
+            {origen === "" && (
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400 }}>
+                <input type="checkbox" style={{ width: "auto" }} checked={conCobro} onChange={(e) => setConCobro(e.target.checked)} /> Con cobro
+              </label>
+            )}
+            {institucional && (
+              <>
+                <div className="field"><label htmlFor="ot-oficio">Nº de oficio <span className="req">*</span></label><input id="ot-oficio" value={oficioNumero} maxLength={80} onChange={(e) => setOficioNumero(e.target.value)} /></div>
+                <div className="field"><label htmlFor="ot-oficio-f">Fecha del oficio <span className="req">*</span></label><input id="ot-oficio-f" type="date" value={oficioFecha} onChange={(e) => setOficioFecha(e.target.value)} /></div>
+                <fieldset className="field" style={{ gridColumn: "1 / -1", border: 0, padding: 0, margin: 0 }}>
+                  <legend style={{ fontSize: 12, fontWeight: 600 }}>Laboratorios que intervienen</legend>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 14px" }}>
+                    {labsTodos.map((u) => (
+                      <label key={u.id} style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 400 }} title={u.nombre}>
+                        <input type="checkbox" style={{ width: "auto" }} checked={labsInterv.includes(u.id)}
+                          onChange={(e) => setLabsInterv(e.target.checked ? [...labsInterv, u.id] : labsInterv.filter((x) => x !== u.id))} />
+                        {u.codigo}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+                <p className="hint" style={{ margin: 0, gridColumn: "1 / -1" }}>Sin cobro: el valor de los ensayos queda como costo de referencia y la OT se cierra sin factura.</p>
+              </>
+            )}
             {/* Internación: la OT nace al registrar la resolución DGMN (BPCH · Comercial › Internaciones). */}
             {interlab && (
               <>
@@ -363,6 +407,36 @@ export default function NuevaOtPage() {
                 {etsElegibles.map((e) => <option key={e.id} value={e.id}>{e.codigo} v{e.version} · {e.nombre}</option>)}
               </select>
             </div>
+          )}
+          {modo === "nueva" && (
+            <>
+              <div className="field">
+                <label htmlFor="ot-tipo">Tipo de trabajo</label>
+                <select id="ot-tipo" value={tipoTrabajo} onChange={(e) => setTipoTrabajo(e.target.value)}>
+                  <option value="">— sin clasificar —</option>
+                  <option value="ENSAYOS">Ensayos (emite IE)</option>
+                  <option value="ADQUISICIONES">Adquisiciones · lote (emite IVC)</option>
+                  <option value="ASESORIA">Asesoría</option>
+                  <option value="CALIBRACION">Calibración</option>
+                  <option value="CERTIFICACION">Certificación</option>
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="ot-nivel">Nivel tecnológico</label>
+                <select id="ot-nivel" value={nivelTec} onChange={(e) => setNivelTec(e.target.value)}>
+                  <option value="">—</option>
+                  {["AA", "AB", "BA", "BB"].map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div className="field">
+                <label htmlFor="ot-muestreo">¿Requiere muestreo?</label>
+                <select id="ot-muestreo" value={requiereMuestreo} onChange={(e) => setRequiereMuestreo(e.target.value as "" | "si" | "no")}>
+                  <option value="">—</option>
+                  <option value="si">Sí</option>
+                  <option value="no">No</option>
+                </select>
+              </div>
+            </>
           )}
           <div className="field span-3">
             <label>Observaciones</label>

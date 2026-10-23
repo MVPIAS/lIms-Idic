@@ -84,6 +84,8 @@ function InformesContenido() {
   const [modalidad, setModalidad] = useState<Modalidad>("cumplimiento");
   const [conclusion, setConclusion] = useState("");
   const [portada, setPortada] = useState<Portada>({});
+  // IVC (EP-03 3.4): ítems defectuosos del producto terminado.
+  const [defectos, setDefectos] = useState<{ items: string; descripcion: string; numeracion: string }[]>([]);
   const [ensayos, setEnsayos] = useState<EnsayoOt[]>([]);
   const [verFormato, setVerFormato] = useState(false);
   // Qué cubre el documento: toda la OT, una muestra, un producto o un laboratorio.
@@ -146,6 +148,9 @@ function InformesContenido() {
   const datosInforme = () => ({
     conclusion: conclusion.trim() || null,
     ...(propuesta?.formato.portada === "ivc" ? { portada } : {}),
+    ...(propuesta?.formato.productoTerminado
+      ? { productoTerminado: defectos.filter((d) => d.items.trim() || d.descripcion.trim() || d.numeracion.trim()).map((d) => ({ items: d.items.trim() || null, descripcion: d.descripcion.trim() || null, numeracion: d.numeracion.trim() || null })) }
+      : {}),
   });
   const conCobertura = () => (cobertura.cobertura === "ot" ? {} : { cobertura });
   const cuerpo = () => ({ otId, plantillaId, modalidad, datosInforme: datosInforme(), ...(tipoDocumento ? { tipoDocumento } : {}), ...conCobertura() });
@@ -419,6 +424,29 @@ function InformesContenido() {
                 ))}
               </div>
               <small style={{ color: "var(--muted)" }}>Lo vacío se imprime «N/A». El N.º de O/T, su fecha, la fecha de elaboración y el N.º de páginas los pone el sistema.</small>
+            </fieldset>
+          )}
+
+          {propuesta.formato.productoTerminado && (
+            <fieldset style={{ border: 0, padding: 0, margin: "0 0 12px" }}>
+              <legend style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Verificación del producto terminado</legend>
+              {defectos.length > 0 && (
+                <table className="data" style={{ marginBottom: 6 }}>
+                  <thead><tr><th style={{ width: 120 }}>N.º de ítems defectuosos</th><th>Descripción de los defectos por ítem (con N.º de registro)</th><th style={{ width: 160 }}>Numeración de los defectos</th><th aria-label="Quitar" /></tr></thead>
+                  <tbody>
+                    {defectos.map((d, i) => (
+                      <tr key={i}>
+                        <td><input className="celda" aria-label={`Ítems defectuosos ${i + 1}`} value={d.items} maxLength={20} onChange={(e) => { setDefectos(defectos.map((x, j) => (j === i ? { ...x, items: e.target.value } : x))); setPreview(null); }} /></td>
+                        <td><input className="celda" aria-label={`Descripción ${i + 1}`} value={d.descripcion} maxLength={600} onChange={(e) => { setDefectos(defectos.map((x, j) => (j === i ? { ...x, descripcion: e.target.value } : x))); setPreview(null); }} /></td>
+                        <td><input className="celda" aria-label={`Numeración ${i + 1}`} value={d.numeracion} maxLength={60} onChange={(e) => { setDefectos(defectos.map((x, j) => (j === i ? { ...x, numeracion: e.target.value } : x))); setPreview(null); }} /></td>
+                        <td><button type="button" className="btn outline sm" aria-label={`Quitar la fila ${i + 1}`} onClick={() => { setDefectos(defectos.filter((_, j) => j !== i)); setPreview(null); }}>✕</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              <button type="button" className="btn outline sm" onClick={() => setDefectos([...defectos, { items: "", descripcion: "", numeracion: "" }])}>＋ Ítem defectuoso</button>
+              <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>Sin filas, la tabla no se imprime.</small>
             </fieldset>
           )}
 

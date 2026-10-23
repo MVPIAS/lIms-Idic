@@ -23,6 +23,7 @@
  *      PATCH /flujo/muestras/:id/recepcion · /recepcion/… (productos, panel,
  *      Nº interno)
  */
+import DistribucionMuestra from "./DistribucionMuestra";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/ui/feedback";
@@ -154,6 +155,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
 
   // Corrección de la recepción de una muestra
   const [editando, setEditando] = useState<string | null>(null);
+  const [distribuyendo, setDistribuyendo] = useState<string | null>(null);
   const [edicion, setEdicion] = useState<DatosRecepcion>(RECEPCION_VACIA);
   const [productoEdicion, setProductoEdicion] = useState("");
 
@@ -338,6 +340,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
               <button className="btn outline sm" disabled={guardando} onClick={() => asignarNumero()}>Asignar número a todas</button>
             </div>
           )}
+          {distribuyendo && <DistribucionMuestra muestraId={distribuyendo} onCerrar={() => setDistribuyendo(null)} />}
           <div style={{ overflowX: "auto" }}>
             <table className="data">
               <thead>
@@ -451,7 +454,11 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                         <td><span className={`pill ${v.pill}`}>{v.texto}</span></td>
                         <td><span className="pill gray">{m.estado}</span></td>
                         {puedeRegistrar && (
-                          <td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            {/* EP-02 1.3 (frente r4d): porción por laboratorio de destino. */}
+                            {m.ensayos > 0 && (
+                              <button className="btn outline sm" style={{ marginRight: 4 }} onClick={() => setDistribuyendo(m.id)}>Distribuir…</button>
+                            )}
                             <button className="btn outline sm" aria-expanded={editando === m.id}
                               onClick={() => { setEditando(editando === m.id ? null : m.id); setEdicion(datosDe(m)); setProductoEdicion(m.catElementoId ?? ""); setAbierto(false); }}>
                               {editando === m.id ? "Cerrar" : "Recepción…"}

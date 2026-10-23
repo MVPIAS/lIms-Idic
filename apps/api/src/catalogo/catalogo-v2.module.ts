@@ -264,6 +264,8 @@ const CatMetodoBase = z.object({
   // El método exige informar el equipo usado al capturar (contrato §4.4.2;
   // align_recepcion_custodia_equipo_lme.sql). Con calibración vencida se bloquea.
   equipoRequerido: z.boolean().optional(),
+  // Contrato §4.2.3 (frente r4d, BL-167): el método exige control de calidad aprobado antes de emitir.
+  qcRequerido: z.boolean().optional(),
 });
 /** El factor y su operación van juntos (ambos o ninguno): 400 con el motivo, no el 500 del CHECK de la base. */
 const factorCompleto = (d: { factorValor?: number | null; factorOperacion?: string | null }, ctx: z.RefinementCtx) => {

@@ -1,4 +1,7 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards, ParseUUIDPipe, BadRequestException } from "@nestjs/common";
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors, ParseUUIDPipe, BadRequestException } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import type { Response } from "express";
+import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, type ArchivoAdjunto } from "../common/adjuntos";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
@@ -102,12 +105,24 @@ const Cabecera = {
   descuentoPct: z.number().min(0).max(0, "La cotización no admite descuento (decisión Comercial R1).").optional(),
   // La validez es AUTOMÁTICA (IT DCO-PG01-P01-IT02); `validezDias` se ignora.
   validezDias: z.number().int().positive().optional(),
+  // EP-01/02 0.1 (BL-210): solicitante y documento con que el cliente pidió el servicio.
+  solicitud: z
+    .object({
+      solicitanteContactoId: z.string().uuid().nullable().optional(),
+      solicitanteNombre: z.string().trim().max(160).nullable().optional(),
+      solicitudMedio: z.enum(["oficio", "correo"]).nullable().optional(),
+      solicitudNumero: z.string().trim().max(80).nullable().optional(),
+      solicitudFecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD").nullable().optional(),
+    })
+    .optional(),
 };
 
 const CrearCotSchema = z
   .object({
     clienteId: z.string().uuid(),
     ...Cabecera,
+    // EP-00 0.3 (BL-173): cotización creada desde una oportunidad del CRM.
+    oportunidadId: z.string().uuid().optional(),
     fechaEmision: fecha.optional(),
     lineas: z.array(LineaSchema).min(1),
   })
@@ -138,6 +153,17 @@ const AceptarSchema = z.object({
   conCobro: z.boolean().default(true),
   /** Laboratorio responsable de la OT (obligatorio si no se deduce del centro de costo / ensayos). */
   unidadPrincipalId: z.string().uuid().optional(),
+  /** EP-00 4.2: monto de la O/C y discrepancia con la cotización. */
+  montoOc: z.number().nonnegative().optional(),
+  discrepancia: z.string().trim().max(2000).optional(),
+  /** EP-00 4.1: documento de aceptación ya subido como adjunto. */
+  adjuntoId: z.string().uuid().optional(),
+});
+
+const AnularOrdenSchema = z.object({
+  numero: z.string().trim().min(1, "Indique el Nº de la orden del cliente.").max(60),
+  montoOc: z.number().nonnegative().optional(),
+  motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres).").max(2000),
 });
 
 const AnularSchema = z.object({
@@ -295,6 +321,41 @@ export class CotizacionController {
     await this.exigirCotizacion(req, id);
     const doc = AceptarSchema.parse(body ?? {});
     return this.svc.aceptar(id, req?.user?.tenantId, doc, req?.user?.sub);
+  }
+
+  /** «Anular orden del cliente» (EP-00 4.2): la O/C no corresponde; la cotización sigue Abierta. */
+  @Post(":id/anular-orden-cliente")
+  @RequierePermiso(PERMISO_ACEPTAR)
+  async anularOrdenCliente(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    return this.svc.anularOrdenCliente(id, req?.user?.tenantId, AnularOrdenSchema.parse(body ?? {}), req?.user?.sub);
+  }
+
+  /**
+   * Adjunto de la cotización (PDF, PNG o JPEG, máx. 5 MB): «solicitud» (oficio o
+   * correo del cliente) exige cotizacion.crear; «aceptacion» (OPI, O/C, correo…)
+   * exige cotizacion.aceptar. Multipart: archivo + clase.
+   */
+  @Post(":id/adjuntos")
+  @RequierePermiso("cotizacion.ver")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ADJUNTO, files: 1, fields: 2 } }))
+  async adjuntar(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoAdjunto | undefined, @Body() body: any, @Req() req: any) {
+    const clase = String(body?.clase ?? "");
+    const permiso = clase === "aceptacion" ? PERMISO_ACEPTAR : "cotizacion.crear";
+    const permisos: string[] = req?.user?.permisos ?? [];
+    if (!(req?.user?.roles ?? []).includes("SUPERADMIN") && !permisos.includes(permiso))
+      throw new ForbiddenException(`Adjuntar el documento de ${clase === "aceptacion" ? "aceptación" : "solicitud"} exige el permiso «${permiso}».`);
+    await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id, permiso);
+    return this.svc.adjuntar(id, req?.user?.tenantId, clase, archivo, req?.user?.sub);
+  }
+
+  @Get(":id/adjuntos/:adjuntoId")
+  @RequierePermiso("cotizacion.ver")
+  async adjunto(@Param("id", ParseUUIDPipe) id: string, @Param("adjuntoId", ParseUUIDPipe) adjuntoId: string, @Req() req: any, @Res() res: Response) {
+    await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id, "cotizacion.ver");
+    const a = await this.svc.adjunto(id, req?.user?.tenantId, adjuntoId);
+    res.set(cabecerasAdjunto(a));
+    res.end(a.datos);
   }
 
   /** Rechazo de una cotización histórica ('enviada'): mismo permiso que anular. */

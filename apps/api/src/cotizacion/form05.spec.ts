@@ -45,3 +45,20 @@ describe("Formulario de costeo FORM05 (EP-00 2.5)", () => {
     expect(erroresPrograma({ etapas: [{ actividad: "Ensayo", inicio: "2026-11-05", termino: "2026-11-04" }], plazoEntregaDias: 15 })[0]).toMatch(/Ensayo/);
   });
 });
+
+describe("Cotización del DSA · comisión, Programa de Trabajo LEM y reposición LRB (EP-05 0.2, BL-151)", () => {
+  const { exigeCosteo, cantidadConReposicion, erroresPrograma } = require("./form05") as typeof import("./form05");
+  it("la comisión, como el servicio no estandarizado, exige el formulario de costeo", () => {
+    expect(exigeCosteo("comision")).toBe(true);
+    expect(exigeCosteo("no_estandar")).toBe(true);
+    expect(exigeCosteo("estandar")).toBe(false);
+  });
+  it("el lote del LRB se cotiza con las unidades de reposición", () => {
+    expect(cantidadConReposicion(30, 4)).toBe(34);
+    expect(cantidadConReposicion(30, 0)).toBe(30);
+  });
+  it("el Programa de Trabajo valida el número de ítems", () => {
+    expect(erroresPrograma({ etapas: [], plazoEntregaDias: 10, numItems: 0 })).toContain("Programa de trabajo: el número de ítems debe ser un entero de 1 o más.");
+    expect(erroresPrograma({ etapas: [], plazoEntregaDias: 10, numItems: 12, puntosEt: "4.1.1" })).toEqual([]);
+  });
+});

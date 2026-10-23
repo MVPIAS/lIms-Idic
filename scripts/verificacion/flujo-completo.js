@@ -314,6 +314,11 @@ async function main() {
 
   /* ---------------- 2. Cotización */
   await paso("Ventas crea la cotización con plazo de entrega", async () => {
+    // Ficha de costos del ensayo de grumos: sin valor la cotización se bloquea (BL-149); Calidad la completa.
+    {
+      const e = await ok("demo.calidad", "GET", `/cat/ensayos/${C.mGrumos.ensayoId}`);
+      if (!(Number(e.precio) > 0)) await ok("demo.calidad", "PATCH", `/cat/ensayos/${C.mGrumos.ensayoId}`, { precio: 5000 });
+    }
     C.cot = await ok(U.ventas, "POST", "/cotizaciones", {
       clienteId: C.cliente.id,
       formato: "NORMAL",
@@ -322,7 +327,8 @@ async function main() {
       lineas: [
         { catEnsayoId: C.mPh.ensayoId, cantidad: 1 },
         { catEnsayoId: C.mAzufre.ensayoId, cantidad: 1 },
-        { catEnsayoId: C.mGrumos.ensayoId, cantidad: 1, precioUnitario: 5000 },
+        // El precio sale de la ficha (EP-00 2.2, BL-149): la del ensayo de grumos se completa arriba si venía sin valor.
+        { catEnsayoId: C.mGrumos.ensayoId, cantidad: 1 },
       ],
     });
     afirmar(C.cot.estado === "abierta", `estado ${C.cot.estado}`);
@@ -538,7 +544,7 @@ async function main() {
     return "analistaId → 400 · analista sin resultado.revisar → 403 · revisor → 200";
   });
   await paso("No se emite el informe antes de aprobar (409)", async () => {
-    const pl = lista(await ok(U.jefe, "GET", "/plantillas?limit=200"));
+    const pl = [...lista(await ok(U.jefe, "GET", "/plantillas?limit=100&search=BolAn")), ...lista(await ok(U.jefe, "GET", "/plantillas?limit=200"))];
     C.plantilla = pl.find((p) => p.repid === "BolAn") ?? pl.find((p) => p.tipo === "BOLETIN" && p.activo !== false);
     afirmar(C.plantilla, "no hay plantilla de boletín");
     const cond = await ok(U.jefe, "POST", "/informes/condiciones", { otId: C.ot.id, plantillaId: C.plantilla.id });

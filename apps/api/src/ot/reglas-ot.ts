@@ -13,7 +13,7 @@
  * Funciones PURAS (sin BD) → testeables directamente (reglas-ot.spec.ts).
  */
 
-export const ORIGENES_OT = ["COTIZACION", "INTERNACION", "DISPOSICION", "INTERLABORATORIO", "OT_INTERNA"] as const;
+export const ORIGENES_OT = ["COTIZACION", "INTERNACION", "DISPOSICION", "INTERLABORATORIO", "OT_INTERNA", "INSTITUCIONAL"] as const;
 
 /** Por qué «Registrar OT» ya no admite el origen Internación. */
 export const MOTIVO_INTERNACION_PUERTA_UNICA =
@@ -54,6 +54,11 @@ export function origenDesdeAceptacion(tipo?: string | null): OrigenOt {
  * explícitamente con cobro es un error de negocio (devuelve el motivo).
  */
 export function resolverCobro(origen: string | null | undefined, conCobro: boolean | undefined): { conCobro: boolean; error?: string } {
+  // EP-01/02 0.5 (BL-160): la OT institucional es sin cobro; el valor de los ensayos queda como costo de referencia.
+  if (origen === "INSTITUCIONAL") {
+    if (conCobro === true) return { conCobro: false, error: "Una OT institucional es sin cobro." };
+    return { conCobro: false };
+  }
   if (origen === "INTERLABORATORIO") {
     if (conCobro === true) return { conCobro: false, error: "Una OT Interlaboratorio no tiene cobro (se costea por horas)." };
     return { conCobro: false };
@@ -69,6 +74,10 @@ export function validarOrigenOt(d: {
   labSolicitanteCcId?: string | null;
   centroCostoId?: string | null;
   resolucion?: string | null;
+  oficioNumero?: string | null;
+  oficioFecha?: string | null;
+  /** Parámetro ot_institucional.exige_oficio (por defecto sí). */
+  exigeOficio?: boolean;
 }): string[] {
   const errores: string[] = [];
   switch (d.origen) {
@@ -84,6 +93,11 @@ export function validarOrigenOt(d: {
       if (!d.centroCostoId) errores.push("Origen INTERLABORATORIO requiere el laboratorio ejecutor (centroCostoId).");
       if (d.labSolicitanteCcId && d.centroCostoId && d.labSolicitanteCcId === d.centroCostoId)
         errores.push("El laboratorio solicitante y el ejecutor deben ser distintos.");
+      break;
+    case "INSTITUCIONAL":
+      if (d.cotizacionId) errores.push("Una OT institucional sin cobro no nace de una cotización.");
+      if (d.exigeOficio !== false && !d.oficioNumero?.trim()) errores.push("OT institucional: indique el Nº del oficio (oficioNumero).");
+      if (d.exigeOficio !== false && !d.oficioFecha) errores.push("OT institucional: indique la fecha del oficio (oficioFecha).");
       break;
     case "INTERNACION":
       // Puerta única: la OT de internación nace al registrar la resolución DGMN
