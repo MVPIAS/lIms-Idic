@@ -496,6 +496,17 @@ async function main() {
     await exigir(403, U.lqaAnalista, "POST", "/avisos/plazos", {});
     return `${usado}: ${r.vencidas} vencida(s), ${r.porVencer} por vencer, ${r.personas} persona(s) avisadas; analista → 403`;
   });
+
+  /* ------------------------------------------------------------ B-070 */
+  await paso("B-070 · Mi bandeja de la Sección Muestreo: su tarjeta siempre y sin las tarjetas de Comercial", async () => {
+    const b = await ok("demo.muestreo", "GET", "/me/bandeja");
+    const claves = b.map((x) => x.clave);
+    afirmar(claves.includes("muestreos_pendientes"), `tarjetas de Muestreo: ${claves}`);
+    afirmar(!claves.some((c) => c.startsWith("cotizaciones")), `Muestreo ve tarjetas de Comercial: ${claves}`);
+    const v = (await ok(U.ventas, "GET", "/me/bandeja")).map((x) => x.clave);
+    afirmar(v.includes("cotizaciones_por_vencer"), `Comercial perdió sus tarjetas: ${v}`);
+    return `Muestreo: ${claves.join(", ")} · Comercial conserva las suyas`;
+  });
 //PASOS
 }
 

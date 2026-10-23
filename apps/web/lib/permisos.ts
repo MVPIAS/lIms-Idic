@@ -51,9 +51,22 @@ const PERFIL_POR_ROL: Record<string, { etiqueta: string; descripcion: string }> 
   METROLOGO: { etiqueta: "Metrología", descripcion: "Calibra los instrumentos y registra las mediciones de sus órdenes de trabajo." },
 };
 
+const INFO_MUESTREO = {
+  etiqueta: "Sección Muestreo",
+  descripcion: "Toma las muestras en terreno, completa el formulario de muestreo (NCh 43/44) y las entrega al laboratorio.",
+};
+
+/** Rol de la Sección Muestreo sin el de Comercial (B-070). */
+export function esSoloMuestreo(roles: string[] = []): boolean {
+  const rs = roles.map((r) => String(r).toUpperCase());
+  return rs.includes("MUESTREO") && !rs.includes("COMERCIAL");
+}
+
 /** Etiqueta y descripción del perfil, afinada por el rol cuando el perfil es genérico. */
 export function infoPerfil(perfil: Perfil | string, roles: string[] = []): { etiqueta: string; descripcion: string } {
   const base = PERFIL_INFO[perfil as Perfil] ?? { etiqueta: String(perfil), descripcion: "" };
+  // B-070: la Sección Muestreo cae en el perfil COMERCIAL (alcance global) pero no es Comercial.
+  if (perfil === "COMERCIAL" && esSoloMuestreo(roles)) return INFO_MUESTREO;
   if (perfil !== "ANALISTA") return base;
   const rs = roles.map((r) => String(r).toUpperCase());
   if (rs.includes("ANALISTA")) return base;

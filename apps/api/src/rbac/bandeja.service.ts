@@ -658,6 +658,14 @@ export class BandejaService {
             await q.muestreosPendientes(),
           )
         : [];
+    // B-070 (recorrido MP-02 D02-38, MP-03 D03-16): la Sección Muestreo tiene su propia bandeja;
+    // su tarjeta se ve siempre (en 0 cuando no hay nada por completar o entregar).
+    const muestreosSiempre = async (): Promise<ItemBandeja[]> => {
+      const filas = await q.muestreosPendientes();
+      const it = item("muestreos_pendientes", "Muestreos por completar o entregar",
+        "Formularios de muestreo en preparación o entregados al laboratorio sin recibir", filas.length, "/ot?estado=abiertas", "warn");
+      return [filas.length ? { ...it, elementos: filas.slice(0, 5).map((f) => ({ ...f, ruta: `/ot/${f.id}?tab=muestreo` })) } : it];
+    };
     const nc = async () =>
       item("nc_abiertas", "No conformidades abiertas", "NC abiertas, en proceso o en verificación", await q.ncAbiertas(), "/no-conformidades", "warn");
 
@@ -718,6 +726,8 @@ export class BandejaService {
       case "DIRECTOR":
         return all([firmas, porOficializar, vencidas, vencidasPorLab, abiertas, nc, sinOt]);
       case "COMERCIAL":
+        if (rolesVigentes.has("MUESTREO") && !rolesVigentes.has("COMERCIAL"))
+          return all([muestreosSiempre, async () => item("ot_en_curso", "OT en curso", "OT abiertas donde puede tocar un muestreo", await q.otAbiertas(), "/ot?estado=abiertas", "info")]);
         return all([
           async () => item("cotizaciones_por_vencer", "Cotizaciones por vencer", "Cotizaciones abiertas que vencen en los próximos 7 días", await q.cotizacionesPorVencer(), "/cotizaciones?porVencer=1", "warn"),
           sinOt,

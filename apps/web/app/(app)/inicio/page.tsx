@@ -17,7 +17,7 @@ import { useMemo, useState } from "react";
 import { llamar } from "@/lib/laboratorio";
 import { toast } from "@/components/ui/feedback";
 import { useAlcance, describirAlcance, type ItemBandeja } from "@/lib/alcance";
-import { usePermisos, infoPerfil, type Perfil } from "@/lib/permisos";
+import { usePermisos, infoPerfil, esSoloMuestreo, type Perfil } from "@/lib/permisos";
 import { EmptyState, SkeletonCards } from "@/components/ui/PageHeader";
 import AvisosBandeja from "@/components/avisos/AvisosBandeja";
 import { fechaDia } from "@/lib/format";
@@ -106,6 +106,12 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/saec/verificar", titulo: "Verificar certificado", desc: "Comprueba la autenticidad de un certificado", icono: "🔎" },
   ],
 };
+
+/** B-070: accesos de la Sección Muestreo (cae en el perfil COMERCIAL pero no cotiza). */
+const ACCIONES_MUESTREO: Accion[] = [
+  { href: "/ot?estado=abiertas", titulo: "OT por muestrear", desc: "Abra la OT y registre el muestreo en su pestaña «Muestreo»", icono: "🧪", perm: "ot.ver" },
+  { href: "/muestras", titulo: "Muestras", desc: "Muestras entregadas a los laboratorios", icono: "🧫", perm: "muestra.ver" },
+];
 
 /** Accesos genéricos (respaldo): los primeros que el permiso permita. */
 const GENERICAS: Accion[] = [
@@ -230,14 +236,14 @@ export default function InicioPage() {
   const nombre = primerNombre(alcance?.usuario?.nombre ?? usuario.nombre ?? usuario.username);
 
   const acciones = useMemo(() => {
-    const propias = (ACCIONES[perfil] ?? []).filter((a) => puede(a.perm));
+    const propias = (perfil === "COMERCIAL" && esSoloMuestreo(roles) ? ACCIONES_MUESTREO : ACCIONES[perfil] ?? []).filter((a) => puede(a.perm));
     if (propias.length >= 2) return propias;
     // Perfil sin accesos útiles (o desconocido): accesos genéricos por permiso.
     const vistos = new Set(propias.map((a) => a.href));
     const extra = GENERICAS.filter((a) => !vistos.has(a.href) && puede(a.perm));
     return [...propias, ...extra].slice(0, 8);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perfil, listo, puede]);
+  }, [perfil, listo, puede, roles]);
 
   // Pendientes: primero lo urgente, luego lo que tiene cantidad.
   const orden: Record<string, number> = { alta: 0, warn: 1, info: 2 };
