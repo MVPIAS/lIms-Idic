@@ -246,6 +246,9 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
 
   const etiquetaToma = (c: string | null) => d?.opcionesToma.find((o) => o.codigo === c)?.etiqueta ?? c ?? "";
 
+  // B-013: testigo, custodia o contramuestra van a bodega con su retención, sin ensayos.
+  const sinEnsayos = ["testigo", "custodia", "contramuestra"].includes(comun.claseCustodia);
+
   async function guardar() {
     const metodoIds = [...marcados];
     if (filas.some((f) => !f.nombre.trim())) return toast.error("Escriba la descripción de cada muestra recibida.");
@@ -255,7 +258,8 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     const falta = faltantesRecepcion({ ...comun, selloNumero: comun.sellosVerificados ? "por muestra" : "" }, cfg);
     if (comun.sellosVerificados && filas.some((f) => !f.sello.trim())) falta.push("indique el Nº de sello de cada muestra (marcó «sellos verificados»)");
     if (falta.length) return toast.error(`Recepción: ${falta.join("; ")}.`);
-    if (!metodoIds.length) return toast.error("Marque al menos un método.");
+    if (!metodoIds.length && !sinEnsayos)
+      return toast.error("Marque al menos un método, o indique en «Destino» que es testigo, en custodia o contramuestra si va a bodega sin ensayos.");
     setGuardando(true);
     try {
       const r: any = await llamar("POST", `/flujo/ot/${otId}/muestras`, {
@@ -275,11 +279,15 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           toast.error(`Las muestras quedaron recepcionadas, pero no se pudo asignar el Nº interno: ${e.message}`);
         }
       }
-      toast.ok(`Se recepcionaron ${r.muestras.length} muestra(s) con ${r.ensayos} ensayo(s) por analizar.${numeros} Siguiente: asignar y ejecutar.`);
+      toast.ok(
+        r.ensayos
+          ? `Se recepcionaron ${r.muestras.length} muestra(s) con ${r.ensayos} ensayo(s) por analizar.${numeros} Siguiente: asignar y ejecutar.`
+          : `Se recepcionaron ${r.muestras.length} muestra(s) sin ensayos, a bodega con su plazo de retención.${numeros}`,
+      );
       setAbierto(false);
       await cargar();
       onCambio?.();
-      onRecepcionado?.();
+      if (r.ensayos) onRecepcionado?.();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -637,8 +645,8 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           </label>
           <div className="toolbar" style={{ margin: 0 }}>
             <button className="btn outline sm" disabled={guardando} onClick={() => setAbierto(false)}>Cancelar</button>
-            <button className="btn primary sm" disabled={guardando || !marcados.size} onClick={guardar}>
-              {guardando ? "Recepcionando…" : "Recepcionar → asignar y ejecutar"}
+            <button className="btn primary sm" disabled={guardando || (!marcados.size && !sinEnsayos)} onClick={guardar}>
+              {guardando ? "Recepcionando…" : !marcados.size && sinEnsayos ? "Recepcionar → bodega (sin ensayos)" : "Recepcionar → asignar y ejecutar"}
             </button>
           </div>
         </div>

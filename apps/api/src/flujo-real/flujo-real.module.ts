@@ -1696,13 +1696,13 @@ export class RegistroMuestrasService {
     const ot = await this.otEnAlcance(otId, tenantId, req, db);
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
-    const errores = erroresRegistro(ot.estado, body.muestras, catalogo);
     // Recepción de cada muestra (si se envía): toma de muestra, condición, sello,
     // producto, destino y campos propios del laboratorio de la OT.
     const opciones = (await this.opcionesToma(tenantId)).map((o) => o.codigo);
     const cfg = await this.recepcion.configDeUnidad(tenantId, ot.unidadPrincipal, db);
     const recepciones: (RecepcionNormalizada | null)[] = [];
     const labs: (RecepcionLabNormalizada | null)[] = [];
+    const errores: string[] = [];
     for (let i = 0; i < body.muestras.length; i++) {
       const r = body.muestras[i].recepcion;
       if (!r) {
@@ -1717,6 +1717,10 @@ export class RegistroMuestrasService {
       recepciones.push(v.n);
       labs.push(v.lab);
     }
+    // Métodos (un testigo / custodia / contramuestra puede ir sin ensayos: B-013).
+    errores.unshift(
+      ...erroresRegistro(ot.estado, body.muestras.map((m, i) => ({ ...m, claseCustodia: labs[i]?.claseCustodia ?? null })), catalogo),
+    );
     // E.T. propia de la muestra y muestreo de origen (align_r2b_*.sql).
     errores.push(...(await erroresEtYMuestreo(db, tenantId, ot, body.muestras)));
     if (errores.length) throw new BadRequestException(errores.join(" "));
@@ -1749,7 +1753,9 @@ export class RegistroMuestrasService {
           m.etId ?? null,
           m.muestreoId ?? null,
         );
-      const g = await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db);
+      const g = m.metodoIds.length
+        ? await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db)
+        : { creados: 0 };
       creadas.push({
         id: muestra.id,
         codigo: muestra.codigo,
