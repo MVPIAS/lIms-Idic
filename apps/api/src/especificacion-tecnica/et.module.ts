@@ -863,8 +863,8 @@ export class EspecificacionTecnicaService {
         for (const p of d.plan!.inspecciones.sinEnsayo ?? []) {
           const espec = especDePunto(p);
           const n = await tx.$executeRawUnsafe(
-            `INSERT INTO resultado (tenant_id, ot_id, muestra_id, et_punto_id, estado, tipo_dato, requisito, unidad, clase_defecto, espec_origen, replicas, veredicto)
-             SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, 'pendiente', 'atributo', $5, $6, $7, 'orden', '[]'::jsonb, 'pendiente'
+            `INSERT INTO resultado (tenant_id, ot_id, muestra_id, et_punto_id, estado, tipo_dato, requisito, unidad, clase_defecto, espec_origen, espec_fuente, replicas, veredicto)
+             SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, 'pendiente', 'atributo', $5, $6, $7, 'et', $8, '[]'::jsonb, 'pendiente'
               WHERE NOT EXISTS (SELECT 1 FROM resultado r WHERE r.muestra_id = $3::uuid AND r.et_punto_id = $4::uuid AND r.deleted_at IS NULL)`,
             tenantId,
             ot.id,
@@ -873,6 +873,7 @@ export class EspecificacionTecnicaService {
             espec.requisito ?? p.caracteristica ?? null,
             espec.unidad,
             espec.claseDefecto,
+            `E.T. ${d.et!.codigo} v${d.et!.version} · punto ${p.punto}`.slice(0, 240),
           );
           ensayosProducto += Number(n) || 0;
         }
