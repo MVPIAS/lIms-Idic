@@ -11,6 +11,7 @@
 --   B-029 · Entrega del certificado externo validado de Metrología.
 --   B-043 · Valores del certificado del patrón (corrección, U, deriva) para el motor.
 --   B-044 · Motivo y fecha al confirmar o descartar una coincidencia IBIS.
+--   B-077 · Formato «xlsx» en las emisiones del listado oficial de la Codificación Única.
 -- Aditivo e idempotente. Va ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
@@ -190,3 +191,9 @@ UPDATE met_patron
 -- -----------------------------------------------------------------------------
 ALTER TABLE ibis_hit ADD COLUMN IF NOT EXISTS estado_motivo TEXT;
 ALTER TABLE ibis_hit ADD COLUMN IF NOT EXISTS estado_at     TIMESTAMPTZ;
+
+-- -----------------------------------------------------------------------------
+-- B-077 · El listado oficial de la Codificación Única se exporta a .xlsx
+-- -----------------------------------------------------------------------------
+ALTER TABLE bpch_listado_emision DROP CONSTRAINT IF EXISTS bpch_listado_emision_formato_check;
+ALTER TABLE bpch_listado_emision ADD CONSTRAINT bpch_listado_emision_formato_check CHECK (formato IN ('pdf', 'csv', 'xlsx'));

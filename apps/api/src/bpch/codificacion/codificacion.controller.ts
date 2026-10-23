@@ -60,9 +60,9 @@ export class CodificacionController {
 
   @Post("listado-oficial/excel")
   @RequierePermiso("bpch.codificacion.ver")
-  @ApiOperation({ summary: "Exporta el listado oficial a Excel (CSV)" })
+  @ApiOperation({ summary: "Exporta el listado oficial a Excel (.xlsx)" })
   async listadoExcel(@Body() body: unknown, @Req() req: any, @Res() res: any) {
-    const r = await this.svc.listadoOficial(req, body, "csv");
+    const r = await this.svc.listadoOficial(req, body, "xlsx");
     res.set({ "Content-Type": r.tipo, "Content-Disposition": `attachment; filename="${r.nombre}"`, "Cache-Control": "private, no-store" });
     res.send(r.contenido);
   }
