@@ -1,4 +1,5 @@
 import { BadRequestException, Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseUUIDPipe, Post, Put, Req, UseGuards } from "@nestjs/common";
+import { AlcanceResultadoService } from "../../rbac/alcance-resultado.service";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -136,9 +137,11 @@ export class EncargoService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
+    private readonly alcanceResultado?: AlcanceResultadoService,
   ) {}
 
-  private async ot(req: any, otId: string) {
+  /** `lectura`: también el laboratorio que participa en la OT (B-002). */
+  private async ot(req: any, otId: string, lectura = false) {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT o.id, o.codigo, o.estado, o.tenant_id AS "tenantId", o.unidad_principal AS "unidadId", u.codigo AS "unidadCodigo",
               o.origen_trabajo AS origen, o.tipo_trabajo AS "tipoTrabajo", to_char(o.fecha_compromiso, 'YYYY-MM-DD') AS "fechaCompromiso"
@@ -148,7 +151,8 @@ export class EncargoService {
       req?.user?.tenantId,
     );
     if (!f[0]) throw new NotFoundException("OT no encontrada.");
-    await this.alcance.exigirUnidad(req, f[0].unidadId, `la OT ${f[0].codigo}`);
+    if (lectura && this.alcanceResultado) await this.alcanceResultado.alcanceEnOt(req, { id: f[0].id, codigo: f[0].codigo, unidadPrincipal: f[0].unidadId }, "ot.ver");
+    else await this.alcance.exigirUnidad(req, f[0].unidadId, `la OT ${f[0].codigo}`);
     return f[0] as { id: string; codigo: string; estado: string; tenantId: string; unidadId: string | null; unidadCodigo: string | null; origen: string | null; tipoTrabajo: string | null; fechaCompromiso: string | null };
   }
 
@@ -157,7 +161,7 @@ export class EncargoService {
   }
 
   async ver(req: any, otId: string) {
-    const ot = await this.ot(req, otId);
+    const ot = await this.ot(req, otId, true);
     const e = (await this.prisma.$queryRawUnsafe<any[]>(SELECT_ENCARGO, otId))[0] ?? null;
     const labs = e?.laboratorios?.length
       ? await this.prisma.$queryRawUnsafe<any[]>(`SELECT id, codigo, nombre FROM unidad WHERE id = ANY($1::uuid[]) ORDER BY codigo`, e.laboratorios)
