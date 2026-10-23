@@ -11,6 +11,7 @@ import Link from "next/link";
 import { toast } from "@/components/ui/feedback";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import NotificacionDgmn from "@/components/bpch-procesos/NotificacionDgmn";
+import RemitirDco from "@/components/bpch-procesos/RemitirDco";
 import { CONDICION, type ConfigBpch, type Fase, pedir } from "./bpch";
 
 const ICONO: Record<Fase["estado"], string> = { hecho: "✓", en_curso: "•", pendiente: "", no_aplica: "–" };
@@ -199,6 +200,9 @@ export function DocumentosYCierre({
           )}
         </div>
       )}
+
+      {/* EP-06 6.14 / EP-07 7.18: el documento final se remite siempre a DCO (aparte de la tasa). */}
+      <RemitirDco key={[certificado, incumplimiento].map((x: any) => (x ? `${x.id ?? x.numero}:${x.estado}` : "-")).join("|")} otId={ot.id} onCambio={onCambio} />
 
       {incumplimiento && <NotificacionDgmn key={`${incumplimiento.id ?? incumplimiento.numero}:${incumplimiento.estado}`} otId={ot.id} onCambio={onCambio} />}
 

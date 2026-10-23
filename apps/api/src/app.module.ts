@@ -42,6 +42,7 @@ import { ConsumiblesModule } from "./consumibles/consumibles.module";
 import { MensajeriaModule } from "./mensajeria/mensajeria.module";
 import { ReportesModule } from "./reportes/reportes.module";
 import { AvisosModule } from "./avisos/avisos.module";
+import { SeguimientoModule } from "./seguimiento/seguimiento.module";
 import { PasoMetodoModule } from "./catalogo/paso-metodo.module";
 import { DocumentosModule } from "./documentos/documentos.module";
 import { MetrologiaModule } from "./metrologia/metrologia.module";
@@ -120,6 +121,7 @@ function prettyTransport() {
     EncuestaModule,
     ReportesModule,
     AvisosModule,
+    SeguimientoModule,
     PasoMetodoModule,
     DocumentosModule,
     MetrologiaModule,

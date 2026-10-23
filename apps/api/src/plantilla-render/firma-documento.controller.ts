@@ -13,6 +13,12 @@ const Entregar = z.object({
   medio: z.enum(MEDIOS_ENTREGA),
   destinatario: z.string().trim().min(2, "Indique a quién se entregó").max(200),
   observacion: z.string().max(1000).optional(),
+  // EP-05 8.1 (frente r4c): guía, ejemplares, copias, oficio y devolución de muestras.
+  guia: z.string().trim().max(60).optional(),
+  ejemplares: z.coerce.number().int().min(1).max(50).optional(),
+  copias: z.string().trim().max(200).optional(),
+  oficioId: z.string().uuid().optional(),
+  devolucionMuestras: z.boolean().optional(),
 });
 const Correo = z.object({
   destinatarios: z
