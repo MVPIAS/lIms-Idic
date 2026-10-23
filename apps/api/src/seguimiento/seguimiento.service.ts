@@ -68,7 +68,8 @@ export interface RegistroDto {
   copias?: number;
   fecha?: string;
   descripcion?: string;
-  archivo?: { nombre: string; mime: string; datos: string };
+  /** Fichero subido en multipart (campo «archivo»). */
+  archivo?: { nombre: string; mime: string; buffer: Buffer };
 }
 
 export const VISTAS_PENDIENTE = ["por_despachar", "por_recibir", "plazo_por_informar", "recepcion_dco", "por_enviar"] as const;
@@ -88,6 +89,16 @@ export interface FilaPendiente {
   cliente: string | null;
   fecha: string | null;
   detalle: string | null;
+}
+
+/** ¿El contenido es del tipo declarado? PDF «%PDF», PNG, JPEG y los Office abiertos (ZIP «PK»). */
+export function contenidoCoincide(mime: string, b: Buffer): boolean {
+  const ini = (bytes: number[]) => bytes.every((x, i) => b[i] === x);
+  if (mime === "application/pdf") return ini([0x25, 0x50, 0x44, 0x46]);
+  if (mime === "image/png") return ini([0x89, 0x50, 0x4e, 0x47]);
+  if (mime === "image/jpeg") return ini([0xff, 0xd8, 0xff]);
+  if (mime.startsWith("application/vnd.openxmlformats-officedocument.")) return ini([0x50, 0x4b, 0x03, 0x04]);
+  return false;
 }
 
 const MIME_ARCHIVO = ["application/pdf", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
@@ -403,8 +414,10 @@ export class SeguimientoService {
     const o = await this.ot(id, req);
     let archivo: { nombre: string; mime: string; bytes: number; datos: string; hash: string } | null = null;
     if (dto.archivo) {
-      if (!MIME_ARCHIVO.includes(dto.archivo.mime)) throw new BadRequestException("El archivo debe ser PDF, PNG, JPEG, Word o Excel.");
-      const buf = Buffer.from(dto.archivo.datos, "base64");
+      const buf = dto.archivo.buffer;
+      // El tipo se comprueba por su contenido (firma del fichero), no solo por lo que declara el navegador.
+      if (!MIME_ARCHIVO.includes(dto.archivo.mime) || !contenidoCoincide(dto.archivo.mime, buf))
+        throw new BadRequestException("El archivo debe ser PDF, PNG, JPEG, Word (.docx) o Excel (.xlsx).");
       if (!buf.length || buf.length > 5_000_000) throw new BadRequestException("El archivo debe pesar como máximo 5 MB.");
       archivo = { nombre: dto.archivo.nombre.slice(0, 200), mime: dto.archivo.mime, bytes: buf.length, datos: buf.toString("base64"), hash: createHash("sha256").update(buf).digest("hex") };
     }

@@ -17,6 +17,7 @@ import { llamar } from "@/lib/laboratorio";
 import { fechaDia, fechaHora, hoyISO } from "@/lib/format";
 import { toast } from "@/components/ui/feedback";
 import Modal from "./Modal";
+import { subirFormulario } from "@/lib/d11";
 
 const MEDIOS_ENVIO = [
   { valor: "correo", texto: "Correo electrónico (adjunta los PDF)" },
@@ -37,13 +38,6 @@ const CORREO: Record<string, string> = {
   no_aplica: "",
 };
 
-const leerArchivo = (f: File) =>
-  new Promise<{ nombre: string; mime: string; datos: string }>((ok, mal) => {
-    const r = new FileReader();
-    r.onload = () => ok({ nombre: f.name, mime: f.type, datos: String(r.result).split(",")[1] ?? "" });
-    r.onerror = () => mal(new Error("No se pudo leer el archivo."));
-    r.readAsDataURL(f);
-  });
 
 type Dialogo = null | "plazo" | "recepcion" | "registro" | "envio";
 
@@ -285,24 +279,16 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
               <button
                 className="btn primary"
                 disabled={ocupado || !registro.numero.trim()}
-                onClick={async () => {
-                  let archivo: { nombre: string; mime: string; datos: string } | undefined;
-                  if (registro.archivo) {
-                    if (registro.archivo.size > 5_000_000) return toast.error("El archivo debe pesar como máximo 5 MB.");
-                    archivo = await leerArchivo(registro.archivo);
-                  }
-                  enviar(
-                    () =>
-                      llamar("POST", `/ot/${otId}/documentos-registro`, {
-                        tipo: registro.tipo,
-                        numero: registro.numero.trim(),
-                        copias: Number(registro.copias || 0),
-                        ...(registro.fecha ? { fecha: registro.fecha } : {}),
-                        ...(registro.descripcion.trim() ? { descripcion: registro.descripcion.trim() } : {}),
-                        ...(archivo ? { archivo } : {}),
-                      }),
-                    () => "Documento registrado.",
-                  );
+                onClick={() => {
+                  if (registro.archivo && registro.archivo.size > 5_000_000) return toast.error("El archivo debe pesar como máximo 5 MB.");
+                  const f = new FormData();
+                  f.append("tipo", registro.tipo);
+                  f.append("numero", registro.numero.trim());
+                  f.append("copias", String(Number(registro.copias || 0)));
+                  if (registro.fecha) f.append("fecha", registro.fecha);
+                  if (registro.descripcion.trim()) f.append("descripcion", registro.descripcion.trim());
+                  if (registro.archivo) f.append("archivo", registro.archivo, registro.archivo.name);
+                  enviar(() => subirFormulario(`/ot/${otId}/documentos-registro`, f), () => "Documento registrado.");
                 }}
               >
                 Registrar documento
