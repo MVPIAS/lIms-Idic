@@ -29,6 +29,7 @@ import FlujoBpmOt from "./_components/FlujoBpmOt";
 import { EtapasOt, SiguientePasoOt, type AvanceOt } from "@/components/ot/RutaOt";
 import InstrumentosOt from "@/components/metrologia/InstrumentosOt";
 import PreparacionOt from "@/components/formularios/PreparacionOt";
+import RemitirDco from "@/components/bpch-procesos/RemitirDco";
 
 /** Laboratorios de la Sección Metrología: sus OT trabajan con instrumentos, no con muestras (EP-04). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -396,6 +397,8 @@ export default function ExpedientePage() {
             {/* Fecha de compromiso, documentos (firma y entrega) y cierre de la OT. */}
             {tab === "informe" && typeof id === "string" && esMetrologia && <InstrumentosOt otId={id} onCambio={cargarOt} modo="cierre" />}
             {tab === "informe" && typeof id === "string" && <NotificacionDgmn otId={id} onCambio={cargarOt} />}
+            {/* B-018: OT directa o de Producción Nacional del BPCH: el mismo bloque «Remitir a DCO» que el expediente de internación. */}
+            {tab === "informe" && typeof id === "string" && avance?.tipo === "bpch" && <RemitirDco otId={id} onCambio={() => { cargarOt(); cargarAvance(); }} />}
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}
             {/* Plazo al cliente, recepción DCO, documentos no-informe y envío (frente r4c). */}
             {tab === "informe" && typeof id === "string" && <div style={{ marginTop: 16 }}><SeguimientoOt otId={id} onCambio={cargarOt} /></div>}
