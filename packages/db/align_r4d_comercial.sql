@@ -41,6 +41,19 @@ END $$;
 COMMENT ON COLUMN cotizacion.solicitante_contacto_id IS 'Contacto del cliente que solicita (EP-01 0.1); se cita por cargo en los documentos.';
 COMMENT ON COLUMN cotizacion.solicitud_medio IS 'Medio de la solicitud: oficio (Ejército, FF.AA.) o correo (particular). Fija la «Referencia».';
 
+-- Solicitud al laboratorio de tipo «comision» (costeo de una comisión en terreno
+-- o en el extranjero, EP-05 0.2, BL-151).
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_solicitud_costeo_tipo_servicio'
+              AND pg_get_constraintdef(oid) NOT LIKE '%comision%') THEN
+    ALTER TABLE solicitud_costeo DROP CONSTRAINT ck_solicitud_costeo_tipo_servicio;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_solicitud_costeo_tipo_servicio') THEN
+    ALTER TABLE solicitud_costeo ADD CONSTRAINT ck_solicitud_costeo_tipo_servicio
+      CHECK (tipo_servicio IS NULL OR tipo_servicio IN ('estandar', 'no_estandar', 'comision'));
+  END IF;
+END $$;
+
 -- -----------------------------------------------------------------------------
 -- 2 · Oportunidad (CRM)
 -- -----------------------------------------------------------------------------

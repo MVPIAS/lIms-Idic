@@ -334,6 +334,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     });
     return {
       parametros,
+      // EP-05 0.2: unidades de reposición que se suman al lote del LRB (parámetro cotizacion_lrb.reposicion).
+      reposicionLrb: entero((await valoresCategoria(this.prisma, t, "cotizacion_lrb")).reposicion, 4, 0, 50),
       centrosCosto: centros.map((c) => ({
         id: c.id,
         codigo: c.codigo,

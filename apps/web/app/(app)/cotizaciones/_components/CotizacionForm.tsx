@@ -219,6 +219,14 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     [lineas, moneda, dolarNum],
   );
   const cc = cfg?.centrosCosto.find((c) => c.id === centroCostoId);
+  // EP-05 0.2: el lote del LRB se cotiza con unidades de reposición (parámetro cotizacion_lrb.reposicion).
+  const reposicionLrb = Number((cfg as any)?.reposicionLrb ?? 4);
+  const esLrb = (cc?.codigo ?? "").toUpperCase() === "LRB" || (cc?.laboratorio ?? "").toUpperCase() === "LRB";
+  const [reposicionAplicada, setReposicionAplicada] = useState(false);
+  function sumarReposicion() {
+    setLineas((ls) => ls.map((l) => (l.catEnsayoId ? { ...l, cantidad: (Number(l.cantidad) || 0) + reposicionLrb } : l)));
+    setReposicionAplicada(true);
+  }
   const cambiaDolar = modo === "editar" && moneda === "USD" && dolarInicial != null && dolarNum !== dolarInicial;
   const tipoInactivo = !!tipoCliente && !!cfg && !opts("tipo_cliente").some((o) => o.codigo === tipoCliente);
 
@@ -523,6 +531,14 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           </div>
         </div>
         <small style={{ color: "var(--muted)" }}>Los ensayos se valorizan con su ficha de costos; el precio no se escribe a mano. Solo los gastos (viáticos, pasajes, traslados) llevan valor manual.</small>
+        {esLrb && reposicionLrb > 0 && lineas.some((l) => l.catEnsayoId) && (
+          <div className="alert info" style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
+            <span style={{ flex: 1 }}>LRB: el lote se cotiza con <b>{reposicionLrb} unidades de reposición</b> además de las del lote.</span>
+            <button type="button" className="btn outline sm" disabled={reposicionAplicada} onClick={sumarReposicion}>
+              {reposicionAplicada ? "Reposición sumada" : `Sumar ${reposicionLrb} a cada ensayo`}
+            </button>
+          </div>
+        )}
         <table className="data" style={{ marginTop: 10 }}>
           <thead>
             <tr><th>Código</th><th>Ensayo</th><th className="num">Cant.</th><th className="num">P. unitario ({moneda})</th><th className="num">Subtotal</th><th></th></tr>

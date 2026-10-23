@@ -163,13 +163,18 @@ export default function RespuestaLaboratorio({
   onCerrar: () => void;
   onHecho: (msg: string) => void;
 }) {
-  const noEstandar = sol.tipoServicio === "no_estandar";
+  // El costeo es obligatorio en un servicio no estandarizado y en una comisión (EP-05 0.2).
+  const noEstandar = sol.tipoServicio === "no_estandar" || sol.tipoServicio === "comision";
+  const esComision = sol.tipoServicio === "comision";
   const previo = sol.estado === "devuelto" ? sol : null;
   const [respuesta, setRespuesta] = useState<"aceptar" | "aceptar_con_comentario" | "rechazar">("aceptar");
   const [comentario, setComentario] = useState(previo?.comentarioLab ?? "");
   const [plazo, setPlazo] = useState(previo?.programa?.plazoEntregaDias ? String(previo.programa.plazoEntregaDias) : "");
   const [fIni, setFIni] = useState(previo?.programa?.fechaInicio ?? "");
   const [fFin, setFFin] = useState(previo?.programa?.fechaTermino ?? "");
+  // Programa de Trabajo del LEM (EP-05 0.2): puntos de la E.T. a ensayar y nº de ítems.
+  const [puntosEt, setPuntosEt] = useState<string>(previo?.programa?.puntosEt ?? "");
+  const [numItems, setNumItems] = useState<string>(previo?.programa?.numItems ? String(previo.programa.numItems) : "");
   const [etapas, setEtapas] = useState<Fila[]>(
     (previo?.programa?.etapas ?? []).map((e) => ({ actividad: e.actividad, inicio: e.inicio ?? "", termino: e.termino ?? "", recursos: e.recursos ?? "" })),
   );
@@ -227,6 +232,8 @@ export default function RespuestaLaboratorio({
               plazoEntregaDias: Math.round(n(plazo)),
               fechaInicio: fIni || null,
               fechaTermino: fFin || null,
+              puntosEt: puntosEt.trim() || null,
+              numItems: numItems ? Math.round(n(numItems)) : null,
               etapas: etapas.filter((e) => e.actividad.trim()).map((e) => ({ actividad: e.actividad.trim(), inicio: e.inicio || null, termino: e.termino || null, recursos: e.recursos.trim() || null })),
             },
         costeo,
@@ -290,6 +297,14 @@ export default function RespuestaLaboratorio({
               <label htmlFor="r-fin">Fecha de término</label>
               <input id="r-fin" type="date" value={fFin} onChange={(e) => setFFin(e.target.value)} />
             </div>
+            <div className="field" style={{ gridColumn: "span 2" }}>
+              <label htmlFor="r-puntos">Puntos de la E.T. que se ensayan</label>
+              <input id="r-puntos" value={puntosEt} maxLength={2000} onChange={(e) => setPuntosEt(e.target.value)} placeholder="p. ej. 4.1.1, 4.1.3 y 4.2 (Programa de Trabajo del LEM)" />
+            </div>
+            <div className="field">
+              <label htmlFor="r-items">Nº de ítems</label>
+              <input id="r-items" inputMode="numeric" value={numItems} onChange={(e) => setNumItems(e.target.value.replace(/\D/g, ""))} maxLength={5} />
+            </div>
           </div>
           <table className="data" style={{ margin: "8px 0" }}>
             <thead><tr><th>Etapa o actividad</th><th style={{ width: 150 }}>Inicio</th><th style={{ width: 150 }}>Término</th><th>Recursos</th><th style={{ width: 40 }}><span className="sr-only">Quitar</span></th></tr></thead>
@@ -310,7 +325,7 @@ export default function RespuestaLaboratorio({
 
           <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>
             Formulario de costeo <span className="tag">FORM05</span>{" "}
-            {noEstandar ? <span className="req" style={{ fontSize: 12 }}>obligatorio · servicio no estandarizado</span> : <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>opcional · servicio estandarizado</span>}
+            {noEstandar ? <span className="req" style={{ fontSize: 12 }}>obligatorio · {esComision ? "costeo de la comisión" : "servicio no estandarizado"}</span> : <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>opcional · servicio estandarizado</span>}
           </h3>
           {SECCIONES.map((s) => (
             <TablaSeccion key={s.k} sec={s} filas={secciones[s.k] ?? []} onCambio={(f) => setSecciones({ ...secciones, [s.k]: f })} />
