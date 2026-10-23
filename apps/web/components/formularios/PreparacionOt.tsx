@@ -36,11 +36,12 @@ function TrabajoDsa({ otId, onCambio }: { otId: string; onCambio?: () => void })
   const [comentario, setComentario] = useState("");
   const [paso, setPaso] = useState("documentacion");
   const [ocupado, setOcupado] = useState(false);
-  const cargar = useCallback(async () => {
+  // B-039: al subir o quitar un adjunto se recarga la ficha SIN pisar lo escrito y aún no guardado.
+  const cargar = useCallback(async (conservarLoEscrito = false) => {
     try {
       const r = await llamar<any>("GET", `/formularios/ot/${otId}/trabajo`);
       setT(r);
-      setDoc(r.documentacion ?? {});
+      if (!conservarLoEscrito) setDoc(r.documentacion ?? {});
       setError("");
       return r;
     } catch (e: any) {
@@ -137,7 +138,7 @@ function TrabajoDsa({ otId, onCambio }: { otId: string; onCambio?: () => void })
               <li key={a.id}>
                 <button type="button" className="btn outline sm" onClick={() => abrirProtegido(`/formularios/adjuntos/${a.id}`, a.nombre).catch((e) => toast.error(e.message))}>{a.nombre}</button>{" "}
                 <small style={{ color: "var(--muted)" }}>{Math.round(a.bytes / 1024)} KB · {a.subidoPor ?? ""} · {fechaHora(a.createdAt)}</small>
-                {editableDoc && <button type="button" className="btn outline sm" style={{ marginLeft: 6 }} onClick={() => borrar(`/formularios/adjuntos/${a.id}`).then(() => cargar()).catch((e) => toast.error(e.message))}>Quitar</button>}
+                {editableDoc && <button type="button" className="btn outline sm" style={{ marginLeft: 6 }} onClick={() => borrar(`/formularios/adjuntos/${a.id}`).then(() => cargar(true)).catch((e) => toast.error(e.message))}>Quitar</button>}
               </li>
             ))}
           </ul>
@@ -148,7 +149,7 @@ function TrabajoDsa({ otId, onCambio }: { otId: string; onCambio?: () => void })
                 const a = e.target.files?.[0];
                 e.target.value = "";
                 if (!a) return;
-                try { await subirArchivo(`/formularios/ot/${otId}/trabajo/adjuntos`, a); toast.ok("Adjunto guardado."); await cargar(); } catch (err: any) { toast.error(err.message); }
+                try { await subirArchivo(`/formularios/ot/${otId}/trabajo/adjuntos`, a); toast.ok("Adjunto guardado. Lo escrito sigue en el formulario: guárdelo o envíelo."); await cargar(true); } catch (err: any) { toast.error(err.message); }
               }} />
             </label>
           )}
