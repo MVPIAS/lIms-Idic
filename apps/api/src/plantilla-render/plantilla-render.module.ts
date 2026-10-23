@@ -48,7 +48,13 @@ const PortadaSchema = z
   })
   .strict();
 /** Datos propios del documento (certificado.datos_informe). */
-const DatosInformeSchema = z.object({ conclusion: texto(4000), portada: PortadaSchema.nullable().optional() }).strict();
+/** «Verificación del producto terminado» del IVC (EP-03 3.4): una fila por ítem defectuoso. */
+const ProductoTerminadoSchema = z
+  .array(z.object({ items: texto(20), descripcion: texto(600), numeracion: texto(60) }).strict())
+  .max(60);
+const DatosInformeSchema = z
+  .object({ conclusion: texto(4000), portada: PortadaSchema.nullable().optional(), productoTerminado: ProductoTerminadoSchema.nullable().optional() })
+  .strict();
 const OtPlantilla = z.object({ otId: z.string().uuid(), plantillaId: z.string().uuid() });
 const PreviewSchema = OtPlantilla.extend({
   /** cumplimiento (con requisito y veredicto) | solo_resultados. Sin valor: el sugerido. */

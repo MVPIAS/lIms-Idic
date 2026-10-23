@@ -52,6 +52,8 @@ export interface ResultadoParaInforme {
   veredicto?: string | null;
   /** Fecha y hora en que se ejecutó el ensayo (captura con equipo). */
   fechaEnsayo?: Date | string | null;
+  /** Nº de sello de la muestra (columna «Sello Nº» de Dimensiones, EP-03 3.4). */
+  selloNumero?: string | null;
   /** Estructura del informe (resultado_informe). */
   seccion?: string | null;
   componente?: string | null;
@@ -75,6 +77,7 @@ export interface FilaInforme {
   veredictoTexto: string;
   desviacion: string;
   cv: string;
+  sello: string;
 }
 
 export interface ComponenteInforme {
@@ -242,6 +245,7 @@ function fila(r: ResultadoParaInforme, modalidad: Modalidad): FilaInforme {
     veredictoTexto: modalidad === "cumplimiento" ? (v ? etiquetaVeredicto(v) : "Pendiente") : "",
     desviacion: r.desviacion === null || r.desviacion === undefined ? "" : fmtNum(r.desviacion),
     cv: r.cv === null || r.cv === undefined ? "" : fmtNum(r.cv, 2),
+    sello: vacio(r.selloNumero) ? "" : String(r.selloNumero).trim(),
   };
 }
 

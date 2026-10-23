@@ -86,7 +86,15 @@ export interface FormatoInforme {
   unidadEnResultado: boolean;
   columnaMuestra: boolean;
   textoSinCota: string;
+  /** Tablas del 15-10 (EP-03 3.4): secciones con «Sello N.º» y secciones sin columna de método. */
+  seccionesConSello?: string[];
+  seccionesSinMetodo?: string[];
+  /** Tabla «Verificación del producto terminado» (solo IVC). */
+  productoTerminado?: boolean;
 }
+
+/** Fila de la «Verificación del producto terminado» del IVC. */
+export interface ItemDefectuoso { items: string; descripcion: string; numeracion: string }
 
 /** Lo que el servidor propone para el documento (POST /informes/propuesta). */
 export interface Propuesta {
