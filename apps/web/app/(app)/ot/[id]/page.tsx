@@ -1,5 +1,6 @@
 "use client";
 
+import { useCambiosOt } from "@/lib/refresco";
 import DatosEncargoOt from "./_components/DatosEncargoOt";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -122,6 +123,8 @@ export default function ExpedientePage() {
   const cargarHistorial = async () => {
     try { setHistorial(await llamar("GET", `/ot/${id}/historial`)); } catch { setHistorial([]); }
   };
+  // B-041: una acción en cualquier bloque de la OT refresca la cabecera, la ruta y la bitácora.
+  useCambiosOt(typeof id === "string" ? id : null, () => { cargarOt(); cargarHistorial(); });
 
   const cargarMuestras = async () => {
     try {

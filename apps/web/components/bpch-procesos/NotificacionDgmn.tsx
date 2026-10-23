@@ -7,6 +7,7 @@
  * se cierra. La registra la Subdirección BPCH (bpch.dgmn.notificar). Si la OT no
  * tiene incumplimientos, no pinta nada. API: /bpch/notificacion-dgmn/ot/:otId.
  */
+import { avisarCambioOt, useCambiosOt } from "@/lib/refresco";
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "@/components/ui/feedback";
 import { fecha, fechaHora } from "@/lib/format";
@@ -48,6 +49,7 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
   useEffect(() => {
     cargar();
   }, [cargar]);
+  useCambiosOt(otId, cargar);
 
   if (!e?.aplica) return null;
   const pendiente = e.incumplimientos.find((x) => x.oficial && !x.notificacion) ?? null;
@@ -70,6 +72,7 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
       setF({ medio: "", oficioNumero: "", fechaEnvio: "", copia: "", observaciones: "" });
       toast.ok("Notificación a DGMN registrada. La OT ya puede cerrarse.");
       onCambio?.();
+      avisarCambioOt(otId);
     } catch (x: any) {
       toast.error(x.message);
     } finally {

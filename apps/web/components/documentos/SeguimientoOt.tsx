@@ -11,6 +11,7 @@
  *      factura (por correo adjunta los PDF). «Registrar envío».
  * API: GET /ot/:id/seguimiento, POST notificar-plazo, recepcion-informe-dco, documentos-registro, envios.
  */
+import { avisarCambioOt, useCambiosOt } from "@/lib/refresco";
 import { textoMedio } from "@/lib/etiquetas";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -67,6 +68,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
   useEffect(() => {
     cargar();
   }, [cargar]);
+  useCambiosOt(otId, cargar);
 
   async function enviar(fn: () => Promise<any>, ok: (r: any) => string) {
     setOcupado(true);
@@ -77,6 +79,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
       setD(r);
       setDialogo(null);
       onCambio?.();
+      avisarCambioOt(otId);
     } catch (e: any) {
       toast.error(e.message);
     } finally {
