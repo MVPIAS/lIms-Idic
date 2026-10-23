@@ -111,6 +111,16 @@ describe("numeración oficial · qué regla se aplica", () => {
     expect(elegirRegla(reglas, ["LQC", "SQU"], "INFORME_ENSAYO")).toBeNull();
   });
 
+  it("B-003: el oficio no hereda la regla «todos los tipos» del laboratorio (serie propia)", () => {
+    const conOficio = [...reglas, regla({ id: "general-oficio", tipoDocumento: "OFICIO" })];
+    expect(elegirRegla(conOficio, ["LRB", "DSA"], "OFICIO")?.id).toBe("general-oficio");
+    expect(elegirRegla(reglas, ["LRB", "DSA"], "OFICIO")).toBeNull();
+    const lrbOficio = [...conOficio, regla({ id: "lrb-oficio", unidadId: "LRB", tipoDocumento: "OFICIO" })];
+    expect(elegirRegla(lrbOficio, ["LRB", "DSA"], "OFICIO")?.id).toBe("lrb-oficio");
+    // Los informes del LRB siguen con su regla «todos los tipos».
+    expect(elegirRegla(conOficio, ["LRB", "DSA"], "INFORME_RECHAZO")?.id).toBe("lrb-todos");
+  });
+
   it("una regla desactivada no se aplica", () => {
     expect(elegirRegla(reglas, ["LPN", "SQU"], "INFORME_ENSAYO")).toBeNull();
   });

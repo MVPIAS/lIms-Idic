@@ -304,7 +304,16 @@ export class OficioService {
         const r = await this.numeracion.reservar(
           tx,
           { tenantId: o.tenant_id, unidadId: o.unidad_id, tipo: "OFICIO", fecha: new Date(), ot: o.ot_codigo ?? null },
-          async (n) => (await tx.$queryRawUnsafe<any[]>(`SELECT 1 FROM oficio WHERE tenant_id = $1::uuid AND numero = $2`, o.tenant_id, n)).length > 0,
+          // B-003: el número no puede repetir el de otro oficio ni el de un documento emitido.
+          async (n) =>
+            (
+              await tx.$queryRawUnsafe<any[]>(
+                `SELECT 1 FROM oficio WHERE tenant_id = $1::uuid AND numero = $2
+                 UNION ALL SELECT 1 FROM certificado WHERE tenant_id = $1::uuid AND (numero = $2 OR codigo = $2) LIMIT 1`,
+                o.tenant_id,
+                n,
+              )
+            ).length > 0,
         );
         if (!r.numero) throw new ConflictException("No hay numeración para los oficios de esta unidad: configúrela en Administración › Numeración de documentos (tipo OFICIO).");
         numero = r.numero;
