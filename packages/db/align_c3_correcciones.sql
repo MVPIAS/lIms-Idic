@@ -127,3 +127,22 @@ DROP TRIGGER IF EXISTS trg_resultado_veredicto_decidido ON resultado;
 CREATE TRIGGER trg_resultado_veredicto_decidido
   BEFORE UPDATE OF veredicto ON resultado
   FOR EACH ROW EXECUTE FUNCTION fn_resultado_veredicto_decidido();
+
+-- -----------------------------------------------------------------------------
+-- B-038 · Contacto principal de la ficha del cliente → Contactos.
+--   Los clientes con «Contacto principal» en la ficha y sin un contacto de ese
+--   nombre lo reciben en Contactos, como principal si el cliente no tenía otro.
+--   NOT EXISTS: idempotente.
+-- -----------------------------------------------------------------------------
+INSERT INTO contacto (cliente_id, nombre, cargo, email, telefono, principal, es_principal, activo)
+SELECT cl.id, LEFT(trim(cl.contacto_nombre), 160), NULLIF(cl.contacto_cargo, ''), NULLIF(cl.contacto_email, '')::citext,
+       NULLIF(cl.contacto_telefono, ''), pr.sin_principal, pr.sin_principal, true
+  FROM cliente cl
+ CROSS JOIN LATERAL (
+       SELECT NOT EXISTS (SELECT 1 FROM contacto x WHERE x.cliente_id = cl.id AND x.deleted_at IS NULL
+                           AND (COALESCE(x.principal, false) OR COALESCE(x.es_principal, false))) AS sin_principal) pr
+ WHERE cl.deleted_at IS NULL
+   AND COALESCE(trim(cl.contacto_nombre), '') <> ''
+   AND NOT EXISTS (SELECT 1 FROM contacto x
+                    WHERE x.cliente_id = cl.id AND x.deleted_at IS NULL
+                      AND lower(trim(x.nombre)) = lower(trim(cl.contacto_nombre)));

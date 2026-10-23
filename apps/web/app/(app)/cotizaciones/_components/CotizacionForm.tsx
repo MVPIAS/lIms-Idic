@@ -123,7 +123,15 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   // Contactos del cliente para elegir al solicitante.
   useEffect(() => {
     if (!cliente?.id) { setContactos([]); return; }
-    pedir<Contacto[]>("GET", `/clientes/${cliente.id}/contactos`).then(setContactos).catch(() => setContactos([]));
+    pedir<Contacto[]>("GET", `/clientes/${cliente.id}/contactos`)
+      .then((cs) => {
+        setContactos(cs);
+        // B-038: sin solicitante elegido, se propone el contacto principal del cliente.
+        const principal = cs.find((c) => c.principal);
+        if (principal) setSolContactoId((actual) => (actual || solNombre.trim() ? actual : principal.id));
+      })
+      .catch(() => setContactos([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cliente?.id]);
 
   /** Referencia sugerida por el documento de solicitud (EP-00 1.1): «OF Nº …» o «Correo de fecha …». */

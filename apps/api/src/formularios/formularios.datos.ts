@@ -73,8 +73,8 @@ export class FormulariosDatos {
   async ot(otId: string, tenantId: string): Promise<OtFormulario> {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT o.id, o.codigo, o.estado, o.tenant_id AS "tenantId", o.unidad_principal AS "unidadPrincipal", u.codigo AS laboratorio,
-              c.razon_social AS cliente, to_char(COALESCE(o.fecha_recepcion, o.created_at::date), 'YYYY-MM-DD') AS "fechaOt",
-              COALESCE(NULLIF(o.solicitante, ''), (SELECT ct.nombre FROM contacto ct WHERE ct.cliente_id = o.cliente_id AND ct.deleted_at IS NULL ORDER BY ct.principal DESC NULLS LAST, ct.created_at LIMIT 1)) AS atencion
+              c.razon_social AS cliente, to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS "fechaOt",
+              COALESCE(NULLIF(o.solicitante, ''), NULLIF(c.contacto_nombre, ''), (SELECT ct.nombre FROM contacto ct WHERE ct.cliente_id = o.cliente_id AND ct.deleted_at IS NULL ORDER BY ct.principal DESC NULLS LAST, ct.created_at LIMIT 1)) AS atencion
          FROM orden_trabajo o
          LEFT JOIN unidad u ON u.id = o.unidad_principal
          LEFT JOIN cliente c ON c.id = o.cliente_id

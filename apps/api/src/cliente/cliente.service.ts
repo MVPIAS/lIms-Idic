@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { contactoPrincipalDesdeFicha } from "./contacto-principal";
 import { PrismaClient } from "@prisma/client";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { validarTipoCliente, type OpcionTipoCliente } from "./tipo-cliente";
@@ -93,12 +94,15 @@ export class ClienteService {
     // tenantId sale del JWT; se ignora cualquier tenantId del body.
     const { tenantId: _ignore, ...rest } = data ?? {};
     await this.exigirTipo(rest.tipo ?? null, tenantId ?? DEV_TENANT);
-    return this.prisma.cliente.create({
+    const cliente = await this.prisma.cliente.create({
       data: {
         ...rest,
         tenantId: tenantId ?? DEV_TENANT,
       },
     });
+    // B-038: el contacto principal de la ficha aparece en Contactos.
+    await contactoPrincipalDesdeFicha(this.prisma, cliente.id);
+    return cliente;
   }
 
   async actualizar(id: string, data: any, tenantId?: string) {
@@ -107,10 +111,13 @@ export class ClienteService {
     // Un cliente con tipo antiguo (pre-R2) se puede editar sin reclasificarlo;
     // si se cambia el tipo, el nuevo debe estar vigente.
     await this.exigirTipo(rest.tipo, actual.tenantId, actual.tipo);
-    return this.prisma.cliente.update({
+    const cliente = await this.prisma.cliente.update({
       where: { id },
       data: rest,
     });
+    if (["contactoNombre", "contactoCargo", "contactoEmail", "contactoTelefono"].some((k) => k in rest))
+      await contactoPrincipalDesdeFicha(this.prisma, id);
+    return cliente;
   }
 
   async bloquear(id: string, motivo: string, tenantId?: string) {
