@@ -351,8 +351,13 @@ export class MetrologiaOtService {
     await this.exigir(req, "registrar", ot);
     if (!ot.cotizacionId) throw new BadRequestException(`La OT ${ot.codigo} no viene de una cotización.`);
     // EP-04 P3.2 (BL-033): el servicio del catálogo (código EN) trae su IT; se hereda si es un proceso del laboratorio de la OT.
-    const lineas = await this.prisma.$queryRawUnsafe<{ id: string; descripcion: string | null; cantidad: number; ensayo_codigo: string | null; proceso: string | null }[]>(
-      `SELECT l.id, l.descripcion, l.cantidad, l.ensayo_codigo, p.codigo AS proceso
+    const lineas = await this.prisma.$queryRawUnsafe<{
+      id: string; descripcion: string | null; cantidad: number; ensayo_codigo: string | null; proceso: string | null;
+      instrumento: string | null; marca: string | null; modelo: string | null; rango: string | null; puntos: string | null; sentido: string | null;
+    }[]>(
+      `SELECT l.id, l.descripcion, l.cantidad, l.ensayo_codigo, p.codigo AS proceso,
+              l.instrumento, l.instrumento_marca AS marca, l.instrumento_modelo AS modelo, l.instrumento_rango AS rango,
+              l.instrumento_puntos AS puntos, l.instrumento_sentido AS sentido
          FROM linea_cotizacion l
          LEFT JOIN cat_ensayo e ON e.id = l.cat_ensayo_id
          LEFT JOIN met_proceso p ON p.codigo = e.instruccion_trabajo AND p.activo AND (p.laboratorio IS NULL OR p.laboratorio = $2)
@@ -369,9 +374,12 @@ export class MetrologiaOtService {
         for (let k = 0; k < cuantos; k++) {
           n += 1; total += 1;
           await tx.$executeRawUnsafe(
-            `INSERT INTO met_ot_instrumento (tenant_id, ot_id, numero, descripcion, linea_cotizacion_id, proceso_codigo, created_by)
-             VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7::uuid)`,
-            ot.tenantId, otId, n, (l.descripcion || l.ensayo_codigo || "Instrumento").slice(0, 300), l.id, l.proceso ?? null, req?.user?.sub ?? null);
+            `INSERT INTO met_ot_instrumento (tenant_id, ot_id, numero, descripcion, linea_cotizacion_id, proceso_codigo, created_by,
+                                             marca, modelo, rango, puntos, sentido)
+             VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7::uuid, $8, $9, $10, $11, $12)`,
+            // B-045: el ítem hereda el instrumento de la línea (no el texto del servicio).
+            ot.tenantId, otId, n, (l.instrumento || l.descripcion || l.ensayo_codigo || "Instrumento").slice(0, 300), l.id, l.proceso ?? null, req?.user?.sub ?? null,
+            l.marca, l.modelo, l.rango, l.puntos, l.sentido);
         }
       }
       return total;

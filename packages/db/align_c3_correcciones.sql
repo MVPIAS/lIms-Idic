@@ -160,3 +160,16 @@ DO $$ BEGIN
 END $$;
 COMMENT ON COLUMN muestra_custodia.porcion IS
   'Qué porción mueve el eslabón: la muestra (NULL o «muestra») o el excedente del lote («excedente»), que se devuelve sin disponer de la muestra ni de la contramuestra.';
+
+-- -----------------------------------------------------------------------------
+-- B-045 · Línea de cotización de Metrología con los datos del instrumento
+--   (EP-04 P0.1–P0.2): el ítem de la OT los hereda al «Cargar desde la cotización».
+-- -----------------------------------------------------------------------------
+ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS instrumento varchar(300);
+ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS instrumento_marca varchar(120);
+ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS instrumento_modelo varchar(120);
+ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS instrumento_rango varchar(160);
+ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS instrumento_puntos varchar(500);
+ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS instrumento_sentido varchar(5);
+COMMENT ON COLUMN linea_cotizacion.instrumento IS 'Metrología: instrumento a calibrar de la línea (lo hereda el ítem de la OT).';
+COMMENT ON COLUMN linea_cotizacion.instrumento_sentido IS 'Metrología (LNF): sentido solicitado T (tracción), C (compresión) o T+C, como met_ot_instrumento.sentido.';
