@@ -20,11 +20,17 @@ import { toast } from "@/components/ui/feedback";
 import { clp, fechaHora, num, pct } from "@/lib/format";
 import { llamar, qs } from "@/lib/laboratorio";
 
-type Categoria = "horas_hombre" | "reactivos" | "equipos" | "otros";
+type Categoria = "horas_hombre" | "reactivos" | "equipos" | "otros" | "ot_interna" | "comision";
 interface Linea {
   categoria: Categoria; cargo?: string | null; consumibleId?: string | null; equipoId?: string | null;
   descripcion?: string | null; cantidad: number; unidad?: string | null; costoUnitario: number;
+  /** OT interna valorizada (EP-00 7.1) y tipo de gasto de comisión (EP-05 9.1). */
+  ordenInternaId?: string | null; tipoGasto?: string | null;
 }
+const GASTOS_COMISION: [string, string][] = [
+  ["viatico", "Viático"], ["pasaje", "Pasaje"], ["traslado", "Traslado"], ["arriendo", "Arriendo de vehículo"],
+  ["combustible", "Combustible"], ["rendicion", "Rendición de cuentas"], ["otro", "Otro gasto"],
+];
 /** Línea en edición: los números como texto (coma decimal). */
 interface Fila extends Omit<Linea, "cantidad" | "costoUnitario"> { clave: string; cantidad: string; costoUnitario: string }
 interface Vista {
@@ -41,7 +47,7 @@ interface Vista {
   estimacion: { costoDirecto: number | null; fuenteCosto: string | null; horasHombre: number | null; fuenteHoras: string | null; cotizadoPorCategoria: Record<Categoria, number>; neto: number | null; alcance?: "ot" | "laboratorio" | "sin_estimacion_laboratorio"; aviso?: string | null };
   comparacion: { costoReal: number; costoEstimado: number | null; diferencia: number | null; desviacionPct: number | null; horasReales: number; horasEstimadas: number | null; diferenciaHoras: number | null; margen: number | null };
   cargos: { codigo: string; etiqueta: string }[];
-  sugerencias: { equipos: { id: string; codigo: string; nombre: string }[]; consumos: { id: string; codigo: string; nombre: string; unidad: string | null; cantidad: number }[] };
+  sugerencias: { equipos: { id: string; codigo: string; nombre: string }[]; consumos: { id: string; codigo: string; nombre: string; unidad: string | null; cantidad: number }[]; lineas?: Linea[] };
   resultadosSinAprobar: number;
   puedeGestionar: boolean;
   erroresCierre: string[];
@@ -52,6 +58,8 @@ const BLOQUES: { k: Categoria; titulo: string; cantidad: string; unitario: strin
   { k: "reactivos", titulo: "Reactivos y consumibles", cantidad: "Cantidad", unitario: "$ / unidad", ayuda: "Insumos usados en los ensayos de la OT (p. ej. acetileno, HCl, lámparas, Titrisol)." },
   { k: "equipos", titulo: "Equipos (horas máquina)", cantidad: "Horas", unitario: "$ / hora", ayuda: "Horas de uso de cada equipo con su tarifa estándar." },
   { k: "otros", titulo: "Otros", cantidad: "Cantidad", unitario: "$ unitario", ayuda: "Traslados, servicios externos u otros gastos directos." },
+  { k: "ot_interna", titulo: "OT internas valorizadas", cantidad: "Cantidad", unitario: "Costo directo", ayuda: "Órdenes internas que otros laboratorios respondieron para esta OT, con su costo directo (EP-00 7.1)." },
+  { k: "comision", titulo: "Gastos de comisión", cantidad: "Cantidad", unitario: "$ unitario", ayuda: "Comisión en terreno o en el extranjero: viáticos, pasajes, traslados, arriendo, combustible y rendición (EP-05 9.1)." },
 ];
 const FUENTE_COSTO: Record<string, string> = {
   costeo_consolidado: "costeo consolidado de la cotización",
@@ -116,12 +124,12 @@ export default function CostosRealesPage() {
   const agregar = (f: Fila) => { setFilas((fs) => [...fs, f]); setSucio(true); };
 
   const totales = useMemo(() => {
-    const t: Record<Categoria, number> = { horas_hombre: 0, reactivos: 0, equipos: 0, otros: 0 };
+    const t: Record<Categoria, number> = { horas_hombre: 0, reactivos: 0, equipos: 0, otros: 0, ot_interna: 0, comision: 0 };
     for (const f of filas) {
       const c = aNum(f.cantidad), u = aNum(f.costoUnitario);
       if (Number.isFinite(c) && Number.isFinite(u)) t[f.categoria] += Math.round(c * u * 100) / 100;
     }
-    return { ...t, total: t.horas_hombre + t.reactivos + t.equipos + t.otros };
+    return { ...t, total: t.horas_hombre + t.reactivos + t.equipos + t.otros + t.ot_interna + t.comision };
   }, [filas]);
 
   async function guardar() {
@@ -137,6 +145,8 @@ export default function CostosRealesPage() {
           cargo: f.categoria === "horas_hombre" ? f.cargo || null : null,
           consumibleId: f.categoria === "reactivos" ? f.consumibleId ?? null : null,
           equipoId: f.categoria === "equipos" ? f.equipoId ?? null : null,
+          ordenInternaId: f.categoria === "ot_interna" ? f.ordenInternaId ?? null : null,
+          tipoGasto: f.categoria === "comision" ? f.tipoGasto ?? null : null,
           descripcion: f.descripcion?.trim() || null,
           cantidad: aNum(f.cantidad),
           unidad: f.unidad?.trim() || null,
@@ -240,7 +250,8 @@ export default function CostosRealesPage() {
 
           {BLOQUES.map((b) => {
             const propias = filas.filter((f) => f.categoria === b.k);
-            const cotizado = v.estimacion.cotizadoPorCategoria[b.k];
+            const cotizado = v.estimacion.cotizadoPorCategoria[b.k] ?? 0;
+            const sugeridas = (v.sugerencias.lineas ?? []).filter((x) => x.categoria === b.k && !(x.ordenInternaId && filas.some((f) => f.ordenInternaId === x.ordenInternaId)));
             return (
               <div className="card" key={b.k}>
                 <h2>
@@ -256,6 +267,7 @@ export default function CostosRealesPage() {
                       <thead>
                         <tr>
                           {b.k === "horas_hombre" && <th>Cargo</th>}
+                          {b.k === "comision" && <th>Gasto</th>}
                           <th>{b.k === "horas_hombre" ? "Detalle (opcional)" : b.k === "reactivos" ? "Reactivo o consumible" : b.k === "equipos" ? "Equipo" : "Descripción"}</th>
                           <th className="num">{b.cantidad}</th>
                           {b.k !== "horas_hombre" && b.k !== "equipos" && <th>Unidad</th>}
@@ -277,6 +289,16 @@ export default function CostosRealesPage() {
                                       {v.cargos.map((x) => <option key={x.codigo} value={x.codigo}>{x.etiqueta}</option>)}
                                     </select>
                                   ) : v.cargos.find((x) => x.codigo === f.cargo)?.etiqueta ?? f.cargo ?? "—"}
+                                </td>
+                              )}
+                              {b.k === "comision" && (
+                                <td>
+                                  {editable ? (
+                                    <select aria-label="Tipo de gasto" value={f.tipoGasto ?? ""} onChange={(e) => cambiar(f.clave, { tipoGasto: e.target.value || null })}>
+                                      <option value="">Elija el gasto…</option>
+                                      {GASTOS_COMISION.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
+                                    </select>
+                                  ) : GASTOS_COMISION.find(([c]) => c === f.tipoGasto)?.[1] ?? "—"}
                                 </td>
                               )}
                               <td>{editable ? <input aria-label="Descripción" value={f.descripcion ?? ""} maxLength={300} onChange={(e) => cambiar(f.clave, { descripcion: e.target.value })} /> : f.descripcion || "—"}</td>
@@ -311,6 +333,13 @@ export default function CostosRealesPage() {
                         ＋ {x.nombre} ({num(x.cantidad, 2)} {x.unidad ?? ""})
                       </button>
                     ))}
+                    {(b.k === "ot_interna" || b.k === "comision") && sugeridas.length > 0 && (
+                      <button className="btn outline sm"
+                        title={b.k === "ot_interna" ? "Órdenes internas respondidas con su costo directo" : "Gastos estimados por el laboratorio en el costeo de la cotización"}
+                        onClick={() => { for (const x of sugeridas) agregar({ ...filaVacia(b.k), ...x, clave: clave(), descripcion: x.descripcion ?? "", unidad: x.unidad ?? "", cantidad: aTexto(x.cantidad), costoUnitario: aTexto(x.costoUnitario) }); }}>
+                        ＋ {b.k === "ot_interna" ? `Traer ${sugeridas.length} orden(es) interna(s)` : `Traer ${sugeridas.length} gasto(s) del costeo`}
+                      </button>
+                    )}
                     {(b.k === "equipos" && v.sugerencias.equipos.length > 0) || (b.k === "reactivos" && v.sugerencias.consumos.length > 0)
                       ? <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Sugeridos desde los ensayos y el kardex de la OT.</span> : null}
                   </div>

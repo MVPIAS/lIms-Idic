@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   ConflictException,
   Controller,
@@ -133,7 +134,20 @@ const CrearCustodiaSchema = z.object({
   selloNumero: optStr(40),
   selloIntegro: z.preprocess(emptyToNull, z.coerce.boolean().nullable().optional()),
   observaciones: optStr(4000),
+  // Devolución de excedente al proveedor (EP-03 7.2, frente r4d): cantidad, guía y medio.
+  cantidadDevuelta: z.preprocess(emptyToNull, z.coerce.number().positive("La cantidad devuelta debe ser mayor que 0.").nullable().optional()),
+  guiaDespacho: optStr(40),
+  medioDevolucion: optStr(40),
 });
+
+/** La devolución registra cantidad devuelta y Nº de guía de despacho (EP-03 7.2). Regla pura. */
+export function erroresDevolucion(d: { evento?: string | null; cantidadDevuelta?: number | null; guiaDespacho?: string | null }): string[] {
+  if (d.evento !== "devolucion") return [];
+  const e: string[] = [];
+  if (!(Number(d.cantidadDevuelta) > 0)) e.push("Devolución: indique la cantidad devuelta.");
+  if (!d.guiaDespacho || !String(d.guiaDespacho).trim()) e.push("Devolución: indique el Nº de la guía de despacho.");
+  return e;
+}
 
 /** Mapa campo JSON (camelCase) → columna (snake_case) para el PATCH dinámico. */
 const COLS_EQUIPO: Record<string, string> = {
@@ -674,6 +688,8 @@ export class EquiposService {
     usuarioId: string | null,
     d: z.infer<typeof CrearCustodiaSchema>,
   ) {
+    const eDev = erroresDevolucion(d);
+    if (eDev.length) throw new BadRequestException(eDev.join(" "));
     return this.prisma.$transaction(async (tx) => {
       // La muestra debe ser del tenant (404 cross-tenant) y queda bloqueada.
       const muestras = await tx.$queryRawUnsafe<any[]>(
@@ -715,6 +731,8 @@ export class EquiposService {
         ubicacionOrigen: d.ubicacionOrigen ?? null,
         ubicacionDestino: d.ubicacionDestino ?? null,
         registradoPor: usuarioId,
+        // Solo las devoluciones llevan estos datos (los eslabones anteriores no cambian su hash).
+        ...(evento === "devolucion" ? { cantidadDevuelta: d.cantidadDevuelta ?? null, guiaDespacho: d.guiaDespacho ?? null } : {}),
       });
 
       const rows = await tx.$queryRawUnsafe<any[]>(
@@ -745,6 +763,14 @@ export class EquiposService {
         hash,
       );
 
+      if (evento === "devolucion")
+        await tx.$executeRawUnsafe(
+          `UPDATE muestra_custodia SET cantidad_devuelta = $2, guia_despacho = $3, medio_devolucion = $4 WHERE id = $1::uuid`,
+          rows[0].id,
+          d.cantidadDevuelta ?? null,
+          d.guiaDespacho ?? null,
+          d.medioDevolucion ?? null,
+        );
       // La ubicación de destino pasa a ser la ubicación actual de la muestra.
       if (d.ubicacionDestino) {
         await tx.$executeRawUnsafe(

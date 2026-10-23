@@ -22,7 +22,7 @@ import {
   type RespuestaLab,
   type SolicitudRuta,
 } from "./circuito-cotizacion";
-import { calcularForm05, erroresForm05, erroresPrograma, type Form05Entrada, type ProgramaTrabajo } from "./form05";
+import { calcularForm05, erroresForm05, erroresPrograma, type Form05Entrada, type ProgramaTrabajo, exigeCosteo, type TipoServicio } from "./form05";
 import { numeroFormulario } from "./numeracion-cotizacion";
 import { htmlCotizacion, pdfCotizacion, type FirmasCotizacion } from "./cotizacion-documento";
 import { hoyEnChile, soloFecha } from "./validez";
@@ -318,7 +318,7 @@ export class CircuitoCotizacionService {
   /* --------------------------------------------------------- solicitudes --- */
 
   /** 2.3 / 2.4 · El ejecutivo pide fechas (servicio estándar) o abre el formulario de costeo (no estándar). */
-  async solicitar(req: any, id: string, b: { unidadId: string; tipoServicio: "estandar" | "no_estandar"; comentario?: string | null; conCopia?: string | null }) {
+  async solicitar(req: any, id: string, b: { unidadId: string; tipoServicio: TipoServicio; comentario?: string | null; conCopia?: string | null }) {
     const tenantId = this.tenant(req);
     await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id);
     const c = await this.cot(id, tenantId);
@@ -337,7 +337,7 @@ export class CircuitoCotizacionService {
     if (viva.length) throw new ConflictException(`Ya hay una solicitud vigente a ${un.codigo} en esta cotización.`);
     const fila = await this.prisma.$transaction(async (tx) => {
       let numero: string | null = null;
-      if (b.tipoServicio === "no_estandar") {
+      if (exigeCosteo(b.tipoServicio)) {
         const r = await tx.$queryRawUnsafe<{ n: number }[]>(
           `UPDATE cotizacion SET form_correlativo = form_correlativo + 1 WHERE id = $1::uuid RETURNING form_correlativo AS n`,
           id,
@@ -357,7 +357,7 @@ export class CircuitoCotizacionService {
         b.comentario?.trim() || null,
         b.conCopia?.trim() || null,
         this.yo(req),
-        b.tipoServicio === "no_estandar" ? "Formulario de cotización (FORM05)" : "Solicitud de fechas",
+        b.tipoServicio === "no_estandar" ? "Formulario de cotización (FORM05)" : b.tipoServicio === "comision" ? "Costeo de comisión (FORM05)" : "Solicitud de fechas",
       );
       return { id: ins[0].id, numero };
     });
@@ -406,8 +406,13 @@ export class CircuitoCotizacionService {
       const ep = erroresPrograma(b.programa);
       if (ep.length) throw new BadRequestException(ep.join(" "));
       programa = b.programa;
-      if (s.tipoServicio === "no_estandar") {
-        if (!b.costeo) throw new BadRequestException("Servicio no estandarizado: complete el formulario de costeo (FORM05).");
+      if (exigeCosteo(s.tipoServicio)) {
+        if (!b.costeo)
+          throw new BadRequestException(
+            s.tipoServicio === "comision"
+              ? "Comisión: complete el costeo (horas por rol, viáticos, pasajes, traslados y arriendo) en el formulario de costeo (FORM05)."
+              : "Servicio no estandarizado: complete el formulario de costeo (FORM05).",
+          );
         const ec = erroresForm05(b.costeo);
         if (ec.length) throw new BadRequestException(ec.join(" "));
         costeo = { ...b.costeo, resultado: calcularForm05(b.costeo, cfg) };

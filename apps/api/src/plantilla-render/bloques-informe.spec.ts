@@ -189,3 +189,35 @@ describe("PDF del informe con anexo fotográfico y portada", () => {
     expect(pdf.length).toBeGreaterThan(1000);
   });
 });
+
+describe("tablas del 15-10 de Textil y LCC (EP-03 3.4, BL-206)", () => {
+  const { bloqueResultados: res, bloqueProductoTerminado, completarCuerpo: completar } = require("./bloques-informe") as typeof import("./bloques-informe");
+  const { configPorTipo: cfgTipo, seccionCoincide } = require("./config-informe") as typeof import("./config-informe");
+  const fila = (p: any) => ({ id: p.id ?? "x", muestra: p.muestra ?? "M1", minimo: "", maximo: "", ensayo: p.ensayo, metodo: "ASTM D 629", unidad: "cm", requisito: "10,5 ± 0,3",
+    requisitoOrigen: "catalogo", resultado: "11,0", observacion: "", veredicto: "no_cumple", veredictoTexto: "No cumple", desviacion: "", cv: "", sello: p.sello ?? "15572" });
+  const est = (titulo: string, filas: any[]) => ({ modalidad: "cumplimiento", secciones: [{ numero: "4.1", titulo, componentes: [{ numero: null, titulo: null, filas }] }],
+    veredictosMuestra: [], veredictoOt: "no_cumple", referencias: [], hayRequisitoDeOrden: false, mostrarEstadisticas: false, mostrarMuestra: false, puntoDe: {} }) as any;
+  it("Dimensiones: «Sello N.º» en la primera fila de la muestra y sin columna de método", () => {
+    const html = res(est("Dimensiones", [fila({ ensayo: "Ancho guante (a)" }), fila({ ensayo: "Ancho fuelle (b)" })]), cfgTipo("IVC"));
+    expect(html).toContain("<th>Sello N.º</th>");
+    expect(html).not.toContain("Método de verificación");
+    expect(html.match(/15572/g)).toHaveLength(1);
+  });
+  it("Ensayos de materiales: con método y sin sello", () => {
+    const html = res(est("Ensayos de materiales", [fila({ ensayo: "Composición" })]), cfgTipo("IVC"));
+    expect(html).toContain("Método de verificación");
+    expect(html).not.toContain("Sello N.º");
+  });
+  it("las secciones se comparan sin mayúsculas ni tildes", () => {
+    expect(seccionCoincide(["4.2 CONFECCION y modelo"], ["Confección"])).toBe(true);
+    expect(seccionCoincide([null, "Etiquetado del producto"], ["Etiquetado"])).toBe(true);
+    expect(seccionCoincide(["Materiales"], ["Dimensiones"])).toBe(false);
+  });
+  it("producto terminado: tabla de 3 columnas solo en el IVC y con filas", () => {
+    const filas = [{ items: "1", descripcion: "Material con piquete N.º registro: 16309", numeracion: "1" }];
+    expect(bloqueProductoTerminado(filas, cfgTipo("IVC"))).toContain("Numeración de los defectos por ítem");
+    expect(bloqueProductoTerminado([], cfgTipo("IVC"))).toBe("");
+    expect(bloqueProductoTerminado(filas, cfgTipo("I.ENSAYO"))).toBe("");
+    expect(completar("<h1>IVC</h1><div class=\"firmas\"></div>", cfgTipo("IVC"))).toContain("{{producto_terminado}}");
+  });
+});

@@ -2,6 +2,7 @@ import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Post, Query, Req, 
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
+import { TIPOS_SERVICIO } from "./form05";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { CircuitoCotizacionService } from "./circuito.service";
@@ -13,7 +14,7 @@ const monto = z.number().nonnegative().max(1e12);
 
 const SolicitarSchema = z.object({
   unidadId: z.string().uuid(),
-  tipoServicio: z.enum(["estandar", "no_estandar"]),
+  tipoServicio: z.enum(TIPOS_SERVICIO),
   comentario: texto(2000).nullable().optional(),
   conCopia: texto(500).nullable().optional(),
 });
@@ -26,6 +27,8 @@ const ProgramaSchema = z.object({
   fechaInicio: fecha.nullable().optional(),
   fechaTermino: fecha.nullable().optional(),
   plazoEntregaDias: z.number().int(),
+  puntosEt: texto(2000).nullable().optional(),
+  numItems: z.number().int().nullable().optional(),
 });
 
 const Form05Schema = z.object({

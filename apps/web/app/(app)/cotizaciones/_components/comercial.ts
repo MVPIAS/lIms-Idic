@@ -93,6 +93,7 @@ export const ORIGEN_LABEL: Record<string, string> = {
   REINSPECCION: "Reinspección (BPCH)",
   PRODUCCION_NACIONAL: "Producción Nacional",
   PROTOTIPO: "Prototipo",
+  INSTITUCIONAL: "Institucional sin cobro",
 };
 
 export const hoyISO = () => {

@@ -25,3 +25,25 @@ describe("control de calidad · independencia", () => {
     expect(motivoNoRevisable("pendiente", { registradoPor: "u1" }, "u1", false)).toBeNull();
   });
 });
+
+describe("QC por método · tipos MRC y patrón, criterios por método (BL-167)", () => {
+  const { criterioAplicable, tiposQcFaltantes, erroresConfigQc } = require("./reglas-qc") as typeof import("./reglas-qc");
+  it("el criterio del control manda; si no, el del método; si no, el por defecto", () => {
+    expect(criterioAplicable("mrc", "95-105", { mrc: "90-110" })).toBe("95-105");
+    expect(criterioAplicable("mrc", null, { mrc: "97,5-102,5" })).toBe("97.5-102.5");
+    expect(criterioAplicable("mrc", null, null)).toBe("90-110");
+    expect(criterioAplicable("patron", undefined, {})).toBe("95-105");
+    expect(criterioAplicable("blanco", null, null)).toBeNull();
+  });
+  it("con tipos exigidos falta uno aprobado de cada tipo; sin tipos basta uno cualquiera", () => {
+    expect(tiposQcFaltantes(["blanco", "mrc"], ["blanco"])).toEqual(["mrc"]);
+    expect(tiposQcFaltantes(["blanco", "mrc"], ["mrc", "blanco"])).toEqual([]);
+    expect(tiposQcFaltantes([], [])).toEqual(["cualquiera"]);
+    expect(tiposQcFaltantes([], ["curva"])).toEqual([]);
+  });
+  it("valida la configuración del método", () => {
+    expect(erroresConfigQc({ qcTipos: ["mrc", "foo"] })).toEqual(["Tipo de control desconocido: foo."]);
+    expect(erroresConfigQc({ qcCriterios: { mrc: "alto" } })[0]).toMatch(/número o un rango/);
+    expect(erroresConfigQc({ qcTipos: ["mrc"], qcCriterios: { mrc: "90-110" } })).toEqual([]);
+  });
+});

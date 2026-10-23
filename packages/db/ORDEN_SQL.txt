@@ -100,4 +100,5 @@ align_r4b_saec.sql
 align_r4b_bpch.sql
 align_r4c_avisos_despacho.sql
 align_r4c_oficio.sql
+align_r4d_comercial.sql
 align_cierre_permisos.sql

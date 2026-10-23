@@ -63,6 +63,24 @@ export function erroresForm05(f: Form05Entrada): string[] {
   return e;
 }
 
+/**
+ * Tipos de solicitud al laboratorio (EP-00 2.4/2.3, EP-05 0.2): fechas de un
+ * servicio estándar, Formulario de costeo de uno no estandarizado, o costeo de
+ * una comisión en terreno o en el extranjero (SEO, LAM, SVM: horas por rol,
+ * viáticos, pasajes, traslados, arriendo y tipo de cambio en el FORM05).
+ */
+export const TIPOS_SERVICIO = ["estandar", "no_estandar", "comision"] as const;
+export type TipoServicio = (typeof TIPOS_SERVICIO)[number];
+/** ¿La respuesta exige el Formulario de costeo (FORM05)? */
+export const exigeCosteo = (t: string | null | undefined) => t === "no_estandar" || t === "comision";
+
+/** Unidades de reposición que se suman al lote del LRB (EP-05 0.2): cantidad cotizada = lote + reposición. */
+export function cantidadConReposicion(lote: number, reposicion: number): number {
+  const l = Math.max(0, Math.round(Number(lote) || 0));
+  const r = Math.max(0, Math.round(Number(reposicion) || 0));
+  return l + r;
+}
+
 export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenParticularPct: number }): Form05Resultado {
   const dolar = Number(f.dolar) > 0 ? Number(f.dolar) : 0;
   const secciones = {
@@ -98,6 +116,9 @@ export interface ProgramaTrabajo {
   fechaTermino?: string | null;
   /** Plazo de entrega propuesto (días corridos). Obligatorio. */
   plazoEntregaDias: number;
+  /** Programa de Trabajo del LEM (EP-05 0.2): puntos de la E.T. que se ensayan y nº de ítems. */
+  puntosEt?: string | null;
+  numItems?: number | null;
 }
 
 export function erroresPrograma(p: ProgramaTrabajo): string[] {
@@ -106,6 +127,8 @@ export function erroresPrograma(p: ProgramaTrabajo): string[] {
     e.push("Plazo de entrega propuesto: entre 1 y 730 días corridos.");
   if (p.fechaInicio && p.fechaTermino && p.fechaTermino < p.fechaInicio)
     e.push("Programa de trabajo: la fecha de término es anterior a la de inicio.");
+  if (p.numItems != null && !(Number.isInteger(p.numItems) && p.numItems >= 1))
+    e.push("Programa de trabajo: el número de ítems debe ser un entero de 1 o más.");
   p.etapas.forEach((x, i) => {
     if (x.inicio && x.termino && x.termino < x.inicio) e.push(`Etapa ${i + 1} («${x.actividad}»): termina antes de empezar.`);
   });

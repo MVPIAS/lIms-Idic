@@ -97,6 +97,15 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | Oficio conductor exigido (`oficio_conductor`) · por confirmar EP-05 7.2 | Documentos que salen con oficio (`exige_tipos`) | Casillas IVC, Informe Técnico, Rechazo, Informe de Ensayo, CRB | IVC, Informe Técnico, Rechazo | Registrar entrega, despacho al cliente y envío | `seguimiento/datos-seguimiento.ts` (`faltaOficio`) |
 | | Departamentos donde rige (`exige_departamentos`) | Casillas DSA, DQO, BPCH | DSA | idem | idem |
 
+| Aceptación por O/C (`aceptacion_oc`) · por confirmar EP-00 4.2 | Diferencia que no es discrepancia (`tolerancia`) | Entero 0–100.000.000 CLP | 0 | Registrar aceptación con O/C: si la O/C difiere más, se exige la discrepancia o anular la orden del cliente | `cotizacion/aceptacion-oc.ts` |
+| Cotización del LRB (`cotizacion_lrb`) · por confirmar EP-05 0.2 | Unidades de reposición (`reposicion`) | Entero 0–50 | 4 | «Sumar N a cada ensayo» en la cotización del LRB | `cotizacion/cotizacion.service.ts` (`config`) |
+| OT institucional (`ot_institucional`) · por confirmar EP-01 §10 P17 | Exigir Nº y fecha de oficio (`exige_oficio`) | Sí / No | Sí | Registrar OT con origen «Institucional sin cobro» y Datos del encargo | `ot/reglas-ot.ts`, `ot/encargo/reglas-encargo.ts` |
+| Informe mensual de la tasa (`tasa_informe`) · por confirmar EP-06 6.23 | Destinatarios de la difusión (`difusion`) | Casillas: Dirección, Subdirección, BPCH, Contraloría interna, DFZ, DCO | Dirección, Subdirección, BPCH, Contraloría interna, DFZ | «Emitir informe mensual → difusión» | `internacion/tasa-mensual.ts` |
+
+Los grupos `aceptacion_oc`, `cotizacion_lrb`, `ot_institucional` y `tasa_informe` los creó el
+frente r4d (`align_r4d_comercial.sql`, ver `docs/FLUJO_R4D_COMERCIAL_OT_CALIDAD.md`). Usa además
+`lrb.plazo_apelacion` (r2a) para el plazo de la apelación del Informe de Rechazo.
+
 Los grupos `muestreo_plan` y `veredicto_lote` los creó el frente r2b
 (`docs/FLUJO_ESPECIFICACIONES_MUESTREO.md`).
 

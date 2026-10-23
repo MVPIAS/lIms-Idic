@@ -19,11 +19,12 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { PageHeader, SkeletonCards } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import { llamar } from "@/lib/laboratorio";
-import { fechaHora } from "@/lib/format";
+import { aInputHoraChile, deInputHoraChile, fechaHora } from "@/lib/format";
 import { Bitacora, Campo, Pasos, type PasoFormulario } from "@/components/formularios/comun";
 
-const local = (iso: string | null | undefined) => (iso ? new Date(new Date(iso).getTime() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "");
-const iso = (l: string) => (l ? new Date(l).toISOString() : null);
+// Fechas y horas en hora de Chile, no en la del equipo.
+const local = (iso: string | null | undefined) => aInputHoraChile(iso);
+const iso = (l: string) => deInputHoraChile(l);
 
 function Contenido() {
   const sp = useSearchParams();

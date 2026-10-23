@@ -7,6 +7,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
 import { AlcanceService } from "../rbac/alcance.service";
+import { TasaMensualController, TasaMensualService } from "./tasa-mensual";
 
 /**
  * SVT8 · Búsqueda de OT de INTERNACIÓN (IDIC-PG 24 Anexo 03) con la tasa del
@@ -217,7 +218,8 @@ export class InternacionController {
 }
 
 @Module({
-  controllers: [InternacionController],
-  providers: [InternacionService],
+  // TasaMensualController ANTES: su ruta estática /internaciones/tasa-mensual.
+  controllers: [TasaMensualController, InternacionController],
+  providers: [InternacionService, TasaMensualService],
 })
 export class InternacionModule {}

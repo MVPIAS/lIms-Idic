@@ -123,11 +123,30 @@ export interface AcRe {
 /** Último s con plan en la columna (21/22 si AQL ≤ 10; 44/45 si es por 100 unidades). */
 const tope = (j: number) => (AQLS[j] <= 10 ? 10 : 12);
 
+/** Celda de la tabla 2-A (fila = índice de la letra, columna = índice del AQL), sin resolver flechas. */
+function celdaTabla(i: number, j: number): (typeof DIAGONAL)[number] {
+  const s = i + j - 14;
+  if (s < 0) return "abajo";
+  if (s > tope(j)) return "arriba";
+  return DIAGONAL[s];
+}
+
+/**
+ * Qué hacer cuando una flecha apunta fuera de la tabla (↓ desde la letra R).
+ * Solo ocurre con la letra R y AQL 0,015, y las dos pantallas que usan la
+ * tabla lo resolvían distinto antes de unificarla; se conserva cada criterio
+ * para no cambiar resultados (por confirmar con la NCh 44 vigente del IDIC):
+ *   · `cero_uno` (Muestreo del lote): el 0/1 de su propia fila;
+ *   · `plan_mas_cercano` (Inspección por atributos y HCP): el plan más cercano
+ *     de la misma fila (1/2).
+ */
+export type BordeTabla = "cero_uno" | "plan_mas_cercano";
+
 /**
  * Plan simple normal (tabla 2-A) para una letra y un AQL, resolviendo las
  * flechas. Lanza PlanError si el AQL no es una columna de la tabla.
  */
-export function planNormal(letra: Letra, aql: number | string): AcRe {
+export function planNormal(letra: Letra, aql: number | string, opciones: { borde?: BordeTabla } = {}): AcRe {
   const j = indiceAql(aql);
   if (j < 0) throw new PlanError(`AQL ${aql} no es una columna de la tabla 2-A (use 0,010 … 1000, p. ej. 1,5 · 2,5 · 4,0 · 6,5).`);
   const i0 = LETRAS.indexOf(letra);
@@ -136,25 +155,36 @@ export function planNormal(letra: Letra, aql: number | string): AcRe {
   let flecha: AcRe["flecha"] = null;
   // Como mucho 16 saltos: siempre se llega a un plan.
   for (let paso = 0; paso < 20; paso++) {
-    const s = i + j - 14;
-    let celda: (typeof DIAGONAL)[number];
-    if (s < 0) celda = "abajo";
-    else if (s > tope(j)) celda = "arriba";
-    else celda = DIAGONAL[s];
+    const celda = celdaTabla(i, j);
     if (typeof celda === "object") {
       const l = LETRAS[i];
       return { letra: l, n: TAMANO_LETRA[l], ac: celda.ac, re: celda.re, flecha };
     }
     const ni = celda === "abajo" ? i + 1 : i - 1;
-    // Sin fila más allá (A arriba o R abajo): se queda con el 0/1 de su propia fila.
+    // Sin fila más allá (A arriba o R abajo).
     if (ni < 0 || ni >= LETRAS.length) {
       const l = LETRAS[i];
+      if (opciones.borde === "plan_mas_cercano") {
+        for (let d = 1; d < AQLS.length; d++) {
+          for (const a of [j + d, j - d]) {
+            if (a < 0 || a >= AQLS.length) continue;
+            const x = celdaTabla(i, a);
+            if (typeof x === "object") return { letra: l, n: TAMANO_LETRA[l], ac: x.ac, re: x.re, flecha };
+          }
+        }
+      }
       return { letra: l, n: TAMANO_LETRA[l], ac: 0, re: 1, flecha };
     }
     flecha = flecha ?? celda;
     i = ni;
   }
   throw new PlanError("No se pudo resolver el plan en la tabla 2-A.");
+}
+
+/** AQL de la tabla escrito como en los informes del IDIC (coma decimal: 0,010 · 0,10 · 1,0 · 2,5 · 10). */
+export function textoAql(aql: number): string {
+  const dec = aql < 0.1 ? 3 : aql < 1 ? 2 : aql < 10 ? 1 : 0;
+  return aql.toFixed(dec).replace(".", ",");
 }
 
 export const TABLAS = ["normal", "estricta", "reducida"] as const;

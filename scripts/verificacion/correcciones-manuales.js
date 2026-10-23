@@ -156,7 +156,8 @@ async function main() {
     const cl = lista(await ok("demo.ventas", "GET", "/clientes?limit=5"))[0];
     afirmar(cl, "no hay clientes");
     C.cliente = cl;
-    const pl = lista(await ok("demo.lqc.jefe", "GET", "/plantillas?limit=200"));
+    // Hay más de 100 plantillas: se busca la del boletín por su código (el listado pagina de a 100).
+    const pl = [...lista(await ok("demo.lqc.jefe", "GET", "/plantillas?limit=100&search=BolAn")), ...lista(await ok("demo.lqc.jefe", "GET", "/plantillas?limit=200"))];
     C.plantilla = pl.find((p) => p.repid === "BolAn") ?? pl.find((p) => p.tipo === "BOLETIN" && p.activo !== false);
     afirmar(C.plantilla, "no hay plantilla de boletín");
     return `pH=${m.codigo} · plantilla ${C.plantilla.repid} (${C.plantilla.tipo})`;

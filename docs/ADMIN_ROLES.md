@@ -124,6 +124,11 @@ ver `docs/FLUJO_AVISOS_DESPACHO_OFICIO.md` §6): `certificado.despachar` (jefatu
 jefaturas, Planificación, Comercial, Dirección), `oficio.ver`, `oficio.crear` (Comercial, jefaturas,
 Dirección) y `oficio.despachar` (Oficina de partes: Director y Subdirector). Firmar un oficio lo decide la
 matriz OFICIO, sin permiso.
+**Comercial, OT, calidad y recepción · frente r4d** (`align_r4d_comercial.sql`, ver
+`docs/FLUJO_R4D_COMERCIAL_OT_CALIDAD.md` §11): `tasa.emitir` (Jefe DCO: informe mensual de la
+tasa 1,5 %), `apelacion.ver/registrar/resolver` (apelación del Informe de Rechazo; resuelve el
+Director), `reclamo.ver/gestionar` (reclamos de clientes: Comercial, Planificación, Calidad) y
+`ot.recepcion_dco` (recepción de ítems en el DCO: Comercial, Planificación, Recepción).
 
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 

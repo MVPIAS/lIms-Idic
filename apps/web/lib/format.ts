@@ -141,6 +141,37 @@ export function fechaHora(v: unknown): string {
   return `${p.dd}-${p.mm}-${p.aaaa} ${p.hh}:${p.mi}`;
 }
 
+/**
+ * Valor de un <input type="datetime-local"> («aaaa-mm-ddTHH:MM») para un instante,
+ * en la hora de CHILE aunque el equipo esté en otra zona.
+ */
+export function aInputHoraChile(v: unknown): string {
+  if (!v) return "";
+  const d = v instanceof Date ? v : new Date(String(v));
+  if (isNaN(d.getTime())) return "";
+  const p = partesChile(d);
+  return `${p.aaaa}-${p.mm}-${p.dd}T${p.hh}:${p.mi}`;
+}
+
+/**
+ * Instante ISO (UTC) de una fecha y hora escritas como hora de CHILE
+ * («aaaa-mm-ddTHH:MM» de un <input type="datetime-local">), sea cual sea la zona
+ * del equipo. Respeta el horario de verano de Chile. Vacío o inválido → null.
+ */
+export function deInputHoraChile(local: string): string | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(local ?? "").trim());
+  if (!m) return null;
+  const pared = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  const comoUtc = (t: number) => {
+    const p = partesChile(new Date(t));
+    return Date.UTC(+p.aaaa, +p.mm - 1, +p.dd, +p.hh, +p.mi);
+  };
+  // Dos aproximaciones bastan: el desfase de Chile es −3 o −4 horas.
+  let t = pared + (pared - comoUtc(pared));
+  t = t + (pared - comoUtc(t));
+  return new Date(t).toISOString();
+}
+
 /** RUT chileno formateado 12.345.678-9 a partir de dígitos + DV. */
 export function rut(v: unknown): string {
   if (!v) return GUION;

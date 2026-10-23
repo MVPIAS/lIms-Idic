@@ -16,41 +16,33 @@
  * inspección o clase de defecto (EP-03 P5, EP-05 P15): van como parámetros.
  */
 
-export const NIVELES = ["S-1", "S-2", "S-3", "S-4", "I", "II", "III"] as const;
-export type Nivel = (typeof NIVELES)[number];
+import {
+  AQLS as AQLS_TABLA,
+  LETRAS,
+  NIVELES,
+  PlanError,
+  TAMANO_LETRA,
+  letraCodigo as letraTabla,
+  planNormal,
+  textoAql,
+  type Letra,
+  type Nivel,
+} from "../muestreo/nch44";
 
-export const LETRAS = ["A", "B", "C", "D", "E", "F", "G", "H", "J", "K", "L", "M", "N", "P", "Q", "R"] as const;
-export type Letra = (typeof LETRAS)[number];
+/*
+ * Las tablas 1 y 2-A son las de `muestreo/nch44.ts`, fuente única en el LIMS
+ * (la usa también el «Muestreo del lote» de la OT). Aquí solo se conserva la
+ * forma en que esta pantalla escribe y valida los AQL (texto con coma decimal)
+ * y sus mensajes de error.
+ */
+export { LETRAS, NIVELES };
+export type { Letra, Nivel };
 
-/** Tamaño de muestra de cada letra código (tabla II-A). */
-export const N_POR_LETRA: Record<Letra, number> = {
-  A: 2, B: 3, C: 5, D: 8, E: 13, F: 20, G: 32, H: 50, J: 80, K: 125, L: 200, M: 315, N: 500, P: 800, Q: 1250, R: 2000,
-};
+/** Tamaño de muestra de cada letra código (tabla 2-A). */
+export const N_POR_LETRA: Record<Letra, number> = TAMANO_LETRA;
 
-/** AQL de la tabla II-A, con coma decimal como se escriben en los informes. */
-export const AQLS = [
-  "0,010", "0,015", "0,025", "0,040", "0,065", "0,10", "0,15", "0,25", "0,40", "0,65", "1,0", "1,5", "2,5", "4,0", "6,5",
-  "10", "15", "25", "40", "65", "100", "150", "250", "400", "650", "1000",
-] as const;
-
-/** Límite superior de cada tramo de tamaño de lote (tabla I); el último no tiene tope. */
-const TRAMOS_LOTE = [8, 15, 25, 50, 90, 150, 280, 500, 1200, 3200, 10000, 35000, 150000, 500000, Infinity];
-
-/** Tabla I: una fila por nivel, una letra por tramo de lote. */
-const TABLA_I: Record<Nivel, string> = {
-  "S-1": "AAAABBBBCCCCDDD",
-  "S-2": "AAABBBCCCDDDEEE",
-  "S-3": "AABBCCDDEEFFGGH",
-  "S-4": "AABCCDEEFGGHJJK",
-  I: "AABCCDEFGHJKLMN",
-  II: "ABCDEFGHJKLMNPQ",
-  III: "BCDEFGHJKLMNPQR",
-};
-
-/** Pares Ac/Re de la tabla II-A, en el orden en que aparecen a lo largo de una fila. */
-const SECUENCIA: [number, number][] = [
-  [1, 2], [2, 3], [3, 4], [5, 6], [7, 8], [10, 11], [14, 15], [21, 22], [30, 31], [44, 45],
-];
+/** AQL de la tabla 2-A, con coma decimal como se escriben en los informes. */
+export const AQLS: readonly string[] = AQLS_TABLA.map(textoAql);
 
 export class AqlError extends Error {}
 
@@ -67,34 +59,12 @@ export function esNivel(v: unknown): v is Nivel {
   return typeof v === "string" && (NIVELES as readonly string[]).includes(v);
 }
 
-/** Tabla I: letra código para un tamaño de lote y un nivel de inspección. */
+/** Tabla 1: letra código para un tamaño de lote y un nivel de inspección. */
 export function letraCodigo(tamanoLote: number, nivel: Nivel): Letra {
   if (!Number.isInteger(tamanoLote) || tamanoLote < 2)
     throw new AqlError("El tamaño del lote debe ser un número entero de 2 o más unidades.");
   if (!esNivel(nivel)) throw new AqlError(`Nivel de inspección desconocido: ${String(nivel)}.`);
-  const i = TRAMOS_LOTE.findIndex((tope) => tamanoLote <= tope);
-  return TABLA_I[nivel][i] as Letra;
-}
-
-type Celda = { ac: number; re: number } | "abajo" | "arriba";
-
-/**
- * Celda de la tabla II-A para una letra y un AQL (sin resolver flechas). La
- * tabla tiene una diagonal: el primer plan de cada fila (0/1) cae en el AQL
- * cuyo índice es 14 − índice de la letra; a su derecha vienen «↑», «↓» y la
- * secuencia 1/2, 2/3, 3/4, 5/6… Los AQL ≤ 10 (porcentaje defectuoso) llegan
- * hasta 21/22; los mayores (defectos por cien unidades), hasta 44/45.
- */
-function celda(iLetra: number, iAql: number): Celda {
-  const k = iAql + iLetra - 14;
-  if (k < 0) return "abajo";
-  if (k === 0) return { ac: 0, re: 1 };
-  if (k === 1) return "arriba";
-  if (k === 2) return "abajo";
-  const par = SECUENCIA[k - 3];
-  const tope = iAql <= AQLS.indexOf("10") ? 7 : SECUENCIA.length - 1;
-  if (!par || k - 3 > tope) return "arriba";
-  return { ac: par[0], re: par[1] };
+  return letraTabla(tamanoLote, nivel);
 }
 
 export interface PlanMuestreo {
@@ -114,34 +84,18 @@ export interface PlanMuestreo {
   texto: string;
 }
 
-/** Tabla II-A, muestreo simple, inspección normal, con las flechas resueltas. */
+/** Tabla 2-A, muestreo simple, inspección normal, con las flechas resueltas. */
 export function planSimpleNormal(letra: Letra, aqlEntrada: string): { letraPlan: Letra; n: number; ac: number; re: number } {
   const aql = normalizarAql(aqlEntrada);
   if (!aql) throw new AqlError(`AQL no válido: «${aqlEntrada}». Use uno de la tabla (p. ej. 1,5 · 2,5 · 6,5).`);
-  const iAql = AQLS.indexOf(aql as (typeof AQLS)[number]);
-  let i = LETRAS.indexOf(letra);
-  if (i < 0) throw new AqlError(`Letra código desconocida: ${letra}.`);
-  let sentido: "abajo" | "arriba" | null = null;
-  for (let pasos = 0; pasos < LETRAS.length + 2; pasos++) {
-    const c = celda(i, iAql);
-    if (typeof c === "object") return { letraPlan: LETRAS[i], n: N_POR_LETRA[LETRAS[i]], ...c };
-    // Una flecha se sigue siempre en el sentido en que apunta la primera.
-    sentido ??= c;
-    const j = sentido === "abajo" ? i + 1 : i - 1;
-    if (j < 0 || j >= LETRAS.length) {
-      // Borde de la tabla: el plan más cercano de la misma fila.
-      for (let d = 1; d < AQLS.length; d++) {
-        for (const a of [iAql + d, iAql - d]) {
-          if (a < 0 || a >= AQLS.length) continue;
-          const x = celda(i, a);
-          if (typeof x === "object") return { letraPlan: LETRAS[i], n: N_POR_LETRA[LETRAS[i]], ...x };
-        }
-      }
-      break;
-    }
-    i = j;
+  if (!LETRAS.includes(letra)) throw new AqlError(`Letra código desconocida: ${letra}.`);
+  try {
+    const p = planNormal(letra, aql, { borde: "plan_mas_cercano" });
+    return { letraPlan: p.letra, n: p.n, ac: p.ac, re: p.re };
+  } catch (e) {
+    if (e instanceof PlanError) throw new AqlError(`No hay plan en la tabla para la letra ${letra} y AQL ${aql}.`);
+    throw e;
   }
-  throw new AqlError(`No hay plan en la tabla para la letra ${letra} y AQL ${aql}.`);
 }
 
 /** Plan completo: lote + nivel + AQL → letra, n, Ac, Re (n nunca supera el lote). */
