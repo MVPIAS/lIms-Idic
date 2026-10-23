@@ -83,8 +83,13 @@ type PanelMetodo = {
 };
 
 // Línea ya armada que se emite al padre para la tabla resumen + payload.
+// `elementoId` vacío = métodos del laboratorio sin elemento del catálogo (B-009).
 export type LineaOT = {
   elementoId: string;
+  /** Elemento genérico del laboratorio («Lab. X», subgrupo «Sub Grupo IDIC»): no es un producto (B-011). */
+  generico: boolean;
+  /** Descripción de la muestra: el producto o lo que escriba quien registra (nunca «Lab. X [códigos]»). */
+  descripcion: string;
   elementoCodigo: string;
   elementoNombre: string;
   familia: string;
@@ -97,6 +102,9 @@ export type LineaOT = {
   metodos: { metodoId: string; metodoCodigo: string; metodoNombre: string; ensayoId: string; precio: number }[];
   subtotal: number;
 };
+
+/** Subgrupo del catálogo heredado con los elementos «laboratorio» (no productos). */
+const esSubgrupoGenerico = (nombre?: string | null) => (nombre ?? "").trim().toLowerCase() === "sub grupo idic";
 
 export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void }) {
   // Catálogos de cada nivel de la cascada.
@@ -130,6 +138,35 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
 
   const [error, setError] = useState("");
   const [loadingPanel, setLoadingPanel] = useState(false);
+
+  // B-009: OT por métodos del laboratorio sin elemento, y métodos que el panel del elemento no trae.
+  const [sinElemento, setSinElemento] = useState(false);
+  const [buscaMetodo, setBuscaMetodo] = useState("");
+  const [metodosEncontrados, setMetodosEncontrados] = useState<PanelMetodo[]>([]);
+  useEffect(() => {
+    const t = buscaMetodo.trim();
+    if (t.length < 2) { setMetodosEncontrados([]); return; }
+    const h = setTimeout(() => {
+      apiGet(`/cat/metodos?search=${encodeURIComponent(t)}&limit=20`)
+        .then((d) =>
+          setMetodosEncontrados(
+            asArray<any>(d).map((m) => ({
+              metodoId: m.id, metodoCodigo: m.codigo, metodoNombre: m.nombre,
+              ensayoId: m.ensayoId ?? m.ensayo?.id ?? "", ensayoCodigo: m.ensayo?.codigo ?? "", ensayoNombre: m.ensayo?.nombre ?? "",
+              precio: Number(m.ensayo?.precio ?? 0),
+            })),
+          ),
+        )
+        .catch(() => setMetodosEncontrados([]));
+    }, 300);
+    return () => clearTimeout(h);
+  }, [buscaMetodo]);
+  const agregarMetodo = (m: PanelMetodo) => {
+    setPanel((ps) => (ps.some((x) => x.metodoId === m.metodoId) ? ps : [...ps, m]));
+    setChecked((c) => ({ ...c, [m.metodoId]: true }));
+    setBuscaMetodo("");
+    setMetodosEncontrados([]);
+  };
 
   // 1 · Gran Grupos al montar.
   useEffect(() => {
@@ -169,6 +206,7 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
 
   // 6 · Panel de métodos al elegir Elemento.
   useEffect(() => {
+    if (sinElemento) return;
     setPanel([]); setChecked({}); setExpandido(null);
     if (!elemento) return;
     setLoadingPanel(true);
@@ -181,6 +219,7 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoadingPanel(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elemento]);
 
   const metodosMarcados = useMemo(() => panel.filter((m) => checked[m.metodoId]), [panel, checked]);
@@ -188,22 +227,25 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
 
   const resetElemento = () => {
     setGranGrupoId(""); setGrupoId(""); setSubgrupoId(""); setFamiliaId(""); setQ("");
-    setElemento(null); setPanel([]); setChecked({});
+    setElemento(null); setPanel([]); setChecked({}); setBuscaMetodo(""); setMetodosEncontrados([]);
     setAnalista(""); setPrioridad("normal"); setTipoInspeccion(""); setCantidad(1); setNumMuestras(1); setNumPlanilla("");
   };
 
-  const puedeAgregar = !!elemento && metodosMarcados.length > 0 && Number(numMuestras) >= 1;
+  const puedeAgregar = (!!elemento || sinElemento) && metodosMarcados.length > 0 && Number(numMuestras) >= 1;
+  const generico = !!elemento && esSubgrupoGenerico(subgrupos.find((x) => x.id === subgrupoId)?.nombre);
 
   const agregar = () => {
-    if (!elemento) return;
+    if (!elemento && !sinElemento) return;
     if (metodosMarcados.length === 0) { setError("Marca al menos un método del panel para agregar el elemento."); return; }
     if (Number(numMuestras) < 1) { setError("El Nº de muestras debe ser al menos 1."); return; }
     setError("");
     onAdd({
-      elementoId: elemento.id,
-      elementoCodigo: elemento.codigo,
-      elementoNombre: elemento.nombre,
-      familia: elemento.familiaNombre ?? "",
+      elementoId: elemento?.id ?? "",
+      generico: !elemento || generico,
+      descripcion: elemento && !generico ? elemento.nombre : "",
+      elementoCodigo: elemento?.codigo ?? "",
+      elementoNombre: elemento?.nombre ?? "Métodos del laboratorio (sin elemento)",
+      familia: elemento?.familiaNombre ?? "",
       analista,
       tipoInspeccion,
       prioridad,
@@ -228,7 +270,14 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
 
       {error && <div className="alert warn">{error}</div>}
 
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 400, marginBottom: 8 }}>
+        <input type="checkbox" style={{ width: "auto" }} checked={sinElemento}
+          onChange={(e) => { resetElemento(); setSinElemento(e.target.checked); }} />
+        Sin elemento del catálogo: registrar con métodos del laboratorio (p. ej. los de la E.T. o una calibración)
+      </label>
+
       {/* Cascada de clasificación */}
+      {!sinElemento && (<>
       <div className="form-grid cols-4">
         <div className="field">
           <label>Gran Grupo</label>
@@ -297,9 +346,17 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
         </div>
       )}
 
+      </>)}
+
       {/* Datos derivados (readonly) + datos del elemento (editables) */}
-      {elemento && (
+      {(elemento || sinElemento) && (
         <>
+          {elemento && generico && (
+            <p className="hint" style={{ margin: "10px 0 0" }}>
+              «{elemento.nombre}» es el elemento del laboratorio, no un producto: escriba la descripción de la muestra en la tabla de líneas.
+            </p>
+          )}
+          {elemento && (
           <div className="form-grid cols-4" style={{ marginTop: 14 }}>
             <div className="field readonly">
               <label>Código del elemento</label>
@@ -310,6 +367,7 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
               <input value={elemento.familiaNombre ?? "—"} readOnly />
             </div>
           </div>
+          )}
 
           <div className="form-grid cols-4" style={{ marginTop: 12 }}>
             <div className="field">
@@ -389,7 +447,9 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
                 ))}
                 {loadingPanel && <tr><td colSpan={4} style={{ textAlign: "center", padding: 18, color: "var(--muted)" }}>Cargando panel…</td></tr>}
                 {!loadingPanel && panel.length === 0 && (
-                  <tr><td colSpan={4} style={{ textAlign: "center", padding: 18, color: "var(--muted)" }}>Este elemento no tiene métodos configurados.</td></tr>
+                  <tr><td colSpan={4} style={{ textAlign: "center", padding: 18, color: "var(--muted)" }}>
+                    {sinElemento ? "Agregue los métodos del laboratorio con el buscador de abajo." : "Este elemento no tiene métodos configurados: agréguelos con el buscador de abajo."}
+                  </td></tr>
                 )}
               </tbody>
               {panel.length > 0 && (
@@ -403,8 +463,22 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
             </table>
           </div>
 
+          <div className="field" style={{ marginTop: 10, maxWidth: 520, position: "relative" }}>
+            <label htmlFor="lb-buscar-metodo">Agregar un método del catálogo</label>
+            <input id="lb-buscar-metodo" value={buscaMetodo} onChange={(e) => setBuscaMetodo(e.target.value)} placeholder="Código o nombre del método" />
+            {metodosEncontrados.length > 0 && (
+              <div className="card" style={{ position: "absolute", zIndex: 5, top: "100%", left: 0, right: 0, margin: 0, padding: 4, maxHeight: 240, overflowY: "auto" }}>
+                {metodosEncontrados.map((m) => (
+                  <button key={m.metodoId} type="button" className="btn outline sm" style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 2 }} onClick={() => agregarMetodo(m)}>
+                    {m.metodoCodigo} · {m.metodoNombre}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button className="btn primary" onClick={agregar} disabled={!puedeAgregar}>＋ Agregar elemento a la OT</button>
+            <button className="btn primary" onClick={agregar} disabled={!puedeAgregar}>{sinElemento ? "＋ Agregar métodos a la OT" : "＋ Agregar elemento a la OT"}</button>
             <button className="btn outline" onClick={resetElemento}>Limpiar</button>
           </div>
         </>
