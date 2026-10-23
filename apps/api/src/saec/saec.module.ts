@@ -1,4 +1,5 @@
 import { CODIGO_UNIDAD_SAEC } from "../ot/laboratorio-ot";
+import { fijarPlazoPorDefecto } from "../ot/plazo-defecto";
 import { generarCodigoOt } from "../common/codigo";
 import {
   BadRequestException,
@@ -1100,6 +1101,8 @@ export class EvidenciaController extends SaecBase {
           d11[0].id, req?.user?.sub ?? null,
         );
         otId = ot[0].id;
+        // B-010 (frente c1): la OT del SAEC también nace con su fecha de compromiso.
+        await fijarPlazoPorDefecto(tx, tenantId, otId!);
         await tx.$executeRawUnsafe(
           `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
            VALUES ($1::uuid, $2::uuid, 'laboratorio', $3::jsonb, $4::uuid)`,

@@ -423,10 +423,12 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
   },
   {
     categoria: "ot_plazo",
-    titulo: "Plazo de la OT de internación",
-    donde: "BPCH › Internaciones: fecha de compromiso de la OT al generarla (hoy en Chile + el plazo). Las OT ya generadas no cambian.",
-    porConfirmar: "Plazo real de la OT de internación (EP-06).",
+    titulo: "Plazo de la OT (fecha de compromiso al nacer)",
+    donde:
+      "Toda OT nace con fecha de compromiso = hoy en Chile + el plazo: el del laboratorio responsable (tabla siguiente), si no el de su origen y si no el plazo por defecto. La OT de una cotización con plazo usa el de la cotización. Las OT ya generadas no cambian; la jefatura puede fijar otra fecha.",
+    porConfirmar: "Plazo estándar de la OT por origen y laboratorio (carta de consultas MET-09; EP-06 para la internación).",
     codigos: {
+      defecto_dias: { tipo: "entero", nombre: "Plazo por defecto (OT directa, institucional y el resto)", min: 1, max: 365, unidad: "días corridos", porDefecto: "10" },
       internacion_dias: {
         tipo: "entero",
         nombre: "Plazo de la OT de internación",
@@ -435,7 +437,17 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         unidad: "días corridos",
         porDefecto: "10",
       },
+      produccion_nacional_dias: { tipo: "entero", nombre: "Plazo de la OT de Producción Nacional", min: 1, max: 365, unidad: "días corridos", porDefecto: "10" },
+      prototipo_dias: { tipo: "entero", nombre: "Plazo de la OT de prototipo", min: 1, max: 365, unidad: "días corridos", porDefecto: "10" },
+      reinspeccion_dias: { tipo: "entero", nombre: "Plazo de la OT de reinspección", min: 1, max: 365, unidad: "días corridos", porDefecto: "10" },
     },
+  },
+  {
+    categoria: "ot_plazo_laboratorio",
+    titulo: "Plazo de la OT por laboratorio",
+    donde: "Manda sobre el plazo del origen y el por defecto para las OT de ese laboratorio responsable.",
+    porConfirmar: "Plazo estándar por laboratorio (MET-09).",
+    patron: { tipo: "entero", nombre: "Plazo de la OT del laboratorio", min: 1, max: 365, unidad: "días corridos", alta: "laboratorio", porDefecto: "10" },
   },
   // --- Avisos y oficio conductor (frente r4c, T20 y T03) ---
   {
