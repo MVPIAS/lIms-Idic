@@ -70,8 +70,8 @@ export default function ClienteSelector({
   if (value) {
     return (
       <div className="field span-2">
-        <label>Cliente <span className="req">*</span></label>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <label id="cli-sel-l">Cliente <span className="req">*</span></label>
+        <div role="group" aria-labelledby="cli-sel-l" style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span
             className="pill blue"
             style={{ fontSize: 13, padding: "6px 10px", flex: 1, display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -87,8 +87,9 @@ export default function ClienteSelector({
 
   return (
     <div className="field span-2" ref={boxRef} style={{ position: "relative" }}>
-      <label>Cliente <span className="req">*</span></label>
+      <label htmlFor="cli-sel">Cliente <span className="req">*</span></label>
       <input
+        id="cli-sel"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onFocus={() => { if (resultados.length) setAbierto(true); }}
