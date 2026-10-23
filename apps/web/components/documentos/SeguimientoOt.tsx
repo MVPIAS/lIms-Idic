@@ -167,7 +167,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
                     <td>Oficio conductor</td>
                     <td><Link href={`/oficios/${o.id}` as any} style={{ color: "var(--accent)" }}>{o.numero ?? "(borrador)"}</Link></td>
                     <td>—</td>
-                    <td>{fechaDia(o.fecha)}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{fechaDia(o.fecha)}</td>
                     <td style={{ fontSize: 11.5 }}>{o.estado}{o.despachoNumero ? ` · despacho Nº ${o.despachoNumero}` : ""} · {o.materia}</td>
                   </tr>
                 ))}
@@ -176,7 +176,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
                     <td>{r.tipo}</td>
                     <td>{r.numero}{r.version > 1 ? <small style={{ color: "var(--muted)" }}> · v{r.version}</small> : null}</td>
                     <td>{r.copias}</td>
-                    <td>{fechaDia(r.fecha)}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{fechaDia(r.fecha)}</td>
                     <td style={{ fontSize: 11.5 }}>
                       {r.archivoNombre ? (
                         <button type="button" className="btn ghost sm" onClick={() => descargar(otId, r.id, r.archivoNombre)}>⬇ {r.archivoNombre}</button>
@@ -190,7 +190,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
                     <td>Envío</td>
                     <td>{e.guia ?? "—"}</td>
                     <td>—</td>
-                    <td>{fechaDia(e.fecha)}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{fechaDia(e.fecha)}</td>
                     <td style={{ fontSize: 11.5 }}>
                       {MEDIOS_ENVIO.find((m) => m.valor === e.medio)?.texto ?? e.medio} · a {e.destinatario}: {(e.documentos ?? []).map((x: any) => x.numero).join(", ")}
                       {e.factura ? ` · factura ${e.factura}` : ""}

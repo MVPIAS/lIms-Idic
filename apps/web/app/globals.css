@@ -267,8 +267,10 @@ a.bandeja-item:hover{transform:translateY(-1px);box-shadow:0 8px 20px rgba(24,33
 .bandeja-num{font-size:26px;font-weight:800;line-height:1.1}
 .bandeja-tit{font-weight:700;font-size:13px;margin-top:2px}
 .bandeja-desc{font-size:11.5px;color:var(--muted);margin-top:3px}
-.bandeja-lista{list-style:none;margin:8px 0 0;padding:6px 0 0;border-top:1px solid var(--line);display:grid;gap:2px}
-.bandeja-lista a{display:flex;gap:6px;align-items:baseline;padding:3px 4px;border-radius:6px;color:inherit;text-decoration:none;font-size:12px;min-width:0}
+.bandeja-item{min-width:0;overflow:hidden}
+.bandeja-lista{list-style:none;margin:8px 0 0;padding:6px 0 0;border-top:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr);gap:2px;min-width:0}
+.bandeja-lista li{min-width:0}
+.bandeja-lista a{display:flex;gap:6px;align-items:baseline;padding:3px 4px;border-radius:6px;color:inherit;text-decoration:none;font-size:12px;min-width:0;overflow:hidden}
 .bandeja-lista a:hover,.bandeja-lista a:focus-visible{background:var(--bg);outline:2px solid transparent}
 .bandeja-lista a:focus-visible{box-shadow:0 0 0 2px var(--accent)}
 .bandeja-lista b{font-weight:700;white-space:nowrap}
@@ -298,6 +300,11 @@ a.kpi:hover{box-shadow:0 8px 20px rgba(24,33,47,.10)}
 .ruta-ot .ruta-tit{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:4px 9px 6px}
 .ruta-ot .ruta-cargando{font-size:12px;color:var(--muted);margin:4px 9px 8px}
 .ruta-ot .step{cursor:default}
+/* Barra horizontal de fases de los expedientes BPCH (frente r4c, BL-216/217): en pantallas
+   estrechas se desplaza dentro de su propio marco, no la página. */
+.barra-fases{display:flex;gap:2px;overflow-x:auto;align-items:flex-start;padding:10px 8px}
+.barra-fases .step{flex:1 1 0;min-width:112px;flex-direction:column;align-items:center;text-align:center;gap:5px;cursor:default}
+.barra-fases .step:not(:last-child):before{left:calc(50% + 14px);right:calc(-50% + 12px);top:16px;bottom:auto;width:auto;height:2px}
 .ruta-ot .step:hover{background:transparent}
 .ruta-ot .step.now{background:#e6f4f6}
 .ruta-ot .step.now .txt{font-weight:700;color:var(--primary)}

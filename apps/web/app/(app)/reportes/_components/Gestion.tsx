@@ -13,6 +13,11 @@ import { toast } from "@/components/ui/feedback";
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}` });
 const pctTxt = (v: number | null) => (v === null ? "—" : `${num(v, 1)} %`);
+const ESTADO_OT: Record<string, string> = {
+  recepcionada: "Recepcionada", recibida: "Recibida", en_analisis: "En análisis", validacion: "En validación",
+  finalizada: "Finalizada", informada: "Informada", cerrada: "Cerrada", anulada: "Anulada",
+};
+const textoEstado = (e: string) => ESTADO_OT[e] ?? e.replace(/_/g, " ");
 const n1 = (v: number | null) => (v === null ? "—" : num(v, 1));
 
 export default function Gestion({ rango }: { rango: string }) {
@@ -74,7 +79,7 @@ export default function Gestion({ rango }: { rango: string }) {
       </div>
       {tabla(
         "OT por laboratorio y estado",
-        ["Laboratorio", ...est.estados, "Total"],
+        ["Laboratorio", ...est.estados.map(textoEstado), "Total"],
         est.filas.map((f: any) => [f.laboratorio, ...est.estados.map((e: string) => f.porEstado[e]), f.total]),
         "Sin OT en el período.",
         est.estados.map((_: string, i: number) => i + 1).concat(est.estados.length + 1),
@@ -104,7 +109,7 @@ export default function Gestion({ rango }: { rango: string }) {
       {tabla(
         `Trazabilidad cotización → OT → factura${d.trazabilidad.length >= 1000 ? " (primeras 1000)" : ""}`,
         ["Cotización", "OT", "Laboratorio", "Estado OT", "Factura", "Estado factura", "Total"],
-        d.trazabilidad.map((t: any) => [t.cotizacion ?? "—", t.ot, t.laboratorio ?? "—", t.estadoOt, t.factura ?? "—", t.estadoFactura ?? "—", t.total === null ? "—" : clp(t.total)]),
+        d.trazabilidad.map((t: any) => [t.cotizacion ?? "—", t.ot, t.laboratorio ?? "—", textoEstado(t.estadoOt), t.factura ?? "—", t.estadoFactura ?? "—", t.total === null ? "—" : clp(t.total)]),
         "Sin OT en el período.",
         [6],
       )}

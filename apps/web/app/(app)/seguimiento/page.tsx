@@ -39,10 +39,31 @@ function Seguimiento() {
   const [filas, setFilas] = useState<any[] | null>(null);
   const [error, setError] = useState("");
   const actual = VISTAS.find((v) => v.clave === vista) ?? visibles[0];
+  // Cuántos hay en cada pestaña: se abre en la primera con pendientes.
+  const [conteos, setConteos] = useState<Record<string, number>>({});
+  const claves = visibles.map((v) => v.clave).join(",");
 
   useEffect(() => {
-    if (listo && !vista && visibles[0]) setVista(visibles[0].clave);
-  }, [listo, vista, visibles]);
+    if (!listo || !claves) return;
+    let vivo = true;
+    (async () => {
+      const pares = await Promise.all(
+        claves.split(",").map(async (c) => {
+          try {
+            return [c, (await llamar<{ total: number }>("GET", `/seguimiento/pendientes?vista=${c}`)).total] as const;
+          } catch {
+            return [c, 0] as const;
+          }
+        }),
+      );
+      if (!vivo) return;
+      const m = Object.fromEntries(pares);
+      setConteos(m);
+      if (!vista) setVista(pares.find(([, n]) => n > 0)?.[0] ?? pares[0][0]);
+    })();
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listo, claves]);
 
   const cargar = useCallback(async () => {
     if (!actual) return;
@@ -76,6 +97,7 @@ function Seguimiento() {
             {visibles.map((v) => (
               <button key={v.clave} type="button" role="tab" aria-selected={actual?.clave === v.clave} className={`tab${actual?.clave === v.clave ? " active" : ""}`} onClick={() => setVista(v.clave)}>
                 {v.titulo}
+                {conteos[v.clave] !== undefined && <span className={`pill ${conteos[v.clave] ? "amber" : "gray"}`} style={{ marginLeft: 6 }}>{conteos[v.clave]}</span>}
               </button>
             ))}
           </div>
