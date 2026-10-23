@@ -8,6 +8,7 @@
 /* Codificación Única · CNC-DGMN                                              */
 /* ========================================================================== */
 
+import { porcentajeChile } from "../../common/numero-chile";
 export const LISTADOS_CODIFICACION = ["EXPLOSIVOS", "SUSTANCIAS_QUIMICAS"] as const;
 export type ListadoCodificacion = (typeof LISTADOS_CODIFICACION)[number];
 export const ESTADOS_CODIFICACION = ["VIGENTE", "EN_RECESO"] as const;
@@ -434,7 +435,7 @@ export function porcentajesTasaCambiados(
   parametros: { tasaPct: number | null; ivaPct: number | null },
 ): string[] {
   const out: string[] = [];
-  if (pedido.tasaPct != null && pedido.tasaPct !== parametros.tasaPct) out.push(`tasa ${pedido.tasaPct} % (parámetro: ${parametros.tasaPct ?? "sin fijar"} %)`);
-  if (pedido.ivaPct != null && pedido.ivaPct !== parametros.ivaPct) out.push(`IVA ${pedido.ivaPct} % (parámetro: ${parametros.ivaPct ?? "sin fijar"} %)`);
+  if (pedido.tasaPct != null && pedido.tasaPct !== parametros.tasaPct) out.push(`tasa ${porcentajeChile(pedido.tasaPct)} (parámetro: ${parametros.tasaPct != null ? porcentajeChile(parametros.tasaPct) : "sin fijar"})`);
+  if (pedido.ivaPct != null && pedido.ivaPct !== parametros.ivaPct) out.push(`IVA ${porcentajeChile(pedido.ivaPct)} (parámetro: ${parametros.ivaPct != null ? porcentajeChile(parametros.ivaPct) : "sin fijar"})`);
   return out;
 }
