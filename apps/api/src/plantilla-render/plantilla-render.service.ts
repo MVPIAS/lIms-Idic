@@ -306,7 +306,37 @@ export class PlantillaRenderService {
           orderBy: { createdAt: "asc" },
         });
     const atencion = atencionInforme({ solicitanteOt: ot.solicitante, fichaCliente: ot.cliente, contactoPrincipal });
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion };
+    const organigrama = await this.organigramaDe(ot.unidadPrincipal);
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion, organigrama };
+  }
+
+  /**
+   * Laboratorio, sección y departamento de la OT para el membrete
+   * ({{unidad.nombre}}, {{seccion.nombre}}, {{departamento.nombre}}; B-026 / B-075).
+   */
+  private async organigramaDe(unidadId: string | null) {
+    const vacio = { codigo: "", nombre: "" };
+    const r = { unidad: vacio, seccion: vacio, departamento: vacio };
+    if (!unidadId) return r;
+    try {
+      const filas = await this.prisma.$queryRawUnsafe<{ codigo: string; nombre: string; tipo: string; nivel: number }[]>(
+        `WITH RECURSIVE cadena AS (
+           SELECT id, padre_id, codigo, nombre, tipo, 0 AS nivel FROM unidad WHERE id = $1::uuid
+           UNION ALL
+           SELECT u.id, u.padre_id, u.codigo, u.nombre, u.tipo, c.nivel + 1 FROM unidad u JOIN cadena c ON u.id = c.padre_id WHERE c.nivel < 20)
+         SELECT codigo, nombre, tipo, nivel FROM cadena ORDER BY nivel`,
+        unidadId,
+      );
+      const de = (tipo: string) => filas.find((f) => f.tipo === tipo);
+      const f0 = filas[0];
+      return {
+        unidad: f0 ? { codigo: f0.codigo, nombre: f0.nombre } : vacio,
+        seccion: de("SECCION") ? { codigo: de("SECCION")!.codigo, nombre: de("SECCION")!.nombre } : vacio,
+        departamento: de("DEPARTAMENTO") ? { codigo: de("DEPARTAMENTO")!.codigo, nombre: de("DEPARTAMENTO")!.nombre } : vacio,
+      };
+    } catch {
+      return r;
+    }
   }
 
   /**
@@ -515,6 +545,9 @@ export class PlantillaRenderService {
       n_muestras: String(muestras.length),
       n_resultados: String(resultados.length),
       laboratorio: ot.subdireccionAsignada ?? "",
+      unidad: ctx.organigrama.unidad,
+      seccion: ctx.organigrama.seccion,
+      departamento: ctx.organigrama.departamento,
 
       // --- alias planos heredados: los escalares del motor anterior, para que
       // un cuerpo escrito contra la API vieja siga rellenándose ---
@@ -772,6 +805,9 @@ export class PlantillaRenderService {
       fecha: fmtFecha(fecha),
       urlVerificacion: this.baseVerificacion,
       borrador: true,
+      // B-026 / B-075: la vista previa muestra las firmas del circuito que tendrá el documento
+      // (matriz de firmas de su tipo y laboratorio), no las líneas fijas de la plantilla.
+      firmas: await this.firmasPrevistas(otId, plantillaId, tenantId, cob, opciones.tipoDocumento ?? null),
     };
 
     return {
@@ -788,6 +824,41 @@ export class PlantillaRenderService {
         this.titulo(cert.numero, plantilla.nombre, ctx.ot.codigo),
       ),
     };
+  }
+
+  /**
+   * Firmas que tendrá el documento según la matriz (todas pendientes), para la
+   * vista previa. Si la matriz no resuelve pasos, undefined: se dejan las de la plantilla.
+   */
+  private async firmasPrevistas(
+    otId: string,
+    plantillaId: string,
+    tenantId: string | undefined,
+    cob: { unidadDocumento: string | null } | null,
+    indicado: string | null,
+  ): Promise<FirmaEstampada[] | undefined> {
+    try {
+      const [ot, plantilla] = await Promise.all([
+        this.prisma.ordenTrabajo.findFirst({ where: { id: otId, ...(tenantId ? { tenantId } : {}) }, select: { unidadPrincipal: true, tenantId: true, origenTrabajo: true } }),
+        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true, repid: true, tipoDocumento: true } }),
+      ]);
+      if (!ot || !plantilla) return undefined;
+      const unidad = cob ? cob.unidadDocumento : ot.unidadPrincipal;
+      if (!unidad) return undefined;
+      const deUnidad = await this.tipoDocumentoDeUnidad(unidad);
+      const { tipo } = tipoDocumentoPorDefecto({ indicado, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoDePlantilla: plantilla.tipoDocumento, tipoUnidad: deUnidad?.tipo ?? null });
+      const res = await this.matriz.resolver(tipo, unidad, ot.tenantId, { otInterna: esOtInterna(ot.origenTrabajo) });
+      if (!res.pasos.length) return undefined;
+      return res.pasos.map((p) => ({
+        accion: p.accion,
+        rol: p.rol.nombre,
+        unidad: p.unidad?.codigo ?? null,
+        nombre: p.responsables.map((r) => r.nombre).filter(Boolean).join(" / ") || null,
+        pendiente: true,
+      }));
+    } catch {
+      return undefined;
+    }
   }
 
   /**

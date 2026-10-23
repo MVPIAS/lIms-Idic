@@ -6,6 +6,7 @@
 --   B-003 · El oficio conductor tiene su propia serie: no repite el número de
 --           un documento emitido (disparador de unicidad oficio ↔ documento).
 --   B-022 · La plantilla guarda su tipo de documento («Automático» lo toma de ella).
+--   B-026 · Cuerpo de la plantilla IVCOR según IDIC-PG09 Anexo 01.
 -- Aditivo e idempotente. Va ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
@@ -73,3 +74,70 @@ UPDATE plantilla_informe p
  WHERE p.repid = v.repid
    AND (v.nombre IS NULL OR p.nombre = v.nombre)
    AND p.tipo_documento IS NULL;
+
+-- -----------------------------------------------------------------------------
+-- B-026 · Cuerpo de la plantilla IVCOR (IDIC-PG09 Anexo 01)
+-- -----------------------------------------------------------------------------
+-- La plantilla «Informe de Verificación de Calidad» (IVCOR) no tenía cuerpo y se
+-- emitía con el genérico del tipo IVC: membrete «Laboratorio de Ensayo y
+-- Calibración», producto terminado tras la conclusión y firmas fijas. Se carga
+-- la estructura del Anexo 01 (portada; I Antecedentes; II Material; III
+-- Trabajos efectuados; IV Resultados; V Conclusión) con el membrete del
+-- laboratorio de la OT. Las firmas las pone el circuito de la matriz (en la
+-- vista previa y en el documento). Solo se carga si la plantilla sigue vacía:
+-- lo que ya haya cargado Calidad no se pisa. Ajustable con las respuestas del IDIC.
+UPDATE plantilla_informe
+   SET cuerpo_html = $ivc$<div class="membrete">
+  <div class="escudo">IDIC</div>
+  <div class="org">
+    <b>INSTITUTO DE INVESTIGACIONES Y CONTROL</b>
+    <span>Ejército de Chile &middot; {{departamento.nombre}} &middot; {{seccion.nombre}} &middot; {{unidad.nombre}}</span>
+  </div>
+  <div class="doc">
+    <b>{{certificado.numero}}</b>
+    <span>IDIC-PG09-Anexo01 &middot; {{plantilla.version}}</span>
+  </div>
+</div>
+
+<h1>INFORME DE VERIFICACIÓN DE CALIDAD</h1>
+{{portada}}
+
+<h2>Índice</h2>
+<p>I. Antecedentes · II. Material · III. Trabajos efectuados · IV. Resultados · V. Conclusión</p>
+
+<h2>I. Antecedentes</h2>
+<table class="meta">
+  <tr><th>Solicitante</th><td colspan="3">{{cliente.razonSocial}}</td></tr>
+  <tr><th>Atención</th><td>{{ot.solicitante}}</td><th>O/T</th><td>{{ot.codigo}} · {{ot.fechaRecepcion}}</td></tr>
+</table>
+{{#si ot.descripcionTrabajo}}<p>{{ot.descripcionTrabajo}}</p>{{/si}}
+
+<h2>II. Material</h2>
+{{tabla_muestras}}
+{{identificacion_muestras}}
+
+<h2>III. Trabajos efectuados</h2>
+<p>Plan de muestreo, normas, métodos y especificaciones técnicas aplicadas:</p>
+{{tabla_metodos}}
+
+<h2>IV. Resultados</h2>
+{{tabla_resultados}}
+{{#si aql.hay}}
+<h3>Inspección por atributos (AQL)</h3>
+{{tabla_aql}}
+{{/si}}
+{{producto_terminado}}
+{{referencias}}
+<p class="nota">La «Condición» es la correspondencia entre el «Requisito» y el «Resultado»: «Cumple» o «No cumple».</p>
+
+<h2>V. Conclusión</h2>
+{{conclusion_texto}}
+
+{{anexo_fotografico}}
+
+<div class="firmas">
+  <div class="firma"><span class="linea"></span>Aprobación técnica · Jefe de Sección</div>
+  <div class="firma"><span class="linea"></span>Oficialización · Jefe de Departamento</div>
+</div>$ivc$
+ WHERE repid = 'IVCOR'
+   AND (cuerpo_html IS NULL OR btrim(cuerpo_html) = '');
