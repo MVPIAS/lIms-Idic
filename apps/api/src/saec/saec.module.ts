@@ -55,6 +55,7 @@ import {
   TIPOS_PERITAJE,
   erroresIngresoEvidencia,
   erroresSolicitudPrestamo,
+  erroresEstadoHit,
   erroresTransicionCaso,
   prestamoVencido,
 } from "./reglas-saec";
@@ -2453,15 +2454,21 @@ export class IbisController extends SaecBase {
   @RequierePermiso("peritaje.registrar")
   async cambiarEstadoHit(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const tenantId = this.tenantId(req);
-    const { estado } = z.object({ estado: z.enum(["sin_confirmar", "confirmado", "descartado"]) }).parse(body);
+    const { estado, motivo } = z.object({ estado: z.enum(["sin_confirmar", "confirmado", "descartado"]), motivo: z.string().trim().max(1000).nullish() }).parse(body);
+    const [actual] = await this.prisma.$queryRawUnsafe<{ estado: string }[]>(
+      `SELECT estado FROM ibis_hit WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`, id, tenantId);
+    if (!actual) throw new NotFoundException("Coincidencia no encontrada");
+    // B-044: se confirma o descarta desde la ficha de la evidencia, con motivo.
+    const errores = erroresEstadoHit(actual.estado, estado, motivo);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
-      `UPDATE ibis_hit SET estado = $3, confirmado_por = $4::uuid
-        WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL
+      `UPDATE ibis_hit SET estado = $3, confirmado_por = $4::uuid, estado_motivo = $5, estado_at = now(), updated_at = now()
+        WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL AND estado = $6
         RETURNING *`,
-      id, tenantId, estado, req?.user?.sub ?? null,
+      id, tenantId, estado, req?.user?.sub ?? null, motivo!.trim(), actual.estado,
     );
-    if (!rows.length) throw new NotFoundException("Coincidencia no encontrada");
-    await this.auditar(req, "ibis", id, "editar", { hitEstado: estado });
+    if (!rows.length) throw new ConflictException("La coincidencia cambió mientras tanto: recargue la ficha.");
+    await this.auditar(req, "ibis", id, "editar", { hitEstado: estado, motivo: motivo!.trim() });
     return rows[0];
   }
 }

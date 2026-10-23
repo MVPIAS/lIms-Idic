@@ -10,6 +10,7 @@
 --   B-075 · Membrete «Laboratorio Químico Central» en el informe del LQC.
 --   B-029 · Entrega del certificado externo validado de Metrología.
 --   B-043 · Valores del certificado del patrón (corrección, U, deriva) para el motor.
+--   B-044 · Motivo y fecha al confirmar o descartar una coincidencia IBIS.
 -- Aditivo e idempotente. Va ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
@@ -183,3 +184,9 @@ UPDATE met_patron
      "2 g E2": {"U": 0.012, "c": -0.021, "d": 0.017}, "5 g E2": {"U": 0.016, "c": -0.031, "d": 0.007}, "10 g E2": {"U": 0.02, "c": 0.029, "d": 0.02},
      "20 g E2": {"U": 0.025, "c": -0.053, "d": 0.021}, "50 g E2": {"U": 0.03, "c": -0.05, "d": 0.01}}'::jsonb
  WHERE codigo = 'PM-01' AND serie = '15884' AND valores_certificado IS NULL AND deleted_at IS NULL;
+
+-- -----------------------------------------------------------------------------
+-- B-044 · Confirmar o descartar una coincidencia IBIS con motivo
+-- -----------------------------------------------------------------------------
+ALTER TABLE ibis_hit ADD COLUMN IF NOT EXISTS estado_motivo TEXT;
+ALTER TABLE ibis_hit ADD COLUMN IF NOT EXISTS estado_at     TIMESTAMPTZ;

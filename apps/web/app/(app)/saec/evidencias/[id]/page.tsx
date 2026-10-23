@@ -7,6 +7,7 @@ import { fechaHora } from "@/lib/format";
 import { validarFormulario } from "@/lib/validate";
 import Peritajes from "./_components/Peritajes";
 import Prestamos from "./_components/Prestamos";
+import CoincidenciasIbis from "./_components/CoincidenciasIbis";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -309,29 +310,8 @@ export default function EvidenciaFichaPage() {
       {/* --- EP-11 11.34 · peritajes --- */}
       <Peritajes evidenciaId={id} peritajes={e.peritajes ?? []} onCambio={cargar} />
 
-      {/* --- RF-K03.2 · coincidencias IBIS --- */}
-      <div className="card card--table" style={{ marginBottom: 12 }}>
-        <h3 style={{ marginTop: 0 }}>Coincidencias balísticas (IBIS)</h3>
-        <table className="data">
-          <thead>
-            <tr><th>Evidencia A</th><th>Evidencia B</th><th className="num">Score</th><th>Estado</th><th>Fecha</th></tr>
-          </thead>
-          <tbody>
-            {(e.hits ?? []).map((h: any) => (
-              <tr key={h.id}>
-                <td className="codigo">{h.evidencia_a_codigo ?? h.uuid_evidencia_a ?? "—"}</td>
-                <td className="codigo">{h.evidencia_b_codigo ?? h.uuid_evidencia_b ?? "—"}</td>
-                <td className="num">{h.score ?? "—"}</td>
-                <td><span className={`pill ${h.estado === "confirmado" ? "green" : h.estado === "descartado" ? "gray" : "amber"}`}>{h.estado}</span></td>
-                <td>{fechaHora(h.fecha_hit)}</td>
-              </tr>
-            ))}
-            {(e.hits ?? []).length === 0 && (
-              <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: 14 }}>Sin coincidencias.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* --- RF-K03.2 · coincidencias IBIS (B-044: confirmar / descartar con motivo) --- */}
+      <CoincidenciasIbis hits={e.hits ?? []} onCambio={cargar} />
 
       {/* --- EP-11 11.33 · préstamos --- */}
       <Prestamos evidencia={e} onCambio={cargar} />
