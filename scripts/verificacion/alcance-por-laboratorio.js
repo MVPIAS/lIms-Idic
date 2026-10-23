@@ -146,7 +146,10 @@ m as (
  union all select 'factura', f.id, array_remove(array[(select uc from ou where ou.id = f.ot_id)] || coalesce((select u from cot where cot.id = f.cotizacion_id), '{}'), null) from factura f
  union all select 'cliente', cl.id, array_remove(array(select distinct uc from ou join orden_trabajo o on o.id = ou.id where o.cliente_id = cl.id
                                    union select unnest(cot.u) from cot join cotizacion c on c.id = cot.id where c.cliente_id = cl.id), null) from cliente cl
- union all select 'oportunidad', op.id, array_remove(array(select uc from ou where ou.id = op.ot_id union select unnest(u) from cot where cot.id = op.cotizacion_id), null) from oportunidad op
+ -- r4d: la oportunidad es del laboratorio que indica (unidad_id); Comercial (DCO) las ve todas.
+ union all select 'oportunidad', op.id, array_remove(array[(select un.codigo from unidad un where un.id = op.unidad_id)], null) from oportunidad op
+ -- r4d: apelaciones (laboratorio de su OT) y reclamos (no conformidad de tipo reclamo de cliente).
+ union all select 'apelacion', a.id, array_remove(array[ou.uc], null) from apelacion a left join ou on ou.id = a.ot_id
  union all select 'orden_interna', oi.id, array_remove(array(select distinct x from unnest(array[ou.uc,
               (select c from famu where famu.fid = oi.origen_lab limit 1), (select c from famu where famu.fid = oi.destino_lab limit 1)]) x), null)
              from orden_interna oi left join ou on ou.id = oi.ot_id
@@ -299,13 +302,17 @@ const LISTADOS = [
   // Fase 1 (decisión del usuario): se mide y se informa, no cuenta como fallo.
   { n: "Cotizaciones (fase 1)", r: "/cotizaciones?limit=200", p: "cotizacion.ver", t: "cotizacion", regla: "unidad", fase1: true, href: "/cotizaciones" },
   { n: "Clientes (fase 1)", r: "/clientes?limit=200", p: "cliente.ver", t: "cliente", regla: "unidad", fase1: true, href: "/clientes" },
-  { n: "Oportunidades CRM (fase 1)", r: "/oportunidades?limit=200", p: "cotizacion.ver", t: "oportunidad", regla: "unidad", fase1: true, href: "/crm" },
+  { n: "Oportunidades CRM (fase 1)", r: "/oportunidades?limit=200", p: "cotizacion.ver", t: "oportunidad", regla: "unidad", fase1: true, dco: true, href: "/crm" },
+  // Frente r4d: tasa 1,5 % mensual (la SCC y el DCO ven todas), reclamos (el DCO los ve todos) y apelaciones.
+  { n: "Tasa 1,5 % mensual (r4d)", r: `/internaciones/tasa-mensual?mes=${new Date().toISOString().slice(0, 7)}`, p: "bpch.tasa.gestionar", t: "ot", regla: "bpch", dco: true, href: "/bpch/tasa-mensual" },
+  { n: "Reclamos de clientes (r4d)", r: "/reclamos", p: "reclamo.ver", t: "ot", regla: "unidad", dco: true, href: "/reclamos" },
+  { n: "Apelaciones (r4d)", r: "/apelaciones", p: "apelacion.ver", t: "apelacion", regla: "unidad", href: "/apelaciones" },
   { n: "Facturas (fase 1)", r: "/facturas?limit=200", p: "factura.ver", t: "factura", regla: "unidad", fase1: true, href: "/facturas" },
 ];
 
 function filasDe(j) {
   if (Array.isArray(j)) return j;
-  for (const k of ["data", "items", "puntos"]) if (j && Array.isArray(j[k])) return j[k];
+  for (const k of ["data", "items", "puntos", "filas"]) if (j && Array.isArray(j[k])) return j[k];
   return null;
 }
 function unidadesFila(f, tipo) {
@@ -395,7 +402,8 @@ async function main() {
       if (L.regla === "comun" || e.global) continue;
       const filas = filasDe(r.json);
       if (!filas) continue;
-      const scc = L.regla === "bpch" && e.unidades.has("SCC");
+      // La SCC ve todo lo del BPCH; con dco, el Departamento Comercial ve todo (r4d).
+      const scc = (L.regla === "bpch" && e.unidades.has("SCC")) || (L.dco && e.unidades.has("DCO"));
       if (scc) continue;
       let fuera = 0;
       let ejemplo = "";
@@ -465,13 +473,18 @@ async function main() {
       ["ot", "ot.ver", (id) => `/formularios/ot/${id}/trabajo`],
       ["resultado", "resultado.ver", (id) => `/formularios/resultado/${id}/micro`],
       ["resultado", "resultado.ver", (id) => `/formularios/resultado/${id}/sensorial`],
+      // Frente r4d: datos del encargo, recepción en DCO, distribución de la muestra, apelación.
+      ["ot", "ot.ver", (id) => `/ot/${id}/encargo`],
+      ["ot", "ot.ver", (id) => `/ot/${id}/recepcion-dco`],
+      ["muestra", "muestra.ver", (id) => `/muestras/${id}/distribucion`],
+      ["oportunidad", "cotizacion.ver", (id) => `/oportunidades/${id}`, null, "dco"],
     ];
     for (const [tipo, perm, ruta, codigos, regla] of DETALLE) {
       if (!tiene(perm)) continue;
       const e = esperado(username, perm);
       if (regla === "saec") {
         if (enD11(e)) continue;
-      } else if (e.global || (regla === "bpch" && e.unidades.has("SCC"))) continue;
+      } else if (e.global || (regla === "bpch" && e.unidades.has("SCC")) || (regla === "dco" && e.unidades.has("DCO"))) continue;
       const cand = (V.mapa || []).filter((r) => r.t === tipo && (regla === "saec" || ((r.u || []).length > 0 && !(r.u || []).some((c) => e.unidades.has(c)))));
       if (!cand.length) continue;
       const r = await llamar(username, "GET", ruta(cand[0].id));

@@ -467,6 +467,8 @@ async function main() {
 
   await paso("BL-219 · Reclamos: Comercial registra, responde y cierra; el analista no", async () => {
     await exigir(403, U.lqcAnalista, "GET", "/reclamos");
+    await ok(U.auditor, "GET", "/reclamos");
+    await exigir(403, U.auditor, "POST", "/reclamos", { fecha: hoyCl(), clienteId: C.cliente.id, motivo: "Prueba de solo lectura", responsableRol: "JEFE_LAB" });
     await exigir(400, U.ventas, "POST", "/reclamos", { fecha: hoyCl(), clienteId: C.cliente.id, motivo: "x", responsableRol: "JEFE_LAB" });
     const otro = await ok(U.ventas, "POST", "/clientes", { rut: rutValido(77000000 + (Number(sello.slice(-5)) % 99999)), razonSocial: `Otro cliente ${sello}`, tipo: "particulares" });
     await exigir(400, U.ventas, "POST", "/reclamos", { fecha: hoyCl(), clienteId: otro.id, otId: C.ot.id, motivo: "Informe con error de unidad", responsableRol: "JEFE_LAB" }, /otro cliente/);

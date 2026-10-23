@@ -29,7 +29,7 @@ const PILL: Record<Reclamo["estadoReclamo"], [string, string]> = { abierto: ["Ab
 
 export default function ReclamosPage() {
   return (
-    <RequierePermiso perm="reclamo.gestionar" titulo="los reclamos de clientes">
+    <RequierePermiso perm={["reclamo.ver", "reclamo.gestionar"]} titulo="los reclamos de clientes">
       <Reclamos />
     </RequierePermiso>
   );
@@ -37,7 +37,7 @@ export default function ReclamosPage() {
 
 function Reclamos() {
   const [filtro, setFiltro] = useState<"" | Reclamo["estadoReclamo"]>("");
-  const [datos, setDatos] = useState<{ data: Reclamo[]; roles: Rol[]; resumen: Record<string, number> } | null>(null);
+  const [datos, setDatos] = useState<{ data: Reclamo[]; roles: Rol[]; resumen: Record<string, number>; puedeGestionar?: boolean } | null>(null);
   const [error, setError] = useState("");
   const [nuevo, setNuevo] = useState(false);
   const [sel, setSel] = useState<Reclamo | null>(null);
@@ -61,7 +61,7 @@ function Reclamos() {
         titulo="Reclamos de clientes"
         subtitulo="Registro, respuesta y cierre de los reclamos de clientes. Cada reclamo queda con su responsable y su respuesta."
         migas={[{ label: "Comercial" }, { label: "Reclamos" }]}
-        acciones={<button className="btn primary sm" onClick={() => { setNuevo(true); setSel(null); }}>＋ Registrar reclamo</button>}
+        acciones={datos?.puedeGestionar ? <button className="btn primary sm" onClick={() => { setNuevo(true); setSel(null); }}>＋ Registrar reclamo</button> : undefined}
       />
       {error && <div className="alert warn" role="alert">{error}</div>}
       <div className="toolbar" style={{ gap: 6, flexWrap: "wrap" }}>
@@ -96,7 +96,7 @@ function Reclamos() {
         )}
       </div>
       {nuevo && datos && <Nuevo roles={datos.roles} onCerrar={() => setNuevo(false)} onHecho={async (r) => { setNuevo(false); toast.ok(`Reclamo ${r.codigo} registrado.`); await cargar(); setSel(r); }} />}
-      {sel && <Detalle r={sel} rol={rolDe(sel.responsableRol)} onCerrar={() => setSel(null)} onCambio={async (r) => { setSel(r); await cargar(); }} />}
+      {sel && <Detalle r={sel} rol={rolDe(sel.responsableRol)} gestiona={!!datos?.puedeGestionar} onCerrar={() => setSel(null)} onCambio={async (r) => { setSel(r); await cargar(); }} />}
     </div>
   );
 }
@@ -176,7 +176,7 @@ function Nuevo({ roles, onCerrar, onHecho }: { roles: Rol[]; onCerrar: () => voi
   );
 }
 
-function Detalle({ r, rol, onCerrar, onCambio }: { r: Reclamo; rol: string; onCerrar: () => void; onCambio: (r: Reclamo) => void }) {
+function Detalle({ r, rol, gestiona, onCerrar, onCambio }: { r: Reclamo; rol: string; gestiona: boolean; onCerrar: () => void; onCambio: (r: Reclamo) => void }) {
   const [respuesta, setRespuesta] = useState(r.respuesta ?? "");
   const [comentario, setComentario] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -192,7 +192,7 @@ function Detalle({ r, rol, onCerrar, onCambio }: { r: Reclamo; rol: string; onCe
       setOcupado(false);
     }
   };
-  const cerrado = r.estadoReclamo === "cerrado";
+  const cerrado = r.estadoReclamo === "cerrado" || !gestiona;
   return (
     <Panel titulo={<><span className="codigo">{r.codigo}</span> · {r.cliente}</>} modo="drawer" ancho={620} onCerrar={onCerrar}>
       <p style={{ margin: "0 0 6px", fontSize: 12.5 }}>

@@ -13,7 +13,7 @@ import { siguienteCodigoNc } from "./no-conformidad.reglas";
  * Reclamos de clientes (EP-00 9.2, BL-219) · vista comercial sobre las no
  * conformidades de tipo «reclamo_cliente».
  *
- *   GET  /reclamos                 · reclamo.gestionar · lista (abiertos, respondidos, cerrados)
+ *   GET  /reclamos                 · reclamo.ver · lista (abiertos, respondidos, cerrados)
  *   POST /reclamos                 · registrar: fecha, cliente y OT, motivo, rol responsable → «Registrar reclamo → responsable»
  *   POST /reclamos/:id/responder   · respuesta al cliente
  *   POST /reclamos/:id/cerrar      · cierre (exige la respuesta)
@@ -81,7 +81,7 @@ export class ReclamoController {
 
   /** null = todos (alcance global o DCO); si no, las unidades visibles. */
   private async unidades(req: any): Promise<string[] | null> {
-    const v = await this.alcance.filtroUnidades(req, "reclamo.gestionar");
+    const v = await this.alcance.filtroUnidades(req);
     if (v === null) return null;
     const dco = (await this.alcance.arbol(req?.user?.tenantId)).porCodigo.get("DCO")?.id;
     return dco && v.includes(dco) ? null : v;
@@ -97,7 +97,7 @@ export class ReclamoController {
   }
 
   @Get()
-  @RequierePermiso("reclamo.gestionar")
+  @RequierePermiso("reclamo.ver")
   async listar(@Query("estado") estado: string | undefined, @Req() req: any) {
     const u = await this.unidades(req);
     const f = await this.prisma.$queryRawUnsafe<any[]>(
@@ -107,8 +107,10 @@ export class ReclamoController {
       u,
     );
     const data = f.map((x) => ({ ...x, estadoReclamo: estadoReclamo(x) })).filter((x) => !estado || x.estadoReclamo === estado);
+    const permisos: string[] = req?.user?.permisos ?? [];
     return {
       data,
+      puedeGestionar: (req?.user?.roles ?? []).includes("SUPERADMIN") || permisos.includes("reclamo.gestionar"),
       roles: ROLES_RESPONSABLES.map((r) => ({ codigo: r, etiqueta: ETIQUETA_ROL_RESPONSABLE[r] })),
       resumen: {
         abiertos: f.filter((x) => estadoReclamo(x) === "abierto").length,
