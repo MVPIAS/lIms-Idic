@@ -104,10 +104,14 @@ export function diferencias(antes: Record<string, unknown> | null, despues: Reco
 
 /** Iniciales de una persona («Rosa Riquelme» → «R. R.»): en los documentos, los inspectores van por iniciales. */
 export function iniciales(nombre: string | null | undefined): string {
+  // B-093: solo las palabras del nombre (sin paréntesis, signos, números ni partículas):
+  // «Inspector 1 · SCC (prueba)» daba «I. ·. S..»; ahora «I. S.».
+  const PARTICULAS = new Set(["de", "del", "la", "las", "los", "y", "e", "da", "van", "von"]);
   return String(nombre ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
+    .replace(/\([^)]*\)/g, " ")
+    .split(/[^\p{L}'’]+/u)
+    .filter((p) => p && /^\p{L}/u.test(p) && !PARTICULAS.has(p.toLowerCase()))
     .slice(0, 3)
-    .map((p) => `${p[0].toUpperCase()}.`)
+    .map((p) => `${p[0].toLocaleUpperCase("es-CL")}.`)
     .join(" ");
 }

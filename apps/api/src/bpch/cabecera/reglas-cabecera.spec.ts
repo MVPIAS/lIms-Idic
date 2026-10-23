@@ -38,5 +38,9 @@ describe("BPCH · cabecera de inspección de la OT (EP-10 10.3)", () => {
     expect(diferencias({ lugarInspeccion: "A", comuna: null }, { lugarInspeccion: "B", comuna: null })).toEqual({ lugarInspeccion: { antes: "A", despues: "B" } });
     expect(diferencias(null, { lugarInspeccion: "A" })).toEqual({ lugarInspeccion: { antes: null, despues: "A" } });
     expect(iniciales("rosa elena riquelme soto")).toBe("R. E. R.");
+    // B-093: nombres con puntos, números, signos y paréntesis.
+    expect(iniciales("Inspector 1 · SCC (prueba)")).toBe("I. S.");
+    expect(iniciales("María de la Luz Ñúñez")).toBe("M. L. Ñ.");
+    expect(iniciales("J. P. Soto")).toBe("J. P. S.");
   });
 });
