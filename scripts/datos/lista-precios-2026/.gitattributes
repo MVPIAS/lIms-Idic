@@ -1,0 +1,2 @@
+# El CSV del IDIC se guarda tal cual (Windows-1252, fin de línea CRLF).
+*.csv -text
