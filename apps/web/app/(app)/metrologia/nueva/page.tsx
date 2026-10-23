@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { calcularCalibracion, nd, fmtN, fmtG, motorDe, LAB_NOMBRE, type Componente, type Divisores, type MotorInfo } from "@/lib/metrologia";
-import { corregida, numeroOVacio, type CondicionesHoja } from "@/lib/metrologiaFicha";
+import { corregida, leerValoresPatron, numeroOVacio, type CondicionesHoja } from "@/lib/metrologiaFicha";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import MotorPanel from "./MotorPanel";
@@ -148,6 +148,11 @@ export default function NuevaCalibracionPage() {
   const proc = useMemo(() => procs.find((p) => p.codigo === procKey), [procs, procKey]);
   const motor = useMemo(() => (proc ? motorDe(motores, proc.codigo, proc.motor) : undefined), [motores, proc]);
   // B-027: condiciones de la hoja de control (auxiliares elegidos y sus lecturas) para el motor.
+  // B-043: valores del certificado del primer patrón elegido que los tenga en el maestro.
+  const valoresMaestro = (() => {
+    const p = (D.patrones as string[]).map((id) => patrones.find((x) => x.id === id)).find((x) => x && x.valores_certificado && Object.keys(x.valores_certificado).length);
+    return p ? { codigo: p.codigo, valores: leerValoresPatron(p.valores_certificado) } : null;
+  })();
   // Se calcula en cada render: la hoja se edita en el mismo objeto D (MotorPanel compara por contenido).
   const condHoja: CondicionesHoja | null = (() => {
     const th = patrones.find((p) => p.id === D.aux.th), ba = patrones.find((p) => p.id === D.aux.ba);
@@ -202,7 +207,7 @@ export default function NuevaCalibracionPage() {
   }
   function up() { setD({ ...D }); }
 
-  async function guardar(extra: { motor?: { datos: any; opciones: Record<string, boolean> } }) {
+  async function guardar(extra: { motor?: { datos: any; opciones: Record<string, boolean> }; motivoValoresPatron?: string | null }) {
     if (!proc) return;
     if (vencidos.length) { setError(`No se puede guardar: ${vencidos.map((p: any) => p.codigo).join(", ")} está vencido a la fecha de calibración.`); return; }
     setSaving(true); setError("");
@@ -220,6 +225,7 @@ export default function NuevaCalibracionPage() {
           },
         } : {}),
         ...(extra.motor ? { motor: extra.motor } : { cond, puntos: gumPuntos() }),
+        ...(extra.motivoValoresPatron ? { motivoValoresPatron: extra.motivoValoresPatron } : {}),
       };
       const r = await fetch(`${API}/metrologia/calibraciones${editId ? `/${editId}` : ""}`, { method: editId ? "PUT" : "POST", headers: auth(), body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
@@ -419,8 +425,8 @@ export default function NuevaCalibracionPage() {
             <PuntosPanel key={procKey + (editId ?? "")} magnitud={proc.magnitud_nombre ?? proc.magnitud} unidadDefecto={proc.unidad}
               inicial={inicialMotor} guardando={saving} onGuardar={(m) => guardar({ motor: m })} />
           ) : motor ? (
-            <MotorPanel key={motor.it + procKey + (editId ?? "")} motor={motor} paridad={paridadMotor} fecha={fechaCal} condiciones={condHoja}
-              inicial={inicialMotor} guardando={saving} onGuardar={(m) => guardar({ motor: m })} />
+            <MotorPanel key={motor.it + procKey + (editId ?? "")} motor={motor} paridad={paridadMotor} fecha={fechaCal} condiciones={condHoja} valoresPatron={valoresMaestro}
+              inicial={inicialMotor} guardando={saving} onGuardar={(m, motivo) => guardar({ motor: m, motivoValoresPatron: motivo })} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div className="card"><div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-2,#eee)", display: "flex", alignItems: "center", gap: 8 }}>

@@ -190,3 +190,25 @@ describe("B-027 · condiciones de la hoja de control → motor", () => {
     expect(condicionesAlMotor({ ITV: 1 }, hoja).campos).toEqual([]);
   });
 });
+
+describe("B-043 · valores del patrón del maestro en el motor", () => {
+  const { valoresPatronAlMotor, leerValoresPatron } = require("./ficha.reglas");
+  const maestro = leerValoresPatron({ "20 mg E2": { c: -0.004, U: 0.003, d: 0.001 }, "50 g E2": { c: "-0,05", U: 0.03, d: 0.01 }, malo: { c: "x" } });
+  it("lee el maestro e ignora piezas mal formadas", () => expect(Object.keys(maestro)).toEqual(["20 mg E2", "50 g E2"]));
+  it("carga en el motor las piezas que faltan", () => {
+    const r = valoresPatronAlMotor({ pat: {}, pts: [] }, maestro);
+    expect(r.datos.pat["50 g E2"]).toEqual({ c: -0.05, U: 0.03, d: 0.01 });
+    expect(r.cargados).toEqual(["20 mg E2", "50 g E2"]);
+    expect(r.error).toBeNull();
+  });
+  it("un valor cambiado exige motivo", () => {
+    const d = { pat: { "20 mg E2": { c: -0.004, U: 0.009, d: 0.001 } } };
+    expect(valoresPatronAlMotor(d, maestro).error).toMatch(/20 mg E2.*motivo/);
+    expect(valoresPatronAlMotor(d, maestro, "Certificado nuevo del 2026").error).toBeNull();
+    expect(valoresPatronAlMotor(d, maestro, "Certificado nuevo del 2026").datos.pat["20 mg E2"].U).toBe(0.009);
+  });
+  it("motores sin «pat» o maestro sin valores: sin cambios", () => {
+    expect(valoresPatronAlMotor({ temp: [1] }, maestro).cargados).toEqual([]);
+    expect(valoresPatronAlMotor({ pat: {} }, {}).cargados).toEqual([]);
+  });
+});

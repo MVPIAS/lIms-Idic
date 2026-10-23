@@ -9,6 +9,7 @@
 --   B-026 · Cuerpo de la plantilla IVCOR según IDIC-PG09 Anexo 01.
 --   B-075 · Membrete «Laboratorio Químico Central» en el informe del LQC.
 --   B-029 · Entrega del certificado externo validado de Metrología.
+--   B-043 · Valores del certificado del patrón (corrección, U, deriva) para el motor.
 -- Aditivo e idempotente. Va ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
@@ -163,3 +164,22 @@ ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entrega_medio        V
 ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entrega_destinatario VARCHAR(160);
 ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entrega_observacion  TEXT;
 ALTER TABLE met_servicio_externo ADD COLUMN IF NOT EXISTS entregado_por        UUID REFERENCES usuario(id);
+
+-- -----------------------------------------------------------------------------
+-- B-043 · Valores del certificado del patrón en el maestro (EP-04 P3.3)
+-- -----------------------------------------------------------------------------
+-- Corrección, U y deriva de cada pieza del patrón (p. ej. cada masa de un
+-- juego): el motor los toma del patrón elegido en vez de pedirlos a mano.
+-- {"20 mg E2": {"c": -0.004, "U": 0.003, "d": 0.001}, ...} (mg en masa).
+ALTER TABLE met_patron ADD COLUMN IF NOT EXISTS valores_certificado JSONB;
+COMMENT ON COLUMN met_patron.valores_certificado IS
+  'Valores del certificado por pieza del patrón: {"<pieza>": {"c": corrección, "U": incertidumbre expandida, "d": deriva}}. Los usa el motor de cálculo (ITM02).';
+
+-- PM-01 (juego de masas E2, serie 15884): los valores de su certificado que ya
+-- usaba la planilla ITM02 del LMT (motor validado, caso M-3889). Solo si está vacío.
+UPDATE met_patron
+   SET valores_certificado = '{"20 mg E2": {"U": 0.003, "c": -0.004, "d": 0.001}, "50 mg E2": {"U": 0.004, "c": -0.001, "d": 0.001},
+     "100 mg E2": {"U": 0.005, "c": -0.003, "d": 0}, "500 mg E2": {"U": 0.008, "c": -0.001, "d": 0}, "1 g E2": {"U": 0.01, "c": -0.003, "d": 0},
+     "2 g E2": {"U": 0.012, "c": -0.021, "d": 0.017}, "5 g E2": {"U": 0.016, "c": -0.031, "d": 0.007}, "10 g E2": {"U": 0.02, "c": 0.029, "d": 0.02},
+     "20 g E2": {"U": 0.025, "c": -0.053, "d": 0.021}, "50 g E2": {"U": 0.03, "c": -0.05, "d": 0.01}}'::jsonb
+ WHERE codigo = 'PM-01' AND serie = '15884' AND valores_certificado IS NULL AND deleted_at IS NULL;

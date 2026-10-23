@@ -345,3 +345,46 @@ export function condicionesAlMotor<T extends Record<string, any>>(datos: T, c: C
     poner("barometro", { ...d.barometro, corr: c.errP, ...(c.uP != null ? { u: c.uP } : {}) });
   return { datos: d as T, campos };
 }
+
+/* ------------------------------- valores del patrón del maestro (B-043) --- */
+export interface ValorPatron { c: number; U: number; d: number }
+export type ValoresPatron = Record<string, ValorPatron>;
+
+/** Lee los valores del certificado guardados en el maestro (ignora piezas mal formadas). */
+export function leerValoresPatron(v: unknown): ValoresPatron {
+  const out: ValoresPatron = {};
+  if (!v || typeof v !== "object") return out;
+  for (const [k, x] of Object.entries(v as Record<string, any>)) {
+    const n = (y: unknown) => (typeof y === "number" ? y : Number(String(y ?? "").replace(",", ".")));
+    const val = { c: n(x?.c), U: n(x?.U), d: n(x?.d ?? 0) };
+    if (k.trim() && [val.c, val.U, val.d].every(Number.isFinite)) out[k.trim()] = val;
+  }
+  return out;
+}
+
+/**
+ * B-043 · EP-04 P3.3 (trazabilidad enlazada): el motor toma la corrección, la U y la
+ * deriva de cada pieza del patrón elegido del maestro (`datos.pat`). Las piezas que
+ * faltan se cargan del maestro; si quien calibra cambió alguna, debe indicar el motivo.
+ * Solo aplica a los motores que usan `pat` (ITM02) y con valores en el maestro.
+ */
+export function valoresPatronAlMotor<T extends Record<string, any>>(
+  datos: T, maestro: ValoresPatron, motivo?: string | null,
+): { datos: T; cargados: string[]; editados: string[]; error: string | null } {
+  const nada = { datos, cargados: [] as string[], editados: [] as string[], error: null };
+  if (!datos || typeof datos !== "object" || !("pat" in datos) || !Object.keys(maestro).length) return nada;
+  const actual = datos.pat && typeof datos.pat === "object" ? (datos.pat as Record<string, any>) : {};
+  const pat: Record<string, ValorPatron> = { ...actual };
+  const cargados: string[] = [], editados: string[] = [];
+  const igual = (a: number, b: number) => Math.abs(a - b) < 1e-12;
+  for (const [k, m] of Object.entries(maestro)) {
+    const x = actual[k];
+    const n = (y: unknown) => (y === "" || y == null ? NaN : Number(y));
+    if (!x || ![n(x.c), n(x.U)].every(Number.isFinite)) { pat[k] = m; cargados.push(k); continue; }
+    if (!igual(n(x.c), m.c) || !igual(n(x.U), m.U) || !igual(Number.isFinite(n(x.d)) ? n(x.d) : 0, m.d)) editados.push(k);
+  }
+  const error = editados.length && !(motivo && motivo.trim().length >= 5)
+    ? `Los valores del patrón de ${editados.join(", ")} difieren de los del maestro: indique el motivo del cambio (mínimo 5 caracteres) o deje los del certificado.`
+    : null;
+  return { datos: { ...datos, pat } as T, cargados, editados, error };
+}
