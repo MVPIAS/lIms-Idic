@@ -115,21 +115,35 @@ export default function ParametrizacionPrototipo({ p, onCambio }: { p: any; onCa
                     </div>
                   )}
                 </td>
-                <td><input aria-label={`Ensayo de la fila ${i + 1}`} value={f.ensayo} disabled={!editable} onChange={(e) => poner(i, { ensayo: e.target.value })} maxLength={200} /></td>
-                <td><input aria-label={`Mínimo de la fila ${i + 1}`} inputMode="decimal" value={f.minimo} disabled={!editable} onChange={(e) => poner(i, { minimo: e.target.value })} style={{ width: 80 }} /></td>
-                <td><input aria-label={`Nominal de la fila ${i + 1}`} inputMode="decimal" value={f.nominal} disabled={!editable} onChange={(e) => poner(i, { nominal: e.target.value })} style={{ width: 80 }} /></td>
-                <td><input aria-label={`Máximo de la fila ${i + 1}`} inputMode="decimal" value={f.maximo} disabled={!editable} onChange={(e) => poner(i, { maximo: e.target.value })} style={{ width: 80 }} /></td>
-                <td><input aria-label={`Unidad de la fila ${i + 1}`} value={f.unidad} disabled={!editable} onChange={(e) => poner(i, { unidad: e.target.value })} maxLength={30} style={{ width: 70 }} /></td>
-                <td style={{ minWidth: 180 }}>
-                  <input aria-label={`Fórmula de la fila ${i + 1}`} placeholder="(C1 - C2) / C3 * 100" value={f.formula} disabled={!editable} onChange={(e) => poner(i, { formula: e.target.value })} maxLength={500} />
-                  {f.formula && (
-                    <select aria-label={`Tipo de fórmula de la fila ${i + 1}`} value={f.tipoFormula} disabled={!editable} onChange={(e) => poner(i, { tipoFormula: e.target.value })} style={{ marginTop: 4 }}>
-                      <option value="">¿General o específica?</option>
-                      <option value="general">General</option>
-                      <option value="especifica">Específica</option>
-                    </select>
-                  )}
-                </td>
+                {editable ? (
+                  <>
+                  <td><input aria-label={`Ensayo de la fila ${i + 1}`} value={f.ensayo} disabled={!editable} onChange={(e) => poner(i, { ensayo: e.target.value })} maxLength={200} /></td>
+                  <td><input aria-label={`Mínimo de la fila ${i + 1}`} inputMode="decimal" value={f.minimo} disabled={!editable} onChange={(e) => poner(i, { minimo: e.target.value })} style={{ width: 80 }} /></td>
+                  <td><input aria-label={`Nominal de la fila ${i + 1}`} inputMode="decimal" value={f.nominal} disabled={!editable} onChange={(e) => poner(i, { nominal: e.target.value })} style={{ width: 80 }} /></td>
+                  <td><input aria-label={`Máximo de la fila ${i + 1}`} inputMode="decimal" value={f.maximo} disabled={!editable} onChange={(e) => poner(i, { maximo: e.target.value })} style={{ width: 80 }} /></td>
+                  <td><input aria-label={`Unidad de la fila ${i + 1}`} value={f.unidad} disabled={!editable} onChange={(e) => poner(i, { unidad: e.target.value })} maxLength={30} style={{ width: 70 }} /></td>
+                  <td style={{ minWidth: 180 }}>
+                    <input aria-label={`Fórmula de la fila ${i + 1}`} placeholder="(C1 - C2) / C3 * 100" value={f.formula} disabled={!editable} onChange={(e) => poner(i, { formula: e.target.value })} maxLength={500} />
+                    {f.formula && (
+                      <select aria-label={`Tipo de fórmula de la fila ${i + 1}`} value={f.tipoFormula} disabled={!editable} onChange={(e) => poner(i, { tipoFormula: e.target.value })} style={{ marginTop: 4 }}>
+                        <option value="">¿General o específica?</option>
+                        <option value="general">General</option>
+                        <option value="especifica">Específica</option>
+                      </select>
+                    )}
+                  </td>
+                  </>
+                ) : (
+                  // B-037: quien valida (o consulta) lee el panel como texto, no en casillas desactivadas y recortadas.
+                  <>
+                    <td style={{ whiteSpace: "normal" }}>{f.ensayo || "—"}</td>
+                    <td className="num">{f.minimo || "—"}</td>
+                    <td className="num">{f.nominal || "—"}</td>
+                    <td className="num">{f.maximo || "—"}</td>
+                    <td>{f.unidad || "—"}</td>
+                    <td style={{ whiteSpace: "normal" }}>{f.formula ? <><code>{f.formula}</code>{f.tipoFormula ? <small style={{ color: "var(--muted)" }}> · {f.tipoFormula === "general" ? "general" : "específica"}</small> : null}</> : "—"}</td>
+                  </>
+                )}
                 {editable && <td><button type="button" className="btn ghost sm" aria-label={`Quitar la fila ${i + 1}`} onClick={() => setFilas((l) => l.filter((_, j) => j !== i))}>Quitar</button></td>}
               </tr>
             ))}
