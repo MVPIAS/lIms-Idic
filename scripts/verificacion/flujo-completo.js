@@ -322,7 +322,8 @@ async function main() {
       lineas: [
         { catEnsayoId: C.mPh.ensayoId, cantidad: 1 },
         { catEnsayoId: C.mAzufre.ensayoId, cantidad: 1 },
-        { catEnsayoId: C.mGrumos.ensayoId, cantidad: 1, precioUnitario: 5000 },
+        // El ensayo de grumos no tiene valor en su ficha: ya no se admite un precio a mano (EP-00 2.2, BL-149).
+        { tipo: "otros", descripcion: "Traslado de muestras", cantidad: 1, precioUnitario: 5000 },
       ],
     });
     afirmar(C.cot.estado === "abierta", `estado ${C.cot.estado}`);

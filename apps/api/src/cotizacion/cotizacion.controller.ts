@@ -102,12 +102,24 @@ const Cabecera = {
   descuentoPct: z.number().min(0).max(0, "La cotización no admite descuento (decisión Comercial R1).").optional(),
   // La validez es AUTOMÁTICA (IT DCO-PG01-P01-IT02); `validezDias` se ignora.
   validezDias: z.number().int().positive().optional(),
+  // EP-01/02 0.1 (BL-210): solicitante y documento con que el cliente pidió el servicio.
+  solicitud: z
+    .object({
+      solicitanteContactoId: z.string().uuid().nullable().optional(),
+      solicitanteNombre: z.string().trim().max(160).nullable().optional(),
+      solicitudMedio: z.enum(["oficio", "correo"]).nullable().optional(),
+      solicitudNumero: z.string().trim().max(80).nullable().optional(),
+      solicitudFecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD").nullable().optional(),
+    })
+    .optional(),
 };
 
 const CrearCotSchema = z
   .object({
     clienteId: z.string().uuid(),
     ...Cabecera,
+    // EP-00 0.3 (BL-173): cotización creada desde una oportunidad del CRM.
+    oportunidadId: z.string().uuid().optional(),
     fechaEmision: fecha.optional(),
     lineas: z.array(LineaSchema).min(1),
   })

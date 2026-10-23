@@ -98,4 +98,5 @@ align_r2a_formularios.sql
 align_r4b_d11.sql
 align_r4b_saec.sql
 align_r4b_bpch.sql
+align_r4d_comercial.sql
 align_cierre_permisos.sql

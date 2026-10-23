@@ -135,6 +135,12 @@ export class ClienteController {
     return this.svc.desbloquear(id, body.motivo, req?.user?.tenantId);
   }
 
+  @Get(":id/contactos")
+  @RequierePermiso("cliente.ver")
+  async contactos(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.contactos(id, req?.user?.tenantId);
+  }
+
   /* --- Plantas del cliente (EP-00 0.1, BL-172) --- */
 
   @Get(":id/plantas")
