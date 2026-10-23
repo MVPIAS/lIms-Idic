@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { calcularCalibracion, nd, fmtN, fmtG, motorDe, LAB_NOMBRE, type Componente, type Divisores, type MotorInfo } from "@/lib/metrologia";
-import { corregida, numeroOVacio } from "@/lib/metrologiaFicha";
+import { corregida, numeroOVacio, type CondicionesHoja } from "@/lib/metrologiaFicha";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import MotorPanel from "./MotorPanel";
@@ -147,6 +147,19 @@ export default function NuevaCalibracionPage() {
 
   const proc = useMemo(() => procs.find((p) => p.codigo === procKey), [procs, procKey]);
   const motor = useMemo(() => (proc ? motorDe(motores, proc.codigo, proc.motor) : undefined), [motores, proc]);
+  // B-027: condiciones de la hoja de control (auxiliares elegidos y sus lecturas) para el motor.
+  // Se calcula en cada render: la hoja se edita en el mismo objeto D (MotorPanel compara por contenido).
+  const condHoja: CondicionesHoja | null = (() => {
+    const th = patrones.find((p) => p.id === D.aux.th), ba = patrones.find((p) => p.id === D.aux.ba);
+    if (!th && !ba) return null;
+    const nums = (xs: string[]) => xs.map(numeroOVacio).filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+    const c = (eq: any, k: string) => eq?.correcciones?.[k] ?? null;
+    return {
+      temp: th ? nums(D.aux.t) : [], hum: th ? nums(D.aux.h) : [], pres: ba ? nums(D.aux.p) : [],
+      errT: c(th, "temp")?.error ?? null, uT: c(th, "temp")?.U ?? null, errH: c(th, "hum")?.error ?? null, uH: c(th, "hum")?.U ?? null,
+      errP: c(ba, "pres")?.error ?? null, uP: c(ba, "pres")?.U ?? null,
+    };
+  })();
   const paridadMotor = useMemo(() => {
     const cs = paridad?.casos.filter((c) => c.it === motor?.it) ?? [];
     return cs.length ? { identicos: cs.reduce((s, c) => s + c.identicos, 0), comparados: cs.reduce((s, c) => s + c.comparados, 0) } : null;
@@ -406,7 +419,7 @@ export default function NuevaCalibracionPage() {
             <PuntosPanel key={procKey + (editId ?? "")} magnitud={proc.magnitud_nombre ?? proc.magnitud} unidadDefecto={proc.unidad}
               inicial={inicialMotor} guardando={saving} onGuardar={(m) => guardar({ motor: m })} />
           ) : motor ? (
-            <MotorPanel key={motor.it + procKey + (editId ?? "")} motor={motor} paridad={paridadMotor} fecha={fechaCal}
+            <MotorPanel key={motor.it + procKey + (editId ?? "")} motor={motor} paridad={paridadMotor} fecha={fechaCal} condiciones={condHoja}
               inicial={inicialMotor} guardando={saving} onGuardar={(m) => guardar({ motor: m })} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
