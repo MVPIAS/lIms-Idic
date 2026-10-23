@@ -2,8 +2,10 @@
  * Precio de las líneas de la cotización (EP-00 2.2, BL-149) · regla PURA,
  * probada en precio-ficha.spec.ts.
  *
- *   · Una línea de ENSAYO toma su precio de la ficha de costos (cat_ensayo.precio,
- *     convertido a US$ con el dólar de la cotización). La API no acepta un precio
+ *   · Una línea de ENSAYO toma su precio de la lista de precios vigente si el
+ *     ensayo está en ella (lista-precio/precio-lista.ts: neto para un particular)
+ *     y, si no, de la ficha de costos (cat_ensayo.precio); convertido a US$ con
+ *     el dólar de la cotización. La API no acepta un precio
  *     manual distinto: antes bastaba con mandar `precioUnitario` para esquivar la
  *     ficha. Un ensayo sin valor en su ficha bloquea la cotización.
  *   · Una línea SIN ensayo solo puede ser un GASTO tipificado (viático, pasaje,
@@ -50,6 +52,8 @@ export function precioDeLinea(
   precioFicha: number | null,
   n: number,
   existentes?: Existentes,
+  /** De dónde sale el precio, para el mensaje (por defecto la ficha; la lista de precios vigente, lp26). */
+  fuente = "su ficha de costos",
 ): { precio: number; error?: undefined } | { precio?: undefined; error: string } {
   const pedido = l.precioUnitario != null ? Number(l.precioUnitario) : null;
   if (l.catEnsayoId) {
@@ -59,7 +63,7 @@ export function precioDeLinea(
     if (!(precioFicha != null && precioFicha > 0))
       return { error: `Línea ${n}: el ensayo ${codigo} no tiene valor en su ficha de costos. Complete la ficha en el catálogo antes de cotizarlo.` };
     if (pedido != null && !igual(pedido, precioFicha))
-      return { error: `Línea ${n}: el precio del ensayo ${codigo} sale de su ficha de costos (${precioFicha}); la cotización no admite un precio manual.` };
+      return { error: `Línea ${n}: el precio del ensayo ${codigo} sale de ${fuente} (${precioFicha}); la cotización no admite un precio manual.` };
     return { precio: precioFicha };
   }
   if (!(pedido != null && pedido > 0)) return { error: `Línea ${n}: indique el valor del gasto.` };

@@ -16,6 +16,7 @@ import { PERMISO_ACEPTAR, PERMISO_ANULAR } from "./permisos-cotizacion";
 import { exigirCotizacionEnAlcance } from "./alcance-cotizacion";
 import { AlcanceService } from "../rbac/alcance.service";
 import { PrismaService } from "../common/prisma.service";
+import { leerConfigCircuito } from "./circuito-config";
 
 const CosteoSchema = z.object({
   lineas: z
@@ -198,9 +199,11 @@ export class CotizacionController {
    */
   @Post("costeo")
   @RequierePermiso("cotizacion.crear")
-  calcularCosteo(@Body() body: unknown) {
+  async calcularCosteo(@Body() body: unknown, @Req() req: any) {
     const { lineas, ...params } = CosteoSchema.parse(body);
-    return this.costeo.calcular(lineas, params);
+    // Sin porcentajes en la petición rigen los de Administración › Parámetros (fórmula oficial 2026).
+    const cfg = await leerConfigCircuito(this.prisma, req?.user?.tenantId);
+    return this.costeo.calcular(lineas, { cfaPct: cfg.cfaPct, margenParticularPct: cfg.margenParticularPct, ivaPct: cfg.ivaPct, ...params });
   }
 
   /** Tasa de internación 1,5% (servicios ligados a importación). */
@@ -240,6 +243,29 @@ export class CotizacionController {
     if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
     const tenantId = req?.user?.tenantId;
     return this.svc.calcularValidezPara(tenantId, clienteId, centroCostoId || null, fechaQ || hoyEnChile());
+  }
+
+  /**
+   * Precio de cada ensayo para el cliente según la lista de precios vigente
+   * (neto para un particular) o la ficha de costos: vista previa del formulario.
+   * ?clienteId=&ids=uuid,uuid&fecha=AAAA-MM-DD
+   */
+  @Get("precios-ensayo")
+  @RequierePermiso("cotizacion.ver")
+  @ApiOperation({ summary: "Precio de los ensayos para un cliente: lista de precios vigente o ficha" })
+  async preciosEnsayo(
+    @Query("clienteId") clienteId: string,
+    @Query("ids") idsQ: string | undefined,
+    @Query("fecha") fechaQ: string | undefined,
+    @Req() req: any,
+  ) {
+    const uuid = z.string().uuid();
+    if (!uuid.safeParse(clienteId).success) throw new BadRequestException("clienteId (uuid) es obligatorio");
+    const ids = [...new Set(String(idsQ ?? "").split(",").map((x) => x.trim()).filter(Boolean))];
+    if (ids.length > 200) throw new BadRequestException("Máximo 200 ensayos por consulta.");
+    if (ids.some((x) => !uuid.safeParse(x).success)) throw new BadRequestException("ids: lista de uuid separados por coma");
+    if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
+    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined);
   }
 
   /**

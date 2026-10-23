@@ -324,6 +324,8 @@ const LISTADOS = [
   { n: "Reclamos de clientes (r4d)", r: "/reclamos", p: "reclamo.ver", t: "ot", regla: "unidad", dco: true, href: "/reclamos" },
   { n: "Apelaciones (r4d)", r: "/apelaciones", p: "apelacion.ver", t: "apelacion", regla: "unidad", href: "/apelaciones" },
   { n: "Facturas (fase 1)", r: "/facturas?limit=200", p: "factura.ver", t: "factura", regla: "unidad", fase1: true, href: "/facturas" },
+  // Frente lp26: listas de precio (dato maestro del instituto, común a todos los laboratorios).
+  { n: "Listas de precio (lp26)", r: "/listas-precio?limit=50", p: "cotizacion.ver", regla: "comun", href: "/listas-precio" },
 ];
 
 function filasDe(j) {

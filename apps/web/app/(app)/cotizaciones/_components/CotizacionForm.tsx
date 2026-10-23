@@ -10,7 +10,8 @@
  *  · Referencia · Descripción técnica y alcance · Condiciones adicionales (≤ 2000,
  *    se imprimen; botón «texto base del laboratorio») · Observaciones internas
  *    (NO se imprimen).
- *  · Líneas = ensayos del catálogo (código EN) valorizados por su ficha de costos.
+ *  · Líneas = ensayos del catálogo (código EN) valorizados con la lista de precios
+ *    vigente (neto para un particular) o, si el ensayo no está en ella, su ficha.
  *  · «Válida hasta» automática y de solo lectura (IT DCO-PG01-P01-IT02).
  *  · Sin «Tipo cotización» (Extensión/Comprensión) y sin descuento.
  */
@@ -27,13 +28,23 @@ export type LineaForm = {
   codigo?: string;
   descripcion: string;
   cantidad: number;
-  /** Precio en CLP según ficha (para convertir si la moneda es USD). */
+  /** Precio en CLP (lista vigente o ficha) para convertir si la moneda es USD. */
   precioClp?: number;
+  /** Línea ya guardada: conserva su precio aunque la lista o la ficha cambien. */
+  guardada?: boolean;
+  /** De dónde salió el precio de una línea nueva. */
+  origen?: { tipo: "lista" | "ficha"; texto: string };
   /** Línea heredada (HH/HM/…): se conserva con su precio, no se puede editar. */
   heredada?: { tipo: string; precioUnitario: number };
   /** Gasto tipificado (viático, pasaje, traslado): precio a mano, en la moneda de la cotización (EP-00 2.2). */
   gasto?: { tipo: string; precio: number };
 };
+
+type PrecioEnsayo = { precio: number | null; origen: "lista" | "ficha" | null; columna?: string | null; lista: { codigo: string; nombre: string; itemCodigo: string } | null };
+const origenDe = (p: PrecioEnsayo): { tipo: "lista" | "ficha"; texto: string } =>
+  p.origen === "lista" && p.lista
+    ? { tipo: "lista", texto: `${p.lista.nombre} · ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : ""}` }
+    : { tipo: "ficha", texto: "Ficha de costos del catálogo" };
 
 /** Gastos que se pueden cotizar sin ensayo del catálogo (la API rechaza cualquier otra línea libre). */
 const TIPOS_GASTO = [
@@ -142,6 +153,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             cantidad: l.cantidad ?? 1,
             // El precio guardado ya está en la moneda de la cotización.
             precioClp: inicial?.moneda === "USD" ? Number(l.precioUnitario) * (dolarInicial ?? 1) : Number(l.precioUnitario),
+            guardada: true,
           }
         : {
             descripcion: l.descripcion ?? l.tipo,
@@ -205,6 +217,42 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       .catch(() => setValidez(null));
   }, [clienteId, centroCostoId, tipoCliente, fechaEmision]);
 
+  // --- Precio de los ensayos para este cliente (lista vigente o ficha) -------------
+  // Misma regla que aplica la API al guardar (GET /cotizaciones/precios-ensayo).
+  const [precios, setPrecios] = useState<Record<string, PrecioEnsayo>>({});
+  const [reglaPrecio, setReglaPrecio] = useState("");
+  useEffect(() => { setPrecios({}); setReglaPrecio(""); }, [clienteId]);
+  const idsPrecio = useMemo(
+    () => [...new Set([...ensayos.map((e) => e.id), ...lineas.filter((l) => l.catEnsayoId && !l.guardada).map((l) => l.catEnsayoId!)])].sort().join(","),
+    [ensayos, lineas],
+  );
+  useEffect(() => {
+    if (!clienteId || !idsPrecio) return;
+    const qs = new URLSearchParams({ clienteId, ids: idsPrecio, fecha: fechaEmision });
+    pedir<any>("GET", `/cotizaciones/precios-ensayo?${qs}`)
+      .then((r) => { setPrecios((p) => ({ ...p, ...(r?.precios ?? {}) })); setReglaPrecio(r?.regla ?? ""); })
+      .catch(() => undefined);
+  }, [clienteId, idsPrecio, tipoCliente, fechaEmision]);
+  useEffect(() => {
+    setLineas((ls) => {
+      let cambio = false;
+      const n = ls.map((l) => {
+        if (!l.catEnsayoId || l.guardada) return l;
+        const p = precios[l.catEnsayoId];
+        if (!p || p.precio == null) return l;
+        const origen = origenDe(p);
+        if (l.precioClp === p.precio && l.origen?.texto === origen.texto) return l;
+        cambio = true;
+        return { ...l, precioClp: p.precio, origen };
+      });
+      return cambio ? n : ls;
+    });
+  }, [precios]);
+  const precioDe = (e: Ensayo) => {
+    const p = precios[e.id];
+    return p && p.precio != null ? { precio: p.precio, origen: origenDe(p) } : { precio: Number(e.precio) || 0, origen: { tipo: "ficha" as const, texto: "Ficha de costos del catálogo" } };
+  };
+
   // --- Derivados -----------------------------------------------------------------
   const dolarNum = Number(dolar) || 0;
   const precioEnMoneda = (l: LineaForm) =>
@@ -257,9 +305,10 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   }
 
   function agregarEnsayo(e: Ensayo) {
+    const p = precioDe(e);
     setLineas((ls) => [
       ...ls,
-      { catEnsayoId: e.id, codigo: e.codigo, descripcion: `${e.codigo} · ${e.nombre}`, cantidad: 1, precioClp: Number(e.precio) || 0 },
+      { catEnsayoId: e.id, codigo: e.codigo, descripcion: `${e.codigo} · ${e.nombre}`, cantidad: 1, precioClp: p.precio, origen: p.origen },
     ]);
   }
   function agregarGasto() {
@@ -280,7 +329,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     if (!cliente?.id) return setError("Seleccione el cliente.");
     if (!lineas.length) return setError("Agregue al menos un ensayo del catálogo.");
     if (lineas.some((l) => !l.heredada && !l.gasto && !(Number(l.precioClp) > 0)))
-      return setError("Hay ensayos sin valor en su ficha de costos: complete la ficha en el catálogo antes de cotizarlos.");
+      return setError("Hay ensayos sin precio: no están en la lista de precios vigente ni tienen valor en su ficha de costos.");
     if (moneda === "USD" && !(dolarNum > 0)) return setError("Indique el valor del dólar del día.");
     if (cambiaDolar && !dolarMotivo.trim()) return setError("El dólar quedó congelado al emitir: indique el motivo del cambio.");
     if (condiciones.length > MAX_COND) return setError(`Condiciones adicionales: máximo ${MAX_COND} caracteres.`);
@@ -496,7 +545,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
 
       {/* ---------------- Ensayos ---------------- */}
       <div className="card">
-        <h2>Ensayos cotizados <span className="right">precio según ficha de costos del catálogo</span></h2>
+        <h2>Ensayos cotizados <span className="right">precio de la lista de precios vigente o, si no está, de la ficha de costos</span></h2>
         <div className="form-grid cols-3">
           <div className="field">
             <label>Buscar ensayo (código EN / nombre)</label>
@@ -507,7 +556,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             <select value="" onChange={(e) => { const x = ensayos.find((en) => en.id === e.target.value); if (x) agregarEnsayo(x); }}>
               <option value="">— selecciona un ensayo para agregarlo —</option>
               {ensayos.map((en) => (
-                <option key={en.id} value={en.id}>{en.codigo} · {en.nombre} · {Number(en.precio) > 0 ? money(en.precio) : "sin valor en ficha"}</option>
+                <option key={en.id} value={en.id}>{en.codigo} · {en.nombre} · {precioDe(en).precio > 0 ? `${money(precioDe(en).precio)}${precioDe(en).origen.tipo === "lista" ? " (lista)" : ""}` : "sin precio"}</option>
               ))}
             </select>
             {msgEnsayo && <small style={{ color: "var(--red)" }}>Catálogo no disponible: {msgEnsayo}</small>}
@@ -532,7 +581,14 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             <button type="button" className="btn outline sm" onClick={agregarGasto}>Agregar gasto</button>
           </div>
         </div>
-        <small style={{ color: "var(--muted)" }}>Los ensayos se valorizan con su ficha de costos; el precio no se escribe a mano. Solo los gastos (viáticos, pasajes, traslados) llevan valor manual.</small>
+        <small style={{ color: "var(--muted)" }}>
+          {reglaPrecio === "PARTICULAR"
+            ? "Cliente particular: cada ensayo toma el neto (sin IVA) de la lista de precios vigente; si no está en la lista, su ficha de costos."
+            : reglaPrecio === "EJERCITO"
+              ? "Cliente Ejército: el precio sale según el parámetro «Precio de la lista que toma un cliente Ejército» (por confirmar)."
+              : "Elija el cliente: el precio de cada ensayo depende de su tipo (particular o Ejército)."}{" "}
+          El precio no se escribe a mano. Solo los gastos (viáticos, pasajes, traslados) llevan valor manual.
+        </small>
         {esLrb && reposicionLrb > 0 && lineas.some((l) => l.catEnsayoId) && (
           <div className="alert info" style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
             <span style={{ flex: 1 }}>LRB: el lote se cotiza con <b>{reposicionLrb} unidades de reposición</b> además de las del lote.</span>
@@ -553,7 +609,10 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
                   {l.descripcion}
                   {l.heredada && <small style={{ display: "block", color: "var(--muted)" }}>Línea heredada (se conserva tal cual)</small>}
                   {l.gasto && <small style={{ display: "block", color: "var(--muted)" }}>Gasto · valor manual</small>}
-                  {!l.heredada && !l.gasto && !(Number(l.precioClp) > 0) && <small style={{ display: "block", color: "var(--red)" }}>Sin valor en la ficha de costos</small>}
+                  {!l.heredada && !l.gasto && !(Number(l.precioClp) > 0) && <small style={{ display: "block", color: "var(--red)" }}>Sin precio en la lista vigente ni en la ficha de costos</small>}
+                  {!l.heredada && !l.gasto && Number(l.precioClp) > 0 && (
+                    <small style={{ display: "block", color: "var(--muted)" }}>{l.guardada ? "Precio cotizado (se conserva)" : l.origen?.texto ?? "Ficha de costos del catálogo"}</small>
+                  )}
                 </td>
                 <td className="num">
                   <input type="number" min={1} step={1} value={l.cantidad} onChange={(e) => setCant(i, Math.max(1, Math.round(Number(e.target.value) || 1)))} style={{ width: 64, textAlign: "right" }} />
