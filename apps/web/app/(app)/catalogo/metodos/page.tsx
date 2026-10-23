@@ -20,6 +20,7 @@ export default function MetodosCatPage() {
           render: (v: any, row: any) => (v != null && row?.factorOperacion ? `${row.factorOperacion === "dividir" ? "÷" : "×"} ${String(Number(v)).replace(".", ",")}` : "—"),
         },
         { key: "equipoRequerido", label: "Exige equipo", render: (v: any) => (v ? <span className="pill blue">Sí</span> : "—") },
+        { key: "qcRequerido", label: "QC requerido", render: (v: any) => (v ? <span className="pill teal">Sí</span> : "—") },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}
       campos={[
@@ -36,6 +37,8 @@ export default function MetodosCatPage() {
         { name: "factorDescripcion", label: "Factor · qué representa (p. ej. dilución 1:10)" },
         // Contrato §4.4.2: al capturar hay que informar el equipo usado; uno con la calibración vencida se bloquea.
         { name: "equipoRequerido", label: "Exige informar el equipo al capturar", tipo: "checkbox" },
+        // Contrato §4.2.3: sin control de calidad aprobado no se emite el informe. Tipos y criterios: Control de calidad (QC).
+        { name: "qcRequerido", label: "QC requerido (no se emite sin control de calidad aprobado)", tipo: "checkbox" },
         { name: "activo", label: "Activo", tipo: "checkbox" },
       ]}
     />

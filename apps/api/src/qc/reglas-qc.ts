@@ -14,6 +14,60 @@
 
 export type ResultadoQc = "aprobado" | "rechazado" | "pendiente";
 
+/* ------------------------------------------ QC por método (BL-167) --- */
+
+/**
+ * Tipos de control: blanco, estándar, curva, duplicado y, desde el frente r4d,
+ * MRC (material de referencia certificado: % de recuperación del valor
+ * certificado) y patrón de verificación (% del valor del patrón).
+ */
+export const TIPOS_QC = ["blanco", "estandar", "curva", "duplicado", "mrc", "patron"] as const;
+export type TipoQc = (typeof TIPOS_QC)[number];
+
+/**
+ * Criterio por defecto de cada tipo cuando ni el control ni el método lo traen.
+ * Los criterios por ensayo los entrega el IDIC (EP-01 §10 P11): mientras tanto
+ * rigen estos, y cada método puede fijar los suyos (cat_metodo.qc_criterios).
+ */
+export const CRITERIO_DEFECTO: Record<TipoQc, string> = {
+  blanco: "",
+  estandar: "80-120",
+  curva: "0.995",
+  duplicado: "10",
+  mrc: "90-110",
+  patron: "95-105",
+};
+
+/** Criterio que se aplica: el del control, el del método para ese tipo o el por defecto. */
+export function criterioAplicable(tipo: string, delControl: string | null | undefined, delMetodo: Record<string, string> | null | undefined): string | null {
+  if (delControl && delControl.trim()) return delControl.trim();
+  const m = delMetodo?.[tipo];
+  if (m && String(m).trim()) return String(m).trim().replace(/,/g, ".");
+  const d = (CRITERIO_DEFECTO as Record<string, string>)[tipo];
+  return d ? d : null;
+}
+
+/**
+ * Lo que falta para que el QC de un método esté aprobado en la OT: con tipos
+ * exigidos, un control APROBADO de cada tipo; sin tipos, uno aprobado de
+ * cualquier tipo (regla anterior).
+ */
+export function tiposQcFaltantes(exigidos: string[] | null | undefined, aprobados: string[]): string[] {
+  const t = (exigidos ?? []).filter(Boolean);
+  if (!t.length) return aprobados.length ? [] : ["cualquiera"];
+  return t.filter((x) => !aprobados.includes(x));
+}
+
+export function erroresConfigQc(c: { qcTipos?: string[]; qcCriterios?: Record<string, string> }): string[] {
+  const e: string[] = [];
+  for (const t of c.qcTipos ?? []) if (!(TIPOS_QC as readonly string[]).includes(t)) e.push(`Tipo de control desconocido: ${t}.`);
+  for (const [t, v] of Object.entries(c.qcCriterios ?? {})) {
+    if (!(TIPOS_QC as readonly string[]).includes(t)) e.push(`Criterio de un tipo desconocido: ${t}.`);
+    else if (v && !/\d/.test(String(v))) e.push(`El criterio de ${t} debe tener un número o un rango (p. ej. 90-110).`);
+  }
+  return e;
+}
+
 /** Estado con el que queda un control recién registrado según su evaluación automática. */
 export function resultadoAlRegistrar(evaluacion: ResultadoQc): ResultadoQc {
   return evaluacion === "aprobado" ? "pendiente" : evaluacion;
