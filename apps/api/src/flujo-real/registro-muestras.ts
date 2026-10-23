@@ -114,7 +114,17 @@ export function siguientesCodigos(otCodigo: string, existentes: string[], n: num
 export interface MuestraARegistrar {
   nombre: string;
   metodoIds: string[];
+  /**
+   * Clase de custodia de la recepción (B-013): un testigo, una muestra en
+   * custodia o una contramuestra van a bodega con su retención y pueden
+   * registrarse SIN ensayos (LME-PG01-IT02, EP-01 6.4).
+   */
+  claseCustodia?: string | null;
 }
+
+/** Clases de custodia que se registran sin ensayos (van a bodega con su plazo de retención). */
+export const CLASES_SIN_ENSAYOS = ["testigo", "custodia", "contramuestra"] as const;
+export const admiteSinEnsayos = (clase?: string | null) => !!clase && (CLASES_SIN_ENSAYOS as readonly string[]).includes(clase);
 
 /**
  * Qué impide registrar (lista vacía = se puede): OT cerrada o anulada, muestras
@@ -132,7 +142,8 @@ export function erroresRegistro(
   muestras.forEach((m, i) => {
     const n = i + 1;
     if (!m.nombre?.trim()) errores.push(`Muestra ${n}: indique su nombre o descripción.`);
-    if (!m.metodoIds?.length) errores.push(`Muestra ${n}: elija al menos un método.`);
+    if (!m.metodoIds?.length && !admiteSinEnsayos(m.claseCustodia))
+      errores.push(`Muestra ${n}: elija al menos un método (o márquela como testigo, en custodia o contramuestra si va a bodega sin ensayos).`);
   });
   const ids = new Set(muestras.flatMap((m) => m.metodoIds ?? []));
   for (const id of ids) {
