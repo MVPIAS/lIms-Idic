@@ -5,6 +5,19 @@
  */
 import type { Hoja } from "../common/xlsx-escritura";
 
+/** Nombre legible del estado de la OT (para la tabla y el Excel). */
+export const ESTADO_OT: Record<string, string> = {
+  recepcionada: "Recepcionada",
+  recibida: "Recibida",
+  en_analisis: "En análisis",
+  validacion: "En validación",
+  finalizada: "Finalizada",
+  informada: "Informada",
+  cerrada: "Cerrada",
+  anulada: "Anulada",
+};
+export const textoEstadoOt = (e: string) => ESTADO_OT[e] ?? (e.charAt(0).toUpperCase() + e.slice(1)).replace(/_/g, " ");
+
 const r1 = (x: number | null) => (x === null || !Number.isFinite(x) ? null : Math.round(x * 10) / 10);
 const pct = (a: number, b: number) => (b > 0 ? r1((a / b) * 100) : null);
 
@@ -87,7 +100,7 @@ export function hojasGestion(r: ReporteGestion): Hoja[] {
   return [
     {
       nombre: "OT por laboratorio y estado",
-      filas: [["Laboratorio", ...r.otPorEstado.estados, "Total"], ...r.otPorEstado.filas.map((f) => [f.laboratorio, ...r.otPorEstado.estados.map((e) => f.porEstado[e]), f.total])],
+      filas: [["Laboratorio", ...r.otPorEstado.estados.map(textoEstadoOt), "Total"], ...r.otPorEstado.filas.map((f) => [f.laboratorio, ...r.otPorEstado.estados.map((e) => f.porEstado[e]), f.total])],
     },
     {
       nombre: "Plazos por laboratorio",
@@ -112,7 +125,7 @@ export function hojasGestion(r: ReporteGestion): Hoja[] {
       nombre: "Cotización-OT-factura",
       filas: [
         ["Cotización", "OT", "Laboratorio", "Estado OT", "Factura", "Estado factura", "Total factura"],
-        ...r.trazabilidad.map((t) => [t.cotizacion, t.ot, t.laboratorio, t.estadoOt, t.factura, t.estadoFactura, t.total]),
+        ...r.trazabilidad.map((t) => [t.cotizacion, t.ot, t.laboratorio, textoEstadoOt(t.estadoOt), t.factura, t.estadoFactura, t.total]),
       ],
     },
     { nombre: "Período", filas: [["Reporte de gestión · LIMS IDIC"], [`Período: ${periodo}`]] },

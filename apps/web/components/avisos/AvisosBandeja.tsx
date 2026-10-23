@@ -38,6 +38,8 @@ const PILL: Record<string, string> = { alta: "red", warn: "amber", info: "blue" 
 export default function AvisosBandeja() {
   const [datos, setDatos] = useState<{ noLeidos: number; data: Aviso[] } | null>(null);
   const [todos, setTodos] = useState(false);
+  // Se muestran los 5 más recientes; el resto, a pedido (la bandeja de pendientes queda a la vista).
+  const [expandido, setExpandido] = useState(false);
   const [error, setError] = useState("");
 
   const cargar = useCallback(async () => {
@@ -65,7 +67,8 @@ export default function AvisosBandeja() {
 
   if (error) return null; // servidor sin avisos: la bandeja sigue igual
   if (!datos) return null;
-  const lista = datos.data;
+  const lista = expandido ? datos.data : datos.data.slice(0, 5);
+  const ocultos = datos.data.length - lista.length;
   return (
     <section className="card" aria-labelledby="tit-avisos">
       <h2 id="tit-avisos" style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -111,6 +114,11 @@ export default function AvisosBandeja() {
             </li>
           ))}
         </ul>
+      )}
+      {(ocultos > 0 || expandido) && (
+        <button type="button" className="btn ghost sm" style={{ marginTop: 6 }} onClick={() => setExpandido((x) => !x)} aria-expanded={expandido}>
+          {expandido ? "Mostrar solo los 5 más recientes" : `Ver ${ocultos} aviso${ocultos === 1 ? "" : "s"} más`}
+        </button>
       )}
     </section>
   );

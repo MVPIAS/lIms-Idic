@@ -28,7 +28,7 @@ export default function BarraFases({ fases, etiqueta = "Avance" }: { fases: Fase
   const actual = faseActual(fases);
   return (
     <div style={{ marginBottom: 12 }}>
-      <nav className="stepper" aria-label={etiqueta}>
+      <nav className="stepper barra-fases" aria-label={etiqueta}>
         {fases.map((f, i) => {
           const noAplica = f.aplica === false;
           const ahora = actual?.clave === f.clave;

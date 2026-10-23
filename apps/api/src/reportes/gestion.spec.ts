@@ -36,8 +36,8 @@ describe("reporte de gestión (EP-00 9.4)", () => {
       trazabilidad: [{ cotizacion: "2026-00001", ot: "OT-1", laboratorio: "LQC", estadoOt: "cerrada", factura: "F-1", estadoFactura: "pagada", total: 119 }],
     });
     expect(h.map((x) => x.nombre)).toContain("Facturación por centro de costo");
-    expect(h[0].filas[0]).toEqual(["Laboratorio", "cerrada", "Total"]);
-    expect(h.find((x) => x.nombre === "Cotización-OT-factura")!.filas[1]).toEqual(["2026-00001", "OT-1", "LQC", "cerrada", "F-1", "pagada", 119]);
+    expect(h[0].filas[0]).toEqual(["Laboratorio", "Cerrada", "Total"]);
+    expect(h.find((x) => x.nombre === "Cotización-OT-factura")!.filas[1]).toEqual(["2026-00001", "OT-1", "LQC", "Cerrada", "F-1", "pagada", 119]);
     expect(h.find((x) => x.nombre === "Período")!.filas[1][0]).toBe("Período: 2026-01-01 a hoy");
   });
 });

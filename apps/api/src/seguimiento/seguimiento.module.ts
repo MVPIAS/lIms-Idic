@@ -191,7 +191,7 @@ export class SeguimientoModule implements OnModuleInit {
           severidad,
           elementos: filas.slice(0, 5).map((f) => ({
             id: f.id,
-            texto: f.numero === f.ot ? `OT ${f.ot}` : `${f.numero} · OT ${f.ot}`,
+            texto: f.numero === f.ot ? f.ot : `${f.numero} · OT ${f.ot}`,
             detalle: [f.cliente, f.detalle].filter(Boolean).join(" · ") || null,
             ruta: `/ot/${f.otId}?tab=informe`,
             fecha: f.fecha,

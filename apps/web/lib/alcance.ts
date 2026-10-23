@@ -109,6 +109,13 @@ function normalizarBandeja(raw: any): ItemBandeja[] | null {
       cantidad: Number(x.cantidad ?? 0) || 0,
       ruta: typeof x.ruta === "string" ? x.ruta : undefined,
       severidad: (["info", "warn", "alta"].includes(x.severidad) ? x.severidad : "info") as Severidad,
+      // «Lo que le toca» (frente r4c): solo filas con texto y enlace interno.
+      elementos: Array.isArray(x.elementos)
+        ? x.elementos
+            .filter((e: any) => e && typeof e.texto === "string" && typeof e.ruta === "string" && e.ruta.startsWith("/"))
+            .slice(0, 5)
+            .map((e: any) => ({ id: String(e.id ?? e.ruta), texto: e.texto, detalle: e.detalle ?? null, ruta: e.ruta, fecha: e.fecha ?? null }))
+        : undefined,
     }));
 }
 
