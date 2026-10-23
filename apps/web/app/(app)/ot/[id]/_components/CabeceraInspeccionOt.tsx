@@ -9,6 +9,7 @@
  * agregan dirección, comuna y contacto. No se muestra en OT de otras unidades.
  * API: GET/PUT /bpch/cabecera-ot/:otId (docs/FLUJO_BPCH_CABECERA_OT.md).
  */
+import { conPunto } from "@/lib/etiquetas";
 import { avisarCambioOt } from "@/lib/refresco";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -162,7 +163,7 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
                   {(her || c.ayuda || (c.k === "inspectores" && f.sugeridos?.inspectores)) && (
                     <small style={{ color: "var(--muted)" }}>
                       {her ? `Si lo deja vacío se imprime: ${her}. ` : ""}
-                      {c.k === "inspectores" && f.sugeridos?.inspectores ? `Asignados a la OT: ${f.sugeridos.inspectores}. ` : ""}
+                      {c.k === "inspectores" && f.sugeridos?.inspectores ? `${conPunto(`Asignados a la OT: ${f.sugeridos.inspectores}`)} ` : ""}
                       {c.ayuda ?? ""}
                     </small>
                   )}
