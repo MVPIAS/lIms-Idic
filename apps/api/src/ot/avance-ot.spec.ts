@@ -559,4 +559,15 @@ describe("Ruta de la OT · OT directa y Producción Nacional del BPCH (BL-158)",
     expect(a.etapaActual).toBe("remision_dco");
     expect(a.siguiente?.texto).toMatch(/II-1/);
   });
+  it("B-020 · prototipo: sin Informe de Inspección ni remisión a DCO; tras los resultados toca el dictamen", () => {
+    const a = calcularAvance(bpch({ origen: "PROTOTIPO", ...lotes, cabeceraBpch: [], resultados: res({ aprobados: 3 }), documentos: [] }));
+    expect(a.etapas.find((e) => e.clave === "informe")?.estado).toBe("no_aplica");
+    expect(a.etapas.find((e) => e.clave === "remision_dco")?.estado).toBe("no_aplica");
+    expect(a.etapaActual).toBe("documento_final");
+    expect(a.siguiente?.texto).toMatch(/dictamen/);
+    const b = calcularAvance(bpch({ origen: "PROTOTIPO", ...lotes, cabeceraBpch: [], resultados: res({ aprobados: 3 }),
+      documentos: [doc({ numero: "PA-1", tipoDocumento: "CERTIFICADO_CONFORMIDAD", estado: "oficial" })] }));
+    expect(b.etapas.find((e) => e.clave === "documento_final")?.estado).toBe("hecho");
+    expect(b.etapaActual).toBe("entrega");
+  });
 });

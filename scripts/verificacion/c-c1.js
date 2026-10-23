@@ -435,6 +435,29 @@ async function main() {
     await exigir(403, U.lqcJefe, "GET", `/bpch/cabecera-ot/${(pnOt ?? proto).id}`);
     return hechos.join(" · ");
   });
+
+  /* ------------------------------------------------------------ B-020 */
+  await paso("B-020 · la ruta según el tipo: prototipo sin Informe de Inspección ni remisión a DCO; internación de armas sin pasos de lotes", async () => {
+    const ots = (await ok(U.admin, "GET", "/ot?limit=200")).data;
+    const hechos = [];
+    const proto = ots.find((o) => o.origenTrabajo === "PROTOTIPO");
+    if (proto) {
+      const a = await ok("demo.bpch.jefe", "GET", `/ot/${proto.id}/avance`);
+      const est = (k) => a.etapas.find((e) => e.clave === k)?.estado;
+      afirmar(est("informe") === "no_aplica" && est("remision_dco") === "no_aplica", `prototipo: informe ${est("informe")}, remisión ${est("remision_dco")}`);
+      hechos.push(`prototipo ${proto.codigo}: informe y remisión «no aplica»`);
+    }
+    const ints = lista(await ok(U.admin, "GET", "/bpch/internaciones?limit=100").catch(() => ({ data: [] })));
+    for (const i of ints) {
+      const d = await ok(U.admin, "GET", `/bpch/internaciones/${i.id}`);
+      if (!(d.armas ?? []).length && d.unidad?.codigo !== "D11") continue;
+      const est = (k) => d.fases.find((f) => f.clave === k)?.estado;
+      afirmar(est("informe") === "no_aplica" && est("codificacion") === "no_aplica", `internación de armas ${d.numero}: ${JSON.stringify(d.fases.map((f) => [f.clave, f.estado]))}`);
+      hechos.push(`internación de armas ${d.numero}: sin Informe de Inspección ni Codificación`);
+      break;
+    }
+    return hechos.join(" · ") || "sin OT de prototipo ni internación de armas en esta base (los recorren los guiones BPCH y r4b)";
+  });
 //PASOS
 }
 
