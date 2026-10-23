@@ -80,7 +80,7 @@ const EntregaSchema = z.object({
   observacion: texto(1000),
 });
 const TEXTO_MEDIO: Record<string, string> = {
-  mano: "en mano", correo: "por correo electrónico", oficina_partes: "por oficina de partes", courier: "por courier", plataforma: "por la plataforma del cliente", otro: "otro medio",
+  mano: "en mano", correo: "por correo electrónico", oficio: "por oficio", oficina_partes: "por oficina de partes", courier: "por courier", plataforma: "por la plataforma del cliente", otro: "otro medio",
 };
 const MotivoSchema = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres)").max(1000) });
 const CorreoSchema = z.object({
