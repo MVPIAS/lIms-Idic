@@ -314,6 +314,11 @@ async function main() {
 
   /* ---------------- 2. Cotización */
   await paso("Ventas crea la cotización con plazo de entrega", async () => {
+    // Ficha de costos del ensayo de grumos: sin valor la cotización se bloquea (BL-149); Calidad la completa.
+    {
+      const e = await ok("demo.calidad", "GET", `/cat/ensayos/${C.mGrumos.ensayoId}`);
+      if (!(Number(e.precio) > 0)) await ok("demo.calidad", "PATCH", `/cat/ensayos/${C.mGrumos.ensayoId}`, { precio: 5000 });
+    }
     C.cot = await ok(U.ventas, "POST", "/cotizaciones", {
       clienteId: C.cliente.id,
       formato: "NORMAL",
@@ -322,8 +327,8 @@ async function main() {
       lineas: [
         { catEnsayoId: C.mPh.ensayoId, cantidad: 1 },
         { catEnsayoId: C.mAzufre.ensayoId, cantidad: 1 },
-        // El ensayo de grumos no tiene valor en su ficha: ya no se admite un precio a mano (EP-00 2.2, BL-149).
-        { tipo: "otros", descripcion: "Traslado de muestras", cantidad: 1, precioUnitario: 5000 },
+        // El precio sale de la ficha (EP-00 2.2, BL-149): la del ensayo de grumos se completa arriba si venía sin valor.
+        { catEnsayoId: C.mGrumos.ensayoId, cantidad: 1 },
       ],
     });
     afirmar(C.cot.estado === "abierta", `estado ${C.cot.estado}`);

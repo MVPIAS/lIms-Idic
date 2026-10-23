@@ -243,7 +243,10 @@ async function main() {
   await paso("BL-149 · El precio del ensayo sale de la ficha: precio manual, ensayo sin valor y línea libre se rechazan", async () => {
     const cab = { clienteId: C.cliente.id, formato: "NORMAL", centroCostoId: C.ccLqc?.id ?? null, plazoEntregaDias: 10 };
     await exigir(400, U.ventas, "POST", "/cotizaciones", { ...cab, lineas: [{ catEnsayoId: C.mPh.ensayoId, cantidad: 1, precioUnitario: 1 }] }, /no admite un precio manual/);
-    await exigir(400, U.ventas, "POST", "/cotizaciones", { ...cab, lineas: [{ catEnsayoId: C.mGrumos.ensayoId, cantidad: 1, precioUnitario: 5000 }] }, /no tiene valor en su ficha/);
+    // Un ensayo del catálogo sin valor en su ficha (otros guiones pueden completar el de grumos).
+    const sinValor = lista(await ok(U.ventas, "GET", "/cat/ensayos?limit=100")).find((e) => !(Number(e.precio) > 0));
+    afirmar(sinValor, "no hay ensayos sin valor en su ficha");
+    await exigir(400, U.ventas, "POST", "/cotizaciones", { ...cab, lineas: [{ catEnsayoId: sinValor.id, cantidad: 1, precioUnitario: 5000 }] }, /no tiene valor en su ficha/);
     await exigir(400, U.ventas, "POST", "/cotizaciones", { ...cab, lineas: [{ descripcion: "Servicio libre", cantidad: 1, precioUnitario: 1000 }] }, /gasto tipificado/);
     return "3 rechazos con su motivo";
   });
