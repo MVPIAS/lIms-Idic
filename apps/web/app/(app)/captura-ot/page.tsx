@@ -35,6 +35,7 @@ import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { num, fechaHora } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
+import { recordarOtActiva } from "@/lib/ot-activa";
 import { confirmar, toast } from "@/components/ui/feedback";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 import { ESTADO_RESULTADO, llamar, qs, veredictoInfo, type Paginado } from "@/lib/laboratorio";
@@ -326,6 +327,7 @@ export default function CapturaOtPage() {
     setLoading(true);
     try {
       if (ot) {
+        recordarOtActiva(ot.id);
         const j = await llamar<any>("GET", `/flujo/ot/${ot.id}/resultados`);
         const info = j.ot ?? { id: ot.id, codigo: ot.codigo };
         if (!ot.codigo && info.codigo) setOt((o) => (o ? { ...o, codigo: info.codigo } : o));
@@ -633,6 +635,7 @@ export default function CapturaOtPage() {
                 Planilla de cálculos
               </Link>
               <Link href={`/informes?otId=${ot.id}` as any} className={`btn sm ${todoAprobado ? "primary" : "outline"}`}
+                aria-label={`Emitir informe de la OT ${ot.codigo}`.trim()}
                 title={todoAprobado ? "Todos los resultados están aprobados" : "Aún hay resultados sin aprobar"}>
                 Emitir informe
               </Link>
