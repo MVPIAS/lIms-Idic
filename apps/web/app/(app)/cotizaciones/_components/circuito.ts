@@ -123,4 +123,6 @@ export const TEXTO_MEDIO: Record<string, string> = {
   correo: "Correo electrónico",
   mano: "Entrega en mano",
   courier: "Courier",
+  oficio: "Oficio",
+  oficina_partes: "Oficina de partes",
 };

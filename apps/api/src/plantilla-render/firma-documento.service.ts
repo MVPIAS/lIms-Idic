@@ -16,7 +16,7 @@ import { decidirFirma, esOficial, pasosActuales, quedaOficial, puedeTransitarDoc
 import { escapeHtml, fmtFecha, fmtFechaHora } from "./html.util";
 
 /** Medios de entrega admitidos (los mismos que usa Comercial para el envío). */
-export const MEDIOS_ENTREGA = ["correo", "mano", "oficina_partes", "courier", "plataforma", "otro"] as const;
+export const MEDIOS_ENTREGA = ["correo", "mano", "oficio", "oficina_partes", "libro", "courier", "plataforma", "otro"] as const;
 
 function usuarioDe(req: any): string {
   const id = req?.user?.sub ?? req?.user?.id;

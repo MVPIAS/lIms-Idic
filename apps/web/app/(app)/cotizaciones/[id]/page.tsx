@@ -299,7 +299,7 @@ function DocumentoYFirma({ c, onHecho, onError }: { c: Circuito; onHecho: (m: st
 function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<void> }) {
   const k = c.cotizacion;
   const { puede } = usePermisos();
-  const [medio, setMedio] = useState<"correo" | "mano" | "courier">("correo");
+  const [medio, setMedio] = useState<"correo" | "mano" | "courier" | "oficio" | "oficina_partes">("correo");
   const [destinatarios, setDestinatarios] = useState(() => [...new Set(c.destinatarios.filter((d) => d.principal).map((d) => d.email))].join(", "));
   const [observacion, setObservacion] = useState("");
   const [error, setError] = useState("");
@@ -308,7 +308,12 @@ function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<vo
     setError("");
     const lista = destinatarios.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
     if (medio === "correo" && !lista.length) return setError("Indique al menos un destinatario.");
-    if (medio !== "correo" && !observacion.trim()) return setError(medio === "mano" ? "Indique a quién se entregó." : "Indique la empresa de courier y el número de seguimiento.");
+    if (medio !== "correo" && !observacion.trim())
+      return setError(
+        medio === "mano" ? "Indique a quién se entregó."
+          : medio === "courier" ? "Indique la empresa de courier y el número de seguimiento."
+          : "Indique el Nº del oficio o del registro de la Oficina de partes.",
+      );
     setBusy(true);
     try {
       const r = await pedir<any>("POST", `/cotizaciones/${k.id}/enviar-cliente`, {
@@ -357,6 +362,8 @@ function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<vo
                 <option value="correo">Correo electrónico (adjunta el PDF)</option>
                 <option value="mano">Entrega en mano</option>
                 <option value="courier">Courier</option>
+                <option value="oficio">Oficio (generado fuera del LIMS)</option>
+                <option value="oficina_partes">Oficina de partes</option>
               </select>
             </div>
             {medio === "correo" ? (
@@ -377,7 +384,7 @@ function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<vo
               </div>
             ) : <div />}
             <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label htmlFor="env-obs">{medio === "correo" ? "Observación" : medio === "mano" ? "Entregada a (nombre y cargo)" : "Courier y número de seguimiento"} {medio !== "correo" && <span className="req">*</span>}</label>
+              <label htmlFor="env-obs">{medio === "correo" ? "Observación" : medio === "mano" ? "Entregada a (nombre y cargo)" : medio === "courier" ? "Courier y número de seguimiento" : "Nº del oficio o del registro de la Oficina de partes"} {medio !== "correo" && <span className="req">*</span>}</label>
               <input id="env-obs" value={observacion} onChange={(e) => setObservacion(e.target.value)} maxLength={1000} />
             </div>
           </div>

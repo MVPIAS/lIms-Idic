@@ -588,7 +588,8 @@ export class SeguimientoService {
         req.user?.sub ?? null,
       );
       // Los documentos del circuito que aún no tenían entrega quedan entregados con este envío.
-      const medioEntrega = ["correo", "mano", "oficina_partes", "courier", "plataforma"].includes(dto.medio) ? dto.medio : "otro";
+      // El medio real del envío (B-024: «Oficio» quedaba como «Otro»).
+      const medioEntrega = ["correo", "mano", "oficio", "oficina_partes", "libro", "courier", "plataforma"].includes(dto.medio) ? dto.medio : "otro";
       for (const d of docs.filter((x) => !x.entregadoAt))
         await tx.$executeRawUnsafe(
           `UPDATE certificado SET entregado_at = $2::date + (now() AT TIME ZONE 'America/Santiago')::time AT TIME ZONE 'America/Santiago',
@@ -732,8 +733,13 @@ export class SeguimientoService {
                 c.oficial_at AS "oficialAt", c.entregado_at AS "entregadoAt", c.reemplaza_id AS "reemplazaId", p.nombre AS plantilla
            FROM certificado c LEFT JOIN plantilla_informe p ON p.id = c.plantilla_id
           WHERE c.ot_id = $1::uuid AND c.deleted_at IS NULL ORDER BY c.fecha`),
-      q(`SELECT id, numero, estado, materia, destinatario, fecha::text AS fecha, despacho_numero AS "despachoNumero" FROM oficio
-          WHERE ot_id = $1::uuid ORDER BY created_at`),
+      // Los de la OT y los de la cotización que la originó (B-024: el oficio conductor de la cotización).
+      q(`SELECT f.id, f.numero, f.estado, f.materia, f.destinatario, f.fecha::text AS fecha, f.despacho_numero AS "despachoNumero",
+                CASE WHEN f.ot_id = $1::uuid THEN 'ot' ELSE 'cotizacion' END AS origen
+           FROM oficio f
+          WHERE f.ot_id = $1::uuid
+             OR (f.ot_id IS NULL AND f.cotizacion_id = (SELECT cotizacion_id FROM orden_trabajo WHERE id = $1::uuid))
+          ORDER BY f.created_at`),
       q(`SELECT r.id, r.variante, r.clave, r.estado, r.version, r.updated_at AS "updatedAt" FROM registro_especializado r
           WHERE r.ot_id = $1::uuid ORDER BY r.created_at`),
       q(`SELECT a.id, a.nombre, a.mime, a.bytes, a.created_at AS "createdAt", r.variante FROM registro_especializado_adjunto a

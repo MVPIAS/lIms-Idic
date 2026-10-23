@@ -21,6 +21,7 @@ import {
   type NivelVb,
   type RespuestaLab,
   type SolicitudRuta,
+  TEXTO_MEDIO,
 } from "./circuito-cotizacion";
 import { calcularForm05, erroresForm05, erroresPrograma, type Form05Entrada, type ProgramaTrabajo, exigeCosteo, type TipoServicio } from "./form05";
 import { numeroFormulario } from "./numeracion-cotizacion";
@@ -664,7 +665,7 @@ export class CircuitoCotizacionService {
   async enviarCliente(
     req: any,
     id: string,
-    b: { medio: "correo" | "mano" | "courier"; destinatarios?: string[]; observacion?: string | null; plantilla?: string },
+    b: { medio: "correo" | "mano" | "courier" | "oficio" | "oficina_partes"; destinatarios?: string[]; observacion?: string | null; plantilla?: string },
   ) {
     const tenantId = this.tenant(req);
     await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id);
@@ -686,7 +687,11 @@ export class CircuitoCotizacionService {
         };
       }
     } else if (!obs) {
-      throw new BadRequestException(`Entrega ${b.medio === "mano" ? "en mano" : "por courier"}: indique a quién se entregó o el número de seguimiento.`);
+      throw new BadRequestException(
+        b.medio === "oficio" || b.medio === "oficina_partes"
+          ? `Envío ${b.medio === "oficio" ? "por oficio" : "por la Oficina de partes"}: indique el Nº del oficio o del registro de la Oficina de partes.`
+          : `Entrega ${b.medio === "mano" ? "en mano" : "por courier"}: indique a quién se entregó o el número de seguimiento.`,
+      );
     }
     const dest = b.medio === "correo" ? (resultado.destinatarios ?? b.destinatarios ?? []).join(", ") : null;
     await this.prisma.$executeRawUnsafe(
@@ -699,6 +704,6 @@ export class CircuitoCotizacionService {
       obs,
     );
     await this.evento(tenantId, id, "enviada_cliente", this.yo(req), obs, { medio: b.medio, destinatarios: dest });
-    return { ok: true, mensaje: `Envío de la cotización ${c.codigo} registrado (${b.medio === "correo" ? `correo a ${dest}` : b.medio === "mano" ? "entrega en mano" : "courier"}).` };
+    return { ok: true, mensaje: `Envío de la cotización ${c.codigo} registrado (${b.medio === "correo" ? `correo a ${dest}` : TEXTO_MEDIO[b.medio] ?? b.medio}).` };
   }
 }
