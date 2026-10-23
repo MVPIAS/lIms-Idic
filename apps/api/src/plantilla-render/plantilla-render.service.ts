@@ -66,6 +66,7 @@ import {
   type IdentificacionMuestra,
 } from "./bloques-informe";
 import { anioChile } from "../common/fecha-chile";
+import { leerCondicion2 } from "../laboratorio/requisito-compuesto";
 
 /** Fotos como máximo en el anexo fotográfico de un documento. */
 export const MAX_FOTOS_INFORME = 24;
@@ -274,6 +275,8 @@ export class PlantillaRenderService {
         limiteSup: legado ? txt(legado.limiteSup) : r.limiteSup,
         requisito: r.requisito,
         especOrigen: legado ? "catalogo" : r.especOrigen,
+        condicion2: legado ? null : leerCondicion2(r.condicion2),
+        valorCondicion2: num(r.valorCondicion2),
         tipoDato: r.tipoDato,
         valorNumerico: num(r.valorNumerico),
         valorTexto: r.valorTexto,

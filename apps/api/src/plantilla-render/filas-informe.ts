@@ -13,6 +13,7 @@
 import { etiquetaVeredicto, normalizarVeredicto, type Veredicto } from "../laboratorio/veredicto";
 import { esNumeroTexto, veredictoMuestra } from "../laboratorio/especificacion";
 import { fmtNum } from "./html.util";
+import { textoCondicion2, type Condicion2 } from "../laboratorio/requisito-compuesto";
 import type { ConfigInforme } from "./config-informe";
 import type { FilaInspeccion } from "./template.engine";
 
@@ -40,6 +41,10 @@ export interface ResultadoParaInforme {
   requisito?: string | null;
   /** 'orden' = especificación fijada o cambiada en esta OT; 'catalogo' = la copiada del catálogo. */
   especOrigen?: string | null;
+  /** Segunda condición del requisito compuesto de la E.T. («con Alargamiento ≥ 30 %», B-025). */
+  condicion2?: Condicion2 | null;
+  /** Valor medido de la segunda condición. */
+  valorCondicion2?: number | null;
   tipoDato?: string | null;
   valorNumerico?: number | null;
   valorTexto?: string | null;
@@ -148,7 +153,17 @@ export function tieneRequisito(r: Pick<ResultadoParaInforme, "limiteInf" | "nomi
  *   · Mín y Máx → «6,5 – 8,5»; solo Mín → «Mín. 2,5»; solo Máx → «Máx. 0,05»;
  *   · solo nominal → el nominal («Lo declarado», «250»).
  */
-export function textoRequisito(r: Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito">): string {
+export function textoRequisito(
+  r: Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito"> & { condicion2?: Condicion2 | null; unidad?: string | null },
+): string {
+  const base = textoRequisitoSimple(r);
+  // B-025: el requisito compuesto de la E.T. se imprime completo («Mín. 1,5 kgf/mm² con Alargamiento ≥ 30 %»).
+  if (!r.condicion2?.etiqueta) return base;
+  const u = vacio(r.unidad) ? "" : ` ${String(r.unidad).trim()}`;
+  return `${base}${base && !vacio(r.requisito) ? "" : u} ${textoCondicion2(r.condicion2)}`.trim();
+}
+
+function textoRequisitoSimple(r: Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito">): string {
   const inf = vacio(r.limiteInf) ? null : String(r.limiteInf).trim();
   const nom = vacio(r.nominal) ? null : String(r.nominal).trim();
   const sup = vacio(r.limiteSup) ? null : String(r.limiteSup).trim();
@@ -187,7 +202,12 @@ export function textoResultado(r: ResultadoParaInforme): string {
   const esAtributo = r.tipoDato === "atributo";
   if (!esAtributo) {
     const n = valorInformado(r);
-    if (n !== null && n !== undefined && Number.isFinite(Number(n))) return fmtNum(Number(n));
+    if (n !== null && n !== undefined && Number.isFinite(Number(n))) {
+      const c2 = r.condicion2?.etiqueta && r.valorCondicion2 != null && Number.isFinite(Number(r.valorCondicion2))
+        ? ` · ${r.condicion2.etiqueta} ${fmtNum(Number(r.valorCondicion2))}${r.condicion2.unidad ? ` ${r.condicion2.unidad}` : ""}`
+        : "";
+      return `${fmtNum(Number(n))}${c2}`;
+    }
   }
   if (!vacio(r.valorTexto)) return String(r.valorTexto).trim();
   if (esAtributo) {

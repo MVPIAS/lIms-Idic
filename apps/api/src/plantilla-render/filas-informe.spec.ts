@@ -170,3 +170,19 @@ describe("informe · armarInforme (secciones numeradas, Textil / LCC)", () => {
     expect(e.secciones[0].numero).toBe("4.1");
   });
 });
+
+describe("B-025 · requisito compuesto de la E.T.", () => {
+  const { textoRequisito: tr, textoResultado: tres } = require("./filas-informe");
+  const c2 = { etiqueta: "Alargamiento", inf: 30, sup: null, unidad: "%" };
+  it("imprime la segunda condición con su valor", () => {
+    expect(tr({ limiteInf: "1,5", nominal: null, limiteSup: null, requisito: null, unidad: "kgf/mm²", condicion2: c2 }))
+      .toBe("Mín. 1,5 kgf/mm² con Alargamiento ≥ 30 %");
+  });
+  it("sin segunda condición el requisito no cambia", () => {
+    expect(tr({ limiteInf: "1,5", nominal: null, limiteSup: null, requisito: null, unidad: "kgf/mm²" })).toBe("Mín. 1,5");
+  });
+  it("el resultado imprime también el valor de la segunda condición", () => {
+    expect(tres({ id: "r", muestraId: "m", muestraCodigo: "M-1", ensayo: "Tracción", valorNumerico: 1.8, condicion2: c2, valorCondicion2: 42 }))
+      .toBe("1,8 · Alargamiento 42 %");
+  });
+});
