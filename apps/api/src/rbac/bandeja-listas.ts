@@ -5,6 +5,8 @@
  * o NULL, $3 usuario). Cada consulta devuelve id, texto, detalle, ruta y fecha.
  */
 
+import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
+
 const OT_TERMINADA = `('cerrada','anulada','finalizada','informada')`;
 const OT_CERRADA = `('cerrada','anulada')`;
 const HOY_CL = `(now() AT TIME ZONE 'America/Santiago')::date`;
@@ -53,11 +55,8 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
   ot_sin_plazo: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso IS NULL`, "o.created_at", "'/ot/' || o.id || '?tab=informe'"), extra: "ninguno" },
   ot_listas_cerrar: {
     sql: filaOt(
-      `o.estado NOT IN ${OT_CERRADA}
-       AND EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
-       AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
-                         AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
-       AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')`,
+      // Misma condición que el conteo, /ot?listasCierre=1 y la Ruta (también la OT de calibración, B-017).
+      `o.estado NOT IN ${OT_CERRADA} AND ${SQL_OT_LISTA_PARA_CERRAR}`,
       "o.fecha_compromiso NULLS LAST",
       "'/ot/' || o.id || '?tab=informe'",
     ),
@@ -70,7 +69,8 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
     extra: "yo",
   },
   ot_sin_asignar: {
-    sql: filaOt(`o.estado NOT IN ${OT_TERMINADA} AND NOT EXISTS (SELECT 1 FROM ot_analista oa WHERE oa.ot_id = o.id)`, "o.created_at", "'/ot/' || o.id || '?tab=asignacion'"),
+    // B-017: el metrólogo asignado a un instrumento también cuenta como analista de la OT.
+    sql: filaOt(`o.estado NOT IN ${OT_TERMINADA} AND NOT ${SQL_OT_CON_ANALISTA}`, "o.created_at", "'/ot/' || o.id || '?tab=asignacion'"),
     extra: "ninguno",
   },
   ot_cerradas_sin_factura: {

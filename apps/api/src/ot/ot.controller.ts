@@ -270,7 +270,13 @@ export class OtController {
 
     const idsMias = si(query.mias) ? await this.idsOtAsignadas(req?.user?.sub, tenantId) : null;
     const idsConAnalista = si(query.sinAsignar)
-      ? (await this.prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT DISTINCT ot_id AS id FROM ot_analista`)).map((f) => f.id)
+      ? (
+          await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+            // B-017: también las OT de calibración con metrólogo asignado por instrumento.
+            `SELECT DISTINCT ot_id AS id FROM ot_analista
+             UNION SELECT DISTINCT ot_id FROM met_ot_instrumento WHERE metrologo_id IS NOT NULL AND estado <> 'anulado'`,
+          )
+        ).map((f) => f.id)
       : null;
 
     const idsListasCierre = si(query.listasCierre) ? await this.cierre.idsListasParaCerrar(tenantId) : null;

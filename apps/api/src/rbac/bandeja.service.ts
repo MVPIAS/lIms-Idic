@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
 import { PrismaService } from "../common/prisma.service";
 import { ContextoAlcance } from "./alcance.service";
 import { Perfil, codigoCanonico } from "./rbac.constants";
@@ -242,11 +243,8 @@ export class BandejaService {
         ),
       otListasParaCerrar: () =>
         this.contar(
-          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA}
-              AND EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
-              AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
-                                AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
-              AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')`,
+          // Misma condición que /ot?listasCierre=1 y la Ruta (también la OT de calibración, B-017).
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND ${SQL_OT_LISTA_PARA_CERRAR}`,
           tenant,
           unidades,
         ),
@@ -274,7 +272,7 @@ export class BandejaService {
         this.contar(
           `SELECT count(*) AS n FROM orden_trabajo o
             WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA}
-              AND NOT EXISTS (SELECT 1 FROM ot_analista oa WHERE oa.ot_id = o.id)`,
+              AND NOT ${SQL_OT_CON_ANALISTA}`,
           tenant,
           unidades,
         ),
