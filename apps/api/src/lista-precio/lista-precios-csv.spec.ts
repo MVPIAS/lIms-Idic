@@ -17,7 +17,10 @@ import {
   type FilaLista,
 } from "./lista-precios-csv";
 
-const CSV_REAL = path.resolve(__dirname, "../../../../scripts/datos/lista-precios-2026/LISTA_DE_PRECIO_2026_COSTOS_ENSAYOS.csv");
+// El CSV del IDIC NO se versiona (.gitignore: datos del cliente). Se lee de LISTA_PRECIOS_CSV
+// o de la copia local junto al generador; sin el fichero, esas pruebas se omiten.
+const CSV_REAL = process.env.LISTA_PRECIOS_CSV || path.resolve(__dirname, "../../../../scripts/datos/lista-precios-2026/LISTA_DE_PRECIO_2026_COSTOS_ENSAYOS.csv");
+const conCsv = fs.existsSync(CSV_REAL) ? describe : describe.skip;
 const ENC = "CODIGO;NOMBR ENSAYO;CENTRO DE COSTOS;CD;CI;CT;RECARGO;NETO;IVA;PRECIO\r\n";
 
 describe("Lector CSV de la lista de precios", () => {
@@ -54,8 +57,8 @@ describe("Lector CSV de la lista de precios", () => {
   });
 });
 
-describe("CSV real del IDIC (22-10-2026)", () => {
-  const { encabezado, filas } = leerListaPrecios(decodificarCp1252(fs.readFileSync(CSV_REAL)));
+conCsv("CSV real del IDIC (22-10-2026)", () => {
+  const { encabezado, filas } = fs.existsSync(CSV_REAL) ? leerListaPrecios(decodificarCp1252(fs.readFileSync(CSV_REAL))) : { encabezado: [], filas: [] as FilaLista[] };
 
   it("619 filas de 10 columnas, todas legibles", () => {
     expect(encabezado[0]).toBe("CODIGO");

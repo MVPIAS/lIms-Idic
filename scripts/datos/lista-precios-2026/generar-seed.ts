@@ -1,7 +1,14 @@
 /**
  * Genera packages/db/seed_lp26_lista_precios_2026.sql e informe-carga.csv a
  * partir de la lista de precios oficial del IDIC 2026 (CSV del 22-10-2026,
- * LISTA_DE_PRECIO_2026_COSTOS_ENSAYOS.csv en esta carpeta).
+ * «LISTA DE PRECIO 2026(COSTOS ENSAYOS).csv», en la carpeta del levantamiento:
+ * documentacion cliente/Levantamiento IDIC/Segunda tanda de levantamiento).
+ *
+ * El CSV y el informe NO se versionan (.gitignore: los ficheros de datos del
+ * cliente quedan fuera del repositorio). Se pasa la ruta del CSV como argumento
+ * o se deja una copia local en esta carpeta con el nombre
+ * LISTA_DE_PRECIO_2026_COSTOS_ENSAYOS.csv; el informe se escribe junto al
+ * generador y tampoco se sube.
  *
  *   pnpm --filter @lims-idic/db exec tsx ../../scripts/datos/lista-precios-2026/generar-seed.ts [ruta-al-csv]
  *
@@ -10,9 +17,10 @@
  * enlazar cada código EN con su ensayo. Las reglas (lectura, fórmula, centro de
  * costo, enlace) están en apps/api/src/lista-precio/lista-precios-csv.ts.
  *
- * El CSV solo trae precios públicos de servicios: código, nombre, centro de
- * costo y la estructura del precio, que es una función fija del precio
- * particular (CI 20 %, recargo 30 %, IVA 19 %).
+ * El seed (sí versionado, como los demás seeds de datos reales) solo lleva
+ * precios de servicios: código, nombre, centro de costo y la estructura del
+ * precio, que es una función fija del precio particular (CI 20 %, recargo 30 %,
+ * IVA 19 %).
  */
 import * as fs from "fs";
 import * as path from "path";
