@@ -455,7 +455,37 @@ export class OficioService {
       usuarioDe(req),
     );
     await this.historial(id, `despachado por Oficina de partes (Nº ${dto.numero.trim()})`, req);
+    if (o.cotizacion_id) await this.marcarCotizacionEnviada(o, dto.numero.trim(), req);
     return this.detalle(id, req);
+  }
+
+  /**
+   * B-024 · EP-00 3.3–3.4: despachar el oficio conductor de la cotización deja la
+   * cotización «Enviada» por oficio (si aún no lo estaba y se puede enviar:
+   * abierta o aceptada y, en el circuito R1, firmada por el Jefe DCO).
+   */
+  private async marcarCotizacionEnviada(o: any, despacho: string, req: any) {
+    const obs = `Oficio ${o.numero ?? ""} · despacho Oficina de partes Nº ${despacho}`.replace(/\s+/g, " ").slice(0, 500);
+    const n = await this.prisma.$executeRawUnsafe(
+      `UPDATE cotizacion SET enviada_at = now(), enviada_por = $2::uuid, enviada_medio = 'oficio', enviada_destinatarios = $3,
+              envio_observacion = $4, updated_at = now()
+        WHERE id = $1::uuid AND enviada_at IS NULL AND estado IN ('abierta', 'aceptada')
+          AND (circuito IS DISTINCT FROM 'r1' OR firma_estado = 'firmada')`,
+      o.cotizacion_id,
+      usuarioDe(req),
+      String(o.destinatario ?? "").slice(0, 500) || null,
+      obs,
+    );
+    if (n > 0)
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO cotizacion_evento (tenant_id, cotizacion_id, accion, comentario, detalle, usuario_id)
+         VALUES ($1::uuid, $2::uuid, 'enviada_cliente', $3, $4::jsonb, $5::uuid)`,
+        o.tenant_id,
+        o.cotizacion_id,
+        obs,
+        JSON.stringify({ medio: "oficio", oficioId: o.id, oficio: o.numero, despacho }),
+        usuarioDe(req),
+      );
   }
 
   async anular(id: string, motivo: string, req: any) {

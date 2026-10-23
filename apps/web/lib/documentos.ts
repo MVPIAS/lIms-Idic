@@ -40,7 +40,9 @@ export const ACCION_FIRMA: Record<string, string> = {
 export const MEDIOS_ENTREGA: { valor: string; texto: string }[] = [
   { valor: "mano", texto: "En mano" },
   { valor: "correo", texto: "Correo electrónico" },
+  { valor: "oficio", texto: "Oficio" },
   { valor: "oficina_partes", texto: "Oficina de partes" },
+  { valor: "libro", texto: "Libro de entrega" },
   { valor: "courier", texto: "Courier / correo postal" },
   { valor: "plataforma", texto: "Plataforma del cliente" },
   { valor: "otro", texto: "Otro" },

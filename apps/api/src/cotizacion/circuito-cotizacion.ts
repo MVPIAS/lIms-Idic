@@ -271,6 +271,7 @@ export const TEXTO_MEDIO: Record<string, string> = {
   mano: "entrega en mano",
   courier: "courier",
   oficio: "oficio",
+  oficina_partes: "Oficina de partes",
 };
 
 function siguiente(clave: string, h: HechosCotizacion, sol: SolicitudRuta[], cfg: ConfigCircuito): Siguiente | null {

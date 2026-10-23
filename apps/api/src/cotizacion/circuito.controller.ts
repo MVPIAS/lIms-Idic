@@ -58,7 +58,7 @@ const ResponderSchema = z.object({
 const VbSchema = z.object({ accion: z.enum(["dar", "devolver"]), comentario: texto(2000).nullable().optional() });
 const MotivoSchema = z.object({ motivo: texto(1000).min(3, "Indique el motivo.") });
 const EnviarClienteSchema = z.object({
-  medio: z.enum(["correo", "mano", "courier"]),
+  medio: z.enum(["correo", "mano", "courier", "oficio", "oficina_partes"]),
   destinatarios: z.array(z.string().trim().email("Correo inválido").max(200)).max(20).optional(),
   observacion: texto(1000).nullable().optional(),
   plantilla: z.string().max(60).optional(),
