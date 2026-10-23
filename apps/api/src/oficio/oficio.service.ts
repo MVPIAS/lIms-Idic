@@ -84,7 +84,9 @@ export class OficioService {
   private async exigirVer(o: any, pasos: any[], req: any) {
     const yo = usuarioDe(req);
     if (pasos.some((p) => idsResponsables(p.responsables).includes(yo))) return;
-    await this.alcance.exigirUnidad(req, o.unidad_id, `el oficio ${o.numero ?? ""}`.trim());
+    // La ruta del detalle no exige permiso (el firmante de turno lo abre aunque no tenga oficio.ver): el resto, sí.
+    if (!tienePermiso(req, "oficio.ver")) throw new ForbiddenException("No tiene permiso para ver oficios (oficio.ver).");
+    await this.alcance.exigirUnidad(req, o.unidad_id, `el oficio ${o.numero ?? ""}`.trim(), "oficio.ver");
   }
 
   private async documentosDe(ids: string[]) {
