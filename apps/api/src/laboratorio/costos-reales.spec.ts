@@ -59,7 +59,7 @@ describe("planilla de costos reales", () => {
     });
     expect(e.horasHombre).toBe(8);
     expect(e.fuenteHoras).toBe("lineas_cotizacion");
-    expect(e.cotizadoPorCategoria).toEqual({ horas_hombre: 80000, reactivos: 0, equipos: 15000, otros: 5000 });
+    expect(e.cotizadoPorCategoria).toEqual({ horas_hombre: 80000, reactivos: 0, equipos: 15000, otros: 5000, ot_interna: 0, comision: 0 });
     expect(e.neto).toBe(190000);
   });
   it("compara lo real con lo estimado", () => {
@@ -112,5 +112,37 @@ describe("planilla de costos por laboratorio (revisión r3, hallazgos 7 y 8)", (
     expect(laboratorioDeResultado([LQC, LPN], [LQC, LPN], LQC)).toBe(LQC);
     expect(laboratorioDeResultado([], [LQC, LPN], LQC)).toBe(LQC);
     expect(laboratorioDeResultado(["otro"], [LQC, LPN], LQC)).toBe(LQC);
+  });
+});
+
+describe("planilla de costos reales · OT internas y gastos de comisión (EP-00 7.1, EP-05 9.1)", () => {
+  const { erroresLineas, lineasSugeridas, resumenCostos } = require("./costos-reales") as typeof import("./costos-reales");
+  it("la OT interna valorizada y el gasto de comisión suman al costo directo real", () => {
+    const r = resumenCostos([
+      { categoria: "ot_interna", ordenInternaId: "oi1", cantidad: 1, costoUnitario: 50000 },
+      { categoria: "comision", tipoGasto: "pasaje", cantidad: 2, costoUnitario: 90000 },
+    ]);
+    expect(r.porCategoria.ot_interna.total).toBe(50000);
+    expect(r.porCategoria.comision.total).toBe(180000);
+    expect(r.total).toBe(230000);
+  });
+  it("exige la orden interna o el tipo de gasto, y no repite una orden interna", () => {
+    expect(erroresLineas([{ categoria: "ot_interna", cantidad: 1, costoUnitario: 1 }], new Set())).toEqual(["Línea 1: indique la orden interna valorizada."]);
+    expect(erroresLineas([{ categoria: "comision", cantidad: 1, costoUnitario: 1 }], new Set())[0]).toMatch(/tipo de gasto de comisión/);
+    const dos = [{ categoria: "ot_interna" as const, ordenInternaId: "a", cantidad: 1, costoUnitario: 1 }, { categoria: "ot_interna" as const, ordenInternaId: "a", cantidad: 1, costoUnitario: 1 }];
+    expect(erroresLineas(dos, new Set())).toContain("Una misma orden interna figura dos veces en la planilla.");
+  });
+  it("sugiere las órdenes internas respondidas y los gastos del costeo, sin repetir lo cargado", () => {
+    const s = lineasSugeridas(
+      [{ id: "a", numero: "OI-1", destino: "LPN", costoDirecto: 30000 }, { id: "b", numero: "OI-2", destino: "LME", costoDirecto: null }],
+      { viaticos: [{ zona: "Arica", dias: 2, montoDiario: 60000, porcentaje: 40 }], pasajes: [{ tramo: "SCL-ARI", cantidad: 1, valorUnitario: 180000 }] },
+      [],
+    );
+    expect(s.map((l) => [l.categoria, l.tipoGasto ?? null, l.cantidad, l.costoUnitario])).toEqual([
+      ["ot_interna", null, 1, 30000],
+      ["comision", "viatico", 2, 24000],
+      ["comision", "pasaje", 1, 180000],
+    ]);
+    expect(lineasSugeridas([{ id: "a", numero: "OI-1", destino: null, costoDirecto: 1 }], null, [{ categoria: "ot_interna", ordenInternaId: "a", cantidad: 1, costoUnitario: 1 }])).toEqual([]);
   });
 });

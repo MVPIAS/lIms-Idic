@@ -421,6 +421,23 @@ async function main() {
     await exigir(409, U.dco, "POST", "/internaciones/tasa-mensual/emitir", { mes }, /ya se emitió/);
     return `${mes}: ${d.filas.length} tasas · ${e.resumen.total} · emitido y difundido`;
   });
+
+  /* ------------------------------------------------------------ T27 */
+  await paso("BL-193/194 · Planilla de costos reales: trae los gastos de comisión del costeo y valida las OT internas (el analista no)", async () => {
+    const ruta = `/laboratorio/ot/${C.ot.id}/costos-reales`;
+    const v = await ok(U.lqcJefe, "GET", ruta);
+    const sug = v.sugerencias.lineas ?? [];
+    const com = sug.filter((x) => x.categoria === "comision");
+    afirmar(com.some((x) => x.tipoGasto === "viatico" && x.costoUnitario === 24000) && com.some((x) => x.tipoGasto === "pasaje"), `sugeridas ${JSON.stringify(sug)}`);
+    const lineas = com.map((x) => ({ categoria: x.categoria, tipoGasto: x.tipoGasto, descripcion: x.descripcion, cantidad: x.cantidad, costoUnitario: x.costoUnitario }));
+    await exigir(403, U.lqcAnalista, "PUT", ruta, { lineas });
+    await exigir(400, U.lqcJefe, "PUT", ruta, { lineas: [...lineas, { categoria: "comision", cantidad: 1, costoUnitario: 1 }] }, /tipo de gasto de comisión/);
+    await exigir(400, U.lqcJefe, "PUT", ruta, { lineas: [{ categoria: "ot_interna", ordenInternaId: crypto.randomUUID(), cantidad: 1, costoUnitario: 50000 }] }, /no es de esta OT/);
+    const g = await ok(U.lqcJefe, "PUT", ruta, { lineas: [...lineas, { categoria: "ot_interna", descripcion: "Orden interna externa (servicio LME)", cantidad: 1, costoUnitario: 50000 }] });
+    afirmar(g.resumen.porCategoria.comision.total === 228000 && g.resumen.porCategoria.ot_interna.total === 50000, `resumen ${JSON.stringify(g.resumen.porCategoria)}`);
+    afirmar(!(g.sugerencias.lineas ?? []).some((x) => x.categoria === "comision"), "no vuelve a sugerir lo cargado");
+    return `comisión ${g.resumen.porCategoria.comision.total} + OT internas ${g.resumen.porCategoria.ot_interna.total} = ${g.resumen.total}`;
+  });
 }
 
 main()

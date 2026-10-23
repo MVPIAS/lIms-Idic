@@ -15,7 +15,7 @@
  * se muestran como referencia por bloque.
  */
 
-export const CATEGORIAS_COSTO = ["horas_hombre", "reactivos", "equipos", "otros"] as const;
+export const CATEGORIAS_COSTO = ["horas_hombre", "reactivos", "equipos", "otros", "ot_interna", "comision"] as const;
 export type CategoriaCosto = (typeof CATEGORIAS_COSTO)[number];
 
 export const ETIQUETA_CATEGORIA: Record<CategoriaCosto, string> = {
@@ -23,6 +23,23 @@ export const ETIQUETA_CATEGORIA: Record<CategoriaCosto, string> = {
   reactivos: "Reactivos y consumibles",
   equipos: "Equipos (horas máquina)",
   otros: "Otros",
+  ot_interna: "OT internas valorizadas",
+  comision: "Gastos de comisión",
+};
+
+/**
+ * Gastos de comisión en terreno o en el extranjero (EP-05 2.4 y 9.1, BL-194):
+ * pasajes, viáticos, traslados, arriendo de vehículo, combustible y rendición.
+ */
+export const TIPOS_GASTO_COMISION = ["viatico", "pasaje", "traslado", "arriendo", "combustible", "rendicion", "otro"] as const;
+export const ETIQUETA_GASTO_COMISION: Record<(typeof TIPOS_GASTO_COMISION)[number], string> = {
+  viatico: "Viático",
+  pasaje: "Pasaje",
+  traslado: "Traslado",
+  arriendo: "Arriendo de vehículo",
+  combustible: "Combustible",
+  rendicion: "Rendición de cuentas",
+  otro: "Otro gasto",
 };
 
 export interface LineaCostoReal {
@@ -34,6 +51,10 @@ export interface LineaCostoReal {
   cantidad: number;
   unidad?: string | null;
   costoUnitario: number;
+  /** Orden interna valorizada (bloque «OT internas», EP-00 7.1). */
+  ordenInternaId?: string | null;
+  /** Tipo de gasto de comisión (bloque «Gastos de comisión», EP-05 9.1). */
+  tipoGasto?: string | null;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -53,8 +74,42 @@ export function erroresLineas(lineas: LineaCostoReal[], cargosValidos: Set<strin
     if (l.categoria === "reactivos" && !l.consumibleId && !l.descripcion?.trim()) e.push(`${n}: indique el reactivo o consumible.`);
     if (l.categoria === "equipos" && !l.equipoId && !l.descripcion?.trim()) e.push(`${n}: indique el equipo.`);
     if (l.categoria === "otros" && !l.descripcion?.trim()) e.push(`${n}: describa el gasto.`);
+    if (l.categoria === "ot_interna" && !l.ordenInternaId && !l.descripcion?.trim()) e.push(`${n}: indique la orden interna valorizada.`);
+    if (l.categoria === "comision" && !(TIPOS_GASTO_COMISION as readonly string[]).includes(String(l.tipoGasto ?? "")))
+      e.push(`${n}: indique el tipo de gasto de comisión (viático, pasaje, traslado, arriendo, combustible, rendición u otro).`);
   });
+  const ois = lineas.filter((l) => l.categoria === "ot_interna" && l.ordenInternaId).map((l) => l.ordenInternaId);
+  if (new Set(ois).size !== ois.length) e.push("Una misma orden interna figura dos veces en la planilla.");
   return e;
+}
+
+/**
+ * Sugerencias para los bloques nuevos (EP-00 7.1, EP-05 9.1): una línea por
+ * orden interna respondida con su costo directo (cantidad 1 × costo), y una por
+ * gasto de comisión estimado por el laboratorio en el Formulario de costeo de la
+ * cotización (viáticos y pasajes; los otros gastos como «otro»). Lo ya cargado
+ * no se repite. El costo real se corrige a mano.
+ */
+export function lineasSugeridas(
+  ordenes: { id: string; numero: string | null; destino: string | null; costoDirecto: number | null }[],
+  costeo: { viaticos?: { zona: string; dias: number; montoDiario: number; porcentaje: number }[]; pasajes?: { tramo: string; cantidad: number; valorUnitario: number }[]; otros?: { descripcion: string; monto: number; moneda: string }[] } | null,
+  yaCargadas: LineaCostoReal[],
+): LineaCostoReal[] {
+  const out: LineaCostoReal[] = [];
+  const cargadas = new Set(yaCargadas.filter((l) => l.ordenInternaId).map((l) => l.ordenInternaId));
+  for (const o of ordenes) {
+    if (cargadas.has(o.id) || !(Number(o.costoDirecto) > 0)) continue;
+    out.push({ categoria: "ot_interna", ordenInternaId: o.id, descripcion: `Orden interna ${o.numero ?? ""}${o.destino ? ` · ${o.destino}` : ""}`.trim(), cantidad: 1, costoUnitario: r2(Number(o.costoDirecto)) });
+  }
+  if (!yaCargadas.some((l) => l.categoria === "comision") && costeo) {
+    for (const v of costeo.viaticos ?? [])
+      out.push({ categoria: "comision", tipoGasto: "viatico", descripcion: `Viático ${v.zona}`, cantidad: Number(v.dias) || 0, unidad: "días", costoUnitario: r2((Number(v.montoDiario) || 0) * ((Number(v.porcentaje) || 0) / 100)) });
+    for (const p of costeo.pasajes ?? [])
+      out.push({ categoria: "comision", tipoGasto: "pasaje", descripcion: `Pasaje ${p.tramo}`, cantidad: Number(p.cantidad) || 0, costoUnitario: r2(Number(p.valorUnitario) || 0) });
+    for (const o of costeo.otros ?? [])
+      if (o.moneda !== "USD") out.push({ categoria: "comision", tipoGasto: "otro", descripcion: o.descripcion, cantidad: 1, costoUnitario: r2(Number(o.monto) || 0) });
+  }
+  return out;
 }
 
 export interface ResumenCostos {
