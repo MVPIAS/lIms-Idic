@@ -458,6 +458,29 @@ async function main() {
     }
     return hechos.join(" · ") || "sin OT de prototipo ni internación de armas en esta base (los recorren los guiones BPCH y r4b)";
   });
+
+  /* ------------------------------------------------------------ B-021 */
+  await paso("B-021 · «Distribuir…» ofrece los laboratorios de la sección antes de sus órdenes internas; uno ajeno no", async () => {
+    const lqaEl = await elemento("86", "Bromatolog");
+    const panel = lista(await ok(U.admin, "GET", `/cascada/elementos/${lqaEl.id}/panel`));
+    const ot = await ok(U.ventas, "POST", "/ot", {
+      clienteId: C.cliente.id, unidadPrincipalId: C.u.LQA.id,
+      muestras: [{ catElementoId: lqaEl.id, nombre: "Leche en polvo lote C1", metodoIds: [panel[0].metodoId] }],
+    });
+    const reg = await ok(U.lqaJefe, "GET", `/flujo/ot/${ot.id}/registro-muestras`);
+    const m = reg.muestras[0];
+    const v = await ok(U.lqaJefe, "GET", `/muestras/${m.id}/distribucion`);
+    const cods = v.laboratorios.map((l) => l.codigo);
+    afirmar(cods.includes("LQA") && cods.includes("LMB") && cods.includes("LES"), `laboratorios ofrecidos: ${cods}`);
+    afirmar(v.laboratorios.find((l) => l.codigo === "LMB").previsto === true, "LMB debería ir como previsto");
+    const quien = (await login(U.lqaJefe)).permisos.includes("muestra.transferir") ? U.lqaJefe : U.admin;
+    const fila = (u) => ({ unidadId: u, porcion: "250 g", fechaHora: new Date().toISOString(), recibidoPor: "Analista de turno" });
+    const r = await ok(quien, "PUT", `/muestras/${m.id}/distribucion`, { filas: [fila(C.u.LMB.id)] });
+    afirmar(r.distribucion.some((d) => d.codigo === "LMB"), "no quedó la porción del LMB");
+    await exigir(400, quien, "PUT", `/muestras/${m.id}/distribucion`, { filas: [fila(C.u.LPN.id)] });
+    await exigir(403, U.lpnAnalista, "GET", `/muestras/${m.id}/distribucion`);
+    return `${ot.codigo}: ofrece ${cods.join(", ")}; porción al LMB antes de su OI; LPN → 400`;
+  });
 //PASOS
 }
 

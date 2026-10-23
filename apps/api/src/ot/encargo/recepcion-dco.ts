@@ -171,8 +171,44 @@ export class RecepcionDcoController {
     return f[0] as { id: string; codigo: string; otId: string | null };
   }
 
-  /** Laboratorios con ensayos de la muestra (método → ensayo → familia → unidad) y sus ensayos. */
+  /**
+   * Laboratorios a los que se puede distribuir la muestra (EP-02 1.3; B-021,
+   * recorrido MP-02 D02-36): los que ya tienen ensayos en ella y, antes del
+   * análisis, los PREVISTOS: los «otros laboratorios» marcados en su recepción,
+   * los que intervienen según el encargo de la OT y los laboratorios de la
+   * misma sección que el responsable (LQA, LMB y LES en Alimentos).
+   */
   private async laboratorios(muestraId: string) {
+    const conEnsayos = await this.laboratoriosConEnsayos(muestraId);
+    const previstos = await this.prisma.$queryRawUnsafe<{ unidadId: string; codigo: string; nombre: string; fuente: string }[]>(
+      `WITH m AS (SELECT mu.id, mu.otros_labs, o.id AS ot_id, o.unidad_principal
+                    FROM muestra mu JOIN orden_trabajo o ON o.id = mu.ot_id WHERE mu.id = $1::uuid),
+            cand AS (
+              SELECT unnest(COALESCE(m.otros_labs, '{}'::uuid[])) AS id, 'recepcion' AS fuente FROM m
+              UNION ALL SELECT unnest(COALESCE(e.laboratorios, '{}'::uuid[])), 'encargo' FROM m JOIN ot_encargo e ON e.ot_id = m.ot_id
+              UNION ALL SELECT u.id, 'seccion' FROM m JOIN unidad p ON p.id = m.unidad_principal
+                          JOIN unidad u ON u.padre_id = p.padre_id AND u.tipo = 'LABORATORIO' AND u.activa
+                         WHERE p.padre_id IS NOT NULL)
+       SELECT u.id AS "unidadId", u.codigo, u.nombre, min(c.fuente) AS fuente
+         FROM cand c JOIN unidad u ON u.id = c.id
+        GROUP BY u.id, u.codigo, u.nombre
+        ORDER BY u.codigo`,
+      muestraId,
+    );
+    const ya = new Set(conEnsayos.map((l) => l.unidadId));
+    const texto: Record<string, string> = {
+      recepcion: "Previsto en la recepción (aún sin ensayos)",
+      encargo: "Interviene según la OT (aún sin ensayos)",
+      seccion: "Laboratorio de la sección (aún sin ensayos)",
+    };
+    return [
+      ...conEnsayos.map((l) => ({ ...l, previsto: false })),
+      ...previstos.filter((p) => !ya.has(p.unidadId)).map((p) => ({ unidadId: p.unidadId, codigo: p.codigo, nombre: p.nombre, ensayos: texto[p.fuente] ?? "Previsto", previsto: true })),
+    ];
+  }
+
+  /** Laboratorios con ensayos de la muestra (método → ensayo → familia → unidad) y sus ensayos. */
+  private async laboratoriosConEnsayos(muestraId: string) {
     return this.prisma.$queryRawUnsafe<{ unidadId: string; codigo: string; nombre: string; ensayos: string }[]>(
       `SELECT u.id AS "unidadId", u.codigo, u.nombre, string_agg(DISTINCT COALESCE(cm.codigo, '') || ' ' || COALESCE(cm.nombre, ''), '; ') AS ensayos
          FROM resultado r
@@ -215,7 +251,7 @@ export class RecepcionDcoController {
     const labs = await this.laboratorios(id);
     const e = erroresDistribucion(d.filas, labs.map((l) => l.unidadId));
     if (e.length) throw new BadRequestException(e.join(" "));
-    const porLab = new Map(labs.map((l) => [l.unidadId, l.ensayos]));
+    const porLab = new Map(labs.filter((l) => !l.previsto).map((l) => [l.unidadId, l.ensayos]));
     await this.prisma.$transaction(async (tx) => {
       for (const f of d.filas)
         await tx.$executeRawUnsafe(
