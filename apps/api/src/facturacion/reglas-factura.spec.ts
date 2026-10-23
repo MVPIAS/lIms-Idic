@@ -111,3 +111,16 @@ describe("firma · imagen", () => {
     expect(() => validarImagenFirma("data:image/svg+xml;base64,PHN2Zz4=")).toThrow("PNG o JPEG");
   });
 });
+
+describe("descripción de la línea de factura sin código repetido (B-084)", () => {
+  const { descripcionLineaFactura } = require("./reglas-factura");
+  it("no repite el código si la descripción ya lo trae", () => {
+    expect(descripcionLineaFactura("131", "131 · Cloruro de Sodio")).toBe("131 · Cloruro de Sodio");
+    expect(descripcionLineaFactura("EN1074", "EN1074 · Equipo de pesaje")).toBe("EN1074 · Equipo de pesaje");
+  });
+  it("antepone el código si no lo trae", () => {
+    expect(descripcionLineaFactura("131", "Cloruro de Sodio")).toBe("131 · Cloruro de Sodio");
+    expect(descripcionLineaFactura("13", "131 · Cloruro")).toBe("13 · 131 · Cloruro");
+    expect(descripcionLineaFactura(null, "Servicio")).toBe("Servicio");
+  });
+});

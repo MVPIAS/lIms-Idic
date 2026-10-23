@@ -26,8 +26,13 @@ export const CARRILES_DSA = ["PARTICULAR", "INSTITUCIONAL", "COMISION_FABRICA", 
 export const LUGARES_EJECUCION = ["IDIC", "FABRICA_NACIONAL", "FABRICA_EXTRANJERO", "UNIDAD_MILITAR"] as const;
 export const CLASIFICACIONES_VEHICULO = ["MMU", "MUU", "PPU", "APOYO"] as const;
 
-/** Documento que propone el tipo de trabajo (EP-03 0.1): IVC para un lote de adquisición, IE para el resto. */
-export function documentoPropuesto(tipoTrabajo: string | null | undefined): "IVC" | "IE" | null {
+/**
+ * Documento que propone el tipo de trabajo (EP-03 0.1): IVC para un lote de
+ * adquisición, IE para el resto. Una OT del BPCH emite Informe de Inspección
+ * (B-084: decía «Emite IE»).
+ */
+export function documentoPropuesto(tipoTrabajo: string | null | undefined, rama?: "bpch" | "d11" | null): "IVC" | "IE" | "II" | null {
+  if (rama === "bpch") return "II";
   if (!tipoTrabajo) return null;
   return tipoTrabajo === "ADQUISICIONES" ? "IVC" : "IE";
 }

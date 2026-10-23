@@ -53,6 +53,21 @@ const pct = (v: unknown) => {
 };
 
 /**
+ * Descripción de una línea de factura: «código · descripción», sin repetir el
+ * código si la descripción ya empieza por él (B-084: «131 · 131 · Cloruro de
+ * Sodio», «EN1074 · EN1074 · Equipo de pesaje…»).
+ */
+export function descripcionLineaFactura(codigo: string | null | undefined, descripcion: string | null | undefined): string {
+  const c = String(codigo ?? "").trim();
+  const d = String(descripcion ?? "").trim();
+  if (!c) return d;
+  if (!d) return c;
+  const resto = d.toLowerCase().startsWith(c.toLowerCase()) ? d.slice(c.length) : null;
+  if (resto !== null && (resto === "" || /^[\s·:\-–—]/.test(resto))) return d;
+  return `${c} · ${d}`;
+}
+
+/**
  * Líneas de la factura a partir de la cotización ACEPTADA: una por línea de la
  * cotización, más el descuento y los gastos administrativos globales, y un
  * ajuste si aún quedara diferencia con el neto aceptado (redondeos, utilidad).
@@ -65,7 +80,7 @@ export function lineasDesdeCotizacion(cot: CotizacionFactura): LineaBorrador[] {
     .map((l) => {
       const cantidad = Math.max(1, Number(l.cantidad) || 1);
       const subtotal = redondear(n(l.subtotal), moneda);
-      const desc = [l.ensayoCodigo, l.descripcion ?? l.categoria ?? l.tipo ?? "Servicio"].filter(Boolean).join(" · ");
+      const desc = descripcionLineaFactura(l.ensayoCodigo, l.descripcion ?? l.categoria ?? l.tipo ?? "Servicio");
       return { descripcion: desc, cantidad, precioUnitario: redondear(subtotal / cantidad, moneda), subtotal };
     });
   const descuento = redondear(n(cot.descuentoMonto), moneda);

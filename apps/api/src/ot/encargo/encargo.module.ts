@@ -7,6 +7,7 @@ import { RequierePermiso } from "../../auth/permisos.decorator";
 import { PrismaService } from "../../common/prisma.service";
 import { AlcanceService } from "../../rbac/alcance.service";
 import { sino, valoresCategoria } from "../../common/parametros-r4d";
+import { ramaDeUnidad } from "../../bpch/cabecera/cabecera-ot";
 import { RecepcionDcoController } from "./recepcion-dco";
 import {
   CARRILES_DSA,
@@ -164,7 +165,7 @@ export class EncargoService {
       : [];
     const listas = await this.prisma.$queryRawUnsafe<{ categoria: string; codigo: string; etiqueta: string }[]>(
       `SELECT categoria, codigo, etiqueta FROM parametro_sistema
-        WHERE tenant_id = $1::uuid AND activo AND categoria IN ('tipo_trabajo','nivel_tecnologico','carril_dsa','lugar_ejecucion','clasificacion_vehiculo')
+        WHERE tenant_id = $1::uuid AND activo AND categoria IN ('tipo_trabajo','nivel_tecnologico','carril_dsa','lugar_ejecucion','clasificacion_vehiculo','forma_pago')
         ORDER BY categoria, orden`,
       ot.tenantId,
     );
@@ -173,7 +174,7 @@ export class EncargoService {
     return {
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, origen: ot.origen, laboratorio: ot.unidadCodigo, fechaCompromiso: ot.fechaCompromiso },
       tipoTrabajo: ot.tipoTrabajo,
-      documentoPropuesto: documentoPropuesto(ot.tipoTrabajo),
+      documentoPropuesto: documentoPropuesto(ot.tipoTrabajo, await ramaDeUnidad(this.prisma, ot.unidadId)),
       encargo: e ? { ...e, laboratoriosDetalle: labs } : null,
       listas: {
         tipoTrabajo: porCat("tipo_trabajo"),
@@ -181,6 +182,7 @@ export class EncargoService {
         carrilDsa: porCat("carril_dsa"),
         lugarEjecucion: porCat("lugar_ejecucion"),
         clasificacionVehiculo: porCat("clasificacion_vehiculo"),
+        formaPago: porCat("forma_pago"),
       },
       puede: {
         editar: !cerrada && this.puede(req, "ot.crear"),

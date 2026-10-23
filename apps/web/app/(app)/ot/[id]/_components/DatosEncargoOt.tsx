@@ -13,6 +13,7 @@
  *    (ot.planificar) confirma el alcance y fija las fechas internas
  *    («Recepcionar → planificar») o devuelve la OT a Ventas con motivo.
  */
+import { DOCUMENTO_OT } from "@/lib/etiquetas";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { llamar } from "@/lib/laboratorio";
@@ -26,7 +27,7 @@ interface Vista {
   tipoTrabajo: string | null;
   documentoPropuesto: "IE" | "IVC" | null;
   encargo: Record<string, any> | null;
-  listas: { tipoTrabajo: Opcion[]; nivelTecnologico: Opcion[]; carrilDsa: Opcion[]; lugarEjecucion: Opcion[]; clasificacionVehiculo: Opcion[] };
+  listas: { tipoTrabajo: Opcion[]; nivelTecnologico: Opcion[]; carrilDsa: Opcion[]; lugarEjecucion: Opcion[]; clasificacionVehiculo: Opcion[]; formaPago?: Opcion[] };
   puede: { editar: boolean; validar: boolean };
 }
 
@@ -178,7 +179,7 @@ export default function DatosEncargoOt({ otId, onCambio }: { otId: string; onCam
       <section className="card" style={{ padding: 12, margin: 0 }} aria-labelledby="enc-titulo">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
           <h3 id="enc-titulo" style={{ margin: 0, fontSize: 14, flex: 1 }}>Datos del encargo</h3>
-          {v.documentoPropuesto && <span className="pill teal" title="Documento que propone el tipo de trabajo">Emite {v.documentoPropuesto}</span>}
+          {v.documentoPropuesto && <span className="pill teal" title={`Documento que emite esta OT (${v.documentoPropuesto})`}>Emite {DOCUMENTO_OT[v.documentoPropuesto] ?? v.documentoPropuesto}</span>}
           {v.puede.editar && !editando && <button className="btn outline sm" onClick={abrirEdicion}>Completar o corregir</button>}
         </div>
         {!editando ? (
@@ -187,7 +188,7 @@ export default function DatosEncargoOt({ otId, onCambio }: { otId: string; onCam
             <Dato l="Nivel tecnológico" x={e.nivelTecnologico} />
             <Dato l="¿Requiere muestreo?" x={sn(e.requiereMuestreo)} />
             <Dato l="Mandante" x={e.mandante} />
-            <Dato l="Moneda · forma de pago" x={[e.moneda, e.formaPago].filter(Boolean).join(" · ")} />
+            <Dato l="Moneda · forma de pago" x={[e.moneda, e.formaPago ? etiqueta(v.listas.formaPago ?? [], e.formaPago) : null].filter(Boolean).join(" · ")} />
             <Dato l="Valor inicial (cotizado)" x={e.valorInicial != null ? monto(e.valorInicial, e.moneda ?? "CLP") : null} />
             <Dato l="Referencia" x={e.referencia} />
             {institucional && <Dato l="Oficio" x={e.oficioNumero ? `${e.oficioNumero}${e.oficioFecha ? ` · ${fechaDia(e.oficioFecha)}` : ""}` : null} />}
