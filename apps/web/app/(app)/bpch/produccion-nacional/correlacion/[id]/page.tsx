@@ -113,7 +113,7 @@ export default function CorrelacionPage() {
       <div className="card" style={{ padding: 14 }}>
         <h2 style={{ fontSize: 14, margin: "0 0 4px" }}>Relación de ventas ↔ inspecciones ejecutadas</h2>
         <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 8px" }}>
-          «Inspeccionado» suma la cantidad de las inspecciones del período con su OT cerrada. Desviación = declarado − inspeccionado; un valor positivo es producto vendido sin inspección registrada.
+          «Inspeccionado» suma la cantidad de las inspecciones del período con su OT cerrada. «Certificado» suma las de esas inspecciones cuya OT tiene su documento oficial sin incumplimiento (regla por confirmar con el IDIC). Desviación = declarado − inspeccionado; un valor positivo es producto vendido sin inspección registrada.
         </p>
         <div className="form-grid cols-4" style={{ marginBottom: 8 }}>
           <div className="field span-2"><label htmlFor="ref">Relación de ventas (referencia)</label><input id="ref" value={f.relacionVentasRef} onChange={set("relacionVentasRef")} disabled={!editable} maxLength={200} /></div>
@@ -121,7 +121,7 @@ export default function CorrelacionPage() {
         </div>
         <div style={{ overflowX: "auto" }}>
         <table className="data">
-          <thead><tr><th>Producto</th><th className="num">Declarado en ventas</th><th className="num">Inspeccionado</th><th className="num">Desviación</th></tr></thead>
+          <thead><tr><th>Producto</th><th className="num">Declarado en ventas</th><th className="num">Inspeccionado</th><th className="num">Certificado</th><th className="num">Desviación</th></tr></thead>
           <tbody>
             {c.filas.map((r: any) => (
               <tr key={r.ocProductoId}>
@@ -132,6 +132,7 @@ export default function CorrelacionPage() {
                   ) : cant(r.ventas)}
                 </td>
                 <td className="num">{cant(r.inspeccionado)}</td>
+                <td className="num">{cant(r.certificado ?? 0)}</td>
                 <td className="num" style={{ color: r.desviacion > 0 ? "var(--red)" : undefined, fontWeight: r.desviacion > 0 ? 700 : undefined }}>{cant(r.desviacion)}</td>
               </tr>
             ))}
