@@ -8,6 +8,7 @@
  * vigente se congela y se cambia con «Nueva versión» (con motivo).
  * API: /especificaciones-tecnicas/:id (et.ver; editar: et.gestionar).
  */
+import ClienteEt, { type ClienteElegido } from "../_components/ClienteEt";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -63,6 +64,7 @@ interface Et {
   version: number;
   nombre: string;
   origen: string;
+  clienteId: string | null;
   clienteNombre: string | null;
   mandante: string | null;
   licitacion: string | null;
@@ -358,17 +360,20 @@ export default function FichaEtPage() {
 function DatosEt({ et, editable, onGuardado }: { et: Et; editable: boolean; onGuardado: (e: Et) => void }) {
   const [f, setF] = useState({ nombre: et.nombre, producto: et.producto ?? "", licitacion: et.licitacion ?? "", mandante: et.mandante ?? "", observaciones: et.observaciones ?? "", reutilizable: et.reutilizable });
   const [guardando, setGuardando] = useState(false);
+  // B-036: el cliente de la E.T. se fija o corrige en borrador.
+  const [cliente, setCliente] = useState<ClienteElegido | null>(et.clienteId ? { id: et.clienteId, nombre: et.clienteNombre ?? "" } : null);
   useEffect(() => {
+    setCliente(et.clienteId ? { id: et.clienteId, nombre: et.clienteNombre ?? "" } : null);
     setF({ nombre: et.nombre, producto: et.producto ?? "", licitacion: et.licitacion ?? "", mandante: et.mandante ?? "", observaciones: et.observaciones ?? "", reutilizable: et.reutilizable });
   }, [et]);
   const cambio = f.nombre !== et.nombre || f.producto !== (et.producto ?? "") || f.licitacion !== (et.licitacion ?? "") || f.mandante !== (et.mandante ?? "")
-    || f.observaciones !== (et.observaciones ?? "") || f.reutilizable !== et.reutilizable;
+    || f.observaciones !== (et.observaciones ?? "") || f.reutilizable !== et.reutilizable || (cliente?.id ?? null) !== (et.clienteId ?? null);
   async function guardar() {
     setGuardando(true);
     try {
       onGuardado(await llamar<Et>("PUT", `/especificaciones-tecnicas/${et.id}`, {
         nombre: f.nombre.trim(), producto: f.producto.trim() || null, licitacion: f.licitacion.trim() || null, mandante: f.mandante.trim() || null,
-        observaciones: f.observaciones.trim() || null, reutilizable: f.reutilizable,
+        observaciones: f.observaciones.trim() || null, reutilizable: f.reutilizable, clienteId: cliente?.id ?? null,
       }));
       toast.ok("Datos de la E.T. guardados.");
     } catch (e: any) { toast.error(e.message); }
@@ -383,7 +388,7 @@ function DatosEt({ et, editable, onGuardado }: { et: Et; editable: boolean; onGu
           <label htmlFor="et-nombre">Nombre</label>
           <input id="et-nombre" value={f.nombre} readOnly={ro} maxLength={300} onChange={(e) => setF({ ...f, nombre: e.target.value })} />
         </div>
-        <div className="field readonly"><label>Cliente</label><input value={et.clienteNombre ?? "—"} readOnly /></div>
+        <ClienteEt id="et-cliente" valor={cliente} onChange={setCliente} soloLectura={ro} />
         <div className="field readonly"><label>Laboratorios</label><input value={et.laboratoriosCodigos.join(", ") || "General (todos)"} readOnly /></div>
         <div className={`field${ro ? " readonly" : ""}`}>
           <label htmlFor="et-producto">Producto</label>
@@ -403,6 +408,7 @@ function DatosEt({ et, editable, onGuardado }: { et: Et; editable: boolean; onGu
             <option value="si">Sí, en OT de cualquier cliente</option>
             <option value="no">No, solo en OT de su cliente</option>
           </select>
+          {!f.reutilizable && !cliente && <small style={{ color: "#7a4b00" }}>Indique el cliente: una E.T. no reutilizable solo se aplica en las OT de su cliente.</small>}
         </div>
         <div className={`field${ro ? " readonly" : ""}`} style={{ gridColumn: "1 / -1" }}>
           <label htmlFor="et-obs">Observaciones</label>

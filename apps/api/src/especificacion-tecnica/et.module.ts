@@ -357,6 +357,23 @@ export class EspecificacionTecnicaService {
       );
   }
 
+  /**
+   * B-036 · Buscador acotado de clientes para asociar la E.T. a su cliente.
+   * Quien gestiona E.T. (p. ej. el Jefe del LEM) no siempre tiene «cliente.ver»:
+   * aquí solo ve razón social y RUT, con un mínimo de 2 letras y 10 resultados.
+   */
+  async buscarClientes(req: any, q: string | undefined) {
+    const t = String(q ?? "").trim().slice(0, 80);
+    if (t.length < 2) return [];
+    return this.prisma.$queryRawUnsafe<{ id: string; razonSocial: string; rut: string | null }[]>(
+      `SELECT id, razon_social AS "razonSocial", rut FROM cliente
+        WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND (razon_social ILIKE $2 OR rut ILIKE $2)
+        ORDER BY razon_social LIMIT 10`,
+      tenantDe(req),
+      `%${t.replace(/[%_\\]/g, (m) => "\\" + m)}%`,
+    );
+  }
+
   private async validarCliente(tenantId: string, clienteId?: string | null) {
     if (!clienteId) return;
     const c = await this.prisma.cliente.findFirst({ where: { id: clienteId, tenantId }, select: { id: true } });
@@ -980,6 +997,13 @@ export class EspecificacionTecnicaController {
   }
 
   /* --- biblioteca --- */
+
+  @Get("clientes")
+  @RequierePermiso("et.gestionar")
+  @ApiOperation({ summary: "Buscador acotado de clientes (razón social y RUT) para asociar la E.T. a su cliente (?q=, mín. 2 letras)" })
+  buscarClientes(@Query("q") q: string | undefined, @Req() req: any) {
+    return this.svc.buscarClientes(req, q);
+  }
 
   @Get("catalogo/metodos")
   @RequierePermiso("et.ver")
