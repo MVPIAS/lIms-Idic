@@ -150,7 +150,7 @@ const ItemCreate = z.object({
   descripcion: z.string().min(1).max(300),
   cc: z.string().max(20).optional(),
   tipo: z.enum(["servicio", "HH", "HM", "viatico", "insumo"]).default("servicio"),
-  precio: z.number().nonnegative(),
+  precio: z.coerce.number().nonnegative(),
 });
 @ApiTags("lista-precio-items") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("lista-precio-items")
 @RequierePermisoCrud({
