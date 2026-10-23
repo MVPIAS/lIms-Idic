@@ -167,6 +167,8 @@ m as (
  -- r2b: especificaciones técnicas (sus laboratorios; vacío = general) y muestreos (el laboratorio de su OT).
  union all select 'et', et.id, array(select un.codigo from unidad un where un.id = any(et.laboratorios)) from especificacion_tecnica et
  union all select 'muestreo', mu.id, array_remove(array[ou.uc], null) from ot_muestreo mu left join ou on ou.id = mu.ot_id
+ -- r4c: oficio conductor (la unidad que lo emite).
+ union all select 'oficio', f.id, array_remove(array[u.codigo], null) from oficio f left join unidad u on u.id = f.unidad_id
 )
 select json_build_object(
  'mapa', (select json_agg(json_build_object('t', t, 'id', id, 'u', u)) from m),
@@ -296,6 +298,13 @@ const LISTADOS = [
   // Frente r4b (EP-11): certificación de armas de la D11 y su catálogo, solo en el compartimento D11.
   { n: "D11 · certificación de armas (r4b)", r: "/d11/ot", p: "arma.ver", regla: "saec", href: "/saec/ot" },
   { n: "D11 · catálogo de armas (r4b)", r: "/d11/catalogos", p: "arma.ver", regla: "saec", href: "/saec/catalogos" },
+  // Frente r4c: oficios conductores (de su unidad emisora) y listas del seguimiento (las tarjetas de Mi bandeja).
+  { n: "Oficios conductores (r4c)", r: "/oficios", p: "oficio.ver", t: "oficio", regla: "unidad", href: "/oficios" },
+  { n: "Seguimiento · por despachar (r4c)", r: "/seguimiento/pendientes?vista=por_despachar", p: "certificado.despachar", t: "certificado", regla: "unidad", href: "/seguimiento" },
+  { n: "Seguimiento · plazo por informar (r4c)", r: "/seguimiento/pendientes?vista=plazo_por_informar", p: "ot.seguimiento", t: "ot", regla: "unidad" },
+  { n: "Seguimiento · recepción en DCO (r4c)", r: "/seguimiento/pendientes?vista=recepcion_dco", p: "ot.seguimiento", t: "ot", regla: "unidad" },
+  { n: "Seguimiento · por enviar (r4c)", r: "/seguimiento/pendientes?vista=por_enviar", p: "ot.seguimiento", t: "ot", regla: "unidad" },
+  { n: "Seguimiento · despachos por recibir (r4c)", r: "/seguimiento/pendientes?vista=por_recibir", p: "certificado.entregar", regla: "comun" },
   // Fase 1 (decisión del usuario): se mide y se informa, no cuenta como fallo.
   { n: "Cotizaciones (fase 1)", r: "/cotizaciones?limit=200", p: "cotizacion.ver", t: "cotizacion", regla: "unidad", fase1: true, href: "/cotizaciones" },
   { n: "Clientes (fase 1)", r: "/clientes?limit=200", p: "cliente.ver", t: "cliente", regla: "unidad", fase1: true, href: "/clientes" },
@@ -465,6 +474,11 @@ async function main() {
       ["ot", "ot.ver", (id) => `/formularios/ot/${id}/trabajo`],
       ["resultado", "resultado.ver", (id) => `/formularios/resultado/${id}/micro`],
       ["resultado", "resultado.ver", (id) => `/formularios/resultado/${id}/sensorial`],
+      // Frente r4c: seguimiento, carpeta, estado por laboratorio y oficio de otro laboratorio.
+      ["ot", "ot.ver", (id) => `/ot/${id}/seguimiento`],
+      ["ot", "ot.ver", (id) => `/ot/${id}/carpeta`],
+      ["ot", "ot.ver", (id) => `/ot/${id}/estado-laboratorios`],
+      ["oficio", "oficio.ver", (id) => `/oficios/${id}`],
     ];
     for (const [tipo, perm, ruta, codigos, regla] of DETALLE) {
       if (!tiene(perm)) continue;
