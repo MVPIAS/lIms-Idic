@@ -1,4 +1,4 @@
-import { diferencias, erroresCabecera, faltantesParaEmitirInspeccion, iniciales } from "./reglas-cabecera";
+import { diferencias, erroresCabecera, heredarCabecera, faltantesParaEmitirInspeccion, iniciales } from "./reglas-cabecera";
 
 describe("BPCH · cabecera de inspección de la OT (EP-10 10.3)", () => {
   const ok = { procedimiento: "SAC-PG01-P01", lugarInspeccion: "Polvorín de prueba", fechaInspeccion: "2026-10-20" };
@@ -38,5 +38,19 @@ describe("BPCH · cabecera de inspección de la OT (EP-10 10.3)", () => {
     expect(diferencias({ lugarInspeccion: "A", comuna: null }, { lugarInspeccion: "B", comuna: null })).toEqual({ lugarInspeccion: { antes: "A", despues: "B" } });
     expect(diferencias(null, { lugarInspeccion: "A" })).toEqual({ lugarInspeccion: { antes: null, despues: "A" } });
     expect(iniciales("rosa elena riquelme soto")).toBe("R. E. R.");
+  });
+});
+
+describe("B-019 · la cabecera hereda lo conocido", () => {
+  it("Producción Nacional: clase/división y grupo, Nº ONU, RAF y lote", () => {
+    const h = heredarCabecera({ documentoOrigen: "RAF 123", claseDivision: "1.1", grupoCompatibilidad: "d", numeroOnu: "UN 0081", lote: "L-7", esquema: "LOTES", elemento: "Dinamita" }, null);
+    expect(h).toEqual({ documentoOrigen: "RAF 123", esquema: "LOTES", elementoGenerico: "Dinamita", claseDivisionUn: "1.1D", numeroUn: "0081", identificacionLote: "L-7" });
+  });
+  it("prototipo: solicitud DGMN, esquema TIPO y elemento; lo ya escrito manda", () => {
+    const h = heredarCabecera({ documentoOrigen: "Sol. 45/2026", esquema: "TIPO", elemento: "Granada", tamanoMuestra: 5 }, { elementoGenerico: "Granada de mano M-2" });
+    expect(h).toEqual({ documentoOrigen: "Sol. 45/2026", esquema: "TIPO", tamanoMuestra: 5 });
+  });
+  it("sin fuente: nada", () => {
+    expect(heredarCabecera(null, null)).toEqual({});
   });
 });
