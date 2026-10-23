@@ -6,7 +6,7 @@ import { Sql, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
 import { faltantesInscripcionCu } from "../prototipos/reglas-prototipo";
 import { generarPdf } from "../../plantilla-render/pdf.renderer";
 import { hoyChile } from "../../common/fecha-chile";
-import { TIPOS_LISTADO, agruparListado, csvListado, entraEnListado, htmlListado, type TipoListado } from "./listado-oficial";
+import { TIPOS_LISTADO, agruparListado, entraEnListado, htmlListado, xlsxListado, type TipoListado } from "./listado-oficial";
 import {
   ESTADOS_CODIFICACION,
   LISTADOS_CODIFICACION,
@@ -146,7 +146,7 @@ export class CodificacionService {
   }
 
   /** Genera el listado oficial (PDF para firma, o Excel) y deja constancia de la emisión. */
-  async listadoOficial(req: any, body: unknown, formato: "pdf" | "csv") {
+  async listadoOficial(req: any, body: unknown, formato: "pdf" | "xlsx") {
     const tenantId = tenantDe(req);
     const d = ListadoOficialBody.parse(body ?? {});
     if (d.fechaEdicion > hoyChile()) throw new BadRequestException("La fecha de edición no puede ser futura.");
@@ -155,7 +155,7 @@ export class CodificacionService {
     if (!total) throw new ConflictException("No hay productos en ese listado para el fabricante indicado.");
     const base = `listado_${d.listado.toLowerCase()}_${(d.fabricante?.trim() || "todos").replace(/[^A-Za-z0-9]+/g, "_").slice(0, 40)}_${d.fechaEdicion}`;
     let contenido: Buffer;
-    if (formato === "csv") contenido = Buffer.from(csvListado(secciones), "utf8");
+    if (formato === "xlsx") contenido = xlsxListado(secciones);
     else {
       // Firmantes por cargo: quién firma y cómo llega la firma de la DGMN está por confirmar (EP-09 P4).
       const cuerpo = htmlListado(secciones, d.listado, d.fechaEdicion, {
@@ -187,7 +187,7 @@ export class CodificacionService {
       createHash("sha256").update(contenido).digest("hex"),
       usuarioDe(req),
     );
-    return { contenido, nombre: `${base}.${formato}`, tipo: formato === "pdf" ? "application/pdf" : "text/csv; charset=utf-8" };
+    return { contenido, nombre: `${base}.${formato}`, tipo: formato === "pdf" ? "application/pdf" : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" };
   }
 
   async emisionesListado(req: any) {

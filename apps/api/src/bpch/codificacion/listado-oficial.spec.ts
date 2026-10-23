@@ -72,3 +72,16 @@ describe("EP-09 9.16 · listado oficial de Codificación Única", () => {
     expect(csv).toContain(";0,53;PTN;");
   });
 });
+
+describe("B-077 · el listado oficial se exporta a .xlsx", () => {
+  const { xlsxListado } = require("./listado-oficial");
+  const { leerXlsx } = require("../../common/tabla-archivo");
+  it("es un libro Excel con cabecera y una fila por producto", () => {
+    const b: Buffer = xlsxListado(agruparListado([p({}), p({ producto: "Otro producto", cnc: "E-I/21/1/2/3/5" })], "EXPLOSIVOS"));
+    expect(b.subarray(0, 2).toString("latin1")).toBe("PK");
+    const filas = leerXlsx(b);
+    expect(filas[0].slice(0, 3)).toEqual(["Fabricante", "RUT", "Grupo"]);
+    expect(filas.length).toBe(3);
+    expect(filas.some((f: string[]) => f.includes("Otro producto"))).toBe(true);
+  });
+});
