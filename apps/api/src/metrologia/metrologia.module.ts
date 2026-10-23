@@ -27,7 +27,10 @@ import {
 import { CASOS_REFERENCIA, esClaveExcel, verificarParidad } from "./motores/paridad";
 import { CASOS_LNF, verificarParidadLNF } from "./motores/paridad-lnf";
 import { balancePorPunto } from "./motores/balance";
-import { condicionesCorregidas, errorNormalizado, puntosFueraDeRango, type Auxiliar, type ConfigFicha, type PatronRango } from "./ficha.reglas";
+import {
+  condicionesAlMotor, condicionesCorregidas, condicionesDeAuxiliares, errorNormalizado, puntosFueraDeRango,
+  type Auxiliar, type CondicionesHoja, type ConfigFicha, type PatronRango,
+} from "./ficha.reglas";
 import { actualizarEquipoDueno, actualizarPatronLnf, destinatariosDe, enviarCertificado, leerConfigFicha } from "./ficha.datos";
 import { ConfiguracionModule, MailService } from "../configuracion/configuracion.module";
 import { CASOS_1510, verificarParidad1510 } from "./motores/paridad-1510";
@@ -926,10 +929,11 @@ export class MetrologiaController {
     const unidadId = await this.unidadDeCalibracion(req, t, proc, origen.ot.laboratorio);
     const fecha = fechaCalibracion(d.fecha);
     const pat = await this.patronesDe(t, d, fecha);
-    const calc = await this.calcularDto(proc, d, fecha);
+    // B-027: las condiciones de la hoja de control (auxiliares del maestro) alimentan al motor.
+    const amb = await this.ambienteDe(t, d, fecha);
+    const calc = await this.calcularDto(proc, d, fecha, condicionesDeAuxiliares(amb.auxiliares));
     const instrumento = instrumentoDesdeOt(d.instrumento, origen.item, origen.ot);
     const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
-    const amb = await this.ambienteDe(t, d, fecha);
 
     for (let intento = 0; ; intento++) {
       const codigo = await this.siguienteCodigo(t, fecha);
@@ -985,9 +989,9 @@ export class MetrologiaController {
     const proc = await cargarProceso(d.procesoCodigo);
     const fecha = d.fecha ? fechaCalibracion(d.fecha) : fechaIso(cal.fecha_calibracion);
     const pat = await this.patronesDe(t, d, fecha);
-    const calc = await this.calcularDto(proc, d, fecha);
-    const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
     const amb = await this.ambienteDe(t, d, fecha);
+    const calc = await this.calcularDto(proc, d, fecha, condicionesDeAuxiliares(amb.auxiliares));
+    const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
     // Calibración ligada a la OT: la OT y la recepción siguen mandando sobre lo escrito.
     const instrumento = cal.ot_instrumento_id
       ? await this.origenOt(req, t, cal.ot_instrumento_id).then((o) => instrumentoDesdeOt(d.instrumento, o.item, o.ot))
@@ -1690,11 +1694,12 @@ export class MetrologiaController {
   }
 
   /** Calcula en el servidor según el tipo de proceso y deja todo listo para persistir. */
-  private async calcularDto(proc: any, d: CrearDto, fecha: string) {
+  private async calcularDto(proc: any, d: CrearDto, fecha: string, hoja: CondicionesHoja | null = null) {
     const motor = motorDeProceso(proc.codigo);
     if (motor) {
       if (!d.motor) throw new BadRequestException(`${proc.codigo} se calcula con su motor: envíe los datos del motor`);
-      const { datos, opciones } = d.motor;
+      const { opciones } = d.motor;
+      const datos = condicionesAlMotor(d.motor.datos, hoja).datos;
       const mot = motivoOpciones(motor, opciones);
       if (mot) throw new BadRequestException(mot);
       const filas = await cargarCmc(proc.codigo);

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtG, parseEntrada, verEntrada, ETIQUETA_ENTRADA, ETIQUETA_MOTOR, type MotorInfo, type CalculoMotor } from "@/lib/metrologia";
+import { condicionesAlMotor, type CondicionesHoja } from "@/lib/metrologiaFicha";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -36,6 +37,8 @@ interface Props {
   /** Fecha de calibración (AAAA-MM-DD): fija la versión vigente de la CMC en la vista previa. */
   fecha?: string;
   onGuardar: (motor: { datos: any; opciones: Record<string, boolean> }) => void;
+  /** B-027: condiciones de la hoja de control (auxiliares del maestro); mandan sobre las del motor. */
+  condiciones?: CondicionesHoja | null;
 }
 
 /**
@@ -44,7 +47,7 @@ interface Props {
  * calcula la vista previa con el mismo motor que usa al guardar. «Cargar
  * ejemplo» trae las entradas de un caso real, solo para formación.
  */
-export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, onGuardar }: Props) {
+export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, onGuardar, condiciones }: Props) {
   const [caso, setCaso] = useState(motor.casos[0]?.caso ?? "");
   const [datos, setDatos] = useState<any>(inicial?.datos ?? null);
   // Calibración nueva: las correcciones que el laboratorio pidió aplicar vienen activadas (C6).
@@ -53,6 +56,16 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
   const [aviso, setAviso] = useState("");
   const [esEjemplo, setEsEjemplo] = useState(false);
   const seq = useRef(0);
+  // B-027: las condiciones de la hoja de control se copian a los datos del motor (una sola captura).
+  const condJson = JSON.stringify(condiciones ?? null);
+  const [deHoja, setDeHoja] = useState<string[]>([]);
+  useEffect(() => {
+    if (!condiciones || !datos) return;
+    const r = condicionesAlMotor(datos, condiciones);
+    if (r.campos.length) setDatos(r.datos);
+    setDeHoja((prev) => [...new Set([...prev, ...r.campos])]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [condJson, datos === null]);
   const lbl = (k: string) => ETIQUETA_MOTOR[motor.it]?.[k] ?? ETIQUETA_ENTRADA[k] ?? k;
 
   // Formulario vacío con la forma de la planilla (si no se está editando un borrador).
@@ -181,6 +194,12 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
         <div className="card">
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-2,#eee)" }}><b style={HEAD}>Toma de datos</b></div>
           <div className="body" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+            {deHoja.length > 0 && (
+              <div className="alert info" role="status" style={{ margin: 0 }}>
+                Condiciones ambientales tomadas de la hoja de control ({deHoja.map(lbl).join(", ")}): se registran una sola vez, con la corrección
+                del certificado del termohigrómetro y del barómetro. Para cambiarlas, corrija las lecturas en la hoja de control.
+              </div>
+            )}
             {partes.escalares.length > 0 && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 8 }}>
                 {partes.escalares.map(({ ruta, v }) => (
