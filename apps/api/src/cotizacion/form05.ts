@@ -4,14 +4,17 @@
  *
  * Siete secciones: 1 Viáticos · 2 Horas hombre (civil / militar) · 3 Servicios
  * estándar (EN de la lista) · 4 Horas máquina · 5 Pasajes · 6 Otros gastos ·
- * 7 Condiciones técnicas y restricciones. Montos finales: CDT, CFA, CT, precio
- * Ejército (= CT) y precio particular (CT + recargo).
+ * 7 Condiciones técnicas y restricciones. Montos finales con la estructura
+ * oficial de la lista de precios 2026 (estructura-precio.ts): CDT, costo
+ * indirecto (CI, antes «CFA»), CT = precio Ejército, recargo, neto = precio
+ * particular sin IVA, IVA y precio particular con IVA.
  *
  * Viático = monto diario del país o zona × % del grado × días (tabla anual
- * DFZ). CFA y recargo particular son parámetros (`circuito_cotizacion.cfa_pct`
- * y `.margen_particular_pct`, por defecto 12 % y 20 % como el costeo que ya
- * existía): la fórmula de precio vigente está POR CONFIRMAR (EP-00 §10 P1).
+ * DFZ). CI, recargo e IVA son parámetros (`circuito_cotizacion.cfa_pct`,
+ * `.margen_particular_pct` e `.iva_pct`): 20 %, 30 % y 19 % según la lista de
+ * precios oficial 2026 del IDIC (22-10-2026), que respondió EP-00 §10 P1.
  */
+import { desdeCostoDirecto } from "./estructura-precio";
 
 export interface Viatico { ambito: "nacional" | "extranjero"; zona: string; grado: string; dias: number; montoDiario: number; porcentaje: number }
 export interface HoraHombre { tipo: "civil" | "militar"; categoria: string; horas: number; valorHora: number }
@@ -42,7 +45,12 @@ export interface Form05Resultado {
   ct: number;
   precioEjercito: number;
   margenParticularPct: number;
+  recargo: number;
+  /** Neto = CT + recargo: precio particular sin IVA. */
   precioParticular: number;
+  ivaPct: number;
+  iva: number;
+  precioParticularIvaIncluido: number;
 }
 
 const r0 = (n: number) => Math.round(n);
@@ -81,7 +89,7 @@ export function cantidadConReposicion(lote: number, reposicion: number): number 
   return l + r;
 }
 
-export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenParticularPct: number }): Form05Resultado {
+export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenParticularPct: number; ivaPct?: number }): Form05Resultado {
   const dolar = Number(f.dolar) > 0 ? Number(f.dolar) : 0;
   const secciones = {
     viaticos: r0(suma(f.viaticos, montoViatico)),
@@ -92,18 +100,22 @@ export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenPart
     otros: r0(suma(f.otros, (o) => (o.moneda === "USD" ? o.monto * dolar : o.monto))),
   };
   const cdt = Object.values(secciones).reduce((a, b) => a + b, 0);
-  const cfa = r0(cdt * (p.cfaPct / 100));
-  const ct = cdt + cfa;
+  const ivaPct = p.ivaPct ?? 19;
+  const e = desdeCostoDirecto(cdt, { ciPct: p.cfaPct, recargoPct: p.margenParticularPct, ivaPct });
   return {
     secciones,
     horasHombreTotal: Math.round(suma(f.horasHombre, (h) => h.horas) * 100) / 100,
     cdt,
     cfaPct: p.cfaPct,
-    cfa,
-    ct,
-    precioEjercito: ct,
+    cfa: e.costoIndirecto,
+    ct: e.costoTotal,
+    precioEjercito: e.costoTotal,
     margenParticularPct: p.margenParticularPct,
-    precioParticular: r0(ct * (1 + p.margenParticularPct / 100)),
+    recargo: e.recargo,
+    precioParticular: e.neto,
+    ivaPct,
+    iva: e.iva,
+    precioParticularIvaIncluido: e.precioIvaIncluido,
   };
 }
 

@@ -60,7 +60,7 @@ export interface Circuito {
     ejecutivoNombre: string | null;
     otCodigo: string | null;
   };
-  config: { niveles: "lab_depto" | "lab" | "ninguno"; exigirConsulta: boolean; exigirFirma: boolean; cfaPct: number; margenParticularPct: number };
+  config: { niveles: "lab_depto" | "lab" | "ninguno"; exigirConsulta: boolean; exigirFirma: boolean; cfaPct: number; margenParticularPct: number; ivaPct?: number };
   ruta: {
     etapas: Etapa[];
     etapaActual: string | null;

@@ -159,7 +159,7 @@ export default function RespuestaLaboratorio({
 }: {
   sol: Solicitud;
   cotCodigo: string;
-  cfg: { cfaPct: number; margenParticularPct: number };
+  cfg: { cfaPct: number; margenParticularPct: number; ivaPct?: number };
   onCerrar: () => void;
   onHecho: (msg: string) => void;
 }) {
@@ -202,8 +202,14 @@ export default function RespuestaLaboratorio({
       otros: sum("otros", (x) => (x.moneda === "USD" ? n(x.monto) * d : n(x.monto))),
     };
     const cdt = Object.values(sec).reduce((a, b) => a + b, 0);
-    const cfa = Math.round(cdt * (cfg.cfaPct / 100));
-    return { cdt, cfa, ct: cdt + cfa, particular: Math.round((cdt + cfa) * (1 + cfg.margenParticularPct / 100)) };
+    // Estructura oficial (estructura-precio.ts): se calcula sin redondear la cadena y se redondea al mostrar.
+    const r = (x: number) => Math.round(Math.round(x * 1e6) / 1e6);
+    const ci = cdt * (cfg.cfaPct / 100);
+    const ct = cdt + ci;
+    const recargo = ct * (cfg.margenParticularPct / 100);
+    const neto = ct + recargo;
+    const iva = neto * ((cfg.ivaPct ?? 19) / 100);
+    return { cdt, cfa: r(ci), ct: r(ct), recargo: r(recargo), particular: r(neto), iva: r(iva), conIva: r(neto + iva) };
   }, [secciones, dolar, cfg]);
 
   const conCosteo = noEstandar || SECCIONES.some((s) => aApi(s, secciones[s.k] ?? []).length > 0);
@@ -345,10 +351,13 @@ export default function RespuestaLaboratorio({
           {conCosteo && (
             <div className="totals-box" style={{ maxWidth: 420, marginLeft: "auto" }} aria-live="polite">
               <div className="row"><span>Costo directo total (CDT)</span><b>{money(prev.cdt)}</b></div>
-              <div className="row"><span>Costo fijo asociado (CFA {cfg.cfaPct} %)</span><b>{money(prev.cfa)}</b></div>
+              <div className="row"><span>Costo indirecto (CI {String(cfg.cfaPct).replace(".", ",")} % del CDT)</span><b>{money(prev.cfa)}</b></div>
               <div className="row"><span>Costo total (CT) · precio Ejército</span><b>{money(prev.ct)}</b></div>
-              <div className="row total"><span>Precio particular (+{cfg.margenParticularPct} %)</span><span>{money(prev.particular)}</span></div>
-              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>Vista previa: el sistema recalcula al enviar. Porcentajes en Administración › Parámetros (por confirmar con el IDIC).</p>
+              <div className="row"><span>Recargo ({String(cfg.margenParticularPct).replace(".", ",")} % del CT)</span><b>{money(prev.recargo)}</b></div>
+              <div className="row total"><span>Neto · precio particular sin IVA</span><span>{money(prev.particular)}</span></div>
+              <div className="row"><span>IVA ({String(cfg.ivaPct ?? 19).replace(".", ",")} %)</span><b>{money(prev.iva)}</b></div>
+              <div className="row"><span>Precio particular IVA incluido</span><b>{money(prev.conIva)}</b></div>
+              <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>Vista previa: el sistema recalcula al enviar. Fórmula de la lista de precios oficial 2026; porcentajes en Administración › Parámetros.</p>
             </div>
           )}
         </>

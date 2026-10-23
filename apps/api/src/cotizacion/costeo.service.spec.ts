@@ -33,19 +33,19 @@ describe("CosteoService.calcular · flujo CDT → CFA → CT", () => {
     expect(r.cdt).toBe(2_000);
   });
 
-  it("aplica el CFA por defecto (12%) sobre el CDT y calcula el CT", () => {
+  it("aplica el costo indirecto por defecto (20 %, lista oficial 2026) sobre el CDT y calcula el CT", () => {
     const r = svc.calcular([{ tipo: "otros", cantidad: 1, valorUnitario: 1_000_000 }]);
-    expect(r.cfaPct).toBe(12);
-    expect(r.cfa).toBe(120_000); // 12% de 1.000.000
-    expect(r.ct).toBe(1_120_000); // CDT + CFA
+    expect(r.cfaPct).toBe(20);
+    expect(r.cfa).toBe(200_000); // 20% de 1.000.000
+    expect(r.ct).toBe(1_200_000); // CDT + CI
   });
 
-  it("acepta un CFA parametrizado distinto del 12% por defecto", () => {
+  it("acepta un CFA parametrizado distinto del 20 % por defecto", () => {
     const r = svc.calcular([{ tipo: "otros", cantidad: 1, valorUnitario: 1_000_000 }], {
-      cfaPct: 20,
+      cfaPct: 12,
     });
-    expect(r.cfa).toBe(200_000);
-    expect(r.ct).toBe(1_200_000);
+    expect(r.cfa).toBe(120_000);
+    expect(r.ct).toBe(1_120_000);
   });
 });
 
@@ -57,19 +57,25 @@ describe("CosteoService.calcular · los tres precios", () => {
     const r = svc.calcular(lineas);
     expect(r.precios.ejercito).toBe(r.ct);
     expect(r.precios.institucional).toBe(r.ct);
-    expect(r.precios.ejercito).toBe(1_120_000);
+    expect(r.precios.ejercito).toBe(1_200_000);
   });
 
-  it("Particular = Costo Total + margen comercial (20% por defecto)", () => {
+  it("Particular = Costo Total + recargo (30 % por defecto, lista oficial 2026)", () => {
     const r = svc.calcular(lineas);
-    // 1.120.000 × 1,20 = 1.344.000
-    expect(r.precios.particular).toBe(1_344_000);
-    expect(r.margenParticularPct).toBe(20);
+    // 1.200.000 × 1,30 = 1.560.000
+    expect(r.precios.particular).toBe(1_560_000);
+    expect(r.margenParticularPct).toBe(30);
+  });
+
+  it("reproduce la lista 2026: EN1214 (CD 329.820) → CT 395.784 y neto 514.519", () => {
+    const r = svc.calcular([{ tipo: "otros", cantidad: 1, valorUnitario: 329_820 }]);
+    expect(r.ct).toBe(395_784);
+    expect(r.precios.particular).toBe(514_519);
   });
 
   it("respeta un margen particular parametrizado", () => {
     const r = svc.calcular(lineas, { margenParticularPct: 35 });
-    expect(r.precios.particular).toBe(Math.round(1_120_000 * 1.35));
+    expect(r.precios.particular).toBe(Math.round(1_200_000 * 1.35));
     expect(r.margenParticularPct).toBe(35);
   });
 
@@ -84,9 +90,9 @@ describe("CosteoService.calcular · redondeos", () => {
   const svc = new CosteoService();
 
   it("sin redondeo (default) redondea al entero más próximo (Math.round)", () => {
-    // CDT 1.000.001 con CFA 12% = 120.000,12 → redondea a 120.000.
+    // CDT 1.000.001 con CI 20% = 200.000,2 → redondea a 200.000.
     const r = svc.calcular([{ tipo: "otros", cantidad: 1, valorUnitario: 1_000_001 }]);
-    expect(r.cfa).toBe(120_000); // 120000.12 → 120000
+    expect(r.cfa).toBe(200_000); // 200000.2 → 200000
     expect(Number.isInteger(r.cfa)).toBe(true);
     expect(Number.isInteger(r.ct)).toBe(true);
   });
@@ -158,7 +164,7 @@ describe("CosteoService.calcular · casos borde", () => {
   it("valores grandes: no hay overflow ni pérdida de enteros seguros", () => {
     const r = svc.calcular([{ tipo: "otros", cantidad: 1_000, valorUnitario: 1_000_000 }]); // 1e9
     expect(r.cdt).toBe(1_000_000_000);
-    expect(r.ct).toBe(1_120_000_000);
+    expect(r.ct).toBe(1_200_000_000);
     expect(r.ct).toBeLessThan(Number.MAX_SAFE_INTEGER);
   });
 });

@@ -185,7 +185,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     categoria: "circuito_cotizacion",
     titulo: "Circuito de la cotización",
     donde: "Comercial › Cotización: costeo con el laboratorio, V°B°, firma del Jefe DCO y registro de la aceptación.",
-    porConfirmar: "Niveles de V°B° y si la firma y la consulta al laboratorio son obligatorias (EP-00 §10 P1–P2).",
+    porConfirmar: "Niveles de V°B° y si la firma y la consulta al laboratorio son obligatorias (EP-00 §10 P2); qué precio de la lista toma un cliente Ejército (EP-00 §10 P1). La fórmula CI 20 % · recargo 30 % · IVA 19 % viene de la lista oficial 2026.",
     codigos: {
       vb_niveles: {
         tipo: "opcion",
@@ -210,8 +210,34 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         ayuda: "Con «No», la cotización se puede aceptar sin firmar.",
         porDefecto: "si",
       },
-      cfa_pct: { tipo: "porcentaje", nombre: "Costo fijo asociado (CFA) del Formulario de costeo", min: 0, max: 100, porDefecto: "12" },
-      margen_particular_pct: { tipo: "porcentaje", nombre: "Recargo del precio particular sobre el costo total", min: 0, max: 100, porDefecto: "20" },
+      cfa_pct: {
+        tipo: "porcentaje",
+        nombre: "Costo indirecto (CI) sobre el costo directo",
+        min: 0,
+        max: 100,
+        ayuda: "FORM05 y lista de precios: CT = CD + CI. Lista oficial IDIC 2026: 20 %.",
+        porDefecto: "20",
+      },
+      margen_particular_pct: {
+        tipo: "porcentaje",
+        nombre: "Recargo del precio particular sobre el costo total",
+        min: 0,
+        max: 100,
+        ayuda: "Neto (precio particular sin IVA) = CT + recargo. Lista oficial IDIC 2026: 30 %.",
+        porDefecto: "30",
+      },
+      iva_pct: { tipo: "porcentaje", nombre: "IVA sobre el neto", min: 0, max: 100, ayuda: "Precio particular con IVA = neto + IVA.", porDefecto: "19" },
+      precio_ejercito: {
+        tipo: "opcion",
+        nombre: "Precio de la lista que toma un cliente Ejército",
+        opciones: [
+          { valor: "ficha", etiqueta: "No usa la lista: ficha de costos del catálogo" },
+          { valor: "costo_total", etiqueta: "Costo total (CD + CI) de la lista vigente" },
+          { valor: "neto", etiqueta: "Neto de la lista vigente (igual que un particular)" },
+        ],
+        ayuda: "Un cliente particular toma siempre el neto de la lista de precios vigente.",
+        porDefecto: "ficha",
+      },
     },
   },
   {
