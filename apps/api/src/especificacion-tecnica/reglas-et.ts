@@ -256,8 +256,13 @@ export interface PlanDesglose {
   componentes: { nombre: string; puntos: PuntoEt[]; metodoIds: string[] }[];
   /** Ensayos del producto (sin componente), sin contar las inspecciones. */
   producto: { puntos: PuntoEt[]; metodoIds: string[] };
-  /** Checklist de inspecciones del producto (no son muestras). */
-  inspecciones: { puntos: PuntoEt[]; metodoIds: string[] };
+  /**
+   * Checklist de inspecciones del producto (no son muestras). B-033: los puntos
+   * «Inspección» sin ensayo del catálogo también forman el checklist
+   * (`sinEnsayo`): se capturan como ítem de atributo (Cumple / No cumple) ligado
+   * al punto de la E.T. y pasan al IVC.
+   */
+  inspecciones: { puntos: PuntoEt[]; metodoIds: string[]; sinEnsayo: PuntoEt[] };
   /** Puntos que no tienen ensayo del catálogo: no se pueden capturar hasta vincularlos. */
   sinEnsayo: PuntoEt[];
 }
@@ -267,7 +272,9 @@ const unicos = (xs: (string | null | undefined)[]) => [...new Set(xs.filter((x):
 /** Plan de ensayos del producto: árbol producto → componentes e inspecciones (EP-03 1.3). */
 export function planDesglose(puntos: PuntoEt[]): PlanDesglose {
   const conEnsayo = puntos.filter((p) => p.catMetodoId);
-  const sinEnsayo = puntos.filter((p) => !p.catMetodoId);
+  const esInspeccionDelProducto = (p: PuntoEt) => p.tipo === "inspeccion" && !(p.componente ?? "").trim();
+  const inspSinEnsayo = puntos.filter((p) => !p.catMetodoId && esInspeccionDelProducto(p));
+  const sinEnsayo = puntos.filter((p) => !p.catMetodoId && !esInspeccionDelProducto(p));
   const porComp = new Map<string, PuntoEt[]>();
   for (const p of conEnsayo) {
     const c = (p.componente ?? "").trim();
@@ -277,12 +284,12 @@ export function planDesglose(puntos: PuntoEt[]): PlanDesglose {
   }
   const componentes = [...porComp.values()].map((ps) => ({ nombre: ps[0].componente!.trim(), puntos: ps, metodoIds: unicos(ps.map((p) => p.catMetodoId)) }));
   const delProducto = conEnsayo.filter((p) => !(p.componente ?? "").trim());
-  const insp = delProducto.filter((p) => p.tipo === "inspeccion");
+  const insp = [...delProducto.filter((p) => p.tipo === "inspeccion"), ...inspSinEnsayo];
   const prod = delProducto.filter((p) => p.tipo !== "inspeccion");
   return {
     componentes,
     producto: { puntos: prod, metodoIds: unicos(prod.map((p) => p.catMetodoId)) },
-    inspecciones: { puntos: insp, metodoIds: unicos(insp.map((p) => p.catMetodoId)) },
+    inspecciones: { puntos: insp, metodoIds: unicos(insp.map((p) => p.catMetodoId)), sinEnsayo: inspSinEnsayo },
     sinEnsayo,
   };
 }
@@ -297,3 +304,9 @@ export function codigoSubmuestra(codigoMuestra: string, existentes: string[]): s
 
 /** Nueva versión: versión siguiente a la mayor existente del código. */
 export const siguienteVersion = (versiones: number[]) => (versiones.length ? Math.max(...versiones) + 1 : 1);
+
+/** Nombre con el que se muestra un ítem del checklist sin ensayo del catálogo (B-033). */
+export function nombreItemInspeccion(p: { punto?: string | null; caracteristica?: string | null; requisito?: string | null }): string {
+  const t = String(p.caracteristica ?? "").trim() || String(p.requisito ?? "").trim() || "Inspección";
+  return `${p.punto ? `${String(p.punto).trim()} · ` : ""}${t}`.slice(0, 240);
+}

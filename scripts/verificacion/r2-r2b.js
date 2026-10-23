@@ -477,7 +477,7 @@ async function main() {
     const reg = await ok(U.lccA1, "POST", `/flujo/ot/${C.otLcc.id}/muestras`, { muestras: [{ nombre: "Par de botas talla 42", metodoIds: [C.mHilo.id], muestreoId: C.muLcc.id }] });
     C.mBota = reg.muestras[0];
     const plan = await ok(U.lccA1, "GET", `/especificaciones-tecnicas/muestra/${C.mBota.id}/desglose`);
-    afirmar(plan.plan.componentes.length === 2 && plan.plan.inspecciones.metodoIds.length === 1 && plan.plan.sinEnsayo.length === 1, JSON.stringify(plan.plan).slice(0, 300));
+    afirmar(plan.plan.componentes.length === 2 && plan.plan.inspecciones.metodoIds.length === 1 && plan.plan.sinEnsayo.length === 0 && plan.plan.inspecciones.sinEnsayo.length === 1, JSON.stringify(plan.plan).slice(0, 300));
     await exigir(403, U.ventas, "POST", `/especificaciones-tecnicas/muestra/${C.mBota.id}/desglose`, {});
     await exigir(403, U.otroAnalista, "POST", `/especificaciones-tecnicas/muestra/${C.mBota.id}/desglose`, {});
     const d = await ok(U.lccA1, "POST", `/especificaciones-tecnicas/muestra/${C.mBota.id}/desglose`, {});
