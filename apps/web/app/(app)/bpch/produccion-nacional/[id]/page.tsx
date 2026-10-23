@@ -16,7 +16,7 @@ import { toast, confirmar } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
-import { rut, hoyISO } from "@/lib/format";
+import { rut, hoyISO, pct } from "@/lib/format";
 import { ESTADO_CORRELACION, ESTADO_LINEA, ESTADO_OC, MESES, MESES_LARGOS, cant, dia, numeroCl } from "@/lib/bpchProcesos";
 import BarraFases from "@/components/bpch-procesos/BarraFases";
 import ClasificacionProducto from "./ClasificacionProducto";
@@ -216,11 +216,11 @@ export default function OcPage() {
                     <td className="num">{cant(c.ejecutado)}</td>
                     <td className="num" style={{ color: c.excedido ? "var(--red)" : undefined, fontWeight: c.excedido ? 700 : undefined }}>{cant(c.saldo)}{c.excedido ? " · excedido" : ""}</td>
                     <td style={{ minWidth: 120 }}>
-                      <div role="progressbar" aria-valuenow={c.porcentajeEjecutado} aria-valuemin={0} aria-valuemax={100} aria-label={`Ejecutado ${c.porcentajeEjecutado} %`}
+                      <div role="progressbar" aria-valuenow={c.porcentajeEjecutado} aria-valuemin={0} aria-valuemax={100} aria-label={`Ejecutado ${pct(c.porcentajeEjecutado)}`}
                         style={{ height: 8, background: "#eef3f7", borderRadius: 4, overflow: "hidden" }}>
                         <div style={{ width: `${Math.min(100, c.porcentajeEjecutado)}%`, height: "100%", background: c.excedido ? "var(--red)" : "var(--green)" }} />
                       </div>
-                      <small style={{ color: "var(--muted)" }}>{c.porcentajeEjecutado} % ejecutado{c.lineasSinCantidad ? ` · ${c.lineasSinCantidad} OT sin cantidad` : ""}</small>
+                      <small style={{ color: "var(--muted)" }}>{pct(c.porcentajeEjecutado)} ejecutado{c.lineasSinCantidad ? ` · ${c.lineasSinCantidad} OT sin cantidad` : ""}</small>
                     </td>
                   </tr>
                 );
