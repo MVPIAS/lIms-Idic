@@ -31,6 +31,9 @@ import { generarNumeroCotizacion } from "./numeracion-cotizacion";
 import { motivoNoAceptable, motivoNoEditable } from "./circuito-cotizacion";
 import { estadoCircuitoDe, leerConfigCircuito } from "./circuito-config";
 import { claveLibre, precioDeLinea, type Existentes } from "./precio-ficha";
+import { revisarOc } from "./aceptacion-oc";
+import { entero, valoresCategoria } from "../common/parametros-r4d";
+import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 import { validarOportunidad, enlazarOportunidad, ganarOportunidadDeCotizacion, guardarDatosSolicitud, leerDatosSolicitud, type DatosSolicitud } from "./cotizacion-extra";
 
 /** Cada cuánto el proceso periódico pasa a «Vencida» las cotizaciones fuera de validez. */
@@ -109,6 +112,12 @@ export interface CabeceraCotizacion {
 }
 
 export interface AceptacionEntrada {
+  /** Monto de la orden de compra, para compararlo con el total cotizado (EP-00 4.2). */
+  montoOc?: number;
+  /** Discrepancia registrada cuando la O/C difiere de la cotización. */
+  discrepancia?: string;
+  /** Adjunto ya subido (POST /cotizaciones/:id/adjuntos, clase «aceptacion»). */
+  adjuntoId?: string;
   tipo?: string;
   numero?: string;
   fecha?: string | Date;
@@ -287,7 +296,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     });
     const circuito = (await estadoCircuitoDe(this.prisma, [id])).get(id);
     const solicitud = await leerDatosSolicitud(this.prisma, id).catch(() => null);
-    return { ...cot, ...(circuito ?? {}), ot, solicitud };
+    const adjuntos = await listarAdjuntos(this.prisma, cot.tenantId, "cotizacion", [id]).catch(() => []);
+    return { ...cot, ...(circuito ?? {}), ot, solicitud, adjuntos };
   }
 
   // --------------------------------------------------------------------------
@@ -681,6 +691,22 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if ((doc.tipo === "OPI_RESOLUCION" || doc.tipo === "OC") && !doc.numero?.trim())
       throw new BadRequestException(`El documento ${doc.tipo === "OC" ? "Orden de compra" : "OPI / Resolución"} requiere número.`);
 
+    // EP-00 4.2 (BL-150): la O/C se compara con el total cotizado; si difiere hay que registrar la discrepancia.
+    const tolerancia = entero((await valoresCategoria(this.prisma, cot.tenantId, "aceptacion_oc")).tolerancia, 0);
+    const oc = revisarOc({ tipo: doc.tipo, montoOc: doc.montoOc, totalCotizado: Number(cot.total ?? 0), tolerancia, discrepancia: doc.discrepancia });
+    if (oc.error) throw new ConflictException(oc.error);
+    // EP-00 4.1 (BL-209): el documento de aceptación es un archivo adjunto de la cotización.
+    let adjuntoNombre: string | null = null;
+    if (doc.adjuntoId) {
+      const a = await this.prisma.$queryRawUnsafe<{ nombre: string }[]>(
+        `SELECT nombre FROM registro_adjunto WHERE id = $1::uuid AND entidad = 'cotizacion' AND entidad_id = $2::uuid AND clase = 'aceptacion' AND deleted_at IS NULL`,
+        doc.adjuntoId,
+        id,
+      );
+      if (!a[0]) throw new BadRequestException("El adjunto indicado no es un documento de aceptación de esta cotización.");
+      adjuntoNombre = a[0].nombre;
+    }
+
     const conCobro = doc.conCobro ?? true;
     const tenantIdOt = cot.tenantId ?? tenantId ?? DEV_TENANT;
     const fechaDoc = doc.tipo ? soloFecha(doc.fecha ?? new Date()) : null;
@@ -723,7 +749,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
                 aceptacionTipo: doc.tipo,
                 aceptacionNumero: doc.numero?.trim() || null,
                 aceptacionFecha: fechaDoc,
-                aceptacionAdjunto: doc.adjunto?.trim() || null,
+                aceptacionAdjunto: adjuntoNombre ?? (doc.adjunto?.trim() || null),
               }
             : {}),
           conCobro,
@@ -778,6 +804,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
 
       return { cotizacion, ot };
     });
+    if (oc.aplica)
+      await this.hito(cot.tenantId, id, oc.hayDiscrepancia ? "discrepancia_oc" : "oc_conforme", usuarioId, doc.discrepancia?.trim() || null, {
+        numero: doc.numero?.trim() ?? null,
+        montoOc: doc.montoOc,
+        total: Number(cot.total ?? 0),
+        diferencia: oc.diferencia,
+      });
     // CRM (EP-00 0.3): la oportunidad de la cotización queda «ganada» con su OT.
     await ganarOportunidadDeCotizacion(this.prisma, id, ot.id).catch(() => undefined);
 
@@ -793,6 +826,53 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       ot: otFinal ?? ot,
       mensaje: `Cotización aceptada. Orden de trabajo ${ot.codigo} creada.${lab}${extra}`,
     };
+  }
+
+  /** Hito de la cotización (bitácora `cotizacion_evento`). */
+  private async hito(tenantId: string, cotizacionId: string, accion: string, usuarioId: string | undefined, comentario: string | null, detalle: object) {
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO cotizacion_evento (tenant_id, cotizacion_id, accion, comentario, detalle, usuario_id)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5::jsonb, $6::uuid)`,
+      tenantId,
+      cotizacionId,
+      accion,
+      comentario,
+      JSON.stringify(detalle),
+      usuarioId ?? null,
+    );
+  }
+
+  /**
+   * «Anular orden del cliente» (EP-00 4.2): la O/C no corresponde a la
+   * cotización. Queda el hito con el motivo; la cotización sigue Abierta para
+   * recibir otra orden o anularse.
+   */
+  async anularOrdenCliente(id: string, tenantId: string | undefined, d: { numero: string; montoOc?: number; motivo: string }, usuarioId?: string) {
+    const cot = await this.detalle(id, tenantId);
+    if (cot.estado !== ESTADO_ABIERTA) throw new ConflictException(`La cotización ${cot.codigo} no está Abierta (está '${cot.estado}').`);
+    await this.hito(cot.tenantId, id, "orden_cliente_anulada", usuarioId, d.motivo.trim(), {
+      numero: d.numero.trim(),
+      montoOc: d.montoOc ?? null,
+      total: Number(cot.total ?? 0),
+    });
+    return { ok: true, mensaje: `Orden del cliente ${d.numero.trim()} anulada. La cotización ${cot.codigo} sigue Abierta.` };
+  }
+
+  /** Adjunto de la cotización: documento de solicitud o de aceptación (EP-00 1.1 y 4.1). */
+  async adjuntar(id: string, tenantId: string | undefined, clase: string, archivo: ArchivoAdjunto | undefined, usuarioId?: string) {
+    const cot = await this.detalle(id, tenantId);
+    if (!["solicitud", "aceptacion"].includes(clase)) throw new BadRequestException("Clase de adjunto: «solicitud» o «aceptacion».");
+    return guardarAdjunto(this.prisma, { tenantId: cot.tenantId, entidad: "cotizacion", entidadId: id, clase, archivo, usuarioId: usuarioId ?? null });
+  }
+
+  async adjuntos(id: string, tenantId: string) {
+    return listarAdjuntos(this.prisma, tenantId, "cotizacion", [id]);
+  }
+
+  async adjunto(id: string, tenantId: string, adjuntoId: string) {
+    const a = await leerAdjunto(this.prisma, tenantId, ["cotizacion"], adjuntoId);
+    if (a.entidadId !== id) throw new NotFoundException("Adjunto no encontrado.");
+    return a;
   }
 
   /** Rechazo: solo cotizaciones históricas ('enviada'); las nuevas se anulan. */
