@@ -37,6 +37,57 @@ const TRANSICIONES_NC: Record<EstadoNc, readonly EstadoNc[]> = {
 export const TIPOS_NC = ["ensayo", "equipo", "muestra", "proceso", "reclamo_cliente", "auditoria", "documental", "otro"] as const;
 export const CRITICIDADES_NC = ["baja", "media", "alta", "critica"] as const;
 
+/* ---------------------------------------- PNC / TNC · IDIC-PG12 (BL-165) --- */
+
+/** NC general, producto no conforme (PNC) o trabajo no conforme (TNC). */
+export const CLASES_NC = ["NC", "PNC", "TNC"] as const;
+/** Formulario del procedimiento IDIC-PG12 con que se registra un PNC/TNC (EP-05 6.2). */
+export const FORMULARIO_PG12 = "IDIC-PG12-FORM01";
+/**
+ * Acción del PNC/TNC: «reejecutar» devuelve los ensayos a la captura (conector B
+ * del Anexo 01), «corregir_informe» va a corregir el documento (conector A) y
+ * «volver_elaboracion» devuelve la calibración a su elaboración (EP-04 P6.3).
+ */
+export const ACCIONES_PNC = ["reejecutar", "corregir_informe", "volver_elaboracion"] as const;
+
+export interface DatosPnc {
+  clase?: string | null;
+  accion?: string | null;
+  otId?: string | null;
+  resultadoIds?: string[];
+  resultadoId?: string | null;
+  calibracionId?: string | null;
+  certificadoId?: string | null;
+  costoNoCalidad?: number | null;
+}
+
+/** Errores de un PNC/TNC al registrarlo (lista vacía = se registra). */
+export function erroresPnc(d: DatosPnc): string[] {
+  const e: string[] = [];
+  if (!d.clase || d.clase === "NC") {
+    if (d.accion) e.push("La acción (reejecutar, corregir el informe…) es de un PNC o TNC.");
+    return e;
+  }
+  if (!d.otId && !d.calibracionId) e.push("Un PNC/TNC se registra sobre una OT o una calibración.");
+  if (!d.accion) e.push("Indique la acción del PNC/TNC: reejecutar, corregir el informe o volver a la elaboración.");
+  if (d.accion === "reejecutar" && !(d.resultadoIds?.length || d.resultadoId)) e.push("Para reejecutar, indique los ensayos afectados.");
+  if (d.accion === "volver_elaboracion" && !d.calibracionId) e.push("«Volver a la elaboración» es para una calibración.");
+  if (d.costoNoCalidad != null && !(Number(d.costoNoCalidad) >= 0)) e.push("El costo de no calidad no puede ser negativo.");
+  return e;
+}
+
+/** Ensayos a devolver al reejecutar: los indicados (sin repetir). */
+export function ensayosAReejecutar(nc: { resultadoIds?: string[] | null; resultadoId?: string | null }): string[] {
+  return [...new Set([...(nc.resultadoIds ?? []), ...(nc.resultadoId ? [nc.resultadoId] : [])])];
+}
+
+/** Cómo se devuelve cada ensayo según su estado: aprobado → reabrir; capturado o revisado → devolver; el resto ya está en captura. */
+export function modoDevolucion(estado: string): "reabrir" | "devolver" | "nada" {
+  if (estado === "aprobado") return "reabrir";
+  if (estado === "capturado" || estado === "revisado_n1") return "devolver";
+  return "nada";
+}
+
 export interface DatosNc {
   estado: string;
   responsableId?: string | null;

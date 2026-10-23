@@ -10,6 +10,11 @@
  * de sus unidades y las transversales (lo impone el servidor).
  * Enlaces: /no-conformidades?nueva=1&otId=…&equipoId=…&resultadoId=… abre el alta
  * con el origen ya puesto. API: /no-conformidades.
+ * PNC/TNC IDIC-PG12 (frente r4d, BL-165): ?nueva=1&clase=PNC&otId=…&resultadoId=…
+ * (desde la captura o la revisión), &calibracionId=… (devolución de una
+ * calibración) o &certificadoId=… (documento devuelto). Acción «Reejecutar»
+ * (devuelve los ensayos a la captura), «Corregir el informe» o «Volver a la
+ * elaboración»; costo de no calidad y «Escalar al Jefe de Sección».
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -38,6 +43,17 @@ const TIPOS: Record<string, string> = {
   documental: "Documental",
   otro: "Otro",
 };
+const CLASES: Record<string, string> = {
+  NC: "No conformidad general",
+  PNC: "Producto no conforme (IDIC-PG12)",
+  TNC: "Trabajo no conforme (IDIC-PG12)",
+};
+const ACCIONES: Record<string, string> = {
+  reejecutar: "Reejecutar → los ensayos vuelven a la captura",
+  corregir_informe: "Corregir el informe",
+  volver_elaboracion: "Volver a la elaboración (calibración)",
+};
+type Inicial = { otId?: string; equipoId?: string; resultadoId?: string; clase?: string; calibracionId?: string; certificadoId?: string; muestraId?: string; titulo?: string };
 const CRITICIDAD: Record<string, { l: string; c: string }> = {
   baja: { l: "Baja", c: "gray" },
   media: { l: "Media", c: "blue" },
@@ -64,7 +80,7 @@ function NoConformidades() {
   const [resumen, setResumen] = useState<{ abiertas: number; vencidas: number; cerradas: number } | null>(null);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
-  const [nueva, setNueva] = useState<null | { otId?: string; equipoId?: string; resultadoId?: string }>(null);
+  const [nueva, setNueva] = useState<null | Inicial>(null);
   const [selId, setSelId] = useState<string | null>(null);
   const [personas, setPersonas] = useState<Persona[]>([]);
 
@@ -72,7 +88,11 @@ function NoConformidades() {
     api.list<Persona>(RECURSO_PERSONAS, { limit: 500 }).then((r) => setPersonas(r.data ?? [])).catch(() => undefined);
     const qs = new URLSearchParams(window.location.search);
     if (qs.get("nueva")) {
-      setNueva({ otId: qs.get("otId") ?? undefined, equipoId: qs.get("equipoId") ?? undefined, resultadoId: qs.get("resultadoId") ?? undefined });
+      setNueva({
+        otId: qs.get("otId") ?? undefined, equipoId: qs.get("equipoId") ?? undefined, resultadoId: qs.get("resultadoId") ?? undefined,
+        clase: qs.get("clase") ?? undefined, calibracionId: qs.get("calibracionId") ?? undefined, certificadoId: qs.get("certificadoId") ?? undefined,
+        muestraId: qs.get("muestraId") ?? undefined, titulo: qs.get("titulo") ?? undefined,
+      });
     }
     if (qs.get("abrir")) setSelId(qs.get("abrir"));
   }, []);
@@ -151,7 +171,7 @@ function NoConformidades() {
         <table className="data">
           <thead>
             <tr>
-              <th>Código</th><th>Título</th><th>Tipo</th><th>Criticidad</th><th>Unidad</th><th>Origen</th>
+              <th>Código</th><th>Título</th><th>Clase · tipo</th><th>Criticidad</th><th>Unidad</th><th>Origen</th>
               <th>Responsable</th><th>Plazo</th><th>Estado</th>
             </tr>
           </thead>
@@ -161,7 +181,7 @@ function NoConformidades() {
               <tr key={n.id} style={{ cursor: "pointer" }} onClick={() => { setSelId(n.id); setNueva(null); }}>
                 <td><span className="codigo">{n.codigo}</span></td>
                 <td>{n.titulo ?? n.descripcion?.slice(0, 60)}</td>
-                <td>{TIPOS[n.tipo] ?? n.tipo ?? "—"}</td>
+                <td>{n.clase && n.clase !== "NC" && <span className="pill teal" style={{ marginRight: 4 }}>{n.clase}</span>}{TIPOS[n.tipo] ?? n.tipo ?? "—"}</td>
                 <td><span className={`pill ${CRITICIDAD[n.criticidad]?.c ?? "gray"}`}>{CRITICIDAD[n.criticidad]?.l ?? n.criticidad ?? "—"}</span></td>
                 <td>{n.unidadCodigo ?? <span style={{ color: "var(--muted)" }}>Transversal</span>}</td>
                 <td>{n.otCodigo ? <span className="codigo">{n.otCodigo}</span> : n.equipoCodigo ? <>Equipo {n.equipoCodigo}</> : "—"}</td>
@@ -189,17 +209,21 @@ function NoConformidades() {
  * Alta
  * ------------------------------------------------------------------------ */
 function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
-  inicial: { otId?: string; equipoId?: string; resultadoId?: string };
+  inicial: Inicial;
   personas: Persona[];
   gestiona: boolean;
   onCancelar: () => void;
   onCreada: (nc: any) => void;
 }) {
   const [f, setF] = useState({
-    titulo: "", descripcion: "", tipo: inicial.equipoId ? "equipo" : "ensayo", criticidad: "media",
+    titulo: inicial.titulo ?? "", descripcion: "", tipo: inicial.equipoId || inicial.calibracionId ? "equipo" : "ensayo", criticidad: "media",
     otId: inicial.otId ?? "", equipoId: inicial.equipoId ?? "", resultadoId: inicial.resultadoId ?? "",
     responsableId: "", plazoCierre: "",
+    clase: inicial.clase && CLASES[inicial.clase] ? inicial.clase : "NC",
+    accion: inicial.calibracionId ? "volver_elaboracion" : inicial.certificadoId ? "corregir_informe" : inicial.resultadoId ? "reejecutar" : "",
+    costoNoCalidad: "",
   });
+  const esPnc = f.clase !== "NC";
   const [ots, setOts] = useState<any[]>([]);
   const [equipos, setEquipos] = useState<any[]>([]);
   const [error, setError] = useState("");
@@ -216,6 +240,9 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
     setError("");
     if (f.titulo.trim().length < 3) return setError("Indique un título breve.");
     if (f.descripcion.trim().length < 5) return setError("Describa la no conformidad.");
+    if (esPnc && !f.accion) return setError("Indique la acción del PNC/TNC.");
+    const costo = f.costoNoCalidad.trim() === "" ? null : Number(f.costoNoCalidad.replace(/\./g, "").replace(",", "."));
+    if (costo !== null && !(costo >= 0)) return setError("El costo de no calidad debe ser un número de 0 o más.");
     setEnviando(true);
     try {
       const nc = await api.post<any>("/no-conformidades", {
@@ -226,6 +253,17 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
         otId: f.otId || null,
         equipoId: f.equipoId || null,
         resultadoId: f.resultadoId || null,
+        clase: f.clase,
+        ...(esPnc
+          ? {
+              accion: f.accion || null,
+              resultadoIds: f.resultadoId ? [f.resultadoId] : [],
+              calibracionId: inicial.calibracionId ?? null,
+              certificadoId: inicial.certificadoId ?? null,
+              muestraId: inicial.muestraId ?? null,
+              costoNoCalidad: costo,
+            }
+          : {}),
         ...(gestiona ? { responsableId: f.responsableId || null, plazoCierre: f.plazoCierre || null } : {}),
       });
       onCreada(nc);
@@ -238,9 +276,30 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
 
   return (
     <form className="card" style={{ borderTop: "3px solid var(--accent)" }} onSubmit={guardar}>
-      <h2>Nueva no conformidad</h2>
+      <h2>{esPnc ? `Nuevo ${f.clase} · IDIC-PG12-FORM01` : "Nueva no conformidad"}</h2>
       {error && <div className="alert warn">{error}</div>}
       <div className="form-grid cols-3">
+        <div className="field">
+          <label htmlFor="nc-clase">Clase</label>
+          <select id="nc-clase" value={f.clase} onChange={(e) => setF({ ...f, clase: e.target.value })}>
+            {Object.entries(CLASES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+        </div>
+        {esPnc && (
+          <>
+            <div className="field">
+              <label htmlFor="nc-accion">Acción <span className="req">*</span></label>
+              <select id="nc-accion" value={f.accion} onChange={(e) => setF({ ...f, accion: e.target.value })}>
+                <option value="">— elija —</option>
+                {Object.entries(ACCIONES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="nc-costo">Costo de no calidad (CLP)</label>
+              <input id="nc-costo" inputMode="decimal" value={f.costoNoCalidad} onChange={(e) => setF({ ...f, costoNoCalidad: e.target.value })} />
+            </div>
+          </>
+        )}
         <div className="field" style={{ gridColumn: "1 / -1" }}>
           <label htmlFor="nc-titulo">Título <span className="req">*</span></label>
           <input id="nc-titulo" value={f.titulo} maxLength={200} onChange={(e) => setF({ ...f, titulo: e.target.value })} />
@@ -277,6 +336,12 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
             {equipos.map((x) => <option key={x.id} value={x.id}>{x.codigo} · {x.nombre}</option>)}
           </select>
         </div>
+        {(inicial.calibracionId || inicial.certificadoId) && (
+          <div className="field">
+            <label>Origen</label>
+            <div style={{ padding: "6px 0" }}>{inicial.calibracionId ? "Calibración devuelta" : "Documento devuelto"}</div>
+          </div>
+        )}
         {f.resultadoId && (
           <div className="field">
             <label>Resultado afectado</label>
@@ -342,6 +407,38 @@ function Detalle({ id, personas, onCerrar, onCambio }: { id: string; personas: P
   const cerrada = nc.estado === "cerrada";
   const editable = nc.puede?.editarAnalisis && !cerrada;
   const gestiona = !!nc.puede?.gestionar;
+  const esPnc = nc.clase === "PNC" || nc.clase === "TNC";
+
+  async function ejecutarAccion() {
+    setOcupado(true);
+    setError("");
+    try {
+      const r = await api.post<any>(`/no-conformidades/${id}/ejecutar-accion`, {});
+      toast.ok(r.mensaje ?? "Acción ejecutada.");
+      await cargar();
+      await onCambio();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function escalar() {
+    if (comentario.trim().length < 5) return setError("Escriba en «Comentario» por qué se escala al Jefe de Sección.");
+    setOcupado(true);
+    setError("");
+    try {
+      await api.post(`/no-conformidades/${id}/escalar`, { motivo: comentario.trim() });
+      toast.ok("Escalada al Jefe de Sección.");
+      setComentario("");
+      await cargar();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
 
   async function guardar() {
     setOcupado(true);
@@ -424,6 +521,28 @@ function Detalle({ id, personas, onCerrar, onCambio }: { id: string; personas: P
         {nc.resultadoId && <> · Resultado <span className="codigo">{String(nc.resultadoId).slice(0, 8)}…</span></>}
       </p>
       <div style={{ whiteSpace: "pre-wrap", marginBottom: 10 }}>{nc.descripcion}</div>
+      {esPnc && (
+        <div className="card" style={{ padding: 10, margin: "0 0 10px", background: "var(--panel, #f7f9fb)" }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", fontSize: 12.5 }}>
+            <span className="pill teal">{nc.clase}</span>
+            <span>{nc.formulario ?? "IDIC-PG12-FORM01"}</span>
+            <span>Acción: <b>{ACCIONES[nc.accion] ?? nc.accion ?? "—"}</b></span>
+            {nc.costoNoCalidad != null && <span>Costo de no calidad: <b>${Math.round(nc.costoNoCalidad).toLocaleString("es-CL")}</b></span>}
+            {(nc.resultadoIds ?? []).length > 0 && <span>{nc.resultadoIds.length} ensayo(s) afectado(s)</span>}
+            {nc.calibracionCodigo && <span>Calibración {nc.calibracionCodigo}</span>}
+            {nc.certificadoNumero && <span>Documento {nc.certificadoNumero}</span>}
+            <div className="spacer" style={{ flex: 1 }} />
+            {nc.accionEjecutadaAt ? (
+              <span className="pill green">Acción ejecutada el {fechaHora(nc.accionEjecutadaAt)}{nc.accionEjecutadaPor ? ` · ${nc.accionEjecutadaPor}` : ""}</span>
+            ) : gestiona && !cerrada ? (
+              <button className="btn primary sm" disabled={ocupado} onClick={ejecutarAccion}>
+                {nc.accion === "reejecutar" ? "Reejecutar → captura" : nc.accion === "corregir_informe" ? "Registrar → corregir informe" : "Registrar → volver a elaboración"}
+              </button>
+            ) : null}
+          </div>
+          {nc.escaladaAt && <p style={{ margin: "6px 0 0", fontSize: 12 }}>Escalada al Jefe de Sección el {fechaHora(nc.escaladaAt)}{nc.escaladaPor ? ` por ${nc.escaladaPor}` : ""}: {nc.escaladaMotivo}</p>}
+        </div>
+      )}
 
       <div className="form-grid cols-2">
         <div className="field">
@@ -461,6 +580,9 @@ function Detalle({ id, personas, onCerrar, onCambio }: { id: string; personas: P
             {siguientes.map((s) => (
               <button key={s.estado} className={`btn ${s.clase} sm`} disabled={ocupado} onClick={() => pasarA(s.estado)}>{s.l}</button>
             ))}
+            {esPnc && !cerrada && !nc.escaladaAt && (
+              <button className="btn outline sm" disabled={ocupado} onClick={escalar} title="Usa el texto de «Comentario» como motivo">Escalar al Jefe de Sección</button>
+            )}
           </>
         )}
       </div>

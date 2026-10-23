@@ -63,6 +63,8 @@ export const NAV: SeccionNav[] = [
       { href: "/cotizaciones", label: "Cotizaciones", icon: "💲", perm: "cotizacion.ver" },
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
       { href: "/encuestas", label: "Encuestas de satisfacción", icon: "☺", perm: "encuesta.ver", claves: "postventa satisfaccion cliente" },
+      // EP-00 9.2 (frente r4d): reclamos de clientes.
+      { href: "/reclamos", label: "Reclamos", icon: "📣", perm: "reclamo.gestionar", claves: "postventa reclamo cliente queja" },
       // Misma pantalla que «BPCH · Certificación › Internaciones» (puerta única): Comercial registra la resolución y la tasa.
       // En Comercial solo para quien trabaja en el Depto. Comercial; el BPCH la tiene en su sección.
       { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: "DCO", claves: "aduana importacion sdbpch resolucion dgmn tasa" },
@@ -101,7 +103,9 @@ export const NAV: SeccionNav[] = [
       { href: "/consumibles", label: "Consumibles · kardex", icon: "🧴", perm: "consumible.gestionar", claves: "stock reactivos lotes" },
       { href: "/municion", label: "Munición de prueba", icon: "🎯", perm: "municion.solicitar", ambito: "DSA", claves: "lrb lam d11 cartuchos orden interna balistica" },
       { href: "/qc", label: "Control de calidad (QC)", icon: "✔", perm: "resultado.ver" },
-      { href: "/no-conformidades", label: "No conformidades", icon: "⚠", perm: "nc.ver", claves: "nc accion correctiva capa calidad reclamo" },
+      { href: "/no-conformidades", label: "No conformidades", icon: "⚠", perm: "nc.ver", claves: "nc accion correctiva capa calidad reclamo pnc tnc pg12" },
+      // EP-05 8.2 (frente r4d): apelaciones de Informes de Rechazo.
+      { href: "/apelaciones", label: "Apelaciones", icon: "⚖", perm: "apelacion.ver", claves: "apelacion rechazo lrb director" },
       { href: "/spc", label: "Control estadístico (SPC)", icon: "📉", perm: "resultado.ver" },
     ],
   },
