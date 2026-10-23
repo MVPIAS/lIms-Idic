@@ -273,3 +273,36 @@ export function contarDefectuosas(resultados: ResultadoLote[]): Record<ClaseDefe
   }
   return { critico: porClase.critico.size, mayor: porClase.mayor.size, menor: porClase.menor.size, pendientes, sinClase };
 }
+
+/** Datos del encargo de la OT que conoce el muestreo (B-087). */
+export interface EncargoParaMuestreo {
+  lugarMuestreo?: string | null;
+  item?: string | null;
+  etTexto?: string | null;
+  proveedor?: string | null;
+  cantidad?: number | string | null;
+  unidadCantidad?: string | null;
+}
+
+/**
+ * B-087 · Precarga del formulario de muestreo con lo que ya sabe el encargo
+ * (proveedor, lugar, producto y E.T., tamaño del lote): solo lo que el
+ * formulario trae vacío; lo escrito manda.
+ */
+export function precargaMuestreo<T extends Record<string, unknown>>(dto: T, e: EncargoParaMuestreo | null | undefined): T {
+  if (!e) return dto;
+  const vacio = (v: unknown) => v === undefined || v === null || (typeof v === "string" && v.trim() === "");
+  const txt = (v: unknown, max: number) => (vacio(v) ? null : String(v).trim().slice(0, max));
+  const out: Record<string, unknown> = { ...dto };
+  const producto = [txt(e.item, 240), txt(e.etTexto, 240)].filter(Boolean).join(" · ").slice(0, 240) || null;
+  const lote = e.cantidad == null || e.cantidad === "" ? null : Number(String(e.cantidad).replace(",", "."));
+  const prop: Record<string, unknown> = {
+    lugar: txt(e.lugarMuestreo, 240),
+    producto,
+    proveedor: txt(e.proveedor, 240),
+    tamanoLote: lote != null && Number.isInteger(lote) && lote > 0 ? lote : null,
+    unidadPresentacion: txt(e.unidadCantidad, 40),
+  };
+  for (const [k, v] of Object.entries(prop)) if (v != null && vacio(out[k])) out[k] = v;
+  return out as T;
+}

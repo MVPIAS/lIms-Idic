@@ -20,6 +20,7 @@
  *   GET    /muestreo/:id/conclusion          ot.ver · veredicto del lote propuesto (no conformidades por clase vs Ac/Re)
  *   POST   /muestreo/:id/concluir            resultado.aprobar · «Concluir → revisión técnica»
  */
+import { precargaMuestreo } from "./reglas-muestreo";
 import {
   BadRequestException,
   Body,
@@ -416,8 +417,14 @@ export class MuestreoService {
   async crear(req: any, otId: string, body: unknown) {
     const ot = await this.otEnAlcance(req, otId, "muestreo.registrar");
     this.exigirOtAbierta(ot);
-    const dto = DatosBody.parse(body ?? {});
     const tenantId = tenantDe(req);
+    // B-087: lo que el encargo de la OT ya sabe (proveedor, lugar, producto y E.T., lote) llega precargado.
+    const [enc] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT lugar_muestreo AS "lugarMuestreo", item, et_texto AS "etTexto", proveedor, cantidad::text AS cantidad, unidad_cantidad AS "unidadCantidad"
+         FROM ot_encargo WHERE ot_id = $1::uuid`,
+      otId,
+    );
+    const dto = precargaMuestreo(DatosBody.parse(body ?? {}), enc);
     if (!dto.numeroFormulario?.trim()) throw new BadRequestException("Indique el Nº de formulario de muestreo.");
     await this.exigirFormularioUnico(tenantId, dto.numeroFormulario, null);
     const sets = await this.columnas(tenantId, dto, null);
