@@ -21,3 +21,15 @@ SELECT t.id, 'ot_plazo', v.codigo, v.etiqueta, v.orden, v.valor
   ('reinspeccion_dias', 'Plazo de la OT de reinspección, en días corridos desde que nace', 4, '10')
  ) AS v(codigo, etiqueta, orden, valor)
 ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
+
+-- --- B-015 · Comercial abre la ficha de la calibración para entregarla ---------
+-- EP-04 P8.1 y FLUJO_METROLOGIA §9.2: Comercial (DCO) entrega y envía por correo
+-- el certificado de calibración (certificado.entregar). Sin metrologia.ver la
+-- ficha daba 403. Lectura solamente: registrar, firmar y emitir siguen en
+-- metrologia.crear / metrologia.emitir. La entrega de ARMAS sigue siendo de la
+-- D11 (custodia y salida por código de barras, EP-11 11.27): se corrige el manual.
+INSERT INTO rol_permiso (rol_id, permiso_id)
+SELECT DISTINCT r.id, p.id
+  FROM rol r JOIN permiso p ON p.codigo = 'metrologia.ver'
+ WHERE COALESCE(r.alias_de, r.codigo) = 'COMERCIAL'
+ON CONFLICT DO NOTHING;
