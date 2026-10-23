@@ -742,13 +742,15 @@ export class PlantillaRenderService {
     otId: string,
     plantillaId: string,
     tenantId?: string,
-    opciones: { modalidad?: Modalidad; datos?: DatosInforme; cobertura?: OpcionesEmision["cobertura"] } = {},
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme; cobertura?: OpcionesEmision["cobertura"]; tipoDocumento?: string } = {},
   ) {
     const fecha = new Date();
+    if (opciones.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(opciones.tipoDocumento))
+      throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
     const cob = tenantId ? await this.resolverCobertura(otId, tenantId, opciones.cobertura) : null;
     if (cob?.errores.length) throw new BadRequestException(cob.errores.join(" "));
     const cert = {
-      numero: await this.numeroBorrador(otId, plantillaId, tenantId, fecha, cob),
+      numero: await this.numeroBorrador(otId, plantillaId, tenantId, fecha, cob, opciones.tipoDocumento ?? null),
       codigoVerificacion: "SIN EMITIR",
       fecha,
     };
@@ -795,6 +797,8 @@ export class PlantillaRenderService {
     tenantId: string | undefined,
     fecha: Date,
     cob: { unidadDocumento: string | null; muestraCodigo: string | null } | null = null,
+    /** Tipo elegido en la pantalla; sin él, el de la plantilla o la unidad (igual que al emitir). */
+    indicado: string | null = null,
   ): Promise<string> {
     const general = `CERT-${anioChile(fecha)}-XXXX`;
     try {
@@ -806,7 +810,7 @@ export class PlantillaRenderService {
       if (!ot || !plantilla) return general;
       const unidad = cob ? cob.unidadDocumento : ot.unidadPrincipal;
       const deUnidad = await this.tipoDocumentoDeUnidad(unidad);
-      const { tipo } = tipoDocumentoPorDefecto({ tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoDePlantilla: plantilla.tipoDocumento, tipoUnidad: deUnidad?.tipo ?? null });
+      const { tipo } = tipoDocumentoPorDefecto({ indicado, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoDePlantilla: plantilla.tipoDocumento, tipoUnidad: deUnidad?.tipo ?? null });
       const p = await this.numeracion.proximo({
         tenantId: ot.tenantId,
         unidadId: unidad,

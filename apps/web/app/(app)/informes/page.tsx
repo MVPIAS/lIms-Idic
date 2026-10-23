@@ -209,7 +209,7 @@ function InformesContenido() {
     setOcupado("preview");
     setError("");
     try {
-      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId, modalidad, datosInforme: datosInforme(), ...conCobertura() }));
+      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId, modalidad, datosInforme: datosInforme(), ...(tipoDocumento ? { tipoDocumento } : {}), ...conCobertura() }));
     } catch (e: any) {
       setError(e.message);
     } finally {
