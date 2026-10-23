@@ -34,3 +34,9 @@ export const DOCUMENTO_OT: Record<string, string> = {
   IVC: "Informe de Verificación de Calidad",
   II: "Informe de Inspección",
 };
+
+/** Cierra una frase con punto sin duplicarlo («… Ltda.» no pasa a «… Ltda..»; B-085). */
+export function conPunto(texto: string | null | undefined): string {
+  const t = String(texto ?? "").trimEnd();
+  return /[.!?…]$/.test(t) ? t : `${t}.`;
+}

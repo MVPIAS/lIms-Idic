@@ -6,6 +6,7 @@
  * distribución interna) → trazabilidad (y cambio de titular) en la
  * Codificación Única → cierre. API: /bpch/reinspecciones/:id
  */
+import { conPunto } from "@/lib/etiquetas";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
@@ -171,9 +172,14 @@ function Detalle() {
                     Cambiar el titular a <b>{destino}</b> {!puede("bpch.codificacion.gestionar") && <small>(requiere permiso de la Codificación Única)</small>}
                   </label>
                 )}
-                {titular.cambiar && <input aria-label="Motivo del cambio de titular" placeholder="Motivo del cambio de titular" value={titular.motivo} onChange={(e) => setTitular({ ...titular, motivo: e.target.value })} style={{ width: "100%", marginTop: 6 }} />}
+                {titular.cambiar && (
+                  <div className="field" style={{ marginTop: 6 }}>
+                    <label htmlFor="tz-motivo">Motivo del cambio de titular</label>
+                    <input id="tz-motivo" placeholder="Por qué cambia el titular" value={titular.motivo} onChange={(e) => setTitular({ ...titular, motivo: e.target.value })} style={{ width: "100%" }} />
+                  </div>
+                )}
                 <button type="button" className="btn primary sm" style={{ marginTop: 8 }} onClick={async () => {
-                  if (await confirmar({ titulo: "¿Registrar la trazabilidad?", mensaje: titular.cambiar ? `Se dejará constancia y el titular pasará a ${destino}.` : "Se dejará constancia de la reinspección en el historial del producto." }))
+                  if (await confirmar({ titulo: "¿Registrar la trazabilidad?", mensaje: titular.cambiar ? conPunto(`Se dejará constancia y el titular pasará a ${destino}`) : "Se dejará constancia de la reinspección en el historial del producto." }))
                     await accion("POST", "/trazabilidad", { cambiarTitular: titular.cambiar, motivo: titular.motivo || null }, "Trazabilidad registrada.");
                 }}>Registrar trazabilidad</button>
               </>
