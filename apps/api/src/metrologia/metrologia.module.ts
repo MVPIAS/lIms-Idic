@@ -1520,6 +1520,7 @@ export class MetrologiaController {
         ultimoPaso: c.pasos ? c.ultimo : true,
         habilitacion: e === "borrador" && yo ? motivoHabilitacion(registro, yo, cal.laboratorio ?? null, cal.magnitud) : null,
         reemisionEnCurso: !!cal.reemision_en_curso,
+        tienePatron: cal.patrones === undefined ? undefined : Array.isArray(cal.patrones) && cal.patrones.length > 0,
       };
       out.push({
         ctx, firmas: propias,

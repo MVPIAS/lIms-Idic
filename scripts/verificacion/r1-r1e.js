@@ -174,8 +174,10 @@ async function itemRecibido(C, lab, jefe, ins = {}) {
 }
 const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 async function calibrar(C, { proceso, autor = METRO, lab = C.lmt, jefe = JEFE, datos, ins }) {
+  // B-028 (frente c2): sin patrón del maestro la calibración no se envía a firma.
+  const patronIds = [proceso.startsWith("ITT") ? C.patTemp : C.patMasa].filter(Boolean);
   const r = await ok(autor, "POST", "/metrologia/calibraciones", {
-    procesoCodigo: proceso, fecha: hoy(), instrumento: ins, intervaloMeses: 12, motor: { datos, opciones: {} },
+    procesoCodigo: proceso, fecha: hoy(), instrumento: ins, intervaloMeses: 12, motor: { datos, opciones: {} }, patronIds,
     otInstrumentoId: await itemRecibido(C, lab, jefe, ins),
   });
   return r.data;
@@ -192,6 +194,13 @@ async function main() {
   C.ej2 = (await ok(METRO, "GET", "/metrologia/motores/ITM02/ejemplo")).data;
   C.ej3 = (await ok(METRO, "GET", "/metrologia/motores/ITM03/ejemplo")).data;
   C.ejT = (await ok(METRO_E, "GET", "/metrologia/motores/ITT02/ejemplo")).data;
+  {
+    const p = (await ok(METRO, "GET", `/metrologia/patrones?fecha=${hoy()}`)).data;
+    const vig = (x) => x.estado === "vigente" && x.activo !== false && x.tipo !== "auxiliar" && x.rango_min == null;
+    C.patMasa = p.find((x) => x.magnitud === "masa" && vig(x))?.id;
+    C.patTemp = p.find((x) => x.magnitud === "temperatura" && x.estado === "vigente" && x.activo !== false && x.tipo !== "auxiliar")?.id;
+    afirmar(C.patMasa && C.patTemp, "faltan patrones vigentes de masa o de temperatura en el maestro");
+  }
   const insBalanza = { item: "Balanza analítica", marca: "Adam", modelo: "NBL254i", serie: "AE9YX953", cap: "250 g", res: "0,0001 g", rango: "(0,02 a 50) g",
     cliente: "IDIC, Departamento Químico", solicitante: "Laboratorio Textil", lugar: "instalaciones", desviacion: "No" };
 

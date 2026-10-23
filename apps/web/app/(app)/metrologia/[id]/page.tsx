@@ -314,6 +314,10 @@ export default function FichaCalibracionPage() {
               ))}
             </div>
             {circ?.errorMatriz && <div className="alert warn">{circ.errorMatriz}</div>}
+            {/* B-028: sin patrón del maestro no se envía a firma (el certificado imprime su trazabilidad). */}
+            {c.estado === "borrador" && Array.isArray(c.patrones) && c.patrones.length === 0 && (
+              <div className="alert warn" role="status">Esta calibración no tiene patrón: elija al menos un patrón vigente del maestro en la hoja de control («Editar borrador») antes de enviarla a firma.</div>
+            )}
             <div className={s.acciones}>
               {a.includes("ENVIAR") && <button className="btn primary" disabled={ocupado} onClick={enviar}>Firmar y enviar → Revisión Jefe Lab.</button>}
               {a.includes("FIRMAR") && <button className="btn primary" disabled={ocupado} onClick={() => firmar(false)}>Aprobar revisión técnica → Firma</button>}

@@ -198,3 +198,13 @@ describe("Revisión r3 · la firma ELABORA no cuenta como otro paso y sin matriz
     expect(motivoNoEnviable([jefeLab, jefeDepto])).toBeNull();
   });
 });
+
+describe("B-028 · no se envía a firma una calibración sin patrón", () => {
+  const { motivoRechazo } = require("./metrologia.flujo");
+  const base = { estado: "borrador", esAutor: true, puedeCrear: true, puedeEmitir: false, calculada: true };
+  it("sin patrón del maestro no se envía; con patrón sí; sin dato no bloquea", () => {
+    expect(motivoRechazo("ENVIAR", { ...base, tienePatron: false })).toMatch(/patrón vigente/);
+    expect(motivoRechazo("ENVIAR", { ...base, tienePatron: true })).toBeNull();
+    expect(motivoRechazo("ENVIAR", base)).toBeNull();
+  });
+});

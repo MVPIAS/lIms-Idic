@@ -229,7 +229,7 @@ async function main() {
     const ins = { item: "Micropipeta", marca: "Brand", modelo: "Transferpette", serie: "No tiene", idEspecial: "MP_09", cap: "200 µL", res: "0,1 µL", rango: "(20 a 200) µL",
       cliente: "Cliente de prueba", ot: C.controlV.ot, fechaOt: C.controlV.fechaOt, fechaRecepcion: C.controlV.fechaRecepcion, lugar: "instalaciones" };
     const otInstrumentoId = await itemRecibido(C, ins, { fechaOt: C.controlV.fechaOt, fechaRecepcion: C.controlV.fechaOt, recepcionPrevia: C.controlV.fechaRecepcion });
-    const r = await ok(METRO, "POST", "/metrologia/calibraciones", { procesoCodigo: "ITV05", fecha: "2026-09-03", instrumento: ins, intervaloMeses: 12, motor: { datos: C.datosV, opciones: {} }, otInstrumentoId });
+    const r = await ok(METRO, "POST", "/metrologia/calibraciones", { procesoCodigo: "ITV05", fecha: "2026-09-03", instrumento: ins, intervaloMeses: 12, motor: { datos: C.datosV, opciones: {} }, otInstrumentoId, patronIds: [C.pF1.id] }); // B-028 (c2): con patrón
     afirmar(r.data.avisos.length === 0, JSON.stringify(r.data.avisos));
     C.calV = r.data;
     return "recepción del 02-09 en una OT del 03-09 → 400; recibida el 03-09 → sin avisos";

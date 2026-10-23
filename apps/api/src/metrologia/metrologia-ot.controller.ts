@@ -230,7 +230,7 @@ export class MetrologiaOtService {
        UNION ALL
        SELECT ot_instrumento_id, 'certificado_externo', certificado_numero, estado, entregado_at, entrega_medio
          FROM met_servicio_externo WHERE ot_id = $1::uuid AND estado NOT IN ('anulado', 'rechazado')`, otId,
-    ).catch(() => []);
+    ).catch(() => [] as { itemId: string; tipo: string; numero: string | null; estado: string; entregadoAt: Date | null; entregaMedio: string | null }[]);
     const instrumentos = items.map((i) => {
       const v = calibracionVigente(cals, i.id);
       const acciones: string[] = [];
