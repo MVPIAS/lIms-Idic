@@ -50,3 +50,14 @@ describe("EP-11 11.33 · préstamos", () => {
     expect(prestamoVencido({ estado: "devuelto", fechaDevolucionPrevista: "2026-10-01" }, hoy)).toBe(false);
   });
 });
+
+describe("B-044 · confirmar o descartar una coincidencia IBIS", () => {
+  const { erroresEstadoHit } = require("./reglas-saec");
+  it("desde sin confirmar, con motivo", () => {
+    expect(erroresEstadoHit("sin_confirmar", "confirmado", "Cotejo positivo del perito")).toEqual([]);
+    expect(erroresEstadoHit("sin_confirmar", "descartado", "x").join(" ")).toMatch(/motivo/);
+    expect(erroresEstadoHit("confirmado", "descartado", "Error de cotejo").join(" ")).toMatch(/sin confirmar/);
+    expect(erroresEstadoHit("confirmado", "sin_confirmar", "Se revisa de nuevo")).toEqual([]);
+    expect(erroresEstadoHit("descartado", "descartado", "Repetido").join(" ")).toMatch(/ya está/);
+  });
+});
