@@ -497,7 +497,7 @@ function PorCalibrar({ filas }: { filas: any[] }) {
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                     {i.estado === "recibido"
                       ? <Link className="btn primary sm" href={`/metrologia/nueva?instrumento=${i.id}&ot=${i.ot_id}` as any}>Calibrar →</Link>
-                      : <Link className="btn outline sm" href={`/ot/${i.ot_id}` as any}>Recibir en la OT →</Link>}
+                      : <Link className="btn outline sm" href={`/ot/${i.ot_id}?tab=instrumentos` as any}>Recibir en la OT →</Link>}
                   </td>
                 </tr>
               ))}

@@ -141,7 +141,7 @@ export default function ExpedientePage() {
   // Pestaña inicial desde la URL (?tab=muestras: bandeja de entrada del laboratorio).
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "ordenes", "resultados", "fotos", "informe", "carpeta", "historial"].includes(t)) setTab(t as typeof tab);
+    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "instrumentos", "ordenes", "resultados", "fotos", "informe", "carpeta", "historial"].includes(t)) setTab(t as typeof tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
