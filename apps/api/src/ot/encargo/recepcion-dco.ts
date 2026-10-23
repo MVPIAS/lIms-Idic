@@ -1,4 +1,5 @@
 import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Put, Req, UseGuards } from "@nestjs/common";
+import { AlcanceResultadoService } from "../../rbac/alcance-resultado.service";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -76,8 +77,10 @@ export class RecepcionDcoController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
+    private readonly alcanceResultado?: AlcanceResultadoService,
   ) {}
 
+  /** Sin `permiso` (lecturas): también el laboratorio que participa en la OT (B-002). */
   private async ot(req: any, otId: string, permiso?: string) {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT id, codigo, estado, unidad_principal AS "unidadId" FROM orden_trabajo WHERE id = $1::uuid AND tenant_id = $2::uuid`,
@@ -85,7 +88,9 @@ export class RecepcionDcoController {
       req?.user?.tenantId,
     );
     if (!f[0]) throw new NotFoundException("OT no encontrada.");
-    await this.alcance.exigirUnidad(req, f[0].unidadId, `la OT ${f[0].codigo}`, permiso);
+    if (!permiso && this.alcanceResultado)
+      await this.alcanceResultado.alcanceEnOt(req, { id: f[0].id, codigo: f[0].codigo, unidadPrincipal: f[0].unidadId }, "ot.ver");
+    else await this.alcance.exigirUnidad(req, f[0].unidadId, `la OT ${f[0].codigo}`, permiso);
     return f[0] as { id: string; codigo: string; estado: string; unidadId: string | null };
   }
 

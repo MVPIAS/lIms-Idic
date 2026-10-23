@@ -130,6 +130,7 @@ export class MuestraController extends BaseCrudController {
     protected svc: MuestraService,
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
+    private readonly alcanceResultado?: AlcanceResultadoService,
   ) { super(); }
 
   /**
@@ -157,7 +158,12 @@ export class MuestraController extends BaseCrudController {
     // ?otId= · muestras de una OT (el expediente ya no trae 200 y filtra en el navegador).
     if (otId) {
       if (!/^[0-9a-f-]{36}$/i.test(otId)) throw new BadRequestException("otId inválido");
-      where = { AND: [where ?? {}, { otId }] };
+      // B-002 (frente c1): el laboratorio que participa en la OT (orden interna) ve su muestra compartida.
+      const ot = filtro && this.alcanceResultado ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { id: true, codigo: true, unidadPrincipal: true } }) : null;
+      const participa = ot && !filtro!.includes(ot.unidadPrincipal ?? "")
+        ? await this.alcanceResultado!.alcanceEnOt(req, ot, "ot.ver").then(() => true, () => false)
+        : false;
+      where = participa ? { otId } : { AND: [where ?? {}, { otId }] };
     }
     return this.svc.listar({ page: parseInt(page), limit: parseInt(limit), search, where }, req?.user?.tenantId);
   }
