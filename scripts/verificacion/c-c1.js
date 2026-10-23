@@ -481,6 +481,21 @@ async function main() {
     await exigir(403, U.lpnAnalista, "GET", `/muestras/${m.id}/distribucion`);
     return `${ot.codigo}: ofrece ${cods.join(", ")}; porción al LMB antes de su OI; LPN → 400`;
   });
+
+  /* ------------------------------------------------------------ B-042 */
+  await paso("B-042 · «Avisar →» de la tarjeta de plazos: quien sigue las OT (ot.seguimiento) avisa; el analista no", async () => {
+    const quien = ["demo.dco.jefe", U.planif, U.ventas].find(Boolean);
+    let usado = null;
+    for (const u of [U.planif, "demo.dco.jefe", U.ventas]) {
+      const s = await login(u);
+      if (s.permisos.includes("ot.seguimiento")) { usado = u; break; }
+    }
+    afirmar(usado, `ningún perfil de Comercial/Planificación tiene ot.seguimiento (${quien})`);
+    const r = await ok(usado, "POST", "/avisos/plazos", {});
+    afirmar(typeof r.vencidas === "number" && typeof r.porVencer === "number", JSON.stringify(r));
+    await exigir(403, U.lqaAnalista, "POST", "/avisos/plazos", {});
+    return `${usado}: ${r.vencidas} vencida(s), ${r.porVencer} por vencer, ${r.personas} persona(s) avisadas; analista → 403`;
+  });
 //PASOS
 }
 
