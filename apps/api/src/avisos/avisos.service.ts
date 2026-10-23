@@ -339,21 +339,25 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
       const tipo = avisoDePlazo(ot.fecha_compromiso, hoy, cfg.diasPorVencer);
       if (!tipo) continue;
       const vencida = tipo === "vencida";
-      // «Avisar →» manual: se repite aunque ya se avisara hoy (clave con la hora).
-      const sufijo = opts.forzar ? `:${Date.now()}` : "";
-      const r = await this.emitir(
-        tenantId,
-        {
-          tipo: vencida ? "ot_vencida" : "ot_por_vencer",
-          titulo: `${vencida ? "OT vencida" : "OT por vencer"} · ${ot.codigo}`,
-          mensaje: `La OT ${ot.codigo}${ot.cliente ? ` (${ot.cliente})` : ""} del ${ot.unidad ?? "laboratorio"} ${vencida ? "venció" : "vence"} el ${ot.fecha_compromiso.split("-").reverse().join("-")} y aún no está terminada.`,
-          ruta: `/ot/${ot.id}`,
-          otId: ot.id,
-          clave: vencida ? `ot_vencida:${ot.id}:${hoy}${sufijo}` : `ot_por_vencer:${ot.id}:${ot.fecha_compromiso}${sufijo}`,
-          creadoPor: opts.usuarioId ?? null,
-        },
-        { jefesDe: [ot.unidad_principal], usuarios: [ot.ejecutivo_id], roles: ot.ejecutivo_id ? [] : [{ rol: "PLANIFICACION" }] },
-      );
+      const base = vencida ? `ot_vencida:${ot.id}:${hoy}` : `ot_por_vencer:${ot.id}:${ot.fecha_compromiso}`;
+      const enviar = (clave: string) =>
+        this.emitir(
+          tenantId,
+          {
+            tipo: vencida ? "ot_vencida" : "ot_por_vencer",
+            titulo: `${vencida ? "OT vencida" : "OT por vencer"} · ${ot.codigo}`,
+            mensaje: `La OT ${ot.codigo}${ot.cliente ? ` (${ot.cliente})` : ""} del ${ot.unidad ?? "laboratorio"} ${vencida ? "venció" : "vence"} el ${ot.fecha_compromiso.split("-").reverse().join("-")} y aún no está terminada.`,
+            ruta: `/ot/${ot.id}`,
+            otId: ot.id,
+            clave,
+            creadoPor: opts.usuarioId ?? null,
+          },
+          { jefesDe: [ot.unidad_principal], usuarios: [ot.ejecutivo_id], roles: ot.ejecutivo_id ? [] : [{ rol: "PLANIFICACION" }] },
+        );
+      // La clave base evita repetir el aviso automático; «Avisar →» manual lo repite
+      // aunque ya se hubiera avisado (clave con la hora) y la revisión automática no lo duplica después.
+      let r = await enviar(base);
+      if (!r.nuevos && opts.forzar) r = await enviar(`${base}:${Date.now()}`);
       if (r.nuevos) {
         if (vencida) vencidas++;
         else porVencer++;
