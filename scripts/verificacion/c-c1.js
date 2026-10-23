@@ -316,6 +316,18 @@ async function main() {
     afirmar(pl.eliminados.some((e) => e.resultadoId === r.id && e.motivo === "Analito de otra matriz (frente c1)"), "no figura en «Ensayos eliminados» con su motivo");
     return `${r.analito ?? r.id} quitado con motivo; analista y LPN → 403`;
   });
+
+  /* ------------------------------------------------------------ B-014 */
+  await paso("B-014 · la D11 y el Jefe de Sucursal eligen cliente con el buscador acotado; sin acceso al maestro completo", async () => {
+    const d11 = await ok("demo.d11.jefe", "GET", `/clientes-buscador?search=${encodeURIComponent(C.cliente.razonSocial.slice(0, 4))}`);
+    afirmar(d11.data.some((c) => c.id === C.cliente.id), "la D11 no encuentra el cliente");
+    afirmar(Object.keys(d11.data[0]).sort().join(",") === "id,nombreFantasia,razonSocial,rut", `campos ${Object.keys(d11.data[0])}`);
+    await exigir(403, "demo.d11.jefe", "GET", "/clientes?limit=5");
+    const suc = await ok("demo.sstgo.jefe", "GET", "/clientes-buscador?limit=200");
+    afirmar(suc.data.length > 0, "el Jefe de Sucursal no ve clientes");
+    await exigir(403, "demo.abastecimiento", "GET", "/clientes-buscador?search=a");
+    return `D11 y Jefe de Sucursal eligen cliente (${suc.data.length}); /clientes sigue 403; Abastecimiento 403`;
+  });
 //PASOS
 }
 

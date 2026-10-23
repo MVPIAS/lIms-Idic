@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Module, Post, Req, UseGuards, Injectable } from "@nestjs/common";
+import { ClientesBuscadorController } from "./clientes-buscador.controller";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -158,6 +159,8 @@ export class FirmaController extends BaseCrudController {
     UnidadesController,
     FirmasMatrizController,
     MeController,
+    // B-014: buscador acotado de clientes (D11, Jefe de Sucursal).
+    ClientesBuscadorController,
   ],
   providers: [PermisoService, FirmaService, FirmasMatrizService, BandejaService],
   exports: [FirmasMatrizService],
