@@ -21,6 +21,7 @@ import { z } from "zod";
 import { NIVELES_TECNOLOGICOS, TIPOS_TRABAJO } from "./encargo/reglas-encargo";
 import { sino, valoresCategoria } from "../common/parametros-r4d";
 import { PrismaService } from "../common/prisma.service";
+import { instanteFechaIngreso } from "../common/fecha-chile";
 import { LaboratorioOtService, UnidadResumen } from "./laboratorio-ot.service";
 import { filtroListaOt, paginacion, semaforoPedido } from "./lista-ot";
 import { OtCierreService } from "./ot-cierre.controller";
@@ -587,7 +588,7 @@ export class OtController {
           flujoInstanciaId: dto.flujoInstanciaId ?? null,
           prioridad: dto.prioridad ?? "normal",
           estado: "recepcionada",
-          fechaRecepcion: dto.fechaIngreso ?? new Date(),
+          fechaRecepcion: instanteFechaIngreso(dto.fechaIngreso) ?? new Date(),
           fechaCompromiso: dto.fechaCompromiso ? new Date(`${dto.fechaCompromiso}T00:00:00Z`) : null,
           notas: dto.notas ?? null,
           descripcionTrabajo: dto.descripcionTrabajo ?? null,
