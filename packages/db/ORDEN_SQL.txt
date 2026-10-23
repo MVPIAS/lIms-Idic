@@ -104,4 +104,5 @@ align_r4d_comercial.sql
 align_lp26_lista_precios.sql
 seed_lp26_lista_precios_2026.sql
 align_c3_correcciones.sql
+seed_c3_demo.sql                     demo
 align_cierre_permisos.sql
