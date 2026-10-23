@@ -1,4 +1,5 @@
 import { SinAlcanceDeEscritura } from "../rbac/alcance-catalogo.guard";
+import { emitirEvento } from "../common/eventos";
 import {
   BadRequestException,
   Body,
@@ -631,11 +632,14 @@ export class ResultadoService extends BaseCrudService {
     }
 
     const origen = nuevo === "revisado_n1" ? "revision" : nuevo === "aprobado" ? "aprobacion" : "devolucion";
-    return conTraza(this.prisma, { usuarioId, motivo: opts.motivo ?? null, origen }, (tx) => tx.resultado.update({
+    const r = await conTraza(this.prisma, { usuarioId, motivo: opts.motivo ?? null, origen }, (tx) => tx.resultado.update({
       where: { id },
       data,
       include: { analito: true, muestra: true },
     }));
+    // Avisos «No cumple» / «Contaminado» (contrato §4.2.6, frente r4c): se avisa tras confirmar.
+    if (nuevo === "aprobado") emitirEvento("resultado.aprobado", { resultadoId: id, usuarioId: usuarioId ?? null });
+    return r;
   }
 
   revisar(id: string, usuarioId?: string) {
