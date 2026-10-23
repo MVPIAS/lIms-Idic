@@ -441,7 +441,7 @@ async function main() {
       await ok(U.a1, "POST", `/flujo/resultado/${r.id}/valor`, { valor: "7,2" });
     await ok(U.rev, "POST", `/resultados/ot/${C.ot.id}/revisar`, {});
     await ok(U.lqcJefe, "POST", `/resultados/ot/${C.ot.id}/aprobar`, {});
-    const pl = lista(await ok(U.lqcJefe, "GET", "/plantillas?limit=200"));
+    const pl = [...lista(await ok(U.lqcJefe, "GET", "/plantillas?limit=100&search=BolAn")), ...lista(await ok(U.lqcJefe, "GET", "/plantillas?limit=200"))];
     const plantilla = pl.find((p) => p.repid === "BolAn") ?? pl.find((p) => p.tipo === "BOLETIN" && p.activo !== false);
     afirmar(plantilla, "no hay plantilla de boletín");
     const r = await ok(U.lqcJefe, "POST", "/informes/emitir", { otId: C.ot.id, plantillaId: plantilla.id });

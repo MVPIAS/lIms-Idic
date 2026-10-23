@@ -338,8 +338,8 @@ export default function QcPage() {
 
       <div className="card">
         <div className="field">
-          <label>Orden de Trabajo</label>
-          <select value={otId} onChange={(e) => onSelectOt(e.target.value)}>
+          <label htmlFor="qc-ot">Orden de Trabajo</label>
+          <select id="qc-ot" value={otId} onChange={(e) => onSelectOt(e.target.value)}>
             <option value="">— seleccionar —</option>
             {ots.map((o) => (
               <option key={o.id} value={o.id}>
@@ -429,8 +429,8 @@ export default function QcPage() {
           <h2>Registrar control</h2>
           <div className="form-grid cols-2">
             <div className="field">
-              <label>Método</label>
-              <select value={fMetodo} onChange={(e) => setFMetodo(e.target.value)}>
+              <label htmlFor="qc-metodo">Método</label>
+              <select id="qc-metodo" value={fMetodo} onChange={(e) => setFMetodo(e.target.value)}>
                 <option value="">— seleccionar —</option>
                 {metodos.map((m) => (
                   <option key={m.id} value={m.id}>
@@ -441,8 +441,8 @@ export default function QcPage() {
               {errs.metodo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.metodo}</small>}
             </div>
             <div className="field">
-              <label>Tipo de control</label>
-              <select value={fTipo} onChange={(e) => setFTipo(e.target.value as Tipo)}>
+              <label htmlFor="qc-tipo">Tipo de control</label>
+              <select id="qc-tipo" value={fTipo} onChange={(e) => setFTipo(e.target.value as Tipo)}>
                 {(Object.keys(TIPO_LABEL) as Tipo[]).map((t) => (
                   <option key={t} value={t}>
                     {TIPO_LABEL[t]}
@@ -451,8 +451,8 @@ export default function QcPage() {
               </select>
             </div>
             <div className="field">
-              <label>Valor esperado</label>
-              <input
+              <label htmlFor="qc-esperado">Valor esperado</label>
+              <input id="qc-esperado"
                 inputMode="decimal"
                 value={fEsperado}
                 onChange={(e) => setFEsperado(e.target.value)}
@@ -462,8 +462,8 @@ export default function QcPage() {
               {errs.esperado && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.esperado}</small>}
             </div>
             <div className="field">
-              <label>{fTipo === "curva" ? "R² obtenido" : "Valor obtenido"}</label>
-              <input
+              <label htmlFor="qc-obtenido">{fTipo === "curva" ? "R² obtenido" : "Valor obtenido"}</label>
+              <input id="qc-obtenido"
                 inputMode="decimal"
                 value={fObtenido}
                 onChange={(e) => setFObtenido(e.target.value)}
