@@ -403,6 +403,57 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- Avisos y oficio conductor (frente r4c, T20 y T03) ---
+  {
+    categoria: "avisos",
+    titulo: "Avisos internos y por correo",
+    donde:
+      "Mi bandeja › Avisos y correo: OT vencidas y por vencer, resultados No cumple o Contaminado, documentos oficiales, despachos y oficios. Sin correo configurado el aviso queda en la bandeja y en la bitácora de Mensajería.",
+    porConfirmar: "Umbral de «por vencer» (Sistema Comercial: 4 días) y aviso al cliente de un No cumple (EP-00 P9, EP-02 P7 / DQO-07).",
+    codigos: {
+      dias_por_vencer: { tipo: "entero", nombre: "Días antes del compromiso en que se avisa «por vencer»", min: 1, max: 30, unidad: "días", porDefecto: "3" },
+      revision_automatica: { tipo: "sino", nombre: "Revisar los plazos cada hora y avisar al laboratorio y al ejecutivo", opciones: SI_NO, porDefecto: "si" },
+      enviar_correo: { tipo: "sino", nombre: "Enviar también por correo los avisos", opciones: SI_NO, porDefecto: "si" },
+      no_cumple_al_cliente: {
+        tipo: "sino",
+        nombre: "Avisar al cliente por correo un resultado No cumple o Contaminado al aprobarlo",
+        opciones: SI_NO,
+        ayuda: "Al Jefe de Laboratorio y al ejecutivo se les avisa siempre (contrato §4.2.6).",
+        porDefecto: "no",
+      },
+      documento_listo: { tipo: "sino", nombre: "Avisar a Comercial cuando un documento queda oficial", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
+  {
+    categoria: "oficio_conductor",
+    titulo: "Oficio conductor exigido para entregar",
+    donde: "Registrar la entrega o el despacho al cliente de un documento: estos tipos, en estos departamentos, necesitan un oficio conductor firmado.",
+    porConfirmar: "Tipos y departamentos que salen con oficio (EP-05 7.2; LEM «¿se requiere oficio?»).",
+    codigos: {
+      exige_tipos: {
+        tipo: "multiple",
+        nombre: "Documentos que salen con oficio conductor",
+        opciones: [
+          { valor: "IVC", etiqueta: "IVC" },
+          { valor: "INFORME_TECNICO", etiqueta: "Informe Técnico" },
+          { valor: "INFORME_RECHAZO", etiqueta: "Informe de Ensayo de Rechazo" },
+          { valor: "INFORME_ENSAYO", etiqueta: "Informe de Ensayo" },
+          { valor: "CERTIFICADO_RESISTENCIA_BALISTICA", etiqueta: "Certificado de Resistencia Balística" },
+        ],
+        porDefecto: "IVC,INFORME_TECNICO,INFORME_RECHAZO",
+      },
+      exige_departamentos: {
+        tipo: "multiple",
+        nombre: "Departamentos donde rige",
+        opciones: [
+          { valor: "DSA", etiqueta: "Armamento y Munición (DSA)" },
+          { valor: "DQO", etiqueta: "Químico (DQO)" },
+          { valor: "BPCH", etiqueta: "Banco de Pruebas (BPCH)" },
+        ],
+        porDefecto: "DSA",
+      },
+    },
+  },
   // --- Muestreo y veredicto del lote (frente r2b, T13 y T11) ---
   {
     categoria: "muestreo_plan",

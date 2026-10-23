@@ -17,6 +17,7 @@ import { useMemo } from "react";
 import { useAlcance, describirAlcance, type ItemBandeja } from "@/lib/alcance";
 import { usePermisos, infoPerfil, type Perfil } from "@/lib/permisos";
 import { EmptyState, SkeletonCards } from "@/components/ui/PageHeader";
+import AvisosBandeja from "@/components/avisos/AvisosBandeja";
 
 interface Accion { href: string; titulo: string; desc: string; icono: string; perm?: string | string[] }
 
@@ -195,6 +196,8 @@ export default function InicioPage() {
           <b>Tu perfil:</b> {info.descripcion}
         </p>
       )}
+
+      <AvisosBandeja />
 
       <div className="card">
         <h2>Lo que tienes pendiente</h2>

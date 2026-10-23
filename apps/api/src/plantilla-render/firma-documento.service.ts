@@ -1,3 +1,4 @@
+import { emitirEvento } from "../common/eventos";
 import {
   BadRequestException,
   ConflictException,
@@ -319,6 +320,8 @@ export class FirmaDocumentoService {
         if (c.count !== 1) throw new ConflictException("El documento cambió de estado mientras firmaba. Actualice la pantalla.");
       }
     });
+    // «Documento listo» (frente r4c): se avisa a Comercial tras confirmar.
+    if (oficial) emitirEvento("documento.oficial", { certificadoId: cert.id, tenantId: cert.tenantId, usuarioId });
     return this.circuito(id, req);
   }
 
