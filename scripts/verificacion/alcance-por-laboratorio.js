@@ -10,7 +10,9 @@
  *   2. Detalle por id de un registro de OTRO laboratorio en cada tipo (OT,
  *      muestra, resultado, informe, certificado heredado, equipo, ensayo,
  *      método, prototipo, clasificación, evidencia SAEC, calibración):
- *      403 o 404 (410 en la ruta retirada /certificados).
+ *      403 o 404 (410 en la ruta retirada /certificados). El circuito de un
+ *      documento ajeno se abre (200) si la persona es responsable de alguno
+ *      de sus pasos de firma: se comprueba aparte y se excluye del 403/404.
  *   3. Escrituras ajenas (equipo, precio de ensayo, anular cotización,
  *      prototipo, aprobar resultados de otro laboratorio): 403. Y controles
  *      positivos con el mismo valor (no cambian nada): pasan la autorización.
@@ -199,6 +201,11 @@ select json_build_object(
                    from resultado r join lims_lab_de_resultado(r.id) l on l.derivado
                    join unidad ud on ud.id = l.unidad_id join unidad up on up.id = l.principal_id
                   where r.deleted_at is null and ud.id <> up.id),
+   -- Responsables de los pasos de firma de cada documento: el circuito se les abre aunque el
+   -- documento sea de otra unidad (firma-documento.service.ts, circuito → esResponsable).
+   'firmantes', (select json_agg(distinct jsonb_build_object('id', f.certificado_id, 'username', us.username))
+                   from documento_firma f cross join lateral jsonb_array_elements(f.responsables) r
+                   join usuario us on us.id::text = r->>'usuarioId' where us.es_demo),
    -- r1h: destino de cada orden interna viva (el buscador de la captura con ?derivadas=1).
    'oiDestinos', (select json_agg(json_build_object('otId', oi.ot_id, 'destino', ud.codigo))
                     from orden_interna oi join cat_familia f on f.id = oi.destino_lab
@@ -444,7 +451,9 @@ async function main() {
       ["ot", "muestra.ver", (id) => `/recepcion/ot/${id}/productos`],
       ["ot", "resultado.crear", (id) => `/flujo/ot/${id}/equipos`],
       ["resultado", "resultado.ver", (id) => `/resultados/${id}`],
-      ["certificado", "ot.ver", (id) => `/informes/${id}/circuito`],
+      // «firma»: el responsable de un paso de firma abre el circuito aunque el documento sea de
+      // otra unidad (p. ej. el Jefe de la SCC firma el Certificado de Conformidad de una sucursal).
+      ["certificado", "ot.ver", (id) => `/informes/${id}/circuito`, null, "firma"],
       ["certificado", "ot.ver", (id) => `/certificados/${id}`, [410]],
       ["equipo", "equipo.ver", (id) => `/equipos/${id}`],
       ["cat_ensayo", "muestra.ver", (id) => `/cat/ensayos/${id}`],
@@ -499,7 +508,17 @@ async function main() {
       if (regla === "saec") {
         if (enD11(e)) continue;
       } else if (e.global || (regla === "bpch" && e.unidades.has("SCC")) || (regla === "dco" && e.unidades.has("DCO"))) continue;
-      const cand = (V.mapa || []).filter((r) => r.t === tipo && (regla === "saec" || ((r.u || []).length > 0 && !(r.u || []).some((c) => e.unidades.has(c)))));
+      const ajeno = (r) => r.t === tipo && (regla === "saec" || ((r.u || []).length > 0 && !(r.u || []).some((c) => e.unidades.has(c))));
+      const firma = (r) => regla === "firma" && (V.datos?.firmantes || []).some((f) => f.id === r.id && f.username === username);
+      if (regla === "firma") {
+        // Control: el documento ajeno que la persona firma sí se abre (misma regla que el código).
+        const propio = (V.mapa || []).find((r) => ajeno(r) && firma(r));
+        if (propio) {
+          const r = await llamar(username, "GET", ruta(propio.id));
+          comprobar(r.status === 200, `${username} · circuito de un documento de ${(propio.u || []).join(",")} que firma → ${r.status} (se esperaba 200)`, "detallesAjenosAbiertos");
+        }
+      }
+      const cand = (V.mapa || []).filter((r) => ajeno(r) && !firma(r));
       if (!cand.length) continue;
       const r = await llamar(username, "GET", ruta(cand[0].id));
       const esperados = codigos || [403, 404];

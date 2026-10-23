@@ -304,7 +304,7 @@ async function main() {
 
   /* ------------------------------------------------ emisión, firmas y oficial */
   await paso("Preparación · emitir y firmar el informe según la matriz → oficial (aviso «documento listo» a Comercial)", async () => {
-    const pl = lista(await ok(U.jefe, "GET", "/plantillas?limit=200"));
+    const pl = [...lista(await ok(U.jefe, "GET", "/plantillas?limit=100&search=BolAn")), ...lista(await ok(U.jefe, "GET", "/plantillas?limit=200"))];
     const plantilla = pl.find((p) => p.repid === "BolAn") ?? pl.find((p) => p.tipo === "BOLETIN" && p.activo !== false);
     const r = await ok(U.jefe, "POST", "/informes/emitir", { otId: C.ot.id, plantillaId: plantilla.id });
     C.docId = (r.certificado ?? r.documento ?? r).id ?? r.certificadoId;
@@ -369,9 +369,9 @@ async function main() {
   });
 
   await paso("T20 · Recepción en DCO: días de atraso y estado (Ventas sí; analista 403; fecha futura 400)", async () => {
-    await exigir(403, U.a1, "POST", `/ot/${C.ot.id}/recepcion-dco`, { fecha: hoyCl() });
-    await exigir(400, U.ventas, "POST", `/ot/${C.ot.id}/recepcion-dco`, { fecha: sumar(hoyCl(), 1) }, /futura/);
-    const r = await ok(U.ventas, "POST", `/ot/${C.ot.id}/recepcion-dco`, { fecha: hoyCl() });
+    await exigir(403, U.a1, "POST", `/ot/${C.ot.id}/recepcion-informe-dco`, { fecha: hoyCl() });
+    await exigir(400, U.ventas, "POST", `/ot/${C.ot.id}/recepcion-informe-dco`, { fecha: sumar(hoyCl(), 1) }, /futura/);
+    const r = await ok(U.ventas, "POST", `/ot/${C.ot.id}/recepcion-informe-dco`, { fecha: hoyCl() });
     afirmar(r.recepcionDco?.estado === "Terminado dentro de plazo" && r.recepcionDco.texto === "2 días a favor", JSON.stringify(r.recepcionDco));
     const ot = await ok(U.jefe, "GET", `/ot/${C.ot.id}`);
     afirmar(ot.estadoEnvio === "Terminado dentro de plazo" && ot.diasAtraso === 0, `${ot.estadoEnvio} · ${ot.diasAtraso}`);
