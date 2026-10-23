@@ -49,6 +49,7 @@ import { cuerpoCertificadoSaec, tituloCertificadoSaec } from "./saec-certificado
 import { anioChile, hoyChile } from "../common/fecha-chile";
 import { escapeHtml, fmtFechaHora } from "../plantilla-render/html.util";
 import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
+import { urlVerificacionBase } from "../common/url-verificacion";
 import {
   NOMBRE_TIPO_PERITAJE,
   RUC_RE,
@@ -2526,7 +2527,7 @@ export class SaecCertificadoController extends SaecBase {
       codigoVerificacion: c.codigo_verificacion ?? "—",
       hash: c.hash_documento ?? "",
       fecha: fmtFecha(c.emitido_at),
-      urlVerificacion: `${(process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "")}/${c.codigo_verificacion}`,
+      urlVerificacion: `${urlVerificacionBase()}/${c.codigo_verificacion}`,
     };
   }
 

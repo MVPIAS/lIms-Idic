@@ -302,6 +302,8 @@ sudo ./instalar-onpremise.sh
 
 **La primera pasada se detiene a propósito.** Genera los secretos y pide revisión. Es el único momento cómodo para ajustar `DOMAIN`, las rutas de datos y el relay SMTP.
 
+**URL de verificación de documentos (`URL_VERIFICACION`).** Es la dirección que se imprime en el pie y en el QR de cada informe y certificado. Si se deja vacía, vale `https://<DOMAIN>/verificar`, la pantalla pública de verificación del propio servidor. Solo se cambia si el IDIC publica la verificación en otro dominio; los documentos ya emitidos conservan la URL con la que se sellaron.
+
 ### 5.4 Qué hace el instalador
 
 1. **Prerequisitos**: root, arquitectura, Docker, CPU/RAM, reloj.

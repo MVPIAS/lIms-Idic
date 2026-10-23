@@ -10,6 +10,7 @@ import type { Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import type { ConsultaCruda } from "./metrologia-ot.datos";
 import { actualizacionEquipo, actualizacionPatronLnf, configFicha, destinatariosAviso, type ConfigFicha, type PatronMaestro } from "./ficha.reglas";
+import { urlVerificacionBase } from "../common/url-verificacion";
 
 /** Cliente con escritura (PrismaService, PrismaClient o la transacción `tx`). */
 export interface ConsultaEscritura extends ConsultaCruda {
@@ -23,7 +24,7 @@ const fechaCl = (iso: string | null | undefined): string => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
   return m ? `${m[3]}-${m[2]}-${m[1]}` : "—";
 };
-const URL_VERIFICACION = () => (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
+const URL_VERIFICACION = () => urlVerificacionBase();
 
 /** Parámetros de la operación de la ficha (Administración › Parámetros del sistema, categoría metrologia_ficha). */
 export async function leerConfigFicha(db: ConsultaCruda, tenantId: string): Promise<ConfigFicha> {

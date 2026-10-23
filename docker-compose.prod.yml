@@ -43,6 +43,8 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       # CORS restringido al dominio público (obligatorio en producción).
       CORS_ORIGINS: https://${DOMAIN}
+      # URL impresa en el pie y en el QR de los documentos (pantalla /verificar/<código>).
+      URL_VERIFICACION: ${URL_VERIFICACION:-https://${DOMAIN}/verificar}
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
