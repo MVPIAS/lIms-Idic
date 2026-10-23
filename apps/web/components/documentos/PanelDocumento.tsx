@@ -422,8 +422,8 @@ export default function PanelDocumento({
               : "El documento deja de tener validez (la verificación pública lo mostrará anulado). Podrá reemitirlo como nueva versión."}
           </p>
           <div className="field">
-            <label>Motivo <span className="req">*</span></label>
-            <textarea rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={1000} />
+            <label htmlFor="doc-1">Motivo <span className="req">*</span></label>
+            <textarea id="doc-1" rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={1000} />
           </div>
         </Modal>
       )}
@@ -462,34 +462,34 @@ export default function PanelDocumento({
           }
         >
           <div className="form-grid">
-            <div className="field"><label>Fecha de entrega</label><input type="date" value={entrega.fecha} max={hoyISO()} onChange={(e) => setEntrega({ ...entrega, fecha: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-2">Fecha de entrega</label><input id="doc-2" type="date" value={entrega.fecha} max={hoyISO()} onChange={(e) => setEntrega({ ...entrega, fecha: e.target.value })} /></div>
             <div className="field">
-              <label>Medio <span className="req">*</span></label>
-              <select value={entrega.medio} onChange={(e) => setEntrega({ ...entrega, medio: e.target.value })}>
+              <label htmlFor="doc-3">Medio <span className="req">*</span></label>
+              <select id="doc-3" value={entrega.medio} onChange={(e) => setEntrega({ ...entrega, medio: e.target.value })}>
                 <option value="">— Seleccione —</option>
                 {MEDIOS_ENTREGA.map((m) => <option key={m.valor} value={m.valor}>{m.texto}</option>)}
               </select>
             </div>
-            <div className="field span-2"><label>Entregado a <span className="req">*</span></label><input value={entrega.destinatario} maxLength={200} onChange={(e) => setEntrega({ ...entrega, destinatario: e.target.value })} /></div>
-            <div className="field"><label>Nº de guía (courier o despacho)</label><input value={entrega.guia} maxLength={60} onChange={(e) => setEntrega({ ...entrega, guia: e.target.value })} /></div>
-            <div className="field"><label>Nº de ejemplares</label><input type="number" min={1} max={50} value={entrega.ejemplares} onChange={(e) => setEntrega({ ...entrega, ejemplares: e.target.value })} /></div>
-            <div className="field"><label>Copias (laboratorio, DCO…)</label><input value={entrega.copias} maxLength={200} onChange={(e) => setEntrega({ ...entrega, copias: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="doc-4">Entregado a <span className="req">*</span></label><input id="doc-4" value={entrega.destinatario} maxLength={200} onChange={(e) => setEntrega({ ...entrega, destinatario: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-5">Nº de guía (courier o despacho)</label><input id="doc-5" value={entrega.guia} maxLength={60} onChange={(e) => setEntrega({ ...entrega, guia: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-6">Nº de ejemplares</label><input id="doc-6" type="number" min={1} max={50} value={entrega.ejemplares} onChange={(e) => setEntrega({ ...entrega, ejemplares: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-7">Copias (laboratorio, DCO…)</label><input id="doc-7" value={entrega.copias} maxLength={200} onChange={(e) => setEntrega({ ...entrega, copias: e.target.value })} /></div>
             <div className="field">
-              <label>Oficio conductor</label>
-              <select value={entrega.oficioId} onChange={(e) => setEntrega({ ...entrega, oficioId: e.target.value })}>
+              <label htmlFor="doc-8">Oficio conductor</label>
+              <select id="doc-8" value={entrega.oficioId} onChange={(e) => setEntrega({ ...entrega, oficioId: e.target.value })}>
                 <option value="">— Sin oficio —</option>
                 {oficiosFirmados.map((o: any) => <option key={o.id} value={o.id}>{o.numero}</option>)}
               </select>
             </div>
             <div className="field">
-              <label>Devolución de muestras solicitada</label>
-              <select value={entrega.devolucion} onChange={(e) => setEntrega({ ...entrega, devolucion: e.target.value })}>
+              <label htmlFor="doc-9">Devolución de muestras solicitada</label>
+              <select id="doc-9" value={entrega.devolucion} onChange={(e) => setEntrega({ ...entrega, devolucion: e.target.value })}>
                 <option value="">— No indica —</option>
                 <option value="si">Sí</option>
                 <option value="no">No</option>
               </select>
             </div>
-            <div className="field span-2"><label>Observación</label><input value={entrega.observacion} maxLength={1000} onChange={(e) => setEntrega({ ...entrega, observacion: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="doc-10">Observación</label><input id="doc-10" value={entrega.observacion} maxLength={1000} onChange={(e) => setEntrega({ ...entrega, observacion: e.target.value })} /></div>
           </div>
         </Modal>
       )}
@@ -514,41 +514,41 @@ export default function PanelDocumento({
           <p style={{ marginTop: 0 }}>
             El documento oficial sale del laboratorio a su destino. El DCO (o el laboratorio solicitante) lo da por recibido y luego registra la entrega al cliente.
           </p>
-          <div className="form-grid">
+          <div className="form-grid cols-2">
             <div className="field">
-              <label>Destino <span className="req">*</span></label>
-              <select value={despacho.destino} onChange={(e) => setDespacho({ ...despacho, destino: e.target.value })}>
+              <label htmlFor="doc-11">Destino <span className="req">*</span></label>
+              <select id="doc-11" value={despacho.destino} onChange={(e) => setDespacho({ ...despacho, destino: e.target.value })}>
                 {DESTINOS.map((d) => <option key={d.valor} value={d.valor}>{d.texto}</option>)}
               </select>
             </div>
             {despacho.destino === "LAB_SOLICITANTE" ? (
               <div className="field">
-                <label>Laboratorio solicitante <span className="req">*</span></label>
-                <select value={despacho.unidadDestinoId} onChange={(e) => setDespacho({ ...despacho, unidadDestinoId: e.target.value })}>
+                <label htmlFor="doc-12">Laboratorio solicitante <span className="req">*</span></label>
+                <select id="doc-12" value={despacho.unidadDestinoId} onChange={(e) => setDespacho({ ...despacho, unidadDestinoId: e.target.value })}>
                   <option value="">— Seleccione —</option>
                   {labs.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
                 </select>
               </div>
             ) : <div />}
-            <div className="field"><label>Fecha de despacho <span className="req">*</span></label><input type="date" value={despacho.fecha} max={hoyISO()} onChange={(e) => setDespacho({ ...despacho, fecha: e.target.value })} /></div>
-            <div className="field"><label>Nº de ejemplares <span className="req">*</span></label><input type="number" min={1} max={50} value={despacho.ejemplares} onChange={(e) => setDespacho({ ...despacho, ejemplares: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-13">Fecha de despacho <span className="req">*</span></label><input id="doc-13" type="date" value={despacho.fecha} max={hoyISO()} onChange={(e) => setDespacho({ ...despacho, fecha: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-14">Nº de ejemplares <span className="req">*</span></label><input id="doc-14" type="number" min={1} max={50} value={despacho.ejemplares} onChange={(e) => setDespacho({ ...despacho, ejemplares: e.target.value })} /></div>
             <div className="field span-2">
-              <label>Distribución (una línea por destinatario, con sus ejemplares al final)</label>
-              <textarea rows={2} value={despacho.distribucion} maxLength={2000} onChange={(e) => setDespacho({ ...despacho, distribucion: e.target.value })} />
+              <label htmlFor="doc-15">Distribución (una línea por destinatario, con sus ejemplares al final)</label>
+              <textarea id="doc-15" rows={2} value={despacho.distribucion} maxLength={2000} onChange={(e) => setDespacho({ ...despacho, distribucion: e.target.value })} />
             </div>
             <div className="field">
               <label><input type="checkbox" checked={despacho.copiaArchivada} onChange={(e) => setDespacho({ ...despacho, copiaArchivada: e.target.checked })} /> Copia archivada en el laboratorio</label>
             </div>
-            <div className="field"><label>Ubicación de la copia</label><input value={despacho.archivoUbicacion} maxLength={200} onChange={(e) => setDespacho({ ...despacho, archivoUbicacion: e.target.value })} /></div>
-            <div className="field"><label>Retención de la copia (meses)</label><input type="number" min={1} max={600} value={despacho.retencionMeses} onChange={(e) => setDespacho({ ...despacho, retencionMeses: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-16">Ubicación de la copia</label><input id="doc-16" value={despacho.archivoUbicacion} maxLength={200} onChange={(e) => setDespacho({ ...despacho, archivoUbicacion: e.target.value })} /></div>
+            <div className="field"><label htmlFor="doc-17">Retención de la copia (meses)</label><input id="doc-17" type="number" min={1} max={600} value={despacho.retencionMeses} onChange={(e) => setDespacho({ ...despacho, retencionMeses: e.target.value })} /></div>
             <div className="field">
-              <label>Oficio conductor</label>
-              <select value={despacho.oficioId} onChange={(e) => setDespacho({ ...despacho, oficioId: e.target.value })}>
+              <label htmlFor="doc-18">Oficio conductor</label>
+              <select id="doc-18" value={despacho.oficioId} onChange={(e) => setDespacho({ ...despacho, oficioId: e.target.value })}>
                 <option value="">— Sin oficio —</option>
                 {(seg.oficios ?? []).map((o: any) => <option key={o.id} value={o.id}>{o.numero ?? "(borrador)"} · {o.estado}</option>)}
               </select>
             </div>
-            <div className="field span-2"><label>Observación</label><input value={despacho.observacion} maxLength={1000} onChange={(e) => setDespacho({ ...despacho, observacion: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="doc-19">Observación</label><input id="doc-19" value={despacho.observacion} maxLength={1000} onChange={(e) => setDespacho({ ...despacho, observacion: e.target.value })} /></div>
           </div>
         </Modal>
       )}
@@ -570,8 +570,8 @@ export default function PanelDocumento({
             Se envía el PDF oficial con la configuración de correo del LIMS. Si el envío sale bien, la entrega queda registrada
             (medio «correo»). Si el correo no está configurado, registre la entrega a mano.
           </p>
-          <div className="field"><label>Destinatarios <span className="req">*</span></label><input value={correo.destinatarios} onChange={(e) => setCorreo({ ...correo, destinatarios: e.target.value })} placeholder="separados por coma" /></div>
-          <div className="field"><label>Mensaje adicional</label><textarea rows={3} value={correo.mensaje} maxLength={2000} onChange={(e) => setCorreo({ ...correo, mensaje: e.target.value })} /></div>
+          <div className="field"><label htmlFor="doc-20">Destinatarios <span className="req">*</span></label><input id="doc-20" value={correo.destinatarios} onChange={(e) => setCorreo({ ...correo, destinatarios: e.target.value })} placeholder="separados por coma" /></div>
+          <div className="field"><label htmlFor="doc-21">Mensaje adicional</label><textarea id="doc-21" rows={3} value={correo.mensaje} maxLength={2000} onChange={(e) => setCorreo({ ...correo, mensaje: e.target.value })} /></div>
         </Modal>
       )}
     </div>
