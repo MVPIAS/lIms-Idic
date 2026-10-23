@@ -857,6 +857,13 @@ export default function CapturaOtPage() {
                                   <button className="btn outline sm" disabled={busy} title="Corregir un resultado ya aprobado (anula el informe en firma u oficial)"
                                     onClick={() => { setReabriendo(reabriendo === f.id ? null : f.id); setMotivoReabrir(""); }}>Reabrir</button>
                                 )}
+                                {/* EP-01/03 4.2, EP-05 6.2 (frente r4d): producto o trabajo no conforme con la OT y el ensayo precargados. */}
+                                {tiene("nc.crear") && (f.otId ?? ot?.id) && ["capturado", "revisado_n1", "aprobado", "devuelto"].includes(f.estado) && (
+                                  <Link className="btn outline sm" title="Registrar un producto o trabajo no conforme (IDIC-PG12) con este ensayo"
+                                    href={`/no-conformidades?nueva=1&clase=PNC&otId=${f.otId ?? ot?.id}&resultadoId=${f.id}&titulo=${encodeURIComponent(`PNC · ${f.analito ?? "ensayo"}`)}` as any}>
+                                    No conforme → PNC
+                                  </Link>
+                                )}
                               </div>
                             </td>
                           </tr>

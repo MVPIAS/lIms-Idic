@@ -438,6 +438,64 @@ async function main() {
     afirmar(!(g.sugerencias.lineas ?? []).some((x) => x.categoria === "comision"), "no vuelve a sugerir lo cargado");
     return `comisión ${g.resumen.porCategoria.comision.total} + OT internas ${g.resumen.porCategoria.ot_interna.total} = ${g.resumen.total}`;
   });
+
+  /* ------------------------------------------------------------ T18 */
+  await paso("BL-165 · PNC IDIC-PG12 desde la captura: «Reejecutar» devuelve el ensayo; escalar al Jefe de Sección", async () => {
+    await ok(U.recepcion, "POST", `/flujo/ot/${C.ot.id}/muestras`, { muestras: [{ nombre: "Agua potable", metodoIds: [C.mPh.id] }] });
+    const rs = (await ok(U.lqcJefe, "GET", `/flujo/ot/${C.ot.id}/resultados`)).resultados;
+    C.res = rs[rs.length - 1];
+    await ok(U.lqcJefe, "POST", `/flujo/resultado/${C.res.id}/valor`, { valor: "7,2" });
+    const base = { titulo: "PNC · pH fuera de control", descripcion: "Se usó un buffer vencido en la calibración del pHmetro", tipo: "ensayo", clase: "PNC", otId: C.ot.id };
+    await exigir(400, U.lqcJefe, "POST", "/no-conformidades", base, /acción/);
+    await exigir(400, U.lqcJefe, "POST", "/no-conformidades", { ...base, accion: "reejecutar" }, /ensayos afectados/);
+    await exigir(400, U.lqcJefe, "POST", "/no-conformidades", { ...base, accion: "reejecutar", resultadoIds: [crypto.randomUUID()] }, /no es de la OT/);
+    await exigir(403, U.ventas, "POST", "/no-conformidades", { ...base, accion: "reejecutar", resultadoIds: [C.res.id] });
+    const nc = await ok(U.lqcJefe, "POST", "/no-conformidades", { ...base, accion: "reejecutar", resultadoIds: [C.res.id], costoNoCalidad: 15000 });
+    afirmar(nc.clase === "PNC" && nc.formulario === "IDIC-PG12-FORM01" && nc.costoNoCalidad === 15000, `nc ${JSON.stringify([nc.clase, nc.formulario, nc.costoNoCalidad])}`);
+    await exigir(403, U.lqcAnalista, "POST", `/no-conformidades/${nc.id}/ejecutar-accion`, {});
+    await exigir(403, U.lpnJefe, "POST", `/no-conformidades/${nc.id}/ejecutar-accion`, {});
+    const r = await ok(U.lqcJefe, "POST", `/no-conformidades/${nc.id}/ejecutar-accion`, {});
+    afirmar(/1 ensayo/.test(r.mensaje) && r.accionEjecutadaAt, `mensaje ${r.mensaje}`);
+    const est = (await ok(U.lqcJefe, "GET", `/flujo/ot/${C.ot.id}/resultados`)).resultados.find((x) => x.id === C.res.id);
+    afirmar(est.estado === "devuelto", `estado del ensayo ${est.estado}`);
+    await exigir(409, U.lqcJefe, "POST", `/no-conformidades/${nc.id}/ejecutar-accion`, {}, /ya se ejecutó/);
+    await exigir(400, U.lqcJefe, "POST", `/no-conformidades/${nc.id}/escalar`, { motivo: "x" });
+    const e = await ok(U.lqcJefe, "POST", `/no-conformidades/${nc.id}/escalar`, { motivo: "Se repite en dos corridas: requiere análisis de la Sección" });
+    afirmar(e.escaladaAt, "escalada");
+    return `${nc.codigo} PNC · ensayo devuelto a la captura · escalada`;
+  });
+
+  await paso("BL-219 · Reclamos: Comercial registra, responde y cierra; el analista no", async () => {
+    await exigir(403, U.lqcAnalista, "GET", "/reclamos");
+    await exigir(400, U.ventas, "POST", "/reclamos", { fecha: hoyCl(), clienteId: C.cliente.id, motivo: "x", responsableRol: "JEFE_LAB" });
+    const otro = await ok(U.ventas, "POST", "/clientes", { rut: rutValido(77000000 + (Number(sello.slice(-5)) % 99999)), razonSocial: `Otro cliente ${sello}`, tipo: "particulares" });
+    await exigir(400, U.ventas, "POST", "/reclamos", { fecha: hoyCl(), clienteId: otro.id, otId: C.ot.id, motivo: "Informe con error de unidad", responsableRol: "JEFE_LAB" }, /otro cliente/);
+    const r = await ok(U.ventas, "POST", "/reclamos", { fecha: hoyCl(), clienteId: C.cliente.id, otId: C.ot.id, motivo: "El informe llegó con la unidad equivocada", responsableRol: "JEFE_LAB" });
+    afirmar(r.estadoReclamo === "abierto" && r.unidadCodigo === "LQC", `reclamo ${r.estadoReclamo} ${r.unidadCodigo}`);
+    await exigir(409, U.ventas, "POST", `/reclamos/${r.id}/cerrar`, {}, /respuesta/);
+    await ok(U.ventas, "POST", `/reclamos/${r.id}/responder`, { respuesta: "Se reemitió el informe corregido el mismo día" });
+    const c = await ok(U.ventas, "POST", `/reclamos/${r.id}/cerrar`, { comentario: "Cliente conforme" });
+    afirmar(c.estadoReclamo === "cerrado", "cerrado");
+    const l = await ok(U.ventas, "GET", "/reclamos?estado=cerrado");
+    afirmar(l.data.some((x) => x.id === r.id), "en la lista de cerrados");
+    return `${r.codigo} abierto → respondido → cerrado`;
+  });
+
+  await paso("BL-166 · Apelación de un Informe de Rechazo: plazo en días hábiles, la registra la jefatura y la resuelve el Director", async () => {
+    const cuerpo = { otId: C.ot.id, documentoNumero: `IR-${sello}`, fechaRecepcionDoc: masDias(hoyCl(), -20), fechaIngreso: hoyCl(), fundamento: "El ensayo se hizo con la norma anterior a la del contrato" };
+    await exigir(403, U.ventas, "POST", "/apelaciones", cuerpo);
+    await exigir(403, U.lpnJefe, "POST", "/apelaciones", cuerpo);
+    await exigir(400, U.lqcJefe, "POST", "/apelaciones", { ...cuerpo, fechaIngreso: masDias(hoyCl(), -30) }, /antes de recibir/);
+    const a = await ok(U.lqcJefe, "POST", "/apelaciones", cuerpo);
+    afirmar(a.fueraDePlazo === true && a.aviso && a.plazoDias === 5, `plazo ${a.fueraDePlazo} ${a.plazoDias}`);
+    await exigir(409, U.lqcJefe, "POST", "/apelaciones", cuerpo, /en trámite/);
+    await ok(U.lqcJefe, "POST", `/apelaciones/${a.id}/adjuntos`, pdf(`antecedentes-${sello}.pdf`));
+    await exigir(403, U.lqcJefe, "POST", `/apelaciones/${a.id}/resolver`, { decision: "rechaza", resolucionFecha: hoyCl(), resolucionTexto: "No ha lugar" });
+    const r = await ok(U.director, "POST", `/apelaciones/${a.id}/resolver`, { decision: "rechaza", resolucionFecha: hoyCl(), resolucionTexto: "Fuera de plazo y sin antecedentes nuevos" });
+    afirmar(r.estado === "resuelta" && r.decision === "rechaza" && r.adjuntos.length === 1, "resuelta");
+    await exigir(409, U.director, "POST", `/apelaciones/${a.id}/resolver`, { decision: "acoge", resolucionFecha: hoyCl(), resolucionTexto: "x x x x" }, /inapelable/);
+    return `${a.codigo} fuera de plazo (vencía ${a.venceEl}) · rechazada por el Director`;
+  });
 }
 
 main()
