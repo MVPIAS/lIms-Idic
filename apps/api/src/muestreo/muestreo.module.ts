@@ -303,13 +303,16 @@ export class MuestreoService {
   async plan(req: any, q: Record<string, string | undefined>) {
     const tamanoLote = Number(q.tamanoLote);
     if (!Number.isInteger(tamanoLote) || tamanoLote < 2) throw new BadRequestException("Indique el tamaño del lote (entero de 2 o más).");
-    const nivel = (q.nivel ?? "II") as Nivel;
+    // B-046: «?config=1» propone el plan con el nivel y los AQL de Parámetros de la operación
+    // (muestreo_plan), como el muestreo del lote; lo que venga en la consulta manda.
+    const cfg = q.config === "1" ? await this.parametros(tenantDe(req)) : null;
+    const nivel = (q.nivel ?? cfg?.nivel ?? "II") as Nivel;
     if (!(NIVELES as readonly string[]).includes(nivel)) throw new BadRequestException("Nivel de inspección desconocido.");
     const tabla = (q.tabla ?? "normal") as Tabla;
     if (!(TABLAS as readonly string[]).includes(tabla)) throw new BadRequestException("Tabla desconocida.");
     const aql: Partial<Record<ClaseDefecto, string>> = {};
     for (const c of CLASES_DEFECTO) {
-      const v = q[`aql_${c}`];
+      const v = q[`aql_${c}`] ?? cfg?.aql[c] ?? undefined;
       if (v && v !== "ninguno") aql[c] = v;
     }
     try {
