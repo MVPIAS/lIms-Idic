@@ -599,6 +599,34 @@ function refCualitativa(v?: string | null): string | null {
   return s.toLowerCase();
 }
 
+/**
+ * Analitos que la E.T. de la muestra (o, si no tiene, la de su OT) pide de cada
+ * método: Map<método, Set<analito>>. Un punto sin analito no restringe su método.
+ */
+async function analitosDelPlanEt(db: Db, muestraId: string): Promise<Map<string, Set<string>>> {
+  const filas = await db.$queryRawUnsafe<{ metodo: string; analito: string | null }[]>(
+    `SELECT p.cat_metodo_id::text AS metodo, p.cat_analito_id::text AS analito
+       FROM muestra m
+       LEFT JOIN orden_trabajo o ON o.id = m.ot_id
+       JOIN especificacion_tecnica_punto p ON p.et_id = COALESCE(m.et_id, o.et_id)
+      WHERE m.id = $1::uuid AND p.cat_metodo_id IS NOT NULL`,
+    muestraId,
+  );
+  const plan = new Map<string, Set<string>>();
+  const libres = new Set<string>();
+  for (const f of filas) {
+    if (!f.analito) libres.add(f.metodo);
+    else (plan.get(f.metodo) ?? plan.set(f.metodo, new Set()).get(f.metodo)!).add(f.analito);
+  }
+  for (const m of libres) plan.delete(m);
+  return plan;
+}
+
+/** B-005: deja solo los analitos que el plan de la E.T. pide (los métodos fuera del plan, completos). */
+export function filtrarAnalitosPorPlan<T extends { id: string; metodoId: string }>(analitos: T[], plan: Map<string, Set<string>>): T[] {
+  return analitos.filter((a) => !plan.has(a.metodoId) || plan.get(a.metodoId)!.has(a.id));
+}
+
 @Injectable()
 export class PuenteAnalisisService {
   constructor(
@@ -751,7 +779,7 @@ export class PuenteAnalisisService {
     }
 
     // Analitos de los métodos pedidos (validando que son del tenant).
-    const analitos = await db.catAnalito.findMany({
+    const todosAnalitos = await db.catAnalito.findMany({
       where: {
         tenantId,
         deletedAt: null,
@@ -759,6 +787,10 @@ export class PuenteAnalisisService {
         metodoId: { in: body.metodoIds },
       },
     });
+    // B-005 (EP-03 1.3): si la E.T. que rige la muestra (o la OT) nombra analitos
+    // concretos de un método, solo se generan esos; el resto del método no aplica.
+    const delPlan = await analitosDelPlanEt(db, muestra.id);
+    const analitos = filtrarAnalitosPorPlan(todosAnalitos, delPlan);
 
     // Resultados del puente ya existentes para esta muestra (idempotencia).
     const yaExisten = await db.resultado.findMany({

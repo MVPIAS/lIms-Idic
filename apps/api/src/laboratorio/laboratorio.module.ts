@@ -39,7 +39,7 @@ import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 import { decidirAccionResultado, motivoMismoRevisor, type AccionResultado } from "../rbac/alcance-resultado";
 import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./veredicto";
 import { leerReplicas } from "./replicas";
-import { AccionRevision, clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, motivoSinVeredicto, planReapertura } from "./flujo-resultado";
+import { AccionRevision, clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, motivoNoQuitable, motivoSinVeredicto, planReapertura } from "./flujo-resultado";
 import { veredictoMuestra } from "./especificacion";
 import { conTraza, exigeMotivoCorreccion, teniaValor } from "./traza";
 import { CostosRealesController, CostosRealesService, PlanillaCalculosController, PlanillaCalculosService } from "./planillas-ot";
@@ -885,6 +885,10 @@ const ResultadoRecaptura = z.object({
   motivo: z.string().trim().max(1000).optional(),
 });
 
+const QuitarEnsayoDto = z.object({
+  motivo: z.string().trim().min(5, "Indique por qué se quita el ensayo (mínimo 5 caracteres): queda en el historial").max(1000),
+});
+
 const DevolverDto = z.object({
   /** RF-E01 exige rechazo MOTIVADO: sin motivo el analista no sabe qué corregir. */
   motivo: z.string().trim().min(5, "Indique el motivo de la devolución (mínimo 5 caracteres)").max(1000),
@@ -1191,6 +1195,27 @@ export class ResultadoController extends BaseCrudController {
     await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "aprobar");
     await this.svc.detalle(id, req?.user?.tenantId);
     return conTraza(this.prisma, { usuarioId: req?.user?.sub, origen: "eliminacion" }, (tx) => tx.resultado.delete({ where: { id } }));
+  }
+
+  /**
+   * B-005 · «Quitar ensayo» que no aplica a la muestra (EP-01 1.3, EP-03 1.3):
+   * la jefatura del laboratorio dueño del ensayo (resultado.aprobar) lo quita con
+   * motivo obligatorio; queda en «Ensayos eliminados» y en el historial con lo que
+   * tenía y el motivo. Lo aprobado se reabre antes (no se quita un resultado firmado).
+   */
+  @Post(":id/quitar")
+  @RequierePermiso("resultado.aprobar")
+  @ApiOperation({ summary: "Quita un ensayo que no aplica, con motivo (queda en Ensayos eliminados y en el historial)" })
+  async quitar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const { motivo } = QuitarEnsayoDto.parse(body ?? {});
+    await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "aprobar");
+    const actual = await this.prisma.resultado.findFirst({ where: { id, deletedAt: null }, select: { estado: true, muestraId: true } });
+    if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
+    const bloqueo = motivoNoQuitable(actual.estado);
+    if (bloqueo) throw new ConflictException(bloqueo);
+    await conTraza(this.prisma, { usuarioId: req?.user?.sub, motivo, origen: "eliminacion" }, (tx) => tx.resultado.delete({ where: { id } }));
+    const veredictoMuestra = await recalcularVeredictoMuestra(this.prisma, actual.muestraId);
+    return { id, quitado: true, motivo, veredictoMuestra };
   }
 
   @Post(":id/recapturar")
