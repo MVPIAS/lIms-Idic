@@ -7,6 +7,7 @@ import { RequierePermiso } from "../../auth/permisos.decorator";
 import { PrismaService } from "../../common/prisma.service";
 import { AlcanceService } from "../../rbac/alcance.service";
 import { sino, valoresCategoria } from "../../common/parametros-r4d";
+import { RecepcionDcoController } from "./recepcion-dco";
 import {
   CARRILES_DSA,
   CLASIFICACIONES_VEHICULO,
@@ -342,5 +343,5 @@ export class EncargoController {
   }
 }
 
-@Module({ controllers: [EncargoController], providers: [EncargoService], exports: [EncargoService] })
+@Module({ controllers: [EncargoController, RecepcionDcoController], providers: [EncargoService], exports: [EncargoService] })
 export class EncargoModule {}

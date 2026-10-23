@@ -18,6 +18,7 @@ import Link from "next/link";
 import { llamar } from "@/lib/laboratorio";
 import { fechaDia, fechaHora, monto } from "@/lib/format";
 import { toast } from "@/components/ui/feedback";
+import RecepcionDcoOt from "./RecepcionDcoOt";
 
 type Opcion = { codigo: string; etiqueta: string };
 interface Vista {
@@ -236,6 +237,8 @@ export default function DatosEncargoOt({ otId, onCambio }: { otId: string; onCam
           </div>
         )}
       </section>
+
+      <RecepcionDcoOt otId={otId} />
 
       <section className="card" style={{ padding: 12, margin: 0 }} aria-labelledby="val-titulo">
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
