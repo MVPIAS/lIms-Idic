@@ -351,6 +351,52 @@ async function main() {
     afirmar(/no la envía a revisión/.test(doc), "ADMIN_ROLES.md no dice que el Operador no envía");
     return "código y ADMIN_ROLES.md dicen lo mismo";
   });
+
+  /* ------------------------------------------------------------ B-017 */
+  await paso("B-017 · Mi bandeja de Metrología: metrólogo asignado ≠ «OT sin analista»; informes técnicos por emitir (Jefe LMT) y servicios externos por aprobar (Jefe DSA)", async () => {
+    const jefe = "demo.lmt.jefe", metro = "demo.lmt.analista1", depto = "demo.dsa.jefe";
+    const ahora = new Date().toISOString();
+    const recibir = (calibrable, extra = {}) => ({
+      fechaHora: ahora, entregadoPor: "Cliente de prueba", estadoFisico: calibrable ? "bueno" : "danado", ubicacion: "Estante C1",
+      calibrable, ...(calibrable ? {} : { estadoFisicoObs: "Golpe en la carcasa", motivoNoCalibrable: "Daño en el mecanismo: no repite la indicación" }), ...extra,
+    });
+    const ot = await ok(U.ventas, "POST", "/ot", { clienteId: C.cliente.id, unidadPrincipalId: C.u.LMT.id, tipoTrabajo: "CALIBRACION" });
+    const i1 = (await ok(jefe, "POST", `/ot/${ot.id}/instrumentos`, { descripcion: "Balanza analítica", serie: `C1-${sello}`, procesoCodigo: "ITM02" })).data.id;
+    const i2 = (await ok(jefe, "POST", `/ot/${ot.id}/instrumentos`, { descripcion: "Celda de carga", serie: `C1B-${sello}` })).data.id;
+    const i3 = (await ok(jefe, "POST", `/ot/${ot.id}/instrumentos`, { descripcion: "Manómetro de alta presión", serie: `C1C-${sello}` })).data.id;
+    // Antes de asignar: la OT figura «sin analista».
+    let sin = (await ok(jefe, "GET", "/ot?sinAsignar=1&estado=abiertas&limit=200")).data.map((o) => o.id);
+    afirmar(sin.includes(ot.id), "la OT recién creada no figura sin analista");
+    const metros = await ok(jefe, "GET", `/ot/${ot.id}/instrumentos/${i1}/metrologos`);
+    await ok(jefe, "POST", `/ot/${ot.id}/instrumentos/${i1}/asignar`, { metrologoId: metros.data.find((x) => x.username === metro).id });
+    sin = (await ok(jefe, "GET", "/ot?sinAsignar=1&estado=abiertas&limit=200")).data.map((o) => o.id);
+    afirmar(!sin.includes(ot.id), "la OT con metrólogo asignado sigue «sin analista»");
+    const b1 = await ok(jefe, "GET", "/me/bandeja");
+    const tarjSin = b1.find((x) => x.clave === "ot_sin_asignar");
+    afirmar(!tarjSin || !(tarjSin.elementos ?? []).some((e) => e.id === ot.id), "Mi bandeja la lista en «OT sin analista»");
+    // Informe técnico del no calibrable: el metrólogo lo envía; el Jefe LMT lo ve en su bandeja.
+    await ok(metro, "POST", `/ot/${ot.id}/instrumentos/${i2}/recepcion`, recibir(false));
+    await ok(metro, "POST", `/ot/${ot.id}/instrumentos/${i2}/informe-tecnico`, { motivo: "El plato está deformado", hallazgos: "Deformación del plato y golpe en la carcasa", recomendacion: "Reparar y volver a calibrar" });
+    await ok(metro, "POST", `/ot/${ot.id}/instrumentos/${i2}/informe-tecnico/enviar`);
+    const b2 = await ok(jefe, "GET", "/me/bandeja");
+    const inf = b2.find((x) => x.clave === "met_informes_por_emitir");
+    afirmar(inf && inf.elementos.some((e) => e.ruta === `/ot/${ot.id}?tab=instrumentos`), `tarjeta de informes: ${JSON.stringify(inf)}`);
+    const bLqc = await ok(U.lqcJefe, "GET", "/me/bandeja");
+    afirmar(!bLqc.some((x) => x.clave === "met_informes_por_emitir"), "el Jefe LQC ve informes técnicos de Metrología");
+    // Servicio externo: lo solicita el Jefe LMT y lo aprueba el Jefe del Departamento.
+    await ok(metro, "POST", `/ot/${ot.id}/instrumentos/${i3}/recepcion`, recibir(false, { requiereExterno: true, motivoNoCalibrable: "Rango sobre el alcance del laboratorio" }));
+    const prov = lista(await ok(jefe, "GET", `/ot/${ot.id}/metrologia/proveedores`));
+    await ok(jefe, "POST", `/ot/${ot.id}/instrumentos/${i3}/servicio-externo`, { proveedorId: prov[0].id, justificacion: "El rango supera la capacidad del patrón", costo: 100000 });
+    const b3 = await ok(depto, "GET", "/me/bandeja");
+    const ext = b3.find((x) => x.clave === "met_externos_por_aprobar");
+    afirmar(ext && ext.elementos.some((e) => e.ruta === `/ot/${ot.id}?tab=instrumentos`), `tarjeta de servicios externos: ${JSON.stringify(ext)}`);
+    const b4 = await ok(jefe, "GET", "/me/bandeja");
+    afirmar(!b4.some((x) => x.clave === "met_externos_por_aprobar"), "el Jefe LMT (no es Jefe del Departamento) ve servicios por aprobar");
+    // Limpieza: se aprueba para no dejar la tarjeta en otras pasadas.
+    await ok(depto, "POST", `/ot/${ot.id}/instrumentos/${i3}/servicio-externo/aprobar`);
+    await ok(jefe, "POST", `/ot/${ot.id}/instrumentos/${i2}/informe-tecnico/emitir`);
+    return `${ot.codigo}: con metrólogo deja de estar «sin analista» · informe técnico → Jefe LMT · servicio externo → Jefe DSA`;
+  });
 //PASOS
 }
 
