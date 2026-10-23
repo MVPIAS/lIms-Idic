@@ -128,7 +128,7 @@ export default function Plantas({ cliente, onCerrar }: { cliente: { id: string; 
           {error && <p role="alert" style={{ color: "var(--danger, #b42318)" }}>{error}</p>}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 8 }}>
             {editando && <button type="button" className="btn outline" onClick={() => { setEditando(null); setForm(VACIA); setError(null); }}>Cancelar corrección</button>}
-            <button type="submit" className="btn" disabled={ocupado}>{ocupado ? "Guardando…" : editando ? "Guardar planta" : "Agregar planta"}</button>
+            <button type="submit" className="btn primary sm" disabled={ocupado}>{ocupado ? "Guardando…" : editando ? "Guardar planta" : "Agregar planta"}</button>
           </div>
         </form>
       )}

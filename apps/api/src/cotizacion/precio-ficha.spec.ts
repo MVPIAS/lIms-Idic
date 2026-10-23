@@ -26,3 +26,11 @@ describe("Cotización · precio desde la ficha de costos (EP-00 2.2, BL-149)", (
     expect(precioDeLinea({ tipo: "producto", descripcion: "Servicio antiguo", precioUnitario: 1000 }, null, 1, ex)).toEqual({ precio: 1000 });
   });
 });
+
+describe("Referencia desde la solicitud (EP-00 1.1)", () => {
+  const { referenciaDesdeSolicitud } = require("./cotizacion-extra") as typeof import("./cotizacion-extra");
+  it("«OF 1234», «Oficio Nº 1234» y «1234» dan «OF Nº 1234»; el correo da su fecha", () => {
+    for (const n of ["OF 1234", "Oficio Nº 1234", "1234", "of. n° 1234"]) expect(referenciaDesdeSolicitud({ solicitudMedio: "oficio", solicitudNumero: n })).toBe("OF Nº 1234");
+    expect(referenciaDesdeSolicitud({ solicitudMedio: "correo", solicitudFecha: "2026-10-20" })).toBe("Correo de fecha 20-10-2026");
+  });
+});
