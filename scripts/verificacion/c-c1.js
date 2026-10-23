@@ -328,6 +328,29 @@ async function main() {
     await exigir(403, "demo.abastecimiento", "GET", "/clientes-buscador?search=a");
     return `D11 y Jefe de Sucursal eligen cliente (${suc.data.length}); /clientes sigue 403; Abastecimiento 403`;
   });
+
+  /* ------------------------------------------------------------ B-015 / B-016 */
+  await paso("B-015 · Comercial lee Metrología (ficha de la calibración, entrega y correo); no registra ni emite; la entrega de armas sigue en la D11", async () => {
+    const s = await login(U.ventas);
+    afirmar(s.permisos.includes("metrologia.ver") && s.permisos.includes("certificado.entregar"), "Comercial sin metrologia.ver / certificado.entregar");
+    afirmar(!s.permisos.includes("metrologia.crear") && !s.permisos.includes("metrologia.emitir"), "Comercial no debe registrar ni emitir calibraciones");
+    await ok(U.ventas, "GET", "/metrologia/procesos");
+    await exigir(403, U.lqcJefe, "GET", "/metrologia/procesos");
+    await exigir(403, U.ventas, "POST", `/d11/ot/${C.otLme.id}/entrega`, {});
+    return "Comercial abre Metrología en lectura; LQC 403 (ámbito SAM); entrega de armas → 403 (D11)";
+  });
+  await paso("B-016 · el Operador de Metrología registra (metrologia.crear) pero no tiene la emisión; el envío exige el registro de firmas", async () => {
+    const op = await ok(U.admin, "GET", "/roles?limit=200").catch(() => null);
+    const lista2 = op ? lista(op) : [];
+    const rol = lista2.find((r) => r.codigo === "OPERADOR_METROLOGIA");
+    if (rol && rol.permisos) {
+      const cods = rol.permisos.map((p) => p.codigo ?? p);
+      afirmar(cods.includes("metrologia.crear") && !cods.includes("metrologia.emitir"), `permisos del Operador: ${cods}`);
+    }
+    const doc = require("fs").readFileSync(require("path").join(RAIZ, "docs/ADMIN_ROLES.md"), "utf8");
+    afirmar(/no la envía a revisión/.test(doc), "ADMIN_ROLES.md no dice que el Operador no envía");
+    return "código y ADMIN_ROLES.md dicen lo mismo";
+  });
 //PASOS
 }
 
