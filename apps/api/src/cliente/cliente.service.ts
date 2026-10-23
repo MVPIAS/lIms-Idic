@@ -129,4 +129,64 @@ export class ClienteService {
       data: { bloqueado: false, motivoBloqueo: null },
     });
   }
+
+  /* ------------------------------------------------ plantas (EP-00 0.1, BL-172) --- */
+
+  /** Plantas del cliente (activas primero). */
+  async plantas(clienteId: string, tenantId?: string) {
+    await this.detalle(clienteId, tenantId);
+    return this.prisma.planta.findMany({ where: { clienteId }, orderBy: [{ activa: "desc" }, { codigo: "asc" }] });
+  }
+
+  /** Alta de una planta. Sin código se numera P01, P02… dentro del cliente. */
+  async crearPlanta(clienteId: string, data: DatosPlanta, tenantId?: string) {
+    await this.detalle(clienteId, tenantId);
+    const existentes = await this.prisma.planta.findMany({ where: { clienteId }, select: { codigo: true, nombre: true } });
+    const codigo = (data.codigo ?? "").trim().toUpperCase() || siguienteCodigoPlanta(existentes.map((e) => e.codigo));
+    if (existentes.some((e) => e.codigo.toUpperCase() === codigo))
+      throw new BadRequestException(`El cliente ya tiene una planta con el código ${codigo}.`);
+    if (existentes.some((e) => e.nombre.trim().toLowerCase() === data.nombre.trim().toLowerCase()))
+      throw new BadRequestException(`El cliente ya tiene una planta llamada «${data.nombre.trim()}».`);
+    return this.prisma.planta.create({ data: { ...limpiarPlanta(data), codigo, clienteId } });
+  }
+
+  /** Corrige una planta o la desactiva (no se borra: puede estar citada en cotizaciones y OT). */
+  async actualizarPlanta(clienteId: string, plantaId: string, data: Partial<DatosPlanta> & { activa?: boolean }, tenantId?: string) {
+    await this.detalle(clienteId, tenantId);
+    const p = await this.prisma.planta.findFirst({ where: { id: plantaId, clienteId } });
+    if (!p) throw new NotFoundException("La planta no existe o no es de este cliente.");
+    if (data.nombre) {
+      const otra = await this.prisma.planta.findFirst({ where: { clienteId, id: { not: plantaId }, nombre: { equals: data.nombre.trim(), mode: "insensitive" } } });
+      if (otra) throw new BadRequestException(`El cliente ya tiene una planta llamada «${data.nombre.trim()}».`);
+    }
+    const { codigo: _c, ...resto } = data;
+    return this.prisma.planta.update({ where: { id: plantaId }, data: limpiarPlanta(resto) });
+  }
+}
+
+export interface DatosPlanta {
+  codigo?: string;
+  nombre: string;
+  direccion?: string | null;
+  ciudad?: string | null;
+  region?: string | null;
+  telefono?: string | null;
+}
+
+/** Siguiente código libre P01, P02… (ignora los códigos que no siguen ese patrón). */
+export function siguienteCodigoPlanta(codigos: string[]): string {
+  const max = codigos.reduce((m, c) => {
+    const x = /^P(\d+)$/i.exec(c.trim());
+    return x ? Math.max(m, Number(x[1])) : m;
+  }, 0);
+  return `P${String(max + 1).padStart(2, "0")}`;
+}
+
+function limpiarPlanta<T extends Record<string, any>>(d: T): T {
+  const o: Record<string, any> = {};
+  for (const [k, v] of Object.entries(d)) {
+    if (v === undefined) continue;
+    o[k] = typeof v === "string" ? (v.trim() === "" ? null : v.trim()) : v;
+  }
+  return o as T;
 }

@@ -1,15 +1,33 @@
 "use client";
 
+import { useState } from "react";
 import CrudTable from "@/components/CrudTable";
 import { rut } from "@/lib/format";
+import Plantas from "./_components/Plantas";
 
 const badge = (v: any) => (
   <span className={`pill ${v ? "red" : "green"}`}>{v ? "bloqueado" : "activo"}</span>
 );
 
+/** «Días de crédito» llega como texto del formulario; la API lo espera entero (vacío = no se informa). */
+const conDiasCredito = (d: any) => {
+  const { diasCredito, ...resto } = d ?? {};
+  const n = String(diasCredito ?? "").trim();
+  return n === "" ? resto : { ...resto, diasCredito: Number(n) };
+};
+
 export default function ClientesPage() {
+  const [plantasDe, setPlantasDe] = useState<{ id: string; razonSocial: string } | null>(null);
   return (
+    <>
     <CrudTable
+      prepararCrear={conDiasCredito}
+      accionesFila={(row) => (
+        <button type="button" className="btn outline sm" onClick={() => setPlantasDe({ id: row.id, razonSocial: row.razonSocial })}
+          title="Plantas o recintos del cliente">
+          Plantas
+        </button>
+      )}
       recurso="clientes"
       titulo="Clientes"
       subtitulo="Instituciones y empresas que solicitan ensayos. El flujo comercial arranca aquí."
@@ -51,11 +69,14 @@ export default function ClientesPage() {
         { campo: "telefono", label: "Teléfono", tipo: "telefono" },
         { campo: "email", label: "Email", tipo: "email" },
         { campo: "formaPagoHabitual", label: "Forma de pago habitual", tipo: "select", opcionesEndpoint: "parametros?categoria=forma_pago&activo=true&limit=50" },
+        { campo: "diasCredito", label: "Días de crédito", tipo: "entero", ayuda: "Plazo de pago de sus facturas. Por defecto, 30." },
         { campo: "contactoNombre", label: "Contacto principal · nombre" },
         { campo: "contactoCargo", label: "Contacto principal · cargo" },
         { campo: "contactoEmail", label: "Contacto principal · correo", tipo: "email" },
         { campo: "contactoTelefono", label: "Contacto principal · teléfono", tipo: "telefono" },
       ]}
     />
+    {plantasDe && <Plantas cliente={plantasDe} onCerrar={() => setPlantasDe(null)} />}
+    </>
   );
 }
