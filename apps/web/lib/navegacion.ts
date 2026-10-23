@@ -66,6 +66,8 @@ export const NAV: SeccionNav[] = [
       // Misma pantalla que «BPCH · Certificación › Internaciones» (puerta única): Comercial registra la resolución y la tasa.
       // En Comercial solo para quien trabaja en el Depto. Comercial; el BPCH la tiene en su sección.
       { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: "DCO", claves: "aduana importacion sdbpch resolucion dgmn tasa" },
+      // EP-06 6.23 (frente r4d): informe mensual de la tasa 1,5 %.
+      { href: "/bpch/tasa-mensual", label: "Tasa 1,5 % mensual", icon: "🧮", perm: "bpch.tasa.gestionar", ambito: "DCO", claves: "tasa internacion informe mensual difusion" },
       { href: "/listas-precio", label: "Listas de precio", icon: "≣", perm: "cotizacion.ver" },
       { href: "/lista-precio-items", label: "Ítems de lista", icon: "🏷", perm: "cotizacion.ver" },
       { href: "/centros-costo", label: "Centros de costo", icon: "🏦", perm: "factura.ver" },

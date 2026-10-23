@@ -396,6 +396,31 @@ async function main() {
     C.otInst = ot;
     return `${ot.codigo} sin cobro · oficio OF ${sello}`;
   });
+
+  /* ------------------------------------------------------------ T17 */
+  await paso("BL-164 · Informe mensual de la tasa 1,5 %: Comercial lo consulta y descarga; solo el Jefe DCO lo emite", async () => {
+    const mes = hoyCl().slice(0, 7);
+    await exigir(403, U.lqcJefe, "GET", `/internaciones/tasa-mensual?mes=${mes}`);
+    await exigir(403, U.finanzas, "GET", `/internaciones/tasa-mensual?mes=${mes}`);
+    const inf = await ok(U.ventas, "GET", `/internaciones/tasa-mensual?mes=${mes}`);
+    afirmar(Array.isArray(inf.filas) && inf.resumen && inf.difusion.length >= 1, "informe");
+    afirmar(inf.puedeEmitir === false, "Comercial no emite");
+    const csv = await llamar(U.ventas, "GET", `/internaciones/tasa-mensual?mes=${mes}&formato=csv`);
+    afirmar(csv.status === 200 && csv.tipo.includes("text/csv") && String(csv.json).includes("Resolución DGMN"), `csv ${csv.status} ${csv.tipo}`);
+    await exigir(403, U.ventas, "POST", "/internaciones/tasa-mensual/emitir", { mes });
+    await exigir(400, U.dco, "POST", "/internaciones/tasa-mensual/emitir", { mes: "1990-01" }, /No hay tasas/);
+    const d = await ok(U.dco, "GET", `/internaciones/tasa-mensual?mes=${mes}`);
+    afirmar(d.puedeEmitir === true, "el Jefe DCO puede emitir");
+    if (!d.filas.length) return `${mes}: sin tasas calculadas (no se emite)`;
+    if (d.emitido) {
+      await exigir(409, U.dco, "POST", "/internaciones/tasa-mensual/emitir", { mes }, /ya se emitió/);
+      return `${mes}: ${d.filas.length} tasas · ya emitido (409 al repetir)`;
+    }
+    const e = await ok(U.dco, "POST", "/internaciones/tasa-mensual/emitir", { mes, observaciones: "Prueba r4d" });
+    afirmar(e.emitido && /Dirección/.test(e.emitido.difusion), `emitido ${JSON.stringify(e.emitido)}`);
+    await exigir(409, U.dco, "POST", "/internaciones/tasa-mensual/emitir", { mes }, /ya se emitió/);
+    return `${mes}: ${d.filas.length} tasas · ${e.resumen.total} · emitido y difundido`;
+  });
 }
 
 main()
