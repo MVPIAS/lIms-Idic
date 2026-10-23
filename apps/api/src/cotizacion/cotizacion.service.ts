@@ -7,6 +7,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
+import { fijarPlazoPorDefecto } from "../ot/plazo-defecto";
 import { PrismaService } from "../common/prisma.service";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { validarTransicion } from "../common/estados";
@@ -846,6 +847,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
           usuarioId,
           origen: doc.unidadPrincipalId ? "aceptacion_indicado" : "aceptacion_deducido",
         });
+      // B-010 (frente c1): sin plazo en la cotización, el plazo por defecto de la OT.
+      await fijarPlazoPorDefecto(tx, tenantIdOt, ot.id);
 
       return { cotizacion, ot };
     });

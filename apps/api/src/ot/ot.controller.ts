@@ -36,6 +36,7 @@ import { ORIGENES_OT, calcularOpiPendiente, resolverCobro, validarOrigenOt } fro
 import { RegistroMuestrasService } from "../flujo-real/flujo-real.module";
 import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { esElementoGenerico, muestrasDeAlta, type ElementoAlta } from "./alta-muestras";
+import { fijarPlazoPorDefecto } from "./plazo-defecto";
 
 const PrioridadEnum = z.enum(["baja", "normal", "alta", "urgente"]);
 
@@ -652,6 +653,8 @@ export class OtController {
         usuarioId: req.user?.sub,
         origen: dto.unidadPrincipalId ? "alta_indicado" : "alta_deducido",
       });
+      // B-010: sin fecha indicada, el plazo por defecto (laboratorio > origen > defecto).
+      await fijarPlazoPorDefecto(tx, tenantId, creada.id);
       if (alta.et) {
         await tx.$executeRawUnsafe(
           `UPDATE orden_trabajo SET et_id = $2::uuid, et_asignada_por = $3::uuid, et_asignada_at = now() WHERE id = $1::uuid`,
