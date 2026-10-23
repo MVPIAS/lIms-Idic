@@ -33,7 +33,17 @@ export interface LineaCotizacionRegistro {
   catEnsayoId: string | null;
   ensayoCodigo: string | null;
   ensayoNombre?: string | null;
+  /** Tipo de la línea de la cotización («producto», «viatico», «pasaje», «otros»…). */
+  tipo?: string | null;
 }
+
+/**
+ * B-090 · Líneas de la cotización que NO son ensayos: gastos (viático, pasaje,
+ * traslado u otro gasto) y horas. No se proponen en la recepción de muestras.
+ */
+export const TIPOS_LINEA_GASTO = ["viatico", "pasaje", "otros", "hora_hombre", "hora_maquina", "extension"] as const;
+export const esLineaDeGasto = (l: { catEnsayoId?: string | null; tipo?: string | null }): boolean =>
+  !l.catEnsayoId && (TIPOS_LINEA_GASTO as readonly string[]).includes(String(l.tipo ?? ""));
 
 export interface LineaPropuesta {
   lineaId: string;
@@ -53,7 +63,7 @@ export function proponerDesdeCotizacion(
   lineas: LineaCotizacionRegistro[],
   metodosPorEnsayo: Map<string, MetodoCatalogo[]>,
 ): LineaPropuesta[] {
-  return lineas.map((l) => {
+  return lineas.filter((l) => !esLineaDeGasto(l)).map((l) => {
     const descripcion = (l.ensayoNombre ?? l.descripcion ?? l.ensayoCodigo ?? "Línea sin descripción").trim();
     if (!l.catEnsayoId) {
       return {

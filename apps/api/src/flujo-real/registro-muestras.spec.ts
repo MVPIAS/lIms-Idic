@@ -68,3 +68,18 @@ describe("registro de muestras desde la cotización", () => {
     expect(erroresRegistro("recepcionada", [], mapa)).toEqual(["Indique al menos una muestra."]);
   });
 });
+
+describe("recepción · los gastos de la cotización no son líneas de ensayo (B-090)", () => {
+  const { proponerDesdeCotizacion } = require("./registro-muestras");
+  it("viático, pasaje y otros gastos no se proponen", () => {
+    const r = proponerDesdeCotizacion(
+      [
+        { id: "1", descripcion: "Traslado", cantidad: 1, catEnsayoId: null, ensayoCodigo: null, tipo: "otros" },
+        { id: "2", descripcion: "Viático", cantidad: 2, catEnsayoId: null, ensayoCodigo: null, tipo: "viatico" },
+        { id: "3", descripcion: "Texto libre", cantidad: 1, catEnsayoId: null, ensayoCodigo: null, tipo: "producto" },
+      ],
+      new Map(),
+    );
+    expect(r.map((x: any) => x.lineaId)).toEqual(["3"]);
+  });
+});
