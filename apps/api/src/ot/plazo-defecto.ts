@@ -7,6 +7,10 @@
  *                                 prototipo, reinspeccion, cotizacion, institucional…)
  *   ot_plazo.defecto_dias       · el resto
  *
+ * La OT que nace de una cotización NO se toca: toma el plazo de la cotización
+ * (disparador fn_ot_fecha_compromiso) y, si la cotización no lo trae, queda en
+ * la tarjeta «OT sin plazo · Asignar plazo» para que Comercial lo fije.
+ *
  * Los valores por defecto (10 días corridos) están POR CONFIRMAR con el IDIC
  * (carta de consultas MET-09, plazo estándar). La jefatura sigue pudiendo fijar
  * otra fecha a mano; una OT que ya trae fecha (p. ej. desde la cotización) no

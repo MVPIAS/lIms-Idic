@@ -425,7 +425,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     categoria: "ot_plazo",
     titulo: "Plazo de la OT (fecha de compromiso al nacer)",
     donde:
-      "Toda OT nace con fecha de compromiso = hoy en Chile + el plazo: el del laboratorio responsable (tabla siguiente), si no el de su origen y si no el plazo por defecto. La OT de una cotización con plazo usa el de la cotización. Las OT ya generadas no cambian; la jefatura puede fijar otra fecha.",
+      "Toda OT nace con fecha de compromiso = hoy en Chile + el plazo: el del laboratorio responsable (tabla siguiente), si no el de su origen y si no el plazo por defecto. La OT de una cotización usa el plazo de la cotización (si no lo trae, Comercial lo fija desde «OT sin plazo»). Las OT ya generadas no cambian; la jefatura puede fijar otra fecha.",
     porConfirmar: "Plazo estándar de la OT por origen y laboratorio (carta de consultas MET-09; EP-06 para la internación).",
     codigos: {
       defecto_dias: { tipo: "entero", nombre: "Plazo por defecto (OT directa, institucional y el resto)", min: 1, max: 365, unidad: "días corridos", porDefecto: "10" },
