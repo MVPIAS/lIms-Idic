@@ -28,6 +28,7 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
 import { ESTADO_PROTOTIPO, dia } from "@/lib/bpchProcesos";
+import BarraFases from "@/components/bpch-procesos/BarraFases";
 import { descargarAdjunto, subirFormulario } from "@/lib/d11";
 
 const CLASE_ADJUNTO: Record<string, string> = { ficha_tecnica: "Ficha técnica", hoja_seguridad: "Hoja de datos de seguridad" };
@@ -216,6 +217,22 @@ export default function PrototipoPage() {
       />
       {error && <div className="alert warn" role="alert">{error}</div>}
       {p?.anulado && <div className="alert warn">Anulado el {fechaHora(p.anulado.at)}: {p.anulado.motivo}</div>}
+      {/* EP-08 8.19 (BL-217): fases deducidas del estado, con «Le toca a». */}
+      {p && !p.anulado && (
+        <BarraFases
+          etiqueta="Avance del prototipo"
+          fases={[
+            { clave: "ingreso", titulo: "Ingreso", hecho: true, leToca: "SCC" },
+            { clave: "clasificacion", titulo: "Clasificación", hecho: p.clasificacion?.estado === "aprobada", leToca: "SCC (aprueba la jefatura)", accion: "Clasificar la sustancia y aprobar la clasificación" },
+            { clave: "sac", titulo: "Pronunciamiento SAC", hecho: Boolean(p.sac?.tamanoMuestra), leToca: "Sección Aseguramiento de la Calidad", accion: "Registrar el tamaño de muestra (SAC-PG01-IT10)" },
+            { clave: "parametrizacion", titulo: "Parametrización", hecho: p.parametrizacion?.estado === "validada", aplica: Boolean(p.parametrizacion), leToca: "SCC → validación de la jefatura", accion: "Parametrizar las pruebas del elemento nuevo y validarlas" },
+            { clave: "evaluacion", titulo: "OT de evaluación", hecho: conOt && p.evaluacion?.resultados > 0 && p.evaluacion?.aprobados === p.evaluacion?.resultados, leToca: "Laboratorio (flujo general)", accion: conOt ? "Capturar, revisar y aprobar los ensayos de la OT" : "Generar la OT de evaluación" },
+            { clave: "dictamen", titulo: "Dictamen", hecho: p.estado === "dictaminado", leToca: "Jefatura SCC", accion: "Dictaminar el tipo y emitir el documento" },
+            { clave: "cnc", titulo: "Código CNC-DGMN", hecho: Boolean(p.codigoCnc), aplica: p.estado !== "dictaminado" || p.dictamen === "aprobado", leToca: "SCC", accion: "Registrar el código único CNC-DGMN" },
+            { clave: "codificacion", titulo: "Codificación Única", hecho: Boolean(p.inscripcionCu?.inscrito), aplica: p.estado !== "dictaminado" || p.dictamen === "aprobado", leToca: "SCC", accion: "Inscribir el tipo en la Codificación Única" },
+          ]}
+        />
+      )}
 
       <Paso n={1} titulo="Ingreso y antecedentes técnicos" hecho={!nuevo}>
         <div className="form-grid cols-2">

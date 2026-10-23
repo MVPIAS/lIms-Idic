@@ -18,6 +18,7 @@ import { useAlcance, describirAlcance, type ItemBandeja } from "@/lib/alcance";
 import { usePermisos, infoPerfil, type Perfil } from "@/lib/permisos";
 import { EmptyState, SkeletonCards } from "@/components/ui/PageHeader";
 import AvisosBandeja from "@/components/avisos/AvisosBandeja";
+import { fechaDia } from "@/lib/format";
 
 interface Accion { href: string; titulo: string; desc: string; icono: string; perm?: string | string[] }
 
@@ -144,6 +145,36 @@ function TarjetaPendiente({ it }: { it: ItemBandeja }) {
       {it.ruta && <div style={{ fontSize: 11, color: "var(--accent)", marginTop: 6, fontWeight: 600 }}>Ver detalle →</div>}
     </>
   );
+  // Con su lista («lo que le toca»): la tarjeta no es un enlace (habría enlaces anidados);
+  // cada fila lleva a su OT, documento u oficio y «Ver todo» abre la lista completa.
+  if (it.elementos?.length)
+    return (
+      <div className={cls}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+          <div className="bandeja-num">{it.cantidad.toLocaleString("es-CL")}</div>
+          {it.severidad === "alta" && <span className="pill red">urgente</span>}
+          {it.severidad === "warn" && <span className="pill amber">atención</span>}
+        </div>
+        <div className="bandeja-tit">{it.titulo}</div>
+        {it.descripcion && <div className="bandeja-desc">{it.descripcion}</div>}
+        <ul className="bandeja-lista" aria-label={`Lo que le toca: ${it.titulo}`}>
+          {it.elementos.map((e) => (
+            <li key={e.id}>
+              <Link href={e.ruta as any}>
+                <b>{e.texto}</b>
+                {e.detalle ? <span>{e.detalle}</span> : <span />}
+                {e.fecha ? <time dateTime={e.fecha}>{fechaDia(e.fecha)}</time> : null}
+              </Link>
+            </li>
+          ))}
+        </ul>
+        {it.ruta && (
+          <Link href={it.ruta as any} className="bandeja-ver">
+            {it.cantidad > it.elementos.length ? `Ver los ${it.cantidad.toLocaleString("es-CL")} →` : "Ver lista →"}
+          </Link>
+        )}
+      </div>
+    );
   return it.ruta
     ? <Link href={it.ruta as any} className={cls}>{cuerpo}</Link>
     : <div className={cls}>{cuerpo}</div>;

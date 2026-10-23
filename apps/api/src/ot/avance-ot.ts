@@ -23,7 +23,7 @@ import { condicionFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
 import { calibracionVigente, documentosDeCalibraciones, faltantesInstrumentos } from "../metrologia/metrologia-ot.reglas";
 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
-export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas";
+export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas" | "bpch";
 /** Pestañas del expediente de la OT a las que puede llevar el «Siguiente paso». */
 export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe";
 
@@ -88,6 +88,8 @@ export interface DocumentoAvance {
   estado: string;
   tipoDocumento?: string | null;
   entregadoAt: Date | string | null;
+  /** Destino del despacho del documento (DCO, LAB_SOLICITANTE, BPCH, CLIENTE), si se despachó (frente r4c). */
+  despachadoA?: string | null;
   /** Pasos de firma pendientes ahora (solo si está en firma). */
   pendientes?: { rol: string; unidad: string | null; personas: { id: string; nombre: string }[] }[];
 }
@@ -214,6 +216,8 @@ export function tipoRuta(h: HechosOt): TipoRuta {
   // (si la OT usa la captura estándar, sigue la ruta de laboratorio).
   if (h.unidad?.esMetrologia && ((h.calibraciones?.length ?? 0) > 0 || (h.instrumentos?.length ?? 0) > 0 || h.resultados.total === 0)) return "metrologia";
   if (h.origen && ORIGENES_INTERNOS.includes(h.origen)) return "interna";
+  // OT directa o de Producción Nacional del BPCH (EP-10, EP-07): fases de la inspección (BL-158).
+  if (h.rama === "bpch") return "bpch";
   return "laboratorio";
 }
 
@@ -943,6 +947,88 @@ function rutaArmas(h: HechosOt): Ruta {
   };
 }
 
+/**
+ * OT directa o de Producción Nacional del BPCH (EP-10 §3, EP-07; BL-158): las
+ * fases de la inspección en vez de las del laboratorio. Cabecera de inspección →
+ * lotes (muestras) → resultados → Informe de Inspección → documento final
+ * (Certificado de Conformidad o Informe de Incumplimiento según la condición;
+ * en Producción Nacional el informe técnico va en la correlación de la O/C) →
+ * remisión a DCO → entrega → cierre → factura y pago.
+ */
+function rutaBpch(h: HechosOt): Ruta {
+  const u = lab(h);
+  const r = h.resultados;
+  const pn = h.origen === "PRODUCCION_NACIONAL";
+  const condicion = condicionFinal(h.muestras.veredictos ?? []);
+  const informe = vigenteDeTipo(h.documentos, "INFORME_INSPECCION");
+  const certificado = vigenteDeTipo(h.documentos, "CERTIFICADO_CONFORMIDAD");
+  const incumplimiento = vigenteDeTipo(h.documentos, "INFORME_INCUMPLIMIENTO");
+  const final = condicion === "no_cumple" ? incumplimiento : certificado;
+  const nombreFinal = condicion === "no_cumple" ? "Informe de Incumplimiento" : "Certificado de Conformidad";
+  const informeOficial = Boolean(informe && esOficialDoc(informe));
+  const finalAplica = !pn || Boolean(certificado || incumplimiento);
+  const aRemitir = finalAplica ? final : informe;
+  const remitido = Boolean(aRemitir?.despachadoA === "DCO");
+  const docs = etapasDocumentos(h.documentos);
+  const cierre = etapaCierre(h);
+  const fac = etapasFactura(h);
+  const etapas = [
+    etapa("apertura", "Apertura de la OT", h.unidad ? "hecho" : "pendiente", detalleApertura(h)),
+    etapa("cabecera", "Cabecera de inspección", !h.cabeceraBpch?.length || informe ? "hecho" : "pendiente",
+      h.cabeceraBpch?.length && !informe ? `Falta: ${h.cabeceraBpch.length} dato(s)` : "Lugar, fecha, inspectores y procedimiento"),
+    etapa("lotes", "Lotes a inspeccionar", h.muestras.total > 0 ? "hecho" : "pendiente",
+      h.muestras.total ? plural(h.muestras.total, "lote registrado", "lotes registrados") : null),
+    etapa("resultados", "Resultados de la inspección", r.total > 0 && r.aprobados === r.total ? "hecho" : r.total - r.pendientes - r.devueltos > 0 ? "en_curso" : "pendiente",
+      r.total ? `${r.aprobados} de ${r.total} aprobados` : null),
+    etapa("informe", "Informe de Inspección", informeOficial ? "hecho" : informe ? "en_curso" : "pendiente", informe?.numero ?? null),
+    etapa(
+      "documento_final",
+      condicion === "no_cumple" ? "Informe de Incumplimiento → DGMN" : "Certificado de Conformidad",
+      !finalAplica ? "no_aplica" : final && esOficialDoc(final) ? "hecho" : final ? "en_curso" : "pendiente",
+      !finalAplica ? "Producción Nacional: el informe técnico va en la correlación de la O/C" : final?.numero ?? `Condición: ${TEXTO_CONDICION[condicion]}`,
+    ),
+    etapa("remision_dco", "Remitir a DCO", remitido ? "hecho" : "pendiente", remitido ? `${aRemitir!.numero} remitido` : null),
+    docs.entrega,
+    cierre.etapa,
+    fac.factura,
+    fac.pago,
+  ];
+  const ir = (texto: string, pestana: PestanaOt, permisos: string[], rol = "Inspector o Jefe de Sucursal"): Paso => ({
+    texto, leToca: { rol, unidad: u, personas: h.analistas }, accion: { texto: pestana === "cabecera" ? "Ir a Cabecera" : pestana === "muestras" ? "Ir a Muestras" : "Ir a Informe y cierre", pestana, permisos },
+  });
+  return {
+    etapas,
+    paso: (clave) => {
+      switch (clave) {
+        case "apertura":
+          return ir("Fijar la sucursal responsable de la OT", "cabecera", ["ot.cambiar_laboratorio"], "Sección Certificación de la Conformidad");
+        case "cabecera":
+          return ir(`Completar la cabecera de inspección: ${(h.cabeceraBpch ?? []).join(" ")}`, "cabecera", ["bpch.cabecera.gestionar"]);
+        case "lotes":
+          return ir("Registrar cada lote a inspeccionar como muestra con sus ensayos", "muestras", ["muestra.crear"], "Inspector");
+        case "resultados":
+          return pasoResultados(h, "resultados");
+        case "informe":
+          if (informe?.estado === "en_firma") return pasoFirma(informe);
+          return ir(informe?.estado === "devuelto" ? `El Informe de Inspección ${informe.numero} fue devuelto: corríjalo y reemítalo` : "Emitir el Informe de Inspección", "informe", ["certificado.emitir"]);
+        case "documento_final":
+          if (final?.estado === "en_firma") return pasoFirma(final);
+          return ir(`Emitir el ${nombreFinal}`, "informe", ["certificado.emitir"]);
+        case "remision_dco":
+          return ir(`Remitir ${aRemitir?.numero ?? "el documento"} a DCO (con o sin tasa, cumpla o no)`, "informe", ["certificado.despachar"], "Jefe de Sucursal o SCC");
+        case "entrega":
+          return pasoDocumentos(h, "entrega");
+        case "cierre":
+          return cierre.paso;
+        case "factura":
+        case "pago":
+          return pasoFactura(h, clave);
+      }
+      return null;
+    },
+  };
+}
+
 /* ------------------------------------------------------------ principal --- */
 
 /**
@@ -958,6 +1044,7 @@ export function calcularAvance(h: HechosOt): AvanceOt {
     : tipo === "internacion" ? rutaInternacion(h)
     : tipo === "reinspeccion" ? rutaReinspeccion(h)
     : tipo === "metrologia" ? rutaMetrologia(h)
+    : tipo === "bpch" ? rutaBpch(h)
     : rutaLaboratorio(h);
 
   const anulada = h.estado === "anulada";

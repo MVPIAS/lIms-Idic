@@ -71,6 +71,25 @@ export interface RegistroDto {
   archivo?: { nombre: string; mime: string; datos: string };
 }
 
+export const VISTAS_PENDIENTE = ["por_despachar", "por_recibir", "plazo_por_informar", "recepcion_dco", "por_enviar"] as const;
+export type VistaPendiente = (typeof VISTAS_PENDIENTE)[number];
+const PERMISO_VISTA: Record<VistaPendiente, string> = {
+  por_despachar: "certificado.despachar",
+  por_recibir: "certificado.entregar",
+  plazo_por_informar: "ot.seguimiento",
+  recepcion_dco: "ot.seguimiento",
+  por_enviar: "ot.seguimiento",
+};
+export interface FilaPendiente {
+  id: string;
+  numero: string;
+  otId: string;
+  ot: string;
+  cliente: string | null;
+  fecha: string | null;
+  detalle: string | null;
+}
+
 const MIME_ARCHIVO = ["application/pdf", "image/png", "image/jpeg", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"];
 
 @Injectable()
@@ -579,6 +598,108 @@ export class SeguimientoService {
     });
     await this.historial(o, "envio_cliente", { medio: dto.medio, destinatario: dto.destinatario.trim(), documentos: lista.map((x) => x.numero) }, req.user?.sub ?? null);
     return { ...(await this.vista(id, req)), correo, error };
+  }
+
+  /**
+   * Estado por laboratorio de las muestras de la OT (EP-02 4.2 «Consolidar la
+   * muestra», BL-215): una fila por muestra y laboratorio dueño de sus ensayos
+   * (el responsable o el destino de una orden interna), con cuántos están por
+   * capturar, en revisión y aprobados.
+   */
+  async estadoLaboratorios(id: string, req: any) {
+    await this.ot(id, req);
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT m.id AS "muestraId", m.codigo AS muestra, u.codigo AS laboratorio, u.nombre AS "laboratorioNombre", bool_or(lr.derivado) AS derivado,
+              count(*)::int AS total,
+              count(*) FILTER (WHERE r.estado IN ('pendiente', 'devuelto', 'rechazado'))::int AS "porCapturar",
+              count(*) FILTER (WHERE r.estado IN ('capturado', 'revisado_n1'))::int AS "enRevision",
+              count(*) FILTER (WHERE r.estado = 'aprobado')::int AS aprobados,
+              count(*) FILTER (WHERE r.veredicto = 'no_cumple')::int AS "noCumple"
+         FROM resultado r JOIN muestra m ON m.id = r.muestra_id
+         JOIN LATERAL lims_lab_de_resultado(r.id) lr ON TRUE
+         LEFT JOIN unidad u ON u.id = lr.unidad_id
+        WHERE r.ot_id = $1::uuid AND r.deleted_at IS NULL AND m.deleted_at IS NULL
+        GROUP BY m.id, m.codigo, u.codigo, u.nombre
+        ORDER BY m.codigo, u.codigo`,
+      id,
+    );
+    const labs = [...new Set(filas.map((f) => f.laboratorio))];
+    return { compartida: labs.length > 1, laboratorios: labs, filas };
+  }
+
+  /* ------------------------------------------------- pendientes (bandeja) --- */
+
+  /**
+   * Listas «lo que le toca» del seguimiento (pantalla /seguimiento y tarjetas
+   * de Mi bandeja, que cuentan exactamente estas filas):
+   *   por_despachar      documentos oficiales sin despacho ni entrega (jefaturas, certificado.despachar);
+   *   por_recibir        despachos sin recibir con destino en su ámbito (certificado.entregar);
+   *   plazo_por_informar OT abiertas con fecha de compromiso aún no informada al cliente (ot.seguimiento);
+   *   recepcion_dco      OT con documento oficial sin recepción en DCO (ot.seguimiento);
+   *   por_enviar         OT recibidas en DCO aún no enviadas al cliente (ot.seguimiento).
+   */
+  async pendientes(req: any, vista: VistaPendiente): Promise<FilaPendiente[]> {
+    const t = req?.user?.tenantId;
+    if (!t) return [];
+    const permiso = PERMISO_VISTA[vista];
+    if (!permiso || !tienePermiso(req, permiso)) return [];
+    const filtro = await this.alcance.filtroUnidades(req, permiso);
+    const sql: Record<VistaPendiente, string> = {
+      por_despachar: `
+        SELECT c.id, COALESCE(c.numero, c.codigo) AS numero, o.id AS ot_id, o.codigo AS ot, cl.razon_social AS cliente,
+               COALESCE(c.oficial_at, c.fecha) AS fecha, p.nombre AS documento
+          FROM certificado c JOIN orden_trabajo o ON o.id = c.ot_id
+          LEFT JOIN cliente cl ON cl.id = o.cliente_id LEFT JOIN plantilla_informe p ON p.id = c.plantilla_id
+         WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL AND c.estado IN ('oficial', 'emitido') AND c.entregado_at IS NULL
+           AND o.estado <> 'anulada'
+           AND NOT EXISTS (SELECT 1 FROM documento_despacho d WHERE d.certificado_id = c.id)
+           AND ($2::uuid[] IS NULL OR COALESCE(c.unidad_id, o.unidad_principal) = ANY($2::uuid[]))
+         ORDER BY fecha`,
+      por_recibir: `
+        SELECT c.id, COALESCE(c.numero, c.codigo) AS numero, o.id AS ot_id, o.codigo AS ot, cl.razon_social AS cliente,
+               d.fecha, d.destino AS documento
+          FROM documento_despacho d JOIN certificado c ON c.id = d.certificado_id JOIN orden_trabajo o ON o.id = d.ot_id
+          LEFT JOIN cliente cl ON cl.id = o.cliente_id
+         WHERE d.tenant_id = $1::uuid AND d.recibido_at IS NULL AND c.deleted_at IS NULL
+           AND ($2::uuid[] IS NULL
+                OR (d.destino IN ('DCO', 'CLIENTE') AND EXISTS (SELECT 1 FROM unidad u WHERE u.codigo IN ('DCO', 'SVT', 'SPC') AND u.tenant_id = d.tenant_id AND u.id = ANY($2::uuid[])))
+                OR (d.destino = 'LAB_SOLICITANTE' AND d.unidad_destino_id = ANY($2::uuid[]))
+                OR (d.destino = 'BPCH' AND EXISTS (SELECT 1 FROM unidad u WHERE u.codigo IN ('SCC', 'BPCH') AND u.tenant_id = d.tenant_id AND u.id = ANY($2::uuid[]))))
+         ORDER BY d.fecha`,
+      plazo_por_informar: `
+        SELECT o.id, o.codigo AS numero, o.id AS ot_id, o.codigo AS ot, cl.razon_social AS cliente, o.fecha_compromiso AS fecha, u.codigo AS documento
+          FROM orden_trabajo o LEFT JOIN cliente cl ON cl.id = o.cliente_id LEFT JOIN unidad u ON u.id = o.unidad_principal
+         WHERE o.tenant_id = $1::uuid AND o.estado NOT IN ('cerrada', 'anulada') AND o.fecha_compromiso IS NOT NULL
+           AND o.plazo_notificado_at IS NULL AND COALESCE(o.origen_trabajo, '') NOT IN ('OT_INTERNA', 'INTERLABORATORIO')
+           AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
+         ORDER BY o.fecha_compromiso`,
+      recepcion_dco: `
+        SELECT o.id, o.codigo AS numero, o.id AS ot_id, o.codigo AS ot, cl.razon_social AS cliente, o.fecha_compromiso AS fecha, u.codigo AS documento
+          FROM orden_trabajo o LEFT JOIN cliente cl ON cl.id = o.cliente_id LEFT JOIN unidad u ON u.id = o.unidad_principal
+         WHERE o.tenant_id = $1::uuid AND o.estado <> 'anulada' AND o.fecha_recep_dco IS NULL
+           AND COALESCE(o.origen_trabajo, '') NOT IN ('OT_INTERNA', 'INTERLABORATORIO')
+           AND EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial', 'emitido'))
+           AND COALESCE(o.estado_envio, '') <> 'Enviado al cliente'
+           AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
+         ORDER BY o.fecha_compromiso NULLS LAST`,
+      por_enviar: `
+        SELECT o.id, o.codigo AS numero, o.id AS ot_id, o.codigo AS ot, cl.razon_social AS cliente, o.fecha_recep_dco AS fecha, o.estado_envio AS documento
+          FROM orden_trabajo o LEFT JOIN cliente cl ON cl.id = o.cliente_id
+         WHERE o.tenant_id = $1::uuid AND o.estado <> 'anulada' AND o.fecha_recep_dco IS NOT NULL
+           AND COALESCE(o.estado_envio, '') <> 'Enviado al cliente'
+           AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
+         ORDER BY o.fecha_recep_dco`,
+    };
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(`${sql[vista]} LIMIT 500`, t, filtro).catch(() => [] as any[]);
+    return filas.map((f) => ({
+      id: f.id,
+      numero: f.numero,
+      otId: f.ot_id,
+      ot: f.ot,
+      cliente: f.cliente ?? null,
+      fecha: f.fecha ? new Date(f.fecha).toISOString().slice(0, 10) : null,
+      detalle: f.documento ?? null,
+    }));
   }
 
   /* ------------------------------------------------------ carpeta de trabajo --- */

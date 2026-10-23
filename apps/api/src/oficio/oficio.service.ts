@@ -173,6 +173,16 @@ export class OficioService {
     return { data, total: data.length };
   }
 
+  /** Oficios devueltos a quien los elaboró (tarjeta de Mi bandeja). */
+  async devueltosDe(req: any) {
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, numero, materia, destinatario, fecha::text AS fecha FROM oficio
+        WHERE tenant_id = $1::uuid AND creado_por = $2::uuid AND estado = 'devuelto' ORDER BY updated_at DESC`,
+      req.user.tenantId,
+      usuarioDe(req),
+    );
+  }
+
   /* ---------------------------------------------------------------- crear --- */
 
   /** Unidad emisora y vínculo, comprobando el alcance. */

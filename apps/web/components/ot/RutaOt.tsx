@@ -14,7 +14,7 @@ export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bl
 export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe";
 
 export interface AvanceOt {
-  tipo: "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas";
+  tipo: "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas" | "bpch";
   etapas: { clave: string; titulo: string; estado: EstadoEtapa; detalle: string | null }[];
   etapaActual: string | null;
   siguiente: {
@@ -37,6 +37,7 @@ const TIPO: Record<AvanceOt["tipo"], string> = {
   internacion: "Ruta de la internación (BPCH)",
   reinspeccion: "Ruta de la reinspección (BPCH)",
   armas: "Ruta de las armas (Delegación Nº 11)",
+  bpch: "Ruta de la inspección (BPCH)",
 };
 const ICONO: Record<EstadoEtapa, string> = { hecho: "✓", en_curso: "", pendiente: "", no_aplica: "–", bloqueado: "!" };
 const CLASE: Record<EstadoEtapa, string> = { hecho: "done", en_curso: "now", pendiente: "pend", no_aplica: "na", bloqueado: "bloq" };

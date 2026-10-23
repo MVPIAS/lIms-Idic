@@ -62,6 +62,7 @@ export const NAV: SeccionNav[] = [
       { href: "/crm", label: "Oportunidades (CRM)", icon: "🎯", perm: "cotizacion.ver", claves: "crm pipeline" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "💲", perm: "cotizacion.ver" },
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
+      { href: "/seguimiento", label: "Seguimiento y envío", icon: "📮", perm: ["ot.seguimiento", "certificado.despachar", "certificado.entregar"], claves: "despacho recepcion dco plazo cliente envio guia entrega atraso" },
       { href: "/encuestas", label: "Encuestas de satisfacción", icon: "☺", perm: "encuesta.ver", claves: "postventa satisfaccion cliente" },
       // Misma pantalla que «BPCH · Certificación › Internaciones» (puerta única): Comercial registra la resolución y la tasa.
       // En Comercial solo para quien trabaja en el Depto. Comercial; el BPCH la tiene en su sección.

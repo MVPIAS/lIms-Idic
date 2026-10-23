@@ -40,6 +40,8 @@ export interface ItemBandeja {
   cantidad: number;
   ruta?: string;
   severidad: Severidad;
+  /** Las primeras filas de la lista («lo que le toca»): cada una lleva a su OT, documento u oficio. */
+  elementos?: { id: string; texto: string; detalle?: string | null; ruta: string; fecha?: string | null }[];
 }
 
 export interface EstadoAlcance {

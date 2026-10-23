@@ -16,6 +16,7 @@ import CabeceraInspeccionOt from "./_components/CabeceraInspeccionOt";
 import EspecificacionTecnicaOt from "./_components/EspecificacionTecnicaOt";
 import MuestreoOt from "./_components/MuestreoOt";
 import FotosOt from "./_components/FotosOt";
+import EstadoPorLaboratorio from "./_components/EstadoPorLaboratorio";
 import PanelCierreOt from "@/components/documentos/PanelCierreOt";
 import SeguimientoOt from "@/components/documentos/SeguimientoOt";
 import OrigenBpchOt from "@/components/bpch-procesos/OrigenBpchOt";
@@ -347,6 +348,8 @@ export default function ExpedientePage() {
                 </table>
               ) : <p className="subtitle" style={{ margin: 0 }}>Sin movimientos registrados de laboratorio ni de asignación.</p>
             )}
+            {/* Muestra compartida entre laboratorios (EP-02 4.2): estado de cada uno. */}
+            {tab === "muestras" && typeof id === "string" && <EstadoPorLaboratorio otId={id} version={muestras.length} />}
             {tab === "muestras" && typeof id === "string" && (
               <RegistroMuestras otId={id} onCambio={() => { cargarMuestras(); cargarOt(); }}
                 onOrdenInterna={(unidadId) => { setDestinoOi(unidadId ?? null); setTab("ordenes"); }}

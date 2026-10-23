@@ -22,6 +22,7 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
 import { ESTADO_CLASIFICACION, RESULTADO_PRUEBA, abrirDocumento } from "@/lib/bpchProcesos";
+import BarraFases from "@/components/bpch-procesos/BarraFases";
 import { descargarAdjunto, subirFormulario } from "@/lib/d11";
 
 type EnsayoIt21 = { tuboFragmentado: boolean; placaPerforada: boolean; observacion?: string | null };
@@ -309,6 +310,19 @@ export default function ClasificacionPage() {
       )}
       {c?.anulada && <div className="alert warn">Anulada por {c.anulada.por} el {fechaHora(c.anulada.at)}: {c.anulada.motivo}</div>}
       {c?.estado === "reemplazada" && <div className="alert info">Esta versión fue reemplazada por una reclasificación posterior.</div>}
+      {/* EP-08 8.19 (BL-217): fases deducidas del estado, con «Le toca a». */}
+      {c && !nueva && c.estado !== "anulada" && c.estado !== "reemplazada" && (
+        <BarraFases
+          etiqueta="Avance de la clasificación"
+          fases={[
+            { clave: "antecedentes", titulo: "Antecedentes", hecho: true, detalle: c.ot ? `OT ${c.ot.codigo}` : null },
+            { clave: "pruebas", titulo: "Pruebas ONU (IT21–IT23)", hecho: c.explosiva !== null && c.explosiva !== undefined || c.estado !== "borrador", leToca: "Inspector o laboratorio", accion: "Registrar los resultados de las pruebas de las series ONU" },
+            { clave: "clasificar", titulo: "Clasificación", hecho: c.estado !== "borrador", leToca: "Quien clasifica (SCC)", accion: "Decidir la clase y registrar la clasificación" },
+            { clave: "aprobar", titulo: "Aprobación", hecho: c.estado === "aprobada", leToca: "Jefatura (otra persona)", accion: "Aprobar la clasificación o devolverla con motivo" },
+            { clave: "documento", titulo: "Documento sellado", hecho: Boolean(c.documento), detalle: c.documento?.numero ?? null, leToca: "Sistema al aprobar", accion: "Se sella al aprobar" },
+          ]}
+        />
+      )}
       {!nueva && !editable && c?.estado !== "anulada" && (
         <div className="alert info">La clasificación está «{est?.texto}»: los datos no se editan.{c?.estado === "registrada" ? " La jefatura puede aprobarla o devolverla con un motivo." : ""}</div>
       )}
