@@ -94,6 +94,7 @@ export const NAV: SeccionNav[] = [
       { href: "/informes", label: "Emitir informe", icon: "🖨", perm: "certificado.emitir" },
       { href: "/informes/por-firmar", label: "Documentos por firmar", icon: "✒", perm: "documento.firmar", claves: "firma firmar oficializar revisar informe" },
       { href: "/certificados", label: "Informes y certificados", icon: "📜", perm: "ot.ver", claves: "entrega anular reemitir" },
+      { href: "/oficios", label: "Oficios conductores", icon: "✉", perm: "oficio.ver", claves: "oficio conductor vb despacho oficina de partes ivc informe tecnico rechazo ffaa" },
       { href: "/custodia", label: "Cadena de custodia", icon: "🔗", perm: "muestra.ver" },
       { href: "/equipos", label: "Equipos y calibración", icon: "⚙", perm: "equipo.ver" },
       { href: "/consumibles", label: "Consumibles · kardex", icon: "🧴", perm: "consumible.gestionar", claves: "stock reactivos lotes" },

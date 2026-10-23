@@ -298,6 +298,7 @@ function DocumentoYFirma({ c, onHecho, onError }: { c: Circuito; onHecho: (m: st
 /* ------------------------------------------------------------- 5 · envío --- */
 function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<void> }) {
   const k = c.cotizacion;
+  const { puede } = usePermisos();
   const [medio, setMedio] = useState<"correo" | "mano" | "courier">("correo");
   const [destinatarios, setDestinatarios] = useState(() => [...new Set(c.destinatarios.filter((d) => d.principal).map((d) => d.email))].join(", "));
   const [observacion, setObservacion] = useState("");
@@ -332,6 +333,13 @@ function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<vo
           {k.envioObservacion ? <> · {k.envioObservacion}</> : null}
         </div>
       ) : null}
+      {/* EP-00 3.1–3.3: a Ejército y FF.AA. la cotización sale con oficio conductor (V°B° Jefe DCO → Dirección → Oficina de partes). */}
+      {puede("oficio.crear") && (
+        <p style={{ fontSize: 12.5, margin: "0 0 8px" }}>
+          Ejército y FF.AA.: <Link href={`/oficios/nuevo?cotizacion=${(k as any).id}` as any} className="btn outline sm">Generar oficio →</Link>{" "}
+          <Link href={`/oficios?vista=todos` as any} style={{ color: "var(--accent)" }}>ver oficios</Link>
+        </p>
+      )}
       {!c.puedo.enviarCliente ? (
         <p className="subtitle">
           {k.circuito === "r1" && k.firmaEstado !== "firmada"
