@@ -405,12 +405,13 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           {modo === "crear" ? (
             <>
               <div className="field">
-                <label>Buscar cliente (razón social / RUT)</label>
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Escribe para buscar…" />
+                <label htmlFor="cot-cli-buscar">Buscar cliente (razón social / RUT)</label>
+                <input id="cot-cli-buscar" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Escribe para buscar…" />
               </div>
               <div className="field" style={{ gridColumn: "span 2" }}>
-                <label>Cliente <span className="req">*</span></label>
+                <label htmlFor="cot-cliente">Cliente <span className="req">*</span></label>
                 <select
+                  id="cot-cliente"
                   value={cliente?.id ?? ""}
                   onChange={(e) => {
                     const c = clientes.find((x) => x.id === e.target.value) ?? null;
@@ -429,13 +430,13 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             </>
           ) : (
             <div className="field readonly" style={{ gridColumn: "span 2" }}>
-              <label>Cliente</label>
-              <input readOnly value={`${cliente?.razonSocial ?? "—"}${cliente?.rut ? ` · ${fmtRut(cliente.rut)}` : ""}`} />
+              <label htmlFor="cot-cliente-ro">Cliente</label>
+              <input id="cot-cliente-ro" readOnly value={`${cliente?.razonSocial ?? "—"}${cliente?.rut ? ` · ${fmtRut(cliente.rut)}` : ""}`} />
             </div>
           )}
           <div className="field">
-            <label>Tipo de cliente</label>
-            <select value={tipoCliente} disabled={!cliente} onChange={(e) => cambiarTipoCliente(e.target.value)}>
+            <label htmlFor="cot-tipo-cliente">Tipo de cliente</label>
+            <select id="cot-tipo-cliente" value={tipoCliente} disabled={!cliente} onChange={(e) => cambiarTipoCliente(e.target.value)}>
               <option value="">— sin tipo —</option>
               {tipoInactivo && <option value={tipoCliente}>{tipoCliente} (valor antiguo)</option>}
               {opts("tipo_cliente").map((o) => <option key={o.codigo} value={o.codigo}>{o.etiqueta}</option>)}

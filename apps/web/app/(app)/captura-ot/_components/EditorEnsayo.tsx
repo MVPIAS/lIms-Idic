@@ -328,26 +328,26 @@ export default function EditorEnsayo({
         </div>
         <div className="form-grid cols-4">
           <div className="field">
-            <label>Tipo de dato</label>
-            <select value={esp.tipoDato} disabled={!editable("tipoDato")} onChange={(x) => setEsp({ ...esp, tipoDato: x.target.value as any })}>
+            <label htmlFor={`td-${e.id}`}>Tipo de dato</label>
+            <select id={`td-${e.id}`} value={esp.tipoDato} disabled={!editable("tipoDato")} onChange={(x) => setEsp({ ...esp, tipoDato: x.target.value as any })}>
               <option value="numerico">Numérico (veredicto por Mín / Máx)</option>
               <option value="atributo">Atributo (Cumple / No cumple)</option>
             </select>
           </div>
           {CAMPOS.map((c) => (
             <div key={c.k} className={`field${editable(c.k) ? "" : " readonly"}`}>
-              <label>{c.l}{!vacio(cat[c.k]) && String(cat[c.k]) !== String((esp as any)[c.k]) ? ` · catálogo: ${cat[c.k]}` : ""}</label>
-              <input value={(esp as any)[c.k]} readOnly={!editable(c.k)} onChange={(x) => setEsp({ ...esp, [c.k]: x.target.value })}
+              <label htmlFor={`es-${c.k}-${e.id}`}>{c.l}{!vacio(cat[c.k]) && String(cat[c.k]) !== String((esp as any)[c.k]) ? ` · catálogo: ${cat[c.k]}` : ""}</label>
+              <input id={`es-${c.k}-${e.id}`} value={(esp as any)[c.k]} readOnly={!editable(c.k)} onChange={(x) => setEsp({ ...esp, [c.k]: x.target.value })}
                 placeholder={editable(c.k) ? "vacío" : ""} />
             </div>
           ))}
           <div className={`field span-3${editable("requisito") ? "" : " readonly"}`}>
-            <label>Requisito (texto){!vacio(cat.requisito) && cat.requisito !== esp.requisito ? ` · catálogo: ${cat.requisito}` : ""}</label>
-            <input value={esp.requisito} readOnly={!editable("requisito")} onChange={(x) => setEsp({ ...esp, requisito: x.target.value })} />
+            <label htmlFor={`rq-${e.id}`}>Requisito (texto){!vacio(cat.requisito) && cat.requisito !== esp.requisito ? ` · catálogo: ${cat.requisito}` : ""}</label>
+            <input id={`rq-${e.id}`} value={esp.requisito} readOnly={!editable("requisito")} onChange={(x) => setEsp({ ...esp, requisito: x.target.value })} />
           </div>
           <div className={`field span-2${esJefatura && puedeCapturar ? "" : " readonly"}`}>
-            <label>Fórmula {nCampos > 0 ? `(campos C1..C${nCampos})` : ""}</label>
-            <input value={esp.formula} readOnly={!(esJefatura && puedeCapturar)} style={{ fontFamily: "'JetBrains Mono', monospace" }}
+            <label htmlFor={`fx-${e.id}`}>Fórmula {nCampos > 0 ? `(campos C1..C${nCampos})` : ""}</label>
+            <input id={`fx-${e.id}`} value={esp.formula} readOnly={!(esJefatura && puedeCapturar)} style={{ fontFamily: "'JetBrains Mono', monospace" }}
               placeholder={esJefatura ? "p. ej. (C1 - C2) / C3 * 100" : "sin fórmula: el valor se ingresa directo"}
               onChange={(x) => setEsp({ ...esp, formula: x.target.value })} />
           </div>
@@ -469,8 +469,8 @@ export default function EditorEnsayo({
           {e.tipoDato === "atributo" ? (
             <div className="form-grid cols-3" style={{ marginTop: 6 }}>
               <div className="field">
-                <label>Veredicto del analista <span className="req">*</span></label>
-                <div style={{ display: "flex", gap: 14, paddingTop: 4 }}>
+                <label id={`va-${e.id}`}>Veredicto del analista <span className="req">*</span></label>
+                <div role="radiogroup" aria-labelledby={`va-${e.id}`} style={{ display: "flex", gap: 14, paddingTop: 4 }}>
                   {(["cumple", "no_cumple"] as const).map((v) => (
                     <label key={v} style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 400, textTransform: "none", fontSize: 12.5 }}>
                       <input type="radio" style={{ width: "auto" }} checked={atributo === v} onChange={() => setAtributo(v)} name={`atr-${e.id}`} />
@@ -480,12 +480,12 @@ export default function EditorEnsayo({
                 </div>
               </div>
               <div className="field">
-                <label>Lo observado (opcional)</label>
-                <input value={valor} onChange={(x) => setValor(x.target.value)} placeholder={e.requisito ? `Requisito: ${e.requisito}` : ""} />
+                <label htmlFor={`ob-${e.id}`}>Lo observado (opcional)</label>
+                <input id={`ob-${e.id}`} value={valor} onChange={(x) => setValor(x.target.value)} placeholder={e.requisito ? `Requisito: ${e.requisito}` : ""} />
               </div>
               <div className="field">
-                <label>Observación {atributo === "no_cumple" && <span className="req">*</span>}</label>
-                <input value={observacion} onChange={(x) => setObservacion(x.target.value)} />
+                <label htmlFor={`oa-${e.id}`}>Observación {atributo === "no_cumple" && <span className="req">*</span>}</label>
+                <input id={`oa-${e.id}`} value={observacion} onChange={(x) => setObservacion(x.target.value)} />
               </div>
             </div>
           ) : nCampos > 0 && e.formulaAplicable ? (
@@ -531,8 +531,8 @@ export default function EditorEnsayo({
                 </p>
               )}
               <div className="field">
-                <label>{e.planClases ? `Valores de las ${e.planClases.n} unidades` : "Valor o réplicas"}{esp.unidad ? ` (${esp.unidad})` : ""}</label>
-                <input value={valor} onChange={(x) => setValor(x.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace" }}
+                <label htmlFor={`vr-${e.id}`}>{e.planClases ? `Valores de las ${e.planClases.n} unidades` : "Valor o réplicas"}{esp.unidad ? ` (${esp.unidad})` : ""}</label>
+                <input id={`vr-${e.id}`} value={valor} onChange={(x) => setValor(x.target.value)} style={{ fontFamily: "'JetBrains Mono', monospace" }}
                   placeholder="12,4   ·   o réplicas: 12,4 12,6 12,5" />
                 <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
                   {e.planClases ? "Sepárelas con espacio o punto y coma; cada valor es una unidad" : "Varias réplicas: sepárelas con espacio o punto y coma; se promedian"}
@@ -540,8 +540,8 @@ export default function EditorEnsayo({
                 </span>
               </div>
               <div className="field">
-                <label>Observación (opcional)</label>
-                <input value={observacion} onChange={(x) => setObservacion(x.target.value)} />
+                <label htmlFor={`on-${e.id}`}>Observación (opcional)</label>
+                <input id={`on-${e.id}`} value={observacion} onChange={(x) => setObservacion(x.target.value)} />
               </div>
             </div>
           )}
