@@ -58,8 +58,7 @@ import {
   laboratorioDeResultado,
   resumenCostos,
   totalLinea,
-  type LineaCostoReal,
-} from "./costos-reales";
+  type LineaCostoReal, TIPOS_GASTO_COMISION, lineasSugeridas } from "./costos-reales";
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
 
@@ -287,6 +286,8 @@ const LineaBody = z.object({
   cantidad: z.number().finite().min(0).max(1_000_000),
   unidad: z.string().trim().max(20).nullable().optional(),
   costoUnitario: z.number().finite().min(0).max(1_000_000_000),
+  ordenInternaId: z.string().uuid().nullable().optional(),
+  tipoGasto: z.enum(TIPOS_GASTO_COMISION).nullable().optional(),
 });
 const GuardarCostosBody = z.object({
   unidadId: z.string().uuid().optional(),
@@ -337,7 +338,8 @@ export class CostosRealesService {
       ? await this.prisma.$queryRawUnsafe<any[]>(
           `SELECT l.id, l.categoria, l.cargo, l.consumible_id AS "consumibleId", l.equipo_id AS "equipoId", l.descripcion,
                   l.cantidad::float8 AS cantidad, l.unidad, l.costo_unitario::float8 AS "costoUnitario", l.total::float8 AS total,
-                  c.nombre AS "consumibleNombre", e.nombre AS "equipoNombre", e.codigo AS "equipoCodigo"
+                  c.nombre AS "consumibleNombre", e.nombre AS "equipoNombre", e.codigo AS "equipoCodigo",
+                  l.orden_interna_id AS "ordenInternaId", l.tipo_gasto AS "tipoGasto"
              FROM ot_costo_real_linea l
              LEFT JOIN consumible c ON c.id = l.consumible_id
              LEFT JOIN equipo e ON e.id = l.equipo_id
@@ -452,11 +454,40 @@ export class CostosRealesService {
       estimacion,
       comparacion: comparar(resumen, estimacion),
       cargos,
-      sugerencias: { equipos, consumos },
+      sugerencias: { equipos, consumos, lineas: await this.sugerenciasR4d(ot.id, unidad, cot?.id ?? null, lineas) },
       resultadosSinAprobar: sinAprobar,
       puedeGestionar,
       erroresCierre: estado === "cerrada" ? [] : erroresCierrePlanilla({ estado, lineas, resultadosSinAprobar: sinAprobar }),
     };
+  }
+
+  /**
+   * Órdenes internas de la OT respondidas con costo directo (las que emitió este
+   * laboratorio, o todas si la OT tiene un solo laboratorio) y gastos de comisión
+   * estimados por el laboratorio en el costeo de la cotización (BL-193, BL-194).
+   */
+  private async sugerenciasR4d(otId: string, unidadId: string, cotizacionId: string | null, lineas: LineaCostoReal[]) {
+    const ordenes = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT oi.id, oi.numero, fd.nombre AS destino, oi.costo_directo::float8 AS "costoDirecto"
+         FROM orden_interna oi
+         LEFT JOIN cat_familia fd ON fd.id = oi.destino_lab
+         LEFT JOIN cat_familia fo ON fo.id = oi.origen_lab
+        WHERE oi.ot_id = $1::uuid AND oi.deleted_at IS NULL AND oi.costo_directo IS NOT NULL
+          AND (oi.origen_lab IS NULL OR fo.codsucdel IS NULL OR EXISTS (
+                SELECT 1 FROM unidad u WHERE u.id = $2::uuid AND fo.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))))
+        ORDER BY oi.numero`,
+      otId,
+      unidadId,
+    ).catch(() => []);
+    const costeo = cotizacionId
+      ? (await this.prisma.$queryRawUnsafe<{ costeo: any }[]>(
+          `SELECT costeo FROM solicitud_costeo WHERE cotizacion_id = $1::uuid AND unidad_id = $2::uuid AND deleted_at IS NULL AND costeo IS NOT NULL
+            ORDER BY respondida_at DESC NULLS LAST LIMIT 1`,
+          cotizacionId,
+          unidadId,
+        ).catch(() => []))[0]?.costeo ?? null
+      : null;
+    return lineasSugeridas(ordenes, costeo, lineas);
   }
 
   async guardar(otId: string, body: z.infer<typeof GuardarCostosBody>, req: any) {
@@ -478,6 +509,12 @@ export class CostosRealesService {
       const ok = await this.prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT id FROM equipo WHERE id = ANY($1::uuid[]) AND tenant_id = $2::uuid`, equipoIds, tenantId);
       if (ok.length !== equipoIds.length) errores.push("Algún equipo indicado no existe.");
     }
+    // Las órdenes internas valorizadas deben ser de esta OT (EP-00 7.1).
+    const oiIds = [...new Set(lineas.map((l) => l.ordenInternaId).filter((x): x is string => !!x))];
+    if (oiIds.length) {
+      const ok = await this.prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT id FROM orden_interna WHERE id = ANY($1::uuid[]) AND ot_id = $2::uuid AND deleted_at IS NULL`, oiIds, ot.id);
+      if (ok.length !== oiIds.length) errores.push("Alguna orden interna indicada no es de esta OT.");
+    }
     if (errores.length) throw new BadRequestException(errores.join(" "));
 
     const usuario = req?.user?.sub ?? null;
@@ -496,10 +533,12 @@ export class CostosRealesService {
       for (let i = 0; i < lineas.length; i++) {
         const l = lineas[i];
         await tx.$executeRawUnsafe(
-          `INSERT INTO ot_costo_real_linea (planilla_id, orden, categoria, cargo, consumible_id, equipo_id, descripcion, cantidad, unidad, costo_unitario, total)
-           VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6::uuid, $7, $8, $9, $10, $11)`,
+          `INSERT INTO ot_costo_real_linea (planilla_id, orden, categoria, cargo, consumible_id, equipo_id, descripcion, cantidad, unidad, costo_unitario, total,
+                                            orden_interna_id, tipo_gasto)
+           VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6::uuid, $7, $8, $9, $10, $11, $12::uuid, $13)`,
           fila.id, i, l.categoria, l.categoria === "horas_hombre" ? l.cargo ?? null : null, l.consumibleId ?? null, l.equipoId ?? null,
           l.descripcion?.trim() || null, l.cantidad, l.unidad?.trim() || null, l.costoUnitario, totalLinea(l),
+          l.categoria === "ot_interna" ? l.ordenInternaId ?? null : null, l.categoria === "comision" ? l.tipoGasto ?? null : null,
         );
       }
     });
