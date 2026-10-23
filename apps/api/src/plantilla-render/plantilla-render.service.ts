@@ -1,4 +1,5 @@
 import { portadaDesdeEncargo } from "../ot/encargo/reglas-encargo";
+import { nombreItemInspeccion } from "../especificacion-tecnica/reglas-et";
 import { observacionConDecision } from "../laboratorio/veredicto-decidido";
 import { etiquetaVeredicto } from "../laboratorio/veredicto";
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common";
@@ -255,6 +256,16 @@ export class PlantillaRenderService {
     for (const l of limites) if (!limitePorAnalito.has(l.analitoId)) limitePorAnalito.set(l.analitoId, l);
 
     const ubicaciones = await this.ubicaciones(otId);
+    // B-033: los ítems del checklist sin ensayo del catálogo se imprimen con su punto de la E.T.
+    const puntosSinEnsayo = [...new Set(resultados.filter((r) => !r.catMetodoId && !r.catAnalitoId && !r.analitoId && r.etPuntoId).map((r) => r.etPuntoId!))];
+    const nombrePunto = new Map<string, string>(
+      puntosSinEnsayo.length
+        ? (await this.prisma.$queryRawUnsafe<{ id: string; punto: string; caracteristica: string; requisito: string | null }[]>(
+            `SELECT id, punto, caracteristica, requisito FROM especificacion_tecnica_punto WHERE id = ANY($1::uuid[])`,
+            puntosSinEnsayo,
+          )).map((p) => [p.id, nombreItemInspeccion(p)])
+        : [],
+    );
     // B-032: nombre del revisor que decidió el veredicto a mano (se anota en la observación).
     const decisores = [...new Set(resultados.map((r) => r.veredictoDecididoPor).filter((x): x is string => !!x))];
     const nombreDecisor = new Map(
@@ -273,7 +284,7 @@ export class PlantillaRenderService {
         muestraId: r.muestraId,
         muestraCodigo: r.muestra?.codigo ?? "",
         muestraNombre: r.muestra?.nombre ?? null,
-        ensayo: r.catAnalito?.nombre ?? r.analito?.nombre ?? null,
+        ensayo: r.catAnalito?.nombre ?? r.analito?.nombre ?? (r.etPuntoId ? nombrePunto.get(r.etPuntoId) ?? null : null),
         metodoNombre: r.catMetodo?.nombre ?? null,
         metodoNorma: r.catMetodo?.norma ?? null,
         unidad: r.unidad ?? r.catAnalito?.unidad ?? r.analito?.unidad ?? legado?.unidad ?? null,

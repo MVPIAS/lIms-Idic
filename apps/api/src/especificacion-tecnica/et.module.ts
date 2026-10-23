@@ -67,6 +67,8 @@ import {
   erroresPunto,
   motivoNoPermitido,
   planDesglose,
+  especDePunto,
+  nombreItemInspeccion,
   puedeGestionar,
   puedeVer,
   siguienteVersion,
@@ -856,6 +858,24 @@ export class EspecificacionTecnicaService {
         let ensayosProducto = 0;
         if (delProducto.length)
           ensayosProducto = (await this.puente.generarAnalisis(ot.id, { muestraId, metodoIds: delProducto }, tenantId, req, tx)).creados;
+        // B-033: los puntos «Inspección» sin ensayo del catálogo forman el checklist: un ítem de
+        // atributo por punto (Cumple / No cumple), ligado al punto. Idempotente por punto.
+        for (const p of d.plan!.inspecciones.sinEnsayo ?? []) {
+          const espec = especDePunto(p);
+          const n = await tx.$executeRawUnsafe(
+            `INSERT INTO resultado (tenant_id, ot_id, muestra_id, et_punto_id, estado, tipo_dato, requisito, unidad, clase_defecto, espec_origen, replicas, veredicto)
+             SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, 'pendiente', 'atributo', $5, $6, $7, 'orden', '[]'::jsonb, 'pendiente'
+              WHERE NOT EXISTS (SELECT 1 FROM resultado r WHERE r.muestra_id = $3::uuid AND r.et_punto_id = $4::uuid AND r.deleted_at IS NULL)`,
+            tenantId,
+            ot.id,
+            muestraId,
+            p.id,
+            espec.requisito ?? p.caracteristica ?? null,
+            espec.unidad,
+            espec.claseDefecto,
+          );
+          ensayosProducto += Number(n) || 0;
+        }
         const existentes = await tx.muestra.findMany({ where: { tenantId, codigo: { startsWith: m.codigo } }, select: { codigo: true } });
         const codigos = existentes.map((e) => e.codigo);
         const yaHechos = new Set(
