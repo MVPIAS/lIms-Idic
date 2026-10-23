@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { apiGet, asArray } from "./api";
 
 // Cliente devuelto por GET /api/clientes?search=&limit=50 → {data:[{id,razonSocial,rut,tipo}], meta}.
-export type Cliente = { id: string; razonSocial: string; rut?: string; tipo?: string };
+export type Cliente = { id: string; razonSocial: string; rut?: string; tipo?: string; tipoEtiqueta?: string | null };
 
 // Selector/buscador de cliente real: consulta la API con debounce y devuelve al padre
 // el cliente elegido (id + razón social). Reemplaza el antiguo input de texto libre que
@@ -76,7 +76,7 @@ export default function ClienteSelector({
             className="pill blue"
             style={{ fontSize: 13, padding: "6px 10px", flex: 1, display: "inline-flex", alignItems: "center", gap: 6 }}
           >
-            <span className="codigo">{value.tipo || "cliente"}</span>
+            <span className="codigo">{value.tipoEtiqueta || value.tipo || "cliente"}</span>
             {etiqueta}
           </span>
           <button type="button" className="btn outline sm" onClick={limpiar}>Cambiar</button>
@@ -112,7 +112,7 @@ export default function ClienteSelector({
                   <td>
                     <div style={{ fontWeight: 600 }}>{c.razonSocial}</div>
                     <div style={{ fontSize: 12, color: "var(--muted)" }}>
-                      {c.rut || "sin RUT"}{c.tipo ? ` · ${c.tipo}` : ""}
+                      {c.rut || "sin RUT"}{c.tipoEtiqueta || c.tipo ? ` · ${c.tipoEtiqueta || c.tipo}` : ""}
                     </div>
                   </td>
                 </tr>

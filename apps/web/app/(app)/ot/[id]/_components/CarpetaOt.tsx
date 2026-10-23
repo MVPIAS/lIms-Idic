@@ -15,6 +15,7 @@ import { fechaDia, fechaHora, clp } from "@/lib/format";
 import { toast } from "@/components/ui/feedback";
 import { ESTADO_DOC, abrirPdf } from "@/lib/documentos";
 import { ESTADO_OFICIO } from "@/lib/oficios";
+import { textoMedio } from "@/lib/etiquetas";
 
 export default function CarpetaOt({ otId }: { otId: string }) {
   const [c, setC] = useState<any>(null);
@@ -130,7 +131,7 @@ export default function CarpetaOt({ otId }: { otId: string }) {
         "Envíos al cliente",
         s.envios.length,
         <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
-          {s.envios.map((e: any, i: number) => <li key={i}>{fechaDia(e.fecha)} · {e.medio} · {e.destinatario}: {(e.documentos ?? []).map((x: any) => x.numero).join(", ")}</li>)}
+          {s.envios.map((e: any, i: number) => <li key={i}>{fechaDia(e.fecha)} · {textoMedio(e.medio)} · {e.destinatario}: {(e.documentos ?? []).map((x: any) => x.numero).join(", ")}</li>)}
         </ul>,
       )}
 

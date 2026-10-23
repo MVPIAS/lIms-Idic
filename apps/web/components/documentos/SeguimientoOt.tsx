@@ -11,6 +11,7 @@
  *      factura (por correo adjunta los PDF). «Registrar envío».
  * API: GET /ot/:id/seguimiento, POST notificar-plazo, recepcion-informe-dco, documentos-registro, envios.
  */
+import { textoMedio } from "@/lib/etiquetas";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { llamar } from "@/lib/laboratorio";
@@ -100,7 +101,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
           <div style={{ fontSize: 11, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>Plazo informado al cliente</div>
           {d.plazo.notificadoAt ? (
             <div style={{ fontSize: 12.5 }}>
-              <span className="pill green">Informado</span> el {fechaHora(d.plazo.notificadoAt)} · {d.plazo.medio}
+              <span className="pill green">Informado</span> el {fechaHora(d.plazo.notificadoAt)} · {textoMedio(d.plazo.medio)}
               <div style={{ color: "var(--muted)" }}>Entrega comprometida: {fechaDia(d.plazo.fechaCompromiso)}</div>
             </div>
           ) : (

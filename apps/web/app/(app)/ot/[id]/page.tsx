@@ -9,6 +9,7 @@ import { ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
 import { usePermisos } from "@/lib/permisos";
 import { llamar, etiquetaUnidad } from "@/lib/laboratorio";
 import { toast } from "@/components/ui/feedback";
+import { textoMedio } from "@/lib/etiquetas";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
 import RegistroMuestras from "./_components/RegistroMuestras";
@@ -67,11 +68,11 @@ function textoHistorial(h: any): string {
     return d.accion === "reabrir" ? `Planilla de costos reales reabierta · motivo: ${d.motivo ?? ""}` : `Planilla de costos reales cerrada · total $${Math.round(Number(d.total ?? 0)).toLocaleString("es-CL")}`;
   // Hitos del seguimiento (frente r4c): avisos, plazo, recepción DCO, despacho, envío y carpeta.
   if (h.tipo === "aviso") return `Aviso enviado: ${d.titulo ?? d.tipo ?? ""}${d.personas ? ` (${d.personas} persona${d.personas === 1 ? "" : "s"})` : ""}`;
-  if (h.tipo === "plazo_notificado") return `Plazo informado al cliente: entrega el ${d.fecha ?? "—"}${d.medio ? ` · por ${d.medio}` : ""}`;
+  if (h.tipo === "plazo_notificado") return `Plazo informado al cliente: entrega el ${d.fecha ?? "—"}${d.medio ? ` · por ${textoMedio(d.medio)}` : ""}`;
   if (h.tipo === "recepcion_dco") return `Recepción del informe en DCO el ${d.fecha ?? "—"} · ${d.estado ?? ""}${d.texto ? ` (${d.texto})` : ""}`;
   if (h.tipo === "despacho") return `Documento ${d.numero ?? ""} despachado a ${d.destino ?? "—"}${d.ejemplares ? ` · ${d.ejemplares} ejemplar(es)` : ""}`;
   if (h.tipo === "despacho_recibido") return `Documento ${d.numero ?? ""} recibido por ${d.destino ?? "el destino"}`;
-  if (h.tipo === "envio_cliente") return `Envío al cliente por ${d.medio ?? "—"} a ${d.destinatario ?? "—"}: ${(d.documentos ?? []).join(", ")}`;
+  if (h.tipo === "envio_cliente") return `Envío al cliente por ${textoMedio(d.medio)} a ${d.destinatario ?? "—"}: ${(d.documentos ?? []).join(", ")}`;
   if (h.tipo === "documento_registro") return `Documento ${d.tipo ?? ""} Nº ${d.numero ?? ""} registrado${d.version > 1 ? ` (versión ${d.version})` : ""}`;
   if (h.tipo === "carpeta_archivada") return `Carpeta de Trabajo archivada${d.ubicacion ? ` en ${d.ubicacion}` : ""}`;
   if (h.tipo === "oficio") return `Oficio ${d.numero ?? ""} ${d.accion ?? ""}`;
