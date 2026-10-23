@@ -9,6 +9,7 @@ import { generarPdf } from "../../plantilla-render/pdf.renderer";
 import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 import { cuerpoDocumentoClasificacion } from "./documento-clasificacion";
 import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../../common/adjuntos";
+import { urlVerificacionBase } from "../../common/url-verificacion";
 
 /** Adjuntos de la clasificación: la curva tiempo/presión del MCU (IT23, «registro permanente»). */
 export const CLASES_ADJUNTO_CLASIFICACION = ["curva_it23"] as const;
@@ -137,7 +138,7 @@ export class ClasificacionService {
   ) {}
 
   private get baseVerificacion(): string {
-    return (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
+    return urlVerificacionBase();
   }
 
   /** Listas vigentes (parámetros del sistema) para los combos y la validación. */

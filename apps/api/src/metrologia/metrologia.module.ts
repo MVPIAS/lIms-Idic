@@ -51,6 +51,7 @@ import {
 } from "./metrologia-ot.reglas";
 import { MetrologiaOtController, MetrologiaOtService } from "./metrologia-ot.controller";
 import { MetrologiaDocumentosController, MetrologiaDocumentosService } from "./metrologia-documentos.controller";
+import { urlVerificacionBase } from "../common/url-verificacion";
 import {
   avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, motivoNoEmiteMetrologo, nuevoCodigoVerificacion, numeroCertificado,
   revisarPatrones, uCertificada, type FilaCmc, type Firmante,
@@ -73,7 +74,7 @@ const TIPO_DOC = "CERTIFICADO_CALIBRACION";
 const CAMPOS_MAESTRO: Record<string, string[]> = { ITM02: ["mcm"], ITV05: ["cmcTabla", "tan", "uEqW", "uEqA"], ITM03: ["rho0", "rhoAl"] };
 /** Motores cuya U certificada es la ASIGNADA por clase (OIML R111), no la calculada. */
 const U_ASIGNADA = new Set(["ITM01", "ITM03"]);
-const URL_VERIFICACION = () => (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
+const URL_VERIFICACION = () => urlVerificacionBase();
 
 const PuntoSchema = z.object({
   nominal: z.coerce.number(),

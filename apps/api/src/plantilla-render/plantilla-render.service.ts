@@ -67,6 +67,7 @@ import {
 } from "./bloques-informe";
 import { anioChile } from "../common/fecha-chile";
 import { leerCondicion2 } from "../laboratorio/requisito-compuesto";
+import { urlVerificacionBase } from "../common/url-verificacion";
 
 /** Fotos como máximo en el anexo fotográfico de un documento. */
 export const MAX_FOTOS_INFORME = 24;
@@ -188,7 +189,7 @@ export class PlantillaRenderService {
 
   /** URL pública de verificación; configurable por despliegue. */
   private get baseVerificacion(): string {
-    return (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
+    return urlVerificacionBase();
   }
 
   /* ====================================================================== */
