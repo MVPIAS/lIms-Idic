@@ -117,7 +117,9 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
 
   /** Referencia sugerida por el documento de solicitud (EP-00 1.1): «OF Nº …» o «Correo de fecha …». */
   function referenciaSugerida(medio: string, numero: string, fechaSol: string): string {
-    if (medio === "oficio" && numero.trim()) return `OF Nº ${numero.trim()}`;
+    // «OF 1234», «Oficio Nº 1234» o «1234» dan la misma referencia: «OF Nº 1234».
+    const n = numero.trim().replace(/^(of(icio)?\.?\s*)?(n[º°o]\.?\s*)?/i, "").trim();
+    if (medio === "oficio" && n) return `OF Nº ${n}`;
     if (medio === "correo" && fechaSol) return `Correo de fecha ${fechaSol.slice(8, 10)}-${fechaSol.slice(5, 7)}-${fechaSol.slice(0, 4)}`;
     return "";
   }

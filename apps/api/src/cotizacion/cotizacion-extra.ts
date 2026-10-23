@@ -38,7 +38,8 @@ const CAMPOS: Record<keyof DatosSolicitud, [string, string]> = {
  * si llegó por oficio; «Correo de fecha dd-mm-aaaa» si llegó por correo.
  */
 export function referenciaDesdeSolicitud(d: DatosSolicitud): string | null {
-  if (d.solicitudMedio === "oficio" && d.solicitudNumero?.trim()) return `OF Nº ${d.solicitudNumero.trim()}`;
+  const n = (d.solicitudNumero ?? "").trim().replace(/^(of(icio)?\.?\s*)?(n[º°o]\.?\s*)?/i, "").trim();
+  if (d.solicitudMedio === "oficio" && n) return `OF Nº ${n}`;
   if (d.solicitudMedio === "correo" && d.solicitudFecha) {
     const [a, m, dd] = d.solicitudFecha.slice(0, 10).split("-");
     return `Correo de fecha ${dd}-${m}-${a}`;
