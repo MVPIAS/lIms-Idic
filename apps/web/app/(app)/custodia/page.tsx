@@ -50,6 +50,9 @@ const FORM_VACIO = {
   humedadPct: "",
   selloNumero: "",
   observaciones: "",
+  cantidadDevuelta: "",
+  guiaDespacho: "",
+  medioDevolucion: "",
 };
 
 export default function CustodiaPage() {
@@ -162,6 +165,10 @@ export default function CustodiaPage() {
       v.aUsuarioId = "Una transferencia requiere el responsable receptor.";
     }
     if (f.tempCelsius !== "" && !esNumero(String(f.tempCelsius))) v.tempCelsius = "Temperatura no numérica.";
+    if (f.evento === "devolucion") {
+      if (!(Number(String(f.cantidadDevuelta).replace(",", ".")) > 0)) v.cantidadDevuelta = "Indique la cantidad devuelta.";
+      if (!String(f.guiaDespacho).trim()) v.guiaDespacho = "Indique el Nº de la guía de despacho.";
+    }
     if (f.humedadPct !== "") {
       if (!esNumero(String(f.humedadPct))) v.humedadPct = "Humedad no numérica.";
       else if (Number(f.humedadPct) < 0 || Number(f.humedadPct) > 100) v.humedadPct = "La humedad debe estar entre 0 y 100 %.";
@@ -181,6 +188,10 @@ export default function CustodiaPage() {
       humedadPct: f.humedadPct === "" ? null : Number(f.humedadPct),
       selloNumero: f.selloNumero || null,
       observaciones: f.observaciones || null,
+      // Devolución de excedente (EP-03 7.2): cantidad, guía de despacho y medio.
+      ...(f.evento === "devolucion"
+        ? { cantidadDevuelta: f.cantidadDevuelta === "" ? null : Number(String(f.cantidadDevuelta).replace(",", ".")), guiaDespacho: f.guiaDespacho || null, medioDevolucion: f.medioDevolucion || null }
+        : {}),
     };
     try {
       const res = await fetch(`${API}/custodia`, {
@@ -385,6 +396,24 @@ export default function CustodiaPage() {
                 onChange={(e) => setF({ ...f, ubicacionDestino: e.target.value })}
               />
             </div>
+            {f.evento === "devolucion" && (
+              <>
+                <div className="field">
+                  <label htmlFor="cu-cant">Cantidad devuelta <span className="req">*</span></label>
+                  <input id="cu-cant" inputMode="decimal" value={f.cantidadDevuelta} onChange={(e) => setF({ ...f, cantidadDevuelta: e.target.value })} />
+                  {errs.cantidadDevuelta && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.cantidadDevuelta}</small>}
+                </div>
+                <div className="field">
+                  <label htmlFor="cu-guia">Guía de despacho Nº <span className="req">*</span></label>
+                  <input id="cu-guia" maxLength={40} value={f.guiaDespacho} onChange={(e) => setF({ ...f, guiaDespacho: e.target.value })} />
+                  {errs.guiaDespacho && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.guiaDespacho}</small>}
+                </div>
+                <div className="field">
+                  <label htmlFor="cu-medio">Medio</label>
+                  <input id="cu-medio" maxLength={40} placeholder="courier, retiro del proveedor…" value={f.medioDevolucion} onChange={(e) => setF({ ...f, medioDevolucion: e.target.value })} />
+                </div>
+              </>
+            )}
             <div className="field">
               <label>N° de sello</label>
               <input value={f.selloNumero} onChange={(e) => setF({ ...f, selloNumero: e.target.value })} />
@@ -506,6 +535,7 @@ export default function CustodiaPage() {
 
                   <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {c.sello_numero && <span>Sello {c.sello_numero}</span>}
+                    {c.guia_despacho && <span>Devueltas {String(Number(c.cantidad_devuelta)).replace(".", ",")} · guía {c.guia_despacho}{c.medio_devolucion ? ` · ${c.medio_devolucion}` : ""}</span>}
                     {c.temp_celsius != null && <span>{num(c.temp_celsius, 1)} °C</span>}
                     {c.humedad_pct != null && <span>{pct(c.humedad_pct)} HR</span>}
                     {c.registrado_por_usuario && <span>Registró: {nombreUsuario(c.registrado_por_usuario)}</span>}

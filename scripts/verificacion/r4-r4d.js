@@ -526,6 +526,50 @@ async function main() {
       await ok(U.calidad, "PUT", ruta, { qcRequerido: !!antes.qcRequerido, qcTipos: antes.qcTipos ?? [], qcCriterios: antes.qcCriterios ?? {} });
     }
   });
+
+  /* ------------------------------------------------------------ T08 */
+  await paso("BL-211 · Recepción de ítems en DCO: portador, fecha, cantidad y condición; entrega al laboratorio", async () => {
+    const ruta = `/ot/${C.ot.id}/recepcion-dco`;
+    const cuerpo = { portadorRut: rutValido(12345678), portadorNombre: "C. D.", portadorDireccion: "Av. Prueba 100", fechaRecibo: new Date().toISOString(), cantidadItems: 12, condicion: "cumple" };
+    await exigir(403, U.lqcAnalista, "POST", ruta, cuerpo);
+    await exigir(400, U.ventas, "POST", ruta, { ...cuerpo, portadorRut: "12.345.678-0" }, /RUT/);
+    await exigir(400, U.ventas, "POST", ruta, { ...cuerpo, condicion: "no_cumple" }, /No cumple/);
+    const r = await ok(U.ventas, "POST", ruta, cuerpo);
+    const rec = r.recepciones[r.recepciones.length - 1];
+    afirmar(rec.cantidadItems === 12 && rec.condicion === "cumple" && !rec.entregadoLabAt, "recepción");
+    await ok(U.recepcion, "POST", `${ruta}/${rec.id}/entregar`, {});
+    await exigir(409, U.ventas, "POST", `${ruta}/${rec.id}/entregar`, {}, /ya se entregó/);
+    const v = await ok(U.lqcJefe, "GET", ruta);
+    afirmar(v.puedeRegistrar === false && v.recepciones.some((x) => x.id === rec.id && x.entregadoLabAt), "el laboratorio la ve entregada");
+    return `${rec.cantidadItems} ítems · cumple · entregados al laboratorio`;
+  });
+
+  await paso("BL-212 · Distribución de la muestra: porción, fecha y hora por laboratorio con ensayos (otro laboratorio no)", async () => {
+    const mId = C.res.muestraId;
+    const ruta = `/muestras/${mId}/distribucion`;
+    const d = await ok(U.recepcion, "GET", ruta);
+    const lqc = d.laboratorios.find((l) => l.codigo === "LQC");
+    afirmar(lqc && /251/.test(lqc.ensayos), `laboratorios ${JSON.stringify(d.laboratorios)}`);
+    const fila = { unidadId: lqc.unidadId, porcion: "500 mL", fechaHora: new Date().toISOString(), recibidoPor: "E. F." };
+    await exigir(400, U.recepcion, "PUT", ruta, { filas: [{ ...fila, unidadId: C.lpn.id }] }, /no tiene ensayos/);
+    await exigir(403, "demo.lpn.analista1", "PUT", ruta, { filas: [fila] });
+    await exigir(403, U.ventas, "PUT", ruta, { filas: [fila] });
+    const r = await ok(U.recepcion, "PUT", ruta, { filas: [fila] });
+    afirmar(r.distribucion.length === 1 && r.distribucion[0].porcion === "500 mL", "distribución");
+    const r2 = await ok(U.recepcion, "PUT", ruta, { filas: [{ ...fila, porcion: "450 mL" }] });
+    afirmar(r2.distribucion.length === 1 && r2.distribucion[0].porcion === "450 mL", "corrección reemplaza");
+    return "LQC · 450 mL (corregida)";
+  });
+
+  await paso("BL-213 · Devolución del excedente con cantidad y guía de despacho en la cadena de custodia", async () => {
+    const base = { muestraId: C.res.muestraId, evento: "devolucion", motivo: "Devolución del excedente al proveedor" };
+    await exigir(400, U.recepcion, "POST", "/custodia", base, /guía de despacho/);
+    const c = await ok(U.recepcion, "POST", "/custodia", { ...base, cantidadDevuelta: 8, guiaDespacho: `GD-${sello.slice(-5)}`, medioDevolucion: "courier" });
+    const cadena = lista(await ok(U.recepcion, "GET", `/custodia?muestraId=${C.res.muestraId}&limit=50`));
+    const dev = cadena.find((x) => x.id === c.id) ?? c;
+    afirmar(Number(dev.cantidad_devuelta) === 8 && dev.guia_despacho === `GD-${sello.slice(-5)}`, `devolución ${JSON.stringify([dev.cantidad_devuelta, dev.guia_despacho])}`);
+    return `8 unidades · guía GD-${sello.slice(-5)}`;
+  });
 }
 
 main()
