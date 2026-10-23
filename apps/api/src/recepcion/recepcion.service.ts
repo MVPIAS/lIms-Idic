@@ -20,6 +20,13 @@ import {
 
 type Db = PrismaService | Prisma.TransactionClient;
 
+/**
+ * B-011: el elemento genérico de cada laboratorio del catálogo heredado («Lab.
+ * Quimico Central», «Lab.Textil»…, subgrupo «Sub Grupo IDIC») no es un producto
+ * (matriz): no se ofrece en la recepción (ot/alta-muestras.ts).
+ */
+const NO_GENERICO = `NOT EXISTS (SELECT 1 FROM cat_subgrupo sg WHERE sg.id = e.subgrupo_id AND lower(trim(sg.nombre)) = 'sub grupo idic')`;
+
 /** familia del catálogo (CODSUCDEL) contenida en el codsucdel de la unidad («3009/3008»). */
 const FAMILIA_DE_UNIDAD = `f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))`;
 
@@ -150,7 +157,7 @@ export class RecepcionService {
              FROM cat_elemento e
              JOIN cat_familia f ON f.id = e.familia_id
              JOIN unidad u ON u.id = $2::uuid AND ${FAMILIA_DE_UNIDAD}
-            WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL AND e.activo
+            WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL AND e.activo AND ${NO_GENERICO}
             ORDER BY e.nombre LIMIT 100`,
           tenantId,
           ot.unidadPrincipal,
@@ -162,7 +169,7 @@ export class RecepcionService {
         ? await this.prisma.$queryRawUnsafe<ProductoLab[]>(
             `SELECT e.id, e.codigo, e.nombre, e.nombre AS "nombreCatalogo", ${conMetodos} AS metodos, FALSE AS "delLaboratorio"
                FROM cat_elemento e
-              WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL AND e.activo
+              WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL AND e.activo AND ${NO_GENERICO}
                 AND (e.nombre ILIKE '%' || $2 || '%' OR e.codigo ILIKE $2 || '%')
               ORDER BY (e.nombre ILIKE $2 || '%') DESC, e.nombre LIMIT 20`,
             tenantId,
@@ -172,6 +179,8 @@ export class RecepcionService {
     const ids = new Set(propios.map((p) => p.id));
     return {
       laboratorio: unidad?.codigo ?? null,
+      // B-011: el laboratorio aún no tiene su lista de productos (categoría producto_lab): la pantalla lo dice.
+      sinLista: !!unidad && !propios.length,
       productos: propios.map((p) => ({ ...p, metodos: Number(p.metodos) })),
       encontrados: encontrados.filter((e) => !ids.has(e.id)).map((p) => ({ ...p, metodos: Number(p.metodos) })),
     };

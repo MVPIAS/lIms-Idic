@@ -81,7 +81,7 @@ const datosDe = (m: MuestraOt): DatosRecepcion => ({
 });
 
 /** Selector del producto (matriz): lista del laboratorio + búsqueda en el catálogo. */
-function SelectorProducto({ id, valor, onCambio, productos, otId, obligatorio, nombreActual }: {
+function SelectorProducto({ id, valor, onCambio, productos, otId, obligatorio, nombreActual, sinLista }: {
   id: string;
   valor: string;
   onCambio: (id: string, p: ProductoLab | null) => void;
@@ -89,6 +89,8 @@ function SelectorProducto({ id, valor, onCambio, productos, otId, obligatorio, n
   otId: string;
   obligatorio: boolean;
   nombreActual?: string | null;
+  /** El laboratorio aún no tiene lista de productos configurada (B-011). */
+  sinLista?: boolean;
 }) {
   const [busca, setBusca] = useState("");
   const [encontrados, setEncontrados] = useState<ProductoLab[]>([]);
@@ -123,6 +125,11 @@ function SelectorProducto({ id, valor, onCambio, productos, otId, obligatorio, n
       </select>
       <input aria-label="Buscar otro producto en el catálogo" value={busca} onChange={(e) => setBusca(e.target.value)}
         placeholder="Otro producto: buscar en el catálogo" style={{ marginTop: 4, fontSize: 12 }} />
+      {sinLista && (
+        <span className="hint" style={{ fontSize: 11 }}>
+          El laboratorio aún no tiene su lista de productos (Administración › Parámetros del sistema · «producto_lab»): búsquelo en el catálogo o descríbalo en la muestra.
+        </span>
+      )}
     </div>
   );
 }
@@ -141,6 +148,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   const [abierto, setAbierto] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [productos, setProductos] = useState<ProductoLab[]>([]);
+  const [sinListaProductos, setSinListaProductos] = useState(false);
 
   // Formulario de registro
   const [filas, setFilas] = useState<FilaRegistro[]>([filaVacia()]);
@@ -169,7 +177,9 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   }, [otId]);
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
-    llamar<{ productos: ProductoLab[] }>("GET", `/recepcion/ot/${otId}/productos`).then((r) => setProductos(r.productos)).catch(() => setProductos([]));
+    llamar<{ productos: ProductoLab[]; sinLista?: boolean }>("GET", `/recepcion/ot/${otId}/productos`)
+      .then((r) => { setProductos(r.productos); setSinListaProductos(!!r.sinLista); })
+      .catch(() => setProductos([]));
   }, [otId]);
 
   const cfg = d?.configRecepcion ?? null;
@@ -472,7 +482,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                             <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 6 }}>Recepción e identificación de {m.codigo}</div>
                             <div className="form-grid cols-2" style={{ marginBottom: 6 }}>
                               <SelectorProducto id={`prod-${m.id}`} valor={productoEdicion} onCambio={(id) => setProductoEdicion(id)} productos={productos}
-                                otId={otId} obligatorio={!!cfg?.productoObligatorio} nombreActual={m.productoNombre} />
+                                otId={otId} obligatorio={!!cfg?.productoObligatorio} nombreActual={m.productoNombre} sinLista={sinListaProductos} />
                             </div>
                             <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} labPrincipalId={d.ot.unidadPrincipal}
                               config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} />
@@ -527,7 +537,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                   <label htmlFor={`m-${i}-nombre`}>{unaPorEnvase ? `Envase ${i + 1}` : `Muestra ${i + 1}`} · descripción <span className="req">*</span></label>
                   <input id={`m-${i}-nombre`} value={f.nombre} maxLength={200} onChange={(e) => setFilas((xs) => xs.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))} />
                 </div>
-                <SelectorProducto id={`m-${i}-producto`} valor={f.productoId} productos={productos} otId={otId} obligatorio={!!cfg?.productoObligatorio}
+                <SelectorProducto id={`m-${i}-producto`} valor={f.productoId} productos={productos} otId={otId} obligatorio={!!cfg?.productoObligatorio} sinLista={sinListaProductos}
                   onCambio={(id, p) => {
                     setFilas((xs) => xs.map((x, j) => (j === i || (i === 0 && !x.productoId && !unaPorEnvase) ? { ...x, productoId: id } : x)));
                     if (id && p) cargarPanel(id, p.nombre);
