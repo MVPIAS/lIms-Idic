@@ -8,6 +8,7 @@ import {
   motivoNoPermitido,
   planDesglose,
   puedeGestionar,
+  puedeGestionarConSeccion,
   puedeVer,
   puntoDeEnsayo,
   siguienteVersion,
@@ -137,5 +138,20 @@ describe("E.T. · desglose producto → componentes e inspecciones (EP-03 1.3)",
   it("códigos de submuestra correlativos", () => {
     expect(codigoSubmuestra("OT-1-M1", [])).toBe("OT-1-M1-C1");
     expect(codigoSubmuestra("OT-1-M1", ["OT-1-M1", "OT-1-M1-C1", "OT-1-M1-C3", "OT-1-M10-C9"])).toBe("OT-1-M1-C4");
+  });
+});
+
+describe("B-071 · E.T. con laboratorios de la misma sección", () => {
+  const LCC = "lcc", LTX = "ltx", LPN = "lpn";
+  it("el Jefe LCC gestiona una E.T. de LCC y LTX (misma sección)", () => {
+    expect(puedeGestionarConSeccion([LCC, LTX], [LCC], [LCC, LTX])).toBe(true);
+  });
+  it("sin ninguno de sus laboratorios, o con uno de otra sección, no", () => {
+    expect(puedeGestionarConSeccion([LTX], [LCC], [LCC, LTX])).toBe(false);
+    expect(puedeGestionarConSeccion([LCC, LPN], [LCC], [LCC, LTX])).toBe(false);
+    expect(puedeGestionarConSeccion([], [LCC], [LCC, LTX])).toBe(false);
+  });
+  it("alcance global: todo", () => {
+    expect(puedeGestionarConSeccion([LPN], null)).toBe(true);
   });
 });
