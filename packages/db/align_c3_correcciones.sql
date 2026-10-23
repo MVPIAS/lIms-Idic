@@ -98,3 +98,32 @@ UPDATE cat_analito a
    AND a.unidad IS DISTINCT FROM 'K.U.';
 
 DROP TABLE IF EXISTS c3_campos_metodo;
+
+-- -----------------------------------------------------------------------------
+-- B-032 · «Decidir…» un veredicto (p. ej. un «< LD» frente a un máximo) exige
+--   motivo; queda en la bitácora del resultado y el informe lo anota
+--   (EP-02 3.5, §10.2).
+-- -----------------------------------------------------------------------------
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS veredicto_motivo text;
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS veredicto_decidido_por uuid;
+ALTER TABLE resultado ADD COLUMN IF NOT EXISTS veredicto_decidido_at timestamptz;
+COMMENT ON COLUMN resultado.veredicto_motivo IS 'Motivo del veredicto decidido a mano por el revisor (Decidir…); se anota en el informe.';
+
+-- Si el veredicto cambia por otra vía (nueva captura, reapertura, recálculo),
+-- la decisión manual deja de valer: se limpia para que el informe no la anote.
+CREATE OR REPLACE FUNCTION fn_resultado_veredicto_decidido() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.veredicto IS DISTINCT FROM OLD.veredicto
+     AND COALESCE(NULLIF(current_setting('lims.origen', true), ''), 'sistema') <> 'veredicto_manual' THEN
+    NEW.veredicto_motivo := NULL;
+    NEW.veredicto_decidido_por := NULL;
+    NEW.veredicto_decidido_at := NULL;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS trg_resultado_veredicto_decidido ON resultado;
+CREATE TRIGGER trg_resultado_veredicto_decidido
+  BEFORE UPDATE OF veredicto ON resultado
+  FOR EACH ROW EXECUTE FUNCTION fn_resultado_veredicto_decidido();

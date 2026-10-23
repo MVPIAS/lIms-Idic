@@ -328,8 +328,8 @@ async function main() {
   });
 
   await paso("D02-03 · El veredicto lo decide el revisor, no quien capturó; luego se revisa", async () => {
-    await exigir([403, 409], U.lqaA1, "POST", `/resultados/${C.rCen}/veredicto`, { veredicto: "cumple" });
-    const v = await ok(U.lqaJefe, "POST", `/resultados/${C.rCen}/veredicto`, { veredicto: "cumple" });
+    await exigir([403, 409], U.lqaA1, "POST", `/resultados/${C.rCen}/veredicto`, { veredicto: "cumple", motivo: "Límite de detección sobre el máximo: se decide por norma" });
+    const v = await ok(U.lqaJefe, "POST", `/resultados/${C.rCen}/veredicto`, { veredicto: "cumple", motivo: "Límite de detección sobre el máximo: se decide por norma" });
     afirmar(v.veredicto === "cumple", `veredicto ${v.veredicto}`);
     // Revisa el jefe del LQA (prueba de segregación del paso siguiente).
     await ok(U.lqaJefe, "POST", `/resultados/${C.rCen}/revisar`);

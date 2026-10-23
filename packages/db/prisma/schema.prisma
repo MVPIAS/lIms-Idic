@@ -1042,6 +1042,10 @@ model Resultado {
   cv         Decimal?  @db.Decimal(8, 2)
   unidad     String?   @db.VarChar(30)
   veredicto  String?   @db.VarChar(20)
+  /// B-032 · Veredicto decidido a mano por el revisor («Decidir…»): motivo, quién y cuándo.
+  veredictoMotivo     String?   @map("veredicto_motivo")
+  veredictoDecididoPor String?  @map("veredicto_decidido_por") @db.Uuid
+  veredictoDecididoAt DateTime? @map("veredicto_decidido_at") @db.Timestamptz
   analistaId String?   @map("analista_id") @db.Uuid
   fecha      DateTime  @default(now()) @db.Timestamptz
   deletedAt  DateTime? @map("deleted_at") @db.Timestamptz

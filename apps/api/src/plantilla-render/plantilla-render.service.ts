@@ -1,4 +1,5 @@
 import { portadaDesdeEncargo } from "../ot/encargo/reglas-encargo";
+import { observacionConDecision } from "../laboratorio/veredicto-decidido";
 import { etiquetaVeredicto } from "../laboratorio/veredicto";
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from "@nestjs/common";
 import { createHash } from "crypto";
@@ -254,6 +255,13 @@ export class PlantillaRenderService {
     for (const l of limites) if (!limitePorAnalito.has(l.analitoId)) limitePorAnalito.set(l.analitoId, l);
 
     const ubicaciones = await this.ubicaciones(otId);
+    // B-032: nombre del revisor que decidió el veredicto a mano (se anota en la observación).
+    const decisores = [...new Set(resultados.map((r) => r.veredictoDecididoPor).filter((x): x is string => !!x))];
+    const nombreDecisor = new Map(
+      decisores.length
+        ? (await this.prisma.usuario.findMany({ where: { id: { in: decisores } }, select: { id: true, nombreCompleto: true } })).map((u) => [u.id, u.nombreCompleto])
+        : [],
+    );
     const txt = (v: unknown) => (v === null || v === undefined ? null : String(v));
     const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(String(v)));
     const paraInforme: ResultadoParaInforme[] = resultados.map((r) => {
@@ -282,7 +290,7 @@ export class PlantillaRenderService {
         desviacion: num(r.desviacion),
         cv: num(r.cv),
         nReplicas: replicas,
-        observacion: r.observacion,
+        observacion: observacionConDecision(r.observacion, r.veredictoMotivo, r.veredictoDecididoPor ? nombreDecisor.get(r.veredictoDecididoPor) : null),
         veredicto: r.veredicto,
         fechaEnsayo: r.fechaEnsayo ?? null,
         selloNumero: (r.muestra as any)?.selloNumero ?? null,
