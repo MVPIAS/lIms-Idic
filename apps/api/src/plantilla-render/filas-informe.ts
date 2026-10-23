@@ -45,6 +45,8 @@ export interface ResultadoParaInforme {
   condicion2?: Condicion2 | null;
   /** Valor medido de la segunda condición. */
   valorCondicion2?: number | null;
+  /** Ensayo derivado a otro laboratorio por orden interna (B-075): quién lo hizo y con qué orden. */
+  derivadoA?: { laboratorio: string; ordenInterna: string | null } | null;
   tipoDato?: string | null;
   valorNumerico?: number | null;
   valorTexto?: string | null;
@@ -182,8 +184,28 @@ function textoRequisitoSimple(r: Pick<ResultadoParaInforme, "limiteInf" | "nomin
   else if (sup !== null) cotas = `Máx. ${fmtCota(sup)}`;
   else if (nom !== null) cotas = fmtCota(nom);
   const texto = vacio(r.requisito) ? "" : String(r.requisito).trim();
-  if (texto && cotas) return `${texto} (${cotas})`;
+  // B-075: si el texto ya dice las cotas («Máx. 0,5 % (…)»), no se repiten entre paréntesis.
+  const yaLasDice = [inf, nom, sup].filter((x): x is string => x !== null).every((x) => contieneCota(texto, x));
+  if (texto && cotas && !yaLasDice) return `${texto} (${cotas})`;
   return texto || cotas;
+}
+
+/** ¿El texto del requisito ya trae la cota (con coma o punto decimal)? */
+function contieneCota(texto: string, cota: string): boolean {
+  const n = aNumero(cota);
+  const formas = new Set([cota, cota.replace(".", ","), cota.replace(",", "."), ...(n !== null ? [fmtNum(n), String(n), String(n).replace(".", ",")] : [])]);
+  const esc = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return [...formas].some((f) => !!f && new RegExp("(^|[^\\d,.])" + esc(f) + "($|[^\\d])").test(texto));
+}
+
+/**
+ * Texto del requisito con su unidad cuando la tabla no tiene columna «Unidad»
+ * (B-075, Anexo 02-02: «Mín. 97 %»). No la repite si ya figura en el texto.
+ */
+export function requisitoConUnidad(requisito: string, unidad: string | null | undefined): string {
+  const u = vacio(unidad) ? "" : String(unidad).trim();
+  if (!u || !/\d/.test(requisito) || requisito.includes(u)) return requisito;
+  return `${requisito} ${u}`;
 }
 
 /**
@@ -254,7 +276,11 @@ function fila(r: ResultadoParaInforme, modalidad: Modalidad): FilaInforme {
     // Las cotas por separado se imprimen como se escribieron (decimales incluidos: «0,00»).
     minimo: textoCota(r.limiteInf),
     maximo: textoCota(r.limiteSup),
-    ensayo: vacio(r.ensayo) ? "Ensayo sin nombre en el catálogo" : String(r.ensayo).trim(),
+    ensayo:
+      (vacio(r.ensayo) ? "Ensayo sin nombre en el catálogo" : String(r.ensayo).trim()) +
+      (r.derivadoA?.laboratorio
+        ? ` (realizado por ${r.derivadoA.laboratorio}${r.derivadoA.ordenInterna ? `, orden interna ${r.derivadoA.ordenInterna}` : ""})`
+        : ""),
     metodo: textoMetodo(r),
     unidad: vacio(r.unidad) ? "" : String(r.unidad).trim(),
     requisito: conRequisito ? textoRequisito(r) : "No especificado",

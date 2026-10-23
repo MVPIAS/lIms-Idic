@@ -255,6 +255,7 @@ export class PlantillaRenderService {
     for (const l of limites) if (!limitePorAnalito.has(l.analitoId)) limitePorAnalito.set(l.analitoId, l);
 
     const ubicaciones = await this.ubicaciones(otId);
+    const derivados = await this.derivadosDe(otId);
     const txt = (v: unknown) => (v === null || v === undefined ? null : String(v));
     const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(String(v)));
     const paraInforme: ResultadoParaInforme[] = resultados.map((r) => {
@@ -277,6 +278,7 @@ export class PlantillaRenderService {
         especOrigen: legado ? "catalogo" : r.especOrigen,
         condicion2: legado ? null : leerCondicion2(r.condicion2),
         valorCondicion2: num(r.valorCondicion2),
+        derivadoA: derivados.get(r.id) ?? null,
         tipoDato: r.tipoDato,
         valorNumerico: num(r.valorNumerico),
         valorTexto: r.valorTexto,
@@ -308,6 +310,21 @@ export class PlantillaRenderService {
     const atencion = atencionInforme({ solicitanteOt: ot.solicitante, fichaCliente: ot.cliente, contactoPrincipal });
     const organigrama = await this.organigramaDe(ot.unidadPrincipal);
     return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion, organigrama };
+  }
+
+  /** Ensayos de la OT derivados a otro laboratorio por orden interna (lims_lab_de_resultado). */
+  private async derivadosDe(otId: string): Promise<Map<string, { laboratorio: string; ordenInterna: string | null }>> {
+    try {
+      const f = await this.prisma.$queryRawUnsafe<{ id: string; codigo: string; oi: string | null }[]>(
+        `SELECT r.id, u.codigo, l.oi_numero AS oi
+           FROM resultado r CROSS JOIN LATERAL lims_lab_de_resultado(r.id) l JOIN unidad u ON u.id = l.unidad_id
+          WHERE r.ot_id = $1::uuid AND r.deleted_at IS NULL AND l.derivado AND l.unidad_id IS DISTINCT FROM l.principal_id`,
+        otId,
+      );
+      return new Map(f.map((x) => [x.id, { laboratorio: x.codigo, ordenInterna: x.oi }]));
+    } catch {
+      return new Map(); // BD sin align_r1g_recorrido.sql
+    }
   }
 
   /**
