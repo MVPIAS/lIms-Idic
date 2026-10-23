@@ -402,7 +402,8 @@ export class RecepcionService {
               m.retener_hasta AS "retenerHasta", m.ubicacion, m.recepcionada_at AS "recepcionadaAt",
               o.id AS "otId", o.codigo AS "otCodigo", u.codigo AS laboratorio,
               (SELECT c.evento FROM muestra_custodia c WHERE c.muestra_id = m.id AND c.deleted_at IS NULL
-                 AND c.evento IN ('devolucion', 'destruccion') ORDER BY c.fecha DESC LIMIT 1) AS disposicion
+                 AND c.evento IN ('devolucion', 'destruccion') AND COALESCE(c.porcion, 'muestra') <> 'excedente'
+               ORDER BY c.fecha DESC LIMIT 1) AS disposicion
          FROM muestra m
          JOIN orden_trabajo o ON o.id = m.ot_id
          LEFT JOIN unidad u ON u.id = o.unidad_principal

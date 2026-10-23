@@ -138,7 +138,18 @@ const CrearCustodiaSchema = z.object({
   cantidadDevuelta: z.preprocess(emptyToNull, z.coerce.number().positive("La cantidad devuelta debe ser mayor que 0.").nullable().optional()),
   guiaDespacho: optStr(40),
   medioDevolucion: optStr(40),
+  // B-034: la devolución puede ser del excedente del lote (porción propia) y no de la muestra.
+  porcion: z.preprocess(emptyToNull, z.enum(["muestra", "excedente"]).nullable().optional()),
 });
+
+/**
+ * B-034 · ¿El eslabón dispone de la muestra? La devolución del EXCEDENTE del lote
+ * es una porción aparte: no dispone de la muestra ni de la contramuestra, que
+ * siguen en retención. Regla pura.
+ */
+export function disponeDeLaMuestra(d: { evento?: string | null; porcion?: string | null }): boolean {
+  return (d.evento === "devolucion" || d.evento === "destruccion") && d.porcion !== "excedente";
+}
 
 /** La devolución registra cantidad devuelta y Nº de guía de despacho (EP-03 7.2). Regla pura. */
 export function erroresDevolucion(d: { evento?: string | null; cantidadDevuelta?: number | null; guiaDespacho?: string | null }): string[] {
@@ -702,7 +713,10 @@ export class EquiposService {
       if (!muestras.length) throw new NotFoundException("Muestra no encontrada");
       // Retención (EP-01 §6.4, EP-03 §6.3): un testigo o una contramuestra no se
       // destruyen antes de su plazo; una muestra en custodia se devuelve.
-      const bloqueo = motivoNoDisponer(
+      const excedente = d.evento === "devolucion" && d.porcion === "excedente";
+      if (d.porcion === "excedente" && d.evento !== "devolucion")
+        throw new BadRequestException("El excedente del lote solo se registra como devolución.");
+      const bloqueo = excedente ? null : motivoNoDisponer(
         d.evento ?? "transferencia",
         { codigo: muestras[0].codigo, claseCustodia: muestras[0].clase_custodia, retenerHasta: muestras[0].retener_hasta },
         hoyIso(),
@@ -733,6 +747,7 @@ export class EquiposService {
         registradoPor: usuarioId,
         // Solo las devoluciones llevan estos datos (los eslabones anteriores no cambian su hash).
         ...(evento === "devolucion" ? { cantidadDevuelta: d.cantidadDevuelta ?? null, guiaDespacho: d.guiaDespacho ?? null } : {}),
+        ...(excedente ? { porcion: "excedente" } : {}),
       });
 
       const rows = await tx.$queryRawUnsafe<any[]>(
@@ -765,14 +780,15 @@ export class EquiposService {
 
       if (evento === "devolucion")
         await tx.$executeRawUnsafe(
-          `UPDATE muestra_custodia SET cantidad_devuelta = $2, guia_despacho = $3, medio_devolucion = $4 WHERE id = $1::uuid`,
+          `UPDATE muestra_custodia SET cantidad_devuelta = $2, guia_despacho = $3, medio_devolucion = $4, porcion = $5 WHERE id = $1::uuid`,
           rows[0].id,
           d.cantidadDevuelta ?? null,
           d.guiaDespacho ?? null,
           d.medioDevolucion ?? null,
+          excedente ? "excedente" : "muestra",
         );
-      // La ubicación de destino pasa a ser la ubicación actual de la muestra.
-      if (d.ubicacionDestino) {
+      // La ubicación de destino pasa a ser la ubicación actual de la muestra (el excedente no la mueve).
+      if (d.ubicacionDestino && !excedente) {
         await tx.$executeRawUnsafe(
           `UPDATE muestra SET ubicacion = $3
             WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,

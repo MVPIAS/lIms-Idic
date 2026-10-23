@@ -53,6 +53,8 @@ const FORM_VACIO = {
   cantidadDevuelta: "",
   guiaDespacho: "",
   medioDevolucion: "",
+  // B-034: lo que se devuelve es por defecto el excedente del lote (porción aparte).
+  porcion: "excedente",
 };
 
 export default function CustodiaPage() {
@@ -190,7 +192,7 @@ export default function CustodiaPage() {
       observaciones: f.observaciones || null,
       // Devolución de excedente (EP-03 7.2): cantidad, guía de despacho y medio.
       ...(f.evento === "devolucion"
-        ? { cantidadDevuelta: f.cantidadDevuelta === "" ? null : Number(String(f.cantidadDevuelta).replace(",", ".")), guiaDespacho: f.guiaDespacho || null, medioDevolucion: f.medioDevolucion || null }
+        ? { cantidadDevuelta: f.cantidadDevuelta === "" ? null : Number(String(f.cantidadDevuelta).replace(",", ".")), guiaDespacho: f.guiaDespacho || null, medioDevolucion: f.medioDevolucion || null, porcion: f.porcion || "excedente" }
         : {}),
     };
     try {
@@ -399,6 +401,13 @@ export default function CustodiaPage() {
             {f.evento === "devolucion" && (
               <>
                 <div className="field">
+                  <label htmlFor="cu-porcion">Qué se devuelve <span className="req">*</span></label>
+                  <select id="cu-porcion" value={f.porcion} onChange={(e) => setF({ ...f, porcion: e.target.value })}>
+                    <option value="excedente">El excedente del lote (la muestra y la contramuestra siguen en custodia)</option>
+                    <option value="muestra">La muestra completa (deja de estar en custodia)</option>
+                  </select>
+                </div>
+                <div className="field">
                   <label htmlFor="cu-cant">Cantidad devuelta <span className="req">*</span></label>
                   <input id="cu-cant" inputMode="decimal" value={f.cantidadDevuelta} onChange={(e) => setF({ ...f, cantidadDevuelta: e.target.value })} />
                   {errs.cantidadDevuelta && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.cantidadDevuelta}</small>}
@@ -535,6 +544,7 @@ export default function CustodiaPage() {
 
                   <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {c.sello_numero && <span>Sello {c.sello_numero}</span>}
+                    {c.porcion === "excedente" && <span className="pill gray">Excedente del lote</span>}
                     {c.guia_despacho && <span>Devueltas {String(Number(c.cantidad_devuelta)).replace(".", ",")} · guía {c.guia_despacho}{c.medio_devolucion ? ` · ${c.medio_devolucion}` : ""}</span>}
                     {c.temp_celsius != null && <span>{num(c.temp_celsius, 1)} °C</span>}
                     {c.humedad_pct != null && <span>{pct(c.humedad_pct)} HR</span>}
