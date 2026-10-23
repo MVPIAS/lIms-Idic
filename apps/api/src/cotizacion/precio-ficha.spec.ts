@@ -34,3 +34,16 @@ describe("Referencia desde la solicitud (EP-00 1.1)", () => {
     expect(referenciaDesdeSolicitud({ solicitudMedio: "correo", solicitudFecha: "2026-10-20" })).toBe("Correo de fecha 20-10-2026");
   });
 });
+
+describe("referencia del oficio sin prefijo duplicado (B-086)", () => {
+  const { referenciaDesdeSolicitud } = require("./cotizacion-extra");
+  it("«OF-PRUEBA-0001», «OF.123» y «Oficio N°: 55» quedan bien formadas", () => {
+    expect(referenciaDesdeSolicitud({ solicitudMedio: "oficio", solicitudNumero: "OF-PRUEBA-0001" })).toBe("OF Nº PRUEBA-0001");
+    expect(referenciaDesdeSolicitud({ solicitudMedio: "oficio", solicitudNumero: "OF.123" })).toBe("OF Nº 123");
+    expect(referenciaDesdeSolicitud({ solicitudMedio: "oficio", solicitudNumero: "Oficio N°: 55" })).toBe("OF Nº 55");
+  });
+  it("no recorta palabras que empiezan por «of» o «no»", () => {
+    expect(referenciaDesdeSolicitud({ solicitudMedio: "oficio", solicitudNumero: "OFERTA-9" })).toBe("OF Nº OFERTA-9");
+    expect(referenciaDesdeSolicitud({ solicitudMedio: "oficio", solicitudNumero: "NOTA 7" })).toBe("OF Nº NOTA 7");
+  });
+});
