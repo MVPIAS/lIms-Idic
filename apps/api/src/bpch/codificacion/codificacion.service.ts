@@ -72,7 +72,12 @@ export const FiltroCodificacion = z.object({
 });
 
 const COLUMNAS = `c.id, c.listado, c.estado, c.cnc_dgmn AS cnc, c.cliente_id AS "clienteId",
-  c.fabricante_nombre AS "fabricanteNombre", c.fabricante_rut AS "fabricanteRut",
+  c.fabricante_nombre AS "fabricanteNombre",
+  -- B-078: el RUT del titular; si el producto no lo trae (traspaso a una empresa escrita a mano),
+  -- el de su ficha en el maestro de clientes o el de otro producto del mismo titular (como el PDF).
+  COALESCE(NULLIF(c.fabricante_rut, ''), (SELECT cl.rut FROM cliente cl WHERE cl.id = c.cliente_id),
+    (SELECT o.fabricante_rut FROM bpch_codificacion o WHERE o.tenant_id = c.tenant_id AND o.id <> c.id
+        AND lower(o.fabricante_nombre) = lower(c.fabricante_nombre) AND NULLIF(o.fabricante_rut, '') IS NOT NULL LIMIT 1)) AS "fabricanteRut",
   c.elemento_generico AS "elementoGenerico", c.producto, c.clase_division_un AS "claseDivisionUn",
   c.numero_un AS "numeroUn", c.cat_elemento_id AS "catElementoId", ce.nombre AS "catElementoNombre",
   c.certificado_id AS "certificadoId", COALESCE(ct.numero, c.certificado_numero) AS "certificadoNumero",
@@ -242,9 +247,22 @@ export class CodificacionService {
     if (d.clienteId) {
       const c = await this.prisma.cliente.findFirst({ where: { id: d.clienteId, tenantId }, select: { id: true, razonSocial: true, rut: true } });
       if (!c) throw new BadRequestException("La empresa indicada no existe en el maestro de clientes.");
-      return { clienteId: c.id, nombre: d.fabricanteNombre?.trim() || c.razonSocial, rut: d.fabricanteRut?.trim() || c.rut };
+      return { clienteId: c.id, nombre: d.fabricanteNombre?.trim() || c.razonSocial, rut: d.fabricanteRut?.trim() || c.rut || (await this.rutConocido(tenantId, d.fabricanteNombre?.trim() || c.razonSocial)) };
     }
-    return { clienteId: null, nombre: d.fabricanteNombre?.trim() ?? "", rut: d.fabricanteRut?.trim() || null };
+    const nombre = d.fabricanteNombre?.trim() ?? "";
+    return { clienteId: null, nombre, rut: d.fabricanteRut?.trim() || (nombre ? await this.rutConocido(tenantId, nombre) : null) };
+  }
+
+  /** B-078: RUT ya conocido de un titular por su nombre (maestro de clientes u otro producto de la Codificación Única). */
+  private async rutConocido(tenantId: string, nombre: string): Promise<string | null> {
+    const f = await this.prisma.$queryRawUnsafe<{ rut: string | null }[]>(
+      `SELECT COALESCE(
+         (SELECT rut FROM cliente WHERE tenant_id = $1::uuid AND lower(razon_social) = lower($2) AND NULLIF(rut, '') IS NOT NULL AND deleted_at IS NULL LIMIT 1),
+         (SELECT fabricante_rut FROM bpch_codificacion WHERE tenant_id = $1::uuid AND lower(fabricante_nombre) = lower($2) AND NULLIF(fabricante_rut, '') IS NOT NULL LIMIT 1)) AS rut`,
+      tenantId,
+      nombre,
+    );
+    return f[0]?.rut ?? null;
   }
 
   private async exigirCncLibre(sql: Sql, tenantId: string, cnc: string, exceptoId?: string) {
