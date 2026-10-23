@@ -350,6 +350,13 @@ model LineaCotizacion {
   // Línea = ensayo del catálogo (código EN) valorizado por su ficha (R1).
   catEnsayoId     String?    @map("cat_ensayo_id") @db.Uuid
   ensayoCodigo    String?    @map("ensayo_codigo") @db.VarChar(30)
+  /// B-045 · Metrología: instrumento de la línea (lo hereda el ítem de la OT).
+  instrumento         String? @db.VarChar(300)
+  instrumentoMarca    String? @map("instrumento_marca") @db.VarChar(120)
+  instrumentoModelo   String? @map("instrumento_modelo") @db.VarChar(120)
+  instrumentoRango    String? @map("instrumento_rango") @db.VarChar(160)
+  instrumentoPuntos   String? @map("instrumento_puntos") @db.VarChar(500)
+  instrumentoSentido  String? @map("instrumento_sentido") @db.VarChar(5)
 
   cotizacion      Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
 

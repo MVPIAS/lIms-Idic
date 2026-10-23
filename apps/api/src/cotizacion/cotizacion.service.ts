@@ -83,6 +83,13 @@ export interface LineaEntrada {
   diasOHoras?: number;
   precioUnitario?: number;
   tramo?: string;
+  /** B-045 · Metrología: instrumento de la línea. */
+  instrumento?: string | null;
+  instrumentoMarca?: string | null;
+  instrumentoModelo?: string | null;
+  instrumentoRango?: string | null;
+  instrumentoPuntos?: string | null;
+  instrumentoSentido?: string | null;
 }
 
 /** Campos de cabecera comunes a crear/editar (ya validados por zod en el controller). */
@@ -466,6 +473,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         orden: i + 1,
         catEnsayoId: l.catEnsayoId ?? null,
         ensayoCodigo: ensayoCodigo ?? null,
+        // B-045: datos del instrumento (Metrología); vacío = sin dato.
+        instrumento: l.instrumento?.trim() || null,
+        instrumentoMarca: l.instrumentoMarca?.trim() || null,
+        instrumentoModelo: l.instrumentoModelo?.trim() || null,
+        instrumentoRango: l.instrumentoRango?.trim() || null,
+        instrumentoPuntos: l.instrumentoPuntos?.trim() || null,
+        instrumentoSentido: l.instrumentoSentido ?? null,
       };
     });
   }
