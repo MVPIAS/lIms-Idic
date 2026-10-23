@@ -1650,7 +1650,11 @@ export class RegistroMuestrasService {
       : null;
     const porEnsayo = new Map<string, MetodoCatalogo[]>();
     for (const m of metodos) if (m.ensayoId) (porEnsayo.get(m.ensayoId) ?? porEnsayo.set(m.ensayoId, []).get(m.ensayoId)!).push(m);
+    const panelOt = cot ? null : await this.panelDeOt(tenantId, ot);
     return {
+      // B-008: la OT que nace de un programa (producto), de un prototipo (panel
+      // parametrizado) o de un registro con elemento trae su panel a la recepción.
+      panelOt,
       ot: {
         id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal, clienteId: ot.clienteId,
         clienteNombre: cliente?.razonSocial ?? null, catElementoId: ot.catElementoId ?? null,
@@ -1680,6 +1684,89 @@ export class RegistroMuestrasService {
         porEnsayo,
       ),
     };
+  }
+
+  /**
+   * Panel que la OT ya trae (B-008, recorrido MP-07 D07-06, MP-08 D08-02,
+   * MP-05 D05-09): el panel parametrizado del prototipo de la OT (EP-08 8.11,
+   * «el panel es el que carga la OT») o el panel del producto (elemento) de la
+   * OT. La recepción lo propone marcado; null si la OT no trae ninguno.
+   */
+  async panelDeOt(tenantId: string, ot: { id: string; catElementoId?: string | null }) {
+    const proto = await this.prisma.$queryRawUnsafe<{ codigo: string; elemento: string; estado: string; metodos: string[] }[]>(
+      `SELECT p.codigo, p.elemento, p.param_estado AS estado,
+              COALESCE(array_agg(DISTINCT pp.cat_metodo_id::text) FILTER (WHERE pp.cat_metodo_id IS NOT NULL), '{}') AS metodos
+         FROM bpch_prototipo p LEFT JOIN bpch_prototipo_parametro pp ON pp.prototipo_id = p.id
+        WHERE p.tenant_id = $1::uuid AND p.ot_id = $2::uuid
+        GROUP BY p.codigo, p.elemento, p.param_estado`,
+      tenantId,
+      ot.id,
+    );
+    if (proto[0]?.metodos?.length)
+      return {
+        origen: "prototipo" as const,
+        nombre: `Prototipo ${proto[0].codigo} · ${proto[0].elemento}`,
+        parametrizacion: proto[0].estado,
+        metodos: await this.metodos(tenantId, { ids: proto[0].metodos }),
+      };
+    if (!ot.catElementoId) return null;
+    const el = await this.prisma.$queryRawUnsafe<{ nombre: string; metodos: string[] }[]>(
+      `SELECT e.nombre, COALESCE(array_agg(p.metodo_id::text) FILTER (WHERE p.metodo_id IS NOT NULL), '{}') AS metodos
+         FROM cat_elemento e
+         LEFT JOIN cat_panel p ON p.elemento_id = e.id AND p.deleted_at IS NULL AND p.activo
+        WHERE e.id = $1::uuid AND e.tenant_id = $2::uuid
+        GROUP BY e.nombre`,
+      ot.catElementoId,
+      tenantId,
+    );
+    if (!el[0]) return null;
+    return { origen: "producto" as const, nombre: el[0].nombre, parametrizacion: null, metodos: await this.metodos(tenantId, { ids: el[0].metodos }) };
+  }
+
+  /**
+   * Prototipo con parametrización validada (EP-08 8.11): sus Mín/Nom/Máx, unidad
+   * y fórmula se aplican a los ensayos recién generados del mismo método (y del
+   * mismo ensayo cuando el método tiene varios), como especificación de la orden.
+   */
+  private async aplicarParametrizacionPrototipo(db: Db, tenantId: string, otId: string, muestraIds: string[], usuarioId: string | null) {
+    const filas = await db.$queryRawUnsafe<any[]>(
+      `SELECT pp.cat_metodo_id AS "metodoId", pp.ensayo, pp.minimo::text AS minimo, pp.nominal::text AS nominal, pp.maximo::text AS maximo,
+              pp.unidad, pp.formula, p.codigo
+         FROM bpch_prototipo p JOIN bpch_prototipo_parametro pp ON pp.prototipo_id = p.id
+        WHERE p.tenant_id = $1::uuid AND p.ot_id = $2::uuid AND p.param_estado = 'validada'`,
+      tenantId,
+      otId,
+    );
+    if (!filas.length || !muestraIds.length) return 0;
+    const res = await db.$queryRawUnsafe<any[]>(
+      `SELECT r.id, r.cat_metodo_id AS "metodoId", COALESCE(an.nombre, an.codigo, '') AS analito
+         FROM resultado r LEFT JOIN cat_analito an ON an.id = r.cat_analito_id
+        WHERE r.muestra_id = ANY($1::uuid[]) AND r.deleted_at IS NULL AND r.estado = 'pendiente'`,
+      muestraIds,
+    );
+    const norm = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const txt = (v: string | null) => (v == null ? null : String(Number(v)));
+    let n = 0;
+    for (const r of res) {
+      const del = filas.filter((f) => f.metodoId === r.metodoId);
+      const par = del.length === 1 ? del[0] : del.find((f) => norm(f.ensayo ?? "") === norm(r.analito));
+      if (!par) continue;
+      await db.$executeRawUnsafe(
+        `UPDATE resultado SET limite_inf = $2, nominal = $3, limite_sup = $4, unidad = COALESCE($5, unidad), formula = COALESCE($6, formula),
+                espec_catalogo = COALESCE(espec_catalogo, jsonb_build_object('limiteInf', limite_inf, 'nominal', nominal, 'limiteSup', limite_sup, 'unidad', unidad, 'formula', formula)),
+                espec_origen = 'orden', espec_editada_por = $7::uuid, espec_editada_at = now()
+          WHERE id = $1::uuid`,
+        r.id,
+        txt(par.minimo),
+        txt(par.nominal),
+        txt(par.maximo),
+        par.unidad ?? null,
+        par.formula ?? null,
+        usuarioId,
+      );
+      n++;
+    }
+    return n;
   }
 
   /**
@@ -1764,6 +1851,9 @@ export class RegistroMuestrasService {
         metodos: m.metodoIds.map((id) => catalogo.get(id)?.codigo ?? id),
       });
     }
+
+    // B-008: la parametrización validada del prototipo rige sus ensayos (EP-08 8.11).
+    await this.aplicarParametrizacionPrototipo(db, tenantId, otId, creadas.map((c) => c.id), req?.user?.sub ?? null);
 
     // La OT recibe sus muestras: si aún no tenía fecha de recepción, es hoy.
     if (!ot.fechaRecepcion)

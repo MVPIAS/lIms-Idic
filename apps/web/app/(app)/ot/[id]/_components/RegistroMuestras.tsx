@@ -58,6 +58,8 @@ interface Propuesta {
   muestras: MuestraOt[];
   lineas: Linea[];
   opcionesToma: { codigo: string; etiqueta: string }[];
+  /** B-008: panel que la OT ya trae (producto de la OT o parametrización del prototipo). */
+  panelOt?: { origen: "producto" | "prototipo"; nombre: string; parametrizacion: string | null; metodos: Metodo[] } | null;
 }
 interface FilaRegistro { nombre: string; ident: string; sello: string; productoId: string }
 
@@ -195,7 +197,10 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     setFilas(Array.from({ length: n }, () => filaVacia(d.ot.catElementoId ?? "")));
     setComun(RECEPCION_VACIA);
     setExtra([]);
-    setPanel([]);
+    // B-008: el panel de la OT (producto o prototipo) llega propuesto y marcado.
+    const po = d.panelOt;
+    setPanel(po?.metodos.length ? [{ producto: po.origen === "prototipo" ? `${po.nombre} (panel parametrizado)` : po.nombre, metodos: po.metodos }] : []);
+    if (po?.metodos.length) setMarcados(new Set(po.metodos.filter((m) => m.analitos).map((m) => m.id)));
     setBusqueda("");
     setEncontrados([]);
     setEditando(null);
