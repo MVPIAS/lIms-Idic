@@ -89,9 +89,19 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | | Ensayos con fuego real que gastan munición de prueba (`metodos_fuego`) | idem | 1203 | «Registrar ensayos» del arma: exige lote y cartuchos y los descuenta del inventario (EP-11 11.17) | idem y `saec/d11/municion.service.ts` |
 | | Un arma con cuño CIP también se acuña (`acunacion_cip`) | Sí / No | No | Acuñación IT08 | idem |
 | | Vigencia del certificado por arma (`vigencia_anios`) | Entero 1–10 años | 4 | Emisión del certificado por arma | idem |
+| Avisos internos y por correo (`avisos`) · por confirmar EP-00 P9, EP-02 P7 | Días antes del compromiso en que se avisa «por vencer» (`dias_por_vencer`) | Entero 1–30 días | 3 | Revisión de plazos y «Avisar →» | `avisos/reglas-avisos.ts` (`configAvisos`) |
+| | Revisar los plazos cada hora (`revision_automatica`) | Sí / No | Sí | Avisos de OT vencidas y por vencer | idem |
+| | Enviar también por correo (`enviar_correo`) | Sí / No | Sí | Todo aviso; sin correo configurado queda en Mi bandeja | idem |
+| | Avisar al cliente un No cumple o Contaminado (`no_cumple_al_cliente`) | Sí / No | No | Aprobación del resultado (contrato §4.2.6) | idem |
+| | Avisar a Comercial cuando un documento queda oficial (`documento_listo`) | Sí / No | Sí | Última firma del documento | idem |
+| Oficio conductor exigido (`oficio_conductor`) · por confirmar EP-05 7.2 | Documentos que salen con oficio (`exige_tipos`) | Casillas IVC, Informe Técnico, Rechazo, Informe de Ensayo, CRB | IVC, Informe Técnico, Rechazo | Registrar entrega, despacho al cliente y envío | `seguimiento/datos-seguimiento.ts` (`faltaOficio`) |
+| | Departamentos donde rige (`exige_departamentos`) | Casillas DSA, DQO, BPCH | DSA | idem | idem |
 
 Los grupos `muestreo_plan` y `veredicto_lote` los creó el frente r2b
 (`docs/FLUJO_ESPECIFICACIONES_MUESTREO.md`).
+
+Los grupos `avisos` y `oficio_conductor` los creó el frente r4c
+(`align_r4c_avisos_despacho.sql`, `align_r4c_oficio.sql`, ver `docs/FLUJO_AVISOS_DESPACHO_OFICIO.md`).
 
 Los grupos `bpch_prototipo` y `d11` los creó el frente r4b
 (`align_r4b_bpch.sql`, `align_r4b_d11.sql`, ver `docs/FLUJO_D11_ARMAS.md`).

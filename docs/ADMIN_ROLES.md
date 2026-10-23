@@ -118,6 +118,13 @@ validar o devolver la Planilla de trabajo, el Paquete técnico o el Proyecto de 
 del DSA: SUPERADMIN, JEFE_LAB, JEFE_SECCION, JEFE_DEPTO; además, el paso exige el rol
 que corresponde en la rama del laboratorio).
 
+**Avisos, despacho, oficio conductor y carpeta** (`align_r4c_avisos_despacho.sql`, `align_r4c_oficio.sql`,
+ver `docs/FLUJO_AVISOS_DESPACHO_OFICIO.md` §6): `certificado.despachar` (jefaturas y Dirección),
+`ot.seguimiento` (Comercial, Planificación, jefaturas, Dirección), `ot.carpeta` (personal de laboratorio,
+jefaturas, Planificación, Comercial, Dirección), `oficio.ver`, `oficio.crear` (Comercial, jefaturas,
+Dirección) y `oficio.despachar` (Oficina de partes: Director y Subdirector). Firmar un oficio lo decide la
+matriz OFICIO, sin permiso.
+
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
 ---

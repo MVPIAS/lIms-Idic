@@ -1,4 +1,6 @@
-import { BadRequestException, Body, Controller, Get, Module, OnModuleInit, Param, ParseUUIDPipe, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Module, OnModuleInit, Param, ParseUUIDPipe, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { ApiConsumes } from "@nestjs/swagger";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
@@ -36,7 +38,6 @@ const Registro = z.object({
   copias: z.coerce.number().int().min(0).max(50).optional(),
   fecha: fecha.optional(),
   descripcion: z.string().trim().max(500).optional(),
-  archivo: z.object({ nombre: z.string().trim().min(1).max(200), mime: z.string().max(120), datos: z.string().max(7_000_000) }).optional(),
 });
 const Anular = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (al menos 5 caracteres)").max(500) });
 const Envio = z.object({
@@ -100,10 +101,23 @@ export class SeguimientoController {
     return this.svc.recepcionDco(id, RecepcionDco.parse(body ?? {}).fecha, req);
   }
 
+  /** multipart/form-data: tipo, numero, copias, fecha, descripcion y el fichero «archivo» (opcional, 5 MB). */
   @Post("ot/:id/documentos-registro")
   @RequierePermiso("ot.carpeta")
-  registrar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    return this.svc.registrarDocumento(id, Registro.parse(body ?? {}), req);
+  @ApiConsumes("multipart/form-data")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: 5_000_000, files: 1, fields: 10 } }))
+  registrar(
+    @Param("id", ParseUUIDPipe) id: string,
+    @UploadedFile() archivo: { originalname: string; mimetype: string; buffer: Buffer } | undefined,
+    @Body() body: unknown,
+    @Req() req: any,
+  ) {
+    const dto = Registro.parse(body ?? {});
+    return this.svc.registrarDocumento(
+      id,
+      { ...dto, ...(archivo ? { archivo: { nombre: archivo.originalname, mime: archivo.mimetype, buffer: archivo.buffer } } : {}) },
+      req,
+    );
   }
 
   @Post("ot/:id/documentos-registro/:registroId/anular")

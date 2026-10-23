@@ -440,13 +440,20 @@ async function main() {
   });
 
   await paso("T20 · Documentos y envío: carta registrada (versión 2 al repetir el Nº) y envío conjunto con guía; el documento queda entregado", async () => {
-    await exigir(403, U.finanzas, "POST", `/ot/${C.ot.id}/documentos-registro`, { tipo: "CARTA", numero: `C-${sello}` });
-    const pdf = Buffer.from("%PDF-1.4\n% prueba r4c\n").toString("base64");
-    await ok(U.ventas, "POST", `/ot/${C.ot.id}/documentos-registro`, { tipo: "CARTA", numero: `C-${sello}`, copias: 1, archivo: { nombre: "carta.pdf", mime: "application/pdf", datos: pdf } });
-    const v = await ok(U.ventas, "POST", `/ot/${C.ot.id}/documentos-registro`, { tipo: "CARTA", numero: `C-${sello}`, copias: 2 });
+    const formulario = (campos, archivo) => {
+      const f = new FormData();
+      for (const [k, v] of Object.entries(campos)) f.append(k, String(v));
+      if (archivo) f.append("archivo", new Blob([archivo.datos], { type: archivo.mime }), archivo.nombre);
+      return f;
+    };
+    const pdf = Buffer.from("%PDF-1.4\n% prueba r4c\n");
+    await exigir(403, U.finanzas, "POST", `/ot/${C.ot.id}/documentos-registro`, formulario({ tipo: "CARTA", numero: `C-${sello}` }));
+    await ok(U.ventas, "POST", `/ot/${C.ot.id}/documentos-registro`, formulario({ tipo: "CARTA", numero: `C-${sello}`, copias: 1 }, { nombre: "carta.pdf", mime: "application/pdf", datos: pdf }));
+    const v = await ok(U.ventas, "POST", `/ot/${C.ot.id}/documentos-registro`, formulario({ tipo: "CARTA", numero: `C-${sello}`, copias: 2 }));
     const reg = v.registros.filter((r) => r.numero === `C-${sello}`);
     afirmar(reg.length === 2 && reg.map((r) => r.version).sort().join() === "1,2", JSON.stringify(reg.map((r) => r.version)));
-    await exigir(400, U.ventas, "POST", `/ot/${C.ot.id}/documentos-registro`, { tipo: "CARTA", numero: "X", archivo: { nombre: "x.exe", mime: "application/x-msdownload", datos: pdf } });
+    // Un ejecutable con el tipo «PDF» se rechaza por su contenido.
+    await exigir(400, U.ventas, "POST", `/ot/${C.ot.id}/documentos-registro`, formulario({ tipo: "CARTA", numero: "X" }, { nombre: "x.pdf", mime: "application/pdf", datos: Buffer.from("MZ\x90\x00 no es un pdf") }), /PDF/);
     const arch = await llamar(U.jefe, "GET", `/ot/${C.ot.id}/documentos-registro/${reg[0].id}/archivo`);
     afirmar(arch.status === 200, `archivo ${arch.status}`);
     await exigir(403, U.a1, "POST", `/ot/${C.ot.id}/envios`, { medio: "mano", destinatario: "Cliente", certificadoIds: [C.docId] });
