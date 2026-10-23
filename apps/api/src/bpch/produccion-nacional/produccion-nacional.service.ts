@@ -1045,13 +1045,37 @@ export class ProduccionNacionalService {
         const f = fechaReferenciaLinea(Number(o.anio), { mes: Number(l.mes), fechaProgramada: iso(l.fecha_programada) });
         return f >= desde && f <= hasta;
       })
-      .map((l) => ({ ocProductoId: l.oc_producto_id, cantidad: l.cantidad === null ? null : Number(l.cantidad) }));
+      .map((l) => ({ ocProductoId: l.oc_producto_id, cantidad: l.cantidad === null ? null : Number(l.cantidad), otId: l.ot_id as string | null }));
     const filas = correlacionar(
       productos.map((p) => this.aProducto(p)),
       new Map(ventas.map((v) => [v.oc_producto_id, Number(v.cantidad_ventas)])),
       ejecutadas,
     );
-    return { filas, lineasConVentas: ventas.length, sinCantidad: ejecutadas.filter((e) => e.cantidad === null).length };
+    // B-073 (recorrido MP-07, D07-09; maqueta: Declarado · Inspeccionado · Certificado · Desviación).
+    // «Certificado»: cantidad de las inspecciones ejecutadas cuya OT tiene su documento oficial
+    // (Informe de Inspección o Certificado de Conformidad) y ningún Informe de Incumplimiento.
+    // Regla POR CONFIRMAR con el IDIC (carta BPCH-28: qué cuenta como inspeccionado y certificado).
+    const otIds = [...new Set(ejecutadas.map((e) => e.otId).filter((x): x is string => !!x))];
+    const certificadas = new Set(
+      otIds.length
+        ? (
+            await this.prisma.$queryRawUnsafe<{ ot_id: string }[]>(
+              `SELECT c.ot_id FROM certificado c
+                WHERE c.ot_id = ANY($1::uuid[]) AND c.deleted_at IS NULL AND c.estado IN ('oficial', 'emitido')
+                  AND c.tipo_documento IN ('INFORME_INSPECCION', 'CERTIFICADO_CONFORMIDAD')
+                  AND NOT EXISTS (SELECT 1 FROM certificado x WHERE x.ot_id = c.ot_id AND x.deleted_at IS NULL
+                                    AND x.tipo_documento = 'INFORME_INCUMPLIMIENTO' AND x.estado <> 'anulado')`,
+              otIds,
+            )
+          ).map((f) => f.ot_id)
+        : [],
+    );
+    const certificadoPor = new Map<string, number>();
+    for (const e of ejecutadas)
+      if (e.otId && certificadas.has(e.otId) && e.cantidad !== null)
+        certificadoPor.set(e.ocProductoId, (certificadoPor.get(e.ocProductoId) ?? 0) + e.cantidad);
+    const conCertificado = filas.map((f: any) => ({ ...f, certificado: certificadoPor.get(f.ocProductoId) ?? 0 }));
+    return { filas: conCertificado, lineasConVentas: ventas.length, sinCantidad: ejecutadas.filter((e) => e.cantidad === null).length };
   }
 
   private mapearCorrelacion(c: any, calc: { filas: any[]; lineasConVentas: number; sinCantidad: number }, o: any) {

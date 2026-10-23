@@ -518,6 +518,18 @@ async function main() {
     await exigir(403, U.lpnJefe, "POST", "/especificaciones-tecnicas", cab([C.u.LCC.id, C.u.LTX.id], "d"));
     return `${et.codigo ?? cab([], "a").codigo} (LCC + LTX) creada por el Jefe LCC; solo LTX, LCC + LPN y el Jefe LPN → 403`;
   });
+
+  /* ------------------------------------------------------------ B-073 */
+  await paso("B-073 · la correlación de Producción Nacional trae la columna «Certificado»", async () => {
+    const av = lista(await ok("demo.dco.jefe", "GET", "/avisos?limite=200")).find((a) => /correlacion\//.test(a.ruta ?? ""));
+    if (!av) return "sin correlación de PN en esta base (corra antes bpch-produccion-prototipos-clasificacion.js)";
+    const id = av.ruta.split("/").pop();
+    const c = await ok("demo.bpch.jefe", "GET", `/bpch/pn/correlaciones/${id}`);
+    afirmar(c.filas.length && c.filas.every((f) => typeof f.certificado === "number"), `filas ${JSON.stringify(c.filas).slice(0, 200)}`);
+    afirmar(c.filas.every((f) => f.certificado <= (f.inspeccionado ?? 0)), "certificado mayor que inspeccionado");
+    await exigir(403, U.lqcJefe, "GET", `/bpch/pn/correlaciones/${id}`);
+    return c.filas.map((f) => `${f.producto}: declarado ${f.ventas ?? "—"} · inspeccionado ${f.inspeccionado} · certificado ${f.certificado}`).join(" | ");
+  });
 //PASOS
 }
 
