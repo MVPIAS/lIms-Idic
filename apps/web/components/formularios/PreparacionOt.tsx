@@ -382,6 +382,7 @@ function FormPreparacion({ otId, fila, equipos, onListo }: { otId: string; fila:
                 {c.tipo === "texto" && <input id={id} value={val ?? ""} onChange={(e) => set(e.target.value)} maxLength={500} />}
                 {(c.tipo === "numero" || c.tipo === "entero") && <input id={id} inputMode={c.tipo === "entero" ? "numeric" : "decimal"} value={val == null ? "" : String(val).replace(".", ",")} onChange={(e) => set(e.target.value)} />}
                 {c.tipo === "fecha" && <input id={id} type="date" value={(val ?? "").slice(0, 10)} onChange={(e) => set(e.target.value)} />}
+                {c.tipo === "fechahora" && <input id={id} type="datetime-local" value={(val ?? "").slice(0, 16)} onChange={(e) => set(e.target.value)} />}
                 {c.tipo === "lista" && <select id={id} value={val ?? ""} onChange={(e) => set(e.target.value)}><option value="">—</option>{c.opciones.map((o: any) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}</select>}
                 {c.tipo === "equipo" && (
                   <select id={id} value={val ?? ""} onChange={(e) => set(e.target.value)}>

@@ -48,7 +48,7 @@ const TIPOS_CAMPO: Opcion[] = [
   { valor: "casilla", etiqueta: "Casilla (sí / no)" },
 ];
 const CAMPO_VACIO: DefCampo = { tipo: "texto", obligatorio: false, opciones: [], ayuda: "", activo: true };
-const TIPOS_CAMPO_PREP: Opcion[] = [...TIPOS_CAMPO, { valor: "equipo", etiqueta: "Equipo del laboratorio" }];
+const TIPOS_CAMPO_PREP: Opcion[] = [...TIPOS_CAMPO, { valor: "fechahora", etiqueta: "Fecha y hora" }, { valor: "equipo", etiqueta: "Equipo del laboratorio" }];
 
 /** Lo que se edita: un valor simple, la definición de un campo, una variante o las filas de una tabla. */
 type Borrador = string | boolean | string[] | DefCampo | Variante | Record<string, unknown>[];
