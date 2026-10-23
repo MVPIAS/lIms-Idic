@@ -685,9 +685,13 @@ export class PuenteAnalisisService {
     };
   }
 
-  /** OT del tenant y dentro del alcance del usuario (404 / 403). */
-  private async otEnAlcance(otId: string, tenantId: string, req: any) {
-    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+  /**
+   * OT del tenant y dentro del alcance del usuario (404 / 403). Se lee con `db`:
+   * dentro de la transacción que crea la OT con sus muestras (B-001) la OT aún
+   * no es visible fuera de ella.
+   */
+  private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma) {
+    const ot = await db.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
     await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return ot;
@@ -729,7 +733,7 @@ export class PuenteAnalisisService {
           if (!o) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
           return o;
         })
-      : await this.otEnAlcance(otId, tenantId, req);
+      : await this.otEnAlcance(otId, tenantId, req, db);
     const muestra = await this.muestraDeOt(otId, body.muestraId, tenantId, db);
 
     // Una OT que aún no tiene laboratorio (p. ej. creada antes de esta
@@ -1377,7 +1381,7 @@ const RecepcionBody = z.object({
     .optional(),
 });
 
-const RegistrarMuestrasBody = z.object({
+export const RegistrarMuestrasBody = z.object({
   muestras: z
     .array(
       z.object({
@@ -1454,8 +1458,8 @@ export class RegistroMuestrasService {
     private readonly recepcion: RecepcionService,
   ) {}
 
-  private async otEnAlcance(otId: string, tenantId: string, req: any) {
-    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+  private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma) {
+    const ot = await db.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
     await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return ot;
@@ -1689,7 +1693,7 @@ export class RegistroMuestrasService {
   }
 
   private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any) {
-    const ot = await this.otEnAlcance(otId, tenantId, req);
+    const ot = await this.otEnAlcance(otId, tenantId, req, db);
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
     const errores = erroresRegistro(ot.estado, body.muestras, catalogo);
