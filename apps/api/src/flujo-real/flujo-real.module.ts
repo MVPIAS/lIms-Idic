@@ -1456,6 +1456,7 @@ export class RegistroMuestrasService {
     private readonly puente: PuenteAnalisisService,
     private readonly labs: LaboratorioOtService,
     private readonly recepcion: RecepcionService,
+    private readonly alcanceResultado: AlcanceResultadoService,
   ) {}
 
   private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma) {
@@ -1587,7 +1588,10 @@ export class RegistroMuestrasService {
    * tiene cada una) y la propuesta de métodos desde la cotización aceptada.
    */
   async propuesta(otId: string, tenantId: string, req: any) {
-    const ot = await this.otEnAlcance(otId, tenantId, req);
+    // Lectura: el laboratorio que participa en la OT ve sus muestras (B-002, EP-02 3.1).
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    await this.alcanceResultado.alcanceEnOt(req, ot, "muestra.ver");
     const muestras = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT m.id, m.codigo, m.nombre, m.estado, m.veredicto,
               m.toma_muestra AS "tomaMuestra", m.condicion_recepcion AS "condicionRecepcion",

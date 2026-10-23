@@ -43,7 +43,12 @@ describe("Registrar OT con sus muestras (B-001, B-011)", () => {
     const CLIENTE = "cccccccc-cccc-cccc-cccc-cccccccccccc";
     const req = { user: { sub: "u", tenantId: "t", permisos: ["ot.crear"] } };
     const montar = (registrar: jest.Mock) => {
-      const tx = { ordenTrabajo: { create: jest.fn(async () => ({ id: "ot-1", codigo: "OT-2026-0001" })) }, $executeRawUnsafe: jest.fn() };
+      const tx = {
+        ordenTrabajo: { create: jest.fn(async () => ({ id: "ot-1", codigo: "OT-2026-0001" })) },
+        $executeRawUnsafe: jest.fn(),
+        $queryRawUnsafe: jest.fn(async () => []),
+        $queryRaw: jest.fn(async () => [{ ultimo: 1 }]),
+      };
       const prisma = {
         cliente: { findFirst: jest.fn(async () => ({ id: CLIENTE })) },
         $queryRawUnsafe: jest.fn(async (sql: string) =>
@@ -56,7 +61,6 @@ describe("Registrar OT con sus muestras (B-001, B-011)", () => {
       const labs = { resolverParaAlta: jest.fn(async () => LQC), fijar: jest.fn() };
       const alcance = { exigirUnidad: jest.fn() };
       const ctl = new OtController(prisma as any, {} as any, alcance as any, labs as any, {} as any, {} as any, { registrar } as any);
-      (ctl as any).generarCodigo = async () => "OT-2026-0001";
       return { ctl, tx, prisma };
     };
 

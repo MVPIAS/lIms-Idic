@@ -1,4 +1,5 @@
 import { Controller, Get, Injectable, NotFoundException, Param, ParseUUIDPipe, Req, UseGuards } from "@nestjs/common";
+import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { PrismaService } from "../common/prisma.service";
@@ -27,6 +28,7 @@ export class AvanceOtService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
+    private readonly alcanceResultado: AlcanceResultadoService,
   ) {}
 
   /** Hechos de la OT que alimentan la ruta. */
@@ -37,7 +39,8 @@ export class AvanceOtService {
       include: { unidad: { select: { codigo: true } } },
     });
     if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    // B-002: también el laboratorio que participa en la OT (destino de una orden interna) ve la ruta.
+    await this.alcanceResultado.alcanceEnOt(req, ot, "ot.ver");
 
     const rama = await ramaDeUnidad(this.prisma, ot.unidadPrincipal).catch(() => null);
     const [cotizacion, muestras, analistas, resultados, docs, factura, calibraciones, internacion, reinspeccion, ordenesInternas] = await Promise.all([
