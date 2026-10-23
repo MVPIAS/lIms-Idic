@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   OnModuleInit,
@@ -789,6 +790,10 @@ export class PrototiposService implements OnModuleInit {
    * resultado.aprobar para cambiar lo que vino del catálogo).
    */
   async aplicarParametros(req: any, tenantId: string, id: string) {
+    // La jefatura (resultado.aprobar) aplica la parametrización a mano; al registrar la
+    // muestra de la OT ya se aplica sola (B-008, flujo-real · aplicarParametrizacionPrototipo).
+    if (!(req?.user?.roles ?? []).includes("SUPERADMIN") && !(req?.user?.permisos ?? []).includes("resultado.aprobar"))
+      throw new ForbiddenException("La parametrización la aplica la jefatura de la unidad de la OT.");
     const p = await this.fila(tenantId, id);
     if (p.param_estado !== "validada") throw new ConflictException("La parametrización no está validada.");
     if (!p.ot_id || p.ot_estado === "anulada") throw new ConflictException("El prototipo no tiene OT vigente.");
