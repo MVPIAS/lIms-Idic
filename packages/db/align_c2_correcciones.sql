@@ -7,6 +7,7 @@
 --           un documento emitido (disparador de unicidad oficio ↔ documento).
 --   B-022 · La plantilla guarda su tipo de documento («Automático» lo toma de ella).
 --   B-026 · Cuerpo de la plantilla IVCOR según IDIC-PG09 Anexo 01.
+--   B-075 · Membrete «Laboratorio Químico Central» en el informe del LQC.
 -- Aditivo e idempotente. Va ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
@@ -141,3 +142,12 @@ UPDATE plantilla_informe
 </div>$ivc$
  WHERE repid = 'IVCOR'
    AND (cuerpo_html IS NULL OR btrim(cuerpo_html) = '');
+
+-- -----------------------------------------------------------------------------
+-- B-075 · Membrete del informe del LQC (IDIC-PG09 Anexo 02-02)
+-- -----------------------------------------------------------------------------
+-- El membrete decía «Laboratorio de Química (LQC)»; el nombre oficial es
+-- «Laboratorio Químico Central». Solo cambia el texto antiguo (idempotente).
+UPDATE plantilla_informe
+   SET cuerpo_html = replace(cuerpo_html, 'Laboratorio de Química (LQC)', 'Laboratorio Químico Central')
+ WHERE repid = 'PG09A2-LQC' AND cuerpo_html LIKE '%Laboratorio de Química (LQC)%';
