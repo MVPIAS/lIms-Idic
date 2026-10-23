@@ -110,12 +110,12 @@ function NuevoOficio() {
             </fieldset>
           )}
           <div className="form-grid cols-2">
-            <div className="field span-2"><label>Destinatario (unidad o autoridad) <span className="req">*</span></label><input value={f.destinatario} maxLength={300} onChange={(e) => setF({ ...f, destinatario: e.target.value })} /></div>
-            <div className="field span-2"><label>Materia (OBJ.) <span className="req">*</span></label><input value={f.materia} maxLength={500} onChange={(e) => setF({ ...f, materia: e.target.value })} /></div>
-            <div className="field"><label>Fecha</label><input type="date" value={f.fecha} max={hoyISO()} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></div>
-            <div className="field"><label>Nº de oficio</label><input value="Se asigna al enviarlo a firmas (correlativo de la unidad)" readOnly /></div>
-            <div className="field span-2"><label>Texto del oficio (un párrafo por bloque; vacío = texto de remisión)</label><textarea rows={5} maxLength={8000} value={f.cuerpo} onChange={(e) => setF({ ...f, cuerpo: e.target.value })} /></div>
-            <div className="field span-2"><label>Distribución (una línea por destinatario, con sus ejemplares al final)</label><textarea rows={3} maxLength={2000} value={f.distribucion} onChange={(e) => setF({ ...f, distribucion: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="ofn-1">Destinatario (unidad o autoridad) <span className="req">*</span></label><input id="ofn-1" value={f.destinatario} maxLength={300} onChange={(e) => setF({ ...f, destinatario: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="ofn-2">Materia (OBJ.) <span className="req">*</span></label><input id="ofn-2" value={f.materia} maxLength={500} onChange={(e) => setF({ ...f, materia: e.target.value })} /></div>
+            <div className="field"><label htmlFor="ofn-3">Fecha</label><input id="ofn-3" type="date" value={f.fecha} max={hoyISO()} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></div>
+            <div className="field"><label htmlFor="ofn-4">Nº de oficio</label><input id="ofn-4" value="Se asigna al enviarlo a firmas (correlativo de la unidad)" readOnly /></div>
+            <div className="field span-2"><label htmlFor="ofn-5">Texto del oficio (un párrafo por bloque; vacío = texto de remisión)</label><textarea id="ofn-5" rows={5} maxLength={8000} value={f.cuerpo} onChange={(e) => setF({ ...f, cuerpo: e.target.value })} /></div>
+            <div className="field span-2"><label htmlFor="ofn-6">Distribución (una línea por destinatario, con sus ejemplares al final)</label><textarea id="ofn-6" rows={3} maxLength={2000} value={f.distribucion} onChange={(e) => setF({ ...f, distribucion: e.target.value })} /></div>
           </div>
           <div className="toolbar" style={{ marginBottom: 0 }}>
             <Link href={(otId ? `/ot/${otId}?tab=informe` : cotizacionId ? `/cotizaciones/${cotizacionId}` : "/oficios") as any} className="btn outline">Cancelar</Link>
