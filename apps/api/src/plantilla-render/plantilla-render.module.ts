@@ -11,6 +11,7 @@ import {
   Res,
   UseGuards,
 } from "@nestjs/common";
+import { puedeVerDocumento } from "../rbac/alcance-documento";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
@@ -109,13 +110,27 @@ export class PlantillaRenderController {
    */
   private async exigirAlcanceDocumento(certificadoId: string, req: any) {
     const d = await this.svc.alcanceDocumento(certificadoId, req?.user?.tenantId);
-    if (req?.user?.sub && d.responsables.includes(req.user.sub)) return;
+    // B-002 (frente c1): también quien lo emitió y el laboratorio responsable de su OT (rbac/alcance-documento.ts).
+    const visibles = new Set<string>();
+    for (const u of [d.unidadId, d.otUnidadId]) if (u && (await this.alcance.puedeVerUnidad(req, u))) visibles.add(u);
+    if (puedeVerDocumento(d, req?.user?.sub, (u) => !!u && visibles.has(u))) return;
     await this.alcance.exigirUnidad(req, d.unidadId, `el documento ${d.etiqueta}`);
   }
 
   /** La OT debe estar dentro del alcance por laboratorio de quien emite. */
-  private async exigirAlcanceOt(otId: string, req: any, cobertura?: { cobertura?: string; unidadId?: string | null } | null) {
+  private async exigirAlcanceOt(
+    otId: string,
+    req: any,
+    cobertura?: { cobertura?: string; unidadId?: string | null } | null,
+    /** B-002 (frente c1): lecturas de la emisión (propuesta, cobertura) para un laboratorio que trabaja en la OT. */
+    participanteBasta = false,
+  ) {
     const ctx = await this.svc.contexto(otId, req?.user?.tenantId);
+    if (participanteBasta && !(await this.alcance.puedeVerUnidad(req, ctx.ot.unidadPrincipal))) {
+      const filtro = await this.alcance.filtroUnidades(req);
+      for (const u of filtro ?? [])
+        if (await this.svc.laboratorioTrabajaEnOt(otId, req?.user?.tenantId, u)) return;
+    }
     // Documento de UN laboratorio (Alimentos: LQA, LMB, LES): basta con tener ese
     // laboratorio en el alcance; su cobertura se valida después contra la OT.
     if (
@@ -149,7 +164,7 @@ export class PlantillaRenderController {
   @RequierePermiso("certificado.emitir")
   async propuesta(@Body() body: unknown, @Req() req: any) {
     const { otId, plantillaId } = OtPlantilla.parse(body);
-    await this.exigirAlcanceOt(otId, req);
+    await this.exigirAlcanceOt(otId, req, null, true);
     return this.svc.propuestaDocumento(otId, plantillaId, req?.user?.tenantId);
   }
 
@@ -198,7 +213,7 @@ export class PlantillaRenderController {
   @Get("ot/:otId/cobertura")
   @RequierePermiso("certificado.emitir")
   async cobertura(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
-    await this.exigirAlcanceOt(otId, req);
+    await this.exigirAlcanceOt(otId, req, null, true);
     return this.svc.coberturaOt(otId, req?.user?.tenantId);
   }
 

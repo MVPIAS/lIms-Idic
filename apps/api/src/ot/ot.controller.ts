@@ -484,7 +484,8 @@ export class OtController {
   @Get(":id/historial")
   @RequierePermiso("ot.ver")
   async historial(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    await this.otEnAlcance(id, req);
+    // Lectura: también el laboratorio que participa en la OT (B-002).
+    await this.otVisible(id, req);
     return this.prisma.$queryRawUnsafe(
       `SELECT h.id, h.tipo, h.detalle, h.created_at AS "createdAt",
               u.id AS "usuarioId", u.nombre_completo AS "usuarioNombre"
@@ -506,17 +507,24 @@ export class OtController {
     });
     if (!ot) return ot;
     // Fuera del alcance por unidad → 403 (la OT existe pero no es de sus laboratorios).
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    // B-002: el laboratorio que participa en la OT (destino de una orden interna)
+    // abre el expediente; dentro ve solo sus ensayos (alcanceEnOt).
+    const vista = await this.alcanceResultado.alcanceEnOt(req, ot, "ot.ver");
     const [analistas, asignador] = await Promise.all([
       this.analistasDe([ot.id]),
       ot.unidadAsignadaPor
         ? this.prisma.usuario.findUnique({ where: { id: ot.unidadAsignadaPor }, select: { id: true, nombreCompleto: true } })
         : null,
     ]);
+    const participa = vista.todo
+      ? null
+      : await this.prisma.unidad.findMany({ where: { id: { in: [...vista.labs] } }, select: { id: true, codigo: true, nombre: true } });
     return {
       ...ot,
       analistas: analistas.get(ot.id) ?? [],
       unidadAsignadaPorNombre: asignador?.nombreCompleto ?? null,
+      // Laboratorios con los que el usuario participa en una OT de otro laboratorio (null = la ve entera).
+      participacion: participa ? { laboratorios: participa } : null,
     };
   }
 
@@ -599,10 +607,11 @@ export class OtController {
     // Muestras que nacen con la OT (B-001) y E.T. que las rige: se validan ANTES de crear nada.
     const alta = await this.validarMuestrasDeAlta(tenantId, dto, clienteId!, unidad.id);
 
-    const codigo = await this.generarCodigo(tenantId);
     const opiNumero = dto.opiNumero?.trim() || null;
 
     const ot = await this.prisma.$transaction(async (tx) => {
+      // El correlativo se toma DENTRO de la transacción: si una muestra falla, no se gasta un número (B-001).
+      const codigo = await generarCodigoOt(tx, tenantId);
       const creada = await tx.ordenTrabajo.create({
         data: {
           tenantId,
@@ -734,6 +743,17 @@ export class OtController {
       where: { id },
       include: { cliente: true, unidad: SELECT_UNIDAD },
     });
+  }
+
+  /** Lectura de la OT: su laboratorio responsable o un laboratorio que participa en ella (B-002). */
+  private async otVisible(id: string, req: any) {
+    const tenantId = req.user?.tenantId;
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, codigo: true, unidadPrincipal: true },
+    });
+    if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
+    return this.alcanceResultado.alcanceEnOt(req, ot, "ot.ver");
   }
 
   /** OT del tenant y dentro del alcance del usuario (404 / 403). */

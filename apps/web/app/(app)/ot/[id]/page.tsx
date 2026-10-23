@@ -212,6 +212,15 @@ export default function ExpedientePage() {
         </div>
       </div>
 
+      {/* B-002: un laboratorio que participa en la OT de otro (orden interna) ve el expediente con sus ensayos. */}
+      {ot?.participacion?.laboratorios?.length > 0 && (
+        <div className="alert info">
+          Usted participa en esta OT con <b>{ot.participacion.laboratorios.map((l: { codigo: string }) => l.codigo).join(", ")}</b>:
+          ve la muestra compartida con los ensayos de su laboratorio, registra su preparación y emite su documento («Un laboratorio»).
+          Lo demás de la OT lo gestiona {ot?.unidad?.codigo ?? "el laboratorio responsable"}.
+        </div>
+      )}
+
       {ot && <OrigenBpchOt otId={ot.id} origenTrabajo={ot.origenTrabajo} />}
 
       {/* Delegación Nº 11 (EP-11): las armas se trabajan en su expediente propio. */}
