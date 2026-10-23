@@ -228,11 +228,32 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
   const resetElemento = () => {
     setGranGrupoId(""); setGrupoId(""); setSubgrupoId(""); setFamiliaId(""); setQ("");
     setElemento(null); setPanel([]); setChecked({}); setBuscaMetodo(""); setMetodosEncontrados([]);
+    setEsProductoLab(false); setProductosLab([]); setGenericoOrigen(null);
     setAnalista(""); setPrioridad("normal"); setTipoInspeccion(""); setCantidad(1); setNumMuestras(1); setNumPlanilla("");
   };
 
   const puedeAgregar = (!!elemento || sinElemento) && metodosMarcados.length > 0 && Number(numMuestras) >= 1;
-  const generico = !!elemento && esSubgrupoGenerico(subgrupos.find((x) => x.id === subgrupoId)?.nombre);
+
+  // B-012: el elemento genérico del laboratorio ofrece los productos con panel propio (lista producto_lab):
+  // el panel viene del producto, el mismo que propone la recepción.
+  const [productosLab, setProductosLab] = useState<{ id: string; codigo: string; nombre: string; metodos: number; laboratorio: string }[]>([]);
+  const [esProductoLab, setEsProductoLab] = useState(false);
+  const [genericoOrigen, setGenericoOrigen] = useState<Elemento | null>(null);
+  useEffect(() => {
+    if (!elemento || esProductoLab || !esSubgrupoGenerico(subgrupos.find((x) => x.id === subgrupoId)?.nombre)) { if (!esProductoLab) setProductosLab([]); return; }
+    apiGet(`/recepcion/elemento/${encodeURIComponent(elemento.id)}/productos`)
+      .then((d: any) => setProductosLab(d?.productos ?? []))
+      .catch(() => setProductosLab([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [elemento]);
+  const elegirProductoLab = (id: string) => {
+    const p = productosLab.find((x) => x.id === id);
+    if (!p) { setEsProductoLab(false); if (genericoOrigen) setElemento(genericoOrigen); return; }
+    if (!esProductoLab) setGenericoOrigen(elemento);
+    setEsProductoLab(true);
+    setElemento({ id: p.id, codigo: p.codigo, nombre: p.nombre, familiaNombre: elemento?.familiaNombre });
+  };
+  const generico = !!elemento && !esProductoLab && esSubgrupoGenerico(subgrupos.find((x) => x.id === subgrupoId)?.nombre);
 
   const agregar = () => {
     if (!elemento && !sinElemento) return;
@@ -330,7 +351,7 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
               {elementos.map((el) => {
                 const sel = elemento?.id === el.id;
                 return (
-                  <tr key={el.id} className="row-action" onClick={() => setElemento(el)} style={sel ? { background: "#eff5ff" } : undefined}>
+                  <tr key={el.id} className="row-action" onClick={() => { setEsProductoLab(false); setGenericoOrigen(null); setElemento(el); }} style={sel ? { background: "#eff5ff" } : undefined}>
                     <td><span className="codigo">{el.codigo}</span></td>
                     <td>{el.nombre}</td>
                     <td>{el.familiaNombre ?? "—"}</td>
@@ -351,6 +372,15 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
       {/* Datos derivados (readonly) + datos del elemento (editables) */}
       {(elemento || sinElemento) && (
         <>
+          {productosLab.length > 0 && (
+            <div className="field" style={{ marginTop: 10, maxWidth: 420 }}>
+              <label htmlFor="lb-producto-lab">Producto del {productosLab[0].laboratorio} (panel propio)</label>
+              <select id="lb-producto-lab" value={esProductoLab ? elemento?.id ?? "" : ""} onChange={(e) => elegirProductoLab(e.target.value)}>
+                <option value="">— Elemento del laboratorio (sin producto) —</option>
+                {productosLab.map((p) => <option key={p.id} value={p.id}>{p.nombre} · {p.metodos} método(s)</option>)}
+              </select>
+            </div>
+          )}
           {elemento && generico && (
             <p className="hint" style={{ margin: "10px 0 0" }}>
               «{elemento.nombre}» es el elemento del laboratorio, no un producto: escriba la descripción de la muestra en la tabla de líneas.

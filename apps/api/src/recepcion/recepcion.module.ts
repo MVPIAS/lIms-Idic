@@ -31,6 +31,13 @@ export class RecepcionController {
     return this.svc.bandeja(tenantDe(req), req);
   }
 
+  @Get("elemento/:elementoId/productos")
+  @RequierePermiso("ot.ver")
+  @ApiOperation({ summary: "Productos con panel propio del laboratorio de un elemento genérico (Registrar OT, B-012)" })
+  productosDeElemento(@Param("elementoId", ParseUUIDPipe) elementoId: string, @Req() req: any) {
+    return this.svc.productosDeElemento(tenantDe(req), elementoId);
+  }
+
   @Get("ot/:otId/productos")
   @RequierePermiso("muestra.ver")
   @ApiOperation({ summary: "Productos (matriz) del laboratorio de la OT; con ?search= también del catálogo" })
