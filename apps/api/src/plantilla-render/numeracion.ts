@@ -51,6 +51,13 @@ export const NOMBRE_TIPO_NUMERABLE: Record<string, string> = {
   OFICIO: "Oficio conductor",
 };
 
+/**
+ * Tipos con serie propia: solo se numeran con una regla de su mismo tipo (de la
+ * unidad, de un ancestro o general), nunca con la regla «todos los tipos» de
+ * un laboratorio, que es la de sus informes.
+ */
+export const TIPOS_SERIE_PROPIA: ReadonlySet<string> = new Set(["OFICIO"]);
+
 /** Tokens admitidos (nombre → descripción), para validar y para la ayuda de la pantalla. */
 export const TOKENS: Record<string, string> = {
   AAAA: "Año de emisión (2026)",
@@ -184,15 +191,19 @@ export function formatearNumero(formato: string, v: VariablesNumero): { numero: 
  */
 export function elegirRegla<R extends Regla>(reglas: R[], cadena: string[], tipo: string): R | null {
   const activas = reglas.filter((r) => r.activo !== false);
+  // Un tipo con serie propia (el oficio) nunca toma la regla «todos los tipos»
+  // de un laboratorio: si no, el oficio conductor heredaría el número del
+  // informe que conduce (B-003, «IDIC DSA SAM LRB Nº J.{OT_N}/{AAAA}»).
+  const admiteTodos = !TIPOS_SERIE_PROPIA.has(tipo);
   for (const unidad of cadena) {
     const deUnidad = activas.filter((r) => r.unidadId === unidad);
     const exacta = deUnidad.find((r) => r.tipoDocumento === tipo);
     if (exacta) return exacta;
-    const todos = deUnidad.find((r) => r.tipoDocumento === null);
+    const todos = admiteTodos ? deUnidad.find((r) => r.tipoDocumento === null) : undefined;
     if (todos) return todos;
   }
   const generales = activas.filter((r) => r.unidadId === null);
-  return generales.find((r) => r.tipoDocumento === tipo) ?? generales.find((r) => r.tipoDocumento === null) ?? null;
+  return generales.find((r) => r.tipoDocumento === tipo) ?? (admiteTodos ? generales.find((r) => r.tipoDocumento === null) : undefined) ?? null;
 }
 
 /** Período del correlativo: el año si se reinicia cada año, 0 si es continuo. */

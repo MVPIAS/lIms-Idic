@@ -894,7 +894,10 @@ export class PlantillaRenderService {
         muestra: d.muestraCodigo,
         numInforme,
       },
-      async (numero) => Boolean(await tx.certificado.findFirst({ where: { tenantId: d.tenantId, OR: [{ numero }, { codigo: numero }] }, select: { id: true } })),
+      // Un documento tampoco puede repetir el número de un oficio (B-003).
+      async (numero) =>
+        Boolean(await tx.certificado.findFirst({ where: { tenantId: d.tenantId, OR: [{ numero }, { codigo: numero }] }, select: { id: true } })) ||
+        (await tx.$queryRawUnsafe(`SELECT 1 FROM oficio WHERE tenant_id = $1::uuid AND numero = $2 LIMIT 1`, d.tenantId, numero) as unknown[]).length > 0,
     );
     if (r.numero) return { numero: r.numero, aviso: null, formato: r.regla.formato };
     const numero = await this.siguienteNumero(tx, d.tenantId, anioChile(d.fecha));
