@@ -25,11 +25,38 @@ type Fila = {
   sinSerie: boolean;
   accesorios: string;
   lote: string;
+  /** B-094: textos de la planilla para volver a emparejar tras añadir al catálogo. */
+  modeloTexto?: string;
+  calibreTexto?: string;
+  /** Filas leídas de la planilla: al volver a cargarla se reemplazan, no se suman. */
+  dePlanilla?: boolean;
 };
 let seq = 0;
 const vacia = (): Fila => ({ clave: ++seq, resolucionArmaId: null, tipo: "", marcaTexto: "", marcaId: "", modeloId: "", calibreId: "", paisOrigen: "", serie: "", sinSerie: false, accesorios: "", lote: "" });
 const k = (s?: string | null) => (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/\s+/g, " ").trim();
 const etiquetaMarca = (m: { nombre: string; pais: string | null }) => (m.pais ? `${m.nombre} (${m.pais})` : m.nombre);
+
+/**
+ * B-094 · Empareja con el catálogo las filas que aún no tienen marca, modelo o
+ * calibre, a partir del texto de la planilla (o del escrito). No toca lo ya
+ * elegido.
+ */
+function reemparejar(filas: Fila[], cat: Catalogos): Fila[] {
+  const marcas = cat.marcas.filter((m) => m.activo);
+  return filas.map((f) => {
+    let { marcaId, modeloId, calibreId, paisOrigen } = f;
+    if (!marcaId && f.marcaTexto) {
+      const m = marcas.find((x) => k(etiquetaMarca(x)) === k(f.marcaTexto)) ?? marcas.find((x) => k(x.nombre) === k(f.marcaTexto));
+      if (m) { marcaId = m.id; paisOrigen = paisOrigen || m.pais || ""; }
+    }
+    if (marcaId && !modeloId && f.modeloTexto)
+      modeloId = cat.modelos.find((x) => x.marcaId === marcaId && x.activo && k(x.nombre) === k(f.modeloTexto))?.id ?? "";
+    if (!calibreId && f.calibreTexto) calibreId = cat.calibres.find((c) => c.activo && k(c.nombre) === k(f.calibreTexto))?.id ?? "";
+    if (marcaId === f.marcaId && modeloId === f.modeloId && calibreId === f.calibreId && paisOrigen === f.paisOrigen) return f;
+    const marca = marcas.find((x) => x.id === marcaId);
+    return { ...f, marcaId, modeloId, calibreId, paisOrigen, marcaTexto: marca ? etiquetaMarca(marca) : f.marcaTexto };
+  });
+}
 
 export default function RegistroArmas({ d, accion, onEtiquetas }: { d: ExpedienteD11; accion: Accion; onEtiquetas: () => void }) {
   const [cat, setCat] = useState<Catalogos | null>(null);
@@ -41,7 +68,15 @@ export default function RegistroArmas({ d, accion, onEtiquetas }: { d: Expedient
   const puede = d.puedo.registrar && d.ot.abierta && Boolean(acta);
   const faltan = acta ? Math.max(0, acta.cantidad - d.armas.length) : 0;
 
-  const cargarCat = () => pedir<Catalogos>("GET", "/d11/catalogos").then(setCat).catch((e) => toast.error(e.message));
+  const cargarCat = () =>
+    pedir<Catalogos>("GET", "/d11/catalogos")
+      .then((c) => {
+        setCat(c);
+        // B-094: tras añadir una marca, un modelo o un calibre, las filas que lo esperaban se completan solas.
+        setFilas((xs) => reemparejar(xs, c));
+        return c;
+      })
+      .catch((e) => toast.error(e.message));
   useEffect(() => {
     cargarCat();
   }, []);
@@ -78,6 +113,8 @@ export default function RegistroArmas({ d, accion, onEtiquetas }: { d: Expedient
           paisOrigen: marca?.pais ?? "",
           serie: l.cantidad === 1 ? l.serie ?? "" : "",
           accesorios: l.accesorios ?? "",
+          modeloTexto: l.modelo ?? "",
+          calibreTexto: l.calibre ?? "",
         });
     }
     setFilas(nuevas.slice(0, Math.max(faltan, 0)));
@@ -89,7 +126,7 @@ export default function RegistroArmas({ d, accion, onEtiquetas }: { d: Expedient
     setOcupado(true);
     try {
       const r = await subirPlanilla<any>("/d11/planilla", archivo);
-      const nuevas: Fila[] = r.filas.map((x: any) => {
+      const leidas: Fila[] = r.filas.map((x: any) => {
         const marca = marcas.find((m) => m.id === x.marcaId);
         return {
           ...vacia(),
@@ -102,9 +139,14 @@ export default function RegistroArmas({ d, accion, onEtiquetas }: { d: Expedient
           serie: x.serie ?? "",
           accesorios: x.accesorios ?? "",
           lote: x.lote ?? "",
+          modeloTexto: x.modelo ?? "",
+          calibreTexto: x.calibre ?? "",
+          dePlanilla: true,
         };
       });
-      setFilas((xs) => [...xs, ...nuevas]);
+      const nuevas = cat ? reemparejar(leidas, cat) : leidas;
+      // B-094: volver a cargar la planilla reemplaza sus filas (antes se sumaban: 6 filas tras recargar 3).
+      setFilas((xs) => [...xs.filter((x) => !x.dePlanilla), ...nuevas]);
       setAvisos([...r.errores, ...(nuevas.some((x) => !x.marcaId || !x.modeloId || !x.calibreId) ? ["Hay filas con marca, modelo o calibre fuera del catálogo: elíjalos o añádalos."] : [])]);
       toast.ok(`${nuevas.length} fila(s) leídas de ${archivo.name}. Revíselas antes de registrar.`);
     } catch (e: any) {
