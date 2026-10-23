@@ -279,6 +279,8 @@ export type FirmaEstampada = {
   /** Imagen de firma en base64 (sin prefijo data:) y su tipo MIME. */
   imagen?: { data: string; mime: string } | null;
   pendiente: boolean;
+  /** Leyenda de la plantilla que acompaña a la firma («Por orden del Director del IDIC»). */
+  leyenda?: string | null;
 };
 
 /** Datos del sello que va al pie del documento (fuera del cuerpo sellado). */
@@ -340,6 +342,7 @@ export function bloqueFirmasHtml(firmas: FirmaEstampada[]): string {
         <b>${escapar(f.nombre ?? "")}</b>
         ${f.cargo ? `<span>${escapar(f.cargo)}</span>` : ""}
         <span>${escapar(textoAccion(f.accion))} · ${escapar(f.rol)}${f.unidad ? ` · ${escapar(f.unidad)}` : ""}</span>
+        ${f.leyenda ? `<span>${escapar(f.leyenda)}</span>` : ""}
         ${estado}</div>`;
     })
     .join("");
@@ -356,8 +359,18 @@ const RE_BLOQUE_FIRMAS = /<div class="firmas">(?:\s*<div class="firma">[\s\S]*?<
  */
 export function cuerpoConFirmas(cuerpo: string, firmas: FirmaEstampada[] | undefined): string {
   if (!firmas || !firmas.length) return cuerpo;
-  const bloque = bloqueFirmasHtml(firmas);
-  return RE_BLOQUE_FIRMAS.test(cuerpo) ? cuerpo.replace(RE_BLOQUE_FIRMAS, bloque) : `${cuerpo}${bloque}`;
+  const plantilla = RE_BLOQUE_FIRMAS.exec(cuerpo)?.[0] ?? "";
+  // La leyenda de la plantilla («Por orden del Director del IDIC», Anexo 02-02) se
+  // conserva en la firma que oficializa (o en la última) del bloque del circuito.
+  const leyenda = /Por orden del Director(?: del IDIC)?/i.exec(plantilla)?.[0] ?? null;
+  const conLeyenda = leyenda
+    ? firmas.map((f, i) => {
+        const destino = firmas.some((x) => x.accion === "OFICIALIZA") ? f.accion === "OFICIALIZA" : i === firmas.length - 1;
+        return destino ? { ...f, leyenda } : f;
+      })
+    : firmas;
+  const bloque = bloqueFirmasHtml(conLeyenda);
+  return plantilla ? cuerpo.replace(RE_BLOQUE_FIRMAS, bloque) : `${cuerpo}${bloque}`;
 }
 
 /**
