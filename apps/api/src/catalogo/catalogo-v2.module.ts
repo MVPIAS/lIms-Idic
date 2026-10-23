@@ -217,7 +217,7 @@ export class CatEnsayoService extends BaseCrudService {
 const CatEnsayoCreate = z.object({
   codigo: z.string().min(1).max(30),
   nombre: z.string().min(1).max(240),
-  precio: z.number().nonnegative().default(0),
+  precio: z.coerce.number().nonnegative().default(0),
   familiaId: z.string().uuid().optional(),
   agrupado: z.string().max(30).optional(),
   objetivo: z.string().optional(),
