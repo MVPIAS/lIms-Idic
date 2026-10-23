@@ -11,7 +11,8 @@ import { FormulariosDatos, tenantDe, usuarioDe, type OtFormulario } from "./form
 import { ReglasCapturaService } from "./reglas-captura.service";
 import { evaluarPreparacion, leerCampoPrep, type CampoPrep } from "./preparacion";
 import {
-  erroresComision, erroresDocumentacion, erroresReserva, exigeAprobacion, FORMULARIOS_TRABAJO, LABS_DSA, leerConfigTrabajo, pasosAprobacion, TEXTO_ESTADO_TRABAJO, transicion,
+  erroresComision, erroresDocumentacion, erroresReserva, exigeAprobacion,
+  conTerrenoPropuesto, FORMULARIOS_TRABAJO, LABS_DSA, leerConfigTrabajo, pasosAprobacion, TEXTO_ESTADO_TRABAJO, transicion,
   type AccionTrabajo, type EstadoTrabajo,
 } from "./trabajo";
 import { leerAmenazas } from "./lrb";
@@ -187,7 +188,7 @@ export class PreparacionService {
       this.d.params(tenantId, "hcp_plantilla"),
     ]);
     const datos = reg?.datos ?? {};
-    const documentacion = datos.documentacion ?? {};
+    const documentacion = conTerrenoPropuesto(lab, datos.documentacion ?? {}, await this.lugarEjecucion(otId));
     const exige = exigeAprobacion(lab, documentacion, cfg);
     const estado = (reg?.estado as EstadoTrabajo) ?? "borrador";
     const roles = req?.user?.roles?.includes("SUPERADMIN") ? ["SUPERADMIN"] : await this.rolesEnRama(req, ot.unidadPrincipal!);
@@ -254,6 +255,12 @@ export class PreparacionService {
   }
 
   /** 2.2 Guardar la documentación (y «Enviar a aprobación → Jefe» con `enviar`). */
+  /** Lugar de ejecución del encargo de la OT (Datos del encargo). */
+  private async lugarEjecucion(otId: string): Promise<string | null> {
+    const f = await this.d.prisma.$queryRawUnsafe<{ l: string | null }[]>(`SELECT lugar_ejecucion AS l FROM ot_encargo WHERE ot_id = $1::uuid`, otId);
+    return f[0]?.l ?? null;
+  }
+
   async trabajoDocumentacion(otId: string, body: any, req: any, enviar: boolean) {
     const tenantId = tenantDe(req);
     const ot = await this.d.ot(otId, tenantId);
@@ -266,7 +273,11 @@ export class PreparacionService {
     const f = FORMULARIOS_TRABAJO[lab];
     const reg = await this.d.registro(otId, "trabajo", lab);
     const cfg = await this.configTrabajo(tenantId);
-    const entrada = typeof body?.documentacion === "object" && body.documentacion ? body.documentacion : reg?.datos?.documentacion ?? {};
+    const entrada = conTerrenoPropuesto(
+      lab,
+      typeof body?.documentacion === "object" && body.documentacion ? body.documentacion : reg?.datos?.documentacion ?? {},
+      await this.lugarEjecucion(otId),
+    );
     const documentacion: Record<string, unknown> = {};
     for (const c of f.campos) if (c.campo in entrada) documentacion[c.campo] = entrada[c.campo];
     const ctx = {
