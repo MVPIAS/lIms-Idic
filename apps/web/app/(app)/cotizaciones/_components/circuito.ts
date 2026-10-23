@@ -114,6 +114,9 @@ export const TEXTO_EVENTO: Record<string, string> = {
   firma_devuelta: "Devolvió la cotización al ejecutivo",
   enviada_cliente: "Registró el envío al cliente",
   envio_fallido: "Intento de envío por correo fallido",
+  discrepancia_oc: "Aceptó con una O/C distinta de la cotización (discrepancia)",
+  oc_conforme: "Comparó la O/C con la cotización: coincide",
+  orden_cliente_anulada: "Anuló la orden del cliente",
 };
 
 export const TEXTO_MEDIO: Record<string, string> = {

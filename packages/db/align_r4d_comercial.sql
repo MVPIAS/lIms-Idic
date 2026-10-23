@@ -312,7 +312,7 @@ SELECT t.id, v.categoria, v.codigo, v.etiqueta, v.orden, v.valor
  CROSS JOIN (VALUES
     ('cotizacion_lrb', 'reposicion', 'Unidades de reposición que se suman al lote del LRB al cotizar', 1, '4'),
     ('aceptacion_oc', 'tolerancia', 'Diferencia entre la O/C y el total cotizado que no se considera discrepancia (CLP)', 1, '0'),
-    ('tasa_informe', 'difusion', 'Destinatarios de la difusión del informe mensual de la tasa 1,5 %', 1, 'Dirección, Subdirección, BPCH, Contraloría interna, DFZ'),
+    ('tasa_informe', 'difusion', 'Destinatarios de la difusión del informe mensual de la tasa 1,5 %', 1, 'DIRECCION,SUBDIRECCION,BPCH,CONTRALORIA,DFZ'),
     ('ot_institucional', 'exige_oficio', 'La OT institucional sin cobro exige el Nº y la fecha del oficio', 1, 'si')
  ) AS v(categoria, codigo, etiqueta, orden, valor)
 ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
