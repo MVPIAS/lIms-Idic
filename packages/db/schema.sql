@@ -2155,19 +2155,8 @@ FROM tenant t, (VALUES
 ) AS x(codigo, nombre)
 WHERE t.codigo='IDIC';
 
--- Normas referenciales más usadas (extraídas del análisis)
-INSERT INTO norma (codigo, nombre, organismo, ano) VALUES
-  ('NCh-ISO/IEC 17025', 'Requisitos generales para la competencia de laboratorios', 'INN', 2017),
-  ('NCh 624',        'Cuero - Determinación de resistencia a la tracción y alargamiento', 'INN', 2017),
-  ('NCh 622',        'Cuero - Determinación de la resistencia al desgarramiento', 'INN', 2010),
-  ('NCh 1206',       'Cuero - Determinación de cenizas', 'INN', 2014),
-  ('NCh 841',        'Productos alimenticios - Determinación de humedad', 'INN', 2018),
-  ('NCh 842',        'Productos alimenticios - Determinación de cenizas', 'INN', 2018),
-  ('NCh 95',         'Productos alimenticios - Determinación de acidez', 'INN', 1981),
-  ('NCh 3547',       'Productos alimenticios - Determinación de materia grasa', 'INN', 2018),
-  ('ASTM E18',       'Hardness of Metallic Materials - Rockwell', 'ASTM', 2022),
-  ('ASTM D5185',     'Multielement Determination of Used and Unused Lubricating Oils', 'ASTM', 2018),
-  ('AOAC 979.08',    'Caffeine in Tea, HPLC', 'AOAC', 2019);
+-- Normas de ejemplo: seed_normas_ejemplo_demo.sql (solo demo). El catálogo de normas
+-- del IDIC llega con su migración (lo da el IDIC).
 
 -- Tasa 1,5% sobre internaciones (Ley 17.798 Control de Armas) y niveles técnicos
 INSERT INTO tasa_arancel (tenant_id, codigo, nombre, porcentaje, base, fundamento_legal)

@@ -18,6 +18,7 @@
 # final). scripts/verificar-orden-sql.sh lo comprueba y la CI falla si falta.
 # =============================================================================
 schema.sql
+seed_normas_ejemplo_demo.sql         demo
 seed_rbac.sql
 seed_gran_grupo_grupo.sql
 seed_plantillas.sql
@@ -26,7 +27,9 @@ seed_flujos.sql
 seed_preprod_demo.sql                demo
 align_schema_to_prisma.sql
 seed_analitos_limites.sql
+seed_analitos_limites_demo.sql       demo
 crm_oportunidad.sql
+seed_crm_oportunidad_demo.sql        demo
 seed_operacion_demo.sql              demo
 align_resultado_operacion.sql        sin-demo
 align_orden_compra.sql
@@ -34,10 +37,12 @@ align_final.sql
 align_resultado_estado.sql
 align_certificado.sql
 equipos_custodia.sql
+seed_equipos_custodia_demo.sql       demo
 align_rbac.sql
 align_rbac_unidad.sql
 align_resultado_equipo.sql
 saec.sql
+seed_saec_demo.sql                   demo
 align_saec_certificado.sql
 align_ibis_ot.sql
 catalogo_v2.sql
@@ -59,6 +64,7 @@ seed_informes_min20.sql
 seed_maestros_idic.sql
 align_rbac_tecnico.sql
 align_metrologia.sql
+seed_metrologia_patrones_demo.sql    demo
 align_admin_roles.sql
 align_accesos_demo.sql
 align_permisos_ambito.sql
