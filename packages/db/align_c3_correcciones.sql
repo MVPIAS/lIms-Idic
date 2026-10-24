@@ -173,3 +173,22 @@ ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS instrumento_puntos varchar
 ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS instrumento_sentido varchar(5);
 COMMENT ON COLUMN linea_cotizacion.instrumento IS 'Metrología: instrumento a calibrar de la línea (lo hereda el ítem de la OT).';
 COMMENT ON COLUMN linea_cotizacion.instrumento_sentido IS 'Metrología (LNF): sentido solicitado T (tracción), C (compresión) o T+C, como met_ot_instrumento.sentido.';
+
+-- -----------------------------------------------------------------------------
+-- Datos de demostración · clientes privados reales en la semilla de preproducción
+--   seed_preprod_demo.sql sembraba dos empresas privadas reales con su RUT. El
+--   repositorio es público: pasan a clientes ficticios con RUT de prueba válido
+--   (módulo 11, tramo 99.999.9xx). Solo se tocan las filas sembradas (RUT y razón
+--   social exactos de la semilla); un cliente creado a mano no coincide. Si ya
+--   existe el RUT ficticio en el tenant, no se toca nada. Idempotente.
+-- -----------------------------------------------------------------------------
+UPDATE cliente c
+   SET rut = v.rut_nuevo, razon_social = v.razon_nueva, telefono = v.tel_nuevo
+  FROM (VALUES
+    ('96.529.310-8', 'Empresas Carozzi S.A.', '+56 2 2444 0000', '99.999.901-8', 'Cliente Prueba Aiuken S.A.', '+56 2 2000 0001'),
+    ('91.021.000-9', 'CAP Acero · Compañía Acero del Pacífico', '+56 41 240 0000', '99.999.902-6', 'Cliente Prueba Metalúrgica Aiuken S.A.', '+56 2 2000 0002')
+  ) AS v(rut_viejo, razon_vieja, tel_viejo, rut_nuevo, razon_nueva, tel_nuevo)
+ -- Huella completa de la fila sembrada (RUT, razón social, teléfono, ciudad, región y crédito).
+ WHERE c.rut = v.rut_viejo AND c.razon_social = v.razon_vieja AND c.telefono = v.tel_viejo
+   AND c.ciudad = 'Santiago' AND c.region = 'RM' AND c.dias_credito = 30
+   AND NOT EXISTS (SELECT 1 FROM cliente x WHERE x.tenant_id = c.tenant_id AND x.rut = v.rut_nuevo);
