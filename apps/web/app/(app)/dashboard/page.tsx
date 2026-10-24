@@ -48,7 +48,7 @@ const GRUPOS: Grupo[] = [
     titulo: "Laboratorio",
     kpis: [
       { clave: "ot", label: "Órdenes de trabajo", recurso: "ot", href: "/ot", icono: "🗂", cls: "k-blue", perm: "ot.ver", ayuda: "OT registradas" },
-      { clave: "muestras", label: "Muestras", recurso: "muestras", href: "/muestras", icono: "🧫", cls: "k-green", perm: "muestra.ver", ayuda: "Muestras registradas" },
+      { clave: "muestras", label: "Muestras recibidas", recurso: "muestras", href: "/muestras", icono: "🧫", cls: "k-green", perm: "muestra.ver", ayuda: "Muestras recibidas en las OT" },
       { clave: "equipos", label: "Equipos", recurso: "equipos", href: "/equipos", icono: "⚙", cls: "k-amber", perm: "equipo.ver", ayuda: "Equipos en inventario" },
       // Misma fuente que «Informes y certificados»: acotada al alcance por laboratorio (la ruta /certificados se retiró).
       { clave: "certificados", label: "Informes y certificados", recurso: "informes/documentos", href: "/certificados", icono: "📜", cls: "k-violet", perm: "ot.ver", ayuda: "Documentos emitidos en su alcance" },

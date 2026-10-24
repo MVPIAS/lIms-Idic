@@ -9,8 +9,8 @@ export default function MuestrasPage() {
   return (
     <CrudTable
       recurso="muestras"
-      titulo="Muestras"
-      subtitulo="Maestro de muestras. A cada muestra se le asignan 1..n ensayos. La recepción (toma de muestra, condición, sello, identificación del cliente y otros laboratorios) se registra en el expediente de la OT, pestaña «Muestras»."
+      titulo="Muestras recibidas"
+      subtitulo="Muestras recibidas en cada OT, de todas las OT de su alcance: no es una tabla maestra. Cada muestra pertenece a una OT y lleva 1..n ensayos. La recepción (toma de muestra, condición, sello, identificación del cliente y otros laboratorios) se registra o corrige en el expediente de la OT, pestaña «Muestras»."
       columnas={[
         { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v}</span> },
         { campo: "nombre", titulo: "Muestra" },

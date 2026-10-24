@@ -30,7 +30,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/captura-ot", titulo: "Capturar resultados", desc: "Registra las mediciones de tus ensayos", icono: "✍", perm: "resultado.crear" },
     { href: "/ot?mias=1&estado=abiertas", titulo: "Mis órdenes de trabajo", desc: "Lo que tienes asignado y su avance", icono: "🗂", perm: "ot.ver" },
     { href: "/captura-ot?estado=pendiente,devuelto&asignados=1", titulo: "Captura por OT", desc: "Todos los ensayos de una OT en una pantalla", icono: "📈", perm: "resultado.crear" },
-    { href: "/muestras", titulo: "Muestras", desc: "Busca una muestra y su estado", icono: "🧫", perm: "muestra.ver" },
+    { href: "/muestras", titulo: "Muestras recibidas", desc: "Busca una muestra recibida en una OT y su estado", icono: "🧫", perm: "muestra.ver" },
     { href: "/qc", titulo: "Control de calidad", desc: "Blancos, estándares y duplicados", icono: "✔", perm: "resultado.ver" },
   ],
   REVISOR: [
@@ -73,7 +73,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/ot/nueva", titulo: "Registrar OT", desc: "Abre una orden de trabajo", icono: "＋", perm: "ot.crear" },
     { href: "/ot", titulo: "Órdenes de trabajo", desc: "Distribución y plazos", icono: "🗂", perm: "ot.ver" },
     { href: "/ordenes-internas", titulo: "Órdenes internas", desc: "Derivaciones entre laboratorios", icono: "🔀", perm: "ot.ver" },
-    { href: "/muestras", titulo: "Muestras", desc: "Recepción y ubicación", icono: "🧫", perm: "muestra.ver" },
+    { href: "/muestras", titulo: "Muestras recibidas", desc: "Recepción y ubicación", icono: "🧫", perm: "muestra.ver" },
   ],
   FINANZAS: [
     { href: "/ot", titulo: "OT por facturar", desc: "Trabajos terminados sin factura", icono: "🧮", perm: "ot.ver" },
@@ -110,7 +110,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
 /** B-070: accesos de la Sección Muestreo (cae en el perfil COMERCIAL pero no cotiza). */
 const ACCIONES_MUESTREO: Accion[] = [
   { href: "/ot?estado=abiertas", titulo: "OT por muestrear", desc: "Abra la OT y registre el muestreo en su pestaña «Muestreo»", icono: "🧪", perm: "ot.ver" },
-  { href: "/muestras", titulo: "Muestras", desc: "Muestras entregadas a los laboratorios", icono: "🧫", perm: "muestra.ver" },
+  { href: "/muestras", titulo: "Muestras recibidas", desc: "Muestras entregadas a los laboratorios", icono: "🧫", perm: "muestra.ver" },
 ];
 
 /** Accesos genéricos (respaldo): los primeros que el permiso permita. */
