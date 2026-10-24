@@ -109,16 +109,17 @@ async function main() {
   }
   console.log(`  ✓ ${usuariosDemo.length} usuarios demo cargados`);
 
-  // 6. Clientes reales (extraídos del dump comercial_produccion)
+  // 6. Clientes de demostración: organismos públicos y empresas FICTICIAS con RUT de prueba
+  //    (módulo 11, tramo 99.999.9xx). El repositorio es público: ninguna empresa privada real.
   const clientesReales = [
     { rut: "61.105.000-3", razonSocial: "Fábricas y Maestranzas del Ejército", tipo: "gubernamental" },
     { rut: "61.101.078-8", razonSocial: "División Logística del Ejército", tipo: "gubernamental" },
     { rut: "60.910.000-1", razonSocial: "Universidad de Chile", tipo: "gubernamental" },
-    { rut: "90.266.000-3", razonSocial: "ENAEX S.A.", tipo: "externo" },
-    { rut: "96.591.040-9", razonSocial: "Carozzi S.A.", tipo: "externo" },
+    { rut: "99.999.903-4", razonSocial: "Cliente Prueba Explosivos Aiuken S.A.", tipo: "externo" },
+    { rut: "99.999.904-2", razonSocial: "Cliente Prueba Alimentos Aiuken S.A.", tipo: "externo" },
     { rut: "61.704.000-K", razonSocial: "Codelco · División Andina", tipo: "gubernamental" },
-    { rut: "80.919.600-3", razonSocial: "Pinturas SIPA Ltda.", tipo: "externo" },
-    { rut: "95.467.000-7", razonSocial: "Orica Chile S.A.", tipo: "externo" },
+    { rut: "99.999.905-0", razonSocial: "Cliente Prueba Pinturas Aiuken Ltda.", tipo: "externo" },
+    { rut: "99.999.906-9", razonSocial: "Cliente Prueba Voladuras Aiuken S.A.", tipo: "externo" },
   ];
   for (const c of clientesReales) {
     await prisma.cliente.upsert({

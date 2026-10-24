@@ -426,7 +426,7 @@ Para verificar comportamiento real se ejecutaron escrituras contra `https://167.
 
 | Artefacto | Estado |
 |---|---|
-| Cotización `COT-2026-0001` (cliente CAP Acero, $2.397.324) | **Persiste** · estado `ESTADO_INVENTADO_XYZ` → luego `aceptada` → anulada por el DELETE del test RBAC. **Conviene borrarla a mano** |
+| Cotización `COT-2026-0001` (cliente de demostración, $2.397.324) | **Persiste** · estado `ESTADO_INVENTADO_XYZ` → luego `aceptada` → anulada por el DELETE del test RBAC. **Conviene borrarla a mano** |
 | Usuario `qa_audit_lector` (rol LECTOR) | ✅ eliminado (soft-delete, HTTP 200) |
 | Resultado de prueba (réplicas [510,512,514]) | ✅ eliminado (HTTP 200) |
 | Cliente `QA RBAC PROBE SPA` / método `QA-RBAC-PROBE` | No creados (fallaron con 400/500 antes de persistir) |
