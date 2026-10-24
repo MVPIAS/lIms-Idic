@@ -10,10 +10,12 @@
  *   · Sin ítem enlazado en una lista vigente → la ficha de costos (cat_ensayo.precio).
  *
  * Lista vigente: activa, no borrada, `vigente_desde` ≤ fecha de emisión ≤
- * `vigente_hasta` (o sin fin). Si dos listas vigentes tienen el ensayo, manda la
+ * `vigente_hasta` (o sin fin) y en una moneda de la operación (frente f5: una
+ * lista histórica en UF o EUR no da precios nuevos). Si dos listas vigentes tienen el ensayo, manda la
  * de `vigente_desde` más reciente.
  */
 import type { PrecioEjercito } from "../cotizacion/circuito-config";
+import { MONEDAS_OPERACION } from "../common/moneda";
 import type { ReglaValidez } from "../cotizacion/validez";
 
 export interface ItemListaVigente {
@@ -74,12 +76,14 @@ export async function itemsListaVigente(db: any, tenantId: string, catEnsayoIds:
          FROM lista_precio_item i
          JOIN lista_precio lp ON lp.id = i.lista_precio_id
         WHERE lp.tenant_id = $1::uuid AND lp.deleted_at IS NULL AND COALESCE(lp.activa, TRUE)
+          AND COALESCE(upper(lp.moneda), 'CLP') = ANY($4::text[])
           AND lp.vigente_desde <= $3::date AND (lp.vigente_hasta IS NULL OR lp.vigente_hasta >= $3::date)
           AND i.cat_ensayo_id = ANY($2::uuid[]) AND i.precio > 0
         ORDER BY i.cat_ensayo_id, lp.vigente_desde DESC, lp.created_at DESC`,
       tenantId,
       catEnsayoIds,
       fecha,
+      [...MONEDAS_OPERACION],
     );
   return new Map(
     filas.map((f) => [

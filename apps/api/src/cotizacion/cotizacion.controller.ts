@@ -5,6 +5,7 @@ import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, type ArchivoAdjunto } from "../com
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
+import { zMoneda } from "../common/moneda";
 import { CotizacionService } from "./cotizacion.service";
 import { hoyEnChile } from "./validez";
 import { CosteoService } from "./costeo.service";
@@ -93,7 +94,7 @@ const Cabecera = {
   // R1: «Contado 30 días» / «Por adelantado» (códigos de parametro_sistema forma_pago).
   formaPago: z.string().max(80).nullable().optional(),
   medioEnvio: z.string().max(40).nullable().optional(),
-  moneda: z.enum(["CLP", "USD"]).default("CLP"),
+  moneda: zMoneda.default("CLP"),
   dolarValor: z.number().positive().nullable().optional(),
   dolarFecha: fecha.nullable().optional(),
   dolarMotivo: z.string().max(500).nullable().optional(),
@@ -146,7 +147,7 @@ const ActualizarCotSchema = z.object({
   estado: z.enum(estadosValidos("cotizacion") as [string, ...string[]]).optional(),
   ...Cabecera,
   formato: Cabecera.formato.optional(),
-  moneda: z.enum(["CLP", "USD"]).optional(),
+  moneda: zMoneda.optional(),
   gastosAdminPct: z.number().min(0).max(100).optional(),
   ivaPct: z.number().min(0).max(100).optional(),
   lineas: z.array(LineaSchema).min(1).optional(),

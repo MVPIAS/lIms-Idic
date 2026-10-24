@@ -6,7 +6,7 @@
  * (/cotizaciones) y la ficha (/cotizaciones/[id]).
  */
 import Link from "next/link";
-import { money, fecha, fechaDia, rut as fmtRut } from "@/lib/format";
+import { monto, fecha, fechaDia, rut as fmtRut } from "@/lib/format";
 import { ESTADO_PILL, ESTADO_LABEL, ACEPTACION_LABEL, ORIGEN_LABEL, ESTADOS_VIGENTES, etiquetaDe, fueraDeValidez, type Opcion } from "./comercial";
 import { descargarAdjunto } from "@/lib/d11";
 import { toast } from "@/components/ui/feedback";
@@ -64,7 +64,8 @@ export function EstadoChip({ estado }: { estado: string }) {
  * Detalle de solo lectura (aceptadas, anuladas, históricas o Abierta sin editar)
  * ------------------------------------------------------------------------ */
 export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, onAnular }: { cot: any; params: Record<string, Opcion[]>; acciones: Acciones; onEditar: () => void; onAceptar: () => void; onAnular: () => void }) {
-  const mon = cot.moneda === "USD" ? "USD" : "CLP";
+  // Frente f5: la moneda guardada se muestra tal cual (una histórica, p. ej. UF, sin convertir).
+  const mon: string = cot.moneda || "CLP";
   const Campo = ({ l, v, full }: { l: string; v: React.ReactNode; full?: boolean }) => (
     <div className="field readonly" style={full ? { gridColumn: "1 / -1" } : undefined}>
       <label>{l}</label>
@@ -96,7 +97,7 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
         <Campo l="Formato" v={cot.formato} />
         <Campo l="Emisión" v={fechaDia(cot.fechaEmision)} />
         <Campo l="Válida hasta" v={fechaDia(cot.validaHasta ?? cot.expiraAt)} />
-        <Campo l="Moneda" v={mon === "USD" ? `US$ · dólar ${cot.dolarValor} (${fechaDia(cot.dolarFecha)})` : "CLP"} />
+        <Campo l="Moneda" v={mon === "USD" ? `US$ · dólar ${cot.dolarValor} (${fechaDia(cot.dolarFecha)})` : mon === "CLP" ? "CLP" : `${mon} · moneda histórica (dato migrado, sin convertir)`} />
         {cot.dolarMotivo && <Campo l="Motivo cambio de dólar" v={cot.dolarMotivo} full />}
         <Campo l="Forma de pago" v={etiquetaDe(params.forma_pago, cot.formaPago)} />
         <Campo l="Medio de envío" v={etiquetaDe(params.medio_envio, cot.medioEnvio)} />
@@ -114,12 +115,12 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
               <td><span className="codigo">{l.ensayoCodigo ?? l.tipo}</span></td>
               <td>{l.descripcion ?? "—"}</td>
               <td className="num">{l.cantidad}</td>
-              <td className="num">{money(l.precioUnitario, mon)}</td>
-              <td className="num">{money(l.subtotal, mon)}</td>
+              <td className="num">{monto(l.precioUnitario, mon)}</td>
+              <td className="num">{monto(l.subtotal, mon)}</td>
             </tr>
           ))}
         </tbody>
-        <tfoot><tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total (IVA exento)</td><td className="num" style={{ fontWeight: 800 }}>{money(cot.total, mon)}</td></tr></tfoot>
+        <tfoot><tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total (IVA exento)</td><td className="num" style={{ fontWeight: 800 }}>{monto(cot.total, mon)}</td></tr></tfoot>
       </table>
 
       <div className="form-grid cols-2">

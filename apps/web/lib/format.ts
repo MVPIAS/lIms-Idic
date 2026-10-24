@@ -44,11 +44,17 @@ export const clp = (v: unknown): string => money(v, "CLP");
 export const usd = (v: unknown): string => money(v, "USD");
 
 /**
- * Moneda según código dinámico (columna `moneda` de la fila). Cualquier valor
- * que no sea USD se trata como CLP.
+ * Moneda según código dinámico (columna `moneda` de la fila). Vacío = CLP.
+ * Frente f5: el LIMS trabaja en CLP y USD; un dato histórico en otra moneda
+ * (UF, EUR… migrado) se muestra tal cual, con su código y sin convertir:
+ * «UF 1.234,56».
  */
 export function monto(v: unknown, codigoMoneda?: string | null): string {
-  return money(v, (codigoMoneda ?? "CLP").toUpperCase() === "USD" ? "USD" : "CLP");
+  const c = (codigoMoneda ?? "").trim().toUpperCase() || "CLP";
+  if (c === "CLP" || c === "USD") return money(v, c);
+  const n = aNumero(v);
+  if (n === null) return GUION;
+  return c + NBSP + n.toLocaleString("es-CL", { minimumFractionDigits: 0, maximumFractionDigits: 4 });
 }
 
 /** Número genérico con decimales opcionales (miles ".", decimal ","). */

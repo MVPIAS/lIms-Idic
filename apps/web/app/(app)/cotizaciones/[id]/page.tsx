@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { fechaDia, fechaHora, money, rut } from "@/lib/format";
+import { fechaDia, fechaHora, monto, rut } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
 import CotizacionForm from "../_components/CotizacionForm";
 import { DetalleCotizacion, EstadoChip, FirmaChip, accionesDe } from "../_components/Detalle";
@@ -101,7 +101,7 @@ export default function FichaCotizacionPage() {
           Cliente: <b>{cot.cliente?.razonSocial ?? "—"}</b>{cot.cliente?.rut ? <> ({rut(cot.cliente.rut)})</> : null}
           {" · "}Estado: <b>{cot.estado === "expirada" ? "Vencida" : cot.estado}</b>
           {etapaActual && <> · Etapa: <b>{etapaActual.titulo}</b></>}
-          {" · "}Total: <b>{money(cot.total, cot.moneda === "USD" ? "USD" : "CLP")}</b>
+          {" · "}Total: <b>{monto(cot.total, cot.moneda)}</b>
           {" · "}Válida hasta: <b>{fechaDia(cot.validaHasta ?? cot.expiraAt)}</b>
           {k.ejecutivoNombre ? <> · Ejecutivo: <b>{k.ejecutivoNombre}</b></> : null}
         </div>

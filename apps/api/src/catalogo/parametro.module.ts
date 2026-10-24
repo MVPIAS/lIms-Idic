@@ -43,6 +43,7 @@ import {
   type DefValor,
 } from "./parametro-configurable";
 import { AlcanceService } from "../rbac/alcance.service";
+import { MSJ_MONEDA, esMonedaOperacion } from "../common/moneda";
 
 /** Tipos de unidad que reciben muestras (códigos de laboratorio de los parámetros de recepción). */
 const UNIDADES_RECEPCION = ["LABORATORIO", "SUCURSAL", "DELEGACION"];
@@ -435,6 +436,7 @@ export class ParametroSistemaController extends BaseCrudController {
   @Post()
   override async crear(@Body() body: unknown, @Req() req: any) {
     const dto = ParametroCreate.parse(body);
+    exigirMonedaOperacion(dto.categoria, dto.codigo);
     if (protegido(dto.categoria, dto.codigo))
       throw new ConflictException(MSJ_CONFIGURABLE);
     return this.svc.crear(dto, tenantDe(req));
@@ -451,6 +453,9 @@ export class ParametroSistemaController extends BaseCrudController {
     const actual: any = await this.svc.detalle(id, tenantDe(req));
     const cambiaClave =
       (dto.categoria !== undefined && dto.categoria !== actual.categoria) || (dto.codigo !== undefined && dto.codigo !== actual.codigo);
+    if (cambiaClave) {
+      exigirMonedaOperacion(dto.categoria ?? actual.categoria, dto.codigo ?? actual.codigo);
+    }
     if (CATEGORIAS_CON_HISTORIAL.includes(actual.categoria)) {
       if (cambiaClave || (dto.valor !== undefined && dto.valor !== actual.valor) || dto.activo === false)
         throw new ConflictException("Este porcentaje se cambia en «Porcentajes de la tasa de internación», con motivo: queda en el historial.");
@@ -471,8 +476,24 @@ export class ParametroSistemaController extends BaseCrudController {
       throw new ConflictException("Los porcentajes de la tasa de internación no se borran: el cálculo de la tasa los necesita.");
     if (protegido(actual.categoria, actual.codigo))
       throw new ConflictException("Los parámetros de la operación no se borran: desactívelos (o cambie su valor) con motivo en «Parámetros de la operación».");
+    // Frente f5: monedas y medios de envío pueden estar guardados en cotizaciones, OT y documentos.
+    if (actual.categoria === "moneda" || actual.categoria === "medio_envio")
+      throw new ConflictException(
+        `«${actual.etiqueta}» no se borra: puede estar guardado en cotizaciones, OT o documentos y su texto se sigue mostrando. Desactívelo para que deje de ofrecerse.`,
+      );
     return this.svc.eliminar(id, tenantDe(req));
   }
+}
+
+/**
+ * Frente f5 · la categoría `moneda` es la lista que ofrecen las pantallas y solo
+ * admite las monedas de la operación (CLP y USD, common/moneda.ts).
+ */
+function exigirMonedaOperacion(categoria: string | undefined, codigo: string | undefined) {
+  if (categoria === "moneda" && codigo !== undefined && !esMonedaOperacion(codigo))
+    throw new ConflictException(`${MSJ_MONEDA} La categoría «moneda» no admite ${String(codigo).slice(0, 20)}.`);
+  if (categoria === "moneda" && codigo !== undefined && codigo !== codigo.trim().toUpperCase())
+    throw new BadRequestException("El código de la moneda va en mayúsculas (CLP o USD).");
 }
 
 /** ¿El valor de (categoría, código) solo se cambia con motivo desde «Parámetros de la operación»? */

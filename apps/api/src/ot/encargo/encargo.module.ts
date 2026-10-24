@@ -3,6 +3,7 @@ import { AlcanceResultadoService } from "../../rbac/alcance-resultado.service";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
+import { zMoneda } from "../../common/moneda";
 import { PermisoGuard } from "../../auth/permiso.guard";
 import { RequierePermiso } from "../../auth/permisos.decorator";
 import { PrismaService } from "../../common/prisma.service";
@@ -42,7 +43,7 @@ const EncargoSchema = z.object({
   nivelTecnologico: opcion(NIVELES_TECNOLOGICOS),
   requiereMuestreo: z.boolean().nullable().optional(),
   mandante: txt(160),
-  moneda: z.preprocess((v) => (v === "" ? null : v), z.enum(["CLP", "USD"]).nullable().optional()),
+  moneda: z.preprocess((v) => (v === "" ? null : v), zMoneda.nullable().optional()),
   oficioNumero: txt(80),
   oficioFecha: fechaOpc,
   laboratorios: z.array(z.string().uuid()).max(20).optional(),

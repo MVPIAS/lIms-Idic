@@ -520,7 +520,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           <div className="field">
             <label>Moneda</label>
             <select value={moneda} onChange={(e) => setMoneda(e.target.value as "CLP" | "USD")}>
-              {(opts("moneda").length ? opts("moneda") : [{ codigo: "CLP", etiqueta: "CLP" }, { codigo: "USD", etiqueta: "USD" }]).map((o) => (
+              {/* Frente f5: la lista sale del parámetro «moneda» (CLP y USD; align_f5_correcciones.sql la garantiza). */}
+              {(opts("moneda").length ? opts("moneda") : [{ codigo: moneda, etiqueta: moneda }]).map((o) => (
                 <option key={o.codigo} value={o.codigo}>{o.etiqueta}</option>
               ))}
             </select>

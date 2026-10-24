@@ -34,9 +34,14 @@ export type LineaCotizacionTipo = z.infer<typeof LineaCotizacionTipo>;
 
 // R1: formatos vigentes NORMAL y PERSONALIZADO; F1–F6 solo en el histórico.
 export const FormatoCotizacion = z.enum(["NORMAL", "PERSONALIZADO", "F1", "F2", "F3", "F4", "F5", "F6"]);
-export const Moneda = z.enum(["CLP", "USD", "UF", "EUR", "CLF"]);
+/**
+ * Frente f5: el LIMS trabaja solo en CLP y USD (regla de la API en
+ * apps/api/src/common/moneda.ts; lista de las pantallas en el parámetro
+ * `moneda`). UF, EUR o CLF solo aparecen en datos históricos migrados.
+ */
+export const Moneda = z.enum(["CLP", "USD"]);
 /** R1: la cotización solo se emite en CLP o USD. */
-export const MonedaCotizacion = z.enum(["CLP", "USD"]);
+export const MonedaCotizacion = Moneda;
 
 /** SVT6 · documento de aceptación de la cotización (IDIC-PG03 6.3 n / 6.4 g). */
 export const AceptacionTipo = z.enum(["OPI_RESOLUCION", "OC", "CORREO", "PAGO_ADELANTADO", "DISPOSICION_DIRECTOR"]);
