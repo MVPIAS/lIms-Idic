@@ -173,7 +173,8 @@ export class CabeceraOtService {
   private async fuente(otId: string): Promise<FuenteCabecera | null> {
     const pn = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT r.numero AS raf, to_char(r.fecha, 'YYYY-MM-DD') AS raf_fecha, p.producto, e.nombre AS elemento,
-              c.clase_division, c.grupo_compatibilidad, c.numero_onu, l.lote, l.lugar, to_char(l.fecha_programada, 'YYYY-MM-DD') AS fecha
+              c.clase_division, c.grupo_compatibilidad, c.numero_onu, l.lote, l.lugar, to_char(l.fecha_programada, 'YYYY-MM-DD') AS fecha,
+              l.cantidad::text AS cantidad
          FROM bpch_pn_inspeccion l
          JOIN bpch_oc_operativa o ON o.id = l.oc_id
          JOIN bpch_raf r ON r.id = o.raf_id
@@ -188,7 +189,7 @@ export class CabeceraOtService {
       return {
         documentoOrigen: `RAF DGMN ${pn[0].raf}`, fechaDocumento: pn[0].raf_fecha, esquema: "LOTES", elemento: pn[0].elemento ?? pn[0].producto,
         claseDivision: pn[0].clase_division, grupoCompatibilidad: pn[0].grupo_compatibilidad, numeroOnu: pn[0].numero_onu,
-        lote: pn[0].lote, lugar: pn[0].lugar, fechaInspeccion: pn[0].fecha,
+        lote: pn[0].lote, lugar: pn[0].lugar, fechaInspeccion: pn[0].fecha, tamanoLote: pn[0].cantidad,
       };
     const pr = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT p.solicitud_dgmn, to_char(p.fecha_solicitud, 'YYYY-MM-DD') AS fecha, p.esquema, p.elemento, p.codigo_cnc, p.sac_tamano_muestra,

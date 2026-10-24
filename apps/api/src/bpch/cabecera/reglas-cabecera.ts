@@ -136,6 +136,8 @@ export interface FuenteCabecera {
   lugar?: string | null;
   fechaInspeccion?: string | null;
   tamanoMuestra?: number | null;
+  /** D07-12: cantidad programada del lote (Producción Nacional). */
+  tamanoLote?: number | string | null;
 }
 
 export function heredarCabecera(f: FuenteCabecera | null, actual: CabeceraDto | null): Partial<CabeceraDto> {
@@ -154,6 +156,8 @@ export function heredarCabecera(f: FuenteCabecera | null, actual: CabeceraDto | 
     lugarInspeccion: f.lugar?.trim() || null,
     fechaInspeccion: f.fechaInspeccion || null,
     tamanoMuestra: f.tamanoMuestra ?? null,
+    // D07-12: el tamaño del lote es la cantidad programada (solo si es un entero positivo).
+    tamanoLote: Number.isInteger(Number(f.tamanoLote)) && Number(f.tamanoLote) > 0 ? Number(f.tamanoLote) : null,
   };
   const out: Partial<CabeceraDto> = {};
   for (const [k, v] of Object.entries(propuesta) as [keyof CabeceraDto, any][]) {
