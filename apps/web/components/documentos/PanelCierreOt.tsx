@@ -114,8 +114,13 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
           {d.plazo.diasRestantes !== null && d.plazo.semaforo !== "terminada" && <span style={{ color: "var(--muted)" }}>{textoDias(d.plazo.diasRestantes)}</span>}
           {d.plazo.origen && (
             <span style={{ color: "var(--muted)" }}>
-              · {d.plazo.origen === "cotizacion" ? `según el plazo de la cotización ${d.plazo.cotizacionCodigo ?? ""} (${d.plazo.plazoDiasCotizacion} días)` : "fijada a mano"}
-              {d.plazo.fijadaPor ? ` por ${d.plazo.fijadaPor}` : ""}{d.plazo.fijadaAt ? ` el ${fechaHora(d.plazo.fijadaAt)}` : ""}
+              {/* D10-12: la fecha que la OT toma por defecto (ot_plazo) no es «fijada a mano». */}
+              · {d.plazo.origen === "cotizacion"
+                ? `según el plazo de la cotización ${d.plazo.cotizacionCodigo ?? ""} (${d.plazo.plazoDiasCotizacion} días)`
+                : d.plazo.origen === "plazo_defecto"
+                  ? "según el plazo por defecto (Parámetros de la operación)"
+                  : "fijada a mano"}
+              {d.plazo.origen !== "plazo_defecto" && d.plazo.fijadaPor ? ` por ${d.plazo.fijadaPor}` : ""}{d.plazo.fijadaAt ? ` el ${fechaHora(d.plazo.fijadaAt)}` : ""}
             </span>
           )}
           {d.puedo.planificar && !editFecha && (
