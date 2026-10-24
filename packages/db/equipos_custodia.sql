@@ -288,21 +288,22 @@ SELECT
   (SELECT us.id FROM usuario us WHERE us.tenant_id = e.tenant_id AND us.username = 'm.gonzalez' LIMIT 1)
 FROM equipo e
 JOIN (VALUES
+  -- Laboratorios de calibración FICTICIOS (D04-28; renombrado de las bases ya desplegadas en align_f4_correcciones.sql).
   -- equipo        fecha  proveedor                         norma                certificado         resultado            proxima  observaciones
-  ('EQ-HPLC-001',  -520, 'Lab. Metrología Aplicada Ltda.',  'NCh-ISO/IEC 17025', 'CAL-2024-HPLC-118', 'conforme',            -155, 'Verificación de caudal y linealidad del DAD dentro de tolerancia.'),
-  ('EQ-HPLC-001',  -155, 'Lab. Metrología Aplicada Ltda.',  'NCh-ISO/IEC 17025', 'CAL-2025-HPLC-402', 'conforme',             210, 'Calibración anual. Sin desviaciones.'),
-  ('EQ-GCMS-001',  -460, 'CESMEC S.A.',                     'NCh-ISO/IEC 17025', 'CAL-2024-GCMS-077', 'conforme_con_obs',     -95, 'Se recomienda reemplazo del septum en la próxima mantención.'),
-  ('EQ-GCMS-001',   -95, 'CESMEC S.A.',                     'NCh-ISO/IEC 17025', 'CAL-2025-GCMS-311', 'conforme',             270, 'Sintonía del cuadrupolo conforme. Sensibilidad OK.'),
+  ('EQ-HPLC-001',  -520, 'Laboratorio de Calibración Prueba 1 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2024-HPLC-118', 'conforme',            -155, 'Verificación de caudal y linealidad del DAD dentro de tolerancia.'),
+  ('EQ-HPLC-001',  -155, 'Laboratorio de Calibración Prueba 1 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2025-HPLC-402', 'conforme',             210, 'Calibración anual. Sin desviaciones.'),
+  ('EQ-GCMS-001',  -460, 'Laboratorio de Calibración Prueba 2 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2024-GCMS-077', 'conforme_con_obs',     -95, 'Se recomienda reemplazo del septum en la próxima mantención.'),
+  ('EQ-GCMS-001',   -95, 'Laboratorio de Calibración Prueba 2 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2025-GCMS-311', 'conforme',             270, 'Sintonía del cuadrupolo conforme. Sensibilidad OK.'),
   -- VENCIDO: última calibración conforme pero su vigencia expiró hace 35 días.
-  ('EQ-BAL-001',   -765, 'Lab. Metrología Aplicada Ltda.',  'OIML R76 / NCh2103','CAL-2023-BAL-021',  'conforme',            -400, 'Calibración con pesas patrón clase E2.'),
-  ('EQ-BAL-001',   -400, 'Lab. Metrología Aplicada Ltda.',  'OIML R76 / NCh2103','CAL-2024-BAL-233',  'conforme',             -35, 'VIGENCIA EXPIRADA: recalibración pendiente. Equipo NO apto para ensayo.'),
-  ('EQ-FTIR-001',  -180, 'PerkinElmer Chile SpA',           'NCh-ISO/IEC 17025', 'CAL-2025-FTIR-014', 'conforme',             185, 'Verificación con patrón de poliestireno.'),
+  ('EQ-BAL-001',   -765, 'Laboratorio de Calibración Prueba 1 Aiuken S.A.', 'OIML R76 / NCh2103','CAL-2023-BAL-021',  'conforme',            -400, 'Calibración con pesas patrón clase E2.'),
+  ('EQ-BAL-001',   -400, 'Laboratorio de Calibración Prueba 1 Aiuken S.A.', 'OIML R76 / NCh2103','CAL-2024-BAL-233',  'conforme',             -35, 'VIGENCIA EXPIRADA: recalibración pendiente. Equipo NO apto para ensayo.'),
+  ('EQ-FTIR-001',  -180, 'Laboratorio de Calibración Prueba 3 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2025-FTIR-014', 'conforme',             185, 'Verificación con patrón de poliestireno.'),
   -- VENCIDO: además la última calibración fue NO CONFORME.
-  ('EQ-MUF-001',   -795, 'CESMEC S.A.',                     'NCh-ISO/IEC 17025', 'CAL-2023-MUF-009',  'conforme',            -430, 'Mapeo térmico de cámara conforme.'),
-  ('EQ-MUF-001',   -430, 'CESMEC S.A.',                     'NCh-ISO/IEC 17025', 'CAL-2024-MUF-188',  'no_conforme',          -62, 'Desviación de +9 °C en el punto de 550 °C. Requiere ajuste del controlador PID.'),
-  ('EQ-EST-001',   -120, 'Lab. Metrología Aplicada Ltda.',  'NCh-ISO/IEC 17025', 'CAL-2025-EST-055',  'conforme',             245, 'Uniformidad térmica dentro de ±2 °C.'),
-  ('EQ-PHM-001',   -210, 'Hanna Instruments Chile',         'NCh-ISO/IEC 17025', 'CAL-2025-PHM-091',  'conforme',             155, 'Calibración a 3 puntos (pH 4,01 / 7,00 / 10,01).'),
-  ('EQ-DUR-001',    -70, 'Instron Chile Ltda.',             'ASTM D2240',        'CAL-2025-DUR-137',  'conforme',             295, 'Verificación con bloques patrón Shore A y D.')
+  ('EQ-MUF-001',   -795, 'Laboratorio de Calibración Prueba 2 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2023-MUF-009',  'conforme',            -430, 'Mapeo térmico de cámara conforme.'),
+  ('EQ-MUF-001',   -430, 'Laboratorio de Calibración Prueba 2 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2024-MUF-188',  'no_conforme',          -62, 'Desviación de +9 °C en el punto de 550 °C. Requiere ajuste del controlador PID.'),
+  ('EQ-EST-001',   -120, 'Laboratorio de Calibración Prueba 1 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2025-EST-055',  'conforme',             245, 'Uniformidad térmica dentro de ±2 °C.'),
+  ('EQ-PHM-001',   -210, 'Laboratorio de Calibración Prueba 4 Aiuken S.A.', 'NCh-ISO/IEC 17025', 'CAL-2025-PHM-091',  'conforme',             155, 'Calibración a 3 puntos (pH 4,01 / 7,00 / 10,01).'),
+  ('EQ-DUR-001',    -70, 'Laboratorio de Calibración Prueba 5 Aiuken S.A.', 'ASTM D2240',        'CAL-2025-DUR-137',  'conforme',             295, 'Verificación con bloques patrón Shore A y D.')
 ) AS v(equipo_codigo, fecha_offset, ejecutada_por, norma, certificado_ref, resultado, proxima_offset, observaciones)
   ON v.equipo_codigo = e.codigo
 JOIN tenant t ON t.id = e.tenant_id AND t.codigo = 'IDIC'

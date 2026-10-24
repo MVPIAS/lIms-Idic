@@ -619,7 +619,7 @@ FROM tenant t, (VALUES
    'no_inscrita', NULL, NULL::date, NULL, NULL, 'en_analisis',
    'Serie limada; se solicita restauración de numeración por ataque químico. Consulta DGMN pendiente.'),
   (NULL, 'FN-4471290', FALSE, 'FN Herstal','FNP-9','9 mm Parabellum','pistola',
-   'inscrita', 'DGMN-2019-114872', DATE '2019-07-04', 'Juan Pérez Soto', '13.884.221-5', 'en_custodia',
+   'inscrita', 'DGMN-2019-114872', DATE '2019-07-04', 'Propietario Prueba Aiuken', '11.111.111-1', 'en_custodia',
    'Arma inscrita, ingresada por encargo vigente comunicado por la DGMN.'),
   (NULL, 'HECHIZA-0031', FALSE, 'Artesanal','Hechiza','12 mm','hechiza',
    'decomisada', NULL, NULL::date, NULL, NULL, 'en_custodia',

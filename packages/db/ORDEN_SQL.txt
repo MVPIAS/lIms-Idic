@@ -109,4 +109,5 @@ align_c2_correcciones.sql
 seed_c2_metrologia_demo.sql                demo
 align_c3_correcciones.sql
 seed_c3_demo.sql                     demo
+align_f4_correcciones.sql
 align_cierre_permisos.sql

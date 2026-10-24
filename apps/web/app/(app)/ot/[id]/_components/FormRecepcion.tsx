@@ -164,7 +164,7 @@ export default function FormRecepcion({
   useEffect(() => {
     llamar<Unidad[]>("GET", "/ot/laboratorios").then(setLabs).catch(() => setLabs([]));
   }, []);
-  // Clientes del maestro (LME 20-10: «MAXAM, AUSTIN, DEGESCH…»): se buscan al escribir.
+  // Clientes del maestro (petición del LME del 20-10: lista de clientes): se buscan al escribir.
   useEffect(() => {
     const q = busqCliente.trim();
     const t = setTimeout(() => {
