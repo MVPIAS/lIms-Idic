@@ -29,6 +29,16 @@ export function motivoNoCapturable(estado: string | null | undefined): string | 
   return `El resultado está en un estado no reconocido ('${e}').`;
 }
 
+/**
+ * B-005 · ¿Se puede quitar el ensayo de la OT? Lo aprobado ya forma parte de un
+ * informe posible: se reabre antes (queda trazado) y luego se quita.
+ */
+export function motivoNoQuitable(estado: string | null | undefined): string | null {
+  if (estado === "aprobado")
+    return "El ensayo está aprobado: reábralo antes de quitarlo (los informes en firma u oficiales se anularán).";
+  return null;
+}
+
 export type AccionRevision = "revisar" | "aprobar";
 
 export interface ResultadoParaAccion {

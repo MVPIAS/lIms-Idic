@@ -26,6 +26,8 @@ interface Ficha {
   vista?: Record<string, string | null> | null;
   faltantesEmision?: string[];
   sugeridos?: { inspectores: string; procedimientos: string[] };
+  /** B-019: datos conocidos del producto (Producción Nacional) o del prototipo para los campos vacíos. */
+  heredados?: Cabecera;
   historial?: { id: string; cambios: Record<string, { antes: any; despues: any }>; createdAt: string; usuarioNombre: string | null }[];
 }
 
@@ -72,7 +74,8 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
     try {
       const r = await llamar<Ficha>("GET", `/bpch/cabecera-ot/${otId}`);
       setF(r);
-      setForm(r.cabecera ?? {});
+      // B-019: la cabecera llega precargada con lo que ya se conoce; lo guardado manda.
+      setForm({ ...(r.heredados ?? {}), ...(r.cabecera ?? {}) });
     } catch {
       setF({ esBpch: false });
     }
@@ -156,6 +159,9 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
                       min={c.tipo === "number" ? 1 : undefined}
                       list={c.tipo === "procedimiento" ? "cab-procedimientos" : undefined}
                       onChange={(e) => set(e.target.value)} />
+                  )}
+                  {f.heredados?.[c.k] !== undefined && f.heredados?.[c.k] === form[c.k] && (
+                    <small style={{ color: "var(--accent)" }}>Precargado {f.proceso === "PRODUCCION_NACIONAL" ? "del producto y su clasificación" : "del prototipo"}: revíselo y guarde.</small>
                   )}
                   {(her || c.ayuda || (c.k === "inspectores" && f.sugeridos?.inspectores)) && (
                     <small style={{ color: "var(--muted)" }}>

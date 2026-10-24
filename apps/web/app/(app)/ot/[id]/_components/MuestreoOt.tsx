@@ -175,6 +175,9 @@ function FichaMuestreo({ d, m, onCambio }: { d: DatosMuestreo; m: Muestreo; onCa
   const paso = m.estado === "borrador" ? (m.faltantes.length ? (m.plan || m.tipoFormulario !== "planilla_nch44" ? 2 : 1) : 3)
     : m.estado === "registrado" ? 4 : 5;
   const formulario = d.opciones.formularios.find((f) => f.valor === m.tipoFormulario)?.etiqueta ?? m.tipoFormulario;
+  // B-020 (recorrido MP-02, D02-43): la conclusión del lote es del muestreo con plan NCh 44
+  // (inspección por lotes); un muestreo sin plan (p. ej. el NUMFORM de Alimentos) termina al recibirlo.
+  const conLote = !!m.plan || m.tipoFormulario === "planilla_nch44" || !!m.veredictoLote;
 
   return (
     <div className="card" style={{ margin: 0 }} aria-label={`Muestreo Nº ${m.numeroFormulario}`}>
@@ -189,10 +192,10 @@ function FichaMuestreo({ d, m, onCambio }: { d: DatosMuestreo; m: Muestreo; onCa
           { titulo: "Plan y unidades", detalle: m.plan ? `NCh 44 · letra ${m.plan.letra} · n ${m.plan.n}` : "NCh 43/44" },
           { titulo: "Entregar al laboratorio", detalle: m.registradoAt ? fechaHora(m.registradoAt) : "Sección Muestreo" },
           { titulo: "Recibido conforme", detalle: m.recibidoAt ? `${m.recibidoConforme ? "Conforme" : "No conforme"} · ${fechaHora(m.recibidoAt)}` : "Laboratorio" },
-          { titulo: "Conclusión del lote", detalle: m.veredictoLote ? (m.veredictoLote === "acepta" ? "Acepta" : "Rechaza") : "Jefatura" },
+          ...(conLote ? [{ titulo: "Conclusión del lote", detalle: m.veredictoLote ? (m.veredictoLote === "acepta" ? "Acepta" : "Rechaza") : "Jefatura" }] : []),
         ]}
         actual={paso}
-        completo={!!m.veredictoLote}
+        completo={conLote ? !!m.veredictoLote : m.estado === "recibido"}
         anulado={m.estado === "anulado"}
       />
       {m.estado === "anulado" && <div className="alert warn">Muestreo anulado · {m.anuladoMotivo}</div>}
@@ -248,7 +251,7 @@ function FichaMuestreo({ d, m, onCambio }: { d: DatosMuestreo; m: Muestreo; onCa
       )}
 
       {m.estado !== "anulado" && <MuestrasDelMuestreo d={d} m={m} onCambio={onCambio} />}
-      {m.estado === "recibido" && <ConclusionLote d={d} m={m} onCambio={onCambio} />}
+      {m.estado === "recibido" && conLote && <ConclusionLote d={d} m={m} onCambio={onCambio} />}
 
       {dialogo && (
         <MotivoModal

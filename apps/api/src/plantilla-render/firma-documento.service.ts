@@ -137,7 +137,10 @@ export class FirmaDocumentoService {
     const esResponsable = cert.firmas.some((f) =>
       Array.isArray(f.responsables) && (f.responsables as any[]).some((r) => r?.usuarioId === usuarioId),
     );
-    if (!esResponsable)
+    // B-002 (frente c1): quien lo emitió y el laboratorio responsable de la OT también lo siguen.
+    const esEmisor = !!usuarioId && (cert as any).emitidoPor === usuarioId;
+    const veOt = !!cert.ot?.unidadPrincipal && (await this.alcance.puedeVerUnidad(req, cert.ot.unidadPrincipal));
+    if (!esResponsable && !esEmisor && !veOt)
       await this.alcance.exigirUnidad(req, cert.unidadId ?? cert.ot?.unidadPrincipal, `el documento ${cert.numero ?? cert.codigo}`);
     const reemplazo = await this.prisma.certificado.findFirst({
       where: { reemplazaId: cert.id, deletedAt: null },

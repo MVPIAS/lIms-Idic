@@ -268,6 +268,9 @@ export default function CapturaOtPage() {
   const [ocupado, setOcupado] = useState<string | null>(null);
   const [devolviendo, setDevolviendo] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("");
+  // B-005: «Quitar ensayo» que no aplica, con motivo.
+  const [quitando, setQuitando] = useState<string | null>(null);
+  const [motivoQuitar, setMotivoQuitar] = useState("");
   // Reabrir un resultado aprobado (jefatura): fila abierta y su motivo.
   const [reabriendo, setReabriendo] = useState<string | null>(null);
   const [motivoReabrir, setMotivoReabrir] = useState("");
@@ -396,6 +399,22 @@ export default function CapturaOtPage() {
         ...(que === "revisar" ? { revisadoPorNombre: acceso.usuario.nombre } : { aprobadoPorNombre: acceso.usuario.nombre }),
       });
       toast.ok(que === "revisar" ? "Resultado revisado." : "Resultado aprobado.");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(null);
+    }
+  }
+
+  async function quitar(f: Fila) {
+    if (motivoQuitar.trim().length < 5) { toast.error("Indique por qué se quita el ensayo (mínimo 5 caracteres)."); return; }
+    setOcupado(f.id);
+    try {
+      await llamar("POST", `/resultados/${f.id}/quitar`, { motivo: motivoQuitar.trim() });
+      setFilas((prev) => prev.filter((x) => x.id !== f.id));
+      setQuitando(null);
+      setMotivoQuitar("");
+      toast.ok("Ensayo quitado de la OT. Queda en «Ensayos eliminados» de la planilla de cálculos, con el motivo.");
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -853,6 +872,10 @@ export default function CapturaOtPage() {
                                 {puede(f, "revisar") && ["capturado", "revisado_n1"].includes(f.estado) && (
                                   <button className="btn outline sm" disabled={busy} onClick={() => { setDevolviendo(devolviendo === f.id ? null : f.id); setMotivo(""); }}>Devolver</button>
                                 )}
+                                {puede(f, "aprobar") && f.estado !== "aprobado" && (
+                                  <button className="btn ghost-danger sm" disabled={busy} title="Quitar un ensayo que no aplica a esta muestra (con motivo)"
+                                    onClick={() => { setQuitando(quitando === f.id ? null : f.id); setMotivoQuitar(""); }}>Quitar</button>
+                                )}
                                 {puede(f, "reabrir") && f.estado === "aprobado" && (
                                   <button className="btn outline sm" disabled={busy} title="Corregir un resultado ya aprobado (anula el informe en firma u oficial)"
                                     onClick={() => { setReabriendo(reabriendo === f.id ? null : f.id); setMotivoReabrir(""); }}>Reabrir</button>
@@ -909,6 +932,25 @@ export default function CapturaOtPage() {
                                   </div>
                                   <button className="btn outline sm" onClick={() => setReabriendo(null)}>Cancelar</button>
                                   <button className="btn danger sm" disabled={busy} onClick={() => reabrir(f)}>Reabrir resultado</button>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          {quitando === f.id && (
+                            <tr>
+                              <td colSpan={7} style={{ background: "#fff5f5" }}>
+                                <p style={{ margin: "0 0 6px", fontSize: 12 }}>
+                                  El ensayo <b>{f.analito ?? "—"}</b> sale de la OT: no se capturará, no se aprobará ni irá al informe. Queda en
+                                  «Ensayos eliminados» de la planilla de cálculos y en el historial, con lo que tenía y el motivo.
+                                </p>
+                                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                                  <div className="field" style={{ flex: 1, minWidth: 260 }}>
+                                    <label htmlFor={`quitar-${f.id}`}>Motivo <span className="req">*</span></label>
+                                    <input id={`quitar-${f.id}`} value={motivoQuitar} onChange={(e) => setMotivoQuitar(e.target.value)} maxLength={1000} autoFocus
+                                      placeholder="Por qué no aplica (p. ej. analito de otra matriz)" />
+                                  </div>
+                                  <button className="btn outline sm" onClick={() => setQuitando(null)}>Cancelar</button>
+                                  <button className="btn danger sm" disabled={busy} onClick={() => quitar(f)}>Quitar ensayo</button>
                                 </div>
                               </td>
                             </tr>

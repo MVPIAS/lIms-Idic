@@ -1553,11 +1553,18 @@ export class PlantillaRenderService {
   async alcanceDocumento(certificadoId: string, tenantId?: string) {
     const cert = await this.prisma.certificado.findFirst({
       where: { id: certificadoId, deletedAt: null, ...(tenantId ? { tenantId } : {}) },
-      select: { numero: true, codigo: true, unidadId: true, ot: { select: { unidadPrincipal: true } }, firmas: { select: { responsables: true } } },
+      select: { numero: true, codigo: true, unidadId: true, emitidoPor: true, ot: { select: { unidadPrincipal: true } }, firmas: { select: { responsables: true } } },
     });
     if (!cert) throw new NotFoundException(`Certificado ${certificadoId} no encontrado`);
     const responsables = cert.firmas.flatMap((f) => (Array.isArray(f.responsables) ? (f.responsables as any[]) : []).map((r) => r?.usuarioId)).filter(Boolean);
-    return { etiqueta: cert.numero ?? cert.codigo, unidadId: cert.unidadId ?? cert.ot?.unidadPrincipal ?? null, responsables: responsables as string[] };
+    return {
+      etiqueta: cert.numero ?? cert.codigo,
+      unidadId: cert.unidadId ?? cert.ot?.unidadPrincipal ?? null,
+      // B-002 (frente c1): quien lo emitió y el laboratorio responsable de la OT también lo abren.
+      otUnidadId: cert.ot?.unidadPrincipal ?? null,
+      emitidoPor: cert.emitidoPor ?? null,
+      responsables: responsables as string[],
+    };
   }
 
   /** Carga un certificado validando tenant (404 en cross-tenant, no 403). */

@@ -599,6 +599,34 @@ function refCualitativa(v?: string | null): string | null {
   return s.toLowerCase();
 }
 
+/**
+ * Analitos que la E.T. de la muestra (o, si no tiene, la de su OT) pide de cada
+ * método: Map<método, Set<analito>>. Un punto sin analito no restringe su método.
+ */
+async function analitosDelPlanEt(db: Db, muestraId: string): Promise<Map<string, Set<string>>> {
+  const filas = await db.$queryRawUnsafe<{ metodo: string; analito: string | null }[]>(
+    `SELECT p.cat_metodo_id::text AS metodo, p.cat_analito_id::text AS analito
+       FROM muestra m
+       LEFT JOIN orden_trabajo o ON o.id = m.ot_id
+       JOIN especificacion_tecnica_punto p ON p.et_id = COALESCE(m.et_id, o.et_id)
+      WHERE m.id = $1::uuid AND p.cat_metodo_id IS NOT NULL`,
+    muestraId,
+  );
+  const plan = new Map<string, Set<string>>();
+  const libres = new Set<string>();
+  for (const f of filas) {
+    if (!f.analito) libres.add(f.metodo);
+    else (plan.get(f.metodo) ?? plan.set(f.metodo, new Set()).get(f.metodo)!).add(f.analito);
+  }
+  for (const m of libres) plan.delete(m);
+  return plan;
+}
+
+/** B-005: deja solo los analitos que el plan de la E.T. pide (los métodos fuera del plan, completos). */
+export function filtrarAnalitosPorPlan<T extends { id: string; metodoId: string }>(analitos: T[], plan: Map<string, Set<string>>): T[] {
+  return analitos.filter((a) => !plan.has(a.metodoId) || plan.get(a.metodoId)!.has(a.id));
+}
+
 @Injectable()
 export class PuenteAnalisisService {
   constructor(
@@ -685,9 +713,13 @@ export class PuenteAnalisisService {
     };
   }
 
-  /** OT del tenant y dentro del alcance del usuario (404 / 403). */
-  private async otEnAlcance(otId: string, tenantId: string, req: any) {
-    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+  /**
+   * OT del tenant y dentro del alcance del usuario (404 / 403). Se lee con `db`:
+   * dentro de la transacción que crea la OT con sus muestras (B-001) la OT aún
+   * no es visible fuera de ella.
+   */
+  private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma) {
+    const ot = await db.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
     await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return ot;
@@ -729,7 +761,7 @@ export class PuenteAnalisisService {
           if (!o) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
           return o;
         })
-      : await this.otEnAlcance(otId, tenantId, req);
+      : await this.otEnAlcance(otId, tenantId, req, db);
     const muestra = await this.muestraDeOt(otId, body.muestraId, tenantId, db);
 
     // Una OT que aún no tiene laboratorio (p. ej. creada antes de esta
@@ -747,7 +779,7 @@ export class PuenteAnalisisService {
     }
 
     // Analitos de los métodos pedidos (validando que son del tenant).
-    const analitos = await db.catAnalito.findMany({
+    const todosAnalitos = await db.catAnalito.findMany({
       where: {
         tenantId,
         deletedAt: null,
@@ -755,6 +787,10 @@ export class PuenteAnalisisService {
         metodoId: { in: body.metodoIds },
       },
     });
+    // B-005 (EP-03 1.3): si la E.T. que rige la muestra (o la OT) nombra analitos
+    // concretos de un método, solo se generan esos; el resto del método no aplica.
+    const delPlan = await analitosDelPlanEt(db, muestra.id);
+    const analitos = filtrarAnalitosPorPlan(todosAnalitos, delPlan);
 
     // Resultados del puente ya existentes para esta muestra (idempotencia).
     const yaExisten = await db.resultado.findMany({
@@ -1377,7 +1413,7 @@ const RecepcionBody = z.object({
     .optional(),
 });
 
-const RegistrarMuestrasBody = z.object({
+export const RegistrarMuestrasBody = z.object({
   muestras: z
     .array(
       z.object({
@@ -1452,10 +1488,11 @@ export class RegistroMuestrasService {
     private readonly puente: PuenteAnalisisService,
     private readonly labs: LaboratorioOtService,
     private readonly recepcion: RecepcionService,
+    private readonly alcanceResultado: AlcanceResultadoService,
   ) {}
 
-  private async otEnAlcance(otId: string, tenantId: string, req: any) {
-    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+  private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma) {
+    const ot = await db.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
     await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return ot;
@@ -1583,7 +1620,10 @@ export class RegistroMuestrasService {
    * tiene cada una) y la propuesta de métodos desde la cotización aceptada.
    */
   async propuesta(otId: string, tenantId: string, req: any) {
-    const ot = await this.otEnAlcance(otId, tenantId, req);
+    // Lectura: el laboratorio que participa en la OT ve sus muestras (B-002, EP-02 3.1).
+    const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
+    if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
+    await this.alcanceResultado.alcanceEnOt(req, ot, "muestra.ver");
     const muestras = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT m.id, m.codigo, m.nombre, m.estado, m.veredicto,
               m.toma_muestra AS "tomaMuestra", m.condicion_recepcion AS "condicionRecepcion",
@@ -1646,7 +1686,11 @@ export class RegistroMuestrasService {
       : null;
     const porEnsayo = new Map<string, MetodoCatalogo[]>();
     for (const m of metodos) if (m.ensayoId) (porEnsayo.get(m.ensayoId) ?? porEnsayo.set(m.ensayoId, []).get(m.ensayoId)!).push(m);
+    const panelOt = cot ? null : await this.panelDeOt(tenantId, ot);
     return {
+      // B-008: la OT que nace de un programa (producto), de un prototipo (panel
+      // parametrizado) o de un registro con elemento trae su panel a la recepción.
+      panelOt,
       ot: {
         id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal, clienteId: ot.clienteId,
         clienteNombre: cliente?.razonSocial ?? null, catElementoId: ot.catElementoId ?? null,
@@ -1679,6 +1723,89 @@ export class RegistroMuestrasService {
   }
 
   /**
+   * Panel que la OT ya trae (B-008, recorrido MP-07 D07-06, MP-08 D08-02,
+   * MP-05 D05-09): el panel parametrizado del prototipo de la OT (EP-08 8.11,
+   * «el panel es el que carga la OT») o el panel del producto (elemento) de la
+   * OT. La recepción lo propone marcado; null si la OT no trae ninguno.
+   */
+  async panelDeOt(tenantId: string, ot: { id: string; catElementoId?: string | null }) {
+    const proto = await this.prisma.$queryRawUnsafe<{ codigo: string; elemento: string; estado: string; metodos: string[] }[]>(
+      `SELECT p.codigo, p.elemento, p.param_estado AS estado,
+              COALESCE(array_agg(DISTINCT pp.cat_metodo_id::text) FILTER (WHERE pp.cat_metodo_id IS NOT NULL), '{}') AS metodos
+         FROM bpch_prototipo p LEFT JOIN bpch_prototipo_parametro pp ON pp.prototipo_id = p.id
+        WHERE p.tenant_id = $1::uuid AND p.ot_id = $2::uuid
+        GROUP BY p.codigo, p.elemento, p.param_estado`,
+      tenantId,
+      ot.id,
+    );
+    if (proto[0]?.metodos?.length)
+      return {
+        origen: "prototipo" as const,
+        nombre: `Prototipo ${proto[0].codigo} · ${proto[0].elemento}`,
+        parametrizacion: proto[0].estado,
+        metodos: await this.metodos(tenantId, { ids: proto[0].metodos }),
+      };
+    if (!ot.catElementoId) return null;
+    const el = await this.prisma.$queryRawUnsafe<{ nombre: string; metodos: string[] }[]>(
+      `SELECT e.nombre, COALESCE(array_agg(p.metodo_id::text) FILTER (WHERE p.metodo_id IS NOT NULL), '{}') AS metodos
+         FROM cat_elemento e
+         LEFT JOIN cat_panel p ON p.elemento_id = e.id AND p.deleted_at IS NULL AND p.activo
+        WHERE e.id = $1::uuid AND e.tenant_id = $2::uuid
+        GROUP BY e.nombre`,
+      ot.catElementoId,
+      tenantId,
+    );
+    if (!el[0]) return null;
+    return { origen: "producto" as const, nombre: el[0].nombre, parametrizacion: null, metodos: await this.metodos(tenantId, { ids: el[0].metodos }) };
+  }
+
+  /**
+   * Prototipo con parametrización validada (EP-08 8.11): sus Mín/Nom/Máx, unidad
+   * y fórmula se aplican a los ensayos recién generados del mismo método (y del
+   * mismo ensayo cuando el método tiene varios), como especificación de la orden.
+   */
+  private async aplicarParametrizacionPrototipo(db: Db, tenantId: string, otId: string, muestraIds: string[], usuarioId: string | null) {
+    const filas = await db.$queryRawUnsafe<any[]>(
+      `SELECT pp.cat_metodo_id AS "metodoId", pp.ensayo, pp.minimo::text AS minimo, pp.nominal::text AS nominal, pp.maximo::text AS maximo,
+              pp.unidad, pp.formula, p.codigo
+         FROM bpch_prototipo p JOIN bpch_prototipo_parametro pp ON pp.prototipo_id = p.id
+        WHERE p.tenant_id = $1::uuid AND p.ot_id = $2::uuid AND p.param_estado = 'validada'`,
+      tenantId,
+      otId,
+    );
+    if (!filas.length || !muestraIds.length) return 0;
+    const res = await db.$queryRawUnsafe<any[]>(
+      `SELECT r.id, r.cat_metodo_id AS "metodoId", COALESCE(an.nombre, an.codigo, '') AS analito
+         FROM resultado r LEFT JOIN cat_analito an ON an.id = r.cat_analito_id
+        WHERE r.muestra_id = ANY($1::uuid[]) AND r.deleted_at IS NULL AND r.estado = 'pendiente'`,
+      muestraIds,
+    );
+    const norm = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const txt = (v: string | null) => (v == null ? null : String(Number(v)));
+    let n = 0;
+    for (const r of res) {
+      const del = filas.filter((f) => f.metodoId === r.metodoId);
+      const par = del.length === 1 ? del[0] : del.find((f) => norm(f.ensayo ?? "") === norm(r.analito));
+      if (!par) continue;
+      await db.$executeRawUnsafe(
+        `UPDATE resultado SET limite_inf = $2, nominal = $3, limite_sup = $4, unidad = COALESCE($5, unidad), formula = COALESCE($6, formula),
+                espec_catalogo = COALESCE(espec_catalogo, jsonb_build_object('limiteInf', limite_inf, 'nominal', nominal, 'limiteSup', limite_sup, 'unidad', unidad, 'formula', formula)),
+                espec_origen = 'orden', espec_editada_por = $7::uuid, espec_editada_at = now()
+          WHERE id = $1::uuid`,
+        r.id,
+        txt(par.minimo),
+        txt(par.nominal),
+        txt(par.maximo),
+        par.unidad ?? null,
+        par.formula ?? null,
+        usuarioId,
+      );
+      n++;
+    }
+    return n;
+  }
+
+  /**
    * Crea las muestras y genera sus ensayos por analizar (puente catálogo →
    * resultado). Todo o nada: dentro de `db` si viene de otra operación (lotes
    * BPCH) o en una transacción propia; si una muestra falla, no queda ninguna.
@@ -1689,16 +1816,16 @@ export class RegistroMuestrasService {
   }
 
   private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any) {
-    const ot = await this.otEnAlcance(otId, tenantId, req);
+    const ot = await this.otEnAlcance(otId, tenantId, req, db);
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
-    const errores = erroresRegistro(ot.estado, body.muestras, catalogo);
     // Recepción de cada muestra (si se envía): toma de muestra, condición, sello,
     // producto, destino y campos propios del laboratorio de la OT.
     const opciones = (await this.opcionesToma(tenantId)).map((o) => o.codigo);
     const cfg = await this.recepcion.configDeUnidad(tenantId, ot.unidadPrincipal, db);
     const recepciones: (RecepcionNormalizada | null)[] = [];
     const labs: (RecepcionLabNormalizada | null)[] = [];
+    const errores: string[] = [];
     for (let i = 0; i < body.muestras.length; i++) {
       const r = body.muestras[i].recepcion;
       if (!r) {
@@ -1713,6 +1840,10 @@ export class RegistroMuestrasService {
       recepciones.push(v.n);
       labs.push(v.lab);
     }
+    // Métodos (un testigo / custodia / contramuestra puede ir sin ensayos: B-013).
+    errores.unshift(
+      ...erroresRegistro(ot.estado, body.muestras.map((m, i) => ({ ...m, claseCustodia: labs[i]?.claseCustodia ?? null })), catalogo),
+    );
     // E.T. propia de la muestra y muestreo de origen (align_r2b_*.sql).
     errores.push(...(await erroresEtYMuestreo(db, tenantId, ot, body.muestras)));
     if (errores.length) throw new BadRequestException(errores.join(" "));
@@ -1745,7 +1876,9 @@ export class RegistroMuestrasService {
           m.etId ?? null,
           m.muestreoId ?? null,
         );
-      const g = await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db);
+      const g = m.metodoIds.length
+        ? await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db)
+        : { creados: 0 };
       creadas.push({
         id: muestra.id,
         codigo: muestra.codigo,
@@ -1754,6 +1887,9 @@ export class RegistroMuestrasService {
         metodos: m.metodoIds.map((id) => catalogo.get(id)?.codigo ?? id),
       });
     }
+
+    // B-008: la parametrización validada del prototipo rige sus ensayos (EP-08 8.11).
+    await this.aplicarParametrizacionPrototipo(db, tenantId, otId, creadas.map((c) => c.id), req?.user?.sub ?? null);
 
     // La OT recibe sus muestras: si aún no tenía fecha de recepción, es hoy.
     if (!ot.fechaRecepcion)

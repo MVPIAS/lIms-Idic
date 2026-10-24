@@ -83,7 +83,8 @@ export function BuscadorEmpresa({
   deshabilitado?: boolean;
 }) {
   const id = useId();
-  const b = useBusqueda<Empresa>((q) => `/clientes?search=${encodeURIComponent(q)}&limit=20`, !valor);
+  // B-014: buscador acotado (también para la D11 y el Jefe de Sucursal, sin cliente.ver).
+  const b = useBusqueda<Empresa>((q) => `/clientes-buscador?search=${encodeURIComponent(q)}&limit=20`, !valor);
   return (
     <div className="field">
       <label htmlFor={id}>{etiqueta} {requerido && <span className="req">*</span>}</label>

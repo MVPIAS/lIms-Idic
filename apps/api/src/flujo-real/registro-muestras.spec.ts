@@ -1,4 +1,4 @@
-import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
+import { admiteSinEnsayos, erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
 
 const met = (id: string, ensayoId: string | null, analitos = 1): MetodoCatalogo => ({
   id, codigo: id.toUpperCase(), nombre: `Método ${id}`, ensayoId, analitos,
@@ -66,5 +66,19 @@ describe("registro de muestras desde la cotización", () => {
     expect(e.join(" | ")).toMatch(/M3 · Método m3 no tiene analitos/);
     expect(e.join(" | ")).toMatch(/zz no existe/);
     expect(erroresRegistro("recepcionada", [], mapa)).toEqual(["Indique al menos una muestra."]);
+  });
+});
+
+describe("B-013 · testigo, custodia o contramuestra sin ensayos", () => {
+  const metodos = new Map();
+  it("una muestra de análisis sin métodos no se registra", () => {
+    expect(erroresRegistro("recepcionada", [{ nombre: "Nitrato", metodoIds: [] }], metodos).join(" ")).toMatch(/elija al menos un método/);
+    expect(erroresRegistro("recepcionada", [{ nombre: "Nitrato", metodoIds: [], claseCustodia: "analisis" }], metodos)).toHaveLength(1);
+  });
+  it("testigo, custodia y contramuestra van a bodega sin ensayos", () => {
+    for (const clase of ["testigo", "custodia", "contramuestra"])
+      expect(erroresRegistro("recepcionada", [{ nombre: "Testigo lote 4", metodoIds: [], claseCustodia: clase }], metodos)).toEqual([]);
+    expect(admiteSinEnsayos("testigo")).toBe(true);
+    expect(admiteSinEnsayos(null)).toBe(false);
   });
 });

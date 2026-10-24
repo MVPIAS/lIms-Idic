@@ -1,4 +1,6 @@
 import { Body, Controller, Get, Module, Post, Req, UseGuards, Injectable } from "@nestjs/common";
+import { BandejaMetrologiaDocumentos } from "./bandeja-metrologia-documentos";
+import { ClientesBuscadorController } from "./clientes-buscador.controller";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -158,8 +160,11 @@ export class FirmaController extends BaseCrudController {
     UnidadesController,
     FirmasMatrizController,
     MeController,
+    // B-014: buscador acotado de clientes (D11, Jefe de Sucursal).
+    ClientesBuscadorController,
   ],
-  providers: [PermisoService, FirmaService, FirmasMatrizService, BandejaService],
+  // BandejaMetrologiaDocumentos: tarjetas de informes técnicos y servicios externos (B-017).
+  providers: [PermisoService, FirmaService, FirmasMatrizService, BandejaService, BandejaMetrologiaDocumentos],
   exports: [FirmasMatrizService],
 })
 export class RbacModule {}

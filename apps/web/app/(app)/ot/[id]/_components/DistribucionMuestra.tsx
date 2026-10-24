@@ -14,7 +14,8 @@ import { toast } from "@/components/ui/feedback";
 
 interface Vista {
   muestra: { id: string; codigo: string };
-  laboratorios: { unidadId: string; codigo: string; nombre: string; ensayos: string }[];
+  /** `previsto`: laboratorio que interviene pero aún no tiene ensayos en la muestra (B-021). */
+  laboratorios: { unidadId: string; codigo: string; nombre: string; ensayos: string; previsto?: boolean }[];
   distribucion: { unidadId: string; codigo: string; porcion: string; fechaHora: string; recibidoPor: string; registradoPor: string | null }[];
   puedeDistribuir: boolean;
 }
@@ -31,7 +32,7 @@ export default function DistribucionMuestra({ muestraId, onCerrar }: { muestraId
     const ahora = aInputHoraChile(new Date());
     setFilas(Object.fromEntries(x.laboratorios.map((l) => {
       const d = x.distribucion.find((y) => y.unidadId === l.unidadId);
-      return [l.unidadId, { incluir: true, porcion: d?.porcion ?? "", fecha: d ? aInputHoraChile(d.fechaHora) : ahora, recibidoPor: d?.recibidoPor ?? "" }];
+      return [l.unidadId, { incluir: !l.previsto || !!d, porcion: d?.porcion ?? "", fecha: d ? aInputHoraChile(d.fechaHora) : ahora, recibidoPor: d?.recibidoPor ?? "" }];
     })));
   };
   useEffect(() => {
@@ -80,7 +81,7 @@ export default function DistribucionMuestra({ muestraId, onCerrar }: { muestraId
                   <tr key={l.unidadId}>
                     <td><input type="checkbox" style={{ width: "auto" }} aria-label={`Entregar a ${l.codigo}`} disabled={!v.puedeDistribuir} checked={!!f?.incluir} onChange={(e) => set(l.unidadId, { incluir: e.target.checked })} /></td>
                     <td><b title={l.nombre}>{l.codigo}</b>{ya && <div style={{ fontSize: 11, color: "var(--muted)" }}>Entregada {fechaHora(ya.fechaHora)}</div>}</td>
-                    <td style={{ fontSize: 12, maxWidth: 260 }}>{l.ensayos}</td>
+                    <td style={{ fontSize: 12, maxWidth: 260, ...(l.previsto ? { color: "var(--muted)", fontStyle: "italic" } : {}) }}>{l.ensayos}</td>
                     <td><input aria-label={`Porción para ${l.codigo}`} value={f?.porcion ?? ""} maxLength={80} placeholder="p. ej. 250 g" disabled={!v.puedeDistribuir} onChange={(e) => set(l.unidadId, { porcion: e.target.value })} style={{ width: 120 }} /></td>
                     <td><input aria-label={`Fecha y hora para ${l.codigo}`} type="datetime-local" value={f?.fecha ?? ""} disabled={!v.puedeDistribuir} onChange={(e) => set(l.unidadId, { fecha: e.target.value })} /></td>
                     <td><input aria-label={`Quién recibe en ${l.codigo}`} value={f?.recibidoPor ?? ""} maxLength={160} disabled={!v.puedeDistribuir} onChange={(e) => set(l.unidadId, { recibidoPor: e.target.value })} style={{ width: 150 }} /></td>
@@ -89,7 +90,10 @@ export default function DistribucionMuestra({ muestraId, onCerrar }: { muestraId
               })}
             </tbody>
           </table>
-          <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "6px 0 0" }}>Cada laboratorio ve la muestra en su bandeja con solo sus ensayos. Corregir una fila la reemplaza.</p>
+          <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "6px 0 0" }}>
+            Cada laboratorio ve la muestra en su bandeja con solo sus ensayos. Puede entregar la porción a un laboratorio previsto
+            antes de que reciba su orden interna. Corregir una fila la reemplaza.
+          </p>
         </div>
       )}
     </Modal>

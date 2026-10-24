@@ -84,7 +84,7 @@ export default function SaecEvidenciasPage() {
       const [e, c, cl] = await Promise.all([
         fetch(`${API}/evidencias?${params}`, { headers: auth() }).then((x) => x.json()),
         fetch(`${API}/saec/casos?limit=200`, { headers: auth() }).then((x) => x.json()),
-        fetch(`${API}/clientes?limit=200`, { headers: auth() }).then((x) => x.json()).catch(() => ({ data: [] })),
+        fetch(`${API}/clientes-buscador?limit=200`, { headers: auth() }).then((x) => x.json()).catch(() => ({ data: [] })),
       ]);
       setRows(e.data ?? (Array.isArray(e) ? e : []));
       setCasos(c.data ?? (Array.isArray(c) ? c : []));

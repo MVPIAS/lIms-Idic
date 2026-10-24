@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
 import { PrismaService } from "../common/prisma.service";
 import { ContextoAlcance } from "./alcance.service";
 import { Perfil, codigoCanonico } from "./rbac.constants";
@@ -242,11 +243,8 @@ export class BandejaService {
         ),
       otListasParaCerrar: () =>
         this.contar(
-          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA}
-              AND EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
-              AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
-                                AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
-              AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')`,
+          // Misma condición que /ot?listasCierre=1 y la Ruta (también la OT de calibración, B-017).
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND ${SQL_OT_LISTA_PARA_CERRAR}`,
           tenant,
           unidades,
         ),
@@ -274,7 +272,7 @@ export class BandejaService {
         this.contar(
           `SELECT count(*) AS n FROM orden_trabajo o
             WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA}
-              AND NOT EXISTS (SELECT 1 FROM ot_analista oa WHERE oa.ot_id = o.id)`,
+              AND NOT ${SQL_OT_CON_ANALISTA}`,
           tenant,
           unidades,
         ),
@@ -660,6 +658,14 @@ export class BandejaService {
             await q.muestreosPendientes(),
           )
         : [];
+    // B-070 (recorrido MP-02 D02-38, MP-03 D03-16): la Sección Muestreo tiene su propia bandeja;
+    // su tarjeta se ve siempre (en 0 cuando no hay nada por completar o entregar).
+    const muestreosSiempre = async (): Promise<ItemBandeja[]> => {
+      const filas = await q.muestreosPendientes();
+      const it = item("muestreos_pendientes", "Muestreos por completar o entregar",
+        "Formularios de muestreo en preparación o entregados al laboratorio sin recibir", filas.length, "/ot?estado=abiertas", "warn");
+      return [filas.length ? { ...it, elementos: filas.slice(0, 5).map((f) => ({ ...f, ruta: `/ot/${f.id}?tab=muestreo` })) } : it];
+    };
     const nc = async () =>
       item("nc_abiertas", "No conformidades abiertas", "NC abiertas, en proceso o en verificación", await q.ncAbiertas(), "/no-conformidades", "warn");
 
@@ -720,6 +726,8 @@ export class BandejaService {
       case "DIRECTOR":
         return all([firmas, porOficializar, vencidas, vencidasPorLab, abiertas, nc, sinOt]);
       case "COMERCIAL":
+        if (rolesVigentes.has("MUESTREO") && !rolesVigentes.has("COMERCIAL"))
+          return all([muestreosSiempre, async () => item("ot_en_curso", "OT en curso", "OT abiertas donde puede tocar un muestreo", await q.otAbiertas(), "/ot?estado=abiertas", "info")]);
         return all([
           async () => item("cotizaciones_por_vencer", "Cotizaciones por vencer", "Cotizaciones abiertas que vencen en los próximos 7 días", await q.cotizacionesPorVencer(), "/cotizaciones?porVencer=1", "warn"),
           sinOt,
