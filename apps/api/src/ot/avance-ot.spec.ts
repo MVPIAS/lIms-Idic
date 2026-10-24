@@ -56,6 +56,21 @@ describe("Ruta de la OT · laboratorio (recorrido estándar)", () => {
     expect(recibido.avisos).toContain("Muestreo recibido no conforme: Nº F-7.");
   });
 
+  it("D03-19 · la OT que requiere muestreo sigue en Recepción hasta recibir el muestreo, aunque ya tenga muestras", () => {
+    const conMuestras = { muestras: { total: 1, recepcionIncompleta: 1 }, resultados: res({ pendientes: 2 }) };
+    const sinMuestreo = calcularAvance(base({ ...conMuestras, requiereMuestreo: true }));
+    expect(sinMuestreo.etapaActual).toBe("recepcion");
+    expect(sinMuestreo.siguiente?.texto).toMatch(/Registrar el muestreo de la OT/);
+    expect(sinMuestreo.siguiente?.accion).toMatchObject({ pestana: "muestreo", permisos: ["muestreo.registrar"] });
+    const entregado = calcularAvance(base({ ...conMuestras, requiereMuestreo: true, muestreos: [{ numero: "F-9", estado: "registrado", recibidoConforme: null }] }));
+    expect(entregado.etapaActual).toBe("recepcion");
+    expect(entregado.siguiente?.texto).toMatch(/Recibir el muestreo Nº F-9/);
+    const recibido = calcularAvance(base({ ...conMuestras, requiereMuestreo: true, muestreos: [{ numero: "F-9", estado: "recibido", recibidoConforme: true }] }));
+    expect(recibido.etapaActual).not.toBe("recepcion");
+    // Sin «requiere muestreo», las muestras bastan (como antes).
+    expect(calcularAvance(base(conMuestras)).etapaActual).not.toBe("recepcion");
+  });
+
   it("sin laboratorio responsable: Apertura (le toca a Planificación, en la Cabecera)", () => {
     const a = calcularAvance(base({ unidad: null }));
     expect(a.etapaActual).toBe("apertura");

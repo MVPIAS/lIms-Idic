@@ -191,6 +191,10 @@ export class AvanceOtService {
           ot.id,
         )
         .catch(() => []),
+      requiereMuestreo: await this.prisma
+        .$queryRawUnsafe<{ r: boolean | null }[]>(`SELECT requiere_muestreo AS r FROM ot_encargo WHERE ot_id = $1::uuid`, ot.id)
+        .then((f) => f[0]?.r ?? null)
+        .catch(() => null),
       coberturaPendiente: await hechosCobertura(this.prisma, ot.id, ot.tenantId).then((x) => x.pendientes).catch(() => []),
       // OT directa o de Producción Nacional del BPCH (internación y reinspección tienen su ruta propia).
       rama,
