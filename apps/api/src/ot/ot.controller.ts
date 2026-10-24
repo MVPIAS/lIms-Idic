@@ -34,6 +34,7 @@ import { generarCodigoOt } from "../common/codigo";
 import { AlcanceService } from "../rbac/alcance.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 import { ORIGENES_OT, calcularOpiPendiente, resolverCobro, validarOrigenOt } from "./reglas-ot";
+import { SQL_OT_LISTA_PARA_CERRAR } from "./lista-cierre";
 import { RegistroMuestrasService } from "../flujo-real/flujo-real.module";
 import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { esElementoGenerico, muestrasDeAlta, type ElementoAlta } from "./alta-muestras";
@@ -350,6 +351,8 @@ export class OtController {
     const filas = await this.prisma.$queryRawUnsafe<{ id: string; situacion: string }[]>(
       `SELECT o.id,
               CASE
+                -- Misma regla que la tarjeta «OT listas para cerrar» (también la OT de calibración, sin muestras).
+                WHEN ${SQL_OT_LISTA_PARA_CERRAR} THEN 'lista_para_cerrar'
                 WHEN NOT EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL) THEN 'por_recepcionar'
                 WHEN r.total = 0 THEN 'por_recepcionar'
                 WHEN r.por_capturar > 0 THEN 'en_analisis'

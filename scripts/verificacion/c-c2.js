@@ -389,6 +389,8 @@ async function recorrido(C) {
     const a = await avance(C.otN.id);
     afirmar(a.etapaActual === "cierre" && etapaDe(a, "cierre")?.detalle === "Lista para cerrar", `ruta: ${a.etapaActual} · ${etapaDe(a, "cierre")?.detalle} · ${a.siguiente?.texto}`);
     afirmar(await enListas(C.otN), "no figura en «OT listas para cerrar»");
+    const fila = lista(await ok(U.planif, "GET", `/ot?search=${encodeURIComponent(C.otN.codigo)}&limit=50`)).find((x) => x.id === C.otN.id);
+    afirmar(fila?.situacion === "lista_para_cerrar", `la lista de OT dice «${fila?.situacion}» (sin muestras: no es «por recepcionar»)`);
     const ban = lista(await ok(U.planif, "GET", "/me/bandeja")).find((x) => x.clave === "ot_listas_cerrar");
     afirmar(ban && ban.cantidad >= 1, "la tarjeta «OT listas para cerrar» no cuenta la OT");
     const c = await ok(U.planif, "GET", `/ot/${C.otN.id}/cierre`);
