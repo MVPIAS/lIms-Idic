@@ -141,6 +141,10 @@ proto as (select p.id, p.clasificacion_id, coalesce(uo.codigo, up.codigo) c from
 m as (
  select 'ot' t, id, array_remove(array[uc], null) u from ou
  union all select 'muestra', mu.id, array_remove(array[ou.uc], null) from muestra mu left join ou on ou.id = mu.ot_id
+ -- Distribución de la muestra: también la ve el laboratorio destino de una orden interna viva de su OT
+ -- (alcanceEnOt › destinosDeOt). Sin esto, la 1.ª muestra «ajena» podía ser de una OT derivada al perfil.
+ union all select 'muestra_dist', mu.id, array_remove(array[ou.uc], null) || array(select distinct famu.c from orden_interna oi join famu on famu.fid = oi.destino_lab
+              where oi.ot_id = mu.ot_id and oi.deleted_at is null and oi.estado <> 'anulada') from muestra mu left join ou on ou.id = mu.ot_id
  union all select 'resultado', r.id, array_remove(array[ou.uc, (select un.codigo from lims_lab_de_resultado(r.id) l join unidad un on un.id = l.unidad_id where l.derivado)], null)
              from resultado r left join ou on ou.id = r.ot_id
  union all select 'certificado', c.id, array_remove(array[coalesce(u.codigo, ou.uc)], null) from certificado c left join unidad u on u.id = c.unidad_id left join ou on ou.id = c.ot_id
@@ -501,7 +505,7 @@ async function main() {
       // Frente r4d: datos del encargo, recepción en DCO, distribución de la muestra, apelación.
       ["ot", "ot.ver", (id) => `/ot/${id}/encargo`],
       ["ot", "ot.ver", (id) => `/ot/${id}/recepcion-dco`],
-      ["muestra", "muestra.ver", (id) => `/muestras/${id}/distribucion`],
+      ["muestra_dist", "muestra.ver", (id) => `/muestras/${id}/distribucion`],
       ["oportunidad", "cotizacion.ver", (id) => `/oportunidades/${id}`, null, "dco"],
     ];
     for (const [tipo, perm, ruta, codigos, regla] of DETALLE) {
