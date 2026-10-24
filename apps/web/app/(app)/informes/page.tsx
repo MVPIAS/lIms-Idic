@@ -14,6 +14,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { otActiva } from "@/lib/ot-activa";
 import { api } from "@/lib/api";
 import { fecha } from "@/lib/format";
 import DataTable, { type DataColumn } from "@/components/DataTable";
@@ -68,7 +69,9 @@ function InformesContenido() {
   const [otSel, setOtSel] = useState<OtCorta | null>(null);
   const [plantillas, setPlantillas] = useState<Plantilla[]>([]);
   const [docs, setDocs] = useState<any[]>([]);
-  const [otId, setOtId] = useState(params.get("otId") ?? "");
+  // Sin ?otId (abierto desde el menú) se propone la OT de la captura en curso (B-023).
+  const [otInicial] = useState(() => params.get("otId") ?? (typeof window === "undefined" ? null : otActiva()));
+  const [otId, setOtId] = useState(otInicial ?? "");
   const [plantillaId, setPlantillaId] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("");
   const [tipoDocumento, setTipoDocumento] = useState("");
@@ -105,7 +108,7 @@ function InformesContenido() {
     (async () => {
       setCargando(true);
       try {
-        const inicial = params.get("otId");
+        const inicial = otInicial;
         const [o, p] = await Promise.all([
           inicial ? api.getRaw<OtCorta>(`ot/${inicial}`).catch(() => null) : Promise.resolve(null),
           // Todas las páginas (la API entrega de a 100; hay más plantillas heredadas que eso).
@@ -209,7 +212,7 @@ function InformesContenido() {
     setOcupado("preview");
     setError("");
     try {
-      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId, modalidad, datosInforme: datosInforme(), ...conCobertura() }));
+      setPreview(await api.post<Preview>("/informes/previsualizar", { otId, plantillaId, modalidad, datosInforme: datosInforme(), ...(tipoDocumento ? { tipoDocumento } : {}), ...conCobertura() }));
     } catch (e: any) {
       setError(e.message);
     } finally {

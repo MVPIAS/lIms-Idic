@@ -12,7 +12,7 @@ import { llamar } from "@/lib/laboratorio";
 import { enviarInforme } from "@/lib/informes";
 import { fechaDia, fechaHora } from "@/lib/format";
 import { MEDIOS_ENTREGA, textoMedio } from "@/lib/documentos";
-import { toast } from "@/components/ui/feedback";
+import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import css from "./ficha.module.css";
 
@@ -28,7 +28,8 @@ const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Sa
 
 type Dlg =
   | { tipo: "informe"; fila: any } | { tipo: "devolverInforme"; fila: any } | { tipo: "entregarInforme"; fila: any }
-  | { tipo: "solicitar"; fila: any } | { tipo: "rechazar"; fila: any } | { tipo: "envio"; fila: any } | { tipo: "certificado"; fila: any } | { tipo: "validar"; fila: any };
+  | { tipo: "solicitar"; fila: any } | { tipo: "rechazar"; fila: any } | { tipo: "envio"; fila: any } | { tipo: "certificado"; fila: any } | { tipo: "validar"; fila: any }
+  | { tipo: "entregarExterno"; fila: any };
 
 async function abrirPdf(ruta: string) {
   try {
@@ -94,8 +95,15 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
                 ) : <p>Aún no se elabora.</p>}
                 <div className={css.acciones}>
                   {ai.includes("GUARDAR") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "informe", fila: f })}>{inf ? "Editar informe" : "Elaborar informe técnico"}</button>}
-                  {ai.includes("ENVIAR") && <button className="btn primary sm" disabled={ocupado} onClick={() => hacer("POST", `${base(f)}/informe-tecnico/enviar`, undefined, "Informe técnico enviado a firma.")}>Enviar a firma → emitir</button>}
-                  {ai.includes("EMITIR") && <button className="btn primary sm" disabled={ocupado} onClick={() => hacer("POST", `${base(f)}/informe-tecnico/emitir`, undefined, "Informe técnico emitido con su número.")}>Firmar y emitir → Entrega</button>}
+                  {ai.includes("ENVIAR") && <button className="btn primary sm" disabled={ocupado} onClick={async () => {
+                    // B-074: enviar a firma un documento que se sellará pide confirmación.
+                    if (await confirmar({ titulo: "¿Enviar el informe técnico a firma?", mensaje: "Queda en firma de la jefatura del laboratorio: ya no se puede editar salvo que lo devuelvan.", confirmarTexto: "Enviar a firma" }))
+                      hacer("POST", `${base(f)}/informe-tecnico/enviar`, undefined, "Informe técnico enviado a firma.");
+                  }}>Enviar a firma → emitir</button>}
+                  {ai.includes("EMITIR") && <button className="btn primary sm" disabled={ocupado} onClick={async () => {
+                    if (await confirmar({ titulo: "¿Firmar y emitir el informe técnico?", mensaje: "Recibe su número, queda sellado y su fecha de emisión se congela.", confirmarTexto: "Firmar y emitir" }))
+                      hacer("POST", `${base(f)}/informe-tecnico/emitir`, undefined, "Informe técnico emitido con su número.");
+                  }}>Firmar y emitir → Entrega</button>}
                   {ai.includes("DEVOLVER") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "devolverInforme", fila: f })}>Devolver…</button>}
                   {ai.includes("ENTREGAR") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "entregarInforme", fila: f })}>Registrar entrega → Cierre</button>}
                   {inf && <button className="btn outline sm" onClick={() => abrirPdf(`${base(f)}/informe-tecnico/pdf`)}>{inf.estado === "emitido" ? "Informe (PDF)" : "Borrador (PDF)"}</button>}
@@ -108,7 +116,10 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
                     {ext.fecha_envio ? ` · enviado el ${fechaDia(ext.fecha_envio)}` : ""}{ext.fecha_retorno ? ` · volvió el ${fechaDia(ext.fecha_retorno)}` : ""}
                     {ext.certificado_numero ? <> · certificado externo <span className="codigo">{ext.certificado_numero}</span></> : null}
                     {ext.estado === "validado" ? ` · ${ext.aptitud === "apto" ? "apto" : "no apto"}${ext.aptitud_comentario ? `: ${ext.aptitud_comentario}` : ""}` : ""}
-                    {ext.estado === "rechazado" && ext.rechazo_motivo ? <span style={{ display: "block" }}>Rechazado: {ext.rechazo_motivo}</span> : null}</p>
+                    {ext.estado === "rechazado" && ext.rechazo_motivo ? <span style={{ display: "block" }}>Rechazado: {ext.rechazo_motivo}</span> : null}
+                    {ext.estado === "validado" && (ext.entregado_at
+                      ? <span style={{ display: "block" }}>Entregado al cliente el {fechaDia(ext.entregado_at)} · {ext.entrega_destinatario}</span>
+                      : <span style={{ display: "block" }}><span className="pill amber">Sin entregar al cliente</span></span>)}</p>
                 ) : <p>No se ha solicitado.</p>}
                 <div className={css.acciones}>
                   {ae.includes("SOLICITAR") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "solicitar", fila: f })}>Solicitar servicio externo → Jefe de Departamento</button>}
@@ -117,6 +128,7 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
                   {ae.includes("ENVIO") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "envio", fila: f })}>Registrar envío al proveedor →</button>}
                   {ae.includes("CERTIFICADO") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "certificado", fila: f })}>{ext?.tiene_certificado ? "Reemplazar el certificado externo" : "Adjuntar el certificado externo"}</button>}
                   {ae.includes("VALIDAR") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "validar", fila: f })}>Validar el certificado externo → Entrega</button>}
+                  {ae.includes("ENTREGAR") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "entregarExterno", fila: f })}>Registrar entrega → Cierre</button>}
                   {ext?.tiene_certificado && <button className="btn outline sm" onClick={() => abrirPdf(`${base(f)}/servicio-externo/certificado`)}>Certificado externo (PDF)</button>}
                 </div>
               </div>
@@ -133,6 +145,8 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
         onGuardar={(motivo) => hacer("POST", `${base(dlg.fila)}/servicio-externo/rechazar`, { motivo }, "Solicitud rechazada.")} />}
       {dlg?.tipo === "entregarInforme" && <DialogoEntrega ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/informe-tecnico/entregar`, b, "Entrega del informe técnico registrada.")} />}
+      {dlg?.tipo === "entregarExterno" && <DialogoEntrega ocupado={ocupado} onCerrar={() => setDlg(null)}
+        onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/servicio-externo/entregar`, b, "Entrega del certificado externo registrada.")} />}
       {dlg?.tipo === "solicitar" && <DialogoSolicitud otId={otId} ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/servicio-externo`, b, "Servicio externo solicitado: espera la aprobación del Jefe de Departamento.")} />}
       {dlg?.tipo === "envio" && <DialogoEnvio costo={dlg.fila.externo?.costo} ocupado={ocupado} onCerrar={() => setDlg(null)}

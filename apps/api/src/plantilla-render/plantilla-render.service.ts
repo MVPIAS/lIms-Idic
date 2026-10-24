@@ -66,6 +66,8 @@ import {
   type IdentificacionMuestra,
 } from "./bloques-informe";
 import { anioChile } from "../common/fecha-chile";
+import { leerCondicion2 } from "../laboratorio/requisito-compuesto";
+import { urlVerificacionBase } from "../common/url-verificacion";
 
 /** Fotos como máximo en el anexo fotográfico de un documento. */
 export const MAX_FOTOS_INFORME = 24;
@@ -187,7 +189,7 @@ export class PlantillaRenderService {
 
   /** URL pública de verificación; configurable por despliegue. */
   private get baseVerificacion(): string {
-    return (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
+    return urlVerificacionBase();
   }
 
   /* ====================================================================== */
@@ -254,6 +256,7 @@ export class PlantillaRenderService {
     for (const l of limites) if (!limitePorAnalito.has(l.analitoId)) limitePorAnalito.set(l.analitoId, l);
 
     const ubicaciones = await this.ubicaciones(otId);
+    const derivados = await this.derivadosDe(otId);
     const txt = (v: unknown) => (v === null || v === undefined ? null : String(v));
     const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(String(v)));
     const paraInforme: ResultadoParaInforme[] = resultados.map((r) => {
@@ -274,6 +277,9 @@ export class PlantillaRenderService {
         limiteSup: legado ? txt(legado.limiteSup) : r.limiteSup,
         requisito: r.requisito,
         especOrigen: legado ? "catalogo" : r.especOrigen,
+        condicion2: legado ? null : leerCondicion2(r.condicion2),
+        valorCondicion2: num(r.valorCondicion2),
+        derivadoA: derivados.get(r.id) ?? null,
         tipoDato: r.tipoDato,
         valorNumerico: num(r.valorNumerico),
         valorTexto: r.valorTexto,
@@ -303,7 +309,52 @@ export class PlantillaRenderService {
           orderBy: { createdAt: "asc" },
         });
     const atencion = atencionInforme({ solicitanteOt: ot.solicitante, fichaCliente: ot.cliente, contactoPrincipal });
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion };
+    const organigrama = await this.organigramaDe(ot.unidadPrincipal);
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion, organigrama };
+  }
+
+  /** Ensayos de la OT derivados a otro laboratorio por orden interna (lims_lab_de_resultado). */
+  private async derivadosDe(otId: string): Promise<Map<string, { laboratorio: string; ordenInterna: string | null }>> {
+    try {
+      const f = await this.prisma.$queryRawUnsafe<{ id: string; codigo: string; oi: string | null }[]>(
+        `SELECT r.id, u.codigo, l.oi_numero AS oi
+           FROM resultado r CROSS JOIN LATERAL lims_lab_de_resultado(r.id) l JOIN unidad u ON u.id = l.unidad_id
+          WHERE r.ot_id = $1::uuid AND r.deleted_at IS NULL AND l.derivado AND l.unidad_id IS DISTINCT FROM l.principal_id`,
+        otId,
+      );
+      return new Map(f.map((x) => [x.id, { laboratorio: x.codigo, ordenInterna: x.oi }]));
+    } catch {
+      return new Map(); // BD sin align_r1g_recorrido.sql
+    }
+  }
+
+  /**
+   * Laboratorio, sección y departamento de la OT para el membrete
+   * ({{unidad.nombre}}, {{seccion.nombre}}, {{departamento.nombre}}; B-026 / B-075).
+   */
+  private async organigramaDe(unidadId: string | null) {
+    const vacio = { codigo: "", nombre: "" };
+    const r = { unidad: vacio, seccion: vacio, departamento: vacio };
+    if (!unidadId) return r;
+    try {
+      const filas = await this.prisma.$queryRawUnsafe<{ codigo: string; nombre: string; tipo: string; nivel: number }[]>(
+        `WITH RECURSIVE cadena AS (
+           SELECT id, padre_id, codigo, nombre, tipo, 0 AS nivel FROM unidad WHERE id = $1::uuid
+           UNION ALL
+           SELECT u.id, u.padre_id, u.codigo, u.nombre, u.tipo, c.nivel + 1 FROM unidad u JOIN cadena c ON u.id = c.padre_id WHERE c.nivel < 20)
+         SELECT codigo, nombre, tipo, nivel FROM cadena ORDER BY nivel`,
+        unidadId,
+      );
+      const de = (tipo: string) => filas.find((f) => f.tipo === tipo);
+      const f0 = filas[0];
+      return {
+        unidad: f0 ? { codigo: f0.codigo, nombre: f0.nombre } : vacio,
+        seccion: de("SECCION") ? { codigo: de("SECCION")!.codigo, nombre: de("SECCION")!.nombre } : vacio,
+        departamento: de("DEPARTAMENTO") ? { codigo: de("DEPARTAMENTO")!.codigo, nombre: de("DEPARTAMENTO")!.nombre } : vacio,
+      };
+    } catch {
+      return r;
+    }
   }
 
   /**
@@ -512,6 +563,9 @@ export class PlantillaRenderService {
       n_muestras: String(muestras.length),
       n_resultados: String(resultados.length),
       laboratorio: ot.subdireccionAsignada ?? "",
+      unidad: ctx.organigrama.unidad,
+      seccion: ctx.organigrama.seccion,
+      departamento: ctx.organigrama.departamento,
 
       // --- alias planos heredados: los escalares del motor anterior, para que
       // un cuerpo escrito contra la API vieja siga rellenándose ---
@@ -742,13 +796,15 @@ export class PlantillaRenderService {
     otId: string,
     plantillaId: string,
     tenantId?: string,
-    opciones: { modalidad?: Modalidad; datos?: DatosInforme; cobertura?: OpcionesEmision["cobertura"] } = {},
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme; cobertura?: OpcionesEmision["cobertura"]; tipoDocumento?: string } = {},
   ) {
     const fecha = new Date();
+    if (opciones.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(opciones.tipoDocumento))
+      throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
     const cob = tenantId ? await this.resolverCobertura(otId, tenantId, opciones.cobertura) : null;
     if (cob?.errores.length) throw new BadRequestException(cob.errores.join(" "));
     const cert = {
-      numero: await this.numeroBorrador(otId, plantillaId, tenantId, fecha, cob),
+      numero: await this.numeroBorrador(otId, plantillaId, tenantId, fecha, cob, opciones.tipoDocumento ?? null),
       codigoVerificacion: "SIN EMITIR",
       fecha,
     };
@@ -767,6 +823,9 @@ export class PlantillaRenderService {
       fecha: fmtFecha(fecha),
       urlVerificacion: this.baseVerificacion,
       borrador: true,
+      // B-026 / B-075: la vista previa muestra las firmas del circuito que tendrá el documento
+      // (matriz de firmas de su tipo y laboratorio), no las líneas fijas de la plantilla.
+      firmas: await this.firmasPrevistas(otId, plantillaId, tenantId, cob, opciones.tipoDocumento ?? null),
     };
 
     return {
@@ -786,6 +845,41 @@ export class PlantillaRenderService {
   }
 
   /**
+   * Firmas que tendrá el documento según la matriz (todas pendientes), para la
+   * vista previa. Si la matriz no resuelve pasos, undefined: se dejan las de la plantilla.
+   */
+  private async firmasPrevistas(
+    otId: string,
+    plantillaId: string,
+    tenantId: string | undefined,
+    cob: { unidadDocumento: string | null } | null,
+    indicado: string | null,
+  ): Promise<FirmaEstampada[] | undefined> {
+    try {
+      const [ot, plantilla] = await Promise.all([
+        this.prisma.ordenTrabajo.findFirst({ where: { id: otId, ...(tenantId ? { tenantId } : {}) }, select: { unidadPrincipal: true, tenantId: true, origenTrabajo: true } }),
+        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true, repid: true, tipoDocumento: true } }),
+      ]);
+      if (!ot || !plantilla) return undefined;
+      const unidad = cob ? cob.unidadDocumento : ot.unidadPrincipal;
+      if (!unidad) return undefined;
+      const deUnidad = await this.tipoDocumentoDeUnidad(unidad);
+      const { tipo } = tipoDocumentoPorDefecto({ indicado, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoDePlantilla: plantilla.tipoDocumento, tipoUnidad: deUnidad?.tipo ?? null });
+      const res = await this.matriz.resolver(tipo, unidad, ot.tenantId, { otInterna: esOtInterna(ot.origenTrabajo) });
+      if (!res.pasos.length) return undefined;
+      return res.pasos.map((p) => ({
+        accion: p.accion,
+        rol: p.rol.nombre,
+        unidad: p.unidad?.codigo ?? null,
+        nombre: p.responsables.map((r) => r.nombre).filter(Boolean).join(" / ") || null,
+        pendiente: true,
+      }));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Número que se imprime en la vista previa: el que tendría el documento con
    * la numeración de su laboratorio, marcado «BORRADOR» (no reserva nada).
    */
@@ -795,18 +889,20 @@ export class PlantillaRenderService {
     tenantId: string | undefined,
     fecha: Date,
     cob: { unidadDocumento: string | null; muestraCodigo: string | null } | null = null,
+    /** Tipo elegido en la pantalla; sin él, el de la plantilla o la unidad (igual que al emitir). */
+    indicado: string | null = null,
   ): Promise<string> {
     const general = `CERT-${anioChile(fecha)}-XXXX`;
     try {
       const [ot, plantilla, primera] = await Promise.all([
         this.prisma.ordenTrabajo.findFirst({ where: { id: otId, ...(tenantId ? { tenantId } : {}) }, select: { codigo: true, unidadPrincipal: true, tenantId: true } }),
-        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true, repid: true } }),
+        this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId }, select: { tipo: true, repid: true, tipoDocumento: true } }),
         this.prisma.muestra.findFirst({ where: { otId, deletedAt: null }, orderBy: { codigo: "asc" }, select: { codigo: true } }),
       ]);
       if (!ot || !plantilla) return general;
       const unidad = cob ? cob.unidadDocumento : ot.unidadPrincipal;
       const deUnidad = await this.tipoDocumentoDeUnidad(unidad);
-      const { tipo } = tipoDocumentoPorDefecto({ tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoUnidad: deUnidad?.tipo ?? null });
+      const { tipo } = tipoDocumentoPorDefecto({ indicado, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoDePlantilla: plantilla.tipoDocumento, tipoUnidad: deUnidad?.tipo ?? null });
       const p = await this.numeracion.proximo({
         tenantId: ot.tenantId,
         unidadId: unidad,
@@ -894,7 +990,10 @@ export class PlantillaRenderService {
         muestra: d.muestraCodigo,
         numInforme,
       },
-      async (numero) => Boolean(await tx.certificado.findFirst({ where: { tenantId: d.tenantId, OR: [{ numero }, { codigo: numero }] }, select: { id: true } })),
+      // Un documento tampoco puede repetir el número de un oficio (B-003).
+      async (numero) =>
+        Boolean(await tx.certificado.findFirst({ where: { tenantId: d.tenantId, OR: [{ numero }, { codigo: numero }] }, select: { id: true } })) ||
+        (await tx.$queryRawUnsafe(`SELECT 1 FROM oficio WHERE tenant_id = $1::uuid AND numero = $2 LIMIT 1`, d.tenantId, numero) as unknown[]).length > 0,
     );
     if (r.numero) return { numero: r.numero, aviso: null, formato: r.regla.formato };
     const numero = await this.siguienteNumero(tx, d.tenantId, anioChile(d.fecha));
@@ -949,7 +1048,7 @@ export class PlantillaRenderService {
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
     const plantilla = await this.prisma.plantillaInforme.findFirst({
       where: { id: plantillaId, ...(tenantId ? { tenantId } : {}) },
-      select: { id: true, repid: true, nombre: true, tipo: true },
+      select: { id: true, repid: true, nombre: true, tipo: true, tipoDocumento: true },
     });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
 
@@ -966,6 +1065,7 @@ export class PlantillaRenderService {
       indicado: opts.tipoDocumento,
       tipoPlantilla: plantilla.tipo,
       repid: plantilla.repid,
+      tipoDePlantilla: plantilla.tipoDocumento,
       tipoUnidad: deUnidad?.tipo ?? null,
     });
     const faltantes: string[] = [];
@@ -1225,14 +1325,14 @@ export class PlantillaRenderService {
     const ot = await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId }, select: { codigo: true, estado: true } });
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
     if (ot.estado === "anulada" || ot.estado === "cerrada") throw new ConflictException(`La OT ${ot.codigo} está ${ot.estado}.`);
-    const plantilla = await this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId, tenantId }, select: { id: true, tipo: true, nombre: true, repid: true } });
+    const plantilla = await this.prisma.plantillaInforme.findFirst({ where: { id: plantillaId, tenantId }, select: { id: true, tipo: true, nombre: true, repid: true, tipoDocumento: true } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
     const otro = documentoEnConflicto(cober.cob, cober.hechos.documentos.filter((d) => d.plantillaId === plantillaId));
     if (otro) throw new ConflictException(`Ya existe el documento ${otro.numero}${otro.etiqueta ? ` (${otro.etiqueta})` : ""} con esta plantilla.`);
     if (p.tipoDocumento && !(TIPOS_DOCUMENTO as readonly string[]).includes(p.tipoDocumento))
       throw new BadRequestException(`tipoDocumento inválido. Valores: ${TIPOS_DOCUMENTO.join(", ")}`);
     const deUnidad = await this.tipoDocumentoDeUnidad(cober.unidadDocumento);
-    const { tipo: tipoDocumento } = tipoDocumentoPorDefecto({ indicado: p.tipoDocumento, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoUnidad: deUnidad?.tipo ?? null });
+    const { tipo: tipoDocumento } = tipoDocumentoPorDefecto({ indicado: p.tipoDocumento, tipoPlantilla: plantilla.tipo, repid: plantilla.repid, tipoDePlantilla: plantilla.tipoDocumento, tipoUnidad: deUnidad?.tipo ?? null });
     const fecha = new Date();
     const motivo = p.motivo.trim();
     return this.prisma.$transaction(async (tx) => {

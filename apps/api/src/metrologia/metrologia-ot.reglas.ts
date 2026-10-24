@@ -25,7 +25,7 @@ import { anioChile } from "../common/fecha-chile";
 export type EstadoInstrumento = "por_recibir" | "recibido" | "no_apto" | "devuelto" | "anulado";
 export const ESTADOS_FISICOS = ["bueno", "con_observaciones", "danado"] as const;
 export type EstadoFisico = (typeof ESTADOS_FISICOS)[number];
-export const MEDIOS_ENTREGA_CAL = ["mano", "correo", "oficina_partes", "courier", "plataforma", "otro"] as const;
+export const MEDIOS_ENTREGA_CAL = ["mano", "correo", "oficio", "oficina_partes", "courier", "plataforma", "otro"] as const;
 
 export interface InstrumentoOt {
   id: string;
@@ -257,6 +257,14 @@ export function faltantesInstrumentos(items: InstrumentoOt[], cals: CalibracionO
   return f;
 }
 
+/**
+ * Ítem no calibrable: el que sigue en custodia como no apto y el que ya se
+ * devolvió sin calibrar (B-004: al registrar la devolución pasa a «devuelto»,
+ * pero sigue resuelto con su informe técnico o su servicio externo validado).
+ */
+export const esNoCalibrable = (i: Pick<InstrumentoOt, "estado" | "calibrable">): boolean =>
+  i.estado === "no_apto" || (i.estado === "devuelto" && i.calibrable === false);
+
 /** Cierre técnico (Jefe de Laboratorio): todos los ítems con su documento emitido o no aptos. */
 export function motivoCierreTecnico(
   otEstado: string, items: InstrumentoOt[], cals: CalibracionOt[],
@@ -268,11 +276,11 @@ export function motivoCierreTecnico(
   if (!vivos.length) return "La OT no tiene instrumentos registrados.";
   const faltan = vivos.filter((i) => {
     if (i.estado === "por_recibir") return true;
-    if (i.estado === "no_apto") return !!noApto?.exige && !noApto.resueltos.has(i.id);
+    if (esNoCalibrable(i)) return !!noApto?.exige && !noApto.resueltos.has(i.id);
     const v = calibracionVigente(cals, i.id);
     return !v || v.estado !== "emitida";
   });
-  const sinDoc = faltan.filter((i) => i.estado === "no_apto"), sinCert = faltan.filter((i) => i.estado !== "no_apto");
+  const sinDoc = faltan.filter(esNoCalibrable), sinCert = faltan.filter((i) => !esNoCalibrable(i));
   if (sinCert.length) return `Faltan certificados emitidos: ${sinCert.map((i) => `ítem ${i.numero}`).join(", ")}.`;
   if (sinDoc.length) return `Falta el informe técnico emitido o el servicio externo validado del no calibrable: ${sinDoc.map((i) => `ítem ${i.numero}`).join(", ")}.`;
   return null;

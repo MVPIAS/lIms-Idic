@@ -19,11 +19,11 @@
 export type EstadoInforme = "borrador" | "en_firma" | "emitido" | "anulado";
 export type AccionInforme = "GUARDAR" | "ENVIAR" | "EMITIR" | "DEVOLVER" | "ENTREGAR";
 export type EstadoExterno = "solicitado" | "aprobado" | "enviado" | "validado" | "rechazado" | "anulado";
-export type AccionExterno = "SOLICITAR" | "APROBAR" | "RECHAZAR" | "ENVIO" | "CERTIFICADO" | "VALIDAR";
+export type AccionExterno = "SOLICITAR" | "APROBAR" | "RECHAZAR" | "ENVIO" | "CERTIFICADO" | "VALIDAR" | "ENTREGAR";
 
 export interface ItemDoc { numero: number; estado: string; otEstado: string; calibrable?: boolean | null }
 export interface InformeDoc { estado: EstadoInforme; entregadoAt?: Date | string | null; elaboradoPor?: string | null }
-export interface ExternoDoc { estado: EstadoExterno; certificadoNumero?: string | null; tieneCertificado?: boolean; fechaEnvio?: string | null }
+export interface ExternoDoc { estado: EstadoExterno; certificadoNumero?: string | null; tieneCertificado?: boolean; fechaEnvio?: string | null; entregadoAt?: Date | string | null }
 
 const cerrada = (e: string) => e === "cerrada" || e === "anulada";
 const item = (i: ItemDoc) => `ítem ${i.numero}`;
@@ -58,6 +58,12 @@ export function motivoExterno(
   d: { justificacion?: string | null; proveedorId?: string | null; motivo?: string | null; ocNumero?: string | null; fechaEnvio?: string | null;
     certificadoNumero?: string | null; fechaRetorno?: string | null; aptitud?: string | null } = {},
 ): string | null {
+  // B-029: el certificado externo validado se entrega al cliente (también con el instrumento ya devuelto o la OT cerrada).
+  if (accion === "ENTREGAR") {
+    if (!ext || ext.estado !== "validado") return "Solo se entrega un certificado externo validado.";
+    if (ext.entregadoAt) return "La entrega del certificado externo ya está registrada.";
+    return null;
+  }
   if (cerrada(i.otEstado)) return `La OT está ${i.otEstado}.`;
   if (i.estado !== "no_apto") return `El servicio externo es para el instrumento que el laboratorio no puede calibrar: el ${item(i)} está ${String(i.estado).replace("_", " ")}.`;
   const vivo = ext && !["rechazado", "anulado"].includes(ext.estado);

@@ -61,6 +61,8 @@ const PreviewSchema = OtPlantilla.extend({
   /** cumplimiento (con requisito y veredicto) | solo_resultados. Sin valor: el sugerido. */
   modalidad: z.enum(["cumplimiento", "solo_resultados"]).optional(),
   datosInforme: DatosInformeSchema.optional(),
+  /** Tipo de documento elegido en la pantalla: la vista previa muestra el número de su serie (B-076). */
+  tipoDocumento: z.string().max(40).optional(),
   cobertura: z
     .object({
       cobertura: z.enum(["ot", "muestra", "producto", "laboratorio"]),
@@ -184,10 +186,10 @@ export class PlantillaRenderController {
   @Post("previsualizar")
   @RequierePermiso("certificado.emitir")
   async previsualizar(@Body() body: unknown, @Req() req: any) {
-    const { otId, plantillaId, modalidad, datosInforme, cobertura } = PreviewSchema.parse(body);
+    const { otId, plantillaId, modalidad, datosInforme, cobertura, tipoDocumento } = PreviewSchema.parse(body);
     // Antes no comprobaba el alcance: cualquier emisor previsualizaba OTs de otro laboratorio.
     await this.exigirAlcanceOt(otId, req, cobertura);
-    return this.svc.previsualizar(otId, plantillaId, req?.user?.tenantId, { modalidad, datos: datosInforme, cobertura });
+    return this.svc.previsualizar(otId, plantillaId, req?.user?.tenantId, { modalidad, datos: datosInforme, cobertura, tipoDocumento });
   }
 
   /** Emite el informe/certificado: rellena, sella con HASH, numera y registra Certificado. */

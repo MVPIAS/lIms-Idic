@@ -490,7 +490,11 @@ async function recorrido(C) {
       accesorios: [{ tipo: "Amplificador", marca: "HBM", modelo: "MGC plus", serie: "801143406/1" }, { tipo: "Cable", detalle: "3,1 m" }],
     });
     const ej = (await ok(U.lnfA, "GET", "/metrologia/motores/LCPNF-IT01/ejemplo")).data;
-    const cal = await ok(U.lnfA, "POST", "/metrologia/calibraciones", { otInstrumentoId: it.data.id, procesoCodigo: "LCPNF-IT01", fecha: hoy(), intervaloMeses: 24, motor: { datos: ej.datos, opciones: {} } });
+    // B-028 (frente c2): sin patrón del maestro la calibración no se envía a firma.
+    const pf = (await ok(U.lnfA, "GET", `/metrologia/patrones?fecha=${hoy()}`)).data
+      .find((x) => x.magnitud === "fuerza" && x.estado === "vigente" && x.activo !== false && x.tipo !== "auxiliar" && x.rango_min == null && x.serie !== serieT);
+    afirmar(pf, "no hay un patrón de fuerza vigente en el maestro");
+    const cal = await ok(U.lnfA, "POST", "/metrologia/calibraciones", { otInstrumentoId: it.data.id, procesoCodigo: "LCPNF-IT01", fecha: hoy(), intervaloMeses: 24, motor: { datos: ej.datos, opciones: {} }, patronIds: [pf.id] });
     const html = (await ok(U.lnfA, "GET", `/metrologia/calibraciones/${cal.data.id}/html`)).data.html;
     afirmar(/CALIBRATION CERTIFICATE/i.test(html) && html.includes("Página 6 de 6") && html.includes("MGC plus") && html.includes("Anexo"), "no es el certificado bilingüe del LNF");
     await ok(U.lnfA, "POST", `/metrologia/calibraciones/${cal.data.id}/enviar`);

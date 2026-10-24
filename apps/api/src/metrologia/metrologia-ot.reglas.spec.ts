@@ -134,6 +134,19 @@ describe("Cierre de una OT de calibración (P9.1, P9.2)", () => {
     expect(motivoCierreTecnico("en_analisis", [item({ estado: "recibido" }), item({ id: "i2", numero: 2, estado: "no_apto" })], [entregada])).toBeNull();
     expect(motivoCierreTecnico("finalizada", [item({ estado: "recibido" })], [entregada])).toMatch(/ya está finalizada/);
   });
+
+  it("B-004: el no calibrable ya devuelto sigue resuelto con su informe técnico o servicio externo validado", () => {
+    const calibrado = item({ estado: "devuelto", calibrable: true });
+    const noCal2 = item({ id: "i2", numero: 2, estado: "devuelto", calibrable: false });
+    const noCal3 = item({ id: "i3", numero: 3, estado: "no_apto", calibrable: false });
+    const resueltos = { exige: true, resueltos: new Set(["i2", "i3"]) };
+    expect(motivoCierreTecnico("en_analisis", [calibrado, noCal2, noCal3], [entregada], resueltos)).toBeNull();
+    expect(motivoCierreTecnico("en_analisis", [calibrado, noCal2, noCal3], [entregada])).toBeNull();
+    // Sin su documento, el devuelto no calibrable se reclama como no calibrable, no como «falta certificado».
+    expect(motivoCierreTecnico("en_analisis", [calibrado, noCal2], [entregada], { exige: true, resueltos: new Set() })).toMatch(/no calibrable: ítem 2/);
+    // Un calibrable devuelto sigue exigiendo su certificado emitido.
+    expect(motivoCierreTecnico("en_analisis", [item({ estado: "devuelto", calibrable: true })], [])).toMatch(/Faltan certificados emitidos: ítem 1/);
+  });
 });
 
 describe("Barra de 6 pasos de la ficha (maqueta de Metrología)", () => {

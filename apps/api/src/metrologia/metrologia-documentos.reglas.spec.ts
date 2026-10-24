@@ -77,3 +77,24 @@ describe("Cierre técnico con el parámetro «el no calibrable exige su document
     expect(noAptoResuelto({ estado: "en_firma" }, { estado: "enviado" })).toBe(false);
   });
 });
+
+describe("B-081 · texto del error de correo", () => {
+  const { textoErrorCorreo } = require("./ficha.datos");
+  it("sin «para este tenant» ni doble punto", () => {
+    expect(textoErrorCorreo("No hay configuración de correo para este tenant.")).toBe("No hay configuración de correo en esta instalación (Administración › Correo)");
+    expect(`No se pudo enviar el correo: ${textoErrorCorreo("Conexión rechazada.")}.`).toBe("No se pudo enviar el correo: Conexión rechazada.");
+    expect(textoErrorCorreo(null)).toBe("error del servidor de correo");
+  });
+});
+
+describe("B-029 · entrega del certificado externo validado", () => {
+  const { motivoExterno } = require("./metrologia-documentos.reglas");
+  const devuelto = { numero: 2, estado: "devuelto", otEstado: "en_analisis", calibrable: false };
+  it("se entrega una vez, validado, aunque el instrumento ya se haya devuelto o la OT esté cerrada", () => {
+    expect(motivoExterno("ENTREGAR", devuelto, { estado: "validado" })).toBeNull();
+    expect(motivoExterno("ENTREGAR", { ...devuelto, otEstado: "cerrada" }, { estado: "validado" })).toBeNull();
+    expect(motivoExterno("ENTREGAR", devuelto, { estado: "validado", entregadoAt: "2026-10-23" })).toMatch(/ya está registrada/);
+    expect(motivoExterno("ENTREGAR", devuelto, { estado: "enviado" })).toMatch(/validado/);
+    expect(motivoExterno("ENTREGAR", devuelto, null)).toMatch(/validado/);
+  });
+});

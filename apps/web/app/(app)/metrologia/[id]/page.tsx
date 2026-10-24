@@ -314,6 +314,10 @@ export default function FichaCalibracionPage() {
               ))}
             </div>
             {circ?.errorMatriz && <div className="alert warn">{circ.errorMatriz}</div>}
+            {/* B-028: sin patrón del maestro no se envía a firma (el certificado imprime su trazabilidad). */}
+            {c.estado === "borrador" && Array.isArray(c.patrones) && c.patrones.length === 0 && (
+              <div className="alert warn" role="status">Esta calibración no tiene patrón: elija al menos un patrón vigente del maestro en la hoja de control («Editar borrador») antes de enviarla a firma.</div>
+            )}
             <div className={s.acciones}>
               {a.includes("ENVIAR") && <button className="btn primary" disabled={ocupado} onClick={enviar}>Firmar y enviar → Revisión Jefe Lab.</button>}
               {a.includes("FIRMAR") && <button className="btn primary" disabled={ocupado} onClick={() => firmar(false)}>Aprobar revisión técnica → Firma</button>}
@@ -324,6 +328,10 @@ export default function FichaCalibracionPage() {
                 <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("correo")}>Enviar por correo…</button>
               )}
               {a.includes("REEMITIR") && <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("reemitir")}>Reemitir…</button>}
+              {/* B-082: la reemisión sigue disponible tras la entrega, pero solo para quien firma y emite. */}
+              {c.estado === "emitida" && !a.includes("REEMITIR") && (
+                <span className={s.espera}>La reemisión de un certificado emitido (también después de entregarlo) la hace quien puede firmar y emitir: el Jefe del laboratorio.</span>
+              )}
               {/* EP-04 P6.3 (frente r4d): trabajo no conforme con la calibración precargada. */}
               {devuelta && puede("nc.crear") && (
                 <Link className="btn outline" href={`/no-conformidades?nueva=1&clase=TNC&calibracionId=${c.id}&titulo=${encodeURIComponent(`TNC · calibración ${c.codigo}`)}` as any}>
@@ -402,7 +410,7 @@ export default function FichaCalibracionPage() {
           <table className="data">
             <thead><tr><th>Fecha</th><th>Usuario</th><th>Evento</th><th>Comentario</th></tr></thead>
             <tbody>{c.eventos.map((e: any, i: number) => (
-              <tr key={i}><td style={{ whiteSpace: "nowrap" }}>{fechaHora(e.created_at)}</td><td>{e.usuario ?? "—"}</td><td>{ACCION_EVENTO[e.accion] ?? e.accion}</td><td>{e.comentario ?? ""}</td></tr>
+              <tr key={i}><td style={{ whiteSpace: "nowrap" }}>{fechaHora(e.created_at)}</td><td>{e.usuario ?? "—"}</td><td>{e.accion === "CORREO" && /^Envío fallido|^No se pudo/.test(e.comentario ?? "") ? "Envío por correo fallido" : ACCION_EVENTO[e.accion] ?? e.accion}</td><td>{e.comentario ?? ""}</td></tr>
             ))}</tbody>
           </table>
         ) : <p className="subtitle" style={{ margin: 0 }}>Sin eventos.</p>}
@@ -420,7 +428,7 @@ export default function FichaCalibracionPage() {
           onGuardar={(motivo) => accion(dialogo, { motivo }, dialogo === "devolver" ? `${c.codigo} devuelta al metrólogo.` : "Reemisión creada.")} />
       )}
       {dialogo === "correo" && (
-        <CorreoDialogo numero={nombre} entregado={!!c.entregado_at} ocupado={ocupado} onCerrar={() => setDialogo(null)} onEnviar={async (b) => {
+        <CorreoDialogo numero={nombre} entregado={!!c.entregado_at} propuesto={c.correo_propuesto ?? null} ocupado={ocupado} onCerrar={() => setDialogo(null)} onEnviar={async (b) => {
           setOcupado(true);
           try {
             const r = await llamar("POST", `/ot/${c.ot_id}/calibraciones/${c.id}/enviar-correo`, b);
@@ -457,8 +465,9 @@ function MotivoDialogo({ titulo, texto, boton, ocupado, onCerrar, onGuardar }: {
   );
 }
 
-function CorreoDialogo({ numero, entregado, ocupado, onCerrar, onEnviar }: { numero: string; entregado: boolean; ocupado: boolean; onCerrar: () => void; onEnviar: (b: any) => void }) {
-  const [para, setPara] = useState("");
+function CorreoDialogo({ numero, entregado, ocupado, onCerrar, onEnviar, propuesto }: { numero: string; entregado: boolean; ocupado: boolean; onCerrar: () => void; onEnviar: (b: any) => void; propuesto?: string | null }) {
+  // B-081: propone el correo del contacto del cliente de la OT (se puede cambiar).
+  const [para, setPara] = useState(propuesto ?? "");
   const [mensaje, setMensaje] = useState("");
   const lista = para.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
   const malos = lista.filter((x) => !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x));

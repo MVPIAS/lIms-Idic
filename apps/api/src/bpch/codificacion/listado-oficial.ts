@@ -8,6 +8,7 @@
  * exportación a Excel (CSV con BOM y punto y coma, como el resto del LIMS).
  */
 import { escapeHtml } from "../../plantilla-render/html.util";
+import { libroXlsx } from "../../common/xlsx-escritura";
 
 export const TIPOS_LISTADO = ["EXPLOSIVOS", "SUSTANCIAS_QUIMICAS", "EN_RECESO"] as const;
 export type TipoListado = (typeof TIPOS_LISTADO)[number];
@@ -140,7 +141,23 @@ export function htmlListado(secciones: SeccionFabricante[], tipo: TipoListado, f
   return partes.join("\n");
 }
 
-/** Excel: CSV con BOM y punto y coma (Excel en español abre las columnas). */
+/** Filas del listado para Excel: cabecera y una fila por producto (B-077). */
+export function filasListado(secciones: SeccionFabricante[]): (string | number | null)[][] {
+  const filas: (string | number | null)[][] = [["Fabricante", "RUT", "Grupo", "Familia", "Código asignado", "Div. NU", "Nº NU", "EQ.DIN 60 %", "PTN/PIN", "Producto", "Estado"]];
+  for (const s of secciones)
+    for (const g of s.grupos)
+      for (const f of g.familias)
+        for (const p of f.productos)
+          filas.push([s.fabricante, s.rut, g.grupo, f.familia, p.cnc, p.claseDivisionUn, p.numeroUn, p.eqDin60 ?? null, p.ptnPin, p.producto, letraEstado(p.estado)]);
+  return filas;
+}
+
+/** Excel (B-077): libro .xlsx con el listado (la EQ.DIN 60 % va como número). */
+export function xlsxListado(secciones: SeccionFabricante[]): Buffer {
+  return libroXlsx([{ nombre: "Listado oficial", filas: filasListado(secciones) }]);
+}
+
+/** CSV con BOM y punto y coma (se conserva para quien lo use; la pantalla descarga .xlsx). */
 export function csvListado(secciones: SeccionFabricante[]): string {
   const c = (v: unknown) => {
     const t = v == null ? "" : String(v);
