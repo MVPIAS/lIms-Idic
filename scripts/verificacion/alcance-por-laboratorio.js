@@ -330,6 +330,11 @@ const LISTADOS = [
   { n: "Facturas (fase 1)", r: "/facturas?limit=200", p: "factura.ver", t: "factura", regla: "unidad", fase1: true, href: "/facturas" },
   // Frente lp26: listas de precio (dato maestro del instituto, común a todos los laboratorios).
   { n: "Listas de precio (lp26)", r: "/listas-precio?limit=50", p: "cotizacion.ver", regla: "comun", href: "/listas-precio" },
+  // f5: tarifas del Sistema Comercial antiguo (tablas comunes; se mantienen con catalogo.gestionar global).
+  { n: "Tarifas HH (f5)", r: "/tarifas/hh?limit=50", p: "tarifa.ver", regla: "comun", href: "/catalogo/tarifas-hh" },
+  { n: "Perfiles HH (f5)", r: "/tarifas/hh-perfiles?limit=50", p: "tarifa.ver", regla: "comun", href: "/catalogo/perfiles-hh" },
+  { n: "Tarifas HM (f5)", r: "/tarifas/hm?limit=50", p: "tarifa.ver", regla: "comun", href: "/catalogo/tarifas-hm" },
+  { n: "Servicios primarios (f5)", r: "/tarifas/servicios-primarios?limit=50", p: "tarifa.ver", regla: "comun", href: "/catalogo/servicios-primarios" },
 ];
 
 function filasDe(j) {
@@ -599,6 +604,8 @@ async function main() {
     const ens = propio(D.ensayos, esperado(u, "catalogo.gestionar").unidades);
     if (ens) await intentar(u, "PATCH", `/cat/ensayos/${ens.id}`, { precio: Number(ens.precio) || 0 }, NO_403, `control: precio de ensayo propio (${ens.u}, mismo valor)`);
     await intentar("demo.lqc.jefe", "POST", "/cat/gran-grupos", { codigo: "ZZ", nombre: "Prueba de alcance" }, [403], "alta en tabla común del catálogo");
+    // f5: las tarifas son comunes: una jefatura (catalogo.gestionar acotado) no las da de alta.
+    await intentar("demo.lqc.jefe", "POST", "/tarifas/hh", { categoria: "ZZ", valorHoraClp: 1, vigenteDesde: "2026-01-01" }, [403], "alta de tarifa HH (tabla común)");
   }
   // r2b: editar una E.T. de otro laboratorio (et.gestionar acotado: jefaturas) y recibir un muestreo ajeno.
   for (const u of ["demo.lqc.jefe", "demo.squ.jefe"]) {

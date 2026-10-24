@@ -17,6 +17,7 @@ import { FlujoModule } from "./flujo/flujo.module";
 import { HealthModule } from "./health/health.module";
 import { PrismaModule } from "./common/prisma.module";
 import { ComercialModule } from "./comercial/comercial.module";
+import { TarifasModule } from "./tarifas/tarifas.module";
 import { FacturacionModule } from "./facturacion/facturacion.module";
 import { AdquisicionesModule } from "./adquisiciones/adquisiciones.module";
 import { LaboratorioModule } from "./laboratorio/laboratorio.module";
@@ -107,6 +108,7 @@ function prettyTransport() {
     OtModule,
     FlujoModule,
     ComercialModule,
+    TarifasModule,
     FacturacionModule,
     AdquisicionesModule,
     LaboratorioModule,

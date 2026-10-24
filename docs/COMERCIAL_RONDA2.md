@@ -252,3 +252,29 @@ Todos bajo `/api`, con JWT. Permisos entre paréntesis.
   `SET lims.migracion = 'on'`.
 - Lo guardado en UF, EUR… se muestra tal cual («UF 2,5»), sin convertir, y es de
   solo lectura; una lista de precios histórica no da precios a la cotización.
+
+## 8. Tarifas HH, HM y servicios primarios (frente f5, Mapa de migración v2.1)
+
+Las tarifas del Sistema Comercial antiguo tenían tabla en `schema.sql` pero no
+pantalla. Se mantienen en **Tablas maestras › Tarifas** con el CRUD de las demás
+maestras (listar, buscar, crear, editar, activar o desactivar; sin borrado
+físico: `DELETE` responde 409).
+
+| Pantalla | Tabla (origen) | API |
+|---|---|---|
+| `/catalogo/tarifas-hh` · horas hombre por categoría | `hora_hombre_catalogo` (COM.hrshombre) | `/tarifas/hh` |
+| `/catalogo/perfiles-hh` · ajuste % civil / militar | `hora_hombre_perfil` (COM.phh_hh) | `/tarifas/hh-perfiles` |
+| `/catalogo/tarifas-hm` · hora máquina por equipo (EQ###) | `hora_maquina_catalogo` (COM.hrsmaquina) | `/tarifas/hm` |
+| `/catalogo/servicios-primarios` | `lista_precio_servicio_primario` (COM.lps_primaria) | `/tarifas/servicios-primarios` |
+
+- Lectura: `tarifa.ver` (Comercial, Planificación, Finanzas, Calidad, jefaturas;
+  Dirección, Administración y Lector por la cascada de `align_cierre_permisos.sql`).
+  El rol CLIENTE no la tiene.
+- Escritura: `catalogo.gestionar` con alcance global (Calidad, Administración). Una
+  jefatura de laboratorio recibe 403: son tablas comunes (`AlcanceCatalogoGuard`).
+- Valores en CLP con vigencia (desde ≤ hasta). Un cambio de valor = una fila nueva
+  con otra fecha de inicio.
+- **Ningún cálculo las lee todavía.** El Formulario de costeo (FORM05) recibe a
+  mano el valor de la hora hombre y de la hora máquina, y la ficha de costos usa
+  `cat_ensayo.precio` y la lista de precios vigente. Proponer el valor de estas
+  tablas en el FORM05 queda pendiente de que el IDIC confirme las tarifas.

@@ -75,3 +75,78 @@ ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
 
 UPDATE parametro_sistema SET activo = FALSE
  WHERE categoria = 'moneda' AND codigo NOT IN ('CLP', 'USD') AND activo IS NOT FALSE;
+
+-- -----------------------------------------------------------------------------
+-- 2 · Tarifas de horas hombre (HH), horas máquina (HM) y servicios primarios.
+--   Las tablas existían (schema.sql, «tablas rescatadas»: COM.hrshombre,
+--   COM.phh_hh, COM.hrsmaquina y COM.lps_primaria) pero sin pantalla. Se
+--   mantienen en Tablas maestras › Tarifas (apps/api/src/tarifas) con el CRUD de
+--   las demás maestras: listar, buscar, crear, editar y activar o desactivar,
+--   sin borrado físico. Ningún cálculo las lee todavía: el costeo (FORM05) y la
+--   ficha de costos usan sus propios valores (docs/COMERCIAL_RONDA2.md § 8).
+--   · Lectura: permiso nuevo tarifa.ver (Comercial, Planificación, Finanzas,
+--     Calidad y jefaturas; Dirección, Administración y Lector por la cascada de
+--     align_cierre_permisos.sql, que reparte todo permiso *.ver).
+--   · Escritura: catalogo.gestionar con alcance global (AlcanceCatalogoGuard).
+-- -----------------------------------------------------------------------------
+ALTER TABLE hora_hombre_catalogo           ADD COLUMN IF NOT EXISTS activo     BOOLEAN     NOT NULL DEFAULT TRUE;
+ALTER TABLE hora_hombre_catalogo           ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE hora_hombre_catalogo           ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE hora_hombre_perfil             ADD COLUMN IF NOT EXISTS activo     BOOLEAN     NOT NULL DEFAULT TRUE;
+ALTER TABLE hora_hombre_perfil             ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE hora_hombre_perfil             ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE hora_maquina_catalogo          ADD COLUMN IF NOT EXISTS activo     BOOLEAN     NOT NULL DEFAULT TRUE;
+ALTER TABLE hora_maquina_catalogo          ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE hora_maquina_catalogo          ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE lista_precio_servicio_primario ADD COLUMN IF NOT EXISTS activo     BOOLEAN     NOT NULL DEFAULT TRUE;
+ALTER TABLE lista_precio_servicio_primario ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE lista_precio_servicio_primario ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+
+-- HM: el código del equipo en el Sistema Comercial (EQ###). La tarifa se puede
+-- cargar antes de que el equipo exista en «Equipos y calibración» (equipo_id).
+ALTER TABLE hora_maquina_catalogo ADD COLUMN IF NOT EXISTS codigo VARCHAR(20);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hora_maquina_codigo_vigencia
+  ON hora_maquina_catalogo (tenant_id, codigo, vigente_desde) WHERE codigo IS NOT NULL;
+
+-- Un perfil (civil, militar) una sola vez por instalación.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_hora_hombre_perfil
+  ON hora_hombre_perfil (tenant_id, lower(perfil)) WHERE perfil IS NOT NULL;
+
+-- Valores ≥ 0 y vigencia coherente (los CHECK son nuevos: las tablas estaban vacías;
+-- NOT VALID por si una base ya tuviera filas cargadas a mano).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_hh_valor') THEN
+    ALTER TABLE hora_hombre_catalogo ADD CONSTRAINT ck_hh_valor
+      CHECK (valor_hora_clp >= 0 AND (vigente_hasta IS NULL OR vigente_hasta >= vigente_desde)) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_hm_valor') THEN
+    ALTER TABLE hora_maquina_catalogo ADD CONSTRAINT ck_hm_valor
+      CHECK (valor_hora_clp >= 0 AND (vigente_hasta IS NULL OR vigente_hasta >= vigente_desde)) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_lps_primaria_valor') THEN
+    ALTER TABLE lista_precio_servicio_primario ADD CONSTRAINT ck_lps_primaria_valor
+      CHECK ((precio_clp IS NULL OR precio_clp >= 0) AND (vigente_hasta IS NULL OR vigente_hasta >= vigente_desde)) NOT VALID;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_hh_perfil_ajuste') THEN
+    ALTER TABLE hora_hombre_perfil ADD CONSTRAINT ck_hh_perfil_ajuste
+      CHECK (ajuste_pct IS NULL OR ajuste_pct BETWEEN -100 AND 1000) NOT VALID;
+  END IF;
+END $$;
+
+COMMENT ON TABLE hora_hombre_catalogo IS 'Tarifa de la hora hombre por categoría (A–E), en CLP y con vigencia (COM.hrshombre). Tablas maestras › Tarifas HH.';
+COMMENT ON TABLE hora_hombre_perfil IS 'Ajuste % de la hora hombre por perfil (civil, militar) (COM.phh_hh). Tablas maestras › Perfiles HH.';
+COMMENT ON TABLE hora_maquina_catalogo IS 'Tarifa de la hora máquina por equipo (EQ###), en CLP y con vigencia (COM.hrsmaquina). Tablas maestras › Tarifas HM.';
+COMMENT ON TABLE lista_precio_servicio_primario IS 'Precio de los servicios primarios por código y vigencia, en CLP (COM.lps_primaria). Tablas maestras › Servicios primarios.';
+
+INSERT INTO permiso (codigo, modulo, accion, descripcion) VALUES
+  ('tarifa.ver', 'tarifa', 'ver',
+   'Ver las tarifas de horas hombre, horas máquina y servicios primarios (Tablas maestras › Tarifas). Se mantienen con catalogo.gestionar de alcance global.')
+ON CONFLICT (codigo) DO NOTHING;
+
+INSERT INTO rol_permiso (rol_id, permiso_id)
+SELECT r.id, p.id
+  FROM (VALUES ('COMERCIAL'), ('PLANIFICACION'), ('FINANZAS'), ('CALIDAD'), ('JEFE_LAB'), ('SUPERADMIN')) AS m(rol)
+  JOIN rol r     ON r.codigo = m.rol
+  JOIN permiso p ON p.codigo = 'tarifa.ver'
+ON CONFLICT DO NOTHING;

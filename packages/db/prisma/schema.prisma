@@ -692,6 +692,8 @@ model CentroCosto {
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt DateTime? @map("deleted_at") @db.Timestamptz
 
+  serviciosPrimarios ListaPrecioServicioPrimario[]
+
   @@unique([tenantId, codigo])
   @@map("centro_costo")
 }
@@ -1850,4 +1852,78 @@ model CorrelativoMuestra {
   updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
 
   @@map("correlativo_muestra")
+}
+
+// ---------------------------------------------------------------------------
+// Tarifas del Sistema Comercial antiguo (frente f5 · align_f5_correcciones.sql).
+// Tablas maestras › Tarifas: listar, buscar, crear, editar y activar o
+// desactivar (sin borrado físico). Valores en CLP con vigencia.
+// ---------------------------------------------------------------------------
+
+/// Tarifa de la hora hombre por categoría (COM.hrshombre).
+model HoraHombreCatalogo {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  categoria    String    @db.VarChar(20)
+  descripcion  String?   @db.VarChar(200)
+  valorHoraClp Decimal   @map("valor_hora_clp") @db.Decimal(14, 2)
+  vigenteDesde DateTime  @map("vigente_desde") @db.Date
+  vigenteHasta DateTime? @map("vigente_hasta") @db.Date
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId, categoria, vigenteDesde])
+  @@map("hora_hombre_catalogo")
+}
+
+/// Ajuste % de la hora hombre por perfil: civil, militar (COM.phh_hh).
+model HoraHombrePerfil {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  perfil      String?  @db.VarChar(40)
+  ajustePct   Decimal? @map("ajuste_pct") @db.Decimal(5, 2)
+  descripcion String?
+  activo      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("hora_hombre_perfil")
+}
+
+/// Tarifa de la hora máquina por equipo, código EQ### (COM.hrsmaquina).
+model HoraMaquinaCatalogo {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  codigo       String?   @db.VarChar(20)
+  equipoId     String?   @map("equipo_id") @db.Uuid
+  descripcion  String?   @db.VarChar(200)
+  valorHoraClp Decimal   @map("valor_hora_clp") @db.Decimal(14, 2)
+  vigenteDesde DateTime  @map("vigente_desde") @db.Date
+  vigenteHasta DateTime? @map("vigente_hasta") @db.Date
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("hora_maquina_catalogo")
+}
+
+/// Precio de los servicios primarios (COM.lps_primaria).
+model ListaPrecioServicioPrimario {
+  id            String       @id @default(uuid()) @db.Uuid
+  tenantId      String       @map("tenant_id") @db.Uuid
+  codigo        String       @db.VarChar(40)
+  descripcion   String?
+  precioClp     Decimal?     @map("precio_clp") @db.Decimal(14, 2)
+  centroCostoId String?      @map("centro_costo_id") @db.Uuid
+  vigenteDesde  DateTime     @map("vigente_desde") @db.Date
+  vigenteHasta  DateTime?    @map("vigente_hasta") @db.Date
+  activo        Boolean      @default(true)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt     DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  centroCosto CentroCosto? @relation(fields: [centroCostoId], references: [id])
+
+  @@unique([tenantId, codigo, vigenteDesde])
+  @@map("lista_precio_servicio_primario")
 }
