@@ -117,6 +117,7 @@ export const TEXTO_EVENTO: Record<string, string> = {
   discrepancia_oc: "Aceptó con una O/C distinta de la cotización (discrepancia)",
   oc_conforme: "Comparó la O/C con la cotización: coincide",
   orden_cliente_anulada: "Anuló la orden del cliente",
+  aceptada: "Registró la aceptación del cliente y generó la OT",
 };
 
 export const TEXTO_MEDIO: Record<string, string> = {

@@ -8,6 +8,7 @@ import { RequierePermiso } from "../../auth/permisos.decorator";
 import { PrismaService } from "../../common/prisma.service";
 import { AlcanceService } from "../../rbac/alcance.service";
 import { sino, valoresCategoria } from "../../common/parametros-r4d";
+import { ramaDeUnidad } from "../../bpch/cabecera/cabecera-ot";
 import { RecepcionDcoController } from "./recepcion-dco";
 import {
   CARRILES_DSA,
@@ -168,7 +169,7 @@ export class EncargoService {
       : [];
     const listas = await this.prisma.$queryRawUnsafe<{ categoria: string; codigo: string; etiqueta: string }[]>(
       `SELECT categoria, codigo, etiqueta FROM parametro_sistema
-        WHERE tenant_id = $1::uuid AND activo AND categoria IN ('tipo_trabajo','nivel_tecnologico','carril_dsa','lugar_ejecucion','clasificacion_vehiculo')
+        WHERE tenant_id = $1::uuid AND activo AND categoria IN ('tipo_trabajo','nivel_tecnologico','carril_dsa','lugar_ejecucion','clasificacion_vehiculo','forma_pago')
         ORDER BY categoria, orden`,
       ot.tenantId,
     );
@@ -177,7 +178,7 @@ export class EncargoService {
     return {
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, origen: ot.origen, laboratorio: ot.unidadCodigo, fechaCompromiso: ot.fechaCompromiso },
       tipoTrabajo: ot.tipoTrabajo,
-      documentoPropuesto: documentoPropuesto(ot.tipoTrabajo),
+      documentoPropuesto: documentoPropuesto(ot.tipoTrabajo, await ramaDeUnidad(this.prisma, ot.unidadId)),
       encargo: e ? { ...e, laboratoriosDetalle: labs } : null,
       listas: {
         tipoTrabajo: porCat("tipo_trabajo"),
@@ -185,6 +186,7 @@ export class EncargoService {
         carrilDsa: porCat("carril_dsa"),
         lugarEjecucion: porCat("lugar_ejecucion"),
         clasificacionVehiculo: porCat("clasificacion_vehiculo"),
+        formaPago: porCat("forma_pago"),
       },
       puede: {
         editar: !cerrada && this.puede(req, "ot.crear"),
@@ -315,6 +317,16 @@ export async function heredarDeCotizacion(db: any, tenantId: string, otId: strin
        descripcion_tecnica = EXCLUDED.descripcion_tecnica, valor_inicial = EXCLUDED.valor_inicial, paridad = EXCLUDED.paridad`,
     otId,
     tenantId,
+    cotizacionId,
+  );
+  // B-038: el solicitante de la cotización (contacto elegido o nombre escrito) pasa a la OT y de ahí al informe.
+  await db.$executeRawUnsafe(
+    `UPDATE orden_trabajo o
+        SET solicitante = LEFT(COALESCE(NULLIF(trim(ct.nombre || COALESCE(', ' || NULLIF(ct.cargo, ''), '')), ''), NULLIF(trim(c.solicitante_nombre), '')), 200)
+       FROM cotizacion c LEFT JOIN contacto ct ON ct.id = c.solicitante_contacto_id
+      WHERE o.id = $1::uuid AND c.id = $2::uuid AND COALESCE(o.solicitante, '') = ''
+        AND COALESCE(ct.nombre, c.solicitante_nombre, '') <> ''`,
+    otId,
     cotizacionId,
   );
 }

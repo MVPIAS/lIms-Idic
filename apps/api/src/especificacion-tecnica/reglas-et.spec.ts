@@ -133,7 +133,10 @@ describe("E.T. · desglose producto → componentes e inspecciones (EP-03 1.3)",
     expect(d.componentes.map((c) => [c.nombre, c.metodoIds.length])).toEqual([["Planta", 2], ["Capellada", 1]]);
     expect(d.producto.metodoIds).toEqual([M2]);
     expect(d.inspecciones.metodoIds).toEqual([M1]);
-    expect(d.sinEnsayo.map((x) => x.punto)).toEqual(["6"]);
+    // B-033: la inspección sin ensayo forma el checklist; ya no queda como «sin ensayo».
+    expect(d.inspecciones.puntos.map((x) => x.punto)).toEqual(["5", "6"]);
+    expect(d.inspecciones.sinEnsayo.map((x) => x.punto)).toEqual(["6"]);
+    expect(d.sinEnsayo).toEqual([]);
   });
   it("códigos de submuestra correlativos", () => {
     expect(codigoSubmuestra("OT-1-M1", [])).toBe("OT-1-M1-C1");

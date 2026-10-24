@@ -604,6 +604,16 @@ export default function CrudTable({
     const out = { ...data };
     for (const c of listaCampos) {
       if (c.tipo === "ref" && (out[c.campo] === "" || out[c.campo] == null)) delete out[c.campo];
+      // B-035: los campos numéricos viajan como número (el formulario los guarda
+      // como texto y el Decimal de la API llega como "12345.00").
+      if ((c.tipo === "number" || c.tipo === "entero" || c.tipo === "moneda") && typeof out[c.campo] === "string") {
+        const t = out[c.campo].trim();
+        if (t === "") delete out[c.campo];
+        else {
+          const n = Number(/,\d+$/.test(t) ? t.replace(/\./g, "").replace(",", ".") : t);
+          if (Number.isFinite(n)) out[c.campo] = n;
+        }
+      }
     }
     return out;
   }

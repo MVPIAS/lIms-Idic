@@ -23,6 +23,7 @@
  *      PATCH /flujo/muestras/:id/recepcion · /recepcion/… (productos, panel,
  *      Nº interno)
  */
+import MarcarTodos from "@/components/ui/MarcarTodos";
 import DistribucionMuestra from "./DistribucionMuestra";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
@@ -597,9 +598,14 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
               ))}
             </div>
           ))}
-          {panel.map((p) => (
+          {panel.map((p) => {
+            const delPanel = p.metodos.filter((m) => m.analitos && !d.lineas.some((l) => l.metodos.some((x) => x.id === m.id))).map((m) => m.id);
+            return (
             <div key={p.producto} style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
-              <div style={{ fontWeight: 600, fontSize: 12.5 }}>
+              <div style={{ fontWeight: 600, fontSize: 12.5, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <MarcarTodos marcados={delPanel.filter((id) => marcados.has(id)).length} total={delPanel.length}
+                  onMarcar={() => setMarcados((s) => new Set([...s, ...delPanel]))}
+                  onDesmarcar={() => setMarcados((s) => new Set([...s].filter((id) => !delPanel.includes(id))))} />
                 Panel de ensayos del producto {p.producto}
                 <span style={{ fontWeight: 400, color: "var(--muted)" }}>
                   {d.cotizacion ? " · marque solo lo pedido en la cotización" : " · propuestos; desmarque lo que no se pidió"}
@@ -613,7 +619,8 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                 </label>
               ))}
             </div>
-          ))}
+            );
+          })}
           {extra.length > 0 && (
             <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
               <div style={{ fontWeight: 600, fontSize: 12.5 }}>Otros métodos del catálogo</div>

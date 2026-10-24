@@ -16,6 +16,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
+import { numeroChile } from "../common/numero-chile";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -201,7 +202,7 @@ export class EncuestaService {
       b.fechaRespuesta,
       req?.user?.sub ?? null,
     );
-    return { ok: true, promedio: r.promedio, mensaje: `Encuesta de la OT ${e.otCodigo ?? ""} registrada${r.promedio !== null ? ` (promedio ${r.promedio})` : ""}.` };
+    return { ok: true, promedio: r.promedio, mensaje: `Encuesta de la OT ${e.otCodigo ?? ""} registrada${r.promedio !== null ? ` (promedio ${numeroChile(r.promedio)})` : ""}.` };
   }
 
   async sinRespuesta(req: any, id: string, motivo: string) {

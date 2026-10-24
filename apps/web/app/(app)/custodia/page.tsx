@@ -3,7 +3,7 @@
 import { URL_PERSONAS, etiquetaPersona } from "@/lib/personas";
 import { useEffect, useMemo, useState } from "react";
 import { deInputHoraChile, fechaHora, num, pct } from "@/lib/format";
-import { esNumero } from "@/lib/validate";
+import { esNumero, errorNumeroEnLinea } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import Retenciones from "./_components/Retenciones";
 
@@ -53,6 +53,8 @@ const FORM_VACIO = {
   cantidadDevuelta: "",
   guiaDespacho: "",
   medioDevolucion: "",
+  // B-034: lo que se devuelve es por defecto el excedente del lote (porción aparte).
+  porcion: "excedente",
 };
 
 export default function CustodiaPage() {
@@ -166,7 +168,7 @@ export default function CustodiaPage() {
     }
     if (f.tempCelsius !== "" && !esNumero(String(f.tempCelsius))) v.tempCelsius = "Temperatura no numérica.";
     if (f.evento === "devolucion") {
-      if (!(Number(String(f.cantidadDevuelta).replace(",", ".")) > 0)) v.cantidadDevuelta = "Indique la cantidad devuelta.";
+      if (!(Number(String(f.cantidadDevuelta).replace(",", ".")) > 0)) v.cantidadDevuelta = errorNumeroEnLinea(f.cantidadDevuelta, "numero", { positivo: true }) || "Indique la cantidad devuelta.";
       if (!String(f.guiaDespacho).trim()) v.guiaDespacho = "Indique el Nº de la guía de despacho.";
     }
     if (f.humedadPct !== "") {
@@ -174,7 +176,7 @@ export default function CustodiaPage() {
       else if (Number(f.humedadPct) < 0 || Number(f.humedadPct) > 100) v.humedadPct = "La humedad debe estar entre 0 y 100 %.";
     }
     setErrs(v);
-    if (Object.keys(v).length) return;
+    if (Object.keys(v).length) { setError("Revise los campos marcados en rojo: el traspaso no se registró."); return; }
     const payload = {
       muestraId: f.muestraId,
       evento: f.evento,
@@ -190,7 +192,7 @@ export default function CustodiaPage() {
       observaciones: f.observaciones || null,
       // Devolución de excedente (EP-03 7.2): cantidad, guía de despacho y medio.
       ...(f.evento === "devolucion"
-        ? { cantidadDevuelta: f.cantidadDevuelta === "" ? null : Number(String(f.cantidadDevuelta).replace(",", ".")), guiaDespacho: f.guiaDespacho || null, medioDevolucion: f.medioDevolucion || null }
+        ? { cantidadDevuelta: f.cantidadDevuelta === "" ? null : Number(String(f.cantidadDevuelta).replace(",", ".")), guiaDespacho: f.guiaDespacho || null, medioDevolucion: f.medioDevolucion || null, porcion: f.porcion || "excedente" }
         : {}),
     };
     try {
@@ -399,9 +401,20 @@ export default function CustodiaPage() {
             {f.evento === "devolucion" && (
               <>
                 <div className="field">
+                  <label htmlFor="cu-porcion">Qué se devuelve <span className="req">*</span></label>
+                  <select id="cu-porcion" value={f.porcion} onChange={(e) => setF({ ...f, porcion: e.target.value })}>
+                    <option value="excedente">El excedente del lote (la muestra y la contramuestra siguen en custodia)</option>
+                    <option value="muestra">La muestra completa (deja de estar en custodia)</option>
+                  </select>
+                </div>
+                <div className="field">
                   <label htmlFor="cu-cant">Cantidad devuelta <span className="req">*</span></label>
-                  <input id="cu-cant" inputMode="decimal" value={f.cantidadDevuelta} onChange={(e) => setF({ ...f, cantidadDevuelta: e.target.value })} />
-                  {errs.cantidadDevuelta && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.cantidadDevuelta}</small>}
+                  <input id="cu-cant" inputMode="decimal" value={f.cantidadDevuelta} aria-invalid={errorNumeroEnLinea(f.cantidadDevuelta, "numero", { positivo: true }) || errs.cantidadDevuelta ? true : undefined}
+                    onChange={(e) => { setF({ ...f, cantidadDevuelta: e.target.value }); setErrs((x) => ({ ...x, cantidadDevuelta: "" })); }} />
+                  {/* B-088: aviso al escribir texto o un cero, no solo al registrar. */}
+                  {(errorNumeroEnLinea(f.cantidadDevuelta, "numero", { positivo: true }) || errs.cantidadDevuelta) && (
+                    <small role="alert" style={{ color: "var(--red)", fontSize: 11 }}>{errorNumeroEnLinea(f.cantidadDevuelta, "numero", { positivo: true }) || errs.cantidadDevuelta}</small>
+                  )}
                 </div>
                 <div className="field">
                   <label htmlFor="cu-guia">Guía de despacho Nº <span className="req">*</span></label>
@@ -465,6 +478,7 @@ export default function CustodiaPage() {
             </span>
             <button className="btn primary sm">Registrar traspaso</button>
           </div>
+          {error && <div className="alert warn" role="alert" style={{ marginTop: 8, marginBottom: 0 }}>{error}</div>}
         </form>
       )}
 
@@ -535,6 +549,7 @@ export default function CustodiaPage() {
 
                   <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 3, display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {c.sello_numero && <span>Sello {c.sello_numero}</span>}
+                    {c.porcion === "excedente" && <span className="pill gray">Excedente del lote</span>}
                     {c.guia_despacho && <span>Devueltas {String(Number(c.cantidad_devuelta)).replace(".", ",")} · guía {c.guia_despacho}{c.medio_devolucion ? ` · ${c.medio_devolucion}` : ""}</span>}
                     {c.temp_celsius != null && <span>{num(c.temp_celsius, 1)} °C</span>}
                     {c.humedad_pct != null && <span>{pct(c.humedad_pct)} HR</span>}

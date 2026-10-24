@@ -127,3 +127,26 @@ describe("preparación del trabajo DSA (T26)", () => {
     expect(motivoBloqueoTrabajo({ lab: "LRB", exige: true, estado: "aprobada", bloqueaCaptura: true })).toBeNull();
   });
 });
+
+describe("concordancia del documento de trabajo (B-085)", () => {
+  const { generoDocumentoTrabajo } = require("./trabajo");
+  it("Paquete técnico y Plan de trabajo son masculinos; Planilla, femenina", () => {
+    expect(generoDocumentoTrabajo("Paquete técnico").art).toBe("el");
+    expect(generoDocumentoTrabajo("Plan de inspección").lo).toBe("lo");
+    expect(generoDocumentoTrabajo("Planilla de trabajo")).toEqual({ art: "la", o: "a", lo: "la" });
+  });
+});
+
+describe("LEM · trabajo en terreno según el lugar de ejecución (B-089)", () => {
+  const { conTerrenoPropuesto, terrenoPorLugar } = require("./trabajo");
+  it("fuera del IDIC se propone en terreno", () => {
+    expect(terrenoPorLugar("UNIDAD_MILITAR")).toBe(true);
+    expect(terrenoPorLugar("IDIC")).toBe(false);
+    expect(terrenoPorLugar(null)).toBe(false);
+    expect(conTerrenoPropuesto("LEM", {}, "UNIDAD_MILITAR")).toEqual({ terreno: true });
+  });
+  it("lo marcado por el usuario manda; otros laboratorios no cambian", () => {
+    expect(conTerrenoPropuesto("LEM", { terreno: false }, "UNIDAD_MILITAR")).toEqual({ terreno: false });
+    expect(conTerrenoPropuesto("LRB", {}, "UNIDAD_MILITAR")).toEqual({});
+  });
+});

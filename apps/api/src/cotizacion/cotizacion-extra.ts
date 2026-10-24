@@ -37,8 +37,14 @@ const CAMPOS: Record<keyof DatosSolicitud, [string, string]> = {
  * Referencia de la cotización a partir de la solicitud (EP-00 1.1): «OF Nº …»
  * si llegó por oficio; «Correo de fecha dd-mm-aaaa» si llegó por correo.
  */
+export function numeroOficioLimpio(numero: string | null | undefined): string {
+  // B-086: «OF-PRUEBA-0001» daba «OF Nº -PRUEBA-0001». Se quita el prefijo con
+  // cualquier separador (espacio, punto, guion, dos puntos).
+  return String(numero ?? "").trim().replace(/^(of(icio)?(?![a-z])[\s.\-:]*)?(n[º°o](?![a-z])[\s.\-:]*)?/i, "").trim();
+}
+
 export function referenciaDesdeSolicitud(d: DatosSolicitud): string | null {
-  const n = (d.solicitudNumero ?? "").trim().replace(/^(of(icio)?\.?\s*)?(n[º°o]\.?\s*)?/i, "").trim();
+  const n = numeroOficioLimpio(d.solicitudNumero);
   if (d.solicitudMedio === "oficio" && n) return `OF Nº ${n}`;
   if (d.solicitudMedio === "correo" && d.solicitudFecha) {
     const [a, m, dd] = d.solicitudFecha.slice(0, 10).split("-");

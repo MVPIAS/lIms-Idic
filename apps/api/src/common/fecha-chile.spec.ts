@@ -37,3 +37,22 @@ describe("Fechas y horas de Chile en documentos (D02-27)", () => {
     expect(fechaChile("sin fecha")).toBe("sin fecha");
   });
 });
+
+describe("instanteFechaIngreso (B-030 · fecha de la OT en el certificado)", () => {
+  const { instanteFechaIngreso, fechaChile } = require("./fecha-chile");
+  const ahora = new Date("2026-10-23T22:30:00Z"); // 23-10 19:30 en Chile
+  it("medianoche UTC de HOY en Chile → el instante actual", () => {
+    expect(instanteFechaIngreso("2026-10-23T00:00:00.000Z", ahora)).toBe(ahora);
+  });
+  it("otro día → 12:00 de Chile de ese día; impreso sigue siendo ese día", () => {
+    const d = instanteFechaIngreso("2026-10-20", ahora);
+    expect(d.toISOString()).toBe("2026-10-20T15:00:00.000Z");
+    expect(fechaChile(d)).toBe("20-10-2026");
+  });
+  it("un instante con hora se respeta", () => {
+    expect(instanteFechaIngreso("2026-10-23T14:05:00Z", ahora).toISOString()).toBe("2026-10-23T14:05:00.000Z");
+  });
+  it("sin valor → null", () => {
+    expect(instanteFechaIngreso(undefined, ahora)).toBeNull();
+  });
+});

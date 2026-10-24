@@ -103,7 +103,7 @@ Esto explica por qué el diseño se percibe muy por debajo del prototipo: no es 
 **Severidad:** Alta — no es solo estético: comunica al usuario final (y a cualquier cliente que vea una demo) que el sistema está roto, sin indicarle qué hacer.
 
 ### Bug #4 — Filas de tabla no son accionables (ALTA)
-**Pasos:** `/clientes` → clic sobre el nombre de un cliente (p.ej. "CAP Acero · Compañía Acero del Pacífico").
+**Pasos:** `/clientes` → clic sobre el nombre de un cliente (p.ej. "Cliente Prueba Metalúrgica Aiuken S.A.").
 **Observado:** el elemento es texto plano (`generic`), no un link ni un botón — no navega a ningún detalle, no abre modal de edición, no hay forma de ver/editar un cliente existente ni de ver sus cotizaciones/OTs asociadas desde la lista. El backend sí expone `GET /api/clientes/{id}` con `plantas`, `cotizaciones`, `ots` — el dato está disponible pero no hay UI para consumirlo.
 **Impacto:** rompe el flujo comercial básico ("Instituciones y empresas que solicitan ensayos. El flujo comercial arranca aquí." dice el propio copy de la página, pero no se puede entrar al detalle de ningún cliente).
 **Severidad:** Alta.

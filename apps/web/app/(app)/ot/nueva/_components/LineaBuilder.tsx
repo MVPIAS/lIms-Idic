@@ -1,5 +1,6 @@
 "use client";
 
+import MarcarTodos from "@/components/ui/MarcarTodos";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { apiGet, asArray, clp } from "./api";
 
@@ -431,6 +432,11 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
 
           {/* Panel de métodos */}
           <h2 style={{ marginTop: 16 }}>Panel de métodos <span className="right">{metodosMarcados.length} de {panel.length} seleccionados</span></h2>
+          <div style={{ margin: "0 0 6px" }}>
+            <MarcarTodos marcados={metodosMarcados.length} total={panel.length}
+              onMarcar={() => setChecked(Object.fromEntries(panel.map((m) => [m.metodoId, true])))}
+              onDesmarcar={() => setChecked({})} />
+          </div>
           <div className="card card--table">
             <table className="data">
               <thead>

@@ -82,3 +82,17 @@ describe("Muestreo · unidades no conformes por clase", () => {
     expect(c).toEqual({ critico: 0, mayor: 1, menor: 1, pendientes: 1, sinClase: 1 });
   });
 });
+
+describe("precarga del muestreo desde el encargo (B-087)", () => {
+  const { precargaMuestreo } = require("./reglas-muestreo");
+  const e = { lugarMuestreo: "Bodega del proveedor", item: "Bota de servicio", etTexto: "ET-12 v1", proveedor: "Proveedor S.A.", cantidad: "500", unidadCantidad: "pares" };
+  it("completa lo vacío con lo que sabe la OT", () => {
+    expect(precargaMuestreo({ numeroFormulario: "N-1" }, e)).toEqual({
+      numeroFormulario: "N-1", lugar: "Bodega del proveedor", producto: "Bota de servicio · ET-12 v1", proveedor: "Proveedor S.A.", tamanoLote: 500, unidadPresentacion: "pares",
+    });
+  });
+  it("lo escrito manda", () => {
+    expect(precargaMuestreo({ proveedor: "Otro" }, e).proveedor).toBe("Otro");
+    expect(precargaMuestreo({ a: 1 }, null)).toEqual({ a: 1 });
+  });
+});

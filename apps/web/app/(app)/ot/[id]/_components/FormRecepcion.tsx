@@ -11,6 +11,7 @@
  * corrección de la recepción de una muestra. Las reglas las valida el servidor
  * (apps/api/src/flujo-real/recepcion-muestra.ts y recepcion/reglas-recepcion.ts).
  */
+import { errorNumeroEnLinea } from "@/lib/validate";
 import { useEffect, useId, useState } from "react";
 import { llamar, type Unidad } from "@/lib/laboratorio";
 import { faltantesLaboratorio, valorCampo, type CampoRecepcion, type ConfigRecepcion, type ValorCampo } from "@/lib/recepcion";
@@ -114,6 +115,8 @@ function CampoLab({ c, valor, onCambio, idBase }: { c: CampoRecepcion; valor: Va
         {ayuda}
       </div>
     );
+  // B-088: los campos numéricos avisan al escribir, no al guardar.
+  const errNum = c.tipo === "numero" || c.tipo === "entero" ? errorNumeroEnLinea(valor, c.tipo) : "";
   return (
     <div className="field">
       <label htmlFor={id}>{c.etiqueta} {req}</label>
@@ -123,8 +126,11 @@ function CampoLab({ c, valor, onCambio, idBase }: { c: CampoRecepcion; valor: Va
         inputMode={c.tipo === "numero" ? "decimal" : c.tipo === "entero" ? "numeric" : undefined}
         value={String(valor ?? "")}
         maxLength={300}
+        aria-invalid={errNum ? true : undefined}
+        aria-describedby={errNum ? `${id}-err` : undefined}
         onChange={(e) => onCambio(e.target.value)}
       />
+      {errNum && <small id={`${id}-err`} role="alert" style={{ color: "var(--red)", fontSize: 11 }}>{errNum}</small>}
       {ayuda}
     </div>
   );

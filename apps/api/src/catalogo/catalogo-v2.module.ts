@@ -217,7 +217,7 @@ export class CatEnsayoService extends BaseCrudService {
 const CatEnsayoCreate = z.object({
   codigo: z.string().min(1).max(30),
   nombre: z.string().min(1).max(240),
-  precio: z.number().nonnegative().default(0),
+  precio: z.coerce.number().nonnegative().default(0),
   familiaId: z.string().uuid().optional(),
   agrupado: z.string().max(30).optional(),
   objetivo: z.string().optional(),
@@ -240,7 +240,8 @@ export class CatMetodoService extends BaseCrudService {
     super(prisma, {
       model: "catMetodo",
       search: ["codigo", "nombre", "norma"],
-      include: { ensayo: true },
+      // B-091: el laboratorio (familia del ensayo) distingue métodos con el mismo nombre en los buscadores.
+      include: { ensayo: { include: { familia: { select: { codsucdel: true, nombre: true, laboratorio: true } } } } },
       orderBy: { codigo: "asc" },
       tenant: true,
       softDelete: true,

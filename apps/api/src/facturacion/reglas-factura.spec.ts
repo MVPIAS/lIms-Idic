@@ -111,3 +111,31 @@ describe("firma · imagen", () => {
     expect(() => validarImagenFirma("data:image/svg+xml;base64,PHN2Zz4=")).toThrow("PNG o JPEG");
   });
 });
+
+describe("descripción de la línea de factura sin código repetido (B-084)", () => {
+  const { descripcionLineaFactura } = require("./reglas-factura");
+  it("no repite el código si la descripción ya lo trae", () => {
+    expect(descripcionLineaFactura("131", "131 · Cloruro de Sodio")).toBe("131 · Cloruro de Sodio");
+    expect(descripcionLineaFactura("EN1074", "EN1074 · Equipo de pesaje")).toBe("EN1074 · Equipo de pesaje");
+  });
+  it("antepone el código si no lo trae", () => {
+    expect(descripcionLineaFactura("131", "Cloruro de Sodio")).toBe("131 · Cloruro de Sodio");
+    expect(descripcionLineaFactura("13", "131 · Cloruro")).toBe("13 · 131 · Cloruro");
+    expect(descripcionLineaFactura(null, "Servicio")).toBe("Servicio");
+  });
+});
+
+describe("borrador de la OT sin cotización (B-040)", () => {
+  const { lineasDesdeOt } = require("./reglas-factura");
+  it("una línea por ensayo con precio, cantidad = muestras", () => {
+    const l = lineasDesdeOt([
+      { codigo: "EN100", nombre: "Inspección visual", cantidad: 2, precio: 140 },
+      { codigo: "EN200", nombre: "Sin precio", cantidad: 1, precio: null },
+    ], null, "OT-2026-0005");
+    expect(l).toEqual([{ descripcion: "EN100 · Inspección visual", cantidad: 2, precioUnitario: 140, subtotal: 280 }]);
+  });
+  it("sin precios, toma el valor estimado de la OT", () => {
+    expect(lineasDesdeOt([], 280, "OT-2026-0005")).toEqual([{ descripcion: "Servicios de la OT OT-2026-0005 (valor estimado)", cantidad: 1, precioUnitario: 280, subtotal: 280 }]);
+    expect(lineasDesdeOt([], null, "OT-1")).toEqual([]);
+  });
+});

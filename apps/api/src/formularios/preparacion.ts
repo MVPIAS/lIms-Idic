@@ -18,7 +18,7 @@
  * el ensayo»).
  */
 
-export const TIPOS_CAMPO_PREP = ["texto", "numero", "entero", "fecha", "lista", "casilla", "equipo"] as const;
+export const TIPOS_CAMPO_PREP = ["texto", "numero", "entero", "fecha", "fechahora", "lista", "casilla", "equipo"] as const;
 export type TipoCampoPrep = (typeof TIPOS_CAMPO_PREP)[number];
 
 export interface CampoPrep {
@@ -93,7 +93,7 @@ export const CAMPOS_DEFECTO: Record<string, Def[]> = {
   LQA: [
     { campo: "homogeneizacion", etiqueta: "Método de homogeneización", tipo: "texto", obligatorio: true },
     { campo: "porcion_analitica", etiqueta: "Porción analítica", tipo: "numero", unidad: "g", obligatorio: true },
-    { campo: "fecha", etiqueta: "Fecha y hora", tipo: "fecha", obligatorio: true },
+    { campo: "fecha", etiqueta: "Fecha y hora", tipo: "fechahora", obligatorio: true },
   ],
   LMB: [
     { campo: "unidad_analitica", etiqueta: "Unidad analítica", tipo: "lista", obligatorio: true, opciones: op("25 g", "50 g", "100 g", "25 mL") },
@@ -101,7 +101,7 @@ export const CAMPOS_DEFECTO: Record<string, Def[]> = {
     { campo: "volumen_diluyente", etiqueta: "Volumen de diluyente", tipo: "numero", unidad: "mL" },
     { campo: "homogeneizador", etiqueta: "Homogeneizador", tipo: "equipo", bloquea: true },
     { campo: "asepsia", etiqueta: "Condiciones de asepsia verificadas", tipo: "casilla", obligatorio: true, bloquea: true },
-    { campo: "fecha", etiqueta: "Fecha y hora", tipo: "fecha", obligatorio: true },
+    { campo: "fecha", etiqueta: "Fecha y hora", tipo: "fechahora", obligatorio: true },
   ],
   LES: [
     { campo: "variante", etiqueta: "Variante", tipo: "lista", obligatorio: true, opciones: op("Con preparación", "Sin preparación") },
@@ -275,6 +275,13 @@ export function evaluarPreparacion(
           datos[c.campo] = t;
           if (c.bloquea && t.slice(0, 10) < ctx.hoy) bloqueos.push(`${c.etiqueta}: vencida el ${t.slice(0, 10).split("-").reverse().join("-")}.`);
         }
+        break;
+      }
+      case "fechahora": {
+        // Hora de pared de Chile «AAAA-MM-DDTHH:MM» (EP-02 3.1: la preparación registra fecha Y hora).
+        const t = String(v).trim().slice(0, 16);
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(t)) errores.push(`${c.etiqueta}: indique la fecha y la hora.`);
+        else datos[c.campo] = t;
         break;
       }
       case "lista":

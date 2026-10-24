@@ -7,6 +7,7 @@
  * eligieron la conservan. Solo las E.T. de los laboratorios del usuario (y las
  * generales, sin laboratorio). API: GET/POST /especificaciones-tecnicas.
  */
+import ClienteEt from "./_components/ClienteEt";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -143,28 +144,19 @@ export default function BibliotecaEtPage() {
         <DataTable columns={columnas} rows={filas} rowKey={(f) => f.id} headerSearch searchKeys={["codigo", "nombre", "origen", "laboratorios"]}
           onRowClick={(f) => router.push(`/especificaciones/${f.id}` as any)} />
       )}
-      {nueva && <NuevaEt labs={labs} conClientes={puede("cliente.ver")} onCerrar={() => setNueva(false)} onCreada={(id) => router.push(`/especificaciones/${id}` as any)} />}
+      {nueva && <NuevaEt labs={labs} onCerrar={() => setNueva(false)} onCreada={(id) => { setNueva(false); cargar(); router.push(`/especificaciones/${id}` as any); }} />}
     </div>
   );
 }
 
-function NuevaEt({ labs, conClientes, onCerrar, onCreada }: { labs: Lab[]; conClientes: boolean; onCerrar: () => void; onCreada: (id: string) => void }) {
+function NuevaEt({ labs, onCerrar, onCreada }: { labs: Lab[]; onCerrar: () => void; onCreada: (id: string) => void }) {
   const [f, setF] = useState({ codigo: "", nombre: "", origen: "cliente", mandante: "", licitacion: "", producto: "", reutilizable: true });
   const [laboratorios, setLaboratorios] = useState<string[]>([]);
   const [cliente, setCliente] = useState<{ id: string; nombre: string } | null>(null);
-  const [buscaCliente, setBuscaCliente] = useState("");
-  const [clientes, setClientes] = useState<{ id: string; razonSocial: string }[]>([]);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const set = (k: keyof typeof f, v: string | boolean) => setF((p) => ({ ...p, [k]: v }));
 
-  useEffect(() => {
-    if (!conClientes || buscaCliente.trim().length < 2) { setClientes([]); return; }
-    const t = setTimeout(() => {
-      llamar<any>("GET", `/clientes${qs({ search: buscaCliente.trim(), limit: 8 })}`).then((r) => setClientes(r.data ?? [])).catch(() => setClientes([]));
-    }, 250);
-    return () => clearTimeout(t);
-  }, [buscaCliente, conClientes]);
 
   async function crear() {
     setError("");
@@ -224,32 +216,7 @@ function NuevaEt({ labs, conClientes, onCerrar, onCreada }: { labs: Lab[]; conCl
           <label htmlFor="net-mandante">Mandante</label>
           <input id="net-mandante" value={f.mandante} maxLength={120} onChange={(e) => set("mandante", e.target.value)} placeholder="AME, DIVLOG…" />
         </div>
-        {conClientes && (
-          <div className="field">
-            <label htmlFor="net-cliente">Cliente</label>
-            {cliente ? (
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span>{cliente.nombre}</span>
-                <button type="button" className="btn outline sm" onClick={() => setCliente(null)}>Quitar</button>
-              </div>
-            ) : (
-              <>
-                <input id="net-cliente" value={buscaCliente} onChange={(e) => setBuscaCliente(e.target.value)} placeholder="Escriba al menos 2 letras" autoComplete="off" />
-                {clientes.length > 0 && (
-                  <ul style={{ listStyle: "none", margin: "4px 0 0", padding: 0, border: "1px solid var(--line)", borderRadius: 5, maxHeight: 150, overflowY: "auto" }}>
-                    {clientes.map((c) => (
-                      <li key={c.id}>
-                        <button type="button" className="btn outline sm" style={{ width: "100%", textAlign: "left", border: "none" }} onClick={() => { setCliente({ id: c.id, nombre: c.razonSocial }); setBuscaCliente(""); }}>
-                          {c.razonSocial}
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </>
-            )}
-          </div>
-        )}
+        <ClienteEt id="net-cliente" valor={cliente} onChange={setCliente} />
         <fieldset className="field" style={{ gridColumn: "1 / -1", border: "none", padding: 0, margin: 0 }}>
           <legend style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".4px", fontWeight: 600, marginBottom: 3 }}>Laboratorios donde se usa</legend>
           <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px", maxHeight: 120, overflowY: "auto" }}>

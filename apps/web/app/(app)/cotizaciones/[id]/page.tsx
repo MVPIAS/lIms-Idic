@@ -438,7 +438,12 @@ function Bitacora({ c }: { c: Circuito }) {
             <td style={{ whiteSpace: "nowrap" }}>{fechaHora(e.createdAt)}</td>
             <td>{e.usuarioNombre ?? "—"}</td>
             <td>{TEXTO_EVENTO[e.accion] ?? e.accion}{e.unidadCodigo ? ` · ${e.unidadCodigo}` : ""}{e.solicitudNumero ? ` (${e.solicitudNumero})` : ""}</td>
-            <td>{e.comentario ?? (e.detalle?.medio ? TEXTO_MEDIO[e.detalle.medio] ?? e.detalle.medio : "")}</td>
+            <td>
+              {e.comentario ?? (e.detalle?.medio ? TEXTO_MEDIO[e.detalle.medio] ?? e.detalle.medio : "")}
+              {e.detalle?.otId ? (
+                <>{e.detalle?.numero ? `${e.detalle.numero} · ` : ""}OT <Link href={`/ot/${e.detalle.otId}` as any} className="codigo" style={{ textDecoration: "underline" }}>{e.detalle.otCodigo}</Link></>
+              ) : null}
+            </td>
           </tr>
         ))}
       </tbody>

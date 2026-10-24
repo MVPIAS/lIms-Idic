@@ -10,7 +10,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { fechaDia, fechaHora } from "@/lib/format";
+import { fechaDia, fechaHora, num } from "@/lib/format";
 import { fmtG } from "@/lib/metrologia";
 import { llamar } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
@@ -224,9 +224,9 @@ export default function FichaCalibracionPage() {
             ) : <p className="subtitle" style={{ margin: 0 }}>Sin patrones declarados.</p>}
           </section>
           <section className={s.bloque}><h2>Condiciones ambientales</h2><dl className={s.datos}>
-            {dato("Temperatura", c.ambiente?.temp ? `${c.ambiente.temp} ± ${c.ambiente.tempU ?? "—"} °C` : "—")}
-            {dato("Humedad relativa", c.ambiente?.hum ? `${c.ambiente.hum} ± ${c.ambiente.humU ?? "—"} %` : "—")}
-            {dato("Presión", c.ambiente?.pres ? `${c.ambiente.pres} ± ${c.ambiente.presU ?? "—"} hPa` : "—")}
+            {dato("Temperatura", c.ambiente?.temp ? `${num(c.ambiente.temp, 1)} ± ${c.ambiente.tempU != null ? num(c.ambiente.tempU, 1) : "—"} °C` : "—")}
+            {dato("Humedad relativa", c.ambiente?.hum ? `${num(c.ambiente.hum, 1)} ± ${c.ambiente.humU != null ? num(c.ambiente.humU, 1) : "—"} %` : "—")}
+            {dato("Presión", c.ambiente?.pres ? `${num(c.ambiente.pres, 1)} ± ${c.ambiente.presU != null ? num(c.ambiente.presU, 1) : "—"} hPa` : "—")}
             {c.auxiliares?.termohigrometro && dato("Termohigrómetro", `${c.auxiliares.termohigrometro.codigo}${c.auxiliares.termohigrometro.n_certificado ? ` · cert. ${c.auxiliares.termohigrometro.n_certificado}` : ""}`)}
             {c.auxiliares?.barometro && dato("Barómetro", `${c.auxiliares.barometro.codigo}${c.auxiliares.barometro.n_certificado ? ` · cert. ${c.auxiliares.barometro.n_certificado}` : ""}`)}
           </dl>

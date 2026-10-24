@@ -275,6 +275,9 @@ export default function CapturaOtPage() {
   // Reabrir un resultado aprobado (jefatura): fila abierta y su motivo.
   const [reabriendo, setReabriendo] = useState<string | null>(null);
   const [motivoReabrir, setMotivoReabrir] = useState("");
+  // B-032: «Decidir…» pide motivo (queda en la bitácora y en el informe).
+  const [decidiendo, setDecidiendo] = useState<{ id: string; veredicto: string } | null>(null);
+  const [motivoVeredicto, setMotivoVeredicto] = useState("");
   const [omitidos, setOmitidos] = useState<{ id: string; motivo: string }[]>([]);
   const [abierto, setAbierto] = useState<string | null>(null);
   // Resultado por réplicas con el editor de corrección abierto.
@@ -461,11 +464,14 @@ export default function CapturaOtPage() {
   }
 
   async function fijarVeredicto(f: Fila, v: string) {
+    if (motivoVeredicto.trim().length < 5) { toast.error("Indique el motivo de la decisión (mínimo 5 caracteres)."); return; }
     setOcupado(f.id);
     try {
-      const r = await llamar("POST", `/resultados/${f.id}/veredicto`, { veredicto: v });
+      const r = await llamar("POST", `/resultados/${f.id}/veredicto`, { veredicto: v, motivo: motivoVeredicto.trim() });
       actualizarFila(f.id, r);
-      toast.ok("Veredicto registrado.");
+      setDecidiendo(null);
+      setMotivoVeredicto("");
+      toast.ok("Veredicto registrado con su motivo: queda en la bitácora y se anota en el informe.");
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -840,8 +846,8 @@ export default function CapturaOtPage() {
                             <td>
                               <span className={`pill ${vd.pill}`}>{vd.texto}</span>
                               {((f.estado === "capturado" && puede(f, "revisar")) || (f.estado === "revisado_n1" && puede(f, "aprobar"))) && !propio && sinVeredicto(f) && (valorTexto(f) !== "") && (
-                                <select aria-label="Veredicto del revisor" defaultValue="" style={{ marginTop: 4, display: "block" }} disabled={busy}
-                                  onChange={(e) => { if (e.target.value) fijarVeredicto(f, e.target.value); }}>
+                                <select aria-label="Veredicto del revisor" value={decidiendo?.id === f.id ? decidiendo.veredicto : ""} style={{ marginTop: 4, display: "block" }} disabled={busy}
+                                  onChange={(e) => { setDecidiendo(e.target.value ? { id: f.id, veredicto: e.target.value } : null); setMotivoVeredicto(""); }}>
                                   <option value="">Decidir…</option>
                                   <option value="cumple">Cumple</option>
                                   <option value="no_cumple">No cumple</option>
@@ -917,6 +923,25 @@ export default function CapturaOtPage() {
                                   onCerrar={() => setCorrigiendo(null)}
                                   onGuardado={() => { setCorrigiendo(null); cargar(); }}
                                 />
+                              </td>
+                            </tr>
+                          )}
+                          {decidiendo?.id === f.id && (
+                            <tr>
+                              <td colSpan={7} style={{ background: "#f5f9ff" }}>
+                                <p style={{ margin: "0 0 6px", fontSize: 12 }}>
+                                  El sistema no pudo decidir el veredicto. Su decisión (<b>{decidiendo.veredicto === "cumple" ? "Cumple" : decidiendo.veredicto === "no_cumple" ? "No cumple" : "Informativo"}</b>)
+                                  queda en la bitácora del resultado y el informe la anota como «Veredicto decidido por el revisor».
+                                </p>
+                                <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                                  <div className="field" style={{ flex: 1, minWidth: 260 }}>
+                                    <label htmlFor={`mv-${f.id}`}>Motivo de la decisión <span className="req">*</span></label>
+                                    <input id={`mv-${f.id}`} value={motivoVeredicto} onChange={(e) => setMotivoVeredicto(e.target.value)} maxLength={500} autoFocus
+                                      placeholder="Por qué se decide así (p. ej. límite de detección sobre el máximo)" />
+                                  </div>
+                                  <button className="btn outline sm" onClick={() => { setDecidiendo(null); setMotivoVeredicto(""); }}>Cancelar</button>
+                                  <button className="btn sm" disabled={busy || motivoVeredicto.trim().length < 5} onClick={() => fijarVeredicto(f, decidiendo.veredicto)}>Registrar veredicto</button>
+                                </div>
                               </td>
                             </tr>
                           )}
