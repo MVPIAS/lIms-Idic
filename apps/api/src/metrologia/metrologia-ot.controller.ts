@@ -131,11 +131,14 @@ export class MetrologiaOtService {
               o.cotizacion_id AS "cotizacionId", o.origen_trabajo AS "origen", o.created_at AS "createdAt",
               to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS "fechaOt",
               u.codigo AS laboratorio, u.nombre AS "laboratorioNombre", c.razon_social AS cliente, c.direccion AS "clienteDireccion",
-              cc.nombre AS "labSolicitante"
+              cc.nombre AS "labSolicitante", NULLIF(trim(o.solicitante), '') AS solicitante,
+              NULLIF(concat_ws(' · ', NULLIF(COALESCE(ct.telefono, c.contacto_telefono), ''), NULLIF(COALESCE(ct.email::text, c.contacto_email::text), '')), '') AS contacto
          FROM orden_trabajo o
          LEFT JOIN unidad u ON u.id = o.unidad_principal
          LEFT JOIN cliente c ON c.id = o.cliente_id
          LEFT JOIN centro_costo cc ON cc.id = o.lab_solicitante_cc_id
+         LEFT JOIN cotizacion cz ON cz.id = o.cotizacion_id
+         LEFT JOIN contacto ct ON ct.id = cz.solicitante_contacto_id
         WHERE o.id = $1::uuid AND o.tenant_id = $2::uuid`,
       id, this.tenant(req),
     );
@@ -145,7 +148,7 @@ export class MetrologiaOtService {
     return ot as {
       id: string; codigo: string; estado: string; tenantId: string; unidadId: string | null; conCobro: boolean; cotizacionId: string | null;
       origen: string | null; fechaOt: string; laboratorio: string | null; laboratorioNombre: string | null; cliente: string | null;
-      clienteDireccion: string | null; labSolicitante: string | null;
+      clienteDireccion: string | null; labSolicitante: string | null; solicitante: string | null; contacto: string | null;
     };
   }
 

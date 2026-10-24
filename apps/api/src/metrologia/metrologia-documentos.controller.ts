@@ -16,7 +16,7 @@ import { ancestroDeTipo } from "../rbac/alcance";
 import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { MetrologiaOtService, fechaEntrega } from "./metrologia-ot.controller";
-import { MEDIOS_ENTREGA_CAL, formatearNumero, siguienteCorrelativo } from "./metrologia-ot.reglas";
+import { MEDIOS_ENTREGA_CAL, formatearNumero, siguienteCorrelativo, solicitanteDeOt } from "./metrologia-ot.reglas";
 import { instrumentosDeOt } from "./metrologia-ot.datos";
 import {
   MAX_PDF_EXTERNO, motivoExterno, motivoInforme, revisarPdf, type AccionExterno, type AccionInforme, type ExternoDoc, type InformeDoc,
@@ -276,7 +276,7 @@ export class MetrologiaDocumentosService {
 <h1 class="compacta">INFORME TÉCNICO N° ${esc(inf.numero ?? "BORRADOR")}</h1>
 <p class="linea-acred"><b>Instrumento no calibrable · ${esc(ot.laboratorioNombre ?? ot.laboratorio ?? "")}</b></p>
 <table class="meta compacta"><tbody>
-${fila("Orden de trabajo", ot.codigo)}${fila("Fecha de la OT", /^\d{4}-\d{2}-\d{2}$/.test(String(ot.fechaOt ?? "")) ? String(ot.fechaOt).split("-").reverse().join("-") : ot.fechaOt)}${fila("Cliente", ot.cliente)}${fila("Solicitante", ot.labSolicitante)}
+${fila("Orden de trabajo", ot.codigo)}${fila("Fecha de la OT", /^\d{4}-\d{2}-\d{2}$/.test(String(ot.fechaOt ?? "")) ? String(ot.fechaOt).split("-").reverse().join("-") : ot.fechaOt)}${fila("Cliente", ot.cliente)}${fila("Solicitante", solicitanteDeOt(ot))}
 ${fila("Instrumento", it.descripcion)}${fila("Marca y modelo", [it.marca, it.modelo].filter(Boolean).join(" · "))}${fila("Número de serie", it.serie)}
 ${fila("Identificación especial", it.idEspecial)}${fila("Capacidad", it.capacidad)}${fila("Etiqueta de custodia", it.etiqueta)}
 ${fila("Recepción", fechaHora(it.recibidoAt))}${fila("Fecha de emisión", inf.emitido_at ? fechaHora(inf.emitido_at) : "Se fija al emitir")}

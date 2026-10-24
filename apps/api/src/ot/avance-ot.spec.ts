@@ -318,7 +318,7 @@ describe("Ruta de la OT · Metrología (EP-04: calibración ligada a la OT)", ()
   });
 
   it("sin exigir devolución (parámetro): con el certificado entregado pasa al cierre", () => {
-    const a = calcularAvance(met({ exigeDevolucion: false, instrumentos: [ins("recibido")], calibraciones: [cal("emitida", { entregadoAt: "2026-10-20" })] }));
+    const a = calcularAvance(met({ estado: "finalizada", exigeDevolucion: false, instrumentos: [ins("recibido")], calibraciones: [cal("emitida", { entregadoAt: "2026-10-20" })] }));
     expect(a.etapaActual).toBe("cierre");
     expect(a.siguiente?.texto).toBe("Cerrar la OT: todo está aprobado, oficial y entregado");
   });
@@ -341,8 +341,16 @@ describe("Ruta de la OT · Metrología (EP-04: calibración ligada a la OT)", ()
       expect(a.etapaActual).toBe("entrega");
       expect(a.siguiente?.texto).toBe("Registrar la entrega del informe técnico IT-0007");
     });
-    it("informe entregado e instrumento devuelto: Cierre «Lista para cerrar», sin «no tiene informes»", () => {
-      const a = calcularAvance(met({ instrumentos: [ins("devuelto")], documentosNoCalibrables: [it_({ entregadoAt: "2026-10-24" })] }));
+    it("D04-29 · todo entregado y devuelto pero sin cierre técnico: «Falta el cierre técnico», le toca al Jefe de Laboratorio", () => {
+      const a = calcularAvance(met({ estado: "en_analisis", instrumentos: [ins("devuelto")], documentosNoCalibrables: [it_({ entregadoAt: "2026-10-24" })] }));
+      expect(a.etapaActual).toBe("cierre");
+      expect(a.etapas.find((e) => e.clave === "cierre")?.detalle).toBe("Falta el cierre técnico");
+      expect(a.siguiente?.texto).toMatch(/^Cerrar técnicamente la OT/);
+      expect(a.siguiente?.leToca?.rol).toBe("Jefe de Laboratorio de Metrología");
+      expect(a.siguiente?.accion).toMatchObject({ pestana: "instrumentos", permisos: ["ot.asignar"] });
+    });
+    it("informe entregado, instrumento devuelto y cierre técnico (finalizada): Cierre «Lista para cerrar», sin «no tiene informes»", () => {
+      const a = calcularAvance(met({ estado: "finalizada", instrumentos: [ins("devuelto")], documentosNoCalibrables: [it_({ entregadoAt: "2026-10-24" })] }));
       expect(a.etapaActual).toBe("cierre");
       expect(a.etapas.find((e) => e.clave === "cierre")?.detalle).toBe("Lista para cerrar");
       expect(a.siguiente?.texto).toBe("Cerrar la OT: todo está aprobado, oficial y entregado");
@@ -355,11 +363,12 @@ describe("Ruta de la OT · Metrología (EP-04: calibración ligada a la OT)", ()
       const ext = it_({ tipo: "certificado_externo", numero: "EXT-9", estado: "validado" });
       expect(calcularAvance(met({ instrumentos: [ins("no_apto")], documentosNoCalibrables: [ext] })).siguiente?.texto)
         .toBe("Registrar la entrega del certificado externo EXT-9");
-      expect(calcularAvance(met({ instrumentos: [ins("devuelto")], documentosNoCalibrables: [{ ...ext, entregadoAt: "2026-10-24" }] })).siguiente?.texto)
+      expect(calcularAvance(met({ estado: "finalizada", instrumentos: [ins("devuelto")], documentosNoCalibrables: [{ ...ext, entregadoAt: "2026-10-24" }] })).siguiente?.texto)
         .toBe("Cerrar la OT: todo está aprobado, oficial y entregado");
     });
     it("mixto: certificado de calibración + informe técnico, ambos entregados y devueltos → lista para cerrar", () => {
       const a = calcularAvance(met({
+        estado: "finalizada",
         instrumentos: [ins("devuelto"), ins("devuelto", { id: "i2", numero: 2, descripcion: "Celda" })],
         calibraciones: [cal("emitida", { entregadoAt: "2026-10-20" })],
         documentosNoCalibrables: [it_({ instrumentoId: "i2", entregadoAt: "2026-10-24" })],

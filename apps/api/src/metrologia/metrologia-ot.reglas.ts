@@ -354,10 +354,25 @@ export function pasosFicha(c: { estado: string; calculada: boolean; recibido: bo
  * de la OT y de la recepción mandan (no se escriben a mano); lo demás (clase, rango
  * calibrado, contacto, lugar, desviaciones) viene del formulario.
  */
+/**
+ * D04-26 / D04-27 · Solicitante que imprimen la hoja de control y el informe técnico:
+ * el de la OT (persona que lo pidió); en una OT interna, el laboratorio solicitante.
+ */
+export function solicitanteDeOt(ot: { solicitante?: string | null; labSolicitante?: string | null }): string | null {
+  const s = String(ot.solicitante ?? "").trim();
+  if (s) return s;
+  const l = String(ot.labSolicitante ?? "").trim();
+  return l || null;
+}
+
 export function instrumentoDesdeOt(
   form: Record<string, any>,
   item: { descripcion: string; marca?: string | null; modelo?: string | null; serie?: string | null; idEspecial?: string | null; capacidad?: string | null; resolucion?: string | null; rango?: string | null; recibidoAt?: Date | string | null },
-  ot: { codigo: string; fechaOt: string | null; cliente?: string | null; clienteDireccion?: string | null; labSolicitante?: string | null },
+  ot: {
+    codigo: string; fechaOt: string | null; cliente?: string | null; clienteDireccion?: string | null; labSolicitante?: string | null;
+    /** D04-26: solicitante de la OT (heredado de la cotización) y cómo contactarlo. */
+    solicitante?: string | null; contacto?: string | null;
+  },
 ): Record<string, any> {
   const de = (v: string | null | undefined, previo: any) => (v != null && String(v).trim() !== "" ? v : previo ?? null);
   return {
@@ -374,7 +389,8 @@ export function instrumentoDesdeOt(
     fechaOt: ot.fechaOt,
     fechaRecepcion: dia(item.recibidoAt ?? null),
     cliente: de(ot.cliente, form.cliente),
-    solicitante: de(form.solicitante, ot.labSolicitante),
+    solicitante: de(form.solicitante, solicitanteDeOt(ot)),
+    contacto: de(form.contacto, ot.contacto),
     direccion: de(form.direccion, ot.clienteDireccion),
   };
 }
