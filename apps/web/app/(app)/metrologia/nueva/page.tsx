@@ -119,7 +119,15 @@ export default function NuevaCalibracionPage() {
         : item.estado === "por_recibir" ? `Primero registre la recepción del ítem ${item.numero} (OT › Instrumentos).` : `El ítem ${item.numero} no se puede calibrar (${ESTADO_INSTRUMENTO[item.estado]?.texto ?? item.estado}).`);
     setOrigen({ ot: m.ot, item });
     if (item.procesoCodigo && procesos.some((x: any) => x.codigo === item.procesoCodigo)) setProcKey(item.procesoCodigo);
-    setD({ ...vacio(), intervalo: item.intervaloMeses != null ? String(item.intervaloMeses) : "12", ident: { rango: item.rango ?? "", lugar: "instalaciones" } });
+    // D04-26: la hoja de control nace con el solicitante, el contacto y la dirección de la OT (editables).
+    const o = m.ot ?? {};
+    setD({
+      ...vacio(), intervalo: item.intervaloMeses != null ? String(item.intervaloMeses) : "12",
+      ident: {
+        rango: item.rango ?? "", lugar: "instalaciones",
+        solicitante: o.solicitante || o.labSolicitante || "", contacto: o.contacto ?? "", direccion: o.clienteDireccion ?? "",
+      },
+    });
   }
 
   async function cargarBorrador(id: string) {
@@ -203,7 +211,7 @@ export default function NuevaCalibracionPage() {
 
   function cambiarProc(code: string) {
     setProcKey(code); setOk(null); setError(""); setInicialMotor(null); setAvisosServidor([]);
-    setD(origen ? { ...vacio(), intervalo: D.intervalo, ident: { rango: D.ident.rango ?? "", lugar: D.ident.lugar ?? "instalaciones" } } : vacio());
+    setD(origen ? { ...vacio(), intervalo: D.intervalo, ident: { rango: D.ident.rango ?? "", lugar: D.ident.lugar ?? "instalaciones", solicitante: D.ident.solicitante ?? "", contacto: D.ident.contacto ?? "", direccion: D.ident.direccion ?? "" } } : vacio());
   }
   function up() { setD({ ...D }); }
 

@@ -1,7 +1,7 @@
 import { faltantesParaCerrar } from "../ot/plazos";
 import {
   calibracionVigente, correlativoDe, documentosDeCalibraciones, documentosDeMetrologia, documentosDeNoCalibrables, esEntregableNoCalibrable, etiquetaInstrumento, faltantesInstrumentos, formatearNumero, formatoValido,
-  instrumentoDesdeOt, motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion, pasosFicha, siguienteCorrelativo,
+  instrumentoDesdeOt, solicitanteDeOt, motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion, pasosFicha, siguienteCorrelativo,
   instanteChile, type CalibracionOt, type DatosRecepcion, type DocumentoNoCalibrable, type InstrumentoOt,
 } from "./metrologia-ot.reglas";
 
@@ -84,6 +84,21 @@ describe("Calibración ligada a la OT (P3.1)", () => {
       { codigo: "OT-2026-0007", fechaOt: "2026-10-19", cliente: "Cliente de prueba" },
     );
     expect(r).toMatchObject({ item: "Balanza", marca: "Sartorius", serie: "S-1", ot: "OT-2026-0007", fechaOt: "2026-10-19", fechaRecepcion: "2026-10-20", cliente: "Cliente de prueba", clase: "F1" });
+  });
+});
+
+describe("D04-26 / D04-27 · solicitante, contacto y dirección de la OT en la hoja de control y el informe técnico", () => {
+  const ot = { codigo: "OT-2026-0009", fechaOt: "2026-10-24", cliente: "Cliente de prueba", clienteDireccion: "Av. Prueba 123", solicitante: "M. R.", contacto: "+56 2 2000 0001" };
+  it("la hoja de control nace con el solicitante, el contacto y la dirección de la OT", () => {
+    expect(instrumentoDesdeOt({}, { descripcion: "Balanza" }, ot)).toMatchObject({ solicitante: "M. R.", contacto: "+56 2 2000 0001", direccion: "Av. Prueba 123" });
+  });
+  it("lo escrito en la hoja de control se respeta", () => {
+    expect(instrumentoDesdeOt({ solicitante: "Otro", contacto: "otro@x" }, { descripcion: "Balanza" }, ot)).toMatchObject({ solicitante: "Otro", contacto: "otro@x" });
+  });
+  it("OT interna: a falta de persona, el laboratorio solicitante; sin ninguno, vacío", () => {
+    expect(solicitanteDeOt({ solicitante: "M. R.", labSolicitante: "LQC" })).toBe("M. R.");
+    expect(solicitanteDeOt({ solicitante: " ", labSolicitante: "LQC" })).toBe("LQC");
+    expect(solicitanteDeOt({})).toBeNull();
   });
 });
 

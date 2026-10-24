@@ -679,7 +679,7 @@ export class BandejaService {
     const porFirmarCot = async (): Promise<ItemBandeja[]> =>
       (await q.firmaCotizaciones()) === 0 ? [] : [item("cotizaciones_por_firmar", "Cotizaciones por firmar", "Cotizaciones enviadas a su firma (Jefe del Departamento Comercial)", await q.cotizacionesPorFirmar(), "/cotizaciones?estado=abierta&firma=pendiente", "warn")];
     const encuestas = async () =>
-      item("encuestas_pendientes", "Encuestas por registrar", "OT cerradas cuya encuesta de satisfacción aún no se registra", await q.encuestasPendientes(), "/encuestas?estado=pendiente", "info");
+      item("encuestas_pendientes", "Encuestas por registrar", "OT finalizadas o cerradas cuya encuesta de satisfacción aún no se registra", await q.encuestasPendientes(), "/encuestas?estado=pendiente", "info");
 
     // Documentación del trabajo del DSA que espera la decisión de esta jefatura (EP-05 2.3, frente r2a):
     // Jefe de Lab aprueba (LRB, SVM…); en el LEM en terreno valida la Sección y aprueba el Departamento.

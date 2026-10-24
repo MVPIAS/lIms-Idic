@@ -1445,12 +1445,15 @@ export class MetrologiaController {
   private async origenOt(req: any, t: string, itemId: string) {
     const f = await prisma.$queryRawUnsafe<any[]>(
       `SELECT i.ot_id, o.codigo, o.estado, o.unidad_principal, u.codigo AS laboratorio, c.razon_social AS cliente, c.direccion AS cliente_direccion,
-              cc.nombre AS lab_solicitante,
+              cc.nombre AS lab_solicitante, NULLIF(trim(o.solicitante), '') AS solicitante,
+              NULLIF(concat_ws(' · ', NULLIF(COALESCE(ct.telefono, c.contacto_telefono), ''), NULLIF(COALESCE(ct.email::text, c.contacto_email::text), '')), '') AS contacto,
               to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha_ot
          FROM met_ot_instrumento i JOIN orden_trabajo o ON o.id = i.ot_id
          LEFT JOIN unidad u ON u.id = o.unidad_principal
          LEFT JOIN cliente c ON c.id = o.cliente_id
          LEFT JOIN centro_costo cc ON cc.id = o.lab_solicitante_cc_id
+         LEFT JOIN cotizacion cz ON cz.id = o.cotizacion_id
+         LEFT JOIN contacto ct ON ct.id = cz.solicitante_contacto_id
         WHERE i.id = $1::uuid AND i.tenant_id = $2::uuid`, itemId, t);
     if (!f.length) throw new NotFoundException("Instrumento de OT no encontrado");
     await this.alcance.exigirUnidad(req, f[0].unidad_principal, `la OT ${f[0].codigo}`, "metrologia.crear");
@@ -1460,6 +1463,7 @@ export class MetrologiaController {
       ot: {
         id: f[0].ot_id as string, codigo: f[0].codigo as string, estado: f[0].estado as string, laboratorio: f[0].laboratorio as string | null,
         fechaOt: f[0].fecha_ot as string | null, cliente: f[0].cliente, clienteDireccion: f[0].cliente_direccion, labSolicitante: f[0].lab_solicitante,
+        solicitante: f[0].solicitante as string | null, contacto: f[0].contacto as string | null,
       },
     };
   }

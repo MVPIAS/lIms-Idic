@@ -706,7 +706,20 @@ function rutaMetrologia(h: HechosOt): Ruta {
   ];
   const sinEntregar = emitidas.filter((c) => !c.entregadoAt);
   const porDevolver = exigeDevolucion ? enCustodia : [];
-  const cierre = etapaCierre(h);
+  const instr = (texto: string, rol: string, permisos: string[], personas: string[] = []): Paso => ({
+    texto, leToca: { rol, unidad: u, personas }, accion: { texto: "Ir a Instrumentos", pestana: "instrumentos", permisos },
+  });
+  // D04-29: la OT de calibración queda «Lista para cerrar» después del cierre técnico (OT finalizada),
+  // no antes; hasta entonces el siguiente paso es «Cerrar técnicamente» (Jefe de Laboratorio).
+  const cierreBase = etapaCierre(h);
+  const faltaCierreTecnico = items.length > 0 && !["finalizada", "informada", "cerrada", "anulada"].includes(h.estado);
+  const cierre =
+    faltaCierreTecnico && cierreBase.etapa.detalle === "Lista para cerrar"
+      ? {
+          etapa: { ...cierreBase.etapa, detalle: "Falta el cierre técnico" },
+          paso: instr("Cerrar técnicamente la OT: todos los instrumentos tienen su documento entregado", "Jefe de Laboratorio de Metrología", ["ot.asignar"]),
+        }
+      : cierreBase;
   const fac = etapasFactura(h);
   const cerrada = h.estado === "cerrada";
   const item = (i: InstrumentoAvance) => `ítem ${i.numero} (${i.descripcion})`;
@@ -742,9 +755,6 @@ function rutaMetrologia(h: HechosOt): Ruta {
     fac.factura,
     fac.pago,
   ];
-  const instr = (texto: string, rol: string, permisos: string[], personas: string[] = []): Paso => ({
-    texto, leToca: { rol, unidad: u, personas }, accion: { texto: "Ir a Instrumentos", pestana: "instrumentos", permisos },
-  });
   return {
     etapas,
     paso: (clave) => {

@@ -10,6 +10,9 @@
 /** La OT tiene sus documentos oficiales y entregados y nada pendiente: falta cerrarla. */
 export const SQL_OT_LISTA_PARA_CERRAR = `
   o.estado NOT IN ('cerrada','anulada')
+  -- D04-29: la OT de calibración (con instrumentos) está lista para cerrar tras su cierre técnico (finalizada).
+  AND (o.estado IN ('finalizada','informada')
+       OR NOT EXISTS (SELECT 1 FROM met_ot_instrumento i0 WHERE i0.ot_id = o.id AND i0.estado <> 'anulado'))
   AND (EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
        OR EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_id = o.id AND mc.deleted_at IS NULL AND mc.estado = 'emitida')
        -- Decisión 24-10: informe técnico emitido y certificado externo validado del no calibrable.
