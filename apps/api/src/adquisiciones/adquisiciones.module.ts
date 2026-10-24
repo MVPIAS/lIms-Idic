@@ -2,6 +2,7 @@ import { Body, Controller, Module, Post, Req, UseGuards, Injectable, BadRequestE
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
+import { zMoneda } from "../common/moneda";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
@@ -100,7 +101,7 @@ const OCCreate = z.object({
   fecha: z.coerce.date().optional(),
   // `moneda` se acepta por compatibilidad de contrato pero NO se persiste:
   // el modelo Prisma OrdenCompra no declara la columna (ver nota de divergencia).
-  moneda: z.string().max(10).optional(),
+  moneda: zMoneda.optional(),
   notas: z.string().optional(),
   detalle: z.string().optional(),
   estado: z.enum(OC_ESTADOS).default("emitida"),

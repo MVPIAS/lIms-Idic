@@ -239,3 +239,16 @@ Todos bajo `/api`, con JWT. Permisos entre paréntesis.
   el archivo se gestiona en el repositorio documental.
 - **Textos base por laboratorio:** la columna existe y se edita en Centros de costo;
   los textos reales los debe entregar cada laboratorio.
+
+## 7. Moneda: solo CLP y USD (frente f5, Mapa de migración v2.1)
+
+- Regla de la API: `apps/api/src/common/moneda.ts` (`zMoneda`), en listas de
+  precio, cotización, gastos del costeo, OT, oportunidades y órdenes de compra.
+- Lista de las pantallas: el parámetro `moneda` (Parámetros del sistema), que solo
+  admite CLP y USD y no se borra.
+- En la base, el disparador `lims_moneda_operacion()` rechaza una moneda nueva que
+  no sea CLP o USD en `lista_precio`, `cotizacion`, `ot_encargo`, `oportunidad` y
+  `orden_compra`, sin tocar las filas viejas. La carga histórica (ETL) lo salta con
+  `SET lims.migracion = 'on'`.
+- Lo guardado en UF, EUR… se muestra tal cual («UF 2,5»), sin convertir, y es de
+  solo lectura; una lista de precios histórica no da precios a la cotización.

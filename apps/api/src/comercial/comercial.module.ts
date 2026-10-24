@@ -1,4 +1,4 @@
-import { Body, Controller, Module, Post, UseGuards, Injectable } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ConflictException, Module, Post, UseGuards, Injectable } from "@nestjs/common";
 import { fichaDesdeContactoPrincipal } from "../cliente/contacto-principal";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
@@ -10,6 +10,7 @@ import { validaRut } from "../common/rut.validator";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { ListaPrecioDetalleController, ListaPrecioDetalleService } from "../lista-precio/lista-precio-detalle.controller";
+import { MSJ_MONEDA, esMonedaHistorica, esMonedaOperacion, zMoneda } from "../common/moneda";
 
 /* ===================== PROVEEDORES ===================== */
 @Injectable()
@@ -125,11 +126,44 @@ export class ListaPrecioService extends BaseCrudService {
   constructor(prisma: PrismaService) {
     super(prisma, { model: "listaPrecio", search: ["codigo", "nombre"], include: { items: true } });
   }
+
+  /**
+   * Frente f5 · una lista guardada en una moneda que ya no se usa (UF, EUR…,
+   * datos migrados) es histórica: se ve tal cual, sin convertir. Solo se puede
+   * activar o desactivar; cambiar su código, nombre o moneda se rechaza.
+   */
+  async actualizar(id: string, data: any, tenantId?: string) {
+    const actual: any = await this.detalle(id, tenantId);
+    if (esMonedaHistorica(actual.moneda)) {
+      const valor = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? ""));
+      const cambia = (["codigo", "nombre", "moneda", "vigenteDesde"] as const).filter((k) => data?.[k] !== undefined && valor(data[k]) !== valor(actual[k]));
+      if (cambia.length)
+        throw new ConflictException(
+          `La lista ${actual.codigo} está en ${actual.moneda}, una moneda histórica: es de solo lectura (solo se puede activar o desactivar). ${MSJ_MONEDA} Para precios nuevos cree una lista en CLP o USD.`,
+        );
+    } else if (data?.moneda !== undefined && data.moneda !== actual.moneda && !esMonedaOperacion(data.moneda)) {
+      throw new BadRequestException(MSJ_MONEDA);
+    } else if (data?.moneda !== undefined && data.moneda !== actual.moneda && (actual.items?.length ?? 0) > 0) {
+      // Los precios no se convierten: cambiar la moneda de una lista con ítems los falsearía.
+      throw new ConflictException(`La lista ${actual.codigo} ya tiene ítems en ${actual.moneda}: su moneda no cambia (los precios no se convierten). Cree otra lista en ${data.moneda}.`);
+    }
+    return super.actualizar(id, data, tenantId);
+  }
+
+  async eliminar(id: string, tenantId?: string) {
+    const actual: any = await this.detalle(id, tenantId);
+    if (esMonedaHistorica(actual.moneda))
+      throw new ConflictException(`La lista ${actual.codigo} está en ${actual.moneda}, una moneda histórica: no se borra (es un dato histórico). Desactívela si no debe usarse.`);
+    return super.eliminar(id, tenantId);
+  }
 }
 const ListaPrecioCreate = z.object({
   codigo: z.string().min(1).max(30),
   nombre: z.string().min(1).max(200),
-  moneda: z.enum(["CLP", "USD", "UF", "EUR"]).default("CLP"),
+  // Frente f5: solo CLP y USD (common/moneda.ts); las listas antiguas en UF quedan como históricas.
+  moneda: zMoneda.default("CLP"),
+  // AAAA-MM-DD; sin ella, la base pone hoy (antes el alta fallaba: vigente_desde es obligatoria).
+  vigenteDesde: z.preprocess((v) => (v === "" ? undefined : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD").transform((s) => new Date(`${s}T00:00:00Z`)).optional()),
   activa: z.boolean().default(true),
 });
 // Las listas de precio alimentan la cotización: se leen con `cotizacion.ver` y
@@ -143,7 +177,11 @@ const ListaPrecioCreate = z.object({
 })
 export class ListaPrecioController extends BaseCrudController {
   protected createSchema = ListaPrecioCreate;
-  protected updateSchema = ListaPrecioCreate.partial();
+  // La edición puede traer la moneda guardada de una lista histórica (UF) sin cambiarla:
+  // el servicio rechaza un CAMBIO a una moneda que no sea CLP o USD.
+  protected updateSchema = ListaPrecioCreate.partial().extend({
+    moneda: z.string().trim().max(3).transform((s) => s.toUpperCase()).optional(),
+  });
   constructor(protected svc: ListaPrecioService) { super(); }
 }
 
@@ -157,6 +195,32 @@ export class ListaPrecioItemService extends BaseCrudService {
     // ListaPrecioItem no tiene relación a `metodo`: sus líneas son de texto
     // libre (codigo/descripcion/tipo), no apuntan al catálogo de métodos.
     super(prisma, { model: "listaPrecioItem", search: ["codigo", "descripcion"], include: { lista: true }, tenant: false, softDelete: false, orderBy: { codigo: "asc" } });
+  }
+
+  /** Frente f5: los ítems de una lista en moneda histórica (UF, EUR…) no se crean, cambian ni borran. */
+  private async exigirListaVigenteEnMoneda(listaPrecioId: string | undefined, tenantId?: string) {
+    if (!listaPrecioId) return;
+    const l = await this.prisma.listaPrecio.findFirst({ where: { id: listaPrecioId, ...(tenantId ? { tenantId } : {}) }, select: { codigo: true, moneda: true } });
+    if (l && esMonedaHistorica(l.moneda))
+      throw new ConflictException(`La lista ${l.codigo} está en ${l.moneda}, una moneda histórica: sus ítems son de solo lectura. ${MSJ_MONEDA}`);
+  }
+
+  async crear(data: any, tenantId?: string) {
+    await this.exigirListaVigenteEnMoneda(data?.listaPrecioId, tenantId);
+    return super.crear(data, tenantId);
+  }
+
+  async actualizar(id: string, data: any, tenantId?: string) {
+    const actual: any = await this.detalle(id, tenantId);
+    await this.exigirListaVigenteEnMoneda(actual.listaPrecioId, tenantId);
+    if (data?.listaPrecioId && data.listaPrecioId !== actual.listaPrecioId) await this.exigirListaVigenteEnMoneda(data.listaPrecioId, tenantId);
+    return super.actualizar(id, data, tenantId);
+  }
+
+  async eliminar(id: string, tenantId?: string) {
+    const actual: any = await this.detalle(id, tenantId);
+    await this.exigirListaVigenteEnMoneda(actual.listaPrecioId, tenantId);
+    return super.eliminar(id, tenantId);
   }
 }
 const ItemCreate = z.object({

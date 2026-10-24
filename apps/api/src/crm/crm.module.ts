@@ -19,6 +19,7 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
+import { zMoneda } from "../common/moneda";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
@@ -47,7 +48,7 @@ const CrearOportunidadSchema = z.object({
   clienteId: z.preprocess(emptyToNull, z.string().uuid().nullable().optional()),
   contacto: z.preprocess(emptyToNull, z.string().max(160).nullable().optional()),
   montoEstimado: z.coerce.number().nonnegative().optional(),
-  moneda: z.string().length(3).optional(),
+  moneda: zMoneda.optional(),
   probabilidad: z.coerce.number().int().min(0).max(100).optional(),
   etapa: z.enum(ETAPAS).optional(),
   estado: z.enum(ESTADOS).optional(),

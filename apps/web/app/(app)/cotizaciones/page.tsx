@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { money, fechaDia } from "@/lib/format";
+import { monto, fechaDia } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
 import { pedir, ESTADOS_VIGENTES, porVencer } from "./_components/comercial";
 import { EstadoChip, FirmaChip, accionesDe } from "./_components/Detalle";
@@ -194,7 +194,7 @@ export default function CotizacionesPage() {
                 <td>{c.cliente?.razonSocial ?? "—"}</td>
                 <td><EstadoChip estado={c.estado} /></td>
                 <td><FirmaChip c={c} /></td>
-                <td className="num">{money(c.total, c.moneda === "USD" ? "USD" : "CLP")}</td>
+                <td className="num">{monto(c.total, c.moneda)}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
                   {fechaDia(c.validaHasta ?? c.expiraAt)}
                   {porVencer(c) && <span className="pill amber" style={{ marginLeft: 6 }}>por vencer</span>}

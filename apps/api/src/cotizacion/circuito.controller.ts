@@ -2,6 +2,7 @@ import { Body, Controller, Get, Header, Param, ParseUUIDPipe, Post, Query, Req, 
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
+import { zMoneda } from "../common/moneda";
 import { TIPOS_SERVICIO } from "./form05";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
@@ -43,7 +44,7 @@ const Form05Schema = z.object({
   servicios: z.array(z.object({ codigo: texto(40).min(1), descripcion: texto(300).optional(), cantidad: z.number().positive().max(100000), valorUnitario: monto })).max(100).optional(),
   horasMaquina: z.array(z.object({ equipo: texto(200).min(1), horas: z.number().positive().max(100000), valorHora: monto })).max(50).optional(),
   pasajes: z.array(z.object({ ambito: z.enum(["nacional", "extranjero"]), tramo: texto(200).min(1), cantidad: z.number().positive().max(1000), valorUnitario: monto })).max(50).optional(),
-  otros: z.array(z.object({ descripcion: texto(300).min(1), monto, moneda: z.enum(["CLP", "USD"]).default("CLP") })).max(50).optional(),
+  otros: z.array(z.object({ descripcion: texto(300).min(1), monto, moneda: zMoneda.default("CLP") })).max(50).optional(),
   condiciones: texto(4000).nullable().optional(),
   dolar: z.number().positive().max(100000).nullable().optional(),
 });

@@ -13,8 +13,10 @@ import Panel from "./Panel";
 import { pedir } from "./comercial";
 import { money } from "@/lib/format";
 import type { Solicitud } from "./circuito";
+import { useListaParametro } from "@/lib/lista-parametro";
 
-type Col = { k: string; l: string; tipo: "texto" | "numero" | "opcion"; ops?: [string, string][]; ancho?: number };
+/** `opsParametro`: las opciones salen de esa categoría de «Parámetros del sistema» (p. ej. «moneda»; `ops` queda como respaldo). */
+type Col = { k: string; l: string; tipo: "texto" | "numero" | "opcion"; ops?: [string, string][]; opsParametro?: string; ancho?: number };
 type Fila = Record<string, string>;
 
 const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva: Fila }[] = [
@@ -82,7 +84,7 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
     cols: [
       { k: "descripcion", l: "Descripción", tipo: "texto" },
       { k: "monto", l: "Monto", tipo: "numero", ancho: 110 },
-      { k: "moneda", l: "Moneda", tipo: "opcion", ops: [["CLP", "CLP"], ["USD", "US$"]], ancho: 90 },
+      { k: "moneda", l: "Moneda", tipo: "opcion", opsParametro: "moneda", ops: [["CLP", "CLP"], ["USD", "US$"]], ancho: 90 },
     ],
     nueva: { descripcion: "", monto: "", moneda: "CLP" },
   },
@@ -106,6 +108,10 @@ function aApi(sec: (typeof SECCIONES)[number], filas: Fila[]) {
 
 function TablaSeccion({ sec, filas, onCambio }: { sec: (typeof SECCIONES)[number]; filas: Fila[]; onCambio: (f: Fila[]) => void }) {
   const set = (i: number, k: string, v: string) => onCambio(filas.map((f, j) => (j === i ? { ...f, [k]: v } : f)));
+  // Frente f5: la moneda de los gastos sale del parámetro «moneda» (CLP y USD).
+  const monedas = useListaParametro("moneda");
+  const opsDe = (c: Col): [string, string][] =>
+    c.opsParametro === "moneda" && monedas.opciones.length ? monedas.opciones.map((o) => [o.codigo, o.etiqueta]) : c.ops ?? [];
   return (
     <fieldset style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", margin: "0 0 10px" }}>
       <legend style={{ fontSize: 12.5, fontWeight: 700, padding: "0 4px" }}>{sec.titulo}</legend>
@@ -125,7 +131,7 @@ function TablaSeccion({ sec, filas, onCambio }: { sec: (typeof SECCIONES)[number
                   <td key={c.k}>
                     {c.tipo === "opcion" ? (
                       <select className="celda" aria-label={`${c.l} · fila ${i + 1}`} value={f[c.k]} onChange={(e) => set(i, c.k, e.target.value)}>
-                        {c.ops!.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                        {opsDe(c).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
                     ) : (
                       <input

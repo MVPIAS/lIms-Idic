@@ -13,7 +13,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { money, fechaDia } from "@/lib/format";
+import { monto, fechaDia } from "@/lib/format";
+import { useListaParametro } from "@/lib/lista-parametro";
 import { pedir } from "../../cotizaciones/_components/comercial";
 
 type Item = {
@@ -49,6 +50,7 @@ const ENLACE: Record<string, string> = { codigo: "por código EN", nombre: "por 
 
 export default function ListaPrecioDetallePage() {
   const { id } = useParams<{ id: string }>();
+  const monedas = useListaParametro("moneda");
   const [d, setD] = useState<Detalle | null>(null);
   const [error, setError] = useState("");
   const [q, setQ] = useState("");
@@ -80,7 +82,9 @@ export default function ListaPrecioDetallePage() {
   const r = d?.resumen;
   const paginas = d ? Math.max(1, Math.ceil(d.meta.total / d.meta.limit)) : 1;
   const hoy = new Date().toISOString().slice(0, 10);
-  const vigente = l ? l.activa && String(l.vigenteDesde).slice(0, 10) <= hoy && (!l.vigenteHasta || String(l.vigenteHasta).slice(0, 10) >= hoy) : false;
+  // Frente f5: moneda fuera de la lista del parámetro «moneda» (CLP, USD) = histórica.
+  const historica = !!l?.moneda && monedas.cargado && !monedas.vigente(l.moneda);
+  const vigente = l ? !historica && l.activa && String(l.vigenteDesde).slice(0, 10) <= hoy && (!l.vigenteHasta || String(l.vigenteHasta).slice(0, 10) >= hoy) : false;
 
   return (
     <div>
@@ -94,6 +98,12 @@ export default function ListaPrecioDetallePage() {
           Vigente desde {fechaDia(l.vigenteDesde)}{l.vigenteHasta ? ` hasta ${fechaDia(l.vigenteHasta)}` : ""} · {l.moneda}
           {l.fuente ? ` · Fuente: ${l.fuente}` : ""}
         </p>
+      )}
+      {l && historica && (
+        <div className="alert info" role="note">
+          Lista en {l.moneda}, una moneda histórica (dato migrado): se muestra tal cual, sin convertir, y es de solo lectura.
+          El LIMS trabaja en CLP y USD; la cotización no toma precios de esta lista.
+        </div>
       )}
       {error && <div className="alert warn" role="alert">{error}</div>}
 
@@ -178,13 +188,13 @@ export default function ListaPrecioDetallePage() {
                   {i.centroOrigen ?? "—"}
                   <small style={{ display: "block", color: "var(--muted)" }}>{i.centroCostoCodigo ?? "sin centro de costo"}{i.unidadCodigo ? ` · ${i.unidadCodigo}` : ""}</small>
                 </td>
-                <td className="num">{i.costoDirecto != null ? money(i.costoDirecto) : "—"}</td>
-                <td className="num">{i.costoIndirecto != null ? money(i.costoIndirecto) : "—"}</td>
-                <td className="num">{i.costoTotal != null ? money(i.costoTotal) : "—"}</td>
-                <td className="num">{i.recargo != null ? money(i.recargo) : "—"}</td>
-                <td className="num"><b>{money(i.neto ?? i.precio)}</b></td>
-                <td className="num">{i.iva != null ? money(i.iva) : "—"}</td>
-                <td className="num">{i.precioIvaIncluido != null ? money(i.precioIvaIncluido) : "—"}</td>
+                <td className="num">{i.costoDirecto != null ? monto(i.costoDirecto, l?.moneda) : "—"}</td>
+                <td className="num">{i.costoIndirecto != null ? monto(i.costoIndirecto, l?.moneda) : "—"}</td>
+                <td className="num">{i.costoTotal != null ? monto(i.costoTotal, l?.moneda) : "—"}</td>
+                <td className="num">{i.recargo != null ? monto(i.recargo, l?.moneda) : "—"}</td>
+                <td className="num"><b>{monto(i.neto ?? i.precio, l?.moneda)}</b></td>
+                <td className="num">{i.iva != null ? monto(i.iva, l?.moneda) : "—"}</td>
+                <td className="num">{i.precioIvaIncluido != null ? monto(i.precioIvaIncluido, l?.moneda) : "—"}</td>
               </tr>
             ))}
             {!cargando && d && d.data.length === 0 && (
