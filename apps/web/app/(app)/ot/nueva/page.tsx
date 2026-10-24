@@ -112,7 +112,7 @@ export default function NuevaOtPage() {
   const [labId, setLabId] = useState("");
   const pistasLab = useMemo(
     () => ({
-      elementoIds: lineas.map((l) => l.elementoId),
+      elementoIds: lineas.map((l) => l.elementoId).filter(Boolean), // la línea «sin elemento» (B-009) no lleva elemento
       metodoIds: lineas.flatMap((l) => l.metodos.map((m) => m.metodoId)),
       centroCostoId: interlab && labEjecutor ? labEjecutor : undefined,
     }),
