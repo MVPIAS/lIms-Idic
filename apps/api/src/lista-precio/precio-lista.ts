@@ -51,6 +51,18 @@ export function elegirPrecio(
   return conValor(precioFicha) ? { precio: Number(precioFicha), origen: "ficha" } : null;
 }
 
+/**
+ * D01-23 · Precio de referencia de un ensayo en el panel de «Registrar OT» (total
+ * estimado): la ficha del ensayo si tiene valor; si no, el neto del ítem enlazado
+ * en la lista vigente; si tampoco, lo que diga la ficha (0 o vacío).
+ */
+export function precioPanel(precioFicha: unknown, item: ItemListaVigente | null | undefined): number | null {
+  const ficha = precioFicha == null ? null : Number(precioFicha);
+  if (ficha != null && Number.isFinite(ficha) && ficha > 0) return ficha;
+  if (item && Number.isFinite(item.precio) && item.precio > 0) return item.precio;
+  return ficha;
+}
+
 /** Ítems de las listas vigentes a `fecha` (AAAA-MM-DD) enlazados con esos ensayos del catálogo. */
 export async function itemsListaVigente(db: any, tenantId: string, catEnsayoIds: string[], fecha: string): Promise<Map<string, ItemListaVigente>> {
   if (!catEnsayoIds.length) return new Map();

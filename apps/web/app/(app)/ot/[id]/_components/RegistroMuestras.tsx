@@ -484,38 +484,45 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                               <button className="btn outline sm" style={{ marginRight: 4 }} onClick={() => setDistribuyendo(m.id)}>Distribuir…</button>
                             )}
                             <button className="btn outline sm" aria-expanded={editando === m.id}
-                              onClick={() => { setEditando(editando === m.id ? null : m.id); setEdicion(datosDe(m)); setProductoEdicion(m.catElementoId ?? ""); setAbierto(false); }}>
+                              onClick={() => {
+                                setEditando(editando === m.id ? null : m.id); setEdicion(datosDe(m)); setProductoEdicion(m.catElementoId ?? ""); setAbierto(false);
+                                if (editando !== m.id) setTimeout(() => document.getElementById("recepcion-edicion")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                              }}>
                               {editando === m.id ? "Cerrar" : "Recepción…"}
                             </button>
                           </td>
                         )}
                       </tr>
-                      {editando === m.id && (
-                        <tr>
-                          <td colSpan={10} style={{ background: "#f8fbfc" }}>
-                            <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 6 }}>Recepción e identificación de {m.codigo}</div>
-                            <div className="form-grid cols-2" style={{ marginBottom: 6 }}>
-                              <SelectorProducto id={`prod-${m.id}`} valor={productoEdicion} onCambio={(id) => setProductoEdicion(id)} productos={productos}
-                                otId={otId} obligatorio={!!cfg?.productoObligatorio} nombreActual={m.productoNombre} sinLista={sinListaProductos} />
-                            </div>
-                            <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} labPrincipalId={d.ot.unidadPrincipal}
-                              config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} />
-                            <FotosRecepcion otId={otId} muestraId={m.id} codigo={m.codigo} puedeEditar={puedeRegistrar} onCambio={cargar} />
-                            <div className="toolbar" style={{ margin: "8px 0 0" }}>
-                              <span style={{ fontSize: 11.5, color: "var(--muted)" }}>El cambio queda en el historial de la OT con lo anterior y lo nuevo.</span>
-                              <div className="spacer" />
-                              <button className="btn outline sm" disabled={guardando} onClick={() => setEditando(null)}>Cancelar</button>
-                              <button className="btn primary sm" disabled={guardando} onClick={() => guardarRecepcion(m)}>{guardando ? "Guardando…" : "Guardar recepción"}</button>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                     </Fragment>
                   );
                 })}
               </tbody>
             </table>
           </div>
+          {/* D01-24: el formulario «Recepción…» va bajo la tabla, a su ancho: dentro de la fila tomaba el ancho
+              de la tabla (más ancho que su recuadro) y había que desplazarse en horizontal para ver «Guardar». */}
+          {(() => {
+            const m = editando ? d.muestras.find((x) => x.id === editando) : undefined;
+            if (!m) return null;
+            return (
+              <div id="recepcion-edicion" className="card" style={{ background: "#f8fbfc", margin: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 6 }}>Recepción e identificación de {m.codigo}</div>
+                <div className="form-grid cols-2" style={{ marginBottom: 6 }}>
+                  <SelectorProducto id={`prod-${m.id}`} valor={productoEdicion} onCambio={(id) => setProductoEdicion(id)} productos={productos}
+                    otId={otId} obligatorio={!!cfg?.productoObligatorio} nombreActual={m.productoNombre} sinLista={sinListaProductos} />
+                </div>
+                <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} labPrincipalId={d.ot.unidadPrincipal}
+                  config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} />
+                <FotosRecepcion otId={otId} muestraId={m.id} codigo={m.codigo} puedeEditar={puedeRegistrar} onCambio={cargar} />
+                <div className="toolbar" style={{ margin: "8px 0 0" }}>
+                  <span style={{ fontSize: 11.5, color: "var(--muted)" }}>El cambio queda en el historial de la OT con lo anterior y lo nuevo.</span>
+                  <div className="spacer" />
+                  <button className="btn outline sm" disabled={guardando} onClick={() => setEditando(null)}>Cancelar</button>
+                  <button className="btn primary sm" disabled={guardando} onClick={() => guardarRecepcion(m)}>{guardando ? "Guardando…" : "Guardar recepción"}</button>
+                </div>
+              </div>
+            );
+          })()}
         </>
       ) : (
         <div className="alert warn" style={{ margin: 0 }}>

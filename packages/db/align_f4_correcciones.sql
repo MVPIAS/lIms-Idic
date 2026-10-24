@@ -87,3 +87,73 @@ UPDATE arma
    SET propietario_registrado = 'Propietario Prueba Aiuken', rut_propietario = '11.111.111-1'
  WHERE serie = 'FN-4471290' AND marca = 'FN Herstal'
    AND propietario_registrado = 'Juan Pérez Soto' AND rut_propietario = '13.884.221-5';
+
+-- -----------------------------------------------------------------------------
+-- D01-14 (resto de B-031) · Viscosidad Stormer en K.U.
+--   c3 dejó la lectura y el analito en «K.U.», pero las especificaciones del
+--   catálogo de esos métodos traían la unidad «grs», «ku», «k.u» o «K.U», y el
+--   ensayo copia la unidad de su especificación: el resultado y el informe
+--   seguían en «grs». Se normaliza a «K.U.» en el catálogo y en los ensayos aún
+--   no aprobados (los aprobados conservan lo que se informó).
+-- -----------------------------------------------------------------------------
+UPDATE cat_especificacion e
+   SET unidad = 'K.U.'
+  FROM cat_analito a
+  JOIN cat_metodo m ON m.id = a.metodo_id
+ WHERE e.analito_id = a.id
+   AND m.codigo IN ('659', '660', '661', '662', '663')
+   AND e.unidad IS DISTINCT FROM 'K.U.';
+
+UPDATE resultado r
+   SET unidad = 'K.U.'
+  FROM cat_metodo m
+ WHERE r.cat_metodo_id = m.id
+   AND m.codigo IN ('659', '660', '661', '662', '663')
+   AND r.estado NOT IN ('aprobado', 'anulado')
+   AND r.unidad IS DISTINCT FROM 'K.U.';
+
+-- -----------------------------------------------------------------------------
+-- D01-21 · Sólidos en peso, no volátiles y pigmento: tres lecturas, no seis.
+--   La fórmula de esos métodos es ((C1 − C2) / C3) × 100 sobre los TRES primeros
+--   campos (crisol o cápsula con el residuo, crisol o cápsula sola y masa de
+--   muestra usada), pero el catálogo heredado traía además una segunda
+--   plantilla de tres campos (crisol con no volátil, crisol con pintura, masa
+--   de pintura usada). Mismo patrón que B-031 (align_c3_correcciones.sql): se
+--   deja un juego único y ordenado de campos por método, con su unidad; los
+--   demás quedan inactivos (no se borran). Solo los métodos cuyos analitos usan
+--   TODOS esa fórmula y que tienen más de tres campos activos.
+-- -----------------------------------------------------------------------------
+DROP TABLE IF EXISTS f4_campos_metodo;
+CREATE TEMP TABLE f4_campos_metodo (metodo_id uuid, tenant_id uuid, orden int, nombre text, unidad text);
+
+INSERT INTO f4_campos_metodo
+SELECT m.id, m.tenant_id, v.orden,
+       CASE WHEN v.orden = 1 THEN 'Crisol o cápsula con ' || CASE WHEN lower(m.nombre) LIKE 'pigmento%' THEN 'pigmento' ELSE 'no volátil' END
+            ELSE v.nombre END,
+       'g'
+  FROM cat_metodo m
+ CROSS JOIN (VALUES (1, NULL), (2, 'Crisol o cápsula sola'), (3, 'Masa de muestra usada')) AS v(orden, nombre)
+ WHERE EXISTS (SELECT 1 FROM cat_analito a WHERE a.metodo_id = m.id AND a.deleted_at IS NULL)
+   AND NOT EXISTS (
+         SELECT 1 FROM cat_analito a
+          WHERE a.metodo_id = m.id AND a.deleted_at IS NULL
+            AND regexp_replace(lower(coalesce(a.formula, '')), '\s', '', 'g')
+                NOT LIKE '%acum:=acum+((val(ssql[1,2])-val(ssql[2,2]))/val(ssql[3,2]))*100%')
+   AND (SELECT count(*) FROM paso_metodo p WHERE p.cat_metodo_id = m.id AND p.activo AND p.deleted_at IS NULL) > 3;
+
+-- En una segunda pasada ningún método tiene más de tres campos activos: no cambia nada.
+
+UPDATE paso_metodo p
+   SET activo = false
+ WHERE p.activo
+   AND p.cat_metodo_id IN (SELECT metodo_id FROM f4_campos_metodo)
+   AND NOT EXISTS (SELECT 1 FROM f4_campos_metodo c
+                    WHERE c.metodo_id = p.cat_metodo_id AND c.orden = p.orden AND c.nombre = p.nombre);
+
+INSERT INTO paso_metodo (tenant_id, cat_metodo_id, orden, nombre, tipo_dato, unidad, obligatorio, activo)
+SELECT c.tenant_id, c.metodo_id, c.orden, c.nombre, 'numero', c.unidad, true, true
+  FROM f4_campos_metodo c
+ON CONFLICT (tenant_id, cat_metodo_id, orden, nombre)
+DO UPDATE SET activo = true, unidad = EXCLUDED.unidad, deleted_at = NULL;
+
+DROP TABLE IF EXISTS f4_campos_metodo;

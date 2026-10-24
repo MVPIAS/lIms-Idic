@@ -63,7 +63,15 @@ describe("Informe interno del LME · Muestra · Ensayo · Requisito · Resultado
     expect(html).not.toContain("<h3>");
     const ths = [...html.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]);
     expect(ths).toEqual(["Muestra", "Ensayo", "Requisito", "Resultado", "Condición"]);
-    expect(html).toContain("<td>OT-1-M2</td><td>Humedad</td><td>Máx. 1</td><td>0,05 %</td>");
+    expect(html).toContain("<td>OT-1-M2</td><td>Humedad</td><td>Máx. 1 %</td><td>0,05 %</td>");
+  });
+
+  it("D01-13 · el requisito del catálogo lleva su unidad aunque el resultado también la lleve («Mín. 97 %»)", () => {
+    const html = bloqueResultados(
+      armarInforme([r({ id: "c", ensayo: "Cloruro de sodio", limiteInf: "97", valorNumerico: 98.196, unidad: "%", veredicto: "cumple" })], INTERNO_LME, "cumplimiento"),
+      INTERNO_LME,
+    );
+    expect(html).toContain("<td>Mín. 97 %</td><td>98,196 %</td>");
   });
 
   it("aun con una sola muestra, la columna Muestra se mantiene", () => {

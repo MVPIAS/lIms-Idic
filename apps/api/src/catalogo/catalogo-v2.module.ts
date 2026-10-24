@@ -1,4 +1,6 @@
 import { erroresFactorMetodo } from "../laboratorio/factor";
+import { hoyEnChile, isoFecha, soloFecha } from "../cotizacion/validez";
+import { itemsListaVigente, precioPanel } from "../lista-precio/precio-lista";
 import {
   Controller,
   Get,
@@ -468,7 +470,11 @@ export class CascadaService {
     }));
   }
 
-  /** Panel de un elemento: qué métodos (+ su ensayo y precio) aplican. */
+  /**
+   * Panel de un elemento: qué métodos (+ su ensayo y precio) aplican.
+   * D01-23: el precio es el de la ficha del ensayo (cat_ensayo.precio) o, si la
+   * ficha está en 0, el neto del ítem enlazado en la lista de precios vigente.
+   */
   async panelDeElemento(tenantId: string, elementoId: string) {
     const rows = await this.prisma.catPanel.findMany({
       where: { tenantId, deletedAt: null, elementoId },
@@ -478,6 +484,8 @@ export class CascadaService {
       },
       orderBy: { orden: "asc" },
     });
+    const ensayoIds = [...new Set(rows.map((r) => r.ensayo?.id).filter((x): x is string => !!x))];
+    const lista = await itemsListaVigente(this.prisma, tenantId, ensayoIds, isoFecha(soloFecha(hoyEnChile())));
     return rows.map((r) => ({
       metodoId: r.metodo?.id ?? null,
       metodoCodigo: r.metodo?.codigo ?? null,
@@ -485,7 +493,7 @@ export class CascadaService {
       ensayoId: r.ensayo?.id ?? null,
       ensayoCodigo: r.ensayo?.codigo ?? null,
       ensayoNombre: r.ensayo?.nombre ?? null,
-      precio: r.ensayo?.precio ?? null,
+      precio: precioPanel(r.ensayo?.precio ?? null, r.ensayo ? lista.get(r.ensayo.id) : undefined),
     }));
   }
 
