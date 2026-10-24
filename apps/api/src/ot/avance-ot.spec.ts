@@ -291,6 +291,17 @@ describe("Ruta de la OT · Metrología (EP-04: calibración ligada a la OT)", ()
     expect(a.siguiente?.texto).toBe("Registrar la devolución de ítem 1 (Balanza) (acta)");
   });
 
+  it("no calibrable (sin calibración): calibración, revisión y firma no aplican; primero la devolución, luego el cierre (B-004)", () => {
+    const enCustodia = calcularAvance(met({ instrumentos: [ins("no_apto")] }));
+    expect(estados(enCustodia).calibracion).toBe("hecho");
+    expect(estados(enCustodia).firma_emision).toBe("hecho");
+    expect(enCustodia.etapaActual).toBe("entrega");
+    expect(enCustodia.siguiente?.texto).toBe("Registrar la devolución de ítem 1 (Balanza) (acta)");
+    const devuelto = calcularAvance(met({ instrumentos: [ins("devuelto")] }));
+    expect(estados(devuelto).entrega).toBe("hecho");
+    expect(devuelto.etapaActual).toBe("cierre");
+  });
+
   it("sin exigir devolución (parámetro): con el certificado entregado pasa al cierre", () => {
     const a = calcularAvance(met({ exigeDevolucion: false, instrumentos: [ins("recibido")], calibraciones: [cal("emitida", { entregadoAt: "2026-10-20" })] }));
     expect(a.etapaActual).toBe("cierre");
