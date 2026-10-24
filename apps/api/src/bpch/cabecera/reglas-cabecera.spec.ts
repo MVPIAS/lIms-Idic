@@ -54,6 +54,11 @@ describe("B-019 · la cabecera hereda lo conocido", () => {
     const h = heredarCabecera({ documentoOrigen: "Sol. 45/2026", esquema: "TIPO", elemento: "Granada", tamanoMuestra: 5 }, { elementoGenerico: "Granada de mano M-2" });
     expect(h).toEqual({ documentoOrigen: "Sol. 45/2026", esquema: "TIPO", tamanoMuestra: 5 });
   });
+  it("D07-12 · Producción Nacional: el tamaño del lote es la cantidad programada (entera); lo escrito manda", () => {
+    expect(heredarCabecera({ lote: "L-9", tamanoLote: "1200" }, null)).toEqual({ identificacionLote: "L-9", tamanoLote: 1200 });
+    expect(heredarCabecera({ tamanoLote: "12.5" }, null)).toEqual({});
+    expect(heredarCabecera({ tamanoLote: 1200 }, { tamanoLote: 900 })).toEqual({});
+  });
   it("sin fuente: nada", () => {
     expect(heredarCabecera(null, null)).toEqual({});
   });
