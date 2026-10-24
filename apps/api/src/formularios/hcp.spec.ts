@@ -1,4 +1,4 @@
-import { erroresCabecera, evaluarLoteSvm, evaluarVehiculo, leerPlantilla, novedades, veredictoMetodo, type InspeccionVehiculo } from "./hcp";
+import { erroresCabecera, evaluarLoteSvm, evaluarVehiculo, leerPlantilla, novedades, veredictoMetodo, type InspeccionVehiculo, cabeceraDesdeRecepcion } from "./hcp";
 
 const plantilla = leerPlantilla(
   JSON.stringify([
@@ -79,5 +79,15 @@ describe("HCP · novedades del lote", () => {
     expect(n).toHaveLength(2);
     expect(n[0]).toMatchObject({ vehiculo: 2, clase: "B", item: "2.1.1", accionProveedor: "Reponer plumilla" });
     expect(n[1].descripcion).toMatch(/Sin repuesto/);
+  });
+});
+
+describe("D05-21 · la cabecera de la HCP propone lo registrado en la recepción del vehículo", () => {
+  it("chasis, motor, año y km de llegada desde los datos propios del SVM", () => {
+    expect(cabeceraDesdeRecepcion({ chasis: " 9BW-001 ", motor: "M-77", anio: "2025", km: "1.250,5".replace(".", ""), identificador: "EJTO-1" }))
+      .toEqual({ chasis: "9BW-001", motor: "M-77", anio: 2025, kmLlegada: 1250.5 });
+  });
+  it("sin recepción: vacío", () => {
+    expect(cabeceraDesdeRecepcion(null)).toEqual({ chasis: "", motor: "", anio: null, kmLlegada: null });
   });
 });

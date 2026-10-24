@@ -139,6 +139,17 @@ function resolverItem(i: ItemHcp, r: ResultadoItem | undefined): Pick<ItemEvalua
   return { resultado: r?.resultado === "C" || r?.resultado === "NC" ? r.resultado : null, valor, observacion };
 }
 
+/**
+ * D05-21 · Cabecera que la HCP propone para un vehículo con lo registrado en su
+ * recepción (Datos propios del SVM: chasis, motor, año y km de llegada). Solo
+ * propone: lo que ya trae la HCP se respeta.
+ */
+export function cabeceraDesdeRecepcion(datos: Record<string, unknown> | null | undefined): { chasis: string; motor: string; anio: number | null; kmLlegada: number | null } {
+  const d = datos ?? {};
+  const txt = (v: unknown) => (v == null ? "" : String(v).trim());
+  return { chasis: txt(d.chasis).slice(0, 60), motor: txt(d.motor).slice(0, 60), anio: num(d.anio), kmLlegada: num(d.km) };
+}
+
 export function erroresCabecera(c: CabeceraVehiculo): string[] {
   const e: string[] = [];
   if (!c.inspectores?.filter((x) => x?.trim()).length) e.push("Indique los inspectores.");
