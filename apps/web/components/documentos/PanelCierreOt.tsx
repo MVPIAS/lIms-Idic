@@ -172,10 +172,32 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
           </table>
         ) : (
           <p className="subtitle" style={{ margin: 0 }}>
-            {d.calibraciones?.length
-              ? "Sin informes del flujo general: los certificados de calibración de la OT se listan arriba y cuentan para el cierre."
+            {d.calibraciones?.length || d.documentosNoCalibrables?.length
+              ? "Sin informes del flujo general: los documentos de Metrología de la OT cuentan para el cierre."
               : "Todavía no se ha emitido ningún informe para esta OT."}
           </p>
+        )}
+        {/* Metrología: certificados de calibración, informe técnico emitido y certificado externo validado (decisión 24-10). */}
+        {(d.calibraciones?.length > 0 || d.documentosNoCalibrables?.length > 0) && (
+          <table className="data" style={{ marginTop: 8 }} aria-label="Documentos de Metrología que cuentan para el cierre">
+            <thead><tr><th>Número</th><th>Documento de Metrología</th><th>Entrega</th></tr></thead>
+            <tbody>
+              {(d.calibraciones ?? []).map((c: any) => (
+                <tr key={c.id}>
+                  <td><span className="codigo">{c.numero}</span></td>
+                  <td>Certificado de calibración <small style={{ color: "var(--muted)" }}>· {c.estado === "emitida" ? "emitido" : c.estado.replace("_", " ")}</small></td>
+                  <td style={{ fontSize: 11.5 }}>{c.entregadoAt ? fecha(c.entregadoAt) : c.estado === "emitida" ? <span className="pill amber">Sin entregar</span> : "—"}</td>
+                </tr>
+              ))}
+              {(d.documentosNoCalibrables ?? []).map((x: any) => (
+                <tr key={x.id}>
+                  <td><span className="codigo">{x.numero}</span></td>
+                  <td>{x.tipo === "informe_tecnico" ? "Informe técnico (no calibrable) · emitido" : "Certificado externo · validado"}</td>
+                  <td style={{ fontSize: 11.5 }}>{x.entregadoAt ? <>{fecha(x.entregadoAt)} · {textoMedio(x.entregaMedio)}</> : <span className="pill amber">Sin entregar</span>}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 

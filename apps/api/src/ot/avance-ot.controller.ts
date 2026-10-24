@@ -181,6 +181,7 @@ export class AvanceOtService {
       instrumentos: (calibraciones?.items ?? []).map((x) => ({
         id: x.id, numero: x.numero, descripcion: x.descripcion, estado: x.estado, metrologo: x.metrologoNombre, metrologoId: x.metrologoId,
       })),
+      documentosNoCalibrables: calibraciones?.docsNoCalibrables ?? [],
       exigeDevolucion: calibraciones?.exigeDevolucion ?? true,
       // Muestreo de la OT (align_r2b_muestreo.sql): el que aún no recibe el laboratorio guía la recepción.
       muestreos: await this.prisma
