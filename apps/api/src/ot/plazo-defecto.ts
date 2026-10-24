@@ -1,6 +1,7 @@
 /**
  * Fecha de compromiso por defecto de TODA OT al nacer (B-010, recorrido MP-10
- * D10-02): hoy en Chile + el plazo configurado en «Parámetros del sistema».
+ * D10-02): día de ingreso de la OT en Chile (hoy, si no se indicó otro) + el plazo
+ * configurado en «Parámetros del sistema».
  *
  *   ot_plazo_laboratorio.<LAB>  · plazo del laboratorio responsable (manda)
  *   ot_plazo.<origen>_dias      · plazo del origen (internacion, produccion_nacional,
@@ -53,8 +54,8 @@ export function diasPorDefecto(
  * tiene. Se llama dentro de la transacción que la crea. Devuelve la fecha o null.
  */
 export async function fijarPlazoPorDefecto(db: Db, tenantId: string, otId: string, ahora: Date = new Date()): Promise<string | null> {
-  const [ot] = await db.$queryRawUnsafe<{ fecha: Date | null; origen: string | null; lab: string | null }[]>(
-    `SELECT o.fecha_compromiso AS fecha, o.origen_trabajo AS origen, u.codigo AS lab
+  const [ot] = await db.$queryRawUnsafe<{ fecha: Date | null; recepcion: Date | null; origen: string | null; lab: string | null }[]>(
+    `SELECT o.fecha_compromiso AS fecha, o.fecha_recepcion AS recepcion, o.origen_trabajo AS origen, u.codigo AS lab
        FROM orden_trabajo o LEFT JOIN unidad u ON u.id = o.unidad_principal
       WHERE o.id = $1::uuid`,
     otId,
@@ -71,7 +72,11 @@ export async function fijarPlazoPorDefecto(db: Db, tenantId: string, otId: strin
     ot.origen,
     ot.lab,
   );
-  const f = dias ? fechaCompromisoDesdePlazo(null, dias, ahora) : null;
+  // Los días corren desde la fecha de ingreso de la OT (día de Chile). Si el ingreso es
+  // hoy coincide con «hoy + plazo»; si se registró con un ingreso anterior, el plazo
+  // cuenta desde ese día (B-030 guarda el ingreso a las 12:00 de Chile de ese día, así
+  // que su día de Chile es siempre el elegido en el calendario).
+  const f = dias ? fechaCompromisoDesdePlazo(ot.recepcion ?? null, dias, ahora) : null;
   if (!f) return null;
   await db.$executeRawUnsafe(`UPDATE orden_trabajo SET fecha_compromiso = $2::date, fecha_compromiso_origen = 'plazo_defecto', fecha_compromiso_at = now()
       WHERE id = $1::uuid AND fecha_compromiso IS NULL`, otId, f);
