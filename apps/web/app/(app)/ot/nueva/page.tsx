@@ -141,20 +141,30 @@ export default function NuevaOtPage() {
 
   const addLinea = (l: LineaOT) => setLineas((ls) => [...ls, l]);
 
-  /** B-009: la OT de una E.T. se registra con los métodos de sus puntos (de este laboratorio), sin elemento. */
+  /**
+   * B-009: la OT de una E.T. se registra con los métodos de sus puntos (de este laboratorio), sin elemento.
+   * D03-18: solo los del PRODUCTO (puntos sin componente); los de cada componente van a su submuestra
+   * al «Confirmar plan de ensayos» y no se repiten en la muestra del producto.
+   */
   async function metodosDeEt() {
     try {
-      const et = await llamar<{ codigo: string; version: number; puntos: { catMetodoId: string | null; metodoCodigo: string | null; metodoNombre: string | null; laboratorioId: string | null }[] }>(
-        "GET", `/especificaciones-tecnicas/${etId}`,
-      );
+      const et = await llamar<{
+        codigo: string; version: number; metodosProducto?: string[];
+        puntos: { catMetodoId: string | null; metodoCodigo: string | null; metodoNombre: string | null; laboratorioId: string | null; componente: string | null }[];
+      }>("GET", `/especificaciones-tecnicas/${etId}`);
+      const delLab = et.puntos.filter((p) => p.catMetodoId && (!p.laboratorioId || p.laboratorioId === labId));
+      const delProducto = new Set(et.metodosProducto ?? delLab.filter((p) => !(p.componente ?? "").trim()).map((p) => p.catMetodoId!));
       const vistos = new Set<string>();
-      const metodos = et.puntos
-        .filter((p) => p.catMetodoId && (!p.laboratorioId || p.laboratorioId === labId))
+      const metodos = delLab
+        .filter((p) => delProducto.has(p.catMetodoId!))
         .filter((p) => !vistos.has(p.catMetodoId!) && vistos.add(p.catMetodoId!))
         .map((p) => ({ metodoId: p.catMetodoId!, metodoCodigo: p.metodoCodigo ?? "", metodoNombre: p.metodoNombre ?? "", ensayoId: "", precio: 0 }));
-      if (!metodos.length) { setErrMsg(`La E.T. ${et.codigo} no tiene métodos del catálogo para este laboratorio.`); return; }
+      const componentes = new Set(delLab.map((p) => (p.componente ?? "").trim()).filter(Boolean));
+      if (!metodos.length && !componentes.size) { setErrMsg(`La E.T. ${et.codigo} no tiene métodos del catálogo para este laboratorio.`); return; }
       addLinea({
-        elementoId: "", generico: true, descripcion: "", elementoCodigo: "", elementoNombre: `Métodos de la E.T. ${et.codigo} v${et.version}`,
+        elementoId: "", generico: true, descripcion: "", elementoCodigo: "",
+        elementoNombre: `Métodos de la E.T. ${et.codigo} v${et.version}`
+          + (componentes.size ? ` · producto (los de ${[...componentes].join(", ")} se asignan al confirmar el plan de ensayos)` : ""),
         familia: "", analista: "", tipoInspeccion: "", prioridad, cantidad: 1, numMuestras: 1, numPlanilla: "", metodos, subtotal: 0,
       });
     } catch (e) {
