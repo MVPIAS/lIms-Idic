@@ -15,6 +15,9 @@
  *   tras la entrega · B-074 pie técnico e informe técnico · B-079 URL de verificación ·
  *   B-044 coincidencia IBIS con motivo · B-077 listado CU en .xlsx · B-078 RUT del
  *   nuevo titular. (B-025: pruebas unitarias de filas-informe.)
+ *   Cierre de la OT de Metrología con no calibrables (decisión 24-10): el informe
+ *   técnico y el certificado externo cuentan como documento; ruta, «OT listas para
+ *   cerrar», cierre final y factura.
  *
  * Usa datos que dejan los guiones anteriores de la lista (documento oficial del LQC
  * de r4-r4c / informe-ensayo y calibraciones emitidas de r1-r1a / r4-r4a): córrase
@@ -340,6 +343,76 @@ async function recorrido(C) {
     const d = m.instrumentos[0].documentosNoCalibrable.find((x) => x.tipo === "certificado_externo");
     afirmar(d?.numero === `EXT-C2-${sello}` && d.entregadoAt && d.entregaMedio === "oficio", JSON.stringify(d));
     return `EXT-C2-${sello} entregado por oficio · sin validar → 409 · Finanzas → 403 · repetido → 409`;
+  });
+
+  /* ---------------- Cierre de la OT de Metrología con no calibrables (24-10) */
+  // Decisión del 24-10: el informe técnico emitido y el certificado externo validado cuentan
+  // como documento para el cierre final, con la misma regla de entrega que los demás.
+  const avance = async (otId, u = U.planif) => { const a = await ok(u, "GET", `/ot/${otId}/avance`); return a?.data ?? a; };
+  const etapaDe = (a, clave) => (a.etapas ?? []).find((e) => e.clave === clave);
+  const enListas = async (ot) => lista(await ok(U.planif, "GET", `/ot?listasCierre=1&search=${encodeURIComponent(ot.codigo)}&limit=50`)).some((x) => x.id === ot.id);
+
+  await paso("Cierre Metrología · Todos no calibrables (con cobro): informe técnico emitido sin entregar → el cierre lo pide; no figura en «OT listas para cerrar»", async () => {
+    const svc = lista(await ok(U.ventas, "GET", "/cat/ensayos?search=EN1074&limit=5")).find((e) => e.codigo === "EN1074");
+    afirmar(svc, "falta el servicio EN1074 en el catálogo");
+    const cot = await ok(U.ventas, "POST", "/cotizaciones", { clienteId: C.clienteId, formato: "NORMAL", plazoEntregaDias: 15, referencia: `C2 cierre no calibrable ${sello}`, lineas: [{ catEnsayoId: svc.id, cantidad: 1 }] });
+    await ok(U.ventas, "POST", `/cotizaciones/${cot.id}/enviar-a-firma`, {});
+    await ok("demo.dco.jefe", "POST", `/cotizaciones/${cot.id}/firmar`, {});
+    const r = await ok(U.ventas, "POST", `/cotizaciones/${cot.id}/aceptar`, { tipo: "OC", numero: `OC-NC-${sello}`, fecha: hoy(), conCobro: true, unidadPrincipalId: C.LMT.id });
+    C.otN = await ok(U.jefe, "GET", `/ot/${r?.ot?.id ?? r?.otId ?? r?.ot_id}`);
+    afirmar(C.otN.conCobro, "la OT de la cotización no es con cobro");
+    await ok(U.jefe, "POST", `/ot/${C.otN.id}/instrumentos/desde-cotizacion`);
+    C.iN = (await met(C.otN.id)).instrumentos[0].id;
+    await ok(U.jefe, "PUT", `/ot/${C.otN.id}/instrumentos/${C.iN}`, { descripcion: "Balanza con plato deformado (prueba c2)", serie: `BN-${sello}`, procesoCodigo: "ITM02" });
+    await ok(U.metro, "POST", `/ot/${C.otN.id}/instrumentos/${C.iN}/recepcion`, recibir(false));
+    const b = `/ot/${C.otN.id}/instrumentos/${C.iN}`;
+    await ok(U.metro, "POST", `${b}/informe-tecnico`, { motivo: "El plato está deformado: no repite la indicación", hallazgos: "Deformación del plato y golpe en la carcasa", recomendacion: "Reparar y volver a calibrar" });
+    await ok(U.metro, "POST", `${b}/informe-tecnico/enviar`);
+    C.itN = (await ok(U.jefe, "POST", `${b}/informe-tecnico/emitir`)).data.numero;
+    const c = await ok(U.planif, "GET", `/ot/${C.otN.id}/cierre`);
+    afirmar(!c.puedeCerrar && c.faltantes.some((f) => f.includes(C.itN) && /falta registrar su entrega/.test(f)), `faltantes: ${c.faltantes.join(" | ")}`);
+    afirmar(!c.faltantes.some((f) => /no tiene informes ni certificados/.test(f)), "el informe técnico emitido no cuenta como documento");
+    afirmar((c.documentosNoCalibrables ?? []).some((d) => d.numero === C.itN && !d.entregadoAt), "el panel de cierre no lista el informe técnico");
+    const a = await avance(C.otN.id);
+    afirmar(a.etapaActual === "entrega" && a.siguiente?.texto === `Registrar la entrega del informe técnico ${C.itN}`, `ruta: ${a.etapaActual} · ${a.siguiente?.texto}`);
+    afirmar(!(await enListas(C.otN)), "figura en «OT listas para cerrar» con el informe sin entregar");
+    return `${cot.codigo} → ${C.otN.codigo} · ${C.itN} emitido · cierre y ruta piden su entrega`;
+  });
+
+  await paso("Cierre Metrología · Todos no calibrables: entrega → devolución → cierre técnico → lista para cerrar → cierre (el metrólogo no) → factura", async () => {
+    const b = `/ot/${C.otN.id}/instrumentos/${C.iN}`;
+    await exigir(403, U.fin, "POST", `${b}/informe-tecnico/entregar`, { medio: "mano", destinatario: "Cliente" });
+    await ok(U.ventas, "POST", `${b}/informe-tecnico/entregar`, { medio: "mano", destinatario: "Encargado del cliente" });
+    await ok(U.metro, "POST", `${b}/devolucion`, { fechaHora: new Date().toISOString(), recibidoPor: "Encargado del cliente", estadoFisico: "danado", observacion: "Se devuelve sin calibrar" });
+    const ct = await ok(U.jefe, "POST", `/ot/${C.otN.id}/metrologia/cierre-tecnico`);
+    afirmar(ct.data.estado === "finalizada", JSON.stringify(ct.data));
+    const a = await avance(C.otN.id);
+    afirmar(a.etapaActual === "cierre" && etapaDe(a, "cierre")?.detalle === "Lista para cerrar", `ruta: ${a.etapaActual} · ${etapaDe(a, "cierre")?.detalle} · ${a.siguiente?.texto}`);
+    afirmar(await enListas(C.otN), "no figura en «OT listas para cerrar»");
+    const ban = lista(await ok(U.planif, "GET", "/me/bandeja")).find((x) => x.clave === "ot_listas_cerrar");
+    afirmar(ban && ban.cantidad >= 1, "la tarjeta «OT listas para cerrar» no cuenta la OT");
+    const c = await ok(U.planif, "GET", `/ot/${C.otN.id}/cierre`);
+    afirmar(c.puedeCerrar && !c.faltantes.length, `faltantes: ${c.faltantes.join(" | ")}`);
+    await exigir(403, U.metro, "POST", `/ot/${C.otN.id}/cerrar`, {});
+    const r = await ok(U.planif, "POST", `/ot/${C.otN.id}/cerrar`, {});
+    afirmar(r.ot.estado === "cerrada" && r.facturaCreada?.id && r.facturaCreada.total > 0, `cierre: ${r.ot.estado} · factura ${JSON.stringify(r.facturaCreada)}`);
+    afirmar(!(await enListas(C.otN)), "la OT cerrada sigue en «OT listas para cerrar»");
+    const a2 = await avance(C.otN.id);
+    afirmar(a2.etapaActual === "factura" && etapaDe(a2, "cierre")?.estado === "hecho", `ruta tras cerrar: ${a2.etapaActual}`);
+    return `${C.otN.codigo} cerrada · factura ${r.facturaCreada.numero} $${Number(r.facturaCreada.total).toLocaleString("es-CL")} · metrólogo → 403`;
+  });
+
+  await paso("Cierre Metrología · Servicio externo: certificado validado y entregado (B-029) → devolución → cierre técnico → cierre", async () => {
+    const it = (await met(C.otC.id)).instrumentos[0];
+    const c0 = await ok(U.planif, "GET", `/ot/${C.otC.id}/cierre`);
+    afirmar(!c0.faltantes.some((f) => /no tiene informes ni certificados/.test(f)), "el certificado externo validado no cuenta como documento");
+    afirmar((c0.documentosNoCalibrables ?? []).some((d) => d.tipo === "certificado_externo" && d.entregadoAt), "el panel de cierre no lista el certificado externo");
+    await ok(U.metro, "POST", `/ot/${C.otC.id}/instrumentos/${it.id}/devolucion`, { fechaHora: new Date().toISOString(), recibidoPor: "Encargado del cliente", estadoFisico: "bueno", observacion: "Vuelve del proveedor externo" });
+    await ok(U.jefe, "POST", `/ot/${C.otC.id}/metrologia/cierre-tecnico`);
+    afirmar(await enListas(C.otC), "la OT del externo no figura en «OT listas para cerrar»");
+    const r = await ok(U.planif, "POST", `/ot/${C.otC.id}/cerrar`, {});
+    afirmar(r.ot.estado === "cerrada" && !r.facturaCreada, `cierre: ${r.ot.estado} · factura ${JSON.stringify(r.facturaCreada)}`);
+    return `${C.otC.codigo} cerrada con EXT-C2-${sello} (OT interna sin cobro: sin factura)`;
   });
 
   /* ----------------------------------------- B-028 / B-043 / B-027 / B-081 */

@@ -19,6 +19,7 @@
  *    certificado externo PDF, validación).
  *  - BL-201: el certificado del LNF de un transductor del maestro publica clase y t/u/v.
  *  - Formatos: ASTM de ITT01 y certificado bilingüe del LNF.
+ *  - Cierre final de la OT mixta (certificado + informe técnico del no calibrable), 24-10.
  * Reglas: docs/FLUJO_METROLOGIA.md §9.
  *
  * Uso:
@@ -387,6 +388,22 @@ async function recorrido(C) {
     const r = await ok(U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
     afirmar(r.data.estado === "finalizada", JSON.stringify(r.data));
     return "OT finalizada";
+  });
+
+  /* ------------- cierre final del caso mixto (decisión 24-10: informe técnico = documento) */
+  await paso("Cierre final · OT mixta (certificado de calibración + informe técnico del no calibrable): devolución de los dos y cierre con factura", async () => {
+    const c0 = await ok(U.planif, "GET", `/ot/${C.ot.id}/cierre`);
+    afirmar(!c0.puedeCerrar && c0.faltantes.every((f) => /sigue en custodia/.test(f)), `faltantes: ${c0.faltantes.join(" | ")}`);
+    afirmar((c0.documentosNoCalibrables ?? []).some((d) => d.numero === C.it && d.entregadoAt), "el cierre no lista el informe técnico entregado");
+    const dev = { fechaHora: ahoraIso(), recibidoPor: "Encargado del cliente", estadoFisico: "bueno" };
+    await ok(U.metro, "POST", `/ot/${C.ot.id}/instrumentos/${C.i1.id}/devolucion`, dev);
+    await ok(U.metro, "POST", `/ot/${C.ot.id}/instrumentos/${C.i2.id}/devolucion`, { ...dev, estadoFisico: "danado", observacion: "Se devuelve sin calibrar" });
+    const c = await ok(U.planif, "GET", `/ot/${C.ot.id}/cierre`);
+    afirmar(c.puedeCerrar, `faltantes: ${c.faltantes.join(" | ")}`);
+    await exigir(403, U.metro, "POST", `/ot/${C.ot.id}/cerrar`, {});
+    const r = await ok(U.planif, "POST", `/ot/${C.ot.id}/cerrar`, {});
+    afirmar(r.ot.estado === "cerrada" && r.facturaCreada?.id, `cierre: ${r.ot.estado} · factura ${JSON.stringify(r.facturaCreada)}`);
+    return `${C.ot.codigo} cerrada con ${C.num1} y ${C.it} · factura ${r.facturaCreada.numero} · metrólogo → 403`;
   });
 
   /* --------------------------- BL-199 / BL-075 · OT interlaboratorio */
