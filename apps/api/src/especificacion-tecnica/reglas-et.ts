@@ -308,6 +308,17 @@ export function planDesglose(puntos: PuntoEt[]): PlanDesglose {
   };
 }
 
+/**
+ * D03-18 · Métodos con los que «Registrar OT» crea la muestra del PRODUCTO por
+ * una E.T.: los de sus puntos sin componente (ensayos del producto e
+ * inspecciones con ensayo). Los de cada componente van a su submuestra al
+ * «Confirmar plan de ensayos» y no se repiten en el producto.
+ */
+export function metodosDelProducto(puntos: PuntoEt[]): string[] {
+  const plan = planDesglose(puntos);
+  return unicos([...plan.producto.puntos, ...plan.inspecciones.puntos].map((p) => p.catMetodoId));
+}
+
 /** Código de una submuestra de componente: «<muestra>-C<k>» (k = siguiente libre). */
 export function codigoSubmuestra(codigoMuestra: string, existentes: string[]): string {
   const re = new RegExp(`^${codigoMuestra.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-C(\\d+)$`);

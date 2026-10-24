@@ -7,6 +7,7 @@ import {
   fuenteDe,
   motivoNoPermitido,
   planDesglose,
+  metodosDelProducto,
   puedeGestionar,
   puedeGestionarConSeccion,
   puedeVer,
@@ -137,6 +138,14 @@ describe("E.T. · desglose producto → componentes e inspecciones (EP-03 1.3)",
     expect(d.inspecciones.puntos.map((x) => x.punto)).toEqual(["5", "6"]);
     expect(d.inspecciones.sinEnsayo.map((x) => x.punto)).toEqual(["6"]);
     expect(d.sinEnsayo).toEqual([]);
+  });
+  it("D03-18 · la muestra del producto nace solo con los métodos de sus puntos, no con los de los componentes", () => {
+    const M3 = "00000000-0000-0000-0000-0000000000c3";
+    const conComp = [...puntos, p({ punto: "7", catMetodoId: M3, componente: "Forro" })];
+    expect(metodosDelProducto(conComp)).toEqual([M2, M1]);
+    expect(metodosDelProducto(conComp)).not.toContain(M3);
+    // E.T. solo con componentes: el producto no lleva ensayos (los llevan sus submuestras).
+    expect(metodosDelProducto([p({ punto: "1", catMetodoId: M3, componente: "Forro" })])).toEqual([]);
   });
   it("códigos de submuestra correlativos", () => {
     expect(codigoSubmuestra("OT-1-M1", [])).toBe("OT-1-M1-C1");

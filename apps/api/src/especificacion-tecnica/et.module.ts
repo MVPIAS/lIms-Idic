@@ -67,6 +67,7 @@ import {
   erroresPunto,
   motivoNoPermitido,
   planDesglose,
+  metodosDelProducto,
   especDePunto,
   nombreItemInspeccion,
   puedeGestionarConSeccion,
@@ -311,6 +312,8 @@ export class EspecificacionTecnicaService {
       ...et,
       laboratoriosCodigos: (et.laboratorios ?? []).map((l: string) => nombreLab.get(l) ?? "?"),
       puntos,
+      // D03-18: «Registrar OT» crea la muestra del producto solo con estos métodos.
+      metodosProducto: metodosDelProducto(puntos as PuntoEt[]),
       versiones,
       uso,
       laboratorios: labs,
