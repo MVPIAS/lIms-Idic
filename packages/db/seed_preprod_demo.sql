@@ -20,15 +20,19 @@ FROM tenant t, (VALUES
 ) AS v(rut, razon, tipo, tel)
 WHERE t.codigo='IDIC' ON CONFLICT (tenant_id, rut) DO NOTHING;
 
--- Proveedores demo (codigo NOT NULL + UNIQUE(tenant_id, codigo))
+-- Proveedores demo (codigo NOT NULL + UNIQUE(tenant_id, codigo)). Empresas FICTICIAS
+-- con RUT de prueba (módulo 11, tramo 99.999.91x): el repositorio es público (D04-28).
+-- align_f4_correcciones.sql renombra en las bases ya desplegadas las filas que esta
+-- semilla creó antes con empresas reales; la clave es el código, así que reaplicar
+-- esta semilla nunca duplica un proveedor.
 INSERT INTO proveedor (tenant_id, codigo, razon_social, rut, telefono, activo)
 SELECT t.id, v.codigo, v.razon, v.rut, v.tel, TRUE
 FROM tenant t, (VALUES
-  ('PROV-001','Agilent Technologies Chile','96.800.570-3','+56 2 2570 0000'),   -- Equipos/reactivos HPLC-AAS
-  ('PROV-002','Merck S.A. Chile','88.412.100-6','+56 2 2830 0000'),             -- Reactivos y estándares
-  ('PROV-003','Calibraciones Metrológicas Ltda.','77.198.320-8','+56 2 2711 0000'), -- Calibración de patrones
-  ('PROV-004','Instru-Lab Chile','79.685.230-0','+56 2 2685 0000'),             -- Instrumentos de ensayo mecánico
-  ('PROV-005','Gases y Equipos Indura','96.912.330-0','+56 2 2530 0000')        -- Gases de laboratorio
+  ('PROV-001','Proveedor Prueba 1 Aiuken S.A.','99.999.911-5','+56 2 2000 0101'),   -- Equipos/reactivos HPLC-AAS
+  ('PROV-002','Proveedor Prueba 2 Aiuken S.A.','99.999.912-3','+56 2 2000 0102'),   -- Reactivos y estándares
+  ('PROV-003','Proveedor Prueba 3 Aiuken S.A.','99.999.913-1','+56 2 2000 0103'),   -- Calibración de patrones
+  ('PROV-004','Proveedor Prueba 4 Aiuken S.A.','99.999.914-K','+56 2 2000 0104'),   -- Instrumentos de ensayo mecánico
+  ('PROV-005','Proveedor Prueba 5 Aiuken S.A.','99.999.915-8','+56 2 2000 0105')    -- Gases de laboratorio
 ) AS v(codigo, razon, rut, tel)
 WHERE t.codigo='IDIC' ON CONFLICT (tenant_id, codigo) DO NOTHING;
 

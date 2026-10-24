@@ -65,7 +65,7 @@ SELECT
   v.cierre,
   v.notas
 FROM tenant t, (VALUES
-  ('OPP-2026-0001','Renovación análisis de aceros estructurales', '91.021.000-9','Ing. P. Muñoz',  48500000, 60, 'propuesta',   'viva',    'referido',   DATE '2026-09-30','Propuesta enviada; pendiente aprobación técnica del cliente.'),
+  ('OPP-2026-0001','Renovación análisis de aceros estructurales', '99.999.902-6','Ing. P. Muñoz',  48500000, 60, 'propuesta',   'viva',    'referido',   DATE '2026-09-30','Propuesta enviada; pendiente aprobación técnica del cliente.'),
   ('OPP-2026-0002','Ensayos balísticos munición 5.56 lote 2026',  '61.104.000-8','Cap. R. Torres',  92000000, 75, 'negociacion', 'viva',    'licitacion', DATE '2026-08-15','En negociación de plazos y penalidades.'),
   ('OPP-2026-0003','Servicio de peritaje armas incautadas',       '71.541.400-7','Subof. L. Rojas', 15300000, 40, 'calificada',  'viva',    'evento',     DATE '2026-10-20','Levantamiento de requisitos con DEPTOL5.'),
   ('OPP-2026-0004','Control de calidad alimentos programa escolar','61.219.000-3','Sra. C. Díaz',    27800000, 30, 'prospecto',   'viva',    'web',        DATE '2026-11-10','Primer contacto; interesados en acreditación.'),
