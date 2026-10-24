@@ -19,6 +19,7 @@ import { PlantillaRenderService } from "../plantilla-render/plantilla-render.ser
 import { AvisosService } from "../avisos/avisos.service";
 import { escapeHtml } from "../plantilla-render/html.util";
 import { hoyCl } from "../ot/plazos";
+import { exigirMedioEnvioActivo } from "../common/medios-envio";
 import { ramaDeUnidad } from "../bpch/cabecera/cabecera-ot";
 import {
   NOMBRE_DESTINO,
@@ -479,6 +480,7 @@ export class SeguimientoService {
 
   async registrarEnvio(id: string, dto: EnvioDto, req: any) {
     const o = await this.ot(id, req);
+    await exigirMedioEnvioActivo(this.prisma, o.tenant_id, dto.medio);
     const fecha = dto.fecha ?? hoyCl();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || fecha > hoyCl()) throw new BadRequestException("La fecha del envío no puede ser futura.");
     const docs = (await this.documentosOt(id)).filter((d) => (dto.certificadoIds ?? []).includes(d.id));
@@ -589,7 +591,8 @@ export class SeguimientoService {
       );
       // Los documentos del circuito que aún no tenían entrega quedan entregados con este envío.
       // El medio real del envío (B-024: «Oficio» quedaba como «Otro»).
-      const medioEntrega = ["correo", "mano", "oficio", "oficina_partes", "libro", "courier", "plataforma"].includes(dto.medio) ? dto.medio : "otro";
+      // Frente f5: el mismo código de «Parámetros del sistema › medio_envio» (ya validado).
+      const medioEntrega = dto.medio;
       for (const d of docs.filter((x) => !x.entregadoAt))
         await tx.$executeRawUnsafe(
           `UPDATE certificado SET entregado_at = $2::date + (now() AT TIME ZONE 'America/Santiago')::time AT TIME ZONE 'America/Santiago',

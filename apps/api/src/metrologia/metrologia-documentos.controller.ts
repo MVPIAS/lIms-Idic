@@ -16,7 +16,8 @@ import { ancestroDeTipo } from "../rbac/alcance";
 import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { MetrologiaOtService, fechaEntrega } from "./metrologia-ot.controller";
-import { MEDIOS_ENTREGA_CAL, formatearNumero, siguienteCorrelativo, solicitanteDeOt } from "./metrologia-ot.reglas";
+import { formatearNumero, siguienteCorrelativo, solicitanteDeOt } from "./metrologia-ot.reglas";
+import { exigirMedioEnvioActivo, zMedioEnvio } from "../common/medios-envio";
 import { instrumentosDeOt } from "./metrologia-ot.datos";
 import {
   MAX_PDF_EXTERNO, motivoExterno, motivoInforme, revisarPdf, type AccionExterno, type AccionInforme, type ExternoDoc, type InformeDoc,
@@ -37,7 +38,7 @@ const InformeSchema = z.object({ hallazgos: t500, motivo: t500, recomendacion: z
 const MotivoSchema = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres)").max(1000) });
 const EntregaSchema = z.object({
   fecha: z.string().trim().max(40).optional(),
-  medio: z.enum(MEDIOS_ENTREGA_CAL),
+  medio: zMedioEnvio, // frente f5: «Parámetros del sistema › medio_envio»
   destinatario: z.string().trim().min(2, "Indique a quién se entregó").max(160),
   observacion: z.string().trim().max(1000).nullish(),
 });
@@ -227,6 +228,7 @@ export class MetrologiaDocumentosService {
     const d = EntregaSchema.parse(body ?? {});
     const ot = await this.ot.cargarOt(otId, req);
     await this.exigirPermiso(req, ["certificado.entregar", "metrologia.crear"], ot, "registrar la entrega del informe técnico");
+    await exigirMedioEnvioActivo(this.prisma, ot.tenantId, d.medio);
     await this.prisma.$transaction(async (tx) => {
       const it = await this.itemDe(otId, itemId, tx);
       const inf = await this.informeDe(itemId, tx, true);
@@ -247,6 +249,7 @@ export class MetrologiaDocumentosService {
     const d = EntregaSchema.parse(body ?? {});
     const ot = await this.ot.cargarOt(otId, req);
     await this.exigirPermiso(req, ["certificado.entregar", "metrologia.crear"], ot, "registrar la entrega del certificado externo");
+    await exigirMedioEnvioActivo(this.prisma, ot.tenantId, d.medio);
     await this.prisma.$transaction(async (tx) => {
       const it = await this.itemDe(otId, itemId, tx);
       const ext = await this.externoDe(itemId, tx, true);

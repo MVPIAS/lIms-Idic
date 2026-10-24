@@ -15,7 +15,8 @@ import { useRouter } from "next/navigation";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora, fechaDia } from "@/lib/format";
 import { toast, confirmar } from "@/components/ui/feedback";
-import { MEDIOS_ENTREGA, textoMedio } from "@/lib/documentos";
+import { textoMedio } from "@/lib/documentos";
+import { useMediosEnvio } from "@/lib/lista-parametro";
 import Modal from "@/components/documentos/Modal";
 import css from "./ficha.module.css";
 import NoCalibrables from "./NoCalibrables";
@@ -34,6 +35,7 @@ type Dialogo =
 const vacioItem = () => ({ descripcion: "", marca: "", modelo: "", serie: "", idEspecial: "", capacidad: "", resolucion: "", rango: "", procesoCodigo: "", sentido: "", puntos: "", intervaloMeses: "", equipoCodigo: "" });
 
 export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }: { otId: string; onCambio?: () => void; modo?: "instrumentos" | "cierre" }) {
+  useMediosEnvio(); // frente f5: textos de los medios de envío (Parámetros del sistema)
   const router = useRouter();
   const [d, setD] = useState<any>(null);
   const [error, setError] = useState("");
@@ -437,6 +439,7 @@ function DialogoRecepcion({ item, laboratorio, ocupado, onCerrar, onGuardar }: {
 }
 
 function DialogoEntrega({ item, ocupado, onCerrar, onGuardar }: { item: any; ocupado: boolean; onCerrar: () => void; onGuardar: (b: any) => void }) {
+  const medios = useMediosEnvio(); // frente f5: «Parámetros del sistema › medio_envio»
   const [f, setF] = useState({ fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), medio: "", destinatario: "", observacion: "" });
   return (
     <Modal titulo={`Registrar la entrega del certificado ${item.calibracion?.numeroCertificado ?? ""}`} onCerrar={onCerrar}
@@ -447,7 +450,7 @@ function DialogoEntrega({ item, ocupado, onCerrar, onGuardar }: { item: any; ocu
         <div className="field"><label htmlFor="en-f">Fecha de entrega <Req /></label><input id="en-f" type="date" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></div>
         <div className="field"><label htmlFor="en-m">Medio <Req /></label>
           <select id="en-m" value={f.medio} onChange={(e) => setF({ ...f, medio: e.target.value })}>
-            <option value="">Seleccione…</option>{MEDIOS_ENTREGA.map((m) => <option key={m.valor} value={m.valor}>{m.texto}</option>)}
+            <option value="">Seleccione…</option>{medios.opciones.map((m) => <option key={m.codigo} value={m.codigo}>{m.etiqueta}</option>)}
           </select></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="en-d">Destinatario <Req /></label><input id="en-d" maxLength={160} value={f.destinatario} onChange={(e) => setF({ ...f, destinatario: e.target.value })} /></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="en-o">Observación</label><input id="en-o" maxLength={1000} value={f.observacion} onChange={(e) => setF({ ...f, observacion: e.target.value })} /></div>

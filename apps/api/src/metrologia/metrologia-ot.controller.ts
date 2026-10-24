@@ -5,6 +5,7 @@ import {
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
+import { exigirMedioEnvioActivo, textoEnFrase, zMedioEnvio } from "../common/medios-envio";
 import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
@@ -12,7 +13,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { caminoEstadosOt, faltantesParaCerrar } from "../ot/plazos";
 import { motivoHabilitacion, type Firmante } from "./metrologia.reglas";
 import {
-  ESTADOS_FISICOS, MEDIOS_ENTREGA_CAL, instanteChile, calibracionVigente, documentosDeMetrologia, etiquetaInstrumento, faltantesInstrumentos,
+  ESTADOS_FISICOS, instanteChile, calibracionVigente, documentosDeMetrologia, etiquetaInstrumento, faltantesInstrumentos,
   motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion,
 } from "./metrologia-ot.reglas";
 import { LABS_SAM, calibracionesDeOt, cierreExigeDevolucion, documentosNoCalibrablesDeOt, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
@@ -75,13 +76,11 @@ const DevolucionSchema = z.object({
 const EntregaSchema = z.object({
   /** AAAA-MM-DD (día de Chile) o fecha-hora; sin ella, ahora. */
   fecha: z.string().trim().max(40).optional(),
-  medio: z.enum(MEDIOS_ENTREGA_CAL),
+  // Frente f5: «Parámetros del sistema › medio_envio» (se comprueba que esté activo al entregar).
+  medio: zMedioEnvio,
   destinatario: z.string().trim().min(2, "Indique a quién se entregó").max(160),
   observacion: texto(1000),
 });
-const TEXTO_MEDIO: Record<string, string> = {
-  mano: "en mano", correo: "por correo electrónico", oficio: "por oficio", oficina_partes: "por oficina de partes", courier: "por courier", plataforma: "por la plataforma del cliente", otro: "otro medio",
-};
 const MotivoSchema = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres)").max(1000) });
 const CorreoSchema = z.object({
   destinatarios: z.array(z.string().trim().email("Correo no válido").max(160)).min(1, "Indique al menos un correo").max(10),
@@ -474,6 +473,7 @@ export class MetrologiaOtService {
     const d = EntregaSchema.parse(body ?? {});
     const ot = await this.cargarOt(otId, req);
     await this.exigir(req, "entregar", ot);
+    const medio = textoEnFrase(await exigirMedioEnvioActivo(this.prisma, ot.tenantId, d.medio));
     await this.prisma.$transaction(async (tx) => {
       const filas = await tx.$queryRawUnsafe<any[]>(
         `SELECT id, codigo, numero_certificado AS "numeroCertificado", estado, emitido_at AS "emitidoAt", entregado_at AS "entregadoAt"
@@ -490,7 +490,7 @@ export class MetrologiaOtService {
       await tx.$executeRawUnsafe(
         `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
          VALUES ($1::uuid, 'ENTREGADA', 'emitida', 'emitida', $2::uuid, $3)`,
-        calId, req?.user?.sub ?? null, `Entregado a ${d.destinatario} · ${TEXTO_MEDIO[d.medio] ?? d.medio}${d.observacion ? ` · ${d.observacion}` : ""}`);
+        calId, req?.user?.sub ?? null, `Entregado a ${d.destinatario} · ${medio}${d.observacion ? ` · ${d.observacion}` : ""}`);
     });
     // P8.4 con el parámetro «al entregar»: el equipo del laboratorio dueño toma el certificado ahora.
     const cfg = await leerConfigFicha(this.prisma as any, ot.tenantId);

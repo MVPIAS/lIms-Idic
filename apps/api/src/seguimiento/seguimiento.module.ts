@@ -5,6 +5,7 @@ import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
+import { zMedioEnvio } from "../common/medios-envio";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { ConfiguracionModule } from "../configuracion/configuracion.module";
@@ -42,7 +43,8 @@ const Registro = z.object({
 const Anular = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (al menos 5 caracteres)").max(500) });
 const Envio = z.object({
   fecha: fecha.optional(),
-  medio: z.enum(["correo", "mano", "libro", "oficio", "oficina_partes", "courier", "plataforma", "otro"]),
+  // Frente f5: la lista es «Parámetros del sistema › medio_envio» (el servicio comprueba que esté activo).
+  medio: zMedioEnvio,
   destinatario: z.string().trim().min(2, "Indique a quién se envía").max(300),
   certificadoIds: z.array(z.string().uuid()).max(50).optional(),
   registroIds: z.array(z.string().uuid()).max(50).optional(),

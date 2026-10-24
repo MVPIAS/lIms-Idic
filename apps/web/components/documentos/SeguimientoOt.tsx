@@ -13,6 +13,7 @@
  */
 import { avisarCambioOt, useCambiosOt } from "@/lib/refresco";
 import { textoMedio } from "@/lib/etiquetas";
+import { useMediosEnvio } from "@/lib/lista-parametro";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { llamar } from "@/lib/laboratorio";
@@ -21,16 +22,6 @@ import { toast } from "@/components/ui/feedback";
 import Modal from "./Modal";
 import { subirFormulario } from "@/lib/d11";
 
-const MEDIOS_ENVIO = [
-  { valor: "correo", texto: "Correo electrónico (adjunta los PDF)" },
-  { valor: "mano", texto: "Entrega en mano" },
-  { valor: "oficio", texto: "Oficio" },
-  { valor: "oficina_partes", texto: "Oficina de partes" },
-  { valor: "courier", texto: "Courier" },
-  { valor: "libro", texto: "Libro de entrega" },
-  { valor: "plataforma", texto: "Plataforma" },
-  { valor: "otro", texto: "Otro" },
-];
 const TIPOS_REGISTRO = ["CARTA", "OFICIO", "CERTIFICADO", "INFORME", "IVC", "PLANILLA", "ACTA", "OTRO"];
 const CORREO: Record<string, string> = {
   enviado: "Correo enviado",
@@ -44,6 +35,8 @@ const CORREO: Record<string, string> = {
 type Dialogo = null | "plazo" | "recepcion" | "registro" | "envio";
 
 export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCambio?: () => void }) {
+  // Frente f5: los medios salen de «Parámetros del sistema › medio_envio» (antes, lista propia aquí).
+  const medios = useMediosEnvio();
   const [d, setD] = useState<any>(null);
   const [error, setError] = useState("");
   const [dialogo, setDialogo] = useState<Dialogo>(null);
@@ -196,7 +189,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
                     <td>—</td>
                     <td style={{ whiteSpace: "nowrap" }}>{fechaDia(e.fecha)}</td>
                     <td style={{ fontSize: 11.5 }}>
-                      {MEDIOS_ENVIO.find((m) => m.valor === e.medio)?.texto ?? e.medio} · a {e.destinatario}: {(e.documentos ?? []).map((x: any) => x.numero).join(", ")}
+                      {medios.texto(e.medio)} · a {e.destinatario}: {(e.documentos ?? []).map((x: any) => x.numero).join(", ")}
                       {e.factura ? ` · factura ${e.factura}` : ""}
                     </td>
                   </tr>
@@ -387,7 +380,7 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
               <label htmlFor="seg-11">Medio <span className="req">*</span></label>
               <select id="seg-11" value={envio.medio} onChange={(e) => setEnvio({ ...envio, medio: e.target.value })}>
                 <option value="">— Seleccione —</option>
-                {MEDIOS_ENVIO.map((m) => <option key={m.valor} value={m.valor}>{m.texto}</option>)}
+                {medios.opciones.map((m) => <option key={m.codigo} value={m.codigo}>{m.codigo === "correo" ? `${m.etiqueta} (adjunta los PDF)` : m.etiqueta}</option>)}
               </select>
             </div>
             <div className="field"><label htmlFor="seg-12">Fecha <span className="req">*</span></label><input id="seg-12" type="date" value={envio.fecha} max={hoyISO()} onChange={(e) => setEnvio({ ...envio, fecha: e.target.value })} /></div>

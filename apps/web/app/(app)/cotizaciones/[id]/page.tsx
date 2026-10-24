@@ -22,7 +22,8 @@ import { DialogoAceptacion, DialogoAnulacion } from "../_components/Dialogos";
 import LaboratorioCotizacion from "../_components/LaboratorioCotizacion";
 import Panel from "../_components/Panel";
 import { ACEPTACION_LABEL, descargarPdfCotizacion, pedir, pedirTexto, type Opcion } from "../_components/comercial";
-import { PESTANA_DE_ETAPA, TEXTO_EVENTO, TEXTO_MEDIO, type Circuito, type EstadoEtapa, type PestanaCot } from "../_components/circuito";
+import { PESTANA_DE_ETAPA, TEXTO_EVENTO, type Circuito, type EstadoEtapa, type PestanaCot } from "../_components/circuito";
+import { useMediosEnvio } from "@/lib/lista-parametro";
 import { confirmar } from "@/components/ui/feedback";
 
 const ICONO: Record<EstadoEtapa, string> = { hecho: "✓", en_curso: "", pendiente: "", no_aplica: "–", bloqueado: "!" };
@@ -299,7 +300,9 @@ function DocumentoYFirma({ c, onHecho, onError }: { c: Circuito; onHecho: (m: st
 function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<void> }) {
   const k = c.cotizacion;
   const { puede } = usePermisos();
-  const [medio, setMedio] = useState<"correo" | "mano" | "courier" | "oficio" | "oficina_partes">("correo");
+  // Frente f5: los medios salen de «Parámetros del sistema › medio_envio».
+  const medios = useMediosEnvio();
+  const [medio, setMedio] = useState<string>("correo");
   const [destinatarios, setDestinatarios] = useState(() => [...new Set(c.destinatarios.filter((d) => d.principal).map((d) => d.email))].join(", "));
   const [observacion, setObservacion] = useState("");
   const [error, setError] = useState("");
@@ -312,7 +315,8 @@ function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<vo
       return setError(
         medio === "mano" ? "Indique a quién se entregó."
           : medio === "courier" ? "Indique la empresa de courier y el número de seguimiento."
-          : "Indique el Nº del oficio o del registro de la Oficina de partes.",
+          : medio === "oficio" || medio === "oficina_partes" ? "Indique el Nº del oficio o del registro de la Oficina de partes."
+          : "Indique a quién se entregó o la referencia del envío.",
       );
     setBusy(true);
     try {
@@ -333,7 +337,7 @@ function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<vo
     <div>
       {k.enviadaAt ? (
         <div className="alert info" role="status">
-          Enviada el {fechaHora(k.enviadaAt)} · {TEXTO_MEDIO[k.enviadaMedio ?? ""] ?? k.enviadaMedio}
+          Enviada el {fechaHora(k.enviadaAt)} · {medios.texto(k.enviadaMedio)}
           {k.enviadaDestinatarios ? <> · a {k.enviadaDestinatarios}</> : null}
           {k.envioObservacion ? <> · {k.envioObservacion}</> : null}
         </div>
@@ -358,12 +362,12 @@ function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<vo
           <div className="form-grid cols-2">
             <div className="field">
               <label htmlFor="env-medio">Medio <span className="req">*</span></label>
-              <select id="env-medio" value={medio} onChange={(e) => setMedio(e.target.value as any)}>
-                <option value="correo">Correo electrónico (adjunta el PDF)</option>
-                <option value="mano">Entrega en mano</option>
-                <option value="courier">Courier</option>
-                <option value="oficio">Oficio (generado fuera del LIMS)</option>
-                <option value="oficina_partes">Oficina de partes</option>
+              <select id="env-medio" value={medio} onChange={(e) => setMedio(e.target.value)}>
+                {medios.opciones.map((m) => (
+                  <option key={m.codigo} value={m.codigo}>
+                    {m.codigo === "correo" ? `${m.etiqueta} (adjunta el PDF)` : m.codigo === "oficio" ? `${m.etiqueta} (generado fuera del LIMS)` : m.etiqueta}
+                  </option>
+                ))}
               </select>
             </div>
             {medio === "correo" ? (
@@ -384,7 +388,7 @@ function Envio({ c, onHecho }: { c: Circuito; onHecho: (m: string) => Promise<vo
               </div>
             ) : <div />}
             <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label htmlFor="env-obs">{medio === "correo" ? "Observación" : medio === "mano" ? "Entregada a (nombre y cargo)" : medio === "courier" ? "Courier y número de seguimiento" : "Nº del oficio o del registro de la Oficina de partes"} {medio !== "correo" && <span className="req">*</span>}</label>
+              <label htmlFor="env-obs">{medio === "correo" ? "Observación" : medio === "mano" ? "Entregada a (nombre y cargo)" : medio === "courier" ? "Courier y número de seguimiento" : medio === "oficio" || medio === "oficina_partes" ? "Nº del oficio o del registro de la Oficina de partes" : "Entregada a o referencia del envío"} {medio !== "correo" && <span className="req">*</span>}</label>
               <input id="env-obs" value={observacion} onChange={(e) => setObservacion(e.target.value)} maxLength={1000} />
             </div>
           </div>
@@ -428,6 +432,7 @@ function Aceptacion({ cot, c, acc, onAceptar }: { cot: any; c: Circuito; acc: Re
 
 /* ----------------------------------------------------------- bitácora --- */
 function Bitacora({ c }: { c: Circuito }) {
+  const medios = useMediosEnvio();
   if (!c.eventos.length) return <p className="subtitle" style={{ margin: 0 }}>Sin movimientos del circuito todavía.</p>;
   return (
     <table className="data">
@@ -439,7 +444,7 @@ function Bitacora({ c }: { c: Circuito }) {
             <td>{e.usuarioNombre ?? "—"}</td>
             <td>{TEXTO_EVENTO[e.accion] ?? e.accion}{e.unidadCodigo ? ` · ${e.unidadCodigo}` : ""}{e.solicitudNumero ? ` (${e.solicitudNumero})` : ""}</td>
             <td>
-              {e.comentario ?? (e.detalle?.medio ? TEXTO_MEDIO[e.detalle.medio] ?? e.detalle.medio : "")}
+              {e.comentario ?? (e.detalle?.medio ? medios.texto(e.detalle.medio) : "")}
               {e.detalle?.otId ? (
                 <>{e.detalle?.numero ? `${e.detalle.numero} · ` : ""}OT <Link href={`/ot/${e.detalle.otId}` as any} className="codigo" style={{ textDecoration: "underline" }}>{e.detalle.otCodigo}</Link></>
               ) : null}

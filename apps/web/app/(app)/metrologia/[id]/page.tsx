@@ -14,7 +14,8 @@ import { fechaDia, fechaHora, num } from "@/lib/format";
 import { fmtG } from "@/lib/metrologia";
 import { llamar } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
-import { MEDIOS_ENTREGA, textoMedio } from "@/lib/documentos";
+import { textoMedio } from "@/lib/documentos";
+import { useMediosEnvio } from "@/lib/lista-parametro";
 import { ORIGEN_OT } from "@/lib/metrologiaOt";
 import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
@@ -48,6 +49,7 @@ function chip(c: any): { texto: string; clase: string } {
 }
 
 export default function FichaCalibracionPage() {
+  useMediosEnvio(); // frente f5: textos de los medios de envío (Parámetros del sistema)
   const { id } = useParams<{ id: string }>();
   const { puede } = usePermisos();
   const [c, setC] = useState<any>(null);
@@ -486,6 +488,7 @@ function CorreoDialogo({ numero, entregado, ocupado, onCerrar, onEnviar, propues
 }
 
 function EntregaDialogo({ numero, ocupado, onCerrar, onGuardar }: { numero: string; ocupado: boolean; onCerrar: () => void; onGuardar: (b: any) => void }) {
+  const medios = useMediosEnvio(); // frente f5: «Parámetros del sistema › medio_envio»
   const [f, setF] = useState({ fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), medio: "", destinatario: "", observacion: "" });
   const ok = f.fecha && f.medio && f.destinatario.trim().length >= 2;
   return (
@@ -497,7 +500,7 @@ function EntregaDialogo({ numero, ocupado, onCerrar, onGuardar }: { numero: stri
         <div className="field"><label htmlFor="ef-f">Fecha de entrega <span className="req">*</span></label><input id="ef-f" type="date" value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></div>
         <div className="field"><label htmlFor="ef-m">Medio <span className="req">*</span></label>
           <select id="ef-m" value={f.medio} onChange={(e) => setF({ ...f, medio: e.target.value })}>
-            <option value="">Seleccione…</option>{MEDIOS_ENTREGA.map((m) => <option key={m.valor} value={m.valor}>{m.texto}</option>)}
+            <option value="">Seleccione…</option>{medios.opciones.map((m) => <option key={m.codigo} value={m.codigo}>{m.etiqueta}</option>)}
           </select></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="ef-d">Destinatario <span className="req">*</span></label><input id="ef-d" maxLength={160} value={f.destinatario} onChange={(e) => setF({ ...f, destinatario: e.target.value })} /></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="ef-o">Observación</label><input id="ef-o" maxLength={1000} value={f.observacion} onChange={(e) => setF({ ...f, observacion: e.target.value })} /></div>

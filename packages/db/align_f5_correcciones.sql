@@ -150,3 +150,30 @@ SELECT r.id, p.id
   JOIN rol r     ON r.codigo = m.rol
   JOIN permiso p ON p.codigo = 'tarifa.ver'
 ON CONFLICT DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 3 · Medios de envío: una sola lista, «Parámetros del sistema › medio_envio».
+--   El seguimiento (envío conjunto), la entrega de documentos, el envío de la
+--   cotización y la entrega de Metrología tenían su propia lista en el código y
+--   duplicaban este parámetro, que solo tenía correo, mano, courier y fax. Se dan
+--   de alta los demás códigos que ya se guardan, para que todo lo guardado siga
+--   siendo válido y tenga su texto. La API comprueba que el medio esté activo
+--   (apps/api/src/common/medios-envio.ts).
+-- -----------------------------------------------------------------------------
+INSERT INTO parametro_sistema (tenant_id, categoria, codigo, etiqueta, orden, activo)
+SELECT t.id, 'medio_envio', v.codigo, v.etiqueta, v.orden, TRUE
+  FROM tenant t,
+       (VALUES ('correo',         'Correo electrónico',        1),
+               ('mano',           'Entrega en mano',           2),
+               ('courier',        'Correo postal / courier',   3),
+               ('oficio',         'Oficio',                    4),
+               ('oficina_partes', 'Oficina de partes',         5),
+               ('libro',          'Libro de entrega',          6),
+               ('plataforma',     'Plataforma del cliente',    7),
+               ('otro',           'Otro medio',                8)) AS v(codigo, etiqueta, orden)
+ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
+
+-- ot_envio fijaba la lista con un CHECK: un medio dado de alta en Parámetros no
+-- se podría registrar. La valida la API contra el parámetro. Las filas
+-- guardadas no cambian.
+ALTER TABLE ot_envio DROP CONSTRAINT IF EXISTS ck_ot_envio_medio;

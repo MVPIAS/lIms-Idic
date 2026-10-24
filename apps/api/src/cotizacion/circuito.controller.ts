@@ -3,6 +3,7 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
 import { zMoneda } from "../common/moneda";
+import { zMedioEnvio } from "../common/medios-envio";
 import { TIPOS_SERVICIO } from "./form05";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
@@ -59,7 +60,8 @@ const ResponderSchema = z.object({
 const VbSchema = z.object({ accion: z.enum(["dar", "devolver"]), comentario: texto(2000).nullable().optional() });
 const MotivoSchema = z.object({ motivo: texto(1000).min(3, "Indique el motivo.") });
 const EnviarClienteSchema = z.object({
-  medio: z.enum(["correo", "mano", "courier", "oficio", "oficina_partes"]),
+  // Frente f5: «Parámetros del sistema › medio_envio» (el servicio comprueba que esté activo).
+  medio: zMedioEnvio,
   destinatarios: z.array(z.string().trim().email("Correo inválido").max(200)).max(20).optional(),
   observacion: texto(1000).nullable().optional(),
   plantilla: z.string().max(60).optional(),

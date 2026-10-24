@@ -4,13 +4,15 @@ import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
-import { FirmaDocumentoService, MEDIOS_ENTREGA } from "./firma-documento.service";
+import { FirmaDocumentoService } from "./firma-documento.service";
+import { zMedioEnvio } from "../common/medios-envio";
 
 const Motivo = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (al menos 5 caracteres)").max(1000) });
 const Firmar = z.object({ comentario: z.string().max(500).optional() });
 const Entregar = z.object({
   fecha: z.coerce.date().optional(),
-  medio: z.enum(MEDIOS_ENTREGA),
+  // Frente f5: «Parámetros del sistema › medio_envio» (el servicio comprueba que esté activo).
+  medio: zMedioEnvio,
   destinatario: z.string().trim().min(2, "Indique a quién se entregó").max(200),
   observacion: z.string().max(1000).optional(),
   // EP-05 8.1 (frente r4c): guía, ejemplares, copias, oficio y devolución de muestras.

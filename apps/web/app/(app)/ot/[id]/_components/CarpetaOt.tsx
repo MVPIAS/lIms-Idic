@@ -16,8 +16,10 @@ import { toast } from "@/components/ui/feedback";
 import { ESTADO_DOC, abrirPdf } from "@/lib/documentos";
 import { ESTADO_OFICIO } from "@/lib/oficios";
 import { textoMedio } from "@/lib/etiquetas";
+import { useMediosEnvio } from "@/lib/lista-parametro";
 
 export default function CarpetaOt({ otId }: { otId: string }) {
+  useMediosEnvio(); // frente f5: textos de los medios de envío (Parámetros del sistema)
   const [c, setC] = useState<any>(null);
   const [error, setError] = useState("");
   const [ubicacion, setUbicacion] = useState("");

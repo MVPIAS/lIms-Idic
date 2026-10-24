@@ -44,6 +44,7 @@ import {
 } from "./parametro-configurable";
 import { AlcanceService } from "../rbac/alcance.service";
 import { MSJ_MONEDA, esMonedaOperacion } from "../common/moneda";
+import { MSJ_MEDIO_CODIGO, exigirMedioEnvio } from "../common/medios-envio";
 
 /** Tipos de unidad que reciben muestras (códigos de laboratorio de los parámetros de recepción). */
 const UNIDADES_RECEPCION = ["LABORATORIO", "SUCURSAL", "DELEGACION"];
@@ -437,6 +438,7 @@ export class ParametroSistemaController extends BaseCrudController {
   override async crear(@Body() body: unknown, @Req() req: any) {
     const dto = ParametroCreate.parse(body);
     exigirMonedaOperacion(dto.categoria, dto.codigo);
+    exigirMedioEnvio(dto.categoria, dto.codigo);
     if (protegido(dto.categoria, dto.codigo))
       throw new ConflictException(MSJ_CONFIGURABLE);
     return this.svc.crear(dto, tenantDe(req));
@@ -455,7 +457,13 @@ export class ParametroSistemaController extends BaseCrudController {
       (dto.categoria !== undefined && dto.categoria !== actual.categoria) || (dto.codigo !== undefined && dto.codigo !== actual.codigo);
     if (cambiaClave) {
       exigirMonedaOperacion(dto.categoria ?? actual.categoria, dto.codigo ?? actual.codigo);
+      exigirMedioEnvio(dto.categoria ?? actual.categoria, dto.codigo ?? actual.codigo);
+      // Los medios de envío ya usados en OT, documentos y cotizaciones no cambian de código: se desactivan.
+      if (actual.categoria === "medio_envio") throw new ConflictException(MSJ_MEDIO_CODIGO);
     }
+    // «correo» es el medio con el que el LIMS envía los PDF: no se desactiva.
+    if (actual.categoria === "medio_envio" && actual.codigo === "correo" && dto.activo === false)
+      throw new ConflictException("«Correo electrónico» no se desactiva: es el medio con el que el LIMS envía los PDF a los clientes.");
     if (CATEGORIAS_CON_HISTORIAL.includes(actual.categoria)) {
       if (cambiaClave || (dto.valor !== undefined && dto.valor !== actual.valor) || dto.activo === false)
         throw new ConflictException("Este porcentaje se cambia en «Porcentajes de la tasa de internación», con motivo: queda en el historial.");

@@ -161,3 +161,21 @@ Firmar y devolver un oficio no llevan permiso: los autoriza la matriz OFICIO.
 | Formato del Nº de oficio `OF-{LAB}-{AAAA}-{N:4}`, por unidad y año | Administración › Numeración | EP-00 §6 «Correlativo DCO POR CONFIRMAR» |
 | Oficina de partes = Director y Subdirector (`oficio.despachar`) | Administración › Roles | EP-00 3.3; EP-05 §7 «Registratura POR CONFIRMAR» |
 | Destinos del despacho: DCO, laboratorio solicitante, BPCH, cliente | — | EP-01 6.3 |
+
+## Medios de envío: una sola lista (frente f5)
+
+El medio del envío conjunto (Seguimiento y envío), de la entrega de un documento
+(panel del documento), del envío de la cotización y de la entrega de Metrología
+(certificado, informe técnico y certificado externo) sale de **Parámetros del
+sistema › `medio_envio`**. Antes cada pantalla y cada endpoint tenía su lista en el
+código y el parámetro solo tenía correo, mano, courier y fax.
+
+- `align_f5_correcciones.sql` da de alta en el parámetro todos los códigos que ya se
+  guardaban (correo, mano, courier, oficio, oficina_partes, libro, plataforma, otro):
+  lo guardado sigue siendo válido y se muestra con su texto, también lo inactivo
+  (fax). Se retira el CHECK `ck_ot_envio_medio`, que fijaba la lista en la base.
+- La API (`apps/api/src/common/medios-envio.ts`) acepta solo un medio activo de la
+  lista. En Parámetros, un medio no se borra ni cambia de código (se desactiva), y
+  «correo» no se desactiva: es el que envía los PDF.
+- El aviso de plazo al cliente (correo, oficio, teléfono, otro) no es un medio de
+  envío de documentos y conserva su lista.

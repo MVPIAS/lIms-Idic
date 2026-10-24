@@ -120,10 +120,4 @@ export const TEXTO_EVENTO: Record<string, string> = {
   aceptada: "Registró la aceptación del cliente y generó la OT",
 };
 
-export const TEXTO_MEDIO: Record<string, string> = {
-  correo: "Correo electrónico",
-  mano: "Entrega en mano",
-  courier: "Courier",
-  oficio: "Oficio",
-  oficina_partes: "Oficina de partes",
-};
+// Textos de los medios de envío: «Parámetros del sistema › medio_envio» (useMediosEnvio, frente f5).

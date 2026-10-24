@@ -6,6 +6,7 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
 import { zMoneda } from "../common/moneda";
+import { zMedioEnvio } from "../common/medios-envio";
 import { CotizacionService } from "./cotizacion.service";
 import { hoyEnChile } from "./validez";
 import { CosteoService } from "./costeo.service";
@@ -93,7 +94,8 @@ const Cabecera = {
   formato: z.enum(["NORMAL", "PERSONALIZADO"]),
   // R1: «Contado 30 días» / «Por adelantado» (códigos de parametro_sistema forma_pago).
   formaPago: z.string().max(80).nullable().optional(),
-  medioEnvio: z.string().max(40).nullable().optional(),
+  // Frente f5: código de «Parámetros del sistema › medio_envio» (el servicio comprueba que esté activo).
+  medioEnvio: z.preprocess((v) => (v === "" ? null : v), zMedioEnvio.nullable().optional()),
   moneda: zMoneda.default("CLP"),
   dolarValor: z.number().positive().nullable().optional(),
   dolarFecha: fecha.nullable().optional(),
