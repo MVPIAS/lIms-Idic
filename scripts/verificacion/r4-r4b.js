@@ -611,7 +611,8 @@ async function main() {
     const pdf = await llamar(U.bpch, "POST", "/bpch/codificacion/listado-oficial/pdf", cuerpo);
     afirmar(pdf.status === 201 && pdf.tipo.startsWith("application/pdf"), `PDF ${pdf.status}`);
     const csv = await llamar(U.bpch, "POST", "/bpch/codificacion/listado-oficial/excel", { ...cuerpo, fabricante: fabs[0].fabricante });
-    afirmar(csv.status === 201 && /Fabricante;RUT;Grupo/.test(String(csv.json)), "Excel");
+    // B-077 (frente c2): el Excel es un libro .xlsx, ya no un CSV.
+    afirmar(csv.status === 201 && /spreadsheetml/.test(csv.tipo), `Excel ${csv.status} ${csv.tipo}`);
     await exigir([403], U.ventas, "POST", "/bpch/codificacion/listado-oficial/pdf", cuerpo);
     await exigir(400, U.bpch, "POST", "/bpch/codificacion/listado-oficial/pdf", { ...cuerpo, fechaEdicion: "2999-01-01" }, /futura/);
     const em = await ok(U.bpch, "GET", "/bpch/codificacion/listado-oficial/emisiones");

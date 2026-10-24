@@ -15,7 +15,7 @@
  */
 import { escapeHtml } from "./html.util";
 import { seccionCoincide, type ConfigInforme } from "./config-informe";
-import type { EstructuraInforme, FilaInforme, FilaMetodo } from "./filas-informe";
+import { requisitoConUnidad, type EstructuraInforme, type FilaInforme, type FilaMetodo } from "./filas-informe";
 
 const GUION = "—";
 const celda = (v: string, clase = "") =>
@@ -51,7 +51,9 @@ function cabecera(est: EstructuraInforme, cfg: ConfigInforme, cols: ColsSeccion 
 
 function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme, cols: ColsSeccion = { sello: false, metodo: cfg.columnaMetodo }, conSello = true): string {
   const cumplimiento = est.modalidad === "cumplimiento";
-  const requisito = f.requisitoOrigen === "orden" ? `${f.requisito} *` : f.requisito;
+  // Sin columna «Unidad» ni unidad junto al resultado, el requisito la lleva (Anexo 02-02).
+  const req = !cfg.columnaUnidad && !cfg.unidadEnResultado && f.requisitoOrigen ? requisitoConUnidad(f.requisito, f.unidad) : f.requisito;
+  const requisito = f.requisitoOrigen === "orden" ? `${req} *` : req;
   const marca = f.requisitoOrigen === "orden" ? " *" : "";
   const cota = (v: string) => `<td class="num">${escapeHtml(v ? `${v}${marca}` : cfg.textoSinCota || GUION)}</td>`;
   const conUnidad = cfg.unidadEnResultado && f.unidad && f.resultado !== "Sin resultado" ? `${f.resultado} ${f.unidad}` : f.resultado;

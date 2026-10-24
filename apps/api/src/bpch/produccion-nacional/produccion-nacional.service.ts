@@ -13,6 +13,7 @@ import { generarPdf } from "../../plantilla-render/pdf.renderer";
 import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 import { ClasificacionService } from "../clasificacion/clasificacion.service";
 import { cuerpoInformeTecnico } from "./documento-informe-tecnico";
+import { urlVerificacionBase } from "../../common/url-verificacion";
 import {
   ETIQUETA_ESTADO_LINEA,
   comprobarGeneracionOt,
@@ -185,7 +186,7 @@ export class ProduccionNacionalService {
   ) {}
 
   private get baseVerificacion(): string {
-    return (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
+    return urlVerificacionBase();
   }
 
   async config(tenantId: string) {

@@ -27,7 +27,10 @@ import {
 import { CASOS_REFERENCIA, esClaveExcel, verificarParidad } from "./motores/paridad";
 import { CASOS_LNF, verificarParidadLNF } from "./motores/paridad-lnf";
 import { balancePorPunto } from "./motores/balance";
-import { condicionesCorregidas, errorNormalizado, puntosFueraDeRango, type Auxiliar, type ConfigFicha, type PatronRango } from "./ficha.reglas";
+import {
+  condicionesAlMotor, condicionesCorregidas, condicionesDeAuxiliares, errorNormalizado, leerValoresPatron, puntosFueraDeRango, valoresPatronAlMotor,
+  type Auxiliar, type CondicionesHoja, type ConfigFicha, type PatronRango, type ValoresPatron,
+} from "./ficha.reglas";
 import { actualizarEquipoDueno, actualizarPatronLnf, destinatariosDe, enviarCertificado, leerConfigFicha } from "./ficha.datos";
 import { ConfiguracionModule, MailService } from "../configuracion/configuracion.module";
 import { CASOS_1510, verificarParidad1510 } from "./motores/paridad-1510";
@@ -48,6 +51,7 @@ import {
 } from "./metrologia-ot.reglas";
 import { MetrologiaOtController, MetrologiaOtService } from "./metrologia-ot.controller";
 import { MetrologiaDocumentosController, MetrologiaDocumentosService } from "./metrologia-documentos.controller";
+import { urlVerificacionBase } from "../common/url-verificacion";
 import {
   avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, motivoNoEmiteMetrologo, nuevoCodigoVerificacion, numeroCertificado,
   revisarPatrones, uCertificada, type FilaCmc, type Firmante,
@@ -70,7 +74,7 @@ const TIPO_DOC = "CERTIFICADO_CALIBRACION";
 const CAMPOS_MAESTRO: Record<string, string[]> = { ITM02: ["mcm"], ITV05: ["cmcTabla", "tan", "uEqW", "uEqA"], ITM03: ["rho0", "rhoAl"] };
 /** Motores cuya U certificada es la ASIGNADA por clase (OIML R111), no la calculada. */
 const U_ASIGNADA = new Set(["ITM01", "ITM03"]);
-const URL_VERIFICACION = () => (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
+const URL_VERIFICACION = () => urlVerificacionBase();
 
 const PuntoSchema = z.object({
   nominal: z.coerce.number(),
@@ -120,6 +124,8 @@ const CrearSchema = z.object({
     }).default({}),
   }).nullish(),
   puntos: z.array(PuntoSchema).default([]),
+  /** B-043: motivo por el que se cambian los valores del patrón que vienen del maestro (corrección, U, deriva). */
+  motivoValoresPatron: z.string().trim().max(500).nullish(),
   /** Datos de entrada del motor de la IT y correcciones aplicadas (hallazgos). */
   motor: z.object({ datos: z.record(z.any()), opciones: z.record(z.boolean()).default({}) }).optional(),
 });
@@ -484,7 +490,7 @@ export class MetrologiaController {
       `SELECT p.id, p.codigo, p.tipo, p.nombre, p.marca, p.modelo, p.serie, p.rango, p.clase, p.norma_referencia, p.puesta_marcha,
               p.emisor, p.n_certificado, p.ultima_calibracion, p.intervalo_meses, p.vence, p.trazabilidad, p.u_expandida, p.deriva,
               p.laboratorio, p.fuente, p.observacion, p.activo, m.codigo AS magnitud,
-              p.rango_min, p.rango_max, p.unidad_rango, p.correcciones, p.coeficientes
+              p.rango_min, p.rango_max, p.unidad_rango, p.correcciones, p.coeficientes, p.valores_certificado
          FROM met_patron p LEFT JOIN met_magnitud m ON m.id = p.magnitud_id
         WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ORDER BY m.codigo, p.codigo`, tenantId(req));
     return { data: data.map((p) => ({ ...p, estado: estadoPatron(p.vence, f) })), fecha: f };
@@ -521,6 +527,7 @@ export class MetrologiaController {
       ["u_expandida", d.u_expandida], ["deriva", d.deriva], ["activo", d.activo], ["observacion", d.observacion],
       ["rango_min", d.rango_min], ["rango_max", d.rango_max], ["unidad_rango", d.unidad_rango],
       ["correcciones", d.correcciones === undefined ? undefined : d.correcciones === null ? null : JSON.stringify(d.correcciones), "jsonb"],
+      ["valores_certificado", d.valores_certificado === undefined ? undefined : d.valores_certificado === null ? null : JSON.stringify(d.valores_certificado), "jsonb"],
     ];
     const set: string[] = [], vals: any[] = [id, tenantId(req)];
     for (const [c, val, tipo] of campos) {
@@ -850,12 +857,21 @@ export class MetrologiaController {
   /** Detalle con el contexto de reglas (para exigir cada acción con su motivo exacto). */
   private async detalleCtx(id: string, req: any) {
     const cal = await this.cargar(id, req);
-    const [puntos, eventos] = await Promise.all([
+    const [puntos, eventos, correo] = await Promise.all([
       prisma.$queryRawUnsafe<any[]>(`SELECT * FROM met_calibracion_punto WHERE calibracion_id = $1::uuid ORDER BY orden`, id),
       prisma.$queryRawUnsafe<any[]>(
         `SELECT e.accion, e.estado_desde, e.estado_hasta, e.comentario, e.created_at, u.nombre_completo AS usuario
            FROM met_calibracion_evento e LEFT JOIN usuario u ON u.id = e.usuario_id
           WHERE e.calibracion_id = $1::uuid ORDER BY e.created_at`, id),
+      // B-081: correo que se propone en «Enviar por correo»: el contacto principal del cliente de la OT o el de su ficha.
+      cal.ot_id
+        ? prisma.$queryRawUnsafe<{ email: string | null }[]>(
+            `SELECT COALESCE(
+                      (SELECT ct.email FROM contacto ct WHERE ct.cliente_id = o.cliente_id AND ct.deleted_at IS NULL AND ct.principal
+                          AND COALESCE(ct.email, '') <> '' ORDER BY ct.created_at LIMIT 1),
+                      NULLIF(cl.contacto_email, ''), NULLIF(cl.email, '')) AS email
+               FROM orden_trabajo o LEFT JOIN cliente cl ON cl.id = o.cliente_id WHERE o.id = $1::uuid`, cal.ot_id).catch(() => [])
+        : Promise.resolve([] as { email: string | null }[]),
     ]);
     const calculada = cal.resumen != null || cal.u_max != null;
     const [cx] = await this.contextos(req, [{ ...cal, calculada }]);
@@ -872,6 +888,7 @@ export class MetrologiaController {
       // Pestaña 4: desglose uᵢ por punto del motor (vista del cálculo guardado, no recalcula).
       balance: balancePorPunto(cal.motor, cal.resultado, cal.datos, cal.opciones),
       acciones: accionesDisponibles(cx.ctx), __ctx: cx.ctx,
+      correo_propuesto: correo[0]?.email ?? null,
       // La imagen del esquema no viaja en el detalle (puede pesar 2 MB): solo si existe.
       esquema_propio: !!esquema_datos, __esquema: esquema_datos as string | null,
     };
@@ -916,10 +933,11 @@ export class MetrologiaController {
     const unidadId = await this.unidadDeCalibracion(req, t, proc, origen.ot.laboratorio);
     const fecha = fechaCalibracion(d.fecha);
     const pat = await this.patronesDe(t, d, fecha);
-    const calc = await this.calcularDto(proc, d, fecha);
+    // B-027: las condiciones de la hoja de control (auxiliares del maestro) alimentan al motor.
+    const amb = await this.ambienteDe(t, d, fecha);
+    const calc = await this.calcularDto(proc, d, fecha, condicionesDeAuxiliares(amb.auxiliares), pat.valores);
     const instrumento = instrumentoDesdeOt(d.instrumento, origen.item, origen.ot);
     const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
-    const amb = await this.ambienteDe(t, d, fecha);
 
     for (let intento = 0; ; intento++) {
       const codigo = await this.siguienteCodigo(t, fecha);
@@ -946,7 +964,7 @@ export class MetrologiaController {
             origen.ot.id, d.otInstrumentoId);
           if (amb.auxiliares) await tx.$executeRawUnsafe(`UPDATE met_calibracion SET auxiliares = $2::jsonb WHERE id = $1::uuid`, cal[0].id, JSON.stringify(amb.auxiliares));
           await this.guardarPuntos(tx, cal[0].id, calc.puntos);
-          await this.evento(tx, cal[0].id, "CREADA", null, "borrador", req, null);
+          await this.evento(tx, cal[0].id, "CREADA", null, "borrador", req, d.motivoValoresPatron ? `Valores del patrón cambiados respecto del maestro: ${d.motivoValoresPatron}` : null);
           return cal[0].id as string;
         });
         return {
@@ -975,9 +993,9 @@ export class MetrologiaController {
     const proc = await cargarProceso(d.procesoCodigo);
     const fecha = d.fecha ? fechaCalibracion(d.fecha) : fechaIso(cal.fecha_calibracion);
     const pat = await this.patronesDe(t, d, fecha);
-    const calc = await this.calcularDto(proc, d, fecha);
-    const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
     const amb = await this.ambienteDe(t, d, fecha);
+    const calc = await this.calcularDto(proc, d, fecha, condicionesDeAuxiliares(amb.auxiliares), pat.valores);
+    const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
     // Calibración ligada a la OT: la OT y la recepción siguen mandando sobre lo escrito.
     const instrumento = cal.ot_instrumento_id
       ? await this.origenOt(req, t, cal.ot_instrumento_id).then((o) => instrumentoDesdeOt(d.instrumento, o.item, o.ot))
@@ -995,7 +1013,7 @@ export class MetrologiaController {
       if (!n) throw new ForbiddenException("La calibración cambió de estado mientras tanto; recargue la lista");
       await tx.$executeRawUnsafe(`DELETE FROM met_calibracion_punto WHERE calibracion_id = $1::uuid`, id);
       await this.guardarPuntos(tx, id, calc.puntos);
-      await this.evento(tx, id, "EDITADA", "borrador", "borrador", req, null);
+      await this.evento(tx, id, "EDITADA", "borrador", "borrador", req, d.motivoValoresPatron ? `Valores del patrón cambiados respecto del maestro: ${d.motivoValoresPatron}` : null);
     });
     return {
       data: {
@@ -1510,6 +1528,7 @@ export class MetrologiaController {
         ultimoPaso: c.pasos ? c.ultimo : true,
         habilitacion: e === "borrador" && yo ? motivoHabilitacion(registro, yo, cal.laboratorio ?? null, cal.magnitud) : null,
         reemisionEnCurso: !!cal.reemision_en_curso,
+        tienePatron: cal.patrones === undefined ? undefined : Array.isArray(cal.patrones) && cal.patrones.length > 0,
       };
       out.push({
         ctx, firmas: propias,
@@ -1611,10 +1630,10 @@ export class MetrologiaController {
   /** Patrones del maestro usados en la calibración: bloqueo si vencidos a la fecha, aviso si vencen pronto. */
   private async patronesDe(t: string, d: CrearDto, fecha: string) {
     const ids = d.patronIds.length ? d.patronIds : d.patronId ? [d.patronId] : [];
-    if (!ids.length) return { patronId: null, snapshot: [], avisos: [] as string[], rangos: [] as PatronRango[] };
+    if (!ids.length) return { patronId: null, snapshot: [], avisos: [] as string[], rangos: [] as PatronRango[], valores: {} as ValoresPatron };
     const rows = await prisma.$queryRawUnsafe<any[]>(
       `SELECT p.id, p.codigo, p.nombre, p.rango, p.marca, p.modelo, p.serie, p.clase, p.n_certificado, p.vence, p.emisor, p.trazabilidad, p.activo,
-              p.tipo, p.rango_min, p.rango_max, p.unidad_rango, m.codigo AS magnitud
+              p.tipo, p.rango_min, p.rango_max, p.unidad_rango, m.codigo AS magnitud, p.valores_certificado
          FROM met_patron p LEFT JOIN met_magnitud m ON m.id = p.magnitud_id
         WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL AND p.id = ANY($2::uuid[])`, t, ids);
     const r = revisarPatrones(rows.map((x) => ({ ...x, vence: x.vence ? fechaIso(x.vence) : null })), ids, fecha);
@@ -1627,7 +1646,9 @@ export class MetrologiaController {
       id: x.id, codigo: x.codigo, magnitud: x.magnitud ?? null, tipo: x.tipo ?? null,
       rangoMin: x.rango_min == null ? null : Number(x.rango_min), rangoMax: x.rango_max == null ? null : Number(x.rango_max), unidadRango: x.unidad_rango ?? null,
     }));
-    return { patronId: ids[0], snapshot, avisos: r.avisos, rangos };
+    // B-043: valores del certificado de los patrones elegidos (no auxiliares), para el motor.
+    const valores: ValoresPatron = Object.assign({}, ...rows.filter((x) => x.tipo !== "auxiliar").map((x) => leerValoresPatron(x.valores_certificado)));
+    return { patronId: ids[0], snapshot, avisos: r.avisos, rangos, valores };
   }
 
   /**
@@ -1679,11 +1700,14 @@ export class MetrologiaController {
   }
 
   /** Calcula en el servidor según el tipo de proceso y deja todo listo para persistir. */
-  private async calcularDto(proc: any, d: CrearDto, fecha: string) {
+  private async calcularDto(proc: any, d: CrearDto, fecha: string, hoja: CondicionesHoja | null = null, valores: ValoresPatron = {}) {
     const motor = motorDeProceso(proc.codigo);
     if (motor) {
       if (!d.motor) throw new BadRequestException(`${proc.codigo} se calcula con su motor: envíe los datos del motor`);
-      const { datos, opciones } = d.motor;
+      const { opciones } = d.motor;
+      const vp = valoresPatronAlMotor(condicionesAlMotor(d.motor.datos, hoja).datos, valores, d.motivoValoresPatron);
+      if (vp.error) throw new BadRequestException(vp.error);
+      const datos = vp.datos;
       const mot = motivoOpciones(motor, opciones);
       if (mot) throw new BadRequestException(mot);
       const filas = await cargarCmc(proc.codigo);
@@ -1769,6 +1793,8 @@ const PatronSchema = z.object({
   unidad_rango: z.string().trim().max(20).nullish(),
   /** Errores del certificado del equipo auxiliar (EP-04 P3.4): se restan de la lectura. */
   correcciones: z.object({ temp: CorreccionSchema, hum: CorreccionSchema, pres: CorreccionSchema }).partial().nullish(),
+  /** B-043: corrección, U y deriva de cada pieza del patrón ({"20 mg E2": {c, U, d}}); los usa el motor. */
+  valores_certificado: z.record(z.string().trim().min(1).max(40), z.object({ c: z.coerce.number(), U: z.coerce.number().min(0), d: z.coerce.number().default(0) })).nullish(),
 });
 
 /**

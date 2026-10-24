@@ -347,7 +347,7 @@ function EmitirListado({ gestiona, inicial, onCerrar }: { gestiona: boolean; ini
     setError("");
     setOcupado(true);
     try {
-      const nombre = await descargarGenerado(`/bpch/codificacion/listado-oficial/${formato}`, { listado, fabricante: fabricante || null, fechaEdicion }, `listado.${formato === "pdf" ? "pdf" : "csv"}`);
+      const nombre = await descargarGenerado(`/bpch/codificacion/listado-oficial/${formato}`, { listado, fabricante: fabricante || null, fechaEdicion }, `listado.${formato === "pdf" ? "pdf" : "xlsx"}`);
       toast.ok(`Listado generado: ${nombre}`);
       cargarEmisiones();
     } catch (e: any) {

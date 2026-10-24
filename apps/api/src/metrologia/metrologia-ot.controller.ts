@@ -16,7 +16,7 @@ import {
   motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion,
 } from "./metrologia-ot.reglas";
 import { LABS_SAM, calibracionesDeOt, cierreExigeDevolucion, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
-import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, noAptoResueltos } from "./ficha.datos";
+import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, noAptoResueltos, textoErrorCorreo } from "./ficha.datos";
 import { MailService } from "../configuracion/configuracion.module";
 
 // ---------------------------------------------------------------------------
@@ -80,7 +80,7 @@ const EntregaSchema = z.object({
   observacion: texto(1000),
 });
 const TEXTO_MEDIO: Record<string, string> = {
-  mano: "en mano", correo: "por correo electrónico", oficina_partes: "por oficina de partes", courier: "por courier", plataforma: "por la plataforma del cliente", otro: "otro medio",
+  mano: "en mano", correo: "por correo electrónico", oficio: "por oficio", oficina_partes: "por oficina de partes", courier: "por courier", plataforma: "por la plataforma del cliente", otro: "otro medio",
 };
 const MotivoSchema = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres)").max(1000) });
 const CorreoSchema = z.object({
@@ -223,6 +223,14 @@ export class MetrologiaOtService {
     );
     const puedeCalibrar = tiene(req, "metrologia.crear") && (await this.alcance.puedeVerUnidad(req, ot.unidadId, "metrologia.crear"));
     const yo = req?.user?.sub;
+    // B-029: documento de cada ítem no calibrable (informe técnico o certificado externo) para la tabla y el cierre.
+    const docsNoCal = await this.prisma.$queryRawUnsafe<{ itemId: string; tipo: string; numero: string | null; estado: string; entregadoAt: Date | null; entregaMedio: string | null }[]>(
+      `SELECT ot_instrumento_id AS "itemId", 'informe_tecnico' AS tipo, numero, estado, entregado_at AS "entregadoAt", entrega_medio AS "entregaMedio"
+         FROM met_informe_tecnico WHERE ot_id = $1::uuid AND estado <> 'anulado'
+       UNION ALL
+       SELECT ot_instrumento_id, 'certificado_externo', certificado_numero, estado, entregado_at, entrega_medio
+         FROM met_servicio_externo WHERE ot_id = $1::uuid AND estado NOT IN ('anulado', 'rechazado')`, otId,
+    ).catch(() => [] as { itemId: string; tipo: string; numero: string | null; estado: string; entregadoAt: Date | null; entregaMedio: string | null }[]);
     const instrumentos = items.map((i) => {
       const v = calibracionVigente(cals, i.id);
       const acciones: string[] = [];
@@ -234,7 +242,7 @@ export class MetrologiaOtService {
         if (devolver && (i.estado === "no_apto" || (i.estado === "recibido" && v?.estado === "emitida"))) acciones.push("DEVOLVER");
         if (v && v.estado === "emitida" && !v.entregadoAt && entregar) acciones.push("ENTREGAR");
       }
-      return { ...i, calibracion: v, acciones };
+      return { ...i, calibracion: v, acciones, documentosNoCalibrable: docsNoCal.filter((x) => x.itemId === i.id) };
     });
     const faltantes = esMetrologia && items.length
       ? [
@@ -504,7 +512,7 @@ export class MetrologiaOtService {
     return {
       data: {
         ok: r.ok, destinatarios, entregado,
-        error: r.ok ? null : `No se pudo enviar el correo: ${r.error}. Revise la configuración de correo o registre la entrega manualmente.`,
+        error: r.ok ? null : `No se pudo enviar el correo: ${textoErrorCorreo(r.error)}. Revise la configuración de correo o registre la entrega manualmente.`,
       },
     };
   }

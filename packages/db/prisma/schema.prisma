@@ -1167,6 +1167,9 @@ model PlantillaInforme {
   // Cuerpo del documento en HTML con placeholders {{campo}} (align_certificado.sql).
   // Sin él la plantilla es una cáscara y el motor cae a la plantilla por defecto.
   cuerpoHtml String?   @map("cuerpo_html")
+  // Tipo de documento de la matriz que emite la plantilla (align_c2_correcciones.sql, B-022).
+  // Sin valor, se deduce del tipo de plantilla y de la unidad de la OT.
+  tipoDocumento String? @map("tipo_documento") @db.VarChar(40)
   version    String    @default("v1") @db.VarChar(10)
   activo     Boolean   @default(true)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz

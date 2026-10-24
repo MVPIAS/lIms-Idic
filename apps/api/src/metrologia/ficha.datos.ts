@@ -10,6 +10,7 @@ import type { Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import type { ConsultaCruda } from "./metrologia-ot.datos";
 import { actualizacionEquipo, actualizacionPatronLnf, configFicha, destinatariosAviso, type ConfigFicha, type PatronMaestro } from "./ficha.reglas";
+import { urlVerificacionBase } from "../common/url-verificacion";
 
 /** Cliente con escritura (PrismaService, PrismaClient o la transacción `tx`). */
 export interface ConsultaEscritura extends ConsultaCruda {
@@ -23,7 +24,7 @@ const fechaCl = (iso: string | null | undefined): string => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
   return m ? `${m[3]}-${m[2]}-${m[1]}` : "—";
 };
-const URL_VERIFICACION = () => (process.env.URL_VERIFICACION ?? "https://verificar.idic.cl/c").replace(/\/+$/, "");
+const URL_VERIFICACION = () => urlVerificacionBase();
 
 /** Parámetros de la operación de la ficha (Administración › Parámetros del sistema, categoría metrologia_ficha). */
 export async function leerConfigFicha(db: ConsultaCruda, tenantId: string): Promise<ConfigFicha> {
@@ -170,6 +171,17 @@ export interface ServicioCorreo {
 const escHtml = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 
 /**
+ * Error del servidor de correo en palabras del usuario, sin punto final (el que
+ * lo cita pone el suyo: antes salía «…este tenant..»; B-081).
+ */
+export function textoErrorCorreo(error: string | null | undefined): string {
+  return String(error ?? "error del servidor de correo")
+    .replace(/\s*para este tenant\.?/i, " en esta instalación (Administración › Correo)")
+    .trim()
+    .replace(/[.\s]+$/, "");
+}
+
+/**
  * Envía el certificado emitido (PDF adjunto) y lo deja en la bitácora de Mensajería
  * (correo_enviado) y en la de la calibración. Si el SMTP no está operativo responde
  * { ok:false } sin lanzar: la emisión o la entrega no se caen por el correo.
@@ -212,7 +224,7 @@ export async function enviarCertificado(
     /* sin bitácora de correo en esta base */
   }
   await evento(db, calId, o.motivo === "aviso" ? "NOTIFICADA" : "CORREO",
-    ok ? `Certificado enviado por correo a ${destinatarios.join(", ")}.` : `No se pudo enviar el correo a ${destinatarios.join(", ")}: ${error}`, o.usuarioId);
+    ok ? `Certificado enviado por correo a ${destinatarios.join(", ")}.` : `Envío fallido: no se pudo enviar el correo a ${destinatarios.join(", ")}: ${textoErrorCorreo(error)}.`, o.usuarioId);
   return { ok, error, destinatarios };
 }
 

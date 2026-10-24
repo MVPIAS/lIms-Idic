@@ -7,6 +7,7 @@ import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
+import { TIPOS_DOCUMENTO } from "../rbac/rbac.constants";
 
 /* ===================== GRAN GRUPO (eje producto) ===================== */
 @Injectable()
@@ -65,6 +66,8 @@ const PlantillaCreate = z.object({
   tipo: z.enum(["CERTIFICADO", "I.ENSAYO", "I.TECNICO", "IVC", "PLANILLA", "BOLETIN", "OTRO"]),
   emision: z.enum(["conjunto", "individual"]).default("conjunto"),
   archivoRef: z.string().max(200).optional(),
+  /** Tipo de documento de la matriz (firmas y numeración) que emite la plantilla; vacío = automático (B-022). */
+  tipoDocumento: z.preprocess((v) => (v === "" ? null : v), z.enum(TIPOS_DOCUMENTO).nullable().optional()),
   version: z.string().max(10).default("v1"),
   activo: z.boolean().default(true),
 });

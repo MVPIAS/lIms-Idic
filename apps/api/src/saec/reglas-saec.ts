@@ -78,3 +78,16 @@ export const NOMBRE_TIPO_PERITAJE: Record<(typeof TIPOS_PERITAJE)[number], strin
   explosivos: "Explosivos",
   otro: "Otro",
 };
+
+/**
+ * B-044 · Confirmar o descartar una coincidencia IBIS: desde «sin confirmar», con
+ * motivo (mínimo 5 caracteres). Volver a «sin confirmar» también pide motivo.
+ */
+export function erroresEstadoHit(actual: string, nuevo: string, motivo?: string | null): string[] {
+  const e: string[] = [];
+  if (!["sin_confirmar", "confirmado", "descartado"].includes(nuevo)) e.push("Estado de coincidencia no válido.");
+  if (actual === nuevo) e.push(`La coincidencia ya está ${nuevo.replace("_", " ")}.`);
+  if (nuevo !== "sin_confirmar" && actual !== "sin_confirmar") e.push("Solo se confirma o descarta una coincidencia sin confirmar: vuélvala antes a «sin confirmar» con su motivo.");
+  if (!motivo || motivo.trim().length < 5) e.push("Indique el motivo (mínimo 5 caracteres).");
+  return e;
+}

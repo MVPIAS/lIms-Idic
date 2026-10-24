@@ -86,6 +86,7 @@ export default function CarpetaOt({ otId }: { otId: string }) {
             <li key={o.id}>
               <Link href={`/oficios/${o.id}` as any} style={{ color: "var(--accent)" }}>{o.numero ?? "(borrador)"}</Link> · {ESTADO_OFICIO[o.estado]?.texto ?? o.estado} · {o.materia}
               {o.despachoNumero ? ` · despacho Nº ${o.despachoNumero}` : ""}
+              {o.origen === "cotizacion" ? " · de la cotización" : ""}
             </li>
           ))}
         </ul>,

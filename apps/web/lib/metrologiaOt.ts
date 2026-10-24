@@ -58,6 +58,13 @@ const esc = (v: unknown) =>
 const fh = (v?: string | null) => (v ? new Date(v).toLocaleString("es-CL", { timeZone: "America/Santiago", dateStyle: "short", timeStyle: "short" }) : "—");
 
 /** Abre un impreso en una ventana nueva y lanza la impresión (sin datos inventados: solo lo registrado). */
+/** Membrete IDIC de los impresos de Metrología (B-074): organismo, laboratorio y número del documento. */
+function membrete(laboratorio: string | null | undefined, numero: string): string {
+  return `<div class="membrete"><div class="escudo">IDIC</div>
+<div class="org"><b>INSTITUTO DE INVESTIGACIONES Y CONTROL</b><span>Ejército de Chile · ${esc(laboratorio ? `Laboratorio de Metrología · ${laboratorio}` : "Laboratorio de Metrología")}</span></div>
+<div class="doc"><b>${esc(numero)}</b></div></div>`;
+}
+
 function imprimir(titulo: string, cuerpo: string) {
   const w = window.open("", "_blank", "width=760,height=900");
   if (!w) return false;
@@ -70,6 +77,10 @@ function imprimir(titulo: string, cuerpo: string) {
  .etiqueta{border:2px solid #18212f;border-radius:6px;padding:12px 14px;width:320px}
  .etiqueta .cod{font:700 20px ui-monospace,Consolas,monospace;letter-spacing:.04em}
  .firmas{display:flex;gap:40px;margin-top:48px} .firmas div{flex:1;border-top:1px solid #18212f;padding-top:4px;text-align:center}
+ .membrete{display:flex;align-items:center;gap:12px;border-bottom:2px solid #123a63;padding-bottom:8px;margin-bottom:14px}
+ .membrete .escudo{width:36px;height:36px;border-radius:50%;background:#123a63;color:#fff;font:700 10px system-ui;display:flex;align-items:center;justify-content:center}
+ .membrete .org{flex:1} .membrete .org b{display:block;color:#123a63;font-size:13px} .membrete .org span{color:#5f6b7a;font-size:11px}
+ .membrete .doc b{font:700 12px ui-monospace,Consolas,monospace;color:#123a63}
  @media print{body{margin:10mm}}
 </style></head><body>${cuerpo}<script>window.onload=function(){window.print()}</script></body></html>`);
   w.document.close();
@@ -90,7 +101,7 @@ export function imprimirEtiqueta(ot: { codigo: string; laboratorio?: string | nu
 
 export function imprimirRecepcion(ot: { codigo: string; cliente?: string | null; laboratorio?: string | null }, i: any) {
   const acc = (i.accesorios ?? []) as any[];
-  return imprimir(`Recepción ${i.etiqueta ?? ""}`, `
+  return imprimir(`Recepción ${i.etiqueta ?? ""}`, `${membrete(ot.laboratorio, `Recepción ${ot.codigo}-${i.numero}`)}
 <h1>Registro de recepción del instrumento</h1>
 <p class="sub">OT ${esc(ot.codigo)} · ítem ${esc(i.numero)} · ${esc(ot.laboratorio ?? "")} · etiqueta ${esc(i.etiqueta)}</p>
 <table>
@@ -111,13 +122,17 @@ export function imprimirRecepcion(ot: { codigo: string; cliente?: string | null;
 
 export function imprimirActaDevolucion(ot: { codigo: string; cliente?: string | null; laboratorio?: string | null }, i: any) {
   const cert = i.calibracion?.numeroCertificado;
-  return imprimir(`Acta de devolución ${i.etiqueta ?? ""}`, `
+  // B-074: membrete, número del acta y documento del no calibrable (informe técnico o certificado externo).
+  const numero = `Acta de devolución ${ot.codigo}-${i.numero}`;
+  const docNoCal = ((i.documentosNoCalibrable ?? []) as any[])
+    .map((x) => `${x.tipo === "informe_tecnico" ? "Informe técnico" : "Certificado externo"} N° ${esc(x.numero ?? "—")}`).join("; ");
+  return imprimir(numero, `${membrete(ot.laboratorio, numero)}
 <h1>Acta de devolución del instrumento</h1>
 <p class="sub">OT ${esc(ot.codigo)} · ítem ${esc(i.numero)} · ${esc(ot.laboratorio ?? "")} · etiqueta ${esc(i.etiqueta)}</p>
 <table>
  <tr><th>Cliente</th><td>${esc(ot.cliente ?? "—")}</td></tr>
  <tr><th>Instrumento</th><td>${esc(i.descripcion)} · Serie ${esc(i.serie || "s/s")}</td></tr>
- <tr><th>Documento emitido</th><td>${cert ? `Certificado de Calibración N° ${esc(cert)}` : i.estado === "no_apto" || i.calibrable === false ? `No calibrable: ${esc(i.motivoNoCalibrable ?? "")}` : "—"}</td></tr>
+ <tr><th>Documento emitido</th><td>${cert ? `Certificado de Calibración N° ${esc(cert)}` : i.estado === "no_apto" || i.calibrable === false ? `No calibrable: ${esc(i.motivoNoCalibrable ?? "")}${docNoCal ? ` · ${docNoCal}` : ""}` : "—"}</td></tr>
  <tr><th>Recibido en el laboratorio</th><td>${esc(fh(i.recibidoAt))}</td></tr>
  <tr><th>Fecha y hora de devolución</th><td>${esc(fh(i.devueltoAt))}</td></tr>
  <tr><th>Recibe</th><td>${esc(i.devueltoRecibe ?? "—")}</td></tr>

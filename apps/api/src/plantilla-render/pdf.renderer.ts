@@ -233,19 +233,25 @@ function dibujarMembrete(doc: Doc, nodo: Nodo): void {
     align: "center",
   });
 
-  const orgB = org?.hijos.find((h) => h.tag === "b");
-  const orgS = org?.hijos.find((h) => h.tag === "span");
-  doc.font(NEGRITA).fontSize(9.5).fillColor(AZUL);
-  doc.text(textoDe(orgB ?? { tag: "", clase: "", hijos: [] }), x + 42, y + 4, { width: 290 });
-  doc.font(REGULAR).fontSize(7.5).fillColor(SUAVE);
-  doc.text(textoDe(orgS ?? { tag: "", clase: "", hijos: [] }), x + 42, doc.y + 1, { width: 290 });
-
   const docB = docu?.hijos.find((h) => h.tag === "b");
   const docS = docu?.hijos.find((h) => h.tag === "span");
   // Logo de acreditación (certificado de calibración): a la derecha del número.
   const logo = docu?.hijos.find((h) => h.tag === "img" && /\blogo-acred\b/.test(h.clase));
   const mLogo = logo?.src ? DATA_IMAGEN.exec(logo.src) : null;
   const anchoLogo = mLogo ? 88 : 0;
+  const anchoDer = mLogo ? 125 : 170;
+  const xDer = doc.page.width - MARGEN - anchoLogo - (mLogo ? 6 : 0) - anchoDer;
+
+  // B-074: el nombre del organismo no invade la columna del número (se tapaban cuando
+  // el título ocupaba dos líneas, p. ej. el certificado del LNF).
+  const anchoOrg = Math.max(160, Math.min(290, xDer - (x + 42) - 8));
+  const orgB = org?.hijos.find((h) => h.tag === "b");
+  const orgS = org?.hijos.find((h) => h.tag === "span");
+  doc.font(NEGRITA).fontSize(9.5).fillColor(AZUL);
+  doc.text(textoDe(orgB ?? { tag: "", clase: "", hijos: [] }), x + 42, y + 4, { width: anchoOrg });
+  doc.font(REGULAR).fontSize(7.5).fillColor(SUAVE);
+  doc.text(textoDe(orgS ?? { tag: "", clase: "", hijos: [] }), x + 42, doc.y + 1, { width: anchoOrg });
+  const yOrg = doc.y;
   if (mLogo) {
     try {
       doc.image(Buffer.from(mLogo[2], "base64"), doc.page.width - MARGEN - anchoLogo, y, { fit: [anchoLogo, 32], align: "right", valign: "center" });
@@ -253,8 +259,6 @@ function dibujarMembrete(doc: Doc, nodo: Nodo): void {
       /* imagen ilegible: queda el texto «Acreditación LC …» */
     }
   }
-  const anchoDer = mLogo ? 125 : 170;
-  const xDer = doc.page.width - MARGEN - anchoLogo - (mLogo ? 6 : 0) - anchoDer;
   doc.font(MONO_NEGRITA).fontSize(mLogo ? 9 : 10).fillColor(AZUL);
   doc.text(textoDe(docB ?? { tag: "", clase: "", hijos: [] }), xDer, y + 5, {
     width: anchoDer,
@@ -266,7 +270,7 @@ function dibujarMembrete(doc: Doc, nodo: Nodo): void {
     align: "right",
   });
 
-  const yLinea = Math.max(y + 38, doc.y + 6);
+  const yLinea = Math.max(y + 38, doc.y + 6, yOrg + 6);
   doc.moveTo(x, yLinea).lineTo(doc.page.width - MARGEN, yLinea).lineWidth(1.6).stroke(AZUL);
   doc.y = yLinea + 12;
   doc.x = MARGEN;
@@ -831,8 +835,28 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
   }
 }
 
+/**
+ * Texto del pie técnico (B-074), común a todos los PDF del LIMS: número, fecha de
+ * emisión, código de verificación y dónde verificarlo. Sin código (informe técnico,
+ * listado) no se imprime «Cód. verificación: —» ni una URL vacía.
+ */
+export function textoPie(sello: Pick<Sello, "numero" | "fecha" | "codigoVerificacion" | "urlVerificacion">): string {
+  const sinCodigo = !sello.codigoVerificacion || /^[-—–\s]*$/.test(sello.codigoVerificacion);
+  return [
+    sello.numero,
+    sello.fecha ? `Emitido el ${sello.fecha}` : "",
+    sinCodigo ? "" : `Cód. verificación: ${sello.codigoVerificacion}`,
+    sinCodigo || !sello.urlVerificacion ? "" : sello.urlVerificacion,
+  ]
+    .filter(Boolean)
+    .join("  |  ");
+}
+
 /** Pie con el sello: numeración de página + código de verificación + hash. */
-function dibujarPies(doc: Doc, sello: Sello): void {
+/** Marca de un cuerpo que lleva su propia paginación («Página 1 de 6 (Page 1 of 6)», LNF). */
+export const MARCA_PAGINACION_PROPIA = "<!-- paginacion-propia -->";
+
+function dibujarPies(doc: Doc, sello: Sello, paginacionPropia = false): void {
   const rango = doc.bufferedPageRange();
   for (let i = rango.start; i < rango.start + rango.count; i++) {
     doc.switchToPage(i);
@@ -849,12 +873,14 @@ function dibujarPies(doc: Doc, sello: Sello): void {
     doc.font(REGULAR).fontSize(6).fillColor(SUAVE);
     const aviso = avisoEstado(sello);
     const izq = sello.borrador
-      ? "PREVISUALIZACION - documento sin valor: no emitido"
+      ? "PREVISUALIZACIÓN - documento sin valor: no emitido"
       : aviso
         ? `${sello.numero}  |  ${aviso}`
-        : `${sello.numero}  |  Emitido el ${sello.fecha}  |  Cod. verificacion: ${sello.codigoVerificacion}  |  ${sello.urlVerificacion}`;
+        : textoPie(sello);
     doc.text(sanearParaFuente(izq), MARGEN, y - 2, { width: anchoUtil(doc) - 60, lineBreak: false });
-    doc.text(`Pagina ${i - rango.start + 1} de ${rango.count}`, doc.page.width - MARGEN - 60, y - 2, {
+    // B-074: si el cuerpo ya numera sus páginas (con un anexo aparte), el pie no repite
+    // otra cuenta distinta («Página 1 de 6» en el cuerpo y «1 de 7» en el pie).
+    if (!paginacionPropia) doc.text(`Página ${i - rango.start + 1} de ${rango.count}`, doc.page.width - MARGEN - 60, y - 2, {
       width: 60,
       align: "right",
       lineBreak: false,
@@ -984,7 +1010,7 @@ export async function generarPdf(cuerpoHtml: string, sello: Sello, titulo: strin
   if (sello.firmas?.length && !conFirmas._firmasDibujadas) dibujarFirmasCircuito(doc, sello.firmas);
   rellenarNumeroPaginas(doc);
   rellenarPaginacion(doc);
-  dibujarPies(doc, sello);
+  dibujarPies(doc, sello, cuerpoHtml.includes(MARCA_PAGINACION_PROPIA));
 
   doc.end();
   await terminado;

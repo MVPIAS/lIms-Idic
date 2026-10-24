@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtG, parseEntrada, verEntrada, ETIQUETA_ENTRADA, ETIQUETA_MOTOR, type MotorInfo, type CalculoMotor } from "@/lib/metrologia";
+import { clavesDeLaHoja, condicionesAlMotor, valoresPatronAlMotor, type CondicionesHoja, type ValoresPatron } from "@/lib/metrologiaFicha";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -35,7 +36,11 @@ interface Props {
   guardando: boolean;
   /** Fecha de calibración (AAAA-MM-DD): fija la versión vigente de la CMC en la vista previa. */
   fecha?: string;
-  onGuardar: (motor: { datos: any; opciones: Record<string, boolean> }) => void;
+  onGuardar: (motor: { datos: any; opciones: Record<string, boolean> }, motivoValoresPatron?: string | null) => void;
+  /** B-043: valores del certificado de los patrones elegidos del maestro (corrección, U, deriva por pieza). */
+  valoresPatron?: { codigo: string; valores: ValoresPatron } | null;
+  /** B-027: condiciones de la hoja de control (auxiliares del maestro); mandan sobre las del motor. */
+  condiciones?: CondicionesHoja | null;
 }
 
 /**
@@ -44,7 +49,7 @@ interface Props {
  * calcula la vista previa con el mismo motor que usa al guardar. «Cargar
  * ejemplo» trae las entradas de un caso real, solo para formación.
  */
-export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, onGuardar }: Props) {
+export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, onGuardar, condiciones, valoresPatron }: Props) {
   const [caso, setCaso] = useState(motor.casos[0]?.caso ?? "");
   const [datos, setDatos] = useState<any>(inicial?.datos ?? null);
   // Calibración nueva: las correcciones que el laboratorio pidió aplicar vienen activadas (C6).
@@ -53,6 +58,26 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
   const [aviso, setAviso] = useState("");
   const [esEjemplo, setEsEjemplo] = useState(false);
   const seq = useRef(0);
+  // B-027: las condiciones de la hoja de control se copian a los datos del motor (una sola captura).
+  const condJson = JSON.stringify(condiciones ?? null);
+  useEffect(() => {
+    if (!condiciones || !datos) return;
+    const r = condicionesAlMotor(datos, condiciones);
+    if (r.campos.length) setDatos(r.datos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [condJson, datos === null]);
+  // Claves del motor que alimenta la hoja (aunque ya coincidan), para avisar de dónde salen.
+  const deHoja = condiciones && datos ? clavesDeLaHoja(datos, condiciones) : [];
+  // B-043: los valores del patrón (corrección, U y deriva de cada pieza) salen del maestro; cambiarlos pide motivo.
+  const valJson = JSON.stringify(valoresPatron ?? null);
+  const [motivoPat, setMotivoPat] = useState("");
+  useEffect(() => {
+    if (!valoresPatron || !datos) return;
+    const r = valoresPatronAlMotor(datos, valoresPatron.valores);
+    if (r.cargados.length) setDatos(r.datos);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valJson, datos === null]);
+  const editadosPat = valoresPatron && datos ? valoresPatronAlMotor(datos, valoresPatron.valores).editados : [];
   const lbl = (k: string) => ETIQUETA_MOTOR[motor.it]?.[k] ?? ETIQUETA_ENTRADA[k] ?? k;
 
   // Formulario vacío con la forma de la planilla (si no se está editando un borrador).
@@ -181,6 +206,23 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
         <div className="card">
           <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--line-2,#eee)" }}><b style={HEAD}>Toma de datos</b></div>
           <div className="body" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 14 }}>
+            {valoresPatron && datos && "pat" in datos && (
+              <div className={`alert ${editadosPat.length ? "warn" : "info"}`} role="status" style={{ margin: 0 }}>
+                Corrección, U y deriva de cada pieza: del certificado de {valoresPatron.codigo} en el maestro de patrones.
+                {editadosPat.length > 0 && (
+                  <div className="field" style={{ marginTop: 6 }}>
+                    <label htmlFor="mp-motivo">Motivo del cambio de {editadosPat.join(", ")} <span className="req">*</span></label>
+                    <input id="mp-motivo" value={motivoPat} maxLength={500} onChange={(e) => setMotivoPat(e.target.value)} />
+                  </div>
+                )}
+              </div>
+            )}
+            {deHoja.length > 0 && (
+              <div className="alert info" role="status" style={{ margin: 0 }}>
+                Condiciones ambientales tomadas de la hoja de control ({deHoja.map(lbl).join(", ")}): se registran una sola vez, con la corrección
+                del certificado del termohigrómetro y del barómetro. Para cambiarlas, corrija las lecturas en la hoja de control.
+              </div>
+            )}
             {partes.escalares.length > 0 && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 8 }}>
                 {partes.escalares.map(({ ruta, v }) => (
@@ -269,7 +311,7 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
             </>
           )}
           <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
-            <button className="btn primary sm" disabled={guardando || !r} onClick={() => onGuardar({ datos, opciones })}>
+            <button className="btn primary sm" disabled={guardando || !r} onClick={() => onGuardar({ datos, opciones }, editadosPat.length ? motivoPat.trim() : null)}>
               {guardando ? "Guardando…" : "Guardar borrador"}
             </button>
           </div>

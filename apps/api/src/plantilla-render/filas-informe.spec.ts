@@ -170,3 +170,46 @@ describe("informe · armarInforme (secciones numeradas, Textil / LCC)", () => {
     expect(e.secciones[0].numero).toBe("4.1");
   });
 });
+
+describe("B-025 · requisito compuesto de la E.T.", () => {
+  const { textoRequisito: tr, textoResultado: tres } = require("./filas-informe");
+  const c2 = { etiqueta: "Alargamiento", inf: 30, sup: null, unidad: "%" };
+  it("imprime la segunda condición con su valor", () => {
+    expect(tr({ limiteInf: "1,5", nominal: null, limiteSup: null, requisito: null, unidad: "kgf/mm²", condicion2: c2 }))
+      .toBe("Mín. 1,5 kgf/mm² con Alargamiento ≥ 30 %");
+  });
+  it("sin segunda condición el requisito no cambia", () => {
+    expect(tr({ limiteInf: "1,5", nominal: null, limiteSup: null, requisito: null, unidad: "kgf/mm²" })).toBe("Mín. 1,5");
+  });
+  it("el resultado imprime también el valor de la segunda condición", () => {
+    expect(tres({ id: "r", muestraId: "m", muestraCodigo: "M-1", ensayo: "Tracción", valorNumerico: 1.8, condicion2: c2, valorCondicion2: 42 }))
+      .toBe("1,8 · Alargamiento 42 %");
+  });
+});
+
+describe("B-075 · requisito con unidad y sin repetir las cotas", () => {
+  const { textoRequisito: tr, requisitoConUnidad: ru } = require("./filas-informe");
+  it("no repite entre paréntesis las cotas que el texto ya dice", () => {
+    expect(tr({ limiteInf: null, nominal: null, limiteSup: "0,5", requisito: "Máx. 0,5 % (NCh 2190)" })).toBe("Máx. 0,5 % (NCh 2190)");
+    expect(tr({ limiteInf: null, nominal: null, limiteSup: "0.5", requisito: "Máx. 0,5 %" })).toBe("Máx. 0,5 %");
+    expect(tr({ limiteInf: "97", nominal: null, limiteSup: null, requisito: "Pureza" })).toBe("Pureza (Mín. 97)");
+    // 0,05 no es 0,5: sí se añade.
+    expect(tr({ limiteInf: null, nominal: null, limiteSup: "0,05", requisito: "Máx. 0,5 %" })).toBe("Máx. 0,5 % (Máx. 0,05)");
+  });
+  it("añade la unidad al requisito cuando no hay columna de unidad", () => {
+    expect(ru("Mín. 97", "%")).toBe("Mín. 97 %");
+    expect(ru("Máx. 0,5 %", "%")).toBe("Máx. 0,5 %");
+    expect(ru("Sin formación de grumos", "%")).toBe("Sin formación de grumos");
+    expect(ru("Mín. 97", null)).toBe("Mín. 97");
+  });
+});
+
+describe("B-075 · ensayo derivado por orden interna", () => {
+  const { armarInforme: ai } = require("./filas-informe");
+  const { configEfectiva } = require("./config-informe");
+  it("identifica el laboratorio que lo realizó", () => {
+    const est = ai([{ id: "r1", muestraId: "m", muestraCodigo: "M-1", ensayo: "Plomo", valorNumerico: 0.01, derivadoA: { laboratorio: "LQC", ordenInterna: "OI-2026-0003" } }], configEfectiva("I.ENSAYO", null), "solo_resultados");
+    const filas = est.secciones.flatMap((s: any) => s.componentes.flatMap((c: any) => c.filas));
+    expect(filas[0].ensayo).toBe("Plomo (realizado por LQC, orden interna OI-2026-0003)");
+  });
+});
