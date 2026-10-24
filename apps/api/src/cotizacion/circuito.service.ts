@@ -21,8 +21,8 @@ import {
   type NivelVb,
   type RespuestaLab,
   type SolicitudRuta,
-  TEXTO_MEDIO,
 } from "./circuito-cotizacion";
+import { exigirMedioEnvioActivo, textoEnFrase } from "../common/medios-envio";
 import { calcularForm05, erroresForm05, erroresPrograma, type Form05Entrada, type ProgramaTrabajo, exigeCosteo, type TipoServicio } from "./form05";
 import { numeroFormulario } from "./numeracion-cotizacion";
 import { htmlCotizacion, pdfCotizacion, type FirmasCotizacion } from "./cotizacion-documento";
@@ -44,6 +44,7 @@ export interface FilaCot {
   firmaSolicitadaAt: Date | null;
   enviadaAt: Date | null;
   enviadaMedio: string | null;
+  enviadaMedioTexto: string | null;
   enviadaDestinatarios: string | null;
   envioObservacion: string | null;
   ejecutivoNombre: string | null;
@@ -91,6 +92,8 @@ const SQL_COT = `
   SELECT c.id, c.tenant_id AS "tenantId", c.codigo, c.estado, c.circuito, c.firma_estado AS "firmaEstado",
          c.firma_devuelta_motivo AS "firmaDevueltaMotivo", c.firmada_at AS "firmadaAt", fp.nombre_completo AS "firmadaPorNombre",
          c.firma_solicitada_at AS "firmaSolicitadaAt", c.enviada_at AS "enviadaAt", c.enviada_medio AS "enviadaMedio",
+         (SELECT p.etiqueta FROM parametro_sistema p
+           WHERE p.tenant_id = c.tenant_id AND p.categoria = 'medio_envio' AND p.codigo = c.enviada_medio LIMIT 1) AS "enviadaMedioTexto",
          c.enviada_destinatarios AS "enviadaDestinatarios", c.envio_observacion AS "envioObservacion",
          e.nombre_completo AS "ejecutivoNombre", c.created_at AS "createdAt", c.cliente_id AS "clienteId",
          c.centro_costo_id AS "centroCostoId",
@@ -262,6 +265,7 @@ export class CircuitoCotizacionService {
       firmadaPor: c.firmadaPorNombre,
       enviadaAt: c.enviadaAt,
       enviadaMedio: c.enviadaMedio,
+      enviadaMedioTexto: c.enviadaMedioTexto,
       ot: c.otCodigo ? { codigo: c.otCodigo } : null,
       solicitudes: conVb.map((s) => ({ id: s.id, estado: s.estado, unidad: s.unidadCodigo, unidadId: s.unidadId, numero: s.numero, vb: s.vb })),
       firmantes,
@@ -665,10 +669,12 @@ export class CircuitoCotizacionService {
   async enviarCliente(
     req: any,
     id: string,
-    b: { medio: "correo" | "mano" | "courier" | "oficio" | "oficina_partes"; destinatarios?: string[]; observacion?: string | null; plantilla?: string },
+    b: { medio: string; destinatarios?: string[]; observacion?: string | null; plantilla?: string },
   ) {
     const tenantId = this.tenant(req);
     await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id);
+    // Frente f5: el medio es uno activo de «Parámetros del sistema › medio_envio».
+    const texto = await exigirMedioEnvioActivo(this.prisma, tenantId, b.medio);
     const c = await this.cot(id, tenantId);
     const no = motivoNoEnviable(c);
     if (no) throw new ConflictException(no);
@@ -690,7 +696,7 @@ export class CircuitoCotizacionService {
       throw new BadRequestException(
         b.medio === "oficio" || b.medio === "oficina_partes"
           ? `Envío ${b.medio === "oficio" ? "por oficio" : "por la Oficina de partes"}: indique el Nº del oficio o del registro de la Oficina de partes.`
-          : `Entrega ${b.medio === "mano" ? "en mano" : "por courier"}: indique a quién se entregó o el número de seguimiento.`,
+          : `${texto}: indique a quién se entregó, el número de seguimiento o la referencia del envío.`,
       );
     }
     const dest = b.medio === "correo" ? (resultado.destinatarios ?? b.destinatarios ?? []).join(", ") : null;
@@ -704,6 +710,6 @@ export class CircuitoCotizacionService {
       obs,
     );
     await this.evento(tenantId, id, "enviada_cliente", this.yo(req), obs, { medio: b.medio, destinatarios: dest });
-    return { ok: true, mensaje: `Envío de la cotización ${c.codigo} registrado (${b.medio === "correo" ? `correo a ${dest}` : TEXTO_MEDIO[b.medio] ?? b.medio}).` };
+    return { ok: true, mensaje: `Envío de la cotización ${c.codigo} registrado (${b.medio === "correo" ? `correo a ${dest}` : textoEnFrase(texto)}).` };
   }
 }

@@ -8,6 +8,7 @@ import {
   OnModuleInit,
 } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
+import { exigirMedioEnvioActivo } from "../common/medios-envio";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { validarTransicion } from "../common/estados";
 import { generarCodigoOt } from "../common/codigo";
@@ -544,6 +545,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
   async crear(data: CabeceraCotizacion & { clienteId: string; lineas: LineaEntrada[] }, tenantId?: string, usuarioId?: string) {
     const tenantIdFromJWT = tenantId ?? DEV_TENANT;
     this.validarCondiciones(data.condicionesAdicionales);
+    if (data.medioEnvio) await exigirMedioEnvioActivo(this.prisma, tenantIdFromJWT, data.medioEnvio);
     const moneda = data.moneda ?? "CLP";
     const dolar = moneda === "USD" ? Number(data.dolarValor) : null;
     if (moneda === "USD" && !(dolar && dolar > 0))
@@ -630,6 +632,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       );
     }
     this.validarCondiciones(resto.condicionesAdicionales);
+    // Frente f5: un medio NUEVO tiene que estar activo; el ya guardado se conserva aunque se haya desactivado.
+    if (resto.medioEnvio && resto.medioEnvio !== (actual as any).medioEnvio) await exigirMedioEnvioActivo(this.prisma, actual.tenantId, resto.medioEnvio);
 
     const moneda = resto.moneda ?? (actual.moneda as "CLP" | "USD");
     const dolarActual = actual.dolarValor !== null && actual.dolarValor !== undefined ? Number(actual.dolarValor) : null;

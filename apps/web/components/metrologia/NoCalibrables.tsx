@@ -12,7 +12,8 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { llamar } from "@/lib/laboratorio";
 import { enviarInforme } from "@/lib/informes";
 import { fechaDia, fechaHora } from "@/lib/format";
-import { MEDIOS_ENTREGA, textoMedio } from "@/lib/documentos";
+import { textoMedio } from "@/lib/documentos";
+import { useMediosEnvio } from "@/lib/lista-parametro";
 import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import css from "./ficha.module.css";
@@ -41,6 +42,7 @@ async function abrirPdf(ruta: string) {
 }
 
 export default function NoCalibrables({ otId, onCambio }: { otId: string; onCambio?: () => void }) {
+  useMediosEnvio(); // frente f5: textos de los medios de envío (Parámetros del sistema)
   const [d, setD] = useState<any>(null);
   const [error, setError] = useState("");
   const [dlg, setDlg] = useState<Dlg | null>(null);
@@ -193,6 +195,7 @@ function DialogoTexto({ titulo, etiqueta, boton, min, ocupado, onCerrar, onGuard
 }
 
 function DialogoEntrega({ ocupado, onCerrar, onGuardar }: { ocupado: boolean; onCerrar: () => void; onGuardar: (b: any) => void }) {
+  const medios = useMediosEnvio(); // frente f5: «Parámetros del sistema › medio_envio»
   const id = useId();
   const [f, setF] = useState({ fecha: hoy(), medio: "", destinatario: "", observacion: "" });
   return (
@@ -202,7 +205,7 @@ function DialogoEntrega({ ocupado, onCerrar, onGuardar }: { ocupado: boolean; on
       <div className="form-grid cols-2">
         <div className="field"><label htmlFor={`${id}-f`}>Fecha <Req /></label><input id={`${id}-f`} type="date" max={hoy()} value={f.fecha} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></div>
         <div className="field"><label htmlFor={`${id}-m`}>Medio <Req /></label>
-          <select id={`${id}-m`} value={f.medio} onChange={(e) => setF({ ...f, medio: e.target.value })}><option value="">Seleccione…</option>{MEDIOS_ENTREGA.map((m) => <option key={m.valor} value={m.valor}>{m.texto}</option>)}</select></div>
+          <select id={`${id}-m`} value={f.medio} onChange={(e) => setF({ ...f, medio: e.target.value })}><option value="">Seleccione…</option>{medios.opciones.map((m) => <option key={m.codigo} value={m.codigo}>{m.etiqueta}</option>)}</select></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor={`${id}-d`}>Destinatario <Req /></label><input id={`${id}-d`} maxLength={160} value={f.destinatario} onChange={(e) => setF({ ...f, destinatario: e.target.value })} /></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor={`${id}-o`}>Observación</label><input id={`${id}-o`} maxLength={1000} value={f.observacion} onChange={(e) => setF({ ...f, observacion: e.target.value })} /></div>
       </div>

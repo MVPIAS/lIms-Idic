@@ -11,6 +11,7 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar, etiquetaUnidad } from "@/lib/laboratorio";
 import { toast } from "@/components/ui/feedback";
 import { textoMedio } from "@/lib/etiquetas";
+import { useMediosEnvio } from "@/lib/lista-parametro";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
 import RegistroMuestras from "./_components/RegistroMuestras";
@@ -91,6 +92,7 @@ const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token"
 const authJson = () => ({ ...auth(), "Content-Type": "application/json" });
 
 export default function ExpedientePage() {
+  useMediosEnvio(); // frente f5: textos de los medios de envío (Parámetros del sistema)
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);

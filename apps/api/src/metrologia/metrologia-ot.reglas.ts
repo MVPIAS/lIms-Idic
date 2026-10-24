@@ -25,7 +25,7 @@ import { anioChile } from "../common/fecha-chile";
 export type EstadoInstrumento = "por_recibir" | "recibido" | "no_apto" | "devuelto" | "anulado";
 export const ESTADOS_FISICOS = ["bueno", "con_observaciones", "danado"] as const;
 export type EstadoFisico = (typeof ESTADOS_FISICOS)[number];
-export const MEDIOS_ENTREGA_CAL = ["mano", "correo", "oficio", "oficina_partes", "courier", "plataforma", "otro"] as const;
+// Medios de entrega: «Parámetros del sistema › medio_envio» (common/medios-envio.ts, frente f5).
 
 export interface InstrumentoOt {
   id: string;

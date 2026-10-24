@@ -17,13 +17,13 @@ import { toast, confirmar } from "@/components/ui/feedback";
 import {
   ACCION_FIRMA,
   ESTADO_DOC,
-  MEDIOS_ENTREGA,
   abrirPdf,
   htmlDocumento,
   nombresResponsables,
   textoMedio,
 } from "@/lib/documentos";
 import Modal from "./Modal";
+import { useMediosEnvio } from "@/lib/lista-parametro";
 
 type Dialogo = null | "devolver" | "anular" | "entregar" | "correo" | "despachar";
 
@@ -45,6 +45,7 @@ export default function PanelDocumento({
   onCambio?: () => void;
   vistaPreviaInicial?: boolean;
 }) {
+  const medios = useMediosEnvio(); // frente f5: «Parámetros del sistema › medio_envio»
   const [doc, setDoc] = useState<any>(null);
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -467,7 +468,7 @@ export default function PanelDocumento({
               <label htmlFor="doc-3">Medio <span className="req">*</span></label>
               <select id="doc-3" value={entrega.medio} onChange={(e) => setEntrega({ ...entrega, medio: e.target.value })}>
                 <option value="">— Seleccione —</option>
-                {MEDIOS_ENTREGA.map((m) => <option key={m.valor} value={m.valor}>{m.texto}</option>)}
+                {medios.opciones.map((m) => <option key={m.codigo} value={m.codigo}>{m.etiqueta}</option>)}
               </select>
             </div>
             <div className="field span-2"><label htmlFor="doc-4">Entregado a <span className="req">*</span></label><input id="doc-4" value={entrega.destinatario} maxLength={200} onChange={(e) => setEntrega({ ...entrega, destinatario: e.target.value })} /></div>

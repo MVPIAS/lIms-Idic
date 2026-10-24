@@ -13,6 +13,8 @@
 
 /* --------------------------------------------------------------- solicitud --- */
 
+import { textoEnFrase } from "../common/medios-envio";
+
 export type EstadoSolicitud =
   | "solicitado"
   | "respondido"
@@ -170,6 +172,8 @@ export interface HechosCotizacion extends CotizacionCircuito {
   firmadaPor?: string | null;
   enviadaAt?: Date | string | null;
   enviadaMedio?: string | null;
+  /** Texto del medio en «Parámetros del sistema › medio_envio» (frente f5). */
+  enviadaMedioTexto?: string | null;
   ot?: { codigo: string } | null;
   solicitudes: SolicitudRuta[];
   /** Responsables del paso FIRMA de la matriz COTIZACION. */
@@ -232,7 +236,7 @@ export function calcularRutaCotizacion(h: HechosCotizacion, cfg: ConfigCircuito)
 
   // 5 · Envío
   const envio: Etapa = h.enviadaAt
-    ? et("envio", "Envío al cliente", "hecho", h.enviadaMedio ? `Por ${TEXTO_MEDIO[h.enviadaMedio] ?? h.enviadaMedio}` : "Enviada")
+    ? et("envio", "Envío al cliente", "hecho", h.enviadaMedio ? `Por ${h.enviadaMedioTexto ? textoEnFrase(h.enviadaMedioTexto) : h.enviadaMedio}` : "Enviada")
     : aceptada || cerrada
       ? et("envio", "Envío al cliente", "no_aplica", "Sin registro de envío")
       : et("envio", "Envío al cliente", "pendiente", null);
@@ -265,14 +269,6 @@ export function calcularRutaCotizacion(h: HechosCotizacion, cfg: ConfigCircuito)
   const actual = etapas.find((e) => e.estado !== "hecho" && e.estado !== "no_aplica") ?? null;
   return { etapas, etapaActual: actual?.clave ?? null, siguiente: cerrada || !actual ? null : siguiente(actual.clave, h, sol, cfg), avisos };
 }
-
-export const TEXTO_MEDIO: Record<string, string> = {
-  correo: "correo electrónico",
-  mano: "entrega en mano",
-  courier: "courier",
-  oficio: "oficio",
-  oficina_partes: "Oficina de partes",
-};
 
 function siguiente(clave: string, h: HechosCotizacion, sol: SolicitudRuta[], cfg: ConfigCircuito): Siguiente | null {
   const nombre = (s: SolicitudRuta) => nombreSol(s);

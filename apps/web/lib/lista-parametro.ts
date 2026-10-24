@@ -5,6 +5,9 @@
  * sistema» (tabla `parametro_sistema`), leídas de UN sitio (frente f5):
  *
  *   · `moneda`      → CLP y USD (la API rechaza otras: apps/api/src/common/moneda.ts).
+ *   · `medio_envio` → medios del envío al cliente, la entrega de documentos, el
+ *                     envío de la cotización y la entrega de Metrología
+ *                     (apps/api/src/common/medios-envio.ts).
  *
  * `opciones` = filas activas (lo que se ofrece); `texto(codigo)` etiqueta
  * también las inactivas, para que un valor ya guardado (p. ej. «fax» o una
@@ -21,6 +24,18 @@ export interface OpcionParametro {
 }
 
 const cache = new Map<string, Promise<OpcionParametro[]>>();
+/** Filas ya leídas por categoría, para los textos que se arman fuera de un componente. */
+const leidas = new Map<string, OpcionParametro[]>();
+
+/** Texto de un código si su categoría ya se leyó (si no, undefined). */
+export function etiquetaLeida(categoria: string, codigo: string): string | undefined {
+  return leidas.get(categoria)?.find((f) => f.codigo === codigo)?.etiqueta;
+}
+
+/** «Entrega en mano» → «entrega en mano» (para una frase); respeta siglas («FAX…»). */
+export function enFrase(etiqueta: string): string {
+  return etiqueta.length > 1 && etiqueta[1] === etiqueta[1].toLowerCase() ? etiqueta[0].toLowerCase() + etiqueta.slice(1) : etiqueta;
+}
 
 /** Todas las filas de la categoría (activas e inactivas), en su orden. */
 export function cargarListaParametro(categoria: string): Promise<OpcionParametro[]> {
@@ -31,6 +46,10 @@ export function cargarListaParametro(categoria: string): Promise<OpcionParametro
       .then((r) =>
         ((r?.data ?? r ?? []) as any[]).map((x) => ({ codigo: String(x.codigo), etiqueta: String(x.etiqueta ?? x.codigo), activo: x.activo !== false, valor: x.valor ?? null })),
       )
+      .then((filas) => {
+        leidas.set(categoria, filas);
+        return filas;
+      })
       .catch((e) => {
         cache.delete(categoria);
         throw e;
@@ -63,4 +82,13 @@ export function useListaParametro(categoria: string) {
     /** ¿El código está entre los que se ofrecen hoy? */
     vigente: (codigo?: string | null) => !!codigo && todas.some((f) => f.activo && f.codigo === codigo),
   };
+}
+
+/**
+ * Medios de envío y de entrega (frente f5): la lista de «Parámetros del sistema ›
+ * medio_envio», sin listas propias en cada pantalla. `texto` da la etiqueta de un
+ * código guardado (también de uno inactivo, como «fax»).
+ */
+export function useMediosEnvio() {
+  return useListaParametro("medio_envio");
 }

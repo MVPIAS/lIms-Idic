@@ -137,9 +137,12 @@ describe("Ruta de la cotización (barra de 6 etapas y siguiente paso)", () => {
     expect(enFirma.siguiente?.leToca).toEqual({ rol: "Jefe del Departamento Comercial", unidad: "DCO", personas: ["J. D."] });
     expect(enFirma.siguiente?.accion?.usuarios).toEqual(["j"]);
     expect(calcularRutaCotizacion({ ...base, firmaEstado: "firmada" }, cfg).etapaActual).toBe("envio");
-    const enviada = calcularRutaCotizacion({ ...base, firmaEstado: "firmada", enviadaAt: "2026-10-20", enviadaMedio: "correo" }, cfg);
+    const enviada = calcularRutaCotizacion({ ...base, firmaEstado: "firmada", enviadaAt: "2026-10-20", enviadaMedio: "correo", enviadaMedioTexto: "Correo electrónico" }, cfg);
     expect(enviada.etapaActual).toBe("aceptacion");
     expect(enviada.etapas.find((e) => e.clave === "envio")?.detalle).toBe("Por correo electrónico");
+    // Frente f5: el texto sale de «Parámetros del sistema › medio_envio»; sin él, el código guardado.
+    const sinTexto = calcularRutaCotizacion({ ...base, firmaEstado: "firmada", enviadaAt: "2026-10-20", enviadaMedio: "libro" }, cfg);
+    expect(sinTexto.etapas.find((e) => e.clave === "envio")?.detalle).toBe("Por libro");
   });
 
   it("devuelta por el Jefe DCO: etapa bloqueada con el motivo y vuelve al ejecutivo", () => {

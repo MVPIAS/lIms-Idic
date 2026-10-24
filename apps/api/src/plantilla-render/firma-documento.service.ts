@@ -14,9 +14,9 @@ import { MailService } from "../configuracion/configuracion.module";
 import { PlantillaRenderService } from "./plantilla-render.service";
 import { decidirFirma, esOficial, pasosActuales, quedaOficial, puedeTransitarDocumento } from "./reglas-emision";
 import { escapeHtml, fmtFecha, fmtFechaHora } from "./html.util";
+import { exigirMedioEnvioActivo } from "../common/medios-envio";
 
-/** Medios de entrega admitidos (los mismos que usa Comercial para el envío). */
-export const MEDIOS_ENTREGA = ["correo", "mano", "oficio", "oficina_partes", "libro", "courier", "plataforma", "otro"] as const;
+// Medios de entrega: «Parámetros del sistema › medio_envio» (common/medios-envio.ts, frente f5).
 
 function usuarioDe(req: any): string {
   const id = req?.user?.sub ?? req?.user?.id;
@@ -424,6 +424,7 @@ export class FirmaDocumentoService {
   ) {
     const cert = await this.cargar(id, req);
     await this.alcance.exigirUnidad(req, cert.unidadId ?? cert.ot?.unidadPrincipal, `el documento ${cert.numero ?? cert.codigo}`);
+    await exigirMedioEnvioActivo(this.prisma, cert.tenantId, dto.medio);
     // EP-05 7.2: IVC, Informe Técnico y Rechazo del DSA salen con oficio conductor firmado (parámetro).
     const sinOficio = esOficial(cert.estado) && !cert.entregadoAt
       ? await faltaOficio(this.prisma, {
