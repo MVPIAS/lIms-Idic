@@ -154,6 +154,8 @@ export interface HechosOt {
   ordenesInternas?: OrdenInternaAvance[];
   /** Muestreos de la OT (sin los anulados): borrador, registrado (entregado) o recibido. */
   muestreos?: { numero: string; estado: string; recibidoConforme: boolean | null }[];
+  /** D03-19: la OT se registró con «¿Requiere muestreo? Sí» (ot_encargo.requiere_muestreo). */
+  requiereMuestreo?: boolean | null;
   /** Documentos por muestra, producto o laboratorio: lo que falta cubrir para cerrar. */
   coberturaPendiente?: string[];
   /** OT del BPCH: lo que le falta a la cabecera de inspección para emitir el Informe de Inspección (EP-10 10.11). */
@@ -548,13 +550,19 @@ function rutaLaboratorio(h: HechosOt): Ruta {
   // La asignación ordena el trabajo pero no lo bloquea: si ya hay capturas, se da por hecha.
   const trabajoEmpezado = h.resultados.total - h.resultados.pendientes > 0;
   const trabajo = etapaTrabajo(h);
+  // D03-19: la OT que requiere muestreo sigue en la Recepción hasta que el laboratorio recibe
+  // un muestreo, aunque sus muestras ya existan (nacieron con la OT o la E.T.).
+  const faltaMuestreo = !!h.requiereMuestreo && !(h.muestreos ?? []).some((x) => x.estado === "recibido");
   const etapas = [
     etapa("apertura", "Apertura de la OT", h.unidad ? "hecho" : "pendiente", detalleApertura(h)),
     etapa(
       "recepcion",
       "Recepción de muestras",
-      h.muestras.total > 0 ? "hecho" : "pendiente",
-      h.muestras.total ? `${plural(h.muestras.total, "muestra")}${h.muestras.recepcionIncompleta ? ` · ${h.muestras.recepcionIncompleta} con recepción incompleta` : ""}` : null,
+      h.muestras.total > 0 && !faltaMuestreo ? "hecho" : "pendiente",
+      [
+        h.muestras.total ? `${plural(h.muestras.total, "muestra")}${h.muestras.recepcionIncompleta ? ` · ${h.muestras.recepcionIncompleta} con recepción incompleta` : ""}` : "",
+        faltaMuestreo ? "requiere muestreo: aún sin recibir" : "",
+      ].filter(Boolean).join(" · ") || null,
     ),
     etapa(
       "asignacion",
@@ -597,6 +605,12 @@ function rutaLaboratorio(h: HechosOt): Ruta {
               texto: `Recibir el muestreo Nº ${enCurso.numero} («recibido conforme») y recepcionar sus muestras`,
               leToca: { rol: "Recepción de muestras", unidad: u, personas: [] },
               accion: { texto: "Ir a Muestreo", pestana: "muestreo", permisos: ["muestra.crear"] },
+            };
+          if (faltaMuestreo)
+            return {
+              texto: "Registrar el muestreo de la OT (requiere muestreo) y entregarlo al laboratorio",
+              leToca: { rol: "Sección Muestreo", unidad: null, personas: [] },
+              accion: { texto: "Ir a Muestreo", pestana: "muestreo", permisos: ["muestreo.registrar"] },
             };
           return {
             texto: "Recepcionar las muestras: producto, condición de recepción, Nº interno y sus ensayos",
