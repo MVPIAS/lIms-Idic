@@ -40,7 +40,7 @@ import {
 } from "./plazos";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
-import { documentosDeCalibraciones, faltantesInstrumentos } from "../metrologia/metrologia-ot.reglas";
+import { documentosDeMetrologia, documentosDeNoCalibrables, esEntregableNoCalibrable, faltantesInstrumentos } from "../metrologia/metrologia-ot.reglas";
 
 const FechaCompromiso = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD"),
@@ -166,7 +166,7 @@ export class OtCierreService {
         estado: ot.estado,
         documentos: [
           ...documentos.map((d) => ({ numero: d.numero, estado: d.estado, entregadoAt: d.entregadoAt, pendienteDe: d.pendienteDe })),
-          ...documentosDeCalibraciones(metro.cals),
+          ...documentosDeMetrologia(metro.cals, metro.docsNoCalibrables),
         ],
         resultadosNoAprobados: totalRes - aprobados,
         coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId),
@@ -207,6 +207,14 @@ export class OtCierreService {
       calibraciones: metro.cals
         .filter((c) => c.estado !== "reemplazada")
         .map((c) => ({ id: c.id, numero: c.numeroCertificado ?? c.codigo, estado: c.estado, entregadoAt: c.entregadoAt ?? null })),
+      // Informe técnico emitido y certificado externo validado de los no calibrables: también cuentan (decisión 24-10).
+      documentosNoCalibrables: metro.docsNoCalibrables.filter(esEntregableNoCalibrable).map((x, i) => ({
+        id: `${x.tipo}-${x.instrumentoId ?? i}`,
+        tipo: x.tipo,
+        numero: documentosDeNoCalibrables([x])[0].numero,
+        entregadoAt: x.entregadoAt ?? null,
+        entregaMedio: x.entregaMedio ?? null,
+      })),
       factura: factura ? { ...factura, total: Number(factura.total) } : null,
       faltantes,
       puedeCerrar: faltantes.length === 0,
@@ -272,7 +280,7 @@ export class OtCierreService {
           estado,
           documentos: [
             ...docs.map((d) => ({ numero: d.numero ?? d.codigo, estado: d.estado, entregadoAt: d.entregadoAt })),
-            ...documentosDeCalibraciones(metro.cals),
+            ...documentosDeMetrologia(metro.cals, metro.docsNoCalibrables),
           ],
           resultadosNoAprobados: noAprobados,
           coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId, tx),

@@ -4,7 +4,7 @@
  * (avance-ot.controller.ts) y la pestaña «Instrumentos» (metrologia-ot.controller.ts).
  * Las tablas met_* no están en Prisma: SQL crudo con parámetros.
  */
-import type { CalibracionOt, InstrumentoOt } from "./metrologia-ot.reglas";
+import type { CalibracionOt, DocumentoNoCalibrable, InstrumentoOt } from "./metrologia-ot.reglas";
 
 /** Cliente mínimo: PrismaService o la transacción `tx`. */
 export interface ConsultaCruda {
@@ -89,11 +89,32 @@ export async function cierreExigeDevolucion(db: ConsultaCruda, tenantId: string)
   return !/^(no|n|false|0)$/i.test(String(p[0].valor ?? "si").trim());
 }
 
+/**
+ * Informe técnico y certificado externo de cada ítem no calibrable (sin anulados ni
+ * rechazados). Base sin align_r4a_metrologia_ficha.sql: ninguno. Se comprueba la
+ * tabla antes de consultar porque también corre dentro de la transacción del cierre
+ * (un error abortaría la transacción).
+ */
+export async function documentosNoCalibrablesDeOt(db: ConsultaCruda, otId: string): Promise<DocumentoNoCalibrable[]> {
+  const t = await db.$queryRawUnsafe<{ ok: boolean }[]>(
+    `SELECT (to_regclass('met_informe_tecnico') IS NOT NULL AND to_regclass('met_servicio_externo') IS NOT NULL) AS ok`);
+  if (!t[0]?.ok) return [];
+  return db.$queryRawUnsafe<DocumentoNoCalibrable[]>(
+    `SELECT ot_instrumento_id AS "instrumentoId", 'informe_tecnico' AS tipo, numero, estado, entregado_at AS "entregadoAt", entrega_medio AS "entregaMedio"
+       FROM met_informe_tecnico WHERE ot_id = $1::uuid AND estado <> 'anulado'
+     UNION ALL
+     SELECT ot_instrumento_id, 'certificado_externo', certificado_numero, estado, entregado_at, entrega_medio
+       FROM met_servicio_externo WHERE ot_id = $1::uuid AND estado NOT IN ('anulado', 'rechazado')`,
+    otId,
+  );
+}
+
 /** Todo lo de Metrología que cuenta para el cierre de una OT. */
 export async function metrologiaParaCierre(db: ConsultaCruda, otId: string, tenantId: string) {
   // En serie: también se llama dentro de una transacción (una sola conexión).
   const items = await instrumentosDeOt(db, otId);
   const cals = await calibracionesDeOt(db, otId);
+  const docsNoCalibrables = await documentosNoCalibrablesDeOt(db, otId);
   const exigeDevolucion = await cierreExigeDevolucion(db, tenantId);
-  return { items, cals, exigeDevolucion };
+  return { items, cals, docsNoCalibrables, exigeDevolucion };
 }

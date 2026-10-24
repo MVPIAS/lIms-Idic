@@ -2,7 +2,8 @@
  * Condiciones SQL comunes de «OT lista para cerrar» y «OT con analista» · B-017
  * (recorrido MP-04, D04-18): la tarjeta de Mi bandeja, el filtro de la lista de
  * OT (/ot?listasCierre=1, /ot?sinAsignar=1) y la Ruta de la OT dicen lo mismo,
- * también en la OT de calibración (certificados de calibración e instrumentos).
+ * también en la OT de calibración (certificados de calibración, informes técnicos y
+ * certificados externos validados de los no calibrables, e instrumentos).
  * El alias de la orden de trabajo es `o`.
  */
 
@@ -10,13 +11,18 @@
 export const SQL_OT_LISTA_PARA_CERRAR = `
   o.estado NOT IN ('cerrada','anulada')
   AND (EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido'))
-       OR EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_id = o.id AND mc.deleted_at IS NULL AND mc.estado = 'emitida'))
+       OR EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_id = o.id AND mc.deleted_at IS NULL AND mc.estado = 'emitida')
+       -- Decisión 24-10: informe técnico emitido y certificado externo validado del no calibrable.
+       OR EXISTS (SELECT 1 FROM met_informe_tecnico mit WHERE mit.ot_id = o.id AND mit.estado = 'emitido')
+       OR EXISTS (SELECT 1 FROM met_servicio_externo mse WHERE mse.ot_id = o.id AND mse.estado = 'validado'))
   AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
                     AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
   AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')
   -- Metrología (EP-04): certificados de calibración emitidos y entregados; instrumentos recibidos, calibrados y devueltos.
   AND NOT EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_id = o.id AND mc.deleted_at IS NULL
                     AND (mc.estado IN ('borrador','calculada','en_revision','en_firma') OR (mc.estado = 'emitida' AND mc.entregado_at IS NULL)))
+  AND NOT EXISTS (SELECT 1 FROM met_informe_tecnico mit WHERE mit.ot_id = o.id AND mit.estado = 'emitido' AND mit.entregado_at IS NULL)
+  AND NOT EXISTS (SELECT 1 FROM met_servicio_externo mse WHERE mse.ot_id = o.id AND mse.estado = 'validado' AND mse.entregado_at IS NULL)
   AND NOT EXISTS (SELECT 1 FROM met_ot_instrumento i WHERE i.ot_id = o.id
                     AND (i.estado = 'por_recibir'
                          OR (i.estado = 'recibido' AND NOT EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_instrumento_id = i.id AND mc.deleted_at IS NULL AND mc.estado <> 'reemplazada'))

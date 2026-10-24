@@ -1,8 +1,8 @@
 import { faltantesParaCerrar } from "../ot/plazos";
 import {
-  calibracionVigente, correlativoDe, documentosDeCalibraciones, etiquetaInstrumento, faltantesInstrumentos, formatearNumero, formatoValido,
+  calibracionVigente, correlativoDe, documentosDeCalibraciones, documentosDeMetrologia, documentosDeNoCalibrables, esEntregableNoCalibrable, etiquetaInstrumento, faltantesInstrumentos, formatearNumero, formatoValido,
   instrumentoDesdeOt, motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion, pasosFicha, siguienteCorrelativo,
-  instanteChile, type CalibracionOt, type DatosRecepcion, type InstrumentoOt,
+  instanteChile, type CalibracionOt, type DatosRecepcion, type DocumentoNoCalibrable, type InstrumentoOt,
 } from "./metrologia-ot.reglas";
 
 const ahora = new Date("2026-10-20T15:00:00Z");
@@ -121,6 +121,35 @@ describe("Cierre de una OT de calibración (P9.1, P9.2)", () => {
     expect(faltantesParaCerrar({ estado: "en_analisis", documentos: documentosDeCalibraciones([{ ...entregada, entregadoAt: null }]), resultadosNoAprobados: 0 }).join(" ")).toMatch(/falta registrar su entrega/);
   });
   it("las reemplazadas no cuentan", () => expect(documentosDeCalibraciones([cal({ estado: "reemplazada" })])).toEqual([]));
+
+  // Decisión 24-10: el informe técnico emitido y el certificado externo validado son documentos del cierre.
+  const inf = (p: Partial<DocumentoNoCalibrable> = {}): DocumentoNoCalibrable =>
+    ({ instrumentoId: "i1", tipo: "informe_tecnico", numero: "IT-0001", estado: "emitido", entregadoAt: null, ...p });
+  const ext = (p: Partial<DocumentoNoCalibrable> = {}): DocumentoNoCalibrable =>
+    inf({ tipo: "certificado_externo", numero: "EXT-1", estado: "validado", ...p });
+  it("solo el informe emitido y el externo validado son entregables", () => {
+    expect(["borrador", "en_firma", "emitido", "anulado"].map((e) => esEntregableNoCalibrable(inf({ estado: e })))).toEqual([false, false, true, false]);
+    expect(["solicitado", "aprobado", "enviado", "validado", "rechazado"].map((e) => esEntregableNoCalibrable(ext({ estado: e })))).toEqual([false, false, false, true, false]);
+  });
+  it("todos no calibrables: el informe técnico entregado basta para cerrar (ya no «no tiene informes ni certificados»)", () => {
+    expect(faltantesParaCerrar({ estado: "finalizada", documentos: documentosDeMetrologia([], [inf({ entregadoAt: "2026-10-24" })]), resultadosNoAprobados: 0 })).toEqual([]);
+    expect(faltantesParaCerrar({ estado: "finalizada", documentos: documentosDeMetrologia([], [ext({ entregadoAt: "2026-10-24" })]), resultadosNoAprobados: 0 })).toEqual([]);
+  });
+  it("misma regla de entrega: emitido o validado sin entregar impide cerrar", () => {
+    expect(faltantesParaCerrar({ estado: "finalizada", documentos: documentosDeMetrologia([], [inf()]), resultadosNoAprobados: 0 }))
+      .toEqual(["El documento IT-0001 es oficial pero falta registrar su entrega al cliente."]);
+    expect(faltantesParaCerrar({ estado: "finalizada", documentos: documentosDeMetrologia([], [ext()]), resultadosNoAprobados: 0 }).join(" ")).toMatch(/EXT-1 .*falta registrar su entrega/);
+  });
+  it("en elaboración no es documento: sin otro, sigue faltando uno emitido", () => {
+    expect(documentosDeNoCalibrables([inf({ estado: "en_firma", numero: null }), ext({ estado: "enviado" })])).toEqual([]);
+    expect(faltantesParaCerrar({ estado: "finalizada", documentos: documentosDeMetrologia([], [inf({ estado: "borrador" })]), resultadosNoAprobados: 0 }))
+      .toEqual(["La OT no tiene informes ni certificados emitidos."]);
+  });
+  it("mixto: certificado de calibración + informe técnico, los dos deben estar entregados", () => {
+    const m = cal({ estado: "emitida", numeroCertificado: "M-3950", entregadoAt: "2026-10-20" });
+    expect(faltantesParaCerrar({ estado: "finalizada", documentos: documentosDeMetrologia([m], [inf({ instrumentoId: "i2", entregadoAt: "2026-10-24" })]), resultadosNoAprobados: 0 })).toEqual([]);
+    expect(faltantesParaCerrar({ estado: "finalizada", documentos: documentosDeMetrologia([m], [inf({ instrumentoId: "i2" })]), resultadosNoAprobados: 0 }).join(" ")).toMatch(/IT-0001/);
+  });
   it("instrumentos: recibidos, calibrados y (si el parámetro lo exige) devueltos", () => {
     expect(faltantesInstrumentos([item()], [], true)).toEqual(["El ítem 1 (Balanza) no se ha recibido."]);
     expect(faltantesInstrumentos([item({ estado: "recibido" })], [], false)).toEqual(["El ítem 1 (Balanza) no tiene calibración."]);

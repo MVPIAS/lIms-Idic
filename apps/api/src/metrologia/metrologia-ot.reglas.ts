@@ -242,6 +242,43 @@ export function documentosDeCalibraciones(cals: CalibracionOt[]): { numero: stri
 }
 
 /**
+ * Documento de un ítem no calibrable: su informe técnico (met_informe_tecnico) o el
+ * certificado del servicio externo (met_servicio_externo).
+ */
+export interface DocumentoNoCalibrable {
+  instrumentoId: string | null;
+  tipo: "informe_tecnico" | "certificado_externo" | string;
+  numero: string | null;
+  /** Informe: borrador | en_firma | emitido | anulado. Externo: solicitado | aprobado | enviado | validado | rechazado | anulado. */
+  estado: string;
+  entregadoAt: Date | string | null;
+  entregaMedio?: string | null;
+}
+
+/** El informe técnico emitido y el certificado externo validado son documentos entregables. */
+export const esEntregableNoCalibrable = (d: Pick<DocumentoNoCalibrable, "tipo" | "estado">): boolean =>
+  d.tipo === "informe_tecnico" ? d.estado === "emitido" : d.tipo === "certificado_externo" ? d.estado === "validado" : false;
+
+/**
+ * Decisión del 24-10: en Metrología, el informe técnico emitido del no calibrable y el
+ * certificado externo validado cuentan como documento para el cierre de la OT, con la
+ * misma regla de entrega que los demás (oficial ⇒ falta registrar su entrega).
+ * Los que aún están en elaboración no son documento todavía (no bloquean ni cuentan).
+ */
+export function documentosDeNoCalibrables(docs: DocumentoNoCalibrable[]): { numero: string; estado: string; entregadoAt: Date | string | null }[] {
+  return docs.filter(esEntregableNoCalibrable).map((d) => ({
+    numero: d.numero ?? (d.tipo === "informe_tecnico" ? "informe técnico" : "certificado externo"),
+    estado: "emitido",
+    entregadoAt: d.entregadoAt ?? null,
+  }));
+}
+
+/** Todos los documentos de Metrología que cuentan para el cierre: certificados de calibración, informes técnicos y certificados externos. */
+export function documentosDeMetrologia(cals: CalibracionOt[], docsNoCalibrables: DocumentoNoCalibrable[] = []) {
+  return [...documentosDeCalibraciones(cals), ...documentosDeNoCalibrables(docsNoCalibrables)];
+}
+
+/**
  * Qué falta en los instrumentos para cerrar la OT (además de la regla general de
  * documentos): todos recibidos, los calibrables con su calibración y, si se exige,
  * todos devueltos. Los mensajes de estado de cada certificado los da la regla general.
