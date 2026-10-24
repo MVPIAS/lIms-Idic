@@ -671,9 +671,13 @@ function rutaMetrologia(h: HechosOt): Ruta {
   const enCustodia = items.filter((i) => i.estado === "recibido" || i.estado === "no_apto");
   const exigeDevolucion = h.exigeDevolucion ?? true;
   const ninguna = cals.length === 0;
-  const todasEnviadas = !ninguna && n("borrador") === 0 && sinCalibrar.length === 0 && porRecibir.length === 0;
+  // Todos los instrumentos recibidos y ninguno por calibrar sin calibración: son no calibrables
+  // (informe técnico o servicio externo, B-004). Calibración, revisión y firma no aplican y la
+  // ruta sigue con la devolución y el cierre, igual que «Cerrar técnicamente».
+  const sinCalibracion = ninguna && items.length > 0 && porRecibir.length === 0 && sinCalibrar.length === 0;
+  const todasEnviadas = sinCalibracion || (!ninguna && n("borrador") === 0 && sinCalibrar.length === 0 && porRecibir.length === 0);
   const todasFirma = todasEnviadas && n("en_revision") === 0;
-  const todasEmitidas = !ninguna && n("emitida") === cals.length && sinCalibrar.length === 0 && porRecibir.length === 0;
+  const todasEmitidas = sinCalibracion || (!ninguna && n("emitida") === cals.length && sinCalibrar.length === 0 && porRecibir.length === 0);
   const emitidas = cals.filter((c) => est(c) === "emitida");
   const sinEntregar = emitidas.filter((c) => !c.entregadoAt);
   const porDevolver = exigeDevolucion ? enCustodia : [];
@@ -696,16 +700,18 @@ function rutaMetrologia(h: HechosOt): Ruta {
       items.length ? `${items.length - porRecibir.length} de ${plural(items.length, "instrumento")} recibidos` : "Sin instrumentos registrados",
     ),
     etapa("calibracion", "Toma de datos y cálculo", todasEnviadas ? "hecho" : ninguna && !items.length ? "pendiente" : ninguna ? "pendiente" : "en_curso",
-      ninguna ? "Sin calibración registrada" : cals.map((c) => `${nombre(c)} · ${TEXTO_CAL[est(c)] ?? est(c)}`).join("; ")),
+      sinCalibracion ? "Sin calibración: instrumentos no calibrables" : ninguna ? "Sin calibración registrada" : cals.map((c) => `${nombre(c)} · ${TEXTO_CAL[est(c)] ?? est(c)}`).join("; ")),
     etapa("revision_tecnica", "Revisión técnica", todasFirma ? "hecho" : n("en_revision") ? "en_curso" : "pendiente", n("en_revision") ? lista("en_revision") : null),
     etapa("firma_emision", "Firma y emisión del certificado", todasEmitidas ? "hecho" : n("en_firma") ? "en_curso" : "pendiente", n("emitida") ? lista("emitida") : null),
     etapa(
       "entrega",
       "Entrega del certificado y devolución",
-      cerrada || (todasEmitidas && !sinEntregar.length && !porDevolver.length) ? "hecho" : emitidas.length > sinEntregar.length ? "en_curso" : "pendiente",
+      cerrada || (todasEmitidas && !sinEntregar.length && !porDevolver.length) ? "hecho" : emitidas.length > sinEntregar.length || sinCalibracion ? "en_curso" : "pendiente",
       emitidas.length
         ? `${emitidas.length - sinEntregar.length} de ${emitidas.length} entregados${exigeDevolucion ? ` · ${items.filter((i) => i.estado === "devuelto").length} de ${items.length} devueltos` : ""}`
-        : null,
+        : sinCalibracion && exigeDevolucion
+          ? `${items.filter((i) => i.estado === "devuelto").length} de ${items.length} devueltos`
+          : null,
     ),
     cierre.etapa,
     fac.factura,
