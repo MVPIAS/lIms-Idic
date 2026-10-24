@@ -91,3 +91,38 @@ export function hoyChile(ahora: Date = new Date()): string {
   const p = partesChile(ahora);
   return `${p.anio}-${dos(p.mes)}-${dos(p.dia)}`;
 }
+
+/**
+ * Instante UTC de una hora de pared de Chile (horario de verano incluido).
+ * `aaaa-mm-dd` + hora y minuto escritos en Chile → Date.
+ */
+export function instanteDeHoraChile(anio: number, mes: number, dia: number, hora = 0, minuto = 0): Date {
+  const pared = Date.UTC(anio, mes - 1, dia, hora, minuto);
+  const comoUtc = (t: number) => {
+    const p = partesChile(new Date(t));
+    return Date.UTC(p.anio, p.mes - 1, p.dia, p.hora, p.minuto);
+  };
+  // Dos aproximaciones bastan: el desfase de Chile es −3 o −4 horas.
+  let t = pared + (pared - comoUtc(pared));
+  t = t + (pared - comoUtc(t));
+  return new Date(t);
+}
+
+/**
+ * Instante que se guarda para una fecha de INGRESO elegida en un <input type="date">
+ * (recorrido MP-04, D04-10 / B-030). La web la envía como medianoche UTC
+ * («2026-10-23T00:00:00.000Z»), que en Chile es el 22-10 a las 21:00: el certificado
+ * de Metrología imprimía el día anterior. Regla:
+ *   · si el día es HOY en Chile → el instante actual;
+ *   · otro día → ese día a las 12:00 de Chile (en cualquier zona sigue siendo ese día);
+ *   · un instante con hora real se respeta tal cual.
+ */
+export function instanteFechaIngreso(valor: Date | string | null | undefined, ahora: Date = new Date()): Date | null {
+  if (valor === null || valor === undefined || valor === "") return null;
+  const d = valor instanceof Date ? valor : new Date(String(valor));
+  if (Number.isNaN(d.getTime())) return null;
+  if (!esFechaCalendario(valor)) return d;
+  const p = partesCalendario(valor, d);
+  if (`${p.anio}-${dos(p.mes)}-${dos(p.dia)}` === hoyChile(ahora)) return ahora;
+  return instanteDeHoraChile(p.anio, p.mes, p.dia, 12, 0);
+}

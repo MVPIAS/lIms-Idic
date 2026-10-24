@@ -212,6 +212,22 @@ export interface ConfigTrabajo {
 }
 
 /** ¿La documentación de este laboratorio pasa por aprobación? (LEM solo en terreno.) */
+/**
+ * B-089 · ¿El lugar de ejecución del encargo es fuera del IDIC? (fábrica nacional
+ * o extranjera, unidad militar). Entonces el trabajo del LEM se propone «en
+ * terreno» (lo que exige la aprobación previa) mientras nadie haya marcado otra cosa.
+ */
+export function terrenoPorLugar(lugarEjecucion: string | null | undefined): boolean {
+  const l = String(lugarEjecucion ?? "").trim().toUpperCase();
+  return l !== "" && l !== "IDIC";
+}
+
+/** La documentación con «terreno» propuesto por el lugar de ejecución si aún no se marcó. */
+export function conTerrenoPropuesto(lab: string, documentacion: Record<string, unknown>, lugarEjecucion: string | null | undefined): Record<string, unknown> {
+  if (lab !== "LEM" || typeof documentacion.terreno === "boolean") return documentacion;
+  return terrenoPorLugar(lugarEjecucion) ? { ...documentacion, terreno: true } : documentacion;
+}
+
 export function exigeAprobacion(lab: string, datos: Record<string, unknown>, cfg: ConfigTrabajo): boolean {
   if (lab === "LEM") return datos.terreno === true;
   return cfg.exigeAprobacion.includes(lab);
@@ -291,4 +307,13 @@ export function leerConfigTrabajo(filas: { codigo: string; valor: string | null;
     exigeAprobacion: exige ? String(exige.valor ?? "").toUpperCase().split(",").map((s) => s.trim()).filter(Boolean) : ["LRB", "SVM"],
     bloqueaCaptura: bloquea ? !["no", "false", "0"].includes(String(bloquea.valor ?? "").trim().toLowerCase()) : true,
   };
+}
+
+/**
+ * Concordancia del documento de trabajo en los textos (B-085: «Preparar la
+ * Paquete técnico»). Masculinos: «Plan …», «Paquete …», «Proyecto …».
+ */
+export function generoDocumentoTrabajo(titulo: string): { art: "el" | "la"; o: "o" | "a"; lo: "lo" | "la" } {
+  const m = /^(plan|paquete|proyecto)\b/i.test(String(titulo ?? "").trim());
+  return m ? { art: "el", o: "o", lo: "lo" } : { art: "la", o: "a", lo: "la" };
 }

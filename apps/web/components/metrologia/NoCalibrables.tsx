@@ -7,6 +7,7 @@
  * certificado externo → Validar). Lo que se puede hacer lo decide el servidor
  * (GET /ot/:id/metrologia/documentos); aquí solo se ofrecen esas acciones.
  */
+import { avisarCambioOt, useCambiosOt } from "@/lib/refresco";
 import { useCallback, useEffect, useId, useState } from "react";
 import { llamar } from "@/lib/laboratorio";
 import { enviarInforme } from "@/lib/informes";
@@ -50,13 +51,14 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
     catch (e: any) { setError(e.message); }
   }, [otId]);
   useEffect(() => { cargar(); }, [cargar]);
+  useCambiosOt(otId, cargar);
 
   async function hacer(metodo: "POST" | "PUT", ruta: string, cuerpo: unknown, ok: string) {
     setOcupado(true);
     try {
       if (cuerpo instanceof FormData) await enviarInforme(ruta, "PUT", cuerpo);
       else await llamar(metodo, ruta, cuerpo);
-      toast.ok(ok); setDlg(null); await cargar(); onCambio?.();
+      toast.ok(ok); setDlg(null); await cargar(); onCambio?.(); avisarCambioOt(otId);
     } catch (e: any) { toast.error(e.message); }
     finally { setOcupado(false); }
   }

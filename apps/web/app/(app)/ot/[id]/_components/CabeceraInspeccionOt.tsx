@@ -9,6 +9,8 @@
  * agregan dirección, comuna y contacto. No se muestra en OT de otras unidades.
  * API: GET/PUT /bpch/cabecera-ot/:otId (docs/FLUJO_BPCH_CABECERA_OT.md).
  */
+import { conPunto } from "@/lib/etiquetas";
+import { avisarCambioOt } from "@/lib/refresco";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { llamar } from "@/lib/laboratorio";
@@ -103,6 +105,7 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
       setF({ ...f, ...r });
       setForm(r.cabecera ?? {});
       toast.ok(r.faltantesEmision?.length ? "Cabecera guardada. Aún falta para emitir el Informe de Inspección." : "Cabecera guardada: siga con el muestreo de los lotes.");
+      avisarCambioOt(otId); // B-041: la ruta deja de decir «Cabecera · etapa actual».
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -166,7 +169,7 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
                   {(her || c.ayuda || (c.k === "inspectores" && f.sugeridos?.inspectores)) && (
                     <small style={{ color: "var(--muted)" }}>
                       {her ? `Si lo deja vacío se imprime: ${her}. ` : ""}
-                      {c.k === "inspectores" && f.sugeridos?.inspectores ? `Asignados a la OT: ${f.sugeridos.inspectores}. ` : ""}
+                      {c.k === "inspectores" && f.sugeridos?.inspectores ? `${conPunto(`Asignados a la OT: ${f.sugeridos.inspectores}`)} ` : ""}
                       {c.ayuda ?? ""}
                     </small>
                   )}
@@ -176,6 +179,8 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
           </div>
           <datalist id="cab-procedimientos">{(f.sugeridos?.procedimientos ?? []).map((p) => <option key={p} value={p} />)}</datalist>
         </fieldset>
+        <PlanNch44 tamanoLote={form.tamanoLote} tamanoMuestra={form.tamanoMuestra} editable={!!f.editable}
+          onUsar={(n) => setForm((x) => ({ ...x, tamanoMuestra: n }))} />
         {f.editable ? (
           <div className="toolbar" style={{ margin: "10px 0 0" }}>
             <button type="submit" className="btn primary" disabled={guardando}>{guardando ? "Guardando…" : "Guardar cabecera → muestrear lotes"}</button>
@@ -203,5 +208,46 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
         </details>
       )}
     </section>
+  );
+}
+
+/**
+ * B-046 · Plan NCh 44 propuesto para el lote (EP-10 10.4): letra código, tamaño
+ * de muestra y Ac/Re por clase, con el nivel y los AQL de Parámetros de la
+ * operación (el mismo plan del muestreo del lote). Quien inspecciona lo usa o
+ * escribe otro tamaño.
+ */
+function PlanNch44({ tamanoLote, tamanoMuestra, editable, onUsar }: { tamanoLote: unknown; tamanoMuestra: unknown; editable: boolean; onUsar: (n: number) => void }) {
+  const lote = Number(String(tamanoLote ?? "").trim());
+  const valido = Number.isInteger(lote) && lote >= 2;
+  const [plan, setPlan] = useState<any>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (!valido) { setPlan(null); setError(""); return; }
+    const t = setTimeout(() => {
+      llamar<any>("GET", `/muestreo/plan?tamanoLote=${lote}&config=1`)
+        .then((p) => { setPlan(p); setError(""); })
+        .catch((e) => { setPlan(null); setError(e.message); });
+    }, 300);
+    return () => clearTimeout(t);
+  }, [lote, valido]);
+  if (!valido) return null;
+  if (error) return <div className="alert warn" style={{ marginTop: 8 }}>Plan NCh 44: {error}</div>;
+  if (!plan) return null;
+  const clases = Object.entries(plan.clases ?? {}) as [string, any][];
+  const ETQ: Record<string, string> = { critico: "Críticos", mayor: "Mayores", menor: "Menores" };
+  const n = Number(plan.nExtraer);
+  const actual = Number(String(tamanoMuestra ?? "").trim());
+  return (
+    <div className="alert info" style={{ marginTop: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ flex: 1, minWidth: 260 }}>
+        <b>Plan NCh 44 propuesto</b> · nivel {plan.nivel} · letra código <b>{plan.letra}</b> · tamaño de muestra <b>n = {n}</b>
+        {clases.length ? <> · {clases.map(([c, p]) => `${ETQ[c] ?? c} AQL ${String(p.aql).replace(".", ",")}: Ac ${p.ac} / Re ${p.re}`).join(" · ")}</> : " · sin AQL configurado (Ac/Re a criterio)"}
+        {plan.avisos?.length ? <small style={{ display: "block", color: "var(--muted)" }}>{plan.avisos.join(" ")}</small> : null}
+      </span>
+      {editable && actual !== n && (
+        <button type="button" className="btn outline sm" onClick={() => onUsar(n)}>Usar n = {n} como tamaño de la muestra</button>
+      )}
+    </div>
   );
 }

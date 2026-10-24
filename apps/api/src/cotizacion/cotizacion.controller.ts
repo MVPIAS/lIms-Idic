@@ -68,6 +68,13 @@ const LineaSchema = z
     diasOHoras: z.number().optional(),
     precioUnitario: z.number().positive().optional(),
     tramo: z.string().max(200).optional(),
+    // B-045 · Metrología: datos del instrumento de la línea (EP-04 P0.1–P0.2).
+    instrumento: z.string().trim().max(300).nullable().optional(),
+    instrumentoMarca: z.string().trim().max(120).nullable().optional(),
+    instrumentoModelo: z.string().trim().max(120).nullable().optional(),
+    instrumentoRango: z.string().trim().max(160).nullable().optional(),
+    instrumentoPuntos: z.string().trim().max(500).nullable().optional(),
+    instrumentoSentido: z.enum(["T", "C", "T+C"]).nullable().optional(),
     // Compatibilidad: el descuento por línea ya no existe (R1); solo se admite 0.
     descuentoPct: z.number().min(0).max(0, "La cotización no admite descuento (decisión Comercial R1).").optional(),
   })

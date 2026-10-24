@@ -18,6 +18,7 @@
  * documentación del trabajo se aprueba antes de ejecutar (EP-05 2.2–2.3), entre
  * la asignación y el análisis va la etapa «Preparación del trabajo» (frente r2a).
  */
+import { generoDocumentoTrabajo } from "../formularios/trabajo";
 import { faltantesParaCerrar } from "./plazos";
 import { condicionFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
 import { calibracionVigente, documentosDeCalibraciones, faltantesInstrumentos } from "../metrologia/metrologia-ot.reglas";
@@ -478,21 +479,22 @@ function etapaTrabajo(h: HechosOt): { etapa: Etapa; paso: Paso } | null {
   if (!t?.exige) return null;
   const estado: EstadoEtapa = t.estado === "aprobada" ? "hecho" : t.estado === "en_aprobacion" || t.estado === "validada" ? "en_curso" : "pendiente";
   const lem = t.laboratorio === "LEM";
+  const g = generoDocumentoTrabajo(t.titulo);
   const paso: Paso =
     t.estado === "en_aprobacion"
       ? {
-          texto: lem ? `Validar la ${t.titulo} (Jefe de Sección) antes de la aprobación del Jefe DSA` : `Aprobar la ${t.titulo} antes de ejecutar`,
+          texto: lem ? `Validar ${g.art} ${t.titulo} (Jefe de Sección) antes de la aprobación del Jefe DSA` : `Aprobar ${g.art} ${t.titulo} antes de ejecutar`,
           leToca: { rol: lem ? "Jefe de Sección Ensayos Mecánicos" : "Jefe de Laboratorio", unidad: lem ? "SEM" : t.laboratorio, personas: [] },
           accion: { texto: "Ir a Preparación", pestana: "preparacion", permisos: ["ot.preparacion.aprobar"] },
         }
       : t.estado === "validada"
         ? {
-            texto: `Aprobar la ${t.titulo} (validada por el Jefe de Sección)`,
+            texto: `Aprobar ${g.art} ${t.titulo} (validad${g.o} por el Jefe de Sección)`,
             leToca: { rol: "Jefe del Departamento Sistemas de Armas", unidad: "DSA", personas: [] },
             accion: { texto: "Ir a Preparación", pestana: "preparacion", permisos: ["ot.preparacion.aprobar"] },
           }
         : {
-            texto: t.estado === "devuelta" ? `Corregir la ${t.titulo} devuelta y enviarla de nuevo a aprobación` : `Preparar la ${t.titulo} y enviarla a aprobación`,
+            texto: t.estado === "devuelta" ? `Corregir ${g.art} ${t.titulo} devuelt${g.o} y enviar${g.lo} de nuevo a aprobación` : `Preparar ${g.art} ${t.titulo} y enviar${g.lo} a aprobación`,
             leToca: { rol: lem ? "Jefe de Laboratorio" : "Analista", unidad: t.laboratorio, personas: h.analistas },
             accion: { texto: "Ir a Preparación", pestana: "preparacion", permisos: ["resultado.crear", "ot.asignar"] },
           };

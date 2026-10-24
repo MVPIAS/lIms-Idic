@@ -103,7 +103,10 @@ export async function aplicarEtAMuestra(
   for (const r of resultados) {
     const nombre = r.catAnalito?.nombre ?? "ensayo";
     if (opts.soloNuevos && (r.estado !== "pendiente" || r.especOrigen !== "catalogo" || r.etPuntoId)) continue;
-    const p = puntoDeEnsayo(puntos, r, et.componente, r.catMetodoId ? porMetodo.get(r.catMetodoId) ?? 0 : 0);
+    // B-033: un ítem del checklist sin ensayo del catálogo está ligado directamente a su punto.
+    const p = !r.catMetodoId && r.etPuntoId
+      ? puntos.find((x) => x.id === r.etPuntoId) ?? null
+      : puntoDeEnsayo(puntos, r, et.componente, r.catMetodoId ? porMetodo.get(r.catMetodoId) ?? 0 : 0);
     if (!p) {
       resumen.sinPunto++;
       continue;

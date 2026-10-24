@@ -6,6 +6,9 @@ describe("OT · datos del encargo (EP-00 5.1, EP-03 0.1/0.3, EP-05 0.1/0.3)", ()
     expect(documentoPropuesto("ADQUISICIONES")).toBe("IVC");
     expect(documentoPropuesto("ENSAYOS")).toBe("IE");
     expect(documentoPropuesto(null)).toBeNull();
+    // B-084: la OT del BPCH emite Informe de Inspección.
+    expect(documentoPropuesto("ENSAYOS", "bpch")).toBe("II");
+    expect(documentoPropuesto(null, "bpch")).toBe("II");
   });
   it("la OT institucional exige el oficio (salvo que el parámetro lo desactive)", () => {
     expect(erroresEncargo({}, { origen: "INSTITUCIONAL" })).toEqual(expect.arrayContaining([expect.stringMatching(/Nº del oficio/), expect.stringMatching(/fecha del oficio/)]));

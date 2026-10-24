@@ -12,7 +12,8 @@ import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from
 import { urlVerificacionBase } from "../../common/url-verificacion";
 
 /** Adjuntos de la clasificación: la curva tiempo/presión del MCU (IT23, «registro permanente»). */
-export const CLASES_ADJUNTO_CLASIFICACION = ["curva_it23"] as const;
+/** Adjuntos de la clasificación: curva del MCU (IT23) y registro de la prueba IT21 (B-092, EP-08 8.2). */
+export const CLASES_ADJUNTO_CLASIFICACION = ["curva_it23", "registro_it21"] as const;
 import {
   EFECTOS_KOENEN,
   erroresAnulacion,

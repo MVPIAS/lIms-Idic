@@ -145,14 +145,14 @@ export default function ClasificacionPage() {
     setJustificacion(x.justificacion ?? "");
   }, []);
 
-  async function subirCurva(archivo: File | undefined) {
+  async function subirCurva(archivo: File | undefined, clase: "curva_it23" | "registro_it21" = "curva_it23") {
     if (!archivo) return;
     try {
       const f = new FormData();
-      f.append("clase", "curva_it23");
+      f.append("clase", clase);
       f.append("archivo", archivo, archivo.name);
       await subirFormulario(`/bpch/clasificaciones/${id}/adjuntos`, f);
-      toast.ok("Curva del MCU adjunta.");
+      toast.ok(clase === "curva_it23" ? "Curva del MCU adjunta." : "Registro de la prueba IT21 adjunto.");
       cargar();
     } catch (e: any) {
       toast.error(e.message);
@@ -384,6 +384,23 @@ export default function ClasificacionPage() {
             <div style={{ display: "grid", gap: 8 }}>
               {serieIt21("serie1", "Serie 1 (sin barrera)")}
               {serieIt21("serie2", "Serie 2 (con barrera de 50 mm)")}
+              {/* B-092: registro de la prueba (fotos o informe del registro audiovisual), como la curva del IT23. */}
+              <div className="field span-3">
+                <span style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>Registro de la prueba (fotografías o acta del registro audiovisual)</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  {(c?.adjuntos ?? []).filter((a: any) => a.clase === "registro_it21").map((a: any) => (
+                    <button key={a.id} type="button" className="btn outline sm" onClick={() => descargarAdjunto(`/bpch/clasificaciones/${id}/adjuntos/${a.id}`, a.nombre).catch((x) => toast.error(x.message))}>⭳ {a.nombre}</button>
+                  ))}
+                  {!nueva && (c?.estado === "borrador" || c?.estado === "registrada") && puede("bpch.clasificacion.registrar") && (
+                    <label className="btn outline sm" style={{ cursor: "pointer", textTransform: "none", letterSpacing: 0 }}>
+                      ＋ Adjuntar registro (PDF, PNG o JPEG)
+                      <input type="file" className="sr-only" accept="application/pdf,image/png,image/jpeg" onChange={(e) => subirCurva(e.target.files?.[0], "registro_it21")} />
+                    </label>
+                  )}
+                  {nueva && <small style={{ color: "var(--muted)" }}>Guarde el borrador para adjuntar el registro.</small>}
+                  {!nueva && !(c?.adjuntos ?? []).some((a: any) => a.clase === "registro_it21") && !(c?.estado === "borrador" || c?.estado === "registrada") && <small style={{ color: "var(--muted)" }}>Sin registro adjunto.</small>}
+                </div>
+              </div>
             </div>
           )}
         </section>

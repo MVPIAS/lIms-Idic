@@ -109,3 +109,21 @@ export function propsInput(tipo?: TipoCampo): Record<string, any> {
     default: return { type: "text" };
   }
 }
+
+/**
+ * Validación EN LÍNEA de un campo numérico mientras se escribe (B-088): mensaje
+ * si lo escrito no es un número (o un entero ≥ 0), vacío si está bien o vacío.
+ * Coma decimal chilena («10,5»).
+ */
+export function errorNumeroEnLinea(v: unknown, tipo: "numero" | "entero" = "numero", opts: { positivo?: boolean } = {}): string {
+  const t = String(v ?? "").trim();
+  if (t === "") return "";
+  if (tipo === "entero") {
+    if (!/^\d+$/.test(t)) return "Escriba un número entero (sin letras ni decimales).";
+    if (opts.positivo && Number(t) <= 0) return "Debe ser mayor que 0.";
+    return "";
+  }
+  if (!/^[+-]?(\d+([.,]\d+)?|[.,]\d+)$/.test(t)) return "Escriba un número (use coma decimal: 10,5).";
+  if (opts.positivo && Number(t.replace(",", ".")) <= 0) return "Debe ser mayor que 0.";
+  return "";
+}

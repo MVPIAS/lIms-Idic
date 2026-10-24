@@ -53,6 +53,21 @@ const pct = (v: unknown) => {
 };
 
 /**
+ * Descripción de una línea de factura: «código · descripción», sin repetir el
+ * código si la descripción ya empieza por él (B-084: «131 · 131 · Cloruro de
+ * Sodio», «EN1074 · EN1074 · Equipo de pesaje…»).
+ */
+export function descripcionLineaFactura(codigo: string | null | undefined, descripcion: string | null | undefined): string {
+  const c = String(codigo ?? "").trim();
+  const d = String(descripcion ?? "").trim();
+  if (!c) return d;
+  if (!d) return c;
+  const resto = d.toLowerCase().startsWith(c.toLowerCase()) ? d.slice(c.length) : null;
+  if (resto !== null && (resto === "" || /^[\s·:\-–—]/.test(resto))) return d;
+  return `${c} · ${d}`;
+}
+
+/**
  * Líneas de la factura a partir de la cotización ACEPTADA: una por línea de la
  * cotización, más el descuento y los gastos administrativos globales, y un
  * ajuste si aún quedara diferencia con el neto aceptado (redondeos, utilidad).
@@ -65,7 +80,7 @@ export function lineasDesdeCotizacion(cot: CotizacionFactura): LineaBorrador[] {
     .map((l) => {
       const cantidad = Math.max(1, Number(l.cantidad) || 1);
       const subtotal = redondear(n(l.subtotal), moneda);
-      const desc = [l.ensayoCodigo, l.descripcion ?? l.categoria ?? l.tipo ?? "Servicio"].filter(Boolean).join(" · ");
+      const desc = descripcionLineaFactura(l.ensayoCodigo, l.descripcion ?? l.categoria ?? l.tipo ?? "Servicio");
       return { descripcion: desc, cantidad, precioUnitario: redondear(subtotal / cantidad, moneda), subtotal };
     });
   const descuento = redondear(n(cot.descuentoMonto), moneda);
@@ -78,6 +93,38 @@ export function lineasDesdeCotizacion(cot: CotizacionFactura): LineaBorrador[] {
   const diff = redondear(n(cot.neto) - suma, moneda);
   if (Math.abs(diff) >= (moneda.toUpperCase() === "CLP" ? 1 : 0.01))
     lineas.push({ descripcion: `Ajuste según cotización ${cot.codigo}`, cantidad: 1, precioUnitario: diff, subtotal: diff });
+  return lineas;
+}
+
+/** Ensayo realizado en la OT (por el catálogo), con su precio ya elegido. */
+export interface EnsayoOtFactura {
+  codigo: string;
+  nombre: string;
+  /** Nº de muestras en que se hizo. */
+  cantidad: number;
+  /** Precio unitario (lista vigente o ficha); null si no tiene. */
+  precio: number | null;
+}
+
+/**
+ * Líneas del borrador de una OT SIN cotización aceptada (B-040: la factura de
+ * la OT directa del BPCH llegaba vacía). Una línea por ensayo del catálogo
+ * hecho en la OT (cantidad = muestras), con el precio de la lista vigente o de
+ * la ficha. Si ningún ensayo tiene precio y la OT tiene un valor estimado, una
+ * línea con ese valor. Finanzas revisa las líneas antes de emitir.
+ */
+export function lineasDesdeOt(ensayos: EnsayoOtFactura[], valorEstimado: number | null, otCodigo: string, moneda = "CLP"): LineaBorrador[] {
+  const lineas: LineaBorrador[] = ensayos
+    .filter((e) => e.precio != null && e.precio > 0)
+    .map((e) => {
+      const cantidad = Math.max(1, Math.round(e.cantidad) || 1);
+      const precioUnitario = redondear(Number(e.precio), moneda);
+      return { descripcion: descripcionLineaFactura(e.codigo, e.nombre), cantidad, precioUnitario, subtotal: redondear(precioUnitario * cantidad, moneda) };
+    });
+  if (!lineas.length && valorEstimado != null && valorEstimado > 0) {
+    const v = redondear(valorEstimado, moneda);
+    lineas.push({ descripcion: `Servicios de la OT ${otCodigo} (valor estimado)`, cantidad: 1, precioUnitario: v, subtotal: v });
+  }
   return lineas;
 }
 

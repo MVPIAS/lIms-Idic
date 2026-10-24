@@ -83,6 +83,13 @@ export interface LineaEntrada {
   diasOHoras?: number;
   precioUnitario?: number;
   tramo?: string;
+  /** B-045 · Metrología: instrumento de la línea. */
+  instrumento?: string | null;
+  instrumentoMarca?: string | null;
+  instrumentoModelo?: string | null;
+  instrumentoRango?: string | null;
+  instrumentoPuntos?: string | null;
+  instrumentoSentido?: string | null;
 }
 
 /** Campos de cabecera comunes a crear/editar (ya validados por zod en el controller). */
@@ -466,6 +473,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         orden: i + 1,
         catEnsayoId: l.catEnsayoId ?? null,
         ensayoCodigo: ensayoCodigo ?? null,
+        // B-045: datos del instrumento (Metrología); vacío = sin dato.
+        instrumento: l.instrumento?.trim() || null,
+        instrumentoMarca: l.instrumentoMarca?.trim() || null,
+        instrumentoModelo: l.instrumentoModelo?.trim() || null,
+        instrumentoRango: l.instrumentoRango?.trim() || null,
+        instrumentoPuntos: l.instrumentoPuntos?.trim() || null,
+        instrumentoSentido: l.instrumentoSentido ?? null,
       };
     });
   }
@@ -851,6 +865,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     });
     // EP-00 5.1 (BL-159): la OT hereda moneda, forma de pago, referencia, descripción técnica, valor y paridad.
     await heredarDeCotizacion(this.prisma, tenantIdOt, ot.id, id);
+    // B-086: la bitácora deja la aceptación y la OT generada (con su enlace).
+    await this.hito(cot.tenantId, id, "aceptada", usuarioId, null, {
+      tipoDocumento: doc.tipo ?? null,
+      numero: doc.numero?.trim() || null,
+      otId: ot.id,
+      otCodigo: ot.codigo,
+    });
     if (oc.aplica)
       await this.hito(cot.tenantId, id, oc.hayDiscrepancia ? "discrepancia_oc" : "oc_conforme", usuarioId, doc.discrepancia?.trim() || null, {
         numero: doc.numero?.trim() ?? null,

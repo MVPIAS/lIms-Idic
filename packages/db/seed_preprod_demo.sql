@@ -11,8 +11,8 @@ SELECT t.id, v.rut, v.razon, v.tipo, 'Santiago', 'RM', v.tel, 30
 FROM tenant t, (VALUES
   ('61.104.000-8','FAMAE · Fábricas y Maestranzas del Ejército','institucional','+56 2 2345 0000'),
   ('61.101.049-4','DGMN · Dir. Gral. Movilización Nacional','gubernamental','+56 2 2410 1000'),
-  ('91.021.000-9','CAP Acero · Compañía Acero del Pacífico','externo','+56 41 240 0000'),
-  ('96.529.310-8','Empresas Carozzi S.A.','externo','+56 2 2444 0000'),
+  ('99.999.902-6','Cliente Prueba Metalúrgica Aiuken S.A.','externo','+56 2 2000 0002'),  -- ficticio (RUT de prueba)
+  ('99.999.901-8','Cliente Prueba Aiuken S.A.','externo','+56 2 2000 0001'),               -- ficticio (RUT de prueba)
   ('61.219.000-3','JUNAEB','gubernamental','+56 2 2595 0000'),
   ('61.307.000-1','SAG · Servicio Agrícola y Ganadero','gubernamental','+56 2 2345 1100'),
   ('61.001.000-8','DIVLOG · División Logística del Ejército','institucional','+56 2 2693 0000'),

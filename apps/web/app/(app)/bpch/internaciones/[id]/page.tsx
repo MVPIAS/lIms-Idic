@@ -15,7 +15,7 @@ import RequierePermiso from "@/components/RequierePermiso";
 import { toast, confirmar } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import { usePermisos } from "@/lib/permisos";
-import { clp, fecha, fechaHora } from "@/lib/format";
+import { clp, fecha, fechaHora, pct } from "@/lib/format";
 import { DocumentosYCierre, Fases } from "../../_components/Expediente";
 import { FormInternacion } from "../../_components/FormInternacion";
 import { SelectorPanel } from "../../_components/Buscadores";
@@ -483,12 +483,12 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
       </div>
 
       <div className="card">
-        <h2>Cálculo de la tasa <span className="right">CIF US$ × paridad × % afecto × {tasaPct ?? "?"} % (+ IVA {ivaPct ?? "?"} %)</span></h2>
+        <h2>Cálculo de la tasa <span className="right">CIF US$ × paridad × % afecto × {tasaPct != null ? pct(tasaPct) : "? %"} (+ IVA {ivaPct != null ? pct(ivaPct) : "? %"})</span></h2>
         {d.tasa && (
           <table className="data" style={{ marginBottom: 10 }}>
             <tbody>
               <tr><th>CIF US$</th><td className="num">{d.tasa.cifUsd.toLocaleString("es-CL")}</td><th>Paridad</th><td className="num">{d.tasa.paridad.toLocaleString("es-CL")}</td><th>% afecto</th><td className="num">{d.tasa.pctAfecto}</td></tr>
-              <tr><th>Tasa ({d.tasa.tasaPct} %)</th><td className="num">{clp(d.tasa.tasa)}</td><th>IVA ({d.tasa.ivaPct} %)</th><td className="num">{clp(d.tasa.iva)}</td><th>Total</th><td className="num"><b>{clp(d.tasa.total)}</b></td></tr>
+              <tr><th>Tasa ({pct(d.tasa.tasaPct)})</th><td className="num">{clp(d.tasa.tasa)}</td><th>IVA ({pct(d.tasa.ivaPct)})</th><td className="num">{clp(d.tasa.iva)}</td><th>Total</th><td className="num"><b>{clp(d.tasa.total)}</b></td></tr>
             </tbody>
           </table>
         )}

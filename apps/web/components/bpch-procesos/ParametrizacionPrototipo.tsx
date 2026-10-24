@@ -28,7 +28,7 @@ export default function ParametrizacionPrototipo({ p, onCambio }: { p: any; onCa
     (par.filas ?? []).map((f: any) => ({ ...f, minimo: aTexto(f.minimo), nominal: aTexto(f.nominal), maximo: aTexto(f.maximo), unidad: f.unidad ?? "", formula: f.formula ?? "", tipoFormula: f.tipoFormula ?? "" })),
   );
   const [buscar, setBuscar] = useState<Record<number, string>>({});
-  const [opciones, setOpciones] = useState<Record<number, { id: string; codigo: string; nombre: string }[]>>({});
+  const [opciones, setOpciones] = useState<Record<number, { id: string; codigo: string; nombre: string; detalle: string }[]>>({});
   const [motivo, setMotivo] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -40,7 +40,18 @@ export default function ParametrizacionPrototipo({ p, onCambio }: { p: any; onCa
     if (q.length < 2) return;
     try {
       const r = await llamar<any>("GET", `/cat/metodos?search=${encodeURIComponent(q)}&limit=20`);
-      setOpciones((o) => ({ ...o, [i]: (r.data ?? r ?? []).map((m: any) => ({ id: m.id, codigo: m.codigo, nombre: m.nombre })) }));
+      // B-091: código, laboratorio, ensayo y norma para distinguir métodos con el mismo nombre.
+      setOpciones((o) => ({
+        ...o,
+        [i]: (r.data ?? r ?? []).map((m: any) => ({
+          id: m.id,
+          codigo: m.codigo,
+          nombre: m.nombre,
+          detalle: [m.ensayo?.familia?.laboratorio || m.ensayo?.familia?.nombre, m.ensayo?.codigo ? `ensayo ${m.ensayo.codigo}` : null, m.norma]
+            .filter((x: any) => x && String(x).trim())
+            .join(" · "),
+        })),
+      }));
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -109,27 +120,41 @@ export default function ParametrizacionPrototipo({ p, onCambio }: { p: any; onCa
                       {(opciones[i] ?? []).length > 0 && (
                         <select aria-label={`Método de la fila ${i + 1}`} defaultValue="" onChange={(e) => { const m = opciones[i].find((x) => x.id === e.target.value); if (m) poner(i, { metodoId: m.id, metodoCodigo: m.codigo, metodoNombre: m.nombre }); }}>
                           <option value="">Elija el método…</option>
-                          {opciones[i].map((m) => <option key={m.id} value={m.id}>{m.codigo} · {m.nombre}</option>)}
+                          {opciones[i].map((m) => <option key={m.id} value={m.id}>{m.codigo} · {m.nombre}{m.detalle ? ` — ${m.detalle}` : ""}</option>)}
                         </select>
                       )}
                     </div>
                   )}
                 </td>
-                <td><input aria-label={`Ensayo de la fila ${i + 1}`} value={f.ensayo} disabled={!editable} onChange={(e) => poner(i, { ensayo: e.target.value })} maxLength={200} /></td>
-                <td><input aria-label={`Mínimo de la fila ${i + 1}`} inputMode="decimal" value={f.minimo} disabled={!editable} onChange={(e) => poner(i, { minimo: e.target.value })} style={{ width: 80 }} /></td>
-                <td><input aria-label={`Nominal de la fila ${i + 1}`} inputMode="decimal" value={f.nominal} disabled={!editable} onChange={(e) => poner(i, { nominal: e.target.value })} style={{ width: 80 }} /></td>
-                <td><input aria-label={`Máximo de la fila ${i + 1}`} inputMode="decimal" value={f.maximo} disabled={!editable} onChange={(e) => poner(i, { maximo: e.target.value })} style={{ width: 80 }} /></td>
-                <td><input aria-label={`Unidad de la fila ${i + 1}`} value={f.unidad} disabled={!editable} onChange={(e) => poner(i, { unidad: e.target.value })} maxLength={30} style={{ width: 70 }} /></td>
-                <td style={{ minWidth: 180 }}>
-                  <input aria-label={`Fórmula de la fila ${i + 1}`} placeholder="(C1 - C2) / C3 * 100" value={f.formula} disabled={!editable} onChange={(e) => poner(i, { formula: e.target.value })} maxLength={500} />
-                  {f.formula && (
-                    <select aria-label={`Tipo de fórmula de la fila ${i + 1}`} value={f.tipoFormula} disabled={!editable} onChange={(e) => poner(i, { tipoFormula: e.target.value })} style={{ marginTop: 4 }}>
-                      <option value="">¿General o específica?</option>
-                      <option value="general">General</option>
-                      <option value="especifica">Específica</option>
-                    </select>
-                  )}
-                </td>
+                {editable ? (
+                  <>
+                  <td><input aria-label={`Ensayo de la fila ${i + 1}`} value={f.ensayo} disabled={!editable} onChange={(e) => poner(i, { ensayo: e.target.value })} maxLength={200} /></td>
+                  <td><input aria-label={`Mínimo de la fila ${i + 1}`} inputMode="decimal" value={f.minimo} disabled={!editable} onChange={(e) => poner(i, { minimo: e.target.value })} style={{ width: 80 }} /></td>
+                  <td><input aria-label={`Nominal de la fila ${i + 1}`} inputMode="decimal" value={f.nominal} disabled={!editable} onChange={(e) => poner(i, { nominal: e.target.value })} style={{ width: 80 }} /></td>
+                  <td><input aria-label={`Máximo de la fila ${i + 1}`} inputMode="decimal" value={f.maximo} disabled={!editable} onChange={(e) => poner(i, { maximo: e.target.value })} style={{ width: 80 }} /></td>
+                  <td><input aria-label={`Unidad de la fila ${i + 1}`} value={f.unidad} disabled={!editable} onChange={(e) => poner(i, { unidad: e.target.value })} maxLength={30} style={{ width: 70 }} /></td>
+                  <td style={{ minWidth: 180 }}>
+                    <input aria-label={`Fórmula de la fila ${i + 1}`} placeholder="(C1 - C2) / C3 * 100" value={f.formula} disabled={!editable} onChange={(e) => poner(i, { formula: e.target.value })} maxLength={500} />
+                    {f.formula && (
+                      <select aria-label={`Tipo de fórmula de la fila ${i + 1}`} value={f.tipoFormula} disabled={!editable} onChange={(e) => poner(i, { tipoFormula: e.target.value })} style={{ marginTop: 4 }}>
+                        <option value="">¿General o específica?</option>
+                        <option value="general">General</option>
+                        <option value="especifica">Específica</option>
+                      </select>
+                    )}
+                  </td>
+                  </>
+                ) : (
+                  // B-037: quien valida (o consulta) lee el panel como texto, no en casillas desactivadas y recortadas.
+                  <>
+                    <td style={{ whiteSpace: "normal" }}>{f.ensayo || "—"}</td>
+                    <td className="num">{f.minimo || "—"}</td>
+                    <td className="num">{f.nominal || "—"}</td>
+                    <td className="num">{f.maximo || "—"}</td>
+                    <td>{f.unidad || "—"}</td>
+                    <td style={{ whiteSpace: "normal" }}>{f.formula ? <><code>{f.formula}</code>{f.tipoFormula ? <small style={{ color: "var(--muted)" }}> · {f.tipoFormula === "general" ? "general" : "específica"}</small> : null}</> : "—"}</td>
+                  </>
+                )}
                 {editable && <td><button type="button" className="btn ghost sm" aria-label={`Quitar la fila ${i + 1}`} onClick={() => setFilas((l) => l.filter((_, j) => j !== i))}>Quitar</button></td>}
               </tr>
             ))}

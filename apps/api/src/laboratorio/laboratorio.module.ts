@@ -1,4 +1,5 @@
 import { SinAlcanceDeEscritura } from "../rbac/alcance-catalogo.guard";
+import { errorMotivoVeredicto } from "./veredicto-decidido";
 import { emitirEvento } from "../common/eventos";
 import {
   BadRequestException,
@@ -817,7 +818,7 @@ export class ResultadoService extends BaseCrudService {
    * decidir (p. ej. un texto frente a límites numéricos). Solo sobre resultados
    * capturados (antes de revisar).
    */
-  async fijarVeredicto(id: string, veredicto: string, usuarioId?: string) {
+  async fijarVeredicto(id: string, veredicto: string, usuarioId?: string, motivo?: string) {
     const v = normalizarVeredicto(veredicto);
     if (!v || v === "pendiente") throw new BadRequestException("Veredicto no válido: cumple, no_cumple o informativo.");
     const actual = await this.prisma.resultado.findFirst({ where: { id, deletedAt: null }, select: { estado: true, analistaId: true, veredicto: true } });
@@ -828,8 +829,14 @@ export class ResultadoService extends BaseCrudService {
       throw new ConflictException("Solo se puede fijar el veredicto de un resultado capturado y aún no revisado.");
     if (usuarioId && actual.analistaId === usuarioId)
       throw new ConflictException("Quien capturó el ensayo no decide su veredicto: lo hace otra persona (segregación de funciones).");
-    const r = await conTraza(this.prisma, { usuarioId, origen: "veredicto_manual" }, (tx) =>
-      tx.resultado.update({ where: { id }, data: { veredicto: v } }),
+    // B-032: la decisión del revisor se justifica (bitácora e informe).
+    const errMotivo = errorMotivoVeredicto(motivo);
+    if (errMotivo) throw new BadRequestException(errMotivo);
+    const r = await conTraza(this.prisma, { usuarioId, origen: "veredicto_manual", motivo: motivo!.trim() }, (tx) =>
+      tx.resultado.update({
+        where: { id },
+        data: { veredicto: v, veredictoMotivo: motivo!.trim(), veredictoDecididoPor: usuarioId ?? null, veredictoDecididoAt: new Date() },
+      }),
     );
     await recalcularVeredictoMuestra(this.prisma as PrismaService, r.muestraId);
     return r;
@@ -904,7 +911,7 @@ const ReabrirDto = z.object({
   motivo: z.string().trim().min(5, "Indique el motivo de la reapertura (mínimo 5 caracteres)").max(1000),
 });
 
-const VeredictoDto = z.object({ veredicto: z.string().min(1).max(20) });
+const VeredictoDto = z.object({ veredicto: z.string().min(1).max(20), motivo: z.string().max(500).optional() });
 
 /**
  * Comprueba que el resultado es del tenant y que el usuario puede hacer la
@@ -1282,7 +1289,7 @@ export class ResultadoController extends BaseCrudController {
   async veredicto(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     const dto = VeredictoDto.parse(body ?? {});
     await exigirAlcanceResultado(this.svc as ResultadoService, this.alcanceRes, id, req, "revisar");
-    return (this.svc as ResultadoService).fijarVeredicto(id, dto.veredicto, req?.user?.sub);
+    return (this.svc as ResultadoService).fijarVeredicto(id, dto.veredicto, req?.user?.sub, dto.motivo);
   }
 }
 

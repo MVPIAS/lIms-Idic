@@ -38,7 +38,29 @@ export type LineaForm = {
   heredada?: { tipo: string; precioUnitario: number };
   /** Gasto tipificado (viático, pasaje, traslado): precio a mano, en la moneda de la cotización (EP-00 2.2). */
   gasto?: { tipo: string; precio: number };
+  /** B-045 · Metrología: instrumento de la línea (lo hereda el ítem de la OT). */
+  inst?: Instrumento;
 };
+
+type Instrumento = { instrumento: string; marca: string; modelo: string; rango: string; puntos: string; sentido: string };
+const INST_VACIO: Instrumento = { instrumento: "", marca: "", modelo: "", rango: "", puntos: "", sentido: "" };
+/** Centros de costo de Metrología: sus líneas llevan el instrumento (EP-04 P0.1–P0.2). */
+const LABS_METROLOGIA = ["LMT", "LMTE", "LNF"];
+const instDe = (l: any): Instrumento | undefined =>
+  l.instrumento || l.instrumentoMarca || l.instrumentoModelo || l.instrumentoRango || l.instrumentoPuntos || l.instrumentoSentido
+    ? { instrumento: l.instrumento ?? "", marca: l.instrumentoMarca ?? "", modelo: l.instrumentoModelo ?? "", rango: l.instrumentoRango ?? "", puntos: l.instrumentoPuntos ?? "", sentido: l.instrumentoSentido ?? "" }
+    : undefined;
+const cuerpoInst = (i?: Instrumento) =>
+  i
+    ? {
+        instrumento: i.instrumento.trim() || null,
+        instrumentoMarca: i.marca.trim() || null,
+        instrumentoModelo: i.modelo.trim() || null,
+        instrumentoRango: i.rango.trim() || null,
+        instrumentoPuntos: i.puntos.trim() || null,
+        instrumentoSentido: i.sentido || null,
+      }
+    : {};
 
 type PrecioEnsayo = { precio: number | null; origen: "lista" | "ficha" | null; columna?: string | null; lista: { codigo: string; nombre: string; itemCodigo: string } | null };
 const origenDe = (p: PrecioEnsayo): { tipo: "lista" | "ficha"; texto: string } =>
@@ -123,13 +145,22 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   // Contactos del cliente para elegir al solicitante.
   useEffect(() => {
     if (!cliente?.id) { setContactos([]); return; }
-    pedir<Contacto[]>("GET", `/clientes/${cliente.id}/contactos`).then(setContactos).catch(() => setContactos([]));
+    pedir<Contacto[]>("GET", `/clientes/${cliente.id}/contactos`)
+      .then((cs) => {
+        setContactos(cs);
+        // B-038: sin solicitante elegido, se propone el contacto principal del cliente.
+        const principal = cs.find((c) => c.principal);
+        if (principal) setSolContactoId((actual) => (actual || solNombre.trim() ? actual : principal.id));
+      })
+      .catch(() => setContactos([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cliente?.id]);
 
   /** Referencia sugerida por el documento de solicitud (EP-00 1.1): «OF Nº …» o «Correo de fecha …». */
   function referenciaSugerida(medio: string, numero: string, fechaSol: string): string {
     // «OF 1234», «Oficio Nº 1234» o «1234» dan la misma referencia: «OF Nº 1234».
-    const n = numero.trim().replace(/^(of(icio)?\.?\s*)?(n[º°o]\.?\s*)?/i, "").trim();
+    // Mismo criterio que numeroOficioLimpio() de la API (B-086: «OF-PRUEBA-0001»).
+    const n = numero.trim().replace(/^(of(icio)?(?![a-z])[\s.\-:]*)?(n[º°o](?![a-z])[\s.\-:]*)?/i, "").trim();
     if (medio === "oficio" && n) return `OF Nº ${n}`;
     if (medio === "correo" && fechaSol) return `Correo de fecha ${fechaSol.slice(8, 10)}-${fechaSol.slice(5, 7)}-${fechaSol.slice(0, 4)}`;
     return "";
@@ -154,8 +185,17 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             // El precio guardado ya está en la moneda de la cotización.
             precioClp: inicial?.moneda === "USD" ? Number(l.precioUnitario) * (dolarInicial ?? 1) : Number(l.precioUnitario),
             guardada: true,
+            inst: instDe(l),
           }
-        : {
+        : TIPOS_GASTO.some((g) => g.v === l.tipo)
+          ? {
+              // B-090: un gasto (viático, pasaje, traslado) sigue siendo gasto al editar, con su tipo.
+              codigo: TIPOS_GASTO.find((g) => g.v === l.tipo)!.l,
+              descripcion: l.descripcion ?? "",
+              cantidad: l.cantidad ?? 1,
+              gasto: { tipo: l.tipo, precio: Number(l.precioUnitario) },
+            }
+          : {
             descripcion: l.descripcion ?? l.tipo,
             cantidad: l.cantidad ?? 1,
             heredada: { tipo: l.tipo, precioUnitario: Number(l.precioUnitario) },
@@ -272,6 +312,9 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   // EP-05 0.2: el lote del LRB se cotiza con unidades de reposición (parámetro cotizacion_lrb.reposicion).
   const reposicionLrb = Number((cfg as any)?.reposicionLrb ?? 4);
   const esLrb = (cc?.codigo ?? "").toUpperCase() === "LRB" || (cc?.laboratorio ?? "").toUpperCase() === "LRB";
+  // El código del centro de costo puede llevar sufijo («LMT-001», «LMT-AE»): cuenta el prefijo.
+  const esMetrologia = LABS_METROLOGIA.includes((cc?.codigo ?? "").toUpperCase().split(/[-_ ]/)[0]) || LABS_METROLOGIA.includes((cc?.laboratorio ?? "").toUpperCase());
+  const setInst = (i: number, x: Partial<Instrumento>) => setLineas((ls) => ls.map((l, j) => (j === i ? { ...l, inst: { ...(l.inst ?? INST_VACIO), ...x } } : l)));
   const [reposicionAplicada, setReposicionAplicada] = useState(false);
   function sumarReposicion() {
     setLineas((ls) => ls.map((l) => (l.catEnsayoId ? { ...l, cantidad: (Number(l.cantidad) || 0) + reposicionLrb } : l)));
@@ -365,7 +408,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           : l.heredada
           ? { tipo: l.heredada.tipo === "comprension" ? "otros" : l.heredada.tipo, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: l.heredada.precioUnitario }
           : l.catEnsayoId
-            ? { catEnsayoId: l.catEnsayoId, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: precioEnMoneda(l) }
+            ? { catEnsayoId: l.catEnsayoId, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: precioEnMoneda(l), ...(esMetrologia ? cuerpoInst(l.inst) : {}) }
             : { tipo: "producto", descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: precioEnMoneda(l) },
       ),
     };
@@ -396,12 +439,13 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           {modo === "crear" ? (
             <>
               <div className="field">
-                <label>Buscar cliente (razón social / RUT)</label>
-                <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Escribe para buscar…" />
+                <label htmlFor="cot-cli-buscar">Buscar cliente (razón social / RUT)</label>
+                <input id="cot-cli-buscar" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Escribe para buscar…" />
               </div>
               <div className="field" style={{ gridColumn: "span 2" }}>
-                <label>Cliente <span className="req">*</span></label>
+                <label htmlFor="cot-cliente">Cliente <span className="req">*</span></label>
                 <select
+                  id="cot-cliente"
                   value={cliente?.id ?? ""}
                   onChange={(e) => {
                     const c = clientes.find((x) => x.id === e.target.value) ?? null;
@@ -420,13 +464,13 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             </>
           ) : (
             <div className="field readonly" style={{ gridColumn: "span 2" }}>
-              <label>Cliente</label>
-              <input readOnly value={`${cliente?.razonSocial ?? "—"}${cliente?.rut ? ` · ${fmtRut(cliente.rut)}` : ""}`} />
+              <label htmlFor="cot-cliente-ro">Cliente</label>
+              <input id="cot-cliente-ro" readOnly value={`${cliente?.razonSocial ?? "—"}${cliente?.rut ? ` · ${fmtRut(cliente.rut)}` : ""}`} />
             </div>
           )}
           <div className="field">
-            <label>Tipo de cliente</label>
-            <select value={tipoCliente} disabled={!cliente} onChange={(e) => cambiarTipoCliente(e.target.value)}>
+            <label htmlFor="cot-tipo-cliente">Tipo de cliente</label>
+            <select id="cot-tipo-cliente" value={tipoCliente} disabled={!cliente} onChange={(e) => cambiarTipoCliente(e.target.value)}>
               <option value="">— sin tipo —</option>
               {tipoInactivo && <option value={tipoCliente}>{tipoCliente} (valor antiguo)</option>}
               {opts("tipo_cliente").map((o) => <option key={o.codigo} value={o.codigo}>{o.etiqueta}</option>)}
@@ -602,7 +646,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             <tr><th>Código</th><th>Ensayo</th><th className="num">Cant.</th><th className="num">P. unitario ({moneda})</th><th className="num">Subtotal</th><th></th></tr>
           </thead>
           <tbody>
-            {lineas.map((l, i) => (
+            {lineas.map((l, i) => [
               <tr key={i}>
                 <td><span className="codigo">{l.codigo ?? (l.heredada ? l.heredada.tipo : "—")}</span></td>
                 <td>
@@ -620,8 +664,39 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
                 <td className="num">{money(precioEnMoneda(l), moneda)}</td>
                 <td className="num">{money(precioEnMoneda(l) * (Number(l.cantidad) || 0), moneda)}</td>
                 <td className="num"><button className="btn outline sm" onClick={() => quitar(i)} aria-label="Quitar">✕</button></td>
-              </tr>
-            ))}
+              </tr>,
+              // B-045: en Metrología cada servicio lleva el instrumento que se calibrará; el ítem de la OT lo hereda.
+              esMetrologia && l.catEnsayoId ? (
+                <tr key={`${i}-inst`}>
+                  <td />
+                  <td colSpan={5} style={{ background: "#f8fbfc" }}>
+                    <div className="form-grid cols-3" style={{ gap: 6 }}>
+                      {([
+                        ["instrumento", "Instrumento", 300, "Ej.: Balanza analítica"],
+                        ["marca", "Marca", 120, ""],
+                        ["modelo", "Modelo", 120, ""],
+                        ["rango", "Rango / capacidad", 160, "Ej.: 0 – 220 g"],
+                        ["puntos", "Puntos de calibración", 500, "Ej.: 10, 50, 100, 200 g"],
+                      ] as const).map(([k, et, max, ph]) => (
+                        <div key={k} className="field" style={{ margin: 0 }}>
+                          <label htmlFor={`inst-${k}-${i}`}>{et}</label>
+                          <input id={`inst-${k}-${i}`} value={l.inst?.[k] ?? ""} maxLength={max} placeholder={ph} onChange={(e) => setInst(i, { [k]: e.target.value })} />
+                        </div>
+                      ))}
+                      <div className="field" style={{ margin: 0 }}>
+                        <label htmlFor={`inst-sentido-${i}`}>Sentido (LNF)</label>
+                        <select id={`inst-sentido-${i}`} value={l.inst?.sentido ?? ""} onChange={(e) => setInst(i, { sentido: e.target.value })}>
+                          <option value="">—</option>
+                          <option value="T">Tracción</option>
+                          <option value="C">Compresión</option>
+                          <option value="T+C">Tracción y compresión</option>
+                        </select>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : null,
+            ])}
             {!lineas.length && (
               <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Aún no hay ensayos. Búscalos en el catálogo y agrégalos.</td></tr>
             )}

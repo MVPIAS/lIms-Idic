@@ -403,9 +403,9 @@ async function main() {
     for (const a of C.armas.slice(0, 2)) {
       const f = await ok(U.d11Jefe, "GET", `/d11/armas/${a.id}`);
       for (const x of f.ensayos.filter((y) => y.estado === "capturado" && y.veredicto === "pendiente")) {
-        await exigir(409, U.armero, "POST", `/resultados/${x.resultadoId}/veredicto`, { veredicto: "informativo" }).catch(() =>
-          exigir(403, U.armero, "POST", `/resultados/${x.resultadoId}/veredicto`, { veredicto: "informativo" }));
-        await ok(U.d11Jefe, "POST", `/resultados/${x.resultadoId}/veredicto`, { veredicto: "informativo" });
+        await exigir(409, U.armero, "POST", `/resultados/${x.resultadoId}/veredicto`, { veredicto: "informativo", motivo: "Ensayo informativo por decisión del revisor" }).catch(() =>
+          exigir(403, U.armero, "POST", `/resultados/${x.resultadoId}/veredicto`, { veredicto: "informativo", motivo: "Ensayo informativo por decisión del revisor" }));
+        await ok(U.d11Jefe, "POST", `/resultados/${x.resultadoId}/veredicto`, { veredicto: "informativo", motivo: "Ensayo informativo por decisión del revisor" });
         informativos++;
       }
     }

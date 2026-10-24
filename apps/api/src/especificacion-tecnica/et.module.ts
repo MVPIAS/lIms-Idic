@@ -67,6 +67,8 @@ import {
   erroresPunto,
   motivoNoPermitido,
   planDesglose,
+  especDePunto,
+  nombreItemInspeccion,
   puedeGestionarConSeccion,
   puedeVer,
   siguienteVersion,
@@ -376,6 +378,23 @@ export class EspecificacionTecnicaService {
           ? "Solo puede gestionar E.T. de los laboratorios de su alcance."
           : "Indique el laboratorio de la E.T.: sin laboratorio solo la gestiona Calidad o Administración.",
       );
+  }
+
+  /**
+   * B-036 · Buscador acotado de clientes para asociar la E.T. a su cliente.
+   * Quien gestiona E.T. (p. ej. el Jefe del LEM) no siempre tiene «cliente.ver»:
+   * aquí solo ve razón social y RUT, con un mínimo de 2 letras y 10 resultados.
+   */
+  async buscarClientes(req: any, q: string | undefined) {
+    const t = String(q ?? "").trim().slice(0, 80);
+    if (t.length < 2) return [];
+    return this.prisma.$queryRawUnsafe<{ id: string; razonSocial: string; rut: string | null }[]>(
+      `SELECT id, razon_social AS "razonSocial", rut FROM cliente
+        WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND (razon_social ILIKE $2 OR rut ILIKE $2)
+        ORDER BY razon_social LIMIT 10`,
+      tenantDe(req),
+      `%${t.replace(/[%_\\]/g, (m) => "\\" + m)}%`,
+    );
   }
 
   private async validarCliente(tenantId: string, clienteId?: string | null) {
@@ -860,6 +879,25 @@ export class EspecificacionTecnicaService {
         let ensayosProducto = 0;
         if (delProducto.length)
           ensayosProducto = (await this.puente.generarAnalisis(ot.id, { muestraId, metodoIds: delProducto }, tenantId, req, tx)).creados;
+        // B-033: los puntos «Inspección» sin ensayo del catálogo forman el checklist: un ítem de
+        // atributo por punto (Cumple / No cumple), ligado al punto. Idempotente por punto.
+        for (const p of d.plan!.inspecciones.sinEnsayo ?? []) {
+          const espec = especDePunto(p);
+          const n = await tx.$executeRawUnsafe(
+            `INSERT INTO resultado (tenant_id, ot_id, muestra_id, et_punto_id, estado, tipo_dato, requisito, unidad, clase_defecto, espec_origen, espec_fuente, replicas, veredicto)
+             SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, 'pendiente', 'atributo', $5, $6, $7, 'et', $8, '[]'::jsonb, 'pendiente'
+              WHERE NOT EXISTS (SELECT 1 FROM resultado r WHERE r.muestra_id = $3::uuid AND r.et_punto_id = $4::uuid AND r.deleted_at IS NULL)`,
+            tenantId,
+            ot.id,
+            muestraId,
+            p.id,
+            espec.requisito ?? p.caracteristica ?? null,
+            espec.unidad,
+            espec.claseDefecto,
+            `E.T. ${d.et!.codigo} v${d.et!.version} · punto ${p.punto}`.slice(0, 240),
+          );
+          ensayosProducto += Number(n) || 0;
+        }
         const existentes = await tx.muestra.findMany({ where: { tenantId, codigo: { startsWith: m.codigo } }, select: { codigo: true } });
         const codigos = existentes.map((e) => e.codigo);
         const yaHechos = new Set(
@@ -1001,6 +1039,13 @@ export class EspecificacionTecnicaController {
   }
 
   /* --- biblioteca --- */
+
+  @Get("clientes")
+  @RequierePermiso("et.gestionar")
+  @ApiOperation({ summary: "Buscador acotado de clientes (razón social y RUT) para asociar la E.T. a su cliente (?q=, mín. 2 letras)" })
+  buscarClientes(@Query("q") q: string | undefined, @Req() req: any) {
+    return this.svc.buscarClientes(req, q);
+  }
 
   @Get("catalogo/metodos")
   @RequierePermiso("et.ver")

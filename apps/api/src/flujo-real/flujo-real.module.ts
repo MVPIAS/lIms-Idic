@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { nombreItemInspeccion } from "../especificacion-tecnica/reglas-et";
 import {
   BadRequestException,
   Body,
@@ -1265,6 +1266,16 @@ export class PuenteAnalisisService {
     }));
 
     const conNombre = await conNombres(this.prisma, resultados);
+    // B-033: ítems del checklist de inspección sin ensayo del catálogo: se nombran con su punto de la E.T.
+    const puntoIds = [...new Set(resultados.filter((r) => !r.catMetodoId && !r.catAnalitoId && !r.analitoId && r.etPuntoId).map((r) => r.etPuntoId!))];
+    const nombrePunto = new Map<string, string>(
+      puntoIds.length
+        ? (await this.prisma.$queryRawUnsafe<{ id: string; punto: string; caracteristica: string; requisito: string | null }[]>(
+            `SELECT id, punto, caracteristica, requisito FROM especificacion_tecnica_punto WHERE id = ANY($1::uuid[])`,
+            puntoIds,
+          )).map((p) => [p.id, nombreItemInspeccion(p)])
+        : [],
+    );
     return {
       otId,
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal },
@@ -1283,6 +1294,7 @@ export class PuenteAnalisisService {
           !!dueno && decidirAccionResultado(dueno, accion, ve).permitido;
         return {
           ...r,
+          ...(r.etPuntoId && nombrePunto.has(r.etPuntoId) ? { analitoNombre: nombrePunto.get(r.etPuntoId), inspeccionEt: true } : {}),
           // Laboratorio dueño del ensayo y lo que el usuario puede hacer con él (la pantalla no adivina).
           laboratorio: dueno?.unidadCodigo ?? null,
           laboratorioId: dueno?.unidadId ?? null,
@@ -1716,6 +1728,7 @@ export class RegistroMuestrasService {
           catEnsayoId: l.catEnsayoId,
           ensayoCodigo: l.ensayoCodigo,
           ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
+          tipo: l.tipo ?? null,
         })),
         porEnsayo,
       ),

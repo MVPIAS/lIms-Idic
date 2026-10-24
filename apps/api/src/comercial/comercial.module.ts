@@ -1,4 +1,5 @@
 import { Body, Controller, Module, Post, UseGuards, Injectable } from "@nestjs/common";
+import { fichaDesdeContactoPrincipal } from "../cliente/contacto-principal";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -49,6 +50,20 @@ export class ContactoService extends BaseCrudService {
   constructor(prisma: PrismaService) {
     super(prisma, { model: "contacto", search: ["nombre", "email"], tenant: false });
   }
+
+  // B-038: un solo contacto principal por cliente, y la ficha del cliente toma sus datos.
+  async crear(data: any, tenantId?: string) {
+    const c = await super.crear(data, tenantId);
+    if (data?.principal === true) await fichaDesdeContactoPrincipal(this.prisma, c.id);
+    return c;
+  }
+
+  async actualizar(id: string, data: any, tenantId?: string) {
+    const c = await super.actualizar(id, data, tenantId);
+    if (data?.principal === true) await fichaDesdeContactoPrincipal(this.prisma, id);
+    else if (data?.principal === false) await this.prisma.$executeRawUnsafe(`UPDATE contacto SET es_principal = false WHERE id = $1::uuid`, id);
+    return c;
+  }
 }
 const ContactoCreate = z.object({
   clienteId: z.string().uuid(),
@@ -56,7 +71,7 @@ const ContactoCreate = z.object({
   cargo: z.string().max(120).optional(),
   email: z.string().email().optional(),
   telefono: z.string().max(40).optional(),
-  principal: z.boolean().default(false),
+  principal: z.preprocess((v) => (v === "si" || v === "true" ? true : v === "no" || v === "false" ? false : v), z.boolean()).default(false),
 });
 // El contacto cuelga del cliente → permisos del dominio cliente.
 @ApiTags("contactos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("contactos")
@@ -150,7 +165,7 @@ const ItemCreate = z.object({
   descripcion: z.string().min(1).max(300),
   cc: z.string().max(20).optional(),
   tipo: z.enum(["servicio", "HH", "HM", "viatico", "insumo"]).default("servicio"),
-  precio: z.number().nonnegative(),
+  precio: z.coerce.number().nonnegative(),
 });
 @ApiTags("lista-precio-items") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("lista-precio-items")
 @RequierePermisoCrud({

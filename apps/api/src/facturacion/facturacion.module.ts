@@ -2,6 +2,9 @@ import {
   Body, Controller, Get, Module, Param, Patch, Post, Put, Query, Req, UseGuards, Injectable, ParseUUIDPipe,
   ConflictException, ForbiddenException, Delete, BadRequestException, NotFoundException,
 } from "@nestjs/common";
+import { elegirPrecio, itemsListaVigente } from "../lista-precio/precio-lista";
+import { leerConfigCircuito } from "../cotizacion/circuito-config";
+import { reglaDeTipoCliente } from "../cotizacion/validez";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -15,6 +18,7 @@ import {
   esNumeroBorrador,
   estadoPorPagos,
   lineasDesdeCotizacion,
+  lineasDesdeOt,
   numeroBorrador,
   totales,
   validarNotaCredito,
@@ -139,13 +143,14 @@ export class FacturaService extends BaseCrudService {
     const aceptada = cot && cot.estado === "aceptada" ? cot : null;
     const moneda = aceptada?.moneda ?? "CLP";
     const ivaPct = aceptada ? Number(aceptada.ivaPct) : 19;
-    const lineas = aceptada ? lineasDesdeCotizacion(aceptada) : [];
+    const lineas = aceptada ? lineasDesdeCotizacion(aceptada) : await this.lineasSinCotizacion(tx, ot);
     const t = totales(lineas, ivaPct, moneda);
+    const conLineas = lineas.length ? "revise las líneas (ensayos de la OT valorizados con la lista de precios vigente o la ficha) antes de emitir" : "complete las líneas antes de emitir";
     const obs = aceptada
       ? `Generada al cerrar la OT ${ot.codigo} con los importes de la cotización ${aceptada.codigo}.`
       : cot
-        ? `Generada al cerrar la OT ${ot.codigo}. La cotización ${cot.codigo} no está aceptada (${cot.estado}): complete las líneas antes de emitir.`
-        : `Generada al cerrar la OT ${ot.codigo}, que no tiene cotización: complete las líneas antes de emitir.`;
+        ? `Generada al cerrar la OT ${ot.codigo}. La cotización ${cot.codigo} no está aceptada (${cot.estado}): ${conLineas}.`
+        : `Generada al cerrar la OT ${ot.codigo}, que no tiene cotización: ${conLineas}.`;
     return tx.factura.create({
       data: {
         tenantId: ot.tenantId,
@@ -167,6 +172,49 @@ export class FacturaService extends BaseCrudService {
       },
       include: { lineas: true },
     });
+  }
+
+  /**
+   * B-040 · Líneas de una OT sin cotización aceptada: los ensayos del catálogo
+   * hechos en la OT, valorizados como en la cotización (lista de precios
+   * vigente a la fecha de la OT según el tipo de cliente, o la ficha), o el
+   * valor estimado de la OT si ninguno tiene precio.
+   */
+  private async lineasSinCotizacion(tx: any, ot: { id: string; codigo: string; tenantId: string; clienteId: string }) {
+    const ensayos: { id: string; codigo: string; nombre: string; precio: unknown; cantidad: number }[] = await tx.$queryRawUnsafe(
+      `SELECT ce.id::text AS id, ce.codigo, ce.nombre, ce.precio, COUNT(DISTINCT r.muestra_id)::int AS cantidad
+         FROM resultado r
+         JOIN cat_metodo m ON m.id = r.cat_metodo_id
+         JOIN cat_ensayo ce ON ce.id = m.ensayo_id
+        WHERE r.ot_id = $1::uuid AND r.deleted_at IS NULL
+        GROUP BY ce.id, ce.codigo, ce.nombre, ce.precio
+        ORDER BY ce.codigo`,
+      ot.id,
+    );
+    const [o] = await tx.$queryRawUnsafe(
+      `SELECT to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha,
+              COALESCE(NULLIF(o.costo_estimado, 0), NULLIF(e.valor_inicial, 0))::float8 AS estimado,
+              cl.tipo AS "tipoCliente", ps.valor AS "reglaParam"
+         FROM orden_trabajo o
+         LEFT JOIN ot_encargo e ON e.ot_id = o.id
+         LEFT JOIN cliente cl ON cl.id = o.cliente_id
+         LEFT JOIN parametro_sistema ps ON ps.tenant_id = o.tenant_id AND ps.categoria = 'tipo_cliente' AND ps.codigo = cl.tipo
+        WHERE o.id = $1::uuid`,
+      ot.id,
+    );
+    const lista = await itemsListaVigente(tx, ot.tenantId, ensayos.map((e) => e.id), o?.fecha ?? new Date().toISOString().slice(0, 10));
+    const cfg = ensayos.length ? await leerConfigCircuito(tx, ot.tenantId) : null;
+    const regla = reglaDeTipoCliente(o?.tipoCliente, o?.reglaParam);
+    return lineasDesdeOt(
+      ensayos.map((e) => ({
+        codigo: e.codigo,
+        nombre: e.nombre,
+        cantidad: e.cantidad,
+        precio: elegirPrecio(lista.get(e.id), e.precio != null ? Number(e.precio) : null, regla, cfg!.precioEjercito)?.precio ?? null,
+      })),
+      o?.estimado ?? null,
+      ot.codigo,
+    );
   }
 
   /** Finanzas revisa el borrador y lo EMITE con el folio real. */
