@@ -242,6 +242,8 @@ export default function CrudTable({
     for (const c of campos) {
       const v = row[c.name];
       if (c.tipo === "checkbox") init[c.name] = v !== false;
+      // Las fechas llegan como ISO completo («2026-01-01T00:00:00.000Z»); el input date pide AAAA-MM-DD.
+      else if (c.tipo === "date") init[c.name] = v ? String(v).slice(0, 10) : "";
       else init[c.name] = v ?? "";
     }
     setEditId(String(row.id));

@@ -182,6 +182,11 @@ export const NAV: SeccionNav[] = [
       { href: "/catalogo/paneles", label: "Paneles de ensayo", icon: "🧩", perm: "catalogo.gestionar", claves: "elemento metodo" },
       { href: "/catalogo/formulas", label: "Fórmulas de cálculo", icon: "𝑓", perm: "catalogo.gestionar" },
       { href: "/catalogo/pasos", label: "Pasos por método", icon: "🪜", perm: "catalogo.gestionar" },
+      // Frente f5: tarifas del Sistema Comercial antiguo (se leen con tarifa.ver; se mantienen con catalogo.gestionar global).
+      { href: "/catalogo/tarifas-hh", label: "Tarifas · horas hombre (HH)", icon: "⏱", perm: "tarifa.ver", claves: "tarifa hh hora hombre categoria valor hora costeo" },
+      { href: "/catalogo/perfiles-hh", label: "Tarifas · perfiles HH", icon: "👷", perm: "tarifa.ver", claves: "tarifa hh perfil civil militar ajuste" },
+      { href: "/catalogo/tarifas-hm", label: "Tarifas · horas máquina (HM)", icon: "⚙", perm: "tarifa.ver", claves: "tarifa hm hora maquina equipo eq valor hora" },
+      { href: "/catalogo/servicios-primarios", label: "Tarifas · servicios primarios", icon: "🏷", perm: "tarifa.ver", claves: "tarifa servicio primario lps precio" },
     ],
   },
   {

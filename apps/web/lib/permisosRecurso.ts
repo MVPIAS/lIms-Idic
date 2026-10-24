@@ -71,6 +71,11 @@ export const PERMISOS_RECURSO: Record<string, PermisosCrud> = {
   "cat/especificaciones": CATALOGO,
   "cat/paneles": CATALOGO,
   "pasos-metodo": CATALOGO,
+  // Frente f5 · tarifas: sin borrado (se desactivan).
+  "tarifas/hh": { ver: "tarifa.ver", crear: "catalogo.gestionar", editar: "catalogo.gestionar" },
+  "tarifas/hh-perfiles": { ver: "tarifa.ver", crear: "catalogo.gestionar", editar: "catalogo.gestionar" },
+  "tarifas/hm": { ver: "tarifa.ver", crear: "catalogo.gestionar", editar: "catalogo.gestionar" },
+  "tarifas/servicios-primarios": { ver: "tarifa.ver", crear: "catalogo.gestionar", editar: "catalogo.gestionar" },
   parametros: { crear: "catalogo.gestionar", editar: "catalogo.gestionar", eliminar: "catalogo.gestionar" },
 
   // SAEC

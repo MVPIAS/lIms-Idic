@@ -25,6 +25,14 @@ const bisagra = [
   { href: "/catalogo/parametros", nivel: "Sistema", nombre: "Parámetros", desc: "Listas y combos editables (tipo de cliente, forma de pago…)." },
 ];
 
+// Frente f5: tarifas del Sistema Comercial antiguo (HH, HM y servicios primarios).
+const tarifas = [
+  { href: "/catalogo/tarifas-hh", nivel: "Tarifa", nombre: "Horas hombre (HH)", desc: "Valor de la hora hombre por categoría, en CLP y con vigencia." },
+  { href: "/catalogo/perfiles-hh", nivel: "Tarifa", nombre: "Perfiles HH", desc: "Ajuste % de la hora hombre por perfil (civil, militar)." },
+  { href: "/catalogo/tarifas-hm", nivel: "Tarifa", nombre: "Horas máquina (HM)", desc: "Valor de la hora de uso de cada equipo (EQ###)." },
+  { href: "/catalogo/servicios-primarios", nivel: "Tarifa", nombre: "Servicios primarios", desc: "Precio de los servicios primarios por código y centro de costo." },
+];
+
 function Tarjeta({ href, nivel, nombre, desc }: { href: string; nivel: string; nombre: string; desc: string }) {
   return (
     <Link href={href as any} className="card" style={{ textDecoration: "none", color: "inherit", display: "block", marginBottom: 0 }}>
@@ -63,6 +71,11 @@ export default function CatalogoPage() {
       <h2 style={{ fontSize: 14, fontWeight: 700, margin: "22px 0 10px" }}>Unión y configuración</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
         {bisagra.map((t) => <Tarjeta key={t.href} {...t} />)}
+      </div>
+
+      <h2 style={{ fontSize: 14, fontWeight: 700, margin: "22px 0 10px" }}>Tarifas</h2>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
+        {tarifas.map((t) => <Tarjeta key={t.href} {...t} />)}
       </div>
     </div>
   );

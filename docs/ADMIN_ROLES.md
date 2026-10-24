@@ -129,6 +129,10 @@ matriz OFICIO, sin permiso.
 tasa 1,5 %), `apelacion.ver/registrar/resolver` (apelación del Informe de Rechazo; resuelve el
 Director), `reclamo.ver/gestionar` (reclamos de clientes: Comercial, Planificación, Calidad) y
 `ot.recepcion_dco` (recepción de ítems en el DCO: Comercial, Planificación, Recepción).
+**Tarifas · frente f5** (`align_f5_correcciones.sql`, ver `docs/COMERCIAL_RONDA2.md` §8): `tarifa.ver`
+(leer las tarifas HH, HM, perfiles HH y servicios primarios en Tablas maestras: Comercial, Planificación,
+Finanzas, Calidad y jefaturas; Dirección, Administración y Lector por la cascada). Las mantiene
+`catalogo.gestionar` con alcance global (Calidad, Administración); el rol CLIENTE no las ve.
 
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
