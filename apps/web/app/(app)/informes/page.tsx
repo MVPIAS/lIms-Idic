@@ -166,7 +166,11 @@ function InformesContenido() {
       setPropuesta(p);
       setModalidad(p.modalidad);
       setPortada(p.portada ?? {});
-      setCobertura({ cobertura: ((p.cobertura?.cobertura as CoberturaElegida["cobertura"]) ?? "ot") });
+      // D02-44: si la propuesta trae el laboratorio (jefatura de un laboratorio participante), se elige ya.
+      setCobertura({
+        cobertura: ((p.cobertura?.cobertura as CoberturaElegida["cobertura"]) ?? "ot"),
+        ...(p.cobertura?.unidadId ? { unidadId: p.cobertura.unidadId } : {}),
+      });
     } catch (e: any) {
       setPropuesta(null);
       setError(e.message);
@@ -188,6 +192,8 @@ function InformesContenido() {
   // Al elegir OT + plantilla, se comprueba qué falta y quién firmará.
   const comprobar = useCallback(async () => {
     if (!otId || !plantillaId) return setCond(null);
+    // D02-44: se comprueba con la cobertura de la propuesta, no antes (evita el aviso de alcance de «toda la OT»).
+    if (!propuesta) return setCond(null);
     setOcupado("cond");
     setError("");
     try {
@@ -201,7 +207,7 @@ function InformesContenido() {
       setOcupado("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [otId, plantillaId, tipoDocumento, cobJson]);
+  }, [otId, plantillaId, tipoDocumento, cobJson, propuesta]);
 
   useEffect(() => {
     setPreview(null);

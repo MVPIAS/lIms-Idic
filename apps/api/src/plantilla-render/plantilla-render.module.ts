@@ -167,7 +167,17 @@ export class PlantillaRenderController {
   async propuesta(@Body() body: unknown, @Req() req: any) {
     const { otId, plantillaId } = OtPlantilla.parse(body);
     await this.exigirAlcanceOt(otId, req, null, true);
-    return this.svc.propuestaDocumento(otId, plantillaId, req?.user?.tenantId);
+    const propuesta = await this.svc.propuestaDocumento(otId, plantillaId, req?.user?.tenantId);
+    // D02-44: la jefatura de un laboratorio que participa en la OT (no el responsable) emite el
+    // documento de SU laboratorio: se le propone esa cobertura desde el inicio, sin pasar por
+    // «toda la OT» (que no es de su alcance y mostraba «Fuera de su alcance»).
+    const ctx = await this.svc.contexto(otId, req?.user?.tenantId);
+    if (!(await this.alcance.puedeVerUnidad(req, ctx.ot.unidadPrincipal))) {
+      for (const u of (await this.alcance.filtroUnidades(req)) ?? [])
+        if (await this.svc.laboratorioTrabajaEnOt(otId, req?.user?.tenantId, u))
+          return { ...propuesta, cobertura: { ...propuesta.cobertura, cobertura: "laboratorio", unidadId: u, porConfirmar: false } };
+    }
+    return propuesta;
   }
 
   /** Contexto de datos de una OT (para el autorelleno). Solo lee datos de la OT. */

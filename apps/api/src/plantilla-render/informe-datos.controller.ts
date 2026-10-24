@@ -127,6 +127,10 @@ export class InformeDatosService {
       select: { id: true, codigo: true, estado: true, unidadPrincipal: true, tenantId: true },
     });
     if (!ot) throw new NotFoundException(`OT ${otId} no encontrada`);
+    // D02-44: el laboratorio que trabaja en la OT (B-002) adjunta y ve las fotos del anexo de su informe.
+    if (!(await this.alcance.puedeVerUnidad(req, ot.unidadPrincipal)))
+      for (const u of (await this.alcance.filtroUnidades(req)) ?? [])
+        if (await this.render.laboratorioTrabajaEnOt(otId, ot.tenantId, u)) return ot;
     await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return ot;
   }
