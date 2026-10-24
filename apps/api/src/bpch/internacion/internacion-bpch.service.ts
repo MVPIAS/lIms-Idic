@@ -341,12 +341,13 @@ export class InternacionBpchService {
       solicitudes,
       tasa,
       estadoOt,
-      fases: this.fases(exp, items, tasa, estadoOt),
+      // B-020 (recorrido MP-11, D11-03): la internación de armas la certifica la D11 arma por arma.
+      fases: this.fases(exp, items, tasa, estadoOt, armas.length > 0 || exp.unidad?.codigo === "D11"),
     };
   }
 
   /** Avance del expediente (lo que la pantalla pinta como pasos). */
-  private fases(i: any, items: any[], tasa: any, e: Awaited<ReturnType<BpchComunService["estadoOt"]>>) {
+  private fases(i: any, items: any[], tasa: any, e: Awaited<ReturnType<BpchComunService["estadoOt"]>>, conArmas = false) {
     type Estado = "hecho" | "en_curso" | "pendiente" | "no_aplica";
     const f = (clave: string, titulo: string, estado: Estado, detalle?: string) => ({ clave, titulo, estado, detalle: detalle ?? null });
     const oficial = (d: any) => d && ["oficial", "emitido"].includes(d.estado);
@@ -364,16 +365,28 @@ export class InternacionBpchService {
         otGen ? "hecho" : i.estado === "antecedentes_pendientes" ? "en_curso" : "pendiente",
         i.estado === "antecedentes_pendientes" ? "Antecedentes solicitados a DGMN" : undefined,
       ),
-      f("ot", "OT y lotes a inspeccionar", lotes ? "hecho" : otGen ? "en_curso" : "pendiente", e?.ot?.codigo),
+      conArmas
+        ? f("ot", "OT de armas (Delegación Nº 11)", otGen ? "hecho" : "pendiente", e?.ot?.codigo)
+        : f("ot", "OT y lotes a inspeccionar", lotes ? "hecho" : otGen ? "en_curso" : "pendiente", e?.ot?.codigo),
       f("resultados", "Resultados de la inspección", resultadosOk ? "hecho" : res && res.capturados > 0 ? "en_curso" : "pendiente", res ? `${res.aprobados}/${res.total} aprobados` : undefined),
-      f("informe", "Informe de Inspección", oficial(e?.informeInspeccion) ? "hecho" : e?.informeInspeccion ? "en_curso" : "pendiente", e?.informeInspeccion?.numero ?? undefined),
-      f(
-        "documento_final",
-        e?.condicion === "no_cumple" ? "Informe de Incumplimiento → DGMN" : "Certificado de Conformidad",
-        oficial(final) && (e?.condicion !== "no_cumple" || final?.entregadoAt) ? "hecho" : final ? "en_curso" : "pendiente",
-        final?.numero ?? (e ? `Condición: ${e.condicionTexto}` : undefined),
-      ),
-      f("codificacion", "Codificación Única", e?.condicion === "no_cumple" ? "no_aplica" : codificado ? "hecho" : "pendiente"),
+      ...(conArmas
+        ? [
+            // Armas: certificado por arma, ensayos, acuñación y entrega en Certificación de armas (EP-11); sin lotes.
+            f("informe", "Informe de Inspección", "no_aplica", "Armas: se certifica cada arma en la Delegación Nº 11"),
+            f("documento_final", "Certificados por arma (D11)", e?.ot?.estado === "cerrada" ? "hecho" : otGen ? "en_curso" : "pendiente",
+              "Se emiten en Certificación de armas de la OT"),
+            f("codificacion", "Codificación Única", "no_aplica", "No aplica a la certificación por arma"),
+          ]
+        : [
+            f("informe", "Informe de Inspección", oficial(e?.informeInspeccion) ? "hecho" : e?.informeInspeccion ? "en_curso" : "pendiente", e?.informeInspeccion?.numero ?? undefined),
+            f(
+              "documento_final",
+              e?.condicion === "no_cumple" ? "Informe de Incumplimiento → DGMN" : "Certificado de Conformidad",
+              oficial(final) && (e?.condicion !== "no_cumple" || final?.entregadoAt) ? "hecho" : final ? "en_curso" : "pendiente",
+              final?.numero ?? (e ? `Condición: ${e.condicionTexto}` : undefined),
+            ),
+            f("codificacion", "Codificación Única", e?.condicion === "no_cumple" ? "no_aplica" : codificado ? "hecho" : "pendiente"),
+          ]),
       f(
         "tasa",
         "Tasa de internación → facturación",

@@ -34,8 +34,10 @@ import {
   diferencias,
   erroresCabecera,
   faltantesParaEmitirInspeccion,
+  heredarCabecera,
   iniciales,
   type CabeceraDto,
+  type FuenteCabecera,
 } from "./reglas-cabecera";
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
@@ -164,6 +166,46 @@ export class CabeceraOtService {
     return f[0] ?? null;
   }
 
+  /**
+   * B-019: datos ya conocidos de la OT de Producción Nacional (producto de la O/C,
+   * su clasificación, la RAF y el lote programado) o de la OT de prototipo.
+   */
+  private async fuente(otId: string): Promise<FuenteCabecera | null> {
+    const pn = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT r.numero AS raf, to_char(r.fecha, 'YYYY-MM-DD') AS raf_fecha, p.producto, e.nombre AS elemento,
+              c.clase_division, c.grupo_compatibilidad, c.numero_onu, l.lote, l.lugar, to_char(l.fecha_programada, 'YYYY-MM-DD') AS fecha
+         FROM bpch_pn_inspeccion l
+         JOIN bpch_oc_operativa o ON o.id = l.oc_id
+         JOIN bpch_raf r ON r.id = o.raf_id
+         JOIN bpch_oc_producto p ON p.id = l.oc_producto_id
+         LEFT JOIN cat_elemento e ON e.id = p.cat_elemento_id
+         LEFT JOIN bpch_clasificacion c ON c.id = p.clasificacion_id
+        WHERE l.ot_id = $1::uuid AND NOT l.anulada
+        LIMIT 1`,
+      otId,
+    );
+    if (pn[0])
+      return {
+        documentoOrigen: `RAF DGMN ${pn[0].raf}`, fechaDocumento: pn[0].raf_fecha, esquema: "LOTES", elemento: pn[0].elemento ?? pn[0].producto,
+        claseDivision: pn[0].clase_division, grupoCompatibilidad: pn[0].grupo_compatibilidad, numeroOnu: pn[0].numero_onu,
+        lote: pn[0].lote, lugar: pn[0].lugar, fechaInspeccion: pn[0].fecha,
+      };
+    const pr = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT p.solicitud_dgmn, to_char(p.fecha_solicitud, 'YYYY-MM-DD') AS fecha, p.esquema, p.elemento, p.codigo_cnc, p.sac_tamano_muestra,
+              c.clase_division, c.grupo_compatibilidad, c.numero_onu
+         FROM bpch_prototipo p LEFT JOIN bpch_clasificacion c ON c.id = p.clasificacion_id
+        WHERE p.ot_id = $1::uuid LIMIT 1`,
+      otId,
+    );
+    if (pr[0])
+      return {
+        documentoOrigen: pr[0].solicitud_dgmn, fechaDocumento: pr[0].fecha, esquema: pr[0].esquema === "LOTES" ? "LOTES" : "TIPO",
+        elemento: pr[0].elemento, cnc: pr[0].codigo_cnc, claseDivision: pr[0].clase_division, grupoCompatibilidad: pr[0].grupo_compatibilidad,
+        numeroOnu: pr[0].numero_onu, tamanoMuestra: pr[0].sac_tamano_muestra ?? null,
+      };
+    return null;
+  }
+
   async ficha(otId: string, tenantId: string, puedeEditar: boolean) {
     const ot = await this.ot(otId, tenantId);
     const esBpch = await otEsBpch(this.prisma, ot.unidadPrincipal);
@@ -199,6 +241,8 @@ export class CabeceraOtService {
       vista,
       faltantesEmision: faltantesParaEmitirInspeccion(vista),
       sugeridos: { inspectores: asignados.map((a) => iniciales(a.nombre)).join(" · "), procedimientos: PROCEDIMIENTOS_CONTROL },
+      // B-019: lo que se conoce del producto o del prototipo, para los campos aún vacíos.
+      heredados: soloComplemento ? {} : heredarCabecera(await this.fuente(otId), cabecera),
       historial,
     };
   }

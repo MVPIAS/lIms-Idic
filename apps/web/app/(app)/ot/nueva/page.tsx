@@ -140,6 +140,27 @@ export default function NuevaOtPage() {
   const totalEstimado = useMemo(() => lineas.reduce((s, l) => s + Number(l.subtotal ?? 0), 0), [lineas]);
 
   const addLinea = (l: LineaOT) => setLineas((ls) => [...ls, l]);
+
+  /** B-009: la OT de una E.T. se registra con los métodos de sus puntos (de este laboratorio), sin elemento. */
+  async function metodosDeEt() {
+    try {
+      const et = await llamar<{ codigo: string; version: number; puntos: { catMetodoId: string | null; metodoCodigo: string | null; metodoNombre: string | null; laboratorioId: string | null }[] }>(
+        "GET", `/especificaciones-tecnicas/${etId}`,
+      );
+      const vistos = new Set<string>();
+      const metodos = et.puntos
+        .filter((p) => p.catMetodoId && (!p.laboratorioId || p.laboratorioId === labId))
+        .filter((p) => !vistos.has(p.catMetodoId!) && vistos.add(p.catMetodoId!))
+        .map((p) => ({ metodoId: p.catMetodoId!, metodoCodigo: p.metodoCodigo ?? "", metodoNombre: p.metodoNombre ?? "", ensayoId: "", precio: 0 }));
+      if (!metodos.length) { setErrMsg(`La E.T. ${et.codigo} no tiene métodos del catálogo para este laboratorio.`); return; }
+      addLinea({
+        elementoId: "", generico: true, descripcion: "", elementoCodigo: "", elementoNombre: `Métodos de la E.T. ${et.codigo} v${et.version}`,
+        familia: "", analista: "", tipoInspeccion: "", prioridad, cantidad: 1, numMuestras: 1, numPlanilla: "", metodos, subtotal: 0,
+      });
+    } catch (e) {
+      setErrMsg(e instanceof Error ? e.message : "No se pudo leer la E.T.");
+    }
+  }
   const delLinea = (i: number) => setLineas((ls) => ls.filter((_, j) => j !== i));
 
   async function registrar() {
@@ -152,20 +173,36 @@ export default function NuevaOtPage() {
     if (interlab && labSolicitante === labEjecutor) { setErrMsg("El laboratorio solicitante y el ejecutor deben ser distintos."); return; }
     if (institucional && (!oficioNumero.trim() || !oficioFecha)) { setErrMsg("OT institucional: indique el Nº y la fecha del oficio."); return; }
     if (!fechaIngreso || Number.isNaN(new Date(fechaIngreso).getTime())) { setErrMsg("Indica una fecha de ingreso válida."); return; }
-    if (lineas.length === 0 && !interlab) { setErrMsg("Agrega al menos un elemento a la OT."); return; }
+    // B-009: la OT puede registrarse sin elementos (calibración, OT interna, E.T. con plan de componentes):
+    // sus muestras se registran después en la recepción del laboratorio.
+    if (lineas.length === 0 && modo === "existente") { setErrMsg("Agregue al menos un elemento o los métodos para registrar sus muestras."); return; }
+    const sinDescripcion = lineas.findIndex((l) => !l.descripcion.trim());
+    if (sinDescripcion >= 0) { setErrMsg(`Escriba la descripción de la muestra de la línea ${sinDescripcion + 1} (el elemento del laboratorio no es un producto).`); return; }
     if (modo === "nueva" && !labId) { setErrMsg("Elija el laboratorio responsable de la OT: sin él nadie del laboratorio la verá."); return; }
+
+    // Muestras: una por cada Nº de muestras de cada línea, con su descripción y sus métodos.
+    const muestras = lineas.flatMap((l) =>
+      Array.from({ length: Math.max(1, Math.min(50, l.numMuestras || 1)) }, () => ({
+        nombre: l.descripcion.trim(),
+        ...(l.elementoId && !l.generico ? { catElementoId: l.elementoId } : {}),
+        metodoIds: l.metodos.map((m) => m.metodoId).filter(Boolean),
+      })),
+    );
+    if (muestras.length > 50) { setErrMsg("Registre como máximo 50 muestras de una vez."); return; }
+    // Sobre una OT existente las muestras las registra quien tiene «muestra.crear» (se avisa antes de tocar nada).
+    if (modo === "existente" && muestras.length && !puede("muestra.crear")) {
+      setErrMsg("Su perfil no registra muestras en una OT existente (permiso «muestra.crear»): las registra la recepción del laboratorio.");
+      return;
+    }
 
     setEnviando(true);
     try {
       // b. La OT: o se REUTILIZA la comercial existente (Registro Definitivo),
-      //    o se crea una nueva. La respuesta puede venir plana o envuelta {data}.
+      //    o se crea una nueva CON sus muestras en una sola operación (B-001).
       let otId: string | undefined;
-      let otCodigo: string;
-      let otClienteId: string | undefined = cliente?.id;
       if (modo === "existente" && otExistenteId) {
-        const ot = otsPendientes.find((o) => o.id === otExistenteId);
         otId = otExistenteId;
-        otCodigo = ot?.codigo || otId.slice(0, 8);
+        if (muestras.length) await apiPost(`/flujo/ot/${otId}/muestras`, { muestras });
       } else {
         const otResp = unwrap<{ id: string; codigo?: string; clienteId?: string }>(
           await apiPost("/ot", {
@@ -194,42 +231,14 @@ export default function NuevaOtPage() {
                   ...(costo ? { costoEstimado: Number(costo) } : {}),
                 }
               : {}),
+            // La E.T. elegida rige los ensayos de las muestras que nacen con la OT.
+            ...(etId ? { etId } : {}),
+            ...(muestras.length ? { muestras } : {}),
           }),
         );
         otId = otResp?.id;
-        otCodigo = otResp?.codigo || otId?.slice(0, 8) || "OT";
-        otClienteId = otResp?.clienteId ?? otClienteId;
       }
       if (!otId) throw new ApiError("La API de OT no devolvió un id.", 500);
-      // La E.T. elegida rige los ensayos que se generan a continuación.
-      if (etId) await llamar("PUT", `/especificaciones-tecnicas/ot/${otId}`, { etId });
-
-      // c. Una muestra por cada elemento/línea, y por cada muestra materializamos
-      //    los métodos elegidos del panel como resultados por analizar (con su
-      //    especificación Mín/Nom/Máx y fórmula) vía el puente catálogo v2 ↔ operativo
-      //    (POST /flujo/ot/:id/generar-analisis). Así el expediente llega listo para
-      //    captura → veredicto → informe.
-      for (let i = 0; i < lineas.length; i++) {
-        const l = lineas[i];
-        const codigo = `${otCodigo}-M${i + 1}`.slice(0, 30);
-        const refMetodos = l.metodos.map((m) => m.metodoCodigo).join(",");
-        const nombre = `${l.elementoNombre}${refMetodos ? ` [${refMetodos}]` : ""}`.slice(0, 200);
-        const muestraResp = unwrap(
-          await apiPost("/muestras", {
-            codigo,
-            otId,
-            clienteId: otClienteId,
-            nombre,
-            estado: "recibida",
-          }),
-        );
-        const muestraId = muestraResp?.id;
-        const metodoIds = l.metodos.map((m) => m.metodoId).filter(Boolean);
-        if (muestraId && metodoIds.length) {
-          // Materializa resultados por analito de cada método seleccionado.
-          await apiPost(`/flujo/ot/${otId}/generar-analisis`, { muestraId, metodoIds });
-        }
-      }
 
       // d. Todo OK → ficha de la OT recién creada.
       router.push(`/ot/${otId}`);
@@ -406,6 +415,11 @@ export default function NuevaOtPage() {
                 <option value="">{labId ? (etsElegibles.length ? "Sin E.T." : "No hay E.T. vigentes para este cliente y laboratorio") : "Elija primero el laboratorio"}</option>
                 {etsElegibles.map((e) => <option key={e.id} value={e.id}>{e.codigo} v{e.version} · {e.nombre}</option>)}
               </select>
+              {etId && (
+                <button type="button" className="btn outline sm" style={{ marginTop: 4 }} onClick={metodosDeEt}>
+                  Agregar los métodos de la E.T. (sin elemento)
+                </button>
+              )}
             </div>
           )}
           {modo === "nueva" && (
@@ -456,6 +470,7 @@ export default function NuevaOtPage() {
             <thead>
               <tr>
                 <th>Elemento</th>
+                <th>Descripción de la muestra <span className="req">*</span></th>
                 <th>Familia</th>
                 <th className="num">Nº muestras</th>
                 <th className="num"># métodos</th>
@@ -467,6 +482,11 @@ export default function NuevaOtPage() {
               {lineas.map((l, i) => (
                 <tr key={i}>
                   <td><span className="codigo">{l.elementoCodigo}</span> {l.elementoNombre}</td>
+                  <td>
+                    <input aria-label={`Descripción de la muestra de la línea ${i + 1}`} value={l.descripcion} maxLength={200}
+                      placeholder={l.generico ? "Escriba el producto o la descripción" : ""}
+                      onChange={(e) => setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, descripcion: e.target.value } : x)))} />
+                  </td>
                   <td>{l.familia || "—"}</td>
                   <td className="num">{l.numMuestras}</td>
                   <td className="num">{l.metodos.length}</td>
@@ -475,13 +495,16 @@ export default function NuevaOtPage() {
                 </tr>
               ))}
               {lineas.length === 0 && (
-                <tr><td colSpan={6} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Aún no has agregado elementos. Arma uno arriba y pulsa “Agregar elemento a la OT”.</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>
+                  Aún no ha agregado elementos. Arme uno arriba y pulse «Agregar elemento a la OT». Si registra la OT sin elementos,
+                  sus muestras se registran después en la recepción del laboratorio.
+                </td></tr>
               )}
             </tbody>
             {lineas.length > 0 && (
               <tfoot>
                 <tr>
-                  <td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total estimado OT</td>
+                  <td colSpan={5} className="num" style={{ fontWeight: 700 }}>Total estimado OT</td>
                   <td className="num" style={{ fontWeight: 800 }}>{clp(totalEstimado)}</td>
                   <td></td>
                 </tr>

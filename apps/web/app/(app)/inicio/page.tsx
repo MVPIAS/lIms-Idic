@@ -13,9 +13,11 @@
  */
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { llamar } from "@/lib/laboratorio";
+import { toast } from "@/components/ui/feedback";
 import { useAlcance, describirAlcance, type ItemBandeja } from "@/lib/alcance";
-import { usePermisos, infoPerfil, type Perfil } from "@/lib/permisos";
+import { usePermisos, infoPerfil, esSoloMuestreo, type Perfil } from "@/lib/permisos";
 import { EmptyState, SkeletonCards } from "@/components/ui/PageHeader";
 import AvisosBandeja from "@/components/avisos/AvisosBandeja";
 import { fechaDia } from "@/lib/format";
@@ -105,6 +107,12 @@ const ACCIONES: Record<Perfil, Accion[]> = {
   ],
 };
 
+/** B-070: accesos de la Sección Muestreo (cae en el perfil COMERCIAL pero no cotiza). */
+const ACCIONES_MUESTREO: Accion[] = [
+  { href: "/ot?estado=abiertas", titulo: "OT por muestrear", desc: "Abra la OT y registre el muestreo en su pestaña «Muestreo»", icono: "🧪", perm: "ot.ver" },
+  { href: "/muestras", titulo: "Muestras", desc: "Muestras entregadas a los laboratorios", icono: "🧫", perm: "muestra.ver" },
+];
+
 /** Accesos genéricos (respaldo): los primeros que el permiso permita. */
 const GENERICAS: Accion[] = [
   ...ACCIONES.ANALISTA.slice(0, 2),
@@ -131,7 +139,38 @@ function primerNombre(n?: string): string {
   return limpio[0] ?? "";
 }
 
-function TarjetaPendiente({ it }: { it: ItemBandeja }) {
+/**
+ * B-042 (EP-00 6.2, manual por rol): «Avisar →» en las tarjetas de plazos. Avisa
+ * ahora a los responsables de las OT vencidas o por vencer de su alcance
+ * (POST /avisos/plazos, permiso ot.seguimiento), además del aviso diario.
+ */
+function BotonAvisar({ clave }: { clave: string }) {
+  const [ocupado, setOcupado] = useState(false);
+  async function avisar() {
+    setOcupado(true);
+    try {
+      const r = await llamar<{ vencidas: number; porVencer: number; personas: number }>("POST", "/avisos/plazos", {});
+      toast.ok(
+        r.personas
+          ? `Aviso enviado a ${r.personas} persona(s): ${r.vencidas} OT vencida(s) y ${r.porVencer} por vencer.`
+          : "No hay a quién avisar: las OT de su alcance ya fueron avisadas hoy o no tienen responsable.",
+      );
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
+  return (
+    <button type="button" className="btn outline sm" style={{ marginTop: 8 }} disabled={ocupado} onClick={avisar}
+      aria-label={clave === "ot_vencidas" ? "Avisar a los responsables de las OT vencidas" : "Avisar a los responsables de las OT por vencer"}>
+      {ocupado ? "Avisando…" : "Avisar →"}
+    </button>
+  );
+}
+
+function TarjetaPendiente({ it, puedeAvisar }: { it: ItemBandeja; puedeAvisar?: boolean }) {
+  const avisar = puedeAvisar && it.cantidad > 0 && ["ot_por_vencer", "ot_vencidas"].includes(it.clave);
   const cls = `bandeja-item ${it.cantidad === 0 ? "cero" : it.severidad}`;
   const cuerpo = (
     <>
@@ -173,6 +212,14 @@ function TarjetaPendiente({ it }: { it: ItemBandeja }) {
             {it.cantidad > it.elementos.length ? `Ver los ${it.cantidad.toLocaleString("es-CL")} →` : "Ver lista →"}
           </Link>
         )}
+        {avisar && <BotonAvisar clave={it.clave} />}
+      </div>
+    );
+  if (avisar)
+    return (
+      <div className={cls}>
+        {it.ruta ? <Link href={it.ruta as any} style={{ color: "inherit", textDecoration: "none", display: "block" }}>{cuerpo}</Link> : cuerpo}
+        <BotonAvisar clave={it.clave} />
       </div>
     );
   return it.ruta
@@ -189,14 +236,14 @@ export default function InicioPage() {
   const nombre = primerNombre(alcance?.usuario?.nombre ?? usuario.nombre ?? usuario.username);
 
   const acciones = useMemo(() => {
-    const propias = (ACCIONES[perfil] ?? []).filter((a) => puede(a.perm));
+    const propias = (perfil === "COMERCIAL" && esSoloMuestreo(roles) ? ACCIONES_MUESTREO : ACCIONES[perfil] ?? []).filter((a) => puede(a.perm));
     if (propias.length >= 2) return propias;
     // Perfil sin accesos útiles (o desconocido): accesos genéricos por permiso.
     const vistos = new Set(propias.map((a) => a.href));
     const extra = GENERICAS.filter((a) => !vistos.has(a.href) && puede(a.perm));
     return [...propias, ...extra].slice(0, 8);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perfil, listo, puede]);
+  }, [perfil, listo, puede, roles]);
 
   // Pendientes: primero lo urgente, luego lo que tiene cantidad.
   const orden: Record<string, number> = { alta: 0, warn: 1, info: 2 };
@@ -243,7 +290,7 @@ export default function InicioPage() {
           <EmptyState compacto icono="🎉" titulo="¡Todo al día!" texto="No tienes trabajo pendiente asignado en este momento." />
         ) : (
           <div className="bandeja" style={{ marginBottom: 0 }}>
-            {pendientes.map((it) => <TarjetaPendiente key={it.clave} it={it} />)}
+            {pendientes.map((it) => <TarjetaPendiente key={it.clave} it={it} puedeAvisar={puede("ot.seguimiento")} />)}
           </div>
         )}
       </div>

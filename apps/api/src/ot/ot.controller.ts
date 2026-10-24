@@ -33,6 +33,10 @@ import { generarCodigoOt } from "../common/codigo";
 import { AlcanceService } from "../rbac/alcance.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 import { ORIGENES_OT, calcularOpiPendiente, resolverCobro, validarOrigenOt } from "./reglas-ot";
+import { RegistroMuestrasService } from "../flujo-real/flujo-real.module";
+import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
+import { esElementoGenerico, muestrasDeAlta, type ElementoAlta } from "./alta-muestras";
+import { fijarPlazoPorDefecto } from "./plazo-defecto";
 
 const PrioridadEnum = z.enum(["baja", "normal", "alta", "urgente"]);
 
@@ -108,6 +112,23 @@ const OtCreate = z
     /** Pistas del catálogo para deducir el laboratorio (registro con elementos). */
     catElementoIds: z.array(z.string().uuid()).max(200).optional(),
     catMetodoIds: z.array(z.string().uuid()).max(500).optional(),
+    /** E.T. del cliente que rige la OT: se fija antes de generar los ensayos de sus muestras. */
+    etId: z.string().uuid().optional(),
+    /**
+     * Muestras que se registran CON la OT (B-001): una por elemento o línea, con
+     * los métodos elegidos. Todo en la misma transacción: si una muestra falla,
+     * no queda la OT. Basta `ot.crear` (registrar la OT con sus elementos).
+     */
+    muestras: z
+      .array(
+        z.object({
+          nombre: z.string().trim().max(200).optional(),
+          catElementoId: z.string().uuid().optional(),
+          metodoIds: z.array(z.string().uuid()).max(200),
+        }),
+      )
+      .max(50)
+      .optional(),
     ...FlujoRef,
   })
   .refine(unSoloFlujo, { message: MSG_UN_SOLO_FLUJO })
@@ -206,6 +227,7 @@ export class OtController {
     private readonly labs: LaboratorioOtService,
     private readonly cierre: OtCierreService,
     private readonly alcanceResultado: AlcanceResultadoService,
+    private readonly registroMuestras?: RegistroMuestrasService,
   ) {}
 
   /**
@@ -248,7 +270,13 @@ export class OtController {
 
     const idsMias = si(query.mias) ? await this.idsOtAsignadas(req?.user?.sub, tenantId) : null;
     const idsConAnalista = si(query.sinAsignar)
-      ? (await this.prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT DISTINCT ot_id AS id FROM ot_analista`)).map((f) => f.id)
+      ? (
+          await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+            // B-017: también las OT de calibración con metrólogo asignado por instrumento.
+            `SELECT DISTINCT ot_id AS id FROM ot_analista
+             UNION SELECT DISTINCT ot_id FROM met_ot_instrumento WHERE metrologo_id IS NOT NULL AND estado <> 'anulado'`,
+          )
+        ).map((f) => f.id)
       : null;
 
     const idsListasCierre = si(query.listasCierre) ? await this.cierre.idsListasParaCerrar(tenantId) : null;
@@ -462,7 +490,8 @@ export class OtController {
   @Get(":id/historial")
   @RequierePermiso("ot.ver")
   async historial(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    await this.otEnAlcance(id, req);
+    // Lectura: también el laboratorio que participa en la OT (B-002).
+    await this.otVisible(id, req);
     return this.prisma.$queryRawUnsafe(
       `SELECT h.id, h.tipo, h.detalle, h.created_at AS "createdAt",
               u.id AS "usuarioId", u.nombre_completo AS "usuarioNombre"
@@ -484,17 +513,24 @@ export class OtController {
     });
     if (!ot) return ot;
     // Fuera del alcance por unidad → 403 (la OT existe pero no es de sus laboratorios).
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    // B-002: el laboratorio que participa en la OT (destino de una orden interna)
+    // abre el expediente; dentro ve solo sus ensayos (alcanceEnOt).
+    const vista = await this.alcanceResultado.alcanceEnOt(req, ot, "ot.ver");
     const [analistas, asignador] = await Promise.all([
       this.analistasDe([ot.id]),
       ot.unidadAsignadaPor
         ? this.prisma.usuario.findUnique({ where: { id: ot.unidadAsignadaPor }, select: { id: true, nombreCompleto: true } })
         : null,
     ]);
+    const participa = vista.todo
+      ? null
+      : await this.prisma.unidad.findMany({ where: { id: { in: [...vista.labs] } }, select: { id: true, codigo: true, nombre: true } });
     return {
       ...ot,
       analistas: analistas.get(ot.id) ?? [],
       unidadAsignadaPorNombre: asignador?.nombreCompleto ?? null,
+      // Laboratorios con los que el usuario participa en una OT de otro laboratorio (null = la ve entera).
+      participacion: participa ? { laboratorios: participa } : null,
     };
   }
 
@@ -574,10 +610,14 @@ export class OtController {
         ? await this.flujos.resolverVersionId(dto, tenantId)
         : null;
 
-    const codigo = await this.generarCodigo(tenantId);
+    // Muestras que nacen con la OT (B-001) y E.T. que las rige: se validan ANTES de crear nada.
+    const alta = await this.validarMuestrasDeAlta(tenantId, dto, clienteId!, unidad.id);
+
     const opiNumero = dto.opiNumero?.trim() || null;
 
     const ot = await this.prisma.$transaction(async (tx) => {
+      // El correlativo se toma DENTRO de la transacción: si una muestra falla, no se gasta un número (B-001).
+      const codigo = await generarCodigoOt(tx, tenantId);
       const creada = await tx.ordenTrabajo.create({
         data: {
           tenantId,
@@ -628,8 +668,30 @@ export class OtController {
         usuarioId: req.user?.sub,
         origen: dto.unidadPrincipalId ? "alta_indicado" : "alta_deducido",
       });
+      // B-010: sin fecha indicada, el plazo por defecto (laboratorio > origen > defecto).
+      await fijarPlazoPorDefecto(tx, tenantId, creada.id);
+      if (alta.et) {
+        await tx.$executeRawUnsafe(
+          `UPDATE orden_trabajo SET et_id = $2::uuid, et_asignada_por = $3::uuid, et_asignada_at = now() WHERE id = $1::uuid`,
+          creada.id,
+          alta.et.id,
+          req?.user?.sub ?? null,
+        );
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'especificacion_tecnica', $3::jsonb, $4::uuid)`,
+          tenantId,
+          creada.id,
+          JSON.stringify({ et: `${alta.et.codigo} v${alta.et.version}` }),
+          req?.user?.sub ?? null,
+        );
+      }
+      // Muestras y ensayos por analizar en la MISMA transacción (todo o nada).
+      if (alta.muestras.length) {
+        if (!this.registroMuestras) throw new BadRequestException("El registro de muestras no está disponible.");
+        await this.registroMuestras.registrar(creada.id, { muestras: alta.muestras }, tenantId, req, tx);
+      }
       return creada;
-    });
+    }, { maxWait: 15_000, timeout: 120_000 });
 
     if (!versionId) return this.otConCliente(ot.id);
 
@@ -638,11 +700,66 @@ export class OtController {
     return this.instanciarYEnlazar(ot.id, versionId, tenantId, req);
   }
 
+  /**
+   * Muestras de «Registrar OT» y E.T. elegida: la descripción de cada muestra
+   * (alta-muestras.ts) y que la E.T. sea elegible para el cliente y el
+   * laboratorio. 400 con todos los motivos antes de crear la OT.
+   */
+  private async validarMuestrasDeAlta(
+    tenantId: string,
+    dto: { etId?: string; muestras?: { nombre?: string; catElementoId?: string; metodoIds: string[] }[] },
+    clienteId: string,
+    unidadId: string,
+  ) {
+    const errores: string[] = [];
+    let et: { id: string; codigo: string; version: number } | null = null;
+    if (dto.etId) {
+      const f = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT id, codigo, version, estado, reutilizable, cliente_id AS "clienteId", laboratorios
+           FROM especificacion_tecnica WHERE tenant_id = $1::uuid AND id = $2::uuid`,
+        tenantId,
+        dto.etId,
+      );
+      if (!f[0]) errores.push("La E.T. indicada no existe.");
+      else {
+        errores.push(...erroresAsignacion({ ...f[0], laboratorios: f[0].laboratorios ?? [] }, { clienteId, unidadId }));
+        et = { id: f[0].id, codigo: f[0].codigo, version: Number(f[0].version) };
+      }
+    }
+    const lineas = dto.muestras ?? [];
+    const ids = [...new Set(lineas.map((l) => l.catElementoId).filter((x): x is string => !!x))];
+    const filas = ids.length
+      ? await this.prisma.$queryRawUnsafe<{ id: string; nombre: string; subgrupo: string | null }[]>(
+          `SELECT e.id, e.nombre, s.nombre AS subgrupo
+             FROM cat_elemento e LEFT JOIN cat_subgrupo s ON s.id = e.subgrupo_id
+            WHERE e.tenant_id = $1::uuid AND e.id = ANY($2::uuid[]) AND e.deleted_at IS NULL`,
+          tenantId,
+          ids,
+        )
+      : [];
+    const elementos = new Map<string, ElementoAlta>(filas.map((f) => [f.id, { id: f.id, nombre: f.nombre, generico: esElementoGenerico(f.subgrupo) }]));
+    const r = muestrasDeAlta(lineas, elementos);
+    errores.push(...r.errores);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    return { et, muestras: r.muestras };
+  }
+
   private otConCliente(id: string) {
     return this.prisma.ordenTrabajo.findUnique({
       where: { id },
       include: { cliente: true, unidad: SELECT_UNIDAD },
     });
+  }
+
+  /** Lectura de la OT: su laboratorio responsable o un laboratorio que participa en ella (B-002). */
+  private async otVisible(id: string, req: any) {
+    const tenantId = req.user?.tenantId;
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, codigo: true, unidadPrincipal: true },
+    });
+    if (!ot) throw new NotFoundException(`OT ${id} no encontrada`);
+    return this.alcanceResultado.alcanceEnOt(req, ot, "ot.ver");
   }
 
   /** OT del tenant y dentro del alcance del usuario (404 / 403). */

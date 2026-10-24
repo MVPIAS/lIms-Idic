@@ -58,6 +58,8 @@ interface Propuesta {
   muestras: MuestraOt[];
   lineas: Linea[];
   opcionesToma: { codigo: string; etiqueta: string }[];
+  /** B-008: panel que la OT ya trae (producto de la OT o parametrización del prototipo). */
+  panelOt?: { origen: "producto" | "prototipo"; nombre: string; parametrizacion: string | null; metodos: Metodo[] } | null;
 }
 interface FilaRegistro { nombre: string; ident: string; sello: string; productoId: string }
 
@@ -81,7 +83,7 @@ const datosDe = (m: MuestraOt): DatosRecepcion => ({
 });
 
 /** Selector del producto (matriz): lista del laboratorio + búsqueda en el catálogo. */
-function SelectorProducto({ id, valor, onCambio, productos, otId, obligatorio, nombreActual }: {
+function SelectorProducto({ id, valor, onCambio, productos, otId, obligatorio, nombreActual, sinLista }: {
   id: string;
   valor: string;
   onCambio: (id: string, p: ProductoLab | null) => void;
@@ -89,6 +91,8 @@ function SelectorProducto({ id, valor, onCambio, productos, otId, obligatorio, n
   otId: string;
   obligatorio: boolean;
   nombreActual?: string | null;
+  /** El laboratorio aún no tiene lista de productos configurada (B-011). */
+  sinLista?: boolean;
 }) {
   const [busca, setBusca] = useState("");
   const [encontrados, setEncontrados] = useState<ProductoLab[]>([]);
@@ -123,6 +127,11 @@ function SelectorProducto({ id, valor, onCambio, productos, otId, obligatorio, n
       </select>
       <input aria-label="Buscar otro producto en el catálogo" value={busca} onChange={(e) => setBusca(e.target.value)}
         placeholder="Otro producto: buscar en el catálogo" style={{ marginTop: 4, fontSize: 12 }} />
+      {sinLista && (
+        <span className="hint" style={{ fontSize: 11 }}>
+          El laboratorio aún no tiene su lista de productos (Administración › Parámetros del sistema · «producto_lab»): búsquelo en el catálogo o descríbalo en la muestra.
+        </span>
+      )}
     </div>
   );
 }
@@ -141,6 +150,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   const [abierto, setAbierto] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [productos, setProductos] = useState<ProductoLab[]>([]);
+  const [sinListaProductos, setSinListaProductos] = useState(false);
 
   // Formulario de registro
   const [filas, setFilas] = useState<FilaRegistro[]>([filaVacia()]);
@@ -169,7 +179,9 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   }, [otId]);
   useEffect(() => { cargar(); }, [cargar]);
   useEffect(() => {
-    llamar<{ productos: ProductoLab[] }>("GET", `/recepcion/ot/${otId}/productos`).then((r) => setProductos(r.productos)).catch(() => setProductos([]));
+    llamar<{ productos: ProductoLab[]; sinLista?: boolean }>("GET", `/recepcion/ot/${otId}/productos`)
+      .then((r) => { setProductos(r.productos); setSinListaProductos(!!r.sinLista); })
+      .catch(() => setProductos([]));
   }, [otId]);
 
   const cfg = d?.configRecepcion ?? null;
@@ -185,7 +197,10 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     setFilas(Array.from({ length: n }, () => filaVacia(d.ot.catElementoId ?? "")));
     setComun(RECEPCION_VACIA);
     setExtra([]);
-    setPanel([]);
+    // B-008: el panel de la OT (producto o prototipo) llega propuesto y marcado.
+    const po = d.panelOt;
+    setPanel(po?.metodos.length ? [{ producto: po.origen === "prototipo" ? `${po.nombre} (panel parametrizado)` : po.nombre, metodos: po.metodos }] : []);
+    if (po?.metodos.length) setMarcados(new Set(po.metodos.filter((m) => m.analitos).map((m) => m.id)));
     setBusqueda("");
     setEncontrados([]);
     setEditando(null);
@@ -236,6 +251,9 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
 
   const etiquetaToma = (c: string | null) => d?.opcionesToma.find((o) => o.codigo === c)?.etiqueta ?? c ?? "";
 
+  // B-013: testigo, custodia o contramuestra van a bodega con su retención, sin ensayos.
+  const sinEnsayos = ["testigo", "custodia", "contramuestra"].includes(comun.claseCustodia);
+
   async function guardar() {
     const metodoIds = [...marcados];
     if (filas.some((f) => !f.nombre.trim())) return toast.error("Escriba la descripción de cada muestra recibida.");
@@ -245,7 +263,8 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     const falta = faltantesRecepcion({ ...comun, selloNumero: comun.sellosVerificados ? "por muestra" : "" }, cfg);
     if (comun.sellosVerificados && filas.some((f) => !f.sello.trim())) falta.push("indique el Nº de sello de cada muestra (marcó «sellos verificados»)");
     if (falta.length) return toast.error(`Recepción: ${falta.join("; ")}.`);
-    if (!metodoIds.length) return toast.error("Marque al menos un método.");
+    if (!metodoIds.length && !sinEnsayos)
+      return toast.error("Marque al menos un método, o indique en «Destino» que es testigo, en custodia o contramuestra si va a bodega sin ensayos.");
     setGuardando(true);
     try {
       const r: any = await llamar("POST", `/flujo/ot/${otId}/muestras`, {
@@ -265,11 +284,15 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           toast.error(`Las muestras quedaron recepcionadas, pero no se pudo asignar el Nº interno: ${e.message}`);
         }
       }
-      toast.ok(`Se recepcionaron ${r.muestras.length} muestra(s) con ${r.ensayos} ensayo(s) por analizar.${numeros} Siguiente: asignar y ejecutar.`);
+      toast.ok(
+        r.ensayos
+          ? `Se recepcionaron ${r.muestras.length} muestra(s) con ${r.ensayos} ensayo(s) por analizar.${numeros} Siguiente: asignar y ejecutar.`
+          : `Se recepcionaron ${r.muestras.length} muestra(s) sin ensayos, a bodega con su plazo de retención.${numeros}`,
+      );
       setAbierto(false);
       await cargar();
       onCambio?.();
-      onRecepcionado?.();
+      if (r.ensayos) onRecepcionado?.();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -472,7 +495,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                             <div style={{ fontWeight: 600, fontSize: 12.5, marginBottom: 6 }}>Recepción e identificación de {m.codigo}</div>
                             <div className="form-grid cols-2" style={{ marginBottom: 6 }}>
                               <SelectorProducto id={`prod-${m.id}`} valor={productoEdicion} onCambio={(id) => setProductoEdicion(id)} productos={productos}
-                                otId={otId} obligatorio={!!cfg?.productoObligatorio} nombreActual={m.productoNombre} />
+                                otId={otId} obligatorio={!!cfg?.productoObligatorio} nombreActual={m.productoNombre} sinLista={sinListaProductos} />
                             </div>
                             <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} labPrincipalId={d.ot.unidadPrincipal}
                               config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} />
@@ -527,7 +550,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                   <label htmlFor={`m-${i}-nombre`}>{unaPorEnvase ? `Envase ${i + 1}` : `Muestra ${i + 1}`} · descripción <span className="req">*</span></label>
                   <input id={`m-${i}-nombre`} value={f.nombre} maxLength={200} onChange={(e) => setFilas((xs) => xs.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))} />
                 </div>
-                <SelectorProducto id={`m-${i}-producto`} valor={f.productoId} productos={productos} otId={otId} obligatorio={!!cfg?.productoObligatorio}
+                <SelectorProducto id={`m-${i}-producto`} valor={f.productoId} productos={productos} otId={otId} obligatorio={!!cfg?.productoObligatorio} sinLista={sinListaProductos}
                   onCambio={(id, p) => {
                     setFilas((xs) => xs.map((x, j) => (j === i || (i === 0 && !x.productoId && !unaPorEnvase) ? { ...x, productoId: id } : x)));
                     if (id && p) cargarPanel(id, p.nombre);
@@ -627,8 +650,8 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           </label>
           <div className="toolbar" style={{ margin: 0 }}>
             <button className="btn outline sm" disabled={guardando} onClick={() => setAbierto(false)}>Cancelar</button>
-            <button className="btn primary sm" disabled={guardando || !marcados.size} onClick={guardar}>
-              {guardando ? "Recepcionando…" : "Recepcionar → asignar y ejecutar"}
+            <button className="btn primary sm" disabled={guardando || (!marcados.size && !sinEnsayos)} onClick={guardar}>
+              {guardando ? "Recepcionando…" : !marcados.size && sinEnsayos ? "Recepcionar → bodega (sin ensayos)" : "Recepcionar → asignar y ejecutar"}
             </button>
           </div>
         </div>

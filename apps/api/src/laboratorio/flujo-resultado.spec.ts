@@ -1,4 +1,4 @@
-import { clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, planReapertura } from "./flujo-resultado";
+import { clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, motivoNoQuitable, planReapertura } from "./flujo-resultado";
 
 describe("flujo del resultado · ¿se puede capturar?", () => {
   it("pendiente, capturado, devuelto y rechazado admiten (re)captura", () => {
@@ -94,5 +94,12 @@ describe("sin veredicto no se revisa ni se aprueba (D02-03)", () => {
     expect(motivoSinVeredicto("pendiente", "aprobado")).toMatch(/Pendiente.*aprobarlo/);
     expect(motivoSinVeredicto(null, "revisado_n1")).toMatch(/revisarlo/);
     for (const v of ["cumple", "no_cumple", "informativo", "Cumple"]) expect(motivoSinVeredicto(v, "aprobado")).toBeNull();
+  });
+});
+
+describe("B-005 · quitar un ensayo que no aplica", () => {
+  it("se quita en cualquier estado salvo aprobado", () => {
+    for (const e of ["pendiente", "capturado", "revisado_n1", "devuelto", "rechazado"]) expect(motivoNoQuitable(e)).toBeNull();
+    expect(motivoNoQuitable("aprobado")).toMatch(/reábralo/);
   });
 });

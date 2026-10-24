@@ -39,7 +39,8 @@ const hoyCl = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santia
 
 export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onCambio?: () => void }) {
   const [e, setE] = useState<Estado | null>(null);
-  const [f, setF] = useState({ medio: "", oficioNumero: "", fechaEnvio: "", copia: "", observaciones: "" });
+  // B-072 (recorrido MP-06, D06-21): la fecha de envío viene propuesta (hoy en Chile), como en la entrega.
+  const [f, setF] = useState({ medio: "", oficioNumero: "", fechaEnvio: hoyCl(), copia: "", observaciones: "" });
   const [ocupado, setOcupado] = useState(false);
 
   const cargar = useCallback(() => {
@@ -52,7 +53,14 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
   if (!e?.aplica) return null;
   const pendiente = e.incumplimientos.find((x) => x.oficial && !x.notificacion) ?? null;
   const enFirma = e.incumplimientos.find((x) => !x.oficial && ["en_firma"].includes(x.estado));
-  const listo = pendiente && f.medio && f.fechaEnvio && f.copia && (f.medio !== "oficina_partes" || f.oficioNumero.trim());
+  // El botón dice qué falta en vez de quedar desactivado sin explicación.
+  const faltan = [
+    !f.medio && "el medio",
+    f.medio === "oficina_partes" && !f.oficioNumero.trim() && "el Nº de oficio",
+    !f.fechaEnvio && "la fecha de envío",
+    !f.copia && "si va con copia al internador",
+  ].filter(Boolean) as string[];
+  const listo = pendiente && !faltan.length;
 
   async function registrar() {
     if (!pendiente) return;
@@ -67,7 +75,7 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
         observaciones: f.observaciones.trim() || null,
       });
       setE(r);
-      setF({ medio: "", oficioNumero: "", fechaEnvio: "", copia: "", observaciones: "" });
+      setF({ medio: "", oficioNumero: "", fechaEnvio: hoyCl(), copia: "", observaciones: "" });
       toast.ok("Notificación a DGMN registrada. La OT ya puede cerrarse.");
       onCambio?.();
     } catch (x: any) {
@@ -125,7 +133,9 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
                 </div>
               </div>
               <div className="toolbar">
-                <button type="button" className="btn primary" disabled={!listo || ocupado} onClick={registrar}>{ocupado ? "Registrando…" : "Registrar notificación → cierre"}</button>
+                <button type="button" className="btn primary" disabled={!listo || ocupado} onClick={registrar}
+                  aria-describedby={faltan.length ? "dg-faltan" : undefined}>{ocupado ? "Registrando…" : "Registrar notificación → cierre"}</button>
+                {faltan.length > 0 && <small id="dg-faltan" role="status" style={{ color: "#7a4b00" }}>Falta indicar {faltan.join(", ")}.</small>}
                 <small style={{ color: "var(--muted)" }}>El oficio lo genera hoy la Subdirección fuera del LIMS (por confirmar con el IDIC si se emite con la matriz OFICIO).</small>
               </div>
             </>

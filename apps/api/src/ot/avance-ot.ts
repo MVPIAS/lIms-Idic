@@ -959,12 +959,15 @@ function rutaBpch(h: HechosOt): Ruta {
   const u = lab(h);
   const r = h.resultados;
   const pn = h.origen === "PRODUCCION_NACIONAL";
+  // B-020 (recorrido MP-08, D08-06): la OT de prototipo no tiene Informe de Inspección
+  // previo ni remisión a DCO; su documento es el dictamen del tipo (EP-08).
+  const proto = h.origen === "PROTOTIPO";
   const condicion = condicionFinal(h.muestras.veredictos ?? []);
   const informe = vigenteDeTipo(h.documentos, "INFORME_INSPECCION");
   const certificado = vigenteDeTipo(h.documentos, "CERTIFICADO_CONFORMIDAD");
   const incumplimiento = vigenteDeTipo(h.documentos, "INFORME_INCUMPLIMIENTO");
-  const final = condicion === "no_cumple" ? incumplimiento : certificado;
-  const nombreFinal = condicion === "no_cumple" ? "Informe de Incumplimiento" : "Certificado de Conformidad";
+  const final = proto ? certificado ?? incumplimiento : condicion === "no_cumple" ? incumplimiento : certificado;
+  const nombreFinal = proto ? "dictamen del tipo" : condicion === "no_cumple" ? "Informe de Incumplimiento" : "Certificado de Conformidad";
   const informeOficial = Boolean(informe && esOficialDoc(informe));
   const finalAplica = !pn || Boolean(certificado || incumplimiento);
   const aRemitir = finalAplica ? final : informe;
@@ -980,14 +983,21 @@ function rutaBpch(h: HechosOt): Ruta {
       h.muestras.total ? plural(h.muestras.total, "lote registrado", "lotes registrados") : null),
     etapa("resultados", "Resultados de la inspección", r.total > 0 && r.aprobados === r.total ? "hecho" : r.total - r.pendientes - r.devueltos > 0 ? "en_curso" : "pendiente",
       r.total ? `${r.aprobados} de ${r.total} aprobados` : null),
-    etapa("informe", "Informe de Inspección", informeOficial ? "hecho" : informe ? "en_curso" : "pendiente", informe?.numero ?? null),
-    etapa(
-      "documento_final",
-      condicion === "no_cumple" ? "Informe de Incumplimiento → DGMN" : "Certificado de Conformidad",
-      !finalAplica ? "no_aplica" : final && esOficialDoc(final) ? "hecho" : final ? "en_curso" : "pendiente",
-      !finalAplica ? "Producción Nacional: el informe técnico va en la correlación de la O/C" : final?.numero ?? `Condición: ${TEXTO_CONDICION[condicion]}`,
-    ),
-    etapa("remision_dco", "Remitir a DCO", remitido ? "hecho" : "pendiente", remitido ? `${aRemitir!.numero} remitido` : null),
+    proto
+      ? etapa("informe", "Informe de Inspección", "no_aplica", "Prototipo: sin Informe de Inspección previo")
+      : etapa("informe", "Informe de Inspección", informeOficial ? "hecho" : informe ? "en_curso" : "pendiente", informe?.numero ?? null),
+    proto
+      ? etapa("documento_final", "Dictamen del tipo (aprobación o rechazo)", final && esOficialDoc(final) ? "hecho" : final ? "en_curso" : "pendiente",
+          final?.numero ?? "Se emite desde BPCH › Prototipos")
+      : etapa(
+          "documento_final",
+          condicion === "no_cumple" ? "Informe de Incumplimiento → DGMN" : "Certificado de Conformidad",
+          !finalAplica ? "no_aplica" : final && esOficialDoc(final) ? "hecho" : final ? "en_curso" : "pendiente",
+          !finalAplica ? "Producción Nacional: el informe técnico va en la correlación de la O/C" : final?.numero ?? `Condición: ${TEXTO_CONDICION[condicion]}`,
+        ),
+    proto
+      ? etapa("remision_dco", "Remitir a DCO", "no_aplica", "Prototipo: el dictamen se entrega desde BPCH › Prototipos")
+      : etapa("remision_dco", "Remitir a DCO", remitido ? "hecho" : "pendiente", remitido ? `${aRemitir!.numero} remitido` : null),
     docs.entrega,
     cierre.etapa,
     fac.factura,

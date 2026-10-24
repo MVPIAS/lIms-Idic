@@ -5,6 +5,7 @@ import { FlujoModule } from "../flujo/flujo.module";
 import { FacturacionModule } from "../facturacion/facturacion.module";
 import { LaboratorioOtModule } from "./laboratorio-ot.service";
 import { AvanceOtController, AvanceOtService } from "./avance-ot.controller";
+import { FlujoRealModule } from "../flujo-real/flujo-real.module";
 
 // FlujoModule exporta FlujoService: la OT lo usa para instanciar el flujo BPM
 // al crearse (flujoDefId/flujoVersionId) o al adjuntarlo vía POST /ot/:id/flujo.
@@ -15,7 +16,8 @@ import { AvanceOtController, AvanceOtService } from "./avance-ot.controller";
 // el GET /ot/:id (ParseUUIDPipe) de OtController. AvanceOtController sirve
 // GET /ot/:id/avance (Ruta de la OT, solo lectura).
 @Module({
-  imports: [FlujoModule, FacturacionModule, LaboratorioOtModule],
+  // FlujoRealModule: «Registrar OT» crea las muestras con la OT (RegistroMuestrasService, B-001).
+  imports: [FlujoModule, FacturacionModule, LaboratorioOtModule, FlujoRealModule],
   controllers: [OtCierreController, AvanceOtController, OtController],
   providers: [OtCierreService, AvanceOtService],
 })

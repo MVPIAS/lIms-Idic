@@ -180,6 +180,20 @@ export function puedeGestionar(laboratorios: string[], filtro: string[] | null):
   return laboratorios.every((l) => filtro.includes(l));
 }
 
+/**
+ * B-071 (recorrido MP-03, D03-07): la jefatura gestiona una E.T. que incluye,
+ * además de alguno de SUS laboratorios, otros laboratorios de la MISMA sección
+ * (una E.T. para LCC y LTX, borrador Textil 15-10). `seccion` = laboratorios
+ * hermanos de los suyos. Una E.T. sin ninguno de sus laboratorios, no.
+ */
+export function puedeGestionarConSeccion(laboratorios: string[], filtro: string[] | null, seccion: string[] = []): boolean {
+  if (filtro === null) return true;
+  if (!laboratorios.length) return false;
+  if (!laboratorios.some((l) => filtro.includes(l))) return false;
+  const ampliado = new Set([...filtro, ...seccion]);
+  return laboratorios.every((l) => ampliado.has(l));
+}
+
 /** ¿El usuario ve la E.T.? Global; las generales (sin laboratorio); o alguna de sus laboratorios. */
 export function puedeVer(laboratorios: string[], filtro: string[] | null): boolean {
   if (filtro === null || !laboratorios.length) return true;

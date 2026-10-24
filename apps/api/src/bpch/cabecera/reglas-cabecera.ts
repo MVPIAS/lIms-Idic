@@ -111,3 +111,51 @@ export function iniciales(nombre: string | null | undefined): string {
     .map((p) => `${p[0].toUpperCase()}.`)
     .join(" ");
 }
+
+/**
+ * B-019 (recorrido MP-07 D07-08, MP-08 D08-03) · lo que la cabecera de
+ * inspección hereda de lo que ya se conoce: la clasificación del producto de
+ * Producción Nacional (clase/división y grupo, Nº ONU), la RAF y el lote; o del
+ * prototipo (solicitud DGMN, esquema «TIPO», elemento, clasificación). Solo se
+ * proponen los campos que la cabecera aún tiene vacíos: lo escrito manda.
+ */
+export interface FuenteCabecera {
+  documentoOrigen?: string | null;
+  fechaDocumento?: string | null;
+  esquema?: "LOTES" | "TIPO" | null;
+  elemento?: string | null;
+  cnc?: string | null;
+  claseDivision?: string | null;
+  grupoCompatibilidad?: string | null;
+  numeroOnu?: string | null;
+  lote?: string | null;
+  lugar?: string | null;
+  fechaInspeccion?: string | null;
+  tamanoMuestra?: number | null;
+}
+
+export function heredarCabecera(f: FuenteCabecera | null, actual: CabeceraDto | null): Partial<CabeceraDto> {
+  if (!f) return {};
+  const clase = `${(f.claseDivision ?? "").trim()}${(f.grupoCompatibilidad ?? "").trim().toUpperCase()}`;
+  const onu = (f.numeroOnu ?? "").replace(/^\s*UN\s*/i, "").trim();
+  const propuesta: Partial<CabeceraDto> = {
+    documentoOrigen: f.documentoOrigen?.trim() || null,
+    fechaDocumento: f.fechaDocumento || null,
+    esquema: f.esquema ?? null,
+    elementoGenerico: f.elemento?.trim() || null,
+    cncDgmn: f.cnc?.trim() || null,
+    claseDivisionUn: clase || null,
+    numeroUn: onu || null,
+    identificacionLote: f.lote?.trim() || null,
+    lugarInspeccion: f.lugar?.trim() || null,
+    fechaInspeccion: f.fechaInspeccion || null,
+    tamanoMuestra: f.tamanoMuestra ?? null,
+  };
+  const out: Partial<CabeceraDto> = {};
+  for (const [k, v] of Object.entries(propuesta) as [keyof CabeceraDto, any][]) {
+    if (v === null || v === undefined || v === "") continue;
+    if (actual && !vacio(actual[k])) continue;
+    (out as any)[k] = v;
+  }
+  return out;
+}
