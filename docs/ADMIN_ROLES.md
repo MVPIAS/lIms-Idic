@@ -439,20 +439,34 @@ alcance); el menú decide los ámbitos con `permisosPorAmbito` (§3 bis).
 
 **`GET /me/bandeja`** → `[{ "clave", "titulo", "descripcion", "cantidad", "ruta", "severidad": "info"|"warn"|"alta" }]`. Ítems por perfil (cantidades acotadas a las unidades visibles; `severidad` = `info` cuando `cantidad = 0`):
 
+Tabla regenerada el 24-10-2026 desde `rbac/bandeja.service.ts › tarjetas()` y las fuentes que registran otros módulos (B-098). Entre paréntesis, la condición cuando la tarjeta no la ve todo el perfil.
+
 | Perfil | Claves |
 |---|---|
-| ANALISTA | `ot_asignadas` (ot_analista o ensayo asignado · abre `/ot?mias=1`), `ot_en_curso`, `resultados_devueltos` (abre `/captura-ot?estado=devuelto,rechazado&mios=1`), `firmas_pendientes` (ot_firma) |
-| REVISOR | `resultados_por_revisar` (abre `/captura-ot?estado=capturado`), `ot_asignadas`, `resultados_devueltos`, `ot_por_vencer`, `firmas_pendientes` |
-| JEFE_LAB | `ot_sin_asignar` (abre `/ot?sinAsignar=1`), `resultados_por_revisar`, `resultados_por_aprobar` (abre `/captura-ot?estado=revisado_n1`), `firmas_pendientes`, `ot_vencidas`, `ot_por_vencer`, `informes_por_oficializar` |
-| JEFE_SECCION / JEFE_DEPTO | `firmas_pendientes`, `informes_por_oficializar`, `resultados_por_aprobar`, `ot_vencidas`, `ot_vencidas_<LAB>` (una por laboratorio con atraso), `ot_abiertas` |
+| ANALISTA | `ot_por_recepcionar` (solo rol RECEPCION · abre `/recepcion`), `lotes_por_inspeccionar` (BPCH), `informes_bpch_por_emitir` (solo rol INSPECTOR del BPCH), `ot_asignadas` (abre `/ot?mias=1&estado=abiertas`), `derivados_por_capturar` (orden interna recibida), `ot_en_curso`, `resultados_devueltos` (abre `/captura-ot?estado=devuelto,rechazado&mios=1`), `firmas_pendientes` |
+| REVISOR | `resultados_por_revisar` (abre `/captura-ot?estado=capturado`), `ot_asignadas`, `derivados_por_capturar`, `resultados_devueltos`, `ot_por_vencer`, `firmas_pendientes` |
+| JEFE_LAB | `internaciones_por_analizar` (BPCH), `lotes_por_inspeccionar` (BPCH), `informes_bpch_por_emitir` (BPCH), `requerimientos_sucursal` (Producción Nacional, si hay), `ot_sin_plazo`, `ot_sin_asignar` (abre `/ot?sinAsignar=1&estado=abiertas`), `trabajo_en_aprobacion` (documentación del trabajo del DSA), `resultados_por_revisar`, `resultados_por_aprobar` (abre `/captura-ot?estado=revisado_n1`), `oi_por_atender`, `derivados_por_capturar`, `oi_por_integrar`, `firmas_pendientes`, `documentos_por_entregar`, `ot_listas_cerrar`, `ot_vencidas`, `ot_por_vencer`, `informes_por_oficializar`, `cotizaciones_por_responder`, `cotizaciones_vb_lab` |
+| JEFE_SECCION | `internaciones_por_analizar` (BPCH), `informes_bpch_por_emitir` (BPCH), `ot_sin_plazo`, `trabajo_en_aprobacion_lem` (Proyectos de Párrafo por validar), `firmas_pendientes`, `informes_por_oficializar`, `resultados_por_aprobar`, `ot_vencidas`, `ot_vencidas_<LAB>` (una por laboratorio con atraso), `ot_abiertas`, `cotizaciones_por_responder` |
+| JEFE_DEPTO | `trabajo_validada_lem` (Proyectos de Párrafo por aprobar), `firmas_pendientes`, `informes_por_oficializar`, `resultados_por_aprobar`, `ot_vencidas`, `ot_vencidas_<LAB>`, `ot_abiertas`, `cotizaciones_por_firmar` (solo quien firma según la matriz COTIZACION: Jefe DCO), `cotizaciones_vb_depto`, `cotizaciones_por_responder` |
 | DIRECTOR | `firmas_pendientes`, `informes_por_oficializar`, `ot_vencidas`, `ot_vencidas_<LAB>`, `ot_abiertas`, `nc_abiertas`, `cotizaciones_aceptadas_sin_ot` |
-| COMERCIAL | `cotizaciones_por_vencer` (7 días), `cotizaciones_aceptadas_sin_ot`, `ot_por_vencer`, `documentos_por_entregar` |
-| PLANIFICACION | `ot_vencidas`, `ot_vencidas_<LAB>`, `ot_por_vencer`, `ot_listas_cerrar`, `documentos_por_entregar`, `ot_abiertas`, `cotizaciones_aceptadas_sin_ot` |
+| COMERCIAL | `cotizaciones_por_vencer` (7 días), `cotizaciones_aceptadas_sin_ot`, `ot_por_vencer`, `documentos_por_entregar`, `cotizaciones_devueltas_firma`, `cotizaciones_firmadas_sin_enviar`, `encuestas_pendientes`, `muestreos_pendientes` (rol MUESTREO). Solo rol MUESTREO (Sección Muestreo, sin rol COMERCIAL): `muestreos_pendientes` (siempre visible, también en 0) y `ot_en_curso` |
+| PLANIFICACION | `ot_vencidas`, `ot_vencidas_<LAB>`, `ot_por_vencer`, `ot_sin_plazo`, `ot_listas_cerrar`, `documentos_por_entregar`, `ot_abiertas`, `cotizaciones_aceptadas_sin_ot`, `encuestas_pendientes` |
 | FINANZAS | `facturas_pendientes` («Pendientes de facturar»), `facturas_por_cobrar` (emitidas y con pago parcial), `ot_cerradas_sin_factura` (con cobro, cerradas antes del cierre automático) |
 | ABASTECIMIENTO | `oc_pendientes` |
 | CALIDAD | `firmas_pendientes`, `nc_abiertas`, `informes_por_oficializar`, `ot_vencidas` |
 | ADMIN | `usuarios_sin_rol`, `usuarios_bloqueados` (por el administrador **o por intentos fallidos**: `intentos_fallidos >= AUTH_MAX_INTENTOS`), `unidades_sin_jefe` |
 | LECTOR | `ot_abiertas` |
+
+Tarjetas que suman otros módulos a cualquier perfil (`registrarFuenteBandeja`), según permiso y solo con pendientes:
+
+| Módulo | Claves |
+|---|---|
+| Metrología (`metrologia.ver`) | `met_por_calibrar`, `met_por_enviar`, `met_devueltas` (metrólogo, `metrologia.crear`: se ven también en 0), `met_por_revisar` y `met_por_emitir` (según la matriz de firmas), `met_por_entregar` (`certificado.entregar` o metrólogo) |
+| Metrología · no calibrables | `met_informes_por_emitir` (`metrologia.emitir`), `met_externos_por_aprobar` (jefaturas titulares o subrogantes de Administración › Unidades) |
+| Oficios | `oficios_por_firmar` (le toca su V°B° o firma), `oficios_por_despachar` (`oficio.despachar`), `oficios_devueltos` (los que elaboró) |
+| Seguimiento y despacho | `seguimiento_por_despachar`, `seguimiento_por_recibir`, `seguimiento_plazo_por_informar`, `seguimiento_recepcion_dco`, `seguimiento_por_enviar` |
+
+`encuestas_pendientes` cuenta las encuestas pendientes, que nacen cuando la OT pasa a **finalizada o cerrada** (EP-00 §9.1, `align_encuestas_satisfaccion.sql`).
 
 Cada conteo es defensivo: si la tabla/columna no existe en la BD, ese ítem vale 0.
 
