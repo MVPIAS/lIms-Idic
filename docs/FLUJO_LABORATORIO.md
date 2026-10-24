@@ -41,6 +41,11 @@ Pestaña «Muestras» del expediente de la OT (`ot/[id]/_components/RegistroMues
 Sirve para cualquier OT abierta, en especial la que nace al aceptar una cotización
 (antes solo «Registrar OT» generaba ensayos y «Muestras › + Nuevo» creaba la muestra vacía).
 
+La pantalla **Laboratorio › Muestras recibidas** (`/muestras`; antes «Muestras», con la ayuda
+«Maestro de muestras») no es una tabla maestra: lista las muestras recibidas en cada OT de su
+alcance, con su recepción (identificación del cliente, sello, condición), ubicación y estado. La
+recepción se registra o corrige aquí, en la pestaña «Muestras» del expediente de la OT.
+
 - `GET /flujo/ot/:id/registro-muestras` (`muestra.ver`): muestras de la OT (con sus ensayos y
   métodos) y, si viene de una cotización, sus líneas con los métodos del catálogo de cada ensayo.
   Un ensayo con un solo método lo trae **marcado**; con varios, hay que elegir (no se adivina).

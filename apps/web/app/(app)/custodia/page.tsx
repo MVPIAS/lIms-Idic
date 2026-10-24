@@ -301,8 +301,8 @@ export default function CustodiaPage() {
 
       {!loading && !muestras.length && (
         <div className="alert info">
-          No hay muestras registradas todavía. Registra una muestra en <strong>Muestras</strong> para poder abrir su
-          cadena de custodia.
+          No hay muestras recibidas todavía. Las muestras se registran al recibirlas en la OT (expediente de la OT,
+          pestaña «Muestras») y aparecen en <strong>Muestras recibidas</strong>; desde ahí se abre su cadena de custodia.
         </div>
       )}
 
