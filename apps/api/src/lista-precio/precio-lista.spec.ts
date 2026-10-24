@@ -1,4 +1,4 @@
-import { elegirPrecio, type ItemListaVigente } from "./precio-lista";
+import { elegirPrecio, precioPanel, type ItemListaVigente } from "./precio-lista";
 import { filtroDetalle } from "./lista-precio-detalle.controller";
 
 const item: ItemListaVigente = {
@@ -34,6 +34,16 @@ describe("Precio del ensayo en la cotización (lista vigente o ficha)", () => {
   it("sin valor ni en la lista ni en la ficha: null (la cotización lo bloquea)", () => {
     expect(elegirPrecio(null, 0, "PARTICULAR", "ficha")).toBeNull();
     expect(elegirPrecio({ ...item, costoTotal: null }, null, "EJERCITO", "costo_total")).toBeNull();
+  });
+});
+
+describe("D01-23 · precio del panel de Registrar OT", () => {
+  it("la ficha con valor manda; en 0 usa el neto de la lista vigente; sin ninguno queda la ficha", () => {
+    expect(precioPanel("12000", item)).toBe(12000);
+    expect(precioPanel("0.00", item)).toBe(item.precio);
+    expect(precioPanel(null, item)).toBe(item.precio);
+    expect(precioPanel("0", undefined)).toBe(0);
+    expect(precioPanel(null, undefined)).toBeNull();
   });
 });
 

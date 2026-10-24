@@ -51,8 +51,9 @@ function cabecera(est: EstructuraInforme, cfg: ConfigInforme, cols: ColsSeccion 
 
 function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme, cols: ColsSeccion = { sello: false, metodo: cfg.columnaMetodo }, conSello = true): string {
   const cumplimiento = est.modalidad === "cumplimiento";
-  // Sin columna «Unidad» ni unidad junto al resultado, el requisito la lleva (Anexo 02-02).
-  const req = !cfg.columnaUnidad && !cfg.unidadEnResultado && f.requisitoOrigen ? requisitoConUnidad(f.requisito, f.unidad) : f.requisito;
+  // Sin columna «Unidad», el requisito lleva la unidad (Anexo 02-02: «Mín. 97 %»), también cuando el
+  // resultado ya la lleva al lado (D01-13: el requisito del catálogo salía «Mín. 97» y el de la orden con «%»).
+  const req = !cfg.columnaUnidad && f.requisitoOrigen ? requisitoConUnidad(f.requisito, f.unidad) : f.requisito;
   const requisito = f.requisitoOrigen === "orden" ? `${req} *` : req;
   const marca = f.requisitoOrigen === "orden" ? " *" : "";
   const cota = (v: string) => `<td class="num">${escapeHtml(v ? `${v}${marca}` : cfg.textoSinCota || GUION)}</td>`;
