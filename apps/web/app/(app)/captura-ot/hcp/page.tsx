@@ -26,6 +26,8 @@ interface Item { item: string; grupo: string; subgrupo: string | null; requisito
 interface ResItem { resultado?: "C" | "NC" | null; valor?: number | null; observacion?: string | null }
 interface Vehiculo {
   muestra: { id: string; codigo: string; nombre: string | null };
+  /** D05-21: lo registrado en la recepción del vehículo, que la cabecera propone. */
+  recepcion?: { chasis: string; motor: string; anio: number | null; kmLlegada: number | null } | null;
   registro: { estado: string; version: number } | null;
   inspeccion: { numero: number; cabecera: any; items: Record<string, ResItem> } | null;
   evaluacion: { respondidos: number; total: number; ncPorClase: Record<string, number>; veredicto: string; estado: string } | null;
@@ -161,9 +163,12 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
   const items = v.plantilla?.items ?? [];
   const base = () => {
     const i = actual?.inspeccion;
+    // D05-21: sin dato en la HCP, se propone lo de la recepción del vehículo.
+    const r = actual?.recepcion;
+    const o = (hcp: unknown, rec: unknown): string => (hcp != null && String(hcp) !== "" ? String(hcp) : rec != null ? String(rec) : "");
     return {
       numero: i?.numero ? String(i.numero) : String((v.vehiculos.indexOf(actual) ?? 0) + 1),
-      cab: { inspectores: (i?.cabecera?.inspectores ?? []).join(", "), chasis: i?.cabecera?.chasis ?? "", motor: i?.cabecera?.motor ?? "", anio: i?.cabecera?.anio ?? "", lugar: i?.cabecera?.lugar ?? "", kmSalida: i?.cabecera?.kmSalida ?? "", kmLlegada: i?.cabecera?.kmLlegada ?? "", fechaInicio: i?.cabecera?.fechaInicio ?? hoyISO(), fechaTermino: i?.cabecera?.fechaTermino ?? "" },
+      cab: { inspectores: (i?.cabecera?.inspectores ?? []).join(", "), chasis: o(i?.cabecera?.chasis, r?.chasis), motor: o(i?.cabecera?.motor, r?.motor), anio: o(i?.cabecera?.anio, r?.anio), lugar: i?.cabecera?.lugar ?? "", kmSalida: i?.cabecera?.kmSalida ?? "", kmLlegada: o(i?.cabecera?.kmLlegada, r?.kmLlegada), fechaInicio: i?.cabecera?.fechaInicio ?? hoyISO(), fechaTermino: i?.cabecera?.fechaTermino ?? "" },
       res: (i?.items ?? {}) as Record<string, ResItem & { valorTxt?: string }>,
     };
   };

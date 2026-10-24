@@ -17,7 +17,7 @@ import {
   cantidadEnPalabras, erroresNuevoDisparo, evaluarLote, evaluarPanel, faltantesDocumentoLrb, leerAmenazas, leerVelocidadManda, seriesPorTalla, veredictoParaMuestra,
   type Disparo, type RegistroDisparos, type UnidadMuestreada,
 } from "./lrb";
-import { evaluarLoteSvm, evaluarVehiculo, leerPlantilla, novedades, veredictoMetodo, type InspeccionVehiculo } from "./hcp";
+import { cabeceraDesdeRecepcion, evaluarLoteSvm, evaluarVehiculo, leerPlantilla, novedades, veredictoMetodo, type InspeccionVehiculo } from "./hcp";
 import { AqlError, esNivel, evaluarInspeccion, letraCodigo, N_POR_LETRA, normalizarAql, type FilaInspeccionAql, type Nivel } from "./aql";
 import { actaNovedades, tablaAql, tablaDisparos, tablaExigencia, tablaReemplazos } from "./bloques-formularios";
 import { DEF_VARIANTE, type Variante } from "./variantes";
@@ -437,12 +437,22 @@ export class FormulariosService implements OnModuleInit {
     const codigo = lote?.datos?.plantilla ?? null;
     const plantilla = plantillas.find((p) => p.codigo === codigo) ?? null;
     const items = plantilla?.items ?? [];
+    // D05-21: lo registrado en la recepción de cada vehículo (chasis, motor, año, km) se propone en su cabecera.
+    const recep = new Map(
+      (
+        await this.d.prisma.$queryRawUnsafe<{ id: string; datos: Record<string, unknown> | null }[]>(
+          `SELECT id, datos_recepcion AS datos FROM muestra WHERE ot_id = $1::uuid AND deleted_at IS NULL`,
+          otId,
+        )
+      ).map((x: { id: string; datos: Record<string, unknown> | null }) => [x.id, cabeceraDesdeRecepcion(x.datos)]),
+    );
     const vehiculos = muestras.map((m) => {
       const r = regs.find((x) => x.muestraId === m.id) ?? null;
       const insp: InspeccionVehiculo | null = r ? { numero: r.datos?.numero ?? 0, cabecera: r.datos?.cabecera ?? { inspectores: [], chasis: "", motor: "" }, items: r.datos?.items ?? {} } : null;
       const ev = insp ? evaluarVehiculo(items, insp) : null;
       return {
         muestra: m,
+        recepcion: recep.get(m.id) ?? null,
         registro: r ? { id: r.id, estado: r.estado, version: r.version, actualizadoPorNombre: r.actualizadoPorNombre, updatedAt: r.updatedAt } : null,
         inspeccion: insp,
         evaluacion: ev ? { ...ev, items: undefined } : null,
