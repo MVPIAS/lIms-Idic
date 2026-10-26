@@ -336,7 +336,7 @@ export default function RespuestaLaboratorio({
           <button type="button" className="btn outline sm" onClick={() => setEtapas([...etapas, { actividad: "", inicio: "", termino: "", recursos: "" }])}>＋ Agregar etapa</button>
 
           <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>
-            Formulario de costeo <span className="tag">FORM05</span>{" "}
+            Formulario de costeo <span className="tag">FORM05</span> <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>montos en CLP (los otros gastos en US$ se convierten con el dólar indicado)</span>{" "}
             {noEstandar ? <span className="req" style={{ fontSize: 12 }}>obligatorio · {esComision ? "costeo de la comisión" : "servicio no estandarizado"}</span> : <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>opcional · servicio estandarizado</span>}
           </h3>
           {SECCIONES.map((s) => (

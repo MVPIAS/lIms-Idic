@@ -199,7 +199,7 @@ function TarjetaSolicitud({ sol, c, puedeRetirar, onResponder, onVb, onRetirar }
           )}
           {r && (
             <div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>Formulario de costeo (FORM05) · interno, no se imprime</div>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>Formulario de costeo (FORM05) · montos en CLP · interno, no se imprime</div>
               <table className="data">
                 <tbody>
                   {Object.entries(SECCION).map(([k, l]) => (r.secciones?.[k] ? <tr key={k}><td>{l}</td><td className="num">{money(r.secciones[k])}</td></tr> : null))}

@@ -485,7 +485,8 @@ export class CascadaService {
       orderBy: { orden: "asc" },
     });
     const ensayoIds = [...new Set(rows.map((r) => r.ensayo?.id).filter((x): x is string => !!x))];
-    const lista = await itemsListaVigente(this.prisma, tenantId, ensayoIds, isoFecha(soloFecha(hoyEnChile())));
+    // Frente f6: el total estimado de la OT va en CLP: solo listas en CLP.
+    const lista = await itemsListaVigente(this.prisma, tenantId, ensayoIds, isoFecha(soloFecha(hoyEnChile())), { soloMoneda: "CLP" });
     return rows.map((r) => ({
       metodoId: r.metodo?.id ?? null,
       metodoCodigo: r.metodo?.codigo ?? null,

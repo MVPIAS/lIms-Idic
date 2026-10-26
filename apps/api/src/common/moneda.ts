@@ -35,3 +35,20 @@ export function esMonedaOperacion(m: unknown): m is MonedaOperacion {
 export function esMonedaHistorica(m: unknown): boolean {
   return m != null && String(m).trim() !== "" && !esMonedaOperacion(m);
 }
+
+/** Moneda guardada (vacía = CLP), en mayúsculas. */
+export function monedaDe(m: unknown): string {
+  const s = m == null ? "" : String(m).trim().toUpperCase();
+  return s || "CLP";
+}
+
+/**
+ * Redondeo de importes según la moneda (frente f6): pesos chilenos sin
+ * decimales; dólares (y cualquier otra) a 2 decimales. Es la regla de la
+ * cotización, sus totales e IVA, la factura y el PDF.
+ */
+export function redondearMoneda(v: number, moneda: unknown): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return 0;
+  return monedaDe(moneda) === "CLP" ? Math.round(n) : Math.round(n * 100) / 100;
+}

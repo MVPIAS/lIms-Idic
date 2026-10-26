@@ -193,7 +193,8 @@ export class FacturaService extends BaseCrudService {
     );
     const [o] = await tx.$queryRawUnsafe(
       `SELECT to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha,
-              COALESCE(NULLIF(o.costo_estimado, 0), NULLIF(e.valor_inicial, 0))::float8 AS estimado,
+              -- Frente f6: el borrador va en CLP; el valor inicial del encargo solo si está en CLP.
+              COALESCE(NULLIF(o.costo_estimado, 0), NULLIF(CASE WHEN COALESCE(upper(e.moneda), 'CLP') = 'CLP' THEN e.valor_inicial END, 0))::float8 AS estimado,
               cl.tipo AS "tipoCliente", ps.valor AS "reglaParam"
          FROM orden_trabajo o
          LEFT JOIN ot_encargo e ON e.ot_id = o.id
@@ -202,7 +203,8 @@ export class FacturaService extends BaseCrudService {
         WHERE o.id = $1::uuid`,
       ot.id,
     );
-    const lista = await itemsListaVigente(tx, ot.tenantId, ensayos.map((e) => e.id), o?.fecha ?? new Date().toISOString().slice(0, 10));
+    // Frente f6: el borrador sin cotización va en CLP: solo listas en CLP (una lista en USD no se toma como pesos).
+    const lista = await itemsListaVigente(tx, ot.tenantId, ensayos.map((e) => e.id), o?.fecha ?? new Date().toISOString().slice(0, 10), { soloMoneda: "CLP" });
     const cfg = ensayos.length ? await leerConfigCircuito(tx, ot.tenantId) : null;
     const regla = reglaDeTipoCliente(o?.tipoCliente, o?.reglaParam);
     return lineasDesdeOt(

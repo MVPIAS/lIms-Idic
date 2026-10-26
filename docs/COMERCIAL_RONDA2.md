@@ -278,3 +278,48 @@ físico: `DELETE` responde 409).
   mano el valor de la hora hombre y de la hora máquina, y la ficha de costos usa
   `cat_ensayo.precio` y la lista de precios vigente. Proponer el valor de estas
   tablas en el FORM05 queda pendiente de que el IDIC confirme las tarifas.
+
+## 9. El precio conserva la moneda de su lista (frente f6)
+
+Antes, la cotización tomaba el neto de la lista vigente como si siempre fuera en
+pesos: un ítem de una lista en USD entraba como CLP en una cotización en pesos, y
+en una cotización en USD se dividía otra vez por el dólar del día. Regla nueva
+(`apps/api/src/lista-precio/precio-lista.ts`, `precioParaCotizacion`):
+
+| Precio (lista o ficha) | Cotización | Resultado |
+|---|---|---|
+| CLP | CLP | tal cual, sin decimales |
+| USD | USD | tal cual, 2 decimales (no se toca el dólar del día) |
+| CLP (lista o ficha de costos) | USD | se convierte con el dólar del día que la cotización exige y congela (como antes) |
+| USD | CLP | **bloqueo**: «El precio de … está en USD … Emita la cotización en USD» |
+
+- Si un ensayo está en listas vigentes de las dos monedas, manda la de la moneda de
+  la cotización (y, entre ellas, la de `vigente_desde` más reciente).
+- No hay tipo de cambio de la operación para pasar dólares a pesos y **no se
+  inventa**. Si el IDIC quiere cotizar en CLP ensayos con precio en USD, decide qué
+  dólar usar (observado del día, el de la factura…); hasta entonces, bloqueo.
+- Al editar una cotización y cambiar su moneda, las líneas ya cotizadas no
+  conservan su precio (estaba en la otra moneda): se vuelven a valorizar.
+- Redondeo (`redondearMoneda`, `common/moneda.ts`): CLP sin decimales y USD a 2,
+  en las líneas, el subtotal, los gastos administrativos, el IVA y el total. El PDF
+  y la pantalla usan el mismo formato (`$ 123.387` · `US$ 150,00`).
+- La factura hereda la moneda de la cotización aceptada (y la OT, su moneda y su
+  valor). El borrador de una OT **sin** cotización va en CLP y solo toma listas en
+  CLP; lo mismo el total estimado de «Registrar OT».
+- El Formulario de costeo (FORM05) es en CLP (los otros gastos en US$ se convierten
+  con el dólar que indica el laboratorio); la pantalla lo dice.
+- Pantalla: `GET /cotizaciones/precios-ensayo?…&moneda=CLP|USD` devuelve cada
+  precio con su `moneda` y, si no se puede cotizar en esa moneda, `bloqueo`.
+- Demostración: `seed_f6_demo.sql` crea `DEMO-USD-2026` (EN1074 US$ 150,00 y
+  EN1075 US$ 250,50, también presentes en la lista oficial en CLP).
+
+## 10. Listas de precio: permiso de lectura propio (frente f6)
+
+Las listas de precio (`/listas-precio`, `/lista-precio-items`, `GET
+/listas-precio/:id/detalle`) se leen con `lista_precio.ver` y no con
+`cotizacion.ver`. Calidad las mantiene con `catalogo.gestionar` (alcance global) y
+ahora también las ve, sin acceso a las cotizaciones de los clientes. Tienen
+`lista_precio.ver` los roles que ya veían las listas (Comercial, Planificación,
+Muestreo, Finanzas, Cobranza, jefaturas de laboratorio, sección y departamento;
+Dirección, Subdirección, Administración y Lector por la cascada) más Calidad. El
+rol CLIENTE ya no las ve: la lista trae la estructura de costos interna.

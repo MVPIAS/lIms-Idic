@@ -28,10 +28,13 @@ export type LineaForm = {
   codigo?: string;
   descripcion: string;
   cantidad: number;
-  /** Precio en CLP (lista vigente o ficha) para convertir si la moneda es USD. */
-  precioClp?: number;
-  /** Línea ya guardada: conserva su precio aunque la lista o la ficha cambien. */
-  guardada?: boolean;
+  /** Precio de la lista vigente o de la ficha, en SU moneda (frente f6: la de la lista; la ficha está en CLP). */
+  precioBase?: number;
+  monedaPrecio?: Moneda;
+  /** Frente f6: el precio está en USD y la cotización en CLP (no se mezclan monedas). */
+  bloqueo?: string | null;
+  /** Línea ya guardada: conserva su precio (en la moneda en que se cotizó) aunque la lista o la ficha cambien. */
+  guardada?: { precio: number; moneda: Moneda };
   /** De dónde salió el precio de una línea nueva. */
   origen?: { tipo: "lista" | "ficha"; texto: string };
   /** Línea heredada (HH/HM/…): se conserva con su precio, no se puede editar. */
@@ -62,7 +65,10 @@ const cuerpoInst = (i?: Instrumento) =>
       }
     : {};
 
-type PrecioEnsayo = { precio: number | null; origen: "lista" | "ficha" | null; columna?: string | null; lista: { codigo: string; nombre: string; itemCodigo: string } | null };
+type Moneda = "CLP" | "USD";
+type PrecioEnsayo = { precio: number | null; moneda?: Moneda | null; bloqueo?: string | null; origen: "lista" | "ficha" | null; columna?: string | null; lista: { codigo: string; nombre: string; itemCodigo: string } | null };
+/** Frente f6: CLP sin decimales, USD a 2 decimales (misma regla que la API). */
+const redondear = (v: number, m: Moneda) => (m === "CLP" ? Math.round(v) : Math.round(v * 100) / 100);
 const origenDe = (p: PrecioEnsayo): { tipo: "lista" | "ficha"; texto: string } =>
   p.origen === "lista" && p.lista
     ? { tipo: "lista", texto: `${p.lista.nombre} · ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : ""}` }
@@ -182,9 +188,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             codigo: l.ensayoCodigo ?? undefined,
             descripcion: l.descripcion ?? "",
             cantidad: l.cantidad ?? 1,
-            // El precio guardado ya está en la moneda de la cotización.
-            precioClp: inicial?.moneda === "USD" ? Number(l.precioUnitario) * (dolarInicial ?? 1) : Number(l.precioUnitario),
-            guardada: true,
+            // El precio guardado está en la moneda de la cotización: se conserva mientras no cambie la moneda.
+            guardada: { precio: Number(l.precioUnitario), moneda: (inicial?.moneda === "USD" ? "USD" : "CLP") as Moneda },
             inst: instDe(l),
           }
         : TIPOS_GASTO.some((g) => g.v === l.tipo)
@@ -261,50 +266,69 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   // Misma regla que aplica la API al guardar (GET /cotizaciones/precios-ensayo).
   const [precios, setPrecios] = useState<Record<string, PrecioEnsayo>>({});
   const [reglaPrecio, setReglaPrecio] = useState("");
-  useEffect(() => { setPrecios({}); setReglaPrecio(""); }, [clienteId]);
+  // Frente f6: el precio depende también de la moneda (si el ensayo está en listas de varias monedas, manda la de la cotización).
+  useEffect(() => { setPrecios({}); setReglaPrecio(""); }, [clienteId, moneda]);
+  // Una línea guardada conserva su precio solo en la moneda en que se cotizó; si cambia la moneda, se vuelve a valorizar.
+  const conserva = (l: LineaForm) => !!l.guardada && l.guardada.moneda === moneda;
   const idsPrecio = useMemo(
-    () => [...new Set([...ensayos.map((e) => e.id), ...lineas.filter((l) => l.catEnsayoId && !l.guardada).map((l) => l.catEnsayoId!)])].sort().join(","),
-    [ensayos, lineas],
+    () => [...new Set([...ensayos.map((e) => e.id), ...lineas.filter((l) => l.catEnsayoId && !conserva(l)).map((l) => l.catEnsayoId!)])].sort().join(","),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ensayos, lineas, moneda],
   );
   useEffect(() => {
     if (!clienteId || !idsPrecio) return;
-    const qs = new URLSearchParams({ clienteId, ids: idsPrecio, fecha: fechaEmision });
+    const qs = new URLSearchParams({ clienteId, ids: idsPrecio, fecha: fechaEmision, moneda });
     pedir<any>("GET", `/cotizaciones/precios-ensayo?${qs}`)
-      .then((r) => { setPrecios((p) => ({ ...p, ...(r?.precios ?? {}) })); setReglaPrecio(r?.regla ?? ""); })
+      .then((r) => { if ((r?.moneda ?? "CLP") !== moneda) return; setPrecios((p) => ({ ...p, ...(r?.precios ?? {}) })); setReglaPrecio(r?.regla ?? ""); })
       .catch(() => undefined);
-  }, [clienteId, idsPrecio, tipoCliente, fechaEmision]);
+  }, [clienteId, idsPrecio, tipoCliente, fechaEmision, moneda]);
   useEffect(() => {
     setLineas((ls) => {
       let cambio = false;
       const n = ls.map((l) => {
-        if (!l.catEnsayoId || l.guardada) return l;
+        if (!l.catEnsayoId || conserva(l)) return l;
         const p = precios[l.catEnsayoId];
         if (!p || p.precio == null) return l;
         const origen = origenDe(p);
-        if (l.precioClp === p.precio && l.origen?.texto === origen.texto) return l;
+        const mp: Moneda = p.moneda === "USD" ? "USD" : "CLP";
+        if (l.precioBase === p.precio && l.monedaPrecio === mp && (l.bloqueo ?? null) === (p.bloqueo ?? null) && l.origen?.texto === origen.texto) return l;
         cambio = true;
-        return { ...l, precioClp: p.precio, origen };
+        return { ...l, precioBase: p.precio, monedaPrecio: mp, bloqueo: p.bloqueo ?? null, origen };
       });
       return cambio ? n : ls;
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [precios]);
   const precioDe = (e: Ensayo) => {
     const p = precios[e.id];
-    return p && p.precio != null ? { precio: p.precio, origen: origenDe(p) } : { precio: Number(e.precio) || 0, origen: { tipo: "ficha" as const, texto: "Ficha de costos del catálogo" } };
+    return p && p.precio != null
+      ? { precio: p.precio, moneda: (p.moneda === "USD" ? "USD" : "CLP") as Moneda, bloqueo: p.bloqueo ?? null, origen: origenDe(p) }
+      : { precio: Number(e.precio) || 0, moneda: "CLP" as Moneda, bloqueo: null, origen: { tipo: "ficha" as const, texto: "Ficha de costos del catálogo" } };
   };
 
   // --- Derivados -----------------------------------------------------------------
   const dolarNum = Number(dolar) || 0;
-  const precioEnMoneda = (l: LineaForm) =>
-    l.heredada
-      ? l.heredada.precioUnitario
-      : l.gasto
-        ? l.gasto.precio
-      : moneda === "USD"
-        ? dolarNum > 0 ? Math.round(((l.precioClp ?? 0) / dolarNum) * 100) / 100 : 0
-        : l.precioClp ?? 0;
+  /**
+   * Frente f6 · el precio conserva la moneda de su lista: misma moneda → tal cual;
+   * CLP → USD con el dólar del día; USD → CLP no se convierte (bloqueo: no hay tipo de cambio de la operación).
+   */
+  const bloqueoDe = (l: LineaForm): string | null =>
+    !l.heredada && !l.gasto && !conserva(l) && l.monedaPrecio === "USD" && moneda === "CLP"
+      ? l.bloqueo || `El precio de ${l.codigo ?? "este ensayo"} está en USD en la lista de precios: emita la cotización en USD (no se mezclan monedas).`
+      : null;
+  const precioEnMoneda = (l: LineaForm): number => {
+    if (l.heredada) return l.heredada.precioUnitario;
+    if (l.gasto) return l.gasto.precio;
+    if (conserva(l)) return l.guardada!.precio;
+    const base = l.precioBase ?? 0;
+    const mp: Moneda = l.monedaPrecio ?? "CLP";
+    if (mp === moneda) return redondear(base, moneda);
+    if (mp === "CLP" && moneda === "USD") return dolarNum > 0 ? redondear(base / dolarNum, "USD") : 0;
+    return 0;
+  };
+  const tienePrecio = (l: LineaForm) => conserva(l) || Number(l.precioBase) > 0;
   const total = useMemo(
-    () => lineas.reduce((s, l) => s + precioEnMoneda(l) * (Number(l.cantidad) || 0), 0),
+    () => redondear(lineas.reduce((s, l) => s + redondear(precioEnMoneda(l) * (Number(l.cantidad) || 0), moneda), 0), moneda),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [lineas, moneda, dolarNum],
   );
@@ -351,7 +375,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     const p = precioDe(e);
     setLineas((ls) => [
       ...ls,
-      { catEnsayoId: e.id, codigo: e.codigo, descripcion: `${e.codigo} · ${e.nombre}`, cantidad: 1, precioClp: p.precio, origen: p.origen },
+      { catEnsayoId: e.id, codigo: e.codigo, descripcion: `${e.codigo} · ${e.nombre}`, cantidad: 1, precioBase: p.precio, monedaPrecio: p.moneda, bloqueo: p.bloqueo, origen: p.origen },
     ]);
   }
   function agregarGasto() {
@@ -371,8 +395,10 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     setError("");
     if (!cliente?.id) return setError("Seleccione el cliente.");
     if (!lineas.length) return setError("Agregue al menos un ensayo del catálogo.");
-    if (lineas.some((l) => !l.heredada && !l.gasto && !(Number(l.precioClp) > 0)))
+    if (lineas.some((l) => !l.heredada && !l.gasto && !tienePrecio(l)))
       return setError("Hay ensayos sin precio: no están en la lista de precios vigente ni tienen valor en su ficha de costos.");
+    const mezcla = lineas.map(bloqueoDe).find(Boolean);
+    if (mezcla) return setError(mezcla);
     if (moneda === "USD" && !(dolarNum > 0)) return setError("Indique el valor del dólar del día.");
     if (cambiaDolar && !dolarMotivo.trim()) return setError("El dólar quedó congelado al emitir: indique el motivo del cambio.");
     if (condiciones.length > MAX_COND) return setError(`Condiciones adicionales: máximo ${MAX_COND} caracteres.`);
@@ -601,7 +627,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             <select value="" onChange={(e) => { const x = ensayos.find((en) => en.id === e.target.value); if (x) agregarEnsayo(x); }}>
               <option value="">— selecciona un ensayo para agregarlo —</option>
               {ensayos.map((en) => (
-                <option key={en.id} value={en.id}>{en.codigo} · {en.nombre} · {precioDe(en).precio > 0 ? `${money(precioDe(en).precio)}${precioDe(en).origen.tipo === "lista" ? " (lista)" : ""}` : "sin precio"}</option>
+                <option key={en.id} value={en.id}>{en.codigo} · {en.nombre} · {precioDe(en).precio > 0 ? `${money(precioDe(en).precio, precioDe(en).moneda)}${precioDe(en).origen.tipo === "lista" ? " (lista)" : ""}` : "sin precio"}</option>
               ))}
             </select>
             {msgEnsayo && <small style={{ color: "var(--red)" }}>Catálogo no disponible: {msgEnsayo}</small>}
@@ -654,16 +680,21 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
                   {l.descripcion}
                   {l.heredada && <small style={{ display: "block", color: "var(--muted)" }}>Línea heredada (se conserva tal cual)</small>}
                   {l.gasto && <small style={{ display: "block", color: "var(--muted)" }}>Gasto · valor manual</small>}
-                  {!l.heredada && !l.gasto && !(Number(l.precioClp) > 0) && <small style={{ display: "block", color: "var(--red)" }}>Sin precio en la lista vigente ni en la ficha de costos</small>}
-                  {!l.heredada && !l.gasto && Number(l.precioClp) > 0 && (
-                    <small style={{ display: "block", color: "var(--muted)" }}>{l.guardada ? "Precio cotizado (se conserva)" : l.origen?.texto ?? "Ficha de costos del catálogo"}</small>
+                  {!l.heredada && !l.gasto && !tienePrecio(l) && <small style={{ display: "block", color: "var(--red)" }}>Sin precio en la lista vigente ni en la ficha de costos</small>}
+                  {!l.heredada && !l.gasto && tienePrecio(l) && (
+                    <small style={{ display: "block", color: "var(--muted)" }}>
+                      {conserva(l)
+                        ? "Precio cotizado (se conserva)"
+                        : `${l.origen?.texto ?? "Ficha de costos del catálogo"} · ${money(l.precioBase, l.monedaPrecio ?? "CLP")}${(l.monedaPrecio ?? "CLP") === "CLP" && moneda === "USD" ? " convertido con el dólar del día" : ""}`}
+                    </small>
                   )}
+                  {bloqueoDe(l) && <small role="alert" style={{ display: "block", color: "var(--red)", fontWeight: 600 }}>{bloqueoDe(l)}</small>}
                 </td>
                 <td className="num">
                   <input type="number" min={1} step={1} value={l.cantidad} onChange={(e) => setCant(i, Math.max(1, Math.round(Number(e.target.value) || 1)))} style={{ width: 64, textAlign: "right" }} />
                 </td>
-                <td className="num">{money(precioEnMoneda(l), moneda)}</td>
-                <td className="num">{money(precioEnMoneda(l) * (Number(l.cantidad) || 0), moneda)}</td>
+                <td className="num">{bloqueoDe(l) ? "—" : money(precioEnMoneda(l), moneda)}</td>
+                <td className="num">{bloqueoDe(l) ? "—" : money(redondear(precioEnMoneda(l) * (Number(l.cantidad) || 0), moneda), moneda)}</td>
                 <td className="num"><button className="btn outline sm" onClick={() => quitar(i)} aria-label="Quitar">✕</button></td>
               </tr>,
               // B-045: en Metrología cada servicio lleva el instrumento que se calibrará; el ítem de la OT lo hereda.
@@ -704,7 +735,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           </tbody>
           {lineas.length > 0 && (
             <tfoot>
-              <tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total (IVA exento)</td><td className="num" style={{ fontWeight: 800 }}>{money(total, moneda)}</td><td /></tr>
+              <tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total (IVA exento)</td><td className="num" style={{ fontWeight: 800 }}>{lineas.some((l) => bloqueoDe(l)) ? "—" : money(total, moneda)}</td><td /></tr>
             </tfoot>
           )}
         </table>
