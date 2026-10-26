@@ -21,7 +21,10 @@
 import { generoDocumentoTrabajo } from "../formularios/trabajo";
 import { faltantesParaCerrar } from "./plazos";
 import { condicionFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
-import { calibracionVigente, documentosDeMetrologia, esEntregableNoCalibrable, faltantesInstrumentos, type DocumentoNoCalibrable } from "../metrologia/metrologia-ot.reglas";
+import {
+  ESTADOS_EXTERNO_EN_CURSO, calibracionVigente, documentosDeMetrologia, esEntregableNoCalibrable, esNoCalibrable, faltantesMetrologia,
+  type DocumentoNoCalibrable,
+} from "../metrologia/metrologia-ot.reglas";
 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
 export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas" | "bpch";
@@ -128,6 +131,8 @@ export interface InstrumentoAvance {
   estado: string;
   metrologo?: string | null;
   metrologoId?: string | null;
+  /** false = recibido como no calibrable (sigue siéndolo tras devolverlo). */
+  calibrable?: boolean | null;
 }
 
 export interface HechosOt {
@@ -165,6 +170,8 @@ export interface HechosOt {
   /** Informe técnico y certificado externo de los no calibrables (cuentan como documento para el cierre). */
   documentosNoCalibrables?: DocumentoNoCalibrable[];
   exigeDevolucion?: boolean;
+  /** metrologia_ficha.no_apto_exige_documento (D04-31: lo exigen el cierre técnico y el final). */
+  noAptoExigeDocumento?: boolean;
   internacion?: {
     id: string;
     numero: string;
@@ -409,7 +416,10 @@ function etapaCierre(h: HechosOt): { etapa: Etapa; paso: Omit<SiguientePaso, "et
           resultadosNoAprobados: h.resultados.total - h.resultados.aprobados,
           coberturaPendiente: h.coberturaPendiente,
         }),
-        ...faltantesInstrumentos(h.instrumentos ?? [], calsOt(h), h.exigeDevolucion ?? true),
+        // D04-31: las mismas reglas de Metrología que el cierre técnico y el cierre final.
+        ...faltantesMetrologia(h.instrumentos ?? [], calsOt(h), h.documentosNoCalibrables ?? [], {
+          exigeDevolucion: h.exigeDevolucion ?? true, noAptoExigeDocumento: h.noAptoExigeDocumento ?? false,
+        }),
       ];
   return {
     etapa: etapa("cierre", "Cierre de la OT", cerrada ? "hecho" : "pendiente", cerrada ? "Cerrada" : faltan.length ? null : "Lista para cerrar"),
@@ -706,6 +716,13 @@ function rutaMetrologia(h: HechosOt): Ruta {
   ];
   const sinEntregar = emitidas.filter((c) => !c.entregadoAt);
   const porDevolver = exigeDevolucion ? enCustodia : [];
+  // D04-31: el servicio externo a medio camino y (si el parámetro lo exige) el no calibrable sin
+  // documento también dejan pendiente la entrega, como en el cierre técnico.
+  const docsNoCal = h.documentosNoCalibrables ?? [];
+  const externosEnCurso = docsNoCal.filter((d) => d.tipo === "certificado_externo" && (ESTADOS_EXTERNO_EN_CURSO as readonly string[]).includes(d.estado));
+  const resueltos = new Set(noCal.map((d) => d.instrumentoId));
+  const noCalSinDoc = h.noAptoExigeDocumento ? items.filter((i) => esNoCalibrable(i) && !resueltos.has(i.id)) : [];
+  const docsPendientes = externosEnCurso.length + noCalSinDoc.length;
   const instr = (texto: string, rol: string, permisos: string[], personas: string[] = []): Paso => ({
     texto, leToca: { rol, unidad: u, personas }, accion: { texto: "Ir a Instrumentos", pestana: "instrumentos", permisos },
   });
@@ -744,7 +761,7 @@ function rutaMetrologia(h: HechosOt): Ruta {
     etapa(
       "entrega",
       "Entrega del certificado y devolución",
-      cerrada || (todasEmitidas && !sinEntregar.length && !porDevolver.length) ? "hecho" : emitidas.length > sinEntregar.length || sinCalibracion ? "en_curso" : "pendiente",
+      cerrada || (todasEmitidas && !sinEntregar.length && !porDevolver.length && !docsPendientes) ? "hecho" : emitidas.length > sinEntregar.length || sinCalibracion ? "en_curso" : "pendiente",
       emitidas.length
         ? `${emitidas.length - sinEntregar.length} de ${emitidas.length} entregados${exigeDevolucion ? ` · ${items.filter((i) => i.estado === "devuelto").length} de ${items.length} devueltos` : ""}`
         : sinCalibracion && exigeDevolucion
@@ -798,6 +815,26 @@ function rutaMetrologia(h: HechosOt): Ruta {
         case "entrega":
           if (sinEntregar.length)
             return instr(`Registrar la entrega del ${sinEntregar.map((d) => d.texto).join(", ")}`, "Metrólogo o Comercial", ["certificado.entregar", "metrologia.crear"]);
+          if (externosEnCurso.length) {
+            const del = (d: DocumentoNoCalibrable) => {
+              const i = items.find((x) => x.id === d.instrumentoId);
+              return i ? ` del ${item(i)}` : "";
+            };
+            const que = (d: DocumentoNoCalibrable) =>
+              d.estado === "solicitado"
+                ? `aprobar o rechazar el servicio externo${del(d)}`
+                : d.estado === "aprobado"
+                  ? `registrar el envío al proveedor externo${del(d)}`
+                  : `validar el certificado externo${del(d)}`;
+            const solicitado = externosEnCurso.some((d) => d.estado === "solicitado");
+            return instr(
+              `Completar el servicio externo: ${externosEnCurso.map(que).join(", ")}`,
+              solicitado ? "Jefe de Departamento del laboratorio" : "Jefe de Laboratorio de Metrología",
+              solicitado ? ["ot.ver"] : ["ot.asignar"],
+            );
+          }
+          if (noCalSinDoc.length)
+            return instr(`Emitir el informe técnico o validar el servicio externo de ${noCalSinDoc.map(item).join(", ")}`, "Metrólogo o Jefe de Laboratorio de Metrología", ["metrologia.crear", "ot.asignar"]);
           return instr(`Registrar la devolución de ${porDevolver.map(item).join(", ")} (acta)`, "Metrólogo o Comercial", ["metrologia.crear", "certificado.entregar"]);
         case "cierre":
           return cierre.paso;

@@ -312,7 +312,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
       no_apto_exige_documento: {
         tipo: "sino",
-        nombre: "El cierre técnico exige el informe técnico emitido o el servicio externo validado del ítem no calibrable",
+        nombre: "El cierre de la OT (técnico y final) exige el informe técnico emitido o el servicio externo validado del ítem no calibrable",
         opciones: SI_NO,
         porDefecto: "no",
       },

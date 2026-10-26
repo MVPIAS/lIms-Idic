@@ -15,12 +15,14 @@
  *   - Fecha de recepción ≥ fecha de la OT (R15 L2) y nunca futura.
  *   - El certificado se entrega una vez, ya emitido, con fecha ≥ emisión.
  *   - El instrumento calibrado se devuelve con el certificado ya emitido.
- *   - Cierre: todos los ítems resueltos (calibración emitida y entregada, o no apto)
- *     y, si el parámetro lo exige, todos devueltos.
+ *   - Cierre (técnico y final, D04-31): todos los ítems resueltos (calibración emitida y
+ *     entregada, o no apto), ningún servicio externo a medio camino y, si los parámetros
+ *     lo exigen, todos devueltos y cada no calibrable con su documento.
  */
 
 /* ------------------------------------------------------------ tipos --- */
 import { anioChile } from "../common/fecha-chile";
+import { faltantesParaCerrar } from "../ot/plazos";
 
 export type EstadoInstrumento = "por_recibir" | "recibido" | "no_apto" | "devuelto" | "anulado";
 export const ESTADOS_FISICOS = ["bueno", "con_observaciones", "danado"] as const;
@@ -302,25 +304,74 @@ export function faltantesInstrumentos(items: InstrumentoOt[], cals: CalibracionO
 export const esNoCalibrable = (i: Pick<InstrumentoOt, "estado" | "calibrable">): boolean =>
   i.estado === "no_apto" || (i.estado === "devuelto" && i.calibrable === false);
 
-/** Cierre técnico (Jefe de Laboratorio): todos los ítems con su documento emitido o no aptos. */
-export function motivoCierreTecnico(
-  otEstado: string, items: InstrumentoOt[], cals: CalibracionOt[],
-  /** Parámetro metrologia_ficha.no_apto_exige_documento: el no calibrable necesita su informe técnico emitido o su servicio externo validado. */
-  noApto?: { exige: boolean; resueltos: Set<string> },
-): string | null {
-  if (["finalizada", "informada", "cerrada", "anulada"].includes(otEstado)) return `La OT ya está ${otEstado}.`;
+/** Servicio externo a medio camino: ni validado, ni rechazado ni anulado. */
+export const ESTADOS_EXTERNO_EN_CURSO = ["solicitado", "aprobado", "enviado"] as const;
+const TEXTO_EXTERNO_EN_CURSO: Record<string, string> = {
+  solicitado: "solicitado: falta que el Departamento lo apruebe o rechace",
+  aprobado: "aprobado: falta registrar su envío y validar el certificado externo",
+  enviado: "enviado: falta validar el certificado externo",
+};
+
+/** Reglas configurables del cierre de una OT de Metrología (Parámetros del sistema). */
+export interface ReglasCierreMetrologia {
+  /** metrologia.cierre_exige_devolucion (por defecto sí). */
+  exigeDevolucion: boolean;
+  /** metrologia_ficha.no_apto_exige_documento (por defecto no). */
+  noAptoExigeDocumento?: boolean;
+}
+
+/**
+ * D04-31 · Lo que falta en los instrumentos de una OT de Metrología, además de la
+ * regla general de documentos. Lo usan IGUAL el cierre técnico, el cierre final, la
+ * pestaña «Instrumentos», el panel «Informe y cierre» y la Ruta de la OT:
+ *   - todos recibidos y los calibrables con su calibración (faltantesInstrumentos);
+ *   - devueltos, si el parámetro lo exige;
+ *   - ningún servicio externo a medio camino (solicitado, aprobado o enviado);
+ *   - con no_apto_exige_documento = sí, cada no calibrable con su informe técnico
+ *     emitido o su certificado externo validado.
+ */
+export function faltantesMetrologia(
+  items: InstrumentoOt[], cals: CalibracionOt[], docs: DocumentoNoCalibrable[], reglas: ReglasCierreMetrologia,
+): string[] {
+  const f = faltantesInstrumentos(items, cals, reglas.exigeDevolucion);
   const vivos = items.filter((x) => x.estado !== "anulado");
-  if (!vivos.length) return "La OT no tiene instrumentos registrados.";
-  const faltan = vivos.filter((i) => {
-    if (i.estado === "por_recibir") return true;
-    if (esNoCalibrable(i)) return !!noApto?.exige && !noApto.resueltos.has(i.id);
-    const v = calibracionVigente(cals, i.id);
-    return !v || v.estado !== "emitida";
-  });
-  const sinDoc = faltan.filter(esNoCalibrable), sinCert = faltan.filter((i) => !esNoCalibrable(i));
-  if (sinCert.length) return `Faltan certificados emitidos: ${sinCert.map((i) => `ítem ${i.numero}`).join(", ")}.`;
-  if (sinDoc.length) return `Falta el informe técnico emitido o el servicio externo validado del no calibrable: ${sinDoc.map((i) => `ítem ${i.numero}`).join(", ")}.`;
-  return null;
+  const de = (id: string | null) => vivos.find((i) => i.id === id);
+  for (const d of docs) {
+    const i = de(d.instrumentoId);
+    const del = i ? `del ${nombreItem(i)} ` : "";
+    if (d.tipo === "certificado_externo" && (ESTADOS_EXTERNO_EN_CURSO as readonly string[]).includes(d.estado))
+      f.push(`El servicio externo ${del}está ${TEXTO_EXTERNO_EN_CURSO[d.estado]}.`);
+  }
+  if (reglas.noAptoExigeDocumento) {
+    const resueltos = new Set(docs.filter(esEntregableNoCalibrable).map((d) => d.instrumentoId));
+    for (const i of vivos.filter((x) => esNoCalibrable(x) && !resueltos.has(x.id)))
+      f.push(`Falta el informe técnico emitido o el servicio externo validado del no calibrable ${nombreItem(i)}.`);
+  }
+  return f;
+}
+
+/** Estados desde los que ya no se cierra técnicamente. */
+export const ESTADOS_SIN_CIERRE_TECNICO = ["finalizada", "informada", "cerrada", "anulada"] as const;
+
+/**
+ * D04-31 · Cierre técnico (Jefe de Laboratorio, «Cerrar técnicamente → Comercial»): exige
+ * lo mismo que el cierre final en lo técnico, para que la OT no llegue a «finalizada» (ni
+ * a «Encuestas por registrar») con algo pendiente:
+ *   - cada documento de Metrología (certificado de calibración, informe técnico o
+ *     certificado externo validado) oficial y entregado (regla general faltantesParaCerrar);
+ *   - lo de faltantesMetrologia (recepción, calibración, devolución, servicio externo y
+ *     documento del no calibrable).
+ * Devuelve la lista de lo que falta (vacía = se puede cerrar técnicamente).
+ */
+export function faltantesCierreTecnico(
+  otEstado: string, items: InstrumentoOt[], cals: CalibracionOt[], docs: DocumentoNoCalibrable[], reglas: ReglasCierreMetrologia,
+): string[] {
+  if ((ESTADOS_SIN_CIERRE_TECNICO as readonly string[]).includes(otEstado)) return [`La OT ya está ${otEstado}.`];
+  if (!items.some((x) => x.estado !== "anulado")) return ["La OT no tiene instrumentos registrados."];
+  return [
+    ...faltantesParaCerrar({ estado: otEstado, documentos: documentosDeMetrologia(cals, docs), resultadosNoAprobados: 0 }),
+    ...faltantesMetrologia(items, cals, docs, reglas),
+  ];
 }
 
 /* ---------------------------------------------------- barra de la ficha --- */

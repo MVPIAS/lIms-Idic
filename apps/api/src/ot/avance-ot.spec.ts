@@ -388,6 +388,35 @@ describe("Ruta de la OT · Metrología (EP-04: calibración ligada a la OT)", ()
   it("un laboratorio de Metrología que usa la captura estándar sigue la ruta de laboratorio", () => {
     expect(tipoRuta(met({ resultados: res({ pendientes: 3 }) }))).toBe("interna");
   });
+  describe("D04-31 · la Ruta dice lo mismo que el cierre técnico", () => {
+    const doc = (p: Record<string, unknown> = {}) => ({ instrumentoId: "i2", tipo: "certificado_externo", numero: null, estado: "aprobado", entregadoAt: null, ...p });
+    const dos = [ins("devuelto", { calibrable: true }), ins("devuelto", { id: "i2", numero: 2, descripcion: "Torquímetro", calibrable: false })];
+    const m3950 = cal("emitida", { numeroCertificado: "M-3950", entregadoAt: "2026-10-26" });
+    it("servicio externo solo aprobado: la entrega sigue en curso y no se ofrece «Cerrar técnicamente» (caso OT-2026-0014)", () => {
+      const a = calcularAvance(met({ instrumentos: dos, calibraciones: [m3950], documentosNoCalibrables: [doc()] }));
+      expect(a.etapaActual).toBe("entrega");
+      expect(a.siguiente?.texto).toBe("Completar el servicio externo: registrar el envío al proveedor externo del ítem 2 (Torquímetro)");
+      expect(a.siguiente?.leToca?.rol).toBe("Jefe de Laboratorio de Metrología");
+      expect(a.etapas.find((e) => e.clave === "cierre")?.detalle).toBeNull();
+    });
+    it("servicio externo solicitado: le toca al Jefe de Departamento aprobarlo o rechazarlo", () => {
+      const a = calcularAvance(met({ instrumentos: dos, calibraciones: [m3950], documentosNoCalibrables: [doc({ estado: "solicitado" })] }));
+      expect(a.siguiente?.texto).toBe("Completar el servicio externo: aprobar o rechazar el servicio externo del ítem 2 (Torquímetro)");
+      expect(a.siguiente?.leToca?.rol).toBe("Jefe de Departamento del laboratorio");
+    });
+    it("externo validado y entregado: «Falta el cierre técnico»", () => {
+      const a = calcularAvance(met({ instrumentos: dos, calibraciones: [m3950], documentosNoCalibrables: [doc({ estado: "validado", numero: "EXT-1", entregadoAt: "2026-10-26" })] }));
+      expect(a.etapaActual).toBe("cierre");
+      expect(a.siguiente?.texto).toMatch(/^Cerrar técnicamente la OT/);
+    });
+    it("no_apto_exige_documento = sí: el no calibrable sin documento deja pendiente la entrega", () => {
+      const a = calcularAvance(met({ noAptoExigeDocumento: true, instrumentos: dos, calibraciones: [m3950] }));
+      expect(a.etapaActual).toBe("entrega");
+      expect(a.siguiente?.texto).toBe("Emitir el informe técnico o validar el servicio externo de ítem 2 (Torquímetro)");
+      // Con el parámetro en «no» (por defecto) la ruta llega al cierre técnico.
+      expect(calcularAvance(met({ instrumentos: dos, calibraciones: [m3950] })).siguiente?.texto).toMatch(/^Cerrar técnicamente la OT/);
+    });
+  });
 });
 
 describe("Ruta de la OT · BPCH Internación", () => {

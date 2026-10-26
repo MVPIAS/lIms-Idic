@@ -1,5 +1,5 @@
 import { motivoExterno, motivoInforme, noAptoResuelto, revisarPdf } from "./metrologia-documentos.reglas";
-import { motivoCierreTecnico } from "./metrologia-ot.reglas";
+import { faltantesCierreTecnico } from "./metrologia-ot.reglas";
 
 const noApto = { numero: 2, estado: "no_apto", otEstado: "en_analisis", calibrable: false };
 
@@ -62,14 +62,15 @@ describe("Servicio externo (EP-04 P2.4)", () => {
 
 describe("Cierre técnico con el parámetro «el no calibrable exige su documento»", () => {
   const items = [{ id: "a", numero: 1, descripcion: "x", estado: "recibido" }, { id: "b", numero: 2, descripcion: "y", estado: "no_apto" }];
-  const cals = [{ id: "c", instrumentoId: "a", codigo: "CAL-1", estado: "emitida" }];
+  const cals = [{ id: "c", instrumentoId: "a", codigo: "CAL-1", estado: "emitida", entregadoAt: "2026-10-26" }];
+  const informe = { instrumentoId: "b", tipo: "informe_tecnico", numero: "IT-0001", estado: "emitido", entregadoAt: "2026-10-26" };
   it("sin el parámetro (por defecto), el no apto no bloquea, como en R1", () => {
-    expect(motivoCierreTecnico("en_analisis", items, cals)).toBeNull();
-    expect(motivoCierreTecnico("en_analisis", items, cals, { exige: false, resueltos: new Set() })).toBeNull();
+    expect(faltantesCierreTecnico("en_analisis", items, cals, [], { exigeDevolucion: false })).toEqual([]);
+    expect(faltantesCierreTecnico("en_analisis", items, cals, [], { exigeDevolucion: false, noAptoExigeDocumento: false })).toEqual([]);
   });
   it("con el parámetro, falta el informe técnico emitido o el servicio externo validado", () => {
-    expect(motivoCierreTecnico("en_analisis", items, cals, { exige: true, resueltos: new Set() })).toMatch(/informe técnico emitido o el servicio externo validado.*ítem 2/);
-    expect(motivoCierreTecnico("en_analisis", items, cals, { exige: true, resueltos: new Set(["b"]) })).toBeNull();
+    expect(faltantesCierreTecnico("en_analisis", items, cals, [], { exigeDevolucion: false, noAptoExigeDocumento: true }).join(" ")).toMatch(/informe técnico emitido o el servicio externo validado.*ítem 2/);
+    expect(faltantesCierreTecnico("en_analisis", items, cals, [informe], { exigeDevolucion: false, noAptoExigeDocumento: true })).toEqual([]);
   });
   it("resuelto = informe emitido o externo validado", () => {
     expect(noAptoResuelto({ estado: "emitido" }, null)).toBe(true);

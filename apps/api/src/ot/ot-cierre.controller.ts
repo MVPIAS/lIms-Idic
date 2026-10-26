@@ -40,7 +40,7 @@ import {
 } from "./plazos";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
-import { documentosDeMetrologia, documentosDeNoCalibrables, esEntregableNoCalibrable, faltantesInstrumentos } from "../metrologia/metrologia-ot.reglas";
+import { documentosDeMetrologia, documentosDeNoCalibrables, esEntregableNoCalibrable, faltantesMetrologia } from "../metrologia/metrologia-ot.reglas";
 
 const FechaCompromiso = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD"),
@@ -171,7 +171,8 @@ export class OtCierreService {
         resultadosNoAprobados: totalRes - aprobados,
         coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId),
       }),
-      ...(ot.estado === "cerrada" ? [] : faltantesInstrumentos(metro.items, metro.cals, metro.exigeDevolucion)),
+      // D04-31: las mismas reglas de Metrología que el cierre técnico (devolución, servicio externo, no calibrable).
+      ...(ot.estado === "cerrada" ? [] : faltantesMetrologia(metro.items, metro.cals, metro.docsNoCalibrables, metro)),
       // EP-10 10.15/10.17: incumplimiento oficial notificado a DGMN; EP-11 11.27: armas entregadas.
       ...(ot.estado === "cerrada" ? [] : await faltantesNotificacionDgmn(this.prisma, id)),
       ...(ot.estado === "cerrada" ? [] : await faltantesCierreArmas(this.prisma, id)),
@@ -285,7 +286,7 @@ export class OtCierreService {
           resultadosNoAprobados: noAprobados,
           coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId, tx),
         }),
-        ...(estado === "cerrada" ? [] : faltantesInstrumentos(metro.items, metro.cals, metro.exigeDevolucion)),
+        ...(estado === "cerrada" ? [] : faltantesMetrologia(metro.items, metro.cals, metro.docsNoCalibrables, metro)),
         ...(estado === "cerrada" ? [] : await faltantesNotificacionDgmn(tx, id)),
         ...(estado === "cerrada" ? [] : await faltantesCierreArmas(tx, id)),
       ];

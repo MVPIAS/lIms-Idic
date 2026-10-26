@@ -26,6 +26,15 @@ export const SQL_OT_LISTA_PARA_CERRAR = `
                     AND (mc.estado IN ('borrador','calculada','en_revision','en_firma') OR (mc.estado = 'emitida' AND mc.entregado_at IS NULL)))
   AND NOT EXISTS (SELECT 1 FROM met_informe_tecnico mit WHERE mit.ot_id = o.id AND mit.estado = 'emitido' AND mit.entregado_at IS NULL)
   AND NOT EXISTS (SELECT 1 FROM met_servicio_externo mse WHERE mse.ot_id = o.id AND mse.estado = 'validado' AND mse.entregado_at IS NULL)
+  -- D04-31: ningún servicio externo a medio camino (como el cierre técnico y el final).
+  AND NOT EXISTS (SELECT 1 FROM met_servicio_externo mse WHERE mse.ot_id = o.id AND mse.estado IN ('solicitado','aprobado','enviado'))
+  -- D04-31: con no_apto_exige_documento = sí, cada no calibrable con su informe técnico emitido o su externo validado.
+  AND NOT (COALESCE((SELECT lower(trim(ps.valor)) IN ('si','sí','s','true','1') FROM parametro_sistema ps
+                      WHERE ps.tenant_id = o.tenant_id AND ps.categoria = 'metrologia_ficha' AND ps.codigo = 'no_apto_exige_documento' AND ps.activo), FALSE)
+           AND EXISTS (SELECT 1 FROM met_ot_instrumento i WHERE i.ot_id = o.id
+                         AND (i.estado = 'no_apto' OR (i.estado = 'devuelto' AND i.calibrable = FALSE))
+                         AND NOT EXISTS (SELECT 1 FROM met_informe_tecnico mit WHERE mit.ot_instrumento_id = i.id AND mit.estado = 'emitido')
+                         AND NOT EXISTS (SELECT 1 FROM met_servicio_externo mse WHERE mse.ot_instrumento_id = i.id AND mse.estado = 'validado')))
   AND NOT EXISTS (SELECT 1 FROM met_ot_instrumento i WHERE i.ot_id = o.id
                     AND (i.estado = 'por_recibir'
                          OR (i.estado = 'recibido' AND NOT EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_instrumento_id = i.id AND mc.deleted_at IS NULL AND mc.estado <> 'reemplazada'))

@@ -56,7 +56,7 @@ tasa; no hay permiso nuevo. (Los porcentajes de la tasa ahora también devuelven
 | | Punto fuera del rango calibrado del patrón (`patron_fuera_rango`) | Opción: bloquear · avisar | bloquear | Guardar la calibración | idem |
 | | Aviso por correo al emitir (`notificar_emision`) | Sí / No | Sí | Emisión del certificado | idem |
 | | Actualizar el equipo del laboratorio dueño (`actualizar_equipo`) | Opción: al emitir · al entregar · no | al emitir | Emisión o entrega | idem |
-| | El cierre técnico exige el informe técnico o el servicio externo del no calibrable (`no_apto_exige_documento`) | Sí / No | No | OT › Cerrar técnicamente | idem |
+| | El cierre de la OT (técnico y final) exige el informe técnico o el servicio externo del no calibrable (`no_apto_exige_documento`) | Sí / No | No | OT › Cerrar técnicamente, Informe y cierre › Cerrar OT y Ruta de la OT | idem |
 | Recepción · producto obligatorio (`recepcion_producto_obligatorio`) | Un código por laboratorio (`LME`, `LPN`, `LQC`, `LCC`, `LTX`…) | Sí / No (se guarda en la columna `activo`). «＋ Añadir laboratorio» para otro laboratorio o sucursal | Sí en LME y LPN; No en LQC, LCC y LTX | Recepción de la muestra y aviso de recepción incompleta | `recepcion/recepcion.service.ts`, `ot/avance-ot.controller.ts` |
 | Recepción · Nº de muestra interno (`numeracion_muestra`) | Primer Nº (`inicio`) | Entero ≥ 1 | 1 | «Asignar número» | `recepcion/reglas-recepcion.ts` |
 | Recepción · plazos de retención (`retencion_muestra`) | Testigo (`testigo`), contramuestra (`contramuestra`) | Entero 1–600 meses | 1 y 12 | Muestras recibidas desde el cambio: no se destruyen antes del plazo | idem |

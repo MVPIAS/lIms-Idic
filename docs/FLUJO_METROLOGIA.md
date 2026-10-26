@@ -407,8 +407,15 @@ en 1531/1531, M-3947, V-5920 y LCPNF-010.26 (`balance.spec.ts` lo vuelve a exigi
   justificación; aprueba o rechaza el jefe (titular o subrogante) del Departamento del laboratorio; el Jefe del
   laboratorio registra el envío (O/C, fecha) y valida el certificado externo (PDF validado por sus bytes, máx.
   10 MB, con su número) como apto o no apto.
-- **Cierre técnico**: con `no_apto_exige_documento` = sí, el ítem no calibrable necesita su informe técnico
-  emitido o su servicio externo validado (por defecto no, como en R1).
+- **Cierre técnico** (D04-31, frente f7): exige lo mismo que el cierre final en lo técnico. «Cerrar
+  técnicamente → Comercial» solo se habilita, y la API solo lo acepta (409 con la lista de lo que falta), si
+  cada documento de Metrología (certificado de calibración, informe técnico emitido o certificado externo
+  validado) está oficial y entregado, los instrumentos están devueltos (si `cierre_exige_devolucion` = sí) y
+  ningún servicio externo está a medio camino (solicitado, aprobado o enviado). Con
+  `no_apto_exige_documento` = sí, el ítem no calibrable necesita además su informe técnico emitido o su
+  servicio externo validado (por defecto no, como en R1); el parámetro lo aplican igual el cierre técnico,
+  el cierre final y la Ruta de la OT (`metrologia-ot.reglas.ts` › `faltantesCierreTecnico` y
+  `faltantesMetrologia`).
 
 ### 9.3 Certificado
 - **Equivalencias en el SI** (hoja 1): en presión (bar), fuerza (kgf) y par (lbf·ft), la capacidad, la
