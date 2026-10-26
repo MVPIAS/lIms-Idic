@@ -24,6 +24,12 @@ import { ACCION_FIRMA, ESTADO_DOC, nombresResponsables } from "@/lib/documentos"
 import PanelDocumento from "@/components/documentos/PanelDocumento";
 import Modal from "@/components/documentos/Modal";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
+
+/**
+ * D02-45: el buscador incluye las OT en que participa el laboratorio del usuario por orden
+ * interna (GET /ot?derivadas=1), el mismo criterio de alcance que «Captura y revisión por OT».
+ */
+const FILTRO_BUSCADOR_OT = { derivadas: 1 };
 import { usePermisos } from "@/lib/permisos";
 import { CAMPOS_PORTADA, MODALIDAD, textoModalidad, type Modalidad, type Portada, type Propuesta } from "@/lib/informes";
 import FotosInforme, { type EnsayoOt } from "@/components/informes/FotosInforme";
@@ -286,6 +292,7 @@ function InformesContenido() {
           <div style={{ gridColumn: "span 2" }}>
             <BuscadorOt
               valor={otSel}
+              filtros={FILTRO_BUSCADOR_OT}
               onCambio={(o) => { setOtSel(o); setOtId(o?.id ?? ""); }}
               etiqueta="Orden de trabajo *"
             />
