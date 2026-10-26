@@ -329,7 +329,9 @@ const LISTADOS = [
   { n: "Apelaciones (r4d)", r: "/apelaciones", p: "apelacion.ver", t: "apelacion", regla: "unidad", href: "/apelaciones" },
   { n: "Facturas (fase 1)", r: "/facturas?limit=200", p: "factura.ver", t: "factura", regla: "unidad", fase1: true, href: "/facturas" },
   // Frente lp26: listas de precio (dato maestro del instituto, común a todos los laboratorios).
-  { n: "Listas de precio (lp26)", r: "/listas-precio?limit=50", p: "cotizacion.ver", regla: "comun", href: "/listas-precio" },
+  { n: "Listas de precio (lp26)", r: "/listas-precio?limit=50", p: "lista_precio.ver", regla: "comun", href: "/listas-precio" },
+  // f6: ítems de lista con el mismo permiso propio.
+  { n: "Ítems de lista (f6)", r: "/lista-precio-items?limit=50", p: "lista_precio.ver", regla: "comun", href: "/lista-precio-items" },
   // f5: tarifas del Sistema Comercial antiguo (tablas comunes; se mantienen con catalogo.gestionar global).
   { n: "Tarifas HH (f5)", r: "/tarifas/hh?limit=50", p: "tarifa.ver", regla: "comun", href: "/catalogo/tarifas-hh" },
   { n: "Perfiles HH (f5)", r: "/tarifas/hh-perfiles?limit=50", p: "tarifa.ver", regla: "comun", href: "/catalogo/perfiles-hh" },

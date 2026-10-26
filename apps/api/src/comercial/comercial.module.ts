@@ -166,11 +166,13 @@ const ListaPrecioCreate = z.object({
   vigenteDesde: z.preprocess((v) => (v === "" ? undefined : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD").transform((s) => new Date(`${s}T00:00:00Z`)).optional()),
   activa: z.boolean().default(true),
 });
-// Las listas de precio alimentan la cotización: se leen con `cotizacion.ver` y
-// se mantienen como dato maestro (`catalogo.gestionar`).
+// Las listas de precio alimentan la cotización. Frente f6: se leen con su
+// permiso propio `lista_precio.ver` (antes `cotizacion.ver`: Calidad las
+// mantenía sin poder verlas) y se mantienen como dato maestro
+// (`catalogo.gestionar` con alcance global: Calidad y Administración).
 @ApiTags("listas-precio") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("listas-precio")
 @RequierePermisoCrud({
-  ver: "cotizacion.ver",
+  ver: "lista_precio.ver",
   crear: "catalogo.gestionar",
   editar: "catalogo.gestionar",
   eliminar: "catalogo.gestionar",
@@ -233,7 +235,7 @@ const ItemCreate = z.object({
 });
 @ApiTags("lista-precio-items") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("lista-precio-items")
 @RequierePermisoCrud({
-  ver: "cotizacion.ver",
+  ver: "lista_precio.ver",
   crear: "catalogo.gestionar",
   editar: "catalogo.gestionar",
   eliminar: "catalogo.gestionar",

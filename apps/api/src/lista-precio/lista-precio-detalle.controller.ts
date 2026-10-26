@@ -6,7 +6,7 @@
  * existen en el LIMS).
  *
  * Dato maestro del instituto, como el resto de /listas-precio: se lee con
- * `cotizacion.ver` y no depende del laboratorio (no hay alcance que filtrar).
+ * `lista_precio.ver` (frente f6) y no depende del laboratorio (no hay alcance que filtrar).
  */
 import { BadRequestException, Controller, Get, Injectable, NotFoundException, Param, ParseUUIDPipe, Query, Req, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
@@ -144,7 +144,7 @@ export class ListaPrecioDetalleController {
   constructor(private readonly svc: ListaPrecioDetalleService) {}
 
   @Get(":id/detalle")
-  @RequierePermiso("cotizacion.ver")
+  @RequierePermiso("lista_precio.ver")
   @ApiOperation({ summary: "Ítems de la lista con estructura de costos, enlace al catálogo y resumen por centro de costo" })
   detalle(@Param("id", ParseUUIDPipe) id: string, @Query() query: Record<string, string>, @Req() req: any) {
     return this.svc.detalle(req?.user?.tenantId, id, {
