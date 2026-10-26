@@ -383,11 +383,13 @@ async function recorrido(C) {
     return `${e.data.numero} · metrólogo no emite → 403 · devuelto y reenviado · Finanzas no entrega → 403`;
   });
 
-  await paso("BL-056 · Con el informe emitido, el Jefe LMT cierra técnicamente la OT (Comercial no puede)", async () => {
+  await paso("BL-056 · Con el informe emitido y entregado, el no calibrable queda resuelto; el cierre técnico espera la devolución (D04-31; Comercial no puede)", async () => {
     await exigir(403, U.ventas, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
-    const r = await ok(U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
-    afirmar(r.data.estado === "finalizada", JSON.stringify(r.data));
-    return "OT finalizada";
+    const m = await met(C.ot.id);
+    afirmar(!m.cierreTecnico.faltantes.some((f) => /informe técnico emitido o el servicio externo validado/.test(f)), `faltantes: ${m.cierreTecnico.faltantes.join(" | ")}`);
+    // D04-31 (frente f7): el cierre técnico exige lo mismo que el cierre final en lo técnico (instrumentos devueltos).
+    await rechazo(409, /sigue en custodia/, U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
+    return "informe resuelto · cierre técnico → 409 hasta devolver los instrumentos";
   });
 
   /* ------------- cierre final del caso mixto (decisión 24-10: informe técnico = documento) */
@@ -398,6 +400,9 @@ async function recorrido(C) {
     const dev = { fechaHora: ahoraIso(), recibidoPor: "Encargado del cliente", estadoFisico: "bueno" };
     await ok(U.metro, "POST", `/ot/${C.ot.id}/instrumentos/${C.i1.id}/devolucion`, dev);
     await ok(U.metro, "POST", `/ot/${C.ot.id}/instrumentos/${C.i2.id}/devolucion`, { ...dev, estadoFisico: "danado", observacion: "Se devuelve sin calibrar" });
+    // Con todo entregado y devuelto, el Jefe LMT cierra técnicamente (D04-31) y luego Planificación cierra.
+    const ct = await ok(U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
+    afirmar(ct.data.estado === "finalizada", JSON.stringify(ct.data));
     const c = await ok(U.planif, "GET", `/ot/${C.ot.id}/cierre`);
     afirmar(c.puedeCerrar, `faltantes: ${c.faltantes.join(" | ")}`);
     await exigir(403, U.metro, "POST", `/ot/${C.ot.id}/cerrar`, {});
@@ -491,8 +496,11 @@ async function recorrido(C) {
     const pdf = await llamar(U.ventas, "GET", `${b}/certificado`);
     afirmar(pdf.status === 200 && pdf.buf.subarray(0, 5).toString() === "%PDF-", `PDF externo ${pdf.status}`);
     const m = await met(C.ot2.id);
-    afirmar(m.cierreTecnico.posible, `cierre técnico: ${m.cierreTecnico.motivo}`);
-    return "fecha futura → 400 · sin certificado → 409 · no PDF → 400 · validado: el ítem queda resuelto para el cierre técnico";
+    // Validado, el ítem queda resuelto: el cierre técnico ya no pide su servicio externo ni su documento
+    // (D04-31: sí pide entregar los documentos y devolver los instrumentos).
+    afirmar(!m.cierreTecnico.faltantes.some((f) => /servicio externo|no calibrable/.test(f)), `cierre técnico: ${m.cierreTecnico.motivo}`);
+    afirmar(m.cierreTecnico.faltantes.some((f) => new RegExp(`EXT-${sello}.*falta registrar su entrega`).test(f)), `cierre técnico: ${m.cierreTecnico.motivo}`);
+    return "fecha futura → 400 · sin certificado → 409 · no PDF → 400 · validado: el ítem queda resuelto (falta entregarlo)";
   });
 
   /* --------------------------------- BL-201 · LNF → maestro de patrones */

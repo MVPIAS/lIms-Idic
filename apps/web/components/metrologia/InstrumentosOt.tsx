@@ -76,7 +76,7 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
   async function cierreTecnico() {
     const ok = await confirmar({
       titulo: `¿Cerrar técnicamente la OT ${d.ot.codigo}?`,
-      mensaje: "Todos los instrumentos tienen su certificado emitido (o son no calibrables). La OT pasa a «finalizada» y queda para que Comercial o Planificación la cierren.",
+      mensaje: "Todos los documentos de Metrología están oficiales y entregados, los instrumentos devueltos y ningún servicio externo pendiente. La OT pasa a «finalizada» y queda para que Comercial o Planificación la cierren.",
       confirmarTexto: "Cerrar técnicamente",
     });
     if (ok) await hacer("POST", `/ot/${otId}/metrologia/cierre-tecnico`, undefined, "OT cerrada técnicamente: pasa a Comercial.");
@@ -89,6 +89,18 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
 
   const items: any[] = d.instrumentos;
   const vivos = items.filter((i) => i.estado !== "anulado");
+  // D04-31: «Cerrar técnicamente → Comercial» solo se habilita sin faltantes (los mismos que el cierre final
+  // en lo técnico). Con permiso y algo pendiente, el botón se ve deshabilitado y la lista dice qué falta.
+  const ct = d.cierreTecnico ?? {};
+  const faltaCt: string[] = ct.faltantes ?? [];
+  const botonCt = (clase: string) =>
+    ct.posible ? (
+      <button className={`btn ${clase} sm`} disabled={ocupado} onClick={cierreTecnico}>Cerrar técnicamente → Comercial</button>
+    ) : d.puedo?.cierreTecnico && ct.aplica && faltaCt.length > 0 ? (
+      <button className={`btn ${clase} sm`} disabled aria-disabled="true" title={`Para cerrar técnicamente falta: ${faltaCt.join(" ")}`}>
+        Cerrar técnicamente → Comercial
+      </button>
+    ) : null;
 
   if (modo === "cierre") {
     const cals = vivos.filter((i) => i.calibracion);
@@ -99,8 +111,9 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
           Certificados de calibración
           <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 12 }}>· cuentan para el cierre como cualquier informe</span>
           <span style={{ flex: 1 }} />
-          {d.cierreTecnico.posible && <button className="btn outline sm" disabled={ocupado} onClick={cierreTecnico}>Cerrar técnicamente → Comercial</button>}
+          {botonCt("outline")}
         </h2>
+        {/* Lo que falta para el cierre técnico es lo mismo que «Para cerrar la OT falta:» de abajo (D04-31). */}
         {cals.length ? (
           <table className="data">
             <thead><tr><th>Certificado</th><th>Instrumento</th><th>Estado</th><th>Entrega</th><th>Custodia</th><th /></tr></thead>
@@ -236,8 +249,11 @@ export default function InstrumentosOt({ otId, onCambio, modo = "instrumentos" }
           {d.faltantes.length ? (
             <><b>Para cerrar la OT falta:</b><ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{d.faltantes.map((f: string) => <li key={f}>{f}</li>)}</ul></>
           ) : <>Instrumentos al día: certificados emitidos y entregados{d.exigeDevolucion ? " e instrumentos devueltos" : ""}.</>}
-          {d.cierreTecnico.posible && (
-            <div style={{ marginTop: 8 }}><button className="btn primary sm" disabled={ocupado} onClick={cierreTecnico}>Cerrar técnicamente → Comercial</button></div>
+          {botonCt("primary") && (
+            <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {botonCt("primary")}
+              {!ct.posible && <span style={{ fontSize: 11.5, color: "var(--muted)" }}>Se habilita cuando no falte nada de la lista.</span>}
+            </div>
           )}
         </div>
       )}

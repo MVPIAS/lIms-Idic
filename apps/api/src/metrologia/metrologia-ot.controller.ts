@@ -10,14 +10,14 @@ import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
-import { caminoEstadosOt, faltantesParaCerrar } from "../ot/plazos";
+import { caminoEstadosOt } from "../ot/plazos";
 import { motivoHabilitacion, type Firmante } from "./metrologia.reglas";
 import {
-  ESTADOS_FISICOS, instanteChile, calibracionVigente, documentosDeMetrologia, etiquetaInstrumento, faltantesInstrumentos,
-  motivoCalibrar, motivoCierreTecnico, motivoDevolucion, motivoEntrega, motivoRecepcion,
+  ESTADOS_FISICOS, ESTADOS_SIN_CIERRE_TECNICO, instanteChile, calibracionVigente, etiquetaInstrumento, faltantesCierreTecnico,
+  faltantesMetrologia, motivoCalibrar, motivoDevolucion, motivoEntrega, motivoRecepcion,
 } from "./metrologia-ot.reglas";
-import { LABS_SAM, calibracionesDeOt, cierreExigeDevolucion, documentosNoCalibrablesDeOt, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
-import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, noAptoResueltos, textoErrorCorreo } from "./ficha.datos";
+import { LABS_SAM, calibracionesDeOt, metrologiaParaCierre, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
+import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, textoErrorCorreo } from "./ficha.datos";
 import { MailService } from "../configuracion/configuracion.module";
 
 // ---------------------------------------------------------------------------
@@ -205,19 +205,13 @@ export class MetrologiaOtService {
     return e[0].id;
   }
 
-  /** Parámetro «el no calibrable exige su informe técnico o servicio externo» y los ítems que ya lo tienen. */
-  private async noAptoDe(tenantId: string, otId: string, db: any = this.prisma) {
-    const cfg = await leerConfigFicha(db, tenantId);
-    return { exige: cfg.noAptoExigeDocumento, resueltos: cfg.noAptoExigeDocumento ? await noAptoResueltos(db, otId) : new Set<string>() };
-  }
-
   /* ------------------------------------------------------------- lectura --- */
   /** Instrumentos, calibraciones, qué falta y qué puede hacer el usuario. */
   async resumen(otId: string, req: any) {
     const ot = await this.cargarOt(otId, req);
-    const [items, cals, exige] = await Promise.all([
-      instrumentosDeOt(this.prisma, otId), calibracionesDeOt(this.prisma, otId), cierreExigeDevolucion(this.prisma, ot.tenantId),
-    ]);
+    // Mismos datos y reglas que el cierre final (ot-cierre.controller.ts) y la Ruta de la OT (D04-31).
+    const metro = await metrologiaParaCierre(this.prisma, otId, ot.tenantId);
+    const { items, cals, exigeDevolucion: exige } = metro;
     const esMetrologia = !!ot.laboratorio && LABS_SAM.includes(ot.laboratorio);
     const abierta = ot.estado !== "cerrada" && ot.estado !== "anulada";
     const [registrar, recibir, asignar, devolver, entregar, cierreTecnico] = await Promise.all(
@@ -226,7 +220,7 @@ export class MetrologiaOtService {
     const puedeCalibrar = tiene(req, "metrologia.crear") && (await this.alcance.puedeVerUnidad(req, ot.unidadId, "metrologia.crear"));
     const yo = req?.user?.sub;
     // B-029: documento de cada ítem no calibrable (informe técnico o certificado externo) para la tabla y el cierre.
-    const docsNoCal = await documentosNoCalibrablesDeOt(this.prisma, otId);
+    const docsNoCal = metro.docsNoCalibrables;
     const instrumentos = items.map((i) => {
       const v = calibracionVigente(cals, i.id);
       const acciones: string[] = [];
@@ -244,22 +238,28 @@ export class MetrologiaOtService {
           .map((x) => ({ itemId: x.instrumentoId, tipo: x.tipo, numero: x.numero, estado: x.estado, entregadoAt: x.entregadoAt, entregaMedio: x.entregaMedio ?? null })),
       };
     });
+    const reglas = { exigeDevolucion: exige, noAptoExigeDocumento: metro.noAptoExigeDocumento };
+    // D04-31: «Para cerrar la OT falta:» y el cierre técnico dicen lo mismo. Antes del cierre técnico la
+    // lista es la del cierre técnico (documentos oficiales y entregados, devueltos, ningún externo a
+    // medio camino); después, la parte de Metrología del cierre final (las mismas reglas).
+    const faltaCt = esMetrologia ? faltantesCierreTecnico(ot.estado, items, cals, docsNoCal, reglas) : ["La OT no es de Metrología."];
+    const sinCt = (ESTADOS_SIN_CIERRE_TECNICO as readonly string[]).includes(ot.estado);
     const faltantes = esMetrologia && items.length
-      ? [
-          ...faltantesParaCerrar({ estado: ot.estado, documentos: documentosDeMetrologia(cals, docsNoCal), resultadosNoAprobados: 0 })
-            .filter((f) => !/no tiene informes ni certificados/.test(f)),
-          ...faltantesInstrumentos(items, cals, exige),
-        ]
+      ? sinCt ? (ot.estado === "cerrada" || ot.estado === "anulada" ? [] : faltantesMetrologia(items, cals, docsNoCal, reglas)) : faltaCt
       : [];
-    const noApto = esMetrologia ? await this.noAptoDe(ot.tenantId, otId) : undefined;
-    const motivoCt = esMetrologia ? motivoCierreTecnico(ot.estado, items, cals, noApto) : "La OT no es de Metrología.";
     return {
       ot: { ...ot, esMetrologia },
       instrumentos,
       calibraciones: cals,
       exigeDevolucion: exige,
       faltantes,
-      cierreTecnico: { posible: !motivoCt && cierreTecnico, motivo: motivoCt },
+      // posible: sin faltantes y con permiso; faltantes: lo que falta (el botón se muestra deshabilitado con esa lista).
+      cierreTecnico: {
+        posible: !faltaCt.length && cierreTecnico,
+        motivo: faltaCt.length ? faltaCt.join(" ") : null,
+        faltantes: sinCt ? [] : faltaCt,
+        aplica: esMetrologia && !sinCt && items.some((i) => i.estado !== "anulado"),
+      },
       puedo: { registrar: registrar && abierta && esMetrologia, recibir, asignar, devolver, entregar, cierreTecnico, calibrar: puedeCalibrar },
     };
   }
@@ -534,8 +534,13 @@ export class MetrologiaOtService {
     const r = await this.prisma.$transaction(async (tx) => {
       const est = await tx.$queryRawUnsafe<{ estado: string }[]>(`SELECT estado FROM orden_trabajo WHERE id = $1::uuid FOR UPDATE`, otId);
       const estado = est[0]?.estado ?? ot.estado;
-      const motivo = motivoCierreTecnico(estado, await instrumentosDeOt(tx, otId), await calibracionesDeOt(tx, otId), await this.noAptoDe(ot.tenantId, otId, tx));
-      if (motivo) throw new ConflictException(`No se puede cerrar técnicamente la OT ${ot.codigo}. ${motivo}`);
+      // D04-31: lo mismo que exige el cierre final en lo técnico (409 con la lista de lo que falta).
+      const m = await metrologiaParaCierre(tx, otId, ot.tenantId);
+      const faltan = faltantesCierreTecnico(estado, m.items, m.cals, m.docsNoCalibrables, {
+        exigeDevolucion: m.exigeDevolucion, noAptoExigeDocumento: m.noAptoExigeDocumento,
+      });
+      if (faltan.length)
+        throw new ConflictException({ statusCode: 409, error: "Conflict", message: `No se puede cerrar técnicamente la OT ${ot.codigo}. ${faltan.join(" ")}`, faltantes: faltan });
       const camino = caminoEstadosOt(estado, "finalizada");
       if (!camino) throw new ConflictException(`La OT está en un estado ('${estado}') desde el que no se llega a «finalizada».`);
       await tx.$executeRawUnsafe(`UPDATE orden_trabajo SET estado = 'finalizada', updated_at = now() WHERE id = $1::uuid`, otId);

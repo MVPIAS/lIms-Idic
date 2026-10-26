@@ -329,15 +329,16 @@ async function main() {
     return c.faltantes.join(" ").slice(0, 110) + "…";
   });
 
-  await paso("P9.1 · Cierre técnico (Jefe de Laboratorio): la OT ve sus calibraciones y pasa a finalizada", async () => {
+  await paso("P9.1 · Cierre técnico (Jefe de Laboratorio): la OT ve sus calibraciones; con instrumentos en custodia no se cierra técnicamente (D04-31)", async () => {
     await exigir(403, U.metro, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
     const m = await met(U.ventas);
     afirmar(m.cierreTecnico.posible === false, "Comercial no debería poder cerrar técnicamente");
     afirmar(m.instrumentos[0].calibracion?.numeroCertificado === C.numero, "la OT no ve su calibración");
-    const r = await ok(U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
-    afirmar(r.data.estado === "finalizada", JSON.stringify(r.data));
-    await rechazo(409, /ya está finalizada/, U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
-    return `recorrido ${r.data.recorrido.join(" → ")}`;
+    // D04-31 (frente f7): el cierre técnico exige lo mismo que el cierre final en lo técnico.
+    const mj = await met(U.jefe);
+    afirmar(!mj.cierreTecnico.posible && mj.cierreTecnico.faltantes.some((f) => /sigue en custodia/.test(f)), `cierre técnico: ${mj.cierreTecnico.motivo}`);
+    await rechazo(409, /sigue en custodia/, U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
+    return "Comercial no · Jefe: 409 mientras los instrumentos siguen en custodia";
   });
 
   await paso("P8.2 · Devolución del instrumento con acta (metrólogo o Comercial); no dos veces; otro laboratorio no", async () => {
@@ -347,9 +348,13 @@ async function main() {
     await ok(U.metro, "POST", `/ot/${C.ot.id}/instrumentos/${C.i1.id}/devolucion`, acta);
     await rechazo(400, /ya fue devuelto/, U.metro, "POST", `/ot/${C.ot.id}/instrumentos/${C.i1.id}/devolucion`, acta);
     await ok(U.ventas, "POST", `/ot/${C.ot.id}/instrumentos/${C.i2.id}/devolucion`, { ...acta, estadoFisico: "danado", observacion: "Se devuelve sin calibrar (no apto)" });
+    // P9.1: con todo entregado y devuelto, el Jefe de Laboratorio cierra técnicamente (D04-31).
+    const r = await ok(U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
+    afirmar(r.data.estado === "finalizada", JSON.stringify(r.data));
+    await rechazo(409, /ya está finalizada/, U.jefe, "POST", `/ot/${C.ot.id}/metrologia/cierre-tecnico`);
     const a = await avance();
     afirmar(a.etapaActual === "cierre" && /Cerrar la OT/.test(a.siguiente.texto), `${a.etapaActual}: ${a.siguiente?.texto}`);
-    return "ítem 1 (metrólogo) e ítem 2 no apto (Comercial) devueltos · Ruta: Cierre de la OT";
+    return "ítem 1 (metrólogo) e ítem 2 no apto (Comercial) devueltos · cierre técnico → finalizada · Ruta: Cierre de la OT";
   });
 
   await paso("P9.2–P9.3 · Cerrar la OT por el camino normal: Finanzas no; Planificación sí y nace la factura pendiente", async () => {

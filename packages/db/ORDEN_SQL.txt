@@ -120,4 +120,5 @@ align_f5_correcciones.sql
 seed_f5_demo.sql                     demo
 align_f6_correcciones.sql
 seed_f6_demo.sql                     demo
+align_f7_correcciones.sql
 align_cierre_permisos.sql

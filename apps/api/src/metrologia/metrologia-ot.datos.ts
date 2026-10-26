@@ -5,6 +5,7 @@
  * Las tablas met_* no están en Prisma: SQL crudo con parámetros.
  */
 import type { CalibracionOt, DocumentoNoCalibrable, InstrumentoOt } from "./metrologia-ot.reglas";
+import { configFicha } from "./ficha.reglas";
 
 /** Cliente mínimo: PrismaService o la transacción `tx`. */
 export interface ConsultaCruda {
@@ -90,6 +91,18 @@ export async function cierreExigeDevolucion(db: ConsultaCruda, tenantId: string)
 }
 
 /**
+ * Parámetro metrologia_ficha.no_apto_exige_documento (por defecto no): el cierre técnico y el
+ * final exigen el informe técnico emitido o el servicio externo validado del no calibrable (D04-31).
+ */
+export async function noAptoExigeDocumentoDe(db: ConsultaCruda, tenantId: string): Promise<boolean> {
+  const filas = await db.$queryRawUnsafe<{ codigo: string; valor: string | null; activo: boolean }[]>(
+    `SELECT codigo, valor, activo FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'metrologia_ficha' AND codigo = 'no_apto_exige_documento'`,
+    tenantId,
+  );
+  return configFicha(filas).noAptoExigeDocumento;
+}
+
+/**
  * Informe técnico y certificado externo de cada ítem no calibrable (sin anulados ni
  * rechazados). Base sin align_r4a_metrologia_ficha.sql: ninguno. Se comprueba la
  * tabla antes de consultar porque también corre dentro de la transacción del cierre
@@ -116,5 +129,6 @@ export async function metrologiaParaCierre(db: ConsultaCruda, otId: string, tena
   const cals = await calibracionesDeOt(db, otId);
   const docsNoCalibrables = await documentosNoCalibrablesDeOt(db, otId);
   const exigeDevolucion = await cierreExigeDevolucion(db, tenantId);
-  return { items, cals, docsNoCalibrables, exigeDevolucion };
+  const noAptoExigeDocumento = await noAptoExigeDocumentoDe(db, tenantId);
+  return { items, cals, docsNoCalibrables, exigeDevolucion, noAptoExigeDocumento };
 }
