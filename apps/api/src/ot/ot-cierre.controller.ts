@@ -207,7 +207,8 @@ export class OtCierreService {
       documentos,
       calibraciones: metro.cals
         .filter((c) => c.estado !== "reemplazada")
-        .map((c) => ({ id: c.id, numero: c.numeroCertificado ?? c.codigo, estado: c.estado, entregadoAt: c.entregadoAt ?? null })),
+        // D04-32: con el medio de la entrega, como el resto de documentos.
+        .map((c) => ({ id: c.id, numero: c.numeroCertificado ?? c.codigo, estado: c.estado, entregadoAt: c.entregadoAt ?? null, entregaMedio: c.entregaMedio ?? null })),
       // Informe técnico emitido y certificado externo validado de los no calibrables: también cuentan (decisión 24-10).
       documentosNoCalibrables: metro.docsNoCalibrables.filter(esEntregableNoCalibrable).map((x, i) => ({
         id: `${x.tipo}-${x.instrumentoId ?? i}`,
