@@ -191,7 +191,8 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
                 <tr key={c.id}>
                   <td><span className="codigo">{c.numero}</span></td>
                   <td>Certificado de calibración <small style={{ color: "var(--muted)" }}>· {c.estado === "emitida" ? "emitido" : c.estado.replace("_", " ")}</small></td>
-                  <td style={{ fontSize: 11.5 }}>{c.entregadoAt ? fecha(c.entregadoAt) : c.estado === "emitida" ? <span className="pill amber">Sin entregar</span> : "—"}</td>
+                  {/* D04-32: fecha y medio de la entrega, como el informe técnico y el certificado externo. */}
+                  <td style={{ fontSize: 11.5 }}>{c.entregadoAt ? <>{fecha(c.entregadoAt)} · {textoMedio(c.entregaMedio)}</> : c.estado === "emitida" ? <span className="pill amber">Sin entregar</span> : "—"}</td>
                 </tr>
               ))}
               {(d.documentosNoCalibrables ?? []).map((x: any) => (
