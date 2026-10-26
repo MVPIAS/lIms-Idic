@@ -365,12 +365,14 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
             </div>
           )}
           {distribuyendo && <DistribucionMuestra muestraId={distribuyendo} onCerrar={() => setDistribuyendo(null)} />}
+          {/* D01-24: la tabla cabe en su recuadro a 1440 px (sin desplazamiento horizontal): Métodos y Ensayos
+              van en una columna, Veredicto y Estado en otra, y las acciones apiladas. */}
           <div style={{ overflowX: "auto" }}>
-            <table className="data">
+            <table className="data" aria-label="Muestras de la OT">
               <thead>
                 <tr>
                   <th>Código · Nº interno</th><th>Muestra · producto</th><th>Recepción</th><th>Sellos</th><th>Otros laboratorios</th>
-                  <th>Métodos</th><th className="num">Ensayos</th><th>Veredicto</th><th>Estado</th>{puedeRegistrar && <th aria-label="Acciones"></th>}
+                  <th>Métodos · ensayos</th><th>Veredicto · estado</th>{puedeRegistrar && <th aria-label="Acciones"></th>}
                 </tr>
               </thead>
               <tbody>
@@ -397,7 +399,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                           {m.clienteNombre && m.clienteId !== d.ot.clienteId && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Cliente: {m.clienteNombre}</div>}
                           {m.identificacionCliente && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Rótulo: «{m.identificacionCliente}»</div>}
                         </td>
-                        <td style={{ fontSize: 12, minWidth: 200 }}>
+                        <td style={{ fontSize: 12, minWidth: 170 }}>
                           {m.recepcionIncompleta && !m.condicionRecepcion ? (
                             <span className="pill amber">incompleta</span>
                           ) : (
@@ -473,23 +475,33 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                           ))}
                           {m.otrosLabsDetalle && <div style={{ color: "var(--muted)" }}>{m.otrosLabsDetalle}</div>}
                         </td>
-                        <td style={{ fontSize: 12 }}>{m.metodos.length ? m.metodos.join(", ") : <span className="pill amber">sin ensayos</span>}</td>
-                        <td className="num">{m.ensayos}</td>
-                        <td><span className={`pill ${v.pill}`}>{v.texto}</span></td>
-                        <td><span className="pill gray">{m.estado}</span></td>
+                        <td style={{ fontSize: 12 }}>
+                          {m.metodos.length ? (
+                            <>
+                              <b style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{m.ensayos} {m.ensayos === 1 ? "ensayo" : "ensayos"}</b>
+                              <div>{m.metodos.join(", ")}</div>
+                            </>
+                          ) : <span className="pill amber">sin ensayos</span>}
+                        </td>
+                        <td>
+                          <span className={`pill ${v.pill}`}>{v.texto}</span>
+                          <div style={{ marginTop: 3 }}><span className="pill gray">{m.estado}</span></div>
+                        </td>
                         {puedeRegistrar && (
-                          <td style={{ whiteSpace: "nowrap" }}>
-                            {/* EP-02 1.3 (frente r4d): porción por laboratorio de destino. */}
-                            {m.ensayos > 0 && (
-                              <button className="btn outline sm" style={{ marginRight: 4 }} onClick={() => setDistribuyendo(m.id)}>Distribuir…</button>
-                            )}
-                            <button className="btn outline sm" aria-expanded={editando === m.id}
-                              onClick={() => {
-                                setEditando(editando === m.id ? null : m.id); setEdicion(datosDe(m)); setProductoEdicion(m.catElementoId ?? ""); setAbierto(false);
-                                if (editando !== m.id) setTimeout(() => document.getElementById("recepcion-edicion")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-                              }}>
-                              {editando === m.id ? "Cerrar" : "Recepción…"}
-                            </button>
+                          <td>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "stretch", gap: 4 }}>
+                              {/* EP-02 1.3 (frente r4d): porción por laboratorio de destino. */}
+                              {m.ensayos > 0 && (
+                                <button className="btn outline sm" onClick={() => setDistribuyendo(m.id)}>Distribuir…</button>
+                              )}
+                              <button className="btn outline sm" aria-expanded={editando === m.id}
+                                onClick={() => {
+                                  setEditando(editando === m.id ? null : m.id); setEdicion(datosDe(m)); setProductoEdicion(m.catElementoId ?? ""); setAbierto(false);
+                                  if (editando !== m.id) setTimeout(() => document.getElementById("recepcion-edicion")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+                                }}>
+                                {editando === m.id ? "Cerrar" : "Recepción…"}
+                              </button>
+                            </div>
                           </td>
                         )}
                       </tr>
