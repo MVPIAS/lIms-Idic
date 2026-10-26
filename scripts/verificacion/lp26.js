@@ -186,7 +186,8 @@ async function main() {
       JSON.stringify({ ...C.lista, items: undefined }),
     );
     await exigir(403, U.a1, "GET", `/listas-precio/${C.lista.id}/detalle`);
-    await exigir(403, U.calidad, "GET", `/listas-precio/${C.lista.id}/detalle`);
+    // Frente f6: Calidad mantiene las listas y las lee con lista_precio.ver (antes 403 por no tener cotizacion.ver).
+    await ok(U.calidad, "GET", `/listas-precio/${C.lista.id}/detalle?limit=1`);
     const d = await ok(U.ventas, "GET", `/listas-precio/${C.lista.id}/detalle?limit=1`);
     afirmar(d.resumen.items === 618 && d.meta.total === 618, `ítems ${d.resumen.items}`);
     afirmar(d.resumen.enlazados >= 120 && d.resumen.sinEnlace === 618 - d.resumen.enlazados, `enlazados ${d.resumen.enlazados}`);

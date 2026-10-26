@@ -71,8 +71,9 @@ export const NAV: SeccionNav[] = [
       { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: "DCO", claves: "aduana importacion sdbpch resolucion dgmn tasa" },
       // EP-06 6.23 (frente r4d): informe mensual de la tasa 1,5 %.
       { href: "/bpch/tasa-mensual", label: "Tasa 1,5 % mensual", icon: "🧮", perm: "bpch.tasa.gestionar", ambito: "DCO", claves: "tasa internacion informe mensual difusion" },
-      { href: "/listas-precio", label: "Listas de precio", icon: "≣", perm: "cotizacion.ver" },
-      { href: "/lista-precio-items", label: "Ítems de lista", icon: "🏷", perm: "cotizacion.ver" },
+      // Frente f6: las listas de precio se leen con su permiso propio (Calidad las mantiene sin ver cotizaciones).
+      { href: "/listas-precio", label: "Listas de precio", icon: "≣", perm: "lista_precio.ver" },
+      { href: "/lista-precio-items", label: "Ítems de lista", icon: "🏷", perm: "lista_precio.ver" },
       { href: "/centros-costo", label: "Centros de costo", icon: "🏦", perm: "factura.ver" },
       { href: "/facturas", label: "Facturas", icon: "📄", perm: "factura.ver" },
       { href: "/pagos", label: "Pagos", icon: "💵", perm: "factura.ver" },

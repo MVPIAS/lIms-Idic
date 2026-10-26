@@ -133,6 +133,10 @@ Director), `reclamo.ver/gestionar` (reclamos de clientes: Comercial, Planificaci
 (leer las tarifas HH, HM, perfiles HH y servicios primarios en Tablas maestras: Comercial, Planificación,
 Finanzas, Calidad y jefaturas; Dirección, Administración y Lector por la cascada). Las mantiene
 `catalogo.gestionar` con alcance global (Calidad, Administración); el rol CLIENTE no las ve.
+**Listas de precio · frente f6** (`align_f6_correcciones.sql`, ver `docs/COMERCIAL_RONDA2.md` §10): `lista_precio.ver`
+(leer las listas de precio y sus ítems: Comercial, Planificación, Muestreo, Finanzas, Cobranza, Calidad y
+jefaturas; Dirección, Administración y Lector por la cascada). Antes se leían con `cotizacion.ver`, que Calidad no
+tiene; se mantienen con `catalogo.gestionar` de alcance global. El rol CLIENTE no las ve (estructura de costos interna).
 
 La matriz por defecto **solo concede** (`ON CONFLICT DO NOTHING`); no revoca nada que ya existiera. Los cambios de permisos de un rol se reflejan en el JWT al volver a iniciar sesión o al refrescar el token (`POST /auth/refresh`).
 
