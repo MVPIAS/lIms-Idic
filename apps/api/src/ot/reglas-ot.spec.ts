@@ -74,5 +74,9 @@ describe("valor inicial de la OT desde la cotización (D02-09)", () => {
   it("sin total ni costeo queda en 0", () => {
     expect(valorInicialOt(0)).toEqual({ costoEstimado: 0, horasHombre: 0 });
     expect(valorInicialOt(NaN, [{ horas: -1, costo: 0 }])).toEqual({ costoEstimado: 0, horasHombre: 0 });
+    // Frente f6: el costo estimado está en CLP; una cotización en USD se lleva a pesos con su dólar del día.
+    expect(valorInicialOt(178.5, [], { moneda: "USD", dolar: 950 })).toEqual({ costoEstimado: 169_575, horasHombre: 0 });
+    expect(valorInicialOt(178.5, [], { moneda: "USD", dolar: null })).toEqual({ costoEstimado: 0, horasHombre: 0 });
+    expect(valorInicialOt(146_831, [], { moneda: "CLP" })).toEqual({ costoEstimado: 146_831, horasHombre: 0 });
   });
 });

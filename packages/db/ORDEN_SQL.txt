@@ -118,4 +118,5 @@ seed_c3_demo.sql                     demo
 align_f4_correcciones.sql
 align_f5_correcciones.sql
 seed_f5_demo.sql                     demo
+seed_f6_demo.sql                     demo
 align_cierre_permisos.sql

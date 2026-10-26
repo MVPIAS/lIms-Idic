@@ -24,7 +24,8 @@ import {
   type ResultadoValidez,
   type ReglaValidez,
 } from "./validez";
-import { elegirPrecio, itemsListaVigente } from "../lista-precio/precio-lista";
+import { elegirPrecio, itemsListaVigente, precioParaCotizacion } from "../lista-precio/precio-lista";
+import { monedaDe, redondearMoneda } from "../common/moneda";
 import { calcularOpiPendiente, origenDesdeAceptacion, valorInicialOt } from "../ot/reglas-ot";
 import { puedeRegistrarAceptacion } from "./permisos-cotizacion";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
@@ -418,8 +419,10 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * Resuelve las líneas: las que traen `catEnsayoId` toman código, descripción y
    * PRECIO: el de la lista de precios vigente a la fecha de emisión si el ensayo
    * está en ella (neto para un particular; para el Ejército según el parámetro
-   * `precio_ejercito`) y, si no, la ficha (cat_ensayo.precio). En USD se
-   * convierte con el dólar congelado de la cotización. Las líneas libres
+   * `precio_ejercito`) y, si no, la ficha (cat_ensayo.precio). El precio
+   * conserva la moneda de su lista (frente f6, precioParaCotizacion): en USD,
+   * un precio en CLP se convierte con el dólar congelado de la cotización; en
+   * CLP, un precio de una lista en USD bloquea la línea. Las líneas libres
    * (HH/HM/viático…) se siguen aceptando por compatibilidad.
    */
   private async resolverLineas(
@@ -438,7 +441,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         })
       : [];
     const porId = new Map(ensayos.map((e) => [e.id, e]));
-    const lista = await itemsListaVigente(this.prisma, tenantId, [...porId.keys()], ctx.fecha);
+    const lista = await itemsListaVigente(this.prisma, tenantId, [...porId.keys()], ctx.fecha, { preferir: moneda });
     const cfg = ids.length ? await leerConfigCircuito(this.prisma, tenantId) : null;
 
     return lineas.map((l, i) => {
@@ -452,9 +455,16 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         ensayoCodigo = e.codigo;
         descripcion = descripcion || `${e.codigo} · ${e.nombre}`;
         const elegido = elegirPrecio(lista.get(e.id), e.precio != null ? Number(e.precio) : null, ctx.regla, cfg!.precioEjercito);
-        const clp = elegido?.precio ?? null;
-        if (elegido?.origen === "lista") fuente = `la lista de precios vigente (${elegido.lista!.nombre}, ${elegido.lista!.itemCodigo})`;
-        precioFicha = clp != null && clp > 0 ? (moneda === "USD" ? Math.round((clp / (dolar || 1)) * 100) / 100 : clp) : null;
+        if (elegido?.origen === "lista") fuente = `la lista de precios vigente (${elegido.lista!.nombre}, ${elegido.lista!.itemCodigo}, ${elegido.moneda})`;
+        if (elegido) {
+          const conv = precioParaCotizacion(elegido, moneda, dolar, e.codigo);
+          if (conv.error !== undefined) {
+            // Una línea ya cotizada que conserva su precio no se bloquea (precio-ficha.ts).
+            const previo = existentes?.ensayos.get(e.id);
+            const conserva = previo != null && (l.precioUnitario == null || Math.abs(Number(l.precioUnitario) - previo) < 0.005);
+            if (!conserva) throw new BadRequestException(`Línea ${i + 1}: ${conv.error}`);
+          } else precioFicha = conv.precio > 0 ? conv.precio : null;
+        }
       }
       // EP-00 2.2 (BL-149): el ensayo se valoriza con la lista vigente o su ficha; sin ensayo, solo gastos tipificados.
       const r = precioDeLinea({ ...l, ensayoCodigo, descripcion }, precioFicha, i + 1, existentes, fuente);
@@ -469,7 +479,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         diasOHoras: l.diasOHoras ?? null,
         precioUnitario: Number(precio),
         descuentoPct: 0,
-        subtotal: cantidad * Number(precio),
+        // Frente f6: CLP sin decimales, USD a 2 decimales.
+        subtotal: redondearMoneda(cantidad * Number(precio), moneda),
         tramo: l.tramo ?? null,
         orden: i + 1,
         catEnsayoId: l.catEnsayoId ?? null,
@@ -489,22 +500,26 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * Precio de cada ensayo para un cliente (vista previa del formulario de la
    * cotización; misma regla que al guardar). GET /cotizaciones/precios-ensayo.
    */
-  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string) {
+  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string, monedaCot?: string) {
+    const moneda = monedaDe(monedaCot);
     const fechaEmision = isoFecha(soloFecha(fecha ?? hoyEnChile()));
     const validez = await this.calcularValidezPara(tenantId, clienteId, null, fechaEmision);
     const ensayos = catEnsayoIds.length
       ? await this.prisma.catEnsayo.findMany({ where: { id: { in: catEnsayoIds }, tenantId, deletedAt: null }, select: { id: true, codigo: true, precio: true } })
       : [];
-    const lista = await itemsListaVigente(this.prisma, tenantId, ensayos.map((e) => e.id), fechaEmision);
+    const lista = await itemsListaVigente(this.prisma, tenantId, ensayos.map((e) => e.id), fechaEmision, { preferir: moneda });
     const cfg = await leerConfigCircuito(this.prisma, tenantId);
     return {
       regla: validez.regla,
       fecha: fechaEmision,
+      moneda,
       precioEjercito: cfg.precioEjercito,
       precios: Object.fromEntries(
         ensayos.map((e) => {
           const p = elegirPrecio(lista.get(e.id), e.precio != null ? Number(e.precio) : null, validez.regla, cfg.precioEjercito);
-          return [e.id, p ? { precio: p.precio, origen: p.origen, columna: p.columna ?? null, lista: p.lista ?? null } : { precio: null, origen: null, columna: null, lista: null }];
+          // Frente f6: el precio va en la moneda de su lista; `bloqueo` = no se puede cotizar en la moneda pedida.
+          const bloqueo = p && p.moneda === "USD" && moneda === "CLP" ? precioParaCotizacion(p, moneda, null, e.codigo).error ?? null : null;
+          return [e.id, p ? { precio: p.precio, moneda: p.moneda, origen: p.origen, columna: p.columna ?? null, lista: p.lista ?? null, bloqueo } : { precio: null, moneda: null, origen: null, columna: null, lista: null, bloqueo: null }];
         }),
       ),
     };
@@ -515,11 +530,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    *   total = SUMA(líneas) [+ gastos admin si se piden] [+ IVA si se pide].
    * R1: la cotización ya NO tiene descuento (descuento = 0 siempre).
    */
-  private totales(lineas: { subtotal: number }[], gastosAdminPct = 0, ivaPct = 0) {
-    const subtotal = lineas.reduce((a, l) => a + l.subtotal, 0);
-    const gastosAdminMonto = subtotal * (gastosAdminPct / 100);
-    const neto = subtotal + gastosAdminMonto;
-    const ivaMonto = neto * (ivaPct / 100);
+  private totales(lineas: { subtotal: number }[], gastosAdminPct = 0, ivaPct = 0, moneda: string = "CLP") {
+    // Frente f6: cada importe redondeado a su moneda (CLP sin decimales, USD a 2).
+    const r = (v: number) => redondearMoneda(v, moneda);
+    const subtotal = r(lineas.reduce((a, l) => a + l.subtotal, 0));
+    const gastosAdminMonto = r(subtotal * (gastosAdminPct / 100));
+    const neto = r(subtotal + gastosAdminMonto);
+    const ivaMonto = r(neto * (ivaPct / 100));
     return {
       subtotal,
       descuentoPct: 0,
@@ -529,7 +546,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       neto,
       ivaPct,
       ivaMonto,
-      total: neto + ivaMonto,
+      total: r(neto + ivaMonto),
     };
   }
 
@@ -556,7 +573,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
     if (data.oportunidadId) await validarOportunidad(this.prisma, tenantIdFromJWT, data.clienteId, data.oportunidadId);
     const lineas = await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, { regla: validez.regla, fecha: isoFecha(fechaEmision) });
-    const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0));
+    const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0), moneda);
     // Número real (EP-00 2.1 · «2026-14324»), correlativo atómico por tenant.
     const codigo = await generarNumeroCotizacion(this.prisma, tenantIdFromJWT, fechaEmision);
     // Ejecutivo = usuario autenticado, solo si existe (FK a usuario).
@@ -674,12 +691,14 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (resto.lineas) {
       if (!resto.lineas.length) throw new BadRequestException("La cotización debe tener al menos una línea.");
       // Las líneas ya cotizadas conservan su precio aunque la ficha cambie (precio-ficha.ts).
+      // Frente f6: si cambia la moneda, los precios guardados (en la moneda anterior) no se conservan: se recalculan.
+      const mismaMoneda = monedaDe(actual.moneda) === moneda;
       const existentes: Existentes = {
-        ensayos: new Map(actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, Number(x.precioUnitario)])),
+        ensayos: new Map(mismaMoneda ? actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, Number(x.precioUnitario)]) : []),
         libres: new Set(actual.lineas.filter((x: any) => !x.catEnsayoId).map((x: any) => claveLibre(x.tipo, x.descripcion, Number(x.precioUnitario)))),
       };
       const lineas = await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar, existentes, { regla: validez.regla, fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())) });
-      const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0));
+      const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0), moneda);
       return this.prisma.$transaction(async (tx) => {
         await tx.lineaCotizacion.deleteMany({ where: { cotizacionId: id } });
         return tx.cotizacion.update({
@@ -795,7 +814,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         WHERE cotizacion_id = $1::uuid AND deleted_at IS NULL AND respondida_at IS NOT NULL`,
       id,
     ).catch(() => []);
-    const inicial = valorInicialOt(Number(cot.total ?? 0), costeos);
+    // Frente f6: el costo estimado de la OT va en CLP (una cotización en USD, con su dólar del día).
+    const inicial = valorInicialOt(Number(cot.total ?? 0), costeos, { moneda: cot.moneda, dolar: cot.dolarValor != null ? Number(cot.dolarValor) : null });
 
     const { cotizacion, ot } = await this.prisma.$transaction(async (tx) => {
       const existente = await tx.ordenTrabajo.findFirst({

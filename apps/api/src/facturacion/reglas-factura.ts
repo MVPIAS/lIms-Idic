@@ -6,6 +6,7 @@
  * la OT) → emitida (Finanzas la revisa y le da el folio) → parcial (pagos que
  * no cubren el total) → pagada; anulada. aviso_1..cde: cobranza heredada.
  */
+import { redondearMoneda } from "../common/moneda";
 
 export const ESTADOS_FACTURA = ["pendiente", "emitida", "parcial", "pagada", "anulada"] as const;
 
@@ -42,9 +43,9 @@ const n = (v: unknown): number => {
   return Number.isFinite(x) ? x : 0;
 };
 
-/** Redondeo de importes: pesos sin decimales; otras monedas a 2 decimales. */
+/** Redondeo de importes: pesos sin decimales; otras monedas a 2 decimales (common/moneda.ts). */
 export function redondear(v: number, moneda: string | null | undefined): number {
-  return (moneda ?? "CLP").toUpperCase() === "CLP" ? Math.round(v) : Math.round(v * 100) / 100;
+  return redondearMoneda(v, moneda);
 }
 
 const pct = (v: unknown) => {

@@ -115,13 +115,23 @@ export function validarOrigenOt(d: {
  * total de la cotización; recorrido MP-02, D02-09). Las horas hombre son las que
  * el laboratorio declaró al responder el costeo (FORM05/FORM06). Sin cotización
  * o con total 0 queda en 0 (OT sin cobro: lo registra quien la crea).
+ *
+ * Frente f6: `orden_trabajo.costo_estimado` está en CLP (costos reales, reportes).
+ * Una cotización en USD se lleva a pesos con SU dólar del día congelado
+ * (`dolar_valor`, el que la cotización exige): no se inventa un tipo de cambio.
+ * El valor en dólares se conserva en el encargo (`ot_encargo.valor_inicial` y `moneda`).
+ * Sin ese dólar, el costo estimado queda en 0.
  */
 export function valorInicialOt(
   totalCotizacion: number,
   costeos: { horas: number | null; costo: number | null }[] = [],
+  cot: { moneda?: string | null; dolar?: number | null } = {},
 ): { costoEstimado: number; horasHombre: number } {
   const r2 = (n: number) => Math.round(n * 100) / 100;
-  const total = Number.isFinite(totalCotizacion) && totalCotizacion > 0 ? totalCotizacion : 0;
+  const enPesos = (cot.moneda ?? "CLP").trim().toUpperCase() !== "USD";
+  const bruto = Number.isFinite(totalCotizacion) && totalCotizacion > 0 ? totalCotizacion : 0;
+  const dolar = Number(cot.dolar);
+  const total = enPesos ? bruto : Number.isFinite(dolar) && dolar > 0 ? Math.round(bruto * dolar) : 0;
   const horas = costeos.reduce((s, c) => s + (Number(c.horas) > 0 ? Number(c.horas) : 0), 0);
   return { costoEstimado: r2(total), horasHombre: r2(horas) };
 }

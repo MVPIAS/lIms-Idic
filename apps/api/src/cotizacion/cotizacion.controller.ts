@@ -258,7 +258,7 @@ export class CotizacionController {
   /**
    * Precio de cada ensayo para el cliente según la lista de precios vigente
    * (neto para un particular) o la ficha de costos: vista previa del formulario.
-   * ?clienteId=&ids=uuid,uuid&fecha=AAAA-MM-DD
+   * ?clienteId=&ids=uuid,uuid&fecha=AAAA-MM-DD&moneda=CLP|USD
    */
   @Get("precios-ensayo")
   @RequierePermiso("cotizacion.ver")
@@ -268,14 +268,18 @@ export class CotizacionController {
     @Query("ids") idsQ: string | undefined,
     @Query("fecha") fechaQ: string | undefined,
     @Req() req: any,
+    @Query("moneda") monedaQ?: string,
   ) {
     const uuid = z.string().uuid();
+    // Frente f6: moneda de la cotización (CLP por defecto); el precio vuelve en la moneda de su lista.
+    const moneda = monedaQ ? zMoneda.safeParse(monedaQ) : null;
+    if (moneda && !moneda.success) throw new BadRequestException(moneda.error.issues[0].message);
     if (!uuid.safeParse(clienteId).success) throw new BadRequestException("clienteId (uuid) es obligatorio");
     const ids = [...new Set(String(idsQ ?? "").split(",").map((x) => x.trim()).filter(Boolean))];
     if (ids.length > 200) throw new BadRequestException("Máximo 200 ensayos por consulta.");
     if (ids.some((x) => !uuid.safeParse(x).success)) throw new BadRequestException("ids: lista de uuid separados por coma");
     if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
-    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined);
+    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined, moneda?.success ? moneda.data : "CLP");
   }
 
   /**
