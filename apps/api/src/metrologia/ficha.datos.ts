@@ -11,14 +11,15 @@ import { generarPdf } from "../plantilla-render/pdf.renderer";
 import type { ConsultaCruda } from "./metrologia-ot.datos";
 import { actualizacionEquipo, actualizacionPatronLnf, configFicha, destinatariosAviso, type ConfigFicha, type PatronMaestro } from "./ficha.reglas";
 import { urlVerificacionBase } from "../common/url-verificacion";
+import { ZONA_CHILE, diaInstanteChile, diaChile as diaCalendario } from "../common/fecha-chile";
 
 /** Cliente con escritura (PrismaService, PrismaClient o la transacción `tx`). */
 export interface ConsultaEscritura extends ConsultaCruda {
   $executeRawUnsafe(query: string, ...values: any[]): Promise<number>;
 }
 
-const diaChile = (d: Date | string) => new Date(d).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
-const fechaIso = (d: any): string => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d ?? "").slice(0, 10));
+const diaChile = (d: Date | string) => diaInstanteChile(d) ?? "";
+const fechaIso = (d: any): string => (d instanceof Date ? diaCalendario(d) ?? "" : String(d ?? "").slice(0, 10));
 /** AAAA-MM-DD → DD-MM-AAAA para los textos de la bitácora. */
 const fechaCl = (iso: string | null | undefined): string => {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? "");
@@ -138,7 +139,7 @@ export async function pdfEmitido(cal: { numero_certificado: string; codigo_verif
     numero: cal.numero_certificado,
     codigoVerificacion: cal.codigo_verificacion ?? "SIN EMITIR",
     hash: cal.certificado_hash ?? createHash("sha256").update(cal.documento_html, "utf8").digest("hex"),
-    fecha: new Date(cal.emitido_at ?? Date.now()).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }),
+    fecha: new Date(cal.emitido_at ?? Date.now()).toLocaleDateString("es-CL", { timeZone: ZONA_CHILE }),
     urlVerificacion: cal.codigo_verificacion ? `${URL_VERIFICACION()}/${cal.codigo_verificacion}` : URL_VERIFICACION(),
     borrador: false,
   };

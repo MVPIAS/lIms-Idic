@@ -12,6 +12,10 @@ RUN pnpm install --no-frozen-lockfile
 # el .env del servidor. Vacío = valor por defecto de la aplicación (20).
 ARG NEXT_PUBLIC_IDLE_MINUTES=""
 ENV NEXT_PUBLIC_IDLE_MINUTES=$NEXT_PUBLIC_IDLE_MINUTES
+# Zona horaria del IDIC en la web (frente f8, lib/fecha-chile.ts). Vacío =
+# America/Santiago. Se incrusta al compilar, como la anterior.
+ARG NEXT_PUBLIC_ZONA_HORARIA=""
+ENV NEXT_PUBLIC_ZONA_HORARIA=$NEXT_PUBLIC_ZONA_HORARIA
 RUN pnpm --filter @lims-idic/web build
 
 FROM node:20-alpine AS run

@@ -23,6 +23,7 @@ import NoCalibrables from "./NoCalibrables";
 import {
   ESTADO_CALIBRACION, ESTADO_INSTRUMENTO, ESTADOS_FISICOS, SENTIDOS, ahoraLocal, imprimirActaDevolucion, imprimirEtiqueta, imprimirRecepcion,
 } from "@/lib/metrologiaOt";
+import { hoyChile } from "@/lib/fecha-chile";
 
 type Dialogo =
   | { tipo: "item"; item?: any }
@@ -456,7 +457,7 @@ function DialogoRecepcion({ item, laboratorio, ocupado, onCerrar, onGuardar }: {
 
 function DialogoEntrega({ item, ocupado, onCerrar, onGuardar }: { item: any; ocupado: boolean; onCerrar: () => void; onGuardar: (b: any) => void }) {
   const medios = useMediosEnvio(); // frente f5: «Parámetros del sistema › medio_envio»
-  const [f, setF] = useState({ fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), medio: "", destinatario: "", observacion: "" });
+  const [f, setF] = useState({ fecha: hoyChile(), medio: "", destinatario: "", observacion: "" });
   return (
     <Modal titulo={`Registrar la entrega del certificado ${item.calibracion?.numeroCertificado ?? ""}`} onCerrar={onCerrar}
       acciones={botones(ocupado, onCerrar, "Registrar entrega → Cierre de OT", !!(f.fecha && f.medio && f.destinatario.trim().length >= 2),

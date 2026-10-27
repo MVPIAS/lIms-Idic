@@ -10,6 +10,7 @@
  *   desarrollo `localStorage.lims_admin_mock = "1"`. Usa datos ficticios en memoria.
  */
 import { errorMensajeDe } from "./apiError";
+import { diaChile, hoyChile } from "./fecha-chile";
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 export const MOCK_ENV = process.env.NEXT_PUBLIC_ADMIN_MOCK === "1";
@@ -483,22 +484,18 @@ export function fraseCadena(pasos: { accion: AccionFirma; quien: string }[]): st
 }
 
 /** Fecha local: "AAAA-MM-DD" se interpreta como día local (no UTC, que en Chile resta un día). */
-function parseFecha(iso: string): Date {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(iso);
-}
-
+/** dd-mm-aaaa del día en Chile (frente f8: sin depender de la zona del equipo). */
 export function fechaCorta(iso?: string | null): string {
   if (!iso) return "";
-  const d = parseFecha(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("es-CL", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const d = diaChile(iso);
+  return d ? `${d.slice(8, 10)}-${d.slice(5, 7)}-${d.slice(0, 4)}` : iso;
 }
-/** ¿La asignación está vigente hoy? */
+/** ¿La asignación está vigente hoy (día en Chile)? */
 export function vigente(a: Pick<Asignacion, "vigenteDesde" | "vigenteHasta">, hoy = new Date()): "vigente" | "futura" | "vencida" {
-  const d = a.vigenteDesde ? parseFecha(a.vigenteDesde) : null;
-  const h = a.vigenteHasta ? parseFecha(a.vigenteHasta) : null;
-  if (d && d > hoy) return "futura";
-  if (h && h < new Date(hoy.toDateString())) return "vencida";
+  const dia = hoyChile(hoy);
+  const d = a.vigenteDesde ? diaChile(a.vigenteDesde) : null;
+  const h = a.vigenteHasta ? diaChile(a.vigenteHasta) : null;
+  if (d && d > dia) return "futura";
+  if (h && h < dia) return "vencida";
   return "vigente";
 }

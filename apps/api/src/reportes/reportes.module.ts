@@ -20,6 +20,7 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { condicionAlcance } from "./alcance-reportes";
 import { ReportesGestionController } from "./reportes-gestion.controller";
+import { hoyChile } from "../common/fecha-chile";
 
 // ===========================================================================
 // Módulo REPORTES · KPIs (contrato §4.5.3) + exportación con filtros (§4.6.6 /
@@ -553,7 +554,7 @@ export class ReportesController extends ReportesBase {
 
     if ((formato ?? "").toLowerCase() === "csv") {
       const csv = toCsv(claves, filas);
-      const stamp = new Date().toISOString().slice(0, 10);
+      const stamp = hoyChile();
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="reporte_${entidad}_${stamp}.csv"`);
       // BOM para que Excel (Windows) detecte UTF-8 y no rompa acentos.

@@ -17,6 +17,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { condicionAlcance } from "./alcance-reportes";
 import { libroXlsx } from "../common/xlsx-escritura";
 import { hojasGestion, otPorLaboratorioEstado, plazosPorLaboratorio, type ReporteGestion } from "./gestion";
+import { SQL_ZONA } from "../common/fecha-chile";
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const n = (x: unknown) => (x === null || x === undefined ? 0 : Number(x));
@@ -72,10 +73,10 @@ export class ReportesGestionController {
               CASE WHEN o.fecha_cierre IS NOT NULL AND o.fecha_recepcion IS NOT NULL
                    THEN EXTRACT(EPOCH FROM (o.fecha_cierre - o.fecha_recepcion)) / 86400.0 END::float8 AS dias,
               CASE WHEN o.fecha_compromiso IS NULL OR o.estado <> 'cerrada' THEN NULL
-                   ELSE COALESCE(o.fecha_recep_dco, (o.fecha_cierre AT TIME ZONE 'America/Santiago')::date) <= o.fecha_compromiso END AS dentro,
-              (o.estado NOT IN ('cerrada', 'anulada') AND o.fecha_compromiso < (now() AT TIME ZONE 'America/Santiago')::date) AS vencida,
+                   ELSE COALESCE(o.fecha_recep_dco, (o.fecha_cierre AT TIME ZONE ${SQL_ZONA})::date) <= o.fecha_compromiso END AS dentro,
+              (o.estado NOT IN ('cerrada', 'anulada') AND o.fecha_compromiso < (now() AT TIME ZONE ${SQL_ZONA})::date) AS vencida,
               CASE WHEN o.fecha_compromiso IS NULL OR o.estado <> 'cerrada' THEN NULL
-                   ELSE COALESCE(o.fecha_recep_dco, (o.fecha_cierre AT TIME ZONE 'America/Santiago')::date) - o.fecha_compromiso END AS atraso
+                   ELSE COALESCE(o.fecha_recep_dco, (o.fecha_cierre AT TIME ZONE ${SQL_ZONA})::date) - o.fecha_compromiso END AS atraso
          FROM orden_trabajo o LEFT JOIN unidad u ON u.id = o.unidad_principal
         WHERE o.tenant_id = $1::uuid AND o.estado <> 'anulada' ${a2.cond}`,
       a2.args,

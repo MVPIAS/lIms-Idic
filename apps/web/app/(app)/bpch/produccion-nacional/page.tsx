@@ -19,6 +19,7 @@ import { usePermisos } from "@/lib/permisos";
 import { llamar, qs } from "@/lib/laboratorio";
 import { rut } from "@/lib/format";
 import { ESTADO_OC, dia } from "@/lib/bpchProcesos";
+import { anioChile } from "@/lib/fecha-chile";
 
 type Raf = any;
 
@@ -26,7 +27,7 @@ export default function ProduccionNacionalPage() {
   const router = useRouter();
   const { puede } = usePermisos();
   const [tab, setTab] = useState<"oc" | "raf">("oc");
-  const [anio, setAnio] = useState(String(new Date().getFullYear()));
+  const [anio, setAnio] = useState(String(anioChile()));
   const [estado, setEstado] = useState("");
   const [q, setQ] = useState("");
   const [ocs, setOcs] = useState<any[]>([]);

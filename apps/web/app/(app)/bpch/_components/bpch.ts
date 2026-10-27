@@ -1,4 +1,5 @@
 "use client";
+import { hoyChile } from "@/lib/fecha-chile";
 
 /**
  * Helpers de las pantallas BPCH (Internación, Reinspección, Codificación Única).
@@ -59,11 +60,7 @@ export const CONDICION: Record<string, { l: string; c: string }> = {
   pendiente: { l: "PENDIENTE", c: "gray" },
 };
 
-export const hoy = () => {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
+export const hoy = () => hoyChile();
 
 /** "2026-10-17T00:00:00.000Z" → "2026-10-17" para un <input type="date">. */
 export const dia = (v: unknown) => (v ? String(v).slice(0, 10) : "");

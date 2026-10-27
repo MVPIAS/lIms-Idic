@@ -6,10 +6,11 @@
  */
 
 import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
+import { SQL_ZONA } from "../common/fecha-chile";
 
 const OT_TERMINADA = `('cerrada','anulada','finalizada','informada')`;
 const OT_CERRADA = `('cerrada','anulada')`;
-const HOY_CL = `(now() AT TIME ZONE 'America/Santiago')::date`;
+const HOY_CL = `(now() AT TIME ZONE ${SQL_ZONA})::date`;
 const OT_SCOPE = `o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))`;
 
 /** Fila de OT con cliente y laboratorio, para las tarjetas de OT. */

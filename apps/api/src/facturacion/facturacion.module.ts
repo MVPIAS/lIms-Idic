@@ -24,6 +24,7 @@ import {
   validarNotaCredito,
   validarPago,
 } from "./reglas-factura";
+import { SQL_ZONA, hoyChile, hoyFechaChile } from "../common/fecha-chile";
 
 /* ===================== FACTURAS ===================== */
 @Injectable()
@@ -192,7 +193,7 @@ export class FacturaService extends BaseCrudService {
       ot.id,
     );
     const [o] = await tx.$queryRawUnsafe(
-      `SELECT to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha,
+      `SELECT to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE ${SQL_ZONA}, 'YYYY-MM-DD') AS fecha,
               -- Frente f6: el borrador va en CLP; el valor inicial del encargo solo si está en CLP.
               COALESCE(NULLIF(o.costo_estimado, 0), NULLIF(CASE WHEN COALESCE(upper(e.moneda), 'CLP') = 'CLP' THEN e.valor_inicial END, 0))::float8 AS estimado,
               cl.tipo AS "tipoCliente", ps.valor AS "reglaParam"
@@ -204,7 +205,7 @@ export class FacturaService extends BaseCrudService {
       ot.id,
     );
     // Frente f6: el borrador sin cotización va en CLP: solo listas en CLP (una lista en USD no se toma como pesos).
-    const lista = await itemsListaVigente(tx, ot.tenantId, ensayos.map((e) => e.id), o?.fecha ?? new Date().toISOString().slice(0, 10), { soloMoneda: "CLP" });
+    const lista = await itemsListaVigente(tx, ot.tenantId, ensayos.map((e) => e.id), o?.fecha ?? hoyChile(), { soloMoneda: "CLP" });
     const cfg = ensayos.length ? await leerConfigCircuito(tx, ot.tenantId) : null;
     const regla = reglaDeTipoCliente(o?.tipoCliente, o?.reglaParam);
     return lineasDesdeOt(
@@ -234,7 +235,7 @@ export class FacturaService extends BaseCrudService {
       where: { id },
       data: {
         numero: dto.numero,
-        fechaEmision: dto.fechaEmision ?? new Date(),
+        fechaEmision: dto.fechaEmision ?? hoyFechaChile(),
         estado: "emitida",
         emitidaPor: usuarioId,
         emitidaAt: new Date(),

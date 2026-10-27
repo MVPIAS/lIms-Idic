@@ -15,6 +15,7 @@ import { toast } from "@/components/ui/feedback";
 import { clp, fechaHora } from "@/lib/format";
 import { llamar } from "@/lib/laboratorio";
 import { descargarAdjunto } from "@/lib/d11";
+import { mesChile } from "@/lib/fecha-chile";
 
 interface Fila {
   internacion: string | null;
@@ -46,7 +47,7 @@ const PAGO: Record<Fila["estadoPago"], [string, string]> = {
   pagada: ["Pagada", "green"],
 };
 
-const mesActual = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit" }).format(new Date());
+const mesActual = () => mesChile();
 const nombreMes = (m: string) => {
   const [a, n] = m.split("-").map(Number);
   return new Date(Date.UTC(a, n - 1, 15)).toLocaleDateString("es-CL", { month: "long", year: "numeric", timeZone: "UTC" });

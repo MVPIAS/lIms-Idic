@@ -1,3 +1,4 @@
+import { hoyChile } from "./fecha-chile";
 /**
  * documentos.ts · utilidades del circuito de firma de informes/certificados,
  * de los plazos de la OT y de la facturación (frontend).
@@ -53,7 +54,7 @@ export const SEMAFORO: Record<string, { texto: string; pill: string }> = {
 export const UMBRAL_POR_VENCER_DIAS = 3;
 
 function hoyCl(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return hoyChile();
 }
 
 /** Semáforo calculado en el cliente a partir de la fecha de compromiso (columna DATE). */

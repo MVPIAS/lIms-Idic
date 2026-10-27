@@ -14,6 +14,7 @@ import { fechaHora } from "@/lib/format";
 import { PageHeader, EmptyState, SkeletonRows } from "@/components/ui/PageHeader";
 import RequierePermiso from "@/components/RequierePermiso";
 import { RECURSO_PERSONAS, etiquetaPersona, type Persona } from "@/lib/personas";
+import { hoyChile, sumarDiasCalendario } from "@/lib/fecha-chile";
 
 const ACCION_LABEL: Record<string, string> = {
   crear: "Creación",
@@ -23,11 +24,7 @@ const ACCION_LABEL: Record<string, string> = {
 };
 const ACCION_PILL: Record<string, string> = { crear: "green", modificar: "blue", eliminar: "red", vencer: "amber" };
 
-const hace = (dias: number) => {
-  const d = new Date();
-  d.setDate(d.getDate() - dias);
-  return d.toISOString().slice(0, 10);
-};
+const hace = (dias: number) => sumarDiasCalendario(hoyChile(), -dias);
 
 export default function AuditoriaPage() {
   return (

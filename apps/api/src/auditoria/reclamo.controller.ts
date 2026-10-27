@@ -6,7 +6,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
-import { anioChile } from "../common/fecha-chile";
+import { anioChile, hoyChile } from "../common/fecha-chile";
 import { siguienteCodigoNc } from "./no-conformidad.reglas";
 
 /**
@@ -140,7 +140,7 @@ export class ReclamoController {
     }
     const u = await this.unidades(req);
     if (u !== null && !(unidadId && u.includes(unidadId))) throw new ForbiddenException("Solo registra reclamos de OT de sus laboratorios.");
-    if (d.fecha > new Date().toISOString().slice(0, 10)) throw new BadRequestException("La fecha del reclamo no puede ser futura.");
+    if (d.fecha > hoyChile()) throw new BadRequestException("La fecha del reclamo no puede ser futura.");
     for (let intento = 0; intento < 3; intento++) {
       const ultimo = await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(
         `SELECT codigo FROM no_conformidad WHERE tenant_id = $1::uuid AND codigo LIKE $2 ORDER BY codigo DESC LIMIT 1`,

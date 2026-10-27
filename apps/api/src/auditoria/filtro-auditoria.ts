@@ -1,3 +1,4 @@
+import { inicioDiaChile, sumarDiasCalendario } from "../common/fecha-chile";
 /**
  * Filtro de la bitácora (audit_log) · RF-H04.3. Función PURA: arma el `where`
  * de Prisma a partir de los filtros de pantalla y del alcance del usuario.
@@ -19,10 +20,16 @@ export interface FiltrosAuditoria {
   hasta?: Date;
 }
 
-/** 'AAAA-MM-DD' en «hasta» significa todo ese día: se lleva al instante final. */
+/** 'AAAA-MM-DD' en «desde» es el comienzo de ese día en Chile (frente f8). */
+export function inicioDelDia(valor: string | Date): Date {
+  if (typeof valor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(valor)) return inicioDiaChile(valor)!;
+  return valor instanceof Date ? valor : new Date(valor);
+}
+
+/** 'AAAA-MM-DD' en «hasta» significa todo ese día en Chile: se lleva a su último instante. */
 export function finDelDia(valor: string | Date): Date {
   if (typeof valor === "string" && /^\d{4}-\d{2}-\d{2}$/.test(valor)) {
-    return new Date(`${valor}T23:59:59.999Z`);
+    return new Date(inicioDiaChile(sumarDiasCalendario(valor, 1))!.getTime() - 1);
   }
   return valor instanceof Date ? valor : new Date(valor);
 }

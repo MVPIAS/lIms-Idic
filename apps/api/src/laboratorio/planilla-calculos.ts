@@ -1,3 +1,4 @@
+import { ZONA_CHILE } from "../common/fecha-chile";
 /**
  * Planilla de registros y cálculos de una OT (vista auditable, de solo lectura)
  * · LIMS IDIC. Depto. Químico, 15-10-2026: «se debe agregar una vista de
@@ -157,7 +158,7 @@ const fila = (xs: unknown[]) => xs.map(celdaCsv).join(";");
 const fechaTexto = (f: string | Date | null | undefined) => {
   if (!f) return "";
   const d = new Date(f);
-  return Number.isNaN(d.getTime()) ? String(f) : d.toLocaleString("es-CL", { timeZone: "America/Santiago" });
+  return Number.isNaN(d.getTime()) ? String(f) : d.toLocaleString("es-CL", { timeZone: ZONA_CHILE });
 };
 
 /** CSV de la planilla (para abrir en Excel): cálculos y, debajo, el historial. */

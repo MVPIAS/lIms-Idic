@@ -3,6 +3,7 @@
  * puras, probadas en reglas-tarifas.spec.ts.
  */
 import { z } from "zod";
+import { diaChile } from "../common/fecha-chile";
 
 export const MSJ_SIN_BORRADO =
   "Las tarifas no se borran (pueden haberse usado en costeos y cotizaciones): edítela y márquela inactiva.";
@@ -19,7 +20,7 @@ const activo = z.preprocess((v) => (v === "si" || v === "true" ? true : v === "n
 
 /** desde ≤ hasta (fechas AAAA-MM-DD o Date). */
 export function erroresVigencia(desde: unknown, hasta: unknown): string[] {
-  const iso = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : v == null || v === "" ? null : String(v).slice(0, 10));
+  const iso = (v: unknown) => (v instanceof Date ? diaChile(v) : v == null || v === "" ? null : String(v).slice(0, 10));
   const d = iso(desde);
   const h = iso(hasta);
   if (!d) return ["Indique la fecha de inicio de la vigencia."];

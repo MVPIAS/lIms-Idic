@@ -21,6 +21,7 @@ import { llamar } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
 import { toast } from "@/components/ui/feedback";
 import EditorTabla, { type ColumnaTabla } from "./EditorTabla";
+import { anioChile } from "@/lib/fecha-chile";
 
 type Tipo = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
 interface Opcion { valor: string; etiqueta: string }
@@ -68,7 +69,7 @@ function borradorDe(p: Parametro): Borrador {
 /** Ejemplo del formato de número de la cotización (el servidor valida). */
 function ejemplo(formato: string, digitos: number) {
   if (!formato.includes("{N}")) return null;
-  return formato.replace(/\{AAAA\}/g, String(new Date().getFullYear())).replace(/\{N\}/g, "1".padStart(Math.max(1, Math.min(10, digitos || 1)), "0"));
+  return formato.replace(/\{AAAA\}/g, String(anioChile())).replace(/\{N\}/g, "1".padStart(Math.max(1, Math.min(10, digitos || 1)), "0"));
 }
 
 const TEXTO_ALTA: Record<Alta, string> = { laboratorio: "＋ Añadir laboratorio", campo: "＋ Añadir campo", metodo: "＋ Añadir método", plantilla: "＋ Añadir plantilla" };

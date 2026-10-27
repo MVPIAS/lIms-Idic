@@ -14,6 +14,9 @@
 // Decimal como string), devolviendo un guion "—" cuando no hay dato.
 // =============================================================================
 
+import { diaChile, hoyChile, partesChile } from "./fecha-chile";
+export { ZONA_CHILE, anioChile, diaChile, hoyChile, mesChile, sumarDiasCalendario, ahoraInputChile } from "./fecha-chile";
+
 const NBSP = " "; // espacio fino no separable entre símbolo y número
 const GUION = "—";
 
@@ -82,32 +85,18 @@ const SOLO_DIA = /^(\d{4})-(\d{2})-(\d{2})(?:T00:00:00(?:\.000)?Z)?$/;
 
 /** Hoy en Chile como «aaaa-mm-dd» (valor por defecto de los <input type="date">). */
 export function hoyISO(): string {
-  try {
-    return new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
-  } catch {
-    const d = new Date();
-    const p = (n: number) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  }
+  return hoyChile();
 }
 
 /**
  * Día, mes, año, hora y minuto de un instante en la hora de CHILE, sea cual sea
  * la zona del equipo (o del servidor, al pre-renderizar): la misma regla que los
- * documentos y PDF (recorrido MP-02, D02-27).
+ * documentos y PDF (recorrido MP-02, D02-27). Ver lib/fecha-chile.ts.
  */
-function partesChile(d: Date): { dd: string; mm: string; aaaa: string; hh: string; mi: string } {
-  try {
-    const p = Object.fromEntries(
-      new Intl.DateTimeFormat("en-US", {
-        timeZone: "America/Santiago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
-      }).formatToParts(d).map((x) => [x.type, x.value]),
-    );
-    return { dd: p.day, mm: p.month, aaaa: p.year, hh: String(Number(p.hour) % 24).padStart(2, "0"), mi: p.minute };
-  } catch {
-    const p = (n: number) => String(n).padStart(2, "0");
-    return { dd: p(d.getDate()), mm: p(d.getMonth() + 1), aaaa: String(d.getFullYear()), hh: p(d.getHours()), mi: p(d.getMinutes()) };
-  }
+function partes(d: Date): { dd: string; mm: string; aaaa: string; hh: string; mi: string } {
+  const p = partesChile(d);
+  const dos = (n: number) => String(n).padStart(2, "0");
+  return { dd: dos(p.dia), mm: dos(p.mes), aaaa: String(p.anio), hh: dos(p.hora), mi: dos(p.minuto) };
 }
 
 /** Fecha dd-mm-aaaa en Chile. Acepta Date, ISO string o "aaaa-mm-dd" (las fechas sin hora, tal cual). */
@@ -123,27 +112,30 @@ export function fecha(v: unknown): string {
     const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/);
     return m ? `${m[3]}-${m[2]}-${m[1]}` : GUION;
   }
-  const p = partesChile(d);
+  const p = partes(d);
   return `${p.dd}-${p.mm}-${p.aaaa}`;
 }
 
-/** Fecha con hora: dd-mm-aaaa HH:MM. */
 /**
  * Fecha de CALENDARIO (columnas DATE: válida hasta, fecha OPI…). Prisma las
- * serializa como "aaaa-mm-ddT00:00:00.000Z"; con `fecha()` en Chile (UTC−3/−4)
- * saldrían un día antes. Aquí se toma la parte aaaa-mm-dd tal cual.
+ * serializa como "aaaa-mm-ddT00:00:00.000Z"; con la hora de Chile (UTC−3/−4)
+ * saldrían un día antes, así que se toma la parte aaaa-mm-dd tal cual.
+ * Frente f8 (D04-33): si llega un INSTANTE con hora (timestamptz, p. ej. la
+ * entrega registrada a las 21:30 de Chile = 00:30 UTC del día siguiente), se
+ * muestra su día en Chile, no el de UTC.
  */
 export function fechaDia(v: unknown): string {
-  if (!v) return GUION;
-  const m = String(v instanceof Date ? v.toISOString() : v).match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : fecha(v);
+  const dia = diaChile(v);
+  if (!dia) return v ? fecha(v) : GUION;
+  return `${dia.slice(8, 10)}-${dia.slice(5, 7)}-${dia.slice(0, 4)}`;
 }
 
+/** Fecha con hora: dd-mm-aaaa HH:MM. */
 export function fechaHora(v: unknown): string {
   if (!v) return GUION;
   const d = v instanceof Date ? v : new Date(String(v));
   if (isNaN(d.getTime())) return fecha(v);
-  const p = partesChile(d);
+  const p = partes(d);
   return `${p.dd}-${p.mm}-${p.aaaa} ${p.hh}:${p.mi}`;
 }
 
@@ -155,7 +147,7 @@ export function aInputHoraChile(v: unknown): string {
   if (!v) return "";
   const d = v instanceof Date ? v : new Date(String(v));
   if (isNaN(d.getTime())) return "";
-  const p = partesChile(d);
+  const p = partes(d);
   return `${p.aaaa}-${p.mm}-${p.dd}T${p.hh}:${p.mi}`;
 }
 
@@ -169,7 +161,7 @@ export function deInputHoraChile(local: string): string | null {
   if (!m) return null;
   const pared = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
   const comoUtc = (t: number) => {
-    const p = partesChile(new Date(t));
+    const p = partes(new Date(t));
     return Date.UTC(+p.aaaa, +p.mm - 1, +p.dd, +p.hh, +p.mi);
   };
   // Dos aproximaciones bastan: el desfase de Chile es −3 o −4 horas.

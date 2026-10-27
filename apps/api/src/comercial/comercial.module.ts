@@ -11,6 +11,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { ListaPrecioDetalleController, ListaPrecioDetalleService } from "../lista-precio/lista-precio-detalle.controller";
 import { MSJ_MONEDA, esMonedaHistorica, esMonedaOperacion, zMoneda } from "../common/moneda";
+import { diaChile } from "../common/fecha-chile";
 
 /* ===================== PROVEEDORES ===================== */
 @Injectable()
@@ -135,7 +136,7 @@ export class ListaPrecioService extends BaseCrudService {
   async actualizar(id: string, data: any, tenantId?: string) {
     const actual: any = await this.detalle(id, tenantId);
     if (esMonedaHistorica(actual.moneda)) {
-      const valor = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v ?? ""));
+      const valor = (v: unknown) => (v instanceof Date ? diaChile(v) ?? "" : String(v ?? ""));
       const cambia = (["codigo", "nombre", "moneda", "vigenteDesde"] as const).filter((k) => data?.[k] !== undefined && valor(data[k]) !== valor(actual[k]));
       if (cambia.length)
         throw new ConflictException(

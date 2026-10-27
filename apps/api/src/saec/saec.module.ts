@@ -47,7 +47,7 @@ import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-def
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { fmtFecha } from "../plantilla-render/html.util";
 import { cuerpoCertificadoSaec, tituloCertificadoSaec } from "./saec-certificado.plantilla";
-import { anioChile, hoyChile } from "../common/fecha-chile";
+import { anioChile, hoyChile, SQL_ZONA, diaChile, fechaChile, instanteDeHoraChile, sumarDiasCalendario, ZONA_CHILE } from "../common/fecha-chile";
 import { escapeHtml, fmtFechaHora } from "../plantilla-render/html.util";
 import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 import { urlVerificacionBase } from "../common/url-verificacion";
@@ -1045,7 +1045,7 @@ export class EvidenciaController extends SaecBase {
     for (const p of peritajes) p.adjuntos = adjuntos.filter((a: any) => a.entidadId === p.id);
     const hoy = hoyChile();
     for (const p of prestamos)
-      p.vencido = prestamoVencido({ estado: p.estado, fechaDevolucionPrevista: p.fecha_devolucion_prevista ? new Date(p.fecha_devolucion_prevista).toISOString().slice(0, 10) : null }, hoy);
+      p.vencido = prestamoVencido({ estado: p.estado, fechaDevolucionPrevista: diaChile(p.fecha_devolucion_prevista) }, hoy);
 
     return {
       ...evidencia,
@@ -1783,11 +1783,11 @@ export class PrestamoEvidenciaController extends SaecBase {
     if (evidenciaId) { args.push(evidenciaId); filtros.push(`AND p.evidencia_id = $${args.length}::uuid`); }
     const where = filtros.join(" ");
 
-    if (vencidos === "1") filtros.push(`AND p.estado = 'entregado' AND p.fecha_devolucion_prevista < (now() AT TIME ZONE 'America/Santiago')::date`);
+    if (vencidos === "1") filtros.push(`AND p.estado = 'entregado' AND p.fecha_devolucion_prevista < (now() AT TIME ZONE ${SQL_ZONA})::date`);
     const where2 = filtros.join(" ");
     const data = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT p.*, e.codigo AS evidencia_codigo, e.tipo AS evidencia_tipo, e.nue AS evidencia_nue,
-              (p.estado = 'entregado' AND p.fecha_devolucion_prevista < (now() AT TIME ZONE 'America/Santiago')::date) AS vencido
+              (p.estado = 'entregado' AND p.fecha_devolucion_prevista < (now() AT TIME ZONE ${SQL_ZONA})::date) AS vencido
          FROM evidencia_prestamo p
          JOIN evidencia e ON e.id = p.evidencia_id
         WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ${where2}
@@ -1936,7 +1936,7 @@ export class PrestamoEvidenciaController extends SaecBase {
     if (!p) throw new NotFoundException("Solicitud de préstamo no encontrada");
     if (!["entregado", "devuelto"].includes(p.estado)) throw new BadRequestException("El acta de salida existe cuando la evidencia se entregó.");
     const fila = (k: string, v: unknown) => `<tr><th>${k}</th><td>${escapeHtml(v == null || v === "" ? "—" : String(v))}</td></tr>`;
-    const plazo = p.fecha_devolucion_prevista ? new Date(p.fecha_devolucion_prevista).toISOString().slice(0, 10).split("-").reverse().join("-") : "—";
+    const plazo = p.fecha_devolucion_prevista ? fechaChile(p.fecha_devolucion_prevista) : "—";
     await this.auditar(req, "prestamo", id, "ver", { acta: true });
     return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Acta ${escapeHtml(p.codigo)}</title>
 <style>
@@ -2845,17 +2845,19 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
   // ----- Barrido automático cada 24h (in-process, sin dependencias) ----------
   onModuleInit() {
     if (process.env.IBIS_CRON_HABILITADO !== "true") return;
-    this.log.log(`Barrido IBIS programado diario a las ${process.env.IBIS_CRON_HORA ?? "02:00"} (${process.env.TZ ?? "hora local"}).`);
+    this.log.log(`Barrido IBIS programado diario a las ${process.env.IBIS_CRON_HORA ?? "02:00"} (hora de ${ZONA_CHILE}).`);
     this.programarSiguienteBarrido();
   }
   onModuleDestroy() { if (this.timerCron) clearTimeout(this.timerCron); }
 
   private programarSiguienteBarrido() {
     const [hh, mm] = (process.env.IBIS_CRON_HORA ?? "02:00").split(":").map((n) => parseInt(n, 10));
+    // La hora del barrido es hora de Chile (ZONA_HORARIA), sea cual sea la zona del proceso (frente f8).
     const ahora = new Date();
-    const prox = new Date(ahora);
-    prox.setHours(Number.isFinite(hh) ? hh : 2, Number.isFinite(mm) ? mm : 0, 0, 0);
-    if (prox <= ahora) prox.setDate(prox.getDate() + 1);
+    const h = Number.isFinite(hh) ? hh : 2, mi = Number.isFinite(mm) ? mm : 0;
+    const a = (dia: string) => dia.split("-").map(Number) as [number, number, number];
+    let prox = instanteDeHoraChile(...a(hoyChile(ahora)), h, mi);
+    if (prox <= ahora) prox = instanteDeHoraChile(...a(sumarDiasCalendario(hoyChile(ahora), 1)), h, mi);
     this.timerCron = setTimeout(async () => {
       try { await this.barridoProgramado(); }
       catch (e: any) { this.log.error(`Barrido IBIS falló: ${e?.message ?? e}`); }

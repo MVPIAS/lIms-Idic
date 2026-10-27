@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { fechaHora } from "@/lib/format";
+import { fechaHora, fechaDia } from "@/lib/format";
 import { fmtG } from "@/lib/metrologia";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -33,7 +33,8 @@ const PENDIENTE: Record<string, { texto: string; f: (c: any) => boolean }> = {
   emitir: { texto: "Por firmar y emitir (le toca a usted)", f: (c) => (c.acciones ?? []).includes("EMITIR") },
   entregar: { texto: "Emitidos sin entrega registrada", f: (c) => c.estado === "emitida" && !c.entregado_at && !!c.ot_id },
 };
-const fecha = (x?: string | null) => (x ? new Date(x).toLocaleDateString("es-CL", { timeZone: "UTC" }) : "—");
+// Frente f8 (D04-33): DATE tal cual; un instante (entregado_at) con su día en Chile.
+const fecha = (x?: string | null) => fechaDia(x);
 
 export default function MetrologiaCalibracionesPage() {
   const { puede } = usePermisos();

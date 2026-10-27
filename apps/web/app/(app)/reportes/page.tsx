@@ -10,6 +10,7 @@ import Gestion from "./_components/Gestion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { clp, num, pct, fecha } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
+import { hoyChile } from "@/lib/fecha-chile";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -398,7 +399,7 @@ function Exportador({ desde, hasta }: { desde: string; hasta: string }) {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `reporte_${entidad}_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.download = `reporte_${entidad}_${hoyChile()}.csv`;
       document.body.appendChild(a);
       a.click();
       a.remove();

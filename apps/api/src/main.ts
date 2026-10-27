@@ -1,3 +1,5 @@
+// Primero: la zona horaria de la sesión de base de datos (frente f8).
+import "./common/zona-entorno";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";

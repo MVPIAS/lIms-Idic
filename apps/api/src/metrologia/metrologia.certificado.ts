@@ -28,6 +28,7 @@ import {
 import { altoObservaciones, paginar, type Bloque, type BloqueTabla } from "./certificado/paginacion";
 import { UNIDAD_SI, lineaEquivalenciasSI } from "./certificado/equivalencias";
 import { armarCertificadoLnf } from "./certificado/lnf";
+import { ZONA_CHILE, diaChile, diaInstanteChile } from "../common/fecha-chile";
 
 /** Texto de un párrafo: no hace falta escapar las comillas (así se lee «"--" = No aplica» tal cual). */
 const escTexto = (s: unknown) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]!);
@@ -39,10 +40,10 @@ const fg = (x: any, d = 6) => (x == null || x === "" || isNaN(Number(x)) ? NA : 
 /** Fecha DATE (sin hora) o AAAA-MM-DD → dd-mm-aaaa. */
 const dia = (x: any) => {
   if (!x) return NA;
-  const s = x instanceof Date ? x.toISOString().slice(0, 10) : String(x).slice(0, 10);
+  const s = x instanceof Date ? diaChile(x) ?? "" : String(x).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s.slice(8, 10)}-${s.slice(5, 7)}-${s.slice(0, 4)}` : esc(s);
 };
-const fechaHora = (x: any) => (x ? new Date(x).toLocaleString("es-CL", { timeZone: "America/Santiago", dateStyle: "short", timeStyle: "short" }) : "");
+const fechaHora = (x: any) => (x ? new Date(x).toLocaleString("es-CL", { timeZone: ZONA_CHILE, dateStyle: "short", timeStyle: "short" }) : "");
 /** U con dos cifras significativas (C12), escrita con sus decimales. */
 const u2 = (U: number | null | undefined) => {
   const r = u2cs(U ?? null);
@@ -444,7 +445,7 @@ ${membrete(numero, acred, ctx.logo)}
 ${cabecera(1)}
 ${reemplaza ? `<p class="reemplaza"><b>ESTE CERTIFICADO REEMPLAZA AL CERTIFICADO N° ${esc(reemplaza)}.</b></p>` : ""}
 <table class="meta compacta"><tbody>
-  <tr><th>Orden de trabajo número</th><td>${v(ins.ot)}</td><th>Fecha</th><td>${dia(ins.fechaOt)}</td><th>Fecha de emisión del certificado</th><td>${cal.emitido_at ? dia(new Date(cal.emitido_at).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" })) : "Pendiente"}</td></tr>
+  <tr><th>Orden de trabajo número</th><td>${v(ins.ot)}</td><th>Fecha</th><td>${dia(ins.fechaOt)}</td><th>Fecha de emisión del certificado</th><td>${cal.emitido_at ? dia(diaInstanteChile(cal.emitido_at)) : "Pendiente"}</td></tr>
 </tbody></table>
 <h2 class="compacta">Identificación del instrumento calibrado</h2>
 ${pares(instrumento)}

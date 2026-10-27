@@ -10,6 +10,7 @@ import { PrismaService } from "../common/prisma.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 import { PuenteAnalisisService, type OpcionesCapturaVariante } from "../flujo-real/flujo-real.module";
 import type { Variante } from "./variantes";
+import { SQL_ZONA } from "../common/fecha-chile";
 
 export const tenantDe = (req: any): string => req?.user?.tenantId;
 export const usuarioDe = (req: any): string | null => req?.user?.sub ?? null;
@@ -73,7 +74,7 @@ export class FormulariosDatos {
   async ot(otId: string, tenantId: string): Promise<OtFormulario> {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT o.id, o.codigo, o.estado, o.tenant_id AS "tenantId", o.unidad_principal AS "unidadPrincipal", u.codigo AS laboratorio,
-              c.razon_social AS cliente, to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS "fechaOt",
+              c.razon_social AS cliente, to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE ${SQL_ZONA}, 'YYYY-MM-DD') AS "fechaOt",
               COALESCE(NULLIF(o.solicitante, ''), NULLIF(c.contacto_nombre, ''), (SELECT ct.nombre FROM contacto ct WHERE ct.cliente_id = o.cliente_id AND ct.deleted_at IS NULL ORDER BY ct.principal DESC NULLS LAST, ct.created_at LIMIT 1)) AS atencion
          FROM orden_trabajo o
          LEFT JOIN unidad u ON u.id = o.unidad_principal

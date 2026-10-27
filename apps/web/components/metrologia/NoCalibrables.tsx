@@ -17,6 +17,7 @@ import { useMediosEnvio } from "@/lib/lista-parametro";
 import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import css from "./ficha.module.css";
+import { hoyChile } from "@/lib/fecha-chile";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const ESTADO_INFORME: Record<string, { texto: string; pill: string }> = {
@@ -26,7 +27,7 @@ const ESTADO_EXTERNO: Record<string, { texto: string; pill: string }> = {
   solicitado: { texto: "Solicitado · espera al Jefe de Departamento", pill: "amber" }, aprobado: { texto: "Aprobado · por enviar", pill: "blue" },
   enviado: { texto: "En el laboratorio externo", pill: "blue" }, validado: { texto: "Validado", pill: "green" }, rechazado: { texto: "Rechazado", pill: "red" },
 };
-const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+const hoy = () => hoyChile();
 
 type Dlg =
   | { tipo: "informe"; fila: any } | { tipo: "devolverInforme"; fila: any } | { tipo: "entregarInforme"; fila: any }

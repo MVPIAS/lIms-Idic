@@ -82,6 +82,7 @@ import {
   type CambioOi,
   type ResultadoDerivado,
 } from "./orden-interna.reglas";
+import { diaChile } from "../common/fecha-chile";
 
 const tenantDe = (req: any): string => req?.user?.tenantId ?? DEV_TENANT;
 const usuarioDe = (req: any): string | null => req?.user?.sub ?? null;
@@ -839,7 +840,7 @@ export class OrdenInternaController extends BaseCrudController {
       cambio.ensayos = finales;
     }
     if (dto.muestraId !== undefined || dto.requisito !== undefined || dto.fechaEnvio !== undefined) {
-      const fecha = dto.fechaEnvio ?? (oi.fechaEnvio ? oi.fechaEnvio.toISOString().slice(0, 10) : null);
+      const fecha = dto.fechaEnvio ?? diaChile(oi.fechaEnvio);
       await this.validarEmision(tenantDe(req), oi.otId, ot.createdAt ?? null, {
         muestraId: dto.muestraId ?? oi.muestraId,
         requisito: dto.requisito ?? oi.requisito,

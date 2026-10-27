@@ -1,3 +1,4 @@
+import { ZONA_CHILE, hoyChile, diaChile } from "../common/fecha-chile";
 /**
  * Validez automática de la cotización · IT DCO-PG01-P01-IT02 (Depto. Comercial).
  *
@@ -53,7 +54,8 @@ export function soloFecha(d: Date | string): Date {
     d = new Date(d);
   }
   if (Number.isNaN(d.getTime())) throw new Error("Fecha de emisión inválida");
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  // Una fecha de calendario (medianoche UTC) se queda en su día; un instante toma su día en Chile (frente f8).
+  return soloFecha(diaChile(d)!);
 }
 
 export function isoFecha(d: Date): string {
@@ -122,13 +124,11 @@ export function calcularValidez(e: EntradaValidez): ResultadoValidez {
 // ---------------------------------------------------------------------------
 
 /** Zona horaria del IDIC: el «hoy» comercial es el de Chile, no el del servidor (UTC). */
-export const ZONA_IDIC = "America/Santiago";
+export const ZONA_IDIC = ZONA_CHILE;
 
 /** Fecha de calendario de hoy en Chile, como fecha UTC a medianoche (comparable con valida_hasta). */
 export function hoyEnChile(ahora: Date = new Date()): Date {
-  // en-CA formatea AAAA-MM-DD.
-  const iso = new Intl.DateTimeFormat("en-CA", { timeZone: ZONA_IDIC, year: "numeric", month: "2-digit", day: "2-digit" }).format(ahora);
-  return soloFecha(iso);
+  return soloFecha(hoyChile(ahora));
 }
 
 /**

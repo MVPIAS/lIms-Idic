@@ -1,3 +1,4 @@
+import { diaChile } from "../../common/fecha-chile";
 /**
  * Producción Nacional · reglas PURAS (sin BD) · BPCH · LIMS IDIC.
  * Pruebas: reglas-pn.spec.ts. Documento: docs/FLUJO_BPCH_PRODUCCION_PROTOTIPOS_CLASIFICACION.md §1.
@@ -167,7 +168,7 @@ export interface OcVigencia {
   vigenciaHasta: string; // AAAA-MM-DD
 }
 
-const dia = (d: string | Date) => (typeof d === "string" ? d.slice(0, 10) : d.toISOString().slice(0, 10));
+const dia = (d: string | Date) => (typeof d === "string" ? d.slice(0, 10) : diaChile(d) ?? "");
 
 /** Primer y último día del mes (AAAA-MM-DD). */
 export function rangoMes(anio: number, mes: number): { desde: string; hasta: string } {

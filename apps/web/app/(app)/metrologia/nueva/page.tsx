@@ -11,6 +11,7 @@ import MotorPanel from "./MotorPanel";
 import PuntosPanel from "./PuntosPanel";
 import { fechaDia, fechaHora } from "@/lib/format";
 import { ESTADO_INSTRUMENTO } from "@/lib/metrologiaOt";
+import { hoyChile } from "@/lib/fecha-chile";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -36,7 +37,7 @@ function vacio() {
   return { ident: {} as any, ambiente: {} as any, cond: {} as any, intervalo: "12", fecha: "", laboratorio: "", patrones: ["", "", ""] as string[], pts: [ptoGum()], aux: auxVacio() };
 }
 const txt = (v: any) => (v == null ? "" : typeof v === "number" ? String(v).replace(".", ",") : String(v));
-const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+const hoy = () => hoyChile();
 
 /** Avisos de fechas (los mismos que da el servidor al guardar; no bloquean). */
 function avisosFechas(ins: any, fechaCal: string): string[] {

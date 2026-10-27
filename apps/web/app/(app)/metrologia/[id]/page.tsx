@@ -22,6 +22,7 @@ import Modal from "@/components/documentos/Modal";
 import PresentacionCertificado from "@/components/metrologia/PresentacionCertificado";
 import BalanceIncertidumbre from "@/components/metrologia/BalanceIncertidumbre";
 import s from "@/components/metrologia/ficha.module.css";
+import { hoyChile } from "@/lib/fecha-chile";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 type Pestana = "control" | "toma" | "resultados" | "balance" | "certificado" | "en";
@@ -489,7 +490,7 @@ function CorreoDialogo({ numero, entregado, ocupado, onCerrar, onEnviar, propues
 
 function EntregaDialogo({ numero, ocupado, onCerrar, onGuardar }: { numero: string; ocupado: boolean; onCerrar: () => void; onGuardar: (b: any) => void }) {
   const medios = useMediosEnvio(); // frente f5: «Parámetros del sistema › medio_envio»
-  const [f, setF] = useState({ fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), medio: "", destinatario: "", observacion: "" });
+  const [f, setF] = useState({ fecha: hoyChile(), medio: "", destinatario: "", observacion: "" });
   const ok = f.fecha && f.medio && f.destinatario.trim().length >= 2;
   return (
     <Modal titulo={`Registrar la entrega del certificado ${numero}`} onCerrar={onCerrar} acciones={<>

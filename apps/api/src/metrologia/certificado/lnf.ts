@@ -20,6 +20,7 @@
  */
 import type { CertificadoArmado, ContextoCertificado, FirmaCert } from "../metrologia.certificado";
 import { leerPresentacion, observacionesImpresas } from "./presentacion";
+import { ZONA_CHILE, diaChile, diaInstanteChile } from "../../common/fecha-chile";
 
 const NA = "-.-";
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
@@ -29,10 +30,10 @@ const fg = (x: any, d = 6) => (x == null || x === "" || !Number.isFinite(Number(
 const sci = (x: any) => (Number.isFinite(Number(x)) ? Number(x).toExponential(9).replace(".", ",") : NA);
 const dia = (x: any) => {
   if (!x) return NA;
-  const s = x instanceof Date ? x.toISOString().slice(0, 10) : String(x).slice(0, 10);
+  const s = x instanceof Date ? diaChile(x) ?? "" : String(x).slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s.slice(8, 10)}-${s.slice(5, 7)}-${s.slice(0, 4)}` : esc(s);
 };
-const fechaHora = (x: any) => (x ? new Date(x).toLocaleString("es-CL", { timeZone: "America/Santiago", dateStyle: "short", timeStyle: "short" }) : "");
+const fechaHora = (x: any) => (x ? new Date(x).toLocaleString("es-CL", { timeZone: ZONA_CHILE, dateStyle: "short", timeStyle: "short" }) : "");
 /** Factor kN → tonf de la planilla (ANEXO CE, celda K24). */
 export const FACTOR_TONF = 9.8067;
 
@@ -68,7 +69,7 @@ export function armarCertificadoLnf(cal: any, ctx: ContextoCertificado): Certifi
   const cable = acc.find((a) => /cable/i.test(a?.tipo ?? "")) ?? {};
   const otros = acc.filter((a) => a !== amp && a !== cable);
   const pat = (Array.isArray(cal.patrones) ? cal.patrones : [])[0] ?? {};
-  const emision = cal.emitido_at ? dia(new Date(cal.emitido_at).toLocaleDateString("sv-SE", { timeZone: "America/Santiago" })) : "Pendiente (se fija al firmar)";
+  const emision = cal.emitido_at ? dia(diaInstanteChile(cal.emitido_at)) : "Pendiente (se fija al firmar)";
   const p = leerPresentacion(cal.presentacion);
   const N = 6;
 

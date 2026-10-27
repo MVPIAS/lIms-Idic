@@ -13,13 +13,12 @@ import Modal from "@/components/documentos/Modal";
 import { llamar } from "@/lib/laboratorio";
 import { toast } from "@/components/ui/feedback";
 import type { DestinoOi, EnsayoRef, OrdenInterna } from "./ordenesInternas";
+import { hoyChile } from "@/lib/fecha-chile";
 
 type EnsayoDestino = EnsayoRef & { enOt: boolean };
 type MuestraOt = { id: string; codigo: string; nombre: string | null };
-const hoyIso = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-};
+// Frente f8: hoy en Chile, no en la zona del equipo.
+const hoyIso = () => hoyChile();
 
 export default function FormOrdenInterna({
   otId,

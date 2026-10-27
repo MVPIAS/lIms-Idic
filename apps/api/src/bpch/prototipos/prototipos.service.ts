@@ -40,6 +40,7 @@ import {
   veredictoOt,
   type Dictamen,
 } from "./reglas-prototipo";
+import { diaChile } from "../../common/fecha-chile";
 
 const texto = (max: number) =>
   z.preprocess((v) => (typeof v === "string" ? (v.trim() === "" ? null : v.trim()) : v), z.string().max(max).nullable().optional());
@@ -98,7 +99,7 @@ export const ParametrosBody = z
   .strict();
 export const Motivo = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (al menos 5 caracteres).").max(2000) });
 
-const iso = (d: unknown) => (d ? new Date(d as any).toISOString().slice(0, 10) : null);
+const iso = (d: unknown) => diaChile(d);
 
 const SELECT = `
   SELECT p.*, cl.razon_social AS cliente_nombre, cl.rut AS cliente_rut,

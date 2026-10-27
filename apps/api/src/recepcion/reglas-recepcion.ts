@@ -17,7 +17,7 @@
  *    custodia se devuelve: no se destruye.
  */
 
-import { hoyChile } from "../common/fecha-chile";
+import { hoyChile, diaChile } from "../common/fecha-chile";
 
 export type TipoCampo = "texto" | "numero" | "entero" | "fecha" | "lista" | "casilla";
 export const TIPOS_CAMPO: readonly TipoCampo[] = ["texto", "numero", "entero", "fecha", "lista", "casilla"];
@@ -238,7 +238,10 @@ export function retenerHasta(clase: ClaseCustodia | null | undefined, recepcion:
   if (!clase || !recepcion) return null;
   const meses = plazos[clase];
   if (!meses) return null;
-  const d = new Date(Date.UTC(recepcion.getUTCFullYear(), recepcion.getUTCMonth(), recepcion.getUTCDate()));
+  // El día de la recepción es el de Chile: una recepción a las 21:30 no cuenta desde el día siguiente (frente f8).
+  const diaRec = diaChile(recepcion);
+  if (!diaRec) return null;
+  const d = new Date(`${diaRec}T00:00:00Z`);
   const dia = d.getUTCDate();
   d.setUTCDate(1);
   d.setUTCMonth(d.getUTCMonth() + Math.trunc(meses));

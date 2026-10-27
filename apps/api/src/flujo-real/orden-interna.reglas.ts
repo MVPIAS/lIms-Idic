@@ -1,3 +1,4 @@
+import { diaChile, hoyChile, sumarDiasCalendario } from "../common/fecha-chile";
 /**
  * Órdenes internas · reglas PURAS (sin BD), probadas en orden-interna.reglas.spec.ts.
  *
@@ -140,17 +141,15 @@ export function erroresEmision(d: {
   if ((d.requisito ?? "").trim().length < 3) e.push("Indique el requisito y el punto de la especificación que debe evaluar el destino.");
   if (!d.fechaEnvio) e.push("Indique la fecha de envío de la muestra.");
   else {
-    const f = new Date(`${String(d.fechaEnvio).slice(0, 10)}T12:00:00`);
-    if (Number.isNaN(f.getTime())) e.push("La fecha de envío no es válida.");
+    // Frente f8: se comparan DÍAS de calendario en hora de Chile (una OT abierta a las 21:30
+    // de Chile ya es del día siguiente en UTC), sin depender de la zona del servidor.
+    const f = String(d.fechaEnvio).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(f) || Number.isNaN(Date.parse(`${f}T12:00:00Z`))) e.push("La fecha de envío no es válida.");
     else {
-      const hoy = d.hoy ?? new Date();
-      const limite = new Date(hoy.getTime() + 60 * 86_400_000);
+      const limite = sumarDiasCalendario(hoyChile(d.hoy ?? new Date()), 60);
       if (f > limite) e.push("La fecha de envío no puede estar a más de 60 días.");
-      if (d.fechaOt) {
-        const ot = new Date(d.fechaOt);
-        ot.setHours(0, 0, 0, 0);
-        if (!Number.isNaN(ot.getTime()) && f < ot) e.push("La fecha de envío no puede ser anterior a la apertura de la OT.");
-      }
+      const ot = d.fechaOt ? diaChile(d.fechaOt) : null;
+      if (ot && f < ot) e.push("La fecha de envío no puede ser anterior a la apertura de la OT.");
     }
   }
   return e;

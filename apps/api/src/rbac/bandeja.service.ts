@@ -5,6 +5,7 @@ import { ContextoAlcance } from "./alcance.service";
 import { Perfil, codigoCanonico } from "./rbac.constants";
 import { MAX_INTENTOS_FALLIDOS } from "../auth/bloqueo";
 import { LISTAS_BANDEJA, LISTA_VENCIDAS_LAB, MAX_ELEMENTOS } from "./bandeja-listas";
+import { SQL_ZONA } from "../common/fecha-chile";
 
 export type Severidad = "info" | "warn" | "alta";
 
@@ -37,7 +38,7 @@ const OT_TERMINADA = `('cerrada','anulada','finalizada','informada')`;
  * lista de OT (apps/api/src/ot/plazos.ts: vencida / por vencer en 3 días).
  */
 const OT_CERRADA = `('cerrada','anulada')`;
-const HOY_CL = `(now() AT TIME ZONE 'America/Santiago')::date`;
+const HOY_CL = `(now() AT TIME ZONE ${SQL_ZONA})::date`;
 
 /**
  * Permiso que exige la pantalla a la que lleva cada tarjeta (el mismo que el
@@ -395,8 +396,8 @@ export class BandejaService {
           // Abiertas (y 'enviada' del histórico) que vencen entre hoy y 7 días (fecha de Chile).
           `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id)
               AND c.estado IN ('abierta','enviada')
-              AND COALESCE(c.valida_hasta, c.expira_at) BETWEEN (now() AT TIME ZONE 'America/Santiago')::date
-                                                            AND (now() AT TIME ZONE 'America/Santiago')::date + 7`,
+              AND COALESCE(c.valida_hasta, c.expira_at) BETWEEN (now() AT TIME ZONE ${SQL_ZONA})::date
+                                                            AND (now() AT TIME ZONE ${SQL_ZONA})::date + 7`,
           tenant,
         ),
       // Circuito de la cotización (frente r1c · align_cotizacion_circuito.sql).

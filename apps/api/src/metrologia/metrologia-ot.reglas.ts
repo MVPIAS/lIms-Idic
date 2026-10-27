@@ -21,7 +21,7 @@
  */
 
 /* ------------------------------------------------------------ tipos --- */
-import { anioChile } from "../common/fecha-chile";
+import { anioChile, ZONA_CHILE, diaChile } from "../common/fecha-chile";
 import { faltantesParaCerrar } from "../ot/plazos";
 
 export type EstadoInstrumento = "por_recibir" | "recibido" | "no_apto" | "devuelto" | "anulado";
@@ -54,7 +54,7 @@ export interface CalibracionOt {
 /* ------------------------------------------------------------ fechas --- */
 const dia = (v: Date | string | null | undefined): string | null => {
   if (!v) return null;
-  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+  if (v instanceof Date) return diaChile(v);
   return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
 };
 /**
@@ -68,7 +68,7 @@ export function instanteChile(s: string): number {
   if (!m) return NaN;
   const utc = Date.UTC(+m[1], +m[2] - 1, +m[3], +(m[4] ?? 0), +(m[5] ?? 0), +(m[6] ?? 0));
   const fmt = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Santiago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+    timeZone: ZONA_CHILE, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
   });
   const desfase = (t: number) => {
     const p = Object.fromEntries(fmt.formatToParts(new Date(t)).map((q) => [q.type, q.value]));

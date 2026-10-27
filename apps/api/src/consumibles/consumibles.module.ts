@@ -21,6 +21,7 @@ import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
+import { diaChile } from "../common/fecha-chile";
 
 // ---------------------------------------------------------------------------
 // Módulo CONSUMIBLES · inventario por lotes + KARDEX de movimientos.
@@ -58,7 +59,7 @@ const optNum = () => z.preprocess(emptyToNull, z.coerce.number().nullable().opti
 /** DATE de Prisma llega como Date (medianoche UTC); toISOString evita el −1 día. */
 const soloFecha = (v: unknown): string | null => {
   if (!v) return null;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (v instanceof Date) return diaChile(v);
   return String(v).slice(0, 10);
 };
 

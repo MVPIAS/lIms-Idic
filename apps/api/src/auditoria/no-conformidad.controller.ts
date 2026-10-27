@@ -38,7 +38,7 @@ import {
   puedeEditarAnalisis,
   siguienteCodigoNc,
 } from "./no-conformidad.reglas";
-import { anioChile } from "../common/fecha-chile";
+import { anioChile, SQL_ZONA } from "../common/fecha-chile";
 
 /**
  * No conformidades (tabla `no_conformidad`, ISO/IEC 17025 §7.10 / §8.7).
@@ -171,7 +171,7 @@ export class NoConformidadController {
          AND ($7::uuid IS NULL OR nc.resultado_id = $7::uuid)
          AND ($8::text IS NULL OR nc.codigo ILIKE '%' || $8 || '%' OR nc.titulo ILIKE '%' || $8 || '%'
               OR nc.descripcion ILIKE '%' || $8 || '%' OR o.codigo ILIKE '%' || $8 || '%')
-         AND ($9::boolean IS NOT TRUE OR (nc.estado <> 'cerrada' AND nc.plazo_cierre < (now() AT TIME ZONE 'America/Santiago')::date))
+         AND ($9::boolean IS NOT TRUE OR (nc.estado <> 'cerrada' AND nc.plazo_cierre < (now() AT TIME ZONE ${SQL_ZONA})::date))
          AND ($10::uuid IS NULL OR nc.responsable_id = $10::uuid OR nc.detectado_por = $10::uuid)
        ORDER BY (nc.estado = 'cerrada'), nc.plazo_cierre NULLS LAST, nc.detectado_at DESC
        LIMIT $11`,
