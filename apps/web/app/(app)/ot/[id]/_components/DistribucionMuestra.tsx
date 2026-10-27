@@ -21,7 +21,7 @@ interface Vista {
 }
 type Fila = { incluir: boolean; porcion: string; fecha: string; recibidoPor: string };
 
-export default function DistribucionMuestra({ muestraId, onCerrar }: { muestraId: string; onCerrar: () => void }) {
+export default function DistribucionMuestra({ muestraId, onCerrar, onCambio }: { muestraId: string; onCerrar: () => void; onCambio?: () => void }) {
   const [v, setV] = useState<Vista | null>(null);
   const [filas, setFilas] = useState<Record<string, Fila>>({});
   const [error, setError] = useState("");
@@ -52,6 +52,7 @@ export default function DistribucionMuestra({ muestraId, onCerrar }: { muestraId
         filas: sel.map((l) => ({ unidadId: l.unidadId, porcion: filas[l.unidadId].porcion.trim(), fechaHora: deInputHoraChile(filas[l.unidadId].fecha), recibidoPor: filas[l.unidadId].recibidoPor.trim() })),
       }));
       toast.ok("Distribución registrada.");
+      onCambio?.(); // D01-25: la ficha de la OT (Ruta, bitácora) se refresca sin recargar.
     } catch (e: any) {
       setError(e.message);
     } finally {

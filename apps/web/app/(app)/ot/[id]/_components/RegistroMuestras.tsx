@@ -28,6 +28,7 @@ import DistribucionMuestra from "./DistribucionMuestra";
 import Link from "next/link";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "@/components/ui/feedback";
+import { avisarCambioOt } from "@/lib/refresco";
 import { llamar, veredictoInfo } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
 import { fechaHora } from "@/lib/format";
@@ -255,6 +256,16 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   // B-013: testigo, custodia o contramuestra van a bodega con su retención, sin ensayos.
   const sinEnsayos = ["testigo", "custodia", "contramuestra"].includes(comun.claseCustodia);
 
+  /**
+   * D01-25: tras cada acción de la tabla de muestras se avisa a la ficha de la OT con el
+   * mecanismo común (lib/refresco.ts): la Ruta, el «Siguiente paso», la cabecera y la
+   * bitácora se recargan sin recargar la página.
+   */
+  const avisarCambio = () => {
+    onCambio?.();
+    avisarCambioOt(otId);
+  };
+
   async function guardar() {
     const metodoIds = [...marcados];
     if (filas.some((f) => !f.nombre.trim())) return toast.error("Escriba la descripción de cada muestra recibida.");
@@ -292,7 +303,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
       );
       setAbierto(false);
       await cargar();
-      onCambio?.();
+      avisarCambio();
       if (r.ensayos) onRecepcionado?.();
     } catch (e: any) {
       toast.error(e.message);
@@ -314,6 +325,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
       toast.ok(`Recepción de ${m.codigo} guardada. Queda en el historial de la OT.`);
       setEditando(null);
       await cargar();
+      avisarCambio();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -332,6 +344,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
         toast.ok(`Se asignó el Nº interno a ${r.asignados.length} muestra(s).`);
       }
       await cargar();
+      avisarCambio();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -364,7 +377,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
               <button className="btn outline sm" disabled={guardando} onClick={() => asignarNumero()}>Asignar número a todas</button>
             </div>
           )}
-          {distribuyendo && <DistribucionMuestra muestraId={distribuyendo} onCerrar={() => setDistribuyendo(null)} />}
+          {distribuyendo && <DistribucionMuestra muestraId={distribuyendo} onCerrar={() => setDistribuyendo(null)} onCambio={() => { cargar(); avisarCambio(); }} />}
           {/* D01-24: la tabla cabe en su recuadro a 1440 px (sin desplazamiento horizontal): Métodos y Ensayos
               van en una columna, Veredicto y Estado en otra, y las acciones apiladas. */}
           <div style={{ overflowX: "auto" }}>
@@ -525,7 +538,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                 </div>
                 <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} labPrincipalId={d.ot.unidadPrincipal}
                   config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} />
-                <FotosRecepcion otId={otId} muestraId={m.id} codigo={m.codigo} puedeEditar={puedeRegistrar} onCambio={cargar} />
+                <FotosRecepcion otId={otId} muestraId={m.id} codigo={m.codigo} puedeEditar={puedeRegistrar} onCambio={() => { cargar(); avisarCambio(); }} />
                 <div className="toolbar" style={{ margin: "8px 0 0" }}>
                   <span style={{ fontSize: 11.5, color: "var(--muted)" }}>El cambio queda en el historial de la OT con lo anterior y lo nuevo.</span>
                   <div className="spacer" />
