@@ -4,6 +4,7 @@
  * servidor (apps/api/src/saec/d11/reglas-d11.ts); aquí solo se pintan.
  */
 import { errorMensajeDe } from "@/lib/apiError";
+import { hoyChile as hoyComun } from "./fecha-chile";
 
 export { pedir } from "../app/(app)/cotizaciones/_components/comercial";
 
@@ -165,7 +166,7 @@ export const EVENTO_CUSTODIA: Record<string, string> = { entrada: "Entrada a bod
 
 /** Fecha AAAA-MM-DD de hoy en Chile (para los campos de fecha). */
 export function hoyChile(): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  return hoyComun();
 }
 
 /** Acción del expediente: llama a la API, avisa y refresca la pantalla (null si falló). */

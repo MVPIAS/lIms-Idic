@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from "react";
 import { toast } from "@/components/ui/feedback";
 import { fecha, fechaHora } from "@/lib/format";
 import { llamar } from "@/lib/laboratorio";
+import { hoyChile } from "@/lib/fecha-chile";
 
 interface Estado {
   aplica: boolean;
@@ -36,7 +37,7 @@ interface Estado {
   }[];
 }
 
-const hoyCl = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const hoyCl = () => hoyChile();
 
 export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onCambio?: () => void }) {
   const [e, setE] = useState<Estado | null>(null);

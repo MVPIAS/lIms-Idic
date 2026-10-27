@@ -16,6 +16,7 @@ import { useParams } from "next/navigation";
 import { monto, fechaDia } from "@/lib/format";
 import { useListaParametro } from "@/lib/lista-parametro";
 import { pedir } from "../../cotizaciones/_components/comercial";
+import { hoyChile } from "@/lib/fecha-chile";
 
 type Item = {
   id: string;
@@ -81,7 +82,7 @@ export default function ListaPrecioDetallePage() {
   const l = d?.lista;
   const r = d?.resumen;
   const paginas = d ? Math.max(1, Math.ceil(d.meta.total / d.meta.limit)) : 1;
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = hoyChile();
   // Frente f5: moneda fuera de la lista del parámetro «moneda» (CLP, USD) = histórica.
   const historica = !!l?.moneda && monedas.cargado && !monedas.vigente(l.moneda);
   const vigente = l ? !historica && l.activa && String(l.vigenteDesde).slice(0, 10) <= hoy && (!l.vigenteHasta || String(l.vigenteHasta).slice(0, 10) >= hoy) : false;

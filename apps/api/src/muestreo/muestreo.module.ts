@@ -69,6 +69,7 @@ import {
   type ReglaSinPlan,
   type Tabla,
 } from "./nch44";
+import { instanteDeHoraChile } from "../common/fecha-chile";
 import {
   ETIQUETA_FORMULARIO,
   TIPOS_FORMULARIO,
@@ -230,10 +231,10 @@ function leerFechaToma(v: string | null | undefined): Date | null {
   const s = v.trim();
   // Sin zona: es hora de Chile (lo que escribe el usuario en la pantalla).
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(s)) {
-    const base = new Date(`${s}Z`);
-    const enChile = new Date(base.toLocaleString("en-US", { timeZone: "America/Santiago" }));
-    const enUtc = new Date(base.toLocaleString("en-US", { timeZone: "UTC" }));
-    return new Date(base.getTime() + (enUtc.getTime() - enChile.getTime()));
+    const [dia, hora] = s.split("T");
+    const [a, m, d] = dia.split("-").map(Number);
+    const [hh, mm] = hora.split(":").map(Number);
+    return instanteDeHoraChile(a, m, d, hh, mm);
   }
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) throw new BadRequestException("Fecha y hora de la toma no válidas.");

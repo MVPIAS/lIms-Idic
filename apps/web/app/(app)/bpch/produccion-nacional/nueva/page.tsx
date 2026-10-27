@@ -12,6 +12,7 @@ import { toast } from "@/components/ui/feedback";
 import { usePermisos } from "@/lib/permisos";
 import { llamar } from "@/lib/laboratorio";
 import { dia, numeroCl } from "@/lib/bpchProcesos";
+import { anioChile } from "@/lib/fecha-chile";
 
 interface FilaProducto {
   producto: string;
@@ -24,7 +25,7 @@ const filaVacia = (): FilaProducto => ({ producto: "", unidadMedida: "", cantida
 export default function NuevaOcPage() {
   const router = useRouter();
   const { puede, listo } = usePermisos();
-  const anioActual = new Date().getFullYear();
+  const anioActual = anioChile();
   const [rafs, setRafs] = useState<any[]>([]);
   const [clasificaciones, setClasificaciones] = useState<any[]>([]);
   const [rafId, setRafId] = useState("");

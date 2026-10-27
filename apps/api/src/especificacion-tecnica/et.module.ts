@@ -76,6 +76,7 @@ import {
   type EstadoEt,
   type PuntoEt,
 } from "./reglas-et";
+import { SQL_ZONA } from "../common/fecha-chile";
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
 const usuarioDe = (req: any): string | null => req?.user?.sub ?? null;
@@ -556,7 +557,7 @@ export class EspecificacionTecnicaService {
       );
       await tx.$executeRawUnsafe(
         `UPDATE especificacion_tecnica SET estado = 'vigente', publicada_por = $2::uuid, publicada_at = now(),
-                vigente_desde = COALESCE(vigente_desde, (now() AT TIME ZONE 'America/Santiago')::date), updated_at = now()
+                vigente_desde = COALESCE(vigente_desde, (now() AT TIME ZONE ${SQL_ZONA})::date), updated_at = now()
           WHERE id = $1::uuid`,
         id,
         usuarioDe(req),

@@ -16,6 +16,7 @@ import { fmtNum } from "./html.util";
 import { textoCondicion2, type Condicion2 } from "../laboratorio/requisito-compuesto";
 import type { ConfigInforme } from "./config-informe";
 import type { FilaInspeccion } from "./template.engine";
+import { ZONA_CHILE } from "../common/fecha-chile";
 
 export type Modalidad = "cumplimiento" | "solo_resultados";
 export const MODALIDADES: readonly Modalidad[] = ["cumplimiento", "solo_resultados"] as const;
@@ -407,7 +408,7 @@ const MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "O
 /** «20.AGO.25 (08:30)» en hora de Chile, como el informe del LME. */
 function fechaAnalisis(d: Date): string {
   const p = new Intl.DateTimeFormat("es-CL", {
-    timeZone: "America/Santiago", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
+    timeZone: ZONA_CHILE, year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
   }).formatToParts(d);
   const v = (t: string) => Number(p.find((x) => x.type === t)?.value ?? 0);
   return `${dosDigitos(v("day"))}.${MESES[v("month") - 1]}.${String(v("year")).slice(-2)} (${dosDigitos(v("hour") % 24)}:${dosDigitos(v("minute"))})`;

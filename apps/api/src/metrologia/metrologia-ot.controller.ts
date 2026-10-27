@@ -19,6 +19,7 @@ import {
 import { LABS_SAM, calibracionesDeOt, metrologiaParaCierre, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
 import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, textoErrorCorreo } from "./ficha.datos";
 import { MailService } from "../configuracion/configuracion.module";
+import { SQL_ZONA, hoyChile } from "../common/fecha-chile";
 
 // ---------------------------------------------------------------------------
 // Metrología ligada a la OT (EP-04, entrega R1): ítems «instrumento» de la OT,
@@ -94,7 +95,7 @@ const CorreoSchema = z.object({
 export function fechaEntrega(f?: string | null, ahora = new Date()): Date {
   if (!f) return ahora;
   if (/^\d{4}-\d{2}-\d{2}$/.test(f)) {
-    const hoy = ahora.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+    const hoy = hoyChile(ahora);
     return f === hoy ? ahora : new Date(instanteChile(`${f}T12:00`));
   }
   return new Date(instanteChile(f));
@@ -128,7 +129,7 @@ export class MetrologiaOtService {
     const filas = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT o.id, o.codigo, o.estado, o.tenant_id AS "tenantId", o.unidad_principal AS "unidadId", o.con_cobro AS "conCobro",
               o.cotizacion_id AS "cotizacionId", o.origen_trabajo AS "origen", o.created_at AS "createdAt",
-              to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS "fechaOt",
+              to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE ${SQL_ZONA}, 'YYYY-MM-DD') AS "fechaOt",
               u.codigo AS laboratorio, u.nombre AS "laboratorioNombre", c.razon_social AS cliente, c.direccion AS "clienteDireccion",
               cc.nombre AS "labSolicitante", NULLIF(trim(o.solicitante), '') AS solicitante,
               NULLIF(concat_ws(' · ', NULLIF(COALESCE(ct.telefono, c.contacto_telefono), ''), NULLIF(COALESCE(ct.email::text, c.contacto_email::text), '')), '') AS contacto

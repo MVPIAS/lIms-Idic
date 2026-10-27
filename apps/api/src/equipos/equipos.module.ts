@@ -25,6 +25,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { hoyIso, motivoNoDisponer } from "../recepcion/reglas-recepcion";
+import { diaChile } from "../common/fecha-chile";
 
 // ---------------------------------------------------------------------------
 // Módulo EQUIPOS · calibración y cadena de custodia de muestras.
@@ -86,7 +87,7 @@ const emptyToNull = (v: unknown) => (v === "" ? null : v);
  */
 const soloFecha = (v: unknown): string | null => {
   if (!v) return null;
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (v instanceof Date) return diaChile(v);
   return String(v).slice(0, 10);
 };
 const optStr = (max: number) => z.preprocess(emptyToNull, z.string().max(max).nullable().optional());

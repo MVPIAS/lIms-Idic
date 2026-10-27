@@ -1,3 +1,4 @@
+import { diaChile, hoyChile } from "../common/fecha-chile";
 /**
  * No conformidades (ISO/IEC 17025 §7.10 y §8.7) · reglas puras.
  *
@@ -126,9 +127,9 @@ export function erroresTransicionNc(nc: DatosNc, destino: string, comentario?: s
 /** ¿Venció el plazo sin cerrarse? */
 export function ncVencida(nc: { estado: string; plazoCierre?: Date | string | null }, hoy: Date): boolean {
   if (!nc.plazoCierre || nc.estado === "cerrada") return false;
-  const p = typeof nc.plazoCierre === "string" ? new Date(`${nc.plazoCierre.slice(0, 10)}T00:00:00Z`) : nc.plazoCierre;
-  const h = Date.UTC(hoy.getUTCFullYear(), hoy.getUTCMonth(), hoy.getUTCDate());
-  return Date.UTC(p.getUTCFullYear(), p.getUTCMonth(), p.getUTCDate()) < h;
+  // Frente f8: «hoy» es el día en Chile (a las 21:30 de Chile no vence la del día siguiente en UTC).
+  const p = typeof nc.plazoCierre === "string" ? nc.plazoCierre.slice(0, 10) : diaChile(nc.plazoCierre);
+  return !!p && p < hoyChile(hoy);
 }
 
 /** Código correlativo anual: NC-2026-0001. */

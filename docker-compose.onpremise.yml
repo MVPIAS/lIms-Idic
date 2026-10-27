@@ -75,7 +75,7 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: https://${DOMAIN}/api
-      TZ: America/Santiago
+      TZ: ${ZONA_HORARIA:-America/Santiago}
     expose: ["3000"]
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:3000/"]
@@ -106,7 +106,10 @@ services:
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      TZ: America/Santiago
+      # Frente f8 · zona horaria del IDIC (common/fecha-chile.ts); la API fija
+      # además la zona de su sesión de base de datos con ella.
+      ZONA_HORARIA: ${ZONA_HORARIA:-America/Santiago}
+      TZ: ${ZONA_HORARIA:-America/Santiago}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       # --- Autenticación -------------------------------------------------------
       # Sesión y bloqueo por intentos fallidos (valores por defecto de la API).
@@ -168,8 +171,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD en .env}
       POSTGRES_DB: ${POSTGRES_DB}
-      TZ: America/Santiago
-      PGTZ: America/Santiago
+      TZ: ${ZONA_HORARIA:-America/Santiago}
+      PGTZ: ${ZONA_HORARIA:-America/Santiago}
       # Locale es-CL para ordenaciones y mensajes coherentes con el sitio.
       LANG: es_CL.utf8
     volumes:

@@ -10,23 +10,24 @@
  * La bandeja («OT vencidas / por vencer») usa exactamente estos cortes.
  */
 import { estadosValidos, validarTransicion } from "../common/estados";
+import { ZONA_CHILE, hoyChile, diaChile } from "../common/fecha-chile";
 
 export const UMBRAL_POR_VENCER_DIAS = 3;
-export const ZONA_HORARIA = "America/Santiago";
+export const ZONA_HORARIA = ZONA_CHILE;
 export const OT_ESTADOS_TERMINADOS = ["cerrada", "anulada"] as const;
 
 export type Semaforo = "en_plazo" | "por_vencer" | "vencida" | "sin_fecha" | "terminada";
 
 /** Fecha de hoy (AAAA-MM-DD) en Chile, sin depender de la zona del servidor. */
 export function hoyCl(ahora: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: ZONA_HORARIA, year: "numeric", month: "2-digit", day: "2-digit" }).format(ahora);
+  return hoyChile(ahora);
 }
 
-/** AAAA-MM-DD de una fecha DATE de Prisma (medianoche UTC) o de un texto. */
+/** AAAA-MM-DD de una fecha DATE de Prisma (medianoche UTC), de un texto o, si es un instante, su día en Chile (frente f8). */
 export function diaDe(v: Date | string | null | undefined): string | null {
   if (!v) return null;
-  if (typeof v === "string") return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : null;
-  return Number.isNaN(v.getTime()) ? null : v.toISOString().slice(0, 10);
+  if (typeof v === "string" && !/^\d{4}-\d{2}-\d{2}/.test(v)) return null;
+  return diaChile(v);
 }
 
 /** Días entre dos AAAA-MM-DD (b − a). */
@@ -61,11 +62,8 @@ export function fechaCompromisoDesdePlazo(
   ahora: Date = new Date(),
 ): string | null {
   if (!plazoDias || plazoDias <= 0) return null;
-  const base = fechaRecepcion
-    ? typeof fechaRecepcion === "string"
-      ? fechaRecepcion.slice(0, 10)
-      : hoyCl(fechaRecepcion)
-    : hoyCl(ahora);
+  // Frente f8: la recepción (timestamptz) cuenta desde su día en Chile, venga como Date o como ISO.
+  const base = (fechaRecepcion ? diaChile(fechaRecepcion) : null) ?? hoyCl(ahora);
   return sumarDias(base, plazoDias);
 }
 
@@ -73,11 +71,8 @@ export function fechaCompromisoDesdePlazo(
 export function validarFechaCompromiso(fecha: string, fechaRecepcion: Date | string | null | undefined): string | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha) || Number.isNaN(Date.parse(`${fecha}T00:00:00Z`)))
     return "Fecha de compromiso inválida (use AAAA-MM-DD).";
-  const recep = fechaRecepcion
-    ? typeof fechaRecepcion === "string"
-      ? fechaRecepcion.slice(0, 10)
-      : hoyCl(fechaRecepcion)
-    : null;
+  // Frente f8: el día de recepción en Chile, venga como Date o como ISO con hora.
+  const recep = fechaRecepcion ? diaChile(fechaRecepcion) : null;
   if (recep && fecha < recep) return `La fecha de compromiso no puede ser anterior a la recepción de la OT (${recep}).`;
   return null;
 }

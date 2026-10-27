@@ -1,4 +1,5 @@
 "use client";
+import { hoyChile, sumarDiasCalendario } from "@/lib/fecha-chile";
 
 /**
  * Helpers del módulo Comercial (cotizaciones · Comercial rondas 1 y 2, oct-2026).
@@ -96,11 +97,7 @@ export const ORIGEN_LABEL: Record<string, string> = {
   INSTITUCIONAL: "Institucional sin cobro",
 };
 
-export const hoyISO = () => {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-};
+export const hoyISO = () => hoyChile();
 
 /** ¿La validez ya terminó? (valida_hasta es inclusive). Fechas AAAA-MM-DD comparables como texto. */
 export const fueraDeValidez = (c: { validaHasta?: string | null; expiraAt?: string | null }) => {
@@ -113,10 +110,7 @@ export const porVencer = (c: { estado: string; validaHasta?: string | null; expi
   if (c.estado !== "abierta") return false;
   const f = String(c.validaHasta ?? c.expiraAt ?? "").slice(0, 10);
   if (!f) return false;
-  const limite = new Date();
-  limite.setDate(limite.getDate() + dias);
-  const p = (n: number) => String(n).padStart(2, "0");
-  const lim = `${limite.getFullYear()}-${p(limite.getMonth() + 1)}-${p(limite.getDate())}`;
+  const lim = sumarDiasCalendario(hoyISO(), dias);
   return f >= hoyISO() && f <= lim;
 };
 

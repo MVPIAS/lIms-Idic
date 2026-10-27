@@ -9,7 +9,7 @@ import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
-import { finDelDia, whereAuditoria } from "./filtro-auditoria";
+import { finDelDia, inicioDelDia, whereAuditoria } from "./filtro-auditoria";
 import { NoConformidadController } from "./no-conformidad.controller";
 
 /**
@@ -32,7 +32,8 @@ const ConsultaSchema = z.object({
   entidadId: z.string().uuid().optional(),
   /** Código legible de la entidad (p. ej. COT-2026-0004, OT-…). */
   entidadCodigo: z.string().max(60).optional(),
-  desde: z.coerce.date().optional(),
+  /** 'AAAA-MM-DD' = desde el comienzo de ese día en Chile. */
+  desde: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.coerce.date()]).optional(),
   /** 'AAAA-MM-DD' = hasta el final de ese día. */
   hasta: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.coerce.date()]).optional(),
 });
@@ -69,7 +70,7 @@ export class AuditoriaController {
     const tenantId = req?.user?.tenantId;
     const alcance = await this.usuariosDeAlcance(req);
     const where = whereAuditoria(
-      { ...q, hasta: q.hasta !== undefined ? finDelDia(q.hasta as any) : undefined },
+      { ...q, desde: q.desde !== undefined ? inicioDelDia(q.desde as any) : undefined, hasta: q.hasta !== undefined ? finDelDia(q.hasta as any) : undefined },
       tenantId,
       alcance,
     );

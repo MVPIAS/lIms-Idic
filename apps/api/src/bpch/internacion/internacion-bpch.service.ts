@@ -23,6 +23,7 @@ import {
 } from "../comun/reglas-bpch";
 import { numeroBorrador, totales } from "../../facturacion/reglas-factura";
 import { ListadoArmaBody, erroresListadoArmas, guardarListadoArmas, leerListadoArmas } from "../../saec/d11/listado-armas";
+import { diaChile } from "../../common/fecha-chile";
 
 const fechaDia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const texto = (max: number) => z.string().trim().max(max);
@@ -659,7 +660,7 @@ export class InternacionBpchService {
     );
     if (!s) throw new NotFoundException("Solicitud no encontrada en esta internación.");
     if (s.fecha_respuesta) throw new ConflictException("La respuesta de esta solicitud ya está registrada.");
-    if (dto.fechaRespuesta < new Date(s.fecha_envio).toISOString().slice(0, 10))
+    if (dto.fechaRespuesta < (diaChile(s.fecha_envio) ?? ""))
       throw new BadRequestException("La fecha de respuesta no puede ser anterior al envío de la solicitud.");
     await this.prisma.$executeRawUnsafe(
       `UPDATE bpch_solicitud_antecedentes SET fecha_respuesta = $2::date, respuesta = $3 WHERE id = $1::uuid`,

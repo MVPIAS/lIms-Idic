@@ -21,6 +21,7 @@ import { usePermisos, infoPerfil, esSoloMuestreo, type Perfil } from "@/lib/perm
 import { EmptyState, SkeletonCards } from "@/components/ui/PageHeader";
 import AvisosBandeja from "@/components/avisos/AvisosBandeja";
 import { fechaDia } from "@/lib/format";
+import { horaChile } from "@/lib/fecha-chile";
 
 interface Accion { href: string; titulo: string; desc: string; icono: string; perm?: string | string[] }
 
@@ -127,7 +128,7 @@ const GENERICAS: Accion[] = [
 ];
 
 function saludoHora(): string {
-  const h = new Date().getHours();
+  const h = horaChile();
   if (h < 12) return "Buenos días";
   if (h < 20) return "Buenas tardes";
   return "Buenas noches";

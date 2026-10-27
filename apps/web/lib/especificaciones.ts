@@ -1,3 +1,4 @@
+import { ZONA_CHILE } from "./fecha-chile";
 /**
  * especificaciones.ts · vocabulario de pantalla de las especificaciones técnicas
  * del cliente (E.T.) y del muestreo NCh 43/44. Las reglas las impone el
@@ -78,7 +79,7 @@ export function aLocalChile(v: unknown): string {
   const d = new Date(String(v));
   if (isNaN(d.getTime())) return "";
   const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+    new Intl.DateTimeFormat("en-CA", { timeZone: ZONA_CHILE, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
       .formatToParts(d)
       .map((x) => [x.type, x.value]),
   );

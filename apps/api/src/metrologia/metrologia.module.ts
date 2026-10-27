@@ -56,6 +56,7 @@ import {
   avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, motivoNoEmiteMetrologo, nuevoCodigoVerificacion, numeroCertificado,
   revisarPatrones, uCertificada, type FilaCmc, type Firmante,
 } from "./metrologia.reglas";
+import { ZONA_CHILE, SQL_ZONA, hoyChile, diaChile } from "../common/fecha-chile";
 
 // ---------------------------------------------------------------------------
 // Módulo Metrología (Sección SAM: LMT, LMTE, LNF). Cada proceso se calcula con
@@ -181,8 +182,7 @@ function tenantId(req: any): string {
 const permisosDe = (req: any): string[] => req?.user?.permisos ?? [];
 const esSuperadmin = (req: any) => (req?.user?.roles ?? []).includes("SUPERADMIN");
 const tiene = (req: any, p: string) => esSuperadmin(req) || permisosDe(req).includes(p);
-const hoyChile = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
-const fechaIso = (d: any): string => (d instanceof Date ? d.toISOString().slice(0, 10) : String(d ?? "").slice(0, 10));
+const fechaIso = (d: any): string => (d instanceof Date ? diaChile(d) ?? "" : String(d ?? "").slice(0, 10));
 
 async function cargarDivisores(): Promise<Divisores> {
   const rows = await prisma.$queryRawUnsafe<any[]>(`SELECT codigo, divisor FROM met_distribucion`);
@@ -826,7 +826,7 @@ export class MetrologiaController {
               it.accesorios AS instrumento_accesorios, it.sentido AS instrumento_sentido,
               it.metrologo_id AS instrumento_metrologo_id, ue2.nombre_completo AS entregado_por_nombre,
               -- Fechas de control de la hoja (EP-04 P3.5): solicitud, O/C, término previsto y real.
-              to_char(COALESCE(sol.created_at, cot.fecha_emision, cot.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha_solicitud,
+              to_char(COALESCE(sol.created_at, cot.fecha_emision, cot.created_at) AT TIME ZONE ${SQL_ZONA}, 'YYYY-MM-DD') AS fecha_solicitud,
               COALESCE(NULLIF(o.oc_numero, ''), CASE WHEN cot.aceptacion_tipo = 'OC' THEN NULLIF(cot.aceptacion_numero, '') END) AS oc_numero,
               to_char(cot.aceptacion_fecha, 'YYYY-MM-DD') AS oc_fecha,
               to_char(o.fecha_compromiso, 'YYYY-MM-DD') AS termino_previsto, o.fecha_cierre AS termino_real
@@ -1268,7 +1268,7 @@ export class MetrologiaController {
       numero,
       codigoVerificacion: cal.codigo_verificacion ?? "SIN EMITIR",
       hash,
-      fecha: new Date(cal.emitido_at ?? Date.now()).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }),
+      fecha: new Date(cal.emitido_at ?? Date.now()).toLocaleDateString("es-CL", { timeZone: ZONA_CHILE }),
       urlVerificacion: cal.codigo_verificacion ? `${URL_VERIFICACION()}/${cal.codigo_verificacion}` : URL_VERIFICACION(),
       borrador: !sellado,
       ...(cal.estado === "reemplazada" ? { estadoDocumento: "anulado", motivoEstado: `Reemplazado por el certificado N° ${cal.reemplazada_por ?? ""}` } : {}),
@@ -1447,7 +1447,7 @@ export class MetrologiaController {
       `SELECT i.ot_id, o.codigo, o.estado, o.unidad_principal, u.codigo AS laboratorio, c.razon_social AS cliente, c.direccion AS cliente_direccion,
               cc.nombre AS lab_solicitante, NULLIF(trim(o.solicitante), '') AS solicitante,
               NULLIF(concat_ws(' · ', NULLIF(COALESCE(ct.telefono, c.contacto_telefono), ''), NULLIF(COALESCE(ct.email::text, c.contacto_email::text), '')), '') AS contacto,
-              to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS fecha_ot
+              to_char(COALESCE(o.fecha_recepcion, o.created_at) AT TIME ZONE ${SQL_ZONA}, 'YYYY-MM-DD') AS fecha_ot
          FROM met_ot_instrumento i JOIN orden_trabajo o ON o.id = i.ot_id
          LEFT JOIN unidad u ON u.id = o.unidad_principal
          LEFT JOIN cliente c ON c.id = o.cliente_id
@@ -1825,7 +1825,7 @@ export class VerificacionMetrologiaController {
     const integro = !!r.documento_html && createHash("sha256").update(r.documento_html, "utf8").digest("hex") === r.certificado_hash;
     const base = {
       numero: r.numero_certificado, proceso: r.proceso, estado: r.estado, hash: r.certificado_hash,
-      fecha: r.emitido_at ? new Date(r.emitido_at).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }) : null,
+      fecha: r.emitido_at ? new Date(r.emitido_at).toLocaleDateString("es-CL", { timeZone: ZONA_CHILE }) : null,
     };
     if (r.estado === "reemplazada") return { ...base, valido: false, motivo: `El certificado fue reemplazado por el N° ${r.reemplazado_por ?? "(en emisión)"}` };
     if (r.estado !== "emitida") return { ...base, valido: false, motivo: "El certificado no está emitido" };

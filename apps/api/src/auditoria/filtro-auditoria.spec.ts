@@ -1,4 +1,4 @@
-import { finDelDia, whereAuditoria } from "./filtro-auditoria";
+import { finDelDia, inicioDelDia, whereAuditoria } from "./filtro-auditoria";
 
 describe("Filtro de la bitácora", () => {
   it("perfil global: solo tenant y filtros pedidos", () => {
@@ -17,9 +17,14 @@ describe("Filtro de la bitácora", () => {
     expect(w.AND).toContainEqual({ usuarioId: { in: ["u1"] } });
   });
 
-  it("rango de fechas: «hasta» con solo la fecha incluye todo el día", () => {
+  it("rango de fechas: «hasta» con solo la fecha incluye todo ese día en Chile (frente f8)", () => {
     const hasta = finDelDia("2026-10-14");
-    expect(hasta.toISOString()).toBe("2026-10-14T23:59:59.999Z");
+    // 14-10-2026 23:59:59.999 en Chile (verano, UTC−3) = 15-10 02:59:59.999 UTC.
+    expect(hasta.toISOString()).toBe("2026-10-15T02:59:59.999Z");
+    // Invierno (UTC−4).
+    expect(finDelDia("2026-07-15").toISOString()).toBe("2026-07-16T03:59:59.999Z");
+    // «desde» empieza a las 00:00 de Chile.
+    expect(inicioDelDia("2026-10-14").toISOString()).toBe("2026-10-14T03:00:00.000Z");
     const w = whereAuditoria({ desde: new Date("2026-10-01T00:00:00Z"), hasta }, undefined, null);
     expect(w).toEqual({ AND: [{ ocurridoAt: { gte: new Date("2026-10-01T00:00:00Z"), lte: hasta } }] });
   });

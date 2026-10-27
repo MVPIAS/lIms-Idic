@@ -9,6 +9,7 @@ import { PrismaService } from "../common/prisma.service";
 import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
 import { AlcanceService } from "../rbac/alcance.service";
 import { DIFUSION_TASA, lista, valoresCategoria } from "../common/parametros-r4d";
+import { ZONA_CHILE, SQL_ZONA, mesChile } from "../common/fecha-chile";
 
 /**
  * Informe mensual de la tasa de internación 1,5 % (EP-06 6.23, BL-164).
@@ -135,8 +136,8 @@ export class TasaMensualService {
          LEFT JOIN factura fa ON fa.id = t.factura_id
          LEFT JOIN centro_costo cc ON cc.id = fa.centro_costo_id
         WHERE t.tenant_id = $1::uuid
-          AND (t.calculado_at AT TIME ZONE 'America/Santiago') >= $2::date
-          AND (t.calculado_at AT TIME ZONE 'America/Santiago') < $3::date
+          AND (t.calculado_at AT TIME ZONE ${SQL_ZONA}) >= $2::date
+          AND (t.calculado_at AT TIME ZONE ${SQL_ZONA}) < $3::date
           AND ($4::uuid[] IS NULL OR o.unidad_principal = ANY($4::uuid[]))
         ORDER BY COALESCE(t.internacion_id, t.ot_id), t.calculado_at DESC`,
       req?.user?.tenantId,
@@ -188,7 +189,7 @@ export class TasaMensualService {
   async emitir(req: any, body: unknown) {
     const { mes, observaciones } = EmitirSchema.parse(body ?? {});
     const inf = await this.informe(req, mes);
-    if (inf.emitido) throw new ConflictException(`El informe de ${mes} ya se emitió el ${new Date(inf.emitido.emitidoAt).toLocaleDateString("es-CL", { timeZone: "America/Santiago" })}.`);
+    if (inf.emitido) throw new ConflictException(`El informe de ${mes} ya se emitió el ${new Date(inf.emitido.emitidoAt).toLocaleDateString("es-CL", { timeZone: ZONA_CHILE })}.`);
     if (!inf.filas.length) throw new BadRequestException(`No hay tasas calculadas en ${mes}: no hay informe que emitir.`);
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO tasa_informe_mensual (tenant_id, mes, n_ot, total_tasa, total_pagado, detalle, difusion, observaciones, emitido_por)
@@ -220,7 +221,7 @@ export class TasaMensualController {
   @RequierePermiso("bpch.tasa.gestionar")
   @ApiOperation({ summary: "Informe mensual de la tasa 1,5 % (?mes=AAAA-MM&formato=csv)" })
   async ver(@Query("mes") mes: string | undefined, @Query("formato") formato: string | undefined, @Req() req: any, @Res({ passthrough: true }) res: Response) {
-    const m = mes ?? new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", year: "numeric", month: "2-digit" }).format(new Date());
+    const m = mes ?? mesChile();
     if (formato === "csv") {
       const filas = await this.svc.filas(req, m);
       res.set({ "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="tasa-1-5-${m}.csv"` });

@@ -1,3 +1,4 @@
+import { ahoraInputChile, ZONA_CHILE } from "./fecha-chile";
 /**
  * metrologiaOt.ts · vocabulario e impresos de la Metrología ligada a la OT
  * (instrumentos, recepción con custodia, entrega y devolución). Reglas en el
@@ -45,17 +46,12 @@ export const ORIGEN_OT: Record<string, string> = {
 
 /** Fecha-hora local de Chile para un <input type="datetime-local"> (AAAA-MM-DDTHH:mm). */
 export function ahoraLocal(): string {
-  const p = Object.fromEntries(
-    new Intl.DateTimeFormat("en-CA", { timeZone: "America/Santiago", hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
-      .formatToParts(new Date())
-      .map((x) => [x.type, x.value]),
-  );
-  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+  return ahoraInputChile();
 }
 
 const esc = (v: unknown) =>
   String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
-const fh = (v?: string | null) => (v ? new Date(v).toLocaleString("es-CL", { timeZone: "America/Santiago", dateStyle: "short", timeStyle: "short" }) : "—");
+const fh = (v?: string | null) => (v ? new Date(v).toLocaleString("es-CL", { timeZone: ZONA_CHILE, dateStyle: "short", timeStyle: "short" }) : "—");
 
 /** Abre un impreso en una ventana nueva y lanza la impresión (sin datos inventados: solo lo registrado). */
 /** Membrete IDIC de los impresos de Metrología (B-074): organismo, laboratorio y número del documento. */

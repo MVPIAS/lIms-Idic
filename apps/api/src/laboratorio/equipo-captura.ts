@@ -57,7 +57,7 @@ export function condicionesEnsayo(c: CondicionesEnsayo, ahora: Date): { errores:
     const d = new Date(c.fechaEnsayo);
     if (Number.isNaN(d.getTime())) errores.push("La fecha y hora del ensayo no es válida.");
     else if (d.getTime() > ahora.getTime() + TOLERANCIA_FUTURO_MS) errores.push("La fecha y hora del ensayo no puede ser futura.");
-    else if (d.getFullYear() < 2000) errores.push("La fecha y hora del ensayo no es válida.");
+    else if (d.getUTCFullYear() < 2000) errores.push("La fecha y hora del ensayo no es válida.");
     else fecha = d;
   }
   const t = c.temperatura ?? null;

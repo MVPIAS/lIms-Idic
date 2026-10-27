@@ -1,3 +1,4 @@
+import { hoyChile } from "../common/fecha-chile";
 /**
  * Reglas del circuito del Certificado de Calibración (puras, sin base de datos).
  *
@@ -188,7 +189,7 @@ export function pasosSinResponsable(pasos: PasoFirmaCal[]): string[] {
 /** Fecha de calibración válida (AAAA-MM-DD) o la de hoy en Chile. */
 export function fechaCalibracion(fecha?: string | null, hoy: Date = new Date()): string {
   if (fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha) && !Number.isNaN(Date.parse(fecha + "T12:00:00Z"))) return fecha;
-  return hoy.toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+  return hoyChile(hoy);
 }
 
 /** Código interno de la calibración (correlativo por año): no es el número del certificado. */

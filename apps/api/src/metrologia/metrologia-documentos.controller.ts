@@ -22,6 +22,7 @@ import { instrumentosDeOt } from "./metrologia-ot.datos";
 import {
   MAX_PDF_EXTERNO, motivoExterno, motivoInforme, revisarPdf, type AccionExterno, type AccionInforme, type ExternoDoc, type InformeDoc,
 } from "./metrologia-documentos.reglas";
+import { ZONA_CHILE, hoyChile } from "../common/fecha-chile";
 
 // ---------------------------------------------------------------------------
 // Documentos del instrumento que NO se calibra en el laboratorio (EP-04 P2.3 y
@@ -51,8 +52,7 @@ type ArchivoSubido = { buffer: Buffer; originalname?: string; mimetype?: string;
 
 const tiene = (req: any, p: string) => (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes(p);
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-const hoyChile = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
-const fechaHora = (x: any) => (x ? new Date(x).toLocaleString("es-CL", { timeZone: "America/Santiago", dateStyle: "short", timeStyle: "short" }) : "");
+const fechaHora = (x: any) => (x ? new Date(x).toLocaleString("es-CL", { timeZone: ZONA_CHILE, dateStyle: "short", timeStyle: "short" }) : "");
 
 @Injectable()
 export class MetrologiaDocumentosService {
@@ -308,7 +308,7 @@ ${fila("Recepción", fechaHora(it.recibidoAt))}${fila("Fecha de emisión", inf.e
       numero: inf.numero ?? `BORRADOR ${ot.codigo}-I${String(it.numero).padStart(2, "0")}`,
       codigoVerificacion: "—",
       hash: sellado ? inf.documento_hash : createHash("sha256").update(cuerpo, "utf8").digest("hex"),
-      fecha: new Date(inf.emitido_at ?? Date.now()).toLocaleDateString("es-CL", { timeZone: "America/Santiago" }),
+      fecha: new Date(inf.emitido_at ?? Date.now()).toLocaleDateString("es-CL", { timeZone: ZONA_CHILE }),
       urlVerificacion: "",
       borrador: !sellado,
     };

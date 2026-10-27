@@ -17,6 +17,7 @@ import {
   type ClaseCustodia,
   type EntradaRecepcionLab,
 } from "./reglas-recepcion";
+import { diaChile } from "../common/fecha-chile";
 
 type Db = PrismaService | Prisma.TransactionClient;
 
@@ -380,7 +381,7 @@ export class RecepcionService {
       tenantId,
       unidades,
     );
-    const fecha = (v: unknown) => (v instanceof Date ? v.toISOString().slice(0, 10) : v ? String(v).slice(0, 10) : null);
+    const fecha = (v: unknown) => diaChile(v);
     const filas = [
       ...ots.map((o) => ({
         tipo: "ot" as const,
@@ -451,7 +452,7 @@ export class RecepcionService {
     );
     const hoy = hoyIso();
     const data = filas.map((f) => {
-      const retener = f.retenerHasta instanceof Date ? f.retenerHasta.toISOString().slice(0, 10) : f.retenerHasta ?? null;
+      const retener = diaChile(f.retenerHasta);
       return {
         ...f,
         numeroInterno: f.numeroInterno == null ? null : String(f.numeroInterno),

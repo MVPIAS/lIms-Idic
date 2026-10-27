@@ -28,6 +28,8 @@ services:
     environment:
       NODE_ENV: production
       NEXT_PUBLIC_API_URL: https://${DOMAIN}/api
+      # Frente f8: el pre-renderizado de Next también en hora de Chile.
+      TZ: ${ZONA_HORARIA:-America/Santiago}
     expose: ["3000"]
     depends_on: [api]
 
@@ -48,7 +50,11 @@ services:
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
-      TZ: America/Santiago
+      # Frente f8 · zona horaria del IDIC: «hoy», el corte de día, el año de la
+      # numeración y las fechas impresas (common/fecha-chile.ts). La API fija
+      # además la zona de su sesión de base de datos con ella.
+      ZONA_HORARIA: ${ZONA_HORARIA:-America/Santiago}
+      TZ: ${ZONA_HORARIA:-America/Santiago}
       # Accesos de prueba por perfil en la pantalla de ingreso (docs/ACCESOS_DEMO.md).
       # SOLO preproducción: el compose on-premise no declara estas variables.
       ACCESOS_DEMO: ${ACCESOS_DEMO:-false}
@@ -74,8 +80,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      TZ: America/Santiago
-      PGTZ: America/Santiago
+      TZ: ${ZONA_HORARIA:-America/Santiago}
+      PGTZ: ${ZONA_HORARIA:-America/Santiago}
     volumes:
       - pg_data:/var/lib/postgresql/data
     # Sin "ports": solo accesible dentro de la red Docker

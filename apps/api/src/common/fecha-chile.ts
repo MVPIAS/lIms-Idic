@@ -1,18 +1,73 @@
 /**
- * Fechas y horas de Chile en documentos, PDF y mensajes · reglas PURAS.
+ * Fechas y horas del IDIC · regla ÚNICA de la API (frente f8).
+ *
+ * El IDIC trabaja en hora de Chile (America/Santiago, con horario de verano).
+ * Pasadas las 21:00 (verano, UTC−3) o las 20:00 (invierno, UTC−4) en UTC ya es
+ * el día siguiente. Regla:
+ *   1. Lo que se guarda como `timestamptz` se queda en UTC (no se toca).
+ *   2. Todo «hoy», todo truncado a día, todo año de numeración y toda fecha
+ *      que se imprime o se muestra se calcula EXPLÍCITAMENTE en la zona del
+ *      IDIC con estas funciones, sea cual sea la zona del proceso (`TZ`) o del
+ *      servidor. Prohibido `toISOString().slice(0, 10)` sobre un instante,
+ *      `getFullYear()`/`getDate()`/`setHours()` locales y `toLocale*String`
+ *      sin `timeZone` (lo vigila fecha-chile.regla.spec.ts).
+ *   3. En SQL, la sesión de la API trabaja en la misma zona (PrismaService
+ *      añade `options=-c TimeZone=<zona>` a la conexión), así `current_date`,
+ *      `now()::date`, `x::date` y `date_trunc` sobre `timestamptz` cortan el
+ *      día en Chile. `align_zona_horaria.sql` fija además la zona por defecto
+ *      de la base para psql, semillas e informes externos.
+ *
+ * La zona es configurable con la variable `ZONA_HORARIA` (por defecto
+ * America/Santiago). Una zona no válida se ignora (se usa la de Chile).
  *
  * Recorrido MP-02, D02-27: el bloque de firmas del informe mostraba 02:09 cuando
  * en Chile eran las 05:09, porque las fechas se formateaban con la zona horaria
- * del equipo servidor (UTC en el contenedor). Todo lo que se imprime con fecha y
- * hora pasa por aquí y usa siempre `America/Santiago`, sea cual sea la zona del
- * servidor (horario de verano incluido).
+ * del equipo servidor (UTC en el contenedor).
  *
  * Fechas de CALENDARIO (columnas DATE: recepción, compromiso, vigencia…): Prisma
  * las entrega como «aaaa-mm-ddT00:00:00.000Z». Esas no se convierten a la hora
  * de Chile (saldrían un día antes): se muestran tal cual, como hace la web
  * (apps/web/lib/format.ts).
  */
-export const ZONA_CHILE = "America/Santiago";
+export const ZONA_POR_DEFECTO = "America/Santiago";
+
+/** ¿Es un identificador de zona IANA que el motor entiende? */
+export function zonaValida(z: unknown): z is string {
+  if (typeof z !== "string" || !/^[A-Za-z][A-Za-z0-9_+\-]*(\/[A-Za-z0-9_+\-]+){0,2}$/.test(z)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: z });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Zona horaria del IDIC: `ZONA_HORARIA` si es válida; si no, America/Santiago. */
+export function zonaHoraria(env: Record<string, string | undefined> = process.env): string {
+  const z = env.ZONA_HORARIA?.trim();
+  return z && zonaValida(z) ? z : ZONA_POR_DEFECTO;
+}
+
+/** Zona efectiva de este proceso (se lee una vez al arrancar). */
+export const ZONA_CHILE = zonaHoraria();
+
+/** La zona como literal SQL ('America/Santiago'); validada, no admite comillas. */
+export const SQL_ZONA = `'${ZONA_CHILE}'`;
+
+/** «Hoy» en la zona del IDIC como expresión SQL (DATE). */
+export const SQL_HOY = `(now() AT TIME ZONE ${SQL_ZONA})::date`;
+
+/** Día (DATE) en la zona del IDIC de una expresión SQL `timestamptz`. */
+export const sqlDia = (expr: string) => `((${expr}) AT TIME ZONE ${SQL_ZONA})::date`;
+
+/**
+ * URL de conexión con la zona de la sesión fijada (`options=-c TimeZone=…`).
+ * Si la URL ya trae `options`, se respeta tal cual.
+ */
+export function urlConZona(url: string | undefined, zona: string = ZONA_CHILE): string | undefined {
+  if (!url || /[?&]options=/.test(url)) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}options=${encodeURIComponent(`-c TimeZone=${zona}`)}`;
+}
 
 const SOLO_DIA = /^(\d{4})-(\d{2})-(\d{2})(?:T00:00:00(?:\.000)?Z)?$/;
 
@@ -125,4 +180,58 @@ export function instanteFechaIngreso(valor: Date | string | null | undefined, ah
   const p = partesCalendario(valor, d);
   if (`${p.anio}-${dos(p.mes)}-${dos(p.dia)}` === hoyChile(ahora)) return ahora;
   return instanteDeHoraChile(p.anio, p.mes, p.dia, 12, 0);
+}
+
+/**
+ * Día de calendario «aaaa-mm-dd» en la zona del IDIC.
+ *   · una fecha de calendario (DATE de Prisma o «aaaa-mm-dd») se toma tal cual;
+ *   · un instante (`timestamptz`, `new Date()`) se convierte a la hora de Chile.
+ * Sustituye a `x.toISOString().slice(0, 10)`, que da el día en UTC.
+ * Si el valor es SIEMPRE un instante, use `diaInstanteChile` (evita confundir un
+ * instante exacto de medianoche UTC con una fecha de calendario).
+ */
+export function diaChile(valor: unknown): string | null {
+  const d = aDate(valor);
+  if (!d) return null;
+  const p = esFechaCalendario(valor) ? partesCalendario(valor, d) : partesChile(d);
+  return `${p.anio}-${dos(p.mes)}-${dos(p.dia)}`;
+}
+
+/** Día «aaaa-mm-dd» en Chile de un INSTANTE (siempre se convierte). */
+export function diaInstanteChile(valor: Date | string | number | null | undefined): string | null {
+  if (valor === null || valor === undefined || valor === "") return null;
+  const d = valor instanceof Date ? valor : new Date(valor);
+  if (Number.isNaN(d.getTime())) return null;
+  const p = partesChile(d);
+  return `${p.anio}-${dos(p.mes)}-${dos(p.dia)}`;
+}
+
+/** Mes «aaaa-mm» en Chile (informes mensuales). */
+export function mesChile(ahora: Date = new Date()): string {
+  const p = partesChile(ahora);
+  return `${p.anio}-${dos(p.mes)}`;
+}
+
+/** Suma días de calendario a «aaaa-mm-dd» (sin zona: aritmética de calendario). */
+export function sumarDiasCalendario(dia: string, n: number): string {
+  const d = new Date(`${dia.slice(0, 10)}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Instante en que empieza (00:00 en Chile) el día «aaaa-mm-dd» o el día en Chile de un instante. */
+export function inicioDiaChile(valor: Date | string): Date | null {
+  const dia = typeof valor === "string" && SOLO_DIA.test(valor.trim()) ? valor.trim().slice(0, 10) : diaInstanteChile(valor as any);
+  if (!dia) return null;
+  const [a, m, d] = dia.split("-").map(Number);
+  return instanteDeHoraChile(a, m, d, 0, 0);
+}
+
+/**
+ * Hoy en Chile como Date a medianoche UTC: el valor que se escribe en una columna
+ * DATE con Prisma (Prisma guarda la parte UTC de la fecha; `new Date()` a las 21:30
+ * de Chile se guardaría como el día siguiente).
+ */
+export function hoyFechaChile(ahora: Date = new Date()): Date {
+  return new Date(`${hoyChile(ahora)}T00:00:00Z`);
 }

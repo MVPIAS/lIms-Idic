@@ -32,6 +32,7 @@ import {
   type DestinoDespacho,
 } from "../avisos/reglas-avisos";
 import { faltaOficio, seguimientoDocumento } from "./datos-seguimiento";
+import { SQL_ZONA, diaChile } from "../common/fecha-chile";
 
 const OFICIAL = ["oficial", "emitido"];
 const tienePermiso = (req: any, p: string) => (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes(p);
@@ -392,7 +393,7 @@ export class SeguimientoService {
     const docs = await this.documentosOt(id);
     if (!docs.some((d) => OFICIAL.includes(d.estado)))
       throw new ConflictException("La recepción en DCO se registra cuando la OT tiene al menos un documento oficial.");
-    const fechaOt = (o.fecha_recepcion ?? o.created_at) ? new Date(o.fecha_recepcion ?? o.created_at).toISOString().slice(0, 10) : null;
+    const fechaOt = diaChile(o.fecha_recepcion ?? o.created_at);
     const err = errorFechaRecepcionDco(fecha, fechaOt, hoyCl());
     if (err) throw new BadRequestException(err);
     const a = atrasoRecepcionDco(fecha, o.fecha_compromiso);
@@ -595,7 +596,7 @@ export class SeguimientoService {
       const medioEntrega = dto.medio;
       for (const d of docs.filter((x) => !x.entregadoAt))
         await tx.$executeRawUnsafe(
-          `UPDATE certificado SET entregado_at = $2::date + (now() AT TIME ZONE 'America/Santiago')::time AT TIME ZONE 'America/Santiago',
+          `UPDATE certificado SET entregado_at = $2::date + (now() AT TIME ZONE ${SQL_ZONA})::time AT TIME ZONE ${SQL_ZONA},
                   entrega_medio = $3, entrega_destinatario = $4, entrega_observacion = $5, entrega_registrada_por = $6::uuid, entrega_guia = $7
             WHERE id = $1::uuid AND entregado_at IS NULL`,
           d.id,
@@ -714,7 +715,7 @@ export class SeguimientoService {
       otId: f.ot_id,
       ot: f.ot,
       cliente: f.cliente ?? null,
-      fecha: f.fecha ? new Date(f.fecha).toISOString().slice(0, 10) : null,
+      fecha: diaChile(f.fecha),
       detalle: f.documento ?? null,
     }));
   }
