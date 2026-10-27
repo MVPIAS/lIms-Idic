@@ -324,7 +324,7 @@ const LISTADOS = [
   { n: "Clientes (fase 1)", r: "/clientes?limit=200", p: "cliente.ver", t: "cliente", regla: "unidad", fase1: true, href: "/clientes" },
   { n: "Oportunidades CRM (fase 1)", r: "/oportunidades?limit=200", p: "cotizacion.ver", t: "oportunidad", regla: "unidad", fase1: true, dco: true, href: "/crm" },
   // Frente r4d: tasa 1,5 % mensual (la SCC y el DCO ven todas), reclamos (el DCO los ve todos) y apelaciones.
-  { n: "Tasa 1,5 % mensual (r4d)", r: `/internaciones/tasa-mensual?mes=${new Date().toISOString().slice(0, 7)}`, p: "bpch.tasa.gestionar", t: "ot", regla: "bpch", dco: true, href: "/bpch/tasa-mensual" },
+  { n: "Tasa 1,5 % mensual (r4d)", r: `/internaciones/tasa-mensual?mes=${new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }).slice(0, 7)}`, p: "bpch.tasa.gestionar", t: "ot", regla: "bpch", dco: true, href: "/bpch/tasa-mensual" },
   { n: "Reclamos de clientes (r4d)", r: "/reclamos", p: "reclamo.ver", t: "ot", regla: "unidad", dco: true, href: "/reclamos" },
   { n: "Apelaciones (r4d)", r: "/apelaciones", p: "apelacion.ver", t: "apelacion", regla: "unidad", href: "/apelaciones" },
   { n: "Facturas (fase 1)", r: "/facturas?limit=200", p: "factura.ver", t: "factura", regla: "unidad", fase1: true, href: "/facturas" },

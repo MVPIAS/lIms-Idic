@@ -439,7 +439,7 @@ async function main() {
     // (EP-07 7.8, EP-10 10.3 y 10.11): el programa de esta línea no los trae.
     await rechazo(409, /cabecera de inspección/i, U.stgo, "POST", "/informes/emitir", { otId: C.otPn.id, plantillaId: C.plInspeccion.id, tipoDocumento: "INFORME_INSPECCION" });
     await ok(U.stgo, "PUT", `/bpch/cabecera-ot/${C.otPn.id}`, {
-      procedimiento: "SAC-PG01-P01", lugarInspeccion: "Planta de prueba (línea fija)", fechaInspeccion: new Date().toISOString().slice(0, 10),
+      procedimiento: "SAC-PG01-P01", lugarInspeccion: "Planta de prueba (línea fija)", fechaInspeccion: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }),
     });
     await rechazo(409, /Prototipos/i, U.stgo, "POST", "/informes/emitir", { otId: C.otPn.id, plantillaId: proto.id });
     const r = await ok(U.stgo, "POST", "/informes/emitir", { otId: C.otPn.id, plantillaId: C.plInspeccion.id, tipoDocumento: "INFORME_INSPECCION" });

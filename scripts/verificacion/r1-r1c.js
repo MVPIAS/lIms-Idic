@@ -163,7 +163,7 @@ const POSIBLES_FIRMANTES = [
   "demo.lqc.jefe", "demo.lqc.revisor", "demo.lqc.analista1", "demo.lqc.analista2", "demo.dqo.jefe", "demo.director",
   "demo.calidad", "demo.squ.jefe", "demo.dco.jefe",
 ];
-const hoy = () => new Date().toISOString().slice(0, 10);
+const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 
 async function main() {
   console.log(`API ${BASE}`);

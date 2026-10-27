@@ -202,7 +202,7 @@ async function main() {
     await ok(U.ventas, "POST", `/cotizaciones/${cot.id}/enviar-a-firma`, {});
     await ok("demo.dco.jefe", "POST", `/cotizaciones/${cot.id}/firmar`, {});
     const r = await ok(U.ventas, "POST", `/cotizaciones/${cot.id}/aceptar`, {
-      tipo: "OC", numero: `OC-QUI-${sello}`, fecha: new Date().toISOString().slice(0, 10), conCobro: true, unidadPrincipalId: C.lqc.id,
+      tipo: "OC", numero: `OC-QUI-${sello}`, fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), conCobro: true, unidadPrincipalId: C.lqc.id,
     });
     C.ot = await ok(U.jefe, "GET", `/ot/${r?.ot?.id ?? r?.otId}`);
     afirmar(C.ot.unidadPrincipal === C.lqc.id, "la OT no quedó en LQC");
@@ -248,7 +248,7 @@ async function main() {
     // Desde r1b la emisión exige muestra de origen, requisito y fecha de envío (EP-01 2.2).
     const oi = await ok(U.planif, "POST", "/ordenes-internas", {
       otId: C.ot.id, origenLab: fam(C.lqc).id, destinoLab: fam(C.lcc).id, detalle: "Cromo en cuero",
-      muestraId: C.muestra.id, requisito: "Cromo total según E.T.", fechaEnvio: new Date().toISOString().slice(0, 10),
+      muestraId: C.muestra.id, requisito: "Cromo total según E.T.", fechaEnvio: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }),
     });
     const p = await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/registro-muestras`);
     const e = p.muestras.find((x) => x.id === C.muestra.id).otrosLabsEnlace[0];

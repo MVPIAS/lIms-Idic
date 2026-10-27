@@ -158,7 +158,7 @@ const U = {
   director: "demo.director",
 };
 const POSIBLES_FIRMANTES = ["demo.sstgo.jefe", "demo.scc.jefe", "demo.bpch.jefe", "demo.director", "demo.sstgo.inspector", "demo.scc.inspector1"];
-const hoy = () => new Date().toISOString().slice(0, 10);
+const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 
 function rutValido(base) {
   const cuerpo = String(base);

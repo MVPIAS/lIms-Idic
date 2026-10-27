@@ -355,7 +355,7 @@ async function main() {
   /* ---------------- 3. Aceptación → OT */
   await paso("Ventas registra la aceptación y nace la OT de LQC", async () => {
     const r = await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/aceptar`, {
-      tipo: "OC", numero: `OC-${sello}`, fecha: new Date().toISOString().slice(0, 10), conCobro: true, unidadPrincipalId: C.lqc.id,
+      tipo: "OC", numero: `OC-${sello}`, fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), conCobro: true, unidadPrincipalId: C.lqc.id,
     });
     const otId = r?.ot?.id ?? r?.otId ?? r?.ot_id;
     afirmar(otId, `la aceptación no devolvió la OT: ${JSON.stringify(r).slice(0, 200)}`);
