@@ -137,7 +137,7 @@ const U = {
   lccA1: "demo.lcc.analista1",        // captura en el destino; no recibe ni cierra
   lccRev: "demo.lcc.revisor",         // revisa en el destino (r1g: el destino revisa y aprueba lo suyo)
 };
-const hoy = () => new Date().toISOString().slice(0, 10);
+const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const lista = (j) => (Array.isArray(j) ? j : j?.data ?? []);
 
 async function seccionOrdenesInternas(C) {
@@ -542,7 +542,7 @@ async function seccionCabeceraBpch(C) {
     await rechazo(400, /no puede superar/, UB.stgoInsp, "PUT", u, { procedimiento: "SAC-PG01-P01", tamanoLote: 5, tamanoMuestra: 8 });
     const f = await ok(UB.stgoInsp, "PUT", u, {
       procedimiento: "SAC-PG01-P01", lugarInspeccion: "Polvorín de prueba (r1b)", direccion: "Camino de prueba km 3", comuna: "Comuna de prueba",
-      fechaInspeccion: new Date().toISOString().slice(0, 10), inspectores: "R. R. · N. C.", documentoOrigen: "Solicitud de prueba 1/2026",
+      fechaInspeccion: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), inspectores: "R. R. · N. C.", documentoOrigen: "Solicitud de prueba 1/2026",
       esquema: "LOTES", elementoEspecifico: "Emulsión de prueba", cncDgmn: "E-I/7/176/673/30365/3202", claseDivisionUn: "1.1D", numeroUn: "0241",
       identificacionLote: "L-PRUEBA-01", tamanoLote: 100, tamanoMuestra: 8,
     });

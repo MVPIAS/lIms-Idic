@@ -146,7 +146,7 @@ function arrancarApi() {
 }
 const pararApi = () => { if (hijo && !hijo.killed) hijo.kill(); };
 
-const hoy = () => new Date().toISOString().slice(0, 10);
+const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const masDias = (dias) => new Date(Date.now() + dias * 86400000).toISOString().slice(0, 10);
 const PDF_MIN = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n", "latin1");
 

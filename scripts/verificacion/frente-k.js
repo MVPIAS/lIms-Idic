@@ -213,7 +213,7 @@ async function main() {
       if ((reg.muestras ?? []).length) { C.otLqc = o; C.mLqc = reg.muestras[0]; break; }
     }
     afirmar(C.mLqc, "no hay OT abierta de LQC con muestras");
-    C.emision = { muestraId: C.mLqc.id, requisito: "Cr total según E.T. (frente K)", fechaEnvio: new Date().toISOString().slice(0, 10) };
+    C.emision = { muestraId: C.mLqc.id, requisito: "Cr total según E.T. (frente K)", fechaEnvio: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }) };
     const cuerpo = { otId: C.otLqc.id, destinoLab: C.destLcc.id, ensayos: C.ensLcc, detalle: "Cromo en cuero (frente K)", ...C.emision };
     await exigir(403, U.planLqc, "POST", "/ordenes-internas", { ...cuerpo, otId: C.otLpn.id });
     // El analista sí emite desde r1b (orden_interna.emitir, EP-01 2.2); Calidad no.

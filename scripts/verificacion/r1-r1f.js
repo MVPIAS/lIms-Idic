@@ -143,7 +143,7 @@ const U = {
   rev: "demo.lqc.revisor",
   recepcion: "demo.recepcion",
 };
-const hoy = () => new Date().toISOString().slice(0, 10);
+const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
 const CONF = "/parametros/configurables";
 
 /** Valores por defecto que dejan los SQL (y que los demás recorridos suponen). */

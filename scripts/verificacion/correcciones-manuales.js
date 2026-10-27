@@ -173,7 +173,7 @@ async function main() {
     await ok("demo.ventas", "POST", `/cotizaciones/${cot.id}/enviar-a-firma`, {});
     await ok("demo.dco.jefe", "POST", `/cotizaciones/${cot.id}/firmar`, {});
     const r = await ok("demo.ventas", "POST", `/cotizaciones/${cot.id}/aceptar`, {
-      tipo: "OC", numero: `OC-${etiqueta}-${sello}`, fecha: new Date().toISOString().slice(0, 10), conCobro: true, unidadPrincipalId: unidad.id,
+      tipo: "OC", numero: `OC-${etiqueta}-${sello}`, fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), conCobro: true, unidadPrincipalId: unidad.id,
     });
     return await ok("demo.director", "GET", `/ot/${r?.ot?.id ?? r?.otId}`);
   };
@@ -408,7 +408,7 @@ async function main() {
 
   /* ---------------- 8 · OPI */
   await paso("8 · Registrar OPI: Recepción no tiene el permiso (la pantalla oculta el recuadro)", async () => {
-    await exigir(403, "demo.recepcion", "POST", `/ot/${C.otS.id}/registrar-opi`, { numero: "OPI-1", fecha: new Date().toISOString().slice(0, 10) });
+    await exigir(403, "demo.recepcion", "POST", `/ot/${C.otS.id}/registrar-opi`, { numero: "OPI-1", fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }) });
   });
 }
 
