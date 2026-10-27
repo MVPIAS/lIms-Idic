@@ -372,7 +372,7 @@ export default function ExpedientePage() {
             {/* Muestra compartida entre laboratorios (EP-02 4.2): estado de cada uno. */}
             {tab === "muestras" && typeof id === "string" && <EstadoPorLaboratorio otId={id} version={muestras.length} />}
             {tab === "muestras" && typeof id === "string" && (
-              <RegistroMuestras otId={id} onCambio={() => { cargarMuestras(); cargarOt(); }}
+              <RegistroMuestras otId={id} onCambio={cargarMuestras}
                 onOrdenInterna={(unidadId) => { setDestinoOi(unidadId ?? null); setTab("ordenes"); }}
                 onRecepcionado={() => setTab("asignacion")} />
             )}
