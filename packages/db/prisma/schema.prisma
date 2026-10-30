@@ -971,6 +971,11 @@ model Muestra {
   claseCustodia         String?   @map("clase_custodia") @db.VarChar(20)
   retenerHasta          DateTime? @map("retener_hasta") @db.Date
   datosRecepcion        Json      @default("{}") @map("datos_recepcion")
+  /// Alimentos (align_ali_alimentos.sql, EP-02 1.1-1.2): temperatura de llegada,
+  /// toma de muestra y Nº del formulario de muestreo; se imprimen en el informe.
+  temperaturaRecepcion  Decimal?  @map("temperatura_recepcion") @db.Decimal(4, 1)
+  fechaTomaMuestra      DateTime? @map("fecha_toma_muestra") @db.Timestamptz
+  formularioMuestreo    String?   @map("formulario_muestreo") @db.VarChar(120)
   createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz
   deletedAt     DateTime? @map("deleted_at") @db.Timestamptz
 

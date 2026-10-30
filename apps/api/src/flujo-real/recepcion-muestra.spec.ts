@@ -1,4 +1,4 @@
-import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion } from "./recepcion-muestra";
+import { enlaceOrdenesInternas, erroresRecepcion, instanteTomaChile, normalizarRecepcion, recepcionIncompleta, selloRecepcion } from "./recepcion-muestra";
 
 const OPC = ["terreno_laboratorio", "entregada_cliente", "seccion_muestreo"];
 const LQC = "11111111-1111-1111-1111-111111111111";
@@ -82,5 +82,38 @@ describe("recepción R1 · producto, cliente, sellos y destino (frente r1d)", ()
   it("«sellos verificados» sin Nº de sello no se acepta", () => {
     const n = normalizarRecepcion({ tomaMuestra: "entregada_cliente", condicionRecepcion: "cumple", sellosVerificados: true });
     expect(erroresRecepcion(n, OPC).join(" ")).toContain("sellos que verificó");
+  });
+});
+
+describe("recepción · Alimentos: temperatura, toma y formulario de muestreo (EP-02 1.1-1.2)", () => {
+  const OPC = ["entregada_cliente"];
+  const base = { tomaMuestra: "entregada_cliente", condicionRecepcion: "cumple" as const };
+  const recepcion = new Date("2026-09-07T14:50:00Z"); // 11:50 en Chile
+  it("normaliza: temperatura a un decimal, toma en hora de Chile y formulario recortado", () => {
+    const n = normalizarRecepcion({ ...base, temperaturaRecepcion: 3.84, fechaTomaMuestra: "2026-09-07T11:09", formularioMuestreo: " FORM-PRUEBA-01 " });
+    expect(n.temperaturaRecepcion).toBe(3.8);
+    expect(n.fechaTomaMuestra?.toISOString()).toBe("2026-09-07T14:09:00.000Z");
+    expect(n.formularioMuestreo).toBe("FORM-PRUEBA-01");
+    expect(erroresRecepcion(n, OPC, null, "", recepcion)).toEqual([]);
+  });
+  it("son opcionales: sin ellos no hay error", () => {
+    const n = normalizarRecepcion(base);
+    expect([n.temperaturaRecepcion, n.fechaTomaMuestra, n.formularioMuestreo]).toEqual([null, null, null]);
+    expect(erroresRecepcion(n, OPC)).toEqual([]);
+  });
+  it("temperatura fuera de rango", () => {
+    expect(erroresRecepcion(normalizarRecepcion({ ...base, temperaturaRecepcion: 85 }), OPC).join(" ")).toMatch(/entre -40 y 60 °C/);
+    expect(erroresRecepcion(normalizarRecepcion({ ...base, temperaturaRecepcion: -18 }), OPC)).toEqual([]);
+  });
+  it("la toma no puede ser posterior a la recepción ni ilegible", () => {
+    const tarde = normalizarRecepcion({ ...base, fechaTomaMuestra: "2026-09-07T12:30" });
+    expect(erroresRecepcion(tarde, OPC, null, "Muestra 1: ", recepcion)[0]).toMatch(/^Muestra 1: la toma de muestra no puede ser posterior/);
+    const mala = normalizarRecepcion({ ...base, fechaTomaMuestra: "07/09/2026" });
+    expect(mala.fechaTomaInvalida).toBe(true);
+    expect(erroresRecepcion(mala, OPC).join(" ")).toMatch(/no es válida/);
+  });
+  it("instanteTomaChile respeta el horario de verano de Chile", () => {
+    expect(instanteTomaChile("2026-12-15T10:00")?.toISOString()).toBe("2026-12-15T13:00:00.000Z");
+    expect(instanteTomaChile("2026-13-01T10:00")).toBeUndefined();
   });
 });

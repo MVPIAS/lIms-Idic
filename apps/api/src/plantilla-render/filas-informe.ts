@@ -74,6 +74,8 @@ export interface FilaInforme {
   /** Cotas por separado (columnas Mínimo / Máximo); vacías si no hay. */
   minimo: string;
   maximo: string;
+  /** Requisito de texto o nominal (columna «Otros» del I.V.C. de Alimentos: «Ausencia»). */
+  otros: string;
   ensayo: string;
   metodo: string;
   unidad: string;
@@ -261,6 +263,19 @@ export function modalidadSugerida(resultados: Pick<ResultadoParaInforme, "limite
   return resultados.some(tieneRequisito) ? "cumplimiento" : "solo_resultados";
 }
 
+/**
+ * Modalidad que se propone al emitir: la que fija la plantilla
+ * (`modalidadPorDefecto`, p. ej. el Informe de Ensayos de Alimentos: solo
+ * resultados) o, si es «sugerida», la de modalidadSugerida.
+ */
+export function modalidadInicial(
+  cfg: { modalidadPorDefecto?: "sugerida" | "cumplimiento" | "solo_resultados" },
+  resultados: Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito">[],
+): Modalidad {
+  const fija = cfg.modalidadPorDefecto;
+  return fija === "cumplimiento" || fija === "solo_resultados" ? fija : modalidadSugerida(resultados);
+}
+
 /* ========================================================================== */
 /* Estructura: secciones, componentes y numeración                            */
 /* ========================================================================== */
@@ -277,6 +292,8 @@ function fila(r: ResultadoParaInforme, modalidad: Modalidad): FilaInforme {
     // Las cotas por separado se imprimen como se escribieron (decimales incluidos: «0,00»).
     minimo: textoCota(r.limiteInf),
     maximo: textoCota(r.limiteSup),
+    // Sin cotas, el requisito de texto (P/A: «Ausencia en 25 g») también va en «Otros».
+    otros: textoCota(r.nominal) || (vacio(r.limiteInf) && vacio(r.limiteSup) && !vacio(r.requisito) ? String(r.requisito).trim() : ""),
     ensayo:
       (vacio(r.ensayo) ? "Ensayo sin nombre en el catálogo" : String(r.ensayo).trim()) +
       (r.derivadoA?.laboratorio

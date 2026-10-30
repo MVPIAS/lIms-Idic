@@ -26,6 +26,13 @@ describe("OT · datos del encargo (EP-00 5.1, EP-03 0.1/0.3, EP-05 0.1/0.3)", ()
     const p = portadaDesdeEncargo({ contrato: "C-1", contratoFecha: "2026-03-05", proveedor: "Prov", cantidad: 1500, unidadCantidad: "pares" }, (d) => d.split("-").reverse().join("-"));
     expect(p).toEqual({ contrato: "C-1", fechaContrato: "05-03-2026", proveedor: "Prov", cantidad: "1500 pares" });
   });
+  it("documento de respaldo (EP-02 0.7): Nº o fecha exigen el tipo; todo vacío no exige nada", () => {
+    const msg = /Documento de respaldo: indique el tipo/;
+    expect(erroresEncargo({ docRespaldoNumero: "952" }, {})).toEqual([expect.stringMatching(msg)]);
+    expect(erroresEncargo({ docRespaldoFecha: "2026-03-23" }, {})).toEqual([expect.stringMatching(msg)]);
+    expect(erroresEncargo({ docRespaldoTipo: "Orden de compra", docRespaldoNumero: "952", docRespaldoFecha: "2026-03-23" }, {})).toEqual([]);
+    expect(erroresEncargo({}, {})).toEqual([]);
+  });
 });
 
 describe("OT · validación del laboratorio (EP-05 1.2, BL-163)", () => {

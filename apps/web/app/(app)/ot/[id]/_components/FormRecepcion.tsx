@@ -7,13 +7,16 @@
  * cumple, qué no cumple), cliente de la muestra (maestro), identificación dada
  * por el cliente, sellos y si se verificaron, campos propios del laboratorio
  * (Catálogo › Parámetros · recepcion_campo) y «¿requiere ensayos de otros
- * laboratorios?». Lo usan el registro de muestras (datos comunes) y la
+ * laboratorios?». Alimentos (EP-02 1.1-1.2, 29-10): temperatura de llegada,
+ * fecha y hora de la toma de muestra (hora de Chile) y Nº del formulario de
+ * muestreo; opcionales y se imprimen en el Informe de Ensayos. Lo usan el registro de muestras (datos comunes) y la
  * corrección de la recepción de una muestra. Las reglas las valida el servidor
  * (apps/api/src/flujo-real/recepcion-muestra.ts y recepcion/reglas-recepcion.ts).
  */
 import { errorNumeroEnLinea } from "@/lib/validate";
 import { useEffect, useId, useState } from "react";
 import { llamar, type Unidad } from "@/lib/laboratorio";
+import { ahoraInputChile } from "@/lib/fecha-chile";
 import { faltantesLaboratorio, valorCampo, type CampoRecepcion, type ConfigRecepcion, type ValorCampo } from "@/lib/recepcion";
 
 export interface DatosRecepcion {
@@ -31,6 +34,11 @@ export interface DatosRecepcion {
   claseCustodia: string;
   ubicacion: string;
   datos: Record<string, ValorCampo>;
+  /** Temperatura de llegada (°C), tal como se escribe («3,8»). */
+  temperaturaRecepcion: string;
+  /** Toma de muestra en hora de Chile («aaaa-mm-ddTHH:MM»). */
+  fechaTomaMuestra: string;
+  formularioMuestreo: string;
 }
 
 export const RECEPCION_VACIA: DatosRecepcion = {
@@ -47,7 +55,16 @@ export const RECEPCION_VACIA: DatosRecepcion = {
   claseCustodia: "",
   ubicacion: "",
   datos: {},
+  temperaturaRecepcion: "",
+  fechaTomaMuestra: "",
+  formularioMuestreo: "",
 };
+
+/** «3,8» → 3.8; vacío → null; NaN si no es un número. */
+export function numeroTemperatura(s: string): number | null {
+  const t = s.trim().replace(",", ".");
+  return t ? Number(t) : null;
+}
 
 /** Lo que falta antes de enviar (el servidor vuelve a comprobarlo). */
 export function faltantesRecepcion(d: DatosRecepcion, cfg?: ConfigRecepcion | null): string[] {
@@ -57,6 +74,9 @@ export function faltantesRecepcion(d: DatosRecepcion, cfg?: ConfigRecepcion | nu
   if (d.condicionRecepcion === "no_cumple" && d.condicionObservacion.trim().length < 5) f.push("describa por qué no cumple (mínimo 5 caracteres)");
   if (d.requiereOtrosLabs && !d.otrosLabs.length) f.push("marque qué otro(s) laboratorio(s) deben ensayarla");
   if (d.sellosVerificados && !d.selloNumero.trim()) f.push("indique el Nº de los sellos que verificó");
+  const temp = numeroTemperatura(d.temperaturaRecepcion);
+  if (temp !== null && (!Number.isFinite(temp) || temp < -40 || temp > 60)) f.push("la temperatura de recepción debe ser un número entre -40 y 60 °C");
+  if (d.fechaTomaMuestra && d.fechaTomaMuestra > ahoraInputChile()) f.push("la toma de muestra no puede ser posterior a ahora");
   f.push(...faltantesLaboratorio(cfg, d));
   return f;
 }
@@ -83,6 +103,9 @@ export function cuerpoRecepcion(d: DatosRecepcion) {
     claseCustodia: t(d.claseCustodia),
     ubicacion: t(d.ubicacion),
     datos,
+    temperaturaRecepcion: numeroTemperatura(d.temperaturaRecepcion),
+    fechaTomaMuestra: d.fechaTomaMuestra || null,
+    formularioMuestreo: t(d.formularioMuestreo),
   };
 }
 
@@ -263,6 +286,25 @@ export default function FormRecepcion({
           </label>
         </div>
       )}
+      <div className="field">
+        <label htmlFor={`${id}-temp`}>Temperatura de recepción (°C)</label>
+        <input id={`${id}-temp`} inputMode="decimal" value={valor.temperaturaRecepcion} maxLength={6} placeholder="Ej.: 3,8"
+          aria-invalid={errorNumeroEnLinea(valor.temperaturaRecepcion) ? true : undefined}
+          onChange={(e) => set({ temperaturaRecepcion: e.target.value })} />
+        {errorNumeroEnLinea(valor.temperaturaRecepcion) && <small role="alert" style={{ color: "var(--red)", fontSize: 11 }}>{errorNumeroEnLinea(valor.temperaturaRecepcion)}</small>}
+        <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Temperatura de llegada; se imprime en el Informe de Ensayos.</span>
+      </div>
+      <div className="field">
+        <label htmlFor={`${id}-ftoma`}>Fecha y hora de toma de muestra</label>
+        <input id={`${id}-ftoma`} type="datetime-local" value={valor.fechaTomaMuestra} max={ahoraInputChile()}
+          onChange={(e) => set({ fechaTomaMuestra: e.target.value })} />
+        <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Hora de Chile; no posterior a la recepción.</span>
+      </div>
+      <div className="field">
+        <label htmlFor={`${id}-form`}>Nº de formulario de muestreo</label>
+        <input id={`${id}-form`} value={valor.formularioMuestreo} maxLength={120} onChange={(e) => set({ formularioMuestreo: e.target.value })}
+          placeholder="Formulario de selección y extracción de muestras" />
+      </div>
       {!tieneUbicacion && (
         <div className="field">
           <label htmlFor={`${id}-ubic`}>Ubicación de almacenamiento</label>

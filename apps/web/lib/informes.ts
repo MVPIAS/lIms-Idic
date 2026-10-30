@@ -79,10 +79,12 @@ export interface FormatoInforme {
   portada: "ninguna" | "ivc";
   etiquetas: {
     ensayo: string; metodo: string; unidad: string; requisito: string; resultado: string; veredicto: string;
-    minimo: string; maximo: string; muestra: string;
+    minimo: string; maximo: string; muestra: string; otros: string;
   };
-  /** texto = columna «Requisito»; min_max = columnas Mínimo / Máximo (LME). */
-  columnasRequisito: "texto" | "min_max";
+  /** texto = columna «Requisito»; min_max = columnas Mínimo / Máximo (LME); min_max_otros = además «Otros» (I.V.C. de Alimentos). */
+  columnasRequisito: "texto" | "min_max" | "min_max_otros";
+  /** Modalidad que la plantilla propone al emitir. */
+  modalidadPorDefecto?: "sugerida" | "cumplimiento" | "solo_resultados";
   unidadEnResultado: boolean;
   columnaMuestra: boolean;
   textoSinCota: string;

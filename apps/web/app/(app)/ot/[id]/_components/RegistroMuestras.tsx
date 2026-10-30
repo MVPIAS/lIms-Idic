@@ -33,6 +33,7 @@ import { llamar, veredictoInfo } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
 import { fechaHora } from "@/lib/format";
 import { etiquetaClase, fechaDma, textoValor, type ConfigRecepcion, type ProductoLab, type ValorCampo } from "@/lib/recepcion";
+import { ahoraInputChile } from "@/lib/fecha-chile";
 import FormRecepcion, { RECEPCION_VACIA, cuerpoRecepcion, faltantesRecepcion, type DatosRecepcion } from "./FormRecepcion";
 import FotosRecepcion from "./FotosRecepcion";
 
@@ -44,6 +45,8 @@ interface Linea {
 interface EnlaceLab { unidadId: string; unidad: { id: string; codigo: string; nombre: string } | null; ordenes: { id: string; numero: string; estado: string }[] }
 interface MuestraOt {
   id: string; codigo: string; nombre: string | null; estado: string; veredicto: string | null; ensayos: number; metodos: string[];
+  /** Norma de cada ensayo pedido (del método del catálogo; null si no tiene). */
+  metodosNorma?: { codigo: string; norma: string | null }[];
   tomaMuestra: string | null; condicionRecepcion: "cumple" | "no_cumple" | null; condicionObservacion: string | null;
   selloNumero: string | null; identificacionCliente: string | null; requiereOtrosLabs: boolean; otrosLabs: string[];
   otrosLabsDetalle: string | null; recepcionadaAt: string | null; recepcionadaPorNombre: string | null;
@@ -52,6 +55,7 @@ interface MuestraOt {
   numeroInterno: string | null; catElementoId: string | null; productoNombre: string | null; productoCodigo: string | null;
   clienteId: string | null; clienteNombre: string | null; sellosVerificados: boolean | null; claseCustodia: string | null;
   retenerHasta: string | null; ubicacion: string | null; datos: Record<string, ValorCampo> | null; fotosRecepcion: number;
+  temperaturaRecepcion?: number | null; fechaTomaMuestra?: string | null; formularioMuestreo?: string | null;
 }
 interface Propuesta {
   ot: { id: string; codigo: string; estado: string; unidadPrincipal: string | null; clienteId: string | null; clienteNombre: string | null; catElementoId: string | null };
@@ -82,6 +86,9 @@ const datosDe = (m: MuestraOt): DatosRecepcion => ({
   claseCustodia: m.claseCustodia ?? "",
   ubicacion: m.ubicacion ?? "",
   datos: { ...(m.datos ?? {}) },
+  temperaturaRecepcion: m.temperaturaRecepcion != null ? String(m.temperaturaRecepcion).replace(".", ",") : "",
+  fechaTomaMuestra: m.fechaTomaMuestra ? ahoraInputChile(new Date(m.fechaTomaMuestra)) : "",
+  formularioMuestreo: m.formularioMuestreo ?? "",
 });
 
 /** Selector del producto (matriz): lista del laboratorio + búsqueda en el catálogo. */
@@ -431,6 +438,15 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                             </div>
                           )}
                           {m.ubicacion && <div style={{ color: "var(--muted)" }}>Ubicación: {m.ubicacion}</div>}
+                          {(m.temperaturaRecepcion != null || m.fechaTomaMuestra || m.formularioMuestreo) && (
+                            <div style={{ color: "var(--muted)" }}>
+                              {[
+                                m.temperaturaRecepcion != null ? `T° ${String(m.temperaturaRecepcion).replace(".", ",")} °C` : null,
+                                m.fechaTomaMuestra ? `Toma ${fechaHora(m.fechaTomaMuestra)}` : null,
+                                m.formularioMuestreo ? `Formulario ${m.formularioMuestreo}` : null,
+                              ].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
                           {(() => {
                             // Datos propios del laboratorio en una línea; las casillas, resumidas.
                             const datos = camposLab.filter((c) => c.tipo !== "casilla" && m.datos && m.datos[c.codigo] !== undefined && m.datos[c.codigo] !== "");
@@ -492,7 +508,13 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                           {m.metodos.length ? (
                             <>
                               <b style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{m.ensayos} {m.ensayos === 1 ? "ensayo" : "ensayos"}</b>
-                              <div>{m.metodos.join(", ")}</div>
+                              {m.metodosNorma?.length ? (
+                                <ul style={{ margin: "2px 0 0", paddingLeft: 16 }} aria-label="Ensayos y norma">
+                                  {m.metodosNorma.map((x) => (
+                                    <li key={x.codigo}>{x.codigo} <span style={{ color: "var(--muted)" }}>· {x.norma ?? "—"}</span></li>
+                                  ))}
+                                </ul>
+                              ) : <div>{m.metodos.join(", ")}</div>}
                             </>
                           ) : <span className="pill amber">sin ensayos</span>}
                         </td>

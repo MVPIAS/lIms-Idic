@@ -10,6 +10,7 @@ import { renderizar, tablaMuestras, tablaInspeccion, type FilaMuestra, type Fila
 import { condicionFinal, faltantesDocumentoFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
 import { fmtFecha, fmtFechaHora } from "./html.util";
 import { atencionInforme } from "./atencion";
+import { antecedentesInforme, datosRecepcionInforme } from "./antecedentes-informe";
 import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
 import { QcService } from "../qc/qc.module";
@@ -45,7 +46,7 @@ import {
   armarInforme,
   filaInspeccion,
   filasMetodos,
-  modalidadSugerida,
+  modalidadInicial,
   tieneRequisito,
   NOMBRE_MODALIDAD,
   type EstructuraInforme,
@@ -329,7 +330,9 @@ export class PlantillaRenderService {
         });
     const atencion = atencionInforme({ solicitanteOt: ot.solicitante, fichaCliente: ot.cliente, contactoPrincipal });
     const organigrama = await this.organigramaDe(ot.unidadPrincipal);
-    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion, organigrama };
+    // Punto 1 del Informe de Ensayos (Alimentos, Anexo 02-02): muestreo, recepción, análisis, temperatura.
+    const antecedentes = antecedentesInforme(muestras, resultados.map((r) => r.fechaEnsayo), ot, ot.cliente);
+    return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion, organigrama, antecedentes };
   }
 
   /** Ensayos de la OT derivados a otro laboratorio por orden interna (lims_lab_de_resultado). */
@@ -386,7 +389,8 @@ export class PlantillaRenderService {
     tenantId: string,
     unidadId: string | null,
     muestras: { codigo: string; nombre: string | null; numeroInterno?: bigint | null; catElementoId: string | null; clienteId: string | null;
-      identificacionCliente: string | null; datosRecepcion?: unknown; ubicacion?: string | null }[],
+      identificacionCliente: string | null; datosRecepcion?: unknown; ubicacion?: string | null;
+      temperaturaRecepcion?: unknown; fechaTomaMuestra?: Date | null; formularioMuestreo?: string | null }[],
     clienteOt: string | null = null,
   ): Promise<IdentificacionMuestra[]> {
     try {
@@ -415,6 +419,8 @@ export class PlantillaRenderService {
             return { etiqueta: c.etiqueta, valor };
           })
           .filter((x): x is { etiqueta: string; valor: string } => !!x);
+        // Temperatura de llegada, toma y formulario de muestreo (EP-02 1.1-1.2).
+        datos.push(...datosRecepcionInforme(m));
         return {
           codigo: m.codigo,
           nombre: m.nombre,
@@ -584,6 +590,8 @@ export class PlantillaRenderService {
       },
       veredicto_ot: veredictoOt,
       atencion: ctx.atencion,
+      // Muestreo, recepción, análisis, temperatura, formulario y contacto ({{antecedentes.*}}).
+      antecedentes: ctx.antecedentes,
       fecha: fmtFecha(cert.fecha),
       fecha_hora: fmtFechaHora(cert.fecha),
       // Documentos BPCH: cabecera del expediente (vacía en las demás OT).
@@ -629,7 +637,7 @@ export class PlantillaRenderService {
     const { ot } = ctx;
     const unaMuestra = ctx.muestras.length === 1 ? ctx.muestras[0] : null;
     return {
-      modalidad: modalidadSugerida(ctx.paraInforme),
+      modalidad: modalidadInicial(cfg, ctx.paraInforme),
       conRequisito: ctx.paraInforme.filter(tieneRequisito).length,
       totalEnsayos: ctx.paraInforme.length,
       portada:
@@ -691,7 +699,7 @@ export class PlantillaRenderService {
 
     const ctx = await this.contexto(otId, tenantId, opciones.filtro ?? null);
     const cfg = await this.configDePlantilla(plantilla.id, plantilla.tipo);
-    const modalidad = opciones.modalidad ?? modalidadSugerida(ctx.paraInforme);
+    const modalidad = opciones.modalidad ?? modalidadInicial(cfg, ctx.paraInforme);
     const datosDoc = opciones.datos ?? {};
     const est = armarInforme(ctx.paraInforme, cfg, modalidad);
     const avisos: string[] = [];

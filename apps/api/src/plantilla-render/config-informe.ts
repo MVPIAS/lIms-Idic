@@ -10,6 +10,10 @@
  *   · (LME, 20-10-2026) requisito en dos columnas Mínimo / Máximo con «-.-»
  *     donde no hay cota, la unidad junto al resultado y una tabla única con la
  *     columna Muestra (informe interno).
+ *   · (Alimentos, 29-10-2026) requisito en tres columnas Mínimo / Máximo /
+ *     Otros (I.V.C. de Alimentos: «Ausencia» va en «Otros») y modalidad por
+ *     defecto de la plantilla (el Informe de Ensayos de Alimentos imprime solo
+ *     resultados; quien emite puede elegir otra).
  *
  * El valor efectivo = valores por defecto del TIPO de plantilla + lo que la
  * plantilla guarde. Funciones PURAS: config-informe.spec.ts.
@@ -27,6 +31,7 @@ const Etiquetas = z
     minimo: z.string().trim().min(1).max(40),
     maximo: z.string().trim().min(1).max(40),
     muestra: z.string().trim().min(1).max(40),
+    otros: z.string().trim().min(1).max(40),
   })
   .partial();
 
@@ -50,8 +55,10 @@ export const ConfigInformeSchema = z
     conclusionFija: z.string().trim().max(2000).nullable(),
     portada: z.enum(["ninguna", "ivc"]),
     etiquetas: Etiquetas,
-    /** texto = una columna «Requisito»; min_max = dos columnas Mínimo / Máximo (LME). */
-    columnasRequisito: z.enum(["texto", "min_max"]),
+    /** texto = una columna «Requisito»; min_max = Mínimo / Máximo (LME); min_max_otros = además «Otros» (I.V.C. de Alimentos). */
+    columnasRequisito: z.enum(["texto", "min_max", "min_max_otros"]),
+    /** Modalidad que propone la plantilla al emitir (sugerida = cumplimiento si algún ensayo tiene requisito). */
+    modalidadPorDefecto: z.enum(["sugerida", "cumplimiento", "solo_resultados"]),
     /** La unidad va junto al valor del resultado («0,00 mg/L»). */
     unidadEnResultado: z.boolean(),
     /** Columna «Muestra» siempre (informe interno del LME). */
@@ -94,8 +101,10 @@ export interface ConfigInforme {
     minimo: string;
     maximo: string;
     muestra: string;
+    otros: string;
   };
-  columnasRequisito: "texto" | "min_max";
+  columnasRequisito: "texto" | "min_max" | "min_max_otros";
+  modalidadPorDefecto: "sugerida" | "cumplimiento" | "solo_resultados";
   unidadEnResultado: boolean;
   columnaMuestra: boolean;
   textoSinCota: string;
@@ -128,8 +137,10 @@ const BASE: ConfigInforme = {
     minimo: "Mínimo",
     maximo: "Máximo",
     muestra: "Muestra",
+    otros: "Otros",
   },
   columnasRequisito: "texto",
+  modalidadPorDefecto: "sugerida",
   unidadEnResultado: false,
   columnaMuestra: false,
   textoSinCota: "—",
