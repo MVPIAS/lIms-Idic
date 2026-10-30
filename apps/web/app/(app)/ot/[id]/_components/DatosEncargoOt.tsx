@@ -42,10 +42,13 @@ const CAMPOS_TEXTO: [string, string, number][] = [
   ["unidadCantidad", "Unidad de la cantidad", 30],
   ["etTexto", "E.T. y versión", 200],
   ["lugarMuestreo", "Lugar de muestreo", 300],
+  ["docRespaldoTipo", "Documento de respaldo (tipo)", 60],
+  ["docRespaldoNumero", "Documento de respaldo (Nº)", 60],
 ];
 const CAMPOS_FECHA: [string, string][] = [
   ["contratoFecha", "Fecha del contrato"],
   ["fechaMuestreo", "Fecha prevista de muestreo"],
+  ["docRespaldoFecha", "Fecha del documento de respaldo"],
 ];
 
 const vacio = (v: unknown) => v == null || v === "";
@@ -78,7 +81,7 @@ export default function DatosEncargoOt({ otId, onCambio }: { otId: string; onCam
 
   function abrirEdicion() {
     const base: Record<string, any> = { tipoTrabajo: v!.tipoTrabajo ?? "" };
-    for (const k of ["nivelTecnologico", "mandante", "oficioNumero", "oficioFecha", "contrato", "contratoFecha", "proyecto", "proveedor", "fabricante", "paisOrigen", "item", "unidadCantidad", "etTexto", "lugarMuestreo", "fechaMuestreo", "paga", "carrilDsa", "lugarEjecucion", "paisEjecucion", "otOrigenCodigo"])
+    for (const k of ["nivelTecnologico", "mandante", "oficioNumero", "oficioFecha", "contrato", "contratoFecha", "proyecto", "proveedor", "fabricante", "paisOrigen", "item", "unidadCantidad", "etTexto", "lugarMuestreo", "fechaMuestreo", "docRespaldoTipo", "docRespaldoNumero", "docRespaldoFecha", "paga", "carrilDsa", "lugarEjecucion", "paisEjecucion", "otOrigenCodigo"])
       base[k] = e[k] ?? "";
     base.cantidad = e.cantidad != null ? String(e.cantidad).replace(".", ",") : "";
     base.requiereMuestreo = e.requiereMuestreo == null ? "" : e.requiereMuestreo ? "si" : "no";
@@ -100,7 +103,7 @@ export default function DatosEncargoOt({ otId, onCambio }: { otId: string; onCam
         otOrigenId = o.id;
       }
       const cuerpo: Record<string, any> = {};
-      for (const k of ["tipoTrabajo", "nivelTecnologico", "mandante", "oficioNumero", "oficioFecha", "contrato", "contratoFecha", "proyecto", "proveedor", "fabricante", "paisOrigen", "item", "unidadCantidad", "etTexto", "lugarMuestreo", "fechaMuestreo", "paga", "carrilDsa", "lugarEjecucion", "paisEjecucion"])
+      for (const k of ["tipoTrabajo", "nivelTecnologico", "mandante", "oficioNumero", "oficioFecha", "contrato", "contratoFecha", "proyecto", "proveedor", "fabricante", "paisOrigen", "item", "unidadCantidad", "etTexto", "lugarMuestreo", "fechaMuestreo", "docRespaldoTipo", "docRespaldoNumero", "docRespaldoFecha", "paga", "carrilDsa", "lugarEjecucion", "paisEjecucion"])
         cuerpo[k] = String(f[k] ?? "").trim() === "" ? null : String(f[k]).trim();
       cuerpo.cantidad = String(f.cantidad ?? "").trim() === "" ? null : Number(String(f.cantidad).replace(/\./g, "").replace(",", "."));
       cuerpo.requiereMuestreo = f.requiereMuestreo === "" ? null : f.requiereMuestreo === "si";
@@ -201,6 +204,7 @@ export default function DatosEncargoOt({ otId, onCambio }: { otId: string; onCam
             <Dato l="Ítem · cantidad" x={[e.item, e.cantidad != null ? `${String(e.cantidad).replace(".", ",")}${e.unidadCantidad ? ` ${e.unidadCantidad}` : ""}` : null].filter(Boolean).join(" · ")} />
             <Dato l="E.T. y versión" x={e.etTexto} />
             <Dato l="Muestreo previsto" x={[e.lugarMuestreo, e.fechaMuestreo ? fechaDia(e.fechaMuestreo) : null].filter(Boolean).join(" · ")} />
+            <Dato l="Documento de respaldo" x={[e.docRespaldoTipo, e.docRespaldoNumero ? `Nº ${e.docRespaldoNumero}` : null, e.docRespaldoFecha ? fechaDia(e.docRespaldoFecha) : null].filter(Boolean).join(" · ")} />
             <Dato l="OT de origen · paga" x={e.otOrigenId ? <><Link href={`/ot/${e.otOrigenId}` as any} className="codigo">{e.otOrigenCodigo}</Link>{e.paga ? ` · paga el ${e.paga}` : ""}</> : null} />
             <Dato l="Carril DSA" x={etiqueta(v.listas.carrilDsa, e.carrilDsa)} />
             <Dato l="Lugar de ejecución" x={[etiqueta(v.listas.lugarEjecucion, e.lugarEjecucion), e.paisEjecucion].filter((x) => x && x !== "—").join(" · ")} />

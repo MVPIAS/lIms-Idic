@@ -64,6 +64,10 @@ export interface DatosEncargo {
   lugarEjecucion?: string | null;
   paisEjecucion?: string | null;
   muestreoCliente?: boolean | null;
+  /** Documento de respaldo de la OT (EP-02 0.7): tipo, Nº y fecha. */
+  docRespaldoTipo?: string | null;
+  docRespaldoNumero?: string | null;
+  docRespaldoFecha?: string | null;
 }
 
 const lleno = (v: unknown) => v != null && String(v).trim() !== "";
@@ -87,6 +91,8 @@ export function erroresEncargo(d: DatosEncargo, ctx: { origen?: string | null; o
   if (d.carrilDsa === "REINSPECCION" && !d.otOrigenId) e.push("Una reinspección exige la OT de origen.");
   if (d.otOrigenId && ctx.otId && d.otOrigenId === ctx.otId) e.push("La OT de origen no puede ser la misma OT.");
   if (d.contratoFecha && d.fechaMuestreo && d.fechaMuestreo < d.contratoFecha) e.push("La fecha de muestreo es anterior a la del contrato.");
+  if ((lleno(d.docRespaldoNumero) || lleno(d.docRespaldoFecha)) && !lleno(d.docRespaldoTipo))
+    e.push("Documento de respaldo: indique el tipo de documento (oficio, orden de compra, factura…).");
   return e;
 }
 

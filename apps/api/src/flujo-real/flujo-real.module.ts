@@ -1423,6 +1423,10 @@ const RecepcionBody = z.object({
     .record(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/), z.union([z.string().max(300), z.number().finite(), z.boolean(), z.null()]))
     .refine((d) => Object.keys(d).length <= 40, "Demasiados campos de recepción.")
     .optional(),
+  /** Alimentos (EP-02 1.1-1.2): temperatura de llegada (°C), toma de muestra en hora de Chile y Nº de formulario de muestreo. */
+  temperaturaRecepcion: z.number().finite().nullable().optional(),
+  fechaTomaMuestra: z.string().max(25).nullable().optional(),
+  formularioMuestreo: z.string().max(120).nullable().optional(),
 });
 
 export const RegistrarMuestrasBody = z.object({
@@ -1530,9 +1534,11 @@ export class RegistroMuestrasService {
     cfg: ConfigRecepcionLab,
     /** Producto ya conocido (de la muestra o de la OT) cuando la recepción no lo trae. */
     productoPrevio: string | null = null,
+    /** Cuándo se recibió la muestra (corrección) o ahora (registro). */
+    recepcionAt: Date = new Date(),
   ) {
     const n = normalizarRecepcion(r);
-    const errores = erroresRecepcion(n, opciones, labPrincipal, prefijo);
+    const errores = erroresRecepcion(n, opciones, labPrincipal, prefijo, recepcionAt);
     for (const u of n.otrosLabs) {
       try {
         await this.labs.validarUnidad(tenantId, u);
@@ -1578,6 +1584,9 @@ export class RegistroMuestrasService {
       otrosLabs: n.otrosLabs,
       otrosLabsDetalle: n.otrosLabsDetalle,
       sellosVerificados: n.sellosVerificados,
+      temperaturaRecepcion: n.temperaturaRecepcion,
+      fechaTomaMuestra: n.fechaTomaMuestra,
+      formularioMuestreo: n.formularioMuestreo,
       ...(n.catElementoId ? { catElementoId: n.catElementoId } : {}),
       ...(n.clienteId ? { clienteId: n.clienteId } : {}),
       ...(lab
@@ -1649,10 +1658,17 @@ export class RegistroMuestrasService {
               m.cliente_id AS "clienteId", cl.razon_social AS "clienteNombre",
               m.sellos_verificados AS "sellosVerificados", m.clase_custodia AS "claseCustodia",
               to_char(m.retener_hasta, 'YYYY-MM-DD') AS "retenerHasta", m.ubicacion, m.datos_recepcion AS "datos",
+              m.temperatura_recepcion::float8 AS "temperaturaRecepcion", m.fecha_toma_muestra AS "fechaTomaMuestra",
+              m.formulario_muestreo AS "formularioMuestreo",
               (SELECT count(*) FROM ot_foto f WHERE f.muestra_id = m.id AND f.tipo = 'recepcion' AND f.deleted_at IS NULL)::int AS "fotosRecepcion",
               (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL)::int AS ensayos,
               COALESCE((SELECT array_agg(DISTINCT cm.codigo) FROM resultado r JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
-                         WHERE r.muestra_id = m.id AND r.deleted_at IS NULL), '{}') AS metodos
+                         WHERE r.muestra_id = m.id AND r.deleted_at IS NULL), '{}') AS metodos,
+              -- Norma de cada ensayo pedido, tomada del método del catálogo (EP-02 0.7).
+              COALESCE((SELECT json_agg(json_build_object('codigo', x.codigo, 'norma', x.norma) ORDER BY x.codigo)
+                          FROM (SELECT DISTINCT cm.codigo, NULLIF(trim(cm.norma), '') AS norma
+                                  FROM resultado r JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
+                                 WHERE r.muestra_id = m.id AND r.deleted_at IS NULL) x), '[]'::json) AS "metodosNorma"
          FROM muestra m
          LEFT JOIN usuario u ON u.id = m.recepcionada_por
          LEFT JOIN usuario uc ON uc.id = m.recepcion_corregida_por
@@ -1934,6 +1950,7 @@ export class RegistroMuestrasService {
     const cfg = await this.recepcion.configDeUnidad(tenantId, ot.unidadPrincipal);
     const { n, errores, lab } = await this.validarRecepcion(
       tenantId, body, ot.unidadPrincipal, "", opciones, cfg, m.catElementoId ?? ot.catElementoId ?? null,
+      m.recepcionadaAt ?? new Date(),
     );
     if (errores.length) throw new BadRequestException(errores.join(" "));
     // El historial guarda la recepción anterior COMPLETA, con quién y cuándo se
@@ -1953,6 +1970,9 @@ export class RegistroMuestrasService {
       claseCustodia: m.claseCustodia,
       ubicacion: m.ubicacion,
       datos: m.datosRecepcion,
+      temperaturaRecepcion: m.temperaturaRecepcion,
+      fechaTomaMuestra: m.fechaTomaMuestra,
+      formularioMuestreo: m.formularioMuestreo,
       recepcionadaAt: m.recepcionadaAt,
       recepcionadaPor: m.recepcionadaPor,
       recepcionCorregidaAt: m.recepcionCorregidaAt,

@@ -122,4 +122,5 @@ align_f6_correcciones.sql
 seed_f6_demo.sql                     demo
 align_f7_correcciones.sql
 align_zona_horaria.sql
+align_ali_alimentos.sql
 align_cierre_permisos.sql

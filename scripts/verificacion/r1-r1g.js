@@ -230,7 +230,8 @@ async function main() {
       muestras: [{
         nombre: `Harina de trigo · bolsa 1 kg (r1g ${sello})`,
         metodoIds: [C.mHum.id, C.mCen.id],
-        recepcion: { tomaMuestra: "entregada_cliente", condicionRecepcion: "cumple", datos: { lote: `L-${sello}`, temperatura_llegada: 4.5 } },
+        // Desde el 29-10 la temperatura es un dato común de la recepción (align_ali_alimentos.sql).
+        recepcion: { tomaMuestra: "entregada_cliente", condicionRecepcion: "cumple", temperaturaRecepcion: 4.5, datos: { lote: `L-${sello}` } },
       }],
     });
     C.muestra = reg.muestras[0];
@@ -239,7 +240,7 @@ async function main() {
     C.numero = String(n.asignados[0].numeroInterno);
     const prop = await ok(U.lqaJefe, "GET", `/flujo/ot/${C.ot.id}/registro-muestras`);
     const m = prop.muestras.find((x) => x.id === C.muestra.id);
-    afirmar(m?.datos?.temperatura_llegada === 4.5, `temperatura de llegada ${JSON.stringify(m?.datos)}`);
+    afirmar(m?.temperaturaRecepcion === 4.5, `temperatura de llegada ${m?.temperaturaRecepcion}`);
     return `${C.muestra.codigo} · Nº interno ${C.numero} · 4,5 °C`;
   });
 

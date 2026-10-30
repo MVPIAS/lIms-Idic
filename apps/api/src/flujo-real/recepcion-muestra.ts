@@ -17,7 +17,13 @@
  *    verificados, destino de la muestra, ubicación y campos propios del
  *    laboratorio. Los propios del laboratorio los valida
  *    recepcion/reglas-recepcion.ts con la configuración de Catálogo › Parámetros.
+ *  · Alimentos (EP-02 1.1 y 1.2, revisión 29-10): temperatura de llegada (°C,
+ *    un decimal), fecha y hora de la toma de muestra (hora de Chile; no puede
+ *    ser posterior a la recepción) y Nº del formulario de muestreo. Opcionales
+ *    en todos los laboratorios; se imprimen en el Informe de Ensayos.
  */
+
+import { instanteDeHoraChile } from "../common/fecha-chile";
 
 export interface RecepcionMuestra {
   tomaMuestra?: string | null;
@@ -36,6 +42,12 @@ export interface RecepcionMuestra {
   claseCustodia?: string | null;
   ubicacion?: string | null;
   datos?: Record<string, string | number | boolean | null> | null;
+  /** Temperatura de llegada en °C. */
+  temperaturaRecepcion?: number | null;
+  /** Toma de muestra en hora de Chile: «aaaa-mm-ddTHH:MM». */
+  fechaTomaMuestra?: string | null;
+  /** Nº del formulario de muestreo (p. ej. «DCO Selección y Extracción de Muestras Nº …»). */
+  formularioMuestreo?: string | null;
 }
 
 export interface RecepcionNormalizada {
@@ -53,6 +65,25 @@ export interface RecepcionNormalizada {
   claseCustodia: string | null;
   ubicacion: string | null;
   datos: Record<string, string | number | boolean | null>;
+  temperaturaRecepcion: number | null;
+  /** Instante de la toma (UTC); null si no se indicó. */
+  fechaTomaMuestra: Date | null;
+  /** true si se indicó una fecha de toma que no se pudo leer. */
+  fechaTomaInvalida: boolean;
+  formularioMuestreo: string | null;
+}
+
+/** Límites razonables de la temperatura de llegada (°C). */
+export const TEMP_RECEPCION_MIN = -40;
+export const TEMP_RECEPCION_MAX = 60;
+
+/** «aaaa-mm-ddTHH:MM» escrito en hora de Chile → instante; undefined si no se puede leer. */
+export function instanteTomaChile(valor: string): Date | undefined {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2})?$/.exec(valor.trim());
+  if (!m) return undefined;
+  const [, a, me, d, h, mi] = m.map(Number);
+  if (me < 1 || me > 12 || d < 1 || d > 31 || h > 23 || mi > 59) return undefined;
+  return instanteDeHoraChile(a, me, d, h, mi);
 }
 
 const limpio = (s?: string | null) => {
@@ -63,6 +94,7 @@ const limpio = (s?: string | null) => {
 /** Normaliza: textos recortados, vacíos a NULL, sin laboratorios si no se requieren. */
 export function normalizarRecepcion(r: RecepcionMuestra): RecepcionNormalizada {
   const requiere = !!r.requiereOtrosLabs;
+  const toma = limpio(r.fechaTomaMuestra);
   return {
     tomaMuestra: limpio(r.tomaMuestra),
     condicionRecepcion: r.condicionRecepcion ?? null,
@@ -78,6 +110,13 @@ export function normalizarRecepcion(r: RecepcionMuestra): RecepcionNormalizada {
     claseCustodia: limpio(r.claseCustodia),
     ubicacion: limpio(r.ubicacion),
     datos: { ...(r.datos ?? {}) },
+    temperaturaRecepcion:
+      typeof r.temperaturaRecepcion === "number" && Number.isFinite(r.temperaturaRecepcion)
+        ? Math.round(r.temperaturaRecepcion * 10) / 10
+        : null,
+    fechaTomaMuestra: toma ? instanteTomaChile(toma) ?? null : null,
+    fechaTomaInvalida: !!toma && !instanteTomaChile(toma),
+    formularioMuestreo: limpio(r.formularioMuestreo),
   };
 }
 
@@ -86,8 +125,15 @@ export function normalizarRecepcion(r: RecepcionMuestra): RecepcionNormalizada {
  * @param opcionesToma códigos vigentes de la lista «toma_muestra»
  * @param labPrincipal laboratorio responsable de la OT (no es «otro laboratorio»)
  * @param prefijo «Muestra 2: » cuando se registran varias
+ * @param recepcionAt cuándo se recibió la muestra (la toma no puede ser posterior)
  */
-export function erroresRecepcion(r: RecepcionNormalizada, opcionesToma: string[], labPrincipal?: string | null, prefijo = ""): string[] {
+export function erroresRecepcion(
+  r: RecepcionNormalizada,
+  opcionesToma: string[],
+  labPrincipal?: string | null,
+  prefijo = "",
+  recepcionAt: Date = new Date(),
+): string[] {
   const e: string[] = [];
   if (!r.tomaMuestra) e.push(`${prefijo}indique quién tomó la muestra (toma de muestra).`);
   else if (!opcionesToma.includes(r.tomaMuestra)) e.push(`${prefijo}la toma de muestra «${r.tomaMuestra}» no está en la lista vigente.`);
@@ -99,6 +145,12 @@ export function erroresRecepcion(r: RecepcionNormalizada, opcionesToma: string[]
     e.push(`${prefijo}el laboratorio responsable de la OT no es «otro laboratorio»: quítelo de la lista.`);
   if (r.sellosVerificados === true && !r.selloNumero)
     e.push(`${prefijo}indique el Nº de los sellos que verificó.`);
+  const t = r.temperaturaRecepcion;
+  if (t !== null && (t < TEMP_RECEPCION_MIN || t > TEMP_RECEPCION_MAX))
+    e.push(`${prefijo}la temperatura de recepción debe estar entre ${TEMP_RECEPCION_MIN} y ${TEMP_RECEPCION_MAX} °C.`);
+  if (r.fechaTomaInvalida) e.push(`${prefijo}la fecha y hora de toma de muestra no es válida.`);
+  else if (r.fechaTomaMuestra && r.fechaTomaMuestra.getTime() > recepcionAt.getTime() + 60_000)
+    e.push(`${prefijo}la toma de muestra no puede ser posterior a la recepción.`);
   return e;
 }
 

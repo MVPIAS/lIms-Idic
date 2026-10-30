@@ -23,6 +23,7 @@ const ETIQUETAS: { clave: keyof FormatoInforme["etiquetas"]; texto: string }[] =
   { clave: "minimo", texto: "Columna del mínimo" },
   { clave: "maximo", texto: "Columna del máximo" },
   { clave: "muestra", texto: "Columna de la muestra" },
+  { clave: "otros", texto: "Columna «Otros» del requisito" },
 ];
 
 export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantillaId: string; onGuardado?: () => void }) {
@@ -93,9 +94,18 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
           <select id="fmt-req" value={f.columnasRequisito} onChange={(e) => poner("columnasRequisito", e.target.value as FormatoInforme["columnasRequisito"])}>
             <option value="texto">Una columna «Requisito» (6,5 – 8,5; Máx. 0,05…)</option>
             <option value="min_max">Dos columnas: Mínimo y Máximo</option>
+            <option value="min_max_otros">Tres columnas: Mínimo, Máximo y Otros («Ausencia»)</option>
           </select>
         </div>
-        {f.columnasRequisito === "min_max" && (
+        <div className="field">
+          <label htmlFor="fmt-modalidad">Modalidad propuesta al emitir</label>
+          <select id="fmt-modalidad" value={f.modalidadPorDefecto ?? "sugerida"} onChange={(e) => poner("modalidadPorDefecto", e.target.value as NonNullable<FormatoInforme["modalidadPorDefecto"]>)}>
+            <option value="sugerida">Según los ensayos (cumplimiento si alguno tiene requisito)</option>
+            <option value="cumplimiento">Cumplimiento (requisito y veredicto)</option>
+            <option value="solo_resultados">Solo resultados</option>
+          </select>
+        </div>
+        {f.columnasRequisito !== "texto" && (
           <div className="field">
             <label htmlFor="fmt-sincota">Texto de una cota vacía</label>
             <input id="fmt-sincota" maxLength={10} value={f.textoSinCota} onChange={(e) => poner("textoSinCota", e.target.value)} />

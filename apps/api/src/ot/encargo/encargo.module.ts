@@ -65,6 +65,10 @@ const EncargoSchema = z.object({
   lugarEjecucion: opcion(LUGARES_EJECUCION),
   paisEjecucion: txt(80),
   muestreoCliente: z.boolean().nullable().optional(),
+  // Documento de respaldo de la OT (EP-02 0.7, revisión 29-10): tipo, Nº y fecha.
+  docRespaldoTipo: txt(60),
+  docRespaldoNumero: txt(60),
+  docRespaldoFecha: fechaOpc,
 });
 
 const ValidacionSchema = z.object({
@@ -106,6 +110,9 @@ const COLS: Record<string, [string, string]> = {
   lugarEjecucion: ["lugar_ejecucion", ""],
   paisEjecucion: ["pais_ejecucion", ""],
   muestreoCliente: ["muestreo_cliente", "::boolean"],
+  docRespaldoTipo: ["doc_respaldo_tipo", ""],
+  docRespaldoNumero: ["doc_respaldo_numero", ""],
+  docRespaldoFecha: ["doc_respaldo_fecha", "::date"],
 };
 
 const SELECT_ENCARGO = `
@@ -119,6 +126,8 @@ const SELECT_ENCARGO = `
          e.ot_origen_id AS "otOrigenId", oo.codigo AS "otOrigenCodigo", e.paga,
          e.carril_dsa AS "carrilDsa", e.lugar_ejecucion AS "lugarEjecucion", e.pais_ejecucion AS "paisEjecucion",
          e.muestreo_cliente AS "muestreoCliente",
+         e.doc_respaldo_tipo AS "docRespaldoTipo", e.doc_respaldo_numero AS "docRespaldoNumero",
+         to_char(e.doc_respaldo_fecha, 'YYYY-MM-DD') AS "docRespaldoFecha",
          e.alcance_conforme AS "alcanceConforme", e.alcance_observacion AS "alcanceObservacion",
          e.clasificacion_vehiculo AS "clasificacionVehiculo", e.subtipo_vehiculo AS "subtipoVehiculo",
          to_char(e.fecha_inspeccion, 'YYYY-MM-DD') AS "fechaInspeccion",

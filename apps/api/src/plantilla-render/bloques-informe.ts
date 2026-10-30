@@ -21,7 +21,8 @@ const GUION = "—";
 const celda = (v: string, clase = "") =>
   `<td${clase ? ` class="${clase}"` : ""}>${v && v.trim() !== "" ? escapeHtml(v) : GUION}</td>`;
 
-const minMax = (cfg: ConfigInforme) => cfg.columnasRequisito === "min_max";
+const minMax = (cfg: ConfigInforme) => cfg.columnasRequisito === "min_max" || cfg.columnasRequisito === "min_max_otros";
+const conOtros = (cfg: ConfigInforme) => cfg.columnasRequisito === "min_max_otros";
 
 /** Columnas de una tabla según su sección (tablas del 15-10, EP-03 3.4). */
 interface ColsSeccion { sello: boolean; metodo: boolean }
@@ -41,7 +42,7 @@ function cabecera(est: EstructuraInforme, cfg: ConfigInforme, cols: ColsSeccion 
     th(e.ensayo) +
     (cols.metodo ? th(e.metodo) : "") +
     (cfg.columnaUnidad ? th(e.unidad) : "") +
-    (cumplimiento ? (minMax(cfg) ? th(e.minimo, true) + th(e.maximo, true) : th(e.requisito)) : "") +
+    (cumplimiento ? (minMax(cfg) ? th(e.minimo, true) + th(e.maximo, true) + (conOtros(cfg) ? th(e.otros) : "") : th(e.requisito)) : "") +
     th(e.resultado) +
     (est.mostrarEstadisticas ? th("DE", true) + th("CV %", true) : "") +
     (cumplimiento ? th(e.veredicto) : "") +
@@ -70,7 +71,7 @@ function filaHtml(f: FilaInforme, est: EstructuraInforme, cfg: ConfigInforme, co
     celda(f.ensayo) +
     (cols.metodo ? celda(f.metodo) : "") +
     (cfg.columnaUnidad ? celda(f.unidad) : "") +
-    (cumplimiento ? (minMax(cfg) ? cota(f.minimo) + cota(f.maximo) : celda(requisito)) : "") +
+    (cumplimiento ? (minMax(cfg) ? cota(f.minimo) + cota(f.maximo) + (conOtros(cfg) ? celda(f.otros) : "") : celda(requisito)) : "") +
     resultado +
     (est.mostrarEstadisticas ? celda(f.desviacion, "num") + celda(f.cv, "num") : "") +
     (cumplimiento ? celda(f.veredictoTexto, clase) : "") +
