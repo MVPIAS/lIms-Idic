@@ -49,6 +49,11 @@ export interface EspecCaptura {
   planClases?: PlanClases | null;
   /** Segunda condición de la misma fila («X kgf con Y mm»). */
   condicion2?: Condicion2 | null;
+  /**
+   * Valor por defecto de las lecturas (paso_metodo.valor_defecto), por campo
+   * «C1».. «Cn»: se usa cuando la celda llega vacía (p. ej. factor de proteína 6,25).
+   */
+  camposDefecto?: Record<string, number> | null;
 }
 
 export interface EntradaCaptura {
@@ -196,7 +201,10 @@ function calcularCapturaSimple(espec: EspecCaptura, e: EntradaCaptura): CalculoC
       const ctx: Record<string, number> = { ...(e.variables ?? {}) };
       const limpia: Record<string, number> = {};
       for (let c = 1; c <= trad.nCampos; c++) {
-        const v = numeroCelda(l[`C${c}`] ?? l[`c${c}`], `Lectura ${i + 1}, campo ${c}`);
+        const bruto = l[`C${c}`] ?? l[`c${c}`];
+        const defecto = espec.camposDefecto?.[`C${c}`];
+        const vacia = bruto == null || String(bruto).trim() === "";
+        const v = vacia && defecto != null && Number.isFinite(defecto) ? defecto : numeroCelda(bruto, `Lectura ${i + 1}, campo ${c}`);
         ctx[`C${c}`] = v;
         limpia[`C${c}`] = v;
       }

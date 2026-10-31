@@ -36,6 +36,7 @@ import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laborator
 import { traducirFormula } from "../laboratorio/formula-legado";
 import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
 import { calcularCaptura, CapturaError, variablesDeCaptura } from "../laboratorio/captura-estandar";
+import { evaluarReglas, leerReglas, modoReglas, textoRegla, type AvisoAceptacion, type ModoReglas } from "../laboratorio/reglas-aceptacion";
 import { leerCondicion2, leerPlanClases } from "../laboratorio/requisito-compuesto";
 import { aplicarEtAMuestra } from "../especificacion-tecnica/aplicar-et";
 import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
@@ -535,6 +536,12 @@ const CapturarValorBody = z
     temperatura: z.number().finite().nullable().optional(),
     humedad: z.number().finite().nullable().optional(),
     incertidumbre: z.string().max(60).nullable().optional(),
+    /**
+     * Reglas de aceptación del método no cumplidas (duplicados, peso constante):
+     * con el parámetro captura_reglas.modo = avisar, la primera vez se responde
+     * 409 con los avisos y el analista confirma reenviando con `true`.
+     */
+    confirmarAvisos: z.boolean().optional(),
   });
 
 /** Factor de la fórmula del ensayo en esta OT (resultado.factor). valor NULL = quitarlo. */
@@ -646,6 +653,33 @@ export class PuenteAnalisisService {
       tenantId,
     );
     return criterioIndeterminado(f[0]?.valor);
+  }
+
+  /** ¿Avisar o impedir si no se cumplen las reglas de aceptación del método? (captura_reglas.modo; SAL-17). */
+  private async modoReglas(tenantId: string): Promise<ModoReglas> {
+    const f = await this.prisma.$queryRawUnsafe<{ valor: string | null }[]>(
+      `SELECT valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'captura_reglas' AND codigo = 'modo' AND activo`,
+      tenantId,
+    );
+    return modoReglas(f[0]?.valor);
+  }
+
+  /** Reglas de aceptación y valores por defecto de las lecturas del método (ALI-D4). */
+  private async capturaDelMetodo(catMetodoId: string | null) {
+    if (!catMetodoId) return { reglas: [], camposDefecto: null as Record<string, number> | null };
+    const [m] = await this.prisma.$queryRawUnsafe<{ reglas_captura: unknown }[]>(
+      `SELECT reglas_captura FROM cat_metodo WHERE id = $1::uuid`,
+      catMetodoId,
+    );
+    const pasos = await this.prisma.$queryRawUnsafe<{ valor_defecto: string | number | null }[]>(
+      `SELECT valor_defecto FROM paso_metodo WHERE cat_metodo_id = $1::uuid AND activo AND deleted_at IS NULL ORDER BY orden, created_at`,
+      catMetodoId,
+    );
+    const camposDefecto: Record<string, number> = {};
+    pasos.forEach((p, i) => {
+      if (p.valor_defecto != null && Number.isFinite(Number(p.valor_defecto))) camposDefecto[`C${i + 1}`] = Number(p.valor_defecto);
+    });
+    return { reglas: leerReglas(m?.reglas_captura), camposDefecto: Object.keys(camposDefecto).length ? camposDefecto : null };
   }
 
   /** Modo de obligatoriedad del equipo en la captura (parámetro captura_equipo.obligatorio). */
@@ -983,6 +1017,7 @@ export class PuenteAnalisisService {
     if (cond.errores.length) throw new BadRequestException(cond.errores.join(" "));
 
     let calc;
+    const metodoCaptura = variante ? null : await this.capturaDelMetodo(resultado.catMetodoId ?? null);
     if (variante) {
       // Valor ya decidido por el formulario especializado (su dato primario queda en su registro).
       const r = variante.registro;
@@ -1002,6 +1037,7 @@ export class PuenteAnalisisService {
           // Requisito compuesto desde la E.T. (plan de clases, segunda condición).
           planClases: leerPlanClases(resultado.planClases),
           condicion2: leerCondicion2(resultado.condicion2),
+          camposDefecto: metodoCaptura?.camposDefecto ?? null,
         },
         entrada,
       );
@@ -1010,10 +1046,38 @@ export class PuenteAnalisisService {
       throw e;
     }
 
+    // Reglas de aceptación del método (EP-02 3.2/3.9, ALI-D4): sobre las
+    // determinaciones calculadas (lecturas o réplicas). Un valor final único no
+    // se evalúa: el analista puede seguir ingresando solo el resultado.
+    let avisos: AvisoAceptacion[] = [];
+    if (metodoCaptura?.reglas.length && tipoDato !== "atributo" && calc.replicas.length) {
+      avisos = evaluarReglas(metodoCaptura.reglas, calc.replicas, calc.lecturas);
+      if (avisos.length) {
+        const modo = await this.modoReglas(tenantId);
+        const lista = avisos.map((a) => a.texto).join(" ");
+        if (modo === "impedir")
+          throw new BadRequestException(`No se cumplen las reglas de aceptación del método: ${lista} Repita la determinación.`);
+        if (!entrada.confirmarAvisos)
+          throw new ConflictException({
+            statusCode: 409,
+            error: "Reglas de aceptación",
+            codigo: "AVISOS_ACEPTACION",
+            message: `No se cumplen las reglas de aceptación del método: ${lista} Confirme para guardar de todos modos.`,
+            avisos,
+          });
+      }
+    }
+
     const actualizado = await conTraza(
       this.prisma,
       { usuarioId: req?.user?.sub, motivo: motivo ?? (resultado.estado === "devuelto" ? resultado.motivoDevolucion : null), origen: corrige ? "correccion" : "captura" },
-      (tx) => tx.resultado.update({
+      async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE resultado SET avisos_aceptacion = $2::jsonb WHERE id = $1::uuid`,
+        id,
+        avisos.length ? JSON.stringify(avisos) : null,
+      );
+      return tx.resultado.update({
       where: { id },
       data: {
         valorSinFactor: calc.valorSinFactor,
@@ -1044,9 +1108,15 @@ export class PuenteAnalisisService {
         valorCondicion2: calc.valorCondicion2,
       },
       include: { catAnalito: true, catMetodo: true },
-    }));
+    });
+      });
     const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
-    return { ...actualizado, veredictoMuestra: veredictoDeLaMuestra, explicacion: calc.explicacion };
+    return {
+      ...actualizado,
+      veredictoMuestra: veredictoDeLaMuestra,
+      explicacion: calc.explicacion,
+      avisosAceptacion: avisos.length ? avisos : null,
+    };
   }
 
   /**
@@ -1249,15 +1319,45 @@ export class PuenteAnalisisService {
     // de las fórmulas por lectura, con su nombre y unidad.
     const metodoIds = [...new Set(resultados.map((r) => r.catMetodoId).filter((x): x is string => Boolean(x)))];
     const pasos = metodoIds.length
-      ? await this.prisma.$queryRawUnsafe<{ cat_metodo_id: string; nombre: string; unidad: string | null; tipo_dato: string }[]>(
-          `SELECT cat_metodo_id, nombre, unidad, tipo_dato FROM paso_metodo
+      ? await this.prisma.$queryRawUnsafe<{
+          cat_metodo_id: string; nombre: string; unidad: string | null; tipo_dato: string;
+          valor_defecto: string | number | null; simbolo: string | null; por_confirmar: boolean | null; instruccion: string | null;
+        }[]>(
+          `SELECT cat_metodo_id, nombre, unidad, tipo_dato, valor_defecto, simbolo, por_confirmar, instruccion FROM paso_metodo
             WHERE cat_metodo_id = ANY($1::uuid[]) AND activo AND deleted_at IS NULL
             ORDER BY cat_metodo_id, orden, created_at`,
           metodoIds,
         )
       : [];
-    const camposPorMetodo: Record<string, { nombre: string; unidad: string | null }[]> = {};
-    for (const p of pasos) (camposPorMetodo[p.cat_metodo_id] ??= []).push({ nombre: p.nombre, unidad: p.unidad });
+    type CampoCaptura = { nombre: string; unidad: string | null; valorDefecto: number | null; simbolo: string | null; porConfirmar: boolean; instruccion: string | null };
+    const camposPorMetodo: Record<string, CampoCaptura[]> = {};
+    for (const p of pasos)
+      (camposPorMetodo[p.cat_metodo_id] ??= []).push({
+        nombre: p.nombre,
+        unidad: p.unidad,
+        valorDefecto: p.valor_defecto != null && Number.isFinite(Number(p.valor_defecto)) ? Number(p.valor_defecto) : null,
+        simbolo: p.simbolo ?? null,
+        porConfirmar: !!p.por_confirmar,
+        instruccion: p.instruccion ?? null,
+      });
+    // Reglas de aceptación y nota de la captura del método (ALI-D4) y avisos aceptados al guardar.
+    const metodosCaptura = metodoIds.length
+      ? await this.prisma.$queryRawUnsafe<{ id: string; reglas_captura: unknown; nota_captura: string | null }[]>(
+          `SELECT id, reglas_captura, nota_captura FROM cat_metodo WHERE id = ANY($1::uuid[])`,
+          metodoIds,
+        )
+      : [];
+    const capturaMetodo = new Map(
+      metodosCaptura.map((m) => [m.id, { reglas: leerReglas(m.reglas_captura), nota: m.nota_captura ?? null }]),
+    );
+    const idsResultado = resultados.map((r) => r.id);
+    const avisosFilas = idsResultado.length
+      ? await this.prisma.$queryRawUnsafe<{ id: string; avisos_aceptacion: unknown }[]>(
+          `SELECT id, avisos_aceptacion FROM resultado WHERE id = ANY($1::uuid[]) AND avisos_aceptacion IS NOT NULL`,
+          idsResultado,
+        )
+      : [];
+    const avisosDe = new Map(avisosFilas.map((a) => [a.id, a.avisos_aceptacion]));
 
     // Veredicto de cada muestra (lote) y de la OT, con la misma regla.
     const porMuestra = muestras.map((m) => ({
@@ -1316,6 +1416,11 @@ export class PuenteAnalisisService {
           formulaLegado: cat.formulaLegado ?? null,
           formulaMotivo: cat.formulaMotivo ?? (r.formula && !t.expr ? t.motivo ?? null : null),
           campos: r.catMetodoId ? camposPorMetodo[r.catMetodoId] ?? [] : [],
+          reglasAceptacion: r.catMetodoId
+            ? (capturaMetodo.get(r.catMetodoId)?.reglas ?? []).map((g) => ({ ...g, texto: textoRegla(g) }))
+            : [],
+          notaCaptura: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.nota ?? null : null,
+          avisosAceptacion: avisosDe.get(r.id) ?? null,
         };
       }),
     };
