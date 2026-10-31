@@ -39,7 +39,7 @@ describe("ALI-D4 · fórmulas de los métodos LQA", () => {
     expect(r.replicas[0]).toBeCloseTo(10.9375, 6);
     expect(r.replicas[1]).toBeCloseTo(11.02500 / 1.002, 6);
     expect(r.valorNumerico).toBeCloseTo((10.9375 + 11.025 / 1.002) / 2, 6);
-    expect(r.veredicto).toBe("no_cumple"); // proteína cruda ≥ 12 % en el catálogo
+    expect(r.veredicto).toBe("no_cumple"); // Mín 12 % de este ejemplo
   });
 
   it("proteína: el factor vacío toma el valor por defecto 6,25 (por confirmar, SAL-06)", () => {
