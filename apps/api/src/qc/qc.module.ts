@@ -26,7 +26,7 @@ import { DEV_TENANT } from "../common/base-crud.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
-import { motivoNoRevisable, resultadoAlRegistrar, CRITERIO_DEFECTO, TIPOS_QC, criterioAplicable, erroresConfigQc, tiposQcFaltantes } from "./reglas-qc";
+import { motivoNoRevisable, resultadoAlRegistrar, CRITERIO_DEFECTO, TIPOS_QC, criterioAplicable, erroresConfigQc, tiposQcFaltantes, evaluarCualitativo, faltantesMicrobiologico } from "./reglas-qc";
 
 /**
  * =============================================================================
@@ -114,7 +114,19 @@ const RegistrarControlSchema = z.object({
   observaciones: z.string().max(1000).optional(),
   /** MRC o patrón usado (identificación, lote, certificado). */
   mrcReferencia: z.string().trim().max(160).optional(),
+  /** QC microbiológico (EP-02 ALI-D6): (+) crece / (−) no crece. */
+  resultadoCualitativo: z.enum(["+", "-"]).optional(),
+  /** Lote del medio de cultivo. */
+  loteMedio: z.string().trim().max(80).optional(),
+  /** Cepa de referencia ATCC (catálogo qc_cepa_referencia) del control positivo. */
+  cepaId: z.string().uuid().optional(),
 });
+const CepaSchema = z.object({
+  codigo: z.string().trim().min(3).max(40),
+  organismo: z.string().trim().min(3).max(120),
+  numero: z.number().int().min(1).max(999).nullable().optional(),
+  activo: z.boolean().optional(),
+}).strict();
 type RegistrarControl = z.infer<typeof RegistrarControlSchema>;
 
 // `aprobadoPor` ya no lo elige el cliente (se ignora si llega): es quien hace la acción.
@@ -160,6 +172,10 @@ export class QcService {
     let cvPct: number | null = b.cvPct ?? null;
 
     let resultado: Evaluacion["resultado"] = "pendiente";
+
+    // QC microbiológico: lectura (+)/(−) contra lo esperado del tipo.
+    if (b.resultadoCualitativo && (b.tipo === "positivo" || b.tipo === "negativo" || b.tipo === "blanco"))
+      return { resultado: evaluarCualitativo(b.tipo, b.resultadoCualitativo), rCuadrado: null, recuperacionPct: null, cvPct: null };
 
     switch (b.tipo) {
       case "blanco": {
@@ -218,6 +234,40 @@ export class QcService {
     return ot;
   }
 
+  /* ------------------------------ cepas de referencia (catálogo administrable) --- */
+
+  async cepas(tenantId: string, todas: boolean) {
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, numero, codigo, organismo, activo FROM qc_cepa_referencia
+        WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND ($2::boolean OR activo)
+        ORDER BY numero NULLS LAST, codigo`,
+      tenantId,
+      todas,
+    );
+  }
+
+  async guardarCepa(tenantId: string, id: string | null, body: unknown) {
+    const d = CepaSchema.parse(body ?? {});
+    try {
+      const f = id
+        ? await this.prisma.$queryRawUnsafe<any[]>(
+            `UPDATE qc_cepa_referencia SET codigo = $3, organismo = $4, numero = $5, activo = COALESCE($6::boolean, activo)
+              WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL RETURNING id, numero, codigo, organismo, activo`,
+            id, tenantId, d.codigo, d.organismo, d.numero ?? null, d.activo ?? null,
+          )
+        : await this.prisma.$queryRawUnsafe<any[]>(
+            `INSERT INTO qc_cepa_referencia (tenant_id, codigo, organismo, numero, activo)
+             VALUES ($1::uuid, $2, $3, $4, COALESCE($5::boolean, true)) RETURNING id, numero, codigo, organismo, activo`,
+            tenantId, d.codigo, d.organismo, d.numero ?? null, d.activo ?? null,
+          );
+      if (!f[0]) throw new NotFoundException("Cepa no encontrada.");
+      return f[0];
+    } catch (e: any) {
+      if (String(e?.message ?? "").includes("ux_qc_cepa")) throw new ConflictException(`Ya existe la cepa ${d.codigo}.`);
+      throw e;
+    }
+  }
+
   /** OT de un control (para comprobar el alcance por laboratorio). */
   async otDeControl(controlId: string, tenantId: string) {
     const c = await this.prisma.qcControl.findFirst({ where: { id: controlId, tenantId, deletedAt: null }, select: { otId: true } });
@@ -244,6 +294,16 @@ export class QcService {
     const criterio = criterioAplicable(body.tipo, body.criterio, crit[0]?.qc_criterios ?? null);
     if ((body.tipo === "mrc" || body.tipo === "patron") && !(body.valorEsperado != null && body.valorObtenido != null))
       throw new BadRequestException(`Un control con ${body.tipo === "mrc" ? "MRC" : "patrón"} necesita el valor certificado (esperado) y el obtenido.`);
+    const faltan = faltantesMicrobiologico(body);
+    if (faltan.length) throw new BadRequestException(`El control microbiológico necesita: ${faltan.join(", ")}.`);
+    if (body.cepaId) {
+      const c = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT 1 FROM qc_cepa_referencia WHERE id = $1::uuid AND tenant_id = $2::uuid AND activo AND deleted_at IS NULL`,
+        body.cepaId,
+        tenantId,
+      );
+      if (!c.length) throw new BadRequestException("La cepa de referencia no existe o está inactiva.");
+    }
     const ev = this.evaluar({ ...body, criterio: criterio ?? undefined });
 
     return this.prisma.qcControl.create({
@@ -267,7 +327,15 @@ export class QcService {
     }).then(async (c) => {
       if (body.mrcReferencia)
         await this.prisma.$executeRawUnsafe(`UPDATE qc_control SET mrc_referencia = $2 WHERE id = $1::uuid`, c.id, body.mrcReferencia);
-      return { ...c, mrcReferencia: body.mrcReferencia ?? null };
+      if (body.resultadoCualitativo || body.loteMedio || body.cepaId)
+        await this.prisma.$executeRawUnsafe(
+          `UPDATE qc_control SET resultado_cualitativo = $2, lote_medio = $3, cepa_id = $4::uuid WHERE id = $1::uuid`,
+          c.id,
+          body.resultadoCualitativo ?? null,
+          body.loteMedio ?? null,
+          body.cepaId ?? null,
+        );
+      return { ...c, mrcReferencia: body.mrcReferencia ?? null, resultadoCualitativo: body.resultadoCualitativo ?? null, loteMedio: body.loteMedio ?? null, cepaId: body.cepaId ?? null };
     });
   }
 
@@ -382,11 +450,22 @@ export class QcService {
       orderBy: { createdAt: "desc" },
     });
 
+    // Columnas del QC microbiológico (align_qc_microbiologico.sql), fuera del modelo Prisma.
+    const extra = controles.length
+      ? await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT q.id, q.mrc_referencia AS "mrcReferencia", q.resultado_cualitativo AS "resultadoCualitativo", q.lote_medio AS "loteMedio",
+                  q.cepa_id AS "cepaId", c.codigo AS "cepaCodigo", c.organismo AS "cepaOrganismo"
+             FROM qc_control q LEFT JOIN qc_cepa_referencia c ON c.id = q.cepa_id WHERE q.id = ANY($1::uuid[])`,
+          controles.map((c) => c.id),
+        ).catch(() => [])
+      : [];
+    const porId = new Map(extra.map((x) => [x.id, x]));
+
     return {
       otId,
       estado: { aprobado: faltantes.length === 0, faltantes },
       metodos,
-      controles,
+      controles: controles.map((c) => ({ ...c, ...(porId.get(c.id) ?? {}) })),
     };
   }
 
@@ -497,6 +576,25 @@ export class QcController {
     );
     if (!n) throw new NotFoundException("Método no encontrado.");
     return this.configMetodo(id, req);
+  }
+
+  @Get("cepas")
+  @RequierePermiso(PERM.ver)
+  @ApiOperation({ summary: "Cepas de referencia ATCC del QC microbiológico (?todas=1 incluye inactivas)" })
+  cepas(@Req() req: any) {
+    return this.svc.cepas(tenantDe(req), req?.query?.todas === "1");
+  }
+
+  @Post("cepas")
+  @RequierePermiso("catalogo.gestionar")
+  crearCepa(@Body() body: unknown, @Req() req: any) {
+    return this.svc.guardarCepa(tenantDe(req), null, body);
+  }
+
+  @Put("cepas/:id")
+  @RequierePermiso("catalogo.gestionar")
+  editarCepa(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.guardarCepa(tenantDe(req), id, body);
   }
 
   @Delete("control/:id")

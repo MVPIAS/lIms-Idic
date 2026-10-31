@@ -1,4 +1,4 @@
-import { motivoNoRevisable, resultadoAlRegistrar } from "./reglas-qc";
+import { motivoNoRevisable, resultadoAlRegistrar, evaluarCualitativo, faltantesMicrobiologico, erroresConfigQc } from "./reglas-qc";
 
 describe("control de calidad · independencia", () => {
   it("un control que cumple el criterio queda pendiente de aprobación; uno que no, rechazado", () => {
@@ -45,5 +45,25 @@ describe("QC por método · tipos MRC y patrón, criterios por método (BL-167)"
     expect(erroresConfigQc({ qcTipos: ["mrc", "foo"] })).toEqual(["Tipo de control desconocido: foo."]);
     expect(erroresConfigQc({ qcCriterios: { mrc: "alto" } })[0]).toMatch(/número o un rango/);
     expect(erroresConfigQc({ qcTipos: ["mrc"], qcCriterios: { mrc: "90-110" } })).toEqual([]);
+  });
+});
+
+describe("QC microbiológico (ALI-D6)", () => {
+  it("positivo debe crecer (+); negativo y blanco no (−)", () => {
+    expect(evaluarCualitativo("positivo", "+")).toBe("aprobado");
+    expect(evaluarCualitativo("positivo", "-")).toBe("rechazado");
+    expect(evaluarCualitativo("negativo", "-")).toBe("aprobado");
+    expect(evaluarCualitativo("negativo", "+")).toBe("rechazado");
+    expect(evaluarCualitativo("blanco", "+")).toBe("rechazado");
+    expect(evaluarCualitativo("blanco", "-")).toBe("aprobado");
+    expect(evaluarCualitativo("positivo", null)).toBe("pendiente");
+  });
+  it("exige resultado, lote del medio y, el positivo, la cepa", () => {
+    expect(faltantesMicrobiologico({ tipo: "positivo" })).toEqual(["resultado (+)/(−)", "lote del medio de cultivo", "cepa de referencia ATCC"]);
+    expect(faltantesMicrobiologico({ tipo: "negativo", resultadoCualitativo: "-", loteMedio: "L-1" })).toEqual([]);
+    expect(faltantesMicrobiologico({ tipo: "blanco" })).toEqual([]);
+  });
+  it("los tipos cualitativos se pueden exigir por método con criterio + / -", () => {
+    expect(erroresConfigQc({ qcTipos: ["positivo", "negativo", "blanco"], qcCriterios: { positivo: "+", negativo: "-" } })).toEqual([]);
   });
 });
