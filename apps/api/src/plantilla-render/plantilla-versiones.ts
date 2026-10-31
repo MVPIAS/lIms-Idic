@@ -56,6 +56,11 @@ export const BLOQUES_MOTOR: Record<string, string> = {
   identificacion_muestras: "Identificación de las muestras",
 };
 
+/** `id`, `xxxId`, `tenant…`, `createdBy`, `deletedAt`… */
+export function esCampoInterno(k: string): boolean {
+  return k === "id" || /Id$/.test(k) || /^tenant/i.test(k) || /^(created|updated|deleted)(At|By)$/.test(k);
+}
+
 /**
  * Rutas `a.b.c` de un objeto de datos, para la lista de variables del editor.
  * Las hojas son escalares, fechas o arrays (no se recorren). Profundidad máxima
@@ -73,6 +78,8 @@ export function aplanarVariables(obj: unknown, prefijo = "", profundidad = 0, sa
   }
   for (const k of claves) {
     if (k === "__proto__" || k === "constructor" || k === "prototype" || !/^[A-Za-z0-9_]+$/.test(k)) continue;
+    // Identificadores y auditoría internos: no sirven para redactar un documento.
+    if (esCampoInterno(k)) continue;
     aplanarVariables((obj as Record<string, unknown>)[k], prefijo ? `${prefijo}.${k}` : k, profundidad + 1, salida);
   }
   return salida;
