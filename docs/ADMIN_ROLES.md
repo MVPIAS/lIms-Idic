@@ -129,6 +129,15 @@ matriz OFICIO, sin permiso.
 tasa 1,5 %), `apelacion.ver/registrar/resolver` (apelación del Informe de Rechazo; resuelve el
 Director), `reclamo.ver/gestionar` (reclamos de clientes: Comercial, Planificación, Calidad) y
 `ot.recepcion_dco` (recepción de ítems en el DCO: Comercial, Planificación, Recepción).
+**Versiones de plantillas · frente plantillas** (`align_plantilla_versiones.sql`): `plantilla.gestionar`
+redacta el BORRADOR de una plantilla (cuerpo y formato), lo descarta, vuelve a una versión anterior y duplica
+plantillas (Calidad, Administración); `plantilla.aprobar` lo deja VIGENTE (Calidad, Director, Subdirector,
+Jefe de Departamento; Superadministración). Quien redactó o modificó el borrador no lo aprueba, aunque tenga
+el permiso (Calidad redacta → aprueba Dirección o una jefatura de departamento; Administración redacta →
+aprueba Calidad). Guardar el formato de una plantilla (también desde «Emitir informe») escribe en el borrador.
+**QC microbiológico · EP-02 ALI-D6** (`align_qc_microbiologico.sql`): sin permisos nuevos. Los controles
+positivo/negativo/blanco (+)/(−) usan los del QC (`resultado.crear`, `resultado.revisar`); el catálogo de
+cepas ATCC se lee con `resultado.ver` y se mantiene con `catalogo.gestionar`.
 **Tarifas · frente f5** (`align_f5_correcciones.sql`, ver `docs/COMERCIAL_RONDA2.md` §8): `tarifa.ver`
 (leer las tarifas HH, HM, perfiles HH y servicios primarios en Tablas maestras: Comercial, Planificación,
 Finanzas, Calidad y jefaturas; Dirección, Administración y Lector por la cascada). Las mantiene
