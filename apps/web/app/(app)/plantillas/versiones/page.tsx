@@ -59,9 +59,11 @@ export default function VersionesPlantillasPage() {
 }
 
 function Contenido() {
-  const { puede } = usePermisos();
+  const { puede, permisos, roles } = usePermisos();
   const gestiona = puede("plantilla.gestionar");
-  const aprueba = puede("plantilla.aprobar");
+  // ADMIN pasa `puede` en la web, pero el servidor exige plantilla.aprobar:
+  // el botón solo se muestra a quien de verdad lo tiene (o SUPERADMIN).
+  const aprueba = permisos.has("plantilla.aprobar") || roles.includes("SUPERADMIN");
   const [plantillas, setPlantillas] = useState<Plantilla[] | null>(null);
   const [filtro, setFiltro] = useState("");
   const [sel, setSel] = useState("");
