@@ -44,3 +44,11 @@ SELECT DISTINCT r.id, p.id
   JOIN rol r     ON COALESCE(r.alias_de, r.codigo) = m.rol AND r.tenant_id = (SELECT id FROM t)
   JOIN permiso p ON p.codigo = m.perm
 ON CONFLICT DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- Versiones de plantilla (align_plantilla_versiones.sql): si algún SQL aplicado
+-- después de aquel cambió el cuerpo o el formato de una plantilla, se registra
+-- como versión VIGENTE nueva (origen «script») y la anterior queda RETIRADA.
+-- Va aquí porque este fichero es siempre el último.
+-- -----------------------------------------------------------------------------
+SELECT plantilla_sincronizar_versiones();

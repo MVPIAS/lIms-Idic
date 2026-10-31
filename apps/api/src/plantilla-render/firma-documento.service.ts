@@ -150,9 +150,14 @@ export class FirmaDocumentoService {
     const v = this.vista(cert, usuarioId, req);
     // Despacho, guía, oficios (frente r4c): se suman sin cambiar la forma anterior.
     const seguimiento = await seguimientoDocumento(this.prisma, cert.id);
+    // Versión de la plantilla con que se emitió (null: BD sin versiones o documento sin plantilla).
+    const pv = await this.prisma.$queryRaw<{ numero: number; estado: string }[]>`
+      SELECT v.numero, v.estado FROM certificado c JOIN plantilla_informe_version v ON v.id = c.plantilla_version_id
+       WHERE c.id = ${cert.id}::uuid`.catch(() => []);
     return {
       ...v,
       modalidad,
+      plantillaVersion: pv[0] ? { numero: pv[0].numero, estado: pv[0].estado } : null,
       reemplazadoPor: reemplazo,
       seguimiento,
       puedo: {
@@ -219,6 +224,8 @@ export class FirmaDocumentoService {
     const modalidades = new Map<string, string | null>();
     // Cobertura del documento (align_r1b_documentos_ot.sql): muestra, producto o laboratorio.
     const coberturas = new Map<string, { etiqueta: string | null; noEmitido: boolean }>();
+    // Versión de la plantilla con que se emitió (align_plantilla_versiones.sql).
+    const versionesPlantilla = new Map<string, number | null>();
     if (filas.length) {
       try {
         const ms = await this.prisma.$queryRaw<{ id: string; modalidad: string | null }[]>`
@@ -226,6 +233,14 @@ export class FirmaDocumentoService {
         for (const m of ms) modalidades.set(m.id, m.modalidad);
       } catch {
         /* BD sin la columna: sin modalidad */
+      }
+      try {
+        const vs = await this.prisma.$queryRaw<{ id: string; numero: number | null }[]>`
+          SELECT c.id, v.numero FROM certificado c LEFT JOIN plantilla_informe_version v ON v.id = c.plantilla_version_id
+           WHERE c.id = ANY(${filas.map((c) => c.id)}::uuid[])`;
+        for (const v of vs) versionesPlantilla.set(v.id, v.numero);
+      } catch {
+        /* BD sin versiones de plantilla */
       }
       try {
         const cs = await this.prisma.$queryRaw<{ id: string; cobertura_etiqueta: string | null; no_emitido: boolean }[]>`
@@ -242,6 +257,7 @@ export class FirmaDocumentoService {
         modalidad: modalidades.get(c.id) ?? null,
         cobertura: coberturas.get(c.id)?.etiqueta ?? null,
         noEmitido: coberturas.get(c.id)?.noEmitido ?? false,
+        plantillaVersion: versionesPlantilla.get(c.id) ?? null,
         numero: c.numero ?? c.codigo,
         firmasHechas: firmas.filter((x) => x.estado === "firmado").length,
         firmasTotal: firmas.filter((x) => x.estado !== "anulado").length,
