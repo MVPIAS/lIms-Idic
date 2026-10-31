@@ -45,6 +45,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { ConfigInformeSchema, configEfectiva, configPorTipo } from "./config-informe";
 import { armarInforme } from "./filas-informe";
 import { PlantillaRenderService } from "./plantilla-render.service";
+import { PlantillaVersionesService } from "./plantilla-versiones.service";
 import { errorDimensionesFoto, tipoImagen } from "./reglas-fotos";
 
 /** Fichero que entrega multer (FileInterceptor, almacenamiento en memoria). */
@@ -118,6 +119,7 @@ export class InformeDatosService {
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
     private readonly render: PlantillaRenderService,
+    private readonly versiones: PlantillaVersionesService,
   ) {}
 
   /** OT del tenant y del alcance del usuario. */
@@ -345,22 +347,50 @@ export class InformeDatosService {
     return p;
   }
 
+  /**
+   * Formato de la plantilla. `guardado`/`efectivo` son los de la versión
+   * VIGENTE (la que se usa al emitir); `borrador`, el que espera aprobación.
+   */
   async formato(id: string, req: any) {
     const p = await this.plantilla(id, req);
-    const f = await this.prisma.$queryRaw<{ config_informe: unknown }[]>`
-      SELECT config_informe FROM plantilla_informe WHERE id = ${id}::uuid`;
-    const guardado = f[0]?.config_informe ?? null;
-    return { plantilla: p, guardado, efectivo: configEfectiva(p.tipo, guardado), porTipo: configPorTipo(p.tipo) };
+    const v = await this.render.versionVigente(id);
+    let guardado: unknown = v?.configInforme ?? null;
+    if (!v) {
+      const f = await this.prisma.$queryRaw<{ config_informe: unknown }[]>`
+        SELECT config_informe FROM plantilla_informe WHERE id = ${id}::uuid`;
+      guardado = f[0]?.config_informe ?? null;
+    }
+    const b = await this.prisma.$queryRaw<{ id: string; numero: number; config_informe: unknown }[]>`
+      SELECT id, numero, config_informe FROM plantilla_informe_version WHERE plantilla_id = ${id}::uuid AND estado = 'BORRADOR'`.catch(() => []);
+    return {
+      plantilla: p,
+      version: v ? { id: v.id, numero: v.numero } : null,
+      guardado,
+      efectivo: configEfectiva(p.tipo, guardado),
+      porTipo: configPorTipo(p.tipo),
+      borrador: b[0]
+        ? { id: b[0].id, numero: b[0].numero, guardado: b[0].config_informe ?? null, efectivo: configEfectiva(p.tipo, b[0].config_informe ?? null) }
+        : null,
+    };
   }
 
-  /** Guarda el formato (solo lo que cambia respecto al tipo). `null` vuelve al del tipo. */
+  /**
+   * Guarda el formato (solo lo que cambia respecto al tipo; `null` vuelve al del
+   * tipo) en el BORRADOR de la plantilla: la vigente no cambia hasta que otra
+   * persona con `plantilla.aprobar` lo apruebe. Devuelve el formato del borrador.
+   */
   async guardarFormato(id: string, cuerpo: unknown, req: any) {
-    await this.plantilla(id, req);
+    const p = await this.plantilla(id, req);
     const crudo = (cuerpo as any)?.formato;
     const valor = crudo === null ? null : ConfigInformeSchema.parse(crudo ?? {});
-    const json = valor === null ? null : JSON.stringify(valor);
-    await this.prisma.$executeRaw`UPDATE plantilla_informe SET config_informe = ${json}::jsonb WHERE id = ${id}::uuid`;
-    return this.formato(id, req);
+    const b = await this.versiones.guardarBorrador(id, tenantDe(req), req?.user?.sub ?? null, { configInforme: valor });
+    const actual = await this.formato(id, req);
+    return {
+      ...actual,
+      guardado: b.configInforme ?? null,
+      efectivo: configEfectiva(p.tipo, b.configInforme ?? null),
+      pendienteAprobacion: true,
+    };
   }
 }
 

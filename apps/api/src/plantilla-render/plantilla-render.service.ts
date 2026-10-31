@@ -71,6 +71,15 @@ import {
 import { anioChile } from "../common/fecha-chile";
 import { leerCondicion2 } from "../laboratorio/requisito-compuesto";
 import { urlVerificacionBase } from "../common/url-verificacion";
+import { aplanarVariables } from "./plantilla-versiones";
+
+/** Versión de una plantilla del repositorio (cuerpo + formato) que rellena el motor. */
+export interface VersionPlantilla {
+  id: string;
+  numero: number;
+  cuerpoHtml: string | null;
+  configInforme: unknown;
+}
 
 /** Fotos como máximo en el anexo fotográfico de un documento. */
 export const MAX_FOTOS_INFORME = 24;
@@ -494,8 +503,26 @@ export class PlantillaRenderService {
     return mapa;
   }
 
-  /** Formato efectivo del informe de una plantilla (tipo + config_informe). */
+  /**
+   * Versión VIGENTE de una plantilla (align_plantilla_versiones.sql): su cuerpo
+   * y su formato son los que se usan al emitir. null si la plantilla aún no
+   * tiene vigente (p. ej. una duplicada sin aprobar) o la BD no tiene versiones.
+   */
+  async versionVigente(plantillaId: string): Promise<VersionPlantilla | null> {
+    try {
+      const f = await this.prisma.$queryRaw<{ id: string; numero: number; cuerpo_html: string | null; config_informe: unknown }[]>`
+        SELECT id, numero, cuerpo_html, config_informe FROM plantilla_informe_version
+         WHERE plantilla_id = ${plantillaId}::uuid AND estado = 'VIGENTE'`;
+      return f[0] ? { id: f[0].id, numero: f[0].numero, cuerpoHtml: f[0].cuerpo_html, configInforme: f[0].config_informe ?? null } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Formato efectivo del informe de una plantilla (tipo + config_informe de su versión VIGENTE). */
   async configDePlantilla(plantillaId: string, tipo: string): Promise<ConfigInforme> {
+    const v = await this.versionVigente(plantillaId);
+    if (v) return configEfectiva(tipo, v.configInforme);
     try {
       const filas = await this.prisma.$queryRaw<{ config_informe: unknown }[]>`
         SELECT config_informe FROM plantilla_informe WHERE id = ${plantillaId}::uuid`;
@@ -690,22 +717,25 @@ export class PlantillaRenderService {
     plantillaId: string,
     tenantId: string | undefined,
     cert: { numero: string; codigoVerificacion: string; fecha: Date },
-    opciones: { modalidad?: Modalidad; datos?: DatosInforme; filtro?: FiltroDocumento | null } = {},
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme; filtro?: FiltroDocumento | null; version?: VersionPlantilla | null } = {},
   ) {
     const plantilla = await this.prisma.plantillaInforme.findUnique({ where: { id: plantillaId } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
     if (tenantId && plantilla.tenantId !== tenantId)
       throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
 
+    // Cuerpo y formato: los de la versión pedida (vista previa de un borrador) o
+    // los de la VIGENTE. Sin versiones (BD antigua), las columnas de la plantilla.
+    const version = opciones.version !== undefined ? opciones.version : await this.versionVigente(plantilla.id);
     const ctx = await this.contexto(otId, tenantId, opciones.filtro ?? null);
-    const cfg = await this.configDePlantilla(plantilla.id, plantilla.tipo);
+    const cfg = version ? configEfectiva(plantilla.tipo, version.configInforme) : await this.configDePlantilla(plantilla.id, plantilla.tipo);
     const modalidad = opciones.modalidad ?? modalidadInicial(cfg, ctx.paraInforme);
     const datosDoc = opciones.datos ?? {};
     const est = armarInforme(ctx.paraInforme, cfg, modalidad);
     const avisos: string[] = [];
 
     // 1. Cuerpo: el de la plantilla; si es una cáscara, el de su tipo + aviso.
-    let cuerpo = plantilla.cuerpoHtml?.trim() ?? "";
+    let cuerpo = (version ? version.cuerpoHtml : plantilla.cuerpoHtml)?.trim() ?? "";
     const usaDefecto = cuerpo === "";
     if (usaDefecto) {
       cuerpo = cuerpoPorDefecto(plantilla.tipo);
@@ -718,7 +748,13 @@ export class PlantillaRenderService {
     cuerpo = completarCuerpo(cuerpo, cfg);
 
     // 2. Datos + bloques generados.
-    const datos: Record<string, unknown> = this.datosPlantilla(ctx, plantilla, cert, est);
+    const datos: Record<string, unknown> = this.datosPlantilla(
+      ctx,
+      // {{plantilla.numero_version}}: número de la versión del repositorio con que se rellena.
+      { ...plantilla, cuerpoHtml: null, numero_version: version ? String(version.numero) : "" } as any,
+      cert,
+      est,
+    );
     const fotos = cfg.anexoFotografico ? await this.fotosDelInforme(otId, est, ctx.muestras) : [];
     const bloques: Record<string, string> = {
       tabla_resultados: bloqueResultados(est, cfg),
@@ -783,7 +819,49 @@ export class PlantillaRenderService {
     // 3. Sello: hash del CUERPO (no del documento con pie -> sería circular).
     const hash = createHash("sha256").update(cuerpoRenderizado, "utf8").digest("hex");
 
-    return { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad, fotos: fotos.length };
+    return {
+      plantilla,
+      ctx,
+      cuerpoRenderizado,
+      hash,
+      avisos,
+      usaDefecto,
+      modalidad,
+      fotos: fotos.length,
+      version: version ? { id: version.id, numero: version.numero } : null,
+      // Lo que el cuerpo puede usar con ESTA OT (lista de variables del editor).
+      claves: { datos: aplanarVariables(datos), bloques: Object.keys(bloques) },
+    };
+  }
+
+  /**
+   * Variables y bloques disponibles para el cuerpo, sacados del motor real con
+   * una OT concreta (incluye los bloques que aportan otros módulos). No escribe.
+   */
+  async variablesConOt(otId: string, plantillaId: string, tenantId: string) {
+    const r = await this.render(otId, plantillaId, tenantId, { numero: "BORRADOR", codigoVerificacion: "SIN EMITIR", fecha: new Date() });
+    return { datos: r.claves.datos, bloques: r.claves.bloques };
+  }
+
+  /**
+   * Vista previa de una versión cualquiera (borrador incluido) con una OT real:
+   * HTML del documento y su PDF con marca de borrador. No escribe nada.
+   */
+  async previsualizarVersion(otId: string, plantillaId: string, tenantId: string, version: VersionPlantilla, formato: "html" | "pdf") {
+    const fecha = new Date();
+    const cert = { numero: `BORRADOR-v${version.numero}`, codigoVerificacion: "SIN EMITIR", fecha };
+    const r = await this.render(otId, plantillaId, tenantId, cert, { version });
+    const sello: Sello = {
+      numero: cert.numero,
+      codigoVerificacion: cert.codigoVerificacion,
+      hash: r.hash,
+      fecha: fmtFecha(fecha),
+      urlVerificacion: this.baseVerificacion,
+      borrador: true,
+    };
+    const titulo = this.titulo(cert.numero, r.plantilla.nombre, r.ctx.ot.codigo);
+    if (formato === "pdf") return { pdf: await generarPdf(r.cuerpoRenderizado, sello, titulo), avisos: r.avisos };
+    return { html: documentoCompleto(r.cuerpoRenderizado, sello, titulo), avisos: r.avisos, usaPlantillaPorDefecto: r.usaDefecto };
   }
 
   /** Título legible del documento (metadatos del PDF y <title>). */
@@ -1516,7 +1594,7 @@ export class PlantillaRenderService {
           });
       const numero = anterior ? numeroVersion(anterior.numero ?? anterior.codigo, version) : oficial!.numero;
 
-      const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad } = await this.render(
+      const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad, version: versionUsada } = await this.render(
         otId,
         plantillaId,
         tenantId,
@@ -1549,6 +1627,9 @@ export class PlantillaRenderService {
       const datosJson = JSON.stringify(opts.datosInforme ?? {});
       await tx.$executeRaw`UPDATE certificado SET modalidad = ${modalidad}, datos_informe = ${datosJson}::jsonb
                             WHERE id = ${cert.id}::uuid`;
+      // Versión de la plantilla con que se rellenó (align_plantilla_versiones.sql).
+      if (versionUsada)
+        await tx.$executeRaw`UPDATE certificado SET plantilla_version_id = ${versionUsada.id}::uuid WHERE id = ${cert.id}::uuid`;
       // Cobertura (align_r1b_documentos_ot.sql): qué parte de la OT cubre este documento.
       await tx.$executeRawUnsafe(
         `UPDATE certificado SET cobertura = $2, muestra_ids = $3::uuid[], unidad_cobertura = $4::uuid, cobertura_etiqueta = $5
