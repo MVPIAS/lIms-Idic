@@ -198,6 +198,9 @@ export const NAV: SeccionNav[] = [
       { href: "/plantillas", label: "Plantillas de informe", icon: "📄", perm: "plantilla.ver" },
       // Formato de las plantillas sin pasar por «Emitir informe» (Gestión de Calidad: plantilla.gestionar).
       { href: "/plantillas/formato", label: "Plantillas de documentos", icon: "📐", perm: "plantilla.gestionar", claves: "formato informe columnas portada anexo numeracion" },
+      // Repositorio con versiones: borrador, aprobación, historial, comparar, duplicar.
+      { href: "/plantillas/versiones", label: "Versiones de plantillas", icon: "🗂", perm: ["plantilla.gestionar", "plantilla.aprobar"], claves: "version borrador aprobar historial membrete cuerpo html duplicar" },
+      { href: "/qc/cepas", label: "Cepas de referencia", icon: "🧫", perm: "resultado.ver", claves: "atcc cepa qc microbiologia control positivo" },
       { href: "/formatos-informe", label: "Formatos de informe", icon: "🧾", perm: "catalogo.gestionar", claves: "veredicto occ oi dgmn" },
       { href: "/tipos-muestra", label: "Tipos de muestra", icon: "🌡", perm: "muestra.ver" },
       { href: "/limites", label: "Límites (clásico)", icon: "📏", perm: "metodo.ver" },

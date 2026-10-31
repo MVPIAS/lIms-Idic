@@ -11,7 +11,14 @@ import { api } from "@/lib/api";
 import { toast } from "@/components/ui/feedback";
 import { enviarInforme, type FormatoInforme } from "@/lib/informes";
 
-type Respuesta = { guardado: Partial<FormatoInforme> | null; efectivo: FormatoInforme; porTipo: FormatoInforme };
+type Respuesta = {
+  guardado: Partial<FormatoInforme> | null;
+  efectivo: FormatoInforme;
+  porTipo: FormatoInforme;
+  /** Versión vigente y borrador pendiente de aprobación (repositorio de plantillas con versiones). */
+  version?: { id: string; numero: number } | null;
+  borrador?: { id: string; numero: number; guardado: Partial<FormatoInforme> | null; efectivo: FormatoInforme } | null;
+};
 
 const ETIQUETAS: { clave: keyof FormatoInforme["etiquetas"]; texto: string }[] = [
   { clave: "ensayo", texto: "Columna del ensayo" },
@@ -39,7 +46,8 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
       .getRaw<Respuesta>(`informes/plantillas/${plantillaId}/formato`)
       .then((r) => {
         setDatos(r);
-        setF(r.efectivo);
+        // Si hay un borrador, se sigue editando sobre él (la vigente no se toca).
+        setF(r.borrador?.efectivo ?? r.efectivo);
       })
       .catch((e) => setError(e.message));
   }, [plantillaId]);
@@ -68,8 +76,10 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
     try {
       const r: Respuesta = await enviarInforme(`/informes/plantillas/${plantillaId}/formato`, "PUT", { formato });
       setDatos(r);
-      setF(r.efectivo);
-      toast.ok(formato ? "Formato de la plantilla guardado." : "La plantilla vuelve al formato de su tipo.");
+      setF(r.borrador?.efectivo ?? r.efectivo);
+      toast.ok(
+        `${formato ? "Formato guardado" : "Vuelta al formato del tipo guardada"} en el borrador v${r.borrador?.numero ?? "?"}: rige cuando otra persona lo apruebe (Plantillas › Versiones).`,
+      );
       onGuardado?.();
     } catch (e: any) {
       toast.error(e.message);
@@ -80,6 +90,10 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
 
   return (
     <div>
+      <p className="subtitle" style={{ marginTop: 0 }}>
+        Vigente: {datos.version ? <b>v{datos.version.numero}</b> : "sin versión"}
+        {datos.borrador ? <> · editando el <b>borrador v{datos.borrador.numero}</b> (pendiente de aprobación)</> : " · al guardar se crea un borrador; la vigente no cambia hasta que se apruebe"}
+      </p>
       <div className="form-grid">
         <div className="field">
           <label htmlFor="fmt-agrup">Agrupación de los resultados</label>
@@ -176,12 +190,12 @@ export default function FormatoPlantilla({ plantillaId, onGuardado }: { plantill
       </div>
       <div className="toolbar" style={{ marginTop: 12, marginBottom: 0 }}>
         <button className="btn primary sm" disabled={guardando} onClick={() => guardar(diferencia())}>
-          {guardando ? "Guardando…" : "Guardar formato"}
+          {guardando ? "Guardando…" : "Guardar en el borrador"}
         </button>
         {datos.guardado && (
           <button className="btn outline sm" disabled={guardando} onClick={() => guardar(null)}>Volver al formato del tipo</button>
         )}
-        <small style={{ color: "var(--muted)" }}>Aplica a los documentos que se emitan desde ahora con esta plantilla; los emitidos no cambian.</small>
+        <small style={{ color: "var(--muted)" }}>Una vez aprobado, aplica a los documentos que se emitan desde entonces; los emitidos no cambian.</small>
       </div>
     </div>
   );

@@ -33,7 +33,10 @@ const auth = () => ({
 
 type Ot = { id: string; codigo: string; cliente?: { razonSocial?: string } };
 type Metodo = { id: string; codigo: string; nombre: string; aprobado: boolean; tiposExigidos?: string[]; tiposFaltantes?: string[]; criterios?: Record<string, string> };
-type Tipo = "blanco" | "estandar" | "curva" | "duplicado" | "mrc" | "patron";
+type Tipo = "blanco" | "estandar" | "curva" | "duplicado" | "mrc" | "patron" | "positivo" | "negativo";
+type Cepa = { id: string; numero: number | null; codigo: string; organismo: string; activo: boolean };
+/** QC microbiológico (EP-02 ALI-D6): lectura (+)/(−), lote del medio y cepa ATCC. */
+const esMicro = (t: string, cualitativo: string) => t === "positivo" || t === "negativo" || (t === "blanco" && cualitativo !== "");
 type ResultadoQc = "aprobado" | "rechazado" | "pendiente" | string;
 
 type Control = {
@@ -52,6 +55,10 @@ type Control = {
   /** Quien registró el control: no puede aprobarlo (segregación de funciones). */
   registradoPor?: string | null;
   observaciones?: string | null;
+  resultadoCualitativo?: string | null;
+  loteMedio?: string | null;
+  cepaCodigo?: string | null;
+  cepaOrganismo?: string | null;
   catMetodo?: { id: string; codigo?: string; nombre?: string } | null;
 };
 
@@ -70,6 +77,8 @@ const TIPO_LABEL: Record<Tipo, string> = {
   duplicado: "Duplicado",
   mrc: "Material de referencia certificado (MRC)",
   patron: "Patrón de verificación",
+  positivo: "Control positivo (microbiología)",
+  negativo: "Control negativo (microbiología)",
 };
 
 /** Pista del criterio esperado según el tipo (solo ayuda de UI). */
@@ -80,6 +89,8 @@ const CRITERIO_HINT: Record<Tipo, string> = {
   duplicado: "umbral %CV, p. ej. 10",
   mrc: "rango %recup., p. ej. 90-110",
   patron: "rango % del valor, p. ej. 95-105",
+  positivo: "debe crecer (+)",
+  negativo: "no debe crecer (−)",
 };
 
 function fmt(v: unknown): string {
@@ -92,6 +103,9 @@ const mono = { fontFamily: "'JetBrains Mono', monospace" } as const;
 
 /** Métrica derivada del control según su tipo (R², %recup., %CV). */
 function metricaDe(c: Control): string {
+  // QC microbiológico: lectura, lote del medio y cepa.
+  if (c.resultadoCualitativo)
+    return `(${c.resultadoCualitativo === "+" ? "+" : "−"}) · lote ${c.loteMedio ?? "—"}${c.cepaCodigo ? ` · ${c.cepaOrganismo ?? ""} ${c.cepaCodigo}` : ""}`;
   return c.tipo === "curva"
     ? `R² ${fmt(c.rCuadrado)}`
     : c.tipo === "estandar" || c.tipo === "mrc" || c.tipo === "patron"
@@ -185,6 +199,10 @@ export default function QcPage() {
   const [fCriterio, setFCriterio] = useState("");
   const [fObs, setFObs] = useState("");
   const [fRef, setFRef] = useState("");
+  const [fCual, setFCual] = useState("");
+  const [fLote, setFLote] = useState("");
+  const [fCepa, setFCepa] = useState("");
+  const [cepas, setCepas] = useState<Cepa[]>([]);
   const [configurando, setConfigurando] = useState<Metodo | null>(null);
   const [saving, setSaving] = useState(false);
   const [errs, setErrs] = useState<Record<string, string>>({});
@@ -196,6 +214,8 @@ export default function QcPage() {
         if (!r.ok) throw new Error(await errorMensaje(r));
         const j = await r.json();
         setOts(Array.isArray(j) ? j : j.data ?? []);
+        const rc = await fetch(`${API}/qc/cepas`, { headers: auth() });
+        if (rc.ok) setCepas(await rc.json());
       } catch (e: any) {
         setError(e.message);
       }
@@ -240,10 +260,15 @@ export default function QcPage() {
     // Validación de campos antes de enviar (el servidor evalúa; aquí garantizamos números).
     const v: Record<string, string> = {};
     if (!fMetodo) v.metodo = "Elija el método al que pertenece el control.";
-    if (fObtenido.trim() === "" || !esNumero(fObtenido)) {
+    const micro = esMicro(fTipo, fCual);
+    if (micro) {
+      if (!fCual) v.cual = "Indique si el control creció (+) o no (−).";
+      if (!fLote.trim()) v.lote = "Indique el lote del medio de cultivo.";
+      if (fTipo === "positivo" && !fCepa) v.cepa = "Elija la cepa de referencia ATCC.";
+    } else if (fObtenido.trim() === "" || !esNumero(fObtenido)) {
       v.obtenido = fTipo === "curva" ? "Indique el R² obtenido (número)." : "Indique el valor obtenido (número).";
     }
-    if ((fTipo === "estandar" || fTipo === "duplicado" || fTipo === "mrc" || fTipo === "patron") && (fEsperado.trim() === "" || !esNumero(fEsperado))) {
+    if (!micro && (fTipo === "estandar" || fTipo === "duplicado" || fTipo === "mrc" || fTipo === "patron") && (fEsperado.trim() === "" || !esNumero(fEsperado))) {
       v.esperado = "Indique el valor esperado (número).";
     }
     if (fEsperado.trim() !== "" && !esNumero(fEsperado)) v.esperado = "El valor esperado debe ser numérico.";
@@ -264,6 +289,13 @@ export default function QcPage() {
       if (fCriterio.trim() !== "") body.criterio = fCriterio.trim();
       if (fObs.trim() !== "") body.observaciones = fObs.trim();
       if ((fTipo === "mrc" || fTipo === "patron") && fRef.trim() !== "") body.mrcReferencia = fRef.trim();
+      if (micro) {
+        body.resultadoCualitativo = fCual;
+        body.loteMedio = fLote.trim();
+        if (fTipo === "positivo") body.cepaId = fCepa;
+        delete body.valorEsperado;
+        delete body.valorObtenido;
+      }
 
       const r = await fetch(`${API}/qc/ot/${otId}/control`, {
         method: "POST",
@@ -485,6 +517,34 @@ export default function QcPage() {
               <label>Observaciones</label>
               <input value={fObs} onChange={(e) => setFObs(e.target.value)} placeholder="opcional" />
             </div>
+            {(fTipo === "positivo" || fTipo === "negativo" || fTipo === "blanco") && (
+              <div className="field">
+                <label htmlFor="qc-cual">Resultado (+)/(−){fTipo === "blanco" ? " (blanco de medio)" : ""}</label>
+                <select id="qc-cual" value={fCual} onChange={(e) => setFCual(e.target.value)}>
+                  <option value="">{fTipo === "blanco" ? "— numérico (LD) —" : "— elija —"}</option>
+                  <option value="+">(+) crece</option>
+                  <option value="-">(−) no crece</option>
+                </select>
+                {errs.cual && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.cual}</small>}
+              </div>
+            )}
+            {esMicro(fTipo, fCual) && (
+              <div className="field">
+                <label htmlFor="qc-lote">Lote del medio de cultivo</label>
+                <input id="qc-lote" value={fLote} maxLength={80} onChange={(e) => setFLote(e.target.value)} />
+                {errs.lote && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.lote}</small>}
+              </div>
+            )}
+            {fTipo === "positivo" && (
+              <div className="field">
+                <label htmlFor="qc-cepa">Cepa de referencia</label>
+                <select id="qc-cepa" value={fCepa} onChange={(e) => setFCepa(e.target.value)}>
+                  <option value="">— elija —</option>
+                  {cepas.map((c) => <option key={c.id} value={c.id}>{c.numero ? `${c.numero}. ` : ""}{c.organismo} {c.codigo}</option>)}
+                </select>
+                {errs.cepa && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.cepa}</small>}
+              </div>
+            )}
             {(fTipo === "mrc" || fTipo === "patron") && (
               <div className="field">
                 <label htmlFor="qc-ref">{fTipo === "mrc" ? "MRC usado (identificación, lote, certificado)" : "Patrón usado"}</label>
