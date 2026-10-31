@@ -21,7 +21,7 @@ export type ResultadoQc = "aprobado" | "rechazado" | "pendiente";
  * MRC (material de referencia certificado: % de recuperación del valor
  * certificado) y patrón de verificación (% del valor del patrón).
  */
-export const TIPOS_QC = ["blanco", "estandar", "curva", "duplicado", "mrc", "patron"] as const;
+export const TIPOS_QC = ["blanco", "estandar", "curva", "duplicado", "mrc", "patron", "positivo", "negativo"] as const;
 export type TipoQc = (typeof TIPOS_QC)[number];
 
 /**
@@ -36,6 +36,9 @@ export const CRITERIO_DEFECTO: Record<TipoQc, string> = {
   duplicado: "10",
   mrc: "90-110",
   patron: "95-105",
+  // QC microbiológico (EP-02 ALI-D6): el positivo crece (+), el negativo no (−).
+  positivo: "+",
+  negativo: "-",
 };
 
 /** Criterio que se aplica: el del control, el del método para ese tipo o el por defecto. */
@@ -63,7 +66,7 @@ export function erroresConfigQc(c: { qcTipos?: string[]; qcCriterios?: Record<st
   for (const t of c.qcTipos ?? []) if (!(TIPOS_QC as readonly string[]).includes(t)) e.push(`Tipo de control desconocido: ${t}.`);
   for (const [t, v] of Object.entries(c.qcCriterios ?? {})) {
     if (!(TIPOS_QC as readonly string[]).includes(t)) e.push(`Criterio de un tipo desconocido: ${t}.`);
-    else if (v && !/\d/.test(String(v))) e.push(`El criterio de ${t} debe tener un número o un rango (p. ej. 90-110).`);
+    else if (v && !(TIPOS_CUALITATIVOS as readonly string[]).includes(t) && !/\d/.test(String(v))) e.push(`El criterio de ${t} debe tener un número o un rango (p. ej. 90-110).`);
   }
   return e;
 }
@@ -90,4 +93,34 @@ export function motivoNoRevisable(
         "Segregación de funciones (ISO/IEC 17025): quien registró el control de calidad no puede aprobarlo. Debe hacerlo otra persona.",
     };
   return null;
+}
+
+/* ------------------------------------- QC microbiológico (EP-02 ALI-D6) --- */
+
+/** Controles que se leen como crece (+) / no crece (−). El blanco también, si se registra así. */
+export const TIPOS_CUALITATIVOS = ["positivo", "negativo"] as const;
+
+/** Resultado esperado: el control positivo crece (+); el negativo y el blanco de medio no (−). */
+export function cualitativoEsperado(tipo: string): "+" | "-" | null {
+  if (tipo === "positivo") return "+";
+  if (tipo === "negativo" || tipo === "blanco") return "-";
+  return null;
+}
+
+/** Evaluación de un control cualitativo: aprobado si da lo esperado; si no, rechazado. */
+export function evaluarCualitativo(tipo: string, obtenido: string | null | undefined): ResultadoQc {
+  const e = cualitativoEsperado(tipo);
+  if (!e || (obtenido !== "+" && obtenido !== "-")) return "pendiente";
+  return obtenido === e ? "aprobado" : "rechazado";
+}
+
+/** Datos que exige un control microbiológico (vacío = completo). */
+export function faltantesMicrobiologico(c: { tipo: string; resultadoCualitativo?: string | null; loteMedio?: string | null; cepaId?: string | null }): string[] {
+  const micro = (TIPOS_CUALITATIVOS as readonly string[]).includes(c.tipo) || (c.tipo === "blanco" && !!c.resultadoCualitativo);
+  if (!micro) return [];
+  const f: string[] = [];
+  if (c.resultadoCualitativo !== "+" && c.resultadoCualitativo !== "-") f.push("resultado (+)/(−)");
+  if (!c.loteMedio || !c.loteMedio.trim()) f.push("lote del medio de cultivo");
+  if (c.tipo === "positivo" && !c.cepaId) f.push("cepa de referencia ATCC");
+  return f;
 }
