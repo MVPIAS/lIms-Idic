@@ -24,8 +24,14 @@ export async function llamar<T = any>(metodo: "GET" | "POST" | "PATCH" | "PUT", 
   });
   if (r.ok) return r.status === 204 ? (undefined as T) : r.json();
   const j: any = await r.json().catch(() => null);
-  if (Array.isArray(j?.message)) throw new Error(j.message.join(", "));
-  throw new Error(errorMensajeDe(j, r.status));
+  // El cuerpo y el estado van en el error para quien necesite más que el texto
+  // (p. ej. los avisos de las reglas de aceptación del método, 409).
+  const err: Error & { status?: number; datos?: any } = new Error(
+    Array.isArray(j?.message) ? j.message.join(", ") : errorMensajeDe(j, r.status),
+  );
+  err.status = r.status;
+  err.datos = j;
+  throw err;
 }
 
 /** Arma una query string omitiendo vacíos. */
