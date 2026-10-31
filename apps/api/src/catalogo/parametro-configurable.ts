@@ -397,6 +397,25 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- Reglas de aceptación del método en la captura (frente ALI-D4) ---
+  {
+    categoria: "captura_reglas",
+    titulo: "Captura · reglas de aceptación del método",
+    donde:
+      "Captura por OT: qué pasa al guardar si no se cumple una regla de aceptación del método (p. ej. diferencia entre duplicados de proteína ≤ 0,38 %, peso constante de la materia grasa ≤ 0,001 g).",
+    porConfirmar: "Si el LIMS debe impedir guardar o solo avisar (EP-02 §10, pregunta 21; carta SAL-17).",
+    codigos: {
+      modo: {
+        tipo: "opcion",
+        nombre: "Regla de aceptación no cumplida",
+        opciones: [
+          { valor: "avisar", etiqueta: "Avisar antes de guardar: el analista confirma y los avisos quedan en el resultado" },
+          { valor: "impedir", etiqueta: "Impedir guardar: hay que repetir la determinación" },
+        ],
+        porDefecto: "avisar",
+      },
+    },
+  },
   {
     categoria: "segregacion_resultado",
     titulo: "Revisión y aprobación de resultados",
