@@ -12,7 +12,14 @@
  *     ajusta en la OT quien tiene «resultado.factor» (la jefatura por defecto),
  *     con motivo. Se aplica al valor calculado (lecturas o réplicas).
  *  3. Captura: numérico (valor, réplicas o lecturas con los campos del método
- *     si hay fórmula) o atributo (Cumple / No cumple con observación).
+ *     si hay fórmula) o atributo (Cumple / No cumple con observación). En un
+ *     método con lecturas (p. ej. LQA, ALI-D4) el analista puede igual
+ *     ingresar solo el valor final. Las lecturas se precargan con su valor por
+ *     defecto (factor de proteína 6,25) y, si el método pide duplicado, salen
+ *     dos filas X y X′. Las reglas de aceptación del método (diferencia entre
+ *     duplicados, peso constante) avisan antes de guardar: el servidor responde
+ *     409 con los avisos y el analista confirma (o, con el parámetro
+ *     captura_reglas.modo = impedir, no se guarda).
  *     Corregir un valor ya capturado exige motivo (queda en el historial).
  *  4. Equipo usado y condiciones del ensayo (contrato §4.4.2): equipo del
  *     laboratorio con su estado de calibración —uno vencido no se puede
@@ -25,7 +32,7 @@
  */
 import { useMemo, useState } from "react";
 import { aInputHoraChile, deInputHoraChile, fechaHora } from "@/lib/format";
-import { toast } from "@/components/ui/feedback";
+import { confirmar, toast } from "@/components/ui/feedback";
 import { llamar, leerReplicas } from "@/lib/laboratorio";
 
 export interface EnsayoEditable {
@@ -42,7 +49,13 @@ export interface EnsayoEditable {
   formula: string | null;
   formulaAplicable: string | null;
   nCampos: number;
-  campos: { nombre: string; unidad: string | null }[];
+  campos: CampoLectura[];
+  /** Reglas de aceptación del método (cat_metodo.reglas_captura; ALI-D4). */
+  reglasAceptacion?: ReglaAceptacionVista[];
+  /** Nota de la captura del método (fórmula y lo que está por confirmar). */
+  notaCaptura?: string | null;
+  /** Avisos de reglas no cumplidas que el analista confirmó al guardar. */
+  avisosAceptacion?: { texto: string }[] | null;
   formulaMotivo: string | null;
   formulaLegado: string | null;
   especOrigen: string;
@@ -80,6 +93,25 @@ export interface EnsayoEditable {
   replicas?: (number | string)[] | null;
   /** Clase de la no conformidad (crítico, mayor, menor) para el veredicto del lote. */
   claseDefecto?: string | null;
+}
+
+/** Lectura (campo C1..Cn) del método: paso_metodo. */
+export interface CampoLectura {
+  nombre: string;
+  unidad: string | null;
+  valorDefecto?: number | null;
+  simbolo?: string | null;
+  porConfirmar?: boolean;
+  instruccion?: string | null;
+}
+
+export interface ReglaAceptacionVista {
+  tipo: "duplicados" | "diferencia_campos";
+  texto: string;
+  max: number;
+  modo?: "absoluto" | "relativo";
+  fuente?: string | null;
+  porConfirmar?: boolean;
 }
 
 /** Equipo que se puede elegir en la captura (GET /flujo/ot/:id/equipos). */
@@ -147,11 +179,24 @@ export default function EditorEnsayo({
 
   // Captura
   const nCampos = e.nCampos;
+  const pideDuplicado = (e.reglasAceptacion ?? []).some((r) => r.tipo === "duplicados");
+  // Fila nueva de lecturas, con el valor por defecto de cada campo (p. ej. factor 6,25).
+  const filaNueva = () =>
+    Array.from({ length: nCampos }, (_, i) => {
+      const d = e.campos[i]?.valorDefecto;
+      return d != null && Number.isFinite(Number(d)) ? String(Number(d)).replace(".", ",") : "";
+    });
   const [lecturas, setLecturas] = useState<string[][]>(() =>
     e.lecturas?.length
       ? e.lecturas.map((l) => Array.from({ length: nCampos }, (_, i) => String(l[`C${i + 1}`] ?? "").replace(".", ",")))
-      : [Array.from({ length: nCampos }, () => "")],
+      : pideDuplicado ? [filaNueva(), filaNueva()] : [filaNueva()],
   );
+  const conLecturas = nCampos > 0 && !!e.formulaAplicable;
+  // Con lecturas, el analista puede igual ingresar solo el valor final (lo que ya capturaba).
+  const [modoCaptura, setModoCaptura] = useState<"lecturas" | "valor">(() =>
+    conLecturas && !e.lecturas?.length && e.valorNumerico != null && e.valorNumerico !== "" ? "valor" : "lecturas",
+  );
+  const usaLecturas = conLecturas && modoCaptura === "lecturas";
   const [valor, setValor] = useState(() =>
     // En un plan de clases se corrigen las unidades, no su promedio.
     e.planClases && e.replicas?.length
@@ -226,8 +271,8 @@ export default function EditorEnsayo({
       if (!atributo) { toast.error("Elija Cumple o No cumple."); return; }
       if (atributo === "no_cumple" && !observacion.trim()) { toast.error("Indique la observación: qué no cumple y por qué."); return; }
       cuerpo = { atributo, valor: valor.trim() || undefined, observacion: observacion.trim() || undefined };
-    } else if (nCampos > 0 && e.formulaAplicable) {
-      const filas = lecturas.filter((l) => l.some((c) => c.trim() !== ""));
+    } else if (usaLecturas) {
+      const filas = lecturas.filter((l) => l.some((c, i) => c.trim() !== "" && c.trim() !== filaNueva()[i]));
       if (!filas.length) { toast.error("Ingrese al menos una lectura."); return; }
       cuerpo = {
         lecturas: filas.map((l) => Object.fromEntries(l.map((c, i) => [`C${i + 1}`, c.trim()]))),
@@ -262,8 +307,23 @@ export default function EditorEnsayo({
     if (incertidumbre.trim()) cuerpo.incertidumbre = incertidumbre.trim();
     setGuardando(true);
     try {
-      const r = await llamar("POST", `/flujo/resultado/${e.id}/valor`, cuerpo);
-      toast.ok("Resultado guardado.");
+      let r: any;
+      try {
+        r = await llamar("POST", `/flujo/resultado/${e.id}/valor`, cuerpo);
+      } catch (err: any) {
+        // Reglas de aceptación del método no cumplidas: se avisa ANTES de guardar.
+        if (err?.status !== 409 || err?.datos?.codigo !== "AVISOS_ACEPTACION") throw err;
+        const avisos: { texto: string }[] = err.datos.avisos ?? [];
+        const seguir = await confirmar({
+          titulo: "No se cumplen las reglas de aceptación del método",
+          mensaje: `${avisos.map((a) => `• ${a.texto}`).join("\n")}\n\n¿Guardar de todos modos? Los avisos quedan registrados en el resultado.`,
+          confirmarTexto: "Guardar con avisos",
+          peligro: true,
+        });
+        if (!seguir) return;
+        r = await llamar("POST", `/flujo/resultado/${e.id}/valor`, { ...cuerpo, confirmarAvisos: true });
+      }
+      toast.ok(r?.avisosAceptacion?.length ? "Resultado guardado con avisos de aceptación." : "Resultado guardado.");
       onGuardado(r);
     } catch (err: any) {
       toast.error(err.message);
@@ -304,8 +364,9 @@ export default function EditorEnsayo({
 
   const etiquetaCampo = (i: number) => {
     const c = e.campos[i];
-    return c ? `${c.nombre}${c.unidad ? ` (${c.unidad})` : ""}` : `Campo ${i + 1}`;
+    return c ? `${c.simbolo ? `${c.simbolo} · ` : ""}${c.nombre}${c.unidad ? ` (${c.unidad})` : ""}` : `Campo ${i + 1}`;
   };
+  const etiquetaLectura = (i: number) => (pideDuplicado && lecturas.length <= 2 ? (i === 0 ? "X" : "X′") : String(i + 1));
 
   return (
     <div style={{ display: "grid", gap: 12, padding: "6px 2px" }}>
@@ -466,6 +527,36 @@ export default function EditorEnsayo({
       {puedeCapturar && (
         <div>
           <b style={{ fontSize: 12.5 }}>Resultado</b>
+          {conLecturas && e.tipoDato !== "atributo" && (
+            <div role="radiogroup" aria-label="Forma de captura" style={{ display: "inline-flex", gap: 14, marginLeft: 12 }}>
+              {([["lecturas", "Con lecturas y fórmula"], ["valor", "Solo el valor final"]] as const).map(([v, t]) => (
+                <label key={v} style={{ display: "inline-flex", gap: 6, alignItems: "center", fontWeight: 400, textTransform: "none", fontSize: 12 }}>
+                  <input type="radio" style={{ width: "auto" }} name={`modo-${e.id}`} checked={modoCaptura === v} onChange={() => setModoCaptura(v)} />
+                  {t}
+                </label>
+              ))}
+            </div>
+          )}
+          {e.tipoDato !== "atributo" && e.notaCaptura && (
+            <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "6px 0 0" }}>{e.notaCaptura}</p>
+          )}
+          {e.tipoDato !== "atributo" && !!e.reglasAceptacion?.length && (
+            <ul style={{ fontSize: 11.5, margin: "6px 0 0", paddingLeft: 18 }} aria-label="Reglas de aceptación del método">
+              {e.reglasAceptacion.map((r, i) => (
+                <li key={i}>
+                  Regla de aceptación: {r.texto}
+                  {r.tipo === "duplicados" && r.modo ? ` (${r.modo === "relativo" ? "relativa" : "absoluta"})` : ""}
+                  {r.fuente ? ` · ${r.fuente}` : ""}
+                  {r.porConfirmar && <span className="pill amber" style={{ marginLeft: 6 }}>por confirmar</span>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {!!e.avisosAceptacion?.length && (
+            <p role="status" style={{ fontSize: 11.5, color: "#7a4b00", margin: "6px 0 0" }}>
+              Guardado con avisos de aceptación: {e.avisosAceptacion.map((a) => a.texto).join(" ")}
+            </p>
+          )}
           {e.tipoDato === "atributo" ? (
             <div className="form-grid cols-3" style={{ marginTop: 6 }}>
               <div className="field">
@@ -488,26 +579,31 @@ export default function EditorEnsayo({
                 <input id={`oa-${e.id}`} value={observacion} onChange={(x) => setObservacion(x.target.value)} />
               </div>
             </div>
-          ) : nCampos > 0 && e.formulaAplicable ? (
+          ) : usaLecturas ? (
             <div style={{ marginTop: 6 }}>
               <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 0 6px" }}>
-                Fórmula por lectura: <code style={{ fontFamily: "'JetBrains Mono', monospace" }}>{e.formulaAplicable}</code>. El valor del ensayo es el promedio de las lecturas. Se admite coma decimal.
+                Fórmula por lectura: <code style={{ fontFamily: "'JetBrains Mono', monospace" }}>{e.formulaAplicable}</code>. El valor del ensayo es el promedio de las lecturas{pideDuplicado ? " (duplicado X y X′)" : ""}. Se admite coma decimal.
               </p>
               <table className="data">
                 <thead>
                   <tr>
                     <th>Lectura</th>
-                    {Array.from({ length: nCampos }, (_, i) => <th key={i}>C{i + 1} · {etiquetaCampo(i)}</th>)}
+                    {Array.from({ length: nCampos }, (_, i) => (
+                      <th key={i} title={e.campos[i]?.instruccion ?? undefined}>
+                        C{i + 1} · {etiquetaCampo(i)}
+                        {e.campos[i]?.porConfirmar && <span className="pill amber" style={{ marginLeft: 4 }}>por confirmar</span>}
+                      </th>
+                    ))}
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {lecturas.map((l, li) => (
                     <tr key={li}>
-                      <td>{li + 1}</td>
+                      <td>{etiquetaLectura(li)}</td>
                       {l.map((c, ci) => (
                         <td key={ci}>
-                          <input value={c} aria-label={`Lectura ${li + 1}, ${etiquetaCampo(ci)}`} style={{ width: "100%", fontFamily: "'JetBrains Mono', monospace" }}
+                          <input value={c} aria-label={`Lectura ${etiquetaLectura(li)}, ${etiquetaCampo(ci)}`} style={{ width: "100%", fontFamily: "'JetBrains Mono', monospace" }}
                             onChange={(x) => setLecturas((ls) => ls.map((row, r) => (r === li ? row.map((v, k) => (k === ci ? x.target.value : v)) : row)))} />
                         </td>
                       ))}
@@ -520,7 +616,7 @@ export default function EditorEnsayo({
                   ))}
                 </tbody>
               </table>
-              <button className="btn outline sm" style={{ marginTop: 6 }} onClick={() => setLecturas((ls) => [...ls, Array.from({ length: nCampos }, () => "")])}>＋ Agregar lectura</button>
+              <button className="btn outline sm" style={{ marginTop: 6 }} onClick={() => setLecturas((ls) => [...ls, filaNueva()])}>＋ Agregar lectura</button>
             </div>
           ) : (
             <div className="form-grid cols-2" style={{ marginTop: 6 }}>
@@ -536,7 +632,8 @@ export default function EditorEnsayo({
                   placeholder="12,4   ·   o réplicas: 12,4 12,6 12,5" />
                 <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>
                   {e.planClases ? "Sepárelas con espacio o punto y coma; cada valor es una unidad" : "Varias réplicas: sepárelas con espacio o punto y coma; se promedian"}
-                  {e.formulaAplicable && nCampos === 0 ? ` y se aplica la fórmula ${e.formulaAplicable}` : ""}.
+                  {e.formulaAplicable && nCampos === 0 ? ` y se aplica la fórmula ${e.formulaAplicable}` : ""}
+                  {conLecturas ? ". Valor final ya calculado: no se aplica la fórmula ni se evalúan las reglas de aceptación" : ""}.
                 </span>
               </div>
               <div className="field">

@@ -134,6 +134,10 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     // La bandeja no trae los campos del método: si la fórmula los pide, se captura desde la OT.
     nCampos: r.nCampos ?? (/\bC\d+\b/.test(String(r.formula ?? "")) ? 1 : 0),
     campos: r.campos ?? [],
+    // Reglas de aceptación y nota de la captura del método (ALI-D4) y avisos aceptados al guardar.
+    reglasAceptacion: Array.isArray(r.reglasAceptacion) ? r.reglasAceptacion : [],
+    notaCaptura: r.notaCaptura ?? null,
+    avisosAceptacion: Array.isArray(r.avisosAceptacion) ? r.avisosAceptacion : null,
     formulaMotivo: r.formulaMotivo ?? null,
     formulaLegado: r.formulaLegado ?? null,
     especOrigen: r.especOrigen ?? "catalogo",
@@ -1034,7 +1038,7 @@ function normalizarParcial(r: any): Partial<Fila> {
   const out: Partial<Fila> = {};
   const campos: (keyof Fila)[] = [
     "estado", "veredicto", "valorNumerico", "valorTexto", "resultadoFinal", "promedio", "fecha",
-    "analistaId", "revisadoAt", "aprobadoAt", "motivoDevolucion",
+    "analistaId", "revisadoAt", "aprobadoAt", "motivoDevolucion", "avisosAceptacion",
   ];
   for (const c of campos) if (r[c] !== undefined) (out as any)[c] = r[c];
   for (const c of ["analistaNombre", "revisadoPorNombre", "aprobadoPorNombre"] as (keyof Fila)[]) if (r[c] !== undefined) (out as any)[c] = r[c];
