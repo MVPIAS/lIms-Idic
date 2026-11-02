@@ -19,7 +19,7 @@
 -- Contrato §4.6.6 y §4.6.7: reporte_plantilla guarda modelos de exportación a
 -- Excel (entidad, columnas, filtros, resumen dinámico y gráfico).
 --
--- Permisos: documento.ver (todo rol con ot.ver) y documento.gestionar (subir,
+-- Permisos: documento.ver (todo rol interno con ot.ver; CLIENTE no) y documento.gestionar (subir,
 -- versionar, publicar, carpetas y permisos). Aditivo e idempotente.
 -- =============================================================================
 
@@ -146,7 +146,14 @@ SELECT DISTINCT rp.rol_id, p.id
   FROM rol_permiso rp
   JOIN permiso po ON po.id = rp.permiso_id AND po.codigo = 'ot.ver'
   JOIN permiso p  ON p.codigo = 'documento.ver'
+  JOIN rol r      ON r.id = rp.rol_id AND COALESCE(r.alias_de, r.codigo) <> 'CLIENTE'
 ON CONFLICT DO NOTHING;
+
+-- El portal del cliente externo no ve el gestor interno (corrige instalaciones previas).
+DELETE FROM rol_permiso rp
+ USING rol r, permiso p
+ WHERE rp.rol_id = r.id AND rp.permiso_id = p.id
+   AND COALESCE(r.alias_de, r.codigo) = 'CLIENTE' AND p.codigo = 'documento.ver';
 
 INSERT INTO rol_permiso (rol_id, permiso_id)
 SELECT r.id, p.id
