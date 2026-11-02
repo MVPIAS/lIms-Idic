@@ -127,4 +127,5 @@ align_qc_microbiologico.sql
 align_plantilla_versiones.sql
 align_ali_d4_metodos_lqa.sql
 align_qc_lmb_metodos.sql
+align_gestor_documental.sql
 align_cierre_permisos.sql

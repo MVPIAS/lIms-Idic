@@ -1,14 +1,22 @@
 import {
   BadRequestException,
+  Body,
+  ConflictException,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   Header,
   Module,
   NotFoundException,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   Res,
+  StreamableFile,
   UseGuards,
 } from "@nestjs/common";
 import type { Response } from "express";
@@ -20,7 +28,9 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { condicionAlcance } from "./alcance-reportes";
 import { ReportesGestionController } from "./reportes-gestion.controller";
-import { hoyChile } from "../common/fecha-chile";
+import { diaChile, esFechaCalendario, fechaHoraChile, hoyChile, partesChile } from "../common/fecha-chile";
+import { libroXlsx, type Celda, type Hoja } from "../common/xlsx-escritura";
+import { AGREGADOS, GRAFICOS, tablaDinamica, type Agregado, type DefResumen, type TipoGrafico } from "./tabla-dinamica";
 
 // ===========================================================================
 // Módulo REPORTES · KPIs (contrato §4.5.3) + exportación con filtros (§4.6.6 /
@@ -52,6 +62,10 @@ interface EntidadDef {
   fechaCol: string;
   /** true si la tabla tiene borrado lógico (deleted_at). */
   softDelete: boolean;
+  /** Nombre legible para la interfaz y el Excel. */
+  etiqueta?: string;
+  /** Permiso adicional para exportarla (además de reporte.ver). */
+  permiso?: string;
 }
 
 /**
@@ -165,7 +179,120 @@ const ENTIDADES: Record<string, EntidadDef> = {
       created_at: "created_at",
     },
   },
+  // §4.6.6: equipos, consumibles y actividades (frente documental).
+  equipo: {
+    tabla: "equipo",
+    etiqueta: "Equipos",
+    fechaCol: "created_at",
+    softDelete: true,
+    columnas: {
+      codigo: "codigo",
+      nombre: "nombre",
+      fabricante: "fabricante",
+      modelo: "modelo",
+      serie: "serie",
+      ubicacion: "ubicacion",
+      unidad: "(SELECT u.codigo FROM unidad u WHERE u.id = equipo.unidad_id)",
+      estado: "estado",
+      fecha_ultima_calibracion: "fecha_ultima_calibracion",
+      proxima_calibracion: "proxima_calibracion",
+      created_at: "created_at",
+    },
+  },
+  consumible_lote: {
+    tabla: "lote_consumible",
+    etiqueta: "Consumibles · lotes y stock",
+    fechaCol: "fecha_recepcion",
+    softDelete: false,
+    columnas: {
+      consumible_codigo: "(SELECT c.codigo FROM consumible c WHERE c.id = lote_consumible.consumible_id)",
+      consumible: "(SELECT c.nombre FROM consumible c WHERE c.id = lote_consumible.consumible_id)",
+      tipo: "(SELECT c.tipo FROM consumible c WHERE c.id = lote_consumible.consumible_id)",
+      unidad_medida: "(SELECT c.unidad_medida FROM consumible c WHERE c.id = lote_consumible.consumible_id)",
+      numero_lote: "numero_lote",
+      fecha_recepcion: "fecha_recepcion",
+      fecha_vencimiento: "fecha_vencimiento",
+      cantidad_inicial: "cantidad_inicial",
+      cantidad_actual: "cantidad_actual",
+      estado: "estado",
+    },
+  },
+  consumible_movimiento: {
+    tabla: "movimiento_consumible",
+    etiqueta: "Consumibles · movimientos",
+    fechaCol: "created_at",
+    softDelete: false,
+    columnas: {
+      fecha: "created_at",
+      tipo: "tipo",
+      cantidad: "cantidad",
+      consumible: "(SELECT c.nombre FROM lote_consumible l JOIN consumible c ON c.id = l.consumible_id WHERE l.id = movimiento_consumible.lote_id)",
+      numero_lote: "(SELECT l.numero_lote FROM lote_consumible l WHERE l.id = movimiento_consumible.lote_id)",
+      muestra: "(SELECT m.codigo FROM muestra m WHERE m.id = movimiento_consumible.muestra_id)",
+      metodo: "(SELECT cm.nombre FROM cat_metodo cm WHERE cm.id = movimiento_consumible.cat_metodo_id)",
+      motivo: "motivo",
+    },
+  },
+  actividad: {
+    tabla: "audit_log",
+    etiqueta: "Actividades (bitácora)",
+    permiso: "audit.ver",
+    fechaCol: "ocurrido_at",
+    softDelete: false,
+    columnas: {
+      fecha: "ocurrido_at",
+      usuario: "username",
+      accion: "accion",
+      entidad: "entidad_tipo",
+      codigo: "entidad_codigo",
+      motivo: "motivo",
+    },
+  },
 };
+
+const ETIQUETA_FORMATO: Record<string, string> = {
+  ot: "Órdenes de trabajo",
+  muestra: "Muestras",
+  resultado: "Resultados",
+  cotizacion: "Cotizaciones",
+  factura: "Facturas",
+  certificado: "Certificados",
+};
+const etiquetaEntidad = (k: string) => ENTIDADES[k]?.etiqueta ?? ETIQUETA_FORMATO[k] ?? k;
+
+/** Valor de celda para el Excel: números como números, fechas legibles. */
+function celdaXlsx(v: unknown): Celda {
+  if (v === null || v === undefined) return null;
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "bigint") return Number(v);
+  if (v instanceof Date) {
+    // Ordenable en Excel: «aaaa-mm-dd» (fecha) o «aaaa-mm-dd HH:MM» en hora de Chile.
+    if (esFechaCalendario(v)) return diaChile(v);
+    const p = partesChile(v);
+    return `${diaChile(v)} ${String(p.hora).padStart(2, "0")}:${String(p.minuto).padStart(2, "0")}`;
+  }
+  if (typeof v === "object") {
+    const n = Number(String(v));
+    return String(v) !== "" && Number.isFinite(n) && /^-?\d/.test(String(v)) ? n : JSON.stringify(v);
+  }
+  return String(v);
+}
+
+/** Lee la definición del resumen (tabla dinámica + gráfico) desde el query string o una plantilla. */
+function leerResumen(r: any, campos: string[]): DefResumen | null {
+  const filas = typeof r?.filas === "string" ? r.filas.trim() : "";
+  if (!filas) return null;
+  const columnas = typeof r?.columnas === "string" && r.columnas.trim() ? r.columnas.trim() : null;
+  const valor = typeof r?.valor === "string" && r.valor.trim() ? r.valor.trim() : null;
+  const agregado = (r?.agregado ?? "conteo") as Agregado;
+  const grafico = (r?.grafico ?? "columna") as TipoGrafico;
+  for (const [c, que] of [[filas, "filas"], [columnas, "columnas"], [valor, "valor"]] as const)
+    if (c && !campos.includes(c)) throw new BadRequestException(`El campo de ${que} del resumen («${c}») debe estar entre las columnas exportadas.`);
+  if (!AGREGADOS.includes(agregado)) throw new BadRequestException(`Agregado inválido. Válidos: ${AGREGADOS.join(", ")}.`);
+  if (!GRAFICOS.includes(grafico)) throw new BadRequestException(`Gráfico inválido. Válidos: ${GRAFICOS.join(", ")}.`);
+  if (agregado !== "conteo" && !valor) throw new BadRequestException("Para sumar, promediar o buscar mínimo/máximo indique el campo de valor.");
+  return { filas, columnas, valor, agregado, grafico };
+}
 
 // ===========================================================================
 // Base común: tenant + filtro de fechas parametrizado
@@ -487,7 +614,7 @@ export class ReportesController extends ReportesBase {
     return Object.fromEntries(
       Object.entries(ENTIDADES).map(([k, def]) => [
         k,
-        { tabla: def.tabla, fechaCol: def.fechaCol, campos: Object.keys(def.columnas) },
+        { tabla: def.tabla, fechaCol: def.fechaCol, campos: Object.keys(def.columnas), etiqueta: etiquetaEntidad(k), permiso: def.permiso ?? null },
       ]),
     );
   }
@@ -504,6 +631,12 @@ export class ReportesController extends ReportesBase {
     @Query("formato") formato?: string,
     @Query("limit") limit?: string,
     @Req() req?: any,
+    @Query("resumenFilas") resumenFilas?: string,
+    @Query("resumenColumnas") resumenColumnas?: string,
+    @Query("resumenValor") resumenValor?: string,
+    @Query("resumenAgregado") resumenAgregado?: string,
+    @Query("grafico") grafico?: string,
+    @Query("titulo") titulo?: string,
   ) {
     const tenantId = this.tenantId(req);
 
@@ -517,6 +650,8 @@ export class ReportesController extends ReportesBase {
     const u = req?.user ?? {};
     if (entidad === "factura" && !(u.roles ?? []).includes("SUPERADMIN") && !(u.permisos ?? []).includes("factura.ver"))
       throw new ForbiddenException("Exportar facturas exige el permiso factura.ver.");
+    if (def.permiso && !(u.roles ?? []).includes("SUPERADMIN") && !(u.permisos ?? []).includes(def.permiso))
+      throw new ForbiddenException(`Exportar ${etiquetaEntidad(String(entidad))} exige el permiso ${def.permiso}.`);
 
     // Resolución de columnas: SOLO claves de la whitelist. Si no se piden campos,
     // se devuelven todos los de la entidad (orden estable del objeto).
@@ -552,6 +687,18 @@ export class ReportesController extends ReportesBase {
       ...args,
     );
 
+    if ((formato ?? "").toLowerCase() === "xlsx") {
+      const resumen = leerResumen(
+        { filas: resumenFilas, columnas: resumenColumnas, valor: resumenValor, agregado: resumenAgregado, grafico },
+        claves,
+      );
+      const libro = this.libro(String(entidad), claves, filas, resumen, { desde, hasta, titulo });
+      const stamp = hoyChile();
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="reporte_${entidad}_${stamp}.xlsx"`);
+      return new StreamableFile(libro);
+    }
+
     if ((formato ?? "").toLowerCase() === "csv") {
       const csv = toCsv(claves, filas);
       const stamp = hoyChile();
@@ -568,6 +715,183 @@ export class ReportesController extends ReportesBase {
       meta: { total: filas.length, limit: max },
       data: filas,
     };
+  }
+
+  /**
+   * §4.6.6/§4.6.7 · Libro Excel: hoja «Datos» con autofiltro y, si se pide un
+   * resumen, hoja «Resumen» con la tabla dinámica y su gráfico nativo, más una
+   * hoja «Filtros» con lo que se exportó y cuándo.
+   */
+  private libro(
+    entidad: string,
+    claves: string[],
+    filas: any[],
+    resumen: DefResumen | null,
+    meta: { desde?: string; hasta?: string; titulo?: string },
+  ): Buffer {
+    const datos: Celda[][] = [claves, ...filas.map((f) => claves.map((k) => celdaXlsx(f[k])))];
+    const anchos = claves.map((k, j) => Math.min(50, Math.max(k.length + 2, ...datos.slice(1, 200).map((f) => String(f[j] ?? "").length + 1))));
+    const hojas: Hoja[] = [];
+    if (resumen) {
+      const t = tablaDinamica(filas, resumen);
+      const conCols = !!resumen.columnas;
+      const tituloGrafico = (meta.titulo?.trim() || `${etiquetaEntidad(entidad)} por ${resumen.filas}`).slice(0, 120);
+      hojas.push({
+        nombre: "Resumen",
+        filas: t.matriz,
+        anchos: t.matriz[0].map((_c, j) => (j === 0 ? 30 : 14)),
+        grafico:
+          resumen.grafico !== "ninguno" && t.grupos > 0
+            ? {
+                tipo: resumen.grafico as "columna" | "barra" | "linea" | "torta",
+                titulo: tituloGrafico,
+                desde: 1,
+                hasta: t.grupos,
+                categorias: 0,
+                // Torta: una sola serie (el total de cada grupo).
+                series: resumen.grafico === "torta" ? [conCols ? t.series + 1 : 1] : conCols ? Array.from({ length: t.series }, (_x, i) => i + 1) : [1],
+              }
+            : undefined,
+      });
+    }
+    hojas.push({ nombre: "Datos", filas: datos, autoFiltro: true, anchos });
+    hojas.push({
+      nombre: "Filtros",
+      filas: [
+        ["Parámetro", "Valor"],
+        ["Entidad", etiquetaEntidad(entidad)],
+        ["Desde", meta.desde ?? "(sin límite)"],
+        ["Hasta", meta.hasta ?? "(sin límite)"],
+        ["Filas exportadas", filas.length],
+        ["Columnas", claves.join(", ")],
+        ...(resumen
+          ? ([
+              ["Resumen · filas", resumen.filas],
+              ["Resumen · columnas", resumen.columnas ?? "—"],
+              ["Resumen · valor", resumen.valor ? `${resumen.agregado} de ${resumen.valor}` : "cantidad de registros"],
+              ["Gráfico", resumen.grafico ?? "columna"],
+            ] as Celda[][])
+          : []),
+        ["Generado (hora de Chile)", fechaHoraChile(new Date())],
+      ],
+      anchos: [26, 70],
+    });
+    return libroXlsx(hojas);
+  }
+
+  // --- §4.6.6/§4.6.7 · Plantillas de exportación guardadas -------------------
+
+  private plantillaDto(p: any) {
+    return {
+      id: p.id,
+      nombre: p.nombre,
+      descripcion: p.descripcion,
+      entidad: p.entidad,
+      campos: p.campos ?? [],
+      filtros: p.filtros ?? {},
+      resumen: p.resumen ?? null,
+      compartida: p.compartida,
+      creadoPor: p.creado_por_nombre ?? null,
+      propia: false,
+      creadoEn: p.creado_en,
+    };
+  }
+
+  private validarPlantilla(b: any) {
+    const nombre = typeof b?.nombre === "string" ? b.nombre.trim() : "";
+    if (!nombre || nombre.length > 120) throw new BadRequestException("Indique un nombre (máx. 120 caracteres).");
+    const def = ENTIDADES[String(b?.entidad ?? "")];
+    if (!def) throw new BadRequestException(`entidad inválida. Válidas: ${Object.keys(ENTIDADES).join(", ")}`);
+    const campos: string[] = Array.isArray(b?.campos) ? b.campos.map(String) : [];
+    if (!campos.length) throw new BadRequestException("Elija al menos una columna.");
+    const malos = campos.filter((c) => !(c in def.columnas));
+    if (malos.length) throw new BadRequestException(`campos no permitidos: ${malos.join(", ")}`);
+    const f = b?.filtros ?? {};
+    const filtros: Record<string, unknown> = {};
+    if (f.ultimosDias !== undefined && f.ultimosDias !== null && f.ultimosDias !== "") {
+      const n = Number(f.ultimosDias);
+      if (!Number.isInteger(n) || n < 1 || n > 3660) throw new BadRequestException("«Últimos días» debe ser un entero entre 1 y 3660.");
+      filtros.ultimosDias = n;
+    }
+    for (const k of ["desde", "hasta"]) {
+      if (f[k]) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(String(f[k]))) throw new BadRequestException(`Filtro ${k} con formato inválido (AAAA-MM-DD).`);
+        filtros[k] = String(f[k]);
+      }
+    }
+    const resumen = b?.resumen ? leerResumen(b.resumen, campos) : null;
+    const descripcion = typeof b?.descripcion === "string" ? b.descripcion.trim().slice(0, 500) || null : null;
+    return { nombre, entidad: String(b.entidad), campos, filtros, resumen, descripcion, compartida: b?.compartida !== false };
+  }
+
+  @Get("plantillas")
+  @RequierePermiso("reporte.ver")
+  async plantillas(@Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const yo = req?.user?.sub ?? null;
+    const f = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT p.*, u.nombre_completo AS creado_por_nombre FROM reporte_plantilla p LEFT JOIN usuario u ON u.id = p.creado_por
+        WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL AND (p.compartida OR p.creado_por = $2::uuid)
+        ORDER BY p.nombre`,
+      tenantId,
+      yo,
+    );
+    return f.map((p) => ({ ...this.plantillaDto(p), propia: p.creado_por === yo }));
+  }
+
+  @Post("plantillas")
+  @RequierePermiso("reporte.ver")
+  async crearPlantilla(@Body() b: any, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const v = this.validarPlantilla(b);
+    try {
+      const r = await this.prisma.$queryRawUnsafe<any[]>(
+        `INSERT INTO reporte_plantilla (tenant_id, nombre, descripcion, entidad, campos, filtros, resumen, compartida, creado_por)
+         VALUES ($1::uuid, $2, $3, $4, $5::text[], $6::jsonb, $7::jsonb, $8, $9::uuid) RETURNING *`,
+        tenantId, v.nombre, v.descripcion, v.entidad, v.campos, JSON.stringify(v.filtros), v.resumen ? JSON.stringify(v.resumen) : null, v.compartida, req?.user?.sub ?? null,
+      );
+      return { ...this.plantillaDto(r[0]), propia: true };
+    } catch (e: any) {
+      if (/23505/.test(String(e?.message ?? ""))) throw new ConflictException("Ya existe una plantilla con ese nombre.");
+      throw e;
+    }
+  }
+
+  private async plantillaPropia(id: string, req: any) {
+    const tenantId = this.tenantId(req);
+    const f = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT * FROM reporte_plantilla WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`, id, tenantId);
+    if (!f.length) throw new NotFoundException("Plantilla no encontrada.");
+    const u = req?.user ?? {};
+    if (f[0].creado_por !== u.sub && !(u.roles ?? []).includes("SUPERADMIN") && !(u.roles ?? []).includes("ADMIN"))
+      throw new ForbiddenException("Solo quien creó la plantilla (o Administración) puede cambiarla.");
+    return f[0];
+  }
+
+  @Patch("plantillas/:id")
+  @RequierePermiso("reporte.ver")
+  async editarPlantilla(@Param("id", new ParseUUIDPipe()) id: string, @Body() b: any, @Req() req: any) {
+    const p = await this.plantillaPropia(id, req);
+    const v = this.validarPlantilla({ ...this.plantillaDto(p), ...b });
+    try {
+      const r = await this.prisma.$queryRawUnsafe<any[]>(
+        `UPDATE reporte_plantilla SET nombre = $2, descripcion = $3, entidad = $4, campos = $5::text[], filtros = $6::jsonb,
+                resumen = $7::jsonb, compartida = $8, actualizado_en = now() WHERE id = $1::uuid RETURNING *`,
+        id, v.nombre, v.descripcion, v.entidad, v.campos, JSON.stringify(v.filtros), v.resumen ? JSON.stringify(v.resumen) : null, v.compartida,
+      );
+      return { ...this.plantillaDto(r[0]), propia: true };
+    } catch (e: any) {
+      if (/23505/.test(String(e?.message ?? ""))) throw new ConflictException("Ya existe una plantilla con ese nombre.");
+      throw e;
+    }
+  }
+
+  @Delete("plantillas/:id")
+  @RequierePermiso("reporte.ver")
+  async borrarPlantilla(@Param("id", new ParseUUIDPipe()) id: string, @Req() req: any) {
+    await this.plantillaPropia(id, req);
+    await this.prisma.$executeRawUnsafe(`UPDATE reporte_plantilla SET deleted_at = now() WHERE id = $1::uuid`, id);
+    return { ok: true };
   }
 }
 

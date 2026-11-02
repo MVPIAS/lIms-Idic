@@ -16,7 +16,7 @@ function cabeceras(): Record<string, string> {
 }
 
 /** Llamada a la API. Lanza Error con el mensaje del servidor (en español). */
-export async function llamar<T = any>(metodo: "GET" | "POST" | "PATCH" | "PUT", ruta: string, cuerpo?: unknown): Promise<T> {
+export async function llamar<T = any>(metodo: "GET" | "POST" | "PATCH" | "PUT" | "DELETE", ruta: string, cuerpo?: unknown): Promise<T> {
   const r = await fetch(`${API}${ruta}`, {
     method: metodo,
     headers: cabeceras(),
