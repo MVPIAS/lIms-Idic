@@ -48,6 +48,7 @@ import { SeguimientoModule } from "./seguimiento/seguimiento.module";
 import { OficioModule } from "./oficio/oficio.module";
 import { PasoMetodoModule } from "./catalogo/paso-metodo.module";
 import { DocumentosModule } from "./documentos/documentos.module";
+import { AgendaModule } from "./agenda/agenda.module";
 import { MetrologiaModule } from "./metrologia/metrologia.module";
 import { InternacionModule } from "./internacion/internacion.module";
 import { BpchModule } from "./bpch/bpch.module";
@@ -129,6 +130,7 @@ function prettyTransport() {
     OficioModule,
     PasoMetodoModule,
     DocumentosModule,
+    AgendaModule,
     MetrologiaModule,
     InternacionModule,
     BpchModule,

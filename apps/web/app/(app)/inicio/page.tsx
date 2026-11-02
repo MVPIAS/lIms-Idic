@@ -40,6 +40,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/ot", titulo: "Órdenes de trabajo", desc: "Estado de las OT de tu laboratorio", icono: "🗂", perm: "ot.ver" },
   ],
   JEFE_LAB: [
+    { href: "/agenda", titulo: "Agenda", desc: "Eventos y reserva de recursos", icono: "📅", perm: "agenda.ver" },
     { href: "/captura-ot?estado=revisado_n1", titulo: "Revisar y aprobar", desc: "Resultados listos para tu aprobación", icono: "✅", perm: ["resultado.aprobar", "resultado.revisar"] },
     { href: "/ot?sinAsignar=1&estado=abiertas", titulo: "Asignar trabajo", desc: "Distribuye las OT entre tus analistas", icono: "👥", perm: "ot.asignar" },
     { href: "/qc", titulo: "Control de calidad", desc: "Controles aprobados y pendientes", icono: "✔", perm: "resultado.ver" },
@@ -71,6 +72,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/crm", titulo: "Oportunidades", desc: "Pipeline comercial", icono: "🎯", perm: "cotizacion.ver" },
   ],
   PLANIFICACION: [
+    { href: "/agenda", titulo: "Agenda", desc: "Eventos y reserva de recursos", icono: "📅", perm: "agenda.ver" },
     { href: "/ot/nueva", titulo: "Registrar OT", desc: "Abre una orden de trabajo", icono: "＋", perm: "ot.crear" },
     { href: "/ot", titulo: "Órdenes de trabajo", desc: "Distribución y plazos", icono: "🗂", perm: "ot.ver" },
     { href: "/ordenes-internas", titulo: "Órdenes internas", desc: "Derivaciones entre laboratorios", icono: "🔀", perm: "ot.ver" },

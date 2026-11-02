@@ -159,6 +159,7 @@ export const NAV: SeccionNav[] = [
     icon: "📊",
     items: [
       { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "csv excel xlsx tabla dinamica grafico plantilla" },
+      { href: "/agenda", label: "Agenda de recursos y eventos", icon: "📅", perm: "agenda.ver", claves: "calendario reserva vehiculo sala reunion salida terreno disponibilidad costos recurrente" },
       { href: "/documentos/gestor", label: "Gestor documental", icon: "📂", perm: "documento.ver", claves: "carpetas versiones procedimientos instructivos archivos subir" },
       { href: "/documentos", label: "Buscador de documentos emitidos", icon: "🗄", perm: "ot.ver" },
       { href: "/auditoria", label: "Auditoría (bitácora)", icon: "🧾", perm: "audit.ver", claves: "audit log trazabilidad cambios quien" },
