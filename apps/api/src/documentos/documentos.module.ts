@@ -1,13 +1,28 @@
 import {
+  BadRequestException,
+  Body,
   Controller,
+  Delete,
   Get,
   Module,
   NotFoundException,
+  Param,
+  ParseIntPipe,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Put,
   Query,
   Req,
+  Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { AuthGuard } from "@nestjs/passport";
+import { GestorDocumentalService } from "./gestor.service";
+import { MAX_DOCUMENTO_BYTES } from "./gestor";
 import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
 import { PermisoGuard } from "../auth/permiso.guard";
@@ -15,9 +30,9 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 
 // ===========================================================================
-// Módulo DOCUMENTOS · Buscador global de documentos (contrato §4.6.1 / §4.6.2,
-// versión acordada con el cliente: se sustituye el árbol jerárquico de carpetas
-// por una BÚSQUEDA GLOBAL por título y filtros).
+// Módulo DOCUMENTOS · Buscador global de documentos EMITIDOS por el LIMS
+// (contrato §4.6.1). El árbol de carpetas con versiones (§4.6.2/§4.6.3) es el
+// gestor documental: GestorDocumentalController, al final de este fichero.
 //
 // Los "documentos" del sistema son los certificados/informes EMITIDOS:
 //   · certificado        (núcleo LIMS · informes de ensayo, certificados…)
@@ -223,7 +238,127 @@ export class DocumentosController {
   }
 }
 
+// ===========================================================================
+// Gestor documental (§4.6.1–§4.6.3): carpetas jerárquicas, documentos con
+// versiones, publicación, renombrado y permisos por usuario (gestor.service.ts).
+// Va ANTES que DocumentosController en el módulo: sus rutas son más específicas.
+// ===========================================================================
+
+const UUID = new ParseUUIDPipe({ version: "4", errorHttpStatusCode: 400 });
+const SUBIDA = FileInterceptor("archivo", { limits: { fileSize: MAX_DOCUMENTO_BYTES, files: 1, fields: 12 } });
+
+@ApiTags("documentos")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@Controller("documentos")
+export class GestorDocumentalController {
+  constructor(private readonly g: GestorDocumentalService) {}
+
+  @Get("carpetas")
+  @RequierePermiso("documento.ver")
+  arbol(@Req() req: any) {
+    return this.g.arbol(req);
+  }
+
+  @Post("carpetas")
+  @RequierePermiso("documento.gestionar")
+  crearCarpeta(@Body() b: any, @Req() req: any) {
+    return this.g.crearCarpeta(req, b);
+  }
+
+  @Patch("carpetas/:id")
+  @RequierePermiso("documento.gestionar")
+  editarCarpeta(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
+    return this.g.editarCarpeta(req, id, b);
+  }
+
+  @Delete("carpetas/:id")
+  @RequierePermiso("documento.gestionar")
+  borrarCarpeta(@Param("id", UUID) id: string, @Req() req: any) {
+    return this.g.borrarCarpeta(req, id);
+  }
+
+  @Get("usuarios")
+  @RequierePermiso("documento.gestionar")
+  usuarios(@Query("q") q: string | undefined, @Req() req: any) {
+    return this.g.usuarios(req, q);
+  }
+
+  @Get("archivos")
+  @RequierePermiso("documento.ver")
+  listar(
+    @Req() req: any,
+    @Query("carpetaId") carpetaId?: string,
+    @Query("otId") otId?: string,
+    @Query("muestraId") muestraId?: string,
+    @Query("clienteId") clienteId?: string,
+    @Query("q") texto?: string,
+    @Query("subcarpetas") subcarpetas?: string,
+  ) {
+    return this.g.listar(req, { carpetaId, otId, muestraId, clienteId, texto, subcarpetas });
+  }
+
+  @Post("archivos")
+  @RequierePermiso("documento.gestionar")
+  @UseInterceptors(SUBIDA)
+  crear(@UploadedFile() archivo: any, @Body() b: any, @Req() req: any) {
+    return this.g.crear(req, archivo, b);
+  }
+
+  @Get("archivos/:id")
+  @RequierePermiso("documento.ver")
+  ver(@Param("id", UUID) id: string, @Req() req: any) {
+    return this.g.ver(req, id);
+  }
+
+  @Patch("archivos/:id")
+  @RequierePermiso("documento.gestionar")
+  editar(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
+    return this.g.editar(req, id, b);
+  }
+
+  @Delete("archivos/:id")
+  @RequierePermiso("documento.gestionar")
+  borrar(@Param("id", UUID) id: string, @Req() req: any) {
+    return this.g.borrar(req, id);
+  }
+
+  @Put("archivos/:id/accesos")
+  @RequierePermiso("documento.gestionar")
+  accesos(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
+    return this.g.accesos(req, id, b);
+  }
+
+  @Post("archivos/:id/versiones")
+  @RequierePermiso("documento.gestionar")
+  @UseInterceptors(SUBIDA)
+  nuevaVersion(@Param("id", UUID) id: string, @UploadedFile() archivo: any, @Body() b: any, @Req() req: any) {
+    return this.g.nuevaVersion(req, id, archivo, b);
+  }
+
+  @Post("archivos/:id/versiones/:numero/publicar")
+  @RequierePermiso("documento.gestionar")
+  publicar(@Param("id", UUID) id: string, @Param("numero", ParseIntPipe) numero: number, @Req() req: any) {
+    return this.g.publicar(req, id, numero);
+  }
+
+  /** Descarga: sin `numero`, la versión publicada. */
+  @Get("archivos/:id/descargar")
+  @RequierePermiso("documento.ver")
+  async descargar(@Param("id", UUID) id: string, @Query("numero") numero: string | undefined, @Req() req: any, @Res() res: any) {
+    const n = numero ? parseInt(numero, 10) : undefined;
+    if (numero && !Number.isInteger(n)) throw new BadRequestException("Número de versión inválido.");
+    const a = await this.g.descargar(req, id, n);
+    res.setHeader("Content-Type", a.mime);
+    res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(a.nombre)}`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Cache-Control", "no-store");
+    res.send(a.datos);
+  }
+}
+
 @Module({
-  controllers: [DocumentosController],
+  controllers: [GestorDocumentalController, DocumentosController],
+  providers: [GestorDocumentalService],
 })
 export class DocumentosModule {}

@@ -158,8 +158,9 @@ export const NAV: SeccionNav[] = [
     title: "Reportes y comunicación",
     icon: "📊",
     items: [
-      { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "csv excel" },
-      { href: "/documentos", label: "Buscador de documentos", icon: "🗄", perm: "ot.ver" },
+      { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "csv excel xlsx tabla dinamica grafico plantilla" },
+      { href: "/documentos/gestor", label: "Gestor documental", icon: "📂", perm: "documento.ver", claves: "carpetas versiones procedimientos instructivos archivos subir" },
+      { href: "/documentos", label: "Buscador de documentos emitidos", icon: "🗄", perm: "ot.ver" },
       { href: "/auditoria", label: "Auditoría (bitácora)", icon: "🧾", perm: "audit.ver", claves: "audit log trazabilidad cambios quien" },
       { href: "/mensajeria", label: "Mensajería · correo", icon: "📧", perm: "cotizacion.ver" },
       { href: "/mensajeria/plantillas", label: "Plantillas de correo", icon: "✉", perm: "cotizacion.ver" },

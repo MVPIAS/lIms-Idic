@@ -104,6 +104,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
   LECTOR: [
     { href: "/reportes", titulo: "Reportes", desc: "Consulta y exporta información", icono: "📊", perm: "resultado.ver" },
     { href: "/documentos", titulo: "Documentos", desc: "Busca informes y certificados", icono: "🗄", perm: "ot.ver" },
+    { href: "/documentos/gestor", titulo: "Gestor documental", desc: "Carpetas, versiones y permisos", icono: "📂", perm: "documento.ver" },
     { href: "/saec/verificar", titulo: "Verificar certificado", desc: "Comprueba la autenticidad de un certificado", icono: "🔎" },
   ],
 };

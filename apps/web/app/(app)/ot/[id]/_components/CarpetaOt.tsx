@@ -24,6 +24,8 @@ export default function CarpetaOt({ otId }: { otId: string }) {
   const [error, setError] = useState("");
   const [ubicacion, setUbicacion] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  // Documentos del gestor documental vinculados a la OT (§4.6.1); null = sin permiso.
+  const [gestor, setGestor] = useState<any[] | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -35,7 +37,8 @@ export default function CarpetaOt({ otId }: { otId: string }) {
   }, [otId]);
   useEffect(() => {
     cargar();
-  }, [cargar]);
+    llamar<any[]>("GET", `/documentos/archivos?otId=${otId}`).then(setGestor).catch(() => setGestor(null));
+  }, [cargar, otId]);
 
   if (error) return <div className="alert warn" role="alert">{error}</div>;
   if (!c) return <p className="subtitle" style={{ margin: 0 }}>Cargando la carpeta…</p>;
@@ -46,7 +49,7 @@ export default function CarpetaOt({ otId }: { otId: string }) {
       {n === 0 ? <p className="subtitle" style={{ margin: 0, fontSize: 12 }}>Nada registrado.</p> : cuerpo}
     </section>
   );
-  const total = Object.values(s).reduce((a: number, x: any) => a + (x?.length ?? 0), 0);
+  const total = Object.values(s).reduce((a: number, x: any) => a + (x?.length ?? 0), 0) + (gestor?.length ?? 0);
 
   return (
     <div>
@@ -114,6 +117,20 @@ export default function CarpetaOt({ otId }: { otId: string }) {
           ))}
         </ul>,
       )}
+      {gestor !== null &&
+        seccion(
+          "Gestor documental (documentos vinculados a la OT)",
+          gestor.length,
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>
+            {gestor.map((d: any) => (
+              <li key={d.id}>
+                <span className="codigo">{d.codigo}</span> · {d.titulo} · {d.carpeta}
+                {d.versionPublicada ? ` · v${d.versionPublicada} publicada` : " · sin publicar"}
+              </li>
+            ))}
+            <li style={{ listStyle: "none", marginTop: 4 }}><Link href={"/documentos/gestor" as any} style={{ color: "var(--accent)" }}>Abrir el gestor documental</Link></li>
+          </ul>,
+        )}
       {seccion("Muestreos", s.muestreos.length, <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5 }}>{s.muestreos.map((m: any) => <li key={m.numero}>Nº {m.numero} · {m.estado} · {fechaDia(m.createdAt)}</li>)}</ul>)}
       {seccion(
         "Órdenes internas",

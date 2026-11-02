@@ -15,7 +15,14 @@ export const UNIDAD_DE: Record<string, (t: string) => string> = {
     `(SELECT o.unidad_principal FROM orden_trabajo o WHERE o.id = COALESCE(${t}.ot_id, (SELECT m.ot_id FROM muestra m WHERE m.id = ${t}.muestra_id)))`,
   certificado: (t) => `COALESCE(${t}.unidad_id, (SELECT o.unidad_principal FROM orden_trabajo o WHERE o.id = ${t}.ot_id))`,
   factura: (t) => `(SELECT o.unidad_principal FROM orden_trabajo o WHERE o.id = ${t}.ot_id)`,
+  equipo: (t) => `${t}.unidad_id`,
 };
+
+/**
+ * Tablas sin unidad: el inventario de consumibles es común a los laboratorios
+ * (se exporta entero a quien tenga reporte.ver).
+ */
+export const SIN_UNIDAD = new Set(["lote_consumible", "movimiento_consumible"]);
 
 /**
  * Condición de alcance para una tabla: ` AND <unidad> = ANY($k::uuid[])`, con las
@@ -24,7 +31,7 @@ export const UNIDAD_DE: Record<string, (t: string) => string> = {
  * es de una unidad visible. Una tabla desconocida no devuelve filas.
  */
 export function condicionAlcance(tabla: string, alias: string, unidades: string[] | null, args: unknown[]): string {
-  if (!unidades) return "";
+  if (!unidades || SIN_UNIDAD.has(tabla)) return "";
   args.push(unidades);
   const k = `$${args.length}::uuid[]`;
   if (tabla === "cotizacion")

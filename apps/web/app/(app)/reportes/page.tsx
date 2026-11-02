@@ -1,7 +1,8 @@
 "use client";
 
 // ===========================================================================
-// Reportes · KPIs (contrato §4.5.3) + Exportador CSV con filtros (§4.6.6/§4.6.7).
+// Reportes · KPIs (contrato §4.5.3) + Exportador a Excel/CSV con filtros,
+// resumen dinámico, gráfico y plantillas guardadas (§4.6.6/§4.6.7).
 // Solo lectura: consume /api/reportes/* (agrega datos existentes). Los gráficos
 // son SVG a mano (barras), sin librerías externas.
 // ===========================================================================
@@ -10,7 +11,7 @@ import Gestion from "./_components/Gestion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { clp, num, pct, fecha } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
-import { hoyChile } from "@/lib/fecha-chile";
+import { hoyChile, sumarDiasCalendario } from "@/lib/fecha-chile";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -27,7 +28,7 @@ const TABS: { key: Tab; label: string; perm: string }[] = [
   { key: "conformidad", label: "Conformidad", perm: "reporte.ver" },
   { key: "plazos", label: "Plazos", perm: "reporte.ver" },
   { key: "comercial", label: "Comercial", perm: "reporte.comercial.ver" },
-  { key: "exportador", label: "Exportador CSV", perm: "reporte.ver" },
+  { key: "exportador", label: "Exportar a Excel", perm: "reporte.ver" },
 ];
 
 async function getJson(path: string): Promise<any> {
@@ -92,7 +93,7 @@ export default function ReportesPage() {
       {tab === "conformidad" && <Conformidad rango={rango} />}
       {tab === "plazos" && <Plazos rango={rango} />}
       {tab === "comercial" && <Comercial rango={rango} />}
-      {tab === "exportador" && <Exportador desde={desde} hasta={hasta} />}
+      {tab === "exportador" && <Exportador desde={desde} hasta={hasta} setDesde={setDesde} setHasta={setHasta} />}
     </div>
   );
 }
@@ -332,48 +333,103 @@ function Comercial({ rango }: { rango: string }) {
   );
 }
 
-// --- Exportador (configurador de tabla -> CSV) ------------------------------
+// --- Exportador (configurador de tabla -> Excel / CSV, §4.6.6 y §4.6.7) ------
+// Columnas y filtros a elección, resumen dinámico (filas × columnas con conteo,
+// suma, promedio, mínimo o máximo) con gráfico nativo de Excel, y plantillas de
+// exportación guardadas para repetir el mismo reporte.
 
-const ENTIDADES_UI: { key: string; label: string }[] = [
-  { key: "ot", label: "Órdenes de trabajo" },
-  { key: "muestra", label: "Muestras" },
-  { key: "resultado", label: "Resultados" },
-  { key: "cotizacion", label: "Cotizaciones" },
-  { key: "certificado", label: "Certificados" },
+interface EntidadInfo { campos: string[]; etiqueta: string; permiso: string | null }
+interface Resumen { filas: string; columnas: string; valor: string; agregado: string; grafico: string }
+interface PlantillaExport {
+  id: string;
+  nombre: string;
+  descripcion: string | null;
+  entidad: string;
+  campos: string[];
+  filtros: { desde?: string; hasta?: string; ultimosDias?: number };
+  resumen: Partial<Resumen> | null;
+  compartida: boolean;
+  creadoPor: string | null;
+  propia: boolean;
+}
+const RESUMEN_VACIO: Resumen = { filas: "", columnas: "", valor: "", agregado: "conteo", grafico: "columna" };
+const AGREGADOS_UI = [
+  { v: "conteo", t: "Cantidad de registros" },
+  { v: "suma", t: "Suma" },
+  { v: "promedio", t: "Promedio" },
+  { v: "minimo", t: "Mínimo" },
+  { v: "maximo", t: "Máximo" },
+];
+const GRAFICOS_UI = [
+  { v: "columna", t: "Columnas" },
+  { v: "barra", t: "Barras horizontales" },
+  { v: "linea", t: "Líneas" },
+  { v: "torta", t: "Torta" },
+  { v: "ninguno", t: "Sin gráfico" },
 ];
 
-function Exportador({ desde, hasta }: { desde: string; hasta: string }) {
-  const [entidades, setEntidades] = useState<Record<string, { campos: string[] }>>({});
+const restarDias = (n: number): string => sumarDiasCalendario(hoyChile(), -n);
+
+function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta: string; setDesde: (v: string) => void; setHasta: (v: string) => void }) {
+  const { puede } = usePermisos();
+  const [entidades, setEntidades] = useState<Record<string, EntidadInfo>>({});
   const [entidad, setEntidad] = useState("ot");
   const [seleccion, setSeleccion] = useState<Record<string, boolean>>({});
+  const [resumen, setResumen] = useState<Resumen>(RESUMEN_VACIO);
+  const [titulo, setTitulo] = useState("");
   const [preview, setPreview] = useState<any>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [plantillas, setPlantillas] = useState<PlantillaExport[]>([]);
+  const [plantillaId, setPlantillaId] = useState("");
+  // Al cargar una plantilla, sus columnas se aplican después de cambiar de entidad.
+  const [pendiente, setPendiente] = useState<PlantillaExport | null>(null);
 
+  const cargarPlantillas = useCallback(() => getJson("/reportes/plantillas").then(setPlantillas).catch(() => setPlantillas([])), []);
   useEffect(() => {
     getJson("/reportes/entidades").then(setEntidades).catch((e) => setError(e.message));
-  }, []);
+    cargarPlantillas();
+  }, [cargarPlantillas]);
 
+  const visibles = Object.entries(entidades).filter(([, e]) => !e.permiso || puede(e.permiso));
   const campos = entidades[entidad]?.campos ?? [];
 
-  // Al cambiar de entidad, se seleccionan todas las columnas por defecto.
   useEffect(() => {
     if (!campos.length) return;
-    setSeleccion(Object.fromEntries(campos.map((c) => [c, true])));
+    if (pendiente && pendiente.entidad === entidad) {
+      setSeleccion(Object.fromEntries(campos.map((c) => [c, pendiente.campos.includes(c)])));
+      setResumen({ ...RESUMEN_VACIO, ...(pendiente.resumen ?? {}), columnas: pendiente.resumen?.columnas ?? "", valor: pendiente.resumen?.valor ?? "" } as Resumen);
+      setPendiente(null);
+    } else if (!pendiente) {
+      setSeleccion(Object.fromEntries(campos.map((c) => [c, true])));
+      setResumen(RESUMEN_VACIO);
+    }
     setPreview(null);
   }, [entidad, entidades]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seleccionadas = campos.filter((c) => seleccion[c]);
+  const resumenActivo = !!resumen.filas;
 
-  const queryBase = useCallback((formato: "csv" | "json") => {
-    const p = new URLSearchParams();
-    p.set("entidad", entidad);
-    if (seleccionadas.length) p.set("campos", seleccionadas.join(","));
-    if (desde) p.set("desde", desde);
-    if (hasta) p.set("hasta", hasta);
-    p.set("formato", formato);
-    return p.toString();
-  }, [entidad, seleccionadas, desde, hasta]);
+  const queryBase = useCallback(
+    (formato: "csv" | "json" | "xlsx") => {
+      const p = new URLSearchParams();
+      p.set("entidad", entidad);
+      if (seleccionadas.length) p.set("campos", seleccionadas.join(","));
+      if (desde) p.set("desde", desde);
+      if (hasta) p.set("hasta", hasta);
+      p.set("formato", formato);
+      if (formato === "xlsx" && resumen.filas) {
+        p.set("resumenFilas", resumen.filas);
+        if (resumen.columnas) p.set("resumenColumnas", resumen.columnas);
+        if (resumen.valor && resumen.agregado !== "conteo") p.set("resumenValor", resumen.valor);
+        p.set("resumenAgregado", resumen.agregado);
+        p.set("grafico", resumen.grafico);
+        if (titulo.trim()) p.set("titulo", titulo.trim());
+      }
+      return p.toString();
+    },
+    [entidad, seleccionadas, desde, hasta, resumen, titulo],
+  );
 
   async function previsualizar() {
     setError("");
@@ -389,17 +445,19 @@ function Exportador({ desde, hasta }: { desde: string; hasta: string }) {
     }
   }
 
-  async function descargar() {
+  async function descargar(formato: "csv" | "xlsx") {
     setError("");
     if (!seleccionadas.length) { setError("Selecciona al menos una columna."); return; }
+    if (formato === "xlsx" && resumenActivo && resumen.agregado !== "conteo" && !resumen.valor) { setError("Elige el campo de valor del resumen."); return; }
     try {
-      const res = await fetch(`${API}/reportes/tabla?${queryBase("csv")}`, { headers: auth() });
+      const res = await fetch(`${API}/reportes/tabla?${queryBase(formato)}`, { headers: auth() });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `reporte_${entidad}_${hoyChile()}.csv`;
+      const base = plantillas.find((x) => x.id === plantillaId)?.nombre.replace(/[^\p{L}\p{N} _-]/gu, "_") || `reporte_${entidad}`;
+      a.download = `${base}_${hoyChile()}.${formato}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -409,15 +467,102 @@ function Exportador({ desde, hasta }: { desde: string; hasta: string }) {
     }
   }
 
+  function aplicarPlantilla(id: string) {
+    setPlantillaId(id);
+    const p = plantillas.find((x) => x.id === id);
+    if (!p) return;
+    const f = p.filtros ?? {};
+    if (f.ultimosDias) {
+      setDesde(restarDias(f.ultimosDias));
+      setHasta(hoyChile());
+    } else {
+      setDesde(f.desde ?? "");
+      setHasta(f.hasta ?? "");
+    }
+    setTitulo(p.nombre);
+    if (p.entidad === entidad) {
+      setSeleccion(Object.fromEntries(campos.map((c) => [c, p.campos.includes(c)])));
+      setResumen({ ...RESUMEN_VACIO, ...(p.resumen ?? {}), columnas: p.resumen?.columnas ?? "", valor: p.resumen?.valor ?? "" } as Resumen);
+      setPreview(null);
+    } else {
+      setPendiente(p);
+      setEntidad(p.entidad);
+    }
+  }
+
+  async function guardarPlantilla(comoNueva: boolean) {
+    const actual = plantillas.find((x) => x.id === plantillaId);
+    const nombre = comoNueva || !actual ? prompt("Nombre de la plantilla de exportación:", titulo || "") : actual.nombre;
+    if (!nombre?.trim()) return;
+    const diasTxt = prompt("Rango de fechas: deja vacío para guardar el rango actual, o escribe N para «últimos N días» al usarla.", actual?.filtros?.ultimosDias ? String(actual.filtros.ultimosDias) : "");
+    if (diasTxt === null) return;
+    const filtros = diasTxt.trim() ? { ultimosDias: Number(diasTxt.trim()) } : { ...(desde ? { desde } : {}), ...(hasta ? { hasta } : {}) };
+    const cuerpo = {
+      nombre: nombre.trim(),
+      entidad,
+      campos: seleccionadas,
+      filtros,
+      resumen: resumen.filas ? { filas: resumen.filas, columnas: resumen.columnas || undefined, valor: resumen.agregado !== "conteo" ? resumen.valor || undefined : undefined, agregado: resumen.agregado, grafico: resumen.grafico } : null,
+      compartida: true,
+    };
+    try {
+      const r = await fetch(`${API}/reportes/plantillas${!comoNueva && actual ? `/${actual.id}` : ""}`, { method: !comoNueva && actual ? "PATCH" : "POST", headers: auth(), body: JSON.stringify(cuerpo) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(Array.isArray(j.message) ? j.message.join(", ") : j.message ?? `Error ${r.status}`);
+      await cargarPlantillas();
+      setPlantillaId(j.id);
+      setError("");
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function borrarPlantilla() {
+    const p = plantillas.find((x) => x.id === plantillaId);
+    if (!p || !confirm(`¿Eliminar la plantilla «${p.nombre}»?`)) return;
+    const r = await fetch(`${API}/reportes/plantillas/${p.id}`, { method: "DELETE", headers: auth() });
+    if (!r.ok) return setError((await r.json().catch(() => ({}))).message ?? `Error ${r.status}`);
+    setPlantillaId("");
+    cargarPlantillas();
+  }
+
+  const plantillaSel = plantillas.find((x) => x.id === plantillaId);
+  const opcionCampo = (vacio: string) => [<option key="" value="">{vacio}</option>, ...seleccionadas.map((c) => <option key={c} value={c}>{c}</option>)];
+
   return (
     <div>
       {error && <div className="alert warn">{error}</div>}
 
       <div className="card" style={{ marginBottom: 12 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+          <div className="field" style={{ margin: 0, minWidth: 260 }}>
+            <label htmlFor="ex-plantilla">Plantilla de exportación</label>
+            <select id="ex-plantilla" value={plantillaId} onChange={(e) => (e.target.value ? aplicarPlantilla(e.target.value) : setPlantillaId(""))}>
+              <option value="">(sin plantilla · configurar a mano)</option>
+              {plantillas.map((p) => <option key={p.id} value={p.id}>{p.nombre}{p.propia ? "" : p.creadoPor ? ` · de ${p.creadoPor}` : ""}</option>)}
+            </select>
+          </div>
+          <button type="button" className="btn sm" onClick={() => guardarPlantilla(true)}>Guardar como plantilla nueva</button>
+          {plantillaSel?.propia && (
+            <>
+              <button type="button" className="btn sm" onClick={() => guardarPlantilla(false)}>Actualizar «{plantillaSel.nombre}»</button>
+              <button type="button" className="btn ghost sm" onClick={borrarPlantilla}>Eliminar plantilla</button>
+            </>
+          )}
+        </div>
+        {plantillaSel && (
+          <p className="subtitle" style={{ margin: "6px 0 0" }}>
+            {plantillaSel.descripcion ? `${plantillaSel.descripcion} · ` : ""}
+            {plantillaSel.filtros?.ultimosDias ? `Rango: últimos ${plantillaSel.filtros.ultimosDias} días` : plantillaSel.filtros?.desde || plantillaSel.filtros?.hasta ? `Rango fijo: ${plantillaSel.filtros.desde ?? "…"} → ${plantillaSel.filtros.hasta ?? "…"}` : "Sin rango de fechas"}
+          </p>
+        )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 12 }}>
         <div className="field" style={{ maxWidth: 320 }}>
-          <label>Entidad a exportar</label>
-          <select value={entidad} onChange={(e) => setEntidad(e.target.value)}>
-            {ENTIDADES_UI.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
+          <label htmlFor="ex-entidad">Qué exportar</label>
+          <select id="ex-entidad" value={entidad} onChange={(e) => { setPlantillaId(""); setEntidad(e.target.value); }}>
+            {visibles.map(([k, e]) => <option key={k} value={k}>{e.etiqueta}</option>)}
           </select>
         </div>
 
@@ -426,12 +571,7 @@ function Exportador({ desde, hasta }: { desde: string; hasta: string }) {
           <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 8 }}>
             {campos.map((c) => (
               <label key={c} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
-                <input
-                  type="checkbox"
-                  checked={!!seleccion[c]}
-                  onChange={(e) => setSeleccion({ ...seleccion, [c]: e.target.checked })}
-                  style={{ width: "auto" }}
-                />
+                <input type="checkbox" checked={!!seleccion[c]} onChange={(e) => setSeleccion({ ...seleccion, [c]: e.target.checked })} style={{ width: "auto" }} />
                 {c}
               </label>
             ))}
@@ -442,9 +582,47 @@ function Exportador({ desde, hasta }: { desde: string; hasta: string }) {
           </div>
         </div>
 
-        <div style={{ marginTop: 14, display: "flex", gap: 8, alignItems: "center" }}>
+        <fieldset style={{ marginTop: 14, border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px" }}>
+          <legend style={{ fontSize: 12.5, fontWeight: 600, padding: "0 4px" }}>Resumen dinámico y gráfico (solo Excel)</legend>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+            <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="ex-rf">Agrupar filas por</label>
+              <select id="ex-rf" value={resumen.filas} onChange={(e) => setResumen({ ...resumen, filas: e.target.value })}>{opcionCampo("(sin resumen)")}</select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="ex-rc">Columnas por (opcional)</label>
+              <select id="ex-rc" value={resumen.columnas} disabled={!resumenActivo} onChange={(e) => setResumen({ ...resumen, columnas: e.target.value })}>{opcionCampo("(ninguna)")}</select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="ex-ra">Calcular</label>
+              <select id="ex-ra" value={resumen.agregado} disabled={!resumenActivo} onChange={(e) => setResumen({ ...resumen, agregado: e.target.value })}>
+                {AGREGADOS_UI.map((a) => <option key={a.v} value={a.v}>{a.t}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="ex-rv">Del campo</label>
+              <select id="ex-rv" value={resumen.valor} disabled={!resumenActivo || resumen.agregado === "conteo"} onChange={(e) => setResumen({ ...resumen, valor: e.target.value })}>{opcionCampo("(elegir)")}</select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="ex-rg">Gráfico</label>
+              <select id="ex-rg" value={resumen.grafico} disabled={!resumenActivo} onChange={(e) => setResumen({ ...resumen, grafico: e.target.value })}>
+                {GRAFICOS_UI.map((g) => <option key={g.v} value={g.v}>{g.t}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="ex-tit">Título del gráfico</label>
+              <input id="ex-tit" value={titulo} maxLength={120} disabled={!resumenActivo} onChange={(e) => setTitulo(e.target.value)} placeholder="Automático" />
+            </div>
+          </div>
+          <p className="subtitle" style={{ margin: "6px 0 0", fontSize: 11.5 }}>
+            El Excel trae la hoja «Resumen» con la tabla cruzada y sus totales, el gráfico nativo de Excel, la hoja «Datos» con filtros por columna y la hoja «Filtros» con lo exportado.
+          </p>
+        </fieldset>
+
+        <div style={{ marginTop: 14, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <button className="btn sm" onClick={previsualizar} disabled={loading}>Previsualizar</button>
-          <button className="btn primary sm" onClick={descargar}>⬇ Descargar CSV</button>
+          <button className="btn primary sm" onClick={() => descargar("xlsx")}>⬇ Descargar Excel</button>
+          <button className="btn sm" onClick={() => descargar("csv")}>⬇ CSV</button>
           <span className="subtitle" style={{ margin: 0 }}>
             {desde || hasta ? `Filtro: ${desde || "…"} → ${hasta || "…"}` : "Sin filtro de fechas"}
           </span>

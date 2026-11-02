@@ -1,15 +1,16 @@
 "use client";
 
 // ===========================================================================
-// Documentos · Buscador global (contrato §4.6.1 / §4.6.2, versión acordada).
-// En lugar de un árbol jerárquico de carpetas, una búsqueda global de los
-// documentos emitidos (certificados/informes del núcleo + certificados SAEC)
+// Documentos · Buscador global de lo EMITIDO por el LIMS (contrato §4.6.1). El
+// árbol de carpetas con versiones es el gestor documental (/documentos/gestor).
+// Búsqueda global de los documentos emitidos (certificados/informes del núcleo + certificados SAEC)
 // por título y filtros (tipo, fecha, cliente). Solo lectura: consume
 // /api/documentos. El JWT se adjunta desde localStorage (mismo patrón que el
 // resto de la app).
 // ===========================================================================
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { fechaHora } from "@/lib/format";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { estadoDocumento } from "@/lib/documentos";
@@ -185,6 +186,8 @@ export default function DocumentosPage() {
         Búsqueda global de los documentos emitidos por el sistema (certificados e informes de las OT y
         certificados del SAEC) por título y filtros (§4.6.1 / §4.6.2). Solo lectura. Se muestran los
         documentos de los laboratorios de su alcance. Solo un documento «Oficial» tiene validez.
+        Los demás documentos (procedimientos, instructivos, contratos…) están en el{" "}
+        <Link href={"/documentos/gestor" as any} style={{ color: "var(--accent)" }}>gestor documental</Link>.
       </p>
 
       <div className="card" style={{ marginBottom: 12 }}>
