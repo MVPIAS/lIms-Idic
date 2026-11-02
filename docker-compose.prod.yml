@@ -63,7 +63,11 @@ services:
       # ETL IBIS · barrido automático de la carpeta cada 24h (proceso interno de la API).
       IBIS_CRON_HABILITADO: ${IBIS_CRON_HABILITADO:-false}
       IBIS_CRON_HORA: ${IBIS_CRON_HORA:-02:00}
+      # Instrumentos (§4.4.6) · lectura automática: una subcarpeta por perfil de instrumento.
+      INSTRUMENTOS_DIR: /data/instrumentos
+      INSTRUMENTOS_INTERVALO_S: ${INSTRUMENTOS_INTERVALO_S:-60}
     volumes:
+      - ${INSTRUMENTOS_HOST_DIR:-./instrumentos}:/data/instrumentos
       - ${IBIS_DIR:-./ibis}/entrada:/data/ibis/entrada
       - ${IBIS_DIR:-./ibis}/procesados:/data/ibis/procesados
       - ${IBIS_DIR:-./ibis}/errores:/data/ibis/errores

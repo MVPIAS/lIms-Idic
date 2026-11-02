@@ -137,6 +137,8 @@ services:
       # IBIS_DIR/procesados (o /errores si falla). No requiere Internet ni credenciales.
       IBIS_CRON_HABILITADO: ${IBIS_CRON_HABILITADO:-true}
       IBIS_CRON_HORA: ${IBIS_CRON_HORA:-02:00}
+      INSTRUMENTOS_DIR: /data/instrumentos
+      INSTRUMENTOS_INTERVALO_S: ${INSTRUMENTOS_INTERVALO_S:-60}
     volumes:
       # Carpeta donde IBIS/SFTP deja el XML DIARIO (entrada) y donde se guarda el
       # XML ya CONSUMIDO (procesados) + los que fallaron (errores). Monte aquí el
@@ -144,6 +146,9 @@ services:
       - ${IBIS_DIR:-./ibis}/entrada:/data/ibis/entrada
       - ${IBIS_DIR:-./ibis}/procesados:/data/ibis/procesados
       - ${IBIS_DIR:-./ibis}/errores:/data/ibis/errores
+      # Instrumentos (§4.4.6): cada instrumento deja su archivo en una subcarpeta
+      # (la del perfil de importación); la API la lee cada INSTRUMENTOS_INTERVALO_S.
+      - ${INSTRUMENTOS_HOST_DIR:-./instrumentos}:/data/instrumentos
     expose: ["3001"]
     healthcheck:
       # /api/health devuelve status=degraded si la BD no responde, pero HTTP 200

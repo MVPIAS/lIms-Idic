@@ -229,6 +229,10 @@ chmod 700 "$LIMS_DATA_DIR/certs" "${LIMS_BACKUP_DIR:-/srv/lims-backup}"
 IBIS_HOST_DIR="${IBIS_DIR:-$APP_DIR/ibis}"
 case "$IBIS_HOST_DIR" in /*) : ;; *) IBIS_HOST_DIR="$APP_DIR/${IBIS_HOST_DIR#./}" ;; esac
 mkdir -p "$IBIS_HOST_DIR"/{entrada,procesados,errores}
+# Carpeta de los instrumentos (lectura automática, §4.4.6): misma razón.
+INSTR_HOST_DIR="${INSTRUMENTOS_HOST_DIR:-$APP_DIR/instrumentos}"
+case "$INSTR_HOST_DIR" in /*) : ;; *) INSTR_HOST_DIR="$APP_DIR/${INSTR_HOST_DIR#./}" ;; esac
+mkdir -p "$INSTR_HOST_DIR"
 # WAL archiving (PITR): el directorio wal/ se monta como /walarchive y lo escribe
 # el archivador de PostgreSQL, que corre como el usuario `postgres` (uid 70 en
 # alpine), NO como root. Se le cede la propiedad DESPUÉS de levantar el stack
