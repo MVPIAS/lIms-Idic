@@ -28,6 +28,7 @@ interface Accion { href: string; titulo: string; desc: string; icono: string; pe
 /** Accesos rápidos por perfil (se muestran solo los que el permiso permite). */
 const ACCIONES: Record<Perfil, Accion[]> = {
   ANALISTA: [
+    { href: "/instrumentos", titulo: "Datos de instrumentos", desc: "Cargar el archivo de un equipo", icono: "📟", perm: "instrumento.importar" },
     { href: "/captura-ot", titulo: "Capturar resultados", desc: "Registra las mediciones de tus ensayos", icono: "✍", perm: "resultado.crear" },
     { href: "/ot?mias=1&estado=abiertas", titulo: "Mis órdenes de trabajo", desc: "Lo que tienes asignado y su avance", icono: "🗂", perm: "ot.ver" },
     { href: "/captura-ot?estado=pendiente,devuelto&asignados=1", titulo: "Captura por OT", desc: "Todos los ensayos de una OT en una pantalla", icono: "📈", perm: "resultado.crear" },
@@ -40,6 +41,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/ot", titulo: "Órdenes de trabajo", desc: "Estado de las OT de tu laboratorio", icono: "🗂", perm: "ot.ver" },
   ],
   JEFE_LAB: [
+    { href: "/instrumentos", titulo: "Datos de instrumentos", desc: "Cargar el archivo de un equipo", icono: "📟", perm: "instrumento.importar" },
     { href: "/agenda", titulo: "Agenda", desc: "Eventos y reserva de recursos", icono: "📅", perm: "agenda.ver" },
     { href: "/captura-ot?estado=revisado_n1", titulo: "Revisar y aprobar", desc: "Resultados listos para tu aprobación", icono: "✅", perm: ["resultado.aprobar", "resultado.revisar"] },
     { href: "/ot?sinAsignar=1&estado=abiertas", titulo: "Asignar trabajo", desc: "Distribuye las OT entre tus analistas", icono: "👥", perm: "ot.asignar" },
