@@ -201,8 +201,9 @@ async function mensajeria() {
   caso("MSJ-04", "Búsqueda en el historial por destinatario encuentra el envío, con estado y OT", !!fila && /prueba\.bloque-a/.test(fila.destinatarios ?? "") && ["enviado", "error", "sin_configurar"].includes(fila.estado), fila ? `estado=${fila.estado} ${fila.error ? `error=${String(fila.error).slice(0, 80)}` : ""}` : `HTTP ${h1.status}, sin filas`);
   const fe = await pedir(CO, "GET", `/mensajeria?estado=${fila?.estado ?? "error"}&tipo=${fila?.tipo ?? "resultado"}`);
   caso("MSJ-05", "Filtros por estado y tipo", fe.status === 200 && (fe.j.data ?? []).every((x) => x.estado === (fila?.estado ?? "error")), `${fe.j?.data?.length ?? 0} filas`);
-  const sinPermiso = await pedir(AN, "GET", "/mensajeria/plantillas");
-  caso("MSJ-06", "Permisos: un analista sin acceso comercial no ve la mensajería comercial", sinPermiso.status === 403, `HTTP ${sinPermiso.status}`);
+  // El analista envía correo (correo.enviar) y por eso lee las plantillas, pero no las edita (correo_plantilla.editar).
+  const sinPermiso = await pedir(AN, "POST", "/mensajeria/plantillas", { etapa: "resultado", nombre: "PRUEBA no debe crearse", asunto: "x", cuerpo: "x" });
+  caso("MSJ-06", "Permisos: un analista no crea ni edita plantillas de correo", sinPermiso.status === 403, `HTTP ${sinPermiso.status}`);
   const malo = await pedir(CO, "POST", `/mensajeria/resultado/${ot?.id}`, { destinatarios: ["no-es-un-correo"] });
   caso("MSJ-07", "Destinatario inválido: se rechaza sin enviar", malo.status >= 400 && malo.status < 500, `HTTP ${malo.status} ${malo.j?.message ?? ""}`);
 }
