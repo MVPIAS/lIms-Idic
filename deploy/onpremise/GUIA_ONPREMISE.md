@@ -462,9 +462,36 @@ sudo /opt/lims-idic/scripts/backup/restore-pitr.sh --target-time "2026-07-17 14:
 
 > **Riesgo a vigilar.** Si el archivado de WAL falla de forma persistente (disco de respaldo lleno o desmontado, permisos), PostgreSQL **retiene el WAL en `pg_wal` y puede llenar el disco de datos hasta detenerse**. La monitorización lo vigila (§8.2, fila WAL) y alerta. Procedimiento completo, RPO/RTO, requisitos de disco y diagnóstico en **`PITR.md`**.
 
+### 7.8 Exportación portable cifrada: SQL plano y CSV (contrato §4.8.4)
+
+El contrato pide copias **en formatos SQL, CSV y/o Excel, cada 15 días como mínimo**. Las copias de §7.1 usan el formato propio de PostgreSQL; para cumplir con formatos abiertos, `exportar-portable.sh` genera **cada domingo a las 04:00** (`lims-exportacion.timer`, una semana = el doble de la frecuencia exigida):
+
+| Dentro del paquete | Contenido |
+|---|---|
+| `lims_idic.sql` | Volcado **SQL plano** (`pg_dump -Fp`): se restaura con `psql` en cualquier PostgreSQL 16, sin herramientas del LIMS |
+| `csv/<tabla>.csv` | **Una tabla por fichero**, con cabecera, UTF-8 y comillas RFC 4180: se abre en Excel o LibreOffice |
+| `FILAS.csv` | Filas de cada tabla (para comprobar una restauración) |
+| `MANIFIESTO.txt`, `SHA256SUMS` | Fecha, versión, cifrado y huella de cada fichero |
+
+Todo sale **cifrado con AES-256** (`openssl enc`, PBKDF2-SHA256 de 600 000 iteraciones) en `/srv/lims-backup/portables/lims_idic-<fecha>.tar.gz.enc`, con su `.sha256`. No queda en disco ninguna copia sin cifrar. La clave es `RESPALDO_CLAVE` del `.env` (el instalador la genera): **guárdela fuera del servidor** (sobre lacrado o gestor de claves del IDIC); sin ella las exportaciones no se pueden leer. Se conservan `RETENCION_PORTABLES` exportaciones (8 ≈ 2 meses). Cada exportación se **descifra y verifica** antes de darse por buena.
+
+```bash
+# Forzar una exportación ahora y verificar la última:
+sudo systemctl start lims-exportacion.service
+sudo /opt/lims-idic/scripts/backup/exportar-portable.sh --verificar /srv/lims-backup/portables/lims_idic-<fecha>.tar.gz.enc
+
+# Sacar el SQL y los CSV para revisarlos (p. ej. abrir una tabla en Excel):
+sudo /opt/lims-idic/scripts/backup/restaurar-portable.sh /srv/lims-backup/portables/lims_idic-<fecha>.tar.gz.enc --extraer /root/revision
+
+# Restaurar el SQL plano en una base NUEVA y comprobar las filas tabla a tabla:
+sudo /opt/lims-idic/scripts/backup/restaurar-portable.sh /srv/lims-backup/portables/lims_idic-<fecha>.tar.gz.enc --a-bd lims_restaurada
+```
+
+En otro equipo (sin el `.env`), basta con exportar la clave antes: `RESPALDO_CLAVE='…' ./restaurar-portable.sh <paquete> --extraer <carpeta>`. Para volver a operar sobre una base restaurada, cambie `POSTGRES_DB` en el `.env` tras revisarla y reinicie `api` y `web`.
+
 ### 7.6 Copia externa (responsabilidad del IDIC)
 
-El kit deja las copias en `/srv/lims-backup`, en el propio servidor. **Eso no protege de un incendio, un robo o la destrucción del equipo.** El IDIC debe llevarlas fuera según su política: NAS, cinta o USB cifrado en otra dependencia.
+El kit deja las copias en `/srv/lims-backup`, en el propio servidor. **Eso no protege de un incendio, un robo o la destrucción del equipo.** El IDIC debe llevarlas fuera según su política: NAS, cinta o USB cifrado en otra dependencia. Las exportaciones portables de §7.8 (`portables/`) son las indicadas para llevar fuera: ya van cifradas.
 
 ---
 
