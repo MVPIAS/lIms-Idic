@@ -19,6 +19,15 @@
 
 import { hoyChile, diaChile } from "../common/fecha-chile";
 
+/**
+ * SQL (alias de muestra `m`): la muestra es un LOTE de una internación o
+ * reinspección BPCH registrado desde su expediente («Registrar lote como
+ * muestra»). Lo toma el inspector en la inspección y ese registro no pide toma
+ * de muestra ni condición: no cuenta como recepción incompleta.
+ */
+export const SQL_LOTE_BPCH = `(EXISTS (SELECT 1 FROM bpch_internacion_item li WHERE li.muestra_id = m.id)
+     OR EXISTS (SELECT 1 FROM bpch_reinspeccion lr WHERE lr.muestra_id = m.id))`;
+
 export type TipoCampo = "texto" | "numero" | "entero" | "fecha" | "lista" | "casilla";
 export const TIPOS_CAMPO: readonly TipoCampo[] = ["texto", "numero", "entero", "fecha", "lista", "casilla"];
 

@@ -7,6 +7,7 @@ import { MAX_INTENTOS_FALLIDOS } from "../auth/bloqueo";
 import { LISTAS_BANDEJA, LISTA_VENCIDAS_LAB, MAX_ELEMENTOS } from "./bandeja-listas";
 import { SQL_ZONA } from "../common/fecha-chile";
 import { SQL_PASO_ACTUAL } from "../plantilla-render/reglas-emision";
+import { SQL_LOTE_BPCH } from "../recepcion/reglas-recepcion";
 
 export type Severidad = "info" | "warn" | "alta";
 
@@ -323,7 +324,7 @@ export class BandejaService {
                       AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
                       AND (NOT EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL)
                            OR EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL
-                                        AND (m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL))))
+                                        AND (m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL) AND NOT ${SQL_LOTE_BPCH})))
                 + (SELECT count(*) FROM orden_interna oi
                      JOIN cat_familia f ON f.id = oi.destino_lab
                      JOIN unidad ud ON ud.tenant_id = oi.tenant_id AND ud.codsucdel = f.codsucdel

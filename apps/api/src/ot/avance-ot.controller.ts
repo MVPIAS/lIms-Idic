@@ -11,6 +11,7 @@ import { calcularAvance, puedeActuar, type DocumentoAvance, type HechosOt } from
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { ramaDeUnidad, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
 import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
+import { SQL_LOTE_BPCH } from "../recepcion/reglas-recepcion";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
 import { trabajoDsaDe } from "../formularios/trabajo-avance";
 import { avanceArmasDeOt } from "../saec/d11/datos-d11";
@@ -57,7 +58,9 @@ export class AvanceOtService {
                                            WHERE ps.tenant_id = m.tenant_id AND ps.categoria = 'recepcion_producto_obligatorio'
                                              AND ps.activo AND upper(ps.codigo) = upper(u.codigo))))
                                    -- Las armas de la D11 se reciben con el acta de recepción (EP-11 11.6).
-                                   AND NOT EXISTS (SELECT 1 FROM d11_arma_ot a WHERE a.muestra_id = m.id))::int AS incompletas,
+                                   AND NOT EXISTS (SELECT 1 FROM d11_arma_ot a WHERE a.muestra_id = m.id)
+                                   -- Los lotes BPCH registrados desde el expediente tampoco piden esos datos.
+                                   AND NOT ${SQL_LOTE_BPCH})::int AS incompletas,
                 array_agg(m.veredicto ORDER BY m.codigo) AS veredictos
            FROM muestra m WHERE m.ot_id = $1::uuid AND m.deleted_at IS NULL`,
         id,
