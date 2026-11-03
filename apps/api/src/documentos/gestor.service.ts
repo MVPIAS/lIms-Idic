@@ -3,7 +3,7 @@ import { PrismaClient } from "@prisma/client";
 import { createHash } from "crypto";
 import { anioChile } from "../common/fecha-chile";
 import { AlcanceService } from "../rbac/alcance.service";
-import { arbolCarpetas, esDescendiente, nombreSeguro, subarbol, tipoArchivo, type CarpetaFila, type CarpetaNodo } from "./gestor";
+import { arbolCarpetas, derechosDocumento, esDescendiente, nombreSeguro, subarbol, tipoArchivo, type CarpetaFila, type CarpetaNodo } from "./gestor";
 
 // ===========================================================================
 // Gestor documental (contrato §4.6.1, §4.6.2, §4.6.3) · packages/db/align_gestor_documental.sql
@@ -13,8 +13,13 @@ import { arbolCarpetas, esDescendiente, nombreSeguro, subarbol, tipoArchivo, typ
 //     unidad en su alcance; los perfiles globales lo ven todo;
 //   · un documento «restringido» solo lo ven quienes figuran en doc_acceso,
 //     quien lo creó y los perfiles globales con documento.gestionar;
-//   · quien solo tiene documento.ver descarga la versión PUBLICADA; los
-//     borradores y versiones anteriores, quien puede editar el documento.
+//   · quien solo tiene documento.ver ve y descarga solo documentos con versión
+//     PUBLICADA (un documento aún en borrador no le aparece); los borradores y
+//     versiones anteriores, quien puede editar el documento;
+//   · el permiso por documento «Ver y editar» (doc_acceso.nivel = 'editar')
+//     deja subir y publicar versiones y cambiar título, descripción y vínculos
+//     aunque la persona no tenga documento.gestionar; mover de carpeta, cambiar
+//     permisos y eliminar siguen siendo de quien gestiona (derechosDocumento).
 // Todos los valores viajan como parámetros posicionales.
 // ===========================================================================
 
@@ -99,9 +104,12 @@ export class GestorDocumentalService {
   async arbol(req: any) {
     const k = await this.ctx(req);
     const vis = await this.carpetasVisibles(k);
+    // Cuenta solo los documentos que esta persona ve (restringidos y borradores aparte).
+    const argsCuenta: any[] = [k.tenantId];
+    const wCuenta = this.condicionVisible(k, vis.map((c) => c.id), argsCuenta);
     const cuenta = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT carpeta_id, count(*)::int AS n FROM doc_documento WHERE tenant_id = $1::uuid AND deleted_at IS NULL GROUP BY carpeta_id`,
-      k.tenantId,
+      `SELECT d.carpeta_id, count(*)::int AS n FROM doc_documento d WHERE d.tenant_id = $1::uuid AND d.deleted_at IS NULL ${wCuenta} GROUP BY d.carpeta_id`,
+      ...argsCuenta,
     );
     const n = new Map(cuenta.map((x) => [x.carpeta_id, x.n]));
     const unidades = await this.prisma.$queryRawUnsafe<any[]>(`SELECT id, codigo, nombre FROM unidad WHERE tenant_id = $1::uuid`, k.tenantId);
@@ -203,14 +211,22 @@ export class GestorDocumentalService {
 
   /* --------------------------------------------------------- documentos --- */
 
-  /** Condición SQL (alias `d`) de documentos visibles para quien consulta; añade parámetros a `args`. */
+  /**
+   * Condición SQL (alias `d`) de documentos visibles para quien consulta; añade
+   * parámetros a `args`. Un documento sin versión publicada solo lo ve quien
+   * puede editarlo (misma regla que derechosDocumento).
+   */
   private condicionVisible(k: Contexto, carpetas: string[], args: any[]): string {
     args.push(carpetas);
     let s = ` AND d.carpeta_id = ANY($${args.length}::uuid[])`;
     if (!(k.gestiona && !k.unidades)) {
       args.push(k.usuarioId);
       const u = `$${args.length}::uuid`;
+      const editaPorAcceso = `EXISTS (SELECT 1 FROM doc_acceso a WHERE a.documento_id = d.id AND a.usuario_id = ${u} AND a.nivel = 'editar')`;
       s += ` AND (NOT d.restringido OR d.creado_por = ${u} OR EXISTS (SELECT 1 FROM doc_acceso a WHERE a.documento_id = d.id AND a.usuario_id = ${u}))`;
+      s += k.gestiona
+        ? ` AND (d.version_publicada IS NOT NULL OR NOT d.restringido OR d.creado_por = ${u} OR ${editaPorAcceso})`
+        : ` AND (d.version_publicada IS NOT NULL OR ${editaPorAcceso})`;
     }
     return s;
   }
@@ -256,6 +272,16 @@ export class GestorDocumentalService {
       ...args,
     );
     const ruta = new Map(vis.map((c) => [c.id, c.ruta]));
+    // Quien no gestiona documentos no sabe de borradores salvo en los que tiene «Ver y editar».
+    let editables: Set<string> | null = null;
+    if (!k.gestiona && filas.length) {
+      const e = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT documento_id FROM doc_acceso WHERE usuario_id = $1::uuid AND nivel = 'editar' AND documento_id = ANY($2::uuid[])`,
+        k.usuarioId,
+        filas.map((f) => f.id),
+      );
+      editables = new Set(e.map((x) => x.documento_id));
+    }
     return filas.map((f) => ({
       id: f.id,
       codigo: f.codigo,
@@ -265,7 +291,7 @@ export class GestorDocumentalService {
       carpeta: ruta.get(f.carpeta_id) ?? null,
       restringido: f.restringido,
       versionPublicada: f.version_publicada,
-      ultimaVersion: f.ultima_version,
+      ultimaVersion: editables && !editables.has(f.id) ? f.version_publicada : f.ultima_version,
       archivo: f.archivo,
       otId: f.ot_id,
       otCodigo: f.ot_codigo,
@@ -290,25 +316,33 @@ export class GestorDocumentalService {
     );
     if (!f.length) throw new NotFoundException("Documento no encontrado.");
     const d = f[0];
-    let edita = k.gestiona;
-    if (edita && d.restringido && !(k.gestiona && !k.unidades) && d.creado_por !== k.usuarioId) {
-      const a = await this.prisma.$queryRawUnsafe<any[]>(
-        `SELECT nivel FROM doc_acceso WHERE documento_id = $1::uuid AND usuario_id = $2::uuid`,
-        id,
-        k.usuarioId,
-      );
-      edita = a[0]?.nivel === "editar";
-    }
-    return { d, edita, carpetas: vis };
+    const a = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT nivel FROM doc_acceso WHERE documento_id = $1::uuid AND usuario_id = $2::uuid`,
+      id,
+      k.usuarioId,
+    );
+    const { edita, administra } = derechosDocumento({
+      gestiona: k.gestiona,
+      global: !k.unidades,
+      restringido: !!d.restringido,
+      esCreador: !!k.usuarioId && d.creado_por === k.usuarioId,
+      nivelAcceso: a[0]?.nivel === "editar" ? "editar" : a[0]?.nivel === "ver" ? "ver" : null,
+    });
+    return { d, edita, administra, carpetas: vis };
   }
 
   private exigirEdicion(edita: boolean) {
     if (!edita) throw new ForbiddenException("No tiene permiso para modificar este documento.");
   }
 
+  private exigirAdministracion(administra: boolean) {
+    if (!administra)
+      throw new ForbiddenException("Mover de carpeta, cambiar permisos o eliminar un documento exige el permiso de gestionar documentos.");
+  }
+
   async ver(req: any, id: string) {
     const k = await this.ctx(req);
-    const { d, edita, carpetas } = await this.documento(k, id);
+    const { d, edita, administra, carpetas } = await this.documento(k, id);
     const versiones = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT v.numero, v.nombre_archivo, v.mime, v.bytes, v.hash_sha256, v.estado, v.comentario,
               v.subido_en, us.nombre_completo AS subido_por, v.publicado_en, up.nombre_completo AS publicado_por
@@ -351,6 +385,7 @@ export class GestorDocumentalService {
       creadoPor: v[0].creador,
       creadoEn: d.creado_en,
       puedeEditar: edita,
+      puedeAdministrar: administra,
       // Quien solo lee ve únicamente la versión publicada.
       versiones: (edita ? versiones : versiones.filter((x) => x.estado === "PUBLICADA")).map((x) => ({
         numero: x.numero,
@@ -365,7 +400,7 @@ export class GestorDocumentalService {
         publicadoEn: x.publicado_en,
         publicadoPor: x.publicado_por,
       })),
-      accesos: edita ? accesos.map((a) => ({ usuarioId: a.usuario_id, nombre: a.nombre, username: a.username, nivel: a.nivel })) : [],
+      accesos: administra ? accesos.map((a) => ({ usuarioId: a.usuario_id, nombre: a.nombre, username: a.username, nivel: a.nivel })) : [],
     };
   }
 
@@ -492,7 +527,7 @@ export class GestorDocumentalService {
 
   async editar(req: any, id: string, b: any) {
     const k = await this.ctx(req);
-    const { d, edita } = await this.documento(k, id);
+    const { d, edita, administra } = await this.documento(k, id);
     this.exigirEdicion(edita);
     const sets: string[] = [];
     const args: any[] = [id, k.usuarioId];
@@ -507,6 +542,7 @@ export class GestorDocumentalService {
     if (b?.carpetaId !== undefined) {
       const carpetaId = uuidOpcional(b.carpetaId, "Carpeta");
       if (!carpetaId) throw new BadRequestException("Indique la carpeta.");
+      if (carpetaId !== d.carpeta_id) this.exigirAdministracion(administra);
       await this.carpeta(k, carpetaId);
       args.push(carpetaId);
       sets.push(`carpeta_id = $${args.length}::uuid`);
@@ -534,8 +570,8 @@ export class GestorDocumentalService {
 
   async accesos(req: any, id: string, b: any) {
     const k = await this.ctx(req);
-    const { edita } = await this.documento(k, id);
-    this.exigirEdicion(edita);
+    const { administra } = await this.documento(k, id);
+    this.exigirAdministracion(administra);
     const lista: { usuarioId: string; nivel: string }[] = Array.isArray(b?.accesos) ? b.accesos : [];
     if (lista.length > 200) throw new BadRequestException("Como máximo 200 usuarios.");
     for (const a of lista) {
@@ -564,8 +600,8 @@ export class GestorDocumentalService {
 
   async borrar(req: any, id: string) {
     const k = await this.ctx(req);
-    const { edita } = await this.documento(k, id);
-    this.exigirEdicion(edita);
+    const { administra } = await this.documento(k, id);
+    this.exigirAdministracion(administra);
     await this.prisma.$executeRawUnsafe(
       `UPDATE doc_documento SET deleted_at = now(), actualizado_por = $2::uuid WHERE id = $1::uuid`, id, k.usuarioId);
     return { ok: true };
