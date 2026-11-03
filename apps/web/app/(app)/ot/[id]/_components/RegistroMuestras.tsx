@@ -320,7 +320,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   }
 
   async function guardarRecepcion(m: MuestraOt) {
-    const falta = faltantesRecepcion(edicion, cfg);
+    const falta = faltantesRecepcion(edicion, cfg, m.recepcionadaAt);
     if (cfg?.productoObligatorio && !productoEdicion) falta.push("elija el producto (matriz)");
     if (falta.length) return toast.error(`Recepción: ${falta.join("; ")}.`);
     setGuardando(true);
@@ -559,7 +559,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                     otId={otId} obligatorio={!!cfg?.productoObligatorio} nombreActual={m.productoNombre} sinLista={sinListaProductos} />
                 </div>
                 <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} labPrincipalId={d.ot.unidadPrincipal}
-                  config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} />
+                  config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} recepcionAt={m.recepcionadaAt} />
                 <FotosRecepcion otId={otId} muestraId={m.id} codigo={m.codigo} puedeEditar={puedeRegistrar} onCambio={() => { cargar(); avisarCambio(); }} />
                 <div className="toolbar" style={{ margin: "8px 0 0" }}>
                   <span style={{ fontSize: 11.5, color: "var(--muted)" }}>El cambio queda en el historial de la OT con lo anterior y lo nuevo.</span>

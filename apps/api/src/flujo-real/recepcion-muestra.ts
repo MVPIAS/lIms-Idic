@@ -126,6 +126,7 @@ export function normalizarRecepcion(r: RecepcionMuestra): RecepcionNormalizada {
  * @param labPrincipal laboratorio responsable de la OT (no es «otro laboratorio»)
  * @param prefijo «Muestra 2: » cuando se registran varias
  * @param recepcionAt cuándo se recibió la muestra (la toma no puede ser posterior)
+ * @param ahora reloj (pruebas): la toma tampoco puede ser futura
  */
 export function erroresRecepcion(
   r: RecepcionNormalizada,
@@ -133,6 +134,7 @@ export function erroresRecepcion(
   labPrincipal?: string | null,
   prefijo = "",
   recepcionAt: Date = new Date(),
+  ahora: Date = new Date(),
 ): string[] {
   const e: string[] = [];
   if (!r.tomaMuestra) e.push(`${prefijo}indique quién tomó la muestra (toma de muestra).`);
@@ -149,9 +151,25 @@ export function erroresRecepcion(
   if (t !== null && (t < TEMP_RECEPCION_MIN || t > TEMP_RECEPCION_MAX))
     e.push(`${prefijo}la temperatura de recepción debe estar entre ${TEMP_RECEPCION_MIN} y ${TEMP_RECEPCION_MAX} °C.`);
   if (r.fechaTomaInvalida) e.push(`${prefijo}la fecha y hora de toma de muestra no es válida.`);
-  else if (r.fechaTomaMuestra && r.fechaTomaMuestra.getTime() > recepcionAt.getTime() + 60_000)
-    e.push(`${prefijo}la toma de muestra no puede ser posterior a la recepción.`);
+  else if (r.fechaTomaMuestra && tomaPosteriorARecepcion(r.fechaTomaMuestra, recepcionAt, ahora)) e.push(`${prefijo}${MENSAJE_TOMA_POSTERIOR}.`);
   return e;
+}
+
+/**
+ * Mismo criterio y mensaje en el formulario (FormRecepcion.tsx) y en el
+ * servidor, al registrar y al corregir: la toma no puede ser posterior a la
+ * recepción de la muestra ni futura.
+ */
+export const MENSAJE_TOMA_POSTERIOR = "la toma de muestra no puede ser posterior a la recepción ni futura";
+
+/**
+ * ¿La toma es posterior a la recepción o al momento actual? Al registrar, la
+ * recepción es «ahora»; al corregir, la hora en que se recibió. Se tolera un
+ * minuto (el formulario trabaja con minutos, sin segundos).
+ */
+export function tomaPosteriorARecepcion(toma: Date, recepcionAt: Date, ahora: Date = new Date()): boolean {
+  const limite = Math.min(recepcionAt.getTime(), ahora.getTime());
+  return toma.getTime() > limite + 60_000;
 }
 
 /** ¿Falta algo de la recepción? (para avisar en la lista de muestras) */

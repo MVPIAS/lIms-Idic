@@ -66,8 +66,25 @@ export function numeroTemperatura(s: string): number | null {
   return t ? Number(t) : null;
 }
 
-/** Lo que falta antes de enviar (el servidor vuelve a comprobarlo). */
-export function faltantesRecepcion(d: DatosRecepcion, cfg?: ConfigRecepcion | null): string[] {
+/**
+ * Límite de la toma de muestra («aaaa-mm-ddTHH:MM», hora de Chile): la recepción
+ * de la muestra (al corregir) o ahora (al registrar), lo que sea antes. Mismo
+ * criterio que el servidor (api/src/flujo-real/recepcion-muestra.ts).
+ */
+export function limiteTomaMuestra(recepcionAt?: string | null): string {
+  const ahora = ahoraInputChile();
+  if (!recepcionAt) return ahora;
+  const t = new Date(recepcionAt);
+  if (Number.isNaN(t.getTime())) return ahora;
+  const recibida = ahoraInputChile(t);
+  return recibida < ahora ? recibida : ahora;
+}
+
+/**
+ * Lo que falta antes de enviar (el servidor vuelve a comprobarlo).
+ * @param recepcionAt cuándo se recibió la muestra (al corregir una recepción)
+ */
+export function faltantesRecepcion(d: DatosRecepcion, cfg?: ConfigRecepcion | null, recepcionAt?: string | null): string[] {
   const f: string[] = [];
   if (!d.tomaMuestra) f.push("indique quién tomó la muestra");
   if (!d.condicionRecepcion) f.push("indique la condición de recepción");
@@ -76,7 +93,7 @@ export function faltantesRecepcion(d: DatosRecepcion, cfg?: ConfigRecepcion | nu
   if (d.sellosVerificados && !d.selloNumero.trim()) f.push("indique el Nº de los sellos que verificó");
   const temp = numeroTemperatura(d.temperaturaRecepcion);
   if (temp !== null && (!Number.isFinite(temp) || temp < -40 || temp > 60)) f.push("la temperatura de recepción debe ser un número entre -40 y 60 °C");
-  if (d.fechaTomaMuestra && d.fechaTomaMuestra > ahoraInputChile()) f.push("la toma de muestra no puede ser posterior a ahora");
+  if (d.fechaTomaMuestra && d.fechaTomaMuestra > limiteTomaMuestra(recepcionAt)) f.push("la toma de muestra no puede ser posterior a la recepción ni futura");
   f.push(...faltantesLaboratorio(cfg, d));
   return f;
 }
@@ -167,6 +184,7 @@ export default function FormRecepcion({
   porMuestra = true,
   config,
   clienteOt,
+  recepcionAt,
 }: {
   valor: DatosRecepcion;
   onCambio: (d: DatosRecepcion) => void;
@@ -179,6 +197,8 @@ export default function FormRecepcion({
   config?: ConfigRecepcion | null;
   /** Cliente de la OT (opción por defecto del cliente de la muestra). */
   clienteOt?: { id: string | null; nombre: string | null } | null;
+  /** Cuándo se recibió la muestra (al corregir): la toma no puede ser posterior. */
+  recepcionAt?: string | null;
 }) {
   const id = useId();
   const [labs, setLabs] = useState<Unidad[]>([]);
@@ -296,9 +316,9 @@ export default function FormRecepcion({
       </div>
       <div className="field">
         <label htmlFor={`${id}-ftoma`}>Fecha y hora de toma de muestra</label>
-        <input id={`${id}-ftoma`} type="datetime-local" value={valor.fechaTomaMuestra} max={ahoraInputChile()}
+        <input id={`${id}-ftoma`} type="datetime-local" value={valor.fechaTomaMuestra} max={limiteTomaMuestra(recepcionAt)}
           onChange={(e) => set({ fechaTomaMuestra: e.target.value })} />
-        <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Hora de Chile; no posterior a la recepción.</span>
+        <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Hora de Chile; no posterior a la recepción ni futura.</span>
       </div>
       <div className="field">
         <label htmlFor={`${id}-form`}>Nº de formulario de muestreo</label>
