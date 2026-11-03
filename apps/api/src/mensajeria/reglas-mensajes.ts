@@ -5,6 +5,7 @@
  */
 import { nombreSeguro, tipoArchivo } from "../documentos/gestor";
 import { sqlDia } from "../common/fecha-chile";
+import { decodeEntities } from "../plantilla-render/html.util";
 
 export const PRIORIDADES = ["normal", "alta", "urgente"] as const;
 export type Prioridad = (typeof PRIORIDADES)[number];
@@ -136,7 +137,7 @@ export function condicionesBusqueda(f: FiltroBusqueda, col: ColumnasBusqueda, de
 
 /** Resumen del cuerpo para listas: texto plano, acotado. */
 export function resumenTexto(html: string, max = 200): string {
-  return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+  return decodeEntities(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, max);
 }
 
 /** Cuerpo HTML seguro de un mensaje escrito como texto (párrafos y saltos de línea). */

@@ -176,6 +176,16 @@ function BuscadorCodigo({
   );
 }
 
+/** Los correos registrados antes de decodificar el resumen traen entidades HTML («&middot;» de la firma): a texto. */
+function sinEntidades(t: string): string {
+  if (!t.includes("&")) return t;
+  try {
+    return new DOMParser().parseFromString(t, "text/html").documentElement.textContent ?? t;
+  } catch {
+    return t;
+  }
+}
+
 export default function MensajeriaPage() {
   return (
     <RequierePermiso perm={["correo.enviar", "cotizacion.ver"]} titulo="Mensajería · correo">
@@ -553,7 +563,7 @@ function Mensajeria() {
             {fechaHora(abierto.created_at)} · de {abierto.enviado_por_nombre ?? "—"} · a {abierto.destinatarios} · {estadoPill(abierto)}
           </p>
           {abierto.error && <div className="alert warn">{abierto.error}</div>}
-          <p style={{ whiteSpace: "pre-wrap" }}>{abierto.cuerpo_resumen ?? ""}</p>
+          <p style={{ whiteSpace: "pre-wrap" }}>{sinEntidades(abierto.cuerpo_resumen ?? "")}</p>
           {(abierto.adjuntos ?? []).length > 0 && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {(abierto.adjuntos ?? []).map((a, i) =>
