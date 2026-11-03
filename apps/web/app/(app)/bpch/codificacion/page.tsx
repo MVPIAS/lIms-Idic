@@ -287,6 +287,10 @@ function Ficha({ inicial, gestiona, onCerrar, onGuardado }: { inicial: any | nul
 }
 
 const CAMPO: Record<string, string> = {
+  listado: "listado",
+  cnc: "código CNC-DGMN",
+  producto: "producto",
+  fabricante: "fabricante",
   grupoListado: "grupo del listado",
   eqDin60: "EQ.DIN 60 %",
   ptnPin: "PTN/PIN",
@@ -296,6 +300,13 @@ const CAMPO: Record<string, string> = {
   catElementoId: "elemento del catálogo",
 };
 
+/** Valor de un campo en el historial: listado con su nombre, vacío como «—». */
+function valorHistorial(campo: string, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "—";
+  if (campo === "listado") return TIPO_LISTADO[String(v)] ?? String(v);
+  return String(v);
+}
+
 function resumen(h: any): string {
   const x = h.detalle ?? {};
   switch (h.evento) {
@@ -303,7 +314,15 @@ function resumen(h: any): string {
     case "reactivacion":
       return x.motivo ?? "";
     case "edicion":
-      return [Object.keys(x.cambios ?? {}).map((k) => CAMPO[k] ?? k).join(", "), x.motivo].filter(Boolean).join(" · ");
+      // Cada campo corregido con su valor anterior y el nuevo («antes → ahora»).
+      return [
+        Object.entries(x.cambios ?? {})
+          .map(([k, c]: [string, any]) => `${CAMPO[k] ?? k}: ${valorHistorial(k, c?.antes)} → ${valorHistorial(k, c?.ahora)}`)
+          .join("; "),
+        x.motivo,
+      ]
+        .filter(Boolean)
+        .join(" · ");
     case "cambio_titular":
       return `${x.anterior?.nombre ?? ""} → ${x.nuevo?.nombre ?? ""} · ${x.motivo ?? ""}`;
     case "reinspeccion":
