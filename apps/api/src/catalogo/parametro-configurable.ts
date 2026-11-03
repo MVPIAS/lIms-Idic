@@ -531,6 +531,24 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       documento_listo: { tipo: "sino", nombre: "Avisar a Comercial cuando un documento queda oficial", opciones: SI_NO, porDefecto: "si" },
     },
   },
+  // --- Sesión (contrato §4.7.6) ---
+  {
+    categoria: "sesion",
+    titulo: "Sesión de los usuarios",
+    donde:
+      "Todas las pantallas: tras estos minutos sin actividad (ratón, teclado, toque) la sesión se cierra sola; un minuto antes aparece el aviso «Seguir conectado». Rige desde la próxima pantalla que abra cada usuario.",
+    codigos: {
+      inactividad_minutos: {
+        tipo: "entero",
+        nombre: "Minutos sin actividad hasta cerrar la sesión",
+        min: 2,
+        max: 480,
+        unidad: "minutos",
+        ayuda: "Contrato §4.7.6: desconexión por inactividad. Por defecto 20 minutos.",
+        porDefecto: "20",
+      },
+    },
+  },
   {
     categoria: "oficio_conductor",
     titulo: "Oficio conductor exigido para entregar",

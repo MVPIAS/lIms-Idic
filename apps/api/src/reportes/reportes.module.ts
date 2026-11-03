@@ -28,7 +28,8 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { condicionAlcance } from "./alcance-reportes";
 import { ReportesGestionController } from "./reportes-gestion.controller";
-import { diaChile, esFechaCalendario, fechaHoraChile, hoyChile, partesChile } from "../common/fecha-chile";
+import { diaChile, esFechaCalendario, fechaHoraChile, hoyChile, partesChile, SQL_HOY, SQL_ZONA } from "../common/fecha-chile";
+import { completarSerie, mesesEntre, porcentaje, tendencia } from "./tendencias";
 import { libroXlsx, type Celda, type Hoja } from "../common/xlsx-escritura";
 import { AGREGADOS, GRAFICOS, tablaDinamica, type Agregado, type DefResumen, type TipoGrafico } from "./tabla-dinamica";
 
@@ -495,6 +496,133 @@ export class ReportesController extends ReportesBase {
   private tasa(num: number, den: number): number | null {
     if (!den) return null;
     return Math.round((num / den) * 1000) / 10;
+  }
+
+  // --- §4.5.7 · Tendencias (histórico por mes y laboratorio) + tiempo real ---
+  /**
+   * Series mensuales (hora de Chile) por laboratorio de: OT ingresadas, muestras
+   * registradas, % No cumple de los resultados evaluados y días de respuesta de
+   * las OT cerradas; cada serie con media móvil de 3 meses, pendiente de la recta,
+   * sentido (sube / baja / estable) y aviso si el último mes es atípico. Además,
+   * la foto «ahora» (OT abiertas, vencidas, resultados por revisar). Respeta el
+   * alcance por laboratorio. Por defecto, los últimos 12 meses.
+   */
+  @Get("tendencias")
+  @RequierePermiso("reporte.ver")
+  async tendencias(@Query("desde") desde?: string, @Query("hasta") hasta?: string, @Req() req?: any) {
+    const tenantId = this.tenantId(req);
+    const unidades = await this.unidades(req);
+    const h = hasta && /^\d{4}-\d{2}-\d{2}$/.test(hasta) ? hasta : hoyChile();
+    let d = desde && /^\d{4}-\d{2}-\d{2}$/.test(desde) ? desde : null;
+    if (!d) {
+      const y = Number(h.slice(0, 4));
+      const m = Number(h.slice(5, 7));
+      d = m === 12 ? `${y}-01-01` : `${y - 1}-${String(m + 1).padStart(2, "0")}-01`;
+    }
+    if (d > h) throw new BadRequestException("La fecha «desde» es posterior a «hasta».");
+    const meses = mesesEntre(d, h);
+    if (meses.length > 60) throw new BadRequestException("El periodo de tendencias es de 60 meses como máximo.");
+    const mes = (col: string) => `to_char(${col} AT TIME ZONE ${SQL_ZONA}, 'YYYY-MM')`;
+    const rango = (col: string, args: any[]) => {
+      args.push(d, h);
+      return ` AND (${col} AT TIME ZONE ${SQL_ZONA})::date BETWEEN $${args.length - 1}::date AND $${args.length}::date`;
+    };
+
+    const aOt: any[] = [tenantId];
+    const fOt = rango("o.created_at", aOt) + condicionAlcance("orden_trabajo", "o", unidades, aOt);
+    const ots = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT ${mes("o.created_at")} AS mes, o.unidad_principal AS unidad, COUNT(*)::int AS n
+         FROM orden_trabajo o WHERE o.tenant_id = $1::uuid AND o.estado <> 'anulada' ${fOt} GROUP BY 1, 2`,
+      ...aOt,
+    );
+    const aMu: any[] = [tenantId];
+    const fMu = rango("m.created_at", aMu) + condicionAlcance("muestra", "m", unidades, aMu);
+    const mus = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT ${mes("m.created_at")} AS mes, (SELECT o.unidad_principal FROM orden_trabajo o WHERE o.id = m.ot_id) AS unidad, COUNT(*)::int AS n
+         FROM muestra m WHERE m.tenant_id = $1::uuid AND m.deleted_at IS NULL ${fMu} GROUP BY 1, 2`,
+      ...aMu,
+    );
+    const aRe: any[] = [tenantId];
+    const fRe = rango("r.fecha", aRe) + condicionAlcance("resultado", "r", unidades, aRe);
+    const res = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT ${mes("r.fecha")} AS mes,
+              (SELECT o.unidad_principal FROM orden_trabajo o WHERE o.id = COALESCE(r.ot_id, (SELECT m.ot_id FROM muestra m WHERE m.id = r.muestra_id))) AS unidad,
+              COUNT(*) FILTER (WHERE r.veredicto IN ('cumple', 'no_cumple'))::int AS evaluados,
+              COUNT(*) FILTER (WHERE r.veredicto = 'no_cumple')::int AS no_cumple
+         FROM resultado r WHERE r.tenant_id = $1::uuid AND r.deleted_at IS NULL AND r.fecha IS NOT NULL ${fRe} GROUP BY 1, 2`,
+      ...aRe,
+    );
+    const aCi: any[] = [tenantId];
+    const fCi = rango("o.fecha_cierre", aCi) + condicionAlcance("orden_trabajo", "o", unidades, aCi);
+    const cie = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT ${mes("o.fecha_cierre")} AS mes, o.unidad_principal AS unidad, COUNT(*)::int AS n,
+              SUM(EXTRACT(EPOCH FROM (o.fecha_cierre - COALESCE(o.fecha_recepcion, o.created_at))) / 86400.0)::float8 AS dias
+         FROM orden_trabajo o WHERE o.tenant_id = $1::uuid AND o.fecha_cierre IS NOT NULL ${fCi} GROUP BY 1, 2`,
+      ...aCi,
+    );
+
+    const ids = [...new Set([...ots, ...mus, ...res, ...cie].map((x) => x.unidad).filter(Boolean))] as string[];
+    const labs = ids.length
+      ? await this.prisma.$queryRawUnsafe<{ id: string; codigo: string; nombre: string }[]>(
+          `SELECT id, codigo, nombre FROM unidad WHERE id = ANY($1::uuid[]) ORDER BY codigo`,
+          ids,
+        )
+      : [];
+    const serieDe = (unidad: string | null) => {
+      const de = (xs: any[]) => (unidad ? xs.filter((x) => x.unidad === unidad) : xs);
+      const sumaPorMes = (xs: any[], campo: string) => {
+        const m = new Map<string, number>();
+        for (const x of xs) m.set(x.mes, (m.get(x.mes) ?? 0) + Number(x[campo] ?? 0));
+        return m;
+      };
+      const filas = (m: Map<string, number>) => [...m].map(([k, v]) => ({ mes: k, valor: v }));
+      const ev = sumaPorMes(de(res), "evaluados");
+      const nc = sumaPorMes(de(res), "no_cumple");
+      const cn = sumaPorMes(de(cie), "n");
+      const cd = sumaPorMes(de(cie), "dias");
+      const serie = (valores: (number | null)[]) => ({ valores, ...tendencia(valores) });
+      return {
+        ot: serie(completarSerie(meses, filas(sumaPorMes(de(ots), "n")), 0)),
+        muestras: serie(completarSerie(meses, filas(sumaPorMes(de(mus), "n")), 0)),
+        pctNoCumple: serie(meses.map((x) => porcentaje(nc.get(x) ?? 0, ev.get(x) ?? 0))),
+        evaluados: completarSerie(meses, filas(ev), 0),
+        diasRespuesta: serie(meses.map((x) => (cn.get(x) ? Math.round(((cd.get(x) ?? 0) / cn.get(x)!) * 10) / 10 : null))),
+        cerradas: completarSerie(meses, filas(cn), 0),
+      };
+    };
+
+    // Foto «ahora» (tiempo real).
+    const aAh: any[] = [tenantId];
+    const fAh = condicionAlcance("orden_trabajo", "o", unidades, aAh);
+    const [ahora] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT COUNT(*) FILTER (WHERE o.estado NOT IN ('cerrada', 'anulada'))::int AS ot_abiertas,
+              COUNT(*) FILTER (WHERE o.estado NOT IN ('cerrada', 'anulada') AND o.fecha_compromiso < ${SQL_HOY})::int AS ot_vencidas,
+              COUNT(*) FILTER (WHERE (o.created_at AT TIME ZONE ${SQL_ZONA})::date = ${SQL_HOY})::int AS ot_hoy
+         FROM orden_trabajo o WHERE o.tenant_id = $1::uuid ${fAh}`,
+      ...aAh,
+    );
+    const aAr: any[] = [tenantId];
+    const fAr = condicionAlcance("resultado", "r", unidades, aAr);
+    const [pend] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT COUNT(*) FILTER (WHERE r.estado = 'capturado')::int AS por_revisar
+         FROM resultado r JOIN orden_trabajo o ON o.id = r.ot_id
+        WHERE r.tenant_id = $1::uuid AND r.deleted_at IS NULL AND o.estado NOT IN ('cerrada', 'anulada') ${fAr}`,
+      ...aAr,
+    );
+
+    return {
+      rango: { desde: d, hasta: h },
+      meses,
+      generado: fechaHoraChile(new Date()),
+      ahora: {
+        otAbiertas: Number(ahora?.ot_abiertas ?? 0),
+        otVencidas: Number(ahora?.ot_vencidas ?? 0),
+        otIngresadasHoy: Number(ahora?.ot_hoy ?? 0),
+        resultadosPorRevisar: Number(pend?.por_revisar ?? 0),
+      },
+      total: serieDe(null),
+      laboratorios: labs.map((l) => ({ id: l.id, codigo: l.codigo, nombre: l.nombre, ...serieDe(l.id) })),
+    };
   }
 
   // --- §4.5.3 · Plazos (ingreso -> cierre) --------------------------------
