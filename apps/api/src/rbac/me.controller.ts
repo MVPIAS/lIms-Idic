@@ -95,6 +95,9 @@ export class MeController {
         return { rol: j.rol, unidad: n ? { id: n.id, codigo: n.codigo, nombre: n.nombre, tipo: n.tipo } : null };
       }),
       permisos: req.user?.permisos ?? [],
+      // Recorrido 30 (fallo 49): ¿mantiene las tablas comunes del catálogo (centros de
+      // costo, listas…)? Solo con catalogo.gestionar de alcance global (alcance-catalogo.guard.ts).
+      catalogoComun: permisosJwt.includes("catalogo.gestionar") && (await this.alcance.alcancePermisos(req, ["catalogo.gestionar"])).esGlobal,
     };
   }
 
