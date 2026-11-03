@@ -16,7 +16,17 @@ const auth = () => ({
   "Content-Type": "application/json",
 });
 
-const TIPOS = ["pistola", "revolver", "fusil", "subfusil", "escopeta", "hechiza", "otro"];
+// Tipo de arma: el valor guardado y su nombre en pantalla (mismos nombres que la Delegación Nº 11).
+const TIPOS: { key: string; label: string }[] = [
+  { key: "pistola", label: "Pistola" },
+  { key: "revolver", label: "Revólver" },
+  { key: "fusil", label: "Fusil" },
+  { key: "subfusil", label: "Subfusil" },
+  { key: "escopeta", label: "Escopeta" },
+  { key: "hechiza", label: "Hechiza" },
+  { key: "otro", label: "Otro" },
+];
+const TIPO_LABEL: Record<string, string> = Object.fromEntries(TIPOS.map((t) => [t.key, t.label]));
 
 // Estado registral ante la DGMN.
 const REGISTRAL: { key: string; label: string; pill: string }[] = [
@@ -30,7 +40,14 @@ const REGISTRAL: { key: string; label: string; pill: string }[] = [
 ];
 const REG_META = Object.fromEntries(REGISTRAL.map((r) => [r.key, r]));
 
-const ESTADOS = ["en_custodia", "en_analisis", "prestada", "devuelta", "destruida"];
+// Estado operativo del arma en el SAEC: valor guardado y nombre en pantalla.
+const ESTADOS: { key: string; label: string }[] = [
+  { key: "en_custodia", label: "En custodia" },
+  { key: "en_analisis", label: "En análisis" },
+  { key: "prestada", label: "Prestada" },
+  { key: "devuelta", label: "Devuelta" },
+  { key: "destruida", label: "Destruida" },
+];
 
 const FORM_VACIO = {
   serie: "",
@@ -200,7 +217,7 @@ export default function SaecArmasPage() {
           ? <span className="pill amber">serie limada</span>
           : <span className="codigo">{r.serie ?? "—"}</span>,
     },
-    { key: "tipo", label: "Tipo", value: (r) => r.tipo ?? "" },
+    { key: "tipo", label: "Tipo", value: (r) => TIPO_LABEL[r.tipo] ?? r.tipo ?? "" },
     {
       key: "marca_modelo",
       label: "Marca / modelo",
@@ -318,7 +335,7 @@ export default function SaecArmasPage() {
             <div className="field">
               <label>Tipo <span className="req">*</span></label>
               <select required value={f.tipo} onChange={(e) => setF({ ...f, tipo: e.target.value })}>
-                {TIPOS.map((t) => <option key={t} value={t}>{t}</option>)}
+                {TIPOS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
               </select>
             </div>
             <div className="field"><label>Marca</label><input value={f.marca} onChange={(e) => setF({ ...f, marca: e.target.value })} /></div>
@@ -337,7 +354,7 @@ export default function SaecArmasPage() {
             <div className="field">
               <label>Estado operativo</label>
               <select value={f.estado} onChange={(e) => setF({ ...f, estado: e.target.value })}>
-                {ESTADOS.map((e) => <option key={e} value={e}>{e}</option>)}
+                {ESTADOS.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}
               </select>
             </div>
             <div className="field">
