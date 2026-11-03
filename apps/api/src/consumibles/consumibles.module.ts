@@ -23,6 +23,8 @@ import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { diaChile } from "../common/fecha-chile";
+import { hoyCl } from "../ot/plazos";
+import { descontarFifo } from "./consumo-automatico";
 import { ConversionError, aUnidadConsumo } from "./conversion";
 
 // ---------------------------------------------------------------------------
@@ -36,6 +38,9 @@ import { ConversionError, aUnidadConsumo } from "./conversion";
 //       entrada  (compra / recepción)  -> suma stock
 //       consumo  (por ensayo/muestra/método) -> resta stock (409 si insuficiente)
 //       ajuste   (corrección de inventario, con signo) -> suma/resta stock
+//   · Consumos pendientes: lo que una captura no pudo descontar por falta de
+//     stock (regla «avisar», consumo-automatico.ts) queda en
+//     `consumo_pendiente` y se regulariza aquí (descontar o descartar con motivo).
 //
 // Las tablas (`consumible`, `lote_consumible`, `movimiento_consumible`) las
 // crea/alinea `packages/db/align_consumibles.sql` y —igual que equipos.module.ts
@@ -640,6 +645,96 @@ export class ConsumiblesService {
     });
   }
 
+  /* --- consumos pendientes (captura sin stock con la regla «avisar») ------- */
+
+  async listarPendientes(tenantId: string, todos: boolean) {
+    const data = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT p.id, p.consumible_id, c.codigo AS consumible_codigo, c.nombre AS consumible_nombre, c.unidad_medida,
+              p.cantidad::float AS cantidad, p.referencia, p.estado, p.created_at, p.resuelto_en, p.motivo_resolucion,
+              mu.codigo AS muestra_codigo, me.codigo AS metodo_codigo, me.nombre AS metodo_nombre,
+              uc.nombre_completo AS creado_por_nombre, ur.nombre_completo AS resuelto_por_nombre,
+              (SELECT COALESCE(SUM(l.cantidad_actual), 0)::float FROM lote_consumible l
+                WHERE l.consumible_id = p.consumible_id AND l.tenant_id = p.tenant_id AND l.cantidad_actual > 0
+                  AND (l.fecha_vencimiento IS NULL OR l.fecha_vencimiento >= $3::date)) AS disponible
+         FROM consumo_pendiente p
+         JOIN consumible c ON c.id = p.consumible_id
+         LEFT JOIN muestra mu ON mu.id = p.muestra_id
+         LEFT JOIN cat_metodo me ON me.id = p.cat_metodo_id
+         LEFT JOIN usuario uc ON uc.id = p.creado_por
+         LEFT JOIN usuario ur ON ur.id = p.resuelto_por
+        WHERE p.tenant_id = $1::uuid AND ($2::boolean OR p.estado = 'pendiente')
+        ORDER BY (p.estado = 'pendiente') DESC, p.created_at DESC
+        LIMIT 500`,
+      tenantId,
+      todos,
+      hoyCl(),
+    );
+    return { data, meta: { total: data.length, pendientes: data.filter((x) => x.estado === "pendiente").length } };
+  }
+
+  private async pendiente(id: string, tenantId: string) {
+    const [p] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT p.*, p.cantidad::float AS cantidad_num, c.codigo, c.nombre FROM consumo_pendiente p JOIN consumible c ON c.id = p.consumible_id
+        WHERE p.id = $1::uuid AND p.tenant_id = $2::uuid`,
+      id,
+      tenantId,
+    );
+    if (!p) throw new NotFoundException("Consumo pendiente no encontrado");
+    if (p.estado !== "pendiente") throw new ConflictException("Este consumo ya fue regularizado.");
+    return p;
+  }
+
+  /** Descuenta ahora el consumo pendiente (FIFO de caducidad, lotes vigentes). */
+  async descontarPendiente(id: string, tenantId: string, usuarioId: string | null) {
+    const p = await this.pendiente(id, tenantId);
+    // Se marca primero (condicional) para que dos clics no descuenten dos veces.
+    const marcadas = await this.prisma.$executeRawUnsafe(
+      `UPDATE consumo_pendiente SET estado = 'descontado', resuelto_por = $2::uuid, resuelto_en = now() WHERE id = $1::uuid AND estado = 'pendiente'`,
+      id,
+      usuarioId,
+    );
+    if (!marcadas) throw new ConflictException("Este consumo ya fue regularizado.");
+    const r = await descontarFifo(this.prisma as any, {
+      tenantId,
+      consumibleId: p.consumible_id,
+      cantidad: Number(p.cantidad_num),
+      muestraId: p.muestra_id,
+      catMetodoId: p.cat_metodo_id,
+      resultadoId: p.resultado_id,
+      automatico: false,
+      motivo: `Regularización de consumo pendiente · ${p.referencia ?? ""}`,
+      usuarioId,
+    }).catch(async (e) => {
+      await this.prisma.$executeRawUnsafe(`UPDATE consumo_pendiente SET estado = 'pendiente', resuelto_por = NULL, resuelto_en = NULL WHERE id = $1::uuid`, id);
+      throw e;
+    });
+    if ("disponible" in r) {
+      await this.prisma.$executeRawUnsafe(`UPDATE consumo_pendiente SET estado = 'pendiente', resuelto_por = NULL, resuelto_en = NULL WHERE id = $1::uuid`, id);
+      throw new ConflictException({
+        statusCode: 409,
+        error: "Stock insuficiente",
+        message: `Aún no hay stock vigente de ${p.codigo} · ${p.nombre}: se necesitan ${p.cantidad_num} y hay ${r.disponible}. Registre la entrada del lote y vuelva a intentarlo.`,
+      });
+    }
+    await this.prisma.$executeRawUnsafe(`UPDATE consumo_pendiente SET lotes = $2 WHERE id = $1::uuid`, id, r.lotes.join(", "));
+    return { ok: true, lotes: r.lotes };
+  }
+
+  /** Descarta el pendiente (p. ej. el consumible no se usó): exige motivo y no toca el stock. */
+  async descartarPendiente(id: string, tenantId: string, usuarioId: string | null, motivo: unknown) {
+    const m = typeof motivo === "string" ? motivo.trim().slice(0, 1000) : "";
+    if (m.length < 5) throw new BadRequestException("Indique el motivo para descartar el consumo pendiente.");
+    await this.pendiente(id, tenantId);
+    const n = await this.prisma.$executeRawUnsafe(
+      `UPDATE consumo_pendiente SET estado = 'descartado', resuelto_por = $2::uuid, resuelto_en = now(), motivo_resolucion = $3 WHERE id = $1::uuid AND estado = 'pendiente'`,
+      id,
+      usuarioId,
+      m,
+    );
+    if (!n) throw new ConflictException("Este consumo ya fue regularizado.");
+    return { ok: true };
+  }
+
   /**
    * KARDEX de un consumible: todos los movimientos de sus lotes en orden
    * cronológico, con saldo corrido, y el resumen de stock.
@@ -786,6 +881,21 @@ export class ConsumiblesController {
       req?.user?.sub ?? req?.user?.id ?? null,
       d,
     );
+  }
+
+  @Get("pendientes")
+  async pendientes(@Query("todos") todos: string | undefined, @Req() req: any) {
+    return this.svc.listarPendientes(this.svc.tenantId(req), todos === "1" || todos === "true");
+  }
+
+  @Post("pendientes/:pendienteId/descontar")
+  async descontarPendiente(@Param("pendienteId", ParseUUIDPipe) pendienteId: string, @Req() req: any) {
+    return this.svc.descontarPendiente(pendienteId, this.svc.tenantId(req), req?.user?.sub ?? req?.user?.id ?? null);
+  }
+
+  @Post("pendientes/:pendienteId/descartar")
+  async descartarPendiente(@Param("pendienteId", ParseUUIDPipe) pendienteId: string, @Body() body: any, @Req() req: any) {
+    return this.svc.descartarPendiente(pendienteId, this.svc.tenantId(req), req?.user?.sub ?? req?.user?.id ?? null, body?.motivo);
   }
 
   /* --- CRUD de consumibles ---------------------------------------------- */

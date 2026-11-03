@@ -742,8 +742,13 @@ export function avisarCalidad(r: any) {
   if (r?.reanalisis === "solicitado") toast.error("No cumple: se abrió un re-análisis automático. Repita la determinación y capture el nuevo valor.");
   else if (r?.advertencia) toast.info(`Cumple con advertencia: ${r.advertenciaMotivo ?? "cerca de un límite"}`);
   const c = r?.consumos;
-  if (c?.faltantes?.length)
-    toast.error(`Sin stock vigente para descontar: ${c.faltantes.map((x: any) => `${x.consumible} (necesita ${String(x.necesario).replace(".", ",")}${x.unidad ? ` ${x.unidad}` : ""})`).join("; ")}. Registre la entrada del lote en Consumibles.`);
-  else if (c?.descontados?.length)
-    toast.info(`Consumibles descontados: ${c.descontados.map((x: any) => `${x.consumible} ${String(x.cantidad).replace(".", ",")}${x.unidad ? ` ${x.unidad}` : ""}`).join("; ")}.`);
+  const cant = (n: number, u: string | null) => `${String(n).replace(".", ",")}${u ? ` ${u}` : ""}`;
+  const descontado = (c?.descontados ?? []).map((x: any) => `${x.consumible} ${cant(x.cantidad, x.unidad)}${x.lotes?.length ? ` (lote ${x.lotes.join(", ")})` : ""}`);
+  const pendiente = (c?.faltantes ?? []).map((x: any) => `${x.consumible} ${cant(x.necesario, x.unidad)} (hay ${cant(x.disponible, x.unidad)})`);
+  // Con stock incompleto se informa TODO: lo que sí se descontó y lo que quedó pendiente.
+  if (pendiente.length)
+    toast.error(
+      `${descontado.length ? `Consumibles descontados: ${descontado.join("; ")}. ` : ""}Pendiente de descontar por falta de stock vigente: ${pendiente.join("; ")}. Quedó registrado en Consumibles › Consumos pendientes; regularícelo al ingresar el lote.`,
+    );
+  else if (descontado.length) toast.info(`Consumibles descontados: ${descontado.join("; ")}.`);
 }
