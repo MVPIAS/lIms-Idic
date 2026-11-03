@@ -624,7 +624,9 @@ export default function CrudTable({
     const errs = validarFormulario(listaCampos, form);
     setErrores(errs);
     if (Object.keys(errs).length > 0) {
-      setErrorForm("Revise los campos marcados en rojo.");
+      // Se nombran los campos: un obligatorio vacío (p. ej. «Tipo de muestra») no queda mudo.
+      const nombres = listaCampos.filter((c) => errs[c.campo]).map((c) => c.label);
+      setErrorForm(`Revise los campos marcados en rojo${nombres.length ? `: ${nombres.join(", ")}` : ""}.`);
       return;
     }
     setGuardando(true);
@@ -795,7 +797,8 @@ export default function CrudTable({
       </div>
 
       {showForm && (
-        <form onSubmit={guardar} className="card" aria-label={editando ? "Editar registro" : "Nuevo registro"}>
+        // noValidate: la validación es la propia (en español y con el campo nombrado), no la del navegador.
+        <form onSubmit={guardar} noValidate className="card" aria-label={editando ? "Editar registro" : "Nuevo registro"}>
           <h2>{editando ? "Editar registro" : "Nuevo registro"}</h2>
           {errorForm && <div className="alert warn">{errorForm}</div>}
           <div className="form-grid">

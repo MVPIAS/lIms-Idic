@@ -65,8 +65,26 @@ function textoHistorial(h: any): string {
   }
   if (h.tipo === "recepcion_muestra") {
     const cond = (c?: string | null) => (c === "cumple" ? "Cumple" : c === "no_cumple" ? "No cumple" : "sin condición");
-    return `Recepción de ${d.muestra ?? "la muestra"} corregida: ${cond(d.anterior?.condicionRecepcion)} → ${cond(d.nuevo?.condicionRecepcion)}`;
+    const campos = camposRecepcionCambiados(d.anterior, d.nuevo);
+    const condicion = (d.anterior?.condicionRecepcion ?? null) !== (d.nuevo?.condicionRecepcion ?? null)
+      ? ` · condición ${cond(d.anterior?.condicionRecepcion)} → ${cond(d.nuevo?.condicionRecepcion)}`
+      : "";
+    return `Recepción de ${d.muestra ?? "la muestra"} corregida${campos.length ? `: ${campos.join(", ")}` : ""}${condicion}`;
   }
+  if (h.tipo === "numero_muestra") return `Nº interno ${d.numeroInterno ?? "—"} asignado a la muestra ${d.muestra ?? ""}`;
+  if (h.tipo === "validacion_laboratorio")
+    return `OT recepcionada en el laboratorio (alcance conforme)${d.fechaTermino ? ` · término ${fechaDia(d.fechaTermino)}` : ""}${d.fechaInforme ? ` · informe ${fechaDia(d.fechaInforme)}` : ""}${d.observacion ? ` · ${d.observacion}` : ""}`;
+  if (h.tipo === "devuelta_ventas") return `OT devuelta a Ventas por alcance no conforme${d.observacion ? ` · ${d.observacion}` : ""}`;
+  if (h.tipo === "encargo") return `Datos del encargo actualizados${(d.campos ?? []).length ? ` (${(d.campos as string[]).length} campo(s))` : ""}`;
+  if (h.tipo === "muestreo") return `Formulario de muestreo ${d.formulario ?? ""}: ${d.accion === "recibir" ? (d.conforme ? "recibido conforme" : "recibido no conforme") : d.accion ?? ""}${d.observacion ? ` · ${d.observacion}` : ""}`;
+  if (h.tipo === "pnc") return `${d.clase ?? "PNC"} ${d.codigo ?? ""} registrado${(d.ensayos ?? []).length ? ` · ${d.ensayos.length} ensayo(s) afectado(s)` : ""}`;
+  if (h.tipo === "apelacion") return `Apelación registrada · vence el ${fechaDia(d.venceEl)}${d.fueraDePlazo ? " (fuera de plazo)" : ""}`;
+  if (h.tipo === "notificacion_dgmn") return `Notificación a la DGMN del informe ${d.informe ?? ""}${d.oficio ? ` · oficio ${d.oficio}` : ""}`;
+  if (h.tipo === "especificacion_tecnica") return `Especificación técnica asignada: ${d.et ?? "—"}`;
+  if (h.tipo === "desglose_componentes") return `Desglose en componentes de ${d.muestra ?? "la muestra"} según la E.T. ${d.et ?? ""}`;
+  if (h.tipo === "bpch_internacion") return `Internación ${d.internacion ?? ""} · resolución ${d.resolucion ?? "—"}`;
+  if (h.tipo === "bpch_reinspeccion") return `Reinspección ${d.reinspeccion ?? ""} desde la OT ${d.origenOt ?? ""}`;
+  if (h.tipo === "origen_bpch") return `Origen BPCH registrado${d.ocNumero ? ` · OC ${d.ocNumero}` : ""}${d.rafNumero ? ` · RAF ${d.rafNumero}` : ""}`;
   if (h.tipo === "costos_reales")
     return d.accion === "reabrir" ? `Planilla de costos reales reabierta · motivo: ${d.motivo ?? ""}` : `Planilla de costos reales cerrada · total $${Math.round(Number(d.total ?? 0)).toLocaleString("es-CL")}`;
   // Hitos del seguimiento (frente r4c): avisos, plazo, recepción DCO, despacho, envío y carpeta.
@@ -84,7 +102,39 @@ function textoHistorial(h: any): string {
   if (h.tipo === "desasignacion") return `Se retiraron ${n} persona${n === 1 ? "" : "s"} de la OT${d.motivo ? ` (${d.motivo})` : ""}`;
   if (h.tipo === "asignacion_ensayo")
     return d.usuario ? `Asignación de ${d.actualizados ?? ""} ensayo(s) a una persona concreta` : `Se retiró la asignación concreta de ${d.actualizados ?? ""} ensayo(s)`;
-  return h.tipo;
+  // Hechos sin texto propio: su código, legible («d11_llegada» → «D11 llegada»).
+  return String(h.tipo ?? "").replace(/^d11_/, "D11 ").replace(/_/g, " ");
+}
+
+/** Campos de la recepción de una muestra con su nombre en pantalla (historial «recepción corregida»). */
+const CAMPOS_RECEPCION: Record<string, string> = {
+  tomaMuestra: "toma de muestra",
+  condicionObservacion: "observación de la condición",
+  selloNumero: "sello",
+  identificacionCliente: "identificación del cliente",
+  requiereOtrosLabs: "otros laboratorios",
+  otrosLabs: "otros laboratorios",
+  otrosLabsDetalle: "detalle para otros laboratorios",
+  catElementoId: "producto",
+  clienteId: "cliente",
+  sellosVerificados: "sellos verificados",
+  claseCustodia: "clase de custodia",
+  ubicacion: "ubicación",
+  datos: "datos del laboratorio",
+  temperaturaRecepcion: "temperatura de llegada",
+  fechaTomaMuestra: "fecha de toma",
+  formularioMuestreo: "formulario de muestreo",
+};
+
+/** Qué cambió en una corrección de recepción (sin repetir campos ni contar los sellos de quién y cuándo). */
+function camposRecepcionCambiados(anterior: any, nuevo: any): string[] {
+  if (!anterior || !nuevo) return [];
+  const igual = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  const nombres = Object.keys(CAMPOS_RECEPCION)
+    .filter((k) => k in nuevo || (k === "datos" && "datosRecepcion" in nuevo))
+    .filter((k) => !igual(anterior[k], k === "datos" ? nuevo.datosRecepcion ?? nuevo.datos : nuevo[k]))
+    .map((k) => CAMPOS_RECEPCION[k]);
+  return [...new Set(nombres)];
 }
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
