@@ -23,6 +23,14 @@ const ACCION_LABEL: Record<string, string> = {
   vencer: "Vencimiento automático",
 };
 const ACCION_PILL: Record<string, string> = { crear: "green", modificar: "blue", eliminar: "red", vencer: "amber" };
+/** Texto de la acción: el que manda la API (etiqueta-accion.ts) o, si falta, el del mapa. */
+const textoAccion = (a: any) => a.accionEtiqueta ?? ACCION_LABEL[a.accion] ?? a.accion;
+/** «PUT /api/ot/:id»: la ruta guardada ya empieza por el verbo (no se repite). */
+const textoRuta = (m: any) => {
+  const ruta = String(m?.ruta ?? "");
+  if (!ruta) return "—";
+  return m?.metodo && !ruta.startsWith(`${m.metodo} `) ? `${m.metodo} ${ruta}` : ruta;
+};
 
 const hace = (dias: number) => sumarDiasCalendario(hoyChile(), -dias);
 
@@ -44,7 +52,8 @@ function Auditoria() {
   const [page, setPage] = useState(1);
   const [filas, setFilas] = useState<any[]>([]);
   const [meta, setMeta] = useState<{ total: number; totalPages: number; acotada?: boolean } | null>(null);
-  const [opciones, setOpciones] = useState<{ recursos: string[]; acciones: string[] }>({ recursos: [], acciones: [] });
+  // `acciones`: familias del filtro (Creación, Modificación, Paso del flujo…) con su texto.
+  const [opciones, setOpciones] = useState<{ recursos: string[]; acciones: { valor: string; etiqueta: string }[] }>({ recursos: [], acciones: [] });
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [abierta, setAbierta] = useState<any | null>(null);
   const [error, setError] = useState("");
@@ -134,7 +143,7 @@ function Auditoria() {
             <label htmlFor="aud-accion">Acción</label>
             <select id="aud-accion" value={accion} onChange={(e) => setAccion(e.target.value)}>
               <option value="">Todas</option>
-              {opciones.acciones.map((a) => <option key={a} value={a}>{ACCION_LABEL[a] ?? a}</option>)}
+              {opciones.acciones.map((a) => <option key={a.valor} value={a.valor}>{a.etiqueta}</option>)}
             </select>
           </div>
           <div className="field">
@@ -169,7 +178,7 @@ function Auditoria() {
               <tr key={`${a.id}-${a.ocurridoAt}`}>
                 <td style={{ whiteSpace: "nowrap" }}>{fechaHora(a.ocurridoAt)}</td>
                 <td>{a.username ?? <span style={{ color: "var(--muted)" }}>sistema</span>}</td>
-                <td><span className={`pill ${ACCION_PILL[a.accion] ?? "gray"}`}>{ACCION_LABEL[a.accion] ?? a.accion}</span></td>
+                <td><span className={`pill ${ACCION_PILL[a.accion] ?? "gray"}`}>{textoAccion(a)}</span></td>
                 <td>{a.entidadTipo}</td>
                 <td>{a.entidadCodigo ? <span className="codigo">{a.entidadCodigo}</span> : "—"}</td>
                 <td style={{ fontSize: 11.5, color: "var(--muted)" }}>{a.ip ?? "—"}</td>
@@ -199,19 +208,48 @@ function Auditoria() {
             <button className="btn outline sm" onClick={() => setAbierta(null)}>Cerrar</button>
           </div>
           <p style={{ fontSize: 12.5, margin: "0 0 8px" }}>
-            {fechaHora(abierta.ocurridoAt)} · {abierta.username ?? "sistema"} · {ACCION_LABEL[abierta.accion] ?? abierta.accion} en <b>{abierta.entidadTipo}</b>
+            {fechaHora(abierta.ocurridoAt)} · {abierta.username ?? "sistema"} · {textoAccion(abierta)} en <b>{abierta.entidadTipo}</b>
             {abierta.entidadCodigo ? <> · <span className="codigo">{abierta.entidadCodigo}</span></> : null}
             {abierta.motivo ? <> · Motivo: {abierta.motivo}</> : null}
           </p>
           <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 0 8px" }}>
-            Ruta: {abierta.metadata?.metodo} {abierta.metadata?.ruta ?? "—"} · Navegador: {abierta.userAgent ?? "—"}
+            Ruta: {textoRuta(abierta.metadata)} · Navegador: {abierta.userAgent ?? "—"}
           </p>
-          <pre style={{ fontSize: 11.5, background: "var(--bg, #f6f8fa)", padding: 10, borderRadius: 6, overflow: "auto", maxHeight: 320 }}>
-            {JSON.stringify(abierta.diff ?? {}, null, 2)}
-          </pre>
+          <DatosRegistrados diff={abierta.diff} />
           <p style={{ fontSize: 11, color: "var(--muted)", margin: 0 }}>Las contraseñas y tokens nunca se guardan en la bitácora (aparecen como [REDACTADO]).</p>
         </div>
       )}
     </div>
+  );
+}
+
+/** Datos del cambio como «campo: valor»; el JSON completo queda plegado debajo. */
+function DatosRegistrados({ diff }: { diff: any }) {
+  const despues = diff?.despues && typeof diff.despues === "object" ? Object.entries(diff.despues as Record<string, unknown>) : [];
+  const texto = (v: unknown) => (v == null ? "—" : typeof v === "object" ? JSON.stringify(v) : String(v));
+  return (
+    <>
+      {despues.length > 0 ? (
+        <table className="data" style={{ fontSize: 12, marginBottom: 8 }}>
+          <thead><tr><th>Dato enviado</th><th>Valor</th></tr></thead>
+          <tbody>
+            {despues.map(([k, v]) => (
+              <tr key={k}><td>{k}</td><td style={{ wordBreak: "break-word" }}>{texto(v)}</td></tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p style={{ fontSize: 12, margin: "0 0 8px" }}>
+          {diff?.eliminado ? <>Registro eliminado: <span className="codigo">{diff.eliminado}</span></> : "Sin datos enviados."}
+          {diff?.truncado ? " (cambio demasiado grande: solo se guardaron los nombres de los campos)" : null}
+        </p>
+      )}
+      <details>
+        <summary style={{ fontSize: 11.5, cursor: "pointer" }}>Ver el registro completo (técnico)</summary>
+        <pre style={{ fontSize: 11.5, background: "var(--bg, #f6f8fa)", padding: 10, borderRadius: 6, overflow: "auto", maxHeight: 320 }}>
+          {JSON.stringify(diff ?? {}, null, 2)}
+        </pre>
+      </details>
+    </>
   );
 }
