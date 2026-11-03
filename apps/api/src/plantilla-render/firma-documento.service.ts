@@ -175,6 +175,8 @@ export class FirmaDocumentoService {
       seguimiento,
       puedo: {
         ...v.puedo,
+        // Ya sustituido por una versión nueva: no se reemite otra vez (la API lo rechaza).
+        reemitir: v.puedo.reemitir && !reemplazo,
         despachar: tienePermiso(req, "certificado.despachar") && esOficial(cert.estado) && !seguimiento.despacho,
         recibirDespacho: tienePermiso(req, "certificado.entregar") && !!seguimiento.despacho && !seguimiento.despacho.recibidoAt,
         oficio: tienePermiso(req, "oficio.crear") && esOficial(cert.estado),
@@ -273,7 +275,8 @@ export class FirmaDocumentoService {
         plantillaVersion: versionesPlantilla.get(c.id) ?? null,
         numero: c.numero ?? c.codigo,
         firmasHechas: firmas.filter((x) => x.estado === "firmado").length,
-        firmasTotal: firmas.filter((x) => x.estado !== "anulado").length,
+        // Pasos del circuito, también los que quedaron anulados al devolver o anular («1 de 3», no «1 de 2»).
+        firmasTotal: firmas.length,
         pendienteDe: actuales.map((p) => ({
           accion: p.accion,
           rol: p.rolNombre,
@@ -295,7 +298,7 @@ export class FirmaDocumentoService {
               p.repid AS "plantillaRepid", p.nombre AS "plantillaNombre",
               df.id AS "pasoId", df.orden, df.accion, df.rol_nombre AS "rolNombre", df.unidad_codigo AS "unidadCodigo",
               (SELECT count(*) FROM documento_firma y WHERE y.certificado_id = c.id AND y.estado = 'firmado')::int AS "firmasHechas",
-              (SELECT count(*) FROM documento_firma y WHERE y.certificado_id = c.id AND y.estado <> 'anulado')::int AS "firmasTotal"
+              (SELECT count(*) FROM documento_firma y WHERE y.certificado_id = c.id)::int AS "firmasTotal"
          FROM documento_firma df
          JOIN certificado c ON c.id = df.certificado_id
          JOIN orden_trabajo o ON o.id = c.ot_id

@@ -45,6 +45,18 @@ export class RecepcionController {
     return this.svc.productos(otId, tenantDe(req), req, search);
   }
 
+  @Get("ot/:otId/metodos")
+  @RequierePermiso("muestra.ver")
+  @ApiOperation({ summary: "Métodos del catálogo del laboratorio de la OT (?search=; con ?otros=1 también los de otros laboratorios)" })
+  metodos(
+    @Param("otId", ParseUUIDPipe) otId: string,
+    @Query("search") search: string | undefined,
+    @Query("otros") otros: string | undefined,
+    @Req() req: any,
+  ) {
+    return this.svc.metodos(otId, tenantDe(req), req, search, otros === "1" || otros === "true");
+  }
+
   @Get("ot/:otId/productos/:elementoId/panel")
   @RequierePermiso("muestra.ver")
   @ApiOperation({ summary: "Métodos del panel del producto (para registrar sus ensayos)" })

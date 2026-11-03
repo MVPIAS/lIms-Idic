@@ -140,7 +140,8 @@ export class OtCierreService {
         numero: d.numero ?? d.codigo,
         oficial: esOficial(d.estado),
         firmasHechas: firmas.filter((x) => x.estado === "firmado").length,
-        firmasTotal: firmas.filter((x) => x.estado !== "anulado").length,
+        // Pasos del circuito, también los anulados al devolver o anular.
+        firmasTotal: firmas.length,
         pendienteDe: pendienteDe || null,
       };
     });

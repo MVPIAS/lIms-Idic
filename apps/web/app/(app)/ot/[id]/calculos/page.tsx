@@ -67,11 +67,15 @@ function valor(v: unknown): string {
   if (typeof v === "object") return Object.entries(v as Record<string, unknown>).map(([k, x]) => `${k}=${valor(x)}`).join(" ");
   return String(v);
 }
+/** Límite tal como se escribió en el catálogo, con coma decimal («20.0» → «20,0»). */
+const lim = (v: string) => (/^-?\d+(\.\d+)?$/.test(v.trim()) ? v.trim().replace(".", ",") : v);
+/** La unidad acompaña a un resultado numérico; no a lo observado en un ensayo por atributo. */
+const conUnidad = (e: Ensayo) => (e.unidad && e.resultado != null && /^-?\d+(\.\d+)?$/.test(String(e.resultado).trim()) ? ` ${e.unidad}` : "");
 const especTexto = (e: Ensayo) => {
   const p: string[] = [];
-  if (e.limiteInf) p.push(`Mín ${e.limiteInf}`);
-  if (e.nominal) p.push(`Nom ${e.nominal}`);
-  if (e.limiteSup) p.push(`Máx ${e.limiteSup}`);
+  if (e.limiteInf) p.push(`Mín ${lim(e.limiteInf)}`);
+  if (e.nominal) p.push(`Nom ${lim(e.nominal)}`);
+  if (e.limiteSup) p.push(`Máx ${lim(e.limiteSup)}`);
   return p.length ? p.join(" · ") : "sin límites";
 };
 
@@ -190,7 +194,7 @@ export default function PlanillaCalculosPage() {
                             <td>{e.factor ? (e.factor.aplicado === false
                               ? <span className="pill gray" title="El valor se ingresó directo: el factor no se aplicó">no aplicado</span>
                               : <span className={`pill ${e.factor.origen === "orden" ? "amber" : "gray"}`} title={e.factor.origen === "orden" ? "Ajustado en esta OT" : "Del método"}>{e.factor.operacion === "dividir" ? "÷" : "×"} {n(e.factor.valor)}</span>) : "—"}</td>
-                            <td className="num" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{e.resultado != null ? valor(e.resultado) : "—"}{e.unidad ? ` ${e.unidad}` : ""}</td>
+                            <td className="num" style={{ fontFamily: "'JetBrains Mono', monospace" }}>{e.resultado != null ? valor(e.resultado) : "—"}{conUnidad(e)}</td>
                             <td style={{ fontSize: 12 }}>{especTexto(e)}{e.requisito && <div style={{ color: "var(--muted)" }}>{e.requisito}</div>}</td>
                             <td><span className={`pill ${vd.pill}`}>{vd.texto}</span></td>
                             <td><span className={`pill ${est.pill}`}>{est.texto}</span></td>
@@ -291,7 +295,7 @@ function DetalleEnsayo({ e }: { e: Ensayo }) {
             </dd>
             <dt>Fórmula aplicada</dt><dd style={{ margin: 0 }}><code style={{ fontFamily: "'JetBrains Mono', monospace" }}>{e.formulaAplicada ?? "—"}</code></dd>
             {e.valorSinFactor != null && (<><dt>Valor sin factor</dt><dd style={{ margin: 0 }}>{n(e.valorSinFactor)}</dd></>)}
-            <dt>Resultado</dt><dd style={{ margin: 0 }}><b>{e.resultado != null ? valor(e.resultado) : "—"}</b>{e.unidad ? ` ${e.unidad}` : ""}</dd>
+            <dt>Resultado</dt><dd style={{ margin: 0 }}><b>{e.resultado != null ? valor(e.resultado) : "—"}</b>{conUnidad(e)}</dd>
             {e.promedio != null && (<><dt>Promedio · DE · CV</dt><dd style={{ margin: 0 }}>{n(e.promedio)} · {n(e.desviacion)} · {e.cv != null ? `${n(e.cv)} %` : "—"}</dd></>)}
           </dl>
         </section>

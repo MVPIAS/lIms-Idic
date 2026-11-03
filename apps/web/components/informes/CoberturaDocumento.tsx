@@ -58,6 +58,7 @@ export default function CoberturaDocumento({
   valor,
   onCambio,
   version,
+  onRegistrado,
 }: {
   otId: string;
   plantillaId: string;
@@ -67,6 +68,8 @@ export default function CoberturaDocumento({
   onCambio: (c: CoberturaElegida) => void;
   /** Cambia tras emitir, para recargar. */
   version: number;
+  /** Tras registrar una parte como «No emitido»: la página refresca su lista de documentos. */
+  onRegistrado?: () => void;
 }) {
   const [d, setD] = useState<DatosCobertura | null>(null);
   const [error, setError] = useState("");
@@ -112,6 +115,7 @@ export default function CoberturaDocumento({
       setNoEmitir(false);
       setMotivo("");
       cargar();
+      onRegistrado?.();
     } catch (e: any) {
       toast.error(e.message);
     } finally {

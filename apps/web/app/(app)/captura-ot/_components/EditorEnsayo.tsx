@@ -148,6 +148,18 @@ const CAMPOS: { k: "limiteInf" | "nominal" | "limiteSup" | "unidad"; l: string }
 ];
 
 const vacio = (v: any) => v == null || String(v).trim() === "";
+/** Límites numéricos: en pantalla con coma decimal; se guardan como vienen del catálogo (punto). */
+const NUM_LIMITE = /^-?\d+([.,]\d+)?$/;
+const limiteConComa = (v: string | number | null | undefined) => (v == null ? "" : NUM_LIMITE.test(String(v).trim()) ? String(v).trim().replace(".", ",") : String(v));
+const limiteConPunto = (k: string, v: string) => (["limiteInf", "nominal", "limiteSup"].includes(k) && NUM_LIMITE.test(v) ? v.replace(",", ".") : v);
+
+/**
+ * Lo escrito en «Resultado» al guardar la especificación de la orden: el editor
+ * se vuelve a montar con el ensayo actualizado y lo recupera (no se pierde el
+ * valor ni la forma de captura elegida).
+ */
+type BorradorCaptura = { modo: "lecturas" | "valor"; valor: string; lecturas: string[][]; observacion: string; atributo: "" | "cumple" | "no_cumple" };
+const borradores = new Map<string, BorradorCaptura>();
 
 export default function EditorEnsayo({
   e,
@@ -170,16 +182,21 @@ export default function EditorEnsayo({
   const cat = e.especCatalogo ?? {};
   const [esp, setEsp] = useState({
     tipoDato: e.tipoDato,
-    limiteInf: e.limiteInf ?? "",
-    nominal: e.nominal ?? "",
-    limiteSup: e.limiteSup ?? "",
+    limiteInf: limiteConComa(e.limiteInf),
+    nominal: limiteConComa(e.nominal),
+    limiteSup: limiteConComa(e.limiteSup),
     unidad: e.unidad ?? "",
     requisito: e.requisito ?? "",
     formula: e.formula ?? "",
   });
   const [guardando, setGuardando] = useState(false);
 
-  // Captura
+  // Captura (con el borrador que dejó «Guardar especificación de la orden», si lo hay)
+  const [borrador] = useState(() => {
+    const b = borradores.get(e.id) ?? null;
+    borradores.delete(e.id);
+    return b;
+  });
   const nCampos = e.nCampos;
   const pideDuplicado = (e.reglasAceptacion ?? []).some((r) => r.tipo === "duplicados");
   // Fila nueva de lecturas, con el valor por defecto de cada campo (p. ej. factor 6,25).
@@ -189,26 +206,31 @@ export default function EditorEnsayo({
       return d != null && Number.isFinite(Number(d)) ? String(Number(d)).replace(".", ",") : "";
     });
   const [lecturas, setLecturas] = useState<string[][]>(() =>
-    e.lecturas?.length
+    borrador?.lecturas.length && borrador.lecturas.every((l) => l.length === nCampos)
+      ? borrador.lecturas
+      : e.lecturas?.length
       ? e.lecturas.map((l) => Array.from({ length: nCampos }, (_, i) => String(l[`C${i + 1}`] ?? "").replace(".", ",")))
       : pideDuplicado ? [filaNueva(), filaNueva()] : [filaNueva()],
   );
   const conLecturas = nCampos > 0 && !!e.formulaAplicable;
   // Con lecturas, el analista puede igual ingresar solo el valor final (lo que ya capturaba).
   const [modoCaptura, setModoCaptura] = useState<"lecturas" | "valor">(() =>
+    borrador ? borrador.modo :
     conLecturas && !e.lecturas?.length && e.valorNumerico != null && e.valorNumerico !== "" ? "valor" : "lecturas",
   );
   const usaLecturas = conLecturas && modoCaptura === "lecturas";
   const [valor, setValor] = useState(() =>
+    borrador ? borrador.valor :
     // En un plan de clases se corrigen las unidades, no su promedio.
     e.planClases && e.replicas?.length
       ? e.replicas.map((x) => String(x).replace(".", ",")).join(" ")
       : e.valorNumerico != null && e.valorNumerico !== "" ? String(e.valorNumerico).replace(".", ",") : e.valorTexto ?? "",
   );
   const [atributo, setAtributo] = useState<"" | "cumple" | "no_cumple">(
+    borrador?.atributo ? borrador.atributo :
     e.tipoDato === "atributo" && (e.veredicto === "cumple" || e.veredicto === "no_cumple") ? e.veredicto : "",
   );
-  const [observacion, setObservacion] = useState(e.observacion ?? "");
+  const [observacion, setObservacion] = useState(borrador ? borrador.observacion : e.observacion ?? "");
   const [valorCond2, setValorCond2] = useState(e.valorCondicion2 != null && e.valorCondicion2 !== "" ? String(Number(e.valorCondicion2)).replace(".", ",") : "");
   const [clase, setClase] = useState(e.claseDefecto ?? "");
   const [motivoClase, setMotivoClase] = useState("");
@@ -238,7 +260,7 @@ export default function EditorEnsayo({
     const actual: Record<string, any> = { ...e, tipoDato: e.tipoDato };
     for (const k of ["tipoDato", "limiteInf", "nominal", "limiteSup", "unidad", "requisito", "formula"] as const) {
       const a = vacio(actual[k]) ? "" : String(actual[k]).trim();
-      const n = String((esp as any)[k] ?? "").trim();
+      const n = limiteConPunto(k, String((esp as any)[k] ?? "").trim());
       if (a !== n) out[k] = n === "" ? null : n;
     }
     return out;
@@ -259,6 +281,7 @@ export default function EditorEnsayo({
       }
       const r = await llamar("PATCH", `/flujo/resultado/${e.id}/especificacion`, { ...cambiosEsp, ...(espRequiereMotivo ? { motivo: motivoEsp.trim() } : {}) });
       toast.ok("Especificación de la orden guardada.");
+      borradores.set(e.id, { modo: modoCaptura, valor, lecturas, observacion, atributo });
       onGuardado(r);
     } catch (err: any) {
       toast.error(err.message);
@@ -286,6 +309,8 @@ export default function EditorEnsayo({
       const r = leerReplicas(t);
       const varias = r.invalidos.length === 0 && r.valores.length > 1;
       cuerpo = varias ? { replicasTexto: t } : { valor: t };
+      // «Solo el valor final» de un método con lecturas: sin fórmula ni reglas de aceptación.
+      if (conLecturas) cuerpo.valorFinal = true;
       if (observacion.trim()) cuerpo.observacion = observacion.trim();
     }
     if (e.condicion2 && e.tipoDato !== "atributo") {
@@ -350,7 +375,15 @@ export default function EditorEnsayo({
         motivo: factorMotivo.trim(),
         todoElMetodo: factorTodos,
       });
-      toast.ok(`Factor guardado${r.actualizados > 1 ? ` en ${r.actualizados} ensayos` : ""}${r.omitidos?.length ? ` (${r.omitidos.length} ya revisado(s) o aprobado(s) no se cambiaron)` : ""}.`);
+      // Lo no cambiado se informa con su motivo (revisado o aprobado, valor ingresado directo…).
+      const omitidos: { motivo: string }[] = r.omitidos ?? [];
+      const porque = [...new Set(omitidos.map((o) => o.motivo))].join(" ");
+      if (!r.actualizados && omitidos.length) toast.error(`No se cambió el factor: ${porque}`);
+      else
+        toast.ok(
+          `Factor guardado${r.actualizados > 1 ? ` en ${r.actualizados} ensayos` : ""}.` +
+            (omitidos.length ? ` ${omitidos.length} ensayo(s) no se cambiaron: ${porque}` : ""),
+        );
       onGuardado(r);
     } catch (err: any) {
       toast.error(err.message);
@@ -400,7 +433,7 @@ export default function EditorEnsayo({
           </div>
           {CAMPOS.map((c) => (
             <div key={c.k} className={`field${editable(c.k) ? "" : " readonly"}`}>
-              <label htmlFor={`es-${c.k}-${e.id}`}>{c.l}{!vacio(cat[c.k]) && String(cat[c.k]) !== String((esp as any)[c.k]) ? ` · catálogo: ${cat[c.k]}` : ""}</label>
+              <label htmlFor={`es-${c.k}-${e.id}`}>{c.l}{!vacio(cat[c.k]) && String(cat[c.k]) !== limiteConPunto(c.k, String((esp as any)[c.k]).trim()) ? ` · catálogo: ${c.k === "unidad" ? cat[c.k] : limiteConComa(cat[c.k])}` : ""}</label>
               <input id={`es-${c.k}-${e.id}`} value={(esp as any)[c.k]} readOnly={!editable(c.k)} onChange={(x) => setEsp({ ...esp, [c.k]: x.target.value })}
                 placeholder={editable(c.k) ? "vacío" : ""} />
             </div>

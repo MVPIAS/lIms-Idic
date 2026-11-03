@@ -263,7 +263,8 @@ export class QcService {
       if (!f[0]) throw new NotFoundException("Cepa no encontrada.");
       return f[0];
     } catch (e: any) {
-      if (String(e?.message ?? "").includes("ux_qc_cepa")) throw new ConflictException(`Ya existe la cepa ${d.codigo}.`);
+      // Prisma informa el 23505 con el detalle de la clave, no siempre con el nombre del índice.
+      if (/ux_qc_cepa|23505/.test(`${e?.message ?? ""} ${JSON.stringify(e?.meta ?? {})}`)) throw new ConflictException(`Ya existe la cepa ${d.codigo}.`);
       throw e;
     }
   }
@@ -354,8 +355,19 @@ export class QcService {
     });
     if (!control) throw new NotFoundException(`Control de calidad ${controlId} no encontrado`);
 
-    const bloqueo = motivoNoRevisable(body.resultado, { registradoPor: control.registradoPor ?? null }, usuario.id, usuario.puedeRevisar);
-    if (bloqueo) throw bloqueo.codigo === 403 ? new ForbiddenException(bloqueo.mensaje) : new ConflictException(bloqueo.mensaje);
+    const bloqueo = motivoNoRevisable(
+      body.resultado,
+      { registradoPor: control.registradoPor ?? null, resultado: control.resultado },
+      usuario.id,
+      usuario.puedeRevisar,
+      body.observaciones,
+    );
+    if (bloqueo)
+      throw bloqueo.codigo === 403
+        ? new ForbiddenException(bloqueo.mensaje)
+        : bloqueo.codigo === 400
+          ? new BadRequestException(bloqueo.mensaje)
+          : new ConflictException(bloqueo.mensaje);
 
     const pendiente = body.resultado === "pendiente";
     return this.prisma.qcControl.update({
@@ -365,7 +377,15 @@ export class QcService {
         aprobadoPor: pendiente ? null : usuario.nombre ?? usuario.id ?? null,
         aprobadoPorId: pendiente ? null : usuario.id ?? null,
         aprobadoAt: pendiente ? null : new Date(),
-        ...(body.observaciones !== undefined ? { observaciones: body.observaciones } : {}),
+        ...(body.observaciones !== undefined
+          ? {
+              // La justificación de aprobar un control rechazado se suma a lo ya observado.
+              observaciones:
+                body.resultado === "aprobado" && control.resultado === "rechazado"
+                  ? [control.observaciones, `Aprobado pese al rechazo: ${body.observaciones.trim()}`].filter(Boolean).join(" · ").slice(0, 2000)
+                  : body.observaciones,
+            }
+          : {}),
       },
       include: { catMetodo: { select: { id: true, codigo: true, nombre: true } } },
     });

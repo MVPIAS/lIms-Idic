@@ -21,6 +21,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import { fechaDia, fechaHora } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
+import { ESTADO_RESULTADO } from "@/lib/laboratorio";
 import { PageHeader, EmptyState, SkeletonRows } from "@/components/ui/PageHeader";
 import RequierePermiso from "@/components/RequierePermiso";
 import { toast } from "@/components/ui/feedback";
@@ -226,6 +227,10 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
   const esPnc = f.clase !== "NC";
   const [ots, setOts] = useState<any[]>([]);
   const [equipos, setEquipos] = useState<any[]>([]);
+  // «Reejecutar» sin un ensayo de origen: se eligen los ensayos de la OT que vuelven a la captura.
+  const [ensayosOt, setEnsayosOt] = useState<{ id: string; texto: string }[] | null>(null);
+  const [elegidos, setElegidos] = useState<string[]>([]);
+  const eligeEnsayos = esPnc && f.accion === "reejecutar" && !f.resultadoId;
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
 
@@ -235,12 +240,28 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
     api.getRaw<any>("equipos?limit=500").then((r) => setEquipos(filas(r))).catch(() => undefined);
   }, []);
 
+  useEffect(() => {
+    setElegidos([]);
+    if (!eligeEnsayos || !f.otId) { setEnsayosOt(null); return; }
+    api.getRaw<any>(`flujo/ot/${f.otId}/resultados`)
+      .then((r) => setEnsayosOt(
+        // Los que tienen valor o decisión (los pendientes ya están en la captura).
+        (r?.resultados ?? []).filter((x: any) => x.estado && x.estado !== "pendiente").map((x: any) => ({
+          id: x.id,
+          texto: `${x.muestra?.codigo ?? x.muestraCodigo ?? "Muestra"} · ${x.analitoNombre ?? x.catAnalito?.nombre ?? x.analito?.nombre ?? "ensayo"} · ${ESTADO_RESULTADO[x.estado]?.texto ?? x.estado}`,
+        })),
+      ))
+      .catch(() => setEnsayosOt([]));
+  }, [eligeEnsayos, f.otId]);
+
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     if (f.titulo.trim().length < 3) return setError("Indique un título breve.");
     if (f.descripcion.trim().length < 5) return setError("Describa la no conformidad.");
     if (esPnc && !f.accion) return setError("Indique la acción del PNC/TNC.");
+    if (eligeEnsayos && !f.otId) return setError("Para reejecutar, elija la orden de trabajo y marque los ensayos afectados.");
+    if (eligeEnsayos && !elegidos.length) return setError("Para reejecutar, marque los ensayos afectados.");
     const costo = f.costoNoCalidad.trim() === "" ? null : Number(f.costoNoCalidad.replace(/\./g, "").replace(",", "."));
     if (costo !== null && !(costo >= 0)) return setError("El costo de no calidad debe ser un número de 0 o más.");
     setEnviando(true);
@@ -257,7 +278,7 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
         ...(esPnc
           ? {
               accion: f.accion || null,
-              resultadoIds: f.resultadoId ? [f.resultadoId] : [],
+              resultadoIds: f.resultadoId ? [f.resultadoId] : f.accion === "reejecutar" ? elegidos : [],
               calibracionId: inicial.calibracionId ?? null,
               certificadoId: inicial.certificadoId ?? null,
               muestraId: inicial.muestraId ?? null,
@@ -340,6 +361,28 @@ function FormNueva({ inicial, personas, gestiona, onCancelar, onCreada }: {
           <div className="field">
             <label>Origen</label>
             <div style={{ padding: "6px 0" }}>{inicial.calibracionId ? "Calibración devuelta" : "Documento devuelto"}</div>
+          </div>
+        )}
+        {eligeEnsayos && (
+          <div className="field" style={{ gridColumn: "1 / -1" }}>
+            <label>Ensayos a reejecutar <span className="req">*</span></label>
+            {!f.otId ? (
+              <div className="hint">Elija la orden de trabajo para ver sus ensayos.</div>
+            ) : ensayosOt === null ? (
+              <div className="hint">Cargando ensayos…</div>
+            ) : ensayosOt.length === 0 ? (
+              <div className="hint">La OT no tiene ensayos con resultado que se puedan reejecutar (o no los puede ver).</div>
+            ) : (
+              <div style={{ maxHeight: 180, overflowY: "auto" }}>
+                {ensayosOt.map((x) => (
+                  <label key={x.id} style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 400, fontSize: 12.5 }}>
+                    <input type="checkbox" style={{ width: "auto" }} checked={elegidos.includes(x.id)}
+                      onChange={(e) => setElegidos((xs) => (e.target.checked ? [...xs, x.id] : xs.filter((y) => y !== x.id)))} />
+                    {x.texto}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         )}
         {f.resultadoId && (

@@ -196,6 +196,21 @@ export class PlanillaCalculosService {
         tenantId,
       ),
     ]);
+    // El equipo se guarda por su id: en el historial se muestra su código y nombre.
+    const esUuid = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+    const equipoIds = [...new Set(historial.filter((h) => h.campo === "equipo_id").flatMap((h) => [h.valor_anterior, h.valor_nuevo]).filter(esUuid))];
+    if (equipoIds.length) {
+      const eqs = await this.prisma.$queryRawUnsafe<{ id: string; texto: string }[]>(
+        `SELECT id::text AS id, codigo || COALESCE(' · ' || nombre, '') AS texto FROM equipo WHERE id = ANY($1::uuid[])`,
+        equipoIds,
+      );
+      const nombre = new Map(eqs.map((e) => [e.id, e.texto]));
+      for (const h of historial)
+        if (h.campo === "equipo_id") {
+          if (esUuid(h.valor_anterior)) h.valor_anterior = nombre.get(h.valor_anterior) ?? "equipo dado de baja";
+          if (esUuid(h.valor_nuevo)) h.valor_nuevo = nombre.get(h.valor_nuevo) ?? "equipo dado de baja";
+        }
+    }
     const campos: Record<string, { nombre: string; unidad: string | null }[]> = {};
     for (const p of pasos) (campos[p.cat_metodo_id] ??= []).push({ nombre: p.nombre, unidad: p.unidad });
 

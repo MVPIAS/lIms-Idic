@@ -73,7 +73,9 @@ export function advertenciaNumerica(
   const margen = inf != null && sup != null ? ((sup - inf) * pct) / 100 : (Math.abs((inf ?? sup)!) * pct) / 100;
   if (!(margen > 0)) return null;
   const cerca: string[] = [];
-  if (inf != null && valor - inf <= margen + 1e-9) cerca.push(`a ${fmt(valor - inf)} del Mín ${fmt(inf)}`);
+  // Un Mín 0 es el piso natural (conteos de defectos, concentraciones): estar en 0
+  // o cerca es lo óptimo, no una alerta. Solo se avisa cerca del Máx.
+  if (inf != null && inf !== 0 && valor - inf <= margen + 1e-9) cerca.push(`a ${fmt(valor - inf)} del Mín ${fmt(inf)}`);
   if (sup != null && sup - valor <= margen + 1e-9) cerca.push(`a ${fmt(sup - valor)} del Máx ${fmt(sup)}`);
   if (!cerca.length) return null;
   return `Cumple, pero ${cerca.join(" y ")} (margen de advertencia ${fmt(pct)} %).`;

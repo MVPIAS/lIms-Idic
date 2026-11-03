@@ -185,6 +185,12 @@ export class CalidadController {
     return this.c.ubicaciones(req, q);
   }
 
+  @Post("ubicaciones")
+  @RequierePermiso("ubicacion.gestionar")
+  crearUbicacion(@Body() b: any, @Req() req: any) {
+    return this.c.crearUbicacion(req, b);
+  }
+
   @Get("muestras")
   @RequierePermiso("muestra.ver")
   muestras(@Query("q") q: string | undefined, @Req() req: any) {

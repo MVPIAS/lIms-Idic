@@ -322,7 +322,7 @@ function InformesContenido() {
         </div>
         {listo && (
           <CoberturaDocumento otId={otId} plantillaId={plantillaId} sugerida={propuesta?.cobertura ?? null}
-            valor={cobertura} onCambio={(c) => { setCobertura(c); setPreview(null); }} version={versionCob} />
+            valor={cobertura} onCambio={(c) => { setCobertura(c); setPreview(null); }} version={versionCob} onRegistrado={cargarDocs} />
         )}
       </div>
 

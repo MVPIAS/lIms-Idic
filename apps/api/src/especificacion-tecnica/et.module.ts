@@ -164,6 +164,9 @@ const FROM_ET = `FROM especificacion_tecnica et
   LEFT JOIN usuario uc ON uc.id = et.creada_por
   LEFT JOIN usuario up ON up.id = et.publicada_por`;
 
+/** Familia del catálogo (CODSUCDEL) contenida en el CODSUCDEL de la unidad `u` («3009/3008»). */
+const FAMILIA_DE_UNIDAD_ET = `f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))`;
+
 @Injectable()
 export class EspecificacionTecnicaService {
   constructor(
@@ -337,9 +340,12 @@ export class EspecificacionTecnicaService {
     const tenantId = tenantDe(req);
     const params: unknown[] = [tenantId];
     const cond = ["m.tenant_id = $1::uuid", "m.deleted_at IS NULL", "m.activo"];
-    if (q.laboratorio && /^[0-9a-f-]{36}$/i.test(q.laboratorio)) {
-      params.push(q.laboratorio);
-      cond.push(`f.codsucdel = (SELECT codsucdel FROM unidad WHERE id = $${params.length}::uuid)`);
+    // Uno o varios laboratorios (los de la E.T., separados por coma): solo sus métodos
+    // (familia del ensayo ⊂ CODSUCDEL de la unidad, que puede ser «3009/3008»).
+    const labs = (q.laboratorio ?? "").split(",").map((x) => x.trim()).filter((x) => /^[0-9a-f-]{36}$/i.test(x));
+    if (labs.length) {
+      params.push(labs);
+      cond.push(`EXISTS (SELECT 1 FROM unidad u WHERE u.id = ANY($${params.length}::uuid[]) AND ${FAMILIA_DE_UNIDAD_ET})`);
     }
     if (q.q?.trim()) {
       params.push(`%${q.q.trim().slice(0, 80)}%`);
@@ -493,8 +499,26 @@ export class EspecificacionTecnicaService {
       ? await this.prisma.catAnalito.findMany({ where: { id: { in: analitoIds }, tenantId }, select: { id: true, metodoId: true } })
       : [];
     const metodoDe = new Map(analitos.map((a) => [a.id, a.metodoId]));
+    // Con laboratorios en la E.T., el método debe ser de alguno de ellos (o del laboratorio del punto).
+    const labsEt: string[] = et.laboratorios ?? [];
+    const metodoLabs = new Map<string, string[]>();
+    if (labsEt.length && metodoIds.length) {
+      const f = await this.prisma.$queryRawUnsafe<{ id: string; unidades: string[] | null; conFamilia: boolean }[]>(
+        `SELECT m.id, f.id IS NOT NULL AS "conFamilia",
+                ARRAY(SELECT u.id FROM unidad u WHERE u.tenant_id = m.tenant_id AND f.id IS NOT NULL AND ${FAMILIA_DE_UNIDAD_ET}) AS unidades
+           FROM cat_metodo m LEFT JOIN cat_ensayo e ON e.id = m.ensayo_id LEFT JOIN cat_familia f ON f.id = e.familia_id
+          WHERE m.id = ANY($1::uuid[])`,
+        metodoIds,
+      );
+      // Un método sin laboratorio en el catálogo (sin familia) no se puede comprobar: se admite.
+      for (const x of f) if (x.conFamilia) metodoLabs.set(x.id, x.unidades ?? []);
+    }
     puntos.forEach((p, i) => {
       if (p.catMetodoId && !metodos.some((m) => m.id === p.catMetodoId)) errores.push(`Fila ${i + 1}: el método no existe en el catálogo.`);
+      const delMetodo = p.catMetodoId ? metodoLabs.get(p.catMetodoId) : undefined;
+      const validos = [...labsEt, ...(p.laboratorioId ? [p.laboratorioId] : [])];
+      if (delMetodo && !delMetodo.some((u) => validos.includes(u)))
+        errores.push(`Fila ${i + 1}: el método no es de los laboratorios de la E.T.`);
       if (p.catAnalitoId && metodoDe.get(p.catAnalitoId) !== p.catMetodoId) errores.push(`Fila ${i + 1}: el analito no es del método indicado.`);
     });
     if (errores.length) throw new BadRequestException(errores.join(" "));

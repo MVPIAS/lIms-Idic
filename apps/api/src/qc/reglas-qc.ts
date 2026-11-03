@@ -79,10 +79,11 @@ export function resultadoAlRegistrar(evaluacion: ResultadoQc): ResultadoQc {
 /** Por qué el usuario no puede dejar el control en `nuevo` (null = puede). */
 export function motivoNoRevisable(
   nuevo: ResultadoQc,
-  control: { registradoPor: string | null },
+  control: { registradoPor: string | null; resultado?: string | null },
   usuarioId: string | undefined,
   puedeRevisar: boolean,
-): { codigo: 403 | 409; mensaje: string } | null {
+  observaciones?: string | null,
+): { codigo: 400 | 403 | 409; mensaje: string } | null {
   if (nuevo !== "aprobado") return null;
   if (!puedeRevisar)
     return { codigo: 403, mensaje: "Aprobar un control de calidad exige el permiso «resultado.revisar» (revisor o jefatura)." };
@@ -91,6 +92,13 @@ export function motivoNoRevisable(
       codigo: 409,
       mensaje:
         "Segregación de funciones (ISO/IEC 17025): quien registró el control de calidad no puede aprobarlo. Debe hacerlo otra persona.",
+    };
+  // Un control rechazado (no cumplió su criterio, p. ej. un negativo que creció) no
+  // se aprueba sin más: queda escrito por qué se acepta.
+  if (control.resultado === "rechazado" && (observaciones ?? "").trim().length < 5)
+    return {
+      codigo: 400,
+      mensaje: "El control está rechazado: para aprobarlo indique en la observación por qué se acepta (mínimo 5 caracteres).",
     };
   return null;
 }
