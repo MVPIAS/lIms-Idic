@@ -4,6 +4,7 @@ import { useState } from "react";
 import CrudTable from "@/components/CrudTable";
 import { rut } from "@/lib/format";
 import Plantas from "./_components/Plantas";
+import HistorialCliente from "./_components/HistorialCliente";
 
 const badge = (v: any) => (
   <span className={`pill ${v ? "red" : "green"}`}>{v ? "bloqueado" : "activo"}</span>
@@ -18,15 +19,22 @@ const conDiasCredito = (d: any) => {
 
 export default function ClientesPage() {
   const [plantasDe, setPlantasDe] = useState<{ id: string; razonSocial: string } | null>(null);
+  const [historialDe, setHistorialDe] = useState<{ id: string; razonSocial: string } | null>(null);
   return (
     <>
     <CrudTable
       prepararCrear={conDiasCredito}
       accionesFila={(row) => (
-        <button type="button" className="btn outline sm" onClick={() => setPlantasDe({ id: row.id, razonSocial: row.razonSocial })}
-          title="Plantas o recintos del cliente">
-          Plantas
-        </button>
+        <>
+          <button type="button" className="btn outline sm" onClick={() => setHistorialDe({ id: row.id, razonSocial: row.razonSocial })}
+            title="Interacciones, cotizaciones, OT, correos y documentos del cliente">
+            Historial
+          </button>{" "}
+          <button type="button" className="btn outline sm" onClick={() => setPlantasDe({ id: row.id, razonSocial: row.razonSocial })}
+            title="Plantas o recintos del cliente">
+            Plantas
+          </button>
+        </>
       )}
       recurso="clientes"
       titulo="Clientes"
@@ -77,6 +85,7 @@ export default function ClientesPage() {
       ]}
     />
     {plantasDe && <Plantas cliente={plantasDe} onCerrar={() => setPlantasDe(null)} />}
+    {historialDe && <HistorialCliente cliente={historialDe} onCerrar={() => setHistorialDe(null)} />}
     </>
   );
 }
