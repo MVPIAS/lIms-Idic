@@ -27,6 +27,7 @@ import {
   faltantesDictamen,
   faltantesGenerarOt,
   faltantesInscripcionCu,
+  codigoCuAjeno,
   faltantesParametrizacion,
   erroresParametros,
   NOMBRE_ESTADO_PARAMETRIZACION,
@@ -625,6 +626,13 @@ export class PrototiposService implements OnModuleInit {
       throw new ConflictException("El certificado de aprobación de tipo aún no es oficial (falta su firma).");
     const error = validarCodigoCnc(codigo);
     if (error) throw new BadRequestException(error);
+    // Se puede corregir un código registrado mientras el tipo no esté inscrito
+    // con él (p. ej. si resultó ser el de otro producto de la Codificación Única).
+    if (p.codigo_cnc) {
+      const actual = await this.filaCu(tenantId, p.codigo_cnc);
+      if (actual && !codigoCuAjeno(actual, p.documento_id))
+        throw new ConflictException(`El tipo ya está inscrito en la Codificación Única con el código ${actual.cnc}: corríjalo allí.`);
+    }
     const dup = await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(
       `SELECT codigo FROM bpch_prototipo WHERE tenant_id = $1::uuid AND codigo_cnc = $2 AND id <> $3::uuid`,
       tenantId,
@@ -632,6 +640,9 @@ export class PrototiposService implements OnModuleInit {
       id,
     );
     if (dup[0]) throw new ConflictException(`El código ${codigo.trim()} ya está asignado al prototipo ${dup[0].codigo}.`);
+    // Tampoco puede ser el de otro producto ya inscrito en la Codificación Única.
+    const ajeno = codigoCuAjeno(await this.filaCu(tenantId, codigo), p.documento_id);
+    if (ajeno) throw new ConflictException(ajeno);
     await this.prisma.$executeRawUnsafe(
       `UPDATE bpch_prototipo SET codigo_cnc = $2, codigo_cnc_por = $3::uuid, codigo_cnc_at = now(), updated_at = now() WHERE id = $1::uuid`,
       id,
@@ -833,20 +844,38 @@ export class PrototiposService implements OnModuleInit {
 
   /** 8.17 · inscripción del tipo en la Codificación Única (si ya existe) y lo que falta para hacerla. */
   private async inscripcionCu(tenantId: string, p: any) {
-    const fila = p.codigo_cnc
-      ? (
-          await this.prisma.$queryRawUnsafe<any[]>(
-            `SELECT id, cnc_dgmn AS cnc, listado, estado FROM bpch_codificacion
-              WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND cnc_normalizado = $2 LIMIT 1`,
-            tenantId,
-            normalizarCnc(p.codigo_cnc),
-          )
-        )[0]
-      : null;
+    const fila = p.codigo_cnc ? await this.filaCu(tenantId, p.codigo_cnc) : null;
+    // Una inscripción con el mismo código pero de otro producto no es la de este
+    // prototipo: no se muestra como «Inscrito» y se avisa del conflicto.
+    const ajeno = codigoCuAjeno(fila, p.documento_id);
+    const propia = fila && !ajeno ? { id: fila.id, cnc: fila.cnc, listado: fila.listado, estado: fila.estado } : null;
     return {
-      inscrito: fila ?? null,
-      faltantes: faltantesInscripcionCu({ estado: p.estado, dictamen: p.dictamen, documentoEstado: p.doc_estado, codigoCnc: p.codigo_cnc, yaInscrito: !!fila }),
+      inscrito: propia,
+      /** Mensaje si el código registrado es el de otro producto inscrito (se puede corregir). */
+      codigoAjeno: ajeno,
+      faltantes: faltantesInscripcionCu({
+        estado: p.estado,
+        dictamen: p.dictamen,
+        documentoEstado: p.doc_estado,
+        codigoCnc: p.codigo_cnc,
+        yaInscrito: !!propia,
+        codigoAjeno: ajeno,
+      }),
     };
+  }
+
+  /** Inscripción vigente de la Codificación Única con ese código (normalizado), o null. */
+  private async filaCu(tenantId: string, codigo: string) {
+    const f = await this.prisma.$queryRawUnsafe<
+      { id: string; cnc: string; listado: string; estado: string; certificadoId: string | null; producto: string | null; fabricante: string | null }[]
+    >(
+      `SELECT id, cnc_dgmn AS cnc, listado, estado, certificado_id AS "certificadoId", producto, fabricante_nombre AS fabricante
+         FROM bpch_codificacion
+        WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND cnc_normalizado = $2 LIMIT 1`,
+      tenantId,
+      normalizarCnc(codigo),
+    );
+    return f[0] ?? null;
   }
 
   /** 8.8 · ficha técnica u hoja de datos de seguridad (PDF/PNG/JPEG). No con el prototipo anulado. */

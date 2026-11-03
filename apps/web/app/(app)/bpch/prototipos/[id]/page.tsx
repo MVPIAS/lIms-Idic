@@ -449,19 +449,24 @@ export default function PrototipoPage() {
 
           {p.dictamen === "aprobado" && (
             <Paso n={7} titulo="Código único CNC-DGMN del tipo aprobado" hecho={Boolean(p.codigoCnc)}>
-              {p.codigoCncDetalle ? (
+              {p.codigoCncDetalle && (
                 <p style={{ margin: 0, fontSize: 13 }}>
                   <b>{p.codigoCncDetalle.codigo}</b> · registrado por {p.codigoCncDetalle.por} el {fechaHora(p.codigoCncDetalle.at)}.
                 </p>
-              ) : dictaminar ? (
+              )}
+              {/* El código registrado es el de otro producto de la Codificación Única: se avisa y se puede corregir. */}
+              {p.codigoCncDetalle && p.inscripcionCu?.codigoAjeno && (
+                <div className="alert warn" style={{ margin: "8px 0" }}>{p.inscripcionCu.codigoAjeno}</div>
+              )}
+              {p.codigoCncDetalle && !p.inscripcionCu?.codigoAjeno ? null : dictaminar ? (
                 <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
                   <div className="field" style={{ minWidth: 280 }}>
                     <label htmlFor="cnc">Código único <span className="req">*</span></label>
                     <input id="cnc" value={cnc} onChange={(e) => setCnc(e.target.value)} maxLength={60} placeholder="Seis partes: E-I/n/n/n/n/n" />
                   </div>
                   <button className="btn primary sm" disabled={busy || !cnc.trim() || !["oficial", "emitido"].includes(p.documento?.estado)}
-                    onClick={async () => { const r = await ejecutar(() => llamar("POST", `/bpch/prototipos/${id}/codigo-cnc`, { codigo: cnc }), "Código único registrado."); if (r) volcar(r); }}>
-                    Registrar código
+                    onClick={async () => { const r = await ejecutar(() => llamar("POST", `/bpch/prototipos/${id}/codigo-cnc`, { codigo: cnc }), p.codigoCncDetalle ? "Código único corregido." : "Código único registrado."); if (r) volcar(r); }}>
+                    {p.codigoCncDetalle ? "Corregir código" : "Registrar código"}
                   </button>
                   {!["oficial", "emitido"].includes(p.documento?.estado) && <small style={{ color: "var(--muted)" }}>Se registra cuando el certificado de aprobación de tipo es oficial (firmado).</small>}
                 </div>

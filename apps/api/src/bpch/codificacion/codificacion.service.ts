@@ -3,7 +3,7 @@ import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
 import { createHash } from "node:crypto";
 import { Sql, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
-import { faltantesInscripcionCu } from "../prototipos/reglas-prototipo";
+import { codigoCuAjeno, faltantesInscripcionCu } from "../prototipos/reglas-prototipo";
 import { generarPdf } from "../../plantilla-render/pdf.renderer";
 import { hoyChile } from "../../common/fecha-chile";
 import { TIPOS_LISTADO, agruparListado, entraEnListado, htmlListado, xlsxListado, type TipoListado } from "./listado-oficial";
@@ -364,12 +364,21 @@ export class CodificacionService {
     if (!p) throw new NotFoundException("Prototipo no encontrado.");
     const ya = p.codigo_cnc
       ? await this.prisma.$queryRawUnsafe<any[]>(
-          `SELECT id FROM bpch_codificacion WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND cnc_normalizado = $2`,
+          `SELECT id, cnc_dgmn AS cnc, certificado_id AS "certificadoId", producto, fabricante_nombre AS fabricante
+             FROM bpch_codificacion WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND cnc_normalizado = $2`,
           tenantId,
           normalizarCnc(p.codigo_cnc),
         )
       : [];
-    const faltan = faltantesInscripcionCu({ estado: p.estado, dictamen: p.dictamen, documentoEstado: p.doc_estado, codigoCnc: p.codigo_cnc, yaInscrito: ya.length > 0 });
+    const faltan = faltantesInscripcionCu({
+      estado: p.estado,
+      dictamen: p.dictamen,
+      documentoEstado: p.doc_estado,
+      codigoCnc: p.codigo_cnc,
+      yaInscrito: ya.length > 0,
+      // El código registrado pertenece a otro producto inscrito: no se inscribe encima.
+      codigoAjeno: codigoCuAjeno(ya[0], p.documento_id),
+    });
     if (faltan.length) throw new ConflictException(faltan.join(" "));
     const id = await this.prisma.$transaction((tx) =>
       this.inscribir(
