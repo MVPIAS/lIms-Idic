@@ -120,9 +120,27 @@ const ACCIONES: Record<string, [string, GrupoAccion]> = {
   "pronunciamiento-sac": ["Pronunciamiento SAC", "flujo"],
 };
 
-/** «solicitudes-laboratorio» → «solicitudes laboratorio». */
+/**
+ * Nombre legible del sub-registro que se da de alta (POST /…/<recurso>): siglas en
+ * mayúscula y tildes, que el código de la ruta no lleva.
+ */
+const RECURSOS: Record<string, string> = {
+  ot: "OT", oc: "OC", hh: "HH", rafs: "RAFS", poe: "POE", pdf: "PDF", excel: "Excel",
+  "ordenes-compra": "órdenes de compra", "ordenes-internas": "órdenes internas", "no-conformidades": "no conformidades",
+  "notas-credito": "notas de crédito", "listas-precio": "listas de precio", "lista-precio-items": "ítems de lista de precio",
+  "numeracion-documentos": "numeración de documentos", "documentos-registro": "documentos", "firmas-matriz": "matriz de firmas",
+  "especificaciones-tecnicas": "especificaciones técnicas", "informe-tecnico": "informe técnico", "servicio-externo": "servicio externo",
+  "custodia-evidencia": "custodia de evidencia", "codigo-cnc": "código CNC-DGMN", "recepcion-dco": "recepción en DCO",
+  "recepcion-informe-dco": "recepción del informe en DCO", "validacion-laboratorio": "validación del laboratorio",
+  analisis: "análisis", calibraciones: "calibraciones", clasificacion: "clasificación", clasificaciones: "clasificaciones",
+  codificacion: "codificación", acunacion: "acuñación", alicuotas: "alícuotas", numeros: "números", numero: "número",
+  planilla: "planilla", recepcion: "recepción", devolucion: "devolución", importaciones: "importaciones",
+  internaciones: "internaciones", reinspecciones: "reinspecciones", seleccion: "selección", ubicaciones: "ubicaciones",
+};
+
+/** «solicitudes-laboratorio» → «solicitudes laboratorio»; con su nombre propio si está en RECURSOS. */
 function legible(codigo: string): string {
-  return codigo.replace(/[-_]+/g, " ").trim();
+  return RECURSOS[codigo.toLowerCase()] ?? codigo.replace(/[-_]+/g, " ").trim();
 }
 
 /** Texto y familia de un código de acción. Lo desconocido es el alta de un sub-registro (POST /…/lotes). */
