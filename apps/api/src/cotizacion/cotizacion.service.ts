@@ -7,6 +7,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from "@nestjs/common";
+import { emitirEvento } from "../common/eventos";
 import { PrismaService } from "../common/prisma.service";
 import { exigirMedioEnvioActivo } from "../common/medios-envio";
 import { DEV_TENANT } from "../common/base-crud.service";
@@ -905,6 +906,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       });
     // CRM (EP-00 0.3): la oportunidad de la cotización queda «ganada» con su OT.
     await ganarOportunidadDeCotizacion(this.prisma, id, ot.id).catch(() => undefined);
+    // Etapa «OT creada» (§4.5.4): correo automático al cliente si está activo.
+    emitirEvento("ot.creada", { otId: ot.id, tenantId: tenantIdOt, usuarioId: usuarioId ?? null });
 
     const extra = ot.opiPendiente ? " Queda con OPI PENDIENTE (disposición del Director con cobro)." : "";
     const otFinal = await this.prisma.ordenTrabajo.findUnique({
