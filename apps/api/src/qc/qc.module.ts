@@ -585,15 +585,41 @@ export class QcController {
     return this.svc.cepas(tenantDe(req), req?.query?.todas === "1");
   }
 
+  /**
+   * Las cepas son un catálogo común de todo el IDIC: las mantiene quien tiene
+   * catalogo.gestionar con alcance GLOBAL (Calidad, Administración), no las
+   * jefaturas de un laboratorio (docs/ADMIN_ROLES.md). La pantalla lo pregunta aquí.
+   */
+  @Get("cepas/edicion")
+  @RequierePermiso(PERM.ver)
+  @ApiOperation({ summary: "¿Puede el usuario mantener el catálogo de cepas? (catalogo.gestionar con alcance global)" })
+  async edicionCepas(@Req() req: any) {
+    return { puedeEditar: await this.mantieneCepas(req) };
+  }
+
+  private async mantieneCepas(req: any): Promise<boolean> {
+    const u = req?.user ?? {};
+    if ((u.roles ?? []).includes("SUPERADMIN")) return true;
+    if (!(u.permisos ?? []).includes("catalogo.gestionar")) return false;
+    return (await this.alcance.alcancePermisos(req, ["catalogo.gestionar"])).esGlobal;
+  }
+
+  private async exigirMantenerCepas(req: any) {
+    if (!(await this.mantieneCepas(req)))
+      throw new ForbiddenException("Las cepas de referencia son un catálogo común del IDIC: las mantienen Calidad y Administración.");
+  }
+
   @Post("cepas")
   @RequierePermiso("catalogo.gestionar")
-  crearCepa(@Body() body: unknown, @Req() req: any) {
+  async crearCepa(@Body() body: unknown, @Req() req: any) {
+    await this.exigirMantenerCepas(req);
     return this.svc.guardarCepa(tenantDe(req), null, body);
   }
 
   @Put("cepas/:id")
   @RequierePermiso("catalogo.gestionar")
-  editarCepa(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+  async editarCepa(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirMantenerCepas(req);
     return this.svc.guardarCepa(tenantDe(req), id, body);
   }
 

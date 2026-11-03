@@ -3,13 +3,13 @@
 /**
  * Configuración del laboratorio › Cepas de referencia (QC microbiológico, EP-02 ALI-D6).
  * Catálogo de cepas ATCC del control positivo: alta, edición y baja (inactiva).
- * Lectura con resultado.ver; cambios con catalogo.gestionar (Calidad, Administración).
+ * Lectura con resultado.ver; cambios con catalogo.gestionar y alcance global
+ * (Calidad, Administración): es un catálogo común del IDIC, no de un laboratorio.
  */
 import { useCallback, useEffect, useState } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import RequierePermiso from "@/components/RequierePermiso";
 import { api } from "@/lib/api";
-import { usePermisos } from "@/lib/permisos";
 import { toast } from "@/components/ui/feedback";
 import { enviarInforme } from "@/lib/informes";
 
@@ -24,12 +24,15 @@ export default function CepasPage() {
 }
 
 function Contenido() {
-  const { puede } = usePermisos();
-  const edita = puede("catalogo.gestionar");
+  // Lo decide la API (catalogo.gestionar con alcance global): una jefatura de laboratorio solo la consulta.
+  const [edita, setEdita] = useState(false);
   const [cepas, setCepas] = useState<Cepa[]>([]);
   const [n, setN] = useState({ numero: "", codigo: "", organismo: "" });
   const cargar = useCallback(() => api.getRaw<Cepa[]>("qc/cepas?todas=1").then(setCepas).catch((e) => toast.error(e.message)), []);
   useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    api.getRaw<{ puedeEditar: boolean }>("qc/cepas/edicion").then((r) => setEdita(!!r?.puedeEditar)).catch(() => setEdita(false));
+  }, []);
 
   async function guardar(ruta: string, metodo: "POST" | "PUT", cuerpo: object, ok: string) {
     try {
@@ -63,6 +66,11 @@ function Contenido() {
             </tbody>
           </table>
         </div>
+        {!edita && (
+          <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--muted)" }}>
+            Catálogo común del IDIC: lo mantienen Calidad y Administración.
+          </p>
+        )}
         {edita && (
           <div className="form-grid cols-4" style={{ marginTop: 10 }}>
             <div className="field"><label htmlFor="ce-n">Nº</label><input id="ce-n" inputMode="numeric" value={n.numero} onChange={(e) => setN({ ...n, numero: e.target.value })} /></div>
