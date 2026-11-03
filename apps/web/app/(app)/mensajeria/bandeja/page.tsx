@@ -17,6 +17,7 @@ import { llamar, qs } from "@/lib/laboratorio";
 import { subirFormulario, descargarAdjunto } from "@/lib/d11";
 import { fechaHora } from "@/lib/format";
 import { toast } from "@/components/ui/feedback";
+import { usePermisos } from "@/lib/permisos";
 
 type Bandeja = "recibidos" | "enviados" | "archivados";
 
@@ -68,6 +69,8 @@ const FILTROS = { remitente: "", destinatario: "", asunto: "", prioridad: "", ad
 const kb = (b: number) => (b >= 1048576 ? `${(b / 1048576).toFixed(1).replace(".", ",")} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
 
 export default function BandejaPage() {
+  // Mensajería · correo se abre con correo.enviar o cotizacion.ver (lib/navegacion.ts).
+  const verCorreos = usePermisos().puede(["correo.enviar", "cotizacion.ver"]);
   const [bandeja, setBandeja] = useState<Bandeja>("recibidos");
   const [filas, setFilas] = useState<Fila[]>([]);
   const [noLeidos, setNoLeidos] = useState(0);
@@ -121,11 +124,11 @@ export default function BandejaPage() {
     <div>
       <PageHeader
         titulo="Mensajes internos"
-        migas={[{ label: "Reportes y comunicación" }, { label: "Mensajería", href: "/mensajeria" }, { label: "Bandeja" }]}
+        migas={[{ label: "Reportes y comunicación" }, { label: "Mensajes internos" }]}
         subtitulo="Mensajes entre personas del instituto, con urgencia, adjuntos y vínculo a una OT. Los correos con clientes están en Mensajería · Correo."
         acciones={
           <>
-            <Link href="/mensajeria" className="btn outline sm">📧 Correos</Link>{" "}
+            {verCorreos && <><Link href="/mensajeria" className="btn outline sm">📧 Correos</Link>{" "}</>}
             <button type="button" className="btn primary sm" onClick={() => { setAbierto(null); setRedactar({}); }}>✏ Nuevo mensaje</button>
           </>
         }

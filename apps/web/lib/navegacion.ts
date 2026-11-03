@@ -167,7 +167,8 @@ export const NAV: SeccionNav[] = [
       { href: "/documentos", label: "Buscador de documentos emitidos", icon: "🗄", perm: "ot.ver" },
       { href: "/auditoria", label: "Auditoría (bitácora)", icon: "🧾", perm: "audit.ver", claves: "audit log trazabilidad cambios quien" },
       { href: "/mensajeria/bandeja", label: "Mensajes internos", icon: "💬", perm: "mensaje.usar", claves: "bandeja mensaje interno adjunto urgente responder" },
-      { href: "/mensajeria", label: "Mensajería · correo", icon: "📧", perm: "cotizacion.ver", claves: "correo historial buscar remitente adjuntos urgencia" },
+      // Con correo.enviar o cotizacion.ver (API: mensajeria/alcance-correo.ts); cada correo según el alcance.
+      { href: "/mensajeria", label: "Mensajería · correo", icon: "📧", perm: ["correo.enviar", "cotizacion.ver"], claves: "correo historial buscar remitente adjuntos urgencia" },
       { href: "/mensajeria/plantillas", label: "Plantillas de correo", icon: "✉", perm: "cotizacion.ver", claves: "plantilla etapa automatico aviso" },
     ],
   },
