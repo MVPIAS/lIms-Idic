@@ -542,6 +542,9 @@ export class ResultadoService extends BaseCrudService {
         analistaId: usuarioId ?? null,
         equipoId: dto.equipoId ?? null,
         estado: "capturado",
+        // Valor nuevo sin revisar: no arrastra la revisión (o devolución) anterior.
+        revisadoPor: null,
+        revisadoAt: null,
         fecha: new Date(),
       },
       include: { analito: true, muestra: true },
@@ -722,8 +725,11 @@ export class ResultadoService extends BaseCrudService {
         data: {
           estado: "devuelto",
           motivoDevolucion: `Reabierto tras su aprobación: ${texto}`,
-          revisadoPor: usuarioId ?? null,
-          revisadoAt: ahora,
+          // Sin revisión registrada: quien reabre queda en reabiertoPor (y la
+          // revisión anterior en el historial); si no, el resultado recapturado
+          // diría «Revisó …» estando por revisar (y la segregación lo bloquearía).
+          revisadoPor: null,
+          revisadoAt: null,
           aprobadoPor: null,
           aprobadoAt: null,
           reabiertoPor: usuarioId ?? null,
