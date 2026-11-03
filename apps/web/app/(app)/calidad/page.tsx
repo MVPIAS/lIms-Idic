@@ -1,14 +1,17 @@
 "use client";
 
 // ===========================================================================
-// Calidad del laboratorio (bloque A del contrato). Cuatro pestañas:
+// Calidad del laboratorio (bloque A del contrato). Pestañas:
 //   · Re-análisis (§4.2.6 / §4.3.9): los ensayos que hay que repetir por un No
 //     cumple, una advertencia o a pedido del revisor; la jefatura los descarta;
 //   · Acreditación ISO/IEC 17025 (§4.3.5): acreditaciones del IDIC y su alcance
 //     por método, con vigencia;
-//   · POE y advertencia (§4.3.1): procedimiento de cada método (del gestor
-//     documental) y su margen de advertencia;
-//   · Alícuotas (§4.2.1): porciones de una muestra, su consumo y estado.
+//   · Método: POE, advertencia y consumibles (§4.3.1, §4.4.5): procedimiento de
+//     cada método (del gestor documental), su margen de advertencia y su consumo;
+//   · Fórmulas desde Excel (§4.3.4);
+//   · Alícuotas (§4.2.1): porciones de una muestra, su consumo, ubicación y estado.
+// Cada pestaña se muestra solo con su permiso: Recepción y Muestreo (muestra.ver
+// y alicuota.gestionar, sin resultado.ver) entran solo a Alícuotas.
 // Las reglas viven en el servidor: apps/api/src/calidad/.
 // ===========================================================================
 
@@ -26,15 +29,33 @@ type Pestana = "reanalisis" | "acreditacion" | "poe" | "formulas" | "alicuotas";
 const fechaCl = (f: string | null | undefined) => (f ? f.slice(0, 10).split("-").reverse().join("-") : "—");
 const num = (v: unknown) => (v == null || v === "" ? "" : String(v).replace(".", ","));
 
+/** Permiso que muestra cada pestaña (con varios, basta uno). Mismo criterio que la API. */
+const PERMISO_PESTANA: Record<Pestana, string | string[]> = {
+  reanalisis: "resultado.ver",
+  acreditacion: "resultado.ver",
+  poe: "resultado.ver",
+  formulas: "catalogo.gestionar",
+  alicuotas: ["muestra.ver", "alicuota.gestionar"],
+};
+const ORDEN: Pestana[] = ["reanalisis", "acreditacion", "poe", "formulas", "alicuotas"];
+
 export default function CalidadPage() {
-  const [pestana, setPestana] = useState<Pestana>("reanalisis");
+  const { listo, puede } = usePermisos();
+  const visibles = ORDEN.filter((p) => puede(PERMISO_PESTANA[p]));
+  const [elegida, setElegida] = useState<Pestana | null>(null);
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t === "acreditacion" || t === "poe" || t === "formulas" || t === "alicuotas") setPestana(t);
+    if (t && (ORDEN as string[]).includes(t)) setElegida(t as Pestana);
   }, []);
-  const tab = (id: Pestana, t: string) => (
-    <button type="button" role="tab" aria-selected={pestana === id} className={`tab${pestana === id ? " active" : ""}`} onClick={() => setPestana(id)}>{t}</button>
-  );
+  // La pestaña pedida (?tab=) solo si su permiso la deja ver; si no, la primera visible.
+  const pestana: Pestana | null = elegida && visibles.includes(elegida) ? elegida : visibles[0] ?? null;
+  const tab = (id: Pestana, t: string) =>
+    visibles.includes(id) ? (
+      <button type="button" role="tab" aria-selected={pestana === id} className={`tab${pestana === id ? " active" : ""}`} onClick={() => setElegida(id)}>{t}</button>
+    ) : null;
+  if (!listo) return <p>Cargando…</p>;
+  if (!pestana)
+    return <div className="card"><p style={{ margin: 0 }}>No tiene acceso a la calidad del laboratorio.</p></div>;
   return (
     <div>
       <div className="page-header">
@@ -114,7 +135,7 @@ function Reanalisis() {
           <option value="todos">Todos</option>
         </select>
         <span style={{ fontSize: 12.5, color: "var(--muted)" }}>
-          Un re-análisis pendiente impide revisar y aprobar el ensayo: se repite la determinación (nueva captura) o la jefatura lo descarta con su motivo. Los parámetros están en Catálogo › Parámetros › «Captura · advertencia y re-análisis».
+          Un re-análisis pendiente impide revisar y aprobar el ensayo: se repite la determinación (nueva captura) o la jefatura lo descarta con su motivo (aquí o en la captura por OT). Los parámetros están en Administración › Parámetros del sistema › Parámetros de la operación › «Captura · advertencia y re-análisis automático».
         </span>
       </div>
       {!filas ? (
@@ -240,7 +261,7 @@ function Acreditaciones() {
       <section className="card">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <p style={{ margin: 0, fontSize: 13, color: "var(--muted)", maxWidth: 720 }}>
-            Cada acreditación (organismo, número y vigencia) y los métodos de su alcance. En la captura por OT, el ensayo de un método con alcance vigente se marca «Acreditado»; los demás, «No acreditado».
+            Cada acreditación (organismo, número y vigencia) y los métodos de su alcance. En la captura por OT, el ensayo de un método con alcance vigente se marca «Acreditado»; si el laboratorio del ensayo (o todo el IDIC) tiene una acreditación vigente y el método no está en su alcance, se marca «No acreditado».
           </p>
           {gestiona && !form && <button className="btn primary sm" onClick={() => setForm({ ...VACIA })}>Nueva acreditación</button>}
         </div>
@@ -484,7 +505,7 @@ function Poe() {
               {ficha.poe.map((p: any) => (
                 <li key={p.documentoId} style={{ marginBottom: 4 }}>
                   <button type="button" className="linklike" style={{ border: 0, background: "none", padding: 0, color: "var(--accent, #1d4ed8)", cursor: "pointer", textDecoration: "underline" }}
-                    onClick={() => descargarAdjunto(`/documentos/archivos/${p.documentoId}/descargar`, `${p.codigo}.pdf`).catch((e) => toast.error(e.message))}>
+                    onClick={() => descargarAdjunto(`/documentos/archivos/${p.documentoId}/descargar`, p.archivo || p.codigo).catch((e) => toast.error(e.message))}>
                     {p.codigo} · {p.titulo}
                   </button>
                   {p.version != null && <span style={{ color: "var(--muted)", fontSize: 12 }}> · versión {p.version}</span>}
@@ -510,7 +531,7 @@ function Poe() {
                       <button className="btn outline sm" onClick={() => vincular(d.id)}>Vincular</button>
                     </li>
                   ))}
-                  {!docs.length && <li style={{ color: "var(--muted)", fontSize: 13 }}>Sin documentos. Súbalos en <Link href={"/documentos" as any}>Gestor documental</Link>.</li>}
+                  {!docs.length && <li style={{ color: "var(--muted)", fontSize: 13 }}>Sin documentos. Súbalos en el <Link href={"/documentos/gestor" as any}>Gestor documental</Link>.</li>}
                 </ul>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "end" }}>
@@ -761,8 +782,15 @@ function Alicuotas() {
   const [muestras, setMuestras] = useState<any[]>([]);
   const [muestraId, setMuestraId] = useState<string | null>(null);
   const [datos, setDatos] = useState<any | null>(null);
-  const [nueva, setNueva] = useState({ n: "1", cantidad: "", unidad: "g", proposito: "" });
-  const [mov, setMov] = useState<{ id: string; tipo: string; cantidad: string; estado: string; detalle: string } | null>(null);
+  const [nueva, setNueva] = useState({ n: "1", cantidad: "", unidad: "g", proposito: "", ubicacionId: "" });
+  const [mov, setMov] = useState<{ id: string; tipo: string; cantidad: string; estado: string; ubicacionId: string; detalle: string } | null>(null);
+  // Ubicaciones donde guardar o a donde trasladar una alícuota (comunes y de su laboratorio).
+  const [ubicaciones, setUbicaciones] = useState<{ id: string; codigo: string; nombre: string; path: string }[]>([]);
+  useEffect(() => {
+    if (!gestiona) return;
+    llamar<any[]>("GET", "/calidad/ubicaciones").then(setUbicaciones).catch(() => setUbicaciones([]));
+  }, [gestiona]);
+  const opcionesUbicacion = ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>);
 
   useEffect(() => {
     const m = new URLSearchParams(window.location.search).get("muestra");
@@ -794,6 +822,7 @@ function Alicuotas() {
         cantidad: nueva.cantidad.trim() || null,
         unidad: nueva.cantidad.trim() ? nueva.unidad.trim() : null,
         proposito: nueva.proposito.trim() || null,
+        ubicacionId: nueva.ubicacionId || null,
       });
       toast.ok(`Alícuotas preparadas: ${r.creadas.join(", ")}.`);
       setNueva({ ...nueva, proposito: "" });
@@ -809,8 +838,10 @@ function Alicuotas() {
         tipo: mov.tipo,
         cantidad: mov.tipo === "consumo" ? mov.cantidad : null,
         estado: mov.tipo === "estado" ? mov.estado : null,
+        ubicacionId: mov.tipo === "traslado" ? mov.ubicacionId || null : null,
         detalle: mov.detalle.trim() || null,
       });
+      if (mov.tipo === "traslado") toast.ok("Alícuota trasladada.");
       setMov(null);
       cargar();
     } catch (e: any) {
@@ -838,7 +869,7 @@ function Alicuotas() {
           )}
         </div>
         <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
-          Una alícuota es una porción de la muestra preparada para un ensayo o para guardar. Lleva su código, cantidad, ubicación y estado; cada consumo o cambio queda en su historial.
+          Una alícuota es una porción de la muestra preparada para un ensayo o para guardar. Lleva su código, cantidad, ubicación y estado; cada consumo, traslado o cambio queda en su historial.
         </p>
       </section>
       {datos && (
@@ -848,7 +879,7 @@ function Alicuotas() {
             {datos.muestra.otId && <Link href={`/ot/${datos.muestra.otId}` as any} style={{ fontSize: 13, marginLeft: 8 }}>{datos.muestra.otCodigo}</Link>}
           </h2>
           {gestiona && (
-            <div style={{ display: "grid", gridTemplateColumns: "90px 140px 90px 1fr auto", gap: 8, alignItems: "end", marginBottom: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "90px 140px 90px 1fr minmax(160px, 220px) auto", gap: 8, alignItems: "end", marginBottom: 10 }}>
               <div className="field" style={{ margin: 0 }}>
                 <label htmlFor="al-n">Cuántas</label>
                 <input id="al-n" inputMode="numeric" value={nueva.n} onChange={(e) => setNueva({ ...nueva, n: e.target.value })} />
@@ -865,12 +896,19 @@ function Alicuotas() {
                 <label htmlFor="al-p">Propósito</label>
                 <input id="al-p" value={nueva.proposito} onChange={(e) => setNueva({ ...nueva, proposito: e.target.value })} placeholder="Ej.: humedad, contramuestra" maxLength={160} />
               </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label htmlFor="al-ub">Ubicación</label>
+                <select id="al-ub" value={nueva.ubicacionId} onChange={(e) => setNueva({ ...nueva, ubicacionId: e.target.value })}>
+                  <option value="">Sin ubicación</option>
+                  {opcionesUbicacion}
+                </select>
+              </div>
               <button className="btn primary sm" onClick={preparar}>Preparar</button>
             </div>
           )}
           <div style={{ overflowX: "auto" }}>
             <table className="table">
-              <thead><tr><th>Código</th><th>Cantidad</th><th>Queda</th><th>Propósito</th><th>Estado</th><th>Historial</th>{gestiona && <th></th>}</tr></thead>
+              <thead><tr><th>Código</th><th>Cantidad</th><th>Queda</th><th>Propósito</th><th>Ubicación</th><th>Estado</th><th>Historial</th>{gestiona && <th></th>}</tr></thead>
               <tbody>
                 {datos.alicuotas.length ? (
                   datos.alicuotas.map((a: any) => (
@@ -879,6 +917,7 @@ function Alicuotas() {
                       <td>{a.cantidad != null ? `${num(a.cantidad)} ${a.unidad ?? ""}` : "—"}</td>
                       <td>{a.cantidadRestante != null ? `${num(a.cantidadRestante)} ${a.unidad ?? ""}` : "—"}</td>
                       <td>{a.proposito ?? "—"}</td>
+                      <td>{a.ubicacion ?? "—"}</td>
                       <td><span className={`pill ${ESTADO_AL[a.estado]?.pill ?? "gray"}`}>{ESTADO_AL[a.estado]?.texto ?? a.estado}</span></td>
                       <td style={{ fontSize: 11.5, color: "var(--muted)" }}>
                         {a.movimientos.map((m: any, i: number) => (
@@ -891,10 +930,16 @@ function Alicuotas() {
                             <div style={{ display: "grid", gap: 4, minWidth: 220 }}>
                               <select aria-label="Movimiento" value={mov!.tipo} onChange={(e) => setMov((v) => v && { ...v, tipo: e.target.value })}>
                                 <option value="consumo">Consumo</option>
+                                <option value="traslado">Traslado</option>
                                 <option value="estado">Cambio de estado</option>
                               </select>
                               {mov!.tipo === "consumo" ? (
                                 <input aria-label="Cantidad consumida" inputMode="decimal" value={mov!.cantidad} onChange={(e) => setMov((v) => v && { ...v, cantidad: e.target.value })} placeholder={`Cantidad (${a.unidad ?? ""})`} />
+                              ) : mov!.tipo === "traslado" ? (
+                                <select aria-label="Ubicación de destino" value={mov!.ubicacionId} onChange={(e) => setMov((v) => v && { ...v, ubicacionId: e.target.value })}>
+                                  <option value="">Ubicación de destino…</option>
+                                  {opcionesUbicacion.filter((o) => o.key !== a.ubicacionId)}
+                                </select>
                               ) : (
                                 <select aria-label="Nuevo estado" value={mov!.estado} onChange={(e) => setMov((v) => v && { ...v, estado: e.target.value })}>
                                   <option value="">Elija…</option>
@@ -908,14 +953,14 @@ function Alicuotas() {
                               </div>
                             </div>
                           ) : (
-                            <button className="btn outline sm" onClick={() => setMov({ id: a.id, tipo: "consumo", cantidad: "", estado: "", detalle: "" })}>Movimiento…</button>
+                            <button className="btn outline sm" onClick={() => setMov({ id: a.id, tipo: "consumo", cantidad: "", estado: "", ubicacionId: "", detalle: "" })}>Movimiento…</button>
                           ))}
                         </td>
                       )}
                     </tr>
                   ))
                 ) : (
-                  <tr><td colSpan={gestiona ? 7 : 6} style={{ color: "var(--muted)" }}>La muestra no tiene alícuotas.</td></tr>
+                  <tr><td colSpan={gestiona ? 8 : 7} style={{ color: "var(--muted)" }}>La muestra no tiene alícuotas.</td></tr>
                 )}
               </tbody>
             </table>

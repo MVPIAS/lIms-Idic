@@ -64,8 +64,10 @@ interface Fila extends EnsayoEditable {
   advertenciaMotivo: string | null;
   reanalisis: { id: string; motivo: string; origen: string; estado: string } | null;
   /** POE del método y alcance acreditado ISO/IEC 17025 vigente (§4.3.1, §4.3.5). */
-  poe: { documentoId: string; codigo: string; titulo: string; version: number | null }[];
+  poe: { documentoId: string; codigo: string; titulo: string; version: number | null; archivo?: string | null }[];
   acreditacion: { numero: string; organismo: string } | null;
+  /** El laboratorio del ensayo (o todo el IDIC) tiene una acreditación vigente: sin alcance, «No acreditado». */
+  laboratorioAcreditado: boolean;
   fecha: string | null;
   analistaId: string | null;
   analistaNombre: string | null;
@@ -151,6 +153,7 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     reanalisis: r.reanalisis ?? null,
     poe: Array.isArray(r.poe) ? r.poe : [],
     acreditacion: r.acreditacion ?? null,
+    laboratorioAcreditado: !!r.laboratorioAcreditado,
     formulaMotivo: r.formulaMotivo ?? null,
     formulaLegado: r.formulaLegado ?? null,
     especOrigen: r.especOrigen ?? "catalogo",
@@ -514,6 +517,23 @@ export default function CapturaOtPage() {
     }
   }
 
+  /** La jefatura descarta el re-análisis pendiente (no se repite), con motivo: el ensayo vuelve a poder revisarse. */
+  async function descartarReanalisis(f: Fila) {
+    const motivo = window.prompt(`Descartar el re-análisis de ${f.analito}${f.muestraCodigo ? ` (${f.muestraCodigo})` : ""}: ¿por qué no se repite la determinación? (mín. 5 caracteres)`);
+    if (motivo == null) return;
+    if (motivo.trim().length < 5) return toast.error("Indique el motivo del descarte (mínimo 5 caracteres).");
+    setOcupado(f.id);
+    try {
+      await llamar("POST", `/calidad/resultados/${f.id}/reanalisis/descartar`, { motivo: motivo.trim() });
+      toast.ok("Re-análisis descartado. El ensayo ya se puede revisar.");
+      await cargar();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(null);
+    }
+  }
+
   async function accionOt(que: "revisar" | "aprobar") {
     if (!ot) return;
     const n = que === "revisar" ? porRevisarAjenos : porAprobarAjenos;
@@ -777,12 +797,15 @@ export default function CapturaOtPage() {
                             <td>
                               {f.analito}
                               {f.metodo && <div style={{ fontSize: 11, color: "var(--muted)" }}>{f.metodo}</div>}
-                              {ot && (f.acreditacion || f.poe.length > 0) && (
+                              {ot && (f.acreditacion || f.laboratorioAcreditado || f.poe.length > 0) && (
                                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2 }}>
                                   {f.acreditacion && <span className="pill green" title={`Método en el alcance acreditado ${f.acreditacion.organismo} ${f.acreditacion.numero} (NCh-ISO/IEC 17025)`}>Acreditado {f.acreditacion.numero}</span>}
+                                  {!f.acreditacion && f.laboratorioAcreditado && (
+                                    <span className="pill gray" title="El laboratorio tiene una acreditación vigente, pero este método no está en su alcance (NCh-ISO/IEC 17025)">No acreditado</span>
+                                  )}
                                   {f.poe.map((p) => (
                                     <button key={p.documentoId} type="button" className="pill teal" style={{ border: 0, cursor: "pointer" }} title={`Descargar el POE ${p.codigo} · ${p.titulo}`}
-                                      onClick={() => descargarAdjunto(`/documentos/archivos/${p.documentoId}/descargar`, `${p.codigo}.pdf`).catch((e) => setError(e.message))}>
+                                      onClick={() => descargarAdjunto(`/documentos/archivos/${p.documentoId}/descargar`, p.archivo || p.codigo).catch((e) => setError(e.message))}>
                                       POE {p.codigo}
                                     </button>
                                   ))}
@@ -898,6 +921,11 @@ export default function CapturaOtPage() {
                                 <div style={{ marginTop: 2 }}>
                                   <span className="pill red" title={f.reanalisis.motivo}>Re-análisis pendiente</span>
                                   <div style={{ fontSize: 11, color: "var(--muted)", maxWidth: 220 }}>{f.reanalisis.motivo} Repita la determinación y capture el nuevo valor.</div>
+                                  {puede(f, "aprobar") && (
+                                    <button className="btn outline sm" style={{ marginTop: 2 }} disabled={busy}
+                                      title="No repetir la determinación: descartar el re-análisis con su motivo (queda en la auditoría)"
+                                      onClick={() => descartarReanalisis(f)}>Descartar re-análisis…</button>
+                                  )}
                                 </div>
                               )}
                               {f.reanalisis?.estado === "realizado" && <div><span className="pill gray" title={f.reanalisis.motivo}>re-analizado</span></div>}

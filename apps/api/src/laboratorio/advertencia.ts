@@ -94,3 +94,13 @@ export function motivoReanalisisAbierto(r: { motivo: string; origen: string } | 
     "Repita la determinación y capture el nuevo valor, o que la jefatura descarte el re-análisis con su motivo."
   );
 }
+
+/**
+ * Motivo del re-análisis automático según el dictamen que lo abrió: un No
+ * cumple o un Cumple en advertencia (modo «No cumple o advertencia»). Lo usan
+ * el registro del re-análisis y el aviso al laboratorio.
+ */
+export function motivoReanalisisAutomatico(veredicto: string | null | undefined, advertencia: string | null | undefined): string {
+  if (veredicto === "no_cumple") return "Resultado No cumple: se repite la determinación antes de revisarlo.";
+  return `Advertencia: ${advertencia || "cumple cerca de un límite"}`;
+}

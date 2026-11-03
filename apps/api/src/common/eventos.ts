@@ -12,12 +12,17 @@ export interface EventosLims {
   "resultado.aprobado": { resultadoId: string; usuarioId: string | null };
   /** Un informe o certificado quedó oficial con la última firma (firma-documento.service). */
   "documento.oficial": { certificadoId: string; tenantId: string; usuarioId: string | null };
-  /** Captura en advertencia o con re-análisis automático (calidad/reanalisis.ts · contrato §4.2.6). */
+  /**
+   * Captura en advertencia o con re-análisis automático (calidad/reanalisis.ts) o
+   * re-análisis pedido por el revisor (calidad.service.ts) · contrato §4.2.6.
+   */
   "resultado.alerta": {
     resultadoId: string;
     tenantId: string;
     usuarioId: string | null;
     tipo: "advertencia" | "reanalisis";
+    /** Quién abrió el re-análisis: la captura (automático) o el revisor/jefatura (manual). */
+    origen?: "automatico" | "manual";
     motivo: string;
     correo: boolean;
   };

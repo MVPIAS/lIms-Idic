@@ -6,7 +6,7 @@
 import { ConflictException } from "@nestjs/common";
 import { emitirEvento } from "../common/eventos";
 import { hoyCl } from "../ot/plazos";
-import { advertenciaNumerica, configResultados, debeReanalizar, motivoReanalisisAbierto, type ConfigResultados } from "../laboratorio/advertencia";
+import { advertenciaNumerica, configResultados, debeReanalizar, motivoReanalisisAbierto, motivoReanalisisAutomatico, type ConfigResultados } from "../laboratorio/advertencia";
 
 type Db = { $queryRawUnsafe: <T = unknown>(q: string, ...p: unknown[]) => Promise<T>; $executeRawUnsafe: (q: string, ...p: unknown[]) => Promise<number> };
 
@@ -97,7 +97,7 @@ export async function trasCaptura(
   );
   let abre = false;
   if (!ya?.n && debeReanalizar(p.veredicto, !!p.advertencia, p.cfg.reanalisis)) {
-    const motivo = p.veredicto === "no_cumple" ? "Resultado No cumple: se repite la determinación antes de revisarlo." : `Advertencia: ${p.advertencia}`;
+    const motivo = motivoReanalisisAutomatico(p.veredicto, p.advertencia);
     const n = await db.$executeRawUnsafe(
       `INSERT INTO resultado_reanalisis (tenant_id, resultado_id, ot_id, origen, motivo, valor_anterior, solicitado_por)
        VALUES ($1::uuid, $2::uuid, $3::uuid, 'automatico', $4, $5::jsonb, $6::uuid)
@@ -117,6 +117,7 @@ export async function trasCaptura(
       tenantId: p.tenantId,
       usuarioId: p.usuarioId,
       tipo: abre ? "reanalisis" : "advertencia",
+      origen: "automatico",
       motivo: abre && p.veredicto === "no_cumple" ? "No cumple" : p.advertencia ?? "",
       correo: p.cfg.avisarAdvertencia,
     });
@@ -128,7 +129,7 @@ export async function trasCaptura(
  * POE vigentes y acreditación del método (vigente hoy).
  */
 export async function calidadDeResultados(db: Db, tenantId: string, resultadoIds: string[], metodoIds: string[]) {
-  const [adv, rea, poe, acr] = await Promise.all([
+  const [adv, rea, poe, acr, labAcr] = await Promise.all([
     resultadoIds.length
       ? db.$queryRawUnsafe<{ id: string; advertencia: boolean; advertencia_motivo: string | null }[]>(
           `SELECT id, advertencia, advertencia_motivo FROM resultado WHERE id = ANY($1::uuid[]) AND advertencia`,
@@ -143,19 +144,45 @@ export async function calidadDeResultados(db: Db, tenantId: string, resultadoIds
         )
       : [],
     metodoIds.length
-      ? db.$queryRawUnsafe<{ cat_metodo_id: string; documento_id: string; codigo: string; titulo: string; version: number | null }[]>(
-          `SELECT p.cat_metodo_id, d.id AS documento_id, d.codigo, d.titulo, d.version_publicada AS version
+      ? db.$queryRawUnsafe<{ cat_metodo_id: string; documento_id: string; codigo: string; titulo: string; version: number | null; archivo: string | null }[]>(
+          `SELECT p.cat_metodo_id, d.id AS documento_id, d.codigo, d.titulo, d.version_publicada AS version,
+                  (SELECT v.nombre_archivo FROM doc_version v WHERE v.documento_id = d.id AND v.numero = d.version_publicada) AS archivo
              FROM cat_metodo_poe p JOIN doc_documento d ON d.id = p.documento_id AND d.deleted_at IS NULL
             WHERE p.cat_metodo_id = ANY($1::uuid[]) ORDER BY p.principal DESC, d.codigo`,
           metodoIds,
         )
       : [],
     metodoIds.length ? metodosAcreditados(db, tenantId, metodoIds) : new Map<string, { numero: string; organismo: string }>(),
+    // Ensayos cuyo laboratorio tiene una acreditación vigente hoy (propia o de todo
+    // el IDIC): los que no están en su alcance se marcan «No acreditado».
+    resultadoIds.length
+      ? db.$queryRawUnsafe<{ id: string }[]>(
+          `SELECT r.id FROM resultado r LEFT JOIN LATERAL lims_lab_de_resultado(r.id) lr ON TRUE
+            WHERE r.id = ANY($1::uuid[])
+              AND EXISTS (SELECT 1 FROM acreditacion a
+                           WHERE a.tenant_id = $2::uuid AND a.deleted_at IS NULL
+                             AND (a.unidad_id IS NULL OR a.unidad_id = lr.unidad_id)
+                             AND (a.vigente_desde IS NULL OR a.vigente_desde <= $3::date)
+                             AND (a.vigente_hasta IS NULL OR a.vigente_hasta >= $3::date))`,
+          resultadoIds,
+          tenantId,
+          hoyCl(),
+        )
+      : [],
   ]);
+  const labAcreditado = new Set(labAcr.map((x) => x.id));
   const advDe = new Map(adv.map((a) => [a.id, a.advertencia_motivo]));
   const reaDe = new Map(rea.map((r) => [r.resultado_id, { id: r.id, motivo: r.motivo, origen: r.origen, estado: r.estado }]));
-  const poeDe = new Map<string, { documentoId: string; codigo: string; titulo: string; version: number | null }[]>();
-  for (const p of poe) (poeDe.get(p.cat_metodo_id) ?? poeDe.set(p.cat_metodo_id, []).get(p.cat_metodo_id)!).push({ documentoId: p.documento_id, codigo: p.codigo, titulo: p.titulo, version: p.version });
+  // `archivo`: nombre real del archivo publicado (con su extensión) para descargarlo.
+  const poeDe = new Map<string, { documentoId: string; codigo: string; titulo: string; version: number | null; archivo: string | null }[]>();
+  for (const p of poe)
+    (poeDe.get(p.cat_metodo_id) ?? poeDe.set(p.cat_metodo_id, []).get(p.cat_metodo_id)!).push({
+      documentoId: p.documento_id,
+      codigo: p.codigo,
+      titulo: p.titulo,
+      version: p.version,
+      archivo: p.archivo,
+    });
   return {
     fila: (resultadoId: string, metodoId: string | null) => ({
       advertencia: advDe.has(resultadoId),
@@ -163,6 +190,7 @@ export async function calidadDeResultados(db: Db, tenantId: string, resultadoIds
       reanalisis: reaDe.get(resultadoId) ?? null,
       poe: metodoId ? poeDe.get(metodoId) ?? [] : [],
       acreditacion: metodoId ? acr.get(metodoId) ?? null : null,
+      laboratorioAcreditado: labAcreditado.has(resultadoId),
     }),
   };
 }

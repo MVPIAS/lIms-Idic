@@ -312,7 +312,7 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
    * automático → analista y jefatura del laboratorio dueño del ensayo (y
    * correo si el parámetro resultados.advertencia_correo lo pide).
    */
-  async alAlertarResultado(d: { resultadoId: string; tenantId: string; usuarioId: string | null; tipo: "advertencia" | "reanalisis"; motivo: string; correo: boolean }) {
+  async alAlertarResultado(d: { resultadoId: string; tenantId: string; usuarioId: string | null; tipo: "advertencia" | "reanalisis"; origen?: "automatico" | "manual"; motivo: string; correo: boolean }) {
     const [r] = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT r.id, r.ot_id, r.analista_id, m.codigo AS muestra, lr.unidad_id,
               COALESCE(ce.nombre, cm.nombre, a.nombre, 'ensayo') AS ensayo
@@ -329,12 +329,15 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
     const ot = await this.datosOt(r.ot_id);
     if (!ot) return null;
     const re = d.tipo === "reanalisis";
+    const manual = re && d.origen === "manual";
     return this.emitir(
       d.tenantId,
       {
         tipo: d.tipo,
-        titulo: `${re ? "Re-análisis automático" : "Resultado en advertencia"} · OT ${ot.codigo}`,
-        mensaje: re
+        titulo: `${manual ? "Re-análisis pedido por el revisor" : re ? "Re-análisis automático" : "Resultado en advertencia"} · OT ${ot.codigo}`,
+        mensaje: manual
+          ? `${r.ensayo} de la muestra ${r.muestra} (OT ${ot.codigo}): se pidió repetir la determinación. Motivo: ${d.motivo}`
+          : re
           ? `${r.ensayo} de la muestra ${r.muestra} (OT ${ot.codigo}): ${d.motivo}. Se abrió un re-análisis: repita la determinación antes de revisarlo.`
           : `${r.ensayo} de la muestra ${r.muestra} (OT ${ot.codigo}): ${d.motivo}`,
         ruta: `/captura-ot?otId=${ot.id}`,

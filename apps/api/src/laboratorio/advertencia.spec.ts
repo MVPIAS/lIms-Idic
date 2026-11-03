@@ -1,4 +1,4 @@
-import { advertenciaNumerica, configResultados, debeReanalizar, motivoReanalisisAbierto } from "./advertencia";
+import { advertenciaNumerica, configResultados, debeReanalizar, motivoReanalisisAbierto, motivoReanalisisAutomatico } from "./advertencia";
 
 describe("dictamen advertencia y re-análisis (§4.2.6 / §4.3.9)", () => {
   it("con Mín y Máx, el margen es un % del intervalo", () => {
@@ -48,5 +48,13 @@ describe("dictamen advertencia y re-análisis (§4.2.6 / §4.3.9)", () => {
   it("motivo de bloqueo", () => {
     expect(motivoReanalisisAbierto(null)).toBeNull();
     expect(motivoReanalisisAbierto({ motivo: "No cumple: 9 > Máx 8", origen: "automatico" })).toMatch(/re-análisis automático pendiente/);
+  });
+
+  it("el motivo del re-análisis automático dice si fue un No cumple o una advertencia", () => {
+    expect(motivoReanalisisAutomatico("no_cumple", null)).toMatch(/^Resultado No cumple/);
+    expect(motivoReanalisisAutomatico("cumple", "Cumple, pero a 0,15 del Máx 8 (margen de advertencia 10 %).")).toBe(
+      "Advertencia: Cumple, pero a 0,15 del Máx 8 (margen de advertencia 10 %).",
+    );
+    expect(motivoReanalisisAutomatico("cumple", null)).toMatch(/^Advertencia: /);
   });
 });
