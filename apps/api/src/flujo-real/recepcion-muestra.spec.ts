@@ -1,4 +1,4 @@
-import { enlaceOrdenesInternas, erroresRecepcion, instanteTomaChile, normalizarRecepcion, recepcionIncompleta, selloRecepcion } from "./recepcion-muestra";
+import { enlaceOrdenesInternas, erroresRecepcion, instanteTomaChile, normalizarRecepcion, recepcionIncompleta, selloRecepcion, tomaPosteriorARecepcion } from "./recepcion-muestra";
 
 const OPC = ["terreno_laboratorio", "entregada_cliente", "seccion_muestreo"];
 const LQC = "11111111-1111-1111-1111-111111111111";
@@ -107,10 +107,23 @@ describe("recepción · Alimentos: temperatura, toma y formulario de muestreo (E
   });
   it("la toma no puede ser posterior a la recepción ni ilegible", () => {
     const tarde = normalizarRecepcion({ ...base, fechaTomaMuestra: "2026-09-07T12:30" });
-    expect(erroresRecepcion(tarde, OPC, null, "Muestra 1: ", recepcion)[0]).toMatch(/^Muestra 1: la toma de muestra no puede ser posterior/);
+    expect(erroresRecepcion(tarde, OPC, null, "Muestra 1: ", recepcion)[0]).toBe("Muestra 1: la toma de muestra no puede ser posterior a la recepción ni futura.");
     const mala = normalizarRecepcion({ ...base, fechaTomaMuestra: "07/09/2026" });
     expect(mala.fechaTomaInvalida).toBe(true);
     expect(erroresRecepcion(mala, OPC).join(" ")).toMatch(/no es válida/);
+  });
+  it("toma: mismo criterio al registrar (recepción = ahora) y al corregir (recepción pasada); ni futura", () => {
+    const recibida = new Date("2026-09-07T15:00:00Z");
+    const ahora = new Date("2026-09-10T15:00:00Z");
+    // Al corregir: después de la recepción, aunque antes de ahora, no vale.
+    expect(tomaPosteriorARecepcion(new Date("2026-09-08T12:00:00Z"), recibida, ahora)).toBe(true);
+    expect(tomaPosteriorARecepcion(new Date("2026-09-07T14:00:00Z"), recibida, ahora)).toBe(false);
+    // Un minuto de tolerancia (el formulario no lleva segundos).
+    expect(tomaPosteriorARecepcion(new Date("2026-09-07T15:00:59Z"), recibida, ahora)).toBe(false);
+    // Futura: aunque la recepción quedara mal fechada en el futuro.
+    expect(tomaPosteriorARecepcion(new Date("2026-09-11T10:00:00Z"), new Date("2026-09-12T00:00:00Z"), ahora)).toBe(true);
+    const futura = normalizarRecepcion({ ...base, fechaTomaMuestra: "2026-09-11T10:00" });
+    expect(erroresRecepcion(futura, OPC, null, "", ahora, ahora).join(" ")).toMatch(/ni futura/);
   });
   it("instanteTomaChile respeta el horario de verano de Chile", () => {
     expect(instanteTomaChile("2026-12-15T10:00")?.toISOString()).toBe("2026-12-15T13:00:00.000Z");
