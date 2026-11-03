@@ -36,6 +36,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { num, fechaHora } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
 import { recordarOtActiva } from "@/lib/ot-activa";
+import { descargarAdjunto } from "@/lib/d11";
 import { confirmar, toast } from "@/components/ui/feedback";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 import { ESTADO_RESULTADO, llamar, qs, veredictoInfo, type Paginado } from "@/lib/laboratorio";
@@ -58,6 +59,13 @@ interface Fila extends EnsayoEditable {
   replicas: number[];
   /** resultado por réplicas (analito del catálogo antiguo): se corrige con «Corregir réplicas…» */
   porReplicas: boolean;
+  /** Dictamen «advertencia» (cumple cerca de un límite) y re-análisis (contrato §4.2.6 / §4.3.9). */
+  advertencia: boolean;
+  advertenciaMotivo: string | null;
+  reanalisis: { id: string; motivo: string; origen: string; estado: string } | null;
+  /** POE del método y alcance acreditado ISO/IEC 17025 vigente (§4.3.1, §4.3.5). */
+  poe: { documentoId: string; codigo: string; titulo: string; version: number | null }[];
+  acreditacion: { numero: string; organismo: string } | null;
   fecha: string | null;
   analistaId: string | null;
   analistaNombre: string | null;
@@ -138,6 +146,11 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     reglasAceptacion: Array.isArray(r.reglasAceptacion) ? r.reglasAceptacion : [],
     notaCaptura: r.notaCaptura ?? null,
     avisosAceptacion: Array.isArray(r.avisosAceptacion) ? r.avisosAceptacion : null,
+    advertencia: !!r.advertencia,
+    advertenciaMotivo: r.advertenciaMotivo ?? null,
+    reanalisis: r.reanalisis ?? null,
+    poe: Array.isArray(r.poe) ? r.poe : [],
+    acreditacion: r.acreditacion ?? null,
     formulaMotivo: r.formulaMotivo ?? null,
     formulaLegado: r.formulaLegado ?? null,
     especOrigen: r.especOrigen ?? "catalogo",
@@ -380,7 +393,7 @@ export default function CapturaOtPage() {
     const raw = (drafts[f.id] ?? "").trim();
     if (!raw) { toast.error("Escriba un valor antes de guardar."); return; }
     const corrige = esCorreccion(f);
-    const motivo = (motivos[f.id] ?? "").trim();
+    const motivo = (motivos[f.id] ?? "").trim() || (f.reanalisis?.estado === "solicitado" ? `Re-análisis: ${f.reanalisis.motivo}`.slice(0, 1000) : "");
     if (corrige && motivo.length < 5) { toast.error("Este ensayo ya tiene un valor: indique el motivo de la corrección (mínimo 5 caracteres)."); return; }
     setOcupado(f.id);
     try {
@@ -476,6 +489,23 @@ export default function CapturaOtPage() {
       setDecidiendo(null);
       setMotivoVeredicto("");
       toast.ok("Veredicto registrado con su motivo: queda en la bitácora y se anota en el informe.");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(null);
+    }
+  }
+
+  /** Re-análisis pedido por el revisor (contrato §4.2.6): bloquea revisar y aprobar hasta repetir. */
+  async function pedirReanalisis(f: Fila) {
+    const motivo = window.prompt(`Re-análisis de ${f.analito}${f.muestraCodigo ? ` (${f.muestraCodigo})` : ""}: ¿por qué hay que repetir la determinación? (mín. 5 caracteres)`);
+    if (motivo == null) return;
+    if (motivo.trim().length < 5) return toast.error("Indique el motivo del re-análisis (mínimo 5 caracteres).");
+    setOcupado(f.id);
+    try {
+      await llamar("POST", `/calidad/resultados/${f.id}/reanalisis`, { motivo: motivo.trim() });
+      toast.ok("Re-análisis pedido: el analista repite la determinación y captura el nuevo valor.");
+      await cargar();
     } catch (e: any) {
       toast.error(e.message);
     } finally {
@@ -746,6 +776,17 @@ export default function CapturaOtPage() {
                             <td>
                               {f.analito}
                               {f.metodo && <div style={{ fontSize: 11, color: "var(--muted)" }}>{f.metodo}</div>}
+                              {ot && (f.acreditacion || f.poe.length > 0) && (
+                                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 2 }}>
+                                  {f.acreditacion && <span className="pill green" title={`Método en el alcance acreditado ${f.acreditacion.organismo} ${f.acreditacion.numero} (NCh-ISO/IEC 17025)`}>Acreditado {f.acreditacion.numero}</span>}
+                                  {f.poe.map((p) => (
+                                    <button key={p.documentoId} type="button" className="pill teal" style={{ border: 0, cursor: "pointer" }} title={`Descargar el POE ${p.codigo} · ${p.titulo}`}
+                                      onClick={() => descargarAdjunto(`/documentos/archivos/${p.documentoId}/descargar`, `${p.codigo}.pdf`).catch((e) => setError(e.message))}>
+                                      POE {p.codigo}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                               {f.asignadoNombre && <div style={{ fontSize: 11, color: "var(--muted)" }}>Asignado a {f.asignadoNombre}</div>}
                               {f.derivado && (
                                 <div style={{ marginTop: 2 }}>
@@ -849,6 +890,16 @@ export default function CapturaOtPage() {
                             </td>
                             <td>
                               <span className={`pill ${vd.pill}`}>{vd.texto}</span>
+                              {f.advertencia && f.veredicto === "cumple" && (
+                                <div><span className="pill amber" title={f.advertenciaMotivo ?? "Cumple, cerca de un límite"}>⚠ advertencia</span></div>
+                              )}
+                              {f.reanalisis?.estado === "solicitado" && (
+                                <div style={{ marginTop: 2 }}>
+                                  <span className="pill red" title={f.reanalisis.motivo}>Re-análisis pendiente</span>
+                                  <div style={{ fontSize: 11, color: "var(--muted)", maxWidth: 220 }}>{f.reanalisis.motivo} Repita la determinación y capture el nuevo valor.</div>
+                                </div>
+                              )}
+                              {f.reanalisis?.estado === "realizado" && <div><span className="pill gray" title={f.reanalisis.motivo}>re-analizado</span></div>}
                               {((f.estado === "capturado" && puede(f, "revisar")) || (f.estado === "revisado_n1" && puede(f, "aprobar"))) && !propio && sinVeredicto(f) && (valorTexto(f) !== "") && (
                                 <select aria-label="Veredicto del revisor" value={decidiendo?.id === f.id ? decidiendo.veredicto : ""} style={{ marginTop: 4, display: "block" }} disabled={busy}
                                   onChange={(e) => { setDecidiendo(e.target.value ? { id: f.id, veredicto: e.target.value } : null); setMotivoVeredicto(""); }}>
@@ -875,15 +926,19 @@ export default function CapturaOtPage() {
                             <td>
                               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                                 {puede(f, "revisar") && f.estado === "capturado" && (
-                                  <button className="btn sm" disabled={busy || propio || sinVeredicto(f)} onClick={() => accion(f, "revisar")}
+                                  <button className="btn sm" disabled={busy || propio || sinVeredicto(f) || f.reanalisis?.estado === "solicitado"} onClick={() => accion(f, "revisar")}
                                     title={propio ? "Lo capturó usted: debe revisarlo otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de revisar, o devuélvalo" : "Marcar como revisado"}>Revisar</button>
                                 )}
                                 {puede(f, "aprobar") && f.estado === "revisado_n1" && (
-                                  <button className="btn success sm" disabled={busy || propio || revisadoPorMi(f) || sinVeredicto(f)} onClick={() => accion(f, "aprobar")}
+                                  <button className="btn success sm" disabled={busy || propio || revisadoPorMi(f) || sinVeredicto(f) || f.reanalisis?.estado === "solicitado"} onClick={() => accion(f, "aprobar")}
                                     title={propio ? "Lo capturó usted: debe aprobarlo otra persona" : revisadoPorMi(f) ? f.bloqueoAprobar ?? "Lo revisó usted: la aprobación la hace otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de aprobar" : "Aprobar el resultado"}>Aprobar</button>
                                 )}
                                 {puede(f, "revisar") && ["capturado", "revisado_n1"].includes(f.estado) && (
                                   <button className="btn outline sm" disabled={busy} onClick={() => { setDevolviendo(devolviendo === f.id ? null : f.id); setMotivo(""); }}>Devolver</button>
+                                )}
+                                {puede(f, "revisar") && ["capturado", "revisado_n1"].includes(f.estado) && f.reanalisis?.estado !== "solicitado" && (
+                                  <button className="btn outline sm" disabled={busy} title="Pedir que se repita la determinación (re-análisis): no se revisa ni se aprueba hasta repetirla"
+                                    onClick={() => pedirReanalisis(f)}>Re-análisis</button>
                                 )}
                                 {puede(f, "aprobar") && f.estado !== "aprobado" && (
                                   <button className="btn ghost-danger sm" disabled={busy} title="Quitar un ensayo que no aplica a esta muestra (con motivo)"
@@ -1041,6 +1096,10 @@ function normalizarParcial(r: any): Partial<Fila> {
     "analistaId", "revisadoAt", "aprobadoAt", "motivoDevolucion", "avisosAceptacion",
   ];
   for (const c of campos) if (r[c] !== undefined) (out as any)[c] = r[c];
-  for (const c of ["analistaNombre", "revisadoPorNombre", "aprobadoPorNombre"] as (keyof Fila)[]) if (r[c] !== undefined) (out as any)[c] = r[c];
+  for (const c of ["analistaNombre", "revisadoPorNombre", "aprobadoPorNombre", "advertencia", "advertenciaMotivo"] as (keyof Fila)[]) if (r[c] !== undefined) (out as any)[c] = r[c];
+  // La captura devuelve el re-análisis como texto: «solicitado» (abierto ahora) o «realizado» (esta captura lo cerró).
+  if (r.reanalisis === "solicitado") out.reanalisis = { id: "", motivo: r.veredicto === "no_cumple" ? "Resultado No cumple: se repite la determinación." : `Advertencia: ${r.advertenciaMotivo ?? ""}`, origen: "automatico", estado: "solicitado" };
+  else if (r.reanalisis === "realizado") out.reanalisis = { id: "", motivo: "Determinación repetida.", origen: "automatico", estado: "realizado" };
+  else if (r.reanalisis && typeof r.reanalisis === "object") out.reanalisis = r.reanalisis;
   return out;
 }

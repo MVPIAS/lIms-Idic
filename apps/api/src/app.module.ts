@@ -50,6 +50,7 @@ import { PasoMetodoModule } from "./catalogo/paso-metodo.module";
 import { DocumentosModule } from "./documentos/documentos.module";
 import { AgendaModule } from "./agenda/agenda.module";
 import { InstrumentosModule } from "./instrumentos/instrumentos.module";
+import { CalidadModule } from "./calidad/calidad.module";
 import { MetrologiaModule } from "./metrologia/metrologia.module";
 import { InternacionModule } from "./internacion/internacion.module";
 import { BpchModule } from "./bpch/bpch.module";
@@ -133,6 +134,7 @@ function prettyTransport() {
     DocumentosModule,
     AgendaModule,
     InstrumentosModule,
+    CalidadModule,
     MetrologiaModule,
     InternacionModule,
     BpchModule,

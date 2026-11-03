@@ -130,4 +130,5 @@ align_qc_lmb_metodos.sql
 align_gestor_documental.sql
 align_agenda_recursos.sql
 align_instrumentos_importacion.sql
+align_calidad_resultados.sql
 align_cierre_permisos.sql

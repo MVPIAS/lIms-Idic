@@ -18,6 +18,8 @@ export const TIPOS_AVISO = {
   oficio_firma: "warn",
   oficio_firmado: "info",
   oficio_devuelto: "alta",
+  advertencia: "warn",
+  reanalisis: "alta",
 } as const satisfies Record<string, Severidad>;
 export type TipoAviso = keyof typeof TIPOS_AVISO;
 

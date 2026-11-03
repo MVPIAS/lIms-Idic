@@ -38,6 +38,8 @@ import { llamar, leerReplicas } from "@/lib/laboratorio";
 export interface EnsayoEditable {
   id: string;
   estado: string;
+  /** Re-análisis abierto: la nueva captura es la repetición (motivo propuesto). */
+  reanalisis?: { motivo: string; estado: string } | null;
   analito: string;
   metodo: string | null;
   tipoDato: "numerico" | "atributo";
@@ -210,7 +212,7 @@ export default function EditorEnsayo({
   const [valorCond2, setValorCond2] = useState(e.valorCondicion2 != null && e.valorCondicion2 !== "" ? String(Number(e.valorCondicion2)).replace(".", ",") : "");
   const [clase, setClase] = useState(e.claseDefecto ?? "");
   const [motivoClase, setMotivoClase] = useState("");
-  const [motivoCaptura, setMotivoCaptura] = useState("");
+  const [motivoCaptura, setMotivoCaptura] = useState(e.reanalisis?.estado === "solicitado" ? `Re-análisis: ${e.reanalisis.motivo}`.slice(0, 1000) : "");
   const [motivoEsp, setMotivoEsp] = useState("");
   // Factor
   const [factorOp, setFactorOp] = useState<"" | "multiplicar" | "dividir">(e.factorOperacion ?? "");

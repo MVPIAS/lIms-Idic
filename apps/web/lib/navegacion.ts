@@ -107,6 +107,7 @@ export const NAV: SeccionNav[] = [
       { href: "/consumibles", label: "Consumibles · kardex", icon: "🧴", perm: "consumible.gestionar", claves: "stock reactivos lotes" },
       { href: "/municion", label: "Munición de prueba", icon: "🎯", perm: "municion.solicitar", ambito: "DSA", claves: "lrb lam d11 cartuchos orden interna balistica" },
       { href: "/qc", label: "Control de calidad (QC)", icon: "✔", perm: "resultado.ver" },
+      { href: "/calidad", label: "Calidad: re-análisis, ISO 17025, POE y alícuotas", icon: "🏅", perm: "resultado.ver", claves: "reanalisis advertencia acreditacion iso 17025 inn alcance poe sop procedimiento metodo alicuota submuestra porcion" },
       { href: "/no-conformidades", label: "No conformidades", icon: "⚠", perm: "nc.ver", claves: "nc accion correctiva capa calidad reclamo pnc tnc pg12" },
       // EP-05 8.2 (frente r4d): apelaciones de Informes de Rechazo.
       { href: "/apelaciones", label: "Apelaciones", icon: "⚖", perm: "apelacion.ver", claves: "apelacion rechazo lrb director" },

@@ -397,6 +397,28 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- Dictamen «advertencia» y re-análisis automático (bloque A, contrato §4.2.6 / §4.3.9) ---
+  {
+    categoria: "resultados",
+    titulo: "Captura · advertencia y re-análisis automático",
+    donde:
+      "Captura por OT: un resultado que cumple pero queda cerca de un límite se marca «advertencia»; un No cumple (y, si se elige, una advertencia) abre un re-análisis que impide revisar y aprobar hasta repetir la determinación o descartarlo. Calidad › Re-análisis. El margen de cada método se ajusta en Calidad › POE y advertencia.",
+    porConfirmar: "Margen de advertencia por laboratorio y si el No cumple se re-analiza siempre (EP-02).",
+    codigos: {
+      advertencia_margen_pct: { tipo: "porcentaje", nombre: "Margen de advertencia (% del intervalo Mín–Máx o del límite único)", min: 0, max: 50, ayuda: "0 = sin advertencias.", porDefecto: "10" },
+      reanalisis_automatico: {
+        tipo: "opcion",
+        nombre: "Re-análisis automático al capturar",
+        opciones: [
+          { valor: "no", etiqueta: "No: el revisor lo pide si hace falta" },
+          { valor: "no_cumple", etiqueta: "Cuando el resultado No cumple (una vez por ensayo)" },
+          { valor: "no_cumple_y_advertencia", etiqueta: "Cuando No cumple o queda en advertencia (una vez por ensayo)" },
+        ],
+        porDefecto: "no_cumple",
+      },
+      advertencia_correo: { tipo: "sino", nombre: "Avisar por correo al laboratorio las advertencias y los re-análisis", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
   // --- Reglas de aceptación del método en la captura (frente ALI-D4) ---
   {
     categoria: "captura_reglas",
