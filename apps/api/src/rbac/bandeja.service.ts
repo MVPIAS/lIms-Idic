@@ -467,7 +467,8 @@ export class BandejaService {
       ocPendientes: () =>
         this.contar(
           `SELECT count(*) AS n FROM orden_compra oc WHERE oc.tenant_id = COALESCE($1::uuid, oc.tenant_id) AND oc.deleted_at IS NULL
-              AND oc.estado IN ('borrador','aprobada','en_proceso')`,
+              -- Estados reales de la OC (adquisiciones.module.ts · OC_ESTADOS): abiertas = emitidas o en curso.
+              AND oc.estado IN ('emitida','en_curso')`,
           tenant,
         ),
       ncAbiertas: () =>
@@ -701,6 +702,20 @@ export class BandejaService {
         "warn",
       );
 
+    // Los Proyectos de Párrafo son del LEM (DSA): la tarjeta solo para la jefatura que lo tiene en su
+    // alcance (o con alguno pendiente); el Jefe del Depto. Químico, por ejemplo, no la ve.
+    const soloConLem = (f: () => Promise<ItemBandeja>) => async (): Promise<ItemBandeja[]> => {
+      const r = await f();
+      if (r.cantidad > 0) return [r];
+      const lem = await this.contar(
+        `SELECT count(*) AS n FROM unidad un WHERE un.tenant_id = COALESCE($1::uuid, un.tenant_id) AND upper(un.codigo) = 'LEM'
+            AND ($2::uuid[] IS NULL OR un.id = ANY($2::uuid[]))`,
+        tenant,
+        unidades,
+      ).catch(() => 0);
+      return lem > 0 ? [r] : [];
+    };
+
     const all = (fs: (() => Promise<ItemBandeja | ItemBandeja[]>)[]) =>
       Promise.all(fs.map((f) => f())).then((r) => r.flat());
 
@@ -721,9 +736,9 @@ export class BandejaService {
       case "JEFE_LAB":
         return all([internacionesPorAnalizar, lotesPorInspeccionar, informesBpch, requerimientos, sinPlazo, sinAsignar, trabajoPorAprobar("en_aprobacion", false, "Documentación del trabajo por aprobar"), porRevisar, porAprobar, oiPorAtender, derivados, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
       case "JEFE_SECCION":
-        return all([internacionesPorAnalizar, informesBpch, sinPlazo, trabajoPorAprobar("en_aprobacion", true, "Proyectos de Párrafo por validar"), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
+        return all([internacionesPorAnalizar, informesBpch, sinPlazo, soloConLem(trabajoPorAprobar("en_aprobacion", true, "Proyectos de Párrafo por validar")), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
       case "JEFE_DEPTO":
-        return all([trabajoPorAprobar("validada", true, "Proyectos de Párrafo por aprobar"), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porFirmarCot, vbDepto, porResponder]);
+        return all([soloConLem(trabajoPorAprobar("validada", true, "Proyectos de Párrafo por aprobar")), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porFirmarCot, vbDepto, porResponder]);
       case "DIRECTOR":
         return all([firmas, porOficializar, vencidas, vencidasPorLab, abiertas, nc, sinOt]);
       case "COMERCIAL":
@@ -749,7 +764,7 @@ export class BandejaService {
         ]);
       case "ABASTECIMIENTO":
         return all([
-          async () => item("oc_pendientes", "Órdenes de compra pendientes", "OC en borrador, aprobadas o en proceso", await q.ocPendientes(), "/ordenes-compra", "warn"),
+          async () => item("oc_pendientes", "Órdenes de compra pendientes", "OC emitidas o en curso, aún sin recibir", await q.ocPendientes(), "/ordenes-compra", "warn"),
         ]);
       case "CALIDAD":
         return all([firmas, nc, porOficializar, vencidas]);
@@ -757,7 +772,7 @@ export class BandejaService {
         return all([
           async () => item("usuarios_sin_rol", "Usuarios sin rol", "Usuarios activos sin ninguna asignación de rol", await q.usuariosSinRol(), "/admin/usuarios?sinRol=1", "warn"),
           async () => item("usuarios_bloqueados", "Usuarios bloqueados", "Cuentas bloqueadas por el administrador o por intentos fallidos de inicio de sesión", await q.usuariosBloqueados(), "/admin/usuarios?estado=bloqueado", "warn"),
-          async () => item("unidades_sin_jefe", "Unidades sin jefe", "Laboratorios, secciones o departamentos sin jefe asignado", await q.unidadesSinJefe(), "/admin/estructura", "info"),
+          async () => item("unidades_sin_jefe", "Unidades sin jefe", "Laboratorios, secciones o departamentos sin jefe asignado", await q.unidadesSinJefe(), "/admin/estructura?sinJefe=1", "info"),
         ]);
       case "LECTOR":
       default:

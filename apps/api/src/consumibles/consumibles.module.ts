@@ -650,7 +650,7 @@ export class ConsumiblesService {
   async listarPendientes(tenantId: string, todos: boolean) {
     const data = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT p.id, p.consumible_id, c.codigo AS consumible_codigo, c.nombre AS consumible_nombre, c.unidad_medida,
-              p.cantidad::float AS cantidad, p.referencia, p.estado, p.created_at, p.resuelto_en, p.motivo_resolucion,
+              p.cantidad::float AS cantidad, p.referencia, p.estado, p.created_at, p.resuelto_en, p.motivo_resolucion, p.lotes,
               mu.codigo AS muestra_codigo, me.codigo AS metodo_codigo, me.nombre AS metodo_nombre,
               uc.nombre_completo AS creado_por_nombre, ur.nombre_completo AS resuelto_por_nombre,
               (SELECT COALESCE(SUM(l.cantidad_actual), 0)::float FROM lote_consumible l
