@@ -903,6 +903,73 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
 
 export const CATEGORIAS_CONFIGURABLES = GRUPOS_CONFIG.map((g) => g.categoria);
 
+/* ------------------------------------------------- listas (combos) --- */
+
+/**
+ * Listas de opciones de «Parámetros del sistema» (tabla de arriba de la
+ * pantalla): se agregan, editan (etiqueta, orden) y desactivan sin motivo.
+ * Distintas de los parámetros de la operación (GRUPOS_CONFIG), cuyo valor se
+ * cambia con motivo.
+ *
+ *   alta = false      el sistema interpreta sus códigos (estados, orígenes,
+ *                     carriles): no se agregan opciones, solo se renombran,
+ *                     reordenan o desactivan.
+ *   noDesactivables   códigos que no se desactivan, con el porqué.
+ */
+export interface ListaParametro {
+  categoria: string;
+  nombre: string;
+  alta?: boolean;
+  noDesactivables?: Record<string, string>;
+}
+
+export const LISTAS_PARAMETROS: ListaParametro[] = [
+  { categoria: "tipo_cliente", nombre: "Tipo de cliente" },
+  { categoria: "forma_pago", nombre: "Forma de pago" },
+  { categoria: "medio_pago", nombre: "Medio de pago" },
+  { categoria: "prioridad", nombre: "Prioridad" },
+  { categoria: "tipo_linea_costeo", nombre: "Tipo de línea de costeo" },
+  { categoria: "tipo_inspeccion", nombre: "Tipo de inspección" },
+  { categoria: "toma_muestra", nombre: "Toma de muestra (recepción)" },
+  { categoria: "cargo_costo", nombre: "Cargo de costo (planillas de la OT)" },
+  {
+    categoria: "medio_envio",
+    nombre: "Medio de envío",
+    noDesactivables: { correo: "«Correo electrónico» no se desactiva: es el medio con el que el LIMS envía los PDF a los clientes." },
+  },
+  { categoria: "moneda", nombre: "Moneda" },
+  { categoria: "formato_cotizacion", nombre: "Formato de cotización" },
+  { categoria: "aceptacion_tipo", nombre: "Tipo de aceptación de la cotización" },
+  { categoria: "validez_cotizacion", nombre: "Validez de la cotización" },
+  { categoria: "estado_cotizacion", nombre: "Estado de la cotización", alta: false },
+  { categoria: "origen_trabajo", nombre: "Origen del trabajo", alta: false },
+  { categoria: "tipo_trabajo", nombre: "Tipo de trabajo", alta: false },
+  { categoria: "carril_dsa", nombre: "Carril de la internación (DSA)", alta: false },
+  { categoria: "lugar_ejecucion", nombre: "Lugar de ejecución" },
+  { categoria: "nivel_tecnologico", nombre: "Nivel tecnológico" },
+  { categoria: "clasificacion_vehiculo", nombre: "Clasificación del vehículo" },
+  { categoria: "producto_lab", nombre: "Producto por laboratorio" },
+  { categoria: "bpch_motivo_reinspeccion", nombre: "Motivo de reinspección (BPCH)" },
+  { categoria: "clase_division_onu", nombre: "Clase / división ONU" },
+  { categoria: "grupo_compatibilidad_onu", nombre: "Grupo de compatibilidad ONU" },
+  { categoria: "certificado_calibracion", nombre: "Certificado de calibración (Metrología)", alta: false },
+];
+
+export const listaDe = (categoria: string) => LISTAS_PARAMETROS.find((l) => l.categoria === categoria) ?? null;
+
+/** Mensaje si la categoría no admite opciones nuevas desde la tabla de listas; null si se puede. */
+export function errorAltaLista(categoria: string): string | null {
+  const l = listaDe(categoria);
+  if (!l) return "Elija una de las listas de «Categoría»: los parámetros de la operación se cambian, con motivo, en su recuadro.";
+  if (l.alta === false) return `En «${l.nombre}» no se agregan opciones: el sistema usa sus códigos. Cambie la etiqueta o el orden de las existentes.`;
+  return null;
+}
+
+/** Mensaje si (categoría, código) no se puede desactivar; null si se puede. */
+export function errorDesactivarLista(categoria: string, codigo: string): string | null {
+  return listaDe(categoria)?.noDesactivables?.[codigo] ?? null;
+}
+
 export const grupoDe = (categoria: string) => GRUPOS_CONFIG.find((g) => g.categoria === categoria) ?? null;
 
 /** Definición del valor de (categoría, código), o null si no es un parámetro configurable. */
