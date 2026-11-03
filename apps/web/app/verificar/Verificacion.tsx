@@ -12,13 +12,13 @@ import { useRouter } from "next/navigation";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
-type Resultado =
+export type Resultado =
   | { tipo: "documento"; d: any }
   | { tipo: "saec"; d: any }
   | { tipo: "no_existe" }
   | { tipo: "error"; mensaje: string };
 
-async function consultar(codigo: string): Promise<Resultado> {
+export async function consultar(codigo: string): Promise<Resultado> {
   const c = encodeURIComponent(codigo.trim().toUpperCase());
   try {
     const r = await fetch(`${API}/informes/verificar/${c}`);
@@ -87,7 +87,7 @@ function Fila({ k, v }: { k: string; v: React.ReactNode }) {
   );
 }
 
-function Ficha({ r }: { r: Resultado }) {
+export function Ficha({ r }: { r: Resultado }) {
   if (r.tipo === "error") return <div className="alert warn" role="alert">{r.mensaje}</div>;
   if (r.tipo === "no_existe")
     return <div className="alert warn" role="alert">No existe ningún documento con ese código. Revise que lo haya escrito tal como aparece impreso.</div>;
