@@ -12,6 +12,7 @@
 // Las reglas viven en el servidor: apps/api/src/equipos/mantencion.module.ts.
 // ===========================================================================
 
+import { MESES_LARGOS } from "@/lib/bpchProcesos";
 import { useCallback, useEffect, useState } from "react";
 import { llamar, qs } from "@/lib/laboratorio";
 import { descargarAdjunto } from "@/lib/d11";
@@ -407,7 +408,11 @@ function Calendario() {
     const k = e.fecha.slice(0, 7);
     (meses.get(k) ?? meses.set(k, []).get(k)!).push(e);
   }
-  const nombreMes = (k: string) => new Date(`${k}-15T12:00:00Z`).toLocaleDateString("es-CL", { month: "long", year: "numeric", timeZone: "UTC" });
+  // «2027-01» → «Enero de 2027» (solo la inicial en mayúscula; capitalize dejaba «Enero De 2027»).
+  const nombreMes = (k: string) => {
+    const mes = MESES_LARGOS[Number(k.slice(5, 7)) - 1] ?? k;
+    return `${mes.charAt(0).toUpperCase()}${mes.slice(1)} de ${k.slice(0, 4)}`;
+  };
   return (
     <>
       <section className="card" style={{ display: "flex", gap: 10, alignItems: "end", flexWrap: "wrap" }}>
@@ -428,7 +433,7 @@ function Calendario() {
       ) : (
         [...meses.entries()].map(([k, evs]) => (
           <section key={k} className="card">
-            <h2 style={{ margin: "0 0 6px", textTransform: "capitalize", fontSize: 16 }}>{nombreMes(k)}</h2>
+            <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>{nombreMes(k)}</h2>
             <div style={{ overflowX: "auto" }}>
               <table className="table">
                 <tbody>
