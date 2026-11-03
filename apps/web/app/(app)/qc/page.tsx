@@ -320,14 +320,22 @@ export default function QcPage() {
     }
   }
 
-  async function revisar(id: string, resultado: "aprobado" | "rechazado") {
+  async function revisar(id: string, resultado: "aprobado" | "rechazado", eraRechazado = false) {
     setError("");
     setOk("");
+    // Aprobar un control rechazado (no cumplió su criterio) exige escribir por qué se acepta.
+    let observaciones: string | undefined;
+    if (resultado === "aprobado" && eraRechazado) {
+      const t = window.prompt("El control está rechazado: ¿por qué se acepta? (mínimo 5 caracteres; queda en el control)");
+      if (t === null) return;
+      if (t.trim().length < 5) { setError("Indique por qué se acepta el control rechazado (mínimo 5 caracteres)."); return; }
+      observaciones = t.trim();
+    }
     try {
       const r = await fetch(`${API}/qc/control/${id}`, {
         method: "PATCH",
         headers: auth(),
-        body: JSON.stringify({ resultado }),
+        body: JSON.stringify({ resultado, ...(observaciones ? { observaciones } : {}) }),
       });
       if (!r.ok) throw new Error(await errorMensaje(r));
       await cargar(otId);
@@ -388,10 +396,15 @@ export default function QcPage() {
           className="alert"
           style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}
         >
-          <span className={`pill ${estado.aprobado ? "green" : "gray"}`}>
-            {estado.aprobado ? "QC aprobado" : "QC pendiente"}
-          </span>
-          {estado.aprobado ? (
+          {/* Sin métodos que exijan QC no hay nada «aprobado»: se dice que no se exige. */}
+          {(!estado.aprobado || metodos.length > 0) && (
+            <span className={`pill ${estado.aprobado ? "green" : "gray"}`}>
+              {estado.aprobado ? "QC aprobado" : "QC pendiente"}
+            </span>
+          )}
+          {estado.aprobado && metodos.length === 0 && !loading ? (
+            <span>Esta OT no tiene métodos que exijan control de calidad.</span>
+          ) : estado.aprobado ? (
             <span>
               La OT {otSel?.codigo} tiene aprobado el control de calidad de todos los métodos que lo
               exigen: la emisión de informe no está bloqueada por QC.
@@ -414,9 +427,8 @@ export default function QcPage() {
             <p className="subtitle">Cargando…</p>
           ) : metodos.length === 0 ? (
             <p className="subtitle">
-              Ningún método presente en las muestras de esta OT tiene <code>qc_requerido</code>. Marque
-              el método como &quot;QC requerido&quot; en el catálogo y materialice sus análisis para
-              exigir control de calidad.
+              Esta OT no tiene métodos que exijan control de calidad. Para exigirlo, la jefatura marca
+              el método como «QC requerido» en el catálogo.
             </p>
           ) : (
             <table className="data">
@@ -579,7 +591,7 @@ export default function QcPage() {
             acciones={(c: Control) => (
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
                 {c.resultado !== "aprobado" && puede("resultado.revisar") && (
-                  <button className="btn sm" onClick={() => revisar(c.id, "aprobado")}
+                  <button className="btn sm" onClick={() => revisar(c.id, "aprobado", c.resultado === "rechazado")}
                     disabled={!!c.registradoPor && c.registradoPor === usuario.id}
                     title={c.registradoPor && c.registradoPor === usuario.id ? "Lo registró usted: debe aprobarlo otra persona" : "Aprobar el control"}>
                     Aprobar

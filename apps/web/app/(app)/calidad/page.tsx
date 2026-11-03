@@ -17,11 +17,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { llamar, qs } from "@/lib/laboratorio";
+import { VEREDICTO, llamar, qs } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
 import { descargarAdjunto, subirFormulario } from "@/lib/d11";
 import { hoyChile } from "@/lib/fecha-chile";
 import { usePermisos } from "@/lib/permisos";
+import { useAlcance } from "@/lib/alcance";
 import { toast } from "@/components/ui/feedback";
 
 type Pestana = "reanalisis" | "acreditacion" | "poe" | "formulas" | "alicuotas";
@@ -92,8 +93,9 @@ const ESTADO_RE: Record<string, { texto: string; pill: string }> = {
 
 function valorDe(v: any) {
   if (!v) return "—";
-  const t = v.texto ?? (v.numerico != null ? num(v.numerico) : null);
-  const ver = v.veredicto === "no_cumple" ? "No cumple" : v.veredicto === "cumple" ? (v.advertencia ? "Cumple · advertencia" : "Cumple") : v.veredicto ?? "";
+  // Un número guardado como texto también va con coma decimal («7.3» → «7,3»).
+  const t = v.texto != null && v.texto !== "" ? (/^-?\d+(\.\d+)?$/.test(String(v.texto).trim()) ? num(String(v.texto).trim()) : v.texto) : v.numerico != null ? num(v.numerico) : null;
+  const ver = v.veredicto === "cumple" && v.advertencia ? "Cumple · advertencia" : v.veredicto ? VEREDICTO[v.veredicto]?.texto ?? v.veredicto : "";
   return `${t ?? "—"}${ver ? ` (${ver})` : ""}`;
 }
 
@@ -775,9 +777,21 @@ const ESTADO_AL: Record<string, { texto: string; pill: string }> = {
   descartada: { texto: "Descartada", pill: "red" },
 };
 
+/** Movimientos del historial de una alícuota (alicuota_movimiento.tipo), en palabras. */
+const MOVIMIENTO_AL: Record<string, string> = {
+  preparacion: "Preparación",
+  consumo: "Consumo",
+  traslado: "Traslado",
+  estado: "Cambio de estado",
+};
+
 function Alicuotas() {
   const { puede } = usePermisos();
   const gestiona = puede("alicuota.gestionar");
+  // Alta de ubicaciones (jefatura del laboratorio, Calidad, Administración).
+  const creaUbicacion = puede("ubicacion.gestionar");
+  const { alcance } = useAlcance();
+  const [nuevaUb, setNuevaUb] = useState<{ codigo: string; nombre: string; tipo: string; unidadId: string } | null>(null);
   const [q, setQ] = useState("");
   const [muestras, setMuestras] = useState<any[]>([]);
   const [muestraId, setMuestraId] = useState<string | null>(null);
@@ -786,10 +800,27 @@ function Alicuotas() {
   const [mov, setMov] = useState<{ id: string; tipo: string; cantidad: string; estado: string; ubicacionId: string; detalle: string } | null>(null);
   // Ubicaciones donde guardar o a donde trasladar una alícuota (comunes y de su laboratorio).
   const [ubicaciones, setUbicaciones] = useState<{ id: string; codigo: string; nombre: string; path: string }[]>([]);
-  useEffect(() => {
+  const cargarUbicaciones = useCallback(() => {
     if (!gestiona) return;
     llamar<any[]>("GET", "/calidad/ubicaciones").then(setUbicaciones).catch(() => setUbicaciones([]));
   }, [gestiona]);
+  useEffect(() => {
+    cargarUbicaciones();
+  }, [cargarUbicaciones]);
+  const crearUbicacion = async () => {
+    if (!nuevaUb) return;
+    if (!nuevaUb.codigo.trim() || !nuevaUb.nombre.trim()) { toast.error("Indique el código y el nombre de la ubicación."); return; }
+    try {
+      const u = await llamar<any>("POST", "/calidad/ubicaciones", {
+        codigo: nuevaUb.codigo.trim(), nombre: nuevaUb.nombre.trim(), tipo: nuevaUb.tipo || null, unidadId: nuevaUb.unidadId || null,
+      });
+      toast.ok(`Ubicación ${u.codigo} registrada.`);
+      setNuevaUb(null);
+      cargarUbicaciones();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
   const opcionesUbicacion = ubicaciones.map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>);
 
   useEffect(() => {
@@ -870,8 +901,51 @@ function Alicuotas() {
         </div>
         <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
           Una alícuota es una porción de la muestra preparada para un ensayo o para guardar. Lleva su código, cantidad, ubicación y estado; cada consumo, traslado o cambio queda en su historial.
+          {gestiona && creaUbicacion && ubicaciones.length > 0 && !nuevaUb && (
+            <>{" "}<button className="btn outline sm" onClick={() => setNuevaUb({ codigo: "", nombre: "", tipo: "estante", unidadId: alcance?.esGlobal ? "" : alcance?.unidadesVisibles[0]?.id ?? "" })}>＋ Nueva ubicación</button></>
+          )}
         </p>
       </section>
+      {gestiona && (ubicaciones.length === 0 || nuevaUb) && (
+        <section className="card">
+          {ubicaciones.length === 0 && (
+            <div className="alert warn" style={{ marginBottom: nuevaUb ? 10 : 0 }}>
+              No hay ubicaciones configuradas: «Ubicación» solo ofrece «Sin ubicación» y no se puede registrar un traslado.{" "}
+              {creaUbicacion
+                ? <>Regístrelas con «＋ Nueva ubicación» (sala, gabinete, estante o caja).{" "}
+                    {!nuevaUb && <button className="btn outline sm" onClick={() => setNuevaUb({ codigo: "", nombre: "", tipo: "estante", unidadId: alcance?.esGlobal ? "" : alcance?.unidadesVisibles[0]?.id ?? "" })}>＋ Nueva ubicación</button>}</>
+                : "Pida a la jefatura de su laboratorio o a Calidad que las registre en esta misma pestaña (Calidad › Alícuotas › «＋ Nueva ubicación»)."}
+            </div>
+          )}
+          {nuevaUb && (
+            <div style={{ display: "grid", gridTemplateColumns: "140px 1fr 140px minmax(160px, 240px) auto auto", gap: 8, alignItems: "end" }}>
+              <div className="field" style={{ margin: 0 }}>
+                <label htmlFor="ub-c">Código <span className="req">*</span></label>
+                <input id="ub-c" value={nuevaUb.codigo} onChange={(e) => setNuevaUb({ ...nuevaUb, codigo: e.target.value })} maxLength={60} placeholder="Ej.: LQA-E1" />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label htmlFor="ub-n">Nombre <span className="req">*</span></label>
+                <input id="ub-n" value={nuevaUb.nombre} onChange={(e) => setNuevaUb({ ...nuevaUb, nombre: e.target.value })} maxLength={120} placeholder="Ej.: Estante 1 del refrigerador de muestras" />
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label htmlFor="ub-t">Tipo</label>
+                <select id="ub-t" value={nuevaUb.tipo} onChange={(e) => setNuevaUb({ ...nuevaUb, tipo: e.target.value })}>
+                  {[["sala", "Sala"], ["gabinete", "Gabinete"], ["estante", "Estante"], ["caja", "Caja"]].map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                </select>
+              </div>
+              <div className="field" style={{ margin: 0 }}>
+                <label htmlFor="ub-l">Laboratorio</label>
+                <select id="ub-l" value={nuevaUb.unidadId} onChange={(e) => setNuevaUb({ ...nuevaUb, unidadId: e.target.value })}>
+                  {alcance?.esGlobal && <option value="">Común a todos los laboratorios</option>}
+                  {(alcance?.unidadesVisibles ?? []).map((u) => <option key={u.id} value={u.id}>{u.codigo} · {u.nombre}</option>)}
+                </select>
+              </div>
+              <button className="btn primary sm" onClick={crearUbicacion}>Registrar ubicación</button>
+              <button className="btn outline sm" onClick={() => setNuevaUb(null)}>Cancelar</button>
+            </div>
+          )}
+        </section>
+      )}
       {datos && (
         <section className="card">
           <h2 style={{ margin: "0 0 6px" }}>
@@ -921,7 +995,7 @@ function Alicuotas() {
                       <td><span className={`pill ${ESTADO_AL[a.estado]?.pill ?? "gray"}`}>{ESTADO_AL[a.estado]?.texto ?? a.estado}</span></td>
                       <td style={{ fontSize: 11.5, color: "var(--muted)" }}>
                         {a.movimientos.map((m: any, i: number) => (
-                          <div key={i}>{fechaHora(m.creadoEn)} · {m.tipo}{m.cantidad != null ? ` ${num(m.cantidad)}` : ""}{m.estadoHasta && m.estadoHasta !== m.estadoDesde ? ` → ${ESTADO_AL[m.estadoHasta]?.texto ?? m.estadoHasta}` : ""}{m.detalle ? ` · ${m.detalle}` : ""}{m.usuario ? ` · ${m.usuario}` : ""}</div>
+                          <div key={i}>{fechaHora(m.creadoEn)} · {MOVIMIENTO_AL[m.tipo] ?? m.tipo}{m.cantidad != null ? ` ${num(m.cantidad)}` : ""}{m.estadoHasta && m.estadoHasta !== m.estadoDesde ? ` → ${ESTADO_AL[m.estadoHasta]?.texto ?? m.estadoHasta}` : ""}{m.detalle ? ` · ${m.detalle}` : ""}{m.usuario ? ` · ${m.usuario}` : ""}</div>
                         ))}
                       </td>
                       {gestiona && (

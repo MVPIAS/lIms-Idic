@@ -249,7 +249,12 @@ export class PlantillaVersionesService {
     const v = await this.version(vid, tenantId);
     const m = motivoNoEditable(v);
     if (m) throw new ConflictException(m);
-    await this.prisma.$executeRawUnsafe(`DELETE FROM plantilla_informe_version WHERE id = $1::uuid AND estado = 'BORRADOR'`, vid);
+    await this.prisma.$transaction(async (tx) => {
+      // Una copia («Duplicar») de una plantilla que solo tenía este borrador lo
+      // referencia como origen: se suelta la referencia para poder borrarlo.
+      await tx.$executeRawUnsafe(`UPDATE plantilla_informe_version SET basada_en_id = NULL WHERE basada_en_id = $1::uuid`, vid);
+      await tx.$executeRawUnsafe(`DELETE FROM plantilla_informe_version WHERE id = $1::uuid AND estado = 'BORRADOR'`, vid);
+    });
     return { descartado: true, numero: v.numero };
   }
 
