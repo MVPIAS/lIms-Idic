@@ -73,6 +73,7 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     this.bajas.push(alEvento("resultado.aprobado", (d) => this.alAprobarResultado(d.resultadoId, d.usuarioId)));
     this.bajas.push(alEvento("documento.oficial", (d) => this.alOficializar(d.certificadoId, d.tenantId, d.usuarioId)));
+    this.bajas.push(alEvento("resultado.alerta", (d) => this.alAlertarResultado(d)));
     // Revisión de plazos cada hora (desactivable por entorno o por parámetro).
     if (process.env.AVISOS_AUTOMATICOS !== "false" && process.env.NODE_ENV !== "test") {
       this.reloj = setInterval(() => this.revisarTodos().catch(() => undefined), UNA_HORA);
@@ -285,6 +286,46 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
       ot.tenant_id,
       { tipo: alerta, titulo, mensaje, ruta: `/ot/${ot.id}?tab=resultados`, otId: ot.id, clave: `${alerta}:${r.id}`, creadoPor: usuarioId },
       { jefesDe: [r.unidad_id ?? ot.unidad_principal], usuarios: [ot.ejecutivo_id], correosExternos: cfg.noCumpleAlCliente ? [ot.cliente_email] : [] },
+    );
+  }
+
+  /**
+   * Contrato §4.2.6 / §4.3.9: captura en advertencia o con re-análisis
+   * automático → analista y jefatura del laboratorio dueño del ensayo (y
+   * correo si el parámetro resultados.advertencia_correo lo pide).
+   */
+  async alAlertarResultado(d: { resultadoId: string; tenantId: string; usuarioId: string | null; tipo: "advertencia" | "reanalisis"; motivo: string; correo: boolean }) {
+    const [r] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT r.id, r.ot_id, r.analista_id, m.codigo AS muestra, lr.unidad_id,
+              COALESCE(ce.nombre, cm.nombre, a.nombre, 'ensayo') AS ensayo
+         FROM resultado r
+         JOIN muestra m ON m.id = r.muestra_id
+         LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
+         LEFT JOIN cat_ensayo ce ON ce.id = cm.ensayo_id
+         LEFT JOIN analito a ON a.id = r.analito_id
+         LEFT JOIN LATERAL lims_lab_de_resultado(r.id) lr ON TRUE
+        WHERE r.id = $1::uuid`,
+      d.resultadoId,
+    );
+    if (!r?.ot_id) return null;
+    const ot = await this.datosOt(r.ot_id);
+    if (!ot) return null;
+    const re = d.tipo === "reanalisis";
+    return this.emitir(
+      d.tenantId,
+      {
+        tipo: d.tipo,
+        titulo: `${re ? "Re-análisis automático" : "Resultado en advertencia"} · OT ${ot.codigo}`,
+        mensaje: re
+          ? `${r.ensayo} de la muestra ${r.muestra} (OT ${ot.codigo}): ${d.motivo}. Se abrió un re-análisis: repita la determinación antes de revisarlo.`
+          : `${r.ensayo} de la muestra ${r.muestra} (OT ${ot.codigo}): ${d.motivo}`,
+        ruta: `/captura-ot?otId=${ot.id}`,
+        otId: ot.id,
+        clave: `${d.tipo}:${r.id}:${Date.now()}`,
+        creadoPor: d.usuarioId,
+      },
+      { jefesDe: [r.unidad_id ?? ot.unidad_principal], usuarios: [r.analista_id] },
+      { correo: d.correo },
     );
   }
 

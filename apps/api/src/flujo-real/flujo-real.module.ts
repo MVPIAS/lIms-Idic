@@ -40,6 +40,7 @@ import { evaluarReglas, leerReglas, modoReglas, textoRegla, type AvisoAceptacion
 import { leerCondicion2, leerPlanClases } from "../laboratorio/requisito-compuesto";
 import { aplicarEtAMuestra } from "../especificacion-tecnica/aplicar-et";
 import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
+import { advertenciaDeCaptura, calidadDeResultados, leerConfigResultados, reanalisisAbierto, trasCaptura } from "../calidad/reanalisis";
 import { criterioIndeterminado, leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado } from "../laboratorio/veredicto";
 import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
 import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion, type RecepcionNormalizada } from "./recepcion-muestra";
@@ -980,7 +981,9 @@ export class PuenteAnalisisService {
       tipoDatoDe({ limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, requisito: resultado.requisito });
     // Corregir un valor ya capturado (aún sin revisar) exige motivo: queda en el historial.
     const corrige = teniaValor(resultado);
-    const motivo = entrada.motivo?.trim() || null;
+    // Re-análisis abierto (contrato §4.2.6): esta captura es la repetición y su motivo por defecto.
+    const reanalisis = await reanalisisAbierto(this.prisma as any, id);
+    const motivo = entrada.motivo?.trim() || (reanalisis && corrige ? `Re-análisis: ${reanalisis.motivo}`.slice(0, 500) : null);
     if (exigeMotivoCorreccion(resultado.estado, corrige) && (!motivo || motivo.length < 5))
       throw new BadRequestException(
         "Este ensayo ya tiene un valor capturado: indique el motivo de la corrección (mínimo 5 caracteres). Queda en el historial del resultado.",
@@ -1068,14 +1071,25 @@ export class PuenteAnalisisService {
       }
     }
 
+    // Dictamen «advertencia»: cumple, pero cerca de un límite (contrato §4.2.6 / §4.3.9).
+    const cfgResultados = await leerConfigResultados(this.prisma as any, tenantId);
+    const advertencia = await advertenciaDeCaptura(
+      this.prisma as any,
+      cfgResultados,
+      { catMetodoId: resultado.catMetodoId ?? null, limiteInf: resultado.limiteInf ?? null, limiteSup: resultado.limiteSup ?? null, tipoDato },
+      calc,
+    );
+
     const actualizado = await conTraza(
       this.prisma,
       { usuarioId: req?.user?.sub, motivo: motivo ?? (resultado.estado === "devuelto" ? resultado.motivoDevolucion : null), origen: corrige ? "correccion" : "captura" },
       async (tx) => {
       await tx.$executeRawUnsafe(
-        `UPDATE resultado SET avisos_aceptacion = $2::jsonb WHERE id = $1::uuid`,
+        `UPDATE resultado SET avisos_aceptacion = $2::jsonb, advertencia = $3, advertencia_motivo = $4 WHERE id = $1::uuid`,
         id,
         avisos.length ? JSON.stringify(avisos) : null,
+        !!advertencia,
+        advertencia,
       );
       return tx.resultado.update({
       where: { id },
@@ -1111,11 +1125,25 @@ export class PuenteAnalisisService {
     });
       });
     const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
+    const re = await trasCaptura(this.prisma as any, {
+      tenantId,
+      resultadoId: id,
+      otId: otId ?? null,
+      usuarioId: req?.user?.sub ?? null,
+      cfg: cfgResultados,
+      veredicto: calc.veredicto,
+      advertencia,
+      valor: { numerico: calc.resultadoFinal ?? calc.valorNumerico, texto: calc.valorTexto },
+      abierto: reanalisis,
+    });
     return {
       ...actualizado,
       veredictoMuestra: veredictoDeLaMuestra,
       explicacion: calc.explicacion,
       avisosAceptacion: avisos.length ? avisos : null,
+      advertencia: !!advertencia,
+      advertenciaMotivo: advertencia,
+      reanalisis: re.reanalisis,
     };
   }
 
@@ -1358,6 +1386,8 @@ export class PuenteAnalisisService {
         )
       : [];
     const avisosDe = new Map(avisosFilas.map((a) => [a.id, a.avisos_aceptacion]));
+    // Advertencia, re-análisis, POE y acreditación ISO/IEC 17025 de cada ensayo (bloque A, calidad).
+    const calidadDe = await calidadDeResultados(this.prisma as any, tenantId, idsResultado, metodoIds);
 
     // Veredicto de cada muestra (lote) y de la OT, con la misma regla.
     const porMuestra = muestras.map((m) => ({
@@ -1421,6 +1451,7 @@ export class PuenteAnalisisService {
             : [],
           notaCaptura: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.nota ?? null : null,
           avisosAceptacion: avisosDe.get(r.id) ?? null,
+          ...calidadDe.fila(r.id, r.catMetodoId ?? null),
         };
       }),
     };

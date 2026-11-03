@@ -1,3 +1,4 @@
+import { exigirSinReanalisis } from "../calidad/reanalisis";
 import { SinAlcanceDeEscritura } from "../rbac/alcance-catalogo.guard";
 import { errorMotivoVeredicto } from "./veredicto-decidido";
 import { emitirEvento } from "../common/eventos";
@@ -610,6 +611,9 @@ export class ResultadoService extends BaseCrudService {
     //    la condición «Pendiente».
     if (nuevo !== "devuelto" && motivoSinVeredicto(actual.veredicto, nuevo))
       throw new ConflictException(motivoSinVeredicto(actual.veredicto, nuevo)!);
+
+    // 3b. Re-análisis abierto (contrato §4.2.6): se repite la determinación o la jefatura lo descarta.
+    if (nuevo !== "devuelto") await exigirSinReanalisis(this.prisma as any, id);
 
     // 4. Revisión y aprobación por personas distintas (recorrido MP-06, D06-05).
     if (nuevo === "aprobado" && this.alcanceRes && actual.revisadoPor && actual.revisadoPor === usuarioId) {
