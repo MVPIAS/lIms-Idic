@@ -198,10 +198,41 @@ export function transicionDocAdm(actual: string, accion: string): { estado?: str
       error:
         actual === "conforme"
           ? "La documentación administrativa ya está conforme."
-          : `No se puede «${accion}» la documentación en estado «${actual}». Acciones posibles: ${posibles.join(", ") || "ninguna"}.`,
+          : `No se puede «${ACCION_DOC_ADM[accion as AccionDocAdm] ?? accion}» la documentación en estado «${ESTADO_DOC_ADM[actual] ?? actual}». ` +
+            `Acciones posibles: ${posibles.map((x) => ACCION_DOC_ADM[x as AccionDocAdm] ?? x).join(", ") || "ninguna"}.`,
     };
   }
   return { estado: destino };
+}
+
+/** Nombre legible de cada acción de la documentación administrativa (bitácora y mensajes). */
+export const ACCION_DOC_ADM: Record<AccionDocAdm, string> = {
+  solicitar: "Solicitud al importador",
+  recibir: "Recepción",
+  conforme: "Conforme",
+  no_conforme: "No conforme",
+};
+
+/** Nombre legible del estado de la documentación administrativa. */
+export const ESTADO_DOC_ADM: Record<string, string> = {
+  pendiente: "Pendiente",
+  solicitada: "Solicitada",
+  recibida: "Recibida",
+  conforme: "Conforme",
+  no_conforme: "No conforme",
+  no_aplica: "No aplica",
+};
+
+/**
+ * Línea de la bitácora del expediente para un paso de la documentación
+ * administrativa: TODOS los pasos quedan (también la recepción y el
+ * «Conforme», aunque no traigan detalle), con su nombre legible; pedir de
+ * nuevo estando ya solicitada es una «Reiteración de la solicitud».
+ */
+export function lineaBitacoraDocAdm(fecha: string, accion: AccionDocAdm, estadoAnterior: string, detalle?: string | null): string {
+  const nombre = accion === "solicitar" && estadoAnterior === "solicitada" ? "Reiteración de la solicitud" : ACCION_DOC_ADM[accion];
+  const d = detalle?.trim();
+  return `${fecha} · ${nombre}${d ? `: ${d}` : ""}`;
 }
 
 /* ========================================================================== */

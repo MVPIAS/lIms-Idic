@@ -20,6 +20,7 @@ import {
   faltantesRemision,
   normalizarCnc,
   transicionDocAdm,
+  lineaBitacoraDocAdm,
 } from "../comun/reglas-bpch";
 import { numeroBorrador, totales } from "../../facturacion/reglas-factura";
 import { ListadoArmaBody, erroresListadoArmas, guardarListadoArmas, leerListadoArmas } from "../../saec/d11/listado-armas";
@@ -699,7 +700,8 @@ export class InternacionBpchService {
       t.estado,
       dto.accion,
       dto.fecha,
-      dto.detalle?.trim() ? `${dto.fecha} · ${dto.accion}: ${dto.detalle.trim()}` : null,
+      // Todos los pasos quedan en la bitácora, con su nombre legible.
+      lineaBitacoraDocAdm(dto.fecha, dto.accion, i.doc_adm_estado, dto.detalle),
       dto.facturaComercial?.trim() || null,
       dto.documentoAduanero?.trim() || null,
       usuarioDe(req),
