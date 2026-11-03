@@ -10,6 +10,8 @@ describe("acción de la bitácora en español", () => {
 
   it("lo desconocido es el alta de un sub-registro, sin guiones", () => {
     expect(accionLegible("solicitudes-laboratorio")).toEqual({ etiqueta: "Registro de solicitudes laboratorio", grupo: "crear" });
+    expect(accionLegible("ordenes-compra").etiqueta).toBe("Registro de órdenes de compra");
+    expect(accionLegible("ot").etiqueta).toBe("Registro de OT");
     expect(accionLegible("lotes").grupo).toBe("crear");
   });
 
