@@ -58,12 +58,12 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/informes/por-firmar", titulo: "Firmar informes", desc: "Informes listos para tu firma", icono: "✒", perm: "documento.firmar" },
     { href: "/dashboard", titulo: "Indicadores por laboratorio", desc: "Carga, plazos y resultados del departamento", icono: "📊" },
     { href: "/certificados", titulo: "Certificados", desc: "Firma, entrega y anulación de informes", icono: "📜", perm: "ot.ver" },
-    { href: "/reportes", titulo: "Reportes", desc: "Exporta datos del departamento", icono: "📤", perm: "resultado.ver" },
+    { href: "/reportes", titulo: "Reportes", desc: "Exporta datos del departamento", icono: "📤", perm: ["reporte.ver", "reporte.comercial.ver"] },
   ],
   DIRECTOR: [
     { href: "/informes/por-firmar", titulo: "Firmar", desc: "Documentos que requieren la firma de la Dirección", icono: "✒", perm: "documento.firmar" },
     { href: "/dashboard", titulo: "Indicadores por laboratorio", desc: "Visión general del instituto", icono: "📊" },
-    { href: "/reportes", titulo: "Reportes", desc: "Información para la toma de decisiones", icono: "📤", perm: "resultado.ver" },
+    { href: "/reportes", titulo: "Reportes", desc: "Información para la toma de decisiones", icono: "📤", perm: ["reporte.ver", "reporte.comercial.ver"] },
     { href: "/cotizaciones", titulo: "Cotizaciones", desc: "Propuestas comerciales en curso", icono: "💲", perm: "cotizacion.ver" },
   ],
   COMERCIAL: [
@@ -106,7 +106,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
     { href: "/catalogo", titulo: "Tablas maestras", desc: "Catálogo de productos y análisis", icono: "🗃", perm: "catalogo.gestionar" },
   ],
   LECTOR: [
-    { href: "/reportes", titulo: "Reportes", desc: "Consulta y exporta información", icono: "📊", perm: "resultado.ver" },
+    { href: "/reportes", titulo: "Reportes", desc: "Consulta y exporta información", icono: "📊", perm: ["reporte.ver", "reporte.comercial.ver"] },
     { href: "/documentos", titulo: "Documentos", desc: "Busca informes y certificados", icono: "🗄", perm: "ot.ver" },
     { href: "/documentos/gestor", titulo: "Gestor documental", desc: "Carpetas, versiones y permisos", icono: "📂", perm: "documento.ver" },
     { href: "/saec/verificar", titulo: "Verificar certificado", desc: "Comprueba la autenticidad de un certificado", icono: "🔎" },
