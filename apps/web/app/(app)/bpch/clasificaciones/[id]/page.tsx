@@ -66,8 +66,20 @@ function aFormulario(p: any): Pruebas {
       pesoFinal15mmG: p?.it22?.pesoFinal15mmG ?? "",
       ensayos: p?.it22?.ensayos ?? [],
     },
-    it23: { aplica: Boolean(p?.it23?.aplica), masaMuestraG: p?.it23?.masaMuestraG ?? "", ensayos: p?.it23?.ensayos ?? [] },
+    it23: {
+      aplica: Boolean(p?.it23?.aplica),
+      masaMuestraG: p?.it23?.masaMuestraG ?? "",
+      // Borrador guardado con IT23 «Aplica» y sin ensayos (los vacíos no se
+      // guardan): se reabren los tres ensayos vacíos, como al marcar «Aplica».
+      ensayos: completarEnsayosIt23(Boolean(p?.it23?.aplica), p?.it23?.ensayos ?? []),
+    },
   };
+}
+
+/** IT23 son tres ensayos: con «Aplica» marcado se completan hasta tres filas vacías. */
+function completarEnsayosIt23(aplica: boolean, ensayos: EnsayoIt23[]): EnsayoIt23[] {
+  if (!aplica || ensayos.length >= 3) return ensayos;
+  return [...ensayos, ...Array.from({ length: 3 - ensayos.length }, (): EnsayoIt23 => ({ presionMaxKpa: "" }))];
 }
 
 const n = (v: unknown) => (v === "" || v === null || v === undefined ? null : Number(v));
