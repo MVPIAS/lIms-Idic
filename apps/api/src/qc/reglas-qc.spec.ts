@@ -20,6 +20,13 @@ describe("control de calidad · independencia", () => {
     expect(motivoNoRevisable("aprobado", { registradoPor: null }, "u1", true)).toBeNull();
   });
 
+  it("aprobar un control rechazado exige la observación de por qué se acepta (400)", () => {
+    expect(motivoNoRevisable("aprobado", { registradoPor: "u1", resultado: "rechazado" }, "u2", true)?.codigo).toBe(400);
+    expect(motivoNoRevisable("aprobado", { registradoPor: "u1", resultado: "rechazado" }, "u2", true, "abc")?.codigo).toBe(400);
+    expect(motivoNoRevisable("aprobado", { registradoPor: "u1", resultado: "rechazado" }, "u2", true, "Repetido con medio nuevo: conforme")).toBeNull();
+    expect(motivoNoRevisable("aprobado", { registradoPor: "u1", resultado: "pendiente" }, "u2", true)).toBeNull();
+  });
+
   it("rechazar o volver a pendiente no exige independencia", () => {
     expect(motivoNoRevisable("rechazado", { registradoPor: "u1" }, "u1", false)).toBeNull();
     expect(motivoNoRevisable("pendiente", { registradoPor: "u1" }, "u1", false)).toBeNull();

@@ -46,7 +46,7 @@ export class CalidadService {
     const est = ["solicitado", "realizado", "descartado"].includes(String(estado)) ? estado : estado === "todos" ? null : "solicitado";
     return this.prisma.$queryRawUnsafe<any[]>(
       `SELECT ra.id, ra.resultado_id AS "resultadoId", ra.ot_id AS "otId", o.codigo AS "otCodigo", m.codigo AS muestra,
-              COALESCE(ce.nombre, cm.nombre, a.nombre, 'ensayo') AS ensayo, ra.origen, ra.motivo, ra.estado,
+              COALESCE(can.nombre, a.nombre, ce.nombre, cm.nombre, 'ensayo') AS ensayo, ra.origen, ra.motivo, ra.estado,
               ra.valor_anterior AS "valorAnterior", ra.valor_nuevo AS "valorNuevo", ra.cierre_motivo AS "cierreMotivo",
               ra.solicitado_at AS "solicitadoAt", ra.cerrado_at AS "cerradoAt", us.nombre_completo AS "solicitadoPor", uc.nombre_completo AS "cerradoPor",
               ul.codigo AS laboratorio
@@ -57,6 +57,8 @@ export class CalidadService {
          LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
          LEFT JOIN cat_ensayo ce ON ce.id = cm.ensayo_id
          LEFT JOIN analito a ON a.id = r.analito_id
+         -- El ensayo con el mismo nombre que en la captura (el analito del catálogo, p. ej. «Proteína cruda»).
+         LEFT JOIN cat_analito can ON can.id = r.cat_analito_id
          LEFT JOIN usuario us ON us.id = ra.solicitado_por
          LEFT JOIN usuario uc ON uc.id = ra.cerrado_por
          LEFT JOIN LATERAL lims_lab_de_resultado(r.id) lr ON TRUE
@@ -631,6 +633,46 @@ export class CalidadService {
       texto(q, 60),
       unidades,
     );
+  }
+
+  /**
+   * Alta de una ubicación (sala, gabinete, estante, caja…) con `ubicacion.gestionar`.
+   * Con laboratorio, debe ser de su alcance; sin laboratorio (común a todos), solo
+   * con alcance global (Calidad, Administración). La pantalla de alícuotas la ofrece
+   * cuando no hay ninguna configurada.
+   */
+  async crearUbicacion(req: any, b: any) {
+    const codigo = texto(b?.codigo, 60);
+    const nombre = texto(b?.nombre, 120);
+    const tipo = texto(b?.tipo, 30);
+    const unidadId = typeof b?.unidadId === "string" && b.unidadId ? b.unidadId : null;
+    if (!codigo || !nombre) throw new BadRequestException("Indique el código y el nombre de la ubicación.");
+    if (unidadId && !/^[0-9a-f-]{36}$/i.test(unidadId)) throw new BadRequestException("El laboratorio indicado no existe.");
+    const alcance = await this.alcance.filtroUnidades(req, "ubicacion.gestionar");
+    if (alcance !== null && (!unidadId || !alcance.includes(unidadId)))
+      throw new ForbiddenException(
+        unidadId ? "Fuera de su alcance: solo registra ubicaciones de sus laboratorios." : "Una ubicación común (sin laboratorio) la registra Calidad o Administración: indique su laboratorio.",
+      );
+    const tenantId = tenantDe(req);
+    const existe = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT 1 FROM ubicacion WHERE tenant_id = $1::uuid AND upper(codigo) = upper($2)`,
+      tenantId,
+      codigo,
+    );
+    if (existe.length) throw new ConflictException(`Ya existe la ubicación ${codigo}.`);
+    const [u] = await this.prisma.$queryRawUnsafe<any[]>(
+      `INSERT INTO ubicacion (tenant_id, codigo, nombre, tipo, path, unidad_id, activa)
+       SELECT $1::uuid, $2, $3, $4, $2, $5::uuid, TRUE
+        WHERE $5::uuid IS NULL OR EXISTS (SELECT 1 FROM unidad WHERE id = $5::uuid AND tenant_id = $1::uuid)
+       RETURNING id, codigo, nombre, tipo, path`,
+      tenantId,
+      codigo,
+      nombre,
+      tipo,
+      unidadId,
+    );
+    if (!u) throw new BadRequestException("El laboratorio indicado no existe.");
+    return u;
   }
 
   /** La ubicación elegida es del tenant y está activa (null si no se eligió). */
