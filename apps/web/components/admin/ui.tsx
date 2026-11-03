@@ -8,6 +8,7 @@
  */
 
 import Link from "next/link";
+import { TarjetaSinAcceso } from "@/components/RequierePermiso";
 import {
   createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode,
 } from "react";
@@ -204,15 +205,9 @@ export function EstadoError({ error, onReintentar, recurso }: { error: unknown; 
   );
 }
 
-export function SinAcceso({ permiso }: { permiso: string }) {
-  return (
-    <div className="card max-w-xl mx-auto mt-6">
-      <EstadoVacio icono="🔒" titulo="Sin acceso a esta sección"
-        texto={<>Tu perfil no incluye el permiso <span className="codigo">{permiso}</span>. Si necesitas administrar
-          esta parte del sistema, pídeselo al administrador del LIMS.</>}
-        accion={<Link href="/dashboard" className="btn outline sm">Volver al panel</Link>} />
-    </div>
-  );
+/** Sin permiso para una pantalla de Administración: la misma tarjeta «Sin acceso» del resto del sistema. */
+export function SinAcceso({ permiso, titulo = "esta sección" }: { permiso: string | string[]; titulo?: string }) {
+  return <TarjetaSinAcceso perm={permiso} titulo={titulo} />;
 }
 
 /** Guardia de UI por permiso (la seguridad real la impone el backend). */

@@ -103,6 +103,8 @@ function textoHistorial(h: any): string {
   if (h.tipo === "documento_registro") return `Documento ${d.tipo ?? ""} Nº ${d.numero ?? ""} registrado${d.version > 1 ? ` (versión ${d.version})` : ""}`;
   if (h.tipo === "carpeta_archivada") return `Carpeta de Trabajo archivada${d.ubicacion ? ` en ${d.ubicacion}` : ""}`;
   if (h.tipo === "oficio") return `Oficio ${d.numero ?? ""} ${d.accion ?? ""}`;
+  if (h.tipo === "fecha_compromiso")
+    return `Fecha de compromiso ${d.desde ? `cambiada del ${fechaDia(d.desde)} al` : "fijada el"} ${fechaDia(d.hacia)}${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
   const n = (d.usuarios ?? []).length;
   if (h.tipo === "asignacion") return `Se asignaron ${n} persona${n === 1 ? "" : "s"} a la OT`;
   if (h.tipo === "desasignacion") return `Se retiraron ${n} persona${n === 1 ? "" : "s"} de la OT${d.motivo ? ` (${d.motivo})` : ""}`;

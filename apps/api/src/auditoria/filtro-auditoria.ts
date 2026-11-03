@@ -13,7 +13,8 @@ export interface FiltrosAuditoria {
   recurso?: string;
   usuarioId?: string;
   username?: string;
-  accion?: string;
+  /** Un código o varios (la familia elegida en el filtro «Acción», etiqueta-accion.ts). */
+  accion?: string | string[];
   entidadId?: string;
   entidadCodigo?: string;
   desde?: Date;
@@ -44,7 +45,8 @@ export function whereAuditoria(
   if (f.recurso) and.push({ entidadTipo: f.recurso });
   if (f.usuarioId) and.push({ usuarioId: f.usuarioId });
   if (f.username) and.push({ username: { contains: f.username, mode: "insensitive" } });
-  if (f.accion) and.push({ accion: f.accion });
+  if (Array.isArray(f.accion)) and.push({ accion: { in: f.accion } });
+  else if (f.accion) and.push({ accion: f.accion });
   if (f.entidadId) and.push({ entidadId: f.entidadId });
   if (f.entidadCodigo) and.push({ entidadCodigo: { contains: f.entidadCodigo, mode: "insensitive" } });
   if (f.desde || f.hasta) {

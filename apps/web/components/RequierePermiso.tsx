@@ -42,7 +42,14 @@ export default function RequierePermiso({
   }
 
   if (puede(perm)) return <>{children}</>;
+  return <TarjetaSinAcceso perm={perm} titulo={titulo} compacto={compacto} />;
+}
 
+/**
+ * Tarjeta «Sin acceso» (la misma en todo el sistema, también en Administración):
+ * «Permiso requerido:» y «← Volver a Mi bandeja».
+ */
+export function TarjetaSinAcceso({ perm, titulo, compacto }: { perm: string | string[]; titulo?: string; compacto?: boolean }) {
   const lista = Array.isArray(perm) ? perm : [perm];
   return (
     <div className={`card sin-acceso${compacto ? " compacto" : ""}`} role="alert">

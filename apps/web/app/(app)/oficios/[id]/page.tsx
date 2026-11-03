@@ -59,7 +59,16 @@ export default function OficioPage() {
   async function pdf() {
     const r = await fetch(`${API}/oficios/${id}/pdf`, { headers: { Authorization: `Bearer ${localStorage.getItem("lims_token")}` } });
     if (!r.ok) return toast.error(`No se pudo generar el PDF (${r.status}).`);
-    window.open(URL.createObjectURL(await r.blob()), "_blank", "noopener");
+    // Se descarga con el nombre que da la API (Oficio_<Nº>.pdf), no con el id interno del blob.
+    const nombre = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") ?? "")?.[1] ?? `Oficio_${o?.numero ?? "borrador"}.pdf`;
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   if (error && !o) return <div className="alert warn" role="alert">{error}</div>;

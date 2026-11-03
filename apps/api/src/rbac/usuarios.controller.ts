@@ -72,7 +72,8 @@ const UsuarioUpdate = z.object({
 const AsignacionCreate = z.object({
   rolId: z.string().uuid(),
   unidadId: z.string().uuid().nullable().optional(),
-  vigenteDesde: z.coerce.date().optional(),
+  // null o vacío = desde ahora. Sin el nullable, z.coerce convertía null en 01-01-1970.
+  vigenteDesde: z.preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.date().optional()),
   vigenteHasta: z.coerce.date().nullable().optional(),
 });
 
