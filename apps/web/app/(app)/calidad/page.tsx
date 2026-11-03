@@ -901,12 +901,12 @@ function Alicuotas() {
         </div>
         <p style={{ margin: 0, fontSize: 13, color: "var(--muted)" }}>
           Una alícuota es una porción de la muestra preparada para un ensayo o para guardar. Lleva su código, cantidad, ubicación y estado; cada consumo, traslado o cambio queda en su historial.
-          {gestiona && creaUbicacion && ubicaciones.length > 0 && !nuevaUb && (
+          {creaUbicacion && ubicaciones.length > 0 && !nuevaUb && (
             <>{" "}<button className="btn outline sm" onClick={() => setNuevaUb({ codigo: "", nombre: "", tipo: "estante", unidadId: alcance?.esGlobal ? "" : alcance?.unidadesVisibles[0]?.id ?? "" })}>＋ Nueva ubicación</button></>
           )}
         </p>
       </section>
-      {gestiona && (ubicaciones.length === 0 || nuevaUb) && (
+      {(gestiona || creaUbicacion) && (ubicaciones.length === 0 || nuevaUb) && (
         <section className="card">
           {ubicaciones.length === 0 && (
             <div className="alert warn" style={{ marginBottom: nuevaUb ? 10 : 0 }}>
