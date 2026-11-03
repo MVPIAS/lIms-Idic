@@ -24,6 +24,7 @@ import { esEmail, propsInput } from "@/lib/validate";
 import { usePermisos } from "@/lib/permisos";
 import { subirFormulario, descargarAdjunto } from "@/lib/d11";
 import { toast } from "@/components/ui/feedback";
+import RequierePermiso from "@/components/RequierePermiso";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -84,7 +85,106 @@ interface Correo {
 
 const FILTROS_VACIOS = { remitente: "", destinatario: "", asunto: "", prioridad: "", adjuntos: "", q: "", desde: "", hasta: "" };
 
+/** Cotización u OT encontrada por su código (GET /mensajeria/vinculos, solo las de su alcance). */
+interface Vinculo {
+  id: string;
+  codigo: string;
+  estado: string | null;
+  cliente: string | null;
+}
+
+async function buscarVinculos(tipo: "cotizacion" | "ot", q: string): Promise<Vinculo[]> {
+  const res = await fetch(`${API}/mensajeria/vinculos?${new URLSearchParams({ tipo, q })}`, { headers: auth() });
+  if (!res.ok) throw new Error(await errorMensaje(res));
+  return res.json();
+}
+
+/**
+ * Buscador por código (N° de cotización AAAA-NNNNN o código de OT): sugiere las
+ * coincidencias de su alcance mientras se escribe y resuelve el id por dentro.
+ */
+function BuscadorCodigo({
+  tipo,
+  codigo,
+  onCambio,
+}: {
+  tipo: "cotizacion" | "ot";
+  codigo: string;
+  onCambio: (codigo: string, vinculo: Vinculo | null) => void;
+}) {
+  const [opciones, setOpciones] = useState<Vinculo[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  useEffect(() => {
+    const q = codigo.trim();
+    if (q.length < 2) {
+      setOpciones([]);
+      return;
+    }
+    let vivo = true;
+    setBuscando(true);
+    const t = setTimeout(() => {
+      buscarVinculos(tipo, q)
+        .then((r) => {
+          if (!vivo) return;
+          setOpciones(r);
+          // Con el código completo escrito queda elegido sin tocar la lista.
+          const exacto = r.find((v) => v.codigo.toLowerCase() === q.toLowerCase());
+          if (exacto) onCambio(exacto.codigo, exacto);
+        })
+        .catch(() => vivo && setOpciones([]))
+        .finally(() => vivo && setBuscando(false));
+    }, 250);
+    return () => {
+      vivo = false;
+      clearTimeout(t);
+    };
+    // onCambio cambia en cada render del padre: basta con reaccionar al texto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codigo, tipo]);
+  const elegido = opciones.find((v) => v.codigo.toLowerCase() === codigo.trim().toLowerCase()) ?? null;
+  const id = `e-cod-${tipo}`;
+  return (
+    <div className="field">
+      <label htmlFor={id}>{tipo === "cotizacion" ? "N° de cotización" : "Código de la OT"} <span className="req">*</span></label>
+      <input
+        id={id}
+        required
+        list={`${id}-lista`}
+        autoComplete="off"
+        placeholder={tipo === "cotizacion" ? "AAAA-NNNNN · escriba para buscar" : "OT-2026-0012 · escriba para buscar"}
+        value={codigo}
+        onChange={(e) => {
+          const v = e.target.value;
+          onCambio(v, opciones.find((o) => o.codigo.toLowerCase() === v.trim().toLowerCase()) ?? null);
+        }}
+      />
+      <datalist id={`${id}-lista`}>
+        {opciones.map((o) => (
+          <option key={o.id} value={o.codigo}>{[o.cliente, o.estado].filter(Boolean).join(" · ")}</option>
+        ))}
+      </datalist>
+      <small style={{ color: "var(--muted)", fontSize: 11 }}>
+        {elegido
+          ? `✓ ${[elegido.cliente, elegido.estado].filter(Boolean).join(" · ") || elegido.codigo}`
+          : codigo.trim().length >= 2 && !buscando
+            ? opciones.length
+              ? "Elija una de la lista."
+              : `Sin ${tipo === "cotizacion" ? "cotizaciones" : "OT"} de su alcance con ese código.`
+            : ""}
+      </small>
+    </div>
+  );
+}
+
 export default function MensajeriaPage() {
+  return (
+    <RequierePermiso perm={["correo.enviar", "cotizacion.ver"]} titulo="Mensajería · correo">
+      <Mensajeria />
+    </RequierePermiso>
+  );
+}
+
+function Mensajeria() {
   const { puede } = usePermisos();
   const [rows, setRows] = useState<Correo[]>([]);
   const [plantillas, setPlantillas] = useState<Plantilla[]>([]);
@@ -103,7 +203,8 @@ export default function MensajeriaPage() {
   const [enviando, setEnviando] = useState(false);
   const [resultado, setResultado] = useState<{ ok: boolean; estado: string; error?: string } | null>(null);
   const [envTipo, setEnvTipo] = useState<"libre" | "cotizacion" | "resultado">("libre");
-  const [envId, setEnvId] = useState("");
+  const [envCodigo, setEnvCodigo] = useState("");
+  const [envVinculo, setEnvVinculo] = useState<Vinculo | null>(null);
   const [envPlantilla, setEnvPlantilla] = useState("");
   const [envDest, setEnvDest] = useState("");
   const [envVeredicto, setEnvVeredicto] = useState("");
@@ -186,7 +287,14 @@ export default function MensajeriaPage() {
         envArchivos.forEach((a) => fd.append("adjuntos", a, a.name));
         data = await subirFormulario("/mensajeria/correo", fd);
       } else {
-        const url = envTipo === "cotizacion" ? `${API}/mensajeria/cotizacion/${envId.trim()}` : `${API}/mensajeria/resultado/${envId.trim()}`;
+        // El código escrito se resuelve a su id (solo cotizaciones u OT de su alcance).
+        const codigo = envCodigo.trim();
+        const vinculo =
+          envVinculo && envVinculo.codigo.toLowerCase() === codigo.toLowerCase()
+            ? envVinculo
+            : (await buscarVinculos(envTipo === "cotizacion" ? "cotizacion" : "ot", codigo)).find((v) => v.codigo.toLowerCase() === codigo.toLowerCase());
+        if (!vinculo) throw new Error(envTipo === "cotizacion" ? `No encontramos la cotización ${codigo} en su alcance.` : `No encontramos la OT ${codigo} en su alcance.`);
+        const url = envTipo === "cotizacion" ? `${API}/mensajeria/cotizacion/${vinculo.id}` : `${API}/mensajeria/resultado/${vinculo.id}`;
         const body: any = { prioridad: envPrioridad };
         if (lista.length) body.destinatarios = lista.join(", ");
         if (envPlantilla) body.plantilla = envPlantilla;
@@ -264,7 +372,13 @@ export default function MensajeriaPage() {
     },
   ];
 
-  const puedeLibre = puede("correo.enviar");
+  // Cada tipo de envío con el permiso que exige la API.
+  const tiposEnvio = [
+    puede("correo.enviar") && { k: "libre" as const, label: "Correo libre con adjuntos" },
+    puede("cotizacion.crear") && { k: "cotizacion" as const, label: "Cotización (con PDF adjunto)" },
+    puede("ot.ver") && { k: "resultado" as const, label: "Resultado de OT" },
+  ].filter((t): t is { k: "libre" | "cotizacion" | "resultado"; label: string } => !!t);
+  const tipoActivo = tiposEnvio.some((t) => t.k === envTipo) ? envTipo : tiposEnvio[0]?.k ?? "libre";
 
   return (
     <div>
@@ -308,7 +422,9 @@ export default function MensajeriaPage() {
           <button type="button" className="btn outline sm" onClick={() => { setF(FILTROS_VACIOS); cargar(FILTROS_VACIOS); }}>Limpiar</button>
         )}
         <div style={{ flex: 1 }} />
-        <button type="button" className="btn primary sm" onClick={() => setShow(!show)}>{show ? "Cerrar" : "＋ Enviar correo"}</button>
+        {tiposEnvio.length > 0 && (
+          <button type="button" className="btn primary sm" onClick={() => { setShow(!show); setEnvTipo(tipoActivo); }}>{show ? "Cerrar" : "＋ Enviar correo"}</button>
+        )}
         {avanzada && (
           <div className="form-grid" style={{ width: "100%", marginTop: 6 }}>
             <div className="field"><label htmlFor="f-rem">Remitente</label><input id="f-rem" value={f.remitente} onChange={set("remitente")} placeholder="Nombre o correo" /></div>
@@ -343,18 +459,17 @@ export default function MensajeriaPage() {
           <div className="form-grid">
             <div className="field">
               <label htmlFor="e-tipo">Tipo <span className="req">*</span></label>
-              <select id="e-tipo" value={envTipo} onChange={(e) => { setEnvTipo(e.target.value as any); setEnvPlantilla(""); setResultado(null); }}>
-                {puedeLibre && <option value="libre">Correo libre con adjuntos</option>}
-                <option value="cotizacion">Cotización (con PDF adjunto)</option>
-                <option value="resultado">Resultado de OT</option>
+              <select id="e-tipo" value={envTipo} onChange={(e) => { setEnvTipo(e.target.value as any); setEnvPlantilla(""); setEnvCodigo(""); setEnvVinculo(null); setResultado(null); }}>
+                {tiposEnvio.map((t) => <option key={t.k} value={t.k}>{t.label}</option>)}
               </select>
             </div>
             {envTipo !== "libre" ? (
               <>
-                <div className="field">
-                  <label htmlFor="e-id">{envTipo === "cotizacion" ? "ID de la cotización" : "ID de la orden de trabajo"} <span className="req">*</span></label>
-                  <input id="e-id" required placeholder="UUID" value={envId} onChange={(e) => setEnvId(e.target.value)} />
-                </div>
+                <BuscadorCodigo
+                  tipo={envTipo === "cotizacion" ? "cotizacion" : "ot"}
+                  codigo={envCodigo}
+                  onCambio={(c, v) => { setEnvCodigo(c); setEnvVinculo(v); }}
+                />
                 <div className="field">
                   <label htmlFor="e-pl">Plantilla</label>
                   <select id="e-pl" value={envPlantilla} onChange={(e) => setEnvPlantilla(e.target.value)}>
@@ -414,7 +529,7 @@ export default function MensajeriaPage() {
             )}
           </div>
           <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
-            <button className="btn primary sm" disabled={enviando || (envTipo !== "libre" && !envId.trim())}>{enviando ? "Enviando…" : "Enviar"}</button>
+            <button className="btn primary sm" disabled={enviando || (envTipo !== "libre" && !envCodigo.trim())}>{enviando ? "Enviando…" : "Enviar"}</button>
           </div>
           {resultado && (
             <div className={`alert ${resultado.ok ? "success" : "warn"}`} style={{ marginTop: 12, marginBottom: 0 }}>

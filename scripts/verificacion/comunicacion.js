@@ -238,8 +238,10 @@ async function main() {
     C.msg = r.id;
     await exigir(403, U.lmbAnalista, "POST", "/mensajes", undefined, formulario({ destinatarios: an.id, asunto: "PRUEBA ajena", cuerpo: "x", otCodigo: C.ot.codigo }));
     await exigir(400, U.lqaJefe, "POST", "/mensajes", undefined, formulario({ destinatarios: (await login(U.lqaJefe)).id, asunto: "PRUEBA a mí", cuerpo: "x" }));
-    const copia = lista(await ok(U.ventas, "GET", `/mensajeria?tipo=mensaje&q=${sello}`));
+    // La copia la ve en el historial de correos su remitente; un tercero (Ventas) no, aunque vea la OT.
+    const copia = lista(await ok(U.lqaJefe, "GET", `/mensajeria?tipo=mensaje&q=${sello}`));
     afirmar(copia.length === (r.correo ? 1 : 0) && (!r.correo || copia[0].asunto.includes("[Prioridad alta]")), "copia por correo en la bitácora");
+    afirmar(!lista(await ok(U.ventas, "GET", `/mensajeria?tipo=mensaje&q=${sello}`)).length, "un tercero no ve la copia del mensaje interno");
     return r.correo ? `copia por correo: ${r.correo}` : "destinatario sin correo registrado: sin copia";
   });
 

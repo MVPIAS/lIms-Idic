@@ -10,12 +10,15 @@
 //
 // Los minutos salen de Parámetros del sistema › Sesión (GET /auth/sesion-config);
 // mientras llega la respuesta, o si falla, rige NEXT_PUBLIC_IDLE_MINUTES (por
-// defecto 20). El aviso previo aparece AVISO_MINUTOS antes del
-// cierre. Los eventos de actividad se escuchan con throttle para no reprogramar
+// defecto 20). Se vuelven a leer al cambiar de pantalla y cada RELEER_MS, así un
+// cambio del administrador rige desde la próxima pantalla que abra cada usuario
+// (como dice el parámetro) sin tener que volver a entrar. El aviso previo
+// aparece AVISO_MINUTOS antes del cierre. Los eventos de actividad se escuchan con throttle para no reprogramar
 // los temporizadores en cada píxel de movimiento del ratón.
 // =============================================================================
 
 import { useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
 
 /** Minutos de inactividad hasta el cierre (default 20; configurable por env). */
@@ -26,6 +29,9 @@ const IDLE_MINUTES = (() => {
 
 /** Minutos de antelación con los que se muestra el aviso previo al cierre. */
 const AVISO_MINUTOS = 1;
+
+/** Cada cuánto se relee la configuración aunque no se cambie de pantalla (ms). */
+const RELEER_MS = 5 * 60_000;
 
 /** Ventana de throttle para los eventos de actividad (ms). */
 const THROTTLE_MS = 1000;
@@ -62,6 +68,8 @@ export function useIdleLogout(): EstadoIdle {
   const cuentaAtras = useRef<ReturnType<typeof setInterval> | null>(null);
   const ultimaActividad = useRef(0);
   const reiniciarRef = useRef<() => void>(() => {});
+  const releerRef = useRef<() => void>(() => {});
+  const pathname = usePathname();
   // Ref espejo de `avisando`, para leerla dentro del listener sin re-suscribir.
   const avisandoRef = useRef(false);
   useEffect(() => {
@@ -123,26 +131,42 @@ export function useIdleLogout(): EstadoIdle {
     }
     programar();
 
-    // Minutos configurados por el administrador: reprograma con ellos.
-    api
-      .getRaw<{ inactividadMinutos?: number }>("auth/sesion-config")
-      .then((c) => {
-        const m = Number(c?.inactividadMinutos);
-        if (!vivo || !Number.isFinite(m) || m <= 0 || m === idleMs / 60_000) return;
-        idleMs = m * 60_000;
-        avisoMs = Math.max(0, idleMs - AVISO_MINUTOS * 60_000);
-        if (!avisandoRef.current) programar();
-      })
-      .catch(() => undefined);
+    // Minutos configurados por el administrador: si cambiaron, reprograma con
+    // ellos (contando desde ahora; durante el aviso previo no se toca nada).
+    const releer = () =>
+      api
+        .getRaw<{ inactividadMinutos?: number }>("auth/sesion-config")
+        .then((c) => {
+          const m = Number(c?.inactividadMinutos);
+          if (!vivo || !Number.isFinite(m) || m <= 0 || m === idleMs / 60_000) return;
+          idleMs = m * 60_000;
+          avisoMs = Math.max(0, idleMs - AVISO_MINUTOS * 60_000);
+          if (!avisandoRef.current && timerCierre.current) programar();
+        })
+        .catch(() => undefined);
+    releerRef.current = releer;
+    releer();
+    const relectura = setInterval(releer, RELEER_MS);
 
     return () => {
       vivo = false;
+      clearInterval(relectura);
       for (const ev of EVENTOS) window.removeEventListener(ev, onActividad);
       limpiarTemporizadores();
     };
-    // Solo se monta una vez: la config se lee al montar y el reinicio va por ref.
+    // Se monta una vez: la relectura y el reinicio van por ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Cada pantalla nueva relee los minutos (la primera lectura la hace el montaje).
+  const primeraRuta = useRef(true);
+  useEffect(() => {
+    if (primeraRuta.current) {
+      primeraRuta.current = false;
+      return;
+    }
+    releerRef.current();
+  }, [pathname]);
 
   return {
     avisando,
