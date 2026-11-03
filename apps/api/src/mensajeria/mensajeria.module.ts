@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Body,
   Controller,
   Get,
@@ -29,6 +30,14 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { ConfiguracionModule, MailService } from "../configuracion/configuracion.module";
 import { cotizacionOficial, datosFirmaCotizacion, nombrePdfCotizacion, pdfCotizacion } from "../cotizacion/cotizacion-documento";
 import { exigirCotizacionEnAlcance } from "../cotizacion/alcance-cotizacion";
+import {
+  accedeACorreos,
+  ambitoCorreoDe,
+  condCotizacionVisible,
+  filtroAlcanceCorreo,
+  unidadesCotizacionVisibles,
+  type AmbitoCorreo,
+} from "./alcance-correo";
 import { AlcanceService } from "../rbac/alcance.service";
 import { estadoCorreo } from "../avisos/reglas-avisos";
 import { TipoCorreo, componerCorreo } from "./correo-plantillas";
@@ -202,17 +211,18 @@ export class MensajeriaService {
       estado: string;
       error?: string | null;
       messageId?: string | null;
+      mensajeId?: string | null;
     } & Vinculos,
   ) {
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
       `INSERT INTO correo_enviado
          (tenant_id, tipo, destinatarios, asunto, cuerpo_resumen, plantilla,
           ot_id, cotizacion_id, estado, error, message_id, enviado_por,
-          cliente_id, muestra_id, prioridad, adjuntos, n_adjuntos)
+          cliente_id, muestra_id, prioridad, adjuntos, n_adjuntos, mensaje_id)
        VALUES ($1::uuid, $2, $3, $4, $5, $6, $7::uuid, $8::uuid, $9, $10, $11, $12::uuid,
                COALESCE($13::uuid, (SELECT cliente_id FROM cotizacion WHERE id = $8::uuid),
                                    (SELECT cliente_id FROM orden_trabajo WHERE id = $7::uuid)),
-               $14::uuid, $15, $16::jsonb, $17)
+               $14::uuid, $15, $16::jsonb, $17, $18::uuid)
        RETURNING id, created_at`,
       tenantId,
       datos.tipo,
@@ -231,6 +241,7 @@ export class MensajeriaService {
       datos.prioridad,
       datos.adjuntos.length ? JSON.stringify(datos.adjuntos) : null,
       datos.adjuntos.length,
+      datos.mensajeId ?? null,
     );
     return rows[0];
   }
@@ -258,6 +269,8 @@ export class MensajeriaService {
       prioridad?: Prioridad;
       /** Adjuntos libres que se guardan para descargarlos desde el historial. */
       guardar?: AdjuntoValido[];
+      /** Copia por correo de este mensaje interno (solo la ven su remitente y destinatarios). */
+      mensajeId?: string | null;
     } & Vinculos,
   ) {
     let estado = "enviado";
@@ -295,6 +308,7 @@ export class MensajeriaService {
       estado,
       error,
       messageId,
+      mensajeId: args.mensajeId ?? null,
     });
     for (const a of args.guardar ?? [])
       await this.prisma.$executeRawUnsafe(
@@ -529,14 +543,73 @@ export class MensajeriaService {
     });
   }
 
-  /** Adjunto de un correo libre del historial. */
+  /* --- Alcance del historial (alcance-correo.ts) ------------------------- */
+
+  /** 403 si el usuario no tiene `correo.enviar` ni `cotizacion.ver`. */
+  exigirAccesoCorreos(req: any) {
+    if (!accedeACorreos(req?.user?.permisos ?? [], req?.user?.roles ?? []))
+      throw new ForbiddenException("Permiso insuficiente. Requiere: correo.enviar o cotizacion.ver");
+  }
+
+  /**
+   * Qué correos de la bitácora puede ver el usuario: los suyos, los de las OT
+   * y cotizaciones de su alcance, los de clientes si ve clientes y, si es
+   * global, todos menos las copias de mensajes internos ajenos.
+   */
+  ambitoCorreo(req: any): Promise<AmbitoCorreo> {
+    return ambitoCorreoDe(this.prisma, this.alcance, req);
+  }
+
+  /**
+   * Buscador de cotización u OT por código para «＋ Enviar correo»: solo las de
+   * su alcance para el permiso con que se envían (cotización: cotizacion.crear;
+   * resultado de OT: ot.ver). Hasta 15 coincidencias, las más recientes primero.
+   */
+  async buscarVinculo(req: any, tipo: string, q: string | undefined) {
+    const tenantId = this.tenantId(req);
+    const permisos: string[] = req?.user?.permisos ?? [];
+    const superadmin = (req?.user?.roles ?? []).includes("SUPERADMIN");
+    const texto = `%${(q ?? "").trim()}%`;
+    if (tipo === "cotizacion") {
+      if (!superadmin && !permisos.includes("cotizacion.crear")) throw new ForbiddenException("Permiso insuficiente. Requiere: cotizacion.crear");
+      // Alias «cz»: el SQL de unidades de la cotización ya usa «c» por dentro.
+      const v = condCotizacionVisible("cz.id", await unidadesCotizacionVisibles(this.alcance, req, "cotizacion.crear"), 3);
+      return this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT cz.id, cz.codigo, cz.estado, cl.razon_social AS cliente
+           FROM cotizacion cz LEFT JOIN cliente cl ON cl.id = cz.cliente_id
+          WHERE cz.tenant_id = $1::uuid AND cz.codigo ILIKE $2 AND ${v.sql}
+          ORDER BY cz.created_at DESC LIMIT 15`,
+        tenantId,
+        texto,
+        ...v.args,
+      );
+    }
+    if (tipo === "ot") {
+      if (!superadmin && !permisos.includes("ot.ver")) throw new ForbiddenException("Permiso insuficiente. Requiere: ot.ver");
+      return this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT o.id, o.codigo, o.estado, cl.razon_social AS cliente
+           FROM orden_trabajo o LEFT JOIN cliente cl ON cl.id = o.cliente_id
+          WHERE o.tenant_id = $1::uuid AND o.codigo ILIKE $2 AND ($3::uuid[] IS NULL OR o.unidad_principal = ANY($3::uuid[]))
+          ORDER BY o.created_at DESC LIMIT 15`,
+        tenantId,
+        texto,
+        await this.alcance.filtroUnidades(req, "ot.ver"),
+      );
+    }
+    throw new BadRequestException("Tipo de vínculo desconocido: use «cotizacion» u «ot».");
+  }
+
+  /** Adjunto de un correo del historial: con la misma regla de alcance que su correo. */
   async adjuntoCorreo(req: any, correoId: string, adjuntoId: string) {
+    this.exigirAccesoCorreos(req);
+    const alc = filtroAlcanceCorreo(await this.ambitoCorreo(req), 4);
     const [a] = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT a.nombre, a.mime, a.contenido FROM mensaje_adjunto a JOIN correo_enviado ce ON ce.id = a.correo_id
-        WHERE a.id = $1::uuid AND a.correo_id = $2::uuid AND ce.tenant_id = $3::uuid`,
+        WHERE a.id = $1::uuid AND a.correo_id = $2::uuid AND ce.tenant_id = $3::uuid AND ${alc.sql}`,
       adjuntoId,
       correoId,
       this.tenantId(req),
+      ...alc.args,
     );
     if (!a) throw new NotFoundException("Adjunto no encontrado.");
     return { nombre: a.nombre as string, mime: a.mime as string, datos: Buffer.from(a.contenido, "base64") };
@@ -545,6 +618,7 @@ export class MensajeriaService {
   /* --- 5. Historial con búsqueda (§4.5.6) -------------------------------- */
 
   async historial(req: any, opts: Record<string, string | undefined>) {
+    this.exigirAccesoCorreos(req);
     const tenantId = this.tenantId(req);
     const { p, l, offset } = this.paginacion(opts.page, opts.limit);
 
@@ -583,6 +657,10 @@ export class MensajeriaService {
     );
     args.push(...b.args);
     filtros.push(...b.sql.map((c) => `AND ${c}`));
+    // Alcance: copias de mensajes internos solo para sus partes; lo demás según OT, cotización o cliente.
+    const alc = filtroAlcanceCorreo(await this.ambitoCorreo(req), args.length + 1);
+    args.push(...alc.args);
+    filtros.push(`AND ${alc.sql}`);
     const where = filtros.join(" ");
 
     const data = await this.prisma.$queryRawUnsafe<any[]>(
@@ -634,8 +712,9 @@ export class MensajeriaController {
    * tipo, nombre y asunto; Mensajería › Plantillas, el resto.
    */
   @Get("plantillas")
-  @RequierePermiso("cotizacion.ver")
   async listarPlantillas(@Req() req: any) {
+    // Con correo.enviar o cotizacion.ver, como el historial (el guard exige TODOS los declarados).
+    this.svc.exigirAccesoCorreos(req);
     const r = await this.plantillas.listar(req.user.tenantId);
     const tipo = (etapa: string) => (etapa === "cotizacion_enviada" ? "cotizacion" : etapa === "resultado" ? "resultado" : "etapa");
     return { ...r, data: r.data.map((p: any) => ({ ...p, tipo: tipo(p.etapa) })) };
@@ -656,10 +735,11 @@ export class MensajeriaController {
   /**
    * Historial de correos con búsqueda (§4.5.6): tipo, estado, remitente,
    * destinatario, asunto, prioridad, adjuntos (si/no), q (palabras clave),
-   * desde/hasta (AAAA-MM-DD), otId, clienteId.
+   * desde/hasta (AAAA-MM-DD), otId, clienteId. Se abre con correo.enviar o
+   * cotizacion.ver (lo comprueba el servicio: el guard exige TODOS los
+   * permisos declarados) y cada fila según alcance-correo.ts.
    */
   @Get()
-  @RequierePermiso("cotizacion.ver")
   historial(@Query() q: Record<string, string>, @Req() req: any) {
     return this.svc.historial(req, q ?? {});
   }
@@ -672,8 +752,14 @@ export class MensajeriaController {
     return this.svc.enviarLibre(req, EnviarLibreSchema.parse(body ?? {}), archivos);
   }
 
+  /** Buscador por código para «＋ Enviar correo»: ?tipo=cotizacion|ot&q=2026-000 */
+  @Get("vinculos")
+  buscarVinculo(@Query("tipo") tipo: string, @Query("q") q: string | undefined, @Req() req: any) {
+    return this.svc.buscarVinculo(req, tipo, q);
+  }
+
+  /** Adjunto de un correo del historial: correo.enviar o cotizacion.ver y el correo en su alcance. */
   @Get("correos/:id/adjuntos/:adjuntoId")
-  @RequierePermiso("cotizacion.ver")
   async adjunto(
     @Param("id", ParseUUIDPipe) id: string,
     @Param("adjuntoId", ParseUUIDPipe) adjuntoId: string,

@@ -64,6 +64,9 @@ export const NuevoMensajeBody = z.object({
 
 const BANDEJAS = ["recibidos", "enviados", "archivados"] as const;
 
+/** Pie de la copia por correo: la ruta del menú real (lib/navegacion.ts de la web). */
+export const PIE_COPIA_CORREO = "Mensaje interno del LIMS IDIC: respóndalo desde «Reportes y comunicación › Mensajes internos».";
+
 @Injectable()
 export class MensajesService {
   constructor(
@@ -274,10 +277,12 @@ export class MensajesService {
           tipo: "mensaje",
           to: para,
           subject: `Mensaje interno · ${body.asunto}`,
-          html: `${cuerpo}<p style="color:#666">Mensaje interno del LIMS IDIC: respóndalo desde «Mensajería › Bandeja».</p>`,
+          html: `${cuerpo}<p style="color:#666">${PIE_COPIA_CORREO}</p>`,
           attachments: adjuntos.map((a) => ({ filename: a.nombre, content: a.datos, contentType: a.mime })),
           plantilla: null,
           prioridad,
+          // Solo lo ven en el historial de correos el remitente y los destinatarios (alcance-correo.ts).
+          mensajeId: id,
           ...v,
         });
     }
