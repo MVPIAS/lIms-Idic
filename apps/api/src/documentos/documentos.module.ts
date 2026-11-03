@@ -117,55 +117,7 @@ export class DocumentosController {
   ): Promise<{ data: DocumentoResultado[]; meta: { page: number; limit: number; total: number } }> {
     const tenantId = this.tenantId(req);
     const { p, l, offset } = this.paginacion(page, limit);
-
-    // ¿Existe la tabla del SAEC en este entorno? Si no, no se une su rama.
-    const reg = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT to_regclass('public.saec_certificado') IS NOT NULL AS existe`,
-    );
-    const haySaec = Boolean(reg[0]?.existe);
-
-    // --- Subconsulta unificada (informes + saec). tenant_id = $1 en ambas ---
-    const ramaInforme = `
-      SELECT 'informe'::text AS origen,
-             c.tipo               AS tipo,
-             c.codigo             AS codigo,
-             ot.codigo            AS ot_codigo,
-             cl.razon_social      AS cliente,
-             c.fecha              AS fecha,
-             c.estado             AS estado,
-             c.hash_sha256        AS hash_sha256,
-             c.codigo_verificacion AS codigo_verificacion,
-             c.url_verificacion   AS url_verificacion,
-             ot.id                AS ot_id,
-             cl.id                AS cliente_id,
-             COALESCE(c.unidad_id, ot.unidad_principal) AS unidad_id
-        FROM certificado c
-        JOIN orden_trabajo ot ON ot.id = c.ot_id
-        LEFT JOIN cliente cl   ON cl.id = ot.cliente_id
-       WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL`;
-
-    const ramaSaec = `
-      SELECT 'saec'::text AS origen,
-             'SAEC'::text          AS tipo,
-             sc.codigo             AS codigo,
-             ot2.codigo            AS ot_codigo,
-             cl2.razon_social      AS cliente,
-             sc.emitido_at         AS fecha,
-             sc.estado             AS estado,
-             sc.hash_documento     AS hash_sha256,
-             sc.codigo_verificacion AS codigo_verificacion,
-             NULL::text            AS url_verificacion,
-             ot2.id                AS ot_id,
-             COALESCE(e.cliente_id, ot2.cliente_id) AS cliente_id,
-             COALESCE(ot2.unidad_principal,
-                      (SELECT u.id FROM unidad u WHERE u.tenant_id = sc.tenant_id AND u.codigo = 'D11' LIMIT 1)) AS unidad_id
-        FROM saec_certificado sc
-        JOIN evidencia e        ON e.id = sc.evidencia_id
-        LEFT JOIN orden_trabajo ot2 ON ot2.id = e.ot_id
-        LEFT JOIN cliente cl2   ON cl2.id = COALESCE(e.cliente_id, ot2.cliente_id)
-       WHERE sc.tenant_id = $1::uuid AND sc.deleted_at IS NULL`;
-
-    const union = haySaec ? `${ramaInforme}\nUNION ALL${ramaSaec}` : ramaInforme;
+    const union = await this.unionDocumentos();
 
     // --- Filtros del buscador, aplicados al conjunto unificado ---
     const args: any[] = [tenantId];
@@ -235,6 +187,83 @@ export class DocumentosController {
     }));
 
     return { data, meta: { page: p, limit: l, total } };
+  }
+
+  /**
+   * Recorrido 30 (fallo 38) · clientes del filtro «Cliente» del buscador: solo
+   * los que tienen documentos en el alcance de quien consulta (id y razón
+   * social). Mismo permiso que el buscador (ot.ver), sin exigir cliente.ver:
+   * no abre la ficha de clientes a Calidad ni a Abastecimiento.
+   */
+  @Get("clientes")
+  @RequierePermiso("ot.ver")
+  async clientes(@Req() req?: any): Promise<{ data: { id: string; razonSocial: string }[] }> {
+    const tenantId = this.tenantId(req);
+    const union = await this.unionDocumentos();
+    const unidades = await this.alcance.filtroUnidades(req);
+    const data = await this.prisma.$queryRawUnsafe<{ id: string; razonSocial: string }[]>(
+      `SELECT cl.id::text AS id, cl.razon_social AS "razonSocial"
+         FROM cliente cl
+        WHERE cl.id IN (SELECT d.cliente_id FROM (${union}) d
+                         WHERE d.cliente_id IS NOT NULL ${unidades ? "AND d.unidad_id = ANY($2::uuid[])" : ""})
+        ORDER BY cl.razon_social
+        LIMIT 1000`,
+      ...(unidades ? [tenantId, unidades] : [tenantId]),
+    );
+    return { data };
+  }
+
+  /** Unión de informes y certificados SAEC (tenant = $1); la rama SAEC solo si existe su tabla. */
+  private async unionDocumentos(): Promise<string> {
+    // ¿Existe la tabla del SAEC en este entorno? Si no, no se une su rama.
+    const reg = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT to_regclass('public.saec_certificado') IS NOT NULL AS existe`,
+    );
+    const haySaec = Boolean(reg[0]?.existe);
+
+    // --- Subconsulta unificada (informes + saec). tenant_id = $1 en ambas ---
+    const ramaInforme = `
+      SELECT 'informe'::text AS origen,
+             c.tipo               AS tipo,
+             c.codigo             AS codigo,
+             ot.codigo            AS ot_codigo,
+             cl.razon_social      AS cliente,
+             c.fecha              AS fecha,
+             c.estado             AS estado,
+             c.hash_sha256        AS hash_sha256,
+             c.codigo_verificacion AS codigo_verificacion,
+             c.url_verificacion   AS url_verificacion,
+             ot.id                AS ot_id,
+             cl.id                AS cliente_id,
+             COALESCE(c.unidad_id, ot.unidad_principal) AS unidad_id
+        FROM certificado c
+        JOIN orden_trabajo ot ON ot.id = c.ot_id
+        LEFT JOIN cliente cl   ON cl.id = ot.cliente_id
+       WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL`;
+
+    const ramaSaec = `
+      SELECT 'saec'::text AS origen,
+             'SAEC'::text          AS tipo,
+             sc.codigo             AS codigo,
+             ot2.codigo            AS ot_codigo,
+             cl2.razon_social      AS cliente,
+             sc.emitido_at         AS fecha,
+             sc.estado             AS estado,
+             sc.hash_documento     AS hash_sha256,
+             sc.codigo_verificacion AS codigo_verificacion,
+             NULL::text            AS url_verificacion,
+             ot2.id                AS ot_id,
+             COALESCE(e.cliente_id, ot2.cliente_id) AS cliente_id,
+             COALESCE(ot2.unidad_principal,
+                      (SELECT u.id FROM unidad u WHERE u.tenant_id = sc.tenant_id AND u.codigo = 'D11' LIMIT 1)) AS unidad_id
+        FROM saec_certificado sc
+        JOIN evidencia e        ON e.id = sc.evidencia_id
+        LEFT JOIN orden_trabajo ot2 ON ot2.id = e.ot_id
+        LEFT JOIN cliente cl2   ON cl2.id = COALESCE(e.cliente_id, ot2.cliente_id)
+       WHERE sc.tenant_id = $1::uuid AND sc.deleted_at IS NULL`;
+
+    const union = haySaec ? `${ramaInforme}\nUNION ALL${ramaSaec}` : ramaInforme;
+    return union;
   }
 }
 

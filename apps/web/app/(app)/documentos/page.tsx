@@ -66,9 +66,10 @@ export default function DocumentosPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Clientes para el desplegable de filtro (best-effort: si falla, no bloquea).
+  // Clientes para el desplegable de filtro (best-effort: si falla, no bloquea): solo los
+  // que tienen documentos en el alcance, sin exigir cliente.ver (Calidad, Abastecimiento).
   useEffect(() => {
-    getJson("/clientes?limit=500")
+    getJson("/documentos/clientes")
       .then((r) => setClientes((r.data ?? []).map((c: any) => ({ id: c.id, razonSocial: c.razonSocial }))))
       .catch(() => setClientes([]));
   }, []);
