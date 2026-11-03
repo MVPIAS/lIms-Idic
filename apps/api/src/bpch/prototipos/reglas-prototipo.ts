@@ -182,13 +182,40 @@ export function mensajeCodificado(elemento: string, exactos: CandidatoCodificado
 }
 
 /** EP-08 8.17 (BL-180): condiciones para inscribir el tipo aprobado en la Codificación Única. */
-export function faltantesInscripcionCu(p: { estado: string; dictamen: string | null; documentoEstado: string | null; codigoCnc: string | null; yaInscrito: boolean }): string[] {
+export function faltantesInscripcionCu(p: {
+  estado: string;
+  dictamen: string | null;
+  documentoEstado: string | null;
+  codigoCnc: string | null;
+  yaInscrito: boolean;
+  /** Mensaje si el código ya está inscrito para OTRO producto (codigoCuAjeno). */
+  codigoAjeno?: string | null;
+}): string[] {
   const f: string[] = [];
   if (p.estado !== "dictaminado" || p.dictamen !== "aprobado") f.push("Solo se inscribe un prototipo con el tipo aprobado.");
   else if (p.documentoEstado !== "oficial" && p.documentoEstado !== "emitido") f.push("El certificado de aprobación de tipo aún no es oficial.");
   if (!p.codigoCnc) f.push("Falta el código único CNC-DGMN (paso 7).");
-  if (p.yaInscrito) f.push("El tipo ya está inscrito en la Codificación Única.");
+  if (p.codigoAjeno) f.push(p.codigoAjeno);
+  else if (p.yaInscrito) f.push("El tipo ya está inscrito en la Codificación Única.");
   return f;
+}
+
+/**
+ * El código único no se repite (EP-08 8.17): si el código ya está inscrito en
+ * la Codificación Única y esa inscripción NO es la de este prototipo (su
+ * certificado de aprobación de tipo), devuelve el mensaje; si no, null.
+ */
+export function codigoCuAjeno(
+  fila: { certificadoId: string | null; producto: string | null; fabricante: string | null; cnc: string } | null | undefined,
+  documentoId: string | null | undefined,
+): string | null {
+  if (!fila) return null;
+  if (documentoId && fila.certificadoId === documentoId) return null;
+  const quien = [fila.producto ? `«${fila.producto}»` : null, fila.fabricante].filter(Boolean).join(" · ");
+  return (
+    `El código ${fila.cnc} ya está inscrito en la Codificación Única${quien ? ` para ${quien}` : ""}: ` +
+    "el código único no se repite. Indique el código asignado a este tipo."
+  );
 }
 
 /* ----------------------------------------- 8.11 · parametrizar el elemento --- */

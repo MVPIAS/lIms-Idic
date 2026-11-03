@@ -1,5 +1,5 @@
 import { puedeOperarEnUnidad } from "../alcance-bpch";
-import { erroresParametros, etapaPrototipo, faltantesDictamen, faltantesGenerarOt, faltantesInscripcionCu, faltantesParametrizacion, mensajeCodificado, resultadoDictamen, revisarCodificado, validarCodigoCnc, veredictoOt } from "./reglas-prototipo";
+import { codigoCuAjeno, erroresParametros, etapaPrototipo, faltantesDictamen, faltantesGenerarOt, faltantesInscripcionCu, faltantesParametrizacion, mensajeCodificado, resultadoDictamen, revisarCodificado, validarCodigoCnc, veredictoOt } from "./reglas-prototipo";
 
 describe("Prototipos · veredicto del tipo", () => {
   it("no cumple si algún ensayo no cumple; pendiente si falta veredicto; cumple con informativos", () => {
@@ -120,6 +120,17 @@ describe("EP-08 8.17 · inscribir el tipo en la Codificación Única (BL-180)", 
     expect(faltantesInscripcionCu({ ...ok, documentoEstado: "en_firma" })[0]).toMatch(/oficial/);
     expect(faltantesInscripcionCu({ ...ok, codigoCnc: null })[0]).toMatch(/CNC-DGMN/);
     expect(faltantesInscripcionCu({ ...ok, yaInscrito: true })[0]).toMatch(/ya está inscrito/);
+  });
+
+  it("el código único no se repite: el de otro producto inscrito se rechaza", () => {
+    const otra = { certificadoId: "cert-otro", producto: "Emulsión PRUEBA", fabricante: "Importadora PRUEBA", cnc: "E-I/7/176/673/30365/9902" };
+    expect(codigoCuAjeno(null, "cert-1")).toBeNull();
+    expect(codigoCuAjeno({ ...otra, certificadoId: "cert-1" }, "cert-1")).toBeNull();
+    const m = codigoCuAjeno(otra, "cert-1");
+    expect(m).toMatch(/ya está inscrito en la Codificación Única para «Emulsión PRUEBA» · Importadora PRUEBA/);
+    expect(codigoCuAjeno({ ...otra, certificadoId: null }, null)).not.toBeNull();
+    const ok = { estado: "dictaminado", dictamen: "aprobado", documentoEstado: "oficial", codigoCnc: otra.cnc, yaInscrito: true, codigoAjeno: m };
+    expect(faltantesInscripcionCu(ok)).toEqual([m]);
   });
 });
 
