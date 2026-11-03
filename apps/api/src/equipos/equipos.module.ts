@@ -429,7 +429,9 @@ export class EquiposService {
       ...args,
     );
 
-    // KPIs de la cabecera: se calculan sobre TODO el parque, no sobre la página.
+    // KPIs de la cabecera: se calculan sobre TODO el parque del alcance del
+    // usuario (no sobre la página ni los demás filtros): el metrólogo del LMT
+    // no ve los indicadores de todo el instituto.
     const kpiRows = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT COUNT(*)::int AS total,
               COUNT(*) FILTER (WHERE estado = 'operativo')::int AS operativos,
@@ -442,8 +444,10 @@ export class EquiposService {
                                  AND proxima_calibracion IS NOT NULL
                                  AND proxima_calibracion >= CURRENT_DATE)::int AS aptos
          FROM equipo
-        WHERE tenant_id = $1::uuid AND deleted_at IS NULL`,
+        WHERE tenant_id = $1::uuid AND deleted_at IS NULL
+          AND ($2::uuid[] IS NULL OR unidad_id IS NULL OR unidad_id = ANY($2::uuid[]))`,
       tenantId,
+      unidadIds ?? null,
     );
 
     const total = Number(totalRows[0]?.total ?? 0);
