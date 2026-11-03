@@ -131,8 +131,10 @@ const ENTIDADES: Record<string, EntidadDef> = {
       fecha: "fecha",
     },
   },
+  // Montos comerciales: solo para quien ve cotizaciones (recorrido 30, fallo 13: Calidad no).
   cotizacion: {
     tabla: "cotizacion",
+    permiso: "cotizacion.ver",
     fechaCol: "created_at",
     softDelete: false,
     columnas: {
