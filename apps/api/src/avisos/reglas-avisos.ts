@@ -22,6 +22,9 @@ export const TIPOS_AVISO = {
   reanalisis: "alta",
   /** «Próxima acción» de una interacción con el cliente (CRM) que llegó a su fecha. */
   proxima_accion: "warn",
+  // Agenda (§4.5.9): invitación o cambio de un evento; anulación o retiro.
+  agenda: "info",
+  agenda_anulado: "warn",
 } as const satisfies Record<string, Severidad>;
 export type TipoAviso = keyof typeof TIPOS_AVISO;
 

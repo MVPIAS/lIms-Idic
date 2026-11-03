@@ -189,6 +189,11 @@ export default function AgendaPage() {
   useEffect(() => {
     cargarMeta();
   }, [cargarMeta]);
+  // Los avisos de la agenda (Mi bandeja) abren la semana del evento: /agenda?fecha=aaaa-mm-dd.
+  useEffect(() => {
+    const f = new URLSearchParams(window.location.search).get("fecha");
+    if (f && /^\d{4}-\d{2}-\d{2}$/.test(f)) setFecha(f);
+  }, []);
 
   const mover = (n: number) => setFecha((d) => (vista === "mes" ? sumarMeses(d, n) : sumarDiasCalendario(d, n * (vista === "semana" ? 7 : 1))));
 

@@ -341,7 +341,8 @@ function Comercial({ rango }: { rango: string }) {
 // suma, promedio, mínimo o máximo) con gráfico nativo de Excel, y plantillas de
 // exportación guardadas para repetir el mismo reporte.
 
-interface EntidadInfo { campos: string[]; etiqueta: string; permiso: string | null }
+// El servidor ya entrega solo las entidades que el perfil puede exportar.
+interface EntidadInfo { campos: string[]; etiquetas?: Record<string, string>; etiqueta: string; permiso: string | null; limite?: number }
 interface Resumen { filas: string; columnas: string; valor: string; agregado: string; grafico: string }
 interface PlantillaExport {
   id: string;
@@ -354,6 +355,8 @@ interface PlantillaExport {
   compartida: boolean;
   creadoPor: string | null;
   propia: boolean;
+  /** Puede actualizarla o eliminarla: quien la creó o Administración (misma regla que el servidor). */
+  editable: boolean;
 }
 const RESUMEN_VACIO: Resumen = { filas: "", columnas: "", valor: "", agregado: "conteo", grafico: "columna" };
 const AGREGADOS_UI = [
@@ -372,6 +375,10 @@ const GRAFICOS_UI = [
 ];
 
 const restarDias = (n: number): string => sumarDiasCalendario(hoyChile(), -n);
+const miles = (n: number) => n.toLocaleString("es-CL");
+/** Aviso cuando el resultado supera el tope de filas de una descarga. */
+const avisoTope = (total: number, limite: number) =>
+  `Se exportan las primeras ${miles(limite)} de ${miles(total)} filas (las más recientes); acote los filtros para obtener el resto.`;
 
 function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta: string; setDesde: (v: string) => void; setHasta: (v: string) => void }) {
   const { puede } = usePermisos();
@@ -387,6 +394,9 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
   const [plantillaId, setPlantillaId] = useState("");
   // Al cargar una plantilla, sus columnas se aplican después de cambiar de entidad.
   const [pendiente, setPendiente] = useState<PlantillaExport | null>(null);
+  // Privada por defecto: solo la ve quien la crea, salvo que marque «Compartir con todos».
+  const [compartir, setCompartir] = useState(false);
+  const [aviso, setAviso] = useState("");
 
   const cargarPlantillas = useCallback(() => getJson("/reportes/plantillas").then(setPlantillas).catch(() => setPlantillas([])), []);
   useEffect(() => {
@@ -396,6 +406,13 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
 
   const visibles = Object.entries(entidades).filter(([, e]) => !e.permiso || puede(e.permiso));
   const campos = entidades[entidad]?.campos ?? [];
+  const limite = entidades[entidad]?.limite ?? 10000;
+  const et = (c: string) => entidades[entidad]?.etiquetas?.[c] ?? c;
+
+  // Si la entidad elegida no está entre las que el perfil puede exportar, toma la primera.
+  useEffect(() => {
+    if (visibles.length && !visibles.some(([k]) => k === entidad)) setEntidad(visibles[0][0]);
+  }, [entidades]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!campos.length) return;
@@ -408,6 +425,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
       setResumen(RESUMEN_VACIO);
     }
     setPreview(null);
+    setAviso("");
   }, [entidad, entidades]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const seleccionadas = campos.filter((c) => seleccion[c]);
@@ -436,11 +454,14 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
 
   async function previsualizar() {
     setError("");
+    setAviso("");
     setLoading(true);
     try {
       const p = new URLSearchParams(queryBase("json"));
       p.set("limit", "25");
-      setPreview(await getJson(`/reportes/tabla?${p.toString()}`));
+      const r = await getJson(`/reportes/tabla?${p.toString()}`);
+      setPreview(r);
+      if (r?.meta?.total > limite) setAviso(avisoTope(r.meta.total, limite));
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -452,7 +473,16 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
     setError("");
     if (!seleccionadas.length) { setError("Selecciona al menos una columna."); return; }
     if (formato === "xlsx" && resumenActivo && resumen.agregado !== "conteo" && !resumen.valor) { setError("Elige el campo de valor del resumen."); return; }
+    setAviso("");
     try {
+      // Antes de descargar: cuántas filas cumplen los filtros (la descarga se corta en el tope).
+      const c = new URLSearchParams(queryBase("json"));
+      c.set("limit", "1");
+      const total: number = (await getJson(`/reportes/tabla?${c.toString()}`))?.meta?.total ?? 0;
+      if (total > limite && !confirm(`El resultado tiene ${miles(total)} filas y una descarga trae como máximo ${miles(limite)} (las más recientes). ¿Descargar igualmente las primeras ${miles(limite)}?`)) {
+        setAviso(avisoTope(total, limite));
+        return;
+      }
       const res = await fetch(`${API}/reportes/tabla?${queryBase(formato)}`, { headers: auth() });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
       const blob = await res.blob();
@@ -465,6 +495,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      if (total > limite) setAviso(avisoTope(total, limite));
     } catch (e: any) {
       setError(e.message);
     }
@@ -483,6 +514,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
       setHasta(f.hasta ?? "");
     }
     setTitulo(p.nombre);
+    setCompartir(!!p.compartida);
     if (p.entidad === entidad) {
       setSeleccion(Object.fromEntries(campos.map((c) => [c, p.campos.includes(c)])));
       setResumen({ ...RESUMEN_VACIO, ...(p.resumen ?? {}), columnas: p.resumen?.columnas ?? "", valor: p.resumen?.valor ?? "" } as Resumen);
@@ -506,7 +538,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
       campos: seleccionadas,
       filtros,
       resumen: resumen.filas ? { filas: resumen.filas, columnas: resumen.columnas || undefined, valor: resumen.agregado !== "conteo" ? resumen.valor || undefined : undefined, agregado: resumen.agregado, grafico: resumen.grafico } : null,
-      compartida: true,
+      compartida: compartir,
     };
     try {
       const r = await fetch(`${API}/reportes/plantillas${!comoNueva && actual ? `/${actual.id}` : ""}`, { method: !comoNueva && actual ? "PATCH" : "POST", headers: auth(), body: JSON.stringify(cuerpo) });
@@ -530,23 +562,28 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
   }
 
   const plantillaSel = plantillas.find((x) => x.id === plantillaId);
-  const opcionCampo = (vacio: string) => [<option key="" value="">{vacio}</option>, ...seleccionadas.map((c) => <option key={c} value={c}>{c}</option>)];
+  const opcionCampo = (vacio: string) => [<option key="" value="">{vacio}</option>, ...seleccionadas.map((c) => <option key={c} value={c}>{et(c)}</option>)];
 
   return (
     <div>
       {error && <div className="alert warn">{error}</div>}
+      {aviso && <div className="alert warn" role="status">{aviso}</div>}
 
       <div className="card" style={{ marginBottom: 12 }}>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
           <div className="field" style={{ margin: 0, minWidth: 260 }}>
             <label htmlFor="ex-plantilla">Plantilla de exportación</label>
-            <select id="ex-plantilla" value={plantillaId} onChange={(e) => (e.target.value ? aplicarPlantilla(e.target.value) : setPlantillaId(""))}>
+            <select id="ex-plantilla" value={plantillaId} onChange={(e) => (e.target.value ? aplicarPlantilla(e.target.value) : (setPlantillaId(""), setCompartir(false)))}>
               <option value="">(sin plantilla · configurar a mano)</option>
-              {plantillas.map((p) => <option key={p.id} value={p.id}>{p.nombre}{p.propia ? "" : p.creadoPor ? ` · de ${p.creadoPor}` : ""}</option>)}
+              {plantillas.map((p) => <option key={p.id} value={p.id}>{p.nombre}{p.propia ? "" : p.creadoPor ? ` · de ${p.creadoPor}` : ""}{p.compartida ? "" : " · privada"}</option>)}
             </select>
           </div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }} title="Sin marcar, la plantilla solo la ve usted">
+            <input type="checkbox" checked={compartir} onChange={(e) => setCompartir(e.target.checked)} style={{ width: "auto" }} />
+            Compartir con todos
+          </label>
           <button type="button" className="btn sm" onClick={() => guardarPlantilla(true)}>Guardar como plantilla nueva</button>
-          {plantillaSel?.propia && (
+          {plantillaSel?.editable && (
             <>
               <button type="button" className="btn sm" onClick={() => guardarPlantilla(false)}>Actualizar «{plantillaSel.nombre}»</button>
               <button type="button" className="btn ghost sm" onClick={borrarPlantilla}>Eliminar plantilla</button>
@@ -555,6 +592,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
         </div>
         {plantillaSel && (
           <p className="subtitle" style={{ margin: "6px 0 0" }}>
+            {plantillaSel.compartida ? "Compartida con todos · " : "Privada (solo la ve quien la creó) · "}
             {plantillaSel.descripcion ? `${plantillaSel.descripcion} · ` : ""}
             {plantillaSel.filtros?.ultimosDias ? `Rango: últimos ${plantillaSel.filtros.ultimosDias} días` : plantillaSel.filtros?.desde || plantillaSel.filtros?.hasta ? `Rango fijo: ${plantillaSel.filtros.desde ?? "…"} → ${plantillaSel.filtros.hasta ?? "…"}` : "Sin rango de fechas"}
           </p>
@@ -575,7 +613,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
             {campos.map((c) => (
               <label key={c} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
                 <input type="checkbox" checked={!!seleccion[c]} onChange={(e) => setSeleccion({ ...seleccion, [c]: e.target.checked })} style={{ width: "auto" }} />
-                {c}
+                {et(c)}
               </label>
             ))}
           </div>
@@ -627,7 +665,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
           <button className="btn primary sm" onClick={() => descargar("xlsx")}>⬇ Descargar Excel</button>
           <button className="btn sm" onClick={() => descargar("csv")}>⬇ CSV</button>
           <span className="subtitle" style={{ margin: 0 }}>
-            {desde || hasta ? `Filtro: ${desde || "…"} → ${hasta || "…"}` : "Sin filtro de fechas"}
+            {desde || hasta ? `Filtro: ${desde || "…"} → ${hasta || "…"}` : "Sin filtro de fechas"} · cada descarga trae como máximo {miles(limite)} filas
           </span>
         </div>
       </div>
@@ -636,10 +674,10 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
 
       {preview && (
         <div className="card card--table">
-          <h2 style={{ padding: "0 4px" }}>Vista previa · {preview.meta.total} fila(s) (máx. 25 mostradas)</h2>
+          <h2 style={{ padding: "0 4px" }}>Vista previa · {miles(preview.meta.total)} fila(s) en total (se muestran hasta 25)</h2>
           <table className="data">
             <thead>
-              <tr>{preview.campos.map((c: string) => <th key={c}>{c}</th>)}</tr>
+              <tr>{preview.campos.map((c: string, i: number) => <th key={c}>{preview.etiquetas?.[i] ?? et(c)}</th>)}</tr>
             </thead>
             <tbody>
               {preview.data.map((row: any, i: number) => (

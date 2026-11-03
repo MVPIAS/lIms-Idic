@@ -1,4 +1,4 @@
-import { arbolCarpetas, esDescendiente, nombreSeguro, subarbol, tipoArchivo } from "./gestor";
+import { arbolCarpetas, derechosDocumento, esDescendiente, nombreSeguro, subarbol, tipoArchivo } from "./gestor";
 
 const C = [
   { id: "r", padreId: null, nombre: "Calidad", unidadId: null },
@@ -54,5 +54,26 @@ describe("gestor documental · archivos admitidos (§4.6.1)", () => {
     expect(nombreSeguro("../../etc/passwd")).toBe("_.._etc_passwd");
     expect(nombreSeguro("Informe <final> ñ.pdf")).toBe("Informe _final_ ñ.pdf");
     expect(nombreSeguro("")).toBe("documento");
+  });
+});
+
+describe("gestor documental · derechos por documento (§4.6.3)", () => {
+  const base = { gestiona: false, global: false, restringido: false, esCreador: false, nivelAcceso: null } as const;
+  it("«Ver y editar» deja editar a quien no gestiona documentos, pero no administrar", () => {
+    expect(derechosDocumento({ ...base, nivelAcceso: "editar" })).toEqual({ edita: true, administra: false });
+    expect(derechosDocumento({ ...base, restringido: true, nivelAcceso: "editar" })).toEqual({ edita: true, administra: false });
+  });
+  it("quien solo consulta no edita, con o sin permiso «Ver»", () => {
+    expect(derechosDocumento(base)).toEqual({ edita: false, administra: false });
+    expect(derechosDocumento({ ...base, nivelAcceso: "ver" })).toEqual({ edita: false, administra: false });
+  });
+  it("quien gestiona: todo en los no restringidos; en los restringidos, global, creador o «Ver y editar»", () => {
+    const g = { ...base, gestiona: true };
+    expect(derechosDocumento(g)).toEqual({ edita: true, administra: true });
+    expect(derechosDocumento({ ...g, restringido: true })).toEqual({ edita: false, administra: false });
+    expect(derechosDocumento({ ...g, restringido: true, nivelAcceso: "ver" })).toEqual({ edita: false, administra: false });
+    expect(derechosDocumento({ ...g, restringido: true, esCreador: true }).administra).toBe(true);
+    expect(derechosDocumento({ ...g, restringido: true, global: true }).administra).toBe(true);
+    expect(derechosDocumento({ ...g, restringido: true, nivelAcceso: "editar" }).administra).toBe(true);
   });
 });

@@ -312,7 +312,8 @@ export class GestorDocumentalController {
   }
 
   @Patch("archivos/:id")
-  @RequierePermiso("documento.gestionar")
+  // documento.ver: el servicio exige poder editar ESTE documento (gestión o «Ver y editar»).
+  @RequierePermiso("documento.ver")
   editar(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
     return this.g.editar(req, id, b);
   }
@@ -330,14 +331,16 @@ export class GestorDocumentalController {
   }
 
   @Post("archivos/:id/versiones")
-  @RequierePermiso("documento.gestionar")
+  // documento.ver: el servicio exige poder editar ESTE documento (gestión o «Ver y editar»).
+  @RequierePermiso("documento.ver")
   @UseInterceptors(SUBIDA)
   nuevaVersion(@Param("id", UUID) id: string, @UploadedFile() archivo: any, @Body() b: any, @Req() req: any) {
     return this.g.nuevaVersion(req, id, archivo, b);
   }
 
   @Post("archivos/:id/versiones/:numero/publicar")
-  @RequierePermiso("documento.gestionar")
+  // documento.ver: el servicio exige poder editar ESTE documento (gestión o «Ver y editar»).
+  @RequierePermiso("documento.ver")
   publicar(@Param("id", UUID) id: string, @Param("numero", ParseIntPipe) numero: number, @Req() req: any) {
     return this.g.publicar(req, id, numero);
   }
