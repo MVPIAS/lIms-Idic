@@ -402,7 +402,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     categoria: "resultados",
     titulo: "Captura · advertencia y re-análisis automático",
     donde:
-      "Captura por OT: un resultado que cumple pero queda cerca de un límite se marca «advertencia»; un No cumple (y, si se elige, una advertencia) abre un re-análisis que impide revisar y aprobar hasta repetir la determinación o descartarlo. Calidad › Re-análisis. El margen de cada método se ajusta en Calidad › POE y advertencia.",
+      "Captura por OT: un resultado que cumple pero queda cerca de un límite se marca «advertencia»; un No cumple (y, si se elige, una advertencia) abre un re-análisis que impide revisar y aprobar hasta repetir la determinación o descartarlo: bandeja en Laboratorio › «Calidad: re-análisis, ISO 17025, POE y alícuotas» › pestaña «Re-análisis». El margen de cada método se ajusta en la pestaña «Método: POE, advertencia y consumibles» de esa misma pantalla.",
     porConfirmar: "Margen de advertencia por laboratorio y si el No cumple se re-analiza siempre (EP-02).",
     codigos: {
       advertencia_margen_pct: { tipo: "porcentaje", nombre: "Margen de advertencia (% del intervalo Mín–Máx o del límite único)", min: 0, max: 50, ayuda: "0 = sin advertencias.", porDefecto: "10" },
@@ -424,7 +424,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     categoria: "consumibles",
     titulo: "Captura · descuento automático de consumibles",
     donde:
-      "Captura por OT: la primera captura de un ensayo (y la repetición de un re-análisis) descuenta del stock, por FIFO de caducidad, lo que su método consume por determinación (Calidad › POE y advertencia por método › Consumibles). Queda en el kardex como consumo automático.",
+      "Captura por OT: la primera captura de un ensayo (y la repetición de un re-análisis) descuenta del stock, por FIFO de caducidad, lo que su método consume por determinación (Laboratorio › «Calidad: re-análisis, ISO 17025, POE y alícuotas» › pestaña «Método: POE, advertencia y consumibles» › «Consumibles por determinación»). Queda en el kardex como consumo automático.",
     porConfirmar: "Consumo de reactivos por determinación de cada método (lo informa cada laboratorio).",
     codigos: {
       descuento_automatico: { tipo: "sino", nombre: "Descontar el consumo del método al capturar", opciones: SI_NO, porDefecto: "si" },

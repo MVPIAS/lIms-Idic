@@ -42,6 +42,13 @@ export class CalidadController {
     return this.c.descartarReanalisis(req, id, b);
   }
 
+  /** Descarte desde la captura por OT: el re-análisis pendiente del ensayo. */
+  @Post("resultados/:id/reanalisis/descartar")
+  @RequierePermiso("resultado.aprobar")
+  descartarDeResultado(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
+    return this.c.descartarReanalisisDeResultado(req, id, b);
+  }
+
   /* métodos: POE y margen de advertencia */
   @Get("metodos")
   @RequierePermiso("resultado.ver")
@@ -170,7 +177,14 @@ export class CalidadController {
     return this.c.quitarAlcance(req, id, metodoId);
   }
 
-  /* alícuotas */
+  /* alícuotas · se leen con muestra.ver (Recepción, Muestreo y el laboratorio lo
+     tienen) y se preparan, consumen, trasladan o descartan con alicuota.gestionar */
+  @Get("ubicaciones")
+  @RequierePermiso("alicuota.gestionar")
+  ubicaciones(@Query("q") q: string | undefined, @Req() req: any) {
+    return this.c.ubicaciones(req, q);
+  }
+
   @Get("muestras")
   @RequierePermiso("muestra.ver")
   muestras(@Query("q") q: string | undefined, @Req() req: any) {

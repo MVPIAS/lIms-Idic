@@ -739,7 +739,13 @@ export function equiposDelEnsayo(equipos: EquipoCaptura[], laboratorioId: string
  * automático y consumibles descontados o sin stock (§4.2.6, §4.4.5).
  */
 export function avisarCalidad(r: any) {
-  if (r?.reanalisis === "solicitado") toast.error("No cumple: se abrió un re-análisis automático. Repita la determinación y capture el nuevo valor.");
+  // El re-análisis automático lo abre un No cumple o (modo «No cumple o advertencia») un Cumple en advertencia.
+  if (r?.reanalisis === "solicitado")
+    toast.error(
+      r?.veredicto === "no_cumple"
+        ? "No cumple: se abrió un re-análisis automático. Repita la determinación y capture el nuevo valor."
+        : `Cumple con advertencia (${r?.advertenciaMotivo ?? "cerca de un límite"}): se abrió un re-análisis automático. Repita la determinación y capture el nuevo valor.`,
+    );
   else if (r?.advertencia) toast.info(`Cumple con advertencia: ${r.advertenciaMotivo ?? "cerca de un límite"}`);
   const c = r?.consumos;
   if (c?.faltantes?.length)

@@ -13,7 +13,9 @@ import { libroXlsx } from "../common/xlsx-escritura";
 import { TablaError, leerTabla, leerXlsx } from "../common/tabla-archivo";
 import { validarFormula } from "../common/formula";
 import { hoyCl } from "../ot/plazos";
+import { emitirEvento } from "../common/eventos";
 import { filasDePlanilla } from "./formula-excel";
+import { leerConfigResultados } from "./reanalisis";
 import { codigoAlicuota, erroresAcreditacion, erroresMovimientoAlicuota, planMovimientoAlicuota, type MovimientoAlicuota } from "./reglas-calidad";
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
@@ -95,14 +97,40 @@ export class CalidadService {
     if (!n) throw new ConflictException("Este ensayo ya tiene un re-análisis pendiente.");
     // Lo revisado vuelve a capturado: se repite y se revisa de nuevo.
     await this.prisma.$executeRawUnsafe(`UPDATE resultado SET estado = 'capturado', revisado_n1_por = NULL, revisado_n1_at = NULL WHERE id = $1::uuid AND estado = 'revisado_n1'`, resultadoId);
+    await this.auditar(req, "reanalisis_solicitado", "resultado", resultadoId, { estadoAnterior: r.estado, motivo });
+    // Mismo aviso que el re-análisis automático (analista y jefatura del laboratorio).
+    const cfg = await leerConfigResultados(this.prisma as any, tenantDe(req));
+    emitirEvento("resultado.alerta", {
+      resultadoId,
+      tenantId: tenantDe(req),
+      usuarioId: usuarioDe(req),
+      tipo: "reanalisis",
+      origen: "manual",
+      motivo,
+      correo: cfg.avisarAdvertencia,
+    });
     return { ok: true };
+  }
+
+  /**
+   * Descarta el re-análisis pendiente de un ensayo (desde la captura por OT, que
+   * conoce el resultado y no siempre el id del re-análisis recién abierto).
+   */
+  async descartarReanalisisDeResultado(req: any, resultadoId: string, body: any) {
+    const [ra] = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT id FROM resultado_reanalisis WHERE resultado_id = $1::uuid AND tenant_id = $2::uuid AND estado = 'solicitado'`,
+      resultadoId,
+      tenantDe(req),
+    );
+    if (!ra) throw new NotFoundException("Este ensayo no tiene un re-análisis pendiente.");
+    return this.descartarReanalisis(req, ra.id, body);
   }
 
   /** La jefatura descarta el re-análisis (no se repite) con motivo. */
   async descartarReanalisis(req: any, id: string, body: any) {
     const motivo = motivoValido(body?.motivo);
     const [ra] = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT id, resultado_id, estado FROM resultado_reanalisis WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      `SELECT id, resultado_id, estado, origen, motivo AS "motivoSolicitud" FROM resultado_reanalisis WHERE id = $1::uuid AND tenant_id = $2::uuid`,
       id,
       tenantDe(req),
     );
@@ -115,6 +143,12 @@ export class CalidadService {
       usuarioDe(req),
       motivo,
     );
+    await this.auditar(req, "reanalisis_descartado", "resultado", ra.resultado_id, {
+      reanalisisId: id,
+      origen: ra.origen,
+      motivoSolicitud: ra.motivoSolicitud,
+      motivo,
+    });
     return { ok: true };
   }
 
@@ -166,7 +200,8 @@ export class CalidadService {
   async poeDeMetodo(req: any, metodoId: string) {
     const m = await this.metodo(req, metodoId);
     const poe = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT d.id AS "documentoId", d.codigo, d.titulo, d.version_publicada AS version, p.principal, p.nota, p.creado_en AS "creadoEn"
+      `SELECT d.id AS "documentoId", d.codigo, d.titulo, d.version_publicada AS version, p.principal, p.nota, p.creado_en AS "creadoEn",
+              (SELECT v.nombre_archivo FROM doc_version v WHERE v.documento_id = d.id AND v.numero = d.version_publicada) AS archivo
          FROM cat_metodo_poe p JOIN doc_documento d ON d.id = p.documento_id AND d.deleted_at IS NULL
         WHERE p.cat_metodo_id = $1::uuid ORDER BY p.principal DESC, d.codigo`,
       metodoId,
@@ -194,16 +229,17 @@ export class CalidadService {
   }
 
   async vincularPoe(req: any, metodoId: string, body: any) {
-    await this.metodoEditable(req, metodoId);
+    const m = await this.metodoEditable(req, metodoId);
     const documentoId = texto(body?.documentoId, 40);
     if (!documentoId) throw new BadRequestException("Elija el documento del POE.");
     const [d] = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT id FROM doc_documento WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
+      `SELECT id, codigo FROM doc_documento WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
       documentoId,
       tenantDe(req),
     );
     if (!d) throw new NotFoundException("Documento no encontrado en el gestor documental.");
     const principal = body?.principal !== false;
+    const nota = texto(body?.nota, 200);
     if (principal) await this.prisma.$executeRawUnsafe(`UPDATE cat_metodo_poe SET principal = FALSE WHERE cat_metodo_id = $1::uuid`, metodoId);
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO cat_metodo_poe (tenant_id, cat_metodo_id, documento_id, principal, nota, creado_por)
@@ -213,25 +249,34 @@ export class CalidadService {
       metodoId,
       documentoId,
       principal,
-      texto(body?.nota, 200),
+      nota,
       usuarioDe(req),
     );
+    await this.auditar(req, "poe_vinculado", "cat_metodo", metodoId, { metodo: m.codigo, documentoId, documento: d.codigo, principal, nota });
     return this.poeDeMetodo(req, metodoId);
   }
 
   async desvincularPoe(req: any, metodoId: string, documentoId: string) {
-    await this.metodoEditable(req, metodoId);
-    await this.prisma.$executeRawUnsafe(`DELETE FROM cat_metodo_poe WHERE cat_metodo_id = $1::uuid AND documento_id = $2::uuid`, metodoId, documentoId);
+    const m = await this.metodoEditable(req, metodoId);
+    const [d] = await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(
+      `SELECT d.codigo FROM cat_metodo_poe p JOIN doc_documento d ON d.id = p.documento_id WHERE p.cat_metodo_id = $1::uuid AND p.documento_id = $2::uuid`,
+      metodoId,
+      documentoId,
+    );
+    const n = await this.prisma.$executeRawUnsafe(`DELETE FROM cat_metodo_poe WHERE cat_metodo_id = $1::uuid AND documento_id = $2::uuid`, metodoId, documentoId);
+    if (n) await this.auditar(req, "poe_desvinculado", "cat_metodo", metodoId, { metodo: m.codigo, documentoId, documento: d?.codigo ?? null });
     return this.poeDeMetodo(req, metodoId);
   }
 
   /** Margen de advertencia propio del método (vacío = el general; 0 = sin advertencias). */
   async margenMetodo(req: any, metodoId: string, body: any) {
-    await this.metodoEditable(req, metodoId);
+    const m = await this.metodoEditable(req, metodoId);
     const v = body?.margenPct;
     const n = v === null || v === "" || v === undefined ? null : Number(String(v).replace(",", "."));
     if (n != null && !(Number.isFinite(n) && n >= 0 && n <= 50)) throw new BadRequestException("El margen de advertencia va de 0 a 50 %.");
     await this.prisma.$executeRawUnsafe(`UPDATE cat_metodo SET margen_advertencia_pct = $2 WHERE id = $1::uuid`, metodoId, n);
+    if ((m.margenAdvertenciaPct ?? null) !== n)
+      await this.auditar(req, "margen_advertencia", "cat_metodo", metodoId, { metodo: m.codigo, anterior: m.margenAdvertenciaPct ?? null, nuevo: n });
     return this.metodo(req, metodoId);
   }
 
@@ -286,6 +331,7 @@ export class CalidadService {
          VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::date, $7::date, $8, $9::uuid) RETURNING id`,
         tenantDe(req), d.unidadId, d.organismo, d.numero, d.norma, d.vigenteDesde, d.vigenteHasta, d.observacion, usuarioDe(req),
       );
+      await this.auditar(req, "acreditacion_creada", "acreditacion", a.id, { nuevo: d });
       return { id: a.id };
     } catch (e: any) {
       if (/ux_acreditacion_numero|23505/.test(`${e?.message ?? ""} ${JSON.stringify(e?.meta ?? {})}`)) throw new ConflictException(`Ya existe la acreditación ${d.organismo} ${d.numero}.`);
@@ -293,8 +339,20 @@ export class CalidadService {
     }
   }
 
+  /** Datos actuales de una acreditación (para la auditoría: antes y después). */
+  private async acreditacionActual(req: any, id: string) {
+    const [a] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT organismo, numero, norma, unidad_id AS "unidadId", vigente_desde::text AS "vigenteDesde", vigente_hasta::text AS "vigenteHasta", observacion
+         FROM acreditacion WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
+      id,
+      tenantDe(req),
+    );
+    return a ?? null;
+  }
+
   async editarAcreditacion(req: any, id: string, body: any) {
     const d = this.datosAcreditacion(body);
+    const anterior = await this.acreditacionActual(req, id);
     const n = await this.prisma.$executeRawUnsafe(
       `UPDATE acreditacion SET unidad_id = $3::uuid, organismo = $4, numero = $5, norma = $6, vigente_desde = $7::date, vigente_hasta = $8::date,
               observacion = $9, actualizado_en = now()
@@ -302,16 +360,19 @@ export class CalidadService {
       id, tenantDe(req), d.unidadId, d.organismo, d.numero, d.norma, d.vigenteDesde, d.vigenteHasta, d.observacion,
     );
     if (!n) throw new NotFoundException("Acreditación no encontrada.");
+    await this.auditar(req, "acreditacion_modificada", "acreditacion", id, { anterior, nuevo: d });
     return { id };
   }
 
   async borrarAcreditacion(req: any, id: string) {
+    const anterior = await this.acreditacionActual(req, id);
     const n = await this.prisma.$executeRawUnsafe(
       `UPDATE acreditacion SET deleted_at = now() WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
       id,
       tenantDe(req),
     );
     if (!n) throw new NotFoundException("Acreditación no encontrada.");
+    await this.auditar(req, "acreditacion_baja", "acreditacion", id, { anterior });
     return { ok: true };
   }
 
@@ -330,13 +391,26 @@ export class CalidadService {
       texto(body?.rango, 120),
       tenantDe(req),
     );
+    await this.auditar(req, "acreditacion_alcance_agregado", "acreditacion", id, {
+      metodoIds: ids,
+      matriz: texto(body?.matriz, 160),
+      rango: texto(body?.rango, 120),
+      agregados: n,
+    });
     return { agregados: n };
   }
 
   async quitarAlcance(req: any, id: string, metodoId: string) {
     const [a] = await this.prisma.$queryRawUnsafe<any[]>(`SELECT id FROM acreditacion WHERE id = $1::uuid AND tenant_id = $2::uuid`, id, tenantDe(req));
     if (!a) throw new NotFoundException("Acreditación no encontrada.");
-    await this.prisma.$executeRawUnsafe(`DELETE FROM acreditacion_alcance WHERE acreditacion_id = $1::uuid AND cat_metodo_id = $2::uuid`, id, metodoId);
+    const [q] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT cm.codigo, aa.matriz, aa.rango FROM acreditacion_alcance aa JOIN cat_metodo cm ON cm.id = aa.cat_metodo_id
+        WHERE aa.acreditacion_id = $1::uuid AND aa.cat_metodo_id = $2::uuid`,
+      id,
+      metodoId,
+    );
+    const n = await this.prisma.$executeRawUnsafe(`DELETE FROM acreditacion_alcance WHERE acreditacion_id = $1::uuid AND cat_metodo_id = $2::uuid`, id, metodoId);
+    if (n) await this.auditar(req, "acreditacion_alcance_quitado", "acreditacion", id, { metodoId, metodo: q?.codigo ?? null, matriz: q?.matriz ?? null, rango: q?.rango ?? null });
     return { ok: true };
   }
 
@@ -541,6 +615,38 @@ export class CalidadService {
     return m;
   }
 
+  /**
+   * Ubicaciones (sala, gabinete, estante, caja…) donde guardar una alícuota: las
+   * comunes (sin laboratorio) y las de los laboratorios del alcance del usuario.
+   */
+  async ubicaciones(req: any, q?: string) {
+    const unidades = await this.alcance.filtroUnidades(req, "alicuota.gestionar");
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, codigo, nombre, tipo, path FROM ubicacion
+        WHERE tenant_id = $1::uuid AND COALESCE(activa, TRUE)
+          AND ($2::text IS NULL OR codigo ILIKE '%' || $2 || '%' OR nombre ILIKE '%' || $2 || '%' OR path ILIKE '%' || $2 || '%')
+          AND ($3::uuid[] IS NULL OR unidad_id IS NULL OR unidad_id = ANY($3::uuid[]))
+        ORDER BY path LIMIT 100`,
+      tenantDe(req),
+      texto(q, 60),
+      unidades,
+    );
+  }
+
+  /** La ubicación elegida es del tenant y está activa (null si no se eligió). */
+  private async ubicacionValida(req: any, ubicacionId: string | null): Promise<{ id: string; nombre: string } | null> {
+    if (!ubicacionId) return null;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(ubicacionId))
+      throw new BadRequestException("La ubicación elegida no existe o está inactiva.");
+    const [u] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, codigo || ' · ' || nombre AS nombre FROM ubicacion WHERE id = $1::uuid AND tenant_id = $2::uuid AND COALESCE(activa, TRUE)`,
+      ubicacionId,
+      tenantDe(req),
+    );
+    if (!u) throw new BadRequestException("La ubicación elegida no existe o está inactiva.");
+    return { id: u.id, nombre: u.nombre };
+  }
+
   async buscarMuestras(req: any, q?: string) {
     const t = texto(q, 60);
     if (!t || t.length < 2) return [];
@@ -586,6 +692,7 @@ export class CalidadService {
     if (cantidad != null && !(Number.isFinite(cantidad) && cantidad > 0)) throw new BadRequestException("La cantidad debe ser mayor que cero.");
     const unidad = texto(body?.unidad, 20);
     if (cantidad != null && !unidad) throw new BadRequestException("Indique la unidad de la cantidad (g, mL…).");
+    const ubicacionId = (await this.ubicacionValida(req, texto(body?.ubicacionId, 40)))?.id ?? null;
     const existentes = await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(`SELECT codigo FROM alicuota WHERE muestra_id = $1::uuid`, muestraId);
     const usados = existentes.map((e) => e.codigo);
     const creadas: string[] = [];
@@ -599,7 +706,7 @@ export class CalidadService {
         codigo,
         cantidad,
         unidad,
-        texto(body?.ubicacionId, 40),
+        ubicacionId,
         texto(body?.proposito, 160),
         texto(body?.observacion, 1000),
         usuarioDe(req),
@@ -633,6 +740,9 @@ export class CalidadService {
     };
     const e = erroresMovimientoAlicuota(mov, { estado: a.estado, restante: a.restante });
     if (e.length) throw new BadRequestException(e.join(" "));
+    // El traslado deja en el historial a dónde se llevó la alícuota.
+    const destino = mov.tipo === "traslado" ? await this.ubicacionValida(req, mov.ubicacionId) : null;
+    const detalle = destino ? `A ${destino.nombre}${mov.detalle ? ` · ${mov.detalle}` : ""}`.slice(0, 500) : mov.detalle;
     const plan = planMovimientoAlicuota(mov, { estado: a.estado, restante: a.restante });
     await this.prisma.$executeRawUnsafe(
       `UPDATE alicuota SET estado = $2, cantidad_restante = $3, ubicacion_id = COALESCE($4::uuid, ubicacion_id), actualizado_en = now() WHERE id = $1::uuid`,
@@ -650,7 +760,7 @@ export class CalidadService {
       a.estado,
       plan.estado,
       texto(body?.resultadoId, 40),
-      mov.detalle,
+      detalle,
       usuarioDe(req),
     );
     return { id, estado: plan.estado, cantidadRestante: plan.restante };
