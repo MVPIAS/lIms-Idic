@@ -241,18 +241,30 @@ export class OtCierreService {
     const nota = dto.motivo?.trim()
       ? `[${hoyCl()}] Fecha de compromiso ${diaDe(ot.fechaCompromiso) ?? "sin fecha"} → ${dto.fecha}: ${dto.motivo.trim()}`
       : null;
-    await this.prisma.$executeRawUnsafe(
-      `UPDATE orden_trabajo
-          SET fecha_compromiso = $2::date, fecha_compromiso_origen = 'manual',
-              fecha_compromiso_por = $3::uuid, fecha_compromiso_at = now(), updated_at = now(),
-              notas = CASE WHEN $4::text IS NULL THEN notas ELSE concat_ws(E'\\n', notas, $4::text) END
-        WHERE id = $1::uuid`,
-      id,
-      dto.fecha,
-      req?.user?.sub ?? null,
-      nota,
-    );
-    return this.estadoCierre(id, req);
+    const usuarioId: string | null = req?.user?.sub ?? null;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE orden_trabajo
+            SET fecha_compromiso = $2::date, fecha_compromiso_origen = 'manual',
+                fecha_compromiso_por = $3::uuid, fecha_compromiso_at = now(), updated_at = now(),
+                notas = CASE WHEN $4::text IS NULL THEN notas ELSE concat_ws(E'\\n', notas, $4::text) END
+          WHERE id = $1::uuid`,
+        id,
+        dto.fecha,
+        usuarioId,
+        nota,
+      );
+      // Pestaña «Historial» de la OT: la fecha anterior, la nueva y el motivo, con quién y cuándo.
+      await tx.$executeRawUnsafe(
+        `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'fecha_compromiso', $3::jsonb, $4::uuid)`,
+        ot.tenantId,
+        id,
+        JSON.stringify({ desde: diaDe(ot.fechaCompromiso) ?? null, hacia: dto.fecha, motivo: dto.motivo?.trim() || null }),
+        usuarioId,
+      );
+    });
+    // `codigo`: la bitácora (AuditInterceptor) registra el cambio con el código de la OT.
+    return { id: ot.id, codigo: ot.codigo, ...(await this.estadoCierre(id, req)) };
   }
 
   /**
