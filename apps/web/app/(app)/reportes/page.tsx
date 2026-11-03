@@ -455,6 +455,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
   async function previsualizar() {
     setError("");
     setAviso("");
+    if (!seleccionadas.length) { setError("Selecciona al menos una columna."); return; }
     setLoading(true);
     try {
       const p = new URLSearchParams(queryBase("json"));
@@ -531,7 +532,13 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
     if (!nombre?.trim()) return;
     const diasTxt = prompt("Rango de fechas: deja vacío para guardar el rango actual, o escribe N para «últimos N días» al usarla.", actual?.filtros?.ultimosDias ? String(actual.filtros.ultimosDias) : "");
     if (diasTxt === null) return;
-    const filtros = diasTxt.trim() ? { ultimosDias: Number(diasTxt.trim()) } : { ...(desde ? { desde } : {}), ...(hasta ? { hasta } : {}) };
+    // «abc» o «x» no es un número: antes se guardaba como «Sin rango de fechas» sin avisar.
+    const dias = diasTxt.trim();
+    if (dias && !(/^\d+$/.test(dias) && Number(dias) >= 1 && Number(dias) <= 3660)) {
+      setError("«Últimos días» debe ser un entero entre 1 y 3660.");
+      return;
+    }
+    const filtros = dias ? { ultimosDias: Number(dias) } : { ...(desde ? { desde } : {}), ...(hasta ? { hasta } : {}) };
     const cuerpo = {
       nombre: nombre.trim(),
       entidad,
