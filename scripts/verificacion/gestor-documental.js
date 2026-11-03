@@ -166,11 +166,10 @@ async function main() {
     return d.codigo;
   });
 
-  await paso("A · El analista (solo documento.ver) ve el documento pero no el borrador ni lo descarga", async () => {
+  await paso("A · El analista (solo documento.ver) no ve un documento que solo tiene borrador", async () => {
     const l = await ok(U.lmbAnalista, "GET", `/documentos/archivos?carpetaId=${C.carpLmb}&subcarpetas=true`);
-    afirmar(l.some((x) => x.id === C.doc), "el analista no lo lista");
-    const v = await ok(U.lmbAnalista, "GET", `/documentos/archivos/${C.doc}`);
-    afirmar(v.versiones.length === 0 && v.puedeEditar === false, "el analista ve versiones o puede editar");
+    afirmar(!l.some((x) => x.id === C.doc), "el analista lista un documento sin versión publicada");
+    await exigir(404, U.lmbAnalista, "GET", `/documentos/archivos/${C.doc}`);
     await exigir(404, U.lmbAnalista, "GET", `/documentos/archivos/${C.doc}/descargar`);
     await exigir(404, U.lqcJefe, "GET", `/documentos/archivos/${C.doc}`);
   });
