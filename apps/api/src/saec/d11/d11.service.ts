@@ -12,6 +12,7 @@ import { svgCode128 } from "../../common/code128";
 import { leerTabla, TablaError } from "../../common/tabla-archivo";
 import { SELECT_ARMAS, estadoDe, type FilaArma } from "./datos-d11";
 import { MunicionService } from "./municion.service";
+import { cerrarReanalisisAutomatico } from "../../calidad/reanalisis";
 import { UsoFuegoBody } from "./municion";
 import {
   CLASES,
@@ -972,6 +973,14 @@ export class D11Service implements OnModuleInit {
           tenantId,
           req,
         );
+        // Un arma prohibida da «No cumple» en la permisibilidad y abriría el
+        // re-análisis automático: repetir la determinación no tiene sentido (es
+        // la clasificación del armero), así que queda sin efecto.
+        await cerrarReanalisisAutomatico(this.prisma as any, {
+          resultadoId: e.resultadoId,
+          usuarioId: req?.user?.sub ?? null,
+          motivo: "No aplica: la permisibilidad la fija la clasificación del arma (IT05); no se repite la determinación.",
+        });
       }
       await this.prisma.$transaction(async (tx) => {
         if (a.clase && delCamino.length)

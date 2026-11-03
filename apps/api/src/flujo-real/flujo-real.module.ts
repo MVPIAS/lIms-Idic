@@ -42,7 +42,7 @@ import { leerCondicion2, leerPlanClases } from "../laboratorio/requisito-compues
 import { aplicarEtAMuestra } from "../especificacion-tecnica/aplicar-et";
 import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { descontarPorCaptura, faltantesDeCaptura, leerConfigConsumo } from "../consumibles/consumo-automatico";
-import { advertenciaDeCaptura, calidadDeResultados, leerConfigResultados, reanalisisAbierto, trasCaptura } from "../calidad/reanalisis";
+import { advertenciaDeCaptura, calidadDeResultados, cerrarReanalisisAutomatico, leerConfigResultados, reanalisisAbierto, trasCaptura } from "../calidad/reanalisis";
 import { criterioIndeterminado, leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado } from "../laboratorio/veredicto";
 import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
 import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion, type RecepcionNormalizada } from "./recepcion-muestra";
@@ -1307,6 +1307,15 @@ export class PuenteAnalisisService {
       },
       include: { catAnalito: true, catMetodo: true },
     }));
+    // El re-análisis automático lo abrió un «No cumple» que, con la especificación
+    // de la orden, ya no lo es (p. ej. tensión del disparador con rango 0–0): queda
+    // sin efecto y no bloquea la revisión.
+    if (resultado.veredicto === "no_cumple" && veredicto !== "no_cumple")
+      await cerrarReanalisisAutomatico(this.prisma as any, {
+        resultadoId: id,
+        usuarioId: req?.user?.sub ?? null,
+        motivo: `Sin efecto: con la especificación de la orden el veredicto pasó a «${veredicto === "cumple" ? "Cumple" : "Pendiente"}».`,
+      });
     const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
     return { ...actualizado, camposEditados: plan.campos, veredictoMuestra: veredictoDeLaMuestra };
   }

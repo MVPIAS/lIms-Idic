@@ -35,6 +35,27 @@ export async function reanalisisAbierto(db: Db, resultadoId: string): Promise<Re
   return r ?? null;
 }
 
+/**
+ * Deja sin efecto el re-análisis AUTOMÁTICO abierto de un ensayo cuando su
+ * causa desapareció o no aplica (p. ej. el «No cumple» venía de una
+ * especificación vacía y la orden ya fijó la suya, o la permisibilidad de un
+ * arma, que no se repite). Queda «descartado» con quién y por qué. Los
+ * re-análisis pedidos a mano no se tocan. Devuelve true si cerró alguno.
+ */
+export async function cerrarReanalisisAutomatico(
+  db: Db,
+  p: { resultadoId: string; usuarioId: string | null; motivo: string },
+): Promise<boolean> {
+  const n = await db.$executeRawUnsafe(
+    `UPDATE resultado_reanalisis SET estado = 'descartado', cerrado_por = $2::uuid, cerrado_at = now(), cierre_motivo = $3
+      WHERE resultado_id = $1::uuid AND estado = 'solicitado' AND origen = 'automatico'`,
+    p.resultadoId,
+    p.usuarioId,
+    p.motivo,
+  );
+  return n > 0;
+}
+
 /** 409 si el ensayo tiene un re-análisis abierto (no se revisa ni se aprueba). */
 export async function exigirSinReanalisis(db: Db, resultadoId: string): Promise<void> {
   const m = motivoReanalisisAbierto(await reanalisisAbierto(db, resultadoId));
