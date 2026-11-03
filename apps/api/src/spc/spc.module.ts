@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Injectable,
@@ -411,6 +412,10 @@ export class SpcController {
     @Query("hasta") hasta: string | undefined,
     @Req() req: any,
   ) {
+    // Identificadores mal formados: 400 con el motivo (antes, error 500 de la base).
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!catAnalitoId || !uuid.test(catAnalitoId)) throw new BadRequestException("Indique el analito (catAnalitoId) con un identificador válido.");
+    if (catMetodoId && !uuid.test(catMetodoId)) throw new BadRequestException("El método (catMetodoId) no es un identificador válido.");
     // Solo los resultados de las OT de su alcance (antes: de todo el instituto).
     return this.svc.series(tenantDe(req), catAnalitoId, catMetodoId, desde, hasta, await this.alcance.filtroUnidades(req));
   }
