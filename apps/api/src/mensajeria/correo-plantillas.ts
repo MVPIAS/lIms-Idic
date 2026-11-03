@@ -30,7 +30,7 @@ export const ETAPAS_CORREO: EtapaCorreo[] = [
   { etapa: "muestras_recibidas", nombre: "Muestras recibidas", disparador: "Al registrar las muestras recibidas de la OT", destino: "cliente", variables: ["cliente", "codigo", "cantidad", "muestras", "fecha"] },
   { etapa: "documento_oficial", nombre: "Informe oficial", disparador: "Cuando el informe o certificado queda con todas sus firmas", destino: "cliente", variables: ["cliente", "codigo", "documento", "fecha"] },
   { etapa: "resultado", nombre: "Resultado de la OT", disparador: null, destino: "cliente", variables: ["cliente", "codigo", "veredicto", "fecha"] },
-  { etapa: "aviso_interno", nombre: "Avisos internos (Mi bandeja)", disparador: "Con cada aviso: OT vencida o por vencer, No cumple, documento listo, despacho…", destino: "interno", variables: ["titulo", "mensaje", "tipo", "fecha"] },
+  { etapa: "aviso_interno", nombre: "Avisos internos (Mi bandeja)", disparador: "Con cada aviso: OT vencida o por vencer, No cumple, documento listo, despacho, próxima acción con un cliente…", destino: "interno", variables: ["titulo", "mensaje", "tipo", "fecha"] },
 ];
 
 const ETAPA_POR_CODIGO = new Map(ETAPAS_CORREO.map((e) => [e.etapa, e]));

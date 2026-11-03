@@ -7,7 +7,7 @@ import { llamar, qs } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
 import { fechaHora } from "@/lib/format";
 import { ahoraInputChile } from "@/lib/fecha-chile";
-import { toast } from "@/components/ui/feedback";
+import { toast, confirmar } from "@/components/ui/feedback";
 
 interface Hito {
   clase: "interaccion" | "oportunidad" | "cotizacion" | "ot" | "correo" | "documento";
@@ -32,40 +32,114 @@ const ICONO_INTERACCION: Record<string, string> = { llamada: "📞", reunion: "�
 
 const VACIA = { tipo: "llamada", fecha: "", asunto: "", detalle: "", contacto: "", proximaAccion: "", proximaFecha: "" };
 
+/** Interacción tal como la devuelve GET /clientes/:id/interacciones (para corregirla). */
+interface Interaccion {
+  id: string;
+  tipo: string;
+  fecha: string;
+  asunto: string;
+  detalle: string | null;
+  contacto: string | null;
+  responsableId: string | null;
+  oportunidadId: string | null;
+  otId: string | null;
+  cotizacionId: string | null;
+  proximaAccion: string | null;
+  proximaFecha: string | null;
+  creadoPor: string | null;
+}
+
 /**
  * Historial del cliente (contrato §4.1.2): línea de tiempo con las
  * interacciones registradas (llamadas, reuniones, correos, visitas, notas) y
  * lo que el LIMS ya sabe del cliente (oportunidades, cotizaciones, OT, correos
  * y documentos), cada cosa según los permisos y el alcance del usuario.
+ * Con `cliente.interaccion` se registran interacciones y se corrigen o
+ * eliminan las propias (o todas con `cliente.editar`, como exige la API). Una
+ * «Próxima acción» con fecha avisa al responsable en Mi bandeja ese día.
  */
 export default function HistorialCliente({ cliente, onCerrar }: { cliente: { id: string; razonSocial: string }; onCerrar: () => void }) {
-  const { puede } = usePermisos();
+  const { puede, usuario } = usePermisos();
   const registrar = puede("cliente.interaccion");
   const [hitos, setHitos] = useState<Hito[] | null>(null);
   const [conteo, setConteo] = useState<Record<string, number>>({});
   const [filtro, setFiltro] = useState<Set<string>>(new Set());
-  const [form, setForm] = useState<typeof VACIA | null>(null);
+  // form.id presente = se está corrigiendo esa interacción.
+  const [form, setForm] = useState<(typeof VACIA & { id?: string }) | null>(null);
   const [ocupado, setOcupado] = useState(false);
+  const [interacciones, setInteracciones] = useState<Map<string, Interaccion>>(new Map());
 
   const cargar = useCallback(async () => {
     try {
       const r = await llamar<{ data: Hito[]; conteo: Record<string, number> }>("GET", `/clientes/${cliente.id}/historial${qs({ clases: [...filtro].join(",") })}`);
       setHitos(r.data);
       if (!filtro.size) setConteo(r.conteo);
+      // Datos completos de las interacciones, para corregirlas desde la línea de tiempo.
+      if (registrar) {
+        const l = await llamar<Interaccion[]>("GET", `/clientes/${cliente.id}/interacciones`).catch(() => [] as Interaccion[]);
+        setInteracciones(new Map(l.map((i) => [i.id, i])));
+      }
     } catch (e: any) {
       toast.error(e.message);
       setHitos([]);
     }
-  }, [cliente.id, filtro]);
+  }, [cliente.id, filtro, registrar]);
   useEffect(() => void cargar(), [cargar]);
+
+  /** La API deja corregir o eliminar a quien la registró o a quien edita clientes. */
+  const editable = (i: Interaccion | undefined): i is Interaccion =>
+    !!i && registrar && (i.creadoPor === usuario.id || puede("cliente.editar"));
+
+  const editar = (i: Interaccion) =>
+    setForm({
+      id: i.id,
+      tipo: i.tipo,
+      fecha: ahoraInputChile(new Date(i.fecha)),
+      asunto: i.asunto,
+      detalle: i.detalle ?? "",
+      contacto: i.contacto ?? "",
+      proximaAccion: i.proximaAccion ?? "",
+      proximaFecha: i.proximaFecha ? i.proximaFecha.slice(0, 10) : "",
+    });
+
+  const eliminar = async (i: Interaccion) => {
+    const ok = await confirmar({
+      titulo: "¿Eliminar la interacción?",
+      mensaje: `«${i.asunto}» dejará de aparecer en el historial del cliente (y su próxima acción ya no se avisará).`,
+      peligro: true,
+    });
+    if (!ok) return;
+    try {
+      await llamar("DELETE", `/clientes/${cliente.id}/interacciones/${i.id}`);
+      toast.ok("Interacción eliminada del historial.");
+      if (form?.id === i.id) setForm(null);
+      await cargar();
+    } catch (x: any) {
+      toast.error(x.message);
+    }
+  };
 
   const guardar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form) return;
     setOcupado(true);
     try {
-      await llamar("POST", `/clientes/${cliente.id}/interacciones`, form);
-      toast.ok("Interacción registrada en el historial del cliente.");
+      const { id, ...datos } = form;
+      if (id) {
+        // La corrección conserva los vínculos que la ventana no muestra (OT, cotización, oportunidad, responsable).
+        const o = interacciones.get(id);
+        await llamar("PATCH", `/clientes/${cliente.id}/interacciones/${id}`, {
+          ...datos,
+          responsableId: o?.responsableId ?? null,
+          oportunidadId: o?.oportunidadId ?? null,
+          otId: o?.otId ?? null,
+          cotizacionId: o?.cotizacionId ?? null,
+        });
+        toast.ok("Interacción corregida.");
+      } else {
+        await llamar("POST", `/clientes/${cliente.id}/interacciones`, datos);
+        toast.ok("Interacción registrada en el historial del cliente.");
+      }
       setForm(null);
       await cargar();
     } catch (x: any) {
@@ -101,6 +175,7 @@ export default function HistorialCliente({ cliente, onCerrar }: { cliente: { id:
 
       {form && (
         <form className="card" onSubmit={guardar} style={{ marginBottom: 12 }}>
+          {form.id && <h3 style={{ margin: "0 0 8px" }}>Corregir interacción</h3>}
           <div className="form-grid">
             <div className="field">
               <label htmlFor="hi-tipo">Tipo</label>
@@ -132,11 +207,12 @@ export default function HistorialCliente({ cliente, onCerrar }: { cliente: { id:
             <div className="field">
               <label htmlFor="hi-pf">Fecha de la próxima acción</label>
               <input id="hi-pf" type="date" value={form.proximaFecha} onChange={(e) => setForm({ ...form, proximaFecha: e.target.value })} />
+              <small style={{ color: "var(--muted)", fontSize: 11 }}>Ese día el responsable recibe un aviso en Mi bandeja.</small>
             </div>
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
             <button type="button" className="btn outline sm" onClick={() => setForm(null)}>Cancelar</button>
-            <button className="btn primary sm" disabled={ocupado}>{ocupado ? "Guardando…" : "Registrar"}</button>
+            <button className="btn primary sm" disabled={ocupado}>{ocupado ? "Guardando…" : form.id ? "Guardar cambios" : "Registrar"}</button>
           </div>
         </form>
       )}
@@ -159,6 +235,12 @@ export default function HistorialCliente({ cliente, onCerrar }: { cliente: { id:
                 {h.ruta ? <Link href={h.ruta as any}>{h.titulo}</Link> : h.titulo}
               </div>
               {h.detalle && <div style={{ whiteSpace: "pre-wrap" }}>{h.detalle}</div>}
+              {h.clase === "interaccion" && editable(interacciones.get(h.id)) && (
+                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+                  <button type="button" className="btn outline sm" onClick={() => editar(interacciones.get(h.id)!)}>✏ Editar</button>
+                  <button type="button" className="btn ghost-danger sm" onClick={() => eliminar(interacciones.get(h.id)!)}>🗑 Eliminar</button>
+                </div>
+              )}
             </li>
           ))}
         </ol>
