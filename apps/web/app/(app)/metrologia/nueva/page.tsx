@@ -188,11 +188,19 @@ export default function NuevaCalibracionPage() {
     procs.forEach((p) => { (g[p.laboratorio ?? ""] ??= []).push(p); });
     return Object.entries(g);
   }, [procs]);
-  // Patrones de la magnitud del proceso primero; los auxiliares (termohigrómetros, barómetros, comparadores) al final.
+  // «Patrón 1…3» ofrece solo los del maestro aplicables: los de la magnitud del
+  // proceso (patrones y luego sus auxiliares, p. ej. comparadores). Los equipos
+  // ambientales (termohigrómetros, barómetros) se eligen en «Condiciones
+  // ambientales». Lo ya elegido (calibración guardada) se conserva aunque no
+  // cumpla, para que se vea y se pueda cambiar. Sin magnitud: todo el maestro.
   const opcionesPatron = useMemo(() => {
     const mag = proc?.magnitud;
-    return [...patrones].sort((a, b) => Number(b.magnitud === mag) - Number(a.magnitud === mag) || String(a.tipo).localeCompare(String(b.tipo)) || String(a.codigo).localeCompare(String(b.codigo)));
-  }, [patrones, proc]);
+    const elegidosIds = new Set((D.patrones as string[]).filter(Boolean));
+    const aplica = (p: any) => !mag || (p.magnitud === mag && !esEquipoAmbiental(p));
+    return patrones
+      .filter((p) => aplica(p) || elegidosIds.has(p.id))
+      .sort((a, b) => Number(b.magnitud === mag) - Number(a.magnitud === mag) || String(a.tipo).localeCompare(String(b.tipo)) || String(a.codigo).localeCompare(String(b.codigo)));
+  }, [patrones, proc, D.patrones]);
   const elegidos = (D.patrones as string[]).map((id) => patrones.find((p) => p.id === id)).filter(Boolean);
   // Equipos auxiliares del maestro (termohigrómetros, barómetros…) para las condiciones ambientales.
   const auxiliares = useMemo(() => patrones.filter((p) => p.tipo === "auxiliar"), [patrones]);
@@ -414,7 +422,7 @@ export default function NuevaCalibracionPage() {
                   </div>
                 );
               })}
-              <small style={{ color: "var(--muted)" }}>Los vencidos a la fecha de calibración no se pueden elegir. El maestro se mantiene en Metrología › Configuración.</small>
+              <small style={{ color: "var(--muted)" }}>Se ofrecen los patrones de la magnitud del proceso; el termohigrómetro y el barómetro se eligen en «Condiciones ambientales». Los vencidos a la fecha de calibración no se pueden elegir. El maestro se mantiene en Metrología › Configuración.</small>
             </div>)}
             {tarjeta("Condiciones ambientales", <div className="form-grid">
               <CondicionesAux D={D} up={up} auxiliares={auxiliares} />
@@ -542,6 +550,11 @@ function PorCalibrar({ filas }: { filas: any[] }) {
  * termohigrómetro y el barómetro, se anotan las lecturas inicial y final y se ve el valor
  * corregido con el error de su certificado (se resta, R15 T1). Sin auxiliar, se escriben a mano.
  */
+/** Equipo auxiliar de condiciones ambientales (termohigrómetro, barómetro): no es un patrón de la medición. */
+function esEquipoAmbiental(p: { tipo?: string | null; nombre?: string | null }): boolean {
+  return p.tipo === "auxiliar" && /termo\s*-?\s*higr[oó]metro|bar[oó]metro/i.test(p.nombre ?? "");
+}
+
 function CondicionesAux({ D, up, auxiliares }: { D: any; up: () => void; auxiliares: any[] }) {
   const th = auxiliares.find((p) => p.id === D.aux.th), ba = auxiliares.find((p) => p.id === D.aux.ba);
   const fila = (clave: "t" | "h" | "p", titulo: string, unidad: string, eq: any, c: "temp" | "hum" | "pres") => {
