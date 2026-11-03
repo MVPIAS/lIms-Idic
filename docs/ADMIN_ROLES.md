@@ -137,7 +137,8 @@ el permiso (Calidad redacta → aprueba Dirección o una jefatura de departament
 aprueba Calidad). Guardar el formato de una plantilla (también desde «Emitir informe») escribe en el borrador.
 **QC microbiológico · EP-02 ALI-D6** (`align_qc_microbiologico.sql`): sin permisos nuevos. Los controles
 positivo/negativo/blanco (+)/(−) usan los del QC (`resultado.crear`, `resultado.revisar`); el catálogo de
-cepas ATCC se lee con `resultado.ver` y se mantiene con `catalogo.gestionar`.
+cepas ATCC se lee con `resultado.ver` y se mantiene con `catalogo.gestionar` con alcance global (Calidad,
+Administración: catálogo común del IDIC; una jefatura de laboratorio solo lo consulta).
 **Tarifas · frente f5** (`align_f5_correcciones.sql`, ver `docs/COMERCIAL_RONDA2.md` §8): `tarifa.ver`
 (leer las tarifas HH, HM, perfiles HH y servicios primarios en Tablas maestras: Comercial, Planificación,
 Finanzas, Calidad y jefaturas; Dirección, Administración y Lector por la cascada). Las mantiene
