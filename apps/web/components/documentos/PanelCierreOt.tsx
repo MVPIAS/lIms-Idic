@@ -78,7 +78,7 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
           ? `La OT queda cerrada. Su factura ${d.factura.numero} ya existe: no se genera otra.`
           : d.ot.cotizacionId
             ? "La OT queda cerrada y se genera la factura en borrador para Finanzas con los importes de la cotización aceptada."
-            : "La OT queda cerrada y se genera la factura en borrador para Finanzas.",
+            : `La OT queda cerrada y se genera la factura en borrador para Finanzas.${d.avisos?.length ? ` ${d.avisos.join(" ")}` : ""}`,
       confirmarTexto: "Cerrar OT",
     });
     if (!ok) return;
@@ -227,6 +227,10 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
           </div>
         )}
         {!cerrada && !d.ot.conCobro && <div style={{ marginTop: 6, color: "var(--muted)" }}>OT sin cobro: al cerrarla no se genera factura.</div>}
+        {/* Aviso (no bloquea): la factura pendiente nacería sin importe (ensayos sin precio de lista). */}
+        {!cerrada && d.avisos?.length > 0 && (
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>{d.avisos.map((a: string, i: number) => <li key={i}>{a}</li>)}</ul>
+        )}
       </div>
       {!cerrada && d.puedo.cerrar && (
         <div className="toolbar" style={{ margin: 0 }}>

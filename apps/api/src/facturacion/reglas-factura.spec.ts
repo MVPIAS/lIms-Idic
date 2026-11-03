@@ -138,4 +138,11 @@ describe("borrador de la OT sin cotización (B-040)", () => {
     expect(lineasDesdeOt([], 280, "OT-2026-0005")).toEqual([{ descripcion: "Servicios de la OT OT-2026-0005 (valor estimado)", cantidad: 1, precioUnitario: 280, subtotal: 280 }]);
     expect(lineasDesdeOt([], null, "OT-1")).toEqual([]);
   });
+  it("sin precios ni valor estimado, una línea por ensayo en $ 0 (no nace vacía)", () => {
+    const { borradorSinImporte } = require("./reglas-factura");
+    const l = lineasDesdeOt([{ codigo: "1754", nombre: "Inspección visual del producto", cantidad: 2, precio: 0 }], null, "OT-2026-0063");
+    expect(l).toEqual([{ descripcion: "1754 · Inspección visual del producto", cantidad: 2, precioUnitario: 0, subtotal: 0 }]);
+    expect(borradorSinImporte(l)).toBe(true);
+    expect(borradorSinImporte([{ subtotal: 10 }])).toBe(false);
+  });
 });

@@ -23,7 +23,8 @@ import { clp, fecha } from "@/lib/format";
 import { AVANCE_INTERNACION, DOC_ADM, ESTADO_INTERNACION, pedir } from "../_components/bpch";
 
 const COBRO_PILL: Record<string, { c: string; l: string }> = {
-  pendiente: { c: "amber", l: "Pendiente" },
+  // Sin factura o con el borrador PEND- aún sin emitir: igual que «Tasa 1,5 % mensual».
+  pendiente: { c: "amber", l: "Sin facturar" },
   facturada: { c: "blue", l: "Facturada" },
   pagada: { c: "green", l: "Pagada" },
   sin_cobro: { c: "gray", l: "Sin cobro" },

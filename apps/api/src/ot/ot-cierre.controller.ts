@@ -1,6 +1,7 @@
 import { faltantesCierreArmas } from "../saec/d11/cierre-d11";
 import { SQL_OT_LISTA_PARA_CERRAR } from "./lista-cierre";
 import { faltantesNotificacionDgmn } from "../bpch/notificacion-dgmn/notificacion-dgmn.module";
+import { faltantesTasaInternacion } from "../bpch/internacion/cierre-tasa";
 import {
   BadRequestException,
   Body,
@@ -25,6 +26,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { FacturaService } from "../facturacion/facturacion.module";
+import { borradorSinImporte } from "../facturacion/reglas-factura";
 import { pasosActuales, esOficial } from "../plantilla-render/reglas-emision";
 import {
   OT_ESTADOS_TERMINADOS,
@@ -176,10 +178,13 @@ export class OtCierreService {
       // EP-10 10.15/10.17: incumplimiento oficial notificado a DGMN; EP-11 11.27: armas entregadas.
       ...(ot.estado === "cerrada" ? [] : await faltantesNotificacionDgmn(this.prisma, id)),
       ...(ot.estado === "cerrada" ? [] : await faltantesCierreArmas(this.prisma, id)),
+      // IDIC-PG 24 Anexo 03: internación sujeta a la tasa con la tasa remitida a facturación.
+      ...(ot.estado === "cerrada" ? [] : await faltantesTasaInternacion(this.prisma, id)),
     ];
     const camino = caminoEstadosOt(ot.estado);
     if (!faltantes.length && camino === null)
       faltantes.push(`La OT está en un estado ('${ot.estado}') desde el que no se puede llegar a «cerrada».`);
+    const avisos = ot.estado !== "cerrada" && ot.conCobro && !factura ? await this.avisosFactura(ot) : [];
     return {
       ot: {
         id: ot.id,
@@ -219,6 +224,7 @@ export class OtCierreService {
       })),
       factura: factura ? { ...factura, total: Number(factura.total) } : null,
       faltantes,
+      avisos,
       puedeCerrar: faltantes.length === 0,
       caminoEstados: camino ?? [],
       puedo: {
@@ -228,6 +234,26 @@ export class OtCierreService {
         entregar: tienePermiso(req, "certificado.entregar"),
       },
     };
+  }
+
+  /**
+   * Aviso (no bloquea) antes de cerrar una OT con cobro sin cotización aceptada:
+   * si sus ensayos no tienen precio en la lista vigente ni en la ficha y no hay
+   * valor estimado, la factura pendiente nacerá en $ 0 (p. ej. Producción Nacional).
+   */
+  private async avisosFactura(ot: { id: string; codigo: string; tenantId: string; cotizacionId: string | null }): Promise<string[]> {
+    if (ot.cotizacionId) {
+      const cot = await this.prisma.cotizacion.findFirst({ where: { id: ot.cotizacionId }, select: { estado: true } });
+      if (cot?.estado === "aceptada") return [];
+    }
+    const lineas = await this.facturas.lineasSinCotizacion(this.prisma, { id: ot.id, codigo: ot.codigo, tenantId: ot.tenantId });
+    return borradorSinImporte(lineas)
+      ? [
+          lineas.length
+            ? "Los ensayos de la OT no tienen precio en la lista de precios vigente ni en la ficha: la factura pendiente nacerá con sus líneas en $ 0 y Finanzas deberá valorizarlas antes de emitirla."
+            : "La OT no tiene ensayos con precio ni valor estimado: la factura pendiente nacerá sin importe y Finanzas deberá completar sus líneas antes de emitirla.",
+        ]
+      : [];
   }
 
   /** Planificación / jefatura fija o corrige la fecha de compromiso (origen «manual»). */
@@ -290,6 +316,7 @@ export class OtCierreService {
         ...(estado === "cerrada" ? [] : faltantesMetrologia(metro.items, metro.cals, metro.docsNoCalibrables, metro)),
         ...(estado === "cerrada" ? [] : await faltantesNotificacionDgmn(tx, id)),
         ...(estado === "cerrada" ? [] : await faltantesCierreArmas(tx, id)),
+        ...(estado === "cerrada" ? [] : await faltantesTasaInternacion(tx, id)),
       ];
       const camino = caminoEstadosOt(estado);
       if (!faltantes.length && camino === null)

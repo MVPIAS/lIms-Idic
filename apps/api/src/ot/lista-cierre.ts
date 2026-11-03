@@ -21,6 +21,8 @@ export const SQL_OT_LISTA_PARA_CERRAR = `
   AND NOT EXISTS (SELECT 1 FROM certificado c WHERE c.ot_id = o.id AND c.deleted_at IS NULL
                     AND (c.estado IN ('en_firma','devuelto') OR (c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL)))
   AND NOT EXISTS (SELECT 1 FROM resultado r WHERE r.ot_id = o.id AND r.deleted_at IS NULL AND r.estado <> 'aprobado')
+  -- IDIC-PG 24 Anexo 03: internación sujeta a la tasa con la tasa remitida a facturación (bpch/internacion/cierre-tasa.ts).
+  AND NOT EXISTS (SELECT 1 FROM bpch_internacion bi WHERE bi.ot_id = o.id AND bi.estado <> 'anulada' AND bi.sujeta_tasa AND bi.remitida_dco_at IS NULL)
   -- Metrología (EP-04): certificados de calibración emitidos y entregados; instrumentos recibidos, calibrados y devueltos.
   AND NOT EXISTS (SELECT 1 FROM met_calibracion mc WHERE mc.ot_id = o.id AND mc.deleted_at IS NULL
                     AND (mc.estado IN ('borrador','calculada','en_revision','en_firma') OR (mc.estado = 'emitida' AND mc.entregado_at IS NULL)))
