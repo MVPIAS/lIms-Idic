@@ -32,7 +32,9 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
+import { AvisosService } from "../avisos/avisos.service";
 import { instanteDeHoraChile } from "../common/fecha-chile";
+import { accedeACorreos, ambitoCorreoDe, filtroAlcanceCorreo } from "../mensajeria/alcance-correo";
 import { ETIQUETA_INTERACCION, TIPOS_INTERACCION, erroresInteraccion, lineaTiempo, oportunidadEnAlcance, type HitoCliente } from "./reglas-crm";
 
 const vacio = (v: unknown) => (v === "" ? null : v);
@@ -71,7 +73,13 @@ export class InteraccionesController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
+    private readonly avisos: AvisosService,
   ) {}
+
+  /** Si la próxima acción ya llegó a su fecha, avisa al responsable sin esperar la revisión horaria. */
+  private avisarProximaAccion(tenantId: string, interaccionId: string) {
+    return this.avisos.revisarProximasAcciones(tenantId, { interaccionId }).catch(() => undefined);
+  }
 
   private async cliente(id: string, tenantId: string) {
     const c = await this.prisma.cliente.findFirst({ where: { id, tenantId }, select: { id: true, razonSocial: true } });
@@ -177,15 +185,18 @@ export class InteraccionesController {
         );
     }
 
-    if (quiere("correo") && puede("cotizacion.ver")) {
+    // Correos: con el mismo acceso y alcance que Mensajería · correo (alcance-correo.ts).
+    if (quiere("correo") && accedeACorreos(permisos, req.user.roles ?? [])) {
+      const alc = filtroAlcanceCorreo(await ambitoCorreoDe(this.prisma, this.alcance, req), 3);
       const f = await this.prisma.$queryRawUnsafe<any[]>(
         `SELECT ce.id, ce.asunto, ce.destinatarios, ce.estado, ce.tipo, ce.n_adjuntos, ce.created_at,
                 COALESCE(u.nombre_completo, 'Sistema LIMS') AS remitente
            FROM correo_enviado ce LEFT JOIN usuario u ON u.id = ce.enviado_por
-          WHERE ce.tenant_id = $1::uuid AND ce.cliente_id = $2::uuid
+          WHERE ce.tenant_id = $1::uuid AND ce.cliente_id = $2::uuid AND ${alc.sql}
           ORDER BY ce.created_at DESC LIMIT 200`,
         tenantId,
         id,
+        ...alc.args,
       );
       fuentes.push(
         f.map((x) => ({
@@ -336,6 +347,7 @@ export class InteraccionesController {
       d.proximaFecha ?? null,
       req.user.sub ?? null,
     );
+    await this.avisarProximaAccion(tenantId, f.id);
     return (await this.interaccionesDe(id, tenantId)).find((i) => i.id === f.id);
   }
 
@@ -382,6 +394,7 @@ export class InteraccionesController {
       d.proximaAccion ?? null,
       d.proximaFecha ?? null,
     );
+    await this.avisarProximaAccion(tenantId, iid);
     return (await this.interaccionesDe(id, tenantId)).find((i) => i.id === iid);
   }
 
@@ -389,7 +402,7 @@ export class InteraccionesController {
   @RequierePermiso("cliente.interaccion")
   async eliminar(@Param("id", ParseUUIDPipe) id: string, @Param("iid", ParseUUIDPipe) iid: string, @Req() req: any) {
     await this.propia(req, id, iid);
-    await this.prisma.$executeRawUnsafe(`UPDATE cliente_interaccion SET deleted_at = now() WHERE id = $1::uuid`, iid);
+    await this.prisma.$executeRawUnsafe(`UPDATE cliente_interaccion SET deleted_at = now() WHERE id = $1::uuid AND tenant_id = $2::uuid`, iid, req.user.tenantId);
     return { ok: true };
   }
 }

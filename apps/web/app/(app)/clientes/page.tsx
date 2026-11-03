@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import CrudTable from "@/components/CrudTable";
 import { rut } from "@/lib/format";
+import { llamar } from "@/lib/laboratorio";
 import Plantas from "./_components/Plantas";
 import HistorialCliente from "./_components/HistorialCliente";
 
@@ -20,6 +21,14 @@ const conDiasCredito = (d: any) => {
 export default function ClientesPage() {
   const [plantasDe, setPlantasDe] = useState<{ id: string; razonSocial: string } | null>(null);
   const [historialDe, setHistorialDe] = useState<{ id: string; razonSocial: string } | null>(null);
+  // ?historial=<id>: abre el historial de ese cliente (enlace del aviso «Próxima acción» de Mi bandeja).
+  useEffect(() => {
+    const id = new URLSearchParams(window.location.search).get("historial");
+    if (!id || !/^[0-9a-f-]{36}$/i.test(id)) return;
+    llamar<{ id: string; razonSocial: string }>("GET", `/clientes/${id}`)
+      .then((c) => setHistorialDe({ id: c.id, razonSocial: c.razonSocial }))
+      .catch(() => undefined);
+  }, []);
   return (
     <>
     <CrudTable
