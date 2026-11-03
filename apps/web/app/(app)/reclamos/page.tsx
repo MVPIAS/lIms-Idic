@@ -108,7 +108,8 @@ function Nuevo({ roles, onCerrar, onHecho }: { roles: Rol[]; onCerrar: () => voi
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   useEffect(() => {
-    llamar<any>("GET", "/clientes?limit=200").then((r) => setClientes(r.data ?? [])).catch(() => setClientes([]));
+    // Buscador acotado (id, razón social, RUT): Calidad registra reclamos sin cliente.ver.
+    llamar<any>("GET", "/clientes-buscador?limit=200").then((r) => setClientes(r.data ?? [])).catch(() => setClientes([]));
   }, []);
   useEffect(() => {
     if (!f.clienteId) { setOts([]); return; }

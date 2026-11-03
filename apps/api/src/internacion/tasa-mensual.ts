@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, Injectable, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, ConflictException, Controller, Get, Injectable, Post, Query, Req, Res, StreamableFile, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
@@ -10,6 +10,7 @@ import { AmbitoUnidad } from "../rbac/ambito-unidad.guard";
 import { AlcanceService } from "../rbac/alcance.service";
 import { DIFUSION_TASA, lista, valoresCategoria } from "../common/parametros-r4d";
 import { ZONA_CHILE, SQL_ZONA, mesChile } from "../common/fecha-chile";
+import { libroXlsx, type Celda } from "../common/xlsx-escritura";
 
 /**
  * Informe mensual de la tasa de internación 1,5 % (EP-06 6.23, BL-164).
@@ -94,6 +95,15 @@ export function csvTasa(mes: string, filas: FilaTasa[]): string {
     [mes, f.internacion, f.ot, f.resolucion, f.cliente, f.centroCosto, num(f.tasa), num(f.iva), num(f.total), f.factura, ETIQUETA_PAGO[f.estadoPago], num(f.pagado)].map(esc).join(";"),
   );
   return "﻿" + [cab.join(";"), ...lineas].join("\r\n") + "\r\n";
+}
+
+/** Filas del libro Excel (.xlsx) del mes: misma cabecera que el CSV, montos como números (recorrido 30, fallo 46). */
+export function filasXlsxTasa(mes: string, filas: FilaTasa[]): Celda[][] {
+  const cab = ["Mes", "Internación", "OT", "Resolución DGMN", "Cliente", "Centro de costo", "Tasa (CLP)", "IVA (CLP)", "Total a cancelar (CLP)", "Factura", "Estado de pago", "Pagado (CLP)"];
+  return [
+    cab,
+    ...filas.map((f) => [mes, f.internacion, f.ot, f.resolucion, f.cliente, f.centroCosto, Math.round(f.tasa), Math.round(f.iva), Math.round(f.total), f.factura, ETIQUETA_PAGO[f.estadoPago], Math.round(f.pagado)]),
+  ];
 }
 
 const EmitirSchema = z.object({
@@ -219,9 +229,17 @@ export class TasaMensualController {
 
   @Get()
   @RequierePermiso("bpch.tasa.gestionar")
-  @ApiOperation({ summary: "Informe mensual de la tasa 1,5 % (?mes=AAAA-MM&formato=csv)" })
+  @ApiOperation({ summary: "Informe mensual de la tasa 1,5 % (?mes=AAAA-MM&formato=xlsx|csv)" })
   async ver(@Query("mes") mes: string | undefined, @Query("formato") formato: string | undefined, @Req() req: any, @Res({ passthrough: true }) res: Response) {
     const m = mes ?? mesChile();
+    if (formato === "xlsx") {
+      const filas = await this.svc.filas(req, m);
+      res.set({
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="tasa-1-5-${m}.xlsx"`,
+      });
+      return new StreamableFile(libroXlsx([{ nombre: `Tasa ${m}`, filas: filasXlsxTasa(m, filas), autoFiltro: true }]));
+    }
     if (formato === "csv") {
       const filas = await this.svc.filas(req, m);
       res.set({ "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="tasa-1-5-${m}.csv"` });

@@ -118,10 +118,11 @@ export default function CotizacionesPage() {
   }, [buscar]);
 
   const conteo = (f: Filtro) => {
-    const todos = Object.entries(conteos).filter(([e]) => e !== "porVencer");
+    // porVencer y enFirma no son estados: no suman en «Todas» ni en «Histórico».
+    const todos = Object.entries(conteos).filter(([e]) => e !== "porVencer" && e !== "enFirma");
     if (f === "todas") return todos.reduce((a, [, n]) => a + n, 0);
     if (f === "historico") return todos.filter(([e]) => esHistorico(e)).reduce((a, [, n]) => a + n, 0);
-    if (f === "enFirma") return null;
+    if (f === "enFirma") return conteos.enFirma ?? null;
     return conteos[f] ?? 0;
   };
 

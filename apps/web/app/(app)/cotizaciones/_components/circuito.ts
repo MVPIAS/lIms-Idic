@@ -118,6 +118,7 @@ export const TEXTO_EVENTO: Record<string, string> = {
   oc_conforme: "Comparó la O/C con la cotización: coincide",
   orden_cliente_anulada: "Anuló la orden del cliente",
   aceptada: "Registró la aceptación del cliente y generó la OT",
+  anulada: "Anuló la cotización",
 };
 
 // Textos de los medios de envío: «Parámetros del sistema › medio_envio» (useMediosEnvio, frente f5).

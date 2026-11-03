@@ -1,4 +1,5 @@
 import { emitirEvento } from "../common/eventos";
+import { textoErrorCorreo } from "../metrologia/ficha.datos";
 import { faltaOficio, seguimientoDocumento } from "../seguimiento/datos-seguimiento";
 import {
   BadRequestException,
@@ -588,7 +589,7 @@ export class FirmaDocumentoService {
     }
     return {
       ok,
-      error: ok ? null : `No se pudo enviar el correo: ${error}. Revise la configuración de correo o registre la entrega manualmente.`,
+      error: ok ? null : `No se pudo enviar el correo: ${textoErrorCorreo(error)}. Revise la configuración de correo o registre la entrega manualmente.`,
       destinatarios,
       documento: await this.circuito(id, req),
     };
