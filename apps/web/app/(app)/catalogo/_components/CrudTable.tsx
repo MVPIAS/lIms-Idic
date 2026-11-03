@@ -62,6 +62,10 @@ export interface Campo {
   requerido?: boolean;
   /** opciones fijas para un select simple. */
   opciones?: string[];
+  /** texto visible de cada opción fija (por defecto, la opción tal cual). */
+  etiquetasOpciones?: Record<string, string>;
+  /** al editar se muestra sin poder cambiarse y no se envía (p. ej. la categoría de un parámetro). */
+  soloLecturaEnEdicion?: boolean;
   /**
    * endpoint (relativo, sin barra inicial) del que cargar opciones de un select.
    * Puede ser una función del formulario actual para cascada (devuelve null si aún no aplica).
@@ -275,6 +279,7 @@ export default function CrudTable({
     const out: Record<string, any> = {};
     for (const c of campos) {
       const raw = form[c.name];
+      if (c.soloLecturaEnEdicion && editId != null) continue;
       if (c.tipo === "checkbox") {
         out[c.name] = !!raw;
       } else if (c.tipo === "number") {
@@ -471,12 +476,15 @@ export default function CrudTable({
                   ) : (
                     <>
                       <label htmlFor={inputId}>{c.label}{c.requerido && <span className="req"> *</span>}</label>
-                      {tipo === "select" && (c.opcionesEndpoint || c.opciones) ? (
+                      {c.soloLecturaEnEdicion && editId != null ? (
+                        <input id={inputId} type="text" readOnly disabled
+                          value={c.etiquetasOpciones?.[form[c.name]] ?? form[c.name] ?? ""} />
+                      ) : tipo === "select" && (c.opcionesEndpoint || c.opciones) ? (
                         c.opciones ? (
                           <select id={inputId} required={c.requerido} value={form[c.name] ?? ""}
                             onChange={(e) => cambiar(c.name, e.target.value)}>
                             <option value="">—</option>
-                            {c.opciones.map((o) => <option key={o} value={o}>{o}</option>)}
+                            {c.opciones.map((o) => <option key={o} value={o}>{c.etiquetasOpciones?.[o] ?? o}</option>)}
                           </select>
                         ) : (
                           <SelectField campo={c} inputId={inputId} value={form[c.name] ?? ""} endpoint={ep}
