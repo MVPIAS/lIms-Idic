@@ -56,6 +56,7 @@ import {
 import { MensajesController, MensajesService } from "./mensajes.service";
 import { EtapasCorreoService } from "./etapas-correo.service";
 import { fechaChile } from "../common/fecha-chile";
+import { decodeEntities } from "../plantilla-render/html.util";
 
 // ---------------------------------------------------------------------------
 // Módulo MENSAJERÍA · correo transaccional, plantillas por etapa y mensajería
@@ -248,7 +249,8 @@ export class MensajeriaService {
 
   /** Extrae un resumen en texto plano del cuerpo HTML del correo. */
   private resumen(html: string): string {
-    return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().slice(0, 2000);
+    // Entidades a texto («&middot;» de la firma → «·»).
+    return decodeEntities(html.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim().slice(0, 2000);
   }
 
   /**
