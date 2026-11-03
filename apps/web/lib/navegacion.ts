@@ -164,8 +164,9 @@ export const NAV: SeccionNav[] = [
       { href: "/documentos/gestor", label: "Gestor documental", icon: "📂", perm: "documento.ver", claves: "carpetas versiones procedimientos instructivos archivos subir" },
       { href: "/documentos", label: "Buscador de documentos emitidos", icon: "🗄", perm: "ot.ver" },
       { href: "/auditoria", label: "Auditoría (bitácora)", icon: "🧾", perm: "audit.ver", claves: "audit log trazabilidad cambios quien" },
-      { href: "/mensajeria", label: "Mensajería · correo", icon: "📧", perm: "cotizacion.ver" },
-      { href: "/mensajeria/plantillas", label: "Plantillas de correo", icon: "✉", perm: "cotizacion.ver" },
+      { href: "/mensajeria/bandeja", label: "Mensajes internos", icon: "💬", perm: "mensaje.usar", claves: "bandeja mensaje interno adjunto urgente responder" },
+      { href: "/mensajeria", label: "Mensajería · correo", icon: "📧", perm: "cotizacion.ver", claves: "correo historial buscar remitente adjuntos urgencia" },
+      { href: "/mensajeria/plantillas", label: "Plantillas de correo", icon: "✉", perm: "cotizacion.ver", claves: "plantilla etapa automatico aviso" },
     ],
   },
   {

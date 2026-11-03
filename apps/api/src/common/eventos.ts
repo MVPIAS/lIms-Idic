@@ -12,6 +12,10 @@ export interface EventosLims {
   "resultado.aprobado": { resultadoId: string; usuarioId: string | null };
   /** Un informe o certificado quedó oficial con la última firma (firma-documento.service). */
   "documento.oficial": { certificadoId: string; tenantId: string; usuarioId: string | null };
+  /** Se creó una OT (a mano en ot.controller o al aceptar la cotización). */
+  "ot.creada": { otId: string; tenantId: string; usuarioId: string | null };
+  /** Se registraron muestras recibidas en una OT (flujo-real › registrar). */
+  "muestras.registradas": { otId: string; tenantId: string; usuarioId: string | null; muestraIds: string[] };
 }
 
 const bus = new EventEmitter();
