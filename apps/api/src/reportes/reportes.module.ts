@@ -31,6 +31,7 @@ import { ReportesGestionController } from "./reportes-gestion.controller";
 import { diaChile, esFechaCalendario, fechaHoraChile, hoyChile, partesChile, SQL_HOY, SQL_ZONA } from "../common/fecha-chile";
 import { completarSerie, mesesEntre, porcentaje, tendencia } from "./tendencias";
 import { libroXlsx, type Celda, type Hoja } from "../common/xlsx-escritura";
+import { etiquetaCampo, etiquetasCampos, LIMITE_EXPORTACION, puedeEditarPlantilla, puedeExportar } from "./exportacion";
 import { AGREGADOS, GRAFICOS, tablaDinamica, type Agregado, type DefResumen, type TipoGrafico } from "./tabla-dinamica";
 
 // ===========================================================================
@@ -147,8 +148,10 @@ const ENTIDADES: Record<string, EntidadDef> = {
     },
   },
   // Facturas en el exportador (EP-00 9.4, BL-174, frente r4c): cuentan por la unidad de su OT.
+  // Solo para quien ve facturación (Finanzas, Comercial, Planificación, Dirección).
   factura: {
     tabla: "factura",
+    permiso: "factura.ver",
     fechaCol: "created_at",
     softDelete: true,
     columnas: {
@@ -736,14 +739,26 @@ export class ReportesController extends ReportesBase {
 
   // --- §4.6.6 / §4.6.7 · Configurador de tabla + export CSV ---------------
   /** Descripción de la whitelist para que la UI pinte los checkboxes. */
+  // Solo las entidades que quien consulta puede exportar (mismo criterio que /tabla),
+  // con la etiqueta legible de cada columna y el tope de filas por descarga.
   @Get("entidades")
   @RequierePermiso("reporte.ver")
-  entidades() {
+  entidades(@Req() req: any) {
     return Object.fromEntries(
-      Object.entries(ENTIDADES).map(([k, def]) => [
-        k,
-        { tabla: def.tabla, fechaCol: def.fechaCol, campos: Object.keys(def.columnas), etiqueta: etiquetaEntidad(k), permiso: def.permiso ?? null },
-      ]),
+      Object.entries(ENTIDADES)
+        .filter(([, def]) => puedeExportar(req?.user, def.permiso))
+        .map(([k, def]) => [
+          k,
+          {
+            tabla: def.tabla,
+            fechaCol: def.fechaCol,
+            campos: Object.keys(def.columnas),
+            etiquetas: Object.fromEntries(Object.keys(def.columnas).map((c) => [c, etiquetaCampo(k, c)])),
+            etiqueta: etiquetaEntidad(k),
+            permiso: def.permiso ?? null,
+            limite: LIMITE_EXPORTACION,
+          },
+        ]),
     );
   }
 
@@ -774,11 +789,8 @@ export class ReportesController extends ReportesBase {
         `entidad inválida. Válidas: ${Object.keys(ENTIDADES).join(", ")}`,
       );
     }
-    // Las facturas solo para quien ve facturación (Finanzas, Comercial, Planificación, Dirección).
-    const u = req?.user ?? {};
-    if (entidad === "factura" && !(u.roles ?? []).includes("SUPERADMIN") && !(u.permisos ?? []).includes("factura.ver"))
-      throw new ForbiddenException("Exportar facturas exige el permiso factura.ver.");
-    if (def.permiso && !(u.roles ?? []).includes("SUPERADMIN") && !(u.permisos ?? []).includes(def.permiso))
+    // Entidades con permiso propio (facturas: factura.ver; bitácora: audit.ver).
+    if (!puedeExportar(req?.user, def.permiso))
       throw new ForbiddenException(`Exportar ${etiquetaEntidad(String(entidad))} exige el permiso ${def.permiso}.`);
 
     // Resolución de columnas: SOLO claves de la whitelist. Si no se piden campos,
@@ -804,7 +816,7 @@ export class ReportesController extends ReportesBase {
     const softClause = def.softDelete ? "AND deleted_at IS NULL" : "";
     const rango =
       this.rangoFechas(def.fechaCol, desde, hasta, args) + condicionAlcance(def.tabla, def.tabla, await this.unidades(req), args);
-    const max = Math.min(50000, Math.max(1, parseInt(limit ?? "10000") || 10000));
+    const max = Math.min(LIMITE_EXPORTACION, Math.max(1, parseInt(limit ?? String(LIMITE_EXPORTACION)) || LIMITE_EXPORTACION));
 
     const filas = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT ${selectList}
@@ -814,13 +826,26 @@ export class ReportesController extends ReportesBase {
         LIMIT ${max}`,
       ...args,
     );
+    // Total real con los mismos filtros: la pantalla avisa si la descarga se corta en el tope.
+    const total =
+      filas.length < max
+        ? filas.length
+        : Number(
+            (
+              await this.prisma.$queryRawUnsafe<any[]>(
+                `SELECT count(*)::int AS n FROM ${def.tabla} WHERE tenant_id = $1::uuid ${softClause} ${rango}`,
+                ...args,
+              )
+            )[0]?.n ?? filas.length,
+          );
+    const encabezados = etiquetasCampos(String(entidad), claves);
 
     if ((formato ?? "").toLowerCase() === "xlsx") {
       const resumen = leerResumen(
         { filas: resumenFilas, columnas: resumenColumnas, valor: resumenValor, agregado: resumenAgregado, grafico },
         claves,
       );
-      const libro = this.libro(String(entidad), claves, filas, resumen, { desde, hasta, titulo });
+      const libro = this.libro(String(entidad), claves, filas, resumen, { desde, hasta, titulo, total });
       const stamp = hoyChile();
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
       res.setHeader("Content-Disposition", `attachment; filename="reporte_${entidad}_${stamp}.xlsx"`);
@@ -828,7 +853,7 @@ export class ReportesController extends ReportesBase {
     }
 
     if ((formato ?? "").toLowerCase() === "csv") {
-      const csv = toCsv(claves, filas);
+      const csv = toCsv(claves, filas, encabezados);
       const stamp = hoyChile();
       res.setHeader("Content-Type", "text/csv; charset=utf-8");
       res.setHeader("Content-Disposition", `attachment; filename="reporte_${entidad}_${stamp}.csv"`);
@@ -839,8 +864,10 @@ export class ReportesController extends ReportesBase {
     return {
       entidad,
       campos: claves,
+      etiquetas: encabezados,
       rango: { desde: desde ?? null, hasta: hasta ?? null },
-      meta: { total: filas.length, limit: max },
+      // total = filas que cumplen los filtros; devueltas = las que trae esta respuesta.
+      meta: { total, devueltas: filas.length, limit: max, limiteExportacion: LIMITE_EXPORTACION },
       data: filas,
     };
   }
@@ -855,15 +882,19 @@ export class ReportesController extends ReportesBase {
     claves: string[],
     filas: any[],
     resumen: DefResumen | null,
-    meta: { desde?: string; hasta?: string; titulo?: string },
+    meta: { desde?: string; hasta?: string; titulo?: string; total?: number },
   ): Buffer {
-    const datos: Celda[][] = [claves, ...filas.map((f) => claves.map((k) => celdaXlsx(f[k])))];
-    const anchos = claves.map((k, j) => Math.min(50, Math.max(k.length + 2, ...datos.slice(1, 200).map((f) => String(f[j] ?? "").length + 1))));
+    const encabezados = etiquetasCampos(entidad, claves);
+    const et = (c: string) => etiquetaCampo(entidad, c);
+    const datos: Celda[][] = [encabezados, ...filas.map((f) => claves.map((k) => celdaXlsx(f[k])))];
+    const anchos = encabezados.map((k, j) => Math.min(50, Math.max(k.length + 2, ...datos.slice(1, 200).map((f) => String(f[j] ?? "").length + 1))));
     const hojas: Hoja[] = [];
     if (resumen) {
       const t = tablaDinamica(filas, resumen);
       const conCols = !!resumen.columnas;
-      const tituloGrafico = (meta.titulo?.trim() || `${etiquetaEntidad(entidad)} por ${resumen.filas}`).slice(0, 120);
+      // Cabecera de la tabla cruzada con nombres legibles.
+      t.matriz[0][0] = conCols ? `${et(resumen.filas)} \\ ${et(resumen.columnas!)}` : et(resumen.filas);
+      const tituloGrafico = (meta.titulo?.trim() || `${etiquetaEntidad(entidad)} por ${et(resumen.filas).toLowerCase()}`).slice(0, 120);
       hojas.push({
         nombre: "Resumen",
         filas: t.matriz,
@@ -891,12 +922,15 @@ export class ReportesController extends ReportesBase {
         ["Desde", meta.desde ?? "(sin límite)"],
         ["Hasta", meta.hasta ?? "(sin límite)"],
         ["Filas exportadas", filas.length],
-        ["Columnas", claves.join(", ")],
+        ...(meta.total !== undefined && meta.total > filas.length
+          ? ([["Aviso", `Se exportan las primeras ${filas.length.toLocaleString("es-CL")} de ${meta.total.toLocaleString("es-CL")} filas; acote los filtros para obtener el resto.`]] as Celda[][])
+          : []),
+        ["Columnas", encabezados.join(", ")],
         ...(resumen
           ? ([
-              ["Resumen · filas", resumen.filas],
-              ["Resumen · columnas", resumen.columnas ?? "—"],
-              ["Resumen · valor", resumen.valor ? `${resumen.agregado} de ${resumen.valor}` : "cantidad de registros"],
+              ["Resumen · filas", et(resumen.filas)],
+              ["Resumen · columnas", resumen.columnas ? et(resumen.columnas) : "—"],
+              ["Resumen · valor", resumen.valor ? `${resumen.agregado} de ${et(resumen.valor)}` : "cantidad de registros"],
               ["Gráfico", resumen.grafico ?? "columna"],
             ] as Celda[][])
           : []),
@@ -921,6 +955,7 @@ export class ReportesController extends ReportesBase {
       compartida: p.compartida,
       creadoPor: p.creado_por_nombre ?? null,
       propia: false,
+      editable: false,
       creadoEn: p.creado_en,
     };
   }
@@ -964,7 +999,8 @@ export class ReportesController extends ReportesBase {
       tenantId,
       yo,
     );
-    return f.map((p) => ({ ...this.plantillaDto(p), propia: p.creado_por === yo }));
+    // editable: misma regla que plantillaPropia (quien la creó o Administración).
+    return f.map((p) => ({ ...this.plantillaDto(p), propia: p.creado_por === yo, editable: puedeEditarPlantilla(req?.user, p.creado_por) }));
   }
 
   @Post("plantillas")
@@ -978,7 +1014,7 @@ export class ReportesController extends ReportesBase {
          VALUES ($1::uuid, $2, $3, $4, $5::text[], $6::jsonb, $7::jsonb, $8, $9::uuid) RETURNING *`,
         tenantId, v.nombre, v.descripcion, v.entidad, v.campos, JSON.stringify(v.filtros), v.resumen ? JSON.stringify(v.resumen) : null, v.compartida, req?.user?.sub ?? null,
       );
-      return { ...this.plantillaDto(r[0]), propia: true };
+      return { ...this.plantillaDto(r[0]), propia: true, editable: true };
     } catch (e: any) {
       if (/23505/.test(String(e?.message ?? ""))) throw new ConflictException("Ya existe una plantilla con ese nombre.");
       throw e;
@@ -990,8 +1026,7 @@ export class ReportesController extends ReportesBase {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT * FROM reporte_plantilla WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`, id, tenantId);
     if (!f.length) throw new NotFoundException("Plantilla no encontrada.");
-    const u = req?.user ?? {};
-    if (f[0].creado_por !== u.sub && !(u.roles ?? []).includes("SUPERADMIN") && !(u.roles ?? []).includes("ADMIN"))
+    if (!puedeEditarPlantilla(req?.user, f[0].creado_por))
       throw new ForbiddenException("Solo quien creó la plantilla (o Administración) puede cambiarla.");
     return f[0];
   }
@@ -1007,7 +1042,7 @@ export class ReportesController extends ReportesBase {
                 resumen = $7::jsonb, compartida = $8, actualizado_en = now() WHERE id = $1::uuid RETURNING *`,
         id, v.nombre, v.descripcion, v.entidad, v.campos, JSON.stringify(v.filtros), v.resumen ? JSON.stringify(v.resumen) : null, v.compartida,
       );
-      return { ...this.plantillaDto(r[0]), propia: true };
+      return { ...this.plantillaDto(r[0]), propia: r[0].creado_por === req?.user?.sub, editable: true };
     } catch (e: any) {
       if (/23505/.test(String(e?.message ?? ""))) throw new ConflictException("Ya existe una plantilla con ese nombre.");
       throw e;
@@ -1039,8 +1074,8 @@ function escapar(s: string): string {
   return s;
 }
 
-function toCsv(claves: string[], filas: any[]): string {
-  const lineas = [claves.map(escapar).join(",")];
+function toCsv(claves: string[], filas: any[], encabezados: string[] = claves): string {
+  const lineas = [encabezados.map(escapar).join(",")];
   for (const fila of filas) {
     lineas.push(claves.map((k) => escapar(celda(fila[k]))).join(","));
   }

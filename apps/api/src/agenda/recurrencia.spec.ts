@@ -1,4 +1,4 @@
-import { bloque, costoUso, diaSemana, esDia, minutosJornada, minutosOcupados, ocurrencias, rangoVista, seSolapan, ultimaOcurrencia } from "./recurrencia";
+import { bloque, costoUso, diaSemana, esDia, fueraDeDisponibilidad, minutosJornada, minutosOcupados, ocurrencias, rangoVista, seSolapan, ultimaOcurrencia } from "./recurrencia";
 
 describe("agenda · recurrencia (§4.5.9)", () => {
   it("evento único: solo su día y solo si cae en el rango", () => {
@@ -89,5 +89,27 @@ describe("agenda · disponibilidad y costos (§4.5.8)", () => {
     expect(rangoVista("dia", "2026-11-04")).toEqual({ desde: "2026-11-04", hasta: "2026-11-04" });
     expect(rangoVista("semana", "2026-11-04")).toEqual({ desde: "2026-11-02", hasta: "2026-11-08" });
     expect(rangoVista("mes", "2028-02-10")).toEqual({ desde: "2028-02-01", hasta: "2028-02-29" });
+  });
+});
+
+describe("agenda · reserva dentro del horario y los días del recurso (§4.5.8)", () => {
+  const camioneta = { nombre: "Camioneta", horaDesde: "08:30", horaHasta: "17:30", diasHabiles: [1, 2, 3, 4, 5] };
+  it("dentro de horario y en día hábil: sin problemas", () => {
+    expect(fueraDeDisponibilidad(camioneta, ["2026-11-02", "2026-11-06"], { todoDia: false, horaInicio: "08:30", horaFin: "17:30" })).toEqual([]);
+    expect(fueraDeDisponibilidad(camioneta, ["2026-11-03"], { todoDia: true })).toEqual([]);
+  });
+  it("rechaza horas fuera del horario del recurso", () => {
+    const p = fueraDeDisponibilidad(camioneta, ["2026-11-02"], { todoDia: false, horaInicio: "07:00", horaFin: "09:00" });
+    expect(p).toHaveLength(1);
+    expect(p[0]).toContain("de 08:30 a 17:30");
+    expect(fueraDeDisponibilidad(camioneta, ["2026-11-02"], { todoDia: false, horaInicio: "16:00", horaFin: "18:00" })).toHaveLength(1);
+  });
+  it("rechaza días no hábiles, también en día completo y en series", () => {
+    // 2026-11-07 es sábado y 2026-11-08 domingo.
+    expect(fueraDeDisponibilidad(camioneta, ["2026-11-07"], { todoDia: true })[0]).toContain("sábado 2026-11-07");
+    expect(fueraDeDisponibilidad(camioneta, ["2026-11-06", "2026-11-07", "2026-11-08"], { todoDia: false, horaInicio: "09:00", horaFin: "10:00" })).toHaveLength(2);
+  });
+  it("un recurso sin días configurados se trata como disponible toda la semana", () => {
+    expect(fueraDeDisponibilidad({ ...camioneta, diasHabiles: [] }, ["2026-11-08"], { todoDia: true })).toEqual([]);
   });
 });

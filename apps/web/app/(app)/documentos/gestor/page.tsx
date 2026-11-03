@@ -68,6 +68,8 @@ interface Ficha {
   creadoPor: string | null;
   creadoEn: string;
   puedeEditar: boolean;
+  /** Mover de carpeta, permisos y eliminar: solo quien gestiona documentos. */
+  puedeAdministrar: boolean;
   versiones: Version[];
   accesos: { usuarioId: string; nombre: string; username: string; nivel: "ver" | "editar" }[];
 }
@@ -426,7 +428,7 @@ function SubirDocumento({ carpeta, onListo, onCancelar }: { carpeta: Carpeta; on
       </div>
       <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, marginBottom: 10 }}>
         <input type="checkbox" checked={publicar} onChange={(e) => setPublicar(e.target.checked)} style={{ width: "auto" }} />
-        Publicar ahora (si no, queda como borrador y solo lo ven quienes gestionan documentos)
+        Publicar ahora (si no, queda como borrador y solo lo ven quienes pueden editarlo; quienes solo consultan no lo ven hasta que se publique)
       </label>
       <div style={{ display: "flex", gap: 8 }}>
         <button className="btn primary sm" disabled={ocupado}>{ocupado ? "Subiendo…" : "Subir"}</button>
@@ -472,7 +474,11 @@ function FichaDocumento({ ficha, carpetas, onCambio, onBorrado }: { ficha: Ficha
           {ficha.puedeEditar && (
             <>
               <button type="button" className="btn sm" onClick={() => setModo(modo === "version" ? "" : "version")}>Nueva versión</button>
-              <button type="button" className="btn sm" onClick={() => setModo(modo === "editar" ? "" : "editar")}>Renombrar / mover</button>
+              <button type="button" className="btn sm" onClick={() => setModo(modo === "editar" ? "" : "editar")}>{ficha.puedeAdministrar ? "Renombrar / mover" : "Renombrar"}</button>
+            </>
+          )}
+          {ficha.puedeAdministrar && (
+            <>
               <button type="button" className="btn sm" onClick={() => setModo(modo === "permisos" ? "" : "permisos")}>Permisos</button>
               <button
                 type="button"
@@ -586,12 +592,19 @@ function EditarDocumento({ ficha, carpetas, onGuardar }: { ficha: Ficha; carpeta
     >
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
         <div className="field"><label htmlFor="ed-titulo">Título</label><input id="ed-titulo" required maxLength={200} value={titulo} onChange={(e) => setTitulo(e.target.value)} /></div>
-        <div className="field">
-          <label htmlFor="ed-carpeta">Carpeta</label>
-          <select id="ed-carpeta" value={carpetaId} onChange={(e) => setCarpetaId(e.target.value)}>
-            {carpetas.map((c) => <option key={c.id} value={c.id}>{c.ruta}</option>)}
-          </select>
-        </div>
+        {ficha.puedeAdministrar ? (
+          <div className="field">
+            <label htmlFor="ed-carpeta">Carpeta</label>
+            <select id="ed-carpeta" value={carpetaId} onChange={(e) => setCarpetaId(e.target.value)}>
+              {carpetas.map((c) => <option key={c.id} value={c.id}>{c.ruta}</option>)}
+            </select>
+          </div>
+        ) : (
+          <div className="field">
+            <label>Carpeta</label>
+            <div style={{ fontSize: 12.5, padding: "6px 0" }}>{ficha.carpeta} <span style={{ color: "var(--muted)" }}>(moverlo de carpeta lo hace quien gestiona documentos)</span></div>
+          </div>
+        )}
         <div className="field"><label htmlFor="ed-ot">OT (código; vacío = sin OT)</label><input id="ed-ot" value={otCodigo} onChange={(e) => setOtCodigo(e.target.value)} /></div>
         <div className="field"><label htmlFor="ed-muestra">Muestra (código)</label><input id="ed-muestra" value={muestraCodigo} onChange={(e) => setMuestraCodigo(e.target.value)} /></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="ed-desc">Descripción</label><input id="ed-desc" maxLength={2000} value={descripcion} onChange={(e) => setDescripcion(e.target.value)} /></div>
@@ -637,6 +650,11 @@ function Permisos({ ficha, onGuardar }: { ficha: Ficha; onGuardar: (b: any) => v
           ))}
         </ul>
       )}
+      <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>
+        «Ver»: consulta y descarga la versión publicada. «Ver y editar»: además sube versiones nuevas, las publica y cambia título,
+        descripción y vínculos de este documento, aunque no gestione documentos. Mover de carpeta, cambiar permisos y eliminar
+        quedan para quienes gestionan documentos.
+      </p>
       <table className="data" style={{ marginBottom: 8 }}>
         <thead><tr><th>Persona</th><th>Permiso</th><th /></tr></thead>
         <tbody>

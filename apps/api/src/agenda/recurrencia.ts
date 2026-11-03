@@ -187,3 +187,27 @@ export function rangoVista(vista: string, dia: string): { desde: string; hasta: 
   }
   return { desde: dia, hasta: dia };
 }
+
+const NOMBRE_DIA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"];
+
+/**
+ * Ocurrencias de una reserva que caen fuera de la disponibilidad del recurso:
+ * en un día que no es hábil para él o, si el evento tiene hora, fuera de su
+ * horario («desde»–«hasta»). Un evento de día completo ocupa la jornada del
+ * recurso, así que solo se revisa el día. Devuelve un mensaje por problema
+ * distinto (el horario se informa una vez; los días, uno por fecha).
+ */
+export function fueraDeDisponibilidad(
+  r: Pick<Recurso, "horaDesde" | "horaHasta" | "diasHabiles"> & { nombre: string },
+  dias: string[],
+  ev: { todoDia: boolean; horaInicio?: string | null; horaFin?: string | null },
+): string[] {
+  const salida: string[] = [];
+  if (!ev.todoDia && ev.horaInicio && ev.horaFin && (minutos(ev.horaInicio) < minutos(r.horaDesde) || minutos(ev.horaFin) > minutos(r.horaHasta)))
+    salida.push(`${r.nombre}: disponible solo de ${r.horaDesde.slice(0, 5)} a ${r.horaHasta.slice(0, 5)} (la reserva es de ${ev.horaInicio.slice(0, 5)} a ${ev.horaFin.slice(0, 5)})`);
+  const habiles = r.diasHabiles?.length ? r.diasHabiles : [1, 2, 3, 4, 5, 6, 7];
+  for (const d of dias)
+    if (!habiles.includes(diaSemana(d)))
+      salida.push(`${r.nombre}: el ${NOMBRE_DIA[diaSemana(d) - 1]} ${d} no está disponible (días: ${habiles.map((x) => NOMBRE_DIA[x - 1]).join(", ")})`);
+  return salida;
+}
