@@ -12,6 +12,7 @@ import {
   origenBandeja,
   plazosRetencion,
   semaforoPlazo,
+  SQL_LOTE_BPCH,
   validarCamposLaboratorio,
   type CampoRecepcion,
   type ClaseCustodia,
@@ -344,7 +345,7 @@ export class RecepcionService {
                          WHERE m2.ot_id = o.id AND m2.deleted_at IS NULL)) AS producto,
               (SELECT count(*) FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL)::int AS muestras,
               (SELECT count(*) FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL
-                  AND (m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL))::int AS incompletas,
+                  AND (m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL) AND NOT ${SQL_LOTE_BPCH})::int AS incompletas,
               (SELECT count(*) FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL AND m.numero_interno IS NULL)::int AS "sinNumero"
          FROM orden_trabajo o
          LEFT JOIN unidad u ON u.id = o.unidad_principal
@@ -355,7 +356,7 @@ export class RecepcionService {
           AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
           AND (NOT EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL)
                OR EXISTS (SELECT 1 FROM muestra m WHERE m.ot_id = o.id AND m.deleted_at IS NULL
-                            AND (m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL)))
+                            AND (m.toma_muestra IS NULL OR m.condicion_recepcion IS NULL) AND NOT ${SQL_LOTE_BPCH}))
         ORDER BY o.fecha_compromiso NULLS LAST, o.created_at
         LIMIT 300`,
       tenantId,
