@@ -4,11 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import { validarFormulario, esMoneda, esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { toast, confirmar } from "@/components/ui/feedback";
+import { diaChile } from "@/lib/fecha-chile";
 
 // Contrato §4.4.4 / §4.4.5 · CONSUMIBLES con lotes/stock/caducidad + KARDEX.
 // Un consumible se recibe en LOTES (stock, nº de lote, caducidad); cada ensayo
 // consume una cantidad que se descuenta del stock; el kardex registra entradas
 // (compra), consumos (por ensayo/muestra/método) y ajustes de inventario.
+// «Consumos pendientes»: lo que una captura no pudo descontar por falta de stock
+// (regla «avisar») queda registrado y aquí se descuenta o se descarta con motivo.
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -476,6 +479,8 @@ export default function ConsumiblesPage() {
         vacio={<>Sin consumibles.</>}
       />
 
+      <ConsumosPendientes refresco={rows} onCambio={cargar} />
+
       {/* ---- Detalle: lotes + movimientos + kardex ---- */}
       {detalle && (
         <div className="card" style={{ marginTop: 16 }}>
@@ -656,6 +661,108 @@ export default function ConsumiblesPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* --- consumos pendientes de descontar -------------------------------------- */
+
+function ConsumosPendientes({ refresco, onCambio }: { refresco: unknown; onCambio: () => void }) {
+  const [filas, setFilas] = useState<any[] | null>(null);
+  const [todos, setTodos] = useState(false);
+  const [descartando, setDescartando] = useState<{ id: string; motivo: string } | null>(null);
+  const [ocupado, setOcupado] = useState(false);
+  async function leer() {
+    try {
+      const res = await fetch(`${API}/consumibles/pendientes${todos ? "?todos=1" : ""}`, { headers: auth() });
+      if (!res.ok) throw new Error(`Error ${res.status} al cargar los consumos pendientes`);
+      setFilas((await res.json()).data ?? []);
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
+  useEffect(() => {
+    leer();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refresco, todos]);
+  async function accion(id: string, que: "descontar" | "descartar", motivo?: string) {
+    setOcupado(true);
+    try {
+      const res = await fetch(`${API}/consumibles/pendientes/${id}/${que}`, { method: "POST", headers: auth(), body: JSON.stringify(motivo ? { motivo } : {}) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.message ?? `Error ${res.status}`);
+      toast.ok(que === "descontar" ? `Consumo descontado${body.lotes?.length ? ` del lote ${body.lotes.join(", ")}` : ""}.` : "Consumo pendiente descartado.");
+      setDescartando(null);
+      onCambio();
+      await leer();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
+  const pendientes = (filas ?? []).filter((f) => f.estado === "pendiente").length;
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <h2 style={{ margin: 0 }}>Consumos pendientes de descontar</h2>
+        {pendientes > 0 && <span className="pill amber">{pendientes}</span>}
+        <div className="spacer" style={{ flex: 1 }}></div>
+        <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5 }}>
+          <input type="checkbox" checked={todos} onChange={(e) => setTodos(e.target.checked)} style={{ width: "auto" }} /> Ver también los regularizados
+        </label>
+      </div>
+      <p className="subtitle" style={{ margin: "6px 0 10px" }}>
+        Lo que una captura no pudo descontar por falta de stock vigente. Cuando ingrese el lote, use «Descontar ahora»; si el consumible no llegó a usarse, «Descartar» con el motivo.
+      </p>
+      {!filas ? (
+        <p style={{ margin: 0 }}>Cargando…</p>
+      ) : !filas.length ? (
+        <p style={{ margin: 0, color: "var(--muted)" }}>No hay consumos pendientes.</p>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="table">
+            <thead>
+              <tr><th>Fecha</th><th>Consumible</th><th>Cantidad</th><th>Stock vigente</th><th>Muestra · método</th><th>Registró</th><th>Estado</th><th></th></tr>
+            </thead>
+            <tbody>
+              {filas.map((f) => (
+                <tr key={f.id}>
+                  <td>{diaChile(f.created_at) ?? "—"}</td>
+                  <td><span className="codigo">{f.consumible_codigo}</span> {f.consumible_nombre}</td>
+                  <td>{fmt(f.cantidad)} {f.unidad_medida ?? ""}</td>
+                  <td>{f.estado === "pendiente" ? (num(f.disponible) + 1e-9 >= num(f.cantidad) ? <span className="pill green">{fmt(f.disponible)}</span> : <span className="pill red">{fmt(f.disponible)}</span>) : "—"}</td>
+                  <td>{f.muestra_codigo ?? "—"}{f.metodo_codigo ? ` · ${f.metodo_codigo}` : ""}</td>
+                  <td>{f.creado_por_nombre ?? "—"}</td>
+                  <td>
+                    {f.estado === "pendiente" ? <span className="pill amber">Pendiente</span> : f.estado === "descontado" ? <span className="pill green">Descontado</span> : <span className="pill gray">Descartado</span>}
+                    {f.estado !== "pendiente" && (
+                      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                        {diaChile(f.resuelto_en) ?? "—"} · {f.resuelto_por_nombre ?? "—"}{f.lotes ? ` · lote ${f.lotes}` : ""}{f.motivo_resolucion ? ` · ${f.motivo_resolucion}` : ""}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {f.estado === "pendiente" && descartando?.id !== f.id && (
+                      <>
+                        <button className="btn primary sm" disabled={ocupado} onClick={() => accion(f.id, "descontar")}>Descontar ahora</button>{" "}
+                        <button className="btn outline sm" disabled={ocupado} onClick={() => setDescartando({ id: f.id, motivo: "" })}>Descartar</button>
+                      </>
+                    )}
+                    {descartando && descartando.id === f.id && (
+                      <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input aria-label="Motivo del descarte" placeholder="Motivo del descarte" value={descartando.motivo} maxLength={1000} onChange={(e) => setDescartando({ id: f.id, motivo: e.target.value })} style={{ minWidth: 200 }} />
+                        <button className="btn sm" disabled={ocupado || descartando.motivo.trim().length < 5} onClick={() => accion(f.id, "descartar", descartando.motivo.trim())}>Confirmar descarte</button>
+                        <button className="btn outline sm" onClick={() => setDescartando(null)}>Cancelar</button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

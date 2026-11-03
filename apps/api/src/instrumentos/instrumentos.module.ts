@@ -25,10 +25,21 @@ const SUBIDA = FileInterceptor("archivo", { limits: { fileSize: MAX_ARCHIVO_BYTE
 export class InstrumentosController {
   constructor(private readonly s: InstrumentosService) {}
 
+  /**
+   * Perfiles: los ve quien importa o quien configura (Calidad configura sin
+   * capturar). Sin @RequierePermiso: el servicio exige uno de los dos y filtra
+   * por la unión de sus alcances.
+   */
   @Get("perfiles")
-  @RequierePermiso("instrumento.importar")
   perfiles(@Req() req: any) {
     return this.s.listarPerfiles(req);
+  }
+
+  /** Laboratorios, equipos y usuarios para el formulario de perfil. */
+  @Get("perfiles/opciones")
+  @RequierePermiso("instrumento.configurar")
+  opciones(@Req() req: any) {
+    return this.s.opcionesPerfil(req);
   }
 
   @Post("perfiles")
