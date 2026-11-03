@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fecha, fechaHora, fechaDia, rut, clp, num, hoyISO } from "@/lib/format";
-import { ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
+import { ACEPTACION_LABEL, ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
 import { usePermisos } from "@/lib/permisos";
 import { llamar, etiquetaUnidad } from "@/lib/laboratorio";
 import { toast } from "@/components/ui/feedback";
@@ -53,6 +53,12 @@ function textoHistorial(h: any): string {
     };
     return `Laboratorio responsable: ${hacia}${como[d.origen] ? ` (${como[d.origen]})` : ""}`;
   }
+  // Recorrido 30 (fallo 17): documento de aceptación de la cotización y discrepancia de la O/C.
+  if (h.tipo === "aceptacion_cotizacion")
+    return `Cotización ${d.cotizacion ?? ""} aceptada con ${ACEPTACION_LABEL[d.tipoDocumento] ?? d.tipoDocumento ?? "—"}${d.numero ? ` Nº ${d.numero}` : ""}${d.fecha ? ` del ${fechaDia(d.fecha)}` : ""}` +
+      (d.adjunto ? ` · documento «${d.adjunto}» (adjunto en la cotización)` : "") +
+      (d.montoOc != null ? ` · monto de la O/C ${clp(d.montoOc)}` : "") +
+      (d.discrepancia ? ` · discrepancia con la cotización: ${d.discrepancia}` : "");
   if (h.tipo === "registro_muestras") {
     const ms: any[] = d.muestras ?? [];
     const ensayos = ms.reduce((s, m) => s + Number(m.ensayos ?? 0), 0);

@@ -255,8 +255,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       and.push({ id: { in: ids.map((x) => x.id) } });
     }
     const where: Prisma.CotizacionWhereInput = { AND: and };
+    // Chip «En firma» (recorrido 30, fallo 47): abiertas con la firma del Jefe DCO pendiente.
+    const enFirma: { id: string }[] = await this.prisma.$queryRawUnsafe(
+      `SELECT id FROM cotizacion WHERE ($1::uuid IS NULL OR tenant_id = $1::uuid) AND estado = 'abierta' AND firma_estado = 'pendiente'`,
+      tenantId ?? null,
+    );
 
-    const [cots, total, porEstado, nPorVencer] = await Promise.all([
+    const [cots, total, porEstado, nPorVencer, nEnFirma] = await Promise.all([
       this.prisma.cotizacion.findMany({
         where,
         skip,
@@ -267,6 +272,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       this.prisma.cotizacion.count({ where }),
       this.prisma.cotizacion.groupBy({ by: ["estado"], where: conBusqueda, _count: { _all: true } }),
       this.prisma.cotizacion.count({ where: { AND: [conBusqueda, filtroPorVencer()] } }),
+      enFirma.length ? this.prisma.cotizacion.count({ where: { AND: [conBusqueda, { id: { in: enFirma.map((x) => x.id) } }] } }) : Promise.resolve(0),
     ]);
     // OT generada por cada cotización (sin relación Prisma): una sola consulta.
     const ids = cots.map((c) => c.id);
@@ -285,6 +291,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     for (const g of porEstado) conteos[g.estado] = g._count._all;
     // No es un estado: el chip «Por vencer (7 días)» de la lista.
     conteos.porVencer = nPorVencer;
+    conteos.enFirma = nEnFirma;
     return {
       data: cots.map((c) => ({ ...c, ...(circuito.get(c.id) ?? {}), ot: porCot.get(c.id) ?? null })),
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
@@ -716,12 +723,12 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * Anular (R1): Abierta → Anulada con motivo. Se conserva `DELETE /:id` como
    * alias (sin motivo) por compatibilidad. No hay borrado físico.
    */
-  async anular(id: string, tenantId?: string, motivo?: string) {
+  async anular(id: string, tenantId?: string, motivo?: string, usuarioId?: string) {
     const actual = await this.detalle(id, tenantId);
     validarTransicion("cotizacion", actual.estado, "anulada");
     if (actual.ot)
       throw new ConflictException(`La cotización ya generó la OT ${actual.ot.codigo}: anule primero la OT.`);
-    return this.prisma.cotizacion.update({
+    const r = await this.prisma.cotizacion.update({
       where: { id },
       data: {
         estado: "anulada",
@@ -730,6 +737,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         updatedAt: new Date(),
       },
     });
+    // Recorrido 30 (fallo 44): la anulación queda en la Bitácora con su motivo.
+    await this.hito(actual.tenantId, id, "anulada", usuarioId, motivo?.trim() || null, { estadoAnterior: actual.estado });
+    return r;
   }
 
   async cambiarEstado(id: string, nuevoEstado: string, tenantId?: string) {
@@ -884,6 +894,25 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
           unidad,
           usuarioId,
           origen: doc.unidadPrincipalId ? "aceptacion_indicado" : "aceptacion_deducido",
+        });
+      // Recorrido 30 (fallo 17): la OT deja en su Historial el documento de aceptación
+      // (tipo, número, fecha y archivo, que sigue adjunto a la cotización) y la discrepancia de la O/C.
+      if (doc.tipo)
+        await this.labs.anotar(tx, {
+          tenantId: tenantIdOt,
+          otId: ot.id,
+          tipo: "aceptacion_cotizacion",
+          usuarioId: usuarioId ?? null,
+          detalle: {
+            cotizacion: cot.codigo,
+            cotizacionId: cot.id,
+            tipoDocumento: doc.tipo,
+            numero: doc.numero?.trim() || null,
+            fecha: fechaDoc ? isoFecha(fechaDoc) : null,
+            adjunto: adjuntoNombre,
+            montoOc: oc.aplica ? doc.montoOc ?? null : null,
+            discrepancia: oc.hayDiscrepancia ? doc.discrepancia?.trim() || null : null,
+          },
         });
 
       return { cotizacion, ot };

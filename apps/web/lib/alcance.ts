@@ -30,6 +30,8 @@ export interface Alcance {
   ambitos?: Record<string, boolean>;
   /** Permisos que valen dentro de cada rama (alcance por asignación). */
   permisosPorAmbito?: Record<string, string[]>;
+  /** Mantiene las tablas comunes del catálogo (catalogo.gestionar con alcance global: Calidad, Administración). */
+  catalogoComun?: boolean;
 }
 
 export type Severidad = "info" | "warn" | "alta";
@@ -94,6 +96,7 @@ function normalizarAlcance(raw: any): Alcance | null {
     ambitos: raw.ambitos && typeof raw.ambitos === "object" ? raw.ambitos : undefined,
     permisosPorAmbito:
       raw.permisosPorAmbito && typeof raw.permisosPorAmbito === "object" ? raw.permisosPorAmbito : undefined,
+    catalogoComun: typeof raw.catalogoComun === "boolean" ? raw.catalogoComun : undefined,
   };
 }
 
