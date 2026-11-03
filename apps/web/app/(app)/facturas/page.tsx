@@ -145,7 +145,7 @@ function FacturasContenido() {
   async function anular(f: any) {
     const ok = await confirmar({
       titulo: `¿Anular la factura ${f.numero}?`,
-      mensaje: "Queda en estado «anulada» y se conserva en el historial. Si tiene pagos, emita una nota de crédito.",
+      mensaje: "Queda en estado «anulada», con saldo $ 0, y se conserva en el historial. Si tiene pagos, emita una nota de crédito. Para volver a cobrar la OT, use «Refacturar OT» en la factura anulada.",
       confirmarTexto: "Anular factura",
       peligro: true,
     });
@@ -153,6 +153,23 @@ function FacturasContenido() {
     try {
       await api.update("facturas", f.id, { estado: "anulada" });
       toast.ok(`Factura ${f.numero} anulada.`);
+      cargar();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }
+
+  /** Nueva factura pendiente de la OT de una factura anulada (copia sus líneas). */
+  async function refacturar(f: any) {
+    const ok = await confirmar({
+      titulo: `¿Refacturar la OT ${f.ot.codigo}?`,
+      mensaje: `Se genera una nueva factura pendiente de facturar con las líneas de ${f.numero}. Revísela y emítala con su folio.`,
+      confirmarTexto: "Refacturar OT",
+    });
+    if (!ok) return;
+    try {
+      const r: any = await api.post(`/facturas/desde-ot/${f.ot.id}`, {});
+      toast.ok(`Factura ${r?.numero ?? ""} pendiente de facturar creada para la OT ${f.ot.codigo}.`);
       cargar();
     } catch (e: any) {
       toast.error(e.message);
@@ -218,6 +235,10 @@ function FacturasContenido() {
       )}
       {f.estado !== "anulada" && f.estado !== "pagada" && Number(f.pagado ?? 0) === 0 && puede("factura.cobrar") && (
         <button className="btn ghost-danger sm" onClick={() => anular(f)}>Anular</button>
+      )}
+      {/* Fallo 50: la OT de una factura anulada se vuelve a facturar desde aquí. */}
+      {f.estado === "anulada" && f.ot && puede("factura.emitir") && (
+        <button className="btn outline sm" onClick={() => refacturar(f)}>Refacturar OT</button>
       )}
     </span>
   );
