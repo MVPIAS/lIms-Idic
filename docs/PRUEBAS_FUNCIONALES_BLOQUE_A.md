@@ -15,7 +15,8 @@
 | Sesión por inactividad (§4.7.6) | API + navegador | 4 | 4/4 OK | — |
 | Usuarios (≥ 1000, §4.7.6) | `carga-concurrente.js` | 2 | 2/2 OK | El listado cortaba en 500 usuarios y declaraba total 500; ahora tope 5000 y total real (`usuarios.controller.ts`) |
 | Exportación portable cifrada (§4.8.4) | `exportar-portable.sh` / `restaurar-portable.sh` | 6 | 6/6 OK | Las tablas particionadas (`audit_log`) no se podían copiar; el recuento de filas por líneas fallaba con textos de varias líneas |
-| Consumibles | — | — | **Pendiente** | Se documentan con el descuento automático y el factor de conversión (§4.4.4, §4.4.5), en el otro frente del bloque A |
+| Consumibles y equipos (§4.4.3–§4.4.5, §4.3.4) | `scripts/verificacion/equipos-consumibles.js` | 8 | 8/8 OK | Una ruta de configuración del método la bloqueaba el guardia del catálogo («tabla común»); ahora exige el laboratorio del método |
+| Calidad de resultados (§4.2.1, §4.2.6, §4.3.1, §4.3.5) | `scripts/verificacion/calidad-resultados.js` | 10 | 10/10 OK | — |
 
 Pruebas unitarias del API: **1820 superadas** (160 suites, 5 omitidas), incluidas las nuevas `reportes/tendencias.spec.ts` y `auth/sesion.spec.ts`. Comprobaciones del repositorio: orden del SQL al día (115 ficheros) y 757 rutas sin duplicados.
 
@@ -104,7 +105,23 @@ Probada con Docker en un PostgreSQL 16 aparte con una copia de la base (264 tabl
 
 Programación: `lims-exportacion.timer` (domingos 04:00, cada semana; el contrato pide cada 15 días como mínimo) o la línea equivalente en `lims-backup.cron`. La clave `RESPALDO_CLAVE` la genera el instalador. Procedimiento en `deploy/onpremise/GUIA_ONPREMISE.md` §7.8.
 
-## 8. Cómo repetir
+## 8. Consumibles, equipos y calidad de resultados (03-11-2026)
+
+Integración de los cuatro grupos del bloque A en la rama `frente-documental` (`5238ebc`), base local `pl_demo`, API en `localhost:3001`. Unitarias: 1852 superadas (166 suites).
+
+| Caso | Qué se comprueba | Resultado |
+|---|---|---|
+| CON-01 | Consumible comprado en frascos de 500 mL y consumido en mL: el lote de 2 frascos entra como 1000 mL; una entrada de 1 frasco suma 500 mL; sin factor, «en envases» se rechaza (400) | OK |
+| CON-02 | Consumo del método 403: 25 mL por réplica; el analista no lo configura (403) | OK |
+| CON-03 | Captura con 2 réplicas: descuenta 50 mL del lote vigente (FIFO), no del vencido; queda en el kardex como consumo automático con la muestra y el resultado | OK |
+| CON-04 | Corregir el valor no descuenta de nuevo; la repetición de un re-análisis sí (es una nueva determinación) | OK |
+| CON-05 | Sin stock: con «avisar» se captura e informa el faltante; con «impedir» responde 409 con el detalle | OK |
+| FOR-01 | Fórmulas desde un .xlsx con fórmulas de celda reales: «=(E2*F2*1.4*6.25)/D2» → «(C2*C3*1.4*6.25)/C1»; vista previa por estados (se guarda, no encontrado, error); aplicar exige motivo y el laboratorio del método | OK |
+| EQ-01 | Plan preventivo: alta, ejecución que corre la próxima fecha (+90 días), historial; otro laboratorio no lo ve (403) | OK |
+| EQ-02 | Calendario y reporte de gestión (cumplimiento, costos) con descarga Excel; un resultado no conforme deja el equipo fuera de servicio | OK |
+| CAL-01…10 | Advertencia cerca del límite, re-análisis automático que bloquea revisar, avisos al laboratorio, re-análisis manual y descarte, POE por método, acreditación ISO/IEC 17025 vigente, margen por método, alícuotas con consumo y alcance | 10/10 OK |
+
+## 9. Cómo repetir
 
 ```bash
 node scripts/verificacion/qc-spc-mensajeria.js --base http://localhost:3001/api --salida qc-spc-msj.json
