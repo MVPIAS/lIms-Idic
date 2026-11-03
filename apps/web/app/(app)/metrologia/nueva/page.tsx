@@ -10,6 +10,7 @@ import { toast } from "@/components/ui/feedback";
 import MotorPanel from "./MotorPanel";
 import PuntosPanel from "./PuntosPanel";
 import { fechaDia, fechaHora } from "@/lib/format";
+import { errorMensajeDe } from "@/lib/apiError";
 import { ESTADO_INSTRUMENTO } from "@/lib/metrologiaOt";
 import { hoyChile } from "@/lib/fecha-chile";
 
@@ -246,7 +247,7 @@ export default function NuevaCalibracionPage() {
       };
       const r = await fetch(`${API}/metrologia/calibraciones${editId ? `/${editId}` : ""}`, { method: editId ? "PUT" : "POST", headers: auth(), body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(Array.isArray(j.message) ? j.message.join(", ") : j.message ?? `Error ${r.status}`);
+      if (!r.ok) throw new Error(errorMensajeDe(j, r.status));
       setOk({ codigo: j.data.codigo, id: j.data.id ?? editId });
       setAvisosServidor(j.data.avisos ?? []);
       if (extra.motor) setInicialMotor(extra.motor);
@@ -260,7 +261,7 @@ export default function NuevaCalibracionPage() {
     try {
       const r = await fetch(`${API}/metrologia/calibraciones/${ok.id}/enviar`, { method: "POST", headers: auth() });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message ?? `Error ${r.status}`);
+      if (!r.ok) throw new Error(errorMensajeDe(j, r.status));
       toast.ok(`${ok.codigo} enviada al jefe del laboratorio`);
       router.push(`/metrologia/${ok.id}` as any);
     } catch (e: any) { setError(e.message); }
@@ -550,9 +551,16 @@ function PorCalibrar({ filas }: { filas: any[] }) {
  * termohigrómetro y el barómetro, se anotan las lecturas inicial y final y se ve el valor
  * corregido con el error de su certificado (se resta, R15 T1). Sin auxiliar, se escriben a mano.
  */
+/** Equipo auxiliar de condiciones ambientales: «th» termohigrómetro, «ba» barómetro; null si es otro equipo. */
+function tipoAmbiental(p: { tipo?: string | null; nombre?: string | null }): "th" | "ba" | null {
+  if (p.tipo !== "auxiliar") return null;
+  if (/termo\s*-?\s*higr[oó]metro/i.test(p.nombre ?? "")) return "th";
+  return /bar[oó]metro/i.test(p.nombre ?? "") ? "ba" : null;
+}
+
 /** Equipo auxiliar de condiciones ambientales (termohigrómetro, barómetro): no es un patrón de la medición. */
 function esEquipoAmbiental(p: { tipo?: string | null; nombre?: string | null }): boolean {
-  return p.tipo === "auxiliar" && /termo\s*-?\s*higr[oó]metro|bar[oó]metro/i.test(p.nombre ?? "");
+  return tipoAmbiental(p) !== null;
 }
 
 function CondicionesAux({ D, up, auxiliares }: { D: any; up: () => void; auxiliares: any[] }) {
@@ -573,12 +581,13 @@ function CondicionesAux({ D, up, auxiliares }: { D: any; up: () => void; auxilia
       </div>
     );
   };
+  // Cada selector ofrece solo su tipo de equipo (lo ya elegido se conserva para que se vea y se cambie).
   const sel = (k: "th" | "ba", etiqueta: string) => (
     <div className="field" style={{ gridColumn: "1 / -1" }}>
       <label htmlFor={`aux-${k}`}>{etiqueta}</label>
       <select id={`aux-${k}`} value={D.aux[k]} style={YEL} onChange={(e) => { D.aux[k] = e.target.value; up(); }}>
         <option value="">(escribir las condiciones a mano)</option>
-        {auxiliares.map((p) => (
+        {auxiliares.filter((p) => tipoAmbiental(p) === k || p.id === D.aux[k]).map((p) => (
           <option key={p.id} value={p.id} disabled={p.estado === "vencido"}>
             {p.codigo} · {p.nombre}{p.serie ? ` · ${p.serie}` : ""}{p.estado === "vencido" ? " · VENCIDO" : ""}
           </option>
