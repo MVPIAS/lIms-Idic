@@ -24,6 +24,11 @@ const ICONOS_SUGERIDOS = ["🏛", "🏢", "📂", "🧪", "⚗", "🔬", "🧫",
 
 type Borrador = Omit<Unidad, "id"> & { id?: string };
 
+/** Tipos que deben tener jefe (la tarjeta «Unidades sin jefe» de Mi bandeja cuenta los mismos). */
+const TIPOS_CON_JEFE = ["LABORATORIO", "SUCURSAL", "DELEGACION", "SECCION", "DEPARTAMENTO"];
+const sinJefe = (u: NodoUnidad) =>
+  u.activo !== false && TIPOS_CON_JEFE.includes(String(u.tipo)) && !(u.jefes?.length) && !(u as any).jefeUsuarioId;
+
 const vacio = (padre: Unidad | null): Borrador => ({
   codigo: "", nombre: "", tipo: tipoHijoSugerido(padre?.tipo ?? null), padreId: padre?.id ?? null,
   sigla: "", icono: "", color: "", codsucdel: "", centroCosto: padre?.centroCosto ?? "", activo: true,
@@ -46,6 +51,7 @@ function Estructura() {
   const [q, setQ] = useState("");
   const [abiertos, setAbiertos] = useState<Set<string>>(new Set());
   const [verInactivas, setVerInactivas] = useState(false);
+  const [soloSinJefe, setSoloSinJefe] = useState(false);
   const [selId, setSelId] = useState<string | null>(null);
   const [modo, setModo] = useState<"editar" | "crear">("editar");
   const [form, setForm] = useState<Borrador | null>(null);
@@ -57,6 +63,11 @@ function Estructura() {
   const unidades: Unidad[] = planas;
   const porId = useMemo(() => new Map(planas.map((u) => [u.id, u])), [planas]);
   const listaUsuarios: Usuario[] = usuarios.data ?? [];
+
+  // ?sinJefe=1 (tarjeta «Unidades sin jefe» de Mi bandeja): filtra el árbol a esas unidades.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("sinJefe") === "1") setSoloSinJefe(true);
+  }, []);
 
   // abre los dos primeros niveles al cargar
   useEffect(() => {
@@ -78,15 +89,17 @@ function Estructura() {
   const nPersonas = (n: NodoUnidad) => n.nUsuarios ?? personasPorUnidad.get(n.id)?.length ?? 0;
 
   // búsqueda: coincidencias + sus ancestros
+  // (con «Solo unidades sin jefe», además, solo las que no tienen jefe titular ni subrogante).
   const coincide = useMemo(() => {
     const t = q.trim().toLowerCase();
-    if (!t) return null;
+    if (!t && !soloSinJefe) return null;
     const hits = planas.filter((u) =>
-      `${u.codigo} ${u.nombre} ${u.sigla ?? ""} ${u.codsucdel ?? ""} ${u.jefes?.map((j) => j.nombre).join(" ")}`.toLowerCase().includes(t));
+      (!soloSinJefe || sinJefe(u)) &&
+      (!t || `${u.codigo} ${u.nombre} ${u.sigla ?? ""} ${u.codsucdel ?? ""} ${u.jefes?.map((j) => j.nombre).join(" ")}`.toLowerCase().includes(t)));
     const visibles = new Set<string>();
     hits.forEach((h) => ruta(h.id, porId as Map<string, Unidad>).forEach((r) => visibles.add(r.id)));
     return { hits: new Set(hits.map((h) => h.id)), visibles };
-  }, [q, planas, porId]);
+  }, [q, planas, porId, soloSinJefe]);
 
   const sel = selId ? porId.get(selId) ?? null : null;
 
@@ -223,6 +236,9 @@ function Estructura() {
                 <span key={t.value} className="inline-flex items-center gap-1"><span style={{ color: t.color }}>{t.icono}</span>{t.label}</span>
               ))}
               <label className="ml-auto inline-flex items-center gap-1 cursor-pointer">
+                <input type="checkbox" checked={soloSinJefe} onChange={(e) => setSoloSinJefe(e.target.checked)} /> Solo unidades sin jefe
+              </label>
+              <label className="inline-flex items-center gap-1 cursor-pointer">
                 <input type="checkbox" checked={verInactivas} onChange={(e) => setVerInactivas(e.target.checked)} /> Ver inactivas
               </label>
             </div>
@@ -235,7 +251,11 @@ function Estructura() {
                   <Nodo key={n.id} n={n} depth={0} abiertos={abiertos} toggle={toggle} selId={selId} onSel={seleccionar}
                     coincide={coincide} verInactivas={verInactivas} nPersonas={nPersonas} />
                 ))}
-                {coincide && coincide.hits.size === 0 && <div className="text-[12px] text-[var(--muted)] p-3">Ninguna unidad coincide con «{q}».</div>}
+                {coincide && coincide.hits.size === 0 && (
+                  <div className="text-[12px] text-[var(--muted)] p-3">
+                    {soloSinJefe && !q.trim() ? "Todas las unidades tienen jefe asignado." : `Ninguna unidad coincide con «${q}»${soloSinJefe ? " entre las que no tienen jefe" : ""}.`}
+                  </div>
+                )}
               </div>
             )}
             {!arbol.cargando && nodos.length > 0 && (

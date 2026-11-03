@@ -5,6 +5,7 @@ import { validarFormulario, esMoneda, esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { toast, confirmar } from "@/components/ui/feedback";
 import { diaChile } from "@/lib/fecha-chile";
+import { fechaHora } from "@/lib/format";
 
 // Contrato §4.4.4 / §4.4.5 · CONSUMIBLES con lotes/stock/caducidad + KARDEX.
 // Un consumible se recibe en LOTES (stock, nº de lote, caducidad); cada ensayo
@@ -160,6 +161,8 @@ export default function ConsumiblesPage() {
       const j = await res.json();
       setRows(j.data ?? []);
       setKpis(j.meta?.kpis ?? {});
+      // La cabecera del detalle (Stock …) toma la fila recién leída: tras un lote o un movimiento cambia.
+      setDetalle((d: any) => (d ? (j.data ?? []).find((x: any) => x.id === d.id) ?? d : d));
       setError("");
     } catch (e: any) {
       setError(e.message);
@@ -645,7 +648,7 @@ export default function ConsumiblesPage() {
               <tbody>
                 {(kardex.data ?? []).map((m: any) => (
                   <tr key={m.id}>
-                    <td style={{ color: "var(--muted)" }}>{String(m.created_at).slice(0, 16).replace("T", " ")}</td>
+                    <td style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{fechaHora(m.created_at)}</td>
                     <td><span className={`pill ${TIPO_MOV[m.tipo]?.pill ?? "gray"}`}>{TIPO_MOV[m.tipo]?.label ?? m.tipo}</span></td>
                     <td>{m.numero_lote}</td>
                     <td style={{ textAlign: "right" }}>{m.delta > 0 ? "+" : ""}{fmt(m.delta)}</td>

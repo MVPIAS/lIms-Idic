@@ -33,7 +33,10 @@ import {
   codigoValido,
   conOpciones,
   defConfigurable,
+  errorAltaLista,
+  errorDesactivarLista,
   erroresMotivo,
+  LISTAS_PARAMETROS,
   grupoDe,
   historialDeFila,
   laboratorioDe,
@@ -441,6 +444,11 @@ export class ParametroSistemaController extends BaseCrudController {
     exigirMedioEnvio(dto.categoria, dto.codigo);
     if (protegido(dto.categoria, dto.codigo))
       throw new ConflictException(MSJ_CONFIGURABLE);
+    // Solo se agregan opciones a las listas registradas (LISTAS_PARAMETROS) que lo admiten.
+    const errAlta = errorAltaLista(dto.categoria);
+    if (errAlta) throw new ConflictException(errAlta);
+    const errDesactivar = dto.activo === false ? errorDesactivarLista(dto.categoria, dto.codigo) : null;
+    if (errDesactivar) throw new ConflictException(errDesactivar);
     return this.svc.crear(dto, tenantDe(req));
   }
 
@@ -461,9 +469,12 @@ export class ParametroSistemaController extends BaseCrudController {
       // Los medios de envío ya usados en OT, documentos y cotizaciones no cambian de código: se desactivan.
       if (actual.categoria === "medio_envio") throw new ConflictException(MSJ_MEDIO_CODIGO);
     }
-    // «correo» es el medio con el que el LIMS envía los PDF: no se desactiva.
-    if (actual.categoria === "medio_envio" && actual.codigo === "correo" && dto.activo === false)
-      throw new ConflictException("«Correo electrónico» no se desactiva: es el medio con el que el LIMS envía los PDF a los clientes.");
+    // Una fila no pasa a otra lista: se agrega en la que corresponde.
+    if (dto.categoria !== undefined && dto.categoria !== actual.categoria)
+      throw new ConflictException("La categoría de una opción no se cambia: agréguela con «＋ Nuevo» en la lista que corresponde.");
+    // Opciones que no se desactivan (p. ej. «correo», el medio con el que el LIMS envía los PDF).
+    const errDesactivar = dto.activo === false && actual.activo !== false ? errorDesactivarLista(actual.categoria, actual.codigo) : null;
+    if (errDesactivar) throw new ConflictException(errDesactivar);
     if (CATEGORIAS_CON_HISTORIAL.includes(actual.categoria)) {
       if (cambiaClave || (dto.valor !== undefined && dto.valor !== actual.valor) || dto.activo === false)
         throw new ConflictException("Este porcentaje se cambia en «Porcentajes de la tasa de internación», con motivo: queda en el historial.");
@@ -532,6 +543,23 @@ export class ParametroPorcentajeController {
    * tiene con alcance GLOBAL (Calidad, Administración), igual que el resto de
    * las tablas comunes (AlcanceCatalogoGuard). `puedeEditar` lo dice a la pantalla.
    */
+  /**
+   * Listas de opciones que se mantienen en la tabla de «Parámetros del sistema»
+   * (LISTAS_PARAMETROS): nombre, si admiten opciones nuevas y qué códigos no se
+   * desactivan. La pantalla arma con esto el select «Categoría».
+   */
+  @Get("listas")
+  @ApiOperation({ summary: "Listas (combos) que se mantienen en Parámetros del sistema" })
+  listas(@Req() req: any) {
+    exigirAlguno(req, ["catalogo.gestionar"]);
+    return LISTAS_PARAMETROS.map((l) => ({
+      categoria: l.categoria,
+      nombre: l.nombre,
+      alta: l.alta !== false,
+      noDesactivables: Object.keys(l.noDesactivables ?? {}),
+    }));
+  }
+
   @Get("configurables")
   @ApiOperation({ summary: "Parámetros de la operación (R1) con su valor tipado y su historial" })
   async configurables(@Req() req: any) {

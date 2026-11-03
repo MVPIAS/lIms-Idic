@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 import CrudTable, { activoBadge, codigoCell } from "../_components/CrudTable";
 import PorcentajesTasa from "@/components/parametros/PorcentajesTasa";
 import ParametrosOperacion from "@/components/parametros/ParametrosOperacion";
@@ -10,27 +12,34 @@ import ParametrosOperacion from "@/components/parametros/ParametrosOperacion";
  * (tipo de cliente, forma de pago, prioridad, tipo de línea de costeo, tipo de
  * inspección) se agregan, editan o desactivan aquí, sin tocar código.
  *
- * Las categorías conocidas se ofrecen como select; el campo admite escribir una
- * nueva categoría si en el futuro se centraliza otro combo.
+ * «Categoría» ofrece las listas registradas en la API (LISTAS_PARAMETROS de
+ * parametro-configurable.ts, GET parametros/listas): las que admiten opciones
+ * nuevas. Al editar, la categoría se muestra sin poder cambiarse, sea cual sea.
  *
  * Debajo, «Parámetros de la operación» (valor de las reglas de la entrega R1,
  * con motivo e historial) y los porcentajes de la tasa de internación. En la
  * tabla de combos esos parámetros solo cambian etiqueta y orden.
  */
-const CATEGORIAS = [
-  "tipo_cliente",
-  "forma_pago",
-  "prioridad",
-  "tipo_linea_costeo",
-  "tipo_inspeccion",
-];
+interface ListaParametro {
+  categoria: string;
+  nombre: string;
+  alta: boolean;
+  noDesactivables: string[];
+}
 
 export default function ParametrosPage() {
+  const [listas, setListas] = useState<ListaParametro[]>([]);
+  useEffect(() => {
+    api.getRaw<ListaParametro[]>("parametros/listas").then((r) => setListas(Array.isArray(r) ? r : [])).catch(() => setListas([]));
+  }, []);
+  // «Medio de envío (medio_envio)»: nombre legible y el código que usan los manuales.
+  const etiquetas = Object.fromEntries(listas.map((l) => [l.categoria, `${l.nombre} (${l.categoria})`]));
+  const conAlta = listas.filter((l) => l.alta).map((l) => l.categoria);
   return (
     <>
     <CrudTable
       titulo="Parámetros del sistema"
-      subtitulo="Combos de negocio editables: agrega, modifica o desactiva valores (tipo de cliente, forma de pago, prioridad, líneas de costeo, tipo de inspección) sin intervención técnica. El valor de las reglas de la operación (cotización, encuestas, recepción, captura, Metrología) y los porcentajes de la tasa de internación se cambian, con motivo, en los recuadros al final de esta página."
+      subtitulo="Listas de opciones editables: agrega, modifica o desactiva valores (tipo de cliente, forma de pago, medio de envío, toma de muestra, cargos de costo, clases ONU…) sin intervención técnica. El valor de las reglas de la operación (cotización, encuestas, recepción, captura, Metrología) y los porcentajes de la tasa de internación se cambian, con motivo, en los recuadros al final de esta página."
       endpoint="parametros"
       accionesExtra={
         <>
@@ -39,14 +48,14 @@ export default function ParametrosPage() {
         </>
       }
       columnas={[
-        { key: "categoria", label: "Categoría" },
+        { key: "categoria", label: "Categoría", render: (v) => etiquetas[v] ?? v },
         { key: "codigo", label: "Código", render: codigoCell },
         { key: "etiqueta", label: "Etiqueta", editable: true },
         { key: "orden", label: "Orden", num: true, editable: { tipo: "number" } },
         { key: "activo", label: "Estado", render: activoBadge },
       ]}
       campos={[
-        { name: "categoria", label: "Categoría", requerido: true, tipo: "select", opciones: CATEGORIAS },
+        { name: "categoria", label: "Categoría", requerido: true, tipo: "select", opciones: conAlta, etiquetasOpciones: etiquetas, soloLecturaEnEdicion: true },
         { name: "codigo", label: "Código (valor interno)", requerido: true },
         { name: "etiqueta", label: "Etiqueta (texto visible)", requerido: true, span: 2 },
         { name: "orden", label: "Orden", tipo: "entero" },

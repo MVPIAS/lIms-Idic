@@ -110,7 +110,7 @@ export default function AdminInicio() {
 
   if (!acceso) return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-40" />)}</div>;
   const alguno = TARJETAS.some((t) => t.permiso.startsWith("admin.") && puede(acceso, t.permiso));
-  if (!alguno) return <SinAcceso permiso="admin.*" />;
+  if (!alguno) return <SinAcceso permiso={Array.from(new Set(TARJETAS.map((t) => t.permiso).filter((p) => p.startsWith("admin."))))} titulo="Administración" />;
 
   return (
     <div>

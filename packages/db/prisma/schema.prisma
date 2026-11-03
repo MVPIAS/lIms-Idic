@@ -643,6 +643,8 @@ model TareaAsignada {
 model Proveedor {
   id            String    @id @default(uuid()) @db.Uuid
   tenantId      String    @map("tenant_id") @db.Uuid
+  // Código humano PROV-NNN (NOT NULL en la tabla): lo asigna ProveedorService.crear.
+  codigo        String?   @db.VarChar(20)
   rut           String    @db.VarChar(20)
   razonSocial   String    @map("razon_social") @db.VarChar(200)
   rubro         String?   @db.VarChar(200)

@@ -10,6 +10,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { finDelDia, inicioDelDia, whereAuditoria } from "./filtro-auditoria";
+import { GRUPOS_ACCION, accionLegible, accionesDelGrupo, esGrupoAccion } from "./etiqueta-accion";
 import { NoConformidadController } from "./no-conformidad.controller";
 
 /**
@@ -69,8 +70,17 @@ export class AuditoriaController {
     const q = ConsultaSchema.parse(query ?? {});
     const tenantId = req?.user?.tenantId;
     const alcance = await this.usuariosDeAlcance(req);
+    // «Acción» = una familia (Creación, Firma y aprobación…): se expande a sus códigos registrados.
+    let accion: string | string[] | undefined = q.accion;
+    if (accion && esGrupoAccion(accion)) {
+      const codigos = await this.prisma.$queryRawUnsafe<{ v: string }[]>(
+        `SELECT DISTINCT accion AS v FROM audit_log WHERE tenant_id = COALESCE($1::uuid, tenant_id)`,
+        tenantId ?? null,
+      );
+      accion = accionesDelGrupo(accion, codigos.map((c) => c.v));
+    }
     const where = whereAuditoria(
-      { ...q, desde: q.desde !== undefined ? inicioDelDia(q.desde as any) : undefined, hasta: q.hasta !== undefined ? finDelDia(q.hasta as any) : undefined },
+      { ...q, accion, desde: q.desde !== undefined ? inicioDelDia(q.desde as any) : undefined, hasta: q.hasta !== undefined ? finDelDia(q.hasta as any) : undefined },
       tenantId,
       alcance,
     );
@@ -86,7 +96,8 @@ export class AuditoriaController {
     ]);
 
     return {
-      data,
+      // Texto de la acción en español (los códigos técnicos de la ruta no se muestran).
+      data: data.map((d: any) => ({ ...d, accionEtiqueta: accionLegible(d.accion).etiqueta })),
       meta: {
         page: q.page,
         limit: q.limit,
@@ -102,21 +113,16 @@ export class AuditoriaController {
   @Get("opciones")
   async opciones(@Req() req: any) {
     const tenantId = req?.user?.tenantId ?? null;
-    const [recursos, acciones] = await Promise.all([
+    const [recursos] = await Promise.all([
       this.prisma.$queryRawUnsafe<{ v: string }[]>(
         `SELECT DISTINCT entidad_tipo AS v FROM audit_log
           WHERE tenant_id = COALESCE($1::uuid, tenant_id) AND ocurrido_at > now() - interval '365 days'
           ORDER BY 1 LIMIT 200`,
         tenantId,
       ),
-      this.prisma.$queryRawUnsafe<{ v: string }[]>(
-        `SELECT DISTINCT accion AS v FROM audit_log
-          WHERE tenant_id = COALESCE($1::uuid, tenant_id) AND ocurrido_at > now() - interval '365 days'
-          ORDER BY 1 LIMIT 100`,
-        tenantId,
-      ),
     ]);
-    return { recursos: recursos.map((r) => r.v), acciones: acciones.map((a) => a.v) };
+    // El filtro «Acción» ofrece las familias, no los ~150 códigos de ruta.
+    return { recursos: recursos.map((r) => r.v), acciones: GRUPOS_ACCION };
   }
 }
 
