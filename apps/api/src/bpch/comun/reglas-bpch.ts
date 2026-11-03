@@ -361,6 +361,22 @@ export function faltantesRemision(p: {
   return f;
 }
 
+/**
+ * Faltante del cierre de la OT de internación (IDIC-PG 24 Anexo 03): si el
+ * expediente está sujeto a la tasa, Comercial tiene que haberla calculado y
+ * remitido a facturación antes de cerrar; así la factura pendiente de la OT
+ * nace con la línea de la tasa y no vacía (recorrido 30, fallo 0).
+ */
+export function faltantesCierreTasa(exps: { numero: string; sujetaTasa: boolean; tasaCalculada: boolean; remitida: boolean }[]): string[] {
+  return exps
+    .filter((e) => e.sujetaTasa && !e.remitida)
+    .map((e) =>
+      e.tasaCalculada
+        ? `La tasa de internación de ${e.numero} está calculada pero Comercial aún no la remite a facturación.`
+        : `Falta que Comercial calcule la tasa de internación de ${e.numero} y la remita a facturación.`,
+    );
+}
+
 /* ========================================================================== */
 /* Reinspección                                                               */
 /* ========================================================================== */

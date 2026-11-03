@@ -128,7 +128,7 @@ export function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerr
         <div className="field" style={{ gridColumn: "1 / -1" }}>
           <label htmlFor="acep-arch">Documento de aceptación (PDF o imagen, máx. 5 MB)</label>
           <input id="acep-arch" type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setArchivo(e.target.files?.[0] ?? null)} />
-          <small style={{ color: "var(--muted)" }}>OPI, O/C, correo o comprobante de pago. Queda en la cotización y en la OT.</small>
+          <small style={{ color: "var(--muted)" }}>OPI, O/C, correo o comprobante de pago. Queda adjunto en la cotización; la OT lo registra en su «Historial» junto con la discrepancia.</small>
         </div>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, gridColumn: "1 / -1" }}>
           <input type="checkbox" style={{ width: "auto" }} checked={conCobro} onChange={(e) => setConCobro(e.target.checked)} />

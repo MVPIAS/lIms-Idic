@@ -905,13 +905,15 @@ export class InternacionBpchService {
     const facturaId = await this.prisma.$transaction(async (tx) => {
       const [bloq] = await tx.$queryRawUnsafe<{ remitida_dco_at: Date | null }[]>(`SELECT remitida_dco_at FROM bpch_internacion WHERE id = $1::uuid FOR UPDATE`, id);
       if (bloq?.remitida_dco_at) throw new ConflictException("La tasa ya fue remitida a facturación.");
-      // Si el cierre de la OT ya dejó una factura pendiente sin líneas, se completa esa.
+      // Si el cierre de la OT ya dejó una factura pendiente sin importe (sin líneas
+      // o con los ensayos en $ 0), se completa esa con la línea de la tasa.
       const vacia = await tx.factura.findFirst({
-        where: { otId: i.ot_id, deletedAt: null, estado: "pendiente", lineas: { none: {} } },
+        where: { otId: i.ot_id, deletedAt: null, estado: "pendiente", total: 0 },
         select: { id: true },
       });
       let fid: string;
       if (vacia) {
+        await tx.lineaFactura.deleteMany({ where: { facturaId: vacia.id } });
         await tx.factura.update({
           where: { id: vacia.id },
           data: { ivaPct, neto: t.neto, ivaMonto: t.ivaMonto, total: t.total, observaciones: obs, lineas: { create: lineas } },

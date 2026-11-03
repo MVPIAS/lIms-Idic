@@ -5,6 +5,8 @@ describe("B-014 · buscador acotado de clientes", () => {
     expect(puedeElegirCliente({ permisos: ["evidencia.crear"] })).toBe(true);
     expect(puedeElegirCliente({ permisos: ["bpch.reinspeccion.gestionar"] })).toBe(true);
     expect(puedeElegirCliente({ permisos: ["cliente.ver"] })).toBe(true);
+    // Calidad registra reclamos (recorrido 30, fallo 4).
+    expect(puedeElegirCliente({ permisos: ["reclamo.gestionar"] })).toBe(true);
   });
   it("un perfil sin ninguno de esos permisos, no", () => {
     expect(puedeElegirCliente({ permisos: ["resultado.crear", "ot.ver"] })).toBe(false);

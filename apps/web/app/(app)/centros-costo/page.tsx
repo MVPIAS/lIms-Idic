@@ -1,6 +1,7 @@
 "use client";
 
 import CrudTable from "@/components/CrudTable";
+import { useAlcance } from "@/lib/alcance";
 
 const activoBadge = (v: any) => (
   <span className={`pill ${v === false ? "gray" : "green"}`}>{v === false ? "inactivo" : "activo"}</span>
@@ -15,8 +16,16 @@ const TIPO_LABEL: Record<string, string> = {
 };
 
 export default function CentrosCostoPage() {
+  // Tabla común del instituto: la mantienen quienes tienen catalogo.gestionar con
+  // alcance global (Calidad, Administración); una jefatura con ese permiso acotado
+  // a su unidad recibe 403 al guardar, así que no se le ofrecen los botones (fallo 49).
+  const { alcance } = useAlcance();
+  const mantiene = alcance?.catalogoComun !== false ? undefined : false;
   return (
     <CrudTable
+      permitirCrear={mantiene}
+      permitirEditar={mantiene}
+      permitirEliminar={mantiene}
       recurso="centros-costo"
       titulo="Centros de Costo"
       subtitulo="Laboratorios, sucursales BPCH y Delegación Nº 11. Cada uno puede tener su texto base de condiciones adicionales y su validez para particulares."

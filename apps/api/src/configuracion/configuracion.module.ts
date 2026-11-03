@@ -239,7 +239,7 @@ export class MailService {
     },
   ): Promise<{ ok: true; messageId?: string }> {
     const cfg = await this.obtenerConfig(tenantId);
-    if (!cfg) throw new Error("No hay configuración de correo para este tenant.");
+    if (!cfg) throw new Error("No hay configuración de correo en esta instalación (Administración › Correo).");
     if (!cfg.activo) throw new Error("La configuración de correo está inactiva.");
     if (!cfg.host) throw new Error("Falta el host SMTP en la configuración.");
 

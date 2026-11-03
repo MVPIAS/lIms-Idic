@@ -323,7 +323,7 @@ export class CotizacionController {
   @RequierePermiso(PERMISO_ANULAR)
   async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     await this.exigirCotizacion(req, id);
-    return this.svc.anular(id, req?.user?.tenantId);
+    return this.svc.anular(id, req?.user?.tenantId, undefined, req?.user?.sub);
   }
 
   /**
@@ -335,7 +335,7 @@ export class CotizacionController {
   async anular(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     await this.exigirCotizacion(req, id);
     const { motivo } = AnularSchema.parse(body ?? {});
-    return this.svc.anular(id, req?.user?.tenantId, motivo);
+    return this.svc.anular(id, req?.user?.tenantId, motivo, req?.user?.sub);
   }
 
   /** Histórico: borrador → enviada (las nuevas nacen Abiertas y no pasan por aquí). */

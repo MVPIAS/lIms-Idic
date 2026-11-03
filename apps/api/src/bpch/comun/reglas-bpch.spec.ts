@@ -13,6 +13,7 @@ import {
   erroresTasa,
   faltantesDocumentoFinal,
   faltantesRemision,
+  faltantesCierreTasa,
   normalizarCnc,
   transicionDocAdm,
   lineaBitacoraDocAdm,
@@ -210,5 +211,14 @@ describe("Tasa · porcentajes del parámetro (revisión de seguridad r3)", () =>
   it("otros porcentajes se informan (exigen el permiso de configuración)", () => {
     expect(porcentajesTasaCambiados({ tasaPct: 2 }, prm)[0]).toMatch(/tasa 2 %/);
     expect(porcentajesTasaCambiados({ ivaPct: 0 }, prm)[0]).toMatch(/IVA 0 %/);
+  });
+});
+
+describe("cierre de la OT de internación con tasa (recorrido 30, fallo 0)", () => {
+  it("exige la tasa calculada y remitida si el expediente está sujeto", () => {
+    expect(faltantesCierreTasa([{ numero: "INT-1", sujetaTasa: false, tasaCalculada: false, remitida: false }])).toEqual([]);
+    expect(faltantesCierreTasa([{ numero: "INT-1", sujetaTasa: true, tasaCalculada: true, remitida: true }])).toEqual([]);
+    expect(faltantesCierreTasa([{ numero: "INT-1", sujetaTasa: true, tasaCalculada: false, remitida: false }])[0]).toMatch(/calcule la tasa de internación de INT-1/);
+    expect(faltantesCierreTasa([{ numero: "INT-1", sujetaTasa: true, tasaCalculada: true, remitida: false }])[0]).toMatch(/aún no la remite/);
   });
 });

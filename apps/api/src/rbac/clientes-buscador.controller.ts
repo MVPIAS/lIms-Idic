@@ -20,6 +20,8 @@ export const PERMISOS_ELEGIR_CLIENTE = [
   "bpch.reinspeccion.gestionar",
   "bpch.internacion.gestionar",
   "muestra.crear",
+  // Recorrido 30 (fallo 4): Calidad elige el cliente al registrar un reclamo.
+  "reclamo.gestionar",
 ] as const;
 
 export function puedeElegirCliente(user: { roles?: string[]; permisos?: string[] } | undefined): boolean {

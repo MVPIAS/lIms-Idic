@@ -101,7 +101,9 @@ export class InternacionService {
     const cobroExpr = e.facturaOt
       ? `CASE WHEN NOT ${conCobro} THEN 'sin_cobro'
               WHEN fac.estado = 'pagada' THEN 'pagada'
-              WHEN fac.id IS NOT NULL THEN 'facturada'
+              -- El borrador «pendiente» (PEND-) aún no es una factura emitida: el cobro
+              -- sigue pendiente, como «Sin facturar» en la tasa 1,5 % mensual (tasa-mensual.ts).
+              WHEN fac.id IS NOT NULL AND fac.estado <> 'pendiente' THEN 'facturada'
               ELSE 'pendiente' END`
       : `CASE WHEN NOT ${conCobro} THEN 'sin_cobro' ELSE 'pendiente' END`;
 

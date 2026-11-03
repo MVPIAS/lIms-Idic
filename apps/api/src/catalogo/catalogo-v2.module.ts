@@ -215,6 +215,33 @@ export class CatEnsayoService extends BaseCrudService {
       softDelete: true,
     });
   }
+
+  /**
+   * Recorrido 30 (fallo 16): el texto también encuentra el ensayo por el código
+   * EN de la lista de precios («EN235» → 133 · Nitrato %), no solo por el código
+   * del catálogo o el nombre, como promete «Buscar ensayo (código EN / nombre)».
+   */
+  override async listar(q: { page?: number; limit?: number; search?: string; where?: any } = {}, tenantId?: string) {
+    const texto = q.search?.trim();
+    if (!texto) return super.listar(q, tenantId);
+    const porLista = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT li.cat_ensayo_id::text AS id
+         FROM lista_precio_item li
+         JOIN lista_precio lp ON lp.id = COALESCE(li.lista_precio_id, li.lista_id)
+        WHERE li.cat_ensayo_id IS NOT NULL AND lp.deleted_at IS NULL
+          AND lp.tenant_id = COALESCE($1::uuid, lp.tenant_id)
+          AND li.codigo ILIKE '%' || $2 || '%'
+        LIMIT 200`,
+      tenantId ?? null,
+      texto,
+    );
+    if (!porLista.length) return super.listar(q, tenantId);
+    const ids = porLista.map((r) => r.id);
+    // Mismo filtro de texto que la base (código, nombre, agrupado) O el código de la lista.
+    const or = [{ codigo: { contains: texto, mode: "insensitive" } }, { nombre: { contains: texto, mode: "insensitive" } }, { agrupado: { contains: texto, mode: "insensitive" } }, { id: { in: ids } }];
+    const where = { ...(q.where ?? {}), AND: [...(q.where?.AND ?? []), { OR: or }] };
+    return super.listar({ ...q, search: undefined, where }, tenantId);
+  }
 }
 const CatEnsayoCreate = z.object({
   codigo: z.string().min(1).max(30),

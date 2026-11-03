@@ -24,6 +24,13 @@ const filaOt = (where: string, orden = "o.fecha_compromiso NULLS LAST, o.created
    WHERE ${OT_SCOPE} AND ${where}
    ORDER BY ${orden}`;
 
+/** Cotización abierta del circuito de firma (mismo criterio que bandeja.service.ts · cotizacionesFirma). */
+const filaCotFirma = (where: string) => `
+  SELECT c.id::text AS id, c.codigo AS texto, cl.razon_social AS detalle, '/cotizaciones/' || c.id AS ruta, NULL::text AS fecha
+    FROM cotizacion c LEFT JOIN cliente cl ON cl.id = c.cliente_id
+   WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.estado = 'abierta' AND ${where} AND ($2::uuid[] IS NULL OR TRUE)
+   ORDER BY c.updated_at`;
+
 /** Resultados agrupados por OT (captura, revisión, aprobación, devueltos). */
 const porOt = (where: string, params: "estados" | "yo" | "nada", ruta: string) => `
   SELECT o.id::text AS id, o.codigo AS texto,
@@ -104,6 +111,10 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
            ORDER BY COALESCE(c.valida_hasta, c.expira_at)`,
     extra: "ninguno",
   },
+  // Recorrido 30 (fallo 48): las tarjetas del circuito de firma también muestran sus filas.
+  cotizaciones_por_firmar: { sql: filaCotFirma(`c.firma_estado = 'pendiente'`), extra: "ninguno" },
+  cotizaciones_devueltas_firma: { sql: filaCotFirma(`c.firma_estado = 'devuelta'`), extra: "ninguno" },
+  cotizaciones_firmadas_sin_enviar: { sql: filaCotFirma(`c.firma_estado = 'firmada' AND c.enviada_at IS NULL`), extra: "ninguno" },
   cotizaciones_aceptadas_sin_ot: {
     sql: `SELECT c.id::text AS id, c.codigo AS texto, cl.razon_social AS detalle, '/cotizaciones/' || c.id AS ruta, NULL::text AS fecha
             FROM cotizacion c LEFT JOIN cliente cl ON cl.id = c.cliente_id

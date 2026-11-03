@@ -67,7 +67,8 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
     setOcupado(true);
     try {
       const r = await fn();
-      if (r?.error) toast.error(`${CORREO[r.correo] ?? "El correo falló"}: ${r.error}`);
+      // Sin servidor de correo: solo el aviso y dónde configurarlo (no el texto técnico repetido).
+      if (r?.error) toast.error(r.correo === "sin_configurar" ? `${CORREO.sin_configurar} (Administración › Correo). Registre la entrega por otro medio.` : `${CORREO[r.correo] ?? "El correo falló"}: ${String(r.error).replace(/[.\s]+$/, "")}.`);
       else toast.ok(ok(r));
       setD(r);
       setDialogo(null);
