@@ -90,6 +90,18 @@ export class AuthController {
   }
 
   /**
+   * GET /api/auth/sesion-config
+   * Minutos de inactividad hasta el cierre de sesión (Parámetros › Sesión, §4.7.6).
+   */
+  @Get("sesion-config")
+  @PermiteCambioClavePendiente()
+  @UseGuards(AuthGuard("jwt"))
+  @ApiBearerAuth()
+  async sesionConfig(@Req() req: any) {
+    return this.auth.configSesion(req.user.tenantId);
+  }
+
+  /**
    * POST /api/auth/logout
    * Invalida el refresh token.
    */
