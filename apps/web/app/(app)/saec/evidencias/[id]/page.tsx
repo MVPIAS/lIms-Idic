@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
+import { usePermisos } from "@/lib/permisos";
 import { validarFormulario } from "@/lib/validate";
 import Peritajes from "./_components/Peritajes";
 import Prestamos from "./_components/Prestamos";
@@ -43,6 +44,8 @@ const MOV_VACIO = {
 export default function EvidenciaFichaPage() {
   const params = useParams();
   const id = String(params?.id ?? "");
+  // Emitir el certificado y mover la custodia según el permiso (el perito solo consulta).
+  const { puede } = usePermisos();
 
   const [e, setE] = useState<any>(null);
   const [error, setError] = useState("");
@@ -172,10 +175,12 @@ export default function EvidenciaFichaPage() {
       <div className="toolbar" style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <Link className="btn sm" href="/saec">← Evidencias</Link>
         <div className="spacer" style={{ flex: 1 }}></div>
-        <button className="btn sm" onClick={emitirCertificado}>Emitir certificado</button>
-        <button className="btn primary sm" onClick={() => setShowMov(!showMov)}>
-          {showMov ? "Cerrar" : "＋ Registrar movimiento de custodia"}
-        </button>
+        {puede("saec.certificado.emitir") && <button className="btn sm" onClick={emitirCertificado}>Emitir certificado</button>}
+        {(showMov || puede("evidencia.custodiar")) && (
+          <button className="btn primary sm" onClick={() => setShowMov(!showMov)}>
+            {showMov ? "Cerrar" : "＋ Registrar movimiento de custodia"}
+          </button>
+        )}
       </div>
 
       {/* --- Datos del elemento --- */}

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fecha } from "@/lib/format";
+import { usePermisos } from "@/lib/permisos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -56,6 +57,8 @@ const FORM_VACIO = {
 };
 
 export default function SaecEvidenciasPage() {
+  // Registrar, editar y dar de baja según el permiso (el perito solo consulta).
+  const { puede } = usePermisos();
   const [rows, setRows] = useState<any[]>([]);
   const [casos, setCasos] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
@@ -247,9 +250,11 @@ export default function SaecEvidenciasPage() {
         <Link className="btn sm" href="/saec/armas">Armas</Link>
         <Link className="btn sm" href="/saec/ibis">Importar IBIS</Link>
         <Link className="btn sm" href="/saec/verificar">Verificar certificado</Link>
-        <button className="btn primary sm" onClick={() => (show ? setShow(false) : abrirNueva())}>
-          {show ? "Cerrar" : "＋ Nueva evidencia"}
-        </button>
+        {(show || puede("evidencia.crear")) && (
+          <button className="btn primary sm" onClick={() => (show ? setShow(false) : abrirNueva())}>
+            {show ? "Cerrar" : "＋ Nueva evidencia"}
+          </button>
+        )}
       </div>
 
       {show && (
@@ -379,8 +384,8 @@ export default function SaecEvidenciasPage() {
                   <td>{fecha(r.created_at)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <Link className="btn sm" href={`/saec/evidencias/${r.id}`}>Ficha</Link>{" "}
-                    <button className="btn sm" onClick={() => abrirEditar(r)}>Editar</button>{" "}
-                    <button className="btn sm" onClick={() => eliminar(r.id, r.codigo)}>Baja</button>
+                    {puede("evidencia.editar") && <><button className="btn sm" onClick={() => abrirEditar(r)}>Editar</button>{" "}</>}
+                    {puede("evidencia.eliminar") && <button className="btn sm" onClick={() => eliminar(r.id, r.codigo)}>Baja</button>}
                   </td>
                 </tr>
               ))}
