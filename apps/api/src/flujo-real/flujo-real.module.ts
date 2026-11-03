@@ -545,6 +545,11 @@ const CapturarValorBody = z
      * 409 con los avisos y el analista confirma reenviando con `true`.
      */
     confirmarAvisos: z.boolean().optional(),
+    /**
+     * «Solo el valor final» en un método con lecturas y fórmula: el valor (o sus
+     * réplicas) ya viene calculado; no se evalúan las reglas de aceptación.
+     */
+    valorFinal: z.boolean().optional(),
   });
 
 /** Factor de la fórmula del ensayo en esta OT (resultado.factor). valor NULL = quitarlo. */
@@ -1053,9 +1058,11 @@ export class PuenteAnalisisService {
 
     // Reglas de aceptación del método (EP-02 3.2/3.9, ALI-D4): sobre las
     // determinaciones calculadas (lecturas o réplicas). Un valor final único no
-    // se evalúa: el analista puede seguir ingresando solo el resultado.
+    // se evalúa: el analista puede seguir ingresando solo el resultado. Tampoco
+    // «Solo el valor final» de un método con lecturas (valorFinal), aunque traiga réplicas.
     let avisos: AvisoAceptacion[] = [];
-    if (metodoCaptura?.reglas.length && tipoDato !== "atributo" && calc.replicas.length) {
+    const soloValorFinal = !!entrada.valorFinal && !entrada.lecturas?.length;
+    if (metodoCaptura?.reglas.length && tipoDato !== "atributo" && calc.replicas.length && !soloValorFinal) {
       avisos = evaluarReglas(metodoCaptura.reglas, calc.replicas, calc.lecturas);
       if (avisos.length) {
         const modo = await this.modoReglas(tenantId);
@@ -1131,6 +1138,9 @@ export class PuenteAnalisisService {
         // Quien captura queda como analista (segregación: no podrá revisarlo).
         analistaId: req?.user?.sub ?? resultado.analistaId ?? null,
         estado: "capturado",
+        // Valor nuevo sin revisar: no arrastra la revisión, devolución o reapertura anterior.
+        revisadoPor: null,
+        revisadoAt: null,
         fecha: new Date(),
         otId: otId ?? null,
         equipoId,
@@ -1450,6 +1460,8 @@ export class PuenteAnalisisService {
     return {
       otId,
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal },
+      // El usuario ve solo los ensayos derivados a su laboratorio (no toda la OT).
+      vistaParcial: !vista.todo,
       muestras: muestraIds.length,
       veredictoOt: veredictoMuestra(porMuestra.filter((m) => resultados.some((r) => r.muestraId === m.id)).map((m) => m.veredicto)),
       veredictosMuestra: porMuestra,

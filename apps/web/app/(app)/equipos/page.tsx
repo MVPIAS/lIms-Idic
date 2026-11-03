@@ -6,6 +6,7 @@ import { fecha as fechaFmt, hoyISO } from "@/lib/format";
 import { validarFormulario } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { ESTADOS_EQUIPO, ESTADO_EQUIPO_META } from "@/lib/equipos";
+import { usePermisos } from "@/lib/permisos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -75,6 +76,8 @@ function BadgeCalibracion({ e }: { e: any }) {
 }
 
 export default function EquiposPage() {
+  // Crear, editar, dar de baja y calibrar exige equipo.gestionar (el revisor solo consulta).
+  const gestiona = usePermisos().puede("equipo.gestionar");
   const [rows, setRows] = useState<any[]>([]);
   const [kpis, setKpis] = useState<any>({});
   const [unidades, setUnidades] = useState<any[]>([]);
@@ -417,9 +420,11 @@ export default function EquiposPage() {
           Solo calibración vencida
         </label>
         <div className="spacer" style={{ flex: 1 }}></div>
-        <button className="btn primary sm" onClick={() => (show ? setShow(false) : abrirNuevo())}>
-          {show ? "Cerrar" : "＋ Nuevo equipo"}
-        </button>
+        {gestiona && (
+          <button className="btn primary sm" onClick={() => (show ? setShow(false) : abrirNuevo())}>
+            {show ? "Cerrar" : "＋ Nuevo equipo"}
+          </button>
+        )}
       </div>
 
       {show && (
@@ -538,7 +543,7 @@ export default function EquiposPage() {
         loading={loading}
         searchKeys={["codigo", "nombre", "marca"]}
         onRowClick={(r) => abrirDetalle(r)}
-        acciones={(r) => (
+        acciones={gestiona ? (r) => (
           <span style={{ whiteSpace: "nowrap" }}>
             <button className="btn sm" onClick={() => abrirEditar(r)}>
               Editar
@@ -547,7 +552,7 @@ export default function EquiposPage() {
               Baja
             </button>
           </span>
-        )}
+        ) : undefined}
         vacio={<>No hay equipos que coincidan con el filtro.</>}
       />
 
@@ -564,9 +569,11 @@ export default function EquiposPage() {
               <BadgeCalibracion e={detalle} />
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button className="btn primary sm" onClick={() => setShowCal((v) => !v)}>
-                {showCal ? "Cerrar" : "＋ Registrar calibración"}
-              </button>
+              {gestiona && (
+                <button className="btn primary sm" onClick={() => setShowCal((v) => !v)}>
+                  {showCal ? "Cerrar" : "＋ Registrar calibración"}
+                </button>
+              )}
               <button className="btn sm" onClick={() => setDetalle(null)}>
                 Cerrar detalle
               </button>

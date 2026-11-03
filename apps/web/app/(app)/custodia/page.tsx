@@ -134,6 +134,8 @@ export default function CustodiaPage() {
     setShow(true);
     setError("");
     setOk("");
+    // Con la muestra ya elegida en «Muestra:», la cadena continúa igual que al elegirla en el formulario.
+    if (sel) void onElegirMuestraForm(sel);
   }
 
   // Al elegir muestra en el formulario, precarga el origen con su ubicación

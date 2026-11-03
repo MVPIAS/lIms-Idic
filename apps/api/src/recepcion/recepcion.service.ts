@@ -213,6 +213,38 @@ export class RecepcionService {
     return { productos: filas.map((f) => ({ ...f, metodos: Number(f.metodos) })) };
   }
 
+  /**
+   * Buscador «Agregar un método del catálogo» al recepcionar: por defecto solo
+   * los métodos del laboratorio de la OT (familia del ensayo ⊂ CODSUCDEL de la
+   * unidad). Con `otros`, también los de otros laboratorios, marcados con su
+   * laboratorio: esos ensayos se derivan con una orden interna.
+   */
+  async metodos(otId: string, tenantId: string, req: any, search?: string, otros = false) {
+    const ot = await this.otEnAlcance(otId, tenantId, req, "muestra.ver");
+    const q = (search ?? "").trim().slice(0, 60);
+    if (q.length < 2) return { metodos: [] };
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT m.id, m.codigo, m.nombre, m.norma, m.ensayo_id AS "ensayoId",
+              (SELECT count(*) FROM cat_analito a WHERE a.metodo_id = m.id AND a.deleted_at IS NULL AND a.activo)::int AS analitos,
+              f.codsucdel, f.nombre AS laboratorio,
+              EXISTS (SELECT 1 FROM unidad u WHERE u.id = $3::uuid AND ${FAMILIA_DE_UNIDAD}) AS "delLaboratorio"
+         FROM cat_metodo m
+         LEFT JOIN cat_ensayo e ON e.id = m.ensayo_id
+         LEFT JOIN cat_familia f ON f.id = e.familia_id
+        WHERE m.tenant_id = $1::uuid AND m.deleted_at IS NULL AND m.activo
+          AND (m.codigo ILIKE $2 || '%' OR m.nombre ILIKE '%' || $2 || '%')
+          AND ($4::boolean OR $3::uuid IS NULL
+               OR EXISTS (SELECT 1 FROM unidad u WHERE u.id = $3::uuid AND ${FAMILIA_DE_UNIDAD}))
+        ORDER BY "delLaboratorio" DESC, (m.codigo ILIKE $2 || '%') DESC, m.nombre
+        LIMIT 20`,
+      tenantId,
+      q,
+      ot.unidadPrincipal ?? null,
+      otros,
+    );
+    return { metodos: filas.map((m) => ({ ...m, analitos: Number(m.analitos) })) };
+  }
+
   /** Métodos del panel del producto (cat_panel), con su nº de analitos: «carga el panel». */
   async panel(otId: string, elementoId: string, tenantId: string, req: any) {
     await this.otEnAlcance(otId, tenantId, req, "muestra.ver");

@@ -438,10 +438,10 @@ function EditorPunto({ inicial, laboratorios, componentes, onCancelar, onListo }
   const [error, setError] = useState("");
   const set = <K extends keyof Punto>(k: K, v: Punto[K]) => setP((x) => ({ ...x, [k]: v }));
 
-  // Métodos del catálogo: los del laboratorio de la E.T. (o búsqueda en todo el catálogo).
+  // Métodos del catálogo: los de los laboratorios de la E.T. (sin laboratorio, búsqueda en todo el catálogo).
   useEffect(() => {
     const t = setTimeout(() => {
-      const lab = laboratorios.length === 1 ? laboratorios[0] : undefined;
+      const lab = laboratorios.length ? laboratorios.join(",") : undefined;
       if (!lab && busca.trim().length < 2) { setMetodos([]); return; }
       llamar<{ metodos: MetodoCat[] }>("GET", `/especificaciones-tecnicas/catalogo/metodos${qs({ laboratorio: lab, q: busca.trim() })}`)
         .then((r) => setMetodos(r.metodos)).catch(() => setMetodos([]));

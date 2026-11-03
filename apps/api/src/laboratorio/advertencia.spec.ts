@@ -16,6 +16,12 @@ describe("dictamen advertencia y re-análisis (§4.2.6 / §4.3.9)", () => {
     expect(advertenciaNumerica(21, "20", null, 10)).toMatch(/del Mín 20/);
   });
 
+  it("un Mín 0 es el piso natural: 0 defectos no es advertencia; cerca del Máx sí", () => {
+    expect(advertenciaNumerica(0, "0", "6", 10)).toBeNull();
+    expect(advertenciaNumerica(0.3, "0", "6", 10)).toBeNull();
+    expect(advertenciaNumerica(5.8, "0", "6", 10)).toMatch(/a 0,2 del Máx 6/);
+  });
+
   it("margen 0 o sin límites numéricos: sin advertencia; el margen del método manda", () => {
     expect(advertenciaNumerica(7.95, "6", "8", 0)).toBeNull();
     expect(advertenciaNumerica(7.95, "6", "8", 0, 5)).toMatch(/margen de advertencia 5 %/);

@@ -280,6 +280,8 @@ export default function CapturaOtPage() {
   const [ot, setOt] = useState<OtCorta | null>(null);
   const [vistaBandeja, setVistaBandeja] = useState<{ estado: string; mios: boolean; asignados: boolean; derivados: boolean } | null>(null);
   const [filas, setFilas] = useState<Fila[]>([]);
+  // Destino de una orden interna: solo ve los ensayos derivados a su laboratorio, no toda la OT.
+  const [vistaParcial, setVistaParcial] = useState(false);
   const [meta, setMeta] = useState<{ total: number; page: number; totalPages: number } | null>(null);
   const [page, setPage] = useState(1);
   const [filtroOt, setFiltroOt] = useState("todos");
@@ -361,6 +363,7 @@ export default function CapturaOtPage() {
         setFilas(fs);
         setVeredictosMuestra(Object.fromEntries((j.veredictosMuestra ?? []).map((m: any) => [m.id, m.veredicto])));
         setVeredictoOt(j.veredictoOt ?? null);
+        setVistaParcial(!!j.vistaParcial);
         setMeta(null);
         setDrafts(Object.fromEntries(fs.map((f) => [f.id, valorBorrador(f)])));
         window.history.replaceState(null, "", `/captura-ot?otId=${ot.id}`);
@@ -714,11 +717,14 @@ export default function CapturaOtPage() {
               <Link href={`/ot/${ot.id}/calculos` as any} className="btn outline sm" title="Lecturas, fórmula aplicada, factor e historial de cambios de cada ensayo (solo lectura, exportable)">
                 Planilla de cálculos
               </Link>
-              <Link href={`/informes?otId=${ot.id}` as any} className={`btn sm ${todoAprobado ? "primary" : "outline"}`}
-                aria-label={`Emitir informe de la OT ${ot.codigo}`.trim()}
-                title={todoAprobado ? "Todos los resultados están aprobados" : "Aún hay resultados sin aprobar"}>
-                Emitir informe
-              </Link>
+              {/* Emitir lo hace quien tiene certificado.emitir (no el analista). */}
+              {tiene("certificado.emitir") && (
+                <Link href={`/informes?otId=${ot.id}` as any} className={`btn sm ${todoAprobado ? "primary" : "outline"}`}
+                  aria-label={`Emitir informe de la OT ${ot.codigo}`.trim()}
+                  title={todoAprobado ? "Todos los resultados están aprobados" : "Aún hay resultados sin aprobar"}>
+                  Emitir informe
+                </Link>
+              )}
             </div>
             {tiene("resultado.aprobar") && omitidosCaptura + omitidosRevision > 0 && (
               <p id="aprobar-todo-omitidos" className="subtitle" style={{ margin: "8px 0 0" }}>
@@ -731,7 +737,13 @@ export default function CapturaOtPage() {
                 {omitidos.length} resultado(s) no se procesaron: {[...new Set(omitidos.map((o) => o.motivo))].join(" ")}
               </div>
             )}
-            {todoAprobado && <div className="alert success" style={{ marginTop: 8 }}>Todos los resultados de la OT {ot.codigo} están aprobados.</div>}
+            {todoAprobado && (
+              <div className="alert success" style={{ marginTop: 8 }}>
+                {vistaParcial
+                  ? `Todos los ensayos de la OT ${ot.codigo} derivados a su laboratorio están aprobados (el resto de la OT lo ve su laboratorio responsable).`
+                  : `Todos los resultados de la OT ${ot.codigo} están aprobados.`}
+              </div>
+            )}
             {ajenos.length > 0 && (
               <div className="alert info" style={{ marginTop: 8 }}>
                 {ajenos.length} ensayo(s) se derivaron a {[...new Set(ajenos.map((f) => f.laboratorio).filter(Boolean))].join(", ")} por orden interna:
