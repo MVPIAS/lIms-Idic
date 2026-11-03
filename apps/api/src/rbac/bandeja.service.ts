@@ -6,6 +6,7 @@ import { Perfil, codigoCanonico } from "./rbac.constants";
 import { MAX_INTENTOS_FALLIDOS } from "../auth/bloqueo";
 import { LISTAS_BANDEJA, LISTA_VENCIDAS_LAB, MAX_ELEMENTOS } from "./bandeja-listas";
 import { SQL_ZONA } from "../common/fecha-chile";
+import { SQL_PASO_ACTUAL } from "../plantilla-render/reglas-emision";
 
 export type Severidad = "info" | "warn" | "alta";
 
@@ -366,10 +367,9 @@ export class BandejaService {
       firmasPendientes: () =>
         this.contar(
           `SELECT count(DISTINCT df.certificado_id) AS n FROM documento_firma df JOIN certificado c ON c.id = df.certificado_id
-            WHERE c.estado = 'en_firma' AND c.deleted_at IS NULL AND c.tenant_id = COALESCE($1::uuid, c.tenant_id)
-              AND df.estado = 'pendiente'
+            WHERE c.estado IN ('en_firma', 'oficial') AND c.deleted_at IS NULL AND c.tenant_id = COALESCE($1::uuid, c.tenant_id)
               AND df.responsables @> jsonb_build_array(jsonb_build_object('usuarioId', $2::text))
-              AND df.orden = (SELECT min(x.orden) FROM documento_firma x WHERE x.certificado_id = df.certificado_id AND x.estado = 'pendiente')`,
+              AND ${SQL_PASO_ACTUAL}`,
           tenant,
           yo,
         ),

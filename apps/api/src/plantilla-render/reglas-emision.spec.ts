@@ -1,6 +1,9 @@
 import {
   decidirFirma,
+  decidirFirmaOpcional,
   esOficial,
+  esPasoObligatorio,
+  pasosOpcionalesPendientes,
   esVigente,
   faltantesParaEmitir,
   numeroVersion,
@@ -153,6 +156,41 @@ describe("reglas-emision · avance del circuito", () => {
     expect(quedaOficial(pasos, "2")).toBe(false);
     const casi = [p("1", 1, "firmado", ["a"]), p("2", 2, "pendiente", ["b"])];
     expect(quedaOficial(casi, "2")).toBe(true);
+  });
+});
+
+describe("reglas-emision · pasos opcionales (V°B° de la Dirección)", () => {
+  const opc = (id: string, orden: number, estado: string, resp: string[], firmadoPor?: string) => ({
+    ...p(id, orden, estado, resp, firmadoPor),
+    obligatorio: false,
+  });
+
+  it("Informe de Incumplimiento: la firma del Jefe SCC lo deja oficial aunque falte el V°B° opcional", () => {
+    const x = [p("1", 1, "pendiente", ["jefescc"]), opc("2", 2, "pendiente", ["director"])];
+    expect(pasosActuales(x).map((y) => y.id)).toEqual(["1"]);
+    expect(quedaOficial(x, "1")).toBe(true);
+  });
+
+  it("un paso opcional antes de uno obligatorio no lo detiene", () => {
+    const x = [opc("1", 1, "pendiente", ["vb"]), p("2", 2, "pendiente", ["firma"]), p("3", 3, "pendiente", ["otro"])];
+    expect(pasosActuales(x).map((y) => y.id)).toEqual(["1", "2"]);
+    expect(decidirFirma(x, "firma").paso?.id).toBe("2");
+    expect(decidirFirma(x, "otro").paso).toBeNull();
+  });
+
+  it("documento oficial: el V°B° opcional pendiente se puede firmar después; nada más", () => {
+    const x = [p("1", 1, "firmado", ["jefescc"], "jefescc"), opc("2", 2, "pendiente", ["director"])];
+    expect(pasosOpcionalesPendientes(x).map((y) => y.id)).toEqual(["2"]);
+    expect(decidirFirmaOpcional(x, "director").paso?.id).toBe("2");
+    expect(decidirFirmaOpcional(x, "jefescc").paso).toBeNull();
+    const sin = [p("1", 1, "firmado", ["jefescc"], "jefescc"), opc("2", 2, "firmado", ["director"], "director")];
+    expect(decidirFirmaOpcional(sin, "director").motivo).toContain("no tiene pasos opcionales");
+  });
+
+  it("sin el dato «obligatorio» el paso se toma como obligatorio (oficios y pasos antiguos)", () => {
+    expect(esPasoObligatorio({})).toBe(true);
+    expect(esPasoObligatorio({ obligatorio: null })).toBe(true);
+    expect(esPasoObligatorio({ obligatorio: false })).toBe(false);
   });
 });
 

@@ -77,7 +77,7 @@ export class AvanceOtService {
         orderBy: { createdAt: "asc" },
         select: {
           id: true, numero: true, codigo: true, estado: true, tipoDocumento: true, entregadoAt: true,
-          firmas: { select: { id: true, orden: true, estado: true, rolNombre: true, rolCodigo: true, unidadCodigo: true, responsables: true } },
+          firmas: { select: { id: true, orden: true, estado: true, rolNombre: true, rolCodigo: true, unidadCodigo: true, responsables: true, obligatorio: true } },
         },
       }),
       this.prisma.factura.findFirst({
