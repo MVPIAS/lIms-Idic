@@ -10,6 +10,8 @@ export default function ProveedoresPage() {
       titulo="Proveedores"
       subtitulo="Maestro de proveedores para órdenes de compra e insumos."
       columnas={[
+        // Código correlativo PROV-NNN: lo asigna el sistema al registrar el proveedor.
+        { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v ?? "—"}</span> },
         { campo: "rut", titulo: "RUT", render: (v) => <span className="codigo">{rut(v)}</span> },
         { campo: "razonSocial", titulo: "Razón social" },
         { campo: "rubro", titulo: "Rubro" },

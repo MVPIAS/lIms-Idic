@@ -4,7 +4,8 @@ import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
 import { PrismaService } from "../common/prisma.service";
-import { BaseCrudService } from "../common/base-crud.service";
+import { BaseCrudService, DEV_TENANT } from "../common/base-crud.service";
+import { siguienteCodigoProveedor } from "./codigo-proveedor";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { validaRut } from "../common/rut.validator";
 import { PermisoGuard } from "../auth/permiso.guard";
@@ -17,7 +18,26 @@ import { diaChile } from "../common/fecha-chile";
 @Injectable()
 export class ProveedorService extends BaseCrudService {
   constructor(prisma: PrismaService) {
-    super(prisma, { model: "proveedor", search: ["razonSocial", "rut", "rubro"] });
+    super(prisma, { model: "proveedor", search: ["razonSocial", "rut", "rubro", "codigo"] });
+  }
+
+  /**
+   * Alta con código correlativo PROV-NNN (`proveedor.codigo` es NOT NULL y el
+   * formulario no lo pide). Candado por tenant para que dos altas simultáneas
+   * no tomen el mismo número.
+   */
+  async crear(data: any, tenantId?: string) {
+    const { tenantId: _ignore, codigo: _codigo, ...rest } = data ?? {};
+    const tid = tenantId ?? DEV_TENANT;
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT pg_advisory_xact_lock(hashtext($1))::text`, `proveedor.codigo:${tid}`);
+      const filas = await tx.$queryRawUnsafe<{ codigo: string | null }[]>(
+        `SELECT codigo FROM proveedor WHERE tenant_id = $1::uuid AND codigo ILIKE 'PROV-%'`,
+        tid,
+      );
+      const codigo = siguienteCodigoProveedor(filas.map((f) => f.codigo));
+      return (tx as any).proveedor.create({ data: { tenantId: tid, codigo, ...rest } });
+    });
   }
 }
 const ProveedorCreate = z.object({
