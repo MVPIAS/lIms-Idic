@@ -20,6 +20,9 @@ export const TIPOS_AVISO = {
   oficio_devuelto: "alta",
   advertencia: "warn",
   reanalisis: "alta",
+  // Agenda (§4.5.9): invitación o cambio de un evento; anulación o retiro.
+  agenda: "info",
+  agenda_anulado: "warn",
 } as const satisfies Record<string, Severidad>;
 export type TipoAviso = keyof typeof TIPOS_AVISO;
 

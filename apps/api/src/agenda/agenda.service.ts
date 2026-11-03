@@ -2,6 +2,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { PrismaClient } from "@prisma/client";
 import { hoyChile, sumarDiasCalendario } from "../common/fecha-chile";
 import { AlcanceService } from "../rbac/alcance.service";
+import { AvisosService } from "../avisos/avisos.service";
+import { cambioRelevante, describirEvento, destinatariosCambio, type DatosAviso } from "./avisos-agenda";
 import {
   MAX_DIAS_CONSULTA,
   RECURRENCIAS,
@@ -11,6 +13,7 @@ import {
   costoUso,
   diasEntre,
   esDia,
+  fueraDeDisponibilidad,
   esHora,
   minutos,
   minutosJornada,
@@ -35,6 +38,11 @@ import {
 //   · los costos los ven quienes gestionan recursos o ven reportes.
 // Un recurso no se puede reservar dos veces a la misma hora: el choque con otro
 // evento, o con la programación de análisis del equipo ligado, se rechaza (409).
+// Tampoco fuera de su horario ni en un día que no es hábil para él (400).
+// Los participantes reciben aviso (Mi bandeja y correo, según el parámetro de
+// avisos) cuando se los invita o se los quita, cuando el evento cambia de
+// fecha, hora, lugar, título o recursos, y cuando se anula el evento o una
+// ocurrencia de la serie. Quien hace el cambio no se avisa a sí mismo.
 // Todos los valores viajan como parámetros posicionales.
 // ===========================================================================
 
@@ -143,7 +151,10 @@ const SELECT_EVENTO = `
 export class AgendaService {
   readonly prisma = new PrismaClient();
 
-  constructor(private readonly alcance: AlcanceService) {}
+  constructor(
+    private readonly alcance: AlcanceService,
+    private readonly avisos: AvisosService,
+  ) {}
 
   private async ctx(req: any): Promise<Contexto> {
     const gestiona = tiene(req, "recurso.gestionar");
@@ -620,6 +631,14 @@ export class AgendaService {
       );
       if (ok[0].n !== d.participantes.length) throw new BadRequestException("Uno de los participantes no existe.");
     }
+    // Horario y días hábiles de cada recurso: al editar, solo las ocurrencias desde hoy.
+    if (recursos.length) {
+      const desde = id && d.fecha < hoyChile() ? hoyChile() : d.fecha;
+      const dias = ocurrencias(d, desde, d.ultimaFecha ?? sumarDiasCalendario(d.fecha, HORIZONTE_SIN_FIN));
+      const fuera = recursos.flatMap((r) => fueraDeDisponibilidad(r, dias, d));
+      if (fuera.length)
+        throw new BadRequestException(`Fuera de la disponibilidad del recurso. ${fuera.slice(0, 5).join(" · ")}${fuera.length > 5 ? ` · y ${fuera.length - 5} más` : ""}`);
+    }
     const choques = await this.choques(k, d, recursos, id);
     if (choques.length) throw new ConflictException(`Recurso no disponible. ${choques.slice(0, 5).join(" · ")}${choques.length > 5 ? ` · y ${choques.length - 5} más` : ""}`);
     const otId = await this.resolverOt(k, d.otCodigo);
@@ -658,9 +677,35 @@ export class AgendaService {
     });
   }
 
+  /** Aviso de agenda a varias personas (nunca hace fallar la operación que lo origina). */
+  private async avisar(
+    k: Contexto,
+    usuarios: string[],
+    a: { tipo: "agenda" | "agenda_anulado"; titulo: string; mensaje: string; clave: string; fecha: string },
+  ) {
+    if (!usuarios.length) return;
+    await this.avisos
+      .emitir(
+        k.tenantId,
+        { tipo: a.tipo, titulo: a.titulo, mensaje: a.mensaje, ruta: `/agenda?fecha=${a.fecha}`, clave: a.clave, creadoPor: k.usuarioId },
+        { usuarios },
+      )
+      .catch(() => undefined);
+  }
+
   async crearEvento(req: any, b: any) {
     const k = await this.ctx(req);
-    return { id: await this.guardarEvento(k, this.datosEvento(b)) };
+    const d = this.datosEvento(b);
+    const id = await this.guardarEvento(k, d);
+    const { invitados } = destinatariosCambio({ antes: [], despues: d.participantes, organizadorId: k.usuarioId, actorId: k.usuarioId });
+    await this.avisar(k, invitados, {
+      tipo: "agenda",
+      titulo: `Invitación: ${d.titulo}`,
+      mensaje: `Le invitaron a ${describirEvento(d)}. Confirme su asistencia en la Agenda.`,
+      clave: `agenda_invitacion:${id}`,
+      fecha: d.fecha,
+    });
+    return { id };
   }
 
   async editarEvento(req: any, id: string, b: any) {
@@ -668,8 +713,39 @@ export class AgendaService {
     const e = await this.evento(k, id);
     if (!this.puedeEditar(k, e)) throw new ForbiddenException("Solo el organizador o quien gestiona recursos puede modificar el evento.");
     const extra = await this.prisma.$queryRawUnsafe<any[]>(`SELECT descripcion FROM agenda_evento WHERE id = $1::uuid`, id);
-    await this.guardarEvento(k, this.datosEvento(b, { ...e, descripcion: extra[0]?.descripcion ?? null }), id);
+    const d = this.datosEvento(b, { ...e, descripcion: extra[0]?.descripcion ?? null });
+    await this.guardarEvento(k, d, id);
+    // Avisos: invitados nuevos, quitados y, si cambió algo relevante, los que siguen.
+    const marca = Date.now();
+    const quien = destinatariosCambio({ antes: e.participantes, despues: d.participantes, organizadorId: e.organizadorId, actorId: k.usuarioId });
+    await this.avisar(k, quien.invitados, {
+      tipo: "agenda",
+      titulo: `Invitación: ${d.titulo}`,
+      mensaje: `Le invitaron a ${describirEvento(d)}. Confirme su asistencia en la Agenda.`,
+      clave: `agenda_invitacion:${id}:${marca}`,
+      fecha: d.fecha,
+    });
+    await this.avisar(k, quien.quitados, {
+      tipo: "agenda_anulado",
+      titulo: `Ya no participa: ${e.titulo}`,
+      mensaje: `Se le quitó de los participantes de ${describirEvento(e as DatosAviso)}.`,
+      clave: `agenda_retiro:${id}:${marca}`,
+      fecha: e.fecha,
+    });
+    if (cambioRelevante(e as DatosAviso, d))
+      await this.avisar(k, quien.siguen, {
+        tipo: "agenda",
+        titulo: `Evento modificado: ${d.titulo}`,
+        mensaje: `El evento cambió. Ahora es ${describirEvento(d)} (antes: ${describirEvento(e as DatosAviso)}).`,
+        clave: `agenda_cambio:${id}:${marca}`,
+        fecha: d.fecha,
+      });
     return { id };
+  }
+
+  /** Participantes y organizador de un evento, sin quien hace el cambio. */
+  private interesados(k: Contexto, e: EventoFila): string[] {
+    return destinatariosCambio({ antes: e.participantes, despues: e.participantes, organizadorId: e.organizadorId, actorId: k.usuarioId }).siguen;
   }
 
   /** Anula una ocurrencia de una serie (o el evento único, que equivale a borrarlo). */
@@ -681,6 +757,13 @@ export class AgendaService {
     if (e.recurrencia === "NINGUNA") throw new BadRequestException("El evento no se repite: elimínelo.");
     if (!ocurrencias(e, fecha, fecha).length) throw new BadRequestException("Esa fecha no es una ocurrencia del evento.");
     await this.prisma.$executeRawUnsafe(`INSERT INTO agenda_evento_excepcion (evento_id, fecha) VALUES ($1::uuid, $2::date) ON CONFLICT DO NOTHING`, id, fecha);
+    await this.avisar(k, this.interesados(k, e), {
+      tipo: "agenda_anulado",
+      titulo: `Anulado el ${fecha}: ${e.titulo}`,
+      mensaje: `Se anuló la ocurrencia del ${fecha} de ${describirEvento(e as DatosAviso)}. Las demás fechas de la serie siguen en pie.`,
+      clave: `agenda_anulada:${id}:${fecha}`,
+      fecha,
+    });
     return { ok: true };
   }
 
@@ -689,6 +772,13 @@ export class AgendaService {
     const e = await this.evento(k, id);
     if (!this.puedeEditar(k, e)) throw new ForbiddenException("Solo el organizador o quien gestiona recursos puede eliminar el evento.");
     await this.prisma.$executeRawUnsafe(`UPDATE agenda_evento SET deleted_at = now(), actualizado_por = $2::uuid WHERE id = $1::uuid`, id, k.usuarioId);
+    await this.avisar(k, this.interesados(k, e), {
+      tipo: "agenda_anulado",
+      titulo: `Evento anulado: ${e.titulo}`,
+      mensaje: `Se anuló ${describirEvento(e as DatosAviso)}${e.recurrencia !== "NINGUNA" ? " y todas sus fechas" : ""}.`,
+      clave: `agenda_anulado:${id}`,
+      fecha: e.fecha,
+    });
     return { ok: true };
   }
 
