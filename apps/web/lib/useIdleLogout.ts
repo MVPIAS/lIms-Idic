@@ -8,13 +8,15 @@
 // redirige a /login. Un minuto antes se muestra un aviso con opción "Seguir
 // conectado" que reinicia el contador.
 //
-// Configurable con NEXT_PUBLIC_IDLE_MINUTES (minutos de inactividad hasta el
-// cierre; por defecto 20). El aviso previo aparece AVISO_MINUTOS antes del
+// Los minutos salen de Parámetros del sistema › Sesión (GET /auth/sesion-config);
+// mientras llega la respuesta, o si falla, rige NEXT_PUBLIC_IDLE_MINUTES (por
+// defecto 20). El aviso previo aparece AVISO_MINUTOS antes del
 // cierre. Los eventos de actividad se escuchan con throttle para no reprogramar
 // los temporizadores en cada píxel de movimiento del ratón.
 // =============================================================================
 
 import { useEffect, useRef, useState } from "react";
+import { api } from "@/lib/api";
 
 /** Minutos de inactividad hasta el cierre (default 20; configurable por env). */
 const IDLE_MINUTES = (() => {
@@ -67,8 +69,9 @@ export function useIdleLogout(): EstadoIdle {
   }, [avisando]);
 
   useEffect(() => {
-    const idleMs = IDLE_MINUTES * 60_000;
-    const avisoMs = Math.max(0, idleMs - AVISO_MINUTOS * 60_000);
+    let idleMs = IDLE_MINUTES * 60_000;
+    let avisoMs = Math.max(0, idleMs - AVISO_MINUTOS * 60_000);
+    let vivo = true;
 
     const limpiarTemporizadores = () => {
       if (timerAviso.current) clearTimeout(timerAviso.current);
@@ -120,11 +123,24 @@ export function useIdleLogout(): EstadoIdle {
     }
     programar();
 
+    // Minutos configurados por el administrador: reprograma con ellos.
+    api
+      .getRaw<{ inactividadMinutos?: number }>("auth/sesion-config")
+      .then((c) => {
+        const m = Number(c?.inactividadMinutos);
+        if (!vivo || !Number.isFinite(m) || m <= 0 || m === idleMs / 60_000) return;
+        idleMs = m * 60_000;
+        avisoMs = Math.max(0, idleMs - AVISO_MINUTOS * 60_000);
+        if (!avisandoRef.current) programar();
+      })
+      .catch(() => undefined);
+
     return () => {
+      vivo = false;
       for (const ev of EVENTOS) window.removeEventListener(ev, onActividad);
       limpiarTemporizadores();
     };
-    // Solo se monta una vez: la config es estática y el reinicio va por ref.
+    // Solo se monta una vez: la config se lee al montar y el reinicio va por ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

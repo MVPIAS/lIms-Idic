@@ -2,6 +2,7 @@ import { LOCK_MS, MAX_INTENTOS_FALLIDOS } from "./bloqueo";
 import { Injectable, UnauthorizedException, BadRequestException, Inject } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { PrismaClient } from "@prisma/client";
+import { minutosInactividad } from "./sesion";
 import * as argon2 from "argon2";
 import { authenticator } from "otplib";
 import * as QRCode from "qrcode";
@@ -399,6 +400,17 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException("Refresh token inválido");
     }
+  }
+
+  /** Minutos de inactividad hasta el cierre de sesión (Parámetros › Sesión, §4.7.6). */
+  async configSesion(tenantId: string) {
+    const [fila] = await this.prisma
+      .$queryRawUnsafe<{ valor: string | null; activo: boolean }[]>(
+        `SELECT valor, activo FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'sesion' AND codigo = 'inactividad_minutos'`,
+        tenantId,
+      )
+      .catch(() => []);
+    return { inactividadMinutos: minutosInactividad(fila) };
   }
 
   async getUserDetails(usuarioId: string) {
