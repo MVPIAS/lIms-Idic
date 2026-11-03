@@ -136,4 +136,5 @@ align_comunicacion.sql
 align_sesion_inactividad.sql
 align_correcciones_v30_2.sql
 align_correcciones_v30_3.sql
+align_correcciones_rec_5.sql
 align_cierre_permisos.sql
