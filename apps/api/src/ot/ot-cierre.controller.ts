@@ -122,7 +122,7 @@ export class OtCierreService {
         entregaMedio: true,
         entregaDestinatario: true,
         plantilla: { select: { nombre: true, repid: true } },
-        firmas: { select: { id: true, orden: true, estado: true, accion: true, rolNombre: true, responsables: true } },
+        firmas: { select: { id: true, orden: true, estado: true, accion: true, rolNombre: true, responsables: true, obligatorio: true } },
       },
     });
     return docs.map(({ firmas, ...d }) => {

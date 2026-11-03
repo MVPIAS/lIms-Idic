@@ -266,7 +266,11 @@ export default function PanelDocumento({
             return (
               <tr key={x.id} style={actual ? { background: "#fff8e8" } : undefined}>
                 <td>{x.orden}</td>
-                <td>{ACCION_FIRMA[x.accion] ?? x.accion}</td>
+                <td>
+                  {ACCION_FIRMA[x.accion] ?? x.accion}
+                  {/* Paso opcional de la matriz: no detiene la oficialización. */}
+                  {x.obligatorio === false && <span style={{ color: "var(--muted)", fontSize: 11 }}> (opcional)</span>}
+                </td>
                 <td>{x.rolNombre ?? x.rolCodigo}{x.unidadCodigo ? ` · ${x.unidadCodigo}` : ""}</td>
                 <td style={{ fontSize: 11.5 }}>{nombresResponsables(x.responsables) || "—"}</td>
                 <td style={{ fontSize: 11.5 }}>
@@ -339,7 +343,10 @@ export default function PanelDocumento({
         {p.firmar && (
           <>
             <button className="btn success" disabled={ocupado} onClick={firmar}>Firmar</button>
-            <button className="btn outline" disabled={ocupado} onClick={() => { setMotivo(""); setDialogo("devolver"); }}>Devolver</button>
+            {/* Un documento ya oficial solo admite el paso opcional pendiente (V°B°): no se devuelve. */}
+            {doc.estado === "en_firma" && (
+              <button className="btn outline" disabled={ocupado} onClick={() => { setMotivo(""); setDialogo("devolver"); }}>Devolver</button>
+            )}
           </>
         )}
         {p.entregar && (

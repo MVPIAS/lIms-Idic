@@ -12,7 +12,16 @@ import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
 import { MailService } from "../configuracion/configuracion.module";
 import { PlantillaRenderService } from "./plantilla-render.service";
-import { decidirFirma, esOficial, pasosActuales, quedaOficial, puedeTransitarDocumento } from "./reglas-emision";
+import {
+  decidirFirma,
+  decidirFirmaOpcional,
+  esOficial,
+  pasosActuales,
+  pasosOpcionalesPendientes,
+  quedaOficial,
+  puedeTransitarDocumento,
+  SQL_PASO_ACTUAL,
+} from "./reglas-emision";
 import { escapeHtml, fmtFecha, fmtFechaHora } from "./html.util";
 import { exigirMedioEnvioActivo } from "../common/medios-envio";
 
@@ -30,12 +39,6 @@ function tienePermiso(req: any, codigo: string): boolean {
   const u = req?.user ?? {};
   return (u.roles ?? []).includes("SUPERADMIN") || (u.permisos ?? []).includes(codigo);
 }
-
-/** SQL del paso «actual» de un documento: pendiente y del menor orden pendiente. */
-const SQL_PASO_ACTUAL = `
-  df.estado = 'pendiente'
-  AND df.orden = (SELECT min(x.orden) FROM documento_firma x
-                   WHERE x.certificado_id = df.certificado_id AND x.estado = 'pendiente')`;
 
 /**
  * Circuito de firma de informes y certificados (ver docs/FLUJO_FIRMA_CIERRE.md):
@@ -92,8 +95,16 @@ export class FirmaDocumentoService {
       hashFirma: f.hashFirma,
       motivo: f.motivo,
     }));
-    const actuales = cert.estado === "en_firma" ? pasosActuales(pasos) : [];
-    const decision = cert.estado === "en_firma" ? decidirFirma(pasos, usuarioId) : { paso: null, motivo: null };
+    // Documento oficial con un paso opcional pendiente (V°B° de la Dirección):
+    // ese paso se puede firmar todavía, sin cambiar el estado del documento.
+    const actuales =
+      cert.estado === "en_firma" ? pasosActuales(pasos) : cert.estado === "oficial" ? pasosOpcionalesPendientes(pasos) : [];
+    const decision =
+      cert.estado === "en_firma"
+        ? decidirFirma(pasos, usuarioId)
+        : cert.estado === "oficial" && actuales.length
+          ? decidirFirmaOpcional(pasos, usuarioId)
+          : { paso: null, motivo: null };
     return {
       id: cert.id,
       numero: cert.numero ?? cert.codigo,
@@ -121,7 +132,7 @@ export class FirmaDocumentoService {
       pasoActual: actuales.map((p) => ({ id: p.id, orden: p.orden, accion: p.accion, rolNombre: p.rolNombre, unidadCodigo: p.unidadCodigo, responsables: p.responsables })),
       puedo: {
         firmar: !!decision.paso,
-        motivoNoFirmar: cert.estado === "en_firma" ? decision.motivo : null,
+        motivoNoFirmar: cert.estado === "en_firma" || actuales.length ? decision.motivo : null,
         anular: tienePermiso(req, "certificado.anular") && puedeTransitarDocumento(cert.estado, "anulado"),
         reemitir: tienePermiso(req, "certificado.emitir") && (cert.estado === "devuelto" || cert.estado === "anulado"),
         entregar: tienePermiso(req, "certificado.entregar") && esOficial(cert.estado) && !cert.entregadoAt,
@@ -214,7 +225,7 @@ export class FirmaDocumentoService {
           codigoVerificacion: true,
           ot: { select: { id: true, codigo: true, cliente: { select: { razonSocial: true } } } },
           plantilla: { select: { repid: true, nombre: true } },
-          firmas: { select: { orden: true, estado: true, accion: true, rolNombre: true, unidadCodigo: true, responsables: true } },
+          firmas: { select: { orden: true, estado: true, accion: true, rolNombre: true, unidadCodigo: true, responsables: true, obligatorio: true } },
         },
       }),
       this.prisma.certificado.count({ where }),
@@ -288,7 +299,7 @@ export class FirmaDocumentoService {
          JOIN orden_trabajo o ON o.id = c.ot_id
          LEFT JOIN cliente cl ON cl.id = o.cliente_id
          LEFT JOIN plantilla_informe p ON p.id = c.plantilla_id
-        WHERE c.estado = 'en_firma' AND c.deleted_at IS NULL
+        WHERE c.estado IN ('en_firma', 'oficial') AND c.deleted_at IS NULL
           AND c.tenant_id = COALESCE($1::uuid, c.tenant_id)
           AND df.responsables @> jsonb_build_array(jsonb_build_object('usuarioId', $2::text))
           AND ${SQL_PASO_ACTUAL}
@@ -309,9 +320,12 @@ export class FirmaDocumentoService {
   async firmar(id: string, req: any, comentario?: string) {
     const usuarioId = usuarioDe(req);
     const cert = await this.cargar(id, req);
-    if (cert.estado !== "en_firma")
+    // Un documento oficial solo admite la firma de un paso OPCIONAL que quedó
+    // pendiente (V°B° posterior); no cambia su estado ni su fecha oficial.
+    const posterior = cert.estado === "oficial" && pasosOpcionalesPendientes(cert.firmas).length > 0;
+    if (cert.estado !== "en_firma" && !posterior)
       throw new ConflictException(`El documento ${cert.numero ?? cert.codigo} no está en firma (estado: ${cert.estado}).`);
-    const { paso, motivo } = decidirFirma(cert.firmas, usuarioId);
+    const { paso, motivo } = posterior ? decidirFirmaOpcional(cert.firmas, usuarioId) : decidirFirma(cert.firmas, usuarioId);
     if (!paso) throw new ForbiddenException(motivo ?? "No le corresponde firmar este documento.");
 
     const [usuario, firmaReg] = await Promise.all([
@@ -326,7 +340,7 @@ export class FirmaDocumentoService {
     const imagen = firmaReg?.imagenData ?? null;
     const imagenHash = imagen ? createHash("sha256").update(imagen, "utf8").digest("hex") : null;
 
-    const oficial = quedaOficial(cert.firmas, paso.id);
+    const oficial = !posterior && quedaOficial(cert.firmas, paso.id);
     await this.prisma.$transaction(async (tx) => {
       // Firma optimista: si otro responsable firmó este paso a la vez, no se pisa.
       const r = await tx.documentoFirma.updateMany({

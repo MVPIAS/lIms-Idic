@@ -247,14 +247,54 @@ export interface PasoFirma {
   orden: number;
   estado: string; // pendiente | firmado | devuelto | anulado
   responsables: unknown;
+  /** Paso obligatorio de la matriz (sin el dato se toma como obligatorio). */
+  obligatorio?: boolean | null;
 }
 
-/** Pasos que se pueden firmar ahora: los pendientes del menor orden (mismo orden = en paralelo). */
+/**
+ * SQL del paso «actual» de un documento (misma regla que pasosActuales; alias `df`
+ * = documento_firma y `c` = certificado): en
+ * firma, los pendientes del menor orden, sin que un paso OPCIONAL detenga a
+ * los siguientes; en un documento ya oficial, los opcionales que queden
+ * pendientes (V°B° posterior de la Dirección).
+ */
+export const SQL_PASO_ACTUAL = `
+  df.estado = 'pendiente'
+  AND (
+    (c.estado = 'en_firma' AND (
+       df.orden = COALESCE((SELECT min(x.orden) FROM documento_firma x
+                             WHERE x.certificado_id = df.certificado_id AND x.estado = 'pendiente' AND x.obligatorio),
+                           (SELECT min(x.orden) FROM documento_firma x
+                             WHERE x.certificado_id = df.certificado_id AND x.estado = 'pendiente'))
+       OR (NOT df.obligatorio AND df.orden < (SELECT min(x.orden) FROM documento_firma x
+                             WHERE x.certificado_id = df.certificado_id AND x.estado = 'pendiente' AND x.obligatorio))))
+    OR (c.estado = 'oficial' AND NOT df.obligatorio))`;
+
+/** ¿El paso es obligatorio? Sin el dato (pasos antiguos, oficios) se toma como obligatorio. */
+export function esPasoObligatorio(p: { obligatorio?: boolean | null }): boolean {
+  return p.obligatorio !== false;
+}
+
+/**
+ * Pasos que se pueden firmar ahora: los pendientes del menor orden (mismo
+ * orden = en paralelo). Un paso OPCIONAL de la matriz (p. ej. el V°B° del
+ * Director en el Informe de Incumplimiento) no detiene a los siguientes: son
+ * actuales todos los pendientes hasta el primer obligatorio pendiente. Sin
+ * obligatorios pendientes, los opcionales que queden.
+ */
 export function pasosActuales<T extends PasoFirma>(pasos: T[]): T[] {
   const pendientes = pasos.filter((p) => p.estado === "pendiente");
   if (!pendientes.length) return [];
   const min = Math.min(...pendientes.map((p) => p.orden));
-  return pendientes.filter((p) => p.orden === min);
+  const obligatorios = pendientes.filter(esPasoObligatorio);
+  if (!obligatorios.length) return pendientes.filter((p) => p.orden === min);
+  const tope = Math.min(...obligatorios.map((p) => p.orden));
+  return pendientes.filter((p) => p.orden === tope || (p.orden < tope && !esPasoObligatorio(p)));
+}
+
+/** Pasos opcionales que siguen pendientes en un documento ya oficial (V°B° posterior). */
+export function pasosOpcionalesPendientes<T extends PasoFirma>(pasos: T[]): T[] {
+  return pasos.filter((p) => p.estado === "pendiente" && !esPasoObligatorio(p));
 }
 
 export function idsResponsables(responsables: unknown): string[] {
@@ -315,9 +355,31 @@ export function decidirFirma<T extends PasoConFirmante>(
   return { paso: mios[0], motivo: null };
 }
 
-/** ¿Con esta firma quedan todos los pasos firmados? */
+/**
+ * ¿Con esta firma quedan firmados todos los pasos OBLIGATORIOS? Los opcionales
+ * no detienen la oficialización: si siguen pendientes, se pueden firmar
+ * después sobre el documento oficial (decidirFirmaOpcional).
+ */
 export function quedaOficial(pasos: PasoFirma[], pasoFirmadoId: string): boolean {
-  return pasos.every((p) => p.id === pasoFirmadoId || p.estado === "firmado");
+  return pasos.every((p) => p.id === pasoFirmadoId || p.estado === "firmado" || !esPasoObligatorio(p));
+}
+
+/**
+ * Firma de un paso opcional pendiente cuando el documento ya es oficial (el
+ * V°B° de la Dirección llega después de la firma del Jefe SCC). Mismas reglas
+ * de separación de funciones que decidirFirma, solo sobre esos pasos.
+ */
+export function decidirFirmaOpcional<T extends PasoConFirmante>(
+  pasos: T[],
+  usuarioId: string,
+): { paso: T | null; motivo: string | null } {
+  const opcionales = pasosOpcionalesPendientes(pasos);
+  if (!opcionales.length) return { paso: null, motivo: "El documento ya es oficial y no tiene pasos opcionales pendientes." };
+  const r = decidirFirma(
+    pasos.map((p) => (opcionales.includes(p) || p.estado !== "pendiente" ? p : { ...p, estado: "anulado" })),
+    usuarioId,
+  );
+  return { paso: r.paso ? (pasos.find((p) => p.id === r.paso!.id) ?? null) : null, motivo: r.motivo };
 }
 
 /* ========================================================================== */
