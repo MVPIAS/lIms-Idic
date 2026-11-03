@@ -128,8 +128,11 @@ export const ACCION_HISTORIAL_OI: Record<string, string> = {
   eliminada: "Borrada",
 };
 
-export const destinoTexto = (o: Pick<OrdenInterna, "destinoUnidadCodigo" | "destinoNombre">) =>
-  o.destinoUnidadCodigo ? `${o.destinoUnidadCodigo} · ${o.destinoNombre ?? ""}` : o.destinoNombre ?? "Sin laboratorio de destino";
+/** Laboratorio de destino con el nombre del organigrama (el mismo que en el resto de las pantallas); si no, el del catálogo. */
+export const destinoTexto = (o: Pick<OrdenInterna, "destinoUnidadCodigo" | "destinoNombre"> & { destinoUnidadNombre?: string | null }) =>
+  o.destinoUnidadCodigo
+    ? `${o.destinoUnidadCodigo} · ${o.destinoUnidadNombre ?? o.destinoNombre ?? ""}`
+    : o.destinoNombre ?? "Sin laboratorio de destino";
 
 export const pesos = (n: number | null | undefined) =>
   n === null || n === undefined ? "—" : `$ ${Math.round(n).toLocaleString("es-CL")}`;
