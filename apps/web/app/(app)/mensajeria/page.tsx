@@ -41,6 +41,10 @@ const TIPOS: { key: string; label: string; pill: string }[] = [
   { key: "otro", label: "Correo libre", pill: "gray" },
   { key: "mensaje", label: "Copia de mensaje interno", pill: "gray" },
   { key: "aviso", label: "Aviso interno", pill: "gray" },
+  // Envíos de documentos desde sus módulos (certificado de calibración, informe, envío al cliente).
+  { key: "certificado", label: "Certificado de calibración", pill: "teal" },
+  { key: "informe", label: "Informe o certificado", pill: "teal" },
+  { key: "envio", label: "Envío de documentos al cliente", pill: "blue" },
 ];
 const TIPO_META = Object.fromEntries(TIPOS.map((t) => [t.key, t]));
 const PRIORIDAD: Record<string, { label: string; pill: string }> = {

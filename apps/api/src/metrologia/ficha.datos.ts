@@ -11,6 +11,7 @@ import { generarPdf } from "../plantilla-render/pdf.renderer";
 import type { ConsultaCruda } from "./metrologia-ot.datos";
 import { actualizacionEquipo, actualizacionPatronLnf, configFicha, destinatariosAviso, type ConfigFicha, type PatronMaestro } from "./ficha.reglas";
 import { urlVerificacionBase } from "../common/url-verificacion";
+import { estadoCorreo } from "../avisos/reglas-avisos";
 import { ZONA_CHILE, diaInstanteChile, diaChile as diaCalendario } from "../common/fecha-chile";
 
 /** Cliente con escritura (PrismaService, PrismaClient o la transacción `tx`). */
@@ -220,7 +221,8 @@ export async function enviarCertificado(
       `INSERT INTO correo_enviado (tenant_id, tipo, destinatarios, asunto, cuerpo_resumen, plantilla, ot_id, estado, error, message_id, enviado_por)
        VALUES ($1::uuid, 'certificado', $2, $3, $4, NULL, $5::uuid, $6, $7, $8, $9::uuid)`,
       c.tenant_id, destinatarios.join(", "), asunto, `${o.motivo === "aviso" ? "Aviso de emisión" : "Envío"} del certificado ${c.numero_certificado} (PDF adjunto).`,
-      c.ot_id, ok ? "enviado" : "error", error, messageId, o.usuarioId);
+      // Sin servidor de correo el intento queda «Sin servidor de correo», como el correo libre.
+      c.ot_id, ok ? "enviado" : estadoCorreo({ quiere: true, destinatarios: destinatarios.length, error }), error, messageId, o.usuarioId);
   } catch {
     /* sin bitácora de correo en esta base */
   }

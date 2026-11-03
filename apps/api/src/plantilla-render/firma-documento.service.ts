@@ -24,6 +24,7 @@ import {
 } from "./reglas-emision";
 import { escapeHtml, fmtFecha, fmtFechaHora } from "./html.util";
 import { exigirMedioEnvioActivo } from "../common/medios-envio";
+import { estadoCorreo } from "../avisos/reglas-avisos";
 
 // Medios de entrega: «Parámetros del sistema › medio_envio» (common/medios-envio.ts, frente f5).
 
@@ -563,7 +564,8 @@ export class FirmaDocumentoService {
         asunto,
         `Envío del documento ${numero} (PDF adjunto).`,
         cert.otId,
-        ok ? "enviado" : "error",
+        // Sin servidor de correo: «Sin servidor de correo» (mismo criterio que los avisos).
+        ok ? "enviado" : estadoCorreo({ quiere: true, destinatarios: destinatarios.length, error }),
         error,
         messageId,
         usuarioDe(req),

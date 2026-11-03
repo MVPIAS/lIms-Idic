@@ -260,7 +260,7 @@ export class SeguimientoService {
           asunto,
           `Entrega a más tardar el ${fechaCl(o.fecha_compromiso)}`,
           o.id,
-          error ? "error" : "enviado",
+          error ? estadoCorreo({ quiere: true, destinatarios: para.length, error }) : "enviado",
           error,
           req.user?.sub ?? null,
         )
@@ -564,7 +564,7 @@ export class SeguimientoService {
           asunto,
           lista.map((x) => x.numero).join(", ").slice(0, 500),
           o.id,
-          error ? "error" : "enviado",
+          error ? estadoCorreo({ quiere: true, destinatarios: para.length, error }) : "enviado",
           error,
           req.user?.sub ?? null,
         )
