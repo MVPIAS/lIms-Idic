@@ -130,8 +130,24 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
 
   /* ------------------------------------------------------------ perfiles --- */
 
-  private async perfilesVisibles(req: any, incluirInactivos = false): Promise<PerfilFila[]> {
-    const unidades = await this.alcance.filtroUnidades(req, "instrumento.importar");
+  /**
+   * Unidades donde vale ALGUNO de los permisos (unión de sus alcances; null =
+   * global). Quien solo configura (Calidad, con instrumento.configurar) ve y
+   * edita perfiles sin poder capturar.
+   */
+  private async unidadesDeAlguno(req: any, permisos: string[]): Promise<string[] | null> {
+    const propios = permisos.filter((p) => tiene(req, p));
+    const out = new Set<string>();
+    for (const p of propios) {
+      const u = await this.alcance.filtroUnidades(req, p);
+      if (!u) return null;
+      u.forEach((x) => out.add(x));
+    }
+    return [...out];
+  }
+
+  private async perfilesVisibles(req: any, incluirInactivos = false, permisos: string[] = ["instrumento.importar"]): Promise<PerfilFila[]> {
+    const unidades = await this.unidadesDeAlguno(req, permisos);
     const f = await this.prisma.$queryRawUnsafe<PerfilFila[]>(
       `${SELECT_PERFIL} WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ${incluirInactivos ? "" : "AND p.activo"} ORDER BY lower(p.nombre)`,
       tenantDe(req),
@@ -139,15 +155,17 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
     return f.filter((p) => this.enAlcance(unidades, p.unidadId));
   }
 
-  private async perfil(req: any, id: string): Promise<PerfilFila> {
-    const p = (await this.perfilesVisibles(req, true)).find((x) => x.id === id);
+  private async perfil(req: any, id: string, permisos?: string[]): Promise<PerfilFila> {
+    const p = (await this.perfilesVisibles(req, true, permisos)).find((x) => x.id === id);
     if (!p) throw new NotFoundException("Perfil de instrumento no encontrado.");
     return p;
   }
 
   async listarPerfiles(req: any) {
+    if (!tiene(req, "instrumento.importar") && !tiene(req, "instrumento.configurar"))
+      throw new ForbiddenException("Permiso insuficiente. Requiere uno de: instrumento.importar, instrumento.configurar");
     const tenantId = tenantDe(req);
-    const lista = await this.perfilesVisibles(req, tiene(req, "instrumento.configurar"));
+    const lista = await this.perfilesVisibles(req, tiene(req, "instrumento.configurar"), ["instrumento.importar", "instrumento.configurar"]);
     const nombres = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT p.id, eq.codigo || ' · ' || COALESCE(eq.nombre, eq.descripcion, '') AS equipo, u.codigo || ' · ' || u.nombre AS unidad, us.nombre_completo AS responsable
          FROM instrumento_perfil p
@@ -160,6 +178,8 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
     const n = new Map(nombres.map((x) => [x.id, x]));
     return {
       puedeConfigurar: tiene(req, "instrumento.configurar"),
+      // Cargar archivos e historial exigen además capturar resultados.
+      puedeImportar: tiene(req, "instrumento.importar") && tiene(req, "resultado.crear"),
       lecturaAutomatica: !!process.env.INSTRUMENTOS_DIR,
       perfiles: lista.map((p) => ({ ...p, equipo: n.get(p.id)?.equipo ?? null, unidad: n.get(p.id)?.unidad ?? null, responsable: n.get(p.id)?.responsable ?? null })),
     };
@@ -253,15 +273,46 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
   }
 
   async editarPerfil(req: any, id: string, b: any) {
-    const previo = await this.perfil(req, id);
+    const previo = await this.perfil(req, id, ["instrumento.configurar"]);
     await this.guardarPerfil(req, this.datosPerfil(b, previo), id);
     return { id };
   }
 
   async borrarPerfil(req: any, id: string) {
-    await this.perfil(req, id);
+    await this.perfil(req, id, ["instrumento.configurar"]);
     await this.prisma.$executeRawUnsafe(`UPDATE instrumento_perfil SET deleted_at = now(), carpeta = NULL WHERE tenant_id = $1::uuid AND id = $2::uuid`, tenantDe(req), id);
     return { ok: true };
+  }
+
+  /**
+   * Opciones del formulario de perfil (laboratorios, equipos y usuarios) para
+   * quien configura: no depende de ot.ver, equipo.ver ni agenda.crear.
+   */
+  async opcionesPerfil(req: any) {
+    const tenantId = tenantDe(req);
+    const unidades = await this.alcance.filtroUnidades(req, "instrumento.configurar");
+    const [labs, equipos, usuarios] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT id, codigo, nombre FROM unidad WHERE tenant_id = $1::uuid AND activa
+            AND COALESCE(tipo, 'LABORATORIO') IN ('LABORATORIO', 'SECCION', 'SUCURSAL', 'DELEGACION')
+            AND ($2::uuid[] IS NULL OR id = ANY($2::uuid[])) ORDER BY codigo`,
+        tenantId,
+        unidades,
+      ),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT id, codigo, nombre, descripcion, unidad_id AS "unidadId" FROM equipo
+          WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND COALESCE(estado, 'operativo') <> 'baja'
+            AND ($2::uuid[] IS NULL OR unidad_id IS NULL OR unidad_id = ANY($2::uuid[])) ORDER BY codigo LIMIT 1000`,
+        tenantId,
+        unidades,
+      ),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT id, nombre_completo AS nombre, username FROM usuario
+          WHERE tenant_id = $1::uuid AND deleted_at IS NULL AND COALESCE(estado, 'activo') = 'activo' ORDER BY nombre_completo LIMIT 500`,
+        tenantId,
+      ),
+    ]);
+    return { unidades: labs, equipos, usuarios };
   }
 
   /* -------------------------------------------------------- emparejamiento --- */
