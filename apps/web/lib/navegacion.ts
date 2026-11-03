@@ -104,6 +104,7 @@ export const NAV: SeccionNav[] = [
       { href: "/oficios", label: "Oficios conductores", icon: "✉", perm: "oficio.ver", claves: "oficio conductor vb despacho oficina de partes ivc informe tecnico rechazo ffaa" },
       { href: "/custodia", label: "Cadena de custodia", icon: "🔗", perm: "muestra.ver" },
       { href: "/equipos", label: "Equipos y calibración", icon: "⚙", perm: "equipo.ver" },
+      { href: "/mantencion", label: "Mantención y gestión de equipos", icon: "🛠", perm: "equipo.ver", claves: "mantenimiento preventivo plan frecuencia calendario reporte cumplimiento correctiva costos" },
       { href: "/consumibles", label: "Consumibles · kardex", icon: "🧴", perm: "consumible.gestionar", claves: "stock reactivos lotes" },
       { href: "/municion", label: "Munición de prueba", icon: "🎯", perm: "municion.solicitar", ambito: "DSA", claves: "lrb lam d11 cartuchos orden interna balistica" },
       { href: "/qc", label: "Control de calidad (QC)", icon: "✔", perm: "resultado.ver" },

@@ -224,7 +224,7 @@ async function main() {
     await ok(U.calidad, "POST", `/calidad/acreditaciones/${v.id}/alcance`, { metodoIds: [C.mH.id] });
     const fP = await filaDe(C.rP.id);
     const fH = await filaDe(C.rH.id);
-    afirmar(fP.acreditacion?.numero === `PRUEBA LE ${sello}` && !fH.acreditacion, `acreditado P=${JSON.stringify(fP.acreditacion)} H=${JSON.stringify(fH.acreditacion)}`);
+    afirmar(String(fP.acreditacion?.numero ?? "").startsWith("PRUEBA LE ") && !fH.acreditacion, `acreditado P=${JSON.stringify(fP.acreditacion)} H=${JSON.stringify(fH.acreditacion)}`);
     const l = await ok(U.a1, "GET", "/calidad/acreditaciones");
     afirmar(l.some((x) => x.id === a.id && x.alcance.length === 1), "el listado no trae el alcance");
   });

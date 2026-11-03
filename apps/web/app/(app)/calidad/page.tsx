@@ -16,12 +16,12 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { llamar, qs } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
-import { descargarAdjunto } from "@/lib/d11";
+import { descargarAdjunto, subirFormulario } from "@/lib/d11";
 import { hoyChile } from "@/lib/fecha-chile";
 import { usePermisos } from "@/lib/permisos";
 import { toast } from "@/components/ui/feedback";
 
-type Pestana = "reanalisis" | "acreditacion" | "poe" | "alicuotas";
+type Pestana = "reanalisis" | "acreditacion" | "poe" | "formulas" | "alicuotas";
 
 const fechaCl = (f: string | null | undefined) => (f ? f.slice(0, 10).split("-").reverse().join("-") : "—");
 const num = (v: unknown) => (v == null || v === "" ? "" : String(v).replace(".", ","));
@@ -30,7 +30,7 @@ export default function CalidadPage() {
   const [pestana, setPestana] = useState<Pestana>("reanalisis");
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t === "acreditacion" || t === "poe" || t === "alicuotas") setPestana(t);
+    if (t === "acreditacion" || t === "poe" || t === "formulas" || t === "alicuotas") setPestana(t);
   }, []);
   const tab = (id: Pestana, t: string) => (
     <button type="button" role="tab" aria-selected={pestana === id} className={`tab${pestana === id ? " active" : ""}`} onClick={() => setPestana(id)}>{t}</button>
@@ -48,12 +48,14 @@ export default function CalidadPage() {
       <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
         {tab("reanalisis", "Re-análisis")}
         {tab("acreditacion", "Acreditación ISO/IEC 17025")}
-        {tab("poe", "POE y advertencia por método")}
+        {tab("poe", "Método: POE, advertencia y consumibles")}
+        {tab("formulas", "Fórmulas desde Excel")}
         {tab("alicuotas", "Alícuotas")}
       </div>
       {pestana === "reanalisis" && <Reanalisis />}
       {pestana === "acreditacion" && <Acreditaciones />}
       {pestana === "poe" && <Poe />}
+      {pestana === "formulas" && <Formulas />}
       {pestana === "alicuotas" && <Alicuotas />}
     </div>
   );
@@ -518,6 +520,223 @@ function Poe() {
                 </div>
                 <button className="btn sm" onClick={guardarMargen}>Guardar margen</button>
               </div>
+            </div>
+          )}
+          <ConsumiblesMetodo metodoId={metodo.id} gestiona={gestiona} />
+        </section>
+      )}
+    </>
+  );
+}
+
+/* ================================================ consumibles del método === */
+
+function ConsumiblesMetodo({ metodoId, gestiona }: { metodoId: string; gestiona: boolean }) {
+  const [lista, setLista] = useState<any[]>([]);
+  const [q, setQ] = useState("");
+  const [opciones, setOpciones] = useState<any[]>([]);
+  const [nuevo, setNuevo] = useState<{ consumible: any | null; cantidad: string; por: string }>({ consumible: null, cantidad: "", por: "ensayo" });
+  const cargar = useCallback(async () => {
+    try {
+      setLista(await llamar<any[]>("GET", `/calidad/metodos/${metodoId}/consumibles`));
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  }, [metodoId]);
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+  useEffect(() => {
+    if (!gestiona) return;
+    const t = setTimeout(() => {
+      if (q.trim().length < 2) return setOpciones([]);
+      llamar<any[]>("GET", `/calidad/consumibles${qs({ q: q.trim() })}`).then(setOpciones).catch(() => setOpciones([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q, gestiona]);
+  const agregar = async () => {
+    if (!nuevo.consumible) return;
+    try {
+      setLista(await llamar<any[]>("POST", `/calidad/metodos/${metodoId}/consumibles`, { consumibleId: nuevo.consumible.id, cantidad: nuevo.cantidad, por: nuevo.por }));
+      setNuevo({ consumible: null, cantidad: "", por: "ensayo" });
+      toast.ok("Consumo del método guardado: se descontará al capturar.");
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+  const quitar = async (consumibleId: string) => {
+    try {
+      setLista(await llamar<any[]>("DELETE", `/calidad/metodos/${metodoId}/consumibles/${consumibleId}`));
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+  return (
+    <>
+      <h3 style={{ margin: "14px 0 4px", fontSize: 14 }}>Consumibles por determinación</h3>
+      <p style={{ margin: "0 0 6px", fontSize: 12.5, color: "var(--muted)" }}>
+        Al capturar un ensayo de este método se descuenta esta cantidad del stock (FIFO por caducidad, solo lotes vigentes) y queda en el kardex.
+      </p>
+      <div style={{ overflowX: "auto" }}>
+        <table className="table">
+          <thead><tr><th>Consumible</th><th>Cantidad</th><th>Por</th><th>Stock vigente</th>{gestiona && <th></th>}</tr></thead>
+          <tbody>
+            {lista.length ? (
+              lista.map((c) => (
+                <tr key={c.consumibleId}>
+                  <td><b>{c.codigo}</b> {c.nombre}</td>
+                  <td>{num(c.cantidad)} {c.unidad ?? ""}</td>
+                  <td>{c.por === "replica" ? "cada réplica" : "cada ensayo"}</td>
+                  <td>{c.stock < c.cantidad ? <span className="pill red">{num(c.stock)} {c.unidad ?? ""}</span> : `${num(c.stock)} ${c.unidad ?? ""}`}</td>
+                  {gestiona && <td><button className="btn outline sm" onClick={() => quitar(c.consumibleId)}>Quitar</button></td>}
+                </tr>
+              ))
+            ) : (
+              <tr><td colSpan={gestiona ? 5 : 4} style={{ color: "var(--muted)" }}>El método no tiene consumo configurado.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {gestiona && (
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 1fr) 120px 150px auto", gap: 8, alignItems: "end", marginTop: 8 }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="mc-q">Consumible</label>
+            {nuevo.consumible ? (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span className="pill teal">{nuevo.consumible.codigo} · {nuevo.consumible.nombre}</span>
+                <button type="button" className="btn outline sm" onClick={() => setNuevo({ ...nuevo, consumible: null })}>Cambiar</button>
+              </div>
+            ) : (
+              <>
+                <input id="mc-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código o nombre" maxLength={80} autoComplete="off" />
+                {!!opciones.length && (
+                  <ul style={{ listStyle: "none", padding: 0, margin: "4px 0 0", border: "1px solid var(--line)", borderRadius: 6, maxHeight: 200, overflowY: "auto" }}>
+                    {opciones.map((o) => (
+                      <li key={o.id}>
+                        <button type="button" style={{ display: "block", width: "100%", textAlign: "left", padding: "5px 8px", border: 0, background: "none", cursor: "pointer" }}
+                          onClick={() => { setNuevo({ ...nuevo, consumible: o }); setQ(""); setOpciones([]); }}>
+                          <b>{o.codigo}</b> {o.nombre} <span style={{ color: "var(--muted)", fontSize: 12 }}>{o.unidad ?? ""}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            )}
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="mc-c">Cantidad{nuevo.consumible?.unidad ? ` (${nuevo.consumible.unidad})` : ""}</label>
+            <input id="mc-c" inputMode="decimal" value={nuevo.cantidad} onChange={(e) => setNuevo({ ...nuevo, cantidad: e.target.value })} />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="mc-por">Por</label>
+            <select id="mc-por" value={nuevo.por} onChange={(e) => setNuevo({ ...nuevo, por: e.target.value })}>
+              <option value="ensayo">cada ensayo</option>
+              <option value="replica">cada réplica</option>
+            </select>
+          </div>
+          <button className="btn sm" disabled={!nuevo.consumible || !nuevo.cantidad.trim()} onClick={agregar}>Agregar</button>
+        </div>
+      )}
+    </>
+  );
+}
+
+/* ============================================================== fórmulas === */
+
+const ESTADO_FORMULA: Record<string, { texto: string; pill: string }> = {
+  listo: { texto: "Se guarda", pill: "green" },
+  sin_cambios: { texto: "Sin cambios", pill: "gray" },
+  no_encontrado: { texto: "No encontrado", pill: "amber" },
+  fuera_alcance: { texto: "Otro laboratorio", pill: "amber" },
+  error: { texto: "Error", pill: "red" },
+};
+
+function Formulas() {
+  const { puede } = usePermisos();
+  const [archivo, setArchivo] = useState<File | null>(null);
+  const [vista, setVista] = useState<any | null>(null);
+  const [motivo, setMotivo] = useState("");
+  const [ocupado, setOcupado] = useState(false);
+  if (!puede("catalogo.gestionar"))
+    return <div className="card"><p style={{ margin: 0 }}>Importar fórmulas al catálogo lo hace quien administra el catálogo de su laboratorio.</p></div>;
+  const leer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!archivo) return;
+    setOcupado(true);
+    try {
+      const f = new FormData();
+      f.append("archivo", archivo, archivo.name);
+      setVista(await subirFormulario<any>("/calidad/formulas/vista-previa", f));
+    } catch (x: any) {
+      toast.error(x.message);
+    } finally {
+      setOcupado(false);
+    }
+  };
+  const listos = (vista?.filas ?? []).filter((f: any) => f.estado === "listo");
+  const aplicar = async () => {
+    setOcupado(true);
+    try {
+      const r = await llamar<any>("POST", "/calidad/formulas/aplicar", { motivo: motivo.trim(), filas: listos.map((f: any) => ({ analitoId: f.analitoId, formula: f.formula })) });
+      toast.ok(`${r.aplicadas} fórmula(s) guardada(s) en el catálogo${r.errores.length ? `; ${r.errores.length} con error` : ""}.`);
+      setVista(null);
+      setArchivo(null);
+      setMotivo("");
+    } catch (x: any) {
+      toast.error(x.message);
+    } finally {
+      setOcupado(false);
+    }
+  };
+  return (
+    <>
+      <form className="card" onSubmit={leer} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, alignItems: "end" }}>
+        <div className="field" style={{ margin: 0 }}>
+          <label htmlFor="fx-arch">Planilla de fórmulas (.xlsx o .csv)</label>
+          <input id="fx-arch" type="file" accept=".xlsx,.csv,.txt" onChange={(e) => { setArchivo(e.target.files?.[0] ?? null); setVista(null); }} />
+        </div>
+        <button type="button" className="btn outline sm" onClick={() => descargarAdjunto("/calidad/formulas/plantilla.xlsx", "plantilla_formulas_lims.xlsx").catch((x) => toast.error(x.message))}>Descargar plantilla</button>
+        <button className="btn primary sm" disabled={!archivo || ocupado}>{ocupado ? "Leyendo…" : "Leer y revisar"}</button>
+        <p style={{ gridColumn: "1 / -1", margin: 0, fontSize: 12.5, color: "var(--muted)" }}>
+          Una fila por analito (método, analito y fórmula). La fórmula puede ser una fórmula de Excel de la misma fila: cada celda se traduce a la variable que nombra la cabecera de su columna (C1, C2…). Nada cambia en el catálogo hasta aplicar.
+        </p>
+      </form>
+      {vista && (
+        <section className="card">
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            <b style={{ marginRight: 6 }}>{vista.archivo}</b>
+            {Object.entries(vista.resumen as Record<string, number>).map(([k, n]) => (
+              <span key={k} className={`pill ${ESTADO_FORMULA[k]?.pill ?? "gray"}`}>{ESTADO_FORMULA[k]?.texto ?? k}: {n}</span>
+            ))}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="table">
+              <thead><tr><th>Fila</th><th>Método · analito</th><th>En la planilla</th><th>Fórmula del LIMS</th><th>Actual</th><th>Estado</th></tr></thead>
+              <tbody>
+                {vista.filas.map((f: any) => (
+                  <tr key={f.fila}>
+                    <td>{f.fila}</td>
+                    <td>{f.metodo} · {f.analito}{f.analitoNombre ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{f.analitoNombre}</div> : null}</td>
+                    <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{f.formulaExcel}</td>
+                    <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>{f.formula ?? "—"}</td>
+                    <td style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 12, color: "var(--muted)" }}>{f.formulaActual ?? "—"}</td>
+                    <td>
+                      <span className={`pill ${ESTADO_FORMULA[f.estado]?.pill ?? "gray"}`}>{ESTADO_FORMULA[f.estado]?.texto ?? f.estado}</span>
+                      {f.detalle && <div style={{ fontSize: 11.5, color: "var(--muted)", maxWidth: 260 }}>{f.detalle}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {!!listos.length && (
+            <div style={{ display: "flex", gap: 8, alignItems: "end", marginTop: 10, flexWrap: "wrap" }}>
+              <div className="field" style={{ margin: 0, flex: "1 1 320px" }}>
+                <label htmlFor="fx-motivo">Motivo del cambio (queda en la auditoría)</label>
+                <input id="fx-motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ej.: fórmulas validadas del método POE-LQA-012 v3" maxLength={500} />
+              </div>
+              <button className="btn primary sm" disabled={ocupado || motivo.trim().length < 5} onClick={aplicar}>Guardar {listos.length} fórmula(s)</button>
             </div>
           )}
         </section>

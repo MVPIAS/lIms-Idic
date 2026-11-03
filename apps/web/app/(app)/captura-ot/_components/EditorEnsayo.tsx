@@ -326,6 +326,7 @@ export default function EditorEnsayo({
         r = await llamar("POST", `/flujo/resultado/${e.id}/valor`, { ...cuerpo, confirmarAvisos: true });
       }
       toast.ok(r?.avisosAceptacion?.length ? "Resultado guardado con avisos de aceptación." : "Resultado guardado.");
+      avisarCalidad(r);
       onGuardado(r);
     } catch (err: any) {
       toast.error(err.message);
@@ -731,4 +732,18 @@ export default function EditorEnsayo({
 export function equiposDelEnsayo(equipos: EquipoCaptura[], laboratorioId: string | null | undefined): EquipoCaptura[] {
   if (!laboratorioId) return equipos;
   return equipos.filter((x) => !x.unidadId || x.unidadId === laboratorioId);
+}
+
+/**
+ * Lo que la captura dejó además del valor (bloque A): advertencia, re-análisis
+ * automático y consumibles descontados o sin stock (§4.2.6, §4.4.5).
+ */
+export function avisarCalidad(r: any) {
+  if (r?.reanalisis === "solicitado") toast.error("No cumple: se abrió un re-análisis automático. Repita la determinación y capture el nuevo valor.");
+  else if (r?.advertencia) toast.info(`Cumple con advertencia: ${r.advertenciaMotivo ?? "cerca de un límite"}`);
+  const c = r?.consumos;
+  if (c?.faltantes?.length)
+    toast.error(`Sin stock vigente para descontar: ${c.faltantes.map((x: any) => `${x.consumible} (necesita ${String(x.necesario).replace(".", ",")}${x.unidad ? ` ${x.unidad}` : ""})`).join("; ")}. Registre la entrada del lote en Consumibles.`);
+  else if (c?.descontados?.length)
+    toast.info(`Consumibles descontados: ${c.descontados.map((x: any) => `${x.consumible} ${String(x.cantidad).replace(".", ",")}${x.unidad ? ` ${x.unidad}` : ""}`).join("; ")}.`);
 }
