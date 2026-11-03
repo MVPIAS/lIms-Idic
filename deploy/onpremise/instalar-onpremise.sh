@@ -157,7 +157,7 @@ command -v openssl >/dev/null || fatal "Falta openssl (necesario para generar se
 if [ ! -f "$APP_DIR/.env" ]; then
   log "No existe .env: se genera desde la plantilla con secretos aleatorios..."
   cp "$KIT_DIR/conf/env.onpremise.example" "$APP_DIR/.env"
-  for var in POSTGRES_PASSWORD JWT_SECRET MINIO_ROOT_PASSWORD; do
+  for var in POSTGRES_PASSWORD JWT_SECRET MINIO_ROOT_PASSWORD RESPALDO_CLAVE; do
     sec="$(generar_secreto)"
     # Delimitador '|' para no chocar con '/' del base64.
     sed -i "s|^${var}=<<GENERAR>>|${var}=${sec}|" "$APP_DIR/.env"
@@ -201,6 +201,7 @@ exigir POSTGRES_PASSWORD   "${POSTGRES_PASSWORD:-}"   20
 # La API aborta el arranque si JWT_SECRET < 32; se exige aquí para fallar antes
 # y con un mensaje comprensible, no con un contenedor en bucle de reinicio.
 exigir JWT_SECRET          "${JWT_SECRET:-}"          32
+exigir RESPALDO_CLAVE      "${RESPALDO_CLAVE:-}"      20
 exigir MINIO_ROOT_USER     "${MINIO_ROOT_USER:-}"     3
 exigir MINIO_ROOT_PASSWORD "${MINIO_ROOT_PASSWORD:-}" 20
 [ "$FALLOS" -eq 0 ] || fatal "$FALLOS problema(s) en $APP_DIR/.env. Corríjalos y reejecute."
@@ -222,7 +223,7 @@ ok "Las 7 imágenes requeridas están presentes"
 paso "6/9 · Directorios de datos y certificado TLS"
 # =============================================================================
 mkdir -p "$LIMS_DATA_DIR"/{postgres,redis,minio,metabase,certs,caddy/data,caddy/config}
-mkdir -p "${LIMS_BACKUP_DIR:-/srv/lims-backup}"/{diarios,semanales,mensuales,wal,basebackups}
+mkdir -p "${LIMS_BACKUP_DIR:-/srv/lims-backup}"/{diarios,semanales,mensuales,wal,basebackups,portables}
 chmod 700 "$LIMS_DATA_DIR/certs" "${LIMS_BACKUP_DIR:-/srv/lims-backup}"
 # Carpetas de intercambio con IBIS. Si no existen, Docker las crea como root al
 # montar el volumen y el ETL de la API no puede mover los XML ya procesados.
@@ -456,8 +457,8 @@ if [ -d "$KIT_DIR/conf/systemd" ]; then
   log "Instalando temporizadores systemd (respaldo y chequeo de salud)..."
   cp "$KIT_DIR"/conf/systemd/*.service "$KIT_DIR"/conf/systemd/*.timer /etc/systemd/system/
   systemctl daemon-reload
-  systemctl enable --now lims-backup.timer lims-basebackup.timer lims-chequeo.timer >>"$LOG_FILE" 2>&1 \
-    && ok "Temporizadores activos: respaldo diario 02:15 · basebackup semanal dom 03:00 · chequeo cada 5 min" \
+  systemctl enable --now lims-backup.timer lims-basebackup.timer lims-exportacion.timer lims-chequeo.timer >>"$LOG_FILE" 2>&1 \
+    && ok "Temporizadores activos: respaldo diario 02:15 · basebackup semanal dom 03:00 · exportación SQL+CSV cifrada dom 04:00 · chequeo cada 5 min" \
     || warn "No se pudieron activar los temporizadores. Actívelos a mano (GUIA_ONPREMISE.md §7)."
 fi
 

@@ -133,4 +133,5 @@ align_instrumentos_importacion.sql
 align_calidad_resultados.sql
 align_equipos_consumibles.sql
 align_comunicacion.sql
+align_sesion_inactividad.sql
 align_cierre_permisos.sql

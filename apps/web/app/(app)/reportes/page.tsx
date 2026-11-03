@@ -8,6 +8,7 @@
 // ===========================================================================
 
 import Gestion from "./_components/Gestion";
+import Tendencias from "./_components/Tendencias";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { clp, num, pct, fecha } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
@@ -19,11 +20,12 @@ const auth = () => ({
   "Content-Type": "application/json",
 });
 
-type Tab = "gestion" | "productividad" | "conformidad" | "plazos" | "comercial" | "exportador";
+type Tab = "gestion" | "tendencias" | "productividad" | "conformidad" | "plazos" | "comercial" | "exportador";
 
 /** Cada pestaña con el permiso que exige su API (/reportes/*). */
 const TABS: { key: Tab; label: string; perm: string }[] = [
   { key: "gestion", label: "Gestión", perm: "reporte.ver" },
+  { key: "tendencias", label: "Tendencias", perm: "reporte.ver" },
   { key: "productividad", label: "Productividad", perm: "reporte.ver" },
   { key: "conformidad", label: "Conformidad", perm: "reporte.ver" },
   { key: "plazos", label: "Plazos", perm: "reporte.ver" },
@@ -58,7 +60,7 @@ export default function ReportesPage() {
     <div>
       <h1 className="page">Reportes e indicadores</h1>
       <p className="subtitle">
-        Indicadores de gestión (KPIs, §4.5.3) y exportación de datos a CSV con filtros (§4.6.6 / §4.6.7).
+        Indicadores de gestión (KPIs, §4.5.3), tendencias en tiempo real e históricas (§4.5.7) y exportación de datos a CSV con filtros (§4.6.6 / §4.6.7).
         Todos los reportes son de solo lectura y respetan el rango de fechas seleccionado.
         {listo && !unidadGlobal && " Las cifras corresponden a los laboratorios de su alcance."}
       </p>
@@ -89,6 +91,7 @@ export default function ReportesPage() {
 
       {listo && !tabs.length && <div className="alert warn">Su perfil no tiene acceso a ningún reporte.</div>}
       {tab === "gestion" && <Gestion rango={rango} />}
+      {tab === "tendencias" && <Tendencias rango={rango} />}
       {tab === "productividad" && <Productividad rango={rango} />}
       {tab === "conformidad" && <Conformidad rango={rango} />}
       {tab === "plazos" && <Plazos rango={rango} />}

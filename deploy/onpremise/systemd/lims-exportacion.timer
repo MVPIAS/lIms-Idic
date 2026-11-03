@@ -1,0 +1,19 @@
+# =============================================================================
+# LIMS IDIC · Temporizador de la exportación portable cifrada · Aiuken
+# =============================================================================
+# Contrato §4.8.4: copias en SQL y CSV cada 15 días como mínimo. Se hace cada
+# semana (domingo 04:00, tras el basebackup de las 03:00).
+#   systemctl enable --now lims-exportacion.timer
+# =============================================================================
+[Unit]
+Description=LIMS IDIC · dispara la exportación portable (SQL plano + CSV, cifrada)
+Documentation=file:/opt/lims-idic/GUIA_ONPREMISE.md
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+RandomizedDelaySec=300
+Persistent=true
+Unit=lims-exportacion.service
+
+[Install]
+WantedBy=timers.target

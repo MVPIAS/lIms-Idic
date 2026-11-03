@@ -157,6 +157,9 @@ async function hashArgon2(password: string): Promise<string> {
   }
 }
 
+/** Máximo de usuarios por consulta del listado (contrato §4.7.6: ≥ 1000 usuarios). */
+const MAX_USUARIOS_LISTA = 5000;
+
 /**
  * Usuarios y sus ASIGNACIONES de rol (rol + unidad + vigencia). Un usuario
  * puede tener varias asignaciones (p. ej. ANALISTA en LQC y REVISOR en LQA).
@@ -177,6 +180,7 @@ export class UsuariosController {
     @Query("unidadId") unidadId?: string,
     @Query("rolId") rolId?: string,
     @Query("activo") activo?: string,
+    @Query("limit") limit?: string,
   ) {
     const tenantId = tenantDe(req);
     const where: any = { deletedAt: null, ...(tenantId ? { tenantId } : {}) };
@@ -195,13 +199,19 @@ export class UsuariosController {
     if (activo === "true") where.estado = "activo";
     else if (activo === "false") where.estado = { not: "activo" };
 
+    // Contrato §4.7.6 (≥ 1000 usuarios): la pantalla de Administración carga la
+    // lista entera y filtra en el navegador; el tope por defecto cubre 5000.
+    const pedido = Number.parseInt(limit ?? "", 10);
+    const tope = Number.isInteger(pedido) && pedido >= 1 ? Math.min(pedido, MAX_USUARIOS_LISTA) : MAX_USUARIOS_LISTA;
     const data = await this.prisma.usuario.findMany({
       where,
       select: { ...SELECT_USUARIO, ...INCLUDE_ASIGNACIONES },
       orderBy: { username: "asc" },
-      take: 500,
+      take: tope,
     });
-    return { data: data.map(aDto), meta: { page: 1, limit: 500, total: data.length, totalPages: 1 } };
+    // El total real (no el de la página): Administración avisa si hay más que el tope.
+    const total = data.length < tope ? data.length : await this.prisma.usuario.count({ where });
+    return { data: data.map(aDto), meta: { page: 1, limit: tope, total, totalPages: Math.max(1, Math.ceil(total / tope)) } };
   }
 
   @Get(":id")
