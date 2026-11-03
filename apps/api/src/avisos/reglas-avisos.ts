@@ -20,6 +20,8 @@ export const TIPOS_AVISO = {
   oficio_devuelto: "alta",
   advertencia: "warn",
   reanalisis: "alta",
+  /** «Próxima acción» de una interacción con el cliente (CRM) que llegó a su fecha. */
+  proxima_accion: "warn",
 } as const satisfies Record<string, Severidad>;
 export type TipoAviso = keyof typeof TIPOS_AVISO;
 
@@ -81,6 +83,19 @@ export function avisoDePlazo(fechaCompromiso: string | null, hoy: string, diasPo
   if (d < 0) return "vencida";
   if (d <= diasPorVencer) return "por_vencer";
   return null;
+}
+
+/** Días hacia atrás en que una próxima acción vencida aún se avisa (no se avisa lo muy antiguo al instalar). */
+export const PROXIMA_ACCION_VENTANA_DIAS = 30;
+
+/**
+ * ¿Se avisa ya la «Próxima acción» de una interacción con el cliente (CRM)?
+ * Sí desde el día indicado (hoy en Chile) y durante la ventana; antes no.
+ */
+export function proximaAccionLlego(proximaFecha: string | null, hoy: string, ventanaDias = PROXIMA_ACCION_VENTANA_DIAS): boolean {
+  if (!proximaFecha || !/^\d{4}-\d{2}-\d{2}/.test(proximaFecha)) return false;
+  const atraso = diasEntre(proximaFecha.slice(0, 10), hoy);
+  return atraso >= 0 && atraso <= ventanaDias;
 }
 
 /**
@@ -175,6 +190,17 @@ export function exigeOficio(tipoDocumento: string | null, departamento: string |
 }
 
 /* ---------------------------------------------------------------- correo --- */
+
+/**
+ * ¿El aviso sale también por correo? Lo piden la operación (salvo que diga que
+ * no), el parámetro «Enviar también por correo los avisos» y la etapa «Avisos
+ * internos» de Mensajería › Plantillas: tiene que haber una plantilla ACTIVA
+ * con «envío automático» (como el resto de etapas). `plantilla` = "respaldo"
+ * si la tabla de plantillas no existe (instalación a medias): texto de siempre.
+ */
+export function quiereCorreoAviso(o: { operacion?: boolean; parametro: boolean; plantilla: "bd" | "respaldo" | null }): boolean {
+  return (o.operacion ?? true) && o.parametro && o.plantilla !== null;
+}
 
 /** Estado del correo de un aviso según qué pasó al enviarlo. */
 export function estadoCorreo(o: { quiere: boolean; destinatarios: number; error: string | null }): EstadoCorreo {

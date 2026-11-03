@@ -12,6 +12,7 @@
  *   · resultado aprobado No cumple / Contaminado (evento «resultado.aprobado»);
  *   · documento oficial (evento «documento.oficial») → Comercial;
  *   · plazos de las OT (revisión cada hora y botón «Avisar →»);
+ *   · «Próxima acción» del historial del cliente al llegar su fecha (revisión cada hora);
  *   · despacho, plazo asignado y oficios (los llaman sus servicios).
  */
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
@@ -29,6 +30,9 @@ import {
   configAvisos,
   correosValidos,
   estadoCorreo,
+  proximaAccionLlego,
+  quiereCorreoAviso,
+  PROXIMA_ACCION_VENTANA_DIAS,
   type ConfigAvisos,
   type EstadoCorreo,
   type Severidad,
@@ -192,17 +196,19 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
         .catch(() => undefined);
     }
 
-    const quiere = (opts.correo ?? true) && cfg.enviarCorreo;
+    // Etapa «Avisos internos» de Plantillas de correo: activa/automático/variante como las demás etapas.
+    const plantilla = (opts.correo ?? true) && cfg.enviarCorreo ? await this.plantillaAviso(tenantId) : null;
+    const quiere = quiereCorreoAviso({ operacion: opts.correo, parametro: cfg.enviarCorreo, plantilla: plantilla && (plantilla === "respaldo" ? "respaldo" : "bd") });
     let estado: EstadoCorreo = "no_aplica";
-    if (quiere) {
+    if (quiere && plantilla) {
       const internos = nuevos.length
         ? await this.prisma.$queryRawUnsafe<{ email: string | null }[]>(`SELECT email FROM usuario WHERE id = ANY($1::uuid[])`, nuevos)
         : [];
       const para = correosValidos([...internos.map((x) => x.email), ...externos]);
       let error: string | null = null;
       if (para.length) {
-        // Texto editable en Mensajería › Plantillas (etapa «Avisos internos», §4.5.4).
-        const correo = await this.textoCorreo(tenantId, a);
+        // Texto editable en Plantillas de correo (etapa «Avisos internos», §4.5.4).
+        const correo = this.textoCorreo(plantilla, a);
         try {
           await this.mail.sendMail(tenantId, { to: para, subject: correo.asunto, html: correo.html });
         } catch (e: any) {
@@ -240,15 +246,30 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
     return { nuevos: nuevos.length, correo: estado };
   }
 
-  /** Asunto y cuerpo del correo de un aviso: la plantilla «aviso_interno» activa o el texto de siempre. */
-  private async textoCorreo(tenantId: string, a: NuevoAviso): Promise<{ asunto: string; html: string }> {
-    const [p] = await this.prisma
-      .$queryRawUnsafe<{ asunto: string; cuerpo: string }[]>(
-        `SELECT asunto, cuerpo FROM correo_plantilla WHERE tenant_id = $1::uuid AND clave = 'aviso_interno' AND activa`,
+  /**
+   * Plantilla con que sale el correo de los avisos: la de la etapa
+   * «aviso_interno» ACTIVA y con «envío automático» (una por etapa: la
+   * variante que lo tenga encendido), igual que CorreoPlantillasService.automatica.
+   * null = la etapa está apagada (el aviso queda solo en Mi bandeja);
+   * "respaldo" = la tabla no existe (instalación a medias): texto de siempre.
+   */
+  private async plantillaAviso(tenantId: string): Promise<{ asunto: string; cuerpo: string } | "respaldo" | null> {
+    try {
+      const [p] = await this.prisma.$queryRawUnsafe<{ asunto: string; cuerpo: string }[]>(
+        `SELECT asunto, cuerpo FROM correo_plantilla
+          WHERE tenant_id = $1::uuid AND etapa = 'aviso_interno' AND activa AND automatico
+          ORDER BY created_at LIMIT 1`,
         tenantId,
-      )
-      .catch(() => []);
-    if (p) {
+      );
+      return p ?? null;
+    } catch {
+      return "respaldo";
+    }
+  }
+
+  /** Asunto y cuerpo del correo de un aviso con su plantilla (o el texto de siempre). */
+  private textoCorreo(p: { asunto: string; cuerpo: string } | "respaldo", a: NuevoAviso): { asunto: string; html: string } {
+    if (p !== "respaldo") {
       const c = componerCorreo({ ...p, destino: "interno" }, { titulo: a.titulo, mensaje: a.mensaje, tipo: a.tipo, fecha: fechaChile(new Date()) });
       return { asunto: c.asunto, html: c.html };
     }
@@ -426,10 +447,52 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
     return { vencidas, porVencer, personas };
   }
 
-  /** Revisión periódica de todos los tenants con la revisión automática activa. */
+  /**
+   * CRM (§4.1.2): la «Próxima acción» con fecha de una interacción con el
+   * cliente avisa a su responsable (o a quien la registró) cuando llega el día
+   * (hoy en Chile), una vez por fecha; si se cambia la fecha, vuelve a avisar.
+   * Lo llaman la revisión horaria y el registro o la edición de la interacción
+   * (`interaccionId` acota a esa).
+   */
+  async revisarProximasAcciones(tenantId: string, opts: { interaccionId?: string } = {}) {
+    const hoy = hoyCl();
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT i.id, i.cliente_id, i.asunto, i.proxima_accion, i.proxima_fecha::text AS proxima_fecha,
+              COALESCE(i.responsable_id, i.creado_por) AS responsable, c.razon_social AS cliente
+         FROM cliente_interaccion i JOIN cliente c ON c.id = i.cliente_id
+        WHERE i.tenant_id = $1::uuid AND i.deleted_at IS NULL AND i.proxima_fecha IS NOT NULL
+          AND i.proxima_fecha <= $2::date AND i.proxima_fecha >= $2::date - $3::int
+          AND ($4::uuid IS NULL OR i.id = $4::uuid)`,
+      tenantId,
+      hoy,
+      PROXIMA_ACCION_VENTANA_DIAS,
+      opts.interaccionId ?? null,
+    );
+    let personas = 0;
+    for (const i of filas) {
+      if (!i.responsable || !proximaAccionLlego(i.proxima_fecha, hoy)) continue;
+      const fecha = String(i.proxima_fecha).slice(0, 10).split("-").reverse().join("-");
+      const r = await this.emitir(
+        tenantId,
+        {
+          tipo: "proxima_accion",
+          titulo: `Próxima acción con ${i.cliente}`.slice(0, 200),
+          mensaje: `${i.proxima_accion ?? "Próxima acción"} (programada para el ${fecha}). Interacción: «${i.asunto}» con ${i.cliente}.`,
+          ruta: `/clientes?historial=${i.cliente_id}`,
+          clave: `proxima_accion:${i.id}:${String(i.proxima_fecha).slice(0, 10)}`,
+        },
+        { usuarios: [i.responsable] },
+      );
+      personas += r.nuevos;
+    }
+    return { personas };
+  }
+
+  /** Revisión periódica de todos los tenants: plazos (si la revisión automática está activa) y próximas acciones del CRM. */
   async revisarTodos() {
     const tenants = await this.prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT id FROM tenant`).catch(() => []);
     for (const t of tenants) {
+      await this.revisarProximasAcciones(t.id).catch((e) => this.log.warn(`revisión de próximas acciones omitida: ${e?.message ?? e}`));
       const cfg = await this.config(t.id);
       if (!cfg.revisionAutomatica) continue;
       await this.revisarPlazos(t.id).catch((e) => this.log.warn(`revisión de plazos omitida: ${e?.message ?? e}`));

@@ -9,6 +9,8 @@ import {
   erroresDespacho,
   estadoCorreo,
   exigeOficio,
+  proximaAccionLlego,
+  quiereCorreoAviso,
 } from "./reglas-avisos";
 
 describe("parámetros de los avisos", () => {
@@ -102,5 +104,29 @@ describe("correo del aviso", () => {
   });
   it("correos válidos sin repetir", () => {
     expect(correosValidos(["A@x.cl", "a@x.cl", null, "malo", " b@y.cl "])).toEqual(["a@x.cl", "b@y.cl"]);
+  });
+});
+
+describe("correo del aviso según la etapa «Avisos internos»", () => {
+  it("con plantilla activa y automática (o el respaldo) y el parámetro en sí: sale", () => {
+    expect(quiereCorreoAviso({ parametro: true, plantilla: "bd" })).toBe(true);
+    expect(quiereCorreoAviso({ parametro: true, plantilla: "respaldo" })).toBe(true);
+  });
+  it("«Apagar automático» o plantilla desactivada: solo en el LIMS", () => {
+    expect(quiereCorreoAviso({ parametro: true, plantilla: null })).toBe(false);
+  });
+  it("el parámetro o la operación pueden apagarlo", () => {
+    expect(quiereCorreoAviso({ parametro: false, plantilla: "bd" })).toBe(false);
+    expect(quiereCorreoAviso({ operacion: false, parametro: true, plantilla: "bd" })).toBe(false);
+  });
+});
+
+describe("próxima acción del CRM", () => {
+  it("se avisa desde su día y durante la ventana", () => {
+    expect(proximaAccionLlego("2026-11-02", "2026-11-02")).toBe(true);
+    expect(proximaAccionLlego("2026-10-20", "2026-11-02")).toBe(true);
+    expect(proximaAccionLlego("2026-11-03", "2026-11-02")).toBe(false);
+    expect(proximaAccionLlego("2026-09-01", "2026-11-02")).toBe(false);
+    expect(proximaAccionLlego(null, "2026-11-02")).toBe(false);
   });
 });
