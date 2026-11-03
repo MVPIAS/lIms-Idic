@@ -185,6 +185,8 @@ async function mensajeria() {
   const CO = "demo.dco.jefe";
   const AN = "demo.lmb.analista1";
   const pl = await pedir(CO, "GET", "/mensajeria/plantillas");
+  // Desde las plantillas por etapa (§4.5.4) la respuesta es { data, ... }.
+  if (pl.j && !Array.isArray(pl.j) && Array.isArray(pl.j.data)) pl.j = pl.j.data;
   caso("MSJ-01", "Plantillas de correo disponibles (cotización y resultados)", pl.status === 200 && Array.isArray(pl.j) && pl.j.length >= 2, Array.isArray(pl.j) ? pl.j.map((p) => p.clave).join(", ") : `HTTP ${pl.status}`);
   const h0 = await pedir(CO, "GET", "/mensajeria?page=1&limit=5");
   caso("MSJ-02", "Historial de correos paginado", h0.status === 200 && Array.isArray(h0.j?.data) && h0.j?.meta, `total=${h0.j?.meta?.total}`);
@@ -196,7 +198,7 @@ async function mensajeria() {
   caso("MSJ-03", "Notificar el resultado de una OT: la operación responde y deja el envío en la bitácora (enviado o con su error si no hay servidor de correo)", env.status < 500 && env.status !== 0, `HTTP ${env.status} ${JSON.stringify(env.j).slice(0, 140)}`);
   const h1 = await pedir(CO, "GET", `/mensajeria?q=${encodeURIComponent("prueba.bloque-a")}`);
   const fila = h1.j?.data?.[0];
-  caso("MSJ-04", "Búsqueda en el historial por destinatario encuentra el envío, con estado y OT", !!fila && /prueba\.bloque-a/.test(fila.destinatarios ?? "") && ["enviado", "error"].includes(fila.estado), fila ? `estado=${fila.estado} ${fila.error ? `error=${String(fila.error).slice(0, 80)}` : ""}` : `HTTP ${h1.status}, sin filas`);
+  caso("MSJ-04", "Búsqueda en el historial por destinatario encuentra el envío, con estado y OT", !!fila && /prueba\.bloque-a/.test(fila.destinatarios ?? "") && ["enviado", "error", "sin_configurar"].includes(fila.estado), fila ? `estado=${fila.estado} ${fila.error ? `error=${String(fila.error).slice(0, 80)}` : ""}` : `HTTP ${h1.status}, sin filas`);
   const fe = await pedir(CO, "GET", `/mensajeria?estado=${fila?.estado ?? "error"}&tipo=${fila?.tipo ?? "resultado"}`);
   caso("MSJ-05", "Filtros por estado y tipo", fe.status === 200 && (fe.j.data ?? []).every((x) => x.estado === (fila?.estado ?? "error")), `${fe.j?.data?.length ?? 0} filas`);
   const sinPermiso = await pedir(AN, "GET", "/mensajeria/plantillas");
