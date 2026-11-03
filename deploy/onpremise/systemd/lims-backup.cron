@@ -19,6 +19,9 @@ MAILTO=soporte.idic@ejercito.cl
 # Basebackup SEMANAL para PITR (domingos 03:00) + purga del WAL ya cubierto
 0 3 * * 0  root  /opt/lims-idic/scripts/backup/basebackup.sh >> /var/log/lims-basebackup.log 2>&1
 
+# Exportación portable cifrada SEMANAL (SQL plano + CSV, contrato §4.8.4): domingos 04:00
+0 4 * * 0  root  /opt/lims-idic/scripts/backup/exportar-portable.sh >> /var/log/lims-exportacion.log 2>&1
+
 # Chequeo de salud cada 5 minutos
 */5 * * * *  root  /opt/lims-idic/monitorizacion/chequeo-salud.sh >> /var/log/lims-chequeo.log 2>&1
 

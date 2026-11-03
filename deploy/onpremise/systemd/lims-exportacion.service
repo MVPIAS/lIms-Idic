@@ -1,0 +1,25 @@
+# =============================================================================
+# LIMS IDIC · Exportación portable cifrada (SQL plano + CSV) · Aiuken
+# =============================================================================
+# Lo dispara lims-exportacion.timer.
+#   systemctl start lims-exportacion.service   # forzar una exportación ahora
+#   journalctl -u lims-exportacion -f
+# =============================================================================
+[Unit]
+Description=LIMS IDIC · exportación portable cifrada (contrato §4.8.4)
+Documentation=file:/opt/lims-idic/GUIA_ONPREMISE.md
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/lims-idic/scripts/backup/exportar-portable.sh
+TimeoutStartSec=4h
+Nice=10
+IOSchedulingClass=idle
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
