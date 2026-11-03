@@ -25,6 +25,7 @@ import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { anioChile } from "../common/fecha-chile";
 import { oportunidadEnAlcance, siguienteCodigoOportunidad } from "./reglas-crm";
+import { InteraccionesController } from "./interacciones.controller";
 
 // ---------------------------------------------------------------------------
 // Módulo CRM · Oportunidades comerciales del LIMS (EP-00 0.3).
@@ -329,6 +330,6 @@ export class OportunidadController {
 }
 
 @Module({
-  controllers: [OportunidadController],
+  controllers: [OportunidadController, InteraccionesController],
 })
 export class CrmModule {}

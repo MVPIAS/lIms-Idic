@@ -19,6 +19,8 @@ import { PrismaService } from "../common/prisma.service";
 import { MailService } from "../configuracion/configuracion.module";
 import { alEvento } from "../common/eventos";
 import { escapeHtml } from "../plantilla-render/html.util";
+import { componerCorreo } from "../mensajeria/correo-plantillas";
+import { fechaChile } from "../common/fecha-chile";
 import { hoyCl } from "../ot/plazos";
 import {
   TIPOS_AVISO,
@@ -199,15 +201,10 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
       const para = correosValidos([...internos.map((x) => x.email), ...externos]);
       let error: string | null = null;
       if (para.length) {
+        // Texto editable en Mensajería › Plantillas (etapa «Avisos internos», §4.5.4).
+        const correo = await this.textoCorreo(tenantId, a);
         try {
-          await this.mail.sendMail(tenantId, {
-            to: para,
-            subject: `IDIC · ${a.titulo}`.slice(0, 300),
-            html:
-              `<p>${escapeHtml(a.mensaje)}</p>` +
-              `<p style="color:#666">Aviso automático del LIMS del Instituto de Investigaciones y Control del Ejército de Chile. ` +
-              `Lo encuentra también en «Mi bandeja».</p>`,
-          });
+          await this.mail.sendMail(tenantId, { to: para, subject: correo.asunto, html: correo.html });
         } catch (e: any) {
           error = String(e?.response ?? e?.message ?? "Error al enviar").slice(0, 300);
         }
@@ -217,7 +214,7 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
              VALUES ($1::uuid, 'aviso', $2, $3, $4, $5, $6::uuid, $7, $8, $9::uuid)`,
             tenantId,
             para.join(", "),
-            `IDIC · ${a.titulo}`.slice(0, 300),
+            correo.asunto,
             a.mensaje.slice(0, 500),
             `aviso_${a.tipo}`.slice(0, 60),
             a.otId ?? null,
@@ -241,6 +238,27 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
           .catch(() => undefined);
     }
     return { nuevos: nuevos.length, correo: estado };
+  }
+
+  /** Asunto y cuerpo del correo de un aviso: la plantilla «aviso_interno» activa o el texto de siempre. */
+  private async textoCorreo(tenantId: string, a: NuevoAviso): Promise<{ asunto: string; html: string }> {
+    const [p] = await this.prisma
+      .$queryRawUnsafe<{ asunto: string; cuerpo: string }[]>(
+        `SELECT asunto, cuerpo FROM correo_plantilla WHERE tenant_id = $1::uuid AND clave = 'aviso_interno' AND activa`,
+        tenantId,
+      )
+      .catch(() => []);
+    if (p) {
+      const c = componerCorreo({ ...p, destino: "interno" }, { titulo: a.titulo, mensaje: a.mensaje, tipo: a.tipo, fecha: fechaChile(new Date()) });
+      return { asunto: c.asunto, html: c.html };
+    }
+    return {
+      asunto: `IDIC · ${a.titulo}`.slice(0, 300),
+      html:
+        `<p>${escapeHtml(a.mensaje)}</p>` +
+        `<p style="color:#666">Aviso automático del LIMS del Instituto de Investigaciones y Control del Ejército de Chile. ` +
+        `Lo encuentra también en «Mi bandeja».</p>`,
+    };
   }
 
   /* ------------------------------------------------------------ disparadores --- */

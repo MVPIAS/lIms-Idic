@@ -14,6 +14,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
+import { emitirEvento } from "../common/eventos";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { Prisma } from "@prisma/client";
@@ -696,6 +697,10 @@ export class OtController {
       }
       return creada;
     }, { maxWait: 15_000, timeout: 120_000 });
+
+    // Etapas «OT creada» y, si vinieron, «muestras recibidas» (§4.5.4).
+    emitirEvento("ot.creada", { otId: ot.id, tenantId, usuarioId: req?.user?.sub ?? null });
+    if (alta.muestras?.length) emitirEvento("muestras.registradas", { otId: ot.id, tenantId, usuarioId: req?.user?.sub ?? null, muestraIds: [] });
 
     if (!versionId) return this.otConCliente(ot.id);
 

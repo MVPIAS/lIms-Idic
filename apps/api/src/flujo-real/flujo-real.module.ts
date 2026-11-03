@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { emitirEvento } from "../common/eventos";
 import { nombreItemInspeccion } from "../especificacion-tecnica/reglas-et";
 import {
   BadRequestException,
@@ -2179,8 +2180,11 @@ export class RegistroMuestrasController {
   @Post(":id/muestras")
   @RequierePermiso("muestra.crear")
   @ApiOperation({ summary: "Registra las muestras recibidas de la OT y genera sus ensayos por analizar" })
-  registrar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    return this.svc.registrar(id, RegistrarMuestrasBody.parse(body ?? {}), tenantDe(req), req);
+  async registrar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const r = await this.svc.registrar(id, RegistrarMuestrasBody.parse(body ?? {}), tenantDe(req), req);
+    // Etapa «muestras recibidas» (§4.5.4): correo automático al cliente si está activo.
+    emitirEvento("muestras.registradas", { otId: id, tenantId: tenantDe(req), usuarioId: req?.user?.sub ?? null, muestraIds: r.muestras.map((m) => m.id) });
+    return r;
   }
 }
 
