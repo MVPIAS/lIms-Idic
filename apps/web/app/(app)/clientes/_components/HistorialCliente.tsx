@@ -156,7 +156,7 @@ export default function HistorialCliente({ cliente, onCerrar }: { cliente: { id:
                 {fechaHora(h.fecha)}{h.responsable ? ` · ${h.responsable}` : ""}
               </div>
               <div style={{ fontWeight: 600 }}>
-                {h.ruta ? <Link href={h.ruta}>{h.titulo}</Link> : h.titulo}
+                {h.ruta ? <Link href={h.ruta as any}>{h.titulo}</Link> : h.titulo}
               </div>
               {h.detalle && <div style={{ whiteSpace: "pre-wrap" }}>{h.detalle}</div>}
             </li>
