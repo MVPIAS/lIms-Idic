@@ -3,7 +3,9 @@
 // ===========================================================================
 // Mantención y gestión de equipos (contrato §4.4.3). Tres pestañas:
 //   · Plan preventivo: tareas por equipo con frecuencia y próxima fecha; se
-//     registra lo ejecutado (corre la próxima fecha) o una correctiva;
+//     registra lo ejecutado (corre la próxima fecha) o una correctiva (falla
+//     fuera del plan), y se consulta el historial del equipo (mantenciones y
+//     calibraciones). Un resultado «no conforme» deja el equipo fuera de servicio;
 //   · Calendario: calibraciones y mantenciones programadas en el rango;
 //   · Reporte de gestión: cumplimiento del plan, atrasos, costos y
 //     calibraciones vencidas, con descarga en Excel.
@@ -16,6 +18,7 @@ import { descargarAdjunto } from "@/lib/d11";
 import { hoyChile } from "@/lib/fecha-chile";
 import { usePermisos } from "@/lib/permisos";
 import { toast } from "@/components/ui/feedback";
+import { ESTADO_EQUIPO_META } from "@/lib/equipos";
 
 type Pestana = "plan" | "calendario" | "reporte";
 
@@ -28,6 +31,15 @@ const ESTADO: Record<string, { texto: string; pill: string }> = {
 };
 const TIPO: Record<string, string> = { preventiva: "Preventiva", verificacion: "Verificación", limpieza: "Limpieza", calibracion: "Calibración", correctiva: "Correctiva" };
 const clp = (n: number | null | undefined) => (n == null ? "—" : `$${Math.round(n).toLocaleString("es-CL")}`);
+const RESULTADO: Record<string, { texto: string; pill: string }> = {
+  conforme: { texto: "Conforme", pill: "green" },
+  conforme_con_obs: { texto: "Conforme con observaciones", pill: "amber" },
+  no_conforme: { texto: "No conforme", pill: "red" },
+};
+const pillResultado = (r: string | null | undefined) => (r ? <span className={`pill ${RESULTADO[r]?.pill ?? "gray"}`}>{RESULTADO[r]?.texto ?? r}</span> : "—");
+const pillEstadoEquipo = (e: { estado: string; estadoTexto?: string }) => (
+  <span className={`pill ${ESTADO_EQUIPO_META[e.estado]?.pill ?? "gray"}`}>{e.estadoTexto || ESTADO_EQUIPO_META[e.estado]?.label || e.estado}</span>
+);
 
 export default function MantencionPage() {
   const [pestana, setPestana] = useState<Pestana>("plan");
@@ -56,6 +68,7 @@ export default function MantencionPage() {
 
 /* ================================================================= plan === */
 
+const CORRECTIVA_VACIA = { equipoId: "", fecha: "", ejecutadaPor: "", descripcion: "", resultado: "conforme", costo: "", observaciones: "" };
 const PLAN_VACIO = { id: "", equipoId: "", tipo: "preventiva", descripcion: "", frecuenciaDias: "180", proximaFecha: "", proveedor: "" };
 
 function Plan() {
@@ -67,6 +80,8 @@ function Plan() {
   const [form, setForm] = useState<typeof PLAN_VACIO | null>(null);
   const [ejecutando, setEjecutando] = useState<any | null>(null);
   const [ej, setEj] = useState({ fecha: "", ejecutadaPor: "", resultado: "conforme", costo: "", observaciones: "" });
+  const [correctiva, setCorrectiva] = useState<typeof CORRECTIVA_VACIA | null>(null);
+  const [historial, setHistorial] = useState<string | null>(null);
   const cargar = useCallback(async () => {
     try {
       setPlanes(await llamar<any[]>("GET", `/mantencion/planes${qs({ estado: filtro || undefined })}`));
@@ -104,6 +119,19 @@ function Plan() {
       toast.error(e.message);
     }
   };
+  const registrarCorrectiva = async () => {
+    if (!correctiva) return;
+    try {
+      const r = await llamar<any>("POST", `/mantencion/equipos/${correctiva.equipoId}/correctiva`, { ...correctiva, costo: correctiva.costo || null });
+      toast.ok(`Mantención correctiva registrada.${r?.fueraDeServicio ? " El equipo quedó fuera de servicio." : ""}`);
+      const equipoId = correctiva.equipoId;
+      setCorrectiva(null);
+      setHistorial(equipoId);
+      cargar();
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
   const baja = async (p: any) => {
     if (!window.confirm(`¿Dar de baja el plan «${p.descripcion}» de ${p.equipoCodigo}?`)) return;
     try {
@@ -125,6 +153,11 @@ function Plan() {
           <option value="al_dia">Al día</option>
         </select>
         <span style={{ flex: 1 }} />
+        <select aria-label="Equipo para ver su historial" value="" onChange={(e) => e.target.value && setHistorial(e.target.value)} style={{ width: "auto" }}>
+          <option value="">Historial de un equipo…</option>
+          {equipos.map((e) => <option key={e.id} value={e.id}>{e.codigo} · {e.nombre ?? e.descripcion}</option>)}
+        </select>
+        {gestiona && !correctiva && <button className="btn sm" onClick={() => setCorrectiva({ ...CORRECTIVA_VACIA, fecha: hoyChile() })}>Registrar correctiva</button>}
         {gestiona && !form && <button className="btn primary sm" onClick={() => setForm({ ...PLAN_VACIO, proximaFecha: hoyChile() })}>Nueva tarea de mantención</button>}
       </section>
       {form && (
@@ -166,6 +199,51 @@ function Plan() {
           </div>
         </section>
       )}
+      {correctiva && (
+        <section className="card" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, alignItems: "end" }}>
+          <h3 style={{ gridColumn: "1 / -1", margin: 0, fontSize: 15 }}>Registrar mantención correctiva (falla fuera del plan)</h3>
+          <div className="field" style={{ margin: 0, gridColumn: "span 2" }}>
+            <label htmlFor="co-eq">Equipo</label>
+            <select id="co-eq" value={correctiva.equipoId} onChange={(e) => setCorrectiva({ ...correctiva, equipoId: e.target.value })}>
+              <option value="">Elija…</option>
+              {equipos.map((e) => <option key={e.id} value={e.id}>{e.codigo} · {e.nombre ?? e.descripcion}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="co-f">Fecha en que se hizo</label>
+            <input id="co-f" type="date" value={correctiva.fecha} max={hoyChile()} onChange={(e) => setCorrectiva({ ...correctiva, fecha: e.target.value })} />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="co-por">Hecha por</label>
+            <input id="co-por" value={correctiva.ejecutadaPor} onChange={(e) => setCorrectiva({ ...correctiva, ejecutadaPor: e.target.value })} maxLength={200} />
+          </div>
+          <div className="field" style={{ margin: 0, gridColumn: "1 / -1" }}>
+            <label htmlFor="co-d">Falla y reparación</label>
+            <input id="co-d" value={correctiva.descripcion} onChange={(e) => setCorrectiva({ ...correctiva, descripcion: e.target.value })} placeholder="Ej.: no enciende la lámpara; se reemplazó la fuente de poder" maxLength={2000} />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="co-r">Resultado</label>
+            <select id="co-r" value={correctiva.resultado} onChange={(e) => setCorrectiva({ ...correctiva, resultado: e.target.value })}>
+              <option value="conforme">Conforme</option>
+              <option value="conforme_con_obs">Conforme con observaciones</option>
+              <option value="no_conforme">No conforme (equipo fuera de servicio)</option>
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="co-c">Costo (CLP)</label>
+            <input id="co-c" inputMode="numeric" value={correctiva.costo} onChange={(e) => setCorrectiva({ ...correctiva, costo: e.target.value })} />
+          </div>
+          <div className="field" style={{ margin: 0, gridColumn: "1 / -1" }}>
+            <label htmlFor="co-o">Observaciones</label>
+            <input id="co-o" value={correctiva.observaciones} onChange={(e) => setCorrectiva({ ...correctiva, observaciones: e.target.value })} maxLength={2000} />
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn primary sm" disabled={!correctiva.equipoId || !correctiva.fecha || !correctiva.descripcion.trim()} onClick={registrarCorrectiva}>Registrar</button>
+            <button className="btn outline sm" onClick={() => setCorrectiva(null)}>Cancelar</button>
+          </div>
+        </section>
+      )}
+      {historial && <HistorialEquipo equipoId={historial} onCerrar={() => setHistorial(null)} />}
       {ejecutando && (
         <section className="card" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, alignItems: "end" }}>
           <h3 style={{ gridColumn: "1 / -1", margin: 0, fontSize: 15 }}>Registrar · {ejecutando.equipoCodigo} · {ejecutando.descripcion} (programada {fechaCl(ejecutando.proximaFecha)})</h3>
@@ -207,7 +285,7 @@ function Plan() {
         ) : (
           <div style={{ overflowX: "auto" }}>
             <table className="table">
-              <thead><tr><th>Equipo</th><th>Tarea</th><th>Cada</th><th>Próxima</th><th>Última</th><th>Estado</th>{gestiona && <th></th>}</tr></thead>
+              <thead><tr><th>Equipo</th><th>Tarea</th><th>Cada</th><th>Próxima</th><th>Última</th><th>Estado</th><th></th></tr></thead>
               <tbody>
                 {planes.map((p) => (
                   <tr key={p.id}>
@@ -217,13 +295,16 @@ function Plan() {
                     <td>{fechaCl(p.proximaFecha)}</td>
                     <td>{fechaCl(p.ultimaEjecucion)}</td>
                     <td><span className={`pill ${ESTADO[p.estado]?.pill ?? "gray"}`}>{ESTADO[p.estado]?.texto ?? p.estado}</span></td>
-                    {gestiona && (
-                      <td style={{ whiteSpace: "nowrap" }}>
-                        <button className="btn sm" onClick={() => { setEjecutando(p); setEj({ fecha: hoyChile(), ejecutadaPor: "", resultado: "conforme", costo: "", observaciones: "" }); }}>Registrar hecha</button>{" "}
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button className="btn outline sm" onClick={() => setHistorial(p.equipoId)}>Historial</button>
+                      {gestiona && (
+                        <>
+                        {" "}<button className="btn sm" onClick={() => { setEjecutando(p); setEj({ fecha: hoyChile(), ejecutadaPor: "", resultado: "conforme", costo: "", observaciones: "" }); }}>Registrar hecha</button>{" "}
                         <button className="btn outline sm" onClick={() => setForm({ ...PLAN_VACIO, ...p, frecuenciaDias: String(p.frecuenciaDias), proveedor: p.proveedor ?? "" })}>Editar</button>{" "}
                         <button className="btn outline sm" onClick={() => baja(p)}>Baja</button>
-                      </td>
-                    )}
+                        </>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -232,6 +313,76 @@ function Plan() {
         )}
       </section>
     </>
+  );
+}
+
+/* ============================================================ historial === */
+
+/** Historial del equipo: mantenciones (preventivas y correctivas) y calibraciones. */
+function HistorialEquipo({ equipoId, onCerrar }: { equipoId: string; onCerrar: () => void }) {
+  const [h, setH] = useState<any | null>(null);
+  useEffect(() => {
+    setH(null);
+    llamar<any>("GET", `/mantencion/equipos/${equipoId}/historial`).then(setH).catch((e) => toast.error(e.message));
+  }, [equipoId]);
+  return (
+    <section className="card">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+        <h3 style={{ margin: 0, fontSize: 15 }}>Historial · {h ? `${h.equipo.codigo} · ${h.equipo.nombre ?? ""}` : "…"}</h3>
+        <span style={{ flex: 1 }} />
+        <button className="btn outline sm" onClick={onCerrar}>Cerrar</button>
+      </div>
+      {!h ? (
+        <p style={{ margin: 0 }}>Cargando…</p>
+      ) : (
+        <>
+          <h4 style={{ margin: "6px 0", fontSize: 13.5 }}>Mantenciones</h4>
+          {!h.mantenciones.length ? (
+            <p style={{ margin: 0, color: "var(--muted)" }}>Sin mantenciones registradas.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table className="table">
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Hecha por</th><th>Resultado</th><th>Costo</th><th>Registró</th></tr></thead>
+                <tbody>
+                  {h.mantenciones.map((m: any) => (
+                    <tr key={m.id}>
+                      <td style={{ whiteSpace: "nowrap" }}>{fechaCl(m.fecha)}{m.fechaProgramada ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>programada {fechaCl(m.fechaProgramada)}</div> : null}</td>
+                      <td>{TIPO[m.tipo] ?? m.tipo}</td>
+                      <td>{m.descripcion ?? "—"}{m.observaciones ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{m.observaciones}</div> : null}</td>
+                      <td>{m.ejecutadaPor ?? "—"}</td>
+                      <td>{pillResultado(m.resultado)}</td>
+                      <td style={{ fontVariantNumeric: "tabular-nums" }}>{clp(m.costo)}</td>
+                      <td>{m.registradaPor ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+          <h4 style={{ margin: "12px 0 6px", fontSize: 13.5 }}>Calibraciones</h4>
+          {!h.calibraciones.length ? (
+            <p style={{ margin: 0, color: "var(--muted)" }}>Sin calibraciones registradas.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table className="table">
+                <thead><tr><th>Fecha</th><th>Hecha por</th><th>Resultado</th><th>Próxima</th><th>Certificado</th></tr></thead>
+                <tbody>
+                  {h.calibraciones.map((c: any) => (
+                    <tr key={c.id}>
+                      <td>{fechaCl(c.fecha)}</td>
+                      <td>{c.ejecutadaPor ?? "—"}</td>
+                      <td>{pillResultado(c.resultado)}</td>
+                      <td>{fechaCl(c.proximaFecha)}</td>
+                      <td>{c.certificado ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -303,6 +454,7 @@ function Calendario() {
 
 function Reporte() {
   const hoy = hoyChile();
+  const [historial, setHistorial] = useState<string | null>(null);
   const [rango, setRango] = useState({ desde: `${hoy.slice(0, 4)}-01-01`, hasta: hoy });
   const [r, setR] = useState<any | null>(null);
   const cargar = useCallback(async () => {
@@ -331,6 +483,7 @@ function Reporte() {
         </div>
         <button className="btn outline sm" onClick={() => descargarAdjunto(`/mantencion/reporte.xlsx${qs(rango)}`, `gestion_equipos_${rango.desde}_${rango.hasta}.xlsx`).catch((e) => toast.error(e.message))}>⬇ Excel</button>
       </section>
+      {historial && <HistorialEquipo equipoId={historial} onCerrar={() => setHistorial(null)} />}
       {r && (
         <>
           <div className="kpis" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
@@ -350,8 +503,8 @@ function Reporte() {
                 <tbody>
                   {r.equipos.map((e: any) => (
                     <tr key={e.id}>
-                      <td><b>{e.codigo}</b> {e.nombre}<div style={{ fontSize: 11.5, color: "var(--muted)" }}>{e.laboratorio ?? "común"}</div></td>
-                      <td>{e.estado}</td>
+                      <td><b>{e.codigo}</b> {e.nombre}<div style={{ fontSize: 11.5, color: "var(--muted)" }}>{e.laboratorio ?? "común"} · <button type="button" onClick={() => setHistorial(e.id)} style={{ background: "none", border: 0, padding: 0, color: "var(--accent)", cursor: "pointer", fontSize: 11.5 }}>Historial</button></div></td>
+                      <td>{pillEstadoEquipo(e)}</td>
                       <td><span className={`pill ${ESTADO[e.calibracion]?.pill ?? "gray"}`}>{ESTADO[e.calibracion]?.texto}</span><div style={{ fontSize: 11.5 }}>{fechaCl(e.proximaCalibracion)}</div></td>
                       <td><span className={`pill ${ESTADO[e.mantencion]?.pill ?? "gray"}`}>{ESTADO[e.mantencion]?.texto}</span><div style={{ fontSize: 11.5 }}>{fechaCl(e.proximaMantencion)}</div></td>
                       <td>{e.programadas}</td>

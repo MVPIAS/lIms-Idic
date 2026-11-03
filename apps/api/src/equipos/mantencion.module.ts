@@ -25,7 +25,7 @@ import { PrismaService } from "../common/prisma.service";
 import { libroXlsx } from "../common/xlsx-escritura";
 import { hoyCl } from "../ot/plazos";
 import { AlcanceService } from "../rbac/alcance.service";
-import { cumplimiento, diasEntre, erroresEjecucion, erroresPlan, estadoPlazo, ocurrencias, siguienteFecha, sumarDias } from "./plan-mantencion";
+import { cumplimiento, dejaFueraDeServicio, diasEntre, erroresEjecucion, etiquetaEstadoEquipo, erroresPlan, estadoPlazo, ocurrencias, siguienteFecha, sumarDias } from "./plan-mantencion";
 
 // ===========================================================================
 // Mantención preventiva y gestión de equipos (contrato §4.4.3): plan por
@@ -184,23 +184,27 @@ export class MantencionService {
       );
       await tx.$executeRawUnsafe(`UPDATE plan_mantencion SET proxima_fecha = $2::date, actualizado_en = now() WHERE id = $1::uuid`, id, proxima);
       // Un resultado no conforme deja el equipo fuera de servicio hasta revisarlo.
-      if (d.resultado === "no_conforme") await tx.$executeRawUnsafe(`UPDATE equipo SET estado = 'fuera_servicio' WHERE id = $1::uuid`, p.equipo_id);
+      if (dejaFueraDeServicio(d.resultado)) await tx.$executeRawUnsafe(`UPDATE equipo SET estado = 'fuera_servicio' WHERE id = $1::uuid`, p.equipo_id);
     });
     await this.recalcularEquipo(p.equipo_id);
-    return { proximaFecha: proxima, fueraDeServicio: d.resultado === "no_conforme" };
+    return { proximaFecha: proxima, fueraDeServicio: dejaFueraDeServicio(d.resultado) };
   }
 
-  /** Mantención correctiva (sin plan). */
+  /** Mantención correctiva (sin plan). No conforme: el equipo queda fuera de servicio, igual que en la preventiva. */
   async correctiva(req: any, equipoId: string, b: any) {
     await this.equipo(req, equipoId, "equipo.gestionar");
     const d = this.datosEjecucion(b);
     if (!d.descripcion) throw new BadRequestException("Describa la falla y lo que se hizo.");
-    await this.prisma.$executeRawUnsafe(
-      `INSERT INTO mantencion (tenant_id, equipo_id, tipo, fecha, ejecutada_por, descripcion, costo, resultado, observaciones, registrada_por)
-       VALUES ($1::uuid, $2::uuid, 'correctiva', $3::date, $4, $5, $6, $7, $8, $9::uuid)`,
-      tenantDe(req), equipoId, d.fecha, d.ejecutadaPor, d.descripcion, d.costo, d.resultado ?? "conforme", d.observaciones, req?.user?.sub ?? null,
-    );
-    return { ok: true };
+    const fuera = dejaFueraDeServicio(d.resultado);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `INSERT INTO mantencion (tenant_id, equipo_id, tipo, fecha, ejecutada_por, descripcion, costo, resultado, observaciones, registrada_por)
+         VALUES ($1::uuid, $2::uuid, 'correctiva', $3::date, $4, $5, $6, $7, $8, $9::uuid)`,
+        tenantDe(req), equipoId, d.fecha, d.ejecutadaPor, d.descripcion, d.costo, d.resultado ?? "conforme", d.observaciones, req?.user?.sub ?? null,
+      );
+      if (fuera) await tx.$executeRawUnsafe(`UPDATE equipo SET estado = 'fuera_servicio' WHERE id = $1::uuid`, equipoId);
+    });
+    return { ok: true, fueraDeServicio: fuera };
   }
 
   async historial(req: any, equipoId: string) {
@@ -297,6 +301,7 @@ export class MantencionService {
       const c = cumplimiento(ej.map((m) => ({ fecha: m.fecha, fechaProgramada: m.fecha_programada, costo: m.costo })), vencidosPorEquipo.get(e.id) ?? 0);
       return {
         ...e,
+        estadoTexto: etiquetaEstadoEquipo(e.estado),
         calibracion: estadoPlazo(e.proximaCalibracion, hoy),
         mantencion: estadoPlazo(e.proximaMantencion, hoy),
         correctivas: ej.filter((m) => m.tipo === "correctiva").length,
@@ -352,7 +357,7 @@ export class MantencionService {
         filas: [
           ["Código", "Equipo", "Lab.", "Estado", "Calibración", "Próx. calibración", "Mantención", "Próx. mantención", "Programadas", "A tiempo", "Atrasadas", "Pendientes", "Costo (CLP)"],
           ...r.equipos.map((e: any) => [
-            e.codigo, e.nombre, e.laboratorio ?? "", e.estado, ESTADO[e.calibracion], fecha(e.proximaCalibracion), ESTADO[e.mantencion], fecha(e.proximaMantencion),
+            e.codigo, e.nombre, e.laboratorio ?? "", e.estadoTexto, ESTADO[e.calibracion], fecha(e.proximaCalibracion), ESTADO[e.mantencion], fecha(e.proximaMantencion),
             e.programadas, e.aTiempo, e.atrasadas, e.pendientes, e.costo,
           ]),
         ],

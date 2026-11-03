@@ -6,6 +6,16 @@
 
 export const TIPOS_PLAN = ["preventiva", "verificacion", "limpieza"] as const;
 export const RESULTADOS_MANTENCION = ["conforme", "conforme_con_obs", "no_conforme"] as const;
+/** Etiquetas del estado del equipo (las mismas de la pantalla Equipos, apps/web/lib/equipos.ts). */
+export const ETIQUETA_ESTADO_EQUIPO: Record<string, string> = {
+  operativo: "Operativo",
+  en_calibracion: "En calibración",
+  fuera_servicio: "Fuera de servicio",
+  baja: "De baja",
+};
+export const etiquetaEstadoEquipo = (estado: string | null | undefined) => (estado ? ETIQUETA_ESTADO_EQUIPO[estado] ?? estado : "");
+/** Una mantención (preventiva o correctiva) con resultado no conforme deja el equipo fuera de servicio. */
+export const dejaFueraDeServicio = (resultado: string | null | undefined) => resultado === "no_conforme";
 /** Días de holgura para considerar «a tiempo» una mantención programada. */
 export const TOLERANCIA_DIAS = 7;
 

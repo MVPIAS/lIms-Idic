@@ -1,4 +1,4 @@
-import { cumplimiento, erroresEjecucion, erroresPlan, estadoPlazo, ocurrencias, siguienteFecha, sumarDias } from "./plan-mantencion";
+import { cumplimiento, dejaFueraDeServicio, erroresEjecucion, etiquetaEstadoEquipo, erroresPlan, estadoPlazo, ocurrencias, siguienteFecha, sumarDias } from "./plan-mantencion";
 
 describe("plan de mantención preventiva (§4.4.3)", () => {
   it("valida el plan y la ejecución", () => {
@@ -34,5 +34,21 @@ describe("plan de mantención preventiva (§4.4.3)", () => {
     );
     expect(c).toEqual({ programadas: 3, ejecutadas: 2, aTiempo: 1, atrasadas: 1, pendientes: 1, porcentaje: 33.3, costo: 1500 });
     expect(cumplimiento([], 0).porcentaje).toBeNull();
+  });
+});
+
+describe("estado del equipo en el reporte y tras una mantención", () => {
+  it("muestra la etiqueta, no el código interno", () => {
+    expect(etiquetaEstadoEquipo("fuera_servicio")).toBe("Fuera de servicio");
+    expect(etiquetaEstadoEquipo("en_calibracion")).toBe("En calibración");
+    expect(etiquetaEstadoEquipo("operativo")).toBe("Operativo");
+    expect(etiquetaEstadoEquipo("otro")).toBe("otro");
+    expect(etiquetaEstadoEquipo(null)).toBe("");
+  });
+
+  it("solo el resultado no conforme deja el equipo fuera de servicio", () => {
+    expect(dejaFueraDeServicio("no_conforme")).toBe(true);
+    expect(dejaFueraDeServicio("conforme_con_obs")).toBe(false);
+    expect(dejaFueraDeServicio(null)).toBe(false);
   });
 });
