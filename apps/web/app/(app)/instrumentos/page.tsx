@@ -46,6 +46,8 @@ interface Perfil {
 }
 interface Meta {
   puedeConfigurar: boolean;
+  /** Cargar archivos e historial (instrumento.importar + resultado.crear); Calidad solo configura. */
+  puedeImportar?: boolean;
   lecturaAutomatica: boolean;
   perfiles: Perfil[];
 }
@@ -98,7 +100,10 @@ export default function InstrumentosPage() {
   const [error, setError] = useState("");
   const cargar = useCallback(async () => {
     try {
-      setMeta(await llamar<Meta>("GET", "/instrumentos/perfiles"));
+      const m = await llamar<Meta>("GET", "/instrumentos/perfiles");
+      setMeta(m);
+      // Quien solo configura perfiles (Calidad) entra directo a «Perfiles de instrumento».
+      if (m.puedeImportar === false) setPestana("perfiles");
       setError("");
     } catch (e: any) {
       setError(e.message);
@@ -122,13 +127,16 @@ export default function InstrumentosPage() {
         </div>
       </div>
       {error && <div className="alert warn" role="alert">{error}</div>}
+      {meta?.puedeImportar === false && (
+        <div className="alert info" role="note">Usted configura los perfiles de los instrumentos; la carga de archivos y su historial son de quien captura resultados.</div>
+      )}
       <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
-        {tab("cargar", "Cargar archivo")}
-        {tab("historial", "Historial")}
+        {meta?.puedeImportar !== false && tab("cargar", "Cargar archivo")}
+        {meta?.puedeImportar !== false && tab("historial", "Historial")}
         {tab("perfiles", "Perfiles de instrumento")}
       </div>
-      {meta && pestana === "cargar" && <Cargar meta={meta} />}
-      {meta && pestana === "historial" && <Historial meta={meta} />}
+      {meta && meta.puedeImportar !== false && pestana === "cargar" && <Cargar meta={meta} />}
+      {meta && meta.puedeImportar !== false && pestana === "historial" && <Historial meta={meta} />}
       {meta && pestana === "perfiles" && <Perfiles meta={meta} onCambio={cargar} />}
     </div>
   );
@@ -412,9 +420,14 @@ function FormularioPerfil({ inicial, onListo, onCancelar }: { inicial?: Perfil; 
   const [equipos, setEquipos] = useState<{ id: string; codigo: string; nombre: string | null; descripcion: string | null }[]>([]);
   const [usuarios, setUsuarios] = useState<{ id: string; nombre: string; username: string }[]>([]);
   useEffect(() => {
-    llamar<any>("GET", "/ot/laboratorios").then((r) => setUnidades(Array.isArray(r) ? r : r?.data ?? [])).catch(() => undefined);
-    llamar<any>("GET", "/equipos?limit=200").then((r) => setEquipos(Array.isArray(r) ? r : r?.data ?? [])).catch(() => undefined);
-    llamar<any[]>("GET", "/agenda/usuarios").then(setUsuarios).catch(() => undefined);
+    // Opciones según el alcance de quien configura (no exige ver OT, equipos ni agenda).
+    llamar<any>("GET", "/instrumentos/perfiles/opciones")
+      .then((r) => {
+        setUnidades(r?.unidades ?? []);
+        setEquipos(r?.equipos ?? []);
+        setUsuarios(r?.usuarios ?? []);
+      })
+      .catch((e) => toast.error(e.message));
   }, []);
   const [v, setV] = useState({
     nombre: inicial?.nombre ?? "",
@@ -471,6 +484,7 @@ function FormularioPerfil({ inicial, onListo, onCancelar }: { inicial?: Perfil; 
       <h2 style={{ marginTop: 0 }}>{inicial ? `Perfil «${inicial.nombre}»` : "Nuevo perfil de instrumento"}</h2>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
         <div className="field" style={{ gridColumn: "span 2" }}><label htmlFor="pf-nombre">Nombre</label><input id="pf-nombre" required maxLength={120} value={v.nombre} onChange={(e) => set("nombre", e.target.value)} placeholder="Ej.: ICP-OES · exportación de resultados" /></div>
+        <div className="field" style={{ gridColumn: "1 / -1" }}><label htmlFor="pf-desc">Descripción (opcional)</label><input id="pf-desc" maxLength={500} value={v.descripcion} onChange={(e) => set("descripcion", e.target.value)} placeholder="Ej.: archivo que exporta el software del equipo al terminar la corrida" /></div>
         <div className="field">
           <label htmlFor="pf-unidad">Laboratorio</label>
           <select id="pf-unidad" value={v.unidadId} onChange={(e) => set("unidadId", e.target.value)}>

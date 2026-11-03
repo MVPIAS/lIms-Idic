@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { fecha as fechaFmt, hoyISO } from "@/lib/format";
 import { validarFormulario } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
+import { ESTADOS_EQUIPO, ESTADO_EQUIPO_META } from "@/lib/equipos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -17,12 +18,8 @@ const auth = () => ({
 // usarse para ensayar. Aquí eso se hace visible (badge rojo + KPI + aviso en el
 // detalle); el bloqueo efectivo lo aplica la API en EquiposService.verificarApto().
 
-const ESTADOS: { key: string; label: string; pill: string }[] = [
-  { key: "operativo", label: "Operativo", pill: "green" },
-  { key: "en_calibracion", label: "En calibración", pill: "amber" },
-  { key: "fuera_servicio", label: "Fuera de servicio", pill: "red" },
-];
-const ESTADO_META = Object.fromEntries(ESTADOS.map((e) => [e.key, e]));
+const ESTADOS = ESTADOS_EQUIPO;
+const ESTADO_META = ESTADO_EQUIPO_META;
 
 const RESULTADOS: { key: string; label: string; pill: string }[] = [
   { key: "conforme", label: "Conforme", pill: "green" },
