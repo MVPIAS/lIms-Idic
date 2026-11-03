@@ -32,18 +32,22 @@ const CONS_VACIO = {
   tipo: "",
   unidadMedida: "",
   stockMinimo: "",
+  unidadCompra: "",
+  factorConversion: "",
 };
 const LOTE_VACIO = {
   numeroLote: "",
   fechaRecepcion: "",
   fechaVencimiento: "",
   cantidadInicial: "",
+  enUnidadCompra: false,
 };
 const MOV_VACIO = {
   tipo: "consumo",
   loteId: "",
   cantidad: "",
   motivo: "",
+  enUnidadCompra: false,
 };
 
 function BadgeLote({ l }: { l: any }) {
@@ -191,6 +195,8 @@ export default function ConsumiblesPage() {
       tipo: r.tipo ?? "",
       unidadMedida: r.unidad_medida ?? "",
       stockMinimo: r.stock_minimo ?? "",
+      unidadCompra: r.unidad_compra ?? "",
+      factorConversion: r.factor_conversion ?? "",
     });
     setShowCons(true);
   }
@@ -205,10 +211,17 @@ export default function ConsumiblesPage() {
       f,
     );
     if (f.stockMinimo !== "" && !esMoneda(String(f.stockMinimo))) v.stockMinimo = "El stock mínimo debe ser un número ≥ 0.";
+    if (f.factorConversion !== "" && !(Number(f.factorConversion) > 0)) v.factorConversion = "El factor debe ser un número mayor que 0.";
+    if (f.factorConversion !== "" && !String(f.unidadCompra).trim()) v.unidadCompra = "Indique el envase (frasco, caja…).";
     setErrs(v);
     if (Object.keys(v).length) return;
     try {
-      const payload = { ...f, stockMinimo: f.stockMinimo === "" ? null : Number(f.stockMinimo) };
+      const payload = {
+        ...f,
+        stockMinimo: f.stockMinimo === "" ? null : Number(f.stockMinimo),
+        unidadCompra: String(f.unidadCompra).trim() || null,
+        factorConversion: f.factorConversion === "" ? null : Number(f.factorConversion),
+      };
       const url = editId ? `${API}/consumibles/${editId}` : `${API}/consumibles`;
       const res = await fetch(url, {
         method: editId ? "PATCH" : "POST",
@@ -282,6 +295,7 @@ export default function ConsumiblesPage() {
         fechaRecepcion: lf.fechaRecepcion || null,
         fechaVencimiento: lf.fechaVencimiento || null,
         cantidadInicial: Number(lf.cantidadInicial || 0),
+        enUnidadCompra: lf.enUnidadCompra,
       };
       const res = await fetch(`${API}/consumibles/lotes`, {
         method: "POST",
@@ -322,6 +336,7 @@ export default function ConsumiblesPage() {
         tipo: mf.tipo,
         cantidad: Number(mf.cantidad),
         motivo: mf.motivo || null,
+        enUnidadCompra: mf.tipo === "entrada" && mf.enUnidadCompra,
       };
       if (mf.loteId) payload.loteId = mf.loteId;
       else payload.consumibleId = detalle.id; // consumo FIFO por caducidad
@@ -425,6 +440,17 @@ export default function ConsumiblesPage() {
               <input type="number" inputMode="decimal" step="any" min="0" value={f.stockMinimo} onChange={(e) => setF({ ...f, stockMinimo: e.target.value })} />
               {errs.stockMinimo && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.stockMinimo}</small>}
             </div>
+            <div className="field">
+              <label>Se compra en (envase)</label>
+              <input placeholder="frasco 500 mL, caja 100 viales" maxLength={30} value={f.unidadCompra} onChange={(e) => setF({ ...f, unidadCompra: e.target.value })} />
+              {errs.unidadCompra && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.unidadCompra}</small>}
+            </div>
+            <div className="field">
+              <label>{f.unidadMedida || "Unidades"} por envase</label>
+              <input type="number" inputMode="decimal" step="any" min="0" placeholder="Ej.: 500" value={f.factorConversion} onChange={(e) => setF({ ...f, factorConversion: e.target.value })} />
+              {errs.factorConversion && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.factorConversion}</small>}
+              <small style={{ color: "var(--muted)", fontSize: 11 }}>El stock se lleva en {f.unidadMedida || "la unidad de medida"}; las entradas pueden registrarse en envases.</small>
+            </div>
           </div>
           <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
             <button className="btn primary sm">{editId ? "Guardar cambios" : "Crear consumible"}</button>
@@ -458,6 +484,11 @@ export default function ConsumiblesPage() {
               {detalle.codigo} · {detalle.nombre}
             </h2>
             <span className="pill blue">Stock {fmt(detalle.stock_total)} {detalle.unidad_medida ?? ""}</span>
+            {Number(detalle.factor_conversion) > 0 && (
+              <span className="pill gray" title={`1 ${detalle.unidad_compra} = ${fmt(detalle.factor_conversion)} ${detalle.unidad_medida ?? ""}`}>
+                ≈ {Math.floor((Number(detalle.stock_total) + 1e-9) / Number(detalle.factor_conversion))} {detalle.unidad_compra}
+              </span>
+            )}
             <div className="spacer" style={{ flex: 1 }}></div>
             <button className="btn sm" onClick={() => abrirMov("")}>Registrar movimiento</button>
             <button className="btn sm" onClick={() => setShowLote((s) => !s)}>{showLote ? "Cerrar" : "＋ Nuevo lote"}</button>
@@ -477,6 +508,12 @@ export default function ConsumiblesPage() {
                   <label>Cantidad inicial (stock) <span className="req">*</span></label>
                   <input required type="number" inputMode="decimal" step="any" min="0" value={lf.cantidadInicial} onChange={(e) => setLf({ ...lf, cantidadInicial: e.target.value })} />
                   {errsLote.cantidadInicial && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsLote.cantidadInicial}</small>}
+                  {detalle?.factor_conversion && (
+                    <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+                      <input type="checkbox" checked={lf.enUnidadCompra} onChange={(e) => setLf({ ...lf, enUnidadCompra: e.target.checked })} />
+                      En envases ({detalle.unidad_compra}: {fmt(detalle.factor_conversion)} {detalle.unidad_medida ?? ""} c/u)
+                    </label>
+                  )}
                 </div>
                 <div className="field">
                   <label>Fecha recepción</label>
@@ -554,6 +591,12 @@ export default function ConsumiblesPage() {
                 <label>Cantidad {mf.tipo === "ajuste" && <span style={{ color: "var(--muted)" }}>(+ suma / − resta)</span>}</label>
                 <input required type="number" inputMode="decimal" step="any" value={mf.cantidad} onChange={(e) => setMf({ ...mf, cantidad: e.target.value })} />
                 {errsMov.cantidad && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsMov.cantidad}</small>}
+                {mf.tipo === "entrada" && detalle.factor_conversion && (
+                  <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+                    <input type="checkbox" checked={mf.enUnidadCompra} onChange={(e) => setMf({ ...mf, enUnidadCompra: e.target.checked })} />
+                    En envases ({detalle.unidad_compra}: {fmt(detalle.factor_conversion)} {detalle.unidad_medida ?? ""} c/u)
+                  </label>
+                )}
               </div>
               <div className="field" style={{ gridColumn: "1 / -1" }}>
                 <label>Motivo</label>

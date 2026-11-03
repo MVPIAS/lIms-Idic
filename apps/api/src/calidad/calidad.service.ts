@@ -9,6 +9,11 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
+import { libroXlsx } from "../common/xlsx-escritura";
+import { TablaError, leerTabla, leerXlsx } from "../common/tabla-archivo";
+import { validarFormula } from "../common/formula";
+import { hoyCl } from "../ot/plazos";
+import { filasDePlanilla } from "./formula-excel";
 import { codigoAlicuota, erroresAcreditacion, erroresMovimientoAlicuota, planMovimientoAlicuota, type MovimientoAlicuota } from "./reglas-calidad";
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
@@ -139,6 +144,25 @@ export class CalidadService {
     return m;
   }
 
+  /** Escritura sobre un método: solo de un laboratorio del alcance del usuario (o común). */
+  private async metodoEditable(req: any, metodoId: string) {
+    const m = await this.metodo(req, metodoId);
+    const unidades = await this.alcance.filtroUnidades(req, "catalogo.gestionar");
+    if (!unidades) return m;
+    const [r] = await this.prisma.$queryRawUnsafe<{ unidades: string[] }[]>(
+      `SELECT COALESCE(array_agg(u.id::text), '{}') AS unidades
+         FROM cat_metodo cm JOIN cat_ensayo e ON e.id = cm.ensayo_id JOIN cat_familia f ON f.id = e.familia_id
+         JOIN unidad u ON u.tenant_id = f.tenant_id
+                      AND f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))
+        WHERE cm.id = $1::uuid`,
+      metodoId,
+    );
+    const del = r?.unidades ?? [];
+    if (del.length && !del.some((u) => unidades.includes(u)))
+      throw new ForbiddenException(`El método ${m.codigo} es de un laboratorio que usted no tiene asignado.`);
+    return m;
+  }
+
   async poeDeMetodo(req: any, metodoId: string) {
     const m = await this.metodo(req, metodoId);
     const poe = await this.prisma.$queryRawUnsafe<any[]>(
@@ -170,7 +194,7 @@ export class CalidadService {
   }
 
   async vincularPoe(req: any, metodoId: string, body: any) {
-    await this.metodo(req, metodoId);
+    await this.metodoEditable(req, metodoId);
     const documentoId = texto(body?.documentoId, 40);
     if (!documentoId) throw new BadRequestException("Elija el documento del POE.");
     const [d] = await this.prisma.$queryRawUnsafe<any[]>(
@@ -196,14 +220,14 @@ export class CalidadService {
   }
 
   async desvincularPoe(req: any, metodoId: string, documentoId: string) {
-    await this.metodo(req, metodoId);
+    await this.metodoEditable(req, metodoId);
     await this.prisma.$executeRawUnsafe(`DELETE FROM cat_metodo_poe WHERE cat_metodo_id = $1::uuid AND documento_id = $2::uuid`, metodoId, documentoId);
     return this.poeDeMetodo(req, metodoId);
   }
 
   /** Margen de advertencia propio del método (vacío = el general; 0 = sin advertencias). */
   async margenMetodo(req: any, metodoId: string, body: any) {
-    await this.metodo(req, metodoId);
+    await this.metodoEditable(req, metodoId);
     const v = body?.margenPct;
     const n = v === null || v === "" || v === undefined ? null : Number(String(v).replace(",", "."));
     if (n != null && !(Number.isFinite(n) && n >= 0 && n <= 50)) throw new BadRequestException("El margen de advertencia va de 0 a 50 %.");
@@ -314,6 +338,190 @@ export class CalidadService {
     if (!a) throw new NotFoundException("Acreditación no encontrada.");
     await this.prisma.$executeRawUnsafe(`DELETE FROM acreditacion_alcance WHERE acreditacion_id = $1::uuid AND cat_metodo_id = $2::uuid`, id, metodoId);
     return { ok: true };
+  }
+
+  /* ------------------------------------------- consumo del método (§4.4.5) --- */
+
+  async consumiblesDeMetodo(req: any, metodoId: string) {
+    await this.metodo(req, metodoId);
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT mc.consumible_id AS "consumibleId", c.codigo, c.nombre, c.unidad_medida AS unidad, mc.cantidad::float AS cantidad, mc.por, mc.nota,
+              COALESCE((SELECT SUM(l.cantidad_actual) FROM lote_consumible l
+                         WHERE l.consumible_id = c.id AND l.cantidad_actual > 0 AND (l.fecha_vencimiento IS NULL OR l.fecha_vencimiento >= $2::date)), 0)::float AS stock
+         FROM cat_metodo_consumible mc JOIN consumible c ON c.id = mc.consumible_id
+        WHERE mc.cat_metodo_id = $1::uuid ORDER BY c.codigo`,
+      metodoId,
+      hoyCl(),
+    );
+  }
+
+  async buscarConsumibles(req: any, q?: string) {
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, codigo, nombre, unidad_medida AS unidad, unidad_compra AS "unidadCompra", factor_conversion::float AS "factorConversion"
+         FROM consumible WHERE tenant_id = $1::uuid AND activo IS NOT FALSE
+          AND ($2::text IS NULL OR codigo ILIKE '%' || $2 || '%' OR nombre ILIKE '%' || $2 || '%')
+        ORDER BY codigo LIMIT 30`,
+      tenantDe(req),
+      texto(q, 80),
+    );
+  }
+
+  async agregarConsumibleMetodo(req: any, metodoId: string, body: any) {
+    await this.metodoEditable(req, metodoId);
+    const consumibleId = texto(body?.consumibleId, 40);
+    const cantidad = Number(String(body?.cantidad ?? "").replace(",", "."));
+    const por = body?.por === "replica" ? "replica" : "ensayo";
+    if (!consumibleId) throw new BadRequestException("Elija el consumible.");
+    if (!(Number.isFinite(cantidad) && cantidad > 0)) throw new BadRequestException("La cantidad por determinación debe ser mayor que cero.");
+    const [c] = await this.prisma.$queryRawUnsafe<any[]>(`SELECT id FROM consumible WHERE id = $1::uuid AND tenant_id = $2::uuid`, consumibleId, tenantDe(req));
+    if (!c) throw new NotFoundException("Consumible no encontrado.");
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO cat_metodo_consumible (tenant_id, cat_metodo_id, consumible_id, cantidad, por, nota, creado_por)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::uuid)
+       ON CONFLICT (cat_metodo_id, consumible_id) DO UPDATE SET cantidad = EXCLUDED.cantidad, por = EXCLUDED.por, nota = EXCLUDED.nota`,
+      tenantDe(req),
+      metodoId,
+      consumibleId,
+      cantidad,
+      por,
+      texto(body?.nota, 200),
+      usuarioDe(req),
+    );
+    return this.consumiblesDeMetodo(req, metodoId);
+  }
+
+  async quitarConsumibleMetodo(req: any, metodoId: string, consumibleId: string) {
+    await this.metodoEditable(req, metodoId);
+    await this.prisma.$executeRawUnsafe(`DELETE FROM cat_metodo_consumible WHERE cat_metodo_id = $1::uuid AND consumible_id = $2::uuid`, metodoId, consumibleId);
+    return this.consumiblesDeMetodo(req, metodoId);
+  }
+
+  /* ------------------------------------------ fórmulas desde Excel (§4.3.4) --- */
+
+  plantillaFormulas(): Buffer {
+    return libroXlsx([
+      {
+        nombre: "Fórmulas",
+        anchos: [12, 14, 34, 16, 18, 16],
+        filas: [
+          ["Método", "Analito", "Fórmula", "C1 masa (g)", "C2 volumen (mL)", "C3 normalidad"],
+          ["403", "PROT", "(C2*C3*1,4*6,25)/C1", 1, 12.3, 0.1],
+        ],
+      },
+      {
+        nombre: "Instrucciones",
+        anchos: [110],
+        filas: [
+          ["Una fila por analito: código del método, código del analito y su fórmula."],
+          ["La fórmula puede ser una fórmula de Excel de la misma fila (=(E2*F2*1,4)/D2) o un texto con las variables C1, C2… del método."],
+          ["Las columnas desde la D nombran las variables en su cabecera (C1, C2… o un nombre de una palabra); sus valores sirven solo para probar la fórmula en Excel."],
+          ["Funciones: PROMEDIO/AVERAGE, SUMA/SUM, MIN, MAX, ABS, RAIZ/SQRT, LOG, LN, POTENCIA/POWER, REDONDEAR/ROUND."],
+          ["Al subirla, el LIMS muestra la vista previa: nada cambia en el catálogo hasta aplicar."],
+        ],
+      },
+    ]);
+  }
+
+  async vistaPreviaFormulas(req: any, archivo: { originalname: string; buffer: Buffer } | undefined) {
+    if (!archivo?.buffer?.length) throw new BadRequestException("Adjunte la planilla (.xlsx o .csv).");
+    let filas: string[][];
+    try {
+      const esZip = archivo.buffer.length > 4 && archivo.buffer.readUInt32LE(0) === 0x04034b50;
+      filas = esZip ? leerXlsx(archivo.buffer, { formulas: true }) : leerTabla(archivo.originalname, archivo.buffer);
+    } catch (e: any) {
+      if (e instanceof TablaError) throw new BadRequestException(e.message);
+      throw new BadRequestException("No se pudo leer la planilla: guárdela como .xlsx o .csv.");
+    }
+    const p = filasDePlanilla(filas.map((f) => f.map((c) => String(c ?? "").trim())));
+    if (p.error) throw new BadRequestException(p.error);
+    const unidades = await this.alcance.filtroUnidades(req, "catalogo.gestionar");
+    const salida: any[] = [];
+    for (const f of p.filas) {
+      const base = { fila: f.fila, metodo: f.metodo, analito: f.analito, formulaExcel: f.formulaExcel, formula: f.formula, analitoId: null as string | null, formulaActual: null as string | null };
+      if (f.error) {
+        salida.push({ ...base, estado: "error", detalle: f.error });
+        continue;
+      }
+      const [a] = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT a.id, a.formula, a.nombre,
+                COALESCE((SELECT array_agg(u.id::text) FROM cat_ensayo e JOIN cat_familia fa ON fa.id = e.familia_id
+                           JOIN unidad u ON u.tenant_id = fa.tenant_id
+                      AND fa.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))
+                          WHERE e.id = cm.ensayo_id), '{}') AS unidades
+           FROM cat_metodo cm JOIN cat_analito a ON a.metodo_id = cm.id AND a.deleted_at IS NULL
+          WHERE cm.tenant_id = $1::uuid AND cm.deleted_at IS NULL AND upper(cm.codigo) = upper($2) AND upper(a.codigo) = upper($3)
+          LIMIT 1`,
+        tenantDe(req),
+        f.metodo,
+        f.analito,
+      );
+      if (!a) {
+        salida.push({ ...base, estado: "no_encontrado", detalle: `No hay un analito ${f.analito} en el método ${f.metodo}.` });
+        continue;
+      }
+      const ok = { ...base, analitoId: a.id, formulaActual: a.formula ?? null, analitoNombre: a.nombre };
+      if (unidades && a.unidades.length && !a.unidades.some((u: string) => unidades.includes(u)))
+        salida.push({ ...ok, estado: "fuera_alcance", detalle: "El método es de un laboratorio que usted no tiene asignado." });
+      else if ((a.formula ?? "").replace(/\s+/g, "") === f.formula) salida.push({ ...ok, estado: "sin_cambios", detalle: null });
+      else salida.push({ ...ok, estado: "listo", detalle: a.formula ? "Reemplaza la fórmula actual." : "Fórmula nueva." });
+    }
+    const resumen: Record<string, number> = {};
+    for (const x of salida) resumen[x.estado] = (resumen[x.estado] ?? 0) + 1;
+    return { archivo: archivo.originalname, resumen, filas: salida };
+  }
+
+  /** Guarda las fórmulas elegidas de la vista previa (se vuelven a validar y quedan en la auditoría). */
+  async aplicarFormulas(req: any, body: any) {
+    const filas: { analitoId: string; formula: string }[] = Array.isArray(body?.filas) ? body.filas : [];
+    if (!filas.length) throw new BadRequestException("No hay fórmulas para aplicar.");
+    const motivo = motivoValido(body?.motivo);
+    let aplicadas = 0;
+    const errores: { analitoId: string; error: string }[] = [];
+    for (const f of filas.slice(0, 500)) {
+      const v = validarFormula(String(f?.formula ?? ""));
+      if (!v.ok) {
+        errores.push({ analitoId: f?.analitoId, error: v.error ?? "Fórmula no válida." });
+        continue;
+      }
+      const [a] = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT a.id, a.metodo_id, a.formula FROM cat_analito a JOIN cat_metodo cm ON cm.id = a.metodo_id
+          WHERE a.id = $1::uuid AND cm.tenant_id = $2::uuid AND a.deleted_at IS NULL`,
+        f.analitoId,
+        tenantDe(req),
+      );
+      if (!a) {
+        errores.push({ analitoId: f.analitoId, error: "Analito no encontrado." });
+        continue;
+      }
+      try {
+        await this.metodoEditable(req, a.metodo_id);
+      } catch (e: any) {
+        errores.push({ analitoId: f.analitoId, error: e.message });
+        continue;
+      }
+      const nueva = String(f.formula).trim();
+      await this.prisma.$executeRawUnsafe(`UPDATE cat_analito SET formula = $2 WHERE id = $1::uuid`, a.id, nueva);
+      await this.auditar(req, "formula_importada", "cat_analito", a.id, { anterior: a.formula ?? null, nueva, motivo });
+      aplicadas++;
+    }
+    return { aplicadas, errores };
+  }
+
+  private async auditar(req: any, accion: string, entidad: string, id: string, detalle: unknown) {
+    await this.prisma
+      .$executeRawUnsafe(
+        `INSERT INTO audit_log (tenant_id, usuario_id, username, accion, entidad_tipo, entidad_id, diff, motivo)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::uuid, $7::jsonb, $8)`,
+        tenantDe(req),
+        usuarioDe(req),
+        req?.user?.username ?? null,
+        accion,
+        entidad,
+        id,
+        JSON.stringify(detalle),
+        (detalle as any)?.motivo ?? null,
+      )
+      .catch(() => undefined);
   }
 
   /* -------------------------------------------------------------- alícuotas --- */

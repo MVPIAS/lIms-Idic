@@ -40,6 +40,7 @@ import { evaluarReglas, leerReglas, modoReglas, textoRegla, type AvisoAceptacion
 import { leerCondicion2, leerPlanClases } from "../laboratorio/requisito-compuesto";
 import { aplicarEtAMuestra } from "../especificacion-tecnica/aplicar-et";
 import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
+import { descontarPorCaptura, faltantesDeCaptura, leerConfigConsumo } from "../consumibles/consumo-automatico";
 import { advertenciaDeCaptura, calidadDeResultados, leerConfigResultados, reanalisisAbierto, trasCaptura } from "../calidad/reanalisis";
 import { criterioIndeterminado, leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado } from "../laboratorio/veredicto";
 import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
@@ -1080,6 +1081,23 @@ export class PuenteAnalisisService {
       calc,
     );
 
+    // Consumibles del método (contrato §4.4.5): la primera captura (o la repetición de un
+    // re-análisis) descuenta su consumo; con «impedir», sin stock no se captura.
+    const cfgConsumo = await leerConfigConsumo(this.prisma as any, tenantId);
+    const consume = cfgConsumo.automatico && (!corrige || !!reanalisis);
+    const determinaciones = Math.max(1, calc.replicas.length || (Array.isArray(calc.lecturas) ? calc.lecturas.length : 0));
+    if (consume && cfgConsumo.sinStock === "impedir") {
+      const faltan = await faltantesDeCaptura(this.prisma as any, { tenantId, catMetodoId: resultado.catMetodoId ?? null, determinaciones });
+      if (faltan.length)
+        throw new ConflictException({
+          statusCode: 409,
+          error: "Stock insuficiente",
+          codigo: "SIN_STOCK",
+          message: `No hay stock vigente para este ensayo: ${faltan.map((f) => `${f.consumible} (necesita ${f.necesario}${f.unidad ? ` ${f.unidad}` : ""}, hay ${f.disponible})`).join("; ")}. Registre la entrada del lote en Consumibles.`,
+          faltantes: faltan,
+        });
+    }
+
     const actualizado = await conTraza(
       this.prisma,
       { usuarioId: req?.user?.sub, motivo: motivo ?? (resultado.estado === "devuelto" ? resultado.motivoDevolucion : null), origen: corrige ? "correccion" : "captura" },
@@ -1136,11 +1154,24 @@ export class PuenteAnalisisService {
       valor: { numerico: calc.resultadoFinal ?? calc.valorNumerico, texto: calc.valorTexto },
       abierto: reanalisis,
     });
+    const consumos = consume
+      ? await descontarPorCaptura(this.prisma as any, {
+          tenantId,
+          resultadoId: id,
+          catMetodoId: resultado.catMetodoId ?? null,
+          muestraId: resultado.muestraId,
+          determinaciones,
+          usuarioId: req?.user?.sub ?? null,
+          referencia: `${actualizado.catMetodo?.codigo ?? "ensayo"} · resultado ${id.slice(0, 8)}`,
+          repeticion: !!reanalisis,
+        })
+      : null;
     return {
       ...actualizado,
       veredictoMuestra: veredictoDeLaMuestra,
       explicacion: calc.explicacion,
       avisosAceptacion: avisos.length ? avisos : null,
+      consumos: consumos && (consumos.descontados.length || consumos.faltantes.length) ? consumos : null,
       advertencia: !!advertencia,
       advertenciaMotivo: advertencia,
       reanalisis: re.reanalisis,

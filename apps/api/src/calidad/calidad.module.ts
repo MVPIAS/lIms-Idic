@@ -1,8 +1,11 @@
-import { Body, Controller, Delete, Get, Module, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Module, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { MAX_BYTES_ARCHIVO } from "../common/tabla-archivo";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
+import { RecursoDeLaboratorio, SinAlcanceDeEscritura } from "../rbac/alcance-catalogo.guard";
 import { CalidadService } from "./calidad.service";
 
 // ===========================================================================
@@ -59,21 +62,75 @@ export class CalidadController {
   }
 
   @Post("metodos/:id/poe")
+  @RecursoDeLaboratorio("cat_metodo")
   @RequierePermiso("catalogo.gestionar")
   vincular(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
     return this.c.vincularPoe(req, id, b);
   }
 
   @Delete("metodos/:id/poe/:documentoId")
+  @RecursoDeLaboratorio("cat_metodo")
   @RequierePermiso("catalogo.gestionar")
   desvincular(@Param("id", UUID) id: string, @Param("documentoId", UUID) documentoId: string, @Req() req: any) {
     return this.c.desvincularPoe(req, id, documentoId);
   }
 
   @Patch("metodos/:id/margen")
+  @RecursoDeLaboratorio("cat_metodo")
   @RequierePermiso("catalogo.gestionar")
   margen(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
     return this.c.margenMetodo(req, id, b);
+  }
+
+  /* consumo del método (§4.4.5) */
+  @Get("consumibles")
+  @RequierePermiso("resultado.ver")
+  consumibles(@Query("q") q: string | undefined, @Req() req: any) {
+    return this.c.buscarConsumibles(req, q);
+  }
+
+  @Get("metodos/:id/consumibles")
+  @RequierePermiso("resultado.ver")
+  consumiblesMetodo(@Param("id", UUID) id: string, @Req() req: any) {
+    return this.c.consumiblesDeMetodo(req, id);
+  }
+
+  @Post("metodos/:id/consumibles")
+  @RecursoDeLaboratorio("cat_metodo")
+  @RequierePermiso("catalogo.gestionar")
+  agregarConsumible(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
+    return this.c.agregarConsumibleMetodo(req, id, b);
+  }
+
+  @Delete("metodos/:id/consumibles/:consumibleId")
+  @RecursoDeLaboratorio("cat_metodo")
+  @RequierePermiso("catalogo.gestionar")
+  quitarConsumible(@Param("id", UUID) id: string, @Param("consumibleId", UUID) consumibleId: string, @Req() req: any) {
+    return this.c.quitarConsumibleMetodo(req, id, consumibleId);
+  }
+
+  /* fórmulas desde Excel (§4.3.4) */
+  @Get("formulas/plantilla.xlsx")
+  @RequierePermiso("catalogo.gestionar")
+  plantilla(@Res() res: any) {
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="plantilla_formulas_lims.xlsx"`);
+    res.send(this.c.plantillaFormulas());
+  }
+
+  @Post("formulas/vista-previa")
+  @SinAlcanceDeEscritura() // el servicio exige el laboratorio de cada método
+  @RequierePermiso("catalogo.gestionar")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ARCHIVO, files: 1, fields: 4 } }))
+  vistaPrevia(@UploadedFile() archivo: any, @Req() req: any) {
+    return this.c.vistaPreviaFormulas(req, archivo);
+  }
+
+  @Post("formulas/aplicar")
+  @SinAlcanceDeEscritura() // el servicio exige el laboratorio de cada método
+  @RequierePermiso("catalogo.gestionar")
+  aplicarFormulas(@Body() b: any, @Req() req: any) {
+    return this.c.aplicarFormulas(req, b);
   }
 
   /* acreditaciones ISO/IEC 17025 */

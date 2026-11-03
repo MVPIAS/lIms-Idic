@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   ConflictException,
   Controller,
@@ -22,6 +23,7 @@ import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { diaChile } from "../common/fecha-chile";
+import { ConversionError, aUnidadConsumo } from "./conversion";
 
 // ---------------------------------------------------------------------------
 // Módulo CONSUMIBLES · inventario por lotes + KARDEX de movimientos.
@@ -71,6 +73,9 @@ const CrearConsumibleSchema = z.object({
   proveedorId: optUuid(),
   stockMinimo: optNum(),
   activo: z.preprocess(emptyToNull, z.coerce.boolean().optional()),
+  // §4.4.4: se compra en envases (unidadCompra) y se consume en unidadMedida.
+  unidadCompra: optStr(30),
+  factorConversion: z.preprocess(emptyToNull, z.coerce.number().positive().nullable().optional()),
 });
 const ActualizarConsumibleSchema = CrearConsumibleSchema.partial();
 
@@ -80,6 +85,8 @@ const CrearLoteSchema = z.object({
   fechaRecepcion: optDate(),
   fechaVencimiento: optDate(),
   cantidadInicial: z.coerce.number().nonnegative(),
+  /** La cantidad viene en unidades de compra (envases): se multiplica por el factor. */
+  enUnidadCompra: z.preprocess(emptyToNull, z.coerce.boolean().optional()),
   ubicacionId: optUuid(),
   estado: optStr(30),
 });
@@ -102,6 +109,8 @@ const MovimientoSchema = z
     muestraId: optUuid(),
     catMetodoId: optUuid(),
     motivo: optStr(2000),
+    /** La cantidad viene en unidades de compra (envases): se multiplica por el factor (§4.4.4). */
+    enUnidadCompra: z.preprocess(emptyToNull, z.coerce.boolean().optional()),
   })
   .refine((d) => d.loteId || d.consumibleId, {
     message: "Se requiere loteId o consumibleId",
@@ -112,6 +121,16 @@ const MovimientoSchema = z
   .refine((d) => d.tipo !== "ajuste" || d.cantidad !== 0, {
     message: "El ajuste no puede ser 0",
   });
+
+/** Conversión a unidad de consumo; un consumible sin factor da 400 con el motivo. */
+function convertir(cantidad: number, factor: unknown, enUnidadCompra: boolean | null | undefined): number {
+  try {
+    return aUnidadConsumo(cantidad, factor as any, enUnidadCompra);
+  } catch (e) {
+    if (e instanceof ConversionError) throw new BadRequestException(e.message);
+    throw e;
+  }
+}
 
 /* ========================================================================== */
 /* ConsumiblesService                                                          */
@@ -243,8 +262,8 @@ export class ConsumiblesService {
     try {
       const rows = await this.prisma.$queryRawUnsafe<any[]>(
         `INSERT INTO consumible
-           (tenant_id, codigo, nombre, tipo, unidad_medida, proveedor_id, stock_minimo, activo)
-         VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8)
+           (tenant_id, codigo, nombre, tipo, unidad_medida, proveedor_id, stock_minimo, activo, unidad_compra, factor_conversion)
+         VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10)
          RETURNING *`,
         tenantId,
         d.codigo,
@@ -254,6 +273,8 @@ export class ConsumiblesService {
         d.proveedorId ?? null,
         d.stockMinimo ?? null,
         d.activo ?? true,
+        d.unidadCompra ?? null,
+        d.factorConversion ?? null,
       );
       return rows[0];
     } catch (e: any) {
@@ -273,6 +294,8 @@ export class ConsumiblesService {
       proveedorId: "proveedor_id",
       stockMinimo: "stock_minimo",
       activo: "activo",
+      unidadCompra: "unidad_compra",
+      factorConversion: "factor_conversion",
     };
     const CAST: Record<string, string> = { proveedor_id: "::uuid" };
     const sets: string[] = [];
@@ -385,11 +408,13 @@ export class ConsumiblesService {
   ) {
     // El consumible debe ser del tenant (404 cross-tenant).
     const con = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT id FROM consumible WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      `SELECT id, factor_conversion FROM consumible WHERE id = $1::uuid AND tenant_id = $2::uuid`,
       d.consumibleId,
       tenantId,
     );
     if (!con.length) throw new NotFoundException("Consumible no encontrado");
+    // §4.4.4: lo recibido en envases entra al stock en unidad de consumo.
+    d = { ...d, cantidadInicial: convertir(d.cantidadInicial, con[0].factor_conversion, d.enUnidadCompra) };
 
     return this.prisma.$transaction(async (tx) => {
       let lote: any;
@@ -512,6 +537,17 @@ export class ConsumiblesService {
     usuarioId: string | null,
     d: z.infer<typeof MovimientoSchema>,
   ) {
+    if (d.enUnidadCompra) {
+      const [c] = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT c.factor_conversion FROM consumible c
+          WHERE c.tenant_id = $1::uuid AND c.id = COALESCE($2::uuid, (SELECT consumible_id FROM lote_consumible WHERE id = $3::uuid))`,
+        tenantId,
+        d.consumibleId ?? null,
+        d.loteId ?? null,
+      );
+      if (!c) throw new NotFoundException("Consumible no encontrado");
+      d = { ...d, cantidad: convertir(d.cantidad, c.factor_conversion, true) };
+    }
     return this.prisma.$transaction(async (tx) => {
       let loteId = d.loteId ?? null;
 

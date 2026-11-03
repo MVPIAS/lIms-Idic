@@ -419,6 +419,26 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       advertencia_correo: { tipo: "sino", nombre: "Avisar por correo al laboratorio las advertencias y los re-análisis", opciones: SI_NO, porDefecto: "si" },
     },
   },
+  // --- Descuento automático de consumibles (bloque A, contrato §4.4.5) ---
+  {
+    categoria: "consumibles",
+    titulo: "Captura · descuento automático de consumibles",
+    donde:
+      "Captura por OT: la primera captura de un ensayo (y la repetición de un re-análisis) descuenta del stock, por FIFO de caducidad, lo que su método consume por determinación (Calidad › POE y advertencia por método › Consumibles). Queda en el kardex como consumo automático.",
+    porConfirmar: "Consumo de reactivos por determinación de cada método (lo informa cada laboratorio).",
+    codigos: {
+      descuento_automatico: { tipo: "sino", nombre: "Descontar el consumo del método al capturar", opciones: SI_NO, porDefecto: "si" },
+      sin_stock: {
+        tipo: "opcion",
+        nombre: "Si no hay stock vigente suficiente",
+        opciones: [
+          { valor: "avisar", etiqueta: "Avisar: se captura y la respuesta indica el faltante" },
+          { valor: "impedir", etiqueta: "Impedir la captura hasta registrar la entrada del lote" },
+        ],
+        porDefecto: "avisar",
+      },
+    },
+  },
   // --- Reglas de aceptación del método en la captura (frente ALI-D4) ---
   {
     categoria: "captura_reglas",

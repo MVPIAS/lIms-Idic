@@ -149,7 +149,8 @@ function columna(ref: string): number {
   return n - 1;
 }
 
-export function leerXlsx(b: Buffer): string[][] {
+/** Con `formulas`, una celda con fórmula devuelve «=<fórmula>» (tal como la guarda Excel) en vez de su valor. */
+export function leerXlsx(b: Buffer, opciones: { formulas?: boolean } = {}): string[][] {
   const entradas = entradasZip(b);
   const porNombre = new Map(entradas.map((e) => [e.nombre, e]));
   const compartidas: string[] = [];
@@ -178,6 +179,8 @@ export function leerXlsx(b: Buffer): string[][] {
       else if (tipo === "inlineStr") valor = textoDe(cuerpo);
       else if (tipo === "b") valor = v === "1" ? "VERDADERO" : "FALSO";
       else valor = v != null ? decodificar(v) : "";
+      const f = opciones.formulas ? /<f(?:\s[^>]*)?>([\s\S]*?)<\/f>/.exec(cuerpo)?.[1] : undefined;
+      if (f) valor = `=${decodificar(f)}`;
       while (fila.length < col) fila.push("");
       fila[col] = valor;
     }

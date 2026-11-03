@@ -40,7 +40,7 @@ import { descargarAdjunto } from "@/lib/d11";
 import { confirmar, toast } from "@/components/ui/feedback";
 import BuscadorOt, { type OtCorta } from "@/components/BuscadorOt";
 import { ESTADO_RESULTADO, llamar, qs, veredictoInfo, type Paginado } from "@/lib/laboratorio";
-import EditorEnsayo, { equiposDelEnsayo, textoFactor, type EnsayoEditable, type EquipoCaptura } from "./_components/EditorEnsayo";
+import EditorEnsayo, { avisarCalidad, equiposDelEnsayo, textoFactor, type EnsayoEditable, type EquipoCaptura } from "./_components/EditorEnsayo";
 import EditorReplicas from "./_components/EditorReplicas";
 
 /** Resultado en una forma común (viene de dos endpoints con forma distinta). */
@@ -400,6 +400,7 @@ export default function CapturaOtPage() {
       // El servidor decide si es número (admite «12,4») o texto («Ausente»).
       const cuerpo = pareceReplicas(raw) ? { replicasTexto: raw } : { valor: raw };
       const r = await llamar("POST", `/flujo/resultado/${f.id}/valor`, { ...cuerpo, ...(corrige ? { motivo } : {}) });
+      avisarCalidad(r);
       setMotivos((m) => ({ ...m, [f.id]: "" }));
       actualizarFila(f.id, { ...r, analistaNombre: acceso.usuario.nombre });
       if (r.veredictoMuestra && f.muestraId) setVeredictosMuestra((m) => ({ ...m, [f.muestraId!]: r.veredictoMuestra }));
