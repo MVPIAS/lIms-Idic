@@ -15,6 +15,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import {
   ESTADOS_FACTURA,
+  borradorSinImporte,
   esNumeroBorrador,
   estadoPorPagos,
   lineasDesdeCotizacion,
@@ -146,7 +147,11 @@ export class FacturaService extends BaseCrudService {
     const ivaPct = aceptada ? Number(aceptada.ivaPct) : 19;
     const lineas = aceptada ? lineasDesdeCotizacion(aceptada) : await this.lineasSinCotizacion(tx, ot);
     const t = totales(lineas, ivaPct, moneda);
-    const conLineas = lineas.length ? "revise las líneas (ensayos de la OT valorizados con la lista de precios vigente o la ficha) antes de emitir" : "complete las líneas antes de emitir";
+    const conLineas = !lineas.length
+      ? "complete las líneas antes de emitir"
+      : borradorSinImporte(lineas)
+        ? "sus ensayos no tienen precio en la lista de precios vigente ni en la ficha: valorice las líneas antes de emitir"
+        : "revise las líneas (ensayos de la OT valorizados con la lista de precios vigente o la ficha) antes de emitir";
     const obs = aceptada
       ? `Generada al cerrar la OT ${ot.codigo} con los importes de la cotización ${aceptada.codigo}.`
       : cot
@@ -181,7 +186,7 @@ export class FacturaService extends BaseCrudService {
    * vigente a la fecha de la OT según el tipo de cliente, o la ficha), o el
    * valor estimado de la OT si ninguno tiene precio.
    */
-  private async lineasSinCotizacion(tx: any, ot: { id: string; codigo: string; tenantId: string; clienteId: string }) {
+  async lineasSinCotizacion(tx: any, ot: { id: string; codigo: string; tenantId: string; clienteId?: string }) {
     const ensayos: { id: string; codigo: string; nombre: string; precio: unknown; cantidad: number }[] = await tx.$queryRawUnsafe(
       `SELECT ce.id::text AS id, ce.codigo, ce.nombre, ce.precio, COUNT(DISTINCT r.muestra_id)::int AS cantidad
          FROM resultado r

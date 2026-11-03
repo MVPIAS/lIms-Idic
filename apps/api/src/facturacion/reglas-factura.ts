@@ -112,7 +112,9 @@ export interface EnsayoOtFactura {
  * la OT directa del BPCH llegaba vacía). Una línea por ensayo del catálogo
  * hecho en la OT (cantidad = muestras), con el precio de la lista vigente o de
  * la ficha. Si ningún ensayo tiene precio y la OT tiene un valor estimado, una
- * línea con ese valor. Finanzas revisa las líneas antes de emitir.
+ * línea con ese valor. Si tampoco hay valor estimado (p. ej. Producción
+ * Nacional, cuyos ensayos no tienen precio de lista), una línea por ensayo en
+ * $ 0: la factura no nace vacía y Finanzas valoriza las líneas antes de emitir.
  */
 export function lineasDesdeOt(ensayos: EnsayoOtFactura[], valorEstimado: number | null, otCodigo: string, moneda = "CLP"): LineaBorrador[] {
   const lineas: LineaBorrador[] = ensayos
@@ -126,8 +128,14 @@ export function lineasDesdeOt(ensayos: EnsayoOtFactura[], valorEstimado: number 
     const v = redondear(valorEstimado, moneda);
     lineas.push({ descripcion: `Servicios de la OT ${otCodigo} (valor estimado)`, cantidad: 1, precioUnitario: v, subtotal: v });
   }
+  if (!lineas.length)
+    for (const e of ensayos)
+      lineas.push({ descripcion: descripcionLineaFactura(e.codigo, e.nombre), cantidad: Math.max(1, Math.round(e.cantidad) || 1), precioUnitario: 0, subtotal: 0 });
   return lineas;
 }
+
+/** ¿Las líneas del borrador suman cero (sin líneas o todas sin precio)? */
+export const borradorSinImporte = (lineas: { subtotal: number }[]) => !lineas.some((l) => Number(l.subtotal) > 0);
 
 /** Neto, IVA y total de unas líneas. */
 export function totales(lineas: { subtotal: number }[], ivaPct: number, moneda?: string | null) {
