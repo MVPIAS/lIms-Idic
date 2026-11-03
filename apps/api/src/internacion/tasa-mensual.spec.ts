@@ -37,3 +37,12 @@ describe("CSV de la tasa · fórmulas", () => {
     expect(csv("2026-10", [{ internacion: "I", ot: "O", otId: "o", resolucion: "R", cliente: "=HYPERLINK(1)", centroCosto: "C", calculadaAt: "", tasa: 1, iva: 0, total: 1, factura: null, estadoFactura: null, pagado: 0, estadoPago: "sin_facturar" }])).toContain("'=HYPERLINK(1)");
   });
 });
+
+describe("tasa mensual · Excel (.xlsx)", () => {
+  const { filasXlsxTasa } = require("./tasa-mensual");
+  it("misma cabecera que el CSV y montos como números", () => {
+    const f = filasXlsxTasa("2026-11", [{ internacion: "INT-1", ot: "OT-1", otId: "o", resolucion: "R", cliente: "C", centroCosto: null, calculadaAt: "", tasa: 1000.4, iva: 190, total: 1190, factura: null, estadoFactura: null, pagado: 0, estadoPago: "sin_facturar" }]);
+    expect(f[0][0]).toBe("Mes");
+    expect(f[1]).toEqual(["2026-11", "INT-1", "OT-1", "R", "C", null, 1000, 190, 1190, null, "Sin facturar", 0]);
+  });
+});

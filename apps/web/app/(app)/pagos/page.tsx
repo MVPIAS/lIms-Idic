@@ -9,6 +9,7 @@
 import CrudTable from "@/components/CrudTable";
 import { fechaDia, monto } from "@/lib/format";
 import { ESTADO_FACTURA } from "@/lib/documentos";
+import { useListaParametro } from "@/lib/lista-parametro";
 
 const num = (data: any) => ({
   facturaId: data.facturaId,
@@ -24,6 +25,8 @@ const etiquetaFactura = (f: any) =>
   `${f.numero} · ${ESTADO_FACTURA[f.estado]?.texto ?? f.estado}${f.saldo != null ? ` · saldo ${monto(f.saldo, f.moneda)}` : ""}`;
 
 export default function PagosPage() {
+  // Etiqueta del medio («Transferencia bancaria»), no el código guardado (fallo 51).
+  const medios = useListaParametro("medio_pago");
   return (
     <CrudTable
       recurso="pagos"
@@ -46,7 +49,7 @@ export default function PagosPage() {
         },
         { campo: "fecha", titulo: "Fecha", render: (v) => fechaDia(v) },
         { campo: "monto", titulo: "Monto", right: true, render: (v, row) => monto(v, row.factura?.moneda) },
-        { campo: "medio", titulo: "Medio" },
+        { campo: "medio", titulo: "Medio", render: (v) => medios.texto(v) },
         { campo: "numeroBoletin", titulo: "Boletín de ingreso", render: (v) => (v ? <span className="codigo">{v}</span> : "—") },
         { campo: "referencia", titulo: "Referencia", render: (v) => (v ? <span className="codigo">{v}</span> : "—") },
       ]}

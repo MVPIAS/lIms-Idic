@@ -71,7 +71,8 @@ export class FacturaService extends BaseCrudService {
     const f = await this.detalle(id, tenantId); // scope por tenant (404 si es de otro)
     const pagado = f.pagos.reduce((a: number, p: any) => a + Number(p.monto), 0);
     const nc = f.notasCredito.reduce((a: number, n: any) => a + Number(n.monto), 0);
-    return { total: Number(f.total), pagado, notasCredito: nc, saldo: Number(f.total) - pagado - nc, estado: f.estado };
+    // Una factura anulada no se cobra: su saldo es cero (recorrido 30, fallo 50).
+    return { total: Number(f.total), pagado, notasCredito: nc, saldo: f.estado === "anulada" ? 0 : Number(f.total) - pagado - nc, estado: f.estado };
   }
   /** ¿Otra factura del tenant ya usa ese número? (UNIQUE(tenant_id, numero)). */
   async numeroOcupado(numero: string, exceptoId: string, tenantId?: string) {
@@ -113,7 +114,7 @@ export class FacturaService extends BaseCrudService {
           cliente: cli.get(f.clienteId) ?? null,
           ot: f.otId ? otm.get(f.otId) ?? null : null,
           pagado,
-          saldo: Number(f.total) - pagado - nc,
+          saldo: f.estado === "anulada" ? 0 : Number(f.total) - pagado - nc,
         };
       }),
     };
@@ -157,10 +158,14 @@ export class FacturaService extends BaseCrudService {
       : cot
         ? `Generada al cerrar la OT ${ot.codigo}. La cotización ${cot.codigo} no está aceptada (${cot.estado}): ${conLineas}.`
         : `Generada al cerrar la OT ${ot.codigo}, que no tiene cotización: ${conLineas}.`;
+    // El número provisional puede estar tomado por un borrador anterior ya anulado (refacturación).
+    let numero = numeroBorrador(ot.codigo);
+    for (let i = 2; await tx.factura.findFirst({ where: { tenantId: ot.tenantId, numero }, select: { id: true } }); i++)
+      numero = `${numeroBorrador(ot.codigo).slice(0, 26)}-${i}`;
     return tx.factura.create({
       data: {
         tenantId: ot.tenantId,
-        numero: numeroBorrador(ot.codigo),
+        numero,
         clienteId: ot.clienteId,
         otId: ot.id,
         cotizacionId: cot?.id ?? null,
@@ -223,6 +228,64 @@ export class FacturaService extends BaseCrudService {
       o?.estimado ?? null,
       ot.codigo,
     );
+  }
+
+  /**
+   * Refacturación (recorrido 30, fallo 50): Finanzas genera de nuevo la factura
+   * pendiente de una OT CERRADA con cobro que se quedó sin factura viva (la
+   * anterior se anuló). Mismas líneas que al cerrar la OT.
+   */
+  async refacturarOt(otId: string, tenantId: string | undefined, usuarioId: string | null) {
+    const ot = await this.prisma.ordenTrabajo.findFirst({
+      where: { id: otId, ...(tenantId ? { tenantId } : {}) },
+      select: { id: true, codigo: true, tenantId: true, clienteId: true, cotizacionId: true, centroCostoId: true, estado: true, conCobro: true },
+    });
+    if (!ot) throw new NotFoundException("OT no encontrada.");
+    if (ot.estado !== "cerrada" || !ot.conCobro)
+      throw new ConflictException(`La OT ${ot.codigo} no es una OT cerrada con cobro: su factura nace al cerrarla.`);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT id FROM orden_trabajo WHERE id = $1::uuid FOR UPDATE`, ot.id);
+      const viva = await tx.factura.findFirst({ where: { otId: ot.id, deletedAt: null, NOT: { estado: "anulada" } }, select: { numero: true, estado: true } });
+      if (viva) throw new ConflictException(`La OT ${ot.codigo} ya tiene la factura ${viva.numero} (${viva.estado}).`);
+      // Con una factura anulada con importes, la nueva copia sus líneas (Finanzas las corrige
+      // antes de emitir); si no, se arma como al cerrar la OT.
+      const anulada = await tx.factura.findFirst({
+        where: { otId: ot.id, deletedAt: null, estado: "anulada", total: { gt: 0 } },
+        orderBy: { updatedAt: "desc" },
+        include: { lineas: true },
+      });
+      if (!anulada) return this.crearBorradorDesdeOt(tx, ot, usuarioId);
+      let numero = numeroBorrador(ot.codigo);
+      for (let i = 2; await tx.factura.findFirst({ where: { tenantId: ot.tenantId, numero }, select: { id: true } }); i++)
+        numero = `${numeroBorrador(ot.codigo).slice(0, 26)}-${i}`;
+      const nueva = await tx.factura.create({
+        data: {
+          tenantId: ot.tenantId,
+          numero,
+          clienteId: anulada.clienteId,
+          otId: ot.id,
+          cotizacionId: anulada.cotizacionId ?? null,
+          centroCostoId: anulada.centroCostoId ?? null,
+          moneda: anulada.moneda,
+          ivaPct: anulada.ivaPct,
+          neto: anulada.neto,
+          ivaMonto: anulada.ivaMonto,
+          total: anulada.total,
+          estado: "pendiente",
+          origen: anulada.origen,
+          observaciones: `Refacturación de la OT ${ot.codigo}: reemplaza a la factura anulada ${anulada.numero}. Revise las líneas antes de emitir.`,
+          creadaPor: usuarioId,
+          lineas: {
+            create: anulada.lineas.map((l: any) => ({ descripcion: l.descripcion, cantidad: l.cantidad, precioUnitario: l.precioUnitario, subtotal: l.subtotal })),
+          },
+        },
+        include: { lineas: true },
+      });
+      // La tasa de internación remitida queda apuntando a la nueva factura (Tasa 1,5 % mensual).
+      await tx.$executeRawUnsafe(`UPDATE calculo_tasa_internacion SET factura_id = $2::uuid WHERE factura_id = $1::uuid`, anulada.id, nueva.id);
+      await tx.$executeRawUnsafe(`UPDATE bpch_internacion SET factura_id = $2::uuid, updated_at = now() WHERE factura_id = $1::uuid`, anulada.id, nueva.id);
+      return nueva;
+    });
   }
 
   /** Finanzas revisa el borrador y lo EMITE con el folio real. */
@@ -411,6 +474,13 @@ export class FacturaController extends BaseCrudController {
   @RequierePermiso("factura.ver")
   saldo(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.saldo(id, req?.user?.tenantId);
+  }
+
+  /** Refacturación: nueva factura pendiente de una OT cerrada con cobro cuya factura se anuló. */
+  @Post("desde-ot/:otId")
+  @RequierePermiso("factura.emitir")
+  refacturar(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    return this.svc.refacturarOt(otId, req?.user?.tenantId, req?.user?.sub ?? null);
   }
 
   /** Finanzas emite el borrador «Pendiente de facturar» con el folio real. */

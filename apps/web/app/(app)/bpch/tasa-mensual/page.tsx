@@ -100,7 +100,7 @@ export default function TasaMensualPage() {
             <label htmlFor="tm-mes" className="sr-only">Mes</label>
             <input id="tm-mes" type="month" value={mes} onChange={(e) => e.target.value && setMes(e.target.value)} style={{ width: 160 }} />
             <button className="btn outline sm" disabled={!inf?.filas.length}
-              onClick={() => descargarAdjunto(`/internaciones/tasa-mensual?mes=${mes}&formato=csv`, `tasa-1-5-${mes}.csv`).catch((e) => toast.error(e.message))}>
+              onClick={() => descargarAdjunto(`/internaciones/tasa-mensual?mes=${mes}&formato=xlsx`, `tasa-1-5-${mes}.xlsx`).catch((e) => toast.error(e.message))}>
               ⬇ Excel
             </button>
           </>
