@@ -449,7 +449,7 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
           {d.documentacion.ivaInternacion != null && <> · IVA de internación {clp(d.documentacion.ivaInternacion)}</>}
         </p>
         {d.documentacion.otrosDocumentos && <p style={{ fontSize: 12.5 }}>Otros documentos: {d.documentacion.otrosDocumentos}</p>}
-        {d.documentacion.detalle && <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, background: "#f6f9fb", padding: 8, borderRadius: 6 }}>{d.documentacion.detalle}</pre>}
+        {d.documentacion.detalle && <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, background: "#f6f9fb", padding: 8, borderRadius: 6 }}>{bitacoraLegible(d.documentacion.detalle)}</pre>}
         {acciones.length > 0 && puede("bpch.internacion.gestionar") && (
           <div className="form-grid">
             <div className="field"><label htmlFor="dfe">Fecha</label><input id="dfe" type="date" value={doc.fecha} onChange={(e) => setDoc({ ...doc, fecha: e.target.value })} /></div>
@@ -582,4 +582,10 @@ function Codificacion({ d, puede, accion }: { d: any; puede: Puede; accion: Acci
       <p className="subtitle" style={{ margin: "8px 0 0" }}>Ver el listado completo en <Link href={"/bpch/codificacion" as any}>Codificación Única</Link>.</p>
     </div>
   );
+}
+
+/** Bitácora anterior a las etiquetas: «2026-10-30 · no_conforme: …» → «2026-10-30 · No conforme: …». */
+const ACCION_BITACORA: Record<string, string> = { solicitar: "Solicitud al importador", recibir: "Recepción", conforme: "Conforme", no_conforme: "No conforme" };
+function bitacoraLegible(texto: string): string {
+  return texto.replace(/ · (solicitar|recibir|conforme|no_conforme):/g, (_m, a: string) => ` · ${ACCION_BITACORA[a]}:`);
 }

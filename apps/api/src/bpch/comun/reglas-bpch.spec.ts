@@ -15,6 +15,7 @@ import {
   faltantesRemision,
   normalizarCnc,
   transicionDocAdm,
+  lineaBitacoraDocAdm,
 } from "./reglas-bpch";
 
 describe("Codificación Única · CNC-DGMN", () => {
@@ -86,6 +87,16 @@ describe("Internación · análisis técnico", () => {
   });
   it("no se repite una vez generada la OT", () => {
     expect(erroresAnalisis({ estado: "ot_generada", infoCompleta: true, solicitudesPendientes: 0 }).join(" ")).toMatch(/OT está generada/);
+  });
+});
+
+describe("Internación · bitácora de la documentación administrativa", () => {
+  it("registra todos los pasos con su nombre legible, también sin detalle", () => {
+    expect(lineaBitacoraDocAdm("2026-10-30", "solicitar", "pendiente", "Factura y DIN")).toBe("2026-10-30 · Solicitud al importador: Factura y DIN");
+    expect(lineaBitacoraDocAdm("2026-10-30", "solicitar", "solicitada", "Falta la DIN")).toBe("2026-10-30 · Reiteración de la solicitud: Falta la DIN");
+    expect(lineaBitacoraDocAdm("2026-10-31", "recibir", "solicitada", null)).toBe("2026-10-31 · Recepción");
+    expect(lineaBitacoraDocAdm("2026-10-31", "conforme", "recibida", "  ")).toBe("2026-10-31 · Conforme");
+    expect(lineaBitacoraDocAdm("2026-10-31", "no_conforme", "recibida", "CIF ilegible")).toBe("2026-10-31 · No conforme: CIF ilegible");
   });
 });
 
