@@ -37,7 +37,11 @@ import { ahoraInputChile } from "@/lib/fecha-chile";
 import FormRecepcion, { RECEPCION_VACIA, cuerpoRecepcion, faltantesRecepcion, type DatosRecepcion } from "./FormRecepcion";
 import FotosRecepcion from "./FotosRecepcion";
 
-interface Metodo { id: string; codigo: string; nombre: string; norma?: string | null; ensayoId?: string | null; analitos: number }
+interface Metodo {
+  id: string; codigo: string; nombre: string; norma?: string | null; ensayoId?: string | null; analitos: number;
+  /** Buscador: laboratorio (familia) del método y si es del laboratorio de la OT. */
+  laboratorio?: string | null; delLaboratorio?: boolean;
+}
 interface Linea {
   lineaId: string; descripcion: string; cantidad: number; ensayoId: string | null; ensayoCodigo: string | null;
   metodos: Metodo[]; sugeridos: string[]; aviso: string | null;
@@ -169,6 +173,8 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   const [panel, setPanel] = useState<{ producto: string; metodos: Metodo[] }[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [encontrados, setEncontrados] = useState<Metodo[]>([]);
+  // El buscador ofrece solo los métodos del laboratorio de la OT; los de otros se derivan con una orden interna.
+  const [otrosLabs, setOtrosLabs] = useState(false);
   const [buscando, setBuscando] = useState(false);
   const [conNumero, setConNumero] = useState(true);
 
@@ -234,9 +240,11 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     const t = setTimeout(async () => {
       setBuscando(true);
       try {
-        const r: any = await llamar("GET", `/cat/metodos?search=${encodeURIComponent(busqueda.trim())}&limit=20`);
-        const xs: any[] = Array.isArray(r) ? r : r?.data ?? [];
-        setEncontrados(xs.map((m) => ({ id: m.id, codigo: m.codigo, nombre: m.nombre, norma: m.norma, ensayoId: m.ensayoId, analitos: m.analitos?.length ?? m._count?.analitos ?? 1 })));
+        const r = await llamar<{ metodos: Metodo[] }>(
+          "GET",
+          `/recepcion/ot/${otId}/metodos?search=${encodeURIComponent(busqueda.trim())}${otrosLabs ? "&otros=1" : ""}`,
+        );
+        setEncontrados(r.metodos);
       } catch {
         setEncontrados([]);
       } finally {
@@ -244,7 +252,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
       }
     }, 300);
     return () => clearTimeout(t);
-  }, [busqueda, abierto]);
+  }, [busqueda, abierto, otId, otrosLabs]);
 
   const metodosListados = useMemo(
     () => new Set([...(d?.lineas ?? []).flatMap((l) => l.metodos.map((m) => m.id)), ...panel.flatMap((p) => p.metodos.map((m) => m.id))]),
@@ -682,6 +690,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                 <label key={m.id} style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 400, fontSize: 12.5 }}>
                   <input type="checkbox" style={{ width: "auto" }} checked={marcados.has(m.id)} onChange={() => alternar(m.id)} />
                   {etiquetaMetodo(m)}
+                  {m.delLaboratorio === false && <span style={{ color: "var(--muted)" }}> · {m.laboratorio ?? "otro laboratorio"}: derívelo con una orden interna</span>}
                 </label>
               ))}
             </div>
@@ -689,12 +698,17 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           <div className="field" style={{ marginTop: 8, maxWidth: 520, position: "relative" }}>
             <label htmlFor="buscar-metodo">Agregar un método del catálogo</label>
             <input id="buscar-metodo" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Código o nombre del método" />
+            <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 400, fontSize: 11.5, color: "var(--muted)", marginTop: 4 }}>
+              <input type="checkbox" style={{ width: "auto" }} checked={otrosLabs} onChange={(e) => setOtrosLabs(e.target.checked)} />
+              Incluir métodos de otros laboratorios (esos ensayos se derivan con una orden interna)
+            </label>
             {(buscando || encontrados.length > 0) && (
               <div className="card" style={{ position: "absolute", zIndex: 5, top: "100%", left: 0, right: 0, margin: 0, padding: 4, maxHeight: 240, overflowY: "auto" }}>
                 {buscando && <div style={{ fontSize: 12, color: "var(--muted)", padding: 4 }}>Buscando…</div>}
                 {encontrados.map((m) => (
                   <button key={m.id} type="button" className="btn outline sm" style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 2 }} onClick={() => agregarExtra(m)}>
                     {etiquetaMetodo(m)}
+                    {m.delLaboratorio === false && <span style={{ color: "var(--muted)" }}> · {m.laboratorio ?? "otro laboratorio"}</span>}
                   </button>
                 ))}
               </div>
