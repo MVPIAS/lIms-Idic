@@ -134,4 +134,5 @@ align_calidad_resultados.sql
 align_equipos_consumibles.sql
 align_comunicacion.sql
 align_sesion_inactividad.sql
+align_correcciones_v30_3.sql
 align_cierre_permisos.sql
