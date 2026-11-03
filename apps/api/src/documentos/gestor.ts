@@ -108,3 +108,23 @@ export function esDescendiente(filas: CarpetaFila[], id: string, candidato: stri
 export function subarbol(filas: CarpetaFila[], id: string): string[] {
   return filas.filter((f) => esDescendiente(filas, id, f.id)).map((f) => f.id);
 }
+
+/**
+ * Qué puede hacer una persona con UN documento que ya ve.
+ *   · edita: subir versión, publicar y cambiar título, descripción y vínculos.
+ *     La tienen quienes gestionan documentos (si el documento es restringido,
+ *     solo el perfil global y quien lo creó) y quien figura en sus permisos con
+ *     «Ver y editar», aunque no tenga documento.gestionar.
+ *   · administra: además mover de carpeta, cambiar permisos y eliminar. Solo
+ *     quien gestiona documentos y edita.
+ */
+export function derechosDocumento(p: {
+  gestiona: boolean;
+  global: boolean;
+  restringido: boolean;
+  esCreador: boolean;
+  nivelAcceso: "ver" | "editar" | null;
+}): { edita: boolean; administra: boolean } {
+  const porGestion = p.gestiona && (p.global || !p.restringido || p.esCreador || p.nivelAcceso === "editar");
+  return { edita: porGestion || p.nivelAcceso === "editar", administra: porGestion };
+}
