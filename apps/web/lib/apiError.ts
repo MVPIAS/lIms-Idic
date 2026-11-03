@@ -43,7 +43,8 @@ export function errorMensajeDe(body: any, status: number): string {
   const issues: ApiIssue[] = Array.isArray(body?.issues) ? body.issues : [];
 
   if (issues.length > 0) {
-    if (issues.every(esFraseCompleta)) return issues.map((i) => (i.message ?? "").trim()).join(" ");
+    // La misma frase en varias lecturas (pres.0, pres.1…) se muestra una vez.
+    if (issues.every(esFraseCompleta)) return [...new Set(issues.map((i) => (i.message ?? "").trim()))].join(" ");
     const detalle = issues
       .map((i) => {
         const p = pathTexto(i?.path);

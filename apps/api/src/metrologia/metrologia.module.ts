@@ -94,13 +94,17 @@ const InstrumentoSchema = z.object({
   lugar: z.enum(["instalaciones", "cliente"]).nullish().or(z.literal("")),
   desviacion: texto,
 }).strip();
+/** Mensajes de las lecturas de los equipos auxiliares (frases completas: la pantalla las muestra tal cual). */
+const RANGO_TEMP = "La temperatura del termohigrómetro debe estar entre −50 y 150 °C.";
+const RANGO_HUM = "La humedad del termohigrómetro debe estar entre 0 y 100 %HR.";
+const RANGO_PRES = "La presión del barómetro debe estar entre 300 y 1200 hPa (escríbala en hPa, no en kPa).";
 const CrearSchema = z.object({
   procesoCodigo: z.string().min(2),
   /** Ítem (instrumento) de la OT del que nace la calibración: obligatorio al crear (EP-04 P3.1). */
   otInstrumentoId: z.string().uuid().nullish(),
   patronId: z.string().uuid().nullish(),
   /** Patrones usados (máximo 3) del maestro: se bloquea si alguno está vencido a la fecha de calibración. */
-  patronIds: z.array(z.string().uuid()).max(3).default([]),
+  patronIds: z.array(z.string().uuid()).max(3, "Se pueden elegir hasta 3 patrones.").default([]),
   /** Laboratorio (LMT, LMTE, LNF, LCAD): obligatorio solo en procesos sin laboratorio fijo (PTS01). */
   laboratorio: z.string().max(10).nullish(),
   /** Fecha de calibración AAAA-MM-DD (por defecto, hoy). */
@@ -110,7 +114,7 @@ const CrearSchema = z.object({
   patronSnap: z.record(z.any()).optional(),
   ambiente: z.record(z.union([z.string(), z.number()]).transform((x) => String(x).slice(0, 40))).default({}),
   cond: z.record(z.coerce.number()).default({}),
-  intervaloMeses: z.coerce.number().int().min(0).max(120).default(12),
+  intervaloMeses: z.coerce.number().int().min(0).max(120, "El intervalo de calibración no puede superar 120 meses.").default(12),
   /**
    * Termohigrómetro y barómetro del maestro con sus lecturas (EP-04 P3.4): el servidor corrige
    * con el error de su certificado (se resta) y deja las condiciones corregidas en el certificado.
@@ -119,9 +123,9 @@ const CrearSchema = z.object({
     termohigrometroId: z.string().uuid().nullish(),
     barometroId: z.string().uuid().nullish(),
     lecturas: z.object({
-      temp: z.array(z.coerce.number().min(-50).max(150).nullable()).max(10).default([]),
-      hum: z.array(z.coerce.number().min(0).max(100).nullable()).max(10).default([]),
-      pres: z.array(z.coerce.number().min(300).max(1200).nullable()).max(10).default([]),
+      temp: z.array(z.coerce.number().min(-50, RANGO_TEMP).max(150, RANGO_TEMP).nullable()).max(10).default([]),
+      hum: z.array(z.coerce.number().min(0, RANGO_HUM).max(100, RANGO_HUM).nullable()).max(10).default([]),
+      pres: z.array(z.coerce.number().min(300, RANGO_PRES).max(1200, RANGO_PRES).nullable()).max(10).default([]),
     }).default({}),
   }).nullish(),
   puntos: z.array(PuntoSchema).default([]),
