@@ -2,13 +2,14 @@
 import "./common/zona-entorno";
 import { NestFactory } from "@nestjs/core";
 import { ValidationPipe } from "@nestjs/common";
-import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
+import { SwaggerModule } from "@nestjs/swagger";
 import { Logger } from "nestjs-pino";
 import helmet from "helmet";
 import { AppModule } from "./app.module";
 import { ZodExceptionFilter } from "./common/zod-exception.filter";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import { instalarSerializacionBigInt } from "./common/bigint-json";
+import { construirDocumentoApi, fijarDocumentoApi } from "./integracion/openapi-doc";
 
 // Las columnas bigint de Prisma (Nº interno de la muestra, correlativos, count(*))
 // se responden como texto: sin esto, JSON.stringify lanza y la API da 500.
@@ -100,16 +101,20 @@ async function bootstrap() {
   // Prefix API
   app.setGlobalPrefix("api");
 
-  // Swagger SOLO en desarrollo (deshabilitado en producción).
-  if (!isProd) {
-    const config = new DocumentBuilder()
-      .setTitle("LIMS IDIC API")
-      .setDescription("API del módulo Comercial y LIMS técnico unificado")
-      .setVersion("0.1.0")
-      .addBearerAuth()
-      .build();
-    const document = SwaggerModule.createDocument(app, config);
-    SwaggerModule.setup("api/docs", app, document);
+  // Documentación de la API (contrato §4.7.4). La especificación OpenAPI se
+  // construye SIEMPRE y se sirve protegida en GET /api/integracion/openapi.json
+  // (permiso integracion.documentacion: administradores y tokens de
+  // integración); la web la muestra en Administración › API e integración.
+  // La interfaz Swagger pública de /api/docs sigue SOLO en desarrollo.
+  // Un fallo al generarla no debe impedir que la API arranque.
+  try {
+    const document = construirDocumentoApi(app);
+    fijarDocumentoApi(document);
+    if (!isProd) {
+      SwaggerModule.setup("api/docs", app, document);
+    }
+  } catch (e) {
+    console.error(`No se pudo generar la documentación OpenAPI: ${e instanceof Error ? e.message : e}`);
   }
 
   const port = Number(process.env.API_PORT ?? 3001);

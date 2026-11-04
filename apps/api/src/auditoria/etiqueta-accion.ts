@@ -8,7 +8,7 @@
  * solicitudes-laboratorio…). Aquí cada código se traduce a un texto en español
  * y se agrupa en pocas familias, que son las que ofrece el filtro «Acción».
  */
-export type GrupoAccion = "crear" | "modificar" | "eliminar" | "vencer" | "flujo";
+export type GrupoAccion = "crear" | "modificar" | "eliminar" | "vencer" | "flujo" | "consulta";
 
 export const GRUPOS_ACCION: { valor: GrupoAccion; etiqueta: string }[] = [
   { valor: "crear", etiqueta: "Creación" },
@@ -16,6 +16,7 @@ export const GRUPOS_ACCION: { valor: GrupoAccion; etiqueta: string }[] = [
   { valor: "eliminar", etiqueta: "Eliminación / anulación" },
   { valor: "vencer", etiqueta: "Vencimiento automático" },
   { valor: "flujo", etiqueta: "Paso del flujo (firma, aprobación, envío…)" },
+  { valor: "consulta", etiqueta: "Consulta por API (token de integración)" },
 ];
 
 /** Sub-acciones conocidas: [texto, familia]. */
@@ -24,6 +25,9 @@ const ACCIONES: Record<string, [string, GrupoAccion]> = {
   modificar: ["Modificación", "modificar"],
   eliminar: ["Eliminación / anulación", "eliminar"],
   vencer: ["Vencimiento automático", "vencer"],
+  // Consultas (GET) hechas con un token de integración (contrato §4.7.4).
+  consulta_api: ["Consulta por API", "consulta"],
+  revocar: ["Revocación", "eliminar"],
   anular: ["Anulación", "eliminar"],
   "anular-ocurrencia": ["Anulación de ocurrencia", "eliminar"],
   "anular-orden-cliente": ["Anulación de la orden del cliente", "eliminar"],
@@ -127,7 +131,7 @@ const ACCIONES: Record<string, [string, GrupoAccion]> = {
 const RECURSOS: Record<string, string> = {
   ot: "OT", oc: "OC", hh: "HH", rafs: "RAFS", poe: "POE", pdf: "PDF", excel: "Excel",
   "ordenes-compra": "órdenes de compra", "ordenes-internas": "órdenes internas", "no-conformidades": "no conformidades",
-  "notas-credito": "notas de crédito", "listas-precio": "listas de precio", "lista-precio-items": "ítems de lista de precio",
+  "notas-credito": "notas de crédito", tokens: "token de integración", "listas-precio": "listas de precio", "lista-precio-items": "ítems de lista de precio",
   "numeracion-documentos": "numeración de documentos", "documentos-registro": "documentos", "firmas-matriz": "matriz de firmas",
   "especificaciones-tecnicas": "especificaciones técnicas", "informe-tecnico": "informe técnico", "servicio-externo": "servicio externo",
   "custodia-evidencia": "custodia de evidencia", "codigo-cnc": "código CNC-DGMN", "recepcion-dco": "recepción en DCO",

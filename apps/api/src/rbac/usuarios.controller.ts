@@ -184,7 +184,13 @@ export class UsuariosController {
     @Query("limit") limit?: string,
   ) {
     const tenantId = tenantDe(req);
-    const where: any = { deletedAt: null, ...(tenantId ? { tenantId } : {}) };
+    // Las cuentas de servicio de los tokens de integración (estado «servicio») se
+    // gestionan en Administración › API e integración, no aquí (estado NULL sí se lista).
+    const where: any = {
+      deletedAt: null,
+      AND: [{ OR: [{ estado: null }, { estado: { not: "servicio" } }] }],
+      ...(tenantId ? { tenantId } : {}),
+    };
     if (q?.trim()) {
       const t = q.trim();
       where.OR = [
