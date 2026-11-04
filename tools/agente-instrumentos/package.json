@@ -1,0 +1,23 @@
+{
+  "name": "lims-idic-agente-instrumentos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Agente de instrumentos del LIMS IDIC: lee equipos por puerto serie (RS-232) o Ethernet (TCP) y envía las lecturas al LIMS (contrato §4.4.7).",
+  "main": "agente.js",
+  "bin": {
+    "lims-agente-instrumentos": "agente.js"
+  },
+  "scripts": {
+    "start": "node agente.js",
+    "probar": "node agente.js --probar",
+    "simular": "node agente.js --simular",
+    "simulador-tcp": "node simulador.js --puerto 4001",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "serialport": "^12.0.0"
+  }
+}

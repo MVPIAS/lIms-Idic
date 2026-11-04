@@ -1,0 +1,6 @@
+node_modules/
+agente.config.json
+cola-pendiente.json
+rechazadas.json
+agente.log
+package-lock.json
