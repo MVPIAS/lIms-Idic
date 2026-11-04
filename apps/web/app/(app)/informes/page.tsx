@@ -132,7 +132,7 @@ function InformesContenido() {
         // Lista depurada (recorrido MP-02, D02-05): fuera las plantillas de prueba heredadas
         // («test», «NULL», «-») y todas las activas, no solo las 100 primeras.
         const deVerdad = (x: Plantilla) =>
-          x.activo !== false && !/^\s*test\s*$/i.test(x.nombre ?? "") && !["-", "NULL", ""].includes(String(x.repid ?? "").trim().toUpperCase());
+          x.activo !== false && x.tipo !== "COTIZACION" && !/^\s*test\s*$/i.test(x.nombre ?? "") && !["-", "NULL", ""].includes(String(x.repid ?? "").trim().toUpperCase());
         setPlantillas(lista<Plantilla>(p).filter(deVerdad).sort((a, b) => `${a.repid} ${a.nombre}`.localeCompare(`${b.repid} ${b.nombre}`, "es")));
       } catch (e: any) {
         setError(e?.message ?? "No se pudieron cargar los datos");

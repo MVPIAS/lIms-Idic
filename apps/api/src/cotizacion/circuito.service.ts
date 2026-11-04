@@ -26,6 +26,7 @@ import { exigirMedioEnvioActivo, textoEnFrase } from "../common/medios-envio";
 import { calcularForm05, erroresForm05, erroresPrograma, type Form05Entrada, type ProgramaTrabajo, exigeCosteo, type TipoServicio } from "./form05";
 import { numeroFormulario } from "./numeracion-cotizacion";
 import { htmlCotizacion, pdfCotizacion, type FirmasCotizacion } from "./cotizacion-documento";
+import { cuerpoCotizacionVigente } from "./plantilla-cotizacion";
 import { hoyEnChile, soloFecha } from "./validez";
 
 /** Tipos de unidad a los que Comercial pide fechas y costo (laboratorios y sus equivalentes). */
@@ -650,17 +651,20 @@ export class CircuitoCotizacionService {
       firma: c.firmaEstado === "firmada" ? { nombre: c.firmadaPorNombre, fecha: c.firmadaAt } : null,
       pendientes: firmantes.map((f) => f.nombre),
     };
-    return { cot: { ...cot, circuito: c.circuito, firmaEstado: c.firmaEstado, firmadaAt: c.firmadaAt }, firmas, codigo: c.codigo };
+    const doc = { ...cot, circuito: c.circuito, firmaEstado: c.firmaEstado, firmadaAt: c.firmadaAt };
+    // 4.6.8: el cuerpo sale de la plantilla «Cotización» vigente (o la anterior si falla).
+    const cuerpo = await cuerpoCotizacionVigente(this.prisma, tenantId, doc, firmas);
+    return { cot: doc, firmas, codigo: c.codigo, cuerpo };
   }
 
   async html(req: any, id: string): Promise<string> {
     const d = await this.documento(req, id);
-    return htmlCotizacion(d.cot, d.firmas);
+    return htmlCotizacion(d.cot, d.firmas, d.cuerpo);
   }
 
   async pdf(req: any, id: string): Promise<{ pdf: Buffer; codigo: string }> {
     const d = await this.documento(req, id);
-    return { pdf: await pdfCotizacion(d.cot, d.firmas), codigo: d.codigo };
+    return { pdf: await pdfCotizacion(d.cot, d.firmas, d.cuerpo), codigo: d.codigo };
   }
 
   /* ---------------------------------------------------------------- envío --- */

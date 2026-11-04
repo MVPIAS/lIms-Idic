@@ -10,6 +10,9 @@
  *  · vista previa en HTML y PDF con una OT real;
  *  · aprobar (plantilla.aprobar, nunca quien redactó), historial, comparar,
  *    volver a una versión anterior (= borrador copia) y duplicar la plantilla.
+ *  · plantilla «Cotización» (tipo COTIZACION, contrato 4.6.8): sus variables son
+ *    las de la cotización (documentadas con su descripción) y la vista previa se
+ *    hace con una cotización real en vez de una OT.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader, EmptyState } from "@/components/ui/PageHeader";
@@ -40,6 +43,14 @@ type Version = {
 };
 type Historial = { plantilla: Plantilla; vigente: Version | null; borrador: Version | null; versiones: Version[] };
 type Ot = { id: string; codigo: string };
+type CotPrevia = { id: string; codigo: string; estado: string; cliente: string | null };
+type Variables = {
+  conOt: boolean;
+  cotizacion?: boolean;
+  datos: string[];
+  bloques: { clave: string; descripcion: string }[];
+  documentadas?: { clave: string; descripcion: string; bloque?: boolean }[];
+};
 type Linea = { tipo: "igual" | "quitada" | "agregada"; texto: string };
 
 const PILL: Record<string, string> = { VIGENTE: "teal", BORRADOR: "blue", RETIRADA: "gray" };
@@ -125,6 +136,7 @@ function Contenido() {
 
 function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Historial; gestiona: boolean; aprueba: boolean; recargar: () => void; alDuplicar: (id: string) => void }) {
   const p = hist.plantilla;
+  const esCot = p.tipo === "COTIZACION";
   const [cuerpo, setCuerpo] = useState("");
   const [motivo, setMotivo] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -133,7 +145,9 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
   const [selA, setSelA] = useState("");
   const [ots, setOts] = useState<Ot[]>([]);
   const [otId, setOtId] = useState("");
-  const [vars, setVars] = useState<{ conOt: boolean; datos: string[]; bloques: { clave: string; descripcion: string }[] } | null>(null);
+  const [vars, setVars] = useState<Variables | null>(null);
+  const [cots, setCots] = useState<CotPrevia[]>([]);
+  const [cotId, setCotId] = useState("");
   const [previa, setPrevia] = useState<{ html: string; avisos: string[] } | null>(null);
   const [dup, setDup] = useState({ repid: "", nombre: "" });
 
@@ -145,11 +159,12 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
     api.getRaw<Version>(`informes/plantillas/versiones/${base.id}`).then((v) => setCuerpo(v.cuerpoHtml ?? "")).catch(() => setCuerpo(""));
   }, [hist]);
   useEffect(() => {
-    api.list<Ot>("ot", { limit: 100 }).then((r) => setOts(r.data)).catch(() => setOts([]));
-  }, []);
+    if (esCot) api.getRaw<CotPrevia[]>(`informes/plantillas/${p.id}/cotizaciones`).then(setCots).catch(() => setCots([]));
+    else api.list<Ot>("ot", { limit: 100 }).then((r) => setOts(r.data)).catch(() => setOts([]));
+  }, [esCot, p.id]);
   useEffect(() => {
-    api.getRaw(`informes/plantillas/${p.id}/variables${otId ? `?otId=${otId}` : ""}`).then(setVars).catch((e) => toast.error(e.message));
-  }, [p.id, otId]);
+    api.getRaw<Variables>(`informes/plantillas/${p.id}/variables${otId && !esCot ? `?otId=${otId}` : ""}`).then(setVars).catch((e) => toast.error(e.message));
+  }, [p.id, otId, esCot]);
 
   async function accion(fn: () => Promise<unknown>, ok: string) {
     setOcupado(true);
@@ -170,13 +185,15 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
 
   async function verPrevia(formato: "html" | "pdf") {
     const v = hist.borrador ?? hist.vigente;
-    if (!v || !otId) return toast.error("Elija una OT para la vista previa (y guarde el borrador si lo cambió).");
+    if (!v) return toast.error("La plantilla no tiene versiones: guarde un borrador primero.");
+    if (esCot ? !cotId : !otId)
+      return toast.error(`Elija ${esCot ? "una cotización" : "una OT"} para la vista previa (y guarde el borrador si lo cambió).`);
     setOcupado(true);
     try {
       const r = await fetch(`${API}/informes/plantillas/versiones/${v.id}/previsualizar`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(token() ? { Authorization: `Bearer ${token()}` } : {}) },
-        body: JSON.stringify({ otId, formato }),
+        body: JSON.stringify(esCot ? { cotizacionId: cotId, formato } : { otId, formato }),
       });
       if (!r.ok) {
         const j = await r.json().catch(() => ({}));
@@ -220,6 +237,15 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
         </p>
       </div>
 
+      {esCot && (
+        <div className="alert info" role="note">
+          Esta plantilla da forma al PDF de todas las <b>cotizaciones</b> (formato DCO FORM04). La versión vigente es la que
+          sale al descargar o enviar una cotización; las firmas del circuito (Ejecutivo que elabora y Jefe DCO que firma) se
+          agregan solas al final. Si la versión vigente tuviera un error, las cotizaciones saldrían con la vigente anterior.
+          Las observaciones internas y el costeo nunca se imprimen.
+        </div>
+      )}
+
       <div className="card" style={{ padding: 14 }}>
         <h3 style={{ fontSize: 13, margin: "0 0 8px" }}>{hist.borrador ? `Borrador v${hist.borrador.numero}` : "Cuerpo vigente (al guardar se crea un borrador)"}</h3>
         <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 3fr) minmax(0, 1fr)", gap: 12 }}>
@@ -231,13 +257,46 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
             <input id="pv-motivo" value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={1000} readOnly={!editable} />
           </div>
           <div>
-            <div className="field">
-              <label htmlFor="pv-ot">OT para variables y vista previa</label>
-              <select id="pv-ot" value={otId} onChange={(e) => setOtId(e.target.value)}>
-                <option value="">— Sin OT (solo bloques) —</option>
-                {ots.map((o) => <option key={o.id} value={o.id}>{o.codigo}</option>)}
-              </select>
-            </div>
+            {esCot ? (
+              <div className="field">
+                <label htmlFor="pv-cot">Cotización para la vista previa</label>
+                <select id="pv-cot" value={cotId} onChange={(e) => setCotId(e.target.value)}>
+                  <option value="">— Elija una cotización —</option>
+                  {cots.map((c) => <option key={c.id} value={c.id}>{c.codigo} · {c.cliente ?? "—"} ({c.estado})</option>)}
+                </select>
+              </div>
+            ) : (
+              <div className="field">
+                <label htmlFor="pv-ot">OT para variables y vista previa</label>
+                <select id="pv-ot" value={otId} onChange={(e) => setOtId(e.target.value)}>
+                  <option value="">— Sin OT (solo bloques) —</option>
+                  {ots.map((o) => <option key={o.id} value={o.id}>{o.codigo}</option>)}
+                </select>
+              </div>
+            )}
+            {esCot && vars?.documentadas ? (
+              <div style={{ maxHeight: 380, overflow: "auto", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, padding: 6 }}>
+                <b>Variables de la cotización</b>
+                {vars.documentadas.filter((d) => !d.bloque).map((d) => (
+                  <div key={d.clave}>
+                    <button type="button" className="btn link sm" disabled={!editable} onClick={() => insertar(`{{${d.clave}}}`)}>{`{{${d.clave}}}`}</button>
+                    <small style={{ color: "var(--muted)", display: "block", marginLeft: 8 }}>{d.descripcion}</small>
+                  </div>
+                ))}
+                <b>Bloques (tablas y párrafos)</b>
+                {vars.documentadas.filter((d) => d.bloque).map((d) => (
+                  <div key={d.clave}>
+                    <button type="button" className="btn link sm" disabled={!editable} onClick={() => insertar(`{{${d.clave}}}`)}>{`{{${d.clave}}}`}</button>
+                    <small style={{ color: "var(--muted)", display: "block", marginLeft: 8 }}>{d.descripcion}</small>
+                  </div>
+                ))}
+                <p style={{ color: "var(--muted)" }}>
+                  Condicionales: {"{{#si ruta}}…{{/si}}"} (se muestra si hay dato) y {"{{#no ruta}}…{{/no}}"} (si no lo hay); no se
+                  puede poner un {"{{#si}}"} dentro de otro {"{{#si}}"}. Los datos se escapan siempre. Una versión con variables
+                  inexistentes o marcas mal escritas no se puede aprobar.
+                </p>
+              </div>
+            ) : (
             <div style={{ maxHeight: 380, overflow: "auto", fontSize: 12, border: "1px solid var(--border)", borderRadius: 6, padding: 6 }}>
               <b>Bloques</b>
               {vars?.bloques.map((b) => (
@@ -249,6 +308,7 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
               ))}
               <p style={{ color: "var(--muted)" }}>Condicionales: {"{{#si ruta}}…{{/si}}"} y {"{{#no ruta}}…{{/no}}"}. Los datos se escapan siempre.</p>
             </div>
+            )}
           </div>
         </div>
         <div className="toolbar" style={{ marginTop: 10, marginBottom: 0, flexWrap: "wrap" }}>
@@ -268,7 +328,7 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
             </button>
           )}
         </div>
-        <small style={{ color: "var(--muted)" }}>Quien redacta o modifica un borrador no puede aprobarlo. La vista previa usa el borrador si existe (guárdelo antes) o la vigente.</small>
+        <small style={{ color: "var(--muted)" }}>Quien redacta o modifica un borrador no puede aprobarlo. La vista previa usa el borrador si existe (guárdelo antes) o la vigente{esCot ? ", con la cotización elegida" : ""}.</small>
       </div>
 
       {previa && (
@@ -335,7 +395,7 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
         </div>
       )}
 
-      {editable && (
+      {editable && !esCot && (
         <div className="card" style={{ padding: 14 }}>
           <h3 style={{ fontSize: 13, margin: "0 0 8px" }}>Duplicar plantilla (p. ej. para otro laboratorio)</h3>
           <div className="form-grid cols-3">
