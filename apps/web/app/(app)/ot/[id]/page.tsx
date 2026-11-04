@@ -33,6 +33,7 @@ import { EtapasOt, SiguientePasoOt, type AvanceOt } from "@/components/ot/RutaOt
 import InstrumentosOt from "@/components/metrologia/InstrumentosOt";
 import PreparacionOt from "@/components/formularios/PreparacionOt";
 import RemitirDco from "@/components/bpch-procesos/RemitirDco";
+import ConsumosOt from "@/components/consumibles/ConsumosOt";
 
 /** Laboratorios de la Sección Metrología: sus OT trabajan con instrumentos, no con muestras (EP-04). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -154,7 +155,7 @@ export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "informe" | "carpeta" | "flujo" | "historial">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "consumos" | "informe" | "carpeta" | "flujo" | "historial">("cabecera");
   /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
   const [destinoOi, setDestinoOi] = useState<string | null>(null);
   const { puede } = usePermisos();
@@ -206,7 +207,7 @@ export default function ExpedientePage() {
   // Pestaña inicial desde la URL (?tab=muestras: bandeja de entrada del laboratorio).
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "instrumentos", "ordenes", "resultados", "fotos", "informe", "carpeta", "historial"].includes(t)) setTab(t as typeof tab);
+    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "instrumentos", "ordenes", "resultados", "fotos", "consumos", "informe", "carpeta", "historial"].includes(t)) setTab(t as typeof tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -339,6 +340,8 @@ export default function ExpedientePage() {
             {tabBtn("ordenes", "Órdenes internas")}
             {tabBtn("resultados", "Resultados")}
             {puede(["resultado.ver", "certificado.emitir"]) && tabBtn("fotos", "Fotos")}
+            {/* §4.4.5: reactivos y consumibles usados en la OT y sus muestras. */}
+            {puede("ot.ver") && tabBtn("consumos", "Consumos")}
             {tabBtn("informe", "Informe y cierre")}
             {tabBtn("carpeta", "Carpeta de trabajo")}
             {MOTOR_FLUJOS_VISIBLE && tabBtn("flujo", "Flujo")}
@@ -458,6 +461,7 @@ export default function ExpedientePage() {
               </div>
             )}
             {tab === "fotos" && typeof id === "string" && <FotosOt otId={id} otEstado={ot?.estado} />}
+            {tab === "consumos" && typeof id === "string" && <ConsumosOt otId={id} />}
             {/* Fecha de compromiso, documentos (firma y entrega) y cierre de la OT. */}
             {tab === "informe" && typeof id === "string" && esMetrologia && <InstrumentosOt otId={id} onCambio={cargarOt} modo="cierre" />}
             {tab === "informe" && typeof id === "string" && <NotificacionDgmn otId={id} onCambio={cargarOt} />}

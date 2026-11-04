@@ -4,6 +4,7 @@ import {
   ConflictException,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Injectable,
   Module,
@@ -21,11 +22,14 @@ import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { PrismaClient } from "@prisma/client";
 import { z } from "zod";
 import { PermisoGuard } from "../auth/permiso.guard";
-import { RequierePermisoCrud } from "../auth/permisos.decorator";
+import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { diaChile } from "../common/fecha-chile";
 import { hoyCl } from "../ot/plazos";
 import { descontarFifo } from "./consumo-automatico";
 import { ConversionError, aUnidadConsumo } from "./conversion";
+import { AlcanceService } from "../rbac/alcance.service";
+import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
+import { ACTIVIDADES, VinculoError, actividadDelMovimiento, otDelMovimiento, resumenConsumos } from "./vinculo-movimiento";
 
 // ---------------------------------------------------------------------------
 // Módulo CONSUMIBLES · inventario por lotes + KARDEX de movimientos.
@@ -38,6 +42,11 @@ import { ConversionError, aUnidadConsumo } from "./conversion";
 //       entrada  (compra / recepción)  -> suma stock
 //       consumo  (por ensayo/muestra/método) -> resta stock (409 si insuficiente)
 //       ajuste   (corrección de inventario, con signo) -> suma/resta stock
+//   · Vínculo (§4.4.5): todo movimiento puede ligarse a una OT, una muestra,
+//     un método y una actividad (vinculo-movimiento.ts). El descuento
+//     automático de la captura lo hace siempre; en el registro manual es
+//     opcional y el buscador de OT y muestras se acota al alcance del usuario.
+//     La ficha de la OT muestra sus consumos (GET /consumibles/ot/:otId).
 //   · Consumos pendientes: lo que una captura no pudo descontar por falta de
 //     stock (regla «avisar», consumo-automatico.ts) queda en
 //     `consumo_pendiente` y se regulariza aquí (descontar o descartar con motivo).
@@ -113,8 +122,11 @@ const MovimientoSchema = z
     loteId: optUuid(),
     consumibleId: optUuid(),
     cantidad: z.coerce.number(),
+    // Vínculo opcional (§4.4.5): OT, muestra, método y actividad.
+    otId: optUuid(),
     muestraId: optUuid(),
     catMetodoId: optUuid(),
+    actividad: optStr(20), // se valida con actividadDelMovimiento (mensaje en español)
     motivo: optStr(2000),
     /** La cantidad viene en unidades de compra (envases): se multiplica por el factor (§4.4.4). */
     enUnidadCompra: z.preprocess(emptyToNull, z.coerce.boolean().optional()),
@@ -139,6 +151,14 @@ function convertir(cantidad: number, factor: unknown, enUnidadCompra: boolean | 
   }
 }
 
+/** Vínculo efectivo de un movimiento (§4.4.5). */
+interface Vinculo {
+  otId: string | null;
+  muestraId: string | null;
+  catMetodoId: string | null;
+  actividad: string | null;
+}
+
 /* ========================================================================== */
 /* ConsumiblesService                                                          */
 /* ========================================================================== */
@@ -146,6 +166,11 @@ function convertir(cantidad: number, factor: unknown, enUnidadCompra: boolean | 
 @Injectable()
 export class ConsumiblesService {
   private prisma = new PrismaClient();
+
+  constructor(
+    private readonly alcance: AlcanceService,
+    private readonly alcanceResultado: AlcanceResultadoService,
+  ) {}
 
   tenantId(req: any): string {
     const id = req?.user?.tenantId;
@@ -545,6 +570,7 @@ export class ConsumiblesService {
     tenantId: string,
     usuarioId: string | null,
     d: z.infer<typeof MovimientoSchema>,
+    vinculo: Vinculo = { otId: null, muestraId: null, catMetodoId: null, actividad: null },
   ) {
     if (d.enUnidadCompra) {
       const [c] = await this.prisma.$queryRawUnsafe<any[]>(
@@ -633,20 +659,180 @@ export class ConsumiblesService {
       const cantidadAsiento = d.tipo === "ajuste" ? d.cantidad : Math.abs(d.cantidad);
       const mov = await tx.$queryRawUnsafe<any[]>(
         `INSERT INTO movimiento_consumible
-           (tenant_id, lote_id, tipo, cantidad, muestra_id, cat_metodo_id, motivo, created_by)
-         VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid, $7, $8::uuid)
+           (tenant_id, lote_id, tipo, cantidad, muestra_id, cat_metodo_id, motivo, created_by, ot_id, actividad)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid, $7, $8::uuid, $9::uuid, $10)
          RETURNING *`,
         tenantId,
         loteId,
         d.tipo,
         cantidadAsiento,
-        d.muestraId ?? null,
-        d.catMetodoId ?? null,
+        vinculo.muestraId,
+        vinculo.catMetodoId,
         d.motivo ?? null,
         usuarioId,
+        vinculo.otId,
+        vinculo.actividad,
       );
       return { ...mov[0], stock_resultante: nuevo };
     });
+  }
+
+  /* --- vínculo con OT / muestra / método / actividad (§4.4.5) ------------- */
+
+  /**
+   * Valida el vínculo de un movimiento manual: la OT y la muestra existen y son
+   * del alcance del usuario, la muestra es de la OT, el método existe y la
+   * actividad es de la lista. Devuelve el vínculo efectivo (OT de la muestra si
+   * no se indicó; «análisis» si hay muestra o método y no se eligió actividad).
+   */
+  async resolverVinculo(req: any, tenantId: string, d: z.infer<typeof MovimientoSchema>): Promise<Vinculo> {
+    let muestra: { id: string; codigo: string; otId: string | null; otCodigo: string | null } | null = null;
+    if (d.muestraId) {
+      const [m] = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT m.id, m.codigo, m.ot_id, o.codigo AS ot_codigo, o.unidad_principal
+           FROM muestra m LEFT JOIN orden_trabajo o ON o.id = m.ot_id
+          WHERE m.id = $1::uuid AND m.tenant_id = $2::uuid AND m.deleted_at IS NULL`,
+        d.muestraId,
+        tenantId,
+      );
+      if (!m) throw new NotFoundException("La muestra elegida no existe.");
+      if (m.ot_id) await this.exigirOt(req, { id: m.ot_id, codigo: m.ot_codigo, unidadPrincipal: m.unidad_principal });
+      muestra = { id: m.id, codigo: m.codigo, otId: m.ot_id, otCodigo: m.ot_codigo };
+    }
+    if (d.otId && d.otId !== muestra?.otId) {
+      const [o] = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT id, codigo, unidad_principal FROM orden_trabajo WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+        d.otId,
+        tenantId,
+      );
+      if (!o) throw new NotFoundException("La OT elegida no existe.");
+      await this.exigirOt(req, { id: o.id, codigo: o.codigo, unidadPrincipal: o.unidad_principal });
+    }
+    if (d.catMetodoId) {
+      const [me] = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT 1 FROM cat_metodo WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
+        d.catMetodoId,
+        tenantId,
+      );
+      if (!me) throw new NotFoundException("El método elegido no existe.");
+    }
+    try {
+      return {
+        otId: otDelMovimiento(d.otId, muestra),
+        muestraId: d.muestraId ?? null,
+        catMetodoId: d.catMetodoId ?? null,
+        actividad: actividadDelMovimiento(d.actividad, d),
+      };
+    } catch (e) {
+      if (e instanceof VinculoError) throw new BadRequestException(e.message);
+      throw e;
+    }
+  }
+
+  /** La OT es del alcance del usuario (su laboratorio o uno que participa por orden interna). */
+  private async exigirOt(req: any, ot: { id: string; codigo: string; unidadPrincipal: string | null }) {
+    try {
+      await this.alcanceResultado.alcanceEnOt(req, ot, "consumible.gestionar");
+    } catch {
+      throw new ForbiddenException(`La OT ${ot.codigo} es de un laboratorio fuera de su alcance.`);
+    }
+  }
+
+  /**
+   * Buscador del formulario de movimiento: OT, muestras o métodos que contienen
+   * el texto. OT y muestras, solo de los laboratorios del alcance del usuario;
+   * los métodos de la muestra elegida aparecen primero.
+   */
+  async buscarVinculo(req: any, tenantId: string, tipo: string, q: string, filtros: { otId?: string; muestraId?: string }) {
+    const texto = `%${q.trim().slice(0, 60)}%`;
+    const unidades = await this.alcance.filtroUnidades(req, "consumible.gestionar");
+    if (tipo === "ot") {
+      return this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT o.id, o.codigo, c.razon_social AS detalle, o.estado
+           FROM orden_trabajo o LEFT JOIN cliente c ON c.id = o.cliente_id
+          WHERE o.tenant_id = $1::uuid AND (o.codigo ILIKE $2 OR c.razon_social ILIKE $2)
+            AND ($3::uuid[] IS NULL OR o.unidad_principal = ANY($3::uuid[]))
+          ORDER BY o.created_at DESC LIMIT 20`,
+        tenantId,
+        texto,
+        unidades,
+      );
+    }
+    if (tipo === "muestra") {
+      return this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT m.id, m.codigo, m.nombre AS detalle, m.ot_id AS "otId", o.codigo AS "otCodigo"
+           FROM muestra m LEFT JOIN orden_trabajo o ON o.id = m.ot_id
+          WHERE m.tenant_id = $1::uuid AND m.deleted_at IS NULL AND (m.codigo ILIKE $2 OR m.nombre ILIKE $2)
+            AND ($3::uuid IS NULL OR m.ot_id = $3::uuid)
+            AND ($4::uuid[] IS NULL OR o.unidad_principal = ANY($4::uuid[]))
+          ORDER BY m.created_at DESC LIMIT 20`,
+        tenantId,
+        texto,
+        filtros.otId ?? null,
+        unidades,
+      );
+    }
+    if (tipo === "metodo") {
+      return this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT me.id, me.codigo, me.nombre AS detalle,
+                EXISTS (SELECT 1 FROM resultado r WHERE r.cat_metodo_id = me.id AND r.muestra_id = $3::uuid AND r.deleted_at IS NULL) AS "deLaMuestra"
+           FROM cat_metodo me
+          WHERE me.tenant_id = $1::uuid AND me.deleted_at IS NULL AND me.activo AND (me.codigo ILIKE $2 OR me.nombre ILIKE $2)
+          ORDER BY 4 DESC, me.codigo LIMIT 20`,
+        tenantId,
+        texto,
+        filtros.muestraId ?? null,
+      );
+    }
+    throw new BadRequestException("Indique qué buscar: ot, muestra o metodo.");
+  }
+
+  /**
+   * Consumos de una OT (ficha de la OT, §4.4.5): movimientos de lotes ligados a
+   * la OT o a sus muestras —automáticos de la captura y manuales— y los
+   * consumos pendientes de descontar de sus muestras.
+   */
+  async consumosDeOt(req: any, otId: string) {
+    const tenantId = this.tenantId(req);
+    const [ot] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, codigo, unidad_principal FROM orden_trabajo WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      otId,
+      tenantId,
+    );
+    if (!ot) throw new NotFoundException("OT no encontrada");
+    await this.alcanceResultado.alcanceEnOt(req, { id: ot.id, codigo: ot.codigo, unidadPrincipal: ot.unidad_principal }, "ot.ver");
+    const movimientos = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT mv.id, mv.tipo, mv.cantidad::float AS cantidad, mv.actividad, mv.automatico, mv.motivo, mv.created_at,
+              c.codigo AS consumible_codigo, c.nombre AS consumible_nombre, c.unidad_medida,
+              l.numero_lote, l.fecha_vencimiento,
+              mu.codigo AS muestra_codigo, me.codigo AS metodo_codigo, me.nombre AS metodo_nombre,
+              u.nombre_completo AS usuario_nombre
+         FROM movimiento_consumible mv
+         JOIN lote_consumible l ON l.id = mv.lote_id
+         JOIN consumible c ON c.id = l.consumible_id
+         LEFT JOIN muestra mu ON mu.id = mv.muestra_id
+         LEFT JOIN cat_metodo me ON me.id = mv.cat_metodo_id
+         LEFT JOIN usuario u ON u.id = mv.created_by
+        WHERE mv.tenant_id = $2::uuid
+          AND (mv.ot_id = $1::uuid OR mu.ot_id = $1::uuid)
+        ORDER BY mv.created_at DESC, mv.id
+        LIMIT 1000`,
+      otId,
+      tenantId,
+    );
+    const pendientes = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT p.id, p.cantidad::float AS cantidad, p.referencia, p.created_at, c.codigo AS consumible_codigo, c.nombre AS consumible_nombre,
+              c.unidad_medida, mu.codigo AS muestra_codigo, me.codigo AS metodo_codigo
+         FROM consumo_pendiente p
+         JOIN consumible c ON c.id = p.consumible_id
+         JOIN muestra mu ON mu.id = p.muestra_id
+         LEFT JOIN cat_metodo me ON me.id = p.cat_metodo_id
+        WHERE p.tenant_id = $2::uuid AND mu.ot_id = $1::uuid AND p.estado = 'pendiente'
+        ORDER BY p.created_at DESC`,
+      otId,
+      tenantId,
+    );
+    return { ot: { id: ot.id, codigo: ot.codigo }, actividades: ACTIVIDADES, resumen: resumenConsumos(movimientos), movimientos, pendientes };
   }
 
   /* --- consumos pendientes (captura sin stock con la regla «avisar») ------- */
@@ -751,11 +937,15 @@ export class ConsumiblesService {
       `SELECT m.*,
               l.numero_lote,
               mu.codigo AS muestra_codigo,
+              me.codigo AS metodo_codigo,
               me.nombre AS metodo_nombre,
+              COALESCE(o.codigo, om.codigo) AS ot_codigo,
               u.nombre_completo AS usuario_nombre
          FROM movimiento_consumible m
          JOIN lote_consumible l ON l.id = m.lote_id
          LEFT JOIN muestra   mu ON mu.id = m.muestra_id
+         LEFT JOIN orden_trabajo o  ON o.id = m.ot_id
+         LEFT JOIN orden_trabajo om ON om.id = mu.ot_id
          LEFT JOIN cat_metodo me ON me.id = m.cat_metodo_id
          LEFT JOIN usuario    u ON u.id = m.created_by
         WHERE l.consumible_id = $1::uuid AND m.tenant_id = $2::uuid
@@ -797,6 +987,7 @@ export class ConsumiblesService {
           unidad_medida: consumible.unidad_medida,
           stock_minimo: consumible.stock_minimo,
         },
+        actividades: ACTIVIDADES,
         resumen: {
           total_entradas: Number(r.total_entradas ?? 0),
           total_consumos: Number(r.total_consumos ?? 0),
@@ -880,11 +1071,22 @@ export class ConsumiblesController {
   @Post("movimiento")
   async movimiento(@Body() body: unknown, @Req() req: any) {
     const d = MovimientoSchema.parse(body);
-    return this.svc.registrarMovimiento(
-      this.svc.tenantId(req),
-      req?.user?.sub ?? req?.user?.id ?? null,
-      d,
-    );
+    const tenantId = this.svc.tenantId(req);
+    const vinculo = await this.svc.resolverVinculo(req, tenantId, d);
+    return this.svc.registrarMovimiento(tenantId, req?.user?.sub ?? req?.user?.id ?? null, d, vinculo);
+  }
+
+  /** Buscador de OT, muestras y métodos para el vínculo del movimiento (alcance del usuario). */
+  @Get("vinculos")
+  async vinculos(
+    @Query("tipo") tipo: string,
+    @Query("q") q: string | undefined,
+    @Query("otId") otId: string | undefined,
+    @Query("muestraId") muestraId: string | undefined,
+    @Req() req: any,
+  ) {
+    const uuid = (v?: string) => (v && /^[0-9a-f-]{36}$/i.test(v) ? v : undefined);
+    return this.svc.buscarVinculo(req, this.svc.tenantId(req), tipo, q ?? "", { otId: uuid(otId), muestraId: uuid(muestraId) });
   }
 
   @Get("pendientes")
@@ -946,10 +1148,28 @@ export class ConsumiblesController {
   }
 }
 
+/**
+ * Consumos de la OT (§4.4.5): los ve quien ve la OT (pestaña «Consumos» del
+ * expediente), sin necesitar el permiso del inventario.
+ */
+@ApiTags("consumibles")
+@ApiBearerAuth()
+@UseGuards(AuthGuard("jwt"), PermisoGuard)
+@Controller("consumibles/ot")
+export class ConsumosOtController {
+  constructor(private readonly svc: ConsumiblesService) {}
+
+  @Get(":otId")
+  @RequierePermiso("ot.ver")
+  consumos(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    return this.svc.consumosDeOt(req, otId);
+  }
+}
+
 /* ========================================================================== */
 
 @Module({
-  controllers: [ConsumiblesController],
+  controllers: [ConsumosOtController, ConsumiblesController],
   providers: [ConsumiblesService],
   exports: [ConsumiblesService],
 })
