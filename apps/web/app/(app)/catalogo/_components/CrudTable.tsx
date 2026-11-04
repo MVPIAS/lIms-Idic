@@ -96,6 +96,13 @@ export interface CrudTableProps {
   permitirEliminar?: boolean;
   /** Botones o enlaces adicionales en la cabecera, junto a «＋ Nuevo». */
   accionesExtra?: React.ReactNode;
+  /**
+   * Al EDITAR se pide el motivo del cambio y se envía en el PATCH con este nombre
+   * de campo (control de cambios de los métodos, contrato §4.3.3).
+   */
+  motivoEdicion?: { campo: string; etiqueta: string; placeholder?: string };
+  /** Botones adicionales de cada fila (p. ej. «Historial de versiones»), antes de «Editar». */
+  accionesFila?: (row: any) => React.ReactNode;
 }
 
 const mapPorDefecto = (row: any) => {
@@ -175,7 +182,7 @@ function SelectField({ campo, inputId, value, endpoint, onChange }: SelectFieldP
 
 export default function CrudTable({
   titulo, subtitulo, endpoint, columnas, campos, migas, permisos, accionesExtra,
-  permitirCrear, permitirEditar, permitirEliminar,
+  permitirCrear, permitirEditar, permitirEliminar, motivoEdicion, accionesFila,
 }: CrudTableProps) {
   const { puede, listo } = usePermisos();
   const perms = permisos ?? permisosDe(endpoint) ?? {};
@@ -200,6 +207,7 @@ export default function CrudTable({
   const [form, setForm] = useState<Record<string, any>>({});
   const [errores, setErrores] = useState<Record<string, string>>({});
   const [borrandoId, setBorrandoId] = useState<string | null>(null);
+  const [motivo, setMotivo] = useState("");
   const formId = useId();
 
   const cargar = useCallback(async () => {
@@ -252,6 +260,7 @@ export default function CrudTable({
     }
     setEditId(String(row.id));
     setForm(init);
+    setMotivo("");
     setShowForm(true);
     setError("");
   }
@@ -309,6 +318,7 @@ export default function CrudTable({
     try {
       const payload = construirPayload();
       if (editId != null) {
+        if (motivoEdicion && motivo.trim()) payload[motivoEdicion.campo] = motivo.trim();
         await apiFetch(`${endpoint}/${editId}`, { method: "PATCH", body: JSON.stringify(payload) });
       } else {
         await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) });
@@ -507,6 +517,13 @@ export default function CrudTable({
               );
             })}
           </div>
+          {editando && motivoEdicion && (
+            <div className="field" style={{ marginTop: 12 }}>
+              <label htmlFor={`${formId}-motivo`}>{motivoEdicion.etiqueta}</label>
+              <textarea id={`${formId}-motivo`} rows={2} maxLength={500} value={motivo}
+                placeholder={motivoEdicion.placeholder} onChange={(e) => setMotivo(e.target.value)} />
+            </div>
+          )}
           <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end", gap: 8 }}>
             <button type="button" className="btn outline sm" onClick={cerrarForm}>Cancelar</button>
             <button className="btn primary sm">{editando ? "Actualizar" : "Guardar"}</button>
@@ -529,8 +546,9 @@ export default function CrudTable({
         loading={loading}
         headerSearch={false}
         paginate={false}
-        acciones={puedeEditar || puedeEliminar ? (row) => (
+        acciones={puedeEditar || puedeEliminar || accionesFila ? (row) => (
           <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
+            {accionesFila?.(row)}
             {puedeEditar && <button type="button" className="btn outline sm" onClick={() => abrirEditar(row)}>Editar</button>}
             {puedeEliminar && (
               <button type="button" className="btn ghost-danger sm"

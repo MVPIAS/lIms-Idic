@@ -95,6 +95,11 @@ interface Fila extends EnsayoEditable {
    * configuración exige personas distintas). Lo dice la API en la vista por OT; undefined en la bandeja.
    */
   bloqueoAprobar?: string | null;
+  /**
+   * QC exigido por el método aún no aprobado en la OT (contrato §4.2.4): no se captura,
+   * revisa ni aprueba hasta registrarlo y aprobarlo. Lo dice la API en la vista por OT.
+   */
+  qcBloqueo: { codigo: string; nombre: string; faltan: string[]; mensaje: string } | null;
   /** Lo que el usuario puede hacer con ESTE ensayo según la API (vista por OT); null en la bandeja. */
   puedo: { capturar: boolean; revisar: boolean; aprobar: boolean; reabrir: boolean } | null;
 }
@@ -137,6 +142,7 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     ordenInterna: r.ordenInterna ?? null,
     puedo: r.puedo ?? null,
     bloqueoAprobar: r.bloqueoAprobar,
+    qcBloqueo: r.qcBloqueo ?? null,
     tipoDato: r.tipoDato === "atributo" ? "atributo" : "numerico",
     requisito: r.requisito ?? null,
     formula: r.formula ?? null,
@@ -242,6 +248,12 @@ function valorBorrador(r: Fila): string {
 }
 
 const CAPTURABLES = ["pendiente", "capturado", "devuelto", "rechazado"];
+/** Nombre de cada tipo de control de calidad (aviso de QC pendiente). */
+const TIPO_QC: Record<string, string> = {
+  blanco: "blanco", estandar: "estándar", curva: "curva de calibración", duplicado: "duplicado",
+  mrc: "MRC", patron: "patrón de verificación", positivo: "control positivo", negativo: "control negativo",
+  cualquiera: "un control de cualquier tipo",
+};
 
 /** El buscador también encuentra las OT de otros laboratorios con ensayos derivados a los suyos (D02-25). */
 const FILTRO_BUSCADOR = { derivadas: 1 };
@@ -594,6 +606,10 @@ export default function CapturaOtPage() {
   const omitidosRevision = aprobablesEnBloque.filter((f) => f.analistaId !== yo && revisadoPorMi(f)).length;
   // Ensayos de otro laboratorio en esta OT (derivados por orden interna): solo lectura.
   const ajenos = ot ? filas.filter((f) => f.derivado && f.puedo && !f.puedo.capturar && !f.puedo.revisar && !f.puedo.aprobar && !f.puedo.reabrir) : [];
+  // Métodos con el QC exigido aún sin aprobar en la OT (uno por método, contrato §4.2.4).
+  const qcPendientes = ot
+    ? [...new Map(filas.filter((f) => f.qcBloqueo && f.estado !== "aprobado").map((f) => [f.qcBloqueo!.codigo, f.qcBloqueo!])).values()]
+    : [];
   // El destino de una orden interna solo recibe los ensayos que se le derivaron.
   const soloDerivados = ot != null && filas.length > 0 && filas.every((f) => f.derivado) && ajenos.length === 0;
 
@@ -673,6 +689,17 @@ export default function CapturaOtPage() {
               </Link>
             ))}
           </div>
+        </div>
+      )}
+
+      {ot && qcPendientes.length > 0 && (
+        <div className="alert warn" role="alert" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ flex: 1, minWidth: 260 }}>
+            <b>Control de calidad pendiente.</b> No se pueden capturar, revisar ni aprobar los resultados de{" "}
+            {qcPendientes.map((q) => `${q.codigo} · ${q.nombre} (falta: ${q.faltan.map((t) => TIPO_QC[t] ?? t).join(", ")})`).join("; ")}{" "}
+            hasta que su control de calidad esté registrado y aprobado por otra persona en esta OT.
+          </span>
+          <Link href={`/qc?otId=${ot.id}` as any} className="btn primary sm">Registrar control de calidad →</Link>
         </div>
       )}
 
@@ -800,7 +827,9 @@ export default function CapturaOtPage() {
                       const vd = veredictoInfo(f.veredicto);
                       const est = ESTADO_RESULTADO[f.estado] ?? { texto: f.estado, pill: "gray" };
                       const propio = !!yo && f.analistaId === yo;
-                      const capturable = CAPTURABLES.includes(f.estado) && puede(f, "capturar");
+                      // Sin el QC del método aprobado en la OT no se captura (contrato §4.2.4): se avisa en la celda.
+                      const qcPendiente = !!f.qcBloqueo && CAPTURABLES.includes(f.estado) && puede(f, "capturar");
+                      const capturable = CAPTURABLES.includes(f.estado) && puede(f, "capturar") && !f.qcBloqueo;
                       const lectura = !!f.puedo && !f.puedo.capturar && !f.puedo.revisar && !f.puedo.aprobar && !f.puedo.reabrir;
                       const busy = ocupado === f.id;
                       return (
@@ -858,6 +887,15 @@ export default function CapturaOtPage() {
                               )}
                             </td>
                             <td>
+                              {qcPendiente && (
+                                <div style={{ marginBottom: 4 }}>
+                                  <span className="pill amber" title={f.qcBloqueo!.mensaje}>QC pendiente</span>
+                                  <div style={{ fontSize: 11, color: "var(--muted)", maxWidth: 240 }}>
+                                    No se puede capturar: falta el control de calidad aprobado del método.{" "}
+                                    <Link href={`/qc?otId=${f.otId ?? ot?.id ?? ""}` as any}>Registrar control →</Link>
+                                  </div>
+                                </div>
+                              )}
                               {formDe(f) ? (
                                 <div>
                                   {valorTexto(f) && <div style={{ fontFamily: "'JetBrains Mono', monospace" }}>{valorTexto(f)}</div>}
@@ -967,12 +1005,12 @@ export default function CapturaOtPage() {
                             <td>
                               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                                 {puede(f, "revisar") && f.estado === "capturado" && (
-                                  <button className="btn sm" disabled={busy || propio || sinVeredicto(f) || f.reanalisis?.estado === "solicitado"} onClick={() => accion(f, "revisar")}
-                                    title={propio ? "Lo capturó usted: debe revisarlo otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de revisar, o devuélvalo" : "Marcar como revisado"}>Revisar</button>
+                                  <button className="btn sm" disabled={busy || propio || sinVeredicto(f) || f.reanalisis?.estado === "solicitado" || !!f.qcBloqueo} onClick={() => accion(f, "revisar")}
+                                    title={propio ? "Lo capturó usted: debe revisarlo otra persona" : f.qcBloqueo ? f.qcBloqueo.mensaje : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de revisar, o devuélvalo" : "Marcar como revisado"}>Revisar</button>
                                 )}
                                 {puede(f, "aprobar") && f.estado === "revisado_n1" && (
-                                  <button className="btn success sm" disabled={busy || propio || revisadoPorMi(f) || sinVeredicto(f) || f.reanalisis?.estado === "solicitado"} onClick={() => accion(f, "aprobar")}
-                                    title={propio ? "Lo capturó usted: debe aprobarlo otra persona" : revisadoPorMi(f) ? f.bloqueoAprobar ?? "Lo revisó usted: la aprobación la hace otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de aprobar" : "Aprobar el resultado"}>Aprobar</button>
+                                  <button className="btn success sm" disabled={busy || propio || revisadoPorMi(f) || sinVeredicto(f) || f.reanalisis?.estado === "solicitado" || !!f.qcBloqueo} onClick={() => accion(f, "aprobar")}
+                                    title={propio ? "Lo capturó usted: debe aprobarlo otra persona" : f.qcBloqueo ? f.qcBloqueo.mensaje : revisadoPorMi(f) ? f.bloqueoAprobar ?? "Lo revisó usted: la aprobación la hace otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de aprobar" : "Aprobar el resultado"}>Aprobar</button>
                                 )}
                                 {puede(f, "revisar") && ["capturado", "revisado_n1"].includes(f.estado) && (
                                   <button className="btn outline sm" disabled={busy} onClick={() => { setDevolviendo(devolviendo === f.id ? null : f.id); setMotivo(""); }}>Devolver</button>
