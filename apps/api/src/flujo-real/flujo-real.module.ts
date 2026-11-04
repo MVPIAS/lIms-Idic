@@ -33,6 +33,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { PlantillaRenderModule } from "../plantilla-render/plantilla-render.module";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
 import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
+import { bloqueosQcDeOt, exigirQcParaEjecutar } from "../qc/qc-ejecucion";
 import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laboratorio.module";
 import { traducirFormula } from "../laboratorio/formula-legado";
 import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
@@ -979,6 +980,8 @@ export class PuenteAnalisisService {
 
     const bloqueo = motivoNoCapturable(resultado.estado);
     if (bloqueo) throw new ConflictException(bloqueo);
+    // QC exigido por el método aprobado y vigente en la OT (contrato §4.2.4 / §4.3.8; parámetro qc.bloqueo).
+    await exigirQcParaEjecutar(this.prisma as any, tenantId, id, "captura");
     // Formulario especializado del ensayo, preparación de la muestra y documentación
     // del trabajo del DSA (formularios/reglas-captura.service.ts): 409 con el motivo.
     await this.reglasCaptura.exigirCapturable(id, tenantId, variante?.variante ?? null);
@@ -1439,6 +1442,8 @@ export class PuenteAnalisisService {
     const avisosDe = new Map(avisosFilas.map((a) => [a.id, a.avisos_aceptacion]));
     // Advertencia, re-análisis, POE y acreditación ISO/IEC 17025 de cada ensayo (bloque A, calidad).
     const calidadDe = await calidadDeResultados(this.prisma as any, tenantId, idsResultado, metodoIds);
+    // Métodos cuyo QC exigido aún no está aprobado en la OT: no se capturan ni aprueban (contrato §4.2.4).
+    const qcBloqueos = await bloqueosQcDeOt(this.prisma as any, tenantId, otId, metodoIds);
 
     // Veredicto de cada muestra (lote) y de la OT, con la misma regla.
     const porMuestra = muestras.map((m) => ({
@@ -1504,6 +1509,10 @@ export class PuenteAnalisisService {
             : [],
           notaCaptura: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.nota ?? null : null,
           avisosAceptacion: avisosDe.get(r.id) ?? null,
+          // Por qué no se puede capturar ni aprobar este ensayo todavía (QC del método pendiente); null = nada.
+          qcBloqueo: r.catMetodoId && qcBloqueos.has(r.catMetodoId)
+            ? (({ codigo, nombre, faltan, mensaje }) => ({ codigo, nombre, faltan, mensaje }))(qcBloqueos.get(r.catMetodoId)!)
+            : null,
           ...calidadDe.fila(r.id, r.catMetodoId ?? null),
         };
       }),

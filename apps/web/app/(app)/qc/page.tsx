@@ -187,6 +187,8 @@ export default function QcPage() {
   const [metodos, setMetodos] = useState<Metodo[]>([]);
   const [controles, setControles] = useState<Control[]>([]);
   const [estado, setEstado] = useState<Estado | null>(null);
+  // Qué bloquea el QC pendiente (parámetro qc.bloqueo): captura y aprobación + informe, o solo el informe.
+  const [modoBloqueo, setModoBloqueo] = useState<"ejecucion" | "informe">("ejecucion");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
@@ -216,6 +218,9 @@ export default function QcPage() {
         setOts(Array.isArray(j) ? j : j.data ?? []);
         const rc = await fetch(`${API}/qc/cepas`, { headers: auth() });
         if (rc.ok) setCepas(await rc.json());
+        // Enlace «Registrar control →» desde la captura: /qc?otId=… abre esa OT.
+        const desde = new URLSearchParams(window.location.search).get("otId");
+        if (desde) onSelectOt(desde);
       } catch (e: any) {
         setError(e.message);
       }
@@ -239,6 +244,7 @@ export default function QcPage() {
       setMetodos(j.metodos ?? []);
       setControles(j.controles ?? []);
       setEstado(j.estado ?? null);
+      setModoBloqueo(j.modoBloqueo === "informe" ? "informe" : "ejecucion");
       setFMetodo((prev) => prev || (j.metodos?.[0]?.id ?? ""));
     } catch (e: any) {
       setError(e.message);
@@ -369,9 +375,9 @@ export default function QcPage() {
       <h1 className="page">Control de Calidad</h1>
       <p className="subtitle">
         Elija una Orden de Trabajo y registre blancos, estándares, curvas de calibración y duplicados
-        de los métodos que exigen QC. El servidor evalúa cada control (aprobado / rechazado). La emisión
-        del informe queda bloqueada mientras un método que requiere QC no tenga control aprobado. —
-        contrato 4.2.3 / 4.2.4 / 4.3.7 / 4.3.8.
+        de los métodos que exigen QC. El servidor evalúa cada control (aprobado / rechazado). Mientras un
+        método que requiere QC no tenga su control aprobado en la OT no se capturan ni aprueban sus
+        resultados (según «Parámetros del sistema») y no se emite el informe. — contrato 4.2.3 / 4.2.4 / 4.3.7 / 4.3.8.
       </p>
       {error && <div className="alert warn">{error}</div>}
       {ok && <div className="alert">{ok}</div>}
@@ -407,12 +413,14 @@ export default function QcPage() {
           ) : estado.aprobado ? (
             <span>
               La OT {otSel?.codigo} tiene aprobado el control de calidad de todos los métodos que lo
-              exigen: la emisión de informe no está bloqueada por QC.
+              exigen: {modoBloqueo === "ejecucion" ? "la captura, la aprobación de resultados y " : ""}la emisión de informe no está bloqueada por QC.
             </span>
           ) : estado.faltantes.length ? (
             <span>
               Falta aprobar QC de: {estado.faltantes.map((m) => `${m.codigo} · ${m.nombre}`).join("; ")}.
-              La emisión del informe está BLOQUEADA hasta aprobarlos.
+              {modoBloqueo === "ejecucion"
+                ? " La captura, la revisión y la aprobación de sus resultados y la emisión del informe están BLOQUEADAS hasta aprobarlos."
+                : " La emisión del informe está BLOQUEADA hasta aprobarlos."}
             </span>
           ) : (
             <span>Esta OT no tiene métodos que exijan control de calidad.</span>
@@ -626,6 +634,8 @@ function ConfigQcMetodo({ metodo, onCerrar, onGuardado }: { metodo: Metodo; onCe
   const [cfg, setCfg] = useState<{ qcRequerido: boolean; qcTipos: string[]; qcCriterios: Record<string, string>; criteriosPorDefecto: Record<string, string> } | null>(null);
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
+  // Cambiar el QC del método crea una revisión en su «Historial de versiones» (contrato §4.3.3).
+  const [motivo, setMotivo] = useState("");
   useEffect(() => {
     llamar<any>("GET", `/qc/metodos/${metodo.id}`)
       .then((c) => setCfg({ qcRequerido: !!c.qcRequerido, qcTipos: c.qcTipos ?? [], qcCriterios: c.qcCriterios ?? {}, criteriosPorDefecto: c.criteriosPorDefecto ?? {} }))
@@ -636,7 +646,7 @@ function ConfigQcMetodo({ metodo, onCerrar, onGuardado }: { metodo: Metodo; onCe
     setOcupado(true);
     setError("");
     try {
-      await llamar("PUT", `/qc/metodos/${metodo.id}`, { qcRequerido: cfg.qcRequerido, qcTipos: cfg.qcTipos, qcCriterios: cfg.qcCriterios });
+      await llamar("PUT", `/qc/metodos/${metodo.id}`, { qcRequerido: cfg.qcRequerido, qcTipos: cfg.qcTipos, qcCriterios: cfg.qcCriterios, ...(motivo.trim() ? { motivo: motivo.trim() } : {}) });
       toast.ok("QC del método guardado.");
       onGuardado();
     } catch (e: any) {
@@ -656,7 +666,7 @@ function ConfigQcMetodo({ metodo, onCerrar, onGuardado }: { metodo: Metodo; onCe
         <>
           <label style={{ display: "flex", gap: 6, alignItems: "center", fontWeight: 600, margin: "4px 0 10px" }}>
             <input type="checkbox" style={{ width: "auto" }} checked={cfg.qcRequerido} onChange={(e) => setCfg({ ...cfg, qcRequerido: e.target.checked })} />
-            QC requerido: el informe no se emite sin control de calidad aprobado
+            QC requerido: exige control de calidad aprobado en la OT antes de capturar y aprobar resultados y de emitir el informe
           </label>
           <table className="data">
             <thead><tr><th>Exigir</th><th>Tipo de control</th><th>Criterio de aceptación</th></tr></thead>
@@ -676,6 +686,10 @@ function ConfigQcMetodo({ metodo, onCerrar, onGuardado }: { metodo: Metodo; onCe
           <p style={{ fontSize: 12, color: "var(--muted)", margin: "8px 0 0" }}>
             Sin tipos marcados basta un control aprobado de cualquier tipo. Los criterios por ensayo están por confirmar con el IDIC: vacío = criterio general.
           </p>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label htmlFor="qc-motivo">Motivo del cambio (queda en el historial de versiones del método)</label>
+            <input id="qc-motivo" value={motivo} maxLength={500} onChange={(e) => setMotivo(e.target.value)} placeholder="p. ej. Se exige curva de calibración según POE rev. 3" />
+          </div>
         </>
       )}
     </Modal>

@@ -1,4 +1,5 @@
 import { exigirSinReanalisis } from "../calidad/reanalisis";
+import { exigirQcParaEjecutar } from "../qc/qc-ejecucion";
 import { SinAlcanceDeEscritura } from "../rbac/alcance-catalogo.guard";
 import { errorMotivoVeredicto } from "./veredicto-decidido";
 import { emitirEvento } from "../common/eventos";
@@ -517,7 +518,7 @@ export class ResultadoService extends BaseCrudService {
     const actual = await this.prisma.resultado.findFirst({
       where: { id, deletedAt: null },
       select: {
-        id: true, estado: true, analitoId: true, motivoDevolucion: true,
+        id: true, estado: true, analitoId: true, motivoDevolucion: true, catMetodoId: true,
         valorNumerico: true, valorTexto: true, resultadoFinal: true, promedio: true,
       },
     });
@@ -526,6 +527,8 @@ export class ResultadoService extends BaseCrudService {
       throw new BadRequestException("Este resultado se captura por valor en «Captura y revisión por OT», no por réplicas.");
     const motivo = motivoNoCapturable(actual.estado);
     if (motivo) throw new ConflictException(motivo);
+    // QC exigido por el método (si el ensayo es de un método del catálogo): contrato §4.2.4.
+    if (actual.catMetodoId) await exigirQcParaEjecutar(this.prisma as any, tenantId === DEV_TENANT ? null : tenantId, id, "captura");
     const motivoCorreccion = typeof dto.motivo === "string" ? dto.motivo.trim() : "";
     if (exigeMotivoCorreccion(actual.estado, teniaValor(actual)) && motivoCorreccion.length < 5)
       throw new BadRequestException(
@@ -617,6 +620,11 @@ export class ResultadoService extends BaseCrudService {
 
     // 3b. Re-análisis abierto (contrato §4.2.6): se repite la determinación o la jefatura lo descarta.
     if (nuevo !== "devuelto") await exigirSinReanalisis(this.prisma as any, id);
+
+    // 3c. QC exigido por el método aprobado y vigente en la OT (contrato §4.2.4 / §4.3.8;
+    //     parámetro qc.bloqueo): sin él no se revisa ni se aprueba.
+    if (nuevo !== "devuelto")
+      await exigirQcParaEjecutar(this.prisma as any, actual.muestra?.tenantId ?? null, id, nuevo === "aprobado" ? "aprobacion" : "revision");
 
     // 4. Revisión y aprobación por personas distintas (recorrido MP-06, D06-05).
     if (nuevo === "aprobado" && this.alcanceRes && actual.revisadoPor && actual.revisadoPor === usuarioId) {
