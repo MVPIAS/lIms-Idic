@@ -1,0 +1,32 @@
+{
+  "lims": {
+    "url": "https://lims.idic.cl/api",
+    "token": "lims_disp_PEGUE_AQUI_EL_TOKEN_DEL_DISPOSITIVO"
+  },
+  "conexion": {
+    "tipo": "serie",
+    "puerto": "COM3",
+    "baudios": 9600,
+    "bitsDatos": 8,
+    "paridad": "none",
+    "bitsParada": 1,
+    "controlFlujo": false,
+    "codificacion": "latin1"
+  },
+  "trama": {
+    "terminador": "LF",
+    "silencioMs": 800,
+    "ignorar": ["^OK$", "^READY"]
+  },
+  "envio": {
+    "loteSegundos": 15,
+    "maxTramas": 200,
+    "cabecera": null
+  },
+  "simulador": {
+    "muestras": ["M-PRUEBA-0001", "M-PRUEBA-0002"],
+    "ensayo": "pH",
+    "intervaloSegundos": 3
+  },
+  "registro": "agente.log"
+}

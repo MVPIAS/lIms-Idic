@@ -2,8 +2,10 @@ import { Body, Controller, Delete, Get, Module, Param, ParseUUIDPipe, Patch, Pos
 import { FileInterceptor } from "@nestjs/platform-express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import { AuthModule } from "../auth/auth.module";
 import { PermisoGuard } from "../auth/permiso.guard";
+import { Public } from "../auth/public.decorator";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { FlujoRealModule } from "../flujo-real/flujo-real.module";
 import { InstrumentosService, MAX_ARCHIVO_BYTES } from "./instrumentos.service";
@@ -12,7 +14,9 @@ import { InstrumentosService, MAX_ARCHIVO_BYTES } from "./instrumentos.service";
 // Adquisición de datos desde instrumentos (contrato §4.4.6, §4.4.7): perfiles
 // de lectura por instrumento, carga de archivos con vista previa, aplicación a
 // los ensayos de la OT, historial con el archivo original y lectura automática
-// de carpetas (instrumentos.service.ts).
+// de carpetas (instrumentos.service.ts). Comunicación serie (RS-232) y
+// Ethernet: alta y revocación de dispositivos aquí; las lecturas del agente
+// entran por AgenteInstrumentosController (token de dispositivo, no de usuario).
 // ===========================================================================
 
 const UUID = new ParseUUIDPipe({ version: "4", errorHttpStatusCode: 400 });
@@ -77,8 +81,29 @@ export class InstrumentosController {
 
   @Get("importaciones")
   @RequierePermiso("instrumento.importar")
-  historial(@Query("perfilId") perfilId: string | undefined, @Req() req: any) {
-    return this.s.historial(req, perfilId);
+  historial(@Query("perfilId") perfilId: string | undefined, @Query("pendientes") pendientes: string | undefined, @Req() req: any) {
+    return this.s.historial(req, perfilId, pendientes === "1" || pendientes === "true");
+  }
+
+  /* --- dispositivos conectados por puerto serie o Ethernet (§4.4.7) --- */
+
+  @Get("dispositivos")
+  @RequierePermiso("instrumento.configurar")
+  dispositivos(@Req() req: any) {
+    return this.s.listarDispositivos(req);
+  }
+
+  /** Alta: la respuesta trae el token, que no vuelve a mostrarse. */
+  @Post("dispositivos")
+  @RequierePermiso("instrumento.configurar")
+  crearDispositivo(@Body() b: any, @Req() req: any) {
+    return this.s.crearDispositivo(req, b);
+  }
+
+  @Post("dispositivos/:id/revocar")
+  @RequierePermiso("instrumento.configurar")
+  revocarDispositivo(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
+    return this.s.revocarDispositivo(req, id, b);
   }
 
   @Get("importaciones/:id")
@@ -112,9 +137,39 @@ export class InstrumentosController {
   }
 }
 
+/**
+ * Entrada del agente de instrumentos (tools/agente-instrumentos). @Public para
+ * el JWT: se autentica con el token del dispositivo (Authorization: Bearer
+ * lims_disp_…), que el servicio verifica en cada petición. El límite de
+ * peticiones va por IP (el token no es un JWT).
+ */
+@ApiTags("instrumentos")
+@Public()
+@Controller("instrumentos/agente")
+export class AgenteInstrumentosController {
+  constructor(private readonly s: InstrumentosService) {}
+
+  /** Saludo del agente al arrancar: confirma el token y entrega el perfil del instrumento. */
+  @Get("yo")
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  async yo(@Req() req: any) {
+    return this.s.infoDispositivo(await this.s.autenticarDispositivo(req));
+  }
+
+  /** Lote de tramas leídas del puerto serie o del socket TCP. */
+  @Post("lecturas")
+  @Throttle({ default: { ttl: 60_000, limit: 120 } })
+  async lecturas(@Body() b: any, @Req() req: any) {
+    const d = await this.s.autenticarDispositivo(req);
+    // Para la bitácora (AuditInterceptor): el tenant y quién envió, sin usuario.
+    req.user = { tenantId: d.tenant_id, username: `dispositivo: ${d.nombre}` };
+    return this.s.ingestar(d, b);
+  }
+}
+
 @Module({
   imports: [FlujoRealModule, AuthModule],
-  controllers: [InstrumentosController],
+  controllers: [AgenteInstrumentosController, InstrumentosController],
   providers: [InstrumentosService],
 })
 export class InstrumentosModule {}
