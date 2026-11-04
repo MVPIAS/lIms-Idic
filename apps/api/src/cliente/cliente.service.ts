@@ -3,6 +3,7 @@ import { contactoPrincipalDesdeFicha } from "./contacto-principal";
 import { PrismaClient } from "@prisma/client";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { validarTipoCliente, type OpcionTipoCliente } from "./tipo-cliente";
+import { MSJ_MONEDA, esMonedaOperacion } from "../common/moneda";
 
 @Injectable()
 export class ClienteService {
@@ -15,6 +16,26 @@ export class ClienteService {
       orderBy: { orden: "asc" },
       select: { codigo: true, etiqueta: true, activo: true },
     });
+  }
+
+  /**
+   * Contrato 4.1.3 · la lista de precios propia tiene que existir en el tenant,
+   * no estar borrada y estar en una moneda de la operación (CLP o USD).
+   */
+  private async exigirListaPrecio(listaPrecioId: unknown, tenantId: string) {
+    if (typeof listaPrecioId !== "string") return;
+    const l = await this.prisma.listaPrecio.findFirst({ where: { id: listaPrecioId, tenantId, deletedAt: null }, select: { codigo: true, moneda: true } });
+    if (!l) throw new BadRequestException("La lista de precios elegida no existe o fue eliminada.");
+    if (!esMonedaOperacion(String(l.moneda ?? "CLP").toUpperCase()))
+      throw new BadRequestException(`La lista ${l.codigo} está en ${l.moneda}, una moneda histórica: no puede asignarse a un cliente. ${MSJ_MONEDA}`);
+  }
+
+  /** Código y nombre de la lista propia de cada cliente (la relación no está en Prisma). */
+  private async conListaPrecio<T extends { listaPrecioId?: string | null }>(filas: T[]): Promise<(T & { listaPrecio: { id: string; codigo: string; nombre: string; especial: boolean } | null })[]> {
+    const ids = [...new Set(filas.map((f) => f.listaPrecioId).filter((x): x is string => !!x))];
+    const ls = ids.length ? await this.prisma.listaPrecio.findMany({ where: { id: { in: ids } }, select: { id: true, codigo: true, nombre: true, especial: true } }) : [];
+    const porId = new Map(ls.map((l) => [l.id, l]));
+    return filas.map((f) => ({ ...f, listaPrecio: f.listaPrecioId ? porId.get(f.listaPrecioId) ?? null : null }));
   }
 
   /** Valida `tipo` contra la lista vigente (400 con mensaje claro si no vale). */
@@ -57,7 +78,7 @@ export class ClienteService {
     const tipos = new Map((await this.tiposCliente(opts.tenantId)).map((t) => [t.codigo, t]));
 
     return {
-      data: data.map((c) => ({
+      data: (await this.conListaPrecio(data)).map((c) => ({
         ...c,
         tipoEtiqueta: c.tipo ? tipos.get(c.tipo)?.etiqueta ?? c.tipo : null,
         tipoVigente: c.tipo ? tipos.get(c.tipo)?.activo ?? false : false,
@@ -87,13 +108,14 @@ export class ClienteService {
       },
     });
     if (!cliente) throw new NotFoundException(`Cliente ${id} no encontrado`);
-    return cliente;
+    return (await this.conListaPrecio([cliente]))[0];
   }
 
   async crear(data: any, tenantId?: string) {
     // tenantId sale del JWT; se ignora cualquier tenantId del body.
     const { tenantId: _ignore, ...rest } = data ?? {};
     await this.exigirTipo(rest.tipo ?? null, tenantId ?? DEV_TENANT);
+    await this.exigirListaPrecio(rest.listaPrecioId, tenantId ?? DEV_TENANT);
     const cliente = await this.prisma.cliente.create({
       data: {
         ...rest,
@@ -111,6 +133,7 @@ export class ClienteService {
     // Un cliente con tipo antiguo (pre-R2) se puede editar sin reclasificarlo;
     // si se cambia el tipo, el nuevo debe estar vigente.
     await this.exigirTipo(rest.tipo, actual.tenantId, actual.tipo);
+    await this.exigirListaPrecio(rest.listaPrecioId, actual.tenantId);
     const cliente = await this.prisma.cliente.update({
       where: { id },
       data: rest,

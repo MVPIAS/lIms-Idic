@@ -283,6 +283,20 @@ export class CotizacionController {
   }
 
   /**
+   * Contrato 4.1.3 · condiciones especiales del cliente que el formulario de la
+   * cotización precarga: lista de precios propia (y si está vigente), descuento
+   * especial, condiciones de texto y forma de pago habitual. ?clienteId=&fecha=
+   */
+  @Get("condiciones-cliente")
+  @RequierePermiso("cotizacion.ver")
+  @ApiOperation({ summary: "Condiciones especiales del cliente: lista propia, descuento, condiciones y forma de pago" })
+  async condicionesCliente(@Query("clienteId") clienteId: string, @Query("fecha") fechaQ: string | undefined, @Req() req: any) {
+    if (!z.string().uuid().safeParse(clienteId).success) throw new BadRequestException("Indique el cliente (clienteId).");
+    if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("La fecha debe tener el formato AAAA-MM-DD.");
+    return this.svc.condicionesCliente(req?.user?.tenantId, clienteId, fechaQ || undefined);
+  }
+
+  /**
    * Lista paginada con búsqueda en el servidor → `{ data, meta, conteos }`.
    * q (N°, cliente o referencia) · estado (o `historico`) · sinOt=1 · porVencer=1 · page · limit.
    */

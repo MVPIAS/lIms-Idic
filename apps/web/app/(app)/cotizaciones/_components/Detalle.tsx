@@ -113,7 +113,11 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
           {(cot.lineas ?? []).map((l: any) => (
             <tr key={l.id}>
               <td><span className="codigo">{l.ensayoCodigo ?? l.tipo}</span></td>
-              <td>{l.descripcion ?? "—"}</td>
+              <td>
+                {l.descripcion ?? "—"}
+                {/* Contrato 4.1.3: de qué lista (o de la ficha) salió el precio. */}
+                {l.precioOrigen && <small style={{ display: "block", color: "var(--muted)" }}>Precio: {l.precioOrigen}</small>}
+              </td>
               <td className="num">{l.cantidad}</td>
               <td className="num">{monto(l.precioUnitario, mon)}</td>
               <td className="num">{monto(l.subtotal, mon)}</td>

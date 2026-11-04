@@ -37,6 +37,8 @@ export type LineaForm = {
   guardada?: { precio: number; moneda: Moneda };
   /** De dónde salió el precio de una línea nueva. */
   origen?: { tipo: "lista" | "ficha"; texto: string };
+  /** Contrato 4.1.3 · origen guardado de una línea ya cotizada (lista propia, lista vigente o ficha). */
+  origenGuardado?: string | null;
   /** Línea heredada (HH/HM/…): se conserva con su precio, no se puede editar. */
   heredada?: { tipo: string; precioUnitario: number };
   /** Gasto tipificado (viático, pasaje, traslado): precio a mano, en la moneda de la cotización (EP-00 2.2). */
@@ -66,13 +68,30 @@ const cuerpoInst = (i?: Instrumento) =>
     : {};
 
 type Moneda = "CLP" | "USD";
-type PrecioEnsayo = { precio: number | null; moneda?: Moneda | null; bloqueo?: string | null; origen: "lista" | "ficha" | null; columna?: string | null; lista: { codigo: string; nombre: string; itemCodigo: string } | null };
+type PrecioEnsayo = {
+  precio: number | null;
+  moneda?: Moneda | null;
+  bloqueo?: string | null;
+  /** «lista_cliente» = lista de precios propia del cliente (contrato 4.1.3). */
+  origen: "lista" | "ficha" | "lista_cliente" | null;
+  columna?: string | null;
+  lista: { codigo: string; nombre: string; itemCodigo: string } | null;
+  /** Texto del origen calculado por la API (incluye el descuento especial del cliente). */
+  texto?: string | null;
+};
+/** Contrato 4.1.3 · condiciones especiales del cliente (GET /cotizaciones/condiciones-cliente). */
+type CondicionesCliente = {
+  lista: { id: string; codigo: string; nombre: string; moneda: string; vigente: boolean; motivo: string | null } | null;
+  descuentoPct: number;
+  condiciones: string | null;
+  formaPagoHabitual: string | null;
+};
 /** Frente f6: CLP sin decimales, USD a 2 decimales (misma regla que la API). */
 const redondear = (v: number, m: Moneda) => (m === "CLP" ? Math.round(v) : Math.round(v * 100) / 100);
 const origenDe = (p: PrecioEnsayo): { tipo: "lista" | "ficha"; texto: string } =>
-  p.origen === "lista" && p.lista
-    ? { tipo: "lista", texto: `${p.lista.nombre} · ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : ""}` }
-    : { tipo: "ficha", texto: "Ficha de costos del catálogo" };
+  (p.origen === "lista" || p.origen === "lista_cliente") && p.lista
+    ? { tipo: "lista", texto: p.texto || `${p.lista.nombre} · ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : ""}` }
+    : { tipo: "ficha", texto: p.texto || "Ficha de costos del catálogo" };
 
 /** Gastos que se pueden cotizar sin ensayo del catálogo (la API rechaza cualquier otra línea libre). */
 const TIPOS_GASTO = [
@@ -190,6 +209,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             cantidad: l.cantidad ?? 1,
             // El precio guardado está en la moneda de la cotización: se conserva mientras no cambie la moneda.
             guardada: { precio: Number(l.precioUnitario), moneda: (inicial?.moneda === "USD" ? "USD" : "CLP") as Moneda },
+            origenGuardado: l.precioOrigen ?? null,
             inst: instDe(l),
           }
         : TIPOS_GASTO.some((g) => g.v === l.tipo)
@@ -299,6 +319,27 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [precios]);
+  // --- Condiciones especiales del cliente (contrato 4.1.3) --------------------------
+  // Lista propia, descuento, condiciones de texto y forma de pago habitual. Al
+  // crear se precargan; al editar solo se muestran (se respeta lo guardado).
+  const [condCli, setCondCli] = useState<CondicionesCliente | null>(null);
+  useEffect(() => {
+    if (!clienteId) { setCondCli(null); return; }
+    let vivo = true;
+    pedir<CondicionesCliente>("GET", `/cotizaciones/condiciones-cliente?${new URLSearchParams({ clienteId, fecha: fechaEmision })}`)
+      .then((c) => {
+        if (!vivo) return;
+        setCondCli(c);
+        if (modo !== "crear") return;
+        if (c.formaPagoHabitual) setFormaPago(c.formaPagoHabitual);
+        const extra = c.condiciones?.trim();
+        if (extra) setCondiciones((t) => (t.includes(extra) ? t : (t.trim() ? `${t.trim()}\n${extra}` : extra).slice(0, MAX_COND)));
+      })
+      .catch(() => vivo && setCondCli(null));
+    return () => { vivo = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clienteId]);
+
   const precioDe = (e: Ensayo) => {
     const p = precios[e.id];
     return p && p.precio != null
@@ -350,8 +391,11 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   function elegirCentro(id: string) {
     setCentroCostoId(id);
     const c = cfg?.centrosCosto.find((x) => x.id === id);
-    // Precarga el texto base del laboratorio solo si el usuario no ha escrito nada.
-    if (c?.condicionesBase && !condiciones.trim()) setCondiciones(c.condicionesBase.slice(0, MAX_COND));
+    // Precarga el texto base del laboratorio solo si el usuario no ha escrito nada
+    // (o solo están las condiciones especiales del cliente: el texto base va antes).
+    const delCliente = condCli?.condiciones?.trim() ?? "";
+    if (c?.condicionesBase && (!condiciones.trim() || (delCliente && condiciones.trim() === delCliente)))
+      setCondiciones((delCliente ? `${c.condicionesBase}\n${delCliente}` : c.condicionesBase).slice(0, MAX_COND));
   }
 
   async function cambiarTipoCliente(codigo: string) {
@@ -603,6 +647,25 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             </div>
             <small style={{ color: "var(--muted)" }}>La referencia de la cotización se completa con el documento: «OF Nº …» u «Correo de fecha …».</small>
           </fieldset>
+          {condCli && (condCli.lista || condCli.descuentoPct > 0 || condCli.condiciones) && (
+            <div className={`alert ${condCli.lista && !condCli.lista.vigente ? "warn" : "info"}`} role="note" style={{ gridColumn: "1 / -1", margin: 0 }}>
+              <b>Condiciones especiales del cliente</b>
+              <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                {condCli.lista &&
+                  (condCli.lista.vigente ? (
+                    <li>
+                      Lista de precios propia «{condCli.lista.nombre}» ({condCli.lista.codigo}, {condCli.lista.moneda}): sus precios mandan sobre la lista general.
+                    </li>
+                  ) : (
+                    <li>{condCli.lista.motivo}</li>
+                  ))}
+                {condCli.descuentoPct > 0 && <li>Descuento especial de {String(condCli.descuentoPct).replace(".", ",")} % sobre el precio de cada ensayo.</li>}
+                {condCli.condiciones && <li>Condiciones especiales{modo === "crear" ? " agregadas a «Condiciones adicionales»" : ""}: «{condCli.condiciones}»</li>}
+                {modo === "crear" && condCli.formaPagoHabitual && <li>Forma de pago habitual del cliente precargada.</li>}
+              </ul>
+              <small style={{ color: "var(--muted)" }}>Se mantienen en la ficha del cliente (Comercial › Clientes › Editar).</small>
+            </div>
+          )}
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <label>Referencia</label>
             <input value={referencia} onChange={(e) => setReferencia(e.target.value)} maxLength={300} placeholder="Referencia del cliente / solicitud" />
@@ -616,7 +679,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
 
       {/* ---------------- Ensayos ---------------- */}
       <div className="card">
-        <h2>Ensayos cotizados <span className="right">precio de la lista de precios vigente o, si no está, de la ficha de costos</span></h2>
+        <h2>Ensayos cotizados <span className="right">precio de la lista propia del cliente, de la lista de precios vigente o, si no está, de la ficha de costos</span></h2>
         <div className="form-grid cols-3">
           <div className="field">
             <label>Buscar ensayo (código EN / nombre)</label>
@@ -658,6 +721,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             : reglaPrecio === "EJERCITO"
               ? "Cliente Ejército: el precio sale según el parámetro «Precio de la lista que toma un cliente Ejército» (por confirmar)."
               : "Elija el cliente: el precio de cada ensayo depende de su tipo (particular o Ejército)."}{" "}
+          {condCli?.lista?.vigente ? `Este cliente tiene lista de precios propia («${condCli.lista.nombre}»): manda sobre la lista general. ` : ""}
+          {condCli && condCli.descuentoPct > 0 ? `Se aplica su descuento especial de ${String(condCli.descuentoPct).replace(".", ",")} %. ` : ""}
           El precio no se escribe a mano. Solo los gastos (viáticos, pasajes, traslados) llevan valor manual.
         </small>
         {esLrb && reposicionLrb > 0 && lineas.some((l) => l.catEnsayoId) && (
@@ -684,7 +749,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
                   {!l.heredada && !l.gasto && tienePrecio(l) && (
                     <small style={{ display: "block", color: "var(--muted)" }}>
                       {conserva(l)
-                        ? "Precio cotizado (se conserva)"
+                        ? `Precio cotizado (se conserva)${l.origenGuardado ? ` · ${l.origenGuardado}` : ""}`
                         : `${l.origen?.texto ?? "Ficha de costos del catálogo"} · ${money(l.precioBase, l.monedaPrecio ?? "CLP")}${(l.monedaPrecio ?? "CLP") === "CLP" && moneda === "USD" ? " convertido con el dólar del día" : ""}`}
                     </small>
                   )}
