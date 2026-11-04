@@ -45,7 +45,7 @@ if [ ! -f .env ]; then
   exit 0
 fi
 
-echo ">> 7/7 · Build + arranque del stack (caddy, web, api, postgres, redis, minio, metabase)..."
+echo ">> 7/7 · Build + arranque del stack (caddy, web, api, postgres, redis, minio, metabase, respaldo)..."
 docker compose -f docker-compose.prod.yml --env-file .env up -d --build
 
 echo ">> Esperando a PostgreSQL y aplicando schema + seeds..."
@@ -66,6 +66,11 @@ for f in $(bash scripts/orden-sql.sh demo | sed 's|^|packages/db/|'); do
     docker compose -f docker-compose.prod.yml exec -T postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" < "$f" || echo "   (aviso: $f ya aplicado o con avisos)"
   fi
 done
+
+# Usuario de solo lectura de Metabase (§4.7.5): solo si el .env trae su contraseña.
+if [ -n "${METABASE_LECTURA_PASSWORD:-}" ]; then
+  bash scripts/metabase/crear-usuario-lectura.sh || echo "   (aviso: no se pudo habilitar lims_lectura; ver docs/RESPALDOS_Y_BI.md)"
+fi
 
 echo ">> Creando usuario administrador (si no existe)..."
 docker compose -f docker-compose.prod.yml exec -T api node dist/cli/crear-admin.js --usuario admin --rol SUPERADMIN --nombre "Administrador Aiuken" || echo "   (crea el admin manualmente si la API aún no está lista)"

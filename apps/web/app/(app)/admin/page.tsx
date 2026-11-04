@@ -10,6 +10,8 @@
 import Link from "next/link";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "@/lib/api";
+import { llamar } from "@/lib/laboratorio";
+import { fechaHora } from "@/lib/format";
 import {
   TIPOS_UNIDAD, adminApi, esNoDisponible, leerAcceso, mockActivo, puede, type Acceso,
 } from "@/lib/admin";
@@ -87,6 +89,18 @@ const TARJETAS: Tarjeta[] = [
       return {
         valor: cfg?.host ? (cfg.activo ? "Activo" : "Inactivo") : "Sin configurar",
         detalle: cfg?.host ? `${cfg.host}:${cfg.puerto ?? ""}` : "define el servidor SMTP",
+      };
+    },
+  },
+  {
+    href: "/admin/respaldos", titulo: "Respaldos", icono: "💾", color: "#5b6b7a", permiso: "admin.respaldos",
+    texto: "Copias de seguridad automáticas de la base de datos: último respaldo, próximo programado, retención e historial. Aviso si un respaldo falla.",
+    cargar: async () => {
+      if (mockActivo()) return { valor: "—", detalle: "no incluido en el modo ejemplo" };
+      const r = await llamar<{ estado: { color: string; titulo: string }; ultimoOk: { fin: string | null } | null }>("GET", "/respaldos");
+      return {
+        valor: <span style={{ color: r.estado.color === "verde" ? "#1f8a5b" : "#c0392b" }}>{r.estado.color === "verde" ? "Al día" : "Revisar"}</span>,
+        detalle: r.ultimoOk?.fin ? `último correcto: ${fechaHora(r.ultimoOk.fin)}` : r.estado.titulo,
       };
     },
   },

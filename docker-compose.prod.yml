@@ -47,6 +47,9 @@ services:
       CORS_ORIGINS: https://${DOMAIN}
       # URL impresa en el pie y en el QR de los documentos (pantalla /verificar/<código>).
       URL_VERIFICACION: ${URL_VERIFICACION:-https://${DOMAIN}/verificar}
+      # Inteligencia de negocio (§4.7.5): dirección de Metabase que abre el menú
+      # «Análisis e inteligencia de negocio». Vacía = la pantalla dice que no está configurado.
+      URL_BI: ${URL_BI:-https://bi.${DOMAIN}}
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${MINIO_ROOT_USER}
       S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
@@ -121,7 +124,11 @@ services:
     # consola/API solo internas; exponer vía Caddy si se necesita
 
   metabase:
-    image: metabase/metabase:latest
+    # Versión FIJA (línea LTS 0.64): «latest» es una etiqueta móvil y un
+    # «docker compose pull» podía cambiar de versión sin aviso. Metabase no admite
+    # volver a una versión anterior sobre su base: para subir de versión, cambie
+    # METABASE_IMAGE en el .env tras respaldar (docs/RESPALDOS_Y_BI.md §2.1).
+    image: ${METABASE_IMAGE:-metabase/metabase:v0.64.5.1}
     container_name: lims-metabase
     restart: unless-stopped
     environment:
@@ -133,7 +140,55 @@ services:
       MB_DB_USER: ${POSTGRES_USER}
       MB_DB_PASS: ${POSTGRES_PASSWORD}
       MB_DB_HOST: postgres
+      # Dirección pública (bi.<dominio>, Caddyfile): enlaces y correos de Metabase.
+      MB_SITE_URL: https://bi.${DOMAIN}
+      MB_SITE_LOCALE: es
+      # Sin telemetría hacia el fabricante ni comprobación de versiones.
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      JAVA_TIMEZONE: ${ZONA_HORARIA:-America/Santiago}
+      TZ: ${ZONA_HORARIA:-America/Santiago}
     expose: ["3000"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 180s
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # Respaldo programado de la base del LIMS (contrato §4.8.4). pg_dump diario a
+  # la hora de «Parámetros del sistema › Respaldos de la base de datos»,
+  # verificado, con retención diaria/semanal y registro de cada ejecución en
+  # `respaldo_registro` (pantalla Administración › Respaldos).
+  # Guía y restauración: docs/RESPALDOS_Y_BI.md. Respaldo inmediato desde la consola:
+  #   docker compose -f docker-compose.prod.yml run --rm respaldo --ahora
+  respaldo:
+    # Misma imagen que la base: pg_dump/pg_restore de la misma versión mayor.
+    image: postgres:16-alpine
+    container_name: lims-respaldo
+    restart: unless-stopped
+    entrypoint: ["bash", "/scripts/respaldo-programado.sh"]
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      METABASE_DB: ${METABASE_DB:-lims_metabase}
+      ZONA_HORARIA: ${ZONA_HORARIA:-America/Santiago}
+      TZ: ${ZONA_HORARIA:-America/Santiago}
+      # Valores de partida si la base aún no tiene los parámetros «respaldos.*».
+      RESPALDO_HORA: ${RESPALDO_HORA:-2}
+      RESPALDO_RETENCION_DIARIOS: ${RESPALDO_RETENCION_DIARIOS:-14}
+      RESPALDO_RETENCION_SEMANALES: ${RESPALDO_RETENCION_SEMANALES:-8}
+      RESPALDO_SERVIDOR: ${RESPALDO_SERVIDOR:-preproduccion}
+    volumes:
+      - ./scripts/backup:/scripts:ro
+      # Carpeta del HOST con los respaldos (700, solo root). Llévela también fuera
+      # del servidor: un respaldo en el mismo disco no protege de su pérdida.
+      - ${RESPALDO_HOST_DIR:-./respaldos}:/respaldos
     depends_on:
       postgres: { condition: service_healthy }
 

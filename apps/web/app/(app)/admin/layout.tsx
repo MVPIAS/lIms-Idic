@@ -12,6 +12,7 @@ const SECCIONES = [
   { href: "/admin/roles", label: "Roles y permisos", icono: "🔑", perm: "admin.roles" },
   { href: "/admin/firmas", label: "Matriz de firmas", icono: "✍", perm: "admin.firmas" },
   { href: "/admin/numeracion", label: "Numeración", icono: "№", perm: "documento.numeracion" },
+  { href: "/admin/respaldos", label: "Respaldos", icono: "💾", perm: "admin.respaldos" },
 ];
 
 /** Área de Administración: proveedores (toasts/confirmación) + sub-navegación. */
