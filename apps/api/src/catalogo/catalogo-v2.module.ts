@@ -2,16 +2,20 @@ import { erroresFactorMetodo } from "../laboratorio/factor";
 import { hoyEnChile, isoFecha, soloFecha } from "../cotizacion/validez";
 import { itemsListaVigente, precioPanel } from "../lista-precio/precio-lista";
 import {
+  Body,
   Controller,
   Get,
   Module,
   Param,
   ParseUUIDPipe,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards,
   Injectable,
 } from "@nestjs/common";
+import { conVersionMetodo, insertarVersionMetodo, motivoMetodo, revisionesActuales, versionesDeMetodo } from "./metodo-version";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
@@ -310,7 +314,65 @@ export const CatMetodoUpdate = CatMetodoBase.partial().superRefine(factorComplet
 export class CatMetodoController extends BaseCrudController {
   protected createSchema = CatMetodoCreate;
   protected updateSchema = CatMetodoUpdate;
-  constructor(protected svc: CatMetodoService) { super(); }
+  constructor(protected svc: CatMetodoService, private readonly prisma: PrismaService) { super(); }
+
+  /** Listado con la revisión vigente de cada método (columna «Rev.», contrato §4.3.3). */
+  @Get()
+  async listar(
+    @Query("page") page = "1",
+    @Query("limit") limit = "20",
+    @Query("search") search?: string,
+    @Req() req?: any,
+  ) {
+    const r: any = await super.listar(page, limit, search, req);
+    const revs = await revisionesActuales(this.prisma as any, (r?.data ?? []).map((m: any) => m.id));
+    return { ...r, data: (r?.data ?? []).map((m: any) => ({ ...m, revision: revs.get(m.id) ?? null })) };
+  }
+
+  /** Alta: nace la revisión 1 del método (quién y cuándo). */
+  @Post()
+  async crear(@Body() body: unknown, @Req() req: any) {
+    const datos = this.createSchema.parse(body) as Record<string, unknown>;
+    const { tenantId: _t, ...rest } = datos;
+    const tenantId = req?.user?.tenantId ?? DEV_TENANT;
+    return this.prisma.$transaction(async (tx) => {
+      const creado = await tx.catMetodo.create({ data: { ...(rest as any), tenantId } });
+      const revision = await insertarVersionMetodo(tx as any, {
+        metodoId: creado.id,
+        origen: "alta",
+        motivo: motivoMetodo((body as any)?.motivoCambio) ?? "Alta del método.",
+        cambios: [],
+        usuarioId: req?.user?.sub,
+      });
+      return { ...creado, revision };
+    });
+  }
+
+  /**
+   * Edición con control de cambios: si cambia algo, pide el motivo (parámetro
+   * metodo_version.motivo) y crea la revisión siguiente con lo que cambió.
+   */
+  @Patch(":id")
+  async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const datos = this.updateSchema.parse(body);
+    const tenantId = req?.user?.tenantId;
+    await this.svc.detalle(id, tenantId); // existencia + tenant (404)
+    const { tenantId: _t, ...rest } = (datos ?? {}) as Record<string, unknown>;
+    const r = await conVersionMetodo(
+      this.prisma as any,
+      { tenantId, metodoId: id, usuarioId: req?.user?.sub, motivo: (body as any)?.motivoCambio, origen: "edicion" },
+      (tx) => tx.catMetodo.update({ where: { id }, data: rest }),
+    );
+    return { ...(r.valor as any), revision: r.revision, cambios: r.cambios };
+  }
+
+  /** «Historial de versiones» del método: revisiones con fecha, responsable, motivo y cambios. */
+  @Get(":id/versiones")
+  @ApiOperation({ summary: "Historial de versiones del método (contrato §4.3.3)" })
+  async versiones(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const m: any = await this.svc.detalle(id, req?.user?.tenantId);
+    return { metodo: { id: m.id, codigo: m.codigo, nombre: m.nombre }, versiones: await versionesDeMetodo(this.prisma as any, id) };
+  }
 }
 
 /* --------- Nivel 3 · Analito --------- */

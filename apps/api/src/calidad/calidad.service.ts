@@ -16,6 +16,7 @@ import { hoyCl } from "../ot/plazos";
 import { emitirEvento } from "../common/eventos";
 import { filasDePlanilla } from "./formula-excel";
 import { leerConfigResultados } from "./reanalisis";
+import { conVersionMetodo } from "../catalogo/metodo-version";
 import { codigoAlicuota, erroresAcreditacion, erroresMovimientoAlicuota, planMovimientoAlicuota, type MovimientoAlicuota } from "./reglas-calidad";
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
@@ -276,7 +277,12 @@ export class CalidadService {
     const v = body?.margenPct;
     const n = v === null || v === "" || v === undefined ? null : Number(String(v).replace(",", "."));
     if (n != null && !(Number.isFinite(n) && n >= 0 && n <= 50)) throw new BadRequestException("El margen de advertencia va de 0 a 50 %.");
-    await this.prisma.$executeRawUnsafe(`UPDATE cat_metodo SET margen_advertencia_pct = $2 WHERE id = $1::uuid`, metodoId, n);
+    // Queda como revisión del método (contrato §4.3.3); esta pantalla aún no pide motivo.
+    await conVersionMetodo(
+      this.prisma as any,
+      { tenantId: tenantDe(req), metodoId, usuarioId: usuarioDe(req), motivo: texto(body?.motivo, 500) ?? "Margen de advertencia (Calidad › Métodos).", origen: "margen", exigirMotivo: false },
+      (tx) => tx.$executeRawUnsafe(`UPDATE cat_metodo SET margen_advertencia_pct = $2 WHERE id = $1::uuid`, metodoId, n),
+    );
     if ((m.margenAdvertenciaPct ?? null) !== n)
       await this.auditar(req, "margen_advertencia", "cat_metodo", metodoId, { metodo: m.codigo, anterior: m.margenAdvertenciaPct ?? null, nuevo: n });
     return this.metodo(req, metodoId);

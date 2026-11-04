@@ -26,6 +26,8 @@ import { DEV_TENANT } from "../common/base-crud.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
+import { leerModoBloqueoQc } from "./qc-ejecucion";
+import { conVersionMetodo } from "../catalogo/metodo-version";
 import { motivoNoRevisable, resultadoAlRegistrar, CRITERIO_DEFECTO, TIPOS_QC, criterioAplicable, erroresConfigQc, tiposQcFaltantes, evaluarCualitativo, faltantesMicrobiologico } from "./reglas-qc";
 
 /**
@@ -41,7 +43,9 @@ import { motivoNoRevisable, resultadoAlRegistrar, CRITERIO_DEFECTO, TIPOS_QC, cr
  * El estado global de una OT (`estadoOt`) lo consume además el GATE de emisión
  * de informe (plantilla-render.service.emitir): una OT no puede emitir mientras
  * un método presente en sus muestras con `qc_requerido=true` no tenga al menos
- * un `qc_control` con resultado 'aprobado'.
+ * un `qc_control` con resultado 'aprobado'. Con el parámetro qc.bloqueo en
+ * «ejecucion» (por defecto) tampoco se capturan, revisan ni aprueban los
+ * resultados de ese método (qc-ejecucion.ts).
  *
  * DDL: packages/db/align_qc.sql. Permisos RBAC reales del dominio laboratorio:
  *   · resultado.ver     → lectura del QC.
@@ -134,6 +138,8 @@ const ConfigQcSchema = z.object({
   qcRequerido: z.boolean(),
   qcTipos: z.array(z.string().max(20)).max(6).optional(),
   qcCriterios: z.record(z.string().max(20), z.string().max(40)).optional(),
+  /** Motivo del cambio: queda en el historial de versiones del método (contrato §4.3.3). */
+  motivo: z.string().max(500).optional(),
 });
 
 const RevisarControlSchema = z.object({
@@ -483,6 +489,8 @@ export class QcService {
 
     return {
       otId,
+      // Qué bloquea el QC pendiente (parámetro qc.bloqueo): captura y aprobación + informe, o solo el informe.
+      modoBloqueo: await leerModoBloqueoQc(this.prisma as any, tenantId),
       estado: { aprobado: faltantes.length === 0, faltantes },
       metodos,
       controles: controles.map((c) => ({ ...c, ...(porId.get(c.id) ?? {}) })),
@@ -585,14 +593,20 @@ export class QcController {
     if (d.qcTipos?.length && d.qcRequerido === false) e.push("Para exigir tipos de control, marque «QC requerido».");
     if (e.length) throw new BadRequestException(e.join(" "));
     const criterios = Object.fromEntries(Object.entries(d.qcCriterios ?? {}).filter(([, v]) => v && String(v).trim()).map(([k, v]) => [k, String(v).trim().replace(/,/g, ".")]));
-    const n = await this.prisma.$executeRawUnsafe(
-      `UPDATE cat_metodo SET qc_requerido = $3, qc_tipos = $4::text[], qc_criterios = $5::jsonb
-        WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
-      id,
-      tenantDe(req),
-      d.qcRequerido,
-      [...new Set(d.qcTipos ?? [])],
-      JSON.stringify(criterios),
+    // Cambiar el QC del método crea una revisión en su historial de versiones (con motivo).
+    const { valor: n } = await conVersionMetodo(
+      this.prisma as any,
+      { tenantId: tenantDe(req), metodoId: id, usuarioId: req?.user?.sub, motivo: d.motivo, origen: "qc" },
+      (tx) =>
+        tx.$executeRawUnsafe(
+          `UPDATE cat_metodo SET qc_requerido = $3, qc_tipos = $4::text[], qc_criterios = $5::jsonb
+            WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
+          id,
+          tenantDe(req),
+          d.qcRequerido,
+          [...new Set(d.qcTipos ?? [])],
+          JSON.stringify(criterios),
+        ) as Promise<number>,
     );
     if (!n) throw new NotFoundException("Método no encontrado.");
     return this.configMetodo(id, req);
