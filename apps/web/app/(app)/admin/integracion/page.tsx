@@ -64,8 +64,9 @@ export default function IntegracionPage() {
 function Integracion() {
   const { puede } = usePermisos();
   const gestiona = puede("integracion.tokens");
-  const [pestana, setPestana] = useState<"tokens" | "docs">(gestiona ? "tokens" : "docs");
-  const tab = gestiona ? pestana : "docs";
+  // Sin elección del usuario se abre «Tokens» a quien los gestiona (los permisos llegan tras el primer render).
+  const [pestana, setPestana] = useState<"tokens" | "docs" | null>(null);
+  const tab = gestiona ? pestana ?? "tokens" : "docs";
 
   return (
     <div>
@@ -146,7 +147,7 @@ function Tokens() {
                     {t.rol.nombre}
                     {t.unidad && <small style={{ display: "block", color: "var(--muted)" }}>en {t.unidad.codigo} · {t.unidad.nombre}</small>}
                   </td>
-                  <td><span className="codigo">…{t.sufijo}</span></td>
+                  <td style={{ whiteSpace: "nowrap" }}><span className="codigo" title="Últimos caracteres del token">…{t.sufijo}</span></td>
                   <td style={{ whiteSpace: "nowrap" }}>{fechaDia(t.expiraAt)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     {t.ultimoUsoAt ? <>{fechaHora(t.ultimoUsoAt)}<small style={{ display: "block", color: "var(--muted)" }}>{t.usos} uso(s){t.ultimoUsoIp ? ` · IP ${t.ultimoUsoIp}` : ""}</small></> : <i style={{ color: "var(--muted)" }}>Nunca usado</i>}
@@ -169,7 +170,7 @@ function Tokens() {
 
       <details className="card" style={{ marginTop: 12 }}>
         <summary style={{ cursor: "pointer", fontWeight: 600 }}>Cómo se usa un token</summary>
-        <ol style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.6 }}>
+        <ol style={{ margin: "8px 0 0", paddingLeft: 18, lineHeight: 1.6, listStyle: "decimal" }}>
           <li>El sistema externo envía en cada petición la cabecera <span className="codigo">Authorization: Bearer &lt;token&gt;</span>.</li>
           <li>El token actúa con los permisos del rol asignado (y solo en su unidad, si el rol es por laboratorio). Además puede leer la documentación de la API.</li>
           <li>Cada uso actualiza «Último uso» y queda en Auditoría con la cuenta <span className="codigo">api.…</span> del token.</li>
@@ -413,7 +414,7 @@ function Documentacion() {
     <>
       <div className="card">
         <h2>{doc.data?.info?.title} <span className="right">versión {doc.data?.info?.version} · {total} operaciones</span></h2>
-        <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, fontSize: 12.5 }}>
+        <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6, fontSize: 12.5, listStyle: "disc" }}>
           <li><b>Dirección base:</b> <span className="codigo">{typeof window !== "undefined" ? window.location.origin : ""}/api</span></li>
           <li><b>Autenticación:</b> cabecera <span className="codigo">Authorization: Bearer &lt;token&gt;</span> con un token de integración (pestaña «Tokens de integración») o de sesión.</li>
           <li><b>Permisos:</b> cada operación indica el permiso que exige; sin él la API responde 403. Las rutas por laboratorio filtran además por la unidad del rol.</li>
