@@ -163,6 +163,8 @@ export const NAV: SeccionNav[] = [
     icon: "📊",
     items: [
       { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "csv excel xlsx tabla dinamica grafico plantilla" },
+      // Brecha §4.7.5: enlace a Metabase (bi.<dominio>), que se abre en otra pestaña.
+      { href: "/bi", label: "Análisis e inteligencia de negocio (Metabase)", icon: "📈", perm: "reporte.ver", claves: "metabase bi tableros dashboard analisis inteligencia de negocio graficos" },
       { href: "/agenda", label: "Agenda de recursos y eventos", icon: "📅", perm: "agenda.ver", claves: "calendario reserva vehiculo sala reunion salida terreno disponibilidad costos recurrente" },
       { href: "/documentos/gestor", label: "Gestor documental", icon: "📂", perm: "documento.ver", claves: "carpetas versiones procedimientos instructivos archivos subir" },
       { href: "/documentos", label: "Buscador de documentos emitidos", icon: "🗄", perm: "ot.ver" },
@@ -227,6 +229,7 @@ export const NAV: SeccionNav[] = [
       { href: "/admin/roles", label: "Roles y permisos", icon: "🔑", perm: ["admin.roles", "admin.usuarios"] },
       { href: "/admin/firmas", label: "Matriz de firmas", icon: "✒", perm: ["admin.firmas", "admin.usuarios"] },
       { href: "/admin/numeracion", label: "Numeración de documentos", icon: "№", perm: "documento.numeracion", claves: "correlativo numero informe certificado" },
+      { href: "/admin/respaldos", label: "Respaldos", icon: "💾", perm: "admin.respaldos", claves: "backup copia de seguridad pg_dump restaurar respaldo" },
       { href: "/catalogo/parametros", label: "Parámetros del sistema", icon: "🎛", perm: "catalogo.gestionar", claves: "listas combos" },
       { href: "/config-correo", label: "Correo saliente", icon: "✉", perm: "admin.usuarios", claves: "smtp" },
       { href: "/usuarios", label: "Usuarios (vista clásica)", icon: "👤", perm: "admin.usuarios" },

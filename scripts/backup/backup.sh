@@ -51,7 +51,40 @@ log()   { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*"; }
 fatal() {
   log "ERROR: $*"
   printf 'estado=ERROR\nfecha=%s\nmensaje=%s\n' "$(date -Is)" "$*" > "$ESTADO" 2>/dev/null || true
+  registro_fin ERROR "$*"
   exit 1
+}
+
+# --- Registro en la base (pantalla Administración › Respaldos, §4.8.4) --------
+# Cada copia queda en `respaldo_registro` y el latido en `respaldo_servicio`
+# (align_brechas_6.sql). Nunca hace fallar la copia: si la tabla no existe o la
+# base no responde, el respaldo sigue y solo se pierde la fila.
+REG_ID=""
+T0="$(date +%s)"
+bd_sql() {
+  $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+    psql -X -q -A -t -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 "$@" -f - 2>/dev/null
+}
+registro_inicio() {
+  REG_ID="$(bd_sql -v srv="$(hostname)" <<'SQL' | head -1 | tr -d '[:space:]'
+INSERT INTO respaldo_registro (tipo, resultado, inicio, servidor) VALUES ('programado', 'EN_CURSO', now(), :'srv') RETURNING id;
+SQL
+)" || REG_ID=""
+  bd_sql -v rd="$RET_D" -v rs="$RET_S" -v rm="$RET_M" -v dir="$BACKUP_DIR" -v srv="$(hostname)" <<'SQL' >/dev/null || true
+INSERT INTO respaldo_servicio (id, modo, latido_at, detalle)
+VALUES (1, 'systemd', now(), jsonb_build_object('hora', '02:15', 'zona', 'America/Santiago',
+  'retencion_diarios', :'rd'::int, 'retencion_semanales', :'rs'::int, 'retencion_mensuales', :'rm'::int,
+  'directorio', :'dir', 'servidor', :'srv', 'manual', false))
+ON CONFLICT (id) DO UPDATE SET modo = EXCLUDED.modo, latido_at = EXCLUDED.latido_at, detalle = EXCLUDED.detalle;
+SQL
+}
+registro_fin() { # resultado mensaje [tamano archivo nivel]
+  [ -n "$REG_ID" ] || return 0
+  bd_sql -v id="$REG_ID" -v res="$1" -v msg="$2" -v tam="${3:-}" -v arch="${4:-}" -v niv="${5:-}" -v dur="$(( $(date +%s) - T0 ))" <<'SQL' >/dev/null || true
+UPDATE respaldo_registro SET resultado = :'res', fin = now(), mensaje = :'msg', duracion_s = :'dur'::int,
+       tamano_bytes = NULLIF(:'tam', '')::bigint, archivo = NULLIF(:'arch', ''), nivel = NULLIF(:'niv', '')
+ WHERE id = :'id'::bigint;
+SQL
 }
 
 FECHA="$(date '+%Y%m%d-%H%M%S')"
@@ -116,6 +149,7 @@ log "Espacio libre en destino: ${LIBRE_MB} MB"
 
 $COMPOSE ps postgres --status running 2>/dev/null | grep -q lims-postgres \
   || fatal "El contenedor de PostgreSQL no está en ejecución."
+registro_inicio
 
 # --- 1. PostgreSQL ------------------------------------------------------------
 # $BACKUP_DIR está montado como /backup dentro del contenedor de PostgreSQL
@@ -225,5 +259,7 @@ rotar mensuales "$RET_M"
 printf 'estado=OK\nfecha=%s\nruta=%s\ntipo=%s\ntamano_bytes=%s\n' \
   "$(date -Is)" "$DESTINO" "$TIPO" "$(du -sb "$DESTINO" | cut -f1)" > "$ESTADO"
 
+NIVEL="diario"; [ "$PROMOVER_SEMANAL" = "si" ] && NIVEL="$NIVEL+semanal"; [ "$PROMOVER_MENSUAL" = "si" ] && NIVEL="$NIVEL+mensual"
+registro_fin OK "Copia correcta y verificada (pg_restore --list)." "$(du -sb "$DESTINO" | cut -f1)" "$DUMP_NOMBRE" "$NIVEL"
 log "═══ COPIA CORRECTA Y VERIFICADA · $(du -sh "$DESTINO" | cut -f1) · $DESTINO"
 log "Total en $BACKUP_DIR: $(du -sh "$BACKUP_DIR" | cut -f1) ($(find "$BACKUP_DIR" -maxdepth 2 -type d -name '20*' | wc -l) copias)"

@@ -62,6 +62,7 @@ import { EspecificacionTecnicaModule } from "./especificacion-tecnica/et.module"
 import { MuestreoModule } from "./muestreo/muestreo.module";
 import { FormulariosModule } from "./formularios/formularios.module";
 import { ReglasCapturaModule } from "./formularios/reglas-captura.service";
+import { SistemaModule } from "./sistema/sistema.module";
 
 /**
  * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
@@ -128,6 +129,8 @@ function prettyTransport() {
     MensajeriaModule,
     EncuestaModule,
     ReportesModule,
+    // Brechas §4.8.4 y §4.7.5: respaldos programados (Administración › Respaldos) y enlace a Metabase.
+    SistemaModule,
     AvisosModule,
     SeguimientoModule,
     OficioModule,

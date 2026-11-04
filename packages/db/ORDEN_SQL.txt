@@ -139,4 +139,5 @@ align_correcciones_v30_3.sql
 align_correcciones_rec_5.sql
 align_correcciones_rec_7.sql
 align_correcciones_rec_8.sql
+align_brechas_6.sql
 align_cierre_permisos.sql
