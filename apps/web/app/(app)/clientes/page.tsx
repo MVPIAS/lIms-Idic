@@ -17,6 +17,20 @@ const conDiasCredito = (d: any) => {
   const n = String(diasCredito ?? "").trim();
   return n === "" ? resto : { ...resto, diasCredito: Number(n) };
 };
+/**
+ * Contrato 4.1.3 · al editar, dejar vacíos la lista propia o el descuento los
+ * QUITA (el formulario omite las referencias vacías; aquí viajan como null).
+ */
+const alActualizar = (d: any) => {
+  const r = conDiasCredito(d);
+  return {
+    ...r,
+    listaPrecioId: r.listaPrecioId || null,
+    descuentoEspecialPct: r.descuentoEspecialPct === "" || r.descuentoEspecialPct == null ? null : r.descuentoEspecialPct,
+    condicionesEspeciales: String(r.condicionesEspeciales ?? "").trim() || null,
+  };
+};
+const pct = (v: any) => `${String(Number(v)).replace(".", ",")} %`;
 
 export default function ClientesPage() {
   const [plantasDe, setPlantasDe] = useState<{ id: string; razonSocial: string } | null>(null);
@@ -33,6 +47,7 @@ export default function ClientesPage() {
     <>
     <CrudTable
       prepararCrear={conDiasCredito}
+      prepararActualizar={alActualizar}
       accionesFila={(row) => (
         <>
           <button type="button" className="btn outline sm" onClick={() => setHistorialDe({ id: row.id, razonSocial: row.razonSocial })}
@@ -68,6 +83,21 @@ export default function ClientesPage() {
         },
         { campo: "ciudad", titulo: "Ciudad" },
         { campo: "telefono", titulo: "Teléfono" },
+        {
+          campo: "listaPrecioId",
+          titulo: "Condiciones especiales",
+          // Contrato 4.1.3: lista de precios propia y descuento especial (se aplican al cotizarle).
+          render: (_v, row) =>
+            row?.listaPrecio || Number(row?.descuentoEspecialPct) > 0 || row?.condicionesEspeciales ? (
+              <span style={{ fontSize: 12 }}>
+                {row.listaPrecio && <span className="tag" title="Lista de precios propia: manda al cotizarle">{row.listaPrecio.codigo}</span>}
+                {Number(row.descuentoEspecialPct) > 0 && <span className="pill blue" style={{ marginLeft: 4 }}>−{pct(row.descuentoEspecialPct)}</span>}
+                {row.condicionesEspeciales && <span className="pill gray" style={{ marginLeft: 4 }} title={row.condicionesEspeciales}>condiciones</span>}
+              </span>
+            ) : (
+              "—"
+            ),
+        },
         { campo: "bloqueado", titulo: "Estado", render: badge },
       ]}
       campos={[
@@ -91,6 +121,28 @@ export default function ClientesPage() {
         { campo: "contactoCargo", label: "Contacto principal · cargo" },
         { campo: "contactoEmail", label: "Contacto principal · correo", tipo: "email" },
         { campo: "contactoTelefono", label: "Contacto principal · teléfono", tipo: "telefono" },
+        // Contrato 4.1.1 / 4.1.3: condiciones comerciales especiales del cliente.
+        {
+          campo: "listaPrecioId",
+          label: "Lista de precios propia",
+          tipo: "ref",
+          refRecurso: "listas-precio",
+          refLabel: (r: any) => `${r.codigo ?? ""} · ${r.nombre ?? ""}${r.especial ? " (especial de cliente)" : ""}`,
+          ayuda: "Opcional. Al cotizarle, los precios de esta lista mandan sobre la lista general (si está vigente y tiene el ensayo). Déjela vacía para usar la lista general.",
+        },
+        {
+          campo: "descuentoEspecialPct",
+          label: "Descuento especial (%)",
+          tipo: "number",
+          ayuda: "Opcional, de 0 a 99,99. Se descuenta del precio de cada ensayo que se le cotice y queda indicado en la línea.",
+        },
+        {
+          campo: "condicionesEspeciales",
+          label: "Condiciones especiales (se precargan en su cotización)",
+          tipo: "textarea",
+          span: 3,
+          ayuda: "Texto que se agrega a «Condiciones adicionales» al cotizarle (p. ej. pago a 60 días, entrega de muestras en planta). La forma de pago habitual también se precarga.",
+        },
       ]}
     />
     {plantasDe && <Plantas cliente={plantasDe} onCerrar={() => setPlantasDe(null)} />}

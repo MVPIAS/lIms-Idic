@@ -13,6 +13,8 @@
  * `vigente_hasta` (o sin fin) y en una moneda de la operación (frente f5: una
  * lista histórica en UF o EUR no da precios nuevos). Si dos listas vigentes tienen el ensayo, manda la
  * de la moneda pedida (la de la cotización) y, entre ellas, la de `vigente_desde` más reciente.
+ * Las listas «especiales de cliente» (contrato 4.1.3) no son generales: solo las
+ * toma la cotización al cliente que las tiene asignadas (`elegirPrecioCliente`).
  *
  * Frente f6 · el precio CONSERVA LA MONEDA DE SU LISTA (`precioParaCotizacion`):
  *   · misma moneda que la cotización → tal cual;
@@ -45,10 +47,14 @@ export interface PrecioElegido {
   precio: number;
   /** Moneda del precio: la de su lista; la ficha de costos está en CLP. */
   moneda: MonedaOperacion;
-  origen: "lista" | "ficha";
+  /** «lista_cliente» = lista de precios propia del cliente (contrato 4.1.3), con prioridad sobre la general. */
+  origen: "lista" | "ficha" | "lista_cliente";
   /** Columna de la lista que se usó. */
   columna?: "neto" | "costo_total";
   lista?: { codigo: string; nombre: string; itemCodigo: string };
+  /** Descuento especial del cliente aplicado (%) y el precio antes de aplicarlo. */
+  descuentoPct?: number;
+  precioSinDescuento?: number;
 }
 
 /** Precio que corresponde al ensayo para el tipo de cliente (null si no hay ni lista ni ficha con valor). */
@@ -65,6 +71,74 @@ export function elegirPrecio(
     if (conValor(v)) return { precio: Number(v), moneda: item.moneda ?? "CLP", origen: "lista", columna, lista: { codigo: item.listaCodigo, nombre: item.listaNombre, itemCodigo: item.itemCodigo } };
   }
   return conValor(precioFicha) ? { precio: Number(precioFicha), moneda: "CLP", origen: "ficha" } : null;
+}
+
+/**
+ * Contrato 4.1.1 / 4.1.3 · precio para un cliente con condiciones especiales.
+ * Orden de prioridad:
+ *   1. Lista de precios PROPIA del cliente (ficha del cliente › «Lista de
+ *      precios propia»), si está vigente y tiene el ensayo: se toma su precio
+ *      tal cual, sea cual sea el tipo de cliente (es un precio negociado para él).
+ *   2. Lista de precios vigente general (regla de `elegirPrecio`: neto para un
+ *      particular; para el Ejército según `precio_ejercito`).
+ *   3. Ficha de costos del ensayo.
+ * Sobre el resultado se aplica el descuento especial del cliente (%), si tiene.
+ */
+export function elegirPrecioCliente(
+  itemCliente: ItemListaVigente | null | undefined,
+  itemGeneral: ItemListaVigente | null | undefined,
+  precioFicha: number | null,
+  regla: ReglaValidez,
+  precioEjercito: PrecioEjercito,
+  descuentoPct: number | null | undefined = 0,
+): PrecioElegido | null {
+  const propio: PrecioElegido | null =
+    itemCliente && Number.isFinite(Number(itemCliente.precio)) && Number(itemCliente.precio) > 0
+      ? {
+          precio: Number(itemCliente.precio),
+          moneda: itemCliente.moneda ?? "CLP",
+          origen: "lista_cliente",
+          columna: "neto",
+          lista: { codigo: itemCliente.listaCodigo, nombre: itemCliente.listaNombre, itemCodigo: itemCliente.itemCodigo },
+        }
+      : null;
+  return aplicarDescuento(propio ?? elegirPrecio(itemGeneral, precioFicha, regla, precioEjercito), descuentoPct);
+}
+
+/** Descuento especial del cliente (0 a menos de 100 %) sobre el precio elegido; sin descuento, igual. */
+export function aplicarDescuento(p: PrecioElegido | null, descuentoPct: number | null | undefined): PrecioElegido | null {
+  const d = Number(descuentoPct);
+  if (!p || !(Number.isFinite(d) && d > 0 && d < 100)) return p;
+  return { ...p, precioSinDescuento: p.precio, descuentoPct: d, precio: Math.round(p.precio * (1 - d / 100) * 100) / 100 };
+}
+
+/** Porcentaje «12,5 %» a la chilena. */
+const pctTexto = (n: number) => `${String(Math.round(n * 100) / 100).replace(".", ",")} %`;
+
+/**
+ * Texto del origen del precio que se muestra bajo cada línea de la cotización
+ * y se guarda en `linea_cotizacion.precio_origen`.
+ */
+export function textoOrigenPrecio(p: Pick<PrecioElegido, "origen" | "lista" | "columna" | "descuentoPct"> | null | undefined): string | null {
+  if (!p) return null;
+  const base =
+    p.origen === "lista_cliente" && p.lista
+      ? `Lista propia del cliente «${p.lista.nombre}» · ítem ${p.lista.itemCodigo}`
+      : p.origen === "lista" && p.lista
+        ? `Lista de precios vigente «${p.lista.nombre}» · ítem ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : ""}`
+        : "Ficha de costos del catálogo";
+  return p.descuentoPct ? `${base} · descuento especial del cliente ${pctTexto(p.descuentoPct)}` : base;
+}
+
+/**
+ * Contrato 4.1.3 · «Vigente hasta» no puede ser anterior a «Vigente desde».
+ * Acepta AAAA-MM-DD o el Date de una columna DATE (medianoche UTC).
+ */
+export function erroresVigenciaLista(desde: unknown, hasta: unknown): string | null {
+  const dia = (v: unknown) => (v == null || v === "" ? null : v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+  const d = dia(desde);
+  const h = dia(hasta);
+  return d && h && h < d ? "«Vigente hasta» no puede ser anterior a «Vigente desde»." : null;
 }
 
 /** Texto de la moneda para los mensajes. */
@@ -91,7 +165,7 @@ export function precioParaCotizacion(
     return { precio: redondearMoneda(elegido.precio / Number(dolar), "USD") };
   }
   const delEnsayo = codigo ? `del ensayo ${codigo}` : "del ensayo";
-  const donde = elegido.origen === "lista" && elegido.lista ? `la lista «${elegido.lista.nombre}» (${elegido.lista.itemCodigo})` : "su ficha de costos";
+  const donde = elegido.origen !== "ficha" && elegido.lista ? `la lista «${elegido.lista.nombre}» (${elegido.lista.itemCodigo})` : "su ficha de costos";
   return {
     error: `El precio ${delEnsayo} está en ${nombreMoneda(mPre)} en ${donde} y la cotización está en ${nombreMoneda(mCot)}: no se mezclan monedas ni se convierte sin un tipo de cambio de la operación. Emita la cotización en ${mPre}.`,
   };
@@ -102,6 +176,11 @@ export interface OpcionesListaVigente {
   preferir?: string | null;
   /** Solo listas en esta moneda (factura sin cotización y total estimado de la OT: CLP). */
   soloMoneda?: string | null;
+  /**
+   * Contrato 4.1.3 · solo esta lista (la propia del cliente), sea o no «especial».
+   * Sin ella se buscan las listas generales: las especiales de cliente quedan fuera.
+   */
+  listaId?: string | null;
 }
 
 /**
@@ -126,6 +205,9 @@ export async function itemsListaVigente(
 ): Promise<Map<string, ItemListaVigente>> {
   if (!catEnsayoIds.length) return new Map();
   const monedas = opciones.soloMoneda ? [monedaDe(opciones.soloMoneda)] : [...MONEDAS_OPERACION];
+  // Lista propia del cliente ($6) o, sin ella, solo las listas generales (no especiales).
+  const deLista = opciones.listaId ? "AND lp.id = $6::uuid" : "AND NOT COALESCE(lp.especial, FALSE)";
+  const extra = opciones.listaId ? [opciones.listaId] : [];
   const filas: { catEnsayoId: string; itemId: string; itemCodigo: string; precio: unknown; costoTotal: unknown; listaCodigo: string; listaNombre: string; moneda: string }[] =
     await db.$queryRawUnsafe(
       `SELECT DISTINCT ON (i.cat_ensayo_id)
@@ -138,12 +220,14 @@ export async function itemsListaVigente(
           AND COALESCE(upper(lp.moneda), 'CLP') = ANY($4::text[])
           AND lp.vigente_desde <= $3::date AND (lp.vigente_hasta IS NULL OR lp.vigente_hasta >= $3::date)
           AND i.cat_ensayo_id = ANY($2::uuid[]) AND i.precio > 0
+          ${deLista}
         ORDER BY i.cat_ensayo_id, (COALESCE(upper(lp.moneda), 'CLP') = $5) DESC, lp.vigente_desde DESC, lp.created_at DESC`,
       tenantId,
       catEnsayoIds,
       fecha,
       monedas,
       monedaDe(opciones.preferir ?? opciones.soloMoneda),
+      ...extra,
     );
   return new Map(
     filas.map((f) => [

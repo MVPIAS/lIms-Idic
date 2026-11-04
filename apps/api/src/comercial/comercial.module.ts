@@ -11,6 +11,7 @@ import { validaRut } from "../common/rut.validator";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
 import { ListaPrecioDetalleController, ListaPrecioDetalleService } from "../lista-precio/lista-precio-detalle.controller";
+import { erroresVigenciaLista } from "../lista-precio/precio-lista";
 import { MSJ_MONEDA, esMonedaHistorica, esMonedaOperacion, zMoneda } from "../common/moneda";
 import { diaChile } from "../common/fecha-chile";
 
@@ -153,11 +154,42 @@ export class ListaPrecioService extends BaseCrudService {
    * datos migrados) es histórica: se ve tal cual, sin convertir. Solo se puede
    * activar o desactivar; cambiar su código, nombre o moneda se rechaza.
    */
+  /** Contrato 4.1.3 · cuántos clientes tienen asignada cada lista (columna «Uso» de la pantalla). */
+  private async conClientes<T extends { id: string }>(filas: T[]): Promise<(T & { clientesAsignados: number })[]> {
+    const ids = filas.map((f) => f.id);
+    const n = ids.length
+      ? await this.prisma.$queryRawUnsafe<{ id: string; n: number }[]>(
+          `SELECT lista_precio_id::text AS id, count(*)::int AS n FROM cliente
+            WHERE lista_precio_id = ANY($1::uuid[]) AND deleted_at IS NULL GROUP BY 1`,
+          ids,
+        )
+      : [];
+    const porId = new Map(n.map((r) => [r.id, r.n]));
+    return filas.map((f) => ({ ...f, clientesAsignados: porId.get(f.id) ?? 0 }));
+  }
+
+  async listar(q: any, tenantId?: string) {
+    const r: any = await super.listar(q, tenantId);
+    return { ...r, data: await this.conClientes(r.data) };
+  }
+
+  async crear(data: any, tenantId?: string) {
+    const e = erroresVigenciaLista(data?.vigenteDesde, data?.vigenteHasta);
+    if (e) throw new BadRequestException(e);
+    return super.crear(data, tenantId);
+  }
+
   async actualizar(id: string, data: any, tenantId?: string) {
     const actual: any = await this.detalle(id, tenantId);
+    // Contrato 4.1.3: «Vigente hasta» se fija en pantalla; nunca antes de «Vigente desde».
+    const e = erroresVigenciaLista(
+      data?.vigenteDesde !== undefined ? data.vigenteDesde : actual.vigenteDesde,
+      data?.vigenteHasta !== undefined ? data.vigenteHasta : actual.vigenteHasta,
+    );
+    if (e) throw new BadRequestException(e);
     if (esMonedaHistorica(actual.moneda)) {
       const valor = (v: unknown) => (v instanceof Date ? diaChile(v) ?? "" : String(v ?? ""));
-      const cambia = (["codigo", "nombre", "moneda", "vigenteDesde"] as const).filter((k) => data?.[k] !== undefined && valor(data[k]) !== valor(actual[k]));
+      const cambia = (["codigo", "nombre", "moneda", "vigenteDesde", "vigenteHasta"] as const).filter((k) => data?.[k] !== undefined && valor(data[k]) !== valor(actual[k]));
       if (cambia.length)
         throw new ConflictException(
           `La lista ${actual.codigo} está en ${actual.moneda}, una moneda histórica: es de solo lectura (solo se puede activar o desactivar). ${MSJ_MONEDA} Para precios nuevos cree una lista en CLP o USD.`,
@@ -185,6 +217,13 @@ const ListaPrecioCreate = z.object({
   moneda: zMoneda.default("CLP"),
   // AAAA-MM-DD; sin ella, la base pone hoy (antes el alta fallaba: vigente_desde es obligatoria).
   vigenteDesde: z.preprocess((v) => (v === "" ? undefined : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD").transform((s) => new Date(`${s}T00:00:00Z`)).optional()),
+  // Contrato 4.1.3: fin de la vigencia (vacío = sin fin). Desde ese día la cotización deja de tomar sus precios.
+  vigenteHasta: z.preprocess(
+    (v) => (v === "" ? null : v),
+    z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "«Vigente hasta»: fecha AAAA-MM-DD").transform((s) => new Date(`${s}T00:00:00Z`)).nullable().optional(),
+  ),
+  // Lista especial de cliente: solo la usan los clientes que la tienen asignada en su ficha.
+  especial: z.preprocess((v) => (v === "si" ? true : v === "no" ? false : v), z.boolean().optional()),
   activa: z.boolean().default(true),
 });
 // Las listas de precio alimentan la cotización. Frente f6: se leen con su
@@ -228,16 +267,58 @@ export class ListaPrecioItemService extends BaseCrudService {
       throw new ConflictException(`La lista ${l.codigo} está en ${l.moneda}, una moneda histórica: sus ítems son de solo lectura. ${MSJ_MONEDA}`);
   }
 
+  /**
+   * Contrato 4.1.3 · enlace del ítem con el ensayo del catálogo desde la
+   * pantalla: el ensayo tiene que existir en el tenant y no estar ya enlazado a
+   * otro ítem de la MISMA lista (la cotización no sabría cuál de los dos usar).
+   * Devuelve los campos a guardar (`enlace` = «manual»; sin ensayo, sin enlace).
+   */
+  private async enlaceCatalogo(catEnsayoId: unknown, listaPrecioId: string | undefined, tenantId?: string, itemId?: string) {
+    if (catEnsayoId === undefined) return {};
+    if (catEnsayoId === null) return { catEnsayoId: null, enlace: null };
+    const e = await this.prisma.catEnsayo.findFirst({ where: { id: String(catEnsayoId), deletedAt: null, ...(tenantId ? { tenantId } : {}) }, select: { codigo: true } });
+    if (!e) throw new BadRequestException("El ensayo del catálogo elegido no existe o fue eliminado.");
+    if (listaPrecioId) {
+      const otro = await this.prisma.listaPrecioItem.findFirst({
+        where: { listaPrecioId, catEnsayoId: String(catEnsayoId), ...(itemId ? { NOT: { id: itemId } } : {}) },
+        select: { codigo: true },
+      });
+      if (otro) throw new ConflictException(`El ensayo ${e.codigo} ya está enlazado al ítem ${otro.codigo} de esta lista: un ensayo se enlaza a un solo ítem por lista.`);
+    }
+    return { catEnsayoId: String(catEnsayoId), enlace: "manual" };
+  }
+
+  /** Código y nombre del ensayo enlazado (la relación no está en Prisma). */
+  private async conEnsayo<T extends { catEnsayoId?: string | null }>(filas: T[]): Promise<(T & { catEnsayo: { id: string; codigo: string; nombre: string } | null })[]> {
+    const ids = [...new Set(filas.map((f) => f.catEnsayoId).filter((x): x is string => !!x))];
+    const es = ids.length ? await this.prisma.catEnsayo.findMany({ where: { id: { in: ids } }, select: { id: true, codigo: true, nombre: true } }) : [];
+    const porId = new Map(es.map((x) => [x.id, x]));
+    return filas.map((f) => ({ ...f, catEnsayo: f.catEnsayoId ? porId.get(f.catEnsayoId) ?? null : null }));
+  }
+
+  async listar(q: any, tenantId?: string) {
+    const r: any = await super.listar(q, tenantId);
+    return { ...r, data: await this.conEnsayo(r.data) };
+  }
+
+  async detalle(id: string, tenantId?: string) {
+    return (await this.conEnsayo([(await super.detalle(id, tenantId)) as any]))[0];
+  }
+
   async crear(data: any, tenantId?: string) {
     await this.exigirListaVigenteEnMoneda(data?.listaPrecioId, tenantId);
-    return super.crear(data, tenantId);
+    const { catEnsayoId, ...resto } = data ?? {};
+    return super.crear({ ...resto, ...(await this.enlaceCatalogo(catEnsayoId, data?.listaPrecioId, tenantId)) }, tenantId);
   }
 
   async actualizar(id: string, data: any, tenantId?: string) {
     const actual: any = await this.detalle(id, tenantId);
     await this.exigirListaVigenteEnMoneda(actual.listaPrecioId, tenantId);
     if (data?.listaPrecioId && data.listaPrecioId !== actual.listaPrecioId) await this.exigirListaVigenteEnMoneda(data.listaPrecioId, tenantId);
-    return super.actualizar(id, data, tenantId);
+    const { catEnsayoId, ...resto } = data ?? {};
+    // Mismo ensayo que ya tenía: no cambia el enlace (conserva «por código EN» de la carga oficial).
+    const enlace = catEnsayoId !== undefined && catEnsayoId === actual.catEnsayoId ? {} : await this.enlaceCatalogo(catEnsayoId, resto.listaPrecioId ?? actual.listaPrecioId, tenantId, id);
+    return super.actualizar(id, { ...resto, ...enlace }, tenantId);
   }
 
   async eliminar(id: string, tenantId?: string) {
@@ -253,6 +334,8 @@ const ItemCreate = z.object({
   cc: z.string().max(20).optional(),
   tipo: z.enum(["servicio", "HH", "HM", "viatico", "insumo"]).default("servicio"),
   precio: z.coerce.number().nonnegative(),
+  // Contrato 4.1.3: ensayo del catálogo enlazado (vacío = sin enlace). Sin enlace, la cotización no lo toma.
+  catEnsayoId: z.preprocess((v) => (v === "" ? null : v), z.string().uuid("Elija el ensayo del catálogo de la lista.").nullable().optional()),
 });
 @ApiTags("lista-precio-items") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("lista-precio-items")
 @RequierePermisoCrud({

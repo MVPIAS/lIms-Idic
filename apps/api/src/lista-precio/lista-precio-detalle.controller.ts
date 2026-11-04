@@ -62,7 +62,8 @@ export class ListaPrecioDetalleService {
   async detalle(tenantId: string, id: string, f: FiltroDetalle) {
     const listas: any[] = await this.prisma.$queryRawUnsafe(
       `SELECT id::text, codigo, nombre, moneda, vigente_desde AS "vigenteDesde", vigente_hasta AS "vigenteHasta",
-              COALESCE(activa, TRUE) AS activa, fuente
+              COALESCE(activa, TRUE) AS activa, fuente, COALESCE(especial, FALSE) AS especial,
+              (SELECT count(*)::int FROM cliente c WHERE c.lista_precio_id = lista_precio.id AND c.deleted_at IS NULL) AS "clientesAsignados"
          FROM lista_precio WHERE id = $1::uuid AND tenant_id = $2::uuid AND deleted_at IS NULL`,
       id,
       tenantId,

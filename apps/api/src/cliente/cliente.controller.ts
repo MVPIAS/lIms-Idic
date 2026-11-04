@@ -39,6 +39,18 @@ const CrearClienteSchema = z.object({
   contactoCargo: opcional(120),
   contactoEmail: z.preprocess((v) => (v === "" ? undefined : v), z.string().email("Correo del contacto no válido").max(160).optional()),
   contactoTelefono: opcional(40),
+  // Contrato 4.1.1/4.1.3: condiciones especiales. "" (campo vacío) = quitarlas.
+  listaPrecioId: z.preprocess((v) => (v === "" ? null : v), z.string().uuid("Elija una lista de precios de la lista.").nullable().optional()),
+  descuentoEspecialPct: z.preprocess(
+    (v) => (v === "" || v === null ? null : typeof v === "string" ? Number(v.replace(",", ".")) : v),
+    z
+      .number({ invalid_type_error: "El descuento especial debe ser un número." })
+      .min(0, "El descuento especial no puede ser negativo.")
+      .lt(100, "El descuento especial debe ser menor que 100 %.")
+      .nullable()
+      .optional(),
+  ),
+  condicionesEspeciales: z.preprocess((v) => (v === "" ? null : v), z.string().max(2000, "Condiciones especiales: máximo 2000 caracteres.").nullable().optional()),
 });
 /** Planta del cliente (EP-00 0.1: «Planta(s) [nombre, dirección]»). */
 const PlantaSchema = z.object({

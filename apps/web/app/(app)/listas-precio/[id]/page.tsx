@@ -41,7 +41,7 @@ type Item = {
 };
 type Centro = { centro: string; centroCosto: string | null; unidad: string | null; items: number; enlazados: number; porCodigo: number; porNombre: number; manuales: number; sinCentroCosto: boolean };
 type Detalle = {
-  lista: { id: string; codigo: string; nombre: string; moneda: string; vigenteDesde: string; vigenteHasta: string | null; activa: boolean; fuente: string | null };
+  lista: { id: string; codigo: string; nombre: string; moneda: string; vigenteDesde: string; vigenteHasta: string | null; activa: boolean; fuente: string | null; especial?: boolean; clientesAsignados?: number };
   resumen: { items: number; enlazados: number; sinEnlace: number; conCostos: boolean; porCentro: Centro[]; centrosSinCentroCosto: string[] };
   data: Item[];
   meta: { page: number; limit: number; total: number };
@@ -98,6 +98,11 @@ export default function ListaPrecioDetallePage() {
         <p className="subtitle">
           Vigente desde {fechaDia(l.vigenteDesde)}{l.vigenteHasta ? ` hasta ${fechaDia(l.vigenteHasta)}` : ""} · {l.moneda}
           {l.fuente ? ` · Fuente: ${l.fuente}` : ""}
+          {l.especial
+            ? ` · Lista especial de cliente (asignada a ${l.clientesAsignados ?? 0} ${l.clientesAsignados === 1 ? "cliente" : "clientes"})`
+            : l.clientesAsignados
+              ? ` · Lista propia de ${l.clientesAsignados} ${l.clientesAsignados === 1 ? "cliente" : "clientes"}`
+              : ""}
         </p>
       )}
       {l && historica && (
@@ -108,9 +113,38 @@ export default function ListaPrecioDetallePage() {
       )}
       {error && <div className="alert warn" role="alert">{error}</div>}
 
-      {r && r.conCostos && (
+      {r && (
         <div className="card">
           <h2>Cómo se calcula el precio</h2>
+          {/* Contrato 4.1.3: orden de prioridad del precio al cotizar. */}
+          <p style={{ margin: "0 0 6px", fontSize: 13 }}>Al cotizar un ensayo a un cliente, el precio sale, en este orden:</p>
+          <ol style={{ margin: "0 0 8px", paddingLeft: 20, fontSize: 13 }}>
+            <li>
+              <b>Lista de precios propia del cliente</b> (Clientes › Editar › «Lista de precios propia»), si está activa, vigente a la fecha de emisión
+              y tiene el ensayo enlazado: se toma su precio, para cualquier tipo de cliente.
+            </li>
+            <li>
+              <b>Lista de precios general vigente</b> (uso «general»): un cliente particular toma el <b>neto</b>; un cliente Ejército, lo que diga el
+              parámetro «Precio de la lista que toma un cliente Ejército». Las listas «especiales de cliente» no se usan aquí.
+            </li>
+            <li><b>Ficha de costos</b> del ensayo en el catálogo, si no está en ninguna lista.</li>
+          </ol>
+          <p style={{ margin: "0 0 8px", fontSize: 13 }}>
+            Si el cliente tiene <b>descuento especial</b>, se descuenta de ese precio. Cada línea de la cotización indica de qué lista (o de la ficha)
+            salió su precio. Solo cuentan los ítems <b>enlazados con un ensayo del catálogo</b> (Ítems de lista › «Ensayo del catálogo»).
+          </p>
+          {l?.especial && (
+            <div className="alert info" role="note">
+              Esta es una lista especial de cliente: solo la toman los {l.clientesAsignados ?? 0} clientes que la tienen asignada; para el resto de los
+              clientes no existe.
+            </div>
+          )}
+        </div>
+      )}
+
+      {r && r.conCostos && (
+        <div className="card">
+          <h2>Estructura de costos de la lista</h2>
           <p style={{ margin: "0 0 8px", fontSize: 13 }}>
             Costo indirecto = 20 % del costo directo · Costo total = directo + indirecto (precio Ejército) · Recargo = 30 % del costo total ·
             <b> Neto = costo total + recargo</b> (precio particular sin IVA: lo toma la cotización a un cliente particular) · IVA 19 % del neto.
