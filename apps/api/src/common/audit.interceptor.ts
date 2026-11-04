@@ -34,7 +34,10 @@ export class AuditInterceptor implements NestInterceptor {
     if (ctx.getType() !== "http") return next.handle();
 
     const req = ctx.switchToHttp().getRequest();
-    if (!MUTACIONES.has(req.method)) return next.handle();
+    // Contrato §4.7.4: con un token de integración también se registran las
+    // consultas (parámetro integracion.auditar_lecturas, por defecto Sí).
+    const lecturaIntegracion = req.method === "GET" && req.user?.integracion?.auditarLecturas === true;
+    if (!MUTACIONES.has(req.method) && !lecturaIntegracion) return next.handle();
 
     return next.handle().pipe(
       // Solo el flujo `next` → solo se audita la mutación que terminó BIEN.
@@ -69,9 +72,15 @@ export class AuditInterceptor implements NestInterceptor {
           accion: this.accion(req),
           entidadTipo: this.entidadTipo(req),
           entidadId: this.uuidOrNull(data?.id) ?? this.uuidOrNull(req.params?.id),
-          entidadCodigo: this.texto(data?.codigo ?? data?.numero, 60),
-          diff: this.diff(req, data),
-          metadata: { ruta, metodo: req.method, statusCode: statusCode ?? null },
+          entidadCodigo: req.method === "GET" ? null : this.texto(data?.codigo ?? data?.numero, 60),
+          diff: req.method === "GET" ? this.consulta(req) : this.diff(req, data),
+          metadata: {
+            ruta,
+            metodo: req.method,
+            statusCode: statusCode ?? null,
+            // Petición hecha con un token de integración (cuenta de servicio).
+            ...(user?.integracion ? { integracion: { tokenId: user.integracion.tokenId, nombre: user.integracion.nombre } } : {}),
+          },
         },
       });
     } catch (e) {
@@ -91,6 +100,7 @@ export class AuditInterceptor implements NestInterceptor {
    * que es más informativa que 'crear' y es justo lo que audita la 17025.
    */
   private accion(req: any): string {
+    if (req.method === "GET") return "consulta_api";
     const patron: string = req.route?.path ?? "";
     const ultimo = patron.split("/").filter(Boolean).pop();
     if (req.method === "POST" && ultimo && !ultimo.startsWith(":")) return ultimo.slice(0, 60);
@@ -135,6 +145,12 @@ export class AuditInterceptor implements NestInterceptor {
       return { truncado: true, bytes: json.length, claves: Object.keys(despues ?? {}) };
     }
     return payload;
+  }
+
+  /** Consulta de una integración: solo los parámetros de la URL (sin la respuesta). */
+  private consulta(req: any): any {
+    const q = this.sanear(req.query);
+    return q && Object.keys(q).length ? { consulta: q } : undefined;
   }
 
   /** Copia profunda con las claves sensibles redactadas. */

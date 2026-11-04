@@ -8,7 +8,8 @@
     "start:prod": "node dist/main",
     "test": "jest",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "lint": "eslint \"{src,test}/**/*.ts\" --fix"
+    "lint": "eslint \"{src,test}/**/*.ts\" --fix",
+    "openapi:exportar": "ts-node --transpile-only src/cli/exportar-openapi.ts"
   },
   "dependencies": {
     "@lims-idic/db": "workspace:*",
