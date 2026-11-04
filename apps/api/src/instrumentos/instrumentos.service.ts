@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit, UnauthorizedException } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
 import { createHash } from "crypto";
 import { promises as fs } from "fs";
@@ -9,6 +9,7 @@ import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
 import { teniaValor } from "../laboratorio/traza";
 import { AlcanceService } from "../rbac/alcance.service";
 import { FORMATOS, LecturaError, SEPARADORES, decodificar, leerArchivo, normalizar, type FilaLeida, type Perfil } from "./lector";
+import { IngestaError, datosDispositivo, generarToken, hashToken, textoDeLecturas, tokenDeCabeceras } from "./dispositivos";
 
 // ===========================================================================
 // Adquisición de datos desde instrumentos (contrato §4.4.6, §4.4.7) ·
@@ -26,6 +27,11 @@ import { FORMATOS, LecturaError, SEPARADORES, decodificar, leerArchivo, normaliz
 //      archivos nuevos a nombre del responsable del perfil (solo los ensayos sin
 //      valor; las correcciones y los avisos quedan para una persona) y los mueve
 //      a «procesados» o «errores».
+//   4. Dispositivos (serie RS-232 / Ethernet): el agente de instrumentos
+//      (tools/agente-instrumentos) envía las tramas con un token de dispositivo
+//      (alta y revocación en «Dispositivos conectados»). Se interpretan con el
+//      perfil y quedan como lectura pendiente (PREVISTA, sin dueño): cualquier
+//      analista del laboratorio la revisa y la captura desde «Lecturas pendientes».
 // ===========================================================================
 
 const tenantDe = (req: any): string => {
@@ -181,6 +187,8 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
       // Cargar archivos e historial exigen además capturar resultados.
       puedeImportar: tiene(req, "instrumento.importar") && tiene(req, "resultado.crear"),
       lecturaAutomatica: !!process.env.INSTRUMENTOS_DIR,
+      // Lecturas de dispositivos sin revisar en los perfiles visibles (insignia de «Lecturas pendientes»).
+      pendientes: await this.contarPendientes(tenantId, lista.map((p) => p.id)),
       perfiles: lista.map((p) => ({ ...p, equipo: n.get(p.id)?.equipo ?? null, unidad: n.get(p.id)?.unidad ?? null, responsable: n.get(p.id)?.responsable ?? null })),
     };
   }
@@ -318,7 +326,7 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
   /* -------------------------------------------------------- emparejamiento --- */
 
   /** Empareja las filas leídas con los ensayos de las muestras indicadas (y de la OT, si se eligió). */
-  private async emparejar(req: any, filas: FilaLeida[], otId: string | null): Promise<FilaPrevia[]> {
+  private async emparejar(req: any, filas: FilaLeida[], otId: string | null, unidadesFijas?: string[] | null): Promise<FilaPrevia[]> {
     const tenantId = tenantDe(req);
     const codigos = [...new Set(filas.filter((f) => f.muestra).map((f) => f.muestra.toUpperCase()))];
     const muestras = codigos.length
@@ -344,7 +352,8 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
           ids,
         )
       : [];
-    const unidades = await this.alcance.filtroUnidades(req, "resultado.crear");
+    // Lecturas de un dispositivo: el laboratorio del perfil (no hay usuario en la petición).
+    const unidades = unidadesFijas !== undefined ? unidadesFijas : await this.alcance.filtroUnidades(req, "resultado.crear");
     const usados = new Map<string, number>(); // resultadoId → índice de la última fila que lo usa
 
     const salida: FilaPrevia[] = filas.map((f) => {
@@ -428,7 +437,9 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
 
   private async importacion(req: any, id: string) {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT i.*, p.nombre AS perfil, p.equipo_id, p.unidad_id AS perfil_unidad FROM instrumento_importacion i JOIN instrumento_perfil p ON p.id = i.perfil_id
+      `SELECT i.*, p.nombre AS perfil, p.equipo_id, p.unidad_id AS perfil_unidad, d.nombre AS dispositivo_nombre
+         FROM instrumento_importacion i JOIN instrumento_perfil p ON p.id = i.perfil_id
+         LEFT JOIN instrumento_dispositivo d ON d.id = i.dispositivo_id
         WHERE i.tenant_id = $1::uuid AND i.id = $2::uuid`,
       tenantDe(req), id,
     );
@@ -484,8 +495,9 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
       }
     }
     await this.prisma.$executeRawUnsafe(
-      `UPDATE instrumento_importacion SET estado = 'APLICADA', filas = $2::jsonb, aplicadas = $3, con_error = $4, aplicado_en = now() WHERE id = $1::uuid`,
-      id, JSON.stringify(filas), aplicadas, errores,
+      // Lectura de un dispositivo (sin dueño): queda a nombre de quien la revisó y capturó.
+      `UPDATE instrumento_importacion SET estado = 'APLICADA', filas = $2::jsonb, aplicadas = $3, con_error = $4, aplicado_en = now(), usuario_id = COALESCE(usuario_id, $5::uuid) WHERE id = $1::uuid`,
+      id, JSON.stringify(filas), aplicadas, errores, req?.user?.sub ?? null,
     );
     return { id, aplicadas, errores, resumen: resumir(filas), filas };
   }
@@ -497,7 +509,7 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
     return { ok: true };
   }
 
-  async historial(req: any, perfilId?: string) {
+  async historial(req: any, perfilId?: string, soloPendientes = false) {
     const tenantId = tenantDe(req);
     const visibles = new Set((await this.perfilesVisibles(req, true)).map((p) => p.id));
     const args: any[] = [tenantId];
@@ -507,11 +519,15 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
       args.push(pid);
       w = " AND i.perfil_id = $2::uuid";
     }
+    // «Lecturas pendientes»: lo recibido de los dispositivos que nadie ha revisado aún.
+    if (soloPendientes) w += " AND i.estado = 'PREVISTA' AND i.origen = 'DISPOSITIVO'";
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT i.id, i.perfil_id AS "perfilId", p.nombre AS perfil, i.origen, i.archivo_nombre AS archivo, i.archivo_bytes AS bytes, i.hash_sha256 AS "hashSha256",
-              i.estado, i.total, i.aplicadas, i.con_error AS "conError", o.codigo AS "otCodigo", u.nombre_completo AS usuario, i.creado_en AS "creadoEn", i.aplicado_en AS "aplicadoEn"
+              i.estado, i.total, i.aplicadas, i.con_error AS "conError", o.codigo AS "otCodigo", u.nombre_completo AS usuario, i.creado_en AS "creadoEn", i.aplicado_en AS "aplicadoEn",
+              d.nombre AS dispositivo
          FROM instrumento_importacion i
          JOIN instrumento_perfil p ON p.id = i.perfil_id
+         LEFT JOIN instrumento_dispositivo d ON d.id = i.dispositivo_id
          LEFT JOIN orden_trabajo o ON o.id = i.ot_id
          LEFT JOIN usuario u ON u.id = i.usuario_id
         WHERE i.tenant_id = $1::uuid ${w}
@@ -523,10 +539,24 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
 
   async detalle(req: any, id: string) {
     const imp = await this.importacion(req, id);
+    // Lectura de un dispositivo aún sin aplicar: se vuelve a emparejar con el
+    // alcance de quien la revisa y con el estado actual de los ensayos (pudieron
+    // capturarse a mano después de recibirla).
+    if (imp.origen === "DISPOSITIVO" && imp.estado === "PREVISTA") {
+      const p = await this.perfilPorId(imp.tenant_id, imp.perfil_id);
+      try {
+        const filas = leerArchivo(decodificar(Buffer.from(imp.contenido, "base64")), { ...p, separador: p.separador as Perfil["separador"] });
+        imp.filas = await this.emparejar(req, filas, imp.ot_id ?? null);
+        await this.prisma.$executeRawUnsafe(`UPDATE instrumento_importacion SET filas = $2::jsonb, total = $3 WHERE id = $1::uuid`, id, JSON.stringify(imp.filas), imp.filas.length);
+      } catch (e) {
+        if (!(e instanceof LecturaError)) throw e;
+      }
+    }
     return {
       id: imp.id,
       perfil: imp.perfil,
       origen: imp.origen,
+      dispositivo: imp.dispositivo_nombre ?? null,
       archivo: imp.archivo_nombre,
       hashSha256: imp.hash_sha256,
       estado: imp.estado,
@@ -541,6 +571,165 @@ export class InstrumentosService implements OnModuleInit, OnModuleDestroy {
   async original(req: any, id: string) {
     const imp = await this.importacion(req, id);
     return { nombre: imp.archivo_nombre as string, datos: Buffer.from(imp.contenido, "base64") };
+  }
+
+  /* ------------------------------------------- dispositivos (serie/Ethernet) --- */
+
+  private async perfilPorId(tenantId: string, id: string): Promise<PerfilFila> {
+    const f = await this.prisma.$queryRawUnsafe<PerfilFila[]>(`${SELECT_PERFIL} WHERE p.tenant_id = $1::uuid AND p.id = $2::uuid`, tenantId, id);
+    if (!f[0]) throw new NotFoundException("Perfil de instrumento no encontrado.");
+    return f[0];
+  }
+
+  private async contarPendientes(tenantId: string, perfiles: string[]): Promise<number> {
+    if (!perfiles.length) return 0;
+    const [r] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM instrumento_importacion WHERE tenant_id = $1::uuid AND estado = 'PREVISTA' AND origen = 'DISPOSITIVO' AND perfil_id = ANY($2::uuid[])`,
+      tenantId,
+      perfiles,
+    );
+    return Number(r?.n ?? 0);
+  }
+
+  /** Dispositivos de los perfiles que el usuario configura (o importa), activos y revocados. */
+  async listarDispositivos(req: any) {
+    const tenantId = tenantDe(req);
+    const visibles = new Set((await this.perfilesVisibles(req, true, ["instrumento.importar", "instrumento.configurar"])).map((p) => p.id));
+    const f = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT d.id, d.nombre, d.conexion, d.ubicacion, d.token_prefijo AS "tokenPrefijo", d.perfil_id AS "perfilId", p.nombre AS perfil,
+              d.creado_en AS "creadoEn", uc.nombre_completo AS "creadoPor", d.revocado_en AS "revocadoEn", ur.nombre_completo AS "revocadoPor",
+              d.motivo_revocacion AS "motivoRevocacion", d.ultimo_contacto AS "ultimoContacto", d.ultima_ip AS "ultimaIp",
+              d.version_agente AS "versionAgente", d.envios,
+              (SELECT count(*)::int FROM instrumento_importacion i WHERE i.dispositivo_id = d.id AND i.estado = 'PREVISTA') AS pendientes
+         FROM instrumento_dispositivo d
+         JOIN instrumento_perfil p ON p.id = d.perfil_id
+         LEFT JOIN usuario uc ON uc.id = d.creado_por
+         LEFT JOIN usuario ur ON ur.id = d.revocado_por
+        WHERE d.tenant_id = $1::uuid
+        ORDER BY (d.revocado_en IS NULL) DESC, lower(d.nombre)`,
+      tenantId,
+    );
+    return f.filter((x) => visibles.has(x.perfilId));
+  }
+
+  /** Alta: devuelve el token UNA sola vez (en la BD queda solo su SHA-256). */
+  async crearDispositivo(req: any, b: any) {
+    const tenantId = tenantDe(req);
+    let d: ReturnType<typeof datosDispositivo>;
+    try {
+      d = datosDispositivo(b);
+    } catch (e) {
+      if (e instanceof IngestaError) throw new BadRequestException(e.message);
+      throw e;
+    }
+    const p = await this.perfil(req, d.perfilId, ["instrumento.configurar"]);
+    if (!p.activo) throw new BadRequestException("El perfil está inactivo: actívelo antes de conectar un dispositivo.");
+    const t = generarToken();
+    try {
+      const r = await this.prisma.$queryRawUnsafe<any[]>(
+        `INSERT INTO instrumento_dispositivo (tenant_id, perfil_id, nombre, conexion, ubicacion, token_hash, token_prefijo, creado_por)
+         VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid) RETURNING id`,
+        tenantId, p.id, d.nombre, d.conexion, d.ubicacion, t.hash, t.prefijo, req?.user?.sub ?? null,
+      );
+      return { id: r[0].id, nombre: d.nombre, perfil: p.nombre, token: t.token };
+    } catch (e: any) {
+      if (/23505/.test(String(e?.message ?? ""))) throw new ConflictException(`Ya hay un dispositivo activo llamado «${d.nombre}».`);
+      throw e;
+    }
+  }
+
+  /** Revocación: el token deja de valer de inmediato; las lecturas recibidas se conservan. */
+  async revocarDispositivo(req: any, id: string, b: any) {
+    const tenantId = tenantDe(req);
+    const motivo = texto(b?.motivo, 500, "el motivo de la revocación", true)!;
+    if (motivo.length < 5) throw new BadRequestException("Motivo de la revocación: mínimo 5 caracteres.");
+    const [d] = await this.prisma.$queryRawUnsafe<any[]>(`SELECT perfil_id, revocado_en FROM instrumento_dispositivo WHERE id = $1::uuid AND tenant_id = $2::uuid`, id, tenantId);
+    if (!d) throw new NotFoundException("Dispositivo no encontrado.");
+    await this.perfil(req, d.perfil_id, ["instrumento.configurar"]);
+    if (d.revocado_en) throw new ConflictException("El dispositivo ya estaba revocado.");
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE instrumento_dispositivo SET revocado_en = now(), revocado_por = $3::uuid, motivo_revocacion = $4 WHERE id = $1::uuid AND tenant_id = $2::uuid AND revocado_en IS NULL`,
+      id, tenantId, req?.user?.sub ?? null, motivo,
+    );
+    return { id, ok: true };
+  }
+
+  /**
+   * Autentica al agente por su token (no por usuario): dispositivo vigente,
+   * perfil activo. Registra el último contacto, la IP y la versión del agente.
+   */
+  async autenticarDispositivo(req: any) {
+    const token = tokenDeCabeceras(req?.headers);
+    if (!token) throw new UnauthorizedException("Falta el token del dispositivo.");
+    const [d] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT d.id, d.tenant_id, d.perfil_id, d.nombre, d.conexion, d.revocado_en, p.activo AS perfil_activo, p.deleted_at AS perfil_baja
+         FROM instrumento_dispositivo d JOIN instrumento_perfil p ON p.id = d.perfil_id
+        WHERE d.token_hash = $1`,
+      hashToken(token),
+    );
+    if (!d || d.revocado_en) throw new UnauthorizedException("Token de dispositivo inválido o revocado.");
+    if (d.perfil_baja || !d.perfil_activo) throw new ForbiddenException("El perfil del instrumento está inactivo o dado de baja.");
+    const version = typeof req?.headers?.["x-agente-version"] === "string" ? req.headers["x-agente-version"].slice(0, 40) : null;
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE instrumento_dispositivo SET ultimo_contacto = now(), ultima_ip = $2, version_agente = COALESCE($3, version_agente) WHERE id = $1::uuid`,
+      d.id, String(req?.ip ?? "").slice(0, 64) || null, version,
+    );
+    return d as { id: string; tenant_id: string; perfil_id: string; nombre: string; conexion: string };
+  }
+
+  /** Lo que el agente necesita del perfil para separar e informar las lecturas en su registro local. */
+  async infoDispositivo(d: { tenant_id: string; perfil_id: string; nombre: string; conexion: string }) {
+    const p = await this.perfilPorId(d.tenant_id, d.perfil_id);
+    return {
+      dispositivo: d.nombre,
+      conexion: d.conexion,
+      perfil: {
+        nombre: p.nombre, formato: p.formato, separador: p.separador, decimal: p.decimal, filaCabecera: p.filaCabecera,
+        colMuestra: p.colMuestra, colEnsayo: p.colEnsayo, colValor: p.colValor, colUnidad: p.colUnidad, ensayoFijo: p.ensayoFijo,
+      },
+    };
+  }
+
+  /**
+   * Lecturas enviadas por el agente: se interpretan con el perfil (mismo lector
+   * que los archivos), se emparejan con los ensayos del laboratorio del perfil
+   * y quedan como importación PREVISTA de origen DISPOSITIVO, sin dueño, con
+   * las tramas tal como llegaron (dato bruto + SHA-256). No se captura nada
+   * hasta que un analista la revisa.
+   */
+  async ingestar(d: { id: string; tenant_id: string; perfil_id: string; nombre: string }, b: any) {
+    const p = await this.perfilPorId(d.tenant_id, d.perfil_id);
+    let lote: { texto: string; tramas: number };
+    try {
+      lote = textoDeLecturas(b, p);
+    } catch (e) {
+      if (e instanceof IngestaError) throw new BadRequestException(e.message);
+      throw e;
+    }
+    const buffer = Buffer.from(lote.texto, "utf8");
+    const hash = createHash("sha256").update(buffer).digest("hex");
+    const sello = new Date().toISOString().replace(/[-:]/g, "").replace("T", "_").slice(0, 15);
+    const nombre = `${d.nombre.replace(/[^A-Za-z0-9 _.()áéíóúñÁÉÍÓÚÑ-]/g, "_").slice(0, 150)}_${sello}.txt`;
+    let previas: FilaPrevia[] = [];
+    let estado = "PREVISTA";
+    let mensaje: string | null = null;
+    try {
+      const filas = leerArchivo(lote.texto, { ...p, separador: p.separador as Perfil["separador"] });
+      previas = await this.emparejar({ user: { tenantId: d.tenant_id } }, filas, null, p.unidadId ? [p.unidadId] : null);
+    } catch (e) {
+      if (!(e instanceof LecturaError)) throw e;
+      // Lo recibido no encaja con el perfil: se guarda igual (dato bruto) como ERROR, para revisarlo.
+      estado = "ERROR";
+      mensaje = `Las tramas no se pudieron leer con el perfil «${p.nombre}»: ${e.message}`;
+      previas = [{ fila: 0, muestra: "", ensayo: "", ensayoArchivo: "", valor: "", unidad: null, fecha: null, error: mensaje, estado: "invalido", detalle: mensaje, resultadoId: null, otCodigo: null, ensayoLims: null, valorAnterior: null }];
+    }
+    const r = await this.prisma.$queryRawUnsafe<any[]>(
+      `INSERT INTO instrumento_importacion (tenant_id, perfil_id, origen, archivo_nombre, archivo_bytes, hash_sha256, contenido, filas, total, estado, dispositivo_id)
+       VALUES ($1::uuid, $2::uuid, 'DISPOSITIVO', $3, $4, $5, $6, $7::jsonb, $8, $9, $10::uuid) RETURNING id`,
+      d.tenant_id, p.id, nombre, buffer.length, hash, buffer.toString("base64"), JSON.stringify(previas), previas.length, estado, d.id,
+    );
+    await this.prisma.$executeRawUnsafe(`UPDATE instrumento_dispositivo SET envios = envios + 1 WHERE id = $1::uuid`, d.id);
+    return { id: r[0].id, estado, tramas: lote.tramas, resumen: estado === "ERROR" ? {} : resumir(previas), mensaje };
   }
 
   /* ---------------------------------------------------- lectura automática --- */

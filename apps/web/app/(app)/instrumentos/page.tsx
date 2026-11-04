@@ -1,12 +1,17 @@
 "use client";
 
 // ===========================================================================
-// Datos de instrumentos (contrato §4.4.6, §4.4.7). Tres pestañas:
+// Datos de instrumentos (contrato §4.4.6, §4.4.7). Pestañas:
 //   · Cargar archivo: se elige el perfil del instrumento, se sube el archivo
 //     (CSV, TXT o XML) y se revisa la vista previa fila a fila antes de capturar;
 //   · Historial: archivos leídos, a mano o desde la carpeta automática, con el
 //     original descargable;
-//   · Perfiles: cómo exporta cada instrumento (quien configura).
+//   · Lecturas pendientes: lo que enviaron los equipos conectados por puerto
+//     serie (RS-232) o Ethernet a través del agente de instrumentos, para
+//     revisarlo y capturarlo con la misma vista previa que un archivo;
+//   · Perfiles: cómo exporta cada instrumento (quien configura);
+//   · Dispositivos conectados: alta (token mostrado una vez) y revocación de
+//     los agentes instalados en los PC de los equipos (quien configura).
 // Las reglas viven en el servidor: apps/api/src/instrumentos/instrumentos.service.ts.
 // ===========================================================================
 
@@ -17,7 +22,7 @@ import { subirFormulario, descargarAdjunto } from "@/lib/d11";
 import { fechaHora } from "@/lib/format";
 import { toast } from "@/components/ui/feedback";
 
-type Pestana = "cargar" | "historial" | "perfiles";
+type Pestana = "cargar" | "pendientes" | "historial" | "perfiles" | "dispositivos";
 
 interface Perfil {
   id: string;
@@ -49,6 +54,8 @@ interface Meta {
   /** Cargar archivos e historial (instrumento.importar + resultado.crear); Calidad solo configura. */
   puedeImportar?: boolean;
   lecturaAutomatica: boolean;
+  /** Lecturas de dispositivos sin revisar (§4.4.7). */
+  pendientes?: number;
   perfiles: Perfil[];
 }
 interface Fila {
@@ -68,6 +75,8 @@ interface Fila {
 interface Vista {
   id: string;
   perfil?: string;
+  origen?: string;
+  dispositivo?: string | null;
   archivo: string;
   hashSha256: string;
   estado?: string;
@@ -132,12 +141,16 @@ export default function InstrumentosPage() {
       )}
       <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
         {meta?.puedeImportar !== false && tab("cargar", "Cargar archivo")}
+        {meta?.puedeImportar !== false && tab("pendientes", `Lecturas pendientes${meta?.pendientes ? ` (${meta.pendientes})` : ""}`)}
         {meta?.puedeImportar !== false && tab("historial", "Historial")}
         {tab("perfiles", "Perfiles de instrumento")}
+        {meta?.puedeConfigurar && tab("dispositivos", "Dispositivos conectados")}
       </div>
       {meta && meta.puedeImportar !== false && pestana === "cargar" && <Cargar meta={meta} />}
+      {meta && meta.puedeImportar !== false && pestana === "pendientes" && <Historial meta={meta} soloPendientes onCambio={cargar} />}
       {meta && meta.puedeImportar !== false && pestana === "historial" && <Historial meta={meta} />}
       {meta && pestana === "perfiles" && <Perfiles meta={meta} onCambio={cargar} />}
+      {meta?.puedeConfigurar && pestana === "dispositivos" && <Dispositivos meta={meta} />}
     </div>
   );
 }
@@ -234,6 +247,9 @@ function VistaPrevia({ vista, onCambio }: { vista: Vista; onCambio: (v: Vista | 
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div>
           <h2 style={{ margin: "0 0 4px" }}>{vista.archivo}</h2>
+          {vista.origen === "DISPOSITIVO" && (
+            <div style={{ fontSize: 12, color: "var(--muted)" }}>Recibido del dispositivo «{vista.dispositivo ?? "—"}» (puerto serie o Ethernet). Se volvió a emparejar con los ensayos al abrirlo.</div>
+          )}
           <div style={{ fontSize: 11.5, color: "var(--muted)", fontFamily: "ui-monospace, monospace" }}>SHA-256 {vista.hashSha256}</div>
         </div>
         <Resumen r={vista.resumen} />
@@ -304,15 +320,21 @@ function VistaPrevia({ vista, onCambio }: { vista: Vista; onCambio: (v: Vista | 
 
 /* =========================================================== historial === */
 
-function Historial({ meta }: { meta: Meta }) {
+function Historial({ meta, soloPendientes = false, onCambio }: { meta: Meta; soloPendientes?: boolean; onCambio?: () => void }) {
   const [filas, setFilas] = useState<any[]>([]);
   const [perfilId, setPerfilId] = useState("");
   const [abierta, setAbierta] = useState<Vista | null>(null);
+  const [version, setVersion] = useState(0);
   useEffect(() => {
-    llamar<any[]>("GET", `/instrumentos/importaciones${qs({ perfilId: perfilId || null })}`).then(setFilas).catch((e) => toast.error(e.message));
-  }, [perfilId]);
+    llamar<any[]>("GET", `/instrumentos/importaciones${qs({ perfilId: perfilId || null, pendientes: soloPendientes ? 1 : null })}`).then(setFilas).catch((e) => toast.error(e.message));
+  }, [perfilId, soloPendientes, version]);
   return (
     <>
+      {soloPendientes && (
+        <p className="subtitle" style={{ marginTop: 0 }}>
+          Lecturas que enviaron los equipos conectados por puerto serie (RS-232) o Ethernet a través del agente de instrumentos. Nada se ha capturado todavía: abra cada lectura, revise la vista previa y pulse «Capturar».
+        </p>
+      )}
       <div className="toolbar" style={{ display: "flex", gap: 10, alignItems: "flex-end", marginBottom: 10 }}>
         <div className="field" style={{ margin: 0, minWidth: 240 }}>
           <label htmlFor="hi-perfil">Instrumento</label>
@@ -322,7 +344,16 @@ function Historial({ meta }: { meta: Meta }) {
           </select>
         </div>
       </div>
-      {abierta && <VistaPrevia vista={abierta} onCambio={(v) => setAbierta(v)} />}
+      {abierta && (
+        <VistaPrevia
+          vista={abierta}
+          onCambio={(v) => {
+            setAbierta(v);
+            // Capturada o descartada: sale de «Lecturas pendientes» y baja la insignia.
+            if (!v || v.estado !== "PREVISTA") { setVersion((n) => n + 1); onCambio?.(); }
+          }}
+        />
+      )}
       <div className="card card--table" style={{ overflowX: "auto" }}>
         <table className="data">
           <thead>
@@ -338,7 +369,10 @@ function Historial({ meta }: { meta: Meta }) {
                     {x.archivo}
                   </button>
                 </td>
-                <td>{x.origen === "CARPETA" ? <span className="pill blue">Automático</span> : "Manual"}</td>
+                <td>
+                  {x.origen === "CARPETA" ? <span className="pill blue">Automático</span> : x.origen === "DISPOSITIVO" ? <span className="pill teal">Dispositivo</span> : "Manual"}
+                  {x.dispositivo && <div style={{ fontSize: 11, color: "var(--muted)" }}>{x.dispositivo}</div>}
+                </td>
                 <td className="codigo">{x.otCodigo ?? "—"}</td>
                 <td><span className={`pill ${x.estado === "APLICADA" ? "green" : x.estado === "PREVISTA" ? "amber" : "gray"}`}>{x.estado.toLowerCase()}</span></td>
                 <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{x.aplicadas} / {x.total}{x.conError ? <span style={{ color: "#7d1f1f" }}> · {x.conError} error</span> : null}</td>
@@ -348,7 +382,7 @@ function Historial({ meta }: { meta: Meta }) {
                 </td>
               </tr>
             ))}
-            {!filas.length && <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Aún no se han cargado archivos.</td></tr>}
+            {!filas.length && <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>{soloPendientes ? "No hay lecturas de dispositivos pendientes de revisar." : "Aún no se han cargado archivos."}</td></tr>}
           </tbody>
         </table>
       </div>
@@ -556,5 +590,167 @@ function FormularioPerfil({ inicial, onListo, onCancelar }: { inicial?: Perfil; 
         <button type="button" className="btn sm" onClick={onCancelar}>Cancelar</button>
       </div>
     </form>
+  );
+}
+
+/* ======================================================== dispositivos === */
+
+interface Dispositivo {
+  id: string;
+  nombre: string;
+  conexion: "SERIE" | "ETHERNET";
+  ubicacion: string | null;
+  tokenPrefijo: string;
+  perfil: string;
+  creadoEn: string;
+  creadoPor: string | null;
+  revocadoEn: string | null;
+  revocadoPor: string | null;
+  motivoRevocacion: string | null;
+  ultimoContacto: string | null;
+  ultimaIp: string | null;
+  versionAgente: string | null;
+  envios: number;
+  pendientes: number;
+}
+
+/**
+ * Dispositivos conectados (§4.4.7): el agente de instrumentos instalado en el
+ * PC del equipo lee el puerto serie (RS-232) o el socket TCP (Ethernet) y
+ * envía las lecturas al LIMS con su token. El token se muestra una sola vez.
+ */
+function Dispositivos({ meta }: { meta: Meta }) {
+  const [lista, setLista] = useState<Dispositivo[]>([]);
+  const [nuevo, setNuevo] = useState(false);
+  const [creado, setCreado] = useState<{ nombre: string; perfil: string; token: string } | null>(null);
+  const [revocando, setRevocando] = useState<{ id: string; nombre: string; motivo: string } | null>(null);
+  const activos = meta.perfiles.filter((p) => p.activo);
+  const [v, setV] = useState({ nombre: "", perfilId: activos[0]?.id ?? "", conexion: "SERIE", ubicacion: "" });
+  const leer = useCallback(() => {
+    llamar<Dispositivo[]>("GET", "/instrumentos/dispositivos").then(setLista).catch((e) => toast.error(e.message));
+  }, []);
+  useEffect(() => {
+    leer();
+  }, [leer]);
+
+  const crear = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const r = await llamar<{ nombre: string; perfil: string; token: string }>("POST", "/instrumentos/dispositivos", { ...v, ubicacion: v.ubicacion || null });
+      setCreado(r);
+      setNuevo(false);
+      setV({ nombre: "", perfilId: activos[0]?.id ?? "", conexion: "SERIE", ubicacion: "" });
+      leer();
+    } catch (x: any) {
+      toast.error(x.message);
+    }
+  };
+  const revocar = async () => {
+    if (!revocando) return;
+    try {
+      await llamar("POST", `/instrumentos/dispositivos/${revocando.id}/revocar`, { motivo: revocando.motivo });
+      toast.ok(`Dispositivo «${revocando.nombre}» revocado: su token deja de valer.`);
+      setRevocando(null);
+      leer();
+    } catch (x: any) {
+      toast.error(x.message);
+    }
+  };
+
+  return (
+    <>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <span className="subtitle" style={{ margin: 0, flex: 1 }}>
+          Equipos conectados por puerto serie (RS-232) o Ethernet. En el PC del equipo se instala el «agente de instrumentos» (carpeta tools/agente-instrumentos del LIMS) con el token del dispositivo; sus lecturas llegan a «Lecturas pendientes».
+        </span>
+        <button type="button" className="btn primary sm" disabled={!activos.length} onClick={() => { setNuevo((x) => !x); setCreado(null); }}>
+          {nuevo ? "Cerrar" : "+ Conectar dispositivo"}
+        </button>
+      </div>
+      {!activos.length && <div className="alert info" role="note">Primero cree un perfil de instrumento activo: el dispositivo interpreta sus lecturas con ese perfil.</div>}
+      {creado && (
+        <div className="card" role="alert" style={{ borderColor: "var(--accent)" }}>
+          <h2 style={{ marginTop: 0 }}>Dispositivo «{creado.nombre}» conectado</h2>
+          <p style={{ margin: "0 0 8px" }}>
+            <strong>Copie el token ahora: no se volverá a mostrar.</strong> Péguelo en la configuración del agente instalado en el PC del equipo (perfil «{creado.perfil}»).
+          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <code style={{ padding: "6px 8px", background: "var(--bg-soft, #f3f4f6)", borderRadius: 6, wordBreak: "break-all", flex: "1 1 320px" }}>{creado.token}</code>
+            <button type="button" className="btn sm" onClick={() => navigator.clipboard?.writeText(creado.token).then(() => toast.ok("Token copiado."), () => toast.error("No se pudo copiar: selecciónelo y cópielo a mano."))}>Copiar token</button>
+            <button type="button" className="btn ghost sm" onClick={() => setCreado(null)}>Listo, ya lo copié</button>
+          </div>
+        </div>
+      )}
+      {nuevo && (
+        <form className="card" onSubmit={crear} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, alignItems: "end" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="dv-nombre">Nombre del dispositivo</label>
+            <input id="dv-nombre" required minLength={3} maxLength={120} value={v.nombre} onChange={(e) => setV({ ...v, nombre: e.target.value })} placeholder="Ej.: pHmetro LQC sala 2" />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="dv-perfil">Perfil del instrumento</label>
+            <select id="dv-perfil" value={v.perfilId} onChange={(e) => setV({ ...v, perfilId: e.target.value })}>
+              {activos.map((p) => <option key={p.id} value={p.id}>{p.nombre} · {p.formato}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="dv-conexion">Conexión</label>
+            <select id="dv-conexion" value={v.conexion} onChange={(e) => setV({ ...v, conexion: e.target.value })}>
+              <option value="SERIE">Puerto serie (RS-232)</option>
+              <option value="ETHERNET">Ethernet (TCP/IP)</option>
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="dv-ubic">Ubicación (opcional)</label>
+            <input id="dv-ubic" maxLength={200} value={v.ubicacion} onChange={(e) => setV({ ...v, ubicacion: e.target.value })} placeholder="Ej.: PC-LQC-07, COM3" />
+          </div>
+          <button className="btn primary sm" disabled={!v.perfilId}>Conectar y generar token</button>
+        </form>
+      )}
+      {revocando && (
+        <div className="card" role="dialog" aria-label="Revocar dispositivo" style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div className="field" style={{ margin: 0, flex: "1 1 320px" }}>
+            <label htmlFor="dv-motivo">Motivo para revocar «{revocando.nombre}»</label>
+            <input id="dv-motivo" maxLength={500} value={revocando.motivo} onChange={(e) => setRevocando({ ...revocando, motivo: e.target.value })} placeholder="Ej.: PC reemplazado, token expuesto" />
+          </div>
+          <button type="button" className="btn sm" onClick={() => setRevocando(null)}>Cancelar</button>
+          <button type="button" className="btn danger sm" disabled={revocando.motivo.trim().length < 5} onClick={revocar}>Revocar</button>
+        </div>
+      )}
+      <div className="card card--table" style={{ overflowX: "auto" }}>
+        <table className="data">
+          <thead>
+            <tr><th>Dispositivo</th><th>Perfil</th><th>Conexión</th><th>Token</th><th>Último contacto</th><th style={{ textAlign: "right" }}>Envíos</th><th style={{ textAlign: "right" }}>Pendientes</th><th>Estado</th><th /></tr>
+          </thead>
+          <tbody>
+            {lista.map((d) => (
+              <tr key={d.id} style={{ opacity: d.revocadoEn ? 0.6 : 1 }}>
+                <td><div style={{ fontWeight: 600 }}>{d.nombre}</div>{d.ubicacion && <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{d.ubicacion}</div>}</td>
+                <td style={{ fontSize: 12 }}>{d.perfil}</td>
+                <td style={{ fontSize: 12 }}>{d.conexion === "ETHERNET" ? "Ethernet (TCP/IP)" : "Puerto serie (RS-232)"}</td>
+                <td><code style={{ fontSize: 11.5 }}>{d.tokenPrefijo}…</code></td>
+                <td style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                  {d.ultimoContacto ? fechaHora(d.ultimoContacto) : "Nunca"}
+                  {d.versionAgente && <div style={{ color: "var(--muted)" }}>agente {d.versionAgente}{d.ultimaIp ? ` · ${d.ultimaIp}` : ""}</div>}
+                </td>
+                <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{d.envios}</td>
+                <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{d.pendientes ? <span className="pill amber">{d.pendientes}</span> : 0}</td>
+                <td>
+                  {d.revocadoEn ? (
+                    <span className="pill gray" title={`${fechaHora(d.revocadoEn)}${d.revocadoPor ? ` · ${d.revocadoPor}` : ""}${d.motivoRevocacion ? ` · ${d.motivoRevocacion}` : ""}`}>Revocado</span>
+                  ) : (
+                    <span className="pill green">Activo</span>
+                  )}
+                </td>
+                <td>
+                  {!d.revocadoEn && <button type="button" className="btn ghost sm" onClick={() => setRevocando({ id: d.id, nombre: d.nombre, motivo: "" })}>Revocar</button>}
+                </td>
+              </tr>
+            ))}
+            {!lista.length && <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>No hay dispositivos conectados.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
