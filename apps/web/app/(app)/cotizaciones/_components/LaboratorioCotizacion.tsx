@@ -29,6 +29,8 @@ const SECCION: Record<string, string> = {
   horasMaquina: "4 · Horas máquina",
   pasajes: "5 · Pasajes",
   otros: "6 · Otros gastos",
+  // Contrato 4.1.4 (las cotizaciones anteriores no la tienen: no se muestra).
+  insumos: "7 · Insumos y reactivos",
 };
 
 function FormSolicitud({ cotId, onHecho }: { cotId: string; onHecho: (m: string) => void }) {
@@ -211,7 +213,7 @@ function TarjetaSolicitud({ sol, c, puedeRetirar, onResponder, onVb, onRetirar }
                   {r.precioParticularIvaIncluido != null && <tr><td>Precio particular IVA incluido (IVA {String(r.ivaPct).replace(".", ",")} %: {money(r.iva)})</td><td className="num">{money(r.precioParticularIvaIncluido)}</td></tr>}
                 </tbody>
               </table>
-              {sol.costeo?.condiciones && <p style={{ fontSize: 12.5, margin: "6px 0 0" }}>7 · Condiciones técnicas y restricciones: {sol.costeo.condiciones}</p>}
+              {sol.costeo?.condiciones && <p style={{ fontSize: 12.5, margin: "6px 0 0" }}>{sol.costeo.insumos ? "8" : "7"} · Condiciones técnicas y restricciones: {sol.costeo.condiciones}</p>}
             </div>
           )}
         </div>

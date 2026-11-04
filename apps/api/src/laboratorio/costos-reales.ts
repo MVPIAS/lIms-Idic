@@ -87,12 +87,18 @@ export function erroresLineas(lineas: LineaCostoReal[], cargosValidos: Set<strin
  * Sugerencias para los bloques nuevos (EP-00 7.1, EP-05 9.1): una línea por
  * orden interna respondida con su costo directo (cantidad 1 × costo), y una por
  * gasto de comisión estimado por el laboratorio en el Formulario de costeo de la
- * cotización (viáticos y pasajes; los otros gastos como «otro»). Lo ya cargado
- * no se repite. El costo real se corrige a mano.
+ * cotización (viáticos y pasajes; los otros gastos como «otro»), y una de
+ * «Reactivos y consumibles» por insumo estimado en la sección 7 del FORM05
+ * (contrato 4.1.4). Lo ya cargado no se repite. El costo real se corrige a mano.
  */
 export function lineasSugeridas(
   ordenes: { id: string; numero: string | null; destino: string | null; costoDirecto: number | null }[],
-  costeo: { viaticos?: { zona: string; dias: number; montoDiario: number; porcentaje: number }[]; pasajes?: { tramo: string; cantidad: number; valorUnitario: number }[]; otros?: { descripcion: string; monto: number; moneda: string }[] } | null,
+  costeo: {
+    viaticos?: { zona: string; dias: number; montoDiario: number; porcentaje: number }[];
+    pasajes?: { tramo: string; cantidad: number; valorUnitario: number }[];
+    otros?: { descripcion: string; monto: number; moneda: string }[];
+    insumos?: { consumibleId?: string | null; descripcion: string; unidad?: string | null; cantidad: number; costoUnitario: number }[];
+  } | null,
   yaCargadas: LineaCostoReal[],
 ): LineaCostoReal[] {
   const out: LineaCostoReal[] = [];
@@ -109,6 +115,9 @@ export function lineasSugeridas(
     for (const o of costeo.otros ?? [])
       if (o.moneda !== "USD") out.push({ categoria: "comision", tipoGasto: "otro", descripcion: o.descripcion, cantidad: 1, costoUnitario: r2(Number(o.monto) || 0) });
   }
+  if (!yaCargadas.some((l) => l.categoria === "reactivos") && costeo)
+    for (const x of costeo.insumos ?? [])
+      out.push({ categoria: "reactivos", consumibleId: x.consumibleId ?? null, descripcion: x.descripcion, cantidad: Number(x.cantidad) || 0, unidad: x.unidad ?? null, costoUnitario: r2(Number(x.costoUnitario) || 0) });
   return out;
 }
 

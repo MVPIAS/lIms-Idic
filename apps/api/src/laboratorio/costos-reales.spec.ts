@@ -145,4 +145,9 @@ describe("planilla de costos reales · OT internas y gastos de comisión (EP-00 
     ]);
     expect(lineasSugeridas([{ id: "a", numero: "OI-1", destino: null, costoDirecto: 1 }], null, [{ categoria: "ot_interna", ordenInternaId: "a", cantidad: 1, costoUnitario: 1 }])).toEqual([]);
   });
+  it("contrato 4.1.4 · los insumos del FORM05 se sugieren como reactivos y consumibles (una vez)", () => {
+    const costeo = { insumos: [{ consumibleId: "c1", descripcion: "Metanol", unidad: "mL", cantidad: 250, costoUnitario: 12.5 }] };
+    expect(lineasSugeridas([], costeo, []).map((l) => [l.categoria, l.consumibleId, l.cantidad, l.costoUnitario])).toEqual([["reactivos", "c1", 250, 12.5]]);
+    expect(lineasSugeridas([], costeo, [{ categoria: "reactivos", cantidad: 1, costoUnitario: 1 }])).toEqual([]);
+  });
 });

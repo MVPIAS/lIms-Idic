@@ -46,6 +46,20 @@ const Form05Schema = z.object({
   horasMaquina: z.array(z.object({ equipo: texto(200).min(1), horas: z.number().positive().max(100000), valorHora: monto })).max(50).optional(),
   pasajes: z.array(z.object({ ambito: z.enum(["nacional", "extranjero"]), tramo: texto(200).min(1), cantidad: z.number().positive().max(1000), valorUnitario: monto })).max(50).optional(),
   otros: z.array(z.object({ descripcion: texto(300).min(1), monto, moneda: zMoneda.default("CLP") })).max(50).optional(),
+  // Contrato 4.1.4 · sección 7: insumos y reactivos del inventario (consumibleId) o escritos a mano; costo en CLP.
+  insumos: z
+    .array(
+      z.object({
+        consumibleId: z.string().uuid().nullable().optional(),
+        codigo: texto(40).nullable().optional(),
+        descripcion: texto(300).min(1, "Indique el insumo o reactivo de cada fila."),
+        unidad: texto(30).nullable().optional(),
+        cantidad: z.number({ invalid_type_error: "Indique la cantidad del insumo." }).positive("La cantidad del insumo debe ser mayor que 0.").max(1e7),
+        costoUnitario: monto,
+      }),
+    )
+    .max(100)
+    .optional(),
   condiciones: texto(4000).nullable().optional(),
   dolar: z.number().positive().max(100000).nullable().optional(),
 });
@@ -97,6 +111,13 @@ export class CircuitoCotizacionController {
   @ApiOperation({ summary: "El laboratorio responde: programa (FORM06) y costeo (FORM05)" })
   responder(@Param("sid", ParseUUIDPipe) sid: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.responder(req, sid, ResponderSchema.parse(body ?? {}) as any);
+  }
+
+  @Get("solicitudes-laboratorio/:sid/referencias-costeo")
+  @RequierePermiso("cotizacion.costear")
+  @ApiOperation({ summary: "Tarifas HH/HM vigentes del laboratorio y consumibles con su costo, para precargar el FORM05" })
+  referenciasCosteo(@Param("sid", ParseUUIDPipe) sid: string, @Req() req: any) {
+    return this.svc.referenciasCosteo(req, sid);
   }
 
   @Post("solicitudes-laboratorio/:sid/vb")
