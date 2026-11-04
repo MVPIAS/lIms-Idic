@@ -585,6 +585,36 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- Respaldos programados (contrato §4.8.4, brechas tanda 6) ---
+  {
+    categoria: "respaldos",
+    titulo: "Respaldos de la base de datos",
+    donde:
+      "Administración › Respaldos: el servicio de respaldo lee estos valores cada minuto (no hay que reiniciarlo). Cambiar la hora a una que ya pasó hoy hace un respaldo enseguida. Guía: docs/RESPALDOS_Y_BI.md.",
+    codigos: {
+      hora: { tipo: "entero", nombre: "Hora del respaldo diario (hora de Chile)", min: 0, max: 23, unidad: "h", ayuda: "Por defecto a las 2 de la madrugada, cuando nadie trabaja en el LIMS.", porDefecto: "2" },
+      retencion_diarios: { tipo: "entero", nombre: "Respaldos diarios que se conservan", min: 1, max: 365, unidad: "respaldos", porDefecto: "14" },
+      retencion_semanales: {
+        tipo: "entero",
+        nombre: "Respaldos semanales (del domingo) que se conservan",
+        min: 0,
+        max: 104,
+        unidad: "respaldos",
+        ayuda: "El del domingo se guarda además como semanal sin ocupar espacio extra. 0 = sin semanales.",
+        porDefecto: "8",
+      },
+      horas_alerta: {
+        tipo: "entero",
+        nombre: "Horas sin un respaldo correcto para dar el estado en rojo y avisar",
+        min: 1,
+        max: 168,
+        unidad: "horas",
+        ayuda: "Por defecto 26 horas: un día más un margen para el respaldo de la madrugada.",
+        porDefecto: "26",
+      },
+      avisar_fallo: { tipo: "sino", nombre: "Avisar a los administradores si un respaldo falla o se atrasa", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
   {
     categoria: "integracion",
     titulo: "API e integración con otros sistemas",

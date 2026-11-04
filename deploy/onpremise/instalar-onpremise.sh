@@ -157,7 +157,7 @@ command -v openssl >/dev/null || fatal "Falta openssl (necesario para generar se
 if [ ! -f "$APP_DIR/.env" ]; then
   log "No existe .env: se genera desde la plantilla con secretos aleatorios..."
   cp "$KIT_DIR/conf/env.onpremise.example" "$APP_DIR/.env"
-  for var in POSTGRES_PASSWORD JWT_SECRET MINIO_ROOT_PASSWORD RESPALDO_CLAVE; do
+  for var in POSTGRES_PASSWORD JWT_SECRET MINIO_ROOT_PASSWORD RESPALDO_CLAVE METABASE_LECTURA_PASSWORD; do
     sec="$(generar_secreto)"
     # Delimitador '|' para no chocar con '/' del base64.
     sed -i "s|^${var}=<<GENERAR>>|${var}=${sec}|" "$APP_DIR/.env"

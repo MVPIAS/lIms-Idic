@@ -132,6 +132,9 @@ services:
       # URL que se imprime (y codifica en el QR) en informes y certificados para
       # verificar su autenticidad. Por defecto, el propio servidor interno.
       URL_VERIFICACION: ${URL_VERIFICACION:-https://${DOMAIN}/verificar}
+      # Menú «Análisis e inteligencia de negocio (Metabase)» (§4.7.5). Vacía si el
+      # certificado no cubre bi.<dominio> (Caddyfile.onpremise): la pantalla lo dice.
+      URL_BI: ${URL_BI:-}
       # ETL IBIS · barrido AUTOMÁTICO de la carpeta cada 24h (proceso interno de la API).
       # IBIS deja el XML diario en IBIS_DIR/entrada; el ETL lo consume y lo mueve a
       # IBIS_DIR/procesados (o /errores si falla). No requiere Internet ni credenciales.
