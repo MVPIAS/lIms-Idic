@@ -29,6 +29,7 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { ConfiguracionModule, MailService } from "../configuracion/configuracion.module";
 import { cotizacionOficial, datosFirmaCotizacion, nombrePdfCotizacion, pdfCotizacion } from "../cotizacion/cotizacion-documento";
+import { cuerpoCotizacionVigente } from "../cotizacion/plantilla-cotizacion";
 import { exigirCotizacionEnAlcance } from "../cotizacion/alcance-cotizacion";
 import {
   accedeACorreos,
@@ -374,7 +375,9 @@ export class MensajeriaService {
       throw new ConflictException(
         `La cotización ${cot.codigo} aún no está firmada por el Jefe DCO: solo se envía al cliente una cotización firmada.`,
       );
-    const pdf = opts.pdf ?? (await pdfCotizacion({ ...cot, ...firma }, firma.firmas));
+    const pdf =
+      opts.pdf ??
+      (await pdfCotizacion({ ...cot, ...firma }, firma.firmas, await cuerpoCotizacionVigente(this.prisma, tenantId, { ...cot, ...firma }, firma.firmas)));
     const nombrePdf = nombrePdfCotizacion(cot.codigo);
 
     const r = await this.enviarYRegistrar(req, tenantId, {
