@@ -1,6 +1,8 @@
 /**
  * Documento de la cotización (DCO-PG01-P01-IT02-FORM04): cuerpo HTML, vista
- * previa con firmas y PDF. Lo usan el panel de la cotización (GET
+ * previa con firmas y PDF. El cuerpo sale de la plantilla «Cotización» vigente
+ * del repositorio de plantillas (plantilla-cotizacion.ts, contrato 4.6.8);
+ * `cuerpoCotizacionHtml` es el formato fijo de respaldo. Lo usan el panel de la cotización (GET
  * /cotizaciones/:id/pdf y /html, «Enviar al cliente») y Mensajería.
  *
  * El cuerpo es el mismo subconjunto de HTML que usan los informes (membrete,
@@ -177,9 +179,11 @@ export function firmasEstampadas(f: FirmasCotizacion): FirmaEstampada[] {
   ];
 }
 
-/** Cuerpo, sello y título del documento de la cotización. */
-export function documentoCotizacion(cot: any, firmas: FirmasCotizacion) {
-  const cuerpo = cuerpoCotizacionHtml(cot);
+/**
+ * Cuerpo, sello y título del documento de la cotización. `cuerpo` = el ya rendido
+ * con la plantilla vigente (plantilla-cotizacion.ts); sin él, el formato fijo.
+ */
+export function documentoCotizacion(cot: any, firmas: FirmasCotizacion, cuerpo: string = cuerpoCotizacionHtml(cot)) {
   const hash = createHash("sha256").update(cuerpo, "utf8").digest("hex");
   const oficial = cotizacionOficial(cot);
   const fecha = cot.firmadaAt ?? cot.fechaEmision ?? cot.createdAt ?? new Date();
@@ -197,14 +201,14 @@ export function documentoCotizacion(cot: any, firmas: FirmasCotizacion) {
 }
 
 /** Vista previa HTML completa (la misma que el PDF). */
-export function htmlCotizacion(cot: any, firmas: FirmasCotizacion): string {
-  const d = documentoCotizacion(cot, firmas);
+export function htmlCotizacion(cot: any, firmas: FirmasCotizacion, cuerpo?: string): string {
+  const d = documentoCotizacion(cot, firmas, cuerpo);
   return documentoCompleto(d.cuerpo, d.sello, d.titulo);
 }
 
 /** PDF/A de la cotización. */
-export async function pdfCotizacion(cot: any, firmas: FirmasCotizacion): Promise<Buffer> {
-  const d = documentoCotizacion(cot, firmas);
+export async function pdfCotizacion(cot: any, firmas: FirmasCotizacion, cuerpo?: string): Promise<Buffer> {
+  const d = documentoCotizacion(cot, firmas, cuerpo);
   return generarPdf(d.cuerpo, d.sello, d.titulo);
 }
 

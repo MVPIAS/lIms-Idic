@@ -1057,10 +1057,13 @@ export class OtController {
   private async validarInstancia(instanciaId: string, tenantId: string) {
     const ins = await this.prisma.flujoInstancia.findFirst({
       where: { id: instanciaId, tenantId },
-      select: { id: true },
+      select: { id: true, metadata: true },
     });
     if (!ins)
       throw new BadRequestException("flujoInstanciaId no existe o no pertenece al tenant");
+    // Una simulación del Diseñador de flujos (datos PRUEBA) no se liga a una OT.
+    if ((ins.metadata as any)?.simulacion === true)
+      throw new BadRequestException("La instancia es una simulación del Diseñador de flujos y no se puede ligar a una OT.");
   }
 
   /**
