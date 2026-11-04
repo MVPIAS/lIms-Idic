@@ -4,7 +4,10 @@
  *
  * Siete secciones: 1 Viáticos · 2 Horas hombre (civil / militar) · 3 Servicios
  * estándar (EN de la lista) · 4 Horas máquina · 5 Pasajes · 6 Otros gastos ·
- * 7 Condiciones técnicas y restricciones. Montos finales con la estructura
+ * 7 Insumos y reactivos (contrato 4.1.4: consumibles del inventario con su
+ * costo de referencia, o escritos a mano) · 8 Condiciones técnicas y
+ * restricciones. Las cotizaciones guardadas antes de la sección 7 no la traen:
+ * cuenta 0 (compatibles). Montos finales con la estructura
  * oficial de la lista de precios 2026 (estructura-precio.ts): CDT, costo
  * indirecto (CI, antes «CFA»), CT = precio Ejército, recargo, neto = precio
  * particular sin IVA, IVA y precio particular con IVA.
@@ -22,6 +25,8 @@ export interface ServicioEstandar { codigo: string; descripcion?: string; cantid
 export interface HoraMaquina { equipo: string; horas: number; valorHora: number }
 export interface Pasaje { ambito: "nacional" | "extranjero"; tramo: string; cantidad: number; valorUnitario: number }
 export interface OtroGasto { descripcion: string; monto: number; moneda: "CLP" | "USD" }
+/** Contrato 4.1.4 · insumo o reactivo: del inventario (consumibleId) o escrito a mano. Costo en CLP por unidad. */
+export interface Insumo { consumibleId?: string | null; codigo?: string | null; descripcion: string; unidad?: string | null; cantidad: number; costoUnitario: number }
 
 export interface Form05Entrada {
   viaticos?: Viatico[];
@@ -30,14 +35,16 @@ export interface Form05Entrada {
   horasMaquina?: HoraMaquina[];
   pasajes?: Pasaje[];
   otros?: OtroGasto[];
-  /** Sección 7. */
+  /** Sección 7 · insumos y reactivos (contrato 4.1.4). */
+  insumos?: Insumo[];
+  /** Sección 8. */
   condiciones?: string | null;
   /** Valor del dólar para convertir los otros gastos en US$. */
   dolar?: number | null;
 }
 
 export interface Form05Resultado {
-  secciones: { viaticos: number; horasHombre: number; servicios: number; horasMaquina: number; pasajes: number; otros: number };
+  secciones: { viaticos: number; horasHombre: number; servicios: number; horasMaquina: number; pasajes: number; otros: number; insumos: number };
   horasHombreTotal: number;
   cdt: number;
   cfaPct: number;
@@ -59,13 +66,16 @@ const suma = <T>(xs: T[] | undefined, f: (x: T) => number) => (xs ?? []).reduce(
 /** Viático de una fila: monto diario × % del grado × días. */
 export const montoViatico = (v: Viatico) => v.montoDiario * (v.porcentaje / 100) * v.dias;
 
+/** Insumo de una fila: cantidad × costo unitario (CLP). */
+export const montoInsumo = (x: Pick<Insumo, "cantidad" | "costoUnitario">) => (Number(x.cantidad) || 0) * (Number(x.costoUnitario) || 0);
+
 /** Errores de contenido del formulario (lo que zod no puede ver). */
 export function erroresForm05(f: Form05Entrada): string[] {
   const e: string[] = [];
   const filas =
     (f.viaticos?.length ?? 0) + (f.horasHombre?.length ?? 0) + (f.servicios?.length ?? 0) +
-    (f.horasMaquina?.length ?? 0) + (f.pasajes?.length ?? 0) + (f.otros?.length ?? 0);
-  if (filas === 0) e.push("El formulario de costeo necesita al menos una fila en alguna de las secciones 1 a 6.");
+    (f.horasMaquina?.length ?? 0) + (f.pasajes?.length ?? 0) + (f.otros?.length ?? 0) + (f.insumos?.length ?? 0);
+  if (filas === 0) e.push("El formulario de costeo necesita al menos una fila en alguna de las secciones 1 a 7.");
   if ((f.otros ?? []).some((o) => o.moneda === "USD") && !(Number(f.dolar) > 0))
     e.push("Hay otros gastos en US$: indique el valor del dólar para convertirlos.");
   return e;
@@ -98,6 +108,7 @@ export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenPart
     horasMaquina: r0(suma(f.horasMaquina, (h) => h.horas * h.valorHora)),
     pasajes: r0(suma(f.pasajes, (x) => x.cantidad * x.valorUnitario)),
     otros: r0(suma(f.otros, (o) => (o.moneda === "USD" ? o.monto * dolar : o.monto))),
+    insumos: r0(suma(f.insumos, montoInsumo)),
   };
   const cdt = Object.values(secciones).reduce((a, b) => a + b, 0);
   const ivaPct = p.ivaPct ?? 19;

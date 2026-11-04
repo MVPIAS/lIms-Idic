@@ -3,21 +3,44 @@
 /**
  * «Cotización · respuesta del laboratorio» (EP-00 2.5): el Jefe de Laboratorio
  * responde la solicitud de Comercial con el Programa de trabajo (FORM06) y, si
- * el servicio no es estandarizado, el Formulario de costeo (FORM05, siete
- * secciones). Botones «Aceptar», «Aceptar con comentario» y «Rechazar con
+ * el servicio no es estandarizado, el Formulario de costeo (FORM05, ocho
+ * secciones; la 7, «Insumos y reactivos», es del contrato 4.1.4). El «Valor
+ * hora» de HH y HM se precarga con las tarifas vigentes de Tablas maestras (las
+ * HM, de los equipos del laboratorio) y los insumos se eligen del inventario de
+ * consumibles con su costo de referencia; todo queda editable. Botones «Aceptar», «Aceptar con comentario» y «Rechazar con
  * comentario» → vuelve a Comercial. Los montos que se ven aquí son una vista
  * previa: el servidor los recalcula al enviar (form05.ts).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Panel from "./Panel";
 import { pedir } from "./comercial";
 import { money } from "@/lib/format";
 import type { Solicitud } from "./circuito";
 import { useListaParametro } from "@/lib/lista-parametro";
 
-/** `opsParametro`: las opciones salen de esa categoría de «Parámetros del sistema» (p. ej. «moneda»; `ops` queda como respaldo). */
-type Col = { k: string; l: string; tipo: "texto" | "numero" | "opcion"; ops?: [string, string][]; opsParametro?: string; ancho?: number };
+/**
+ * `opsParametro`: las opciones salen de esa categoría de «Parámetros del sistema» (p. ej. «moneda»; `ops` queda como respaldo).
+ * `sugerencias`: el texto se elige de las tarifas vigentes (HH por categoría, HM por equipo) y completa el «Valor hora».
+ * tipo «insumo»: combo con los consumibles del inventario (vacío = escrito a mano).
+ */
+type Col = { k: string; l: string; tipo: "texto" | "numero" | "opcion" | "insumo"; ops?: [string, string][]; opsParametro?: string; ancho?: number; sugerencias?: "hh" | "hm" };
 type Fila = Record<string, string>;
+
+/** Contrato 4.1.4 · valores de referencia del FORM05 (GET …/solicitudes-laboratorio/:sid/referencias-costeo). */
+type Referencias = {
+  tarifasHh: { categoria: string; descripcion: string | null; valorHora: number }[];
+  tarifasHm: { codigo: string | null; descripcion: string | null; equipo: string | null; valorHora: number; delLaboratorio: boolean }[];
+  insumos: { id: string; codigo: string; nombre: string; unidad: string | null; costoUnitario: number | null }[];
+};
+const etiquetaHm = (t: Referencias["tarifasHm"][number]) => t.equipo ?? t.descripcion ?? t.codigo ?? "Equipo";
+const iguales = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+/** Sugerencias (texto → valor hora) de una columna con tarifas. */
+function sugerenciasDe(c: Col, refs: Referencias | null): { texto: string; valor: number; detalle?: string }[] {
+  if (!refs || !c.sugerencias) return [];
+  return c.sugerencias === "hh"
+    ? refs.tarifasHh.map((t) => ({ texto: t.categoria, valor: t.valorHora, detalle: t.descripcion ?? undefined }))
+    : refs.tarifasHm.map((t) => ({ texto: etiquetaHm(t), valor: t.valorHora }));
+}
 
 const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva: Fila }[] = [
   {
@@ -37,9 +60,10 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
   {
     k: "horasHombre",
     titulo: "2 · Horas hombre",
+    ayuda: "Elija la categoría de las tarifas HH vigentes (Tablas maestras) y el valor hora se completa solo; puede cambiarlo.",
     cols: [
       { k: "tipo", l: "Personal", tipo: "opcion", ops: [["civil", "Civil"], ["militar", "Militar"]], ancho: 100 },
-      { k: "categoria", l: "Categoría", tipo: "texto" },
+      { k: "categoria", l: "Categoría", tipo: "texto", sugerencias: "hh" },
       { k: "horas", l: "Horas", tipo: "numero", ancho: 80 },
       { k: "valorHora", l: "Valor hora", tipo: "numero", ancho: 110 },
     ],
@@ -60,8 +84,9 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
   {
     k: "horasMaquina",
     titulo: "4 · Horas máquina",
+    ayuda: "Elija el equipo de las tarifas HM vigentes del laboratorio (Tablas maestras) y el valor hora se completa solo; puede cambiarlo.",
     cols: [
-      { k: "equipo", l: "Equipo", tipo: "texto" },
+      { k: "equipo", l: "Equipo", tipo: "texto", sugerencias: "hm" },
       { k: "horas", l: "Horas", tipo: "numero", ancho: 80 },
       { k: "valorHora", l: "Valor hora", tipo: "numero", ancho: 110 },
     ],
@@ -88,6 +113,20 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
     ],
     nueva: { descripcion: "", monto: "", moneda: "CLP" },
   },
+  {
+    // Contrato 4.1.4: partida de insumos y reactivos (suma al costo directo).
+    k: "insumos",
+    titulo: "7 · Insumos y reactivos",
+    ayuda: "Elija el consumible del inventario (trae su costo unitario de referencia) o déjelo en «escrito a mano» y complete la descripción y el costo. Subtotal = cantidad × costo unitario, en CLP.",
+    cols: [
+      { k: "consumibleId", l: "Del inventario", tipo: "insumo", ancho: 220 },
+      { k: "descripcion", l: "Insumo o reactivo", tipo: "texto" },
+      { k: "unidad", l: "Unidad", tipo: "texto", ancho: 80 },
+      { k: "cantidad", l: "Cantidad", tipo: "numero", ancho: 90 },
+      { k: "costoUnitario", l: "Costo unitario", tipo: "numero", ancho: 110 },
+    ],
+    nueva: { consumibleId: "", descripcion: "", unidad: "", cantidad: "1", costoUnitario: "" },
+  },
 ];
 
 /** Número escrito a la chilena: «1.234.567,5» o «45000» o «1,5» (y «1.5» como decimal). */
@@ -102,12 +141,42 @@ const numerica = (v: string) => String(v ?? "").trim() !== "";
 /** Convierte las filas de una sección al formato de la API (números y vacíos fuera). */
 function aApi(sec: (typeof SECCIONES)[number], filas: Fila[]) {
   return filas
-    .filter((f) => sec.cols.some((c) => c.tipo !== "opcion" && String(f[c.k] ?? "").trim()))
-    .map((f) => Object.fromEntries(sec.cols.map((c) => [c.k, c.tipo === "numero" ? n(f[c.k]) : String(f[c.k] ?? "").trim()])));
+    .filter((f) => sec.cols.some((c) => c.tipo !== "opcion" && c.tipo !== "insumo" && String(f[c.k] ?? "").trim()))
+    .map((f) =>
+      Object.fromEntries(sec.cols.map((c) => [c.k, c.tipo === "numero" ? n(f[c.k]) : c.tipo === "insumo" ? f[c.k] || null : String(f[c.k] ?? "").trim()])),
+    );
 }
 
-function TablaSeccion({ sec, filas, onCambio }: { sec: (typeof SECCIONES)[number]; filas: Fila[]; onCambio: (f: Fila[]) => void }) {
-  const set = (i: number, k: string, v: string) => onCambio(filas.map((f, j) => (j === i ? { ...f, [k]: v } : f)));
+/**
+ * Contrato 4.1.4 · completa la fila al elegir: la categoría HH o el equipo HM
+ * de una tarifa vigente pone su «Valor hora» (si estaba vacío o lo había puesto
+ * la tarifa anterior); el consumible del inventario pone descripción, unidad y
+ * costo unitario. Lo escrito a mano se respeta.
+ */
+function completar(sec: (typeof SECCIONES)[number], f: Fila, k: string, v: string, refs: Referencias | null): Fila {
+  const nueva = { ...f, [k]: v };
+  const col = sec.cols.find((c) => c.k === k);
+  if (col?.sugerencias) {
+    const t = sugerenciasDe(col, refs).find((x) => iguales(x.texto, v));
+    const automatico = !String(f.valorHora ?? "").trim() || f.valorHora === f._valorTarifa;
+    if (t && automatico) return { ...nueva, valorHora: String(t.valor), _valorTarifa: String(t.valor) };
+  }
+  if (col?.tipo === "insumo") {
+    const x = refs?.insumos.find((i) => i.id === v);
+    if (!x) return nueva;
+    return {
+      ...nueva,
+      descripcion: `${x.codigo} · ${x.nombre}`,
+      unidad: x.unidad ?? "",
+      costoUnitario: x.costoUnitario != null ? String(x.costoUnitario) : f.costoUnitario ?? "",
+    };
+  }
+  return nueva;
+}
+
+function TablaSeccion({ sec, filas, onCambio, refs }: { sec: (typeof SECCIONES)[number]; filas: Fila[]; onCambio: (f: Fila[]) => void; refs: Referencias | null }) {
+  const set = (i: number, k: string, v: string) => onCambio(filas.map((f, j) => (j === i ? completar(sec, f, k, v, refs) : f)));
+  const sinTarifas = sec.cols.some((c) => c.sugerencias) && !!refs && !sec.cols.some((c) => sugerenciasDe(c, refs).length);
   // Frente f5: la moneda de los gastos sale del parámetro «moneda» (CLP y USD).
   const monedas = useListaParametro("moneda");
   const opsDe = (c: Col): [string, string][] =>
@@ -116,6 +185,18 @@ function TablaSeccion({ sec, filas, onCambio }: { sec: (typeof SECCIONES)[number
     <fieldset style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", margin: "0 0 10px" }}>
       <legend style={{ fontSize: 12.5, fontWeight: 700, padding: "0 4px" }}>{sec.titulo}</legend>
       {sec.ayuda && <p className="subtitle" style={{ margin: "0 0 6px", fontSize: 11.5 }}>{sec.ayuda}</p>}
+      {sinTarifas && (
+        <p className="subtitle" style={{ margin: "0 0 6px", fontSize: 11.5 }}>
+          No hay tarifas {sec.k === "horasHombre" ? "HH" : "HM del laboratorio"} vigentes en «Tablas maestras»: escriba el valor hora.
+        </p>
+      )}
+      {sec.cols.filter((c) => c.sugerencias).map((c) => (
+        <datalist key={c.k} id={`dl-${sec.k}-${c.k}`}>
+          {sugerenciasDe(c, refs).map((x) => (
+            <option key={x.texto} value={x.texto}>{`${x.detalle ? `${x.detalle} · ` : ""}${money(x.valor)} / hora`}</option>
+          ))}
+        </datalist>
+      ))}
       {filas.length > 0 && (
         <table className="data" style={{ marginBottom: 6 }}>
           <thead>
@@ -133,10 +214,20 @@ function TablaSeccion({ sec, filas, onCambio }: { sec: (typeof SECCIONES)[number
                       <select className="celda" aria-label={`${c.l} · fila ${i + 1}`} value={f[c.k]} onChange={(e) => set(i, c.k, e.target.value)}>
                         {opsDe(c).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                       </select>
+                    ) : c.tipo === "insumo" ? (
+                      <select className="celda" aria-label={`${c.l} · fila ${i + 1}`} value={f[c.k] ?? ""} onChange={(e) => set(i, c.k, e.target.value)}>
+                        <option value="">— escrito a mano —</option>
+                        {(refs?.insumos ?? []).map((x) => (
+                          <option key={x.id} value={x.id}>
+                            {`${x.codigo} · ${x.nombre}${x.costoUnitario != null ? ` · ${money(x.costoUnitario)}${x.unidad ? `/${x.unidad}` : ""}` : " · sin costo"}`}
+                          </option>
+                        ))}
+                      </select>
                     ) : (
                       <input
                         className="celda"
                         aria-label={`${c.l} · fila ${i + 1}`}
+                        list={c.sugerencias ? `dl-${sec.k}-${c.k}` : undefined}
                         inputMode={c.tipo === "numero" ? "decimal" : undefined}
                         value={f[c.k]}
                         onChange={(e) => set(i, c.k, e.target.value)}
@@ -193,6 +284,13 @@ export default function RespuestaLaboratorio({
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
   const rechaza = respuesta === "rechazar";
+  // Contrato 4.1.4: tarifas HH/HM vigentes y consumibles con su costo (si falla, el formulario sigue a mano).
+  const [refs, setRefs] = useState<Referencias | null>(null);
+  useEffect(() => {
+    pedir<Referencias>("GET", `/cotizaciones/solicitudes-laboratorio/${sol.id}/referencias-costeo`)
+      .then(setRefs)
+      .catch(() => setRefs(null));
+  }, [sol.id]);
 
   // Vista previa de los montos (mismo cálculo que form05.ts; manda el servidor).
   const prev = useMemo(() => {
@@ -206,6 +304,7 @@ export default function RespuestaLaboratorio({
       horasMaquina: sum("horasMaquina", (x) => n(x.horas) * n(x.valorHora)),
       pasajes: sum("pasajes", (x) => n(x.cantidad) * n(x.valorUnitario)),
       otros: sum("otros", (x) => (x.moneda === "USD" ? n(x.monto) * d : n(x.monto))),
+      insumos: sum("insumos", (x) => n(x.cantidad) * n(x.costoUnitario)),
     };
     const cdt = Object.values(sec).reduce((a, b) => a + b, 0);
     // Estructura oficial (estructura-precio.ts): se calcula sin redondear la cadena y se redondea al mostrar.
@@ -215,7 +314,7 @@ export default function RespuestaLaboratorio({
     const recargo = ct * (cfg.margenParticularPct / 100);
     const neto = ct + recargo;
     const iva = neto * ((cfg.ivaPct ?? 19) / 100);
-    return { cdt, cfa: r(ci), ct: r(ct), recargo: r(recargo), particular: r(neto), iva: r(iva), conIva: r(neto + iva) };
+    return { cdt, insumos: sec.insumos, cfa: r(ci), ct: r(ct), recargo: r(recargo), particular: r(neto), iva: r(iva), conIva: r(neto + iva) };
   }, [secciones, dolar, cfg]);
 
   const conCosteo = noEstandar || SECCIONES.some((s) => aApi(s, secciones[s.k] ?? []).length > 0);
@@ -340,11 +439,11 @@ export default function RespuestaLaboratorio({
             {noEstandar ? <span className="req" style={{ fontSize: 12 }}>obligatorio · {esComision ? "costeo de la comisión" : "servicio no estandarizado"}</span> : <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>opcional · servicio estandarizado</span>}
           </h3>
           {SECCIONES.map((s) => (
-            <TablaSeccion key={s.k} sec={s} filas={secciones[s.k] ?? []} onCambio={(f) => setSecciones({ ...secciones, [s.k]: f })} />
+            <TablaSeccion key={s.k} sec={s} refs={refs} filas={secciones[s.k] ?? []} onCambio={(f) => setSecciones({ ...secciones, [s.k]: f })} />
           ))}
           <div className="form-grid cols-2">
             <div className="field" style={{ gridColumn: "1 / -1" }}>
-              <label htmlFor="r-cond">7 · Condiciones técnicas y restricciones</label>
+              <label htmlFor="r-cond">8 · Condiciones técnicas y restricciones</label>
               <textarea id="r-cond" rows={2} maxLength={4000} value={condiciones} onChange={(e) => setCondiciones(e.target.value)} />
             </div>
             {(secciones.otros ?? []).some((o) => o.moneda === "USD") && (
@@ -356,6 +455,7 @@ export default function RespuestaLaboratorio({
           </div>
           {conCosteo && (
             <div className="totals-box" style={{ maxWidth: 420, marginLeft: "auto" }} aria-live="polite">
+              {prev.insumos > 0 && <div className="row"><span>de ello, insumos y reactivos (sección 7)</span><b>{money(prev.insumos)}</b></div>}
               <div className="row"><span>Costo directo total (CDT)</span><b>{money(prev.cdt)}</b></div>
               <div className="row"><span>Costo indirecto (CI {String(cfg.cfaPct).replace(".", ",")} % del CDT)</span><b>{money(prev.cfa)}</b></div>
               <div className="row"><span>Costo total (CT) · precio Ejército</span><b>{money(prev.ct)}</b></div>

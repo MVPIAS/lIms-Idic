@@ -23,7 +23,7 @@ describe("Formulario de costeo FORM05 (EP-00 2.5)", () => {
       },
       p,
     );
-    expect(r.secciones).toEqual({ viaticos: 40000, horasHombre: 136000, servicios: 100000, horasMaquina: 96000, pasajes: 90000, otros: 9500 });
+    expect(r.secciones).toEqual({ viaticos: 40000, horasHombre: 136000, servicios: 100000, horasMaquina: 96000, pasajes: 90000, otros: 9500, insumos: 0 });
     expect(r.cdt).toBe(471500);
     expect(r.cfa).toBe(56580);
     expect(r.ct).toBe(528080);
@@ -43,6 +43,31 @@ describe("Formulario de costeo FORM05 (EP-00 2.5)", () => {
     // EN412 (LEM): la lista se armó hacia atrás desde el precio particular; desde el CD entero 38.153 el CT y el neto salen 1 peso arriba.
     const c = calcularForm05({ servicios: [{ codigo: "EN412", cantidad: 1, valorUnitario: 38153 }] }, oficial);
     expect([c.ct, c.precioParticular, c.precioParticularIvaIncluido]).toEqual([45784, 59519, 70827]);
+  });
+
+  it("contrato 4.1.4 · la sección 7 (insumos y reactivos) suma cantidad × costo unitario al costo directo", () => {
+    const oficial = { cfaPct: 20, margenParticularPct: 30, ivaPct: 19 };
+    const r = calcularForm05(
+      {
+        horasHombre: [{ tipo: "civil", categoria: "Analista", horas: 2, valorHora: 10000 }],
+        insumos: [
+          { consumibleId: "c1", codigo: "RC-METOH", descripcion: "Metanol", unidad: "mL", cantidad: 250, costoUnitario: 12.5 },
+          { descripcion: "Filtro PRUEBA escrito a mano", cantidad: 3, costoUnitario: 1500 },
+        ],
+      },
+      oficial,
+    );
+    expect(r.secciones.insumos).toBe(7625);
+    expect(r.cdt).toBe(27625);
+    expect(r.ct).toBe(33150);
+    // Una fila de insumos basta para que el formulario no esté vacío.
+    expect(erroresForm05({ insumos: [{ descripcion: "Reactivo", cantidad: 1, costoUnitario: 100 }] })).toEqual([]);
+  });
+
+  it("un costeo guardado antes de la sección de insumos sigue calculando igual (insumos = 0)", () => {
+    const r = calcularForm05({ servicios: [{ codigo: "EN1214", cantidad: 1, valorUnitario: 329820 }] }, { cfaPct: 20, margenParticularPct: 30, ivaPct: 19 });
+    expect(r.secciones.insumos).toBe(0);
+    expect(r.cdt).toBe(329820);
   });
 
   it("exige al menos una fila y el dólar si hay gastos en US$", () => {

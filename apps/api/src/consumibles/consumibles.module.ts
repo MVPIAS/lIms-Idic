@@ -81,6 +81,8 @@ const CrearConsumibleSchema = z.object({
   // §4.4.4: se compra en envases (unidadCompra) y se consume en unidadMedida.
   unidadCompra: optStr(30),
   factorConversion: z.preprocess(emptyToNull, z.coerce.number().positive().nullable().optional()),
+  // Contrato 4.1.4: costo de referencia por unidad de medida (CLP); lo propone el costeo FORM05.
+  costoUnitarioClp: z.preprocess(emptyToNull, z.coerce.number().nonnegative("El costo unitario no puede ser negativo.").max(1e12).nullable().optional()),
 });
 const ActualizarConsumibleSchema = CrearConsumibleSchema.partial();
 
@@ -267,8 +269,8 @@ export class ConsumiblesService {
     try {
       const rows = await this.prisma.$queryRawUnsafe<any[]>(
         `INSERT INTO consumible
-           (tenant_id, codigo, nombre, tipo, unidad_medida, proveedor_id, stock_minimo, activo, unidad_compra, factor_conversion)
-         VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10)
+           (tenant_id, codigo, nombre, tipo, unidad_medida, proveedor_id, stock_minimo, activo, unidad_compra, factor_conversion, costo_unitario_clp)
+         VALUES ($1::uuid, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11)
          RETURNING *`,
         tenantId,
         d.codigo,
@@ -280,6 +282,7 @@ export class ConsumiblesService {
         d.activo ?? true,
         d.unidadCompra ?? null,
         d.factorConversion ?? null,
+        d.costoUnitarioClp ?? null,
       );
       return rows[0];
     } catch (e: any) {
@@ -301,6 +304,7 @@ export class ConsumiblesService {
       activo: "activo",
       unidadCompra: "unidad_compra",
       factorConversion: "factor_conversion",
+      costoUnitarioClp: "costo_unitario_clp",
     };
     const CAST: Record<string, string> = { proveedor_id: "::uuid" };
     const sets: string[] = [];

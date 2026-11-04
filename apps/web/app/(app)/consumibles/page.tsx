@@ -5,7 +5,7 @@ import { validarFormulario, esMoneda, esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { toast, confirmar } from "@/components/ui/feedback";
 import { diaChile } from "@/lib/fecha-chile";
-import { fechaHora } from "@/lib/format";
+import { fechaHora, money } from "@/lib/format";
 
 // Contrato §4.4.4 / §4.4.5 · CONSUMIBLES con lotes/stock/caducidad + KARDEX.
 // Un consumible se recibe en LOTES (stock, nº de lote, caducidad); cada ensayo
@@ -38,6 +38,7 @@ const CONS_VACIO = {
   stockMinimo: "",
   unidadCompra: "",
   factorConversion: "",
+  costoUnitarioClp: "",
 };
 const LOTE_VACIO = {
   numeroLote: "",
@@ -104,6 +105,19 @@ const CONS_COLUMNS: DataColumn[] = [
     num: true,
     value: (r) => (r.stock_minimo != null ? num(r.stock_minimo) : ""),
     render: (r) => <span style={{ color: "var(--muted)" }}>{r.stock_minimo != null ? fmt(r.stock_minimo) : "—"}</span>,
+  },
+  {
+    // Contrato 4.1.4: costo de referencia que propone el costeo de la cotización (FORM05).
+    key: "costo_unitario_clp",
+    label: "Costo unitario",
+    num: true,
+    value: (r) => (r.costo_unitario_clp != null ? num(r.costo_unitario_clp) : ""),
+    render: (r) =>
+      r.costo_unitario_clp != null ? (
+        <span>{money(num(r.costo_unitario_clp))}{r.unidad_medida ? <small style={{ color: "var(--muted)" }}>/{r.unidad_medida}</small> : null}</span>
+      ) : (
+        <span style={{ color: "var(--muted)" }}>—</span>
+      ),
   },
   {
     key: "lotes",
@@ -203,6 +217,7 @@ export default function ConsumiblesPage() {
       stockMinimo: r.stock_minimo ?? "",
       unidadCompra: r.unidad_compra ?? "",
       factorConversion: r.factor_conversion ?? "",
+      costoUnitarioClp: r.costo_unitario_clp ?? "",
     });
     setShowCons(true);
   }
@@ -218,6 +233,7 @@ export default function ConsumiblesPage() {
     );
     if (f.stockMinimo !== "" && !esMoneda(String(f.stockMinimo))) v.stockMinimo = "El stock mínimo debe ser un número ≥ 0.";
     if (f.factorConversion !== "" && !(Number(f.factorConversion) > 0)) v.factorConversion = "El factor debe ser un número mayor que 0.";
+    if (String(f.costoUnitarioClp) !== "" && !esMoneda(String(f.costoUnitarioClp))) v.costoUnitarioClp = "El costo unitario debe ser un número mayor o igual a 0.";
     if (f.factorConversion !== "" && !String(f.unidadCompra).trim()) v.unidadCompra = "Indique el envase (frasco, caja…).";
     setErrs(v);
     if (Object.keys(v).length) return;
@@ -227,6 +243,7 @@ export default function ConsumiblesPage() {
         stockMinimo: f.stockMinimo === "" ? null : Number(f.stockMinimo),
         unidadCompra: String(f.unidadCompra).trim() || null,
         factorConversion: f.factorConversion === "" ? null : Number(f.factorConversion),
+        costoUnitarioClp: String(f.costoUnitarioClp) === "" ? null : Number(f.costoUnitarioClp),
       };
       const url = editId ? `${API}/consumibles/${editId}` : `${API}/consumibles`;
       const res = await fetch(url, {
@@ -456,6 +473,12 @@ export default function ConsumiblesPage() {
               <input type="number" inputMode="decimal" step="any" min="0" placeholder="Ej.: 500" value={f.factorConversion} onChange={(e) => setF({ ...f, factorConversion: e.target.value })} />
               {errs.factorConversion && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.factorConversion}</small>}
               <small style={{ color: "var(--muted)", fontSize: 11 }}>El stock se lleva en {f.unidadMedida || "la unidad de medida"}; las entradas pueden registrarse en envases.</small>
+            </div>
+            <div className="field">
+              <label>Costo unitario (CLP por {f.unidadMedida || "unidad de medida"})</label>
+              <input type="number" inputMode="decimal" step="any" min="0" placeholder="Ej.: 1500" value={f.costoUnitarioClp} onChange={(e) => setF({ ...f, costoUnitarioClp: e.target.value })} />
+              {errs.costoUnitarioClp && <small style={{ color: "var(--red)", fontSize: 11 }}>{errs.costoUnitarioClp}</small>}
+              <small style={{ color: "var(--muted)", fontSize: 11 }}>Costo de referencia: lo propone la sección «Insumos y reactivos» del formulario de costeo de la cotización (FORM05).</small>
             </div>
           </div>
           <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>

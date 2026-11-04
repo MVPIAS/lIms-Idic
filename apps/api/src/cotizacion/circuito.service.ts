@@ -27,6 +27,8 @@ import { calcularForm05, erroresForm05, erroresPrograma, type Form05Entrada, typ
 import { numeroFormulario } from "./numeracion-cotizacion";
 import { htmlCotizacion, pdfCotizacion, type FirmasCotizacion } from "./cotizacion-documento";
 import { hoyEnChile, soloFecha } from "./validez";
+import { leerReferenciasCosteo } from "./referencias-costeo";
+import { hoyCl } from "../ot/plazos";
 
 /** Tipos de unidad a los que Comercial pide fechas y costo (laboratorios y sus equivalentes). */
 const TIPOS_CONSULTABLES = ["LABORATORIO", "SUCURSAL", "DELEGACION", "SECCION"];
@@ -383,6 +385,18 @@ export class CircuitoCotizacionService {
     await this.prisma.$executeRawUnsafe(`UPDATE solicitud_costeo SET deleted_at = now(), updated_at = now() WHERE id = $1::uuid`, solicitudId);
     await this.evento(tenantId, s.cotizacionId, "solicitud_retirada", this.yo(req), motivo, { unidad: s.unidadCodigo }, solicitudId);
     return { ok: true, mensaje: `Solicitud a ${s.unidadCodigo} retirada.` };
+  }
+
+  /**
+   * Contrato 4.1.4 · tarifas HH/HM vigentes (las HM, de los equipos del
+   * laboratorio de la solicitud) y consumibles con su costo, para precargar el
+   * FORM05. Mismo permiso y alcance que responder la solicitud.
+   */
+  async referenciasCosteo(req: any, solicitudId: string) {
+    const tenantId = this.tenant(req);
+    const s = await this.solicitud(solicitudId, tenantId);
+    await this.alcance.exigirUnidad(req, s.unidadId, `la solicitud ${s.numero ?? ""}`.trim(), "cotizacion.costear");
+    return leerReferenciasCosteo(this.prisma, tenantId, s.unidadId, hoyCl());
   }
 
   /** 2.5 · El laboratorio responde: programa de trabajo (FORM06) y, si no es estándar, formulario de costeo (FORM05). */
