@@ -167,8 +167,10 @@ export async function descontarFifo(
         t.queda,
       );
       await tx.$executeRawUnsafe(
-        `INSERT INTO movimiento_consumible (tenant_id, lote_id, tipo, cantidad, muestra_id, cat_metodo_id, resultado_id, automatico, motivo, created_by)
-         VALUES ($1::uuid, $2::uuid, 'consumo', $3, $4::uuid, $5::uuid, $6::uuid, $7, $8, $9::uuid)`,
+        // §4.4.5: la OT sale de la muestra y la actividad es «análisis» (mismo vínculo que un movimiento manual).
+        `INSERT INTO movimiento_consumible (tenant_id, lote_id, tipo, cantidad, muestra_id, cat_metodo_id, resultado_id, automatico, motivo, created_by, ot_id, actividad)
+         VALUES ($1::uuid, $2::uuid, 'consumo', $3, $4::uuid, $5::uuid, $6::uuid, $7, $8, $9::uuid,
+                 (SELECT ot_id FROM muestra WHERE id = $4::uuid), 'analisis')`,
         p.tenantId,
         t.loteId,
         t.toma,
