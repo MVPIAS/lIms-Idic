@@ -6,11 +6,15 @@ import DataTable, { type DataColumn } from "@/components/DataTable";
 import { toast, confirmar } from "@/components/ui/feedback";
 import { diaChile } from "@/lib/fecha-chile";
 import { fechaHora } from "@/lib/format";
+import BuscadorVinculo, { type OpcionVinculo } from "@/components/consumibles/BuscadorVinculo";
+import { ACTIVIDADES, textoVinculo } from "@/components/consumibles/actividades";
 
 // Contrato §4.4.4 / §4.4.5 · CONSUMIBLES con lotes/stock/caducidad + KARDEX.
 // Un consumible se recibe en LOTES (stock, nº de lote, caducidad); cada ensayo
 // consume una cantidad que se descuenta del stock; el kardex registra entradas
 // (compra), consumos (por ensayo/muestra/método) y ajustes de inventario.
+// Cada movimiento puede ligarse a una OT, una muestra, un método y una actividad
+// (§4.4.5); los consumos automáticos de la captura llevan siempre ese vínculo.
 // «Consumos pendientes»: lo que una captura no pudo descontar por falta de stock
 // (regla «avisar») queda registrado y aquí se descuenta o se descarta con motivo.
 
@@ -52,6 +56,11 @@ const MOV_VACIO = {
   cantidad: "",
   motivo: "",
   enUnidadCompra: false,
+  // Vínculo opcional con el trabajo del laboratorio (§4.4.5).
+  actividad: "",
+  ot: null as OpcionVinculo | null,
+  muestra: null as OpcionVinculo | null,
+  metodo: null as OpcionVinculo | null,
 };
 
 function BadgeLote({ l }: { l: any }) {
@@ -343,6 +352,10 @@ export default function ConsumiblesPage() {
         cantidad: Number(mf.cantidad),
         motivo: mf.motivo || null,
         enUnidadCompra: mf.tipo === "entrada" && mf.enUnidadCompra,
+        otId: mf.ot?.id ?? mf.muestra?.otId ?? null,
+        muestraId: mf.muestra?.id ?? null,
+        catMetodoId: mf.metodo?.id ?? null,
+        actividad: mf.actividad || null,
       };
       if (mf.loteId) payload.loteId = mf.loteId;
       else payload.consumibleId = detalle.id; // consumo FIFO por caducidad
@@ -611,6 +624,24 @@ export default function ConsumiblesPage() {
                 <input value={mf.motivo} onChange={(e) => setMf({ ...mf, motivo: e.target.value })} placeholder="ensayo, corrección de inventario, compra OC-123…" />
               </div>
             </div>
+            <fieldset style={{ border: "1px solid var(--line)", borderRadius: 8, padding: 10, margin: "12px 0 0" }}>
+              <legend style={{ fontSize: 12.5, fontWeight: 600, padding: "0 4px" }}>Vínculo con el trabajo (opcional)</legend>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+                <div className="field" style={{ margin: 0 }}>
+                  <label htmlFor="mov-actividad">Actividad</label>
+                  <select id="mov-actividad" value={mf.actividad} onChange={(e) => setMf({ ...mf, actividad: e.target.value })}>
+                    <option value="">{mf.muestra || mf.metodo ? "— Análisis (por defecto) —" : "— Sin actividad —"}</option>
+                    {Object.entries(ACTIVIDADES).map(([k, t]) => <option key={k} value={k}>{t}</option>)}
+                  </select>
+                </div>
+                <BuscadorVinculo tipo="ot" valor={mf.ot} onCambio={(v) => setMf({ ...mf, ot: v, muestra: v && mf.muestra?.otId !== v.id ? null : mf.muestra })} />
+                <BuscadorVinculo tipo="muestra" valor={mf.muestra} otId={mf.ot?.id} onCambio={(v) => setMf({ ...mf, muestra: v })} />
+                <BuscadorVinculo tipo="metodo" valor={mf.metodo} muestraId={mf.muestra?.id} onCambio={(v) => setMf({ ...mf, metodo: v })} />
+              </div>
+              <p className="subtitle" style={{ margin: "6px 0 0", fontSize: 11.5 }}>
+                Las OT y muestras se buscan dentro de su alcance. Si elige solo la muestra, el movimiento queda también en su OT. Queda en el kardex y en la pestaña «Consumos» de la OT.
+              </p>
+            </fieldset>
             <div style={{ marginTop: 12, display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button type="button" className="btn sm" onClick={() => setShowMov(false)}>Cancelar</button>
               <button className="btn primary sm">Registrar</button>
@@ -622,7 +653,7 @@ export default function ConsumiblesPage() {
       {/* ---- Modal kardex ---- */}
       {kardex && (
         <div className="modal-backdrop" style={backdrop} onClick={() => setKardex(null)}>
-          <div className="card" style={{ ...modal, maxWidth: 900 }} onClick={(e) => e.stopPropagation()}>
+          <div className="card" style={{ ...modal, maxWidth: 1100 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <h3 style={{ margin: 0 }}>Kardex · {kardex.meta?.consumible?.codigo} {kardex.meta?.consumible?.nombre}</h3>
               <div className="spacer" style={{ flex: 1 }}></div>
@@ -642,6 +673,8 @@ export default function ConsumiblesPage() {
                   <th>Lote</th>
                   <th style={{ textAlign: "right" }}>Cantidad</th>
                   <th style={{ textAlign: "right" }}>Saldo</th>
+                  <th>Vínculo (OT · muestra · método)</th>
+                  <th>Actividad</th>
                   <th>Motivo</th>
                 </tr>
               </thead>
@@ -649,17 +682,20 @@ export default function ConsumiblesPage() {
                 {(kardex.data ?? []).map((m: any) => (
                   <tr key={m.id}>
                     <td style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>{fechaHora(m.created_at)}</td>
-                    <td><span className={`pill ${TIPO_MOV[m.tipo]?.pill ?? "gray"}`}>{TIPO_MOV[m.tipo]?.label ?? m.tipo}</span></td>
+                    <td>
+                      <span className={`pill ${TIPO_MOV[m.tipo]?.pill ?? "gray"}`}>{TIPO_MOV[m.tipo]?.label ?? m.tipo}</span>
+                      {m.automatico && <div style={{ fontSize: 11, color: "var(--muted)" }}>automático (captura)</div>}
+                    </td>
                     <td>{m.numero_lote}</td>
                     <td style={{ textAlign: "right" }}>{m.delta > 0 ? "+" : ""}{fmt(m.delta)}</td>
                     <td style={{ textAlign: "right", fontWeight: 600 }}>{fmt(m.saldo)}</td>
-                    <td style={{ color: "var(--muted)" }}>
-                      {[m.motivo, m.muestra_codigo && `muestra ${m.muestra_codigo}`, m.metodo_nombre].filter(Boolean).join(" · ") || "—"}
-                    </td>
+                    <td style={{ fontSize: 12 }}>{textoVinculo(m) || "—"}</td>
+                    <td style={{ fontSize: 12 }}>{m.actividad ? ACTIVIDADES[m.actividad] ?? m.actividad : "—"}</td>
+                    <td style={{ color: "var(--muted)" }}>{m.motivo || "—"}</td>
                   </tr>
                 ))}
                 {!(kardex.data ?? []).length && (
-                  <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>Sin movimientos.</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>Sin movimientos.</td></tr>
                 )}
               </tbody>
             </table>
