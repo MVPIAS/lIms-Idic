@@ -42,7 +42,10 @@
 	}
 }
 
-# BI (Metabase) en subdominio
+# BI (Metabase) en subdominio · contrato §4.7.5, docs/RESPALDOS_Y_BI.md §2.
+# Requiere un registro DNS bi.<DOMAIN> que apunte a este servidor: con él, Caddy
+# obtiene el certificado solo. El LIMS lo enlaza en «Reportes y comunicación ›
+# Análisis e inteligencia de negocio (Metabase)» (variable URL_BI de la API).
 bi.{$DOMAIN} {
 	reverse_proxy metabase:3000
 	encode gzip zstd

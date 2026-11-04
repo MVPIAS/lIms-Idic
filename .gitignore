@@ -72,3 +72,6 @@ seed-data-real/
 # Permitir explícitamente artefactos de código que sí deben ir:
 !package.json
 !tsconfig*.json
+
+# Respaldos de la base que deja el servicio «respaldo» (docker-compose.prod.yml)
+/respaldos/

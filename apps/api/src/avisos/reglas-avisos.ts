@@ -25,6 +25,8 @@ export const TIPOS_AVISO = {
   // Agenda (§4.5.9): invitación o cambio de un evento; anulación o retiro.
   agenda: "info",
   agenda_anulado: "warn",
+  // Respaldo de la base de datos fallido o atrasado (§4.8.4) → administradores.
+  respaldo: "alta",
 } as const satisfies Record<string, Severidad>;
 export type TipoAviso = keyof typeof TIPOS_AVISO;
 
