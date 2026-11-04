@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, ParseUUIDPipe, Post, Query, Req, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { FlujoService } from "./flujo.service";
@@ -31,6 +31,13 @@ export class FlujoController {
     return this.flujos.detallePorCodigo(codigo, req?.user?.tenantId);
   }
 
+  /** Historial de versiones de un flujo. */
+  @Get("codigo/:codigo/versiones")
+  @RequierePermiso("flujo.ver")
+  versiones(@Param("codigo") codigo: string, @Req() req: any) {
+    return this.flujos.versiones(codigo, req?.user?.tenantId);
+  }
+
   /** Detalle de una versión concreta. */
   @Get("version/:versionId")
   @RequierePermiso("flujo.ver")
@@ -50,6 +57,25 @@ export class FlujoController {
   @RequierePermiso("flujo.publicar")
   publicar(@Param("versionId") versionId: string, @Req() req: any) {
     return this.flujos.publicar(versionId, req?.user?.tenantId);
+  }
+
+  /**
+   * Simulación del diseñador (borrador o publicada) con datos PRUEBA: sin OT y
+   * sin tareas en bandejas. `variables` = valores iniciales para las decisiones.
+   */
+  @Post("version/:versionId/simular")
+  @RequierePermiso("flujo.editar")
+  simular(@Param("versionId", ParseUUIDPipe) versionId: string, @Body() body: any, @Req() req: any) {
+    const variables = body?.variables && typeof body.variables === "object" && !Array.isArray(body.variables) ? body.variables : {};
+    return this.flujos.simular(versionId, variables, req?.user?.sub, req?.user?.tenantId);
+  }
+
+  /** Completa un paso de una simulación (con el resultado que elige el diseñador). */
+  @Post("simulacion/:pasoEjecucionId/completar")
+  @RequierePermiso("flujo.editar")
+  completarSimulacion(@Param("pasoEjecucionId", ParseUUIDPipe) id: string, @Body() body: any, @Req() req: any) {
+    const resultado = body?.resultado && typeof body.resultado === "object" && !Array.isArray(body.resultado) ? body.resultado : {};
+    return this.flujos.completarSimulacion(id, resultado, req?.user?.tenantId);
   }
 
   /**

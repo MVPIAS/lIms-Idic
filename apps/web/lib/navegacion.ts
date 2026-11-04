@@ -9,12 +9,10 @@
  * /grupos) ya no aparecen: redirigen a su equivalente v2 (next.config.js).
  */
 /**
- * Motor de flujos genérico: oculto salvo NEXT_PUBLIC_MOTOR_FLUJOS_VISIBLE=true.
- * Es la misma regla que lib/motorFlujos.ts (ver su comentario); se repite aquí
- * sin import porque este fichero se carga solo, sin dependencias, en
- * scripts/verificacion/alcance-por-laboratorio.js.
+ * Diseñador de flujos (contratos 4.1.5, 4.3.1, 4.5.1): siempre en
+ * «Administración» para quien diseña (flujo.editar: Administración y Gestión de
+ * Calidad). Ya no depende de NEXT_PUBLIC_MOTOR_FLUJOS_VISIBLE (lib/motorFlujos.ts).
  */
-const MOTOR_FLUJOS_VISIBLE = process.env.NEXT_PUBLIC_MOTOR_FLUJOS_VISIBLE === "true";
 
 export type Perm = string | string[];
 export interface ItemNav {
@@ -212,8 +210,6 @@ export const NAV: SeccionNav[] = [
       { href: "/formatos-informe", label: "Formatos de informe", icon: "🧾", perm: "catalogo.gestionar", claves: "veredicto occ oi dgmn" },
       { href: "/tipos-muestra", label: "Tipos de muestra", icon: "🌡", perm: "muestra.ver" },
       { href: "/limites", label: "Límites (clásico)", icon: "📏", perm: "metodo.ver" },
-      // Motor de flujos genérico: oculto salvo que se reactive (lib/motorFlujos.ts).
-      ...(MOTOR_FLUJOS_VISIBLE ? [{ href: "/flujos", label: "Diseñador de flujos", icon: "⛓", perm: "flujo.ver" }] : []),
     ],
   },
   {
@@ -226,6 +222,8 @@ export const NAV: SeccionNav[] = [
       { href: "/admin/usuarios", label: "Usuarios", icon: "👥", perm: "admin.usuarios" },
       { href: "/admin/roles", label: "Roles y permisos", icon: "🔑", perm: ["admin.roles", "admin.usuarios"] },
       { href: "/admin/firmas", label: "Matriz de firmas", icon: "✒", perm: ["admin.firmas", "admin.usuarios"] },
+      // Módulo de diseño y simulación; los circuitos operativos son la Matriz de firmas y los pasos por método.
+      { href: "/flujos", label: "Diseñador de flujos", icon: "⛓", perm: "flujo.editar", claves: "flujo bpm proceso etapas transiciones sla plazo simular workflow" },
       { href: "/admin/numeracion", label: "Numeración de documentos", icon: "№", perm: "documento.numeracion", claves: "correlativo numero informe certificado" },
       { href: "/catalogo/parametros", label: "Parámetros del sistema", icon: "🎛", perm: "catalogo.gestionar", claves: "listas combos" },
       { href: "/config-correo", label: "Correo saliente", icon: "✉", perm: "admin.usuarios", claves: "smtp" },
