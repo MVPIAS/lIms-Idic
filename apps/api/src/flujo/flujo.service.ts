@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { PrismaClient } from "@prisma/client";
 import { permisoParaCompletar } from "./permiso-paso";
+import { erroresParaGuardar, erroresParaPublicar } from "./validar-flujo";
 
 /**
  * Motor BPM · los flujos viven como DATOS (flujo_def/version/paso/transicion)
@@ -14,6 +15,12 @@ import { permisoParaCompletar } from "./permiso-paso";
  *  - ACTIVIDAD / ESPERA  crean paso_ejecucion pendiente + tarea en bandeja;
  *             avanzan cuando alguien llama completarTarea().
  *  - FIN      completa la instancia.
+ *
+ * Diseñador de flujos (contratos 4.1.5, 4.3.1, 4.5.1): es un módulo de diseño y
+ * SIMULACIÓN. Los circuitos operativos de los laboratorios siguen siendo los
+ * programados (Matriz de firmas y pasos por método). Una simulación es una
+ * instancia sin OT con `metadata.simulacion = true` (datos PRUEBA): no crea
+ * tareas en ninguna bandeja y no se puede ligar a una OT.
  */
 @Injectable()
 export class FlujoService {
@@ -62,6 +69,23 @@ export class FlujoService {
     const vigente =
       def.versiones.find((v) => v.estado === "publicado") ?? def.versiones[0];
     return this.detalleVersion(vigente.id, tenantId);
+  }
+
+  /** Historial de versiones de un flujo (para el diseñador). */
+  async versiones(codigo: string, tenantId?: string) {
+    const def = await this.prisma.flujoDef.findFirst({
+      where: { codigo, ...(tenantId ? { tenantId } : {}) },
+      include: {
+        versiones: {
+          orderBy: { version: "desc" },
+          select: { id: true, version: true, estado: true, vigenteDesde: true, vigenteHasta: true, publicadoAt: true, notasCambio: true, _count: { select: { pasos: true } } },
+        },
+      },
+    });
+    if (!def) throw new NotFoundException(`Flujo ${codigo} no existe`);
+    // Orden natural de versión (v10.0 después de v9.0).
+    const n = (v: string) => Number(v.replace(/[^\d.]/g, "").split(".")[0]) || 0;
+    return def.versiones.sort((a, b) => n(b.version) - n(a.version));
   }
 
   /**
@@ -119,40 +143,42 @@ export class FlujoService {
     nombre: string;
     categoria?: string;
     descripcion?: string;
+    notasCambio?: string;
     pasos: Array<{
       tmpId: string; numero: number; tipo: string; actividad: string;
-      slaMinutos?: number; sistema?: string; condicion?: string;
+      slaMinutos?: number | null; sistema?: string; condicion?: string;
     }>;
     transiciones: Array<{
-      origenTmp: string; destinoTmp: string; condicion?: string;
-      etiqueta?: string; orden?: number;
+      origenTmp: string; destinoTmp: string; condicion?: string | null;
+      etiqueta?: string | null; orden?: number;
     }>;
   }, tenantIdArg?: string) {
-    if (!body.pasos?.length) throw new BadRequestException("El flujo no tiene pasos");
-    const tiposValidos = new Set(["INICIO","ACTIVIDAD","DECISION","AUTO","ESPERA","FIN","SUBPROCESO"]);
-    for (const p of body.pasos)
-      if (!tiposValidos.has(p.tipo))
-        throw new BadRequestException(`Tipo de paso inválido: ${p.tipo}`);
-    if (body.pasos.filter((p) => p.tipo === "INICIO").length !== 1)
-      throw new BadRequestException("El flujo debe tener exactamente un paso INICIO");
-    if (!body.pasos.some((p) => p.tipo === "FIN"))
-      throw new BadRequestException("El flujo debe tener al menos un paso FIN");
+    const codigo = String(body?.codigo ?? "").trim();
+    const nombre = String(body?.nombre ?? "").trim();
+    if (!/^[A-Za-z0-9_-]{2,40}$/.test(codigo))
+      throw new BadRequestException("El código del flujo debe tener de 2 a 40 letras, números, guiones o guiones bajos (sin espacios).");
+    if (nombre.length < 3) throw new BadRequestException("Escriba el nombre del flujo (al menos 3 letras).");
+    body.pasos = (body.pasos ?? []).map((p) => ({ ...p, slaMinutos: p.slaMinutos == null || (p.slaMinutos as any) === "" ? null : Number(p.slaMinutos) }));
+    const errores = erroresParaGuardar(body.pasos, body.transiciones ?? []);
+    if (errores.length) throw new BadRequestException(`No se puede guardar el flujo: ${errores.join(" ")}`);
 
     const tenantId = tenantIdArg ?? "00000000-0000-0000-0000-000000000000"; // del JWT (fallback DEV)
 
     return this.prisma.$transaction(async (tx) => {
-      let def = await tx.flujoDef.findFirst({ where: { tenantId, codigo: body.codigo } });
+      let def = await tx.flujoDef.findFirst({ where: { tenantId, codigo } });
       if (!def) {
         def = await tx.flujoDef.create({
           data: {
-            tenantId, codigo: body.codigo, nombre: body.nombre,
+            tenantId, codigo, nombre,
             categoria: body.categoria, descripcion: body.descripcion,
           },
         });
+      } else if (def.nombre !== nombre) {
+        def = await tx.flujoDef.update({ where: { id: def.id }, data: { nombre } });
       }
       const nVersiones = await tx.flujoVersion.count({ where: { flujoDefId: def.id } });
       const ver = await tx.flujoVersion.create({
-        data: { flujoDefId: def.id, version: `v${nVersiones + 1}.0`, estado: "borrador" },
+        data: { flujoDefId: def.id, version: `v${nVersiones + 1}.0`, estado: "borrador", notasCambio: body.notasCambio?.trim() || null },
       });
 
       const idPorTmp = new Map<string, string>();
@@ -166,7 +192,7 @@ export class FlujoService {
         });
         idPorTmp.set(p.tmpId, creado.id);
       }
-      for (const t of body.transiciones ?? []) {
+      for (const [i, t] of (body.transiciones ?? []).entries()) {
         const origen = idPorTmp.get(t.origenTmp);
         const destino = idPorTmp.get(t.destinoTmp);
         if (!origen || !destino)
@@ -174,11 +200,13 @@ export class FlujoService {
         await tx.flujoTransicion.create({
           data: {
             flujoVersionId: ver.id, origenPasoId: origen, destinoPasoId: destino,
-            condicion: t.condicion, etiqueta: t.etiqueta, orden: t.orden ?? 0,
+            condicion: t.condicion?.trim() || null, etiqueta: t.etiqueta?.trim() || null, orden: t.orden ?? i,
           },
         });
       }
-      return { defId: def.id, versionId: ver.id, version: ver.version, estado: ver.estado };
+      // Lo que impediría publicar (no impide guardar el borrador).
+      const avisos = erroresParaPublicar(body.pasos, body.transiciones ?? []);
+      return { defId: def.id, versionId: ver.id, version: ver.version, estado: ver.estado, avisos };
     });
   }
 
@@ -191,6 +219,9 @@ export class FlujoService {
     if (!ver) throw new NotFoundException();
     // Solo se publica una versión del propio tenant.
     if (tenantId && ver.def.tenantId !== tenantId) throw new NotFoundException();
+    if (ver.estado === "publicado") throw new BadRequestException(`La versión ${ver.version} ya está publicada.`);
+    const errores = await this.erroresDeVersion(versionId);
+    if (errores.length) throw new BadRequestException(`No se puede publicar la versión ${ver.version}: ${errores.join(" ")}`);
     await this.prisma.flujoVersion.updateMany({
       where: { flujoDefId: ver.flujoDefId, estado: "publicado" },
       data: { estado: "archivado", vigenteHasta: new Date() },
@@ -201,12 +232,57 @@ export class FlujoService {
     });
   }
 
+  /** Errores de diseño de una versión guardada (validar-flujo.ts). */
+  private async erroresDeVersion(versionId: string): Promise<string[]> {
+    const v = await this.prisma.flujoVersion.findUnique({
+      where: { id: versionId },
+      include: { pasos: true, transiciones: true },
+    });
+    if (!v) return ["La versión no existe."];
+    return erroresParaPublicar(
+      v.pasos.map((p) => ({ tmpId: p.id, tipo: p.tipo, actividad: p.actividad, slaMinutos: p.slaMinutos })),
+      v.transiciones.map((t) => ({ origenTmp: t.origenPasoId, destinoTmp: t.destinoPasoId, condicion: t.condicion })),
+    );
+  }
+
+  // ----------------------------------------------------------- simulación
+  /**
+   * Simula una versión (borrador o publicada) con datos PRUEBA: instancia sin OT
+   * con `metadata.simulacion = true`. No crea tareas en bandejas; los pasos
+   * humanos quedan pendientes hasta que el diseñador los completa.
+   */
+  async simular(versionId: string, variables: Record<string, unknown> | undefined, usuarioId: string | undefined, tenantId?: string) {
+    const ver = await this.detalleVersion(versionId, tenantId);
+    const errores = await this.erroresDeVersion(versionId);
+    if (errores.length) throw new BadRequestException(`No se puede simular la versión ${ver.version}: ${errores.join(" ")}`);
+    return this.crearInstancia(ver, { metadata: { ...(variables ?? {}), simulacion: true, etiqueta: "PRUEBA" }, usuarioId });
+  }
+
+  /** Completa un paso de una SIMULACIÓN (nunca de una instancia real). */
+  async completarSimulacion(pasoEjecucionId: string, resultado: Record<string, unknown> | undefined, tenantId?: string) {
+    const pe = await this.prisma.pasoEjecucion.findUnique({ where: { id: pasoEjecucionId }, include: { instancia: true } });
+    if (!pe || (tenantId && pe.instancia.tenantId !== tenantId)) throw new NotFoundException("Ejecución de paso no encontrada");
+    if ((pe.instancia.metadata as any)?.simulacion !== true)
+      throw new BadRequestException("Este paso no es de una simulación: se completa desde la OT.");
+    return this.completarTarea(pasoEjecucionId, { resultado: (resultado ?? {}) as Record<string, any> }, tenantId);
+  }
+
   // ------------------------------------------------------------- ejecución
   /** Crea una instancia del flujo (p. ej. al generar una OT) y avanza lo automático. */
   async instanciar(versionId: string, body: { otId?: string; metadata?: Record<string, any>; usuarioId?: string }, tenantId?: string) {
     const ver = await this.detalleVersion(versionId, tenantId);
     if (ver.estado !== "publicado")
       throw new BadRequestException("Solo se instancian versiones publicadas");
+    const md = { ...(body.metadata ?? {}) };
+    delete (md as any).simulacion; // una instancia real nunca es simulación
+    return this.crearInstancia(ver, { otId: body.otId, metadata: md, usuarioId: body.usuarioId });
+  }
+
+  private async crearInstancia(
+    ver: Awaited<ReturnType<FlujoService["detalleVersion"]>>,
+    body: { otId?: string; metadata?: Record<string, any>; usuarioId?: string },
+  ) {
+    const versionId = ver.id;
     const inicio = ver.pasos.find((p) => p.tipo === "INICIO");
     if (!inicio) throw new BadRequestException("El flujo no tiene paso INICIO");
 
@@ -391,7 +467,8 @@ export class FlujoService {
     // La tarea humana se asigna a quien inició la instancia. `asignado_a` es NOT
     // NULL y FK a usuario: si no hay iniciador válido no se crea la tarea (evita
     // el 500 por FK contra un UUID inexistente); el paso queda pendiente sin dueño.
-    if (instancia.iniciadoPor) {
+    // Simulación del diseñador: sin tarea en ninguna bandeja.
+    if (instancia.iniciadoPor && (contexto as any).simulacion !== true) {
       await this.prisma.tareaAsignada.create({
         data: {
           pasoEjecucionId: pe.id,
@@ -409,13 +486,21 @@ export class FlujoService {
       orderBy: { orden: "asc" },
       include: { destino: true },
     });
-    if (!salientes.length) return null;
-    // primera transición cuya condición sea verdadera; sin condición = default
-    for (const t of salientes) {
-      if (!t.condicion || evaluarCondicion(t.condicion, contexto)) return t.destino;
-    }
-    return salientes[salientes.length - 1].destino; // fallback: la última (rama 'No')
+    return elegirTransicion(salientes, contexto)?.destino ?? null;
   }
+}
+
+/**
+ * Transición que se sigue desde un paso: la primera (en orden) cuya condición
+ * sea verdadera; si ninguna, la primera SIN condición (camino por defecto); si
+ * no hay, la última. Antes una transición sin condición colocada antes que la
+ * condicionada ganaba siempre (las del flujo sembrado tienen el mismo orden).
+ */
+export function elegirTransicion<T extends { condicion?: string | null }>(salientes: T[], contexto: Record<string, any>): T | null {
+  if (!salientes.length) return null;
+  const condicionada = salientes.find((t) => t.condicion?.trim() && evaluarCondicion(t.condicion, contexto));
+  if (condicionada) return condicionada;
+  return salientes.find((t) => !t.condicion?.trim()) ?? salientes[salientes.length - 1];
 }
 
 /**
