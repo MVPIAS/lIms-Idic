@@ -7,10 +7,13 @@ import { AuthService } from "./auth.service";
 import { JwtStrategy } from "./jwt.strategy";
 import { LdapStrategy } from "./ldap.strategy";
 import { getJwtSecret } from "../common/jwt-secret";
+// Tokens de integración (§4.7.4): JwtStrategy los valida contra token_integracion.
+import { IntegracionModule } from "../integracion/integracion.module";
 
 @Module({
   imports: [
     PassportModule,
+    IntegracionModule,
     JwtModule.register({
       secret: getJwtSecret(),
       // Se fija explícitamente el algoritmo de firma (HS256, simétrico). Evita

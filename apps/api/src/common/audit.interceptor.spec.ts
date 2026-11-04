@@ -225,3 +225,48 @@ describe("AuditInterceptor.intercept · sólo audita mutaciones OK", () => {
     });
   });
 });
+
+describe("AuditInterceptor.intercept · tokens de integración (§4.7.4)", () => {
+  function ctxIntegracion(method: string, auditarLecturas: boolean) {
+    return {
+      getType: () => "http",
+      switchToHttp: () => ({
+        getRequest: () => ({
+          method,
+          originalUrl: "/api/ot?estado=abierta",
+          route: { path: "/ot" },
+          query: { estado: "abierta" },
+          user: { tenantId: "t1", sub: "11111111-1111-4111-8111-111111111111", username: "api.erp", integracion: { tokenId: "tk", nombre: "ERP", auditarLecturas } },
+          headers: {},
+        }),
+        getResponse: () => ({ statusCode: 200 }),
+      }),
+    } as any;
+  }
+
+  it("registra la consulta (GET) con el token y los parámetros de la URL", (done) => {
+    const { interceptor, create } = nuevoInterceptor();
+    const handler = { handle: () => of([{ id: "x" }]) } as any;
+    interceptor.intercept(ctxIntegracion("GET", true), handler).subscribe(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(create).toHaveBeenCalledTimes(1);
+      const data = create.mock.calls[0][0].data;
+      expect(data.accion).toBe("consulta_api");
+      expect(data.entidadTipo).toBe("ot");
+      expect(data.username).toBe("api.erp");
+      expect(data.diff).toEqual({ consulta: { estado: "abierta" } });
+      expect(data.metadata.integracion).toEqual({ tokenId: "tk", nombre: "ERP" });
+      done();
+    });
+  });
+
+  it("con el parámetro en «No» la consulta no se registra", (done) => {
+    const { interceptor, create } = nuevoInterceptor();
+    const handler = { handle: () => of([]) } as any;
+    interceptor.intercept(ctxIntegracion("GET", false), handler).subscribe(() => {
+      expect(create).not.toHaveBeenCalled();
+      done();
+    });
+  });
+});

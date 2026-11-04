@@ -586,6 +586,21 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     },
   },
   {
+    categoria: "integracion",
+    titulo: "API e integración con otros sistemas",
+    donde:
+      "Peticiones hechas con un token de integración (Administración › API e integración). Las escrituras se registran siempre en la bitácora; este parámetro decide si también las consultas.",
+    codigos: {
+      auditar_lecturas: {
+        tipo: "sino",
+        nombre: "Registrar también las consultas (GET) de las integraciones",
+        opciones: SI_NO,
+        ayuda: "Contrato §4.7.4: trazabilidad de los accesos externos. Con «No» solo quedan en la bitácora las escrituras y el último uso del token.",
+        porDefecto: "si",
+      },
+    },
+  },
+  {
     categoria: "oficio_conductor",
     titulo: "Oficio conductor exigido para entregar",
     donde: "Registrar la entrega o el despacho al cliente de un documento: estos tipos, en estos departamentos, necesitan un oficio conductor firmado.",

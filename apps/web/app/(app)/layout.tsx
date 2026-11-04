@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
 import Topbar from "@/components/Topbar";
 import IdleLogout from "@/components/IdleLogout";
@@ -14,6 +14,18 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Contraseña temporal pendiente de cambio: el servidor rechaza todo lo demás
   // (403 CAMBIO_CLAVE_REQUERIDO), así que solo se muestra el cambio.
   const [cambioPendiente, setCambioPendiente] = useState(false);
+  // Teléfono y tableta (contrato §4.7.3): bajo 900 px el menú lateral es un panel
+  // desplegable que abre el botón ☰ de la barra superior y se cierra al navegar.
+  // En escritorio el estado no se usa (el CSS lo ignora).
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const pathname = usePathname();
+  useEffect(() => setMenuAbierto(false), [pathname]);
+  useEffect(() => {
+    if (!menuAbierto) return;
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") setMenuAbierto(false); };
+    window.addEventListener("keydown", k);
+    return () => window.removeEventListener("keydown", k);
+  }, [menuAbierto]);
 
   useEffect(() => {
     if (!localStorage.getItem("lims_token")) {
@@ -49,12 +61,19 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <Sidebar />
+    <div className={`app${menuAbierto ? " menu-abierto" : ""}`}>
+      <aside
+        className="sidebar"
+        id="menu-lateral"
+        aria-label="Menú principal"
+        // Un enlace del menú cierra el panel aunque lleve a la página actual.
+        onClick={(e) => { if ((e.target as HTMLElement).closest("a")) setMenuAbierto(false); }}
+      >
+        <Sidebar onCerrar={() => setMenuAbierto(false)} />
       </aside>
+      <div className="menu-fondo" aria-hidden onClick={() => setMenuAbierto(false)} />
       <header className="topbar">
-        <Topbar />
+        <Topbar menuAbierto={menuAbierto} onMenu={() => setMenuAbierto((v) => !v)} />
       </header>
       <main className="mainarea">{children}</main>
       <IdleLogout />

@@ -26,7 +26,8 @@ function leerPlegado(): Record<string, boolean> {
   }
 }
 
-export default function Sidebar() {
+/** `onCerrar`: botón ✕ del panel desplegable en teléfono y tableta (oculto en escritorio). */
+export default function Sidebar({ onCerrar }: { onCerrar?: () => void } = {}) {
   const pathname = usePathname() ?? "";
   const { listo, puede, perfilJwt, roles } = usePermisos();
   const { alcance } = useAlcance();
@@ -90,6 +91,11 @@ export default function Sidebar() {
           <b>LIMS IDIC</b>
           <small>Instituto de Investigaciones y Control</small>
         </div>
+        {onCerrar && (
+          <button type="button" className="sb-cerrar" onClick={onCerrar} aria-label="Cerrar el menú">
+            <span aria-hidden>✕</span>
+          </button>
+        )}
       </div>
 
       {listo && (
