@@ -458,6 +458,42 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- QC obligatorio en la ejecución del análisis (contrato §4.2.4 / §4.3.8; qc/qc-ejecucion.ts) ---
+  {
+    categoria: "qc",
+    titulo: "Control de calidad · qué bloquea el QC exigido por el método",
+    donde:
+      "Captura y revisión por OT y Emitir informe: un método marcado «QC requerido» necesita su control de calidad aprobado en la OT (menú Control de calidad (QC)).",
+    codigos: {
+      bloqueo: {
+        tipo: "opcion",
+        nombre: "Sin el QC exigido aprobado",
+        opciones: [
+          { valor: "ejecucion", etiqueta: "Bloquear la captura y la aprobación de resultados del método (y la emisión del informe)" },
+          { valor: "informe", etiqueta: "Bloquear solo la emisión del informe" },
+        ],
+        porDefecto: "ejecucion",
+      },
+    },
+  },
+  // --- Control de versiones de los métodos (contrato §4.3.3; catalogo/metodo-version.ts) ---
+  {
+    categoria: "metodo_version",
+    titulo: "Métodos · motivo del cambio",
+    donde:
+      "Tablas maestras › Métodos y «Tipos y criterios…» del QC: cada cambio de un método crea una revisión numerada en su «Historial de versiones».",
+    codigos: {
+      motivo: {
+        tipo: "opcion",
+        nombre: "Motivo al modificar un método",
+        opciones: [
+          { valor: "obligatorio", etiqueta: "Obligatorio (mínimo 5 caracteres)" },
+          { valor: "opcional", etiqueta: "Opcional" },
+        ],
+        porDefecto: "obligatorio",
+      },
+    },
+  },
   {
     categoria: "segregacion_resultado",
     titulo: "Revisión y aprobación de resultados",
