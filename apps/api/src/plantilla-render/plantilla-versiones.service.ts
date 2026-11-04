@@ -29,6 +29,20 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { ConfigInformeSchema, configEfectiva, configPorTipo } from "./config-informe";
 import { PlantillaRenderService, type VersionPlantilla } from "./plantilla-render.service";
 import { BLOQUES_MOTOR, diffLineas, motivoNoAprobable, motivoNoEditable } from "./plantilla-versiones";
+import { createHash } from "node:crypto";
+import { generarPdf } from "./pdf.renderer";
+import { documentoCompleto, type Sello } from "./plantilla-defecto";
+import { renderizar } from "./template.engine";
+import {
+  COTIZACION_EJEMPLO,
+  TIPO_PLANTILLA_COTIZACION,
+  VARIABLES_COTIZACION,
+  contextoCotizacion,
+  renderCuerpoCotizacion,
+  validarCuerpoCotizacion,
+} from "../cotizacion/plantilla-cotizacion";
+import { cuerpoCotizacionHtml, datosFirmaCotizacion, fechaCorta } from "../cotizacion/cotizacion-documento";
+import { SQL_UNIDADES_COTIZACION, cotizacionEnAlcance, exigirCotizacionEnAlcance } from "../cotizacion/alcance-cotizacion";
 
 /**
  * =============================================================================
@@ -47,6 +61,11 @@ import { BLOQUES_MOTOR, diffLineas, motivoNoAprobable, motivoNoEditable } from "
  *
  * Al aprobar se copian cuerpo y formato a plantilla_informe (espejo de la
  * vigente) para que el código que lee esas columnas vea lo vigente.
+ *
+ * Plantilla de COTIZACIÓN (tipo COTIZACION, contrato 4.6.8): mismo circuito;
+ * sus variables son las de la cotización (cotizacion/plantilla-cotizacion.ts),
+ * la vista previa se hace con una cotización real y no se aprueba una versión
+ * con errores (marcas mal escritas, variables inexistentes…).
  * =============================================================================
  */
 
@@ -77,7 +96,11 @@ const DuplicarSchema = z
     nombre: z.string().trim().min(3).max(160),
   })
   .strict();
-const PreviaSchema = z.object({ otId: z.string().uuid(), formato: z.enum(["html", "pdf"]).optional() }).strict();
+const PreviaSchema = z
+  .object({ otId: z.string().uuid().optional(), cotizacionId: z.string().uuid().optional(), formato: z.enum(["html", "pdf"]).optional() })
+  .strict();
+
+const esCotizacion = (tipo: string | null | undefined) => tipo === TIPO_PLANTILLA_COTIZACION;
 
 export interface FilaVersion {
   id: string;
@@ -275,6 +298,7 @@ export class PlantillaVersionesService {
       if (no) throw no.codigo === 403 ? new ForbiddenException(no.mensaje) : new ConflictException(no.mensaje);
       const motivo = d.motivo || v.motivo;
       if (!motivo || !String(motivo).trim()) throw new BadRequestException("Indique el motivo del cambio antes de aprobar.");
+      await this.exigirCotizacionValida(v.plantillaId, v.cuerpoHtml, tx);
       await tx.$executeRawUnsafe(
         `UPDATE plantilla_informe_version SET estado = 'RETIRADA', retirado_en = now()
           WHERE plantilla_id = $1::uuid AND estado = 'VIGENTE'`,
@@ -295,6 +319,24 @@ export class PlantillaVersionesService {
       );
     });
     return this.version(vid, tenantId);
+  }
+
+  /**
+   * Plantilla de cotización: no se aprueba una versión que no rinde (se prueba
+   * con una cotización de ejemplo). Las de informe no pasan por aquí.
+   */
+  private async exigirCotizacionValida(plantillaId: string, cuerpo: string | null, db: any) {
+    const f = (await db.$queryRawUnsafe(`SELECT tipo FROM plantilla_informe WHERE id = $1::uuid`, plantillaId)) as { tipo: string }[];
+    if (!esCotizacion(f[0]?.tipo) || !cuerpo?.trim()) return;
+    const errores = validarCuerpoCotizacion(cuerpo);
+    if (!errores.length) {
+      try {
+        renderCuerpoCotizacion(cuerpo, COTIZACION_EJEMPLO, null);
+      } catch (e: any) {
+        errores.push(String(e?.message ?? e));
+      }
+    }
+    if (errores.length) throw new BadRequestException(`La plantilla de cotización tiene errores y no se puede aprobar: ${errores.join(" ")}`);
   }
 
   /** Volver a una versión anterior: nuevo BORRADOR copia de aquella (la vigente no cambia hasta aprobar). */
@@ -323,7 +365,9 @@ export class PlantillaVersionesService {
    */
   async duplicar(plantillaId: string, tenantId: string, usuarioId: string | null, cuerpo: unknown) {
     const d = DuplicarSchema.parse(cuerpo ?? {});
-    await this.plantilla(plantillaId, tenantId);
+    const origen = await this.plantilla(plantillaId, tenantId);
+    if (esCotizacion(origen.tipo))
+      throw new ConflictException("La plantilla de cotización es única: para cambiarla, edite su borrador y que Calidad lo apruebe.");
     const nueva = await this.prisma.$transaction(async (tx) => {
       const existe = (await tx.$queryRawUnsafe(
         `SELECT 1 FROM plantilla_informe WHERE tenant_id = $1::uuid AND repid = $2 AND nombre = $3`,
@@ -377,7 +421,15 @@ export class PlantillaVersionesService {
 
   /** Variables del motor: con OT, las reales; sin OT, solo los bloques fijos. */
   async variables(plantillaId: string, tenantId: string, otId?: string) {
-    await this.plantilla(plantillaId, tenantId);
+    const p = await this.plantilla(plantillaId, tenantId);
+    if (esCotizacion(p.tipo))
+      return {
+        conOt: false,
+        cotizacion: true,
+        datos: VARIABLES_COTIZACION.filter((v) => !v.bloque).map((v) => v.clave),
+        bloques: VARIABLES_COTIZACION.filter((v) => v.bloque).map((v) => ({ clave: v.clave, descripcion: v.descripcion })),
+        documentadas: VARIABLES_COTIZACION,
+      };
     const bloquesFijos = Object.entries(BLOQUES_MOTOR).map(([clave, descripcion]) => ({ clave, descripcion }));
     if (!otId) return { conOt: false, datos: [] as string[], bloques: bloquesFijos };
     const r = await this.render.variablesConOt(otId, plantillaId, tenantId);
@@ -386,6 +438,68 @@ export class PlantillaVersionesService {
       datos: r.datos,
       bloques: r.bloques.map((clave) => ({ clave, descripcion: BLOQUES_MOTOR[clave] ?? "Bloque de otro módulo" })),
     };
+  }
+
+  /** Cotizaciones recientes para la vista previa (solo las del alcance de quien la pide). */
+  async cotizacionesParaPrevia(tenantId: string, visibles: string[] | null, dcoId: string | null) {
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string; codigo: string; estado: string; cliente: string | null }[]>(
+      `SELECT c.id, c.codigo, c.estado, cl.razon_social AS cliente
+         FROM cotizacion c LEFT JOIN cliente cl ON cl.id = c.cliente_id
+        WHERE c.tenant_id = $1::uuid
+        ORDER BY c.created_at DESC LIMIT 60`,
+      tenantId,
+    );
+    if (visibles === null) return filas;
+    const r: typeof filas = [];
+    for (const f of filas) {
+      const u = await this.prisma.$queryRawUnsafe<{ id: string }[]>(SQL_UNIDADES_COTIZACION, f.id);
+      if (cotizacionEnAlcance(visibles, u.map((x) => x.id), dcoId)) r.push(f);
+    }
+    return r;
+  }
+
+  /**
+   * Vista previa de una versión de la plantilla de cotización con una
+   * cotización real: HTML o PDF con la marca de previsualización. Si la versión
+   * tiene errores se muestra lo que se pueda, con los avisos: no se podrá
+   * aprobar y, si fuera la vigente, se usaría la vigente anterior.
+   */
+  async previaCotizacion(vid: string, tenantId: string, cotizacionId: string, formato: "html" | "pdf") {
+    const v = await this.version(vid, tenantId);
+    const cot = await this.prisma.cotizacion.findFirst({
+      where: { id: cotizacionId, tenantId },
+      include: { cliente: true, lineas: { orderBy: { orden: "asc" } } },
+    });
+    if (!cot) throw new NotFoundException("Cotización no encontrada");
+    const firma = await datosFirmaCotizacion(this.prisma, cot.id);
+    const doc = { ...cot, ...firma };
+    const avisos = v.cuerpoHtml?.trim() ? validarCuerpoCotizacion(v.cuerpoHtml) : [];
+    let cuerpo: string;
+    if (!v.cuerpoHtml?.trim()) cuerpo = cuerpoCotizacionHtml(doc);
+    else {
+      try {
+        if (avisos.length) throw new Error("");
+        cuerpo = renderCuerpoCotizacion(v.cuerpoHtml, doc, firma.firmas);
+      } catch (e: any) {
+        if (e?.message) avisos.push(String(e.message));
+        const c = contextoCotizacion(doc, firma.firmas);
+        cuerpo = renderizar(v.cuerpoHtml, c.datos, c.bloques).html;
+      }
+    }
+    if (avisos.length)
+      avisos.push("Con estos errores la versión no se puede aprobar; si fuera la vigente, las cotizaciones saldrían con la versión vigente anterior.");
+    const numero = `BORRADOR-v${v.numero}`;
+    const sello: Sello = {
+      numero,
+      codigoVerificacion: "SIN EMITIR",
+      hash: createHash("sha256").update(cuerpo, "utf8").digest("hex"),
+      fecha: fechaCorta(new Date()),
+      urlVerificacion: "el Departamento Comercial del IDIC",
+      borrador: true,
+    };
+    const titulo = `Vista previa · Cotización ${cot.codigo} · plantilla v${v.numero}`;
+    if (formato === "pdf") return { pdf: await generarPdf(cuerpo, sello, titulo), avisos };
+    return { html: documentoCompleto(cuerpo, sello, titulo), avisos };
   }
 
   async previa(vid: string, tenantId: string, otId: string, formato: "html" | "pdf") {
@@ -420,6 +534,17 @@ export class PlantillaVersionesController {
       await this.exigirOt(otId, req);
     }
     return this.svc.variables(id, tenantDe(req), otId || undefined);
+  }
+
+  /** Cotizaciones para la vista previa de la plantilla de cotización (las del alcance del usuario). */
+  @Get(":id/cotizaciones")
+  @RequierePermiso("plantilla.ver")
+  async cotizaciones(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    const p = await this.svc.plantilla(id, tenantDe(req));
+    if (!esCotizacion(p.tipo)) return [];
+    const visibles = await this.alcance.filtroUnidades(req, "plantilla.ver");
+    const dco = visibles === null ? null : (await this.alcance.arbol(tenantDe(req))).porCodigo.get("DCO")?.id ?? null;
+    return this.svc.cotizacionesParaPrevia(tenantDe(req), visibles, dco);
   }
 
   @Post(":id/borrador")
@@ -481,9 +606,19 @@ export class PlantillaVersionesController {
   async previsualizar(@Param("vid", ParseUUIDPipe) vid: string, @Body() body: unknown, @Req() req: any, @Res() res: Response) {
     if (!tiene(req, "plantilla.gestionar") && !tiene(req, "plantilla.aprobar"))
       throw new ForbiddenException("La vista previa de una versión es para quien redacta o aprueba plantillas.");
-    const { otId, formato } = PreviaSchema.parse(body ?? {});
-    await this.exigirOt(otId, req);
-    const r = await this.svc.previa(vid, tenantDe(req), otId, formato ?? "html");
+    const { otId, cotizacionId, formato } = PreviaSchema.parse(body ?? {});
+    const v = await this.svc.version(vid, tenantDe(req));
+    const p = await this.svc.plantilla(v.plantillaId, tenantDe(req));
+    let r: { pdf?: Buffer; html?: string; avisos: string[] };
+    if (esCotizacion(p.tipo)) {
+      if (!cotizacionId) throw new BadRequestException("Elija una cotización para la vista previa.");
+      await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, cotizacionId, "plantilla.ver");
+      r = await this.svc.previaCotizacion(vid, tenantDe(req), cotizacionId, formato ?? "html");
+    } else {
+      if (!otId) throw new BadRequestException("Elija una OT para la vista previa.");
+      await this.exigirOt(otId, req);
+      r = await this.svc.previa(vid, tenantDe(req), otId, formato ?? "html");
+    }
     if ("pdf" in r && r.pdf) {
       res.set({ "Content-Type": "application/pdf", "Content-Disposition": 'inline; filename="vista-previa.pdf"', "Cache-Control": "private, no-store" });
       res.end(r.pdf);

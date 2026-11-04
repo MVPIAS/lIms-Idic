@@ -723,6 +723,9 @@ export class PlantillaRenderService {
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
     if (tenantId && plantilla.tenantId !== tenantId)
       throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
+    // La plantilla de cotización (4.6.8) solo da forma a las cotizaciones.
+    if (plantilla.tipo === "COTIZACION")
+      throw new BadRequestException(`La plantilla ${plantilla.repid} es el diseño de la cotización: elija una plantilla de informe o certificado.`);
 
     // Cuerpo y formato: los de la versión pedida (vista previa de un borrador) o
     // los de la VIGENTE. Sin versiones (BD antigua), las columnas de la plantilla.

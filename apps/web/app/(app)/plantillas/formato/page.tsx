@@ -38,7 +38,8 @@ function Contenido() {
 
   const visibles = useMemo(() => {
     const t = filtro.trim().toLowerCase();
-    return (plantillas ?? []).filter((p) => !t || `${p.repid} ${p.nombre} ${p.tipo}`.toLowerCase().includes(t));
+    // La plantilla de cotización (4.6.8) no tiene formato de informe: se edita en «Versiones de plantillas».
+    return (plantillas ?? []).filter((p) => p.tipo !== "COTIZACION" && (!t || `${p.repid} ${p.nombre} ${p.tipo}`.toLowerCase().includes(t)));
   }, [plantillas, filtro]);
   const elegida = plantillas?.find((p) => p.id === sel) ?? null;
 
