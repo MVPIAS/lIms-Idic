@@ -225,6 +225,7 @@ export const NAV: SeccionNav[] = [
       // Módulo de diseño y simulación; los circuitos operativos son la Matriz de firmas y los pasos por método.
       { href: "/flujos", label: "Diseñador de flujos", icon: "⛓", perm: "flujo.editar", claves: "flujo bpm proceso etapas transiciones sla plazo simular workflow" },
       { href: "/admin/numeracion", label: "Numeración de documentos", icon: "№", perm: "documento.numeracion", claves: "correlativo numero informe certificado" },
+      { href: "/admin/integracion", label: "API e integración", icon: "🔌", perm: ["integracion.tokens", "integracion.documentacion"], claves: "api rest swagger openapi token integracion servicio" },
       { href: "/catalogo/parametros", label: "Parámetros del sistema", icon: "🎛", perm: "catalogo.gestionar", claves: "listas combos" },
       { href: "/config-correo", label: "Correo saliente", icon: "✉", perm: "admin.usuarios", claves: "smtp" },
       { href: "/usuarios", label: "Usuarios (vista clásica)", icon: "👤", perm: "admin.usuarios" },

@@ -62,6 +62,7 @@ import { EspecificacionTecnicaModule } from "./especificacion-tecnica/et.module"
 import { MuestreoModule } from "./muestreo/muestreo.module";
 import { FormulariosModule } from "./formularios/formularios.module";
 import { ReglasCapturaModule } from "./formularios/reglas-captura.service";
+import { IntegracionModule } from "./integracion/integracion.module";
 
 /**
  * En desarrollo embellecemos los logs con `pino-pretty`, pero es una
@@ -155,6 +156,8 @@ function prettyTransport() {
     EquiposModule,
     ConfiguracionModule,
     AuditoriaModule,
+    // API documentada y tokens de integración (contrato §4.7.4).
+    IntegracionModule,
     HealthModule,
   ],
   providers: [
