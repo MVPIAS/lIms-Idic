@@ -78,6 +78,15 @@ const TARJETAS: Tarjeta[] = [
     },
   },
   {
+    href: "/admin/integracion", titulo: "API e integración", icono: "🔌", color: "#516071", permiso: "integracion.tokens",
+    texto: "Documentación de la API REST y tokens de integración para que otros sistemas se conecten con permisos acotados (contrato §4.7.4).",
+    cargar: async () => {
+      if (mockActivo()) return { valor: "—", detalle: "no incluido en el modo ejemplo" };
+      const ts: any[] = await api.getRaw("integracion/tokens");
+      return { valor: ts.filter((t) => t.estado === "vigente").length, detalle: "token(s) vigente(s)" };
+    },
+  },
+  {
     href: "/config-correo", titulo: "Correo", icono: "✉", color: "#2b65d9", permiso: "admin.usuarios",
     texto: "Servidor de correo interno (SMTP) usado para notificaciones y envío de informes.",
     cargar: async () => {
