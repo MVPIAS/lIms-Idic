@@ -9,8 +9,16 @@ describe("Cotización · precio desde la ficha de costos (EP-00 2.2, BL-149)", (
   it("rechaza un precio manual distinto de la ficha", () => {
     expect(precioDeLinea({ ...ens, precioUnitario: 1000 }, 45000, 2).error).toMatch(/no admite un precio manual/);
   });
-  it("un ensayo sin valor en su ficha bloquea la cotización", () => {
-    expect(precioDeLinea({ ...ens, precioUnitario: 5000 }, null, 1).error).toMatch(/no tiene valor en su ficha/);
+  it("un ensayo sin precio en lista ni ficha se bloquea si no trae precio manual con motivo", () => {
+    expect(precioDeLinea(ens, null, 1).error).toMatch(/precio manual con su motivo/);
+    expect(precioDeLinea({ ...ens, precioUnitario: 5000 }, null, 1).error).toMatch(/exige un motivo/);
+    expect(precioDeLinea({ ...ens, precioUnitario: 5000, motivoPrecioManual: "corto" }, null, 1).error).toMatch(/exige un motivo/);
+  });
+  it("un ensayo sin precio admite precio manual con motivo", () => {
+    expect(precioDeLinea({ ...ens, precioUnitario: 5000, motivoPrecioManual: "Valor informado por el jefe del LPN" }, null, 1)).toEqual({ precio: 5000, manual: true });
+  });
+  it("con precio en lista o ficha el motivo no habilita un precio manual", () => {
+    expect(precioDeLinea({ ...ens, precioUnitario: 1000, motivoPrecioManual: "Valor informado por el jefe del LPN" }, 45000, 1).error).toMatch(/no admite un precio manual/);
   });
   it("al editar, la línea ya cotizada conserva su precio aunque la ficha cambie", () => {
     const ex = { ensayos: new Map([["e1", 40000]]), libres: new Set<string>() };

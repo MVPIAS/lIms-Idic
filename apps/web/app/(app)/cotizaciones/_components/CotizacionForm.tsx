@@ -45,7 +45,12 @@ export type LineaForm = {
   gasto?: { tipo: string; precio: number };
   /** B-045 · Metrología: instrumento de la línea (lo hereda el ítem de la OT). */
   inst?: Instrumento;
+  /** Ensayo sin precio en lista ni ficha: precio manual, en la moneda de la cotización, con motivo obligatorio. */
+  manual?: { precio: string; motivo: string };
 };
+
+/** Largo mínimo del motivo de un precio manual (igual que la API, precio-ficha.ts). */
+const MIN_MOTIVO_MANUAL = 10;
 
 type Instrumento = { instrumento: string; marca: string; modelo: string; rango: string; puntos: string; sentido: string };
 const INST_VACIO: Instrumento = { instrumento: "", marca: "", modelo: "", rango: "", puntos: "", sentido: "" };
@@ -357,17 +362,24 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     !l.heredada && !l.gasto && !conserva(l) && l.monedaPrecio === "USD" && moneda === "CLP"
       ? l.bloqueo || `El precio de ${l.codigo ?? "este ensayo"} está en USD en la lista de precios: emita la cotización en USD (no se mezclan monedas).`
       : null;
+  /** Ensayo sin precio en lista ni ficha: se cotiza con precio manual y motivo. */
+  const sinPrecio = (l: LineaForm) => !!l.catEnsayoId && !conserva(l) && !(Number(l.precioBase) > 0);
+  const precioManual = (l: LineaForm) => Number(String(l.manual?.precio ?? "").replace(",", ".")) || 0;
+  const manualCompleto = (l: LineaForm) => precioManual(l) > 0 && (l.manual?.motivo.trim().length ?? 0) >= MIN_MOTIVO_MANUAL;
+  const setManual = (i: number, x: Partial<{ precio: string; motivo: string }>) =>
+    setLineas((ls) => ls.map((l, j) => (j === i ? { ...l, manual: { precio: "", motivo: "", ...l.manual, ...x } } : l)));
   const precioEnMoneda = (l: LineaForm): number => {
     if (l.heredada) return l.heredada.precioUnitario;
     if (l.gasto) return l.gasto.precio;
     if (conserva(l)) return l.guardada!.precio;
+    if (sinPrecio(l)) return redondear(precioManual(l), moneda);
     const base = l.precioBase ?? 0;
     const mp: Moneda = l.monedaPrecio ?? "CLP";
     if (mp === moneda) return redondear(base, moneda);
     if (mp === "CLP" && moneda === "USD") return dolarNum > 0 ? redondear(base / dolarNum, "USD") : 0;
     return 0;
   };
-  const tienePrecio = (l: LineaForm) => conserva(l) || Number(l.precioBase) > 0;
+  const tienePrecio = (l: LineaForm) => conserva(l) || Number(l.precioBase) > 0 || (sinPrecio(l) && manualCompleto(l));
   const total = useMemo(
     () => redondear(lineas.reduce((s, l) => s + redondear(precioEnMoneda(l) * (Number(l.cantidad) || 0), moneda), 0), moneda),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -440,7 +452,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     if (!cliente?.id) return setError("Seleccione el cliente.");
     if (!lineas.length) return setError("Agregue al menos un ensayo del catálogo.");
     if (lineas.some((l) => !l.heredada && !l.gasto && !tienePrecio(l)))
-      return setError("Hay ensayos sin precio: no están en la lista de precios vigente ni tienen valor en su ficha de costos.");
+      return setError(`Hay ensayos sin precio en la lista vigente ni en su ficha de costos: indique el precio manual y su motivo (mínimo ${MIN_MOTIVO_MANUAL} caracteres).`);
     const mezcla = lineas.map(bloqueoDe).find(Boolean);
     if (mezcla) return setError(mezcla);
     if (moneda === "USD" && !(dolarNum > 0)) return setError("Indique el valor del dólar del día.");
@@ -478,7 +490,14 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           : l.heredada
           ? { tipo: l.heredada.tipo === "comprension" ? "otros" : l.heredada.tipo, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: l.heredada.precioUnitario }
           : l.catEnsayoId
-            ? { catEnsayoId: l.catEnsayoId, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: precioEnMoneda(l), ...(esMetrologia ? cuerpoInst(l.inst) : {}) }
+            ? {
+                catEnsayoId: l.catEnsayoId,
+                descripcion: l.descripcion,
+                cantidad: Number(l.cantidad) || 1,
+                precioUnitario: precioEnMoneda(l),
+                ...(sinPrecio(l) ? { motivoPrecioManual: l.manual?.motivo.trim() ?? null } : {}),
+                ...(esMetrologia ? cuerpoInst(l.inst) : {}),
+              }
             : { tipo: "producto", descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: precioEnMoneda(l) },
       ),
     };
@@ -723,7 +742,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
               : "Elija el cliente: el precio de cada ensayo depende de su tipo (particular o Ejército)."}{" "}
           {condCli?.lista?.vigente ? `Este cliente tiene lista de precios propia («${condCli.lista.nombre}»): manda sobre la lista general. ` : ""}
           {condCli && condCli.descuentoPct > 0 ? `Se aplica su descuento especial de ${String(condCli.descuentoPct).replace(".", ",")} %. ` : ""}
-          El precio no se escribe a mano. Solo los gastos (viáticos, pasajes, traslados) llevan valor manual.
+          El precio no se escribe a mano, salvo en un ensayo que no tiene precio en ninguna lista ni en su ficha: ahí se indica el precio y el motivo, y queda en la bitácora.
+          Los gastos (viáticos, pasajes, traslados) también llevan valor manual.
         </small>
         {esLrb && reposicionLrb > 0 && lineas.some((l) => l.catEnsayoId) && (
           <div className="alert info" style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8 }}>
@@ -745,8 +765,23 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
                   {l.descripcion}
                   {l.heredada && <small style={{ display: "block", color: "var(--muted)" }}>Línea heredada (se conserva tal cual)</small>}
                   {l.gasto && <small style={{ display: "block", color: "var(--muted)" }}>Gasto · valor manual</small>}
-                  {!l.heredada && !l.gasto && !tienePrecio(l) && <small style={{ display: "block", color: "var(--red)" }}>Sin precio en la lista vigente ni en la ficha de costos</small>}
-                  {!l.heredada && !l.gasto && tienePrecio(l) && (
+                  {!l.heredada && !l.gasto && !l.catEnsayoId && !tienePrecio(l) && <small style={{ display: "block", color: "var(--red)" }}>Sin precio en la lista vigente ni en la ficha de costos</small>}
+                  {sinPrecio(l) && (
+                    <div style={{ marginTop: 6, padding: 8, background: "#fff8e6", border: "1px solid #f0d48a", borderRadius: 4 }}>
+                      <small style={{ display: "block", color: "var(--red)", fontWeight: 600 }}>Sin precio en la lista vigente ni en la ficha de costos: precio manual con motivo</small>
+                      <div className="form-grid cols-3" style={{ gap: 6, marginTop: 4 }}>
+                        <div className="field" style={{ margin: 0 }}>
+                          <label htmlFor={`man-precio-${i}`}>Precio unitario ({moneda})</label>
+                          <input id={`man-precio-${i}`} inputMode="decimal" value={l.manual?.precio ?? ""} onChange={(e) => setManual(i, { precio: e.target.value })} />
+                        </div>
+                        <div className="field" style={{ margin: 0, gridColumn: "span 2" }}>
+                          <label htmlFor={`man-motivo-${i}`}>Motivo (queda en la bitácora)</label>
+                          <input id={`man-motivo-${i}`} maxLength={250} value={l.manual?.motivo ?? ""} placeholder="Ej.: valor informado por la jefatura del laboratorio" onChange={(e) => setManual(i, { motivo: e.target.value })} />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {!l.heredada && !l.gasto && !sinPrecio(l) && tienePrecio(l) && (
                     <small style={{ display: "block", color: "var(--muted)" }}>
                       {conserva(l)
                         ? `Precio cotizado (se conserva)${l.origenGuardado ? ` · ${l.origenGuardado}` : ""}`
