@@ -511,11 +511,11 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       if (r.error !== undefined) throw new BadRequestException(r.error);
       const precio = r.precio;
       const cantidad = l.cantidad ?? 1;
-      // Ensayo sin precio en lista ni ficha: el precio manual guarda su motivo como origen.
-      if (r.manual) origen = `Precio manual (sin precio en lista ni ficha): ${l.motivoPrecioManual!.trim()}`;
       // Línea ya cotizada que conserva un precio distinto del actual: conserva también su origen.
       if (l.catEnsayoId && (precioFicha == null || Math.abs(precio - precioFicha) >= 0.005) && existentes?.ensayos.has(l.catEnsayoId))
         origen = ctx.origenes?.get(l.catEnsayoId) ?? "Precio ya cotizado (se conserva)";
+      // Ensayo sin precio en lista ni ficha: el precio manual guarda su motivo como origen (también al cambiarlo).
+      if (r.manual) origen = `Precio manual (sin precio en lista ni ficha): ${l.motivoPrecioManual!.trim()}`;
       return {
         tipo: l.catEnsayoId ? "producto" : l.tipo ?? "producto",
         descripcion: descripcion ?? null,
