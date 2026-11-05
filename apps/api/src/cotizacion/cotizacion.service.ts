@@ -77,6 +77,23 @@ export function grupoCentroCosto(tipo?: string | null): string {
   return tipo === "sucursal_bpch" || tipo === "delegacion_bpch" ? "Sucursales y Delegación BPCH" : "Laboratorios";
 }
 
+/** Línea con precio manual (ensayo sin precio en lista ni ficha), para la bitácora. */
+interface LineaManual {
+  orden: number;
+  ensayoCodigo: string | null;
+  precioUnitario: number;
+  motivo: string;
+}
+
+/** Quita la marca `manual` de las líneas resueltas y devuelve aparte las de precio manual. */
+function separarManuales<T extends { manual: boolean; orden: number; ensayoCodigo: string | null; precioUnitario: number; precioOrigen: string | null }>(resueltas: T[]) {
+  const manuales: LineaManual[] = resueltas
+    .filter((l) => l.manual)
+    .map((l) => ({ orden: l.orden, ensayoCodigo: l.ensayoCodigo, precioUnitario: l.precioUnitario, motivo: (l.precioOrigen ?? "").replace(/^Precio manual \(sin precio en lista ni ficha\): /, "") }));
+  const lineas = resueltas.map(({ manual: _m, ...l }) => l);
+  return { lineas, manuales };
+}
+
 export interface LineaEntrada {
   tipo?: string;
   catEnsayoId?: string;
@@ -94,6 +111,8 @@ export interface LineaEntrada {
   instrumentoRango?: string | null;
   instrumentoPuntos?: string | null;
   instrumentoSentido?: string | null;
+  /** Motivo del precio manual de un ensayo sin precio en lista ni ficha (precio-ficha.ts). */
+  motivoPrecioManual?: string | null;
 }
 
 /** Campos de cabecera comunes a crear/editar (ya validados por zod en el controller). */
@@ -492,6 +511,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       if (r.error !== undefined) throw new BadRequestException(r.error);
       const precio = r.precio;
       const cantidad = l.cantidad ?? 1;
+      // Ensayo sin precio en lista ni ficha: el precio manual guarda su motivo como origen.
+      if (r.manual) origen = `Precio manual (sin precio en lista ni ficha): ${l.motivoPrecioManual!.trim()}`;
       // Línea ya cotizada que conserva un precio distinto del actual: conserva también su origen.
       if (l.catEnsayoId && (precioFicha == null || Math.abs(precio - precioFicha) >= 0.005) && existentes?.ensayos.has(l.catEnsayoId))
         origen = ctx.origenes?.get(l.catEnsayoId) ?? "Precio ya cotizado (se conserva)";
@@ -517,6 +538,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         instrumentoPuntos: l.instrumentoPuntos?.trim() || null,
         instrumentoSentido: l.instrumentoSentido ?? null,
         precioOrigen: l.catEnsayoId ? origen?.slice(0, 300) ?? null : null,
+        manual: r.manual === true,
       };
     });
   }
@@ -618,7 +640,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const fechaEmision = soloFecha(data.fechaEmision ?? hoyEnChile());
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
     if (data.oportunidadId) await validarOportunidad(this.prisma, tenantIdFromJWT, data.clienteId, data.oportunidadId);
-    const lineas = await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, { regla: validez.regla, fecha: isoFecha(fechaEmision), clienteId: data.clienteId });
+    const { lineas, manuales } = separarManuales(await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, { regla: validez.regla, fecha: isoFecha(fechaEmision), clienteId: data.clienteId }));
     const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0), moneda);
     // Número real (EP-00 2.1 · «2026-14324»), correlativo atómico por tenant.
     const codigo = await generarNumeroCotizacion(this.prisma, tenantIdFromJWT, fechaEmision);
@@ -660,6 +682,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     });
     if (data.solicitud) await guardarDatosSolicitud(this.prisma, creada.id, data.solicitud);
     if (data.oportunidadId) await enlazarOportunidad(this.prisma, tenantIdFromJWT, creada.id, data.clienteId, data.oportunidadId);
+    await this.hitoPrecioManual(tenantIdFromJWT, creada.id, usuarioId, manuales, moneda);
     return creada;
   }
 
@@ -669,7 +692,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * `estado` se admite por compatibilidad, validado como transición; la
    * aceptación y la anulación tienen sus propios endpoints con datos obligatorios.
    */
-  async actualizar(id: string, data: CabeceraCotizacion & { estado?: string }, tenantId?: string) {
+  async actualizar(id: string, data: CabeceraCotizacion & { estado?: string }, tenantId?: string, usuarioId?: string) {
     const actual = await this.detalle(id, tenantId); // existencia + tenant
     const { estado, ...resto } = data;
     const { solicitud, oportunidadId: _o, ...restoCab } = resto;
@@ -744,14 +767,16 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         libres: new Set(actual.lineas.filter((x: any) => !x.catEnsayoId).map((x: any) => claveLibre(x.tipo, x.descripcion, Number(x.precioUnitario)))),
       };
       const origenes = new Map<string, string | null>(actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, x.precioOrigen ?? null]));
-      const lineas = await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar, existentes, {
-        regla: validez.regla,
-        fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
-        clienteId: actual.clienteId,
-        origenes,
-      });
+      const { lineas, manuales } = separarManuales(
+        await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar, existentes, {
+          regla: validez.regla,
+          fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
+          clienteId: actual.clienteId,
+          origenes,
+        }),
+      );
       const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0), moneda);
-      return this.prisma.$transaction(async (tx) => {
+      const r = await this.prisma.$transaction(async (tx) => {
         await tx.lineaCotizacion.deleteMany({ where: { cotizacionId: id } });
         return tx.cotizacion.update({
           where: { id },
@@ -759,6 +784,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
           include: { lineas: true, cliente: true },
         });
       });
+      await this.hitoPrecioManual(actual.tenantId, id, usuarioId, manuales, moneda);
+      return r;
     }
     return this.prisma.cotizacion.update({ where: { id }, data: upd, include: { lineas: true, cliente: true } });
   }
@@ -997,6 +1024,15 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Hito de la cotización (bitácora `cotizacion_evento`). */
+  /** Precio manual de ensayos sin precio (precio-ficha.ts): queda en la bitácora con quién y por qué. */
+  private async hitoPrecioManual(tenantId: string, cotizacionId: string, usuarioId: string | undefined, manuales: LineaManual[], moneda: string) {
+    if (!manuales.length) return;
+    await this.hito(tenantId, cotizacionId, "precio_manual", usuarioId, manuales.map((m) => `${m.ensayoCodigo}: ${m.motivo}`).join(" · ").slice(0, 1000), {
+      moneda,
+      lineas: manuales,
+    });
+  }
+
   private async hito(tenantId: string, cotizacionId: string, accion: string, usuarioId: string | undefined, comentario: string | null, detalle: object) {
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO cotizacion_evento (tenant_id, cotizacion_id, accion, comentario, detalle, usuario_id)

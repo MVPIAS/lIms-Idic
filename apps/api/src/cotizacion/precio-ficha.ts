@@ -7,7 +7,10 @@
  *     y, si no, de la ficha de costos (cat_ensayo.precio); convertido a US$ con
  *     el dólar de la cotización. La API no acepta un precio
  *     manual distinto: antes bastaba con mandar `precioUnitario` para esquivar la
- *     ficha. Un ensayo sin valor en su ficha bloquea la cotización.
+ *     ficha. Un ensayo sin precio en ninguna lista ni en su ficha admite un
+ *     precio MANUAL solo con motivo (05-11-2026, excepción acotada a BL-149):
+ *     la línea guarda el motivo como origen del precio y la cotización deja
+ *     el hito «precio_manual» en su bitácora. Sin motivo, la línea se bloquea.
  *   · Una línea SIN ensayo solo puede ser un GASTO tipificado (viático, pasaje,
  *     traslado u otro gasto, horas de comisión): no un «producto» libre.
  *   · Al EDITAR, una línea que ya estaba en la cotización conserva su precio
@@ -30,7 +33,12 @@ export interface LineaPrecio {
   tipo?: string | null;
   descripcion?: string | null;
   precioUnitario?: number | null;
+  /** Motivo del precio manual (solo para un ensayo sin precio en lista ni ficha). */
+  motivoPrecioManual?: string | null;
 }
+
+/** Largo mínimo del motivo de un precio manual. */
+export const MIN_MOTIVO_MANUAL = 10;
 
 export interface Existentes {
   /** Precio guardado de cada ensayo ya cotizado (por catEnsayoId). */
@@ -54,14 +62,20 @@ export function precioDeLinea(
   existentes?: Existentes,
   /** De dónde sale el precio, para el mensaje (por defecto la ficha; la lista de precios vigente, lp26). */
   fuente = "su ficha de costos",
-): { precio: number; error?: undefined } | { precio?: undefined; error: string } {
+): { precio: number; manual?: boolean; error?: undefined } | { precio?: undefined; manual?: undefined; error: string } {
   const pedido = l.precioUnitario != null ? Number(l.precioUnitario) : null;
   if (l.catEnsayoId) {
     const codigo = l.ensayoCodigo ?? "del catálogo";
     const previo = existentes?.ensayos.get(l.catEnsayoId);
     if (previo != null && (pedido == null || igual(pedido, previo))) return { precio: previo };
-    if (!(precioFicha != null && precioFicha > 0))
-      return { error: `Línea ${n}: el ensayo ${codigo} no tiene valor en su ficha de costos. Complete la ficha en el catálogo antes de cotizarlo.` };
+    if (!(precioFicha != null && precioFicha > 0)) {
+      const motivo = l.motivoPrecioManual?.trim() ?? "";
+      if (!(pedido != null && pedido > 0))
+        return { error: `Línea ${n}: el ensayo ${codigo} no está en la lista de precios vigente ni tiene valor en su ficha de costos. Indique un precio manual con su motivo o complete la ficha en el catálogo.` };
+      if (motivo.length < MIN_MOTIVO_MANUAL)
+        return { error: `Línea ${n}: el ensayo ${codigo} no tiene precio en la lista ni en su ficha; el precio manual exige un motivo (mínimo ${MIN_MOTIVO_MANUAL} caracteres).` };
+      return { precio: pedido, manual: true };
+    }
     if (pedido != null && !igual(pedido, precioFicha))
       return { error: `Línea ${n}: el precio del ensayo ${codigo} sale de ${fuente} (${precioFicha}); la cotización no admite un precio manual.` };
     return { precio: precioFicha };

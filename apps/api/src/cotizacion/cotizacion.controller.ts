@@ -69,6 +69,8 @@ const LineaSchema = z
     cantidad: z.number().int().positive().default(1),
     diasOHoras: z.number().optional(),
     precioUnitario: z.number().positive().optional(),
+    // Precio manual: solo un ensayo sin precio en lista ni ficha, con motivo (precio-ficha.ts).
+    motivoPrecioManual: z.string().trim().max(250).nullable().optional(),
     tramo: z.string().max(200).optional(),
     // B-045 · Metrología: datos del instrumento de la línea (EP-04 P0.1–P0.2).
     instrumento: z.string().trim().max(300).nullable().optional(),
@@ -325,7 +327,7 @@ export class CotizacionController {
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     await this.exigirCotizacion(req, id);
     const data = ActualizarCotSchema.parse(body);
-    return this.svc.actualizar(id, data as any, req?.user?.tenantId);
+    return this.svc.actualizar(id, data as any, req?.user?.tenantId, req?.user?.sub);
   }
 
   /**
