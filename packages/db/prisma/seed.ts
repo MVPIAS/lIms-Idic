@@ -3,6 +3,7 @@
  * Carga: tenant IDIC, 1 sede, unidades, roles base, 5 usuarios demo, 3 clientes reales.
  */
 import { PrismaClient } from "@prisma/client";
+import { hash as argon2Hash } from "@node-rs/argon2";
 
 const prisma = new PrismaClient();
 
@@ -94,15 +95,18 @@ async function main() {
     { username: "j.soto", nombreCompleto: "Javier Soto Ramírez", grado: "Sargento", cargo: "Recepción Central" },
     { username: "admin", nombreCompleto: "Administrador del Sistema", grado: "Civil", cargo: "TI" },
   ];
+  // Hash argon2id real para la contraseña demo (antes era un PHC malformado
+  // que hacía que argon2.verify lanzara y /auth/login devolviera 500).
+  const demoPasswordHash = await argon2Hash("demo");
   for (const u of usuariosDemo) {
     await prisma.usuario.upsert({
       where: { tenantId_username: { tenantId: tenant.id, username: u.username } },
-      update: {},
+      update: { passwordHash: demoPasswordHash },
       create: {
         tenantId: tenant.id,
         ...u,
         email: `${u.username}@ejercito.cl`,
-        passwordHash: "$argon2id$v=19$m=65536,t=3,p=4$DEMO", // password 'demo'
+        passwordHash: demoPasswordHash, // password 'demo'
         estado: "activo",
       },
     });

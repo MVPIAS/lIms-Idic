@@ -17,7 +17,7 @@ import {
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
 import { z } from "zod";
-import * as argon2 from "argon2";
+import { hash as argon2Hash } from "@node-rs/argon2";
 import { PrismaClient } from "@prisma/client";
 import { PrismaService } from "../common/prisma.service";
 import { BaseCrudService } from "../common/base-crud.service";
@@ -136,7 +136,7 @@ export class UsuarioController {
   async crear(@Body() body: unknown, @Req() req: any) {
     const dto = UsuarioCreate.parse(body);
     const tenantId = req.user?.tenantId ?? (await this.prisma.tenant.findFirst())?.id;
-    const passwordHash = await argon2.hash(dto.password);
+    const passwordHash = await argon2Hash(dto.password);
     const u = await this.prisma.usuario.create({
       data: {
         tenantId,
