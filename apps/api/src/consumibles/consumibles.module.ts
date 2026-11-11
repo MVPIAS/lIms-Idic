@@ -25,7 +25,8 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { diaChile } from "../common/fecha-chile";
 import { hoyCl } from "../ot/plazos";
-import { descontarFifo } from "./consumo-automatico";
+import { descontarFifo, laboratoriosDelConsumo, leerModoConsumo, lotesParaConsumo } from "./consumo-automatico";
+import { BodegasController, BodegasService } from "./bodegas.controller";
 import { ConversionError, aUnidadConsumo } from "./conversion";
 import { AlcanceService } from "../rbac/alcance.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
@@ -105,6 +106,10 @@ const CrearLoteSchema = z.object({
   enUnidadCompra: z.preprocess(emptyToNull, z.coerce.boolean().optional()),
   ubicacionId: optUuid(),
   estado: optStr(30),
+  /** S4 · bodega donde entra el lote (por defecto, la bodega central). */
+  bodegaId: optUuid(),
+  /** S4 · precio de compra por unidad de consumo del lote (valoriza el inventario). */
+  costoUnitarioClp: z.preprocess(emptyToNull, z.coerce.number().nonnegative("El costo unitario no puede ser negativo.").max(1e12).nullable().optional()),
 });
 const ActualizarLoteSchema = z.object({
   numeroLote: optStr(80),
@@ -112,6 +117,7 @@ const ActualizarLoteSchema = z.object({
   fechaVencimiento: optDate(),
   ubicacionId: optUuid(),
   estado: optStr(30),
+  costoUnitarioClp: z.preprocess(emptyToNull, z.coerce.number().nonnegative("El costo unitario no puede ser negativo.").max(1e12).nullable().optional()),
 });
 
 const MovimientoSchema = z
@@ -159,8 +165,19 @@ interface Vinculo {
   actividad: string | null;
 }
 
+/** S4 · bodega del lote y su valorización (precio del lote o, si falta, costo de referencia del consumible). */
+const SQL_BODEGA_LOTE = `b.codigo AS bodega_codigo, b.nombre AS bodega_nombre, b.tipo AS bodega_tipo,
+  COALESCE(l.costo_unitario_clp, NULLIF(c.costo_unitario_clp, 0)) AS costo_valorizacion,
+  CASE WHEN l.costo_unitario_clp IS NOT NULL THEN 'lote' WHEN NULLIF(c.costo_unitario_clp, 0) IS NOT NULL THEN 'consumible' ELSE 'pendiente' END AS fuente_costo`;
+
+const lotePlano = (r: any) => {
+  const cantidad = Number(r.cantidad_actual ?? 0);
+  const costo = r.costo_valorizacion == null ? null : Number(r.costo_valorizacion);
+  return { ...r, cantidad_actual: cantidad, costo_valorizacion: costo, valor_stock: costo == null ? null : Math.round(cantidad * costo * 100) / 100 };
+};
+
 /* ========================================================================== */
-/* ConsumiblesService                                                          */
+/* ConsumiblesService                                                         */
 /* ========================================================================== */
 
 @Injectable()
@@ -365,25 +382,27 @@ export class ConsumiblesService {
 
   async lotesDeConsumible(consumibleId: string, tenantId: string) {
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT l.*,
+      `SELECT l.*, ${SQL_BODEGA_LOTE},
               (l.fecha_vencimiento IS NOT NULL AND l.fecha_vencimiento < CURRENT_DATE) AS caducado,
               (l.fecha_vencimiento IS NOT NULL
                AND l.fecha_vencimiento >= CURRENT_DATE
                AND l.fecha_vencimiento < CURRENT_DATE + 30)                            AS por_vencer
          FROM lote_consumible l
+         JOIN consumible c ON c.id = l.consumible_id
+         LEFT JOIN bodega b ON b.id = l.bodega_id
         WHERE l.consumible_id = $1::uuid AND l.tenant_id = $2::uuid
         ORDER BY l.fecha_vencimiento ASC NULLS LAST, l.numero_lote ASC`,
       consumibleId,
       tenantId,
     );
-    return rows.map((r) => ({ ...r, cantidad_actual: Number(r.cantidad_actual ?? 0) }));
+    return rows.map(lotePlano);
   }
 
   async listarLotes(
     tenantId: string,
-    opts: { page: number; limit: number; consumibleId?: string; soloDisponibles?: boolean },
+    opts: { page: number; limit: number; consumibleId?: string; soloDisponibles?: boolean; bodegaId?: string },
   ) {
-    const { page, limit, consumibleId, soloDisponibles } = opts;
+    const { page, limit, consumibleId, soloDisponibles, bodegaId } = opts;
     const offset = (page - 1) * limit;
     const args: any[] = [tenantId];
     const filtros: string[] = [];
@@ -392,14 +411,19 @@ export class ConsumiblesService {
       filtros.push(`AND l.consumible_id = $${args.length}::uuid`);
     }
     if (soloDisponibles) filtros.push(`AND l.cantidad_actual > 0`);
+    if (bodegaId) {
+      args.push(bodegaId);
+      filtros.push(`AND l.bodega_id = $${args.length}::uuid`);
+    }
     const where = filtros.join(" ");
 
     const data = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT l.*, c.codigo AS consumible_codigo, c.nombre AS consumible_nombre,
-              c.unidad_medida,
+              c.unidad_medida, ${SQL_BODEGA_LOTE},
               (l.fecha_vencimiento IS NOT NULL AND l.fecha_vencimiento < CURRENT_DATE) AS caducado
          FROM lote_consumible l
          JOIN consumible c ON c.id = l.consumible_id
+         LEFT JOIN bodega b ON b.id = l.bodega_id
         WHERE l.tenant_id = $1::uuid ${where}
         ORDER BY l.fecha_vencimiento ASC NULLS LAST, c.codigo ASC
         LIMIT ${Number(limit)} OFFSET ${Number(offset)}`,
@@ -412,16 +436,17 @@ export class ConsumiblesService {
     );
     const total = Number(totalRows[0]?.total ?? 0);
     return {
-      data: data.map((r) => ({ ...r, cantidad_actual: Number(r.cantidad_actual ?? 0) })),
+      data: data.map(lotePlano),
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
   }
 
   async cargarLote(id: string, tenantId: string): Promise<any> {
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT l.*, c.codigo AS consumible_codigo, c.nombre AS consumible_nombre, c.unidad_medida
+      `SELECT l.*, c.codigo AS consumible_codigo, c.nombre AS consumible_nombre, c.unidad_medida, ${SQL_BODEGA_LOTE}
          FROM lote_consumible l
          JOIN consumible c ON c.id = l.consumible_id
+         LEFT JOIN bodega b ON b.id = l.bodega_id
         WHERE l.id = $1::uuid AND l.tenant_id = $2::uuid
         LIMIT 1`,
       id,
@@ -449,6 +474,14 @@ export class ConsumiblesService {
     if (!con.length) throw new NotFoundException("Consumible no encontrado");
     // §4.4.4: lo recibido en envases entra al stock en unidad de consumo.
     d = { ...d, cantidadInicial: convertir(d.cantidadInicial, con[0].factor_conversion, d.enUnidadCompra) };
+    // S4 · el lote entra a una bodega activa de la institución; si no se indica, a la central.
+    const [bod] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, activa FROM bodega WHERE tenant_id = $1::uuid AND (id = $2::uuid OR ($2::uuid IS NULL AND tipo = 'central'))`,
+      tenantId,
+      d.bodegaId ?? null,
+    );
+    if (d.bodegaId && !bod) throw new NotFoundException("La bodega elegida no existe.");
+    if (bod && !bod.activa) throw new BadRequestException("La bodega elegida está inactiva.");
 
     return this.prisma.$transaction(async (tx) => {
       let lote: any;
@@ -456,8 +489,8 @@ export class ConsumiblesService {
         const rows = await tx.$queryRawUnsafe<any[]>(
           `INSERT INTO lote_consumible
              (tenant_id, consumible_id, numero_lote, fecha_recepcion, fecha_vencimiento,
-              cantidad_inicial, cantidad_actual, ubicacion_id, estado)
-           VALUES ($1::uuid, $2::uuid, $3, $4::date, $5::date, $6, $6, $7::uuid, $8)
+              cantidad_inicial, cantidad_actual, ubicacion_id, estado, bodega_id, costo_unitario_clp)
+           VALUES ($1::uuid, $2::uuid, $3, $4::date, $5::date, $6, $6, $7::uuid, $8, $9::uuid, $10)
            RETURNING *`,
           tenantId,
           d.consumibleId,
@@ -467,11 +500,13 @@ export class ConsumiblesService {
           d.cantidadInicial,
           d.ubicacionId ?? null,
           d.estado ?? "disponible",
+          bod?.id ?? null,
+          d.costoUnitarioClp ?? null,
         );
         lote = rows[0];
       } catch (e: any) {
         if (String(e?.message ?? "").includes("lote_consumible_consumible_id_numero_lote_key"))
-          throw new ConflictException(`Ya existe el lote ${d.numeroLote} para este consumible`);
+          throw new ConflictException(`Ya existe el lote ${d.numeroLote} de este consumible en esa bodega`);
         throw e;
       }
 
@@ -499,6 +534,7 @@ export class ConsumiblesService {
       fechaVencimiento: "fecha_vencimiento",
       ubicacionId: "ubicacion_id",
       estado: "estado",
+      costoUnitarioClp: "costo_unitario_clp",
     };
     const CAST: Record<string, string> = {
       fecha_recepcion: "::date",
@@ -583,22 +619,21 @@ export class ConsumiblesService {
       if (!c) throw new NotFoundException("Consumible no encontrado");
       d = { ...d, cantidad: convertir(d.cantidad, c.factor_conversion, true) };
     }
+    // S4 · bodegas: laboratorios del vínculo y modo de consumo (se leen fuera de la transacción).
+    const labs = !d.loteId && d.tipo === "consumo"
+      ? await laboratoriosDelConsumo(this.prisma as any, { tenantId, catMetodoId: vinculo.catMetodoId, muestraId: vinculo.muestraId, otId: vinculo.otId })
+      : [];
+    const modo = await leerModoConsumo(this.prisma as any, tenantId);
     return this.prisma.$transaction(async (tx) => {
       let loteId = d.loteId ?? null;
 
-      // FIFO por caducidad si no se especificó el lote.
+      // FIFO por caducidad si no se especificó el lote; S4: primero la sub-bodega del
+      // laboratorio del vínculo (método u OT), según consumibles.bodega_consumo.
       if (!loteId) {
         if (d.tipo !== "consumo")
           throw new ConflictException("entrada y ajuste requieren un loteId explícito");
-        const cand = await tx.$queryRawUnsafe<any[]>(
-          `SELECT id FROM lote_consumible
-            WHERE consumible_id = $1::uuid AND tenant_id = $2::uuid AND cantidad_actual >= $3
-            ORDER BY fecha_vencimiento ASC NULLS LAST, numero_lote ASC
-            LIMIT 1
-            FOR UPDATE`,
-          d.consumibleId,
-          tenantId,
-          d.cantidad,
+        const cand = (await lotesParaConsumo(tx as any, { tenantId, consumibleId: d.consumibleId!, labs, modo, bloquear: true })).filter(
+          (l) => Number(l.cantidad_actual) + 1e-9 >= Math.abs(d.cantidad),
         );
         if (!cand.length)
           throw new ConflictException({
@@ -936,6 +971,7 @@ export class ConsumiblesService {
     const movs = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT m.*,
               l.numero_lote,
+              (SELECT b.codigo FROM bodega b WHERE b.id = l.bodega_id) AS bodega_codigo,
               mu.codigo AS muestra_codigo,
               me.codigo AS metodo_codigo,
               me.nombre AS metodo_nombre,
@@ -1035,11 +1071,13 @@ export class ConsumiblesController {
     @Query("consumibleId") consumibleId: string | undefined,
     @Query("disponibles") disponibles: string | undefined,
     @Req() req: any,
+    @Query("bodegaId") bodegaId?: string,
   ) {
     return this.svc.listarLotes(this.svc.tenantId(req), {
       ...pag(page, limit),
       consumibleId: consumibleId || undefined,
       soloDisponibles: disponibles === "1" || disponibles === "true",
+      bodegaId: bodegaId && /^[0-9a-f-]{36}$/i.test(bodegaId) ? bodegaId : undefined,
     });
   }
 
@@ -1169,8 +1207,9 @@ export class ConsumosOtController {
 /* ========================================================================== */
 
 @Module({
-  controllers: [ConsumosOtController, ConsumiblesController],
-  providers: [ConsumiblesService],
+  // BodegasController (consumibles/bodegas…) va antes que ConsumiblesController (consumibles/:id).
+  controllers: [ConsumosOtController, BodegasController, ConsumiblesController],
+  providers: [ConsumiblesService, BodegasService],
   exports: [ConsumiblesService],
 })
 export class ConsumiblesModule {}

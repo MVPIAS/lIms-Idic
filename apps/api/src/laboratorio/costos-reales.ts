@@ -31,13 +31,14 @@ export const ETIQUETA_CATEGORIA: Record<CategoriaCosto, string> = {
  * Gastos de comisión en terreno o en el extranjero (EP-05 2.4 y 9.1, BL-194):
  * pasajes, viáticos, traslados, arriendo de vehículo, combustible y rendición.
  */
-export const TIPOS_GASTO_COMISION = ["viatico", "pasaje", "traslado", "arriendo", "combustible", "rendicion", "otro"] as const;
+export const TIPOS_GASTO_COMISION = ["viatico", "pasaje", "traslado", "arriendo", "combustible", "vehiculo", "rendicion", "otro"] as const;
 export const ETIQUETA_GASTO_COMISION: Record<(typeof TIPOS_GASTO_COMISION)[number], string> = {
   viatico: "Viático",
   pasaje: "Pasaje",
   traslado: "Traslado",
   arriendo: "Arriendo de vehículo",
   combustible: "Combustible",
+  vehiculo: "Vehículo institucional (km × costo por km)",
   rendicion: "Rendición de cuentas",
   otro: "Otro gasto",
 };
@@ -76,7 +77,7 @@ export function erroresLineas(lineas: LineaCostoReal[], cargosValidos: Set<strin
     if (l.categoria === "otros" && !l.descripcion?.trim()) e.push(`${n}: describa el gasto.`);
     if (l.categoria === "ot_interna" && !l.ordenInternaId && !l.descripcion?.trim()) e.push(`${n}: indique la orden interna valorizada.`);
     if (l.categoria === "comision" && !(TIPOS_GASTO_COMISION as readonly string[]).includes(String(l.tipoGasto ?? "")))
-      e.push(`${n}: indique el tipo de gasto de comisión (viático, pasaje, traslado, arriendo, combustible, rendición u otro).`);
+      e.push(`${n}: indique el tipo de gasto de comisión (viático, pasaje, traslado, arriendo, combustible, vehículo institucional, rendición u otro).`);
   });
   const ois = lineas.filter((l) => l.categoria === "ot_interna" && l.ordenInternaId).map((l) => l.ordenInternaId);
   if (new Set(ois).size !== ois.length) e.push("Una misma orden interna figura dos veces en la planilla.");
@@ -308,3 +309,98 @@ export function erroresCierrePlanilla(p: { estado: string; lineas: LineaCostoRea
     e.push(`El laboratorio aún tiene ${p.resultadosSinAprobar} ensayo(s) sin aprobar en esta OT: la planilla se cierra al terminar su parte.`);
   return e;
 }
+
+/* ======================= S4 · semáforo, tarifas y consolidado ======================= */
+
+/**
+ * Semáforo de lo cotizado frente a lo real (reuniones R2, R9 y R10): según la
+ * desviación del costo real sobre el costo directo estimado.
+ *   verde    · desviación < umbral amarillo (incluye gastar menos de lo estimado)
+ *   amarillo · umbral amarillo ≤ desviación < umbral rojo
+ *   rojo     · desviación ≥ umbral rojo
+ *   sin_dato · no hay estimación con qué comparar o aún no hay costos
+ * Los umbrales son parámetros (costo_real.semaforo_amarillo_pct y _rojo_pct);
+ * los valores por defecto (10 % y 20 %) son de ejemplo hasta que SPC los fije.
+ */
+export type Semaforo = "verde" | "amarillo" | "rojo" | "sin_dato";
+export interface UmbralesSemaforo {
+  amarilloPct: number;
+  rojoPct: number;
+}
+export const UMBRALES_POR_DEFECTO: UmbralesSemaforo = { amarilloPct: 10, rojoPct: 20 };
+
+export const ETIQUETA_SEMAFORO: Record<Semaforo, string> = {
+  verde: "Dentro de lo cotizado",
+  amarillo: "Sobre lo cotizado (alerta)",
+  rojo: "Muy sobre lo cotizado",
+  sin_dato: "Sin estimación para comparar",
+};
+
+/** Umbrales desde las filas de parametro_sistema (valores con coma o punto); si faltan o no cuadran, los de ejemplo. */
+export function umbralesDesde(filas: { codigo: string; valor: string | null; activo?: boolean }[]): UmbralesSemaforo {
+  const leer = (c: string) => {
+    const f = filas.find((x) => x.codigo === c && x.activo !== false);
+    const n = Number(String(f?.valor ?? "").replace(",", "."));
+    return f && Number.isFinite(n) && n >= 0 ? n : null;
+  };
+  const amarillo = leer("semaforo_amarillo_pct") ?? UMBRALES_POR_DEFECTO.amarilloPct;
+  const rojo = leer("semaforo_rojo_pct") ?? UMBRALES_POR_DEFECTO.rojoPct;
+  return rojo >= amarillo ? { amarilloPct: amarillo, rojoPct: rojo } : { ...UMBRALES_POR_DEFECTO };
+}
+
+export function semaforo(costoReal: number, costoEstimado: number | null, u: UmbralesSemaforo = UMBRALES_POR_DEFECTO): { color: Semaforo; desviacionPct: number | null } {
+  if (costoEstimado == null || !(costoEstimado > 0) || !(costoReal > 0)) return { color: "sin_dato", desviacionPct: null };
+  const exacto = ((costoReal - costoEstimado) / costoEstimado) * 100;
+  const color: Semaforo = exacto >= u.rojoPct ? "rojo" : exacto >= u.amarilloPct ? "amarillo" : "verde";
+  return { color, desviacionPct: r2(exacto) };
+}
+
+/**
+ * Costo real de la OT completa (todos los laboratorios que trabajaron en ella)
+ * frente al costo directo estimado de la cotización y al neto cotizado.
+ */
+export interface PlanillaResumen {
+  unidadId: string;
+  unidad: string;
+  estado: string;
+  total: number;
+  horasHombre: number;
+}
+export function consolidarOt(
+  planillas: PlanillaResumen[],
+  est: { costoDirecto: number | null; neto: number | null; laboratorios: number },
+  u: UmbralesSemaforo = UMBRALES_POR_DEFECTO,
+) {
+  const total = r2(planillas.reduce((s, p) => s + (Number(p.total) || 0), 0));
+  const horas = r2(planillas.reduce((s, p) => s + (Number(p.horasHombre) || 0), 0));
+  const cerradas = planillas.filter((p) => p.estado === "cerrada").length;
+  const s = semaforo(total, est.costoDirecto, u);
+  return {
+    planillas,
+    costoReal: total,
+    horasHombre: horas,
+    costoEstimado: est.costoDirecto,
+    diferencia: est.costoDirecto != null ? r2(total - est.costoDirecto) : null,
+    desviacionPct: s.desviacionPct,
+    semaforo: s.color,
+    margen: est.neto != null ? r2(est.neto - total) : null,
+    neto: est.neto,
+    /** Planillas cerradas sobre laboratorios que trabajan en la OT: el costo es definitivo cuando todas lo están. */
+    cerradas,
+    laboratorios: est.laboratorios,
+    completo: est.laboratorios > 0 && cerradas >= est.laboratorios,
+  };
+}
+
+/**
+ * Tarifa vigente de una lista con vigencia a una fecha (AAAA-MM-DD): la de
+ * inicio más reciente que no haya terminado. null si no hay ninguna.
+ */
+export function tarifaVigente<T extends { vigenteDesde: string; vigenteHasta: string | null; activo: boolean }>(filas: T[], dia: string): T | null {
+  const ok = filas.filter((f) => f.activo && f.vigenteDesde <= dia && (!f.vigenteHasta || f.vigenteHasta >= dia));
+  ok.sort((a, b) => (a.vigenteDesde < b.vigenteDesde ? 1 : a.vigenteDesde > b.vigenteDesde ? -1 : 0));
+  return ok[0] ?? null;
+}
+
+/** Prefijo del cargo de una línea de horas hombre valorizada con una categoría de «Tarifas HH». */
+export const PREFIJO_CATEGORIA_HH = "HH:";

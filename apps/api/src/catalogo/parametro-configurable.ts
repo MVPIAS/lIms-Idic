@@ -439,6 +439,29 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         ],
         porDefecto: "avisar",
       },
+      // S4 · bodegas (R1, R5): de qué bodega sale el consumo de un ensayo.
+      bodega_consumo: {
+        tipo: "opcion",
+        nombre: "Bodega de la que se descuenta el consumo de un ensayo",
+        opciones: [
+          { valor: "laboratorio_primero", etiqueta: "Primero la sub-bodega del laboratorio y luego la bodega central" },
+          { valor: "solo_laboratorio", etiqueta: "Solo la sub-bodega del laboratorio" },
+          { valor: "todas", etiqueta: "Cualquier bodega (sin preferencia)" },
+        ],
+        porDefecto: "laboratorio_primero",
+      },
+    },
+  },
+  // --- Semáforo del costo real de la OT (frente S4 · reuniones R2, R9 y R10) ---
+  {
+    categoria: "costo_real",
+    titulo: "Costo real de la OT · semáforo de lo cotizado frente a lo real",
+    donde:
+      "OT › Costos reales (planilla de cada laboratorio y total de la OT) y Zona de informes › «Costo cotizado frente a costo real por OT»: verde bajo el umbral amarillo, amarillo entre ambos y rojo desde el umbral rojo.",
+    porConfirmar: "Umbrales del semáforo (los valores 10 % y 20 % son de ejemplo): los fija SPC.",
+    codigos: {
+      semaforo_amarillo_pct: { tipo: "porcentaje", nombre: "Amarillo desde esta desviación del costo real sobre el estimado", unidad: "%", porDefecto: "10" },
+      semaforo_rojo_pct: { tipo: "porcentaje", nombre: "Rojo desde esta desviación del costo real sobre el estimado", unidad: "%", porDefecto: "20" },
     },
   },
   // --- Reglas de aceptación del método en la captura (frente ALI-D4) ---

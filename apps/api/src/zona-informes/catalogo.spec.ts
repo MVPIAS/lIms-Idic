@@ -9,7 +9,8 @@ describe("Zona de informes · catálogo", () => {
     const claves = INFORMES.map((i) => i.clave);
     expect(new Set(claves).size).toBe(claves.length);
     for (const i of INFORMES) {
-      expect(i.legado.length).toBeGreaterThan(0);
+      // Reemplaza un informe Crystal o responde a un pedido escrito (documento Z26).
+      expect(i.legado.length > 0 || !!i.pedido).toBe(true);
       for (const c of i.columnas) expect(i.select).toMatch(new RegExp(`AS ${c.clave}\\b`));
     }
   });
@@ -68,6 +69,38 @@ describe("Zona de informes · consulta", () => {
       const { sql } = armarConsulta(def, (f as any).filtros, T, [LAB]);
       expect(sql).toMatch(/^SELECT .* FROM .* WHERE /s);
     }
+  });
+});
+
+describe("Zona de informes · bases del documento Z26 (frente S4)", () => {
+  const z26 = ["z26-cotizaciones", "z26-ot-externas", "z26-ot-internas", "z26-ensayos", "z26-ensayos-por-ot", "z26-costo-cotizado-real",
+    "z26-recursos-ot", "z26-equipos", "z26-personal", "z26-insumos", "z26-vehiculos", "inventario-bodega", "consumos-valorizados"];
+  it("están todas en el catálogo, en su área", () => {
+    for (const c of z26) expect(informePorClave(c)?.area).toBe("Bases de datos y costos (Z26)");
+  });
+  it("cubren los campos de la planilla «Filtros para exportar información»", () => {
+    const titulos = (c: string) => informePorClave(c)!.columnas.map((x) => x.titulo).join(" | ");
+    for (const t of ["N° cotización", "Requirente", "Tipo de requirente", "Laboratorio o sucursal", "Fecha de creación", "Plazo", "Estado de la OT",
+      "Ensayo o detalle del trabajo", "Precio cotizado", "Considera OT internas", "N° factura", "Fecha factura", "Monto factura", "Analista responsable SVT"])
+      expect(titulos("z26-cotizaciones")).toContain(t);
+    for (const t of ["N° OT", "Fecha de solicitud", "Fecha de aceptación", "Estado cotización", "Clasificación", "OT internas asociadas"])
+      expect(titulos("z26-ot-externas")).toContain(t);
+    for (const t of ["N° OT interna", "Laboratorio o sucursal requirente", "Costo real", "N° factura"]) expect(titulos("z26-ot-internas")).toContain(t);
+    for (const t of ["Código ensayo", "Nombre ensayo", "Laboratorio asociado", "Equipos y maquinarias", "Personal requerido", "Insumos y accesorios", "Vehículos requeridos"])
+      expect(titulos("z26-ensayos")).toContain(t);
+  });
+  it("el costo cotizado frente al real trae semáforo y queda acotado a los laboratorios del usuario", () => {
+    const def = informePorClave("z26-costo-cotizado-real")!;
+    expect(def.permiso).toBe("costo_real.ver");
+    expect(def.select).toMatch(/'rojo'/);
+    const { sql, args } = armarConsulta(def, { estado: "cerrada" }, T, [LAB]);
+    expect(sql).toContain("o.unidad_principal = ANY($3::uuid[])");
+    expect(sql).toContain("parametro_sistema");
+    expect(args).toEqual([T, "cerrada", [LAB]]);
+  });
+  it("la bodega central se ve desde cualquier laboratorio; las sub-bodegas, solo desde el suyo", () => {
+    const { sql } = armarConsulta(informePorClave("inventario-bodega")!, {}, T, [LAB]);
+    expect(sql).toContain("b.unidad_id = ANY($2::uuid[]) OR b.tipo = 'central'");
   });
 });
 

@@ -19,6 +19,7 @@ interface Reporte {
   area: string;
   descripcion: string;
   legado: string[];
+  pedido?: string | null;
 }
 interface Documento {
   tipo: string;
@@ -67,7 +68,7 @@ function Zona() {
     return cat.areas
       .map((a) => ({
         area: a,
-        reportes: cat.reportes.filter((r) => r.area === a && coincide([r.titulo, r.descripcion, ...r.legado])),
+        reportes: cat.reportes.filter((r) => r.area === a && coincide([r.titulo, r.descripcion, ...r.legado, r.pedido ?? ""])),
       }))
       .filter((g) => g.reportes.length);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -119,7 +120,8 @@ function Zona() {
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>📊 {r.titulo}</div>
                 <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 6 }}>{r.descripcion}</div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                  Reemplaza a: <span className="codigo">{r.legado.join(", ")}</span>
+                  {r.legado.length > 0 ? <>Reemplaza a: <span className="codigo">{r.legado.join(", ")}</span></> : null}
+                  {r.pedido ? <div>Pedido: {r.pedido}</div> : null}
                 </div>
               </Link>
             ))}
