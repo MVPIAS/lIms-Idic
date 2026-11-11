@@ -24,6 +24,7 @@ import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { alcanceDe } from "./alcance";
+import { erroresReemplazo, filasReemplazo } from "./reemplazo";
 
 /**
  * Alta de usuario. Lo usan las dos pantallas:
@@ -75,6 +76,14 @@ const AsignacionCreate = z.object({
   // null o vacío = desde ahora. Sin el nullable, z.coerce convertía null en 01-01-1970.
   vigenteDesde: z.preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.date().optional()),
   vigenteHasta: z.coerce.date().nullable().optional(),
+});
+
+/** Reemplazo temporal (R8): quién reemplaza a quién, vigencia y motivo. */
+const ReemplazoCreate = z.object({
+  reemplazadoId: z.string().uuid(),
+  desde: z.preprocess((v) => (v === null || v === "" ? undefined : v), z.coerce.date().optional()),
+  hasta: z.coerce.date(),
+  motivo: z.string().trim().min(5, "Indique el motivo del reemplazo (mínimo 5 caracteres)").max(500),
 });
 
 const SELECT_USUARIO = {
@@ -402,6 +411,78 @@ export class UsuariosController {
       },
     });
     return { passwordTemporal: passwordTemporal_ };
+  }
+
+  /**
+   * Reemplazos temporales del usuario (R8): asignaciones que recibió por reemplazo,
+   * con a quién reemplaza, la vigencia y el motivo.
+   */
+  @Get(":id/reemplazos")
+  async reemplazos(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.cargar(id, tenantDe(req));
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT ur.id, ur.reemplazo_de AS "reemplazadoId", u.nombre_completo AS reemplazado, ur.motivo_reemplazo AS motivo,
+              ur.vigente_desde AS desde, ur.vigente_hasta AS hasta, r.codigo AS "rolCodigo", r.nombre AS "rolNombre",
+              un.codigo AS "unidadCodigo", (ur.vigente_hasta IS NULL OR ur.vigente_hasta > now()) AND ur.vigente_desde <= now() AS vigente
+         FROM usuario_rol ur JOIN rol r ON r.id = ur.rol_id
+         LEFT JOIN unidad un ON un.id = ur.unidad_id
+         LEFT JOIN usuario u ON u.id = ur.reemplazo_de
+        WHERE ur.usuario_id = $1::uuid AND ur.reemplazo_de IS NOT NULL
+        ORDER BY ur.vigente_desde DESC`, id);
+    return { data: filas };
+  }
+
+  /**
+   * Da al usuario, por un tiempo, los roles vigentes de la persona a la que reemplaza
+   * (y su jefatura, si dirige una unidad). Vencida la fecha, dejan de valer solos.
+   */
+  @Post(":id/reemplazos")
+  async reemplazar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const dto = ReemplazoCreate.parse(body ?? {});
+    const tenantId = tenantDe(req);
+    const usuario = await this.cargar(id, tenantId);
+    const reemplazado = await this.cargar(dto.reemplazadoId, tenantId);
+    const ahora = new Date();
+    const desde = dto.desde ?? ahora;
+    const errores = erroresReemplazo({ reemplazanteId: id, reemplazadoId: dto.reemplazadoId, desde, hasta: dto.hasta, motivo: dto.motivo }, ahora);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    const jefaturas = await this.prisma.$queryRawUnsafe<{ unidadId: string; unidadTipo: string | null }[]>(
+      `SELECT j.unidad_id AS "unidadId", un.tipo AS "unidadTipo" FROM unidad_jefe j JOIN unidad un ON un.id = j.unidad_id
+        WHERE j.usuario_id = $1::uuid AND un.activa`, dto.reemplazadoId);
+    const roles = await this.prisma.rol.findMany({ where: { tenantId: usuario.tenantId }, select: { id: true, codigo: true } });
+    const filas = filasReemplazo({
+      asignaciones: reemplazado.usuarioRoles.map((a: any) => ({
+        rolId: a.rolId, rolCodigo: a.rol.codigo, unidadId: a.unidadId ?? null, vigenteDesde: a.vigenteDesde, vigenteHasta: a.vigenteHasta,
+      })),
+      jefaturas,
+      rolesPorCodigo: new Map(roles.map((r) => [r.codigo, r.id])),
+      yaTiene: usuario.usuarioRoles.map((a: any) => ({ rolId: a.rolId, unidadId: a.unidadId ?? null })),
+      ahora,
+    });
+    if (!filas.length)
+      throw new BadRequestException(`${reemplazado.nombreCompleto} no tiene roles vigentes que ${usuario.nombreCompleto} no tenga ya: no hay nada que traspasar.`);
+    await this.prisma.$transaction(async (tx) => {
+      for (const f of filas)
+        await tx.$executeRawUnsafe(
+          `INSERT INTO usuario_rol (usuario_id, rol_id, unidad_id, vigente_desde, vigente_hasta, asignado_por, reemplazo_de, motivo_reemplazo)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::uuid, $7::uuid, $8)`,
+          id, f.rolId, f.unidadId, desde, dto.hasta, req?.user?.sub ?? null, dto.reemplazadoId, dto.motivo);
+      // Los permisos del token se recalculan en el próximo ingreso o renovación.
+      await tx.usuario.update({ where: { id }, data: { tokenVersion: { increment: 1 } } });
+    });
+    return { data: { roles: filas.map((f) => ({ rol: f.rolCodigo, unidadId: f.unidadId, origen: f.origen })), desde, hasta: dto.hasta } };
+  }
+
+  /** Termina antes un reemplazo: sus asignaciones vencen ahora (quedan en el historial). */
+  @Post(":id/reemplazos/:reemplazadoId/terminar")
+  async terminarReemplazo(@Param("id", ParseUUIDPipe) id: string, @Param("reemplazadoId", ParseUUIDPipe) reemplazadoId: string, @Req() req: any) {
+    await this.cargar(id, tenantDe(req));
+    const n = await this.prisma.$executeRawUnsafe(
+      `UPDATE usuario_rol SET vigente_hasta = now() WHERE usuario_id = $1::uuid AND reemplazo_de = $2::uuid AND (vigente_hasta IS NULL OR vigente_hasta > now())`,
+      id, reemplazadoId);
+    if (!n) throw new NotFoundException("No hay un reemplazo vigente de esa persona.");
+    await this.prisma.usuario.update({ where: { id }, data: { tokenVersion: { increment: 1 } } });
+    return { data: { terminadas: n } };
   }
 
   private async cargar(id: string, tenantId?: string) {

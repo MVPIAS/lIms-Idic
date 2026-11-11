@@ -19,6 +19,7 @@
  * fuerza, la clase. Un solo identificador: el número del certificado. El PDF lo arma
  * plantilla-render (pdf.renderer.ts) respetando los saltos y anclando el pie de cada hoja.
  */
+import { leyendaReemision, type ModalidadReemision } from "../common/leyenda-reemision";
 import { REGISTRO_MOTORES, type ResumenMotor } from "./motores";
 import { decimales2cs, u2cs } from "./metrologia.reglas";
 import { formatoDe, type FormatoIT } from "./certificado/formato-it";
@@ -86,6 +87,8 @@ export interface ContextoCertificado {
   jefeDepto: FirmaCert | null;
   /** Número del certificado que este reemplaza (reemisión del LIMS). */
   reemplazaNumero?: string | null;
+  /** Reemisión del LIMS: modificación (mismo número, versión) o reemplazo (número nuevo), con su motivo. */
+  reemision?: { modalidad: ModalidadReemision; numeroAnterior: string; fechaAnterior?: string | null; motivo?: string | null } | null;
   /** Logo de acreditación configurado (Metrología › Configuración); sin él, solo el texto. */
   logo?: ImagenCert | null;
   /** Esquema o imagen de la calibración (el del proceso o uno propio), con su título. */
@@ -443,7 +446,7 @@ ${membrete(numero, acred, ctx.logo)}
 
   const hoja1 = `
 ${cabecera(1)}
-${reemplaza ? `<p class="reemplaza"><b>ESTE CERTIFICADO REEMPLAZA AL CERTIFICADO N° ${esc(reemplaza)}.</b></p>` : ""}
+${ctx.reemision ? `<p class="reemplaza"><b>${esc(leyendaReemision(ctx.reemision))}</b></p>` : reemplaza ? `<p class="reemplaza"><b>ESTE CERTIFICADO REEMPLAZA AL CERTIFICADO N° ${esc(reemplaza)}.</b></p>` : ""}
 <table class="meta compacta"><tbody>
   <tr><th>Orden de trabajo número</th><td>${v(ins.ot)}</td><th>Fecha</th><td>${dia(ins.fechaOt)}</td><th>Fecha de emisión del certificado</th><td>${cal.emitido_at ? dia(diaInstanteChile(cal.emitido_at)) : "Pendiente"}</td></tr>
 </tbody></table>

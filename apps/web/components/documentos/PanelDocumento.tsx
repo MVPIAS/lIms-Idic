@@ -25,7 +25,7 @@ import {
 import Modal from "./Modal";
 import { useMediosEnvio } from "@/lib/lista-parametro";
 
-type Dialogo = null | "devolver" | "anular" | "entregar" | "correo" | "despachar";
+type Dialogo = null | "devolver" | "anular" | "entregar" | "correo" | "despachar" | "modificar" | "reemplazar";
 
 /** Destinos del despacho (EP-01 6.3, EP-05 8.1; «Remitir a DCO» del BPCH). */
 const DESTINOS: { valor: string; texto: string }[] = [
@@ -376,6 +376,14 @@ export default function PanelDocumento({
           <Link href={`/oficios/nuevo?documento=${documentoId}${doc.ot?.id ? `&ot=${doc.ot.id}` : ""}` as any} className="btn outline">Oficio conductor…</Link>
         )}
         {p.reemitir && <button className="btn outline" disabled={ocupado} onClick={reemitir}>Reemitir nueva versión</button>}
+        {p.modificar && (
+          <button className="btn outline" disabled={ocupado} title="Corregir sin cerrar la OT: mismo número con la versión siguiente y la leyenda «Documento modificado»"
+            onClick={() => { setMotivo(""); setDialogo("modificar"); }}>Modificar…</button>
+        )}
+        {p.reemplazar && (
+          <button className="btn outline" disabled={ocupado} title="Documento de reemplazo con número nuevo y la leyenda «reemplaza al N°»"
+            onClick={() => { setMotivo(""); setDialogo("reemplazar"); }}>Reemplazar…</button>
+        )}
         <span className="spacer" />
         {p.anular && <button className="btn ghost-danger" disabled={ocupado} onClick={() => { setMotivo(""); setDialogo("anular"); }}>Anular</button>}
       </div>
@@ -400,6 +408,50 @@ export default function PanelDocumento({
             />
           )}
         </div>
+      )}
+
+      {(dialogo === "modificar" || dialogo === "reemplazar") && (
+        <Modal
+          titulo={dialogo === "modificar" ? `Modificar ${doc.numero}` : `Reemplazar ${doc.numero}`}
+          onCerrar={() => setDialogo(null)}
+          acciones={
+            <>
+              <button className="btn outline" onClick={() => setDialogo(null)}>Cancelar</button>
+              <button
+                className="btn primary"
+                disabled={ocupado || motivo.trim().length < 5}
+                onClick={async () => {
+                  setOcupado(true);
+                  try {
+                    const r: any = await api.post(`/informes/${documentoId}/modificar`, {
+                      modalidad: dialogo === "modificar" ? "modificacion" : "reemplazo", motivo: motivo.trim(),
+                    });
+                    toast.ok(`${dialogo === "modificar" ? "Versión modificada" : "Documento de reemplazo"} ${r.numero} emitido: queda en firma.`);
+                    setDialogo(null);
+                    onCambio?.();
+                    await cargar();
+                  } catch (e: any) {
+                    toast.error(e.message);
+                  } finally {
+                    setOcupado(false);
+                  }
+                }}
+              >
+                {dialogo === "modificar" ? "Emitir la versión modificada" : "Emitir el reemplazo"}
+              </button>
+            </>
+          }
+        >
+          <p style={{ marginTop: 0 }}>
+            {dialogo === "modificar"
+              ? "Se emite una nueva versión con los datos actuales de la OT y el mismo número (por ejemplo, …-V2). Imprime «Documento modificado» con el motivo y vuelve a pasar por las firmas. El documento actual queda anulado. Solo con la OT abierta."
+              : "Se emite un documento con número nuevo que imprime «Este documento reemplaza al documento N°…» con el motivo, y vuelve a pasar por las firmas. El documento actual queda anulado."}
+          </p>
+          <div className="field">
+            <label htmlFor="doc-mod">Motivo <span className="req">*</span></label>
+            <textarea id="doc-mod" rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)} maxLength={1000} />
+          </div>
+        </Modal>
       )}
 
       {(dialogo === "devolver" || dialogo === "anular") && (

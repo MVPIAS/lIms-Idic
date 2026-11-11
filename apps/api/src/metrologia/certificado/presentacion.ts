@@ -27,7 +27,14 @@ export const FORMATOS_CERTIFICADO: Record<string, { valor: string; etiqueta: str
     { valor: "estandar", etiqueta: "Estándar (hoja «Certificado» del libro)" },
     { valor: "astm", etiqueta: "Termómetro de fabricación ASTM (hoja «Certificado ASTM»)" },
   ],
+  // LNF (sesión del 03-11, R9): libro LCPNF-000.00 rev 23, hojas «CE DAkks» y «CIPM-MRA».
+  "LCPNF-IT01": [
+    { valor: "estandar", etiqueta: "Estándar (hojas «CE DAkks» y «ANEXO CE», 6 páginas + anexo)" },
+    { valor: "cipm_mra", etiqueta: "Con la declaración CIPM MRA de Laboratorio Designado (hoja 7 «CIPM-MRA»)" },
+  ],
 };
+/** Texto de un formato para la bitácora. */
+const TEXTO_FORMATO: Record<string, string> = { astm: "termómetro de fabricación ASTM", cipm_mra: "con la declaración CIPM MRA" };
 export const formatosDe = (proceso: string) => FORMATOS_CERTIFICADO[proceso] ?? [];
 
 export interface Presentacion {
@@ -183,7 +190,7 @@ export function resumenCambios(antes: Presentacion, despues: Presentacion): stri
   if (antes.observaciones !== despues.observaciones) c.push(despues.observaciones == null ? "Observaciones: textos automáticos" : "Observaciones editadas");
   if (JSON.stringify(antes.campos) !== JSON.stringify(despues.campos)) c.push("Condiciones de la IT actualizadas");
   if ((antes.formato ?? "estandar") !== (despues.formato ?? "estandar"))
-    c.push(`Formato del certificado: ${despues.formato === "astm" ? "termómetro de fabricación ASTM" : "estándar"}`);
+    c.push(`Formato del certificado: ${TEXTO_FORMATO[despues.formato ?? ""] ?? "estándar"}`);
   if (antes.esquemaModo !== despues.esquemaModo || antes.esquemaPie !== despues.esquemaPie)
     c.push(`Esquema: ${{ defecto: "el del proceso", propio: "propio de la calibración", ninguno: "sin esquema" }[despues.esquemaModo]}`);
   return c.join(" · ");

@@ -149,4 +149,5 @@ align_tarifas_viatico_vehiculo.sql
 align_evaluacion_ensayo.sql
 align_bpch_requerimiento.sql
 align_ibis_testigos.sql
+align_sesiones_s2.sql
 align_cierre_permisos.sql

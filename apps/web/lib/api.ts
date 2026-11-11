@@ -100,6 +100,12 @@ export const api = {
     guardarSesion(r);
     return r;
   },
+  /** Perfil activo (jefaturas duales, R1): guarda la sesión nueva con los permisos de ese perfil. */
+  elegirPerfil: async (unidadId: string | null) => {
+    const r = await request<Sesion>("/auth/perfil", { method: "POST", body: JSON.stringify({ unidadId }) });
+    guardarSesion(r);
+    return r;
+  },
   logout: () => {
     if (typeof window !== "undefined") {
       localStorage.removeItem("lims_token");
