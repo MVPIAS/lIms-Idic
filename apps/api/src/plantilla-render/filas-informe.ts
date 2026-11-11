@@ -49,6 +49,8 @@ export interface ResultadoParaInforme {
   /** Ensayo derivado a otro laboratorio por orden interna (B-075): quién lo hizo y con qué orden. */
   derivadoA?: { laboratorio: string; ordenInterna: string | null } | null;
   tipoDato?: string | null;
+  /** con_condicion (o null) | sin_condicion | solo_resultado (laboratorio/especificacion.ts). */
+  evaluacion?: string | null;
   valorNumerico?: number | null;
   valorTexto?: string | null;
   resultadoFinal?: number | null;
@@ -147,7 +149,14 @@ const textoCota = (v: string | null | undefined): string =>
   vacio(v) ? "" : String(v).trim().replace(/^([+-]?\d+)\.(\d+)$/, "$1,$2");
 
 /** ¿El ensayo tiene requisito (alguna cota o texto)? */
-export function tieneRequisito(r: Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito">): boolean {
+/** Celda sin valor por decisión (no por falta de dato). */
+export const GUION_INFORME = "—";
+
+export function tieneRequisito(
+  r: Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito"> & { evaluacion?: string | null },
+): boolean {
+  // «Solo resultado»: el requisito que traiga el catálogo no se informa.
+  if (r.evaluacion === "solo_resultado") return false;
   return [r.limiteInf, r.nominal, r.limiteSup, r.requisito].some((v) => !vacio(v));
 }
 
@@ -284,8 +293,12 @@ const etiquetaMuestra = (r: ResultadoParaInforme) =>
   `Muestra ${r.muestraCodigo}${vacio(r.muestraNombre) ? "" : ` · ${String(r.muestraNombre).trim()}`}`;
 
 function fila(r: ResultadoParaInforme, modalidad: Modalidad): FilaInforme {
+  const soloResultado = r.evaluacion === "solo_resultado";
+  // Sin condición o solo resultado: no se imprime Cumple / No cumple (guion).
+  const sinCondicion = soloResultado || r.evaluacion === "sin_condicion";
+  if (soloResultado) r = { ...r, limiteInf: null, nominal: null, limiteSup: null, requisito: null };
   const conRequisito = tieneRequisito(r);
-  const v = normalizarVeredicto(r.veredicto);
+  const v = sinCondicion ? null : normalizarVeredicto(r.veredicto);
   return {
     id: r.id,
     muestra: r.muestraCodigo,
@@ -301,12 +314,12 @@ function fila(r: ResultadoParaInforme, modalidad: Modalidad): FilaInforme {
         : ""),
     metodo: textoMetodo(r),
     unidad: vacio(r.unidad) ? "" : String(r.unidad).trim(),
-    requisito: conRequisito ? textoRequisito(r) : "No especificado",
+    requisito: conRequisito ? textoRequisito(r) : soloResultado ? GUION_INFORME : "No especificado",
     requisitoOrigen: conRequisito ? (r.especOrigen === "orden" ? "orden" : "catalogo") : null,
     resultado: textoResultado(r),
     observacion: vacio(r.observacion) ? "" : String(r.observacion).trim(),
     veredicto: modalidad === "cumplimiento" ? v : null,
-    veredictoTexto: modalidad === "cumplimiento" ? (v ? etiquetaVeredicto(v) : "Pendiente") : "",
+    veredictoTexto: modalidad === "cumplimiento" ? (sinCondicion ? GUION_INFORME : v ? etiquetaVeredicto(v) : "Pendiente") : "",
     desviacion: r.desviacion === null || r.desviacion === undefined ? "" : fmtNum(r.desviacion),
     cv: r.cv === null || r.cv === undefined ? "" : fmtNum(r.cv, 2),
     sello: vacio(r.selloNumero) ? "" : String(r.selloNumero).trim(),

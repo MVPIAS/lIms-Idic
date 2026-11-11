@@ -23,7 +23,7 @@
 import { evaluarFormula, FormulaError } from "../common/formula";
 import { leerReplicas } from "./replicas";
 import { traducirFormula } from "./formula-legado";
-import { esNumeroTexto, type TipoDato } from "./especificacion";
+import { esNumeroTexto, sinCondicion, type TipoDato } from "./especificacion";
 import { leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado, type Veredicto } from "./veredicto";
 import { aplicarFactor, expresionConFactor, type Factor } from "./factor";
 import {
@@ -38,6 +38,8 @@ export class CapturaError extends Error {}
 
 export interface EspecCaptura {
   tipoDato: TipoDato;
+  /** con_condicion | sin_condicion | solo_resultado: en los dos últimos el veredicto es «informativo». */
+  evaluacion?: string | null;
   limiteInf?: string | null;
   nominal?: string | null;
   limiteSup?: string | null;
@@ -135,6 +137,14 @@ function sinVariablesReservadas(vars: Record<string, number> | undefined) {
  *   · segunda condición: cumple solo si cumplen las dos.
  */
 export function calcularCaptura(espec: EspecCaptura, e: EntradaCaptura): CalculoCaptura {
+  // Requisito sin condición o solo resultado: se calcula el valor (fórmula,
+  // réplicas, factor) sin contrastarlo; un ensayo de atributo admite texto libre.
+  if (sinCondicion(espec.evaluacion)) {
+    const libre: EspecCaptura = { ...espec, tipoDato: "numerico", limiteInf: null, limiteSup: null, planClases: null, condicion2: null };
+    const calc = calcularCapturaSimple(libre, e.atributo && (e.valor == null || String(e.valor).trim() === "")
+      ? { ...e, valor: e.atributo === "cumple" ? "Cumple" : "No cumple" } : e);
+    return { ...calc, veredicto: "informativo", explicacion: null };
+  }
   const calc = calcularCapturaSimple(espec, e);
   if (espec.tipoDato === "atributo") return calc;
   let veredicto = calc.veredicto;

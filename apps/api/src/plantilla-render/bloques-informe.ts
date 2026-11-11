@@ -121,7 +121,7 @@ export function bloqueResultados(est: EstructuraInforme, cfg: ConfigInforme): st
   if (est.hayRequisitoDeOrden)
     notas.push("* Requisito fijado para esta orden de trabajo (completa o reemplaza el del catálogo).");
   if (est.mostrarEstadisticas) notas.push("DE: desviación estándar; CV: coeficiente de variación de las réplicas.");
-  if (cumplimiento && est.secciones.some((s) => s.componentes.some((c) => c.filas.some((f) => f.requisitoOrigen === null))))
+  if (cumplimiento && est.secciones.some((s) => s.componentes.some((c) => c.filas.some((f) => f.requisito === "No especificado"))))
     notas.push("«No especificado»: el ensayo no tiene requisito; el resultado es informativo.");
   if (notas.length) html += `<p class="nota">${notas.map(escapeHtml).join("<br>")}</p>`;
   return html;

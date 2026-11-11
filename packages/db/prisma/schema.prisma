@@ -1108,6 +1108,8 @@ model Resultado {
   asignadoA        String?   @map("asignado_a") @db.Uuid
   /// Formulario de captura estándar (align_flujo_laboratorio.sql §7).
   tipoDato         String?   @map("tipo_dato") @db.VarChar(12)
+  /// con_condicion (o null) | sin_condicion | solo_resultado (align_evaluacion_ensayo.sql)
+  evaluacion       String?   @db.VarChar(16)
   requisito        String?
   observacion      String?
   lecturas         Json?
@@ -1605,6 +1607,8 @@ model CatEspecificacion {
   requisitos String?
   texto      String?
   unidad     String?   @db.VarChar(60)
+  /// con_condicion (o null) | sin_condicion | solo_resultado
+  evaluacion String?   @db.VarChar(16)
   dedupeKey  String    @map("dedupe_key") @db.VarChar(40)
   activo     Boolean   @default(true)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz

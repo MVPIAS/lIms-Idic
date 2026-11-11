@@ -432,6 +432,8 @@ const CatEspecificacionCreate = z.object({
   requisitos: z.string().optional(),
   texto: z.string().optional(),
   unidad: z.string().max(60).optional(),
+  /** con_condicion | sin_condicion | solo_resultado (laboratorio/especificacion.ts). */
+  evaluacion: z.enum(["con_condicion", "sin_condicion", "solo_resultado"]).nullable().optional(),
   dedupeKey: z.string().min(1).max(40),
 });
 @ApiTags("cat-especificaciones") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/especificaciones")
