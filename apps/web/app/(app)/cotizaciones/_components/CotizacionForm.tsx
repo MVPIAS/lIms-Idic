@@ -14,13 +14,21 @@
  *    vigente (neto para un particular) o, si el ensayo no está en ella, su ficha.
  *  · «Válida hasta» automática y de solo lectura (IT DCO-PG01-P01-IT02).
  *  · Sin «Tipo cotización» (Extensión/Comprensión) y sin descuento.
+ *  · Sesiones de preproducción (frente S1): tipo de cliente de ESTA cotización
+ *    (reunión 2), centro de costo emisor (reunión 2), con o sin costo (reunión 1),
+ *    muestras con su producto antes de los ensayos (reuniones 3 y 5), condiciones
+ *    hasta 5.000 caracteres, valores netos (IVA al final) y pre-cotización con
+ *    valores referenciales (reunión 10).
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { money, fechaDia, rut as fmtRut } from "@/lib/format";
 import { pedir, GRUPOS_CC, hoyISO, type ConfigCotizacion, type Opcion } from "./comercial";
 
-type Cliente = { id: string; razonSocial?: string; rut?: string; tipo?: string | null };
+type Cliente = { id: string; razonSocial?: string; rut?: string; tipo?: string | null; bloqueado?: boolean | null; motivoBloqueo?: string | null };
+/** Muestra de la cotización (reunión 5): producto del catálogo elegido antes que los ensayos (reunión 3). */
+type MuestraForm = { descripcion: string; catElementoId: string | null; productoTexto: string | null; plazoDias: string };
+type ElementoCat = { id: string; codigo: string; nombre: string; familia?: { nombre?: string } | null };
 type Ensayo = { id: string; codigo: string; nombre: string; precio: number | string };
 
 export type LineaForm = {
@@ -47,6 +55,10 @@ export type LineaForm = {
   inst?: Instrumento;
   /** Ensayo sin precio en lista ni ficha: precio manual, en la moneda de la cotización, con motivo obligatorio. */
   manual?: { precio: string; motivo: string };
+  /** Muestra de la cotización a la que pertenece (reunión 5); sin ella, línea general. */
+  muestraN?: number | null;
+  /** Pre-cotización (reunión 10): valor referencial, descripción y monto, sin ensayo. */
+  ref?: { precio: number };
 };
 
 /** Largo mínimo del motivo de un precio manual (igual que la API, precio-ficha.ts). */
@@ -116,11 +128,16 @@ type Props = {
   oportunidadId?: string;
   /** Cliente con que se precarga (el de la oportunidad). */
   clienteInicialId?: string;
+  /** Reunión 10: crear una pre-cotización (valores referenciales). */
+  precotizacion?: boolean;
 };
 
-const MAX_COND = 2000;
+/** Condiciones adicionales: 5.000 caracteres (reuniones 1 y 2); la API manda el valor en /cotizaciones/config. */
+const MAX_COND_DEF = 5000;
 
-export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, oportunidadId, clienteInicialId }: Props) {
+export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, oportunidadId, clienteInicialId, precotizacion }: Props) {
+  // Reunión 10: la pre-cotización solo lleva valores referenciales (sin ensayos ni muestras).
+  const precot = modo === "crear" ? !!precotizacion : inicial?.tipoDocumento === "precotizacion";
   const [cfg, setCfg] = useState<ConfigCotizacion | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -129,7 +146,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   const [q, setQ] = useState("");
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [cliente, setCliente] = useState<Cliente | null>(inicial?.cliente ?? null);
-  const [tipoCliente, setTipoCliente] = useState<string>(inicial?.cliente?.tipo ?? "");
+  // Reunión 2: el tipo de cliente se elige en cada cotización (por defecto, el de la ficha).
+  const [tipoCliente, setTipoCliente] = useState<string>(inicial?.tipoClienteCodigo ?? inicial?.cliente?.tipo ?? "");
   const [msgTipo, setMsgTipo] = useState("");
 
   // Cabecera
@@ -150,6 +168,22 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   // Plazo de entrega comprometido (días corridos desde la recepción): fija la fecha de compromiso de la OT.
   const [plazoDias, setPlazoDias] = useState<string>(inicial?.plazoEntregaDias != null ? String(inicial.plazoEntregaDias) : "");
   const [obsInternas, setObsInternas] = useState<string>(inicial?.observacionesInternas ?? "");
+  // Reunión 2: centro de costo de la sucursal que emite (vacío = Casa Matriz, Depto. Comercial).
+  const [emisorId, setEmisorId] = useState<string>(inicial?.centroCostoEmisorId ?? "");
+  // Reunión 1: OT con costo (factura) o sin costo (valorización estadística), desde el inicio.
+  const [conCobro, setConCobro] = useState<boolean>(inicial?.conCobro !== false);
+  // Reunión 5: muestras de la cotización y su producto (reunión 3).
+  const [muestras, setMuestras] = useState<MuestraForm[]>(() =>
+    (inicial?.muestras ?? []).map((m: any) => ({ descripcion: m.descripcion ?? "", catElementoId: m.catElementoId ?? null, productoTexto: m.productoTexto ?? null, plazoDias: m.plazoDias ? String(m.plazoDias) : "" })),
+  );
+  const [destino, setDestino] = useState<string>("");
+  const [qProducto, setQProducto] = useState("");
+  const [productos, setProductos] = useState<ElementoCat[]>([]);
+  const [productoPara, setProductoPara] = useState<number | null>(null);
+  const [ensayosProducto, setEnsayosProducto] = useState<Ensayo[]>([]);
+  // Reunión 10: valor referencial por agregar.
+  const [rDesc, setRDesc] = useState("");
+  const [rValor, setRValor] = useState("");
   // Solicitud (EP-01/02 0.1): quién pide y con qué documento.
   const sol0 = inicial?.solicitud ?? {};
   const [contactos, setContactos] = useState<Contacto[]>([]);
@@ -206,8 +240,11 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   // Líneas
   const [lineas, setLineas] = useState<LineaForm[]>(() =>
     (inicial?.lineas ?? []).map((l: any) =>
-      l.catEnsayoId || l.tipo === "producto"
+      l.tipo === "referencial"
+        ? { descripcion: l.descripcion ?? "", cantidad: l.cantidad ?? 1, ref: { precio: Number(l.precioUnitario) } }
+        : l.catEnsayoId || l.tipo === "producto"
         ? {
+            muestraN: l.muestraN ?? null,
             catEnsayoId: l.catEnsayoId ?? undefined,
             codigo: l.ensayoCodigo ?? undefined,
             descripcion: l.descripcion ?? "",
@@ -242,6 +279,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   );
 
   const opts = (cat: string): Opcion[] => cfg?.parametros?.[cat] ?? [];
+  const MAX_COND = cfg?.condicionesMax ?? MAX_COND_DEF;
 
   // --- Configuración -----------------------------------------------------------
   useEffect(() => {
@@ -282,6 +320,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     if (!clienteId) { setValidez(null); return; }
     const qs = new URLSearchParams({ clienteId, fecha: fechaEmision });
     if (centroCostoId) qs.set("centroCostoId", centroCostoId);
+    if (tipoCliente) qs.set("tipoCliente", tipoCliente);
     pedir<any>("GET", `/cotizaciones/validez?${qs}`)
       .then((v) => setValidez({ validaHasta: v.validaHasta, explicacion: v.explicacion }))
       .catch(() => setValidez(null));
@@ -292,17 +331,18 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   const [precios, setPrecios] = useState<Record<string, PrecioEnsayo>>({});
   const [reglaPrecio, setReglaPrecio] = useState("");
   // Frente f6: el precio depende también de la moneda (si el ensayo está en listas de varias monedas, manda la de la cotización).
-  useEffect(() => { setPrecios({}); setReglaPrecio(""); }, [clienteId, moneda]);
+  useEffect(() => { setPrecios({}); setReglaPrecio(""); }, [clienteId, moneda, tipoCliente]);
   // Una línea guardada conserva su precio solo en la moneda en que se cotizó; si cambia la moneda, se vuelve a valorizar.
   const conserva = (l: LineaForm) => !!l.guardada && l.guardada.moneda === moneda;
   const idsPrecio = useMemo(
-    () => [...new Set([...ensayos.map((e) => e.id), ...lineas.filter((l) => l.catEnsayoId && !conserva(l)).map((l) => l.catEnsayoId!)])].sort().join(","),
+    () => [...new Set([...ensayos.map((e) => e.id), ...ensayosProducto.map((e) => e.id), ...lineas.filter((l) => l.catEnsayoId && !conserva(l)).map((l) => l.catEnsayoId!)])].sort().join(","),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ensayos, lineas, moneda],
+    [ensayos, ensayosProducto, lineas, moneda],
   );
   useEffect(() => {
     if (!clienteId || !idsPrecio) return;
     const qs = new URLSearchParams({ clienteId, ids: idsPrecio, fecha: fechaEmision, moneda });
+    if (tipoCliente) qs.set("tipoCliente", tipoCliente);
     pedir<any>("GET", `/cotizaciones/precios-ensayo?${qs}`)
       .then((r) => { if ((r?.moneda ?? "CLP") !== moneda) return; setPrecios((p) => ({ ...p, ...(r?.precios ?? {}) })); setReglaPrecio(r?.regla ?? ""); })
       .catch(() => undefined);
@@ -371,6 +411,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   const precioEnMoneda = (l: LineaForm): number => {
     if (l.heredada) return l.heredada.precioUnitario;
     if (l.gasto) return l.gasto.precio;
+    if (l.ref) return l.ref.precio;
     if (conserva(l)) return l.guardada!.precio;
     if (sinPrecio(l)) return redondear(precioManual(l), moneda);
     const base = l.precioBase ?? 0;
@@ -410,10 +451,14 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       setCondiciones((delCliente ? `${c.condicionesBase}\n${delCliente}` : c.condicionesBase).slice(0, MAX_COND));
   }
 
-  async function cambiarTipoCliente(codigo: string) {
-    const anterior = tipoCliente;
+  /** Reunión 2: el tipo se elige en ESTA cotización; la ficha del cliente solo cambia si se pide. */
+  function cambiarTipoCliente(codigo: string) {
     setTipoCliente(codigo);
-    setMsgTipo("");
+    setMsgTipo(codigo && cliente?.tipo && codigo !== cliente.tipo ? "Distinto del tipo de la ficha: vale solo para esta cotización." : "");
+  }
+  async function guardarTipoEnFicha() {
+    const anterior = cliente?.tipo ?? "";
+    const codigo = tipoCliente;
     if (!cliente?.id || !codigo) return;
     try {
       // Ruta propia de la reclasificación (exige cotizacion.crear, no la edición
@@ -422,17 +467,67 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       setCliente({ ...cliente, tipo: codigo });
       setMsgTipo("Tipo de cliente actualizado en la ficha del cliente.");
     } catch (e: any) {
-      setTipoCliente(anterior);
+      setTipoCliente(tipoCliente || anterior);
       setMsgTipo(`No se pudo actualizar el tipo del cliente: ${e.message}`);
     }
   }
 
   function agregarEnsayo(e: Ensayo) {
     const p = precioDe(e);
-    setLineas((ls) => [
-      ...ls,
-      { catEnsayoId: e.id, codigo: e.codigo, descripcion: `${e.codigo} · ${e.nombre}`, cantidad: 1, precioBase: p.precio, monedaPrecio: p.moneda, bloqueo: p.bloqueo, origen: p.origen },
-    ]);
+    // Reunión 5: el ensayo va a la muestra elegida, a todas las muestras o queda general.
+    const ns: (number | null)[] = destino === "todas" ? muestras.map((_, i) => i + 1) : [destino ? Number(destino) : null];
+    setLineas((ls) => {
+      const nuevas = ns
+        .filter((n) => !ls.some((l) => l.catEnsayoId === e.id && (l.muestraN ?? null) === n))
+        .map((n) => ({ catEnsayoId: e.id, codigo: e.codigo, descripcion: `${e.codigo} · ${e.nombre}`, cantidad: 1, precioBase: p.precio, monedaPrecio: p.moneda, bloqueo: p.bloqueo, origen: p.origen, muestraN: n }));
+      if (!nuevas.length) setError(`El ensayo ${e.codigo} ya está en ${ns.length > 1 ? "todas las muestras" : ns[0] ? `la muestra ${ns[0]}` : "la cotización"}.`);
+      return [...ls, ...nuevas];
+    });
+  }
+  /* --- Muestras (reunión 5) y producto antes de los ensayos (reunión 3) --- */
+  const setMuestra = (i: number, x: Partial<MuestraForm>) => setMuestras((ms) => ms.map((m, j) => (j === i ? { ...m, ...x } : m)));
+  function agregarMuestra() {
+    setMuestras((ms) => [...ms, { descripcion: "", catElementoId: null, productoTexto: null, plazoDias: "" }]);
+    setDestino(String(muestras.length + 1));
+  }
+  function quitarMuestra(i: number) {
+    const n = i + 1;
+    setMuestras((ms) => ms.filter((_, j) => j !== i));
+    // Las líneas de esa muestra se quitan; las de las siguientes se renumeran.
+    setLineas((ls) => ls.filter((l) => l.muestraN !== n).map((l) => (l.muestraN && l.muestraN > n ? { ...l, muestraN: l.muestraN - 1 } : l)));
+    setDestino("");
+  }
+  useEffect(() => {
+    if (productoPara === null) return;
+    const t = setTimeout(() => {
+      pedir<any>("GET", `/cascada/elementos?q=${encodeURIComponent(qProducto)}`)
+        .then((r) => setProductos(Array.isArray(r) ? r : r?.data ?? []))
+        .catch(() => setProductos([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [qProducto, productoPara]);
+  // Ensayos que aplican al producto de la muestra de destino (panel del catálogo).
+  const productoDestino = destino && destino !== "todas" ? muestras[Number(destino) - 1]?.catElementoId ?? null : null;
+  useEffect(() => {
+    if (!productoDestino) { setEnsayosProducto([]); return; }
+    pedir<any[]>("GET", `/cascada/elementos/${productoDestino}/panel`)
+      .then((filas) => {
+        const vistos = new Set<string>();
+        setEnsayosProducto(
+          (filas ?? [])
+            .filter((f) => f.ensayoId && !vistos.has(f.ensayoId) && vistos.add(f.ensayoId))
+            .map((f) => ({ id: f.ensayoId, codigo: f.ensayoCodigo, nombre: f.ensayoNombre, precio: f.precio ?? 0 })),
+        );
+      })
+      .catch(() => setEnsayosProducto([]));
+  }, [productoDestino]);
+  function agregarReferencial() {
+    const valor = Number(String(rValor).replace(/\./g, "").replace(",", "."));
+    if (!rDesc.trim()) return setError("Describa el valor referencial (p. ej. «Campaña de ensayos en terreno, 10 días»).");
+    if (!(valor > 0)) return setError("Indique el monto referencial.");
+    setError("");
+    setLineas((ls) => [...ls, { descripcion: rDesc.trim(), cantidad: 1, ref: { precio: valor } }]);
+    setRDesc(""); setRValor("");
   }
   function agregarGasto() {
     const valor = Number(String(gValor).replace(",", "."));
@@ -450,8 +545,12 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   async function guardar() {
     setError("");
     if (!cliente?.id) return setError("Seleccione el cliente.");
+    if (cliente.bloqueado) return setError(`El cliente está bloqueado por el Jefe del Departamento Comercial${cliente.motivoBloqueo ? ` (${cliente.motivoBloqueo})` : ""}: no se le pueden emitir cotizaciones.`);
+    if (precot && !lineas.some((l) => l.ref)) return setError("Indique al menos un valor referencial (descripción y monto).");
+    const plazoMal = muestras.findIndex((m) => m.plazoDias.trim() && !(Number.isInteger(Number(m.plazoDias)) && Number(m.plazoDias) >= 1 && Number(m.plazoDias) <= 730));
+    if (plazoMal >= 0) return setError(`Muestra ${plazoMal + 1}: el plazo debe ser un número entero de días entre 1 y 730.`);
     // Sin ensayos se guarda la cabecera: el laboratorio los agrega al responder (cotización compartida).
-    if (lineas.some((l) => !l.heredada && !l.gasto && !tienePrecio(l)))
+    if (lineas.some((l) => !l.heredada && !l.gasto && !l.ref && !tienePrecio(l)))
       return setError(`Hay ensayos sin precio en la lista vigente ni en su ficha de costos: indique el precio manual y su motivo (mínimo ${MIN_MOTIVO_MANUAL} caracteres).`);
     const mezcla = lineas.map(bloqueoDe).find(Boolean);
     if (mezcla) return setError(mezcla);
@@ -476,6 +575,20 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       condicionesAdicionales: condiciones.trim() || null,
       plazoEntregaDias: plazo,
       observacionesInternas: obsInternas.trim() || null,
+      tipoClienteCodigo: tipoCliente || null,
+      centroCostoEmisorId: emisorId || null,
+      conCobro,
+      ...(precot
+        ? {}
+        : {
+            muestras: muestras.map((m) => ({
+              descripcion: m.descripcion.trim() || null,
+              catElementoId: m.catElementoId,
+              productoTexto: m.productoTexto,
+              plazoDias: m.plazoDias.trim() ? Number(m.plazoDias) : null,
+            })),
+          }),
+      ...(modo === "crear" && precot ? { tipoDocumento: "precotizacion" } : {}),
       solicitud: {
         solicitanteContactoId: solContactoId || null,
         solicitanteNombre: solNombre.trim() || null,
@@ -485,7 +598,9 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       },
       ...(modo === "crear" && oportunidadId ? { oportunidadId } : {}),
       lineas: lineas.map((l) =>
-        l.gasto
+        l.ref
+          ? { descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: l.ref.precio }
+          : l.gasto
           ? { tipo: l.gasto.tipo, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: l.gasto.precio }
           : l.heredada
           ? { tipo: l.heredada.tipo === "comprension" ? "otros" : l.heredada.tipo, descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: l.heredada.precioUnitario }
@@ -496,6 +611,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
                 cantidad: Number(l.cantidad) || 1,
                 precioUnitario: precioEnMoneda(l),
                 ...(sinPrecio(l) ? { motivoPrecioManual: l.manual?.motivo.trim() ?? null } : {}),
+                muestraN: l.muestraN ?? null,
                 ...(esMetrologia ? cuerpoInst(l.inst) : {}),
               }
             : { tipo: "producto", descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: precioEnMoneda(l) },
@@ -559,14 +675,19 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           )}
           <div className="field">
             <label htmlFor="cot-tipo-cliente">Tipo de cliente</label>
-            <select id="cot-tipo-cliente" value={tipoCliente} disabled={!cliente} onChange={(e) => cambiarTipoCliente(e.target.value)}>
+            <select id="cot-tipo-cliente" value={tipoCliente} disabled={!cliente} onChange={(e) => cambiarTipoCliente(e.target.value)} title="Un mismo cliente puede venir como Ejército, particular o proveedor: el tipo se elige en cada cotización">
               <option value="">— sin tipo —</option>
               {tipoInactivo && <option value={tipoCliente}>{tipoCliente} (valor antiguo)</option>}
               {opts("tipo_cliente").map((o) => <option key={o.codigo} value={o.codigo}>{o.etiqueta}</option>)}
             </select>
             <small style={{ color: msgTipo.startsWith("No") ? "var(--red)" : "var(--muted)" }}>
-              {msgTipo || (tipoInactivo ? "Tipo antiguo: reclasifique al cliente (define la validez)." : "Define la regla de validez. Se guarda en la ficha del cliente.")}
+              {msgTipo || (tipoInactivo ? "Tipo antiguo: elija uno vigente (define la validez y el recargo)." : "De esta cotización: define la validez y el recargo del precio.")}
             </small>
+            {cliente && tipoCliente && tipoCliente !== (cliente.tipo ?? "") && !tipoInactivo && (
+              <button type="button" className="btn-link" style={{ background: "none", border: 0, padding: 0, color: "var(--accent)", textDecoration: "underline", cursor: "pointer", fontSize: 12, textAlign: "left" }} onClick={guardarTipoEnFicha}>
+                Guardar también en la ficha del cliente
+              </button>
+            )}
           </div>
 
           <div className="field">
@@ -581,6 +702,22 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
                 ) : null,
               )}
             </select>
+          </div>
+          <div className="field">
+            <label htmlFor="cot-emisor">Centro de costo emisor</label>
+            <select id="cot-emisor" value={emisorId} onChange={(e) => setEmisorId(e.target.value)}>
+              <option value="">Casa Matriz · Depto. Comercial</option>
+              {(cfg?.centrosCosto ?? []).filter((c) => c.tipo !== "laboratorio").map((c) => <option key={c.id} value={c.id}>{c.nombre} ({c.codigo})</option>)}
+            </select>
+            <small style={{ color: "var(--muted)" }}>Sucursal que emite la cotización.</small>
+          </div>
+          <div className="field">
+            <label htmlFor="cot-cobro">Costo de la OT</label>
+            <select id="cot-cobro" value={conCobro ? "si" : "no"} onChange={(e) => setConCobro(e.target.value === "si")}>
+              <option value="si">Con costo (se factura)</option>
+              <option value="no">Sin costo (valorización estadística)</option>
+            </select>
+            <small style={{ color: "var(--muted)" }}>{conCobro ? "La OT se factura al cerrar." : "La OT registra horas e insumos, pero no se factura."}</small>
           </div>
           <div className="field">
             <label>Formato <span className="req">*</span></label>
@@ -666,6 +803,11 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             </div>
             <small style={{ color: "var(--muted)" }}>La referencia de la cotización se completa con el documento: «OF Nº …» u «Correo de fecha …».</small>
           </fieldset>
+          {cliente?.bloqueado && (
+            <div className="alert warn" role="alert" style={{ gridColumn: "1 / -1", margin: 0 }}>
+              <b>Cliente bloqueado</b> por el Jefe del Departamento Comercial{cliente.motivoBloqueo ? `: ${cliente.motivoBloqueo}` : ""}. No se le pueden emitir cotizaciones hasta que el Jefe DCO lo desbloquee.
+            </div>
+          )}
           {condCli && (condCli.lista || condCli.descuentoPct > 0 || condCli.condiciones) && (
             <div className={`alert ${condCli.lista && !condCli.lista.vigente ? "warn" : "info"}`} role="note" style={{ gridColumn: "1 / -1", margin: 0 }}>
               <b>Condiciones especiales del cliente</b>
@@ -696,9 +838,118 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
         </div>
       </div>
 
+      {/* ---------------- Pre-cotización: valores referenciales (reunión 10) ---------------- */}
+      {precot && (
+        <div className="card">
+          <h2>Valores referenciales <span className="right">sin ensayos ni muestras · no genera OT</span></h2>
+          <div className="form-grid cols-4">
+            <div className="field" style={{ gridColumn: "span 2" }}>
+              <label htmlFor="r-desc">Descripción</label>
+              <input id="r-desc" value={rDesc} maxLength={2000} onChange={(e) => setRDesc(e.target.value)} placeholder="p. ej. Evaluación técnica del vehículo, 10 días en terreno" />
+            </div>
+            <div className="field">
+              <label htmlFor="r-valor">Monto referencial neto ({moneda})</label>
+              <input id="r-valor" inputMode="decimal" value={rValor} onChange={(e) => setRValor(e.target.value)} />
+            </div>
+            <div className="field" style={{ justifyContent: "flex-end" }}>
+              <button type="button" className="btn outline sm" onClick={agregarReferencial}>Agregar valor</button>
+            </div>
+          </div>
+          <table className="data" style={{ marginTop: 10 }}>
+            <thead><tr><th>Descripción</th><th className="num">Cant.</th><th className="num">Monto neto ({moneda})</th><th className="num">Subtotal</th><th></th></tr></thead>
+            <tbody>
+              {lineas.map((l, i) => (
+                <tr key={i}>
+                  <td>{l.descripcion}</td>
+                  <td className="num"><input type="number" min={1} step={1} value={l.cantidad} onChange={(e) => setCant(i, Math.max(1, Math.round(Number(e.target.value) || 1)))} style={{ width: 64, textAlign: "right" }} /></td>
+                  <td className="num">{money(precioEnMoneda(l), moneda)}</td>
+                  <td className="num">{money(redondear(precioEnMoneda(l) * (Number(l.cantidad) || 0), moneda), moneda)}</td>
+                  <td className="num"><button className="btn outline sm" onClick={() => quitar(i)} aria-label="Quitar">✕</button></td>
+                </tr>
+              ))}
+              {!lineas.length && <tr><td colSpan={5} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Agregue al menos un valor referencial.</td></tr>}
+            </tbody>
+            {lineas.length > 0 && (
+              <tfoot><tr><td colSpan={3} className="num" style={{ fontWeight: 700 }}>Total neto referencial (el IVA se agrega al final)</td><td className="num" style={{ fontWeight: 800 }}>{money(total, moneda)}</td><td /></tr></tfoot>
+            )}
+          </table>
+        </div>
+      )}
+
+      {/* ---------------- Muestras (reuniones 3 y 5) ---------------- */}
+      {!precot && (
+        <div className="card">
+          <h2>Muestras <span className="right">opcional · elija el producto de cada muestra antes de sus ensayos</span></h2>
+          {muestras.length === 0 && (
+            <p className="hint" style={{ margin: "0 0 8px" }}>Sin muestras registradas: los ensayos se cotizan para la cotización completa. Agregue muestras para indicar cuántas trae el cliente y qué ensayos lleva cada una.</p>
+          )}
+          {muestras.map((m, i) => (
+            <div key={i} className="form-grid cols-4" style={{ alignItems: "end", borderBottom: "1px solid var(--line)", paddingBottom: 8, marginBottom: 8 }}>
+              <div className="field">
+                <label htmlFor={`m-desc-${i}`}>Muestra {i + 1} · identificación</label>
+                <input id={`m-desc-${i}`} value={m.descripcion} maxLength={300} onChange={(e) => setMuestra(i, { descripcion: e.target.value })} placeholder={`Muestra ${i + 1}`} />
+              </div>
+              <div className="field" style={{ gridColumn: "span 2" }}>
+                <label>Producto (catálogo)</label>
+                {productoPara === i ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input aria-label="Buscar producto" autoFocus value={qProducto} onChange={(e) => setQProducto(e.target.value)} placeholder="Buscar producto por código o nombre…" style={{ flex: 1 }} />
+                    <select aria-label="Elegir producto" value="" onChange={(e) => {
+                      const el = productos.find((x) => x.id === e.target.value);
+                      if (el) { setMuestra(i, { catElementoId: el.id, productoTexto: `${el.codigo} · ${el.nombre}` }); setProductoPara(null); setDestino(String(i + 1)); }
+                    }} style={{ flex: 1 }}>
+                      <option value="">{productos.length ? "— elija el producto —" : "Escriba para buscar"}</option>
+                      {productos.map((x) => <option key={x.id} value={x.id}>{x.codigo} · {x.nombre}{x.familia?.nombre ? ` (${x.familia.nombre})` : ""}</option>)}
+                    </select>
+                    <button type="button" className="btn outline sm" onClick={() => setProductoPara(null)}>Cerrar</button>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ flex: 1 }}>{m.productoTexto ?? <span style={{ color: "var(--muted)" }}>Sin producto</span>}</span>
+                    <button type="button" className="btn outline sm" onClick={() => { setProductoPara(i); setQProducto(""); }}>{m.productoTexto ? "Cambiar" : "Elegir producto"}</button>
+                  </div>
+                )}
+              </div>
+              <div className="field" style={{ display: "flex", flexDirection: "row", gap: 6, alignItems: "end" }}>
+                <div style={{ flex: 1 }}>
+                  <label htmlFor={`m-plazo-${i}`}>Plazo propio (días)</label>
+                  <input id={`m-plazo-${i}`} type="number" min={1} max={730} value={m.plazoDias} onChange={(e) => setMuestra(i, { plazoDias: e.target.value })} placeholder="general" />
+                </div>
+                <button type="button" className="btn outline sm" onClick={() => quitarMuestra(i)} aria-label={`Quitar la muestra ${i + 1}`}>✕</button>
+              </div>
+            </div>
+          ))}
+          <button type="button" className="btn outline sm" onClick={agregarMuestra}>＋ Agregar muestra</button>
+        </div>
+      )}
+
       {/* ---------------- Ensayos ---------------- */}
+      {!precot && (
       <div className="card">
         <h2>Ensayos cotizados <span className="right">precio de la lista propia del cliente, de la lista de precios vigente o, si no está, de la ficha de costos</span></h2>
+        {muestras.length > 0 && (
+          <div className="form-grid cols-3" style={{ marginBottom: 6 }}>
+            <div className="field">
+              <label htmlFor="cot-destino">Agregar los ensayos a</label>
+              <select id="cot-destino" value={destino} onChange={(e) => setDestino(e.target.value)}>
+                <option value="">Toda la cotización (sin muestra)</option>
+                {muestras.map((m, i) => <option key={i} value={String(i + 1)}>Muestra {i + 1}{m.descripcion ? ` · ${m.descripcion}` : ""}{m.productoTexto ? ` · ${m.productoTexto}` : ""}</option>)}
+                {muestras.length > 1 && <option value="todas">Todas las muestras</option>}
+              </select>
+            </div>
+            {productoDestino && (
+              <div className="field" style={{ gridColumn: "span 2" }}>
+                <label htmlFor="cot-ens-producto">Ensayos del producto de la muestra {destino}</label>
+                <select id="cot-ens-producto" value="" onChange={(e) => { const x = ensayosProducto.find((en) => en.id === e.target.value); if (x) agregarEnsayo(x); }}>
+                  <option value="">{ensayosProducto.length ? "— elija un ensayo que aplica a este producto —" : "El catálogo no tiene ensayos para este producto: búsquelos abajo"}</option>
+                  {ensayosProducto.map((en) => (
+                    <option key={en.id} value={en.id}>{en.codigo} · {en.nombre} · {precioDe(en).precio > 0 ? money(precioDe(en).precio, precioDe(en).moneda) : "sin precio"}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
         <div className="form-grid cols-3">
           <div className="field">
             <label>Buscar ensayo (código EN / nombre)</label>
@@ -755,13 +1006,14 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
         )}
         <table className="data" style={{ marginTop: 10 }}>
           <thead>
-            <tr><th>Código</th><th>Ensayo</th><th className="num">Cant.</th><th className="num">P. unitario ({moneda})</th><th className="num">Subtotal</th><th></th></tr>
+            <tr><th>Código</th><th>Ensayo</th><th className="num">Cant.</th><th className="num">P. unitario neto ({moneda})</th><th className="num">Subtotal neto</th><th></th></tr>
           </thead>
           <tbody>
             {lineas.map((l, i) => [
               <tr key={i}>
                 <td><span className="codigo">{l.codigo ?? (l.heredada ? l.heredada.tipo : "—")}</span></td>
                 <td>
+                  {l.muestraN ? <span className="pill blue" style={{ marginRight: 6 }} title={muestras[l.muestraN - 1]?.descripcion || undefined}>Muestra {l.muestraN}</span> : null}
                   {l.descripcion}
                   {l.heredada && <small style={{ display: "block", color: "var(--muted)" }}>Línea heredada (se conserva tal cual)</small>}
                   {l.gasto && <small style={{ display: "block", color: "var(--muted)" }}>Gasto · valor manual</small>}
@@ -835,11 +1087,12 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           </tbody>
           {lineas.length > 0 && (
             <tfoot>
-              <tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total (IVA exento)</td><td className="num" style={{ fontWeight: 800 }}>{lineas.some((l) => bloqueoDe(l)) ? "—" : money(total, moneda)}</td><td /></tr>
+              <tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total neto (el IVA se agrega al final)</td><td className="num" style={{ fontWeight: 800 }}>{lineas.some((l) => bloqueoDe(l)) ? "—" : money(total, moneda)}</td><td /></tr>
             </tfoot>
           )}
         </table>
       </div>
+      )}
 
       {/* ---------------- Condiciones, validez, notas ---------------- */}
       <div className="card">
@@ -860,9 +1113,11 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             </small>
           </div>
           <div className="field">
-            <label>Plazo de entrega (días corridos)</label>
+            <label>Plazo de entrega (días corridos desde la llegada de la muestra)</label>
             <input type="number" min={1} max={730} step={1} value={plazoDias} onChange={(e) => setPlazoDias(e.target.value)} />
-            <small style={{ color: "var(--muted)" }}>Desde la recepción de las muestras. Fija la fecha de compromiso de la OT; si lo deja vacío, la fija Planificación.</small>
+            <small style={{ color: "var(--muted)" }}>
+              Días corridos que tarda el servicio, contados desde que la muestra llega al laboratorio (no desde la emisión). Las fechas quedan condicionadas a la entrega oportuna de las muestras. Si lo deja vacío, la fecha la fija Planificación.
+            </small>
           </div>
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <label>Observaciones internas <small style={{ color: "var(--muted)" }}>(uso interno de Comercial · NO se imprimen)</small></label>
@@ -883,8 +1138,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
         <div className="toolbar" style={{ marginTop: 12 }}>
           {onCancelar && <button className="btn outline sm" onClick={onCancelar}>Cancelar</button>}
           <div className="spacer" />
-          <button className="btn success sm" disabled={saving || !cfg} onClick={guardar}>
-            {saving ? "Guardando…" : modo === "crear" ? "Emitir cotización (Abierta)" : "Guardar cambios"}
+          <button className="btn success sm" disabled={saving || !cfg || !!cliente?.bloqueado} onClick={guardar}>
+            {saving ? "Guardando…" : modo === "crear" ? (precot ? "Emitir pre-cotización" : "Emitir cotización (Abierta)") : "Guardar cambios"}
           </button>
         </div>
       </div>

@@ -23,7 +23,7 @@ import { pedir, ESTADOS_VIGENTES, porVencer } from "./_components/comercial";
 import { EstadoChip, FirmaChip, accionesDe } from "./_components/Detalle";
 import { DialogoAceptacion, DialogoAnulacion } from "./_components/Dialogos";
 
-type Filtro = "todas" | "abierta" | "porVencer" | "enFirma" | "aceptada" | "anulada" | "expirada" | "historico";
+type Filtro = "todas" | "abierta" | "porVencer" | "enFirma" | "aceptada" | "anulada" | "expirada" | "historico" | "precot";
 const FILTROS_URL: Filtro[] = ["abierta", "aceptada", "anulada", "expirada", "historico"];
 const FIRMAS = ["pendiente", "firmada", "devuelta", "sin_firma"];
 const TEXTO_FIRMA: Record<string, string> = {
@@ -69,6 +69,8 @@ export default function CotizacionesPage() {
       if (q.trim()) p.set("q", q.trim());
       if (filtro === "porVencer") p.set("porVencer", "1");
       else if (filtro === "enFirma") { p.set("estado", "abierta"); p.set("firma", "pendiente"); }
+      // Reunión 10: pre-cotizaciones (valores referenciales, sin ensayos ni OT).
+      else if (filtro === "precot") p.set("tipoDocumento", "precotizacion");
       else if (filtro !== "todas") p.set("estado", filtro);
       if (extra.sinOt) p.set("sinOt", "1");
       if (extra.firma) p.set("firma", extra.firma);
@@ -119,7 +121,8 @@ export default function CotizacionesPage() {
 
   const conteo = (f: Filtro) => {
     // porVencer y enFirma no son estados: no suman en «Todas» ni en «Histórico».
-    const todos = Object.entries(conteos).filter(([e]) => e !== "porVencer" && e !== "enFirma");
+    const todos = Object.entries(conteos).filter(([e]) => e !== "porVencer" && e !== "enFirma" && e !== "precotizaciones");
+    if (f === "precot") return conteos.precotizaciones ?? null;
     if (f === "todas") return todos.reduce((a, [, n]) => a + n, 0);
     if (f === "historico") return todos.filter(([e]) => esHistorico(e)).reduce((a, [, n]) => a + n, 0);
     if (f === "enFirma") return conteos.enFirma ?? null;
@@ -135,6 +138,7 @@ export default function CotizacionesPage() {
     { f: "anulada", l: "Anuladas" },
     { f: "expirada", l: "Vencidas" },
     { f: "historico", l: "Histórico" },
+    { f: "precot", l: "Pre-cotizaciones" },
   ];
   const hayExtra = extra.sinOt || extra.firma || extra.enviada;
   const textoExtra = [
@@ -164,6 +168,8 @@ export default function CotizacionesPage() {
           );
         })}
         <input aria-label="Buscar cotizaciones" placeholder="Buscar por N°, cliente o referencia…" style={{ flex: 1, minWidth: 200 }} value={buscar} onChange={(e) => setBuscar(e.target.value)} />
+        <Link href={"/cotizaciones/avisos" as any} className="btn outline sm" title="OT listas para facturar, OPI pendientes y aceptadas sin OT">Avisos comerciales</Link>
+        {permisosListos && puede("cotizacion.crear") && <Link href={"/cotizaciones/nueva?tipo=precotizacion" as any} className="btn outline sm" title="Valores referenciales, sin ensayos ni OT">＋ Pre-cotización</Link>}
         {permisosListos && puede("cotizacion.crear") && <Link href={"/cotizaciones/nueva" as any} className="btn primary sm">＋ Nueva cotización</Link>}
       </div>
       {hayExtra && (
@@ -181,7 +187,7 @@ export default function CotizacionesPage() {
               <th>Cliente</th>
               <th>Estado</th>
               <th>Firma y envío</th>
-              <th className="num">Total</th>
+              <th className="num">Total neto</th>
               <th>Válida hasta</th>
               <th>OT</th>
               <th>Emisión</th>
@@ -191,11 +197,14 @@ export default function CotizacionesPage() {
           <tbody>
             {cots.map((c) => { const acc = accionesDe(c, puede, exigirFirma); return (
               <tr key={c.id}>
-                <td style={{ whiteSpace: "nowrap" }}><Link href={`/cotizaciones/${c.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{c.codigo}</Link></td>
+                <td style={{ whiteSpace: "nowrap" }}>
+                  <Link href={`/cotizaciones/${c.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{c.codigo}</Link>
+                  {c.tipoDocumento === "precotizacion" && <span className="pill gray" style={{ marginLeft: 6 }} title="Valores referenciales: no genera OT">pre-cotización</span>}
+                </td>
                 <td>{c.cliente?.razonSocial ?? "—"}</td>
                 <td><EstadoChip estado={c.estado} /></td>
                 <td><FirmaChip c={c} /></td>
-                <td className="num">{monto(c.total, c.moneda)}</td>
+                <td className="num" title="Neto: el IVA se agrega al final">{monto(c.total, c.moneda)}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
                   {fechaDia(c.validaHasta ?? c.expiraAt)}
                   {porVencer(c) && <span className="pill amber" style={{ marginLeft: 6 }}>por vencer</span>}

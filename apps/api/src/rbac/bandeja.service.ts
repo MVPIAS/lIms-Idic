@@ -1,4 +1,5 @@
 import { Injectable, Logger } from "@nestjs/common";
+import { MESES_OPI_DEF, SQL_ACEPTADA_SIN_OT, SQL_OT_LISTA_PARA_FACTURAR } from "../comercial/avisos-comercial";
 import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
 import { PrismaService } from "../common/prisma.service";
 import { ContextoAlcance } from "./alcance.service";
@@ -443,13 +444,33 @@ export class BandejaService {
           `SELECT count(*) AS n FROM encuesta_satisfaccion e WHERE e.tenant_id = COALESCE($1::uuid, e.tenant_id) AND e.estado = 'pendiente'`,
           tenant,
         ),
+      // Reunión 1: sin las excepciones marcadas por Comercial (sin_ot_motivo, avisos-comercial.ts).
       cotizacionesSinOt: () =>
         this.contar(
-          `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id)
-              AND c.estado = 'aceptada'
-              AND NOT EXISTS (SELECT 1 FROM orden_trabajo o WHERE o.cotizacion_id = c.id)`,
+          `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND ${SQL_ACEPTADA_SIN_OT}`,
           tenant,
+        ).catch(() =>
+          this.contar(
+            `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id)
+                AND c.estado = 'aceptada' AND NOT EXISTS (SELECT 1 FROM orden_trabajo o WHERE o.cotizacion_id = c.id)`,
+            tenant,
+          ),
         ),
+      // Reunión 1: OT con cobro listas para facturar (cerradas o listas para cerrar, sin factura emitida).
+      otPorFacturar: () =>
+        this.contar(`SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND ${SQL_OT_LISTA_PARA_FACTURAR}`, tenant, unidades).catch(() => 0),
+      // Reunión 2: OT por disposición con la OPI pendiente pasado el plazo (ot_disposicion.meses_opi, 2 por defecto).
+      otOpiVencida: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM orden_trabajo o
+            WHERE ${otScope} AND o.opi_pendiente AND o.estado <> 'anulada'
+              AND (COALESCE(o.disposicion_fecha, (o.created_at AT TIME ZONE ${SQL_ZONA})::date)
+                   + make_interval(months => COALESCE((SELECT CASE WHEN ps.valor ~ '^[0-9]{1,2}$' THEN ps.valor::int END FROM parametro_sistema ps
+                                                         WHERE ps.tenant_id = o.tenant_id AND ps.categoria = 'ot_disposicion' AND ps.codigo = 'meses_opi' AND ps.activo), ${MESES_OPI_DEF})))::date
+                  < (now() AT TIME ZONE ${SQL_ZONA})::date`,
+          tenant,
+          unidades,
+        ).catch(() => 0),
       // OT cerradas CON COBRO sin ninguna factura viva (p. ej. cerradas antes
       // de que el cierre generara el borrador). Las nuevas ya nacen con él.
       otCerradasSinFactura: () =>
@@ -592,7 +613,11 @@ export class BandejaService {
     const porOficializar = async () =>
       item("informes_por_oficializar", "Informes por oficializar", "Informes y certificados de su ámbito que esperan firmas: aún no son oficiales", await q.documentosEnFirma(), "/certificados?estado=en_firma", "warn");
     const sinOt = async () =>
-      item("cotizaciones_aceptadas_sin_ot", "Cotizaciones aceptadas sin OT", "Cotizaciones aceptadas a las que aún no se les creó OT", await q.cotizacionesSinOt(), "/cotizaciones?estado=aceptada&sinOt=1", "warn");
+      item("cotizaciones_aceptadas_sin_ot", "Cotizaciones aceptadas sin OT", "Cotizaciones aceptadas a las que aún no se les creó OT (sin las excepciones marcadas por Comercial)", await q.cotizacionesSinOt(), "/cotizaciones?estado=aceptada&sinOt=1", "warn");
+    const porFacturar = async () =>
+      item("ot_por_facturar", "OT listas para facturar", "OT con cobro cerradas o listas para cerrar que aún no tienen factura emitida", await q.otPorFacturar(), "/cotizaciones/avisos?vista=facturar", "warn");
+    const opiVencida = async () =>
+      item("ot_opi_vencida", "OPI vencida", "OT por disposición cuya OPI no se regularizó en el plazo (2 meses por defecto)", await q.otOpiVencida(), "/cotizaciones/avisos?vista=opi", "alta");
     const oiPorAtender = async () =>
       item("oi_por_atender", "Órdenes internas por atender", "Órdenes internas de otros laboratorios por recibir o responder", await qOi.porAtender(), "/ordenes-internas", "warn");
     const oiPorIntegrar = async () =>
@@ -748,6 +773,8 @@ export class BandejaService {
         return all([
           async () => item("cotizaciones_por_vencer", "Cotizaciones por vencer", "Cotizaciones abiertas que vencen en los próximos 7 días", await q.cotizacionesPorVencer(), "/cotizaciones?porVencer=1", "warn"),
           sinOt,
+          porFacturar,
+          opiVencida,
           porVencer,
           porEntregar,
           async () => item("cotizaciones_devueltas_firma", "Cotizaciones devueltas por el Jefe DCO", "Corrija lo observado y vuelva a enviarlas a firma", await q.cotizacionesFirma("devuelta"), "/cotizaciones?estado=abierta&firma=devuelta", "alta"),
@@ -756,7 +783,7 @@ export class BandejaService {
           muestreos,
         ]);
       case "PLANIFICACION":
-        return all([vencidas, vencidasPorLab, porVencer, sinPlazo, listasCerrar, porEntregar, abiertas, sinOt, encuestas]);
+        return all([vencidas, vencidasPorLab, porVencer, sinPlazo, listasCerrar, porEntregar, abiertas, sinOt, porFacturar, opiVencida, encuestas]);
       case "FINANZAS":
         return all([
           async () => item("facturas_pendientes", "Pendientes de facturar", "Facturas en borrador generadas al cerrar OT con cobro: revíselas y emítalas", await q.facturasPendientes(), "/facturas?estado=pendiente", "alta"),
