@@ -7,7 +7,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
 import { zMoneda } from "../common/moneda";
 import { zMedioEnvio } from "../common/medios-envio";
-import { CotizacionService } from "./cotizacion.service";
+import { CONDICIONES_MAX, CotizacionService } from "./cotizacion.service";
 import { hoyEnChile } from "./validez";
 import { CosteoService } from "./costeo.service";
 import { PermisoGuard } from "../auth/permiso.guard";
@@ -79,6 +79,8 @@ const LineaSchema = z
     instrumentoRango: z.string().trim().max(160).nullable().optional(),
     instrumentoPuntos: z.string().trim().max(500).nullable().optional(),
     instrumentoSentido: z.enum(["T", "C", "T+C"]).nullable().optional(),
+    // Reunión 5 (Químico): muestra de la cotización a la que pertenece el ensayo.
+    muestraN: z.number().int().min(1).max(200).nullable().optional(),
     // Compatibilidad: el descuento por línea ya no existe (R1); solo se admite 0.
     descuentoPct: z.number().min(0).max(0, "La cotización no admite descuento (decisión Comercial R1).").optional(),
   })
@@ -104,7 +106,26 @@ const Cabecera = {
   dolarMotivo: z.string().max(500).nullable().optional(),
   referencia: z.string().max(300).nullable().optional(),
   descripcionTecnica: z.string().max(20000).nullable().optional(),
-  condicionesAdicionales: z.string().max(2000, "Condiciones adicionales: máximo 2000 caracteres.").nullable().optional(),
+  // Reuniones 1 y 2: hasta 5.000 caracteres (antes 2.000).
+  condicionesAdicionales: z.string().max(CONDICIONES_MAX, "Condiciones adicionales: máximo 5.000 caracteres.").nullable().optional(),
+  // Reunión 2: tipo de cliente de ESTA cotización (define validez y recargo); vacío = el de la ficha.
+  tipoClienteCodigo: z.string().trim().max(60).nullable().optional(),
+  // Reunión 2: centro de costo de la sucursal que emite (vacío = Casa Matriz, Depto. Comercial).
+  centroCostoEmisorId: z.string().uuid().nullable().optional(),
+  // Reunión 1: OT con costo (factura) o sin costo (valorización estadística) desde el inicio.
+  conCobro: z.boolean().optional(),
+  // Reunión 5: muestras de la cotización (producto elegido antes que los ensayos, reunión 3).
+  muestras: z
+    .array(
+      z.object({
+        descripcion: z.string().trim().max(300).nullable().optional(),
+        catElementoId: z.string().uuid().nullable().optional(),
+        productoTexto: z.string().trim().max(300).nullable().optional(),
+        plazoDias: z.number().int().min(1).max(730).nullable().optional(),
+      }),
+    )
+    .max(200)
+    .optional(),
   // Plazo de entrega comprometido (días corridos desde la recepción): fija la
   // fecha de compromiso de la OT que nace al aceptar (docs/FLUJO_FIRMA_CIERRE.md §4).
   plazoEntregaDias: z.number().int().min(1, "Plazo de entrega: mínimo 1 día.").max(730, "Plazo de entrega: máximo 730 días.").nullable().optional(),
@@ -136,6 +157,8 @@ const CrearCotSchema = z
     ...Cabecera,
     // EP-00 0.3 (BL-173): cotización creada desde una oportunidad del CRM.
     oportunidadId: z.string().uuid().optional(),
+    // Reunión 10: pre-cotización = valores referenciales, sin ensayos ni OT.
+    tipoDocumento: z.enum(["cotizacion", "precotizacion"]).default("cotizacion"),
     fechaEmision: fecha.optional(),
     // Cotización compartida (sesiones 27-10 y 06-11): Comercial puede guardar solo
     // la cabecera; el laboratorio agrega los ensayos al responder. La firma exige líneas.
@@ -165,7 +188,8 @@ const AceptarSchema = z.object({
   numero: z.string().max(60).optional(),
   fecha: fecha.optional(),
   adjunto: z.string().max(300).optional(),
-  conCobro: z.boolean().default(true),
+  // Sin indicar, rige lo que dice la cotización (con o sin costo, reunión 1).
+  conCobro: z.boolean().optional(),
   /** Laboratorio responsable de la OT (obligatorio si no se deduce del centro de costo / ensayos). */
   unidadPrincipalId: z.string().uuid().optional(),
   /** EP-00 4.2: monto de la O/C y discrepancia con la cotización. */
@@ -179,6 +203,10 @@ const AnularOrdenSchema = z.object({
   numero: z.string().trim().min(1, "Indique el Nº de la orden del cliente.").max(60),
   montoOc: z.number().nonnegative().optional(),
   motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres).").max(2000),
+});
+
+const SinOtSchema = z.object({
+  motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres).").max(1000).nullable(),
 });
 
 const AnularSchema = z.object({
@@ -250,13 +278,15 @@ export class CotizacionController {
     @Query("centroCostoId") centroCostoId: string | undefined,
     @Query("fecha") fechaQ: string | undefined,
     @Req() req: any,
+    @Query("tipoCliente") tipoQ?: string,
   ) {
     const uuid = z.string().uuid();
     if (!uuid.safeParse(clienteId).success) throw new BadRequestException("clienteId (uuid) es obligatorio");
     if (centroCostoId && !uuid.safeParse(centroCostoId).success) throw new BadRequestException("centroCostoId inválido");
     if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
+    if (tipoQ && !/^[a-z0-9_]{1,60}$/i.test(tipoQ)) throw new BadRequestException("tipoCliente inválido");
     const tenantId = req?.user?.tenantId;
-    return this.svc.calcularValidezPara(tenantId, clienteId, centroCostoId || null, fechaQ || hoyEnChile());
+    return this.svc.calcularValidezPara(tenantId, clienteId, centroCostoId || null, fechaQ || hoyEnChile(), tipoQ || null);
   }
 
   /**
@@ -273,6 +303,7 @@ export class CotizacionController {
     @Query("fecha") fechaQ: string | undefined,
     @Req() req: any,
     @Query("moneda") monedaQ?: string,
+    @Query("tipoCliente") tipoQ?: string,
   ) {
     const uuid = z.string().uuid();
     // Frente f6: moneda de la cotización (CLP por defecto); el precio vuelve en la moneda de su lista.
@@ -283,7 +314,8 @@ export class CotizacionController {
     if (ids.length > 200) throw new BadRequestException("Máximo 200 ensayos por consulta.");
     if (ids.some((x) => !uuid.safeParse(x).success)) throw new BadRequestException("ids: lista de uuid separados por coma");
     if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
-    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined, moneda?.success ? moneda.data : "CLP");
+    if (tipoQ && !/^[a-z0-9_]{1,60}$/i.test(tipoQ)) throw new BadRequestException("tipoCliente inválido");
+    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined, moneda?.success ? moneda.data : "CLP", tipoQ || null);
   }
 
   /**
@@ -379,6 +411,34 @@ export class CotizacionController {
     await this.exigirCotizacion(req, id);
     const doc = AceptarSchema.parse(body ?? {});
     return this.svc.aceptar(id, req?.user?.tenantId, doc, req?.user?.sub);
+  }
+
+  /** Reunión 10 · nueva versión de una pre-cotización (la anterior queda reemplazada). */
+  @Post(":id/nueva-version")
+  @RequierePermiso("cotizacion.crear")
+  async nuevaVersion(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    return this.svc.nuevaVersion(id, req?.user?.tenantId, req?.user?.sub);
+  }
+
+  /** Reunión 10 · emite la cotización formal desde una pre-cotización (sin ensayos; los agrega el laboratorio). */
+  @Post(":id/cotizacion-formal")
+  @RequierePermiso("cotizacion.crear")
+  async cotizacionFormal(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    return this.svc.convertirPrecotizacion(id, req?.user?.tenantId, req?.user?.sub);
+  }
+
+  /**
+   * Reunión 1 · excepción del aviso «aceptadas sin OT»: { motivo } la marca;
+   * { motivo: null } la quita. La registra la Sección Ventas (cotizacion.aceptar).
+   */
+  @Post(":id/sin-ot")
+  @RequierePermiso(PERMISO_ACEPTAR)
+  async sinOt(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    const { motivo } = SinOtSchema.parse(body ?? {});
+    return this.svc.marcarSinOt(id, req?.user?.tenantId, motivo, req?.user?.sub);
   }
 
   /** «Anular orden del cliente» (EP-00 4.2): la O/C no corresponde; la cotización sigue Abierta. */

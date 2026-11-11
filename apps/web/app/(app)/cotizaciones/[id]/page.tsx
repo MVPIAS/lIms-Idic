@@ -168,7 +168,7 @@ export default function FichaCotizacionPage() {
               ) : (
                 <>
                   {acc.motivoNoEditar && cot.estado === "abierta" && <div className="alert info">No se edita: {acc.motivoNoEditar}</div>}
-                  <DetalleCotizacion cot={cot} params={params} acciones={{ ...acc, aceptar: false, motivoNoAceptar: undefined }} onEditar={() => setEditando(true)} onAceptar={() => irA("aceptacion")} onAnular={() => setAnulando(true)} />
+                  <DetalleCotizacion cot={cot} params={params} acciones={{ ...acc, aceptar: false, motivoNoAceptar: undefined }} onEditar={() => setEditando(true)} onAceptar={() => irA("aceptacion")} onAnular={() => setAnulando(true)} puede={puede} onCambio={(m) => hecho(m)} />
                   {c.puedo.solicitar && (
                     <div className="toolbar" style={{ marginTop: 8 }}>
                       <div className="spacer" />
@@ -410,15 +410,21 @@ function Aceptacion({ cot, c, acc, onAceptar }: { cot: any; c: Circuito; acc: Re
         <div className="form-grid cols-2">
           <div className="field readonly"><label>Documento de aceptación</label><div>{ACEPTACION_LABEL[cot.aceptacionTipo] ?? cot.aceptacionTipo ?? "—"}</div></div>
           <div className="field readonly"><label>Número / fecha</label><div>{cot.aceptacionNumero ?? "s/n"} · {fechaDia(cot.aceptacionFecha)}</div></div>
-          <div className="field readonly"><label>Cobro</label><div>{cot.conCobro ? "Con cobro" : "Sin cobro"}</div></div>
+          <div className="field readonly"><label>Cobro</label><div>{cot.conCobro ? "Con costo (se factura)" : "Sin costo (valorización estadística)"}</div></div>
           <div className="field readonly"><label>OT generada</label><div>{cot.ot ? <Link href={`/ot/${cot.ot.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{cot.ot.codigo}</Link> : "—"}</div></div>
         </div>
+      </div>
+    );
+  if (cot.tipoDocumento === "precotizacion")
+    return (
+      <div className="alert info">
+        Una pre-cotización entrega valores referenciales: no se acepta ni genera OT. Use «Emitir cotización formal» (pestaña Datos) y registre la aceptación en esa cotización.
       </div>
     );
   return (
     <div>
       <p className="subtitle" style={{ marginTop: 0 }}>
-        Con el documento con que el cliente acepta (OPI o Resolución, O/C, correo, pago por adelantado o disposición del Director) nace la Orden de Trabajo con su laboratorio responsable.
+        Con el documento con que el cliente acepta (OPI, resolución u oficio, O/C, correo, pago por adelantado o disposición del Director) y su comprobante adjunto nace la Orden de Trabajo con su laboratorio responsable.
       </p>
       {acc.motivoNoAceptar && <div className="alert warn">{acc.motivoNoAceptar}</div>}
       {!c.cotizacion.enviadaAt && acc.aceptar && <div className="alert info">Aún no se registra el envío al cliente.</div>}

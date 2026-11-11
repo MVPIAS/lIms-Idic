@@ -68,6 +68,10 @@ const ActualizarClienteSchema = CrearClienteSchema.partial().extend({
   diasCredito: z.number().int().positive().optional(),
 });
 
+const MotivoBloqueoSchema = z.object({
+  motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres).").max(1000),
+});
+
 @ApiTags("clientes")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
@@ -91,6 +95,16 @@ export class ClienteController {
       tipo,
       tenantId: req?.user?.tenantId,
     });
+  }
+
+  /**
+   * Reunión 2 · clientes con facturas impagas vencidas (propuesta de bloqueo para
+   * el Jefe DCO) y los ya bloqueados. ?todos=1 incluye a los que no deben nada.
+   */
+  @Get("morosos")
+  @RequierePermiso("cliente.ver")
+  morosos(@Query("todos") todos: string | undefined, @Req() req: any) {
+    return this.svc.morosos(req?.user?.tenantId, todos === "1");
   }
 
   @Get(":id")
@@ -126,25 +140,30 @@ export class ClienteController {
     return this.svc.actualizar(id, { tipo }, req?.user?.tenantId);
   }
 
-  /** Bloqueo/desbloqueo comercial = modificar la ficha del cliente → cliente.editar. */
+  /**
+   * Reunión 2 · bloqueo de clientes con facturas impagas: atribución del Jefe del
+   * Departamento Comercial (permiso `cliente.bloquear` + jefatura del DCO). Un
+   * cliente bloqueado no recibe cotizaciones ni se le registra la aceptación.
+   */
   @Post(":id/bloquear")
-  @RequierePermiso("cliente.editar")
-  async bloquear(
-    @Param("id", ParseUUIDPipe) id: string,
-    @Body() body: { motivo: string },
-    @Req() req: any,
-  ) {
-    return this.svc.bloquear(id, body.motivo, req?.user?.tenantId);
+  @RequierePermiso("cliente.bloquear")
+  async bloquear(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const { motivo } = MotivoBloqueoSchema.parse(body ?? {});
+    return this.svc.bloquear(id, motivo, req?.user?.tenantId, req);
   }
 
   @Post(":id/desbloquear")
-  @RequierePermiso("cliente.editar")
-  async desbloquear(
-    @Param("id", ParseUUIDPipe) id: string,
-    @Body() body: { motivo: string },
-    @Req() req: any,
-  ) {
-    return this.svc.desbloquear(id, body.motivo, req?.user?.tenantId);
+  @RequierePermiso("cliente.bloquear")
+  async desbloquear(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const { motivo } = MotivoBloqueoSchema.parse(body ?? {});
+    return this.svc.desbloquear(id, motivo, req?.user?.tenantId, req);
+  }
+
+  /** Historial de bloqueos y desbloqueos del cliente. */
+  @Get(":id/bloqueos")
+  @RequierePermiso("cliente.ver")
+  bloqueos(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.historialBloqueos(id, req?.user?.tenantId);
   }
 
   @Get(":id/contactos")

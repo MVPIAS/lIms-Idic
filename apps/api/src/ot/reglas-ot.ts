@@ -20,11 +20,42 @@ export const MOTIVO_INTERNACION_PUERTA_UNICA =
   "La OT de internación no se registra a mano: nace sola cuando la SCC completa el análisis técnico de la resolución DGMN en Internaciones (BPCH · Comercial).";
 export type OrigenOt = (typeof ORIGENES_OT)[number];
 
-export const TIPOS_ACEPTACION = ["OPI_RESOLUCION", "OC", "CORREO", "PAGO_ADELANTADO", "DISPOSICION_DIRECTOR"] as const;
+// Sesiones 28-10 (reuniones 2 y 3): los cuatro tipos del PG 03 (OPI, resolución, correo, pago
+// adelantado), más «Resolución» y «Oficio» para BPCH; OPI_RESOLUCION queda como la OPI.
+export const TIPOS_ACEPTACION = ["OPI_RESOLUCION", "RESOLUCION", "OFICIO", "OC", "CORREO", "PAGO_ADELANTADO", "DISPOSICION_DIRECTOR"] as const;
 export type TipoAceptacion = (typeof TIPOS_ACEPTACION)[number];
 
 /** Tipos de aceptación que exigen número de documento. */
-export const ACEPTACION_REQUIERE_NUMERO: readonly TipoAceptacion[] = ["OPI_RESOLUCION", "OC"];
+export const ACEPTACION_REQUIERE_NUMERO: readonly TipoAceptacion[] = ["OPI_RESOLUCION", "RESOLUCION", "OFICIO", "OC"];
+
+/** Tipos que no exigen comprobante adjunto: la disposición del Director es la propia OT sin OPI. */
+export const ACEPTACION_SIN_COMPROBANTE: readonly TipoAceptacion[] = ["DISPOSICION_DIRECTOR"];
+
+/** Etiqueta del documento de aceptación (mensajes). */
+export const ETIQUETA_ACEPTACION: Record<TipoAceptacion, string> = {
+  OPI_RESOLUCION: "OPI",
+  RESOLUCION: "Resolución",
+  OFICIO: "Oficio",
+  OC: "Orden de compra",
+  CORREO: "Correo",
+  PAGO_ADELANTADO: "Comprobante de pago adelantado",
+  DISPOSICION_DIRECTOR: "Disposición del Director",
+};
+
+/**
+ * Revisión del documento de aceptación (pura): número cuando el tipo lo exige y
+ * comprobante adjunto cuando el parámetro `aceptacion_comprobante.exige` está
+ * activo (salvo la disposición del Director). Devuelve el error o null.
+ */
+export function errorDocumentoAceptacion(d: { tipo?: string | null; numero?: string | null; tieneComprobante: boolean; exigeComprobante: boolean }): string | null {
+  const tipo = d.tipo as TipoAceptacion | undefined;
+  if (!tipo) return null;
+  if (!(TIPOS_ACEPTACION as readonly string[]).includes(tipo)) return `Documento de aceptación desconocido («${tipo}»).`;
+  if (ACEPTACION_REQUIERE_NUMERO.includes(tipo) && !d.numero?.trim()) return `El documento «${ETIQUETA_ACEPTACION[tipo]}» requiere número.`;
+  if (d.exigeComprobante && !ACEPTACION_SIN_COMPROBANTE.includes(tipo) && !d.tieneComprobante)
+    return `Adjunte el comprobante de la aceptación (${ETIQUETA_ACEPTACION[tipo]}: PDF o imagen) antes de registrarla.`;
+  return null;
+}
 
 export interface EntradaOpi {
   origen?: string | null;

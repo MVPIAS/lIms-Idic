@@ -8,6 +8,7 @@ import { useParams } from "next/navigation";
 import { fecha, fechaHora, fechaDia, rut, clp, num, hoyISO } from "@/lib/format";
 import { ACEPTACION_LABEL, ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
 import { usePermisos } from "@/lib/permisos";
+import ComercialOt from "./_components/ComercialOt";
 import { llamar, etiquetaUnidad } from "@/lib/laboratorio";
 import { toast } from "@/components/ui/feedback";
 import { textoMedio } from "@/lib/etiquetas";
@@ -322,6 +323,9 @@ export default function ExpedientePage() {
           {opiMsg && <div style={{ marginTop: 6 }}>{opiMsg}</div>}
         </div>
       )}
+
+      {/* Comercial (reuniones 1 y 2): plazo de la OPI y anular la OT si el cliente desiste. */}
+      {ot && <ComercialOt ot={ot} onCambio={() => { cargarOt(); cargarHistorial(); cargarAvance(); }} />}
 
       {typeof id === "string" && <SiguientePasoOt avance={avance} otId={id} onPestana={setTab} />}
 
