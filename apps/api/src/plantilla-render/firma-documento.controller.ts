@@ -9,6 +9,8 @@ import { zMedioEnvio } from "../common/medios-envio";
 
 const Motivo = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (al menos 5 caracteres)").max(1000) });
 const Firmar = z.object({ comentario: z.string().max(500).optional() });
+/** Documento modificado (mismo número con versión, OT abierta) o de reemplazo (número nuevo). R9. */
+const Reemision = Motivo.extend({ modalidad: z.enum(["modificacion", "reemplazo"]) });
 const Entregar = z.object({
   fecha: z.coerce.date().optional(),
   // Frente f5: «Parámetros del sistema › medio_envio» (el servicio comprueba que esté activo).
@@ -93,6 +95,18 @@ export class FirmaDocumentoController {
   @RequierePermiso("certificado.emitir")
   reemitir(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.reemitir(id, req);
+  }
+
+  /**
+   * Modificar (OT abierta: mismo número con la versión siguiente y la leyenda «Documento
+   * modificado») o reemplazar (número nuevo con «Este documento reemplaza al N°…») un
+   * documento oficial. El documento anterior queda anulado con el motivo al emitirse el nuevo.
+   */
+  @Post(":id/modificar")
+  @RequierePermiso("certificado.emitir")
+  modificar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const d = Reemision.parse(body ?? {});
+    return this.svc.reemitirOficial(id, d.modalidad, d.motivo, req);
   }
 
   @Post(":id/entregar")

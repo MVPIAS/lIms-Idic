@@ -1,3 +1,4 @@
+import { rutasMenuOculto } from "./menu-oculto";
 import { Controller, Get, Req, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiTags } from "@nestjs/swagger";
@@ -98,7 +99,21 @@ export class MeController {
       // Recorrido 30 (fallo 49): ¿mantiene las tablas comunes del catálogo (centros de
       // costo, listas…)? Solo con catalogo.gestionar de alcance global (alcance-catalogo.guard.ts).
       catalogoComun: permisosJwt.includes("catalogo.gestionar") && (await this.alcance.alcancePermisos(req, ["catalogo.gestionar"])).esGlobal,
+      // R1/R10: módulos heredados que el IDIC no usa, ocultos del menú por parámetro (menu.ocultos).
+      menuOculto: await this.menuOculto(tenantId),
+      perfilActivo: ctx.perfilActivo ?? null,
     };
+  }
+
+  /** Rutas del menú ocultas por el parámetro «menu · ocultos» (una por línea o separadas por coma). */
+  private async menuOculto(tenantId?: string): Promise<string[]> {
+    const f = await this.prisma
+      .$queryRawUnsafe<{ valor: string | null }[]>(
+        `SELECT valor FROM parametro_sistema WHERE ($1::uuid IS NULL OR tenant_id = $1::uuid) AND categoria = 'menu' AND codigo = 'ocultos' AND activo LIMIT 1`,
+        tenantId ?? null,
+      )
+      .catch(() => []);
+    return rutasMenuOculto(f[0]?.valor);
   }
 
   /** Unidades que inspeccionan (o llevan) algún expediente BPCH con unidad: trabajo asignado. */

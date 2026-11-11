@@ -1,3 +1,4 @@
+import { motivoNoReemite, type ModalidadReemision } from "../common/leyenda-reemision";
 import { emitirEvento } from "../common/eventos";
 import { textoErrorCorreo } from "../metrologia/ficha.datos";
 import { faltaOficio, seguimientoDocumento } from "../seguimiento/datos-seguimiento";
@@ -177,6 +178,9 @@ export class FirmaDocumentoService {
         ...v.puedo,
         // Ya sustituido por una versión nueva: no se reemite otra vez (la API lo rechaza).
         reemitir: v.puedo.reemitir && !reemplazo,
+        // R9: un documento oficial se modifica (OT abierta, mismo número con versión) o se reemplaza (número nuevo).
+        modificar: tienePermiso(req, "certificado.emitir") && esOficial(cert.estado) && !reemplazo && !["cerrada", "anulada"].includes(String(cert.ot?.estado ?? "")),
+        reemplazar: tienePermiso(req, "certificado.emitir") && esOficial(cert.estado) && !reemplazo,
         despachar: tienePermiso(req, "certificado.despachar") && esOficial(cert.estado) && !seguimiento.despacho,
         recibirDespacho: tienePermiso(req, "certificado.entregar") && !!seguimiento.despacho && !seguimiento.despacho.recibidoAt,
         oficio: tienePermiso(req, "oficio.crear") && esOficial(cert.estado),
@@ -430,6 +434,19 @@ export class FirmaDocumentoService {
       }),
     ]);
     return this.circuito(id, req);
+  }
+
+  /** Modificación o reemplazo de un documento OFICIAL (R9): la emisión anula el anterior y lo cita. */
+  async reemitirOficial(id: string, modalidad: ModalidadReemision, motivo: string, req: any) {
+    const cert = await this.cargar(id, req);
+    await this.alcance.exigirUnidad(req, cert.unidadId ?? cert.ot?.unidadPrincipal, `el documento ${cert.numero ?? cert.codigo}`);
+    const noPuede = motivoNoReemite({
+      modalidad, tipo: "documento", estadoDocumento: cert.estado, otCerrada: ["cerrada", "anulada"].includes(String(cert.ot?.estado ?? "")),
+    });
+    if (noPuede) throw new ConflictException(noPuede);
+    return this.render.emitir(cert.otId, cert.plantillaId ?? "", cert.tenantId, usuarioDe(req), {
+      reemplazaId: cert.id, reemision: { modalidad, motivo: motivo.trim() },
+    });
   }
 
   async reemitir(id: string, req: any) {

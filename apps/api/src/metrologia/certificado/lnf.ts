@@ -20,6 +20,7 @@
  */
 import type { CertificadoArmado, ContextoCertificado, FirmaCert } from "../metrologia.certificado";
 import { leerPresentacion, observacionesImpresas } from "./presentacion";
+import { leyendaReemision } from "../../common/leyenda-reemision";
 import { ZONA_CHILE, diaChile, diaInstanteChile } from "../../common/fecha-chile";
 
 const NA = "-.-";
@@ -34,6 +35,27 @@ const dia = (x: any) => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s.slice(8, 10)}-${s.slice(5, 7)}-${s.slice(0, 4)}` : esc(s);
 };
 const fechaHora = (x: any) => (x ? new Date(x).toLocaleString("es-CL", { timeZone: ZONA_CHILE, dateStyle: "short", timeStyle: "short" }) : "");
+/** Unidad de la señal del indicador: la de la hoja de control (`uRes`) o mV/V. */
+export const unidadSenalLnf = (D: any): string => {
+  const u = String(D?.uRes ?? "").trim();
+  return u ? u.slice(0, 20) : "mV/V";
+};
+
+/**
+ * Declaración CIPM MRA (hoja «CIPM-MRA» del libro LCPNF-000.00 rev 23): el IDIC es el
+ * Laboratorio Designado en fuerza. Se imprime con el formato «cipm_mra».
+ */
+export const CIPM_MRA: [string, string][] = [
+  ["El Instituto de Investigaciones y Control del Ejército (IDIC) es el Laboratorio Designado en Chile para las mediciones en la magnitud de Fuerza.",
+    "The Instituto de Investigaciones y Control del Ejército (IDIC) is the Designated Laboratory in Chile for Force magnitude measurements."],
+  ["Nombrado mediante Decreto Ley N° 487 del Ministerio de Economía, Fomento y Reconstrucción, publicado el 22 de septiembre de 2000.",
+    "Designated by Decree Law N° 487 of the Ministry of Economy, Development and Reconstruction, published on September 22nd, 2000."],
+  ["Este certificado es consistente con las capacidades de calibración y medición (CMCs) que se incluyen en el Apéndice C del Acuerdo de Reconocimiento Mutuo (CIPM MRA) elaborado por el Comité Internacional de Pesos y Medidas (CIPM). Bajo el CIPM MRA, todos los institutos participantes reconocen la validez de los certificados de calibración y medición de cada uno para las magnitudes, rangos e incertidumbres de medición especificados en la KCDB (para más detalles, visite https://www.bipm.org/kcdb/).",
+    "This certificate is consistent with the Calibration and Measurement Capabilities (CMCs) that are included in Appendix C of the Mutual Recognition Arrangement (CIPM MRA) drawn up by the International Committee for Weights and Measures (CIPM). Under the CIPM MRA, all participating institutes recognize the validity of each other's calibration and measurement certificates for the quantities, ranges and measurement uncertainties specified in the KCDB (for details, see https://www.bipm.org/kcdb/)."],
+  ["El logo CIPM y esta declaración dan fe solo de las mediciones contenidas en este certificado.",
+    "The CIPM MRA logo and this statement attest only to the measurement component of the certificate."],
+];
+
 /** Factor kN → tonf de la planilla (ANEXO CE, celda K24). */
 export const FACTOR_TONF = 9.8067;
 
@@ -71,7 +93,11 @@ export function armarCertificadoLnf(cal: any, ctx: ContextoCertificado): Certifi
   const pat = (Array.isArray(cal.patrones) ? cal.patrones : [])[0] ?? {};
   const emision = cal.emitido_at ? dia(diaInstanteChile(cal.emitido_at)) : "Pendiente (se fija al firmar)";
   const p = leerPresentacion(cal.presentacion);
-  const N = 6;
+  // Unidad de la señal del indicador (configurable en la hoja de control: mV/V, kN, div…; R9).
+  const uS = esc(unidadSenalLnf(D));
+  // Hoja 7 con la declaración CIPM MRA (hoja «CIPM-MRA» de LCPNF-000.00 rev 23) si el formato la pide.
+  const conCipm = p.formato === "cipm_mra";
+  const N = conCipm ? 7 : 6;
 
   const cabecera = (pag: string) => `
 <div class="membrete">
@@ -86,6 +112,7 @@ export function armarCertificadoLnf(cal: any, ctx: ContextoCertificado): Certifi
   const hoja1 = `<!-- paginacion-propia -->
 ${cabecera(pagina(1))}
 <h1 class="compacta">CERTIFICADO DE CALIBRACIÓN N° ${esc(numero)} <i>(CALIBRATION CERTIFICATE)</i></h1>
+${ctx.reemision ? `<p class="reemplaza"><b>${esc(leyendaReemision(ctx.reemision))}</b></p>` : p.reemplaza ? `<p class="reemplaza"><b>ESTE CERTIFICADO REEMPLAZA AL CERTIFICADO N° ${esc(p.reemplaza)}.</b></p>` : ""}
 ${acred ? `<p class="linea-acred">${bi(`Acreditado como laboratorio de calibración: ${acred}`, `Accredited calibration laboratory: ${acred}`)}</p>` : ""}
 ${filas([
     [bi("Marca de calibración", "Calibration mark"), marca ? esc(marca) : NA],
@@ -98,8 +125,8 @@ ${filas([
     [bi("Número de páginas del certificado", "Number of pages of the certificate"), `${N} páginas <i>(${N} pages)</i>`],
     [bi("Fecha de calibración", "Date of calibration"), dia(cal.fecha_calibracion)],
   ])}
-${parrafo("Este certificado de calibración documenta la trazabilidad a los patrones nacionales, que realizan las unidades de medida de acuerdo con el Sistema Internacional de Unidades (SI).",
-    "This calibration certificate documents the traceability to national standards, which realize the units of measurement according to the International System of Units (SI).")}
+${parrafo("Este certificado de calibración documenta la trazabilidad metrológica a los patrones nacionales, que realizan las unidades de medida de acuerdo con el Sistema Internacional de Unidades (SI).",
+    "This calibration certificate documents the metrological traceability to national standards, which realize the units of measurement according to the International System of Units (SI).")}
 ${acred ? parrafo("La entidad de acreditación es firmante de los acuerdos multilaterales de la European co-operation for Accreditation (EA) y de la International Laboratory Accreditation Cooperation (ILAC) para el reconocimiento mutuo de los certificados de calibración.",
     "The accreditation body is signatory to the multilateral agreements of the European co-operation for Accreditation (EA) and of the International Laboratory Accreditation Cooperation (ILAC) for the mutual recognition of calibration certificates.") : ""}
 ${parrafo("El usuario está obligado a recalibrar el instrumento a intervalos apropiados.", "The user is obliged to recalibrate the object at appropriate intervals.")}
@@ -120,8 +147,8 @@ ${filas([
     [bi("Número de serie", "Serial number"), v(ins.serie)], [bi("Identificación especial", "Special Id."), v(ins.idEspecial)],
     [bi("Capacidad nominal", "Capacity"), v(ins.cap)],
     [bi("Marca amplificador", "Amplifier"), v(amp.marca)], [bi("Modelo amplificador", "Model"), v(amp.modelo)], [bi("Número de serie", "Serial number"), v(amp.serie)],
-    [bi("Resolución", "Resolution"), D.resInd != null ? `${fg(D.resInd, 8)} mV/V (${fg(R.r, 4)} kN)` : NA],
-    [bi("Señal de cero", "Zero signal"), Array.isArray(D.pre) && D.pre[0]?.[0] != null ? `${fg(D.pre[0][0], 6)} mV/V` : NA],
+    [bi("Resolución", "Resolution"), D.resInd != null ? `${fg(D.resInd, 8)} ${uS} (${fg(R.r, 4)} kN)` : NA],
+    [bi("Señal de cero", "Zero signal"), Array.isArray(D.pre) && D.pre[0]?.[0] != null ? `${fg(D.pre[0][0], 6)} ${uS}` : NA],
     [bi("Marca cable", "Cable brand"), v(cable.marca)], [bi("Modelo", "Model"), v(cable.modelo)], [bi("Largo", "Length"), v(cable.detalle)],
   ])}
 <h2 class="compacta">${bi("Identificación del cliente", "Customer identification")}</h2>
@@ -152,11 +179,11 @@ ${filas([
 <div class="salto-pagina"></div>
 ${cabecera(pagina(3))}
 <h2 class="compacta">${bi("Tablas de resultados de calibración", "Calibration results")} · ${esc(sentido)}</h2>
-${tablaRep(["Valor nominal / kN", "X1 asc. 0° / mV/V", "X2 asc. 0° / mV/V", "X3 asc. 120° / mV/V", "X4 desc. 120° / mV/V", "X5 asc. 240° / mV/V", "X6 desc. 240° / mV/V"],
+${tablaRep(["Valor nominal / kN", `X1 asc. 0° / ${uS}`, `X2 asc. 0° / ${uS}`, `X3 asc. 120° / ${uS}`, `X4 desc. 120° / ${uS}`, `X5 asc. 240° / ${uS}`, `X6 desc. 240° / ${uS}`],
     [["0", "0", "0", "0", NA, "0", NA], ...rows.map((x) => [fg(x.F, 3), X(x, 0), X(x, 1), X(x, 2), X(x, 3), X(x, 4), X(x, 5)])],
     bi("Deformación del sistema de medición durante la calibración", "Deflection during calibration"))}
 <p class="nota legal">${bi(`Error de cero por serie f₀: ${(R.f0 ?? []).map((x: number) => `${fx(x, 4)} %`).join(" · ") || NA}`, "zero error per series")}</p>
-${tablaRep(["Valor nominal / kN", "Promedio X1, X3, X5 / mV/V", "E. reproducibilidad b / %", "Promedio X1, X2 / mV/V", "E. repetibilidad b′ / %", "Deformación ajustada Xa / mV/V", "E. interpolación fc / %", "E. reversibilidad v / %"],
+${tablaRep(["Valor nominal / kN", `Promedio X1, X3, X5 / ${uS}`, "E. reproducibilidad b / %", `Promedio X1, X2 / ${uS}`, "E. repetibilidad b′ / %", `Deformación ajustada Xa / ${uS}`, "E. interpolación fc / %", "E. reversibilidad v / %"],
     rows.map((x) => [fg(x.F, 3), fx(x.Xr, 6), fx(x.b, 3), fx(x.Xwr, 6), fx(x.bp, 3), fx(x.Xa, 6), fx(x.fc, 3), x.v == null ? NA : fx(x.v, 3)]),
     bi("Promedio de las deformaciones con y sin rotación, deformación ajustada y errores relativos", "Mean deflection with and without rotation, adjusted deflection, relative errors"))}`;
 
@@ -167,11 +194,11 @@ ${tablaRep(["Valor nominal / kN", "Promedio X1, X3, X5 / mV/V", "E. reproducibil
 ${cabecera(pagina(4))}
 <h2 class="compacta">${esc(sentido)}</h2>
 ${filas([
-    [bi("Ecuación de interpolación S = a·F + b·F² + c·F³ (F en kN, S en mV/V)", "Interpolation equation"),
+    [bi(`Ecuación de interpolación S = a·F + b·F² + c·F³ (F en kN, S en ${uS})`, "Interpolation equation"),
       `a = ${sci(c.S3?.[0])} · b = ${sci(c.S3?.[1])} · c = ${sci(c.S3?.[2])}`],
   ])}
 ${tablaRep(["F / kN", ...pasos.map((x) => `+${x}`)], (R.tabla ?? []).map((t: any) => [fg(t.F, 3), ...t.S.map((s: number) => fx(s, 5))]),
-    bi("Tabla de interpolación para S = a·F + b·F² + c·F³ (S en mV/V)", "Interpolation table"))}
+    bi(`Tabla de interpolación para S = a·F + b·F² + c·F³ (S en ${uS})`, "Interpolation table"))}
 ${filas([
     [bi("Ecuación inversa de interpolación F = t·S + u·S² + v·S³ (F en kN)", "Inverse interpolation equation"),
       `t = ${sci(c.F3?.[0])} · u = ${sci(c.F3?.[1])} · v = ${sci(c.F3?.[2])}`],
@@ -206,7 +233,14 @@ ${tablaRangos}
 ${obs.length ? `<h3>Observaciones <i>(Remarks)</i></h3>${obs.map((o) => `<p>${esc(o)}</p>`).join("")}` : ""}
 ${parrafo("El Laboratorio Nacional declara que no se hace responsable del uso de este certificado para la obtención o mantenimiento de una acreditación. En caso de que el cliente decida utilizarlo con dicho fin, lo hará bajo su exclusiva responsabilidad.",
     "The National Laboratory states that it is not responsible for the use of this certificate for obtaining or maintaining accreditation. Should the client decide to use it for this purpose, they do so under their sole responsibility.")}
-<p class="fin"><b>Fin del certificado de calibración</b> <i>(End of calibration certificate)</i></p>`;
+${conCipm ? "" : `<p class="fin"><b>Fin del certificado de calibración</b> <i>(End of calibration certificate)</i></p>`}`;
+
+  const hoja7 = conCipm ? `
+<div class="salto-pagina"></div>
+${cabecera(pagina(7))}
+<h2 class="compacta">${bi("Declaración CIPM MRA", "CIPM MRA statement")}</h2>
+${CIPM_MRA.map(([es, en]) => parrafo(es, en)).join("")}
+<p class="fin"><b>Fin del certificado de calibración</b> <i>(End of calibration certificate)</i></p>` : "";
 
   const t = (x: number) => x / FACTOR_TONF;
   const anexo = `
@@ -215,8 +249,8 @@ ${cabecera(`Anexo · Página 1 de 1 <i>(Annex · Page 1 of 1)</i>`)}
 <h2 class="compacta">${bi("Anexo · Transformación de unidades", "Annex · Unit conversion")} · ${esc(sentido)}</h2>
 <p class="nota legal">1 tonf = ${fg(FACTOR_TONF, 4)} kN (factor de la planilla del laboratorio).</p>
 ${tablaRep(["F / tonf", ...[0, 1, 2, 3, 4].map((j) => `+${fx(t((Fmin / 10) * j), 2)}`)], (R.tabla ?? []).map((x: any) => [fx(t(x.F), 2), ...x.S.map((s: number) => fx(s, 5))]),
-    bi("Tabla de interpolación (S en mV/V)", "Interpolation table"))}
+    bi(`Tabla de interpolación (S en ${uS})`, "Interpolation table"))}
 ${tablaRep(["F / tonf", `U (k = ${fg(k, 2)}) / %`], rows.map((x) => [fx(t(x.F), 2), umin(x)]), bi("Incertidumbre expandida", "Expanded uncertainty"))}`;
 
-  return { html: hoja1 + hoja2 + hoja3 + hoja4 + hoja5 + hoja6 + anexo, hojas: N + 1 };
+  return { html: hoja1 + hoja2 + hoja3 + hoja4 + hoja5 + hoja6 + hoja7 + anexo, hojas: N + 1 };
 }

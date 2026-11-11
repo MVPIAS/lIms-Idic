@@ -14,6 +14,7 @@ import {
   resolverAmbito,
 } from "./alcance";
 import { Perfil, ROLES_SIEMPRE_GLOBALES, codigoCanonico, definicionAmbito } from "./rbac.constants";
+import { aplicarPerfil } from "./perfil-activo";
 
 /** Usuario tal como lo deja JwtStrategy en req.user. */
 export interface UsuarioReq {
@@ -51,6 +52,8 @@ export interface ContextoAlcance {
   asignaciones: AsignacionDetalle[];
   asignacionesVigentes: AsignacionDetalle[];
   jefaturas: (JefaturaAlcance & { rol: string })[];
+  /** Perfil activo (unidad) elegido por la persona con jefaturas duales (R1); null = todas sus asignaciones. */
+  perfilActivo?: string | null;
 }
 
 const TTL_ARBOL_MS = 30_000;
@@ -141,14 +144,31 @@ export class AlcanceService {
     return filas;
   }
 
+  /** Unidad del perfil activo de la persona (R1); null si no eligió (o la base no tiene la tabla). */
+  async perfilActivoDe(usuarioId: string): Promise<string | null> {
+    try {
+      const f = await this.prisma.$queryRawUnsafe<{ unidad_id: string | null }[]>(
+        `SELECT unidad_id FROM usuario_perfil_activo WHERE usuario_id = $1::uuid`,
+        usuarioId,
+      );
+      return f?.[0]?.unidad_id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async contexto(usuarioId: string, tenantId?: string, rolesJwt: string[] = []): Promise<ContextoAlcance> {
-    const [arbol, asignaciones, jefaturas] = await Promise.all([
+    const [arbol, asignaciones, todasJefaturas, unidadPerfil] = await Promise.all([
       this.arbol(tenantId),
       this.asignacionesDe(usuarioId),
       this.jefaturasDe(usuarioId),
+      this.perfilActivoDe(usuarioId),
     ]);
     const ahora = new Date();
-    const vigentes = asignaciones.filter((a) => esVigente(a, ahora));
+    // Perfil activo (R1): solo las asignaciones y la jefatura de esa unidad (más las sin unidad).
+    const perfil = aplicarPerfil(unidadPerfil, asignaciones.filter((a) => esVigente(a, ahora)), todasJefaturas);
+    const vigentes = perfil.asignaciones;
+    const jefaturas = perfil.jefaturas;
     let { esGlobal, unidadIds } = calcularAlcance(vigentes, jefaturas, arbol, ahora);
     // Un SUPERADMIN del token (p. ej. el admin creado por CLI) ve todo aunque
     // su asignación aún no esté en BD.
@@ -168,6 +188,7 @@ export class AlcanceService {
       asignaciones,
       asignacionesVigentes: vigentes,
       jefaturas,
+      perfilActivo: perfil.aplicado ? unidadPerfil : null,
     };
   }
 

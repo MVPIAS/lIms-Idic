@@ -9,6 +9,8 @@ import { fechaHora } from "@/lib/format";
 export default function MetodosCatPage() {
   // Método cuyo «Historial de versiones» está abierto (contrato §4.3.3).
   const [historial, setHistorial] = useState<{ id: string; codigo: string } | null>(null);
+  // Redondeo del resultado y condiciones ambientales del método (R7 LPN, R8 LME).
+  const [reglas, setReglas] = useState<{ id: string; codigo: string } | null>(null);
   return (
     <>
     <CrudTable
@@ -57,12 +59,19 @@ export default function MetodosCatPage() {
         placeholder: "p. ej. Nueva edición de la norma NCh 2018",
       }}
       accionesFila={(row) => (
-        <button type="button" className="btn outline sm" onClick={() => setHistorial({ id: String(row.id), codigo: String(row.codigo ?? "") })}>
-          Historial de versiones
-        </button>
+        <>
+          <button type="button" className="btn outline sm" onClick={() => setHistorial({ id: String(row.id), codigo: String(row.codigo ?? "") })}>
+            Historial de versiones
+          </button>{" "}
+          <button type="button" className="btn outline sm" title="Decimales del resultado (redondeo) y condiciones ambientales en la captura"
+            onClick={() => setReglas({ id: String(row.id), codigo: String(row.codigo ?? "") })}>
+            Resultado y condiciones
+          </button>
+        </>
       )}
     />
     {historial && <HistorialVersiones metodo={historial} onCerrar={() => setHistorial(null)} />}
+    {reglas && <ReglasResultado metodo={reglas} onCerrar={() => setReglas(null)} />}
     </>
   );
 }
@@ -130,6 +139,54 @@ function HistorialVersiones({ metodo, onCerrar }: { metodo: { id: string; codigo
           </tbody>
         </table>
       )}
+    </Modal>
+  );
+}
+
+/**
+ * Reglas del resultado del método (R7, R8): cuántos decimales tiene el resultado final
+ * (p. ej. el brillo en enteros) y si las condiciones ambientales se piden al capturar.
+ */
+function ReglasResultado({ metodo, onCerrar }: { metodo: { id: string; codigo: string }; onCerrar: () => void }) {
+  const [dec, setDec] = useState<string>("");
+  const [cond, setCond] = useState<string>("opcional");
+  const [cargado, setCargado] = useState(false);
+  const [ocupado, setOcupado] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    llamar<{ data: { decimales: number | null; condiciones: string } }>("GET", `/cat/metodos/${metodo.id}/reglas-resultado`)
+      .then((r) => { setDec(r.data.decimales == null ? "" : String(r.data.decimales)); setCond(r.data.condiciones); setCargado(true); })
+      .catch((e) => setError(e.message));
+  }, [metodo.id]);
+  async function guardar() {
+    setOcupado(true); setError("");
+    try {
+      await llamar("PUT", `/cat/metodos/${metodo.id}/reglas-resultado`, { decimales: dec === "" ? null : Number(dec), condiciones: cond });
+      onCerrar();
+    } catch (e: any) { setError(e.message); }
+    finally { setOcupado(false); }
+  }
+  return (
+    <Modal titulo={`Resultado y condiciones · ${metodo.codigo}`} onCerrar={onCerrar} ancho={560}
+      acciones={<><button className="btn outline sm" onClick={onCerrar}>Cancelar</button><button className="btn primary sm" disabled={!cargado || ocupado} onClick={guardar}>Guardar</button></>}>
+      {error && <div className="alert warn" role="alert">{error}</div>}
+      <div className="field">
+        <label htmlFor="rr-dec">Decimales del resultado final</label>
+        <select id="rr-dec" value={dec} onChange={(e) => setDec(e.target.value)}>
+          <option value="">Sin redondeo (como se calcula)</option>
+          <option value="0">0 · entero (p. ej. brillo)</option>
+          {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={String(n)}>{n} decimal{n > 1 ? "es" : ""}</option>)}
+        </select>
+        <small style={{ color: "var(--muted)" }}>Se redondea al medio hacia arriba (0,5 → 1) y el veredicto se decide con el valor redondeado, que es el que se informa.</small>
+      </div>
+      <div className="field">
+        <label htmlFor="rr-cond">Condiciones ambientales (temperatura y humedad) al capturar</label>
+        <select id="rr-cond" value={cond} onChange={(e) => setCond(e.target.value)}>
+          <option value="no_aplica">No aplican a este ensayo (no se piden ni se guardan)</option>
+          <option value="opcional">Opcionales</option>
+          <option value="obligatoria">Obligatorias</option>
+        </select>
+      </div>
     </Modal>
   );
 }
