@@ -43,6 +43,8 @@ export interface EnsayoEditable {
   analito: string;
   metodo: string | null;
   tipoDato: "numerico" | "atributo";
+  /** con_condicion (o null) | sin_condicion | solo_resultado: sin Cumple / No cumple. */
+  evaluacion?: string | null;
   limiteInf: string | null;
   nominal: string | null;
   limiteSup: string | null;
@@ -182,6 +184,7 @@ export default function EditorEnsayo({
   const cat = e.especCatalogo ?? {};
   const [esp, setEsp] = useState({
     tipoDato: e.tipoDato,
+    evaluacion: e.evaluacion ?? "con_condicion",
     limiteInf: limiteConComa(e.limiteInf),
     nominal: limiteConComa(e.nominal),
     limiteSup: limiteConComa(e.limiteSup),
@@ -236,6 +239,9 @@ export default function EditorEnsayo({
   const [motivoClase, setMotivoClase] = useState("");
   const [motivoCaptura, setMotivoCaptura] = useState(e.reanalisis?.estado === "solicitado" ? `Re-análisis: ${e.reanalisis.motivo}`.slice(0, 1000) : "");
   const [motivoEsp, setMotivoEsp] = useState("");
+  // Requisito sin condición o solo resultado: se anota el valor (número o texto), sin Cumple / No cumple.
+  const sinCondicion = !!e.evaluacion && e.evaluacion !== "con_condicion";
+  const comoAtributo = e.tipoDato === "atributo" && !sinCondicion;
   // Factor
   const [factorOp, setFactorOp] = useState<"" | "multiplicar" | "dividir">(e.factorOperacion ?? "");
   const [factorValor, setFactorValor] = useState(e.factorValor != null && e.factorValor !== "" ? String(Number(e.factorValor)).replace(".", ",") : "");
@@ -257,8 +263,8 @@ export default function EditorEnsayo({
     puedeCapturar && (esJefatura || vacio(cat[k]) || (k === "tipoDato" && ["limiteInf", "nominal", "limiteSup", "requisito"].every((c) => vacio(cat[c]))));
   const cambiosEsp = useMemo(() => {
     const out: Record<string, string | null> = {};
-    const actual: Record<string, any> = { ...e, tipoDato: e.tipoDato };
-    for (const k of ["tipoDato", "limiteInf", "nominal", "limiteSup", "unidad", "requisito", "formula"] as const) {
+    const actual: Record<string, any> = { ...e, tipoDato: e.tipoDato, evaluacion: e.evaluacion ?? "con_condicion" };
+    for (const k of ["tipoDato", "evaluacion", "limiteInf", "nominal", "limiteSup", "unidad", "requisito", "formula"] as const) {
       const a = vacio(actual[k]) ? "" : String(actual[k]).trim();
       const n = limiteConPunto(k, String((esp as any)[k] ?? "").trim());
       if (a !== n) out[k] = n === "" ? null : n;
@@ -269,7 +275,7 @@ export default function EditorEnsayo({
   // Cambiar lo que trajo el catálogo, el tipo (con especificación) o la fórmula lo hace la jefatura con motivo.
   const catalogoTraeEspec = ["limiteInf", "nominal", "limiteSup", "requisito"].some((k) => !vacio(cat[k]));
   const espRequiereMotivo = Object.keys(cambiosEsp).some((k) =>
-    k === "formula" ? true : k === "tipoDato" ? catalogoTraeEspec : !vacio(cat[k]),
+    k === "formula" || k === "evaluacion" ? true : k === "tipoDato" ? catalogoTraeEspec : !vacio(cat[k]),
   );
 
   async function guardarEspecificacion() {
@@ -292,7 +298,7 @@ export default function EditorEnsayo({
 
   async function guardarCaptura() {
     let cuerpo: any;
-    if (e.tipoDato === "atributo") {
+    if (comoAtributo) {
       if (!atributo) { toast.error("Elija Cumple o No cumple."); return; }
       if (atributo === "no_cumple" && !observacion.trim()) { toast.error("Indique la observación: qué no cumple y por qué."); return; }
       cuerpo = { atributo, valor: valor.trim() || undefined, observacion: observacion.trim() || undefined };
@@ -429,6 +435,16 @@ export default function EditorEnsayo({
             <select id={`td-${e.id}`} value={esp.tipoDato} disabled={!editable("tipoDato")} onChange={(x) => setEsp({ ...esp, tipoDato: x.target.value as any })}>
               <option value="numerico">Numérico (veredicto por Mín / Máx)</option>
               <option value="atributo">Atributo (Cumple / No cumple)</option>
+            </select>
+          </div>
+          <div className={`field${esJefatura && puedeCapturar ? "" : " readonly"}`}>
+            <label htmlFor={`ev-${e.id}`}>Evaluación</label>
+            <select id={`ev-${e.id}`} value={esp.evaluacion} disabled={!(esJefatura && puedeCapturar)}
+              title="Con condición: Cumple / No cumple. Sin condición: el requisito se informa como referencia. Solo resultado: ni requisito ni condición."
+              onChange={(x) => setEsp({ ...esp, evaluacion: x.target.value })}>
+              <option value="con_condicion">Con condición (Cumple / No cumple)</option>
+              <option value="sin_condicion">Requisito sin condición</option>
+              <option value="solo_resultado">Solo resultado</option>
             </select>
           </div>
           {CAMPOS.map((c) => (
@@ -593,7 +609,7 @@ export default function EditorEnsayo({
               Guardado con avisos de aceptación: {e.avisosAceptacion.map((a) => a.texto).join(" ")}
             </p>
           )}
-          {e.tipoDato === "atributo" ? (
+          {comoAtributo ? (
             <div className="form-grid cols-3" style={{ marginTop: 6 }}>
               <div className="field">
                 <label id={`va-${e.id}`}>Veredicto del analista <span className="req">*</span></label>

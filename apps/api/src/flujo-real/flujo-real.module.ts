@@ -36,7 +36,7 @@ import { motivoNoCapturable } from "../laboratorio/flujo-resultado";
 import { bloqueosQcDeOt, exigirQcParaEjecutar } from "../qc/qc-ejecucion";
 import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laboratorio.module";
 import { traducirFormula } from "../laboratorio/formula-legado";
-import { planEdicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
+import { EVALUACIONES, evaluacionDe, planEdicion, sinCondicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
 import { calcularCaptura, CapturaError, variablesDeCaptura } from "../laboratorio/captura-estandar";
 import { evaluarReglas, leerReglas, modoReglas, textoRegla, type AvisoAceptacion, type ModoReglas } from "../laboratorio/reglas-aceptacion";
 import { leerCondicion2, leerPlanClases } from "../laboratorio/requisito-compuesto";
@@ -573,6 +573,8 @@ const EspecificacionBody = z.object({
   requisito: z.string().max(2000).nullable().optional(),
   tipoDato: z.enum(["numerico", "atributo"]).optional(),
   formula: z.string().max(500).nullable().optional(),
+  /** Con condición, requisito sin condición o solo resultado (jefatura). */
+  evaluacion: z.enum(EVALUACIONES).optional(),
   /** Motivo (obligatorio cuando la jefatura cambia lo que vino del catálogo o la fórmula). */
   motivo: z.string().trim().max(1000).optional(),
 });
@@ -881,6 +883,8 @@ export class PuenteAnalisisService {
         ? `${espec!.requisitos!.trim()}${primero(espec?.texto) ? ` (${espec!.texto!.trim()})` : ""}`
         : null;
       const tipoDato = tipoDatoDe({ limiteInf, nominal, limiteSup, requisito });
+      // Con condición (null), requisito sin condición o solo resultado: lo fija el catálogo.
+      const evaluacion = espec?.evaluacion && sinCondicion(espec.evaluacion) ? espec.evaluacion : null;
       // La fórmula se guarda ya en la sintaxis del motor (traducida del LIMS
       // antiguo cuando se puede); la original queda en la copia del catálogo.
       const trad = traducirFormula(a.formula);
@@ -903,9 +907,10 @@ export class PuenteAnalisisService {
           limiteSup,
           requisito,
           tipoDato,
+          evaluacion,
           especOrigen: "catalogo",
           especCatalogo: {
-            limiteInf, nominal, limiteSup, unidad, requisito, tipoDato,
+            limiteInf, nominal, limiteSup, unidad, requisito, tipoDato, evaluacion,
             formula: trad.expr,
             ...(a.formula && !trad.expr ? { formulaLegado: a.formula, formulaMotivo: trad.motivo ?? null } : {}),
           },
@@ -1046,6 +1051,7 @@ export class PuenteAnalisisService {
         {
           criterioLd: await this.criterioLd(tenantId),
           tipoDato, limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup, formula: resultado.formula,
+          evaluacion: resultado.evaluacion,
           factor: factorDe(resultado.factorValor, resultado.factorOperacion, resultado.factorDescripcion),
           // Requisito compuesto desde la E.T. (plan de clases, segunda condición).
           planClases: leerPlanClases(resultado.planClases),
@@ -1263,6 +1269,7 @@ export class PuenteAnalisisService {
       limiteInf: resultado.limiteInf, nominal: resultado.nominal, limiteSup: resultado.limiteSup,
       unidad: resultado.unidad, requisito: resultado.requisito, formula: resultado.formula,
       tipoDato: resultado.tipoDato ?? tipoDatoDe({ ...resultado }),
+      evaluacion: evaluacionDe(resultado.evaluacion),
     };
     const catalogo = (resultado.especCatalogo ?? {}) as Especificacion;
     const plan = planEdicion(actual, catalogo, pedido as Especificacion);
@@ -1290,7 +1297,11 @@ export class PuenteAnalisisService {
 
     // Veredicto con la nueva especificación (si ya hay valor numérico).
     let veredicto = resultado.veredicto;
-    if (nueva.tipoDato === "atributo" && actual.tipoDato !== "atributo" && resultado.estado !== "pendiente") veredicto = "pendiente";
+    const conValor = resultado.estado !== "pendiente" || resultado.valorNumerico != null || !!resultado.valorTexto;
+    if (sinCondicion(nueva.evaluacion)) veredicto = conValor ? "informativo" : resultado.veredicto;
+    // Vuelve a tener condición: un atributo lo decide de nuevo el analista o el revisor.
+    else if (sinCondicion(actual.evaluacion) && nueva.tipoDato === "atributo" && conValor) veredicto = "pendiente";
+    else if (nueva.tipoDato === "atributo" && actual.tipoDato !== "atributo" && resultado.estado !== "pendiente") veredicto = "pendiente";
     else if (nueva.tipoDato !== "atributo" && resultado.valorNumerico != null) {
       const n = (v?: string | null) => (v != null && /^\s*[+-]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(v) ? Number(v.replace(",", ".")) : null);
       veredicto = veredictoNumerico(Number(resultado.valorNumerico), n(nueva.limiteInf), n(nueva.limiteSup));
@@ -1311,6 +1322,7 @@ export class PuenteAnalisisService {
         ...("requisito" in plan.cambios ? { requisito: plan.cambios.requisito } : {}),
         ...("tipoDato" in plan.cambios ? { tipoDato: plan.cambios.tipoDato } : {}),
         ...("formula" in plan.cambios ? { formula: plan.cambios.formula } : {}),
+        ...("evaluacion" in plan.cambios ? { evaluacion: plan.cambios.evaluacion === "con_condicion" ? null : plan.cambios.evaluacion } : {}),
         // Copia del catálogo: se fija la primera vez (resultados anteriores a esta versión).
         ...(resultado.especCatalogo ? {} : { especCatalogo: actual as any }),
         especOrigen: "orden",
@@ -1327,7 +1339,7 @@ export class PuenteAnalisisService {
       await cerrarReanalisisAutomatico(this.prisma as any, {
         resultadoId: id,
         usuarioId: req?.user?.sub ?? null,
-        motivo: `Sin efecto: con la especificación de la orden el veredicto pasó a «${veredicto === "cumple" ? "Cumple" : "Pendiente"}».`,
+        motivo: `Sin efecto: con la especificación de la orden el veredicto pasó a «${veredicto === "cumple" ? "Cumple" : veredicto === "informativo" ? "Informativo" : "Pendiente"}».`,
       });
     const veredictoDeLaMuestra = await recalcularVeredictoMuestra(this.prisma, resultado.muestraId);
     return { ...actualizado, camposEditados: plan.campos, veredictoMuestra: veredictoDeLaMuestra };

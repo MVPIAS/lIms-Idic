@@ -310,6 +310,7 @@ export class PlantillaRenderService {
         valorCondicion2: num(r.valorCondicion2),
         derivadoA: derivados.get(r.id) ?? null,
         tipoDato: r.tipoDato,
+        evaluacion: legado ? null : r.evaluacion ?? null,
         valorNumerico: num(r.valorNumerico),
         valorTexto: r.valorTexto,
         resultadoFinal: num(r.resultadoFinal),
@@ -814,7 +815,8 @@ export class PlantillaRenderService {
     if (sinNombre)
       avisos.push(`${sinNombre} ensayo(s) sin nombre en el catálogo: se imprimen como «Ensayo sin nombre en el catálogo».`);
     if (modalidad === "cumplimiento") {
-      const sinReq = ctx.paraInforme.filter((r) => !tieneRequisito(r)).length;
+      // «Solo resultado» es una decisión del laboratorio, no una falta.
+      const sinReq = ctx.paraInforme.filter((r) => !tieneRequisito(r) && r.evaluacion !== "solo_resultado").length;
       if (sinReq)
         avisos.push(
           `${sinReq} de ${ctx.paraInforme.length} ensayo(s) sin requisito: en el informe de cumplimiento salen como «No especificado» (informativo).`,

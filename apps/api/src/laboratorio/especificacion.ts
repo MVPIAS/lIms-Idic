@@ -14,6 +14,31 @@ import { normalizarVeredicto, type Veredicto } from "./veredicto";
 
 export type TipoDato = "numerico" | "atributo";
 
+/**
+ * Cómo se evalúa el ensayo (sesiones Químico 29-10, LPN 30-10, LME 02-11):
+ *   · con_condicion  · Cumple / No cumple contra el requisito (por defecto);
+ *   · sin_condicion  · el requisito se informa como referencia, sin veredicto;
+ *   · solo_resultado · solo el valor: ni requisito ni condición.
+ * En los dos últimos el veredicto es «informativo».
+ */
+export const EVALUACIONES = ["con_condicion", "sin_condicion", "solo_resultado"] as const;
+export type Evaluacion = (typeof EVALUACIONES)[number];
+export const ETIQUETA_EVALUACION: Record<Evaluacion, string> = {
+  con_condicion: "Con condición (Cumple / No cumple)",
+  sin_condicion: "Requisito sin condición",
+  solo_resultado: "Solo resultado",
+};
+
+/** Lleva cualquier valor guardado a una evaluación; null o desconocido → con_condicion. */
+export function evaluacionDe(v: string | null | undefined): Evaluacion {
+  return v === "sin_condicion" || v === "solo_resultado" ? v : "con_condicion";
+}
+
+/** ¿El ensayo se informa sin Cumple / No cumple? */
+export function sinCondicion(v: string | null | undefined): boolean {
+  return evaluacionDe(v) !== "con_condicion";
+}
+
 /** ¿El texto es un número (admite coma decimal)? */
 export function esNumeroTexto(v: string | null | undefined): boolean {
   return /^\s*[+-]?(\d+([.,]\d+)?|[.,]\d+)\s*$/.test(String(v ?? ""));
@@ -52,7 +77,7 @@ export function veredictoMuestra(veredictos: (string | null | undefined)[]): Ver
   return "cumple";
 }
 
-export const CAMPOS_ESPEC = ["limiteInf", "nominal", "limiteSup", "unidad", "requisito", "tipoDato", "formula"] as const;
+export const CAMPOS_ESPEC = ["limiteInf", "nominal", "limiteSup", "unidad", "requisito", "tipoDato", "formula", "evaluacion"] as const;
 export type CampoEspec = (typeof CAMPOS_ESPEC)[number];
 export type Especificacion = Partial<Record<CampoEspec, string | null>>;
 
@@ -81,6 +106,8 @@ export function planEdicion(
     cambios[c] = nuevo;
     campos.push(c);
     if (c === "formula") requiereJefatura = true;
+    // Quitar o poner la condición cambia el veredicto del informe: siempre jefatura.
+    else if (c === "evaluacion") requiereJefatura = true;
     else if (c === "tipoDato") {
       // El tipo es solo un valor por defecto si el catálogo no traía especificación.
       if (catalogoTraeEspec) requiereJefatura = true;
