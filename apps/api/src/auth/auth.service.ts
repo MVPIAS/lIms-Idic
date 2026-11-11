@@ -1,3 +1,5 @@
+import { hayVariosPerfiles, opcionesPerfil } from "../rbac/perfil-activo";
+import { esVigente } from "../rbac/alcance";
 import { LOCK_MS, MAX_INTENTOS_FALLIDOS } from "./bloqueo";
 import { Injectable, UnauthorizedException, BadRequestException, Inject } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
@@ -275,6 +277,42 @@ export class AuthService {
       },
     });
     return { ok: true, mensaje: "Contraseña actualizada.", ...(await this.emitirSesion(actualizado)) };
+  }
+
+  /**
+   * Perfiles que puede elegir una persona con varias jefaturas o roles en unidades
+   * distintas (R1), y el que tiene activo. Con menos de dos, no se ofrece selector.
+   */
+  async perfiles(usuarioId: string, tenantId?: string) {
+    const [arbol, asignaciones, jefaturas, activo] = await Promise.all([
+      this.alcance.arbol(tenantId),
+      this.alcance.asignacionesDe(usuarioId),
+      this.alcance.jefaturasDe(usuarioId),
+      this.alcance.perfilActivoDe(usuarioId),
+    ]);
+    const ahora = new Date();
+    const opciones = opcionesPerfil(
+      asignaciones.filter((a) => esVigente(a, ahora)).map((a) => ({ unidadId: a.unidadId, rolCodigo: a.rolCodigo, rolNombre: a.rolNombre })),
+      jefaturas,
+      (id) => arbol.porId.get(id) ?? null,
+    );
+    return { opciones: hayVariosPerfiles(opciones) ? opciones : [], activo: opciones.some((o) => o.unidadId === activo) ? activo : null };
+  }
+
+  /** Elige el perfil activo (o null = todos) y devuelve una sesión nueva con sus permisos. */
+  async elegirPerfil(usuarioId: string, tenantId: string | undefined, unidadId: string | null) {
+    const { opciones } = await this.perfiles(usuarioId, tenantId);
+    if (unidadId && !opciones.some((o) => o.unidadId === unidadId))
+      throw new BadRequestException("Ese perfil no corresponde a sus jefaturas o roles vigentes.");
+    if (unidadId)
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO usuario_perfil_activo (usuario_id, unidad_id, actualizado_en) VALUES ($1::uuid, $2::uuid, now())
+         ON CONFLICT (usuario_id) DO UPDATE SET unidad_id = EXCLUDED.unidad_id, actualizado_en = now()`,
+        usuarioId, unidadId);
+    else await this.prisma.$executeRawUnsafe(`DELETE FROM usuario_perfil_activo WHERE usuario_id = $1::uuid`, usuarioId);
+    const usuario = await this.prisma.usuario.findFirst({ where: { id: usuarioId, deletedAt: null, estado: "activo" } });
+    if (!usuario) throw new UnauthorizedException();
+    return { ok: true, perfil: unidadId, ...(await this.emitirSesion(usuario)) };
   }
 
   /** ¿Es un usuario de prueba? Tolera bases sin align_accesos_demo.sql. */

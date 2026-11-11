@@ -1,3 +1,4 @@
+import { leyendaReemision, type ModalidadReemision } from "../common/leyenda-reemision";
 import { portadaDesdeEncargo } from "../ot/encargo/reglas-encargo";
 import { nombreItemInspeccion } from "../especificacion-tecnica/reglas-et";
 import { observacionConDecision } from "../laboratorio/veredicto-decidido";
@@ -68,7 +69,7 @@ import {
   type FotoInforme,
   type IdentificacionMuestra,
 } from "./bloques-informe";
-import { anioChile } from "../common/fecha-chile";
+import { anioChile, diaChile } from "../common/fecha-chile";
 import { leerCondicion2 } from "../laboratorio/requisito-compuesto";
 import { urlVerificacionBase } from "../common/url-verificacion";
 import { aplanarVariables } from "./plantilla-versiones";
@@ -121,6 +122,11 @@ export interface OpcionesEmision {
   tipoDocumento?: string;
   /** Reemisión: id del documento devuelto o anulado que se sustituye (nueva versión). */
   reemplazaId?: string;
+  /**
+   * Reemisión de un documento OFICIAL (R9): «modificacion» conserva el número con la versión
+   * siguiente; «reemplazo» toma un número nuevo. Ambas imprimen su leyenda y anulan el anterior.
+   */
+  reemision?: { modalidad: ModalidadReemision; motivo: string };
   /** Informe de cumplimiento o de solo resultados (por defecto, el sugerido). */
   modalidad?: Modalidad;
   datosInforme?: DatosInforme;
@@ -718,7 +724,7 @@ export class PlantillaRenderService {
     plantillaId: string,
     tenantId: string | undefined,
     cert: { numero: string; codigoVerificacion: string; fecha: Date },
-    opciones: { modalidad?: Modalidad; datos?: DatosInforme; filtro?: FiltroDocumento | null; version?: VersionPlantilla | null } = {},
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme; filtro?: FiltroDocumento | null; version?: VersionPlantilla | null; leyenda?: string | null } = {},
   ) {
     const plantilla = await this.prisma.plantillaInforme.findUnique({ where: { id: plantillaId } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
@@ -803,7 +809,11 @@ export class PlantillaRenderService {
       if (extra.datos && !(clave in datos)) datos[clave] = extra.datos;
       for (const [k, v] of Object.entries(extra.bloques ?? {})) if (!(k in bloques)) bloques[k] = v;
     }
-    const { html: cuerpoRenderizado, faltantes } = renderizar(cuerpo, datos, bloques);
+    const { html: cuerpoBase, faltantes } = renderizar(cuerpo, datos, bloques);
+    // Documento modificado o de reemplazo (R9): la leyenda va al inicio y entra en el sello.
+    const cuerpoRenderizado = opciones.leyenda
+      ? `<p class="reemplaza"><b>${escapeHtml(opciones.leyenda)}</b></p>\n${cuerpoBase}`
+      : cuerpoBase;
 
     if (faltantes.length)
       avisos.push(`Placeholders sin dato en el expediente (se emiten vacíos): ${faltantes.join(", ")}.`);
@@ -1531,14 +1541,18 @@ export class PlantillaRenderService {
       plantillaId: string | null;
       otId: string;
       tipoDocumento: string | null;
+      fecha?: Date | null;
     } | null = null;
     if (opts.reemplazaId) {
       previo = await this.prisma.certificado.findFirst({
         where: { id: opts.reemplazaId, tenantId, deletedAt: null },
-        select: { id: true, numero: true, codigo: true, version: true, estado: true, plantillaId: true, otId: true, tipoDocumento: true },
+        select: { id: true, numero: true, codigo: true, version: true, estado: true, plantillaId: true, otId: true, tipoDocumento: true, fecha: true },
       });
       if (!previo) throw new NotFoundException(`Documento ${opts.reemplazaId} no encontrado`);
-      if (previo.estado !== "devuelto" && previo.estado !== "anulado")
+      // R9: un documento oficial se modifica o se reemplaza (opts.reemision); el resto, solo devuelto o anulado.
+      if (opts.reemision && !esOficial(previo.estado))
+        throw new ConflictException(`Solo se modifica o reemplaza un documento oficial; ${previo.numero ?? previo.codigo} está ${previo.estado}.`);
+      if (!opts.reemision && previo.estado !== "devuelto" && previo.estado !== "anulado")
         throw new ConflictException(
           `Solo se reemite un documento devuelto o anulado; ${previo.numero ?? previo.codigo} está ${previo.estado}.`,
         );
@@ -1586,9 +1600,17 @@ export class PlantillaRenderService {
     // La transacción cubre: reservar correlativo -> renderizar con ese número
     // -> insertar documento y pasos de firma. El render va dentro porque el
     // CUERPO IMPRIME el número, así que el hash depende de él.
+    // R9: el reemplazo toma número nuevo (versión 1); la modificación, la versión siguiente.
+    const reemplazo = opts.reemision?.modalidad === "reemplazo";
+    const leyenda = anterior && opts.reemision
+      ? leyendaReemision({
+          modalidad: opts.reemision.modalidad, tipo: "documento", numeroAnterior: anterior.numero ?? anterior.codigo,
+          fechaAnterior: anterior.fecha ? diaChile(anterior.fecha) : null, motivo: opts.reemision.motivo,
+        })
+      : null;
     const emitido = await this.prisma.$transaction(async (tx) => {
-      const version = anterior ? anterior.version + 1 : 1;
-      const oficial = anterior
+      const version = anterior && !reemplazo ? anterior.version + 1 : 1;
+      const oficial = anterior && !reemplazo
         ? null
         : await this.numeroOficial(tx, {
             tenantId,
@@ -1599,14 +1621,14 @@ export class PlantillaRenderService {
             otCodigo: cond.ot.codigo,
             muestraCodigo: cond.muestraCodigo,
           });
-      const numero = anterior ? numeroVersion(anterior.numero ?? anterior.codigo, version) : oficial!.numero;
+      const numero = anterior && !reemplazo ? numeroVersion(anterior.numero ?? anterior.codigo, version) : oficial!.numero;
 
       const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad, version: versionUsada } = await this.render(
         otId,
         plantillaId,
         tenantId,
         { numero, codigoVerificacion, fecha },
-        { modalidad: opts.modalidad, datos: opts.datosInforme, filtro: cober.filtro },
+        { modalidad: opts.modalidad, datos: opts.datosInforme, filtro: cober.filtro, leyenda },
       );
 
       const cert = await tx.certificado.create({
@@ -1667,6 +1689,19 @@ export class PlantillaRenderService {
 
       // Reemisión desde un documento devuelto: el devuelto queda anulado; la
       // nueva versión apunta a él por reemplaza_id.
+      // R9: el documento oficial modificado o reemplazado queda anulado con su motivo.
+      if (anterior && opts.reemision && esOficial(anterior.estado)) {
+        const que = opts.reemision.modalidad === "modificacion" ? "Modificado" : "Reemplazado";
+        await tx.certificado.update({
+          where: { id: anterior.id },
+          data: {
+            estado: "anulado",
+            anuladoAt: fecha,
+            anuladoPor: usuarioId ?? null,
+            anuladoMotivo: `${que} por ${numero}: ${opts.reemision.motivo}`.slice(0, 1000),
+          },
+        });
+      }
       if (anterior && anterior.estado === "devuelto") {
         await tx.certificado.update({
           where: { id: anterior.id },

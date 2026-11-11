@@ -248,6 +248,8 @@ export const NAV: SeccionNav[] = [
 export interface AlcanceMenu {
   ambitos?: Record<string, boolean>;
   permisosPorAmbito?: Record<string, string[]>;
+  /** Rutas ocultas por el parámetro «menu · ocultos» (módulos heredados que el IDIC no usa; R1, R10). */
+  menuOculto?: string[];
 }
 
 /**
@@ -259,6 +261,7 @@ export interface AlcanceMenu {
  * responde 403 igualmente). Es la misma regla que aplica @AmbitoUnidad.
  */
 export function itemEnAmbito(i: ItemNav, alcance: AlcanceMenu | null | undefined): boolean {
+  if (alcance?.menuOculto?.includes(i.href.toLowerCase())) return false;
   if (!i.ambito || !alcance?.ambitos) return true;
   const porAmbito = alcance.permisosPorAmbito;
   const perms = i.perm ? ([] as string[]).concat(i.perm) : [];

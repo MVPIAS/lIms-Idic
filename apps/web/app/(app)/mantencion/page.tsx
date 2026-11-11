@@ -21,7 +21,7 @@ import { usePermisos } from "@/lib/permisos";
 import { toast } from "@/components/ui/feedback";
 import { ESTADO_EQUIPO_META } from "@/lib/equipos";
 
-type Pestana = "plan" | "calendario" | "reporte";
+type Pestana = "plan" | "programas" | "calendario" | "reporte";
 
 const fechaCl = (f: string | null | undefined) => (f ? f.slice(0, 10).split("-").reverse().join("-") : "—");
 const ESTADO: Record<string, { texto: string; pill: string }> = {
@@ -57,10 +57,12 @@ export default function MantencionPage() {
       </div>
       <div className="tabs" role="tablist" style={{ marginBottom: 12 }}>
         {tab("plan", "Plan preventivo")}
+        {tab("programas", "Programas auditables")}
         {tab("calendario", "Calendario")}
         {tab("reporte", "Reporte de gestión")}
       </div>
       {pestana === "plan" && <Plan />}
+      {pestana === "programas" && <Programas />}
       {pestana === "calendario" && <Calendario />}
       {pestana === "reporte" && <Reporte />}
     </div>
@@ -70,7 +72,7 @@ export default function MantencionPage() {
 /* ================================================================= plan === */
 
 const CORRECTIVA_VACIA = { equipoId: "", fecha: "", ejecutadaPor: "", descripcion: "", resultado: "conforme", costo: "", observaciones: "" };
-const PLAN_VACIO = { id: "", equipoId: "", tipo: "preventiva", descripcion: "", frecuenciaDias: "180", proximaFecha: "", proveedor: "" };
+const PLAN_VACIO = { id: "", equipoId: "", tipo: "preventiva", descripcion: "", frecuenciaDias: "180", proximaFecha: "", proveedor: "", programaId: "" };
 
 function Plan() {
   const { puede } = usePermisos();
@@ -83,6 +85,11 @@ function Plan() {
   const [ej, setEj] = useState({ fecha: "", ejecutadaPor: "", resultado: "conforme", costo: "", observaciones: "" });
   const [correctiva, setCorrectiva] = useState<typeof CORRECTIVA_VACIA | null>(null);
   const [historial, setHistorial] = useState<string | null>(null);
+  // Programas en borrador a los que se puede vincular una tarea (Químico, R5).
+  const [programas, setProgramas] = useState<any[]>([]);
+  useEffect(() => {
+    llamar<any[]>("GET", "/mantencion/programas").then((r) => setProgramas(r ?? [])).catch(() => setProgramas([]));
+  }, []);
   const cargar = useCallback(async () => {
     try {
       setPlanes(await llamar<any[]>("GET", `/mantencion/planes${qs({ estado: filtro || undefined })}`));
@@ -100,7 +107,7 @@ function Plan() {
   const guardar = async () => {
     if (!form) return;
     try {
-      const datos = { ...form, frecuenciaDias: Number(form.frecuenciaDias) };
+      const datos = { ...form, frecuenciaDias: Number(form.frecuenciaDias), programaId: form.programaId || null };
       if (form.id) await llamar("PATCH", `/mantencion/planes/${form.id}`, datos);
       else await llamar("POST", "/mantencion/planes", datos);
       toast.ok("Plan guardado.");
@@ -189,6 +196,15 @@ function Plan() {
           <div className="field" style={{ margin: 0 }}>
             <label htmlFor="pl-prox">Próxima fecha</label>
             <input id="pl-prox" type="date" value={form.proximaFecha} onChange={(e) => setForm({ ...form, proximaFecha: e.target.value })} />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="pl-prog">Programa auditable</label>
+            <select id="pl-prog" value={form.programaId} onChange={(e) => setForm({ ...form, programaId: e.target.value })}>
+              <option value="">(sin programa)</option>
+              {programas.filter((g) => g.estado === "borrador" || g.id === form.programaId).map((g) => (
+                <option key={g.id} value={g.id} disabled={g.estado !== "borrador"}>{g.codigo} · {g.anio}{g.estado !== "borrador" ? ` (${g.estado})` : ""}</option>
+              ))}
+            </select>
           </div>
           <div className="field" style={{ margin: 0 }}>
             <label htmlFor="pl-prov">Proveedor (opcional)</label>
@@ -291,7 +307,8 @@ function Plan() {
                 {planes.map((p) => (
                   <tr key={p.id}>
                     <td><b>{p.equipoCodigo}</b> {p.equipoNombre}<div style={{ fontSize: 11.5, color: "var(--muted)" }}>{p.laboratorio ?? "común"}</div></td>
-                    <td>{TIPO[p.tipo] ?? p.tipo} · {p.descripcion}{p.proveedor ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{p.proveedor}</div> : null}</td>
+                    <td>{TIPO[p.tipo] ?? p.tipo} · {p.descripcion}{p.proveedor ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{p.proveedor}</div> : null}
+                      {p.programaCodigo ? <div style={{ fontSize: 11.5 }}><span className="pill teal">{p.programaCodigo}</span></div> : null}</td>
                     <td>{p.frecuenciaDias} días</td>
                     <td>{fechaCl(p.proximaFecha)}</td>
                     <td>{fechaCl(p.ultimaEjecucion)}</td>
@@ -301,7 +318,7 @@ function Plan() {
                       {gestiona && (
                         <>
                         {" "}<button className="btn sm" onClick={() => { setEjecutando(p); setEj({ fecha: hoyChile(), ejecutadaPor: "", resultado: "conforme", costo: "", observaciones: "" }); }}>Registrar hecha</button>{" "}
-                        <button className="btn outline sm" onClick={() => setForm({ ...PLAN_VACIO, ...p, frecuenciaDias: String(p.frecuenciaDias), proveedor: p.proveedor ?? "" })}>Editar</button>{" "}
+                        <button className="btn outline sm" onClick={() => setForm({ ...PLAN_VACIO, ...p, frecuenciaDias: String(p.frecuenciaDias), proveedor: p.proveedor ?? "", programaId: p.programaId ?? "" })}>Editar</button>{" "}
                         <button className="btn outline sm" onClick={() => baja(p)}>Baja</button>
                         </>
                       )}
@@ -313,6 +330,156 @@ function Plan() {
           </div>
         )}
       </section>
+    </>
+  );
+}
+
+/* ============================================================ programas === */
+
+const ESTADO_PROGRAMA: Record<string, { texto: string; pill: string }> = {
+  borrador: { texto: "Borrador", pill: "gray" },
+  aprobado: { texto: "Aprobado", pill: "green" },
+  cerrado: { texto: "Cerrado", pill: "blue" },
+};
+const PROGRAMA_VACIO = { id: "", codigo: "", nombre: "", anio: "", unidadId: "", documentoCodigo: "", observaciones: "" };
+
+/**
+ * Programas de mantención auditables (Químico, R5): registro del sistema de calidad
+ * que agrupa los planes de un laboratorio y año. Aprobado ya no se modifica; cada
+ * mantención ejecutada guarda su programa y aquí se ve el cumplimiento.
+ */
+function Programas() {
+  const { puede } = usePermisos();
+  const gestiona = puede("equipo.gestionar");
+  const [lista, setLista] = useState<any[] | null>(null);
+  const [labs, setLabs] = useState<{ id: string; codigo: string; nombre: string }[]>([]);
+  const [form, setForm] = useState<typeof PROGRAMA_VACIO | null>(null);
+  const [detalle, setDetalle] = useState<any | null>(null);
+  const cargar = useCallback(async () => {
+    try { setLista(await llamar<any[]>("GET", "/mantencion/programas")); } catch (e: any) { toast.error(e.message); }
+  }, []);
+  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    llamar<any>("GET", "/ot/laboratorios").then((r) => setLabs(Array.isArray(r) ? r : r?.data ?? [])).catch(() => setLabs([]));
+  }, []);
+  const guardar = async () => {
+    if (!form) return;
+    try {
+      const datos = { ...form, anio: Number(form.anio), unidadId: form.unidadId || null };
+      if (form.id) await llamar("PATCH", `/mantencion/programas/${form.id}`, datos);
+      else await llamar("POST", "/mantencion/programas", datos);
+      toast.ok("Programa guardado.");
+      setForm(null);
+      cargar();
+    } catch (e: any) { toast.error(e.message); }
+  };
+  const estado = async (g: any, accion: "aprobar" | "cerrar") => {
+    const texto = accion === "aprobar"
+      ? `¿Aprobar el programa ${g.codigo}? Ya no se podrá modificar ni cambiar sus tareas: queda como evidencia de auditoría.`
+      : `¿Cerrar el programa ${g.codigo}? Queda como evidencia con su cumplimiento.`;
+    if (!window.confirm(texto)) return;
+    try { await llamar("POST", `/mantencion/programas/${g.id}/${accion}`, {}); toast.ok(accion === "aprobar" ? "Programa aprobado." : "Programa cerrado."); cargar(); }
+    catch (e: any) { toast.error(e.message); }
+  };
+  const ver = async (id: string) => {
+    try { setDetalle(await llamar<any>("GET", `/mantencion/programas/${id}`)); } catch (e: any) { toast.error(e.message); }
+  };
+  return (
+    <>
+      <section className="card" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <p style={{ margin: 0, fontSize: 13, flex: 1 }}>
+          Cada programa agrupa las tareas de mantención de un laboratorio en un año. Vincule las tareas en «Plan preventivo» mientras el programa está en borrador;
+          al aprobarlo queda fijo y cada mantención registrada guarda su programa.
+        </p>
+        {gestiona && !form && <button className="btn primary sm" onClick={() => setForm({ ...PROGRAMA_VACIO, anio: hoyChile().slice(0, 4) })}>Nuevo programa</button>}
+      </section>
+      {form && (
+        <section className="card" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, alignItems: "end" }}>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="pg-cod">Código</label>
+            <input id="pg-cod" value={form.codigo} maxLength={40} onChange={(e) => setForm({ ...form, codigo: e.target.value })} placeholder="Ej.: PM-LQC-2026" />
+          </div>
+          <div className="field" style={{ margin: 0, gridColumn: "span 2" }}>
+            <label htmlFor="pg-nom">Nombre</label>
+            <input id="pg-nom" value={form.nombre} maxLength={200} onChange={(e) => setForm({ ...form, nombre: e.target.value })} placeholder="Ej.: Programa anual de mantención de equipos" />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="pg-anio">Año</label>
+            <input id="pg-anio" inputMode="numeric" value={form.anio} onChange={(e) => setForm({ ...form, anio: e.target.value })} />
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="pg-lab">Laboratorio</label>
+            <select id="pg-lab" value={form.unidadId} disabled={!!form.id} onChange={(e) => setForm({ ...form, unidadId: e.target.value })}>
+              <option value="">(común)</option>
+              {labs.map((l) => <option key={l.id} value={l.id}>{l.codigo} · {l.nombre}</option>)}
+            </select>
+          </div>
+          <div className="field" style={{ margin: 0 }}>
+            <label htmlFor="pg-doc">Código del registro de calidad</label>
+            <input id="pg-doc" value={form.documentoCodigo} maxLength={60} onChange={(e) => setForm({ ...form, documentoCodigo: e.target.value })} placeholder="El del sistema de gestión" />
+          </div>
+          <div className="field" style={{ margin: 0, gridColumn: "1 / -1" }}>
+            <label htmlFor="pg-obs">Observaciones</label>
+            <input id="pg-obs" value={form.observaciones} maxLength={2000} onChange={(e) => setForm({ ...form, observaciones: e.target.value })} />
+          </div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button className="btn primary sm" onClick={guardar}>Guardar</button>
+            <button className="btn outline sm" onClick={() => setForm(null)}>Cancelar</button>
+          </div>
+        </section>
+      )}
+      <section className="card">
+        {!lista ? <p>Cargando…</p> : !lista.length ? (
+          <p style={{ margin: 0, color: "var(--muted)" }}>No hay programas de mantención registrados.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="table">
+              <thead><tr><th>Programa</th><th>Año</th><th>Lab.</th><th>Tareas</th><th>Cumplimiento</th><th>Estado</th><th></th></tr></thead>
+              <tbody>
+                {lista.map((g) => (
+                  <tr key={g.id}>
+                    <td><b>{g.codigo}</b> {g.nombre}{g.documentoCodigo ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Registro {g.documentoCodigo}</div> : null}</td>
+                    <td>{g.anio}</td>
+                    <td>{g.laboratorio ?? "común"}</td>
+                    <td>{g.planes}</td>
+                    <td>{g.cumplimiento?.porcentaje == null ? "—" : `${String(g.cumplimiento.porcentaje).replace(".", ",")} %`}
+                      <div style={{ fontSize: 11.5, color: "var(--muted)" }}>{g.cumplimiento?.aTiempo ?? 0} a tiempo · {g.cumplimiento?.atrasadas ?? 0} atrasadas · {g.cumplimiento?.pendientes ?? 0} pendientes</div></td>
+                    <td><span className={`pill ${ESTADO_PROGRAMA[g.estado]?.pill ?? "gray"}`}>{ESTADO_PROGRAMA[g.estado]?.texto ?? g.estado}</span>
+                      {g.aprobadoPor ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Aprobó {g.aprobadoPor}</div> : null}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button className="btn outline sm" onClick={() => ver(g.id)}>Ver</button>
+                      {gestiona && g.estado === "borrador" && (<>{" "}<button className="btn outline sm" onClick={() => setForm({ ...PROGRAMA_VACIO, ...g, anio: String(g.anio), unidadId: g.unidadId ?? "", documentoCodigo: g.documentoCodigo ?? "", observaciones: g.observaciones ?? "" })}>Editar</button>{" "}<button className="btn sm" onClick={() => estado(g, "aprobar")}>Aprobar</button></>)}
+                      {gestiona && g.estado === "aprobado" && (<>{" "}<button className="btn outline sm" onClick={() => estado(g, "cerrar")}>Cerrar</button></>)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      {detalle && (
+        <section className="card">
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <h3 style={{ margin: 0, fontSize: 15, flex: 1 }}>{detalle.programa.codigo} · {detalle.programa.nombre} ({detalle.programa.anio})</h3>
+            <button className="btn outline sm" onClick={() => setDetalle(null)}>Cerrar</button>
+          </div>
+          <h4 style={{ fontSize: 13 }}>Tareas del programa</h4>
+          {!detalle.planes.length ? <p style={{ color: "var(--muted)" }}>Sin tareas vinculadas.</p> : (
+            <table className="table">
+              <thead><tr><th>Equipo</th><th>Tarea</th><th>Cada</th><th>Próxima</th></tr></thead>
+              <tbody>{detalle.planes.map((p: any) => <tr key={p.id}><td>{p.equipoCodigo} {p.equipoNombre}</td><td>{TIPO[p.tipo] ?? p.tipo} · {p.descripcion}{p.activo ? "" : " (de baja)"}</td><td>{p.frecuenciaDias} días</td><td>{fechaCl(p.proximaFecha)}</td></tr>)}</tbody>
+            </table>
+          )}
+          <h4 style={{ fontSize: 13 }}>Mantenciones ejecutadas con este programa</h4>
+          {!detalle.ejecutadas.length ? <p style={{ color: "var(--muted)" }}>Aún no hay mantenciones registradas.</p> : (
+            <table className="table">
+              <thead><tr><th>Equipo</th><th>Programada</th><th>Hecha</th><th>Resultado</th><th>Hecha por</th><th>Registró</th></tr></thead>
+              <tbody>{detalle.ejecutadas.map((m: any) => <tr key={m.id}><td>{m.equipoCodigo}</td><td>{fechaCl(m.fechaProgramada)}</td><td>{fechaCl(m.fecha)}</td><td>{pillResultado(m.resultado)}</td><td>{m.ejecutadaPor ?? "—"}</td><td>{m.registradaPor ?? "—"}</td></tr>)}</tbody>
+            </table>
+          )}
+        </section>
+      )}
     </>
   );
 }

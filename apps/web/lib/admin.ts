@@ -266,6 +266,11 @@ export const adminApi = {
   resetPassword: (id: string) => post<{ passwordTemporal: string }>(`/usuarios/${id}/reset-password`, {}),
   /** Quita el bloqueo por intentos fallidos (o el del administrador). No cambia la contraseña. */
   desbloquearUsuario: (id: string) => post<Usuario>(`/usuarios/${id}/desbloquear`, {}),
+  // Reemplazos temporales (R8): roles de otra persona por un tiempo, con motivo.
+  reemplazos: (id: string) => get<{ data: any[] }>(`/usuarios/${id}/reemplazos`).then((x) => x.data ?? []),
+  reemplazar: (id: string, d: { reemplazadoId: string; desde?: string | null; hasta: string; motivo: string }) =>
+    post<{ data: { roles: { rol: string }[] } }>(`/usuarios/${id}/reemplazos`, d),
+  terminarReemplazo: (id: string, reemplazadoId: string) => post<any>(`/usuarios/${id}/reemplazos/${reemplazadoId}/terminar`, {}),
 
   // Roles y permisos
   roles: () => get<any>("/roles").then((x) => lista<Rol>(x)),

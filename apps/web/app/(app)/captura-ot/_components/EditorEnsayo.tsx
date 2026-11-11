@@ -58,6 +58,12 @@ export interface EnsayoEditable {
   reglasAceptacion?: ReglaAceptacionVista[];
   /** Nota de la captura del método (fórmula y lo que está por confirmar). */
   notaCaptura?: string | null;
+  /** R7: decimales del resultado final (0 = entero); null = sin redondeo. */
+  decimalesResultado?: number | null;
+  /** R8: si las condiciones ambientales no aplican, son opcionales u obligatorias. */
+  condicionesAmbientales?: "no_aplica" | "opcional" | "obligatoria";
+  /** R7: explicación del factor (cuándo se aplica, cómo opera, quién lo ajusta). */
+  explicacionFactor?: string | null;
   /** Avisos de reglas no cumplidas que el analista confirmó al guardar. */
   avisosAceptacion?: { texto: string }[] | null;
   formulaMotivo: string | null;
@@ -535,7 +541,7 @@ export default function EditorEnsayo({
             )}
           </div>
           <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 0 6px" }}>
-            Se aplica al valor calculado (lecturas o réplicas). Un valor final ingresado directamente no se modifica.
+            {e.explicacionFactor ?? "Se aplica al valor calculado (lecturas o réplicas). Un valor final ingresado directamente no se modifica."}
           </p>
           {puedeFactor && puedeCapturar && (
             <>
@@ -588,6 +594,11 @@ export default function EditorEnsayo({
                 </label>
               ))}
             </div>
+          )}
+          {e.tipoDato !== "atributo" && e.decimalesResultado != null && (
+            <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "6px 0 0" }}>
+              Regla de redondeo del ensayo: el resultado se informa {e.decimalesResultado === 0 ? "en enteros" : `con ${e.decimalesResultado} decimal${e.decimalesResultado > 1 ? "es" : ""}`} (0,5 hacia arriba) y el veredicto se decide con ese valor.
+            </p>
           )}
           {e.tipoDato !== "atributo" && e.notaCaptura && (
             <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "6px 0 0" }}>{e.notaCaptura}</p>
@@ -709,7 +720,7 @@ export default function EditorEnsayo({
           )}
           <fieldset style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px 8px", margin: "10px 0 0" }}>
             <legend style={{ fontSize: 12, fontWeight: 600, padding: "0 4px" }}>
-              Equipo y condiciones del ensayo{e.equipoRequerido ? " · el método exige informar el equipo" : ""}
+              {e.condicionesAmbientales === "no_aplica" ? "Equipo del ensayo" : "Equipo y condiciones del ensayo"}{e.equipoRequerido ? " · el método exige informar el equipo" : ""}
             </legend>
             <div className="form-grid cols-4">
               <div className="field span-2">
@@ -742,14 +753,22 @@ export default function EditorEnsayo({
                 <input id={`fe-${e.id}`} type="datetime-local" value={fechaEnsayo} onChange={(x) => setFechaEnsayo(x.target.value)} />
                 <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Hora de Chile. Vacía = ahora.</span>
               </div>
-              <div className="field">
-                <label htmlFor={`te-${e.id}`}>T (°C)</label>
-                <input id={`te-${e.id}`} inputMode="decimal" value={temperatura} onChange={(x) => setTemperatura(x.target.value)} />
-              </div>
-              <div className="field">
-                <label htmlFor={`hr-${e.id}`}>HR (%)</label>
-                <input id={`hr-${e.id}`} inputMode="decimal" value={humedad} onChange={(x) => setHumedad(x.target.value)} />
-              </div>
+              {e.condicionesAmbientales === "no_aplica" ? (
+                <div className="field span-2">
+                  <span style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 18 }}>Las condiciones ambientales no aplican a este ensayo.</span>
+                </div>
+              ) : (
+                <>
+                  <div className="field">
+                    <label htmlFor={`te-${e.id}`}>T (°C){e.condicionesAmbientales === "obligatoria" && <span className="req"> *</span>}</label>
+                    <input id={`te-${e.id}`} inputMode="decimal" value={temperatura} onChange={(x) => setTemperatura(x.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor={`hr-${e.id}`}>HR (%){e.condicionesAmbientales === "obligatoria" && <span className="req"> *</span>}</label>
+                    <input id={`hr-${e.id}`} inputMode="decimal" value={humedad} onChange={(x) => setHumedad(x.target.value)} />
+                  </div>
+                </>
+              )}
               <div className="field span-2">
                 <label htmlFor={`in-${e.id}`}>Incertidumbre</label>
                 <input id={`in-${e.id}`} value={incertidumbre} maxLength={60} onChange={(x) => setIncertidumbre(x.target.value)} placeholder="p. ej. ± 0,02 %" />

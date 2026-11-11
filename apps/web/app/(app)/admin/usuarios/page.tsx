@@ -203,7 +203,7 @@ function ChipAsignacion({ a }: { a: Asignacion }) {
   );
 }
 
-type Tab = "datos" | "roles" | "acciones";
+type Tab = "datos" | "roles" | "reemplazos" | "acciones";
 
 function PanelUsuario({ usuario, roles, rolPorId, unidades, onCambio, onCreado, tabInicial = "datos" }: {
   usuario: Usuario | null; roles: Rol[]; rolPorId: Map<string, Rol>; unidades: Unidad[];
@@ -215,13 +215,14 @@ function PanelUsuario({ usuario, roles, rolPorId, unidades, onCambio, onCreado, 
     <div>
       {!creando && (
         <div className="tabs mb-3" role="tablist">
-          {([["datos", "Datos"], ["roles", `Roles y alcance (${usuario.asignaciones.length})`], ["acciones", "Acciones"]] as [Tab, string][]).map(([k, l]) => (
+          {([["datos", "Datos"], ["roles", `Roles y alcance (${usuario.asignaciones.length})`], ["reemplazos", "Reemplazos"], ["acciones", "Acciones"]] as [Tab, string][]).map(([k, l]) => (
             <button key={k} role="tab" aria-selected={tab === k} className={`tab ${tab === k ? "active" : ""}`} onClick={() => setTab(k)}>{l}</button>
           ))}
         </div>
       )}
       {(creando || tab === "datos") && <TabDatos usuario={usuario} onCambio={onCambio} onCreado={onCreado} />}
       {!creando && tab === "roles" && <TabRoles usuario={usuario} roles={roles} rolPorId={rolPorId} unidades={unidades} onCambio={onCambio} />}
+      {!creando && tab === "reemplazos" && <TabReemplazos usuario={usuario} onCambio={onCambio} />}
       {!creando && tab === "acciones" && <TabAcciones usuario={usuario} onCambio={onCambio} />}
     </div>
   );
@@ -438,6 +439,77 @@ function TabRoles({ usuario, roles, rolPorId, unidades, onCambio }: {
             {usuario.asignaciones.length > 0 && <button className="btn outline sm" onClick={() => setAbierto(false)}>Cancelar</button>}
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Reemplazos temporales (R8): la persona recibe por un tiempo los roles vigentes de otra
+ * (y su jefatura, si dirige una unidad). Al vencer, dejan de valer solos.
+ */
+function TabReemplazos({ usuario, onCambio }: { usuario: Usuario; onCambio: () => Promise<void> }) {
+  const toast = useToast();
+  const [lista, setLista] = useState<any[] | null>(null);
+  const [personas, setPersonas] = useState<Usuario[]>([]);
+  const [f, setF] = useState({ reemplazadoId: "", desde: "", hasta: "", motivo: "" });
+  const [ocupado, setOcupado] = useState(false);
+  const cargar = async () => {
+    try { setLista(await adminApi.reemplazos(usuario.id)); } catch (e) { toast.error(e); }
+  };
+  useEffect(() => { cargar(); adminApi.usuarios({ activo: true }).then(setPersonas).catch(() => setPersonas([])); }, [usuario.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  async function crear() {
+    setOcupado(true);
+    try {
+      const r = await adminApi.reemplazar(usuario.id, { reemplazadoId: f.reemplazadoId, desde: f.desde || null, hasta: f.hasta, motivo: f.motivo.trim() });
+      toast.ok(`Reemplazo registrado: ${r.data.roles.map((x) => x.rol).join(", ")}. La persona debe volver a ingresar para usarlo.`);
+      setF({ reemplazadoId: "", desde: "", hasta: "", motivo: "" });
+      await cargar();
+      await onCambio();
+    } catch (e) { toast.error(e); } finally { setOcupado(false); }
+  }
+  async function terminar(reemplazadoId: string) {
+    setOcupado(true);
+    try { await adminApi.terminarReemplazo(usuario.id, reemplazadoId); toast.ok("Reemplazo terminado."); await cargar(); await onCambio(); }
+    catch (e) { toast.error(e); } finally { setOcupado(false); }
+  }
+  const vigentes = new Set((lista ?? []).filter((x) => x.vigente).map((x) => x.reemplazadoId));
+  return (
+    <div className="card">
+      <p className="text-[12px] text-[var(--muted)]" style={{ marginTop: 0 }}>
+        Mientras dure el reemplazo, <b>{usuario.nombre}</b> tendrá los roles vigentes de la persona reemplazada (y su jefatura, si dirige una unidad), con firma
+        en la matriz de firmas. Al vencer la fecha de término, los permisos dejan de valer solos.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo label="Reemplaza a" req className="sm:col-span-2">
+          <select value={f.reemplazadoId} onChange={(e) => setF({ ...f, reemplazadoId: e.target.value })}>
+            <option value="">Elija la persona…</option>
+            {personas.filter((p) => p.id !== usuario.id).map((p) => <option key={p.id} value={p.id}>{p.nombre} ({p.username})</option>)}
+          </select>
+        </Campo>
+        <Campo label="Desde (vacío = ahora)"><input type="date" value={f.desde} onChange={(e) => setF({ ...f, desde: e.target.value })} /></Campo>
+        <Campo label="Hasta" req><input type="date" value={f.hasta} onChange={(e) => setF({ ...f, hasta: e.target.value })} /></Campo>
+        <Campo label="Motivo" req className="sm:col-span-2"><input value={f.motivo} maxLength={500} onChange={(e) => setF({ ...f, motivo: e.target.value })} placeholder="p. ej. feriado legal del jefe de laboratorio" /></Campo>
+      </div>
+      <div className="flex gap-2 mt-3">
+        <button className="btn primary sm" disabled={ocupado || !f.reemplazadoId || !f.hasta || f.motivo.trim().length < 5} onClick={crear}>Registrar reemplazo</button>
+      </div>
+      <h4 style={{ fontSize: 13, marginTop: 16 }}>Reemplazos registrados</h4>
+      {!lista ? <SkeletonLineas n={2} /> : !lista.length ? <p className="text-[12px] text-[var(--muted)]">Sin reemplazos.</p> : (
+        <table className="data">
+          <thead><tr><th>Reemplaza a</th><th>Rol</th><th>Vigencia</th><th>Motivo</th><th></th></tr></thead>
+          <tbody>
+            {lista.map((x) => (
+              <tr key={x.id}>
+                <td>{x.reemplazado ?? "—"}</td>
+                <td>{x.rolNombre}{x.unidadCodigo ? ` · ${x.unidadCodigo}` : ""}</td>
+                <td>{fechaCorta(x.desde)} → {fechaCorta(x.hasta)} {x.vigente ? <span className="pill green">vigente</span> : <span className="pill gray">terminado</span>}</td>
+                <td>{x.motivo}</td>
+                <td>{x.vigente && vigentes.has(x.reemplazadoId) && <button className="btn outline sm" disabled={ocupado} onClick={() => terminar(x.reemplazadoId)}>Terminar ahora</button>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );

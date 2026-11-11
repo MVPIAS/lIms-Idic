@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtG, parseEntrada, verEntrada, ETIQUETA_ENTRADA, ETIQUETA_MOTOR, type MotorInfo, type CalculoMotor } from "@/lib/metrologia";
-import { clavesDeLaHoja, condicionesAlMotor, valoresPatronAlMotor, type CondicionesHoja, type ValoresPatron } from "@/lib/metrologiaFicha";
+import { clavesDeLaHoja, condicionesAlMotor, valoresPatronAlMotor, smpPorFuerza, unidadIndicador, GRUPOS_LNF, type CoefSmp, type CondicionesHoja, type ValoresPatron } from "@/lib/metrologiaFicha";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -41,7 +41,11 @@ interface Props {
   valoresPatron?: { codigo: string; valores: ValoresPatron } | null;
   /** B-027: condiciones de la hoja de control (auxiliares del maestro); mandan sobre las del motor. */
   condiciones?: CondicionesHoja | null;
+  /** LNF (R9): patrón de referencia con los coeficientes de su certificado para la columna SMP. */
+  smp?: { codigo: string; coef: CoefSmp | null } | null;
 }
+/** Fondo de la columna de fuerza (kN) del LNF: se destaca de las lecturas (R9). */
+const FUERZA = { background: "var(--accent-soft,#FCE7D6)", fontWeight: 600 } as const;
 
 /**
  * Toma de datos genérica de un motor validado: la forma del formulario sale de
@@ -49,7 +53,8 @@ interface Props {
  * calcula la vista previa con el mismo motor que usa al guardar. «Cargar
  * ejemplo» trae las entradas de un caso real, solo para formación.
  */
-export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, onGuardar, condiciones, valoresPatron }: Props) {
+export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, onGuardar, condiciones, valoresPatron, smp }: Props) {
+  const esLnf = motor.it === "LCPNF-IT01";
   const [caso, setCaso] = useState(motor.casos[0]?.caso ?? "");
   const [datos, setDatos] = useState<any>(inicial?.datos ?? null);
   // Calibración nueva: las correcciones que el laboratorio pidió aplicar vienen activadas (C6).
@@ -78,13 +83,22 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [valJson, datos === null]);
   const editadosPat = valoresPatron && datos ? valoresPatronAlMotor(datos, valoresPatron.valores).editados : [];
-  const lbl = (k: string) => ETIQUETA_MOTOR[motor.it]?.[k] ?? ETIQUETA_ENTRADA[k] ?? k;
+  // LNF: la unidad de la resolución del indicador se escribe en la hoja (no siempre mV/V).
+  const uInd = esLnf ? unidadIndicador(datos) : "mV/V";
+  const lbl = (k: string) => {
+    const t = ETIQUETA_MOTOR[motor.it]?.[k] ?? ETIQUETA_ENTRADA[k] ?? k;
+    return esLnf ? t.replace(/mV\/V/g, uInd) : t;
+  };
 
   // Formulario vacío con la forma de la planilla (si no se está editando un borrador).
   useEffect(() => {
     if (inicial?.datos) return;
     fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/plantilla`, { headers: auth() })
-      .then((r) => r.json()).then((j) => setDatos(j.data?.datos ?? {})).catch((e) => setAviso(e.message));
+      .then((r) => r.json()).then((j) => {
+        const d = j.data?.datos ?? {};
+        // LNF: la unidad del indicador aparece en la hoja con mV/V por defecto (configurable).
+        setDatos(esLnf && d && !("uRes" in d) ? { ...d, uRes: "mV/V" } : d);
+      }).catch((e) => setAviso(e.message));
   }, [motor.it]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function cargarEjemplo() {
@@ -217,22 +231,50 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
                 )}
               </div>
             )}
+            {esLnf && (
+              <div className={`alert ${smp?.coef ? "info" : "warn"}`} role="status" style={{ margin: 0 }}>
+                {smp?.coef
+                  ? <>Columna SMP: señal del patrón {smp.codigo} en cada fuerza, según la ecuación de su certificado (maestro de patrones). Es informativa: no entra al cálculo.</>
+                  : <>Columna SMP vacía: elija el patrón de referencia en «Patrones utilizados»; sus coeficientes a, b y c se cargan en el maestro de patrones (o al emitir su certificado en el LNF).</>}
+                {" "}En amarillo lo que usted escribe; en azul lo que se calcula. La columna de fuerza (kN) va destacada.
+              </div>
+            )}
             {deHoja.length > 0 && (
               <div className="alert info" role="status" style={{ margin: 0 }}>
                 Condiciones ambientales tomadas de la hoja de control ({deHoja.map(lbl).join(", ")}): se registran una sola vez, con la corrección
                 del certificado del termohigrómetro y del barómetro. Para cambiarlas, corrija las lecturas en la hoja de control.
               </div>
             )}
-            {partes.escalares.length > 0 && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 8 }}>
-                {partes.escalares.map(({ ruta, v }) => (
-                  <div className="field" key={ruta.join(".")} style={{ minWidth: 0 }}>
-                    <label htmlFor={`m-${ruta.join("-")}`} title={ruta.join(".")}>{ruta.length > 1 ? `${lbl(ruta[0])} · ${lbl(ruta.slice(1).join(" · "))}` : lbl(ruta[0])}</label>
-                    <input id={`m-${ruta.join("-")}`} value={verEntrada(v)} style={{ ...YEL, fontFamily: "var(--mono,monospace)" }} onChange={(e) => cambiar(ruta, e.target.value)} />
-                  </div>
-                ))}
-              </div>
-            )}
+            {partes.escalares.length > 0 && (() => {
+              const campo = ({ ruta, v }: { ruta: string[]; v: any }) => (
+                <div className="field" key={ruta.join(".")} style={{ minWidth: 0 }}>
+                  <label htmlFor={`m-${ruta.join("-")}`} title={ruta.join(".")}>{ruta.length > 1 ? `${lbl(ruta[0])} · ${lbl(ruta.slice(1).join(" · "))}` : lbl(ruta[0])}</label>
+                  <input id={`m-${ruta.join("-")}`} value={verEntrada(v)} style={{ ...YEL, fontFamily: "var(--mono,monospace)" }} onChange={(e) => cambiar(ruta, e.target.value)} />
+                </div>
+              );
+              const rejilla = (xs: { ruta: string[]; v: any }[]) => (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 8 }}>{xs.map(campo)}</div>
+              );
+              if (!esLnf) return rejilla(partes.escalares);
+              // LNF (R9): se indica qué se está llenando y se separa el patrón del instrumento.
+              const usadas = new Set(GRUPOS_LNF.flatMap((g) => g.claves));
+              const resto = partes.escalares.filter((e) => !usadas.has(e.ruta[0]));
+              return (
+                <>
+                  {GRUPOS_LNF.map((g) => {
+                    const xs = partes.escalares.filter((e) => g.claves.includes(e.ruta[0]));
+                    return xs.length ? (
+                      <fieldset key={g.titulo} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px 10px", margin: 0 }}>
+                        <legend style={{ fontSize: 12, fontWeight: 600, padding: "0 4px" }}>{g.titulo}</legend>
+                        <small style={{ display: "block", color: "var(--muted)", marginBottom: 6 }}>{g.ayuda}</small>
+                        {rejilla(xs)}
+                      </fieldset>
+                    ) : null;
+                  })}
+                  {resto.length > 0 && rejilla(resto)}
+                </>
+              );
+            })()}
             {[...partes.series.map(([k, v]) => ({ k, filas: [v as any[]], base: [k] })), ...partes.matrices.map(([k, m]) => ({ k, filas: m, base: [k] }))].map(({ k, filas, base }) => (
               <div key={k} style={{ overflowX: "auto" }}>
                 <div style={{ fontSize: 12, marginBottom: 4 }}><b>{lbl(k)}</b> <span className="codigo" style={{ fontSize: 11 }}>{k}</span></div>
@@ -246,16 +288,23 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
             {partes.puntosKey && (
               <div style={{ overflowX: "auto" }}>
                 <table className="data">
-                  <thead><tr><th>#</th>{partes.cols.flatMap((c) => (c.n ? Array.from({ length: c.n }, (_, i) => <th key={c.k + i}>{lbl(c.k)} {i + 1}</th>) : [<th key={c.k}>{lbl(c.k)}</th>]))}</tr></thead>
+                  <thead><tr><th>#</th>{partes.cols.flatMap((c) => {
+                    const ths = c.n ? Array.from({ length: c.n }, (_, i) => <th key={c.k + i}>{lbl(c.k)} {i + 1}</th>) : [<th key={c.k} style={esLnf && c.k === "F" ? FUERZA : undefined}>{lbl(c.k)}</th>];
+                    // LNF: columna SMP (señal del patrón según su certificado) justo después de la fuerza.
+                    return esLnf && c.k === "F" ? [...ths, <th key="smp" title="Sistema de medición patrón: S = a·F + b·F² + c·F³ del certificado del patrón">SMP ({uInd})</th>] : ths;
+                  })}</tr></thead>
                   <tbody>
                     {partes.filas.map((f, i) => (
                       <tr key={i}>
                         <td className="num">{i + 1}</td>
                         {partes.cols.flatMap((c) => {
                           const val = c.ruta.reduce((o: any, k) => (o == null ? undefined : o[k]), f);
-                          return c.n
+                          const celdas = c.n
                             ? Array.from({ length: c.n }, (_, j) => <td key={c.k + j}>{Array.isArray(val) && j < val.length ? inp([partes.puntosKey!, i, ...c.ruta, j], val[j]) : null}</td>)
-                            : [<td key={c.k}>{c.ruta.length > 1 && val === undefined ? "—" : inp([partes.puntosKey!, i, ...c.ruta], val)}</td>];
+                            : [<td key={c.k} style={esLnf && c.k === "F" ? FUERZA : undefined}>{c.ruta.length > 1 && val === undefined ? "—" : inp([partes.puntosKey!, i, ...c.ruta], val)}</td>];
+                          if (!(esLnf && c.k === "F")) return celdas;
+                          const sv = smpPorFuerza(smp?.coef ?? null, val);
+                          return [...celdas, <td key="smp" className="num" style={BLUE}>{sv == null ? "—" : fmtG(sv)}</td>];
                         })}
                       </tr>
                     ))}

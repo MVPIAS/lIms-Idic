@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
 import { itemDeRuta } from "@/lib/navegacion";
 import { usePermisos, infoPerfil } from "@/lib/permisos";
+import SelectorPerfil from "@/components/SelectorPerfil";
 
 /** Migas de la barra superior a partir del mapa del menú (lib/navegacion.ts). */
 function crumbFor(pathname: string): { seccion: string; pagina: string } {
@@ -49,6 +50,7 @@ export default function Topbar({ menuAbierto = false, onMenu }: { menuAbierto?: 
         LIMS IDIC{crumb.seccion && <> · {crumb.seccion}</>}{crumb.pagina && <> · <b>{crumb.pagina}</b></>}
       </div>
       <div className="user">
+        <SelectorPerfil />
         <div className="avatar">{iniciales}</div>
         <div className="user-txt" style={{ lineHeight: 1.2 }}>
           <div style={{ fontWeight: 600 }}>{user?.nombreCompleto ?? usuario.nombre ?? usuario.username ?? "Usuario"}</div>

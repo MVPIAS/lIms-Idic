@@ -149,7 +149,7 @@ export const ETIQUETA_MOTOR: Record<string, Record<string, string>> = {
     HR: "Humedad inicio / medio / final", P: "Presión inicio / medio / final", ev: "Evaporación: inicial, +20 s, final, +20 s (g) por serie", pts: "Puntos", nom: "Volumen nominal (mL)", s: "Pesada (g)", dec: "Decimales del certificado",
   },
   "LCPNF-IT01": {
-    sentido: "Sentido (TRACCIÓN / COMPRESIÓN)", resInd: "Resolución del indicador (mV/V)", div: "N° de divisiones",
+    sentido: "Sentido (TRACCIÓN / COMPRESIÓN)", resInd: "Resolución del indicador (mV/V)", uRes: "Unidad de la resolución y de las lecturas", div: "N° de divisiones",
     decRes: "Decimales de la resolución", conv: "Conversión a kN", fmin: "Rango mínimo (kN)", fmax: "Rango máximo (kN)",
     urelSmp: "U relativa del SMP (UREL95)", grado: "Grado de interpolación (1, 2 o 3)", interp: "Incluir error de interpolación (SI / NO)",
     dec: "Decimales de los promedios", tIni: "Temperatura al inicio (°C)", hr: "Humedad relativa (%)", hrU: "U de la humedad (%)",
