@@ -100,16 +100,41 @@ export interface ConfigSegregacion {
   modo: "distintas" | "misma_persona";
   /** Códigos de laboratorio donde la misma persona puede revisar y aprobar. */
   excepciones: string[];
+  /**
+   * Revisión previa del resultado (sesiones 27-10 a 09-11: «el jefe aprueba sin
+   * revisor»): «obligatoria» (por defecto) u «opcional», en que la jefatura
+   * aprueba directo lo capturado.
+   */
+  revision?: "obligatoria" | "opcional";
+  /** Con «opcional»: laboratorios donde se aprueba sin revisión (vacío = todos). */
+  sinRevision?: string[];
 }
 
-export function configSegregacion(modo: string | null | undefined, excepciones: string | null | undefined): ConfigSegregacion {
+const listaCodigos = (v: string | null | undefined) =>
+  String(v ?? "")
+    .split(/[\s,;/]+/)
+    .map((s) => s.trim().toUpperCase())
+    .filter(Boolean);
+
+export function configSegregacion(
+  modo: string | null | undefined,
+  excepciones: string | null | undefined,
+  revision?: string | null,
+  sinRevision?: string | null,
+): ConfigSegregacion {
   return {
     modo: String(modo ?? "").trim().toLowerCase() === "misma_persona" ? "misma_persona" : "distintas",
-    excepciones: String(excepciones ?? "")
-      .split(/[\s,;/]+/)
-      .map((s) => s.trim().toUpperCase())
-      .filter(Boolean),
+    excepciones: listaCodigos(excepciones),
+    revision: String(revision ?? "").trim().toLowerCase() === "opcional" ? "opcional" : "obligatoria",
+    sinRevision: listaCodigos(sinRevision),
   };
+}
+
+/** ¿En este laboratorio la jefatura aprueba un resultado capturado sin revisión previa? */
+export function apruebaSinRevision(cfg: ConfigSegregacion, laboratorio: string | null | undefined): boolean {
+  if (cfg.revision !== "opcional") return false;
+  const labs = cfg.sinRevision ?? [];
+  return !labs.length || (!!laboratorio && labs.includes(laboratorio.toUpperCase()));
 }
 
 /**

@@ -95,6 +95,8 @@ interface Fila extends EnsayoEditable {
    * configuración exige personas distintas). Lo dice la API en la vista por OT; undefined en la bandeja.
    */
   bloqueoAprobar?: string | null;
+  /** Revisión previa opcional en su laboratorio: se aprueba directo lo capturado. */
+  apruebaSinRevision?: boolean;
   /**
    * QC exigido por el método aún no aprobado en la OT (contrato §4.2.4): no se captura,
    * revisa ni aprueba hasta registrarlo y aprobarlo. Lo dice la API en la vista por OT.
@@ -599,7 +601,9 @@ export default function CapturaOtPage() {
   // ¿Lo revisó el usuario y la regla «revisión y aprobación por personas distintas» le impide aprobarlo?
   // La API lo dice por ensayo (respeta la configuración); en la bandeja, la regla por defecto.
   const revisadoPorMi = (f: Fila) => (f.bloqueoAprobar !== undefined ? !!f.bloqueoAprobar : f.revisadoPor === yo);
-  const aprobablesEnBloque = filas.filter((f) => f.estado === "revisado_n1" && puede(f, "aprobar") && !sinVeredicto(f));
+  // Revisión previa opcional en el laboratorio: lo capturado también se aprueba (sesiones oct-nov 2026).
+  const enAprobacion = (f: Fila) => f.estado === "revisado_n1" || (f.estado === "capturado" && !!f.apruebaSinRevision);
+  const aprobablesEnBloque = filas.filter((f) => enAprobacion(f) && puede(f, "aprobar") && !sinVeredicto(f));
   const porAprobarAjenos = aprobablesEnBloque.filter((f) => f.analistaId !== yo && !revisadoPorMi(f)).length;
   // Los que «Aprobar todo» deja fuera por la segregación de funciones (D06-20).
   const omitidosCaptura = aprobablesEnBloque.filter((f) => f.analistaId === yo).length;
@@ -1008,7 +1012,7 @@ export default function CapturaOtPage() {
                                   <button className="btn sm" disabled={busy || propio || sinVeredicto(f) || f.reanalisis?.estado === "solicitado" || !!f.qcBloqueo} onClick={() => accion(f, "revisar")}
                                     title={propio ? "Lo capturó usted: debe revisarlo otra persona" : f.qcBloqueo ? f.qcBloqueo.mensaje : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de revisar, o devuélvalo" : "Marcar como revisado"}>Revisar</button>
                                 )}
-                                {puede(f, "aprobar") && f.estado === "revisado_n1" && (
+                                {puede(f, "aprobar") && enAprobacion(f) && (
                                   <button className="btn success sm" disabled={busy || propio || revisadoPorMi(f) || sinVeredicto(f) || f.reanalisis?.estado === "solicitado" || !!f.qcBloqueo} onClick={() => accion(f, "aprobar")}
                                     title={propio ? "Lo capturó usted: debe aprobarlo otra persona" : f.qcBloqueo ? f.qcBloqueo.mensaje : revisadoPorMi(f) ? f.bloqueoAprobar ?? "Lo revisó usted: la aprobación la hace otra persona" : sinVeredicto(f) ? "Sin veredicto: decídalo con «Decidir…» antes de aprobar" : "Aprobar el resultado"}>Aprobar</button>
                                 )}

@@ -55,7 +55,7 @@ import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 import { condicionesEnsayo, equipoObligatorio, equipoUsable, modoEquipo, type ModoEquipo } from "../laboratorio/equipo-captura";
 import { RecepcionService, type ConfigRecepcionLab } from "../recepcion/recepcion.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
-import { decidirAccionResultado, motivoMismoRevisor, type AccionResultado } from "../rbac/alcance-resultado";
+import { apruebaSinRevision, decidirAccionResultado, motivoMismoRevisor, type AccionResultado } from "../rbac/alcance-resultado";
 import { retenerHasta, type RecepcionLabNormalizada } from "../recepcion/reglas-recepcion";
 import { ReglasCapturaService } from "../formularios/reglas-captura.service";
 import type { Variante } from "../formularios/variantes";
@@ -1502,6 +1502,8 @@ export class PuenteAnalisisService {
           ordenInterna: dueno?.derivado ? { id: dueno.ordenInternaId, numero: dueno.oiNumero, estado: dueno.oiEstado } : null,
           // Motivo por el que el usuario no aprueba este ensayo aunque tenga el permiso (lo revisó él).
           bloqueoAprobar: motivoMismoRevisor({ revisadoPor: r.revisadoPor ?? null }, yo, segregacion, dueno?.unidadCodigo ?? null),
+          // Revisión previa opcional en su laboratorio: la jefatura aprueba directo lo capturado.
+          apruebaSinRevision: apruebaSinRevision(segregacion, dueno?.unidadCodigo ?? null),
           puedo: {
             capturar: puede(veCapturar, "capturar"),
             revisar: puede(veRevisar, "revisar"),

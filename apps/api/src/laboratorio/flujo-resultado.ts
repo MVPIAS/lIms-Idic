@@ -63,12 +63,15 @@ export function clasificarParaAccion(
   resultados: ResultadoParaAccion[],
   accion: AccionRevision,
   usuarioId: string | undefined,
+  /** Aprobar: ¿este resultado capturado se aprueba sin revisión previa? */
+  sinRevision: (id: string) => boolean = () => false,
 ): { aplicables: string[]; omitidos: Omitido[] } {
   const aplicables: string[] = [];
   const omitidos: Omitido[] = [];
   const origen = ORIGEN[accion];
   for (const r of resultados) {
-    if (r.estado !== origen) continue; // no está en la etapa: ni se cuenta
+    const enEtapa = r.estado === origen || (accion === "aprobar" && r.estado === "capturado" && sinRevision(r.id));
+    if (!enEtapa) continue; // no está en la etapa: ni se cuenta
     if (usuarioId && r.analistaId && r.analistaId === usuarioId) {
       omitidos.push({ id: r.id, motivo: "Lo capturó usted: debe revisarlo o aprobarlo otra persona." });
       continue;
