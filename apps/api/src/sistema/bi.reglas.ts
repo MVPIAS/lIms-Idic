@@ -19,3 +19,34 @@ export function urlBi(valor: string | null | undefined): string | null {
     return null;
   }
 }
+
+/**
+ * Acceso TEMPORAL a Metabase mostrado en la pantalla «Análisis e inteligencia de
+ * negocio», igual que los accesos de prueba del ingreso. Los valores viven en el
+ * servidor (BI_ACCESO_USUARIO / BI_ACCESO_CLAVE, nunca en el repositorio) y solo
+ * se entregan al administrador del LIMS. Retirar cuando el IDIC tenga sus propios
+ * usuarios de Metabase: basta con vaciar las variables.
+ */
+export interface AccesoBi {
+  usuario: string;
+  clave: string;
+}
+
+export const ROLES_ADMIN_BI = ["SUPERADMIN", "ADMIN"];
+
+export function esAdministradorLims(user: { roles?: string[]; permisos?: string[] } | null | undefined): boolean {
+  const roles = user?.roles ?? [];
+  const permisos = user?.permisos ?? [];
+  return roles.some((r) => ROLES_ADMIN_BI.includes(r)) || permisos.includes("admin.usuarios");
+}
+
+export function accesoBi(
+  usuario: string | null | undefined,
+  clave: string | null | undefined,
+  user: { roles?: string[]; permisos?: string[] } | null | undefined,
+): AccesoBi | null {
+  const u = String(usuario ?? "").trim();
+  const c = String(clave ?? "");
+  if (!u || !c || !esAdministradorLims(user)) return null;
+  return { usuario: u, clave: c };
+}

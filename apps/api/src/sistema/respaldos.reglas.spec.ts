@@ -1,5 +1,5 @@
 import { estadoRespaldos, horaValida, politicaDe, proximoRespaldo, servicioActivo, tamanoLegible, POLITICA_DEFECTO } from "./respaldos.reglas";
-import { urlBi } from "./bi.reglas";
+import { accesoBi, urlBi } from "./bi.reglas";
 import { fechaHoraChile } from "../common/fecha-chile";
 
 const H = 3_600_000;
@@ -99,5 +99,19 @@ describe("respaldos · tamaño legible y URL del BI", () => {
     expect(urlBi("javascript:alert(1)")).toBeNull();
     expect(urlBi("https://usuario:clave@bi.example.cl")).toBeNull();
     expect(urlBi("no es una url")).toBeNull();
+  });
+});
+
+describe("BI · acceso temporal a Metabase", () => {
+  it("solo lo recibe el administrador del LIMS", () => {
+    expect(accesoBi("admin-bi@x", "secreto", { roles: ["SUPERADMIN"] })).toEqual({ usuario: "admin-bi@x", clave: "secreto" });
+    expect(accesoBi("admin-bi@x", "secreto", { roles: ["ADMIN"] })).not.toBeNull();
+    expect(accesoBi("admin-bi@x", "secreto", { roles: ["ANALISTA"], permisos: ["admin.usuarios"] })).not.toBeNull();
+    expect(accesoBi("admin-bi@x", "secreto", { roles: ["JEFE_LAB"], permisos: ["reporte.ver"] })).toBeNull();
+    expect(accesoBi("admin-bi@x", "secreto", null)).toBeNull();
+  });
+  it("sin variables no hay acceso", () => {
+    expect(accesoBi("", "secreto", { roles: ["SUPERADMIN"] })).toBeNull();
+    expect(accesoBi("admin-bi@x", undefined, { roles: ["SUPERADMIN"] })).toBeNull();
   });
 });

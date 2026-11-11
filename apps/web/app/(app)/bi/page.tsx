@@ -16,6 +16,8 @@ import { llamar } from "@/lib/laboratorio";
 interface ConfigBi {
   configurado: boolean;
   url: string | null;
+  /** Acceso temporal: solo llega al administrador del LIMS (BI_ACCESO_* en el servidor). */
+  acceso?: { usuario: string; clave: string } | null;
 }
 
 const TABLEROS = [
@@ -67,9 +69,13 @@ function Bi() {
               Abrir Metabase en otra pestaña ↗
             </a>
           </div>
-          <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 10, marginBottom: 0 }}>
-            Metabase tiene su propio ingreso: use el usuario y la contraseña que le dio el administrador de Metabase (no son los del LIMS).
-          </p>
+          {cfg.acceso ? (
+            <AccesoTemporal acceso={cfg.acceso} />
+          ) : (
+            <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 10, marginBottom: 0 }}>
+              Metabase tiene su propio ingreso: use el usuario y la contraseña que le dio el administrador de Metabase (no son los del LIMS).
+            </p>
+          )}
         </div>
       ) : (
         <div className="alert warn">
@@ -95,6 +101,43 @@ function Bi() {
           secretos de los usuarios no son visibles desde Metabase.
         </p>
       </div>
+    </div>
+  );
+}
+
+/** Acceso temporal a Metabase, visible solo para el administrador del LIMS. */
+function AccesoTemporal({ acceso }: { acceso: { usuario: string; clave: string } }) {
+  const [ver, setVer] = useState(false);
+  const [copiado, setCopiado] = useState<string | null>(null);
+  const copiar = (texto: string, que: string) => {
+    navigator.clipboard?.writeText(texto).then(() => {
+      setCopiado(que);
+      setTimeout(() => setCopiado(null), 1500);
+    });
+  };
+  return (
+    <div className="alert warn" style={{ marginTop: 10, marginBottom: 0 }}>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>Acceso temporal a Metabase (solo administrador)</div>
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: "6px 10px", alignItems: "center", fontSize: 13 }}>
+        <span>Usuario</span>
+        <span className="codigo">{acceso.usuario}</span>
+        <button className="btn" type="button" onClick={() => copiar(acceso.usuario, "usuario")}>
+          {copiado === "usuario" ? "Copiado" : "Copiar"}
+        </button>
+        <span>Contraseña</span>
+        <span className="codigo">{ver ? acceso.clave : "•".repeat(Math.min(acceso.clave.length, 12))}</span>
+        <span style={{ display: "flex", gap: 6 }}>
+          <button className="btn" type="button" onClick={() => setVer((v) => !v)}>
+            {ver ? "Ocultar" : "Mostrar"}
+          </button>
+          <button className="btn" type="button" onClick={() => copiar(acceso.clave, "clave")}>
+            {copiado === "clave" ? "Copiado" : "Copiar"}
+          </button>
+        </span>
+      </div>
+      <small style={{ display: "block", marginTop: 6 }}>
+        Es el administrador de Metabase, no un usuario del LIMS. Se retirará cuando cada persona tenga su propio usuario.
+      </small>
     </div>
   );
 }
