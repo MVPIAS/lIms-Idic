@@ -261,6 +261,90 @@ function TablaSeccion({ sec, filas, onCambio, refs }: { sec: (typeof SECCIONES)[
   );
 }
 
+/**
+ * Cotización compartida (sesiones 27-10 y 06-11): Comercial guarda la cabecera
+ * y el laboratorio agrega aquí los ensayos que realizará, con su cantidad. El
+ * precio sale de la lista vigente o de la ficha, como en Comercial.
+ */
+function EnsayosDelLaboratorio({ solId }: { solId: string }) {
+  const [q, setQ] = useState("");
+  const [opciones, setOpciones] = useState<{ id: string; codigo?: string; nombre: string }[]>([]);
+  const [elegidos, setElegidos] = useState<{ id: string; nombre: string; cantidad: string }[]>([]);
+  const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
+  const [guardando, setGuardando] = useState(false);
+  useEffect(() => {
+    if (q.trim().length < 2) { setOpciones([]); return; }
+    const t = setTimeout(() => {
+      pedir<any>("GET", `/cat/ensayos?search=${encodeURIComponent(q.trim())}&limit=20`)
+        .then((j) => setOpciones(j?.data ?? []))
+        .catch(() => setOpciones([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  async function agregar() {
+    setMsg(null);
+    if (!elegidos.length) return setMsg({ ok: false, texto: "Elija al menos un ensayo." });
+    setGuardando(true);
+    try {
+      const r = await pedir<any>("POST", `/cotizaciones/solicitudes-laboratorio/${solId}/ensayos`, {
+        lineas: elegidos.map((e) => ({ catEnsayoId: e.id, cantidad: Math.max(1, Number(e.cantidad) || 1) })),
+      });
+      setMsg({ ok: true, texto: r?.mensaje ?? "Ensayos agregados." });
+      setElegidos([]);
+    } catch (e: any) {
+      setMsg({ ok: false, texto: e.message });
+    } finally {
+      setGuardando(false);
+    }
+  }
+  return (
+    <fieldset style={{ border: "1px solid var(--line)", borderRadius: 6, padding: "8px 12px", margin: "0 0 12px" }}>
+      <legend style={{ fontWeight: 700, fontSize: 13 }}>Ensayos que realizará el laboratorio</legend>
+      <p style={{ fontSize: 12, color: "var(--muted)", margin: "0 0 6px" }}>
+        Si Comercial dejó la cotización sin ensayos (o faltan), agréguelos aquí. Se suman a la cotización con el precio de la lista vigente o de su ficha.
+      </p>
+      {msg && <div className={`alert ${msg.ok ? "ok" : "warn"}`} role="status">{msg.texto}</div>}
+      <div className="form-grid cols-3">
+        <div className="field span-2">
+          <label htmlFor={`ens-q-${solId}`}>Buscar en el catálogo</label>
+          <input id={`ens-q-${solId}`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código o nombre del ensayo" />
+          {opciones.length > 0 && (
+            <ul style={{ listStyle: "none", padding: 0, margin: "4px 0 0", maxHeight: 160, overflowY: "auto", border: "1px solid var(--line)", borderRadius: 4 }}>
+              {opciones.map((o) => (
+                <li key={o.id}>
+                  <button type="button" className="btn ghost sm" style={{ width: "100%", justifyContent: "flex-start" }}
+                    onClick={() => { if (!elegidos.some((e) => e.id === o.id)) setElegidos([...elegidos, { id: o.id, nombre: `${o.codigo ? `${o.codigo} · ` : ""}${o.nombre}`, cantidad: "1" }]); setQ(""); }}>
+                    {o.codigo ? `${o.codigo} · ` : ""}{o.nombre}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+      {elegidos.length > 0 && (
+        <table className="tabla" style={{ marginTop: 6 }}>
+          <thead><tr><th>Ensayo</th><th style={{ width: 110 }}>Cantidad</th><th style={{ width: 60 }}></th></tr></thead>
+          <tbody>
+            {elegidos.map((e, i) => (
+              <tr key={e.id}>
+                <td>{e.nombre}</td>
+                <td><input aria-label={`Cantidad de ${e.nombre}`} inputMode="numeric" value={e.cantidad}
+                  onChange={(x) => setElegidos(elegidos.map((y, j) => (j === i ? { ...y, cantidad: x.target.value.replace(/\D/g, "") } : y)))} /></td>
+                <td><button type="button" className="btn ghost sm" aria-label={`Quitar ${e.nombre}`} onClick={() => setElegidos(elegidos.filter((_, j) => j !== i))}>✕</button></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="toolbar" style={{ marginTop: 6 }}>
+        <div className="spacer" />
+        <button type="button" className="btn outline sm" disabled={guardando || !elegidos.length} onClick={agregar}>Agregar a la cotización</button>
+      </div>
+    </fieldset>
+  );
+}
+
 export default function RespuestaLaboratorio({
   sol,
   cotCodigo,
@@ -408,6 +492,8 @@ export default function RespuestaLaboratorio({
           </div>
         )}
       </fieldset>
+
+      {!rechaza && <EnsayosDelLaboratorio solId={sol.id} />}
 
       {!rechaza && (
         <>

@@ -758,7 +758,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     };
 
     if (resto.lineas) {
-      if (!resto.lineas.length) throw new BadRequestException("La cotización debe tener al menos una línea.");
+      // Sin líneas se puede guardar (cotización compartida); la firma las exige (faltantesParaFirma).
       // Las líneas ya cotizadas conservan su precio aunque la ficha cambie (precio-ficha.ts).
       // Frente f6: si cambia la moneda, los precios guardados (en la moneda anterior) no se conservan: se recalculan.
       const mismaMoneda = monedaDe(actual.moneda) === moneda;
@@ -788,6 +788,48 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       return r;
     }
     return this.prisma.cotizacion.update({ where: { id }, data: upd, include: { lineas: true, cliente: true } });
+  }
+
+  /**
+   * Cotización compartida (sesiones 27-10 y 06-11): el laboratorio agrega los
+   * ensayos que propone al responder la solicitud. Se suman a los que ya tiene
+   * (un ensayo repetido no se duplica), con el precio de la lista o de la ficha
+   * como cualquier línea, y se recalculan los totales. Solo mientras la
+   * cotización está Abierta y no enviada a firma.
+   */
+  async agregarLineas(id: string, nuevas: LineaEntrada[], tenantId: string, usuarioId?: string, unidad?: string | null) {
+    const actual = await this.detalle(id, tenantId);
+    if (actual.estado !== ESTADO_ABIERTA) throw new ConflictException(`La cotización ${actual.codigo} ya no está Abierta (${actual.estado}).`);
+    const noEditable = motivoNoEditable((actual as any).firmaEstado ?? null);
+    if (noEditable) throw new ConflictException(noEditable);
+    const ya = new Set(actual.lineas.map((l: any) => l.catEnsayoId).filter(Boolean));
+    const pedidas = nuevas.filter((l) => !l.catEnsayoId || !ya.has(l.catEnsayoId));
+    if (!pedidas.length) return { agregadas: 0, omitidas: nuevas.length, cotizacion: actual };
+    const moneda = actual.moneda as "CLP" | "USD";
+    const dolar = moneda === "USD" && actual.dolarValor != null ? Number(actual.dolarValor) : null;
+    const validez = await this.calcularValidezPara(actual.tenantId, actual.clienteId, actual.centroCostoId, actual.fechaEmision);
+    const { lineas, manuales } = separarManuales(
+      await this.resolverLineas(actual.tenantId, pedidas, moneda, dolar, undefined, {
+        regla: validez.regla,
+        fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
+        clienteId: actual.clienteId,
+      }),
+    );
+    const base = actual.lineas.length ? Math.max(...actual.lineas.map((l: any) => Number(l.orden ?? 0))) : 0;
+    const conOrden = lineas.map((l: any, i: number) => ({ ...l, orden: base + i + 1 }));
+    const todas = [...actual.lineas.map((l: any) => ({ subtotal: Number(l.subtotal) })), ...conOrden.map((l: any) => ({ subtotal: Number(l.subtotal) }))];
+    const tot = this.totales(todas, Number(actual.gastosAdminPct ?? 0), Number(actual.ivaPct ?? 0), moneda);
+    const r = await this.prisma.cotizacion.update({
+      where: { id },
+      data: { ...tot, updatedAt: new Date(), lineas: { create: conOrden } },
+      include: { lineas: true, cliente: true },
+    });
+    await this.hitoPrecioManual(actual.tenantId, id, usuarioId, manuales, moneda);
+    await this.hito(actual.tenantId, id, "ensayos_laboratorio", usuarioId, null, {
+      unidad: unidad ?? null,
+      ensayos: conOrden.length,
+    });
+    return { agregadas: conOrden.length, omitidas: nuevas.length - pedidas.length, cotizacion: r };
   }
 
   /**
