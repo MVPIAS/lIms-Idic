@@ -15,6 +15,7 @@ import { textoMedio } from "@/lib/etiquetas";
 import { useMediosEnvio } from "@/lib/lista-parametro";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
+import TerrenoOt from "./_components/TerrenoOt";
 import RegistroMuestras from "./_components/RegistroMuestras";
 import OrdenesInternasOt from "./_components/OrdenesInternasOt";
 import CabeceraInspeccionOt from "./_components/CabeceraInspeccionOt";
@@ -156,7 +157,7 @@ export default function ExpedientePage() {
   const { id } = useParams<{ id: string }>();
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "consumos" | "informe" | "carpeta" | "flujo" | "historial">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "consumos" | "informe" | "carpeta" | "flujo" | "historial" | "terreno">("cabecera");
   /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
   const [destinoOi, setDestinoOi] = useState<string | null>(null);
   const { puede } = usePermisos();
@@ -208,7 +209,7 @@ export default function ExpedientePage() {
   // Pestaña inicial desde la URL (?tab=muestras: bandeja de entrada del laboratorio).
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "instrumentos", "ordenes", "resultados", "fotos", "consumos", "informe", "carpeta", "historial"].includes(t)) setTab(t as typeof tab);
+    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "instrumentos", "ordenes", "resultados", "fotos", "consumos", "informe", "carpeta", "historial", "terreno"].includes(t)) setTab(t as typeof tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -254,6 +255,10 @@ export default function ExpedientePage() {
   // mientras carga, no se muestran para no hacerlas aparecer y desaparecer.
   const conMuestreo = avance?.pestanas ? avance.pestanas.muestreo : false;
   const conPreparacion = avance?.pestanas ? avance.pestanas.preparacion : false;
+  // R10: trabajo en terreno (SVM, LAM, SEO). R6: a quien solo muestrea se le oculta la asignación.
+  const conTerreno = !!avance?.pestanas?.terreno;
+  const conAsignacion = avance?.pestanas?.asignacion !== false;
+  const perfilPestanas = avance?.pestanas?.perfil ?? null;
   const codOt = ot?.codigo ?? ot?.numero ?? (typeof id === "string" ? id.slice(0, 8) : "");
   const tabBtn = (t: typeof tab, l: string) =>
     <button onClick={() => setTab(t)} className={`tab${tab === t ? " active" : ""}`}>{l}</button>;
@@ -336,7 +341,8 @@ export default function ExpedientePage() {
         <div className="card" style={{ padding: 0 }}>
           <div className="tabs" style={{ padding: "0 8px" }}>
             {tabBtn("cabecera", "Cabecera")}
-            {tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
+            {conAsignacion && tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
+            {conTerreno && tabBtn("terreno", "Terreno")}
             {esMetrologia && tabBtn("instrumentos", "Instrumentos")}
             {conMuestreo && tabBtn("muestreo", "Muestreo")}
             {(!esMetrologia || muestras.length > 0) && tabBtn("muestras", `Muestras (${muestras.length})`)}
@@ -419,7 +425,9 @@ export default function ExpedientePage() {
               {typeof id === "string" && <CabeceraInspeccionOt otId={id} />}
               </div>
             )}
-            {tab === "asignacion" && typeof id === "string" && <Asignacion otId={id} onCambio={cargarOt} />}
+            {perfilPestanas && <div style={{ padding: "6px 0 0" }}><span className="pill blue">Perfil: {perfilPestanas}</span></div>}
+            {tab === "asignacion" && conAsignacion && typeof id === "string" && <Asignacion otId={id} onCambio={cargarOt} />}
+            {tab === "terreno" && conTerreno && typeof id === "string" && <TerrenoOt otId={id} onCambio={cargarAvance} />}
             {/* Preparación del trabajo (DSA, EP-05 2.1–2.3) y de las muestras (T29). */}
             {tab === "preparacion" && conPreparacion && typeof id === "string" && <PreparacionOt otId={id} laboratorio={ot?.unidad?.codigo ?? null} onCambio={cargarAvance} />}
             {tab === "historial" && (

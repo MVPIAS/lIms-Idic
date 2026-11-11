@@ -68,6 +68,7 @@ interface Propuesta {
   muestras: MuestraOt[];
   lineas: Linea[];
   opcionesToma: { codigo: string; etiqueta: string }[];
+  ubicaciones?: { codigo: string; etiqueta: string }[];
   /** B-008: panel que la OT ya trae (producto de la OT o parametrización del prototipo). */
   panelOt?: { origen: "producto" | "prototipo"; nombre: string; parametrizacion: string | null; metodos: Metodo[] } | null;
 }
@@ -566,7 +567,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                   <SelectorProducto id={`prod-${m.id}`} valor={productoEdicion} onCambio={(id) => setProductoEdicion(id)} productos={productos}
                     otId={otId} obligatorio={!!cfg?.productoObligatorio} nombreActual={m.productoNombre} sinLista={sinListaProductos} />
                 </div>
-                <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} labPrincipalId={d.ot.unidadPrincipal}
+                <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} ubicaciones={d.ubicaciones} labPrincipalId={d.ot.unidadPrincipal}
                   config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} recepcionAt={m.recepcionadaAt} />
                 <FotosRecepcion otId={otId} muestraId={m.id} codigo={m.codigo} puedeEditar={puedeRegistrar} onCambio={() => { cargar(); avisarCambio(); }} />
                 <div className="toolbar" style={{ margin: "8px 0 0" }}>
@@ -633,7 +634,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           <h3 style={{ fontSize: 13, margin: "6px 0" }}>
             Recepción{filas.length > 1 && <span style={{ fontWeight: 400, color: "var(--muted)" }}> · se aplica a las {filas.length} muestras; después puede corregir cada una con «Recepción…»</span>}
           </h3>
-          <FormRecepcion valor={comun} onCambio={setComun} opcionesToma={d.opcionesToma} labPrincipalId={d.ot.unidadPrincipal} porMuestra={false}
+          <FormRecepcion valor={comun} onCambio={setComun} opcionesToma={d.opcionesToma} ubicaciones={d.ubicaciones} labPrincipalId={d.ot.unidadPrincipal} porMuestra={false}
             config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} />
 
           <h3 style={{ fontSize: 13, margin: "12px 0 6px" }}>

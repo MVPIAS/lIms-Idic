@@ -22,6 +22,7 @@ import Clasificacion from "./_components/Clasificacion";
 import EnsayosArma from "./_components/EnsayosArma";
 import { Acunacion, Certificados, Revision } from "./_components/Certificados";
 import Entrega from "./_components/Entrega";
+import EsperaDevoluciones from "./_components/EsperaDevoluciones";
 
 export default function ExpedienteD11Page() {
   return (
@@ -154,6 +155,7 @@ function Expediente() {
           {elegido === "acunacion" && <Acunacion d={d} accion={accion} />}
           {elegido === "certificados" && <Certificados d={d} accion={accion} />}
           {elegido === "entrega" && <Entrega d={d} accion={accion} />}
+          <EsperaDevoluciones d={d} accion={accion} />
         </div>
       </div>
     </div>

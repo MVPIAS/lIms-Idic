@@ -1,0 +1,43 @@
+import { revisarBateria } from "./bateria";
+import { errorEntregaBpch } from "./entrega-bpch";
+
+const bateria = [
+  { id: "1", codigo: "IV-01", nombre: "Inspección visual" },
+  { id: "2", codigo: "EMB-01", nombre: "Embalaje" },
+];
+
+describe("Batería de ensayos fija del BPCH (R4)", () => {
+  it("con toda la batería no hay nada que decir", () => {
+    expect(revisarBateria(bateria, ["1", "2", "3"], null)).toEqual({ faltan: [], error: null, excepcion: false });
+  });
+  it("quitar un ensayo sin excepción se rechaza", () => {
+    const r = revisarBateria(bateria, ["1"], null);
+    expect(r.error).toMatch(/EMB-01/);
+  });
+  it("la excepción exige el permiso y un motivo", () => {
+    expect(revisarBateria(bateria, ["1"], { motivo: "Sin embalaje en la partida", permitido: false }).error).toMatch(/bpch.bateria.excepcion/);
+    expect(revisarBateria(bateria, ["1"], { motivo: "abc", permitido: true }).error).toMatch(/motivo/);
+    expect(revisarBateria(bateria, ["1"], { motivo: "Sin embalaje en la partida", permitido: true })).toMatchObject({ error: null, excepcion: true });
+  });
+  it("sin batería en el catálogo no se exige nada", () => {
+    expect(revisarBateria([], ["9"], null).error).toBeNull();
+  });
+});
+
+describe("Entrega del documento final del BPCH por Comercial (R4)", () => {
+  const base = { tipoDocumento: "CERTIFICADO_CONFORMIDAD", esBpch: true, origen: "INTERNACION", despacho: null };
+  it("sin remisión a DCO no se entrega", () => {
+    expect(errorEntregaBpch(base)).toMatch(/Remitir a DCO/);
+  });
+  it("remitido pero no recibido por Comercial tampoco", () => {
+    expect(errorEntregaBpch({ ...base, despacho: { destino: "DCO", recibidoAt: null } })).toMatch(/recepción/);
+  });
+  it("recibido por Comercial se entrega", () => {
+    expect(errorEntregaBpch({ ...base, despacho: { destino: "DCO", recibidoAt: "2026-11-10" } })).toBeNull();
+  });
+  it("no aplica al certificado de control, a otras unidades ni al prototipo", () => {
+    expect(errorEntregaBpch({ ...base, tipoDocumento: "INFORME_INSPECCION" })).toBeNull();
+    expect(errorEntregaBpch({ ...base, esBpch: false })).toBeNull();
+    expect(errorEntregaBpch({ ...base, origen: "PROTOTIPO" })).toBeNull();
+  });
+});

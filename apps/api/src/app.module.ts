@@ -62,6 +62,7 @@ import { EncuestaModule } from "./encuesta/encuesta.module";
 import { RecepcionModule } from "./recepcion/recepcion.module";
 import { EspecificacionTecnicaModule } from "./especificacion-tecnica/et.module";
 import { MuestreoModule } from "./muestreo/muestreo.module";
+import { TerrenoModule } from "./terreno/terreno.module";
 import { FormulariosModule } from "./formularios/formularios.module";
 import { ReglasCapturaModule } from "./formularios/reglas-captura.service";
 import { IntegracionModule } from "./integracion/integracion.module";
@@ -152,6 +153,7 @@ function prettyTransport() {
     RecepcionModule,
     EspecificacionTecnicaModule,
     MuestreoModule,
+    TerrenoModule,
     FormulariosModule,
     RbacModule,
     PlantillaRenderModule,

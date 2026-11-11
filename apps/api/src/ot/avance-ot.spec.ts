@@ -619,11 +619,11 @@ describe("Ruta de la OT · armas de la Delegación Nº 11 (EP-11)", () => {
 
 describe("Pestañas «Muestreo» y «Preparación» según la especificación", () => {
   it("se ven en una OT de laboratorio fuera del BPCH", () => {
-    expect(calcularAvance(base()).pestanas).toEqual({ muestreo: true, preparacion: true });
+    expect(calcularAvance(base()).pestanas).toMatchObject({ muestreo: true, preparacion: true });
   });
   it("no se ven en OT del BPCH (el muestreo NCh 44 es del expediente) ni de la D11", () => {
-    expect(calcularAvance(base({ rama: "bpch" })).pestanas).toEqual({ muestreo: false, preparacion: false });
-    expect(calcularAvance(base({ rama: "d11" })).pestanas).toEqual({ muestreo: false, preparacion: false });
+    expect(calcularAvance(base({ rama: "bpch" })).pestanas).toMatchObject({ muestreo: false, preparacion: false });
+    expect(calcularAvance(base({ rama: "d11" })).pestanas).toMatchObject({ muestreo: false, preparacion: false });
   });
   it("no se ven en Metrología ni en la ruta de armas", () => {
     expect(calcularAvance(base({ unidad: { codigo: "LMT", esMetrologia: true } })).pestanas.muestreo).toBe(false);

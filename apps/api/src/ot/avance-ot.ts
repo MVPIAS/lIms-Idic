@@ -27,9 +27,9 @@ import {
 } from "../metrologia/metrologia-ot.reglas";
 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
-export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas" | "bpch";
+export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas" | "bpch" | "terreno";
 /** Pestañas del expediente de la OT a las que puede llevar el «Siguiente paso». */
-export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe";
+export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe" | "terreno";
 
 export interface Etapa {
   clave: string;
@@ -80,7 +80,16 @@ export interface AvanceOt {
    * de los laboratorios (EP-01/02/03/05); en el BPCH el muestreo NCh 44 vive en el
    * expediente de inspección (EP-10 10.4) y la D11 trabaja en Certificación de armas.
    */
-  pestanas: { muestreo: boolean; preparacion: boolean };
+  pestanas: {
+    muestreo: boolean;
+    preparacion: boolean;
+    /** R10: trabajo en terreno sin recepción (SVM, LAM, SEO). */
+    terreno?: boolean;
+    /** R6: a quien solo muestrea se le ocultan la asignación y la preparación. */
+    asignacion?: boolean;
+    /** Nombre del perfil cuando lo hay (p. ej. «Muestreador de Comercial»). */
+    perfil?: string | null;
+  };
 }
 
 /* ------------------------------------------------------------- entrada --- */
@@ -209,6 +218,12 @@ export interface HechosOt {
   armas?: {
     pasos: { clave: string; titulo: string; boton: string; leToca: string; estado: "hecho" | "en_curso" | "pendiente"; detalle: string }[];
   } | null;
+  /** R10: trabajo en terreno sin recepción (terreno/reglas-terreno.ts › pasosTerreno). */
+  terreno?: {
+    pasos: { clave: string; titulo: string; boton: string; leToca: string; estado: "hecho" | "en_curso" | "pendiente"; detalle: string }[];
+  } | null;
+  /** El laboratorio de la OT trabaja en terreno (parámetro terreno.laboratorios), aunque aún no se abra. */
+  terrenoAplica?: boolean;
 }
 
 /* ------------------------------------------------------------- reglas --- */
@@ -222,6 +237,7 @@ const ORIGENES_INTERNOS = ["OT_INTERNA", "INTERLABORATORIO"];
 /** Tipo de ruta que corresponde a la OT. */
 export function tipoRuta(h: HechosOt): TipoRuta {
   if (h.armas) return "armas";
+  if (h.terreno) return "terreno";
   if (h.internacion) return "internacion";
   if (h.reinspeccion) return "reinspeccion";
   // Metrología: laboratorio de la Sección Metrología que trabaja con calibraciones
@@ -1028,6 +1044,44 @@ function rutaArmas(h: HechosOt): Ruta {
 }
 
 /**
+ * R10 · OT en terreno sin recepción ni toma de muestras (SVM, LAM, SEO): los
+ * pasos del trabajo en terreno (apertura, asignación, pruebas, lista de
+ * chequeo, IVC y cierre del terreno) y luego la emisión del informe, su
+ * entrega, el cierre de la OT y la factura del flujo general.
+ */
+function rutaTerreno(h: HechosOt): Ruta {
+  const x = h.terreno!;
+  const docs = etapasDocumentos(h.documentos, "Emisión del IVC");
+  const cierre = etapaCierre(h);
+  const fac = etapasFactura(h);
+  const etapas: Etapa[] = [
+    ...x.pasos.map((p) => etapa(`terreno_${p.clave}`, p.titulo, p.estado, p.detalle)),
+    docs.emision,
+    docs.firmas,
+    docs.entrega,
+    cierre.etapa,
+    fac.factura,
+    fac.pago,
+  ];
+  return {
+    etapas,
+    paso: (clave) => {
+      if (clave === "cierre") return cierre.paso;
+      if (clave === "emision" || clave === "firmas" || clave === "entrega") return pasoDocumentos(h, clave);
+      if (clave === "factura" || clave === "pago") return pasoFactura(h, clave);
+      const p = x.pasos.find((y) => `terreno_${y.clave}` === clave);
+      if (!p) return null;
+      const gestiona = ["terreno_apertura", "terreno_asignacion", "terreno_ivc", "terreno_cierre"].includes(clave);
+      return {
+        texto: `${p.titulo} · ${p.boton}`,
+        leToca: { rol: p.leToca, unidad: lab(h), personas: gestiona ? [] : h.analistas },
+        accion: { texto: "Ir a Terreno", pestana: "terreno", permisos: gestiona ? ["terreno.gestionar"] : ["terreno.registrar"] },
+      };
+    },
+  };
+}
+
+/**
  * OT directa o de Producción Nacional del BPCH (EP-10 §3, EP-07; BL-158): las
  * fases de la inspección en vez de las del laboratorio. Cabecera de inspección →
  * lotes (muestras) → resultados → Informe de Inspección → documento final
@@ -1065,13 +1119,13 @@ function rutaBpch(h: HechosOt): Ruta {
       r.total ? `${r.aprobados} de ${r.total} aprobados` : null),
     proto
       ? etapa("informe", "Informe de Inspección", "no_aplica", "Prototipo: sin Informe de Inspección previo")
-      : etapa("informe", "Informe de Inspección", informeOficial ? "hecho" : informe ? "en_curso" : "pendiente", informe?.numero ?? null),
+      : etapa("informe", "Certificado de control de la sucursal (Informe de Inspección)", informeOficial ? "hecho" : informe ? "en_curso" : "pendiente", informe?.numero ?? null),
     proto
       ? etapa("documento_final", "Dictamen del tipo (aprobación o rechazo)", final && esOficialDoc(final) ? "hecho" : final ? "en_curso" : "pendiente",
           final?.numero ?? "Se emite desde BPCH › Prototipos")
       : etapa(
           "documento_final",
-          condicion === "no_cumple" ? "Informe de Incumplimiento → DGMN" : "Certificado de Conformidad",
+          condicion === "no_cumple" ? "Informe de Incumplimiento → DGMN" : "Certificado de Conformidad (casa matriz)",
           !finalAplica ? "no_aplica" : final && esOficialDoc(final) ? "hecho" : final ? "en_curso" : "pendiente",
           !finalAplica ? "Producción Nacional: el informe técnico va en la correlación de la O/C" : final?.numero ?? `Condición: ${TEXTO_CONDICION[condicion]}`,
         ),
@@ -1100,7 +1154,7 @@ function rutaBpch(h: HechosOt): Ruta {
           return pasoResultados(h, "resultados");
         case "informe":
           if (informe?.estado === "en_firma") return pasoFirma(informe);
-          return ir(informe?.estado === "devuelto" ? `El Informe de Inspección ${informe.numero} fue devuelto: corríjalo y reemítalo` : "Emitir el Informe de Inspección", "informe", ["certificado.emitir"]);
+          return ir(informe?.estado === "devuelto" ? `El certificado de control ${informe.numero} fue devuelto: corríjalo y reemítalo` : "Emitir el certificado de control de la sucursal (Informe de Inspección)", "informe", ["certificado.emitir"]);
         case "documento_final":
           if (final?.estado === "en_firma") return pasoFirma(final);
           return ir(`Emitir el ${nombreFinal}`, "informe", ["certificado.emitir"]);
@@ -1131,6 +1185,7 @@ export function calcularAvance(h: HechosOt): AvanceOt {
   const tipo = tipoRuta(h);
   const ruta =
     tipo === "armas" ? rutaArmas(h)
+    : tipo === "terreno" ? rutaTerreno(h)
     : tipo === "internacion" ? rutaInternacion(h)
     : tipo === "reinspeccion" ? rutaReinspeccion(h)
     : tipo === "metrologia" ? rutaMetrologia(h)
@@ -1182,7 +1237,19 @@ export function calcularAvance(h: HechosOt): AvanceOt {
 /** Pestañas «Muestreo» y «Preparación»: solo en OT de laboratorio fuera del BPCH y la D11. */
 export function pestanasOt(h: HechosOt, tipo: TipoRuta = tipoRuta(h)): AvanceOt["pestanas"] {
   const deLaboratorio = (tipo === "laboratorio" || tipo === "interna") && !h.rama && !h.unidad?.esMetrologia;
-  return { muestreo: deLaboratorio, preparacion: deLaboratorio };
+  const terreno = tipo === "terreno" || Boolean(h.terrenoAplica);
+  // R10: el trabajo en terreno no tiene toma de muestras ni preparación.
+  return { muestreo: deLaboratorio, preparacion: deLaboratorio, terreno, asignacion: true };
+}
+
+/**
+ * R6 · a quien solo muestrea (muestreador de Comercial o de la Sección
+ * Muestreo) se le ocultan los pasos que no usa: asignación y preparación; ve el
+ * muestreo y su perfil con claridad.
+ */
+export function pestanasParaPerfil(p: AvanceOt["pestanas"], perfil: { soloMuestrea: boolean; nombre: string | null }): AvanceOt["pestanas"] {
+  if (!perfil.soloMuestrea) return { ...p, perfil: perfil.nombre };
+  return { ...p, asignacion: false, preparacion: false, perfil: perfil.nombre };
 }
 
 /** ¿Puede este usuario hacer la acción del siguiente paso? (para mostrar el botón o «Esperando a…»). */

@@ -1035,6 +1035,63 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       vigencia_anios: { tipo: "entero", nombre: "Vigencia del certificado por arma", min: 1, max: 10, unidad: "años", porDefecto: "4" },
     },
   },
+  {
+    categoria: "bpch_resolucion",
+    titulo: "BPCH y Delegación Nº 11 · vigencia de la resolución",
+    donde: "OT del BPCH y la D11: la fecha de compromiso no puede pasar el último día de vigencia de la resolución y ninguna queda sin plazo (sesión R3).",
+    codigos: {
+      vigencia_dias: { tipo: "entero", nombre: "Días de vigencia de la resolución", min: 1, max: 730, unidad: "días", porDefecto: "180" },
+    },
+  },
+  {
+    categoria: "bpch_lugar_inspeccion",
+    titulo: "BPCH · plantas y lugares de inspección",
+    donde: "OT › Cabecera de inspección: el lugar se elige de esta tabla y trae su dirección y comuna; «En terreno» deja escribirlo.",
+    porConfirmar: "Tabla real de plantas y lugares con su dirección (acuerdo 3 de la sesión R3). Las filas «PRUEBA» son de ejemplo.",
+    codigos: {
+      tabla: {
+        tipo: "tabla",
+        nombre: "Plantas y lugares de inspección",
+        maxFilas: 500,
+        columnas: [
+          { clave: "lugar", etiqueta: "Planta o lugar", tipo: "texto", obligatoria: true, largo: 240 },
+          { clave: "direccion", etiqueta: "Dirección", tipo: "texto", obligatoria: true, largo: 240 },
+          { clave: "comuna", etiqueta: "Comuna", tipo: "texto", largo: 120 },
+          { clave: "sucursal", etiqueta: "Sucursal (código)", tipo: "texto", largo: 20 },
+        ],
+      },
+    },
+  },
+  {
+    categoria: "terreno",
+    titulo: "Trabajo en terreno sin recepción",
+    donde: "OT › Terreno: los laboratorios marcados abren su OT en terreno (apertura, asignación, pruebas, lista de chequeo, IVC y cierre · sesión R10).",
+    codigos: {
+      laboratorios: {
+        tipo: "multiple",
+        nombre: "Laboratorios que trabajan en terreno",
+        opcionesDe: "laboratorios",
+        porDefecto: "SVM,LAM,SEO",
+      },
+    },
+  },
+  {
+    categoria: "terreno_protocolo",
+    titulo: "Trabajo en terreno · protocolo de recepción cualitativa por laboratorio",
+    donde: "OT › Terreno › Pruebas: sistemas y pruebas que se proponen (formato de control de prueba). Se pueden agregar otras en la OT.",
+    porConfirmar: "Protocolos reales de Vehículos, Armamento y Telecomunicaciones (acuerdo 3 de la sesión R10). Las filas «PRUEBA» son de ejemplo.",
+    patron: {
+      tipo: "tabla",
+      nombre: "Pruebas del protocolo",
+      alta: "laboratorio",
+      maxFilas: 300,
+      columnas: [
+        { clave: "sistema", etiqueta: "Sistema", tipo: "texto", obligatoria: true, largo: 120 },
+        { clave: "prueba", etiqueta: "Prueba", tipo: "texto", obligatoria: true, largo: 300 },
+        { clave: "requisito", etiqueta: "Requisito", tipo: "texto", largo: 500 },
+      ],
+    },
+  },
 ];
 
 export const CATEGORIAS_CONFIGURABLES = GRUPOS_CONFIG.map((g) => g.categoria);
@@ -1067,6 +1124,9 @@ export const LISTAS_PARAMETROS: ListaParametro[] = [
   { categoria: "tipo_linea_costeo", nombre: "Tipo de línea de costeo" },
   { categoria: "tipo_inspeccion", nombre: "Tipo de inspección" },
   { categoria: "toma_muestra", nombre: "Toma de muestra (recepción)" },
+  { categoria: "ubicacion_almacenamiento", nombre: "Ubicación de almacenamiento (recepción)" },
+  { categoria: "unidad_tamano_lote", nombre: "Unidad del tamaño del lote" },
+  { categoria: "unidad_tamano_muestra", nombre: "Unidad del tamaño de la muestra" },
   { categoria: "cargo_costo", nombre: "Cargo de costo (planillas de la OT)" },
   {
     categoria: "medio_envio",
