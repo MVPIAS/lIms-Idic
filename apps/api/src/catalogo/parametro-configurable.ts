@@ -699,6 +699,41 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       reposicion: { tipo: "entero", nombre: "Unidades de reposición que se suman al lote", min: 0, max: 50, unidad: "unidades", porDefecto: "4" },
     },
   },
+  // --- Comercial · sesiones de preproducción (frente S1, reuniones 1 y 2) ---
+  {
+    categoria: "aceptacion_comprobante",
+    titulo: "Aceptación de la cotización · comprobante",
+    donde: "Registrar aceptación: OPI, resolución, oficio, O/C, correo o pago adelantado con su comprobante adjunto (reuniones 2 y 3).",
+    codigos: {
+      exige: { tipo: "sino", nombre: "Exigir el comprobante adjunto (salvo la disposición del Director)", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
+  {
+    categoria: "ot_disposicion",
+    titulo: "OT por disposición sin OPI · plazo",
+    donde: "OT por disposición del Director con cobro: la OPI se regulariza en este plazo; después aparece como «OPI vencida» en Mi bandeja (reunión 2).",
+    codigos: {
+      meses_opi: { tipo: "entero", nombre: "Meses para regularizar la OPI", min: 1, max: 24, unidad: "meses", porDefecto: "2" },
+    },
+  },
+  {
+    categoria: "cotizacion_vencidas",
+    titulo: "Cotizaciones vencidas · anulación",
+    donde: "Una cotización Vencida sin OT pasa sola a Anulada estos días después de su vencimiento (reunión 2).",
+    porConfirmar: "Qué hacer con las vencidas: se planteó anularlas (reunión 2). 0 = no se anulan.",
+    codigos: {
+      anular_dias: { tipo: "entero", nombre: "Días tras el vencimiento para anularla (0 = no se anula)", min: 0, max: 3650, unidad: "días", porDefecto: "0" },
+    },
+  },
+  {
+    categoria: "cliente_moroso",
+    titulo: "Clientes morosos · propuesta de bloqueo",
+    donde: "Comercial › Clientes › Morosos: facturas impagas vencidas que proponen el bloqueo al Jefe DCO (reunión 2).",
+    porConfirmar: "Días de gracia tras el vencimiento antes de proponer el bloqueo.",
+    codigos: {
+      dias_gracia: { tipo: "entero", nombre: "Días de gracia tras el vencimiento de la factura", min: 0, max: 3650, unidad: "días", porDefecto: "0" },
+    },
+  },
   {
     categoria: "ot_institucional",
     titulo: "OT institucional sin cobro",

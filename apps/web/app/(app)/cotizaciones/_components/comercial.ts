@@ -50,8 +50,14 @@ export type ConfigCotizacion = {
   parametros: Record<string, Opcion[]>;
   centrosCosto: CentroCosto[];
   validez: { particularDias: number; ejercitoMesesOctDic: number };
+  /** Condiciones adicionales: 5.000 caracteres (reuniones 1 y 2). */
   condicionesMax: number;
+  /** Reuniones 2 y 3: el comprobante de la aceptación es obligatorio (parámetro aceptacion_comprobante.exige). */
+  aceptacion?: { exigeComprobante: boolean };
 };
+
+/** Tipo de documento (reunión 10): la pre-cotización entrega valores referenciales, sin ensayos ni OT. */
+export const esPrecot = (c: { tipoDocumento?: string | null } | null | undefined) => c?.tipoDocumento === "precotizacion";
 
 export const GRUPOS_CC = ["Laboratorios", "Sucursales y Delegación BPCH"] as const;
 
@@ -78,7 +84,9 @@ export const ESTADO_LABEL: Record<string, string> = {
 };
 
 export const ACEPTACION_LABEL: Record<string, string> = {
-  OPI_RESOLUCION: "OPI / Resolución (Ejército)",
+  OPI_RESOLUCION: "OPI (Ejército)",
+  RESOLUCION: "Resolución (BPCH u otra autoridad)",
+  OFICIO: "Oficio",
   OC: "Orden de compra",
   CORREO: "Aprobación por correo (particular)",
   PAGO_ADELANTADO: "Comprobante de pago por adelantado",

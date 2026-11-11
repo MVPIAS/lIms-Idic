@@ -6,9 +6,10 @@ import { rut } from "@/lib/format";
 import { llamar } from "@/lib/laboratorio";
 import Plantas from "./_components/Plantas";
 import HistorialCliente from "./_components/HistorialCliente";
+import { BloqueoCliente, ClientesMorosos } from "./_components/BloqueoCliente";
 
 const badge = (v: any) => (
-  <span className={`pill ${v ? "red" : "green"}`}>{v ? "bloqueado" : "activo"}</span>
+  <span className={`pill ${v ? "red" : "green"}`} title={v ? "Bloqueado por el Jefe DCO: no recibe cotizaciones" : undefined}>{v ? "bloqueado" : "activo"}</span>
 );
 
 /** «Días de crédito» llega como texto del formulario; la API lo espera entero (vacío = no se informa). */
@@ -35,6 +36,10 @@ const pct = (v: any) => `${String(Number(v)).replace(".", ",")} %`;
 export default function ClientesPage() {
   const [plantasDe, setPlantasDe] = useState<{ id: string; razonSocial: string } | null>(null);
   const [historialDe, setHistorialDe] = useState<{ id: string; razonSocial: string } | null>(null);
+  // Reunión 2: bloqueo de clientes con facturas impagas (Jefe del Departamento Comercial).
+  const [bloqueoDe, setBloqueoDe] = useState<any | null>(null);
+  const [verMorosos, setVerMorosos] = useState(false);
+  const [version, setVersion] = useState(0);
   // ?historial=<id>: abre el historial de ese cliente (enlace del aviso «Próxima acción» de Mi bandeja).
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("historial");
@@ -45,7 +50,13 @@ export default function ClientesPage() {
   }, []);
   return (
     <>
+    <div className="toolbar" style={{ justifyContent: "flex-end", marginBottom: -6 }}>
+      <button type="button" className="btn outline sm" onClick={() => setVerMorosos(true)} title="Clientes con facturas impagas vencidas y clientes bloqueados">
+        Morosos y bloqueados
+      </button>
+    </div>
     <CrudTable
+      key={version}
       prepararCrear={conDiasCredito}
       prepararActualizar={alActualizar}
       accionesFila={(row) => (
@@ -57,6 +68,10 @@ export default function ClientesPage() {
           <button type="button" className="btn outline sm" onClick={() => setPlantasDe({ id: row.id, razonSocial: row.razonSocial })}
             title="Plantas o recintos del cliente">
             Plantas
+          </button>{" "}
+          <button type="button" className={`btn sm ${row.bloqueado ? "success" : "outline"}`} onClick={() => setBloqueoDe(row)}
+            title={row.bloqueado ? `Bloqueado: ${row.motivoBloqueo ?? ""}` : "Bloquear por facturas impagas (Jefe DCO)"}>
+            {row.bloqueado ? "Desbloquear" : "Bloquear"}
           </button>
         </>
       )}
@@ -147,6 +162,8 @@ export default function ClientesPage() {
     />
     {plantasDe && <Plantas cliente={plantasDe} onCerrar={() => setPlantasDe(null)} />}
     {historialDe && <HistorialCliente cliente={historialDe} onCerrar={() => setHistorialDe(null)} />}
+    {verMorosos && <ClientesMorosos onCerrar={() => setVerMorosos(false)} onElegir={(c) => { setVerMorosos(false); setBloqueoDe(c); }} />}
+    {bloqueoDe && <BloqueoCliente cliente={bloqueoDe} onCerrar={() => setBloqueoDe(null)} onHecho={() => { setBloqueoDe(null); setVersion((v) => v + 1); }} />}
     </>
   );
 }

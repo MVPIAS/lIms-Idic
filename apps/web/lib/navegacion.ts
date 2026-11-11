@@ -60,6 +60,9 @@ export const NAV: SeccionNav[] = [
       { href: "/crm", label: "Oportunidades (CRM)", icon: "🎯", perm: "cotizacion.ver", claves: "crm pipeline" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "💲", perm: "cotizacion.ver" },
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
+      // Sesiones de preproducción (frente S1): avisos de Comercial y validez por tipo de cliente y laboratorio.
+      { href: "/cotizaciones/avisos", label: "Avisos comerciales", icon: "🔔", perm: "cotizacion.ver", claves: "facturar opi pendiente aceptadas sin ot" },
+      { href: "/cotizaciones/validez", label: "Validez de cotizaciones", icon: "📅", perm: "cotizacion.ver", claves: "validez dias tipo de cliente laboratorio" },
       { href: "/seguimiento", label: "Seguimiento y envío", icon: "📮", perm: ["ot.seguimiento", "certificado.despachar", "certificado.entregar"], claves: "despacho recepcion dco plazo cliente envio guia entrega atraso" },
       { href: "/encuestas", label: "Encuestas de satisfacción", icon: "☺", perm: "encuesta.ver", claves: "postventa satisfaccion cliente" },
       // EP-00 9.2 (frente r4d): reclamos de clientes.
