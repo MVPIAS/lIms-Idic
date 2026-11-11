@@ -25,6 +25,7 @@ interface Informe {
   area: string;
   descripcion: string;
   legado: string[];
+  pedido?: string | null;
   filtros: ("fecha" | "laboratorio" | "centroCosto" | "estado" | "texto")[];
   columnas: Columna[];
   filas: Record<string, string | number | null>[];
@@ -171,7 +172,8 @@ export default function InformeFijoPage() {
         <p className="subtitle">
           {inf.descripcion}{" "}
           <span style={{ fontSize: 11.5 }}>
-            Reemplaza a: <span className="codigo">{inf.legado.join(", ")}</span>
+            {inf.legado.length > 0 ? <>Reemplaza a: <span className="codigo">{inf.legado.join(", ")}</span></> : null}
+            {inf.pedido ? <> Pedido: {inf.pedido}</> : null}
           </span>
         </p>
       ) : null}

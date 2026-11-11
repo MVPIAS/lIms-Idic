@@ -8,8 +8,12 @@
  * la cotización. Ven la planilla las jefaturas, Dirección, Planificación y
  * Finanzas (costo_real.ver), siempre dentro de su alcance.
  *
- * Las tarifas ($/h por cargo y por equipo) no constan en las fuentes recibidas:
- * se escriben en cada línea.
+ * Tarifas (frente S4): al elegir una categoría de «Tarifas HH» el $/h se toma de
+ * Tablas maestras; los equipos sugeridos traen su tarifa HM si existe (si no,
+ * «Pendiente del IDIC» y se escribe a mano); los consumos del kardex vienen
+ * valorizados con el costo de cada lote; el vehículo institucional usa el costo
+ * por km. Semáforo de lo cotizado frente a lo real por laboratorio y para la OT
+ * completa (umbrales en Parámetros › Costo real).
  *
  * API: GET|PUT /laboratorio/ot/:id/costos-reales · POST …/cerrar · POST …/reabrir
  */
@@ -29,7 +33,7 @@ interface Linea {
 }
 const GASTOS_COMISION: [string, string][] = [
   ["viatico", "Viático"], ["pasaje", "Pasaje"], ["traslado", "Traslado"], ["arriendo", "Arriendo de vehículo"],
-  ["combustible", "Combustible"], ["rendicion", "Rendición de cuentas"], ["otro", "Otro gasto"],
+  ["combustible", "Combustible"], ["vehiculo", "Vehículo institucional (km)"], ["rendicion", "Rendición de cuentas"], ["otro", "Otro gasto"],
 ];
 /** Línea en edición: los números como texto (coma decimal). */
 interface Fila extends Omit<Linea, "cantidad" | "costoUnitario"> { clave: string; cantidad: string; costoUnitario: string }
@@ -45,21 +49,41 @@ interface Vista {
   lineas: (Linea & { total: number; consumibleNombre?: string | null; equipoNombre?: string | null; equipoCodigo?: string | null })[];
   resumen: { porCategoria: Record<Categoria, { cantidad: number; total: number; lineas: number }>; horasHombre: number; horasMaquina: number; total: number };
   estimacion: { costoDirecto: number | null; fuenteCosto: string | null; horasHombre: number | null; fuenteHoras: string | null; cotizadoPorCategoria: Record<Categoria, number>; neto: number | null; alcance?: "ot" | "laboratorio" | "sin_estimacion_laboratorio"; aviso?: string | null };
-  comparacion: { costoReal: number; costoEstimado: number | null; diferencia: number | null; desviacionPct: number | null; horasReales: number; horasEstimadas: number | null; diferenciaHoras: number | null; margen: number | null };
-  cargos: { codigo: string; etiqueta: string }[];
-  sugerencias: { equipos: { id: string; codigo: string; nombre: string }[]; consumos: { id: string; codigo: string; nombre: string; unidad: string | null; cantidad: number }[]; lineas?: Linea[] };
+  comparacion: { costoReal: number; costoEstimado: number | null; diferencia: number | null; desviacionPct: number | null; horasReales: number; horasEstimadas: number | null; diferenciaHoras: number | null; margen: number | null; semaforo?: Semaforo };
+  umbrales?: { amarilloPct: number; rojoPct: number };
+  consolidado?: {
+    planillas: { unidadId: string; unidad: string; estado: string; total: number; horasHombre: number }[];
+    costoReal: number; costoEstimado: number | null; diferencia: number | null; desviacionPct: number | null; semaforo: Semaforo;
+    margen: number | null; cerradas: number; laboratorios: number; completo: boolean;
+  };
+  tarifas?: { vehiculos: { categoria: string; descripcion: string | null; costoKm: number }[] };
+  pendientesIdic?: string[];
+  cargos: { codigo: string; etiqueta: string; valorHora?: number }[];
+  sugerencias: {
+    equipos: { id: string; codigo: string; nombre: string; valorHora?: number | null }[];
+    consumos: { id: string; codigo: string; nombre: string; unidad: string | null; cantidad: number; costoUnitario?: number | null; sinCosto?: number }[];
+    lineas?: Linea[];
+  };
   resultadosSinAprobar: number;
   puedeGestionar: boolean;
   erroresCierre: string[];
 }
 
+type Semaforo = "verde" | "amarillo" | "rojo" | "sin_dato";
+const SEMAFORO: Record<Semaforo, { pill: string; texto: string }> = {
+  verde: { pill: "green", texto: "Verde · dentro de lo cotizado" },
+  amarillo: { pill: "amber", texto: "Amarillo · sobre lo cotizado" },
+  rojo: { pill: "red", texto: "Rojo · muy sobre lo cotizado" },
+  sin_dato: { pill: "gray", texto: "Sin estimación para comparar" },
+};
+
 const BLOQUES: { k: Categoria; titulo: string; cantidad: string; unitario: string; ayuda: string }[] = [
-  { k: "horas_hombre", titulo: "Horas hombre", cantidad: "Horas", unitario: "$ / hora", ayuda: "Por cargo. La tarifa por hora la indica la jefatura (no consta en las fuentes recibidas)." },
+  { k: "horas_hombre", titulo: "Horas hombre", cantidad: "Horas", unitario: "$ / hora", ayuda: "Por cargo o por categoría de «Tarifas HH»: al elegir una categoría, el $ / hora se toma de Tablas maestras (puede corregirse)." },
   { k: "reactivos", titulo: "Reactivos y consumibles", cantidad: "Cantidad", unitario: "$ / unidad", ayuda: "Insumos usados en los ensayos de la OT (p. ej. acetileno, HCl, lámparas, Titrisol)." },
-  { k: "equipos", titulo: "Equipos (horas máquina)", cantidad: "Horas", unitario: "$ / hora", ayuda: "Horas de uso de cada equipo con su tarifa estándar." },
+  { k: "equipos", titulo: "Equipos (horas máquina)", cantidad: "Horas", unitario: "$ / hora", ayuda: "Horas de uso de cada equipo con su tarifa de «Tarifas HM». El valor hora de cada equipo aún no lo entrega el IDIC: si falta, escríbalo a mano." },
   { k: "otros", titulo: "Otros", cantidad: "Cantidad", unitario: "$ unitario", ayuda: "Traslados, servicios externos u otros gastos directos." },
   { k: "ot_interna", titulo: "OT internas valorizadas", cantidad: "Cantidad", unitario: "Costo directo", ayuda: "Órdenes internas que otros laboratorios respondieron para esta OT, con su costo directo (EP-00 7.1)." },
-  { k: "comision", titulo: "Gastos de comisión", cantidad: "Cantidad", unitario: "$ unitario", ayuda: "Comisión en terreno o en el extranjero: viáticos, pasajes, traslados, arriendo, combustible y rendición (EP-05 9.1)." },
+  { k: "comision", titulo: "Gastos de comisión", cantidad: "Cantidad", unitario: "$ unitario", ayuda: "Comisión en terreno o en el extranjero: viáticos, pasajes, traslados, arriendo, combustible, vehículo institucional (km × costo por km) y rendición (EP-05 9.1)." },
 ];
 const FUENTE_COSTO: Record<string, string> = {
   costeo_consolidado: "costeo consolidado de la cotización",
@@ -238,13 +262,46 @@ export default function CostosRealesPage() {
               <div style={{ fontSize: 11, color: "var(--muted)" }}>{est!.fuenteCosto ? FUENTE_COSTO[est!.fuenteCosto] : "La cotización no trae estimación de costo"}</div></div>
             <div className={`kpi ${c!.diferencia == null ? "" : c!.diferencia > 0 ? "k-red" : "k-green"}`}><div className="lab">Diferencia real − estimado</div>
               <div className="val">{c!.diferencia != null ? `${clp(c!.diferencia)}` : "—"}</div>
-              {c!.desviacionPct != null && <div style={{ fontSize: 11, color: "var(--muted)" }}>{pct(c!.desviacionPct, 1)} sobre lo estimado</div>}</div>
+              {c!.desviacionPct != null && <div style={{ fontSize: 11, color: "var(--muted)" }}>{pct(c!.desviacionPct, 1)} sobre lo estimado</div>}
+              {c!.semaforo && <span className={`pill ${SEMAFORO[c!.semaforo].pill}`} title={v.umbrales ? `Amarillo desde ${num(v.umbrales.amarilloPct, 1)} %, rojo desde ${num(v.umbrales.rojoPct, 1)} %` : undefined}>{SEMAFORO[c!.semaforo].texto}</span>}</div>
             <div className="kpi k-violet"><div className="lab">Horas hombre (real / estimado)</div>
               <div className="val">{num(c!.horasReales, 2)} / {c!.horasEstimadas != null ? num(c!.horasEstimadas, 2) : "—"}</div>
               {est!.fuenteHoras && <div style={{ fontSize: 11, color: "var(--muted)" }}>{FUENTE_HORAS[est!.fuenteHoras]}</div>}</div>
             <div className="kpi k-amber"><div className="lab">Neto cotizado − costo real</div><div className="val">{c!.margen != null ? clp(c!.margen) : "—"}</div></div>
           </div>
           {est!.aviso && <div className="alert info">{est!.aviso}</div>}
+          {(v.pendientesIdic ?? []).length > 0 && (
+            <div className="alert warn"><ul style={{ margin: 0, paddingLeft: 18 }}>{v.pendientesIdic!.map((x) => <li key={x}>{x}</li>)}</ul></div>
+          )}
+          {v.consolidado && v.consolidado.laboratorios > 1 && (
+            <div className="card">
+              <h2>
+                Costo real de la OT completa ({v.consolidado.laboratorios} laboratorios)
+                <span className="right"><span className={`pill ${SEMAFORO[v.consolidado.semaforo].pill}`}>{SEMAFORO[v.consolidado.semaforo].texto}</span></span>
+              </h2>
+              <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>
+                Suma de las planillas de todos los laboratorios frente al costo directo estimado de la cotización completa.
+                {v.consolidado.completo ? " Todas las planillas están cerradas: el costo es definitivo." : ` Planillas cerradas: ${v.consolidado.cerradas} de ${v.consolidado.laboratorios}.`}
+              </p>
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: 13 }}>
+                <div>Costo real: <b>{clp(v.consolidado.costoReal)}</b></div>
+                <div>Estimado: <b>{v.consolidado.costoEstimado != null ? clp(v.consolidado.costoEstimado) : "—"}</b></div>
+                <div>Diferencia: <b>{v.consolidado.diferencia != null ? clp(v.consolidado.diferencia) : "—"}</b>{v.consolidado.desviacionPct != null && ` (${pct(v.consolidado.desviacionPct, 1)})`}</div>
+                <div>Neto − costo real: <b>{v.consolidado.margen != null ? clp(v.consolidado.margen) : "—"}</b></div>
+              </div>
+              {v.consolidado.planillas.length > 0 && (
+                <table className="data" style={{ marginTop: 8 }}>
+                  <thead><tr><th>Laboratorio</th><th>Planilla</th><th className="num">Horas hombre</th><th className="num">Costo real</th></tr></thead>
+                  <tbody>
+                    {v.consolidado.planillas.map((p) => (
+                      <tr key={p.unidadId}><td>{p.unidad}</td><td><span className={`pill ${p.estado === "cerrada" ? "green" : "amber"}`}>{p.estado === "cerrada" ? "Cerrada" : "Borrador"}</span></td>
+                        <td className="num">{num(p.horasHombre, 2)}</td><td className="num">{clp(p.total)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
           {est!.alcance === "laboratorio" && <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>Se compara con la estimación de este laboratorio (su solicitud de costeo), no con el total de la OT.</p>}
           {sucio && <div className="alert info">Hay cambios sin guardar: los indicadores del servidor se actualizan al guardar.</div>}
 
@@ -284,21 +341,35 @@ export default function CostosRealesPage() {
                               {b.k === "horas_hombre" && (
                                 <td>
                                   {editable ? (
-                                    <select aria-label="Cargo" value={f.cargo ?? ""} onChange={(e) => cambiar(f.clave, { cargo: e.target.value || null })}>
-                                      <option value="">Elija el cargo…</option>
-                                      {v.cargos.map((x) => <option key={x.codigo} value={x.codigo}>{x.etiqueta}</option>)}
+                                    <select aria-label="Cargo" value={f.cargo ?? ""} onChange={(e) => {
+                                      const cargo = e.target.value || null;
+                                      const t = v.cargos.find((x) => x.codigo === cargo)?.valorHora;
+                                      cambiar(f.clave, { cargo, ...(t != null ? { costoUnitario: aTexto(t) } : {}) });
+                                    }}>
+                                      <option value="">Elija el cargo o la categoría…</option>
+                                      {v.cargos.map((x) => <option key={x.codigo} value={x.codigo}>{x.etiqueta}{x.valorHora != null ? ` (${clp(x.valorHora)} / h)` : ""}</option>)}
                                     </select>
                                   ) : v.cargos.find((x) => x.codigo === f.cargo)?.etiqueta ?? f.cargo ?? "—"}
                                 </td>
                               )}
                               {b.k === "comision" && (
                                 <td>
-                                  {editable ? (
-                                    <select aria-label="Tipo de gasto" value={f.tipoGasto ?? ""} onChange={(e) => cambiar(f.clave, { tipoGasto: e.target.value || null })}>
+                                  {editable ? (<>
+                                    <select aria-label="Tipo de gasto" value={f.tipoGasto ?? ""} onChange={(e) => cambiar(f.clave, { tipoGasto: e.target.value || null, ...(e.target.value === "vehiculo" ? { unidad: "km" } : {}) })}>
                                       <option value="">Elija el gasto…</option>
                                       {GASTOS_COMISION.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
                                     </select>
-                                  ) : GASTOS_COMISION.find(([c]) => c === f.tipoGasto)?.[1] ?? "—"}
+                                    {f.tipoGasto === "vehiculo" && (v.tarifas?.vehiculos ?? []).length > 0 && (
+                                      <select aria-label="Categoría del vehículo" style={{ marginTop: 4 }} defaultValue=""
+                                        onChange={(e) => {
+                                          const t = v.tarifas!.vehiculos.find((x) => x.categoria === e.target.value);
+                                          if (t) cambiar(f.clave, { costoUnitario: aTexto(t.costoKm), descripcion: f.descripcion || `Vehículo ${t.descripcion ?? t.categoria}` });
+                                        }}>
+                                        <option value="">Costo por km de…</option>
+                                        {v.tarifas!.vehiculos.map((t) => <option key={t.categoria} value={t.categoria}>{t.descripcion ?? t.categoria} ({clp(t.costoKm)} / km)</option>)}
+                                      </select>
+                                    )}
+                                  </>) : GASTOS_COMISION.find(([c]) => c === f.tipoGasto)?.[1] ?? "—"}
                                 </td>
                               )}
                               <td>{editable ? <input aria-label="Descripción" value={f.descripcion ?? ""} maxLength={300} onChange={(e) => cambiar(f.clave, { descripcion: e.target.value })} /> : f.descripcion || "—"}</td>
@@ -322,14 +393,14 @@ export default function CostosRealesPage() {
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, alignItems: "center" }}>
                     <button className="btn outline sm" onClick={() => agregar(filaVacia(b.k))}>＋ Agregar línea</button>
                     {b.k === "equipos" && v.sugerencias.equipos.filter((e) => !filas.some((f) => f.equipoId === e.id)).map((e) => (
-                      <button key={e.id} className="btn outline sm" title="Equipo usado en los ensayos de la OT"
-                        onClick={() => agregar({ ...filaVacia("equipos"), equipoId: e.id, descripcion: `${e.codigo} ${e.nombre}`.trim(), unidad: "h" })}>
-                        ＋ {e.codigo}
+                      <button key={e.id} className="btn outline sm" title={e.valorHora != null ? `Equipo usado en los ensayos de la OT · tarifa HM ${clp(e.valorHora)} / h` : "Equipo usado en los ensayos de la OT · sin tarifa HM (Pendiente del IDIC): escriba el $ / hora"}
+                        onClick={() => agregar({ ...filaVacia("equipos"), equipoId: e.id, descripcion: `${e.codigo} ${e.nombre}`.trim(), unidad: "h", costoUnitario: aTexto(e.valorHora ?? null) })}>
+                        ＋ {e.codigo}{e.valorHora == null ? " (sin tarifa)" : ""}
                       </button>
                     ))}
                     {b.k === "reactivos" && v.sugerencias.consumos.filter((x) => !filas.some((f) => f.consumibleId === x.id)).map((x) => (
-                      <button key={x.id} className="btn outline sm" title="Consumo registrado en el kardex sobre las muestras de la OT"
-                        onClick={() => agregar({ ...filaVacia("reactivos"), consumibleId: x.id, descripcion: x.nombre, cantidad: aTexto(x.cantidad), unidad: x.unidad ?? "" })}>
+                      <button key={x.id} className="btn outline sm" title={x.costoUnitario != null ? `Consumo registrado en el kardex sobre las muestras de la OT · costo promedio de sus lotes ${clp(x.costoUnitario)}` : "Consumo registrado en el kardex · sin costo de lote (Pendiente del IDIC)"}
+                        onClick={() => agregar({ ...filaVacia("reactivos"), consumibleId: x.id, descripcion: x.nombre, cantidad: aTexto(x.cantidad), unidad: x.unidad ?? "", costoUnitario: aTexto(x.costoUnitario ?? null) })}>
                         ＋ {x.nombre} ({num(x.cantidad, 2)} {x.unidad ?? ""})
                       </button>
                     ))}

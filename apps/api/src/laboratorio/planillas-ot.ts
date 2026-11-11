@@ -58,7 +58,10 @@ import {
   laboratorioDeResultado,
   resumenCostos,
   totalLinea,
-  type LineaCostoReal, TIPOS_GASTO_COMISION, lineasSugeridas } from "./costos-reales";
+  type LineaCostoReal, TIPOS_GASTO_COMISION, lineasSugeridas,
+  consolidarOt, estimacionDeCotizacion, semaforo } from "./costos-reales";
+import { categoriasHh, consumosValorizados, planillasDeOt, tarifaDeEquipo, tarifasVigentes, umbralesSemaforo } from "./costo-real-datos";
+import { hoyCl } from "../ot/plazos";
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
 
@@ -408,14 +411,15 @@ export class CostosRealesService {
         )
       : [];
     // La planilla de UN laboratorio se compara con la estimación de SU parte (hallazgo 7).
-    const estimacion = estimacionDelLaboratorio({
+    const fuentes = {
       costosDirectosTotal: cot ? Number(cot.costosDirectosTotal) : null,
       solicitudes: solicitudes.map((s) => ({ horasHombre: Number(s.horasHombre), costoDirecto: Number(s.costoDirecto) })),
       otHorasHombre: Number(ot.horasHombre),
       otCostoEstimado: Number(ot.costoEstimado),
       lineasCotizacion: (cot?.lineas ?? []).map((l) => ({ tipo: l.tipo, cantidad: l.cantidad, diasOHoras: l.diasOHoras != null ? Number(l.diasOHoras) : null, subtotal: Number(l.subtotal) })),
       neto: cot ? Number(cot.neto) : null,
-    }, {
+    };
+    const estimacion = estimacionDelLaboratorio(fuentes, {
       multiLaboratorio: posibles.length > 1,
       solicitudesDelLaboratorio: solicitudes.filter((x) => x.delLaboratorio),
     });
@@ -425,28 +429,36 @@ export class CostosRealesService {
     // Ensayos de ESTE laboratorio: las sugerencias no muestran equipos ni consumos de otros.
     const propios = [...labs].filter(([, x]) => x.unidadId === unidad).map(([id]) => id);
 
-    // Sugerencias para completar: equipos usados en los ensayos del laboratorio y
-    // consumos registrados (kardex) sobre sus muestras. Horas y tarifas, a mano.
-    const [equipos, consumos, cargos] = await Promise.all([
+    // Sugerencias para completar: equipos usados en los ensayos del laboratorio (con
+    // su tarifa HM, si la hay) y consumos registrados (kardex) sobre sus muestras,
+    // valorizados con el costo de cada lote (S4). Las horas, a mano; el $/h de las
+    // horas hombre sale de «Tarifas HH» al elegir una categoría.
+    const [equiposBase, consumos, cargosLab, tarifas, umbrales, planillas] = await Promise.all([
       this.prisma.$queryRawUnsafe<any[]>(
         `SELECT DISTINCT e.id, e.codigo, e.nombre FROM resultado r
            JOIN equipo e ON e.id = r.equipo_id
           WHERE r.id = ANY($1::uuid[]) ORDER BY e.codigo`,
         propios,
       ),
-      this.prisma.$queryRawUnsafe<any[]>(
-        `SELECT c.id, c.codigo, c.nombre, c.unidad_medida AS unidad, sum(mc.cantidad)::float8 AS cantidad
-           FROM movimiento_consumible mc JOIN lote_consumible l ON l.id = mc.lote_id
-           JOIN consumible c ON c.id = l.consumible_id JOIN muestra m ON m.id = mc.muestra_id
-          WHERE m.ot_id = $1::uuid AND mc.tipo = 'consumo' AND mc.tenant_id = $2::uuid
-            AND m.id IN (SELECT r.muestra_id FROM resultado r WHERE r.id = ANY($3::uuid[]))
-          GROUP BY c.id, c.codigo, c.nombre, c.unidad_medida ORDER BY c.codigo`,
-        ot.id,
-        tenantId,
-        propios,
-      ),
+      consumosValorizados(this.prisma, ot.id, tenantId, propios),
       this.cargos(tenantId),
+      tarifasVigentes(this.prisma, tenantId, hoyCl()),
+      umbralesSemaforo(this.prisma, tenantId),
+      planillasDeOt(this.prisma, ot.id),
     ]);
+    const equipos = equiposBase.map((e) => ({ ...e, valorHora: tarifaDeEquipo(tarifas.hm, e) }));
+    const cargos = [...cargosLab, ...tarifas.hh.map((h) => ({ codigo: h.codigo, etiqueta: h.etiqueta, valorHora: h.valorHora }))];
+    const comparacion = comparar(resumen, estimacion);
+    const sem = semaforo(comparacion.costoReal, comparacion.costoEstimado, umbrales);
+    // OT completa: todos los laboratorios frente a la cotización completa.
+    const estOt = estimacionDeCotizacion(fuentes);
+    const consolidado = consolidarOt(planillas, { costoDirecto: estOt.costoDirecto, neto: estOt.neto, laboratorios: posibles.length }, umbrales);
+    const pendientes: string[] = [];
+    if (equipos.some((e) => e.valorHora == null))
+      pendientes.push("Valor hora (HM) de los equipos sin tarifa en Tablas maestras › Tarifas HM: Pendiente del IDIC. Escríbalo a mano mientras tanto.");
+    if (consumos.some((c) => c.sinCosto > 0))
+      pendientes.push("Costo de los insumos sin precio de lote ni costo de referencia: Pendiente del IDIC.");
+    if (!tarifas.hh.length) pendientes.push("No hay tarifas HH vigentes en Tablas maestras › Tarifas HH.");
 
     const permisos: string[] = req?.user?.permisos ?? [];
     const puedeGestionar = (req?.user?.roles ?? []).includes("SUPERADMIN") || permisos.includes("costo_real.gestionar");
@@ -467,7 +479,11 @@ export class CostosRealesService {
       lineas,
       resumen,
       estimacion,
-      comparacion: comparar(resumen, estimacion),
+      comparacion: { ...comparacion, semaforo: sem.color },
+      umbrales,
+      consolidado,
+      tarifas: { vehiculos: tarifas.vehiculos },
+      pendientesIdic: pendientes,
       cargos,
       sugerencias: { equipos, consumos, lineas: await this.sugerenciasR4d(ot.id, unidad, cot?.id ?? null, lineas) },
       resultadosSinAprobar: sinAprobar,
@@ -511,7 +527,8 @@ export class CostosRealesService {
     const { p } = await this.planillaDe(ot.id, unidadId);
     if (p?.estado === "cerrada") throw new ConflictException("La planilla está cerrada: reábrala (con motivo) para corregirla.");
     const lineas: LineaCostoReal[] = body.lineas.map((l) => ({ ...l, categoria: l.categoria }));
-    const cargos = new Set((await this.cargos(tenantId)).map((c) => c.codigo));
+    // Cargo = un cargo de la lista o una categoría de «Tarifas HH» (S4).
+    const cargos = new Set([...(await this.cargos(tenantId)).map((c) => c.codigo), ...(await categoriasHh(this.prisma, tenantId))]);
     const errores = erroresLineas(lineas, cargos);
     // Consumibles y equipos deben ser del tenant.
     const consumibleIds = [...new Set(lineas.map((l) => l.consumibleId).filter((x): x is string => !!x))];

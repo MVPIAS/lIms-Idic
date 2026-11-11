@@ -1125,7 +1125,7 @@ export class PuenteAnalisisService {
     const consume = cfgConsumo.automatico && (!corrige || !!reanalisis);
     const determinaciones = Math.max(1, calc.replicas.length || (Array.isArray(calc.lecturas) ? calc.lecturas.length : 0));
     if (consume && cfgConsumo.sinStock === "impedir") {
-      const faltan = await faltantesDeCaptura(this.prisma as any, { tenantId, catMetodoId: resultado.catMetodoId ?? null, determinaciones });
+      const faltan = await faltantesDeCaptura(this.prisma as any, { tenantId, catMetodoId: resultado.catMetodoId ?? null, determinaciones, muestraId: resultado.muestraId ?? null });
       if (faltan.length)
         throw new ConflictException({
           statusCode: 409,
