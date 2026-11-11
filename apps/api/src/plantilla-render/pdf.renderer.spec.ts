@@ -1,3 +1,4 @@
+import { certificadoHtml } from "../metrologia/metrologia.certificado";
 import { documentoCompleto, type Sello } from "./plantilla-defecto";
 import { generarPdf } from "./pdf.renderer";
 
@@ -37,5 +38,15 @@ describe("generarPdf · número de páginas", () => {
     const cuerpo = `<h1>Certificado</h1>${parrafos(5)}`;
     expect(paginas(await pdfDe(cuerpo, { ...SELLO, borrador: true }))).toBe(1);
     expect(paginas(await pdfDe(cuerpo, { ...SELLO, estadoDocumento: "anulado", motivoEstado: "Reemplazado" }))).toBe(1);
+  });
+
+  it("el certificado de calibración (2 hojas, pie de hoja anclado al fondo) sale con 2 páginas", async () => {
+    // Como GET /metrologia/calibraciones/:id/pdf: el cuerpo va directo a generarPdf, sin
+    // documentoCompleto (su bloque de sello no cabría tras el pie de hoja y abriría otra página).
+    const cal = { codigo: "CAL-2026-0001", magnitud: "Masa", instrumento: { item: "Balanza" }, puntos: [] };
+    const ctx = { departamento: "Departamento de Metrología", metrologo: null, jefeLab: null, jefeDepto: null };
+    const cuerpo = certificadoHtml(cal, ctx);
+    expect(paginas(await generarPdf(cuerpo, SELLO, "Prueba"))).toBe(2);
+    expect(paginas(await generarPdf(cuerpo, { ...SELLO, borrador: true }, "Prueba"))).toBe(2);
   });
 });
