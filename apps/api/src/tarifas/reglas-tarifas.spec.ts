@@ -2,7 +2,7 @@
  * Frente f5 · tarifas HH, HM, perfiles HH y servicios primarios: lo que se
  * acepta al crear y editar, y la vigencia.
  */
-import { erroresVigencia, esquemasTarifa } from "./reglas-tarifas";
+import { erroresViatico, erroresVigencia, esquemasTarifa } from "./reglas-tarifas";
 
 describe("tarifas · vigencia", () => {
   it("exige inicio y que el fin no sea anterior", () => {
@@ -50,5 +50,13 @@ describe("tarifas · servicios primarios y perfiles HH", () => {
   it("perfil: ajuste entre −100 % y 1000 %", () => {
     expect(esquemasTarifa.perfil.crear.parse({ perfil: "militar", ajustePct: "15" })).toMatchObject({ perfil: "militar", ajustePct: 15, activo: true });
     expect(esquemasTarifa.perfil.crear.safeParse({ perfil: "civil", ajustePct: -150 }).success).toBe(false);
+  });
+});
+
+describe("Escala de viáticos", () => {
+  it("el tramo de grados no puede terminar antes de empezar; en el extranjero exige el país", () => {
+    expect(erroresViatico({ ambito: "nacional", gradoDesde: 9, gradoHasta: 13 })).toEqual([]);
+    expect(erroresViatico({ ambito: "nacional", gradoDesde: 13, gradoHasta: 9 })[0]).toMatch(/termina \(9\) antes de empezar \(13\)/);
+    expect(erroresViatico({ ambito: "extranjero", pais: null, gradoDesde: 1, gradoHasta: 2 })[0]).toMatch(/país/);
   });
 });

@@ -9,8 +9,10 @@
  * restricciones. Las cotizaciones guardadas antes de la sección 7 no la traen:
  * cuenta 0 (compatibles). Montos finales con la estructura
  * oficial de la lista de precios 2026 (estructura-precio.ts): CDT, costo
- * indirecto (CI, antes «CFA»), CT = precio Ejército, recargo, neto = precio
- * particular sin IVA, IVA y precio particular con IVA.
+ * indirecto (CI, antes «CFA»), CT, recargo, neto = precio particular sin IVA,
+ * IVA y precio particular con IVA. Precio Ejército: el CT o, con el parámetro
+ * `precio_ejercito` = «costo_directo» (política de precios DCO-PG01-P05-IT05),
+ * el costo directo sin las horas hombre militares.
  *
  * Viático = monto diario del país o zona × % del grado × días (tabla anual
  * DFZ). CI, recargo e IVA son parámetros (`circuito_cotizacion.cfa_pct`,
@@ -99,7 +101,7 @@ export function cantidadConReposicion(lote: number, reposicion: number): number 
   return l + r;
 }
 
-export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenParticularPct: number; ivaPct?: number }): Form05Resultado {
+export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenParticularPct: number; ivaPct?: number; precioEjercito?: string }): Form05Resultado {
   const dolar = Number(f.dolar) > 0 ? Number(f.dolar) : 0;
   const secciones = {
     viaticos: r0(suma(f.viaticos, montoViatico)),
@@ -120,7 +122,7 @@ export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenPart
     cfaPct: p.cfaPct,
     cfa: e.costoIndirecto,
     ct: e.costoTotal,
-    precioEjercito: e.costoTotal,
+    precioEjercito: p.precioEjercito === "costo_directo" ? r0(cdt - suma(f.horasHombre, (h) => (h.tipo === "militar" ? h.horas * h.valorHora : 0))) : e.costoTotal,
     margenParticularPct: p.margenParticularPct,
     recargo: e.recargo,
     precioParticular: e.neto,

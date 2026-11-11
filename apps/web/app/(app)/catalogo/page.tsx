@@ -31,6 +31,8 @@ const tarifas = [
   { href: "/catalogo/perfiles-hh", nivel: "Tarifa", nombre: "Perfiles HH", desc: "Ajuste % de la hora hombre por perfil (civil, militar)." },
   { href: "/catalogo/tarifas-hm", nivel: "Tarifa", nombre: "Horas máquina (HM)", desc: "Valor de la hora de uso de cada equipo (EQ###)." },
   { href: "/catalogo/servicios-primarios", nivel: "Tarifa", nombre: "Servicios primarios", desc: "Precio de los servicios primarios por código y centro de costo." },
+  { href: "/catalogo/tarifas-viaticos", nivel: "Tarifa", nombre: "Viáticos", desc: "Monto diario por tramo de grado, nacional y por país, con vigencia." },
+  { href: "/catalogo/tarifas-vehiculos", nivel: "Tarifa", nombre: "Vehículos", desc: "Costo por kilómetro por categoría de vehículo, en CLP y con vigencia." },
 ];
 
 function Tarjeta({ href, nivel, nombre, desc }: { href: string; nivel: string; nombre: string; desc: string }) {

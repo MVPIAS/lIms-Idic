@@ -145,4 +145,5 @@ align_brechas_3.sql
 align_brechas_4.sql
 align_brechas_5.sql
 align_brechas_6.sql
+align_tarifas_viatico_vehiculo.sql
 align_cierre_permisos.sql

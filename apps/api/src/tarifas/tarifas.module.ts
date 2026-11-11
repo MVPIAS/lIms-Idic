@@ -1,7 +1,8 @@
 /**
  * Tarifas del Sistema Comercial antiguo (frente f5 · Mapa de migración v2.1,
  * «Maestros y combos»): horas hombre (HH) por categoría, ajuste HH por perfil,
- * horas máquina (HM) por equipo y servicios primarios. Las tablas existían
+ * horas máquina (HM) por equipo y servicios primarios. Más los costos estándar
+ * de DCO-PG01-P05-IT01: escala de viáticos por grado y costo por km de vehículo. Las tablas existían
  * (schema.sql) pero no tenían pantalla.
  *
  * Mismo patrón CRUD que las demás tablas maestras (BaseCrudController):
@@ -13,9 +14,8 @@
  *                                 laboratorio recibe 403, son tablas comunes)
  *   DELETE                      409: no hay borrado físico; se desactiva.
  *
- * Valores en CLP con vigencia (desde ≤ hasta). Ningún cálculo las lee todavía:
- * el costeo FORM05 y la ficha de costos usan sus propios valores
- * (docs/COMERCIAL_RONDA2.md § 8).
+ * Valores con vigencia (desde ≤ hasta). El FORM05 propone los valores vigentes
+ * de HH, HM y viáticos (cotizacion/referencias-costeo.ts); quedan editables.
  */
 import { BadRequestException, ConflictException, Controller, Injectable, Module, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
@@ -25,7 +25,7 @@ import { BaseCrudService } from "../common/base-crud.service";
 import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermisoCrud } from "../auth/permisos.decorator";
-import { erroresVigencia, esquemasTarifa, MSJ_SIN_BORRADO, mensajeDuplicado } from "./reglas-tarifas";
+import { erroresViatico, erroresVigencia, esquemasTarifa, MSJ_SIN_BORRADO, mensajeDuplicado } from "./reglas-tarifas";
 
 const PERMISOS_TARIFA = {
   ver: "tarifa.ver",
@@ -202,8 +202,52 @@ export class ServicioPrimarioController extends BaseCrudController {
   constructor(protected svc: ServicioPrimarioService) { super(); }
 }
 
+/* ------------------------------------------------- viáticos por grado (IT01) --- */
+@Injectable()
+export class TarifaViaticoService extends TarifaService {
+  protected readonly nombre = "un tramo de viático con ese ámbito, país, grado inicial y fecha de inicio";
+  constructor(prisma: PrismaService) {
+    super(prisma, {
+      model: "tarifaViatico",
+      search: ["denominacion", "pais"],
+      orderBy: [{ ambito: "asc" }, { pais: "asc" }, { gradoDesde: "asc" }, { vigenteDesde: "desc" }],
+    });
+  }
+
+  async actualizar(id: string, data: any, tenantId?: string) {
+    // Edición parcial: el tramo se valida con lo que queda guardado.
+    const actual: any = await this.detalle(id, tenantId);
+    const errores = erroresViatico({ ...actual, ...Object.fromEntries(Object.entries(data ?? {}).filter(([, v]) => v !== undefined)) });
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    return super.actualizar(id, data, tenantId);
+  }
+}
+@ApiTags("tarifas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("tarifas/viaticos")
+@RequierePermisoCrud(PERMISOS_TARIFA)
+export class TarifaViaticoController extends BaseCrudController {
+  protected createSchema = esquemasTarifa.viatico.crear;
+  protected updateSchema = esquemasTarifa.viatico.editar;
+  constructor(protected svc: TarifaViaticoService) { super(); }
+}
+
+/* ------------------------------------------- vehículos: costo por km (IT01) --- */
+@Injectable()
+export class TarifaVehiculoService extends TarifaService {
+  protected readonly nombre = "un costo por km con esa categoría y esa fecha de inicio";
+  constructor(prisma: PrismaService) {
+    super(prisma, { model: "tarifaVehiculo", search: ["categoria", "descripcion"], orderBy: [{ categoria: "asc" }, { vigenteDesde: "desc" }] });
+  }
+}
+@ApiTags("tarifas") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("tarifas/vehiculos")
+@RequierePermisoCrud(PERMISOS_TARIFA)
+export class TarifaVehiculoController extends BaseCrudController {
+  protected createSchema = esquemasTarifa.vehiculo.crear;
+  protected updateSchema = esquemasTarifa.vehiculo.editar;
+  constructor(protected svc: TarifaVehiculoService) { super(); }
+}
+
 @Module({
-  controllers: [TarifaHhController, TarifaHhPerfilController, TarifaHmController, ServicioPrimarioController],
-  providers: [TarifaHhService, TarifaHhPerfilService, TarifaHmService, ServicioPrimarioService],
+  controllers: [TarifaHhController, TarifaHhPerfilController, TarifaHmController, ServicioPrimarioController, TarifaViaticoController, TarifaVehiculoController],
+  providers: [TarifaHhService, TarifaHhPerfilService, TarifaHmService, ServicioPrimarioService, TarifaViaticoService, TarifaVehiculoService],
 })
 export class TarifasModule {}

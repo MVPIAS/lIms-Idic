@@ -7,6 +7,9 @@
  *     que no van atadas a un equipo): «Valor hora» de la sección 4.
  *   · Consumibles activos del inventario con su costo de referencia por unidad
  *     (Consumibles › «Costo unitario»): sección 7, insumos y reactivos.
+ *   · Escala de viáticos vigente (Tablas maestras › Viáticos): «Monto diario»
+ *     de la sección 1 según el tramo de grado; el % del grado lo pone el laboratorio.
+ *   · Costo por km vigente por categoría de vehículo (Tablas maestras › Vehículos).
  * Los valores se proponen en pantalla y quedan editables; el servidor no los
  * impone al guardar (el costeo es una estimación del laboratorio).
  */
@@ -14,7 +17,16 @@
 export interface TarifaHhRef { categoria: string; descripcion: string | null; valorHora: number; vigenteDesde: string }
 export interface TarifaHmRef { codigo: string | null; descripcion: string | null; equipo: string | null; valorHora: number; vigenteDesde: string; delLaboratorio: boolean }
 export interface InsumoRef { id: string; codigo: string; nombre: string; unidad: string | null; costoUnitario: number | null }
-export interface ReferenciasCosteo { fecha: string; tarifasHh: TarifaHhRef[]; tarifasHm: TarifaHmRef[]; insumos: InsumoRef[] }
+export interface ViaticoRef { ambito: string; pais: string | null; gradoDesde: number; gradoHasta: number; denominacion: string | null; montoDiario: number; moneda: string }
+export interface VehiculoRef { categoria: string; descripcion: string | null; costoKm: number }
+export interface ReferenciasCosteo {
+  fecha: string;
+  tarifasHh: TarifaHhRef[];
+  tarifasHm: TarifaHmRef[];
+  insumos: InsumoRef[];
+  viaticos: ViaticoRef[];
+  vehiculos: VehiculoRef[];
+}
 
 const num = (v: unknown) => (v == null ? null : Number(v));
 
@@ -25,7 +37,7 @@ export function etiquetaTarifaHm(t: Pick<TarifaHmRef, "codigo" | "descripcion" |
 
 /** Lee las referencias vigentes a `fecha` (AAAA-MM-DD) para el laboratorio `unidadId`. */
 export async function leerReferenciasCosteo(db: any, tenantId: string, unidadId: string | null, fecha: string): Promise<ReferenciasCosteo> {
-  const [hh, hm, ins] = await Promise.all([
+  const [hh, hm, ins, via, veh] = await Promise.all([
     db.$queryRawUnsafe(
       `SELECT DISTINCT ON (lower(categoria)) categoria, descripcion, valor_hora_clp::float8 AS "valorHora",
               to_char(vigente_desde, 'YYYY-MM-DD') AS "vigenteDesde"
@@ -57,6 +69,24 @@ export async function leerReferenciasCosteo(db: any, tenantId: string, unidadId:
         LIMIT 2000`,
       tenantId,
     ) as Promise<any[]>,
+    db.$queryRawUnsafe(
+      `SELECT DISTINCT ON (ambito, COALESCE(pais, ''), grado_desde)
+              ambito, pais, grado_desde AS "gradoDesde", grado_hasta AS "gradoHasta", denominacion,
+              monto_diario::float8 AS "montoDiario", moneda
+         FROM tarifa_viatico
+        WHERE tenant_id = $1::uuid AND activo AND vigente_desde <= $2::date AND (vigente_hasta IS NULL OR vigente_hasta >= $2::date)
+        ORDER BY ambito, COALESCE(pais, ''), grado_desde, vigente_desde DESC`,
+      tenantId,
+      fecha,
+    ) as Promise<any[]>,
+    db.$queryRawUnsafe(
+      `SELECT DISTINCT ON (categoria) categoria, descripcion, costo_km_clp::float8 AS "costoKm"
+         FROM tarifa_vehiculo
+        WHERE tenant_id = $1::uuid AND activo AND vigente_desde <= $2::date AND (vigente_hasta IS NULL OR vigente_hasta >= $2::date)
+        ORDER BY categoria, vigente_desde DESC`,
+      tenantId,
+      fecha,
+    ) as Promise<any[]>,
   ]);
   return {
     fecha,
@@ -65,5 +95,7 @@ export async function leerReferenciasCosteo(db: any, tenantId: string, unidadId:
       .map((r) => ({ ...r, valorHora: Number(r.valorHora), delLaboratorio: !!r.delLaboratorio }))
       .sort((a, b) => Number(b.delLaboratorio) - Number(a.delLaboratorio) || etiquetaTarifaHm(a).localeCompare(etiquetaTarifaHm(b), "es")),
     insumos: ins.map((r) => ({ ...r, costoUnitario: num(r.costoUnitario) })),
+    viaticos: via.map((r) => ({ ...r, gradoDesde: Number(r.gradoDesde), gradoHasta: Number(r.gradoHasta), montoDiario: Number(r.montoDiario) })),
+    vehiculos: veh.map((r) => ({ ...r, costoKm: Number(r.costoKm) })),
   };
 }

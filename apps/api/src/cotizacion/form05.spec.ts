@@ -32,6 +32,20 @@ describe("Formulario de costeo FORM05 (EP-00 2.5)", () => {
     expect(r.horasHombreTotal).toBe(7);
   });
 
+  it("política de precios (IT05): con «costo_directo» el precio Ejército es el CDT sin las horas hombre militares", () => {
+    const f = {
+      horasHombre: [
+        { tipo: "civil" as const, categoria: "TEC-SUPERIOR", horas: 8, valorHora: 9051 },
+        { tipo: "militar" as const, categoria: "TECNICO-MILITAR", horas: 2, valorHora: 8316 },
+      ],
+      horasMaquina: [{ equipo: "Balanza digital", horas: 0.25, valorHora: 184 }],
+    };
+    const r = calcularForm05(f, { ...p, precioEjercito: "costo_directo" });
+    expect(r.cdt).toBe(72408 + 16632 + 46);
+    expect(r.precioEjercito).toBe(72408 + 46);
+    expect(calcularForm05(f, p).precioEjercito).toBe(calcularForm05(f, p).ct);
+  });
+
   it("con la fórmula oficial 2026 (CI 20 %, recargo 30 %, IVA 19 %) reproduce la lista: EN1214 y EN1150", () => {
     const oficial = { cfaPct: 20, margenParticularPct: 30, ivaPct: 19 };
     const a = calcularForm05({ servicios: [{ codigo: "EN1214", cantidad: 1, valorUnitario: 329820 }] }, oficial);

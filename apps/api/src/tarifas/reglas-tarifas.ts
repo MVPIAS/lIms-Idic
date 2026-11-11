@@ -84,4 +84,32 @@ const perfilBase = z.object({
 });
 const perfil = { crear: perfilBase, editar: perfilBase.partial() };
 
-export const esquemasTarifa = { hh, hm, servicioPrimario, perfil };
+const grado = z.coerce.number({ invalid_type_error: "El grado debe ser un número." }).int("El grado es un número entero.").min(1, "El grado parte en 1.").max(99);
+const viaticoBase = conVigencia({
+  ambito: z.enum(["nacional", "extranjero"], { errorMap: () => ({ message: "Ámbito: nacional o extranjero." }) }).default("nacional"),
+  pais: texto(80),
+  gradoDesde: grado,
+  gradoHasta: grado,
+  denominacion: texto(120),
+  montoDiario: valorClp,
+  moneda: z.enum(["CLP", "USD"]).default("CLP"),
+});
+/** Grados: «desde» ≤ «hasta»; un viático en el extranjero indica el país. */
+export function erroresViatico(d: { ambito?: string; pais?: string | null; gradoDesde?: number; gradoHasta?: number }): string[] {
+  const e: string[] = [];
+  if (d.gradoDesde != null && d.gradoHasta != null && d.gradoHasta < d.gradoDesde) e.push(`El tramo de grados termina (${d.gradoHasta}) antes de empezar (${d.gradoDesde}).`);
+  if (d.ambito === "extranjero" && !d.pais) e.push("Un viático en el extranjero indica el país.");
+  return e;
+}
+const viatico = {
+  crear: viaticoBase.crear.superRefine((d: any, ctx) => erroresViatico(d).forEach((message) => ctx.addIssue({ code: "custom", message, path: ["gradoHasta"] }))),
+  editar: viaticoBase.editar,
+};
+
+const vehiculo = conVigencia({
+  categoria: z.string().trim().min(1, "Indique la categoría del vehículo.").max(40).transform((s) => s.toUpperCase()),
+  descripcion: texto(200),
+  costoKmClp: valorClp,
+});
+
+export const esquemasTarifa = { hh, hm, servicioPrimario, perfil, viatico, vehiculo };

@@ -95,7 +95,7 @@ type CondicionesCliente = {
 const redondear = (v: number, m: Moneda) => (m === "CLP" ? Math.round(v) : Math.round(v * 100) / 100);
 const origenDe = (p: PrecioEnsayo): { tipo: "lista" | "ficha"; texto: string } =>
   (p.origen === "lista" || p.origen === "lista_cliente") && p.lista
-    ? { tipo: "lista", texto: p.texto || `${p.lista.nombre} · ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : ""}` }
+    ? { tipo: "lista", texto: p.texto || `${p.lista.nombre} · ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : p.columna === "costo_directo" ? " · costo directo" : ""}` }
     : { tipo: "ficha", texto: p.texto || "Ficha de costos del catálogo" };
 
 /** Gastos que se pueden cotizar sin ensayo del catálogo (la API rechaza cualquier otra línea libre). */
@@ -738,7 +738,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           {reglaPrecio === "PARTICULAR"
             ? "Cliente particular: cada ensayo toma el neto (sin IVA) de la lista de precios vigente; si no está en la lista, su ficha de costos."
             : reglaPrecio === "EJERCITO"
-              ? "Cliente Ejército: el precio sale según el parámetro «Precio de la lista que toma un cliente Ejército» (por confirmar)."
+              ? "Cliente Ejército: el precio sale según el parámetro «Precio de la lista que toma un cliente Ejército» (política de precios: costo directo)."
               : "Elija el cliente: el precio de cada ensayo depende de su tipo (particular o Ejército)."}{" "}
           {condCli?.lista?.vigente ? `Este cliente tiene lista de precios propia («${condCli.lista.nombre}»): manda sobre la lista general. ` : ""}
           {condCli && condCli.descuentoPct > 0 ? `Se aplica su descuento especial de ${String(condCli.descuentoPct).replace(".", ",")} %. ` : ""}

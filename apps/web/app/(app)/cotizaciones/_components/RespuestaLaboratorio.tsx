@@ -20,10 +20,11 @@ import { useListaParametro } from "@/lib/lista-parametro";
 
 /**
  * `opsParametro`: las opciones salen de esa categoría de «Parámetros del sistema» (p. ej. «moneda»; `ops` queda como respaldo).
- * `sugerencias`: el texto se elige de las tarifas vigentes (HH por categoría, HM por equipo) y completa el «Valor hora».
+ * `sugerencias`: el texto se elige de las tarifas vigentes (HH por categoría, HM por equipo, viáticos por tramo de grado)
+ * y completa el «Valor hora» (o el «Monto diario» del viático).
  * tipo «insumo»: combo con los consumibles del inventario (vacío = escrito a mano).
  */
-type Col = { k: string; l: string; tipo: "texto" | "numero" | "opcion" | "insumo"; ops?: [string, string][]; opsParametro?: string; ancho?: number; sugerencias?: "hh" | "hm" };
+type Col = { k: string; l: string; tipo: "texto" | "numero" | "opcion" | "insumo"; ops?: [string, string][]; opsParametro?: string; ancho?: number; sugerencias?: "hh" | "hm" | "viatico" };
 type Fila = Record<string, string>;
 
 /** Contrato 4.1.4 · valores de referencia del FORM05 (GET …/solicitudes-laboratorio/:sid/referencias-costeo). */
@@ -31,12 +32,22 @@ type Referencias = {
   tarifasHh: { categoria: string; descripcion: string | null; valorHora: number }[];
   tarifasHm: { codigo: string | null; descripcion: string | null; equipo: string | null; valorHora: number; delLaboratorio: boolean }[];
   insumos: { id: string; codigo: string; nombre: string; unidad: string | null; costoUnitario: number | null }[];
+  viaticos?: { ambito: string; pais: string | null; gradoDesde: number; gradoHasta: number; denominacion: string | null; montoDiario: number; moneda: string }[];
 };
+/** «Grados 9–13 · CAP - ALF» (y el país, en el extranjero): igual que etiquetaViatico de la API. */
+const etiquetaViatico = (v: NonNullable<Referencias["viaticos"]>[number]) =>
+  [v.ambito === "extranjero" ? v.pais : null, v.gradoDesde === v.gradoHasta ? `Grado ${v.gradoDesde}` : `Grados ${v.gradoDesde}–${v.gradoHasta}`, v.denominacion]
+    .filter(Boolean)
+    .join(" · ");
+/** Columna que completa la sugerencia elegida. */
+const campoValor = (c: Col) => (c.sugerencias === "viatico" ? "montoDiario" : "valorHora");
 const etiquetaHm = (t: Referencias["tarifasHm"][number]) => t.equipo ?? t.descripcion ?? t.codigo ?? "Equipo";
 const iguales = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 /** Sugerencias (texto → valor hora) de una columna con tarifas. */
 function sugerenciasDe(c: Col, refs: Referencias | null): { texto: string; valor: number; detalle?: string }[] {
   if (!refs || !c.sugerencias) return [];
+  if (c.sugerencias === "viatico")
+    return (refs.viaticos ?? []).map((v) => ({ texto: etiquetaViatico(v), valor: v.montoDiario, detalle: v.moneda !== "CLP" ? v.moneda : undefined }));
   return c.sugerencias === "hh"
     ? refs.tarifasHh.map((t) => ({ texto: t.categoria, valor: t.valorHora, detalle: t.descripcion ?? undefined }))
     : refs.tarifasHm.map((t) => ({ texto: etiquetaHm(t), valor: t.valorHora }));
@@ -46,11 +57,11 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
   {
     k: "viaticos",
     titulo: "1 · Viáticos",
-    ayuda: "Viático = monto diario del país o zona × % del grado × días (tabla anual DFZ).",
+    ayuda: "Viático = monto diario × % del grado × días. Elija el tramo de grado de la escala vigente (Tablas maestras › Viáticos) y el monto diario se completa solo; ponga el % (100, 60, 40 o 20).",
     cols: [
       { k: "ambito", l: "Ámbito", tipo: "opcion", ops: [["nacional", "Nacional"], ["extranjero", "Extranjero"]], ancho: 110 },
       { k: "zona", l: "País o zona", tipo: "texto" },
-      { k: "grado", l: "Grado", tipo: "texto" },
+      { k: "grado", l: "Grado", tipo: "texto", sugerencias: "viatico" },
       { k: "dias", l: "Días", tipo: "numero", ancho: 70 },
       { k: "montoDiario", l: "Monto diario", tipo: "numero", ancho: 110 },
       { k: "porcentaje", l: "% del grado", tipo: "numero", ancho: 90 },
@@ -149,8 +160,8 @@ function aApi(sec: (typeof SECCIONES)[number], filas: Fila[]) {
 
 /**
  * Contrato 4.1.4 · completa la fila al elegir: la categoría HH o el equipo HM
- * de una tarifa vigente pone su «Valor hora» (si estaba vacío o lo había puesto
- * la tarifa anterior); el consumible del inventario pone descripción, unidad y
+ * de una tarifa vigente pone su «Valor hora», y el tramo de viático su «Monto
+ * diario» (si estaba vacío o lo había puesto la tarifa anterior); el consumible del inventario pone descripción, unidad y
  * costo unitario. Lo escrito a mano se respeta.
  */
 function completar(sec: (typeof SECCIONES)[number], f: Fila, k: string, v: string, refs: Referencias | null): Fila {
@@ -158,8 +169,9 @@ function completar(sec: (typeof SECCIONES)[number], f: Fila, k: string, v: strin
   const col = sec.cols.find((c) => c.k === k);
   if (col?.sugerencias) {
     const t = sugerenciasDe(col, refs).find((x) => iguales(x.texto, v));
-    const automatico = !String(f.valorHora ?? "").trim() || f.valorHora === f._valorTarifa;
-    if (t && automatico) return { ...nueva, valorHora: String(t.valor), _valorTarifa: String(t.valor) };
+    const campo = campoValor(col);
+    const automatico = !String(f[campo] ?? "").trim() || f[campo] === f._valorTarifa;
+    if (t && automatico) return { ...nueva, [campo]: String(t.valor), _valorTarifa: String(t.valor), ...(col.sugerencias === "viatico" && !String(f.porcentaje ?? "").trim() ? { porcentaje: "100" } : {}) };
   }
   if (col?.tipo === "insumo") {
     const x = refs?.insumos.find((i) => i.id === v);
@@ -187,13 +199,15 @@ function TablaSeccion({ sec, filas, onCambio, refs }: { sec: (typeof SECCIONES)[
       {sec.ayuda && <p className="subtitle" style={{ margin: "0 0 6px", fontSize: 11.5 }}>{sec.ayuda}</p>}
       {sinTarifas && (
         <p className="subtitle" style={{ margin: "0 0 6px", fontSize: 11.5 }}>
-          No hay tarifas {sec.k === "horasHombre" ? "HH" : "HM del laboratorio"} vigentes en «Tablas maestras»: escriba el valor hora.
+          {sec.k === "viaticos"
+            ? "No hay escala de viáticos vigente en «Tablas maestras»: escriba el monto diario."
+            : `No hay tarifas ${sec.k === "horasHombre" ? "HH" : "HM del laboratorio"} vigentes en «Tablas maestras»: escriba el valor hora.`}
         </p>
       )}
       {sec.cols.filter((c) => c.sugerencias).map((c) => (
         <datalist key={c.k} id={`dl-${sec.k}-${c.k}`}>
           {sugerenciasDe(c, refs).map((x) => (
-            <option key={x.texto} value={x.texto}>{`${x.detalle ? `${x.detalle} · ` : ""}${money(x.valor)} / hora`}</option>
+            <option key={x.texto} value={x.texto}>{`${x.detalle ? `${x.detalle} · ` : ""}${money(x.valor)} / ${c.sugerencias === "viatico" ? "día al 100 %" : "hora"}`}</option>
           ))}
         </datalist>
       ))}
@@ -256,7 +270,7 @@ export default function RespuestaLaboratorio({
 }: {
   sol: Solicitud;
   cotCodigo: string;
-  cfg: { cfaPct: number; margenParticularPct: number; ivaPct?: number };
+  cfg: { cfaPct: number; margenParticularPct: number; ivaPct?: number; precioEjercito?: string };
   onCerrar: () => void;
   onHecho: (msg: string) => void;
 }) {
@@ -314,7 +328,10 @@ export default function RespuestaLaboratorio({
     const recargo = ct * (cfg.margenParticularPct / 100);
     const neto = ct + recargo;
     const iva = neto * ((cfg.ivaPct ?? 19) / 100);
-    return { cdt, insumos: sec.insumos, cfa: r(ci), ct: r(ct), recargo: r(recargo), particular: r(neto), iva: r(iva), conIva: r(neto + iva) };
+    // Política de precios (DCO-PG01-P05-IT05): con «costo_directo», el Ejército paga el CDT sin las horas hombre militares.
+    const hhMilitar = sum("horasHombre", (x) => (x.tipo === "militar" ? n(x.horas) * n(x.valorHora) : 0));
+    const ejercito = cfg.precioEjercito === "costo_directo" ? cdt - hhMilitar : ct;
+    return { cdt, insumos: sec.insumos, cfa: r(ci), ct: r(ct), ejercito: r(ejercito), recargo: r(recargo), particular: r(neto), iva: r(iva), conIva: r(neto + iva) };
   }, [secciones, dolar, cfg]);
 
   const conCosteo = noEstandar || SECCIONES.some((s) => aApi(s, secciones[s.k] ?? []).length > 0);
@@ -458,7 +475,8 @@ export default function RespuestaLaboratorio({
               {prev.insumos > 0 && <div className="row"><span>de ello, insumos y reactivos (sección 7)</span><b>{money(prev.insumos)}</b></div>}
               <div className="row"><span>Costo directo total (CDT)</span><b>{money(prev.cdt)}</b></div>
               <div className="row"><span>Costo indirecto (CI {String(cfg.cfaPct).replace(".", ",")} % del CDT)</span><b>{money(prev.cfa)}</b></div>
-              <div className="row"><span>Costo total (CT) · precio Ejército</span><b>{money(prev.ct)}</b></div>
+              <div className="row"><span>Costo total (CT)</span><b>{money(prev.ct)}</b></div>
+              <div className="row"><span>Precio Ejército{cfg.precioEjercito === "costo_directo" ? " (costo directo sin HH militares)" : " (CT)"}</span><b>{money(prev.ejercito)}</b></div>
               <div className="row"><span>Recargo ({String(cfg.margenParticularPct).replace(".", ",")} % del CT)</span><b>{money(prev.recargo)}</b></div>
               <div className="row total"><span>Neto · precio particular sin IVA</span><span>{money(prev.particular)}</span></div>
               <div className="row"><span>IVA ({String(cfg.ivaPct ?? 19).replace(".", ",")} %)</span><b>{money(prev.iva)}</b></div>

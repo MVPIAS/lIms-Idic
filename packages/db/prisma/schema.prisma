@@ -1893,6 +1893,43 @@ model HoraHombreCatalogo {
   @@map("hora_hombre_catalogo")
 }
 
+/// Escala de viáticos por grado (DCO-PG01-P05-IT01): monto diario al 100 %; el costeo aplica el % del grado.
+model TarifaViatico {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  ambito       String    @default("nacional") @db.VarChar(12)
+  pais         String?   @db.VarChar(80)
+  gradoDesde   Int       @map("grado_desde")
+  gradoHasta   Int       @map("grado_hasta")
+  denominacion String?   @db.VarChar(120)
+  montoDiario  Decimal   @map("monto_diario") @db.Decimal(14, 2)
+  moneda       String    @default("CLP") @db.VarChar(3)
+  vigenteDesde DateTime  @map("vigente_desde") @db.Date
+  vigenteHasta DateTime? @map("vigente_hasta") @db.Date
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@map("tarifa_viatico")
+}
+
+/// Costo por kilómetro por categoría de vehículo (DCO-PG01-P05-IT01).
+model TarifaVehiculo {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  categoria    String    @db.VarChar(40)
+  descripcion  String?   @db.VarChar(200)
+  costoKmClp   Decimal   @map("costo_km_clp") @db.Decimal(14, 2)
+  vigenteDesde DateTime  @map("vigente_desde") @db.Date
+  vigenteHasta DateTime? @map("vigente_hasta") @db.Date
+  activo       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([tenantId, categoria, vigenteDesde])
+  @@map("tarifa_vehiculo")
+}
+
 /// Ajuste % de la hora hombre por perfil: civil, militar (COM.phh_hh).
 model HoraHombrePerfil {
   id          String   @id @default(uuid()) @db.Uuid
