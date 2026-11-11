@@ -517,6 +517,24 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         ayuda: "Solo cuenta con «Por personas distintas». Ninguno marcado = la regla vale en todos los laboratorios.",
         porDefecto: "",
       },
+      revision: {
+        tipo: "opcion",
+        nombre: "Revisión previa a la aprobación",
+        opciones: [
+          { valor: "obligatoria", etiqueta: "Obligatoria: capturar → revisar → aprobar" },
+          { valor: "opcional", etiqueta: "Opcional: la jefatura aprueba directo lo capturado" },
+        ],
+        ayuda:
+          "Sesiones de oct-nov 2026: la mayoría de los laboratorios no tiene revisor; el jefe aprueba. Quien captura nunca aprueba su propio resultado.",
+        porDefecto: "obligatoria",
+      },
+      sin_revision_labs: {
+        tipo: "multiple",
+        nombre: "Laboratorios que aprueban sin revisión",
+        opcionesDe: "laboratorios",
+        ayuda: "Solo cuenta con «Opcional». Ninguno marcado = todos los laboratorios aprueban sin revisión.",
+        porDefecto: "",
+      },
     },
   },
   {

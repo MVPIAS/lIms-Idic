@@ -46,6 +46,6 @@ describe("revisión y aprobación por personas distintas (D06-05)", () => {
   it("configurable: excepción por laboratorio o desactivada", () => {
     expect(motivoMismoRevisor({ revisadoPor: "u1" }, "u1", configSegregacion("distintas", "LMT, lnf"), "LNF")).toBeNull();
     expect(motivoMismoRevisor({ revisadoPor: "u1" }, "u1", configSegregacion("misma_persona", ""), "LQA")).toBeNull();
-    expect(configSegregacion(null, null)).toEqual({ modo: "distintas", excepciones: [] });
+    expect(configSegregacion(null, null)).toEqual({ modo: "distintas", excepciones: [], revision: "obligatoria", sinRevision: [] });
   });
 });

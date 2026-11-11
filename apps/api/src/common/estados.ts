@@ -67,7 +67,9 @@ const TRANSICIONES: Record<DominioEstado, Record<string, readonly string[]>> = {
   // OT, aún sin valor. La captura lo lleva a `capturado`; no se revisa vacío.
   resultado: {
     pendiente: ["capturado"],
-    capturado: ["revisado_n1", "rechazado", "devuelto"],
+    // capturado → aprobado: solo donde la revisión previa es opcional
+    // (parámetro segregacion_resultado.revision; lo comprueba el servicio).
+    capturado: ["revisado_n1", "aprobado", "rechazado", "devuelto"],
     revisado_n1: ["aprobado", "rechazado", "devuelto"],
     aprobado: [],
     rechazado: ["capturado"],

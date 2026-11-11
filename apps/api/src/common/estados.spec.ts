@@ -114,9 +114,8 @@ describe("estados · resultado (RF-E01, aprobación escalonada)", () => {
     ko("resultado", "aprobado", "capturado");
     ko("resultado", "aprobado", "revisado_n1");
   });
-  it("no se aprueba lo que sigue en 'capturado' (hay que revisar antes)", () => {
-    ko("resultado", "capturado", "aprobado");
-  });
+  // capturado → aprobado lo admite la máquina; el servicio lo permite solo con la
+  // revisión previa «opcional» (aprobacion-sin-revision.spec.ts).
   it("rechaza el estado 'revisado' (el válido es revisado_n1)", () => {
     ko("resultado", "capturado", "revisado");
   });

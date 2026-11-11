@@ -39,7 +39,7 @@ import { evaluarFormula, validarFormula, FormulaError, NOMBRES_FUNCION } from ".
 import { EquiposModule, EquiposService } from "../equipos/equipos.module";
 import { AlcanceService } from "../rbac/alcance.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
-import { decidirAccionResultado, motivoMismoRevisor, type AccionResultado } from "../rbac/alcance-resultado";
+import { apruebaSinRevision, decidirAccionResultado, motivoMismoRevisor, type AccionResultado } from "../rbac/alcance-resultado";
 import { ETIQUETA_VEREDICTO, normalizarVeredicto, veredictoNumerico } from "./veredicto";
 import { leerReplicas } from "./replicas";
 import { AccionRevision, clasificarParaAccion, motivoEdicionManual, motivoNoCapturable, motivoNoQuitable, motivoSinVeredicto, planReapertura } from "./flujo-resultado";
@@ -603,6 +603,16 @@ export class ResultadoService extends BaseCrudService {
 
     // 1. ¿Permite la máquina de estados este paso? (common/estados.ts)
     validarTransicion("resultado", actual.estado, nuevo);
+    // 1b. Aprobar lo capturado sin revisión: solo donde la revisión previa es opcional.
+    if (nuevo === "aprobado" && actual.estado === "capturado") {
+      const cfg = this.alcanceRes ? await this.alcanceRes.segregacion(actual.muestra?.tenantId) : null;
+      const lab = this.alcanceRes ? (await this.alcanceRes.labs([id])).get(id)?.unidadCodigo ?? null : null;
+      if (!cfg || !apruebaSinRevision(cfg, lab))
+        throw new ConflictException(
+          "Este resultado debe revisarse antes de aprobarlo. Para aprobar sin revisión, la administración marca la revisión previa como «Opcional» " +
+            "(Parámetros › Revisión y aprobación de resultados).",
+        );
+    }
 
     // 2. Segregación de funciones.
     if (opts.exigeIndependencia && usuarioId && actual.analistaId && usuarioId === actual.analistaId)
@@ -818,7 +828,16 @@ export class ResultadoService extends BaseCrudService {
         return ok;
       });
     }
-    const { aplicables, omitidos } = clasificarParaAccion(filas, accion, usuarioId);
+    // Aprobar sin revisión previa donde el parámetro lo permite (sesiones oct-nov 2026).
+    let sinRevision: (id: string) => boolean = () => false;
+    if (accion === "aprobar" && this.alcanceRes && filas.some((r) => r.estado === "capturado")) {
+      const cfg = await this.alcanceRes.segregacion(req?.user?.tenantId ?? null);
+      if (cfg.revision === "opcional") {
+        const duenos = await this.alcanceRes.labs(filas.filter((r) => r.estado === "capturado").map((r) => r.id));
+        sinRevision = (id) => apruebaSinRevision(cfg, duenos.get(id)?.unidadCodigo ?? null);
+      }
+    }
+    const { aplicables, omitidos } = clasificarParaAccion(filas, accion, usuarioId, sinRevision);
     const hechos: string[] = [];
     for (const id of aplicables) {
       try {

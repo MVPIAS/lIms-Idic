@@ -159,7 +159,7 @@ export class AlcanceResultadoService {
       tenantId,
     );
     const v = (c: string) => filas.find((f) => f.codigo === c)?.valor ?? null;
-    return configSegregacion(v("revisor_aprobador"), v("excepciones"));
+    return configSegregacion(v("revisor_aprobador"), v("excepciones"), v("revision"), v("sin_revision_labs"));
   }
 }
 
