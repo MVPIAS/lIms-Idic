@@ -185,10 +185,10 @@ export class UsuariosController {
   ) {
     const tenantId = tenantDe(req);
     // Las cuentas de servicio de los tokens de integración (estado «servicio») se
-    // gestionan en Administración › API e integración, no aquí (estado NULL sí se lista).
+    // gestionan en Administración › API e integración, no aquí (estado es NOT NULL: basta con NOT).
     const where: any = {
       deletedAt: null,
-      AND: [{ OR: [{ estado: null }, { estado: { not: "servicio" } }] }],
+      NOT: { estado: "servicio" },
       ...(tenantId ? { tenantId } : {}),
     };
     if (q?.trim()) {
