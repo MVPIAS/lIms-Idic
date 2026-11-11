@@ -77,6 +77,7 @@ function Expediente() {
   const elegido = paso ?? actual.clave;
   const abierta = d.ot.abierta;
   const verEtiquetas = () => abrirDocumento(`/d11/ot/${d.ot.id}/etiquetas`).catch((e) => toast.error(e.message));
+  const verFichas = () => abrirDocumento(`/evidencias/fichas?otId=${d.ot.id}`).catch((e) => toast.error(e.message));
 
   return (
     <div>
@@ -146,7 +147,7 @@ function Expediente() {
           {elegido === "programacion" && <Programacion d={d} accion={accion} />}
           {elegido === "llegada" && <Llegada d={d} accion={accion} />}
           {elegido === "acta" && <Acta d={d} accion={accion} />}
-          {elegido === "registro" && <RegistroArmas d={d} accion={accion} onEtiquetas={verEtiquetas} />}
+          {elegido === "registro" && <RegistroArmas d={d} accion={accion} onEtiquetas={verEtiquetas} onFichas={verFichas} />}
           {elegido === "clasificacion" && <Clasificacion d={d} accion={accion} />}
           {elegido === "ensayos" && <EnsayosArma d={d} onCambio={cargar} />}
           {elegido === "revision" && <Revision d={d} />}
