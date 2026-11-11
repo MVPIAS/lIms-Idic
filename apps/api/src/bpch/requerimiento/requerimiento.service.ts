@@ -188,6 +188,7 @@ export class RequerimientoBpchService {
         origen: "REQUERIMIENTO_BPCH",
         conCobro: r.conCobro,
         resolucion: `${r.docOrigenTipo === "rpi" ? "RPI" : "OF"} ${r.docOrigenNumero}`.slice(0, 40),
+        fechaResolucion: r.docOrigenFecha ?? null,
         descripcion: descripcionOt({ ...r, escalon: r.escalon as Escalon }),
         elementoGenerico: r.elementoGenerico,
         catElementoId: r.catElementoId,

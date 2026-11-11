@@ -41,7 +41,7 @@ export const NOMBRE_TIPO_NUMERABLE: Record<string, string> = {
   IVC: "Informe de verificación de calidad (IVC)",
   INFORME_TECNICO: "Informe técnico",
   CERTIFICADO_CALIBRACION: "Certificado de calibración",
-  INFORME_INSPECCION: "Informe de inspección",
+  INFORME_INSPECCION: "Certificado de control (informe de inspección)",
   CERTIFICADO_CONFORMIDAD: "Certificado de conformidad",
   INFORME_INCUMPLIMIENTO: "Informe de incumplimiento",
   CERTIFICADO_RESISTENCIA_BALISTICA: "Certificado de Resistencia Balística (CRB)",

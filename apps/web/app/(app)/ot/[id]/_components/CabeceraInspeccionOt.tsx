@@ -30,6 +30,13 @@ interface Ficha {
   sugeridos?: { inspectores: string; procedimientos: string[] };
   /** B-019: datos conocidos del producto (Producción Nacional) o del prototipo para los campos vacíos. */
   heredados?: Cabecera;
+  /** R3: listas de unidades y lugares de inspección (plantas del cliente y tabla del BPCH). */
+  opciones?: {
+    unidadesLote: { valor: string; etiqueta: string }[];
+    unidadesMuestra: { valor: string; etiqueta: string }[];
+    lugares: { origen: "planta" | "tabla"; lugar: string; direccion: string | null; comuna: string | null }[];
+  };
+  lotes?: LoteCab[];
   historial?: { id: string; cambios: Record<string, { antes: any; despues: any }>; createdAt: string; usuarioNombre: string | null }[];
 }
 
@@ -66,6 +73,18 @@ const CAMPOS: { k: string; etiqueta: string; tipo?: "date" | "number" | "esquema
 ];
 const COMPLEMENTO = new Set(["direccion", "comuna", "contacto"]);
 
+type LoteCab = {
+  identificacion: string;
+  tamanoLote: number | string | null;
+  unidadLote: string | null;
+  tamanoMuestra: number | string | null;
+  unidadMuestra: string | null;
+  vencimiento: string | null;
+  especificacion: string | null;
+  observacion: string | null;
+};
+const LOTE_VACIO: LoteCab = { identificacion: "", tamanoLote: "", unidadLote: "", tamanoMuestra: "", unidadMuestra: "", vencimiento: "", especificacion: "", observacion: "" };
+
 export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
   const [f, setF] = useState<Ficha | null>(null);
   const [form, setForm] = useState<Cabecera>({});
@@ -100,6 +119,10 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
       for (const c of campos) {
         const v = form[c.k];
         cuerpo[c.k] = v === "" || v === undefined ? null : c.tipo === "number" ? Number(v) : v;
+      }
+      if (!f?.soloComplemento) {
+        cuerpo.unidadLote = form.unidadLote || null;
+        cuerpo.unidadMuestra = form.unidadMuestra || null;
       }
       const r = await llamar<Ficha>("PUT", `/bpch/cabecera-ot/${otId}`, cuerpo);
       setF({ ...f, ...r });
@@ -148,6 +171,22 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
               return (
                 <div key={c.k} className={`field${c.ancho === 2 ? " span-2" : ""}`}>
                   <label htmlFor={id}>{c.etiqueta}{c.k === "procedimiento" && <span className="req"> *</span>}</label>
+                  {c.k === "lugarInspeccion" && (f.opciones?.lugares ?? []).length > 0 && (
+                    <select
+                      aria-label="Elegir el lugar de la tabla de plantas y lugares"
+                      value=""
+                      style={{ marginBottom: 4 }}
+                      onChange={(e) => {
+                        const l = f.opciones!.lugares[Number(e.target.value)];
+                        if (l) setForm((x) => ({ ...x, lugarInspeccion: l.lugar, direccion: l.direccion ?? x.direccion ?? "", comuna: l.comuna ?? x.comuna ?? "" }));
+                      }}
+                    >
+                      <option value="">— Elegir planta o lugar (trae la dirección) · o escriba si es en terreno —</option>
+                      {f.opciones!.lugares.map((l, i) => (
+                        <option key={`${l.origen}-${l.lugar}`} value={i}>{l.origen === "planta" ? "Planta del cliente" : "Lugar"} · {l.lugar}{l.comuna ? ` (${l.comuna})` : ""}</option>
+                      ))}
+                    </select>
+                  )}
                   {c.tipo === "esquema" ? (
                     <select id={id} value={valor} onChange={(e) => set(e.target.value)}>
                       <option value="">— Seleccione —</option>
@@ -162,6 +201,17 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
                       min={c.tipo === "number" ? 1 : undefined}
                       list={c.tipo === "procedimiento" ? "cab-procedimientos" : undefined}
                       onChange={(e) => set(e.target.value)} />
+                  )}
+                  {(c.k === "tamanoLote" || c.k === "tamanoMuestra") && (
+                    <select
+                      aria-label={c.k === "tamanoLote" ? "Unidad del tamaño del lote" : "Unidad del tamaño de la muestra"}
+                      value={form[c.k === "tamanoLote" ? "unidadLote" : "unidadMuestra"] ?? ""}
+                      style={{ marginTop: 4 }}
+                      onChange={(e) => setForm((x) => ({ ...x, [c.k === "tamanoLote" ? "unidadLote" : "unidadMuestra"]: e.target.value }))}
+                    >
+                      <option value="">— Unidad —</option>
+                      {(c.k === "tamanoLote" ? f.opciones?.unidadesLote : f.opciones?.unidadesMuestra)?.map((u) => <option key={u.valor} value={u.valor}>{u.etiqueta}</option>)}
+                    </select>
                   )}
                   {f.heredados?.[c.k] !== undefined && f.heredados?.[c.k] === form[c.k] && (
                     <small style={{ color: "var(--accent)" }}>Precargado {f.proceso === "PRODUCCION_NACIONAL" ? "del producto y su clasificación" : "del prototipo"}: revíselo y guarde.</small>
@@ -190,6 +240,8 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
         )}
       </form>
 
+      <LotesInspeccion otId={otId} ficha={f} onGuardado={(r) => setF({ ...f, ...r })} />
+
       {!!f.historial?.length && (
         <details style={{ marginTop: 10 }}>
           <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 12.5 }}>Historial de la cabecera ({f.historial.length})</summary>
@@ -206,6 +258,101 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
             </tbody>
           </table>
         </details>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Sesión R3 · lotes de la inspección: especificación por lote, tamaño del lote
+ * (kilos, toneladas) y de la muestra (toneladas, kilos, gramos, unidades) y la
+ * fecha de vencimiento o vigencia de cada lote. API: PUT /bpch/cabecera-ot/:otId/lotes.
+ */
+function LotesInspeccion({ otId, ficha, onGuardado }: { otId: string; ficha: Ficha; onGuardado: (r: Ficha) => void }) {
+  const [filas, setFilas] = useState<LoteCab[]>([]);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    setFilas((ficha.lotes ?? []).map((l) => ({ ...LOTE_VACIO, ...Object.fromEntries(Object.entries(l).map(([k, v]) => [k, v ?? ""])) }) as LoteCab));
+  }, [ficha.lotes]);
+  const editable = !!ficha.editable;
+  const set = (i: number, k: keyof LoteCab, v: string) => setFilas((xs) => xs.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
+  const num = (v: unknown) => (v === "" || v === null || v === undefined ? null : Number(String(v).replace(",", ".")));
+
+  async function guardar() {
+    setGuardando(true);
+    setError("");
+    try {
+      const lotes = filas.map((l) => ({
+        identificacion: String(l.identificacion ?? "").trim(),
+        tamanoLote: num(l.tamanoLote),
+        unidadLote: l.unidadLote || null,
+        tamanoMuestra: num(l.tamanoMuestra),
+        unidadMuestra: l.unidadMuestra || null,
+        vencimiento: l.vencimiento || null,
+        especificacion: l.especificacion || null,
+        observacion: l.observacion || null,
+      }));
+      const r = await llamar<Ficha>("PUT", `/bpch/cabecera-ot/${otId}/lotes`, { lotes });
+      onGuardado(r);
+      toast.ok("Lotes de la inspección guardados.");
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  if (!editable && !filas.length) return null;
+  return (
+    <section style={{ marginTop: 12 }} aria-labelledby="cab-lotes">
+      <h4 id="cab-lotes" style={{ margin: "0 0 4px", fontSize: 13 }}>Lotes de la inspección</h4>
+      <p className="subtitle" style={{ margin: "0 0 6px" }}>Uno o más lotes, cada uno con su especificación, tamaños con unidad y fecha de vencimiento o vigencia.</p>
+      {error && <div className="alert warn" role="alert">{error}</div>}
+      {filas.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data" aria-label="Lotes de la inspección">
+            <thead>
+              <tr>
+                <th scope="col">Lote *</th><th scope="col">Tamaño del lote</th><th scope="col">Tamaño de la muestra</th>
+                <th scope="col">Vencimiento o vigencia</th><th scope="col">Especificación</th><th scope="col">Observación</th>{editable && <th scope="col" />}
+              </tr>
+            </thead>
+            <tbody>
+              {filas.map((l, i) => (
+                <tr key={i}>
+                  <td><input aria-label={`Identificación del lote ${i + 1}`} value={l.identificacion ?? ""} maxLength={200} disabled={!editable} onChange={(e) => set(i, "identificacion", e.target.value)} /></td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <input aria-label={`Tamaño del lote ${i + 1}`} inputMode="decimal" style={{ width: 80 }} value={String(l.tamanoLote ?? "")} disabled={!editable} onChange={(e) => set(i, "tamanoLote", e.target.value)} />
+                    <select aria-label={`Unidad del lote ${i + 1}`} value={l.unidadLote ?? ""} disabled={!editable} onChange={(e) => set(i, "unidadLote", e.target.value)}>
+                      <option value="">—</option>
+                      {ficha.opciones?.unidadesLote.map((u) => <option key={u.valor} value={u.valor}>{u.etiqueta}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <input aria-label={`Tamaño de la muestra del lote ${i + 1}`} inputMode="decimal" style={{ width: 80 }} value={String(l.tamanoMuestra ?? "")} disabled={!editable} onChange={(e) => set(i, "tamanoMuestra", e.target.value)} />
+                    <select aria-label={`Unidad de la muestra del lote ${i + 1}`} value={l.unidadMuestra ?? ""} disabled={!editable} onChange={(e) => set(i, "unidadMuestra", e.target.value)}>
+                      <option value="">—</option>
+                      {ficha.opciones?.unidadesMuestra.map((u) => <option key={u.valor} value={u.valor}>{u.etiqueta}</option>)}
+                    </select>
+                  </td>
+                  <td><input aria-label={`Vencimiento o vigencia del lote ${i + 1}`} type="date" value={l.vencimiento ?? ""} disabled={!editable} onChange={(e) => set(i, "vencimiento", e.target.value)} /></td>
+                  <td><input aria-label={`Especificación del lote ${i + 1}`} value={l.especificacion ?? ""} maxLength={1000} disabled={!editable} onChange={(e) => set(i, "especificacion", e.target.value)} /></td>
+                  <td><input aria-label={`Observación del lote ${i + 1}`} value={l.observacion ?? ""} maxLength={1000} disabled={!editable} onChange={(e) => set(i, "observacion", e.target.value)} /></td>
+                  {editable && (
+                    <td><button type="button" className="btn ghost-danger sm" aria-label={`Quitar el lote ${i + 1}`} onClick={() => setFilas((xs) => xs.filter((_, j) => j !== i))}>Quitar</button></td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {editable && (
+        <div className="toolbar" style={{ margin: "6px 0 0", gap: 6 }}>
+          <button type="button" className="btn outline sm" onClick={() => setFilas((xs) => [...xs, { ...LOTE_VACIO }])}>Agregar lote</button>
+          <button type="button" className="btn primary sm" disabled={guardando} onClick={guardar}>{guardando ? "Guardando…" : "Guardar lotes"}</button>
+        </div>
       )}
     </section>
   );

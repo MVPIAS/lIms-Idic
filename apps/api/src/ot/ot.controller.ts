@@ -40,6 +40,8 @@ import { RegistroMuestrasService } from "../flujo-real/flujo-real.module";
 import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { esElementoGenerico, muestrasDeAlta, type ElementoAlta } from "./alta-muestras";
 import { fijarPlazoPorDefecto } from "./plazo-defecto";
+import { aplicarVigenciaResolucion, errorCambioPlazo } from "./plazo-resolucion";
+import { ramaDeUnidad } from "../bpch/cabecera/cabecera-ot";
 
 const PrioridadEnum = z.enum(["baja", "normal", "alta", "urgente"]);
 
@@ -675,6 +677,8 @@ export class OtController {
       });
       // B-010: sin fecha indicada, el plazo por defecto (laboratorio > origen > defecto).
       await fijarPlazoPorDefecto(tx, tenantId, creada.id);
+      // R3: en las sucursales del BPCH y la D11 ninguna OT queda sin plazo ni pasa la vigencia de la resolución.
+      if (await ramaDeUnidad(tx, unidad.id)) await aplicarVigenciaResolucion(tx, tenantId, creada.id, null);
       if (alta.et) {
         await tx.$executeRawUnsafe(
           `UPDATE orden_trabajo SET et_id = $2::uuid, et_asignada_por = $3::uuid, et_asignada_at = now() WHERE id = $1::uuid`,
@@ -1085,6 +1089,16 @@ export class OtController {
     });
     if (!actual) throw new NotFoundException(`OT ${id} no encontrada`);
     await this.alcance.exigirUnidad(req, actual.unidadPrincipal, `la OT ${id}`);
+    if (dto.fechaCompromiso !== undefined) {
+      // R3: la fecha de compromiso de una OT del BPCH o la D11 no pasa la vigencia de la resolución ni queda vacía.
+      const rama = await ramaDeUnidad(this.prisma, actual.unidadPrincipal);
+      const [v] = await this.prisma.$queryRawUnsafe<{ vigencia: string | null }[]>(
+        `SELECT to_char(vigencia_resolucion_hasta, 'YYYY-MM-DD') AS vigencia FROM orden_trabajo WHERE id = $1::uuid`,
+        id,
+      );
+      const error = errorCambioPlazo(dto.fechaCompromiso ?? null, v?.vigencia ?? null, Boolean(rama));
+      if (error) throw new BadRequestException(error);
+    }
 
     if (dto.estado !== undefined) {
       if (dto.estado === "cerrada") {

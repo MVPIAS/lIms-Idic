@@ -96,6 +96,9 @@ export interface ArmaOt {
   requiereAcunacion: boolean;
   certificado: { id: string; numero: string; estado: string; entregadoAt: string | null; vigenteHasta: string | null; vigenteDesde: string | null } | null;
   entregada: boolean;
+  /** R12: pendiente de una nueva resolución (falla o serie distinta). */
+  pendiente?: { motivo: string; motivoNombre: string; detalle: string | null; desde: string } | null;
+  liberada?: { resolucion: string; fecha: string } | null;
   etapa: string;
   etapaNombre: string;
   puedeAcunar: boolean;
@@ -121,9 +124,11 @@ export interface ExpedienteD11 {
   avance: { pasos: PasoD11[]; actual: number; completo: boolean };
   emisiones: { id: string; desde: string; hasta: string; cantidad: number; createdAt: string; emitidaPor: string | null; enFirma: number; oficiales: number; entregados: number; anulados: number }[];
   entregas: { id: string; numero: string; receptorNombre: string; receptorDocumento: string | null; fecha: string; armas: number; registradaPor: string | null; createdAt: string }[];
+  /** R12: devoluciones técnicas de armas (certificado anulado y resultados devueltos). */
+  devoluciones?: { id: string; armaOtId: string; muestra: string; etapa: string; motivo: string; certificado: string | null; resultados: number; createdAt: string; devueltaPor: string | null }[];
   personal: { id: string; nombre: string }[];
   config: { acunacionCip: boolean; vigenciaAnios: number };
-  puedo: { programar: boolean; registrar: boolean; catalogo: boolean; emitir: boolean; aprobar: boolean; entregarCertificados: boolean };
+  puedo: { programar: boolean; registrar: boolean; catalogo: boolean; emitir: boolean; aprobar: boolean; entregarCertificados: boolean; devolver?: boolean };
 }
 
 export interface EnsayoFicha {

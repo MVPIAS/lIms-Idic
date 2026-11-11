@@ -25,6 +25,7 @@ import {
 import { numeroBorrador, totales } from "../../facturacion/reglas-factura";
 import { ListadoArmaBody, erroresListadoArmas, guardarListadoArmas, leerListadoArmas } from "../../saec/d11/listado-armas";
 import { diaChile } from "../../common/fecha-chile";
+import { revisarBateria } from "../comun/bateria";
 
 const fechaDia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const texto = (max: number) => z.string().trim().max(max);
@@ -105,7 +106,17 @@ const InspeccionBody = z.object({
 });
 
 const LotesBody = z.object({
-  items: z.array(z.object({ id: z.string().uuid(), metodoIds: z.array(z.string().uuid()).min(1, "Elija al menos un ensayo del lote").max(200) })).min(1).max(50),
+  items: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        metodoIds: z.array(z.string().uuid()).min(1, "Elija al menos un ensayo del lote").max(200),
+        /** R4: quitar ensayos de la batería fija exige motivo y el permiso bpch.bateria.excepcion. */
+        excepcionMotivo: z.string().trim().max(1000).nullable().optional(),
+      }),
+    )
+    .min(1)
+    .max(50),
 });
 
 const TasaBody = z.object({
@@ -629,6 +640,7 @@ export class InternacionBpchService {
         origen: "INTERNACION",
         conCobro: i.sujeta_tasa,
         resolucion: i.resolucion_numero,
+        fechaResolucion: i.resolucion_fecha ?? null,
         descripcion: `Internación ${i.numero} · Resolución DGMN ${i.resolucion_numero} · ${elementos}`.slice(0, 4000),
         tipoTrabajo: "CERTIFICACION",
         elementoGenerico: unico?.elementoGenerico ?? null,
@@ -781,6 +793,17 @@ export class InternacionBpchService {
       else if (actual.muestraId) errores.push(`El lote ${actual.orden} ya está registrado como muestra ${actual.muestraCodigo}.`);
       else errores.push(...erroresLoteParaMuestra(actual, `Lote ${actual.orden}`));
     }
+    // R4: la batería de ensayos del elemento (panel del catálogo) es fija; quitar un ensayo es una excepción controlada.
+    const excepciones: { lote: number; faltan: string[]; motivo: string }[] = [];
+    const permitido = (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("bpch.bateria.excepcion");
+    for (const it of dto.items) {
+      const actual = porId.get(it.id);
+      if (!actual?.catElementoId) continue;
+      const bateria = (await this.comun.panel(tenantDe(req), actual.catElementoId)).map((m: any) => ({ id: m.id, codigo: m.codigo, nombre: m.nombre }));
+      const r = revisarBateria(bateria, it.metodoIds, it.excepcionMotivo ? { motivo: it.excepcionMotivo, permitido } : null, `El lote ${actual.orden}`);
+      if (r.error) errores.push(r.error);
+      else if (r.excepcion) excepciones.push({ lote: actual.orden, faltan: r.faltan.map((m) => m.codigo || m.nombre), motivo: it.excepcionMotivo!.trim() });
+    }
     if (errores.length) throw new BadRequestException(errores.join(" "));
     // Todos los lotes o ninguno, con la fila del expediente bloqueada: un doble
     // envío espera al primero y ve sus lotes ya registrados; si un lote falla,
@@ -813,6 +836,14 @@ export class InternacionBpchService {
           await tx.$executeRawUnsafe(`UPDATE bpch_internacion_item SET muestra_id = $2::uuid WHERE id = $1::uuid`, it.id, m.id);
           hechas.push({ lote: actual.orden, muestra: m.codigo, ensayos: m.ensayos });
         }
+        for (const x of excepciones)
+          await tx.$executeRawUnsafe(
+            `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'bpch_bateria_excepcion', $3::jsonb, $4::uuid)`,
+            tenantDe(req),
+            i.ot_id,
+            JSON.stringify(x),
+            usuarioDe(req),
+          );
         return hechas;
       },
       { maxWait: 15_000, timeout: 120_000 },
