@@ -7,6 +7,7 @@ const item: ItemListaVigente = {
   itemCodigo: "EN1214",
   precio: 514_519,
   costoTotal: 395_784,
+  costoDirecto: 329_820,
   listaCodigo: "LP-2026",
   listaNombre: "Lista de precios 2026",
   moneda: "CLP",
@@ -32,6 +33,12 @@ describe("Precio del ensayo en la cotización (lista vigente o ficha)", () => {
     expect(elegirPrecio(item, 612_278, "EJERCITO", "ficha")).toEqual({ precio: 612_278, moneda: "CLP", origen: "ficha" });
     expect(elegirPrecio(item, 612_278, "EJERCITO", "costo_total")?.precio).toBe(395_784);
     expect(elegirPrecio(item, 612_278, "EJERCITO", "neto")?.precio).toBe(514_519);
+  });
+
+  it("Ejército con la política de precios (IT05): costo directo de la lista; sin él, la ficha", () => {
+    expect(elegirPrecio(item, 612_278, "EJERCITO", "costo_directo")).toMatchObject({ precio: 329_820, columna: "costo_directo" });
+    expect(elegirPrecio({ ...item, costoDirecto: null }, 28_000, "EJERCITO", "costo_directo")).toEqual({ precio: 28_000, moneda: "CLP", origen: "ficha" });
+    expect(elegirPrecio(item, 612_278, "PARTICULAR", "costo_directo")?.precio).toBe(514_519);
   });
 
   it("sin valor ni en la lista ni en la ficha: null (la cotización lo bloquea)", () => {

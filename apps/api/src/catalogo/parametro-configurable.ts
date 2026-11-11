@@ -232,10 +232,11 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         nombre: "Precio de la lista que toma un cliente Ejército",
         opciones: [
           { valor: "ficha", etiqueta: "No usa la lista: ficha de costos del catálogo" },
+          { valor: "costo_directo", etiqueta: "Costo directo de la lista vigente (política de precios DCO-PG01-P05-IT05)" },
           { valor: "costo_total", etiqueta: "Costo total (CD + CI) de la lista vigente" },
           { valor: "neto", etiqueta: "Neto de la lista vigente (igual que un particular)" },
         ],
-        ayuda: "Un cliente particular toma siempre el neto de la lista de precios vigente.",
+        ayuda: "Un cliente particular toma siempre el neto de la lista de precios vigente. La política de precios (DCO-PG01-P05-IT05) fija para el Ejército y las FF.AA. el costo directo, sin las horas hombre militares; en el formulario de costeo esas horas no se suman al precio Ejército.",
         porDefecto: "ficha",
       },
     },

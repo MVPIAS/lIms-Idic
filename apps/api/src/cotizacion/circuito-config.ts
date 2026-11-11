@@ -7,7 +7,7 @@
  */
 import { nivelesVb, siNo, type ConfigCircuito } from "./circuito-cotizacion";
 
-export type PrecioEjercito = "ficha" | "costo_total" | "neto";
+export type PrecioEjercito = "ficha" | "costo_directo" | "costo_total" | "neto";
 
 export interface ConfigCircuitoCompleta extends ConfigCircuito {
   /** Costo indirecto (CI) sobre el costo directo, %. Lista oficial 2026: 20. */
@@ -25,7 +25,7 @@ export const CI_PCT_DEF = 20;
 export const RECARGO_PCT_DEF = 30;
 export const IVA_PCT_DEF = 19;
 export const precioEjercitoDe = (v: string | null | undefined): PrecioEjercito =>
-  v === "costo_total" || v === "neto" ? v : "ficha";
+  v === "costo_directo" || v === "costo_total" || v === "neto" ? v : "ficha";
 
 const pct = (v: string | null | undefined, def: number) => {
   const n = Number(String(v ?? "").replace(",", "."));

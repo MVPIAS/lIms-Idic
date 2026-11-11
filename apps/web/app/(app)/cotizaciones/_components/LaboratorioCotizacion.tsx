@@ -207,7 +207,8 @@ function TarjetaSolicitud({ sol, c, puedeRetirar, onResponder, onVb, onRetirar }
                   {Object.entries(SECCION).map(([k, l]) => (r.secciones?.[k] ? <tr key={k}><td>{l}</td><td className="num">{money(r.secciones[k])}</td></tr> : null))}
                   <tr><td><b>Costo directo total (CDT)</b></td><td className="num"><b>{money(r.cdt)}</b></td></tr>
                   <tr><td>Costo indirecto (CI {String(r.cfaPct).replace(".", ",")} %)</td><td className="num">{money(r.cfa)}</td></tr>
-                  <tr><td>Costo total · precio Ejército</td><td className="num">{money(r.ct)}</td></tr>
+                  <tr><td>Costo total (CT)</td><td className="num">{money(r.ct)}</td></tr>
+                  {r.precioEjercito != null && <tr><td>Precio Ejército{r.precioEjercito !== r.ct ? " (costo directo sin HH militares)" : ""}</td><td className="num">{money(r.precioEjercito)}</td></tr>}
                   {r.recargo != null && <tr><td>Recargo ({String(r.margenParticularPct).replace(".", ",")} % del CT)</td><td className="num">{money(r.recargo)}</td></tr>}
                   <tr><td>{r.recargo != null ? "Neto · precio particular sin IVA" : `Precio particular (+${r.margenParticularPct} %)`}</td><td className="num">{money(r.precioParticular)}</td></tr>
                   {r.precioParticularIvaIncluido != null && <tr><td>Precio particular IVA incluido (IVA {String(r.ivaPct).replace(".", ",")} %: {money(r.iva)})</td><td className="num">{money(r.precioParticularIvaIncluido)}</td></tr>}

@@ -6,7 +6,8 @@
  *     el IVA lo suma la cotización).
  *   · Cliente EJÉRCITO   → según `circuito_cotizacion.precio_ejercito` (POR
  *     CONFIRMAR, EP-00 §10 P1): «ficha» (por defecto: no usa la lista, rige la
- *     ficha de costos del catálogo), «costo_total» (CD + CI) o «neto».
+ *     ficha de costos del catálogo), «costo_directo» (política de precios
+ *     DCO-PG01-P05-IT05), «costo_total» (CD + CI) o «neto».
  *   · Sin ítem enlazado en una lista vigente → la ficha de costos (cat_ensayo.precio).
  *
  * Lista vigente: activa, no borrada, `vigente_desde` ≤ fecha de emisión ≤
@@ -37,6 +38,8 @@ export interface ItemListaVigente {
   /** Precio de venta del ítem (neto en la lista oficial). */
   precio: number;
   costoTotal: number | null;
+  /** Costo directo del ítem (precio de un cliente Ejército según la política de precios). */
+  costoDirecto?: number | null;
   listaCodigo: string;
   listaNombre: string;
   /** Moneda de la lista (frente f6): el precio está en ella. */
@@ -50,7 +53,7 @@ export interface PrecioElegido {
   /** «lista_cliente» = lista de precios propia del cliente (contrato 4.1.3), con prioridad sobre la general. */
   origen: "lista" | "ficha" | "lista_cliente";
   /** Columna de la lista que se usó. */
-  columna?: "neto" | "costo_total";
+  columna?: "neto" | "costo_directo" | "costo_total";
   lista?: { codigo: string; nombre: string; itemCodigo: string };
   /** Descuento especial del cliente aplicado (%) y el precio antes de aplicarlo. */
   descuentoPct?: number;
@@ -65,9 +68,9 @@ export function elegirPrecio(
   precioEjercito: PrecioEjercito,
 ): PrecioElegido | null {
   const conValor = (n: number | null | undefined): n is number => n != null && Number.isFinite(Number(n)) && Number(n) > 0;
-  const columna: "neto" | "costo_total" | null = regla === "PARTICULAR" ? "neto" : precioEjercito === "ficha" ? null : precioEjercito;
+  const columna: "neto" | "costo_directo" | "costo_total" | null = regla === "PARTICULAR" ? "neto" : precioEjercito === "ficha" ? null : precioEjercito;
   if (item && columna) {
-    const v = columna === "neto" ? item.precio : item.costoTotal;
+    const v = columna === "neto" ? item.precio : columna === "costo_directo" ? item.costoDirecto : item.costoTotal;
     if (conValor(v)) return { precio: Number(v), moneda: item.moneda ?? "CLP", origen: "lista", columna, lista: { codigo: item.listaCodigo, nombre: item.listaNombre, itemCodigo: item.itemCodigo } };
   }
   return conValor(precioFicha) ? { precio: Number(precioFicha), moneda: "CLP", origen: "ficha" } : null;
@@ -125,7 +128,7 @@ export function textoOrigenPrecio(p: Pick<PrecioElegido, "origen" | "lista" | "c
     p.origen === "lista_cliente" && p.lista
       ? `Lista propia del cliente «${p.lista.nombre}» · ítem ${p.lista.itemCodigo}`
       : p.origen === "lista" && p.lista
-        ? `Lista de precios vigente «${p.lista.nombre}» · ítem ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : ""}`
+        ? `Lista de precios vigente «${p.lista.nombre}» · ítem ${p.lista.itemCodigo}${p.columna === "costo_total" ? " · costo total" : p.columna === "costo_directo" ? " · costo directo" : ""}`
         : "Ficha de costos del catálogo";
   return p.descuentoPct ? `${base} · descuento especial del cliente ${pctTexto(p.descuentoPct)}` : base;
 }
@@ -208,11 +211,11 @@ export async function itemsListaVigente(
   // Lista propia del cliente ($6) o, sin ella, solo las listas generales (no especiales).
   const deLista = opciones.listaId ? "AND lp.id = $6::uuid" : "AND NOT COALESCE(lp.especial, FALSE)";
   const extra = opciones.listaId ? [opciones.listaId] : [];
-  const filas: { catEnsayoId: string; itemId: string; itemCodigo: string; precio: unknown; costoTotal: unknown; listaCodigo: string; listaNombre: string; moneda: string }[] =
+  const filas: { catEnsayoId: string; itemId: string; itemCodigo: string; precio: unknown; costoTotal: unknown; costoDirecto: unknown; listaCodigo: string; listaNombre: string; moneda: string }[] =
     await db.$queryRawUnsafe(
       `SELECT DISTINCT ON (i.cat_ensayo_id)
               i.cat_ensayo_id::text AS "catEnsayoId", i.id::text AS "itemId", i.codigo AS "itemCodigo",
-              i.precio, i.costo_total AS "costoTotal", lp.codigo AS "listaCodigo", lp.nombre AS "listaNombre",
+              i.precio, i.costo_total AS "costoTotal", i.costo_directo AS "costoDirecto", lp.codigo AS "listaCodigo", lp.nombre AS "listaNombre",
               COALESCE(upper(lp.moneda), 'CLP') AS moneda
          FROM lista_precio_item i
          JOIN lista_precio lp ON lp.id = i.lista_precio_id
@@ -232,7 +235,7 @@ export async function itemsListaVigente(
   return new Map(
     filas.map((f) => [
       f.catEnsayoId,
-      { ...f, moneda: monedaDe(f.moneda) as MonedaOperacion, precio: Number(f.precio), costoTotal: f.costoTotal == null ? null : Number(f.costoTotal) },
+      { ...f, moneda: monedaDe(f.moneda) as MonedaOperacion, precio: Number(f.precio), costoTotal: f.costoTotal == null ? null : Number(f.costoTotal), costoDirecto: f.costoDirecto == null ? null : Number(f.costoDirecto) },
     ]),
   );
 }
