@@ -40,9 +40,16 @@ import { estadoCircuitoDe, leerConfigCircuito } from "./circuito-config";
 import { claveLibre, precioDeLinea, type Existentes } from "./precio-ficha";
 import { revisarOc } from "./aceptacion-oc";
 import { heredarDeCotizacion } from "../ot/encargo/encargo.module";
-import { entero, valoresCategoria } from "../common/parametros-r4d";
+import { entero, sino, valoresCategoria } from "../common/parametros-r4d";
 import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 import { validarOportunidad, enlazarOportunidad, ganarOportunidadDeCotizacion, guardarDatosSolicitud, leerDatosSolicitud, type DatosSolicitud } from "./cotizacion-extra";
+import { claveEnsayoMuestra, normalizarMuestras, validarLineasMuestras, type MuestraEntrada } from "./muestras-cotizacion";
+import { MOTIVO_PRECOT_NO_ACEPTA, TIPO_PRECOTIZACION, codigoPrecotizacion, erroresLineasPrecot, esPrecotizacion, motivoNoConvertir, motivoNoNuevaVersion, siguienteVersion } from "./precotizacion";
+import { resolverReglaValidez, textoOrigenRegla } from "./validez-config";
+import { EXTRAS_VACIOS, guardarExtras, guardarMuestraDeLineas, guardarMuestras, leerExtras, leerMuestraDeLineas, leerMuestras, leerReglasValidez, siguienteSeriePrecot } from "./cotizacion-s1";
+import { motivoClienteBloqueado } from "../cliente/bloqueo-cliente";
+import { validarTipoCliente } from "../cliente/tipo-cliente";
+import { TIPOS_ACEPTACION, errorDocumentoAceptacion } from "../ot/reglas-ot";
 
 /** Cada cuánto el proceso periódico pasa a «Vencida» las cotizaciones fuera de validez. */
 const INTERVALO_VENCIMIENTO_MS = Number(process.env.COTIZACION_VENCIMIENTO_MIN ?? 60) * 60_000;
@@ -52,6 +59,9 @@ const INTERVALO_VENCIMIENTO_MS = Number(process.env.COTIZACION_VENCIMIENTO_MIN ?
  * 'expirada' («Vencida») es vigente: una Abierta fuera de validez pasa sola a ella.
  */
 const ESTADOS_VIGENTES = ["abierta", "aceptada", "anulada", "expirada"] as const;
+
+/** Condiciones adicionales: hasta 5.000 caracteres (reuniones 1 y 2; antes 2.000). */
+export const CONDICIONES_MAX = 5000;
 
 /** Días de aviso de «cotización por vencer» (igual que la tarjeta de Mi bandeja). */
 const DIAS_POR_VENCER = 7;
@@ -113,6 +123,8 @@ export interface LineaEntrada {
   instrumentoSentido?: string | null;
   /** Motivo del precio manual de un ensayo sin precio en lista ni ficha (precio-ficha.ts). */
   motivoPrecioManual?: string | null;
+  /** Muestra de la cotización a la que pertenece (cotización por muestra, reunión 5). */
+  muestraN?: number | null;
 }
 
 /** Campos de cabecera comunes a crear/editar (ya validados por zod en el controller). */
@@ -143,6 +155,16 @@ export interface CabeceraCotizacion {
   solicitud?: DatosSolicitud;
   /** Oportunidad del CRM desde la que se cotiza (EP-00 0.3). */
   oportunidadId?: string | null;
+  /** Tipo de cliente de ESTA cotización (reunión 2): un mismo cliente puede venir como Ejército o particular. */
+  tipoClienteCodigo?: string | null;
+  /** Centro de costo de la sucursal que emite (reunión 2). */
+  centroCostoEmisorId?: string | null;
+  /** OT con costo (se factura) o sin costo (valorización estadística), desde el inicio (reunión 1). */
+  conCobro?: boolean;
+  /** Muestras de la cotización (reunión 5). `undefined` = no se tocan. */
+  muestras?: MuestraEntrada[];
+  /** cotizacion | precotizacion (reunión 10). Solo al crear. */
+  tipoDocumento?: "cotizacion" | "precotizacion";
 }
 
 export interface AceptacionEntrada {
@@ -227,7 +249,39 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         this.log.warn(`no se pudo registrar el vencimiento en audit_log: ${e?.message?.split("\n")[0]}`);
       }
     }
+    await this.anularVencidas(tenantId ?? null, id ?? null);
     return vencidas;
+  }
+
+  /**
+   * Reunión 2 · «definir qué pasa con las vencidas (se planteó anularlas)»: si el
+   * parámetro `cotizacion_vencidas.anular_dias` es mayor que 0, la Vencida sin OT
+   * pasa sola a Anulada esos días después de su vencimiento. Con 0 (por defecto)
+   * no se anula nada: la decisión es del IDIC.
+   */
+  private async anularVencidas(tenantId: string | null, id: string | null) {
+    try {
+      const anuladas = await this.prisma.$queryRawUnsafe<{ id: string; codigo: string; tenant_id: string; dias: string }[]>(
+        `UPDATE cotizacion c
+            SET estado = 'anulada', anulada_at = now(), updated_at = now(),
+                anulacion_motivo = 'Anulada por el sistema: vencida hace más de ' || ps.valor || ' días (Parámetros › cotizacion_vencidas).'
+           FROM parametro_sistema ps
+          WHERE ps.tenant_id = c.tenant_id AND ps.categoria = 'cotizacion_vencidas' AND ps.codigo = 'anular_dias' AND ps.activo
+            AND ps.valor ~ '^[0-9]{1,4}$' AND ps.valor::int > 0
+            AND c.estado = 'expirada'
+            AND COALESCE(c.valida_hasta, c.expira_at) + ps.valor::int < (now() AT TIME ZONE '${ZONA_IDIC}')::date
+            AND NOT EXISTS (SELECT 1 FROM orden_trabajo o WHERE o.cotizacion_id = c.id)
+            AND ($1::uuid IS NULL OR c.tenant_id = $1::uuid)
+            AND ($2::uuid IS NULL OR c.id = $2::uuid)
+        RETURNING c.id, c.codigo, c.tenant_id, ps.valor AS dias`,
+        tenantId,
+        id,
+      );
+      for (const a of anuladas)
+        await this.hito(a.tenant_id, a.id, "anulada", undefined, `Anulada por el sistema: vencida hace más de ${a.dias} días.`, { estadoAnterior: "expirada", automatica: true });
+    } catch (e: any) {
+      this.log.warn(`anulación de vencidas omitida: ${e?.message?.split("\n")[0]}`);
+    }
   }
 
   /**
@@ -239,7 +293,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    *   sinOt    · 1 = aceptadas a las que aún no se les generó OT
    *   porVencer· 1 = abiertas que vencen en los próximos 7 días (fecha de Chile)
    */
-  async listar(tenantId?: string, f: { q?: string; search?: string; estado?: string; sinOt?: string; porVencer?: string; firma?: string; enviada?: string; page?: string; limit?: string } = {}) {
+  async listar(tenantId?: string, f: { q?: string; search?: string; estado?: string; sinOt?: string; porVencer?: string; firma?: string; enviada?: string; tipoDocumento?: string; page?: string; limit?: string } = {}) {
     await this.vencerFueraDeValidez(tenantId ?? null);
     const { page, limit, skip } = paginacion(f.page, f.limit);
     const base: Prisma.CotizacionWhereInput = tenantId ? { tenantId } : {};
@@ -258,8 +312,18 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         where: { cotizacionId: { not: null }, ...(tenantId ? { tenantId } : {}) },
         select: { cotizacionId: true },
       });
-      and.push({ estado: "aceptada", id: { notIn: conOt.map((o) => o.cotizacionId as string) } });
+      // Reunión 1: las marcadas como excepción (con motivo) no cuentan como «aceptadas sin OT».
+      const excepciones: { id: string }[] = await this.prisma
+        .$queryRawUnsafe<{ id: string }[]>(`SELECT id::text AS id FROM cotizacion WHERE ($1::uuid IS NULL OR tenant_id = $1::uuid) AND sin_ot_motivo IS NOT NULL`, tenantId ?? null)
+        .catch(() => []);
+      and.push({ estado: "aceptada", id: { notIn: [...conOt.map((o) => o.cotizacionId as string), ...excepciones.map((x) => x.id)] } });
     }
+    // Reunión 10: pre-cotizaciones (valores referenciales) o solo cotizaciones formales.
+    const precots: { id: string }[] = await this.prisma
+      .$queryRawUnsafe<{ id: string }[]>(`SELECT id::text AS id FROM cotizacion WHERE ($1::uuid IS NULL OR tenant_id = $1::uuid) AND tipo_documento = 'precotizacion'`, tenantId ?? null)
+      .catch(() => []);
+    if (f.tipoDocumento === "precotizacion") and.push({ id: { in: precots.map((x) => x.id) } });
+    else if (f.tipoDocumento === "cotizacion" && precots.length) and.push({ id: { notIn: precots.map((x) => x.id) } });
     if (f.porVencer === "1") and.push(filtroPorVencer());
     // Circuito de firma y envío (columnas fuera del modelo Prisma): ?firma=pendiente|firmada|devuelta|sin_firma, ?enviada=0|1.
     if (f.firma || f.enviada) {
@@ -307,13 +371,15 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       : [];
     const porCot = new Map(ots.map((o) => [o.cotizacionId, o]));
     const circuito = await estadoCircuitoDe(this.prisma, ids);
+    const extras = await leerExtras(this.prisma, ids);
     const conteos: Record<string, number> = {};
     for (const g of porEstado) conteos[g.estado] = g._count._all;
     // No es un estado: el chip «Por vencer (7 días)» de la lista.
     conteos.porVencer = nPorVencer;
     conteos.enFirma = nEnFirma;
+    conteos.precotizaciones = precots.length ? await this.prisma.cotizacion.count({ where: { AND: [conBusqueda, { id: { in: precots.map((x) => x.id) } }] } }) : 0;
     return {
-      data: cots.map((c) => ({ ...c, ...(circuito.get(c.id) ?? {}), ot: porCot.get(c.id) ?? null })),
+      data: cots.map((c) => ({ ...c, ...(circuito.get(c.id) ?? {}), ...(extras.get(c.id) ?? EXTRAS_VACIOS), ot: porCot.get(c.id) ?? null })),
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
       conteos,
     };
@@ -338,7 +404,12 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const circuito = (await estadoCircuitoDe(this.prisma, [id])).get(id);
     const solicitud = await leerDatosSolicitud(this.prisma, id).catch(() => null);
     const adjuntos = await listarAdjuntos(this.prisma, cot.tenantId, "cotizacion", [id]).catch(() => []);
-    return { ...cot, ...(circuito ?? {}), ot, solicitud, adjuntos };
+    // Frente S1: tipo de documento y versiones, emisor, excepción «sin OT» y muestras.
+    const extras = (await leerExtras(this.prisma, [id])).get(id) ?? EXTRAS_VACIOS;
+    const muestras = await leerMuestras(this.prisma, id);
+    const muestraDe = await leerMuestraDeLineas(this.prisma, id);
+    const lineas = cot.lineas.map((l) => ({ ...l, muestraN: muestraDe.get(l.id) ?? null }));
+    return { ...cot, lineas, ...(circuito ?? {}), ...extras, muestras, ot, solicitud, adjuntos };
   }
 
   // --------------------------------------------------------------------------
@@ -391,7 +462,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         particularDias: await this.numeroParametro(t, "particular_dias", DIAS_PARTICULAR_DEF),
         ejercitoMesesOctDic: await this.numeroParametro(t, "ejercito_meses_oct_dic", MESES_EJERCITO_OCT_DIC_DEF),
       },
-      condicionesMax: 2000,
+      condicionesMax: CONDICIONES_MAX,
+      // Reunión 2/3: el comprobante de aceptación es obligatorio (parámetro aceptacion_comprobante.exige).
+      aceptacion: { exigeComprobante: sino((await valoresCategoria(this.prisma, t, "aceptacion_comprobante")).exige, true) },
       // Circuito de la cotización (V°B°, firma): la UI decide qué botones ofrece.
       circuito: await leerConfigCircuito(this.prisma, t),
     };
@@ -407,17 +480,19 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     clienteId: string,
     centroCostoId?: string | null,
     fechaEmision?: string | Date,
-  ): Promise<ResultadoValidez & { tipoClienteCodigo: string | null }> {
+    tipoElegido?: string | null,
+  ): Promise<ResultadoValidez & { tipoClienteCodigo: string | null; reglaPrecio: ReglaValidez }> {
     const cliente = await this.prisma.cliente.findFirst({
       where: { id: clienteId, tenantId },
       select: { tipo: true },
     });
     if (!cliente) throw new BadRequestException("clienteId no existe o no pertenece al tenant");
-    const tipo = cliente.tipo ?? null;
+    // Reunión 2: el tipo de cliente se elige en cada cotización (por defecto, el de la ficha).
+    const tipo = tipoElegido || cliente.tipo || null;
     const param = tipo
       ? await this.prisma.parametroSistema.findFirst({
           where: { tenantId, categoria: "tipo_cliente", codigo: tipo },
-          select: { valor: true },
+          select: { valor: true, etiqueta: true },
         })
       : null;
     let diasLab: number | null = null;
@@ -429,14 +504,24 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       if (!cc) throw new BadRequestException("centroCostoId no existe o no pertenece al tenant");
       diasLab = cc.validezParticularDias ?? null;
     }
+    // El PRECIO (Ejército a costo directo, particular con recargo) sigue la regla del parámetro
+    // tipo_cliente; la VALIDEZ se configura aparte por tipo de cliente y laboratorio (validez-config.ts).
+    const base = reglaDeTipoCliente(tipo, param?.valor);
+    const conf = resolverReglaValidez(await leerReglasValidez(this.prisma, tenantId), { tipoCliente: tipo, centroCostoId: centroCostoId ?? null, base });
     const r = calcularValidez({
       fechaEmision: fechaEmision ?? new Date(),
-      regla: reglaDeTipoCliente(tipo, param?.valor),
+      regla: conf.regla,
       diasParticular: await this.numeroParametro(tenantId, "particular_dias", DIAS_PARTICULAR_DEF),
-      diasParticularLab: diasLab,
-      mesesEjercitoOctDic: await this.numeroParametro(tenantId, "ejercito_meses_oct_dic", MESES_EJERCITO_OCT_DIC_DEF),
+      diasParticularLab: conf.dias ?? diasLab,
+      mesesEjercitoOctDic: conf.meses ?? (await this.numeroParametro(tenantId, "ejercito_meses_oct_dic", MESES_EJERCITO_OCT_DIC_DEF)),
     });
-    return { ...r, tipoClienteCodigo: tipo };
+    const origen = textoOrigenRegla(conf.origen);
+    if (origen && conf.origen !== "laboratorio") {
+      const etiqueta = param?.etiqueta ?? tipo ?? "";
+      const texto = r.explicacion.replace(/^(Ejército|Particular):/, `${etiqueta}:`).replace(" (validez propia del laboratorio)", "").replace(/\.$/, "");
+      r.explicacion = `${texto} (${origen}).`;
+    }
+    return { ...r, tipoClienteCodigo: tipo, reglaPrecio: base };
   }
 
   // --------------------------------------------------------------------------
@@ -547,10 +632,10 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * Precio de cada ensayo para un cliente (vista previa del formulario de la
    * cotización; misma regla que al guardar). GET /cotizaciones/precios-ensayo.
    */
-  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string, monedaCot?: string) {
+  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string, monedaCot?: string, tipoCliente?: string | null) {
     const moneda = monedaDe(monedaCot);
     const fechaEmision = isoFecha(soloFecha(fecha ?? hoyEnChile()));
-    const validez = await this.calcularValidezPara(tenantId, clienteId, null, fechaEmision);
+    const validez = await this.calcularValidezPara(tenantId, clienteId, null, fechaEmision, tipoCliente || null);
     const ensayos = catEnsayoIds.length
       ? await this.prisma.catEnsayo.findMany({ where: { id: { in: catEnsayoIds }, tenantId, deletedAt: null }, select: { id: true, codigo: true, precio: true } })
       : [];
@@ -561,14 +646,15 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const cond = await leerCondicionesCliente(this.prisma, tenantId, clienteId, fechaEmision);
     const listaCliente = cond.lista?.vigente ? await itemsListaVigente(this.prisma, tenantId, ids, fechaEmision, { preferir: moneda, listaId: cond.lista.id }) : new Map();
     return {
-      regla: validez.regla,
+      regla: validez.reglaPrecio,
+      tipoCliente: validez.tipoClienteCodigo,
       fecha: fechaEmision,
       moneda,
       precioEjercito: cfg.precioEjercito,
       condicionesCliente: cond,
       precios: Object.fromEntries(
         ensayos.map((e) => {
-          const p = elegirPrecioCliente(listaCliente.get(e.id), lista.get(e.id), e.precio != null ? Number(e.precio) : null, validez.regla, cfg.precioEjercito, cond.descuentoPct);
+          const p = elegirPrecioCliente(listaCliente.get(e.id), lista.get(e.id), e.precio != null ? Number(e.precio) : null, validez.reglaPrecio, cfg.precioEjercito, cond.descuentoPct);
           // Frente f6: el precio va en la moneda de su lista; `bloqueo` = no se puede cotizar en la moneda pedida.
           const bloqueo = p && p.moneda === "USD" && moneda === "CLP" ? precioParaCotizacion(p, moneda, null, e.codigo).error ?? null : null;
           return [
@@ -619,8 +705,66 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
   }
 
   private validarCondiciones(texto?: string | null) {
-    if (texto && texto.length > 2000)
-      throw new BadRequestException(`Condiciones adicionales: máximo 2000 caracteres (tiene ${texto.length}).`);
+    if (texto && texto.length > CONDICIONES_MAX)
+      throw new BadRequestException(`Condiciones adicionales: máximo ${CONDICIONES_MAX.toLocaleString("es-CL")} caracteres (tiene ${texto.length.toLocaleString("es-CL")}).`);
+  }
+
+  /** Reunión 2: el Jefe DCO bloquea a los clientes con facturas impagas; no se les cotiza ni se acepta. */
+  private async exigirClienteNoBloqueado(tenantId: string, clienteId: string, accion: "cotizar" | "aceptar") {
+    const c = await this.prisma.cliente.findFirst({ where: { id: clienteId, tenantId }, select: { razonSocial: true, bloqueado: true, motivoBloqueo: true } });
+    const motivo = motivoClienteBloqueado(c, accion);
+    if (motivo) throw new ConflictException(motivo);
+  }
+
+  /**
+   * Tipo de cliente elegido en la cotización (reunión 2). Vacío = el de la ficha.
+   * Debe estar vigente en la lista, salvo que sea el mismo que ya tiene la ficha.
+   */
+  private async tipoClienteElegido(tenantId: string, clienteId: string, codigo: string | null | undefined): Promise<string | null> {
+    if (!codigo) return null;
+    const cli = await this.prisma.cliente.findFirst({ where: { id: clienteId, tenantId }, select: { tipo: true } });
+    const lista = await this.parametros(tenantId, "tipo_cliente", false);
+    const r = validarTipoCliente(codigo, lista, cli?.tipo ?? null);
+    if (!r.ok) throw new BadRequestException(r.mensaje);
+    return codigo;
+  }
+
+  /** El centro de costo emisor (sucursal) debe existir en el tenant. */
+  private async exigirCentroCosto(tenantId: string, id: string | null | undefined) {
+    if (!id) return;
+    const cc = await this.prisma.centroCosto.findFirst({ where: { id, tenantId, deletedAt: null }, select: { id: true } });
+    if (!cc) throw new BadRequestException("El centro de costo emisor no existe.");
+  }
+
+  /** Líneas de una pre-cotización: valores referenciales (descripción y monto), sin ensayo. */
+  private lineasReferenciales(lineas: LineaEntrada[], moneda: string) {
+    const e = erroresLineasPrecot(lineas as any);
+    if (e.length) throw new BadRequestException(e.join(" "));
+    return lineas.map((l, i) => {
+      const cantidad = l.cantidad ?? 1;
+      const precio = redondearMoneda(Number(l.precioUnitario), moneda);
+      return {
+        tipo: "referencial",
+        descripcion: (l.descripcion ?? "").trim(),
+        categoria: null,
+        cantidad,
+        diasOHoras: null,
+        precioUnitario: precio,
+        descuentoPct: 0,
+        subtotal: redondearMoneda(cantidad * precio, moneda),
+        tramo: null,
+        orden: i + 1,
+        catEnsayoId: null,
+        ensayoCodigo: null,
+        instrumento: null,
+        instrumentoMarca: null,
+        instrumentoModelo: null,
+        instrumentoRango: null,
+        instrumentoPuntos: null,
+        instrumentoSentido: null,
+        precioOrigen: "Valor referencial (pre-cotización)",
+      };
+    });
   }
 
   /**
@@ -629,8 +773,11 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    */
   async crear(data: CabeceraCotizacion & { clienteId: string; lineas: LineaEntrada[] }, tenantId?: string, usuarioId?: string) {
     const tenantIdFromJWT = tenantId ?? DEV_TENANT;
+    const precot = data.tipoDocumento === TIPO_PRECOTIZACION;
+    await this.exigirClienteNoBloqueado(tenantIdFromJWT, data.clienteId, "cotizar");
     this.validarCondiciones(data.condicionesAdicionales);
     if (data.medioEnvio) await exigirMedioEnvioActivo(this.prisma, tenantIdFromJWT, data.medioEnvio);
+    await this.exigirCentroCosto(tenantIdFromJWT, data.centroCostoEmisorId);
     const moneda = data.moneda ?? "CLP";
     const dolar = moneda === "USD" ? Number(data.dolarValor) : null;
     if (moneda === "USD" && !(dolar && dolar > 0))
@@ -638,52 +785,84 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
 
     // «Hoy» es el de Chile (con new Date() a las 21:00 ya era mañana en UTC: D02-18).
     const fechaEmision = soloFecha(data.fechaEmision ?? hoyEnChile());
-    const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
+    const tipoElegido = await this.tipoClienteElegido(tenantIdFromJWT, data.clienteId, data.tipoClienteCodigo);
+    const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision, tipoElegido);
     if (data.oportunidadId) await validarOportunidad(this.prisma, tenantIdFromJWT, data.clienteId, data.oportunidadId);
-    const { lineas, manuales } = separarManuales(await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, { regla: validez.regla, fecha: isoFecha(fechaEmision), clienteId: data.clienteId }));
+
+    // Reunión 5: muestras de la cotización (la pre-cotización no lleva muestras).
+    if (precot && data.muestras?.length) throw new BadRequestException("La pre-cotización no lleva muestras: solo valores referenciales.");
+    const nm = normalizarMuestras(data.muestras);
+    if (nm.error) throw new BadRequestException(nm.error);
+    let lineas: any[];
+    let manuales: LineaManual[] = [];
+    if (precot) lineas = this.lineasReferenciales(data.lineas, moneda);
+    else {
+      const em = validarLineasMuestras(data.lineas, nm.muestras.length);
+      if (em) throw new BadRequestException(em);
+      ({ lineas, manuales } = separarManuales(await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, { regla: validez.reglaPrecio, fecha: isoFecha(fechaEmision), clienteId: data.clienteId })));
+    }
     const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0), moneda);
-    // Número real (EP-00 2.1 · «2026-14324»), correlativo atómico por tenant.
-    const codigo = await generarNumeroCotizacion(this.prisma, tenantIdFromJWT, fechaEmision);
     // Ejecutivo = usuario autenticado, solo si existe (FK a usuario).
     const ejecutivo = usuarioId
       ? await this.prisma.usuario.findFirst({ where: { id: usuarioId }, select: { id: true } })
       : null;
 
-    const creada = await this.prisma.cotizacion.create({
-      data: {
-        tenantId: tenantIdFromJWT,
-        codigo,
-        clienteId: data.clienteId,
-        plantaId: data.plantaId,
-        centroCostoId: data.centroCostoId ?? null,
-        formato: data.formato,
-        formaPago: data.formaPago ?? null,
-        medioEnvio: data.medioEnvio ?? null,
-        moneda,
-        dolarValor: dolar,
-        dolarFecha: moneda === "USD" ? soloFecha(data.dolarFecha ?? fechaEmision) : null,
-        referencia: data.referencia ?? null,
-        descripcionTecnica: data.descripcionTecnica ?? null,
-        condicionesAdicionales: data.condicionesAdicionales ?? null,
-        plazoEntregaDias: data.plazoEntregaDias ?? null,
-        observacionesInternas: data.observacionesInternas ?? null,
-        notas: data.notas ?? null,
-        fechaEmision,
-        validaHasta: soloFecha(validez.validaHasta),
-        expiraAt: soloFecha(validez.validaHasta),
-        validezDias: validez.dias,
-        tipoClienteCodigo: validez.tipoClienteCodigo,
-        ejecutivoId: ejecutivo?.id ?? null,
-        ...tot,
-        estado: ESTADO_ABIERTA,
-        lineas: { create: lineas },
-      },
-      include: { lineas: true, cliente: true },
-    });
+    const crearCon = (db: any, codigo: string) =>
+      db.cotizacion.create({
+        data: {
+          tenantId: tenantIdFromJWT,
+          codigo,
+          clienteId: data.clienteId,
+          plantaId: data.plantaId,
+          centroCostoId: data.centroCostoId ?? null,
+          formato: data.formato,
+          formaPago: data.formaPago ?? null,
+          medioEnvio: data.medioEnvio ?? null,
+          moneda,
+          dolarValor: dolar,
+          dolarFecha: moneda === "USD" ? soloFecha(data.dolarFecha ?? fechaEmision) : null,
+          referencia: data.referencia ?? null,
+          descripcionTecnica: data.descripcionTecnica ?? null,
+          condicionesAdicionales: data.condicionesAdicionales ?? null,
+          plazoEntregaDias: data.plazoEntregaDias ?? null,
+          observacionesInternas: data.observacionesInternas ?? null,
+          notas: data.notas ?? null,
+          fechaEmision,
+          validaHasta: soloFecha(validez.validaHasta),
+          expiraAt: soloFecha(validez.validaHasta),
+          validezDias: validez.dias,
+          tipoClienteCodigo: validez.tipoClienteCodigo,
+          ejecutivoId: ejecutivo?.id ?? null,
+          ...tot,
+          estado: ESTADO_ABIERTA,
+          lineas: { create: lineas },
+        },
+        include: { lineas: true, cliente: true },
+      });
+
+    let creada: any;
+    if (precot) {
+      // Reunión 10: numeración propia PC-AAAA-NNNN, que no consume el correlativo oficial.
+      creada = await this.prisma.$transaction(async (tx) => {
+        const anio = fechaEmision.getUTCFullYear();
+        const serie = await siguienteSeriePrecot(tx, tenantIdFromJWT, anio);
+        const c = await crearCon(tx, codigoPrecotizacion(anio, serie));
+        await guardarExtras(tx, c.id, { tipoDocumento: TIPO_PRECOTIZACION, precotSerie: serie, precotVersion: 1 });
+        return c;
+      });
+    } else {
+      // Número real (EP-00 2.1 · «2026-14324»), correlativo atómico por tenant.
+      creada = await crearCon(this.prisma, await generarNumeroCotizacion(this.prisma, tenantIdFromJWT, fechaEmision));
+    }
+    await guardarExtras(this.prisma, creada.id, { centroCostoEmisorId: data.centroCostoEmisorId ?? null, conCobro: data.conCobro });
+    if (nm.muestras.length) {
+      await guardarMuestras(this.prisma, tenantIdFromJWT, creada.id, nm.muestras);
+      await guardarMuestraDeLineas(this.prisma, creada.id, data.lineas.map((l, i) => ({ orden: i + 1, muestraN: l.muestraN ?? null })).filter((x) => x.muestraN != null));
+    }
     if (data.solicitud) await guardarDatosSolicitud(this.prisma, creada.id, data.solicitud);
     if (data.oportunidadId) await enlazarOportunidad(this.prisma, tenantIdFromJWT, creada.id, data.clienteId, data.oportunidadId);
     await this.hitoPrecioManual(tenantIdFromJWT, creada.id, usuarioId, manuales, moneda);
-    return creada;
+    return { ...creada, tipoDocumento: precot ? TIPO_PRECOTIZACION : "cotizacion" };
   }
 
   /**
@@ -733,7 +912,24 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (moneda === "CLP") dolar = null;
 
     const centroCostoId = resto.centroCostoId !== undefined ? resto.centroCostoId : actual.centroCostoId;
-    const validez = await this.calcularValidezPara(actual.tenantId, actual.clienteId, centroCostoId, actual.fechaEmision);
+    // Reunión 2: el tipo de cliente se elige en cada cotización (cambiarlo recalcula validez y precios).
+    const tipoElegido =
+      resto.tipoClienteCodigo !== undefined
+        ? await this.tipoClienteElegido(actual.tenantId, actual.clienteId, resto.tipoClienteCodigo)
+        : (actual as any).tipoClienteCodigo ?? null;
+    const validez = await this.calcularValidezPara(actual.tenantId, actual.clienteId, centroCostoId, actual.fechaEmision, tipoElegido);
+    await this.exigirCentroCosto(actual.tenantId, resto.centroCostoEmisorId);
+    const precot = esPrecotizacion(actual as any);
+    if (precot && resto.muestras?.length) throw new BadRequestException("La pre-cotización no lleva muestras: solo valores referenciales.");
+    const nm = resto.muestras !== undefined ? normalizarMuestras(resto.muestras) : { muestras: (actual as any).muestras ?? [] };
+    if ((nm as any).error) throw new BadRequestException((nm as any).error);
+    const guardarS1 = async () => {
+      await guardarExtras(this.prisma, id, { centroCostoEmisorId: resto.centroCostoEmisorId, conCobro: resto.conCobro });
+      if (resto.muestras !== undefined) {
+        await guardarMuestras(this.prisma, actual.tenantId, id, nm.muestras);
+        await this.prisma.$executeRawUnsafe(`UPDATE linea_cotizacion SET muestra_n = NULL WHERE cotizacion_id = $1::uuid AND muestra_n > $2::int`, id, nm.muestras.length);
+      }
+    };
 
     const upd: Record<string, any> = {
       centroCostoId,
@@ -753,11 +949,24 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       validaHasta: soloFecha(validez.validaHasta),
       expiraAt: soloFecha(validez.validaHasta),
       validezDias: validez.dias,
+      tipoClienteCodigo: validez.tipoClienteCodigo,
       ...(estado ? { estado } : {}),
       updatedAt: new Date(),
     };
 
+    if (resto.lineas && precot) {
+      const lineas = this.lineasReferenciales(resto.lineas, moneda);
+      const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0), moneda);
+      const r = await this.prisma.$transaction(async (tx) => {
+        await tx.lineaCotizacion.deleteMany({ where: { cotizacionId: id } });
+        return tx.cotizacion.update({ where: { id }, data: { ...upd, ...tot, lineas: { create: lineas } }, include: { lineas: true, cliente: true } });
+      });
+      await guardarS1();
+      return r;
+    }
     if (resto.lineas) {
+      const em = validarLineasMuestras(resto.lineas, nm.muestras.length);
+      if (em) throw new BadRequestException(em);
       // Sin líneas se puede guardar (cotización compartida); la firma las exige (faltantesParaFirma).
       // Las líneas ya cotizadas conservan su precio aunque la ficha cambie (precio-ficha.ts).
       // Frente f6: si cambia la moneda, los precios guardados (en la moneda anterior) no se conservan: se recalculan.
@@ -769,7 +978,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       const origenes = new Map<string, string | null>(actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, x.precioOrigen ?? null]));
       const { lineas, manuales } = separarManuales(
         await this.resolverLineas(actual.tenantId, resto.lineas, moneda, dolar, existentes, {
-          regla: validez.regla,
+          regla: validez.reglaPrecio,
           fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
           clienteId: actual.clienteId,
           origenes,
@@ -785,9 +994,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         });
       });
       await this.hitoPrecioManual(actual.tenantId, id, usuarioId, manuales, moneda);
+      await guardarS1();
+      await guardarMuestraDeLineas(this.prisma, id, resto.lineas.map((l, i) => ({ orden: i + 1, muestraN: l.muestraN ?? null })));
       return r;
     }
-    return this.prisma.cotizacion.update({ where: { id }, data: upd, include: { lineas: true, cliente: true } });
+    const r = await this.prisma.cotizacion.update({ where: { id }, data: upd, include: { lineas: true, cliente: true } });
+    await guardarS1();
+    return r;
   }
 
   /**
@@ -802,15 +1015,19 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (actual.estado !== ESTADO_ABIERTA) throw new ConflictException(`La cotización ${actual.codigo} ya no está Abierta (${actual.estado}).`);
     const noEditable = motivoNoEditable((actual as any).firmaEstado ?? null);
     if (noEditable) throw new ConflictException(noEditable);
-    const ya = new Set(actual.lineas.map((l: any) => l.catEnsayoId).filter(Boolean));
-    const pedidas = nuevas.filter((l) => !l.catEnsayoId || !ya.has(l.catEnsayoId));
+    if (esPrecotizacion(actual as any)) throw new ConflictException("La pre-cotización no lleva ensayos: solo valores referenciales.");
+    // Reunión 5: el mismo ensayo puede ir en varias muestras, no dos veces en la misma.
+    const ya = new Set(actual.lineas.filter((l: any) => l.catEnsayoId).map((l: any) => claveEnsayoMuestra(l.catEnsayoId, l.muestraN)));
+    const pedidas = nuevas.filter((l) => !l.catEnsayoId || !ya.has(claveEnsayoMuestra(l.catEnsayoId, l.muestraN)));
+    const em = validarLineasMuestras(pedidas, ((actual as any).muestras ?? []).length);
+    if (em) throw new BadRequestException(em);
     if (!pedidas.length) return { agregadas: 0, omitidas: nuevas.length, cotizacion: actual };
     const moneda = actual.moneda as "CLP" | "USD";
     const dolar = moneda === "USD" && actual.dolarValor != null ? Number(actual.dolarValor) : null;
     const validez = await this.calcularValidezPara(actual.tenantId, actual.clienteId, actual.centroCostoId, actual.fechaEmision);
     const { lineas, manuales } = separarManuales(
       await this.resolverLineas(actual.tenantId, pedidas, moneda, dolar, undefined, {
-        regla: validez.regla,
+        regla: validez.reglaPrecio,
         fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
         clienteId: actual.clienteId,
       }),
@@ -825,6 +1042,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       include: { lineas: true, cliente: true },
     });
     await this.hitoPrecioManual(actual.tenantId, id, usuarioId, manuales, moneda);
+    await guardarMuestraDeLineas(this.prisma, id, pedidas.map((l, i) => ({ orden: base + i + 1, muestraN: l.muestraN ?? null })).filter((x) => x.muestraN != null));
     await this.hito(actual.tenantId, id, "ensayos_laboratorio", usuarioId, null, {
       unidad: unidad ?? null,
       ensayos: conOrden.length,
@@ -883,6 +1101,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    */
   async aceptar(id: string, tenantId?: string, doc: AceptacionEntrada = {}, usuarioId?: string) {
     const cot = await this.detalle(id, tenantId); // si venció, detalle ya la pasó a 'expirada'
+    // Reunión 10: la pre-cotización no se acepta ni genera OT.
+    if (esPrecotizacion(cot as any)) throw new ConflictException(MOTIVO_PRECOT_NO_ACEPTA);
+    await this.exigirClienteNoBloqueado(cot.tenantId, cot.clienteId, "aceptar");
     const vigencia = puedeRegistrarAceptacion(cot, hoyEnChile());
     if (!vigencia.ok) throw new ConflictException(vigencia.mensaje);
     validarTransicion("cotizacion", cot.estado, "aceptada");
@@ -893,9 +1114,12 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     );
     if (noAceptable) throw new ConflictException(noAceptable);
     if (cot.estado === ESTADO_ABIERTA && !doc.tipo)
-      throw new BadRequestException("Indique el documento de aceptación (tipo: OPI_RESOLUCION, OC, CORREO, PAGO_ADELANTADO o DISPOSICION_DIRECTOR).");
-    if ((doc.tipo === "OPI_RESOLUCION" || doc.tipo === "OC") && !doc.numero?.trim())
-      throw new BadRequestException(`El documento ${doc.tipo === "OC" ? "Orden de compra" : "OPI / Resolución"} requiere número.`);
+      throw new BadRequestException(`Indique el documento de aceptación (tipo: ${TIPOS_ACEPTACION.join(", ")}).`);
+    // Reuniones 2 y 3: número cuando el documento lo tiene y comprobante adjunto (configurable).
+    const exigeComprobante = cot.estado === ESTADO_ABIERTA && sino((await valoresCategoria(this.prisma, cot.tenantId, "aceptacion_comprobante")).exige, true);
+    const tieneComprobante = Boolean(doc.adjuntoId) || ((cot as any).adjuntos ?? []).some((a: any) => a.clase === "aceptacion");
+    const errDoc = errorDocumentoAceptacion({ tipo: doc.tipo, numero: doc.numero, tieneComprobante, exigeComprobante });
+    if (errDoc) throw new BadRequestException(errDoc);
 
     // EP-00 4.2 (BL-150): la O/C se compara con el total cotizado; si difiere hay que registrar la discrepancia.
     const tolerancia = entero((await valoresCategoria(this.prisma, cot.tenantId, "aceptacion_oc")).tolerancia, 0);
@@ -913,7 +1137,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       adjuntoNombre = a[0].nombre;
     }
 
-    const conCobro = doc.conCobro ?? true;
+    // Reunión 1: la cotización ya dice si la OT es con costo (factura) o sin costo (valorización estadística).
+    const conCobro = doc.conCobro ?? (cot as any).conCobro ?? true;
     const tenantIdOt = cot.tenantId ?? tenantId ?? DEV_TENANT;
     const fechaDoc = doc.tipo ? soloFecha(doc.fecha ?? new Date()) : null;
     const origen = origenDesdeAceptacion(doc.tipo);
@@ -1119,6 +1344,131 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const a = await leerAdjunto(this.prisma, tenantId, ["cotizacion"], adjuntoId);
     if (a.entidadId !== id) throw new NotFoundException("Adjunto no encontrado.");
     return a;
+  }
+
+  /**
+   * Reunión 10 · nueva versión de una pre-cotización: copia la cabecera y los
+   * valores referenciales con el número siguiente (PC-AAAA-NNNN-vN) y la fecha de
+   * hoy; la versión anterior queda anulada con la referencia a la nueva.
+   */
+  async nuevaVersion(id: string, tenantId: string | undefined, usuarioId?: string) {
+    const actual: any = await this.detalle(id, tenantId);
+    const motivo = motivoNoNuevaVersion(actual);
+    if (motivo) throw new ConflictException(motivo);
+    const fechaEmision = soloFecha(hoyEnChile());
+    const validez = await this.calcularValidezPara(actual.tenantId, actual.clienteId, actual.centroCostoId, fechaEmision, actual.tipoClienteCodigo ?? null);
+    const version = siguienteVersion(actual.precotVersion);
+    const anio = Number(/^PC-(\d{4})-/.exec(actual.codigo)?.[1]) || fechaEmision.getUTCFullYear();
+    const serie = actual.precotSerie ?? 1;
+    const lineas = actual.lineas.map((l: any) => ({
+      tipo: l.tipo, descripcion: l.descripcion, categoria: l.categoria, cantidad: l.cantidad, diasOHoras: l.diasOHoras,
+      precioUnitario: l.precioUnitario, descuentoPct: 0, subtotal: l.subtotal, tramo: l.tramo, orden: l.orden, precioOrigen: l.precioOrigen,
+    }));
+    const nueva = await this.prisma.$transaction(async (tx) => {
+      const n = await tx.cotizacion.create({
+        data: {
+          tenantId: actual.tenantId,
+          codigo: codigoPrecotizacion(anio, serie, version),
+          clienteId: actual.clienteId,
+          plantaId: actual.plantaId,
+          centroCostoId: actual.centroCostoId,
+          formato: actual.formato,
+          formaPago: actual.formaPago,
+          medioEnvio: actual.medioEnvio,
+          moneda: actual.moneda,
+          dolarValor: actual.dolarValor,
+          dolarFecha: actual.dolarFecha,
+          referencia: actual.referencia,
+          descripcionTecnica: actual.descripcionTecnica,
+          condicionesAdicionales: actual.condicionesAdicionales,
+          plazoEntregaDias: actual.plazoEntregaDias,
+          observacionesInternas: actual.observacionesInternas,
+          fechaEmision,
+          validaHasta: soloFecha(validez.validaHasta),
+          expiraAt: soloFecha(validez.validaHasta),
+          validezDias: validez.dias,
+          tipoClienteCodigo: validez.tipoClienteCodigo,
+          ejecutivoId: usuarioId ? (await tx.usuario.findFirst({ where: { id: usuarioId }, select: { id: true } }))?.id ?? null : null,
+          subtotal: actual.subtotal, descuentoPct: 0, descuentoMonto: 0, gastosAdminPct: actual.gastosAdminPct, gastosAdminMonto: actual.gastosAdminMonto,
+          neto: actual.neto, ivaPct: actual.ivaPct, ivaMonto: actual.ivaMonto, total: actual.total,
+          estado: ESTADO_ABIERTA,
+          lineas: { create: lineas },
+        },
+      });
+      await guardarExtras(tx, n.id, { tipoDocumento: TIPO_PRECOTIZACION, precotSerie: serie, precotVersion: version, reemplazaId: id, centroCostoEmisorId: actual.centroCostoEmisorId ?? null, conCobro: actual.conCobro });
+      await tx.$executeRawUnsafe(
+        `UPDATE cotizacion SET estado = 'anulada', anulada_at = now(), updated_at = now(), reemplazada_por_id = $2::uuid,
+                anulacion_motivo = $3 WHERE id = $1::uuid`,
+        id,
+        n.id,
+        `Reemplazada por la versión ${version} (${n.codigo}).`,
+      );
+      return n;
+    });
+    await this.hito(actual.tenantId, id, "precot_reemplazada", usuarioId, null, { nuevaId: nueva.id, nuevaCodigo: nueva.codigo });
+    await this.hito(actual.tenantId, nueva.id, "precot_version", usuarioId, null, { anteriorId: id, anteriorCodigo: actual.codigo, version });
+    return { ok: true, id: nueva.id, codigo: nueva.codigo, mensaje: `Versión ${version} emitida: ${nueva.codigo}. La ${actual.codigo} queda reemplazada.` };
+  }
+
+  /**
+   * Reunión 10 · «Emitir cotización formal» desde una pre-cotización: nueva
+   * cotización Abierta con la misma cabecera y SIN ensayos (el laboratorio los
+   * agrega al responder, como en la cotización compartida).
+   */
+  async convertirPrecotizacion(id: string, tenantId: string | undefined, usuarioId?: string) {
+    const p: any = await this.detalle(id, tenantId);
+    const motivo = motivoNoConvertir(p);
+    if (motivo) throw new ConflictException(motivo);
+    const previa = await this.prisma
+      .$queryRawUnsafe<{ codigo: string }[]>(`SELECT codigo FROM cotizacion WHERE precotizacion_id = $1::uuid AND estado <> 'anulada' LIMIT 1`, id)
+      .catch(() => []);
+    if (previa[0]) throw new ConflictException(`Desde esta pre-cotización ya se emitió la cotización ${previa[0].codigo}.`);
+    const c = await this.crear(
+      {
+        clienteId: p.clienteId,
+        plantaId: p.plantaId ?? undefined,
+        centroCostoId: p.centroCostoId ?? null,
+        centroCostoEmisorId: p.centroCostoEmisorId ?? null,
+        tipoClienteCodigo: p.tipoClienteCodigo ?? null,
+        formato: p.formato === "PERSONALIZADO" ? "PERSONALIZADO" : "NORMAL",
+        formaPago: p.formaPago,
+        medioEnvio: p.medioEnvio,
+        moneda: p.moneda === "USD" ? "USD" : "CLP",
+        dolarValor: p.dolarValor != null ? Number(p.dolarValor) : null,
+        referencia: p.referencia ?? `Pre-cotización ${p.codigo}`,
+        descripcionTecnica: p.descripcionTecnica,
+        condicionesAdicionales: p.condicionesAdicionales,
+        plazoEntregaDias: p.plazoEntregaDias,
+        observacionesInternas: [p.observacionesInternas, `Emitida desde la pre-cotización ${p.codigo}.`].filter(Boolean).join("\n"),
+        conCobro: p.conCobro,
+        lineas: [],
+      },
+      p.tenantId,
+      usuarioId,
+    );
+    await guardarExtras(this.prisma, c.id, { precotizacionId: id });
+    await this.hito(p.tenantId, id, "precot_convertida", usuarioId, null, { cotizacionId: c.id, cotizacionCodigo: c.codigo });
+    await this.hito(p.tenantId, c.id, "desde_precotizacion", usuarioId, null, { precotizacionId: id, precotizacionCodigo: p.codigo });
+    return { ok: true, id: c.id, codigo: c.codigo, mensaje: `Cotización ${c.codigo} emitida desde ${p.codigo}. El laboratorio agrega los ensayos al responder.` };
+  }
+
+  /**
+   * Reunión 1 · excepción del aviso «Cotizaciones aceptadas sin OT»: Comercial
+   * indica por qué una aceptada no tendrá OT en el LIMS (o lo quita con null).
+   */
+  async marcarSinOt(id: string, tenantId: string | undefined, motivo: string | null, usuarioId?: string) {
+    const cot: any = await this.detalle(id, tenantId);
+    if (cot.estado !== "aceptada") throw new ConflictException(`La cotización ${cot.codigo} no está Aceptada.`);
+    if (cot.ot) throw new ConflictException(`La cotización ${cot.codigo} ya tiene la OT ${cot.ot.codigo}.`);
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE cotizacion SET sin_ot_motivo = $2, sin_ot_at = CASE WHEN $2::text IS NULL THEN NULL ELSE now() END,
+              sin_ot_por = CASE WHEN $2::text IS NULL THEN NULL ELSE $3::uuid END, updated_at = now() WHERE id = $1::uuid`,
+      id,
+      motivo,
+      usuarioId ?? null,
+    );
+    await this.hito(cot.tenantId, id, motivo ? "sin_ot_excepcion" : "sin_ot_excepcion_quitada", usuarioId, motivo, {});
+    return { ok: true, mensaje: motivo ? `La cotización ${cot.codigo} queda como excepción: no aparecerá en «aceptadas sin OT».` : `La cotización ${cot.codigo} vuelve al aviso «aceptadas sin OT».` };
   }
 
   /** Rechazo: solo cotizaciones históricas ('enviada'); las nuevas se anulan. */

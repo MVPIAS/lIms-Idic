@@ -6,8 +6,10 @@
  * (/cotizaciones) y la ficha (/cotizaciones/[id]).
  */
 import Link from "next/link";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { monto, fecha, fechaDia, rut as fmtRut } from "@/lib/format";
-import { ESTADO_PILL, ESTADO_LABEL, ACEPTACION_LABEL, ORIGEN_LABEL, ESTADOS_VIGENTES, etiquetaDe, fueraDeValidez, type Opcion } from "./comercial";
+import { ESTADO_PILL, ESTADO_LABEL, ACEPTACION_LABEL, ORIGEN_LABEL, ESTADOS_VIGENTES, etiquetaDe, fueraDeValidez, esPrecot, pedir, type Opcion } from "./comercial";
 import { descargarAdjunto } from "@/lib/d11";
 import { toast } from "@/components/ui/feedback";
 
@@ -24,9 +26,12 @@ export function accionesDe(c: any, puede: (p: string) => boolean, exigirFirma = 
   const sinFirma = exigirFirma && c.circuito === "r1" && c.firmaEstado !== "firmada";
   return {
     editar: c.estado === "abierta" && !vencida && !enFirma && puede("cotizacion.crear"),
-    aceptar: (c.estado === "abierta" || c.estado === "enviada") && !vencida && !sinFirma && puede("cotizacion.aceptar"),
+    // Reunión 10: la pre-cotización no se acepta ni genera OT.
+    aceptar: !esPrecot(c) && (c.estado === "abierta" || c.estado === "enviada") && !vencida && !sinFirma && puede("cotizacion.aceptar"),
     anular: (c.estado === "abierta" || c.estado === "expirada") && puede("cotizacion.anular"),
-    motivoNoAceptar: vencida
+    motivoNoAceptar: esPrecot(c)
+      ? undefined
+      : vencida
       ? `Venció el ${fechaDia(c.validaHasta ?? c.expiraAt)}: emita una nueva cotización.`
       : sinFirma && c.estado === "abierta"
         ? "Aún no está firmada por el Jefe DCO: envíela a firma y, una vez firmada, al cliente."
@@ -63,9 +68,29 @@ export function EstadoChip({ estado }: { estado: string }) {
 /* --------------------------------------------------------------------------
  * Detalle de solo lectura (aceptadas, anuladas, históricas o Abierta sin editar)
  * ------------------------------------------------------------------------ */
-export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, onAnular }: { cot: any; params: Record<string, Opcion[]>; acciones: Acciones; onEditar: () => void; onAceptar: () => void; onAnular: () => void }) {
+export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, onAnular, puede, onCambio }: { cot: any; params: Record<string, Opcion[]>; acciones: Acciones; onEditar: () => void; onAceptar: () => void; onAnular: () => void; puede?: (p: string) => boolean; onCambio?: (msg: string) => void }) {
   // Frente f5: la moneda guardada se muestra tal cual (una histórica, p. ej. UF, sin convertir).
   const mon: string = cot.moneda || "CLP";
+  const router = useRouter();
+  const [ocupado, setOcupado] = useState(false);
+  const [sinOtAbierto, setSinOtAbierto] = useState(false);
+  const [sinOtMotivo, setSinOtMotivo] = useState("");
+  const precot = esPrecot(cot);
+  const muestras: any[] = cot.muestras ?? [];
+  /** Acción de la cotización (pre-cotización y excepción «sin OT»); con `ir`, abre la cotización resultante. */
+  async function accion(ruta: string, cuerpo?: unknown, ir = false) {
+    setOcupado(true);
+    try {
+      const r = await pedir<any>("POST", `/cotizaciones/${cot.id}/${ruta}`, cuerpo ?? {});
+      toast.ok(r?.mensaje ?? "Hecho.");
+      if (ir && r?.id) router.push(`/cotizaciones/${r.id}` as any);
+      else onCambio?.(r?.mensaje ?? "Hecho.");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
   const Campo = ({ l, v, full }: { l: string; v: React.ReactNode; full?: boolean }) => (
     <div className="field readonly" style={full ? { gridColumn: "1 / -1" } : undefined}>
       <label>{l}</label>
@@ -77,6 +102,19 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
       {esHistorico(cot.estado) && (
         <div className="alert info">Cotización histórica (estado «{cot.estado}»): se conserva de solo lectura.</div>
       )}
+      {precot && (
+        <div className="alert info">
+          <b>Pre-cotización</b>{cot.precotVersion ? ` · versión ${cot.precotVersion}` : ""}: valores referenciales, sin ensayos ni muestras; no se acepta ni genera OT.
+          {cot.reemplazaCodigo && <> Reemplaza a <Link href={`/cotizaciones/${cot.reemplazaId}` as any} className="codigo" style={{ textDecoration: "underline" }}>{cot.reemplazaCodigo}</Link>.</>}
+          {cot.reemplazadaPorCodigo && <> Reemplazada por <Link href={`/cotizaciones/${cot.reemplazadaPorId}` as any} className="codigo" style={{ textDecoration: "underline" }}>{cot.reemplazadaPorCodigo}</Link>.</>}
+        </div>
+      )}
+      {cot.precotizacionCodigo && (
+        <div className="alert info">Emitida desde la pre-cotización <Link href={`/cotizaciones/${cot.precotizacionId}` as any} className="codigo" style={{ textDecoration: "underline" }}>{cot.precotizacionCodigo}</Link>.</div>
+      )}
+      {cot.sinOtMotivo && (
+        <div className="alert info">Aceptada sin OT por excepción: {cot.sinOtMotivo}. No aparece en el aviso «aceptadas sin OT».</div>
+      )}
       {cot.ot?.opiPendiente && (
         <div className="alert warn">La OT {cot.ot.codigo} está con <b>OPI pendiente</b> (disposición del Director con cobro). Registre la OPI en la OT.</div>
       )}
@@ -87,13 +125,36 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
         {acciones.editar && <button className="btn primary sm" onClick={onEditar}>Editar</button>}
         {acciones.aceptar && <button className="btn success sm" onClick={onAceptar}>Registrar aceptación</button>}
         {acciones.anular && <button className="btn outline sm" onClick={onAnular}>Anular</button>}
+        {precot && !cot.reemplazadaPorId && cot.estado !== "anulada" && puede?.("cotizacion.crear") && (
+          <>
+            <button className="btn outline sm" disabled={ocupado} onClick={() => accion("nueva-version", undefined, true)} title="Copia los valores referenciales con el número siguiente; esta versión queda reemplazada">Nueva versión</button>
+            <button className="btn primary sm" disabled={ocupado} onClick={() => accion("cotizacion-formal", undefined, true)} title="Crea la cotización con la misma cabecera; el laboratorio agrega los ensayos">Emitir cotización formal</button>
+          </>
+        )}
+        {cot.estado === "aceptada" && !cot.ot && puede?.("cotizacion.aceptar") && (
+          cot.sinOtMotivo
+            ? <button className="btn outline sm" disabled={ocupado} onClick={() => accion("sin-ot", { motivo: null })}>Quitar excepción «sin OT»</button>
+            : <button className="btn outline sm" disabled={ocupado} onClick={() => setSinOtAbierto((v) => !v)}>No tendrá OT (excepción)</button>
+        )}
         <div className="spacer" />
         {cot.ot && <Link href={`/ot/${cot.ot.id}` as any} className="btn outline sm">Ir a la OT {cot.ot.codigo}</Link>}
       </div>
 
+      {sinOtAbierto && (
+        <div className="card" style={{ marginBottom: 10 }}>
+          <label htmlFor="sinot-motivo">¿Por qué esta cotización aceptada no tendrá OT en el LIMS?</label>
+          <textarea id="sinot-motivo" rows={2} maxLength={1000} value={sinOtMotivo} onChange={(e) => setSinOtMotivo(e.target.value)} placeholder="p. ej. el servicio se facturó directamente; la OT se registró en otra cotización…" />
+          <div className="toolbar" style={{ marginTop: 6 }}>
+            <button className="btn outline sm" onClick={() => setSinOtAbierto(false)}>Cancelar</button>
+            <button className="btn primary sm" disabled={ocupado || sinOtMotivo.trim().length < 5} onClick={() => { setSinOtAbierto(false); accion("sin-ot", { motivo: sinOtMotivo.trim() }); }}>Registrar excepción</button>
+          </div>
+        </div>
+      )}
       <div className="form-grid cols-3">
         <Campo l="Cliente" v={<>{cot.cliente?.razonSocial}{cot.cliente?.rut ? ` · ${fmtRut(cot.cliente.rut)}` : ""}</>} />
-        <Campo l="Tipo de cliente (al emitir)" v={etiquetaDe(params.tipo_cliente, cot.tipoClienteCodigo)} />
+        <Campo l="Tipo de cliente (de esta cotización)" v={etiquetaDe(params.tipo_cliente, cot.tipoClienteCodigo)} />
+        <Campo l="Centro de costo emisor" v={cot.emisor ? `${cot.emisor.nombre} (${cot.emisor.codigo})` : "Casa Matriz · Depto. Comercial"} />
+        <Campo l="Costo de la OT" v={cot.conCobro === false ? "Sin costo (valorización estadística)" : "Con costo (se factura)"} />
         <Campo l="Formato" v={cot.formato} />
         <Campo l="Emisión" v={fechaDia(cot.fechaEmision)} />
         <Campo l="Válida hasta" v={fechaDia(cot.validaHasta ?? cot.expiraAt)} />
@@ -102,18 +163,34 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
         <Campo l="Forma de pago" v={etiquetaDe(params.forma_pago, cot.formaPago)} />
         <Campo l="Medio de envío" v={etiquetaDe(params.medio_envio, cot.medioEnvio)} />
         <Campo l="Referencia" v={cot.referencia} />
-        <Campo l="Plazo de entrega" v={cot.plazoEntregaDias ? `${cot.plazoEntregaDias} días corridos` : "Sin plazo"} />
+        <Campo l="Plazo de entrega" v={cot.plazoEntregaDias ? `${cot.plazoEntregaDias} días corridos desde la llegada de la muestra` : "Sin plazo"} />
         <Campo l="Ejecutivo" v={cot.ejecutivo?.nombreCompleto ?? "—"} />
         <Campo l="Descripción técnica y alcance" v={cot.descripcionTecnica} full />
       </div>
 
+      {muestras.length > 0 && (
+        <table className="data" style={{ margin: "10px 0" }}>
+          <thead><tr><th>Muestra</th><th>Producto</th><th className="num">Ensayos</th><th>Plazo propio</th></tr></thead>
+          <tbody>
+            {muestras.map((m) => (
+              <tr key={m.n}>
+                <td>Muestra {m.n}{m.descripcion && m.descripcion !== `Muestra ${m.n}` ? ` · ${m.descripcion}` : ""}</td>
+                <td>{m.productoTexto ?? "—"}</td>
+                <td className="num">{(cot.lineas ?? []).filter((l: any) => l.muestraN === m.n && l.catEnsayoId).length}</td>
+                <td>{m.plazoDias ? `${m.plazoDias} días desde su llegada` : "El general"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       <table className="data" style={{ margin: "10px 0" }}>
-        <thead><tr><th>Código</th><th>Descripción</th><th className="num">Cant.</th><th className="num">P. unitario</th><th className="num">Subtotal</th></tr></thead>
+        <thead><tr><th>Código</th><th>Descripción</th><th className="num">Cant.</th><th className="num">P. unitario neto</th><th className="num">Subtotal neto</th></tr></thead>
         <tbody>
           {(cot.lineas ?? []).map((l: any) => (
             <tr key={l.id}>
               <td><span className="codigo">{l.ensayoCodigo ?? l.tipo}</span></td>
               <td>
+                {l.muestraN ? <span className="pill blue" style={{ marginRight: 6 }}>Muestra {l.muestraN}</span> : null}
                 {l.descripcion ?? "—"}
                 {/* Contrato 4.1.3: de qué lista (o de la ficha) salió el precio. */}
                 {l.precioOrigen && <small style={{ display: "block", color: "var(--muted)" }}>Precio: {l.precioOrigen}</small>}
@@ -124,7 +201,7 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
             </tr>
           ))}
         </tbody>
-        <tfoot><tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total (IVA exento)</td><td className="num" style={{ fontWeight: 800 }}>{monto(cot.total, mon)}</td></tr></tfoot>
+        <tfoot><tr><td colSpan={4} className="num" style={{ fontWeight: 700 }}>Total neto{precot ? " referencial" : ""} (el IVA se agrega al final)</td><td className="num" style={{ fontWeight: 800 }}>{monto(cot.total, mon)}</td></tr></tfoot>
       </table>
 
       <div className="form-grid cols-2">
@@ -135,7 +212,7 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
             <Campo l="Documento de aceptación" v={ACEPTACION_LABEL[cot.aceptacionTipo] ?? cot.aceptacionTipo} />
             <Campo l="Número / fecha" v={`${cot.aceptacionNumero ?? "s/n"} · ${fechaDia(cot.aceptacionFecha)}`} />
             <Campo l="Adjunto" v={cot.aceptacionAdjunto} />
-            <Campo l="Cobro" v={cot.conCobro ? "Con cobro" : "Sin cobro"} />
+            <Campo l="Cobro" v={cot.conCobro ? "Con costo (se factura)" : "Sin costo (valorización estadística)"} />
           </>
         )}
         {cot.solicitud && (cot.solicitud.solicitudMedio || cot.solicitud.solicitanteContacto || cot.solicitud.solicitanteNombre) && (
