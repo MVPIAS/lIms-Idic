@@ -1,6 +1,6 @@
 import { configEfectiva } from "./config-informe";
 import { armarInforme, filasMetodos, type ResultadoParaInforme } from "./filas-informe";
-import { bloqueIdentificacion, bloqueMetodos, bloqueResultados, bloqueTermograma } from "./bloques-informe";
+import { bloqueIdentificacion, bloqueMetodos, bloqueResultados, bloqueTermograma, completarCuerpo } from "./bloques-informe";
 
 /** Formatos del LME (respuestas del 20-10-2026), tal como los siembra align_recepcion_custodia_equipo_lme.sql. */
 const LIMS_LME = configEfectiva("I.ENSAYO", {
@@ -99,6 +99,14 @@ describe("Bloques del informe para cliente externo (IDIC-PG09 Anexo 02-02 rev05)
     const html = bloqueTermograma([{ mime: "image/png", datos: png, pie: "DSC <b>", punto: null, titulo: "Muestra OT-1-M1" }]);
     expect(html).toContain("Termograma 1 · Muestra OT-1-M1 · DSC &lt;b&gt;");
     expect(bloqueTermograma([{ mime: "image/gif", datos: png, pie: null, punto: null, titulo: null }])).toBe("");
+    expect(bloqueTermograma([{ mime: "image/png", datos: png, pie: null, punto: null, titulo: null }], "Registros")).toMatch(/^<h2>Registros<\/h2>/);
+  });
+
+  it("si la plantilla no ubica {{termograma}}, el motor lo agrega tras el anexo fotográfico", () => {
+    const cfg = { anexoFotografico: true } as any;
+    const sin = completarCuerpo("<h1>Informe</h1>{{tabla_resultados}}", cfg);
+    expect(sin.indexOf("{{termograma_anexo}}")).toBeGreaterThan(sin.indexOf("{{anexo_fotografico}}"));
+    expect(completarCuerpo("<h1>Informe</h1>{{termograma}}", cfg)).not.toContain("termograma_anexo");
   });
 
   it("identificación de la muestra con Nº interno, producto y datos de recepción, escapados", () => {
