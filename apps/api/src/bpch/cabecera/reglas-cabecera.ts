@@ -37,6 +37,9 @@ export interface CabeceraDto {
   identificacionLote?: string | null;
   tamanoLote?: number | null;
   tamanoMuestra?: number | null;
+  /** R3: unidad del tamaño del lote (lista unidad_tamano_lote) y de la muestra (unidad_tamano_muestra). */
+  unidadLote?: string | null;
+  unidadMuestra?: string | null;
   fechaVencimientoProducto?: string | null;
   vigenciaInforme?: string | null;
   observaciones?: string | null;
@@ -164,6 +167,90 @@ export function heredarCabecera(f: FuenteCabecera | null, actual: CabeceraDto | 
     if (v === null || v === undefined || v === "") continue;
     if (actual && !vacio(actual[k])) continue;
     (out as any)[k] = v;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------------ */
+/* R3 · lotes de la inspección: especificación, tamaños con unidad, vigencia  */
+/* ------------------------------------------------------------------------ */
+
+export interface LoteCabecera {
+  identificacion: string;
+  tamanoLote?: number | null;
+  unidadLote?: string | null;
+  tamanoMuestra?: number | null;
+  unidadMuestra?: string | null;
+  /** Fecha de vencimiento o de vigencia del lote (AAAA-MM-DD). */
+  vencimiento?: string | null;
+  especificacion?: string | null;
+  observacion?: string | null;
+}
+
+/** Factor a kilos de las unidades de masa (para comparar muestra y lote de distinta unidad). */
+const A_KG: Record<string, number> = { t: 1000, kg: 1, g: 0.001 };
+
+/**
+ * Errores de los lotes de la cabecera (lista vacía = válidos): identificación
+ * única, tamaños positivos con su unidad de la lista, la muestra no mayor que
+ * el lote (si son comparables: misma unidad o ambas de masa) y fecha válida.
+ */
+export function erroresLotesCabecera(lotes: LoteCabecera[], unidades: { lote: string[]; muestra: string[] }): string[] {
+  const e: string[] = [];
+  const vistos = new Set<string>();
+  lotes.forEach((l, i) => {
+    const n = `Lote ${i + 1}`;
+    const id = (l.identificacion ?? "").trim();
+    if (!id) e.push(`${n}: indique la identificación del lote.`);
+    else if (vistos.has(id.toUpperCase())) e.push(`${n}: el lote «${id}» está repetido.`);
+    vistos.add(id.toUpperCase());
+    const tam = (v: number | null | undefined, u: string | null | undefined, lista: string[], que: string) => {
+      if (v == null) {
+        if (u) e.push(`${n}: indique el tamaño ${que} o quite su unidad.`);
+        return;
+      }
+      if (!Number.isFinite(v) || v <= 0) e.push(`${n}: el tamaño ${que} debe ser mayor que cero.`);
+      if (!u) e.push(`${n}: elija la unidad del tamaño ${que}.`);
+      else if (!lista.includes(u)) e.push(`${n}: la unidad «${u}» del tamaño ${que} no está en la lista.`);
+    };
+    tam(l.tamanoLote, l.unidadLote, unidades.lote, "del lote");
+    tam(l.tamanoMuestra, l.unidadMuestra, unidades.muestra, "de la muestra");
+    if (l.tamanoLote != null && l.tamanoMuestra != null && l.unidadLote && l.unidadMuestra) {
+      const igual = l.unidadLote === l.unidadMuestra;
+      const fl = igual ? 1 : A_KG[l.unidadLote];
+      const fm = igual ? 1 : A_KG[l.unidadMuestra];
+      if (fl && fm && l.tamanoMuestra * fm > l.tamanoLote * fl) e.push(`${n}: la muestra no puede ser mayor que el lote.`);
+    }
+    if (l.vencimiento && (!/^\d{4}-\d{2}-\d{2}$/.test(l.vencimiento) || Number.isNaN(Date.parse(`${l.vencimiento}T12:00:00Z`))))
+      e.push(`${n}: la fecha de vencimiento o vigencia no es válida (AAAA-MM-DD).`);
+  });
+  if (lotes.length > 100) e.push("Registre como máximo 100 lotes.");
+  return e;
+}
+
+/** Lugar de inspección elegible: planta del cliente o lugar de la tabla del BPCH. */
+export interface LugarInspeccion {
+  origen: "planta" | "tabla";
+  lugar: string;
+  direccion: string | null;
+  comuna: string | null;
+  sucursal?: string | null;
+}
+
+/**
+ * Lugares que se ofrecen en la cabecera: las plantas del cliente de la OT y los
+ * de la tabla del BPCH (si la fila indica sucursal, solo los de la sucursal de
+ * la OT), sin repetir el nombre.
+ */
+export function lugaresDisponibles(plantas: LugarInspeccion[], tabla: LugarInspeccion[], sucursalOt: string | null): LugarInspeccion[] {
+  const out: LugarInspeccion[] = [];
+  const vistos = new Set<string>();
+  const propios = tabla.filter((t) => !t.sucursal || !sucursalOt || t.sucursal.toUpperCase() === sucursalOt.toUpperCase());
+  for (const l of [...plantas, ...propios]) {
+    const k = l.lugar.trim().toUpperCase();
+    if (!k || vistos.has(k)) continue;
+    vistos.add(k);
+    out.push(l);
   }
   return out;
 }

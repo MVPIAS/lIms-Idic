@@ -29,6 +29,9 @@ import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { OrdenInternaConsultaController, OrdenInternaController, OrdenInternaService } from "./orden-interna";
+import { OiPendientesController, OiPendientesService } from "./oi-pendientes";
+import { revisarBateria } from "../bpch/comun/bateria";
+import { otEsBpch } from "../bpch/cabecera/cabecera-ot";
 import { AlcanceService } from "../rbac/alcance.service";
 import { PlantillaRenderModule } from "../plantilla-render/plantilla-render.module";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
@@ -1676,6 +1679,8 @@ export const RegistrarMuestrasBody = z.object({
         etId: z.string().uuid().nullable().optional(),
         /** Muestreo de la OT del que sale la muestra (sus sellos se verifican al recibirla). */
         muestreoId: z.string().uuid().nullable().optional(),
+        /** R4 (BPCH): motivo de la excepción si se quita un ensayo de la batería fija del elemento. */
+        excepcionBateria: z.string().trim().max(1000).nullable().optional(),
       }),
     )
     .min(1, "Indique al menos una muestra.")
@@ -1970,6 +1975,11 @@ export class RegistroMuestrasService {
         })),
       })),
       opcionesToma: await this.opcionesToma(tenantId),
+      // R3: ubicaciones de almacenamiento de la lista (Catálogo › Parámetros · ubicacion_almacenamiento).
+      ubicaciones: await this.prisma.$queryRawUnsafe<{ codigo: string; etiqueta: string }[]>(
+        `SELECT codigo, etiqueta FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'ubicacion_almacenamiento' AND activo ORDER BY orden, etiqueta`,
+        tenantId,
+      ),
       lineas: proponerDesdeCotizacion(
         lineas.map((l) => ({
           id: l.id,
@@ -2074,11 +2084,12 @@ export class RegistroMuestrasService {
    * BPCH) o en una transacción propia; si una muestra falla, no queda ninguna.
    */
   async registrar(otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any, db?: Db) {
-    if (db) return this.registrarEn(db, otId, body, tenantId, req);
-    return this.prisma.$transaction((tx) => this.registrarEn(tx, otId, body, tenantId, req), { maxWait: 15_000, timeout: 120_000 });
+    // Desde otra operación (lotes de la internación, reinspección…) la batería la revisa esa operación.
+    if (db) return this.registrarEn(db, otId, body, tenantId, req, false);
+    return this.prisma.$transaction((tx) => this.registrarEn(tx, otId, body, tenantId, req, true), { maxWait: 15_000, timeout: 120_000 });
   }
 
-  private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any) {
+  private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any, validarBateria: boolean) {
     const ot = await this.otEnAlcance(otId, tenantId, req, db);
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
@@ -2109,7 +2120,33 @@ export class RegistroMuestrasService {
     );
     // E.T. propia de la muestra y muestreo de origen (align_r2b_*.sql).
     errores.push(...(await erroresEtYMuestreo(db, tenantId, ot, body.muestras)));
+    // R4: en las OT del BPCH la batería de ensayos del elemento (cat_panel) es fija; quitar uno es una excepción controlada.
+    const excepcionesBateria: { muestra: string; faltan: string[]; motivo: string }[] = [];
+    if (validarBateria && (await otEsBpch(db, ot.unidadPrincipal))) {
+      const permitido = (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("bpch.bateria.excepcion");
+      for (const [i, m] of body.muestras.entries()) {
+        const elemento = m.catElementoId ?? ot.catElementoId ?? null;
+        if (!elemento || !m.metodoIds.length) continue;
+        const bateria = await db.$queryRawUnsafe<{ id: string; codigo: string; nombre: string }[]>(
+          `SELECT cm.id, cm.codigo, cm.nombre FROM cat_panel p JOIN cat_metodo cm ON cm.id = p.metodo_id AND cm.deleted_at IS NULL AND cm.activo
+            WHERE p.tenant_id = $1::uuid AND p.elemento_id = $2::uuid AND p.deleted_at IS NULL AND p.activo`,
+          tenantId,
+          elemento,
+        );
+        const r = revisarBateria(bateria, m.metodoIds, m.excepcionBateria ? { motivo: m.excepcionBateria, permitido } : null, `La muestra ${i + 1}`);
+        if (r.error) errores.push(r.error);
+        else if (r.excepcion) excepcionesBateria.push({ muestra: m.nombre, faltan: r.faltan.map((x) => x.codigo || x.nombre), motivo: m.excepcionBateria!.trim() });
+      }
+    }
     if (errores.length) throw new BadRequestException(errores.join(" "));
+    for (const x of excepcionesBateria)
+      await db.$executeRawUnsafe(
+        `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'bpch_bateria_excepcion', $3::jsonb, $4::uuid)`,
+        tenantId,
+        otId,
+        JSON.stringify(x),
+        req?.user?.sub ?? null,
+      );
 
     const existentes = await db.muestra.findMany({
       where: { tenantId, codigo: { startsWith: ot.codigo } },
@@ -2278,6 +2315,8 @@ export class RecepcionMuestraController {
     SolicitudCosteoController,
     // Las rutas estáticas de órdenes internas (destinos, ot/:otId) van ANTES que el CRUD.
     OrdenInternaConsultaController,
+    // R3: lo que pasa a otro laboratorio sin orden interna (antes del CRUD).
+    OiPendientesController,
     OrdenInternaController,
     // El controlador de /sugerir va ANTES que el CRUD para ganar a `@Get(":id")`.
     FormatoInformeSugerirController,
@@ -2292,6 +2331,7 @@ export class RecepcionMuestraController {
   providers: [
     SolicitudCosteoService,
     OrdenInternaService,
+    OiPendientesService,
     FormatoInformeService,
     FlujoOtService,
     CosteoService,

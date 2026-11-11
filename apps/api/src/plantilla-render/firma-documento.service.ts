@@ -26,6 +26,8 @@ import {
 } from "./reglas-emision";
 import { escapeHtml, fmtFecha, fmtFechaHora } from "./html.util";
 import { exigirMedioEnvioActivo } from "../common/medios-envio";
+import { errorEntregaBpch, FINALES_BPCH } from "../bpch/comun/entrega-bpch";
+import { otEsBpch } from "../bpch/cabecera/cabecera-ot";
 import { estadoCorreo } from "../avisos/reglas-avisos";
 
 // Medios de entrega: «Parámetros del sistema › medio_envio» (common/medios-envio.ts, frente f5).
@@ -503,6 +505,23 @@ export class FirmaDocumentoService {
       );
     if (cert.entregadoAt)
       throw new ConflictException(`La entrega de ${cert.numero ?? cert.codigo} ya está registrada (${fmtFecha(cert.entregadoAt)}).`);
+    // R4 (BPCH · 17065): el documento final del BPCH lo entrega Comercial tras recibirlo de la sucursal.
+    if (cert.otId && (FINALES_BPCH as readonly string[]).includes(cert.tipoDocumento ?? "")) {
+      const [h] = await this.prisma.$queryRawUnsafe<{ origen: string | null; destino: string | null; recibido_at: Date | null }[]>(
+        `SELECT o.origen_trabajo AS origen, d.destino, d.recibido_at
+           FROM orden_trabajo o LEFT JOIN documento_despacho d ON d.certificado_id = $2::uuid
+          WHERE o.id = $1::uuid ORDER BY d.created_at DESC NULLS LAST LIMIT 1`,
+        cert.otId,
+        cert.id,
+      );
+      const motivo = errorEntregaBpch({
+        tipoDocumento: cert.tipoDocumento,
+        esBpch: await otEsBpch(this.prisma, cert.ot?.unidadPrincipal ?? null),
+        origen: h?.origen ?? null,
+        despacho: h?.destino ? { destino: h.destino, recibidoAt: h.recibido_at } : null,
+      });
+      if (motivo) throw new ConflictException(motivo);
+    }
     const fecha = dto.fecha ?? new Date();
     if (fecha.getTime() > Date.now() + 60_000) throw new BadRequestException("La fecha de entrega no puede ser futura.");
     await this.prisma.certificado.update({

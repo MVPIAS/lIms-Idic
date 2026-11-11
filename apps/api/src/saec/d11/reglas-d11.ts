@@ -473,6 +473,8 @@ export interface EstadoArma {
   /** Certificado vigente (en firma u oficial). */
   certificado: { estado: string } | null;
   entregada: boolean;
+  /** R12: el arma falló o su serie no coincide con la resolución y espera una nueva resolución. */
+  pendiente?: boolean;
 }
 
 /** ¿Se acuña con el cuño BPCH (IT08)? Armas que cumplen por prueba completa (y las CIP si así se configura). */
@@ -495,6 +497,7 @@ export function erroresAcunacion(a: EstadoArma, cfg: Pick<ConfigD11, "acunacionC
 
 /** Por qué no se puede emitir el certificado del arma (vacío = se puede). */
 export function erroresCertificado(a: EstadoArma, cfg: Pick<ConfigD11, "acunacionCip">): string[] {
+  if (a.pendiente) return ["está pendiente de una nueva resolución"];
   if (a.certificado) return [`ya tiene certificado (${a.certificado.estado === "en_firma" ? "en firma" : a.certificado.estado})`];
   if (a.permisibilidad === "prohibida") return ["es prohibida: corresponde informe de incumplimiento a DGMN"];
   if (!a.clase || (!a.camino && a.clase === "arma")) return ["falta clasificarla y elegir su camino"];
@@ -530,6 +533,7 @@ export function rangoEmision(numeros: string[]): { desde: string; hasta: string;
 
 export type EtapaArma =
   | "registrada"
+  | "pendiente_resolucion"
   | "prohibida"
   | "en_ensayo"
   | "por_revisar"
@@ -542,6 +546,7 @@ export type EtapaArma =
 
 export const NOMBRE_ETAPA_ARMA: Record<EtapaArma, string> = {
   registrada: "Por clasificar",
+  pendiente_resolucion: "Pendiente de nueva resolución",
   prohibida: "Prohibida · informe a DGMN",
   en_ensayo: "En ensayo",
   por_revisar: "Por revisar y aprobar",
@@ -555,6 +560,7 @@ export const NOMBRE_ETAPA_ARMA: Record<EtapaArma, string> = {
 
 export function etapaArma(a: EstadoArma, cfg: Pick<ConfigD11, "acunacionCip">): EtapaArma {
   if (a.entregada) return "entregada";
+  if (a.pendiente) return "pendiente_resolucion";
   if (!a.clase || !a.permisibilidad) return "registrada";
   if (a.permisibilidad === "prohibida") return "prohibida";
   if (a.certificado) return a.certificado.estado === "en_firma" ? "certificado_en_firma" : "certificada";
@@ -592,10 +598,11 @@ export function avanceD11(h: HechosExpediente, cfg: Pick<ConfigD11, "acunacionCi
   const n = h.armas.length;
   const etapas = h.armas.map((a) => etapaArma(a, cfg));
   const cuenta = (f: (e: EtapaArma, a: EstadoArma) => boolean) => h.armas.filter((a, i) => f(etapas[i], a)).length;
-  const activas = h.armas.filter((a) => a.permisibilidad !== "prohibida");
+  const activas = h.armas.filter((a) => a.permisibilidad !== "prohibida" && !a.pendiente);
+  const enEspera = h.armas.filter((a) => a.pendiente).length;
   const clasificadas = cuenta((e) => e !== "registrada");
-  const sinPendientes = cuenta((_e, a) => a.clase != null && a.pendientes === 0);
-  const aprobadas = cuenta((_e, a) => a.permisibilidad === "prohibida" || todoAprobado(a));
+  const sinPendientes = cuenta((_e, a) => (a.clase != null && a.pendientes === 0) || a.pendiente === true);
+  const aprobadas = cuenta((_e, a) => a.permisibilidad === "prohibida" || a.pendiente === true || todoAprobado(a));
   const porAcunar = h.armas.filter((a) => requiereAcunacion(a, cfg) && a.veredicto === "cumple");
   const acunadas = porAcunar.filter((a) => a.acunada).length;
   const certificables = activas.filter((a) => a.veredicto === "cumple");
@@ -604,7 +611,7 @@ export function avanceD11(h: HechosExpediente, cfg: Pick<ConfigD11, "acunacionCi
   const entregadas = cuenta((e) => e === "entregada");
   // Las prohibidas no se entregan al importador (su destino lo informa la DGMN, 11.24):
   // la entrega está hecha cuando lo están todas las demás, igual que el cierre (faltantesCierreD11).
-  const prohibidas = n - activas.length;
+  const prohibidas = n - activas.length - enEspera;
   const porEntregar = activas.length;
   const registroCompleto = h.recibidas != null && h.recibidas > 0 && n >= h.recibidas;
 
@@ -633,7 +640,7 @@ export function avanceD11(h: HechosExpediente, cfg: Pick<ConfigD11, "acunacionCi
       "D11 / Comercial",
       n > 0 && entregadas >= porEntregar,
       entregadas > 0,
-      `${entregadas} de ${porEntregar} entregadas${prohibidas ? ` · ${prohibidas} prohibida${prohibidas === 1 ? "" : "s"}: no se entrega${prohibidas === 1 ? "" : "n"}` : ""}`,
+      `${entregadas} de ${porEntregar} entregadas${prohibidas ? ` · ${prohibidas} prohibida${prohibidas === 1 ? "" : "s"}: no se entrega${prohibidas === 1 ? "" : "n"}` : ""}${enEspera ? ` · ${enEspera} pendiente${enEspera === 1 ? "" : "s"} de nueva resolución` : ""}`,
     ),
   ];
   // Un paso solo cuenta como hecho si los anteriores lo están (la barra no salta).
@@ -646,8 +653,67 @@ export function avanceD11(h: HechosExpediente, cfg: Pick<ConfigD11, "acunacionCi
 }
 
 /** 11.27 · qué falta para cerrar la OT de armas: armas entregadas o con destino. */
-export function faltantesCierreD11(armas: { muestra: string; entregada: boolean; prohibida: boolean }[]): string[] {
-  const sin = armas.filter((a) => !a.entregada && !a.prohibida).map((a) => a.muestra);
+export function faltantesCierreD11(armas: { muestra: string; entregada: boolean; prohibida: boolean; pendiente?: boolean }[]): string[] {
+  // R12: el arma pendiente de una nueva resolución no se entrega en esta OT (espera la nueva).
+  const sin = armas.filter((a) => !a.entregada && !a.prohibida && !a.pendiente).map((a) => a.muestra);
   if (!sin.length) return [];
   return [`Faltan ${sin.length} arma(s) por entregar al importador (${sin.slice(0, 5).join(", ")}${sin.length > 5 ? "…" : ""}): regístrelo en Certificación de armas › Entrega.`];
+}
+
+/* ======================================================================== */
+/* R12 · Armas pendientes de nueva resolución y devoluciones técnicas         */
+/* ======================================================================== */
+
+export const MOTIVOS_PENDIENTE = ["falla", "serie_distinta", "otro"] as const;
+export type MotivoPendiente = (typeof MOTIVOS_PENDIENTE)[number];
+export const NOMBRE_MOTIVO_PENDIENTE: Record<MotivoPendiente, string> = {
+  falla: "Falló en las pruebas",
+  serie_distinta: "La serie no coincide con la resolución",
+  otro: "Otro motivo",
+};
+
+/** Estado mínimo del arma para decidir si se deja pendiente, se libera o se devuelve. */
+export interface ArmaParaEspera {
+  entregada: boolean;
+  pendiente: boolean;
+  /** Certificado oficial ya entregado al importador. */
+  certificadoEntregado: boolean;
+}
+
+/**
+ * Dejar el arma pendiente hasta una nueva resolución (R12): «si un arma falla o
+ * su número de serie es distinto, queda pendiente». No se hace con un arma ya
+ * entregada ni con un certificado entregado; el motivo es obligatorio y «otro»
+ * exige el detalle.
+ */
+export function erroresPendiente(a: ArmaParaEspera, motivo: string | null | undefined, detalle: string | null | undefined): string[] {
+  const e: string[] = [];
+  if (a.entregada) e.push("El arma ya se entregó al importador: no queda pendiente.");
+  if (a.certificadoEntregado) e.push("El certificado del arma ya se entregó: no queda pendiente.");
+  if (a.pendiente) e.push("El arma ya está pendiente de una nueva resolución.");
+  if (!motivo || !(MOTIVOS_PENDIENTE as readonly string[]).includes(motivo)) e.push("Indique el motivo: falla, serie distinta u otro.");
+  const d = (detalle ?? "").trim();
+  if (motivo === "otro" && d.length < 5) e.push("Con «Otro motivo», describa el motivo (al menos 5 caracteres).");
+  return e;
+}
+
+/** Liberar el arma pendiente: exige el número de la nueva resolución y la OT abierta. */
+export function erroresLiberar(a: Pick<ArmaParaEspera, "pendiente">, nuevaResolucion: string | null | undefined, otAbierta: boolean): string[] {
+  const e: string[] = [];
+  if (!a.pendiente) e.push("El arma no está pendiente.");
+  if (!otAbierta) e.push("La OT está cerrada: registre el arma en la OT de la nueva resolución.");
+  if (!(nuevaResolucion ?? "").trim()) e.push("Indique el número de la nueva resolución.");
+  return e;
+}
+
+/**
+ * Devolución técnica en cualquier paso (R12): «se pueden devolver los
+ * certificados por motivos técnicos para rehacer las pruebas o enmendar».
+ * Se puede mientras el arma no se haya entregado; el motivo es obligatorio.
+ */
+export function erroresDevolucion(a: Pick<ArmaParaEspera, "entregada" | "certificadoEntregado">, motivo: string | null | undefined): string[] {
+  const e: string[] = [];
+  if (a.entregada || a.certificadoEntregado) e.push("El arma o su certificado ya se entregaron: la corrección va por anulación y reemisión del certificado.");
+  if ((motivo ?? "").trim().length < 5) e.push("Indique el motivo técnico de la devolución (al menos 5 caracteres).");
+  return e;
 }

@@ -24,7 +24,7 @@ export const MODALIDAD: Record<Modalidad, { texto: string; corto: string; ayuda:
  * «Cumplimiento»; recorrido MP-06, D06-18).
  */
 const NATURALEZA_DOC: Record<string, string> = {
-  INFORME_INSPECCION: "Inspección",
+  INFORME_INSPECCION: "Certificado de control",
   CERTIFICADO_CONFORMIDAD: "Conformidad",
   INFORME_INCUMPLIMIENTO: "Incumplimiento",
   CERTIFICADO_RESISTENCIA_BALISTICA: "CRB",

@@ -33,6 +33,10 @@ import {
   PROCESOS_CON_EXPEDIENTE,
   diferencias,
   erroresCabecera,
+  erroresLotesCabecera,
+  lugaresDisponibles,
+  type LoteCabecera,
+  type LugarInspeccion,
   faltantesParaEmitirInspeccion,
   heredarCabecera,
   iniciales,
@@ -62,6 +66,8 @@ const COLUMNAS: [keyof CabeceraDto, string, "t" | "d" | "i"][] = [
   ["identificacionLote", "identificacion_lote", "t"],
   ["tamanoLote", "tamano_lote", "i"],
   ["tamanoMuestra", "tamano_muestra", "i"],
+  ["unidadLote", "unidad_lote", "t"],
+  ["unidadMuestra", "unidad_muestra", "t"],
   ["fechaVencimientoProducto", "fecha_vencimiento_producto", "d"],
   ["vigenciaInforme", "vigencia_informe", "d"],
   ["observaciones", "observaciones", "t"],
@@ -90,9 +96,33 @@ export const CabeceraSchema = z
     identificacionLote: texto(200),
     tamanoLote: entero,
     tamanoMuestra: entero,
+    unidadLote: texto(20),
+    unidadMuestra: texto(20),
     fechaVencimientoProducto: fecha,
     vigenciaInforme: fecha,
     observaciones: texto(4000),
+  })
+  .strict();
+
+const numeroPositivo = z.number().positive().max(1e9).nullable().optional();
+export const LotesCabeceraSchema = z
+  .object({
+    lotes: z
+      .array(
+        z
+          .object({
+            identificacion: z.string().trim().max(200),
+            tamanoLote: numeroPositivo,
+            unidadLote: texto(20),
+            tamanoMuestra: numeroPositivo,
+            unidadMuestra: texto(20),
+            vencimiento: fecha,
+            especificacion: texto(1000),
+            observacion: texto(1000),
+          })
+          .strict(),
+      )
+      .max(100),
   })
   .strict();
 
@@ -231,7 +261,10 @@ export class CabeceraOtService {
     ]);
     const soloComplemento = (PROCESOS_CON_EXPEDIENTE as readonly string[]).includes(proceso);
     const abierta = !["cerrada", "anulada"].includes(ot.estado);
+    const [opciones, lotes] = await Promise.all([this.opciones(otId, tenantId), this.lotes(otId)]);
     return {
+      opciones,
+      lotes,
       ot,
       esBpch: true,
       proceso,
@@ -246,6 +279,97 @@ export class CabeceraOtService {
       heredados: soloComplemento ? {} : heredarCabecera(await this.fuente(otId), cabecera),
       historial,
     };
+  }
+
+  /** R3: listas de la cabecera (unidades de tamaño y lugares de inspección con su dirección). */
+  private async opciones(otId: string, tenantId: string) {
+    const [listas, tabla, plantas, suc] = await Promise.all([
+      this.prisma.$queryRawUnsafe<{ categoria: string; codigo: string; etiqueta: string }[]>(
+        `SELECT categoria, codigo, etiqueta FROM parametro_sistema
+          WHERE tenant_id = $1::uuid AND activo AND categoria IN ('unidad_tamano_lote', 'unidad_tamano_muestra') ORDER BY orden, etiqueta`,
+        tenantId,
+      ),
+      this.prisma.$queryRawUnsafe<{ valor: string | null }[]>(
+        `SELECT valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND activo AND categoria = 'bpch_lugar_inspeccion' AND codigo = 'tabla'`,
+        tenantId,
+      ),
+      this.prisma.$queryRawUnsafe<{ nombre: string; direccion: string | null; ciudad: string | null }[]>(
+        `SELECT p.nombre, p.direccion, p.ciudad FROM planta p JOIN orden_trabajo o ON o.cliente_id = p.cliente_id
+          WHERE o.id = $1::uuid AND COALESCE(p.activa, true) ORDER BY p.nombre`,
+        otId,
+      ),
+      this.prisma.$queryRawUnsafe<{ codigo: string | null }[]>(
+        `SELECT u.codigo FROM orden_trabajo o LEFT JOIN unidad u ON u.id = o.unidad_principal WHERE o.id = $1::uuid`,
+        otId,
+      ),
+    ]);
+    let filas: any[] = [];
+    try {
+      filas = JSON.parse(tabla[0]?.valor ?? "[]");
+    } catch {
+      filas = [];
+    }
+    const deTabla: LugarInspeccion[] = (Array.isArray(filas) ? filas : [])
+      .filter((f) => f && typeof f.lugar === "string")
+      .map((f) => ({ origen: "tabla", lugar: f.lugar, direccion: f.direccion ?? null, comuna: f.comuna ?? null, sucursal: f.sucursal ?? null }));
+    const dePlantas: LugarInspeccion[] = plantas.map((p) => ({ origen: "planta", lugar: p.nombre, direccion: p.direccion, comuna: p.ciudad }));
+    const op = (c: string) => listas.filter((l) => l.categoria === c).map((l) => ({ valor: l.codigo, etiqueta: l.etiqueta }));
+    return {
+      unidadesLote: op("unidad_tamano_lote"),
+      unidadesMuestra: op("unidad_tamano_muestra"),
+      lugares: lugaresDisponibles(dePlantas, deTabla, suc[0]?.codigo ?? null),
+    };
+  }
+
+  private lotes(otId: string) {
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, orden, identificacion, tamano_lote::float8 AS "tamanoLote", unidad_lote AS "unidadLote",
+              tamano_muestra::float8 AS "tamanoMuestra", unidad_muestra AS "unidadMuestra",
+              to_char(vencimiento, 'YYYY-MM-DD') AS vencimiento, especificacion, observacion
+         FROM bpch_cabecera_lote WHERE ot_id = $1::uuid ORDER BY orden`,
+      otId,
+    );
+  }
+
+  /** R3 · reemplaza los lotes de la inspección (especificación, tamaños con unidad y vencimiento o vigencia). */
+  async guardarLotes(otId: string, tenantId: string, usuarioId: string | null, lotes: LoteCabecera[]) {
+    const ot = await this.ot(otId, tenantId);
+    if (!(await otEsBpch(this.prisma, ot.unidadPrincipal)))
+      throw new BadRequestException(`La OT ${ot.codigo} no es de una unidad del Banco de Pruebas: no lleva cabecera de inspección.`);
+    if (["cerrada", "anulada"].includes(ot.estado)) throw new ConflictException(`La OT ${ot.codigo} está ${ot.estado}: los lotes ya no se cambian.`);
+    const op = await this.opciones(otId, tenantId);
+    const errores = erroresLotesCabecera(lotes, { lote: op.unidadesLote.map((u) => u.valor), muestra: op.unidadesMuestra.map((u) => u.valor) });
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    const antes = await this.lotes(otId);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`DELETE FROM bpch_cabecera_lote WHERE ot_id = $1::uuid`, otId);
+      for (const [i, l] of lotes.entries())
+        await tx.$executeRawUnsafe(
+          `INSERT INTO bpch_cabecera_lote (tenant_id, ot_id, orden, identificacion, tamano_lote, unidad_lote, tamano_muestra, unidad_muestra,
+                                           vencimiento, especificacion, observacion, created_by)
+           VALUES ($1::uuid, $2::uuid, $3, $4, $5::numeric, $6, $7::numeric, $8, $9::date, $10, $11, $12::uuid)`,
+          tenantId,
+          otId,
+          i + 1,
+          l.identificacion.trim(),
+          l.tamanoLote ?? null,
+          l.unidadLote || null,
+          l.tamanoMuestra ?? null,
+          l.unidadMuestra || null,
+          l.vencimiento || null,
+          l.especificacion?.trim() || null,
+          l.observacion?.trim() || null,
+          usuarioId,
+        );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO bpch_cabecera_ot_historial (tenant_id, ot_id, cambios, usuario_id) VALUES ($1::uuid, $2::uuid, $3::jsonb, $4::uuid)`,
+        tenantId,
+        otId,
+        JSON.stringify({ lotes: { antes: antes.length, despues: lotes.length } }),
+        usuarioId,
+      );
+    });
+    return this.ficha(otId, tenantId, true);
   }
 
   async guardar(otId: string, tenantId: string, usuarioId: string | null, dto: CabeceraDto) {
@@ -319,6 +443,15 @@ export class CabeceraOtController {
     const tiene = (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("bpch.cabecera.gestionar");
     const puede = tiene && (await this.alcance.puedeVerUnidad(req, ot.unidadPrincipal, "bpch.cabecera.gestionar"));
     return this.svc.ficha(otId, tenantDe(req), puede);
+  }
+
+  @Put(":otId/lotes")
+  @RequierePermiso("bpch.cabecera.gestionar")
+  @ApiOperation({ summary: "R3 · Lotes de la inspección: especificación, tamaños con unidad y vencimiento o vigencia por lote" })
+  async guardarLotes(@Param("otId", ParseUUIDPipe) otId: string, @Body() body: unknown, @Req() req: any) {
+    const dto = LotesCabeceraSchema.parse(body ?? {});
+    await this.exigirAlcance(otId, req);
+    return this.svc.guardarLotes(otId, tenantDe(req), req?.user?.sub ?? null, dto.lotes);
   }
 
   @Put(":otId")

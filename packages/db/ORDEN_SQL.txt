@@ -151,4 +151,5 @@ align_bpch_requerimiento.sql
 align_ibis_testigos.sql
 align_sesiones_s1.sql
 align_sesiones_s2.sql
+align_sesiones_s3.sql
 align_cierre_permisos.sql
