@@ -64,6 +64,21 @@ const Form05Schema = z.object({
   dolar: z.number().positive().max(100000).nullable().optional(),
 });
 
+/** Cotización compartida: ensayos que agrega el laboratorio. */
+const EnsayosLabSchema = z.object({
+  lineas: z
+    .array(
+      z.object({
+        catEnsayoId: z.string().uuid(),
+        cantidad: z.number().int().positive().max(10000).default(1),
+        precioUnitario: z.number().positive().optional(),
+        motivoPrecioManual: z.string().trim().max(250).nullable().optional(),
+      }),
+    )
+    .min(1, "Elija al menos un ensayo.")
+    .max(200),
+});
+
 const ResponderSchema = z.object({
   respuesta: z.enum(["aceptar", "aceptar_con_comentario", "rechazar"]),
   comentario: texto(2000).nullable().optional(),
@@ -111,6 +126,13 @@ export class CircuitoCotizacionController {
   @ApiOperation({ summary: "El laboratorio responde: programa (FORM06) y costeo (FORM05)" })
   responder(@Param("sid", ParseUUIDPipe) sid: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.responder(req, sid, ResponderSchema.parse(body ?? {}) as any);
+  }
+
+  @Post("solicitudes-laboratorio/:sid/ensayos")
+  @RequierePermiso("cotizacion.costear")
+  @ApiOperation({ summary: "Cotización compartida: el laboratorio agrega ensayos a la cotización de la solicitud" })
+  agregarEnsayos(@Param("sid", ParseUUIDPipe) sid: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.agregarEnsayos(req, sid, EnsayosLabSchema.parse(body ?? {}));
   }
 
   @Get("solicitudes-laboratorio/:sid/referencias-costeo")

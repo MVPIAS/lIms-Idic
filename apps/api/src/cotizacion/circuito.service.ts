@@ -479,6 +479,33 @@ export class CircuitoCotizacionService {
     };
   }
 
+  /**
+   * Cotización compartida (sesiones 27-10 y 06-11): mientras responde la
+   * solicitud, el laboratorio agrega los ensayos (y su cantidad) a una
+   * cotización que Comercial guardó solo con la cabecera.
+   */
+  async agregarEnsayos(req: any, solicitudId: string, b: { lineas: { catEnsayoId: string; cantidad?: number; motivoPrecioManual?: string | null; precioUnitario?: number }[] }) {
+    const tenantId = this.tenant(req);
+    const s = await this.solicitud(solicitudId, tenantId);
+    await this.alcance.exigirUnidad(req, s.unidadId, `la solicitud ${s.numero ?? ""}`.trim(), "cotizacion.costear");
+    if (!puedeResponder(s.estado))
+      throw new ConflictException(`La solicitud ya fue respondida (${ETIQUETA_SOLICITUD[s.estado] ?? s.estado}): pida a Comercial que la devuelva para agregar ensayos.`);
+    if (!b.lineas?.length) throw new BadRequestException("Elija al menos un ensayo.");
+    const r = await this.cotizaciones.agregarLineas(
+      s.cotizacionId,
+      b.lineas.map((l) => ({ catEnsayoId: l.catEnsayoId, cantidad: l.cantidad ?? 1, motivoPrecioManual: l.motivoPrecioManual ?? undefined, precioUnitario: l.precioUnitario })) as any,
+      tenantId,
+      this.yo(req) ?? undefined,
+      s.unidadCodigo ?? null,
+    );
+    return {
+      ok: true,
+      agregadas: r.agregadas,
+      omitidas: r.omitidas,
+      mensaje: `${r.agregadas} ensayo(s) agregado(s) a la cotización${r.omitidas ? `; ${r.omitidas} ya estaba(n)` : ""}.`,
+    };
+  }
+
   /** 2.6 · V°B° del laboratorio o del departamento: dar o devolver con comentario. */
   async vb(req: any, solicitudId: string, b: { accion: "dar" | "devolver"; comentario?: string | null }) {
     const tenantId = this.tenant(req);

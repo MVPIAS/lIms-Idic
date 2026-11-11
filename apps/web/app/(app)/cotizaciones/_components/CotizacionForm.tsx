@@ -450,7 +450,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   async function guardar() {
     setError("");
     if (!cliente?.id) return setError("Seleccione el cliente.");
-    if (!lineas.length) return setError("Agregue al menos un ensayo del catálogo.");
+    // Sin ensayos se guarda la cabecera: el laboratorio los agrega al responder (cotización compartida).
     if (lineas.some((l) => !l.heredada && !l.gasto && !tienePrecio(l)))
       return setError(`Hay ensayos sin precio en la lista vigente ni en su ficha de costos: indique el precio manual y su motivo (mínimo ${MIN_MOTIVO_MANUAL} caracteres).`);
     const mezcla = lineas.map(bloqueoDe).find(Boolean);
@@ -830,7 +830,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
               ) : null,
             ])}
             {!lineas.length && (
-              <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Aún no hay ensayos. Búscalos en el catálogo y agrégalos.</td></tr>
+              <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>Aún no hay ensayos. Búscalos en el catálogo o guarda solo los datos: el laboratorio puede agregarlos al responder la solicitud.</td></tr>
             )}
           </tbody>
           {lineas.length > 0 && (

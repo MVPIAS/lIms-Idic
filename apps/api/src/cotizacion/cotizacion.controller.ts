@@ -137,7 +137,9 @@ const CrearCotSchema = z
     // EP-00 0.3 (BL-173): cotización creada desde una oportunidad del CRM.
     oportunidadId: z.string().uuid().optional(),
     fechaEmision: fecha.optional(),
-    lineas: z.array(LineaSchema).min(1),
+    // Cotización compartida (sesiones 27-10 y 06-11): Comercial puede guardar solo
+    // la cabecera; el laboratorio agrega los ensayos al responder. La firma exige líneas.
+    lineas: z.array(LineaSchema).default([]),
   })
   .refine((d) => d.moneda !== "USD" || (d.dolarValor ?? 0) > 0, {
     message: "Cotización en USD: indique el valor del dólar del día (dolarValor).",
@@ -154,7 +156,7 @@ const ActualizarCotSchema = z.object({
   moneda: zMoneda.optional(),
   gastosAdminPct: z.number().min(0).max(100).optional(),
   ivaPct: z.number().min(0).max(100).optional(),
-  lineas: z.array(LineaSchema).min(1).optional(),
+  lineas: z.array(LineaSchema).optional(),
 });
 
 /** SVT6 · documento de aceptación (IDIC-PG03 6.3 n / 6.4 g). */
