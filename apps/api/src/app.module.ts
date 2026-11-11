@@ -43,6 +43,7 @@ import { QcModule } from "./qc/qc.module";
 import { ConsumiblesModule } from "./consumibles/consumibles.module";
 import { MensajeriaModule } from "./mensajeria/mensajeria.module";
 import { ReportesModule } from "./reportes/reportes.module";
+import { ZonaInformesModule } from "./zona-informes/zona-informes.module";
 import { AvisosModule } from "./avisos/avisos.module";
 import { SeguimientoModule } from "./seguimiento/seguimiento.module";
 import { OficioModule } from "./oficio/oficio.module";
@@ -130,6 +131,7 @@ function prettyTransport() {
     MensajeriaModule,
     EncuestaModule,
     ReportesModule,
+    ZonaInformesModule,
     // Brechas §4.8.4 y §4.7.5: respaldos programados (Administración › Respaldos) y enlace a Metabase.
     SistemaModule,
     AvisosModule,
