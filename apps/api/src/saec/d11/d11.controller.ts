@@ -100,6 +100,34 @@ export class D11Controller {
     return this.svc.registrarEnsayos(req, id, body);
   }
 
+  @Post("armas/:id/pendiente")
+  @RequierePermiso("arma.registrar")
+  @ApiOperation({ summary: "R12 · El arma falla o su serie no coincide: queda pendiente de una nueva resolución" })
+  pendiente(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.dejarPendiente(req, id, body);
+  }
+
+  @Post("armas/:id/liberar")
+  @RequierePermiso("arma.registrar")
+  @ApiOperation({ summary: "R12 · Llegó la nueva resolución: el arma pendiente vuelve a su curso" })
+  liberar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.liberarPendiente(req, id, body);
+  }
+
+  @Post("armas/:id/devolver")
+  @RequierePermiso("arma.devolver")
+  @ApiOperation({ summary: "R12 · Devolución técnica en cualquier paso: anula el certificado del arma y devuelve sus resultados" })
+  devolver(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.devolverArma(req, id, body);
+  }
+
+  @Get("armas-pendientes")
+  @RequierePermiso("arma.ver")
+  @ApiOperation({ summary: "R12 · Armas pendientes de una nueva resolución en las OT de la D11" })
+  pendientes(@Req() req: any) {
+    return this.svc.armasPendientes(req);
+  }
+
   @Post("armas/:id/movimientos")
   @RequierePermiso("arma.registrar")
   @ApiOperation({ summary: "11.7 · Cambio de ubicación en bodega (movimiento de custodia inmutable)" })

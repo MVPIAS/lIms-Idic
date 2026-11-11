@@ -180,6 +180,7 @@ export default function FormRecepcion({
   valor,
   onCambio,
   opcionesToma,
+  ubicaciones = [],
   labPrincipalId,
   porMuestra = true,
   config,
@@ -189,6 +190,8 @@ export default function FormRecepcion({
   valor: DatosRecepcion;
   onCambio: (d: DatosRecepcion) => void;
   opcionesToma: { codigo: string; etiqueta: string }[];
+  /** R3: lista de ubicaciones de almacenamiento (se puede escribir otra). */
+  ubicaciones?: { codigo: string; etiqueta: string }[];
   /** laboratorio responsable de la OT: no se ofrece como «otro laboratorio» */
   labPrincipalId?: string | null;
   /** false = datos comunes a varias muestras (sello e identificación van por muestra) */
@@ -328,7 +331,9 @@ export default function FormRecepcion({
       {!tieneUbicacion && (
         <div className="field">
           <label htmlFor={`${id}-ubic`}>Ubicación de almacenamiento</label>
-          <input id={`${id}-ubic`} value={valor.ubicacion} maxLength={120} onChange={(e) => set({ ubicacion: e.target.value })} />
+          <input id={`${id}-ubic`} value={valor.ubicacion} maxLength={120} list={`${id}-ubic-lista`} onChange={(e) => set({ ubicacion: e.target.value })}
+            placeholder={ubicaciones.length ? "Elija de la lista o escriba otra" : undefined} />
+          <datalist id={`${id}-ubic-lista`}>{ubicaciones.map((u) => <option key={u.codigo} value={u.etiqueta} />)}</datalist>
         </div>
       )}
       {camposLab.length > 0 && (

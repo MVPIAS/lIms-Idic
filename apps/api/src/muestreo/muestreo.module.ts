@@ -21,6 +21,8 @@
  *   POST   /muestreo/:id/concluir            resultado.aprobar · «Concluir → revisión técnica»
  */
 import { precargaMuestreo } from "./reglas-muestreo";
+import { NORMAS_MUESTREO, erroresHoras, perfilMuestreo, tipoAdjunto } from "./formulario-completo";
+import { fichaFormularioHtml } from "./ficha-formulario";
 import {
   BadRequestException,
   Body,
@@ -89,6 +91,7 @@ const tiene = (req: any, p: string) => (req?.user?.roles ?? []).includes("SUPERA
 
 const MAX_FOTO = 2 * 1024 * 1024;
 const MAX_FOTOS_MUESTREO = 30;
+const MAX_ADJUNTO = 5 * 1024 * 1024;
 type ArchivoSubido = { buffer: Buffer; originalname?: string };
 
 const texto = (max: number) => z.string().trim().max(max).nullable().optional();
@@ -136,6 +139,16 @@ const DatosBody = z
     observaciones: texto(4000),
     lineaMovil: z.boolean().optional(),
     lineaMovilPlan: texto(2000),
+    /** R6: formulario de selección y extracción completo. */
+    horaInicio: z.string().max(5).nullable().optional(),
+    horaTermino: z.string().max(5).nullable().optional(),
+    detalleMuestras: texto(4000),
+    especificacionTecnica: texto(240),
+    protocoloNorma: texto(240),
+    normaMuestreo: z.enum(NORMAS_MUESTREO).nullable().optional(),
+    cantidadAleatoria: z.number().int().positive().max(100000).nullable().optional(),
+    unidadLote: texto(20),
+    unidadMuestra: texto(20),
     /** Plan NCh 44 (null = quitarlo). */
     plan: PlanBody.nullable().optional(),
   })
@@ -186,6 +199,9 @@ const SELECT_MUESTREO = `mu.id, mu.ot_id AS "otId", mu.numero_formulario AS "num
   mu.tamano_muestra AS "tamanoMuestra", mu.cantidad_envase AS "cantidadEnvase", mu.material_adicional AS "materialAdicional", mu.sellos,
   mu.registro_foto_numero AS "registroFotoNumero", mu.devolucion_excedente AS "devolucionExcedente", mu.costo_uf::float8 AS "costoUf",
   mu.tiempo_respuesta AS "tiempoRespuesta", mu.observaciones, mu.plan, mu.linea_movil AS "lineaMovil", mu.linea_movil_plan AS "lineaMovilPlan",
+  to_char(mu.hora_inicio, 'HH24:MI') AS "horaInicio", to_char(mu.hora_termino, 'HH24:MI') AS "horaTermino", mu.detalle_muestras AS "detalleMuestras",
+  mu.especificacion_tecnica AS "especificacionTecnica", mu.protocolo_norma AS "protocoloNorma", mu.norma_muestreo AS "normaMuestreo",
+  mu.cantidad_aleatoria AS "cantidadAleatoria", mu.unidad_lote AS "unidadLote", mu.unidad_muestra AS "unidadMuestra",
   mu.estado, mu.created_at AS "createdAt", uc.nombre_completo AS "creadoPorNombre",
   mu.registrado_at AS "registradoAt", ur.nombre_completo AS "registradoPorNombre",
   mu.recibido_conforme AS "recibidoConforme", mu.recibido_observacion AS "recibidoObservacion", mu.recibido_at AS "recibidoAt",
@@ -223,6 +239,15 @@ const CAMPOS: [string, string, string][] = [
   ["observaciones", "observaciones", ""],
   ["lineaMovil", "linea_movil", "::boolean"],
   ["lineaMovilPlan", "linea_movil_plan", ""],
+  ["horaInicio", "hora_inicio", "::time"],
+  ["horaTermino", "hora_termino", "::time"],
+  ["detalleMuestras", "detalle_muestras", ""],
+  ["especificacionTecnica", "especificacion_tecnica", ""],
+  ["protocoloNorma", "protocolo_norma", ""],
+  ["normaMuestreo", "norma_muestreo", ""],
+  ["cantidadAleatoria", "cantidad_aleatoria", "::int"],
+  ["unidadLote", "unidad_lote", ""],
+  ["unidadMuestra", "unidad_muestra", ""],
 ];
 
 /** Fecha y hora de la toma: ISO o «AAAA-MM-DDTHH:MM» en hora de Chile. */
@@ -358,13 +383,30 @@ export class MuestreoService {
           otId,
         )];
     const abierta = !["cerrada", "anulada"].includes(ot.estado);
+    const adjuntos = ids.length
+      ? await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT id, muestreo_id AS "muestreoId", nombre, mime, bytes, created_at AS "createdAt" FROM ot_muestreo_adjunto
+            WHERE muestreo_id = ANY($1::uuid[]) AND deleted_at IS NULL ORDER BY created_at`,
+          ids,
+        )
+      : [];
+    const listas = await this.prisma.$queryRawUnsafe<{ categoria: string; codigo: string; etiqueta: string }[]>(
+      `SELECT categoria, codigo, etiqueta FROM parametro_sistema
+        WHERE tenant_id = $1::uuid AND activo AND categoria IN ('unidad_tamano_lote', 'unidad_tamano_muestra') ORDER BY orden, etiqueta`,
+      tenantId,
+    );
     return {
+      // R6: el muestreador de Comercial trabaja sin plan NCh 44 y sin costo; a quien solo muestrea se le ocultan los pasos que no usa.
+      perfil: perfilMuestreo(req?.user?.roles ?? [], req?.user?.permisos ?? []),
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, laboratorio: ot.unidad?.codigo ?? null },
       porDefecto: await this.parametros(tenantId),
       opciones: {
         formularios: TIPOS_FORMULARIO.map((t) => ({ valor: t, etiqueta: ETIQUETA_FORMULARIO[t] })),
         niveles: NIVELES.map((n) => ({ valor: n, etiqueta: ETIQUETA_NIVEL[n] })),
         aql: AQLS.map((a) => ({ valor: String(a), etiqueta: String(a).replace(".", ",") })),
+        normas: NORMAS_MUESTREO.map((n) => ({ valor: n, etiqueta: n })),
+        unidadesLote: listas.filter((l) => l.categoria === "unidad_tamano_lote").map((l) => ({ valor: l.codigo, etiqueta: l.etiqueta })),
+        unidadesMuestra: listas.filter((l) => l.categoria === "unidad_tamano_muestra").map((l) => ({ valor: l.codigo, etiqueta: l.etiqueta })),
       },
       puede: {
         registrar: abierta && tiene(req, "muestreo.registrar"),
@@ -376,6 +418,7 @@ export class MuestreoService {
         ...f,
         unidades: unidades.filter((u) => u.muestreoId === f.id),
         fotos: fotos.filter((x) => x.muestreoId === f.id).map((x) => ({ ...x, url: `muestreo/fotos/${x.id}/imagen` })),
+        adjuntos: adjuntos.filter((x) => x.muestreoId === f.id).map((x) => ({ ...x, url: `muestreo/adjuntos/${x.id}/archivo` })),
         muestras: muestras.filter((m) => m.muestreoId === f.id).map((m) => m.id),
         faltantes: f.estado === "borrador" ? faltantesRegistro({ ...f, sellos: f.sellos ?? [] }, fotos.filter((x) => x.muestreoId === f.id).length) : [],
       })),
@@ -395,6 +438,11 @@ export class MuestreoService {
       sets.push({ col, cast, valor: v ?? (k === "lineaMovil" ? false : null) });
     }
     if ("sellos" in dto) sets.push({ col: "sellos", cast: "::text[]", valor: normalizarSellos(dto.sellos ?? []) });
+    const horas = erroresHoras(
+      "horaInicio" in dto ? dto.horaInicio || null : actual?.horaInicio ?? null,
+      "horaTermino" in dto ? dto.horaTermino || null : actual?.horaTermino ?? null,
+    );
+    if (horas.length) throw new BadRequestException(horas.join(" "));
     if (dto.catElementoId) {
       const e = await this.prisma.catElemento.findFirst({ where: { id: dto.catElementoId, tenantId }, select: { id: true } });
       if (!e) throw new BadRequestException("El producto indicado no existe en el catálogo.");
@@ -715,6 +763,72 @@ export class MuestreoService {
     return this.deOt(req, ot.id);
   }
 
+  /* ------------------------- R6 · formulario firmado y ficha imprimible --- */
+
+  async subirAdjunto(req: any, id: string, archivo: ArchivoSubido | undefined) {
+    const { mu, ot } = await this.cargar(req, id, "muestreo.registrar");
+    this.exigirOtAbierta(ot);
+    if (mu.estado === "anulado") throw new ConflictException("El muestreo está anulado.");
+    if (!archivo?.buffer?.length) throw new BadRequestException("Adjunte el formulario (PDF, PNG o JPEG).");
+    if (archivo.buffer.length > MAX_ADJUNTO) throw new BadRequestException("El archivo no puede superar 5 MB.");
+    const mime = tipoAdjunto(archivo.buffer);
+    if (!mime) throw new BadRequestException("El archivo debe ser un PDF, PNG o JPEG.");
+    const nombre = (archivo.originalname ?? "formulario").replace(/[^\p{L}\p{N} ._-]/gu, "_").slice(0, 200);
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO ot_muestreo_adjunto (tenant_id, muestreo_id, nombre, mime, bytes, datos, hash_sha256, subido_por)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid)`,
+      tenantDe(req),
+      id,
+      nombre,
+      mime,
+      archivo.buffer.length,
+      archivo.buffer.toString("base64"),
+      createHash("sha256").update(archivo.buffer).digest("hex"),
+      usuarioDe(req),
+    );
+    await this.historial(ot.id, tenantDe(req), usuarioDe(req), { accion: "adjunto", formulario: mu.numeroFormulario, archivo: nombre });
+    return this.deOt(req, ot.id);
+  }
+
+  private async adjunto(req: any, adjuntoId: string, permiso: string) {
+    const [a] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT a.*, mu.ot_id, mu.estado AS muestreo_estado FROM ot_muestreo_adjunto a JOIN ot_muestreo mu ON mu.id = a.muestreo_id
+        WHERE a.id = $1::uuid AND a.tenant_id = $2::uuid AND a.deleted_at IS NULL`,
+      adjuntoId,
+      tenantDe(req),
+    );
+    if (!a) throw new NotFoundException("Archivo no encontrado.");
+    const ot = await this.otEnAlcance(req, a.ot_id, permiso);
+    return { a, ot };
+  }
+
+  async archivoAdjunto(req: any, adjuntoId: string) {
+    const { a } = await this.adjunto(req, adjuntoId, "ot.ver");
+    return { mime: a.mime as string, nombre: a.nombre as string, datos: Buffer.from(a.datos, "base64") };
+  }
+
+  async quitarAdjunto(req: any, adjuntoId: string) {
+    const { a, ot } = await this.adjunto(req, adjuntoId, "muestreo.registrar");
+    this.exigirOtAbierta(ot);
+    if (a.muestreo_estado === "recibido") throw new ConflictException("El muestreo ya se recibió: su formulario no se quita.");
+    await this.prisma.$executeRawUnsafe(`UPDATE ot_muestreo_adjunto SET deleted_at = now() WHERE id = $1::uuid`, adjuntoId);
+    return this.deOt(req, ot.id);
+  }
+
+  /** Ficha imprimible del formulario de selección y extracción con el registro fotográfico (R6). */
+  async formulario(req: any, id: string): Promise<string> {
+    const { mu, ot } = await this.cargar(req, id, "ot.ver");
+    const fotos = await this.prisma.$queryRawUnsafe<{ mime: string; datos: string; pie: string | null }[]>(
+      `SELECT mime, datos, pie FROM ot_muestreo_foto WHERE muestreo_id = $1::uuid AND deleted_at IS NULL ORDER BY created_at`,
+      id,
+    );
+    const unidades = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT posicion, identificacion, reemplazada FROM ot_muestreo_unidad WHERE muestreo_id = $1::uuid ORDER BY orden`,
+      id,
+    );
+    return fichaFormularioHtml({ ...mu, otCodigo: ot.codigo, unidades }, fotos);
+  }
+
   /* -------------------------------------------- conclusión del lote --- */
 
   private async datosConclusion(req: any, mu: any, ot: { id: string }) {
@@ -852,6 +966,42 @@ export class MuestreoController {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("ETag", `"${f.hash}"`);
     res.end(f.datos);
+  }
+
+  @Get("adjuntos/:adjuntoId/archivo")
+  @RequierePermiso("ot.ver")
+  async archivoAdjunto(@Param("adjuntoId", ParseUUIDPipe) adjuntoId: string, @Req() req: any, @Res() res: Response) {
+    const a = await this.svc.archivoAdjunto(req, adjuntoId);
+    res.setHeader("Content-Type", a.mime);
+    res.setHeader("Content-Length", String(a.datos.length));
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(a.nombre)}"`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.end(a.datos);
+  }
+
+  @Delete("adjuntos/:adjuntoId")
+  @RequierePermiso("muestreo.registrar")
+  quitarAdjunto(@Param("adjuntoId", ParseUUIDPipe) adjuntoId: string, @Req() req: any) {
+    return this.svc.quitarAdjunto(req, adjuntoId);
+  }
+
+  @Get(":id/formulario")
+  @RequierePermiso("ot.ver")
+  @ApiOperation({ summary: "R6 · Ficha imprimible del formulario de selección y extracción con el registro fotográfico" })
+  async formulario(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
+    const html = await this.svc.formulario(req, id);
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.end(html);
+  }
+
+  @Post(":id/adjuntos")
+  @RequierePermiso("muestreo.registrar")
+  @ApiConsumes("multipart/form-data")
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_ADJUNTO, files: 1, fields: 2 } }))
+  @ApiOperation({ summary: "R6 · Adjunta el formulario de selección y extracción firmado (PDF, PNG o JPEG)" })
+  subirAdjunto(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoSubido | undefined, @Req() req: any) {
+    return this.svc.subirAdjunto(req, id, archivo);
   }
 
   @Delete("fotos/:fotoId")

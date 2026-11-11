@@ -39,12 +39,18 @@ export interface FilaArma {
   pendientes: number;
   aprobados: number;
   certificado: { id: string; numero: string; estado: string; entregadoAt: string | null; vigenteHasta: string | null; vigenteDesde: string | null } | null;
+  pendiente_motivo: string | null;
+  pendiente_detalle: string | null;
+  pendiente_at: Date | null;
+  liberada_resolucion: string | null;
+  liberada_at: Date | null;
 }
 
 export const SELECT_ARMAS = `
   SELECT a.id, a.orden, a.tipo, a.serie_normalizada, a.sin_serie, a.accesorios, a.lote, a.ubicacion,
          a.clase, a.permisibilidad, a.camino, a.acunacion_numero, a.acunacion_anio, a.acunada_at,
          a.entrega_id, a.resolucion_arma_id,
+         a.pendiente_motivo, a.pendiente_detalle, a.pendiente_at, a.liberada_resolucion, a.liberada_at,
          ar.id AS arma_id, ar.serie, ar.marca, ar.modelo, ar.calibre, ar.pais_origen,
          m.id AS muestra_id, m.codigo AS muestra, m.codigo_barras, m.veredicto,
          (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL)::int AS ensayos,
@@ -74,6 +80,7 @@ export function estadoDe(a: FilaArma): EstadoArma {
     acunada: Boolean(a.acunada_at),
     certificado: a.certificado ? { estado: a.certificado.estado } : null,
     entregada: Boolean(a.entrega_id),
+    pendiente: Boolean(a.pendiente_motivo),
   };
 }
 

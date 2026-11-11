@@ -11,10 +11,10 @@ import Link from "next/link";
 import { fecha } from "@/lib/format";
 
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
-export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe";
+export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe" | "terreno";
 
 export interface AvanceOt {
-  tipo: "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas" | "bpch";
+  tipo: "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas" | "bpch" | "terreno";
   etapas: { clave: string; titulo: string; estado: EstadoEtapa; detalle: string | null }[];
   etapaActual: string | null;
   siguiente: {
@@ -27,7 +27,7 @@ export interface AvanceOt {
   cierre: { fecha: string | null; conCobro: boolean; factura: { numero: string; estado: string } | null } | null;
   avisos: string[];
   /** Pestañas «Muestreo» y «Preparación»: solo donde la especificación las pide (no en BPCH, D11 ni Metrología). */
-  pestanas?: { muestreo: boolean; preparacion: boolean };
+  pestanas?: { muestreo: boolean; preparacion: boolean; terreno?: boolean; asignacion?: boolean; perfil?: string | null };
 }
 
 const TIPO: Record<AvanceOt["tipo"], string> = {
@@ -38,6 +38,7 @@ const TIPO: Record<AvanceOt["tipo"], string> = {
   reinspeccion: "Ruta de la reinspección (BPCH)",
   armas: "Ruta de las armas (Delegación Nº 11)",
   bpch: "Ruta de la inspección (BPCH)",
+  terreno: "Ruta del trabajo en terreno",
 };
 const ICONO: Record<EstadoEtapa, string> = { hecho: "✓", en_curso: "", pendiente: "", no_aplica: "–", bloqueado: "!" };
 const CLASE: Record<EstadoEtapa, string> = { hecho: "done", en_curso: "now", pendiente: "pend", no_aplica: "na", bloqueado: "bloq" };

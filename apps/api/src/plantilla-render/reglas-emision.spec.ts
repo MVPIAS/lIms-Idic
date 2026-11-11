@@ -261,7 +261,7 @@ describe("tipo de documento por defecto según la unidad de la OT", () => {
       { orden: 3, accion: "OFICIALIZA", rol: { nombre: "Jefe de departamento" }, unidad: null, advertencia: "No se encontró una unidad de nivel DEPARTAMENTO para X" },
       "INFORME_INSPECCION",
     );
-    expect(sinUnidad).toContain("Informe de inspección");
+    expect(sinUnidad).toContain("Certificado de control (informe de inspección)");
     expect(sinUnidad).toContain("Administración › Estructura");
   });
 });

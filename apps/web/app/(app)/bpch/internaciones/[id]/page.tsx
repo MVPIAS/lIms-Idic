@@ -316,6 +316,8 @@ function Inspeccion({ d, puede, accion }: { d: any; puede: Puede; accion: Accion
     Object.fromEntries(d.items.map((it: any) => [it.id, { identificacionLote: it.identificacionLote ?? "", tamanoLote: it.tamanoLote != null ? String(it.tamanoLote) : "", tamanoMuestra: it.tamanoMuestra != null ? String(it.tamanoMuestra) : "" }])),
   );
   const [metodos, setMetodos] = useState<Record<string, string[]>>({});
+  /** R4: motivo de la excepción si se quita algún ensayo de la batería fija (lo autoriza la jefatura de la SCC). */
+  const [excepcion, setExcepcion] = useState<Record<string, string>>({});
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
   if (!d.otId) return <div className="alert info">La inspección se programa una vez generada la OT (análisis técnico completo).</div>;
   const editable = puede("bpch.internacion.gestionar") && !["cerrada", "anulada"].includes(d.estadoOt?.ot?.estado);
@@ -391,10 +393,27 @@ function Inspeccion({ d, puede, accion }: { d: any; puede: Puede; accion: Accion
                   className="btn primary sm"
                   style={{ marginTop: 6 }}
                   disabled={!(metodos[it.id] ?? []).length}
-                  onClick={() => accion("POST", "/lotes", { items: [{ id: it.id, metodoIds: metodos[it.id] }] }, "Lote registrado como muestra con sus ensayos.")}
+                  onClick={() =>
+                    accion(
+                      "POST",
+                      "/lotes",
+                      { items: [{ id: it.id, metodoIds: metodos[it.id], excepcionMotivo: excepcion[it.id]?.trim() || null }] },
+                      "Lote registrado como muestra con sus ensayos.",
+                    )
+                  }
                 >
                   Registrar lote como muestra ({(metodos[it.id] ?? []).length} ensayos)
                 </button>
+                <div className="field" style={{ marginTop: 6 }}>
+                  <label htmlFor={`exc-${it.id}`}>Motivo de la excepción (solo si quita ensayos de la batería)</label>
+                  <input
+                    id={`exc-${it.id}`}
+                    value={excepcion[it.id] ?? ""}
+                    maxLength={1000}
+                    onChange={(e) => setExcepcion((x) => ({ ...x, [it.id]: e.target.value }))}
+                    placeholder="La batería del procedimiento de calidad es fija; quitar un ensayo lo autoriza la jefatura de la SCC"
+                  />
+                </div>
                 <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>Guarde antes la identificación y los tamaños del lote. Otros ensayos se agregan desde la pestaña «Muestras» del expediente de la OT.</small>
               </div>
             ) : (

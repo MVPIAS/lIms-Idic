@@ -7,7 +7,10 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { pasosActuales } from "../plantilla-render/reglas-emision";
-import { calcularAvance, puedeActuar, type DocumentoAvance, type HechosOt } from "./avance-ot";
+import { calcularAvance, pestanasParaPerfil, puedeActuar, type DocumentoAvance, type HechosOt } from "./avance-ot";
+import { hechosTerreno } from "../terreno/terreno.module";
+import { laboratorioDeTerreno, pasosTerreno } from "../terreno/reglas-terreno";
+import { perfilMuestreo } from "../muestreo/formulario-completo";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { ramaDeUnidad, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
 import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
@@ -236,7 +239,20 @@ export class AvanceOtService {
         : null,
       // DSA: documentación del trabajo que se aprueba antes de ejecutar (frente r2a).
       trabajoDsa: await trabajoDsaDe(this.prisma as any, { id: ot.id, tenantId: ot.tenantId, laboratorio: ot.unidad?.codigo ?? null }),
+      // R10: trabajo en terreno sin recepción (SVM, LAM, SEO).
+      ...(await this.terreno(ot.id, ot.tenantId, ot.unidad?.codigo ?? null)),
     };
+  }
+
+  private async terreno(otId: string, tenantId: string, laboratorio: string | null) {
+    const h = await hechosTerreno(this.prisma as any, otId);
+    const [p] = await this.prisma
+      .$queryRawUnsafe<{ valor: string | null }[]>(
+        `SELECT valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'terreno' AND codigo = 'laboratorios' AND activo`,
+        tenantId,
+      )
+      .catch(() => [] as { valor: string | null }[]);
+    return { terreno: h ? { pasos: pasosTerreno(h).pasos } : null, terrenoAplica: laboratorioDeTerreno(p?.valor ?? null, laboratorio) };
   }
 
   /** Ruta de la OT + si el usuario puede hacer el siguiente paso. */
@@ -245,6 +261,7 @@ export class AvanceOtService {
     const u = req?.user ?? {};
     return {
       ...a,
+      pestanas: pestanasParaPerfil(a.pestanas, perfilMuestreo(u.roles ?? [], u.permisos ?? [])),
       siguiente: a.siguiente
         ? { ...a.siguiente, puedoActuar: puedeActuar(a.siguiente.accion, { id: u.sub, permisos: u.permisos, roles: u.roles }) }
         : null,

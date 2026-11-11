@@ -16,6 +16,7 @@ import { ImagenFoto, prepararFoto } from "@/components/informes/FotosInforme";
 import { enviarInforme } from "@/lib/informes";
 import { api } from "@/lib/api";
 import { llamar, qs } from "@/lib/laboratorio";
+import { abrirDocumento } from "@/lib/bpchProcesos";
 import { fechaHora } from "@/lib/format";
 import { AYUDA_FORMULARIO, CLASE_DEFECTO, ESTADO_MUESTREO, aLocalChile, coma, type ClaseDefecto } from "@/lib/especificaciones";
 
@@ -35,6 +36,9 @@ interface Muestreo {
   tamanoLote: number | null; unidadPresentacion: string | null; tamanoMuestra: number | null; cantidadEnvase: string | null; materialAdicional: string | null;
   sellos: string[]; registroFotoNumero: string | null; devolucionExcedente: boolean | null; costoUf: number | null; tiempoRespuesta: string | null; observaciones: string | null;
   plan: Plan | null; lineaMovil: boolean; lineaMovilPlan: string | null; estado: string;
+  horaInicio: string | null; horaTermino: string | null; detalleMuestras: string | null; especificacionTecnica: string | null; protocoloNorma: string | null;
+  normaMuestreo: string | null; cantidadAleatoria: number | null; unidadLote: string | null; unidadMuestra: string | null;
+  adjuntos?: { id: string; nombre: string; mime: string; bytes: number; url: string; createdAt: string }[];
   createdAt: string; creadoPorNombre: string | null; registradoAt: string | null; registradoPorNombre: string | null;
   recibidoConforme: boolean | null; recibidoObservacion: string | null; recibidoAt: string | null; recibidoPorNombre: string | null;
   veredictoLote: string | null; conclusion: string | null; concluidoAt: string | null; concluidoPorNombre: string | null; anuladoMotivo: string | null;
@@ -43,7 +47,9 @@ interface Muestreo {
 interface DatosMuestreo {
   ot: { id: string; codigo: string; estado: string; laboratorio: string | null };
   porDefecto: { nivel: string; aql: Partial<Record<ClaseDefecto, string | null>>; reglaSinPlan: string };
-  opciones: { formularios: Opcion[]; niveles: Opcion[]; aql: Opcion[] };
+  opciones: { formularios: Opcion[]; niveles: Opcion[]; aql: Opcion[]; normas?: Opcion[]; unidadesLote?: Opcion[]; unidadesMuestra?: Opcion[] };
+  /** R6: el muestreador de Comercial trabaja sin plan NCh 44 y sin costo. */
+  perfil?: { soloMuestrea: boolean; verPlan: boolean; verCosto: boolean; nombre: string | null };
   puede: { registrar: boolean; recibir: boolean; concluir: boolean };
   muestras: { id: string; codigo: string; nombre: string | null; muestreoId: string | null; selloNumero: string | null; sellosVerificados: boolean | null }[];
   muestreos: Muestreo[];
@@ -137,26 +143,39 @@ function NuevoMuestreo({ otId, opciones, onCerrar, onCreado }: { otId: string; o
 
 /* --------------------------------------------------------- ficha --- */
 
-type Campo = { k: keyof Muestreo; l: string; tipo?: "texto" | "numero" | "fecha" | "fechahora" | "sino" | "area"; max?: number; para?: string[]; req?: string[]; ayuda?: string };
+type Campo = {
+  k: keyof Muestreo; l: string; tipo?: "texto" | "numero" | "fecha" | "fechahora" | "sino" | "area" | "hora" | "opcion"; max?: number; para?: string[]; req?: string[]; ayuda?: string;
+  /** Lista de opciones (tipo «opcion»). */
+  lista?: "normas" | "unidadesLote" | "unidadesMuestra";
+};
 const CAMPOS: Campo[] = [
   { k: "lugar", l: "Lugar de muestreo", max: 240, req: ["extraccion", "numform", "it01_form06", "planilla_nch44"] },
   { k: "fechaToma", l: "Fecha y hora de la toma", tipo: "fechahora", req: ["extraccion", "numform", "it01_form06", "planilla_nch44"] },
+  { k: "horaInicio", l: "Hora de inicio de la toma", tipo: "hora", para: ["extraccion", "planilla_nch44", "it01_form06", "numform"] },
+  { k: "horaTermino", l: "Hora de término de la toma", tipo: "hora", para: ["extraccion", "planilla_nch44", "it01_form06", "numform"] },
   { k: "responsable", l: "Responsable de la toma", max: 200, req: ["it01_form06"] },
   { k: "solicitadoPor", l: "Solicitado por", max: 200, para: ["numform", "extraccion"], req: ["numform"] },
   { k: "producto", l: "Producto / E.T.", max: 240, req: ["extraccion", "numform"] },
+  { k: "especificacionTecnica", l: "Especificación técnica", max: 240, para: ["extraccion", "planilla_nch44", "numform"] },
+  { k: "protocoloNorma", l: "Protocolo o norma", max: 240, para: ["extraccion", "planilla_nch44"] },
   { k: "proveedor", l: "Proveedor", max: 240, req: ["extraccion", "numform"] },
   { k: "guiaDespacho", l: "Guía de despacho", max: 60, para: ["numform", "extraccion", "planilla_nch44"] },
-  { k: "identificacionLote", l: "Identificación del lote", max: 120, req: ["planilla_nch44"] },
-  { k: "fechaElaboracion", l: "Fecha de elaboración", tipo: "fecha", para: ["numform"] },
+  { k: "identificacionLote", l: "Nº de lote", max: 120, req: ["planilla_nch44"], para: ["extraccion", "numform", "it01_form06"] },
+  { k: "fechaElaboracion", l: "Fecha de elaboración o fabricación", tipo: "fecha", para: ["numform", "extraccion", "planilla_nch44"] },
   { k: "tamanoLote", l: "Tamaño del lote", tipo: "numero", req: ["extraccion", "numform", "planilla_nch44"] },
+  { k: "unidadLote", l: "Unidad del lote", tipo: "opcion", lista: "unidadesLote", para: ["extraccion", "numform", "planilla_nch44"] },
   { k: "unidadPresentacion", l: "Unidad de presentación", max: 40, para: ["planilla_nch44", "extraccion"], ayuda: "Cajas, sacos, unidades, pares…" },
   { k: "tamanoMuestra", l: "Tamaño de la muestra", tipo: "numero", req: ["extraccion", "planilla_nch44"], ayuda: "Con plan NCh 44 es su n." },
+  { k: "unidadMuestra", l: "Unidad de la muestra", tipo: "opcion", lista: "unidadesMuestra", para: ["extraccion", "numform", "planilla_nch44"] },
+  { k: "normaMuestreo", l: "Norma del muestreo", tipo: "opcion", lista: "normas", para: ["extraccion", "planilla_nch44"], ayuda: "NCh 44 (plan por atributos) o NCh 43 (selección al azar)." },
+  { k: "cantidadAleatoria", l: "Muestras de la selección al azar", tipo: "numero", para: ["extraccion", "planilla_nch44"], ayuda: "Opcional." },
   { k: "cantidadEnvase", l: "Cantidad y envase", max: 200, req: ["numform", "it01_form06"] },
   { k: "registroFotoNumero", l: "Registro fotográfico Nº", max: 60, para: ["extraccion", "planilla_nch44"], ayuda: "O adjunte las fotos abajo." },
   { k: "devolucionExcedente", l: "¿Se devuelve el excedente?", tipo: "sino", req: ["numform"], para: ["extraccion"] },
   { k: "costoUf", l: "Costo (UF)", tipo: "numero", para: ["extraccion", "numform"] },
   { k: "tiempoRespuesta", l: "Tiempo de respuesta", max: 60, para: ["extraccion", "numform"] },
   { k: "materialAdicional", l: "Material adicional / certificados", tipo: "area", para: ["it01_form06", "extraccion"] },
+  { k: "detalleMuestras", l: "Detalle de muestras", tipo: "area", para: ["extraccion", "planilla_nch44", "numform", "it01_form06"] },
   { k: "observaciones", l: "Observaciones", tipo: "area" },
 ];
 
@@ -203,10 +222,20 @@ function FichaMuestreo({ d, m, onCambio }: { d: DatosMuestreo; m: Muestreo; onCa
         <div className="alert warn">Recibido NO conforme por {m.recibidoPorNombre} el {fechaHora(m.recibidoAt)}: {m.recibidoObservacion}</div>
       )}
 
-      <FormularioMuestreo m={m} editable={editable} onCambio={onCambio} />
-      <PlanMuestreo d={d} m={m} editable={editable} onCambio={onCambio} />
+      <div className="toolbar" style={{ margin: "4px 0 0", justifyContent: "flex-end" }}>
+        <button type="button" className="btn outline sm" onClick={() => abrirDocumento(`/muestreo/${m.id}/formulario`).catch((e) => toast.error(e.message))}>
+          Imprimir formulario
+        </button>
+      </div>
+      <FormularioMuestreo m={m} editable={editable} onCambio={onCambio} opciones={d.opciones} verCosto={d.perfil?.verCosto !== false} />
+      {d.perfil?.verPlan !== false ? (
+        <PlanMuestreo d={d} m={m} editable={editable} onCambio={onCambio} />
+      ) : (
+        <p className="subtitle" style={{ marginTop: 10 }}>Perfil {d.perfil?.nombre ?? "de muestreo"}: sin plan NCh 44 (lo define el laboratorio).</p>
+      )}
       <UnidadesMuestreo m={m} editable={editable} puedeReemplazar={d.puede.registrar && m.estado !== "anulado" && !m.veredictoLote} onCambio={onCambio} />
       <FotosMuestreo m={m} editable={d.puede.registrar && ["borrador", "registrado"].includes(m.estado)} onCambio={onCambio} />
+      <AdjuntosMuestreo m={m} editable={d.puede.registrar && m.estado !== "anulado"} onCambio={onCambio} />
 
       {m.estado === "borrador" && d.puede.registrar && (
         <div className="siguiente-paso" style={{ marginTop: 12, padding: 10, border: "1px solid var(--line)", borderRadius: 8, background: "#fafcfd" }}>
@@ -274,7 +303,7 @@ function FichaMuestreo({ d, m, onCambio }: { d: DatosMuestreo; m: Muestreo; onCa
 
 /* ----------------------------------------------------- formulario --- */
 
-function FormularioMuestreo({ m, editable, onCambio }: { m: Muestreo; editable: boolean; onCambio: (r: DatosMuestreo) => void }) {
+function FormularioMuestreo({ m, editable, onCambio, opciones, verCosto }: { m: Muestreo; editable: boolean; onCambio: (r: DatosMuestreo) => void; opciones: DatosMuestreo["opciones"]; verCosto: boolean }) {
   const inicial = useMemo(() => {
     const v: Record<string, string> = {};
     for (const c of CAMPOS) {
@@ -289,7 +318,8 @@ function FormularioMuestreo({ m, editable, onCambio }: { m: Muestreo; editable: 
   const [lineaMovil, setLineaMovil] = useState(m.lineaMovil);
   const [guardando, setGuardando] = useState(false);
   useEffect(() => { setV(inicial); setLineaMovil(m.lineaMovil); }, [inicial, m.lineaMovil]);
-  const campos = CAMPOS.filter((c) => !c.para && !c.req ? true : (c.req ?? []).includes(m.tipoFormulario) || (c.para ?? []).includes(m.tipoFormulario));
+  const campos = CAMPOS.filter((c) => !c.para && !c.req ? true : (c.req ?? []).includes(m.tipoFormulario) || (c.para ?? []).includes(m.tipoFormulario))
+    .filter((c) => verCosto || c.k !== "costoUf");
   const cambio = Object.keys(inicial).some((k) => inicial[k] !== v[k]) || lineaMovil !== m.lineaMovil;
 
   async function guardar() {
@@ -330,6 +360,13 @@ function FormularioMuestreo({ m, editable, onCambio }: { m: Muestreo; editable: 
                 <select id={id} value={val} disabled={!editable} onChange={(e) => set(e.target.value)}>
                   <option value="">—</option><option value="si">Sí</option><option value="no">No</option>
                 </select>
+              ) : c.tipo === "opcion" ? (
+                <select id={id} value={val} disabled={!editable} onChange={(e) => set(e.target.value)}>
+                  <option value="">—</option>
+                  {(opciones[c.lista!] ?? []).map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
+                </select>
+              ) : c.tipo === "hora" ? (
+                <input id={id} type="time" value={val} readOnly={!editable} onChange={(e) => set(e.target.value)} />
               ) : c.tipo === "area" ? (
                 <textarea id={id} rows={2} value={val} readOnly={!editable} maxLength={4000} onChange={(e) => set(e.target.value)} />
               ) : (
@@ -846,5 +883,54 @@ function MotivoModal({ titulo, etiqueta, boton, onCerrar, onConfirmar }: { titul
         <span style={{ fontSize: 11, color: "var(--muted)" }}>Mínimo 5 caracteres. Queda en el historial de la OT.</span>
       </div>
     </Modal>
+  );
+}
+
+/* --------------------------------------------- formulario firmado (R6) --- */
+
+function AdjuntosMuestreo({ m, editable, onCambio }: { m: Muestreo; editable: boolean; onCambio: (r: DatosMuestreo) => void }) {
+  const [subiendo, setSubiendo] = useState(false);
+  const adjuntos = m.adjuntos ?? [];
+  if (!editable && !adjuntos.length) return null;
+  async function subir(archivo: File) {
+    setSubiendo(true);
+    try {
+      const fd = new FormData();
+      fd.append("archivo", archivo);
+      onCambio((await enviarInforme(`/muestreo/${m.id}/adjuntos`, "POST", fd)) as DatosMuestreo);
+      toast.ok("Formulario adjuntado.");
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setSubiendo(false);
+    }
+  }
+  return (
+    <section aria-labelledby={`mu-adj-${m.id}`} style={{ marginTop: 14 }}>
+      <h3 id={`mu-adj-${m.id}`} style={{ fontSize: 13, margin: "6px 0" }}>Formulario de selección y extracción firmado</h3>
+      {adjuntos.length > 0 && (
+        <ul style={{ margin: "0 0 6px", paddingLeft: 18, fontSize: 12.5 }}>
+          {adjuntos.map((a) => (
+            <li key={a.id}>
+              <button type="button" className="btn link sm" onClick={() => abrirDocumento(`/${a.url}`).catch((e) => toast.error(e.message))}>{a.nombre}</button>
+              {" "}· {Math.max(1, Math.round(a.bytes / 1024))} KB · {fechaHora(a.createdAt)}
+              {editable && m.estado !== "recibido" && (
+                <button type="button" className="btn ghost-danger sm" style={{ marginLeft: 6 }}
+                  onClick={async () => { try { onCambio(await llamar<DatosMuestreo>("DELETE", `/muestreo/adjuntos/${a.id}`)); } catch (e: any) { toast.error(e.message); } }}>
+                  Quitar
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {editable && (
+        <div className="field" style={{ maxWidth: 420 }}>
+          <label htmlFor={`mu-adj-f-${m.id}`}>Adjuntar el formulario (PDF, PNG o JPEG · máx. 5 MB)</label>
+          <input id={`mu-adj-f-${m.id}`} type="file" accept="application/pdf,image/png,image/jpeg" disabled={subiendo}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) subir(f); e.target.value = ""; }} />
+        </div>
+      )}
+    </section>
   );
 }
