@@ -133,6 +133,7 @@ export const NAV: SeccionNav[] = [
     icon: "✹",
     items: [
       { href: "/bpch/internaciones", label: "Internaciones", icon: "🛃", perm: "bpch.internacion.ver", ambito: ["BPCH_ASIGNADO", "DCO"], claves: "resolucion dgmn tasa importacion" },
+      { href: "/bpch/requerimientos", label: "Requerimientos (OT sin cotización)", icon: "✎", perm: "bpch.requerimiento.ver", ambito: "BPCH_ASIGNADO", claves: "requerimiento oficio rpi ot sin cotizacion sucursal escalon" },
       { href: "/bpch/reinspecciones", label: "Reinspecciones", icon: "↻", perm: "bpch.reinspeccion.ver", ambito: "BPCH_ASIGNADO", claves: "traspaso vencimiento rechazo" },
       { href: "/bpch/codificacion", label: "Codificación Única", icon: "🗂", perm: "bpch.codificacion.ver", ambito: ["BPCH_CERT", "DCO"], claves: "cnc dgmn listado explosivos receso" },
       { href: "/bpch/produccion-nacional", label: "Producción Nacional", icon: "🏭", perm: "bpch.pn.ver", ambito: ["BPCH_CERT", "DCO"], claves: "raf fabricante o/c operativa programa inspecciones fiscalizacion" },

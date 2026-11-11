@@ -120,6 +120,7 @@ export const ORIGENES_OT_ENCUESTA: Opcion[] = [
   { valor: "REINSPECCION", etiqueta: "Reinspección (BPCH)" },
   { valor: "PRODUCCION_NACIONAL", etiqueta: "Producción Nacional (BPCH)" },
   { valor: "PROTOTIPO", etiqueta: "Prototipo (BPCH)" },
+  { valor: "REQUERIMIENTO_BPCH", etiqueta: "Requerimiento (BPCH, sin cotización)" },
 ];
 
 const TIPO_CAMPO_ETIQUETA: Record<TipoCampo, string> = {

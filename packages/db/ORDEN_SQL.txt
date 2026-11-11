@@ -147,4 +147,5 @@ align_brechas_5.sql
 align_brechas_6.sql
 align_tarifas_viatico_vehiculo.sql
 align_evaluacion_ensayo.sql
+align_bpch_requerimiento.sql
 align_cierre_permisos.sql

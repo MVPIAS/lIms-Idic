@@ -18,7 +18,7 @@ export interface DatosOtProceso {
   clienteId: string;
   unidad: UnidadResumen;
   /** Origen de la OT (parametro_sistema · origen_trabajo). */
-  origen: "PRODUCCION_NACIONAL" | "PROTOTIPO" | "INTERNACION" | "REINSPECCION";
+  origen: "PRODUCCION_NACIONAL" | "PROTOTIPO" | "INTERNACION" | "REINSPECCION" | "REQUERIMIENTO_BPCH";
   conCobro: boolean;
   /** Resolución DGMN (RAF o solicitud del prototipo) → orden_trabajo.numero_ley. */
   resolucion: string | null;
