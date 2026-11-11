@@ -38,6 +38,7 @@ import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laborator
 import { traducirFormula } from "../laboratorio/formula-legado";
 import { EVALUACIONES, evaluacionDe, planEdicion, sinCondicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
 import { calcularCaptura, CapturaError, variablesDeCaptura } from "../laboratorio/captura-estandar";
+import { condicionesSegunMetodo, explicacionFactor, leerReglasResultado } from "../laboratorio/reglas-resultado";
 import { evaluarReglas, leerReglas, modoReglas, textoRegla, type AvisoAceptacion, type ModoReglas } from "../laboratorio/reglas-aceptacion";
 import { leerCondicion2, leerPlanClases } from "../laboratorio/requisito-compuesto";
 import { aplicarEtAMuestra } from "../especificacion-tecnica/aplicar-et";
@@ -675,6 +676,16 @@ export class PuenteAnalisisService {
     return modoReglas(f[0]?.valor);
   }
 
+  /** Decimales del resultado y condiciones ambientales del método (R7, R8). */
+  private async reglasResultadoDe(catMetodoId: string | null) {
+    if (!catMetodoId) return leerReglasResultado(null);
+    const [m] = await this.prisma.$queryRawUnsafe<{ decimales_resultado: number | null; condiciones_ambientales: string | null }[]>(
+      `SELECT decimales_resultado, condiciones_ambientales FROM cat_metodo WHERE id = $1::uuid`,
+      catMetodoId,
+    );
+    return leerReglasResultado(m);
+  }
+
   /** Reglas de aceptación y valores por defecto de las lecturas del método (ALI-D4). */
   private async capturaDelMetodo(catMetodoId: string | null) {
     if (!catMetodoId) return { reglas: [], camposDefecto: null as Record<string, number> | null };
@@ -1028,8 +1039,14 @@ export class PuenteAnalisisService {
       // Bloqueo: calibración vencida, sin calibración, en calibración o fuera de servicio (409).
       await this.equipos.verificarApto(entrada.equipoId, tenantId);
     }
+    // Reglas del método (R7, R8): decimales del resultado y condiciones ambientales.
+    const reglasRes = await this.reglasResultadoDe(resultado.catMetodoId ?? null);
+    const ambiente = variante
+      ? { temperatura: entrada.temperatura, humedad: entrada.humedad, error: null }
+      : condicionesSegunMetodo(reglasRes.condiciones, { temperatura: entrada.temperatura ?? null, humedad: entrada.humedad ?? null });
+    if (ambiente.error) throw new BadRequestException(ambiente.error);
     const cond = condicionesEnsayo(
-      { fechaEnsayo: entrada.fechaEnsayo, temperatura: entrada.temperatura, humedad: entrada.humedad, incertidumbre: entrada.incertidumbre },
+      { fechaEnsayo: entrada.fechaEnsayo, temperatura: ambiente.temperatura ?? undefined, humedad: ambiente.humedad ?? undefined, incertidumbre: entrada.incertidumbre },
       new Date(),
     );
     if (cond.errores.length) throw new BadRequestException(cond.errores.join(" "));
@@ -1057,6 +1074,7 @@ export class PuenteAnalisisService {
           planClases: leerPlanClases(resultado.planClases),
           condicion2: leerCondicion2(resultado.condicion2),
           camposDefecto: metodoCaptura?.camposDefecto ?? null,
+          decimales: reglasRes.decimales,
         },
         entrada,
       );
@@ -1436,13 +1454,13 @@ export class PuenteAnalisisService {
       });
     // Reglas de aceptación y nota de la captura del método (ALI-D4) y avisos aceptados al guardar.
     const metodosCaptura = metodoIds.length
-      ? await this.prisma.$queryRawUnsafe<{ id: string; reglas_captura: unknown; nota_captura: string | null }[]>(
-          `SELECT id, reglas_captura, nota_captura FROM cat_metodo WHERE id = ANY($1::uuid[])`,
+      ? await this.prisma.$queryRawUnsafe<{ id: string; reglas_captura: unknown; nota_captura: string | null; decimales_resultado: number | null; condiciones_ambientales: string | null }[]>(
+          `SELECT id, reglas_captura, nota_captura, decimales_resultado, condiciones_ambientales FROM cat_metodo WHERE id = ANY($1::uuid[])`,
           metodoIds,
         )
       : [];
     const capturaMetodo = new Map(
-      metodosCaptura.map((m) => [m.id, { reglas: leerReglas(m.reglas_captura), nota: m.nota_captura ?? null }]),
+      metodosCaptura.map((m) => [m.id, { reglas: leerReglas(m.reglas_captura), nota: m.nota_captura ?? null, resultado: leerReglasResultado(m) }]),
     );
     const idsResultado = resultados.map((r) => r.id);
     const avisosFilas = idsResultado.length
@@ -1522,6 +1540,10 @@ export class PuenteAnalisisService {
             ? (capturaMetodo.get(r.catMetodoId)?.reglas ?? []).map((g) => ({ ...g, texto: textoRegla(g) }))
             : [],
           notaCaptura: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.nota ?? null : null,
+          // R7/R8: decimales del resultado, condiciones ambientales y explicación del factor.
+          decimalesResultado: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.resultado.decimales ?? null : null,
+          condicionesAmbientales: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.resultado.condiciones ?? "opcional" : "opcional",
+          explicacionFactor: explicacionFactor(factorDe(r.factorValor, r.factorOperacion, r.factorDescripcion), r.factorOrigen ?? null),
           avisosAceptacion: avisosDe.get(r.id) ?? null,
           // Por qué no se puede capturar ni aprobar este ensayo todavía (QC del método pendiente); null = nada.
           qcBloqueo: r.catMetodoId && qcBloqueos.has(r.catMetodoId)

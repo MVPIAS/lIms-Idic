@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { calcularCalibracion, nd, fmtN, fmtG, motorDe, LAB_NOMBRE, type Componente, type Divisores, type MotorInfo } from "@/lib/metrologia";
-import { corregida, leerValoresPatron, numeroOVacio, type CondicionesHoja } from "@/lib/metrologiaFicha";
+import { coeficientesSmp, corregida, leerValoresPatron, numeroOVacio, type CondicionesHoja } from "@/lib/metrologiaFicha";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import MotorPanel from "./MotorPanel";
@@ -35,7 +35,7 @@ const ptoGum = () => ({ nominal: "", correccion: "", uPatron: "", deriva: "", le
 /** Termohigrómetro y barómetro del maestro con sus lecturas inicial y final (EP-04 P3.4). */
 const auxVacio = () => ({ th: "", ba: "", t: ["", ""], h: ["", ""], p: ["", ""] });
 function vacio() {
-  return { ident: {} as any, ambiente: {} as any, cond: {} as any, intervalo: "12", fecha: "", laboratorio: "", patrones: ["", "", ""] as string[], pts: [ptoGum()], aux: auxVacio() };
+  return { ident: {} as any, ambiente: {} as any, cond: {} as any, intervalo: "12", fecha: "", laboratorio: "", patrones: ["", "", ""] as string[], pts: [ptoGum()], aux: auxVacio(), comentarios: "" };
 }
 const txt = (v: any) => (v == null ? "" : typeof v === "number" ? String(v).replace(".", ",") : String(v));
 const hoy = () => hoyChile();
@@ -148,6 +148,7 @@ export default function NuevaCalibracionPage() {
       ident: cal.instrumento ?? {}, ambiente: cal.ambiente ?? {},
       cond: Object.fromEntries(Object.entries(cal.cond ?? {}).map(([k, v]) => [k, txt(v)])),
       intervalo: String(cal.intervalo_meses ?? 12), fecha: (cal.fecha_calibracion ?? "").slice(0, 10), laboratorio: cal.laboratorio ?? "",
+      comentarios: cal.comentarios_hoja ?? "",
       patrones: [ids[0] ?? "", ids[1] ?? "", ids[2] ?? ""],
       pts: cal.motor || !(cal.puntos ?? []).length ? [ptoGum()] : cal.puntos.map((p: any) => ({
         nominal: txt(p.nominal), correccion: txt(p.correccion), uPatron: txt(p.u_patron), deriva: txt(p.deriva), lect: (p.lecturas ?? []).map(txt),
@@ -194,17 +195,25 @@ export default function NuevaCalibracionPage() {
   // ambientales (termohigrómetros, barómetros) se eligen en «Condiciones
   // ambientales». Lo ya elegido (calibración guardada) se conserva aunque no
   // cumpla, para que se vea y se pueda cambiar. Sin magnitud: todo el maestro.
+  // R9 (LNF): cada laboratorio ve solo sus patrones y auxiliares (los sin laboratorio son comunes).
+  const labCal: string = proc?.laboratorio || origen?.ot?.laboratorio || D.laboratorio || "";
+  const delLab = (p: any) => !labCal || !p.laboratorio || p.laboratorio === labCal;
   const opcionesPatron = useMemo(() => {
     const mag = proc?.magnitud;
     const elegidosIds = new Set((D.patrones as string[]).filter(Boolean));
-    const aplica = (p: any) => !mag || (p.magnitud === mag && !esEquipoAmbiental(p));
+    const aplica = (p: any) => delLab(p) && (!mag || (p.magnitud === mag && !esEquipoAmbiental(p)));
     return patrones
       .filter((p) => aplica(p) || elegidosIds.has(p.id))
       .sort((a, b) => Number(b.magnitud === mag) - Number(a.magnitud === mag) || String(a.tipo).localeCompare(String(b.tipo)) || String(a.codigo).localeCompare(String(b.codigo)));
-  }, [patrones, proc, D.patrones]);
+  }, [patrones, proc, D.patrones, labCal]); // eslint-disable-line react-hooks/exhaustive-deps
   const elegidos = (D.patrones as string[]).map((id) => patrones.find((p) => p.id === id)).filter(Boolean);
   // Equipos auxiliares del maestro (termohigrómetros, barómetros…) para las condiciones ambientales.
-  const auxiliares = useMemo(() => patrones.filter((p) => p.tipo === "auxiliar"), [patrones]);
+  const auxiliares = useMemo(() => patrones.filter((p) => p.tipo === "auxiliar" && (delLab(p) || [D.aux.th, D.aux.ba].includes(p.id))), [patrones, labCal, D.aux.th, D.aux.ba]); // eslint-disable-line react-hooks/exhaustive-deps
+  // LNF (R9): columna SMP con los coeficientes del certificado del primer patrón elegido que los tenga.
+  const smpLnf = (() => {
+    const p = elegidos.find((x: any) => coeficientesSmp(x.coeficientes));
+    return p ? { codigo: p.codigo, coef: coeficientesSmp(p.coeficientes) } : elegidos[0] ? { codigo: elegidos[0].codigo, coef: null } : null;
+  })();
   const avisos = [...avisosFechas(D.ident, fechaCal), ...elegidos.filter((p: any) => p.estado === "por_vencer").map((p: any) => `El patrón ${p.codigo} vence el ${dmy(String(p.vence).slice(0, 10))} (menos de 30 días).`)];
   const vencidos = elegidos.filter((p: any) => p.estado === "vencido");
 
@@ -236,6 +245,7 @@ export default function NuevaCalibracionPage() {
         ...(!editId && origen?.item?.id ? { otInstrumentoId: origen.item.id } : {}),
         instrumento: D.ident, ambiente: D.ambiente, intervaloMeses: D.intervalo === "" ? 12 : Number(D.intervalo),
         patronIds: (D.patrones as string[]).filter(Boolean),
+        comentarios: String(D.comentarios ?? "").trim() || null,
         ...(D.aux.th || D.aux.ba ? {
           auxiliares: {
             termohigrometroId: D.aux.th || null, barometroId: D.aux.ba || null,
@@ -378,6 +388,13 @@ export default function NuevaCalibracionPage() {
                   <option value="cliente">Instalaciones del cliente</option>
                 </select></div>
             </div>)}
+            {origen?.item?.cotizado && tarjeta("Lo cotizado", <div style={{ fontSize: 12.5, display: "grid", gap: 3 }}>
+              <div><b>{origen.item.cotizado.descripcion || origen.item.cotizado.ensayoCodigo || "Línea de la cotización"}</b>{origen.item.cotizado.cantidad ? ` · ${origen.item.cotizado.cantidad} unidad(es)` : ""}</div>
+              {origen.item.cotizado.sentido && <div>Sentido cotizado: <b>{({ T: "Tracción", C: "Compresión", "T+C": "Tracción y compresión" } as Record<string, string>)[origen.item.cotizado.sentido] ?? origen.item.cotizado.sentido}</b></div>}
+              {origen.item.cotizado.rango && <div>Rango cotizado: {origen.item.cotizado.rango}</div>}
+              {origen.item.cotizado.puntos && <div>Puntos cotizados: {origen.item.cotizado.puntos}</div>}
+              <small style={{ color: "var(--muted)" }}>Si la hoja no coincide con lo cotizado (sentido o puntos), al guardar verá un aviso.</small>
+            </div>)}
             {tarjeta("Instrumento", <div className="form-grid">
               {origen ? (
                 origen.item.descripcion !== undefined ? (
@@ -434,6 +451,10 @@ export default function NuevaCalibracionPage() {
                 <small style={{ gridColumn: "1 / -1", color: "var(--muted)" }}>En {motor.it} el certificado informa las condiciones corregidas que calcula la planilla.</small>
               )}
             </div>)}
+            {tarjeta("Comentarios de la hoja", <div className="field" style={{ margin: 0 }}>
+              <label htmlFor="f-comentarios">Notas internas de la calibración (no se imprimen en el certificado)</label>
+              <textarea id="f-comentarios" rows={3} maxLength={4000} value={D.comentarios ?? ""} style={YEL} onChange={(e) => { D.comentarios = e.target.value; up(); }} />
+            </div>)}
             {!motor && tarjeta("Condiciones y contribuciones", <div className="form-grid">
               {condKeys.map((k) => fld(D.cond, k, (COND_LBL[k] ?? k) + " (" + u + ")"))}
             </div>)}
@@ -443,7 +464,7 @@ export default function NuevaCalibracionPage() {
             <PuntosPanel key={procKey + (editId ?? "")} magnitud={proc.magnitud_nombre ?? proc.magnitud} unidadDefecto={proc.unidad}
               inicial={inicialMotor} guardando={saving} onGuardar={(m) => guardar({ motor: m })} />
           ) : motor ? (
-            <MotorPanel key={motor.it + procKey + (editId ?? "")} motor={motor} paridad={paridadMotor} fecha={fechaCal} condiciones={condHoja} valoresPatron={valoresMaestro}
+            <MotorPanel key={motor.it + procKey + (editId ?? "")} motor={motor} paridad={paridadMotor} fecha={fechaCal} condiciones={condHoja} valoresPatron={valoresMaestro} smp={smpLnf}
               inicial={inicialMotor} guardando={saving} onGuardar={(m, motivo) => guardar({ motor: m, motivoValoresPatron: motivo })} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>

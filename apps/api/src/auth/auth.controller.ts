@@ -25,6 +25,8 @@ const CambiarPasswordSchema = z.object({
   nueva: z.string().min(1, "Indique la nueva contraseña.").max(CLAVE_MAX),
 });
 
+const PerfilSchema = z.object({ unidadId: z.string().uuid().nullable().optional() });
+
 const CodigoSchema = z.object({
   codigo: z.string().min(6).max(8),
 });
@@ -128,6 +130,25 @@ export class AuthController {
   async cambiarPassword(@Req() req: any, @Body() body: unknown) {
     const { actual, nueva } = CambiarPasswordSchema.parse(body);
     return this.auth.cambiarPassword(req.user.sub, actual, nueva);
+  }
+
+  // ─── Perfil activo (jefaturas duales, R1) ───────────────────────────────────
+
+  /** GET /api/auth/perfiles · perfiles que puede elegir (vacío si tiene uno solo) y el activo. */
+  @Get("perfiles")
+  @UseGuards(AuthGuard("jwt"))
+  @ApiBearerAuth()
+  async perfiles(@Req() req: any) {
+    return this.auth.perfiles(req.user.sub, req.user.tenantId);
+  }
+
+  /** POST /api/auth/perfil { unidadId | null } · elige el perfil y devuelve una sesión nueva con sus permisos. */
+  @Post("perfil")
+  @UseGuards(AuthGuard("jwt"))
+  @ApiBearerAuth()
+  async elegirPerfil(@Req() req: any, @Body() body: unknown) {
+    const { unidadId } = PerfilSchema.parse(body ?? {});
+    return this.auth.elegirPerfil(req.user.sub, req.user.tenantId, unidadId ?? null);
   }
 
   // ─── 2FA · TOTP ───────────────────────────────────────────────────────────

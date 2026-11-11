@@ -1,4 +1,5 @@
 import { erroresFactorMetodo } from "../laboratorio/factor";
+import { erroresReglasResultado, leerReglasResultado } from "../laboratorio/reglas-resultado";
 import { hoyEnChile, isoFecha, soloFecha } from "../cotizacion/validez";
 import { itemsListaVigente, precioPanel } from "../lista-precio/precio-lista";
 import {
@@ -9,6 +10,8 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
+  Put,
+  BadRequestException,
   Post,
   Query,
   Req,
@@ -306,6 +309,11 @@ const factorCompleto = (d: { factorValor?: number | null; factorOperacion?: stri
   const e = erroresFactorMetodo(d);
   if (e) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["factorOperacion"], message: e });
 };
+/** Reglas del resultado del método (R7, R8). */
+const ReglasResultadoBody = z.object({
+  decimales: z.number().int().min(0).max(6).nullable().optional(),
+  condiciones: z.enum(["no_aplica", "opcional", "obligatoria"]).default("opcional"),
+});
 export const CatMetodoCreate = CatMetodoBase.superRefine(factorCompleto);
 export const CatMetodoUpdate = CatMetodoBase.partial().superRefine(factorCompleto);
 @ApiTags("cat-metodos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/metodos")
@@ -364,6 +372,32 @@ export class CatMetodoController extends BaseCrudController {
       (tx) => tx.catMetodo.update({ where: { id }, data: rest }),
     );
     return { ...(r.valor as any), revision: r.revision, cambios: r.cambios };
+  }
+
+  /**
+   * Reglas del resultado del método (R7 LPN, R8 LME): decimales del resultado final
+   * (redondeo; 0 = entero) y si las condiciones ambientales no aplican, son opcionales
+   * u obligatorias en la captura. Columnas fuera de Prisma (align_sesiones_s2.sql).
+   */
+  @Get(":id/reglas-resultado")
+  async reglasResultado(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.svc.detalle(id, req?.user?.tenantId);
+    const [m] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT decimales_resultado, condiciones_ambientales FROM cat_metodo WHERE id = $1::uuid`, id);
+    return { data: leerReglasResultado(m) };
+  }
+
+  @Put(":id/reglas-resultado")
+  @RequierePermiso("catalogo.gestionar")
+  async guardarReglasResultado(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const d = ReglasResultadoBody.parse(body ?? {});
+    const errores = erroresReglasResultado(d);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    await this.svc.detalle(id, req?.user?.tenantId);
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE cat_metodo SET decimales_resultado = $2, condiciones_ambientales = $3 WHERE id = $1::uuid`,
+      id, d.decimales ?? null, d.condiciones);
+    return { data: leerReglasResultado({ decimales_resultado: d.decimales ?? null, condiciones_ambientales: d.condiciones }) };
   }
 
   /** «Historial de versiones» del método: revisiones con fecha, responsable, motivo y cambios. */

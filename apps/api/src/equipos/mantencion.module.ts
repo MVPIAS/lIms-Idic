@@ -26,6 +26,7 @@ import { libroXlsx } from "../common/xlsx-escritura";
 import { hoyCl } from "../ot/plazos";
 import { AlcanceService } from "../rbac/alcance.service";
 import { cumplimiento, dejaFueraDeServicio, diasEntre, erroresEjecucion, etiquetaEstadoEquipo, erroresPlan, estadoPlazo, ocurrencias, siguienteFecha, sumarDias } from "./plan-mantencion";
+import { erroresPrograma, motivoProgramaCerrado, periodoPrograma, puedeTransitarPrograma } from "./plan-mantencion";
 
 // ===========================================================================
 // Mantención preventiva y gestión de equipos (contrato §4.4.3): plan por
@@ -83,8 +84,10 @@ export class MantencionService {
       `SELECT p.id, p.equipo_id AS "equipoId", e.codigo AS "equipoCodigo", COALESCE(e.nombre, e.descripcion) AS "equipoNombre", un.codigo AS laboratorio,
               p.tipo, p.descripcion, p.frecuencia_dias AS "frecuenciaDias", p.proxima_fecha::text AS "proximaFecha",
               p.responsable_id AS "responsableId", us.nombre_completo AS responsable, p.proveedor, p.activo,
+              p.programa_id AS "programaId", pg.codigo AS "programaCodigo",
               (SELECT max(m.fecha)::text FROM mantencion m WHERE m.plan_id = p.id) AS "ultimaEjecucion"
          FROM plan_mantencion p
+         LEFT JOIN programa_mantencion pg ON pg.id = p.programa_id
          JOIN equipo e ON e.id = p.equipo_id AND e.deleted_at IS NULL
          LEFT JOIN unidad un ON un.id = e.unidad_id
          LEFT JOIN usuario us ON us.id = p.responsable_id
@@ -109,6 +112,7 @@ export class MantencionService {
       proximaFecha: texto(b?.proximaFecha, 10),
       responsableId: texto(b?.responsableId, 40),
       proveedor: texto(b?.proveedor, 200),
+      programaId: texto(b?.programaId, 40),
     };
     const e = erroresPlan(d);
     if (e.length) throw new BadRequestException(e.join(" "));
@@ -118,10 +122,11 @@ export class MantencionService {
   async crearPlan(req: any, b: any) {
     const d = this.datosPlan(b);
     await this.equipo(req, d.equipoId!, "equipo.gestionar");
+    if (d.programaId) await this.programaEditable(req, d.programaId);
     const [p] = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
-      `INSERT INTO plan_mantencion (tenant_id, equipo_id, tipo, descripcion, frecuencia_dias, proxima_fecha, responsable_id, proveedor, creado_por)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::date, $7::uuid, $8, $9::uuid) RETURNING id`,
-      tenantDe(req), d.equipoId, d.tipo, d.descripcion, d.frecuenciaDias, d.proximaFecha, d.responsableId, d.proveedor, req?.user?.sub ?? null,
+      `INSERT INTO plan_mantencion (tenant_id, equipo_id, tipo, descripcion, frecuencia_dias, proxima_fecha, responsable_id, proveedor, creado_por, programa_id)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6::date, $7::uuid, $8, $9::uuid, $10::uuid) RETURNING id`,
+      tenantDe(req), d.equipoId, d.tipo, d.descripcion, d.frecuenciaDias, d.proximaFecha, d.responsableId, d.proveedor, req?.user?.sub ?? null, d.programaId,
     );
     await this.recalcularEquipo(d.equipoId!);
     return { id: p.id };
@@ -129,7 +134,7 @@ export class MantencionService {
 
   private async plan(req: any, id: string, permiso: string) {
     const [p] = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT id, equipo_id, frecuencia_dias, proxima_fecha::text AS proxima_fecha, activo FROM plan_mantencion WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      `SELECT id, equipo_id, frecuencia_dias, proxima_fecha::text AS proxima_fecha, activo, programa_id FROM plan_mantencion WHERE id = $1::uuid AND tenant_id = $2::uuid`,
       id,
       tenantDe(req),
     );
@@ -141,10 +146,16 @@ export class MantencionService {
   async editarPlan(req: any, id: string, b: any) {
     const p = await this.plan(req, id, "equipo.gestionar");
     const d = this.datosPlan({ ...b, equipoId: p.equipo_id });
+    // Cambiar el programa de un plan solo entre programas en borrador (los aprobados son evidencia).
+    const nuevoPrograma = b && "programaId" in b ? d.programaId : p.programa_id ?? null;
+    if ((nuevoPrograma ?? null) !== (p.programa_id ?? null)) {
+      if (p.programa_id) await this.programaEditable(req, p.programa_id);
+      if (nuevoPrograma) await this.programaEditable(req, nuevoPrograma);
+    }
     await this.prisma.$executeRawUnsafe(
       `UPDATE plan_mantencion SET tipo = $2, descripcion = $3, frecuencia_dias = $4, proxima_fecha = $5::date, responsable_id = $6::uuid,
-              proveedor = $7, actualizado_en = now() WHERE id = $1::uuid`,
-      id, d.tipo, d.descripcion, d.frecuenciaDias, d.proximaFecha, d.responsableId, d.proveedor,
+              proveedor = $7, programa_id = $8::uuid, actualizado_en = now() WHERE id = $1::uuid`,
+      id, d.tipo, d.descripcion, d.frecuenciaDias, d.proximaFecha, d.responsableId, d.proveedor, nuevoPrograma,
     );
     await this.recalcularEquipo(p.equipo_id);
     return { id };
@@ -178,8 +189,8 @@ export class MantencionService {
     const proxima = siguienteFecha(d.fecha!, p.frecuencia_dias);
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
-        `INSERT INTO mantencion (tenant_id, equipo_id, plan_id, tipo, fecha, fecha_programada, ejecutada_por, descripcion, costo, resultado, observaciones, proxima_fecha, registrada_por)
-         SELECT $1::uuid, $2::uuid, $3::uuid, tipo, $4::date, $5::date, $6, COALESCE($7, descripcion), $8, $9, $10, $11::date, $12::uuid FROM plan_mantencion WHERE id = $3::uuid`,
+        `INSERT INTO mantencion (tenant_id, equipo_id, plan_id, tipo, fecha, fecha_programada, ejecutada_por, descripcion, costo, resultado, observaciones, proxima_fecha, registrada_por, programa_id)
+         SELECT $1::uuid, $2::uuid, $3::uuid, tipo, $4::date, $5::date, $6, COALESCE($7, descripcion), $8, $9, $10, $11::date, $12::uuid, programa_id FROM plan_mantencion WHERE id = $3::uuid`,
         tenantDe(req), p.equipo_id, id, d.fecha, p.proxima_fecha, d.ejecutadaPor, d.descripcion, d.costo, d.resultado ?? "conforme", d.observaciones, proxima, req?.user?.sub ?? null,
       );
       await tx.$executeRawUnsafe(`UPDATE plan_mantencion SET proxima_fecha = $2::date, actualizado_en = now() WHERE id = $1::uuid`, id, proxima);
@@ -224,6 +235,128 @@ export class MantencionService {
       ),
     ]);
     return { equipo: { id: e.id, codigo: e.codigo, nombre: e.nombre }, mantenciones, calibraciones };
+  }
+
+  /* ------------------------------------------------- programas (Químico, R5) --- */
+
+  private async programaFila(req: any, id: string) {
+    const [g] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, codigo, nombre, anio, unidad_id, documento_codigo, estado FROM programa_mantencion WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+      id, tenantDe(req));
+    if (!g) throw new NotFoundException("Programa de mantención no encontrado.");
+    const u = await this.unidades(req, "equipo.ver");
+    if (u && g.unidad_id && !u.includes(g.unidad_id)) throw new ForbiddenException(`El programa ${g.codigo} es de otro laboratorio.`);
+    return g;
+  }
+
+  /** Programa en borrador (se le pueden vincular planes); si no, 400 con el motivo. */
+  private async programaEditable(req: any, id: string) {
+    const g = await this.programaFila(req, id);
+    const motivo = motivoProgramaCerrado(g.estado);
+    if (motivo) throw new BadRequestException(motivo);
+    return g;
+  }
+
+  /** Programas con su cumplimiento en el año (programadas, a tiempo, atrasadas, pendientes). */
+  async programas(req: any) {
+    const u = await this.unidades(req, "equipo.ver");
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT g.id, g.codigo, g.nombre, g.anio, g.unidad_id AS "unidadId", un.codigo AS laboratorio, g.documento_codigo AS "documentoCodigo",
+              g.estado, g.aprobado_at AS "aprobadoAt", ua.nombre_completo AS "aprobadoPor", g.cerrado_at AS "cerradoAt", g.observaciones,
+              (SELECT count(*)::int FROM plan_mantencion p WHERE p.programa_id = g.id AND p.activo) AS planes
+         FROM programa_mantencion g
+         LEFT JOIN unidad un ON un.id = g.unidad_id
+         LEFT JOIN usuario ua ON ua.id = g.aprobado_por
+        WHERE g.tenant_id = $1::uuid AND ($2::uuid[] IS NULL OR g.unidad_id IS NULL OR g.unidad_id = ANY($2::uuid[]))
+        ORDER BY g.anio DESC, g.codigo`,
+      tenantDe(req), u);
+    const hoy = hoyCl();
+    const out = [];
+    for (const g of filas) out.push({ ...g, cumplimiento: await this.cumplimientoPrograma(g.id, g.anio, hoy) });
+    return out;
+  }
+
+  private async cumplimientoPrograma(id: string, anio: number, hoy: string) {
+    const { desde, hasta } = periodoPrograma(anio);
+    const ej = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT fecha::text AS fecha, fecha_programada::text AS fecha_programada, costo::float AS costo
+         FROM mantencion WHERE programa_id = $1::uuid AND fecha_programada BETWEEN $2::date AND $3::date`, id, desde, hasta);
+    // Vencidas sin hacer: la próxima fecha de los planes del programa ya pasó dentro del año.
+    const [v] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM plan_mantencion WHERE programa_id = $1::uuid AND activo AND proxima_fecha < $2::date AND proxima_fecha BETWEEN $3::date AND $4::date`,
+      id, hoy, desde, hasta);
+    return cumplimiento(ej.map((m) => ({ fecha: m.fecha, fechaProgramada: m.fecha_programada, costo: m.costo })), v?.n ?? 0);
+  }
+
+  private datosPrograma(b: any) {
+    const d = {
+      codigo: texto(b?.codigo, 40),
+      nombre: texto(b?.nombre, 200),
+      anio: b?.anio == null || b?.anio === "" ? null : Number(b.anio),
+      unidadId: texto(b?.unidadId, 40),
+      documentoCodigo: texto(b?.documentoCodigo, 60),
+      observaciones: texto(b?.observaciones, 2000),
+    };
+    const e = erroresPrograma(d);
+    if (e.length) throw new BadRequestException(e.join(" "));
+    return d;
+  }
+
+  async crearPrograma(req: any, b: any) {
+    const d = this.datosPrograma(b);
+    const u = await this.unidades(req, "equipo.gestionar");
+    if (u && (!d.unidadId || !u.includes(d.unidadId))) throw new ForbiddenException("Elija un laboratorio de su alcance para el programa.");
+    try {
+      const [g] = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+        `INSERT INTO programa_mantencion (tenant_id, codigo, nombre, anio, unidad_id, documento_codigo, observaciones, creado_por)
+         VALUES ($1::uuid, $2, $3, $4, $5::uuid, $6, $7, $8::uuid) RETURNING id`,
+        tenantDe(req), d.codigo, d.nombre, d.anio, d.unidadId, d.documentoCodigo, d.observaciones, req?.user?.sub ?? null);
+      return { id: g.id };
+    } catch (e: any) {
+      if (/unique|duplicate|23505/i.test(String(e?.message ?? ""))) throw new BadRequestException(`Ya existe un programa con el código ${d.codigo}.`);
+      throw e;
+    }
+  }
+
+  async editarPrograma(req: any, id: string, b: any) {
+    await this.programaEditable(req, id);
+    const d = this.datosPrograma(b);
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE programa_mantencion SET codigo = $2, nombre = $3, anio = $4, documento_codigo = $5, observaciones = $6, actualizado_en = now() WHERE id = $1::uuid`,
+      id, d.codigo, d.nombre, d.anio, d.documentoCodigo, d.observaciones);
+    return { id };
+  }
+
+  /** Aprueba (queda fijo como evidencia) o cierra el programa. */
+  async estadoPrograma(req: any, id: string, nuevo: string) {
+    const g = await this.programaFila(req, id);
+    if (!puedeTransitarPrograma(g.estado, nuevo))
+      throw new BadRequestException(`El programa ${g.codigo} está ${g.estado}: no puede pasar a ${nuevo}.`);
+    const [n] = await this.prisma.$queryRawUnsafe<{ n: number }[]>(`SELECT count(*)::int AS n FROM plan_mantencion WHERE programa_id = $1::uuid AND activo`, id);
+    if (nuevo === "aprobado" && !n?.n) throw new BadRequestException("Vincule al menos un plan de mantención antes de aprobar el programa.");
+    await this.prisma.$executeRawUnsafe(
+      nuevo === "aprobado"
+        ? `UPDATE programa_mantencion SET estado = 'aprobado', aprobado_por = $2::uuid, aprobado_at = now(), actualizado_en = now() WHERE id = $1::uuid`
+        : `UPDATE programa_mantencion SET estado = 'cerrado', cerrado_por = $2::uuid, cerrado_at = now(), actualizado_en = now() WHERE id = $1::uuid`,
+      id, req?.user?.sub ?? null);
+    return { id, estado: nuevo };
+  }
+
+  /** Detalle auditable: planes del programa y mantenciones ejecutadas con él. */
+  async programa(req: any, id: string) {
+    const g = await this.programaFila(req, id);
+    const [planes, ejecutadas] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT p.id, e.codigo AS "equipoCodigo", COALESCE(e.nombre, e.descripcion) AS "equipoNombre", p.tipo, p.descripcion,
+                p.frecuencia_dias AS "frecuenciaDias", p.proxima_fecha::text AS "proximaFecha", p.activo
+           FROM plan_mantencion p JOIN equipo e ON e.id = p.equipo_id WHERE p.programa_id = $1::uuid ORDER BY e.codigo`, id),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT m.id, e.codigo AS "equipoCodigo", m.tipo, m.fecha::text AS fecha, m.fecha_programada::text AS "fechaProgramada", m.resultado,
+                m.ejecutada_por AS "ejecutadaPor", u.nombre_completo AS "registradaPor", m.costo::float AS costo
+           FROM mantencion m JOIN equipo e ON e.id = m.equipo_id LEFT JOIN usuario u ON u.id = m.registrada_por
+          WHERE m.programa_id = $1::uuid ORDER BY m.fecha DESC`, id),
+    ]);
+    return { programa: g, planes, ejecutadas, cumplimiento: await this.cumplimientoPrograma(id, g.anio, hoyCl()) };
   }
 
   /* ------------------------------------------------------------ calendario --- */
@@ -413,6 +546,43 @@ export class MantencionController {
   @RequierePermiso("equipo.ver")
   historial(@Param("id", UUID) id: string, @Req() req: any) {
     return this.m.historial(req, id);
+  }
+
+  // Programas de mantención auditables (Químico, R5).
+  @Get("programas")
+  @RequierePermiso("equipo.ver")
+  programas(@Req() req: any) {
+    return this.m.programas(req);
+  }
+
+  @Get("programas/:id")
+  @RequierePermiso("equipo.ver")
+  programa(@Param("id", UUID) id: string, @Req() req: any) {
+    return this.m.programa(req, id);
+  }
+
+  @Post("programas")
+  @RequierePermiso("equipo.gestionar")
+  crearPrograma(@Body() b: any, @Req() req: any) {
+    return this.m.crearPrograma(req, b);
+  }
+
+  @Patch("programas/:id")
+  @RequierePermiso("equipo.gestionar")
+  editarPrograma(@Param("id", UUID) id: string, @Body() b: any, @Req() req: any) {
+    return this.m.editarPrograma(req, id, b);
+  }
+
+  @Post("programas/:id/aprobar")
+  @RequierePermiso("equipo.gestionar")
+  aprobarPrograma(@Param("id", UUID) id: string, @Req() req: any) {
+    return this.m.estadoPrograma(req, id, "aprobado");
+  }
+
+  @Post("programas/:id/cerrar")
+  @RequierePermiso("equipo.gestionar")
+  cerrarPrograma(@Param("id", UUID) id: string, @Req() req: any) {
+    return this.m.estadoPrograma(req, id, "cerrado");
   }
 
   @Get("calendario")
