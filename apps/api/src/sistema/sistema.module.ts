@@ -5,7 +5,8 @@
  * Rutas:
  *   GET  respaldos            · estado (verde/rojo), último, próximo, política e historial (admin.respaldos)
  *   POST respaldos/solicitar  · «Respaldar ahora»: deja una solicitud que el servicio atiende en ≤ 1 min (admin.respaldos)
- *   GET  sistema/bi           · dirección de Metabase (variable URL_BI) para el menú (reporte.ver)
+ *   GET  sistema/bi           · dirección de Metabase (variable URL_BI) para el menú (reporte.ver);
+ *                               al administrador del LIMS, además, el acceso temporal (BI_ACCESO_*)
  *
  * Los respaldos los hace el servicio «respaldo» de docker-compose.prod.yml (o
  * backup.sh en on-premise); esta API solo lee `respaldo_registro` /
@@ -21,7 +22,7 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { AvisosService } from "../avisos/avisos.service";
 import { hoyCl } from "../ot/plazos";
 import { estadoRespaldos, politicaDe, proximoRespaldo, servicioActivo, tamanoLegible, type ServicioRespaldo } from "./respaldos.reglas";
-import { urlBi } from "./bi.reglas";
+import { accesoBi, urlBi } from "./bi.reglas";
 
 const QUINCE_MIN = 15 * 60 * 1000;
 
@@ -261,9 +262,11 @@ export class SistemaController {
   /** Menú «Análisis e inteligencia de negocio (Metabase)»: la dirección sale de URL_BI. */
   @Get("bi")
   @RequierePermiso("reporte.ver")
-  bi() {
+  bi(@Req() req: { user?: { roles?: string[]; permisos?: string[] } }) {
     const url = urlBi(process.env.URL_BI);
-    return { configurado: !!url, url };
+    // Acceso temporal (solo administrador del LIMS); ver bi.reglas.ts.
+    const acceso = url ? accesoBi(process.env.BI_ACCESO_USUARIO, process.env.BI_ACCESO_CLAVE, req.user) : null;
+    return { configurado: !!url, url, acceso };
   }
 }
 
