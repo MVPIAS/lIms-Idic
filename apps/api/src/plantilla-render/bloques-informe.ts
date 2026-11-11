@@ -7,6 +7,8 @@
  *   {{portada}}            portada del IVC (propósito, OT, OPI/OC, contrato…)
  *   {{tabla_metodos}}      análisis · método · fecha del análisis (PG09 Anexo 02-02, 3.1)
  *   {{termograma}}         termogramas u otros registros del instrumento (LME)
+ *   {{termograma_anexo}}   los mismos, con título, al final: lo agrega el motor
+ *                          cuando la plantilla no ubica {{termograma}} (LME 02-11)
  *   {{identificacion_muestras}} Nº interno, producto, cliente y datos de recepción
  *
  * TODO valor que viene de la BD se escapa (`escapeHtml`); el HTML lo pone el
@@ -166,10 +168,10 @@ export function bloqueAnexo(fotos: FotoInforme[], cfg: ConfigInforme): string {
  * `{{termograma}}`: termogramas (u otro registro gráfico del instrumento) de la
  * OT marcados para el informe, con su pie. Vacío si no hay.
  */
-export function bloqueTermograma(fotos: FotoInforme[]): string {
+export function bloqueTermograma(fotos: FotoInforme[], titulo?: string): string {
   const validas = fotos.filter((f) => /^image\/(png|jpeg)$/.test(f.mime) && BASE64.test(f.datos));
   if (!validas.length) return "";
-  return validas
+  return (titulo ? `<h2>${escapeHtml(titulo)}</h2>` : "") + validas
     .map((f, i) => {
       const pie = [`Termograma ${i + 1}`, f.titulo ?? "", f.pie ?? ""].filter((x) => x && x.trim()).join(" · ");
       return `<div class="foto termograma"><img src="data:${f.mime};base64,${f.datos}" alt="Termograma ${i + 1}"><p class="pie-foto">${escapeHtml(pie)}</p></div>`;
@@ -300,8 +302,10 @@ const RE_FIRMAS = /<div class="firmas">/;
 export function completarCuerpo(cuerpo: string, cfg: ConfigInforme): string {
   let out = cuerpo;
   const tiene = (t: string) => new RegExp(`\\{\\{\\s*${t}\\s*\\}\\}`).test(out);
-  const finales = [...(cfg.productoTerminado ? ["producto_terminado"] : []), "referencias", "anexo_fotografico", "conclusion"]
-    .filter((t) => !tiene(t) && !(t === "conclusion" && tiene("conclusion_texto")))
+  // Termogramas: si la plantilla no los ubica, van tras el anexo fotográfico
+  // (antes no salían: LME 02-11, «el segundo anexo no aparece»).
+  const finales = [...(cfg.productoTerminado ? ["producto_terminado"] : []), "referencias", "anexo_fotografico", "termograma_anexo", "conclusion"]
+    .filter((t) => !tiene(t) && !(t === "conclusion" && tiene("conclusion_texto")) && !(t === "termograma_anexo" && tiene("termograma")))
     .map((t) => `{{${t}}}`);
   // IVC: sección V «Inspección por atributos (AQL)» si la OT la tiene (EP-03 3.7, frente r2a).
   if (cfg.portada === "ivc" && !tiene("tabla_aql"))

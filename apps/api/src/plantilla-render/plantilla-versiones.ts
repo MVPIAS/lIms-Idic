@@ -53,6 +53,7 @@ export const BLOQUES_MOTOR: Record<string, string> = {
   tabla_inspeccion: "Tabla de inspección (mínimo, máximo, resultado, condición)",
   tabla_metodos: "Métodos usados",
   termograma: "Termogramas de la OT",
+  termograma_anexo: "Termogramas de la OT con título (el motor lo agrega si falta {{termograma}})",
   identificacion_muestras: "Identificación de las muestras",
 };
 

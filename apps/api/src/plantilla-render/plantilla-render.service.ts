@@ -759,6 +759,7 @@ export class PlantillaRenderService {
       est,
     );
     const fotos = cfg.anexoFotografico ? await this.fotosDelInforme(otId, est, ctx.muestras) : [];
+    const termogramas = await this.termogramasDelInforme(otId, ctx.muestras);
     const bloques: Record<string, string> = {
       tabla_resultados: bloqueResultados(est, cfg),
       tabla_muestras: tablaMuestras(this.filasMuestras(ctx)),
@@ -779,7 +780,8 @@ export class PlantillaRenderService {
           : "",
       tabla_inspeccion: tablaInspeccion(this.filasInspeccion(ctx)),
       tabla_metodos: bloqueMetodos(filasMetodos(ctx.paraInforme)),
-      termograma: bloqueTermograma(await this.termogramasDelInforme(otId, ctx.muestras)),
+      termograma: bloqueTermograma(termogramas),
+      termograma_anexo: bloqueTermograma(termogramas, "Registros del instrumento"),
       identificacion_muestras: bloqueIdentificacion(ctx.identificacion),
     };
     // Contexto de otros módulos: nunca pisa una clave del motor.
