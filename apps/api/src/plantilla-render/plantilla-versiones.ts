@@ -42,6 +42,7 @@ export function motivoNoEditable(v: { estado: string }): string | null {
  * (SAEC, BPCH…), que aparecen al consultar las variables con una OT concreta.
  */
 export const BLOQUES_MOTOR: Record<string, string> = {
+  ibis_arma: "Registro balístico IBIS del arma (certificado por arma): identificador, fecha de prueba, hit y evidencias de prueba",
   tabla_resultados: "Tabla de resultados según el formato de la plantilla",
   tabla_muestras: "Tabla de muestras de la OT",
   referencias: "Normas y métodos citados",

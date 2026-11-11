@@ -9,6 +9,7 @@ import { validarFormulario } from "@/lib/validate";
 import Peritajes from "./_components/Peritajes";
 import Prestamos from "./_components/Prestamos";
 import CoincidenciasIbis from "./_components/CoincidenciasIbis";
+import { abrirDocumento } from "@/lib/bpchProcesos";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -174,7 +175,11 @@ export default function EvidenciaFichaPage() {
 
       <div className="toolbar" style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <Link className="btn sm" href="/saec">← Evidencias</Link>
+        <Link className="btn sm outline" href="/saec/donde-esta">¿Dónde está?</Link>
         <div className="spacer" style={{ flex: 1 }}></div>
+        <button className="btn sm outline" onClick={() => abrirDocumento(`/evidencias/fichas?ids=${id}`).catch((e) => setError(e.message))}>
+          Imprimir ficha
+        </button>
         {puede("saec.certificado.emitir") && <button className="btn sm" onClick={emitirCertificado}>Emitir certificado</button>}
         {(showMov || puede("evidencia.custodiar")) && (
           <button className="btn primary sm" onClick={() => setShowMov(!showMov)}>

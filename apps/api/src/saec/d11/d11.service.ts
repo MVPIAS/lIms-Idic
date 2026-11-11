@@ -7,6 +7,7 @@ import { PuenteAnalisisService, RegistroMuestrasService } from "../../flujo-real
 import { PlantillaRenderService, type DocumentoEnRender } from "../../plantilla-render/plantilla-render.service";
 import { FirmaDocumentoService } from "../../plantilla-render/firma-documento.service";
 import { escapeHtml, fmtFecha, fmtFechaHora } from "../../plantilla-render/html.util";
+import { bloqueIbisArma, type IbisDeArma } from "../ibis-testigos";
 import { anioChile, hoyChile } from "../../common/fecha-chile";
 import { svgCode128 } from "../../common/code128";
 import { leerTabla, TablaError } from "../../common/tabla-archivo";
@@ -1248,7 +1249,33 @@ export class D11Service implements OnModuleInit {
       },
       bloques: {
         qr_verificacion: `<div class="foto esquema"><img src="${qr}" alt="Código QR de verificación"><span>Escanee el código para verificar el certificado</span></div>`,
+        ibis_arma: bloqueIbisArma(await this.ibisDeArma(a.arma_id)),
       },
+    };
+  }
+
+  /** Resultado de IBIS del arma (el último asociado) y sus evidencias de prueba; null = «Pendiente de IBIS». */
+  private async ibisDeArma(armaId: string | null): Promise<IbisDeArma | null> {
+    if (!armaId) return null;
+    const [r] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT uuid_ibis, exhibit_number, fecha_prueba, hit_count FROM ibis_resultado
+        WHERE arma_id = $1::uuid AND estado = 'asignado' AND deleted_at IS NULL ORDER BY asignado_at DESC NULLS LAST LIMIT 1`,
+      armaId,
+    );
+    const ev = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT codigo, tipo, exhibit_number, hit_count, ubicacion, fecha_disparo FROM evidencia
+        WHERE arma_id = $1::uuid AND deleted_at IS NULL ORDER BY tipo DESC, codigo`,
+      armaId,
+    );
+    if (!r && !ev.length) return null;
+    const fecha = r?.fecha_prueba ?? ev.find((e) => e.fecha_disparo)?.fecha_disparo ?? null;
+    const hits = Math.max(Number(r?.hit_count ?? 0), ...ev.map((e) => Number(e.hit_count ?? 0)));
+    return {
+      uuid: r?.uuid_ibis ?? null,
+      exhibit: r?.exhibit_number ?? null,
+      fechaPrueba: fecha ? fmtFecha(fecha) : null,
+      hitCount: hits,
+      evidencias: ev.map((e) => ({ codigo: e.codigo, tipo: e.tipo, exhibit: e.exhibit_number, hitCount: Number(e.hit_count ?? 0), ubicacion: e.ubicacion })),
     };
   }
 

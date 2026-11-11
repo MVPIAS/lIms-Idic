@@ -149,6 +149,7 @@ export const NAV: SeccionNav[] = [
       { href: "/saec/ot", label: "Certificación de armas", icon: "🎯", perm: "arma.ver", ambito: "D11", claves: "d11 internacion resolucion acta acunacion certificado por arma entrega" },
       { href: "/saec/catalogos", label: "Catálogo de armas", icon: "🗂", perm: "arma.ver", ambito: "D11", claves: "marca modelo calibre cip pais" },
       { href: "/saec", label: "Evidencias", icon: "🧷", perm: "evidencia.ver", ambito: "D11" },
+      { href: "/saec/donde-esta", label: "¿Dónde está la evidencia?", icon: "📍", perm: "evidencia.ver", ambito: "D11", claves: "buscar ubicacion estante caja serie hit ibis vaina proyectil prestamo fiscalia" },
       { href: "/saec/casos", label: "Casos", icon: "🗂", perm: "caso.ver", ambito: "D11", claves: "causa fiscalia ruc" },
       { href: "/saec/municion", label: "Munición de prueba", icon: "🧰", perm: "arma.ver", ambito: "D11", claves: "lotes inventario cartuchos lrb lam entrega" },
       { href: "/saec/armas", label: "Armas", icon: "🔫", perm: "arma.ver", ambito: "D11" },

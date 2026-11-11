@@ -1,6 +1,7 @@
 import { CODIGO_UNIDAD_SAEC } from "../ot/laboratorio-ot";
 import { fijarPlazoPorDefecto } from "../ot/plazo-defecto";
 import { generarCodigoOt } from "../common/codigo";
+import { tipoTestigo, normalizarBusqueda, paginaFichas, type FichaEvidencia } from "./ibis-testigos";
 import {
   BadRequestException,
   ConflictException,
@@ -968,6 +969,79 @@ export class EvidenciaController extends SaecBase {
       tenantId,
     );
     return { data: { porUbicacion, porTipo, porEstado } };
+  }
+
+  /**
+   * «¿Dónde está?» · por serie del arma, código de la evidencia, código de barras
+   * o el Nº / UUID que trae un hit de IBIS: cada evidencia con su ubicación
+   * (texto), su estado y, si está prestada, a quién y hasta cuándo.
+   */
+  @Get("donde-esta")
+  @RequierePermiso("evidencia.ver")
+  async dondeEsta(@Query("q") q: string | undefined, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const { texto, serie } = normalizarBusqueda(q ?? "");
+    if (texto.length < 2) throw new BadRequestException("Escriba al menos 2 caracteres: serie del arma, código de evidencia o Nº IBIS.");
+    const data = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT e.id, e.codigo, e.codigo_barras, e.tipo, e.exhibit_number, e.uuid_ibis, e.estado, e.ubicacion, e.hit_count,
+              e.fecha_disparo, e.descripcion, ot.codigo AS ot_codigo, ot.id AS ot_id,
+              COALESCE(a.serie, a2.serie) AS serie, COALESCE(a.marca, a2.marca) AS marca, COALESCE(a.modelo, a2.modelo) AS modelo,
+              COALESCE(a.calibre, a2.calibre, e.calibre_texto) AS calibre,
+              (SELECT json_build_object('codigo', p.codigo, 'organismo', p.organismo_solicitante, 'solicitante', p.solicitante_nombre,
+                                        'receptor', p.receptor_nombre, 'entregado', p.entregado_at, 'devolucion', p.fecha_devolucion_prevista,
+                                        'estado', p.estado)
+                 FROM evidencia_prestamo p
+                WHERE p.evidencia_id = e.id AND p.deleted_at IS NULL AND p.estado IN ('solicitado', 'aprobado', 'entregado')
+                ORDER BY p.created_at DESC LIMIT 1) AS prestamo
+         FROM evidencia e
+         LEFT JOIN arma a ON a.id = e.arma_id
+         LEFT JOIN arma a2 ON a2.evidencia_id = e.id AND a2.deleted_at IS NULL
+         LEFT JOIN orden_trabajo ot ON ot.id = e.ot_id
+        WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL
+          AND (upper(e.codigo) = upper($2) OR upper(e.codigo_barras) = upper($2) OR upper(e.exhibit_number) = upper($2)
+               OR e.uuid_ibis = $2
+               OR ($3 <> '' AND (upper(regexp_replace(COALESCE(a.serie, ''), '[^A-Za-z0-9]', '', 'g')) = $3
+                                 OR upper(regexp_replace(COALESCE(a2.serie, ''), '[^A-Za-z0-9]', '', 'g')) = $3)))
+        ORDER BY e.fecha_disparo NULLS LAST, e.codigo
+        LIMIT 50`,
+      tenantId, texto, serie,
+    );
+    await this.auditar(req, "evidencia", null, "ver", { accion: "donde_esta", q: texto, encontradas: data.length });
+    return { data, meta: { total: data.length } };
+  }
+
+  /** Fichas imprimibles (tipo biblioteca) de una o varias evidencias, o de todas las de una OT. */
+  @Get("fichas")
+  @RequierePermiso("evidencia.ver")
+  @Header("Content-Type", "text/html; charset=utf-8")
+  @Header("Cache-Control", "private, no-store")
+  async fichas(@Query("ids") ids: string | undefined, @Query("otId") otId: string | undefined, @Req() req: any) {
+    const tenantId = this.tenantId(req);
+    const lista = (ids ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (lista.some((x) => !UUID_RE.test(x)) || (otId && !UUID_RE.test(otId))) throw new BadRequestException("Identificador no válido.");
+    if (!lista.length && !otId) throw new BadRequestException("Indique las evidencias (ids) o la OT (otId).");
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT e.codigo, e.codigo_barras, e.tipo, e.exhibit_number, e.uuid_ibis, e.ubicacion, e.hit_count, e.fecha_disparo,
+              ot.codigo AS ot, COALESCE(a.serie, a2.serie) AS serie, COALESCE(a.marca, a2.marca) AS marca,
+              COALESCE(a.modelo, a2.modelo) AS modelo, COALESCE(a.calibre, a2.calibre, e.calibre_texto) AS calibre
+         FROM evidencia e
+         LEFT JOIN arma a ON a.id = e.arma_id
+         LEFT JOIN arma a2 ON a2.evidencia_id = e.id AND a2.deleted_at IS NULL
+         LEFT JOIN orden_trabajo ot ON ot.id = e.ot_id
+        WHERE e.tenant_id = $1::uuid AND e.deleted_at IS NULL
+          AND (e.id = ANY($2::uuid[]) OR ($3::uuid IS NOT NULL AND e.ot_id = $3::uuid))
+        ORDER BY COALESCE(a.serie, a2.serie), e.tipo DESC, e.codigo
+        LIMIT 500`,
+      tenantId, lista, otId ?? null,
+    );
+    if (!filas.length) throw new NotFoundException("No hay evidencias para imprimir.");
+    const fichas: FichaEvidencia[] = filas.map((f) => ({
+      codigo: f.codigo, codigoBarras: f.codigo_barras, tipo: f.tipo, exhibit: f.exhibit_number, uuidIbis: f.uuid_ibis,
+      serie: f.serie, marca: f.marca, modelo: f.modelo, calibre: f.calibre, ot: f.ot,
+      fechaDisparo: f.fecha_disparo ? fmtFechaHora(f.fecha_disparo) : null, ubicacion: f.ubicacion, hitCount: Number(f.hit_count ?? 0),
+    }));
+    return paginaFichas("Fichas de evidencias", fichas, fmtFechaHora(new Date()));
   }
 
   /** RF-K04.4 · escaneo de código de barras para identificación rápida. */
@@ -3123,6 +3197,39 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
         }
       }
 
+      // Evidencias de prueba (vaina / proyectil) de las armas: <TestFirearmExhibitUUID> = arma.
+      let testigos = 0;
+      for (const x of buscarElementos(raiz, "Exhibits", "Exhibit")) {
+        const tipo = tipoTestigo(txt(x, "Type"));
+        const firearm = txt(x, "TestFirearmExhibitUUID");
+        const uuid = txt(x, "UUID");
+        if (!tipo || !firearm || !uuid) continue;
+        try {
+          const cal = codigoTexto(x, "Caliber");
+          const fps = codigoTexto(x, "FiringPinShape");
+          const hi = hijo(x, "HitIndicator");
+          const hitCount = hi ? intEsi(hi.attrs?.Count ?? hi.texto) : intEsi(txt(x, "HitIndicator"));
+          await tx.$executeRawUnsafe(
+            `INSERT INTO ibis_testigo
+               (tenant_id, ibis_importacion_id, uuid_ibis, exhibit_number, tipo, firearm_uuid, calibre,
+                firing_pin_shape, breech_face_class, hit_count, fecha_disparo, datos)
+             VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11::timestamptz, $12::jsonb)
+             ON CONFLICT (tenant_id, uuid_ibis) WHERE deleted_at IS NULL
+               DO UPDATE SET hit_count = EXCLUDED.hit_count, ibis_importacion_id = EXCLUDED.ibis_importacion_id,
+                 exhibit_number = COALESCE(EXCLUDED.exhibit_number, ibis_testigo.exhibit_number),
+                 datos = EXCLUDED.datos, updated_at = now()`,
+            tenantId, impId, uuid, txt(x, "ExhibitNumber"), tipo, firearm, cal.texto ?? cal.codigo,
+            fps.texto ?? fps.codigo, txt(x, "BreechFaceClassCharacteristics"), hitCount,
+            fechaEsi(txt(x, "LastAcquisitionDate") ?? txt(x, "CreationDate")),
+            JSON.stringify({ uuid, exhibitNumber: txt(x, "ExhibitNumber"), type: txt(x, "Type"), firearm, caliber: cal, firingPinShape: fps, hitCount }),
+          );
+          testigos++;
+          bitacora.push({ entidad: tipo === "vainilla" ? "Vaina" : "Proyectil", uuid, arma: firearm });
+        } catch (e: any) {
+          errores.push({ tipo: "testigo", mensaje: e?.message ?? String(e) });
+        }
+      }
+
       // Bajas: <RemovedExhibits> → baja lógica del pool por UUID.
       for (const rem of buscarTodos(raiz, "RemovedExhibits")) {
         const uuids = [
@@ -3136,9 +3243,35 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
             tenantId, u,
           );
           eliminados += Number(n) || 0;
+          await tx.$executeRawUnsafe(
+            `UPDATE ibis_testigo SET deleted_at = now() WHERE tenant_id = $1::uuid AND uuid_ibis = $2 AND deleted_at IS NULL AND evidencia_id IS NULL`,
+            tenantId, u,
+          );
         }
       }
 
+      // Un arma ya asociada a su OT que IBIS vuelve a enviar (p. ej. con un hit nuevo)
+      // actualiza su resultado y no reaparece como pendiente de asignar.
+      const actualizadas = await tx.$executeRawUnsafe(
+        `UPDATE ibis_resultado a
+            SET hit_count = n.hit_count, resultado = n.resultado, datos = n.datos
+           FROM ibis_resultado n
+          WHERE n.ibis_importacion_id = $2::uuid AND n.estado = 'pool' AND n.deleted_at IS NULL
+            AND a.tenant_id = $1::uuid AND a.uuid_ibis = n.uuid_ibis AND a.estado = 'asignado' AND a.deleted_at IS NULL`,
+        tenantId, impId,
+      );
+      if (Number(actualizadas)) {
+        await tx.$executeRawUnsafe(
+          `UPDATE ibis_resultado n SET deleted_at = now()
+            WHERE n.ibis_importacion_id = $2::uuid AND n.estado = 'pool' AND n.deleted_at IS NULL
+              AND EXISTS (SELECT 1 FROM ibis_resultado a WHERE a.tenant_id = $1::uuid AND a.uuid_ibis = n.uuid_ibis
+                             AND a.estado = 'asignado' AND a.deleted_at IS NULL)`,
+          tenantId, impId,
+        );
+        bitacora.push({ entidad: "Firearm", accion: "actualizada en su OT", cantidad: Number(actualizadas) });
+      }
+      const evidenciasCreadas = await this.materializarTestigos(tx, tenantId, req);
+      bitacora.push({ entidad: "Evidencias", testigos, evidenciasCreadas });
       const estado = errores.length === 0 ? "procesado" : (creados > 0 ? "parcial" : "error");
       await tx.$executeRawUnsafe(
         `UPDATE ibis_importacion
@@ -3149,7 +3282,7 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
         JSON.stringify(errores), JSON.stringify(bitacora.slice(0, 500)),
         JSON.stringify({ resultadosCreados: creados, eliminados, estado, hash }),
       );
-      return { importacionId: impId, estado, resultadosCreados: creados, eliminados, errores };
+      return { importacionId: impId, estado, resultadosCreados: creados, eliminados, errores, testigos, evidenciasCreadas };
     }, { timeout: 120_000 });
 
     await this.auditar(req, "ibis", resumen.importacionId, "importar",
@@ -3232,10 +3365,79 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
         );
         n++;
       }
-      return n;
+      const evidencias = await this.materializarTestigos(tx, tenantId, req);
+      return { n, evidencias };
     });
-    await this.auditar(req, "ibis", otId, "editar", { asignados, otId, accion: "adjuntar_ibis" });
-    return { data: { otId, asignados } };
+    await this.auditar(req, "ibis", otId, "editar", { asignados: asignados.n, evidencias: asignados.evidencias, otId, accion: "adjuntar_ibis" });
+    return { data: { otId, asignados: asignados.n, evidenciasCreadas: asignados.evidencias } };
+  }
+
+  /**
+   * Crea en el banco de evidencias la vaina y el proyectil de prueba de cada arma
+   * ya asociada a su OT (ibis_resultado «asignado»), ligados al arma y a la OT,
+   * con su código y su código de barras. Idempotente: un testigo ya enlazado no
+   * se repite. También actualiza el contador de hits de las ya creadas.
+   */
+  private async materializarTestigos(tx: ClienteSql, tenantId: string, req: any): Promise<number> {
+    await tx.$executeRawUnsafe(
+      `UPDATE evidencia e SET hit_count = t.hit_count, updated_at = now()
+         FROM ibis_testigo t
+        WHERE t.tenant_id = $1::uuid AND t.evidencia_id = e.id AND t.deleted_at IS NULL
+          AND e.hit_count IS DISTINCT FROM t.hit_count`,
+      tenantId,
+    );
+    const pend = await tx.$queryRawUnsafe<any[]>(
+      `SELECT t.id, t.uuid_ibis, t.exhibit_number, t.tipo, t.calibre, t.firing_pin_shape, t.breech_face_class,
+              t.hit_count, t.fecha_disparo, r.arma_id, r.ot_id, a.serie, a.marca, a.modelo, a.calibre AS arma_calibre,
+              o.cliente_id, o.codigo AS ot_codigo,
+              (SELECT e.id FROM evidencia e WHERE e.tenant_id = t.tenant_id AND e.uuid_ibis = t.uuid_ibis) AS existente
+         FROM ibis_testigo t
+         JOIN ibis_resultado r ON r.tenant_id = t.tenant_id AND r.uuid_ibis = t.firearm_uuid
+                              AND r.estado = 'asignado' AND r.deleted_at IS NULL AND r.arma_id IS NOT NULL
+         JOIN arma a ON a.id = r.arma_id
+         LEFT JOIN orden_trabajo o ON o.id = r.ot_id
+        WHERE t.tenant_id = $1::uuid AND t.deleted_at IS NULL AND t.evidencia_id IS NULL
+        ORDER BY t.fecha_disparo NULLS LAST, t.exhibit_number`,
+      tenantId,
+    );
+    let n = 0;
+    for (const t of pend) {
+      let evidenciaId: string = t.existente;
+      if (evidenciaId) {
+        await tx.$executeRawUnsafe(
+          `UPDATE evidencia SET arma_id = COALESCE(arma_id, $3::uuid), ot_id = COALESCE(ot_id, $4::uuid),
+                  fecha_disparo = COALESCE(fecha_disparo, $5::timestamptz), updated_at = now()
+            WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+          evidenciaId, tenantId, t.arma_id, t.ot_id, t.fecha_disparo,
+        );
+      } else {
+        const codigo = await this.siguienteCodigo("evidencia", `EV-${anioChile()}-`, tenantId, tx);
+        const nombre = t.tipo === "vainilla" ? "Vaina" : "Proyectil";
+        const ins = await tx.$queryRawUnsafe<any[]>(
+          `INSERT INTO evidencia
+             (tenant_id, codigo, uuid_ibis, exhibit_number, tipo, descripcion, categoria_codigo, categoria_texto,
+              calibre_texto, firing_pin_shape, breech_face_class, hit_count, estado, codigo_barras, ot_id, cliente_id,
+              procedencia, arma_id, fecha_disparo, created_by)
+           VALUES ($1::uuid, $2, $3, $4, $5, $6, 'TST', 'Disparo de prueba', $7, $8, $9, $10, 'ingresada', $2, $11::uuid, $12::uuid,
+                   'IBIS · disparo de prueba (internación)', $13::uuid, $14::timestamptz, $15::uuid)
+           RETURNING id`,
+          tenantId, codigo, t.uuid_ibis, t.exhibit_number, t.tipo,
+          `${nombre} de prueba del arma serie ${t.serie ?? "s/n"}${t.marca ? ` · ${t.marca}` : ""}${t.modelo ? ` ${t.modelo}` : ""}`,
+          t.calibre ?? t.arma_calibre, t.firing_pin_shape, t.breech_face_class, t.hit_count ?? 0, t.ot_id, t.cliente_id,
+          t.arma_id, t.fecha_disparo, req?.user?.sub ?? null,
+        );
+        evidenciaId = ins[0].id;
+        await tx.$executeRawUnsafe(
+          `INSERT INTO evidencia_movimiento (tenant_id, evidencia_id, evento, hacia_organismo, motivo, registrado_por, ip_origen)
+           VALUES ($1::uuid, $2::uuid, 'entrada', 'IDIC · Banco de evidencias', $3, $4::uuid, $5::inet)`,
+          tenantId, evidenciaId, `Ingreso automático desde IBIS (${t.exhibit_number ?? t.uuid_ibis}) · OT ${t.ot_codigo ?? "—"}`,
+          req?.user?.sub ?? null, this.ip(req),
+        );
+        n++;
+      }
+      await tx.$executeRawUnsafe(`UPDATE ibis_testigo SET evidencia_id = $2::uuid, updated_at = now() WHERE id = $1::uuid`, t.id, evidenciaId);
+    }
+    return n;
   }
 }
 
