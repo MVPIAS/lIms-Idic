@@ -14,6 +14,7 @@
  * como parámetro posicional ($n); nunca se interpola.
  */
 import { SQL_HOY, sqlDia } from "../common/fecha-chile";
+import { AREA_Z26, BASES_Z26, INFORMES_Z26 } from "./catalogo-z26";
 
 export type TipoColumna = "texto" | "fecha" | "fechahora" | "numero" | "monto" | "dias" | "estado" | "si_no";
 
@@ -33,11 +34,12 @@ export const AREAS = [
   "BPCH · tasa de internación",
   "Laboratorio y calidad",
   "Catálogo de ensayos",
+  AREA_Z26,
 ] as const;
 export type Area = (typeof AREAS)[number];
 
 /** Origen de los datos: FROM, inquilino y expresiones para filtros y alcance. */
-interface Base {
+export interface Base {
   from: string;
   /** Condición fija (inquilino y borrado lógico); $1 = tenant. */
   donde: string;
@@ -191,6 +193,8 @@ const BASES = {
     texto: [`e.codigo`, `e.nombre`, `m.codigo`, `m.nombre`, `m.norma`, `e.instruccion_trabajo`],
     alcance: null,
   },
+  // Frente S4 · bases del documento Z26 (catalogo-z26.ts).
+  ...BASES_Z26,
 } satisfies Record<string, Base>;
 
 export type BaseClave = keyof typeof BASES;
@@ -202,8 +206,10 @@ export interface InformeFijo {
   descripcion: string;
   /** Archivos .rpt del sistema anterior que reemplaza. */
   legado: string[];
+  /** Pedido que origina un informe sin antecedente en Crystal (p. ej. documento Z26 del IDIC). */
+  pedido?: string;
   /** Permiso además de iniciar sesión. */
-  permiso: "reporte.ver" | "reporte.comercial.ver";
+  permiso: "reporte.ver" | "reporte.comercial.ver" | "costo_real.ver";
   base: BaseClave;
   filtros: FiltroClave[];
   columnas: Columna[];
@@ -817,6 +823,8 @@ export const INFORMES: InformeFijo[] = [
       m.version AS version, (e.activo AND COALESCE(m.activo, TRUE)) AS activo, e.precio AS precio`,
     orden: "e.codigo, m.codigo",
   },
+  // ------------------------------------------------------------ Bases de datos y costos (Z26 · frente S4)
+  ...INFORMES_Z26,
 ];
 
 export const LIMITE_FILAS = 5000;

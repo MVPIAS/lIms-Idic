@@ -65,6 +65,7 @@ export class ZonaInformesController {
       area: i.area,
       descripcion: i.descripcion,
       legado: i.legado,
+      pedido: i.pedido ?? null,
       filtros: i.filtros,
     }));
     const documentos = Object.entries(DOCUMENTOS_LEGADO).map(([tipo, informes]) => ({
@@ -111,6 +112,7 @@ export class ZonaInformesController {
       area: r.def.area,
       descripcion: r.def.descripcion,
       legado: r.def.legado,
+      pedido: r.def.pedido ?? null,
       filtros: r.def.filtros,
       columnas: r.def.columnas,
       filas: r.filas,
@@ -184,7 +186,10 @@ export function hojaInforme(def: InformeFijo, filas: Record<string, unknown>[], 
     .filter(([, v]) => v)
     .map(([k, v]) => `${k}: ${v}`)
     .join(" · ");
-  const extra: Celda[][] = [[], [`Reemplaza a: ${def.legado.join(", ")}`], [`Filtros: ${nota || "sin filtros"}`]];
+  const extra: Celda[][] = [[]];
+  if (def.legado.length) extra.push([`Reemplaza a: ${def.legado.join(", ")}`]);
+  if (def.pedido) extra.push([`Pedido: ${def.pedido}`]);
+  extra.push([`Filtros: ${nota || "sin filtros"}`]);
   if (truncado) extra.push([`Se muestran las primeras ${LIMITE_FILAS} filas: acote el período.`]);
   return {
     nombre: def.titulo.slice(0, 31),

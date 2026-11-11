@@ -107,6 +107,7 @@ export const NAV: SeccionNav[] = [
       { href: "/equipos", label: "Equipos y calibración", icon: "⚙", perm: "equipo.ver" },
       { href: "/mantencion", label: "Mantención y gestión de equipos", icon: "🛠", perm: "equipo.ver", claves: "mantenimiento preventivo plan frecuencia calendario reporte cumplimiento correctiva costos" },
       { href: "/consumibles", label: "Consumibles · kardex", icon: "🧴", perm: "consumible.gestionar", claves: "stock reactivos lotes" },
+      { href: "/consumibles/bodegas", label: "Bodegas e inventario valorizado", icon: "🏬", perm: "consumible.gestionar", claves: "bodega central sub-bodega traspaso inventario valorizado lote abastecimiento" },
       { href: "/municion", label: "Munición de prueba", icon: "🎯", perm: "municion.solicitar", ambito: "DSA", claves: "lrb lam d11 cartuchos orden interna balistica" },
       { href: "/qc", label: "Control de calidad (QC)", icon: "✔", perm: "resultado.ver" },
       // Recepción y Muestreo (alicuota.gestionar, sin resultado.ver) entran solo a la pestaña Alícuotas.

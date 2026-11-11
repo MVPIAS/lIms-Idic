@@ -32,6 +32,7 @@ const TIPO_MOV: Record<string, { label: string; pill: string }> = {
   entrada: { label: "Entrada", pill: "green" },
   consumo: { label: "Consumo", pill: "amber" },
   ajuste: { label: "Ajuste", pill: "blue" },
+  traspaso: { label: "Traspaso", pill: "violet" },
 };
 
 const CONS_VACIO = {
@@ -50,6 +51,9 @@ const LOTE_VACIO = {
   fechaVencimiento: "",
   cantidadInicial: "",
   enUnidadCompra: false,
+  // S4 · bodega donde entra el lote (vacío = bodega central) y precio de compra del lote.
+  bodegaId: "",
+  costoUnitarioClp: "",
 };
 const MOV_VACIO = {
   tipo: "consumo",
@@ -161,6 +165,7 @@ export default function ConsumiblesPage() {
   const [lotes, setLotes] = useState<any[]>([]);
   const [showLote, setShowLote] = useState(false);
   const [lf, setLf] = useState<any>({ ...LOTE_VACIO });
+  const [bodegas, setBodegas] = useState<any[]>([]);
 
   // Movimiento.
   const [showMov, setShowMov] = useState(false);
@@ -196,6 +201,11 @@ export default function ConsumiblesPage() {
 
   useEffect(() => {
     cargar();
+    // S4 · bodegas para el alta de lotes.
+    fetch(`${API}/consumibles/bodegas`, { headers: auth() })
+      .then((r) => (r.ok ? r.json() : { data: [] }))
+      .then((j) => setBodegas((j.data ?? []).filter((b: any) => b.activa)))
+      .catch(() => setBodegas([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -318,6 +328,7 @@ export default function ConsumiblesPage() {
     if (!lf.numeroLote.trim()) v.numeroLote = "El nº de lote es obligatorio.";
     if (String(lf.cantidadInicial).trim() === "" || !esMoneda(String(lf.cantidadInicial))) v.cantidadInicial = "Cantidad inicial obligatoria (número ≥ 0).";
     if (lf.fechaRecepcion && lf.fechaVencimiento && lf.fechaVencimiento < lf.fechaRecepcion) v.fechaVencimiento = "La caducidad debe ser posterior a la recepción.";
+    if (String(lf.costoUnitarioClp).trim() !== "" && !esMoneda(String(lf.costoUnitarioClp))) v.costoUnitarioClp = "El costo debe ser un número ≥ 0.";
     setErrsLote(v);
     if (Object.keys(v).length) return;
     try {
@@ -328,6 +339,8 @@ export default function ConsumiblesPage() {
         fechaVencimiento: lf.fechaVencimiento || null,
         cantidadInicial: Number(lf.cantidadInicial || 0),
         enUnidadCompra: lf.enUnidadCompra,
+        bodegaId: lf.bodegaId || null,
+        costoUnitarioClp: String(lf.costoUnitarioClp).trim() === "" ? null : Number(lf.costoUnitarioClp),
       };
       const res = await fetch(`${API}/consumibles/lotes`, {
         method: "POST",
@@ -413,7 +426,8 @@ export default function ConsumiblesPage() {
       <p className="subtitle">
         Inventario de reactivos y consumibles por <strong>lotes</strong> (stock, nº de lote y caducidad). Cada ensayo
         <strong> consume</strong> stock; el <strong>kardex</strong> registra entradas, consumos y ajustes (contrato
-        §4.4.4 / §4.4.5).
+        §4.4.4 / §4.4.5). Cada lote está en una bodega: la central o la sub-bodega de un laboratorio.{" "}
+        <a href="/consumibles/bodegas">Bodegas, inventario valorizado y traspasos →</a>
       </p>
       {error && <div className="alert warn">{error}</div>}
       {ok && <div className="alert" style={{ background: "var(--green-bg, #e6f4ea)", color: "#137333" }}>{ok}</div>}
@@ -568,6 +582,19 @@ export default function ConsumiblesPage() {
                   <input type="date" value={lf.fechaVencimiento} onChange={(e) => setLf({ ...lf, fechaVencimiento: e.target.value })} />
                   {errsLote.fechaVencimiento && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsLote.fechaVencimiento}</small>}
                 </div>
+                <div className="field">
+                  <label>Bodega</label>
+                  <select value={lf.bodegaId} onChange={(e) => setLf({ ...lf, bodegaId: e.target.value })}>
+                    <option value="">Bodega central (por defecto)</option>
+                    {bodegas.filter((b) => b.tipo !== "central").map((b) => <option key={b.id} value={b.id}>{b.codigo} · {b.nombre}</option>)}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Precio de compra del lote (CLP por {detalle.unidad_medida || "unidad"})</label>
+                  <input type="number" inputMode="decimal" step="any" min="0" value={lf.costoUnitarioClp} onChange={(e) => setLf({ ...lf, costoUnitarioClp: e.target.value })} />
+                  {errsLote.costoUnitarioClp && <small style={{ color: "var(--red)", fontSize: 11 }}>{errsLote.costoUnitarioClp}</small>}
+                  <small style={{ color: "var(--muted)", fontSize: 11 }}>Valoriza el inventario y el consumo. Vacío = costo de referencia del consumible.</small>
+                </div>
               </div>
               <div style={{ marginTop: 12, display: "flex", justifyContent: "flex-end" }}>
                 <button className="btn primary sm">Registrar lote (entrada)</button>
@@ -579,7 +606,10 @@ export default function ConsumiblesPage() {
             <thead>
               <tr>
                 <th>Lote</th>
+                <th>Bodega</th>
                 <th style={{ textAlign: "right" }}>Stock</th>
+                <th style={{ textAlign: "right" }}>Costo unitario</th>
+                <th style={{ textAlign: "right" }}>Valor</th>
                 <th>Recepción</th>
                 <th>Caducidad</th>
                 <th>Estado</th>
@@ -590,7 +620,12 @@ export default function ConsumiblesPage() {
               {lotes.map((l) => (
                 <tr key={l.id} style={l.caducado ? { background: "rgba(217,48,37,0.06)" } : undefined}>
                   <td><span className="codigo">{l.numero_lote}</span></td>
+                  <td>{l.bodega_codigo ?? "—"}</td>
                   <td style={{ textAlign: "right" }}>{fmt(l.cantidad_actual)}</td>
+                  <td style={{ textAlign: "right" }} title={l.fuente_costo === "consumible" ? "Costo de referencia del consumible" : l.fuente_costo === "lote" ? "Precio del lote" : "Sin costo: Pendiente del IDIC"}>
+                    {l.costo_valorizacion != null ? money(l.costo_valorizacion) : <span className="pill gray">Pendiente</span>}
+                  </td>
+                  <td style={{ textAlign: "right" }}>{l.valor_stock != null ? money(l.valor_stock) : "—"}</td>
                   <td style={{ color: "var(--muted)" }}>{fecha(l.fecha_recepcion)}</td>
                   <td style={{ color: "var(--muted)" }}>{fecha(l.fecha_vencimiento)}</td>
                   <td><BadgeLote l={l} /></td>
@@ -598,7 +633,7 @@ export default function ConsumiblesPage() {
                 </tr>
               ))}
               {!lotes.length && (
-                <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>Sin lotes. Registre uno para tener stock.</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--muted)", padding: 16 }}>Sin lotes. Registre uno para tener stock.</td></tr>
               )}
             </tbody>
           </table>
@@ -625,7 +660,7 @@ export default function ConsumiblesPage() {
                   <option value="">{mf.tipo === "consumo" ? "— FIFO por caducidad —" : "— seleccione lote —"}</option>
                   {lotes.map((l) => (
                     <option key={l.id} value={l.id}>
-                      {l.numero_lote} · stock {fmt(l.cantidad_actual)}{l.caducado ? " (caducado)" : ""}
+                      {l.numero_lote}{l.bodega_codigo ? ` · ${l.bodega_codigo}` : ""} · stock {fmt(l.cantidad_actual)}{l.caducado ? " (caducado)" : ""}
                     </option>
                   ))}
                 </select>
