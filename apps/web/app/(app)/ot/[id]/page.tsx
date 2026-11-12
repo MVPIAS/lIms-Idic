@@ -480,7 +480,7 @@ export default function ExpedientePage() {
             {/* B-018: OT directa o de Producción Nacional del BPCH: el mismo bloque «Remitir a DCO» que el expediente de internación.
                 D08-09: no en el prototipo, cuya ruta marca «Remitir a DCO · No aplica» (el dictamen se entrega desde BPCH › Prototipos). */}
             {tab === "informe" && typeof id === "string" && avance?.tipo === "bpch"
-              && avance.etapas?.find((e) => e.clave === "remision_dco")?.estado !== "no_aplica" && <RemitirDco otId={id} onCambio={() => { cargarOt(); cargarAvance(); }} />}
+              && avance.etapas?.find((e) => e.clave === "remision_dco")?.estado !== "no_aplica" && <RemitirDco otId={id} conInspeccion={ot?.origenTrabajo === "PRODUCCION_NACIONAL"} onCambio={() => { cargarOt(); cargarAvance(); }} />}
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}
             {/* Plazo al cliente, recepción DCO, documentos no-informe y envío (frente r4c). */}
             {tab === "informe" && typeof id === "string" && <div style={{ marginTop: 16 }}><SeguimientoOt otId={id} onCambio={cargarOt} /></div>}
