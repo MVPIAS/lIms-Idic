@@ -286,7 +286,9 @@ export interface Comparacion {
 }
 
 export function comparar(real: ResumenCostos, est: Estimacion): Comparacion {
-  const dif = est.costoDirecto != null ? r2(real.total - est.costoDirecto) : null;
+  // Sin costos registrados no hay nada que comparar: ni diferencia ni «-100 %» (F035).
+  const hay = real.total > 0;
+  const dif = hay && est.costoDirecto != null ? r2(real.total - est.costoDirecto) : null;
   return {
     costoReal: real.total,
     costoEstimado: est.costoDirecto,
@@ -295,7 +297,7 @@ export function comparar(real: ResumenCostos, est: Estimacion): Comparacion {
     horasReales: real.horasHombre,
     horasEstimadas: est.horasHombre,
     diferenciaHoras: est.horasHombre != null ? r2(real.horasHombre - est.horasHombre) : null,
-    margen: est.neto != null ? r2(est.neto - real.total) : null,
+    margen: hay && est.neto != null ? r2(est.neto - real.total) : null,
   };
 }
 
@@ -380,10 +382,10 @@ export function consolidarOt(
     costoReal: total,
     horasHombre: horas,
     costoEstimado: est.costoDirecto,
-    diferencia: est.costoDirecto != null ? r2(total - est.costoDirecto) : null,
+    diferencia: total > 0 && est.costoDirecto != null ? r2(total - est.costoDirecto) : null,
     desviacionPct: s.desviacionPct,
     semaforo: s.color,
-    margen: est.neto != null ? r2(est.neto - total) : null,
+    margen: total > 0 && est.neto != null ? r2(est.neto - total) : null,
     neto: est.neto,
     /** Planillas cerradas sobre laboratorios que trabajan en la OT: el costo es definitivo cuando todas lo están. */
     cerradas,
