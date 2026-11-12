@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import CrudTable from "@/components/CrudTable";
 import { rut } from "@/lib/format";
 import { llamar } from "@/lib/laboratorio";
+import { usePermisos } from "@/lib/permisos";
 import Plantas from "./_components/Plantas";
 import HistorialCliente from "./_components/HistorialCliente";
 import { BloqueoCliente, ClientesMorosos } from "./_components/BloqueoCliente";
@@ -40,6 +41,10 @@ export default function ClientesPage() {
   const [bloqueoDe, setBloqueoDe] = useState<any | null>(null);
   const [verMorosos, setVerMorosos] = useState(false);
   const [version, setVersion] = useState(0);
+  // «Bloquear / Desbloquear» solo a quien tiene cliente.bloquear (Jefe DCO): al resto la API
+  // le responde 403, así que no se le ofrece (F073, F079).
+  const { puede } = usePermisos();
+  const puedeBloquear = puede("cliente.bloquear");
   // ?historial=<id>: abre el historial de ese cliente (enlace del aviso «Próxima acción» de Mi bandeja).
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("historial");
@@ -68,11 +73,16 @@ export default function ClientesPage() {
           <button type="button" className="btn outline sm" onClick={() => setPlantasDe({ id: row.id, razonSocial: row.razonSocial })}
             title="Plantas o recintos del cliente">
             Plantas
-          </button>{" "}
-          <button type="button" className={`btn sm ${row.bloqueado ? "success" : "outline"}`} onClick={() => setBloqueoDe(row)}
-            title={row.bloqueado ? `Bloqueado: ${row.motivoBloqueo ?? ""}` : "Bloquear por facturas impagas (Jefe DCO)"}>
-            {row.bloqueado ? "Desbloquear" : "Bloquear"}
           </button>
+          {puedeBloquear && (
+            <>
+              {" "}
+              <button type="button" className={`btn sm ${row.bloqueado ? "success" : "outline"}`} onClick={() => setBloqueoDe(row)}
+                title={row.bloqueado ? `Bloqueado: ${row.motivoBloqueo ?? ""}` : "Bloquear por facturas impagas (Jefe DCO)"}>
+                {row.bloqueado ? "Desbloquear" : "Bloquear"}
+              </button>
+            </>
+          )}
         </>
       )}
       recurso="clientes"
@@ -162,7 +172,7 @@ export default function ClientesPage() {
     />
     {plantasDe && <Plantas cliente={plantasDe} onCerrar={() => setPlantasDe(null)} />}
     {historialDe && <HistorialCliente cliente={historialDe} onCerrar={() => setHistorialDe(null)} />}
-    {verMorosos && <ClientesMorosos onCerrar={() => setVerMorosos(false)} onElegir={(c) => { setVerMorosos(false); setBloqueoDe(c); }} />}
+    {verMorosos && <ClientesMorosos onCerrar={() => setVerMorosos(false)} onElegir={puedeBloquear ? (c) => { setVerMorosos(false); setBloqueoDe(c); } : undefined} />}
     {bloqueoDe && <BloqueoCliente cliente={bloqueoDe} onCerrar={() => setBloqueoDe(null)} onHecho={() => { setBloqueoDe(null); setVersion((v) => v + 1); }} />}
     </>
   );

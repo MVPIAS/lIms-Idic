@@ -82,7 +82,8 @@ export function BloqueoCliente({ cliente, onCerrar, onHecho }: { cliente: Client
   );
 }
 
-export function ClientesMorosos({ onCerrar, onElegir }: { onCerrar: () => void; onElegir: (c: ClienteRef) => void }) {
+/** Sin `onElegir` (quien no tiene cliente.bloquear) la lista es de solo consulta. */
+export function ClientesMorosos({ onCerrar, onElegir }: { onCerrar: () => void; onElegir?: (c: ClienteRef) => void }) {
   const [filas, setFilas] = useState<any[] | null>(null);
   const [error, setError] = useState("");
   const cargar = useCallback(() => llamar<any[]>("GET", "/clientes/morosos").then(setFilas).catch((e) => setError(e.message)), []);
@@ -101,7 +102,7 @@ export function ClientesMorosos({ onCerrar, onElegir }: { onCerrar: () => void; 
               <td className="num">{clp(c.morosidad.montoVencido)}</td>
               <td className="num">{c.morosidad.diasMoraMax || "—"}</td>
               <td>{c.bloqueado ? <span className="pill red">bloqueado</span> : <span className="pill amber">propuesto</span>}</td>
-              <td><button className="btn outline sm" onClick={() => onElegir(c)}>{c.bloqueado ? "Desbloquear…" : "Bloquear…"}</button></td>
+              <td>{onElegir && <button className="btn outline sm" onClick={() => onElegir(c)}>{c.bloqueado ? "Desbloquear…" : "Bloquear…"}</button>}</td>
             </tr>
           ))}
           {filas && !filas.length && <tr><td colSpan={6} style={{ textAlign: "center", color: "var(--muted)", padding: 18 }}>No hay clientes con facturas impagas vencidas ni bloqueados.</td></tr>}
