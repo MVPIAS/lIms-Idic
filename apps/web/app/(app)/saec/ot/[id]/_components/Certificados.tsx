@@ -142,13 +142,17 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
   const conCert = d.armas.filter((a) => a.certificado);
   const [marcadas, setMarcadas] = useState<Set<string>>(new Set());
   const [ocupado, setOcupado] = useState(false);
+  // F041: las armas que no se pudieron emitir quedan explicadas en pantalla (no solo en un aviso que se borra).
+  const [fallos, setFallos] = useState<string[]>([]);
   const puede = d.puedo.emitir && d.ot.abierta;
 
   async function emitir() {
     setOcupado(true);
+    setFallos([]);
     const r = await accion("POST", `/d11/ot/${d.ot.id}/certificados`, { armaOtIds: [...marcadas] }, `Certificados emitidos: quedan en firma según la matriz de la D11.`);
     if (r) {
       setMarcadas(new Set());
+      setFallos(r.fallos ?? []);
       for (const f of r.fallos ?? []) toast.error(f);
     }
     setOcupado(false);
@@ -167,6 +171,12 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
           Un certificado por arma, con vigencia de <b>{d.config.vigenciaAnios} años</b> desde la emisión, código de verificación con QR y huella SHA-256.
           Se emiten en bloque: el sistema reserva un rango de números y los deja en firma según la matriz de firmas de la D11.
         </p>
+        {fallos.length > 0 && (
+          <div className="alert warn" role="alert">
+            No se emitió el certificado de {fallos.length} arma(s); siguen en la lista para emitirlas de nuevo:
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{fallos.map((f) => <li key={f}>{f}</li>)}</ul>
+          </div>
+        )}
         {certificables.length === 0 ? (
           <p className="subtitle" style={{ margin: 0 }}>No hay armas listas para certificar (aprobadas, que cumplen y acuñadas si corresponde).</p>
         ) : (
