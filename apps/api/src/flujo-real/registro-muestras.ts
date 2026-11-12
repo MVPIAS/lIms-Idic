@@ -216,3 +216,38 @@ export function erroresRegistro(
   }
   return errores;
 }
+
+/* ------------------- métodos agregados a una muestra ya recepcionada (F064) --- */
+
+/** Perfiles de recepción que agregan métodos a una muestra recibida (además de las jefaturas, con ot.asignar). */
+export const ROLES_RECEPCION = ["RECEPCION", "PLANIFICACION"] as const;
+
+/** ¿Puede agregar métodos a una muestra ya recepcionada? Recepción o jefatura (con muestra.crear). */
+export function puedeAgregarMetodos(u: { roles?: string[] | null; permisos?: string[] | null }): boolean {
+  const roles = u.roles ?? [];
+  const permisos = u.permisos ?? [];
+  if (roles.includes("SUPERADMIN")) return true;
+  if (!permisos.includes("muestra.crear")) return false;
+  return permisos.includes("ot.asignar") || roles.some((r) => (ROLES_RECEPCION as readonly string[]).includes(r));
+}
+
+/** Qué impide agregar los métodos (lista vacía = se puede). */
+export function erroresAgregarMetodos(
+  otEstado: string,
+  metodoIds: string[],
+  yaEnMuestra: string[],
+  metodos: Map<string, MetodoCatalogo>,
+  motivo: string | null | undefined,
+): string[] {
+  const e: string[] = [];
+  if (otEstado === "cerrada" || otEstado === "anulada") e.push(`La OT está ${otEstado}: no se agregan métodos a sus muestras.`);
+  if (!metodoIds.length) e.push("Elija al menos un método.");
+  if (!motivo || motivo.trim().length < 5) e.push("Indique el motivo (queda en el historial de la OT).");
+  for (const id of metodoIds) {
+    const m = metodos.get(id);
+    if (!m) e.push(`El método ${id} no existe en el catálogo o está inactivo.`);
+    else if (m.analitos === 0) e.push(`El método ${m.codigo} · ${m.nombre} no tiene analitos en el catálogo: no genera ensayos por analizar.`);
+    else if (yaEnMuestra.includes(id)) e.push(`El método ${m.codigo} · ${m.nombre} ya está en la muestra.`);
+  }
+  return e;
+}

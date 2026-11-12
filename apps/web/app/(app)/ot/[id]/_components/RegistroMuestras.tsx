@@ -36,6 +36,7 @@ import { etiquetaClase, fechaDma, metodosDeLaMuestra, textoValor, type ConfigRec
 import { ahoraInputChile } from "@/lib/fecha-chile";
 import FormRecepcion, { RECEPCION_VACIA, cuerpoRecepcion, faltantesRecepcion, type DatosRecepcion } from "./FormRecepcion";
 import FotosRecepcion from "./FotosRecepcion";
+import AgregarMetodosMuestra from "./AgregarMetodosMuestra";
 
 interface Metodo {
   id: string; codigo: string; nombre: string; norma?: string | null; ensayoId?: string | null; analitos: number;
@@ -167,7 +168,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   /** Tras recepcionar: siguiente paso «asignar y ejecutar» (pestaña Asignación). */
   onRecepcionado?: () => void;
 }) {
-  const { puede } = usePermisos();
+  const { puede, roles } = usePermisos();
   const [d, setD] = useState<Propuesta | null>(null);
   const [error, setError] = useState("");
   const [abierto, setAbierto] = useState(false);
@@ -392,6 +393,8 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
 
   const cerrada = ["cerrada", "anulada"].includes(d.ot.estado);
   const puedeRegistrar = puede("muestra.crear") && !cerrada;
+  // F064: agregar métodos a una muestra recepcionada · Recepción o jefatura (la API lo vuelve a comprobar).
+  const puedeAgregarMetodos = puedeRegistrar && (puede("ot.asignar") || roles.some((r) => ["RECEPCION", "PLANIFICACION", "SUPERADMIN"].includes(r)));
   const incompletas = d.muestras.filter((m) => m.recepcionIncompleta).length;
   const sinNumero = d.muestras.filter((m) => !m.numeroInterno).length;
   const camposLab = cfg?.campos.filter((c) => !["clase_custodia", "ubicacion"].includes(c.codigo)) ?? [];
@@ -589,6 +592,9 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                 <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} ubicaciones={d.ubicaciones} labPrincipalId={d.ot.unidadPrincipal}
                   config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} recepcionAt={m.recepcionadaAt} />
                 <FotosRecepcion otId={otId} muestraId={m.id} codigo={m.codigo} puedeEditar={puedeRegistrar} onCambio={() => { cargar(); avisarCambio(); }} />
+                {puedeAgregarMetodos && (
+                  <AgregarMetodosMuestra otId={otId} muestraId={m.id} codigo={m.codigo} yaEnMuestra={m.metodos ?? []} onAgregado={() => { cargar(); avisarCambio(); }} />
+                )}
                 <div className="toolbar" style={{ margin: "8px 0 0" }}>
                   <span style={{ fontSize: 11.5, color: "var(--muted)" }}>El cambio queda en el historial de la OT con lo anterior y lo nuevo.</span>
                   <div className="spacer" />

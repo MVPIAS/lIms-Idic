@@ -132,3 +132,21 @@ describe("recepción de una cotización por muestra (F026, F062)", () => {
     expect(metodosDeLaMuestra(null, marcados, lineas)).toEqual(marcados);
   });
 });
+
+describe("agregar métodos a una muestra ya recepcionada (F064)", () => {
+  const { puedeAgregarMetodos, erroresAgregarMetodos } = require("./registro-muestras") as typeof import("./registro-muestras");
+  it("lo hace Recepción o la jefatura (con permiso de recepción), no el analista", () => {
+    expect(puedeAgregarMetodos({ roles: ["RECEPCION"], permisos: ["muestra.crear"] })).toBe(true);
+    expect(puedeAgregarMetodos({ roles: ["JEFE_LAB"], permisos: ["muestra.crear", "ot.asignar"] })).toBe(true);
+    expect(puedeAgregarMetodos({ roles: ["ANALISTA"], permisos: ["muestra.crear"] })).toBe(false);
+    expect(puedeAgregarMetodos({ roles: ["DIRECTOR"], permisos: ["ot.asignar"] })).toBe(false);
+    expect(puedeAgregarMetodos({ roles: ["SUPERADMIN"], permisos: [] })).toBe(true);
+  });
+  it("exige motivo, métodos con analitos y que no estén ya en la muestra", () => {
+    const cat = new Map([["m-hum", met("m-hum", "e-hum")], ["m-sin", met("m-sin", "e-x", 0)]]);
+    expect(erroresAgregarMetodos("en_proceso", ["m-hum"], [], cat, "Se omitió al recepcionar")).toEqual([]);
+    expect(erroresAgregarMetodos("en_proceso", ["m-hum"], ["m-hum"], cat, "Se omitió al recepcionar")[0]).toMatch(/ya está en la muestra/);
+    expect(erroresAgregarMetodos("en_proceso", ["m-sin"], [], cat, "Se omitió al recepcionar")[0]).toMatch(/no tiene analitos/);
+    expect(erroresAgregarMetodos("cerrada", [], [], cat, "")).toHaveLength(3);
+  });
+});
