@@ -105,6 +105,12 @@ export interface CrudTableProps {
   accionesFila?: (row: any) => React.ReactNode;
 }
 
+/**
+ * La API marca `enAlcance: false` en los registros de un laboratorio que el usuario no
+ * tiene asignado (p. ej. Métodos, F061): se ven, pero sin «Editar» ni «Eliminar».
+ */
+const fueraDeAlcance = (row: any) => row?.enAlcance === false;
+
 const mapPorDefecto = (row: any) => {
   const codigo = row.codigo ?? row.cgrupo ?? row.cntlroom ?? row.codsucdel ?? null;
   const nombre = row.nombre ?? row.razonSocial ?? row.descripcion ?? null;
@@ -390,7 +396,7 @@ export default function CrudTable({
   function celdaRender(row: any, c: Columna) {
     const contenido = c.render ? c.render(row[c.key], row) : (row[c.key] ?? "—");
     const cfg = cfgCelda(c);
-    if (!cfg || !puedeEditar) return contenido;
+    if (!cfg || !puedeEditar || fueraDeAlcance(row)) return contenido;
     const enEdicion = celda?.id === String(row.id) && celda.key === c.key;
     if (!enEdicion) {
       return (
@@ -549,8 +555,8 @@ export default function CrudTable({
         acciones={puedeEditar || puedeEliminar || accionesFila ? (row) => (
           <div style={{ display: "inline-flex", gap: 6, justifyContent: "flex-end" }}>
             {accionesFila?.(row)}
-            {puedeEditar && <button type="button" className="btn outline sm" onClick={() => abrirEditar(row)}>Editar</button>}
-            {puedeEliminar && (
+            {puedeEditar && !fueraDeAlcance(row) && <button type="button" className="btn outline sm" onClick={() => abrirEditar(row)}>Editar</button>}
+            {puedeEliminar && !fueraDeAlcance(row) && (
               <button type="button" className="btn ghost-danger sm"
                 disabled={borrandoId === String(row.id)} onClick={() => eliminar(row)}>
                 {borrandoId === String(row.id) ? "Eliminando…" : "Eliminar"}

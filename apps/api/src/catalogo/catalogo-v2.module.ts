@@ -28,6 +28,8 @@ import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { RecursoDeLaboratorio } from "../rbac/alcance-catalogo.guard";
+import { AlcanceService } from "../rbac/alcance.service";
+import { marcarEnAlcance } from "./en-alcance";
 
 /**
  * =============================================================================
@@ -322,7 +324,30 @@ export const CatMetodoUpdate = CatMetodoBase.partial().superRefine(factorComplet
 export class CatMetodoController extends BaseCrudController {
   protected createSchema = CatMetodoCreate;
   protected updateSchema = CatMetodoUpdate;
-  constructor(protected svc: CatMetodoService, private readonly prisma: PrismaService) { super(); }
+  constructor(protected svc: CatMetodoService, private readonly prisma: PrismaService, private readonly alcance: AlcanceService) { super(); }
+
+  /**
+   * Métodos (de esta página) que el usuario puede modificar: con catalogo.gestionar
+   * global, todos; acotado, los de un ensayo de su laboratorio (misma regla que
+   * AlcanceCatalogoGuard). null = todos.
+   */
+  private async idsEnAlcance(req: any, ids: string[]): Promise<Set<string> | null> {
+    const a = await this.alcance.alcancePermisos(req, ["catalogo.gestionar"]);
+    if (a.esGlobal) return null;
+    if (!ids.length || !a.unidadIds.length) return new Set();
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT m.id::text AS id
+         FROM cat_metodo m
+         JOIN cat_ensayo e ON e.id = m.ensayo_id
+         JOIN cat_familia f ON f.id = e.familia_id
+         JOIN unidad u ON u.tenant_id = f.tenant_id
+                      AND f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))
+        WHERE m.id = ANY($1::uuid[]) AND u.id = ANY($2::uuid[])`,
+      ids,
+      a.unidadIds,
+    );
+    return new Set(filas.map((f) => f.id));
+  }
 
   /** Listado con la revisión vigente de cada método (columna «Rev.», contrato §4.3.3). */
   @Get()
@@ -334,7 +359,10 @@ export class CatMetodoController extends BaseCrudController {
   ) {
     const r: any = await super.listar(page, limit, search, req);
     const revs = await revisionesActuales(this.prisma as any, (r?.data ?? []).map((m: any) => m.id));
-    return { ...r, data: (r?.data ?? []).map((m: any) => ({ ...m, revision: revs.get(m.id) ?? null })) };
+    // F061: cada fila dice si el usuario puede modificarla (la pantalla no ofrece Editar en los ajenos).
+    const enAlcance = req?.user?.sub ? await this.idsEnAlcance(req, (r?.data ?? []).map((m: any) => m.id)).catch(() => null) : null;
+    const data = marcarEnAlcance((r?.data ?? []).map((m: any) => ({ ...m, revision: revs.get(m.id) ?? null })), enAlcance);
+    return { ...r, data };
   }
 
   /** Alta: nace la revisión 1 del método (quién y cuándo). */

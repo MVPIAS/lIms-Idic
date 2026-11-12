@@ -63,10 +63,13 @@ export default function MetodosCatPage() {
           <button type="button" className="btn outline sm" onClick={() => setHistorial({ id: String(row.id), codigo: String(row.codigo ?? "") })}>
             Historial de versiones
           </button>{" "}
-          <button type="button" className="btn outline sm" title="Decimales del resultado (redondeo) y condiciones ambientales en la captura"
-            onClick={() => setReglas({ id: String(row.id), codigo: String(row.codigo ?? "") })}>
-            Resultado y condiciones
-          </button>
+          {/* Solo en los métodos de su laboratorio (o todos, con alcance global): F061. */}
+          {row.enAlcance !== false && (
+            <button type="button" className="btn outline sm" title="Decimales del resultado (redondeo) y condiciones ambientales en la captura"
+              onClick={() => setReglas({ id: String(row.id), codigo: String(row.codigo ?? "") })}>
+              Resultado y condiciones
+            </button>
+          )}
         </>
       )}
     />
