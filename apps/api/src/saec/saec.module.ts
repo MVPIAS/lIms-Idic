@@ -2059,6 +2059,8 @@ export class IbisController extends SaecBase {
       `SELECT i.id, i.nombre_archivo, i.hash_sha256, i.tamano_bytes, i.version_esi, i.estado,
               i.casos_creados, i.casos_actualizados, i.evidencias_creadas, i.evidencias_actualizadas,
               i.hits_creados, i.peritajes_creados, i.eliminados, i.errores, i.bitacora,
+              -- F042: origen del archivo (manual o carpeta) y armas que trajo, para el «Registro de XML cargados».
+              i.origen_barrido, i.resultados_creados,
               i.created_at, u.nombre_completo AS importado_por_nombre
          FROM ibis_importacion i
          LEFT JOIN usuario u ON u.id = i.importado_por
@@ -3072,9 +3074,13 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
       conError: resultados.filter((r) => r.estado === "error").length,
       at: new Date().toISOString(),
     };
+    // F042: sin fila de configuración (carpetas por defecto) el UPDATE no dejaba constancia:
+    // se crea con las carpetas usadas y se anota el último barrido.
     await this.prisma.$executeRawUnsafe(
-      `UPDATE configuracion_ibis SET ultimo_barrido_at = now(), ultimo_barrido_res = $2::jsonb WHERE tenant_id = $1::uuid`,
-      tenantId, JSON.stringify(resumen),
+      `INSERT INTO configuracion_ibis (tenant_id, carpeta_entrada, carpeta_procesados, carpeta_errores, activo, ultimo_barrido_at, ultimo_barrido_res)
+       VALUES ($1::uuid, $3, $4, $5, true, now(), $2::jsonb)
+       ON CONFLICT (tenant_id) DO UPDATE SET ultimo_barrido_at = now(), ultimo_barrido_res = EXCLUDED.ultimo_barrido_res`,
+      tenantId, JSON.stringify(resumen), cfg.carpeta_entrada, cfg.carpeta_procesados, cfg.carpeta_errores,
     ).catch(() => undefined);
     await this.auditar(req, "ibis", null, "importar", { barrido: resumen });
     return { ...resumen, resultados };
