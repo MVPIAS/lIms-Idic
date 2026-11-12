@@ -153,7 +153,8 @@ export default function SeguimientoOt({ otId, onCambio }: { otId: string; onCamb
               setDialogo("envio");
             }}>Registrar envío</button>
           )}
-          {d.puedo.oficio && <Link href={`/oficios/nuevo?ot=${otId}` as any} className="btn outline sm">Oficio conductor…</Link>}
+          {/* Solo con un documento oficial que conducir (F095). */}
+          {d.puedo.oficio && oficiales.length > 0 && <Link href={`/oficios/nuevo?ot=${otId}` as any} className="btn outline sm">Oficio conductor…</Link>}
         </h3>
         {d.registros.length || d.envios.length || d.oficios.length ? (
           <div style={{ overflowX: "auto" }}>
