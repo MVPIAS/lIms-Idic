@@ -12,7 +12,7 @@ import { useState } from "react";
 import RequierePermiso from "@/components/RequierePermiso";
 import { llamar } from "@/lib/laboratorio";
 import { abrirDocumento } from "@/lib/bpchProcesos";
-import { fechaHora } from "@/lib/format";
+import { fechaDia, fechaHora } from "@/lib/format";
 
 interface Prestamo {
   codigo: string;
@@ -133,7 +133,7 @@ function DondeEsta() {
                   {f.prestamo.organismo ? ` a ${f.prestamo.organismo}` : ""}
                   {f.prestamo.receptor || f.prestamo.solicitante ? ` (${f.prestamo.receptor ?? f.prestamo.solicitante})` : ""}
                   {f.prestamo.entregado ? ` · desde ${fechaHora(f.prestamo.entregado)}` : ""}
-                  {f.prestamo.devolucion ? ` · devolución prevista ${String(f.prestamo.devolucion).slice(0, 10)}` : ""} · solicitud {f.prestamo.codigo}
+                  {f.prestamo.devolucion ? ` · devolución prevista ${fechaDia(f.prestamo.devolucion)}` : ""} · solicitud {f.prestamo.codigo}
                   {prestada && f.ubicacion ? <span style={{ color: "var(--muted)" }}> · su lugar: {f.ubicacion}</span> : null}
                 </div>
               ) : null}
