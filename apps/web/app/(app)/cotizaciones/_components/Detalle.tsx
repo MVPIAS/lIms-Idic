@@ -115,7 +115,7 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
       {cot.sinOtMotivo && (
         <div className="alert info">Aceptada sin OT por excepción: {cot.sinOtMotivo}. No aparece en el aviso «aceptadas sin OT».</div>
       )}
-      {cot.ot?.opiPendiente && (
+      {cot.ot?.opiPendiente && cot.ot?.estado !== "anulada" && (
         <div className="alert warn">La OT {cot.ot.codigo} está con <b>OPI pendiente</b> (disposición del Director con cobro). Registre la OPI en la OT.</div>
       )}
       {acciones.motivoNoAceptar && (
