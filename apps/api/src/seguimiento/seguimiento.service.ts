@@ -10,7 +10,7 @@
  *   · Carpeta de Trabajo (EP-05 9.3, contrato §4.6.2).
  * Todo se acota a la OT del alcance del usuario.
  */
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
@@ -31,7 +31,8 @@ import {
   estadoCorreo,
   type DestinoDespacho,
 } from "../avisos/reglas-avisos";
-import { faltaOficio, seguimientoDocumento } from "./datos-seguimiento";
+import { faltaOficio, receptorDe, seguimientoDocumento } from "./datos-seguimiento";
+import { MSG_RECIBIR_DESPACHO, puedeRecibirDespacho } from "./recibir-despacho";
 import { SQL_ZONA, diaChile } from "../common/fecha-chile";
 
 const OFICIAL = ["oficial", "emitido"];
@@ -376,6 +377,14 @@ export class SeguimientoService {
 
   async recibirDespacho(certId: string, req: any) {
     const c = await this.documento(certId, req);
+    // F015: el despacho lo da por recibido su destino (DCO = Comercial), no quien remitió.
+    const [pend] = await this.prisma.$queryRawUnsafe<{ destino: string; unidad: string | null }[]>(
+      `SELECT d.destino, u.codigo AS unidad FROM documento_despacho d LEFT JOIN unidad u ON u.id = d.unidad_destino_id
+        WHERE d.certificado_id = $1::uuid AND d.recibido_at IS NULL`,
+      c.id,
+    );
+    if (pend && !puedeRecibirDespacho(pend.destino, await receptorDe(this.prisma, req), pend.unidad))
+      throw new ForbiddenException(MSG_RECIBIR_DESPACHO[pend.destino] ?? "Este despacho lo da por recibido su destino.");
     const n = await this.prisma.$executeRawUnsafe(
       `UPDATE documento_despacho SET recibido_at = now(), recibido_por = $2::uuid WHERE certificado_id = $1::uuid AND recibido_at IS NULL`,
       c.id,

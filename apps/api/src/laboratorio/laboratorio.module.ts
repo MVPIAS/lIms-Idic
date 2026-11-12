@@ -9,6 +9,7 @@ import {
   ConflictException,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   Module,
   NotFoundException,
@@ -22,6 +23,8 @@ import {
   Injectable,
 } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
+import { errorQuitarDeBateria } from "../bpch/comun/bateria";
+import { otEsBpch } from "../bpch/cabecera/cabecera-ot";
 import { variablesDeCaptura } from "./captura-estandar";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
@@ -1263,6 +1266,22 @@ export class ResultadoController extends BaseCrudController {
     if (!actual) throw new NotFoundException(`Resultado ${id} no encontrado`);
     const bloqueo = motivoNoQuitable(actual.estado);
     if (bloqueo) throw new ConflictException(bloqueo);
+    // F007 (R4): en el BPCH, un ensayo de la batería del elemento solo se quita como excepción autorizada.
+    const [b] = await this.prisma.$queryRawUnsafe<{ unidad: string | null; enBateria: boolean; ensayo: string | null }[]>(
+      `SELECT o.unidad_principal AS unidad, cm.codigo AS ensayo,
+              EXISTS (SELECT 1 FROM cat_panel p
+                       WHERE p.elemento_id = COALESCE(m.cat_elemento_id, o.cat_elemento_id) AND p.metodo_id = r.cat_metodo_id
+                         AND p.deleted_at IS NULL AND p.activo) AS "enBateria"
+         FROM resultado r JOIN orden_trabajo o ON o.id = r.ot_id
+         LEFT JOIN muestra m ON m.id = r.muestra_id LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
+        WHERE r.id = $1::uuid`,
+      id,
+    );
+    if (b?.enBateria) {
+      const permitido = (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("bpch.bateria.excepcion");
+      const error = errorQuitarDeBateria({ esBpch: await otEsBpch(this.prisma, b.unidad), enBateria: true, permitido, ensayo: b.ensayo });
+      if (error) throw new ForbiddenException(error);
+    }
     await conTraza(this.prisma, { usuarioId: req?.user?.sub, motivo, origen: "eliminacion" }, (tx) => tx.resultado.delete({ where: { id } }));
     const veredictoMuestra = await recalcularVeredictoMuestra(this.prisma, actual.muestraId);
     return { id, quitado: true, motivo, veredictoMuestra };

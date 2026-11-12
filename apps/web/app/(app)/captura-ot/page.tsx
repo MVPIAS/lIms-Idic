@@ -556,12 +556,18 @@ export default function CapturaOtPage() {
   async function accionOt(que: "revisar" | "aprobar") {
     if (!ot) return;
     const n = que === "revisar" ? porRevisarAjenos : porAprobarAjenos;
+    // F011: un No cumple abre un re-análisis; hasta repetir la determinación no se revisa ni se aprueba.
+    const etapa = que === "revisar" ? ["capturado"] : ["revisado_n1", "capturado"];
+    const conReanalisis = filas.filter((f) => etapa.includes(f.estado) && f.reanalisis?.estado === "solicitado").length;
+    const avisoReanalisis = conReanalisis
+      ? ` ${conReanalisis} ensayo(s) con re-análisis pendiente (un No cumple abre uno) quedan fuera: repita la determinación y capture el nuevo valor, o que la jefatura descarte el re-análisis con su motivo; después se ${que === "revisar" ? "revisan" : "aprueban"}.`
+      : "";
     const ok = await confirmar({
       titulo: que === "revisar" ? `¿Revisar ${n} resultado(s) de la OT ${ot.codigo}?` : `¿Aprobar ${n} resultado(s) de la OT ${ot.codigo}?`,
       mensaje:
-        que === "revisar"
+        (que === "revisar"
           ? "Quedan revisados con su nombre, fecha y hora. Lo revisado ya no se corrige sin devolverlo."
-          : "Quedan aprobados con su nombre, fecha y hora. Lo aprobado solo se corrige reabriéndolo con motivo (anula los informes emitidos).",
+          : "Quedan aprobados con su nombre, fecha y hora. Lo aprobado solo se corrige reabriéndolo con motivo (anula los informes emitidos).") + avisoReanalisis,
       confirmarTexto: que === "revisar" ? "Revisar" : "Aprobar",
     });
     if (!ok) return;
@@ -570,7 +576,10 @@ export default function CapturaOtPage() {
     try {
       const r = await llamar<{ hechos: number; omitidos: { id: string; motivo: string }[]; deOtrosLaboratorios?: number }>("POST", `/resultados/ot/${ot.id}/${que}`);
       setOmitidos(r.omitidos ?? []);
-      toast.ok(`${r.hechos} resultado${r.hechos === 1 ? "" : "s"} ${que === "revisar" ? "revisado" : "aprobado"}${r.hechos === 1 ? "" : "s"}.${r.omitidos?.length ? ` ${r.omitidos.length} omitido(s).` : ""}`);
+      toast.ok(`${r.hechos} resultado${r.hechos === 1 ? "" : "s"} ${que === "revisar" ? "revisado" : "aprobado"}${r.hechos === 1 ? "" : "s"}.`);
+      // F011: lo que quedó fuera se explica (p. ej. el No cumple con re-análisis pendiente), no solo se cuenta.
+      if (r.omitidos?.length)
+        toast.error(`${r.omitidos.length} sin ${que === "revisar" ? "revisar" : "aprobar"}: ${[...new Set(r.omitidos.map((o) => o.motivo))].join(" ")}`);
       await cargar();
     } catch (e: any) {
       toast.error(e.message);

@@ -25,6 +25,7 @@ import { useEffect, useMemo, useState } from "react";
 import { money, fechaDia, rut as fmtRut } from "@/lib/format";
 import { pedir, GRUPOS_CC, hoyISO, type ConfigCotizacion, type Opcion } from "./comercial";
 import { toast } from "@/components/ui/feedback";
+import { montoCl } from "@/lib/monto-cl";
 
 type Cliente = { id: string; razonSocial?: string; rut?: string; tipo?: string | null; bloqueado?: boolean | null; motivoBloqueo?: string | null };
 /** Muestra de la cotización (reunión 5): producto del catálogo elegido antes que los ensayos (reunión 3). */
@@ -405,7 +406,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       : null;
   /** Ensayo sin precio en lista ni ficha: se cotiza con precio manual y motivo. */
   const sinPrecio = (l: LineaForm) => !!l.catEnsayoId && !conserva(l) && !(Number(l.precioBase) > 0);
-  const precioManual = (l: LineaForm) => Number(String(l.manual?.precio ?? "").replace(",", ".")) || 0;
+  const precioManual = (l: LineaForm) => montoCl(l.manual?.precio ?? "") || 0;
   const manualCompleto = (l: LineaForm) => precioManual(l) > 0 && (l.manual?.motivo.trim().length ?? 0) >= MIN_MOTIVO_MANUAL;
   const setManual = (i: number, x: Partial<{ precio: string; motivo: string }>) =>
     setLineas((ls) => ls.map((l, j) => (j === i ? { ...l, manual: { precio: "", motivo: "", ...l.manual, ...x } } : l)));
@@ -523,7 +524,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       .catch(() => setEnsayosProducto([]));
   }, [productoDestino]);
   function agregarReferencial() {
-    const valor = Number(String(rValor).replace(/\./g, "").replace(",", "."));
+    const valor = montoCl(rValor) ?? Number.NaN;
     if (!rDesc.trim()) return setError("Describa el valor referencial (p. ej. «Campaña de ensayos en terreno, 10 días»).");
     if (!(valor > 0)) return setError("Indique el monto referencial.");
     setError("");
@@ -531,7 +532,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     setRDesc(""); setRValor("");
   }
   function agregarGasto() {
-    const valor = Number(String(gValor).replace(",", "."));
+    const valor = montoCl(gValor) ?? Number.NaN;
     if (!gDesc.trim()) return setError("Describa el gasto (p. ej. «Viático Arica, 2 días»).");
     if (!(valor > 0)) return setError("Indique el valor del gasto.");
     setError("");

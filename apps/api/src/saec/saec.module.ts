@@ -52,6 +52,7 @@ import { anioChile, hoyChile, SQL_ZONA, diaChile, fechaChile, instanteDeHoraChil
 import { escapeHtml, fmtFechaHora } from "../plantilla-render/html.util";
 import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 import { urlVerificacionBase } from "../common/url-verificacion";
+import { fechaEsi } from "./fecha-ibis";
 import {
   NOMBRE_TIPO_PERITAJE,
   RUC_RE,
@@ -367,12 +368,7 @@ function boolEsi(v: string | null): boolean | null {
   return null;
 }
 
-/** ISO-8601/UTC según el Anexo C. Devuelve null si no es una fecha válida. */
-function fechaEsi(v: string | null): string | null {
-  if (!v) return null;
-  const d = new Date(v.trim());
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
+/* ISO-8601/UTC según el Anexo C: fechaEsi (fecha-ibis.ts) interpreta la hora sin zona en hora de Chile (F038). */
 
 function intEsi(v: string | null): number {
   const x = parseInt((v ?? "").trim(), 10);
@@ -2063,6 +2059,8 @@ export class IbisController extends SaecBase {
       `SELECT i.id, i.nombre_archivo, i.hash_sha256, i.tamano_bytes, i.version_esi, i.estado,
               i.casos_creados, i.casos_actualizados, i.evidencias_creadas, i.evidencias_actualizadas,
               i.hits_creados, i.peritajes_creados, i.eliminados, i.errores, i.bitacora,
+              -- F042: origen del archivo (manual o carpeta) y armas que trajo, para el «Registro de XML cargados».
+              i.origen_barrido, i.resultados_creados,
               i.created_at, u.nombre_completo AS importado_por_nombre
          FROM ibis_importacion i
          LEFT JOIN usuario u ON u.id = i.importado_por
@@ -3076,9 +3074,13 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
       conError: resultados.filter((r) => r.estado === "error").length,
       at: new Date().toISOString(),
     };
+    // F042: sin fila de configuración (carpetas por defecto) el UPDATE no dejaba constancia:
+    // se crea con las carpetas usadas y se anota el último barrido.
     await this.prisma.$executeRawUnsafe(
-      `UPDATE configuracion_ibis SET ultimo_barrido_at = now(), ultimo_barrido_res = $2::jsonb WHERE tenant_id = $1::uuid`,
-      tenantId, JSON.stringify(resumen),
+      `INSERT INTO configuracion_ibis (tenant_id, carpeta_entrada, carpeta_procesados, carpeta_errores, activo, ultimo_barrido_at, ultimo_barrido_res)
+       VALUES ($1::uuid, $3, $4, $5, true, now(), $2::jsonb)
+       ON CONFLICT (tenant_id) DO UPDATE SET ultimo_barrido_at = now(), ultimo_barrido_res = EXCLUDED.ultimo_barrido_res`,
+      tenantId, JSON.stringify(resumen), cfg.carpeta_entrada, cfg.carpeta_procesados, cfg.carpeta_errores,
     ).catch(() => undefined);
     await this.auditar(req, "ibis", null, "importar", { barrido: resumen });
     return { ...resumen, resultados };
@@ -3369,7 +3371,23 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
       return { n, evidencias };
     });
     await this.auditar(req, "ibis", otId, "editar", { asignados: asignados.n, evidencias: asignados.evidencias, otId, accion: "adjuntar_ibis" });
-    return { data: { otId, asignados: asignados.n, evidenciasCreadas: asignados.evidencias } };
+    // F039: armas de la OT ya certificadas «Pendiente de IBIS»: el certificado debe reemitirse.
+    const porReemitir = await this.prisma.$queryRawUnsafe<{ numero: string }[]>(
+      `SELECT DISTINCT COALESCE(c.numero, c.codigo) AS numero
+         FROM certificado c
+         JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
+         JOIN d11_arma_ot ao ON ao.id = ca.arma_ot_id
+        WHERE c.ot_id = $1::uuid AND c.tenant_id = $2::uuid AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'
+          AND c.estado IN ('en_firma', 'oficial', 'emitido') AND c.documento_html LIKE '%Pendiente de IBIS%'
+          AND EXISTS (SELECT 1 FROM ibis_resultado ir WHERE ir.arma_id = ao.arma_id AND ir.estado = 'asignado' AND ir.deleted_at IS NULL)`,
+      otId, tenantId,
+    ).catch(() => [] as { numero: string }[]);
+    if (porReemitir.length)
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'd11_ibis_por_reemitir', $3::jsonb, $4::uuid)`,
+        tenantId, otId, JSON.stringify({ certificados: porReemitir.map((p) => p.numero) }), req?.user?.sub ?? null,
+      ).catch(() => undefined);
+    return { data: { otId, asignados: asignados.n, evidenciasCreadas: asignados.evidencias, certificadosPorReemitir: porReemitir.map((p) => p.numero) } };
   }
 
   /**

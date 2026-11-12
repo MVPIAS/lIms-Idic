@@ -1,5 +1,6 @@
 "use client";
 import { hoyChile } from "@/lib/fecha-chile";
+import { montoCl } from "@/lib/monto-cl";
 
 /**
  * Helpers de las pantallas BPCH (Internación, Reinspección, Codificación Única).
@@ -67,8 +68,5 @@ export const dia = (v: unknown) => (v ? String(v).slice(0, 10) : "");
 
 /** Número de un input («1.482» o «1482,5») o null. */
 export function numero(v: string): number | null {
-  const t = v.trim();
-  if (!t) return null;
-  const n = Number(t.includes(",") ? t.replace(/\./g, "").replace(",", ".") : t);
-  return Number.isFinite(n) ? n : null;
+  return v.trim() ? montoCl(v) : null; // «1.482» = 1482 (punto de miles): F001
 }

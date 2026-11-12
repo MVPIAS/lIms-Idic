@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
+
+/** Nombre de cada tipo de evidencia (el valor interno no se muestra). */
+const TIPO_EVIDENCIA: Record<string, string> = { vainilla: "Vaina", proyectil: "Proyectil", arma: "Arma", explosivo: "Explosivo", otro: "Otro" };
 import { usePermisos } from "@/lib/permisos";
 import { validarFormulario } from "@/lib/validate";
 import Peritajes from "./_components/Peritajes";
@@ -191,7 +194,8 @@ export default function EvidenciaFichaPage() {
       {/* --- Datos del elemento --- */}
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="form-grid">
-          <Dato lab="Tipo" val={e.tipo} />
+          {/* F046: el tipo con su nombre (no el valor interno), la marca del arma y la fecha de disparo. */}
+          <Dato lab="Tipo" val={TIPO_EVIDENCIA[e.tipo] ?? e.tipo} />
           <Dato lab="Estado" val={e.estado} />
           <Dato lab="Caso" val={e.caso?.numero_caso} />
           <Dato lab="NUE" val={e.nue} />
@@ -203,7 +207,8 @@ export default function EvidenciaFichaPage() {
           <Dato lab="Calibre" val={e.calibre_texto} />
           <Dato lab="Forma del percutor" val={e.firing_pin_shape} />
           <Dato lab="Cara de recámara" val={e.breech_face_class} />
-          <Dato lab="Marca" val={e.marca} />
+          <Dato lab="Marca" val={e.marca ?? e.arma?.marca} />
+          {e.fecha_disparo && <Dato lab="Fecha de disparo" val={fechaHora(e.fecha_disparo)} />}
           <Dato lab="Composición" val={e.composicion} />
           <Dato lab="Código de barras" val={e.codigo_barras} />
           <Dato lab="Ubicación actual" val={e.ubicacion} />

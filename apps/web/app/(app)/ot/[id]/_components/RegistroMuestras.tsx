@@ -77,6 +77,8 @@ interface Propuesta {
   ubicaciones?: { codigo: string; etiqueta: string }[];
   /** B-008: panel que la OT ya trae (producto de la OT o parametrización del prototipo). */
   panelOt?: { origen: "producto" | "prototipo"; nombre: string; parametrizacion: string | null; metodos: Metodo[] } | null;
+  /** F006: por qué la OT no trae panel (p. ej. el producto de la O/C sin elemento del catálogo). */
+  avisoPanel?: string | null;
 }
 interface FilaRegistro {
   nombre: string; ident: string; sello: string; productoId: string;
@@ -229,6 +231,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     }
     setComun(RECEPCION_VACIA);
     setExtra([]);
+    setMotivoExcepcion("");
     // B-008: el panel de la OT (producto o prototipo) llega propuesto y marcado.
     const po = d.panelOt;
     setPanel(po?.metodos.length ? [{ producto: po.origen === "prototipo" ? `${po.nombre} (panel parametrizado)` : po.nombre, metodos: po.metodos }] : []);
@@ -275,6 +278,13 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     () => new Set([...(d?.lineas ?? []).flatMap((l) => l.metodos.map((m) => m.id)), ...panel.flatMap((p) => p.metodos.map((m) => m.id))]),
     [d, panel],
   );
+  // F007 (R4): ensayos del panel propuesto que se desmarcaron. En el Banco de Pruebas la batería
+  // es fija: quitar uno exige motivo y la autorización de la jefatura (lo valida la API).
+  const [motivoExcepcion, setMotivoExcepcion] = useState("");
+  const quitadosPanel = useMemo(
+    () => panel.flatMap((p) => p.metodos).filter((m, i, xs) => m.analitos && !marcados.has(m.id) && xs.findIndex((x) => x.id === m.id) === i),
+    [panel, marcados],
+  );
   const alternar = (id: string) => setMarcados((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const agregarExtra = (m: Metodo) => {
     if (!metodosListados.has(m.id) && !extra.some((x) => x.id === m.id)) setExtra((x) => [...x, m]);
@@ -320,6 +330,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           // F026/F062: la muestra de la cotización lleva sus ensayos (y los de toda la cotización).
           metodoIds: metodosDeLaMuestra(f.muestraN, metodoIds, d?.lineas ?? []),
           ...(f.productoId ? { catElementoId: f.productoId } : {}),
+          ...(quitadosPanel.length && motivoExcepcion.trim() ? { excepcionBateria: motivoExcepcion.trim() } : {}),
           recepcion: cuerpoRecepcion({ ...comun, identificacionCliente: f.ident, selloNumero: f.sello }),
         })),
       });
@@ -672,7 +683,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           </h3>
           {d.lineas.length === 0 && panel.length === 0 && (
             <p className="subtitle" style={{ margin: "0 0 8px" }}>
-              {d.cotizacion ? "La cotización no tiene líneas." : "Esta OT no viene de una cotización."} Elija el producto para cargar su panel de ensayos, o busque los métodos en el catálogo.
+              {d.avisoPanel ?? (d.cotizacion ? "La cotización no tiene líneas." : "Esta OT no viene de una cotización.")} Elija el producto para cargar su panel de ensayos, o busque los métodos en el catálogo.
             </p>
           )}
           {d.lineas.map((l) => (
@@ -714,6 +725,14 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
             </div>
             );
           })}
+          {quitadosPanel.length > 0 && !d.cotizacion && (
+            <div className="field" style={{ marginTop: 6, maxWidth: 720 }}>
+              <label htmlFor="excepcion-bateria">Motivo para quitar {quitadosPanel.length} ensayo(s) del panel</label>
+              <input id="excepcion-bateria" value={motivoExcepcion} maxLength={1000} onChange={(e) => setMotivoExcepcion(e.target.value)}
+                placeholder="Obligatorio en el Banco de Pruebas: la batería es fija y la excepción la autoriza la jefatura" />
+              <small style={{ color: "var(--muted)" }}>Quitados: {quitadosPanel.map((m) => m.codigo || m.nombre).join(", ")}.</small>
+            </div>
+          )}
           {extra.length > 0 && (
             <div style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
               <div style={{ fontWeight: 600, fontSize: 12.5 }}>Otros métodos del catálogo</div>

@@ -30,6 +30,7 @@ import {
 } from "./reglas-emision";
 import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
 import { NumeracionService } from "./numeracion.service";
+import { PLAZO_TX_EMISION, conReintento } from "./reintento-emision";
 import { numeroGeneral } from "./numeracion";
 import {
   documentoEnConflicto,
@@ -40,7 +41,7 @@ import {
 } from "./cobertura-documento";
 import { etiquetaDe, hechosCobertura, resultadosCubiertos } from "./cobertura-ot";
 import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
-import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
+import { camposLotesImpresos, faltantesParaEmitirInspeccion, tamanoCabeceraImpreso, type LoteImpreso } from "../bpch/cabecera/reglas-cabecera";
 import { escapeHtml } from "./html.util";
 import { camposDeLaboratorio } from "../recepcion/reglas-recepcion";
 import { elegirPlantillaSugerida } from "./plantilla-sugerida";
@@ -506,6 +507,31 @@ export class PlantillaRenderService {
       const condicion = condicionFinal(muestras.map((m) => m.veredicto));
       const datos: Record<string, string> = {};
       for (const [k, v] of Object.entries(filas[0])) datos[k] = v === null || v === undefined ? "" : String(v);
+      // F014: los lotes de «Lotes de la inspección» (bpch_cabecera_lote) se imprimen todos,
+      // con su unidad y su vencimiento; sin ellos, los tamaños de la cabecera llevan su unidad.
+      const lotes = await this.prisma.$queryRawUnsafe<LoteImpreso[]>(
+        `SELECT identificacion, tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra",
+                unidad_muestra AS "unidadMuestra", to_char(vencimiento, 'YYYY-MM-DD') AS vencimiento
+           FROM bpch_cabecera_lote WHERE ot_id = $1::uuid ORDER BY orden`,
+        otId,
+      ).catch(() => [] as LoteImpreso[]);
+      const deLotes = camposLotesImpresos(lotes, datos.vencimiento_producto ?? "");
+      if (deLotes) Object.assign(datos, deLotes);
+      else {
+        const [c] = await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra", unidad_muestra AS "unidadMuestra"
+             FROM bpch_cabecera_ot WHERE ot_id = $1::uuid`,
+          otId,
+        ).catch(() => [] as any[]);
+        // F022: la reinspección guarda sus tamaños (con unidad) en su expediente.
+        const [rei] = c ? [] : await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra", unidad_muestra AS "unidadMuestra"
+             FROM bpch_reinspeccion WHERE ot_id = $1::uuid LIMIT 1`,
+          otId,
+        ).catch(() => [] as any[]);
+        const t = c ? tamanoCabeceraImpreso(c) : rei ? tamanoCabeceraImpreso(rei) : null;
+        if (t) datos.tamano_lote_muestra = t;
+      }
       return {
         ...datos,
         condicion_final: TEXTO_CONDICION[condicion],
@@ -1668,7 +1694,9 @@ export class PlantillaRenderService {
           fechaAnterior: anterior.fecha ? diaChile(anterior.fecha) : null, motivo: opts.reemision.motivo,
         })
       : null;
-    const emitido = await this.prisma.$transaction(async (tx) => {
+    // F003: plazo amplio (el render va dentro) y un reintento ante errores transitorios
+    // (transacción vencida, bloqueo o choque de número); ver reintento-emision.ts.
+    const emitido = await conReintento(() => this.prisma.$transaction(async (tx) => {
       const version = anterior && !reemplazo ? anterior.version + 1 : 1;
       const oficial = anterior && !reemplazo
         ? null
@@ -1780,7 +1808,7 @@ export class PlantillaRenderService {
 
       if (oficial?.aviso) avisos.push(oficial.aviso);
       return { cert, plantilla, otCodigo: ctx.ot.codigo, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad };
-    });
+    }, PLAZO_TX_EMISION));
 
     const sello = await this.selloDe(emitido.cert.id);
 
