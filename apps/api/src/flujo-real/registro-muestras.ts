@@ -35,6 +35,8 @@ export interface LineaCotizacionRegistro {
   ensayoNombre?: string | null;
   /** Tipo de la línea de la cotización («producto», «viatico», «pasaje», «otros»…). */
   tipo?: string | null;
+  /** Muestra de la cotización a la que va la línea (null = toda la cotización). */
+  muestraN?: number | null;
 }
 
 /**
@@ -56,6 +58,8 @@ export interface LineaPropuesta {
   sugeridos: string[];
   /** Texto para la persona cuando la línea necesita una decisión. */
   aviso: string | null;
+  /** Muestra de la cotización a la que va la línea (null = toda la cotización). */
+  muestraN?: number | null;
 }
 
 /** Propone, por cada línea de la cotización, los métodos que se aplicarían. */
@@ -75,6 +79,7 @@ export function proponerDesdeCotizacion(
         metodos: [],
         sugeridos: [],
         aviso: "Línea sin ensayo del catálogo: busque el método en el catálogo.",
+        muestraN: l.muestraN ?? null,
       };
     }
     const todos = metodosPorEnsayo.get(l.catEnsayoId) ?? [];
@@ -92,7 +97,54 @@ export function proponerDesdeCotizacion(
       metodos: todos,
       sugeridos: utiles.length === 1 ? [utiles[0].id] : [],
       aviso,
+      muestraN: l.muestraN ?? null,
     };
+  });
+}
+
+/* ------------------------- recepción de una cotización por muestra (F026, F062) --- */
+
+/** Muestra registrada en la cotización (cotizacion_muestra). */
+export interface MuestraCotizacionRegistro {
+  n: number;
+  descripcion: string;
+  catElementoId: string | null;
+  productoNombre?: string | null;
+  productoTexto?: string | null;
+}
+
+/**
+ * Muestras que la recepción propone cuando la cotización se hizo por muestra:
+ * una por cada muestra de la cotización, con su descripción, su producto y los
+ * métodos sugeridos de sus ensayos (más los de las líneas de toda la cotización).
+ */
+export function muestrasPropuestas(muestras: MuestraCotizacionRegistro[], lineas: LineaPropuesta[]) {
+  return muestras.map((m) => ({
+    n: m.n,
+    descripcion: m.descripcion,
+    catElementoId: m.catElementoId,
+    productoNombre: m.productoNombre ?? m.productoTexto ?? null,
+    lineaIds: lineas.filter((l) => l.muestraN === m.n).map((l) => l.lineaId),
+    sugeridos: [...new Set(lineas.filter((l) => l.muestraN == null || l.muestraN === m.n).flatMap((l) => l.sugeridos))],
+  }));
+}
+
+/**
+ * Métodos marcados que van a una muestra recibida (la pantalla aplica la misma
+ * regla, lib/recepcion.ts): los de las líneas de SU muestra de la cotización y
+ * los de las líneas de toda la cotización; un método agregado a mano (panel o
+ * catálogo, sin línea) va a todas. Una fila sin muestra de la cotización lleva todos.
+ */
+export function metodosDeLaMuestra(
+  muestraN: number | null | undefined,
+  marcados: string[],
+  lineas: Pick<LineaPropuesta, "muestraN" | "metodos">[],
+): string[] {
+  if (muestraN == null) return [...marcados];
+  return marcados.filter((id) => {
+    const deLineas = lineas.filter((l) => l.metodos.some((m) => m.id === id));
+    if (!deLineas.length) return true;
+    return deLineas.some((l) => l.muestraN == null || l.muestraN === muestraN);
   });
 }
 
@@ -163,4 +215,39 @@ export function erroresRegistro(
       errores.push(`El método ${m.codigo} · ${m.nombre} no tiene analitos en el catálogo: no genera ensayos por analizar.`);
   }
   return errores;
+}
+
+/* ------------------- métodos agregados a una muestra ya recepcionada (F064) --- */
+
+/** Perfiles de recepción que agregan métodos a una muestra recibida (además de las jefaturas, con ot.asignar). */
+export const ROLES_RECEPCION = ["RECEPCION", "PLANIFICACION"] as const;
+
+/** ¿Puede agregar métodos a una muestra ya recepcionada? Recepción o jefatura (con muestra.crear). */
+export function puedeAgregarMetodos(u: { roles?: string[] | null; permisos?: string[] | null }): boolean {
+  const roles = u.roles ?? [];
+  const permisos = u.permisos ?? [];
+  if (roles.includes("SUPERADMIN")) return true;
+  if (!permisos.includes("muestra.crear")) return false;
+  return permisos.includes("ot.asignar") || roles.some((r) => (ROLES_RECEPCION as readonly string[]).includes(r));
+}
+
+/** Qué impide agregar los métodos (lista vacía = se puede). */
+export function erroresAgregarMetodos(
+  otEstado: string,
+  metodoIds: string[],
+  yaEnMuestra: string[],
+  metodos: Map<string, MetodoCatalogo>,
+  motivo: string | null | undefined,
+): string[] {
+  const e: string[] = [];
+  if (otEstado === "cerrada" || otEstado === "anulada") e.push(`La OT está ${otEstado}: no se agregan métodos a sus muestras.`);
+  if (!metodoIds.length) e.push("Elija al menos un método.");
+  if (!motivo || motivo.trim().length < 5) e.push("Indique el motivo (queda en el historial de la OT).");
+  for (const id of metodoIds) {
+    const m = metodos.get(id);
+    if (!m) e.push(`El método ${id} no existe en el catálogo o está inactivo.`);
+    else if (m.analitos === 0) e.push(`El método ${m.codigo} · ${m.nombre} no tiene analitos en el catálogo: no genera ensayos por analizar.`);
+    else if (yaEnMuestra.includes(id)) e.push(`El método ${m.codigo} · ${m.nombre} ya está en la muestra.`);
+  }
+  return e;
 }

@@ -21,6 +21,7 @@ import {
   type NivelVb,
   type RespuestaLab,
   type SolicitudRuta,
+  unicasPorId,
 } from "./circuito-cotizacion";
 import { exigirMedioEnvioActivo, textoEnFrase } from "../common/medios-envio";
 import { calcularForm05, erroresForm05, erroresPrograma, type Form05Entrada, type ProgramaTrabajo, exigeCosteo, type TipoServicio } from "./form05";
@@ -30,6 +31,8 @@ import { cuerpoCotizacionVigente } from "./plantilla-cotizacion";
 import { hoyEnChile, soloFecha } from "./validez";
 import { leerReferenciasCosteo } from "./referencias-costeo";
 import { hoyCl } from "../ot/plazos";
+import { esPrecotizacion } from "./precotizacion";
+import { leerMuestras } from "./cotizacion-s1";
 
 /** Tipos de unidad a los que Comercial pide fechas y costo (laboratorios y sus equivalentes). */
 const TIPOS_CONSULTABLES = ["LABORATORIO", "SUCURSAL", "DELEGACION", "SECCION"];
@@ -55,6 +58,7 @@ export interface FilaCot {
   lineas: number;
   clienteId: string;
   centroCostoId: string | null;
+  tipoDocumento: string | null;
   otCodigo: string | null;
 }
 
@@ -99,7 +103,7 @@ const SQL_COT = `
            WHERE p.tenant_id = c.tenant_id AND p.categoria = 'medio_envio' AND p.codigo = c.enviada_medio LIMIT 1) AS "enviadaMedioTexto",
          c.enviada_destinatarios AS "enviadaDestinatarios", c.envio_observacion AS "envioObservacion",
          e.nombre_completo AS "ejecutivoNombre", c.created_at AS "createdAt", c.cliente_id AS "clienteId",
-         c.centro_costo_id AS "centroCostoId",
+         c.centro_costo_id AS "centroCostoId", c.tipo_documento AS "tipoDocumento",
          (SELECT count(*)::int FROM linea_cotizacion l WHERE l.cotizacion_id = c.id) AS lineas,
          (SELECT o.codigo FROM orden_trabajo o WHERE o.cotizacion_id = c.id ORDER BY o.created_at LIMIT 1) AS "otCodigo"
     FROM cotizacion c
@@ -270,6 +274,7 @@ export class CircuitoCotizacionService {
       enviadaMedio: c.enviadaMedio,
       enviadaMedioTexto: c.enviadaMedioTexto,
       ot: c.otCodigo ? { codigo: c.otCodigo } : null,
+      precotizacion: esPrecotizacion(c),
       solicitudes: conVb.map((s) => ({ id: s.id, estado: s.estado, unidad: s.unidadCodigo, unidadId: s.unidadId, numero: s.numero, vb: s.vb })),
       firmantes,
     };
@@ -306,7 +311,8 @@ export class CircuitoCotizacionService {
     const faltanFirma = faltantesParaFirma(c, sols.map((s) => ({ id: s.id, estado: s.estado, unidad: s.unidadCodigo, numero: s.numero })), cfg, "enviar");
     const editable = c.estado === "abierta" && !motivoNoEditable(c.firmaEstado);
     return {
-      cotizacion: c,
+      // F030: las muestras de la cotización, para que el laboratorio asigne a una muestra los ensayos que agrega.
+      cotizacion: { ...c, muestras: (await leerMuestras(this.prisma as any, id)).map((m) => ({ n: m.n, descripcion: m.descripcion })) },
       config: { niveles: cfg.niveles, exigirConsulta: cfg.exigirConsulta, exigirFirma: cfg.exigirFirma, cfaPct: cfg.cfaPct, margenParticularPct: cfg.margenParticularPct, ivaPct: cfg.ivaPct, precioEjercito: cfg.precioEjercito },
       ruta: { ...ruta, siguiente: ruta.siguiente ? { ...ruta.siguiente, puedoActuar } : null },
       solicitudes: conVb.map((s) => ({ ...s, etiquetaEstado: ETIQUETA_SOLICITUD[s.estado] ?? s.estado })),
@@ -484,7 +490,7 @@ export class CircuitoCotizacionService {
    * solicitud, el laboratorio agrega los ensayos (y su cantidad) a una
    * cotización que Comercial guardó solo con la cabecera.
    */
-  async agregarEnsayos(req: any, solicitudId: string, b: { lineas: { catEnsayoId: string; cantidad?: number; motivoPrecioManual?: string | null; precioUnitario?: number }[] }) {
+  async agregarEnsayos(req: any, solicitudId: string, b: { lineas: { catEnsayoId: string; cantidad?: number; motivoPrecioManual?: string | null; precioUnitario?: number; muestraN?: number | null }[] }) {
     const tenantId = this.tenant(req);
     const s = await this.solicitud(solicitudId, tenantId);
     await this.alcance.exigirUnidad(req, s.unidadId, `la solicitud ${s.numero ?? ""}`.trim(), "cotizacion.costear");
@@ -493,7 +499,7 @@ export class CircuitoCotizacionService {
     if (!b.lineas?.length) throw new BadRequestException("Elija al menos un ensayo.");
     const r = await this.cotizaciones.agregarLineas(
       s.cotizacionId,
-      b.lineas.map((l) => ({ catEnsayoId: l.catEnsayoId, cantidad: l.cantidad ?? 1, motivoPrecioManual: l.motivoPrecioManual ?? undefined, precioUnitario: l.precioUnitario })) as any,
+      b.lineas.map((l) => ({ catEnsayoId: l.catEnsayoId, cantidad: l.cantidad ?? 1, motivoPrecioManual: l.motivoPrecioManual ?? undefined, precioUnitario: l.precioUnitario, muestraN: l.muestraN ?? null })) as any,
       tenantId,
       this.yo(req) ?? undefined,
       s.unidadCodigo ?? null,
@@ -585,7 +591,7 @@ export class CircuitoCotizacionService {
     const yo = this.yo(req);
     const data = [];
     const cache = new Map<string, Awaited<ReturnType<CircuitoCotizacionService["responsablesVb"]>>>();
-    for (const f of filas) {
+    for (const f of unicasPorId(filas)) {
       const nivel = nivelVbPendiente(f.estado, cfg.niveles);
       let vb = null as Awaited<ReturnType<CircuitoCotizacionService["responsablesVb"]>> | null;
       if (nivel) {

@@ -5,6 +5,7 @@ import DatosEncargoOt from "./_components/DatosEncargoOt";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { recordarOtActiva } from "@/lib/ot-activa";
 import { fecha, fechaHora, fechaDia, rut, clp, num, hoyISO } from "@/lib/format";
 import { ACEPTACION_LABEL, ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
 import { usePermisos } from "@/lib/permisos";
@@ -80,6 +81,11 @@ function textoHistorial(h: any): string {
       : "";
     return `Recepción de ${d.muestra ?? "la muestra"} corregida${campos.length ? `: ${campos.join(", ")}` : ""}${condicion}`;
   }
+  // F032: la anulación con su causa y su motivo (ot_historial.detalle).
+  if (h.tipo === "ot_anulada")
+    return `OT anulada${d.causaTexto ? ` · causa: ${String(d.causaTexto).toLowerCase()}` : ""}${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
+  if (h.tipo === "metodos_agregados")
+    return `Se agregaron ${(d.ensayos ?? []).length} método(s) a ${d.muestra ?? "la muestra"}${(d.ensayos ?? []).length ? `: ${(d.ensayos as string[]).join(", ")}` : ""}${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
   if (h.tipo === "numero_muestra") return `Nº interno ${d.numeroInterno ?? "—"} asignado a la muestra ${d.muestra ?? ""}`;
   if (h.tipo === "validacion_laboratorio")
     return `OT recepcionada en el laboratorio (alcance conforme)${d.fechaTermino ? ` · término ${fechaDia(d.fechaTermino)}` : ""}${d.fechaInforme ? ` · informe ${fechaDia(d.fechaInforme)}` : ""}${d.observacion ? ` · ${d.observacion}` : ""}`;
@@ -155,6 +161,10 @@ const authJson = () => ({ ...auth(), "Content-Type": "application/json" });
 export default function ExpedientePage() {
   useMediosEnvio(); // frente f5: textos de los medios de envío (Parámetros del sistema)
   const { id } = useParams<{ id: string }>();
+  // F049: «Emitir informe» (también desde el menú) propone la OT cuya ficha se está viendo.
+  useEffect(() => {
+    if (typeof id === "string") recordarOtActiva(id);
+  }, [id]);
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
   const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "consumos" | "informe" | "carpeta" | "flujo" | "historial" | "terreno">("cabecera");
@@ -242,6 +252,8 @@ export default function ExpedientePage() {
   const [opiNumero, setOpiNumero] = useState("");
   const [opiFecha, setOpiFecha] = useState(() => hoyISO());
   const [opiMsg, setOpiMsg] = useState("");
+  // Una OT anulada ya no regulariza la OPI: no se marca ni se ofrece registrarla (F031).
+  const opiVigente = !!ot?.opiPendiente && ot?.estado !== "anulada";
   const registrarOpi = async () => {
     setBusy(true); setOpiMsg("");
     try {
@@ -285,7 +297,7 @@ export default function ExpedientePage() {
           {ot?.origenTrabajo ? <> · Origen: <b>{ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo}</b></> : null}
           {" · "}Laboratorio: {ot?.unidad ? <b title={ot.unidad.nombre}>{ot.unidad.codigo}</b> : <span className="pill amber">sin laboratorio</span>}
           {ot?.fechaCompromiso ? <> · Compromiso: <b>{fechaDia(ot.fechaCompromiso)}</b></> : null}
-          {ot?.opiPendiente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
+          {opiVigente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
           {ot?.conCobro === false && <span className="pill gray" style={{ marginLeft: 8 }}>Sin cobro</span>}
         </div>
       </div>
@@ -317,7 +329,7 @@ export default function ExpedientePage() {
       )}
 
       {/* SVT7 · OT por disposición del Director con cobro: falta la OPI. */}
-      {ot?.opiPendiente && (
+      {opiVigente && (
         <div className="alert warn">
           <div style={{ marginBottom: 6 }}>
             OT creada por <b>disposición del Director</b>{ot.disposicionRef ? <> ({ot.disposicionRef})</> : null} con cobro: está <b>pendiente la OPI</b>.
@@ -414,7 +426,7 @@ export default function ExpedientePage() {
                 <div className="field readonly"><label>Ingreso</label><input value={fecha(ot?.fechaIngreso ?? ot?.createdAt)} readOnly /></div>
                 <div className="field readonly"><label>Origen</label><input value={ot?.origenTrabajo ? ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo : "—"} readOnly /></div>
                 <div className="field readonly"><label>Cobro</label><input value={ot ? (ot.conCobro === false ? "Sin cobro" : "Con cobro") : "—"} readOnly /></div>
-                <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : ot?.opiPendiente ? "Pendiente" : "—"} readOnly /></div>
+                <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : opiVigente ? "Pendiente" : "—"} readOnly /></div>
                 {ot?.disposicionRef && <div className="field readonly"><label>Disposición del Director</label><input value={`${ot.disposicionRef}${ot.disposicionFecha ? ` · ${fechaDia(ot.disposicionFecha)}` : ""}`} readOnly /></div>}
                 {ot?.numeroLey && <div className="field readonly"><label>Resolución DGMN</label><input value={ot.numeroLey} readOnly /></div>}
                 <div className="field readonly"><label>Horas hombre</label><input value={num(ot?.horasHombre, 1)} readOnly /></div>

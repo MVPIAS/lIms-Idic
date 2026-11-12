@@ -213,7 +213,7 @@ export default function CotizacionesPage() {
                   {c.ot ? (
                     <>
                       <Link href={`/ot/${c.ot.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{c.ot.codigo}</Link>
-                      {c.ot.opiPendiente && <span className="pill amber" style={{ marginLeft: 6 }}>OPI pendiente</span>}
+                      {c.ot.opiPendiente && c.ot.estado !== "anulada" && <span className="pill amber" style={{ marginLeft: 6 }}>OPI pendiente</span>}
                     </>
                   ) : (
                     <span style={{ color: "var(--muted)" }}>—</span>

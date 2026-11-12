@@ -285,6 +285,17 @@ export function modalidadInicial(
   return fija === "cumplimiento" || fija === "solo_resultados" ? fija : modalidadSugerida(resultados);
 }
 
+/**
+ * De dónde sale la modalidad propuesta (F072): «plantilla» si la plantilla la
+ * fija (p. ej. el Informe de Ensayos de Alimentos: solo resultados) y
+ * «sugerida» si se deduce de los requisitos. La pantalla no rotula «Sugerido»
+ * una modalidad que contradice los requisitos: dice que es la de la plantilla.
+ */
+export function origenModalidad(cfg: { modalidadPorDefecto?: "sugerida" | "cumplimiento" | "solo_resultados" }): "plantilla" | "sugerida" {
+  const fija = cfg.modalidadPorDefecto;
+  return fija === "cumplimiento" || fija === "solo_resultados" ? "plantilla" : "sugerida";
+}
+
 /* ========================================================================== */
 /* Estructura: secciones, componentes y numeración                            */
 /* ========================================================================== */

@@ -28,7 +28,8 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { leerModoBloqueoQc } from "./qc-ejecucion";
 import { conVersionMetodo } from "../catalogo/metodo-version";
-import { motivoNoRevisable, resultadoAlRegistrar, CRITERIO_DEFECTO, TIPOS_QC, criterioAplicable, erroresConfigQc, tiposQcFaltantes, evaluarCualitativo, faltantesMicrobiologico } from "./reglas-qc";
+import { motivoNoRevisable, resultadoAlRegistrar, CRITERIO_DEFECTO, TIPOS_QC, criterioAplicable, erroresConfigQc, tiposQcFaltantes, evaluarCualitativo, faltantesMicrobiologico, metodosQcDelAlcance, recortarEstadoQc } from "./reglas-qc";
+import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 
 /**
  * =============================================================================
@@ -522,40 +523,73 @@ export class QcController {
     private readonly svc: QcService,
     private readonly prisma: PrismaService,
     private readonly alcance: AlcanceService,
+    private readonly alcanceResultado: AlcanceResultadoService,
   ) {}
 
-  /** La OT debe existir y ser de un laboratorio del alcance del usuario (404 / 403). */
-  private async exigirOt(otId: string, req: any) {
+  /**
+   * La OT debe existir y ser del alcance del usuario (404 / 403). Como en la
+   * captura, el laboratorio DESTINO de una orden interna recibida también entra,
+   * pero solo para los métodos de los ensayos derivados a sus laboratorios
+   * (F070: el LMB registra el QC de los derivados de una OT del LQA).
+   * Devuelve los métodos permitidos (null = todos).
+   */
+  private async exigirOt(otId: string, req: any, permiso: string): Promise<Set<string> | null> {
     const ot = await this.prisma.ordenTrabajo.findFirst({
       where: { id: otId, tenantId: tenantDe(req) },
-      select: { codigo: true, unidadPrincipal: true },
+      select: { id: true, codigo: true, unidadPrincipal: true },
     });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    const vista = await this.alcanceResultado.alcanceEnOt(req, ot, permiso);
+    if (vista.todo) return null;
+    const ensayos = await this.prisma.$queryRawUnsafe<{ metodoId: string | null; unidadId: string | null }[]>(
+      `SELECT r.cat_metodo_id AS "metodoId", l.unidad_id AS "unidadId"
+         FROM resultado r
+         JOIN muestra m ON m.id = r.muestra_id
+         JOIN LATERAL lims_lab_de_resultado(r.id) l ON TRUE
+        WHERE COALESCE(r.ot_id, m.ot_id) = $1::uuid AND r.deleted_at IS NULL AND m.deleted_at IS NULL`,
+      otId,
+    );
+    return metodosQcDelAlcance(vista, ensayos);
+  }
+
+  private exigirMetodo(permitidos: Set<string> | null, metodoId: string | null) {
+    if (permitidos && !(metodoId && permitidos.has(metodoId)))
+      throw new ForbiddenException("Fuera de su alcance: el método no corresponde a los ensayos derivados a su laboratorio.");
   }
 
   @Get("ot/:otId")
   @RequierePermiso(PERM.ver)
   @ApiOperation({ summary: "Controles de QC de la OT + estado global {aprobado, faltantes}" })
   async estado(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
-    await this.exigirOt(otId, req);
-    return this.svc.estadoOt(otId, tenantDe(req));
+    const permitidos = await this.exigirOt(otId, req, PERM.ver);
+    return recortarEstadoQc(await this.svc.estadoOt(otId, tenantDe(req)), permitidos);
   }
 
   @Post("ot/:otId/control")
   @RequierePermiso(PERM.gestionar)
   @ApiOperation({ summary: "Registra un control con evaluación automática (si cumple, queda pendiente de aprobación por otra persona)" })
   async registrar(@Param("otId", ParseUUIDPipe) otId: string, @Body() body: unknown, @Req() req: any) {
-    await this.exigirOt(otId, req);
-    return this.svc.registrar(otId, RegistrarControlSchema.parse(body), tenantDe(req), req?.user?.sub);
+    const permitidos = await this.exigirOt(otId, req, PERM.gestionar);
+    const datos = RegistrarControlSchema.parse(body);
+    this.exigirMetodo(permitidos, datos.catMetodoId);
+    return this.svc.registrar(otId, datos, tenantDe(req), req?.user?.sub);
+  }
+
+  /** Alcance sobre el control: su OT (o el destino de la OI, para los métodos derivados). */
+  private async exigirControl(id: string, req: any) {
+    const c = await this.prisma.qcControl.findFirst({
+      where: { id, tenantId: tenantDe(req), deletedAt: null },
+      select: { otId: true, catMetodoId: true },
+    });
+    if (!c) throw new NotFoundException(`Control de calidad ${id} no encontrado`);
+    this.exigirMetodo(await this.exigirOt(c.otId, req, PERM.gestionar), c.catMetodoId);
   }
 
   @Patch("control/:id")
   @RequierePermiso(PERM.gestionar)
   @ApiOperation({ summary: "Aprobación (resultado.revisar, no quien lo registró) o rechazo manual del control" })
   async revisar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    const ot = await this.svc.otDeControl(id, tenantDe(req));
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    await this.exigirControl(id, req);
     const roles: string[] = req?.user?.roles ?? [];
     const puedeRevisar = roles.includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("resultado.revisar");
     return this.svc.revisar(id, RevisarControlSchema.parse(body), tenantDe(req), {
@@ -661,8 +695,7 @@ export class QcController {
   @RequierePermiso(PERM.gestionar)
   @ApiOperation({ summary: "Retira (soft delete) un control no aprobado registrado por error" })
   async eliminar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    const ot = await this.svc.otDeControl(id, tenantDe(req));
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    await this.exigirControl(id, req);
     return this.svc.eliminar(id, tenantDe(req));
   }
 }

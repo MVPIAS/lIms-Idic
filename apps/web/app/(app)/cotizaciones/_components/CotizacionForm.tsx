@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { money, fechaDia, rut as fmtRut } from "@/lib/format";
 import { pedir, GRUPOS_CC, hoyISO, type ConfigCotizacion, type Opcion } from "./comercial";
+import { toast } from "@/components/ui/feedback";
 
 type Cliente = { id: string; razonSocial?: string; rut?: string; tipo?: string | null; bloqueado?: boolean | null; motivoBloqueo?: string | null };
 /** Muestra de la cotización (reunión 5): producto del catálogo elegido antes que los ensayos (reunión 3). */
@@ -805,7 +806,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           </fieldset>
           {cliente?.bloqueado && (
             <div className="alert warn" role="alert" style={{ gridColumn: "1 / -1", margin: 0 }}>
-              <b>Cliente bloqueado</b> por el Jefe del Departamento Comercial{cliente.motivoBloqueo ? `: ${cliente.motivoBloqueo}` : ""}. No se le pueden emitir cotizaciones hasta que el Jefe DCO lo desbloquee.
+              <b>Cliente bloqueado</b> por el Jefe del Departamento Comercial{cliente.motivoBloqueo ? `: ${String(cliente.motivoBloqueo).trim().replace(/[\s.]+$/, "")}` : ""}. No se le pueden emitir cotizaciones hasta que el Jefe DCO lo desbloquee.
             </div>
           )}
           {condCli && (condCli.lista || condCli.descuentoPct > 0 || condCli.condiciones) && (
@@ -1013,7 +1014,19 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
               <tr key={i}>
                 <td><span className="codigo">{l.codigo ?? (l.heredada ? l.heredada.tipo : "—")}</span></td>
                 <td>
-                  {l.muestraN ? <span className="pill blue" style={{ marginRight: 6 }} title={muestras[l.muestraN - 1]?.descripcion || undefined}>Muestra {l.muestraN}</span> : null}
+                  {/* F030: un ensayo (también los que agregó el laboratorio) se asigna a una muestra de la cotización. */}
+                  {muestras.length > 0 && l.catEnsayoId && !l.heredada ? (
+                    <select aria-label={`Muestra del ensayo ${l.codigo ?? ""}`.trim()} value={l.muestraN ?? ""} style={{ marginRight: 6, maxWidth: 200 }}
+                      onChange={(e) => {
+                        const n = e.target.value ? Number(e.target.value) : null;
+                        if (lineas.some((x, j) => j !== i && x.catEnsayoId === l.catEnsayoId && (x.muestraN ?? null) === n))
+                          return toast.error(`El ensayo ${l.codigo ?? ""} ya está en ${n ? `la muestra ${n}` : "la cotización completa"}.`);
+                        setLineas((ls) => ls.map((x, j) => (j === i ? { ...x, muestraN: n } : x)));
+                      }}>
+                      <option value="">Toda la cotización</option>
+                      {muestras.map((m, k) => <option key={k} value={k + 1}>Muestra {k + 1}{m.descripcion ? ` · ${m.descripcion}` : ""}</option>)}
+                    </select>
+                  ) : l.muestraN ? <span className="pill blue" style={{ marginRight: 6 }} title={muestras[l.muestraN - 1]?.descripcion || undefined}>Muestra {l.muestraN}</span> : null}
                   {l.descripcion}
                   {l.heredada && <small style={{ display: "block", color: "var(--muted)" }}>Línea heredada (se conserva tal cual)</small>}
                   {l.gasto && <small style={{ display: "block", color: "var(--muted)" }}>Gasto · valor manual</small>}

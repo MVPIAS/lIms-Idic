@@ -108,6 +108,13 @@ describe("Ruta de la cotización (barra de 6 etapas y siguiente paso)", () => {
     expect(r.siguiente?.accion?.permisos).toEqual(["cotizacion.crear"]);
   });
 
+  it("una pre-cotización no tiene la etapa de aceptación y OT (F037)", () => {
+    const r = calcularRutaCotizacion({ ...base, precotizacion: true, firmaEstado: "firmada", enviadaAt: "2026-10-20" }, cfg);
+    expect(r.etapas.map((e) => e.clave)).toEqual(["elaboracion", "costeo", "vb", "firma", "envio"]);
+    expect(r.etapaActual).toBeNull();
+    expect(r.siguiente).toBeNull();
+  });
+
   it("con una solicitud pendiente le toca al Jefe de Laboratorio, con el permiso de costear", () => {
     const r = calcularRutaCotizacion({ ...base, solicitudes: [sol("solicitado")] }, cfg);
     expect(r.etapaActual).toBe("costeo");
@@ -164,5 +171,34 @@ describe("Ruta de la cotización (barra de 6 etapas y siguiente paso)", () => {
     const r = calcularRutaCotizacion({ ...base, circuito: "historico" }, cfg);
     expect(r.etapas.find((e) => e.clave === "firma")?.estado).toBe("no_aplica");
     expect(r.etapaActual).toBe("envio");
+  });
+});
+
+describe("cambiar las líneas después del V°B° del costeo (F025)", () => {
+  const { estadoTrasCambioLineas, lineasCambiaron } = require("./circuito-cotizacion") as typeof import("./circuito-cotizacion");
+  it("la solicitud con V°B° vuelve a «respondida» y se pide de nuevo el V°B°", () => {
+    expect(estadoTrasCambioLineas("aprobado", "lab_depto")).toBe("respondido");
+    expect(estadoTrasCambioLineas("vb_lab", "lab_depto")).toBe("respondido");
+    expect(estadoTrasCambioLineas("aprobado", "lab")).toBe("respondido");
+    expect(estadoTrasCambioLineas("solicitado", "lab_depto")).toBeNull();
+    expect(estadoTrasCambioLineas("rechazado", "lab_depto")).toBeNull();
+    expect(estadoTrasCambioLineas("aprobado", "ninguno")).toBeNull();
+  });
+  it("detecta un ensayo agregado, una cantidad o una muestra distinta; no el orden", () => {
+    const a = [
+      { catEnsayoId: "e1", cantidad: 1, precioUnitario: "1000", muestraN: 1 },
+      { catEnsayoId: "e2", cantidad: 2, precioUnitario: 500, muestraN: null },
+    ];
+    expect(lineasCambiaron(a, [a[1], { ...a[0], precioUnitario: 1000 }])).toBe(false);
+    expect(lineasCambiaron(a, [...a, { catEnsayoId: "e193", cantidad: 1, precioUnitario: 800 }])).toBe(true);
+    expect(lineasCambiaron(a, [a[0], { ...a[1], cantidad: 3 }])).toBe(true);
+    expect(lineasCambiaron(a, [a[0], { ...a[1], muestraN: 1 }])).toBe(true);
+  });
+});
+
+describe("bandeja del laboratorio sin filas repetidas (F029)", () => {
+  const { unicasPorId } = require("./circuito-cotizacion") as typeof import("./circuito-cotizacion");
+  it("cada solicitud aparece una vez, en su orden", () => {
+    expect(unicasPorId([{ id: "a" }, { id: "b" }, { id: "a" }]).map((f) => f.id)).toEqual(["a", "b"]);
   });
 });

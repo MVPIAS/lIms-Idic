@@ -102,6 +102,10 @@ export interface ItemDefectuoso { items: string; descripcion: string; numeracion
 export interface Propuesta {
   formato: FormatoInforme;
   modalidad: Modalidad;
+  /** «plantilla»: la fija la plantilla; «sugerida»: según los requisitos (F072). */
+  modalidadOrigen?: "plantilla" | "sugerida";
+  /** Modalidad que corresponde a los requisitos de los ensayos. */
+  modalidadPorRequisitos?: Modalidad;
   conRequisito: number;
   totalEnsayos: number;
   portada: Portada | null;
