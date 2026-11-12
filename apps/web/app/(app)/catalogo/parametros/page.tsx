@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { useAlcance } from "@/lib/alcance";
 import CrudTable, { activoBadge, codigoCell } from "../_components/CrudTable";
 import PorcentajesTasa from "@/components/parametros/PorcentajesTasa";
 import ParametrosOperacion from "@/components/parametros/ParametrosOperacion";
@@ -35,10 +36,20 @@ export default function ParametrosPage() {
   // «Medio de envío (medio_envio)»: nombre legible y el código que usan los manuales.
   const etiquetas = Object.fromEntries(listas.map((l) => [l.categoria, `${l.nombre} (${l.categoria})`]));
   const conAlta = listas.filter((l) => l.alta).map((l) => l.categoria);
+  // Tabla común del instituto: la mantienen Calidad y Administración (catalogo.gestionar con
+  // alcance global). A una jefatura con el permiso acotado la API le responde 403 al guardar,
+  // así que no se le ofrecen «Nuevo», «Editar» ni «Eliminar» (F093, como en Centros de costo).
+  const { alcance } = useAlcance();
+  const mantiene = alcance?.catalogoComun !== false ? undefined : false;
   return (
     <>
     <CrudTable
       titulo="Parámetros del sistema"
+      // El menú y la barra superior la ubican en «Administración» (F082).
+      migas={[{ label: "Administración" }, { label: "Parámetros del sistema" }]}
+      permitirCrear={mantiene}
+      permitirEditar={mantiene}
+      permitirEliminar={mantiene}
       subtitulo="Listas de opciones editables: agrega, modifica o desactiva valores (tipo de cliente, forma de pago, medio de envío, toma de muestra, cargos de costo, clases ONU…) sin intervención técnica. El valor de las reglas de la operación (cotización, encuestas, recepción, captura, Metrología) y los porcentajes de la tasa de internación se cambian, con motivo, en los recuadros al final de esta página."
       endpoint="parametros"
       accionesExtra={

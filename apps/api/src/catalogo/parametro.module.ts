@@ -36,6 +36,7 @@ import {
   errorAltaLista,
   errorDesactivarLista,
   erroresMotivo,
+  filaPorDefecto,
   LISTAS_PARAMETROS,
   grupoDe,
   historialDeFila,
@@ -202,7 +203,8 @@ export class ParametroSistemaService extends BaseCrudService {
       const parametros = g.codigos
         ? Object.entries(g.codigos).map(([codigo, def]) => {
             const f = delGrupo.find((x) => x.codigo === codigo);
-            return f ? parametro(def, f) : { codigo, nombre: def.nombre, falta: true };
+            // Sin la fila (instalación sin sembrar): rige el valor por defecto; el primer cambio la crea (F076).
+            return f ? parametro(def, f) : { ...parametro(def, filaPorDefecto(g.categoria, codigo, def)), falta: true };
           })
         : delGrupo.filter((f) => codigoValido(g.patron!.alta, f.codigo)).map((f) => parametro(g.patron!, f, g.patron!.alta));
       // El tipo del patrón (para dar de alta aunque el grupo aún no tenga filas).
@@ -248,7 +250,28 @@ export class ParametroSistemaService extends BaseCrudService {
         categoria,
         codigo,
       );
-      const fila = filas[0];
+      let fila = filas[0];
+      if (!fila && grupoDe(categoria)?.codigos) {
+        // Parámetro fijo sin su fila en esta instalación (F076): se crea con el valor
+        // que ya regía (el por defecto) y el cambio queda en el historial como siempre.
+        const nueva = filaPorDefecto(categoria, codigo, defBase);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO parametro_sistema (tenant_id, categoria, codigo, etiqueta, orden, valor)
+           VALUES ($1::uuid, $2, $3, $4, 90, $5) ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING`,
+          tenantId,
+          categoria,
+          codigo,
+          nueva.etiqueta.slice(0, 160),
+          nueva.valor,
+        );
+        const creadas = await tx.$queryRawUnsafe<{ id: string; etiqueta: string; valor: string | null; activo: boolean }[]>(
+          `SELECT id, etiqueta, valor, activo FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = $2 AND codigo = $3 FOR UPDATE`,
+          tenantId,
+          categoria,
+          codigo,
+        );
+        fila = creadas[0];
+      }
       if (!fila) throw new NotFoundException(`El parámetro ${categoria}.${codigo} no existe en esta instalación.`);
       const r = normalizarValor(def, { codigo, etiqueta: fila.etiqueta }, b.valor, categoria);
       const errores = [...r.errores, ...errMotivo];

@@ -36,6 +36,7 @@ import { DIFUSION_TASA } from "../common/parametros-r4d";
 import { OPCIONES_VARIANTE, esVariante } from "../formularios/variantes";
 // NCh 44 de los formularios especializados (frente r2a): AQL como texto con coma.
 import { jsonCampoPrep, normalizarCampoPrep } from "../formularios/preparacion";
+import { OPCIONES_MENU_OCULTO } from "../rbac/menu-oculto";
 
 /** Columnas de AQL de la tabla 2-A como opciones (se guarda con punto, se muestra con coma). */
 const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: String(a).replace(".", ",") }));
@@ -625,6 +626,21 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         unidad: "minutos",
         ayuda: "Contrato §4.7.6: desconexión por inactividad. Por defecto 20 minutos.",
         porDefecto: "20",
+      },
+    },
+  },
+  // --- Menú: módulos heredados ocultos (R1, R10; F077: antes solo por SQL) ---
+  {
+    categoria: "menu",
+    titulo: "Menú lateral",
+    donde: "Menú de todos los usuarios: los módulos marcados no se muestran (módulos heredados que el IDIC no usa). Solo ordena el menú; los permisos siguen rigiendo. Rige al volver a ingresar.",
+    codigos: {
+      ocultos: {
+        tipo: "multiple",
+        nombre: "Módulos que no se muestran en el menú",
+        ayuda: "Marque los módulos que el IDIC no usa. Por defecto, ninguno.",
+        opciones: OPCIONES_MENU_OCULTO,
+        porDefecto: "",
       },
     },
   },
@@ -1264,6 +1280,20 @@ function campoDe(valor: string | null, activo: boolean): DefCampo {
     ayuda: typeof d.ayuda === "string" ? d.ayuda : "",
     activo,
   };
+}
+
+/**
+ * Fila que rige cuando la instalación no tiene la del parámetro (F076): el valor
+ * por defecto de su definición, activa. La pantalla la muestra como cualquier
+ * otra (marcada «falta») y el primer cambio la crea; nunca se cae por no tenerla.
+ */
+export function filaPorDefecto(categoria: string, codigo: string, def: DefValor) {
+  return { id: null, categoria, codigo, etiqueta: def.nombre, valor: def.porDefecto ?? null, activo: true, updatedAt: null };
+}
+
+/** Parámetros fijos (no por patrón) con valor por defecto: los que siembra align_fx5_a.sql. */
+export function parametrosFijos(): { categoria: string; codigo: string; def: DefValor }[] {
+  return GRUPOS_CONFIG.flatMap((g) => Object.entries(g.codigos ?? {}).map(([codigo, def]) => ({ categoria: g.categoria, codigo, def })));
 }
 
 /** Valor tipado para el formulario de la pantalla (lo que rige hoy). */
