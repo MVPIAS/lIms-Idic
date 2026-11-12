@@ -3371,7 +3371,23 @@ export class IbisEtlController extends SaecBase implements OnModuleInit, OnModul
       return { n, evidencias };
     });
     await this.auditar(req, "ibis", otId, "editar", { asignados: asignados.n, evidencias: asignados.evidencias, otId, accion: "adjuntar_ibis" });
-    return { data: { otId, asignados: asignados.n, evidenciasCreadas: asignados.evidencias } };
+    // F039: armas de la OT ya certificadas «Pendiente de IBIS»: el certificado debe reemitirse.
+    const porReemitir = await this.prisma.$queryRawUnsafe<{ numero: string }[]>(
+      `SELECT DISTINCT COALESCE(c.numero, c.codigo) AS numero
+         FROM certificado c
+         JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
+         JOIN d11_arma_ot ao ON ao.id = ca.arma_ot_id
+        WHERE c.ot_id = $1::uuid AND c.tenant_id = $2::uuid AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'
+          AND c.estado IN ('en_firma', 'oficial', 'emitido') AND c.documento_html LIKE '%Pendiente de IBIS%'
+          AND EXISTS (SELECT 1 FROM ibis_resultado ir WHERE ir.arma_id = ao.arma_id AND ir.estado = 'asignado' AND ir.deleted_at IS NULL)`,
+      otId, tenantId,
+    ).catch(() => [] as { numero: string }[]);
+    if (porReemitir.length)
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'd11_ibis_por_reemitir', $3::jsonb, $4::uuid)`,
+        tenantId, otId, JSON.stringify({ certificados: porReemitir.map((p) => p.numero) }), req?.user?.sub ?? null,
+      ).catch(() => undefined);
+    return { data: { otId, asignados: asignados.n, evidenciasCreadas: asignados.evidencias, certificadosPorReemitir: porReemitir.map((p) => p.numero) } };
   }
 
   /**

@@ -94,7 +94,7 @@ export interface ArmaOt {
   veredicto: string | null;
   acunacion: { numero: string; anio: number; fecha: string } | null;
   requiereAcunacion: boolean;
-  certificado: { id: string; numero: string; estado: string; entregadoAt: string | null; vigenteHasta: string | null; vigenteDesde: string | null } | null;
+  certificado: { id: string; numero: string; estado: string; entregadoAt: string | null; vigenteHasta: string | null; vigenteDesde: string | null; /** F039: emitido «Pendiente de IBIS» y ya llegó el registro: reemitir. */ pendienteIbis?: boolean } | null;
   entregada: boolean;
   /** R12: pendiente de una nueva resolución (falla o serie distinta). */
   pendiente?: { motivo: string; motivoNombre: string; detalle: string | null; desde: string } | null;

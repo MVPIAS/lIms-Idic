@@ -37,6 +37,20 @@ export interface IbisDeArma {
   evidencias: { codigo: string; tipo: string; exhibit: string | null; hitCount: number; ubicacion: string | null }[];
 }
 
+/** Marca que deja en el certificado el bloque IBIS sin resultado. */
+export const MARCA_PENDIENTE_IBIS = "Pendiente de IBIS";
+
+/**
+ * fx5-c · F039: el certificado por arma se emitió «Pendiente de IBIS» y después
+ * llegó el registro del arma: hay que reemitirlo para incorporarlo. Solo los
+ * vigentes (en firma u oficiales); uno anulado o reemplazado ya no cuenta.
+ */
+export function debeReemitirPorIbis(c: { estado: string; documentoHtml: string | null | undefined; ibisAsignado: boolean }): boolean {
+  if (!c.ibisAsignado) return false;
+  if (!["en_firma", "oficial", "emitido"].includes(c.estado)) return false;
+  return (c.documentoHtml ?? "").includes(MARCA_PENDIENTE_IBIS);
+}
+
 /** Bloque «Registro balístico IBIS» del certificado por arma (CERTARMA). */
 export function bloqueIbisArma(d: IbisDeArma | null): string {
   if (!d) {
