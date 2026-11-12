@@ -165,7 +165,7 @@ function Plan() {
           <option value="">Historial de un equipo…</option>
           {equipos.map((e) => <option key={e.id} value={e.id}>{e.codigo} · {e.nombre ?? e.descripcion}</option>)}
         </select>
-        {gestiona && !correctiva && <button className="btn sm" onClick={() => setCorrectiva({ ...CORRECTIVA_VACIA, fecha: hoyChile() })}>Registrar correctiva</button>}
+        {gestiona && !correctiva && <button className="btn primary sm" onClick={() => setCorrectiva({ ...CORRECTIVA_VACIA, fecha: hoyChile() })}>Registrar correctiva</button>}
         {gestiona && !form && <button className="btn primary sm" onClick={() => setForm({ ...PLAN_VACIO, proximaFecha: hoyChile() })}>Nueva tarea de mantención</button>}
       </section>
       {form && (
@@ -301,7 +301,7 @@ function Plan() {
           <p style={{ margin: 0, color: "var(--muted)" }}>No hay tareas de mantención {filtro ? "en esta vista" : "planificadas"}.</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table className="table">
+            <table className="data">
               <thead><tr><th>Equipo</th><th>Tarea</th><th>Cada</th><th>Próxima</th><th>Última</th><th>Estado</th><th></th></tr></thead>
               <tbody>
                 {planes.map((p) => (
@@ -317,7 +317,7 @@ function Plan() {
                       <button className="btn outline sm" onClick={() => setHistorial(p.equipoId)}>Historial</button>
                       {gestiona && (
                         <>
-                        {" "}<button className="btn sm" onClick={() => { setEjecutando(p); setEj({ fecha: hoyChile(), ejecutadaPor: "", resultado: "conforme", costo: "", observaciones: "" }); }}>Registrar hecha</button>{" "}
+                        {" "}<button className="btn primary sm" onClick={() => { setEjecutando(p); setEj({ fecha: hoyChile(), ejecutadaPor: "", resultado: "conforme", costo: "", observaciones: "" }); }}>Registrar hecha</button>{" "}
                         <button className="btn outline sm" onClick={() => setForm({ ...PLAN_VACIO, ...p, frecuenciaDias: String(p.frecuenciaDias), proveedor: p.proveedor ?? "", programaId: p.programaId ?? "" })}>Editar</button>{" "}
                         <button className="btn outline sm" onClick={() => baja(p)}>Baja</button>
                         </>
@@ -359,9 +359,12 @@ function Programas() {
     try { setLista(await llamar<any[]>("GET", "/mantencion/programas")); } catch (e: any) { toast.error(e.message); }
   }, []);
   useEffect(() => { cargar(); }, [cargar]);
+  // Los laboratorios solo hacen falta en el formulario (quien gestiona equipos): un rol de
+  // consulta no ve OT y la API le respondía 403 (F080).
   useEffect(() => {
+    if (!gestiona) return;
     llamar<any>("GET", "/ot/laboratorios").then((r) => setLabs(Array.isArray(r) ? r : r?.data ?? [])).catch(() => setLabs([]));
-  }, []);
+  }, [gestiona]);
   const guardar = async () => {
     if (!form) return;
     try {
@@ -433,7 +436,7 @@ function Programas() {
           <p style={{ margin: 0, color: "var(--muted)" }}>No hay programas de mantención registrados.</p>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table className="table">
+            <table className="data">
               <thead><tr><th>Programa</th><th>Año</th><th>Lab.</th><th>Tareas</th><th>Cumplimiento</th><th>Estado</th><th></th></tr></thead>
               <tbody>
                 {lista.map((g) => (
@@ -448,7 +451,7 @@ function Programas() {
                       {g.aprobadoPor ? <div style={{ fontSize: 11.5, color: "var(--muted)" }}>Aprobó {g.aprobadoPor}</div> : null}</td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button className="btn outline sm" onClick={() => ver(g.id)}>Ver</button>
-                      {gestiona && g.estado === "borrador" && (<>{" "}<button className="btn outline sm" onClick={() => setForm({ ...PROGRAMA_VACIO, ...g, anio: String(g.anio), unidadId: g.unidadId ?? "", documentoCodigo: g.documentoCodigo ?? "", observaciones: g.observaciones ?? "" })}>Editar</button>{" "}<button className="btn sm" onClick={() => estado(g, "aprobar")}>Aprobar</button></>)}
+                      {gestiona && g.estado === "borrador" && (<>{" "}<button className="btn outline sm" onClick={() => setForm({ ...PROGRAMA_VACIO, ...g, anio: String(g.anio), unidadId: g.unidadId ?? "", documentoCodigo: g.documentoCodigo ?? "", observaciones: g.observaciones ?? "" })}>Editar</button>{" "}<button className="btn success sm" onClick={() => estado(g, "aprobar")}>Aprobar</button></>)}
                       {gestiona && g.estado === "aprobado" && (<>{" "}<button className="btn outline sm" onClick={() => estado(g, "cerrar")}>Cerrar</button></>)}
                     </td>
                   </tr>
@@ -466,14 +469,14 @@ function Programas() {
           </div>
           <h4 style={{ fontSize: 13 }}>Tareas del programa</h4>
           {!detalle.planes.length ? <p style={{ color: "var(--muted)" }}>Sin tareas vinculadas.</p> : (
-            <table className="table">
+            <table className="data">
               <thead><tr><th>Equipo</th><th>Tarea</th><th>Cada</th><th>Próxima</th></tr></thead>
               <tbody>{detalle.planes.map((p: any) => <tr key={p.id}><td>{p.equipoCodigo} {p.equipoNombre}</td><td>{TIPO[p.tipo] ?? p.tipo} · {p.descripcion}{p.activo ? "" : " (de baja)"}</td><td>{p.frecuenciaDias} días</td><td>{fechaCl(p.proximaFecha)}</td></tr>)}</tbody>
             </table>
           )}
           <h4 style={{ fontSize: 13 }}>Mantenciones ejecutadas con este programa</h4>
           {!detalle.ejecutadas.length ? <p style={{ color: "var(--muted)" }}>Aún no hay mantenciones registradas.</p> : (
-            <table className="table">
+            <table className="data">
               <thead><tr><th>Equipo</th><th>Programada</th><th>Hecha</th><th>Resultado</th><th>Hecha por</th><th>Registró</th></tr></thead>
               <tbody>{detalle.ejecutadas.map((m: any) => <tr key={m.id}><td>{m.equipoCodigo}</td><td>{fechaCl(m.fechaProgramada)}</td><td>{fechaCl(m.fecha)}</td><td>{pillResultado(m.resultado)}</td><td>{m.ejecutadaPor ?? "—"}</td><td>{m.registradaPor ?? "—"}</td></tr>)}</tbody>
             </table>
@@ -509,7 +512,7 @@ function HistorialEquipo({ equipoId, onCerrar }: { equipoId: string; onCerrar: (
             <p style={{ margin: 0, color: "var(--muted)" }}>Sin mantenciones registradas.</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table className="table">
+              <table className="data">
                 <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Hecha por</th><th>Resultado</th><th>Costo</th><th>Registró</th></tr></thead>
                 <tbody>
                   {h.mantenciones.map((m: any) => (
@@ -532,7 +535,7 @@ function HistorialEquipo({ equipoId, onCerrar }: { equipoId: string; onCerrar: (
             <p style={{ margin: 0, color: "var(--muted)" }}>Sin calibraciones registradas.</p>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table className="table">
+              <table className="data">
                 <thead><tr><th>Fecha</th><th>Hecha por</th><th>Resultado</th><th>Próxima</th><th>Certificado</th></tr></thead>
                 <tbody>
                   {h.calibraciones.map((c: any) => (
@@ -602,7 +605,7 @@ function Calendario() {
           <section key={k} className="card">
             <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>{nombreMes(k)}</h2>
             <div style={{ overflowX: "auto" }}>
-              <table className="table">
+              <table className="data">
                 <tbody>
                   {evs.map((e, i) => (
                     <tr key={i}>
@@ -670,7 +673,7 @@ function Reporte() {
           </div>
           <section className="card">
             <div style={{ overflowX: "auto" }}>
-              <table className="table">
+              <table className="data">
                 <thead><tr><th>Equipo</th><th>Estado</th><th>Calibración</th><th>Mantención</th><th>Programadas</th><th>A tiempo</th><th>Atrasadas</th><th>Pendientes</th><th>Correctivas</th><th>Costo</th></tr></thead>
                 <tbody>
                   {r.equipos.map((e: any) => (
