@@ -261,3 +261,55 @@ export function lugaresDisponibles(plantas: LugarInspeccion[], tabla: LugarInspe
   }
   return out;
 }
+
+/* fx5-c · F014: lotes de la inspección en el Certificado de control y en el de Conformidad */
+
+export interface LoteImpreso {
+  identificacion: string;
+  tamanoLote?: number | string | null;
+  unidadLote?: string | null;
+  tamanoMuestra?: number | string | null;
+  unidadMuestra?: string | null;
+  /** aaaa-mm-dd */
+  vencimiento?: string | null;
+}
+
+const cantidadCl = (v: number | string | null | undefined, u: string | null | undefined): string => {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  const t = Number.isFinite(n) ? n.toLocaleString("es-CL", { maximumFractionDigits: 3 }) : String(v);
+  return u ? `${t} ${ETIQUETA_UNIDAD[u] ?? u}` : t;
+};
+const diaCl = (v: string | null | undefined) => (v && /^\d{4}-\d{2}-\d{2}/.test(v) ? `${v.slice(8, 10)}-${v.slice(5, 7)}-${v.slice(0, 4)}` : "");
+
+/**
+ * Campos {{bpch.lote}}, {{bpch.tamano_lote_muestra}} y {{bpch.vencimiento_producto}}
+ * de los documentos: con lotes registrados en «Lotes de la inspección», todos,
+ * con su unidad y su vencimiento; sin lotes, null (queda la cabecera).
+ */
+export function camposLotesImpresos(
+  lotes: LoteImpreso[],
+  vencimientoCabecera = "",
+): Record<"lote" | "tamano_lote_muestra" | "vencimiento_producto", string> | null {
+  if (!lotes.length) return null;
+  const varios = lotes.length > 1;
+  const pref = (l: LoteImpreso) => (varios ? `${l.identificacion}: ` : "");
+  const venc = lotes.filter((l) => diaCl(l.vencimiento));
+  return {
+    lote: lotes.map((l) => l.identificacion).join(" · "),
+    tamano_lote_muestra: lotes.map((l) => `${pref(l)}${cantidadCl(l.tamanoLote, l.unidadLote)} / ${cantidadCl(l.tamanoMuestra, l.unidadMuestra)}`).join(" · "),
+    vencimiento_producto: venc.length ? venc.map((l) => `${pref(l)}${diaCl(l.vencimiento)}`).join(" · ") : vencimientoCabecera,
+  };
+}
+
+/** Tamaños de la cabecera (sin lotes adicionales) con su unidad: «800 Kilos / 13 Kilos». */
+export function tamanoCabeceraImpreso(c: {
+  tamanoLote?: number | string | null;
+  unidadLote?: string | null;
+  tamanoMuestra?: number | string | null;
+  unidadMuestra?: string | null;
+}): string | null {
+  if (!c.unidadLote && !c.unidadMuestra) return null;
+  if ((c.tamanoLote ?? "") === "" && (c.tamanoMuestra ?? "") === "") return null;
+  return `${cantidadCl(c.tamanoLote, c.unidadLote)} / ${cantidadCl(c.tamanoMuestra, c.unidadMuestra)}`;
+}

@@ -1,4 +1,4 @@
-import { diferencias, erroresCabecera, heredarCabecera, faltantesParaEmitirInspeccion, iniciales, loteEnUnidades } from "./reglas-cabecera";
+import { diferencias, erroresCabecera, heredarCabecera, faltantesParaEmitirInspeccion, iniciales, loteEnUnidades, camposLotesImpresos, tamanoCabeceraImpreso } from "./reglas-cabecera";
 import { muestraSuperaLote } from "../comun/reglas-bpch";
 
 describe("BPCH · cabecera de inspección de la OT (EP-10 10.3)", () => {
@@ -77,6 +77,18 @@ describe("F005 · lote y muestra en la misma escala", () => {
     expect(muestraSuperaLote(2, "t", 50, "unidades")).toBeNull();
     expect(muestraSuperaLote(2, null, 5, null)).toBe(true);
     expect(muestraSuperaLote(3000, "g", 2, "kg")).toBe(false);
+  });
+  it("F014: el documento imprime todos los lotes con unidad y vencimiento", () => {
+    const r = camposLotesImpresos([
+      { identificacion: "L-PRUEBA-V4-A1", tamanoLote: "800.000", unidadLote: "kg", tamanoMuestra: "13", unidadMuestra: "kg", vencimiento: "2027-01-31" },
+      { identificacion: "L-PRUEBA-V4-A2", tamanoLote: 2, unidadLote: "t", tamanoMuestra: 5, unidadMuestra: "kg", vencimiento: null },
+    ]);
+    expect(r?.lote).toBe("L-PRUEBA-V4-A1 · L-PRUEBA-V4-A2");
+    expect(r?.tamano_lote_muestra).toBe("L-PRUEBA-V4-A1: 800 Kilos / 13 Kilos · L-PRUEBA-V4-A2: 2 Toneladas / 5 Kilos");
+    expect(r?.vencimiento_producto).toBe("L-PRUEBA-V4-A1: 31-01-2027");
+    expect(camposLotesImpresos([])).toBeNull();
+    expect(tamanoCabeceraImpreso({ tamanoLote: "1500", unidadLote: "unidades", tamanoMuestra: "13", unidadMuestra: "unidades" })).toBe("1.500 Unidades / 13 Unidades");
+    expect(tamanoCabeceraImpreso({ tamanoLote: 800, tamanoMuestra: 13 })).toBeNull();
   });
   it("el plan NCh 44 solo se propone con el lote en unidades", () => {
     expect(loteEnUnidades("unidades")).toBe(true);
