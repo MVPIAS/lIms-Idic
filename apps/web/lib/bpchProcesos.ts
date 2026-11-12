@@ -5,6 +5,7 @@
  * los documentos protegidos por JWT.
  */
 import { errorMensajeDe } from "@/lib/apiError";
+import { montoCl } from "@/lib/monto-cl";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const token = () => (typeof window !== "undefined" ? localStorage.getItem("lims_token") : null);
@@ -79,14 +80,11 @@ export const dia = (v?: string | null) => (v ? `${v.slice(8, 10)}-${v.slice(5, 7
 
 /**
  * Número escrito en es-CL: «12,5» y «1.240,5» con coma decimal; un solo punto
- * sin coma se lee como decimal («12.5»). Devuelve NaN si no se entiende.
+ * sin coma y sin formar grupos de miles se lee como decimal («12.5»); «1.500» es mil quinientos. Devuelve NaN si no se entiende.
  */
 export function numeroCl(s: string): number {
-  const t = s.trim().replace(/\s/g, "");
-  if (!t) return NaN;
-  if (t.includes(",")) return Number(t.replace(/\./g, "").replace(",", "."));
-  if ((t.match(/\./g) ?? []).length > 1) return Number(t.replace(/\./g, ""));
-  return Number(t);
+  // F001: un punto que forma grupos de miles («1.500») es separador de miles.
+  return montoCl(s) ?? NaN;
 }
 
 /** Pide a la API un fichero generado (POST con cuerpo JSON) y lo descarga con el nombre que da el servidor. */

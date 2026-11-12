@@ -15,7 +15,8 @@ import RequierePermiso from "@/components/RequierePermiso";
 import { toast, confirmar } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
 import { usePermisos } from "@/lib/permisos";
-import { clp, fecha, fechaHora, pct } from "@/lib/format";
+import { clp, fecha, fechaHora, num as fmtNum, pct } from "@/lib/format";
+import { montoAInput, montoCl } from "@/lib/monto-cl";
 import { DocumentosYCierre, Fases } from "../../_components/Expediente";
 import { FormInternacion } from "../../_components/FormInternacion";
 import { SelectorPanel } from "../../_components/Buscadores";
@@ -431,16 +432,17 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
   const [doc, setDoc] = useState({ fecha: hoy(), detalle: "", facturaComercial: "", cifUsd: "", tipoCambio: "", ivaInternacion: "", otrosDocumentos: "" });
   // El CIF y el tipo de cambio registrados con la documentación se proponen en el cálculo (EP-06 6.8; D06-03).
   const [t, setT] = useState({
-    cifUsd: d.documentacion?.cifUsd != null ? String(d.documentacion.cifUsd).replace(".", ",") : "",
-    paridad: d.documentacion?.tipoCambio != null ? String(d.documentacion.tipoCambio).replace(".", ",") : "",
+    cifUsd: montoAInput(d.documentacion?.cifUsd),
+    paridad: montoAInput(d.documentacion?.tipoCambio),
     pctAfecto: "100",
   });
   if (!d.sujetaTasa) return <div className="alert info">Esta internación no está sujeta a la tasa: no hay documentación administrativa ni cobro.</div>;
   const tasaPct = config?.parametros.tasaPct;
   const ivaPct = config?.parametros.ivaPct;
-  const num = (v: string) => Number(v.replace(",", "."));
+  // Montos a la chilena: «184.500» es ciento ochenta y cuatro mil quinientos (F001).
+  const num = (v: string) => montoCl(v) ?? Number.NaN;
   const prev =
-    t.cifUsd && t.paridad && tasaPct != null && ivaPct != null
+    t.cifUsd && t.paridad && tasaPct != null && ivaPct != null && Number.isFinite(num(t.cifUsd)) && Number.isFinite(num(t.paridad)) && Number.isFinite(num(t.pctAfecto))
       ? (() => {
           const tasa = Math.round(num(t.cifUsd) * num(t.paridad) * (num(t.pctAfecto) / 100) * (tasaPct / 100));
           const iva = Math.round(tasa * (ivaPct / 100));
@@ -463,8 +465,8 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
           {d.documentacion.solicitadaAt && <> · solicitada {fecha(d.documentacion.solicitadaAt)}</>}
           {d.documentacion.recibidaAt && <> · recibida {fecha(d.documentacion.recibidaAt)}</>}
           {d.documentacion.facturaComercial && <> · factura comercial {d.documentacion.facturaComercial}</>}
-          {d.documentacion.cifUsd != null && <> · CIF US$ {Number(d.documentacion.cifUsd).toLocaleString("es-CL")}</>}
-          {d.documentacion.tipoCambio != null && <> · tipo de cambio {Number(d.documentacion.tipoCambio).toLocaleString("es-CL")}</>}
+          {d.documentacion.cifUsd != null && <> · CIF US$ {fmtNum(d.documentacion.cifUsd, 0)}</>}
+          {d.documentacion.tipoCambio != null && <> · tipo de cambio {fmtNum(d.documentacion.tipoCambio, 0)}</>}
           {d.documentacion.ivaInternacion != null && <> · IVA de internación {clp(d.documentacion.ivaInternacion)}</>}
         </p>
         {d.documentacion.otrosDocumentos && <p style={{ fontSize: 12.5 }}>Otros documentos: {d.documentacion.otrosDocumentos}</p>}
@@ -485,14 +487,18 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
             <div className="toolbar" style={{ gridColumn: "1 / -1", marginBottom: 0 }}>
               {acciones.map((x) => (
                 <button key={x.a} type="button" className={`btn ${x.a === "no_conforme" ? "ghost-danger" : "primary"} sm`} onClick={async () => {
-                  // «184.500,5» o «945,2» (coma decimal chilena) o «945.2».
-                  const n = (v: string) => (v.trim() ? Number(v.includes(",") ? v.replace(/\./g, "").replace(",", ".") : v) : null);
+                  // «184.500,5», «184.500» (punto de miles) o «945,2» (coma decimal chilena): F001.
+                  const n = (v: string) => (v.trim() ? montoCl(v) : null);
+                  if (x.a === "recibir") {
+                    const malo = ([["Monto CIF", doc.cifUsd], ["Tipo de cambio", doc.tipoCambio], ["IVA de internación", doc.ivaInternacion]] as const).find(([, v]) => v.trim() && montoCl(v) === null);
+                    if (malo) { toast.error(`${malo[0]}: escriba un número con punto de miles y coma decimal (p. ej. 184.500,50).`); return; }
+                  }
                   const montos = x.a === "recibir"
                     ? { cifUsd: n(doc.cifUsd), tipoCambio: n(doc.tipoCambio), ivaInternacion: n(doc.ivaInternacion), otrosDocumentos: doc.otrosDocumentos || null }
                     : {};
                   if (await accion("POST", "/documentacion", { accion: x.a, fecha: doc.fecha, detalle: doc.detalle || null, facturaComercial: doc.facturaComercial || null, ...montos }, "Documentación actualizada.")) {
                     setDoc({ ...doc, detalle: "" });
-                    if (x.a === "recibir") setT((p) => ({ ...p, cifUsd: doc.cifUsd || p.cifUsd, paridad: doc.tipoCambio || p.paridad }));
+                    if (x.a === "recibir") setT((p) => ({ ...p, cifUsd: doc.cifUsd.trim() ? montoAInput(montoCl(doc.cifUsd)) : p.cifUsd, paridad: doc.tipoCambio.trim() ? montoAInput(montoCl(doc.tipoCambio)) : p.paridad }));
                   }
                 }}>{x.l}</button>
               ))}
@@ -506,7 +512,7 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
         {d.tasa && (
           <table className="data" style={{ marginBottom: 10 }}>
             <tbody>
-              <tr><th>CIF US$</th><td className="num">{d.tasa.cifUsd.toLocaleString("es-CL")}</td><th>Paridad</th><td className="num">{d.tasa.paridad.toLocaleString("es-CL")}</td><th>% afecto</th><td className="num">{d.tasa.pctAfecto}</td></tr>
+              <tr><th>CIF US$</th><td className="num">{fmtNum(d.tasa.cifUsd, 0)}</td><th>Paridad</th><td className="num">{fmtNum(d.tasa.paridad, 0)}</td><th>% afecto</th><td className="num">{d.tasa.pctAfecto}</td></tr>
               <tr><th>Tasa ({pct(d.tasa.tasaPct)})</th><td className="num">{clp(d.tasa.tasa)}</td><th>IVA ({pct(d.tasa.ivaPct)})</th><td className="num">{clp(d.tasa.iva)}</td><th>Total</th><td className="num"><b>{clp(d.tasa.total)}</b></td></tr>
             </tbody>
           </table>
@@ -516,7 +522,7 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
           docEstado !== "conforme" ? (
             <div className="alert info" style={{ marginTop: 8 }}>La tasa se calcula con la documentación administrativa conforme.</div>
           ) : (
-            <form className="form-grid" style={{ marginTop: 10 }} onSubmit={(e) => { e.preventDefault(); accion("POST", "/tasa", { cifUsd: num(t.cifUsd), paridad: num(t.paridad), pctAfecto: num(t.pctAfecto) }, "Tasa calculada."); }}>
+            <form className="form-grid" style={{ marginTop: 10 }} onSubmit={(e) => { e.preventDefault(); if (![t.cifUsd, t.paridad, t.pctAfecto].every((v) => Number.isFinite(num(v)))) { toast.error("Revise el CIF, la paridad y el % afecto: punto de miles y coma decimal (p. ej. 184.500 o 950,25)."); return; } accion("POST", "/tasa", { cifUsd: num(t.cifUsd), paridad: num(t.paridad), pctAfecto: num(t.pctAfecto) }, "Tasa calculada."); }}>
               <div className="field"><label htmlFor="cif">Valor CIF (US$) *</label><input id="cif" inputMode="decimal" value={t.cifUsd} onChange={(e) => setT({ ...t, cifUsd: e.target.value })} /></div>
               <div className="field"><label htmlFor="par">Paridad US$ → $ *</label><input id="par" inputMode="decimal" value={t.paridad} onChange={(e) => setT({ ...t, paridad: e.target.value })} /></div>
               <div className="field"><label htmlFor="afe">% afecto</label><input id="afe" inputMode="decimal" value={t.pctAfecto} onChange={(e) => setT({ ...t, pctAfecto: e.target.value })} /></div>

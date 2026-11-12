@@ -11,6 +11,7 @@ import { toast } from "@/components/ui/feedback";
 import { BuscadorCodificacion, BuscadorElemento, BuscadorEmpresa, type ElementoCatalogo, type Empresa, type ProductoCodificado } from "./Buscadores";
 import { type ConfigBpch, pedir } from "./bpch";
 import ListadoArmas, { type ArmaListado, armasDesde } from "./ListadoArmas";
+import { montoCl } from "@/lib/monto-cl";
 
 type Item = {
   clave: number;
@@ -108,7 +109,7 @@ export function FormInternacion({ config, inicial, onGuardado, onCancelar }: { c
         cnc: it.cnc || null,
         claseDivisionUn: it.claseDivisionUn || null,
         numeroUn: it.numeroUn || null,
-        cantidad: it.cantidad.trim() ? Number(it.cantidad.replace(",", ".")) : null,
+        cantidad: it.cantidad.trim() ? montoCl(it.cantidad) : null,
         unidadMedida: it.unidadMedida || null,
       })),
     };

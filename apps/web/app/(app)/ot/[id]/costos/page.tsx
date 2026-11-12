@@ -23,6 +23,7 @@ import { PageHeader, SkeletonCards } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import { clp, fechaHora, num, pct } from "@/lib/format";
 import { llamar, qs } from "@/lib/laboratorio";
+import { montoCl } from "@/lib/monto-cl";
 
 type Categoria = "horas_hombre" | "reactivos" | "equipos" | "otros" | "ot_interna" | "comision";
 interface Linea {
@@ -102,7 +103,8 @@ const aTexto = (v: number | null | undefined) => (v == null ? "" : String(v).rep
 const aNum = (s: string) => {
   const t = s.trim().replace(/\s/g, "");
   if (!t) return 0;
-  return /^\d+([.,]\d+)?$/.test(t) ? Number(t.replace(",", ".")) : NaN;
+  const n = montoCl(t); // «184.500» = 184500 (punto de miles), «12,5» (coma decimal): F001
+  return n === null || n < 0 ? NaN : n;
 };
 const filaVacia = (k: Categoria): Fila => ({ clave: clave(), categoria: k, cargo: null, descripcion: "", cantidad: "", unidad: "", costoUnitario: "" });
 
