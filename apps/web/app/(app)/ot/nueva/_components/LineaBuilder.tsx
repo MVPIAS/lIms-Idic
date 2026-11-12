@@ -102,6 +102,8 @@ export type LineaOT = {
   numPlanilla: string;
   metodos: { metodoId: string; metodoCodigo: string; metodoNombre: string; ensayoId: string; precio: number }[];
   subtotal: number;
+  /** F013: motivo por el que se quitan ensayos del panel (excepción a la batería fija del BPCH). */
+  excepcionBateria?: string;
 };
 
 /** Subgrupo del catálogo heredado con los elementos «laboratorio» (no productos). */
@@ -215,6 +217,7 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
       .then((d) => {
         const list = asArray<PanelMetodo>(d);
         setPanel(list);
+        setBateria(list.map((m) => m.metodoId));
         // Todos marcados por defecto.
         setChecked(Object.fromEntries(list.map((m) => [m.metodoId, true])));
       })
@@ -224,11 +227,16 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
   }, [elemento]);
 
   const metodosMarcados = useMemo(() => panel.filter((m) => checked[m.metodoId]), [panel, checked]);
+  // F013 (R4): métodos del panel del elemento (la batería). En una OT del Banco de Pruebas
+  // quitar uno es una excepción: exige motivo y la autorización de la jefatura (lo valida la API).
+  const [bateria, setBateria] = useState<string[]>([]);
+  const [motivoExcepcion, setMotivoExcepcion] = useState("");
+  const quitadosBateria = useMemo(() => panel.filter((m) => bateria.includes(m.metodoId) && !checked[m.metodoId]), [panel, bateria, checked]);
   const subtotal = useMemo(() => metodosMarcados.reduce((s, m) => s + Number(m.precio ?? 0), 0), [metodosMarcados]);
 
   const resetElemento = () => {
     setGranGrupoId(""); setGrupoId(""); setSubgrupoId(""); setFamiliaId(""); setQ("");
-    setElemento(null); setPanel([]); setChecked({}); setBuscaMetodo(""); setMetodosEncontrados([]);
+    setElemento(null); setPanel([]); setChecked({}); setBuscaMetodo(""); setMetodosEncontrados([]); setBateria([]); setMotivoExcepcion("");
     setEsProductoLab(false); setProductosLab([]); setGenericoOrigen(null);
     setAnalista(""); setPrioridad("normal"); setTipoInspeccion(""); setCantidad(1); setNumMuestras(1); setNumPlanilla("");
   };
@@ -282,6 +290,7 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
         precio: Number(m.precio ?? 0),
       })),
       subtotal,
+      ...(quitadosBateria.length && motivoExcepcion.trim() ? { excepcionBateria: motivoExcepcion.trim() } : {}),
     });
     resetElemento();
   };
@@ -498,6 +507,15 @@ export default function LineaBuilder({ onAdd }: { onAdd: (l: LineaOT) => void })
               )}
             </table>
           </div>
+
+          {quitadosBateria.length > 0 && (
+            <div className="field" style={{ marginTop: 10, maxWidth: 720 }}>
+              <label htmlFor="lb-excepcion">Motivo para quitar {quitadosBateria.length} ensayo(s) del panel</label>
+              <input id="lb-excepcion" value={motivoExcepcion} maxLength={1000} onChange={(e) => setMotivoExcepcion(e.target.value)}
+                placeholder="Obligatorio en el Banco de Pruebas: la batería es fija y la excepción la autoriza la jefatura" />
+              <small style={{ color: "var(--muted)" }}>Quitados: {quitadosBateria.map((m) => m.metodoCodigo).join(", ")}. En el Banco de Pruebas solo la jefatura de la Sección Certificación de la Conformidad o del Banco puede registrar la OT sin toda la batería.</small>
+            </div>
+          )}
 
           <div className="field" style={{ marginTop: 10, maxWidth: 520, position: "relative" }}>
             <label htmlFor="lb-buscar-metodo">Agregar un método del catálogo</label>
