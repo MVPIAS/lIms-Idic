@@ -43,6 +43,7 @@ import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
 import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
 import { escapeHtml } from "./html.util";
 import { camposDeLaboratorio } from "../recepcion/reglas-recepcion";
+import { elegirPlantillaSugerida } from "./plantilla-sugerida";
 import {
   armarInforme,
   filaInspeccion,
@@ -1376,6 +1377,25 @@ export class PlantillaRenderService {
     const formato = await this.configDePlantilla(plantilla.id, plantilla.tipo);
     const encargo = formato.portada === "ivc" ? await this.portadaEncargo(ctx.ot.id) : {};
     return { formato, ...this.sugerencias(ctx, formato, encargo), cobertura: await this.coberturaSugerida(ctx.ot.unidadPrincipal) };
+  }
+
+  /** Plantilla que se propone para el documento del laboratorio indicado (F063, plantilla-sugerida.ts). */
+  async plantillaSugerida(tenantId: string | undefined, unidadId: string | null) {
+    if (!unidadId) return null;
+    const [u] = await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(`SELECT codigo FROM unidad WHERE id = $1::uuid`, unidadId);
+    const plantillas = await this.prisma.$queryRawUnsafe<{ id: string; repid: string; activo: boolean }[]>(
+      `SELECT id, repid, activo FROM plantilla_informe
+        WHERE deleted_at IS NULL AND tipo <> 'COTIZACION' AND ($1::uuid IS NULL OR tenant_id = $1::uuid)`,
+      tenantId ?? null,
+    );
+    const usadas = await this.prisma.$queryRawUnsafe<{ plantillaId: string; veces: number }[]>(
+      `SELECT c.plantilla_id AS "plantillaId", count(*)::int AS veces
+         FROM certificado c JOIN orden_trabajo o ON o.id = c.ot_id
+        WHERE c.plantilla_id IS NOT NULL AND c.deleted_at IS NULL AND COALESCE(c.unidad_id, o.unidad_principal) = $1::uuid
+        GROUP BY c.plantilla_id`,
+      unidadId,
+    );
+    return elegirPlantillaSugerida(u?.codigo ?? null, plantillas, usadas);
   }
 
   /**

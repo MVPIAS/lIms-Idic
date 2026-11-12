@@ -11,7 +11,7 @@
  * por firmar»; con la última firma pasa a oficial.
  * Reglas: docs/FLUJO_FIRMA_CIERRE.md y docs/FLUJO_INFORME_ENSAYO.md.
  */
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { otActiva } from "@/lib/ot-activa";
@@ -152,6 +152,23 @@ function InformesContenido() {
   useEffect(() => {
     if (plantillaId && !plantillasVisibles.some((p) => p.id === plantillaId)) setPlantillaId("");
   }, [plantillasVisibles, plantillaId]);
+
+  // F063: con la OT elegida y sin plantilla, se propone la del laboratorio (una vez por OT; se puede cambiar).
+  const sugeridaPara = useRef<string>("");
+  useEffect(() => {
+    if (!otId || plantillaId || cargando || !plantillas.length || sugeridaPara.current === otId) return;
+    sugeridaPara.current = otId;
+    api
+      .getRaw<{ sugerida: { plantillaId: string } | null }>(`informes/ot/${otId}/plantilla-sugerida`)
+      .then((r) => {
+        const id = r?.sugerida?.plantillaId;
+        if (id && plantillas.some((p) => p.id === id)) {
+          setFiltroTipo("");
+          setPlantillaId((actual) => actual || id);
+        }
+      })
+      .catch(() => undefined);
+  }, [otId, plantillaId, cargando, plantillas]);
 
   const listo = !!otId && !!plantillaId;
   const datosInforme = () => ({
