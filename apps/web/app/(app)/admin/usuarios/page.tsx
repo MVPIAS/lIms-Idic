@@ -462,7 +462,8 @@ function TabReemplazos({ usuario, onCambio }: { usuario: Usuario; onCambio: () =
     setOcupado(true);
     try {
       const r = await adminApi.reemplazar(usuario.id, { reemplazadoId: f.reemplazadoId, desde: f.desde || null, hasta: f.hasta, motivo: f.motivo.trim() });
-      toast.ok(`Reemplazo registrado: ${r.data.roles.map((x) => x.rol).join(", ")}. La persona debe volver a ingresar para usarlo.`);
+      // Nombre del rol y unidad («Jefe de Departamento · DQO»), no el código interno (F092).
+      toast.ok(`Reemplazo registrado: ${r.data.texto || `${r.data.roles.length} rol(es)`}. La persona debe volver a ingresar para usarlo.`);
       setF({ reemplazadoId: "", desde: "", hasta: "", motivo: "" });
       await cargar();
       await onCambio();
