@@ -80,6 +80,11 @@ function textoHistorial(h: any): string {
       : "";
     return `Recepción de ${d.muestra ?? "la muestra"} corregida${campos.length ? `: ${campos.join(", ")}` : ""}${condicion}`;
   }
+  // F032: la anulación con su causa y su motivo (ot_historial.detalle).
+  if (h.tipo === "ot_anulada")
+    return `OT anulada${d.causaTexto ? ` · causa: ${String(d.causaTexto).toLowerCase()}` : ""}${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
+  if (h.tipo === "metodos_agregados")
+    return `Se agregaron ${(d.ensayos ?? []).length} método(s) a ${d.muestra ?? "la muestra"}${(d.ensayos ?? []).length ? `: ${(d.ensayos as string[]).join(", ")}` : ""}${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
   if (h.tipo === "numero_muestra") return `Nº interno ${d.numeroInterno ?? "—"} asignado a la muestra ${d.muestra ?? ""}`;
   if (h.tipo === "validacion_laboratorio")
     return `OT recepcionada en el laboratorio (alcance conforme)${d.fechaTermino ? ` · término ${fechaDia(d.fechaTermino)}` : ""}${d.fechaInforme ? ` · informe ${fechaDia(d.fechaInforme)}` : ""}${d.observacion ? ` · ${d.observacion}` : ""}`;
