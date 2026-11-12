@@ -114,14 +114,40 @@ export function erroresItems(items: ItemInternacion[], opts: { conArmas?: boolea
   return e;
 }
 
-/** Tamaños del lote: enteros positivos y muestra ≤ lote. */
-export function erroresLote(d: { tamanoLote?: number | null; tamanoMuestra?: number | null }, n = "Lote"): string[] {
+/** Factor a kilos de las unidades de masa de las listas unidad_tamano_lote / unidad_tamano_muestra. */
+export const UNIDAD_A_KG: Record<string, number> = { t: 1000, kg: 1, g: 0.001 };
+
+/**
+ * fx5-c · F005: compara muestra y lote en la misma escala. Sin unidades (o la
+ * misma) se comparan tal cual; dos unidades de masa se convierten a kilos; si
+ * son incompatibles (Toneladas y Unidades, Pares y Kilos…) no se comparan.
+ * Devuelve null si no se pueden comparar.
+ */
+export function muestraSuperaLote(lote: number, uLote: string | null | undefined, muestra: number, uMuestra: string | null | undefined): boolean | null {
+  const a = (uLote ?? "").trim();
+  const b = (uMuestra ?? "").trim();
+  if (!a || !b || a === b) return muestra > lote;
+  const fl = UNIDAD_A_KG[a];
+  const fm = UNIDAD_A_KG[b];
+  if (!fl || !fm) return null;
+  return muestra * fm > lote * fl;
+}
+
+/** Tamaños del lote: enteros positivos y muestra ≤ lote (en la misma escala si traen unidad: F005). */
+export function erroresLote(
+  d: { tamanoLote?: number | null; tamanoMuestra?: number | null; unidadLote?: string | null; unidadMuestra?: string | null },
+  n = "Lote",
+  etiquetas: Record<string, string> = {},
+): string[] {
   const e: string[] = [];
   const lote = d.tamanoLote ?? null;
   const muestra = d.tamanoMuestra ?? null;
   if (lote !== null && (!Number.isInteger(lote) || lote <= 0)) e.push(`${n}: el tamaño del lote debe ser un entero mayor que cero.`);
   if (muestra !== null && (!Number.isInteger(muestra) || muestra <= 0)) e.push(`${n}: el tamaño de la muestra debe ser un entero mayor que cero.`);
-  if (lote !== null && muestra !== null && muestra > lote) e.push(`${n}: el tamaño de la muestra (${muestra}) no puede superar el del lote (${lote}).`);
+  if (lote !== null && muestra !== null && muestraSuperaLote(lote, d.unidadLote, muestra, d.unidadMuestra)) {
+    const con = (v: number, u?: string | null) => (u ? `${v} ${etiquetas[u] ?? u}` : String(v));
+    e.push(`${n}: el tamaño de la muestra (${con(muestra, d.unidadMuestra)}) no puede superar el del lote (${con(lote, d.unidadLote)}).`);
+  }
   return e;
 }
 
