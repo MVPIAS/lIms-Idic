@@ -212,7 +212,7 @@ export default function QcPage() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await fetch(`${API}/ot?limit=200`, { headers: auth() });
+        const r = await fetch(`${API}/ot?limit=200&derivadas=1`, { headers: auth() });
         if (!r.ok) throw new Error(await errorMensaje(r));
         const j = await r.json();
         setOts(Array.isArray(j) ? j : j.data ?? []);
