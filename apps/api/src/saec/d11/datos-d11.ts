@@ -38,7 +38,16 @@ export interface FilaArma {
   ensayos: number;
   pendientes: number;
   aprobados: number;
-  certificado: { id: string; numero: string; estado: string; entregadoAt: string | null; vigenteHasta: string | null; vigenteDesde: string | null } | null;
+  certificado: {
+    id: string;
+    numero: string;
+    estado: string;
+    entregadoAt: string | null;
+    vigenteHasta: string | null;
+    vigenteDesde: string | null;
+    /** F039: debe reemitirse para incorporar el registro de IBIS. */
+    pendienteIbis?: boolean;
+  } | null;
   pendiente_motivo: string | null;
   pendiente_detalle: string | null;
   pendiente_at: Date | null;
@@ -58,7 +67,10 @@ export const SELECT_ARMAS = `
                                               AND r.estado IN ('pendiente', 'devuelto'))::int AS pendientes,
          (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL AND r.estado = 'aprobado')::int AS aprobados,
          (SELECT json_build_object('id', c.id, 'numero', COALESCE(c.numero, c.codigo), 'estado', c.estado,
-                                   'entregadoAt', c.entregado_at, 'vigenteHasta', ca.vigente_hasta, 'vigenteDesde', ca.vigente_desde)
+                                   'entregadoAt', c.entregado_at, 'vigenteHasta', ca.vigente_hasta, 'vigenteDesde', ca.vigente_desde,
+                                   -- F039: emitido «Pendiente de IBIS» y el registro del arma ya llegó: hay que reemitirlo.
+                                   'pendienteIbis', (c.documento_html LIKE '%Pendiente de IBIS%'
+                                     AND EXISTS (SELECT 1 FROM ibis_resultado ir WHERE ir.arma_id = ar.id AND ir.estado = 'asignado' AND ir.deleted_at IS NULL)))
             FROM certificado c
             LEFT JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
            WHERE c.ot_id = a.ot_id AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'

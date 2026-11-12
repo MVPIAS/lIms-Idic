@@ -20,6 +20,7 @@ import { rut, hoyISO, pct } from "@/lib/format";
 import { ESTADO_CORRELACION, ESTADO_LINEA, ESTADO_OC, MESES, MESES_LARGOS, cant, dia, numeroCl } from "@/lib/bpchProcesos";
 import BarraFases from "@/components/bpch-procesos/BarraFases";
 import ClasificacionProducto from "./ClasificacionProducto";
+import { BuscadorElemento, type ElementoCatalogo } from "../../_components/Buscadores";
 
 const vacioLinea = { ocProductoId: "", unidadId: "", mes: "", fechaProgramada: "", lugar: "", lote: "", cantidad: "", observaciones: "" };
 
@@ -37,8 +38,10 @@ export default function OcPage() {
   const [motivo, setMotivo] = useState("");
   const [modalOc, setModalOc] = useState<"anular" | null>(null);
   const [corrModal, setCorrModal] = useState(false);
-  const [producto, setProducto] = useState<{ producto: string; unidadMedida: string; cantidadAutorizada: string } | null>(null);
+  const [producto, setProducto] = useState<{ producto: string; unidadMedida: string; cantidadAutorizada: string; elemento: ElementoCatalogo | null } | null>(null);
   const [clasProducto, setClasProducto] = useState<any>(null);
+  // F006: elemento del catálogo del producto (de él sale la batería de ensayos de la OT).
+  const [elemProducto, setElemProducto] = useState<{ p: any; elemento: ElementoCatalogo | null } | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -182,7 +185,7 @@ export default function OcPage() {
       <div className="card" style={{ padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <h2 style={{ fontSize: 14, margin: 0 }}>Productos y consumo de la O/C</h2>
-          {gestionar && vigente && <button className="btn outline sm" onClick={() => setProducto({ producto: "", unidadMedida: "", cantidadAutorizada: "" })}>＋ Producto</button>}
+          {gestionar && vigente && <button className="btn outline sm" onClick={() => setProducto({ producto: "", unidadMedida: "", cantidadAutorizada: "", elemento: null })}>＋ Producto</button>}
         </div>
         <p style={{ fontSize: 12, color: "var(--muted)", margin: "4px 0 8px" }}>
           Consume lo que tiene OT: en curso = comprometido; cerrada = ejecutado. Lo planificado sin OT no descuenta. Si se supera lo autorizado, se avisa.
@@ -197,7 +200,18 @@ export default function OcPage() {
                 const p = oc.productos.find((x: any) => x.id === c.ocProductoId);
                 return (
                   <tr key={c.ocProductoId}>
-                    <td>{c.producto} <small style={{ color: "var(--muted)" }}>({c.unidadMedida})</small></td>
+                    <td>
+                      {c.producto} <small style={{ color: "var(--muted)" }}>({c.unidadMedida})</small>
+                      <small style={{ display: "block", color: p?.catElemento ? "var(--muted)" : "var(--warn, #b45309)" }}>
+                        {p?.catElemento ? `Elemento: ${p.catElemento.nombre}` : "Sin elemento del catálogo: la OT no trae su batería"}
+                        {gestionar && vigente && p && (
+                          <button type="button" className="btn outline sm" style={{ marginLeft: 6 }} onClick={() => setElemProducto({ p, elemento: null })}
+                            aria-label={`${p.catElemento ? "Cambiar" : "Asociar"} el elemento del catálogo de ${p.producto}`}>
+                            {p.catElemento ? "Cambiar" : "Asociar"}
+                          </button>
+                        )}
+                      </small>
+                    </td>
                     <td>
                       {p?.clasificacion ? <Link href={`/bpch/clasificaciones/${p.clasificacion.id}` as any}>{p.clasificacion.codigo}</Link> : <span style={{ color: "var(--muted)" }}>Sin clasificación</span>}
                       {gestionar && vigente && p && (
@@ -399,7 +413,8 @@ export default function OcPage() {
             <>
               <button className="btn outline sm" onClick={() => setProducto(null)}>Cancelar</button>
               <button className="btn primary sm" disabled={busy || !producto.producto.trim() || !producto.unidadMedida.trim() || !producto.cantidadAutorizada.trim()} onClick={async () => {
-                const x = await ejecutar(() => llamar("POST", `/bpch/pn/oc/${id}/productos`, { ...producto, cantidadAutorizada: numeroCl(producto.cantidadAutorizada) }), "Producto agregado.");
+                const { elemento, ...datos } = producto;
+                const x = await ejecutar(() => llamar("POST", `/bpch/pn/oc/${id}/productos`, { ...datos, cantidadAutorizada: numeroCl(producto.cantidadAutorizada), catElementoId: elemento?.id ?? null }), "Producto agregado.");
                 if (x) { setOc(x); setProducto(null); }
               }}>Agregar</button>
             </>
@@ -409,7 +424,29 @@ export default function OcPage() {
             <div className="field span-3"><label htmlFor="p-n">Producto <span className="req">*</span></label><input id="p-n" value={producto.producto} onChange={(e) => setProducto({ ...producto, producto: e.target.value })} maxLength={240} /></div>
             <div className="field"><label htmlFor="p-u">Unidad <span className="req">*</span></label><input id="p-u" value={producto.unidadMedida} onChange={(e) => setProducto({ ...producto, unidadMedida: e.target.value })} maxLength={20} placeholder="t, kg, u, m" /></div>
             <div className="field"><label htmlFor="p-c">Cantidad autorizada <span className="req">*</span></label><input id="p-c" inputMode="decimal" value={producto.cantidadAutorizada} onChange={(e) => setProducto({ ...producto, cantidadAutorizada: e.target.value })} /></div>
+            <div className="span-3"><BuscadorElemento valor={producto.elemento} onChange={(e) => setProducto({ ...producto, elemento: e })} /></div>
           </div>
+          <small style={{ color: "var(--muted)" }}>Del elemento del catálogo sale la batería de ensayos que trae cada OT de este producto.</small>
+        </Modal>
+      )}
+
+      {elemProducto && (
+        <Modal
+          titulo={`Elemento del catálogo · ${elemProducto.p.producto}`}
+          onCerrar={() => setElemProducto(null)}
+          acciones={
+            <>
+              <button className="btn outline sm" onClick={() => setElemProducto(null)}>Cancelar</button>
+              <button className="btn primary sm" disabled={busy || !elemProducto.elemento} onClick={async () => {
+                const x = await ejecutar(() => llamar("PATCH", `/bpch/pn/oc/${id}/productos/${elemProducto.p.id}`, { catElementoId: elemProducto.elemento!.id }), "Elemento asociado.");
+                if (x) { setOc(x); setElemProducto(null); }
+              }}>Guardar</button>
+            </>
+          }
+        >
+          {elemProducto.p.catElemento && <p style={{ fontSize: 12.5 }}>Actual: {elemProducto.p.catElemento.nombre}</p>}
+          <BuscadorElemento valor={elemProducto.elemento} onChange={(e) => setElemProducto({ ...elemProducto, elemento: e })} />
+          <small style={{ color: "var(--muted)" }}>Las OT del programa, incluso las ya generadas, toman la batería de ensayos de este elemento en la recepción.</small>
         </Modal>
       )}
 

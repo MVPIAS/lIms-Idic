@@ -196,6 +196,7 @@ export default function NuevaOtPage() {
         nombre: l.descripcion.trim(),
         ...(l.elementoId && !l.generico ? { catElementoId: l.elementoId } : {}),
         metodoIds: l.metodos.map((m) => m.metodoId).filter(Boolean),
+        ...(l.excepcionBateria ? { excepcionBateria: l.excepcionBateria } : {}),
       })),
     );
     if (muestras.length > 50) { setErrMsg("Registre como máximo 50 muestras de una vez."); return; }

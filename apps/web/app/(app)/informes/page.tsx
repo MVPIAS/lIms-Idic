@@ -60,7 +60,7 @@ const TIPOS_DOCUMENTO: { valor: string; texto: string }[] = [
   { valor: "IVC", texto: "Informe de verificación (IVC)" },
   { valor: "INFORME_TECNICO", texto: "Informe técnico" },
   { valor: "CERTIFICADO_CALIBRACION", texto: "Certificado de calibración" },
-  { valor: "INFORME_INSPECCION", texto: "Informe de inspección" },
+  { valor: "INFORME_INSPECCION", texto: "Certificado de control (Informe de Inspección)" },
   { valor: "CERTIFICADO_CONFORMIDAD", texto: "Certificado de conformidad" },
   { valor: "INFORME_INCUMPLIMIENTO", texto: "Informe de incumplimiento" },
   { valor: "CERTIFICADO_RESISTENCIA_BALISTICA", texto: "Certificado de Resistencia Balística (CRB)" },
@@ -379,7 +379,8 @@ function InformesContenido() {
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6 }}>
                 {cond.faltantes.map((f, i) => <li key={i}>{f}</li>)}
               </ul>
-              {otId && <p className="subtitle" style={{ marginBottom: 0 }}>Revise y apruebe los resultados en <Link href={"/captura-ot" as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>.</p>}
+              {/* F019: solo si falta aprobar resultados (no cuando todo está aprobado y falta otra cosa). */}
+              {otId && cond.resultados.aprobados < cond.resultados.total && <p className="subtitle" style={{ marginBottom: 0 }}>Revise y apruebe los resultados en <Link href={"/captura-ot" as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>.</p>}
             </>
           )}
           {cond?.puedeEmitir && <p style={{ margin: "0 0 6px" }}>Todo en orden: resultados aprobados y firmantes definidos.</p>}

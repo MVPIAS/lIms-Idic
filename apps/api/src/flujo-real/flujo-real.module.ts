@@ -994,7 +994,15 @@ export class PuenteAnalisisService {
    * cumple en los atributos. Lo revisado o aprobado no se sobrescribe. Deja al
    * usuario como analista (segregación) y recalcula el veredicto de la muestra.
    */
-  async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any, variante?: OpcionesCapturaVariante) {
+  async capturarValor(
+    id: string,
+    entrada: z.infer<typeof CapturarValorBody>,
+    tenantId: string,
+    req?: any,
+    variante?: OpcionesCapturaVariante,
+    /** F045: captura que no es una determinación repetible (p. ej. IT05 del arma): sin re-análisis automático. */
+    opciones?: { sinReanalisis?: boolean },
+  ) {
     // El laboratorio de destino de una orden interna recibida captura sus ensayos derivados.
     const { resultado, otId, lab } = await this.resultadoEnAlcance(id, tenantId, req);
 
@@ -1195,6 +1203,7 @@ export class PuenteAnalisisService {
       advertencia,
       valor: { numerico: calc.resultadoFinal ?? calc.valorNumerico, texto: calc.valorTexto },
       abierto: reanalisis,
+      sinReanalisis: !!opciones?.sinReanalisis,
     });
     const consumos = consume
       ? await descontarPorCaptura(this.prisma as any, {
@@ -1747,10 +1756,10 @@ export class RegistroMuestrasService {
     private readonly alcanceResultado: AlcanceResultadoService,
   ) {}
 
-  private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma) {
+  private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma, alcanceVerificado = false) {
     const ot = await db.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    if (!alcanceVerificado) await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return ot;
   }
 
@@ -1977,13 +1986,20 @@ export class RegistroMuestrasService {
       })),
       porEnsayo,
     );
+    // F006: si la OT viene del programa de Producción Nacional y su producto no tiene
+    // elemento del catálogo, se dice dónde corregirlo (en vez de «no viene de una cotización»).
+    const prodPn = !cot && !ot.catElementoId ? await this.productoDeProgramaPn(ot.id) : null;
+    const pn = !panelOt && prodPn && !prodPn.catElementoId ? prodPn : null;
     return {
       // B-008: la OT que nace de un programa (producto), de un prototipo (panel
       // parametrizado) o de un registro con elemento trae su panel a la recepción.
       panelOt,
+      avisoPanel: pn
+        ? `El producto «${pn.producto}» de la O/C operativa ${pn.oc} no está asociado a un elemento del catálogo, así que la OT no trae su batería de ensayos: asócielo en Producción Nacional › O/C › Productos (las OT ya generadas lo toman al recargar).`
+        : null,
       ot: {
         id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal, clienteId: ot.clienteId,
-        clienteNombre: cliente?.razonSocial ?? null, catElementoId: ot.catElementoId ?? null,
+        clienteNombre: cliente?.razonSocial ?? null, catElementoId: ot.catElementoId ?? prodPn?.catElementoId ?? null,
       },
       configRecepcion: cfg,
       cotizacion: cot ? { id: cot.id, codigo: cot.codigo, estado: cot.estado, referencia: cot.referencia } : null,
@@ -2034,18 +2050,35 @@ export class RegistroMuestrasService {
         parametrizacion: proto[0].estado,
         metodos: await this.metodos(tenantId, { ids: proto[0].metodos }),
       };
-    if (!ot.catElementoId) return null;
+    // F006: la OT del programa de Producción Nacional toma el elemento del producto de
+    // la O/C aunque se haya asociado después de generar la OT.
+    const elementoId = ot.catElementoId ?? (await this.productoDeProgramaPn(ot.id))?.catElementoId ?? null;
+    if (!elementoId) return null;
     const el = await this.prisma.$queryRawUnsafe<{ nombre: string; metodos: string[] }[]>(
       `SELECT e.nombre, COALESCE(array_agg(p.metodo_id::text) FILTER (WHERE p.metodo_id IS NOT NULL), '{}') AS metodos
          FROM cat_elemento e
          LEFT JOIN cat_panel p ON p.elemento_id = e.id AND p.deleted_at IS NULL AND p.activo
         WHERE e.id = $1::uuid AND e.tenant_id = $2::uuid
         GROUP BY e.nombre`,
-      ot.catElementoId,
+      elementoId,
       tenantId,
     );
     if (!el[0]) return null;
     return { origen: "producto" as const, nombre: el[0].nombre, parametrizacion: null, metodos: await this.metodos(tenantId, { ids: el[0].metodos }) };
+  }
+
+  /** Producto de la O/C operativa de Producción Nacional del que nació la OT (o null si no es de ese programa). */
+  private async productoDeProgramaPn(otId: string): Promise<{ producto: string; oc: string; catElementoId: string | null } | null> {
+    const [f] = await this.prisma.$queryRawUnsafe<{ producto: string; oc: string; catElementoId: string | null }[]>(
+      `SELECT p.producto, o.numero AS oc, p.cat_elemento_id AS "catElementoId"
+         FROM bpch_pn_inspeccion i
+         JOIN bpch_oc_producto p ON p.id = i.oc_producto_id
+         JOIN bpch_oc_operativa o ON o.id = p.oc_id
+        WHERE i.ot_id = $1::uuid
+        LIMIT 1`,
+      otId,
+    );
+    return f ?? null;
   }
 
   /**
@@ -2099,14 +2132,28 @@ export class RegistroMuestrasService {
    * resultado). Todo o nada: dentro de `db` si viene de otra operación (lotes
    * BPCH) o en una transacción propia; si una muestra falla, no queda ninguna.
    */
-  async registrar(otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any, db?: Db) {
+  async registrar(
+    otId: string,
+    body: z.infer<typeof RegistrarMuestrasBody>,
+    tenantId: string,
+    req: any,
+    db?: Db,
+    /**
+     * fx5-c · F002: el expediente BPCH que llama ya verificó el alcance con su
+     * regla (la SCC gestiona los expedientes de todas las sucursales), así que
+     * no se exige además la unidad de la OT.
+     * fx5-c · F013: «Registrar OT» crea las muestras dentro de su transacción y
+     * pide validar la batería fija igual que la recepción.
+     */
+    opciones?: { alcanceVerificado?: boolean; validarBateria?: boolean },
+  ) {
     // Desde otra operación (lotes de la internación, reinspección…) la batería la revisa esa operación.
-    if (db) return this.registrarEn(db, otId, body, tenantId, req, false);
+    if (db) return this.registrarEn(db, otId, body, tenantId, req, !!opciones?.validarBateria, !!opciones?.alcanceVerificado);
     return this.prisma.$transaction((tx) => this.registrarEn(tx, otId, body, tenantId, req, true), { maxWait: 15_000, timeout: 120_000 });
   }
 
-  private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any, validarBateria: boolean) {
-    const ot = await this.otEnAlcance(otId, tenantId, req, db);
+  private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any, validarBateria: boolean, alcanceVerificado = false) {
+    const ot = await this.otEnAlcance(otId, tenantId, req, db, alcanceVerificado);
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
     // Recepción de cada muestra (si se envía): toma de muestra, condición, sello,

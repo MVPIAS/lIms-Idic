@@ -131,6 +131,8 @@ const OtCreate = z
           nombre: z.string().trim().max(200).optional(),
           catElementoId: z.string().uuid().optional(),
           metodoIds: z.array(z.string().uuid()).max(200),
+          /** F013 (R4): en el BPCH, quitar ensayos de la batería exige motivo y bpch.bateria.excepcion. */
+          excepcionBateria: z.string().trim().max(1000).nullable().optional(),
         }),
       )
       .max(50)
@@ -698,7 +700,8 @@ export class OtController {
       // Muestras y ensayos por analizar en la MISMA transacción (todo o nada).
       if (alta.muestras.length) {
         if (!this.registroMuestras) throw new BadRequestException("El registro de muestras no está disponible.");
-        await this.registroMuestras.registrar(creada.id, { muestras: alta.muestras }, tenantId, req, tx);
+        // F013: la batería fija del BPCH también rige al registrar la OT (no solo en la recepción).
+        await this.registroMuestras.registrar(creada.id, { muestras: alta.muestras }, tenantId, req, tx, { validarBateria: true });
       }
       return creada;
     }, { maxWait: 15_000, timeout: 120_000 });
@@ -721,7 +724,7 @@ export class OtController {
    */
   private async validarMuestrasDeAlta(
     tenantId: string,
-    dto: { etId?: string; muestras?: { nombre?: string; catElementoId?: string; metodoIds: string[] }[] },
+    dto: { etId?: string; muestras?: { nombre?: string; catElementoId?: string; metodoIds: string[]; excepcionBateria?: string | null }[] },
     clienteId: string,
     unidadId: string,
   ) {

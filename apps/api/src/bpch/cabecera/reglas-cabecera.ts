@@ -8,7 +8,7 @@
  * tamaños, vencimiento del producto y vigencia del informe. Se imprime en el
  * Informe de Inspección y en el documento final.
  */
-import { errorFormatoCnc, erroresLote } from "../comun/reglas-bpch";
+import { UNIDAD_A_KG, errorFormatoCnc, erroresLote, muestraSuperaLote } from "../comun/reglas-bpch";
 
 /** Procedimientos de control que propone la pantalla (lista abierta: el IDIC puede usar otros). */
 export const PROCEDIMIENTOS_CONTROL = ["SAC-PG01-P01", "SAC-PG05"] as const;
@@ -66,7 +66,8 @@ export function erroresCabecera(d: CabeceraDto, opts: { soloComplemento?: boolea
     const f = errorFormatoCnc(String(d.cncDgmn));
     if (f) e.push(f);
   }
-  e.push(...erroresLote({ tamanoLote: d.tamanoLote ?? null, tamanoMuestra: d.tamanoMuestra ?? null }));
+  // F005: lote y muestra se comparan en la misma escala (2 t y 5 kg es válido).
+  e.push(...erroresLote({ tamanoLote: d.tamanoLote ?? null, tamanoMuestra: d.tamanoMuestra ?? null, unidadLote: d.unidadLote, unidadMuestra: d.unidadMuestra }, "Lote", ETIQUETA_UNIDAD));
   const fecha = (v: string | null | undefined, n: string) => {
     if (vacio(v)) return;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(String(v)) || Number.isNaN(new Date(`${v}T12:00:00Z`).getTime())) e.push(`${n}: fecha no válida (AAAA-MM-DD).`);
@@ -187,8 +188,17 @@ export interface LoteCabecera {
   observacion?: string | null;
 }
 
-/** Factor a kilos de las unidades de masa (para comparar muestra y lote de distinta unidad). */
-const A_KG: Record<string, number> = { t: 1000, kg: 1, g: 0.001 };
+/** Etiquetas de las unidades de tamaño para los mensajes (las de las listas unidad_tamano_*). */
+export const ETIQUETA_UNIDAD: Record<string, string> = { t: "Toneladas", kg: "Kilos", g: "Gramos", unidades: "Unidades", pares: "Pares" };
+
+/**
+ * F005: el plan NCh 44 se calcula con el tamaño del lote en unidades (envases,
+ * piezas, pares). Con el lote en masa (kilos, toneladas) no se propone.
+ */
+export function loteEnUnidades(unidadLote: string | null | undefined): boolean {
+  const u = (unidadLote ?? "").trim();
+  return !u || !UNIDAD_A_KG[u];
+}
 
 /**
  * Errores de los lotes de la cabecera (lista vacía = válidos): identificación
@@ -216,10 +226,7 @@ export function erroresLotesCabecera(lotes: LoteCabecera[], unidades: { lote: st
     tam(l.tamanoLote, l.unidadLote, unidades.lote, "del lote");
     tam(l.tamanoMuestra, l.unidadMuestra, unidades.muestra, "de la muestra");
     if (l.tamanoLote != null && l.tamanoMuestra != null && l.unidadLote && l.unidadMuestra) {
-      const igual = l.unidadLote === l.unidadMuestra;
-      const fl = igual ? 1 : A_KG[l.unidadLote];
-      const fm = igual ? 1 : A_KG[l.unidadMuestra];
-      if (fl && fm && l.tamanoMuestra * fm > l.tamanoLote * fl) e.push(`${n}: la muestra no puede ser mayor que el lote.`);
+      if (muestraSuperaLote(l.tamanoLote, l.unidadLote, l.tamanoMuestra, l.unidadMuestra)) e.push(`${n}: la muestra no puede ser mayor que el lote.`);
     }
     if (l.vencimiento && (!/^\d{4}-\d{2}-\d{2}$/.test(l.vencimiento) || Number.isNaN(Date.parse(`${l.vencimiento}T12:00:00Z`))))
       e.push(`${n}: la fecha de vencimiento o vigencia no es válida (AAAA-MM-DD).`);
@@ -253,4 +260,56 @@ export function lugaresDisponibles(plantas: LugarInspeccion[], tabla: LugarInspe
     out.push(l);
   }
   return out;
+}
+
+/* fx5-c · F014: lotes de la inspección en el Certificado de control y en el de Conformidad */
+
+export interface LoteImpreso {
+  identificacion: string;
+  tamanoLote?: number | string | null;
+  unidadLote?: string | null;
+  tamanoMuestra?: number | string | null;
+  unidadMuestra?: string | null;
+  /** aaaa-mm-dd */
+  vencimiento?: string | null;
+}
+
+const cantidadCl = (v: number | string | null | undefined, u: string | null | undefined): string => {
+  if (v === null || v === undefined || v === "") return "—";
+  const n = Number(v);
+  const t = Number.isFinite(n) ? n.toLocaleString("es-CL", { maximumFractionDigits: 3 }) : String(v);
+  return u ? `${t} ${ETIQUETA_UNIDAD[u] ?? u}` : t;
+};
+const diaCl = (v: string | null | undefined) => (v && /^\d{4}-\d{2}-\d{2}/.test(v) ? `${v.slice(8, 10)}-${v.slice(5, 7)}-${v.slice(0, 4)}` : "");
+
+/**
+ * Campos {{bpch.lote}}, {{bpch.tamano_lote_muestra}} y {{bpch.vencimiento_producto}}
+ * de los documentos: con lotes registrados en «Lotes de la inspección», todos,
+ * con su unidad y su vencimiento; sin lotes, null (queda la cabecera).
+ */
+export function camposLotesImpresos(
+  lotes: LoteImpreso[],
+  vencimientoCabecera = "",
+): Record<"lote" | "tamano_lote_muestra" | "vencimiento_producto", string> | null {
+  if (!lotes.length) return null;
+  const varios = lotes.length > 1;
+  const pref = (l: LoteImpreso) => (varios ? `${l.identificacion}: ` : "");
+  const venc = lotes.filter((l) => diaCl(l.vencimiento));
+  return {
+    lote: lotes.map((l) => l.identificacion).join(" · "),
+    tamano_lote_muestra: lotes.map((l) => `${pref(l)}${cantidadCl(l.tamanoLote, l.unidadLote)} / ${cantidadCl(l.tamanoMuestra, l.unidadMuestra)}`).join(" · "),
+    vencimiento_producto: venc.length ? venc.map((l) => `${pref(l)}${diaCl(l.vencimiento)}`).join(" · ") : vencimientoCabecera,
+  };
+}
+
+/** Tamaños de la cabecera (sin lotes adicionales) con su unidad: «800 Kilos / 13 Kilos». */
+export function tamanoCabeceraImpreso(c: {
+  tamanoLote?: number | string | null;
+  unidadLote?: string | null;
+  tamanoMuestra?: number | string | null;
+  unidadMuestra?: string | null;
+}): string | null {
+  if (!c.unidadLote && !c.unidadMuestra) return null;
+  if ((c.tamanoLote ?? "") === "" && (c.tamanoMuestra ?? "") === "") return null;
+  return `${cantidadCl(c.tamanoLote, c.unidadLote)} / ${cantidadCl(c.tamanoMuestra, c.unidadMuestra)}`;
 }

@@ -164,6 +164,8 @@ export class BpchComunService {
       tenantDe(req),
       req,
       tx,
+      // F002: el expediente ya pasó por exigirExpediente (la SCC opera las OT de las sucursales).
+      { alcanceVerificado: true },
     );
     const m = r.muestras[0];
     if (d.lote) await tx.$executeRawUnsafe(`UPDATE muestra SET numero_lote = $2 WHERE id = $1::uuid`, m.id, d.lote.slice(0, 80));

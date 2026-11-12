@@ -1,4 +1,11 @@
-import { calcularAvance, puedeActuar, tipoRuta, type CalibracionAvance, type DocumentoAvance, type HechosOt, type InstrumentoAvance } from "./avance-ot";
+import { NOMBRE_ORIGEN_OT, calcularAvance, puedeActuar, tipoRuta, type CalibracionAvance, type DocumentoAvance, type HechosOt, type InstrumentoAvance } from "./avance-ot";
+
+describe("F008 · el origen de la OT se lee con su nombre", () => {
+  it("Requerimiento BPCH y no REQUERIMIENTO_BPCH", () => {
+    expect(NOMBRE_ORIGEN_OT.REQUERIMIENTO_BPCH).toBe("Requerimiento BPCH");
+    expect(Object.values(NOMBRE_ORIGEN_OT).some((v) => /_/.test(v))).toBe(false);
+  });
+});
 
 /** OT de laboratorio recién nacida de una cotización aceptada (estado «recepcionada»). */
 function base(p: Partial<HechosOt> = {}): HechosOt {

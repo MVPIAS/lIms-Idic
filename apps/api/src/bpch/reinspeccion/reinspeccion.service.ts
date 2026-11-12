@@ -5,6 +5,7 @@ import { BpchComunService, tenantDe, usuarioDe } from "../comun/bpch-comun.servi
 import { OtDesdeProcesoService } from "../ot-desde-proceso.service";
 import { CodificacionService } from "../codificacion/codificacion.service";
 import { condicionFinal, erroresLote, erroresLoteParaMuestra, erroresReinspeccion } from "../comun/reglas-bpch";
+import { ETIQUETA_UNIDAD } from "../cabecera/reglas-cabecera";
 
 const fechaDia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const texto = (max: number) => z.string().trim().max(max);
@@ -56,6 +57,9 @@ const InspeccionBody = z.object({
   identificacionLote: opcional(80),
   tamanoLote: z.number().int().optional().nullable(),
   tamanoMuestra: z.number().int().optional().nullable(),
+  /** F022: unidad de los tamaños (listas unidad_tamano_lote / unidad_tamano_muestra, como la cabecera de la OT). */
+  unidadLote: opcional(20),
+  unidadMuestra: opcional(20),
 });
 
 const LoteBody = z.object({ metodoIds: z.array(z.string().uuid()).min(1, "Elija al menos un ensayo").max(200) });
@@ -288,7 +292,16 @@ export class ReinspeccionService {
         numeroUn: r.numero_un,
         catElementoId: r.cat_elemento_id,
       },
-      lote: { identificacion: r.identificacion_lote, tamanoLote: r.tamano_lote, tamanoMuestra: r.tamano_muestra, muestraId: r.muestra_id },
+      lote: {
+        identificacion: r.identificacion_lote,
+        tamanoLote: r.tamano_lote,
+        tamanoMuestra: r.tamano_muestra,
+        unidadLote: r.unidad_lote ?? null,
+        unidadMuestra: r.unidad_muestra ?? null,
+        muestraId: r.muestra_id,
+      },
+      // F012: sin elemento del catálogo, los ensayos del prototipo o de la OT original.
+      ensayosPropuestos: r.muestra_id ? null : await this.ensayosPropuestos(tenantDe(req), r),
       inspeccion: {
         lugar: r.lugar_inspeccion,
         fecha: r.fecha_inspeccion,
@@ -435,8 +448,10 @@ export class ReinspeccionService {
       identificacionLote: dto.identificacionLote === undefined ? r.identificacion_lote : dto.identificacionLote,
       tamanoLote: dto.tamanoLote === undefined ? r.tamano_lote : dto.tamanoLote,
       tamanoMuestra: dto.tamanoMuestra === undefined ? r.tamano_muestra : dto.tamanoMuestra,
+      unidadLote: dto.unidadLote === undefined ? r.unidad_lote ?? null : dto.unidadLote?.trim() || null,
+      unidadMuestra: dto.unidadMuestra === undefined ? r.unidad_muestra ?? null : dto.unidadMuestra?.trim() || null,
     };
-    const errores = erroresLote(lote);
+    const errores = erroresLote(lote, "Lote", ETIQUETA_UNIDAD);
     if (errores.length) throw new BadRequestException(errores.join(" "));
     await this.prisma.$executeRawUnsafe(
       `UPDATE bpch_reinspeccion SET lugar_inspeccion = $2, fecha_inspeccion = $3::date, inspectores = $4, fecha_vencimiento_producto = $5::date,
@@ -458,7 +473,51 @@ export class ReinspeccionService {
     );
     if (r.muestra_id && lote.identificacionLote?.trim())
       await this.prisma.$executeRawUnsafe(`UPDATE muestra SET numero_lote = $2 WHERE id = $1::uuid`, r.muestra_id, lote.identificacionLote.trim().slice(0, 80));
+    // F022 (align_fx5_c.sql): unidades de los tamaños; sin las columnas (base sin migrar) no se guardan.
+    await this.prisma
+      .$executeRawUnsafe(`UPDATE bpch_reinspeccion SET unidad_lote = $2, unidad_muestra = $3 WHERE id = $1::uuid`, id, lote.unidadLote, lote.unidadMuestra)
+      .catch(() => undefined);
     return this.detalle(req, id);
+  }
+
+  /**
+   * F012: ensayos propuestos para el lote cuando el producto no tiene elemento
+   * del catálogo (p. ej. inscrito en la Codificación Única desde un prototipo):
+   * los de la parametrización del prototipo de origen o, si no, los que se
+   * hicieron en la OT original. Quien inspecciona puede agregar otros del catálogo.
+   */
+  private async ensayosPropuestos(tenantId: string, r: any): Promise<{ origen: string; metodos: { id: string; codigo: string; nombre: string; analitos: number }[] } | null> {
+    if (r.cat_elemento_id) return null;
+    const metodos = async (ids: string[]) =>
+      ids.length
+        ? this.prisma.$queryRawUnsafe<{ id: string; codigo: string; nombre: string; analitos: number }[]>(
+            `SELECT m.id, m.codigo, m.nombre,
+                    (SELECT count(*)::int FROM cat_analito a WHERE a.metodo_id = m.id AND a.deleted_at IS NULL) AS analitos
+               FROM cat_metodo m WHERE m.tenant_id = $1::uuid AND m.id = ANY($2::uuid[]) AND m.deleted_at IS NULL ORDER BY m.codigo`,
+            tenantId,
+            ids,
+          ).catch(() => [])
+        : [];
+    // OT de origen: la de la reinspección y las que dieron de alta el producto en la Codificación Única.
+    const ots = await this.prisma.$queryRawUnsafe<{ ot_id: string }[]>(
+      `SELECT DISTINCT ot_id FROM bpch_codificacion_historial WHERE codificacion_id = $1::uuid AND ot_id IS NOT NULL AND ($2::uuid IS NULL OR ot_id <> $2::uuid)`,
+      r.codificacion_id ?? null,
+      r.ot_id ?? null,
+    ).catch(() => [] as { ot_id: string }[]);
+    const origenes = [...new Set([r.origen_ot_id, ...ots.map((o) => o.ot_id)].filter((x): x is string => !!x))];
+    if (!origenes.length) return null;
+    const proto = await this.prisma.$queryRawUnsafe<{ codigo: string; ids: string[] }[]>(
+      `SELECT p.codigo, array_agg(DISTINCT pp.cat_metodo_id::text) AS ids
+         FROM bpch_prototipo p JOIN bpch_prototipo_parametro pp ON pp.prototipo_id = p.id AND pp.cat_metodo_id IS NOT NULL
+        WHERE p.ot_id = ANY($1::uuid[]) GROUP BY p.codigo LIMIT 1`,
+      origenes,
+    ).catch(() => [] as { codigo: string; ids: string[] }[]);
+    if (proto[0]?.ids?.length) return { origen: `parametrización del prototipo ${proto[0].codigo}`, metodos: await metodos(proto[0].ids) };
+    const hechos = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT cat_metodo_id::text AS id FROM resultado WHERE ot_id = ANY($1::uuid[]) AND deleted_at IS NULL AND cat_metodo_id IS NOT NULL`,
+      origenes,
+    ).catch(() => [] as { id: string }[]);
+    return hechos.length ? { origen: "ensayos de la OT original", metodos: await metodos(hechos.map((h) => h.id)) } : null;
   }
 
   async lote(req: any, id: string, body: unknown) {

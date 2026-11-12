@@ -86,6 +86,18 @@ export async function advertenciaDeCaptura(
  * por ensayo: si ya se re-analizó, el nuevo No cumple se mantiene). Avisa al
  * laboratorio de la advertencia o del re-análisis.
  */
+/** ¿La captura abre un re-análisis automático? (una sola vez por ensayo; nunca si la captura no es repetible: F045). */
+export function abreReanalisisAutomatico(p: {
+  yaHubo: boolean;
+  veredicto: string | null;
+  advertencia: boolean;
+  modo: ConfigResultados["reanalisis"];
+  sinReanalisis?: boolean;
+}): boolean {
+  if (p.sinReanalisis || p.yaHubo) return false;
+  return debeReanalizar(p.veredicto, p.advertencia, p.modo);
+}
+
 export async function trasCaptura(
   db: Db,
   p: {
@@ -98,6 +110,12 @@ export async function trasCaptura(
     advertencia: string | null;
     valor: { numerico: unknown; texto: unknown };
     abierto: ReanalisisAbierto | null;
+    /**
+     * F045: la captura no es una determinación que se pueda repetir (p. ej. la
+     * permisibilidad IT05 que fija la clasificación del arma): no abre re-análisis
+     * ni avisa de repetirla.
+     */
+    sinReanalisis?: boolean;
   },
 ): Promise<{ reanalisis: "realizado" | "solicitado" | null }> {
   const valor = JSON.stringify({ numerico: p.valor.numerico ?? null, texto: p.valor.texto ?? null, veredicto: p.veredicto, advertencia: !!p.advertencia });
@@ -117,7 +135,7 @@ export async function trasCaptura(
     p.resultadoId,
   );
   let abre = false;
-  if (!ya?.n && debeReanalizar(p.veredicto, !!p.advertencia, p.cfg.reanalisis)) {
+  if (abreReanalisisAutomatico({ yaHubo: !!ya?.n, veredicto: p.veredicto, advertencia: !!p.advertencia, modo: p.cfg.reanalisis, sinReanalisis: p.sinReanalisis })) {
     const motivo = motivoReanalisisAutomatico(p.veredicto, p.advertencia);
     const n = await db.$executeRawUnsafe(
       `INSERT INTO resultado_reanalisis (tenant_id, resultado_id, ot_id, origen, motivo, valor_anterior, solicitado_por)

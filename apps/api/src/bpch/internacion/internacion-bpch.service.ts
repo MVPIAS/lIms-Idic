@@ -26,6 +26,10 @@ import { numeroBorrador, totales } from "../../facturacion/reglas-factura";
 import { ListadoArmaBody, erroresListadoArmas, guardarListadoArmas, leerListadoArmas } from "../../saec/d11/listado-armas";
 import { diaChile } from "../../common/fecha-chile";
 import { revisarBateria } from "../comun/bateria";
+import { preMontoCl } from "../../common/monto-cl";
+
+/** Monto que la pantalla puede mandar como número o como texto chileno («184.500»): F001. */
+const montoCL = (t: z.ZodNumber) => z.preprocess(preMontoCl, t.optional().nullable());
 
 const fechaDia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const texto = (max: number) => z.string().trim().max(max);
@@ -78,9 +82,9 @@ const DocumentacionBody = z.object({
   facturaComercial: opcional(60),
   documentoAduanero: opcional(60),
   // EP-06 6.8 (recorrido MP-06, D06-03): montos de la documentación recibida.
-  cifUsd: z.number().positive("El CIF debe ser mayor que 0.").max(1e12).optional().nullable(),
-  tipoCambio: z.number().positive("El tipo de cambio debe ser mayor que 0.").max(1e6).optional().nullable(),
-  ivaInternacion: z.number().min(0).max(1e13).optional().nullable(),
+  cifUsd: montoCL(z.number({ invalid_type_error: "Escriba el CIF con punto de miles y coma decimal (p. ej. 184.500,50)." }).positive("El CIF debe ser mayor que 0.").max(1e12)),
+  tipoCambio: montoCL(z.number({ invalid_type_error: "Escriba el tipo de cambio con coma decimal (p. ej. 950,25)." }).positive("El tipo de cambio debe ser mayor que 0.").max(1e6)),
+  ivaInternacion: montoCL(z.number({ invalid_type_error: "Escriba el IVA con punto de miles (p. ej. 1.250.000)." }).min(0).max(1e13)),
   otrosDocumentos: opcional(2000),
 });
 
@@ -120,9 +124,9 @@ const LotesBody = z.object({
 });
 
 const TasaBody = z.object({
-  cifUsd: z.number(),
-  paridad: z.number(),
-  pctAfecto: z.number().default(100),
+  cifUsd: z.preprocess(preMontoCl, z.number({ invalid_type_error: "Escriba el CIF con punto de miles y coma decimal (p. ej. 184.500,50)." })),
+  paridad: z.preprocess(preMontoCl, z.number({ invalid_type_error: "Escriba la paridad con coma decimal (p. ej. 950,25)." })),
+  pctAfecto: z.preprocess(preMontoCl, z.number().default(100)),
   tasaPct: z.number().optional(),
   ivaPct: z.number().optional(),
 });

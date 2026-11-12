@@ -7,7 +7,8 @@ import { PuenteAnalisisService, RegistroMuestrasService } from "../../flujo-real
 import { PlantillaRenderService, type DocumentoEnRender } from "../../plantilla-render/plantilla-render.service";
 import { FirmaDocumentoService } from "../../plantilla-render/firma-documento.service";
 import { escapeHtml, fmtFecha, fmtFechaHora } from "../../plantilla-render/html.util";
-import { bloqueIbisArma, type IbisDeArma } from "../ibis-testigos";
+import { MARCA_PENDIENTE_IBIS, bloqueIbisArma, debeReemitirPorIbis, type IbisDeArma } from "../ibis-testigos";
+import { registrarFuenteBandeja } from "../../rbac/bandeja.service";
 import { anioChile, hoyChile } from "../../common/fecha-chile";
 import { svgCode128 } from "../../common/code128";
 import { leerTabla, TablaError } from "../../common/tabla-archivo";
@@ -193,6 +194,35 @@ export class D11Service implements OnModuleInit {
   onModuleInit() {
     this.render.registrarContexto("arma", (otId, tenantId, plantilla, doc) => this.contextoCertificado(otId, tenantId, plantilla, doc));
     this.render.registrarVerificacion("CERTIFICADO_ARMA", (certificadoId) => this.verificacionPublica(certificadoId));
+    // F039: tarjeta de Mi bandeja con los certificados por arma que deben reemitirse porque llegó su registro de IBIS.
+    registrarFuenteBandeja(async (req) => {
+      const permisos: string[] = req?.user?.permisos ?? [];
+      if (!(req?.user?.roles ?? []).includes("SUPERADMIN") && !permisos.includes("certificado.emitir")) return [];
+      const tenantId = tenantDe(req);
+      const visibles = await this.alcance.filtroUnidades(req, "certificado.emitir").catch(() => [] as string[]);
+      const rama = await this.unidadesD11(tenantId);
+      const unidades = visibles ? rama.filter((u) => visibles.includes(u)) : rama;
+      if (!unidades.length) return [];
+      const filas = await this.certificadosPorReemitirIbis(tenantId, unidades).catch(() => []);
+      if (!filas.length) return [];
+      return [
+        {
+          clave: "d11_reemitir_ibis",
+          titulo: "Certificados por arma por reemitir (llegó IBIS)",
+          descripcion: "Se emitieron «Pendiente de IBIS» y ya llegó el registro balístico del arma: reemítalos para incorporarlo.",
+          cantidad: filas.length,
+          ruta: `/saec/ot/${filas[0].otId}`,
+          severidad: "alta" as const,
+          elementos: filas.slice(0, 5).map((f) => ({
+            id: f.id,
+            texto: `${f.numero} · OT ${f.ot}`,
+            detalle: f.muestra,
+            ruta: `/saec/ot/${f.otId}`,
+            fecha: f.fecha,
+          })),
+        },
+      ];
+    });
   }
 
   /* ------------------------------------------------------------ comunes --- */
@@ -989,6 +1019,9 @@ export class D11Service implements OnModuleInit {
           { valor, ...(e.estado !== "pendiente" ? { motivo: d.motivo?.trim() || "Reclasificación del arma (IT05)" } : {}) } as any,
           tenantId,
           req,
+          undefined,
+          // F045: la permisibilidad la fija la clasificación: no abre re-análisis ni avisa al armero.
+          { sinReanalisis: true },
         );
         // Un arma prohibida da «No cumple» en la permisibilidad y abriría el
         // re-análisis automático: repetir la determinación no tiene sentido (es
@@ -1191,6 +1224,74 @@ export class D11Service implements OnModuleInit {
     }
     if (!emitidos.length) throw new ConflictException(`No se emitió ningún certificado. ${fallos.join(" ")}`);
     return { emision, emitidos: emitidos.length, fallos, expediente: await this.expediente(req, otId) };
+  }
+
+  /**
+   * fx5-c · F039 · Reemite el certificado de un arma que salió «Pendiente de IBIS»
+   * cuando ya llegó su registro: modificación (OT abierta) o reemplazo (OT
+   * cerrada) con el mismo motivo, para que el nuevo documento incorpore el bloque
+   * IBIS. La nueva versión hereda la vigencia y el rango del certificado anterior.
+   */
+  async reemitirConIbis(req: any, certificadoId: string) {
+    const tenantId = tenantDe(req);
+    const [c] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT c.id, c.ot_id, c.estado, c.documento_html, COALESCE(c.numero, c.codigo) AS numero, ca.arma_ot_id, ca.emision_id,
+              to_char(ca.vigente_desde, 'YYYY-MM-DD') AS desde, to_char(ca.vigente_hasta, 'YYYY-MM-DD') AS hasta, ao.arma_id,
+              EXISTS (SELECT 1 FROM ibis_resultado ir WHERE ir.arma_id = ao.arma_id AND ir.estado = 'asignado' AND ir.deleted_at IS NULL) AS ibis
+         FROM certificado c
+         LEFT JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
+         LEFT JOIN d11_arma_ot ao ON ao.id = ca.arma_ot_id
+        WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'`,
+      certificadoId,
+      tenantId,
+    );
+    if (!c) throw new NotFoundException("Certificado por arma no encontrado.");
+    const ot = await this.otD11(req, c.ot_id);
+    if (!debeReemitirPorIbis({ estado: c.estado, documentoHtml: c.documento_html, ibisAsignado: Boolean(c.ibis) }))
+      throw new ConflictException(`El certificado ${c.numero} no está «Pendiente de IBIS» con un registro de IBIS ya asociado: no hay nada que incorporar.`);
+    if (c.estado === "en_firma")
+      throw new ConflictException(`El certificado ${c.numero} aún está en firma: devuélvalo desde «Ver certificado» y emítalo de nuevo para incorporar el registro de IBIS.`);
+    const modalidad = OT_CERRADA.includes(ot.estado) ? "reemplazo" : "modificacion";
+    const r = await this.render.emitir(c.ot_id, await this.plantillaCertificado(tenantId), tenantId, usuarioDe(req) ?? undefined, {
+      reemplazaId: c.id,
+      reemision: { modalidad, motivo: "Se incorpora el registro balístico de IBIS, que llegó después de emitir el certificado." },
+      tipoDocumento: "CERTIFICADO_ARMA",
+    });
+    if (c.arma_ot_id && c.desde && c.hasta)
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO d11_certificado_arma (tenant_id, arma_ot_id, certificado_id, emision_id, vigente_desde, vigente_hasta)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::date, $6::date) ON CONFLICT (certificado_id) DO NOTHING`,
+        tenantId,
+        c.arma_ot_id,
+        r.certificado.id,
+        c.emision_id,
+        c.desde,
+        c.hasta,
+      );
+    await this.historial(c.ot_id, tenantId, "d11_reemision_ibis", { anterior: c.numero, nuevo: r.numero, modalidad }, usuarioDe(req));
+    return { numero: r.numero, certificadoId: r.certificado.id, expediente: await this.expediente(req, c.ot_id) };
+  }
+
+  /** F039: certificados por arma que deben reemitirse porque llegó su registro de IBIS (bandeja y aviso al adjuntar). */
+  async certificadosPorReemitirIbis(tenantId: string, unidades: string[] | null, otId?: string) {
+    return this.prisma.$queryRawUnsafe<{ id: string; numero: string; otId: string; ot: string; fecha: string; muestra: string | null }[]>(
+      `SELECT c.id, COALESCE(c.numero, c.codigo) AS numero, o.id AS "otId", o.codigo AS ot, to_char(c.fecha, 'YYYY-MM-DD') AS fecha, m.codigo AS muestra
+         FROM certificado c
+         JOIN orden_trabajo o ON o.id = c.ot_id
+         JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
+         JOIN d11_arma_ot ao ON ao.id = ca.arma_ot_id
+         LEFT JOIN muestra m ON m.id = ao.muestra_id
+        WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'
+          AND c.estado IN ('en_firma', 'oficial', 'emitido') AND c.documento_html LIKE '%' || $4 || '%'
+          AND EXISTS (SELECT 1 FROM ibis_resultado ir WHERE ir.arma_id = ao.arma_id AND ir.estado = 'asignado' AND ir.deleted_at IS NULL)
+          AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
+          AND ($3::uuid IS NULL OR o.id = $3::uuid)
+        ORDER BY c.fecha`,
+      tenantId,
+      unidades,
+      otId ?? null,
+      MARCA_PENDIENTE_IBIS,
+    );
   }
 
   /** Firma de un rango: el responsable del paso actual firma todos sus certificados en firma. */

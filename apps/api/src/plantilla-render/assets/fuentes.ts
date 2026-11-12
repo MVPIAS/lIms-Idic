@@ -87,6 +87,9 @@ const SUSTITUCIONES: Array<[RegExp, string]> = [
   [/[✗✘]/g, "X"],
   [/[…]/g, "..."],
   [/[«»]/g, '"'],
+  // F021: separador de la ruta del catálogo («Explosivos › Iniciadores»), antes salía «?».
+  [/›/g, ">"],
+  [/‹/g, "<"],
   // Espacios no separables y de ancho fijo -> espacio normal.
   [/[    - ]/g, " "],
   // Guiones tipográficos que no son el ASCII '-' ni el en/em dash que sí traemos.
