@@ -79,6 +79,7 @@ import {
   erroresRecepcion,
   faltantesRegistro,
   motivoNoEditable,
+  motivoNoDefinePlanLaboratorio,
   normalizarPlan,
   normalizarSellos,
   type EstadoMuestreo,
@@ -412,6 +413,8 @@ export class MuestreoService {
         registrar: abierta && tiene(req, "muestreo.registrar"),
         recibir: abierta && tiene(req, "muestra.crear"),
         concluir: abierta && tiene(req, "resultado.aprobar"),
+        // F085: el laboratorio define el plan NCh 44 si el muestreo llegó sin él.
+        definirPlan: abierta && tiene(req, "resultado.aprobar"),
       },
       muestras,
       muestreos: filas.map((f) => ({
@@ -523,6 +526,30 @@ export class MuestreoService {
         ...vals,
       );
     }
+    return this.deOt(req, ot.id);
+  }
+
+  /**
+   * F085 · Plan NCh 44 definido por el laboratorio con el muestreo ya entregado
+   * (quien muestreó no lo ve). No toca el tamaño de muestra del formulario.
+   */
+  async planLaboratorio(req: any, id: string, body: unknown) {
+    const { mu, ot } = await this.cargar(req, id, "resultado.aprobar");
+    this.exigirOtAbierta(ot);
+    const bloqueo = motivoNoDefinePlanLaboratorio(mu);
+    if (bloqueo) throw new ConflictException(bloqueo);
+    const dto = z.object({ plan: PlanBody.nullable() }).strict().parse(body ?? {});
+    const sets = (await this.columnas(tenantDe(req), { plan: dto.plan }, mu)).filter((s) => s.col === "plan");
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE ot_muestreo SET plan = $2::jsonb, actualizado_por = $3::uuid, updated_at = now() WHERE id = $1::uuid`,
+        id,
+        sets[0]?.valor ?? null,
+        usuarioDe(req),
+      );
+      const plan = sets[0]?.valor ? JSON.parse(String(sets[0].valor)) : null;
+      await this.historial(ot.id, tenantDe(req), usuarioDe(req), { accion: "plan_laboratorio", formulario: mu.numeroFormulario, letra: plan?.letra ?? null, n: plan?.n ?? null }, tx);
+    });
     return this.deOt(req, ot.id);
   }
 
@@ -1014,6 +1041,13 @@ export class MuestreoController {
   @RequierePermiso("muestreo.registrar")
   editar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.editar(req, id, body);
+  }
+
+  @Put(":id/plan")
+  @RequierePermiso("resultado.aprobar")
+  @ApiOperation({ summary: "F085 · Plan NCh 44 que define el laboratorio con el muestreo ya entregado (antes de concluir el lote)" })
+  planLaboratorio(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.planLaboratorio(req, id, body);
   }
 
   @Post(":id/seleccion")

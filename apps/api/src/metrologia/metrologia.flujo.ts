@@ -53,6 +53,8 @@ export interface ContextoCal {
   tienePatron?: boolean;
   /** Por qué el usuario no puede firmar el paso pendiente (si lo sabemos), en lugar del mensaje genérico. */
   motivoPaso?: string | null;
+  /** F055: separación de funciones en una reemisión (quien la elaboró no aprueba su revisión). */
+  autoRevision?: string | null;
 }
 
 /** Normaliza estados antiguos («calculada» = borrador guardado). */
@@ -92,6 +94,7 @@ export function motivoRechazo(accion: AccionCal, c: ContextoCal): string | null 
     case "EMITIR":
       if (!enCircuito(e)) return "La calibración debe estar enviada a revisión";
       if (!(c.responsablePaso ?? c.puedeEmitir)) return c.motivoPaso || "No le corresponde firmar el paso pendiente según la matriz de firmas";
+      if (accion !== "DEVOLVER" && c.autoRevision) return c.autoRevision;
       if (accion !== "DEVOLVER" && !c.calculada) return "La calibración no tiene resultado calculado";
       if (accion === "FIRMAR" && (c.ultimoPaso ?? true)) return "El paso pendiente emite el certificado: use «Emitir»";
       if (accion === "EMITIR" && !(c.ultimoPaso ?? true)) return "Faltan firmas anteriores a la emisión";
@@ -184,6 +187,47 @@ export function pasosSinResponsable(pasos: PasoFirmaCal[]): string[] {
   return pasos
     .filter((p) => p.accion !== "ELABORA" && p.obligatorio && !p.responsables.length)
     .map((p) => `Paso ${p.orden} de la matriz de firmas (${p.descripcion ?? p.rol.nombre}): nadie tiene el rol «${p.rol.nombre}» en ${p.unidad?.codigo ?? "la unidad"}. Asígnelo en Administración › Usuarios o ajuste la matriz de firmas.`);
+}
+
+/**
+ * F055 · separación de funciones: en una modificación o un reemplazo de certificado,
+ * quien firmó la elaboración (ELABORA) no aprueba su propia revisión técnica ni la
+ * emisión; lo hace otro responsable del paso (p. ej. el subrogante).
+ */
+export function motivoAutoRevision(c: { esReemision: boolean; usuarioId: string | null | undefined; firmas: FirmaHecha[] }): string | null {
+  if (!c.esReemision || !c.usuarioId) return null;
+  const elaboro = c.firmas.some((f) => f.accion === "ELABORA" && f.usuarioId === c.usuarioId);
+  return elaboro
+    ? "Usted elaboró esta reemisión: la revisión técnica y la firma las hace otro responsable del paso (separación de funciones)."
+    : null;
+}
+
+/**
+ * F054 · motivo de la verificación pública de un certificado reemplazado. `cadena` son
+ * los certificados que lo siguieron, en orden (el que lo reemplazó, el que reemplazó a
+ * ese…), con su número y estado. Nombra el que lo reemplazó y, si este a su vez fue
+ * reemplazado, el que está vigente hoy.
+ */
+export function motivoReemplazado(cadena: { numero: string | null; estado: string | null }[]): string {
+  const conNumero = cadena.filter((x) => !!x.numero);
+  const inmediato = conNumero[0];
+  if (!inmediato) return "El certificado fue reemplazado por otro certificado.";
+  const base = `El certificado fue reemplazado por el N° ${inmediato.numero}`;
+  const vigente = [...conNumero].reverse().find((x) => x.estado === "emitida");
+  if (!vigente || vigente.numero === inmediato.numero) return `${base}.`;
+  return `${base}, que a su vez fue reemplazado; el certificado vigente es el N° ${vigente.numero}.`;
+}
+
+/**
+ * F056 · la fecha de calibración no puede ser posterior a hoy en Chile.
+ * Devuelve el motivo del rechazo o null.
+ */
+export function motivoFechaFutura(fecha: string | null | undefined, hoy: Date = new Date()): string | null {
+  if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return null;
+  const h = hoyChile(hoy);
+  if (fecha <= h) return null;
+  const dmy = (x: string) => `${x.slice(8, 10)}-${x.slice(5, 7)}-${x.slice(0, 4)}`;
+  return `La fecha de calibración (${dmy(fecha)}) no puede ser posterior a hoy (${dmy(h)}, hora de Chile).`;
 }
 
 /** Fecha de calibración válida (AAAA-MM-DD) o la de hoy en Chile. */

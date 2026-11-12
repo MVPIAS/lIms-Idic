@@ -50,7 +50,7 @@ interface DatosMuestreo {
   opciones: { formularios: Opcion[]; niveles: Opcion[]; aql: Opcion[]; normas?: Opcion[]; unidadesLote?: Opcion[]; unidadesMuestra?: Opcion[] };
   /** R6: el muestreador de Comercial trabaja sin plan NCh 44 y sin costo. */
   perfil?: { soloMuestrea: boolean; verPlan: boolean; verCosto: boolean; nombre: string | null };
-  puede: { registrar: boolean; recibir: boolean; concluir: boolean };
+  puede: { registrar: boolean; recibir: boolean; concluir: boolean; definirPlan?: boolean };
   muestras: { id: string; codigo: string; nombre: string | null; muestreoId: string | null; selloNumero: string | null; sellosVerificados: boolean | null }[];
   muestreos: Muestreo[];
 }
@@ -197,6 +197,8 @@ function FichaMuestreo({ d, m, onCambio }: { d: DatosMuestreo; m: Muestreo; onCa
   // B-020 (recorrido MP-02, D02-43): la conclusión del lote es del muestreo con plan NCh 44
   // (inspección por lotes); un muestreo sin plan (p. ej. el NUMFORM de Alimentos) termina al recibirlo.
   const conLote = !!m.plan || m.tipoFormulario === "planilla_nch44" || !!m.veredictoLote;
+  // F085: entregado sin plan NCh 44 (el muestreador no lo ve): lo define la jefatura del laboratorio.
+  const planDelLab = !!d.puede.definirPlan && !m.plan && ["registrado", "recibido"].includes(m.estado) && !m.veredictoLote;
 
   return (
     <div className="card" style={{ margin: 0 }} aria-label={`Muestreo Nº ${m.numeroFormulario}`}>
@@ -229,7 +231,7 @@ function FichaMuestreo({ d, m, onCambio }: { d: DatosMuestreo; m: Muestreo; onCa
       </div>
       <FormularioMuestreo m={m} editable={editable} onCambio={onCambio} opciones={d.opciones} verCosto={d.perfil?.verCosto !== false} />
       {d.perfil?.verPlan !== false ? (
-        <PlanMuestreo d={d} m={m} editable={editable} onCambio={onCambio} />
+        <PlanMuestreo d={d} m={m} editable={editable || planDelLab} delLaboratorio={planDelLab} onCambio={onCambio} />
       ) : (
         <p className="subtitle" style={{ marginTop: 10 }}>Perfil {d.perfil?.nombre ?? "de muestreo"}: sin plan NCh 44 (lo define el laboratorio).</p>
       )}
@@ -410,7 +412,7 @@ interface Propuesta {
   clases: Partial<Record<ClaseDefecto, { letra: string; n: number; ac: number; re: number; aql: number; nEfectivo: number; flecha: string | null }>>;
 }
 
-function PlanMuestreo({ d, m, editable, onCambio }: { d: DatosMuestreo; m: Muestreo; editable: boolean; onCambio: (r: DatosMuestreo) => void }) {
+function PlanMuestreo({ d, m, editable, delLaboratorio = false, onCambio }: { d: DatosMuestreo; m: Muestreo; editable: boolean; delLaboratorio?: boolean; onCambio: (r: DatosMuestreo) => void }) {
   const p = m.plan;
   const [nivel, setNivel] = useState(p?.nivel ?? d.porDefecto.nivel);
   const [tabla, setTabla] = useState(p?.tabla ?? "normal");
@@ -449,7 +451,11 @@ function PlanMuestreo({ d, m, editable, onCambio }: { d: DatosMuestreo; m: Muest
       },
     };
     setGuardando(true);
-    try { onCambio(await llamar<DatosMuestreo>("PUT", `/muestreo/${m.id}`, cuerpo)); toast.ok("Plan de muestreo guardado."); }
+    try {
+      // F085: con el muestreo ya entregado, el plan lo guarda el laboratorio (sin tocar el formulario).
+      onCambio(await llamar<DatosMuestreo>("PUT", delLaboratorio ? `/muestreo/${m.id}/plan` : `/muestreo/${m.id}`, cuerpo));
+      toast.ok(delLaboratorio ? "Plan NCh 44 definido por el laboratorio: siga con la conclusión del lote." : "Plan de muestreo guardado.");
+    }
     catch (e: any) { toast.error(e.message); }
     finally { setGuardando(false); }
   }
@@ -463,6 +469,11 @@ function PlanMuestreo({ d, m, editable, onCambio }: { d: DatosMuestreo; m: Muest
       </h3>
       {editable ? (
         <>
+          {delLaboratorio && (
+            <div className="alert info" style={{ marginTop: 0 }}>
+              El muestreo llegó sin plan NCh 44 (quien muestreó no lo define). Defínalo aquí con el tamaño del lote del formulario ({m.tamanoLote ?? "—"}): con él se concluye el lote.
+            </div>
+          )}
           <div className="form-grid">
             <div className="field">
               <label htmlFor={`pl-niv-${m.id}`}>Nivel de inspección</label>

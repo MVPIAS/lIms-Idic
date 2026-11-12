@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from "react";
 import { llamar } from "@/lib/laboratorio";
 import { enviarInforme } from "@/lib/informes";
 import { imagenComoDato } from "./imagen";
+import { textoReemision } from "@/lib/metrologia";
 import { toast } from "@/components/ui/feedback";
 import s from "./ficha.module.css";
 
@@ -23,7 +24,7 @@ type Datos = {
   };
   /** Formatos de certificado del proceso además del estándar (ITT01: ASTM). */
   formatos?: { valor: string; etiqueta: string }[];
-  editable: boolean; acreditacionProceso: string | null; acreditado: boolean; logoConfigurado: boolean; reemision: string | null;
+  editable: boolean; acreditacionProceso: string | null; acreditado: boolean; logoConfigurado: boolean; reemision: string | null; reemisionModalidad?: string | null;
   automaticas: string[]; observaciones: string[]; campos: Campo[]; frases: string[];
   esquema: { modo: string; propio: boolean; defecto: string | null; imprime: string | null };
   hojas: number; avisos: string[];
@@ -103,7 +104,8 @@ export default function PresentacionCertificado({ id, magnitud, onGuardado }: { 
     <ul style={{ margin: "0 0 8px", paddingLeft: 18, fontSize: 12.5 }}>
       <li>{d.hojas} hojas · «Página X de {d.hojas}» en cada una. Hoja 1: firmas del Jefe de Departamento y del Jefe de Laboratorio y leyenda legal; hojas 2 a {d.hojas}: firmas del Jefe de Laboratorio y del metrólogo. Observaciones y «Fin del certificado» en la última.</li>
       <li>Línea de acreditación: «{lineaHoy}»{d.acreditado ? (d.logoConfigurado ? ", con el logo de acreditación." : ". El logo no está cargado: se imprime solo «Acreditación " + d.acreditacionProceso + "» (Metrología › Configuración).") : ", sin logo."}</li>
-      {(d.reemision || d.presentacion.reemplaza) && <li>Reemplaza al certificado N° {d.reemision ?? d.presentacion.reemplaza}{d.reemision ? " (reemisión en el LIMS)" : ""}.</li>}
+      {d.reemision ? <li>{textoReemision(d.reemision, d.reemisionModalidad).presentacion}</li>
+        : d.presentacion.reemplaza && <li>Reemplaza al certificado N° {d.presentacion.reemplaza}.</li>}
       <li>Esquema: {d.esquema.imprime ? `${d.esquema.imprime}${d.esquema.modo === "propio" ? " (imagen propia)" : " (el del proceso)"}` : "sin esquema"}.</li>
       {(d.formatos ?? []).length > 0 && <li>Formato: {(d.formatos ?? []).find((x) => x.valor === (d.presentacion.formato ?? "estandar"))?.etiqueta ?? "Estándar"}.</li>}
     </ul>

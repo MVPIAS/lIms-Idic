@@ -154,4 +154,5 @@ align_sesiones_s2.sql
 align_sesiones_s3.sql
 align_sesiones_s4.sql
 align_fx5_a.sql
+align_fx5_d.sql
 align_cierre_permisos.sql

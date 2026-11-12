@@ -207,3 +207,64 @@ export function laboratorioDeTerreno(valor: string | null | undefined, laborator
   const lista = (valor ?? "SVM,LAM,SEO").split(/[,;\s]+/).map((x) => x.trim().toUpperCase()).filter(Boolean);
   return lista.includes(laboratorio.toUpperCase());
 }
+
+/* ------------------------------------------- informe de la OT (F083) --- */
+
+/** Estado del trabajo en terreno para emitir el informe de la OT. */
+export interface TerrenoParaInforme {
+  cerrado: boolean;
+  ivcGrado: string | null;
+}
+
+/**
+ * F083 · Una OT en terreno no tiene resultados de la captura normal: sus resultados
+ * son los del trabajo en terreno (lista de chequeo e IVC). Lo que falta para emitir
+ * el informe con ellos (lista vacía = se puede). null = la OT no trabaja en terreno.
+ */
+export function faltantesInformeTerreno(t: TerrenoParaInforme | null | undefined): string[] | null {
+  if (!t) return null;
+  const f: string[] = [];
+  if (!t.ivcGrado) f.push("Emita primero el IVC del trabajo en terreno con su grado de cumplimiento (pestaña «Terreno»).");
+  if (!t.cerrado) f.push("Cierre primero el trabajo en terreno (pestaña «Terreno» › «Cerrar el trabajo en terreno»).");
+  return f;
+}
+
+const esc = (s: unknown) =>
+  String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+const TEXTO_RESULTADO: Record<string, string> = { cumple: "Cumple", no_cumple: "No cumple", no_aplica: "No aplica", pendiente: "Pendiente" };
+
+/**
+ * F083 · Tabla de resultados del informe de una OT en terreno: grado de cumplimiento
+ * del IVC, resultado por sistema controlado y cada prueba de la lista de chequeo.
+ */
+export function bloqueResultadosTerreno(d: {
+  lugar?: string | null;
+  ivcNumero?: string | null;
+  ivcGrado: string | null;
+  conclusion?: string | null;
+  pruebas: { sistema: string; prueba: string; requisito?: string | null; resultado: string | null; observacion?: string | null; unidad?: string | null }[];
+}): string {
+  const clase = (r: string | null | undefined) => (r === "cumple" ? "ok" : r === "no_cumple" ? "no" : "");
+  const sistemas = resultadoPorSistema(d.pruebas.map((p) => ({ sistema: p.sistema, resultado: p.resultado })));
+  const conUnidad = d.pruebas.some((p) => p.unidad);
+  const cab =
+    `<p><b>Trabajo en terreno</b>${d.lugar ? ` · ${esc(d.lugar)}` : ""}${d.ivcNumero ? ` · IVC N° ${esc(d.ivcNumero)}` : ""}. ` +
+    `Grado de cumplimiento: <b>${esc(TEXTO_RESULTADO[d.ivcGrado ?? ""] ?? "Sin IVC")}</b>.</p>`;
+  const porSistema =
+    `<table class="rep"><thead><tr><th>Sistema controlado</th><th class="num">Pruebas</th><th>Resultado</th></tr></thead><tbody>` +
+    sistemas.map((s) => `<tr><td>${esc(s.sistema)}</td><td class="num">${s.pruebas}</td><td class="${clase(s.resultado)}">${esc(TEXTO_RESULTADO[s.resultado])}</td></tr>`).join("") +
+    `</tbody></table>`;
+  const detalle = d.pruebas.length
+    ? `<table class="rep"><thead><tr><th>Sistema</th>${conUnidad ? "<th>Unidad</th>" : ""}<th>Prueba</th><th>Requisito</th><th>Resultado</th><th>Observación</th></tr></thead><tbody>` +
+      d.pruebas
+        .map(
+          (p) =>
+            `<tr><td>${esc(p.sistema)}</td>${conUnidad ? `<td>${esc(p.unidad ?? "—")}</td>` : ""}<td>${esc(p.prueba)}</td><td>${esc(p.requisito || "—")}</td>` +
+            `<td class="${clase(p.resultado)}">${esc(TEXTO_RESULTADO[p.resultado ?? "pendiente"] ?? p.resultado)}</td><td>${esc(p.observacion || "—")}</td></tr>`,
+        )
+        .join("") +
+      `</tbody></table>`
+    : `<table class="rep"><tbody><tr><td class="vacio">Sin pruebas registradas en el trabajo en terreno.</td></tr></tbody></table>`;
+  const concl = d.conclusion ? `<p>${esc(d.conclusion)}</p>` : "";
+  return cab + porSistema + detalle + concl;
+}

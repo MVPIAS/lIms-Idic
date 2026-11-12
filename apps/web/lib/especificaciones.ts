@@ -47,6 +47,34 @@ export function leerNumero(v: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/* ---------------------------------------- especificación de la orden (F084) --- */
+const NUM_LIMITE = /^-?\d+([.,]\d+)?$/;
+const CLAVES_LIMITE = ["limiteInf", "nominal", "limiteSup"];
+const esVacio = (v: unknown) => v == null || String(v).trim() === "";
+/** Límite numérico con punto decimal (como se guarda); el resto del texto, tal cual. */
+export const limiteConPunto = (k: string, v: string) => (CLAVES_LIMITE.includes(k) && NUM_LIMITE.test(v) ? v.replace(",", ".") : v);
+
+/**
+ * F084 · Cambios reales entre la especificación del ensayo (`actual`) y lo que hay en
+ * el editor (`editado`). Un límite de la E.T. escrito con coma («1,5») es el mismo que
+ * «1.5»: no es un cambio. Antes contaba como cambio y el analista no podía capturar
+ * («Guarde primero la especificación…») hasta que la jefatura la guardara, con lo que el
+ * ensayo perdía la marca E.T. y el informe imprimía el requisito con «*».
+ */
+export function cambiosEspecificacion(
+  actual: Record<string, unknown>,
+  editado: Record<string, unknown>,
+  claves: readonly string[],
+): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const k of claves) {
+    const a = esVacio(actual[k]) ? "" : limiteConPunto(k, String(actual[k]).trim());
+    const n = limiteConPunto(k, String(editado[k] ?? "").trim());
+    if (a !== n) out[k] = n === "" ? null : n;
+  }
+  return out;
+}
+
 /** Requisito legible de un punto: «≥ 550 kgf con Alargamiento ≥ 12 mm», «48–55 HRC», «n 5 · c 2 · m 100 · M 1000». */
 export function textoRequisito(p: {
   tipo?: string; limiteInf?: string | null; nominal?: string | null; limiteSup?: string | null; unidad?: string | null; requisito?: string | null;

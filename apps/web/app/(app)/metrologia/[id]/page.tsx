@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fechaDia, fechaHora, num } from "@/lib/format";
-import { fmtG } from "@/lib/metrologia";
+import { fmtG, textoReemision } from "@/lib/metrologia";
 import { llamar } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
 import { textoMedio } from "@/lib/documentos";
@@ -172,7 +172,7 @@ export default function FichaCalibracionPage() {
       </ol>
 
       {devuelta && <div className="alert warn"><b>Devuelta al metrólogo:</b> {c.devuelto_motivo}. La calibración vuelve a «Toma de datos».</div>}
-      {c.reemplaza_numero && <div className="alert info">Reemisión: este certificado reemplaza al N° <b>{c.reemplaza_numero}</b> al emitirse.</div>}
+      {c.reemplaza_numero && <div className="alert info">{c.estado === "emitida" || c.estado === "reemplazada" ? textoReemision(c.reemplaza_numero, c.reemision_modalidad).presentacion : textoReemision(c.reemplaza_numero, c.reemision_modalidad).aviso}</div>}
       {c.estado === "reemplazada" && <div className="alert warn">Este certificado fue reemplazado por el N° <b>{c.reemplazada_por ?? "(en emisión)"}</b>.</div>}
       {(c.avisos ?? []).map((t: string) => <div key={t} className="alert info">{t}</div>)}
 

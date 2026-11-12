@@ -864,6 +864,9 @@ export class EspecificacionTecnicaService {
     const puntos = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT p.id, p.punto, p.componente, p.caracteristica, p.tipo, p.cat_metodo_id AS "catMetodoId", p.cat_analito_id AS "catAnalitoId",
               p.limite_inf AS "limiteInf", p.nominal, p.limite_sup AS "limiteSup", p.unidad, p.requisito,
+              -- F090: el plan muestra el requisito completo (segunda condición y plan de clases).
+              p.cond2_etiqueta AS "cond2Etiqueta", p.cond2_inf::float8 AS "cond2Inf", p.cond2_sup::float8 AS "cond2Sup", p.cond2_unidad AS "cond2Unidad",
+              p.plan_n AS "planN", p.plan_c AS "planC", p.plan_m::float8 AS "planM", p.plan_mm::float8 AS "planMM",
               m.codigo AS "metodoCodigo", m.nombre AS "metodoNombre", u.codigo AS "laboratorioCodigo"
          FROM especificacion_tecnica_punto p LEFT JOIN cat_metodo m ON m.id = p.cat_metodo_id LEFT JOIN unidad u ON u.id = p.laboratorio_id
         WHERE p.et_id = $1::uuid ORDER BY p.orden, p.punto`,

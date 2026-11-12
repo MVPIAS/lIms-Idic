@@ -238,6 +238,19 @@ export function motivoNoEditable(estado: EstadoMuestreo): string | null {
   return "El muestreo está anulado.";
 }
 
+/**
+ * F085 · El plan NCh 44 lo define el LABORATORIO cuando quien muestreó no lo ve
+ * (muestreador de Comercial: «lo define el laboratorio»): con el muestreo ya entregado
+ * o recibido, mientras el lote no esté concluido. null = puede; si no, el motivo.
+ */
+export function motivoNoDefinePlanLaboratorio(m: { estado: EstadoMuestreo; veredictoLote?: string | null; tamanoLote?: number | null }): string | null {
+  if (m.estado === "anulado") return "El muestreo está anulado.";
+  if (m.estado === "borrador") return "El muestreo aún no se entrega al laboratorio: el plan se guarda en el formulario de muestreo.";
+  if (m.veredictoLote) return "El lote ya está concluido: el plan de muestreo no cambia.";
+  if (m.tamanoLote == null || m.tamanoLote < 2) return "El formulario de muestreo no tiene el tamaño del lote: sin él no se calcula el plan NCh 44.";
+  return null;
+}
+
 /** «Recibido conforme» por el laboratorio (EP-01 1.1): solo un muestreo entregado; no conforme exige motivo. */
 export function erroresRecepcion(estado: EstadoMuestreo, conforme: boolean, observacion?: string | null): string[] {
   if (estado !== "registrado")

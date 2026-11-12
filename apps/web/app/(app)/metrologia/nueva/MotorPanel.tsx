@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fmtG, parseEntrada, verEntrada, ETIQUETA_ENTRADA, ETIQUETA_MOTOR, type MotorInfo, type CalculoMotor } from "@/lib/metrologia";
-import { clavesDeLaHoja, condicionesAlMotor, valoresPatronAlMotor, smpPorFuerza, unidadIndicador, GRUPOS_LNF, type CoefSmp, type CondicionesHoja, type ValoresPatron } from "@/lib/metrologiaFicha";
+import { clavesDeLaHoja, condicionesAlMotor, valoresPatronAlMotor, smpPorFuerza, unidadIndicador, conUnidadIndicador, GRUPOS_LNF, type CoefSmp, type CondicionesHoja, type ValoresPatron } from "@/lib/metrologiaFicha";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({ Authorization: `Bearer ${localStorage.getItem("lims_token")}`, "Content-Type": "application/json" });
@@ -56,7 +56,7 @@ const FUERZA = { background: "var(--accent-soft,#FCE7D6)", fontWeight: 600 } as 
 export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, onGuardar, condiciones, valoresPatron, smp }: Props) {
   const esLnf = motor.it === "LCPNF-IT01";
   const [caso, setCaso] = useState(motor.casos[0]?.caso ?? "");
-  const [datos, setDatos] = useState<any>(inicial?.datos ?? null);
+  const [datos, setDatos] = useState<any>(conUnidadIndicador(inicial?.datos ?? null, esLnf));
   // Calibración nueva: las correcciones que el laboratorio pidió aplicar vienen activadas (C6).
   const [opciones, setOpciones] = useState<Record<string, boolean>>(inicial?.opciones ?? motor.opcionesPorDefecto ?? {});
   const [calc, setCalc] = useState<CalculoMotor | null>(null);
@@ -97,7 +97,7 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
       .then((r) => r.json()).then((j) => {
         const d = j.data?.datos ?? {};
         // LNF: la unidad del indicador aparece en la hoja con mV/V por defecto (configurable).
-        setDatos(esLnf && d && !("uRes" in d) ? { ...d, uRes: "mV/V" } : d);
+        setDatos(conUnidadIndicador(d, esLnf));
       }).catch((e) => setAviso(e.message));
   }, [motor.it]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -106,12 +106,12 @@ export default function MotorPanel({ motor, paridad, inicial, guardando, fecha, 
     setAviso("");
     try {
       const j = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/ejemplo?caso=${encodeURIComponent(caso)}`, { headers: auth() }).then((r) => r.json());
-      setDatos(j.data?.datos ?? null); setOpciones(motor.opcionesPorDefecto ?? {}); setEsEjemplo(true);
+      setDatos(conUnidadIndicador(j.data?.datos ?? null, esLnf)); setOpciones(motor.opcionesPorDefecto ?? {}); setEsEjemplo(true);
     } catch (e: any) { setAviso(e.message); }
   }
   async function vaciar() {
     const j = await fetch(`${API}/metrologia/motores/${encodeURIComponent(motor.it)}/plantilla`, { headers: auth() }).then((r) => r.json()).catch(() => null);
-    setDatos(j?.data?.datos ?? {}); setOpciones(motor.opcionesPorDefecto ?? {}); setEsEjemplo(false); setCalc(null);
+    setDatos(conUnidadIndicador(j?.data?.datos ?? {}, esLnf)); setOpciones(motor.opcionesPorDefecto ?? {}); setEsEjemplo(false); setCalc(null);
   }
 
   // Vista previa: el servidor calcula con el mismo motor que usa al guardar.
