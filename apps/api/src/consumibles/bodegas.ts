@@ -167,3 +167,22 @@ export function erroresBodega(b: { tipo?: string; unidadId?: string | null; codi
   if (b.nombre !== undefined && !b.nombre.trim()) e.push("Indique el nombre de la bodega.");
   return e;
 }
+
+/**
+ * Orden del kardex (F078): cronológico y, dentro del mismo instante (los dos
+ * asientos de un traspaso nacen en la misma transacción), primero la salida
+ * (−) y luego la entrada (+), para que el saldo corrido no muestre un máximo
+ * intermedio que nunca existió. Desempate estable por id.
+ */
+export function compararKardex(
+  a: { created_at: Date | string; tipo: string; cantidad: number | string | null; id: string },
+  b: { created_at: Date | string; tipo: string; cantidad: number | string | null; id: string },
+): number {
+  const ta = new Date(a.created_at).getTime();
+  const tb = new Date(b.created_at).getTime();
+  if (ta !== tb) return ta - tb;
+  const salida = (m: typeof a) => (m.tipo === "traspaso" && Number(m.cantidad ?? 0) < 0) || m.tipo === "consumo" ? 0 : 1;
+  const d = salida(a) - salida(b);
+  if (d) return d;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}

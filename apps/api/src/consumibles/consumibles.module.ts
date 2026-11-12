@@ -27,6 +27,7 @@ import { diaChile } from "../common/fecha-chile";
 import { hoyCl } from "../ot/plazos";
 import { descontarFifo, laboratoriosDelConsumo, leerModoConsumo, lotesParaConsumo } from "./consumo-automatico";
 import { BodegasController, BodegasService } from "./bodegas.controller";
+import { compararKardex } from "./bodegas";
 import { ConversionError, aUnidadConsumo } from "./conversion";
 import { AlcanceService } from "../rbac/alcance.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
@@ -989,6 +990,8 @@ export class ConsumiblesService {
       consumibleId,
       tenantId,
     );
+    // Un traspaso: primero la salida y luego la entrada (F078).
+    movs.sort(compararKardex);
 
     // Saldo corrido global del consumible.
     let saldo = 0;
