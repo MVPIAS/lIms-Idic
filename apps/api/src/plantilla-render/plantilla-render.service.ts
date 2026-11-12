@@ -491,7 +491,13 @@ export class PlantillaRenderService {
              FROM bpch_cabecera_ot WHERE ot_id = $1::uuid`,
           otId,
         ).catch(() => [] as any[]);
-        const t = c ? tamanoCabeceraImpreso(c) : null;
+        // F022: la reinspección guarda sus tamaños (con unidad) en su expediente.
+        const [rei] = c ? [] : await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra", unidad_muestra AS "unidadMuestra"
+             FROM bpch_reinspeccion WHERE ot_id = $1::uuid LIMIT 1`,
+          otId,
+        ).catch(() => [] as any[]);
+        const t = c ? tamanoCabeceraImpreso(c) : rei ? tamanoCabeceraImpreso(rei) : null;
         if (t) datos.tamano_lote_muestra = t;
       }
       return {

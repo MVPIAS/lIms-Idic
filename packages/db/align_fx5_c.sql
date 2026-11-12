@@ -35,3 +35,12 @@ UPDATE plantilla_informe
    SET cuerpo_html = replace(cuerpo_html, '<h1>INFORME DE INSPECCIÓN</h1>', '<h1>CERTIFICADO DE CONTROL (INFORME DE INSPECCIÓN)</h1>')
  WHERE repid = 'SCCII'
    AND cuerpo_html LIKE '%<h1>INFORME DE INSPECCIÓN</h1>%';
+
+-- -----------------------------------------------------------------------------
+-- F022 · Expediente de reinspección: los tamaños del lote y de la muestra con
+-- su unidad, como la cabecera de inspección de la OT (listas unidad_tamano_*).
+-- -----------------------------------------------------------------------------
+ALTER TABLE bpch_reinspeccion ADD COLUMN IF NOT EXISTS unidad_lote    VARCHAR(20);
+ALTER TABLE bpch_reinspeccion ADD COLUMN IF NOT EXISTS unidad_muestra VARCHAR(20);
+COMMENT ON COLUMN bpch_reinspeccion.unidad_lote IS 'Unidad del tamaño del lote (lista unidad_tamano_lote).';
+COMMENT ON COLUMN bpch_reinspeccion.unidad_muestra IS 'Unidad del tamaño de la muestra (lista unidad_tamano_muestra).';
