@@ -33,6 +33,9 @@ export default function OrdenesInternasOt({
   const [filas, setFilas] = useState<OrdenInterna[] | null>(null);
   const [error, setError] = useState("");
   const [nueva, setNueva] = useState(false);
+  // Cada recarga de las órdenes internas vuelve a pedir las muestras sin orden
+  // interna: al emitir una, el aviso desaparece sin recargar la ficha (F018, F066, F074).
+  const [rev, setRev] = useState(0);
 
   const cargar = useCallback(async () => {
     setError("");
@@ -41,6 +44,8 @@ export default function OrdenesInternasOt({
     } catch (e: any) {
       setError(e.message);
       setFilas([]);
+    } finally {
+      setRev((v) => v + 1);
     }
   }, [otId]);
 
@@ -64,7 +69,7 @@ export default function OrdenesInternasOt({
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      <PendientesOi otId={otId} puedeGenerar={gestionar && abierta} onGenerado={() => { cargar(); onCambio?.(); }} />
+      <PendientesOi otId={otId} rev={rev} puedeGenerar={gestionar && abierta} onGenerado={() => { cargar(); onCambio?.(); }} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <p className="subtitle" style={{ margin: 0, maxWidth: 640 }}>
           Derivaciones de esta OT a otros laboratorios. El laboratorio de destino ve la OT y solo los ensayos que se le derivan;
@@ -116,7 +121,7 @@ type Pendiente = { clave: string; muestra: string; laboratorio: string; ensayos:
  * en la recepción) y genera una orden por muestra y laboratorio. Sin ellas la
  * OT no se cierra. API: /ordenes-internas/pendientes/:otId.
  */
-function PendientesOi({ otId, puedeGenerar, onGenerado }: { otId: string; puedeGenerar: boolean; onGenerado: () => void }) {
+function PendientesOi({ otId, rev, puedeGenerar, onGenerado }: { otId: string; rev: number; puedeGenerar: boolean; onGenerado: () => void }) {
   const [pend, setPend] = useState<Pendiente[]>([]);
   const [requisito, setRequisito] = useState("");
   const [ocupado, setOcupado] = useState(false);
@@ -132,7 +137,7 @@ function PendientesOi({ otId, puedeGenerar, onGenerado }: { otId: string; puedeG
   }, [otId]);
   useEffect(() => {
     cargar();
-  }, [cargar]);
+  }, [cargar, rev]);
 
   if (!pend.length) return null;
   const generables = pend.filter((p) => p.ensayos.length > 0).length;
