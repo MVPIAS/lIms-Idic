@@ -100,6 +100,7 @@ export const ORIGEN_LABEL: Record<string, string> = {
   INTERLABORATORIO: "Interlaboratorio",
   OT_INTERNA: "OT interna",
   REINSPECCION: "Reinspección (BPCH)",
+  REQUERIMIENTO_BPCH: "Requerimiento BPCH",
   PRODUCCION_NACIONAL: "Producción Nacional",
   PROTOTIPO: "Prototipo",
   INSTITUCIONAL: "Institucional sin cobro",
