@@ -10,6 +10,12 @@ describe("bloqueo de clientes con facturas impagas (reunión 2)", () => {
     expect(motivoClienteBloqueado({ bloqueado: true }, "aceptar")).toMatch(/no se puede registrar la aceptación/);
   });
 
+  it("un motivo que ya termina en punto no se cierra con dos (F036)", () => {
+    const m = motivoClienteBloqueado({ bloqueado: true, motivoBloqueo: "Factura impaga (caso de prueba MP-00). " }, "cotizar")!;
+    expect(m).toMatch(/Motivo: Factura impaga \(caso de prueba MP-00\)\. Solo/);
+    expect(m).not.toMatch(/\.\./);
+  });
+
   it("solo la jefatura del Depto. Comercial (o SUPERADMIN) bloquea", () => {
     expect(puedeBloquearClientes({ superadmin: true, tienePermiso: false, esJefeDco: false })).toBe(true);
     expect(puedeBloquearClientes({ superadmin: false, tienePermiso: true, esJefeDco: true })).toBe(true);

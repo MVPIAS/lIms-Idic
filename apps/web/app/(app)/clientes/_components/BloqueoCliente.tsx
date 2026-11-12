@@ -43,7 +43,7 @@ export function BloqueoCliente({ cliente, onCerrar, onHecho }: { cliente: Client
   return (
     <Modal titulo={<>{bloqueado ? "Desbloquear" : "Bloquear"} cliente · {cliente.razonSocial}</>} onCerrar={onCerrar}>
       {bloqueado ? (
-        <div className="alert warn">Bloqueado{cliente.motivoBloqueo ? `: ${cliente.motivoBloqueo}` : ""}. No recibe cotizaciones ni se le registran aceptaciones.</div>
+        <div className="alert warn">Bloqueado{cliente.motivoBloqueo ? `: ${cliente.motivoBloqueo.trim().replace(/[\s.]+$/, "")}` : ""}. No recibe cotizaciones ni se le registran aceptaciones.</div>
       ) : (
         <p className="hint" style={{ marginTop: 0 }}>Al bloquearlo no se le podrán emitir cotizaciones ni registrar la aceptación de las abiertas, hasta que el Jefe DCO lo desbloquee.</p>
       )}

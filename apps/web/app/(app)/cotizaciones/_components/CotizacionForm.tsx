@@ -805,7 +805,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           </fieldset>
           {cliente?.bloqueado && (
             <div className="alert warn" role="alert" style={{ gridColumn: "1 / -1", margin: 0 }}>
-              <b>Cliente bloqueado</b> por el Jefe del Departamento Comercial{cliente.motivoBloqueo ? `: ${cliente.motivoBloqueo}` : ""}. No se le pueden emitir cotizaciones hasta que el Jefe DCO lo desbloquee.
+              <b>Cliente bloqueado</b> por el Jefe del Departamento Comercial{cliente.motivoBloqueo ? `: ${String(cliente.motivoBloqueo).trim().replace(/[\s.]+$/, "")}` : ""}. No se le pueden emitir cotizaciones hasta que el Jefe DCO lo desbloquee.
             </div>
           )}
           {condCli && (condCli.lista || condCli.descuentoPct > 0 || condCli.condiciones) && (
