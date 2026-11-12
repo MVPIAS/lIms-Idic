@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { recordarOtActiva } from "@/lib/ot-activa";
 import { PageHeader, Skeleton } from "@/components/ui/PageHeader";
 import RequierePermiso from "@/components/RequierePermiso";
 import { toast } from "@/components/ui/feedback";
@@ -34,6 +35,10 @@ export default function ExpedienteD11Page() {
 
 function Expediente() {
   const { id } = useParams<{ id: string }>();
+  // F049: «Emitir informe» (también desde el menú) propone la OT cuya ficha se está viendo.
+  useEffect(() => {
+    if (typeof id === "string") recordarOtActiva(id);
+  }, [id]);
   const [d, setD] = useState<ExpedienteD11 | null>(null);
   const [error, setError] = useState("");
   const [paso, setPaso] = useState<string | null>(null);

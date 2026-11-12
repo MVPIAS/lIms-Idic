@@ -5,6 +5,7 @@ import DatosEncargoOt from "./_components/DatosEncargoOt";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { recordarOtActiva } from "@/lib/ot-activa";
 import { fecha, fechaHora, fechaDia, rut, clp, num, hoyISO } from "@/lib/format";
 import { ACEPTACION_LABEL, ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
 import { usePermisos } from "@/lib/permisos";
@@ -160,6 +161,10 @@ const authJson = () => ({ ...auth(), "Content-Type": "application/json" });
 export default function ExpedientePage() {
   useMediosEnvio(); // frente f5: textos de los medios de envío (Parámetros del sistema)
   const { id } = useParams<{ id: string }>();
+  // F049: «Emitir informe» (también desde el menú) propone la OT cuya ficha se está viendo.
+  useEffect(() => {
+    if (typeof id === "string") recordarOtActiva(id);
+  }, [id]);
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
   const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "consumos" | "informe" | "carpeta" | "flujo" | "historial" | "terreno">("cabecera");
