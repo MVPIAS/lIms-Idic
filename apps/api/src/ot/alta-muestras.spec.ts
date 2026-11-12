@@ -20,6 +20,13 @@ describe("Registrar OT con sus muestras (B-001, B-011)", () => {
     expect(r.muestras[0]).toEqual({ nombre: "Nitrato de Amonio", catElementoId: PRODUCTO.id, metodoIds: ["a", "b"] });
   });
 
+  it("F013: el motivo de la excepción a la batería llega al registro (y vacío no se manda)", () => {
+    const con = muestrasDeAlta([{ catElementoId: PRODUCTO.id, metodoIds: ["a"], excepcionBateria: "  Sin embalaje en la partida " }], elementos);
+    expect(con.muestras[0].excepcionBateria).toBe("Sin embalaje en la partida");
+    const sin = muestrasDeAlta([{ catElementoId: PRODUCTO.id, metodoIds: ["a"], excepcionBateria: "  " }], elementos);
+    expect(sin.muestras[0]).not.toHaveProperty("excepcionBateria");
+  });
+
   it("elemento del laboratorio: nunca «Lab. X [códigos]»; sin descripción escrita no se registra", () => {
     const sin = muestrasDeAlta([{ catElementoId: LAB.id, metodoIds: ["175", "177"] }], elementos);
     expect(sin.errores[0]).toMatch(/escriba la descripción/);

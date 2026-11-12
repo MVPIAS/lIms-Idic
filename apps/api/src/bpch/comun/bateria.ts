@@ -38,7 +38,18 @@ export function revisarBateria(
       excepcion: false,
     };
   if (!excepcion.permitido)
-    return { faltan, error: `Quitar ensayos de la batería (${lista}) es una excepción que autoriza la jefatura de la SCC (permiso bpch.bateria.excepcion).`, excepcion: false };
+    return { faltan, error: `Quitar ensayos de la batería (${lista}) es una excepción que solo autoriza la jefatura de la Sección Certificación de la Conformidad o del Banco de Pruebas; pídale que registre el lote.`, excepcion: false };
   if ((excepcion.motivo ?? "").trim().length < 5) return { faltan, error: "Indique el motivo de la excepción (al menos 5 caracteres).", excepcion: false };
   return { faltan, error: null, excepcion: true };
+}
+
+/**
+ * fx5-c · F007: «Quitar» un ensayo ya generado en «Captura y revisión por OT».
+ * En una OT del BPCH, si el ensayo es de la batería del elemento, quitarlo es la
+ * misma excepción controlada: solo con el permiso de excepción (el motivo ya es
+ * obligatorio en «Quitar»). Fuera del BPCH o fuera de la batería no aplica.
+ */
+export function errorQuitarDeBateria(h: { esBpch: boolean; enBateria: boolean; permitido: boolean; ensayo?: string | null }): string | null {
+  if (!h.esBpch || !h.enBateria || h.permitido) return null;
+  return `${h.ensayo ? `«${h.ensayo}» es` : "El ensayo es"} parte de la batería de ensayos del procedimiento de calidad: solo lo quita, como excepción y con motivo, la jefatura de la Sección Certificación de la Conformidad o del Banco de Pruebas.`;
 }

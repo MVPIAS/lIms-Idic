@@ -1,5 +1,16 @@
-import { revisarBateria } from "./bateria";
+import { errorQuitarDeBateria, revisarBateria } from "./bateria";
 import { errorEntregaBpch } from "./entrega-bpch";
+
+describe("Quitar un ensayo de la batería en la captura (F007)", () => {
+  it("en el BPCH, un ensayo de la batería solo lo quita quien tiene la excepción", () => {
+    expect(errorQuitarDeBateria({ esBpch: true, enBateria: true, permitido: false, ensayo: "EMB-01" })).toMatch(/EMB-01.*batería/);
+    expect(errorQuitarDeBateria({ esBpch: true, enBateria: true, permitido: true })).toBeNull();
+  });
+  it("fuera de la batería o fuera del BPCH no aplica", () => {
+    expect(errorQuitarDeBateria({ esBpch: true, enBateria: false, permitido: false })).toBeNull();
+    expect(errorQuitarDeBateria({ esBpch: false, enBateria: true, permitido: false })).toBeNull();
+  });
+});
 
 const bateria = [
   { id: "1", codigo: "IV-01", nombre: "Inspección visual" },
@@ -15,7 +26,9 @@ describe("Batería de ensayos fija del BPCH (R4)", () => {
     expect(r.error).toMatch(/EMB-01/);
   });
   it("la excepción exige el permiso y un motivo", () => {
-    expect(revisarBateria(bateria, ["1"], { motivo: "Sin embalaje en la partida", permitido: false }).error).toMatch(/bpch.bateria.excepcion/);
+    expect(revisarBateria(bateria, ["1"], { motivo: "Sin embalaje en la partida", permitido: false }).error).toMatch(/solo autoriza la jefatura/);
+    // F002: el mensaje no muestra el código técnico del permiso.
+    expect(revisarBateria(bateria, ["1"], { motivo: "Sin embalaje en la partida", permitido: false }).error).not.toMatch(/bpch\.bateria/);
     expect(revisarBateria(bateria, ["1"], { motivo: "abc", permitido: true }).error).toMatch(/motivo/);
     expect(revisarBateria(bateria, ["1"], { motivo: "Sin embalaje en la partida", permitido: true })).toMatchObject({ error: null, excepcion: true });
   });
