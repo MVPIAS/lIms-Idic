@@ -40,7 +40,7 @@ import {
 } from "./cobertura-documento";
 import { etiquetaDe, hechosCobertura, resultadosCubiertos } from "./cobertura-ot";
 import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
-import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
+import { camposLotesImpresos, faltantesParaEmitirInspeccion, tamanoCabeceraImpreso, type LoteImpreso } from "../bpch/cabecera/reglas-cabecera";
 import { escapeHtml } from "./html.util";
 import { camposDeLaboratorio } from "../recepcion/reglas-recepcion";
 import {
@@ -474,6 +474,25 @@ export class PlantillaRenderService {
       const condicion = condicionFinal(muestras.map((m) => m.veredicto));
       const datos: Record<string, string> = {};
       for (const [k, v] of Object.entries(filas[0])) datos[k] = v === null || v === undefined ? "" : String(v);
+      // F014: los lotes de «Lotes de la inspección» (bpch_cabecera_lote) se imprimen todos,
+      // con su unidad y su vencimiento; sin ellos, los tamaños de la cabecera llevan su unidad.
+      const lotes = await this.prisma.$queryRawUnsafe<LoteImpreso[]>(
+        `SELECT identificacion, tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra",
+                unidad_muestra AS "unidadMuestra", to_char(vencimiento, 'YYYY-MM-DD') AS vencimiento
+           FROM bpch_cabecera_lote WHERE ot_id = $1::uuid ORDER BY orden`,
+        otId,
+      ).catch(() => [] as LoteImpreso[]);
+      const deLotes = camposLotesImpresos(lotes, datos.vencimiento_producto ?? "");
+      if (deLotes) Object.assign(datos, deLotes);
+      else {
+        const [c] = await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra", unidad_muestra AS "unidadMuestra"
+             FROM bpch_cabecera_ot WHERE ot_id = $1::uuid`,
+          otId,
+        ).catch(() => [] as any[]);
+        const t = c ? tamanoCabeceraImpreso(c) : null;
+        if (t) datos.tamano_lote_muestra = t;
+      }
       return {
         ...datos,
         condicion_final: TEXTO_CONDICION[condicion],

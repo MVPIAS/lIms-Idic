@@ -75,7 +75,7 @@ describe("Registrar OT con sus muestras (B-001, B-011)", () => {
       const registrar = jest.fn(async () => ({ muestras: [] }));
       const { ctl, tx } = montar(registrar);
       await ctl.crear({ clienteId: CLIENTE, unidadPrincipalId: LQC.id, muestras: [{ catElementoId: PRODUCTO.id, metodoIds: [] }] }, req);
-      expect(registrar).toHaveBeenCalledWith("ot-1", { muestras: [{ nombre: PRODUCTO.nombre, catElementoId: PRODUCTO.id, metodoIds: [] }] }, "t", req, tx);
+      expect(registrar).toHaveBeenCalledWith("ot-1", { muestras: [{ nombre: PRODUCTO.nombre, catElementoId: PRODUCTO.id, metodoIds: [] }] }, "t", req, tx, { validarBateria: true });
     });
 
     it("un error al registrar las muestras se propaga (la transacción se deshace)", async () => {
