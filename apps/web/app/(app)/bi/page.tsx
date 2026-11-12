@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import RequierePermiso from "@/components/RequierePermiso";
 import { llamar } from "@/lib/laboratorio";
+import { usePermisos } from "@/lib/permisos";
 
 interface ConfigBi {
   configurado: boolean;
@@ -37,6 +38,8 @@ export default function BiPage() {
 function Bi() {
   const [cfg, setCfg] = useState<ConfigBi | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Lo técnico (variable del servidor, guía, vistas de la base) solo al administrador (F094).
+  const { admin } = usePermisos();
 
   useEffect(() => {
     llamar<ConfigBi>("GET", "/sistema/bi")
@@ -78,11 +81,18 @@ function Bi() {
           )}
         </div>
       ) : (
-        <div className="alert warn">
-          <b>Metabase no está configurado en este servidor.</b> El administrador de la plataforma debe definir la dirección de Metabase
-          en la variable <span className="codigo">URL_BI</span> (por ejemplo <span className="codigo">https://bi.&lt;dominio&gt;</span>) y
-          reiniciar la API. Guía: <span className="codigo">docs/RESPALDOS_Y_BI.md</span>.
-        </div>
+        admin ? (
+          <div className="alert warn">
+            <b>Metabase no está configurado en este servidor.</b> El administrador de la plataforma debe definir la dirección de Metabase
+            en la variable <span className="codigo">URL_BI</span> (por ejemplo <span className="codigo">https://bi.&lt;dominio&gt;</span>) y
+            reiniciar la API. Guía: <span className="codigo">docs/RESPALDOS_Y_BI.md</span>.
+          </div>
+        ) : (
+          <div className="alert warn">
+            <b>Los tableros de análisis aún no están habilitados en esta instalación.</b> Para usarlos, pida el acceso al
+            administrador del sistema.
+          </div>
+        )
       )}
 
       <div className="card" style={{ marginTop: 12 }}>
@@ -95,10 +105,14 @@ function Bi() {
           ))}
         </ul>
         <p style={{ fontSize: 12.5, color: "var(--muted)", marginTop: 8, marginBottom: 0 }}>
-          Además puede crear sus propias preguntas sobre las tablas del LIMS y las vistas preparadas para el análisis
-          (<span className="codigo">bi_ot_estado_mes</span>, <span className="codigo">bi_ot_plazos</span>,{" "}
-          <span className="codigo">bi_ot_cumplimiento_mes</span>, <span className="codigo">bi_resultado_no_cumple_lab</span>). Las contraseñas y
-          secretos de los usuarios no son visibles desde Metabase.
+          Además puede crear sus propias preguntas sobre los datos del LIMS
+          {admin && (
+            <>
+              {" "}y las vistas preparadas para el análisis (<span className="codigo">bi_ot_estado_mes</span>, <span className="codigo">bi_ot_plazos</span>,{" "}
+              <span className="codigo">bi_ot_cumplimiento_mes</span>, <span className="codigo">bi_resultado_no_cumple_lab</span>)
+            </>
+          )}
+          . Las contraseñas y secretos de los usuarios no son visibles desde Metabase.
         </p>
       </div>
     </div>
