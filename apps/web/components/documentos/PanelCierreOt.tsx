@@ -123,6 +123,10 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
               {d.plazo.origen !== "plazo_defecto" && d.plazo.fijadaPor ? ` por ${d.plazo.fijadaPor}` : ""}{d.plazo.fijadaAt ? ` el ${fechaHora(d.plazo.fijadaAt)}` : ""}
             </span>
           )}
+          {/* F009: la OT del BPCH o la D11 no dura más que su resolución. */}
+          {d.plazo.vigenciaResolucion && (
+            <span style={{ color: "var(--muted)" }}>· vigencia de la resolución hasta <b>{fechaDia(d.plazo.vigenciaResolucion)}</b> (la fecha de compromiso no puede pasarla)</span>
+          )}
           {d.puedo.planificar && !editFecha && (
             <button className="btn outline sm" onClick={() => { setNuevaFecha(d.plazo.fechaCompromiso ?? d.plazo.sugerida ?? ""); setMotivo(""); setEditFecha(true); }}>
               {d.plazo.fechaCompromiso ? "Cambiar fecha" : "Fijar fecha"}

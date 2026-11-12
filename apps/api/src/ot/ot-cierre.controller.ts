@@ -86,7 +86,8 @@ export class OtCierreService {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT o.fecha_compromiso_origen AS origen, o.fecha_compromiso_at AS "fijadaAt",
               u.nombre_completo AS "fijadaPor", o.cerrada_por AS "cerradaPor",
-              c.codigo AS "cotizacionCodigo", c.plazo_entrega_dias AS "plazoDias", c.estado AS "cotizacionEstado"
+              c.codigo AS "cotizacionCodigo", c.plazo_entrega_dias AS "plazoDias", c.estado AS "cotizacionEstado",
+              to_char(o.vigencia_resolucion_hasta, 'YYYY-MM-DD') AS "vigenciaResolucion"
          FROM orden_trabajo o
          LEFT JOIN usuario u ON u.id = o.fecha_compromiso_por
          LEFT JOIN cotizacion c ON c.id = o.cotizacion_id
@@ -211,6 +212,8 @@ export class OtCierreService {
         sugerida: fechaCompromisoDesdePlazo(ot.fechaRecepcion, extras.plazoDias ?? null),
         plazoDiasCotizacion: extras.plazoDias ?? null,
         cotizacionCodigo: extras.cotizacionCodigo ?? null,
+        // F009: OT del BPCH o la D11: la fecha no pasa la vigencia de la resolución.
+        vigenciaResolucion: extras.vigenciaResolucion ?? null,
         ...semaforoPlazo(ot.fechaCompromiso, ot.estado),
       },
       resultados: { total: totalRes, aprobados },
