@@ -21,20 +21,25 @@ const CAUSAS: [string, string][] = [
 ];
 
 export default function ComercialOt({ ot, onCambio }: { ot: any; onCambio: () => void }) {
-  const { puede } = usePermisos();
+  const { puede, listo } = usePermisos();
+  const veAvisos = listo && puede("cotizacion.ver");
   const [plazo, setPlazo] = useState<{ estado: string; limite: string; diasRestantes: number } | null>(null);
   const [abierto, setAbierto] = useState(false);
   const [causa, setCausa] = useState("cliente_desiste");
   const [motivo, setMotivo] = useState("");
   const [busy, setBusy] = useState(false);
 
+  // Los permisos se leen después del primer render: el efecto se repite cuando
+  // están listos (antes nunca pedía el plazo, F024). Una OT anulada no lo muestra (F031).
   useEffect(() => {
-    if (!ot?.opiPendiente || !puede("cotizacion.ver")) return;
+    if (!ot?.opiPendiente || ot?.estado === "anulada" || !veAvisos) {
+      setPlazo(null);
+      return;
+    }
     llamar<any>("GET", "/comercial/avisos")
       .then((r) => setPlazo((r?.otOpiPendiente ?? []).find((x: any) => x.id === ot.id)?.plazo ?? null))
       .catch(() => setPlazo(null));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ot?.id, ot?.opiPendiente]);
+  }, [ot?.id, ot?.opiPendiente, ot?.estado, veAvisos]);
 
   async function anular() {
     setBusy(true);

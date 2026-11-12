@@ -236,6 +236,8 @@ export default function ExpedientePage() {
   const [opiNumero, setOpiNumero] = useState("");
   const [opiFecha, setOpiFecha] = useState(() => hoyISO());
   const [opiMsg, setOpiMsg] = useState("");
+  // Una OT anulada ya no regulariza la OPI: no se marca ni se ofrece registrarla (F031).
+  const opiVigente = !!ot?.opiPendiente && ot?.estado !== "anulada";
   const registrarOpi = async () => {
     setBusy(true); setOpiMsg("");
     try {
@@ -279,7 +281,7 @@ export default function ExpedientePage() {
           {ot?.origenTrabajo ? <> · Origen: <b>{ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo}</b></> : null}
           {" · "}Laboratorio: {ot?.unidad ? <b title={ot.unidad.nombre}>{ot.unidad.codigo}</b> : <span className="pill amber">sin laboratorio</span>}
           {ot?.fechaCompromiso ? <> · Compromiso: <b>{fechaDia(ot.fechaCompromiso)}</b></> : null}
-          {ot?.opiPendiente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
+          {opiVigente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
           {ot?.conCobro === false && <span className="pill gray" style={{ marginLeft: 8 }}>Sin cobro</span>}
         </div>
       </div>
@@ -311,7 +313,7 @@ export default function ExpedientePage() {
       )}
 
       {/* SVT7 · OT por disposición del Director con cobro: falta la OPI. */}
-      {ot?.opiPendiente && (
+      {opiVigente && (
         <div className="alert warn">
           <div style={{ marginBottom: 6 }}>
             OT creada por <b>disposición del Director</b>{ot.disposicionRef ? <> ({ot.disposicionRef})</> : null} con cobro: está <b>pendiente la OPI</b>.
@@ -408,7 +410,7 @@ export default function ExpedientePage() {
                 <div className="field readonly"><label>Ingreso</label><input value={fecha(ot?.fechaIngreso ?? ot?.createdAt)} readOnly /></div>
                 <div className="field readonly"><label>Origen</label><input value={ot?.origenTrabajo ? ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo : "—"} readOnly /></div>
                 <div className="field readonly"><label>Cobro</label><input value={ot ? (ot.conCobro === false ? "Sin cobro" : "Con cobro") : "—"} readOnly /></div>
-                <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : ot?.opiPendiente ? "Pendiente" : "—"} readOnly /></div>
+                <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : opiVigente ? "Pendiente" : "—"} readOnly /></div>
                 {ot?.disposicionRef && <div className="field readonly"><label>Disposición del Director</label><input value={`${ot.disposicionRef}${ot.disposicionFecha ? ` · ${fechaDia(ot.disposicionFecha)}` : ""}`} readOnly /></div>}
                 {ot?.numeroLey && <div className="field readonly"><label>Resolución DGMN</label><input value={ot.numeroLey} readOnly /></div>}
                 <div className="field readonly"><label>Horas hombre</label><input value={num(ot?.horasHombre, 1)} readOnly /></div>

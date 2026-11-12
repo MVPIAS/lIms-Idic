@@ -364,7 +364,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       ? await this.prisma.ordenTrabajo.findMany({
           where: { cotizacionId: { in: ids }, ...(tenantId ? { tenantId } : {}) },
           select: {
-            id: true, codigo: true, cotizacionId: true, opiPendiente: true, conCobro: true, origenTrabajo: true,
+            id: true, codigo: true, cotizacionId: true, estado: true, opiPendiente: true, conCobro: true, origenTrabajo: true,
             unidad: { select: { id: true, codigo: true, nombre: true } },
           },
         })
