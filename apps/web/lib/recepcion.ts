@@ -82,3 +82,22 @@ export function textoValor(c: CampoRecepcion, v: ValorCampo | undefined): string
 
 /** Fecha AAAA-MM-DD → DD-MM-AAAA. */
 export const fechaDma = (iso?: string | null) => (iso ? iso.slice(0, 10).split("-").reverse().join("-") : "—");
+
+/**
+ * F026/F062 · Métodos marcados que van a una muestra recibida de una cotización
+ * por muestra: los de las líneas de SU muestra y de toda la cotización; un
+ * método agregado a mano (sin línea) va a todas. Misma regla que
+ * apps/api/src/flujo-real/registro-muestras.ts · metodosDeLaMuestra (probada allí).
+ */
+export function metodosDeLaMuestra(
+  muestraN: number | null | undefined,
+  marcados: string[],
+  lineas: { muestraN?: number | null; metodos: { id: string }[] }[],
+): string[] {
+  if (muestraN == null) return [...marcados];
+  return marcados.filter((id) => {
+    const deLineas = lineas.filter((l) => l.metodos.some((m) => m.id === id));
+    if (!deLineas.length) return true;
+    return deLineas.some((l) => l.muestraN == null || l.muestraN === muestraN);
+  });
+}

@@ -49,7 +49,8 @@ import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { descontarPorCaptura, faltantesDeCaptura, leerConfigConsumo } from "../consumibles/consumo-automatico";
 import { advertenciaDeCaptura, calidadDeResultados, cerrarReanalisisAutomatico, leerConfigResultados, reanalisisAbierto, trasCaptura } from "../calidad/reanalisis";
 import { criterioIndeterminado, leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado } from "../laboratorio/veredicto";
-import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
+import { erroresRegistro, muestrasPropuestas, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
+import { leerMuestraDeLineas, leerMuestras } from "../cotizacion/cotizacion-s1";
 import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion, type RecepcionNormalizada } from "./recepcion-muestra";
 import { aplicarFactor, erroresFactor, expresionConFactor, factorDe } from "../laboratorio/factor";
 import { planAjusteFactor } from "../laboratorio/ajuste-factor";
@@ -1954,6 +1955,28 @@ export class RegistroMuestrasService {
     const porEnsayo = new Map<string, MetodoCatalogo[]>();
     for (const m of metodos) if (m.ensayoId) (porEnsayo.get(m.ensayoId) ?? porEnsayo.set(m.ensayoId, []).get(m.ensayoId)!).push(m);
     const panelOt = cot ? null : await this.panelDeOt(tenantId, ot);
+    // F026/F062: cotización por muestra → cada línea con su muestra y las muestras con su producto.
+    const muestraDeLinea = cot ? await leerMuestraDeLineas(this.prisma as any, cot.id) : new Map<string, number | null>();
+    const muestrasCot = cot ? await leerMuestras(this.prisma as any, cot.id) : [];
+    const elementos = muestrasCot.some((m) => m.catElementoId)
+      ? await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
+          `SELECT id::text AS id, nombre FROM cat_elemento WHERE id = ANY($1::uuid[])`,
+          muestrasCot.map((m) => m.catElementoId).filter((x): x is string => !!x),
+        )
+      : [];
+    const lineasPropuestas = proponerDesdeCotizacion(
+      lineas.map((l) => ({
+        id: l.id,
+        descripcion: l.descripcion,
+        cantidad: l.cantidad,
+        catEnsayoId: l.catEnsayoId,
+        ensayoCodigo: l.ensayoCodigo,
+        ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
+        tipo: l.tipo ?? null,
+        muestraN: muestraDeLinea.get(l.id) ?? null,
+      })),
+      porEnsayo,
+    );
     return {
       // B-008: la OT que nace de un programa (producto), de un prototipo (panel
       // parametrizado) o de un registro con elemento trae su panel a la recepción.
@@ -1980,17 +2003,10 @@ export class RegistroMuestrasService {
         `SELECT codigo, etiqueta FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'ubicacion_almacenamiento' AND activo ORDER BY orden, etiqueta`,
         tenantId,
       ),
-      lineas: proponerDesdeCotizacion(
-        lineas.map((l) => ({
-          id: l.id,
-          descripcion: l.descripcion,
-          cantidad: l.cantidad,
-          catEnsayoId: l.catEnsayoId,
-          ensayoCodigo: l.ensayoCodigo,
-          ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
-          tipo: l.tipo ?? null,
-        })),
-        porEnsayo,
+      lineas: lineasPropuestas,
+      muestrasCotizacion: muestrasPropuestas(
+        muestrasCot.map((m) => ({ ...m, productoNombre: elementos.find((e) => e.id === m.catElementoId)?.nombre ?? null })),
+        lineasPropuestas,
       ),
     };
   }
