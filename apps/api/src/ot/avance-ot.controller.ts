@@ -47,7 +47,7 @@ export class AvanceOtService {
     await this.alcanceResultado.alcanceEnOt(req, ot, "ot.ver");
 
     const rama = await ramaDeUnidad(this.prisma, ot.unidadPrincipal).catch(() => null);
-    const [cotizacion, muestras, analistas, resultados, docs, factura, calibraciones, internacion, reinspeccion, ordenesInternas] = await Promise.all([
+    const [cotizacion, muestras, analistas, resultados, docs, factura, calibraciones, internacion, reinspeccion, ordenesInternas, aprobadosSinRevision] = await Promise.all([
       ot.cotizacionId
         ? this.prisma.cotizacion.findFirst({ where: { id: ot.cotizacionId }, select: { codigo: true, estado: true } })
         : null,
@@ -126,6 +126,8 @@ export class AvanceOtService {
           ORDER BY oi.created_at`,
         id,
       ).catch(() => []),
+      // Aprobados sin revisión previa (revisión opcional): la Ruta no los da por revisados (F067).
+      this.prisma.resultado.count({ where: { otId: id, deletedAt: null, estado: "aprobado", revisadoPor: null } }),
     ]);
 
     const cuenta = (...estados: string[]) => resultados.filter((r) => estados.includes(r.estado ?? "")).reduce((s, r) => s + r._count._all, 0);
@@ -178,6 +180,7 @@ export class AvanceOtService {
         revisados: cuenta("revisado_n1"),
         aprobados: cuenta("aprobado"),
         devueltos: cuenta("devuelto", "rechazado"),
+        aprobadosSinRevision,
       },
       documentos,
       factura: factura ? { numero: factura.numero ?? "(sin número)", estado: factura.estado } : null,

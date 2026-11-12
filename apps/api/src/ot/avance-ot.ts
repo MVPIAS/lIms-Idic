@@ -159,7 +159,11 @@ export interface HechosOt {
   muestras: { total: number; recepcionIncompleta: number; veredictos?: (string | null)[] };
   /** Nombres de las personas asignadas a la OT (o a sus ensayos). */
   analistas: string[];
-  resultados: { total: number; pendientes: number; capturados: number; revisados: number; aprobados: number; devueltos: number };
+  resultados: {
+    total: number; pendientes: number; capturados: number; revisados: number; aprobados: number; devueltos: number;
+    /** Aprobados sin revisión previa (parámetro «revisión opcional»): no cuentan como revisados. */
+    aprobadosSinRevision?: number;
+  };
   documentos: DocumentoAvance[];
   factura: { numero: string; estado: string } | null;
   /** Calibraciones de Metrología ligadas a la OT. */
@@ -270,6 +274,18 @@ function detalleApertura(h: HechosOt): string {
   return `${origen}${h.unidad ? ` · ${h.unidad.codigo}` : " · sin laboratorio"}`;
 }
 
+/**
+ * Texto de la etapa Revisión. Lo aprobado sin revisión previa (revisión opcional
+ * en el laboratorio) no se cuenta como revisado: se informa aparte (F067).
+ */
+export function textoRevision(r: HechosOt["resultados"]): string | null {
+  if (!r.total) return null;
+  const sinRevision = Math.max(0, Math.min(r.aprobados, r.aprobadosSinRevision ?? 0));
+  const revisados = r.revisados + r.aprobados - sinRevision;
+  const base = `${revisados} de ${r.total} revisados`;
+  return sinRevision ? `${base} · ${sinRevision} aprobado${sinRevision === 1 ? "" : "s"} sin revisión previa` : base;
+}
+
 /** Estado de los resultados para las etapas Análisis, Revisión y Aprobación. */
 function etapasResultados(h: HechosOt): { analisis: Etapa; revision: Etapa; aprobacion: Etapa } {
   const r = h.resultados;
@@ -289,7 +305,7 @@ function etapasResultados(h: HechosOt): { analisis: Etapa; revision: Etapa; apro
       "revision",
       "Revisión",
       revisionHecha ? "hecho" : r.revisados + r.aprobados > 0 ? "en_curso" : "pendiente",
-      r.total ? `${r.revisados + r.aprobados} de ${r.total} revisados` : null,
+      textoRevision(r),
     ),
     aprobacion: etapa(
       "aprobacion",
