@@ -175,6 +175,8 @@ export interface HechosCotizacion extends CotizacionCircuito {
   /** Texto del medio en «Parámetros del sistema › medio_envio» (frente f5). */
   enviadaMedioTexto?: string | null;
   ot?: { codigo: string } | null;
+  /** Pre-cotización: no se acepta ni genera OT, así que su ruta no tiene esa etapa (F037). */
+  precotizacion?: boolean;
   solicitudes: SolicitudRuta[];
   /** Responsables del paso FIRMA de la matriz COTIZACION. */
   firmantes: { id: string; nombre: string }[];
@@ -258,7 +260,7 @@ export function calcularRutaCotizacion(h: HechosCotizacion, cfg: ConfigCircuito)
     cerrar(vb),
     cerrar(firma),
     envio,
-    aceptacion,
+    ...(h.precotizacion ? [] : [aceptacion]),
   ];
 
   if (h.estado === "anulada") avisos.push("La cotización está anulada.");

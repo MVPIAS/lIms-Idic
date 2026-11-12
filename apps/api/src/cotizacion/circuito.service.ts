@@ -30,6 +30,7 @@ import { cuerpoCotizacionVigente } from "./plantilla-cotizacion";
 import { hoyEnChile, soloFecha } from "./validez";
 import { leerReferenciasCosteo } from "./referencias-costeo";
 import { hoyCl } from "../ot/plazos";
+import { esPrecotizacion } from "./precotizacion";
 
 /** Tipos de unidad a los que Comercial pide fechas y costo (laboratorios y sus equivalentes). */
 const TIPOS_CONSULTABLES = ["LABORATORIO", "SUCURSAL", "DELEGACION", "SECCION"];
@@ -55,6 +56,7 @@ export interface FilaCot {
   lineas: number;
   clienteId: string;
   centroCostoId: string | null;
+  tipoDocumento: string | null;
   otCodigo: string | null;
 }
 
@@ -99,7 +101,7 @@ const SQL_COT = `
            WHERE p.tenant_id = c.tenant_id AND p.categoria = 'medio_envio' AND p.codigo = c.enviada_medio LIMIT 1) AS "enviadaMedioTexto",
          c.enviada_destinatarios AS "enviadaDestinatarios", c.envio_observacion AS "envioObservacion",
          e.nombre_completo AS "ejecutivoNombre", c.created_at AS "createdAt", c.cliente_id AS "clienteId",
-         c.centro_costo_id AS "centroCostoId",
+         c.centro_costo_id AS "centroCostoId", c.tipo_documento AS "tipoDocumento",
          (SELECT count(*)::int FROM linea_cotizacion l WHERE l.cotizacion_id = c.id) AS lineas,
          (SELECT o.codigo FROM orden_trabajo o WHERE o.cotizacion_id = c.id ORDER BY o.created_at LIMIT 1) AS "otCodigo"
     FROM cotizacion c
@@ -270,6 +272,7 @@ export class CircuitoCotizacionService {
       enviadaMedio: c.enviadaMedio,
       enviadaMedioTexto: c.enviadaMedioTexto,
       ot: c.otCodigo ? { codigo: c.otCodigo } : null,
+      precotizacion: esPrecotizacion(c),
       solicitudes: conVb.map((s) => ({ id: s.id, estado: s.estado, unidad: s.unidadCodigo, unidadId: s.unidadId, numero: s.numero, vb: s.vb })),
       firmantes,
     };
