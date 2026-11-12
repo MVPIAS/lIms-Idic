@@ -105,6 +105,12 @@ export function lineasCambiaron(antes: LineaHuella[], despues: LineaHuella[]): b
   return a.length !== d.length || a.some((x, i) => x !== d[i]);
 }
 
+/** Una fila por id, en el orden en que llegan (bandeja del laboratorio, F029). */
+export function unicasPorId<T extends { id: string }>(filas: T[]): T[] {
+  const vistos = new Set<string>();
+  return filas.filter((f) => (vistos.has(f.id) ? false : (vistos.add(f.id), true)));
+}
+
 /** Solicitudes que forman parte del circuito (con laboratorio; las heredadas D2 no cuentan). */
 export interface SolicitudCircuito {
   id: string;

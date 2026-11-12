@@ -21,6 +21,7 @@ import {
   type NivelVb,
   type RespuestaLab,
   type SolicitudRuta,
+  unicasPorId,
 } from "./circuito-cotizacion";
 import { exigirMedioEnvioActivo, textoEnFrase } from "../common/medios-envio";
 import { calcularForm05, erroresForm05, erroresPrograma, type Form05Entrada, type ProgramaTrabajo, exigeCosteo, type TipoServicio } from "./form05";
@@ -588,7 +589,7 @@ export class CircuitoCotizacionService {
     const yo = this.yo(req);
     const data = [];
     const cache = new Map<string, Awaited<ReturnType<CircuitoCotizacionService["responsablesVb"]>>>();
-    for (const f of filas) {
+    for (const f of unicasPorId(filas)) {
       const nivel = nivelVbPendiente(f.estado, cfg.niveles);
       let vb = null as Awaited<ReturnType<CircuitoCotizacionService["responsablesVb"]>> | null;
       if (nivel) {
