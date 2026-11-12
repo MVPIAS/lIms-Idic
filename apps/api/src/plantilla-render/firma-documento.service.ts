@@ -1,7 +1,8 @@
 import { motivoNoReemite, type ModalidadReemision } from "../common/leyenda-reemision";
 import { emitirEvento } from "../common/eventos";
 import { textoErrorCorreo } from "../metrologia/ficha.datos";
-import { faltaOficio, seguimientoDocumento } from "../seguimiento/datos-seguimiento";
+import { faltaOficio, receptorDe, seguimientoDocumento } from "../seguimiento/datos-seguimiento";
+import { puedeRecibirDespacho } from "../seguimiento/recibir-despacho";
 import {
   BadRequestException,
   ConflictException,
@@ -184,7 +185,10 @@ export class FirmaDocumentoService {
         modificar: tienePermiso(req, "certificado.emitir") && esOficial(cert.estado) && !reemplazo && !["cerrada", "anulada"].includes(String(cert.ot?.estado ?? "")),
         reemplazar: tienePermiso(req, "certificado.emitir") && esOficial(cert.estado) && !reemplazo,
         despachar: tienePermiso(req, "certificado.despachar") && esOficial(cert.estado) && !seguimiento.despacho,
-        recibirDespacho: tienePermiso(req, "certificado.entregar") && !!seguimiento.despacho && !seguimiento.despacho.recibidoAt,
+        // F015: lo da por recibido el destino (DCO = Comercial), no quien remitió.
+        recibirDespacho:
+          tienePermiso(req, "certificado.entregar") && !!seguimiento.despacho && !seguimiento.despacho.recibidoAt &&
+          puedeRecibirDespacho(seguimiento.despacho.destino, await receptorDe(this.prisma, req), seguimiento.despacho.unidadDestino),
         oficio: tienePermiso(req, "oficio.crear") && esOficial(cert.estado),
       },
     };
