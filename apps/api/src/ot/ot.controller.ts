@@ -14,6 +14,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
+import { ensayosConLaboratorio, ensayosDeOtrosLaboratorios, esDelResponsable } from "./laboratorio-ensayo";
 import { emitirEvento } from "../common/eventos";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
@@ -847,7 +848,7 @@ export class OtController {
   @RequierePermiso("ot.ver")
   async asignacion(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     const ot = await this.otEnAlcance(id, req);
-    const [analistas, personal, muestras, resultados] = await Promise.all([
+    const [analistas, personal, muestras, resultadosTodos, conLab] = await Promise.all([
       this.analistasDe([id]),
       ot.unidadPrincipal ? this.labs.personalDeUnidad(ot.unidadPrincipal) : Promise.resolve([]),
       this.prisma.muestra.findMany({
@@ -868,7 +869,11 @@ export class OtController {
         },
         orderBy: { fecha: "asc" },
       }),
+      ensayosConLaboratorio(this.prisma, id),
     ]);
+    // F071: el responsable reparte solo sus ensayos; los de otros laboratorios los asigna el destino.
+    const ajenos = new Set((conLab ?? []).filter((e) => !esDelResponsable(e, ot.unidadPrincipal)).map((e) => e.id));
+    const resultados = resultadosTodos.filter((r) => !ajenos.has(r.id));
     const asignados = analistas.get(id) ?? [];
     const nombres = new Map<string, string>([
       ...personal.map((p) => [p.id, p.nombre] as [string, string]),
@@ -881,6 +886,7 @@ export class OtController {
       puedeAsignar: roles.includes("SUPERADMIN") || permisos.includes("ot.asignar"),
       analistas: asignados,
       personal,
+      otrosLaboratorios: ensayosDeOtrosLaboratorios(conLab ?? [], ot.unidadPrincipal),
       muestras: muestras.map((m) => ({
         ...m,
         ensayos: resultados
@@ -964,12 +970,17 @@ export class OtController {
         throw new BadRequestException("La persona elegida no tiene rol vigente en el laboratorio responsable de la OT.");
     }
     const yo = req.user?.sub ?? null;
+    // F071: los ensayos de otro laboratorio (por catálogo u orden interna) no se asignan aquí.
+    const ajenos = ((await ensayosConLaboratorio(this.prisma, id)) ?? []).filter((e) => !esDelResponsable(e, ot.unidadPrincipal)).map((e) => e.id);
+    if ((dto.resultadoIds ?? []).some((r) => ajenos.includes(r)))
+      throw new BadRequestException("Hay ensayos de otro laboratorio: los asigna el laboratorio de destino con su orden interna.");
     const actualizados = await this.prisma.$transaction(async (tx) => {
       const n = await tx.$executeRawUnsafe(
         `UPDATE resultado SET asignado_a = $2::uuid
           WHERE ot_id = $1::uuid AND deleted_at IS NULL AND estado <> 'aprobado'
-            AND (muestra_id = ANY($3::uuid[]) OR id = ANY($4::uuid[]))`,
-        id, dto.usuarioId, dto.muestraIds ?? [], dto.resultadoIds ?? [],
+            AND (muestra_id = ANY($3::uuid[]) OR id = ANY($4::uuid[]))
+            AND NOT (id = ANY($5::uuid[]))`,
+        id, dto.usuarioId, dto.muestraIds ?? [], dto.resultadoIds ?? [], ajenos,
       );
       if (dto.usuarioId)
         await tx.$executeRawUnsafe(

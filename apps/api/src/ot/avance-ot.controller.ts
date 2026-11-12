@@ -18,6 +18,7 @@ import { SQL_LOTE_BPCH } from "../recepcion/reglas-recepcion";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
 import { trabajoDsaDe } from "../formularios/trabajo-avance";
 import { avanceArmasDeOt } from "../saec/d11/datos-d11";
+import { ensayosConLaboratorio, esDelResponsable } from "./laboratorio-ensayo";
 
 /** Laboratorios de la Sección Metrología (los mismos que usa el módulo de Metrología). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -131,6 +132,9 @@ export class AvanceOtService {
     ]);
 
     const cuenta = (...estados: string[]) => resultados.filter((r) => estados.includes(r.estado ?? "")).reduce((s, r) => s + r._count._all, 0);
+    // F071: lo que captura otro laboratorio no se le pide a los analistas del responsable.
+    const ajenos = ((await ensayosConLaboratorio(this.prisma, id)) ?? []).filter((e) => !esDelResponsable(e, ot.unidadPrincipal));
+    const cuentaAjenos = (...estados: string[]) => ajenos.filter((e) => estados.includes(e.estado ?? "")).length;
     const totalRes = resultados.reduce((s, r) => s + r._count._all, 0);
     // Despacho de cada documento (frente r4c · documento_despacho): «Remitir a DCO» del BPCH.
     const despachos = new Map(
@@ -182,6 +186,7 @@ export class AvanceOtService {
         devueltos: cuenta("devuelto", "rechazado"),
         aprobadosSinRevision,
       },
+      resultadosOtrosLabs: { pendientes: cuentaAjenos("pendiente"), devueltos: cuentaAjenos("devuelto", "rechazado") },
       documentos,
       factura: factura ? { numero: factura.numero ?? "(sin número)", estado: factura.estado } : null,
       calibraciones: (calibraciones?.cals ?? []).map((c) => ({

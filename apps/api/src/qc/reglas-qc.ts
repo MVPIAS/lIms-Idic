@@ -132,3 +132,46 @@ export function faltantesMicrobiologico(c: { tipo: string; resultadoCualitativo?
   if (c.tipo === "positivo" && !c.cepaId) f.push("cepa de referencia ATCC");
   return f;
 }
+
+/* ------------------------------ alcance por orden interna (F070) --- */
+
+/** Qué parte de la OT ve el usuario (AlcanceResultadoService.alcanceEnOt). */
+export interface VistaQcOt {
+  todo: boolean;
+  labs: Set<string>;
+}
+
+/**
+ * Métodos de la OT cuyo QC ve y registra el usuario. `null` = todos (alcance
+ * sobre el laboratorio responsable). Con alcance solo sobre el destino de una
+ * orden interna recibida, los métodos de los ensayos derivados a sus
+ * laboratorios: la misma regla que la captura de resultados.
+ */
+export function metodosQcDelAlcance(
+  vista: VistaQcOt,
+  ensayos: { metodoId: string | null; unidadId: string | null }[],
+): Set<string> | null {
+  if (vista.todo) return null;
+  const s = new Set<string>();
+  for (const e of ensayos) if (e.metodoId && e.unidadId && vista.labs.has(e.unidadId)) s.add(e.metodoId);
+  return s;
+}
+
+/** Recorta el estado del QC de la OT a los métodos visibles y recalcula lo pendiente. */
+export function recortarEstadoQc<
+  E extends {
+    metodos: { id: string; codigo: string; nombre: string; aprobado: boolean }[];
+    controles: { catMetodoId: string | null }[];
+    estado: { aprobado: boolean; faltantes: { id: string; codigo: string; nombre: string }[] };
+  },
+>(e: E, permitidos: Set<string> | null): E {
+  if (!permitidos) return e;
+  const metodos = e.metodos.filter((m) => permitidos.has(m.id));
+  const faltantes = metodos.filter((m) => !m.aprobado).map(({ id, codigo, nombre }) => ({ id, codigo, nombre }));
+  return {
+    ...e,
+    metodos,
+    controles: e.controles.filter((c) => !!c.catMetodoId && permitidos.has(c.catMetodoId)),
+    estado: { aprobado: faltantes.length === 0, faltantes },
+  };
+}

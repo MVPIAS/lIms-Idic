@@ -32,10 +32,11 @@ import { avisarCambioOt } from "@/lib/refresco";
 import { llamar, veredictoInfo } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
 import { fechaHora } from "@/lib/format";
-import { etiquetaClase, fechaDma, textoValor, type ConfigRecepcion, type ProductoLab, type ValorCampo } from "@/lib/recepcion";
+import { etiquetaClase, fechaDma, metodosDeLaMuestra, textoValor, type ConfigRecepcion, type ProductoLab, type ValorCampo } from "@/lib/recepcion";
 import { ahoraInputChile } from "@/lib/fecha-chile";
 import FormRecepcion, { RECEPCION_VACIA, cuerpoRecepcion, faltantesRecepcion, type DatosRecepcion } from "./FormRecepcion";
 import FotosRecepcion from "./FotosRecepcion";
+import AgregarMetodosMuestra from "./AgregarMetodosMuestra";
 
 interface Metodo {
   id: string; codigo: string; nombre: string; norma?: string | null; ensayoId?: string | null; analitos: number;
@@ -45,7 +46,11 @@ interface Metodo {
 interface Linea {
   lineaId: string; descripcion: string; cantidad: number; ensayoId: string | null; ensayoCodigo: string | null;
   metodos: Metodo[]; sugeridos: string[]; aviso: string | null;
+  /** Muestra de la cotización a la que va la línea (null = toda la cotización). */
+  muestraN?: number | null;
 }
+/** Muestra registrada en la cotización (cotización por muestra, F026/F062). */
+interface MuestraCot { n: number; descripcion: string; catElementoId: string | null; productoNombre: string | null; lineaIds: string[]; sugeridos: string[] }
 interface EnlaceLab { unidadId: string; unidad: { id: string; codigo: string; nombre: string } | null; ordenes: { id: string; numero: string; estado: string }[] }
 interface MuestraOt {
   id: string; codigo: string; nombre: string | null; estado: string; veredicto: string | null; ensayos: number; metodos: string[];
@@ -67,12 +72,17 @@ interface Propuesta {
   cotizacion: { id: string; codigo: string; referencia: string | null } | null;
   muestras: MuestraOt[];
   lineas: Linea[];
+  muestrasCotizacion?: MuestraCot[];
   opcionesToma: { codigo: string; etiqueta: string }[];
   ubicaciones?: { codigo: string; etiqueta: string }[];
   /** B-008: panel que la OT ya trae (producto de la OT o parametrización del prototipo). */
   panelOt?: { origen: "producto" | "prototipo"; nombre: string; parametrizacion: string | null; metodos: Metodo[] } | null;
 }
-interface FilaRegistro { nombre: string; ident: string; sello: string; productoId: string }
+interface FilaRegistro {
+  nombre: string; ident: string; sello: string; productoId: string;
+  /** Muestra de la cotización de la que viene la fila (lleva sus ensayos); null = todos los marcados. */
+  muestraN?: number | null; productoNombre?: string | null;
+}
 
 const etiquetaMetodo = (m: Metodo) => `${m.codigo} · ${m.nombre}${m.norma ? ` (${m.norma})` : ""}`;
 const filaVacia = (productoId = ""): FilaRegistro => ({ nombre: "", ident: "", sello: "", productoId });
@@ -158,7 +168,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   /** Tras recepcionar: siguiente paso «asignar y ejecutar» (pestaña Asignación). */
   onRecepcionado?: () => void;
 }) {
-  const { puede } = usePermisos();
+  const { puede, roles } = usePermisos();
   const [d, setD] = useState<Propuesta | null>(null);
   const [error, setError] = useState("");
   const [abierto, setAbierto] = useState(false);
@@ -208,9 +218,15 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
   const abrir = () => {
     if (!d) return;
     setMarcados(new Set(d.lineas.flatMap((l) => l.sugeridos)));
-    // Tantas muestras como la mayor cantidad cotizada (mínimo 1); la descripción la escribe quien recibe.
-    const n = d.lineas.length ? Math.max(1, Math.min(20, Math.max(...d.lineas.map((l) => l.cantidad || 1)))) : 1;
-    setFilas(Array.from({ length: n }, () => filaVacia(d.ot.catElementoId ?? "")));
+    const mc = d.muestrasCotizacion ?? [];
+    if (mc.length) {
+      // F026/F062: cotización por muestra → se proponen sus muestras con descripción, producto y ensayos.
+      setFilas(mc.map((m) => ({ ...filaVacia(m.catElementoId ?? d.ot.catElementoId ?? ""), nombre: m.descripcion, muestraN: m.n, productoNombre: m.productoNombre })));
+    } else {
+      // Tantas muestras como la mayor cantidad cotizada (mínimo 1); la descripción la escribe quien recibe.
+      const n = d.lineas.length ? Math.max(1, Math.min(20, Math.max(...d.lineas.map((l) => l.cantidad || 1)))) : 1;
+      setFilas(Array.from({ length: n }, () => filaVacia(d.ot.catElementoId ?? "")));
+    }
     setComun(RECEPCION_VACIA);
     setExtra([]);
     // B-008: el panel de la OT (producto o prototipo) llega propuesto y marcado.
@@ -293,12 +309,16 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
     if (falta.length) return toast.error(`Recepción: ${falta.join("; ")}.`);
     if (!metodoIds.length && !sinEnsayos)
       return toast.error("Marque al menos un método, o indique en «Destino» que es testigo, en custodia o contramuestra si va a bodega sin ensayos.");
+    const vacia = filas.findIndex((f) => f.muestraN != null && !metodosDeLaMuestra(f.muestraN, metodoIds, d?.lineas ?? []).length);
+    if (vacia >= 0 && !sinEnsayos)
+      return toast.error(`La muestra ${vacia + 1} (muestra ${filas[vacia].muestraN} de la cotización) quedó sin ensayos marcados: marque sus métodos o agréguelos desde el catálogo.`);
     setGuardando(true);
     try {
       const r: any = await llamar("POST", `/flujo/ot/${otId}/muestras`, {
         muestras: filas.map((f) => ({
           nombre: f.nombre.trim(),
-          metodoIds,
+          // F026/F062: la muestra de la cotización lleva sus ensayos (y los de toda la cotización).
+          metodoIds: metodosDeLaMuestra(f.muestraN, metodoIds, d?.lineas ?? []),
           ...(f.productoId ? { catElementoId: f.productoId } : {}),
           recepcion: cuerpoRecepcion({ ...comun, identificacionCliente: f.ident, selloNumero: f.sello }),
         })),
@@ -373,6 +393,8 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
 
   const cerrada = ["cerrada", "anulada"].includes(d.ot.estado);
   const puedeRegistrar = puede("muestra.crear") && !cerrada;
+  // F064: agregar métodos a una muestra recepcionada · Recepción o jefatura (la API lo vuelve a comprobar).
+  const puedeAgregarMetodos = puedeRegistrar && (puede("ot.asignar") || roles.some((r) => ["RECEPCION", "PLANIFICACION", "SUPERADMIN"].includes(r)));
   const incompletas = d.muestras.filter((m) => m.recepcionIncompleta).length;
   const sinNumero = d.muestras.filter((m) => !m.numeroInterno).length;
   const camposLab = cfg?.campos.filter((c) => !["clase_custodia", "ubicacion"].includes(c.codigo)) ?? [];
@@ -570,6 +592,9 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
                 <FormRecepcion valor={edicion} onCambio={setEdicion} opcionesToma={d.opcionesToma} ubicaciones={d.ubicaciones} labPrincipalId={d.ot.unidadPrincipal}
                   config={cfg} clienteOt={{ id: d.ot.clienteId, nombre: d.ot.clienteNombre }} recepcionAt={m.recepcionadaAt} />
                 <FotosRecepcion otId={otId} muestraId={m.id} codigo={m.codigo} puedeEditar={puedeRegistrar} onCambio={() => { cargar(); avisarCambio(); }} />
+                {puedeAgregarMetodos && (
+                  <AgregarMetodosMuestra otId={otId} muestraId={m.id} codigo={m.codigo} yaEnMuestra={m.metodos ?? []} onAgregado={() => { cargar(); avisarCambio(); }} />
+                )}
                 <div className="toolbar" style={{ margin: "8px 0 0" }}>
                   <span style={{ fontSize: 11.5, color: "var(--muted)" }}>El cambio queda en el historial de la OT con lo anterior y lo nuevo.</span>
                   <div className="spacer" />
@@ -611,10 +636,14 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
             {filas.map((f, i) => (
               <div className="form-grid cols-4" key={i} style={{ borderTop: i ? "1px solid var(--line)" : 0, paddingTop: i ? 6 : 0 }}>
                 <div className="field">
-                  <label htmlFor={`m-${i}-nombre`}>{unaPorEnvase ? `Envase ${i + 1}` : `Muestra ${i + 1}`} · descripción <span className="req">*</span></label>
+                  <label htmlFor={`m-${i}-nombre`}>
+                    {unaPorEnvase ? `Envase ${i + 1}` : `Muestra ${i + 1}`} · descripción <span className="req">*</span>
+                    {f.muestraN ? <span className="pill blue" style={{ marginLeft: 6 }}>Muestra {f.muestraN} de la cotización</span> : null}
+                  </label>
                   <input id={`m-${i}-nombre`} value={f.nombre} maxLength={200} onChange={(e) => setFilas((xs) => xs.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))} />
                 </div>
                 <SelectorProducto id={`m-${i}-producto`} valor={f.productoId} productos={productos} otId={otId} obligatorio={!!cfg?.productoObligatorio} sinLista={sinListaProductos}
+                  nombreActual={f.productoNombre}
                   onCambio={(id, p) => {
                     setFilas((xs) => xs.map((x, j) => (j === i || (i === 0 && !x.productoId && !unaPorEnvase) ? { ...x, productoId: id } : x)));
                     if (id && p) cargarPanel(id, p.nombre);
@@ -649,6 +678,7 @@ export default function RegistroMuestras({ otId, onCambio, onOrdenInterna, onRec
           {d.lineas.map((l) => (
             <div key={l.lineaId} style={{ borderTop: "1px solid var(--line)", padding: "6px 0" }}>
               <div style={{ fontWeight: 600, fontSize: 12.5 }}>
+                {l.muestraN ? <span className="pill blue" style={{ marginRight: 6 }}>Muestra {l.muestraN}</span> : null}
                 {l.ensayoCodigo ? <span className="codigo">{l.ensayoCodigo}</span> : null} {l.descripcion}
                 <span style={{ fontWeight: 400, color: "var(--muted)" }}> · cantidad cotizada {l.cantidad}</span>
               </div>

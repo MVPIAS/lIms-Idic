@@ -280,6 +280,7 @@ export default function LaboratorioCotizacion({ c, onCambio, onMensaje }: { c: C
         <RespuestaLaboratorio
           sol={respondiendo}
           cotCodigo={c.cotizacion.codigo}
+          muestras={c.cotizacion.muestras ?? []}
           cfg={c.config}
           onCerrar={() => setRespondiendo(null)}
           onHecho={(m) => { setRespondiendo(null); hecho(m); }}

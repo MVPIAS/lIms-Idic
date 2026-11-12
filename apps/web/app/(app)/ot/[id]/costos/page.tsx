@@ -76,6 +76,11 @@ const SEMAFORO: Record<Semaforo, { pill: string; texto: string }> = {
   rojo: { pill: "red", texto: "Rojo · muy sobre lo cotizado" },
   sin_dato: { pill: "gray", texto: "Sin estimación para comparar" },
 };
+/** Texto del semáforo: con estimación pero sin costos aún, lo dice así (F035). */
+function textoSemaforo(s: Semaforo, costoEstimado: number | null | undefined, costoReal: number | null | undefined): string {
+  if (s === "sin_dato" && costoEstimado != null && costoEstimado > 0 && !(Number(costoReal) > 0)) return "Aún sin costos registrados";
+  return SEMAFORO[s].texto;
+}
 
 const BLOQUES: { k: Categoria; titulo: string; cantidad: string; unitario: string; ayuda: string }[] = [
   { k: "horas_hombre", titulo: "Horas hombre", cantidad: "Horas", unitario: "$ / hora", ayuda: "Por cargo o por categoría de «Tarifas HH»: al elegir una categoría, el $ / hora se toma de Tablas maestras (puede corregirse)." },
@@ -263,7 +268,7 @@ export default function CostosRealesPage() {
             <div className={`kpi ${c!.diferencia == null ? "" : c!.diferencia > 0 ? "k-red" : "k-green"}`}><div className="lab">Diferencia real − estimado</div>
               <div className="val">{c!.diferencia != null ? `${clp(c!.diferencia)}` : "—"}</div>
               {c!.desviacionPct != null && <div style={{ fontSize: 11, color: "var(--muted)" }}>{pct(c!.desviacionPct, 1)} sobre lo estimado</div>}
-              {c!.semaforo && <span className={`pill ${SEMAFORO[c!.semaforo].pill}`} title={v.umbrales ? `Amarillo desde ${num(v.umbrales.amarilloPct, 1)} %, rojo desde ${num(v.umbrales.rojoPct, 1)} %` : undefined}>{SEMAFORO[c!.semaforo].texto}</span>}</div>
+              {c!.semaforo && <span className={`pill ${SEMAFORO[c!.semaforo].pill}`} title={v.umbrales ? `Amarillo desde ${num(v.umbrales.amarilloPct, 1)} %, rojo desde ${num(v.umbrales.rojoPct, 1)} %` : undefined}>{textoSemaforo(c!.semaforo, c!.costoEstimado, c!.costoReal)}</span>}</div>
             <div className="kpi k-violet"><div className="lab">Horas hombre (real / estimado)</div>
               <div className="val">{num(c!.horasReales, 2)} / {c!.horasEstimadas != null ? num(c!.horasEstimadas, 2) : "—"}</div>
               {est!.fuenteHoras && <div style={{ fontSize: 11, color: "var(--muted)" }}>{FUENTE_HORAS[est!.fuenteHoras]}</div>}</div>
@@ -277,7 +282,7 @@ export default function CostosRealesPage() {
             <div className="card">
               <h2>
                 Costo real de la OT completa ({v.consolidado.laboratorios} laboratorios)
-                <span className="right"><span className={`pill ${SEMAFORO[v.consolidado.semaforo].pill}`}>{SEMAFORO[v.consolidado.semaforo].texto}</span></span>
+                <span className="right"><span className={`pill ${SEMAFORO[v.consolidado.semaforo].pill}`}>{textoSemaforo(v.consolidado.semaforo, v.consolidado.costoEstimado, v.consolidado.costoReal)}</span></span>
               </h2>
               <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>
                 Suma de las planillas de todos los laboratorios frente al costo directo estimado de la cotización completa.

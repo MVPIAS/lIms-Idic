@@ -49,7 +49,8 @@ import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { descontarPorCaptura, faltantesDeCaptura, leerConfigConsumo } from "../consumibles/consumo-automatico";
 import { advertenciaDeCaptura, calidadDeResultados, cerrarReanalisisAutomatico, leerConfigResultados, reanalisisAbierto, trasCaptura } from "../calidad/reanalisis";
 import { criterioIndeterminado, leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado } from "../laboratorio/veredicto";
-import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
+import { erroresAgregarMetodos, erroresRegistro, muestrasPropuestas, proponerDesdeCotizacion, puedeAgregarMetodos, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
+import { leerMuestraDeLineas, leerMuestras } from "../cotizacion/cotizacion-s1";
 import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion, type RecepcionNormalizada } from "./recepcion-muestra";
 import { aplicarFactor, erroresFactor, expresionConFactor, factorDe } from "../laboratorio/factor";
 import { planAjusteFactor } from "../laboratorio/ajuste-factor";
@@ -1954,6 +1955,28 @@ export class RegistroMuestrasService {
     const porEnsayo = new Map<string, MetodoCatalogo[]>();
     for (const m of metodos) if (m.ensayoId) (porEnsayo.get(m.ensayoId) ?? porEnsayo.set(m.ensayoId, []).get(m.ensayoId)!).push(m);
     const panelOt = cot ? null : await this.panelDeOt(tenantId, ot);
+    // F026/F062: cotización por muestra → cada línea con su muestra y las muestras con su producto.
+    const muestraDeLinea = cot ? await leerMuestraDeLineas(this.prisma as any, cot.id) : new Map<string, number | null>();
+    const muestrasCot = cot ? await leerMuestras(this.prisma as any, cot.id) : [];
+    const elementos = muestrasCot.some((m) => m.catElementoId)
+      ? await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
+          `SELECT id::text AS id, nombre FROM cat_elemento WHERE id = ANY($1::uuid[])`,
+          muestrasCot.map((m) => m.catElementoId).filter((x): x is string => !!x),
+        )
+      : [];
+    const lineasPropuestas = proponerDesdeCotizacion(
+      lineas.map((l) => ({
+        id: l.id,
+        descripcion: l.descripcion,
+        cantidad: l.cantidad,
+        catEnsayoId: l.catEnsayoId,
+        ensayoCodigo: l.ensayoCodigo,
+        ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
+        tipo: l.tipo ?? null,
+        muestraN: muestraDeLinea.get(l.id) ?? null,
+      })),
+      porEnsayo,
+    );
     return {
       // B-008: la OT que nace de un programa (producto), de un prototipo (panel
       // parametrizado) o de un registro con elemento trae su panel a la recepción.
@@ -1980,17 +2003,10 @@ export class RegistroMuestrasService {
         `SELECT codigo, etiqueta FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'ubicacion_almacenamiento' AND activo ORDER BY orden, etiqueta`,
         tenantId,
       ),
-      lineas: proponerDesdeCotizacion(
-        lineas.map((l) => ({
-          id: l.id,
-          descripcion: l.descripcion,
-          cantidad: l.cantidad,
-          catEnsayoId: l.catEnsayoId,
-          ensayoCodigo: l.ensayoCodigo,
-          ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
-          tipo: l.tipo ?? null,
-        })),
-        porEnsayo,
+      lineas: lineasPropuestas,
+      muestrasCotizacion: muestrasPropuestas(
+        muestrasCot.map((m) => ({ ...m, productoNombre: elementos.find((e) => e.id === m.catElementoId)?.nombre ?? null })),
+        lineasPropuestas,
       ),
     };
   }
@@ -2207,6 +2223,47 @@ export class RegistroMuestrasService {
   }
 
   /**
+   * F064 · Agrega métodos a una muestra ya recepcionada (p. ej. el segundo método
+   * de un ensayo cotizado que se omitió al recepcionar). Recepción o la jefatura,
+   * con motivo; queda en el historial de la OT.
+   */
+  async agregarMetodos(muestraId: string, body: { metodoIds: string[]; motivo: string }, tenantId: string, req: any) {
+    if (!puedeAgregarMetodos({ roles: req?.user?.roles, permisos: req?.user?.permisos }))
+      throw new ForbiddenException("Agregan métodos a una muestra recepcionada Recepción o la jefatura del laboratorio.");
+    const m = await this.prisma.muestra.findFirst({ where: { id: muestraId, tenantId, deletedAt: null } });
+    if (!m || !m.otId) throw new NotFoundException(`Muestra ${muestraId} no encontrada`);
+    const ot = await this.otEnAlcance(m.otId, tenantId, req);
+    const ids = [...new Set(body.metodoIds)];
+    const catalogo = new Map((await this.metodos(tenantId, { ids })).map((x) => [x.id, x]));
+    const ya = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT cat_metodo_id::text AS id FROM resultado WHERE muestra_id = $1::uuid AND deleted_at IS NULL AND cat_metodo_id IS NOT NULL`,
+      muestraId,
+    );
+    const errores = erroresAgregarMetodos(ot.estado, ids, ya.map((x) => x.id), catalogo, body.motivo);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    return this.prisma.$transaction(
+      async (tx) => {
+        const g = await this.puente.generarAnalisis(ot.id, { muestraId, metodoIds: ids }, tenantId, req, tx as any);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
+           VALUES ($1::uuid, $2::uuid, 'metodos_agregados', $3::jsonb, $4::uuid)`,
+          tenantId,
+          ot.id,
+          JSON.stringify({
+            muestra: m.codigo,
+            ensayos: ids.map((id) => `${catalogo.get(id)?.codigo ?? id} · ${catalogo.get(id)?.nombre ?? ""}`.trim()),
+            motivo: body.motivo.trim(),
+            creados: g.creados,
+          }),
+          req?.user?.sub ?? null,
+        );
+        return { muestraId, creados: g.creados };
+      },
+      { maxWait: 15_000, timeout: 60_000 },
+    );
+  }
+
+  /**
    * Completa o corrige la recepción de una muestra ya registrada (toma de
    * muestra, condición, sello, identificación del cliente, otros laboratorios).
    * Queda en el historial de la OT con lo anterior y lo nuevo.
@@ -2303,6 +2360,17 @@ export class RecepcionMuestraController {
   @ApiOperation({ summary: "Completa o corrige la recepción de una muestra (toma, condición, sello, identificación, otros laboratorios)" })
   recepcion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.actualizarRecepcion(id, RecepcionBody.parse(body ?? {}), tenantDe(req), req);
+  }
+
+  @Post(":id/metodos")
+  @RequierePermiso("muestra.crear")
+  @ApiOperation({ summary: "Agrega métodos a una muestra ya recepcionada (Recepción o jefatura, con motivo; queda en el historial)" })
+  agregarMetodos(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const d = z
+      .object({ metodoIds: z.array(z.string().uuid()).min(1, "Elija al menos un método.").max(50), motivo: z.string().trim().min(5, "Indique el motivo.").max(500) })
+      .strict()
+      .parse(body ?? {});
+    return this.svc.agregarMetodos(id, d, tenantDe(req), req);
   }
 }
 
