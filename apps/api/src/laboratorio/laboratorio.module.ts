@@ -1271,7 +1271,22 @@ export class ResultadoController extends BaseCrudController {
       `SELECT o.unidad_principal AS unidad, cm.codigo AS ensayo,
               EXISTS (SELECT 1 FROM cat_panel p
                        WHERE p.elemento_id = COALESCE(m.cat_elemento_id, o.cat_elemento_id) AND p.metodo_id = r.cat_metodo_id
-                         AND p.deleted_at IS NULL AND p.activo) AS "enBateria"
+                         AND p.deleted_at IS NULL AND p.activo)
+              -- Reinspección de un producto sin elemento del catálogo (inscrito desde un prototipo):
+              -- la batería es la que se le propuso al lote (parametrización del prototipo o ensayos de la OT original).
+              OR EXISTS (
+                SELECT 1 FROM bpch_reinspeccion ri
+                 WHERE ri.ot_id = r.ot_id AND ri.cat_elemento_id IS NULL
+                   AND EXISTS (
+                     WITH origen AS (
+                       SELECT ri.origen_ot_id AS ot_id
+                       UNION SELECT h.ot_id FROM bpch_codificacion_historial h
+                              WHERE h.codificacion_id = ri.codificacion_id AND h.ot_id IS NOT NULL AND h.ot_id <> r.ot_id)
+                     SELECT 1 FROM bpch_prototipo pr JOIN bpch_prototipo_parametro pp ON pp.prototipo_id = pr.id
+                      WHERE pr.ot_id IN (SELECT ot_id FROM origen) AND pp.cat_metodo_id = r.cat_metodo_id
+                     UNION ALL
+                     SELECT 1 FROM resultado r2
+                      WHERE r2.ot_id IN (SELECT ot_id FROM origen) AND r2.cat_metodo_id = r.cat_metodo_id AND r2.deleted_at IS NULL))) AS "enBateria"
          FROM resultado r JOIN orden_trabajo o ON o.id = r.ot_id
          LEFT JOIN muestra m ON m.id = r.muestra_id LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
         WHERE r.id = $1::uuid`,

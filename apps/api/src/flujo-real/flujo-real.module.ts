@@ -818,7 +818,7 @@ export class PuenteAnalisisService {
   ) {
     // La OT debe existir en el tenant y estar en el alcance del usuario.
     const ot = opts.sinAlcanceOt
-      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } }).then((o) => {
+      ? await db.ordenTrabajo.findFirst({ where: { id: otId, tenantId } }).then((o) => {
           if (!o) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
           return o;
         })
@@ -2240,7 +2240,10 @@ export class RegistroMuestrasService {
           m.muestreoId ?? null,
         );
       const g = m.metodoIds.length
-        ? await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db)
+        ? await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db, {
+            // F002: si quien llama ya verificó el alcance (expediente BPCH de la SCC), no se vuelve a exigir la unidad de la OT.
+            sinAlcanceOt: alcanceVerificado,
+          })
         : { creados: 0 };
       creadas.push({
         id: muestra.id,
