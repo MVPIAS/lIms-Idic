@@ -86,8 +86,9 @@ export default function IbisEtlPage() {
     }
   }
 
-  async function verCandidatos(id: string) {
-    setOtId(id); setCandidatos([]); setMsg(null);
+  async function verCandidatos(id: string, limpiarMensaje = true) {
+    setOtId(id); setCandidatos([]);
+    if (limpiarMensaje) setMsg(null);
     if (!id) return;
     try {
       const j = await fetch(`${API}/ibis/ot/${id}/candidatos`, { headers: auth() }).then((x) => x.json());
@@ -102,8 +103,15 @@ export default function IbisEtlPage() {
       const res = await fetch(`${API}/ibis/ot/${otId}/asignar`, { method: "POST", headers: auth(), body: "{}" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.message ?? `Error ${res.status}`);
-      setMsg({ tipo: "success", texto: `${j.data?.asignados ?? 0} arma(s) adjuntada(s) a la OT.` });
-      verCandidatos(otId); cargar();
+      // F043: el mensaje queda (la recarga de candidatos ya no lo borra) e informa las evidencias creadas.
+      const ev = Number(j.data?.evidenciasCreadas ?? 0);
+      const reemitir = Array.isArray(j.data?.certificadosPorReemitir) ? j.data.certificadosPorReemitir : [];
+      setMsg({
+        tipo: reemitir.length ? "warn" : "success",
+        texto: `${j.data?.asignados ?? 0} arma(s) adjuntada(s) a la OT.${ev ? ` Se crearon ${ev} evidencia(s) de prueba (vaina y proyectil) en el banco de evidencias.` : ""}` +
+          (reemitir.length ? ` El certificado ${reemitir.join(", ")} quedó «Pendiente de IBIS»: reemítalo desde la OT para incorporar el registro.` : ""),
+      });
+      verCandidatos(otId, false); cargar();
     } catch (e: any) {
       setMsg({ tipo: "warn", texto: Array.isArray(e.message) ? e.message.join(", ") : e.message });
     } finally { setAsignando(false); }
@@ -114,7 +122,8 @@ export default function IbisEtlPage() {
       render: (h) => <span style={{ whiteSpace: "nowrap" }}>{fechaHora(h.created_at)}</span> },
     { key: "archivo", label: "Archivo", value: (h) => h.nombre_archivo ?? "",
       render: (h) => <span title={h.hash_sha256}>{h.nombre_archivo ?? "—"}</span> },
-    { key: "origen", label: "Origen", value: (h) => h.origen_barrido ?? "" },
+    { key: "origen", label: "Origen", value: (h) => h.origen_barrido ?? "",
+      render: (h) => (h.origen_barrido === "carpeta" ? "Carpeta de entrada" : h.origen_barrido === "manual" ? "Carga manual" : "—") },
     { key: "estado", label: "Estado", value: (h) => h.estado ?? "",
       render: (h) => <span className={`pill ${ESTADO_PILL[h.estado] ?? "gray"}`}>{h.estado}</span> },
     { key: "armas", label: "Armas", num: true, value: (h) => h.resultados_creados ?? 0,
