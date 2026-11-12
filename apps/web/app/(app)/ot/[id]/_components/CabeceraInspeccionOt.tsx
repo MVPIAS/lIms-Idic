@@ -15,6 +15,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { llamar } from "@/lib/laboratorio";
 import { fechaHora } from "@/lib/format";
+import { montoCl } from "@/lib/monto-cl";
 import { toast } from "@/components/ui/feedback";
 
 type Cabecera = Record<string, any>;
@@ -229,7 +230,7 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
           </div>
           <datalist id="cab-procedimientos">{(f.sugeridos?.procedimientos ?? []).map((p) => <option key={p} value={p} />)}</datalist>
         </fieldset>
-        <PlanNch44 tamanoLote={form.tamanoLote} tamanoMuestra={form.tamanoMuestra} editable={!!f.editable}
+        <PlanNch44 tamanoLote={form.tamanoLote} unidadLote={form.unidadLote} tamanoMuestra={form.tamanoMuestra} editable={!!f.editable}
           onUsar={(n) => setForm((x) => ({ ...x, tamanoMuestra: n }))} />
         {f.editable ? (
           <div className="toolbar" style={{ margin: "10px 0 0" }}>
@@ -277,7 +278,7 @@ function LotesInspeccion({ otId, ficha, onGuardado }: { otId: string; ficha: Fic
   }, [ficha.lotes]);
   const editable = !!ficha.editable;
   const set = (i: number, k: keyof LoteCab, v: string) => setFilas((xs) => xs.map((x, j) => (j === i ? { ...x, [k]: v } : x)));
-  const num = (v: unknown) => (v === "" || v === null || v === undefined ? null : Number(String(v).replace(",", ".")));
+  const num = (v: unknown) => (v === "" || v === null || v === undefined ? null : montoCl(v) ?? Number.NaN);
 
   async function guardar() {
     setGuardando(true);
@@ -305,13 +306,14 @@ function LotesInspeccion({ otId, ficha, onGuardado }: { otId: string; ficha: Fic
 
   if (!editable && !filas.length) return null;
   return (
-    <section style={{ marginTop: 12 }} aria-labelledby="cab-lotes">
+    <section style={{ marginTop: 12, minWidth: 0, maxWidth: "100%" }} aria-labelledby="cab-lotes">
       <h4 id="cab-lotes" style={{ margin: "0 0 4px", fontSize: 13 }}>Lotes de la inspección</h4>
       <p className="subtitle" style={{ margin: "0 0 6px" }}>Uno o más lotes, cada uno con su especificación, tamaños con unidad y fecha de vencimiento o vigencia.</p>
       {error && <div className="alert warn" role="alert">{error}</div>}
       {filas.length > 0 && (
-        <div style={{ overflowX: "auto" }}>
-          <table className="data" aria-label="Lotes de la inspección">
+        {/* F016: la tabla se desplaza dentro de su caja y no ensancha la pestaña. */}
+        <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+          <table className="data" aria-label="Lotes de la inspección" style={{ width: "100%" }}>
             <thead>
               <tr>
                 <th scope="col">Lote *</th><th scope="col">Tamaño del lote</th><th scope="col">Tamaño de la muestra</th>
@@ -321,24 +323,24 @@ function LotesInspeccion({ otId, ficha, onGuardado }: { otId: string; ficha: Fic
             <tbody>
               {filas.map((l, i) => (
                 <tr key={i}>
-                  <td><input aria-label={`Identificación del lote ${i + 1}`} value={l.identificacion ?? ""} maxLength={200} disabled={!editable} onChange={(e) => set(i, "identificacion", e.target.value)} /></td>
+                  <td><input aria-label={`Identificación del lote ${i + 1}`} style={{ width: 130 }} value={l.identificacion ?? ""} maxLength={200} disabled={!editable} onChange={(e) => set(i, "identificacion", e.target.value)} /></td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <input aria-label={`Tamaño del lote ${i + 1}`} inputMode="decimal" style={{ width: 80 }} value={String(l.tamanoLote ?? "")} disabled={!editable} onChange={(e) => set(i, "tamanoLote", e.target.value)} />
-                    <select aria-label={`Unidad del lote ${i + 1}`} value={l.unidadLote ?? ""} disabled={!editable} onChange={(e) => set(i, "unidadLote", e.target.value)}>
+                    <select aria-label={`Unidad del lote ${i + 1}`} style={{ width: "auto" }} value={l.unidadLote ?? ""} disabled={!editable} onChange={(e) => set(i, "unidadLote", e.target.value)}>
                       <option value="">—</option>
                       {ficha.opciones?.unidadesLote.map((u) => <option key={u.valor} value={u.valor}>{u.etiqueta}</option>)}
                     </select>
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <input aria-label={`Tamaño de la muestra del lote ${i + 1}`} inputMode="decimal" style={{ width: 80 }} value={String(l.tamanoMuestra ?? "")} disabled={!editable} onChange={(e) => set(i, "tamanoMuestra", e.target.value)} />
-                    <select aria-label={`Unidad de la muestra del lote ${i + 1}`} value={l.unidadMuestra ?? ""} disabled={!editable} onChange={(e) => set(i, "unidadMuestra", e.target.value)}>
+                    <select aria-label={`Unidad de la muestra del lote ${i + 1}`} style={{ width: "auto" }} value={l.unidadMuestra ?? ""} disabled={!editable} onChange={(e) => set(i, "unidadMuestra", e.target.value)}>
                       <option value="">—</option>
                       {ficha.opciones?.unidadesMuestra.map((u) => <option key={u.valor} value={u.valor}>{u.etiqueta}</option>)}
                     </select>
                   </td>
-                  <td><input aria-label={`Vencimiento o vigencia del lote ${i + 1}`} type="date" value={l.vencimiento ?? ""} disabled={!editable} onChange={(e) => set(i, "vencimiento", e.target.value)} /></td>
-                  <td><input aria-label={`Especificación del lote ${i + 1}`} value={l.especificacion ?? ""} maxLength={1000} disabled={!editable} onChange={(e) => set(i, "especificacion", e.target.value)} /></td>
-                  <td><input aria-label={`Observación del lote ${i + 1}`} value={l.observacion ?? ""} maxLength={1000} disabled={!editable} onChange={(e) => set(i, "observacion", e.target.value)} /></td>
+                  <td><input aria-label={`Vencimiento o vigencia del lote ${i + 1}`} type="date" style={{ width: 140 }} value={l.vencimiento ?? ""} disabled={!editable} onChange={(e) => set(i, "vencimiento", e.target.value)} /></td>
+                  <td><input aria-label={`Especificación del lote ${i + 1}`} style={{ width: 150 }} value={l.especificacion ?? ""} maxLength={1000} disabled={!editable} onChange={(e) => set(i, "especificacion", e.target.value)} /></td>
+                  <td><input aria-label={`Observación del lote ${i + 1}`} style={{ width: 150 }} value={l.observacion ?? ""} maxLength={1000} disabled={!editable} onChange={(e) => set(i, "observacion", e.target.value)} /></td>
                   {editable && (
                     <td><button type="button" className="btn ghost-danger sm" aria-label={`Quitar el lote ${i + 1}`} onClick={() => setFilas((xs) => xs.filter((_, j) => j !== i))}>Quitar</button></td>
                   )}
@@ -364,9 +366,11 @@ function LotesInspeccion({ otId, ficha, onGuardado }: { otId: string; ficha: Fic
  * operación (el mismo plan del muestreo del lote). Quien inspecciona lo usa o
  * escribe otro tamaño.
  */
-function PlanNch44({ tamanoLote, tamanoMuestra, editable, onUsar }: { tamanoLote: unknown; tamanoMuestra: unknown; editable: boolean; onUsar: (n: number) => void }) {
+function PlanNch44({ tamanoLote, unidadLote, tamanoMuestra, editable, onUsar }: { tamanoLote: unknown; unidadLote?: unknown; tamanoMuestra: unknown; editable: boolean; onUsar: (n: number) => void }) {
   const lote = Number(String(tamanoLote ?? "").trim());
-  const valido = Number.isInteger(lote) && lote >= 2;
+  // F005: NCh 44 cuenta unidades (envases, piezas, pares); con el lote en masa no se propone un plan.
+  const enMasa = ["t", "kg", "g"].includes(String(unidadLote ?? "").trim());
+  const valido = Number.isInteger(lote) && lote >= 2 && !enMasa;
   const [plan, setPlan] = useState<any>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -378,6 +382,8 @@ function PlanNch44({ tamanoLote, tamanoMuestra, editable, onUsar }: { tamanoLote
     }, 300);
     return () => clearTimeout(t);
   }, [lote, valido]);
+  if (enMasa && Number.isInteger(lote) && lote >= 2)
+    return <div className="alert info" style={{ marginTop: 8 }}>El plan NCh 44 se calcula con el tamaño del lote en unidades (envases, piezas o pares): con el lote en kilos o toneladas indique el tamaño de la muestra según el procedimiento.</div>;
   if (!valido) return null;
   if (error) return <div className="alert warn" style={{ marginTop: 8 }}>Plan NCh 44: {error}</div>;
   if (!plan) return null;
