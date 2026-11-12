@@ -195,3 +195,10 @@ describe("cambiar las líneas después del V°B° del costeo (F025)", () => {
     expect(lineasCambiaron(a, [a[0], { ...a[1], muestraN: 1 }])).toBe(true);
   });
 });
+
+describe("bandeja del laboratorio sin filas repetidas (F029)", () => {
+  const { unicasPorId } = require("./circuito-cotizacion") as typeof import("./circuito-cotizacion");
+  it("cada solicitud aparece una vez, en su orden", () => {
+    expect(unicasPorId([{ id: "a" }, { id: "b" }, { id: "a" }]).map((f) => f.id)).toEqual(["a", "b"]);
+  });
+});
