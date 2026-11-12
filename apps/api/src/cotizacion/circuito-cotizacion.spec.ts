@@ -108,6 +108,13 @@ describe("Ruta de la cotización (barra de 6 etapas y siguiente paso)", () => {
     expect(r.siguiente?.accion?.permisos).toEqual(["cotizacion.crear"]);
   });
 
+  it("una pre-cotización no tiene la etapa de aceptación y OT (F037)", () => {
+    const r = calcularRutaCotizacion({ ...base, precotizacion: true, firmaEstado: "firmada", enviadaAt: "2026-10-20" }, cfg);
+    expect(r.etapas.map((e) => e.clave)).toEqual(["elaboracion", "costeo", "vb", "firma", "envio"]);
+    expect(r.etapaActual).toBeNull();
+    expect(r.siguiente).toBeNull();
+  });
+
   it("con una solicitud pendiente le toca al Jefe de Laboratorio, con el permiso de costear", () => {
     const r = calcularRutaCotizacion({ ...base, solicitudes: [sol("solicitado")] }, cfg);
     expect(r.etapaActual).toBe("costeo");
