@@ -253,6 +253,17 @@ const plural = (n: number, s: string, p = `${s}s`) => `${n} ${n === 1 ? s : p}`;
 const lab = (h: HechosOt) => h.unidad?.codigo ?? null;
 const etapa = (clave: string, titulo: string, estado: EstadoEtapa, detalle?: string | null): Etapa => ({ clave, titulo, estado, detalle: detalle ?? null });
 
+/** F008: nombre legible del origen de la OT (nunca el código interno). */
+export const NOMBRE_ORIGEN_OT: Record<string, string> = {
+  INTERNACION: "Internación",
+  REINSPECCION: "Reinspección (BPCH)",
+  REQUERIMIENTO_BPCH: "Requerimiento BPCH",
+  PRODUCCION_NACIONAL: "Producción Nacional",
+  PROTOTIPO: "Prototipo",
+  INSTITUCIONAL: "Institucional sin cobro",
+  COTIZACION: "Cotización",
+};
+
 /** Texto de la apertura: de dónde viene la OT. */
 function detalleApertura(h: HechosOt): string {
   const origen =
@@ -265,7 +276,7 @@ function detalleApertura(h: HechosOt): string {
           : h.origen === "DISPOSICION"
             ? "Disposición del Director"
             : h.origen
-              ? h.origen.toLowerCase().replace(/_/g, " ")
+              ? NOMBRE_ORIGEN_OT[h.origen] ?? h.origen.toLowerCase().replace(/_/g, " ")
               : "Registro directo";
   return `${origen}${h.unidad ? ` · ${h.unidad.codigo}` : " · sin laboratorio"}`;
 }
