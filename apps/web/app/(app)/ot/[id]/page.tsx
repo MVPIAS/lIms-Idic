@@ -160,7 +160,10 @@ export default function ExpedientePage() {
   const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "consumos" | "informe" | "carpeta" | "flujo" | "historial" | "terreno">("cabecera");
   /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
   const [destinoOi, setDestinoOi] = useState<string | null>(null);
-  const { puede } = usePermisos();
+  const { puede, listo: permisosListos } = usePermisos();
+  // Sin muestra.ver (p. ej. Finanzas) no se piden las muestras: la API respondía 403 y la
+  // OT abría con «Permiso insuficiente» y «Muestras (0)» (F033).
+  const verMuestras = puede("muestra.ver");
   const [historial, setHistorial] = useState<any[]>([]);
   const [cambiandoLab, setCambiandoLab] = useState(false);
   const [labNuevo, setLabNuevo] = useState("");
@@ -191,6 +194,7 @@ export default function ExpedientePage() {
   useCambiosOt(typeof id === "string" ? id : null, () => { cargarOt(); cargarHistorial(); });
 
   const cargarMuestras = async () => {
+    if (!verMuestras) { setMuestras([]); return; }
     try {
       // Solo las muestras de ESTA OT (antes se traían 200 y se filtraban aquí).
       const m = await llamar("GET", `/muestras?otId=${id}&limit=200`);
@@ -199,12 +203,14 @@ export default function ExpedientePage() {
   };
 
   useEffect(() => {
-    (async () => {
-      await cargarOt();
-      await cargarMuestras();
-    })();
+    cargarOt();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  // Las muestras, cuando ya se leyeron los permisos (antes de eso «puede» es falso).
+  useEffect(() => {
+    if (permisosListos) cargarMuestras();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, permisosListos, verMuestras]);
 
   // Pestaña inicial desde la URL (?tab=muestras: bandeja de entrada del laboratorio).
   useEffect(() => {
@@ -345,7 +351,7 @@ export default function ExpedientePage() {
             {conTerreno && tabBtn("terreno", "Terreno")}
             {esMetrologia && tabBtn("instrumentos", "Instrumentos")}
             {conMuestreo && tabBtn("muestreo", "Muestreo")}
-            {(!esMetrologia || muestras.length > 0) && tabBtn("muestras", `Muestras (${muestras.length})`)}
+            {verMuestras && (!esMetrologia || muestras.length > 0) && tabBtn("muestras", `Muestras (${muestras.length})`)}
             {conPreparacion && tabBtn("preparacion", "Preparación")}
             {tabBtn("ordenes", "Órdenes internas")}
             {tabBtn("resultados", "Resultados")}
