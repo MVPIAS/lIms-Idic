@@ -220,7 +220,8 @@ export class SeguimientoService {
         seguimiento: tienePermiso(req, "ot.seguimiento"),
         recepcionDco: tienePermiso(req, "ot.seguimiento") && oficiales.length > 0,
         carpeta: tienePermiso(req, "ot.carpeta"),
-        oficio: tienePermiso(req, "oficio.crear"),
+        // El oficio conduce un documento ya firmado: sin documentos oficiales no se ofrece (F095).
+        oficio: tienePermiso(req, "oficio.crear") && oficiales.length > 0,
       },
     };
   }
