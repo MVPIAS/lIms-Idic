@@ -52,6 +52,7 @@ import { anioChile, hoyChile, SQL_ZONA, diaChile, fechaChile, instanteDeHoraChil
 import { escapeHtml, fmtFechaHora } from "../plantilla-render/html.util";
 import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 import { urlVerificacionBase } from "../common/url-verificacion";
+import { fechaEsi } from "./fecha-ibis";
 import {
   NOMBRE_TIPO_PERITAJE,
   RUC_RE,
@@ -367,12 +368,7 @@ function boolEsi(v: string | null): boolean | null {
   return null;
 }
 
-/** ISO-8601/UTC según el Anexo C. Devuelve null si no es una fecha válida. */
-function fechaEsi(v: string | null): string | null {
-  if (!v) return null;
-  const d = new Date(v.trim());
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
-}
+/* ISO-8601/UTC según el Anexo C: fechaEsi (fecha-ibis.ts) interpreta la hora sin zona en hora de Chile (F038). */
 
 function intEsi(v: string | null): number {
   const x = parseInt((v ?? "").trim(), 10);
