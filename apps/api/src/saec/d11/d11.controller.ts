@@ -156,6 +156,13 @@ export class D11Controller {
     return this.svc.emitirCertificados(req, otId, body);
   }
 
+  @Post("certificados/:id/reemitir-ibis")
+  @RequierePermiso("certificado.emitir")
+  @ApiOperation({ summary: "F039 · Reemite el certificado por arma emitido «Pendiente de IBIS» para incorporar el registro de IBIS" })
+  reemitirIbis(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.reemitirConIbis(req, id);
+  }
+
   /** Sin @RequierePermiso de firma: autoriza la matriz (solo el responsable del paso actual firma). */
   @Post("emisiones/:id/firmar")
   @RequierePermiso("arma.ver")

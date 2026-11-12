@@ -1,4 +1,17 @@
-import { bloqueIbisArma, fichaEvidencia, normalizarBusqueda, paginaFichas, textoHit, tipoTestigo } from "./ibis-testigos";
+import { bloqueIbisArma, debeReemitirPorIbis, fichaEvidencia, normalizarBusqueda, paginaFichas, textoHit, tipoTestigo } from "./ibis-testigos";
+
+describe("F039 · certificado emitido «Pendiente de IBIS» y registro llegado después", () => {
+  const html = bloqueIbisArma(null);
+  it("pide reemitir el certificado vigente que dice «Pendiente de IBIS» cuando el arma ya tiene IBIS", () => {
+    expect(debeReemitirPorIbis({ estado: "oficial", documentoHtml: html, ibisAsignado: true })).toBe(true);
+    expect(debeReemitirPorIbis({ estado: "en_firma", documentoHtml: html, ibisAsignado: true })).toBe(true);
+  });
+  it("no si aún no llega IBIS, si el certificado ya lo trae o si está anulado", () => {
+    expect(debeReemitirPorIbis({ estado: "oficial", documentoHtml: html, ibisAsignado: false })).toBe(false);
+    expect(debeReemitirPorIbis({ estado: "oficial", documentoHtml: "<h2>Registro balístico IBIS</h2><td>EV-1</td>", ibisAsignado: true })).toBe(false);
+    expect(debeReemitirPorIbis({ estado: "anulado", documentoHtml: html, ibisAsignado: true })).toBe(false);
+  });
+});
 
 describe("IBIS · evidencias de prueba", () => {
   it("reconoce la vaina y el proyectil del XML; el resto no es evidencia de prueba", () => {
