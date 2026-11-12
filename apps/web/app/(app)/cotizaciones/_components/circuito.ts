@@ -59,6 +59,8 @@ export interface Circuito {
     envioObservacion: string | null;
     ejecutivoNombre: string | null;
     otCodigo: string | null;
+    /** Muestras de la cotización (cotización por muestra). */
+    muestras?: { n: number; descripcion: string }[];
   };
   config: { niveles: "lab_depto" | "lab" | "ninguno"; exigirConsulta: boolean; exigirFirma: boolean; cfaPct: number; margenParticularPct: number; ivaPct?: number };
   ruta: {
