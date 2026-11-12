@@ -119,6 +119,7 @@ export const TEXTO_EVENTO: Record<string, string> = {
   orden_cliente_anulada: "Anuló la orden del cliente",
   precio_manual: "Puso precio manual a ensayos sin precio",
   ensayos_laboratorio: "El laboratorio agregó ensayos a la cotización",
+  vb_invalidado: "Cambió las líneas después del V°B°: se vuelve a pedir el V°B° del costeo",
   aceptada: "Registró la aceptación del cliente y generó la OT",
   anulada: "Anuló la cotización",
 };

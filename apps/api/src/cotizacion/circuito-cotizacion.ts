@@ -77,6 +77,34 @@ export function estadoTrasVb(nivel: NivelVb, niveles: NivelesVb, accion: "dar" |
   return "aprobado";
 }
 
+/**
+ * F025 · Comercial cambia las líneas después del V°B° del costeo: el V°B° dado
+ * ya no vale y se vuelve a pedir antes de la firma. Devuelve el estado al que
+ * vuelve la solicitud (null = no cambia).
+ */
+export function estadoTrasCambioLineas(estado: string, niveles: NivelesVb): EstadoSolicitud | null {
+  if (niveles === "ninguno") return null;
+  return estado === "vb_lab" || estado === "aprobado" ? "respondido" : null;
+}
+
+/** Huella de las líneas para saber si cambió lo cotizado (ensayo o texto, muestra, cantidad y precio). */
+export interface LineaHuella {
+  catEnsayoId?: string | null;
+  descripcion?: string | null;
+  tipo?: string | null;
+  muestraN?: number | null;
+  cantidad?: number | string | null;
+  precioUnitario?: number | string | null;
+}
+export function lineasCambiaron(antes: LineaHuella[], despues: LineaHuella[]): boolean {
+  const n = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(Number(v)));
+  const h = (l: LineaHuella) =>
+    [l.catEnsayoId ?? `libre:${l.tipo ?? ""}:${String(l.descripcion ?? "").trim()}`, l.muestraN ?? "", n(l.cantidad ?? 1), n(l.precioUnitario)].join("|");
+  const a = antes.map(h).sort();
+  const d = despues.map(h).sort();
+  return a.length !== d.length || a.some((x, i) => x !== d[i]);
+}
+
 /** Solicitudes que forman parte del circuito (con laboratorio; las heredadas D2 no cuentan). */
 export interface SolicitudCircuito {
   id: string;

@@ -173,3 +173,25 @@ describe("Ruta de la cotización (barra de 6 etapas y siguiente paso)", () => {
     expect(r.etapaActual).toBe("envio");
   });
 });
+
+describe("cambiar las líneas después del V°B° del costeo (F025)", () => {
+  const { estadoTrasCambioLineas, lineasCambiaron } = require("./circuito-cotizacion") as typeof import("./circuito-cotizacion");
+  it("la solicitud con V°B° vuelve a «respondida» y se pide de nuevo el V°B°", () => {
+    expect(estadoTrasCambioLineas("aprobado", "lab_depto")).toBe("respondido");
+    expect(estadoTrasCambioLineas("vb_lab", "lab_depto")).toBe("respondido");
+    expect(estadoTrasCambioLineas("aprobado", "lab")).toBe("respondido");
+    expect(estadoTrasCambioLineas("solicitado", "lab_depto")).toBeNull();
+    expect(estadoTrasCambioLineas("rechazado", "lab_depto")).toBeNull();
+    expect(estadoTrasCambioLineas("aprobado", "ninguno")).toBeNull();
+  });
+  it("detecta un ensayo agregado, una cantidad o una muestra distinta; no el orden", () => {
+    const a = [
+      { catEnsayoId: "e1", cantidad: 1, precioUnitario: "1000", muestraN: 1 },
+      { catEnsayoId: "e2", cantidad: 2, precioUnitario: 500, muestraN: null },
+    ];
+    expect(lineasCambiaron(a, [a[1], { ...a[0], precioUnitario: 1000 }])).toBe(false);
+    expect(lineasCambiaron(a, [...a, { catEnsayoId: "e193", cantidad: 1, precioUnitario: 800 }])).toBe(true);
+    expect(lineasCambiaron(a, [a[0], { ...a[1], cantidad: 3 }])).toBe(true);
+    expect(lineasCambiaron(a, [a[0], { ...a[1], muestraN: 1 }])).toBe(true);
+  });
+});
