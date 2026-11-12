@@ -35,7 +35,7 @@ import { paginacion } from "../ot/lista-ot";
 import { hoyCl, sumarDias } from "../ot/plazos";
 import { Prisma } from "@prisma/client";
 import { generarNumeroCotizacion } from "./numeracion-cotizacion";
-import { motivoNoAceptable, motivoNoEditable } from "./circuito-cotizacion";
+import { estadoTrasCambioLineas, lineasCambiaron, motivoNoAceptable, motivoNoEditable } from "./circuito-cotizacion";
 import { estadoCircuitoDe, leerConfigCircuito } from "./circuito-config";
 import { claveLibre, precioDeLinea, type Existentes } from "./precio-ficha";
 import { revisarOc } from "./aceptacion-oc";
@@ -996,6 +996,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       await this.hitoPrecioManual(actual.tenantId, id, usuarioId, manuales, moneda);
       await guardarS1();
       await guardarMuestraDeLineas(this.prisma, id, resto.lineas.map((l, i) => ({ orden: i + 1, muestraN: l.muestraN ?? null })));
+      const despues = lineas.map((l: any, i: number) => ({ ...l, muestraN: resto.lineas![i]?.muestraN ?? null }));
+      if (lineasCambiaron(actual.lineas as any[], despues)) await this.invalidarVbPorCambio(actual.tenantId, id, usuarioId);
       return r;
     }
     const r = await this.prisma.cotizacion.update({ where: { id }, data: upd, include: { lineas: true, cliente: true } });
@@ -1297,6 +1299,32 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     await this.hito(tenantId, cotizacionId, "precio_manual", usuarioId, manuales.map((m) => `${m.ensayoCodigo}: ${m.motivo}`).join(" · ").slice(0, 1000), {
       moneda,
       lineas: manuales,
+    });
+  }
+
+  /**
+   * F025 · Las líneas cambiaron después del V°B° del costeo: las solicitudes con
+   * V°B° vuelven a «respondida» y se pide de nuevo el V°B° (del laboratorio y,
+   * si corresponde, del departamento) antes de enviar a firma.
+   */
+  private async invalidarVbPorCambio(tenantId: string, cotizacionId: string, usuarioId: string | undefined) {
+    const cfg = await leerConfigCircuito(this.prisma, tenantId);
+    const sols = await this.prisma.$queryRawUnsafe<{ id: string; estado: string; unidad: string | null }[]>(
+      `SELECT s.id, s.estado, u.codigo AS unidad FROM solicitud_costeo s LEFT JOIN unidad u ON u.id = s.unidad_id
+        WHERE s.cotizacion_id = $1::uuid AND s.tenant_id = $2::uuid AND s.deleted_at IS NULL`,
+      cotizacionId,
+      tenantId,
+    );
+    const afectadas = sols.filter((s) => estadoTrasCambioLineas(s.estado, cfg.niveles));
+    if (!afectadas.length) return;
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE solicitud_costeo SET estado = 'respondido', vb_lab_por = NULL, vb_lab_at = NULL, vb_lab_comentario = NULL,
+              vb_depto_por = NULL, vb_depto_at = NULL, vb_depto_comentario = NULL, updated_at = now()
+        WHERE id = ANY($1::uuid[])`,
+      afectadas.map((s) => s.id),
+    );
+    await this.hito(tenantId, cotizacionId, "vb_invalidado", usuarioId, null, {
+      unidades: afectadas.map((s) => s.unidad).filter(Boolean),
     });
   }
 
