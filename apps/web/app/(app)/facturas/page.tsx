@@ -295,8 +295,10 @@ function FacturasContenido() {
           <div className="toolbar" style={{ marginTop: 8 }}>
             <button className="btn outline sm" onClick={() => setLineas([...lineas, { descripcion: "", cantidad: "1", precioUnitario: "" }])}>Añadir línea</button>
             <span className="spacer" />
+            {/* F068: el % de IVA se lee también como texto (no solo dentro del campo editable). */}
             <span>Neto <b>{monto(netoEditado, revisar.moneda)}</b> · IVA
-              <input type="number" min="0" max="100" value={ivaPct} onChange={(e) => setIvaPct(e.target.value)} style={{ width: 60, margin: "0 4px" }} />%
+              <input type="number" min="0" max="100" value={ivaPct} onChange={(e) => setIvaPct(e.target.value)} style={{ width: 60, margin: "0 4px" }} aria-label="Porcentaje de IVA" />%
+              {" "}(<b>{Number(ivaPct || 0).toLocaleString("es-CL")} %</b>: {monto(netoEditado * (Number(ivaPct || 0) / 100), revisar.moneda)})
               · Total <b>{monto(netoEditado * (1 + Number(ivaPct || 0) / 100), revisar.moneda)}</b></span>
           </div>
           <div className="form-grid" style={{ marginTop: 10 }}>
