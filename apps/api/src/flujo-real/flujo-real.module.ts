@@ -993,7 +993,15 @@ export class PuenteAnalisisService {
    * cumple en los atributos. Lo revisado o aprobado no se sobrescribe. Deja al
    * usuario como analista (segregación) y recalcula el veredicto de la muestra.
    */
-  async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any, variante?: OpcionesCapturaVariante) {
+  async capturarValor(
+    id: string,
+    entrada: z.infer<typeof CapturarValorBody>,
+    tenantId: string,
+    req?: any,
+    variante?: OpcionesCapturaVariante,
+    /** F045: captura que no es una determinación repetible (p. ej. IT05 del arma): sin re-análisis automático. */
+    opciones?: { sinReanalisis?: boolean },
+  ) {
     // El laboratorio de destino de una orden interna recibida captura sus ensayos derivados.
     const { resultado, otId, lab } = await this.resultadoEnAlcance(id, tenantId, req);
 
@@ -1194,6 +1202,7 @@ export class PuenteAnalisisService {
       advertencia,
       valor: { numerico: calc.resultadoFinal ?? calc.valorNumerico, texto: calc.valorTexto },
       abierto: reanalisis,
+      sinReanalisis: !!opciones?.sinReanalisis,
     });
     const consumos = consume
       ? await descontarPorCaptura(this.prisma as any, {

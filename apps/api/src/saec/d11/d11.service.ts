@@ -1019,6 +1019,9 @@ export class D11Service implements OnModuleInit {
           { valor, ...(e.estado !== "pendiente" ? { motivo: d.motivo?.trim() || "Reclasificación del arma (IT05)" } : {}) } as any,
           tenantId,
           req,
+          undefined,
+          // F045: la permisibilidad la fija la clasificación: no abre re-análisis ni avisa al armero.
+          { sinReanalisis: true },
         );
         // Un arma prohibida da «No cumple» en la permisibilidad y abriría el
         // re-análisis automático: repetir la determinación no tiene sentido (es
