@@ -67,7 +67,9 @@ export default function NuevaCalibracionPage() {
   const [cargado, setCargado] = useState(false);
   const [error, setError] = useState("");
   const [avisosServidor, setAvisosServidor] = useState<string[]>([]);
-  const [ok, setOk] = useState<{ codigo: string; id: string } | null>(null);
+  // puedeEnviar: lo decide el servidor (acciones de la calibración): quien no puede enviarla
+  // (p. ej. sin registro de firma) no ve «Firmar y enviar» (F060).
+  const [ok, setOk] = useState<{ codigo: string; id: string; puedeEnviar?: boolean } | null>(null);
   const [saving, setSaving] = useState(false);
   /** Ítem de la OT del que nace la calibración (EP-04 P3.1: no hay calibración suelta). */
   const [origen, setOrigen] = useState<{ ot: any; item: any } | null>(null);
@@ -258,7 +260,12 @@ export default function NuevaCalibracionPage() {
       const r = await fetch(`${API}/metrologia/calibraciones${editId ? `/${editId}` : ""}`, { method: editId ? "PUT" : "POST", headers: auth(), body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(errorMensajeDe(j, r.status));
-      setOk({ codigo: j.data.codigo, id: j.data.id ?? editId });
+      const idCal = j.data.id ?? editId;
+      setOk({ codigo: j.data.codigo, id: idCal, puedeEnviar: false });
+      fetch(`${API}/metrologia/calibraciones/${idCal}`, { headers: auth() })
+        .then((x) => (x.ok ? x.json() : null))
+        .then((d) => { if (Array.isArray(d?.acciones)) setOk((o) => (o && o.id === idCal ? { ...o, puedeEnviar: d.acciones.includes("ENVIAR") } : o)); })
+        .catch(() => undefined);
       setAvisosServidor(j.data.avisos ?? []);
       if (extra.motor) setInicialMotor(extra.motor);
       if (!editId) { setEditId(j.data.id); window.history.replaceState(null, "", `?id=${j.data.id}`); }
@@ -310,8 +317,8 @@ export default function NuevaCalibracionPage() {
       {[...new Set([...avisos, ...avisosServidor])].map((a) => <div key={a} className="alert info">{a}</div>)}
       {ok && (
         <div className="alert success" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <span>Borrador <b>{ok.codigo}</b> guardado. Puede seguir corrigiéndolo o enviarlo al jefe del laboratorio.</span>
-          <button className="btn primary sm" onClick={enviar}>Firmar y enviar → Revisión Jefe Lab.</button>
+          <span>Borrador <b>{ok.codigo}</b> guardado. Puede seguir corrigiéndolo{ok.puedeEnviar ? " o enviarlo al jefe del laboratorio" : ""}.</span>
+          {ok.puedeEnviar && <button className="btn primary sm" onClick={enviar}>Firmar y enviar → Revisión Jefe Lab.</button>}
           <Link className="btn sm" href={`/metrologia/${ok.id}` as any}>Ver la ficha</Link>
         </div>
       )}
