@@ -32,6 +32,7 @@ import { hoyEnChile, soloFecha } from "./validez";
 import { leerReferenciasCosteo } from "./referencias-costeo";
 import { hoyCl } from "../ot/plazos";
 import { esPrecotizacion } from "./precotizacion";
+import { leerMuestras } from "./cotizacion-s1";
 
 /** Tipos de unidad a los que Comercial pide fechas y costo (laboratorios y sus equivalentes). */
 const TIPOS_CONSULTABLES = ["LABORATORIO", "SUCURSAL", "DELEGACION", "SECCION"];
@@ -310,7 +311,8 @@ export class CircuitoCotizacionService {
     const faltanFirma = faltantesParaFirma(c, sols.map((s) => ({ id: s.id, estado: s.estado, unidad: s.unidadCodigo, numero: s.numero })), cfg, "enviar");
     const editable = c.estado === "abierta" && !motivoNoEditable(c.firmaEstado);
     return {
-      cotizacion: c,
+      // F030: las muestras de la cotización, para que el laboratorio asigne a una muestra los ensayos que agrega.
+      cotizacion: { ...c, muestras: (await leerMuestras(this.prisma as any, id)).map((m) => ({ n: m.n, descripcion: m.descripcion })) },
       config: { niveles: cfg.niveles, exigirConsulta: cfg.exigirConsulta, exigirFirma: cfg.exigirFirma, cfaPct: cfg.cfaPct, margenParticularPct: cfg.margenParticularPct, ivaPct: cfg.ivaPct, precioEjercito: cfg.precioEjercito },
       ruta: { ...ruta, siguiente: ruta.siguiente ? { ...ruta.siguiente, puedoActuar } : null },
       solicitudes: conVb.map((s) => ({ ...s, etiquetaEstado: ETIQUETA_SOLICITUD[s.estado] ?? s.estado })),
@@ -488,7 +490,7 @@ export class CircuitoCotizacionService {
    * solicitud, el laboratorio agrega los ensayos (y su cantidad) a una
    * cotización que Comercial guardó solo con la cabecera.
    */
-  async agregarEnsayos(req: any, solicitudId: string, b: { lineas: { catEnsayoId: string; cantidad?: number; motivoPrecioManual?: string | null; precioUnitario?: number }[] }) {
+  async agregarEnsayos(req: any, solicitudId: string, b: { lineas: { catEnsayoId: string; cantidad?: number; motivoPrecioManual?: string | null; precioUnitario?: number; muestraN?: number | null }[] }) {
     const tenantId = this.tenant(req);
     const s = await this.solicitud(solicitudId, tenantId);
     await this.alcance.exigirUnidad(req, s.unidadId, `la solicitud ${s.numero ?? ""}`.trim(), "cotizacion.costear");
@@ -497,7 +499,7 @@ export class CircuitoCotizacionService {
     if (!b.lineas?.length) throw new BadRequestException("Elija al menos un ensayo.");
     const r = await this.cotizaciones.agregarLineas(
       s.cotizacionId,
-      b.lineas.map((l) => ({ catEnsayoId: l.catEnsayoId, cantidad: l.cantidad ?? 1, motivoPrecioManual: l.motivoPrecioManual ?? undefined, precioUnitario: l.precioUnitario })) as any,
+      b.lineas.map((l) => ({ catEnsayoId: l.catEnsayoId, cantidad: l.cantidad ?? 1, motivoPrecioManual: l.motivoPrecioManual ?? undefined, precioUnitario: l.precioUnitario, muestraN: l.muestraN ?? null })) as any,
       tenantId,
       this.yo(req) ?? undefined,
       s.unidadCodigo ?? null,
