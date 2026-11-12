@@ -1,4 +1,5 @@
 import {
+  compararKardex,
   costoConsumos,
   costoUnitarioLote,
   erroresBodega,
@@ -98,5 +99,24 @@ describe("Bodegas · traspasos y altas", () => {
     expect(erroresBodega({ tipo: "central", unidadId: LQC, codigo: "BC", nombre: "x" }, false)).toHaveLength(1);
     expect(erroresBodega({ tipo: "laboratorio", unidadId: LQC, codigo: "SB-LQC", nombre: "Sub-bodega" }, true)).toEqual([]);
     expect(erroresBodega({ tipo: "otra" }, false)).toHaveLength(1);
+  });
+});
+
+describe("orden del kardex (F078)", () => {
+  it("en un traspaso, la salida va antes que la entrada aunque tengan el mismo instante", () => {
+    const t = "2026-11-12T10:00:00Z";
+    const movs = [
+      { id: "a", created_at: t, tipo: "traspaso", cantidad: 100 },
+      { id: "b", created_at: t, tipo: "traspaso", cantidad: -100 },
+      { id: "c", created_at: "2026-11-12T09:00:00Z", tipo: "entrada", cantidad: 1000 },
+    ];
+    expect([...movs].sort(compararKardex).map((m) => m.id)).toEqual(["c", "b", "a"]);
+  });
+  it("instantes distintos: manda la fecha", () => {
+    const movs = [
+      { id: "x", created_at: "2026-11-12T11:00:00Z", tipo: "traspaso", cantidad: -5 },
+      { id: "y", created_at: "2026-11-12T10:00:00Z", tipo: "traspaso", cantidad: 5 },
+    ];
+    expect([...movs].sort(compararKardex).map((m) => m.id)).toEqual(["y", "x"]);
   });
 });
