@@ -20,11 +20,17 @@ export interface ClienteBloqueable {
 }
 
 /** Mensaje de rechazo si el cliente está bloqueado (null = puede seguir). */
+/** Texto libre sin espacios ni puntos al final, para cerrarlo con un solo punto (F036). */
+export function sinPuntoFinal(t: string | null | undefined): string {
+  return String(t ?? "").trim().replace(/[\s.]+$/, "");
+}
+
 export function motivoClienteBloqueado(c: ClienteBloqueable | null | undefined, accion: "cotizar" | "aceptar"): string | null {
   if (!c?.bloqueado) return null;
   const quien = c.razonSocial ? `El cliente ${c.razonSocial}` : "El cliente";
   const que = accion === "cotizar" ? "no se le pueden emitir cotizaciones" : "no se puede registrar la aceptación de su cotización";
-  const motivo = c.motivoBloqueo?.trim() ? ` Motivo: ${c.motivoBloqueo.trim()}.` : "";
+  const m = sinPuntoFinal(c.motivoBloqueo);
+  const motivo = m ? ` Motivo: ${m}.` : "";
   return `${quien} está bloqueado por el Jefe del Departamento Comercial: ${que}.${motivo} Solo el Jefe DCO puede desbloquearlo.`;
 }
 
