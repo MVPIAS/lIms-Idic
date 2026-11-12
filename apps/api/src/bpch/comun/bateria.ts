@@ -34,7 +34,7 @@ export function revisarBateria(
   if (!excepcion || !(excepcion.motivo ?? "").trim())
     return {
       faltan,
-      error: `${etiqueta} no lleva toda la batería de ensayos del procedimiento de calidad (falta: ${lista}). Solo se quita un ensayo como excepción, con motivo y autorización de la jefatura.`,
+      error: `${etiqueta} no lleva toda la batería de ensayos del procedimiento de calidad (falta: ${lista}). Solo se quita un ensayo como excepción: escriba el motivo en «Motivo para quitar … ensayo(s) del panel» (lo autoriza la jefatura).`,
       excepcion: false,
     };
   if (!excepcion.permitido)

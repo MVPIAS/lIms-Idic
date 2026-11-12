@@ -305,6 +305,21 @@ interface Circuito {
 }
 
 // ===========================================================================
+/**
+ * Errores del certificado de un auxiliar (temp/hum/pres → {error, U}): se guardan solo las
+ * magnitudes con algún valor; si no queda ninguna, NULL (el formulario envía todas, vacías incluidas).
+ */
+export function correccionesLimpias(c: Record<string, { error?: number | null; U?: number | null } | null | undefined> | null): string | null {
+  if (!c) return null;
+  const out: Record<string, { error: number | null; U: number | null }> = {};
+  for (const [k, v] of Object.entries(c)) {
+    if (!v) continue;
+    const error = v.error ?? null, U = v.U ?? null;
+    if (error != null || U != null) out[k] = { error, U };
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : null;
+}
+
 @ApiTags("metrología")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
@@ -552,7 +567,7 @@ export class MetrologiaController {
       ["intervalo_meses", d.intervalo_meses], ["vence", d.vence === "" ? null : d.vence, "date"], ["trazabilidad", d.trazabilidad],
       ["u_expandida", d.u_expandida], ["deriva", d.deriva], ["activo", d.activo], ["observacion", d.observacion],
       ["rango_min", d.rango_min], ["rango_max", d.rango_max], ["unidad_rango", d.unidad_rango],
-      ["correcciones", d.correcciones === undefined ? undefined : d.correcciones === null ? null : JSON.stringify(d.correcciones), "jsonb"],
+      ["correcciones", d.correcciones === undefined ? undefined : correccionesLimpias(d.correcciones), "jsonb"],
       ["valores_certificado", d.valores_certificado === undefined ? undefined : d.valores_certificado === null ? null : JSON.stringify(d.valores_certificado), "jsonb"],
     ];
     const set: string[] = [], vals: any[] = [id, tenantId(req)];
