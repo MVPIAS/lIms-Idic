@@ -525,6 +525,20 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
     return { noLeidos: Number(n?.n ?? 0), data: filas };
   }
 
+  /**
+   * Da por resueltos (leídos) los avisos de estas claves para todos sus
+   * destinatarios: lo pedido ya no está pendiente (p. ej. el V°B° de un oficio anulado).
+   */
+  async resolverPorClave(tenantId: string, claves: string[]) {
+    if (!claves.length) return { resueltos: 0 };
+    const n = await this.prisma.$executeRawUnsafe(
+      `UPDATE aviso SET leido_at = now() WHERE tenant_id = $1::uuid AND clave = ANY($2::text[]) AND leido_at IS NULL`,
+      tenantId,
+      claves,
+    );
+    return { resueltos: Number(n) };
+  }
+
   async marcarLeido(usuarioId: string, tenantId: string, id: string | null) {
     const n = await this.prisma.$executeRawUnsafe(
       `UPDATE aviso SET leido_at = now() WHERE usuario_id = $1::uuid AND tenant_id = $2::uuid AND leido_at IS NULL AND ($3::uuid IS NULL OR id = $3::uuid)`,

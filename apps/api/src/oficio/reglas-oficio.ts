@@ -119,3 +119,13 @@ export function htmlOficio(v: VistaOficio): string {
     v.despacho ? p(`Despachado por Oficina de partes: Nº ${v.despacho.numero} del ${v.despacho.fecha}.`) : "",
   ].join("");
 }
+
+/**
+ * Claves de los avisos «V°B° / firma pendiente» de los pasos de un oficio
+ * (oficio.service.ts › avisarPasoActual). Cuando el paso deja de estar pendiente
+ * (firmado, devuelto o el oficio se anula) esos avisos se dan por resueltos y
+ * salen de «Mi bandeja» (F091).
+ */
+export function clavesAvisoFirmaOficio(pasoIds: (string | null | undefined)[]): string[] {
+  return [...new Set(pasoIds.filter((x): x is string => !!x))].map((id) => `oficio_firma:${id}`);
+}

@@ -1,4 +1,4 @@
-import { editable, errorTransicionOficio, erroresDespachoOficio, erroresOficio, htmlOficio } from "./reglas-oficio";
+import { clavesAvisoFirmaOficio, editable, errorTransicionOficio, erroresDespachoOficio, erroresOficio, htmlOficio } from "./reglas-oficio";
 
 describe("estados del oficio conductor", () => {
   it("borrador → en firma → firmado → despachado", () => {
@@ -61,5 +61,12 @@ describe("cuerpo del oficio", () => {
     expect(h).toContain("Cotización 2026-00001");
     expect(h).toContain("<p>Segundo párrafo.</p>");
     expect(h).toContain("Archivo DCO");
+  });
+});
+
+describe("avisos de firma de un oficio que dejan de estar pendientes (F091)", () => {
+  it("una clave por paso, sin repetir ni vacíos", () => {
+    expect(clavesAvisoFirmaOficio(["p1", "p2", "p1", null, undefined, ""])).toEqual(["oficio_firma:p1", "oficio_firma:p2"]);
+    expect(clavesAvisoFirmaOficio([])).toEqual([]);
   });
 });

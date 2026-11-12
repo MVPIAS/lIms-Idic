@@ -24,7 +24,7 @@ import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { alcanceDe } from "./alcance";
-import { erroresReemplazo, filasReemplazo } from "./reemplazo";
+import { erroresReemplazo, filasReemplazo, textoRolesReemplazo } from "./reemplazo";
 
 /**
  * Alta de usuario. Lo usan las dos pantallas:
@@ -449,7 +449,7 @@ export class UsuariosController {
     const jefaturas = await this.prisma.$queryRawUnsafe<{ unidadId: string; unidadTipo: string | null }[]>(
       `SELECT j.unidad_id AS "unidadId", un.tipo AS "unidadTipo" FROM unidad_jefe j JOIN unidad un ON un.id = j.unidad_id
         WHERE j.usuario_id = $1::uuid AND un.activa`, dto.reemplazadoId);
-    const roles = await this.prisma.rol.findMany({ where: { tenantId: usuario.tenantId }, select: { id: true, codigo: true } });
+    const roles = await this.prisma.rol.findMany({ where: { tenantId: usuario.tenantId }, select: { id: true, codigo: true, nombre: true } });
     const filas = filasReemplazo({
       asignaciones: reemplazado.usuarioRoles.map((a: any) => ({
         rolId: a.rolId, rolCodigo: a.rol.codigo, unidadId: a.unidadId ?? null, vigenteDesde: a.vigenteDesde, vigenteHasta: a.vigenteHasta,
@@ -470,7 +470,13 @@ export class UsuariosController {
       // Los permisos del token se recalculan en el próximo ingreso o renovación.
       await tx.usuario.update({ where: { id }, data: { tokenVersion: { increment: 1 } } });
     });
-    return { data: { roles: filas.map((f) => ({ rol: f.rolCodigo, unidadId: f.unidadId, origen: f.origen })), desde, hasta: dto.hasta } };
+    // Texto legible para el aviso de la pantalla (F092): nombre del rol y sigla de la unidad.
+    const idsUnidad = [...new Set(filas.map((f) => f.unidadId).filter((x): x is string => !!x))];
+    const unidades = idsUnidad.length
+      ? await this.prisma.$queryRawUnsafe<{ id: string; codigo: string }[]>(`SELECT id::text AS id, codigo FROM unidad WHERE id = ANY($1::uuid[])`, idsUnidad)
+      : [];
+    const texto = textoRolesReemplazo(filas, new Map(roles.map((r) => [r.codigo, r.nombre])), new Map(unidades.map((u) => [u.id, u.codigo])));
+    return { data: { roles: filas.map((f) => ({ rol: f.rolCodigo, unidadId: f.unidadId, origen: f.origen })), texto, desde, hasta: dto.hasta } };
   }
 
   /** Termina antes un reemplazo: sus asignaciones vencen ahora (quedan en el historial). */

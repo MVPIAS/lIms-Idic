@@ -1,4 +1,4 @@
-import { erroresReemplazo, filasReemplazo } from "./reemplazo";
+import { erroresReemplazo, filasReemplazo, textoRolesReemplazo } from "./reemplazo";
 
 describe("Reemplazos temporales (R8)", () => {
   const ahora = new Date("2026-11-11T12:00:00Z");
@@ -28,5 +28,17 @@ describe("Reemplazos temporales (R8)", () => {
     expect(erroresReemplazo({ ...base, hasta: new Date("2026-11-01T00:00:00Z") }, ahora)).toEqual(expect.arrayContaining(["La fecha de término debe ser posterior a la de inicio."]));
     expect(erroresReemplazo({ ...base, hasta: new Date("2028-01-01T00:00:00Z") }, ahora)).toContain("Un reemplazo temporal dura como máximo un año.");
     expect(erroresReemplazo({ ...base, motivo: "x" }, ahora)).toHaveLength(1);
+  });
+});
+
+describe("textoRolesReemplazo (F092)", () => {
+  it("muestra el nombre del rol y la sigla de la unidad, sin códigos internos", () => {
+    const nombres = new Map([["JEFE_DEPTO", "Jefe de Departamento"], ["REVISOR", "Revisor"]]);
+    const unidades = new Map([["u1", "DQO"]]);
+    expect(textoRolesReemplazo([{ rolCodigo: "JEFE_DEPTO", unidadId: "u1" }, { rolCodigo: "REVISOR", unidadId: null }], nombres, unidades))
+      .toBe("Jefe de Departamento · DQO, Revisor");
+  });
+  it("no repite y, sin nombre conocido, usa el código", () => {
+    expect(textoRolesReemplazo([{ rolCodigo: "X", unidadId: null }, { rolCodigo: "X", unidadId: null }], new Map(), new Map())).toBe("X");
   });
 });

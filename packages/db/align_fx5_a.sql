@@ -115,3 +115,15 @@ SELECT t.id, v.categoria, v.codigo, v.etiqueta, 90, v.valor
   ('terreno', 'laboratorios', 'Laboratorios que trabajan en terreno', 'SVM,LAM,SEO')
  ) AS v(categoria, codigo, etiqueta, valor)
 ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
+
+-- --- 2 · Avisos de oficios que ya no están pendientes (F091) ------------------
+-- «Oficio … · V°B° pendiente» seguía en Mi bandeja con el oficio anulado. Desde
+-- este frente, anular, devolver o firmar da por leídos esos avisos; aquí se
+-- resuelven los que ya quedaron colgados (solo marca leido_at; no borra nada).
+UPDATE aviso a
+   SET leido_at = now()
+  FROM oficio_firma f
+ WHERE a.tipo = 'oficio_firma'
+   AND a.leido_at IS NULL
+   AND a.clave = 'oficio_firma:' || f.id::text
+   AND f.estado <> 'pendiente';

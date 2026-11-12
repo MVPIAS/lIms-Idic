@@ -77,3 +77,21 @@ export function erroresReemplazo(d: { reemplazanteId: string; reemplazadoId: str
   if (d.motivo.trim().length < 5) e.push("Indique el motivo del reemplazo (mínimo 5 caracteres).");
   return e;
 }
+
+/**
+ * Texto legible de lo traspasado (F092): «Jefe de Departamento · DQO», no el
+ * código interno del rol. Sin nombre conocido, el código (último recurso).
+ */
+export function textoRolesReemplazo(
+  filas: { rolCodigo: string; unidadId: string | null }[],
+  nombreRol: Map<string, string>,
+  codigoUnidad: Map<string, string>,
+): string {
+  const vistos = new Set<string>();
+  for (const f of filas) {
+    const rol = nombreRol.get(f.rolCodigo) ?? f.rolCodigo;
+    const unidad = f.unidadId ? codigoUnidad.get(f.unidadId) : undefined;
+    vistos.add(unidad ? `${rol} · ${unidad}` : rol);
+  }
+  return [...vistos].join(", ");
+}

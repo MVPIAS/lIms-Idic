@@ -21,7 +21,7 @@ import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { fechaChile, fechaHoraChile } from "../common/fecha-chile";
 import { nuevoCodigoVerificacion } from "../common/codigo-verificacion";
 import { hoyCl } from "../ot/plazos";
-import { editable, errorTransicionOficio, erroresDespachoOficio, erroresOficio, htmlOficio, type EstadoOficio } from "./reglas-oficio";
+import { clavesAvisoFirmaOficio, editable, errorTransicionOficio, erroresDespachoOficio, erroresOficio, htmlOficio, type EstadoOficio } from "./reglas-oficio";
 
 const tienePermiso = (req: any, p: string) => (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes(p);
 const usuarioDe = (req: any): string => req?.user?.sub;
@@ -384,6 +384,8 @@ export class OficioService {
       if (final) await tx.$executeRawUnsafe(`UPDATE oficio SET estado = 'firmado', updated_at = now() WHERE id = $1::uuid AND estado = 'en_firma'`, id);
     });
     await this.historial(id, final ? "firmado (todas las firmas)" : `${paso.accion === "VB" ? "V°B°" : "firma"} de ${paso.rolNombre ?? paso.rolCodigo}`, req);
+    // El paso firmado ya no está pendiente para sus otros responsables (F091).
+    await this.avisos.resolverPorClave(o.tenant_id, clavesAvisoFirmaOficio([paso.id])).catch(() => undefined);
     if (final)
       await this.avisos
         .emitir(
@@ -406,6 +408,7 @@ export class OficioService {
 
   async devolver(id: string, motivo: string, req: any) {
     const o = await this.fila(id, req);
+    const pendientes = (await this.pasos(id)).filter((x: any) => x.estado === "pendiente").map((x: any) => x.id as string);
     if (o.estado !== "en_firma") throw new ConflictException(errorTransicionOficio(o.estado, "devuelto") ?? "El oficio no está en firma.");
     const { paso, motivo: m } = decidirFirma(await this.pasos(id), usuarioDe(req));
     if (!paso) throw new ForbiddenException(m ?? "No le corresponde devolver este oficio.");
@@ -420,6 +423,8 @@ export class OficioService {
       await tx.$executeRawUnsafe(`UPDATE oficio SET estado = 'devuelto', devuelto_motivo = $2, updated_at = now() WHERE id = $1::uuid`, id, motivo.trim());
     });
     await this.historial(id, `devuelto: ${motivo.trim()}`, req);
+    // Los V°B° y firmas que quedaban pendientes ya no se piden (F091).
+    await this.avisos.resolverPorClave(o.tenant_id, clavesAvisoFirmaOficio(pendientes)).catch(() => undefined);
     await this.avisos
       .emitir(
         o.tenant_id,
@@ -493,11 +498,14 @@ export class OficioService {
     await this.alcance.exigirUnidad(req, o.unidad_id, "el oficio");
     const err = errorTransicionOficio(o.estado, "anulado");
     if (err) throw new ConflictException(err);
+    const pendientes = (await this.pasos(id)).filter((x: any) => x.estado === "pendiente").map((x: any) => x.id as string);
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(`UPDATE oficio_firma SET estado = 'anulado' WHERE oficio_id = $1::uuid AND estado = 'pendiente'`, id);
       await tx.$executeRawUnsafe(`UPDATE oficio SET estado = 'anulado', anulado_motivo = $2, updated_at = now() WHERE id = $1::uuid`, id, motivo.trim());
     });
     await this.historial(id, `anulado: ${motivo.trim()}`, req);
+    // Oficio anulado: sus avisos «V°B° / firma pendiente» salen de Mi bandeja (F091).
+    await this.avisos.resolverPorClave(o.tenant_id, clavesAvisoFirmaOficio(pendientes)).catch(() => undefined);
     return this.detalle(id, req);
   }
 

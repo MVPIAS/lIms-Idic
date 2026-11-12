@@ -269,7 +269,7 @@ export const adminApi = {
   // Reemplazos temporales (R8): roles de otra persona por un tiempo, con motivo.
   reemplazos: (id: string) => get<{ data: any[] }>(`/usuarios/${id}/reemplazos`).then((x) => x.data ?? []),
   reemplazar: (id: string, d: { reemplazadoId: string; desde?: string | null; hasta: string; motivo: string }) =>
-    post<{ data: { roles: { rol: string }[] } }>(`/usuarios/${id}/reemplazos`, d),
+    post<{ data: { roles: { rol: string }[]; texto?: string } }>(`/usuarios/${id}/reemplazos`, d),
   terminarReemplazo: (id: string, reemplazadoId: string) => post<any>(`/usuarios/${id}/reemplazos/${reemplazadoId}/terminar`, {}),
 
   // Roles y permisos
