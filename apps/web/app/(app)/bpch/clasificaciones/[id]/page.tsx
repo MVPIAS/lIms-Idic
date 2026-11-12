@@ -626,6 +626,8 @@ export default function ClasificacionPage() {
             {c.documento && <div><span style={{ color: "var(--muted)" }}>Documento:</span> {c.documento.numero}</div>}
           </div>
         )}
+        {/* F023: el error de guardar o registrar se ve junto a la decisión, no solo arriba de la página. */}
+        {error && <div className="alert warn" role="alert" style={{ marginTop: 10, marginBottom: 0 }}>{error}</div>}
       </div>
 
       {/* Acciones */}
