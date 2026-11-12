@@ -30,6 +30,7 @@ import {
 } from "./reglas-emision";
 import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
 import { NumeracionService } from "./numeracion.service";
+import { PLAZO_TX_EMISION, conReintento } from "./reintento-emision";
 import { numeroGeneral } from "./numeracion";
 import {
   documentoEnConflicto,
@@ -1627,7 +1628,9 @@ export class PlantillaRenderService {
           fechaAnterior: anterior.fecha ? diaChile(anterior.fecha) : null, motivo: opts.reemision.motivo,
         })
       : null;
-    const emitido = await this.prisma.$transaction(async (tx) => {
+    // F003: plazo amplio (el render va dentro) y un reintento ante errores transitorios
+    // (transacción vencida, bloqueo o choque de número); ver reintento-emision.ts.
+    const emitido = await conReintento(() => this.prisma.$transaction(async (tx) => {
       const version = anterior && !reemplazo ? anterior.version + 1 : 1;
       const oficial = anterior && !reemplazo
         ? null
@@ -1739,7 +1742,7 @@ export class PlantillaRenderService {
 
       if (oficial?.aviso) avisos.push(oficial.aviso);
       return { cert, plantilla, otCodigo: ctx.ot.codigo, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad };
-    });
+    }, PLAZO_TX_EMISION));
 
     const sello = await this.selloDe(emitido.cert.id);
 
