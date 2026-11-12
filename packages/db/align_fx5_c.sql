@@ -23,3 +23,15 @@ ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
 
 COMMENT ON COLUMN bpch_cabecera_ot.unidad_lote IS 'Unidad del tamaño del lote (lista unidad_tamano_lote: kilos, toneladas, unidades, pares).';
 COMMENT ON COLUMN bpch_cabecera_ot.unidad_muestra IS 'Unidad del tamaño de la muestra (lista unidad_tamano_muestra: toneladas, kilos, gramos, unidades, pares).';
+
+-- -----------------------------------------------------------------------------
+-- F020 · Mismo nombre del tipo de documento en todas las pantallas: la ruta y
+-- la lista dicen «Certificado de control»; el título del documento SCCII decía
+-- solo «INFORME DE INSPECCIÓN». Se actualiza el título de la plantilla (la
+-- versión anterior queda RETIRADA y la nueva VIGENTE con origen «script» al
+-- llamar plantilla_sincronizar_versiones() en align_cierre_permisos.sql).
+-- -----------------------------------------------------------------------------
+UPDATE plantilla_informe
+   SET cuerpo_html = replace(cuerpo_html, '<h1>INFORME DE INSPECCIÓN</h1>', '<h1>CERTIFICADO DE CONTROL (INFORME DE INSPECCIÓN)</h1>')
+ WHERE repid = 'SCCII'
+   AND cuerpo_html LIKE '%<h1>INFORME DE INSPECCIÓN</h1>%';
