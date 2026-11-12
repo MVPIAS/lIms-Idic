@@ -29,7 +29,7 @@ import {
 export type EstadoEtapa = "hecho" | "en_curso" | "pendiente" | "no_aplica" | "bloqueado";
 export type TipoRuta = "laboratorio" | "interna" | "metrologia" | "internacion" | "reinspeccion" | "armas" | "bpch" | "terreno";
 /** Pestañas del expediente de la OT a las que puede llevar el «Siguiente paso». */
-export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe" | "terreno";
+export type PestanaOt = "cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "resultados" | "informe" | "terreno" | "ordenes";
 
 export interface Etapa {
   clave: string;
@@ -160,6 +160,11 @@ export interface HechosOt {
   /** Nombres de las personas asignadas a la OT (o a sus ensayos). */
   analistas: string[];
   resultados: { total: number; pendientes: number; capturados: number; revisados: number; aprobados: number; devueltos: number };
+  /**
+   * F071: de lo anterior, lo que captura OTRO laboratorio (por su catálogo o
+   * derivado por orden interna). El «Siguiente paso» del responsable no se lo pide a sus analistas.
+   */
+  resultadosOtrosLabs?: { pendientes: number; devueltos: number };
   documentos: DocumentoAvance[];
   factura: { numero: string; estado: string } | null;
   /** Calibraciones de Metrología ligadas a la OT. */
@@ -300,11 +305,20 @@ function etapasResultados(h: HechosOt): { analisis: Etapa; revision: Etapa; apro
   };
 }
 
+/** Lo que capturan los analistas del laboratorio responsable (sin lo de otros laboratorios, F071). */
+export function porCapturarPropios(h: Pick<HechosOt, "resultados" | "resultadosOtrosLabs">): { total: number; devueltos: number; otros: number } {
+  const o = h.resultadosOtrosLabs ?? { pendientes: 0, devueltos: 0 };
+  const devueltos = Math.max(0, h.resultados.devueltos - o.devueltos);
+  const total = Math.max(0, h.resultados.pendientes - o.pendientes) + devueltos;
+  return { total, devueltos, otros: o.pendientes + o.devueltos };
+}
+
 /** Siguiente paso de los resultados (captura → revisión → aprobación), según lo que falte primero. */
 function pasoResultados(h: HechosOt, clave: string): Omit<SiguientePaso, "etapa"> {
   const r = h.resultados;
   const u = lab(h);
   const rutaCaptura = `/captura-ot?otId=${h.id}`;
+  const propios = porCapturarPropios(h);
   if (r.total === 0)
     return {
       texto: "La OT no tiene ensayos por analizar: regístrelos con las muestras",
@@ -312,9 +326,16 @@ function pasoResultados(h: HechosOt, clave: string): Omit<SiguientePaso, "etapa"
       accion: { texto: "Ir a Muestras", pestana: "muestras", permisos: ["muestra.crear"] },
     };
   const porCapturar = r.pendientes + r.devueltos;
+  if (propios.total === 0 && propios.otros > 0 && clave === "analisis")
+    return {
+      texto: `Faltan ${plural(propios.otros, "ensayo")} de otros laboratorios: emita o revise sus órdenes internas (los capturan ellos)`,
+      leToca: { rol: "Jefe de Laboratorio", unidad: u, personas: [] },
+      accion: { texto: "Ir a Órdenes internas", pestana: "ordenes", permisos: ["orden_interna.emitir"] },
+    };
   if (porCapturar > 0 || clave === "analisis")
     return {
-      texto: `Capturar resultados de ${plural(porCapturar, "ensayo")}${r.devueltos ? ` (${r.devueltos} devuelto(s) para corregir)` : ""}`,
+      texto: `Capturar resultados de ${plural(propios.total, "ensayo")}${propios.devueltos ? ` (${propios.devueltos} devuelto(s) para corregir)` : ""}` +
+        (propios.otros ? ` · ${plural(propios.otros, "ensayo")} de otros laboratorios por orden interna` : ""),
       leToca: { rol: "Analista", unidad: u, personas: h.analistas },
       accion: { texto: "Ir a Captura", ruta: rutaCaptura, permisos: ["resultado.crear"] },
     };
@@ -654,7 +675,7 @@ function rutaLaboratorio(h: HechosOt): Ruta {
           return trabajo?.paso ?? null;
         case "analisis":
           // Con todo lo propio capturado, lo que falta es la orden interna.
-          if (h.resultados.pendientes + h.resultados.devueltos === 0 && h.resultados.total > 0) {
+          if (porCapturarPropios(h).total === 0 && h.resultados.total > 0) {
             const oi = pasoOrdenInterna(h);
             if (oi) return oi;
           }

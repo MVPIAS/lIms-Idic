@@ -94,6 +94,14 @@ describe("Ruta de la OT · laboratorio (recorrido estándar)", () => {
     expect(a.siguiente?.accion).toMatchObject({ ruta: "/captura-ot?otId=ot-1", permisos: ["resultado.crear"] });
   });
 
+  it("no le pide a los analistas del responsable los ensayos de otros laboratorios (F071)", () => {
+    const a = calcularAvance(base({ ...conMuestra, resultados: res({ pendientes: 6 }), resultadosOtrosLabs: { pendientes: 3, devueltos: 0 } }));
+    expect(a.siguiente?.texto).toBe("Capturar resultados de 3 ensayos · 3 ensayos de otros laboratorios por orden interna");
+    const solo = calcularAvance(base({ ...conMuestra, resultados: res({ pendientes: 2, aprobados: 4 }), resultadosOtrosLabs: { pendientes: 2, devueltos: 0 } }));
+    expect(solo.siguiente?.texto).toMatch(/^Faltan 2 ensayos de otros laboratorios/);
+    expect(solo.siguiente?.accion?.pestana).toBe("ordenes");
+  });
+
   it("con resultados a medias: sigue en Análisis y cuenta lo capturado y lo devuelto", () => {
     const a = calcularAvance(base({ ...conMuestra, resultados: res({ pendientes: 1, capturados: 1, devueltos: 1 }) }));
     expect(a.etapaActual).toBe("analisis");
