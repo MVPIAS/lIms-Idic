@@ -36,6 +36,8 @@ function Detalle() {
   const [metodos, setMetodos] = useState<string[]>([]);
   const [f, setF] = useState<Record<string, string> | null>(null);
   const [titular, setTitular] = useState({ cambiar: false, motivo: "" });
+  // F022: lugares (plantas del cliente y tabla del BPCH) y unidades de tamaño, como la cabecera de la OT.
+  const [op, setOp] = useState<{ unidadesLote: Opcion[]; unidadesMuestra: Opcion[]; lugares: { origen: string; lugar: string; comuna: string | null }[] } | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -52,7 +54,10 @@ function Detalle() {
         identificacionLote: r.lote.identificacion ?? "",
         tamanoLote: r.lote.tamanoLote != null ? String(r.lote.tamanoLote) : "",
         tamanoMuestra: r.lote.tamanoMuestra != null ? String(r.lote.tamanoMuestra) : "",
+        unidadLote: r.lote.unidadLote ?? "",
+        unidadMuestra: r.lote.unidadMuestra ?? "",
       });
+      if (r.otId) pedir<any>("GET", `/bpch/cabecera-ot/${r.otId}`).then((c) => setOp(c?.opciones ?? null)).catch(() => setOp(null));
       setError("");
     } catch (e: any) {
       setError(e.message);
@@ -124,13 +129,37 @@ function Detalle() {
             }}>
               <fieldset disabled={!editable} style={{ border: "none", padding: 0, margin: 0 }}>
                 <div className="form-grid">
-                  <div className="field span-2"><label htmlFor="lu">Lugar de inspección</label><input id="lu" value={f.lugarInspeccion} onChange={set("lugarInspeccion")} /></div>
+                  <div className="field span-2">
+                    <label htmlFor="lu">Lugar de inspección</label>
+                    <input id="lu" list="rei-lugares" value={f.lugarInspeccion} onChange={set("lugarInspeccion")} placeholder="Elija una planta o lugar de la tabla, o escríbalo si es en terreno" />
+                    <datalist id="rei-lugares">
+                      {(op?.lugares ?? []).map((l) => <option key={`${l.origen}-${l.lugar}`} value={l.lugar}>{l.origen === "planta" ? "Planta del cliente" : "Lugar"}{l.comuna ? ` · ${l.comuna}` : ""}</option>)}
+                    </datalist>
+                  </div>
                   <div className="field"><label htmlFor="fi">Fecha de inspección</label><input id="fi" type="date" value={f.fechaInspeccion} onChange={set("fechaInspeccion")} /></div>
                   <div className="field span-2"><label htmlFor="in">Inspectores</label><input id="in" value={f.inspectores} onChange={set("inspectores")} placeholder="Iniciales" /></div>
                   <div className="field"><label htmlFor="pr">Procedimiento</label><input id="pr" value={f.procedimiento} onChange={set("procedimiento")} /></div>
                   <div className="field"><label htmlFor="il">Identificación del lote *</label><input id="il" value={f.identificacionLote} onChange={set("identificacionLote")} /></div>
-                  <div className="field"><label htmlFor="tl">Tamaño lote (uu) *</label><input id="tl" type="number" min={1} value={f.tamanoLote} onChange={set("tamanoLote")} /></div>
-                  <div className="field"><label htmlFor="tm">Tamaño muestra (uu) *</label><input id="tm" type="number" min={1} value={f.tamanoMuestra} onChange={set("tamanoMuestra")} /></div>
+                  <div className="field">
+                    <label htmlFor="tl">Tamaño del lote *</label>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <input id="tl" type="number" min={1} value={f.tamanoLote} onChange={set("tamanoLote")} style={{ minWidth: 0 }} />
+                      <select aria-label="Unidad del tamaño del lote" value={f.unidadLote} onChange={(e) => setF((x) => ({ ...x!, unidadLote: e.target.value }))} style={{ width: "auto" }}>
+                        <option value="">—</option>
+                        {(op?.unidadesLote ?? []).map((u) => <option key={u.valor} value={u.valor}>{u.etiqueta}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="tm">Tamaño de la muestra *</label>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <input id="tm" type="number" min={1} value={f.tamanoMuestra} onChange={set("tamanoMuestra")} style={{ minWidth: 0 }} />
+                      <select aria-label="Unidad del tamaño de la muestra" value={f.unidadMuestra} onChange={(e) => setF((x) => ({ ...x!, unidadMuestra: e.target.value }))} style={{ width: "auto" }}>
+                        <option value="">—</option>
+                        {(op?.unidadesMuestra ?? []).map((u) => <option key={u.valor} value={u.valor}>{u.etiqueta}</option>)}
+                      </select>
+                    </div>
+                  </div>
                   <div className="field"><label htmlFor="ve">Vencimiento del producto</label><input id="ve" type="date" value={f.fechaVencimientoProducto} onChange={set("fechaVencimientoProducto")} /></div>
                   <div className="field"><label htmlFor="vi">Vigencia del informe</label><input id="vi" type="date" value={f.vigenciaInforme} onChange={set("vigenciaInforme")} /></div>
                   <div className="field"><label htmlFor="ob">Observaciones</label><input id="ob" value={f.observaciones} onChange={set("observaciones")} /></div>
@@ -143,7 +172,11 @@ function Detalle() {
                 <span className="pill green">Lote registrado como muestra de la OT</span>
               ) : editable && puede("muestra.crear") ? (
                 <>
-                  <SelectorPanel catElementoId={d.producto.catElementoId} valor={metodos} onChange={setMetodos} />
+                  {d.producto.catElementoId ? (
+                    <SelectorPanel catElementoId={d.producto.catElementoId} valor={metodos} onChange={setMetodos} />
+                  ) : (
+                    <EnsayosSinElemento propuestos={d.ensayosPropuestos} valor={metodos} onChange={setMetodos} />
+                  )}
                   <button type="button" className="btn primary sm" style={{ marginTop: 6 }} disabled={!metodos.length} onClick={() => accion("POST", "/lote", { metodoIds: metodos }, "Lote registrado como muestra.")}>
                     Registrar lote como muestra ({metodos.length} ensayos)
                   </button>
@@ -189,5 +222,66 @@ function Detalle() {
         </div>
       </div>
     </div>
+  );
+}
+
+type Opcion = { valor: string; etiqueta: string };
+type MetodoSimple = { id: string; codigo: string; nombre: string; analitos?: number };
+
+/**
+ * F012: producto sin elemento del catálogo (p. ej. inscrito en la Codificación
+ * Única desde un prototipo). Se proponen los ensayos del prototipo o de la OT
+ * original y se pueden agregar otros métodos del catálogo.
+ */
+function EnsayosSinElemento({ propuestos, valor, onChange }: { propuestos: { origen: string; metodos: MetodoSimple[] } | null; valor: string[]; onChange: (ids: string[]) => void }) {
+  const [lista, setLista] = useState<MetodoSimple[]>([]);
+  const [q, setQ] = useState("");
+  const [res, setRes] = useState<MetodoSimple[]>([]);
+  useEffect(() => {
+    const ms = propuestos?.metodos ?? [];
+    setLista(ms);
+    if (ms.length && !valor.length) onChange(ms.filter((m) => (m.analitos ?? 1) > 0).map((m) => m.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [propuestos]);
+  useEffect(() => {
+    const t = q.trim();
+    if (t.length < 2) { setRes([]); return; }
+    const h = setTimeout(() => {
+      pedir<any>("GET", `/cat/metodos?search=${encodeURIComponent(t)}&limit=20`)
+        .then((d) => setRes((Array.isArray(d) ? d : d?.data ?? []).map((m: any) => ({ id: m.id, codigo: m.codigo, nombre: m.nombre }))))
+        .catch(() => setRes([]));
+    }, 300);
+    return () => clearTimeout(h);
+  }, [q]);
+  const marcar = (id: string, si: boolean) => onChange(si ? [...new Set([...valor, id])] : valor.filter((x) => x !== id));
+  return (
+    <fieldset style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 8 }}>
+      <legend style={{ fontSize: 11, color: "var(--muted)", padding: "0 4px" }}>Ensayos del lote ({valor.length} marcados)</legend>
+      <p style={{ margin: "0 0 6px", fontSize: 12 }}>
+        {propuestos
+          ? <>El producto no tiene elemento del catálogo: se proponen los ensayos de la {propuestos.origen}.</>
+          : "El producto no tiene elemento del catálogo ni ensayos de origen: busque los métodos en el catálogo."}
+      </p>
+      {lista.map((m) => (
+        <label key={m.id} style={{ display: "flex", gap: 6, alignItems: "flex-start", fontSize: 12.5, padding: "3px 0" }}>
+          <input type="checkbox" checked={valor.includes(m.id)} onChange={(e) => marcar(m.id, e.target.checked)} />
+          <span><span className="codigo">{m.codigo}</span> {m.nombre}</span>
+        </label>
+      ))}
+      <div className="field" style={{ marginTop: 6, position: "relative" }}>
+        <label htmlFor="rei-buscar-metodo">Agregar un método del catálogo</label>
+        <input id="rei-buscar-metodo" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código o nombre del método" autoComplete="off" />
+        {res.length > 0 && (
+          <div role="listbox" style={{ border: "1px solid var(--line)", borderRadius: 6, marginTop: 4, maxHeight: 200, overflowY: "auto", background: "#fff" }}>
+            {res.map((m) => (
+              <button key={m.id} type="button" role="option" aria-selected={false} style={{ display: "block", width: "100%", textAlign: "left", padding: "6px 8px", border: "none", borderBottom: "1px solid #eef2f5", background: "none", cursor: "pointer", fontSize: 12.5 }}
+                onClick={() => { setLista((xs) => (xs.some((x) => x.id === m.id) ? xs : [...xs, m])); marcar(m.id, true); setQ(""); setRes([]); }}>
+                <span className="codigo">{m.codigo}</span> {m.nombre}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </fieldset>
   );
 }
