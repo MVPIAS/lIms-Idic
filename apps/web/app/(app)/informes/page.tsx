@@ -413,12 +413,20 @@ function InformesContenido() {
                   <input type="radio" name="modalidad" value={m} checked={modalidad === m} onChange={() => { setModalidad(m); setPreview(null); }} style={{ marginTop: 3 }} />
                   <span>
                     <b style={{ fontSize: 13 }}>{MODALIDAD[m].texto}</b>
-                    {propuesta.modalidad === m && <span className="pill teal" style={{ marginLeft: 6 }}>Sugerido</span>}
+                    {propuesta.modalidad === m && (
+                      <span className="pill teal" style={{ marginLeft: 6 }}>{propuesta.modalidadOrigen === "plantilla" ? "Por defecto de la plantilla" : "Sugerido"}</span>
+                    )}
                     <small style={{ display: "block", color: "var(--muted)", marginTop: 2 }}>{MODALIDAD[m].ayuda}</small>
                   </span>
                 </label>
               ))}
             </div>
+            {propuesta.modalidadOrigen === "plantilla" && propuesta.modalidadPorRequisitos && propuesta.modalidadPorRequisitos !== modalidad && (
+              <p className="subtitle" style={{ margin: "6px 0 0" }}>
+                Esta plantilla emite por defecto el «{MODALIDAD[propuesta.modalidad].texto}». Según los requisitos de los ensayos
+                ({propuesta.conRequisito} de {propuesta.totalEnsayos}) corresponde el «{MODALIDAD[propuesta.modalidadPorRequisitos].texto}»: elíjalo arriba si el informe debe llevar el veredicto.
+              </p>
+            )}
             {modalidad === "cumplimiento" && propuesta.conRequisito < propuesta.totalEnsayos && (
               <p className="subtitle" style={{ margin: "6px 0 0" }}>
                 {propuesta.totalEnsayos - propuesta.conRequisito} ensayo(s) sin requisito saldrán como «No especificado» (informativo).

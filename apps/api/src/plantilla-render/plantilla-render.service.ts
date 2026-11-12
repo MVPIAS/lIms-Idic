@@ -48,6 +48,8 @@ import {
   filaInspeccion,
   filasMetodos,
   modalidadInicial,
+  modalidadSugerida,
+  origenModalidad,
   tieneRequisito,
   NOMBRE_MODALIDAD,
   type EstructuraInforme,
@@ -672,6 +674,9 @@ export class PlantillaRenderService {
     const unaMuestra = ctx.muestras.length === 1 ? ctx.muestras[0] : null;
     return {
       modalidad: modalidadInicial(cfg, ctx.paraInforme),
+      modalidadOrigen: origenModalidad(cfg),
+      /** La que corresponde a los requisitos, aunque la plantilla fije otra (F072). */
+      modalidadPorRequisitos: modalidadSugerida(ctx.paraInforme),
       conRequisito: ctx.paraInforme.filter(tieneRequisito).length,
       totalEnsayos: ctx.paraInforme.length,
       portada:
