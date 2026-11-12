@@ -188,7 +188,16 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
         <tbody>
           {(cot.lineas ?? []).map((l: any) => (
             <tr key={l.id}>
-              <td><span className="codigo">{l.ensayoCodigo ?? l.tipo}</span></td>
+              <td>
+                <span className="codigo">{l.ensayoCodigo ?? l.tipo}</span>
+                {/* Ficha de ensayo consultable por Comercial (reunión 2, F034): recursos y estructura del precio. */}
+                {l.catEnsayoId && (puede ? puede("lista_precio.ver") : true) && (
+                  <Link href={`/catalogo/ensayos/${l.catEnsayoId}/ficha` as any} target="_blank" style={{ display: "block", fontSize: 11.5 }}
+                    title="Ficha de ensayo: personal, equipos, insumos y estructura del precio (se abre en otra pestaña)">
+                    Ficha del ensayo ↗
+                  </Link>
+                )}
+              </td>
               <td>
                 {l.muestraN ? <span className="pill blue" style={{ marginRight: 6 }}>Muestra {l.muestraN}</span> : null}
                 {l.descripcion ?? "—"}
