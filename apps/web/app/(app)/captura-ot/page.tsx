@@ -144,6 +144,8 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     ordenInterna: r.ordenInterna ?? null,
     puedo: r.puedo ?? null,
     bloqueoAprobar: r.bloqueoAprobar,
+    // Revisión previa opcional en su laboratorio (F065): sin copiarlo, «Aprobar» no aparecía.
+    apruebaSinRevision: !!r.apruebaSinRevision,
     qcBloqueo: r.qcBloqueo ?? null,
     tipoDato: r.tipoDato === "atributo" ? "atributo" : "numerico",
     requisito: r.requisito ?? null,
@@ -604,6 +606,8 @@ export default function CapturaOtPage() {
   // Revisión previa opcional en el laboratorio: lo capturado también se aprueba (sesiones oct-nov 2026).
   const enAprobacion = (f: Fila) => f.estado === "revisado_n1" || (f.estado === "capturado" && !!f.apruebaSinRevision);
   const aprobablesEnBloque = filas.filter((f) => enAprobacion(f) && puede(f, "aprobar") && !sinVeredicto(f));
+  // Hay capturados que se aprueban sin revisión previa: «Aprobar todo» no es solo «lo revisado».
+  const conSinRevision = aprobablesEnBloque.some((f) => f.estado === "capturado");
   const porAprobarAjenos = aprobablesEnBloque.filter((f) => f.analistaId !== yo && !revisadoPorMi(f)).length;
   // Los que «Aprobar todo» deja fuera por la segregación de funciones (D06-20).
   const omitidosCaptura = aprobablesEnBloque.filter((f) => f.analistaId === yo).length;
@@ -739,10 +743,12 @@ export default function CapturaOtPage() {
                 <button className="btn success sm" disabled={!porAprobarAjenos || ocupado === "__ot"} onClick={() => accionOt("aprobar")}
                   aria-describedby={omitidosCaptura + omitidosRevision ? "aprobar-todo-omitidos" : undefined}
                   title={
-                    "Aprueba todos los resultados revisados de la OT, salvo los que capturó usted y los que revisó usted: " +
-                    "la revisión y la aprobación las hacen personas distintas."
+                    (conSinRevision
+                      ? "Aprueba todos los resultados revisados de la OT y los capturados de los laboratorios con revisión previa opcional, "
+                      : "Aprueba todos los resultados revisados de la OT, ") +
+                    "salvo los que capturó usted y los que revisó usted: la revisión y la aprobación las hacen personas distintas."
                   }>
-                  Aprobar todo lo revisado ({porAprobarAjenos})
+                  {conSinRevision ? "Aprobar todo" : "Aprobar todo lo revisado"} ({porAprobarAjenos})
                 </button>
               )}
               <Link href={`/ot/${ot.id}/calculos` as any} className="btn outline sm" title="Lecturas, fórmula aplicada, factor e historial de cambios de cada ensayo (solo lectura, exportable)">
