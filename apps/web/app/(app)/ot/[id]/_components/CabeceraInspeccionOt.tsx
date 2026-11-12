@@ -310,8 +310,8 @@ function LotesInspeccion({ otId, ficha, onGuardado }: { otId: string; ficha: Fic
       <h4 id="cab-lotes" style={{ margin: "0 0 4px", fontSize: 13 }}>Lotes de la inspección</h4>
       <p className="subtitle" style={{ margin: "0 0 6px" }}>Uno o más lotes, cada uno con su especificación, tamaños con unidad y fecha de vencimiento o vigencia.</p>
       {error && <div className="alert warn" role="alert">{error}</div>}
+      {/* F016: la tabla se desplaza dentro de su caja y no ensancha la pestaña. */}
       {filas.length > 0 && (
-        {/* F016: la tabla se desplaza dentro de su caja y no ensancha la pestaña. */}
         <div style={{ overflowX: "auto", maxWidth: "100%" }}>
           <table className="data" aria-label="Lotes de la inspección" style={{ width: "100%" }}>
             <thead>
