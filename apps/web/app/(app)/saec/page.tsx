@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { fecha } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
+import RequierePermiso from "@/components/RequierePermiso";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 const auth = () => ({
@@ -56,7 +57,16 @@ const FORM_VACIO = {
   crearOt: false,
 };
 
+/** Sin evidencia.ver: «Sin acceso», como el resto de las pantallas del SAEC (F048). */
 export default function SaecEvidenciasPage() {
+  return (
+    <RequierePermiso perm="evidencia.ver" titulo="Evidencias">
+      <SaecEvidencias />
+    </RequierePermiso>
+  );
+}
+
+function SaecEvidencias() {
   // Registrar, editar y dar de baja según el permiso (el perito solo consulta).
   const { puede } = usePermisos();
   const [rows, setRows] = useState<any[]>([]);

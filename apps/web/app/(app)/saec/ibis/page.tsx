@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
+import { usePermisos } from "@/lib/permisos";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
@@ -37,6 +38,10 @@ export default function IbisEtlPage() {
   const [msg, setMsg] = useState<{ tipo: string; texto: string } | null>(null);
   const [barriendo, setBarriendo] = useState(false);
   const [asignando, setAsignando] = useState(false);
+  // Guardar la carpeta y barrerla exigen ibis.config / ibis.barrer: sin ellos no se ofrecen (F044).
+  const { puede } = usePermisos();
+  const configura = puede("ibis.config");
+  const barre = puede("ibis.barrer");
 
   async function cargar() {
     try {
@@ -70,6 +75,7 @@ export default function IbisEtlPage() {
 
   async function guardarCfg(ev: React.FormEvent) {
     ev.preventDefault(); setMsg(null);
+    if (!configura) return;
     try {
       const res = await fetch(`${API}/ibis/config`, {
         method: "PUT", headers: auth(),
@@ -150,15 +156,15 @@ export default function IbisEtlPage() {
           <div className="form-grid">
             <div className="field">
               <label>Carpeta de entrada</label>
-              <input value={cfg.carpeta_entrada ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_entrada: e.target.value })} placeholder="/data/ibis/entrada" />
+              <input readOnly={!configura} value={cfg.carpeta_entrada ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_entrada: e.target.value })} placeholder="/data/ibis/entrada" />
             </div>
             <div className="field">
               <label>Carpeta de procesados</label>
-              <input value={cfg.carpeta_procesados ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_procesados: e.target.value })} placeholder="/data/ibis/procesados" />
+              <input readOnly={!configura} value={cfg.carpeta_procesados ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_procesados: e.target.value })} placeholder="/data/ibis/procesados" />
             </div>
             <div className="field">
               <label>Carpeta de errores</label>
-              <input value={cfg.carpeta_errores ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_errores: e.target.value })} placeholder="/data/ibis/errores" />
+              <input readOnly={!configura} value={cfg.carpeta_errores ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_errores: e.target.value })} placeholder="/data/ibis/errores" />
             </div>
           </div>
           <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -166,10 +172,12 @@ export default function IbisEtlPage() {
               {cfg.ultimo_barrido_at ? `Último barrido: ${fechaHora(cfg.ultimo_barrido_at)}` : "Sin barridos previos."}
             </span>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn sm" type="submit">Guardar carpeta</button>
-              <button className="btn primary sm" type="button" onClick={barrer} disabled={barriendo}>
-                {barriendo ? "Barriendo…" : "▶ Barrer carpeta ahora"}
-              </button>
+              {configura && <button className="btn outline sm" type="submit">Guardar carpeta</button>}
+              {barre && (
+                <button className="btn primary sm" type="button" onClick={barrer} disabled={barriendo}>
+                  {barriendo ? "Barriendo…" : "▶ Barrer carpeta ahora"}
+                </button>
+              )}
             </div>
           </div>
         </form>
