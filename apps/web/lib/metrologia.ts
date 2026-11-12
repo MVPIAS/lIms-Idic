@@ -12,6 +12,22 @@ export type PuntoCalc = Punto & {
   uc: number; uExp: number; en: number; dentro: boolean; componentes: CompCalc[];
 };
 
+/**
+ * F058 · textos de un borrador de reemisión según su modalidad: la modificación conserva
+ * el número con la versión siguiente (X-V2) y el reemplazo emite un número nuevo.
+ */
+export function textoReemision(numeroAnterior: string, modalidad: string | null | undefined): { aviso: string; presentacion: string } {
+  if (modalidad === "modificacion")
+    return {
+      aviso: `Modificación: este borrador modifica el certificado N° ${numeroAnterior}; al emitirse conserva el número con la versión siguiente e imprime «Certificado modificado».`,
+      presentacion: `Modifica el certificado N° ${numeroAnterior} (modificación en el LIMS).`,
+    };
+  return {
+    aviso: `Reemplazo: este certificado reemplazará al N° ${numeroAnterior} al emitirse, con un número nuevo.`,
+    presentacion: `Reemplaza al certificado N° ${numeroAnterior} (reemplazo en el LIMS).`,
+  };
+}
+
 const avg = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 const stdev = (a: number[]) => {
   if (a.length < 2) return 0;

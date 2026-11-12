@@ -103,6 +103,9 @@ export function planEdicion(
     const nuevo = vacio(pedido[c]) ? null : String(pedido[c]).trim();
     const previo = vacio(actual[c]) ? null : String(actual[c]).trim();
     if (nuevo === previo) continue;
+    // F084: «1,5» (como viene de la E.T.) y «1.5» son el mismo límite: no es un cambio.
+    if ((c === "limiteInf" || c === "nominal" || c === "limiteSup") && nuevo != null && previo != null
+      && esNumeroTexto(nuevo) && esNumeroTexto(previo) && Number(nuevo.replace(",", ".")) === Number(previo.replace(",", "."))) continue;
     cambios[c] = nuevo;
     campos.push(c);
     if (c === "formula") requiereJefatura = true;

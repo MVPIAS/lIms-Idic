@@ -21,6 +21,7 @@
 import { generoDocumentoTrabajo } from "../formularios/trabajo";
 import { faltantesParaCerrar } from "./plazos";
 import { condicionFinal, TEXTO_CONDICION } from "../bpch/comun/reglas-bpch";
+import { pasosTerreno } from "../terreno/reglas-terreno";
 import {
   ESTADOS_EXTERNO_EN_CURSO, calibracionVigente, documentosDeMetrologia, esEntregableNoCalibrable, esNoCalibrable, faltantesMetrologia,
   type DocumentoNoCalibrable,
@@ -246,7 +247,7 @@ const ORIGENES_INTERNOS = ["OT_INTERNA", "INTERLABORATORIO"];
 /** Tipo de ruta que corresponde a la OT. */
 export function tipoRuta(h: HechosOt): TipoRuta {
   if (h.armas) return "armas";
-  if (h.terreno) return "terreno";
+  if (h.terreno || terrenoPorAbrir(h)) return "terreno";
   if (h.internacion) return "internacion";
   if (h.reinspeccion) return "reinspeccion";
   // Metrología: laboratorio de la Sección Metrología que trabaja con calibraciones
@@ -257,6 +258,20 @@ export function tipoRuta(h: HechosOt): TipoRuta {
   if (h.rama === "bpch") return "bpch";
   return "laboratorio";
 }
+
+/**
+ * F086 · OT de un laboratorio que trabaja en terreno (SVM, LAM, SEO) registrada sin
+ * elementos: aún sin abrir el trabajo en terreno, sigue la ruta de terreno (abrirlo),
+ * no la de recepción de muestras. Con muestras, resultados o muestreo es de laboratorio.
+ */
+export function terrenoPorAbrir(h: Pick<HechosOt, "terrenoAplica" | "terreno" | "muestras" | "resultados" | "muestreos" | "requiereMuestreo">): boolean {
+  return Boolean(h.terrenoAplica) && !h.terreno && h.muestras.total === 0 && h.resultados.total === 0
+    && !(h.muestreos?.length) && !h.requiereMuestreo;
+}
+
+/** Pasos del terreno aún sin abrir (todos pendientes; el primero es la apertura). */
+const pasosTerrenoSinAbrir = () =>
+  pasosTerreno({ abierto: false, analistas: 0, pruebas: 0, registradas: 0, adjuntos: { protocolo: 0, hoja_control: 0, ivc: 0 }, ivcGrado: null, cerrado: false }).pasos;
 
 const plural = (n: number, s: string, p = `${s}s`) => `${n} ${n === 1 ? s : p}`;
 const lab = (h: HechosOt) => h.unidad?.codigo ?? null;
@@ -1087,7 +1102,7 @@ function rutaArmas(h: HechosOt): Ruta {
  * entrega, el cierre de la OT y la factura del flujo general.
  */
 function rutaTerreno(h: HechosOt): Ruta {
-  const x = h.terreno!;
+  const x = h.terreno ?? { pasos: pasosTerrenoSinAbrir() };
   const docs = etapasDocumentos(h.documentos, "Emisión del IVC");
   const cierre = etapaCierre(h);
   const fac = etapasFactura(h);

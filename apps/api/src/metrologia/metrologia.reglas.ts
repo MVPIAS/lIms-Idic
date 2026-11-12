@@ -90,6 +90,29 @@ export function estadoPatron(vence: string | Date | null | undefined, fecha: str
   const lim = new Date(Date.parse(fecha + "T12:00:00Z") + 30 * 86400000).toISOString().slice(0, 10);
   return v <= lim ? "por_vencer" : "vigente";
 }
+/**
+ * F051/F053 · laboratorios de un patrón o equipo auxiliar del maestro, normalizados
+ * (mayúsculas, sin repetir, sin vacíos). Lista vacía = común a todos los laboratorios.
+ * El primero queda también en la columna antigua `laboratorio`.
+ */
+export function normalizarLaboratorios(xs: readonly unknown[] | null | undefined): string[] {
+  return [...new Set((xs ?? []).map((x) => String(x ?? "").trim().toUpperCase()).filter((x) => /^[A-Z0-9]{2,10}$/.test(x)))];
+}
+
+/**
+ * Coeficientes S = a·F + b·F² + c·F³ del certificado del patrón (columna SMP de la hoja
+ * del LNF) escritos en el maestro: los tres números o ninguno. Devuelve el objeto a
+ * guardar, `null` para borrarlos o un mensaje de error.
+ */
+export function coeficientesSmpEditados(x: { a?: number | null; b?: number | null; c?: number | null } | null | undefined): { a: number; b: number; c: number } | null | { error: string } {
+  if (!x) return null;
+  const v = [x.a, x.b, x.c];
+  if (v.every((n) => n == null)) return null;
+  if (v.some((n) => n == null || !Number.isFinite(n))) return { error: "Escriba los tres coeficientes a, b y c del certificado (use 0 si alguno no aplica)." };
+  if (v.every((n) => n === 0)) return { error: "Los coeficientes a, b y c no pueden ser todos cero." };
+  return { a: x.a as number, b: x.b as number, c: x.c as number };
+}
+
 export interface PatronRef { id: string; codigo?: string | null; nombre: string; vence?: string | Date | null; activo?: boolean }
 /** Bloqueos (patrón vencido o dado de baja, más de 3, repetidos) y avisos (vence en menos de 30 días). */
 export function revisarPatrones(patrones: PatronRef[], pedidos: string[], fecha: string): { errores: string[]; avisos: string[] } {

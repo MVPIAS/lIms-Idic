@@ -76,6 +76,7 @@ import { anioChile, diaChile } from "../common/fecha-chile";
 import { leerCondicion2 } from "../laboratorio/requisito-compuesto";
 import { urlVerificacionBase } from "../common/url-verificacion";
 import { aplanarVariables } from "./plantilla-versiones";
+import { bloqueResultadosTerreno } from "../terreno/reglas-terreno";
 
 /** Versión de una plantilla del repositorio (cuerpo + formato) que rellena el motor. */
 export interface VersionPlantilla {
@@ -195,6 +196,34 @@ export class PlantillaRenderService {
   private readonly validadores: ((otId: string, tipoDocumento: string, tenantId: string) => Promise<string[]>)[] = [];
   registrarValidadorEmision(v: (otId: string, tipoDocumento: string, tenantId: string) => Promise<string[]>) {
     this.validadores.push(v);
+  }
+
+  /** F083 · trabajo en terreno de la OT (null si no tiene o la BD aún no tiene la tabla). */
+  private async terrenoDeOt(otId: string): Promise<{ cerrado: boolean; ivcGrado: string | null } | null> {
+    try {
+      const [t] = await this.prisma.$queryRawUnsafe<{ cerrada_at: Date | null; ivc_grado: string | null }[]>(
+        `SELECT cerrada_at, ivc_grado FROM ot_terreno WHERE ot_id = $1::uuid`, otId);
+      return t ? { cerrado: !!t.cerrada_at, ivcGrado: t.ivc_grado ?? null } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** F083 · tabla de resultados del informe de una OT en terreno (lista de chequeo e IVC). */
+  private async bloqueTerreno(otId: string): Promise<string | null> {
+    try {
+      const [t] = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT id, lugar, ivc_numero, ivc_grado, ivc_conclusion FROM ot_terreno WHERE ot_id = $1::uuid`, otId);
+      if (!t) return null;
+      const pruebas = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT p.sistema, p.prueba, p.requisito, p.resultado, p.observacion,
+                NULLIF(concat_ws(' · ', u.descripcion, u.chasis, u.serie), '') AS unidad
+           FROM ot_terreno_prueba p LEFT JOIN ot_terreno_unidad u ON u.id = p.unidad_id
+          WHERE p.terreno_id = $1::uuid ORDER BY p.orden`, t.id);
+      return bloqueResultadosTerreno({ lugar: t.lugar, ivcNumero: t.ivc_numero, ivcGrado: t.ivc_grado, conclusion: t.ivc_conclusion, pruebas });
+    } catch {
+      return null;
+    }
   }
 
   /** Verificación pública: datos extra por tipo de documento (p. ej. vigencia del certificado por arma). */
@@ -797,6 +826,9 @@ export class PlantillaRenderService {
       termograma_anexo: bloqueTermograma(termogramas, "Registros del instrumento"),
       identificacion_muestras: bloqueIdentificacion(ctx.identificacion),
     };
+    // F083: una OT en terreno no tiene captura normal; sus resultados son los del trabajo en terreno.
+    const terrenoHtml = ctx.resultados.length === 0 ? await this.bloqueTerreno(otId) : null;
+    if (terrenoHtml) bloques.tabla_resultados = terrenoHtml;
     // Contexto de otros módulos: nunca pisa una clave del motor.
     for (const [clave, proveedor] of this.proveedores) {
       const extra = await proveedor(
@@ -824,7 +856,9 @@ export class PlantillaRenderService {
     if (faltantes.length)
       avisos.push(`Placeholders sin dato en el expediente (se emiten vacíos): ${faltantes.join(", ")}.`);
     if (ctx.resultados.length === 0)
-      avisos.push("La OT no tiene resultados registrados: la tabla de resultados sale vacía.");
+      avisos.push(terrenoHtml
+        ? "OT en terreno: la tabla de resultados sale del trabajo en terreno (lista de chequeo e IVC)."
+        : "La OT no tiene resultados registrados: la tabla de resultados sale vacía.");
     if (ctx.cobertura)
       avisos.push(`Documento de una parte de la OT: ${ctx.cobertura}. Imprime solo sus muestras y resultados.`);
     const sinNombre = ctx.paraInforme.filter((r) => !r.ensayo || !r.ensayo.trim()).length;
@@ -1240,6 +1274,7 @@ export class PlantillaRenderService {
             analito: r.analito?.nombre ?? r.catAnalito?.nombre ?? null,
           })),
           plantilla.tipo,
+          resultados.length === 0 ? await this.terrenoDeOt(otId) : null,
         ),
       );
 

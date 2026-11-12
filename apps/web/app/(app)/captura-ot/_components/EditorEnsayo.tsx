@@ -34,6 +34,7 @@ import { useMemo, useState } from "react";
 import { aInputHoraChile, deInputHoraChile, fechaHora } from "@/lib/format";
 import { confirmar, toast } from "@/components/ui/feedback";
 import { llamar, leerReplicas } from "@/lib/laboratorio";
+import { cambiosEspecificacion, limiteConPunto } from "@/lib/especificaciones";
 
 export interface EnsayoEditable {
   id: string;
@@ -159,7 +160,6 @@ const vacio = (v: any) => v == null || String(v).trim() === "";
 /** Límites numéricos: en pantalla con coma decimal; se guardan como vienen del catálogo (punto). */
 const NUM_LIMITE = /^-?\d+([.,]\d+)?$/;
 const limiteConComa = (v: string | number | null | undefined) => (v == null ? "" : NUM_LIMITE.test(String(v).trim()) ? String(v).trim().replace(".", ",") : String(v));
-const limiteConPunto = (k: string, v: string) => (["limiteInf", "nominal", "limiteSup"].includes(k) && NUM_LIMITE.test(v) ? v.replace(",", ".") : v);
 
 /**
  * Lo escrito en «Resultado» al guardar la especificación de la orden: el editor
@@ -267,16 +267,12 @@ export default function EditorEnsayo({
 
   const editable = (k: string) =>
     puedeCapturar && (esJefatura || vacio(cat[k]) || (k === "tipoDato" && ["limiteInf", "nominal", "limiteSup", "requisito"].every((c) => vacio(cat[c]))));
-  const cambiosEsp = useMemo(() => {
-    const out: Record<string, string | null> = {};
-    const actual: Record<string, any> = { ...e, tipoDato: e.tipoDato, evaluacion: e.evaluacion ?? "con_condicion" };
-    for (const k of ["tipoDato", "evaluacion", "limiteInf", "nominal", "limiteSup", "unidad", "requisito", "formula"] as const) {
-      const a = vacio(actual[k]) ? "" : String(actual[k]).trim();
-      const n = limiteConPunto(k, String((esp as any)[k] ?? "").trim());
-      if (a !== n) out[k] = n === "" ? null : n;
-    }
-    return out;
-  }, [esp, e]);
+  // F084: un límite de la E.T. con coma («1,5») no es un cambio frente a «1.5».
+  const cambiosEsp = useMemo(
+    () => cambiosEspecificacion({ ...e, tipoDato: e.tipoDato, evaluacion: e.evaluacion ?? "con_condicion" }, esp,
+      ["tipoDato", "evaluacion", "limiteInf", "nominal", "limiteSup", "unidad", "requisito", "formula"]),
+    [esp, e],
+  );
   const hayCambiosEsp = Object.keys(cambiosEsp).length > 0;
   // Cambiar lo que trajo el catálogo, el tipo (con especificación) o la fórmula lo hace la jefatura con motivo.
   const catalogoTraeEspec = ["limiteInf", "nominal", "limiteSup", "requisito"].some((k) => !vacio(cat[k]));
@@ -455,7 +451,7 @@ export default function EditorEnsayo({
           </div>
           {CAMPOS.map((c) => (
             <div key={c.k} className={`field${editable(c.k) ? "" : " readonly"}`}>
-              <label htmlFor={`es-${c.k}-${e.id}`}>{c.l}{!vacio(cat[c.k]) && String(cat[c.k]) !== limiteConPunto(c.k, String((esp as any)[c.k]).trim()) ? ` · catálogo: ${c.k === "unidad" ? cat[c.k] : limiteConComa(cat[c.k])}` : ""}</label>
+              <label htmlFor={`es-${c.k}-${e.id}`}>{c.l}{!vacio(cat[c.k]) && limiteConPunto(c.k, String(cat[c.k]).trim()) !== limiteConPunto(c.k, String((esp as any)[c.k]).trim()) ? ` · catálogo: ${c.k === "unidad" ? cat[c.k] : limiteConComa(cat[c.k])}` : ""}</label>
               <input id={`es-${c.k}-${e.id}`} value={(esp as any)[c.k]} readOnly={!editable(c.k)} onChange={(x) => setEsp({ ...esp, [c.k]: x.target.value })}
                 placeholder={editable(c.k) ? "vacío" : ""} />
             </div>

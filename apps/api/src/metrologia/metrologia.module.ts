@@ -43,7 +43,7 @@ import { CLAVE_LOGO, claveValida, clavesEsquema, esquemaEfectivo, imagenCert, MA
 import {
   ESTADO_TRAS, accionesDisponibles, clavePaso, codigoCalibracion, estadoDe, fechaCalibracion, motivoNoEnviable, motivoRechazo, ordenElabora,
   pasoPendiente, pasosSinResponsable,
-  plantillaVacia, puedeFirmarPaso, type AccionCal, type ContextoCal, type FirmaHecha, type PasoFirmaCal,
+  plantillaVacia, puedeFirmarPaso, motivoAutoRevision, motivoFechaFutura, motivoReemplazado, type AccionCal, type ContextoCal, type FirmaHecha, type PasoFirmaCal,
 } from "./metrologia.flujo";
 import { calibracionesDeOt, instrumentosDeOt } from "./metrologia-ot.datos";
 import {
@@ -54,7 +54,7 @@ import { MetrologiaDocumentosController, MetrologiaDocumentosService } from "./m
 import { urlVerificacionBase } from "../common/url-verificacion";
 import {
   avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, motivoNoEmiteMetrologo, nuevoCodigoVerificacion, numeroCertificado,
-  revisarPatrones, uCertificada, type FilaCmc, type Firmante,
+  revisarPatrones, uCertificada, normalizarLaboratorios, coeficientesSmpEditados, type FilaCmc, type Firmante,
 } from "./metrologia.reglas";
 import { ZONA_CHILE, SQL_ZONA, hoyChile, diaChile } from "../common/fecha-chile";
 import { esModalidadReemision, motivoNoReemite, numeroModificado } from "../common/leyenda-reemision";
@@ -512,6 +512,8 @@ export class MetrologiaController {
       `SELECT p.id, p.codigo, p.tipo, p.nombre, p.marca, p.modelo, p.serie, p.rango, p.clase, p.norma_referencia, p.puesta_marcha,
               p.emisor, p.n_certificado, p.ultima_calibracion, p.intervalo_meses, p.vence, p.trazabilidad, p.u_expandida, p.deriva,
               p.laboratorio, p.fuente, p.observacion, p.activo, m.codigo AS magnitud,
+              -- F051/F053: un auxiliar puede ser de varios laboratorios (LMT, LMTE, LNF).
+              COALESCE(p.laboratorios, CASE WHEN p.laboratorio IS NULL THEN '{}'::varchar[] ELSE ARRAY[p.laboratorio] END) AS laboratorios,
               p.rango_min, p.rango_max, p.unidad_rango, p.correcciones, p.coeficientes, p.valores_certificado
          FROM met_patron p LEFT JOIN met_magnitud m ON m.id = p.magnitud_id
         WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ORDER BY m.codigo, p.codigo`, tenantId(req));
@@ -534,6 +536,8 @@ export class MetrologiaController {
       d.emisor ?? null, d.n_certificado ?? null, d.ultima_calibracion || null, d.intervalo_meses ?? null, d.vence || null, d.trazabilidad ?? null,
       d.u_expandida ?? null, d.deriva ?? null, d.laboratorio ?? "LMT", d.activo ?? null);
     if (!rows.length) throw new BadRequestException(`Magnitud desconocida: ${d.magnitud}`);
+    const labs = d.laboratorios != null ? normalizarLaboratorios(d.laboratorios) : normalizarLaboratorios([d.laboratorio ?? "LMT"]);
+    await prisma.$executeRawUnsafe(`UPDATE met_patron SET laboratorios = $2::varchar[], laboratorio = $3 WHERE id = $1::uuid`, rows[0].id, labs, labs[0] ?? null);
     return { data: { id: rows[0].id } };
   }
 
@@ -556,6 +560,19 @@ export class MetrologiaController {
       if (val === undefined) continue;
       vals.push(val);
       set.push(`${c} = $${vals.length}${tipo ? "::" + tipo : ""}`);
+    }
+    // F051/F053: laboratorios del equipo (vacío = común); el primero queda en la columna antigua.
+    if (d.laboratorios !== undefined) {
+      const labs = normalizarLaboratorios(d.laboratorios ?? []);
+      vals.push(labs); set.push(`laboratorios = $${vals.length}::varchar[]`);
+      vals.push(labs[0] ?? null); set.push(`laboratorio = $${vals.length}`);
+    }
+    // F051: coeficientes a, b, c del certificado (columna SMP del LNF); conserva t, u, v y la clase.
+    if (d.smp !== undefined) {
+      const k = coeficientesSmpEditados(d.smp);
+      if (k && "error" in k) throw new BadRequestException(k.error);
+      if (k) { vals.push(JSON.stringify(k)); set.push(`coeficientes = COALESCE(coeficientes, '{}'::jsonb) || $${vals.length}::jsonb`); }
+      else set.push(`coeficientes = NULLIF(COALESCE(coeficientes, '{}'::jsonb) - 'a' - 'b' - 'c', '{}'::jsonb)`);
     }
     if (!set.length) throw new BadRequestException("No hay cambios");
     if (d.rango_min != null && d.rango_max != null && d.rango_min > d.rango_max) throw new BadRequestException("El mínimo del rango calibrado no puede ser mayor que el máximo.");
@@ -955,6 +972,8 @@ export class MetrologiaController {
       throw new BadRequestException(`El proceso ${proc.codigo} es del ${proc.laboratorio}; la OT ${origen.ot.codigo} es del ${origen.ot.laboratorio}.`);
     const unidadId = await this.unidadDeCalibracion(req, t, proc, origen.ot.laboratorio);
     const fecha = fechaCalibracion(d.fecha);
+    const futura = motivoFechaFutura(fecha);
+    if (futura) throw new BadRequestException(futura);
     const pat = await this.patronesDe(t, d, fecha);
     // B-027: las condiciones de la hoja de control (auxiliares del maestro) alimentan al motor.
     const amb = await this.ambienteDe(t, d, fecha);
@@ -1016,6 +1035,8 @@ export class MetrologiaController {
     if (d.procesoCodigo !== cal.proceso) throw new BadRequestException("No se puede cambiar el proceso de una calibración guardada");
     const proc = await cargarProceso(d.procesoCodigo);
     const fecha = d.fecha ? fechaCalibracion(d.fecha) : fechaIso(cal.fecha_calibracion);
+    const futura = motivoFechaFutura(fecha);
+    if (futura) throw new BadRequestException(futura);
     const pat = await this.patronesDe(t, d, fecha);
     const amb = await this.ambienteDe(t, d, fecha);
     const calc = await this.calcularDto(proc, d, fecha, condicionesDeAuxiliares(amb.auxiliares), pat.valores);
@@ -1054,6 +1075,8 @@ export class MetrologiaController {
     const t = tenantId(req);
     const cal = await this.detalleCtx(id, req);
     this.exigir("ENVIAR", cal);
+    const futura = motivoFechaFutura(cal.fecha_calibracion ? fechaIso(cal.fecha_calibracion) : null);
+    if (futura) throw new ConflictException(`${futura} Corríjala en la hoja de control antes de enviar.`);
     const c = await this.circuito(t, cal);
     const noEnviable = motivoNoEnviable(c.pasos, c.errorMatriz);
     if (noEnviable) throw new ConflictException(noEnviable);
@@ -1332,6 +1355,7 @@ export class MetrologiaController {
         acreditado: d.acred.acreditado,
         logoConfigurado: defecto.some((x) => x.clave === CLAVE_LOGO),
         reemision: cal.reemplaza_numero ?? null,
+        reemisionModalidad: cal.reemplaza_numero ? (cal.reemision_modalidad ?? "reemplazo") : null,
         automaticas: d.automaticas,
         observaciones: d.observaciones,
         campos: fmt.campos,
@@ -1560,6 +1584,7 @@ export class MetrologiaController {
         calculada: !!cal.calculada,
         responsablePaso: !enCircuito ? false : c.pasos ? puedeFirmarPaso(c.actual, yo, hechas, habAlt) : tiene(req, "metrologia.emitir"),
         motivoPaso: enCircuito && esAlternativo && habAlt ? habAlt : null,
+        autoRevision: enCircuito ? motivoAutoRevision({ esReemision: !!(cal.reemplaza_id || cal.reemplaza_numero), usuarioId: yo, firmas: hechas }) : null,
         ultimoPaso: c.pasos ? c.ultimo : true,
         habilitacion: e === "borrador" && yo ? motivoHabilitacion(registro, yo, cal.laboratorio ?? null, cal.magnitud) : null,
         reemisionEnCurso: !!cal.reemision_en_curso,
@@ -1829,6 +1854,10 @@ const PatronSchema = z.object({
   intervalo_meses: z.coerce.number().int().min(1).max(240).nullish(),
   u_expandida: z.coerce.number().nullish(), deriva: z.coerce.number().nullish(),
   laboratorio: z.string().max(10).nullish(),
+  /** F051/F053: laboratorios que usan el equipo (un auxiliar puede compartirse entre LMT, LMTE y LNF). */
+  laboratorios: z.array(z.string().trim().max(10)).max(10).nullish(),
+  /** F051: coeficientes S = a·F + b·F² + c·F³ del certificado (columna SMP de la hoja del LNF). */
+  smp: z.object({ a: z.coerce.number().finite().nullish(), b: z.coerce.number().finite().nullish(), c: z.coerce.number().finite().nullish() }).nullish(),
   activo: z.boolean().optional(),
   /** Rango calibrado numérico (EP-04 P4.2): solo con él se controla que ningún punto quede fuera. */
   rango_min: z.coerce.number().finite().nullish(),
@@ -1855,8 +1884,7 @@ export class VerificacionMetrologiaController {
     const c = String(codigo ?? "").trim().toUpperCase();
     if (!codigoVerificacionValido(c)) return { valido: false, motivo: "Código con formato no válido" };
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT c.numero_certificado, c.estado, c.emitido_at, c.documento_html, c.certificado_hash, pr.nombre AS proceso,
-              (SELECT x.numero_certificado FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.estado = 'emitida' AND x.deleted_at IS NULL LIMIT 1) AS reemplazado_por
+      `SELECT c.id, c.numero_certificado, c.estado, c.emitido_at, c.documento_html, c.certificado_hash, pr.nombre AS proceso
          FROM met_calibracion c JOIN met_proceso pr ON pr.id = c.proceso_id
         WHERE c.codigo_verificacion = $1 AND c.deleted_at IS NULL LIMIT 1`, c);
     if (!rows.length) return { valido: false, motivo: "No existe un certificado de calibración con ese código" };
@@ -1866,7 +1894,18 @@ export class VerificacionMetrologiaController {
       numero: r.numero_certificado, proceso: r.proceso, estado: r.estado, hash: r.certificado_hash,
       fecha: r.emitido_at ? new Date(r.emitido_at).toLocaleDateString("es-CL", { timeZone: ZONA_CHILE }) : null,
     };
-    if (r.estado === "reemplazada") return { ...base, valido: false, motivo: `El certificado fue reemplazado por el N° ${r.reemplazado_por ?? "(en emisión)"}` };
+    if (r.estado === "reemplazada") {
+      // F054: la cadena de reemplazos emitidos (M-3951 → M-3951-V2 → M-3952), sin borradores.
+      const cadena = await prisma.$queryRawUnsafe<{ numero: string | null; estado: string | null }[]>(
+        `WITH RECURSIVE sig AS (
+           SELECT x.id, x.numero_certificado, x.estado, 1 AS n FROM met_calibracion x
+            WHERE x.reemplaza_id = $1::uuid AND x.deleted_at IS NULL AND x.estado IN ('emitida', 'reemplazada')
+           UNION ALL
+           SELECT y.id, y.numero_certificado, y.estado, sig.n + 1 FROM met_calibracion y JOIN sig ON y.reemplaza_id = sig.id
+            WHERE y.deleted_at IS NULL AND y.estado IN ('emitida', 'reemplazada') AND sig.n < 20)
+         SELECT numero_certificado AS numero, estado FROM sig ORDER BY n`, r.id);
+      return { ...base, valido: false, motivo: motivoReemplazado(cadena) };
+    }
     if (r.estado !== "emitida") return { ...base, valido: false, motivo: "El certificado no está emitido" };
     return { ...base, valido: integro, ...(integro ? {} : { motivo: "El sello de integridad del documento no coincide" }) };
   }

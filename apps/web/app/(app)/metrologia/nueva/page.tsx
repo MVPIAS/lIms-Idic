@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { calcularCalibracion, nd, fmtN, fmtG, motorDe, LAB_NOMBRE, type Componente, type Divisores, type MotorInfo } from "@/lib/metrologia";
-import { coeficientesSmp, corregida, leerValoresPatron, numeroOVacio, type CondicionesHoja } from "@/lib/metrologiaFicha";
+import { calcularCalibracion, nd, fmtN, fmtG, motorDe, textoReemision, LAB_NOMBRE, type Componente, type Divisores, type MotorInfo } from "@/lib/metrologia";
+import { coeficientesSmp, corregida, leerValoresPatron, numeroOVacio, patronDelLaboratorio, type CondicionesHoja } from "@/lib/metrologiaFicha";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import MotorPanel from "./MotorPanel";
@@ -45,6 +45,8 @@ function avisosFechas(ins: any, fechaCal: string): string[] {
   const a: string[] = [];
   if (ins.fechaOt && ins.fechaRecepcion && ins.fechaOt > ins.fechaRecepcion)
     a.push(`La fecha de la OT (${dmy(ins.fechaOt)}) es posterior a la de recepción (${dmy(ins.fechaRecepcion)}): según el laboratorio, la OT debe ser igual o anterior a la recepción.`);
+  // F056: la fecha de calibración no puede ser futura (hora de Chile); el servidor la rechaza.
+  if (fechaCal && fechaCal > hoy()) a.push(`La fecha de calibración (${dmy(fechaCal)}) es posterior a hoy (${dmy(hoy())}): no se podrá guardar.`);
   if (ins.fechaRecepcion && fechaCal && ins.fechaRecepcion > fechaCal)
     a.push(`La fecha de recepción (${dmy(ins.fechaRecepcion)}) es posterior a la de calibración (${dmy(fechaCal)}): revise las fechas.`);
   return a;
@@ -62,6 +64,7 @@ export default function NuevaCalibracionPage() {
   const [D, setD] = useState<any>(vacio());
   const [editId, setEditId] = useState<string | null>(null);
   const [reemplaza, setReemplaza] = useState<string | null>(null);
+  const [modalidadReemision, setModalidadReemision] = useState<string | null>(null);
   const [inicialMotor, setInicialMotor] = useState<{ datos: any; opciones: Record<string, boolean> } | null>(null);
   const [devuelto, setDevuelto] = useState<string | null>(null);
   const [cargado, setCargado] = useState(false);
@@ -139,7 +142,7 @@ export default function NuevaCalibracionPage() {
     const cal = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(cal.message ?? `Error ${r.status}`);
     if (!(cal.acciones ?? []).includes("EDITAR")) throw new Error(`La calibración ${cal.codigo} no se puede editar (estado: ${cal.estado}; solo su autor edita un borrador).`);
-    setEditId(id); setProcKey(cal.proceso); setDevuelto(cal.devuelto_motivo ?? null); setReemplaza(cal.reemplaza_numero ?? null);
+    setEditId(id); setProcKey(cal.proceso); setDevuelto(cal.devuelto_motivo ?? null); setReemplaza(cal.reemplaza_numero ?? null); setModalidadReemision(cal.reemision_modalidad ?? null);
     if (cal.ot_id) setOrigen({ ot: { id: cal.ot_id, codigo: cal.ot_codigo, laboratorio: cal.laboratorio }, item: { numero: cal.instrumento_numero, recibidoAt: cal.instrumento_recibido_at, etiqueta: cal.instrumento_etiqueta } });
     setInicialMotor(cal.motor ? { datos: cal.datos, opciones: cal.opciones ?? {} } : null);
     const ids: string[] = (cal.patrones ?? []).map((p: any) => p.id);
@@ -199,7 +202,7 @@ export default function NuevaCalibracionPage() {
   // cumpla, para que se vea y se pueda cambiar. Sin magnitud: todo el maestro.
   // R9 (LNF): cada laboratorio ve solo sus patrones y auxiliares (los sin laboratorio son comunes).
   const labCal: string = proc?.laboratorio || origen?.ot?.laboratorio || D.laboratorio || "";
-  const delLab = (p: any) => !labCal || !p.laboratorio || p.laboratorio === labCal;
+  const delLab = (p: any) => patronDelLaboratorio(p, labCal);
   const opcionesPatron = useMemo(() => {
     const mag = proc?.magnitud;
     const elegidosIds = new Set((D.patrones as string[]).filter(Boolean));
@@ -293,7 +296,7 @@ export default function NuevaCalibracionPage() {
   const fld = (obj: any, key: string, label: string, wide = false, tipo = "text", ayuda?: string) => (
     <div className="field" style={wide ? { gridColumn: "1 / -1" } : undefined}>
       <label htmlFor={`f-${key}`}>{label}</label>
-      <input id={`f-${key}`} type={tipo} value={obj[key] ?? ""} style={YEL} onChange={(e) => { obj[key] = e.target.value; up(); }} />
+      <input id={`f-${key}`} type={tipo} value={obj[key] ?? ""} style={YEL} max={tipo === "date" && key === "fecha" ? hoy() : undefined} onChange={(e) => { obj[key] = e.target.value; up(); }} />
       {ayuda && <small style={{ color: "var(--muted)" }}>{ayuda}</small>}
     </div>
   );
@@ -312,7 +315,7 @@ export default function NuevaCalibracionPage() {
           usted la firma como metrólogo; después la firman el jefe del laboratorio y el jefe del departamento, que emite el certificado.</>}
       />
       {error && <div className="alert warn" role="alert">{error}</div>}
-      {reemplaza && <div className="alert info">Reemisión: este certificado reemplazará al N° <b>{reemplaza}</b> al emitirse.</div>}
+      {reemplaza && <div className="alert info">{textoReemision(reemplaza, modalidadReemision).aviso}</div>}
       {devuelto && !ok && <div className="alert warn"><b>Devuelta por el revisor:</b> {devuelto}</div>}
       {[...new Set([...avisos, ...avisosServidor])].map((a) => <div key={a} className="alert info">{a}</div>)}
       {ok && (
