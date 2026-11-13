@@ -51,7 +51,7 @@ export default function VerificarCalibracionPage() {
         <div className="card" style={{ padding: 14, maxWidth: 560 }} aria-live="polite">
           {res.valido
             ? <div className="alert success">Certificado válido: N° <b>{res.numero}</b>, emitido el {res.fecha}.</div>
-            : <div className="alert warn">No válido: {res.motivo ?? "el certificado no existe o no está emitido"}.</div>}
+            : <div className="alert warn">No válido: {String(res.motivo ?? "el certificado no existe o no está emitido").replace(/\.+$/, "")}.</div>}
           {(res.numero || res.proceso) && (
             <table className="data" style={{ marginTop: 8 }}>
               <tbody>

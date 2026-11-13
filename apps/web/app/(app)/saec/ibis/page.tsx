@@ -115,7 +115,8 @@ export default function IbisEtlPage() {
       setMsg({
         tipo: reemitir.length ? "warn" : "success",
         texto: `${j.data?.asignados ?? 0} arma(s) adjuntada(s) a la OT.${ev ? ` Se crearon ${ev} evidencia(s) de prueba (vaina y proyectil) en el banco de evidencias.` : ""}` +
-          (reemitir.length ? ` El certificado ${reemitir.join(", ")} quedó «Pendiente de IBIS»: reemítalo desde la OT para incorporar el registro.` : ""),
+          (reemitir.length === 1 ? ` El certificado ${reemitir[0]} quedó «Pendiente de IBIS»: reemítalo desde la OT para incorporar el registro.`
+            : reemitir.length ? ` Los certificados ${reemitir.join(", ")} quedaron «Pendiente de IBIS»: reemítalos desde la OT para incorporar el registro.` : ""),
       });
       verCandidatos(otId, false); cargar();
     } catch (e: any) {
@@ -217,7 +218,7 @@ export default function IbisEtlPage() {
                     <td>{c.modelo ?? "—"}</td>
                     <td>{c.calibre ?? "—"}</td>
                     <td className="num">{c.hit_count ?? 0}</td>
-                    <td>{c.resultado ?? "—"}</td>
+                    <td>{c.resultado ? String(c.resultado).charAt(0).toUpperCase() + String(c.resultado).slice(1).replace(/_/g, " ") : "—"}</td>
                   </tr>
                 ))}
                 {candidatos.length === 0 && (

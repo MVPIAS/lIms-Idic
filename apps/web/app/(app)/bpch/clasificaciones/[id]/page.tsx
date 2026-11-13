@@ -280,7 +280,7 @@ export default function ClasificacionPage() {
                 onChange={(ev) => setIt21(serie, s.ensayos.map((x, j) => (j === i ? { ...x, placaPerforada: ev.target.checked } : x)))} /> Placa testigo perforada
             </label>
             {editable && (
-              <button type="button" className="btn outline sm" aria-label={`Quitar ensayo ${i + 1}`}
+              <button type="button" className="btn outline sm" style={{ justifySelf: "start" }} aria-label={`Quitar ensayo ${i + 1}`}
                 onClick={() => setIt21(serie, s.ensayos.length > 1 ? s.ensayos.filter((_, j) => j !== i) : null)}>Quitar</button>
             )}
           </div>
@@ -483,20 +483,20 @@ export default function ClasificacionPage() {
                       {Object.entries(EFECTOS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
                   </div>
-                  <div className="field" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                    <div>
+                  <div className="field" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 6, minWidth: 0 }}>
+                    <div style={{ minWidth: 0 }}>
                       <label htmlFor={`k-ti-${i}`}>Tiempo (s)</label>
-                      <input id={`k-ti-${i}`} inputMode="decimal" value={verNum(e.tiempoS)} disabled={!editable}
+                      <input id={`k-ti-${i}`} inputMode="decimal" style={{ width: "100%", minWidth: 0 }} value={verNum(e.tiempoS)} disabled={!editable}
                         onChange={(x) => setPruebas((p) => ({ ...p, it22: { ...p.it22, ensayos: p.it22.ensayos.map((y, j) => (j === i ? { ...y, tiempoS: decimal(x.target.value) } : y)) } }))} />
                     </div>
-                    <div>
+                    <div style={{ minWidth: 0 }}>
                       <label htmlFor={`k-mf-${i}`}>Fragmentos (g)</label>
-                      <input id={`k-mf-${i}`} inputMode="decimal" value={verNum(e.masaFragmentosG)} disabled={!editable}
+                      <input id={`k-mf-${i}`} inputMode="decimal" style={{ width: "100%", minWidth: 0 }} value={verNum(e.masaFragmentosG)} disabled={!editable}
                         onChange={(x) => setPruebas((p) => ({ ...p, it22: { ...p.it22, ensayos: p.it22.ensayos.map((y, j) => (j === i ? { ...y, masaFragmentosG: decimal(x.target.value) } : y)) } }))} />
                     </div>
                   </div>
                   {editable ? (
-                    <button type="button" className="btn outline sm" aria-label={`Quitar ensayo ${i + 1}`}
+                    <button type="button" className="btn outline sm" style={{ justifySelf: "start" }} aria-label={`Quitar ensayo ${i + 1}`}
                       onClick={() => setPruebas((p) => ({ ...p, it22: { ...p.it22, ensayos: p.it22.ensayos.filter((_, j) => j !== i) } }))}>Quitar</button>
                   ) : <span />}
                 </div>
