@@ -1100,8 +1100,11 @@ export class EvidenciaController extends SaecBase {
           ORDER BY emitido_at DESC`,
         tenantId, id),
       this.prisma.$queryRawUnsafe<any[]>(
+        // F046: el arma de la evidencia (vínculo inverso) o el arma de la que salió el disparo de prueba (evidencia.arma_id).
         `SELECT * FROM arma
-          WHERE tenant_id = $1::uuid AND evidencia_id = $2::uuid AND deleted_at IS NULL
+          WHERE tenant_id = $1::uuid AND deleted_at IS NULL
+            AND (evidencia_id = $2::uuid OR id = (SELECT arma_id FROM evidencia WHERE id = $2::uuid))
+          ORDER BY (evidencia_id = $2::uuid) DESC NULLS LAST
           LIMIT 1`,
         tenantId, id),
       this.prisma.$queryRawUnsafe<any[]>(

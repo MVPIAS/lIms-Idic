@@ -196,7 +196,7 @@ export default function EvidenciaFichaPage() {
         <div className="form-grid">
           {/* F046: el tipo con su nombre (no el valor interno), la marca del arma y la fecha de disparo. */}
           <Dato lab="Tipo" val={TIPO_EVIDENCIA[e.tipo] ?? e.tipo} />
-          <Dato lab="Estado" val={e.estado} />
+          <Dato lab="Estado" val={e.estado ? String(e.estado).charAt(0).toUpperCase() + String(e.estado).slice(1).replace(/_/g, " ") : null} />
           <Dato lab="Caso" val={e.caso?.numero_caso} />
           <Dato lab="NUE" val={e.nue} />
           <Dato lab="Oficio · fecha" val={e.oficio_numero ? `${e.oficio_numero}${e.oficio_fecha ? ` · ${String(e.oficio_fecha).slice(0, 10).split("-").reverse().join("-")}` : ""}` : null} />

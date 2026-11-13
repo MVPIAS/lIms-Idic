@@ -138,7 +138,7 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
   }
 
   return (
-    <section className="card" style={{ padding: 12, margin: 0 }} aria-labelledby="cab-insp-titulo">
+    <section className="card" style={{ padding: 12, margin: 0, minWidth: 0, maxWidth: "100%" }} aria-labelledby="cab-insp-titulo">
       <div style={{ display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap", justifyContent: "space-between" }}>
         <h3 id="cab-insp-titulo" style={{ margin: 0, fontSize: 14 }}>Cabecera de inspección · SAC-PG01-IT10 · NCh 44</h3>
         <span className="pill blue">{PROCESO[f.proceso ?? "DIRECTA"]}</span>
@@ -162,21 +162,21 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
       {error && <div className="alert warn" role="alert">{error}</div>}
 
       <form onSubmit={guardar} aria-label="Cabecera de inspección">
-        <fieldset disabled={!f.editable} style={{ border: 0, padding: 0, margin: 0 }}>
-          <div className="form-grid cols-2">
+        <fieldset disabled={!f.editable} style={{ border: 0, padding: 0, margin: 0, minWidth: 0 }}>
+          <div className="form-grid cols-2" style={{ minWidth: 0 }}>
             {campos.map((c) => {
               const id = `cab-${c.k}`;
               const her = heredado(c);
               const valor = form[c.k] ?? "";
               const set = (v: any) => setForm((x) => ({ ...x, [c.k]: v }));
               return (
-                <div key={c.k} className={`field${c.ancho === 2 ? " span-2" : ""}`}>
+                <div key={c.k} className={`field${c.ancho === 2 ? " span-2" : ""}`} style={{ minWidth: 0 }}>
                   <label htmlFor={id}>{c.etiqueta}{c.k === "procedimiento" && <span className="req"> *</span>}</label>
                   {c.k === "lugarInspeccion" && (f.opciones?.lugares ?? []).length > 0 && (
                     <select
                       aria-label="Elegir el lugar de la tabla de plantas y lugares"
                       value=""
-                      style={{ marginBottom: 4 }}
+                      style={{ marginBottom: 4, width: "100%", maxWidth: "100%" }}
                       onChange={(e) => {
                         const l = f.opciones!.lugares[Number(e.target.value)];
                         if (l) setForm((x) => ({ ...x, lugarInspeccion: l.lugar, direccion: l.direccion ?? x.direccion ?? "", comuna: l.comuna ?? x.comuna ?? "" }));
