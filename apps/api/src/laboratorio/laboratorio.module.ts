@@ -1286,7 +1286,7 @@ export class ResultadoController extends BaseCrudController {
                       WHERE pr.ot_id IN (SELECT ot_id FROM origen) AND pp.cat_metodo_id = r.cat_metodo_id
                      UNION ALL
                      SELECT 1 FROM resultado r2
-                      WHERE r2.ot_id IN (SELECT ot_id FROM origen) AND r2.cat_metodo_id = r.cat_metodo_id AND r2.deleted_at IS NULL))) AS "enBateria"
+                      WHERE r2.ot_id IN (SELECT ot_id FROM origen) AND r2.cat_metodo_id = r.cat_metodo_id AND r2.deleted_at IS NULL)) AS "enBateria"
          FROM resultado r JOIN orden_trabajo o ON o.id = r.ot_id
          LEFT JOIN muestra m ON m.id = r.muestra_id LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
         WHERE r.id = $1::uuid`,

@@ -1270,7 +1270,10 @@ export class PlantillaRenderService {
     });
     const faltantes: string[] = [];
 
-    if (ot.estado === "anulada" || ot.estado === "cerrada")
+    // Una OT cerrada solo admite el REEMPLAZO de un documento oficial (R9: número nuevo,
+    // leyenda y anulación del anterior), p. ej. el certificado por arma al llegar IBIS (F039).
+    const reemplazoEnCerrada = ot.estado === "cerrada" && opts.reemision?.modalidad === "reemplazo" && !!opts.reemplazaId;
+    if (ot.estado === "anulada" || (ot.estado === "cerrada" && !reemplazoEnCerrada))
       faltantes.push(`La OT ${ot.codigo} está ${ot.estado}: no admite nuevos documentos.`);
     faltantes.push(...cober.errores);
     // Cobertura a medio elegir (p. ej. «Un laboratorio» sin laboratorio): solo se
