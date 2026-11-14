@@ -28,6 +28,8 @@ const CrearClienteSchema = z.object({
   giro: opcional(200),
   tipo: z.string({ required_error: "Indique el tipo de cliente." }).trim().min(1, "Indique el tipo de cliente.").max(30),
   direccion: opcional(),
+  // Comuna del receptor de la factura electrónica (exportación para facturación).
+  comuna: opcional(80),
   ciudad: opcional(80),
   region: opcional(80),
   telefono: opcional(40),
