@@ -33,6 +33,7 @@ import { AlcanceResultadoModule } from "./rbac/alcance-resultado.service";
 import { AlcanceCatalogoGuard } from "./rbac/alcance-catalogo.guard";
 import { AmbitoUnidadGuard } from "./rbac/ambito-unidad.guard";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
+import { FeaModule } from "./fea/fea.module";
 import { CrmModule } from "./crm/crm.module";
 import { EncargoModule } from "./ot/encargo/encargo.module";
 import { SaecModule } from "./saec/saec.module";
@@ -157,6 +158,7 @@ function prettyTransport() {
     FormulariosModule,
     RbacModule,
     PlantillaRenderModule,
+    FeaModule,
     CrmModule,
     EncargoModule,
     SaecModule,

@@ -2,6 +2,7 @@ import {
   BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Module, NotFoundException,
   Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors,
 } from "@nestjs/common";
+import { errorEntregaSinFea, feaPublica, pdfFeaParaCliente } from "../fea/fea.datos";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
@@ -1221,6 +1222,17 @@ export class MetrologiaController {
   private async avisarEmision(id: string, req: any): Promise<{ ok: boolean; destinatarios: string[]; motivo: string | null }> {
     try {
       const d = await destinatariosDe(prisma, id);
+      // FEA (frente F4): si el certificado de calibración exige la versión firmada, el aviso no adjunta el PDF sin firmar.
+      const sinFea = await errorEntregaSinFea(prisma, {
+        tenantId: tenantId(req), origen: "metrologia", documentoId: id, tipoDocumento: "CERTIFICADO_CALIBRACION", numero: "el certificado",
+      });
+      if (sinFea) {
+        const motivo = "se exige la firma electrónica avanzada antes de enviarlo: envíelo desde la OT cuando el firmante suba la versión firmada";
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
+           VALUES ($1::uuid, 'NOTIFICADA', 'emitida', 'emitida', $2::uuid, $3)`, id, req.user?.sub ?? null, `Sin aviso por correo: ${motivo}.`);
+        return { ok: false, destinatarios: [], motivo };
+      }
       if (!d.destinatarios.length) {
         await prisma.$executeRawUnsafe(
           `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
@@ -1312,6 +1324,16 @@ export class MetrologiaController {
   @RequierePermiso("metrologia.ver")
   async pdf(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
     const doc = await this.documento(id, req);
+    // FEA (frente F4): el certificado emitido con versión firmada con firma electrónica avanzada se descarga con ella.
+    if (!doc.sello.borrador && !doc.sello.estadoDocumento) {
+      const fea = await pdfFeaParaCliente(prisma, "metrologia", id, doc.sello.numero);
+      if (fea) {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="${fea.nombre}"`);
+        res.end(fea.buffer);
+        return;
+      }
+    }
     // El PDF dibuja el cuerpo sellado (el mismo sobre el que se calculó el SHA-256) y lo
     // incrusta; número, código de verificación y hash van en el pie de cada hoja.
     const buf = await generarPdf(doc.cuerpo, doc.sello, doc.titulo);
@@ -1922,7 +1944,9 @@ export class VerificacionMetrologiaController {
       return { ...base, valido: false, motivo: motivoReemplazado(cadena) };
     }
     if (r.estado !== "emitida") return { ...base, valido: false, motivo: "El certificado no está emitido" };
-    return { ...base, valido: integro, ...(integro ? {} : { motivo: "El sello de integridad del documento no coincide" }) };
+    // FEA (frente F4): quién lo firmó con firma electrónica avanzada y cuándo, si hay versión firmada.
+    const fea = await feaPublica(prisma, "metrologia", r.id);
+    return { ...base, ...fea, valido: integro, ...(integro ? {} : { motivo: "El sello de integridad del documento no coincide" }) };
   }
 }
 

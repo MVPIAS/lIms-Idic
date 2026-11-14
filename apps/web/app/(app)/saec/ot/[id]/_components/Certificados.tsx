@@ -13,6 +13,7 @@ import { fecha, fechaHora } from "@/lib/format";
 import { abrirDocumento } from "@/lib/bpchProcesos";
 import { PILL_ETAPA, type Accion, type ExpedienteD11 } from "@/lib/d11";
 import { estadoDocumento } from "@/lib/documentos";
+import PanelFea from "@/components/documentos/PanelFea";
 
 const VEREDICTO: Record<string, string> = { cumple: "green", no_cumple: "red", pendiente: "gray" };
 
@@ -161,6 +162,7 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
     const r = await accion("POST", `/d11/emisiones/${id}/firmar`, {}, "Rango firmado: los certificados quedan oficiales.");
     for (const f of r?.fallos ?? []) toast.error(f);
   }
+  const [fea, setFea] = useState<string | null>(null);
   const ver = (id: string) => abrirDocumento(`/informes/${id}/html`).catch((e) => toast.error(e.message));
 
   return (
@@ -302,12 +304,23 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
                     <td>{c.vigenteDesde ? `${fecha(c.vigenteDesde)} → ${fecha(c.vigenteHasta)}` : "—"}</td>
                     <td><span className={`pill ${e.pill}`}>{e.texto}</span></td>
                     <td>{c.entregadoAt ? fecha(c.entregadoAt) : "—"}</td>
-                    <td><button type="button" className="btn outline sm" onClick={() => ver(c.id)}>Ver certificado</button></td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button type="button" className="btn outline sm" onClick={() => ver(c.id)}>Ver certificado</button>{" "}
+                      {(c.estado === "oficial" || c.estado === "emitido") && (
+                        <button type="button" className="btn outline sm" aria-expanded={fea === c.id} onClick={() => setFea((x) => (x === c.id ? null : c.id))}>
+                          Firma FEA
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          {/* Firma electrónica avanzada del Estado sobre el PDF del certificado (frente F4). */}
+          {fea && conCert.some((a) => a.certificado?.id === fea) && (
+            <PanelFea origen="informe" documentoId={fea} />
+          )}
         </div>
       )}
     </>

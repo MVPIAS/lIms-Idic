@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { filaPorDefecto, parametrosFijos, textoValor, valorFormulario } from "./parametro-configurable";
 
@@ -6,7 +6,14 @@ import { filaPorDefecto, parametrosFijos, textoValor, valorFormulario } from "./
  * F076 · «Parámetros del sistema» no se cae si falta la fila de un parámetro, y
  * align_fx5_a.sql siembra todos los parámetros fijos con su valor por defecto.
  */
-const SQL = readFileSync(join(__dirname, "../../../../packages/db/align_fx5_a.sql"), "utf8");
+const DB = join(__dirname, "../../../../packages/db");
+// align_fx5_a.sql y las siembras de los frentes nuevos (align_nuevo_fN.sql: p. ej. «fea» del F4).
+const SQL = [
+  readFileSync(join(DB, "align_fx5_a.sql"), "utf8"),
+  ...readdirSync(DB)
+    .filter((f) => /^align_nuevo_f\d+\.sql$/.test(f))
+    .map((f) => readFileSync(join(DB, f), "utf8")),
+].join(" ");
 const sqlTexto = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 describe("parámetros fijos sin fila (F076)", () => {

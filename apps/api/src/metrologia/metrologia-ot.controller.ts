@@ -19,6 +19,7 @@ import {
 import { LABS_SAM, calibracionesDeOt, metrologiaParaCierre, instrumentosDeOt, type InstrumentoFila } from "./metrologia-ot.datos";
 import { actualizarEquipoDueno, enviarCertificado, leerConfigFicha, textoErrorCorreo } from "./ficha.datos";
 import { MailService } from "../configuracion/configuracion.module";
+import { errorEntregaSinFea } from "../fea/fea.datos";
 import { SQL_ZONA, hoyChile } from "../common/fecha-chile";
 
 // ---------------------------------------------------------------------------
@@ -470,11 +471,22 @@ export class MetrologiaOtService {
   }
 
   /* -------------------------------------------------- entrega del certificado --- */
+  /** FEA (frente F4): si el parámetro la exige para el certificado de calibración, no se entrega ni envía sin la versión firmada. */
+  private async exigirFea(tenantId: string, calId: string) {
+    const f = await this.prisma.$queryRawUnsafe<{ numero: string }[]>(
+      `SELECT COALESCE(numero_certificado, codigo) AS numero FROM met_calibracion WHERE id = $1::uuid`, calId);
+    const motivo = await errorEntregaSinFea(this.prisma, {
+      tenantId, origen: "metrologia", documentoId: calId, tipoDocumento: "CERTIFICADO_CALIBRACION", numero: f[0]?.numero ?? "el certificado",
+    });
+    if (motivo) throw new ConflictException(motivo);
+  }
+
   async entregar(otId: string, calId: string, body: unknown, req: any) {
     const d = EntregaSchema.parse(body ?? {});
     const ot = await this.cargarOt(otId, req);
     await this.exigir(req, "entregar", ot);
     const medio = textoEnFrase(await exigirMedioEnvioActivo(this.prisma, ot.tenantId, d.medio));
+    await this.exigirFea(ot.tenantId, calId);
     await this.prisma.$transaction(async (tx) => {
       const filas = await tx.$queryRawUnsafe<any[]>(
         `SELECT id, codigo, numero_certificado AS "numeroCertificado", estado, emitido_at AS "emitidoAt", entregado_at AS "entregadoAt"
@@ -512,6 +524,7 @@ export class MetrologiaOtService {
          FROM met_calibracion WHERE id = $1::uuid AND ot_id = $2::uuid AND deleted_at IS NULL`, calId, otId);
     if (!filas.length) throw new NotFoundException("Calibración no encontrada en esta OT");
     if (filas[0].estado !== "emitida") throw new ConflictException(`Solo se envía un certificado emitido: ${filas[0].numeroCertificado ?? filas[0].codigo} está ${filas[0].estado}.`);
+    await this.exigirFea(ot.tenantId, calId);
     const destinatarios = [...new Set(d.destinatarios.map((x) => x.toLowerCase()))];
     const r = await enviarCertificado(this.prisma as any, this.mail, calId, destinatarios, { mensaje: d.mensaje ?? null, usuarioId: req?.user?.sub ?? null, motivo: "envio" });
     let entregado = !!filas[0].entregadoAt;
