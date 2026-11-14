@@ -282,7 +282,7 @@ if docker exec lims-postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/
 
   # Diagnóstico combinado.
   if [ "${PEND:-0}" -ge "$UMBRAL_WAL_PENDIENTES" ]; then
-    adv "WAL archiving ATASCADO: ${PEND} segmentos pendientes (umbral $UMBRAL_WAL_PENDIENTES). pg_wal crecerá hasta LLENAR EL DISCO. Último fallo: ${ARCH_ULTFALLO}. Revise /backup/wal (¿existe, hay espacio, es del uid 999?) y PITR.md."
+    adv "WAL archiving ATASCADO: ${PEND} segmentos pendientes (umbral $UMBRAL_WAL_PENDIENTES). pg_wal crecerá hasta LLENAR EL DISCO. Último fallo: ${ARCH_ULTFALLO}. Revise /walarchive (¿existe, hay espacio, es del usuario postgres, uid 70?) y PITR.md §6."
   elif [ "${ARCH_EDAD:--1}" -ge 0 ] && [ "${ARCH_EDAD}" -gt $((UMBRAL_WAL_HORAS*3600)) ]; then
     adv "El último WAL se archivó hace $((ARCH_EDAD/3600)) h (umbral ${UMBRAL_WAL_HORAS} h). Con archive_timeout=300s debería llegar uno cada 5 min: el archivado puede estar fallando (${ARCH_FAIL:-0} fallos, último ${ARCH_ULTFALLO})."
   elif [ "${ARCH_EDAD:--1}" -lt 0 ] && [ "${ARCH_OK:-0}" = "0" ]; then
