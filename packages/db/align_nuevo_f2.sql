@@ -40,3 +40,17 @@ SELECT t.id, 'emisor_facturacion', v.codigo, v.etiqueta, v.orden, v.valor
   ('telefono',            'Teléfono de facturación',                        10, '')
  ) AS v(codigo, etiqueta, orden, valor)
 ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
+
+-- --- 4 · La tasa de internación del BPCH se factura EXENTA de IVA --------------
+-- Decisión del IDIC (respuestas del 10-11-2026): DTE 34, sin reparto por centro
+-- de costo, también con resultado «No cumple». Desde este frente la factura nace
+-- exenta (bpch/internacion: remitirFacturacion). Aquí se corrigen las facturas de
+-- la tasa que siguen PENDIENTES y nunca se marcaron (las emitidas no se tocan:
+-- se corrigen con nota de crédito). Idempotente (solo exenta_iva IS NULL).
+UPDATE factura f
+   SET exenta_iva = TRUE, iva_pct = 0, iva_monto = 0, total = f.neto, updated_at = now()
+ WHERE f.estado = 'pendiente'
+   AND f.exenta_iva IS NULL
+   AND f.deleted_at IS NULL
+   AND (f.origen = 'tasa_internacion'
+        OR EXISTS (SELECT 1 FROM bpch_internacion i WHERE i.factura_id = f.id));

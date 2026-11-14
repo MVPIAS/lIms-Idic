@@ -1,6 +1,7 @@
 import {
   esNumeroBorrador,
   estadoPorPagos,
+  importesTasaInternacion,
   lineasDesdeCotizacion,
   numeroBorrador,
   redondear,
@@ -144,5 +145,15 @@ describe("borrador de la OT sin cotización (B-040)", () => {
     expect(l).toEqual([{ descripcion: "1754 · Inspección visual del producto", cantidad: 2, precioUnitario: 0, subtotal: 0 }]);
     expect(borradorSinImporte(l)).toBe(true);
     expect(borradorSinImporte([{ subtotal: 10 }])).toBe(false);
+  });
+});
+
+describe("factura de la tasa de internación (BPCH)", () => {
+  it("nace exenta de IVA: IVA 0 %, sin monto de IVA y total = neto (DTE 34)", () => {
+    const r = importesTasaInternacion([{ subtotal: 2615841 }]);
+    expect(r).toEqual({ exentaIva: true, ivaPct: 0, neto: 2615841, ivaMonto: 0, total: 2615841 });
+  });
+  it("redondea a pesos enteros", () => {
+    expect(importesTasaInternacion([{ subtotal: 1000.6 }])).toMatchObject({ neto: 1001, ivaMonto: 0, total: 1001 });
   });
 });
