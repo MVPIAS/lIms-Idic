@@ -18,6 +18,10 @@ export const TIPOS_AVISO = {
   oficio_firma: "warn",
   oficio_firmado: "info",
   oficio_devuelto: "alta",
+  // Solicitud de adquisición (IDIC-PG06-IT02-FORM01): V°B° pendiente, devuelta, novedades de Abastecimiento.
+  adquisicion_vb: "warn",
+  adquisicion_devuelta: "alta",
+  adquisicion_sab: "info",
   advertencia: "warn",
   reanalisis: "alta",
   /** «Próxima acción» de una interacción con el cliente (CRM) que llegó a su fecha. */
