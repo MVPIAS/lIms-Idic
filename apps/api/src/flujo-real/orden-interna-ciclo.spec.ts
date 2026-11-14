@@ -16,8 +16,10 @@ import { OrdenInternaController } from "./orden-interna";
  * responde y cierra; el solicitante da por recibido.
  */
 describe("órdenes internas · emisión (EP-01 2.2)", () => {
-  const hoy = new Date(2026, 9, 20);
-  const ok = { muestraId: "m", muestraDeLaOt: true, requisito: "Cr total ≤ 3 % (punto 4.2)", fechaEnvio: "2026-10-20", fechaOt: new Date(2026, 9, 1), hoy };
+  // Instantes fijos a mediodía de Chile: la regla compara días en hora de Chile y la prueba no debe
+  // depender de la zona del equipo donde corre (con new Date(2026, 9, 1) en Madrid la OT caía el 30-09).
+  const hoy = new Date("2026-10-20T15:00:00Z");
+  const ok = { muestraId: "m", muestraDeLaOt: true, requisito: "Cr total ≤ 3 % (punto 4.2)", fechaEnvio: "2026-10-20", fechaOt: new Date("2026-10-01T15:00:00Z"), hoy };
 
   it("con muestra de la OT, requisito y fecha de envío es válida", () => {
     expect(erroresEmision(ok)).toEqual([]);
