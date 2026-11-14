@@ -167,7 +167,7 @@ export const NAV: SeccionNav[] = [
     icon: "📊",
     items: [
       // Zona de informes: reportes fijos (reemplazan a los Crystal Reports del sistema anterior) + documentos por OT.
-      { href: "/zona-informes", label: "Zona de informes", icon: "🗂", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "informes crystal infgest listado gestion facturacion deudores tasa ot sin facturar tiempos certificados boletines" },
+      { href: "/zona-informes", label: "Zona de informes", icon: "🗂", perm: ["reporte.ver", "reporte.comercial.ver", "encuesta.ver"], claves: "informes crystal infgest listado gestion facturacion deudores tasa ot sin facturar tiempos certificados boletines encuestas satisfaccion trimestral" },
       { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "csv excel xlsx tabla dinamica grafico plantilla" },
       // Brecha §4.7.5: enlace a Metabase (bi.<dominio>), que se abre en otra pestaña.
       { href: "/bi", label: "Análisis e inteligencia de negocio (Metabase)", icon: "📈", perm: "reporte.ver", claves: "metabase bi tableros dashboard analisis inteligencia de negocio graficos" },

@@ -1,5 +1,6 @@
-import { INFORMES, armarConsulta, informePorClave, totales, validarFiltros, LIMITE_FILAS } from "./catalogo";
+import { AREAS, INFORMES, armarConsulta, informePorClave, totales, validarFiltros, LIMITE_FILAS } from "./catalogo";
 import { DOCUMENTOS_LEGADO } from "./legado-documentos";
+import { INFORMES_ESPECIALES } from "./especiales";
 
 const T = "00000000-0000-0000-0000-000000000001";
 const LAB = "11111111-2222-3333-4444-555555555555";
@@ -108,5 +109,16 @@ describe("Zona de informes · totales", () => {
   it("suma solo las columnas con total", () => {
     const def = informePorClave("ot-cc-estado")!;
     expect(totales(def, [{ cantidad: 2, monto: "1000.5" }, { cantidad: 3, monto: null }])).toEqual({ cantidad: 5, monto: 1000.5 });
+  });
+});
+
+describe("Informes especiales de la Zona de informes", () => {
+  it("no repiten la clave de un reporte fijo, van en un área conocida y tienen su pantalla", () => {
+    for (const e of INFORMES_ESPECIALES) {
+      expect(INFORMES.some((i) => i.clave === e.clave)).toBe(false);
+      expect(AREAS as readonly string[]).toContain(e.area);
+      expect(e.ruta).toBe(`/zona-informes/${e.clave}`);
+      expect(e.permiso).toMatch(/^[a-z_]+\.[a-z_]+$/);
+    }
   });
 });
