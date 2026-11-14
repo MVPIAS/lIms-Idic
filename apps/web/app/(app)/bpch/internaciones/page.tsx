@@ -128,7 +128,7 @@ function Lista() {
           <thead>
             <tr>
               <th>Nº</th><th>Resolución DGMN</th><th>Empresa importadora</th><th>Elementos</th><th>Inspecciona</th><th>Estado</th><th>OT</th><th>Tasa</th>
-              {verCobro && <th className="num">Tasa + IVA</th>}
+              {verCobro && <th className="num">Tasa (exenta de IVA)</th>}
               {verCobro && <th>Cobro</th>}
             </tr>
           </thead>
@@ -165,7 +165,7 @@ function Lista() {
             Órdenes con origen «Internación» creadas antes de la puerta única (o a mano). Se siguen consultando y cobrando; las nuevas nacen al registrar la resolución DGMN.
           </p>
           <table className="data">
-            <thead><tr><th>OT</th><th>Resolución</th><th>Empresa</th><th>Ingreso</th><th>Estado OT</th><th className="num">CIF (US$)</th><th className="num">Tasa + IVA</th><th>Factura</th><th>Cobro</th></tr></thead>
+            <thead><tr><th>OT</th><th>Resolución</th><th>Empresa</th><th>Ingreso</th><th>Estado OT</th><th className="num">CIF (US$)</th><th className="num">Tasa (exenta de IVA)</th><th>Factura</th><th>Cobro</th></tr></thead>
             <tbody>
               {sinExpediente.map((f) => (
                 <tr key={f.id}>

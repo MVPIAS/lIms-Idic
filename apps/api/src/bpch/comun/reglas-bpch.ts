@@ -272,11 +272,15 @@ export interface EntradaTasa {
   pctAfecto: number;
   /** % de la tasa (parámetro bpch_tasa.tasa_pct, 1,5 según lo levantado). */
   tasaPct: number;
-  /** % de IVA sobre la tasa (parámetro bpch_tasa.iva_pct). */
-  ivaPct: number;
+  /**
+   * Ya no se aplica: la tasa de internación es EXENTA de IVA (IDIC, 10-11-2026).
+   * Se acepta por compatibilidad y se ignora (el resultado lleva ivaPct 0).
+   */
+  ivaPct?: number;
 }
 
 export interface ResultadoTasa extends EntradaTasa {
+  ivaPct: number;
   cifClp: number;
   baseAfecta: number;
   tasa: number;
@@ -284,17 +288,24 @@ export interface ResultadoTasa extends EntradaTasa {
   total: number;
 }
 
+/** IVA de la tasa de internación: EXENTA (decisión del IDIC, respuestas del 10-11-2026). */
+export const IVA_TASA_INTERNACION_PCT = 0;
+
+/** Importes de una tasa ya calculada: exenta de IVA, total a cancelar = tasa. */
+export function importesTasa(tasa: number): { ivaPct: number; iva: number; total: number } {
+  return { ivaPct: IVA_TASA_INTERNACION_PCT, iva: 0, total: Math.round(Number(tasa) || 0) };
+}
+
 /**
  * Tasa = CIF US$ × paridad × % afecto × % tasa (Comunicación Breve del DCO:
- * «Base = CIF US$ × tipo de cambio × % afecto × 1,5 %»). IVA sobre la tasa
- * según parámetro. Montos en pesos, redondeados al entero.
+ * «Base = CIF US$ × tipo de cambio × % afecto × 1,5 %»). Exenta de IVA: total a
+ * cancelar = tasa (IDIC, 10-11-2026). Montos en pesos, redondeados al entero.
  */
 export function calcularTasa(e: EntradaTasa): ResultadoTasa {
   const cifClp = e.cifUsd * e.paridad;
   const baseAfecta = cifClp * (e.pctAfecto / 100);
   const tasa = Math.round(baseAfecta * (e.tasaPct / 100));
-  const iva = Math.round(tasa * (e.ivaPct / 100));
-  return { ...e, cifClp: Math.round(cifClp), baseAfecta: Math.round(baseAfecta), tasa, iva, total: tasa + iva };
+  return { ...e, cifClp: Math.round(cifClp), baseAfecta: Math.round(baseAfecta), tasa, ...importesTasa(tasa) };
 }
 
 export function erroresTasa(e: Partial<EntradaTasa>): string[] {
@@ -304,7 +315,6 @@ export function erroresTasa(e: Partial<EntradaTasa>): string[] {
   if (!pos(e.paridad)) err.push("Indique la paridad US$ → $ (mayor que cero).");
   if (!(typeof e.pctAfecto === "number" && e.pctAfecto > 0 && e.pctAfecto <= 100)) err.push("El % afecto debe estar entre 0 y 100.");
   if (!(typeof e.tasaPct === "number" && e.tasaPct > 0 && e.tasaPct <= 100)) err.push("El % de la tasa debe estar entre 0 y 100 (parámetro bpch_tasa.tasa_pct).");
-  if (!(typeof e.ivaPct === "number" && e.ivaPct >= 0 && e.ivaPct <= 100)) err.push("El % de IVA debe estar entre 0 y 100 (parámetro bpch_tasa.iva_pct).");
   return err;
 }
 

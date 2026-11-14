@@ -27,6 +27,9 @@
  *               HCP por tipo de vehículo, planes n, c, m, M, rangos sensoriales)
  *   campo_prep  campo de la preparación de muestras de un laboratorio
  *               {tipo, obligatorio, bloquea, unidad, opciones, ayuda} + `activo`
+ *   texto       texto libre de hasta `largo` caracteres; `rut` = RUT chileno con
+ *               dígito verificador; `requerido` = no se deja vacío (emisor de la
+ *               factura, frente nuevo-f2)
  */
 import { formatearNumeroCotizacion, configNumeracion } from "../cotizacion/numeracion-cotizacion";
 import { CLASES_CUSTODIA, TIPOS_CAMPO, leerCampo, type TipoCampo } from "../recepcion/reglas-recepcion";
@@ -38,6 +41,7 @@ import { OPCIONES_VARIANTE, esVariante } from "../formularios/variantes";
 import { jsonCampoPrep, normalizarCampoPrep } from "../formularios/preparacion";
 import { OPCIONES_MENU_OCULTO } from "../rbac/menu-oculto";
 import { CATEGORIA_FEA, TIPOS_FEA, codigoParametroFea } from "../fea/fea.reglas";
+import { validaRut } from "../common/rut.validator";
 
 /** Columnas de AQL de la tabla 2-A como opciones (se guarda con punto, se muestra con coma). */
 const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: String(a).replace(".", ",") }));
@@ -50,7 +54,7 @@ const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: St
 const AQLS_FORM: string[] = AQLS.map(textoAql);
 const NIVELES_FORM = NIVELES;
 
-export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
+export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep" | "texto";
 
 /** Columna de un parámetro de tipo «tabla» (tabla de amenazas, HCP, planes RSA…). */
 export interface ColumnaTabla {
@@ -92,6 +96,10 @@ export interface DefValor {
   /** Tipo «tabla»: columnas y máximo de filas. */
   columnas?: ColumnaTabla[];
   maxFilas?: number;
+  /** Tipo «texto»: largo máximo, si no puede quedar vacío y si es un RUT. */
+  largo?: number;
+  requerido?: boolean;
+  rut?: boolean;
 }
 
 export interface GrupoConfig {
@@ -1152,6 +1160,25 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       ],
     },
   },
+  {
+    categoria: "emisor_facturacion",
+    titulo: "Emisor de la factura (exportación para facturación)",
+    donde:
+      "Facturas › «Exportar para facturación (JSON)» y «Descargar documento de cobro (PDF)»: datos del IDIC como emisor del documento tributario que emite su sistema de facturación (docs/EXPORTACION_FACTURACION.md).",
+    porConfirmar: "Datos tributarios reales del IDIC (RUT, razón social, giro, Acteco, dirección y sucursal SII). Los valores «PRUEBA» son de ejemplo.",
+    codigos: {
+      rut: { tipo: "texto", nombre: "RUT del emisor", rut: true, requerido: true, largo: 12, ayuda: "Con dígito verificador, p. ej. 12.345.678-5." },
+      razon_social: { tipo: "texto", nombre: "Razón social", requerido: true, largo: 100 },
+      giro: { tipo: "texto", nombre: "Giro", requerido: true, largo: 80 },
+      acteco: { tipo: "texto", nombre: "Código de actividad económica (Acteco)", largo: 6, ayuda: "Código del SII de 6 dígitos." },
+      direccion: { tipo: "texto", nombre: "Dirección", requerido: true, largo: 70 },
+      comuna: { tipo: "texto", nombre: "Comuna", requerido: true, largo: 20 },
+      ciudad: { tipo: "texto", nombre: "Ciudad", requerido: true, largo: 20 },
+      codigo_sucursal_sii: { tipo: "texto", nombre: "Código de sucursal ante el SII (si corresponde)", largo: 9 },
+      correo: { tipo: "texto", nombre: "Correo de facturación", largo: 80 },
+      telefono: { tipo: "texto", nombre: "Teléfono de facturación", largo: 20 },
+    },
+  },
 ];
 
 export const CATEGORIAS_CONFIGURABLES = GRUPOS_CONFIG.map((g) => g.categoria);
@@ -1340,6 +1367,7 @@ export function valorFormulario(def: DefValor, f: Fila): unknown {
       return (def.opciones ?? []).filter((o) => marcados.includes(o.valor)).map((o) => o.valor);
     }
     case "formato":
+    case "texto":
       return String(v ?? "");
     case "obligatorio":
       return f.activo;
@@ -1605,6 +1633,13 @@ export function normalizarValor(
       if (e.length) return { errores: e };
       return { errores: [], valor: { valor: t, activo: true, historial: t } };
     }
+    case "texto": {
+      const t = texto(entrada);
+      if (!t && def.requerido) return { errores: [`Escriba ${def.nombre.toLowerCase()}: no puede quedar vacío.`] };
+      if (t.length > (def.largo ?? 200)) return { errores: [`Máximo ${def.largo ?? 200} caracteres (tiene ${t.length}).`] };
+      if (t && def.rut && !validaRut(t)) return { errores: ["El RUT no es válido: revise los dígitos y el dígito verificador (p. ej. 12.345.678-5)."] };
+      return { errores: [], valor: { valor: t, activo: true, historial: t || "(vacío)" } };
+    }
     case "obligatorio": {
       const b = esSiNo(entrada);
       if (b === null) return { errores: ["Elija Sí o No."] };
@@ -1693,6 +1728,7 @@ export function textoValor(def: DefValor, guardado: string | null | undefined): 
       return marcados.length ? marcados.map((m) => def.opciones?.find((o) => o.valor === m)?.etiqueta ?? m).join(", ") : "Ninguno";
     }
     case "formato":
+    case "texto":
       return v || "—";
     case "variante": {
       const [valor, estado] = v.split(" · ");

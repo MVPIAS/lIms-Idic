@@ -215,6 +215,8 @@ model Cliente {
   tipo            String?   @db.VarChar(30)
   direccion       String?
   ciudad          String?   @db.VarChar(80)
+  /// Comuna del receptor del DTE (align_nuevo_f2.sql · exportación para facturación).
+  comuna          String?   @db.VarChar(80)
   region          String?   @db.VarChar(80)
   telefono        String?   @db.VarChar(40)
   email           String?   @db.Citext
@@ -784,6 +786,9 @@ model Factura {
   creadaPor     String?   @map("creada_por") @db.Uuid
   emitidaPor    String?   @map("emitida_por") @db.Uuid
   emitidaAt     DateTime? @map("emitida_at") @db.Timestamptz
+  /// Exportación para facturación (align_nuevo_f2.sql): true = exenta de IVA (DTE 34),
+  /// false = afecta (33), null = se deduce (IVA 0 % = exenta). docs/EXPORTACION_FACTURACION.md
+  exentaIva     Boolean?  @map("exenta_iva")
 
   lineas       LineaFactura[]
   pagos        Pago[]

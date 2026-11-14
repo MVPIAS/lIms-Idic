@@ -26,6 +26,7 @@ import {
   validarPago,
 } from "./reglas-factura";
 import { SQL_ZONA, hoyChile, hoyFechaChile } from "../common/fecha-chile";
+import { ExportacionFacturaController, ExportacionFacturaService } from "./exportacion-factura.controller";
 
 /* ===================== FACTURAS ===================== */
 @Injectable()
@@ -268,6 +269,7 @@ export class FacturaService extends BaseCrudService {
           centroCostoId: anulada.centroCostoId ?? null,
           moneda: anulada.moneda,
           ivaPct: anulada.ivaPct,
+          exentaIva: anulada.exentaIva,
           neto: anulada.neto,
           ivaMonto: anulada.ivaMonto,
           total: anulada.total,
@@ -685,8 +687,9 @@ export class NotaCreditoController extends BaseCrudController {
 }
 
 @Module({
-  controllers: [FacturaController, PagoController, NotaCreditoController],
-  providers: [FacturaService, PagoService, NotaCreditoService],
+  // ExportacionFacturaController va primero: «/facturas/exportacion» antes que «/facturas/:id».
+  controllers: [ExportacionFacturaController, FacturaController, PagoController, NotaCreditoController],
+  providers: [FacturaService, PagoService, NotaCreditoService, ExportacionFacturaService],
   // El cierre de la OT (ot/ot-cierre.controller.ts) crea el borrador de factura.
   exports: [FacturaService],
 })

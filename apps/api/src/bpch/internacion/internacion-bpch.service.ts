@@ -22,7 +22,7 @@ import {
   transicionDocAdm,
   lineaBitacoraDocAdm,
 } from "../comun/reglas-bpch";
-import { numeroBorrador, totales } from "../../facturacion/reglas-factura";
+import { importesTasaInternacion, numeroBorrador } from "../../facturacion/reglas-factura";
 import { ListadoArmaBody, erroresListadoArmas, guardarListadoArmas, leerListadoArmas } from "../../saec/d11/listado-armas";
 import { diaChile } from "../../common/fecha-chile";
 import { revisarBateria } from "../comun/bateria";
@@ -878,7 +878,8 @@ export class InternacionBpchService {
       paridad: dto.paridad,
       pctAfecto: dto.pctAfecto,
       tasaPct: dto.tasaPct ?? prm.tasaPct ?? NaN,
-      ivaPct: dto.ivaPct ?? prm.ivaPct ?? NaN,
+      // Exenta de IVA: calcularTasa no lo aplica (IDIC, 10-11-2026).
+      ivaPct: dto.ivaPct ?? prm.ivaPct ?? undefined,
     };
     const errores = erroresTasa(entrada);
     if (errores.length) throw new BadRequestException(errores.join(" "));
@@ -924,8 +925,6 @@ export class InternacionBpchService {
     });
     if (faltan.length) throw new ConflictException(`No se puede remitir la tasa de ${i.numero}. ${faltan.join(" ")}`);
     const usuario = usuarioDe(req);
-    const prm = await this.comun.parametros(tenantId);
-    const ivaPct = Number(tasa.ivaPct ?? prm.ivaPct ?? 19);
     const lineas = [
       {
         descripcion: `Tasa de internación ${Number(tasa.tasaPct).toLocaleString("es-CL")} % · ${i.numero} · Res. DGMN ${i.resolucion_numero} · CIF US$ ${Number(tasa.cifUsd).toLocaleString("es-CL")} × ${Number(tasa.paridad).toLocaleString("es-CL")}${Number(tasa.pctAfecto) !== 100 ? ` × ${tasa.pctAfecto} % afecto` : ""}`.slice(0, 500),
@@ -934,7 +933,10 @@ export class InternacionBpchService {
         subtotal: tasa.tasa,
       },
     ];
-    const t = totales(lineas, ivaPct, "CLP");
+    // La tasa de internación se factura EXENTA de IVA (DTE 34; IDIC, 10-11-2026),
+    // aunque el cálculo de la tasa muestre IVA: la factura nace con IVA 0 %.
+    const t = importesTasaInternacion(lineas);
+    const ivaPct = t.ivaPct;
     const obs = `Tasa de internación remitida por BPCH (${i.numero}). Documento final: ${final!.numero ?? ""}.`;
     const ot = await this.comun.ot(tenantId, i.ot_id);
     const facturaId = await this.prisma.$transaction(async (tx) => {
@@ -951,7 +953,7 @@ export class InternacionBpchService {
         await tx.lineaFactura.deleteMany({ where: { facturaId: vacia.id } });
         await tx.factura.update({
           where: { id: vacia.id },
-          data: { ivaPct, neto: t.neto, ivaMonto: t.ivaMonto, total: t.total, observaciones: obs, lineas: { create: lineas } },
+          data: { ivaPct, exentaIva: t.exentaIva, neto: t.neto, ivaMonto: t.ivaMonto, total: t.total, observaciones: obs, lineas: { create: lineas } },
         });
         fid = vacia.id;
       } else {
@@ -965,6 +967,7 @@ export class InternacionBpchService {
             otId: i.ot_id,
             moneda: "CLP",
             ivaPct,
+            exentaIva: t.exentaIva,
             neto: t.neto,
             ivaMonto: t.ivaMonto,
             total: t.total,
