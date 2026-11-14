@@ -315,8 +315,10 @@ con la referencia `{ "tipo": "RESOLUCION", "tipoDocSii": "804", "folio": "RES-PR
    formato propio de ese sistema) sin cambiar v1.
 2. Datos tributarios reales del IDIC como emisor: RUT, razón social, giro, Acteco,
    dirección, comuna, ciudad y código de sucursal SII (hoy son «PRUEBA»).
-3. ~~Tasa de internación~~ **Resuelto (IDIC, 10-11-2026):** la tasa de internación es exenta de IVA (34), sin reparto por centro de costo, y se factura también con «No cumple». La factura nace exenta; el cálculo de la tasa no se cambió (sigue mostrando un IVA informativo). Texto anterior:
-   cálculo de la tasa le suma IVA según el parámetro y la factura nace afecta;
-   la exportación lo advierte y Finanzas puede marcarla exenta antes de emitir.
+3. **Resuelto (IDIC, 10-11-2026):** la tasa de internación del BPCH se factura
+   exenta de IVA (34), sin reparto por centro de costo, y también con resultado
+   «No cumple». La factura nace exenta (`exenta_iva = true`, IVA 0 %). El cálculo
+   de la tasa no se cambió: su pantalla y el informe mensual siguen mostrando un
+   IVA; falta decidir si se quita de ahí.
 4. ¿Las facturas con IVA 0 % (clientes institucionales) son exentas (34)? Hoy el
    LIMS las exporta como exentas.
