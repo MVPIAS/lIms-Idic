@@ -23,6 +23,7 @@ import {
   textoMedio,
 } from "@/lib/documentos";
 import Modal from "./Modal";
+import PanelFea from "./PanelFea";
 import { useMediosEnvio } from "@/lib/lista-parametro";
 
 type Dialogo = null | "devolver" | "anular" | "entregar" | "correo" | "despachar" | "modificar" | "reemplazar";
@@ -311,6 +312,9 @@ export default function PanelDocumento({
           )}
         </div>
       )}
+
+      {/* Firma electrónica avanzada del Estado sobre el PDF final (frente F4) */}
+      {doc.oficial && <PanelFea origen="informe" documentoId={documentoId} onCambio={onCambio} />}
 
       {/* Despacho y oficio conductor (EP-01 6.3, EP-05 7.2 y 8.1) */}
       {doc.oficial && (seg.despacho || (seg.oficios ?? []).length > 0 || seg.entrega?.guia) && (

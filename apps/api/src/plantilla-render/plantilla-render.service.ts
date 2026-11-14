@@ -1,4 +1,5 @@
 import { leyendaReemision, type ModalidadReemision } from "../common/leyenda-reemision";
+import { feaPublica, pdfFeaParaCliente } from "../fea/fea.datos";
 import { portadaDesdeEncargo } from "../ot/encargo/reglas-encargo";
 import { nombreItemInspeccion } from "../especificacion-tecnica/reglas-et";
 import { observacionConDecision } from "../laboratorio/veredicto-decidido";
@@ -1937,8 +1938,14 @@ export class PlantillaRenderService {
    * guardó al emitir. No se re-renderiza: el PDF de hoy y el de dentro de un año
    * son el mismo documento aunque la OT haya cambiado.
    */
-  async pdf(certificadoId: string, tenantId?: string) {
+  async pdf(certificadoId: string, tenantId?: string, opciones: { sistema?: boolean } = {}) {
     const cert = await this.certificadoDelTenant(certificadoId, tenantId);
+    // FEA (frente F4): un documento oficial con versión firmada con firma electrónica avanzada se
+    // entrega, envía y descarga con ESA versión; `sistema` pide el PDF del LIMS (para firmarlo).
+    if (!opciones.sistema && esOficial(cert.estado)) {
+      const fea = await pdfFeaParaCliente(this.prisma, "informe", cert.id, cert.numero ?? cert.codigo);
+      if (fea) return { buffer: fea.buffer, nombre: fea.nombre };
+    }
     if (!cert.documentoHtml)
       throw new NotFoundException(
         `El certificado ${cert.numero ?? cert.codigo} se emitió antes de que se guardara el documento sellado y no puede regenerarse. Emita uno nuevo.`,
@@ -2021,7 +2028,10 @@ export class PlantillaRenderService {
     const extraFn = tipo ? this.verificaciones.get(tipo) : undefined;
     const extra = extraFn ? await extraFn(cert.id).catch(() => null) : null;
 
+    // FEA (frente F4): si hay versión firmada con firma electrónica avanzada, se informa quién y cuándo.
+    const fea = await feaPublica(this.prisma, "informe", cert.id);
     return {
+      ...fea,
       valido: integro,
       estado: cert.estado,
       numero: cert.numero ?? cert.codigo,
