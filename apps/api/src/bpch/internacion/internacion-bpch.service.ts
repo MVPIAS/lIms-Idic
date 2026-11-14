@@ -878,7 +878,8 @@ export class InternacionBpchService {
       paridad: dto.paridad,
       pctAfecto: dto.pctAfecto,
       tasaPct: dto.tasaPct ?? prm.tasaPct ?? NaN,
-      ivaPct: dto.ivaPct ?? prm.ivaPct ?? NaN,
+      // Exenta de IVA: calcularTasa no lo aplica (IDIC, 10-11-2026).
+      ivaPct: dto.ivaPct ?? prm.ivaPct ?? undefined,
     };
     const errores = erroresTasa(entrada);
     if (errores.length) throw new BadRequestException(errores.join(" "));

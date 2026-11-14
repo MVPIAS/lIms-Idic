@@ -54,3 +54,14 @@ UPDATE factura f
    AND f.deleted_at IS NULL
    AND (f.origen = 'tasa_internacion'
         OR EXISTS (SELECT 1 FROM bpch_internacion i WHERE i.factura_id = f.id));
+
+-- --- 5 · Cálculos de la tasa ya guardados: sin IVA ----------------------------
+-- La tasa de internación es exenta: el cálculo (pantalla) y el informe mensual
+-- muestran IVA 0 y «total a cancelar» = tasa. Se ponen al día los cálculos ya
+-- guardados (idempotente: solo los que aún tienen IVA). No se tocan las facturas
+-- emitidas ni las fotos de los informes mensuales ya emitidos.
+UPDATE calculo_tasa_internacion
+   SET iva_pct = 0, iva_internacion = 0, total_a_cancelar = monto_operacion
+ WHERE COALESCE(iva_internacion, 0) <> 0
+    OR COALESCE(iva_pct, 0) <> 0
+    OR total_a_cancelar IS DISTINCT FROM monto_operacion;
