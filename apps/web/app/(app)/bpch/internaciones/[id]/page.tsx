@@ -438,15 +438,14 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
   });
   if (!d.sujetaTasa) return <div className="alert info">Esta internación no está sujeta a la tasa: no hay documentación administrativa ni cobro.</div>;
   const tasaPct = config?.parametros.tasaPct;
-  const ivaPct = config?.parametros.ivaPct;
+  // La tasa de internación es EXENTA de IVA (IDIC, 10-11-2026): total a cancelar = tasa.
   // Montos a la chilena: «184.500» es ciento ochenta y cuatro mil quinientos (F001).
   const num = (v: string) => montoCl(v) ?? Number.NaN;
   const prev =
-    t.cifUsd && t.paridad && tasaPct != null && ivaPct != null && Number.isFinite(num(t.cifUsd)) && Number.isFinite(num(t.paridad)) && Number.isFinite(num(t.pctAfecto))
+    t.cifUsd && t.paridad && tasaPct != null && Number.isFinite(num(t.cifUsd)) && Number.isFinite(num(t.paridad)) && Number.isFinite(num(t.pctAfecto))
       ? (() => {
           const tasa = Math.round(num(t.cifUsd) * num(t.paridad) * (num(t.pctAfecto) / 100) * (tasaPct / 100));
-          const iva = Math.round(tasa * (ivaPct / 100));
-          return { tasa, iva, total: tasa + iva };
+          return { tasa, total: tasa };
         })()
       : null;
   const docEstado = d.documentacion.estado;
@@ -508,12 +507,12 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
       </div>
 
       <div className="card">
-        <h2>Cálculo de la tasa <span className="right">CIF US$ × paridad × % afecto × {tasaPct != null ? pct(tasaPct) : "? %"} (+ IVA {ivaPct != null ? pct(ivaPct) : "? %"})</span></h2>
+        <h2>Cálculo de la tasa <span className="right">CIF US$ × paridad × % afecto × {tasaPct != null ? pct(tasaPct) : "? %"} · exenta de IVA</span></h2>
         {d.tasa && (
           <table className="data" style={{ marginBottom: 10 }}>
             <tbody>
               <tr><th>CIF US$</th><td className="num">{fmtNum(d.tasa.cifUsd, 0)}</td><th>Paridad</th><td className="num">{fmtNum(d.tasa.paridad, 0)}</td><th>% afecto</th><td className="num">{d.tasa.pctAfecto}</td></tr>
-              <tr><th>Tasa ({pct(d.tasa.tasaPct)})</th><td className="num">{clp(d.tasa.tasa)}</td><th>IVA ({pct(d.tasa.ivaPct)})</th><td className="num">{clp(d.tasa.iva)}</td><th>Total</th><td className="num"><b>{clp(d.tasa.total)}</b></td></tr>
+              <tr><th>Tasa ({pct(d.tasa.tasaPct)})</th><td className="num">{clp(d.tasa.tasa)}</td><th>IVA</th><td>Exento de IVA</td><th>Total a cancelar</th><td className="num"><b>{clp(d.tasa.total)}</b></td></tr>
             </tbody>
           </table>
         )}
@@ -526,7 +525,7 @@ function Tasa({ d, config, puede, accion }: { d: any; config: ConfigBpch | null;
               <div className="field"><label htmlFor="cif">Valor CIF (US$) *</label><input id="cif" inputMode="decimal" value={t.cifUsd} onChange={(e) => setT({ ...t, cifUsd: e.target.value })} /></div>
               <div className="field"><label htmlFor="par">Paridad US$ → $ *</label><input id="par" inputMode="decimal" value={t.paridad} onChange={(e) => setT({ ...t, paridad: e.target.value })} /></div>
               <div className="field"><label htmlFor="afe">% afecto</label><input id="afe" inputMode="decimal" value={t.pctAfecto} onChange={(e) => setT({ ...t, pctAfecto: e.target.value })} /></div>
-              <div className="field readonly"><label>Vista previa</label><input readOnly value={prev ? `Tasa ${clp(prev.tasa)} + IVA ${clp(prev.iva)} = ${clp(prev.total)}` : "—"} /></div>
+              <div className="field readonly"><label>Vista previa</label><input readOnly value={prev ? `Tasa ${clp(prev.tasa)} · exenta de IVA · total a cancelar ${clp(prev.total)}` : "—"} /></div>
               <div><button type="submit" className="btn primary sm">{d.tasa ? "Recalcular" : "Calcular y guardar"}</button></div>
             </form>
           )

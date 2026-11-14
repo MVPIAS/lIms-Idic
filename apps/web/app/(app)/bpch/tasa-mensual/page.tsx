@@ -112,7 +112,7 @@ export default function TasaMensualPage() {
         <div className="kpis">
           <div className="kpi k-blue"><div className="lab">OT con tasa en {nombreMes(mes)}</div><div className="val">{inf.resumen.nOt}</div></div>
           <div className="kpi k-violet"><div className="lab">Tasa 1,5 %</div><div className="val">{clp(inf.resumen.tasa)}</div></div>
-          <div className="kpi k-amber"><div className="lab">Total a cancelar</div><div className="val">{clp(inf.resumen.total)}</div></div>
+          <div className="kpi k-amber"><div className="lab">Total a cancelar (exento de IVA)</div><div className="val">{clp(inf.resumen.total)}</div></div>
           <div className="kpi k-green"><div className="lab">Pagado</div><div className="val">{clp(inf.resumen.pagado)}</div></div>
         </div>
       )}

@@ -11,6 +11,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { DIFUSION_TASA, lista, valoresCategoria } from "../common/parametros-r4d";
 import { ZONA_CHILE, SQL_ZONA, mesChile } from "../common/fecha-chile";
 import { libroXlsx, type Celda } from "../common/xlsx-escritura";
+import { importesTasa } from "../bpch/comun/reglas-bpch";
 
 /**
  * Informe mensual de la tasa de internación 1,5 % (EP-06 6.23, BL-164).
@@ -90,7 +91,7 @@ export function csvTasa(mes: string, filas: FilaTasa[]): string {
     const t = /^[=+\-@]/.test(t0) ? `'${t0}` : t0;
     return /[;"\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t;
   };
-  const cab = ["Mes", "Internación", "OT", "Resolución DGMN", "Cliente", "Centro de costo", "Tasa (CLP)", "IVA (CLP)", "Total a cancelar (CLP)", "Factura", "Estado de pago", "Pagado (CLP)"];
+  const cab = ["Mes", "Internación", "OT", "Resolución DGMN", "Cliente", "Centro de costo", "Tasa (CLP)", "IVA (exento)", "Total a cancelar (CLP)", "Factura", "Estado de pago", "Pagado (CLP)"];
   const lineas = filas.map((f) =>
     [mes, f.internacion, f.ot, f.resolucion, f.cliente, f.centroCosto, num(f.tasa), num(f.iva), num(f.total), f.factura, ETIQUETA_PAGO[f.estadoPago], num(f.pagado)].map(esc).join(";"),
   );
@@ -99,7 +100,7 @@ export function csvTasa(mes: string, filas: FilaTasa[]): string {
 
 /** Filas del libro Excel (.xlsx) del mes: misma cabecera que el CSV, montos como números (recorrido 30, fallo 46). */
 export function filasXlsxTasa(mes: string, filas: FilaTasa[]): Celda[][] {
-  const cab = ["Mes", "Internación", "OT", "Resolución DGMN", "Cliente", "Centro de costo", "Tasa (CLP)", "IVA (CLP)", "Total a cancelar (CLP)", "Factura", "Estado de pago", "Pagado (CLP)"];
+  const cab = ["Mes", "Internación", "OT", "Resolución DGMN", "Cliente", "Centro de costo", "Tasa (CLP)", "IVA (exento)", "Total a cancelar (CLP)", "Factura", "Estado de pago", "Pagado (CLP)"];
   return [
     cab,
     ...filas.map((f) => [mes, f.internacion, f.ot, f.resolucion, f.cliente, f.centroCosto, Math.round(f.tasa), Math.round(f.iva), Math.round(f.total), f.factura, ETIQUETA_PAGO[f.estadoPago], Math.round(f.pagado)]),
@@ -165,8 +166,9 @@ export class TasaMensualService {
         centroCosto: x.centroCosto,
         calculadaAt: x.calculadaAt,
         tasa: Number(x.tasa) || 0,
-        iva: Number(x.iva) || 0,
-        total: Number(x.total) || 0,
+        // Exenta de IVA (IDIC, 10-11-2026): también las calculadas antes con IVA.
+        iva: importesTasa(Number(x.tasa) || 0).iva,
+        total: importesTasa(Number(x.tasa) || 0).total,
         factura: x.factura,
         estadoFactura: x.facturaEstado,
         pagado: Number(x.pagado) || 0,
