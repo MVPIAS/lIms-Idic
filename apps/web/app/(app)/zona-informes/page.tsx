@@ -20,6 +20,8 @@ interface Reporte {
   descripcion: string;
   legado: string[];
   pedido?: string | null;
+  /** Informe con pantalla propia (p. ej. el trimestral de encuestas). */
+  ruta?: string | null;
 }
 interface Documento {
   tipo: string;
@@ -43,7 +45,7 @@ const normal = (s: string) =>
 
 export default function ZonaInformesPage() {
   return (
-    <RequierePermiso perm={["reporte.ver", "reporte.comercial.ver"]} titulo="Zona de informes">
+    <RequierePermiso perm={["reporte.ver", "reporte.comercial.ver", "encuesta.ver"]} titulo="Zona de informes">
       <Zona />
     </RequierePermiso>
   );
@@ -116,7 +118,7 @@ function Zona() {
           <h2 style={{ fontSize: 15, margin: "14px 0 8px" }}>{g.area}</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 10 }}>
             {g.reportes.map((r) => (
-              <Link key={r.clave} href={`/zona-informes/${r.clave}`} className="card" style={{ display: "block", textDecoration: "none", color: "inherit", margin: 0 }}>
+              <Link key={r.clave} href={(r.ruta ?? `/zona-informes/${r.clave}`) as any} className="card" style={{ display: "block", textDecoration: "none", color: "inherit", margin: 0 }}>
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>📊 {r.titulo}</div>
                 <div style={{ fontSize: 12.5, color: "var(--muted)", marginBottom: 6 }}>{r.descripcion}</div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>

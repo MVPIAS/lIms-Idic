@@ -22,6 +22,7 @@ import { fechaHoraChile } from "../common/fecha-chile";
 import { textoEstadoOt } from "../reportes/gestion";
 import { AREAS, INFORMES, LIMITE_FILAS, armarConsulta, consultaEstados, informePorClave, textoCodigo, totales, validarFiltros, type InformeFijo } from "./catalogo";
 import { DOCUMENTOS_LEGADO } from "./legado-documentos";
+import { INFORMES_ESPECIALES } from "./especiales";
 
 /** Tipos de documento por OT: nombre legible y quién los emite. */
 export const TIPOS_DOCUMENTO: Record<string, { titulo: string; descripcion: string }> = {
@@ -67,7 +68,12 @@ export class ZonaInformesController {
       legado: i.legado,
       pedido: i.pedido ?? null,
       filtros: i.filtros,
+      ruta: null as string | null,
     }));
+    // Informes con formato propio (p. ej. el trimestral de encuestas): se abren en su pantalla.
+    for (const e of INFORMES_ESPECIALES)
+      if (tienePermiso(req, e.permiso))
+        reportes.push({ clave: e.clave, titulo: e.titulo, area: e.area as InformeFijo["area"], descripcion: e.descripcion, legado: e.legado, pedido: e.pedido, filtros: [], ruta: e.ruta });
     const documentos = Object.entries(DOCUMENTOS_LEGADO).map(([tipo, informes]) => ({
       tipo,
       titulo: TIPOS_DOCUMENTO[tipo]?.titulo ?? tipo,
