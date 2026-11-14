@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { validarFormulario, esMoneda, esNumero } from "@/lib/validate";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { toast, confirmar } from "@/components/ui/feedback";
-import { diaChile } from "@/lib/fecha-chile";
+import { diaChile, hoyChile } from "@/lib/fecha-chile";
 import { fechaHora, money } from "@/lib/format";
 import BuscadorVinculo, { type OpcionVinculo } from "@/components/consumibles/BuscadorVinculo";
 import { ACTIVIDADES, textoVinculo } from "@/components/consumibles/actividades";
@@ -208,6 +208,32 @@ export default function ConsumiblesPage() {
       .catch(() => setBodegas([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Llegada desde una solicitud de adquisición recibida en bodega
+  // (?consumible=…&nuevoLote=1&cantidad=…&costo=…&ref=…): abre el consumible con
+  // el alta de lote ya rellenada. Solo propone: la persona revisa y guarda.
+  const [prellenado, setPrellenado] = useState(false);
+  useEffect(() => {
+    if (prellenado || !rows.length || typeof window === "undefined") return;
+    const p = new URLSearchParams(window.location.search);
+    const id = p.get("consumible");
+    if (!id || p.get("nuevoLote") !== "1") return;
+    setPrellenado(true);
+    const r = rows.find((x) => x.id === id);
+    if (!r) return setError("El consumible de la solicitud de adquisición no está en el kardex o está inactivo.");
+    abrirDetalle(r).then(() => {
+      setLf({
+        ...LOTE_VACIO,
+        cantidadInicial: p.get("cantidad") ?? "",
+        costoUnitarioClp: p.get("costo") ?? "",
+        enUnidadCompra: !!r.unidad_compra,
+        fechaRecepcion: hoyChile(),
+      });
+      setShowLote(true);
+      if (p.get("ref")) flash(`Ingreso de la solicitud de adquisición ${p.get("ref")}: complete el Nº de lote y la caducidad, y guarde.`);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, prellenado]);
 
   const visibles = useMemo(() => {
     const q = search.trim().toLowerCase();

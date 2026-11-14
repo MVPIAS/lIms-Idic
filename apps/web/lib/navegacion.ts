@@ -108,6 +108,8 @@ export const NAV: SeccionNav[] = [
       { href: "/mantencion", label: "Mantención y gestión de equipos", icon: "🛠", perm: "equipo.ver", claves: "mantenimiento preventivo plan frecuencia calendario reporte cumplimiento correctiva costos" },
       { href: "/consumibles", label: "Consumibles · kardex", icon: "🧴", perm: "consumible.gestionar", claves: "stock reactivos lotes" },
       { href: "/consumibles/bodegas", label: "Bodegas e inventario valorizado", icon: "🏬", perm: "consumible.gestionar", claves: "bodega central sub-bodega traspaso inventario valorizado lote abastecimiento" },
+      // Frente f1 · IDIC-PG06-IT02-FORM01: laboratorio crea, jefatura da V°B°, Abastecimiento (SAB) recibe y anota la O/C.
+      { href: "/solicitudes-adquisicion", label: "Solicitudes de adquisición", icon: "🛒", perm: "adquisicion.ver", claves: "compra pedido sab abastecimiento orden de compra oc vb jefatura form01 pg06 reactivos insumos" },
       { href: "/municion", label: "Munición de prueba", icon: "🎯", perm: "municion.solicitar", ambito: "DSA", claves: "lrb lam d11 cartuchos orden interna balistica" },
       { href: "/qc", label: "Control de calidad (QC)", icon: "✔", perm: "resultado.ver" },
       // Recepción y Muestreo (alicuota.gestionar, sin resultado.ver) entran solo a la pestaña Alícuotas.
