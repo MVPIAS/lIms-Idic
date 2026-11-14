@@ -48,6 +48,7 @@ import { ZonaInformesModule } from "./zona-informes/zona-informes.module";
 import { AvisosModule } from "./avisos/avisos.module";
 import { SeguimientoModule } from "./seguimiento/seguimiento.module";
 import { OficioModule } from "./oficio/oficio.module";
+import { SolicitudAdquisicionModule } from "./solicitud-adquisicion/solicitud-adquisicion.module";
 import { PasoMetodoModule } from "./catalogo/paso-metodo.module";
 import { DocumentosModule } from "./documentos/documentos.module";
 import { AgendaModule } from "./agenda/agenda.module";
@@ -140,6 +141,7 @@ function prettyTransport() {
     AvisosModule,
     SeguimientoModule,
     OficioModule,
+    SolicitudAdquisicionModule,
     PasoMetodoModule,
     DocumentosModule,
     AgendaModule,
