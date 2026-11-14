@@ -37,6 +37,7 @@ import { OPCIONES_VARIANTE, esVariante } from "../formularios/variantes";
 // NCh 44 de los formularios especializados (frente r2a): AQL como texto con coma.
 import { jsonCampoPrep, normalizarCampoPrep } from "../formularios/preparacion";
 import { OPCIONES_MENU_OCULTO } from "../rbac/menu-oculto";
+import { CATEGORIA_FEA, TIPOS_FEA, codigoParametroFea } from "../fea/fea.reglas";
 
 /** Columnas de AQL de la tabla 2-A como opciones (se guarda con punto, se muestra con coma). */
 const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: String(a).replace(".", ",") }));
@@ -1073,6 +1074,26 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
       vigencia_anios: { tipo: "entero", nombre: "Vigencia del certificado por arma", min: 1, max: 10, unidad: "años", porDefecto: "4" },
     },
+  },
+  // --- Firma electrónica avanzada del Estado en el PDF final (frente F4, docs/FLUJO_FEA_DOCUMENTOS.md) ---
+  {
+    categoria: CATEGORIA_FEA,
+    titulo: "Firma electrónica avanzada (FEA) · exigirla antes de entregar al cliente",
+    donde:
+      "Ficha del documento emitido (Informes, Certificados, Documentos por firmar, D11 y Metrología): con «sí», el documento de ese tipo no se registra como entregado ni se envía por correo hasta que el firmante sube la versión firmada con FirmaGob. Con «no», la FEA es opcional.",
+    porConfirmar: "Qué documentos que van al cliente deben llevar la FEA del Estado antes de entregarse (y desde qué fecha).",
+    codigos: Object.fromEntries(
+      TIPOS_FEA.map((t) => [
+        codigoParametroFea(t.tipo),
+        {
+          tipo: "sino" as const,
+          nombre: `${t.nombre}: exige FEA antes de entregar`,
+          opciones: SI_NO,
+          ayuda: "El PDF se firma fuera del LIMS (FirmaGob o token) y se sube en la ficha del documento con «Subir versión firmada con FEA».",
+          porDefecto: "no",
+        },
+      ]),
+    ),
   },
   {
     categoria: "bpch_resolucion",

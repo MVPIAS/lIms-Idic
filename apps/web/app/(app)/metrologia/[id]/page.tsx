@@ -19,6 +19,7 @@ import { useMediosEnvio } from "@/lib/lista-parametro";
 import { ORIGEN_OT } from "@/lib/metrologiaOt";
 import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
+import PanelFea from "@/components/documentos/PanelFea";
 import PresentacionCertificado from "@/components/metrologia/PresentacionCertificado";
 import BalanceIncertidumbre from "@/components/metrologia/BalanceIncertidumbre";
 import s from "@/components/metrologia/ficha.module.css";
@@ -357,6 +358,8 @@ export default function FichaCalibracionPage() {
                   : <>Certificado emitido: fecha congelada y solo lectura. Falta registrar su entrega{c.ot_id ? "" : " (calibración sin OT ligada: se entrega fuera del LIMS)"}.</>}
               </div>
             )}
+            {/* Firma electrónica avanzada del Estado sobre el PDF final (frente F4). */}
+            {c.estado === "emitida" && <PanelFea origen="metrologia" documentoId={id} onCambio={cargar} />}
           </section>
           {!["emitida", "reemplazada"].includes(c.estado) && (
             <section className={s.bloque}>
