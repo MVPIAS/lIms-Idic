@@ -269,6 +269,7 @@ export class FacturaService extends BaseCrudService {
           centroCostoId: anulada.centroCostoId ?? null,
           moneda: anulada.moneda,
           ivaPct: anulada.ivaPct,
+          exentaIva: anulada.exentaIva,
           neto: anulada.neto,
           ivaMonto: anulada.ivaMonto,
           total: anulada.total,

@@ -315,7 +315,7 @@ con la referencia `{ "tipo": "RESOLUCION", "tipoDocSii": "804", "folio": "RES-PR
    formato propio de ese sistema) sin cambiar v1.
 2. Datos tributarios reales del IDIC como emisor: RUT, razón social, giro, Acteco,
    dirección, comuna, ciudad y código de sucursal SII (hoy son «PRUEBA»).
-3. ¿La tasa de internación del BPCH se factura **exenta de IVA** (34)? Hoy el
+3. ~~Tasa de internación~~ **Resuelto (IDIC, 10-11-2026):** la tasa de internación es exenta de IVA (34), sin reparto por centro de costo, y se factura también con «No cumple». La factura nace exenta; el cálculo de la tasa no se cambió (sigue mostrando un IVA informativo). Texto anterior:
    cálculo de la tasa le suma IVA según el parámetro y la factura nace afecta;
    la exportación lo advierte y Finanzas puede marcarla exenta antes de emitir.
 4. ¿Las facturas con IVA 0 % (clientes institucionales) son exentas (34)? Hoy el

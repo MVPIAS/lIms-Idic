@@ -320,7 +320,7 @@ export function construirExportacion(d: DatosExportacion, generadoEn: string): R
   if (!exenta && ivaPct !== TASA_IVA)
     errores.push(`Una factura afecta lleva IVA del ${TASA_IVA} % y esta tiene ${ivaPct.toLocaleString("es-CL")} %. Corrija el IVA o márquela exenta.`);
   if (!exenta && f.origen === "tasa_internacion")
-    advertencias.push("Es la tasa de internación del BPCH y está como afecta a IVA: confirme si corresponde factura exenta (34).");
+    advertencias.push("Es la tasa de internación del BPCH, que se factura exenta de IVA (34), y esta factura está como afecta: corríjala (si está pendiente, márquela «Exenta de IVA»; si ya está emitida, con una nota de crédito).");
 
   // Ítems (líneas positivas) y descuentos/recargos globales (líneas negativas).
   const detalle: DocumentoExportV1["detalle"] = [];
