@@ -101,6 +101,7 @@ export const NAV: SeccionNav[] = [
       { href: "/preparacion-trabajo", label: "Preparación del trabajo por aprobar", icon: "📝", perm: "ot.preparacion.aprobar", claves: "planilla de trabajo paquete tecnico proyecto de parrafo plan de inspeccion aprobar dsa" },
       { href: "/informes", label: "Emitir informe", icon: "🖨", perm: "certificado.emitir" },
       { href: "/informes/por-firmar", label: "Documentos por firmar", icon: "✒", perm: "documento.firmar", claves: "firma firmar oficializar revisar informe" },
+      { href: "/informes/firma-fea", label: "Pendientes de firma FEA", icon: "🔏", perm: ["documento.firmar", "documento.fea.gestionar"], claves: "fea firmagob firma electronica avanzada pdf firmado certificado token" },
       { href: "/certificados", label: "Informes y certificados", icon: "📜", perm: "ot.ver", claves: "entrega anular reemitir" },
       { href: "/oficios", label: "Oficios conductores", icon: "✉", perm: "oficio.ver", claves: "oficio conductor vb despacho oficina de partes ivc informe tecnico rechazo ffaa" },
       { href: "/custodia", label: "Cadena de custodia", icon: "🔗", perm: "muestra.ver" },

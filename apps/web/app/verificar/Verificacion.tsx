@@ -5,7 +5,9 @@
  * impreso al pie): certificado por arma (vigencia, arma con la serie oculta),
  * informes y certificados del flujo general, y certificados de evidencia del
  * SAEC. Sin sesión y sin datos personales: muestra solo lo que ya trae el papel.
- * API pública: GET /informes/verificar/:codigo y GET /saec/certificados/verificar/:codigo.
+ * API pública: GET /informes/verificar/:codigo, GET /saec/certificados/verificar/:codigo y
+ * GET /metrologia/verificar/:codigo. Si el documento tiene versión firmada con la firma
+ * electrónica avanzada del Estado (FEA), muestra quién la firmó y cuándo.
  */
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -28,6 +30,14 @@ export async function consultar(codigo: string): Promise<Resultado> {
     const s = await fetch(`${API}/saec/certificados/verificar/${c}`);
     const js = await s.json().catch(() => null);
     if (js?.data?.certificado) return { tipo: "saec", d: js.data };
+    // Certificado de calibración (Metrología): mismo formato de código.
+    const m = await fetch(`${API}/metrologia/verificar/${c}`);
+    const jm = await m.json().catch(() => null);
+    if (jm?.numero)
+      return {
+        tipo: "documento",
+        d: { ...jm, tipoDocumentoNombre: `Certificado de calibración${jm.proceso ? ` · ${jm.proceso}` : ""}`, motivo: jm.motivo },
+      };
     return { tipo: "no_existe" };
   } catch {
     return { tipo: "error", mensaje: "No se pudo consultar el servicio de verificación. Inténtelo más tarde." };
@@ -130,6 +140,11 @@ export function Ficha({ r }: { r: Resultado }) {
           {esArma && d.arma && <Fila k="Nº de serie (parcial)" v={<code>{d.arma.serie}</code>} />}
           {esArma && <Fila k="Vigencia" v={`${d.vigenteDesde} → ${d.vigenteHasta}`} />}
           {d.hash && <Fila k="Huella SHA-256" v={<code style={{ fontSize: 11, wordBreak: "break-all" }}>{d.hash}</code>} />}
+          {/* Firma electrónica avanzada del Estado sobre el PDF (frente F4). */}
+          {d.firmadoFea && <Fila k="Firma electrónica avanzada" v={<b>{d.leyendaFea}</b>} />}
+          {d.firmadoFea && d.hashFea && (
+            <Fila k="Huella SHA-256 del PDF firmado" v={<code style={{ fontSize: 11, wordBreak: "break-all" }}>{d.hashFea}</code>} />
+          )}
         </tbody>
       </table>
     </div>
