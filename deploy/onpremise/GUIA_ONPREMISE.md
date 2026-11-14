@@ -62,12 +62,15 @@ Siete contenedores sobre una única red Docker (`lims-idic`):
           ┌───────────┼───────────┐
      ┌────▼────┐ ┌────▼───┐ ┌─────▼────┐   ┌──────────┐
      │Postgres │ │ Redis  │ │  MinIO   │   │ Metabase │
-     │  (BD)   │ │(colas) │ │(archivos)│   │   (BI)   │
+     │  (BD)   │ │(hoy sin│ │(hoy sin  │   │   (BI)   │
+     │         │ │  uso)  │ │  uso)    │   │          │
      └─────────┘ └────────┘ └──────────┘   └──────────┘
         ── Sin puertos publicados: solo accesibles por la red interna ──
 ```
 
-> **Nota de seguridad.** Solo Caddy publica puertos (80 y 443). PostgreSQL, Redis, MinIO y Metabase **no son accesibles desde la red del cuartel**: solo desde dentro de la red Docker. Esto es intencionado y no debe modificarse sin una evaluación de seguridad.
+> **Nota de seguridad.** Solo Caddy publica puertos (80 y 443). PostgreSQL, Redis, MinIO y Metabase **no son accesibles directamente desde la red del cuartel**: solo desde dentro de la red Docker (Metabase, únicamente a través de Caddy en `https://bi.<dominio>` cuando el BI está activado, §5.7). Esto es intencionado y no debe modificarse sin una evaluación de seguridad.
+
+> **Redis y MinIO hoy no se usan.** El despliegue los incluye (la API recibe su dirección y credenciales), pero la versión actual del LIMS no guarda nada en ellos: los documentos y adjuntos cargados se guardan **en PostgreSQL** y los informes, certificados y cotizaciones en PDF se generan desde la base. Lo que importa respaldar y restaurar es, por tanto, la base de datos y el `.env`.
 
 ### 1.3 Dónde viven los datos
 
@@ -76,8 +79,8 @@ Todo el estado persistente está bajo `LIMS_DATA_DIR` (por defecto `/srv/lims-id
 ```
 /srv/lims-idic/
 ├── postgres/     Base de datos (muestras, ensayos, resultados, custodia)
-├── minio/        Documentos, informes y certificados firmados
-├── redis/        Colas de trabajo
+├── minio/        Almacén de objetos (hoy sin uso: los documentos van en PostgreSQL)
+├── redis/        Caché/colas (hoy sin uso)
 ├── metabase/     Complementos de BI
 ├── certs/        Certificado y clave TLS   ← permisos 700
 └── caddy/        Estado y registro de accesos del proxy
@@ -204,7 +207,7 @@ Let's Encrypt valida el dominio conectándose al servidor **desde Internet**. Si
 Solicite al área correspondiente un certificado de servidor con:
 
 - **CN**: el nombre DNS del servidor (p. ej. `lims.idic.ejercito.cl`)
-- **SAN**: el mismo nombre **y** `bi.<dominio>` para el módulo de BI
+- **SAN**: el mismo nombre **y** `bi.<dominio>` para el módulo de BI (con `BI_ACTIVO=auto`, el instalador activa el BI solo si el certificado cubre ese nombre, §5.7)
 - Vigencia: la máxima que permita la política interna
 - Clave privada **sin contraseña** (Caddy arranca desatendido; una clave con passphrase impediría el arranque automático tras un corte de luz)
 
@@ -310,11 +313,11 @@ sudo ./instalar-onpremise.sh
 2. **Integridad**: verifica el SHA-256 de cada artefacto. Si uno falla, **aborta**.
 3. **Carga de imágenes**: `docker load` de cada `.tar.gz`. Sin red.
 4. **Código y configuración** a `/opt/lims-idic`.
-5. **`.env`**: lo genera con `openssl rand` o valida el existente. **Falla si un secreto está vacío, es corto o conserva un valor de ejemplo.**
-6. **Datos y certificado**: crea el árbol y valida que certificado y clave se correspondan y cubran `DOMAIN`.
+5. **`.env`**: lo genera con `openssl rand` o valida el existente. **Falla si un secreto está vacío, es corto o conserva un valor de ejemplo.** Si un `.env` de una versión anterior no trae `METABASE_LECTURA_PASSWORD`, la genera (sin mostrarla).
+6. **Datos y certificado**: crea el árbol y valida que certificado y clave se correspondan y cubran `DOMAIN`. Decide si activa el BI (`BI_ACTIVO`, §5.7) y deja `URL_BI` coherente con esa decisión.
 7. **Arranque**: `docker compose up -d`, sin build y sin pull.
 8. **Base de datos**: aplica todos los SQL del manifiesto `packages/db/ORDEN_SQL.txt` en su orden (§5.5). Si falta alguno en el kit, **aborta**. Los errores SQL se cuentan y se listan al final; con `--estricto` el primero detiene la instalación.
-9. **Administrador y temporizadores**: crea el usuario `admin` y activa respaldo y chequeo.
+9. **BI, administrador y temporizadores**: si el BI está activado, habilita el usuario de solo lectura `lims_lectura` (§5.7); crea el usuario `admin` **solo si no existe** (§5.8) y activa respaldo y chequeo.
 10. **Verificación final**: espera a que cada servicio esté en marcha y sano y pide la pantalla de ingreso a través del proxy. Si el LIMS no está en condiciones de uso termina con **INSTALACIÓN INCOMPLETA** y código de error; ya no muestra el mensaje de éxito con un servicio caído. Metabase tarda varios minutos en su primer arranque: si aún no está sano, avisa sin dar la instalación por fallida.
 
 > **Idempotente.** Se puede reejecutar sin miedo. Registra en la tabla `_lims_instalacion` qué SQL aplicó y con qué checksum, y omite los que ya están al día. Si un script cambia (actualización), lo detecta por el checksum y lo reaplica. La única excepción es `schema.sql`: crea la base desde cero y solo se aplica en la instalación inicial; los cambios posteriores del esquema llegan siempre por los `align_*.sql`.
@@ -329,7 +332,9 @@ Por eso el instalador **los omite por defecto**. Ahora bien, hay una trampa: `se
 
 La solución: `packages/db/align_resultado_operacion.sql` replica **solo** esa DDL y ocupa la misma posición del orden, marcado `sin-demo` en el manifiesto (los dos seeds de ejemplo van marcados `demo`). Se optó por un fichero nuevo en vez de modificar `seed_operacion_demo.sql` para no alterar el entorno de preproducción, que está operativo.
 
-Ensayo del 13-10-2026 sobre una base vacía: 41 ficheros en modo producción y 42 en modo demostración, **0 errores SQL** en ambos, y esquema idéntico entre los dos (178 tablas, mismas columnas e índices). En modo producción la base queda con 0 clientes y 0 órdenes de trabajo.
+Cuántos ficheros se aplican no es un número fijo: crece con cada versión. La lista vigente es `packages/db/ORDEN_SQL.txt` (para contarlos: `bash scripts/orden-sql.sh sin-demo | wc -l`), y el instalador muestra el total en la línea «Manifiesto SQL: N ficheros en modo …».
+
+Ensayo del 13-10-2026 sobre una base vacía, con el manifiesto de esa fecha: **0 errores SQL** en modo producción y en modo demostración, y esquema idéntico entre los dos (mismas tablas, columnas e índices). En modo producción la base queda con 0 clientes y 0 órdenes de trabajo.
 
 Si necesita datos demo (formación, demostración a mando):
 
@@ -361,6 +366,46 @@ cd /opt/lims-idic && docker compose -f docker-compose.onpremise.yml --env-file .
 - Los usuarios con contraseña local (el administrador) siguen entrando aunque el directorio no responda: es la vía de acceso de emergencia.
 - No se ha probado contra el directorio real del Ejército: hay que validarlo en la puesta en marcha con una cuenta de prueba.
 
+### 5.7 BI (Metabase) en `https://bi.<dominio>`
+
+El contenedor de Metabase se levanta siempre, pero el BI solo queda **activado** (publicado en el menú y con acceso a la base) según `BI_ACTIVO` en el `.env`:
+
+| `BI_ACTIVO` | Qué hace el instalador |
+|---|---|
+| `auto` (por defecto) | Lo activa si el certificado cubre `bi.<DOMAIN>` (SAN o comodín `*.<DOMAIN>`); si no, no |
+| `si` | Lo activa siempre (avisa si el certificado no cubre `bi.<DOMAIN>`: los navegadores rechazarán la conexión) |
+| `no` | No lo activa |
+
+**Activado**: fija `URL_BI=https://bi.<DOMAIN>` en el `.env` si estaba vacía (la API la usa para el menú «Análisis e inteligencia de negocio»), y tras aplicar los SQL habilita el usuario de base **`lims_lectura`** (lo crea `align_brechas_6.sql` sin poder ingresar; `scripts/metabase/crear-usuario-lectura.sh` le asigna la contraseña `METABASE_LECTURA_PASSWORD` del `.env`, que el instalador genera y **no muestra**). El resumen final indica la dirección del BI.
+
+**No activado**: deja `URL_BI` vacía (el menú del LIMS dice que el BI no está configurado), no espera a Metabase en la verificación final y el resumen dice «no activado».
+
+Para activarlo más tarde: obtenga un certificado con `bi.<dominio>` en el SAN (§4.2) o ponga `BI_ACTIVO=si`, y **vuelva a ejecutar el instalador** (es idempotente).
+
+Último paso, manual (necesita el administrador de Metabase que usted elija): dar de alta la base del LIMS y los tableros iniciales.
+
+```bash
+cd /opt/lims-idic
+sudo MB_ADMIN_EMAIL=<correo del administrador de Metabase> python3 scripts/metabase/configurar-metabase.py
+```
+
+Detalle de los tableros y de lo que `lims_lectura` puede y no puede leer: `docs/RESPALDOS_Y_BI.md` §2 del repositorio.
+
+### 5.8 Usuario administrador inicial
+
+El instalador crea el usuario **`admin`** (rol `SUPERADMIN`) **solo si no existe**:
+
+- En la **primera instalación** lo crea con una **contraseña temporal** aleatoria y lo marca para **cambio obligatorio**: al primer ingreso el LIMS exige elegir una contraseña nueva antes de dejar usar nada más.
+- La contraseña temporal se muestra **una sola vez, en pantalla**, al final de la instalación (también si la verificación final falla). **No se escribe en el registro** `/var/log/lims-instalacion-*.log` ni en ningún archivo. Anótela y entréguela por canal seguro.
+- En una **reinstalación o actualización de versión**, `admin` ya existe y **no se toca**: conserva su contraseña.
+- Si la contraseña se pierde, genere una temporal nueva (vuelve a exigir el cambio en el primer ingreso y cierra las sesiones abiertas):
+
+```bash
+cd /opt/lims-idic
+sudo docker compose -f docker-compose.onpremise.yml --env-file .env exec api \
+  node dist/cli/crear-admin.js --usuario admin --restablecer
+```
+
 ## 6. Verificación
 
 Recorra esta lista tras instalar. **No dé el sistema por entregado hasta que los ocho puntos pasen.**
@@ -372,7 +417,7 @@ Recorra esta lista tras instalar. **No dé el sistema por entregado hasta que lo
 | 3 | Certificado | `echo \| openssl s_client -connect localhost:443 -servername $DOMAIN 2>/dev/null \| openssl x509 -noout -subject -dates` | CN y fechas correctos |
 | 4 | Base de datos | `docker exec lims-postgres psql -U lims -d lims_idic -c "SELECT count(*) FROM metodo"` | > 100 métodos |
 | 5 | Puertos | `ss -tlnp \| grep -E ':(5432\|6379\|9000)'` | **Vacío**: no deben estar publicados |
-| 6 | Web | Abrir `https://<dominio>` e iniciar sesión con `admin` | Entra sin aviso de certificado |
+| 6 | Web | Abrir `https://<dominio>` e iniciar sesión con `admin` y su contraseña temporal (§5.8) | Entra sin aviso de certificado y pide cambiar la contraseña antes de seguir |
 | 7 | Respaldo | `sudo /opt/lims-idic/scripts/backup/backup.sh --tipo diario` | "COPIA CORRECTA Y VERIFICADA" |
 | 8 | Chequeo | `sudo /opt/lims-idic/monitorizacion/chequeo-salud.sh --verboso` | "Todo correcto" |
 
@@ -395,8 +440,8 @@ sudo /opt/lims-idic/monitorizacion/chequeo-salud.sh --probar-correo
 | Fichero | Contenido | Por qué |
 |---|---|---|
 | `lims_idic-<fecha>.dump` | PostgreSQL (`pg_dump -Fc -Z6`) | Todo el laboratorio: muestras, ensayos, resultados, custodia |
-| `minio-<fecha>.tar.gz` | Objetos de MinIO | Informes y certificados firmados |
-| `config-<fecha>.tar.gz` | `.env`, certificados, compose | **Sin el `.env`, un dump no reconstruye el servicio**: otro `JWT_SECRET` invalida las sesiones y otras claves de MinIO dejan los documentos inaccesibles |
+| `minio-<fecha>.tar.gz` | Objetos de MinIO | Hoy MinIO no guarda nada (§1.2): los documentos van dentro del dump. Se respalda por si una versión futura lo usa |
+| `config-<fecha>.tar.gz` | `.env`, certificados, compose | **Sin el `.env`, un dump no reconstruye el servicio**: otro `JWT_SECRET` invalida las sesiones y se pierden las claves de respaldo (`RESPALDO_CLAVE`) y del BI |
 | `SHA256SUMS` | Checksums | Detección de corrupción |
 | `MANIFIESTO.txt` | Fecha, versión, tipo | Trazabilidad |
 
@@ -426,6 +471,14 @@ docker exec lims-postgres psql -U lims -d postgres -c 'DROP DATABASE "simulacro_
 
 El script muestra el recuento de filas por tabla para contrastarlo con la producción. **Registre el resultado en el libro de operación del IDIC.**
 
+`--desde` acepta un directorio de copia (busca su `lims_idic-*.dump`) **o la ruta de cualquier volcado `.dump`** en formato personalizado de `pg_dump` (`-Fc`), por ejemplo el que sale de una recuperación PITR (`PITR.md` §7). El script comprueba que el fichero exista y sea de verdad un volcado de ese formato antes de tocar nada.
+
+**Ajustes post-restauración.** El volcado se restaura con `--no-owner --no-privileges`, así que no trae la zona horaria por defecto de la base ni los permisos del usuario de solo lectura del BI (`lims_lectura`). Al terminar, `restore.sh` ejecuta `scripts/backup/post-restauracion.sh`, que reaplica los SQL de ajuste de su lista (hoy `align_zona_horaria.sql` y `align_brechas_6.sql`, ambos idempotentes; `post-restauracion.sh --listar` los muestra). Si restaura de otra forma (a mano, o con `restaurar-portable.sh --a-bd`), ejecútelo usted:
+
+```bash
+sudo /opt/lims-idic/scripts/backup/post-restauracion.sh <base>
+```
+
 ### 7.5 Restauración real sobre producción
 
 > **DESTRUCTIVO.** Solo ante pérdida real de datos.
@@ -442,8 +495,9 @@ Salvaguardas del script:
 3. **Respalda el estado actual antes de sobrescribirlo** (`pre-restauracion-<fecha>.dump`). Si la copia elegida resulta ser la equivocada, ese fichero es la única vuelta atrás.
 4. Detiene `api` y `web` para liberar conexiones (si no, el `DROP DATABASE` falla).
 5. Verifica el resultado y muestra el recuento por tabla.
+6. Reaplica los ajustes post-restauración (zona horaria y permisos de `lims_lectura`, §7.4) antes de volver a arrancar `api` y `web`.
 
-Los objetos de MinIO **no** se restauran salvo que añada `--con-minio`: normalmente se recupera la base pero se conservan los documentos actuales.
+Los objetos de MinIO **no** se restauran salvo que añada `--con-minio`. Hoy MinIO no guarda documentos del LIMS (§1.2), así que normalmente no hace falta.
 
 > Todo lo que haya entrado en el LIMS **después** de la copia se pierde. Con el respaldo diario `pg_dump` la ventana máxima de pérdida sería de **24 horas**. Por eso el kit incluye además **WAL archiving + PITR** (§7.7), que reduce esa ventana a **≈5 minutos** y permite restaurar a un instante concreto.
 
@@ -487,7 +541,7 @@ sudo /opt/lims-idic/scripts/backup/restaurar-portable.sh /srv/lims-backup/portab
 sudo /opt/lims-idic/scripts/backup/restaurar-portable.sh /srv/lims-backup/portables/lims_idic-<fecha>.tar.gz.enc --a-bd lims_restaurada
 ```
 
-En otro equipo (sin el `.env`), basta con exportar la clave antes: `RESPALDO_CLAVE='…' ./restaurar-portable.sh <paquete> --extraer <carpeta>`. Para volver a operar sobre una base restaurada, cambie `POSTGRES_DB` en el `.env` tras revisarla y reinicie `api` y `web`.
+En otro equipo (sin el `.env`), basta con exportar la clave antes: `RESPALDO_CLAVE='…' ./restaurar-portable.sh <paquete> --extraer <carpeta>`. Para volver a operar sobre una base restaurada, ejecute `post-restauracion.sh <base>` (§7.4), cambie `POSTGRES_DB` en el `.env` tras revisarla y reinicie `api` y `web`.
 
 ### 7.6 Copia externa (responsabilidad del IDIC)
 
@@ -595,7 +649,9 @@ sudo ./monitorizacion/chequeo-salud.sh --verboso
 | Navegador: "certificado no válido" | `DOMAIN` no coincide con CN/SAN, o falta la intermedia | §4.2 |
 | API reiniciándose | `JWT_SECRET` de menos de 32 caracteres | La API aborta a propósito. Corrija el `.env` |
 | API `degraded` | No ve PostgreSQL | `docker compose logs postgres` |
-| `pg_dump: Permission denied` | `/srv/lims-backup` no pertenece al uid 999 | `sudo chown 999:999 /srv/lims-backup/diarios/<fecha>` |
+| `pg_dump: Permission denied` | El directorio de la copia no pertenece al usuario `postgres` del contenedor (uid **70** en `postgres:16-alpine`; 999 es el de la imagen debian, que este kit no usa) | `sudo chown 70:70 /srv/lims-backup/diarios/<fecha>` |
+| Menú «Análisis e inteligencia de negocio» dice que no está configurado | BI no activado: `URL_BI` vacía | §5.7 |
+| Metabase no puede leer la base del LIMS | `lims_lectura` sin habilitar | `COMPOSE_FILE=docker-compose.onpremise.yml bash scripts/metabase/crear-usuario-lectura.sh` (§5.7) |
 | Todo lento | Poca RAM para `shared_buffers=2GB` | §2.1 |
 | Metabase no arranca | Necesita hasta 3 min la primera vez | Espere; `start_period` es de 180 s |
 | Sin alertas por correo | `ALERTA_SMTP_HOST` sin configurar | §8.3 |
@@ -683,8 +739,8 @@ sudo /opt/lims-idic/scripts/backup/restore.sh --desde <copia> --sobre-produccion
 
 1. Servidor nuevo con los requisitos de §2 y Docker (§3.1).
 2. Instale el kit de la versión correspondiente (§5.3).
-3. Recupere `config-<fecha>.tar.gz` de la copia: contiene el `.env` **y los certificados originales**. Sin ese `.env`, los documentos de MinIO quedan inaccesibles y todas las sesiones se invalidan.
-4. Restaure con `--sobre-produccion --con-minio`.
+3. Recupere `config-<fecha>.tar.gz` de la copia: contiene el `.env` **y los certificados originales**. Sin ese `.env` todas las sesiones se invalidan y se pierden las claves de las exportaciones cifradas (`RESPALDO_CLAVE`) y del BI.
+4. Restaure con `--sobre-produccion` (añada `--con-minio` solo si la copia trae objetos de MinIO; hoy el LIMS no los usa, §1.2). `restore.sh` reaplica al final los ajustes post-restauración (§7.4).
 5. Verifique (§6).
 
 ---
@@ -708,8 +764,10 @@ kit-lims-idic-<versión>/
 │   ├── packages/db/*.sql        Esquema, catálogos y alineaciones
 │   ├── packages/db/ORDEN_SQL.txt   Orden de aplicación (fuente única)
 │   ├── scripts/orden-sql.sh     Interpreta el manifiesto (demo / sin-demo)
-│   └── scripts/backup/          backup.sh, restore.sh (pg_dump/GFS)
-│                                archive-wal.sh, basebackup.sh, restore-pitr.sh (PITR)
+│   ├── scripts/backup/          backup.sh, restore.sh, post-restauracion.sh (pg_dump/GFS)
+│   │                            archive-wal.sh, basebackup.sh, restore-pitr.sh (PITR)
+│   │                            exportar-portable.sh, restaurar-portable.sh (SQL/CSV cifrado)
+│   └── scripts/metabase/        crear-usuario-lectura.sh, configurar-metabase.py (BI, §5.7)
 └── conf/
     ├── Caddyfile.onpremise      TLS propio, sin ACME
     ├── env.onpremise.example
@@ -747,7 +805,8 @@ docker exec -it lims-postgres psql -U lims -d lims_idic
 - [ ] **Simulacro de restauración ejecutado con éxito** (§7.4)
 - [ ] **WAL archiving activo** (`SELECT * FROM pg_stat_archiver` con `archived_count` creciente) y **PITR probado** al menos una vez (`restore-pitr.sh`, ver PITR.md §7)
 - [ ] Política de copia externa acordada con el IDIC (§7.6)
-- [ ] Contraseña del administrador entregada por canal seguro y cambiada
+- [ ] Contraseña temporal del administrador entregada por canal seguro y cambiada en el primer ingreso (§5.8)
+- [ ] BI: activado con certificado que cubre `bi.<dominio>`, `lims_lectura` habilitado y tableros dados de alta; o decisión expresa de no activarlo (§5.7)
 - [ ] Kit y USB registrados en el libro de soportes
 
 ### 12.4 Decisiones de diseño
@@ -780,9 +839,9 @@ docker exec -it lims-postgres psql -U lims -d lims_idic
 3. **Servidor único.** Sin alta disponibilidad: una avería de hardware implica restaurar en otro equipo (§11.3). Un LIMS de laboratorio con horario de oficina lo admite; si el IDIC exige HA, es un cambio de alcance.
 4. **Copia externa manual.** El kit deja las copias en el propio servidor (§7.6).
 5. **Renovación del certificado manual.** Inevitable sin ACME. Mitigado con el aviso a 30 días.
-7. **MinIO sin actualizaciones.** La imagen empaquetada es la última pública que se validó (septiembre de 2025) y el fabricante ya no publica nuevas. Funciona y no está expuesta fuera de la red interna de Docker, pero no recibirá parches. Queda por decidir si se sustituye por otro almacén compatible con S3 mantenido.
+7. **MinIO sin actualizaciones.** La imagen empaquetada es la última pública que se validó (septiembre de 2025) y el fabricante ya no publica nuevas. Funciona y no está expuesta fuera de la red interna de Docker, pero no recibirá parches. Como hoy el LIMS no guarda nada en MinIO (ni usa Redis, §1.2), queda por decidir si se retira del despliegue o se sustituye por otro almacén compatible con S3 mantenido.
 8. **Restaurar Metabase es manual.** `restore.sh` restaura la base del LIMS. Los paneles del BI se recuperan con `pg_restore -d lims_metabase metabase-<fecha>.dump`.
-6. **El volcado de MinIO es un `tar` en caliente.** Consistente por objeto; un fichero subido *durante* el volcado podría no entrar. Por eso el respaldo corre a las 02:15.
+6. **El volcado de MinIO es un `tar` en caliente.** Consistente por objeto; un fichero subido *durante* el volcado podría no entrar. Hoy no afecta: MinIO no guarda documentos del LIMS.
 
 ---
 
