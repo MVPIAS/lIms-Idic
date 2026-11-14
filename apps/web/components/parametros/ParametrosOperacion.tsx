@@ -23,9 +23,9 @@ import { toast } from "@/components/ui/feedback";
 import EditorTabla, { type ColumnaTabla } from "./EditorTabla";
 import { anioChile } from "@/lib/fecha-chile";
 
-type Tipo = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
+type Tipo = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep" | "texto";
 interface Opcion { valor: string; etiqueta: string }
-interface Def { tipo: Tipo; ayuda: string | null; min: number | null; max: number | null; unidad: string | null; opciones: Opcion[] | null; porDefecto: string | null; columnas?: ColumnaTabla[] | null; maxFilas?: number | null }
+interface Def { tipo: Tipo; ayuda: string | null; min: number | null; max: number | null; unidad: string | null; opciones: Opcion[] | null; porDefecto: string | null; columnas?: ColumnaTabla[] | null; maxFilas?: number | null; largo?: number | null }
 interface DefCampo { tipo: string; obligatorio: boolean; opciones: Opcion[]; ayuda: string; activo: boolean; bloquea?: boolean; unidad?: string }
 interface Variante { variante: string; activo: boolean }
 type Alta = "laboratorio" | "campo" | "metodo" | "plantilla";
@@ -480,6 +480,14 @@ function EditorValor({ id, def, b, setB, digitos, codigo }: {
         </div>
       );
     }
+    case "texto":
+      return (
+        <div className="field" style={{ maxWidth: 520 }}>
+          <label htmlFor={`${id}-v`}>Nuevo valor</label>
+          <input id={`${id}-v`} value={String(b)} maxLength={def.largo ?? 200} onChange={(e) => setB(e.target.value)} aria-describedby={`${id}-v-ayuda`} autoFocus />
+          <small id={`${id}-v-ayuda`} style={{ color: "var(--muted)" }}>{def.ayuda ?? `Hasta ${def.largo ?? 200} caracteres.`}</small>
+        </div>
+      );
     case "campo":
       return <EditorCampo id={id} c={b as DefCampo} setC={setB} esDestino={codigo.endsWith(".clase_custodia")} />;
     case "campo_prep":

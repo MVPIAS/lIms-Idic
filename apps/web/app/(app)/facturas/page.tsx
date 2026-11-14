@@ -9,7 +9,11 @@
  *  · Registrar un pago descuenta el saldo y deja la factura con pago parcial o
  *    pagada. Una factura con pagos no se anula: se emite una nota de crédito.
  *  · También se puede emitir una factura manual (factura.emitir).
- * Reglas: docs/FLUJO_FIRMA_CIERRE.md.
+ *  · El LIMS no emite la factura electrónica (no sale a internet): la ficha de
+ *    cada factura descarga el «documento de cobro» (PDF, no es un DTE) y el
+ *    JSON lims-idic.factura.v1 que importa el sistema de facturación del IDIC;
+ *    el listado exporta varias facturas por rango de fechas.
+ * Reglas: docs/FLUJO_FIRMA_CIERRE.md y docs/EXPORTACION_FACTURACION.md.
  */
 import { Suspense, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -59,6 +63,10 @@ function FacturasContenido() {
       .catch(() => setMedios([]));
   }, []);
   const [manual, setManual] = useState(false);
+  // Ficha de la factura y exportación para facturación (docs/EXPORTACION_FACTURACION.md).
+  const [ficha, setFicha] = useState<any | null>(null);
+  const [exenta, setExenta] = useState(false);
+  const [lote, setLote] = useState<{ desde: string; hasta: string; estado: string } | null>(null);
   const [clientes, setClientes] = useState<any[]>([]);
   const [nueva, setNueva] = useState({ numero: "", clienteId: "", descripcion: "", cantidad: "1", precioUnitario: "", ivaPct: "19" });
 
@@ -83,28 +91,78 @@ function FacturasContenido() {
     setRevisar(f);
     setLineas((f.lineas ?? []).map((l: any) => ({ descripcion: l.descripcion, cantidad: String(Number(l.cantidad)), precioUnitario: String(Number(l.precioUnitario)) })));
     setIvaPct(String(Number(f.ivaPct ?? 19)));
+    setExenta(f.exentaIva ?? Number(f.ivaPct) === 0);
     setFolio({ numero: "", fecha: hoy() });
+  }
+
+  /** PDF «documento de cobro» de la factura (no es un documento tributario electrónico). */
+  async function descargarPdf(f: any) {
+    setOcupado(true);
+    try {
+      await descargar(`/facturas/${f.id}/documento-cobro`, `Documento-cobro-${f.numero}.pdf`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  /** JSON lims-idic.factura.v1 de una factura para el sistema de facturación. */
+  async function exportarJson(f: any) {
+    setOcupado(true);
+    try {
+      const doc = await descargarJson(`/facturas/${f.id}/exportacion`, `Factura-${f.numero}.json`);
+      const adv: string[] = doc?.advertencias ?? [];
+      toast.ok(`Factura ${f.numero} exportada para facturación (tipo ${doc?.encabezado?.tipoDte}).`);
+      if (adv.length) toast.info(`Revise: ${adv.join(" ")}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  /** Varias facturas en un archivo (rango de fechas de emisión y estado). */
+  async function exportarLote() {
+    if (!lote) return;
+    setOcupado(true);
+    try {
+      const q = new URLSearchParams({ desde: lote.desde, hasta: lote.hasta, ...(lote.estado ? { estado: lote.estado } : {}) });
+      const r = await descargarJson(`/facturas/exportacion?${q.toString()}`, `Facturas-${lote.desde}-a-${lote.hasta}.json`);
+      const om: any[] = r?.omitidas ?? [];
+      toast.ok(`${r?.cantidad ?? 0} factura(s) exportada(s) para facturación.`);
+      if (om.length)
+        toast.info(`${om.length} no se exportaron (${om.slice(0, 3).map((o) => o.folioInterno).join(", ")}${om.length > 3 ? "…" : ""}): el motivo de cada una está en «omitidas» dentro del archivo. Corríjalas y vuelva a exportarlas.`);
+      setLote(null);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(false);
+    }
   }
 
   const lineasValidas = lineas.length > 0 && lineas.every((l) => l.descripcion.trim() && Number(l.cantidad) > 0 && l.precioUnitario !== "" && !isNaN(Number(l.precioUnitario)));
   const netoEditado = lineas.reduce((a, l) => a + Number(l.cantidad || 0) * Number(l.precioUnitario || 0), 0);
+  const ivaEfectivo = exenta ? 0 : Number(ivaPct || 0);
 
   async function guardarYEmitir(soloGuardar: boolean) {
     // Emitir no se deshace (D02-23): se confirma con el folio y el total.
     if (!soloGuardar) {
       const ok = await confirmar({
         titulo: `¿Emitir la factura ${folio.numero.trim()}?`,
-        mensaje: `Queda emitida por ${monto(netoEditado * (1 + Number(ivaPct || 0) / 100), revisar.moneda)} y pasa a cobranza. Para corregirla después se usa una nota de crédito.`,
+        mensaje: `Queda emitida por ${monto(netoEditado * (1 + ivaEfectivo / 100), revisar.moneda)} y pasa a cobranza. Para corregirla después se usa una nota de crédito.`,
         confirmarTexto: "Emitir factura",
       });
       if (!ok) return;
     }
     setOcupado(true);
     try {
-      const r: any = await fetchJson(`/facturas/${revisar.id}/lineas`, "PUT", {
+      await fetchJson(`/facturas/${revisar.id}/lineas`, "PUT", {
         lineas: lineas.map((l) => ({ descripcion: l.descripcion.trim(), cantidad: Number(l.cantidad), precioUnitario: Number(l.precioUnitario) })),
-        ivaPct: Number(ivaPct),
+        ivaPct: exenta ? 0 : Number(ivaPct),
       });
+      // Exenta de IVA (DTE 34) o afecta (33): queda marcada y los importes se recalculan.
+      const r: any = await fetchJson(`/facturas/${revisar.id}/exencion`, "PUT", { exenta });
       if (soloGuardar) {
         toast.ok("Líneas guardadas.");
         setRevisar({ ...revisar, ...r });
@@ -229,6 +287,7 @@ function FacturasContenido() {
 
   const acciones = (f: any) => (
     <span style={{ display: "inline-flex", gap: 6 }} onClick={(e) => e.stopPropagation()}>
+      <button className="btn outline sm" onClick={() => setFicha(f)}>Ver ficha</button>
       {f.estado === "pendiente" && puede("factura.emitir") && <button className="btn primary sm" onClick={() => abrirRevision(f)}>Revisar y emitir</button>}
       {(f.estado === "emitida" || f.estado === "parcial") && puede("factura.cobrar") && (
         <button className="btn success sm" onClick={() => { setPagar(f); setPago({ monto: String(Number(f.saldo ?? 0)), medio: "", referencia: "", numeroBoletin: "", fecha: hoy() }); }}>Registrar pago</button>
@@ -250,7 +309,12 @@ function FacturasContenido() {
         icono="📄"
         subtitulo="Al cerrar una OT con cobro se genera aquí una factura pendiente con los importes de la cotización aceptada. Revísela, emítala con el folio y registre los pagos: el saldo y el estado se actualizan solos."
         migas={[{ label: "Finanzas" }, { label: "Facturas" }]}
-        acciones={puede("factura.emitir") ? <button className="btn outline" onClick={abrirManual}>Factura manual</button> : null}
+        acciones={
+          <>
+            <button className="btn outline" onClick={() => setLote({ desde: `${hoy().slice(0, 8)}01`, hasta: hoy(), estado: "" })}>Exportar para facturación (JSON)</button>
+            {puede("factura.emitir") && <button className="btn outline" onClick={abrirManual}>Factura manual</button>}
+          </>
+        }
       />
       {error && <div className="alert warn">{error}</div>}
       <div className="tabs" style={{ marginBottom: 10 }}>
@@ -262,7 +326,72 @@ function FacturasContenido() {
         ))}
       </div>
       <DataTable columns={columnas} rows={filas} loading={cargando} searchKeys={["numero", "cliente", "ot"]}
-        acciones={acciones} vacio={<>No hay facturas con este filtro.</>} />
+        onRowClick={(f) => setFicha(f)} acciones={acciones} vacio={<>No hay facturas con este filtro.</>} />
+
+      {ficha && (
+        <Modal titulo={`Ficha de la factura ${ficha.numero}`} ancho={820} onCerrar={() => setFicha(null)}
+          acciones={
+            <>
+              <button className="btn outline" onClick={() => setFicha(null)}>Cerrar</button>
+              <button className="btn outline" disabled={ocupado} onClick={() => descargarPdf(ficha)}>Descargar documento de cobro (PDF)</button>
+              <button className="btn primary" disabled={ocupado || ficha.estado === "anulada"}
+                title={ficha.estado === "anulada" ? "Una factura anulada no se exporta para facturación" : undefined}
+                onClick={() => exportarJson(ficha)}>Exportar para facturación (JSON)</button>
+            </>
+          }>
+          <div className="form-grid" style={{ marginTop: 0 }}>
+            <div className="field"><label>Estado</label><span className={`pill ${ESTADO_FACTURA[ficha.estado]?.pill ?? "gray"}`}>{ESTADO_FACTURA[ficha.estado]?.texto ?? ficha.estado}</span></div>
+            <div className="field"><label>Emisión</label><span>{ficha.estado === "pendiente" ? "— (pendiente)" : fechaDia(ficha.fechaEmision)}</span></div>
+            <div className="field"><label>Tipo de factura sugerido</label><span>{(ficha.exentaIva ?? Number(ficha.ivaPct) === 0) ? "Exenta de IVA (34)" : "Afecta a IVA (33)"}</span></div>
+            <div className="field span-2"><label>Cliente</label><span>{[ficha.cliente?.rut, ficha.cliente?.razonSocial].filter(Boolean).join(" · ") || "—"}</span></div>
+            <div className="field"><label>OT</label><span>{ficha.ot ? <Link href={`/ot/${ficha.ot.id}` as any} className="codigo">{ficha.ot.codigo}</Link> : "—"}</span></div>
+          </div>
+          <table className="data" style={{ marginTop: 10 }}>
+            <thead><tr><th>Descripción</th><th style={{ width: 80, textAlign: "right" }}>Cantidad</th><th style={{ width: 130, textAlign: "right" }}>Precio unitario</th><th style={{ width: 120, textAlign: "right" }}>Subtotal</th></tr></thead>
+            <tbody>
+              {(ficha.lineas ?? []).map((l: any) => (
+                <tr key={l.id}><td>{l.descripcion}</td><td style={{ textAlign: "right" }}>{Number(l.cantidad).toLocaleString("es-CL")}</td>
+                  <td style={{ textAlign: "right" }}>{monto(l.precioUnitario, ficha.moneda)}</td><td style={{ textAlign: "right" }}>{monto(l.subtotal, ficha.moneda)}</td></tr>
+              ))}
+              {!(ficha.lineas ?? []).length && <tr><td colSpan={4} style={{ color: "var(--muted)" }}>Sin líneas.</td></tr>}
+            </tbody>
+          </table>
+          <p style={{ textAlign: "right", margin: "8px 0" }}>
+            Neto <b>{monto(ficha.neto, ficha.moneda)}</b> · IVA {Number(ficha.ivaPct ?? 0).toLocaleString("es-CL")} % <b>{monto(ficha.ivaMonto, ficha.moneda)}</b> · Total <b>{monto(ficha.total, ficha.moneda)}</b> · Saldo <b>{monto(ficha.saldo ?? 0, ficha.moneda)}</b>
+          </p>
+          <div className="alert info" style={{ margin: 0 }}>
+            El LIMS no emite la factura electrónica ante el SII. El <b>documento de cobro</b> (PDF) no es un documento tributario.
+            El archivo <b>JSON</b> lleva los datos que importa el sistema de facturación del IDIC para emitirla; si la factura está pendiente,
+            registre después el folio que le asigne ese sistema en «Revisar y emitir».
+          </div>
+        </Modal>
+      )}
+
+      {lote && (
+        <Modal titulo="Exportar facturas para facturación" onCerrar={() => setLote(null)}
+          acciones={
+            <>
+              <button className="btn outline" onClick={() => setLote(null)}>Cancelar</button>
+              <button className="btn primary" disabled={ocupado || !lote.desde || !lote.hasta || lote.hasta < lote.desde} onClick={exportarLote}>Exportar (JSON)</button>
+            </>
+          }>
+          <p style={{ marginTop: 0 }}>Descarga un archivo con las facturas del rango (por fecha de emisión) en el formato que importa el sistema de facturación. Las que no se pueden exportar quedan listadas con el motivo en «omitidas».</p>
+          <div className="form-grid">
+            <div className="field"><label htmlFor="lote-desde">Desde <span className="req">*</span></label><input id="lote-desde" type="date" value={lote.desde} onChange={(e) => setLote({ ...lote, desde: e.target.value })} /></div>
+            <div className="field"><label htmlFor="lote-hasta">Hasta <span className="req">*</span></label><input id="lote-hasta" type="date" value={lote.hasta} onChange={(e) => setLote({ ...lote, hasta: e.target.value })} /></div>
+            <div className="field"><label htmlFor="lote-estado">Estado</label>
+              <select id="lote-estado" value={lote.estado} onChange={(e) => setLote({ ...lote, estado: e.target.value })}>
+                <option value="">Todas menos las anuladas</option>
+                <option value="pendiente">Pendientes de facturar</option>
+                <option value="por_cobrar">Por cobrar (emitidas y con pago parcial)</option>
+                <option value="emitida">Emitidas</option>
+                <option value="pagada">Pagadas</option>
+              </select>
+            </div>
+          </div>
+          {lote.hasta < lote.desde && <div className="alert warn" role="alert">La fecha «hasta» es anterior a «desde».</div>}
+        </Modal>
+      )}
 
       {revisar && (
         <Modal titulo={`Revisar y emitir · ${revisar.ot?.codigo ? `OT ${revisar.ot.codigo}` : revisar.numero}`} ancho={820} onCerrar={() => setRevisar(null)}
@@ -296,10 +425,13 @@ function FacturasContenido() {
             <button className="btn outline sm" onClick={() => setLineas([...lineas, { descripcion: "", cantidad: "1", precioUnitario: "" }])}>Añadir línea</button>
             <span className="spacer" />
             {/* F068: el % de IVA se lee también como texto (no solo dentro del campo editable). */}
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center", marginRight: 12 }} title="Factura exenta (34): p. ej. la tasa de internación del BPCH">
+              <input type="checkbox" checked={exenta} onChange={(e) => setExenta(e.target.checked)} /> Exenta de IVA
+            </label>
             <span>Neto <b>{monto(netoEditado, revisar.moneda)}</b> · IVA
-              <input type="number" min="0" max="100" value={ivaPct} onChange={(e) => setIvaPct(e.target.value)} style={{ width: 60, margin: "0 4px" }} aria-label="Porcentaje de IVA" />%
-              {" "}(<b>{Number(ivaPct || 0).toLocaleString("es-CL")} %</b>: {monto(netoEditado * (Number(ivaPct || 0) / 100), revisar.moneda)})
-              · Total <b>{monto(netoEditado * (1 + Number(ivaPct || 0) / 100), revisar.moneda)}</b></span>
+              <input type="number" min="0" max="100" value={exenta ? "0" : ivaPct} disabled={exenta} onChange={(e) => setIvaPct(e.target.value)} style={{ width: 60, margin: "0 4px" }} aria-label="Porcentaje de IVA" />%
+              {" "}(<b>{ivaEfectivo.toLocaleString("es-CL")} %</b>: {monto(netoEditado * (ivaEfectivo / 100), revisar.moneda)})
+              · Total <b>{monto(netoEditado * (1 + ivaEfectivo / 100), revisar.moneda)}</b></span>
           </div>
           <div className="form-grid" style={{ marginTop: 10 }}>
             <div className="field"><label>Folio de la factura <span className="req">*</span></label><input value={folio.numero} maxLength={30} onChange={(e) => setFolio({ ...folio, numero: e.target.value })} /></div>
@@ -359,6 +491,29 @@ function FacturasContenido() {
     </>
   );
 }
+
+/** Descarga un archivo protegido por JWT (un <a href> plano daría 401); devuelve el Blob. */
+async function bajar(path: string, nombre: string): Promise<Blob> {
+  const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+  const r = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${localStorage.getItem("lims_token")}` } });
+  if (!r.ok) {
+    const j = await r.json().catch(() => ({}));
+    throw new Error(j?.message ?? `Error ${r.status} al descargar el archivo.`);
+  }
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return blob;
+}
+const descargar = (path: string, nombre: string) => bajar(path, nombre).then(() => undefined);
+/** Descarga un JSON y devuelve su contenido (para el resumen en pantalla). */
+const descargarJson = async (path: string, nombre: string) => JSON.parse(await (await bajar(path, nombre)).text());
 
 /** PUT con el mismo manejo de errores que lib/api (que no expone PUT). */
 async function fetchJson(path: string, method: string, body: unknown) {

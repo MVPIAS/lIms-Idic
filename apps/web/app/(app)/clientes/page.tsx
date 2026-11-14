@@ -136,6 +136,8 @@ export default function ClientesPage() {
         // EP-00 0.1 (recorrido MP-02, D02-16): giro, dirección, forma de pago habitual y contacto principal.
         { campo: "giro", label: "Giro", requerido: true },
         { campo: "direccion", label: "Dirección", requerido: true, span: 2 },
+        // Comuna: la exige la factura electrónica (Facturas › Exportar para facturación).
+        { campo: "comuna", label: "Comuna", ayuda: "La pide la factura electrónica del cliente." },
         { campo: "ciudad", label: "Ciudad" },
         { campo: "region", label: "Región" },
         { campo: "telefono", label: "Teléfono", tipo: "telefono" },
