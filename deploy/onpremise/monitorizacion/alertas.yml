@@ -113,7 +113,7 @@ groups:
         labels: { severidad: critica }
         annotations:
           resumen: "WAL archiving atascado: {{ $value }} segmentos pendientes"
-          detalle: "archive_command no consigue archivar. pg_wal crecerá hasta llenar el disco y detener PostgreSQL. Revise que /backup/wal exista, tenga espacio y pertenezca al uid 999. Ver PITR.md."
+          detalle: "archive_command no consigue archivar. pg_wal crecerá hasta llenar el disco y detener PostgreSQL. Revise que /walarchive (LIMS_BACKUP_DIR/wal en el host) exista, tenga espacio y pertenezca al usuario postgres del contenedor (uid 70 en alpine). Ver PITR.md."
 
       - alert: LimsWalArchivadoParado
         expr: lims_wal_ultimo_archivado_hace_seg > 7200

@@ -46,6 +46,9 @@ while [ $# -gt 0 ]; do
 done
 
 touch "$LOG_FILE" 2>/dev/null || { echo "Ejecute como root."; exit 1; }
+# El registro detalla la instalación (rutas, versiones, salida de los SQL): solo
+# lo lee root. Las contraseñas NO se escriben aquí en ningún caso.
+chmod 600 "$LOG_FILE" 2>/dev/null || true
 log "LIMS IDIC · instalación on-premise · $(date '+%Y-%m-%d %H:%M:%S')"
 log "Registro completo en: $LOG_FILE"
 
@@ -141,7 +144,9 @@ cp "$KIT_DIR/GUIA_ONPREMISE.md" "$APP_DIR/" 2>/dev/null || true
 # PITR.md: las unidades lims-basebackup la referencian en Documentation= y el
 # operador la necesita en el sitio para las restauraciones a un instante.
 cp "$KIT_DIR/PITR.md" "$APP_DIR/" 2>/dev/null || true
-chmod +x "$APP_DIR"/scripts/backup/*.sh "$APP_DIR"/monitorizacion/*.sh 2>/dev/null || true
+chmod +x "$APP_DIR"/scripts/backup/*.sh "$APP_DIR"/scripts/metabase/*.sh "$APP_DIR"/monitorizacion/*.sh 2>/dev/null || true
+[ -f "$APP_DIR/scripts/metabase/crear-usuario-lectura.sh" ] \
+  || warn "El kit no trae scripts/metabase/crear-usuario-lectura.sh (kit anterior): el BI no podrá habilitar lims_lectura. Regenere el kit."
 ok "Código, SQL y configuración desplegados"
 
 # =============================================================================
@@ -171,6 +176,27 @@ if [ ! -f "$APP_DIR/.env" ]; then
 else
   ok "Se reutiliza el .env existente"
   chmod 600 "$APP_DIR/.env"
+fi
+
+# Fija VAR=valor en el .env (reemplaza la línea, activa o comentada, o la añade).
+# No imprime el valor: se usa también con secretos.
+fijar_env() {
+  local var="$1" valor="$2"
+  if grep -qE "^${var}=" "$APP_DIR/.env"; then
+    sed -i "s|^${var}=.*|${var}=${valor}|" "$APP_DIR/.env"
+  elif grep -qE "^# ?${var}=" "$APP_DIR/.env"; then
+    sed -i "0,/^# \?${var}=.*/s||${var}=${valor}|" "$APP_DIR/.env"
+  else
+    printf '%s=%s\n' "$var" "$valor" >> "$APP_DIR/.env"
+  fi
+}
+
+# Contraseña del usuario de solo lectura del BI (lims_lectura). Un .env de una
+# versión anterior puede no traerla: se genera aquí, sin mostrarla.
+if ! grep -qE '^METABASE_LECTURA_PASSWORD=.{16,}' "$APP_DIR/.env" \
+   || grep -qE '^METABASE_LECTURA_PASSWORD=<<GENERAR>>' "$APP_DIR/.env"; then
+  fijar_env METABASE_LECTURA_PASSWORD "$(generar_secreto)"
+  ok "Generada la contraseña del usuario de solo lectura del BI (METABASE_LECTURA_PASSWORD, en el .env)"
 fi
 
 set -a; . "$APP_DIR/.env"; set +a
@@ -283,6 +309,42 @@ if [ "$(openssl x509 -noout -modulus -in "$CERT" | openssl md5)" \
   fatal "El certificado y la clave privada NO se corresponden. Caddy no arrancará."
 fi
 ok "Certificado válido para $DOMAIN · caduca: $CERT_FIN"
+
+# --- BI (Metabase) en https://bi.<DOMAIN> ------------------------------------
+# BI_ACTIVO=si | no | auto (por defecto auto: se activa si el certificado cubre
+# bi.<DOMAIN>). Activo => URL_BI apunta a https://bi.<DOMAIN> (salvo que el .env
+# ya traiga otra) y, tras los SQL, se habilita el usuario de solo lectura
+# lims_lectura. No activo => URL_BI vacía: el menú del LIMS dice que el BI no
+# está configurado y el resumen no lo anuncia.
+CERT_CUBRE_BI="no"
+DOM_RE="$(printf '%s' "$DOMAIN" | sed 's/[.]/[.]/g')"
+if openssl x509 -in "$CERT" -noout -text | grep -qE "DNS:(bi[.]${DOM_RE}|[*][.]${DOM_RE})([,[:space:]]|\$)"; then
+  CERT_CUBRE_BI="si"
+fi
+case "${BI_ACTIVO:-auto}" in
+  si)   BI_ON="si"
+        [ "$CERT_CUBRE_BI" = "si" ] || warn "BI_ACTIVO=si pero el certificado no cubre bi.$DOMAIN: los navegadores
+   rechazarán https://bi.$DOMAIN. Pida a la CA un certificado con ese SAN (GUIA_ONPREMISE.md §4.2)." ;;
+  no)   BI_ON="no" ;;
+  auto) BI_ON="$CERT_CUBRE_BI" ;;
+  *)    fatal "BI_ACTIVO='${BI_ACTIVO}' no es válido en .env: use si, no o auto." ;;
+esac
+if [ "$BI_ON" = "si" ]; then
+  if [ -z "${URL_BI:-}" ]; then
+    URL_BI="https://bi.$DOMAIN"
+    fijar_env URL_BI "$URL_BI"
+  fi
+  export URL_BI
+  ok "BI (Metabase) activado: $URL_BI"
+else
+  if [ -n "${URL_BI:-}" ]; then
+    warn "El BI no se activa (BI_ACTIVO=${BI_ACTIVO:-auto}, certificado para bi.$DOMAIN: $CERT_CUBRE_BI): se vacía URL_BI del .env."
+  fi
+  URL_BI=""
+  fijar_env URL_BI ""
+  export URL_BI
+  log "BI (Metabase) no activado: el certificado no cubre bi.$DOMAIN o BI_ACTIVO=no. Para activarlo, ver GUIA_ONPREMISE.md §5.7."
+fi
 
 # =============================================================================
 paso "7/9 · Arranque del stack"
@@ -435,6 +497,21 @@ METODOS="$(psql_run -tAq -c "SELECT count(*) FROM metodo" 2>/dev/null | tr -d '[
 ok "Base de datos: $TABLAS tablas · $ROLES roles · $METODOS métodos de ensayo"
 [ "${ROLES:-0}" -gt 0 ] || fatal "No hay roles: seed_rbac.sql no se aplicó correctamente."
 
+# Usuario de solo lectura del BI: align_brechas_6.sql (ya aplicado) crea el rol
+# lims_lectura sin poder ingresar; aquí se le da la contraseña del .env.
+BI_LECTURA_OK="no"
+if [ "$BI_ON" = "si" ]; then
+  if ( export APP_DIR COMPOSE_FILE="$APP_DIR/docker-compose.onpremise.yml"
+       bash "$APP_DIR/scripts/metabase/crear-usuario-lectura.sh" ) >>"$LOG_FILE" 2>&1; then
+    BI_LECTURA_OK="si"
+    ok "Usuario de solo lectura del BI (lims_lectura) habilitado"
+  else
+    warn "No se pudo habilitar lims_lectura (detalle en $LOG_FILE). El LIMS funciona, pero
+   Metabase no podrá leer la base. Repita con:
+     COMPOSE_FILE=docker-compose.onpremise.yml bash $APP_DIR/scripts/metabase/crear-usuario-lectura.sh"
+  fi
+fi
+
 # =============================================================================
 paso "9/9 · Usuario administrador y monitorización"
 # =============================================================================
@@ -446,11 +523,44 @@ until $COMPOSE exec -T api wget -q -O - http://localhost:3001/api/health 2>/dev/
   sleep 3
 done
 
-# crear-admin.js hace upsert: reejecutarlo no duplica el usuario.
-log "Creando usuario administrador (si no existe)..."
-SALIDA_ADMIN="$($COMPOSE exec -T api node dist/cli/crear-admin.js \
-    --usuario admin --rol SUPERADMIN --nombre "Administrador IDIC" 2>&1 || true)"
-echo "$SALIDA_ADMIN" | tee -a "$LOG_FILE"
+# crear-admin.js crea el usuario `admin` SOLO si no existe, con una contraseña
+# temporal y el cambio obligatorio en el primer ingreso. Si ya existe (segunda
+# pasada, actualización de versión) no lo toca. La temporal se muestra UNA vez
+# por pantalla al final y NUNCA se escribe en el registro.
+log "Usuario administrador (se crea solo si no existe)..."
+CLAVE_ADMIN=""; ADMIN_ESTADO="error"
+if SALIDA_ADMIN="$($COMPOSE exec -T api node dist/cli/crear-admin.js \
+      --usuario admin --rol SUPERADMIN --nombre "Administrador IDIC" 2>&1)"; then
+  CLAVE_ADMIN="$(printf '%s\n' "$SALIDA_ADMIN" | sed -n 's/^  password (temporal): //p' | head -1)"
+  if [ -n "$CLAVE_ADMIN" ]; then ADMIN_ESTADO="creado"; else ADMIN_ESTADO="existente"; fi
+  printf '%s\n' "$SALIDA_ADMIN" | { grep -v 'password (temporal)' || true; } | tee -a "$LOG_FILE"
+else
+  printf '%s\n' "$SALIDA_ADMIN" | { grep -v 'password (temporal)' || true; } | tee -a "$LOG_FILE"
+  warn "No se pudo crear el usuario administrador. Cuando la API esté en marcha, ejecute:
+     $COMPOSE exec api node dist/cli/crear-admin.js --usuario admin --rol SUPERADMIN --nombre \"Administrador IDIC\""
+fi
+# Pase lo que pase después (también si la verificación final falla), la
+# contraseña temporal se muestra antes de terminar: solo por pantalla.
+CLAVE_MOSTRADA="no"
+mostrar_clave_admin() {
+  [ -n "$CLAVE_ADMIN" ] && [ "$CLAVE_MOSTRADA" = "no" ] || return 0
+  CLAVE_MOSTRADA="si"
+  cat <<TXT
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  USUARIO ADMINISTRADOR CREADO                                    │
+  │    usuario               : admin                                 │
+  │    contraseña temporal   : $CLAVE_ADMIN
+  │                                                                  │
+  │  Anótela ahora y entréguela por canal seguro: NO se guarda en    │
+  │  ningún archivo ni en el registro, y no se vuelve a mostrar.     │
+  │  El sistema obliga a cambiarla en el primer ingreso.             │
+  │  Si se pierde:  crear-admin.js --usuario admin --restablecer     │
+  └──────────────────────────────────────────────────────────────────┘
+
+TXT
+}
+trap mostrar_clave_admin EXIT
 
 # Monitorización de nivel 1 (siempre): timers systemd de chequeo y respaldo.
 if [ -d "$KIT_DIR/conf/systemd" ]; then
@@ -478,8 +588,11 @@ for _ in $(seq 1 72); do
     e="$(estado_de "$c")"
     case "$e" in running/healthy|running/sin-sonda) : ;; *) PEND_NUCLEO="$PEND_NUCLEO $c($e)" ;; esac
   done
-  e="$(estado_de lims-metabase)"
-  case "$e" in running/healthy) PEND_BI="" ;; *) PEND_BI="lims-metabase($e)" ;; esac
+  PEND_BI=""
+  if [ "$BI_ON" = "si" ]; then
+    e="$(estado_de lims-metabase)"
+    case "$e" in running/healthy) : ;; *) PEND_BI="lims-metabase($e)" ;; esac
+  fi
   [ -z "$PEND_NUCLEO" ] && [ -z "$PEND_BI" ] && break
   sleep 5
 done
@@ -497,12 +610,29 @@ if [ -n "$PEND_NUCLEO" ] || [ "$WEB_OK" != "si" ]; then
    y el detalle en $LOG_FILE. Corrija y vuelva a ejecutar este instalador."
 fi
 ok "Servicios del LIMS operativos y pantalla de ingreso accesible por HTTPS"
-if [ -n "$PEND_BI" ]; then
+if [ "$BI_ON" != "si" ]; then
+  : # BI no activado: no se espera a Metabase ni se anuncia.
+elif [ -n "$PEND_BI" ]; then
   warn "Metabase (BI) todavía no está sano: $PEND_BI. El LIMS funciona; revise en unos
    minutos con: $COMPOSE ps metabase   ·   $COMPOSE logs --tail 80 metabase"
 else
   ok "Metabase (BI) operativo"
 fi
+
+if [ "$BI_ON" = "si" ]; then
+  LINEA_BI="$URL_BI"
+  [ "$BI_LECTURA_OK" = "si" ] || LINEA_BI="$URL_BI  (falta habilitar lims_lectura: ver avisos)"
+  PASO_BI="    5. BI: alta de la base y tableros en Metabase (GUIA_ONPREMISE.md §5.7)"
+else
+  LINEA_BI="no activado (GUIA_ONPREMISE.md §5.7)"
+  PASO_BI=""
+fi
+case "$ADMIN_ESTADO" in
+  creado)    NOTA_ADMIN="  Usuario admin CREADO: su contraseña temporal se muestra abajo, solo en
+  pantalla. El sistema obliga a cambiarla en el primer ingreso." ;;
+  existente) NOTA_ADMIN="  El usuario admin ya existía: no se ha modificado (conserva su contraseña)." ;;
+  *)         NOTA_ADMIN="  ATENCIÓN: el usuario admin NO se pudo crear (ver avisos más arriba)." ;;
+esac
 
 # =============================================================================
 cat <<TXT | tee -a "$LOG_FILE"
@@ -512,19 +642,19 @@ cat <<TXT | tee -a "$LOG_FILE"
 ╚══════════════════════════════════════════════════════════════════════╝
 
   Acceso web    : https://$DOMAIN
-  BI (Metabase) : https://bi.$DOMAIN
+  BI (Metabase) : $LINEA_BI
   Certificado   : caduca el $CERT_FIN
   Datos         : $LIMS_DATA_DIR
   Respaldos     : ${LIMS_BACKUP_DIR:-/srv/lims-backup}
   Registro      : $LOG_FILE
 
-  ANOTE LA CONTRASEÑA DEL ADMINISTRADOR que aparece arriba: no se vuelve
-  a mostrar. Cámbiela en el primer inicio de sesión.
+$NOTA_ADMIN
 
   VERIFICACIÓN RECOMENDADA (GUIA_ONPREMISE.md §6):
     1. curl -k https://$DOMAIN/api/health          -> {"status":"ok"}
     2. Inicie sesión en la web con el usuario admin
     3. Fuerce un respaldo:  $APP_DIR/scripts/backup/backup.sh --tipo diario
     4. Chequeo de salud:    $APP_DIR/monitorizacion/chequeo-salud.sh
-
+$PASO_BI
 TXT
+mostrar_clave_admin

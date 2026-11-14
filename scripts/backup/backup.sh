@@ -133,11 +133,12 @@ esac
 DESTINO="$BACKUP_DIR/diarios/$FECHA"
 mkdir -p "$DESTINO"
 chmod 700 "$BACKUP_DIR"
-# El contenedor de PostgreSQL corre como uid 999 (usuario `postgres`) y es quien
-# escribe el volcado en este directorio a través del montaje /backup. Sin este
+# El usuario `postgres` de la imagen postgres:16-alpine es el uid 70 (no 999,
+# que es el de la imagen debian); se le cede el directorio del volcado a través
+# del montaje /backup para que pg_dump pueda escribir aunque se ejecute como él. Sin este
 # chown, pg_dump falla con "Permission denied". Los 700 se mantienen: el
 # directorio contiene datos reales del Ejército y el .env con los secretos.
-chown 999:999 "$DESTINO"
+chown 70:70 "$DESTINO"
 chmod 700 "$DESTINO"
 
 log "═══ LIMS IDIC · copia de seguridad ($TIPO) → $DESTINO"
@@ -169,7 +170,7 @@ log "1/4 · Volcando PostgreSQL (pg_dump -Fc)..."
 $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
   pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -Z6 \
           --no-owner --no-privileges -f "$DUMP_CONT" \
-  || fatal "pg_dump falló. ¿Tiene el usuario 'postgres' del contenedor permiso de escritura en $BACKUP_DIR? (chown 999:999)"
+  || fatal "pg_dump falló. ¿Tiene el usuario 'postgres' del contenedor permiso de escritura en $BACKUP_DIR? (chown 70:70: usuario postgres de la imagen alpine)"
 
 [ -s "$DUMP_HOST" ] || fatal "pg_dump no generó el fichero esperado en $DUMP_HOST"
 log "  $(du -h "$DUMP_HOST" | cut -f1) volcados"
