@@ -190,6 +190,7 @@ export class ParametroSistemaService extends BaseCrudService {
         porDefecto: def.porDefecto ?? null,
         columnas: def.columnas ?? null,
         maxFilas: def.maxFilas ?? null,
+        largo: def.largo ?? null,
       },
       valor: valorFormulario(def, f),
       texto: textoValor(def, def.tipo === "campo" ? f.valor : historialDeFila(def, f)),
