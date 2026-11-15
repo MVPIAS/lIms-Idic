@@ -26,6 +26,8 @@ if [ -f "$ENV_FILE" ]; then
 fi
 COMPOSE="${COMPOSE:-docker compose -f $APP_DIR/docker-compose.onpremise.yml --env-file $ENV_FILE}"
 SERVICIO_PG="${SERVICIO_PG:-postgres}"
+# `-e PGPASSWORD` sin valor: docker la toma de este entorno y no aparece en `ps`.
+export PGPASSWORD="${POSTGRES_PASSWORD:-}"
 ITERACIONES=600000
 
 log()   { printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >&2; }
@@ -56,7 +58,7 @@ case "$MODO" in
     [ -n "$ARG" ] || fatal "Indique el nombre de la base nueva."
     case "$ARG" in *[!a-z0-9_]*) fatal "Nombre de base no válido (solo minúsculas, números y _)." ;; esac
     [ "$ARG" != "${POSTGRES_DB:-}" ] || fatal "No se restaura sobre la base en uso (${POSTGRES_DB})."
-    PG="$COMPOSE exec -T -e PGPASSWORD=$POSTGRES_PASSWORD $SERVICIO_PG"
+    PG="$COMPOSE exec -T -e PGPASSWORD $SERVICIO_PG"
     EXISTE="$($PG psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$ARG'" </dev/null | tr -d '[:space:]')"
     [ "$EXISTE" != "1" ] || fatal "La base $ARG ya existe: elija otro nombre o bórrela antes."
     $PG createdb -U "$POSTGRES_USER" "$ARG" </dev/null

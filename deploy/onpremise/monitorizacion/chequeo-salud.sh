@@ -33,6 +33,10 @@ set -uo pipefail    # sin -e: un chequeo que falla no debe abortar los demás
 APP_DIR="${APP_DIR:-/opt/lims-idic}"
 [ -f "$APP_DIR/.env" ] || { echo "ERROR: no se encuentra $APP_DIR/.env"; exit 1; }
 set -a; . "$APP_DIR/.env"; set +a
+# La contraseña de PostgreSQL viaja a los contenedores como `-e PGPASSWORD` SIN
+# valor (docker la toma de este entorno): con `-e PGPASSWORD=<valor>` quedaba en
+# la línea de órdenes de docker, visible en `ps` y en `systemctl status`.
+export PGPASSWORD="${POSTGRES_PASSWORD:-}"
 
 COMPOSE="docker compose -f $APP_DIR/docker-compose.onpremise.yml --env-file $APP_DIR/.env"
 DATA_DIR="${LIMS_DATA_DIR:-/srv/lims-idic}"
@@ -169,9 +173,9 @@ fi
 if docker exec lims-postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
   bien "PostgreSQL acepta conexiones"
   metrica 'lims_postgres_activo 1'
-  CONEX="$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" lims-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAq \
+  CONEX="$(docker exec -e PGPASSWORD lims-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAq \
            -c "SELECT count(*) FROM pg_stat_activity WHERE datname='$POSTGRES_DB'" 2>/dev/null | tr -d '[:space:]')"
-  MAXCON="$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" lims-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAq \
+  MAXCON="$(docker exec -e PGPASSWORD lims-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAq \
            -c "SHOW max_connections" 2>/dev/null | tr -d '[:space:]')"
   metrica "lims_postgres_conexiones ${CONEX:-0}"
   metrica "lims_postgres_conexiones_max ${MAXCON:-200}"
@@ -181,7 +185,7 @@ if docker exec lims-postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/
     bien "Conexiones PostgreSQL: $CONEX/$MAXCON (${PCT}%)"
   fi
   # Tamaño de la base: crecimiento anómalo = algo que investigar.
-  TAM="$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" lims-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAq \
+  TAM="$(docker exec -e PGPASSWORD lims-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAq \
          -c "SELECT pg_database_size('$POSTGRES_DB')" 2>/dev/null | tr -d '[:space:]')"
   metrica "lims_postgres_tamano_bytes ${TAM:-0}"
 else
@@ -265,7 +269,7 @@ fi
 # el archivador de forma directa (pg_stat_archiver) y el backlog de segmentos.
 if docker exec lims-postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; then
   # archived_count | failed_count | seg desde el último archivado | último WAL fallido
-  ARCH="$(docker exec -e PGPASSWORD="$POSTGRES_PASSWORD" lims-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAq \
+  ARCH="$(docker exec -e PGPASSWORD lims-postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAq \
     -c "SELECT archived_count||'|'||failed_count||'|'||COALESCE(EXTRACT(EPOCH FROM (now()-last_archived_time))::bigint::text,'-1')||'|'||COALESCE(last_failed_wal,'-') FROM pg_stat_archiver" 2>/dev/null | tr -d '[:space:]')"
   ARCH_OK="$(echo "$ARCH" | cut -d'|' -f1)"
   ARCH_FAIL="$(echo "$ARCH" | cut -d'|' -f2)"

@@ -25,6 +25,10 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/lims-idic}"
 [ -f "$APP_DIR/.env" ] || { echo "ERROR: no se encuentra $APP_DIR/.env"; exit 1; }
 set -a; . "$APP_DIR/.env"; set +a
+# La contraseña de PostgreSQL viaja a los contenedores como `-e PGPASSWORD` SIN
+# valor (docker la toma de este entorno): con `-e PGPASSWORD=<valor>` quedaba en
+# la línea de órdenes de docker, visible en `ps` y en `systemctl status`.
+export PGPASSWORD="${POSTGRES_PASSWORD:-}"
 
 COMPOSE="docker compose -f $APP_DIR/docker-compose.onpremise.yml --env-file $APP_DIR/.env"
 BACKUP_DIR="${LIMS_BACKUP_DIR:-/srv/lims-backup}"
@@ -62,7 +66,7 @@ fatal() {
 REG_ID=""
 T0="$(date +%s)"
 bd_sql() {
-  $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+  $COMPOSE exec -T -e PGPASSWORD postgres \
     psql -X -q -A -t -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 "$@" -f - 2>/dev/null
 }
 registro_inicio() {
@@ -167,7 +171,7 @@ log "1/4 · Volcando PostgreSQL (pg_dump -Fc)..."
 # mismos roles, algo que importa al restaurar en un servidor de contingencia.
 # La contraseña va por variable de entorno del proceso, nunca en la línea de
 # órdenes (sería visible en el `ps` de cualquier usuario del contenedor).
-$COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+$COMPOSE exec -T -e PGPASSWORD postgres \
   pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -Z6 \
           --no-owner --no-privileges -f "$DUMP_CONT" \
   || fatal "pg_dump falló. ¿Tiene el usuario 'postgres' del contenedor permiso de escritura en $BACKUP_DIR? (chown 70:70: usuario postgres de la imagen alpine)"
@@ -178,8 +182,8 @@ log "  $(du -h "$DUMP_HOST" | cut -f1) volcados"
 # Base de Metabase (paneles, consultas guardadas y usuarios del BI). Vive en una
 # base aparte; si no existe todavía, se omite sin error.
 MB_DB="${METABASE_DB:-lims_metabase}"
-if [ "$($COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$MB_DB'" </dev/null 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
-  if $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres pg_dump -U "$POSTGRES_USER" -d "$MB_DB" -Fc -Z6 --no-owner --no-privileges -f "/backup/diarios/$FECHA/metabase-$FECHA.dump" </dev/null; then
+if [ "$($COMPOSE exec -T -e PGPASSWORD postgres psql -U "$POSTGRES_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='$MB_DB'" </dev/null 2>/dev/null | tr -d '[:space:]')" = "1" ]; then
+  if $COMPOSE exec -T -e PGPASSWORD postgres pg_dump -U "$POSTGRES_USER" -d "$MB_DB" -Fc -Z6 --no-owner --no-privileges -f "/backup/diarios/$FECHA/metabase-$FECHA.dump" </dev/null; then
     log "  $(du -h "$DESTINO/metabase-$FECHA.dump" | cut -f1) de Metabase (base $MB_DB)"
   else
     log "  AVISO: no se pudo volcar la base de Metabase ($MB_DB). El respaldo del LIMS sigue siendo válido."
