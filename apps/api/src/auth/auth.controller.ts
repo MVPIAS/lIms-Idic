@@ -129,7 +129,7 @@ export class AuthController {
   @ApiBody({ schema: { example: { actual: "Temporal123456", nueva: "NuevaClave2026" } } })
   async cambiarPassword(@Req() req: any, @Body() body: unknown) {
     const { actual, nueva } = CambiarPasswordSchema.parse(body);
-    return this.auth.cambiarPassword(req.user.sub, actual, nueva);
+    return this.auth.cambiarPassword(req.user.sub, actual, nueva, req.user.perfilUnidad ?? null);
   }
 
   // ─── Perfil activo (jefaturas duales, R1) ───────────────────────────────────
@@ -139,7 +139,7 @@ export class AuthController {
   @UseGuards(AuthGuard("jwt"))
   @ApiBearerAuth()
   async perfiles(@Req() req: any) {
-    return this.auth.perfiles(req.user.sub, req.user.tenantId);
+    return this.auth.perfiles(req.user.sub, req.user.tenantId, req.user.perfilUnidad ?? null);
   }
 
   /** POST /api/auth/perfil { unidadId | null } · elige el perfil y devuelve una sesión nueva con sus permisos. */
