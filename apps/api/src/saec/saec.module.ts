@@ -45,13 +45,12 @@ import { Public } from "../auth/public.decorator";
 // el mismo envoltorio imprimible y el mismo generador de PDF/A que los informes.
 // Aquí solo vive el cuerpo propio del dominio (saec-certificado.plantilla.ts).
 import { documentoCompleto, type Sello } from "../plantilla-render/plantilla-defecto";
-import { generarPdf } from "../plantilla-render/pdf.renderer";
-import { fmtFecha } from "../plantilla-render/html.util";
 import { cuerpoCertificadoSaec, tituloCertificadoSaec } from "./saec-certificado.plantilla";
+import { documentoSelladoSaec, pdfCertificadoSaec, selloCertificadoSaec } from "./saec-certificado.pdf";
+import { feaPublica, pdfFeaParaCliente } from "../fea/fea.datos";
 import { anioChile, hoyChile, SQL_ZONA, diaChile, fechaChile, instanteDeHoraChile, sumarDiasCalendario, ZONA_CHILE } from "../common/fecha-chile";
 import { escapeHtml, fmtFechaHora } from "../plantilla-render/html.util";
 import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
-import { urlVerificacionBase } from "../common/url-verificacion";
 import { fechaEsi } from "./fecha-ibis";
 import {
   NOMBRE_TIPO_PERITAJE,
@@ -1094,10 +1093,13 @@ export class EvidenciaController extends SaecBase {
           ORDER BY created_at DESC`,
         tenantId, id),
       this.prisma.$queryRawUnsafe<any[]>(
-        `SELECT id, codigo, codigo_verificacion, hash_documento, estado, emitido_at
-           FROM saec_certificado
-          WHERE tenant_id = $1::uuid AND evidencia_id = $2::uuid AND deleted_at IS NULL
-          ORDER BY emitido_at DESC`,
+        // firmado_fea: ya tiene su versión firmada con FEA (docs/FLUJO_FEA_DOCUMENTOS.md).
+        `SELECT c.id, c.codigo, c.codigo_verificacion, c.hash_documento, c.estado, c.emitido_at,
+                EXISTS (SELECT 1 FROM documento_fea_archivo x
+                         WHERE x.origen = 'saec' AND x.documento_id = c.id AND x.clase = 'firmado' AND x.vigente) AS firmado_fea
+           FROM saec_certificado c
+          WHERE c.tenant_id = $1::uuid AND c.evidencia_id = $2::uuid AND c.deleted_at IS NULL
+          ORDER BY c.emitido_at DESC`,
         tenantId, id),
       this.prisma.$queryRawUnsafe<any[]>(
         // F046: el arma de la evidencia (vínculo inverso) o el arma de la que salió el disparo de prueba (evidencia.arma_id).
@@ -2600,27 +2602,12 @@ export class SaecCertificadoController extends SaecBase {
 
   /** El sello que va al pie del documento (fuera de lo hasheado). */
   private sello(c: any): Sello {
-    return {
-      numero: c.codigo,
-      codigoVerificacion: c.codigo_verificacion ?? "—",
-      hash: c.hash_documento ?? "",
-      fecha: fmtFecha(c.emitido_at),
-      urlVerificacion: `${urlVerificacionBase()}/${c.codigo_verificacion}`,
-    };
+    return selloCertificadoSaec(c);
   }
 
-  /**
-   * Documento sellado de un certificado, o 404 explicando por qué no lo hay.
-   * Un certificado sin `documento_html` es uno emitido antes de RF-K07.1: no se
-   * puede reconstruir sin re-renderizar (y re-renderizar rompería el sello).
-   */
+  /** Documento sellado (404 si se emitió sin él). Ver saec-certificado.pdf.ts. */
   private documentoSellado(c: any): string {
-    if (!c.documento_html) {
-      throw new NotFoundException(
-        `El certificado ${c.codigo} se emitió antes de que se guardara el documento sellado y no puede regenerarse. Emita uno nuevo.`,
-      );
-    }
-    return c.documento_html;
+    return documentoSelladoSaec(c);
   }
 
   /**
@@ -2642,17 +2629,16 @@ export class SaecCertificadoController extends SaecBase {
   async pdf(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
     const tenantId = this.tenantId(req);
     const c = await this.certificadoDelTenant(id, tenantId);
-    const buffer = await generarPdf(
-      this.documentoSellado(c),
-      this.sello(c),
-      tituloCertificadoSaec(c.codigo, c.evidencia_codigo),
-    );
+    // Firma Electrónica Avanzada (docs/FLUJO_FEA_DOCUMENTOS.md): si ya se subió la
+    // versión firmada con FEA, esa es la oficial y es la que se descarga.
+    const fea = await pdfFeaParaCliente(this.prisma, "saec", id, c.codigo);
+    const buffer = fea ? fea.buffer : await pdfCertificadoSaec(c);
     // RF-K09.2 · quién se descarga el certificado de una evidencia forense es
     // justo lo que una auditoría quiere poder reconstruir.
-    await this.auditar(req, "certificado", id, "descargar", { formato: "pdf", codigo: c.codigo });
+    await this.auditar(req, "certificado", id, "descargar", { formato: "pdf", codigo: c.codigo, fea: !!fea });
     // Nombre de fichero seguro: saneado a [A-Za-z0-9._-], sin ruta ni comillas,
     // así no puede inyectar CRLF ni cerrar la cabecera.
-    const nombre = `${String(c.codigo).replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
+    const nombre = fea ? fea.nombre : `${String(c.codigo).replace(/[^A-Za-z0-9._-]/g, "_")}.pdf`;
     res.set({
       "Content-Type": "application/pdf",
       "Content-Disposition": `inline; filename="${nombre}"`,
@@ -2706,7 +2692,7 @@ export class SaecCertificadoController extends SaecBase {
       return { data: { valido: false, mensaje: "No existe ningún certificado con ese código de verificación." } };
     }
     const rows = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT c.codigo, c.codigo_verificacion, c.hash_documento, c.documento_html, c.estado,
+      `SELECT c.id, c.codigo, c.codigo_verificacion, c.hash_documento, c.documento_html, c.estado,
               c.emitido_at, c.anulado_at, e.codigo AS evidencia_codigo, t.nombre AS emisor
          FROM saec_certificado c
          JOIN evidencia e ON e.id = c.evidencia_id
@@ -2738,9 +2724,12 @@ export class SaecCertificadoController extends SaecBase {
       ? createHash("sha256").update(c.documento_html, "utf8").digest("hex")
       : null;
     const integro = hashReal !== null && hashReal === c.hash_documento;
+    // FEA: si el certificado tiene versión firmada, se informa quién y cuándo (sin datos internos).
+    const fea = await feaPublica(this.prisma, "saec", c.id);
 
     return {
       data: {
+        ...fea,
         valido: integro,
         estado: c.estado,
         certificado: c.codigo,

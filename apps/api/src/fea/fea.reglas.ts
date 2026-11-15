@@ -24,8 +24,9 @@ import { fechaHoraChile } from "../common/fecha-chile";
 
 /* ------------------------------------------------------------------ tipos --- */
 
-export type OrigenFea = "informe" | "metrologia";
-export const ORIGENES_FEA: readonly OrigenFea[] = ["informe", "metrologia"];
+/** informe = `certificado`; metrologia = `met_calibracion`; saec = `saec_certificado` (certificado de evidencia). */
+export type OrigenFea = "informe" | "metrologia" | "saec";
+export const ORIGENES_FEA: readonly OrigenFea[] = ["informe", "metrologia", "saec"];
 
 /** Tamaño máximo del PDF firmado que se acepta. */
 export const MAX_BYTES_FEA = 15 * 1024 * 1024;
@@ -358,7 +359,24 @@ export const TIPOS_FEA: { tipo: string; nombre: string }[] = [
   { tipo: "CERTIFICADO_ARMA", nombre: "Certificado por arma (Delegación Nº 11)" },
   { tipo: "INFORME_INCUMPLIMIENTO_ARMA", nombre: "Informe de incumplimiento del arma (Delegación Nº 11)" },
   { tipo: "CERTIFICADO_CALIBRACION", nombre: "Certificado de calibración (Metrología)" },
+  { tipo: "CERTIFICADO_EVIDENCIA_SAEC", nombre: "Certificado de evidencia y peritaje (SAEC)" },
 ];
+
+/** Permiso de lectura del expediente SAEC: sin él, el alcance por unidad no basta para ver el certificado de evidencia. */
+export const PERMISO_VER_EVIDENCIA = "evidencia.ver";
+
+/**
+ * ¿Ve el documento para su FEA? El firmante siempre; si no, quien lo tiene en su
+ * alcance por unidad (o SUPERADMIN). En el SAEC (certificado de evidencia forense)
+ * el alcance por unidad no basta: además se exige poder ver el expediente
+ * (evidencia.ver: perito SAEC y jefaturas), igual que la descarga del certificado.
+ */
+export function veDocumentoFea(o: { origen: OrigenFea; esFirmante: boolean; enAlcance: boolean; superadmin: boolean; permisos: string[] }): boolean {
+  if (o.esFirmante) return true;
+  if (!o.enAlcance && !o.superadmin) return false;
+  if (o.origen === "saec") return o.superadmin || o.permisos.includes(PERMISO_VER_EVIDENCIA);
+  return true;
+}
 
 export const CATEGORIA_FEA = "fea";
 export const codigoParametroFea = (tipo: string) => tipo.toLowerCase();

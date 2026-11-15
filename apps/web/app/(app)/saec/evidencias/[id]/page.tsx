@@ -13,6 +13,7 @@ import Peritajes from "./_components/Peritajes";
 import Prestamos from "./_components/Prestamos";
 import CoincidenciasIbis from "./_components/CoincidenciasIbis";
 import { abrirDocumento } from "@/lib/bpchProcesos";
+import PanelFea from "@/components/documentos/PanelFea";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -56,6 +57,8 @@ export default function EvidenciaFichaPage() {
   const [aviso, setAviso] = useState("");
   const [loading, setLoading] = useState(true);
   const [showMov, setShowMov] = useState(false);
+  // Certificado cuya Firma Electrónica Avanzada (FEA) se está mirando (docs/FLUJO_FEA_DOCUMENTOS.md).
+  const [feaCert, setFeaCert] = useState<string | null>(null);
   const [m, setM] = useState<any>({ ...MOV_VACIO });
   const [erroresMov, setErroresMov] = useState<Record<string, string>>({});
 
@@ -344,11 +347,18 @@ export default function EvidenciaFichaPage() {
                 <td className="codigo">{c.codigo}</td>
                 <td className="codigo">{c.codigo_verificacion}</td>
                 <td style={{ fontSize: 10.5, wordBreak: "break-all", maxWidth: 260 }}>{c.hash_documento}</td>
-                <td><span className={`pill ${c.estado === "emitido" ? "green" : "red"}`}>{c.estado}</span></td>
+                <td>
+                  <span className={`pill ${c.estado === "emitido" ? "green" : "red"}`}>{c.estado}</span>
+                  {c.firmado_fea && <span className="pill blue" style={{ marginLeft: 4 }} title="Tiene versión firmada con firma electrónica avanzada">FEA</span>}
+                </td>
                 <td>{fechaHora(c.emitido_at)}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  <button className="btn sm" onClick={() => descargarCertificado(c.id, c.codigo)}>
-                    Descargar PDF/A
+                  <button className="btn sm" onClick={() => descargarCertificado(c.id, c.codigo)}
+                    title={c.firmado_fea ? "Descarga la versión firmada con FEA" : "Descarga el PDF/A emitido por el LIMS"}>
+                    {c.firmado_fea ? "Descargar PDF firmado" : "Descargar PDF/A"}
+                  </button>{" "}
+                  <button className="btn outline sm" aria-expanded={feaCert === c.id} onClick={() => setFeaCert(feaCert === c.id ? null : c.id)}>
+                    {feaCert === c.id ? "Ocultar firma FEA" : "Firma FEA"}
                   </button>
                 </td>
               </tr>
@@ -358,6 +368,11 @@ export default function EvidenciaFichaPage() {
             )}
           </tbody>
         </table>
+        {feaCert && (e.certificados ?? []).some((c: any) => c.id === feaCert) && (
+          <div style={{ marginTop: 10 }}>
+            <PanelFea key={feaCert} origen="saec" documentoId={feaCert} onCambio={cargar} />
+          </div>
+        )}
       </div>
 
       {/* --- RF-K09.2 · auditoría --- */}
