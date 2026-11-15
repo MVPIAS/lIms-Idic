@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import { itemDeRuta } from "@/lib/navegacion";
 import { usePermisos, infoPerfil } from "@/lib/permisos";
 import SelectorPerfil from "@/components/SelectorPerfil";
+import { iniciales as inicialesDe } from "@/lib/iniciales";
 
 /** Migas de la barra superior a partir del mapa del menú (lib/navegacion.ts). */
 function crumbFor(pathname: string): { seccion: string; pagina: string } {
@@ -28,8 +29,9 @@ export default function Topbar({ menuAbierto = false, onMenu }: { menuAbierto?: 
 
   const crumb = crumbFor(pathname);
   const { usuario, perfilJwt, listo, roles } = usePermisos();
-  const iniciales = user?.nombreCompleto
-    ? user.nombreCompleto.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()
+  // «Abastecimiento (prueba)» → «AP»: solo palabras que empiezan con letra (lib/iniciales.ts).
+  const avatar = user?.nombreCompleto
+    ? inicialesDe(user.nombreCompleto)
     : (usuario.username ?? "U").slice(0, 2).toUpperCase();
 
   return (
@@ -51,7 +53,7 @@ export default function Topbar({ menuAbierto = false, onMenu }: { menuAbierto?: 
       </div>
       <div className="user">
         <SelectorPerfil />
-        <div className="avatar">{iniciales}</div>
+        <div className="avatar">{avatar}</div>
         <div className="user-txt" style={{ lineHeight: 1.2 }}>
           <div style={{ fontWeight: 600 }}>{user?.nombreCompleto ?? usuario.nombre ?? usuario.username ?? "Usuario"}</div>
           <div style={{ color: "var(--muted)", fontSize: "10.5px" }}>
