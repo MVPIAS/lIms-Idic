@@ -32,6 +32,10 @@ APP_DIR="${APP_DIR:-/opt/lims-idic}"
 ENV_FILE="${ENV_FILE:-$APP_DIR/.env}"
 [ -f "$ENV_FILE" ] || { echo "ERROR: no se encuentra $ENV_FILE"; exit 1; }
 set -a; . "$ENV_FILE"; set +a
+# La contraseña de PostgreSQL viaja a los contenedores como `-e PGPASSWORD` SIN
+# valor (docker la toma de este entorno): con `-e PGPASSWORD=<valor>` quedaba en
+# la línea de órdenes de docker, visible en `ps` y en `systemctl status`.
+export PGPASSWORD="${POSTGRES_PASSWORD:-}"
 
 COMPOSE="${COMPOSE:-docker compose -f $APP_DIR/docker-compose.onpremise.yml --env-file $ENV_FILE}"
 SERVICIO_PG="${SERVICIO_PG:-postgres}"
@@ -72,13 +76,13 @@ mkdir -p "$CARPETA/csv"
 LIBRE_MB="$(df -Pm "$BACKUP_DIR" | awk 'NR==2{print $4}')"
 [ "$LIBRE_MB" -gt 2048 ] || fatal "Solo quedan ${LIBRE_MB} MB libres en $BACKUP_DIR."
 
-PSQL="$COMPOSE exec -T -e PGPASSWORD=$POSTGRES_PASSWORD $SERVICIO_PG psql -U $POSTGRES_USER -d $POSTGRES_DB -v ON_ERROR_STOP=1 -qAt"
+PSQL="$COMPOSE exec -T -e PGPASSWORD $SERVICIO_PG psql -U $POSTGRES_USER -d $POSTGRES_DB -v ON_ERROR_STOP=1 -qAt"
 
 log "═══ LIMS IDIC · exportación portable → $DESTINO_DIR"
 
 # --- 1. SQL plano -------------------------------------------------------------
 log "1/3 · Volcado SQL plano (pg_dump -Fp)..."
-$COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" "$SERVICIO_PG" \
+$COMPOSE exec -T -e PGPASSWORD "$SERVICIO_PG" \
   pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fp --no-owner --no-privileges </dev/null > "$CARPETA/lims_idic.sql" \
   || fatal "pg_dump falló."
 grep -q "PostgreSQL database dump complete" "$CARPETA/lims_idic.sql" || fatal "El volcado SQL está incompleto."
@@ -96,7 +100,7 @@ N=0
   for t in $TABLAS; do
     # Nombre validado (solo [a-z0-9_]): pg_tables lo da, pero no se interpola nada raro.
     case "$t" in *[!a-z0-9_]*) log "  se omite la tabla de nombre no estándar: $t"; continue ;; esac
-    $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" "$SERVICIO_PG" \
+    $COMPOSE exec -T -e PGPASSWORD "$SERVICIO_PG" \
       psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -qAt \
       -c "COPY (SELECT * FROM public.\"$t\") TO STDOUT WITH (FORMAT csv, HEADER true, ENCODING 'UTF8')" </dev/null > "$CARPETA/csv/$t.csv" \
       || fatal "No se pudo exportar la tabla $t."
