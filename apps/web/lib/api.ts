@@ -28,6 +28,12 @@ export interface Sesion {
   debeCambiarPassword?: boolean;
 }
 
+/**
+ * Marca «ya se le preguntó con qué perfil trabajar» de ESTE ingreso (F028). Se borra
+ * al ingresar y al salir, para que cada ingreso vuelva a preguntar.
+ */
+export const CLAVE_PERFIL_PREGUNTADO = "lims_perfil_preguntado";
+
 function guardarSesion(r: Sesion) {
   if (typeof window === "undefined") return;
   localStorage.setItem("lims_token", r.accessToken);
@@ -89,6 +95,8 @@ export const api = {
       body: JSON.stringify({ username, password, ...(totp ? { totp } : {}) }),
     });
     guardarSesion(r);
+    // Ingreso nuevo: sin perfil elegido todavía, se vuelve a preguntar.
+    try { localStorage.removeItem(CLAVE_PERFIL_PREGUNTADO); } catch { /* sin almacenamiento */ }
     return r;
   },
   /** Cambio de la propia contraseña; guarda la sesión nueva que devuelve el servidor. */
@@ -110,6 +118,7 @@ export const api = {
     if (typeof window !== "undefined") {
       localStorage.removeItem("lims_token");
       localStorage.removeItem("lims_user");
+      localStorage.removeItem(CLAVE_PERFIL_PREGUNTADO);
       window.location.href = "/login";
     }
   },

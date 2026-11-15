@@ -21,6 +21,8 @@ export interface UsuarioReq {
   sub: string;
   tenantId?: string;
   roles?: string[];
+  /** Unidad del perfil activo de ESTA sesión (claim `pu` del JWT, F028); null = todos. */
+  perfilUnidad?: string | null;
 }
 
 export interface AsignacionDetalle extends AsignacionAlcance {
@@ -144,25 +146,21 @@ export class AlcanceService {
     return filas;
   }
 
-  /** Unidad del perfil activo de la persona (R1); null si no eligió (o la base no tiene la tabla). */
-  async perfilActivoDe(usuarioId: string): Promise<string | null> {
-    try {
-      const f = await this.prisma.$queryRawUnsafe<{ unidad_id: string | null }[]>(
-        `SELECT unidad_id FROM usuario_perfil_activo WHERE usuario_id = $1::uuid`,
-        usuarioId,
-      );
-      return f?.[0]?.unidad_id ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  async contexto(usuarioId: string, tenantId?: string, rolesJwt: string[] = []): Promise<ContextoAlcance> {
-    const [arbol, asignaciones, todasJefaturas, unidadPerfil] = await Promise.all([
+  /**
+   * Contexto de alcance de una persona. `unidadPerfil` es el perfil activo de la
+   * sesión (R1/F028): viaja en el JWT (claim `pu`), de modo que cada ingreso tiene
+   * el suyo y elegirlo en un navegador no cambia el de otro. null = todos sus perfiles.
+   */
+  async contexto(
+    usuarioId: string,
+    tenantId?: string,
+    rolesJwt: string[] = [],
+    unidadPerfil: string | null = null,
+  ): Promise<ContextoAlcance> {
+    const [arbol, asignaciones, todasJefaturas] = await Promise.all([
       this.arbol(tenantId),
       this.asignacionesDe(usuarioId),
       this.jefaturasDe(usuarioId),
-      this.perfilActivoDe(usuarioId),
     ]);
     const ahora = new Date();
     // Perfil activo (R1): solo las asignaciones y la jefatura de esa unidad (más las sin unidad).
@@ -210,7 +208,7 @@ export class AlcanceService {
         jefaturas: [],
       };
     }
-    const ctx = await this.contexto(u.sub, u.tenantId, u.roles ?? []);
+    const ctx = await this.contexto(u.sub, u.tenantId, u.roles ?? [], u.perfilUnidad ?? null);
     if (req) req.__alcanceBase = ctx;
     return ctx;
   }
