@@ -27,6 +27,10 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/lims-idic}"
 [ -f "$APP_DIR/.env" ] || { echo "ERROR: no se encuentra $APP_DIR/.env"; exit 1; }
 set -a; . "$APP_DIR/.env"; set +a
+# La contraseña de PostgreSQL viaja a los contenedores como `-e PGPASSWORD` SIN
+# valor (docker la toma de este entorno): con `-e PGPASSWORD=<valor>` quedaba en
+# la línea de órdenes de docker, visible en `ps` y en `systemctl status`.
+export PGPASSWORD="${POSTGRES_PASSWORD:-}"
 
 COMPOSE="docker compose -f $APP_DIR/docker-compose.onpremise.yml --env-file $APP_DIR/.env"
 BACKUP_DIR="${LIMS_BACKUP_DIR:-/srv/lims-backup}"
@@ -63,7 +67,7 @@ $COMPOSE ps postgres --status running 2>/dev/null | grep -q lims-postgres \
   || fatal "El contenedor de PostgreSQL no está en ejecución."
 
 # psql administrativo (para pg_walfile_name). La contraseña va por entorno.
-psql_q() { $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+psql_q() { $COMPOSE exec -T -e PGPASSWORD postgres \
              psql -U "$POSTGRES_USER" -d postgres -tAq "$@"; }
 
 # --- Verificación de un basebackup -------------------------------------------
@@ -157,7 +161,7 @@ log "Tamaño de la base: ${TAM_BD_MB:-?} MB · libre en destino: ${LIBRE_MB} MB"
 # (trust por defecto en la imagen). Se pasa PGPASSWORD por si el sitio endurece
 # pg_hba a scram: no estorba con trust.
 log "Ejecutando pg_basebackup (-Ft -z -Xstream)... puede tardar varios minutos."
-if ! $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+if ! $COMPOSE exec -T -e PGPASSWORD postgres \
        pg_basebackup -U "$POSTGRES_USER" -D "$DESTINO_CONT" \
                      -Ft -z -Xstream --checkpoint=fast -P \
                      -l "lims-idic basebackup $FECHA"; then

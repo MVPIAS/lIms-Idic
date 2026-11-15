@@ -36,6 +36,10 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/lims-idic}"
 [ -f "$APP_DIR/.env" ] || { echo "ERROR: no se encuentra $APP_DIR/.env"; exit 1; }
 set -a; . "$APP_DIR/.env"; set +a
+# La contraseña de PostgreSQL viaja a los contenedores como `-e PGPASSWORD` SIN
+# valor (docker la toma de este entorno): con `-e PGPASSWORD=<valor>` quedaba en
+# la línea de órdenes de docker, visible en `ps` y en `systemctl status`.
+export PGPASSWORD="${POSTGRES_PASSWORD:-}"
 
 COMPOSE="${COMPOSE:-docker compose -f $APP_DIR/docker-compose.onpremise.yml --env-file $APP_DIR/.env}"
 BACKUP_DIR="${LIMS_BACKUP_DIR:-/srv/lims-backup}"
@@ -60,7 +64,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-psql_adm() { $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d postgres "$@"; }
+psql_adm() { $COMPOSE exec -T -e PGPASSWORD postgres psql -U "$POSTGRES_USER" -d postgres "$@"; }
 
 # --- Listado de copias disponibles -------------------------------------------
 if [ "$LISTAR" = "si" ]; then
@@ -176,7 +180,7 @@ TXT
   # equivocada, este volcado es la única vuelta atrás.
   log "Respaldando el estado ACTUAL antes de sobrescribirlo..."
   PREV="/backup/pre-restauracion-$(date '+%Y%m%d-%H%M%S').dump"
-  $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+  $COMPOSE exec -T -e PGPASSWORD postgres \
     pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -Z6 --no-owner --no-privileges -f "$PREV" \
     || fatal "No se pudo respaldar el estado actual. Se aborta la restauración."
   ok "Estado previo guardado en $BACKUP_DIR/$(basename "$PREV")"
@@ -207,19 +211,19 @@ log "3/4 · Restaurando el volcado (puede tardar varios minutos)..."
 # --exit-on-error NO: el dump se generó con --no-owner y puede emitir avisos
 # benignos sobre extensiones o comentarios. Los errores reales se detectan
 # después con el recuento de tablas.
-$COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+$COMPOSE exec -T -e PGPASSWORD postgres \
   pg_restore -U "$POSTGRES_USER" -d "$BD_DESTINO" --no-owner --no-privileges -j 4 "$DUMP_CONT" \
   2>&1 | grep -viE 'warning|already exists' | head -20 || true
 
 # --- 4. Verificación de lo restaurado ----------------------------------------
 log "4/4 · Verificando el resultado..."
-TABLAS="$($COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$BD_DESTINO" -tAq \
+TABLAS="$($COMPOSE exec -T -e PGPASSWORD postgres psql -U "$POSTGRES_USER" -d "$BD_DESTINO" -tAq \
   -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" | tr -d '[:space:]')"
 [ "${TABLAS:-0}" -gt 20 ] || fatal "Solo se han restaurado ${TABLAS:-0} tablas. La restauración ha FALLADO."
 
 printf '\n    %-22s %s\n' "TABLA" "FILAS"
 for t in tenant usuario rol cliente metodo orden_trabajo muestra resultado; do
-  n="$($COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$BD_DESTINO" -tAq \
+  n="$($COMPOSE exec -T -e PGPASSWORD postgres psql -U "$POSTGRES_USER" -d "$BD_DESTINO" -tAq \
        -c "SELECT count(*) FROM $t" 2>/dev/null | tr -d '[:space:]' || echo 'n/d')"
   printf '    %-22s %s\n' "$t" "$n"
 done
