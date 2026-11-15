@@ -216,12 +216,14 @@ Instalación:
 ```bash
 sudo mkdir -p /srv/lims-idic/certs
 # lims.crt = certificado del servidor + cadena intermedia CONCATENADA, en este orden
-sudo cp servidor.crt intermedia.crt > /srv/lims-idic/certs/lims.crt   # o: cat servidor.crt intermedia.crt > lims.crt
+cat servidor.crt intermedia.crt | sudo tee /srv/lims-idic/certs/lims.crt >/dev/null
 sudo cp servidor.key /srv/lims-idic/certs/lims.key
 sudo chmod 600 /srv/lims-idic/certs/lims.key
 sudo chmod 644 /srv/lims-idic/certs/lims.crt
 sudo chown root:root /srv/lims-idic/certs/*
 ```
+
+Si el sistema ya estaba instalado (por ejemplo, con el autofirmado de §4.3), basta con volver a ejecutar `sudo ./instalar-onpremise.sh`: detecta que el certificado es más reciente que el arranque de Caddy y lo reinicia para que sirva el nuevo, y recalcula si el BI queda activado (§5.7).
 
 > **Error frecuente.** Si falta la cadena intermedia, algunos navegadores aceptan el certificado y otros no, de forma aparentemente aleatoria. Concatene siempre el intermedio detrás del certificado del servidor.
 
@@ -251,8 +253,9 @@ Para que el aviso desaparezca en los puestos del laboratorio, distribuya `lims.c
 sudo cp nuevo.crt /srv/lims-idic/certs/lims.crt
 sudo cp nuevo.key /srv/lims-idic/certs/lims.key
 sudo chmod 600 /srv/lims-idic/certs/lims.key
-# Recarga sin cortar el servicio:
-cd /opt/lims-idic && docker compose -f docker-compose.onpremise.yml restart caddy
+# Reinicio de Caddy para cargarlo (corte de pocos segundos; la API de recarga
+# de Caddy está desactivada a propósito, `admin off`):
+cd /opt/lims-idic && docker compose -f docker-compose.onpremise.yml --env-file .env restart caddy
 ```
 
 Verifique: `echo | openssl s_client -connect localhost:443 -servername $DOMAIN 2>/dev/null | openssl x509 -noout -dates`
@@ -314,7 +317,7 @@ sudo ./instalar-onpremise.sh
 3. **Carga de imágenes**: `docker load` de cada `.tar.gz`. Sin red.
 4. **Código y configuración** a `/opt/lims-idic`.
 5. **`.env`**: lo genera con `openssl rand` o valida el existente. **Falla si un secreto está vacío, es corto o conserva un valor de ejemplo.** Si un `.env` de una versión anterior no trae `METABASE_LECTURA_PASSWORD`, la genera (sin mostrarla).
-6. **Datos y certificado**: crea el árbol y valida que certificado y clave se correspondan y cubran `DOMAIN`. Decide si activa el BI (`BI_ACTIVO`, §5.7) y deja `URL_BI` coherente con esa decisión.
+6. **Datos y certificado**: crea el árbol y valida que certificado y clave se correspondan y cubran `DOMAIN` (si el certificado se sustituyó después del último arranque, reinicia Caddy en el paso 7 para que lo sirva). Decide si activa el BI (`BI_ACTIVO`, §5.7) y deja `URL_BI` coherente con esa decisión.
 7. **Arranque**: `docker compose up -d`, sin build y sin pull.
 8. **Base de datos**: aplica todos los SQL del manifiesto `packages/db/ORDEN_SQL.txt` en su orden (§5.5). Si falta alguno en el kit, **aborta**. Los errores SQL se cuentan y se listan al final; con `--estricto` el primero detiene la instalación.
 9. **BI, administrador y temporizadores**: si el BI está activado, habilita el usuario de solo lectura `lims_lectura` (§5.7); crea el usuario `admin` **solo si no existe** (§5.8) y activa respaldo y chequeo.
@@ -378,7 +381,7 @@ El contenedor de Metabase se levanta siempre, pero el BI solo queda **activado**
 
 **Activado**: fija `URL_BI=https://bi.<DOMAIN>` en el `.env` si estaba vacía (la API la usa para el menú «Análisis e inteligencia de negocio»), y tras aplicar los SQL habilita el usuario de base **`lims_lectura`** (lo crea `align_brechas_6.sql` sin poder ingresar; `scripts/metabase/crear-usuario-lectura.sh` le asigna la contraseña `METABASE_LECTURA_PASSWORD` del `.env`, que el instalador genera y **no muestra**). El resumen final indica la dirección del BI.
 
-**No activado**: deja `URL_BI` vacía (el menú del LIMS dice que el BI no está configurado), no espera a Metabase en la verificación final y el resumen dice «no activado».
+**No activado**: deja `URL_BI` vacía (el menú del LIMS dice que el BI no está configurado), deshabilita el ingreso de `lims_lectura` (`NOLOGIN`) si un BI activo anterior lo había habilitado, no espera a Metabase en la verificación final y el resumen dice «no activado». El contenedor de Metabase sigue en marcha y Caddy sigue respondiendo en `bi.<dominio>` con la pantalla de ingreso del propio Metabase, pero este ya no puede leer la base del LIMS.
 
 Para activarlo más tarde: obtenga un certificado con `bi.<dominio>` en el SAN (§4.2) o ponga `BI_ACTIVO=si`, y **vuelva a ejecutar el instalador** (es idempotente).
 
