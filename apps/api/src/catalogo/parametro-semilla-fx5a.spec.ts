@@ -7,11 +7,12 @@ import { filaPorDefecto, parametrosFijos, textoValor, valorFormulario } from "./
  * align_fx5_a.sql siembra todos los parámetros fijos con su valor por defecto.
  */
 const DB = join(__dirname, "../../../../packages/db");
-// align_fx5_a.sql y las siembras de los frentes nuevos (align_nuevo_fN.sql: p. ej. «fea» del F4).
+// align_fx5_a.sql y las siembras de los frentes nuevos (align_nuevo_fN.sql: p. ej. «fea» del F4;
+// align_fNNN_*.sql de las correcciones: p. ej. «fea» del certificado SAEC en align_f028_saec.sql).
 const SQL = [
   readFileSync(join(DB, "align_fx5_a.sql"), "utf8"),
   ...readdirSync(DB)
-    .filter((f) => /^align_nuevo_f\d+\.sql$/.test(f))
+    .filter((f) => /^align_(nuevo_f\d+|f\d{3}_[a-z0-9_]+)\.sql$/.test(f))
     .map((f) => readFileSync(join(DB, f), "utf8")),
 ].join(" ");
 const sqlTexto = (s: string) => `'${s.replace(/'/g, "''")}'`;

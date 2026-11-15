@@ -2,11 +2,11 @@
 
 /**
  * PanelFea · Firma Electrónica Avanzada (FEA) del Estado sobre el PDF final de
- * un documento emitido (informe, certificado, certificado por arma de la D11 o
- * certificado de calibración). El LIMS no se conecta a FirmaGob: el firmante
+ * un documento emitido (informe, certificado, certificado por arma de la D11,
+ * certificado de calibración o certificado de evidencia del SAEC). El LIMS no se conecta a FirmaGob: el firmante
  * descarga aquí el PDF emitido, lo firma en su equipo y sube el archivo
  * firmado. Desde ese momento la descarga, el envío y la verificación pública
- * usan la versión firmada. Lo usan PanelDocumento y la ficha de Metrología.
+ * usan la versión firmada. Lo usan PanelDocumento, la ficha de Metrología y la ficha de la evidencia SAEC.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fechaHora } from "@/lib/format";
