@@ -230,6 +230,12 @@ exigir JWT_SECRET          "${JWT_SECRET:-}"          32
 exigir RESPALDO_CLAVE      "${RESPALDO_CLAVE:-}"      20
 exigir MINIO_ROOT_USER     "${MINIO_ROOT_USER:-}"     3
 exigir MINIO_ROOT_PASSWORD "${MINIO_ROOT_PASSWORD:-}" 20
+# BI_ACTIVO se decide en el paso 6; se valida aquí para no descubrir un valor
+# erróneo después de cargar las imágenes (varios minutos).
+case "${BI_ACTIVO:-auto}" in
+  si|no|auto) : ;;
+  *) warn "BI_ACTIVO='${BI_ACTIVO}' no es válido: use si, no o auto"; FALLOS=$((FALLOS+1)) ;;
+esac
 [ "$FALLOS" -eq 0 ] || fatal "$FALLOS problema(s) en $APP_DIR/.env. Corríjalos y reejecute."
 ok "Secretos y variables validados"
 
@@ -327,7 +333,6 @@ case "${BI_ACTIVO:-auto}" in
    rechazarán https://bi.$DOMAIN. Pida a la CA un certificado con ese SAN (GUIA_ONPREMISE.md §4.2)." ;;
   no)   BI_ON="no" ;;
   auto) BI_ON="$CERT_CUBRE_BI" ;;
-  *)    fatal "BI_ACTIVO='${BI_ACTIVO}' no es válido en .env: use si, no o auto." ;;
 esac
 if [ "$BI_ON" = "si" ]; then
   if [ -z "${URL_BI:-}" ]; then
@@ -351,6 +356,19 @@ paso "7/9 · Arranque del stack"
 # =============================================================================
 log "Levantando contenedores (sin build, sin pull: todo es local)..."
 $COMPOSE up -d --remove-orphans 2>&1 | tee -a "$LOG_FILE"
+
+# Certificado sustituido (p. ej. el autofirmado por el de la CA del Ejército):
+# `up -d` no recrea Caddy porque su configuración no cambia, y Caddy seguiría
+# sirviendo el certificado anterior hasta reiniciarse. Si el certificado o la
+# clave son más recientes que el arranque de Caddy, se reinicia.
+CADDY_INICIO="$(docker inspect -f '{{.State.StartedAt}}' lims-caddy 2>/dev/null || true)"
+if [ -n "$CADDY_INICIO" ]; then
+  CADDY_INICIO_S="$(date -d "$CADDY_INICIO" +%s 2>/dev/null || echo 0)"
+  CERT_MOD_S="$(stat -c %Y "$CERT" "$KEY" | sort -n | tail -1)"
+  if [ "$CERT_MOD_S" -gt "$CADDY_INICIO_S" ]; then
+    $COMPOSE restart caddy >>"$LOG_FILE" 2>&1       && ok "Certificado nuevo: Caddy reiniciado para servirlo"       || warn "No se pudo reiniciar Caddy tras cambiar el certificado: $COMPOSE restart caddy"
+  fi
+fi
 
 log "Esperando a que PostgreSQL acepte conexiones..."
 INTENTOS=0
@@ -509,6 +527,15 @@ if [ "$BI_ON" = "si" ]; then
     warn "No se pudo habilitar lims_lectura (detalle en $LOG_FILE). El LIMS funciona, pero
    Metabase no podrá leer la base. Repita con:
      COMPOSE_FILE=docker-compose.onpremise.yml bash $APP_DIR/scripts/metabase/crear-usuario-lectura.sh"
+  fi
+fi
+
+# BI no activado: el usuario de solo lectura no debe poder ingresar. Una base
+# nueva ya lo crea sin LOGIN (align_brechas_6.sql); esto cubre el caso de un BI
+# que estuvo activo y se desactiva después (BI_ACTIVO=no o certificado nuevo).
+if [ "$BI_ON" != "si" ]; then
+  if [ "$(psql_run -tAq -c "SELECT rolcanlogin FROM pg_roles WHERE rolname='lims_lectura'" 2>/dev/null | tr -d '[:space:]')" = "t" ]; then
+    psql_run -q -c "ALTER ROLE lims_lectura NOLOGIN;" >>"$LOG_FILE" 2>&1       && ok "BI no activado: usuario de solo lectura lims_lectura deshabilitado (NOLOGIN)"       || warn "No se pudo deshabilitar lims_lectura (BI no activado). Revise $LOG_FILE"
   fi
 fi
 
