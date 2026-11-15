@@ -4,7 +4,7 @@
  * fuera del LIMS y se sube aquí.
  *
  *   GET  /fea/pendientes?todos=1&soloExigidos=1   documentos emitidos sin versión FEA (del firmante; todos=1 jefatura)
- *   GET  /fea/:origen/:id                         estado FEA de la ficha (origen: informe | metrologia)
+ *   GET  /fea/:origen/:id                         estado FEA de la ficha (origen: informe | metrologia | saec)
  *   GET  /fea/:origen/:id/original                PDF emitido para firmar (congelado: siempre los mismos bytes)
  *   GET  /fea/:origen/:id/firmado                 versión firmada vigente
  *   POST /fea/:origen/:id/firmado                 sube el PDF firmado (multipart «archivo», «motivoExcepcion» opcional)
@@ -23,7 +23,7 @@ import { FeaService } from "./fea.service";
 import { MAX_BYTES_FEA, ORIGENES_FEA, type OrigenFea } from "./fea.reglas";
 
 function origenDe(o: string): OrigenFea {
-  if (!(ORIGENES_FEA as readonly string[]).includes(o)) throw new BadRequestException("Tipo de documento no válido: use «informe» o «metrologia».");
+  if (!(ORIGENES_FEA as readonly string[]).includes(o)) throw new BadRequestException("Tipo de documento no válido: use «informe», «metrologia» o «saec».");
   return o as OrigenFea;
 }
 

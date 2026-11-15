@@ -113,6 +113,10 @@ export function Ficha({ r }: { r: Resultado }) {
             <Fila k="Evidencia" v={d.evidencia} />
             <Fila k="Emisor" v={d.emisor} />
             <Fila k="Huella SHA-256" v={<code style={{ fontSize: 11, wordBreak: "break-all" }}>{d.hashDocumento}</code>} />
+            {d.firmadoFea && <Fila k="Firma electrónica avanzada" v={<b>{d.leyendaFea}</b>} />}
+            {d.firmadoFea && d.hashFea && (
+              <Fila k="Huella SHA-256 del PDF firmado" v={<code style={{ fontSize: 11, wordBreak: "break-all" }}>{d.hashFea}</code>} />
+            )}
           </tbody>
         </table>
       </div>

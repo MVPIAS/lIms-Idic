@@ -7,7 +7,7 @@
 const API = process.env.NEXT_PUBLIC_API_URL ?? "/api";
 const token = () => (typeof window === "undefined" ? null : localStorage.getItem("lims_token"));
 
-export type OrigenFea = "informe" | "metrologia";
+export type OrigenFea = "informe" | "metrologia" | "saec";
 
 export interface EstadoFea {
   origen: OrigenFea;

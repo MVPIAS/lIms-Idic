@@ -25,6 +25,9 @@ interface Fila {
   entregadoAt: string | null;
   otId: string | null;
   otCodigo: string | null;
+  /** Solo certificados de evidencia del SAEC. */
+  evidenciaId?: string | null;
+  evidenciaCodigo?: string | null;
   cliente: string | null;
   laboratorio: string | null;
   firmante: string | null;
@@ -62,7 +65,18 @@ export default function FirmaFeaPage() {
     cargar();
   }, [cargar]);
 
-  const enlace = (f: Fila) => (f.origen === "metrologia" ? `/metrologia/${f.id}` : f.otId ? `/ot/${f.otId}` : null);
+  const enlace = (f: Fila) =>
+    f.origen === "metrologia"
+      ? `/metrologia/${f.id}`
+      : f.origen === "saec"
+        ? f.evidenciaId ? `/saec/evidencias/${f.evidenciaId}` : null
+        : f.otId ? `/ot/${f.otId}` : null;
+  const textoEnlace = (f: Fila) =>
+    f.origen === "metrologia"
+      ? "Abrir la ficha de la calibración"
+      : f.origen === "saec"
+        ? `Abrir la ficha de la evidencia ${f.evidenciaCodigo ?? ""}`.trim()
+        : `Abrir la OT ${f.otCodigo}`;
 
   return (
     <>
@@ -118,7 +132,7 @@ export default function FirmaFeaPage() {
                   {f.tipoDocumentoNombre}{f.laboratorio ? ` · ${f.laboratorio}` : ""}
                 </div>
                 <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                  {f.otCodigo ? `OT ${f.otCodigo}` : "Sin OT"}{f.cliente ? ` · ${f.cliente}` : ""} · oficial {fecha(f.oficialAt)}
+                  {f.origen === "saec" ? `Evidencia ${f.evidenciaCodigo ?? ""}` : f.otCodigo ? `OT ${f.otCodigo}` : "Sin OT"}{f.cliente ? ` · ${f.cliente}` : ""} · oficial {fecha(f.oficialAt)}
                   {f.firmante ? ` · firmó ${f.firmante}` : ""}
                 </div>
               </button>
@@ -134,7 +148,7 @@ export default function FirmaFeaPage() {
                 {enlace(sel) && (
                   <div className="subtitle" style={{ margin: "4px 0 0" }}>
                     <Link href={enlace(sel) as any} style={{ color: "var(--accent)" }}>
-                      {sel.origen === "metrologia" ? "Abrir la ficha de la calibración" : `Abrir la OT ${sel.otCodigo}`}
+                      {textoEnlace(sel)}
                     </Link>
                   </div>
                 )}

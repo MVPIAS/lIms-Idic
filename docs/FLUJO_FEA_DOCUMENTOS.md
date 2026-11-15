@@ -1,10 +1,11 @@
 # Firma Electrónica Avanzada (FEA) del Estado en el PDF final
 
-Frente F4. SQL: `packages/db/align_nuevo_f4.sql`. Código: `apps/api/src/fea/`
+Frente F4. SQL: `packages/db/align_nuevo_f4.sql` (y `align_f028_saec.sql`, que añade el
+origen `saec`). Código: `apps/api/src/fea/`
 (reglas puras en `fea.reglas.ts` con `fea.reglas.spec.ts`; lecturas comunes en
 `fea.datos.ts`; servicio y API en `fea.service.ts` y `fea.module.ts`). Pantalla:
-`apps/web/components/documentos/PanelFea.tsx` y **Laboratorio › Pendientes de firma FEA**
-(`/informes/firma-fea`). Recorrido: `scripts/verificacion/fea.js`.
+`apps/web/components/documentos/PanelFea.tsx`, **Laboratorio › Pendientes de firma FEA**
+(`/informes/firma-fea`) y la ficha de la evidencia del SAEC (`/saec/evidencias/<id>`). Recorrido: `scripts/verificacion/fea.js`.
 
 ## Qué resuelve
 
@@ -27,9 +28,27 @@ siguen con la firma del sistema; la FEA va solo sobre el PDF final:
 |---|---|---|---|
 | `informe` | `certificado` | Informes de ensayo, IVC, informes técnicos, informes de inspección del BPCH, certificados de conformidad, incumplimiento, rechazo, certificados por arma de la D11 | Ficha del documento (Informes y certificados, Documentos por firmar, cierre de la OT) y «Firma FEA» en *BPCH · SAEC › Certificación de armas* |
 | `metrologia` | `met_calibracion` | Certificados de calibración | Ficha de la calibración (*Metrología › Calibraciones*) |
+| `saec` | `saec_certificado` | Certificado de evidencia y peritaje (SAEC, RF-K07) | Ficha de la evidencia (*BPCH · SAEC › Evidencias*, tabla «Certificados emitidos», botón «Firma FEA») |
 
-No cubre todavía el certificado de evidencia del SAEC (`saec_certificado`), que tiene su
-propio circuito.
+### Certificado de evidencia del SAEC (origen `saec`)
+
+- **PDF para firmar**: el mismo PDF/A que «Descargar PDF/A» de la ficha, generado desde el
+  HTML sellado (`documento_html`, ver `align_saec_certificado.sql`); nunca se re-renderiza
+  desde la evidencia. Código común en `apps/api/src/saec/saec-certificado.pdf.ts`.
+- **Oficial** = estado `emitido`. Un certificado anulado no admite FEA.
+- **Firmante**: quien lo emitió (`emitido_por`; jefatura SAEC con `saec.certificado.emitir`).
+- **Alcance**: unidad Delegación Nº 11 (`D11`, la misma rama de `@AmbitoUnidad("D11")` del
+  SAEC). Además del alcance se exige `evidencia.ver`, igual que la descarga del certificado:
+  el **perito SAEC** ve el estado y descarga el original y la versión firmada; sube la
+  versión firmada el emisor o una **jefatura** con `documento.fea.gestionar` que llegue a la
+  D11 (Jefe de Laboratorio de la D11, Jefe de Sección/Departamento con esa rama, Director…).
+- Con versión firmada: `GET /saec/certificados/:id/pdf` (y «Descargar PDF firmado» en la
+  ficha) entrega la versión FEA, y la verificación pública
+  `GET /saec/certificados/verificar/:codigo` añade `firmadoFea`, `firmanteFea`, `fechaFea`,
+  `leyendaFea` y `hashFea`. El sello de integridad del certificado (hash del HTML) no cambia.
+- El SAEC no tiene «Registrar entrega» ni envío por correo, así que el parámetro
+  `certificado_evidencia_saec` (por defecto **no**) solo sirve, por ahora, para el filtro
+  «Solo los que exigen FEA» de *Pendientes de firma FEA*.
 
 ## Reglas al subir (`analizarSubida`)
 
@@ -60,7 +79,7 @@ propio circuito.
 
 Categoría `fea`, un «sí / no» por tipo de documento (código = tipo en minúsculas:
 `informe_ensayo`, `ivc`, `informe_inspeccion`, `certificado_arma`,
-`certificado_calibracion`…). Por defecto **no**. Con **sí**:
+`certificado_calibracion`, `certificado_evidencia_saec`…). Por defecto **no**. Con **sí**:
 
 - «Registrar entrega» y «Enviar por correo» responden 409 con el mensaje que explica cómo
   seguir, hasta que se suba la versión firmada (informes: `POST /informes/:id/entregar` y
@@ -73,20 +92,21 @@ Categoría `fea`, un «sí / no» por tipo de documento (código = tipo en minú
 | Ruta | Quién | Qué hace |
 |---|---|---|
 | `GET /fea/pendientes?todos=1&soloExigidos=1` | autenticado (`todos`: `documento.fea.gestionar`) | Documentos oficiales sin versión FEA que firmó el usuario (o los de su alcance) |
-| `GET /fea/:origen/:id` | firmante o alcance | Estado: original congelado, versión firmada, anteriores, historial, `puedo` |
+| `GET /fea/:origen/:id` | firmante o alcance (`saec`: además `evidencia.ver`) | Estado: original congelado, versión firmada, anteriores, historial, `puedo` |
 | `GET /fea/:origen/:id/original` | firmante o alcance | PDF emitido para firmar (siempre los mismos bytes) |
 | `GET /fea/:origen/:id/firmado` | firmante o alcance | Versión firmada vigente |
 | `POST /fea/:origen/:id/firmado` | firmante o `documento.fea.gestionar` | Multipart `archivo` (+ `motivoExcepcion` para la excepción) |
 
 Además: `GET /informes/:id/pdf` y `GET /metrologia/calibraciones/:id/pdf` entregan la versión
 FEA si existe; `GET /informes/verificar/:codigo` y `GET /metrologia/verificar/:codigo` añaden
-`firmadoFea`, `firmanteFea`, `fechaFea`, `leyendaFea` y `hashFea`. La página pública
+`firmadoFea`, `firmanteFea`, `fechaFea`, `leyendaFea` y `hashFea`; lo mismo
+`GET /saec/certificados/:id/pdf` y `GET /saec/certificados/verificar/:codigo` para el origen `saec`. La página pública
 `/verificar/<código>` lo muestra (y ahora también encuentra los certificados de calibración).
 
 ## Permiso
 
 `documento.fea.gestionar`: Jefe de Laboratorio, Jefe de Sección, Jefe de Departamento,
-Director, Subdirector y SUPERADMIN.
+Director, Subdirector y SUPERADMIN. `origen` admite `informe`, `metrologia` y `saec`.
 
 ## Prueba real
 
@@ -100,6 +120,9 @@ Metrología.
 ## Por confirmar con el IDIC
 
 - Qué tipos de documento deben exigir la FEA antes de entregarse y desde qué fecha.
+- Certificado de evidencia del SAEC: ¿lo firma con FEA quien lo emite (hoy, la jefatura que
+  pulsa «Emitir certificado») o el perito que hizo el peritaje? Si es el perito, hay que
+  darle `saec.certificado.emitir` o registrar el perito como firmante del certificado.
 - Si FirmaGob (o el token que usen) agrega la firma como actualización incremental o
   reescribe el PDF: en el segundo caso todo PDF caería en «no corresponde» y habría que
   aceptarlo como excepción. Conviene probar con un PDF real firmado por un jefe.
