@@ -339,6 +339,8 @@ Cuántos ficheros se aplican no es un número fijo: crece con cada versión. La 
 
 Ensayo del 13-10-2026 sobre una base vacía, con el manifiesto de esa fecha: **0 errores SQL** en modo producción y en modo demostración, y esquema idéntico entre los dos (mismas tablas, columnas e índices). En modo producción la base queda con 0 clientes y 0 órdenes de trabajo.
 
+Ensayo del 15-11-2026 (kit `1.0.0-rc2`, servidor Ubuntu 24.04 sin red): **129 SQL aplicados en modo producción, 0 errores**; 7 servicios sanos; 0 clientes, 0 órdenes de trabajo y ningún seed `demo` aplicado; `rol_permiso` (1.301 asignaciones) y columnas idénticos a los de una base de referencia montada aplicando el manifiesto a mano, con `align_cierre_permisos.sql` el último. Reinstalación sin cambios (0 SQL reaplicados, `admin` intacto), reinicio del servidor, respaldo y simulacro de restauración (§7.4) correctos.
+
 Si necesita datos demo (formación, demostración a mando):
 
 ```bash
