@@ -8,6 +8,9 @@ import {
   errorMotivoExcepcion,
   esPdf,
   exigeFea,
+  ORIGENES_FEA,
+  TIPOS_FEA,
+  veDocumentoFea,
   fechaPdf,
   leyendaFea,
   messageDigestCms,
@@ -178,6 +181,21 @@ describe("parámetro y textos", () => {
     expect(exigeFea(filas, "CERTIFICADO_CALIBRACION")).toBe(false);
     expect(exigeFea(filas, "IVC")).toBe(false);
     expect(exigeFea(filas, null)).toBe(false);
+  });
+  it("certificado de evidencia SAEC: origen y tipo propios, por defecto sin exigir FEA", () => {
+    expect(ORIGENES_FEA).toContain("saec");
+    expect(TIPOS_FEA.some((t) => t.tipo === "CERTIFICADO_EVIDENCIA_SAEC")).toBe(true);
+    expect(exigeFea(filas, "CERTIFICADO_EVIDENCIA_SAEC")).toBe(false);
+    expect(exigeFea([{ codigo: "certificado_evidencia_saec", valor: "sí", activo: true }], "CERTIFICADO_EVIDENCIA_SAEC")).toBe(true);
+  });
+  it("quién ve el documento: en el SAEC el alcance no basta sin evidencia.ver", () => {
+    const base = { esFirmante: false, enAlcance: true, superadmin: false, permisos: [] as string[] };
+    expect(veDocumentoFea({ ...base, origen: "informe" })).toBe(true);
+    expect(veDocumentoFea({ ...base, origen: "saec" })).toBe(false);
+    expect(veDocumentoFea({ ...base, origen: "saec", permisos: ["evidencia.ver"] })).toBe(true);
+    expect(veDocumentoFea({ ...base, origen: "saec", enAlcance: false, permisos: ["evidencia.ver"] })).toBe(false);
+    expect(veDocumentoFea({ ...base, origen: "saec", enAlcance: false, esFirmante: true })).toBe(true);
+    expect(veDocumentoFea({ ...base, origen: "saec", enAlcance: false, superadmin: true })).toBe(true);
   });
   it("leyenda con nombre y fecha de Chile", () => {
     expect(leyendaFea("JUAN PRUEBA", "2026-11-14T13:30:00.000Z")).toBe("Firmado con firma electrónica avanzada por JUAN PRUEBA el 14-11-2026 10:30");

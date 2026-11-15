@@ -1,8 +1,9 @@
 /**
  * Firma Electrónica Avanzada (FEA) en el PDF final: servicio común para los
  * documentos de `certificado` (origen «informe»: informes y certificados por
- * OT, BPCH, certificados por arma de la D11) y los certificados de calibración
- * de `met_calibracion` (origen «metrologia»). Ver docs/FLUJO_FEA_DOCUMENTOS.md.
+ * OT, BPCH, certificados por arma de la D11), los certificados de calibración
+ * de `met_calibracion` (origen «metrologia») y los certificados de evidencia
+ * del SAEC de `saec_certificado` (origen «saec»). Ver docs/FLUJO_FEA_DOCUMENTOS.md.
  *
  *   · «Descargar PDF para firmar»: el PDF oficial se CONGELA (bytes exactos) la
  *     primera vez; mientras el documento no cambie (huella: sello + firmas), se
@@ -19,6 +20,8 @@ import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
 import { PlantillaRenderService } from "../plantilla-render/plantilla-render.service";
 import { pdfEmitido } from "../metrologia/ficha.datos";
+import { CODIGO_UNIDAD_SAEC } from "../ot/laboratorio-ot";
+import { pdfCertificadoSaec } from "../saec/saec-certificado.pdf";
 import {
   analizarSubida,
   errorMotivoExcepcion,
@@ -26,6 +29,8 @@ import {
   leyendaFea,
   nombreArchivoFea,
   sha256,
+  veDocumentoFea,
+  PERMISO_VER_EVIDENCIA,
   type OrigenFea,
 } from "./fea.reglas";
 import { filasParametroFea, nombreTipoFea } from "./fea.datos";
@@ -46,6 +51,8 @@ interface DocFea {
   firmantes: { usuarioId: string; nombre: string | null }[];
   huella: string;
   entregadoAt: Date | null;
+  /** Solo SAEC: evidencia del certificado (para enlazar su ficha). */
+  evidenciaId?: string | null;
 }
 
 const usuarioDe = (req: any): string => {
@@ -114,6 +121,7 @@ export class FeaService {
         entregadoAt: c.entregado_at,
       };
     }
+    if (origen === "saec") return this.cargarSaec(id, tenantId);
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT c.id, c.tenant_id, COALESCE(c.numero_certificado, c.codigo) AS numero, c.estado, c.certificado_hash, c.ot_id, c.unidad_id,
               c.emitido_by, c.entregado_at, o.codigo AS ot_codigo, o.unidad_principal, ue.nombre_completo AS emisor_nombre
@@ -148,20 +156,67 @@ export class FeaService {
     };
   }
 
+  /**
+   * Certificado de evidencia del SAEC (`saec_certificado`). Lo firma quien lo
+   * emitió (jefatura SAEC con saec.certificado.emitir); su unidad es la
+   * Delegación Nº 11 (los controladores del SAEC son @AmbitoUnidad("D11")).
+   * Oficial = «emitido» (un anulado no admite FEA).
+   */
+  private async cargarSaec(id: string, tenantId: string): Promise<DocFea> {
+    const f = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT c.id, c.codigo, c.estado, c.hash_documento, c.emitido_por, c.evidencia_id, ue.nombre_completo AS emisor_nombre,
+              (SELECT u.id FROM unidad u WHERE u.tenant_id = c.tenant_id AND u.codigo = $3 LIMIT 1) AS unidad_saec
+         FROM saec_certificado c LEFT JOIN usuario ue ON ue.id = c.emitido_por
+        WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid AND c.deleted_at IS NULL`,
+      id,
+      tenantId,
+      CODIGO_UNIDAD_SAEC,
+    );
+    if (!f.length) throw new NotFoundException("Certificado de evidencia no encontrado.");
+    const c = f[0];
+    return {
+      origen: "saec",
+      id,
+      tenantId,
+      numero: c.codigo,
+      tipoDocumento: "CERTIFICADO_EVIDENCIA_SAEC",
+      estado: c.estado,
+      oficial: c.estado === "emitido",
+      otId: null,
+      otCodigo: null,
+      unidades: [c.unidad_saec],
+      firmantes: c.emitido_por ? [{ usuarioId: c.emitido_por, nombre: c.emisor_nombre }] : [],
+      huella: sha256(Buffer.from(`${c.hash_documento ?? ""}|${c.estado}`)),
+      entregadoAt: null,
+      evidenciaId: c.evidencia_id,
+    };
+  }
+
   /** Quién es: firmante del documento, jefatura con permiso, y si lo ve por su alcance. */
   private async acceso(doc: DocFea, req: any) {
     const yo = usuarioDe(req);
     const esFirmante = doc.firmantes.some((f) => f.usuarioId === yo);
-    let ve = esFirmante;
-    for (const u of doc.unidades) if (!ve && u && (await this.alcance.puedeVerUnidad(req, u))) ve = true;
-    if (!ve && (req?.user?.roles ?? []).includes("SUPERADMIN")) ve = true;
+    let enAlcance = false;
+    for (const u of doc.unidades) if (!enAlcance && u && (await this.alcance.puedeVerUnidad(req, u))) enAlcance = true;
+    const ve = veDocumentoFea({
+      origen: doc.origen,
+      esFirmante,
+      enAlcance,
+      superadmin: (req?.user?.roles ?? []).includes("SUPERADMIN"),
+      permisos: req?.user?.permisos ?? [],
+    });
     const gestiona = tiene(req, PERMISO_GESTIONAR) && ve;
     return { yo, esFirmante, ve, gestiona };
   }
 
   private async exigirVer(doc: DocFea, req: any) {
     const a = await this.acceso(doc, req);
-    if (!a.ve) throw new ForbiddenException(`Fuera de su alcance: el documento ${doc.numero} pertenece a una unidad que usted no tiene asignada.`);
+    if (!a.ve)
+      throw new ForbiddenException(
+        doc.origen === "saec"
+          ? `Fuera de su alcance: el certificado ${doc.numero} es del SAEC (Delegación Nº 11) y usted no tiene acceso a sus evidencias.`
+          : `Fuera de su alcance: el documento ${doc.numero} pertenece a una unidad que usted no tiene asignada.`,
+      );
     return a;
   }
 
@@ -182,6 +237,16 @@ export class FeaService {
   /** PDF del sistema (sin la versión FEA). */
   private async pdfSistema(doc: DocFea): Promise<Buffer> {
     if (doc.origen === "informe") return (await this.render.pdf(doc.id, doc.tenantId, { sistema: true })).buffer;
+    if (doc.origen === "saec") {
+      // Mismo PDF/A que «Descargar PDF/A» de la ficha de la evidencia: desde el HTML sellado.
+      const f = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT c.codigo, c.codigo_verificacion, c.hash_documento, c.emitido_at, c.documento_html, e.codigo AS evidencia_codigo
+           FROM saec_certificado c JOIN evidencia e ON e.id = c.evidencia_id WHERE c.id = $1::uuid`,
+        doc.id,
+      );
+      if (!f.length) throw new NotFoundException(`El certificado ${doc.numero} no existe.`);
+      return pdfCertificadoSaec(f[0]);
+    }
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT numero_certificado, codigo_verificacion, documento_html, certificado_hash, emitido_at FROM met_calibracion WHERE id = $1::uuid`,
       doc.id,
@@ -375,6 +440,7 @@ export class FeaService {
       numero: doc.numero,
       tipoDocumento: doc.tipoDocumento,
       tipoDocumentoNombre: nombreTipoFea(doc.tipoDocumento),
+      evidenciaId: doc.evidenciaId ?? null,
       estado: doc.estado,
       oficial: doc.oficial,
       exigeFea: exige,
@@ -462,8 +528,32 @@ export class FeaService {
         LIMIT 300`,
       ...args,
     );
+    // Certificados de evidencia del SAEC: los emitió el usuario o, con `todos`, los de su
+    // alcance si llega a la Delegación Nº 11 y puede ver evidencias (perito/jefatura SAEC).
+    const veSaec = tiene(req, PERMISO_VER_EVIDENCIA);
+    const saec = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT 'saec' AS origen, c.id, c.codigo AS numero, 'CERTIFICADO_EVIDENCIA_SAEC' AS "tipoDocumento",
+                c.emitido_at AS "oficialAt", NULL::timestamptz AS "entregadoAt", NULL::uuid AS "otId", NULL::text AS "otCodigo",
+                e.id AS "evidenciaId", e.codigo AS "evidenciaCodigo", NULL::text AS cliente, un.codigo AS laboratorio,
+                ue.nombre_completo AS firmante
+           FROM saec_certificado c
+           JOIN evidencia e ON e.id = c.evidencia_id
+           LEFT JOIN unidad un ON un.tenant_id = c.tenant_id AND un.codigo = $5
+           LEFT JOIN usuario ue ON ue.id = c.emitido_por
+          WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL AND c.estado = 'emitido'
+            AND NOT EXISTS (SELECT 1 FROM documento_fea_archivo x WHERE x.origen = 'saec' AND x.documento_id = c.id AND x.clase = 'firmado' AND x.vigente)
+            AND (
+              ($3::boolean AND $6::boolean AND ($4::uuid[] IS NULL OR un.id = ANY($4::uuid[])))
+              OR c.emitido_por = $2::uuid
+            )
+          ORDER BY c.emitido_at DESC NULLS LAST
+          LIMIT 300`,
+        ...args,
+        CODIGO_UNIDAD_SAEC,
+        veSaec,
+      );
     const filas = await filasParametroFea(this.prisma, tenantId);
-    const data = [...informes, ...calibraciones]
+    const data = [...informes, ...calibraciones, ...saec]
       .map((d) => ({ ...d, tipoDocumentoNombre: nombreTipoFea(d.tipoDocumento), exigeFea: exigeFea(filas, d.tipoDocumento) }))
       .filter((d) => !o.soloExigidos || d.exigeFea)
       .sort((x, y) => new Date(y.oficialAt ?? 0).getTime() - new Date(x.oficialAt ?? 0).getTime());
