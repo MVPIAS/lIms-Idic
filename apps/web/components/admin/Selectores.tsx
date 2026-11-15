@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { iniciales } from "@/lib/iniciales";
 import { aplanar, construirArbol, metaTipo, type TipoUnidad, type Unidad, type Usuario } from "@/lib/admin";
 
 export interface Opcion {
@@ -151,6 +152,5 @@ export function SelectorUsuario({ usuarios, value, onChange, nulo = "— sin asi
   return <SelectorBuscable opciones={ops} value={value} onChange={onChange} nulo={nulo} disabled={disabled} ariaLabel={ariaLabel ?? "Persona"} />;
 }
 
-export function iniciales(nombre: string): string {
-  return nombre.split(/\s+/).filter((w) => /^[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(w)).map((w) => w[0]).join("").slice(0, 2).toUpperCase() || "··";
-}
+// Iniciales del avatar: viven en lib/iniciales.ts (las usa también la barra superior).
+export { iniciales };
