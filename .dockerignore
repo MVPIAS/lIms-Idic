@@ -1,0 +1,20 @@
+# =============================================================================
+# LIMS IDIC · contexto de construcción de las imágenes (api, web) · Aiuken
+# =============================================================================
+# Las imágenes se construyen desde la raíz del monorepo. Sin este fichero el
+# contexto incluía los node_modules, .next y dist de la copia de trabajo (con
+# enlaces de Windows) y el propio kit generado (deploy/onpremise/salida, ~1,4 GB):
+# la construcción tardaba muchísimo más y el resultado dependía de lo que hubiera
+# en el equipo de quien empaqueta, no solo de git. Detectado en el ensayo del
+# instalador on-premise del 15-11-2026.
+# =============================================================================
+.git
+**/node_modules
+**/.next
+**/.turbo
+apps/api/dist
+deploy/onpremise/salida
+**/*.log
+.env
+.env.*
+!.env.example
