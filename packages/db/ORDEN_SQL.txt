@@ -161,4 +161,5 @@ align_nuevo_f3.sql
 align_nuevo_f4.sql
 align_nuevo_f2.sql
 align_f028_saec.sql
+align_drop_perfil_activo.sql
 align_cierre_permisos.sql
