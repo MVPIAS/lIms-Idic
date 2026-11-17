@@ -51,6 +51,7 @@ export const SEMAFORO: Record<string, { texto: string; pill: string }> = {
   terminada: { texto: "—", pill: "gray" },
 };
 
+/** Valor por defecto de avisos.dias_por_vencer; la lista de OT trae el semáforo ya calculado por el servidor (COM-23). */
 export const UMBRAL_POR_VENCER_DIAS = 3;
 
 function hoyCl(): string {

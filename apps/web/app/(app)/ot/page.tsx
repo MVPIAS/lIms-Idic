@@ -232,8 +232,8 @@ export default function OtPage() {
     {
       // Semáforo de la fecha de compromiso (mismos cortes que Mi bandeja).
       key: "plazo", label: "Plazo",
-      value: (r) => `${SEMAFORO[semaforoDe(r.fechaCompromiso, r.estado).semaforo]?.texto ?? ""} ${r.fechaCompromiso ? fechaDia(r.fechaCompromiso) : ""}`,
-      render: (r) => <SemaforoPlazo fechaCompromiso={r.fechaCompromiso} estado={r.estado} />,
+      value: (r) => `${SEMAFORO[r.plazo?.semaforo ?? semaforoDe(r.fechaCompromiso, r.estado).semaforo]?.texto ?? ""} ${r.fechaCompromiso ? fechaDia(r.fechaCompromiso) : ""}`,
+      render: (r) => <SemaforoPlazo fechaCompromiso={r.fechaCompromiso} estado={r.estado} plazo={r.plazo} />,
     },
     { key: "prioridad", label: "Prioridad", value: (r) => r.prioridad ?? "normal", render: (r) => r.prioridad ?? "normal" },
     { key: "estado", label: "Estado", value: (r) => (r.situacion && SITUACION[r.situacion]?.texto) || r.estado || "", render: (r) => estadoCelda(r) },

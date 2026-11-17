@@ -7,6 +7,7 @@
 
 import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
 import { SQL_ZONA } from "../common/fecha-chile";
+import { SQL_DIAS_POR_VENCER, SQL_PLAZO_CORRE } from "../ot/plazos";
 
 const OT_TERMINADA = `('cerrada','anulada','finalizada','informada')`;
 const OT_CERRADA = `('cerrada','anulada')`;
@@ -58,8 +59,8 @@ const docCert = (where: string) => `
  * desde $3 que usa esa consulta (el conteo usa los mismos).
  */
 export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estados" | "ninguno"; estados?: string[] }> = {
-  ot_vencidas: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso < ${HOY_CL}`), extra: "ninguno" },
-  ot_por_vencer: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso BETWEEN ${HOY_CL} AND ${HOY_CL} + 3`), extra: "ninguno" },
+  ot_vencidas: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso < ${HOY_CL}`), extra: "ninguno" },
+  ot_por_vencer: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso BETWEEN ${HOY_CL} AND ${HOY_CL} + ${SQL_DIAS_POR_VENCER}`), extra: "ninguno" },
   ot_sin_plazo: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso IS NULL`, "o.created_at", "'/ot/' || o.id || '?tab=informe'"), extra: "ninguno" },
   ot_listas_cerrar: {
     sql: filaOt(
@@ -176,6 +177,6 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
 };
 
 /** Las vencidas de un laboratorio (tarjetas «OT vencidas · LAB»). */
-export const LISTA_VENCIDAS_LAB = filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso < ${HOY_CL} AND u.codigo = $3`);
+export const LISTA_VENCIDAS_LAB = filaOt(`o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso < ${HOY_CL} AND u.codigo = $3`);
 
 export const MAX_ELEMENTOS = 5;

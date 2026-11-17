@@ -40,6 +40,7 @@ import {
   sumarDias,
   validarFechaCompromiso,
 } from "./plazos";
+import { diasPorVencerDe } from "./dias-por-vencer";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
 import { documentosDeMetrologia, documentosDeNoCalibrables, esEntregableNoCalibrable, faltantesMetrologia } from "../metrologia/metrologia-ot.reglas";
@@ -207,7 +208,12 @@ export class OtCierreService {
         sugerida: fechaCompromisoDesdePlazo(ot.fechaRecepcion, extras.plazoDias ?? null),
         plazoDiasCotizacion: extras.plazoDias ?? null,
         cotizacionCodigo: extras.cotizacionCodigo ?? null,
-        ...semaforoPlazo(ot.fechaCompromiso, ot.estado),
+        // COM-23: umbral del parámetro avisos.dias_por_vencer y medición con la recepción en el DCO.
+        ...semaforoPlazo(ot.fechaCompromiso, ot.estado, new Date(), {
+          diasPorVencer: await diasPorVencerDe(this.prisma, ot.tenantId),
+          fechaRecepDco: (ot as any).fechaRecepDco ?? null,
+        }),
+        fechaRecepDco: diaDe((ot as any).fechaRecepDco ?? null),
       },
       resultados: { total: totalRes, aprobados },
       documentos,
@@ -415,15 +421,18 @@ export class OtCierreService {
     const listas = listasCierre ? await this.idsListasParaCerrar(tenantId) : null;
     const hoy = hoyCl();
     const d = (s: string) => new Date(`${s}T00:00:00Z`);
+    const umbral = await diasPorVencerDe(this.prisma, tenantId);
+    // COM-23: con la recepción en el DCO registrada el plazo ya no corre.
+    const sinRecepDco = { fechaRecepDco: null };
     const condFecha: any =
       semaforo === "vencida"
-        ? { fechaCompromiso: { lt: d(hoy) } }
+        ? { ...sinRecepDco, fechaCompromiso: { lt: d(hoy) } }
         : semaforo === "por_vencer"
-          ? { fechaCompromiso: { gte: d(hoy), lte: d(sumarDias(hoy, UMBRAL_POR_VENCER_DIAS)) } }
+          ? { ...sinRecepDco, fechaCompromiso: { gte: d(hoy), lte: d(sumarDias(hoy, umbral)) } }
           : semaforo === "en_plazo"
-            ? { fechaCompromiso: { gt: d(sumarDias(hoy, UMBRAL_POR_VENCER_DIAS)) } }
+            ? { ...sinRecepDco, fechaCompromiso: { gt: d(sumarDias(hoy, umbral)) } }
             : semaforo === "sin_fecha"
-              ? { fechaCompromiso: null }
+              ? { ...sinRecepDco, fechaCompromiso: null }
               : {};
     const ots = await this.prisma.ordenTrabajo.findMany({
       where: {
@@ -437,7 +446,7 @@ export class OtCierreService {
       take: 500,
       include: { cliente: true },
     });
-    return ots.map((o) => ({ ...o, plazo: semaforoPlazo(o.fechaCompromiso, o.estado) }));
+    return ots.map((o) => ({ ...o, plazo: semaforoPlazo(o.fechaCompromiso, o.estado, new Date(), { diasPorVencer: umbral, fechaRecepDco: o.fechaRecepDco }) }));
   }
 }
 

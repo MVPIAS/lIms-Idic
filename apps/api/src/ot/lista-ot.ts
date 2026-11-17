@@ -5,7 +5,7 @@
  * OT antiguas no se podían encontrar. Función PURA: lista-ot.spec.ts.
  */
 
-import { OT_ESTADOS_TERMINADOS, UMBRAL_POR_VENCER_DIAS, hoyCl, sumarDias } from "./plazos";
+import { OT_ESTADOS_TERMINADOS, hoyCl, sumarDias, umbralPorVencer } from "./plazos";
 
 /** Estados de OT que ya no requieren trabajo de laboratorio (igual que la bandeja). */
 export const OT_TERMINADAS = ["cerrada", "anulada", "finalizada", "informada"];
@@ -50,6 +50,8 @@ export interface ContextoListaOt {
    */
   idsDerivadas?: string[] | null;
   hoy: Date;
+  /** avisos.dias_por_vencer (COM-23). Sin valor: UMBRAL_POR_VENCER_DIAS. */
+  diasPorVencer?: number | null;
 }
 
 const dia = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -97,8 +99,9 @@ export function filtroListaOt(q: QueryListaOt, ctx: ContextoListaOt): Record<str
   const semaforo = semaforoPedido(q);
   if (semaforo) {
     const hoy = hoyCl(ctx.hoy);
-    const limite = sumarDias(hoy, UMBRAL_POR_VENCER_DIAS);
-    const abiertas = { estado: { notIn: [...OT_ESTADOS_TERMINADOS] } };
+    const limite = sumarDias(hoy, umbralPorVencer(ctx.diasPorVencer));
+    // COM-23: con la recepción en el DCO registrada el plazo ya se midió y no corre.
+    const abiertas = { estado: { notIn: [...OT_ESTADOS_TERMINADOS] }, fechaRecepDco: null };
     if (semaforo === "vencida") and.push({ ...abiertas, fechaCompromiso: { lt: dia(hoy) } });
     else if (semaforo === "por_vencer") and.push({ ...abiertas, fechaCompromiso: { gte: dia(hoy), lte: dia(limite) } });
     else if (semaforo === "en_plazo") and.push({ ...abiertas, fechaCompromiso: { gt: dia(limite) } });
