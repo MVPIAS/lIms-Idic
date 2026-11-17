@@ -197,7 +197,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         min: 0,
         max: 2100,
         unidad: "año",
-        ayuda: "Solo con reinicio anual: el «Último número ya usado» rige únicamente en este año; los demás años empiezan en 1. 0 = no se aplica.",
+        ayuda: "Solo con reinicio anual: el «Último número ya usado» rige únicamente en este año; los demás años empiezan en 1. 0 = el año en curso (se fija solo al numerar la primera cotización).",
         porDefecto: "0",
       },
     },

@@ -29,8 +29,9 @@ describe("Numeración real de la cotización (EP-00 2.1)", () => {
     expect(cfg.inicioAnio).toBe(2026);
     expect(inicioDeSerie(cfg, 2026)).toBe(14599);
     expect(inicioDeSerie(cfg, 2027)).toBe(0);
-    // Sin año (o 0) no se aplica a ningún año: así 2027 no arranca en inicio + 1.
-    expect(inicioDeSerie(configNumeracion({ reinicio: "anual", inicio: "14599", inicio_anio: "0" }), 2027)).toBe(0);
+    // Auditoría: sin año (o 0) rige en el año en curso (y se fija al emitir).
+    expect(inicioDeSerie(configNumeracion({ reinicio: "anual", inicio: "14599", inicio_anio: "0" }), 2026)).toBe(14599);
+    expect(inicioDeSerie(configNumeracion({ reinicio: "anual", inicio: "0", inicio_anio: "" }), 2026)).toBe(0);
     // Correlativo global: «inicio» de siempre.
     expect(inicioDeSerie(configNumeracion({ reinicio: "global", inicio: "14599" }), 2027)).toBe(14599);
   });
@@ -86,5 +87,24 @@ describe("Numeración real de la cotización (EP-00 2.1)", () => {
     await expect(generarNumeroCotizacion(db, "t", new Date(2027, 1, 10))).resolves.toBe("2027-00001");
     expect(vistos[0][1]).toBe("2027");
     await expect(generarNumeroCotizacion(db, "t", new Date(2026, 10, 10))).resolves.toBe("2026-14600");
+  });
+
+  it("auditoría: «inicio» sin año se aplica al año en curso y deja fijado inicio_anio (2027 vuelve a 1)", async () => {
+    const sqls: string[] = [];
+    const params = { reinicio: "anual", inicio: "14599", inicio_anio: "0" } as Record<string, string>;
+    const db = {
+      $queryRawUnsafe: async (sql: string, ...args: any[]) => {
+        sqls.push(sql);
+        if (sql.includes("FROM parametro_sistema") && sql.trim().startsWith("SELECT"))
+          return Object.entries(params).map(([codigo, valor]) => ({ codigo, valor }));
+        if (sql.includes("UPDATE parametro_sistema SET valor")) params.inicio_anio = String(args[1]);
+        if (sql.includes("INSERT INTO cotizacion_correlativo")) return [{ ultimo: Number(args[2]) + 1 }];
+        return [];
+      },
+    };
+    await expect(generarNumeroCotizacion(db, "t", new Date(2026, 10, 20))).resolves.toBe("2026-14600");
+    expect(params.inicio_anio).toBe("2026");
+    expect(sqls.some((x) => x.includes("parametro_sistema_historial"))).toBe(true);
+    await expect(generarNumeroCotizacion(db, "t", new Date(2027, 0, 5))).resolves.toBe("2027-00001");
   });
 });

@@ -13,7 +13,8 @@
  *   · reinicio    anual | global
  *   · inicio      0             (último número usado en el Sistema Comercial)
  *   · inicio_anio año al que se aplica «inicio» con reinicio anual: los demás
- *                 años arrancan en 1. Vacío = «inicio» no se aplica con reinicio anual.
+ *                 años arrancan en 1. Vacío o 0 con «inicio» > 0 = el año en curso
+ *                 (se fija solo con el primer número emitido).
  */
 
 import { anioChile } from "../common/fecha-chile";
@@ -60,8 +61,16 @@ export function serieDe(cfg: ConfigNumeracion, anio: number): string {
  */
 export function inicioDeSerie(cfg: ConfigNumeracion, anio: number): number {
   if (cfg.reinicio !== "anual") return cfg.inicio;
+  // Auditoría 17-11-2026: «inicio» sin año (0 o vacío, p. ej. la instalación
+  // nueva, align_fx5_a.sql) rige en el año en curso; generarNumeroCotizacion
+  // fija ese año en «inicio_anio» la primera vez, para que el año siguiente
+  // vuelva a partir en 1.
+  if (cfg.inicioAnio === null) return cfg.inicio;
   return cfg.inicioAnio === anio ? cfg.inicio : 0;
 }
+
+/** ¿Hay que fijar «inicio_anio» al año en curso? (reinicio anual, «inicio» > 0 y sin año). */
+export const fijarAnioDeInicio = (cfg: ConfigNumeracion) => cfg.reinicio === "anual" && cfg.inicioAnio === null && cfg.inicio > 0;
 
 /** Aplica el formato: «{AAAA}-{N}» con año 2026 y n 14324 → «2026-14324». */
 export function formatearNumeroCotizacion(cfg: ConfigNumeracion, anio: number, n: number): string {
@@ -94,6 +103,29 @@ export async function generarNumeroCotizacion(db: any, tenantId: string, fecha: 
   const anio = anioChile(fecha);
   const serie = serieDe(cfg, anio);
   const inicio = inicioDeSerie(cfg, anio);
+  if (fijarAnioDeInicio(cfg)) {
+    // «inicio» sin año: rige en este año y queda fijado (con su historial).
+    await db.$queryRawUnsafe(
+      `INSERT INTO parametro_sistema (tenant_id, categoria, codigo, etiqueta, valor, orden, activo)
+       VALUES ($1::uuid, 'numeracion_cotizacion', 'inicio_anio', 'Año del último número usado', '0', 90, TRUE)
+       ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING`,
+      tenantId,
+    );
+    await db.$queryRawUnsafe(
+      `WITH upd AS (
+         UPDATE parametro_sistema SET valor = $2, activo = TRUE, updated_at = now()
+          WHERE tenant_id = $1::uuid AND categoria = 'numeracion_cotizacion' AND codigo = 'inicio_anio'
+            AND btrim(COALESCE(valor, '')) IN ('', '0')
+         RETURNING id, tenant_id
+       )
+       INSERT INTO parametro_sistema_historial (tenant_id, parametro_id, categoria, codigo, valor_anterior, valor_nuevo, motivo, usuario_id)
+       SELECT tenant_id, id, 'numeracion_cotizacion', 'inicio_anio', '0', $2,
+              'Fijado con la primera cotización numerada: «Último número ya usado» rige solo en el año en curso (COM-11).', NULL
+         FROM upd`,
+      tenantId,
+      String(anio),
+    );
+  }
   for (let intento = 0; intento < 50; intento++) {
     const r: { ultimo: number }[] = await db.$queryRawUnsafe(
       `INSERT INTO cotizacion_correlativo (tenant_id, serie, ultimo)
