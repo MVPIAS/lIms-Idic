@@ -126,5 +126,6 @@ export function motivoBloqueoMora(e: EstadoMora): string {
 
 /** Mensaje al intentar cotizar o abrir una OT para un cliente bloqueado. */
 export function mensajeClienteBloqueado(razonSocial: string, motivo: string | null | undefined): string {
-  return `El cliente ${razonSocial} está bloqueado${motivo ? ` (${motivo})` : ""}: no se le pueden crear cotizaciones ni OT. Para una excepción, el Jefe DCO debe desbloquearlo registrando el motivo.`;
+  const m = String(motivo ?? "").trim().replace(/[\s.]+$/, "");
+  return `El cliente ${razonSocial} está bloqueado${m ? ` (${m})` : ""}: no se le pueden crear cotizaciones ni OT. Para una excepción, el Jefe DCO debe desbloquearlo registrando el motivo.`;
 }
