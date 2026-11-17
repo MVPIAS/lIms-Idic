@@ -207,8 +207,11 @@ export class FirmaDocumentoService {
     const where: any = { deletedAt: null, ...(tenantId ? { tenantId } : {}) };
     if (f.otId) where.otId = f.otId;
     if (f.estado === "por_entregar") {
+      // Igual que la tarjeta «Documentos por entregar» de Mi bandeja: oficiales sin
+      // entrega de OT que siguen vivas (una OT cerrada o anulada ya no espera entrega).
       where.estado = { in: ["oficial", "emitido"] };
       where.entregadoAt = null;
+      where.ot = { is: { estado: { notIn: ["cerrada", "anulada"] } } };
     } else if (f.estado) where.estado = f.estado;
     if (filtro) where.OR = [{ unidadId: { in: filtro } }, { unidadId: null, ot: { unidadPrincipal: { in: filtro } } }];
     if (f.search) {

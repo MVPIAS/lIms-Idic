@@ -88,7 +88,10 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
     extra: "ninguno",
   },
   documentos_por_entregar: {
-    sql: docCert(`${OT_SCOPE} AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL AND o.estado NOT IN ${OT_CERRADA}`),
+    // Mismo alcance que la lista /certificados?estado=por_entregar (unidad del documento o, sin ella, la de la OT).
+    sql: docCert(`c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL
+       AND o.estado NOT IN ${OT_CERRADA}
+       AND ($2::uuid[] IS NULL OR c.unidad_id = ANY($2::uuid[]) OR (c.unidad_id IS NULL AND o.unidad_principal = ANY($2::uuid[])))`),
     extra: "ninguno",
   },
   informes_por_oficializar: {
