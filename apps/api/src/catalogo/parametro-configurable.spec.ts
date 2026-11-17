@@ -142,7 +142,7 @@ describe("parámetros de la operación · lectura y texto", () => {
   it("valor para el formulario según el tipo", () => {
     const f = (cat: string, cod: string, valor: string | null, activo = true) => valorFormulario(defConfigurable(cat, cod)!, { codigo: cod, valor, activo });
     expect(f("circuito_cotizacion", "exigir_firma_para_aceptar", "si")).toBe(true);
-    expect(f("circuito_cotizacion", "exigir_consulta_laboratorio", "basura")).toBe(false); // por defecto «no»
+    expect(f("circuito_cotizacion", "exigir_consulta_laboratorio", "basura")).toBe(true); // COM-09: por defecto «sí»
     expect(f("encuesta", "excluir_origenes", "ot_interna, INTERLABORATORIO")).toEqual(["INTERLABORATORIO", "OT_INTERNA"]);
     expect(f("numeracion_cotizacion", "digitos", "5")).toBe(5);
     expect(f("recepcion_producto_obligatorio", "LTX", null, false)).toBe(false);

@@ -24,8 +24,9 @@ export interface ConfigCircuitoCompleta extends ConfigCircuito {
 export const CI_PCT_DEF = 20;
 export const RECARGO_PCT_DEF = 30;
 export const IVA_PCT_DEF = 19;
+/** COM-36 (IDIC 17-11-2026): «en general costo directo (para todas las FF.AA. y de Orden)». */
 export const precioEjercitoDe = (v: string | null | undefined): PrecioEjercito =>
-  v === "costo_directo" || v === "costo_total" || v === "neto" ? v : "ficha";
+  v === "ficha" || v === "costo_total" || v === "neto" ? v : "costo_directo";
 
 const pct = (v: string | null | undefined, def: number) => {
   const n = Number(String(v ?? "").replace(",", "."));
@@ -35,7 +36,8 @@ const pct = (v: string | null | undefined, def: number) => {
 export function configDesdeValores(v: Record<string, string | null | undefined>): ConfigCircuitoCompleta {
   return {
     niveles: nivelesVb(v.vb_niveles),
-    exigirConsulta: siNo(v.exigir_consulta_laboratorio, false),
+    // COM-09 (IDIC 17-11-2026): el V°B° del Jefe de Laboratorio es requisito para emitir.
+    exigirConsulta: siNo(v.exigir_consulta_laboratorio, true),
     exigirFirma: siNo(v.exigir_firma_para_aceptar, true),
     cfaPct: pct(v.cfa_pct, CI_PCT_DEF),
     margenParticularPct: pct(v.margen_particular_pct, RECARGO_PCT_DEF),

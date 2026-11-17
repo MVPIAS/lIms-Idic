@@ -46,7 +46,8 @@ describe("Circuito de la cotización · solicitud al laboratorio y V°B° (EP-00
 
   it("los parámetros mal escritos caen a los valores de la EP", () => {
     expect(nivelesVb("LAB")).toBe("lab");
-    expect(nivelesVb("cualquiera")).toBe("lab_depto");
+    // COM-09: por defecto, solo el V°B° del laboratorio.
+    expect(nivelesVb("cualquiera")).toBe("lab");
     expect(siNo("Sí", false)).toBe(true);
     expect(siNo("no", true)).toBe(false);
     expect(siNo(undefined, true)).toBe(true);

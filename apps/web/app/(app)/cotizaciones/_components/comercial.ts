@@ -84,13 +84,13 @@ export const ACEPTACION_LABEL: Record<string, string> = {
   OC: "Orden de compra",
   CORREO: "Aprobación por correo (particular)",
   PAGO_ADELANTADO: "Comprobante de pago por adelantado",
-  DISPOSICION_DIRECTOR: "Disposición del Director (sin OPI previa)",
+  DISPOSICION_DIRECTOR: "Disposición del Director o del Jefe de Departamento (sin OPI previa)",
 };
 
 export const ORIGEN_LABEL: Record<string, string> = {
   COTIZACION: "Cotización",
   INTERNACION: "Internación",
-  DISPOSICION: "Disposición del Director",
+  DISPOSICION: "Disposición del Director o del Jefe de Departamento",
   INTERLABORATORIO: "Interlaboratorio",
   OT_INTERNA: "OT interna",
   REINSPECCION: "Reinspección (BPCH)",

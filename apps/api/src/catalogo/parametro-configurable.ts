@@ -113,7 +113,7 @@ const SI_NO: Opcion[] = [
 /** Orígenes de OT (reglas-ot.ts ORIGENES_OT + los de BPCH). */
 export const ORIGENES_OT_ENCUESTA: Opcion[] = [
   { valor: "COTIZACION", etiqueta: "Cotización" },
-  { valor: "DISPOSICION", etiqueta: "Disposición del Director" },
+  { valor: "DISPOSICION", etiqueta: "Disposición del Director o del Jefe de Departamento" },
   { valor: "INTERLABORATORIO", etiqueta: "Interlaboratorio" },
   { valor: "OT_INTERNA", etiqueta: "OT interna" },
   { valor: "INTERNACION", etiqueta: "Internación (BPCH)" },
@@ -206,13 +206,15 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
           { valor: "lab", etiqueta: "Solo el laboratorio" },
           { valor: "ninguno", etiqueta: "Ninguno" },
         ],
-        porDefecto: "lab_depto",
+        // COM-09 (IDIC 17-11-2026): V°B° del Jefe de Laboratorio.
+        porDefecto: "lab",
       },
       exigir_consulta_laboratorio: {
         tipo: "sino",
         nombre: "Exigir al menos una consulta al laboratorio antes de firmar",
         opciones: SI_NO,
-        porDefecto: "no",
+        // COM-09: el V°B° del laboratorio es requisito para emitir; el analista estima.
+        porDefecto: "si",
       },
       exigir_firma_para_aceptar: {
         tipo: "sino",
@@ -248,7 +250,8 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
           { valor: "neto", etiqueta: "Neto de la lista vigente (igual que un particular)" },
         ],
         ayuda: "Un cliente particular toma siempre el neto de la lista de precios vigente. La política de precios (DCO-PG01-P05-IT05) fija para el Ejército y las FF.AA. el costo directo, sin las horas hombre militares; en el formulario de costeo esas horas no se suman al precio Ejército.",
-        porDefecto: "ficha",
+        // COM-36 (IDIC 17-11-2026): costo directo para todas las FF.AA. y de Orden.
+        porDefecto: "costo_directo",
       },
     },
   },
