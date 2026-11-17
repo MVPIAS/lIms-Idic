@@ -13,7 +13,7 @@ import { PrismaService } from "../common/prisma.service";
 import { AlcanceResultadoService } from "../rbac/alcance-resultado.service";
 import { motivoBloqueoPreparacion } from "./preparacion";
 import { exigeAprobacion, leerConfigTrabajo, LABS_DSA, motivoBloqueoTrabajo, type EstadoTrabajo } from "./trabajo";
-import { mapaActivacion, motivoCapturaEnVariante, varianteDe, type Variante } from "./variantes";
+import { mapaActivacion, motivoCapturaEnVariante, varianteDe, varianteEfectiva, type Variante } from "./variantes";
 
 export interface EnsayoCaptura {
   id: string;
@@ -23,6 +23,8 @@ export interface EnsayoCaptura {
   metodoCodigo: string | null;
   laboratorio: string | null;
   laboratorioId: string | null;
+  /** Tiene valor capturado en la captura estándar (sin registro de formulario especializado): ver varianteEfectiva. */
+  capturadoEnEstandar?: boolean;
 }
 
 @Injectable()
@@ -49,7 +51,14 @@ export class ReglasCapturaService {
   async ensayos(ids: string[]): Promise<EnsayoCaptura[]> {
     if (!ids.length) return [];
     const filas = await this.prisma.$queryRawUnsafe<any[]>(
-      `SELECT r.id, COALESCE(r.ot_id, m.ot_id) AS ot_id, r.muestra_id, m.codigo AS muestra_codigo, cm.codigo AS metodo_codigo
+      `SELECT r.id, COALESCE(r.ot_id, m.ot_id) AS ot_id, r.muestra_id, m.codigo AS muestra_codigo, cm.codigo AS metodo_codigo,
+              ((COALESCE(btrim(r.valor_texto), '') <> '' OR r.valor_numerico IS NOT NULL OR r.resultado_final IS NOT NULL OR r.promedio IS NOT NULL)
+               AND NOT EXISTS (
+                 SELECT 1 FROM registro_especializado re
+                  WHERE re.ot_id = COALESCE(r.ot_id, m.ot_id)
+                    AND re.variante NOT IN ('preparacion', 'trabajo')
+                    AND (re.resultado_id = r.id OR re.clave = r.id::text
+                         OR (re.resultado_id IS NULL AND (re.muestra_id IS NULL OR re.muestra_id = r.muestra_id))))) AS capturado_estandar
          FROM resultado r JOIN muestra m ON m.id = r.muestra_id
          LEFT JOIN cat_metodo cm ON cm.id = r.cat_metodo_id
         WHERE r.id = ANY($1::uuid[])`,
@@ -64,13 +73,14 @@ export class ReglasCapturaService {
       metodoCodigo: f.metodo_codigo,
       laboratorio: labs.get(f.id)?.unidadCodigo ?? null,
       laboratorioId: labs.get(f.id)?.unidadId ?? null,
+      capturadoEnEstandar: f.capturado_estandar === true,
     }));
   }
 
   /** Variante de cada ensayo indicado. */
   async variantes(tenantId: string, ensayos: EnsayoCaptura[]): Promise<Map<string, Variante>> {
     const a = await this.activaciones(tenantId);
-    return new Map(ensayos.map((e) => [e.id, varianteDe(e, a.porMetodo, a.porLaboratorio)]));
+    return new Map(ensayos.map((e) => [e.id, varianteEfectiva(varianteDe(e, a.porMetodo, a.porLaboratorio), e.capturadoEnEstandar)]));
   }
 
   /** Motivo por el que la preparación de la muestra detiene la captura del laboratorio (null = no). */

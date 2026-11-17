@@ -112,6 +112,18 @@ export function varianteDe(
 }
 
 /**
+ * Variante que rige de verdad para un ensayo. Un ensayo que YA tiene valor
+ * capturado en la captura estándar (sin registro de un formulario
+ * especializado) sigue en la captura estándar aunque después se active una
+ * variante para su método o laboratorio (p. ej. SAL-01, tercer envío): así sus
+ * resultados se pueden seguir corrigiendo donde se capturaron. La variante
+ * aplica solo a los ensayos sin valor capturado.
+ */
+export function varianteEfectiva(variante: Variante, capturadoEnEstandar: boolean | null | undefined): Variante {
+  return variante !== "estandar" && capturadoEnEstandar ? "estandar" : variante;
+}
+
+/**
  * Por qué la captura estándar no admite el valor de este ensayo: se registra
  * en su formulario especializado (que lleva el valor al resultado). null = sí.
  */
