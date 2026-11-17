@@ -15,6 +15,10 @@
  *    contramuestra. Testigo y contramuestra se retienen un plazo (meses, en la
  *    categoría `retencion_muestra`); antes no se pueden destruir. La muestra en
  *    custodia se devuelve: no se destruye.
+ *  · Destinos que un laboratorio no usa (categoría `recepcion_destino_no_usado`,
+ *    código = laboratorio, valor «CONTRAMUESTRA,TESTIGO»): no se ofrecen ni se
+ *    aceptan en su recepción. P. ej. la Sección Alimentos no usa contramuestras
+ *    ni testigos (respuesta IDIC 17-11-2026, SAL-09). «Análisis» nunca se excluye.
  */
 
 import { hoyChile, diaChile } from "../common/fecha-chile";
@@ -113,12 +117,28 @@ export function leerCampo(fila: FilaParametro, laboratorio: string): CampoRecepc
   };
 }
 
-/** Campos activos del laboratorio, en orden. */
-export function camposDeLaboratorio(filas: FilaParametro[], laboratorio: string | null | undefined): CampoRecepcion[] {
+/**
+ * Destinos de la muestra que el laboratorio NO usa, desde las filas de
+ * `recepcion_destino_no_usado` (código = laboratorio; valor separado por coma,
+ * en mayúsculas o minúsculas). La fila inactiva no cuenta. «Análisis» nunca se
+ * excluye: es el destino por defecto.
+ */
+export function destinosNoUsados(filas: FilaParametro[], laboratorio: string | null | undefined): ClaseCustodia[] {
+  if (!laboratorio) return [];
+  const f = filas.find((x) => x.activo !== false && x.codigo?.trim().toUpperCase() === laboratorio.trim().toUpperCase());
+  if (!f) return [];
+  const marcados = String(f.valor ?? "").toLowerCase().split(/[,;\s]+/).filter(Boolean);
+  return CLASES_CUSTODIA.filter((c) => c !== "analisis" && marcados.includes(c));
+}
+
+/** Campos activos del laboratorio, en orden; el destino sin las opciones que el laboratorio no usa. */
+export function camposDeLaboratorio(filas: FilaParametro[], laboratorio: string | null | undefined, noUsados: readonly ClaseCustodia[] = []): CampoRecepcion[] {
   if (!laboratorio) return [];
   return filas
     .map((f) => leerCampo(f, laboratorio))
     .filter((c): c is CampoRecepcion => c !== null)
+    .map((c) => (c.codigo === "clase_custodia" && noUsados.length ? { ...c, opciones: c.opciones.filter((o) => !noUsados.includes(o.valor as ClaseCustodia)) } : c))
+    .filter((c) => c.tipo !== "lista" || c.opciones.length > 0)
     .sort((a, b) => a.orden - b.orden || a.codigo.localeCompare(b.codigo));
 }
 
@@ -163,6 +183,7 @@ export function validarCamposLaboratorio(
   entrada: EntradaRecepcionLab,
   laboratorio: string,
   prefijo = "",
+  noUsados: readonly ClaseCustodia[] = [],
 ): { errores: string[]; valor: RecepcionLabNormalizada } {
   const errores: string[] = [];
   const porCodigo = new Map(campos.map((c) => [c.codigo, c]));
@@ -223,6 +244,10 @@ export function validarCamposLaboratorio(
     else claseCustodia = s as ClaseCustodia;
   }
   if (!porCodigo.has("ubicacion") && !vacio(entrada.ubicacion)) ubicacion = texto(entrada.ubicacion).slice(0, 120);
+  if (claseCustodia && noUsados.includes(claseCustodia)) {
+    errores.push(`${prefijo}el ${laboratorio} no usa el destino «${NOMBRE_CLASE[claseCustodia]}»: elija otro destino.`);
+    claseCustodia = null;
+  }
   return { errores, valor: { claseCustodia, ubicacion, datos } };
 }
 
