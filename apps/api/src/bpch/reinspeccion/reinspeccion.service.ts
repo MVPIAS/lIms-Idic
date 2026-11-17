@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { MODALIDADES_INSPECCION } from "../cabecera/reglas-cabecera";
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
 import { BpchComunService, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
@@ -49,7 +50,11 @@ export const SolicitudBody = z.object({
 const InspeccionBody = z.object({
   lugarInspeccion: opcional(240),
   fechaInspeccion: fechaDia.optional().nullable(),
-  inspectores: opcional(240),
+  // BPCH-48: modalidad (en terreno: dos inspectores; administrativo: uno) e
+  // inspectores elegidos entre las personas con rol INSPECTOR de la unidad. El
+  // texto con sus iniciales lo arma el servidor (ya no se escribe a mano).
+  modalidad: z.enum(MODALIDADES_INSPECCION, { errorMap: () => ({ message: "Indique si la inspección es en terreno o un trabajo administrativo." }) }).nullable().optional(),
+  inspectorIds: z.array(z.string().uuid()).max(10).nullable().optional(),
   fechaVencimientoProducto: fechaDia.optional().nullable(),
   vigenciaInforme: fechaDia.optional().nullable(),
   observaciones: opcional(4000),
@@ -306,6 +311,7 @@ export class ReinspeccionService {
         lugar: r.lugar_inspeccion,
         fecha: r.fecha_inspeccion,
         inspectores: r.inspectores,
+        ...(await this.comun.fichaInspectores(r.unidad_inspeccion_id, r)),
         vencimientoProducto: r.fecha_vencimiento_producto,
         vigenciaInforme: r.vigencia_informe,
         observaciones: r.observaciones_inspeccion,
@@ -452,16 +458,19 @@ export class ReinspeccionService {
       unidadMuestra: dto.unidadMuestra === undefined ? r.unidad_muestra ?? null : dto.unidadMuestra?.trim() || null,
     };
     const errores = erroresLote(lote, "Lote", ETIQUETA_UNIDAD);
+    const ins = await this.comun.resolverInspectores(r.unidad_inspeccion_id, dto, r.inspector_ids ?? []);
+    errores.push(...ins.errores);
     if (errores.length) throw new BadRequestException(errores.join(" "));
     await this.prisma.$executeRawUnsafe(
       `UPDATE bpch_reinspeccion SET lugar_inspeccion = $2, fecha_inspeccion = $3::date, inspectores = $4, fecha_vencimiento_producto = $5::date,
               vigencia_informe = $6::date, observaciones_inspeccion = $7, procedimiento = COALESCE($8, procedimiento),
-              identificacion_lote = $9, tamano_lote = $10, tamano_muestra = $11, updated_by = $12::uuid, updated_at = now()
+              identificacion_lote = $9, tamano_lote = $10, tamano_muestra = $11, updated_by = $12::uuid, updated_at = now(),
+              modalidad = $13, inspector_ids = $14::uuid[]
         WHERE id = $1::uuid`,
       id,
       dto.lugarInspeccion?.trim() || null,
       dto.fechaInspeccion ?? null,
-      dto.inspectores?.trim() || null,
+      ins.texto,
       dto.fechaVencimientoProducto ?? null,
       dto.vigenciaInforme ?? null,
       dto.observaciones?.trim() || null,
@@ -470,6 +479,8 @@ export class ReinspeccionService {
       lote.tamanoLote ?? null,
       lote.tamanoMuestra ?? null,
       usuarioDe(req),
+      dto.modalidad ?? null,
+      ins.ids,
     );
     if (r.muestra_id && lote.identificacionLote?.trim())
       await this.prisma.$executeRawUnsafe(`UPDATE muestra SET numero_lote = $2 WHERE id = $1::uuid`, r.muestra_id, lote.identificacionLote.trim().slice(0, 80));
