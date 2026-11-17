@@ -81,7 +81,9 @@ export default function FichaCotizacionPage() {
   const avisar = (m: string) => { setMsg(m); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const hecho = async (m: string) => { avisar(m); await cargar(); };
 
-  if (error && !c) return <div><Link href={"/cotizaciones" as any} className="subtitle">← Cotizaciones</Link><div className="alert warn" role="alert">{error}</div></div>;
+  // COM-09: el analista que costea no ve el listado de cotizaciones; vuelve a su bandeja.
+  const volver = puede("cotizacion.ver") ? { href: "/cotizaciones", texto: "← Cotizaciones" } : { href: "/cotizaciones/por-responder", texto: "← Cotizaciones por responder" };
+  if (error && !c) return <div><Link href={volver.href as any} className="subtitle">{volver.texto}</Link><div className="alert warn" role="alert">{error}</div></div>;
   if (!c || !cot) return <p className="subtitle" aria-busy="true">Cargando la cotización…</p>;
 
   const k = c.cotizacion;
@@ -93,7 +95,7 @@ export default function FichaCotizacionPage() {
 
   return (
     <div>
-      <Link href={"/cotizaciones" as any} className="subtitle" style={{ display: "inline-block", color: "var(--accent)", textDecoration: "none" }}>← Cotizaciones</Link>
+      <Link href={volver.href as any} className="subtitle" style={{ display: "inline-block", color: "var(--accent)", textDecoration: "none" }}>{volver.texto}</Link>
       {msg && <div className="alert info" role="status" style={{ marginBottom: 10 }}>{msg} <button className="btn outline sm" style={{ marginLeft: 8 }} onClick={() => setMsg("")}>Cerrar</button></div>}
       {error && <div className="alert warn" role="alert">{error}</div>}
 
