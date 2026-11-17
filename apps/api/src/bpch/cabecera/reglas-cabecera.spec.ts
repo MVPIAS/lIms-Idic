@@ -78,7 +78,8 @@ describe("B-019 · la cabecera hereda lo conocido", () => {
 });
 
 describe("F005 · lote y muestra en la misma escala", () => {
-  const ok = { procedimiento: "SAC-PG01-P01" };
+  // BPCH-48: modalidad e inspectores obligatorios al guardar la cabecera.
+  const ok = { procedimiento: "SAC-PG01-P01", modalidad: "ADMINISTRATIVO" as const, inspectorIds: ["00000000-0000-4000-8000-000000000001"] };
   it("2 Toneladas de lote y 5 Kilos de muestra es válido", () => {
     expect(erroresCabecera({ ...ok, tamanoLote: 2, unidadLote: "t", tamanoMuestra: 5, unidadMuestra: "kg" })).toEqual([]);
   });
