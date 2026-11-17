@@ -7,6 +7,7 @@ import { descendientes } from "../rbac/alcance";
 import { LaboratorioOtService, UnidadResumen } from "../ot/laboratorio-ot.service";
 import { CODIGO_BPCH, CODIGO_SCC, puedeOperarEnUnidad, filtroExpedientesBpch, expedienteVisible } from "./alcance-bpch";
 import { fijarPlazoPorDefecto } from "../ot/plazo-defecto";
+import { aplicarVigenciaResolucion } from "../ot/plazo-resolucion";
 import { anioChile } from "../common/fecha-chile";
 
 /** Cliente con el que se escribe: el servicio o la transacción en curso. */
@@ -22,6 +23,8 @@ export interface DatosOtProceso {
   conCobro: boolean;
   /** Resolución DGMN (RAF o solicitud del prototipo) → orden_trabajo.numero_ley. */
   resolucion: string | null;
+  /** Fecha de la resolución o documento de origen: desde ella corre su vigencia (R3, plazo-resolucion.ts). */
+  fechaResolucion?: Date | string | null;
   descripcion: string;
   elementoGenerico?: string | null;
   catElementoId?: string | null;
@@ -155,6 +158,8 @@ export class OtDesdeProcesoService {
     // Toda OT nace con su fecha de compromiso (MP-06 D06-09, MP-10 D10-02 · B-010):
     // hoy en Chile + el plazo de Parámetros del sistema (laboratorio > origen > defecto).
     await fijarPlazoPorDefecto(tx, d.tenantId, ot.id);
+    // R3: la OT del BPCH o la D11 no dura más que la resolución (180 días) y nunca queda sin plazo.
+    await aplicarVigenciaResolucion(tx, d.tenantId, ot.id, d.fechaResolucion ?? null);
     await this.labs.anotar(tx as any, {
       tenantId: d.tenantId,
       otId: ot.id,

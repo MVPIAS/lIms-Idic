@@ -25,6 +25,8 @@ interface DatosAsignacion {
   puedeAsignar: boolean;
   analistas: Persona[];
   personal: Persona[];
+  /** Ensayos que hace otro laboratorio (por catálogo u orden interna): los asigna el destino (F071). */
+  otrosLaboratorios?: { laboratorio: string; ensayos: number }[];
   muestras: MuestraAsig[];
 }
 
@@ -144,6 +146,12 @@ export default function Asignacion({ otId, onCambio }: { otId: string; onCambio?
         <p className="subtitle" style={{ margin: "0 0 8px" }}>
           Opcional: asigne una muestra completa o un ensayo concreto a una persona. Si no, cualquiera de los analistas de la OT puede capturarlo.
         </p>
+        {(d.otrosLaboratorios ?? []).length > 0 && (
+          <p className="subtitle" style={{ margin: "0 0 8px" }}>
+            No se listan los ensayos de otros laboratorios ({(d.otrosLaboratorios ?? []).map((o) => `${o.laboratorio}: ${o.ensayos}`).join(", ")}):
+            van con su orden interna y los asigna el laboratorio de destino.
+          </p>
+        )}
         {d.muestras.length === 0 && <p className="subtitle" style={{ margin: 0 }}>La OT aún no tiene muestras registradas.</p>}
         {d.muestras.map((m) => (
           <div key={m.id} className="card" style={{ padding: 10, marginBottom: 8 }}>

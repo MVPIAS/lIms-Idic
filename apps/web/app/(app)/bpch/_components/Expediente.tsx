@@ -39,7 +39,7 @@ export function Fases({ fases }: { fases: Fase[] }) {
 
 type TipoDoc = "INFORME_INSPECCION" | "CERTIFICADO_CONFORMIDAD" | "INFORME_INCUMPLIMIENTO";
 const NOMBRE_DOC: Record<TipoDoc, string> = {
-  INFORME_INSPECCION: "Informe de Inspección",
+  INFORME_INSPECCION: "Certificado de control (Informe de Inspección)",
   CERTIFICADO_CONFORMIDAD: "Certificado de Conformidad",
   INFORME_INCUMPLIMIENTO: "Informe de Incumplimiento",
 };

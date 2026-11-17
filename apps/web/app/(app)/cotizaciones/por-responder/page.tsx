@@ -9,7 +9,7 @@
  * GET /cotizaciones/solicitudes-laboratorio?estado=por_responder|vb|todas
  * (filtrado en el servidor por el alcance del permiso cotizacion.costear).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
 import { pedir } from "../_components/comercial";
@@ -35,12 +35,17 @@ export default function CotizacionesPorResponderPage() {
     setListo(true);
   }, []);
 
+  // Solo cuenta la última consulta: una respuesta atrasada (cambio de pestaña) no se mezcla con la vigente (F029).
+  const consulta = useRef(0);
   const cargar = useCallback(async () => {
     if (!listo) return;
+    const n = ++consulta.current;
     setCargando(true);
     try {
       const r = await pedir<any>("GET", `/cotizaciones/solicitudes-laboratorio?estado=${filtro}`);
-      setFilas(r?.data ?? []);
+      if (n !== consulta.current) return;
+      const vistos = new Set<string>();
+      setFilas((r?.data ?? []).filter((f: any) => (vistos.has(f.id) ? false : (vistos.add(f.id), true))));
       setError("");
     } catch (e: any) {
       setError(e.message);

@@ -4,8 +4,18 @@
  * Defensivas: en una base sin align_r4c_*.sql devuelven lo neutro.
  */
 import { exigeOficio } from "../avisos/reglas-avisos";
+import type { Receptor } from "./recibir-despacho";
 
 type Sql = { $queryRawUnsafe<T = unknown>(q: string, ...v: any[]): Promise<T> };
+
+/** F015: roles y códigos de las unidades visibles del usuario (para puedeRecibirDespacho). */
+export async function receptorDe(db: Sql, req: any): Promise<Receptor> {
+  const ids: string[] = Array.isArray(req?.user?.unidades) ? req.user.unidades : [];
+  const filas = ids.length
+    ? await db.$queryRawUnsafe<{ codigo: string }[]>(`SELECT codigo FROM unidad WHERE id = ANY($1::uuid[])`, ids).catch(() => [] as { codigo: string }[])
+    : [];
+  return { roles: Array.isArray(req?.user?.roles) ? req.user.roles : [], unidades: filas.map((f) => f.codigo) };
+}
 
 /** Código del departamento (ancestro de tipo DEPARTAMENTO) de una unidad, o null. */
 export async function departamentoDe(db: Sql, unidadId: string | null): Promise<string | null> {

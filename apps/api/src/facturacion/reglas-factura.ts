@@ -144,6 +144,18 @@ export function totales(lineas: { subtotal: number }[], ivaPct: number, moneda?:
   return { neto, ivaMonto, total: redondear(neto + ivaMonto, moneda) };
 }
 
+/**
+ * Factura de la TASA DE INTERNACIÓN del BPCH (tasa 1,5 % sobre el CIF, IDIC-PG 24
+ * Anexo 03): EXENTA de IVA (decisión del IDIC, respuestas del 10-11-2026), DTE 34,
+ * sin reparto por centro de costo, y se factura también con resultado «No
+ * cumple». La factura nace con IVA 0 % y `exentaIva = true`, aunque el cálculo
+ * de la tasa (calcularTasa, bpch/comun/reglas-bpch.ts) muestre un IVA.
+ */
+export const IVA_TASA_INTERNACION = 0;
+export function importesTasaInternacion(lineas: { subtotal: number }[]) {
+  return { exentaIva: true as const, ivaPct: IVA_TASA_INTERNACION, ...totales(lineas, IVA_TASA_INTERNACION, "CLP") };
+}
+
 /** Número provisional del borrador: Finanzas le asigna el folio real al emitirla. */
 export function numeroBorrador(otCodigo: string): string {
   return `PEND-${otCodigo}`.slice(0, 30);

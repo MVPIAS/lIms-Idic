@@ -99,3 +99,40 @@ export function cumplimiento(ejecutadas: EjecucionPlan[], vencidasPendientes: nu
     costo: Math.round(ejecutadas.reduce((a, e) => a + (e.costo ?? 0), 0) * 100) / 100,
   };
 }
+
+/* ------------------------------------------- programas auditables (Químico, R5) --- */
+/**
+ * Programa de mantención: el registro del sistema de gestión de calidad que agrupa los
+ * planes de un laboratorio en un año (p. ej. «Programa anual de mantención 2026 · LQC»).
+ * Cada plan se vincula a su programa y cada mantención ejecutada guarda el programa con
+ * que se hizo: el auditor ve lo programado, lo ejecutado y el cumplimiento por programa.
+ *   borrador → aprobado (ya no se cambia, salvo cerrarlo) → cerrado.
+ */
+export const ESTADOS_PROGRAMA = ["borrador", "aprobado", "cerrado"] as const;
+export type EstadoPrograma = (typeof ESTADOS_PROGRAMA)[number];
+const TRANSICIONES_PROGRAMA: Record<EstadoPrograma, readonly EstadoPrograma[]> = {
+  borrador: ["aprobado"],
+  aprobado: ["cerrado"],
+  cerrado: [],
+};
+export const puedeTransitarPrograma = (actual: string, nuevo: string) =>
+  ((TRANSICIONES_PROGRAMA as Record<string, readonly string[]>)[actual] ?? []).includes(nuevo);
+
+export function erroresPrograma(p: { codigo?: string | null; nombre?: string | null; anio?: number | null; documentoCodigo?: string | null }): string[] {
+  const e: string[] = [];
+  if (!p.codigo || p.codigo.trim().length < 2) e.push("Indique el código del programa (mínimo 2 caracteres).");
+  if (!p.nombre || p.nombre.trim().length < 3) e.push("Indique el nombre del programa (mínimo 3 caracteres).");
+  if (!Number.isInteger(p.anio) || p.anio! < 2000 || p.anio! > 2100) e.push("Indique el año del programa (2000 a 2100).");
+  if (p.documentoCodigo != null && p.documentoCodigo.trim().length > 60) e.push("El código del documento del sistema de calidad admite hasta 60 caracteres.");
+  return e;
+}
+
+/** Un programa aprobado o cerrado ya no se modifica (ni sus planes se agregan o quitan): queda como evidencia. */
+export function motivoProgramaCerrado(estado: string | null | undefined): string | null {
+  if (estado === "aprobado") return "El programa está aprobado: no se modifica. Ciérrelo y apruebe uno nuevo si hay cambios.";
+  if (estado === "cerrado") return "El programa está cerrado: es evidencia de auditoría y no se modifica.";
+  return null;
+}
+
+/** Período del programa: su año calendario. */
+export const periodoPrograma = (anio: number) => ({ desde: `${anio}-01-01`, hasta: `${anio}-12-31` });

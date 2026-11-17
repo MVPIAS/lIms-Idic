@@ -4,11 +4,16 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
+
+/** Nombre de cada tipo de evidencia (el valor interno no se muestra). */
+const TIPO_EVIDENCIA: Record<string, string> = { vainilla: "Vaina", proyectil: "Proyectil", arma: "Arma", explosivo: "Explosivo", otro: "Otro" };
 import { usePermisos } from "@/lib/permisos";
 import { validarFormulario } from "@/lib/validate";
 import Peritajes from "./_components/Peritajes";
 import Prestamos from "./_components/Prestamos";
 import CoincidenciasIbis from "./_components/CoincidenciasIbis";
+import { abrirDocumento } from "@/lib/bpchProcesos";
+import PanelFea from "@/components/documentos/PanelFea";
 
 const errStyle = { color: "#c0392b", fontSize: 11, marginTop: 2, display: "block" } as const;
 
@@ -52,6 +57,8 @@ export default function EvidenciaFichaPage() {
   const [aviso, setAviso] = useState("");
   const [loading, setLoading] = useState(true);
   const [showMov, setShowMov] = useState(false);
+  // Certificado cuya Firma Electrónica Avanzada (FEA) se está mirando (docs/FLUJO_FEA_DOCUMENTOS.md).
+  const [feaCert, setFeaCert] = useState<string | null>(null);
   const [m, setM] = useState<any>({ ...MOV_VACIO });
   const [erroresMov, setErroresMov] = useState<Record<string, string>>({});
 
@@ -174,7 +181,11 @@ export default function EvidenciaFichaPage() {
 
       <div className="toolbar" style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
         <Link className="btn sm" href="/saec">← Evidencias</Link>
+        <Link className="btn sm outline" href="/saec/donde-esta">¿Dónde está?</Link>
         <div className="spacer" style={{ flex: 1 }}></div>
+        <button className="btn sm outline" onClick={() => abrirDocumento(`/evidencias/fichas?ids=${id}`).catch((e) => setError(e.message))}>
+          Imprimir ficha
+        </button>
         {puede("saec.certificado.emitir") && <button className="btn sm" onClick={emitirCertificado}>Emitir certificado</button>}
         {(showMov || puede("evidencia.custodiar")) && (
           <button className="btn primary sm" onClick={() => setShowMov(!showMov)}>
@@ -186,8 +197,9 @@ export default function EvidenciaFichaPage() {
       {/* --- Datos del elemento --- */}
       <div className="card" style={{ marginBottom: 12 }}>
         <div className="form-grid">
-          <Dato lab="Tipo" val={e.tipo} />
-          <Dato lab="Estado" val={e.estado} />
+          {/* F046: el tipo con su nombre (no el valor interno), la marca del arma y la fecha de disparo. */}
+          <Dato lab="Tipo" val={TIPO_EVIDENCIA[e.tipo] ?? e.tipo} />
+          <Dato lab="Estado" val={e.estado ? String(e.estado).charAt(0).toUpperCase() + String(e.estado).slice(1).replace(/_/g, " ") : null} />
           <Dato lab="Caso" val={e.caso?.numero_caso} />
           <Dato lab="NUE" val={e.nue} />
           <Dato lab="Oficio · fecha" val={e.oficio_numero ? `${e.oficio_numero}${e.oficio_fecha ? ` · ${String(e.oficio_fecha).slice(0, 10).split("-").reverse().join("-")}` : ""}` : null} />
@@ -198,7 +210,8 @@ export default function EvidenciaFichaPage() {
           <Dato lab="Calibre" val={e.calibre_texto} />
           <Dato lab="Forma del percutor" val={e.firing_pin_shape} />
           <Dato lab="Cara de recámara" val={e.breech_face_class} />
-          <Dato lab="Marca" val={e.marca} />
+          <Dato lab="Marca" val={e.marca ?? e.arma?.marca} />
+          {e.fecha_disparo && <Dato lab="Fecha de disparo" val={fechaHora(e.fecha_disparo)} />}
           <Dato lab="Composición" val={e.composicion} />
           <Dato lab="Código de barras" val={e.codigo_barras} />
           <Dato lab="Ubicación actual" val={e.ubicacion} />
@@ -334,11 +347,18 @@ export default function EvidenciaFichaPage() {
                 <td className="codigo">{c.codigo}</td>
                 <td className="codigo">{c.codigo_verificacion}</td>
                 <td style={{ fontSize: 10.5, wordBreak: "break-all", maxWidth: 260 }}>{c.hash_documento}</td>
-                <td><span className={`pill ${c.estado === "emitido" ? "green" : "red"}`}>{c.estado}</span></td>
+                <td>
+                  <span className={`pill ${c.estado === "emitido" ? "green" : "red"}`}>{c.estado}</span>
+                  {c.firmado_fea && <span className="pill blue" style={{ marginLeft: 4 }} title="Tiene versión firmada con firma electrónica avanzada">FEA</span>}
+                </td>
                 <td>{fechaHora(c.emitido_at)}</td>
                 <td style={{ whiteSpace: "nowrap" }}>
-                  <button className="btn sm" onClick={() => descargarCertificado(c.id, c.codigo)}>
-                    Descargar PDF/A
+                  <button className="btn sm" onClick={() => descargarCertificado(c.id, c.codigo)}
+                    title={c.firmado_fea ? "Descarga la versión firmada con FEA" : "Descarga el PDF/A emitido por el LIMS"}>
+                    {c.firmado_fea ? "Descargar PDF firmado" : "Descargar PDF/A"}
+                  </button>{" "}
+                  <button className="btn outline sm" aria-expanded={feaCert === c.id} onClick={() => setFeaCert(feaCert === c.id ? null : c.id)}>
+                    {feaCert === c.id ? "Ocultar firma FEA" : "Firma FEA"}
                   </button>
                 </td>
               </tr>
@@ -348,6 +368,11 @@ export default function EvidenciaFichaPage() {
             )}
           </tbody>
         </table>
+        {feaCert && (e.certificados ?? []).some((c: any) => c.id === feaCert) && (
+          <div style={{ marginTop: 10 }}>
+            <PanelFea key={feaCert} origen="saec" documentoId={feaCert} onCambio={cargar} />
+          </div>
+        )}
       </div>
 
       {/* --- RF-K09.2 · auditoría --- */}
