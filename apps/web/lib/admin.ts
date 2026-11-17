@@ -313,7 +313,8 @@ export function leerAcceso(): Acceso {
   }
 }
 export function puede(acceso: Acceso, perm: string): boolean {
-  return acceso.admin || acceso.permisos.has(perm) || mockActivo();
+  // Como PermisoGuard en la API: solo SUPERADMIN pasa sin permiso; ADMIN, por sus permisos.
+  return acceso.roles.includes("SUPERADMIN") || acceso.permisos.has(perm) || mockActivo();
 }
 
 // ───────────────────────────── Catálogos de etiquetas ─────────────────────────────

@@ -2,7 +2,7 @@
  * navegacion.ts · mapa único del menú lateral (lo usan Sidebar y Topbar).
  *
  * Cada ítem declara el permiso que lo habilita (`perm`; con array basta UNO).
- * Si el usuario no lo tiene (y no es SUPERADMIN/ADMIN) el ítem no se muestra.
+ * Si el usuario no lo tiene (y no es SUPERADMIN) el ítem no se muestra.
  * La seguridad real la impone el backend (PermisoGuard → 403).
  *
  * Rutas legacy duplicadas del catálogo (/metodos, /analitos, /gran-grupos,
