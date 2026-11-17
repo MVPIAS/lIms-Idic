@@ -15,7 +15,7 @@ import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } 
 import { generarPdf } from "./pdf.renderer";
 import { QcService } from "../qc/qc.module";
 import { FirmasMatrizService } from "../rbac/firmas-matriz.controller";
-import { esOtInterna } from "../rbac/firmas-resolver";
+import { esOtInterna, rotuloRolFirma } from "../rbac/firmas-resolver";
 import { TIPOS_DOCUMENTO } from "../rbac/rbac.constants";
 import {
   esOficial,
@@ -1740,7 +1740,8 @@ export class PlantillaRenderService {
       .filter((f) => f.estado === "firmado" || f.estado === "pendiente")
       .map((f) => ({
         accion: f.accion,
-        rol: f.rolNombre ?? f.rolCodigo,
+        // BPCH-46: documentos ya emitidos con «Jefe de Departamento» del BPCH.
+        rol: rotuloRolFirma(f.rolCodigo, f.rolNombre ?? f.rolCodigo, f.unidadCodigo),
         unidad: f.unidadCodigo,
         nombre:
           f.estado === "firmado"

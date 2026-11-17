@@ -8,6 +8,7 @@ import {
   elegirReglas,
   esOtInterna,
   resolverFirmas,
+  rotuloRolFirma,
   unidadParaNivel,
 } from "./firmas-resolver";
 
@@ -253,5 +254,15 @@ describe("firmas · OT interna (sin oficialización del Jefe de Departamento)", 
     expect(interna.omitidos).toEqual([]);
     const lme = aplicarOtInterna(resolver("INFORME_ENSAYO", "LME"));
     expect(lme.pasos.map((p) => `${p.accion}:${p.rol.codigo}`)).toEqual(["FIRMA:JEFE_LAB", "FIRMA:CALIDAD"]);
+  });
+});
+
+describe("firmas · rótulo «Subdirector BPCH» (BPCH-46)", () => {
+  it("el Jefe del Departamento BPCH firma como Subdirector BPCH; el resto conserva su nombre", () => {
+    expect(rotuloRolFirma("JEFE_DEPTO", "Jefe de Departamento", "BPCH")).toBe("Subdirector BPCH");
+    expect(rotuloRolFirma("JEFEDCO", "Jefe de Departamento", "BPCH")).toBe("Subdirector BPCH");
+    expect(rotuloRolFirma("JEFE_DEPTO", "Jefe de Departamento", "DQO")).toBe("Jefe de Departamento");
+    expect(rotuloRolFirma("JEFE_SECCION", "Jefe de Sección", "SCC")).toBe("Jefe de Sección");
+    expect(rotuloRolFirma("JEFE_DEPTO", "Jefe de Departamento", null)).toBe("Jefe de Departamento");
   });
 });
