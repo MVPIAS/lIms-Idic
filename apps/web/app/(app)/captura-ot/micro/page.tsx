@@ -2,13 +2,16 @@
 
 /**
  * LMB · Siembra, incubación y lectura (EP-02 3.3–3.5) · variante que se activa
- * por método en Parámetros de la operación (inactiva hasta EP-02 P1).
+ * por método en Parámetros de la operación (activa para el LMB desde la
+ * respuesta del IDIC del 17-11-2026, SAL-01).
  *
  *   1 Siembra: fecha y hora, medio y lote, diluciones, volumen, técnica.
  *   2 Incubación: incubadora (equipo apto), temperatura, inicio → lecturas
  *     programadas (24/48/72 h, configurable) con aviso de pendiente y vencida.
  *   3 Lecturas: colonias por placa y dilución, NMP o presencia/ausencia.
- *   4 Resultado: UFC/g (ISO 7218), plan n, c, m, M si está configurado.
+ *   4 Confirmación: fecha, resultado confirmado y observación; si hay
+ *     resultado confirmado, es el resultado final (SAL-01).
+ *   5 Resultado: UFC/g (ISO 7218), plan n, c, m, M si está configurado.
  *     «Confirmar → evaluación» lleva el valor y el veredicto al ensayo.
  *
  * API: GET|PUT /formularios/resultado/:resultadoId/micro
@@ -51,7 +54,7 @@ function Contenido() {
   }, [id]);
   useEffect(() => {
     if (!id) return;
-    cargar().then((r) => r && setPaso(r.registro?.estado === "confirmada" ? "resultado" : r.datos.lecturas?.length ? "lecturas" : r.datos.incubacion?.inicio ? "lecturas" : r.datos.siembra?.fecha ? "incubacion" : "siembra"));
+    cargar().then((r) => r && setPaso(r.registro?.estado === "confirmada" ? "resultado" : r.datos.confirmacion?.fecha ? "confirmacion" : r.datos.lecturas?.length ? "lecturas" : r.datos.incubacion?.inicio ? "lecturas" : r.datos.siembra?.fecha ? "incubacion" : "siembra"));
   }, [id, cargar]);
 
   if (!id) return <div className="alert warn">Abra el formulario desde el ensayo en «Captura y revisión por OT».</div>;
@@ -63,6 +66,7 @@ function Contenido() {
     { clave: "siembra", titulo: "Siembra", estado: d.siembra?.fecha ? "hecho" : "actual", detalle: d.siembra?.fecha ? fechaHora(d.siembra.fecha) : "Pendiente" },
     { clave: "incubacion", titulo: "Incubación", estado: d.incubacion?.inicio ? "hecho" : "pendiente", detalle: d.incubacion?.inicio ? `desde ${fechaHora(d.incubacion.inicio)}` : "Pendiente" },
     { clave: "lecturas", titulo: "Lecturas", estado: v.programadas.length && v.programadas.every((p: any) => p.estado === "registrada") ? "hecho" : "pendiente", detalle: `${v.programadas.filter((p: any) => p.estado === "registrada").length}/${v.programadas.length || v.horas.length} lecturas` },
+    { clave: "confirmacion", titulo: "Confirmación", estado: d.confirmacion?.fecha ? "hecho" : "pendiente", detalle: d.confirmacion?.fecha ? fechaHora(d.confirmacion.fecha) : "Si corresponde" },
     { clave: "resultado", titulo: "Resultado", estado: confirmada ? "hecho" : "pendiente", detalle: v.calculo.texto || "Por calcular" },
   ];
 
@@ -82,6 +86,8 @@ function Contenido() {
       setOcupado(false);
     }
   }
+  const conf = d.confirmacion ?? {};
+  const setConf = (p: any) => setD((x: any) => ({ ...x, confirmacion: { ...(x.confirmacion ?? {}), ...p } }));
   const lect = (h: number) => d.lecturas.find((l: any) => l.horas === h) ?? null;
   const setLect = (h: number, p: any) =>
     setD((x: any) => ({ ...x, lecturas: [...x.lecturas.filter((l: any) => l.horas !== h), { horas: h, colonias: {}, ...(x.lecturas.find((l: any) => l.horas === h) ?? {}), ...p }].sort((a: any, b: any) => a.horas - b.horas) }));
@@ -160,13 +166,29 @@ function Contenido() {
                 </div>
               );
             })}
-            {ed && <div className="toolbar" style={{ marginTop: 10, marginBottom: 0 }}><div className="spacer" /><button type="button" className="btn primary" disabled={ocupado} onClick={async () => { await guardar(false); setPaso("resultado"); }}>Registrar lectura → resultado</button></div>}
+            {ed && <div className="toolbar" style={{ marginTop: 10, marginBottom: 0 }}><div className="spacer" /><button type="button" className="btn primary" disabled={ocupado} onClick={async () => { await guardar(false); setPaso("confirmacion"); }}>Registrar lectura → confirmación</button></div>}
+          </>
+        )}
+        {paso === "confirmacion" && (
+          <>
+            <h2>4 · Confirmación</h2>
+            <p className="subtitle">Registre la confirmación de las colonias o tubos sospechosos. Si indica un resultado confirmado, ese será el resultado final del ensayo; si la confirmación no corresponde, deje el resultado en blanco y se usará el de la última lectura.</p>
+            <div className="form-grid">
+              <Campo id="cf" etiqueta="Fecha y hora de la confirmación"><input id="cf" type="datetime-local" value={local(conf.fecha)} onChange={(e) => setConf({ fecha: iso(e.target.value) })} /></Campo>
+              {d.tipo === "presencia" ? (
+                <Campo id="cp" etiqueta="Resultado confirmado"><select id="cp" value={conf.presencia ?? ""} onChange={(e) => setConf({ presencia: e.target.value || null })}><option value="">—</option><option value="ausencia">Ausencia</option><option value="presencia">Presencia</option></select></Campo>
+              ) : (
+                <Campo id="cv" etiqueta={`Resultado confirmado (${d.tipo === "nmp" ? "NMP" : "ufc/g o ufc/mL"})`} ayuda="Valor numérico; vacío si no corresponde"><input id="cv" inputMode="decimal" value={conf.valor ?? ""} onChange={(e) => setConf({ valor: e.target.value === "" ? null : e.target.value })} /></Campo>
+              )}
+              <Campo id="co" etiqueta="Observación de la confirmación"><input id="co" value={conf.observacion ?? ""} maxLength={300} onChange={(e) => setConf({ observacion: e.target.value })} /></Campo>
+            </div>
+            {ed && <div className="toolbar" style={{ marginTop: 10, marginBottom: 0 }}><div className="spacer" /><button type="button" className="btn primary" disabled={ocupado} onClick={async () => { await guardar(false); setPaso("resultado"); }}>Registrar confirmación → resultado</button></div>}
           </>
         )}
         {paso === "resultado" && (
           <>
-            <h2>4 · Resultado y evaluación</h2>
-            <p style={{ fontSize: 14 }}><span className="res">{v.calculo.texto || "—"}</span> {v.calculo.formula ? <small style={{ color: "var(--muted)" }}>{v.calculo.formula}</small> : null}</p>
+            <h2>5 · Resultado y evaluación</h2>
+            <p style={{ fontSize: 14 }}><span className="res">{v.calculo.texto || "—"}</span> {v.calculo.texto ? <span className={`pill ${v.calculo.confirmado ? "green" : "gray"}`}>{v.calculo.confirmado ? "Confirmado" : "Presuntivo (última lectura)"}</span> : null} {v.calculo.formula ? <small style={{ color: "var(--muted)" }}>{v.calculo.formula}</small> : null}</p>
             {v.calculo.errores?.length ? <div className="alert warn">{v.calculo.errores.join(" ")}</div> : null}
             {v.plan ? (
               <Campo id="un" etiqueta={`Resultados de las n = ${v.plan.n} unidades (separados por coma)`} ayuda={`Plan ${v.plan.M != null ? "de 3 clases" : "de 2 clases"}: no cumple si alguna supera M o más de c = ${v.plan.c} quedan entre m y M.`}>

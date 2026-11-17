@@ -1,5 +1,6 @@
 /**
- * Variantes de Alimentos (R3, inactivas por defecto hasta EP-02 P1):
+ * Variantes de Alimentos (R3; activas para el LMB y el LES desde la respuesta
+ * del IDIC del 17-11-2026, SAL-01):
  * microbiología con siembra, incubación y lecturas programadas y plan n, c, m,
  * M (EP-02 3.3–3.5) y panel sensorial con cartillas y estadístico (3.6–3.8).
  * Reglas puras: micro.ts y sensorial.ts. Un registro por ensayo.
@@ -7,7 +8,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { FormulariosDatos, tenantDe, usuarioDe } from "./formularios.datos";
 import { ReglasCapturaService } from "./reglas-captura.service";
-import { calcularMicro, evaluarPlan, leerHoras, leerPlanes, lecturasProgramadas, planDe, veredictoSimple, type Lectura, type RegistroMicro, type TipoMicro } from "./micro";
+import { evaluarPlan, leerHoras, leerPlanes, lecturasProgramadas, planDe, resultadoFinal, veredictoSimple, type Confirmacion, type Lectura, type RegistroMicro, type TipoMicro } from "./micro";
 import { codigosAleatorios, erroresCartillas, estadisticaEscala, leerRangos, ordenPorJuez, triangular, veredictoRango, type Cartilla, type PruebaSensorial } from "./sensorial";
 
 const num = (v: unknown): number | null => (v === null || v === undefined || v === "" ? null : Number(String(v).replace(",", ".")));
@@ -71,10 +72,11 @@ export class MicroSensorialService {
     ]);
     const datos: RegistroMicro = reg?.datos?.tipo
       ? reg.datos
-      : { tipo: this.tipoPorDefecto(r.metodo), siembra: { fecha: null, medio: null, loteMedio: null, diluciones: [1, 2, 3], volumenMl: 1, tecnica: null }, incubacion: { equipoId: null, temperatura: null, inicio: null }, lecturas: [] };
+      : { tipo: this.tipoPorDefecto(r.metodo), siembra: { fecha: null, medio: null, loteMedio: null, diluciones: [1, 2, 3], volumenMl: 1, tecnica: null }, incubacion: { equipoId: null, temperatura: null, inicio: null }, lecturas: [], confirmacion: null };
+    if (datos.confirmacion === undefined) datos.confirmacion = null;
     const horas = leerHoras(horasTxt);
     const plan = planDe(leerPlanes(planesTxt), e.metodoCodigo, r.producto);
-    const calc = calcularMicro(datos);
+    const calc = resultadoFinal(datos);
     return {
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado },
       ensayo: { id: resultadoId, nombre: r.ensayo, metodo: r.metodo, metodoCodigo: e.metodoCodigo, muestra: r.muestraCodigo, producto: r.producto, maximo: r.limiteSup, requisito: r.requisito, estado: r.estado },
@@ -121,17 +123,20 @@ export class MicroSensorialService {
       };
     });
     if (lecturas.some((l) => !Number.isInteger(l.horas) || l.horas <= 0)) errores.push("Cada lectura indica su hora programada (24, 48…).");
+    const confirmacion = MicroSensorialService.leerConfirmacion(body?.confirmacion, errores);
     const datos: RegistroMicro = {
       tipo,
       siembra: { fecha: fechaHora(s.fecha), medio: txt(s.medio), loteMedio: txt(s.loteMedio, 60), diluciones, volumenMl: num(s.volumenMl), tecnica: txt(s.tecnica, 120) },
       incubacion: { equipoId: incubadora?.id ?? null, temperatura: num(inc.temperatura), inicio: fechaHora(inc.inicio) },
       lecturas,
+      confirmacion,
       unidades: (Array.isArray(body?.unidades) ? body.unidades : []).slice(0, 20).map((u: unknown) => (typeof u === "number" ? u : String(u ?? "").trim())).filter((u: unknown) => u !== ""),
       cantidadAnalizada: txt(body?.cantidadAnalizada, 40),
     };
     if (datos.incubacion.inicio && datos.siembra.fecha && datos.incubacion.inicio < datos.siembra.fecha) errores.push("La incubación no puede empezar antes de la siembra.");
+    if (confirmacion?.fecha && datos.siembra.fecha && confirmacion.fecha < datos.siembra.fecha) errores.push("La confirmación no puede ser anterior a la siembra.");
     if (errores.length) throw new BadRequestException(errores.join(" "));
-    const calc = calcularMicro(datos);
+    const calc = resultadoFinal(datos);
     const confirmar = body?.confirmar === true;
     const reg = await this.d.registro(ot.id, "lmb_micro", resultadoId);
     const corrige = reg?.estado === "confirmada";
@@ -150,7 +155,7 @@ export class MicroSensorialService {
         textoPlan = p.texto;
       } else veredicto = veredictoSimple(calc, tipo, num(r.limiteSup), r.requisito);
     }
-    const estado = confirmar ? "confirmada" : lecturas.some((l) => l.realizada) ? "leida" : datos.incubacion.inicio ? "en_incubacion" : datos.siembra.fecha ? "sembrada" : "borrador";
+    const estado = confirmar ? "confirmada" : confirmacion?.fecha ? "en_confirmacion" : lecturas.some((l) => l.realizada) ? "leida" : datos.incubacion.inicio ? "en_incubacion" : datos.siembra.fecha ? "sembrada" : "borrador";
     await this.d.guardar(
       { tenantId, otId: ot.id, variante: "lmb_micro", clave: resultadoId, resultadoId, muestraId: e.muestraId, unidadId: e.laboratorioId, datos, estado, veredicto, resumen: calc.texto || null },
       { accion: confirmar ? (corrige ? "corregir" : "confirmar") : "guardar", motivo, usuarioId: usuarioDe(req) },
@@ -162,10 +167,27 @@ export class MicroSensorialService {
         tenantId,
         { id: resultadoId, estado: r.estado, ensayo: r.ensayo, muestraCodigo: r.muestraCodigo },
         "lmb_micro",
-        { valorTexto: calc.texto, valorNumerico: calc.valor, veredicto, observacion: [calc.formula, textoPlan].filter(Boolean).join(" · ") || null },
+        { valorTexto: calc.texto, valorNumerico: calc.valor, veredicto, observacion: [calc.formula, textoPlan, confirmacion?.observacion ? `Confirmación: ${confirmacion.observacion}` : null].filter(Boolean).join(" · ") || null },
         motivo ?? (r.valorTexto ? "Determinación microbiológica confirmada de nuevo" : null),
       );
     return { ...(await this.microVer(resultadoId, req)), llevado };
+  }
+
+  /**
+   * Etapa de confirmación (SAL-01): fecha, resultado confirmado (recuento /
+   * NMP o presencia / ausencia) y observación. Vacía → null.
+   */
+  static leerConfirmacion(c: any, errores: string[]): Confirmacion | null {
+    if (!c || typeof c !== "object") return null;
+    const fecha = fechaHora(c.fecha);
+    if (c.fecha && !fecha) errores.push("La fecha de la confirmación no es válida.");
+    const valor = num(c.valor);
+    if (valor != null && !(Number.isFinite(valor) && valor >= 0)) errores.push("El resultado confirmado debe ser un número de 0 o más.");
+    const presencia = c.presencia === "presencia" || c.presencia === "ausencia" ? c.presencia : null;
+    const observacion = txt(c.observacion, 300);
+    const conf: Confirmacion = { fecha, valor: valor != null && Number.isFinite(valor) && valor >= 0 ? valor : null, presencia, observacion };
+    if ((conf.valor != null || conf.presencia) && !conf.fecha) errores.push("Indique la fecha de la confirmación.");
+    return conf.fecha || conf.valor != null || conf.presencia || conf.observacion ? conf : null;
   }
 
   /* ---------------------------------------------------------- sensorial --- */

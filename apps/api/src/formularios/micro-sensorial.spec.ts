@@ -1,4 +1,5 @@
-import { calcularMicro, dosCifras, evaluarPlan, leerHoras, leerPlanes, lecturasProgramadas, planDe, recuento, veredictoSimple } from "./micro";
+import { calcularMicro, dosCifras, evaluarPlan, leerHoras, leerPlanes, lecturasProgramadas, planDe, recuento, resultadoFinal, tieneConfirmado, veredictoSimple } from "./micro";
+import { MicroSensorialService } from "./micro-sensorial.service";
 import { codigosAleatorios, colaBinomial, erroresCartillas, estadisticaEscala, minimoCorrectas, ordenPorJuez, triangular, veredictoRango } from "./sensorial";
 
 describe("LMB · lecturas programadas", () => {
@@ -31,6 +32,46 @@ describe("LMB · recuento ISO 7218", () => {
     expect(calcularMicro({ ...base, tipo: "nmp", lecturas: [{ horas: 48, realizada: "x", nmp: 23, combinacion: "3-1-0" }] }).texto).toBe("23");
     expect(calcularMicro({ ...base, tipo: "presencia", cantidadAnalizada: "25 g", lecturas: [{ horas: 24, realizada: "x", presencia: "ausencia" }] }).texto).toBe("Ausencia en 25 g");
     expect(calcularMicro({ ...base, tipo: "recuento", lecturas: [] }).errores[0]).toMatch(/lectura/);
+  });
+});
+
+describe("LMB · etapa de confirmación (SAL-01)", () => {
+  const base = { siembra: { fecha: "2026-11-17T10:00", medio: null, loteMedio: null, diluciones: [1, 2], volumenMl: 1, tecnica: null }, incubacion: { equipoId: null, temperatura: null, inicio: null } };
+  const lecturas = [{ horas: 48, realizada: "x", colonias: { "1": [150, 160], "2": [14, 16] } }];
+  it("sin confirmación: el resultado es el de la lectura (presuntivo)", () => {
+    const r = resultadoFinal({ ...base, tipo: "recuento", lecturas });
+    expect(r.confirmado).toBe(false);
+    expect(r.texto).toBe(calcularMicro({ ...base, tipo: "recuento", lecturas }).texto);
+  });
+  it("con resultado confirmado: el final es el confirmado y deja constancia del presuntivo", () => {
+    const r = resultadoFinal({ ...base, tipo: "recuento", lecturas, confirmacion: { fecha: "2026-11-19T10:00", valor: 1234, observacion: "PRUEBA" } });
+    expect(r.confirmado).toBe(true);
+    expect(r.valor).toBe(1200);
+    expect(r.formula).toMatch(/^Confirmado \(presuntivo /);
+    expect(r.errores).toEqual([]);
+  });
+  it("presencia / ausencia confirmada manda sobre la lectura", () => {
+    const r = resultadoFinal({ ...base, tipo: "presencia", cantidadAnalizada: "25 g", lecturas: [{ horas: 24, realizada: "x", presencia: "presencia" }], confirmacion: { fecha: "2026-11-19T10:00", presencia: "ausencia" } });
+    expect(r.texto).toBe("Ausencia en 25 g");
+  });
+  it("NMP confirmado sin lectura previa; sin fecha avisa", () => {
+    const r = resultadoFinal({ ...base, tipo: "nmp", lecturas: [], confirmacion: { fecha: null, valor: 9.2 } });
+    expect(r.texto).toBe("9,2");
+    expect(r.errores[0]).toMatch(/fecha de la confirmación/);
+  });
+  it("solo observación o tipo que no corresponde: no hay confirmado", () => {
+    expect(tieneConfirmado("recuento", { fecha: "x", observacion: "PRUEBA" })).toBe(false);
+    expect(tieneConfirmado("recuento", { fecha: "x", presencia: "ausencia" })).toBe(false);
+    expect(tieneConfirmado("presencia", { fecha: "x", valor: 10 })).toBe(false);
+  });
+  it("lectura del cuerpo de la petición", () => {
+    const e: string[] = [];
+    expect(MicroSensorialService.leerConfirmacion({}, e)).toBeNull();
+    expect(MicroSensorialService.leerConfirmacion({ valor: "1,5" }, e)?.valor).toBe(1.5);
+    expect(e).toEqual(["Indique la fecha de la confirmación."]);
+    const e2: string[] = [];
+    expect(MicroSensorialService.leerConfirmacion({ fecha: "2026-11-19T10:00", valor: "-3" }, e2)?.valor).toBeNull();
+    expect(e2[0]).toMatch(/0 o más/);
   });
 });
 
