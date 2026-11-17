@@ -27,6 +27,9 @@
  *               HCP por tipo de vehículo, planes n, c, m, M, rangos sensoriales)
  *   campo_prep  campo de la preparación de muestras de un laboratorio
  *               {tipo, obligatorio, bloquea, unidad, opciones, ayuda} + `activo`
+ *   texto       texto libre de hasta `largo` caracteres; `rut` = RUT chileno con
+ *               dígito verificador; `requerido` = no se deja vacío (emisor de la
+ *               factura, frente nuevo-f2)
  */
 import { formatearNumeroCotizacion, configNumeracion } from "../cotizacion/numeracion-cotizacion";
 import { CLASES_CUSTODIA, TIPOS_CAMPO, leerCampo, type TipoCampo } from "../recepcion/reglas-recepcion";
@@ -36,6 +39,9 @@ import { DIFUSION_TASA } from "../common/parametros-r4d";
 import { OPCIONES_VARIANTE, esVariante } from "../formularios/variantes";
 // NCh 44 de los formularios especializados (frente r2a): AQL como texto con coma.
 import { jsonCampoPrep, normalizarCampoPrep } from "../formularios/preparacion";
+import { OPCIONES_MENU_OCULTO } from "../rbac/menu-oculto";
+import { CATEGORIA_FEA, TIPOS_FEA, codigoParametroFea } from "../fea/fea.reglas";
+import { validaRut } from "../common/rut.validator";
 
 /** Columnas de AQL de la tabla 2-A como opciones (se guarda con punto, se muestra con coma). */
 const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: String(a).replace(".", ",") }));
@@ -48,7 +54,7 @@ const OPCIONES_AQL: Opcion[] = AQLS.map((a) => ({ valor: String(a), etiqueta: St
 const AQLS_FORM: string[] = AQLS.map(textoAql);
 const NIVELES_FORM = NIVELES;
 
-export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
+export type TipoValor = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep" | "texto";
 
 /** Columna de un parámetro de tipo «tabla» (tabla de amenazas, HCP, planes RSA…). */
 export interface ColumnaTabla {
@@ -90,6 +96,10 @@ export interface DefValor {
   /** Tipo «tabla»: columnas y máximo de filas. */
   columnas?: ColumnaTabla[];
   maxFilas?: number;
+  /** Tipo «texto»: largo máximo, si no puede quedar vacío y si es un RUT. */
+  largo?: number;
+  requerido?: boolean;
+  rut?: boolean;
 }
 
 export interface GrupoConfig {
@@ -452,6 +462,29 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         ],
         porDefecto: "avisar",
       },
+      // S4 · bodegas (R1, R5): de qué bodega sale el consumo de un ensayo.
+      bodega_consumo: {
+        tipo: "opcion",
+        nombre: "Bodega de la que se descuenta el consumo de un ensayo",
+        opciones: [
+          { valor: "laboratorio_primero", etiqueta: "Primero la sub-bodega del laboratorio y luego la bodega central" },
+          { valor: "solo_laboratorio", etiqueta: "Solo la sub-bodega del laboratorio" },
+          { valor: "todas", etiqueta: "Cualquier bodega (sin preferencia)" },
+        ],
+        porDefecto: "laboratorio_primero",
+      },
+    },
+  },
+  // --- Semáforo del costo real de la OT (frente S4 · reuniones R2, R9 y R10) ---
+  {
+    categoria: "costo_real",
+    titulo: "Costo real de la OT · semáforo de lo cotizado frente a lo real",
+    donde:
+      "OT › Costos reales (planilla de cada laboratorio y total de la OT) y Zona de informes › «Costo cotizado frente a costo real por OT»: verde bajo el umbral amarillo, amarillo entre ambos y rojo desde el umbral rojo.",
+    porConfirmar: "Umbrales del semáforo (los valores 10 % y 20 % son de ejemplo): los fija SPC.",
+    codigos: {
+      semaforo_amarillo_pct: { tipo: "porcentaje", nombre: "Amarillo desde esta desviación del costo real sobre el estimado", unidad: "%", porDefecto: "10" },
+      semaforo_rojo_pct: { tipo: "porcentaje", nombre: "Rojo desde esta desviación del costo real sobre el estimado", unidad: "%", porDefecto: "20" },
     },
   },
   // --- Reglas de aceptación del método en la captura (frente ALI-D4) ---
@@ -639,6 +672,21 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- Menú: módulos heredados ocultos (R1, R10; F077: antes solo por SQL) ---
+  {
+    categoria: "menu",
+    titulo: "Menú lateral",
+    donde: "Menú de todos los usuarios: los módulos marcados no se muestran (módulos heredados que el IDIC no usa). Solo ordena el menú; los permisos siguen rigiendo. Rige al volver a ingresar.",
+    codigos: {
+      ocultos: {
+        tipo: "multiple",
+        nombre: "Módulos que no se muestran en el menú",
+        ayuda: "Marque los módulos que el IDIC no usa. Por defecto, ninguno.",
+        opciones: OPCIONES_MENU_OCULTO,
+        porDefecto: "",
+      },
+    },
+  },
   // --- Respaldos programados (contrato §4.8.4, brechas tanda 6) ---
   {
     categoria: "respaldos",
@@ -731,6 +779,41 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     porConfirmar: "Regla de +4 unidades de reposición del LRB (EP-05 0.2, LRB R02).",
     codigos: {
       reposicion: { tipo: "entero", nombre: "Unidades de reposición que se suman al lote", min: 0, max: 50, unidad: "unidades", porDefecto: "4" },
+    },
+  },
+  // --- Comercial · sesiones de preproducción (frente S1, reuniones 1 y 2) ---
+  {
+    categoria: "aceptacion_comprobante",
+    titulo: "Aceptación de la cotización · comprobante",
+    donde: "Registrar aceptación: OPI, resolución, oficio, O/C, correo o pago adelantado con su comprobante adjunto (reuniones 2 y 3).",
+    codigos: {
+      exige: { tipo: "sino", nombre: "Exigir el comprobante adjunto (salvo la disposición del Director)", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
+  {
+    categoria: "ot_disposicion",
+    titulo: "OT por disposición sin OPI · plazo",
+    donde: "OT por disposición del Director con cobro: la OPI se regulariza en este plazo; después aparece como «OPI vencida» en Mi bandeja (reunión 2).",
+    codigos: {
+      meses_opi: { tipo: "entero", nombre: "Meses para regularizar la OPI", min: 1, max: 24, unidad: "meses", porDefecto: "2" },
+    },
+  },
+  {
+    categoria: "cotizacion_vencidas",
+    titulo: "Cotizaciones vencidas · anulación",
+    donde: "Una cotización Vencida sin OT pasa sola a Anulada estos días después de su vencimiento (reunión 2).",
+    porConfirmar: "Qué hacer con las vencidas: se planteó anularlas (reunión 2). 0 = no se anulan.",
+    codigos: {
+      anular_dias: { tipo: "entero", nombre: "Días tras el vencimiento para anularla (0 = no se anula)", min: 0, max: 3650, unidad: "días", porDefecto: "0" },
+    },
+  },
+  {
+    categoria: "cliente_moroso",
+    titulo: "Clientes morosos · propuesta de bloqueo",
+    donde: "Comercial › Clientes › Morosos: facturas impagas vencidas que proponen el bloqueo al Jefe DCO (reunión 2).",
+    porConfirmar: "Días de gracia tras el vencimiento antes de proponer el bloqueo.",
+    codigos: {
+      dias_gracia: { tipo: "entero", nombre: "Días de gracia tras el vencimiento de la factura", min: 0, max: 3650, unidad: "días", porDefecto: "0" },
     },
   },
   {
@@ -1034,6 +1117,102 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       vigencia_anios: { tipo: "entero", nombre: "Vigencia del certificado por arma", min: 1, max: 10, unidad: "años", porDefecto: "4" },
     },
   },
+  // --- Firma electrónica avanzada del Estado en el PDF final (frente F4, docs/FLUJO_FEA_DOCUMENTOS.md) ---
+  {
+    categoria: CATEGORIA_FEA,
+    titulo: "Firma electrónica avanzada (FEA) · exigirla antes de entregar al cliente",
+    donde:
+      "Ficha del documento emitido (Informes, Certificados, Documentos por firmar, D11 y Metrología): con «sí», el documento de ese tipo no se registra como entregado ni se envía por correo hasta que el firmante sube la versión firmada con FirmaGob. Con «no», la FEA es opcional.",
+    porConfirmar: "Qué documentos que van al cliente deben llevar la FEA del Estado antes de entregarse (y desde qué fecha).",
+    codigos: Object.fromEntries(
+      TIPOS_FEA.map((t) => [
+        codigoParametroFea(t.tipo),
+        {
+          tipo: "sino" as const,
+          nombre: `${t.nombre}: exige FEA antes de entregar`,
+          opciones: SI_NO,
+          ayuda: "El PDF se firma fuera del LIMS (FirmaGob o token) y se sube en la ficha del documento con «Subir versión firmada con FEA».",
+          porDefecto: "no",
+        },
+      ]),
+    ),
+  },
+  {
+    categoria: "bpch_resolucion",
+    titulo: "BPCH y Delegación Nº 11 · vigencia de la resolución",
+    donde: "OT del BPCH y la D11: la fecha de compromiso no puede pasar el último día de vigencia de la resolución y ninguna queda sin plazo (sesión R3).",
+    codigos: {
+      vigencia_dias: { tipo: "entero", nombre: "Días de vigencia de la resolución", min: 1, max: 730, unidad: "días", porDefecto: "180" },
+    },
+  },
+  {
+    categoria: "bpch_lugar_inspeccion",
+    titulo: "BPCH · plantas y lugares de inspección",
+    donde: "OT › Cabecera de inspección: el lugar se elige de esta tabla y trae su dirección y comuna; «En terreno» deja escribirlo.",
+    porConfirmar: "Tabla real de plantas y lugares con su dirección (acuerdo 3 de la sesión R3). Las filas «PRUEBA» son de ejemplo.",
+    codigos: {
+      tabla: {
+        tipo: "tabla",
+        nombre: "Plantas y lugares de inspección",
+        maxFilas: 500,
+        columnas: [
+          { clave: "lugar", etiqueta: "Planta o lugar", tipo: "texto", obligatoria: true, largo: 240 },
+          { clave: "direccion", etiqueta: "Dirección", tipo: "texto", obligatoria: true, largo: 240 },
+          { clave: "comuna", etiqueta: "Comuna", tipo: "texto", largo: 120 },
+          { clave: "sucursal", etiqueta: "Sucursal (código)", tipo: "texto", largo: 20 },
+        ],
+      },
+    },
+  },
+  {
+    categoria: "terreno",
+    titulo: "Trabajo en terreno sin recepción",
+    donde: "OT › Terreno: los laboratorios marcados abren su OT en terreno (apertura, asignación, pruebas, lista de chequeo, IVC y cierre · sesión R10).",
+    codigos: {
+      laboratorios: {
+        tipo: "multiple",
+        nombre: "Laboratorios que trabajan en terreno",
+        opcionesDe: "laboratorios",
+        porDefecto: "SVM,LAM,SEO",
+      },
+    },
+  },
+  {
+    categoria: "terreno_protocolo",
+    titulo: "Trabajo en terreno · protocolo de recepción cualitativa por laboratorio",
+    donde: "OT › Terreno › Pruebas: sistemas y pruebas que se proponen (formato de control de prueba). Se pueden agregar otras en la OT.",
+    porConfirmar: "Protocolos reales de Vehículos, Armamento y Telecomunicaciones (acuerdo 3 de la sesión R10). Las filas «PRUEBA» son de ejemplo.",
+    patron: {
+      tipo: "tabla",
+      nombre: "Pruebas del protocolo",
+      alta: "laboratorio",
+      maxFilas: 300,
+      columnas: [
+        { clave: "sistema", etiqueta: "Sistema", tipo: "texto", obligatoria: true, largo: 120 },
+        { clave: "prueba", etiqueta: "Prueba", tipo: "texto", obligatoria: true, largo: 300 },
+        { clave: "requisito", etiqueta: "Requisito", tipo: "texto", largo: 500 },
+      ],
+    },
+  },
+  {
+    categoria: "emisor_facturacion",
+    titulo: "Emisor de la factura (exportación para facturación)",
+    donde:
+      "Facturas › «Exportar para facturación (JSON)» y «Descargar documento de cobro (PDF)»: datos del IDIC como emisor del documento tributario que emite su sistema de facturación (docs/EXPORTACION_FACTURACION.md).",
+    porConfirmar: "Datos tributarios reales del IDIC (RUT, razón social, giro, Acteco, dirección y sucursal SII). Los valores «PRUEBA» son de ejemplo.",
+    codigos: {
+      rut: { tipo: "texto", nombre: "RUT del emisor", rut: true, requerido: true, largo: 12, ayuda: "Con dígito verificador, p. ej. 12.345.678-5." },
+      razon_social: { tipo: "texto", nombre: "Razón social", requerido: true, largo: 100 },
+      giro: { tipo: "texto", nombre: "Giro", requerido: true, largo: 80 },
+      acteco: { tipo: "texto", nombre: "Código de actividad económica (Acteco)", largo: 6, ayuda: "Código del SII de 6 dígitos." },
+      direccion: { tipo: "texto", nombre: "Dirección", requerido: true, largo: 70 },
+      comuna: { tipo: "texto", nombre: "Comuna", requerido: true, largo: 20 },
+      ciudad: { tipo: "texto", nombre: "Ciudad", requerido: true, largo: 20 },
+      codigo_sucursal_sii: { tipo: "texto", nombre: "Código de sucursal ante el SII (si corresponde)", largo: 9 },
+      correo: { tipo: "texto", nombre: "Correo de facturación", largo: 80 },
+      telefono: { tipo: "texto", nombre: "Teléfono de facturación", largo: 20 },
+    },
+  },
 ];
 
 export const CATEGORIAS_CONFIGURABLES = GRUPOS_CONFIG.map((g) => g.categoria);
@@ -1066,6 +1245,9 @@ export const LISTAS_PARAMETROS: ListaParametro[] = [
   { categoria: "tipo_linea_costeo", nombre: "Tipo de línea de costeo" },
   { categoria: "tipo_inspeccion", nombre: "Tipo de inspección" },
   { categoria: "toma_muestra", nombre: "Toma de muestra (recepción)" },
+  { categoria: "ubicacion_almacenamiento", nombre: "Ubicación de almacenamiento (recepción)" },
+  { categoria: "unidad_tamano_lote", nombre: "Unidad del tamaño del lote" },
+  { categoria: "unidad_tamano_muestra", nombre: "Unidad del tamaño de la muestra" },
   { categoria: "cargo_costo", nombre: "Cargo de costo (planillas de la OT)" },
   {
     categoria: "medio_envio",
@@ -1182,6 +1364,20 @@ function campoDe(valor: string | null, activo: boolean): DefCampo {
   };
 }
 
+/**
+ * Fila que rige cuando la instalación no tiene la del parámetro (F076): el valor
+ * por defecto de su definición, activa. La pantalla la muestra como cualquier
+ * otra (marcada «falta») y el primer cambio la crea; nunca se cae por no tenerla.
+ */
+export function filaPorDefecto(categoria: string, codigo: string, def: DefValor) {
+  return { id: null, categoria, codigo, etiqueta: def.nombre, valor: def.porDefecto ?? null, activo: true, updatedAt: null };
+}
+
+/** Parámetros fijos (no por patrón) con valor por defecto: los que siembra align_fx5_a.sql. */
+export function parametrosFijos(): { categoria: string; codigo: string; def: DefValor }[] {
+  return GRUPOS_CONFIG.flatMap((g) => Object.entries(g.codigos ?? {}).map(([codigo, def]) => ({ categoria: g.categoria, codigo, def })));
+}
+
 /** Valor tipado para el formulario de la pantalla (lo que rige hoy). */
 export function valorFormulario(def: DefValor, f: Fila): unknown {
   const v = f.valor;
@@ -1205,6 +1401,7 @@ export function valorFormulario(def: DefValor, f: Fila): unknown {
       return (def.opciones ?? []).filter((o) => marcados.includes(o.valor)).map((o) => o.valor);
     }
     case "formato":
+    case "texto":
       return String(v ?? "");
     case "obligatorio":
       return f.activo;
@@ -1470,6 +1667,13 @@ export function normalizarValor(
       if (e.length) return { errores: e };
       return { errores: [], valor: { valor: t, activo: true, historial: t } };
     }
+    case "texto": {
+      const t = texto(entrada);
+      if (!t && def.requerido) return { errores: [`Escriba ${def.nombre.toLowerCase()}: no puede quedar vacío.`] };
+      if (t.length > (def.largo ?? 200)) return { errores: [`Máximo ${def.largo ?? 200} caracteres (tiene ${t.length}).`] };
+      if (t && def.rut && !validaRut(t)) return { errores: ["El RUT no es válido: revise los dígitos y el dígito verificador (p. ej. 12.345.678-5)."] };
+      return { errores: [], valor: { valor: t, activo: true, historial: t || "(vacío)" } };
+    }
     case "obligatorio": {
       const b = esSiNo(entrada);
       if (b === null) return { errores: ["Elija Sí o No."] };
@@ -1558,6 +1762,7 @@ export function textoValor(def: DefValor, guardado: string | null | undefined): 
       return marcados.length ? marcados.map((m) => def.opciones?.find((o) => o.valor === m)?.etiqueta ?? m).join(", ") : "Ninguno";
     }
     case "formato":
+    case "texto":
       return v || "—";
     case "variante": {
       const [valor, estado] = v.split(" · ");

@@ -51,6 +51,7 @@ function Lista() {
         acciones={<Link href={"/saec/catalogos" as any} className="btn outline sm">Catálogo de armas</Link>}
       />
       <Calendario filas={filas ?? []} />
+      <ArmasPendientes />
       <div className="card">
         <div className="toolbar" style={{ marginTop: 0 }}>
           <label className="sr-only" htmlFor="q-ot">Buscar</label>
@@ -135,6 +136,37 @@ function Calendario({ filas }: { filas: any[] }) {
           ))}
         </div>
       )}
+    </section>
+  );
+}
+
+/** R12 · armas que esperan una nueva resolución (falla o serie distinta), en todas las OT de la D11. */
+function ArmasPendientes() {
+  const [filas, setFilas] = useState<any[]>([]);
+  useEffect(() => {
+    pedir<{ data: any[] }>("GET", "/d11/armas-pendientes")
+      .then((r) => setFilas(r.data))
+      .catch(() => setFilas([]));
+  }, []);
+  if (!filas.length) return null;
+  return (
+    <section className="card" aria-labelledby="armas-pendientes">
+      <h3 id="armas-pendientes" style={{ marginTop: 0 }}>Armas pendientes de nueva resolución ({filas.length})</h3>
+      <table className="data" aria-label="Armas pendientes de nueva resolución">
+        <thead><tr><th>OT</th><th>Arma</th><th>Serie</th><th>Motivo</th><th>Desde</th><th>Importador</th></tr></thead>
+        <tbody>
+          {filas.map((f) => (
+            <tr key={f.id}>
+              <td><Link href={`/saec/ot/${f.otId}` as any} className="codigo">{f.ot}</Link></td>
+              <td className="codigo">{f.muestra}</td>
+              <td>{f.serie ?? "Sin serie"}</td>
+              <td title={f.detalle ?? undefined}>{f.motivoNombre}</td>
+              <td>{fecha(f.desde)}</td>
+              <td>{f.cliente ?? "—"}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }

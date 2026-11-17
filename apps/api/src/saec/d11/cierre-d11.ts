@@ -11,8 +11,9 @@ type Sql = { $queryRawUnsafe<T = unknown>(q: string, ...v: any[]): Promise<T> };
 
 export async function faltantesCierreArmas(db: Sql, otId: string): Promise<string[]> {
   try {
-    const filas = await db.$queryRawUnsafe<{ muestra: string; entregada: boolean; prohibida: boolean }[]>(
-      `SELECT m.codigo AS muestra, (a.entrega_id IS NOT NULL) AS entregada, (a.permisibilidad = 'prohibida') AS prohibida
+    const filas = await db.$queryRawUnsafe<{ muestra: string; entregada: boolean; prohibida: boolean; pendiente: boolean }[]>(
+      `SELECT m.codigo AS muestra, (a.entrega_id IS NOT NULL) AS entregada, (a.permisibilidad = 'prohibida') AS prohibida,
+              (a.pendiente_motivo IS NOT NULL) AS pendiente
          FROM d11_arma_ot a JOIN muestra m ON m.id = a.muestra_id AND m.deleted_at IS NULL
         WHERE a.ot_id = $1::uuid ORDER BY a.orden`,
       otId,

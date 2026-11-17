@@ -7,6 +7,8 @@ import { PuenteAnalisisService, RegistroMuestrasService } from "../../flujo-real
 import { PlantillaRenderService, type DocumentoEnRender } from "../../plantilla-render/plantilla-render.service";
 import { FirmaDocumentoService } from "../../plantilla-render/firma-documento.service";
 import { escapeHtml, fmtFecha, fmtFechaHora } from "../../plantilla-render/html.util";
+import { MARCA_PENDIENTE_IBIS, bloqueIbisArma, debeReemitirPorIbis, type IbisDeArma } from "../ibis-testigos";
+import { registrarFuenteBandeja } from "../../rbac/bandeja.service";
 import { anioChile, hoyChile } from "../../common/fecha-chile";
 import { svgCode128 } from "../../common/code128";
 import { leerTabla, TablaError } from "../../common/tabla-archivo";
@@ -30,7 +32,12 @@ import {
   erroresAcunacion,
   erroresCapturaExplicita,
   erroresCertificado,
+  erroresDevolucion,
+  erroresLiberar,
+  erroresPendiente,
   etapaArma,
+  NOMBRE_MOTIVO_PENDIENTE,
+  type MotivoPendiente,
   grupoEnsayo,
   mapearPlanilla,
   normalizarSerie,
@@ -187,6 +194,35 @@ export class D11Service implements OnModuleInit {
   onModuleInit() {
     this.render.registrarContexto("arma", (otId, tenantId, plantilla, doc) => this.contextoCertificado(otId, tenantId, plantilla, doc));
     this.render.registrarVerificacion("CERTIFICADO_ARMA", (certificadoId) => this.verificacionPublica(certificadoId));
+    // F039: tarjeta de Mi bandeja con los certificados por arma que deben reemitirse porque llegó su registro de IBIS.
+    registrarFuenteBandeja(async (req) => {
+      const permisos: string[] = req?.user?.permisos ?? [];
+      if (!(req?.user?.roles ?? []).includes("SUPERADMIN") && !permisos.includes("certificado.emitir")) return [];
+      const tenantId = tenantDe(req);
+      const visibles = await this.alcance.filtroUnidades(req, "certificado.emitir").catch(() => [] as string[]);
+      const rama = await this.unidadesD11(tenantId);
+      const unidades = visibles ? rama.filter((u) => visibles.includes(u)) : rama;
+      if (!unidades.length) return [];
+      const filas = await this.certificadosPorReemitirIbis(tenantId, unidades).catch(() => []);
+      if (!filas.length) return [];
+      return [
+        {
+          clave: "d11_reemitir_ibis",
+          titulo: "Certificados por arma por reemitir (llegó IBIS)",
+          descripcion: "Se emitieron «Pendiente de IBIS» y ya llegó el registro balístico del arma: reemítalos para incorporarlo.",
+          cantidad: filas.length,
+          ruta: `/saec/ot/${filas[0].otId}`,
+          severidad: "alta" as const,
+          elementos: filas.slice(0, 5).map((f) => ({
+            id: f.id,
+            texto: `${f.numero} · OT ${f.ot}`,
+            detalle: f.muestra,
+            ruta: `/saec/ot/${f.otId}`,
+            fecha: f.fecha,
+          })),
+        },
+      ];
+    });
   }
 
   /* ------------------------------------------------------------ comunes --- */
@@ -452,6 +488,15 @@ export class D11Service implements OnModuleInit {
           requiereAcunacion: requiereAcunacion(est, cfg),
           certificado: a.certificado,
           entregada: Boolean(a.entrega_id),
+          pendiente: a.pendiente_motivo
+            ? {
+                motivo: a.pendiente_motivo,
+                motivoNombre: NOMBRE_MOTIVO_PENDIENTE[a.pendiente_motivo as MotivoPendiente] ?? a.pendiente_motivo,
+                detalle: a.pendiente_detalle,
+                desde: a.pendiente_at,
+              }
+            : null,
+          liberada: a.liberada_at ? { resolucion: a.liberada_resolucion, fecha: a.liberada_at } : null,
           etapa,
           etapaNombre: NOMBRE_ETAPA_ARMA[etapa],
           puedeAcunar: erroresAcunacion(est, cfg).length === 0,
@@ -463,6 +508,7 @@ export class D11Service implements OnModuleInit {
       avance,
       emisiones,
       entregas,
+      devoluciones: await this.devoluciones(otId),
       personal,
       config: { acunacionCip: cfg.acunacionCip, vigenciaAnios: cfg.vigenciaAnios },
       puedo: {
@@ -472,6 +518,7 @@ export class D11Service implements OnModuleInit {
         emitir: tiene(req, "certificado.emitir"),
         aprobar: tiene(req, "resultado.aprobar"),
         entregarCertificados: tiene(req, "certificado.entregar"),
+        devolver: tiene(req, "arma.devolver"),
       },
     };
   }
@@ -972,6 +1019,9 @@ export class D11Service implements OnModuleInit {
           { valor, ...(e.estado !== "pendiente" ? { motivo: d.motivo?.trim() || "Reclasificación del arma (IT05)" } : {}) } as any,
           tenantId,
           req,
+          undefined,
+          // F045: la permisibilidad la fija la clasificación: no abre re-análisis ni avisa al armero.
+          { sinReanalisis: true },
         );
         // Un arma prohibida da «No cumple» en la permisibilidad y abriría el
         // re-análisis automático: repetir la determinación no tiene sentido (es
@@ -1176,6 +1226,74 @@ export class D11Service implements OnModuleInit {
     return { emision, emitidos: emitidos.length, fallos, expediente: await this.expediente(req, otId) };
   }
 
+  /**
+   * fx5-c · F039 · Reemite el certificado de un arma que salió «Pendiente de IBIS»
+   * cuando ya llegó su registro: modificación (OT abierta) o reemplazo (OT
+   * cerrada) con el mismo motivo, para que el nuevo documento incorpore el bloque
+   * IBIS. La nueva versión hereda la vigencia y el rango del certificado anterior.
+   */
+  async reemitirConIbis(req: any, certificadoId: string) {
+    const tenantId = tenantDe(req);
+    const [c] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT c.id, c.ot_id, c.estado, c.documento_html, COALESCE(c.numero, c.codigo) AS numero, ca.arma_ot_id, ca.emision_id,
+              to_char(ca.vigente_desde, 'YYYY-MM-DD') AS desde, to_char(ca.vigente_hasta, 'YYYY-MM-DD') AS hasta, ao.arma_id,
+              EXISTS (SELECT 1 FROM ibis_resultado ir WHERE ir.arma_id = ao.arma_id AND ir.estado = 'asignado' AND ir.deleted_at IS NULL) AS ibis
+         FROM certificado c
+         LEFT JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
+         LEFT JOIN d11_arma_ot ao ON ao.id = ca.arma_ot_id
+        WHERE c.id = $1::uuid AND c.tenant_id = $2::uuid AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'`,
+      certificadoId,
+      tenantId,
+    );
+    if (!c) throw new NotFoundException("Certificado por arma no encontrado.");
+    const ot = await this.otD11(req, c.ot_id);
+    if (!debeReemitirPorIbis({ estado: c.estado, documentoHtml: c.documento_html, ibisAsignado: Boolean(c.ibis) }))
+      throw new ConflictException(`El certificado ${c.numero} no está «Pendiente de IBIS» con un registro de IBIS ya asociado: no hay nada que incorporar.`);
+    if (c.estado === "en_firma")
+      throw new ConflictException(`El certificado ${c.numero} aún está en firma: devuélvalo desde «Ver certificado» y emítalo de nuevo para incorporar el registro de IBIS.`);
+    const modalidad = OT_CERRADA.includes(ot.estado) ? "reemplazo" : "modificacion";
+    const r = await this.render.emitir(c.ot_id, await this.plantillaCertificado(tenantId), tenantId, usuarioDe(req) ?? undefined, {
+      reemplazaId: c.id,
+      reemision: { modalidad, motivo: "Se incorpora el registro balístico de IBIS, que llegó después de emitir el certificado." },
+      tipoDocumento: "CERTIFICADO_ARMA",
+    });
+    if (c.arma_ot_id && c.desde && c.hasta)
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO d11_certificado_arma (tenant_id, arma_ot_id, certificado_id, emision_id, vigente_desde, vigente_hasta)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::date, $6::date) ON CONFLICT (certificado_id) DO NOTHING`,
+        tenantId,
+        c.arma_ot_id,
+        r.certificado.id,
+        c.emision_id,
+        c.desde,
+        c.hasta,
+      );
+    await this.historial(c.ot_id, tenantId, "d11_reemision_ibis", { anterior: c.numero, nuevo: r.numero, modalidad }, usuarioDe(req));
+    return { numero: r.numero, certificadoId: r.certificado.id, expediente: await this.expediente(req, c.ot_id) };
+  }
+
+  /** F039: certificados por arma que deben reemitirse porque llegó su registro de IBIS (bandeja y aviso al adjuntar). */
+  async certificadosPorReemitirIbis(tenantId: string, unidades: string[] | null, otId?: string) {
+    return this.prisma.$queryRawUnsafe<{ id: string; numero: string; otId: string; ot: string; fecha: string; muestra: string | null }[]>(
+      `SELECT c.id, COALESCE(c.numero, c.codigo) AS numero, o.id AS "otId", o.codigo AS ot, to_char(c.fecha, 'YYYY-MM-DD') AS fecha, m.codigo AS muestra
+         FROM certificado c
+         JOIN orden_trabajo o ON o.id = c.ot_id
+         JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
+         JOIN d11_arma_ot ao ON ao.id = ca.arma_ot_id
+         LEFT JOIN muestra m ON m.id = ao.muestra_id
+        WHERE c.tenant_id = $1::uuid AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'
+          AND c.estado IN ('en_firma', 'oficial', 'emitido') AND c.documento_html LIKE '%' || $4 || '%'
+          AND EXISTS (SELECT 1 FROM ibis_resultado ir WHERE ir.arma_id = ao.arma_id AND ir.estado = 'asignado' AND ir.deleted_at IS NULL)
+          AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))
+          AND ($3::uuid IS NULL OR o.id = $3::uuid)
+        ORDER BY c.fecha`,
+      tenantId,
+      unidades,
+      otId ?? null,
+      MARCA_PENDIENTE_IBIS,
+    );
+  }
+
   /** Firma de un rango: el responsable del paso actual firma todos sus certificados en firma. */
   async firmarEmision(req: any, emisionId: string) {
     const [em] = await this.prisma.$queryRawUnsafe<any[]>(
@@ -1248,7 +1366,33 @@ export class D11Service implements OnModuleInit {
       },
       bloques: {
         qr_verificacion: `<div class="foto esquema"><img src="${qr}" alt="Código QR de verificación"><span>Escanee el código para verificar el certificado</span></div>`,
+        ibis_arma: bloqueIbisArma(await this.ibisDeArma(a.arma_id)),
       },
+    };
+  }
+
+  /** Resultado de IBIS del arma (el último asociado) y sus evidencias de prueba; null = «Pendiente de IBIS». */
+  private async ibisDeArma(armaId: string | null): Promise<IbisDeArma | null> {
+    if (!armaId) return null;
+    const [r] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT uuid_ibis, exhibit_number, fecha_prueba, hit_count FROM ibis_resultado
+        WHERE arma_id = $1::uuid AND estado = 'asignado' AND deleted_at IS NULL ORDER BY asignado_at DESC NULLS LAST LIMIT 1`,
+      armaId,
+    );
+    const ev = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT codigo, tipo, exhibit_number, hit_count, ubicacion, fecha_disparo FROM evidencia
+        WHERE arma_id = $1::uuid AND deleted_at IS NULL ORDER BY tipo DESC, codigo`,
+      armaId,
+    );
+    if (!r && !ev.length) return null;
+    const fecha = r?.fecha_prueba ?? ev.find((e) => e.fecha_disparo)?.fecha_disparo ?? null;
+    const hits = Math.max(Number(r?.hit_count ?? 0), ...ev.map((e) => Number(e.hit_count ?? 0)));
+    return {
+      uuid: r?.uuid_ibis ?? null,
+      exhibit: r?.exhibit_number ?? null,
+      fechaPrueba: fecha ? fmtFecha(fecha) : null,
+      hitCount: hits,
+      evidencias: ev.map((e) => ({ codigo: e.codigo, tipo: e.tipo, exhibit: e.exhibit_number, hitCount: Number(e.hit_count ?? 0), ubicacion: e.ubicacion })),
     };
   }
 
@@ -1553,6 +1697,160 @@ ${fichas}
       if (e instanceof NotFoundException) throw e;
       this.duplicado(e, "Ese nombre");
     }
+  }
+
+  /* ------------------------------------- R12 · pendientes y devoluciones -- */
+
+  private async armaParaEspera(req: any, armaOtId: string) {
+    const a = await this.armaOt(req, armaOtId);
+    const [c] = await this.prisma.$queryRawUnsafe<{ id: string; numero: string; estado: string; entregado: boolean }[]>(
+      `SELECT c.id, COALESCE(c.numero, c.codigo) AS numero, c.estado, (c.entregado_at IS NOT NULL) AS entregado
+         FROM certificado c
+        WHERE c.ot_id = $1::uuid AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'
+          AND c.estado IN ('en_firma', 'oficial', 'emitido') AND c.muestra_ids @> ARRAY[$2::uuid]
+        ORDER BY c.created_at DESC LIMIT 1`,
+      a.ot_id,
+      a.muestra_id,
+    );
+    return {
+      a,
+      cert: c ?? null,
+      hechos: { entregada: Boolean(a.entrega_id), pendiente: Boolean(a.pendiente_motivo), certificadoEntregado: Boolean(c?.entregado) },
+    };
+  }
+
+  /** R12 · el arma falla o su serie no coincide: queda pendiente hasta una nueva resolución. */
+  async dejarPendiente(req: any, armaOtId: string, body: unknown) {
+    const d = z.object({ motivo: z.string().max(20), detalle: z.string().trim().max(1000).nullable().optional() }).strict().parse(body ?? {});
+    const { a, hechos } = await this.armaParaEspera(req, armaOtId);
+    const ot = await this.otD11(req, a.ot_id);
+    this.otAbierta(ot);
+    const errores = erroresPendiente(hechos, d.motivo, d.detalle);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE d11_arma_ot SET pendiente_motivo = $2, pendiente_detalle = $3, pendiente_por = $4::uuid, pendiente_at = now(),
+              liberada_resolucion = NULL, liberada_por = NULL, liberada_at = NULL, updated_at = now()
+        WHERE id = $1::uuid AND pendiente_motivo IS NULL`,
+      armaOtId,
+      d.motivo,
+      d.detalle?.trim() || null,
+      usuarioDe(req),
+    );
+    await this.historial(
+      a.ot_id,
+      tenantDe(req),
+      "d11_arma_pendiente",
+      { arma: armaOtId, motivo: NOMBRE_MOTIVO_PENDIENTE[d.motivo as MotivoPendiente], detalle: d.detalle?.trim() || null },
+      usuarioDe(req),
+    );
+    return this.expediente(req, a.ot_id);
+  }
+
+  /** R12 · llegó la nueva resolución: el arma vuelve a su curso en la OT (abierta). */
+  async liberarPendiente(req: any, armaOtId: string, body: unknown) {
+    const d = z.object({ resolucion: z.string().trim().max(60) }).strict().parse(body ?? {});
+    const { a, hechos } = await this.armaParaEspera(req, armaOtId);
+    const ot = await this.otD11(req, a.ot_id);
+    const errores = erroresLiberar(hechos, d.resolucion, !OT_CERRADA.includes(ot.estado));
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE d11_arma_ot SET pendiente_motivo = NULL, liberada_resolucion = $2, liberada_por = $3::uuid, liberada_at = now(), updated_at = now()
+        WHERE id = $1::uuid`,
+      armaOtId,
+      d.resolucion.trim(),
+      usuarioDe(req),
+    );
+    await this.historial(a.ot_id, tenantDe(req), "d11_arma_liberada", { arma: armaOtId, resolucion: d.resolucion.trim() }, usuarioDe(req));
+    return this.expediente(req, a.ot_id);
+  }
+
+  /**
+   * R12 · devolución técnica en cualquier paso: el certificado del arma (en
+   * firma u oficial, sin entregar) se anula y sus resultados vuelven al
+   * inspector («devuelto») para rehacer las pruebas o enmendar.
+   */
+  async devolverArma(req: any, armaOtId: string, body: unknown) {
+    const d = z.object({ motivo: z.string().trim().max(2000) }).strict().parse(body ?? {});
+    const { a, cert, hechos } = await this.armaParaEspera(req, armaOtId);
+    const ot = await this.otD11(req, a.ot_id);
+    this.otAbierta(ot);
+    const errores = erroresDevolucion(hechos, d.motivo);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    const cfg = await this.config(tenantDe(req));
+    const [fila] = await this.armas(a.ot_id, this.prisma, [armaOtId]);
+    const etapa = etapaArma(estadoDe(fila), cfg);
+    const motivo = d.motivo.trim();
+    const usuario = usuarioDe(req);
+    const devueltos = await this.prisma.$transaction(async (tx) => {
+      if (cert) {
+        await tx.$executeRawUnsafe(
+          `UPDATE certificado SET estado = 'anulado', anulado_at = now(), anulado_por = $2::uuid, anulado_motivo = $3 WHERE id = $1::uuid`,
+          cert.id,
+          usuario,
+          `Devolución técnica del arma: ${motivo}`.slice(0, 2000),
+        );
+        await tx.$executeRawUnsafe(`UPDATE documento_firma SET estado = 'anulado' WHERE certificado_id = $1::uuid AND estado = 'pendiente'`, cert.id);
+      }
+      const n = await tx.$executeRawUnsafe(
+        `UPDATE resultado SET estado = 'devuelto', motivo_devolucion = $2
+          WHERE muestra_id = $1::uuid AND deleted_at IS NULL AND estado IN ('capturado', 'revisado_n1', 'aprobado')`,
+        a.muestra_id,
+        `Devolución técnica (D11): ${motivo}`.slice(0, 2000),
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO d11_devolucion (tenant_id, ot_id, arma_ot_id, etapa, motivo, certificado, resultados, devuelta_por)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::uuid)`,
+        tenantDe(req),
+        a.ot_id,
+        armaOtId,
+        etapa,
+        motivo,
+        cert?.numero ?? null,
+        n,
+        usuario,
+      );
+      return n;
+    });
+    await this.historial(a.ot_id, tenantDe(req), "d11_devolucion", { arma: armaOtId, etapa, motivo, certificado: cert?.numero ?? null, resultados: devueltos }, usuario);
+    return this.expediente(req, a.ot_id);
+  }
+
+  /** R12 · armas pendientes de nueva resolución en las OT de la D11 que ve el usuario. */
+  async armasPendientes(req: any) {
+    const tenantId = tenantDe(req);
+    const rama = await this.unidadesD11(tenantId);
+    const visibles = await this.alcance.filtroUnidades(req, "arma.ver");
+    const unidades = visibles ? rama.filter((u) => visibles.includes(u)) : rama;
+    if (!unidades.length) return { data: [] };
+    const filas = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT a.id, a.ot_id AS "otId", o.codigo AS ot, o.estado AS "otEstado", o.numero_ley AS resolucion, m.codigo AS muestra,
+              ar.serie, ar.marca, ar.modelo, ar.calibre, a.pendiente_motivo AS motivo, a.pendiente_detalle AS detalle,
+              a.pendiente_at AS desde, u.nombre_completo AS "registradaPor", c.razon_social AS cliente
+         FROM d11_arma_ot a
+         JOIN orden_trabajo o ON o.id = a.ot_id
+         JOIN arma ar ON ar.id = a.arma_id
+         JOIN muestra m ON m.id = a.muestra_id AND m.deleted_at IS NULL
+         LEFT JOIN cliente c ON c.id = o.cliente_id
+         LEFT JOIN usuario u ON u.id = a.pendiente_por
+        WHERE a.tenant_id = $1::uuid AND a.pendiente_motivo IS NOT NULL AND o.unidad_principal = ANY($2::uuid[])
+        ORDER BY a.pendiente_at`,
+      tenantId,
+      unidades,
+    );
+    return { data: filas.map((f) => ({ ...f, motivoNombre: NOMBRE_MOTIVO_PENDIENTE[f.motivo as MotivoPendiente] ?? f.motivo })) };
+  }
+
+  private devoluciones(otId: string) {
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT d.id, d.arma_ot_id AS "armaOtId", m.codigo AS muestra, d.etapa, d.motivo, d.certificado, d.resultados,
+              d.created_at AS "createdAt", u.nombre_completo AS "devueltaPor"
+         FROM d11_devolucion d
+         JOIN d11_arma_ot a ON a.id = d.arma_ot_id
+         JOIN muestra m ON m.id = a.muestra_id
+         LEFT JOIN usuario u ON u.id = d.devuelta_por
+        WHERE d.ot_id = $1::uuid ORDER BY d.created_at DESC`,
+      otId,
+    );
   }
 
   /* ---------------------------------------------------------- historial -- */

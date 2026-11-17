@@ -5,15 +5,18 @@ import DatosEncargoOt from "./_components/DatosEncargoOt";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { recordarOtActiva } from "@/lib/ot-activa";
 import { fecha, fechaHora, fechaDia, rut, clp, num, hoyISO } from "@/lib/format";
 import { ACEPTACION_LABEL, ORIGEN_LABEL } from "../../cotizaciones/_components/comercial";
 import { usePermisos } from "@/lib/permisos";
+import ComercialOt from "./_components/ComercialOt";
 import { llamar, etiquetaUnidad } from "@/lib/laboratorio";
 import { toast } from "@/components/ui/feedback";
 import { textoMedio } from "@/lib/etiquetas";
 import { useMediosEnvio } from "@/lib/lista-parametro";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import Asignacion from "./_components/Asignacion";
+import TerrenoOt from "./_components/TerrenoOt";
 import RegistroMuestras from "./_components/RegistroMuestras";
 import OrdenesInternasOt from "./_components/OrdenesInternasOt";
 import CabeceraInspeccionOt from "./_components/CabeceraInspeccionOt";
@@ -78,6 +81,11 @@ function textoHistorial(h: any): string {
       : "";
     return `Recepción de ${d.muestra ?? "la muestra"} corregida${campos.length ? `: ${campos.join(", ")}` : ""}${condicion}`;
   }
+  // F032: la anulación con su causa y su motivo (ot_historial.detalle).
+  if (h.tipo === "ot_anulada")
+    return `OT anulada${d.causaTexto ? ` · causa: ${String(d.causaTexto).toLowerCase()}` : ""}${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
+  if (h.tipo === "metodos_agregados")
+    return `Se agregaron ${(d.ensayos ?? []).length} método(s) a ${d.muestra ?? "la muestra"}${(d.ensayos ?? []).length ? `: ${(d.ensayos as string[]).join(", ")}` : ""}${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
   if (h.tipo === "numero_muestra") return `Nº interno ${d.numeroInterno ?? "—"} asignado a la muestra ${d.muestra ?? ""}`;
   if (h.tipo === "validacion_laboratorio")
     return `OT recepcionada en el laboratorio (alcance conforme)${d.fechaTermino ? ` · término ${fechaDia(d.fechaTermino)}` : ""}${d.fechaInforme ? ` · informe ${fechaDia(d.fechaInforme)}` : ""}${d.observacion ? ` · ${d.observacion}` : ""}`;
@@ -153,12 +161,19 @@ const authJson = () => ({ ...auth(), "Content-Type": "application/json" });
 export default function ExpedientePage() {
   useMediosEnvio(); // frente f5: textos de los medios de envío (Parámetros del sistema)
   const { id } = useParams<{ id: string }>();
+  // F049: «Emitir informe» (también desde el menú) propone la OT cuya ficha se está viendo.
+  useEffect(() => {
+    if (typeof id === "string") recordarOtActiva(id);
+  }, [id]);
   const [ot, setOt] = useState<any>(null);
   const [muestras, setMuestras] = useState<any[]>([]);
-  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "consumos" | "informe" | "carpeta" | "flujo" | "historial">("cabecera");
+  const [tab, setTab] = useState<"cabecera" | "asignacion" | "muestreo" | "muestras" | "preparacion" | "instrumentos" | "ordenes" | "resultados" | "fotos" | "consumos" | "informe" | "carpeta" | "flujo" | "historial" | "terreno">("cabecera");
   /** Laboratorio propuesto como destino al pulsar «Emitir orden interna» en la recepción de una muestra. */
   const [destinoOi, setDestinoOi] = useState<string | null>(null);
-  const { puede } = usePermisos();
+  const { puede, listo: permisosListos } = usePermisos();
+  // Sin muestra.ver (p. ej. Finanzas) no se piden las muestras: la API respondía 403 y la
+  // OT abría con «Permiso insuficiente» y «Muestras (0)» (F033).
+  const verMuestras = puede("muestra.ver");
   const [historial, setHistorial] = useState<any[]>([]);
   const [cambiandoLab, setCambiandoLab] = useState(false);
   const [labNuevo, setLabNuevo] = useState("");
@@ -189,6 +204,7 @@ export default function ExpedientePage() {
   useCambiosOt(typeof id === "string" ? id : null, () => { cargarOt(); cargarHistorial(); });
 
   const cargarMuestras = async () => {
+    if (!verMuestras) { setMuestras([]); return; }
     try {
       // Solo las muestras de ESTA OT (antes se traían 200 y se filtraban aquí).
       const m = await llamar("GET", `/muestras?otId=${id}&limit=200`);
@@ -197,17 +213,19 @@ export default function ExpedientePage() {
   };
 
   useEffect(() => {
-    (async () => {
-      await cargarOt();
-      await cargarMuestras();
-    })();
+    cargarOt();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+  // Las muestras, cuando ya se leyeron los permisos (antes de eso «puede» es falso).
+  useEffect(() => {
+    if (permisosListos) cargarMuestras();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, permisosListos, verMuestras]);
 
   // Pestaña inicial desde la URL (?tab=muestras: bandeja de entrada del laboratorio).
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "instrumentos", "ordenes", "resultados", "fotos", "consumos", "informe", "carpeta", "historial"].includes(t)) setTab(t as typeof tab);
+    if (t && ["cabecera", "asignacion", "muestreo", "muestras", "preparacion", "instrumentos", "ordenes", "resultados", "fotos", "consumos", "informe", "carpeta", "historial", "terreno"].includes(t)) setTab(t as typeof tab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -234,6 +252,8 @@ export default function ExpedientePage() {
   const [opiNumero, setOpiNumero] = useState("");
   const [opiFecha, setOpiFecha] = useState(() => hoyISO());
   const [opiMsg, setOpiMsg] = useState("");
+  // Una OT anulada ya no regulariza la OPI: no se marca ni se ofrece registrarla (F031).
+  const opiVigente = !!ot?.opiPendiente && ot?.estado !== "anulada";
   const registrarOpi = async () => {
     setBusy(true); setOpiMsg("");
     try {
@@ -253,6 +273,10 @@ export default function ExpedientePage() {
   // mientras carga, no se muestran para no hacerlas aparecer y desaparecer.
   const conMuestreo = avance?.pestanas ? avance.pestanas.muestreo : false;
   const conPreparacion = avance?.pestanas ? avance.pestanas.preparacion : false;
+  // R10: trabajo en terreno (SVM, LAM, SEO). R6: a quien solo muestrea se le oculta la asignación.
+  const conTerreno = !!avance?.pestanas?.terreno;
+  const conAsignacion = avance?.pestanas?.asignacion !== false;
+  const perfilPestanas = avance?.pestanas?.perfil ?? null;
   const codOt = ot?.codigo ?? ot?.numero ?? (typeof id === "string" ? id.slice(0, 8) : "");
   const tabBtn = (t: typeof tab, l: string) =>
     <button onClick={() => setTab(t)} className={`tab${tab === t ? " active" : ""}`}>{l}</button>;
@@ -273,7 +297,7 @@ export default function ExpedientePage() {
           {ot?.origenTrabajo ? <> · Origen: <b>{ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo}</b></> : null}
           {" · "}Laboratorio: {ot?.unidad ? <b title={ot.unidad.nombre}>{ot.unidad.codigo}</b> : <span className="pill amber">sin laboratorio</span>}
           {ot?.fechaCompromiso ? <> · Compromiso: <b>{fechaDia(ot.fechaCompromiso)}</b></> : null}
-          {ot?.opiPendiente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
+          {opiVigente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
           {ot?.conCobro === false && <span className="pill gray" style={{ marginLeft: 8 }}>Sin cobro</span>}
         </div>
       </div>
@@ -305,7 +329,7 @@ export default function ExpedientePage() {
       )}
 
       {/* SVT7 · OT por disposición del Director con cobro: falta la OPI. */}
-      {ot?.opiPendiente && (
+      {opiVigente && (
         <div className="alert warn">
           <div style={{ marginBottom: 6 }}>
             OT creada por <b>disposición del Director</b>{ot.disposicionRef ? <> ({ot.disposicionRef})</> : null} con cobro: está <b>pendiente la OPI</b>.
@@ -323,6 +347,9 @@ export default function ExpedientePage() {
         </div>
       )}
 
+      {/* Comercial (reuniones 1 y 2): plazo de la OPI y anular la OT si el cliente desiste. */}
+      {ot && <ComercialOt ot={ot} onCambio={() => { cargarOt(); cargarHistorial(); cargarAvance(); }} />}
+
       {typeof id === "string" && <SiguientePasoOt avance={avance} otId={id} onPestana={setTab} />}
 
       <div className="expgrid">
@@ -332,10 +359,11 @@ export default function ExpedientePage() {
         <div className="card" style={{ padding: 0 }}>
           <div className="tabs" style={{ padding: "0 8px" }}>
             {tabBtn("cabecera", "Cabecera")}
-            {tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
+            {conAsignacion && tabBtn("asignacion", `Asignación${ot?.analistas?.length ? ` (${ot.analistas.length})` : ""}`)}
+            {conTerreno && tabBtn("terreno", "Terreno")}
             {esMetrologia && tabBtn("instrumentos", "Instrumentos")}
             {conMuestreo && tabBtn("muestreo", "Muestreo")}
-            {(!esMetrologia || muestras.length > 0) && tabBtn("muestras", `Muestras (${muestras.length})`)}
+            {verMuestras && (!esMetrologia || muestras.length > 0) && tabBtn("muestras", `Muestras (${muestras.length})`)}
             {conPreparacion && tabBtn("preparacion", "Preparación")}
             {tabBtn("ordenes", "Órdenes internas")}
             {tabBtn("resultados", "Resultados")}
@@ -398,7 +426,7 @@ export default function ExpedientePage() {
                 <div className="field readonly"><label>Ingreso</label><input value={fecha(ot?.fechaIngreso ?? ot?.createdAt)} readOnly /></div>
                 <div className="field readonly"><label>Origen</label><input value={ot?.origenTrabajo ? ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo : "—"} readOnly /></div>
                 <div className="field readonly"><label>Cobro</label><input value={ot ? (ot.conCobro === false ? "Sin cobro" : "Con cobro") : "—"} readOnly /></div>
-                <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : ot?.opiPendiente ? "Pendiente" : "—"} readOnly /></div>
+                <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : opiVigente ? "Pendiente" : "—"} readOnly /></div>
                 {ot?.disposicionRef && <div className="field readonly"><label>Disposición del Director o del Jefe de Departamento</label><input value={`${ot.disposicionRef}${ot.disposicionFecha ? ` · ${fechaDia(ot.disposicionFecha)}` : ""}`} readOnly /></div>}
                 {ot?.numeroLey && <div className="field readonly"><label>Resolución DGMN</label><input value={ot.numeroLey} readOnly /></div>}
                 <div className="field readonly"><label>Horas hombre</label><input value={num(ot?.horasHombre, 1)} readOnly /></div>
@@ -415,7 +443,9 @@ export default function ExpedientePage() {
               {typeof id === "string" && <CabeceraInspeccionOt otId={id} />}
               </div>
             )}
-            {tab === "asignacion" && typeof id === "string" && <Asignacion otId={id} onCambio={cargarOt} />}
+            {perfilPestanas && <div style={{ padding: "6px 0 0" }}><span className="pill blue">Perfil: {perfilPestanas}</span></div>}
+            {tab === "asignacion" && conAsignacion && typeof id === "string" && <Asignacion otId={id} onCambio={cargarOt} />}
+            {tab === "terreno" && conTerreno && typeof id === "string" && <TerrenoOt otId={id} onCambio={cargarAvance} />}
             {/* Preparación del trabajo (DSA, EP-05 2.1–2.3) y de las muestras (T29). */}
             {tab === "preparacion" && conPreparacion && typeof id === "string" && <PreparacionOt otId={id} laboratorio={ot?.unidad?.codigo ?? null} onCambio={cargarAvance} />}
             {tab === "historial" && (
@@ -468,7 +498,7 @@ export default function ExpedientePage() {
             {/* B-018: OT directa o de Producción Nacional del BPCH: el mismo bloque «Remitir a DCO» que el expediente de internación.
                 D08-09: no en el prototipo, cuya ruta marca «Remitir a DCO · No aplica» (el dictamen se entrega desde BPCH › Prototipos). */}
             {tab === "informe" && typeof id === "string" && avance?.tipo === "bpch"
-              && avance.etapas?.find((e) => e.clave === "remision_dco")?.estado !== "no_aplica" && <RemitirDco otId={id} onCambio={() => { cargarOt(); cargarAvance(); }} />}
+              && avance.etapas?.find((e) => e.clave === "remision_dco")?.estado !== "no_aplica" && <RemitirDco otId={id} conInspeccion={ot?.origenTrabajo === "PRODUCCION_NACIONAL"} onCambio={() => { cargarOt(); cargarAvance(); }} />}
             {tab === "informe" && typeof id === "string" && <PanelCierreOt otId={id} onCambio={cargarOt} />}
             {/* Plazo al cliente, recepción DCO, documentos no-informe y envío (frente r4c). */}
             {tab === "informe" && typeof id === "string" && <div style={{ marginTop: 16 }}><SeguimientoOt otId={id} onCambio={cargarOt} /></div>}

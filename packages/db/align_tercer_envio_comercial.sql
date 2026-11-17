@@ -74,11 +74,13 @@ SELECT c.tenant_id, to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY'), c.ul
  WHERE c.serie = 'global'
 ON CONFLICT (tenant_id, serie) DO UPDATE SET ultimo = GREATEST(cotizacion_correlativo.ultimo, EXCLUDED.ultimo), updated_at = now();
 
--- «inicio» (último número del Sistema Comercial) sigue rigiendo en el año actual.
+-- «inicio» (último número del Sistema Comercial) sigue rigiendo en el año actual:
+-- solo al pasar de «global» a «anual» (la primera vez que corre este script).
 SELECT pg_temp.te_fijar_param('numeracion_cotizacion', 'inicio_anio',
        to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY'),
        'Año del último número usado (con reinicio anual, «inicio» solo rige ese año)', 'COM-11')
- WHERE NOT EXISTS (SELECT 1 FROM parametro_sistema p WHERE p.categoria = 'numeracion_cotizacion' AND p.codigo = 'inicio_anio');
+ WHERE EXISTS (SELECT 1 FROM parametro_sistema p WHERE p.categoria = 'numeracion_cotizacion' AND p.codigo = 'reinicio'
+                  AND btrim(coalesce(p.valor, '')) <> 'anual');
 SELECT pg_temp.te_fijar_param('numeracion_cotizacion', 'reinicio', 'anual',
        'Reinicio del correlativo (global | anual)', 'COM-11');
 
@@ -146,7 +148,6 @@ COMMENT ON COLUMN cliente.bloqueo_origen IS
   'COM-05: mora (automático por facturas vencidas; se levanta solo al pagar) | manual (ficha del cliente). NULL = sin bloqueo o anterior a COM-05.';
 UPDATE cliente SET bloqueo_origen = 'manual' WHERE bloqueado AND bloqueo_origen IS NULL;
 
-ALTER TABLE cliente_desbloqueo ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenant(id);
 ALTER TABLE cliente_desbloqueo ADD COLUMN IF NOT EXISTS facturas  UUID[];
 COMMENT ON COLUMN cliente_desbloqueo.facturas IS
   'COM-05: facturas vencidas que cubre la excepción del Jefe DCO (ya no bloquean al cliente; una factura distinta que llegue al tramo de bloqueo, sí).';
@@ -162,16 +163,8 @@ SELECT t.id, 'mora_cliente', v.codigo, v.etiqueta, v.valor, v.orden, TRUE
  ) AS v(codigo, etiqueta, valor, orden)
 ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
 
-INSERT INTO permiso (id, codigo, modulo, accion, descripcion) VALUES
-  (gen_random_uuid(), 'cliente.desbloquear', 'cliente', 'desbloquear',
-   'Autorizar la excepción o el desbloqueo de un cliente bloqueado (Jefe DCO o su subrogante), con motivo.')
-ON CONFLICT (codigo) DO NOTHING;
-
-INSERT INTO rol_permiso (rol_id, permiso_id)
-SELECT r.id, p.id
-  FROM rol r JOIN permiso p ON p.codigo = 'cliente.desbloquear'
- WHERE COALESCE(r.alias_de, r.codigo) IN ('JEFE_DEPTO')
-ON CONFLICT DO NOTHING;
+-- La excepción / desbloqueo usa el permiso cliente.bloquear (align_sesiones_s1.sql,
+-- Jefe de Departamento) y exige ser jefatura del DCO (cliente.service.ts).
 
 -- -----------------------------------------------------------------------------
 -- COM-38 · Ensayo con precio en USD en una cotización en pesos: se convierte con

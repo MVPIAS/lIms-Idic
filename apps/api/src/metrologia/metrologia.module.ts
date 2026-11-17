@@ -2,6 +2,7 @@ import {
   BadRequestException, Body, ConflictException, Controller, Delete, ForbiddenException, Get, Module, NotFoundException,
   Param, ParseUUIDPipe, Post, Put, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors,
 } from "@nestjs/common";
+import { errorEntregaSinFea, feaPublica, pdfFeaParaCliente } from "../fea/fea.datos";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
@@ -43,7 +44,7 @@ import { CLAVE_LOGO, claveValida, clavesEsquema, esquemaEfectivo, imagenCert, MA
 import {
   ESTADO_TRAS, accionesDisponibles, clavePaso, codigoCalibracion, estadoDe, fechaCalibracion, motivoNoEnviable, motivoRechazo, ordenElabora,
   pasoPendiente, pasosSinResponsable,
-  plantillaVacia, puedeFirmarPaso, type AccionCal, type ContextoCal, type FirmaHecha, type PasoFirmaCal,
+  plantillaVacia, puedeFirmarPaso, motivoAutoRevision, motivoFechaFutura, motivoReemplazado, type AccionCal, type ContextoCal, type FirmaHecha, type PasoFirmaCal,
 } from "./metrologia.flujo";
 import { calibracionesDeOt, instrumentosDeOt } from "./metrologia-ot.datos";
 import {
@@ -54,9 +55,11 @@ import { MetrologiaDocumentosController, MetrologiaDocumentosService } from "./m
 import { urlVerificacionBase } from "../common/url-verificacion";
 import {
   avisosFechas, cmcPara, codigoVerificacionValido, convertir, estadoPatron, motivoHabilitacion, motivoNoEmiteMetrologo, nuevoCodigoVerificacion, numeroCertificado,
-  revisarPatrones, uCertificada, type FilaCmc, type Firmante,
+  revisarPatrones, uCertificada, normalizarLaboratorios, coeficientesSmpEditados, type FilaCmc, type Firmante,
 } from "./metrologia.reglas";
 import { ZONA_CHILE, SQL_ZONA, hoyChile, diaChile } from "../common/fecha-chile";
+import { esModalidadReemision, motivoNoReemite, numeroModificado } from "../common/leyenda-reemision";
+import { avisosCotizadoLnf, validarAmbienteLnf } from "./hoja-lnf.reglas";
 
 // ---------------------------------------------------------------------------
 // Módulo Metrología (Sección SAM: LMT, LMTE, LNF). Cada proceso se calcula con
@@ -133,10 +136,14 @@ const CrearSchema = z.object({
   motivoValoresPatron: z.string().trim().max(500).nullish(),
   /** Datos de entrada del motor de la IT y correcciones aplicadas (hallazgos). */
   motor: z.object({ datos: z.record(z.any()), opciones: z.record(z.boolean()).default({}) }).optional(),
+  /** Comentarios internos de la hoja de control (R9, LNF): no se imprimen en el certificado. */
+  comentarios: z.string().trim().max(4000, "Los comentarios de la hoja admiten hasta 4.000 caracteres.").nullish(),
 });
 type CrearDto = z.infer<typeof CrearSchema>;
 const CalcularSchema = z.object({ datos: z.record(z.any()), opciones: z.record(z.boolean()).default({}) });
 const MotivoSchema = z.object({ motivo: z.string().trim().min(5, "Indique el motivo (mínimo 5 caracteres)").max(2000) });
+/** Reemisión: «reemplazo» (número nuevo, por defecto) o «modificacion» (mismo número con versión, solo con la OT abierta). */
+const ReemisionSchema = MotivoSchema.extend({ modalidad: z.enum(["reemplazo", "modificacion"]).default("reemplazo") });
 /** Presentación del certificado (respuesta del LMT del 21-10): solo se cambia lo que se envía. */
 const PresentacionSchema = z.object({
   acreditado: z.boolean().nullable().optional(),
@@ -165,6 +172,11 @@ function soloEntradas(v: any, it?: string): any {
 
 /** Calcula con el motor y rechaza datos incompletos (con el motivo si el motor lo da). */
 function ejecutarMotor(it: string, datos: Record<string, any>, opciones: Record<string, boolean>) {
+  // Hoja del LNF (R9): condiciones ambientales con el dato y su unidad antes de calcular.
+  if (it === "LCPNF-IT01") {
+    const amb = validarAmbienteLnf(datos ?? {});
+    if (amb.errores.length) throw new BadRequestException(amb.errores.join(" "));
+  }
   let out: ReturnType<typeof calcularConMotor>;
   try {
     out = calcularConMotor(it, datos, opciones);
@@ -176,6 +188,13 @@ function ejecutarMotor(it: string, datos: Record<string, any>, opciones: Record<
   if (!out.resumen.puntos.length || malos.length)
     throw new BadRequestException(`Datos incompletos para ${it}: revise las lecturas (${malos.length} punto(s) sin resultado)`);
   return out;
+}
+
+/** Avisos de la hoja del LNF: ISO 376 fuera de 18–28 °C y diferencias con lo cotizado en el ítem (R9). */
+function avisosHojaLnf(proceso: string, item: { sentido?: string | null; puntos?: string | null; numero?: number | null } | null, d: CrearDto): string[] {
+  const datos = d.motor?.datos;
+  if (motorDeProceso(proceso)?.it !== "LCPNF-IT01" || !datos) return [];
+  return [...validarAmbienteLnf(datos).avisos, ...(item ? avisosCotizadoLnf(item, datos as any) : [])];
 }
 
 function tenantId(req: any): string {
@@ -287,6 +306,21 @@ interface Circuito {
 }
 
 // ===========================================================================
+/**
+ * Errores del certificado de un auxiliar (temp/hum/pres → {error, U}): se guardan solo las
+ * magnitudes con algún valor; si no queda ninguna, NULL (el formulario envía todas, vacías incluidas).
+ */
+export function correccionesLimpias(c: Record<string, { error?: number | null; U?: number | null } | null | undefined> | null): string | null {
+  if (!c) return null;
+  const out: Record<string, { error: number | null; U: number | null }> = {};
+  for (const [k, v] of Object.entries(c)) {
+    if (!v) continue;
+    const error = v.error ?? null, U = v.U ?? null;
+    if (error != null || U != null) out[k] = { error, U };
+  }
+  return Object.keys(out).length ? JSON.stringify(out) : null;
+}
+
 @ApiTags("metrología")
 @ApiBearerAuth()
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
@@ -494,6 +528,8 @@ export class MetrologiaController {
       `SELECT p.id, p.codigo, p.tipo, p.nombre, p.marca, p.modelo, p.serie, p.rango, p.clase, p.norma_referencia, p.puesta_marcha,
               p.emisor, p.n_certificado, p.ultima_calibracion, p.intervalo_meses, p.vence, p.trazabilidad, p.u_expandida, p.deriva,
               p.laboratorio, p.fuente, p.observacion, p.activo, m.codigo AS magnitud,
+              -- F051/F053: un auxiliar puede ser de varios laboratorios (LMT, LMTE, LNF).
+              COALESCE(p.laboratorios, CASE WHEN p.laboratorio IS NULL THEN '{}'::varchar[] ELSE ARRAY[p.laboratorio] END) AS laboratorios,
               p.rango_min, p.rango_max, p.unidad_rango, p.correcciones, p.coeficientes, p.valores_certificado
          FROM met_patron p LEFT JOIN met_magnitud m ON m.id = p.magnitud_id
         WHERE p.tenant_id = $1::uuid AND p.deleted_at IS NULL ORDER BY m.codigo, p.codigo`, tenantId(req));
@@ -516,6 +552,8 @@ export class MetrologiaController {
       d.emisor ?? null, d.n_certificado ?? null, d.ultima_calibracion || null, d.intervalo_meses ?? null, d.vence || null, d.trazabilidad ?? null,
       d.u_expandida ?? null, d.deriva ?? null, d.laboratorio ?? "LMT", d.activo ?? null);
     if (!rows.length) throw new BadRequestException(`Magnitud desconocida: ${d.magnitud}`);
+    const labs = d.laboratorios != null ? normalizarLaboratorios(d.laboratorios) : normalizarLaboratorios([d.laboratorio ?? "LMT"]);
+    await prisma.$executeRawUnsafe(`UPDATE met_patron SET laboratorios = $2::varchar[], laboratorio = $3 WHERE id = $1::uuid`, rows[0].id, labs, labs[0] ?? null);
     return { data: { id: rows[0].id } };
   }
 
@@ -530,7 +568,7 @@ export class MetrologiaController {
       ["intervalo_meses", d.intervalo_meses], ["vence", d.vence === "" ? null : d.vence, "date"], ["trazabilidad", d.trazabilidad],
       ["u_expandida", d.u_expandida], ["deriva", d.deriva], ["activo", d.activo], ["observacion", d.observacion],
       ["rango_min", d.rango_min], ["rango_max", d.rango_max], ["unidad_rango", d.unidad_rango],
-      ["correcciones", d.correcciones === undefined ? undefined : d.correcciones === null ? null : JSON.stringify(d.correcciones), "jsonb"],
+      ["correcciones", d.correcciones === undefined ? undefined : correccionesLimpias(d.correcciones), "jsonb"],
       ["valores_certificado", d.valores_certificado === undefined ? undefined : d.valores_certificado === null ? null : JSON.stringify(d.valores_certificado), "jsonb"],
     ];
     const set: string[] = [], vals: any[] = [id, tenantId(req)];
@@ -538,6 +576,19 @@ export class MetrologiaController {
       if (val === undefined) continue;
       vals.push(val);
       set.push(`${c} = $${vals.length}${tipo ? "::" + tipo : ""}`);
+    }
+    // F051/F053: laboratorios del equipo (vacío = común); el primero queda en la columna antigua.
+    if (d.laboratorios !== undefined) {
+      const labs = normalizarLaboratorios(d.laboratorios ?? []);
+      vals.push(labs); set.push(`laboratorios = $${vals.length}::varchar[]`);
+      vals.push(labs[0] ?? null); set.push(`laboratorio = $${vals.length}`);
+    }
+    // F051: coeficientes a, b, c del certificado (columna SMP del LNF); conserva t, u, v y la clase.
+    if (d.smp !== undefined) {
+      const k = coeficientesSmpEditados(d.smp);
+      if (k && "error" in k) throw new BadRequestException(k.error);
+      if (k) { vals.push(JSON.stringify(k)); set.push(`coeficientes = COALESCE(coeficientes, '{}'::jsonb) || $${vals.length}::jsonb`); }
+      else set.push(`coeficientes = NULLIF(COALESCE(coeficientes, '{}'::jsonb) - 'a' - 'b' - 'c', '{}'::jsonb)`);
     }
     if (!set.length) throw new BadRequestException("No hay cambios");
     if (d.rango_min != null && d.rango_max != null && d.rango_min > d.rango_max) throw new BadRequestException("El mínimo del rango calibrado no puede ser mayor que el máximo.");
@@ -821,6 +872,7 @@ export class MetrologiaController {
       `SELECT c.*, pr.codigo AS proceso, pr.nombre AS proceso_nombre, pr.metodo, pr.norma, pr.revision, pr.acreditacion, pr.prefijo_certificado,
               m.codigo AS magnitud, m.nombre AS magnitud_nombre, m.unidad, m.decimales, un.codigo AS laboratorio, un.nombre AS laboratorio_nombre,
               ua.nombre_completo AS autor_nombre, ue.nombre_completo AS emisor_nombre, r.numero_certificado AS reemplaza_numero,
+              r.emitido_at AS reemplaza_emitido_at,
               (SELECT x.numero_certificado FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.deleted_at IS NULL ORDER BY x.created_at DESC LIMIT 1) AS reemplazada_por,
               EXISTS (SELECT 1 FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.deleted_at IS NULL AND x.estado <> 'reemplazada') AS reemision_en_curso,
               o.codigo AS ot_codigo, o.estado AS ot_estado,
@@ -936,6 +988,8 @@ export class MetrologiaController {
       throw new BadRequestException(`El proceso ${proc.codigo} es del ${proc.laboratorio}; la OT ${origen.ot.codigo} es del ${origen.ot.laboratorio}.`);
     const unidadId = await this.unidadDeCalibracion(req, t, proc, origen.ot.laboratorio);
     const fecha = fechaCalibracion(d.fecha);
+    const futura = motivoFechaFutura(fecha);
+    if (futura) throw new BadRequestException(futura);
     const pat = await this.patronesDe(t, d, fecha);
     // B-027: las condiciones de la hoja de control (auxiliares del maestro) alimentan al motor.
     const amb = await this.ambienteDe(t, d, fecha);
@@ -967,6 +1021,7 @@ export class MetrologiaController {
             req?.user?.sub ?? null, calc.motor, calc.datos, calc.opciones, calc.resultado, calc.resumen, JSON.stringify(pat.snapshot),
             origen.ot.id, d.otInstrumentoId);
           if (amb.auxiliares) await tx.$executeRawUnsafe(`UPDATE met_calibracion SET auxiliares = $2::jsonb WHERE id = $1::uuid`, cal[0].id, JSON.stringify(amb.auxiliares));
+          if (d.comentarios) await tx.$executeRawUnsafe(`UPDATE met_calibracion SET comentarios_hoja = $2 WHERE id = $1::uuid`, cal[0].id, d.comentarios);
           await this.guardarPuntos(tx, cal[0].id, calc.puntos);
           await this.evento(tx, cal[0].id, "CREADA", null, "borrador", req, d.motivoValoresPatron ? `Valores del patrón cambiados respecto del maestro: ${d.motivoValoresPatron}` : null);
           return cal[0].id as string;
@@ -974,7 +1029,7 @@ export class MetrologiaController {
         return {
           data: {
             id, codigo, estado: "borrador", fecha, motor: calc.motor, resumen: calc.resumenObj, uMax: calc.uMax, conforme: calc.conforme, puntos: calc.puntosGum,
-            avisos: [...avisosFechas({ ...instrumento, fechaCalibracion: fecha }), ...pat.avisos, ...amb.avisos, ...rango.avisos],
+            avisos: [...avisosFechas({ ...instrumento, fechaCalibracion: fecha }), ...pat.avisos, ...amb.avisos, ...rango.avisos, ...avisosHojaLnf(proc.codigo, origen.item, d)],
           },
         };
       } catch (e: any) {
@@ -996,14 +1051,15 @@ export class MetrologiaController {
     if (d.procesoCodigo !== cal.proceso) throw new BadRequestException("No se puede cambiar el proceso de una calibración guardada");
     const proc = await cargarProceso(d.procesoCodigo);
     const fecha = d.fecha ? fechaCalibracion(d.fecha) : fechaIso(cal.fecha_calibracion);
+    const futura = motivoFechaFutura(fecha);
+    if (futura) throw new BadRequestException(futura);
     const pat = await this.patronesDe(t, d, fecha);
     const amb = await this.ambienteDe(t, d, fecha);
     const calc = await this.calcularDto(proc, d, fecha, condicionesDeAuxiliares(amb.auxiliares), pat.valores);
     const rango = this.controlRango(proc, calc, pat.rangos, await leerConfigFicha(prisma, t));
     // Calibración ligada a la OT: la OT y la recepción siguen mandando sobre lo escrito.
-    const instrumento = cal.ot_instrumento_id
-      ? await this.origenOt(req, t, cal.ot_instrumento_id).then((o) => instrumentoDesdeOt(d.instrumento, o.item, o.ot))
-      : d.instrumento;
+    const origenEd = cal.ot_instrumento_id ? await this.origenOt(req, t, cal.ot_instrumento_id) : null;
+    const instrumento = origenEd ? instrumentoDesdeOt(d.instrumento, origenEd.item, origenEd.ot) : d.instrumento;
     await prisma.$transaction(async (tx) => {
       const n = await tx.$executeRawUnsafe(
         `UPDATE met_calibracion SET patron_id = $2::uuid, instrumento = $3::jsonb, patron_snap = $4::jsonb, ambiente = $5::jsonb,
@@ -1015,6 +1071,7 @@ export class MetrologiaController {
         JSON.stringify(calc.cond), calc.uMax, calc.uCert, calc.conforme, d.intervaloMeses, calc.motor, calc.datos, calc.opciones,
         calc.resultado, calc.resumen, fecha, JSON.stringify(pat.snapshot), amb.auxiliares ? JSON.stringify(amb.auxiliares) : null);
       if (!n) throw new ForbiddenException("La calibración cambió de estado mientras tanto; recargue la lista");
+      if (d.comentarios !== undefined) await tx.$executeRawUnsafe(`UPDATE met_calibracion SET comentarios_hoja = $2 WHERE id = $1::uuid`, id, d.comentarios || null);
       await tx.$executeRawUnsafe(`DELETE FROM met_calibracion_punto WHERE calibracion_id = $1::uuid`, id);
       await this.guardarPuntos(tx, id, calc.puntos);
       await this.evento(tx, id, "EDITADA", "borrador", "borrador", req, d.motivoValoresPatron ? `Valores del patrón cambiados respecto del maestro: ${d.motivoValoresPatron}` : null);
@@ -1022,7 +1079,7 @@ export class MetrologiaController {
     return {
       data: {
         id, codigo: cal.codigo, estado: "borrador", resumen: calc.resumenObj, uMax: calc.uMax, conforme: calc.conforme,
-        avisos: [...avisosFechas({ ...instrumento, fechaCalibracion: fecha }), ...pat.avisos, ...amb.avisos, ...rango.avisos],
+        avisos: [...avisosFechas({ ...instrumento, fechaCalibracion: fecha }), ...pat.avisos, ...amb.avisos, ...rango.avisos, ...(origenEd ? avisosHojaLnf(proc.codigo, origenEd.item, d) : [])],
       },
     };
   }
@@ -1034,6 +1091,8 @@ export class MetrologiaController {
     const t = tenantId(req);
     const cal = await this.detalleCtx(id, req);
     this.exigir("ENVIAR", cal);
+    const futura = motivoFechaFutura(cal.fecha_calibracion ? fechaIso(cal.fecha_calibracion) : null);
+    if (futura) throw new ConflictException(`${futura} Corríjala en la hoja de control antes de enviar.`);
     const c = await this.circuito(t, cal);
     const noEnviable = motivoNoEnviable(c.pasos, c.errorMatriz);
     if (noEnviable) throw new ConflictException(noEnviable);
@@ -1107,7 +1166,10 @@ export class MetrologiaController {
     const resultado = await prisma.$transaction(async (tx) => {
       await registrarFirma(tx);
       let numero = cal.codigo as string;
-      if (cal.prefijo_certificado) {
+      // Certificado modificado (R9): conserva el número del que reemplaza con la versión siguiente (X-V2).
+      const modifica = cal.reemplaza_numero && cal.reemision_modalidad === "modificacion";
+      if (modifica) numero = numeroModificado(String(cal.reemplaza_numero));
+      else if (cal.prefijo_certificado) {
         // Correlativo atómico por prefijo (fila bloqueada); formato y reinicio anual configurables (LCPNF-NNN.AA).
         const r = await tx.$queryRawUnsafe<any[]>(
           `SELECT ultimo, relleno, formato, anual, anio FROM met_numeracion WHERE tenant_id = $1::uuid AND prefijo = $2 FOR UPDATE`,
@@ -1160,6 +1222,17 @@ export class MetrologiaController {
   private async avisarEmision(id: string, req: any): Promise<{ ok: boolean; destinatarios: string[]; motivo: string | null }> {
     try {
       const d = await destinatariosDe(prisma, id);
+      // FEA (frente F4): si el certificado de calibración exige la versión firmada, el aviso no adjunta el PDF sin firmar.
+      const sinFea = await errorEntregaSinFea(prisma, {
+        tenantId: tenantId(req), origen: "metrologia", documentoId: id, tipoDocumento: "CERTIFICADO_CALIBRACION", numero: "el certificado",
+      });
+      if (sinFea) {
+        const motivo = "se exige la firma electrónica avanzada antes de enviarlo: envíelo desde la OT cuando el firmante suba la versión firmada";
+        await prisma.$executeRawUnsafe(
+          `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
+           VALUES ($1::uuid, 'NOTIFICADA', 'emitida', 'emitida', $2::uuid, $3)`, id, req.user?.sub ?? null, `Sin aviso por correo: ${motivo}.`);
+        return { ok: false, destinatarios: [], motivo };
+      }
       if (!d.destinatarios.length) {
         await prisma.$executeRawUnsafe(
           `INSERT INTO met_calibracion_evento (calibracion_id, accion, estado_desde, estado_hasta, usuario_id, comentario)
@@ -1184,11 +1257,14 @@ export class MetrologiaController {
   @Post("calibraciones/:id/reemitir")
   @RequierePermiso("metrologia.emitir")
   async reemitir(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
-    const { motivo } = MotivoSchema.parse(body ?? {});
+    const { motivo, modalidad } = ReemisionSchema.parse(body ?? {});
     const t = tenantId(req);
     const cal = await this.detalleCtx(id, req);
     if (cal.estado === "emitida" && cal.reemision_en_curso) throw new ConflictException("Ya hay una reemisión en curso de este certificado");
     this.exigir("REEMITIR", cal);
+    // Modificación (mismo número, versión siguiente) solo con la OT abierta; si no, reemplazo con número nuevo.
+    const noPuede = motivoNoReemite({ modalidad, otCerrada: ["cerrada", "anulada"].includes(String(cal.ot_estado ?? "")), estadoDocumento: cal.estado });
+    if (noPuede) throw new ConflictException(noPuede);
     const fecha = fechaIso(cal.fecha_calibracion);
     for (let intento = 0; ; intento++) {
       const codigo = await this.siguienteCodigo(t, fecha);
@@ -1207,22 +1283,23 @@ export class MetrologiaController {
             `INSERT INTO met_calibracion
                (tenant_id, codigo, proceso_id, patron_id, unidad_id, fecha_calibracion, instrumento, patron_snap, ambiente, cond, u_max, u_cert, conforme,
                 intervalo_meses, estado, created_by, motor, datos, opciones, resultado, resumen, patrones, reemplaza_id, motivo_reemision,
-                ot_id, ot_instrumento_id, presentacion, esquema_mime, esquema_datos, esquema_hash, esquema_nombre)
+                ot_id, ot_instrumento_id, presentacion, esquema_mime, esquema_datos, esquema_hash, esquema_nombre, reemision_modalidad, comentarios_hoja)
              SELECT tenant_id, $2, proceso_id, patron_id, unidad_id, fecha_calibracion, instrumento, patron_snap, ambiente, cond, u_max, u_cert, conforme,
                     intervalo_meses, 'borrador', $3::uuid, motor, datos, opciones, resultado, resumen, patrones, id, $4,
-                    ot_id, ot_instrumento_id, presentacion - 'reemplaza' - 'reemplazaMotivo', esquema_mime, esquema_datos, esquema_hash, esquema_nombre
+                    ot_id, ot_instrumento_id, presentacion - 'reemplaza' - 'reemplazaMotivo', esquema_mime, esquema_datos, esquema_hash, esquema_nombre, $5, comentarios_hoja
                FROM met_calibracion WHERE id = $1::uuid RETURNING id`,
-            id, codigo, req.user.sub, motivo);
+            id, codigo, req.user.sub, motivo, modalidad);
           const nid = r[0].id as string;
           await tx.$executeRawUnsafe(
             `INSERT INTO met_calibracion_punto (calibracion_id, orden, nominal, correccion, u_patron, deriva, lecturas, media, repetibilidad, referencia, error, uc, u_exp, en_norm, dentro, componentes)
              SELECT $2::uuid, orden, nominal, correccion, u_patron, deriva, lecturas, media, repetibilidad, referencia, error, uc, u_exp, en_norm, dentro, componentes
                FROM met_calibracion_punto WHERE calibracion_id = $1::uuid`, id, nid);
-          await this.evento(tx, nid, "REEMISION", null, "borrador", req, `Reemite el certificado N° ${cal.numero_certificado ?? cal.codigo}: ${motivo}`);
-          await this.evento(tx, id, "REEMISION", "emitida", "emitida", req, `Reemisión en curso (${codigo}): ${motivo}`);
+          const que = modalidad === "modificacion" ? "Modifica" : "Reemplaza";
+          await this.evento(tx, nid, "REEMISION", null, "borrador", req, `${que} el certificado N° ${cal.numero_certificado ?? cal.codigo}: ${motivo}`);
+          await this.evento(tx, id, "REEMISION", "emitida", "emitida", req, `${modalidad === "modificacion" ? "Modificación" : "Reemplazo"} en curso (${codigo}): ${motivo}`);
           return nid;
         });
-        return { data: { id: nuevo, codigo, estado: "borrador", reemplaza: cal.numero_certificado ?? cal.codigo } };
+        return { data: { id: nuevo, codigo, estado: "borrador", reemplaza: cal.numero_certificado ?? cal.codigo, modalidad } };
       } catch (e: any) {
         if (intento < 4 && /unique|duplicate|23505/i.test(String(e?.message ?? e?.code ?? ""))) continue;
         throw e;
@@ -1247,6 +1324,16 @@ export class MetrologiaController {
   @RequierePermiso("metrologia.ver")
   async pdf(@Param("id", ParseUUIDPipe) id: string, @Req() req: any, @Res() res: Response) {
     const doc = await this.documento(id, req);
+    // FEA (frente F4): el certificado emitido con versión firmada con firma electrónica avanzada se descarga con ella.
+    if (!doc.sello.borrador && !doc.sello.estadoDocumento) {
+      const fea = await pdfFeaParaCliente(prisma, "metrologia", id, doc.sello.numero);
+      if (fea) {
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="${fea.nombre}"`);
+        res.end(fea.buffer);
+        return;
+      }
+    }
     // El PDF dibuja el cuerpo sellado (el mismo sobre el que se calculó el SHA-256) y lo
     // incrusta; número, código de verificación y hash van en el pie de cada hoja.
     const buf = await generarPdf(doc.cuerpo, doc.sello, doc.titulo);
@@ -1305,6 +1392,7 @@ export class MetrologiaController {
         acreditado: d.acred.acreditado,
         logoConfigurado: defecto.some((x) => x.clave === CLAVE_LOGO),
         reemision: cal.reemplaza_numero ?? null,
+        reemisionModalidad: cal.reemplaza_numero ? (cal.reemision_modalidad ?? "reemplazo") : null,
         automaticas: d.automaticas,
         observaciones: d.observaciones,
         campos: fmt.campos,
@@ -1533,6 +1621,7 @@ export class MetrologiaController {
         calculada: !!cal.calculada,
         responsablePaso: !enCircuito ? false : c.pasos ? puedeFirmarPaso(c.actual, yo, hechas, habAlt) : tiene(req, "metrologia.emitir"),
         motivoPaso: enCircuito && esAlternativo && habAlt ? habAlt : null,
+        autoRevision: enCircuito ? motivoAutoRevision({ esReemision: !!(cal.reemplaza_id || cal.reemplaza_numero), usuarioId: yo, firmas: hechas }) : null,
         ultimoPaso: c.pasos ? c.ultimo : true,
         habilitacion: e === "borrador" && yo ? motivoHabilitacion(registro, yo, cal.laboratorio ?? null, cal.magnitud) : null,
         reemisionEnCurso: !!cal.reemision_en_curso,
@@ -1566,6 +1655,14 @@ export class MetrologiaController {
       jefeLab: (jl && hecha(jl.orden, jl.accion)) ?? pendiente(jl) ?? (cal.emisor_nombre ? { accion: "FIRMA", rol: "Jefe", nombre: cal.emisor_nombre, fecha: cal.emitido_at, pendiente: false } : null),
       jefeDepto: (jd && hecha(jd.orden, jd.accion)) ?? pendiente(jd),
       reemplazaNumero: cal.reemplaza_numero ?? null,
+      // Sesión LNF 03-11 (R9): certificado modificado (mismo número, versión) o de reemplazo (número nuevo).
+      reemision: cal.reemplaza_numero
+        ? {
+            modalidad: esModalidadReemision(cal.reemision_modalidad) ? cal.reemision_modalidad : "reemplazo",
+            numeroAnterior: cal.reemplaza_numero, fechaAnterior: cal.reemplaza_emitido_at ? fechaIso(cal.reemplaza_emitido_at) : null,
+            motivo: cal.motivo_reemision ?? null,
+          }
+        : null,
     };
   }
 
@@ -1794,6 +1891,10 @@ const PatronSchema = z.object({
   intervalo_meses: z.coerce.number().int().min(1).max(240).nullish(),
   u_expandida: z.coerce.number().nullish(), deriva: z.coerce.number().nullish(),
   laboratorio: z.string().max(10).nullish(),
+  /** F051/F053: laboratorios que usan el equipo (un auxiliar puede compartirse entre LMT, LMTE y LNF). */
+  laboratorios: z.array(z.string().trim().max(10)).max(10).nullish(),
+  /** F051: coeficientes S = a·F + b·F² + c·F³ del certificado (columna SMP de la hoja del LNF). */
+  smp: z.object({ a: z.coerce.number().finite().nullish(), b: z.coerce.number().finite().nullish(), c: z.coerce.number().finite().nullish() }).nullish(),
   activo: z.boolean().optional(),
   /** Rango calibrado numérico (EP-04 P4.2): solo con él se controla que ningún punto quede fuera. */
   rango_min: z.coerce.number().finite().nullish(),
@@ -1820,8 +1921,7 @@ export class VerificacionMetrologiaController {
     const c = String(codigo ?? "").trim().toUpperCase();
     if (!codigoVerificacionValido(c)) return { valido: false, motivo: "Código con formato no válido" };
     const rows = await prisma.$queryRawUnsafe<any[]>(
-      `SELECT c.numero_certificado, c.estado, c.emitido_at, c.documento_html, c.certificado_hash, pr.nombre AS proceso,
-              (SELECT x.numero_certificado FROM met_calibracion x WHERE x.reemplaza_id = c.id AND x.estado = 'emitida' AND x.deleted_at IS NULL LIMIT 1) AS reemplazado_por
+      `SELECT c.id, c.numero_certificado, c.estado, c.emitido_at, c.documento_html, c.certificado_hash, pr.nombre AS proceso
          FROM met_calibracion c JOIN met_proceso pr ON pr.id = c.proceso_id
         WHERE c.codigo_verificacion = $1 AND c.deleted_at IS NULL LIMIT 1`, c);
     if (!rows.length) return { valido: false, motivo: "No existe un certificado de calibración con ese código" };
@@ -1831,9 +1931,22 @@ export class VerificacionMetrologiaController {
       numero: r.numero_certificado, proceso: r.proceso, estado: r.estado, hash: r.certificado_hash,
       fecha: r.emitido_at ? new Date(r.emitido_at).toLocaleDateString("es-CL", { timeZone: ZONA_CHILE }) : null,
     };
-    if (r.estado === "reemplazada") return { ...base, valido: false, motivo: `El certificado fue reemplazado por el N° ${r.reemplazado_por ?? "(en emisión)"}` };
+    if (r.estado === "reemplazada") {
+      // F054: la cadena de reemplazos emitidos (M-3951 → M-3951-V2 → M-3952), sin borradores.
+      const cadena = await prisma.$queryRawUnsafe<{ numero: string | null; estado: string | null }[]>(
+        `WITH RECURSIVE sig AS (
+           SELECT x.id, x.numero_certificado, x.estado, 1 AS n FROM met_calibracion x
+            WHERE x.reemplaza_id = $1::uuid AND x.deleted_at IS NULL AND x.estado IN ('emitida', 'reemplazada')
+           UNION ALL
+           SELECT y.id, y.numero_certificado, y.estado, sig.n + 1 FROM met_calibracion y JOIN sig ON y.reemplaza_id = sig.id
+            WHERE y.deleted_at IS NULL AND y.estado IN ('emitida', 'reemplazada') AND sig.n < 20)
+         SELECT numero_certificado AS numero, estado FROM sig ORDER BY n`, r.id);
+      return { ...base, valido: false, motivo: motivoReemplazado(cadena) };
+    }
     if (r.estado !== "emitida") return { ...base, valido: false, motivo: "El certificado no está emitido" };
-    return { ...base, valido: integro, ...(integro ? {} : { motivo: "El sello de integridad del documento no coincide" }) };
+    // FEA (frente F4): quién lo firmó con firma electrónica avanzada y cuándo, si hay versión firmada.
+    const fea = await feaPublica(prisma, "metrologia", r.id);
+    return { ...base, ...fea, valido: integro, ...(integro ? {} : { motivo: "El sello de integridad del documento no coincide" }) };
   }
 }
 

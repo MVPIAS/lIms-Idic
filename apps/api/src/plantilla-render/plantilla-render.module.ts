@@ -223,6 +223,27 @@ export class PlantillaRenderController {
    * Cobertura de los documentos de la OT: por muestra (con su producto) y por
    * laboratorio, sus resultados aprobados, sus documentos y lo que falta cubrir.
    */
+  /**
+   * Plantilla que se propone al abrir «Emitir informe» con una OT (F063): la del
+   * laboratorio de la OT o, para quien participa por orden interna, la del suyo.
+   */
+  @Get("ot/:otId/plantilla-sugerida")
+  @RequierePermiso("certificado.emitir")
+  async plantillaSugerida(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
+    await this.exigirAlcanceOt(otId, req, null, true);
+    const ctx = await this.svc.contexto(otId, req?.user?.tenantId);
+    let unidad: string | null = ctx.ot.unidadPrincipal ?? null;
+    if (!(await this.alcance.puedeVerUnidad(req, unidad))) {
+      unidad = null;
+      for (const u of (await this.alcance.filtroUnidades(req)) ?? [])
+        if (await this.svc.laboratorioTrabajaEnOt(otId, req?.user?.tenantId, u)) {
+          unidad = u;
+          break;
+        }
+    }
+    return { sugerida: await this.svc.plantillaSugerida(req?.user?.tenantId, unidad) };
+  }
+
   @Get("ot/:otId/cobertura")
   @RequierePermiso("certificado.emitir")
   async cobertura(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {

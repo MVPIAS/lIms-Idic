@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- PRUEBA · XML de ejemplo con el formato ESI 3.2 que exporta IBIS (Forensic Technology).
+     Un arma importada (Firearm) y sus dos evidencias de prueba: la vaina (Cartridge Case)
+     y el proyectil (Bullet), enlazadas al arma por <TestFirearmExhibitUUID>.
+     Datos ficticios: sirve para probar el recorrido completo antes de que exista IBIS. -->
+<Export>
+  <ESIOutputVersion>3.2</ESIOutputVersion>
+  <RemovedHits/>
+  <RemovedExhibits/>
+  <RemovedCases/>
+  <Cases/>
+  <Exhibits>
+    <Exhibit>
+      <UUID>FIR_PRUEBA_000000000000001</UUID>
+      <Type>Firearm</Type>
+      <ExhibitNumber>FA-PRUEBA-0001</ExhibitNumber>
+      <Category Code="TST">Test Fire</Category>
+      <SerialNumber>PRUEBAREC306789891</SerialNumber>
+      <Make Code="PRB">PRUEBA</Make>
+      <Model>PRUEBA M1</Model>
+      <Caliber Code="9LUG">9 mm Parabellum</Caliber>
+      <FirearmType Code="PI">Pistol</FirearmType>
+      <CountryOfOrigin Code="XX">PRUEBA</CountryOfOrigin>
+      <RegistrationDate>2026-11-11 10:00:00</RegistrationDate>
+      <HitIndicator Count="0"/>
+    </Exhibit>
+    <Exhibit>
+      <UUID>EXH_PRUEBA_000000000000001</UUID>
+      <Type>Cartridge Case</Type>
+      <ExhibitNumber>TF-PRUEBA-0001</ExhibitNumber>
+      <Category Code="TST">Test Fire</Category>
+      <TestFirearmExhibitUUID>FIR_PRUEBA_000000000000001</TestFirearmExhibitUUID>
+      <LastAcquisitionDate>2026-11-11 10:15:00</LastAcquisitionDate>
+      <BreechFaceClassCharacteristics>1</BreechFaceClassCharacteristics>
+      <Caliber Code="9LUG">9 mm Parabellum</Caliber>
+      <FiringPinShape Code="GLO">Elliptical</FiringPinShape>
+      <HitIndicator Count="0"/>
+    </Exhibit>
+    <Exhibit>
+      <UUID>EXH_PRUEBA_000000000000002</UUID>
+      <Type>Bullet</Type>
+      <ExhibitNumber>TF-PRUEBA-0002</ExhibitNumber>
+      <Category Code="TST">Test Fire</Category>
+      <TestFirearmExhibitUUID>FIR_PRUEBA_000000000000001</TestFirearmExhibitUUID>
+      <LastAcquisitionDate>2026-11-11 10:16:00</LastAcquisitionDate>
+      <Caliber Code="9LUG">9 mm Parabellum</Caliber>
+      <HitIndicator Count="0"/>
+    </Exhibit>
+  </Exhibits>
+  <Hits/>
+</Export>

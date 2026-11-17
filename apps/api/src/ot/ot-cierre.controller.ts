@@ -1,4 +1,6 @@
 import { faltantesCierreArmas } from "../saec/d11/cierre-d11";
+import { errorCambioPlazo } from "./plazo-resolucion";
+import { faltantesOrdenInterna, pendientesOrdenInterna } from "../flujo-real/oi-pendientes-datos";
 import { SQL_OT_LISTA_PARA_CERRAR } from "./lista-cierre";
 import { faltantesNotificacionDgmn } from "../bpch/notificacion-dgmn/notificacion-dgmn.module";
 import { faltantesTasaInternacion } from "../bpch/internacion/cierre-tasa";
@@ -85,7 +87,8 @@ export class OtCierreService {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT o.fecha_compromiso_origen AS origen, o.fecha_compromiso_at AS "fijadaAt",
               u.nombre_completo AS "fijadaPor", o.cerrada_por AS "cerradaPor",
-              c.codigo AS "cotizacionCodigo", c.plazo_entrega_dias AS "plazoDias", c.estado AS "cotizacionEstado"
+              c.codigo AS "cotizacionCodigo", c.plazo_entrega_dias AS "plazoDias", c.estado AS "cotizacionEstado",
+              to_char(o.vigencia_resolucion_hasta, 'YYYY-MM-DD') AS "vigenciaResolucion"
          FROM orden_trabajo o
          LEFT JOIN usuario u ON u.id = o.fecha_compromiso_por
          LEFT JOIN cotizacion c ON c.id = o.cotizacion_id
@@ -180,6 +183,8 @@ export class OtCierreService {
       // EP-10 10.15/10.17: incumplimiento oficial notificado a DGMN; EP-11 11.27: armas entregadas.
       ...(ot.estado === "cerrada" ? [] : await faltantesNotificacionDgmn(this.prisma, id)),
       ...(ot.estado === "cerrada" ? [] : await faltantesCierreArmas(this.prisma, id)),
+      // R3: muestra que pasa a otro laboratorio sin orden interna.
+      ...(ot.estado === "cerrada" ? [] : faltantesOrdenInterna(await pendientesOrdenInterna(this.prisma, id))),
       // IDIC-PG 24 Anexo 03: internación sujeta a la tasa con la tasa remitida a facturación.
       ...(ot.estado === "cerrada" ? [] : await faltantesTasaInternacion(this.prisma, id)),
     ];
@@ -208,6 +213,8 @@ export class OtCierreService {
         sugerida: fechaCompromisoDesdePlazo(ot.fechaRecepcion, extras.plazoDias ?? null),
         plazoDiasCotizacion: extras.plazoDias ?? null,
         cotizacionCodigo: extras.cotizacionCodigo ?? null,
+        // F009: OT del BPCH o la D11: la fecha no pasa la vigencia de la resolución.
+        vigenciaResolucion: extras.vigenciaResolucion ?? null,
         // COM-23: umbral del parámetro avisos.dias_por_vencer y medición con la recepción en el DCO.
         ...semaforoPlazo(ot.fechaCompromiso, ot.estado, new Date(), {
           diasPorVencer: await diasPorVencerDe(this.prisma, ot.tenantId),
@@ -271,6 +278,13 @@ export class OtCierreService {
     // Sin fecha de recepción (OT antiguas), el límite es el alta de la OT.
     const error = validarFechaCompromiso(dto.fecha, ot.fechaRecepcion ?? ot.createdAt);
     if (error) throw new BadRequestException(error);
+    // R3: no pasa la vigencia de la resolución (OT del BPCH y la D11).
+    const [v] = await this.prisma.$queryRawUnsafe<{ vigencia: string | null }[]>(
+      `SELECT to_char(vigencia_resolucion_hasta, 'YYYY-MM-DD') AS vigencia FROM orden_trabajo WHERE id = $1::uuid`,
+      id,
+    );
+    const errorVigencia = errorCambioPlazo(dto.fecha, v?.vigencia ?? null, false);
+    if (errorVigencia) throw new BadRequestException(errorVigencia);
     const nota = dto.motivo?.trim()
       ? `[${hoyCl()}] Fecha de compromiso ${diaDe(ot.fechaCompromiso) ?? "sin fecha"} → ${dto.fecha}: ${dto.motivo.trim()}`
       : null;
@@ -335,6 +349,7 @@ export class OtCierreService {
         ...(estado === "cerrada" ? [] : faltantesMetrologia(metro.items, metro.cals, metro.docsNoCalibrables, metro)),
         ...(estado === "cerrada" ? [] : await faltantesNotificacionDgmn(tx, id)),
         ...(estado === "cerrada" ? [] : await faltantesCierreArmas(tx, id)),
+        ...(estado === "cerrada" ? [] : faltantesOrdenInterna(await pendientesOrdenInterna(tx as any, id))),
         ...(estado === "cerrada" ? [] : await faltantesTasaInternacion(tx, id)),
       ];
       const camino = caminoEstadosOt(estado);

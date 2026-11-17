@@ -20,6 +20,7 @@ import { PageHeader, SkeletonCards } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
 import { llamar } from "@/lib/laboratorio";
 import { hoyISO } from "@/lib/format";
+import { faltaObservacion, primerItemSinObservacion } from "@/lib/hcp";
 import { abrirProtegido, aNum, Bitacora, Campo, conComa, Pasos, Veredicto, type PasoFormulario } from "@/components/formularios/comun";
 
 interface Item { item: string; grupo: string; subgrupo: string | null; requisito: string; cantidad: string | null; clase: "A" | "B" | "C"; metodo: string | null; min: number | null; max: number | null; unidad: string | null }
@@ -205,6 +206,17 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
 
   async function guardar(e: React.FormEvent) {
     e.preventDefault();
+    // F087: un ítem que no cumple exige observación; su grupo queda abierto y se lleva el foco al campo.
+    const falta = primerItemSinObservacion(items, f.res);
+    if (falta) {
+      toast.error(`Ítem ${falta}: la observación es obligatoria si no cumple.`);
+      setTimeout(() => {
+        const campo = document.querySelector<HTMLInputElement>(`input[aria-label="Observación del ítem ${falta}"]`);
+        campo?.scrollIntoView({ block: "center", behavior: "smooth" });
+        campo?.focus();
+      }, 0);
+      return;
+    }
     setOcupado(true);
     try {
       const itemsEnvio: Record<string, ResItem> = {};
@@ -269,11 +281,13 @@ function PasoVehiculo({ v, editable, vehiculo, setVehiculo, onCambio, onFin }: {
           <div className="spacer" />
         </div>
         {grupos.map(([g, its]) => {
-          const vis = soloPend ? its.filter((it) => !respondido(it) || editando.has(it.item)) : its;
+          // F087: un ítem N/C sin observación también cuenta como pendiente (el grupo no se pliega ni se oculta).
+          const sinObs = (it: Item) => faltaObservacion(it, f.res[it.item]);
+          const vis = soloPend ? its.filter((it) => !respondido(it) || sinObs(it) || editando.has(it.item)) : its;
           if (!vis.length) return null;
           const nc = its.filter((it) => f.res[it.item]?.resultado === "NC").length;
           return (
-            <details key={g} open={soloPend || its.some((it) => !respondido(it))} style={{ border: "1px solid var(--line)", borderRadius: 7, marginBottom: 6, padding: "6px 10px" }}>
+            <details key={g} open={soloPend || its.some((it) => !respondido(it) || sinObs(it))} style={{ border: "1px solid var(--line)", borderRadius: 7, marginBottom: 6, padding: "6px 10px" }}>
               <summary style={{ cursor: "pointer", fontWeight: 600, fontSize: 12.5 }}>
                 {g} <span style={{ color: "var(--muted)", fontWeight: 400 }}>· {its.filter(respondido).length}/{its.length}{nc ? ` · ${nc} N/C` : ""}</span>
                 {editable && its.some((it) => !cuant(it) && !f.res[it.item]?.resultado) && (

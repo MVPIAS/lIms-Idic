@@ -9,7 +9,7 @@
  *     OT) o abrir una OT directa llaman a exigirClienteHabilitado, que aplica el
  *     bloqueo en ese momento aunque el proceso diario aún no haya corrido.
  */
-import { ConflictException, ForbiddenException, Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { ConflictException, Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { PrismaService } from "../common/prisma.service";
 import { AvisosService } from "../avisos/avisos.service";
 import { hoyChile } from "../common/fecha-chile";
@@ -99,26 +99,6 @@ export async function exigirClienteHabilitado(db: any, tenantId: string | null |
   if (!cli) return;
   const c = await aplicarMora(db, tenantId ?? cli.tenant_id, clienteId);
   if (c?.bloqueado) throw new ConflictException(mensajeClienteBloqueado(c.razon_social, c.motivo_bloqueo));
-}
-
-/**
- * COM-05: la excepción la autoriza el Jefe DCO o su subrogante (jefatura de la
- * unidad DCO, titular o subrogante, o rol Jefe de Departamento en el DCO).
- */
-export async function exigirJefeDco(db: any, req: any) {
-  if ((req?.user?.roles ?? []).includes("SUPERADMIN")) return;
-  const yo = req?.user?.sub;
-  const f: { n: number }[] = await db.$queryRawUnsafe(
-    `SELECT count(*)::int AS n FROM unidad d
-      WHERE d.codigo = 'DCO' AND ($2::uuid IS NULL OR d.tenant_id = $2::uuid)
-        AND (EXISTS (SELECT 1 FROM unidad_jefe j WHERE j.unidad_id = d.id AND j.usuario_id = $1::uuid)
-             OR EXISTS (SELECT 1 FROM usuario_rol ur JOIN rol r ON r.id = ur.rol_id
-                         WHERE ur.usuario_id = $1::uuid AND ur.unidad_id = d.id AND COALESCE(r.alias_de, r.codigo) = 'JEFE_DEPTO'
-                           AND (ur.vigente_desde IS NULL OR ur.vigente_desde <= now()) AND (ur.vigente_hasta IS NULL OR ur.vigente_hasta > now())))`,
-    yo ?? null,
-    req?.user?.tenantId ?? null,
-  );
-  if (!yo || !Number(f[0]?.n)) throw new ForbiddenException("El desbloqueo o la excepción de un cliente la autoriza el Jefe del Departamento Comercial o su subrogante.");
 }
 
 @Injectable()

@@ -12,6 +12,22 @@ export type PuntoCalc = Punto & {
   uc: number; uExp: number; en: number; dentro: boolean; componentes: CompCalc[];
 };
 
+/**
+ * F058 · textos de un borrador de reemisión según su modalidad: la modificación conserva
+ * el número con la versión siguiente (X-V2) y el reemplazo emite un número nuevo.
+ */
+export function textoReemision(numeroAnterior: string, modalidad: string | null | undefined): { aviso: string; presentacion: string } {
+  if (modalidad === "modificacion")
+    return {
+      aviso: `Modificación: este borrador modifica el certificado N° ${numeroAnterior}; al emitirse conserva el número con la versión siguiente e imprime «Certificado modificado».`,
+      presentacion: `Modifica el certificado N° ${numeroAnterior} (modificación en el LIMS).`,
+    };
+  return {
+    aviso: `Reemplazo: este certificado reemplazará al N° ${numeroAnterior} al emitirse, con un número nuevo.`,
+    presentacion: `Reemplaza al certificado N° ${numeroAnterior} (reemplazo en el LIMS).`,
+  };
+}
+
 const avg = (a: number[]) => (a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0);
 const stdev = (a: number[]) => {
   if (a.length < 2) return 0;
@@ -149,7 +165,7 @@ export const ETIQUETA_MOTOR: Record<string, Record<string, string>> = {
     HR: "Humedad inicio / medio / final", P: "Presión inicio / medio / final", ev: "Evaporación: inicial, +20 s, final, +20 s (g) por serie", pts: "Puntos", nom: "Volumen nominal (mL)", s: "Pesada (g)", dec: "Decimales del certificado",
   },
   "LCPNF-IT01": {
-    sentido: "Sentido (TRACCIÓN / COMPRESIÓN)", resInd: "Resolución del indicador (mV/V)", div: "N° de divisiones",
+    sentido: "Sentido (TRACCIÓN / COMPRESIÓN)", resInd: "Resolución del indicador (mV/V)", uRes: "Unidad de la resolución y de las lecturas", div: "N° de divisiones",
     decRes: "Decimales de la resolución", conv: "Conversión a kN", fmin: "Rango mínimo (kN)", fmax: "Rango máximo (kN)",
     urelSmp: "U relativa del SMP (UREL95)", grado: "Grado de interpolación (1, 2 o 3)", interp: "Incluir error de interpolación (SI / NO)",
     dec: "Decimales de los promedios", tIni: "Temperatura al inicio (°C)", hr: "Humedad relativa (%)", hrU: "U de la humedad (%)",

@@ -275,17 +275,25 @@ usa la vía ya probada de `restore.sh` (con su simulacro y salvaguardas):
 docker exec lims-postgres-pitr \
   pg_dump -U lims -d lims_idic -Fc -Z6 --no-owner --no-privileges \
   -f /var/lib/postgresql/data/recuperado.dump
+sudo mkdir -p /srv/lims-backup/pitr-recuperado
 docker cp lims-postgres-pitr:/var/lib/postgresql/data/recuperado.dump \
   /srv/lims-backup/pitr-recuperado/
 
 # 2. Probar SIEMPRE primero en una base temporal (no toca producción):
 sudo /opt/lims-idic/scripts/backup/restore.sh \
-     --desde /srv/lims-backup/pitr-recuperado --a-bd-temporal verificacion_pitr
+     --desde /srv/lims-backup/pitr-recuperado/recuperado.dump --a-bd-temporal verificacion_pitr
 
 # 3. Sólo si el recuento es correcto, sobre producción (destructivo, exige frase):
 sudo /opt/lims-idic/scripts/backup/restore.sh \
-     --desde /srv/lims-backup/pitr-recuperado --sobre-produccion
+     --desde /srv/lims-backup/pitr-recuperado/recuperado.dump --sobre-produccion
 ```
+
+`--desde` recibe aquí la **ruta del fichero**: `restore.sh` acepta cualquier
+volcado `.dump` en formato personalizado (`pg_dump -Fc`), comprueba que exista y
+que lo sea, y al terminar reaplica los ajustes post-restauración (zona horaria de
+la base y permisos de `lims_lectura`; ver `GUIA_ONPREMISE.md` §7.4). Como un
+volcado extraído a mano no lleva `SHA256SUMS`, avisa de que no puede verificar
+checksums y sigue con la comprobación de legibilidad (`pg_restore --list`).
 
 **Paso 4 · Liberar el disco**
 

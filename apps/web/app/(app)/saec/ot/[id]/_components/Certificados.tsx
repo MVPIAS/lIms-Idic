@@ -13,6 +13,7 @@ import { fecha, fechaHora } from "@/lib/format";
 import { abrirDocumento } from "@/lib/bpchProcesos";
 import { PILL_ETAPA, type Accion, type ExpedienteD11 } from "@/lib/d11";
 import { estadoDocumento } from "@/lib/documentos";
+import PanelFea from "@/components/documentos/PanelFea";
 
 const VEREDICTO: Record<string, string> = { cumple: "green", no_cumple: "red", pendiente: "gray" };
 
@@ -142,13 +143,17 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
   const conCert = d.armas.filter((a) => a.certificado);
   const [marcadas, setMarcadas] = useState<Set<string>>(new Set());
   const [ocupado, setOcupado] = useState(false);
+  // F041: las armas que no se pudieron emitir quedan explicadas en pantalla (no solo en un aviso que se borra).
+  const [fallos, setFallos] = useState<string[]>([]);
   const puede = d.puedo.emitir && d.ot.abierta;
 
   async function emitir() {
     setOcupado(true);
+    setFallos([]);
     const r = await accion("POST", `/d11/ot/${d.ot.id}/certificados`, { armaOtIds: [...marcadas] }, `Certificados emitidos: quedan en firma según la matriz de la D11.`);
     if (r) {
       setMarcadas(new Set());
+      setFallos(r.fallos ?? []);
       for (const f of r.fallos ?? []) toast.error(f);
     }
     setOcupado(false);
@@ -157,6 +162,7 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
     const r = await accion("POST", `/d11/emisiones/${id}/firmar`, {}, "Rango firmado: los certificados quedan oficiales.");
     for (const f of r?.fallos ?? []) toast.error(f);
   }
+  const [fea, setFea] = useState<string | null>(null);
   const ver = (id: string) => abrirDocumento(`/informes/${id}/html`).catch((e) => toast.error(e.message));
 
   return (
@@ -167,6 +173,33 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
           Un certificado por arma, con vigencia de <b>{d.config.vigenciaAnios} años</b> desde la emisión, código de verificación con QR y huella SHA-256.
           Se emiten en bloque: el sistema reserva un rango de números y los deja en firma según la matriz de firmas de la D11.
         </p>
+        {/* F039: llegó el XML de IBIS de un arma ya certificada «Pendiente de IBIS». */}
+        {conCert.some((a) => a.certificado?.pendienteIbis) && (
+          <div className="alert warn" role="alert">
+            Llegó el registro de IBIS de arma(s) ya certificadas «Pendiente de IBIS»: el certificado debe reemitirse para incorporarlo.
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+              {conCert.filter((a) => a.certificado?.pendienteIbis).map((a) => (
+                <li key={a.id} style={{ marginBottom: 4 }}>
+                  {a.muestra} · certificado <span className="codigo">{a.certificado!.numero}</span>
+                  {d.puedo.emitir && (a.certificado!.estado === "en_firma" ? (
+                    <small style={{ marginLeft: 6 }}>(está en firma: devuélvalo desde «Ver certificado» y emítalo de nuevo)</small>
+                  ) : (
+                    <button type="button" className="btn outline sm" style={{ marginLeft: 8 }}
+                      onClick={() => accion("POST", `/d11/certificados/${a.certificado!.id}/reemitir-ibis`, {}, "Certificado reemitido con el registro de IBIS: queda en firma.")}>
+                      Reemitir con IBIS
+                    </button>
+                  ))}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {fallos.length > 0 && (
+          <div className="alert warn" role="alert">
+            No se emitió el certificado de {fallos.length} arma(s); siguen en la lista para emitirlas de nuevo:
+            <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>{fallos.map((f) => <li key={f}>{f}</li>)}</ul>
+          </div>
+        )}
         {certificables.length === 0 ? (
           <p className="subtitle" style={{ margin: 0 }}>No hay armas listas para certificar (aprobadas, que cumplen y acuñadas si corresponde).</p>
         ) : (
@@ -271,12 +304,23 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
                     <td>{c.vigenteDesde ? `${fecha(c.vigenteDesde)} → ${fecha(c.vigenteHasta)}` : "—"}</td>
                     <td><span className={`pill ${e.pill}`}>{e.texto}</span></td>
                     <td>{c.entregadoAt ? fecha(c.entregadoAt) : "—"}</td>
-                    <td><button type="button" className="btn outline sm" onClick={() => ver(c.id)}>Ver certificado</button></td>
+                    <td style={{ whiteSpace: "nowrap" }}>
+                      <button type="button" className="btn outline sm" onClick={() => ver(c.id)}>Ver certificado</button>{" "}
+                      {(c.estado === "oficial" || c.estado === "emitido") && (
+                        <button type="button" className="btn outline sm" aria-expanded={fea === c.id} onClick={() => setFea((x) => (x === c.id ? null : c.id))}>
+                          Firma FEA
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          {/* Firma electrónica avanzada del Estado sobre el PDF del certificado (frente F4). */}
+          {fea && conCert.some((a) => a.certificado?.id === fea) && (
+            <PanelFea origen="informe" documentoId={fea} />
+          )}
         </div>
       )}
     </>

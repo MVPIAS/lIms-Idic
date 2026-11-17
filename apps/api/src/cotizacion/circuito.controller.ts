@@ -73,6 +73,8 @@ const EnsayosLabSchema = z.object({
         cantidad: z.number().int().positive().max(10000).default(1),
         precioUnitario: z.number().positive().optional(),
         motivoPrecioManual: z.string().trim().max(250).nullable().optional(),
+        /** F030: muestra de la cotización a la que va el ensayo (vacío = toda la cotización). */
+        muestraN: z.number().int().min(1).max(100).nullable().optional(),
       }),
     )
     .min(1, "Elija al menos un ensayo.")

@@ -34,6 +34,7 @@ import { useMemo, useState } from "react";
 import { aInputHoraChile, deInputHoraChile, fechaHora } from "@/lib/format";
 import { confirmar, toast } from "@/components/ui/feedback";
 import { llamar, leerReplicas } from "@/lib/laboratorio";
+import { cambiosEspecificacion, limiteConPunto } from "@/lib/especificaciones";
 
 export interface EnsayoEditable {
   id: string;
@@ -58,6 +59,12 @@ export interface EnsayoEditable {
   reglasAceptacion?: ReglaAceptacionVista[];
   /** Nota de la captura del método (fórmula y lo que está por confirmar). */
   notaCaptura?: string | null;
+  /** R7: decimales del resultado final (0 = entero); null = sin redondeo. */
+  decimalesResultado?: number | null;
+  /** R8: si las condiciones ambientales no aplican, son opcionales u obligatorias. */
+  condicionesAmbientales?: "no_aplica" | "opcional" | "obligatoria";
+  /** R7: explicación del factor (cuándo se aplica, cómo opera, quién lo ajusta). */
+  explicacionFactor?: string | null;
   /** Avisos de reglas no cumplidas que el analista confirmó al guardar. */
   avisosAceptacion?: { texto: string }[] | null;
   formulaMotivo: string | null;
@@ -153,7 +160,6 @@ const vacio = (v: any) => v == null || String(v).trim() === "";
 /** Límites numéricos: en pantalla con coma decimal; se guardan como vienen del catálogo (punto). */
 const NUM_LIMITE = /^-?\d+([.,]\d+)?$/;
 const limiteConComa = (v: string | number | null | undefined) => (v == null ? "" : NUM_LIMITE.test(String(v).trim()) ? String(v).trim().replace(".", ",") : String(v));
-const limiteConPunto = (k: string, v: string) => (["limiteInf", "nominal", "limiteSup"].includes(k) && NUM_LIMITE.test(v) ? v.replace(",", ".") : v);
 
 /**
  * Lo escrito en «Resultado» al guardar la especificación de la orden: el editor
@@ -261,16 +267,12 @@ export default function EditorEnsayo({
 
   const editable = (k: string) =>
     puedeCapturar && (esJefatura || vacio(cat[k]) || (k === "tipoDato" && ["limiteInf", "nominal", "limiteSup", "requisito"].every((c) => vacio(cat[c]))));
-  const cambiosEsp = useMemo(() => {
-    const out: Record<string, string | null> = {};
-    const actual: Record<string, any> = { ...e, tipoDato: e.tipoDato, evaluacion: e.evaluacion ?? "con_condicion" };
-    for (const k of ["tipoDato", "evaluacion", "limiteInf", "nominal", "limiteSup", "unidad", "requisito", "formula"] as const) {
-      const a = vacio(actual[k]) ? "" : String(actual[k]).trim();
-      const n = limiteConPunto(k, String((esp as any)[k] ?? "").trim());
-      if (a !== n) out[k] = n === "" ? null : n;
-    }
-    return out;
-  }, [esp, e]);
+  // F084: un límite de la E.T. con coma («1,5») no es un cambio frente a «1.5».
+  const cambiosEsp = useMemo(
+    () => cambiosEspecificacion({ ...e, tipoDato: e.tipoDato, evaluacion: e.evaluacion ?? "con_condicion" }, esp,
+      ["tipoDato", "evaluacion", "limiteInf", "nominal", "limiteSup", "unidad", "requisito", "formula"]),
+    [esp, e],
+  );
   const hayCambiosEsp = Object.keys(cambiosEsp).length > 0;
   // Cambiar lo que trajo el catálogo, el tipo (con especificación) o la fórmula lo hace la jefatura con motivo.
   const catalogoTraeEspec = ["limiteInf", "nominal", "limiteSup", "requisito"].some((k) => !vacio(cat[k]));
@@ -449,7 +451,7 @@ export default function EditorEnsayo({
           </div>
           {CAMPOS.map((c) => (
             <div key={c.k} className={`field${editable(c.k) ? "" : " readonly"}`}>
-              <label htmlFor={`es-${c.k}-${e.id}`}>{c.l}{!vacio(cat[c.k]) && String(cat[c.k]) !== limiteConPunto(c.k, String((esp as any)[c.k]).trim()) ? ` · catálogo: ${c.k === "unidad" ? cat[c.k] : limiteConComa(cat[c.k])}` : ""}</label>
+              <label htmlFor={`es-${c.k}-${e.id}`}>{c.l}{!vacio(cat[c.k]) && limiteConPunto(c.k, String(cat[c.k]).trim()) !== limiteConPunto(c.k, String((esp as any)[c.k]).trim()) ? ` · catálogo: ${c.k === "unidad" ? cat[c.k] : limiteConComa(cat[c.k])}` : ""}</label>
               <input id={`es-${c.k}-${e.id}`} value={(esp as any)[c.k]} readOnly={!editable(c.k)} onChange={(x) => setEsp({ ...esp, [c.k]: x.target.value })}
                 placeholder={editable(c.k) ? "vacío" : ""} />
             </div>
@@ -535,7 +537,7 @@ export default function EditorEnsayo({
             )}
           </div>
           <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "0 0 6px" }}>
-            Se aplica al valor calculado (lecturas o réplicas). Un valor final ingresado directamente no se modifica.
+            {e.explicacionFactor ?? "Se aplica al valor calculado (lecturas o réplicas). Un valor final ingresado directamente no se modifica."}
           </p>
           {puedeFactor && puedeCapturar && (
             <>
@@ -588,6 +590,11 @@ export default function EditorEnsayo({
                 </label>
               ))}
             </div>
+          )}
+          {e.tipoDato !== "atributo" && e.decimalesResultado != null && (
+            <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "6px 0 0" }}>
+              Regla de redondeo del ensayo: el resultado se informa {e.decimalesResultado === 0 ? "en enteros" : `con ${e.decimalesResultado} decimal${e.decimalesResultado > 1 ? "es" : ""}`} (0,5 hacia arriba) y el veredicto se decide con ese valor.
+            </p>
           )}
           {e.tipoDato !== "atributo" && e.notaCaptura && (
             <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "6px 0 0" }}>{e.notaCaptura}</p>
@@ -709,7 +716,7 @@ export default function EditorEnsayo({
           )}
           <fieldset style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "6px 10px 8px", margin: "10px 0 0" }}>
             <legend style={{ fontSize: 12, fontWeight: 600, padding: "0 4px" }}>
-              Equipo y condiciones del ensayo{e.equipoRequerido ? " · el método exige informar el equipo" : ""}
+              {e.condicionesAmbientales === "no_aplica" ? "Equipo del ensayo" : "Equipo y condiciones del ensayo"}{e.equipoRequerido ? " · el método exige informar el equipo" : ""}
             </legend>
             <div className="form-grid cols-4">
               <div className="field span-2">
@@ -742,14 +749,22 @@ export default function EditorEnsayo({
                 <input id={`fe-${e.id}`} type="datetime-local" value={fechaEnsayo} onChange={(x) => setFechaEnsayo(x.target.value)} />
                 <span style={{ fontSize: 11, color: "var(--muted)", marginTop: 3 }}>Hora de Chile. Vacía = ahora.</span>
               </div>
-              <div className="field">
-                <label htmlFor={`te-${e.id}`}>T (°C)</label>
-                <input id={`te-${e.id}`} inputMode="decimal" value={temperatura} onChange={(x) => setTemperatura(x.target.value)} />
-              </div>
-              <div className="field">
-                <label htmlFor={`hr-${e.id}`}>HR (%)</label>
-                <input id={`hr-${e.id}`} inputMode="decimal" value={humedad} onChange={(x) => setHumedad(x.target.value)} />
-              </div>
+              {e.condicionesAmbientales === "no_aplica" ? (
+                <div className="field span-2">
+                  <span style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 18 }}>Las condiciones ambientales no aplican a este ensayo.</span>
+                </div>
+              ) : (
+                <>
+                  <div className="field">
+                    <label htmlFor={`te-${e.id}`}>T (°C){e.condicionesAmbientales === "obligatoria" && <span className="req"> *</span>}</label>
+                    <input id={`te-${e.id}`} inputMode="decimal" value={temperatura} onChange={(x) => setTemperatura(x.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label htmlFor={`hr-${e.id}`}>HR (%){e.condicionesAmbientales === "obligatoria" && <span className="req"> *</span>}</label>
+                    <input id={`hr-${e.id}`} inputMode="decimal" value={humedad} onChange={(x) => setHumedad(x.target.value)} />
+                  </div>
+                </>
+              )}
               <div className="field span-2">
                 <label htmlFor={`in-${e.id}`}>Incertidumbre</label>
                 <input id={`in-${e.id}`} value={incertidumbre} maxLength={60} onChange={(x) => setIncertidumbre(x.target.value)} placeholder="p. ej. ± 0,02 %" />
