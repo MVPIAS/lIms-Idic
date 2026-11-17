@@ -32,7 +32,7 @@ export const PERMISOS_RECURSO: Record<string, PermisosCrud> = {
   // Comercial / facturación
   clientes: { ver: "cliente.ver", crear: "cliente.crear", editar: "cliente.editar", eliminar: "cliente.editar" },
   contactos: todos("cliente.ver", "cliente.editar"),
-  proveedores: todos("compra.ver", "compra.gestionar"),
+  proveedores: todos("proveedor.ver", "proveedor.gestionar"),
   "centros-costo": todos("factura.ver", "catalogo.gestionar"),
   "listas-precio": todos("lista_precio.ver", "catalogo.gestionar"),
   "lista-precio-items": todos("lista_precio.ver", "catalogo.gestionar"),

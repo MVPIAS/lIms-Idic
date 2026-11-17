@@ -89,7 +89,7 @@ const ACCIONES: Record<Perfil, Accion[]> = {
   ABASTECIMIENTO: [
     { href: "/consumibles", titulo: "Stock de consumibles", desc: "Lotes, vencimientos y bajo mínimo", icono: "🧴", perm: "consumible.gestionar" },
     { href: "/ordenes-compra", titulo: "Órdenes de compra", desc: "Emitidas, en curso y recibidas", icono: "🛒", perm: "compra.ver" },
-    { href: "/proveedores", titulo: "Proveedores", desc: "Fichas de proveedores", icono: "🚚", perm: "compra.ver" },
+    { href: "/proveedores", titulo: "Proveedores", desc: "Fichas de proveedores", icono: "🚚", perm: "proveedor.ver" },
   ],
   CALIDAD: [
     { href: "/no-conformidades", titulo: "No conformidades", desc: "Tratamiento, plazos y cierre", icono: "⚠", perm: "nc.ver" },

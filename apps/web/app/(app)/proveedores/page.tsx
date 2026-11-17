@@ -8,7 +8,7 @@ export default function ProveedoresPage() {
     <CrudTable
       recurso="proveedores"
       titulo="Proveedores"
-      subtitulo="Maestro de proveedores para órdenes de compra e insumos."
+      subtitulo="Maestro de proveedores para insumos y servicios externos (p. ej. calibraciones de Metrología)."
       columnas={[
         // Código correlativo PROV-NNN: lo asigna el sistema al registrar el proveedor.
         { campo: "codigo", titulo: "Código", render: (v) => <span className="codigo">{v ?? "—"}</span> },
