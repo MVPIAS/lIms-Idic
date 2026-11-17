@@ -66,8 +66,8 @@ async function llamar(username, metodo, ruta, cuerpo) {
   const s = await login(username);
   const r = await fetch(`${BASE}${ruta}`, {
     method: metodo,
-    headers: { authorization: `Bearer ${s.token}`, ...(cuerpo !== undefined ? { "content-type": "application/json" } : {}) },
-    body: cuerpo !== undefined ? JSON.stringify(cuerpo) : undefined,
+    headers: { authorization: `Bearer ${s.token}`, ...(cuerpo !== undefined && !(cuerpo instanceof FormData) ? { "content-type": "application/json" } : {}) },
+    body: cuerpo === undefined ? undefined : cuerpo instanceof FormData ? cuerpo : JSON.stringify(cuerpo),
   });
   const texto = await r.text();
   let json = null;
@@ -193,7 +193,18 @@ async function main() {
     let s = 0, k = 2;
     for (let i = cuerpoRut.length - 1; i >= 0; i--) { s += Number(cuerpoRut[i]) * k; k = k === 7 ? 2 : k + 1; }
     const dv = 11 - (s % 11);
-    const cfg = await ok(U.ventas, "GET", "/cotizaciones/config");
+    let cfg = await ok(U.ventas, "GET", "/cotizaciones/config");
+    // COM-09 (tercer envío): por defecto el V°B° es solo del laboratorio y la consulta al
+    // laboratorio es obligatoria. Este recorrido prueba la configuración anterior (V°B° del
+    // laboratorio y del departamento; consulta opcional): la fija y al terminar deja lo que había.
+    const fijar = async (codigo, valor, actual) => {
+      if (actual === valor) return;
+      paramsAntes.push([codigo, actual]);
+      await ok(U.admin, "PUT", `/parametros/configurables/circuito_cotizacion/${codigo}`, { valor, motivo: "PRUEBA r1c: configuración del recorrido" });
+    };
+    await fijar("vb_niveles", "lab_depto", cfg.circuito?.niveles ?? "lab");
+    await fijar("exigir_consulta_laboratorio", "no", cfg.circuito?.exigirConsulta === false ? "no" : "si");
+    cfg = await ok(U.ventas, "GET", "/cotizaciones/config");
     afirmar(cfg.circuito?.niveles === "lab_depto" && cfg.circuito?.exigirFirma === true, `parámetros del circuito: ${JSON.stringify(cfg.circuito)}`);
     C.cliente = await ok(U.ventas, "POST", "/clientes", {
       rut: `${cuerpoRut}-${dv === 11 ? "0" : dv === 10 ? "K" : dv}`, razonSocial: `Cliente prueba r1c ${sello}`,
@@ -257,14 +268,16 @@ async function main() {
     return `«${c.ruta.siguiente.texto}»`;
   });
 
-  await paso("Mi bandeja y «Cotizaciones por responder»: cada jefe ve solo su laboratorio; el analista no entra (403)", async () => {
+  await paso("Mi bandeja y «Cotizaciones por responder»: cada jefe y analista ve solo su laboratorio (COM-09)", async () => {
     const t = await exigirBandeja(U.lqcJefe, B0[U.lqcJefe], { cotizaciones_por_responder: 1 });
     const lqc = (await ok(U.lqcJefe, "GET", "/cotizaciones/solicitudes-laboratorio?estado=por_responder")).data;
     const lpn = (await ok(U.lpnJefe, "GET", "/cotizaciones/solicitudes-laboratorio?estado=por_responder")).data;
     afirmar(lqc.some((s) => s.cotizacionId === C.cot.id && s.unidadCodigo === "LQC"), "LQC no ve su solicitud");
     afirmar(lqc.every((s) => s.unidadCodigo === "LQC"), "LQC ve solicitudes de otros laboratorios");
     afirmar(lpn.some((s) => s.cotizacionId === C.cot.id) && lpn.every((s) => s.unidadCodigo === "LPN"), "LPN no ve solo lo suyo");
-    await exigir(403, U.a1, "GET", "/cotizaciones/solicitudes-laboratorio"); // sin cotizacion.ver
+    // COM-09: el analista (cotizacion.costear, sin cotizacion.ver) ve las de SU laboratorio.
+    const a1 = (await ok(U.a1, "GET", "/cotizaciones/solicitudes-laboratorio?estado=por_responder")).data;
+    afirmar(a1.some((s) => s.cotizacionId === C.cot.id) && a1.every((s) => s.unidadCodigo === "LQC"), "el analista de LQC no ve solo lo suyo");
     return t;
   });
 
@@ -290,7 +303,7 @@ async function main() {
   await paso("LQC responde (FORM06 + FORM05): fuera de alcance 403, sin permiso 403, sin costeo 400; luego no responde dos veces (409)", async () => {
     const s = await solDe("LQC");
     await exigir(403, U.lpnJefe, "POST", `/cotizaciones/solicitudes-laboratorio/${s.id}/responder`, { respuesta: "aceptar", programa, costeo });
-    await exigir(403, U.a1, "POST", `/cotizaciones/solicitudes-laboratorio/${s.id}/responder`, { respuesta: "aceptar", programa, costeo });
+    await exigir(403, U.rev, "POST", `/cotizaciones/solicitudes-laboratorio/${s.id}/responder`, { respuesta: "aceptar", programa, costeo });
     await exigir(400, U.lqcJefe, "POST", `/cotizaciones/solicitudes-laboratorio/${s.id}/responder`, { respuesta: "aceptar", programa });
     await exigir(400, U.lqcJefe, "POST", `/cotizaciones/solicitudes-laboratorio/${s.id}/responder`, { respuesta: "aceptar", programa: { ...programa, plazoEntregaDias: 0 }, costeo });
     const r = await ok(U.lqcJefe, "POST", `/cotizaciones/solicitudes-laboratorio/${s.id}/responder`, { respuesta: "aceptar", programa, costeo });
@@ -426,6 +439,11 @@ async function main() {
 
   /* ---------------- Aceptación → OT */
   await paso("Ventas registra la aceptación de la cotización firmada: nace la OT de LQC", async () => {
+    // Comprobante de la aceptación (parámetro aceptacion_comprobante.exige, «sí» por defecto).
+    const f = new FormData();
+    f.append("clase", "aceptacion");
+    f.append("archivo", new Blob([Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n")], { type: "application/pdf" }), "oc-prueba.pdf");
+    await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/adjuntos`, f);
     const r = await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/aceptar`, {
       tipo: "OC", numero: `OC-R1C-${sello}`, fecha: hoy(), conCobro: true, unidadPrincipalId: C.lqc.id,
     });
@@ -496,14 +514,20 @@ async function main() {
 
   await paso("Registro manual: el Jefe LQC no puede (403); valor fuera de escala 400; falta una respuesta 400; Ventas la registra", async () => {
     const det = await ok(U.ventas, "GET", `/encuestas/${C.enc.id}`);
-    afirmar(det.preguntas.map((p) => p.codigo).join(",") === "C01,C02,C03,C04" && det.preguntas.every((p) => p.escala.join(",") === "1,3,5,7"), "preguntas por defecto distintas al formulario del Sistema Comercial");
+    // Desde 7bc2c8e las preguntas son las del formulario del IDIC que corresponde (FORM01…FORM05 o
+    // cliente interno), no las C01–C04 del Sistema Comercial: se responde lo que trae la encuesta.
+    const preguntas = det.preguntas.filter((p) => p.obligatoria !== false && Array.isArray(p.escala) && p.escala.length);
+    afirmar(preguntas.length >= 1, "la encuesta no trae preguntas con escala");
     const base = { comentario: "Buena atención", nombreRespondente: "J. P.", cargoRespondente: "Encargado de compras", medio: "telefono", fechaRespuesta: hoy() };
-    const resp = [{ codigo: "C01", valor: 7 }, { codigo: "C02", valor: 5 }, { codigo: "C03", valor: 5 }, { codigo: "C04", valor: 7 }];
+    const maximo = (p) => Math.max(...p.escala.map(Number));
+    const resp = preguntas.map((p) => ({ codigo: p.codigo, valor: maximo(p) }));
+    const fuera = maximo(preguntas[0]) + 1;
     await exigir(403, U.lqcJefe, "POST", `/encuestas/${C.enc.id}/registrar`, { ...base, respuestas: resp });
-    await exigir(400, U.ventas, "POST", `/encuestas/${C.enc.id}/registrar`, { ...base, respuestas: [{ codigo: "C01", valor: 4 }, ...resp.slice(1)] });
+    await exigir(400, U.ventas, "POST", `/encuestas/${C.enc.id}/registrar`, { ...base, respuestas: [{ codigo: preguntas[0].codigo, valor: fuera }, ...resp.slice(1)] });
     await exigir(400, U.ventas, "POST", `/encuestas/${C.enc.id}/registrar`, { ...base, respuestas: resp.slice(1) });
     const r = await ok(U.ventas, "POST", `/encuestas/${C.enc.id}/registrar`, { ...base, respuestas: resp });
-    afirmar(r.promedio === 6, `promedio ${r.promedio}`);
+    afirmar(r.promedio != null && Number(r.promedio) > 0, `promedio ${r.promedio}`);
+    C.nPreguntas = det.preguntas.length;
     await exigir(409, U.ventas, "POST", `/encuestas/${C.enc.id}/registrar`, { ...base, respuestas: resp });
     await exigir(403, U.lqcJefe, "POST", `/encuestas/${C.enc.id}/sin-respuesta`, { motivo: "No debe poder" });
     await exigir(409, U.planif, "POST", `/encuestas/${C.enc.id}/sin-respuesta`, { motivo: "Ya está registrada" });
@@ -514,7 +538,7 @@ async function main() {
   await paso("Reporte por laboratorio y preguntas editables solo por Administración", async () => {
     const rep = await ok(U.ventas, "GET", `/encuestas/reporte?desde=${hoy()}`);
     const lqc = rep.laboratorios.find((l) => l.unidad === "LQC");
-    afirmar(lqc && lqc.registradas >= 1 && lqc.promedio !== null && lqc.porPregunta.length === 4, `reporte ${JSON.stringify(lqc)}`);
+    afirmar(lqc && lqc.registradas >= 1 && lqc.promedio !== null && lqc.porPregunta.length >= 1, `reporte ${JSON.stringify(lqc)}`);
     const ps = await ok(U.ventas, "GET", "/encuestas/preguntas");
     const cuerpo = { preguntas: ps.map(({ codigo, texto, escala, orden, obligatoria, activo }) => ({ codigo, texto, escala, orden, obligatoria, activo })) };
     await exigir(403, U.ventas, "PUT", "/encuestas/preguntas", cuerpo);
@@ -532,13 +556,23 @@ async function main() {
   });
 }
 
+const paramsAntes = [];
+/** Deja el circuito como estaba antes del recorrido (COM-09: V°B° «lab» y consulta obligatoria por defecto). */
+async function restituirNiveles() {
+  for (const [codigo, valor] of paramsAntes.splice(0)) {
+    await ok(U.admin, "PUT", `/parametros/configurables/circuito_cotizacion/${codigo}`, { valor, motivo: "PRUEBA r1c: se deja como estaba" }).catch((e) => console.log(`  (no se pudo restituir ${codigo}: ${e.message})`));
+  }
+}
+
 main()
-  .then(() => {
+  .then(async () => {
+    await restituirNiveles();
     console.log(`\n${pasos.length} pasos en verde.`);
     pararApi();
     process.exit(0);
   })
-  .catch((e) => {
+  .catch(async (e) => {
+    await restituirNiveles();
     console.log(`\nFALLÓ: ${e.message}`);
     pararApi();
     process.exit(1);

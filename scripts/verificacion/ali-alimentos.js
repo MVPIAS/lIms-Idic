@@ -257,11 +257,26 @@ async function main() {
     await ok(U.a1, "PATCH", `/flujo/resultado/${C.rA.id}/especificacion`, { limiteSup: "100000" }).catch(async () =>
       ok(U.jefe, "PATCH", `/flujo/resultado/${C.rA.id}/especificacion`, { limiteSup: "100000", motivo: "Límite del RSA para plato preparado (prueba)" }),
     );
-    await ok(U.a1, "POST", `/flujo/resultado/${C.rA.id}/valor`, { valor: "40" });
+    // SAL-01 (tercer envío): el LMB registra cada etapa en «Microbiología · siembra, incubación
+    // y lectura»; la captura estándar del valor se rechaza (409) y el formulario lo lleva al ensayo.
+    await exigir(409, U.a1, "POST", `/flujo/resultado/${C.rA.id}/valor`, { valor: "40" });
+    const inicio = new Date(Date.now() - 50 * 3600000).toISOString();
+    const leida = new Date(Date.now() - 60000).toISOString();
+    const mA = await ok(U.a1, "PUT", `/formularios/resultado/${C.rA.id}/micro`, {
+      tipo: "recuento", siembra: { fecha: inicio, medio: "PCA", diluciones: [1], volumenMl: 1 }, incubacion: { inicio, temperatura: 35 },
+      lecturas: [{ horas: 48, realizada: leida, colonias: { 1: [4, 4] } }], confirmar: true,
+    });
+    afirmar(mA.llevado?.ok !== false && /^40$/.test(String(mA.calculo?.texto ?? "")), `aerobios ${mA.calculo?.texto} · ${JSON.stringify(mA.llevado)}`);
     await ok(U.a1, "PATCH", `/flujo/resultado/${C.rS.id}/especificacion`, { requisito: "Ausencia en 25 g", tipoDato: "atributo" }).catch(async () =>
       ok(U.jefe, "PATCH", `/flujo/resultado/${C.rS.id}/especificacion`, { requisito: "Ausencia en 25 g", tipoDato: "atributo", motivo: "Salmonella se informa presencia o ausencia (prueba)" }),
     );
-    await ok(U.a1, "POST", `/flujo/resultado/${C.rS.id}/valor`, { atributo: "cumple", valor: "Ausencia" });
+    const mS = await ok(U.a1, "PUT", `/formularios/resultado/${C.rS.id}/micro`, {
+      tipo: "presencia", siembra: { fecha: inicio, medio: "Caldo de preenriquecimiento", diluciones: [], volumenMl: null }, incubacion: { inicio, temperatura: 37 },
+      lecturas: [{ horas: 48, realizada: leida, presencia: "ausencia" }], cantidadAnalizada: "25 g", confirmar: true,
+    });
+    afirmar(/Ausencia en 25 g/.test(String(mS.calculo?.texto ?? "")), `Salmonella ${mS.calculo?.texto}`);
+    const fin = (await ok(U.jefe, "GET", `/flujo/ot/${C.ot.id}/resultados`)).resultados;
+    afirmar(fin.filter((x) => [C.rA.id, C.rS.id].includes(x.id)).every((x) => x.veredicto === "cumple"), `veredictos ${fin.map((x) => x.veredicto).join(",")}`);
   });
   await paso("Revisión y aprobación de la OT de LMB", async () => {
     await ok(U.rev, "POST", `/resultados/ot/${C.ot.id}/revisar`, {});
@@ -282,11 +297,31 @@ async function main() {
     guardar("informe-ensayos-alimentos-vista-previa.html", h);
     const tomaTxt = `${C.toma.slice(8, 10)}-${C.toma.slice(5, 7)}-${C.toma.slice(0, 4)} ${C.toma.slice(11, 16)}`;
     for (const t of ["IDIC-PG09-Anexo02-02", "1. Antecedentes", "Fecha y hora de muestreo", tomaTxt, "Temperatura de recepción", "3,8 °C",
-      `FORM-PRUEBA-${sello}`, "3.1. Normas y métodos", "4. Resultados", "<td>40</td>", "Ausencia", "6. Notas aclaratorias", "Por orden del Director del IDIC"])
+      `FORM-PRUEBA-${sello}`, "3.1. Normas y métodos", "4. Resultados", "<td>40<", "Ausencia en 25 g", "6. Notas aclaratorias", "Por orden del Director del IDIC"])
       afirmar(h.includes(t), `falta «${t}» en el informe`);
     afirmar(!h.includes("Cumple</td>") && !/<th>Veredicto<\/th>|<th>Condición<\/th>/.test(h), "el informe de solo resultados trae veredicto");
     afirmar(!/\{\{/.test(h), "quedan placeholders sin resolver");
     return `${(h.match(/<tr>/g) ?? []).length} filas · muestreo ${tomaTxt}`;
+  });
+  await paso("QC microbiológico (align_qc_lmb_metodos.sql): sin positivo, negativo y blanco aprobados no se emite; el analista los registra y el revisor los aprueba", async () => {
+    const pre = await exigir(409, U.jefe, "POST", "/informes/emitir", { otId: C.ot.id, plantillaId: C.ie.id });
+    afirmar(/control de calidad pendiente/i.test(JSON.stringify(pre)), `el bloqueo no es por el QC: ${JSON.stringify(pre).slice(0, 200)}`);
+    const estado = await ok(U.a1, "GET", `/qc/ot/${C.ot.id}`);
+    const cepas = await ok(U.a1, "GET", "/qc/cepas");
+    const cepa = lista(cepas).find((c) => c.activo);
+    afirmar(cepa, "no hay cepas de referencia activas para el control positivo");
+    let n = 0;
+    for (const m of estado.metodos ?? []) {
+      for (const tipo of m.tiposFaltantes ?? []) {
+        const c = await ok(U.a1, "POST", `/qc/ot/${C.ot.id}/control`, {
+          catMetodoId: m.id, tipo, resultadoCualitativo: tipo === "positivo" ? "+" : "-", loteMedio: `PRUEBA-${sello.slice(-4)}`,
+          ...(tipo === "positivo" ? { cepaId: cepa.id } : {}), observaciones: "PRUEBA ali-alimentos",
+        });
+        await ok(U.rev, "PATCH", `/qc/control/${c.id}`, { resultado: "aprobado", observaciones: "PRUEBA aprobación del revisor" });
+        n++;
+      }
+    }
+    return `${n} controles registrados y aprobados`;
   });
   await paso("ALI-D7 · Emisión: circuito Jefe de Laboratorio → … → Jefe DQO (oficializa) y PDF", async () => {
     const r = await ok(U.jefe, "POST", "/informes/emitir", { otId: C.ot.id, plantillaId: C.ie.id });
@@ -325,7 +360,7 @@ async function main() {
     for (const t of ["Análisis", "Mín.", "Máx.", "Otros", "Resultado", "Observ."]) afirmar(ths.includes(t), `falta la columna «${t}» (${ths.join(", ")})`);
     for (const t of ["I.V.C. N.º", "100000", "Cumple", "3,8 °C"]) afirmar(h.includes(t), `falta «${t}» en el I.V.C.`);
     // Salmonella: sin cotas, el requisito («Ausencia», nominal del catálogo) va en «Otros».
-    afirmar(/<td class="num">—<\/td><td class="num">—<\/td><td>Ausencia[^<]*<\/td><td>Ausencia<\/td><td class="ok">Cumple<\/td>/.test(h), "Salmonella no trae el requisito en «Otros»");
+    afirmar(/<td class="num">—<\/td><td class="num">—<\/td><td>Ausencia[^<]*<\/td><td>Ausencia[^<]*<\/td><td class="ok">Cumple<\/td>/.test(h), "Salmonella no trae el requisito en «Otros»");
     const r = await ok(U.jefe, "POST", "/informes/emitir", { otId: C.ot.id, plantillaId: C.ivc.id });
     const pdf = await ok(U.jefe, "GET", `/informes/${r.certificado.id}/pdf`);
     afirmar(Buffer.isBuffer(pdf) && pdf.subarray(0, 5).toString() === "%PDF-", "el PDF del I.V.C. no se generó");

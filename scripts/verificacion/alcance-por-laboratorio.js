@@ -303,7 +303,7 @@ const LISTADOS = [
   // Frente r2a: documentación del trabajo del DSA que espera aprobación (Mi bandeja · Preparación del trabajo).
   { n: "Documentación del trabajo por aprobar (r2a)", r: "/formularios/pendientes-aprobacion", p: "ot.preparacion.aprobar", t: "ot", regla: "unidad", href: "/preparacion-trabajo" },
   // Circuito de la cotización y encuestas (frente r1c).
-  { n: "Cotizaciones por responder (laboratorio)", r: "/cotizaciones/solicitudes-laboratorio", p: "cotizacion.ver", t: "solicitud_costeo", regla: "unidad", href: "/cotizaciones/por-responder" },
+  { n: "Cotizaciones por responder (laboratorio)", r: "/cotizaciones/solicitudes-laboratorio", p: ["cotizacion.ver", "cotizacion.costear"], t: "solicitud_costeo", regla: "unidad", href: "/cotizaciones/por-responder" },
   { n: "Encuestas de satisfacción", r: "/encuestas?limit=200", p: "encuesta.ver", t: "encuesta", regla: "unidad", href: "/encuestas" },
   { n: "SAEC casos", r: "/saec/casos?limit=200", p: "caso.ver", regla: "saec" },
   { n: "SAEC evidencias", r: "/evidencias?limit=200", p: "evidencia.ver", regla: "saec", href: "/saec" },
@@ -416,7 +416,9 @@ async function main() {
     /* 1 · listados */
     const estadoListado = {};
     for (const L of LISTADOS) {
-      const e = esperado(username, L.p);
+      // p en lista = basta uno (@RequiereAlgunPermiso): el alcance es el del primero que tiene.
+      const pEf = Array.isArray(L.p) ? (L.p.find((x) => tiene(x)) ?? L.p[0]) : L.p;
+      const e = esperado(username, pEf);
       const r = await llamar(username, "GET", L.r);
       estadoListado[L.r] = r.status;
       if (L.regla === "retirada") {
@@ -452,7 +454,7 @@ async function main() {
         continue;
       }
       fila.fuera += fuera;
-      comprobar(fuera === 0, `${username} · ${L.n}: ${fuera} fila(s) fuera del alcance de ${L.p} (p. ej. ${ejemplo})`, "filasFuera");
+      comprobar(fuera === 0, `${username} · ${L.n}: ${fuera} fila(s) fuera del alcance de ${pEf} (p. ej. ${ejemplo})`, "filasFuera");
       if (fuera) R.medicion.filasFuera += fuera - 1; // el comprobar ya contó 1
     }
 
@@ -625,8 +627,9 @@ async function main() {
     const cot = (V.mapa || []).find((r) => r.t === "cotizacion" && (r.u || []).length && !(r.u || []).some((c) => e.unidades.has(c)));
     if (cot) await intentar(u, "POST", `/cotizaciones/${cot.id}/anular`, { motivo: "Prueba de alcance: no debe aplicarse" }, [403], `anular cotización de ${(cot.u || []).join(",")}`);
   }
-  // Responder la solicitud de costeo de otro laboratorio (cotizacion.costear acotado: jefaturas).
-  for (const u of ["demo.lpn.jefe", "demo.dsa.jefe"]) {
+  // Responder la solicitud de costeo de otro laboratorio (cotizacion.costear acotado: jefaturas y,
+  // desde COM-09, analistas de su laboratorio).
+  for (const u of ["demo.lpn.jefe", "demo.dsa.jefe", "demo.lpn.analista1"]) {
     const e = esperado(u, "cotizacion.costear");
     if (e.global) continue;
     const sol = (V.mapa || []).find((r) => r.t === "solicitud_costeo" && (r.u || []).length && !(r.u || []).some((c) => e.unidades.has(c)));

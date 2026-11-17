@@ -149,6 +149,7 @@ const U = {
   ventas: "demo.ventas",
   scc: "demo.scc.jefe",
   inspector: "demo.sstgo.inspector",
+  inspector2: "demo.sstgo.inspector2", // BPCH-48: en terreno van dos inspectores de la unidad
   sstgo: "demo.sstgo.jefe",
   bpch: "demo.bpch.jefe",
   planif: "demo.planificacion",
@@ -159,6 +160,9 @@ const U = {
 };
 const POSIBLES_FIRMANTES = ["demo.sstgo.jefe", "demo.scc.jefe", "demo.bpch.jefe", "demo.director", "demo.sstgo.inspector", "demo.scc.inspector1"];
 const hoy = () => new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" });
+/** BPCH-48: modalidad e inspectores elegidos de la lista (rol Inspector de la unidad). */
+const enTerreno = () => ({ modalidad: "TERRENO", inspectorIds: [sesiones[U.inspector].id, sesiones[U.inspector2].id] });
+const administrativo = () => ({ modalidad: "ADMINISTRATIVO", inspectorIds: [sesiones[U.inspector].id] });
 
 function rutValido(base) {
   const cuerpo = String(base);
@@ -190,6 +194,30 @@ async function capturarLote(otId, muestraId, fallar = null) {
     hechos.push(`${nombre}=${valor}→${c.veredicto}${valor === "1" ? " (FALLA)" : ""}`);
   }
   return hechos;
+}
+
+/**
+ * R4 (BPCH, 29-10-2026): el documento final del BPCH (certificado o informe de
+ * incumplimiento) lo entrega Comercial: primero se remite a DCO y DCO lo recibe.
+ */
+async function remitirADco(docId) {
+  const cuerpo = { destino: "DCO", ejemplares: 1, fecha: hoy(), distribucion: [{ destinatario: "Cliente", ejemplares: 1 }], copiaArchivada: true, archivoUbicacion: "Archivo BPCH (PRUEBA)", retencionMeses: 24 };
+  const r = await llamar(U.bpch, "POST", `/informes/${docId}/despachar`, cuerpo);
+  if (r.status >= 300) await ok(U.sstgo, "POST", `/informes/${docId}/despachar`, cuerpo);
+  await ok(U.planif, "POST", `/informes/${docId}/despacho/recibir`, {});
+}
+
+/**
+ * Revisión de la OT. Con «re-análisis automático = No cumple» (align_fx5_a.sql) un
+ * resultado No cumple queda retenido hasta repetirlo: aquí la jefatura descarta el
+ * re-análisis con su motivo (el No cumple es el esperado en el recorrido) y se revisa de nuevo.
+ */
+async function revisarOt(otId, revisor, jefatura) {
+  const r = await ok(revisor, "POST", `/resultados/ot/${otId}/revisar`, {});
+  const retenidos = (r.omitidos ?? []).filter((o) => /re-an[aá]lisis/i.test(o.motivo ?? ""));
+  for (const o of retenidos) await ok(jefatura, "POST", `/calidad/resultados/${o.id}/reanalisis/descartar`, { motivo: "PRUEBA: el No cumple es el esperado en el recorrido" });
+  if (retenidos.length) await ok(revisor, "POST", `/resultados/ot/${otId}/revisar`, {});
+  return r;
 }
 
 /** Firma un documento según su circuito con los usuarios de prueba (rechaza a uno fuera de turno). */
@@ -257,15 +285,18 @@ async function main() {
     afirmar(C.elemento, "no se encontró el elemento Tronex Plus");
     C.panel = await ok(U.inspector, "GET", `/bpch/panel?catElementoId=${C.elemento.id}`);
     const por = (c) => C.panel.find((m) => m.codigo === c);
-    C.metodos = ["7464", "9362", "1917"].map(por).filter(Boolean).map((m) => m.id);
-    afirmar(C.metodos.length === 3, `panel sin los métodos esperados (${C.panel.map((m) => m.codigo).join(",")})`);
+    C.tres = ["7464", "9362", "1917"].map(por).filter(Boolean).map((m) => m.id);
+    afirmar(C.tres.length === 3, `panel sin los métodos esperados (${C.panel.map((m) => m.codigo).join(",")})`);
+    // R4 (F002/F007): el lote de una internación lleva TODA la batería del procedimiento (el panel).
+    C.metodos = C.panel.map((m) => m.id);
     return `${C.elemento.nombre}: ${C.panel.length} métodos en el panel`;
   });
 
   await paso("Ventas crea las empresas (importador y comprador)", async () => {
     const base = 76000000 + (Number(sello.slice(-6)) % 999999);
     C.importador = await ok(U.ventas, "POST", "/clientes", { rut: rutValido(base), razonSocial: `Importadora prueba BPCH ${sello}`, tipo: "particulares" });
-    C.comprador = await ok(U.ventas, "POST", "/clientes", { rut: rutValido(base + 1), razonSocial: `Compradora prueba BPCH ${sello}`, tipo: "particulares" });
+    // BPCH-19: el comprador nace con su código de empresa; el importador no (se completa antes de su informe).
+    C.comprador = await ok(U.ventas, "POST", "/clientes", { rut: rutValido(base + 1), razonSocial: `Compradora prueba BPCH ${sello}`, tipo: "particulares", codigoEmpresa: `PC${sello.slice(-4)}` });
     return `${C.importador.razonSocial} · ${C.comprador.razonSocial}`;
   });
 
@@ -291,9 +322,11 @@ async function main() {
   await paso("Codificación Única: receso y reactivación con motivo", async () => {
     await exigir(409, U.bpch, "POST", `/bpch/codificacion/${C.cod.id}/estado`, { estado: "EN_RECESO", motivo: "" });
     await ok(U.bpch, "POST", `/bpch/codificacion/${C.cod.id}/estado`, { estado: "EN_RECESO", motivo: "Baja temporal solicitada" });
-    const r = await ok(U.bpch, "POST", `/bpch/codificacion/${C.cod.id}/estado`, { estado: "VIGENTE", motivo: "Reactivado para la prueba" });
+    // BPCH-40: reactivar exige el Nº de un certificado nuevo (distinto del anterior).
+    await exigir(409, U.bpch, "POST", `/bpch/codificacion/${C.cod.id}/estado`, { estado: "VIGENTE", motivo: "Reactivado para la prueba" });
+    const r = await ok(U.bpch, "POST", `/bpch/codificacion/${C.cod.id}/estado`, { estado: "VIGENTE", motivo: "Reactivado para la prueba", certificadoNumero: `CERT-PRUEBA-${sello.slice(-6)}` });
     afirmar(r.estado === "VIGENTE" && r.historial.some((h) => h.evento === "receso"), "no quedó el historial de receso");
-    return "VIGENTE → EN_RECESO → VIGENTE";
+    return "VIGENTE → EN_RECESO → VIGENTE (con certificado nuevo)";
   });
 
   /* ------------------------------------------------ A · Internación que cumple */
@@ -373,12 +406,15 @@ async function main() {
     await exigir(400, U.inspector, "POST", `/bpch/internaciones/${C.A.id}/lotes`, { items: [{ id: it.id, metodoIds: C.metodos }] });
     C.loteA = `DE${sello.slice(-8)}`;
     await ok(U.inspector, "PATCH", `/bpch/internaciones/${C.A.id}/inspeccion`, {
-      lugarInspeccion: "Polvorín de prueba, Ruta 5 Norte", fechaInspeccion: hoy(), inspectores: "R. R. · N. C.",
+      lugarInspeccion: "Polvorín de prueba, Ruta 5 Norte", fechaInspeccion: hoy(), ...enTerreno(),
       fechaVencimientoProducto: "2029-04-26", vigenciaInforme: "2027-04-26", observaciones: "Sin observaciones.",
       items: [{ id: it.id, identificacionLote: C.loteA, tamanoLote: 1482, tamanoMuestra: 36 }],
     });
     await exigir(403, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/lotes`, { items: [{ id: it.id, metodoIds: C.metodos }] });
     afirmar((await avanceEnListado(U.scc, C.A.id)) === "ot_generada", "antes de los lotes el listado debería decir «OT generada»");
+    // Sin toda la batería (y sin motivo de excepción) el lote no se registra.
+    const parcial = await exigir(400, U.inspector, "POST", `/bpch/internaciones/${C.A.id}/lotes`, { items: [{ id: it.id, metodoIds: C.tres }] });
+    afirmar(/batería/i.test(msg(parcial)), `el rechazo no explica la batería: ${msg(parcial)}`);
     // Doble envío simultáneo (revisión r3, hallazgo 10): uno registra el lote y el otro recibe 400.
     const dobles = await Promise.all([1, 2].map(() => llamar(U.inspector, "POST", `/bpch/internaciones/${C.A.id}/lotes`, { items: [{ id: it.id, metodoIds: C.metodos }] })));
     const estados = dobles.map((r) => r.status).sort();
@@ -414,6 +450,10 @@ async function main() {
 
   await paso("A · Informe de Inspección: emisión, cabecera BPCH y firma del Jefe de Sucursal", async () => {
     const pi = await plantilla(C.cfg, "INFORME_INSPECCION");
+    // BPCH-19: sin código de empresa del cliente no se emite el documento oficial (número 3000/<empresa>/OT/muestra).
+    const sin = await exigir(400, U.sstgo, "POST", "/informes/emitir", { otId: C.A.otId, plantillaId: pi.id, tipoDocumento: "INFORME_INSPECCION" });
+    afirmar(/c[oó]digo de empresa/i.test(msg(sin)), `el rechazo no explica el código de empresa: ${msg(sin)}`);
+    await ok(U.ventas, "PATCH", `/clientes/${C.importador.id}`, { codigoEmpresa: `PI${sello.slice(-4)}` });
     const r = await ok(U.sstgo, "POST", "/informes/emitir", { otId: C.A.otId, plantillaId: pi.id, tipoDocumento: "INFORME_INSPECCION" });
     C.informeA = (r.certificado ?? r).id;
     const html = await llamar(U.sstgo, "GET", `/informes/${C.informeA}/html`);
@@ -450,6 +490,9 @@ async function main() {
 
   await paso("A · Entrega del informe y del certificado", async () => {
     await ok(U.planif, "POST", `/informes/${C.informeA}/entregar`, { medio: "mano", destinatario: "BPCH SCC (archivo)" });
+    // Sin remitirlo a DCO, Comercial no lo entrega (409).
+    await exigir(409, U.planif, "POST", `/informes/${C.certA}/entregar`, { medio: "correo", destinatario: "Importador" });
+    await remitirADco(C.certA);
     await ok(U.planif, "POST", `/informes/${C.certA}/entregar`, { medio: "correo", destinatario: "Importador" });
   });
 
@@ -466,8 +509,8 @@ async function main() {
     await ok(U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, tasaPct: C.cfg.parametros.tasaPct });
     C.A = await ok(U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, pctAfecto: 100 });
     afirmar(C.A.tasa.tasa === 2615841, `tasa ${C.A.tasa.tasa} (esperado 2.615.841)`);
-    const iva = Math.round(2615841 * (C.cfg.parametros.ivaPct / 100));
-    afirmar(C.A.tasa.total === 2615841 + iva, `total ${C.A.tasa.total}`);
+    // La tasa de internación está exenta de IVA (IDIC, 10-11-2026): el total es la tasa.
+    afirmar(C.A.tasa.total === 2615841, `total ${C.A.tasa.total} (exenta de IVA)`);
     const r = await ok(U.ventas, "POST", `/bpch/internaciones/${C.A.id}/remitir-facturacion`);
     C.facturaA = r.facturaId;
     await exigir(409, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/remitir-facturacion`);
@@ -522,12 +565,12 @@ async function main() {
   await paso("B · Lote con un defecto crítico → NO CUMPLE", async () => {
     const it = C.B.items[0];
     await ok(U.inspector, "PATCH", `/bpch/internaciones/${C.B.id}/inspeccion`, {
-      lugarInspeccion: "Bodega de prueba", fechaInspeccion: hoy(), inspectores: "R. R. · N. C.", observaciones: "Defecto crítico en embalaje.",
+      lugarInspeccion: "Bodega de prueba", fechaInspeccion: hoy(), ...enTerreno(), observaciones: "Defecto crítico en embalaje.",
       items: [{ id: it.id, identificacionLote: `LB${sello.slice(-6)}`, tamanoLote: 500, tamanoMuestra: 20 }],
     });
     C.B = await ok(U.inspector, "POST", `/bpch/internaciones/${C.B.id}/lotes`, { items: [{ id: it.id, metodoIds: C.metodos }] });
     const h = await capturarLote(C.B.otId, C.B.items[0].muestraId, true);
-    await ok(U.sstgo, "POST", `/resultados/ot/${C.B.otId}/revisar`, {});
+    await revisarOt(C.B.otId, U.sstgo, U.bpch);
     await ok(U.bpch, "POST", `/resultados/ot/${C.B.otId}/aprobar`, {});
     C.B = await ok(U.scc, "GET", `/bpch/internaciones/${C.B.id}`);
     afirmar(C.B.estadoOt.condicion === "no_cumple", `condición ${C.B.estadoOt.condicion}`);
@@ -555,6 +598,7 @@ async function main() {
     await exigir(409, U.bpch, "POST", `/bpch/internaciones/${C.B.id}/codificacion`, { items: [{ id: C.B.items[0].id, listado: "EXPLOSIVOS" }] });
     await exigir(409, U.ventas, "POST", `/bpch/internaciones/${C.B.id}/tasa`, { cifUsd: 1, paridad: 1 });
     await ok(U.planif, "POST", `/informes/${C.informeB}/entregar`, { medio: "mano", destinatario: "BPCH SCC (archivo)" });
+    await remitirADco(C.incumpB);
     await ok(U.bpch, "POST", `/informes/${C.incumpB}/entregar`, { medio: "oficina_partes", destinatario: "DGMN · DCAE", observacion: "Copia al internador" });
     C.B = await ok(U.scc, "GET", `/bpch/internaciones/${C.B.id}`);
     afirmar(C.B.fases.find((f) => f.clave === "documento_final").estado === "hecho", "la fase del incumplimiento no quedó hecha");
@@ -585,7 +629,7 @@ async function main() {
     afirmar(C.D.items.length === 2 && C.D.items.every((x) => x.cnc === C.cncD && !x.codificacionId), "los dos lotes no quedaron con el mismo CNC sin codificar");
     C.D = await ok(U.scc, "POST", `/bpch/internaciones/${C.D.id}/analisis`, { infoCompleta: true, fechaAnalisis: hoy() });
     await ok(U.inspector, "PATCH", `/bpch/internaciones/${C.D.id}/inspeccion`, {
-      lugarInspeccion: "Bodega de prueba D", fechaInspeccion: hoy(), inspectores: "R. R.",
+      lugarInspeccion: "Bodega de prueba D", fechaInspeccion: hoy(), ...administrativo(),
       items: C.D.items.map((x, i) => ({ id: x.id, identificacionLote: `LD${i + 1}-${sello.slice(-6)}`, tamanoLote: 100, tamanoMuestra: 5 })),
     });
     C.D = await ok(U.inspector, "POST", `/bpch/internaciones/${C.D.id}/lotes`, { items: C.D.items.map((x) => ({ id: x.id, metodoIds: C.metodos })) });
@@ -657,10 +701,10 @@ async function main() {
   await paso("C · Inspección del lote, resultados e Informe de Inspección de la reinspección", async () => {
     await exigir(403, U.ventas, "PATCH", `/bpch/reinspecciones/${C.R.id}/inspeccion`, {});
     await ok(U.inspector, "PATCH", `/bpch/reinspecciones/${C.R.id}/inspeccion`, {
-      lugarInspeccion: "Ruta F-800 km 5", fechaInspeccion: hoy(), inspectores: "V. R. · N. C.", fechaVencimientoProducto: "2029-06-30", vigenciaInforme: "2027-01-29",
+      lugarInspeccion: "Ruta F-800 km 5", fechaInspeccion: hoy(), ...enTerreno(), fechaVencimientoProducto: "2029-06-30", vigenciaInforme: "2027-01-29",
       observaciones: "Reinspección por traspaso entre empresas.",
     });
-    const dobles = await Promise.all([1, 2].map(() => llamar(U.inspector, "POST", `/bpch/reinspecciones/${C.R.id}/lote`, { metodoIds: C.metodos.slice(0, 2) })));
+    const dobles = await Promise.all([1, 2].map(() => llamar(U.inspector, "POST", `/bpch/reinspecciones/${C.R.id}/lote`, { metodoIds: C.tres.slice(0, 2) })));
     const est = dobles.map((r) => r.status).sort();
     afirmar(est[0] >= 200 && est[0] < 300 && est[1] === 409, `doble envío del lote de reinspección → ${est.join(", ")}`);
     C.R = dobles.find((r) => r.status < 300).json;

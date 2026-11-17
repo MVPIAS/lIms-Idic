@@ -165,6 +165,7 @@ const U = {
   sccInsp2: "demo.scc.inspector2",
   stgo: "demo.sstgo.jefe", // Jefe de la Sucursal Santiago
   stgoInsp: "demo.sstgo.inspector",
+  stgoInsp2: "demo.sstgo.inspector2", // BPCH-48: segundo inspector de la Sucursal Santiago
   antof: "demo.santof.jefe",
   ventas: "demo.ventas", // Comercial (DCO): lee Producción Nacional
   ajeno: "demo.lqc.analista1", // fuera del ámbito BPCH
@@ -189,11 +190,24 @@ async function flujoGeneral(C, otId, valores, capturador, revisor, aprobador) {
     const v = critico ? valores.critico : valores.menor;
     await ok(capturador, "POST", `/flujo/resultado/${r.id}/valor`, { valor: String(v) });
   }
-  await ok(revisor, "POST", `/resultados/ot/${otId}/revisar`, {});
+  await revisarOt(otId, revisor, aprobador);
   await ok(aprobador, "POST", `/resultados/ot/${otId}/aprobar`, {});
   const fin = (await ok(aprobador, "GET", `/flujo/ot/${otId}/resultados`)).resultados;
   afirmar(fin.every((x) => x.estado === "aprobado"), `estados: ${fin.map((x) => x.estado).join(",")}`);
   return fin;
+}
+
+/**
+ * Revisión de la OT. Con «re-análisis automático = No cumple» (align_fx5_a.sql) un
+ * resultado No cumple queda retenido hasta repetirlo: aquí la jefatura descarta el
+ * re-análisis con su motivo (el No cumple es el esperado en el recorrido) y se revisa de nuevo.
+ */
+async function revisarOt(otId, revisor, jefatura) {
+  const r = await ok(revisor, "POST", `/resultados/ot/${otId}/revisar`, {});
+  const retenidos = (r.omitidos ?? []).filter((o) => /re-an[aá]lisis/i.test(o.motivo ?? ""));
+  for (const o of retenidos) await ok(jefatura, "POST", `/calidad/resultados/${o.id}/reanalisis/descartar`, { motivo: "PRUEBA: el No cumple es el esperado en el recorrido" });
+  if (retenidos.length) await ok(revisor, "POST", `/resultados/ot/${otId}/revisar`, {});
+  return r;
 }
 
 /** Firma un documento siguiendo sus pasos con los usuarios de prueba. */
@@ -339,21 +353,24 @@ async function main() {
     afirmar(C.raf.estado === "vigente" && !C.raf.vencida, `RAF ${C.raf.estado}`);
     return C.raf.numero;
   });
-  await paso("B3 · O/C operativa anual con productos y cantidades (Subdirección); cobro obligatorio", async () => {
+  await paso("B3 · O/C operativa anual con productos y cantidades (Subdirección); siempre sin cobro (BPCH-03)", async () => {
     const cuerpo = {
-      rafId: C.raf.id, numero: `OC-OP-${sello}`, anio, vigenciaDesde: `${anio}-01-01`, vigenciaHasta: `${anio}-12-31`, conCobro: false,
+      rafId: C.raf.id, numero: `OC-OP-${sello}`, anio, vigenciaDesde: `${anio}-01-01`, vigenciaHasta: `${anio}-12-31`,
       productos: [
         { producto: "ANFO a granel", unidadMedida: "t", cantidadAutorizada: 100 },
         { producto: "Emulsión encartuchada", unidadMedida: "u", cantidadAutorizada: 5000 },
       ],
     };
-    await rechazo(400, /cobro/i, U.bpch, "POST", "/bpch/pn/oc", { ...cuerpo, conCobro: undefined });
+    // BPCH-03: ya no se elige; marcarla con cobro se rechaza.
+    await rechazo(400, /no se cobran/i, U.bpch, "POST", "/bpch/pn/oc", { ...cuerpo, conCobro: true });
     await exigir(400, U.bpch, "POST", "/bpch/pn/oc", { ...cuerpo, productos: [] });
     await exigir(403, U.stgo, "POST", "/bpch/pn/oc", cuerpo);
     C.oc = await ok(U.bpch, "POST", "/bpch/pn/oc", cuerpo);
     C.pAnfo = C.oc.productos.find((p) => p.producto.startsWith("ANFO"));
     C.pEmul = C.oc.productos.find((p) => p.producto.startsWith("Emulsión"));
     afirmar(C.oc.productos.length === 2 && C.oc.resumen.total === 0, "la O/C no quedó con sus 2 productos");
+    afirmar(C.oc.conCobro === false || C.oc.conCobro === undefined, `la O/C quedó con cobro (${C.oc.conCobro})`);
+    await exigir(400, U.bpch, "PATCH", `/bpch/pn/oc/${C.oc.id}`, { conCobro: true });
     return `${C.oc.numero} · ${C.oc.productos.map((p) => `${p.producto} ${p.cantidadAutorizada} ${p.unidadMedida}`).join(" / ")}`;
   });
   await paso("B4 · El producto usa una clasificación APROBADA (una en borrador → 400)", async () => {
@@ -423,6 +440,22 @@ async function main() {
     afirmar(o.resumen.enCurso === 1 && c.comprometido === 40 && c.saldo === 60, `consumo ${JSON.stringify(c)}`);
     return `${C.otPn.codigo} · ANFO comprometido ${c.comprometido} t, saldo ${c.saldo} t`;
   });
+  await paso("B6b · RAF vencida: no se genera la OT de la inspección (409, BPCH-29)", async () => {
+    const rafV = await ok(U.scc, "POST", "/bpch/pn/rafs", {
+      clienteId: C.fab.id, numero: `RAF-V-${sello}`, fecha: `${anio - 2}-01-10`, tipoLinea: "FIJA", planta: "Planta de prueba (RAF vencida)",
+      vigenciaHasta: `${anio - 1}-12-31`, listadoProductos: "ANFO a granel", resAlmacenamiento: `Res. almacenamiento V ${sello}`,
+    });
+    afirmar(rafV.vencida === true, `la RAF no figura vencida (${rafV.estado})`);
+    const oc = await ok(U.bpch, "POST", "/bpch/pn/oc", {
+      rafId: rafV.id, numero: `OC-V-${sello}`, anio, vigenciaDesde: `${anio}-01-01`, vigenciaHasta: `${anio}-12-31`,
+      productos: [{ producto: "ANFO a granel", unidadMedida: "t", cantidadAutorizada: 10 }],
+    });
+    const o = await ok(U.stgo, "POST", `/bpch/pn/oc/${oc.id}/programa`, { lineas: [{ ocProductoId: oc.productos[0].id, unidadId: C.unidades.SSTGO.id, mes, cantidad: 5 }] });
+    const linea = o.programa.find((l) => l.unidad.codigo === "SSTGO");
+    await rechazo(409, /venci/i, U.stgo, "POST", `/bpch/pn/programa/${linea.id}/generar-ot`);
+    await ok(U.bpch, "POST", `/bpch/pn/oc/${oc.id}/anular`, { motivo: "PRUEBA: O/C de la RAF vencida" }).catch(() => null);
+    return `${rafV.numero} vencida · generar OT rechazado`;
+  });
   await paso("B7 · Flujo general en la OT: el inspector registra la muestra y captura; la jefatura revisa y BPCH aprueba", async () => {
     const rs = await flujoGeneral(C, C.otPn.id, { critico: 0, menor: 2 }, U.stgoInsp, U.stgo, U.bpch);
     afirmar(rs.every((r) => r.veredicto === "cumple"), `veredictos ${rs.map((r) => r.veredicto).join(",")}`);
@@ -438,9 +471,20 @@ async function main() {
     // Desde r1b el Informe de Inspección exige la cabecera de inspección con lugar y fecha
     // (EP-07 7.8, EP-10 10.3 y 10.11): el programa de esta línea no los trae.
     await rechazo(409, /cabecera de inspección/i, U.stgo, "POST", "/informes/emitir", { otId: C.otPn.id, plantillaId: C.plInspeccion.id, tipoDocumento: "INFORME_INSPECCION" });
+    await rechazo(400, /dos inspectores/i, U.stgo, "PUT", `/bpch/cabecera-ot/${C.otPn.id}`, {
+      procedimiento: "SAC-PG01-P01", lugarInspeccion: "Planta de prueba (línea fija)", fechaInspeccion: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }),
+      modalidad: "TERRENO", inspectorIds: [sesiones[U.stgoInsp].id],
+    });
     await ok(U.stgo, "PUT", `/bpch/cabecera-ot/${C.otPn.id}`, {
       procedimiento: "SAC-PG01-P01", lugarInspeccion: "Planta de prueba (línea fija)", fechaInspeccion: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }),
+      // BPCH-48: en terreno, dos inspectores de la lista de la unidad (uno solo → 400).
+      modalidad: "TERRENO", inspectorIds: [sesiones[U.stgoInsp].id, sesiones[U.stgoInsp2].id],
     });
+    // BPCH-19: el fabricante aún no tiene código de empresa; sin él no se emite el documento oficial.
+    if (!C.fab.codigoEmpresa) {
+      await rechazo(400, /c[oó]digo de empresa/i, U.stgo, "POST", "/informes/emitir", { otId: C.otPn.id, plantillaId: C.plInspeccion.id, tipoDocumento: "INFORME_INSPECCION" });
+      C.fab = { ...C.fab, ...(await ok(U.ventas, "PATCH", `/clientes/${C.fab.id}`, { codigoEmpresa: `PF${sello.slice(-4)}` })) };
+    }
     await rechazo(409, /Prototipos/i, U.stgo, "POST", "/informes/emitir", { otId: C.otPn.id, plantillaId: proto.id });
     const r = await ok(U.stgo, "POST", "/informes/emitir", { otId: C.otPn.id, plantillaId: C.plInspeccion.id, tipoDocumento: "INFORME_INSPECCION" });
     const docId = r.certificado?.id;
@@ -497,10 +541,16 @@ async function main() {
       clienteId: C.fab.id, elemento: `Detonador electrónico de prueba ${sello}`, descripcionTecnica: "Retardo programable; carga base PETN.",
       fichaTecnica: "FT-001", hojaSeguridad: "HDS-001", solicitudDgmn: `SOL-PROTO-${sello}`, fechaSolicitud: `${anio}-${String(mes).padStart(2, "0")}-01`,
       grupoPropuesto: "Detonadores · electrónicos",
+      // BPCH-32: sin clasificación de sustancia APROBADA el prototipo no se ensaya (no genera OT).
+      clasificacionId: C.clas.id,
     };
     await exigir(400, U.sccInsp, "POST", "/bpch/prototipos", { ...cuerpo, solicitudDgmn: " " });
+    await exigir([400, 409], U.sccInsp, "POST", "/bpch/prototipos", { ...cuerpo, solicitudDgmn: `SOL-PROTO-B-${sello}`, clasificacionId: C.clasBorrador.id });
     await exigir(403, U.ventas, "GET", "/bpch/prototipos");
+    const sinClas = await ok(U.sccInsp, "POST", "/bpch/prototipos", { ...cuerpo, solicitudDgmn: `SOL-PROTO-S-${sello}`, clasificacionId: null });
+    afirmar(sinClas.faltantes.generarOt.some((x) => /clasificaci[oó]n de sustancia APROBADA/i.test(x)), "sin clasificación no avisa que falta (BPCH-32)");
     C.proto = await ok(U.sccInsp, "POST", "/bpch/prototipos", cuerpo);
+    afirmar(!C.proto.faltantes.generarOt.some((x) => /clasificaci[oó]n/i.test(x)), "con la clasificación aprobada sigue pidiéndola");
     afirmar(/^PROTO-\d{4}-\d{4}$/.test(C.proto.codigo) && C.proto.esquema === "TIPO", `alta ${C.proto.codigo}`);
     afirmar(C.proto.faltantes.generarOt.some((x) => /SAC/.test(x)), "no avisa que falta el pronunciamiento SAC");
     return `${C.proto.codigo} · ${C.proto.etapa}`;
@@ -522,9 +572,11 @@ async function main() {
     const rs = await flujoGeneral(C, C.otProto.id, { critico: 0, menor: 1 }, U.stgoInsp, U.stgo, U.bpch);
     return `${rs.length} ensayos aprobados`;
   });
-  await paso("C4 · Dictamen: el inspector no dictamina (403); aprobar sin clasificación aprobada → 409", async () => {
+  await paso("C4 · Dictamen: el inspector no dictamina (403); la clasificación aprobada ya se exigió para generar la OT (BPCH-32)", async () => {
     await exigir(403, U.sccInsp, "POST", `/bpch/prototipos/${C.proto.id}/dictamen`, { dictamen: "aprobado" });
-    return await rechazo(409, /clasificación/i, U.scc, "POST", `/bpch/prototipos/${C.proto.id}/dictamen`, { dictamen: "aprobado" });
+    const p = await ok(U.scc, "GET", `/bpch/prototipos/${C.proto.id}`);
+    afirmar(p.clasificacion?.id === C.clas.id && p.clasificacion?.estado === "aprobada", `clasificación ${JSON.stringify(p.clasificacion)}`);
+    return `clasificación ${p.clasificacion.codigo ?? p.clasificacion.id} aprobada desde el ingreso`;
   });
   await paso("C5 · Con la clasificación aprobada, la SCC aprueba el tipo: certificado de aprobación en firma (matriz CERTIFICADO_CONFORMIDAD)", async () => {
     const p = await ok(U.sccInsp, "PATCH", `/bpch/prototipos/${C.proto.id}`, { clasificacionId: C.clas.id });
@@ -553,11 +605,11 @@ async function main() {
     return `firmas ${f.hechos.join(" → ")} · código ${p.codigoCnc} · OT cerrada`;
   });
   await paso("C7 · Segundo prototipo que NO cumple: no se aprueba (409); rechazo con motivo → informe de rechazo (INFORME_INCUMPLIMIENTO)", async () => {
-    let p = await ok(U.scc, "POST", "/bpch/prototipos", { clienteId: C.fab.id, elemento: `Cordón de prueba ${sello}`, solicitudDgmn: `SOL-PROTO-B-${sello}` });
+    // BPCH-32: la clasificación aprobada va desde el ingreso (sin ella no se genera la OT).
+    let p = await ok(U.scc, "POST", "/bpch/prototipos", { clienteId: C.fab.id, elemento: `Cordón de prueba ${sello}`, solicitudDgmn: `SOL-PROTO-B-${sello}`, clasificacionId: C.clas.id });
     await ok(U.scc, "POST", `/bpch/prototipos/${p.id}/pronunciamiento-sac`, { tamanoMuestra: 2 });
     const r = await ok(U.scc, "POST", `/bpch/prototipos/${p.id}/generar-ot`, { unidadId: C.unidades.SSTGO.id, conCobro: false });
     await flujoGeneral(C, r.ot.id, { critico: 1, menor: 0 }, U.stgoInsp, U.stgo, U.bpch);
-    await ok(U.scc, "PATCH", `/bpch/prototipos/${p.id}`, { clasificacionId: C.clas.id });
     await rechazo(409, /no cumplen/i, U.scc, "POST", `/bpch/prototipos/${p.id}/dictamen`, { dictamen: "aprobado" });
     await rechazo(409, /motivo/i, U.scc, "POST", `/bpch/prototipos/${p.id}/dictamen`, { dictamen: "rechazado" });
     // Revisión r3 (hallazgo 11): dos dictámenes simultáneos (doble clic) no emiten dos documentos.
@@ -575,7 +627,8 @@ async function main() {
   });
   await paso("C8 · Listados: prototipos y clasificaciones vigentes", async () => {
     const ps = lista(await ok(U.sccInsp2, "GET", `/bpch/prototipos?q=${encodeURIComponent(sello)}`));
-    afirmar(ps.length === 2, `prototipos encontrados ${ps.length}`);
+    // 3: los dos ensayados y el ingresado sin clasificación en C1 (BPCH-32), que no genera OT.
+    afirmar(ps.length === 3, `prototipos encontrados ${ps.length}`);
     const vig = lista(await ok(U.sccInsp2, "GET", `/bpch/clasificaciones?vigentes=1&q=${encodeURIComponent(sello)}`));
     afirmar(vig.length === 1 && vig[0].id === C.clas.id, `vigentes ${vig.length}`);
     const det = await ok(U.sccInsp2, "GET", `/bpch/clasificaciones/${C.clas.id}`);
