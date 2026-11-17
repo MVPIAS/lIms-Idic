@@ -185,3 +185,36 @@ COMMENT ON COLUMN cotizacion.dolar_observado IS
 ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS precio_usd  NUMERIC(14, 2);
 ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS tipo_cambio NUMERIC(12, 4);
 COMMENT ON COLUMN linea_cotizacion.precio_usd IS 'COM-38: precio en USD de la lista, convertido a pesos con tipo_cambio (dólar observado de la cotización).';
+
+-- -----------------------------------------------------------------------------
+-- COM-30 · Documento tributario «boleta» (asistencia técnica de la Delegación
+-- Nº 11) además de la factura. Se elige al emitir; el folio es por tipo.
+-- -----------------------------------------------------------------------------
+ALTER TABLE factura ADD COLUMN IF NOT EXISTS tipo_documento VARCHAR(10) NOT NULL DEFAULT 'factura';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_factura_tipo_documento') THEN
+    ALTER TABLE factura ADD CONSTRAINT ck_factura_tipo_documento CHECK (tipo_documento IN ('factura', 'boleta'));
+  END IF;
+END $$;
+COMMENT ON COLUMN factura.tipo_documento IS 'COM-30: factura | boleta (asistencia técnica de la Delegación Nº 11). El folio (numero) es correlativo por tipo.';
+-- El folio deja de ser único entre tipos: una boleta y una factura pueden tener el mismo número.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'factura_tenant_id_numero_key') THEN
+    ALTER TABLE factura DROP CONSTRAINT factura_tenant_id_numero_key;
+  END IF;
+END $$;
+DROP INDEX IF EXISTS factura_tenant_id_numero_key;
+-- Si hubiera folios repetidos heredados (datos migrados), el índice no se crea
+-- y el LIMS sigue controlándolo al emitir (FacturaService.numeroOcupado).
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM factura WHERE numero IS NOT NULL AND deleted_at IS NULL
+                  GROUP BY tenant_id, tipo_documento, numero HAVING count(*) > 1) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_factura_tipo_numero ON factura (tenant_id, tipo_documento, numero)
+      WHERE numero IS NOT NULL AND deleted_at IS NULL;
+  ELSE
+    RAISE NOTICE 'factura: hay folios repetidos por tipo; no se crea ux_factura_tipo_numero.';
+  END IF;
+END $$;

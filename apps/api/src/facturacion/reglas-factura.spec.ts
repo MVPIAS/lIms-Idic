@@ -146,3 +146,12 @@ describe("borrador de la OT sin cotización (B-040)", () => {
     expect(borradorSinImporte([{ subtotal: 10 }])).toBe(false);
   });
 });
+
+describe("COM-30 · boleta además de la factura", () => {
+  it("los tipos de documento y su nombre en los mensajes", () => {
+    const { TIPOS_DOCUMENTO, nombreDocumento } = require("./reglas-factura");
+    expect(TIPOS_DOCUMENTO).toEqual(["factura", "boleta"]);
+    expect(nombreDocumento("boleta")).toBe("boleta");
+    expect(nombreDocumento(null)).toBe("factura");
+  });
+});

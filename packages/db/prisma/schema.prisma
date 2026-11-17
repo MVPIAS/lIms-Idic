@@ -793,12 +793,14 @@ model Factura {
   creadaPor     String?   @map("creada_por") @db.Uuid
   emitidaPor    String?   @map("emitida_por") @db.Uuid
   emitidaAt     DateTime? @map("emitida_at") @db.Timestamptz
+  /// COM-30: documento tributario: factura | boleta (asistencia técnica de la Delegación 11).
+  tipoDocumento String    @default("factura") @map("tipo_documento") @db.VarChar(10)
 
   lineas       LineaFactura[]
   pagos        Pago[]
   notasCredito NotaCredito[]
 
-  @@unique([tenantId, numero])
+  @@unique([tenantId, tipoDocumento, numero])
   @@index([clienteId, estado])
   @@map("factura")
 }
