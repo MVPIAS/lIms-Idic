@@ -294,7 +294,14 @@ async function main() {
   /* ------------------------------------------------ 7. Revisión y aprobación */
   await paso("Revisión y aprobación de las dos OT", async () => {
     for (const X of [C.A, C.B]) {
-      await ok(U.rev, "POST", `/resultados/ot/${X.ot.id}/revisar`, {});
+      // Con «re-análisis automático = No cumple» (align_fx5_a.sql) el pH 9,1 queda retenido
+      // hasta repetirlo; aquí la jefatura descarta el re-análisis con su motivo y se revisa.
+      const r = await ok(U.rev, "POST", `/resultados/ot/${X.ot.id}/revisar`, {});
+      const retenidos = (r.omitidos ?? []).filter((o) => /re-an[aá]lisis/i.test(o.motivo ?? ""));
+      for (const o of retenidos) {
+        await ok(U.jefe, "POST", `/calidad/resultados/${o.id}/reanalisis/descartar`, { motivo: "PRUEBA: el valor fuera de requisito es el esperado en el recorrido" });
+      }
+      if (retenidos.length) await ok(U.rev, "POST", `/resultados/ot/${X.ot.id}/revisar`, {});
       await ok(U.jefe, "POST", `/resultados/ot/${X.ot.id}/aprobar`, {});
     }
   });

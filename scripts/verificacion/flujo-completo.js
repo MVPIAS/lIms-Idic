@@ -72,8 +72,8 @@ async function llamar(username, metodo, ruta, cuerpo) {
   const s = await login(username);
   const r = await fetch(`${BASE}${ruta}`, {
     method: metodo,
-    headers: { authorization: `Bearer ${s.token}`, ...(cuerpo !== undefined ? { "content-type": "application/json" } : {}) },
-    body: cuerpo !== undefined ? JSON.stringify(cuerpo) : undefined,
+    headers: { authorization: `Bearer ${s.token}`, ...(cuerpo !== undefined && !(cuerpo instanceof FormData) ? { "content-type": "application/json" } : {}) },
+    body: cuerpo === undefined ? undefined : cuerpo instanceof FormData ? cuerpo : JSON.stringify(cuerpo),
   });
   const texto = await r.text();
   let json = null;
@@ -341,6 +341,23 @@ async function main() {
     await exigir(403, U.a1, "POST", `/cotizaciones/${C.cot.id}/aceptar`, { tipo: "OC", numero: "X", unidadPrincipalId: C.lqc.id });
   });
 
+  /* ---------------- 2a. Consulta al laboratorio (COM-09): el analista estima, el Jefe de Laboratorio da el V°B° */
+  await paso("COM-09 · Sin consulta al laboratorio no va a firma (409); el analista de LQC responde y el Jefe de LQC da el V°B°", async () => {
+    await exigir(409, U.ventas, "POST", `/cotizaciones/${C.cot.id}/enviar-a-firma`, {});
+    await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/solicitudes-laboratorio`, { unidadId: C.lqc.id, tipoServicio: "estandar", comentario: "PRUEBA: fechas del servicio" });
+    const pend = (await ok(U.a1, "GET", "/cotizaciones/solicitudes-laboratorio?estado=por_responder")).data;
+    const sol = pend.find((s) => s.cotizacionId === C.cot.id);
+    afirmar(sol && pend.every((s) => s.unidadCodigo === "LQC"), "el analista de LQC no ve la solicitud de su laboratorio (o ve otras)");
+    await exigir(403, U.otroLab, "POST", `/cotizaciones/solicitudes-laboratorio/${sol.id}/responder`, { respuesta: "aceptar", programa: { plazoEntregaDias: PLAZO_DIAS, etapas: [{ actividad: "Ensayo" }] } });
+    await ok(U.a1, "POST", `/cotizaciones/solicitudes-laboratorio/${sol.id}/responder`, { respuesta: "aceptar", programa: { plazoEntregaDias: PLAZO_DIAS, etapas: [{ actividad: "Ensayo de pH, azufre y grumos" }] } });
+    await exigir(403, U.a1, "POST", `/cotizaciones/solicitudes-laboratorio/${sol.id}/vb`, { accion: "dar" });
+    await ok(U.jefe, "POST", `/cotizaciones/solicitudes-laboratorio/${sol.id}/vb`, { accion: "dar" });
+    const c = await ok(U.ventas, "GET", `/cotizaciones/${C.cot.id}/circuito`);
+    const s = c.solicitudes.find((x) => x.id === sol.id);
+    afirmar(s?.estado === "aprobado", `estado de la solicitud ${s?.estado} (con V°B° solo del laboratorio debía quedar «aprobado»)`);
+    return `solicitud ${sol.numero ?? "de fechas"} · ${s.estado}`;
+  });
+
   /* ---------------- 2b. Firma de la cotización (circuito r1c, matriz COTIZACION) */
   await paso("Sin la firma del Jefe DCO no se registra la aceptación (409); se envía a firma y la firma el Jefe DCO", async () => {
     await exigir(409, U.ventas, "POST", `/cotizaciones/${C.cot.id}/aceptar`, { tipo: "OC", numero: "X", unidadPrincipalId: C.lqc.id });
@@ -354,6 +371,11 @@ async function main() {
 
   /* ---------------- 3. Aceptación → OT */
   await paso("Ventas registra la aceptación y nace la OT de LQC", async () => {
+    // Comprobante de la aceptación (parámetro aceptacion_comprobante.exige, «sí» por defecto).
+    const f = new FormData();
+    f.append("clase", "aceptacion");
+    f.append("archivo", new Blob([Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n")], { type: "application/pdf" }), "oc-prueba.pdf");
+    await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/adjuntos`, f);
     const r = await ok(U.ventas, "POST", `/cotizaciones/${C.cot.id}/aceptar`, {
       tipo: "OC", numero: `OC-${sello}`, fecha: new Date().toLocaleDateString("sv-SE", { timeZone: "America/Santiago" }), conCobro: true, unidadPrincipalId: C.lqc.id,
     });

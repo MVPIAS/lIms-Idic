@@ -9,8 +9,9 @@
  *   · Parámetros de la fórmula oficial: CI 20 %, recargo 30 %, IVA 19 %.
  *   · Cotización a un cliente particular: el precio unitario sale del neto de
  *     la lista vigente (no de la ficha); un precio distinto se rechaza.
- *   · Cliente Ejército: por defecto la ficha; con «precio_ejercito = costo_total»
- *     el costo total de la lista (y se restituye).
+ *   · Cliente Ejército: por defecto el costo directo de la lista (COM-36, tercer
+ *     envío 17-11-2026); con «precio_ejercito = costo_total» el costo total y con
+ *     «ficha» el precio de la ficha (y se restituye).
  *   · FORM05 y simulador de costeo reproducen las cifras de la lista.
  *
  * Uso:
@@ -147,7 +148,8 @@ const U = {
   ventas: "demo.ventas", // cotizacion.crear / .ver
   lqcJefe: "demo.lqc.jefe", // cotizacion.costear (FORM05 de LQC)
   calidad: "demo.calidad", // parámetros con alcance global; sin cotizacion.ver
-  a1: "demo.lqc.analista1", // sin cotizacion.ver
+  a1: "demo.lqc.analista1", // sin cotizacion.ver; con cotizacion.costear de LQC (COM-09)
+  lpnA1: "demo.lpn.analista1", // cotizacion.costear de otro laboratorio
 };
 const CONF = "/parametros/configurables";
 function rutValido(base) {
@@ -219,11 +221,11 @@ async function main() {
     return out.join(" · ");
   });
 
-  await paso("Parámetros de la fórmula oficial: CI 20 %, recargo 30 %, IVA 19 %, Ejército «ficha»", async () => {
+  await paso("Parámetros de la fórmula oficial: CI 20 %, recargo 30 %, IVA 19 %, Ejército «costo directo» (COM-36)", async () => {
     const d = await ok(U.calidad, "GET", CONF);
     const g = d.grupos.find((x) => x.categoria === "circuito_cotizacion");
     const v = Object.fromEntries(g.parametros.map((p) => [p.codigo, p.valor]));
-    afirmar(String(v.cfa_pct) === "20" && String(v.margen_particular_pct) === "30" && String(v.iva_pct) === "19" && v.precio_ejercito === "ficha", JSON.stringify(v));
+    afirmar(String(v.cfa_pct) === "20" && String(v.margen_particular_pct) === "30" && String(v.iva_pct) === "19" && v.precio_ejercito === "costo_directo", JSON.stringify(v));
     return `cfa_pct ${v.cfa_pct} · margen_particular_pct ${v.margen_particular_pct} · iva_pct ${v.iva_pct} · precio_ejercito ${v.precio_ejercito}`;
   });
 
@@ -240,7 +242,7 @@ async function main() {
     return `clientes ${C.part.id.slice(0, 8)} / ${C.ejer.id.slice(0, 8)} · ficha EN1032 ${cat.precio}`;
   });
 
-  await paso("Vista previa del precio: particular → neto de la lista; Ejército → ficha; sin cotizacion.ver 403", async () => {
+  await paso("Vista previa del precio: particular → neto de la lista; Ejército → costo directo de la lista; sin cotizacion.ver 403", async () => {
     const ids = `${C.e957.id},${C.e1032.id}`;
     await exigir(403, U.a1, "GET", `/cotizaciones/precios-ensayo?clienteId=${C.part.id}&ids=${ids}`);
     await exigir(400, U.ventas, "GET", `/cotizaciones/precios-ensayo?clienteId=x&ids=${ids}`);
@@ -249,8 +251,8 @@ async function main() {
     afirmar(p.precios[C.e957.id].precio === 59518 && p.precios[C.e957.id].origen === "lista" && p.precios[C.e957.id].lista.itemCodigo === "EN412", JSON.stringify(p.precios[C.e957.id]));
     afirmar(p.precios[C.e1032.id].precio === 618324 && p.precios[C.e1032.id].origen === "lista", JSON.stringify(p.precios[C.e1032.id]));
     const e = await ok(U.ventas, "GET", `/cotizaciones/precios-ensayo?clienteId=${C.ejer.id}&ids=${ids}`);
-    afirmar(e.regla === "EJERCITO" && e.precios[C.e1032.id].precio === 735806 && e.precios[C.e1032.id].origen === "ficha", JSON.stringify(e));
-    return `particular EN412 ${p.precios[C.e957.id].precio} · EN1032 ${p.precios[C.e1032.id].precio} · Ejército EN1032 ${e.precios[C.e1032.id].precio} (ficha)`;
+    afirmar(e.regla === "EJERCITO" && e.precios[C.e1032.id].precio === 396362 && e.precios[C.e1032.id].origen === "lista" && e.precios[C.e1032.id].columna === "costo_directo", JSON.stringify(e));
+    return `particular EN412 ${p.precios[C.e957.id].precio} · EN1032 ${p.precios[C.e1032.id].precio} · Ejército EN1032 ${e.precios[C.e1032.id].precio} (costo directo)`;
   });
 
   await paso("Cotización particular: el precio unitario sale de la lista 2026; la ficha o un precio a mano se rechazan", async () => {
@@ -269,20 +271,23 @@ async function main() {
     return `${C.cot.codigo}: EN412 59.518 × 3 · EN1032 618.324 (neto de la lista; la ficha dice 735.806)`;
   });
 
-  await paso("Cotización Ejército: ficha por defecto; con precio_ejercito = costo_total toma el CT de la lista (y se restituye)", async () => {
+  await paso("Cotización Ejército: costo directo por defecto (COM-36); con costo_total el CT y con ficha la ficha (y se restituye)", async () => {
     const cab = { clienteId: C.ejer.id, formato: "NORMAL", plazoEntregaDias: 10 };
     const a = await ok(U.ventas, "POST", "/cotizaciones", { ...cab, lineas: [{ catEnsayoId: C.e1032.id, cantidad: 1 }] });
-    afirmar(Number(a.lineas[0].precioUnitario) === 735806, `Ejército con ficha ${a.lineas[0].precioUnitario}`);
+    afirmar(Number(a.lineas[0].precioUnitario) === 396362, `Ejército con costo directo ${a.lineas[0].precioUnitario}`);
     await exigir(403, U.ventas, "PUT", `${CONF}/circuito_cotizacion/precio_ejercito`, { valor: "costo_total", motivo: "Comercial no puede" });
     await exigir(400, U.calidad, "PUT", `${CONF}/circuito_cotizacion/precio_ejercito`, { valor: "otro", motivo: "Opción que no existe" });
     await ok(U.calidad, "PUT", `${CONF}/circuito_cotizacion/precio_ejercito`, { valor: "costo_total", motivo: "Prueba lp26: precio Ejército = costo total" });
     try {
       const b = await ok(U.ventas, "POST", "/cotizaciones", { ...cab, lineas: [{ catEnsayoId: C.e1032.id, cantidad: 1 }] });
       afirmar(Number(b.lineas[0].precioUnitario) === 475634, `Ejército con costo total ${b.lineas[0].precioUnitario}`);
+      await ok(U.calidad, "PUT", `${CONF}/circuito_cotizacion/precio_ejercito`, { valor: "ficha", motivo: "Prueba lp26: precio Ejército = ficha" });
+      const f = await ok(U.ventas, "POST", "/cotizaciones", { ...cab, lineas: [{ catEnsayoId: C.e1032.id, cantidad: 1 }] });
+      afirmar(Number(f.lineas[0].precioUnitario) === 735806, `Ejército con ficha ${f.lineas[0].precioUnitario}`);
     } finally {
-      await ok(U.calidad, "PUT", `${CONF}/circuito_cotizacion/precio_ejercito`, { valor: "ficha", motivo: "Restituye el valor por defecto tras el recorrido lp26" });
+      await ok(U.calidad, "PUT", `${CONF}/circuito_cotizacion/precio_ejercito`, { valor: "costo_directo", motivo: "Restituye el valor por defecto (COM-36) tras el recorrido lp26" });
     }
-    return "ficha 735.806 · costo total 475.634 · restituido «ficha»";
+    return "costo directo 396.362 · costo total 475.634 · ficha 735.806 · restituido «costo_directo»";
   });
 
   await paso("FORM05 (LQC) con la fórmula oficial: servicio EN1214 (CD 329.820) → neto 514.519 y particular 612.278", async () => {
@@ -291,13 +296,20 @@ async function main() {
     const sid = (await ok(U.ventas, "GET", `/cotizaciones/${C.cot.id}/circuito`)).solicitudes.find((s) => s.unidadCodigo === "LQC").id;
     const costeo = { servicios: [{ codigo: "EN1214", descripcion: "Resistencia balística a probeta", cantidad: 1, valorUnitario: 329820 }] };
     const programa = { plazoEntregaDias: 10, etapas: [{ actividad: "Ensayo" }] };
-    await exigir(403, U.a1, "POST", `/cotizaciones/solicitudes-laboratorio/${sid}/responder`, { respuesta: "aceptar", programa, costeo });
+    // COM-09: el analista de LQC ve la solicitud de su laboratorio y abre la ficha; el de otro laboratorio no.
+    const bandejaA1 = (await ok(U.a1, "GET", "/cotizaciones/solicitudes-laboratorio?estado=por_responder")).data;
+    afirmar(bandejaA1.some((s) => s.id === sid) && bandejaA1.every((s) => s.unidadCodigo === "LQC"), "el analista de LQC no ve solo las solicitudes de LQC");
+    await ok(U.a1, "GET", `/cotizaciones/${C.cot.id}/circuito`);
+    await ok(U.a1, "GET", `/cotizaciones/${C.cot.id}`);
+    await exigir(403, U.a1, "GET", "/cotizaciones?limit=5");
+    await exigir(403, U.lpnA1, "GET", `/cotizaciones/${C.cot.id}`);
+    await exigir(403, U.lpnA1, "POST", `/cotizaciones/solicitudes-laboratorio/${sid}/responder`, { respuesta: "aceptar", programa, costeo });
     const x = await ok(U.lqcJefe, "POST", `/cotizaciones/solicitudes-laboratorio/${sid}/responder`, { respuesta: "aceptar", programa, costeo });
     const e = x.resultado;
     const obtenido = [e.cdt, e.cfa, e.ct, e.recargo, e.precioParticular, e.iva, e.precioParticularIvaIncluido];
     const esperado = Object.values(PRECIOS.EN1214);
     afirmar(JSON.stringify(obtenido) === JSON.stringify(esperado), `FORM05 ${obtenido} ≠ ${esperado}`);
-    afirmar(e.cfaPct === 20 && e.margenParticularPct === 30 && e.ivaPct === 19 && e.precioEjercito === 395784, JSON.stringify(e));
+    afirmar(e.cfaPct === 20 && e.margenParticularPct === 30 && e.ivaPct === 19 && e.precioEjercito === 329820, JSON.stringify(e)); // COM-36: Ejército = costo directo
     return `CDT ${e.cdt} · CI ${e.cfa} · CT ${e.ct} · recargo ${e.recargo} · neto ${e.precioParticular} · IVA ${e.iva} · ${e.precioParticularIvaIncluido}`;
   });
 
