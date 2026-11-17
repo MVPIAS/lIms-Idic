@@ -81,3 +81,57 @@ SELECT pg_temp.te_fijar_param('numeracion_cotizacion', 'inicio_anio',
  WHERE NOT EXISTS (SELECT 1 FROM parametro_sistema p WHERE p.categoria = 'numeracion_cotizacion' AND p.codigo = 'inicio_anio');
 SELECT pg_temp.te_fijar_param('numeracion_cotizacion', 'reinicio', 'anual',
        'Reinicio del correlativo (global | anual)', 'COM-11');
+
+-- -----------------------------------------------------------------------------
+-- COM-02 · Reabrir cotización (valor cotizado → valor finalmente trabajado).
+-- La pide el Ejecutivo con motivo obligatorio; la autoriza el Jefe DCO o su
+-- subrogante (permiso nuevo cotizacion.reabrir); se guarda cada versión y el
+-- valor final pasa a la OT (que conserva su número) y a la factura pendiente.
+-- -----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS cotizacion_reapertura (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tenant_id             UUID         NOT NULL REFERENCES tenant(id),
+  cotizacion_id         UUID         NOT NULL REFERENCES cotizacion(id),
+  version               INTEGER      NOT NULL CHECK (version >= 2),
+  estado                VARCHAR(12)  NOT NULL DEFAULT 'solicitada'
+                          CHECK (estado IN ('solicitada', 'autorizada', 'rechazada', 'cerrada')),
+  motivo                TEXT         NOT NULL CHECK (length(btrim(motivo)) >= 10),
+  solicitada_por        UUID REFERENCES usuario(id),
+  solicitada_at         TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  resuelta_por          UUID REFERENCES usuario(id),
+  resuelta_at           TIMESTAMPTZ,
+  comentario_resolucion TEXT,
+  moneda                VARCHAR(3),
+  total_anterior        NUMERIC(14, 2),
+  version_anterior      JSONB,
+  total_final           NUMERIC(14, 2),
+  version_final         JSONB,
+  cerrada_por           UUID REFERENCES usuario(id),
+  cerrada_at            TIMESTAMPTZ,
+  ot_codigo             VARCHAR(30),
+  factura_numero        VARCHAR(30),
+  UNIQUE (cotizacion_id, version)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cotizacion_reapertura_viva
+  ON cotizacion_reapertura (cotizacion_id) WHERE estado IN ('solicitada', 'autorizada');
+CREATE INDEX IF NOT EXISTS idx_cotizacion_reapertura_estado ON cotizacion_reapertura (tenant_id, estado);
+COMMENT ON TABLE cotizacion_reapertura IS
+  'COM-02: reaperturas (versiones) de una cotización aceptada. solicitada (Ejecutivo, motivo) → autorizada | rechazada (Jefe DCO o subrogante) → cerrada (valor final a la OT y a la factura pendiente). version_anterior/version_final = líneas y totales.';
+
+-- Valor final de la OT (el valor inicial es el total cotizado al aceptar).
+ALTER TABLE ot_encargo ADD COLUMN IF NOT EXISTS valor_final        NUMERIC(14, 2);
+ALTER TABLE ot_encargo ADD COLUMN IF NOT EXISTS valor_final_at     TIMESTAMPTZ;
+ALTER TABLE ot_encargo ADD COLUMN IF NOT EXISTS valor_final_motivo VARCHAR(300);
+COMMENT ON COLUMN ot_encargo.valor_final IS 'COM-02: valor finalmente trabajado (total de la cotización tras su reapertura autorizada por el Jefe DCO), en la moneda del encargo.';
+
+INSERT INTO permiso (id, codigo, modulo, accion, descripcion) VALUES
+  (gen_random_uuid(), 'cotizacion.reabrir', 'cotizacion', 'reabrir',
+   'Autorizar o rechazar la reapertura de una cotización aceptada (Jefe DCO o su subrogante).')
+ON CONFLICT (codigo) DO NOTHING;
+
+-- Jefe de Departamento (el Jefe DCO; su subrogante recibe el mismo rol con vigencia).
+INSERT INTO rol_permiso (rol_id, permiso_id)
+SELECT r.id, p.id
+  FROM rol r JOIN permiso p ON p.codigo = 'cotizacion.reabrir'
+ WHERE COALESCE(r.alias_de, r.codigo) IN ('JEFE_DEPTO')
+ON CONFLICT DO NOTHING;

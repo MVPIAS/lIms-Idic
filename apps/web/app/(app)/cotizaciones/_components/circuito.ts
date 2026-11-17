@@ -121,6 +121,10 @@ export const TEXTO_EVENTO: Record<string, string> = {
   ensayos_laboratorio: "El laboratorio agregó ensayos a la cotización",
   aceptada: "Registró la aceptación del cliente y generó la OT",
   anulada: "Anuló la cotización",
+  reapertura_solicitada: "Pidió reabrir la cotización (ajuste del valor)",
+  reapertura_autorizada: "Autorizó la reapertura (Jefe DCO)",
+  reapertura_rechazada: "Rechazó la reapertura (Jefe DCO)",
+  reapertura_cerrada: "Registró el valor final (la OT y la factura pendiente lo toman)",
 };
 
 // Textos de los medios de envío: «Parámetros del sistema › medio_envio» (useMediosEnvio, frente f5).

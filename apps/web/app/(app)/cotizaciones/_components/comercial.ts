@@ -60,16 +60,18 @@ export const GRUPOS_CC = ["Laboratorios", "Sucursales y Delegación BPCH"] as co
  * 'expirada' (Vencida) la pone el SISTEMA cuando una Abierta supera su validez
  * (ya no se puede aceptar; sí anular).
  */
-export const ESTADOS_VIGENTES = ["abierta", "aceptada", "anulada", "expirada"] as const;
+export const ESTADOS_VIGENTES = ["abierta", "aceptada", "reabierta", "anulada", "expirada"] as const;
 export const ESTADO_PILL: Record<string, string> = {
   abierta: "blue",
   aceptada: "green",
+  reabierta: "amber",
   anulada: "red",
   expirada: "amber",
 };
 export const ESTADO_LABEL: Record<string, string> = {
   abierta: "Abierta",
   aceptada: "Aceptada",
+  reabierta: "Reabierta",
   anulada: "Anulada",
   borrador: "Borrador (histórico)",
   enviada: "Enviada (histórico)",

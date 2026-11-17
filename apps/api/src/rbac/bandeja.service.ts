@@ -431,6 +431,12 @@ export class BandejaService {
             WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.estado = 'abierta' AND c.firma_estado = 'pendiente'`,
           tenant,
         ),
+      // COM-02: reaperturas de cotización que esperan al Jefe DCO o su subrogante.
+      reaperturasPorAutorizar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM cotizacion_reapertura r WHERE r.tenant_id = COALESCE($1::uuid, r.tenant_id) AND r.estado = 'solicitada'`,
+          tenant,
+        ),
       cotizacionesFirma: (estado: string, sinEnviar = false) =>
         this.contar(
           `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id)
@@ -681,7 +687,12 @@ export class BandejaService {
       item("cotizaciones_vb_depto", "Costeos por dar V°B° del departamento", "Respuestas de costeo con V°B° del laboratorio que esperan el del Jefe de Departamento", await q.solicitudesLab(["vb_lab"]), "/cotizaciones/por-responder?estado=vb", "warn");
     // Solo para quien firma según la matriz COTIZACION por defecto (Jefe del Depto. Comercial).
     const porFirmarCot = async (): Promise<ItemBandeja[]> =>
-      (await q.firmaCotizaciones()) === 0 ? [] : [item("cotizaciones_por_firmar", "Cotizaciones por firmar", "Cotizaciones enviadas a su firma (Jefe del Departamento Comercial)", await q.cotizacionesPorFirmar(), "/cotizaciones?estado=abierta&firma=pendiente", "warn")];
+      (await q.firmaCotizaciones()) === 0
+        ? []
+        : [
+            item("cotizaciones_por_firmar", "Cotizaciones por firmar", "Cotizaciones enviadas a su firma (Jefe del Departamento Comercial)", await q.cotizacionesPorFirmar(), "/cotizaciones?estado=abierta&firma=pendiente", "warn"),
+            item("reaperturas_por_autorizar", "Reaperturas por autorizar", "Cotizaciones aceptadas que el ejecutivo pide reabrir para ajustar el valor (autoriza el Jefe DCO o su subrogante)", await q.reaperturasPorAutorizar(), "/cotizaciones?estado=aceptada", "warn"),
+          ];
     const encuestas = async () =>
       item("encuestas_pendientes", "Encuestas por registrar", "OT cerradas cuya encuesta de satisfacción aún no se registra", await q.encuestasPendientes(), "/encuestas?estado=pendiente", "info");
 
