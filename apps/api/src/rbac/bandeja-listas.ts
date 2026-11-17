@@ -116,6 +116,14 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
   cotizaciones_por_firmar: { sql: filaCotFirma(`c.firma_estado = 'pendiente'`), extra: "ninguno" },
   cotizaciones_devueltas_firma: { sql: filaCotFirma(`c.firma_estado = 'devuelta'`), extra: "ninguno" },
   cotizaciones_firmadas_sin_enviar: { sql: filaCotFirma(`c.firma_estado = 'firmada' AND c.enviada_at IS NULL`), extra: "ninguno" },
+  reaperturas_por_autorizar: {
+    sql: `SELECT c.id::text AS id, c.codigo AS texto, concat_ws(' · ', cl.razon_social, left(r.motivo, 80)) AS detalle, '/cotizaciones/' || c.id AS ruta,
+                 to_char(r.solicitada_at, 'YYYY-MM-DD') AS fecha
+            FROM cotizacion_reapertura r JOIN cotizacion c ON c.id = r.cotizacion_id LEFT JOIN cliente cl ON cl.id = c.cliente_id
+           WHERE r.tenant_id = COALESCE($1::uuid, r.tenant_id) AND r.estado = 'solicitada' AND ($2::uuid[] IS NULL OR TRUE)
+           ORDER BY r.solicitada_at`,
+    extra: "ninguno",
+  },
   cotizaciones_aceptadas_sin_ot: {
     sql: `SELECT c.id::text AS id, c.codigo AS texto, cl.razon_social AS detalle, '/cotizaciones/' || c.id AS ruta, NULL::text AS fecha
             FROM cotizacion c LEFT JOIN cliente cl ON cl.id = c.cliente_id

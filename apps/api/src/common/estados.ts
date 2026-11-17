@@ -40,7 +40,9 @@ const TRANSICIONES: Record<DominioEstado, Record<string, readonly string[]>> = {
     abierta: ["aceptada", "anulada"],
     borrador: ["enviada", "anulada"],
     enviada: ["aceptada", "rechazada", "expirada", "anulada"],
-    aceptada: ["anulada"],
+    // COM-02: el Jefe DCO autoriza reabrir una Aceptada; con el valor final vuelve a Aceptada.
+    aceptada: ["anulada", "reabierta"],
+    reabierta: ["aceptada"],
     rechazada: ["anulada"],
     expirada: ["anulada"],
     anulada: [],

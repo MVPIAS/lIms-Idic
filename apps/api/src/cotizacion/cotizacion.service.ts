@@ -42,6 +42,17 @@ import { revisarOc } from "./aceptacion-oc";
 import { heredarDeCotizacion } from "../ot/encargo/encargo.module";
 import { entero, valoresCategoria } from "../common/parametros-r4d";
 import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
+import { lineasDesdeCotizacion, totales as totalesFactura } from "../facturacion/reglas-factura";
+import {
+  ESTADO_REABIERTA,
+  REAPERTURA_VIVA,
+  errorCerrarReapertura,
+  errorResolverReapertura,
+  errorSolicitarReapertura,
+  facturaTomaValorFinal,
+  fotoCotizacion,
+  siguienteVersion,
+} from "./reapertura";
 import { validarOportunidad, enlazarOportunidad, ganarOportunidadDeCotizacion, guardarDatosSolicitud, leerDatosSolicitud, type DatosSolicitud } from "./cotizacion-extra";
 
 /** Cada cuánto el proceso periódico pasa a «Vencida» las cotizaciones fuera de validez. */
@@ -51,7 +62,7 @@ const INTERVALO_VENCIMIENTO_MS = Number(process.env.COTIZACION_VENCIMIENTO_MIN ?
  * Estados del flujo comercial vigente; el resto es histórico de solo lectura.
  * 'expirada' («Vencida») es vigente: una Abierta fuera de validez pasa sola a ella.
  */
-const ESTADOS_VIGENTES = ["abierta", "aceptada", "anulada", "expirada"] as const;
+const ESTADOS_VIGENTES = ["abierta", "aceptada", "reabierta", "anulada", "expirada"] as const;
 
 /** Días de aviso de «cotización por vencer» (igual que la tarjeta de Mi bandeja). */
 const DIAS_POR_VENCER = 7;
@@ -338,7 +349,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const circuito = (await estadoCircuitoDe(this.prisma, [id])).get(id);
     const solicitud = await leerDatosSolicitud(this.prisma, id).catch(() => null);
     const adjuntos = await listarAdjuntos(this.prisma, cot.tenantId, "cotizacion", [id]).catch(() => []);
-    return { ...cot, ...(circuito ?? {}), ot, solicitud, adjuntos };
+    // COM-02: reaperturas (versiones) de la cotización, la última primero.
+    const reaperturas = await this.reaperturas(id).catch(() => []);
+    return { ...cot, ...(circuito ?? {}), ot, solicitud, adjuntos, reaperturas };
   }
 
   // --------------------------------------------------------------------------
@@ -701,6 +714,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (estado !== undefined) {
       if (estado === "aceptada") throw new BadRequestException("Use POST /cotizaciones/:id/aceptar (exige documento de aceptación).");
       if (estado === "anulada") throw new BadRequestException("Use POST /cotizaciones/:id/anular (exige motivo).");
+      if (estado === ESTADO_REABIERTA || actual.estado === ESTADO_REABIERTA)
+        throw new BadRequestException("La reapertura la autoriza el Jefe DCO y se cierra registrando el valor final (POST /cotizaciones/:id/reapertura…).");
       validarTransicion("cotizacion", actual.estado, estado);
     }
     if (solicitud) {
@@ -712,7 +727,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     }
     const noEditable = motivoNoEditable((actual as any).firmaEstado ?? null);
     if (noEditable && actual.estado === ESTADO_ABIERTA) throw new ConflictException(noEditable);
-    if (actual.estado !== ESTADO_ABIERTA) {
+    // COM-02: una cotización Reabierta (autorizada por el Jefe DCO) se corrige hasta registrar el valor final.
+    const reabierta = actual.estado === ESTADO_REABIERTA;
+    if (actual.estado !== ESTADO_ABIERTA && !reabierta) {
       throw new ConflictException(
         `Solo se puede editar una cotización Abierta (esta está '${actual.estado}'${["borrador", "enviada", "rechazada", "expirada"].includes(actual.estado) ? ", histórica de solo lectura" : ""}).`,
       );
@@ -734,6 +751,10 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
 
     const centroCostoId = resto.centroCostoId !== undefined ? resto.centroCostoId : actual.centroCostoId;
     const validez = await this.calcularValidezPara(actual.tenantId, actual.clienteId, centroCostoId, actual.fechaEmision);
+    // Reabierta: ya fue aceptada; su validez no se vuelve a calcular.
+    const conservarValidez = reabierta
+      ? { validaHasta: undefined, expiraAt: undefined, validezDias: undefined }
+      : { validaHasta: soloFecha(validez.validaHasta), expiraAt: soloFecha(validez.validaHasta), validezDias: validez.dias };
 
     const upd: Record<string, any> = {
       centroCostoId,
@@ -750,9 +771,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       dolarValor: dolar,
       dolarFecha: moneda === "USD" ? (resto.dolarFecha ? soloFecha(resto.dolarFecha) : actual.dolarFecha ?? actual.fechaEmision) : null,
       ...(cambiaDolar ? { dolarMotivo: resto.dolarMotivo } : {}),
-      validaHasta: soloFecha(validez.validaHasta),
-      expiraAt: soloFecha(validez.validaHasta),
-      validezDias: validez.dias,
+      ...conservarValidez,
       ...(estado ? { estado } : {}),
       updatedAt: new Date(),
     };
@@ -1063,6 +1082,189 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       ot: otFinal ?? ot,
       mensaje: `Cotización aceptada. Orden de trabajo ${ot.codigo} creada.${lab}${extra}`,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // COM-02 · Reabrir cotización (reapertura.ts)
+  // --------------------------------------------------------------------------
+
+  /** Reaperturas de la cotización (versiones), la última primero. */
+  async reaperturas(cotizacionId: string) {
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT r.id, r.version, r.estado, r.motivo, r.solicitada_at AS "solicitadaAt", us.nombre_completo AS "solicitadaPor",
+              r.resuelta_at AS "resueltaAt", ur.nombre_completo AS "resueltaPor", r.comentario_resolucion AS "comentarioResolucion",
+              r.moneda, r.total_anterior::float8 AS "totalAnterior", r.total_final::float8 AS "totalFinal",
+              r.cerrada_at AS "cerradaAt", uc.nombre_completo AS "cerradaPor", r.ot_codigo AS "otCodigo", r.factura_numero AS "facturaNumero"
+         FROM cotizacion_reapertura r
+         LEFT JOIN usuario us ON us.id = r.solicitada_por
+         LEFT JOIN usuario ur ON ur.id = r.resuelta_por
+         LEFT JOIN usuario uc ON uc.id = r.cerrada_por
+        WHERE r.cotizacion_id = $1::uuid
+        ORDER BY r.version DESC`,
+      cotizacionId,
+    );
+  }
+
+  private async reaperturaViva(cotizacionId: string): Promise<{ id: string; estado: string; version: number } | null> {
+    const f = await this.prisma.$queryRawUnsafe<{ id: string; estado: string; version: number }[]>(
+      `SELECT id, estado, version FROM cotizacion_reapertura
+        WHERE cotizacion_id = $1::uuid AND estado = ANY($2::text[]) ORDER BY version DESC LIMIT 1`,
+      cotizacionId,
+      REAPERTURA_VIVA,
+    );
+    return f[0] ?? null;
+  }
+
+  /** 1 · El Ejecutivo pide reabrir una cotización Aceptada, con motivo obligatorio. */
+  async solicitarReapertura(id: string, motivo: string, tenantId?: string, usuarioId?: string) {
+    const cot = await this.detalle(id, tenantId);
+    const viva = await this.reaperturaViva(id);
+    const err = errorSolicitarReapertura(cot, viva, motivo);
+    if (err) throw new ConflictException(err);
+    const versiones = await this.prisma.$queryRawUnsafe<{ version: number }[]>(
+      `SELECT version FROM cotizacion_reapertura WHERE cotizacion_id = $1::uuid`,
+      id,
+    );
+    const version = siguienteVersion(versiones.map((v) => Number(v.version)));
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO cotizacion_reapertura (tenant_id, cotizacion_id, version, estado, motivo, solicitada_por, moneda, total_anterior)
+       VALUES ($1::uuid, $2::uuid, $3::int, 'solicitada', $4, $5::uuid, $6, $7::numeric)`,
+      cot.tenantId,
+      id,
+      version,
+      motivo.trim(),
+      usuarioId ?? null,
+      cot.moneda,
+      Number(cot.total ?? 0),
+    );
+    await this.hito(cot.tenantId, id, "reapertura_solicitada", usuarioId, motivo.trim(), { version });
+    return { ok: true, mensaje: `Reapertura de la cotización ${cot.codigo} solicitada: espera la autorización del Jefe DCO (o su subrogante).` };
+  }
+
+  /** 2 · El Jefe DCO (o su subrogante) autoriza o rechaza la reapertura. */
+  async resolverReapertura(id: string, autorizar: boolean, comentario: string | null | undefined, tenantId?: string, usuarioId?: string) {
+    const cot = await this.detalle(id, tenantId);
+    const viva = await this.reaperturaViva(id);
+    const err = errorResolverReapertura(viva, autorizar, comentario);
+    if (err) throw new ConflictException(err);
+    const obs = comentario?.trim() || null;
+    if (!autorizar) {
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE cotizacion_reapertura SET estado = 'rechazada', resuelta_por = $2::uuid, resuelta_at = now(), comentario_resolucion = $3
+          WHERE id = $1::uuid`,
+        viva!.id,
+        usuarioId ?? null,
+        obs,
+      );
+      await this.hito(cot.tenantId, id, "reapertura_rechazada", usuarioId, obs, { version: viva!.version });
+      return { ok: true, mensaje: `Reapertura rechazada: la cotización ${cot.codigo} sigue Aceptada.` };
+    }
+    // Se guarda la versión vigente (cotizado) antes de permitir cambios.
+    const foto = fotoCotizacion(cot);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE cotizacion_reapertura SET estado = 'autorizada', resuelta_por = $2::uuid, resuelta_at = now(),
+                comentario_resolucion = $3, version_anterior = $4::jsonb
+          WHERE id = $1::uuid`,
+        viva!.id,
+        usuarioId ?? null,
+        obs,
+        JSON.stringify(foto),
+      );
+      validarTransicion("cotizacion", cot.estado, ESTADO_REABIERTA);
+      await tx.cotizacion.update({ where: { id }, data: { estado: ESTADO_REABIERTA, updatedAt: new Date() } });
+    });
+    await this.hito(cot.tenantId, id, "reapertura_autorizada", usuarioId, obs, { version: viva!.version, totalAnterior: foto.total });
+    return { ok: true, mensaje: `Cotización ${cot.codigo} reabierta: corrija sus líneas y registre el valor final.` };
+  }
+
+  /**
+   * 3 · Valor final: la cotización vuelve a Aceptada con el valor corregido; la
+   * OT conserva su número y toma el valor final; la factura pendiente (borrador)
+   * se rehace con las líneas finales. Una factura ya emitida no se toca: se avisa.
+   */
+  async cerrarReapertura(id: string, tenantId?: string, usuarioId?: string) {
+    const cot = await this.detalle(id, tenantId);
+    const viva = await this.reaperturaViva(id);
+    const err = errorCerrarReapertura({ estado: cot.estado, lineas: cot.lineas.length }, viva);
+    if (err) throw new ConflictException(err);
+    const total = Number(cot.total ?? 0);
+    const ot = cot.ot;
+    const r = await this.prisma.$transaction(async (tx) => {
+      validarTransicion("cotizacion", cot.estado, "aceptada");
+      await tx.cotizacion.update({ where: { id }, data: { estado: "aceptada", updatedAt: new Date() } });
+      let facturaNumero: string | null = null;
+      let facturaEmitida: string | null = null;
+      if (ot) {
+        // La OT conserva su número y toma el valor final (EP-00 4.2: valor inicial → valor final).
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_encargo (ot_id, tenant_id, moneda, valor_final, valor_final_at, valor_final_motivo)
+           VALUES ($1::uuid, $2::uuid, $3, $4::numeric, now(), $5)
+           ON CONFLICT (ot_id) DO UPDATE SET valor_final = EXCLUDED.valor_final, valor_final_at = now(),
+             valor_final_motivo = EXCLUDED.valor_final_motivo, moneda = COALESCE(ot_encargo.moneda, EXCLUDED.moneda)`,
+          ot.id,
+          cot.tenantId,
+          cot.moneda,
+          total,
+          `Reapertura v${viva!.version} de la cotización ${cot.codigo}`,
+        );
+        const facturas = await tx.factura.findMany({
+          where: { otId: ot.id, deletedAt: null, NOT: { estado: "anulada" } },
+          select: { id: true, numero: true, estado: true, ivaPct: true },
+        });
+        for (const f of facturas) {
+          if (!facturaTomaValorFinal(f.estado)) {
+            facturaEmitida = f.numero;
+            continue;
+          }
+          const lineas = lineasDesdeCotizacion(cot as any);
+          const t = totalesFactura(lineas, Number(f.ivaPct), cot.moneda);
+          await tx.lineaFactura.deleteMany({ where: { facturaId: f.id } });
+          await tx.factura.update({
+            where: { id: f.id },
+            data: {
+              moneda: cot.moneda,
+              neto: t.neto,
+              ivaMonto: t.ivaMonto,
+              total: t.total,
+              lineas: { create: lineas },
+              observaciones: `Valor final de la cotización ${cot.codigo} (reapertura v${viva!.version}).`,
+            },
+          });
+          facturaNumero = f.numero;
+        }
+        await this.labs.anotar(tx, {
+          tenantId: cot.tenantId,
+          otId: ot.id,
+          tipo: "valor_final",
+          usuarioId: usuarioId ?? null,
+          detalle: { cotizacion: cot.codigo, version: viva!.version, moneda: cot.moneda, valorFinal: total },
+        });
+      }
+      await tx.$executeRawUnsafe(
+        `UPDATE cotizacion_reapertura SET estado = 'cerrada', cerrada_por = $2::uuid, cerrada_at = now(), total_final = $3::numeric,
+                version_final = $4::jsonb, ot_codigo = $5, factura_numero = $6
+          WHERE id = $1::uuid`,
+        viva!.id,
+        usuarioId ?? null,
+        total,
+        JSON.stringify(fotoCotizacion(cot)),
+        ot?.codigo ?? null,
+        facturaNumero,
+      );
+      return { facturaNumero, facturaEmitida };
+    });
+    await this.hito(cot.tenantId, id, "reapertura_cerrada", usuarioId, null, {
+      version: viva!.version,
+      totalFinal: total,
+      otCodigo: ot?.codigo ?? null,
+      facturaNumero: r.facturaNumero,
+    });
+    const partes = [`Valor final registrado: la cotización ${cot.codigo} vuelve a Aceptada (versión ${viva!.version}).`];
+    if (ot) partes.push(`La OT ${ot.codigo} conserva su número y toma el valor final.`);
+    if (r.facturaNumero) partes.push(`La factura pendiente ${r.facturaNumero} se actualizó con el valor final.`);
+    if (r.facturaEmitida) partes.push(`La factura ${r.facturaEmitida} ya estaba emitida: corrija la diferencia con una nota de crédito o débito.`);
+    return { ok: true, mensaje: partes.join(" ") };
   }
 
   /** Hito de la cotización (bitácora `cotizacion_evento`). */

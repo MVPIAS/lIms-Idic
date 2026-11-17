@@ -15,6 +15,8 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos } from "../common/estados";
 import { TIPOS_ACEPTACION } from "../ot/reglas-ot";
 import { PERMISO_ACEPTAR, PERMISO_ANULAR } from "./permisos-cotizacion";
+import { PERMISO_REABRIR } from "./reapertura";
+import { CircuitoCotizacionService } from "./circuito.service";
 import { exigirCotizacionEnAlcance } from "./alcance-cotizacion";
 import { AlcanceService } from "../rbac/alcance.service";
 import { PrismaService } from "../common/prisma.service";
@@ -195,6 +197,7 @@ export class CotizacionController {
     private readonly costeo: CosteoService,
     private readonly alcance: AlcanceService,
     private readonly prisma: PrismaService,
+    private readonly circuito: CircuitoCotizacionService,
   ) {}
 
   /**
@@ -379,6 +382,39 @@ export class CotizacionController {
     await this.exigirCotizacion(req, id);
     const doc = AceptarSchema.parse(body ?? {});
     return this.svc.aceptar(id, req?.user?.tenantId, doc, req?.user?.sub);
+  }
+
+  /**
+   * COM-02 · Reabrir cotización. 1) El Ejecutivo (cotizacion.crear) la pide con
+   * motivo obligatorio; 2) el Jefe DCO o su subrogante (cotizacion.reabrir) la
+   * autoriza o la rechaza; 3) el Ejecutivo corrige y registra el valor final.
+   */
+  @Post(":id/reapertura")
+  @RequierePermiso("cotizacion.crear")
+  @ApiOperation({ summary: "Pedir la reapertura de una cotización Aceptada (motivo obligatorio)" })
+  async solicitarReapertura(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    const { motivo } = z.object({ motivo: z.string().trim().max(2000) }).parse(body ?? {});
+    return this.svc.solicitarReapertura(id, motivo, req?.user?.tenantId, req?.user?.sub);
+  }
+
+  @Post(":id/reapertura/resolver")
+  @RequierePermiso(PERMISO_REABRIR)
+  @ApiOperation({ summary: "Autorizar o rechazar la reapertura (Jefe DCO o subrogante)" })
+  async resolverReapertura(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    const d = z.object({ autorizar: z.boolean(), comentario: z.string().trim().max(2000).optional().nullable() }).parse(body ?? {});
+    // Además del permiso: debe ser el Jefe DCO o su subrogante (matriz de firmas COTIZACION).
+    await this.circuito.exigirJefeDco(req);
+    return this.svc.resolverReapertura(id, d.autorizar, d.comentario, req?.user?.tenantId, req?.user?.sub);
+  }
+
+  @Post(":id/reapertura/cerrar")
+  @RequierePermiso("cotizacion.crear")
+  @ApiOperation({ summary: "Registrar el valor final de la cotización reabierta (vuelve a Aceptada)" })
+  async cerrarReapertura(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    return this.svc.cerrarReapertura(id, req?.user?.tenantId, req?.user?.sub);
   }
 
   /** «Anular orden del cliente» (EP-00 4.2): la O/C no corresponde; la cotización sigue Abierta. */

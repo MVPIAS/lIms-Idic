@@ -23,7 +23,8 @@ export function accionesDe(c: any, puede: (p: string) => boolean, exigirFirma = 
   const enFirma = c.firmaEstado === "pendiente" || c.firmaEstado === "firmada";
   const sinFirma = exigirFirma && c.circuito === "r1" && c.firmaEstado !== "firmada";
   return {
-    editar: c.estado === "abierta" && !vencida && !enFirma && puede("cotizacion.crear"),
+    // COM-02: una Reabierta (autorizada por el Jefe DCO) se corrige hasta registrar el valor final.
+    editar: ((c.estado === "abierta" && !vencida && !enFirma) || c.estado === "reabierta") && puede("cotizacion.crear"),
     aceptar: (c.estado === "abierta" || c.estado === "enviada") && !vencida && !sinFirma && puede("cotizacion.aceptar"),
     anular: (c.estado === "abierta" || c.estado === "expirada") && puede("cotizacion.anular"),
     motivoNoAceptar: vencida
