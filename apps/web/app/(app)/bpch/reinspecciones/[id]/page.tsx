@@ -6,6 +6,7 @@
  * distribución interna) → trazabilidad (y cambio de titular) en la
  * Codificación Única → cierre. API: /bpch/reinspecciones/:id
  */
+import SelectorInspectores, { type ValorInspectores } from "@/components/bpch-procesos/SelectorInspectores";
 import { conPunto } from "@/lib/etiquetas";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -35,6 +36,8 @@ function Detalle() {
   const [error, setError] = useState("");
   const [metodos, setMetodos] = useState<string[]>([]);
   const [f, setF] = useState<Record<string, string> | null>(null);
+  // BPCH-48: modalidad e inspectores de la lista de la unidad de inspección.
+  const [insp, setInsp] = useState<ValorInspectores | null>(null);
   const [titular, setTitular] = useState({ cambiar: false, motivo: "" });
   // F022: lugares (plantas del cliente y tabla del BPCH) y unidades de tamaño, como la cabecera de la OT.
   const [op, setOp] = useState<{ unidadesLote: Opcion[]; unidadesMuestra: Opcion[]; lugares: { origen: string; lugar: string; comuna: string | null }[] } | null>(null);
@@ -46,7 +49,6 @@ function Detalle() {
       setF((x) => x ?? {
         lugarInspeccion: r.inspeccion.lugar ?? "",
         fechaInspeccion: dia(r.inspeccion.fecha),
-        inspectores: r.inspeccion.inspectores ?? "",
         fechaVencimientoProducto: dia(r.inspeccion.vencimientoProducto),
         vigenciaInforme: dia(r.inspeccion.vigenciaInforme),
         observaciones: r.inspeccion.observaciones ?? "",
@@ -57,6 +59,7 @@ function Detalle() {
         unidadLote: r.lote.unidadLote ?? "",
         unidadMuestra: r.lote.unidadMuestra ?? "",
       });
+      setInsp((x) => x ?? { modalidad: r.inspeccion.modalidad ?? "", inspectorIds: r.inspeccion.inspectorIds ?? [] });
       if (r.otId) pedir<any>("GET", `/bpch/cabecera-ot/${r.otId}`).then((c) => setOp(c?.opciones ?? null)).catch(() => setOp(null));
       setError("");
     } catch (e: any) {
@@ -125,7 +128,7 @@ function Detalle() {
             <form onSubmit={(e) => {
               e.preventDefault();
               const n = (v: string) => (v.trim() ? Number(v) : null);
-              accion("PATCH", "/inspeccion", { ...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v || null])), tamanoLote: n(f.tamanoLote), tamanoMuestra: n(f.tamanoMuestra) }, "Inspección guardada.");
+              accion("PATCH", "/inspeccion", { ...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v || null])), tamanoLote: n(f.tamanoLote), tamanoMuestra: n(f.tamanoMuestra), modalidad: insp?.modalidad || null, inspectorIds: insp?.inspectorIds ?? [] }, "Inspección guardada.");
             }}>
               <fieldset disabled={!editable} style={{ border: "none", padding: 0, margin: 0 }}>
                 <div className="form-grid">
@@ -137,7 +140,9 @@ function Detalle() {
                     </datalist>
                   </div>
                   <div className="field"><label htmlFor="fi">Fecha de inspección</label><input id="fi" type="date" value={f.fechaInspeccion} onChange={set("fechaInspeccion")} /></div>
-                  <div className="field span-2"><label htmlFor="in">Inspectores</label><input id="in" value={f.inspectores} onChange={set("inspectores")} placeholder="Iniciales" /></div>
+                  {insp && (
+                    <SelectorInspectores idBase="rei" valor={insp} onCambio={setInsp} disponibles={d.inspeccion.inspectoresDisponibles ?? []} textoAnterior={d.inspeccion.inspectoresTextoAnterior} />
+                  )}
                   <div className="field"><label htmlFor="pr">Procedimiento</label><input id="pr" value={f.procedimiento} onChange={set("procedimiento")} /></div>
                   <div className="field"><label htmlFor="il">Identificación del lote *</label><input id="il" value={f.identificacionLote} onChange={set("identificacionLote")} /></div>
                   <div className="field">
