@@ -5,12 +5,42 @@
 -- se puede correr dos veces. Va en ORDEN_SQL.txt ANTES de align_cierre_permisos.sql.
 -- =============================================================================
 
+-- Marca «aplicado una vez» (auditoría 17-11-2026). Los pasos que fijan una
+-- decisión del IDIC (parámetros, matriz de firmas, permisos) se aplican UNA sola
+-- vez por base: si el IDIC los cambia después en Administración, volver a correr
+-- el SQL (cada despliegue repite ORDEN_SQL.txt) no los pisa ni deja historial.
+-- La usan también align_tercer_envio_bpch.sql y los align_* posteriores.
+CREATE TABLE IF NOT EXISTS sql_paso_aplicado (
+  codigo      VARCHAR(80)  PRIMARY KEY,
+  descripcion TEXT,
+  aplicado_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE sql_paso_aplicado IS
+  'Pasos de datos de los align_*.sql que se aplican una sola vez (decisiones del IDIC que luego se administran desde la pantalla). Borrar la fila = volver a aplicarlo en el próximo despliegue.';
+
+-- Ayudante de esta sesión (pg_temp): TRUE solo la primera vez que se pide el paso
+-- (y lo deja marcado). Patrón: DO $$ BEGIN IF pg_temp.te_primera_vez(...) THEN … END IF; END $$;
+CREATE OR REPLACE FUNCTION pg_temp.te_primera_vez(p_codigo TEXT, p_descripcion TEXT)
+RETURNS boolean AS $$
+DECLARE n INTEGER;
+BEGIN
+  INSERT INTO sql_paso_aplicado (codigo, descripcion) VALUES (p_codigo, p_descripcion)
+  ON CONFLICT (codigo) DO NOTHING;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n > 0;
+END;
+$$ LANGUAGE plpgsql;
+
 -- Ayudante de esta sesión (pg_temp: desaparece al terminar el script). Fija el
 -- valor de un parámetro por decisión del IDIC y deja constancia en
--- parametro_sistema_historial. Si el parámetro no existe lo crea. Idempotente:
--- si ya tiene ese valor no hace nada.
+-- parametro_sistema_historial. Si el parámetro no existe lo crea. Se llama solo
+-- dentro de un paso te_primera_vez; además, si el historial ya registra esta
+-- misma decisión (base donde el script corrió antes de existir la marca), no
+-- vuelve a tocar el parámetro.
 CREATE OR REPLACE FUNCTION pg_temp.te_fijar_param(p_cat TEXT, p_cod TEXT, p_valor TEXT, p_etiqueta TEXT, p_ref TEXT)
 RETURNS void AS $$
+DECLARE
+  v_motivo TEXT := 'Respuesta IDIC tercer envío 17-11-2026 (' || p_ref || ')';
 BEGIN
   INSERT INTO parametro_sistema (tenant_id, categoria, codigo, etiqueta, valor, orden, activo)
   SELECT t.id, p_cat, p_cod, p_etiqueta, p_valor, 90, TRUE FROM tenant t
@@ -21,14 +51,15 @@ BEGIN
       FROM parametro_sistema p
      WHERE p.categoria = p_cat AND p.codigo = p_cod
        AND btrim(coalesce(p.valor, '')) IS DISTINCT FROM p_valor
+       AND NOT EXISTS (SELECT 1 FROM parametro_sistema_historial h
+                        WHERE h.parametro_id = p.id AND h.motivo = v_motivo)
   ), upd AS (
     UPDATE parametro_sistema p SET valor = p_valor, activo = TRUE, updated_at = now()
       FROM cambiados c WHERE p.id = c.id
     RETURNING p.id
   )
   INSERT INTO parametro_sistema_historial (tenant_id, parametro_id, categoria, codigo, valor_anterior, valor_nuevo, motivo, usuario_id)
-  SELECT c.tenant_id, c.id, p_cat, p_cod, c.antes, p_valor,
-         'Respuesta IDIC tercer envío 17-11-2026 (' || p_ref || ')', NULL
+  SELECT c.tenant_id, c.id, p_cat, p_cod, c.antes, p_valor, v_motivo, NULL
     FROM cambiados c JOIN upd u ON u.id = c.id;
 END;
 $$ LANGUAGE plpgsql;
@@ -64,25 +95,32 @@ COMMENT ON COLUMN encuesta_satisfaccion.estado IS
 -- El código ya corrige el defecto previo (numeracion-cotizacion.ts): «inicio»
 -- solo rige en el año «inicio_anio»; los demás años parten en 1.
 -- -----------------------------------------------------------------------------
--- Para no repetir números del año en curso al pasar de «global» a «anual», la
--- serie del año actual continúa desde donde iba el contador global.
-INSERT INTO cotizacion_correlativo (tenant_id, serie, ultimo)
-SELECT c.tenant_id, to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY'), c.ultimo
-  FROM cotizacion_correlativo c
-  JOIN parametro_sistema p ON p.tenant_id = c.tenant_id AND p.categoria = 'numeracion_cotizacion'
-                          AND p.codigo = 'reinicio' AND btrim(coalesce(p.valor, '')) <> 'anual'
- WHERE c.serie = 'global'
-ON CONFLICT (tenant_id, serie) DO UPDATE SET ultimo = GREATEST(cotizacion_correlativo.ultimo, EXCLUDED.ultimo), updated_at = now();
+-- Una sola vez por base (marca te1711.COM-11): si después el IDIC vuelve a
+-- «global» o cambia «inicio_anio» en Parámetros, no se pisa.
+DO $$
+BEGIN
+  IF pg_temp.te_primera_vez('te1711.COM-11', 'Cotización: reinicio anual del correlativo (COM-11)') THEN
+    -- Para no repetir números del año en curso al pasar de «global» a «anual», la
+    -- serie del año actual continúa desde donde iba el contador global.
+    INSERT INTO cotizacion_correlativo (tenant_id, serie, ultimo)
+    SELECT c.tenant_id, to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY'), c.ultimo
+      FROM cotizacion_correlativo c
+      JOIN parametro_sistema p ON p.tenant_id = c.tenant_id AND p.categoria = 'numeracion_cotizacion'
+                              AND p.codigo = 'reinicio' AND btrim(coalesce(p.valor, '')) <> 'anual'
+     WHERE c.serie = 'global'
+    ON CONFLICT (tenant_id, serie) DO UPDATE SET ultimo = GREATEST(cotizacion_correlativo.ultimo, EXCLUDED.ultimo), updated_at = now();
 
--- «inicio» (último número del Sistema Comercial) sigue rigiendo en el año actual:
--- solo al pasar de «global» a «anual» (la primera vez que corre este script).
-SELECT pg_temp.te_fijar_param('numeracion_cotizacion', 'inicio_anio',
-       to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY'),
-       'Año del último número usado (con reinicio anual, «inicio» solo rige ese año)', 'COM-11')
- WHERE EXISTS (SELECT 1 FROM parametro_sistema p WHERE p.categoria = 'numeracion_cotizacion' AND p.codigo = 'reinicio'
-                  AND btrim(coalesce(p.valor, '')) <> 'anual');
-SELECT pg_temp.te_fijar_param('numeracion_cotizacion', 'reinicio', 'anual',
-       'Reinicio del correlativo (global | anual)', 'COM-11');
+    -- «inicio» (último número del Sistema Comercial) sigue rigiendo en el año actual.
+    IF EXISTS (SELECT 1 FROM parametro_sistema p WHERE p.categoria = 'numeracion_cotizacion' AND p.codigo = 'reinicio'
+                  AND btrim(coalesce(p.valor, '')) <> 'anual') THEN
+      PERFORM pg_temp.te_fijar_param('numeracion_cotizacion', 'inicio_anio',
+              to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY'),
+              'Año del último número usado (con reinicio anual, «inicio» solo rige ese año)', 'COM-11');
+    END IF;
+    PERFORM pg_temp.te_fijar_param('numeracion_cotizacion', 'reinicio', 'anual',
+            'Reinicio del correlativo (global | anual)', 'COM-11');
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- COM-02 · Reabrir cotización (valor cotizado → valor finalmente trabajado).
@@ -229,18 +267,24 @@ BEGIN
   END IF;
 END $$;
 
-INSERT INTO flujo_firma (id, tenant_id, tipo_documento, unidad_id, orden, accion, rol_id, nivel_unidad, unidad_destino_id, obligatorio, activo, descripcion)
-SELECT gen_random_uuid(), t.id, 'OFICIO_COTIZACION', NULL, v.orden, v.accion, r.id, v.nivel, NULL, TRUE, TRUE, v.descripcion
-  FROM tenant t
- CROSS JOIN (VALUES
-   (1, 'VB',    'JEFE_DEPTO',  'COMERCIAL', 'V°B° del Jefe del Departamento Comercial'),
-   (2, 'VB',    'JEFE_LAB',    'MISMA',     'V°B° del Jefe del Laboratorio de la cotización'),
-   (3, 'VB',    'SUBDIRECTOR', 'DIRECCION', 'V°B° del Subdirector'),
-   (4, 'FIRMA', 'DIRECTOR',    'DIRECCION', 'Firma el Director')
- ) AS v(orden, accion, rol, nivel, descripcion)
-  JOIN rol r ON r.tenant_id = t.id AND r.codigo = v.rol
- WHERE NOT EXISTS (SELECT 1 FROM flujo_firma x WHERE x.tenant_id = t.id AND x.tipo_documento = 'OFICIO_COTIZACION'
-                      AND x.unidad_id IS NULL AND x.orden = v.orden);
+-- Una sola vez (te1711.COM-08): un paso que el IDIC borre de la matriz no vuelve.
+DO $$
+BEGIN
+  IF pg_temp.te_primera_vez('te1711.COM-08', 'Matriz OFICIO_COTIZACION sembrada (COM-08)') THEN
+    INSERT INTO flujo_firma (id, tenant_id, tipo_documento, unidad_id, orden, accion, rol_id, nivel_unidad, unidad_destino_id, obligatorio, activo, descripcion)
+    SELECT gen_random_uuid(), t.id, 'OFICIO_COTIZACION', NULL, v.orden, v.accion, r.id, v.nivel, NULL, TRUE, TRUE, v.descripcion
+      FROM tenant t
+     CROSS JOIN (VALUES
+       (1, 'VB',    'JEFE_DEPTO',  'COMERCIAL', 'V°B° del Jefe del Departamento Comercial'),
+       (2, 'VB',    'JEFE_LAB',    'MISMA',     'V°B° del Jefe del Laboratorio de la cotización'),
+       (3, 'VB',    'SUBDIRECTOR', 'DIRECCION', 'V°B° del Subdirector'),
+       (4, 'FIRMA', 'DIRECTOR',    'DIRECCION', 'Firma el Director')
+     ) AS v(orden, accion, rol, nivel, descripcion)
+      JOIN rol r ON r.tenant_id = t.id AND r.codigo = v.rol
+     WHERE NOT EXISTS (SELECT 1 FROM flujo_firma x WHERE x.tenant_id = t.id AND x.tipo_documento = 'OFICIO_COTIZACION'
+                          AND x.unidad_id IS NULL AND x.orden = v.orden);
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- COM-32 · Matriz COTIZACION, paso 1 «Elabora»: el Ejecutivo de Ventas y la
@@ -249,48 +293,91 @@ SELECT gen_random_uuid(), t.id, 'OFICIO_COTIZACION', NULL, v.orden, v.accion, r.
 -- porque los ejecutivos están asignados a la Sección Ventas. La Jefa de Ventas
 -- es el responsable alternativo (Jefe de Sección en la misma unidad fija).
 -- -----------------------------------------------------------------------------
-UPDATE flujo_firma f
-   SET nivel_unidad = 'FIJA',
-       unidad_destino_id = svt.id,
-       rol_alternativo_id = js.id,
-       nivel_unidad_alternativo = 'MISMA',
-       alternativo_configurado_at = COALESCE(f.alternativo_configurado_at, now()),
-       descripcion = 'Elabora el Ejecutivo de Ventas o la Jefa de Ventas (Sección Ventas)',
-       updated_at = now()
-  FROM unidad svt, rol js, rol rc
- WHERE f.tipo_documento = 'COTIZACION' AND f.orden = 1 AND f.accion = 'ELABORA' AND f.unidad_id IS NULL
-   AND svt.tenant_id = f.tenant_id AND svt.codigo = 'SVT'
-   AND js.tenant_id = f.tenant_id AND js.codigo = 'JEFE_SECCION'
-   AND rc.id = f.rol_id AND COALESCE(rc.alias_de, rc.codigo) = 'COMERCIAL'
-   AND (f.nivel_unidad IS DISTINCT FROM 'FIJA' OR f.unidad_destino_id IS DISTINCT FROM svt.id OR f.rol_alternativo_id IS DISTINCT FROM js.id);
+-- Una sola vez (te1711.COM-32): un cambio posterior del paso en Administración ›
+-- Matriz de firmas no se pisa.
+DO $$
+BEGIN
+  IF pg_temp.te_primera_vez('te1711.COM-32', 'Matriz COTIZACION: paso Elabora en la Sección Ventas (COM-32)') THEN
+    UPDATE flujo_firma f
+       SET nivel_unidad = 'FIJA',
+           unidad_destino_id = svt.id,
+           rol_alternativo_id = js.id,
+           nivel_unidad_alternativo = 'MISMA',
+           alternativo_configurado_at = COALESCE(f.alternativo_configurado_at, now()),
+           descripcion = 'Elabora el Ejecutivo de Ventas o la Jefa de Ventas (Sección Ventas)',
+           updated_at = now()
+      FROM unidad svt, rol js, rol rc
+     WHERE f.tipo_documento = 'COTIZACION' AND f.orden = 1 AND f.accion = 'ELABORA' AND f.unidad_id IS NULL
+       AND svt.tenant_id = f.tenant_id AND svt.codigo = 'SVT'
+       AND js.tenant_id = f.tenant_id AND js.codigo = 'JEFE_SECCION'
+       AND rc.id = f.rol_id AND COALESCE(rc.alias_de, rc.codigo) = 'COMERCIAL'
+       AND (f.nivel_unidad IS DISTINCT FROM 'FIJA' OR f.unidad_destino_id IS DISTINCT FROM svt.id OR f.rol_alternativo_id IS DISTINCT FROM js.id);
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- COM-18 · No hay adquisiciones en el LIMS (solo ingreso y consumo): se quitan
 -- compra.ver y compra.gestionar a los roles (solo los conserva SUPERADMIN) y se
 -- desactiva la regla SOLICITUD_ADQUISICION. El módulo no se borra.
--- align_cierre_permisos.sql ya no los vuelve a repartir.
+-- El maestro de PROVEEDORES sigue en uso (insumos, servicio externo de
+-- Metrología): pasa a sus propios permisos proveedor.ver / proveedor.gestionar,
+-- que reciben quienes tenían compra.* (antes de quitarlos), Administración y
+-- Abastecimiento. align_cierre_permisos.sql reparte proveedor.ver como cualquier
+-- *.ver y ya no reparte compra.*; align_admin_roles.sql y
+-- align_correcciones_manuales.sql tampoco.
 -- -----------------------------------------------------------------------------
-DELETE FROM rol_permiso rp
- USING permiso p, rol r
- WHERE rp.permiso_id = p.id AND rp.rol_id = r.id
-   AND p.codigo IN ('compra.ver', 'compra.gestionar')
-   AND COALESCE(r.alias_de, r.codigo) <> 'SUPERADMIN';
-UPDATE flujo_firma SET activo = FALSE, updated_at = now()
- WHERE tipo_documento = 'SOLICITUD_ADQUISICION' AND activo;
+INSERT INTO permiso (id, codigo, modulo, accion, descripcion) VALUES
+  (gen_random_uuid(), 'proveedor.ver',       'proveedor', 'ver',       'Ver el maestro de proveedores'),
+  (gen_random_uuid(), 'proveedor.gestionar', 'proveedor', 'gestionar', 'Crear y modificar proveedores del maestro')
+ON CONFLICT (codigo) DO NOTHING;
+
+-- Una sola vez (te1711.COM-18): si el IDIC vuelve a dar compra.* a un rol, o
+-- reactiva SOLICITUD_ADQUISICION, no se pisa.
+DO $$
+BEGIN
+  IF pg_temp.te_primera_vez('te1711.COM-18', 'Sin órdenes de compra: compra.* solo SUPERADMIN; proveedores con permiso propio (COM-18)') THEN
+    INSERT INTO rol_permiso (rol_id, permiso_id)
+    SELECT DISTINCT rp.rol_id, pn.id
+      FROM rol_permiso rp
+      JOIN permiso pc ON pc.id = rp.permiso_id
+      JOIN permiso pn ON pn.codigo = replace(pc.codigo, 'compra.', 'proveedor.')
+     WHERE pc.codigo IN ('compra.ver', 'compra.gestionar')
+    ON CONFLICT DO NOTHING;
+    INSERT INTO rol_permiso (rol_id, permiso_id)
+    SELECT r.id, p.id
+      FROM rol r JOIN permiso p ON p.codigo IN ('proveedor.ver', 'proveedor.gestionar')
+     WHERE COALESCE(r.alias_de, r.codigo) IN ('ADMIN', 'ABASTECIMIENTO', 'SUPERADMIN')
+    ON CONFLICT DO NOTHING;
+
+    DELETE FROM rol_permiso rp
+     USING permiso p, rol r
+     WHERE rp.permiso_id = p.id AND rp.rol_id = r.id
+       AND p.codigo IN ('compra.ver', 'compra.gestionar')
+       AND COALESCE(r.alias_de, r.codigo) <> 'SUPERADMIN';
+    UPDATE flujo_firma SET activo = FALSE, updated_at = now()
+     WHERE tipo_documento = 'SOLICITUD_ADQUISICION' AND activo;
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- COM-09 · V°B° de la cotización solo del Jefe de Laboratorio; es requisito para
 -- emitir; el analista hace la estimación (permiso cotizacion.costear).
+-- Una sola vez (te1711.COM-09).
 -- -----------------------------------------------------------------------------
-SELECT pg_temp.te_fijar_param('circuito_cotizacion', 'vb_niveles', 'lab',
-       'V°B° que exige la respuesta del laboratorio (lab_depto | lab | ninguno)', 'COM-09');
-SELECT pg_temp.te_fijar_param('circuito_cotizacion', 'exigir_consulta_laboratorio', 'si',
-       'Exigir al menos una consulta al laboratorio antes de firmar (si | no)', 'COM-09');
-INSERT INTO rol_permiso (rol_id, permiso_id)
-SELECT r.id, p.id
-  FROM rol r JOIN permiso p ON p.codigo = 'cotizacion.costear'
- WHERE COALESCE(r.alias_de, r.codigo) = 'ANALISTA'
-ON CONFLICT DO NOTHING;
+DO $$
+BEGIN
+  IF pg_temp.te_primera_vez('te1711.COM-09', 'Circuito de cotización: V°B° solo del Jefe de Laboratorio (COM-09)') THEN
+    PERFORM pg_temp.te_fijar_param('circuito_cotizacion', 'vb_niveles', 'lab',
+            'V°B° que exige la respuesta del laboratorio (lab_depto | lab | ninguno)', 'COM-09');
+    PERFORM pg_temp.te_fijar_param('circuito_cotizacion', 'exigir_consulta_laboratorio', 'si',
+            'Exigir al menos una consulta al laboratorio antes de firmar (si | no)', 'COM-09');
+    INSERT INTO rol_permiso (rol_id, permiso_id)
+    SELECT r.id, p.id
+      FROM rol r JOIN permiso p ON p.codigo = 'cotizacion.costear'
+     WHERE COALESCE(r.alias_de, r.codigo) = 'ANALISTA'
+    ON CONFLICT DO NOTHING;
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- COM-16 · OT sin OPI: la dispone el Director y, eventualmente, el Jefe de
@@ -307,8 +394,14 @@ UPDATE parametro_sistema SET etiqueta = 'Disposición del Director o del Jefe de
 -- COM-36 · Precio para las FF.AA. y de Orden: costo directo de la lista vigente.
 -- (El IVA incluido por tipo de cliente no se cambia aquí: ver informe.)
 -- -----------------------------------------------------------------------------
-SELECT pg_temp.te_fijar_param('circuito_cotizacion', 'precio_ejercito', 'costo_directo',
-       'Precio de la lista que toma un cliente Ejército (ficha | costo_directo | costo_total | neto)', 'COM-36');
+-- Una sola vez (te1711.COM-36).
+DO $$
+BEGIN
+  IF pg_temp.te_primera_vez('te1711.COM-36', 'Precio Ejército: costo directo de la lista (COM-36)') THEN
+    PERFORM pg_temp.te_fijar_param('circuito_cotizacion', 'precio_ejercito', 'costo_directo',
+            'Precio de la lista que toma un cliente Ejército (ficha | costo_directo | costo_total | neto)', 'COM-36');
+  END IF;
+END $$;
 UPDATE parametro_sistema SET etiqueta = 'Precio de la lista que toma un cliente Ejército (ficha | costo_directo | costo_total | neto)'
  WHERE categoria = 'circuito_cotizacion' AND codigo = 'precio_ejercito'
    AND etiqueta IS DISTINCT FROM 'Precio de la lista que toma un cliente Ejército (ficha | costo_directo | costo_total | neto)';

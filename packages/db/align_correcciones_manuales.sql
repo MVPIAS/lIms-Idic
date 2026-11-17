@@ -103,20 +103,12 @@ SELECT r.id, p.id FROM rol r JOIN permiso p ON p.codigo = 'resultado.reabrir'
  WHERE r.codigo IN ('SUPERADMIN', 'DIRECTOR', 'SUBDIRECTOR', 'JEFE_DEPTO', 'JEFEDCO', 'JEFE_SECCION', 'JEFE_LAB', 'JEFELAB')
 ON CONFLICT DO NOTHING;
 
--- compra.*: quienes ya veían / gestionaban compras con los permisos de factura
--- (se conserva lo que cada rol podía hacer) y Abastecimiento.
+-- compra.*: ya no se reparte (COM-18, respuesta del IDIC 17-11-2026: no hay
+-- adquisiciones en el LIMS; solo SUPERADMIN, vía align_admin_roles.sql). El
+-- maestro de proveedores usa proveedor.ver / proveedor.gestionar
+-- (align_tercer_envio_comercial.sql). Abastecimiento conserva el kardex.
 INSERT INTO rol_permiso (rol_id, permiso_id)
-SELECT DISTINCT rp.rol_id, pn.id
-  FROM rol_permiso rp JOIN permiso pv ON pv.id = rp.permiso_id AND pv.codigo = 'factura.ver'
-  JOIN permiso pn ON pn.codigo = 'compra.ver'
-ON CONFLICT DO NOTHING;
-INSERT INTO rol_permiso (rol_id, permiso_id)
-SELECT DISTINCT rp.rol_id, pn.id
-  FROM rol_permiso rp JOIN permiso pv ON pv.id = rp.permiso_id AND pv.codigo = 'factura.emitir'
-  JOIN permiso pn ON pn.codigo = 'compra.gestionar'
-ON CONFLICT DO NOTHING;
-INSERT INTO rol_permiso (rol_id, permiso_id)
-SELECT r.id, p.id FROM rol r JOIN permiso p ON p.codigo IN ('compra.ver', 'compra.gestionar', 'consumible.gestionar')
+SELECT r.id, p.id FROM rol r JOIN permiso p ON p.codigo = 'consumible.gestionar'
  WHERE r.codigo = 'ABASTECIMIENTO'
 ON CONFLICT DO NOTHING;
 

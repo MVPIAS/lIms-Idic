@@ -24,6 +24,25 @@
 
 BEGIN;
 
+-- Marca «aplicado una vez» (auditoría 17-11-2026; misma tabla que
+-- align_tercer_envio_comercial.sql). Los pasos 5 y 7 fijan una decisión del IDIC
+-- que luego se administra desde la pantalla: se aplican una sola vez por base.
+CREATE TABLE IF NOT EXISTS sql_paso_aplicado (
+  codigo      VARCHAR(80)  PRIMARY KEY,
+  descripcion TEXT,
+  aplicado_at TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+CREATE OR REPLACE FUNCTION pg_temp.te_primera_vez(p_codigo TEXT, p_descripcion TEXT)
+RETURNS boolean AS $$
+DECLARE n INTEGER;
+BEGIN
+  INSERT INTO sql_paso_aplicado (codigo, descripcion) VALUES (p_codigo, p_descripcion)
+  ON CONFLICT (codigo) DO NOTHING;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n > 0;
+END;
+$$ LANGUAGE plpgsql;
+
 -- -----------------------------------------------------------------------------
 -- 1 · BPCH-19 · código de empresa en el cliente
 -- -----------------------------------------------------------------------------
@@ -147,15 +166,22 @@ COMMENT ON COLUMN bpch_cabecera_ot.inspector_ids IS
 -- 5 · BPCH-43 · sin V°B° del Director en el Informe de Incumplimiento
 --     (también cubre el informe de rechazo de prototipo, que usa esa matriz)
 -- -----------------------------------------------------------------------------
-UPDATE flujo_firma ff
-   SET activo = FALSE,
-       descripcion = COALESCE(ff.descripcion, 'VB del Director') || ' · Desactivado: Respuesta IDIC tercer envío 17-11-2026 (BPCH-43)',
-       updated_at = now()
-  FROM rol r
- WHERE r.id = ff.rol_id AND r.codigo = 'DIRECTOR'
-   AND ff.tipo_documento = 'INFORME_INCUMPLIMIENTO'
-   AND ff.accion = 'VB'
-   AND ff.activo;
+-- Una sola vez (te1711.BPCH-43): si el IDIC reactiva el paso en Administración ›
+-- Matriz de firmas, no se vuelve a desactivar.
+DO $$
+BEGIN
+  IF pg_temp.te_primera_vez('te1711.BPCH-43', 'Informe de Incumplimiento sin V°B° del Director (BPCH-43)') THEN
+    UPDATE flujo_firma ff
+       SET activo = FALSE,
+           descripcion = COALESCE(ff.descripcion, 'VB del Director') || ' · Desactivado: Respuesta IDIC tercer envío 17-11-2026 (BPCH-43)',
+           updated_at = now()
+      FROM rol r
+     WHERE r.id = ff.rol_id AND COALESCE(r.alias_de, r.codigo) = 'DIRECTOR'
+       AND ff.tipo_documento = 'INFORME_INCUMPLIMIENTO'
+       AND ff.accion = 'VB'
+       AND ff.activo;
+  END IF;
+END $$;
 
 -- -----------------------------------------------------------------------------
 -- 6 · BPCH-42 · plantillas SCC: imprimir el contacto (nombre y correo)
@@ -198,8 +224,15 @@ END $$;
 -- -----------------------------------------------------------------------------
 -- 7 · BPCH-03 · Producción Nacional siempre sin cobro
 -- -----------------------------------------------------------------------------
-UPDATE bpch_oc_operativa
-   SET con_cobro = FALSE, updated_at = now()
- WHERE con_cobro AND estado = 'vigente';
+-- Una sola vez (te1711.BPCH-03): una O/C que después se marque «con cobro» a
+-- mano no se vuelve a pasar a «sin cobro».
+DO $$
+BEGIN
+  IF pg_temp.te_primera_vez('te1711.BPCH-03', 'O/C operativas de Producción Nacional sin cobro (BPCH-03)') THEN
+    UPDATE bpch_oc_operativa
+       SET con_cobro = FALSE, updated_at = now()
+     WHERE con_cobro AND estado = 'vigente';
+  END IF;
+END $$;
 
 COMMIT;

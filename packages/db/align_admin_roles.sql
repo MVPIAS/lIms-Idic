@@ -369,6 +369,7 @@ SELECT 'JEFE_SECCION', p.codigo
   FROM rol r JOIN rol_permiso rp ON rp.rol_id = r.id JOIN permiso p ON p.id = rp.permiso_id
  WHERE COALESCE(r.alias_de, r.codigo) = 'JEFE_LAB'
    AND p.codigo NOT LIKE 'costo\_real.%'
+   AND p.codigo NOT LIKE 'compra.%'   -- COM-18: compra.* solo SUPERADMIN
    AND r.tenant_id = (SELECT id FROM tenant WHERE codigo = 'IDIC');
 INSERT INTO _rp_idic SELECT DISTINCT 'JEFE_DEPTO', perm FROM _rp_idic WHERE rol = 'JEFE_SECCION';
 
@@ -378,7 +379,8 @@ INSERT INTO _rp_idic SELECT DISTINCT 'JEFE_DEPTO', perm FROM _rp_idic WHERE rol 
 INSERT INTO _rp_idic
 SELECT r, p.codigo FROM unnest(ARRAY['DIRECTOR','SUBDIRECTOR','ADMIN','LECTOR']) r
 CROSS JOIN permiso p WHERE p.accion = 'ver'
-   AND NOT (r = 'ADMIN' AND p.codigo ~ '^(evidencia|arma|caso|ibis)\.');
+   AND NOT (r = 'ADMIN' AND p.codigo ~ '^(evidencia|arma|caso|ibis)\.')
+   AND p.codigo NOT LIKE 'compra.%';  -- COM-18 (align_tercer_envio_comercial.sql)
 -- SUPERADMIN: todos los permisos (el guard ya lo deja pasar; esto es para la matriz).
 INSERT INTO _rp_idic SELECT 'SUPERADMIN', p.codigo FROM permiso p;
 
