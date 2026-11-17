@@ -129,3 +129,67 @@ export function htmlOficio(v: VistaOficio): string {
 export function clavesAvisoFirmaOficio(pasoIds: (string | null | undefined)[]): string[] {
   return [...new Set(pasoIds.filter((x): x is string => !!x))].map((id) => `oficio_firma:${id}`);
 }
+
+/* ----------------------------------------------------- barra de etapas --- */
+
+export interface PasoBarra {
+  id?: string | null;
+  orden: number;
+  accion: string;
+  rolNombre?: string | null;
+  rolCodigo?: string | null;
+  unidadCodigo?: string | null;
+  estado?: string | null;
+}
+export interface EtapaOficio {
+  clave: string;
+  titulo: string;
+  estado: "hecho" | "actual" | "pendiente";
+}
+
+/** «V°B° Jefe de Departamento · DCO» / «Firma Director». */
+export function tituloPasoOficio(p: PasoBarra): string {
+  const rol = (p.rolNombre ?? p.rolCodigo ?? "").trim() || (p.accion === "VB" ? "responsable" : "firmante");
+  return `${p.accion === "VB" ? "V°B°" : "Firma"} ${rol}${p.unidadCodigo ? ` · ${p.unidadCodigo}` : ""}`;
+}
+
+/**
+ * Barra de etapas de la ficha del oficio: Elaborar → un paso por cada V°B° o
+ * firma del circuito real (los pasos vigentes del oficio; si aún no se envió a
+ * firmas, los que resuelve la matriz: OFICIO u OFICIO_COTIZACION) → Despacho.
+ * Sin pasos conocidos, el circuito genérico de la matriz OFICIO.
+ */
+export function etapasOficio(o: { estado: string; pasos: PasoBarra[]; pasoActual?: string[]; previstos?: PasoBarra[] | null }): EtapaOficio[] {
+  const enCircuito = ["en_firma", "firmado", "despachado"].includes(o.estado);
+  const vigentes = o.pasos.filter((p) => p.estado !== "anulado");
+  const firmadoTodo = o.estado === "firmado" || o.estado === "despachado";
+  const fuente: PasoBarra[] =
+    enCircuito && vigentes.length
+      ? vigentes
+      : o.previstos?.length
+        ? o.previstos
+        : vigentes.length
+          ? vigentes
+          : [
+              { orden: 1, accion: "VB", rolNombre: "Jefe de Departamento" },
+              { orden: 2, accion: "FIRMA", rolNombre: "de la Dirección" },
+            ];
+  const actuales = new Set(o.pasoActual ?? []);
+  const etapas: EtapaOficio[] = [
+    { clave: "elaborar", titulo: "Elaborar", estado: editable(o.estado) ? "actual" : "hecho" },
+    ...[...fuente]
+      .sort((a, b) => a.orden - b.orden)
+      .map((p, i): EtapaOficio => ({
+        clave: `paso-${p.orden}-${i}`,
+        titulo: tituloPasoOficio(p),
+        estado:
+          firmadoTodo || (enCircuito && p.estado === "firmado")
+            ? "hecho"
+            : o.estado === "en_firma" && p.id && actuales.has(p.id)
+              ? "actual"
+              : "pendiente",
+      })),
+    { clave: "despacho", titulo: "Despacho por Oficina de partes", estado: o.estado === "despachado" ? "hecho" : o.estado === "firmado" ? "actual" : "pendiente" },
+  ];
+  return etapas;
+}

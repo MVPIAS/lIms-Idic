@@ -1,4 +1,4 @@
-import { clavesAvisoFirmaOficio, editable, errorTransicionOficio, erroresDespachoOficio, erroresOficio, htmlOficio } from "./reglas-oficio";
+import { clavesAvisoFirmaOficio, editable, errorTransicionOficio, erroresDespachoOficio, erroresOficio, etapasOficio, htmlOficio } from "./reglas-oficio";
 
 describe("estados del oficio conductor", () => {
   it("borrador → en firma → firmado → despachado", () => {
@@ -68,5 +68,42 @@ describe("avisos de firma de un oficio que dejan de estar pendientes (F091)", ()
   it("una clave por paso, sin repetir ni vacíos", () => {
     expect(clavesAvisoFirmaOficio(["p1", "p2", "p1", null, undefined, ""])).toEqual(["oficio_firma:p1", "oficio_firma:p2"]);
     expect(clavesAvisoFirmaOficio([])).toEqual([]);
+  });
+});
+
+describe("barra de etapas del oficio (circuito real)", () => {
+  const cotizacion = [
+    { id: "a", orden: 1, accion: "VB", rolNombre: "Jefe de Departamento", unidadCodigo: "DCO", estado: "firmado" },
+    { id: "b", orden: 2, accion: "VB", rolNombre: "Jefe de Laboratorio", unidadCodigo: "LQC", estado: "pendiente" },
+    { id: "c", orden: 3, accion: "VB", rolNombre: "Subdirector", unidadCodigo: null, estado: "pendiente" },
+    { id: "d", orden: 4, accion: "FIRMA", rolNombre: "Director", unidadCodigo: null, estado: "pendiente" },
+  ];
+  it("oficio de cotización en firma: Elaborar, los 4 pasos de OFICIO_COTIZACION y Despacho", () => {
+    const e = etapasOficio({ estado: "en_firma", pasos: [{ id: "x", orden: 1, accion: "VB", rolNombre: "Viejo", estado: "anulado" }, ...cotizacion], pasoActual: ["b"] });
+    expect(e.map((x) => x.titulo)).toEqual([
+      "Elaborar",
+      "V°B° Jefe de Departamento · DCO",
+      "V°B° Jefe de Laboratorio · LQC",
+      "V°B° Subdirector",
+      "Firma Director",
+      "Despacho por Oficina de partes",
+    ]);
+    expect(e.map((x) => x.estado)).toEqual(["hecho", "hecho", "actual", "pendiente", "pendiente", "pendiente"]);
+  });
+  it("en borrador usa los pasos previstos por la matriz; firmado deja todo hecho y el despacho como actual", () => {
+    const b = etapasOficio({ estado: "borrador", pasos: [], previstos: cotizacion.map((p) => ({ ...p, id: null, estado: null })) });
+    expect(b).toHaveLength(6);
+    expect(b[0].estado).toBe("actual");
+    expect(b.slice(1).every((x) => x.estado === "pendiente")).toBe(true);
+    const f = etapasOficio({ estado: "firmado", pasos: cotizacion });
+    expect(f.map((x) => x.estado)).toEqual(["hecho", "hecho", "hecho", "hecho", "hecho", "actual"]);
+  });
+  it("sin pasos conocidos muestra el circuito genérico", () => {
+    expect(etapasOficio({ estado: "borrador", pasos: [] }).map((x) => x.titulo)).toEqual([
+      "Elaborar",
+      "V°B° Jefe de Departamento",
+      "Firma de la Dirección",
+      "Despacho por Oficina de partes",
+    ]);
   });
 });
