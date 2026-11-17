@@ -47,11 +47,23 @@ function UsuariosContenido() {
       ],
       f,
     );
+    // Misma regla que el cambio de contraseña (apps/api/src/auth/clave.ts).
+    if (f.password) {
+      const p = String(f.password);
+      const u = String(f.username ?? "").trim().toLowerCase();
+      if (p.length < 10) errs.password = "Mínimo 10 caracteres.";
+      else if (!/\p{L}/u.test(p) || !/\d/.test(p)) errs.password = "Debe incluir al menos una letra y un número.";
+      else if (u.length >= 3 && p.toLowerCase().includes(u)) errs.password = "No puede contener el nombre de usuario.";
+    }
     setErrores(errs);
     if (Object.keys(errs).length) return;
     try {
       const res = await fetch(`${API}/usuarios`, { method: "POST", headers: auth(), body: JSON.stringify(f) });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message ?? `Error ${res.status}`);
+      if (!res.ok) {
+        const cuerpo: any = await res.json().catch(() => ({}));
+        const detalle = Array.isArray(cuerpo?.issues) && cuerpo.issues.length ? cuerpo.issues.map((i: any) => i.message).join(" ") : cuerpo?.message;
+        throw new Error(detalle ?? `Error ${res.status}`);
+      }
       const creado = await res.json().catch(() => ({}));
       // Sin contraseña escrita, el servidor genera una temporal y la devuelve una sola vez.
       setTemporal(creado?.passwordTemporal ? { usuario: f.username, clave: creado.passwordTemporal } : null);
@@ -128,7 +140,7 @@ function UsuariosContenido() {
             <div className="field"><label>Usuario <span className="req">*</span></label><input required value={f.username} onChange={(e) => setF({ ...f, username: e.target.value })} />{errores.username && <small style={errStyle}>{errores.username}</small>}</div>
             <div className="field"><label>Nombre completo <span className="req">*</span></label><input required value={f.nombreCompleto} onChange={(e) => setF({ ...f, nombreCompleto: e.target.value })} />{errores.nombreCompleto && <small style={errStyle}>{errores.nombreCompleto}</small>}</div>
             <div className="field"><label>Email</label><input {...propsInput("email")} value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />{errores.email && <small style={errStyle}>{errores.email}</small>}</div>
-            <div className="field"><label>Contraseña inicial (opcional: si la deja vacía se genera una temporal)</label><input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />{errores.password && <small style={errStyle}>{errores.password}</small>}</div>
+            <div className="field"><label>Contraseña inicial (opcional: si la deja vacía se genera una temporal)</label><small style={{ display: "block", color: "var(--muted)" }}>Mínimo 10 caracteres, con al menos una letra y un número, sin el nombre de usuario.</small><input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />{errores.password && <small style={errStyle}>{errores.password}</small>}</div>
             <div className="field"><label>Grado / Cargo</label><input value={f.grado} onChange={(e) => setF({ ...f, grado: e.target.value })} /></div>
             <div className="field"><label>Rol <span className="req">*</span></label>
               <select required value={f.rolId} onChange={(e) => setF({ ...f, rolId: e.target.value })}>
