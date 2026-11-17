@@ -4,7 +4,7 @@ import { ConfigModule } from "@nestjs/config";
 import { LoggerModule } from "nestjs-pino";
 import { ThrottlerModule } from "@nestjs/throttler";
 
-import { UserThrottlerGuard } from "./common/user-throttler.guard";
+import { UserThrottlerGuard, throttleDesactivado } from "./common/user-throttler.guard";
 import { JwtAuthGuard } from "./auth/jwt-auth.guard";
 import { PermisoGuard } from "./auth/permiso.guard";
 import { AuditInterceptor } from "./common/audit.interceptor";
@@ -106,9 +106,11 @@ function prettyTransport() {
     // @Throttle en su propia ruta. La clave de cubeta es el USUARIO (sub del JWT),
     // no la IP —ver UserThrottlerGuard—, así que 300/min es por analista; una
     // pantalla puede disparar varias GET en cascada sin agotar el cupo.
-    ThrottlerModule.forRoot([
-      { name: "default", ttl: 60_000, limit: 300 },
-    ]),
+    // THROTTLE_DESACTIVADO=true (solo fuera de producción) lo apaga para los guiones de verificación.
+    ThrottlerModule.forRoot({
+      throttlers: [{ name: "default", ttl: 60_000, limit: 300 }],
+      skipIf: () => throttleDesactivado(),
+    }),
     PrismaModule,
     // Alcance por unidad (laboratorio) · @Global: AlcanceService inyectable en cualquier módulo.
     AlcanceModule,
