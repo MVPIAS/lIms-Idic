@@ -33,6 +33,8 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import {
   codsucdelDocumento,
+  faltaCodigoEmpresa,
+  mensajeSinCodigoEmpresa,
   conSufijo,
   elegirRegla,
   erroresFormato,
@@ -152,10 +154,12 @@ export class NumeracionService {
   async reservar(
     tx: any,
     d: DatosNumero,
-    existe: (numero: string) => Promise<boolean>,
+    existe: (numero: string, regla: ReglaDb) => Promise<boolean>,
   ): Promise<(NumeroReservado & { faltan?: undefined }) | { numero: null; regla: ReglaDb | null; faltan: string[] }> {
     const { regla, unidad } = await this.resolver(d.tenantId, d.unidadId, d.tipo, tx);
     if (!regla) return { numero: null, regla: null, faltan: [] };
+    // BPCH-19: sin código de empresa el documento oficial no se emite (no «XXXX»).
+    if (faltaCodigoEmpresa(regla.formato, d.empresa)) throw new BadRequestException(mensajeSinCodigoEmpresa(d.empresaNombre));
     const conN = usaCorrelativo(regla.formato);
     const unidadContador = regla.correlativoPorUnidad && d.unidadId ? d.unidadId : SIN_UNIDAD;
     const periodo = periodoDe(regla, d.fecha);
@@ -179,7 +183,7 @@ export class NumeracionService {
       const r = formatearNumero(regla.formato, this.variables(d, unidad, n));
       if (!r.numero) return { numero: null, regla, faltan: r.faltan };
       const numero = conN ? r.numero : conSufijo(r.numero, intento);
-      if (!(await existe(numero))) return { numero, regla, avisos: r.avisos };
+      if (!(await existe(numero, regla))) return { numero, regla, avisos: r.avisos };
     }
     throw new ConflictException(`No se encontró un número libre con el formato ${regla.formato}: revise la numeración del laboratorio.`);
   }

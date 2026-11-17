@@ -78,11 +78,39 @@ export const TOKENS: Record<string, string> = {
   NI: "Número de la orden interna (solo respuesta a una orden interna)",
   NI_N: "Número de la orden interna sin prefijo (OI-2026-0003 → 3)",
   NUM_INFORME: "Número del Informe de Inspección de la OT (certificado e incumplimiento BPCH)",
-  EMPRESA: "Código de empresa del cliente (ficha del cliente); sin código, «XXXX» y un aviso",
+  EMPRESA: "Código de empresa del cliente (ficha del cliente); sin código, la vista previa muestra «XXXX» y el documento oficial no se emite",
 };
 
 /** Marcador del {EMPRESA} cuando el cliente aún no tiene código de empresa (BPCH-19). */
 export const MARCADOR_SIN_EMPRESA = "XXXX";
+
+/** ¿El formato usa este token? (`{EMPRESA}`, `{NUM_INFORME}`…, con o sin ancho). */
+export const usaToken = (formato: string | null | undefined, token: string) =>
+  new RegExp(`\\{${token}(?::\\d{1,2})?\\}`).test(String(formato ?? ""));
+
+/**
+ * BPCH-19: el documento OFICIAL no se emite si el formato lleva {EMPRESA} y el
+ * cliente no tiene código de empresa (el número saldría con «XXXX»). En la
+ * vista previa o el borrador solo se avisa.
+ */
+export function faltaCodigoEmpresa(formato: string | null | undefined, empresa: string | null | undefined): boolean {
+  return usaToken(formato, "EMPRESA") && String(empresa ?? "").trim() === "";
+}
+
+export const mensajeSinCodigoEmpresa = (cliente?: string | null) =>
+  `El cliente${cliente ? ` ${cliente}` : ""} no tiene Código de empresa (BPCH); complételo en la ficha del cliente (Comercial › Clientes) y vuelva a emitir.`;
+
+/**
+ * Unicidad del número oficial. Solo las reglas BPCH (las que usan {EMPRESA} o
+ * {NUM_INFORME}) admiten el mismo número en documentos de distinto tipo: el
+ * certificado y el informe de incumplimiento repiten el número del Informe de
+ * Inspección (BPCH-19). El resto sigue siendo único en todo el instituto, para
+ * que, p. ej., el informe, el CRB y el Informe de Rechazo del LRB
+ * («IDIC DSA SAM LRB Nº J.{OT_N}/{AAAA}») no compartan número.
+ */
+export function unicoPorTipo(formato: string | null | undefined): boolean {
+  return usaToken(formato, "NUM_INFORME") || usaToken(formato, "EMPRESA");
+}
 
 /** Tokens que cambian de un documento a otro (sin ninguno, todos los números serían iguales). */
 const TOKENS_VARIABLES = new Set(["N", "OT", "OT_N", "MUESTRA", "MUESTRA_N", "NI", "NI_N", "NUM_INFORME"]);
@@ -211,7 +239,7 @@ export function formatearNumero(formato: string, v: VariablesNumero): { numero: 
         const e = String(v.empresa ?? "").trim();
         if (e) return e;
         avisos.push(
-          `El cliente${v.empresaNombre ? ` ${v.empresaNombre}` : ""} no tiene código de empresa: el número lleva «${MARCADOR_SIN_EMPRESA}». Regístrelo en la ficha del cliente (Comercial › Clientes).`,
+          `El cliente${v.empresaNombre ? ` ${v.empresaNombre}` : ""} no tiene código de empresa: la vista previa lleva «${MARCADOR_SIN_EMPRESA}» y el documento oficial no se podrá emitir hasta registrarlo en la ficha del cliente (Comercial › Clientes).`,
         );
         return MARCADOR_SIN_EMPRESA;
       }
