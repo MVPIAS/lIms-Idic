@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { fechaHora } from "@/lib/format";
+import { usePermisos } from "@/lib/permisos";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
@@ -37,6 +38,10 @@ export default function IbisEtlPage() {
   const [msg, setMsg] = useState<{ tipo: string; texto: string } | null>(null);
   const [barriendo, setBarriendo] = useState(false);
   const [asignando, setAsignando] = useState(false);
+  // Guardar la carpeta y barrerla exigen ibis.config / ibis.barrer: sin ellos no se ofrecen (F044).
+  const { puede } = usePermisos();
+  const configura = puede("ibis.config");
+  const barre = puede("ibis.barrer");
 
   async function cargar() {
     try {
@@ -70,6 +75,7 @@ export default function IbisEtlPage() {
 
   async function guardarCfg(ev: React.FormEvent) {
     ev.preventDefault(); setMsg(null);
+    if (!configura) return;
     try {
       const res = await fetch(`${API}/ibis/config`, {
         method: "PUT", headers: auth(),
@@ -86,8 +92,9 @@ export default function IbisEtlPage() {
     }
   }
 
-  async function verCandidatos(id: string) {
-    setOtId(id); setCandidatos([]); setMsg(null);
+  async function verCandidatos(id: string, limpiarMensaje = true) {
+    setOtId(id); setCandidatos([]);
+    if (limpiarMensaje) setMsg(null);
     if (!id) return;
     try {
       const j = await fetch(`${API}/ibis/ot/${id}/candidatos`, { headers: auth() }).then((x) => x.json());
@@ -102,8 +109,16 @@ export default function IbisEtlPage() {
       const res = await fetch(`${API}/ibis/ot/${otId}/asignar`, { method: "POST", headers: auth(), body: "{}" });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j.message ?? `Error ${res.status}`);
-      setMsg({ tipo: "success", texto: `${j.data?.asignados ?? 0} arma(s) adjuntada(s) a la OT.` });
-      verCandidatos(otId); cargar();
+      // F043: el mensaje queda (la recarga de candidatos ya no lo borra) e informa las evidencias creadas.
+      const ev = Number(j.data?.evidenciasCreadas ?? 0);
+      const reemitir = Array.isArray(j.data?.certificadosPorReemitir) ? j.data.certificadosPorReemitir : [];
+      setMsg({
+        tipo: reemitir.length ? "warn" : "success",
+        texto: `${j.data?.asignados ?? 0} arma(s) adjuntada(s) a la OT.${ev ? ` Se crearon ${ev} evidencia(s) de prueba (vaina y proyectil) en el banco de evidencias.` : ""}` +
+          (reemitir.length === 1 ? ` El certificado ${reemitir[0]} quedó «Pendiente de IBIS»: reemítalo desde la OT para incorporar el registro.`
+            : reemitir.length ? ` Los certificados ${reemitir.join(", ")} quedaron «Pendiente de IBIS»: reemítalos desde la OT para incorporar el registro.` : ""),
+      });
+      verCandidatos(otId, false); cargar();
     } catch (e: any) {
       setMsg({ tipo: "warn", texto: Array.isArray(e.message) ? e.message.join(", ") : e.message });
     } finally { setAsignando(false); }
@@ -114,7 +129,8 @@ export default function IbisEtlPage() {
       render: (h) => <span style={{ whiteSpace: "nowrap" }}>{fechaHora(h.created_at)}</span> },
     { key: "archivo", label: "Archivo", value: (h) => h.nombre_archivo ?? "",
       render: (h) => <span title={h.hash_sha256}>{h.nombre_archivo ?? "—"}</span> },
-    { key: "origen", label: "Origen", value: (h) => h.origen_barrido ?? "" },
+    { key: "origen", label: "Origen", value: (h) => h.origen_barrido ?? "",
+      render: (h) => (h.origen_barrido === "carpeta" ? "Carpeta de entrada" : h.origen_barrido === "manual" ? "Carga manual" : "—") },
     { key: "estado", label: "Estado", value: (h) => h.estado ?? "",
       render: (h) => <span className={`pill ${ESTADO_PILL[h.estado] ?? "gray"}`}>{h.estado}</span> },
     { key: "armas", label: "Armas", num: true, value: (h) => h.resultados_creados ?? 0,
@@ -150,15 +166,15 @@ export default function IbisEtlPage() {
           <div className="form-grid">
             <div className="field">
               <label>Carpeta de entrada</label>
-              <input value={cfg.carpeta_entrada ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_entrada: e.target.value })} placeholder="/data/ibis/entrada" />
+              <input readOnly={!configura} value={cfg.carpeta_entrada ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_entrada: e.target.value })} placeholder="/data/ibis/entrada" />
             </div>
             <div className="field">
               <label>Carpeta de procesados</label>
-              <input value={cfg.carpeta_procesados ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_procesados: e.target.value })} placeholder="/data/ibis/procesados" />
+              <input readOnly={!configura} value={cfg.carpeta_procesados ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_procesados: e.target.value })} placeholder="/data/ibis/procesados" />
             </div>
             <div className="field">
               <label>Carpeta de errores</label>
-              <input value={cfg.carpeta_errores ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_errores: e.target.value })} placeholder="/data/ibis/errores" />
+              <input readOnly={!configura} value={cfg.carpeta_errores ?? ""} onChange={(e) => setCfg({ ...cfg, carpeta_errores: e.target.value })} placeholder="/data/ibis/errores" />
             </div>
           </div>
           <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -166,10 +182,12 @@ export default function IbisEtlPage() {
               {cfg.ultimo_barrido_at ? `Último barrido: ${fechaHora(cfg.ultimo_barrido_at)}` : "Sin barridos previos."}
             </span>
             <div style={{ display: "flex", gap: 8 }}>
-              <button className="btn sm" type="submit">Guardar carpeta</button>
-              <button className="btn primary sm" type="button" onClick={barrer} disabled={barriendo}>
-                {barriendo ? "Barriendo…" : "▶ Barrer carpeta ahora"}
-              </button>
+              {configura && <button className="btn outline sm" type="submit">Guardar carpeta</button>}
+              {barre && (
+                <button className="btn primary sm" type="button" onClick={barrer} disabled={barriendo}>
+                  {barriendo ? "Barriendo…" : "▶ Barrer carpeta ahora"}
+                </button>
+              )}
             </div>
           </div>
         </form>
@@ -200,7 +218,7 @@ export default function IbisEtlPage() {
                     <td>{c.modelo ?? "—"}</td>
                     <td>{c.calibre ?? "—"}</td>
                     <td className="num">{c.hit_count ?? 0}</td>
-                    <td>{c.resultado ?? "—"}</td>
+                    <td>{c.resultado ? String(c.resultado).charAt(0).toUpperCase() + String(c.resultado).slice(1).replace(/_/g, " ") : "—"}</td>
                   </tr>
                 ))}
                 {candidatos.length === 0 && (

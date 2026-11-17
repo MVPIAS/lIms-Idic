@@ -71,6 +71,11 @@ describe("planilla de costos reales", () => {
     expect(c.margen).toBe(21637);
     expect(comparar(resumenCostos([]), estimacionDeCotizacion({}))).toMatchObject({ diferencia: null, desviacionPct: null, margen: null });
   });
+  it("sin costos registrados no compara con lo estimado (F035: no «-100 %»)", () => {
+    const c = comparar(resumenCostos([]), estimacionDeCotizacion({ costosDirectosTotal: 25944, neto: 50000 }));
+    expect(c.costoEstimado).toBe(25944);
+    expect(c).toMatchObject({ costoReal: 0, diferencia: null, desviacionPct: null, margen: null });
+  });
   it("cierre: con costos, con horas hombre y con el trabajo del laboratorio aprobado", () => {
     expect(erroresCierrePlanilla({ estado: "borrador", lineas, resultadosSinAprobar: 0 })).toEqual([]);
     expect(erroresCierrePlanilla({ estado: "borrador", lineas: [], resultadosSinAprobar: 0 })).toHaveLength(2);

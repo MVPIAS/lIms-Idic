@@ -27,6 +27,8 @@ export interface InstrumentoFila extends InstrumentoOt {
   motivoNoCalibrable: string | null; requiereExterno: boolean | null;
   devueltoRecibe: string | null; devueltoEstado: string | null; devueltoObs: string | null; devueltoGuia: string | null;
   devueltoPorNombre: string | null; anuladoMotivo: string | null; createdAt: Date;
+  /** Lo cotizado: la línea de la cotización de la que nace el ítem (R9, LNF: la OT y la hoja muestran lo cotizado). */
+  cotizado?: { descripcion: string | null; cantidad: number | null; ensayoCodigo: string | null; sentido: string | null; puntos: string | null; rango: string | null } | null;
 }
 
 export interface CalibracionFila extends CalibracionOt {
@@ -49,8 +51,12 @@ export async function instrumentosDeOt(db: ConsultaCruda, otId: string): Promise
             i.calibrable, i.motivo_no_calibrable AS "motivoNoCalibrable", i.requiere_externo AS "requiereExterno",
             i.devuelto_at AS "devueltoAt", i.devuelto_recibe AS "devueltoRecibe", i.devuelto_estado AS "devueltoEstado",
             i.devuelto_obs AS "devueltoObs", i.devuelto_guia AS "devueltoGuia", ud.nombre_completo AS "devueltoPorNombre",
-            i.anulado_motivo AS "anuladoMotivo", i.created_at AS "createdAt"
+            i.anulado_motivo AS "anuladoMotivo", i.created_at AS "createdAt",
+            CASE WHEN l.id IS NULL THEN NULL ELSE json_build_object(
+              'descripcion', l.descripcion, 'cantidad', l.cantidad, 'ensayoCodigo', l.ensayo_codigo,
+              'sentido', l.instrumento_sentido, 'puntos', l.instrumento_puntos, 'rango', l.instrumento_rango) END AS cotizado
        FROM met_ot_instrumento i
+       LEFT JOIN linea_cotizacion l ON l.id = i.linea_cotizacion_id
        LEFT JOIN usuario um ON um.id = i.metrologo_id
        LEFT JOIN usuario ur ON ur.id = i.recibido_por
        LEFT JOIN usuario ud ON ud.id = i.devuelto_por

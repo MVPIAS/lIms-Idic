@@ -1,3 +1,5 @@
+import { leyendaReemision, type ModalidadReemision } from "../common/leyenda-reemision";
+import { feaPublica, pdfFeaParaCliente } from "../fea/fea.datos";
 import { portadaDesdeEncargo } from "../ot/encargo/reglas-encargo";
 import { nombreItemInspeccion } from "../especificacion-tecnica/reglas-et";
 import { observacionConDecision } from "../laboratorio/veredicto-decidido";
@@ -29,6 +31,7 @@ import {
 } from "./reglas-emision";
 import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
 import { NumeracionService } from "./numeracion.service";
+import { PLAZO_TX_EMISION, conReintento } from "./reintento-emision";
 import { numeroGeneral } from "./numeracion";
 import {
   documentoEnConflicto,
@@ -39,14 +42,17 @@ import {
 } from "./cobertura-documento";
 import { etiquetaDe, hechosCobertura, resultadosCubiertos } from "./cobertura-ot";
 import { otEsBpch, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
-import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
+import { camposLotesImpresos, faltantesParaEmitirInspeccion, tamanoCabeceraImpreso, type LoteImpreso } from "../bpch/cabecera/reglas-cabecera";
 import { escapeHtml } from "./html.util";
 import { camposDeLaboratorio } from "../recepcion/reglas-recepcion";
+import { elegirPlantillaSugerida } from "./plantilla-sugerida";
 import {
   armarInforme,
   filaInspeccion,
   filasMetodos,
   modalidadInicial,
+  modalidadSugerida,
+  origenModalidad,
   tieneRequisito,
   NOMBRE_MODALIDAD,
   type EstructuraInforme,
@@ -68,10 +74,11 @@ import {
   type FotoInforme,
   type IdentificacionMuestra,
 } from "./bloques-informe";
-import { anioChile } from "../common/fecha-chile";
+import { anioChile, diaChile } from "../common/fecha-chile";
 import { leerCondicion2 } from "../laboratorio/requisito-compuesto";
 import { urlVerificacionBase } from "../common/url-verificacion";
 import { aplanarVariables } from "./plantilla-versiones";
+import { bloqueResultadosTerreno } from "../terreno/reglas-terreno";
 
 /** Versión de una plantilla del repositorio (cuerpo + formato) que rellena el motor. */
 export interface VersionPlantilla {
@@ -121,6 +128,11 @@ export interface OpcionesEmision {
   tipoDocumento?: string;
   /** Reemisión: id del documento devuelto o anulado que se sustituye (nueva versión). */
   reemplazaId?: string;
+  /**
+   * Reemisión de un documento OFICIAL (R9): «modificacion» conserva el número con la versión
+   * siguiente; «reemplazo» toma un número nuevo. Ambas imprimen su leyenda y anulan el anterior.
+   */
+  reemision?: { modalidad: ModalidadReemision; motivo: string };
   /** Informe de cumplimiento o de solo resultados (por defecto, el sugerido). */
   modalidad?: Modalidad;
   datosInforme?: DatosInforme;
@@ -186,6 +198,34 @@ export class PlantillaRenderService {
   private readonly validadores: ((otId: string, tipoDocumento: string, tenantId: string) => Promise<string[]>)[] = [];
   registrarValidadorEmision(v: (otId: string, tipoDocumento: string, tenantId: string) => Promise<string[]>) {
     this.validadores.push(v);
+  }
+
+  /** F083 · trabajo en terreno de la OT (null si no tiene o la BD aún no tiene la tabla). */
+  private async terrenoDeOt(otId: string): Promise<{ cerrado: boolean; ivcGrado: string | null } | null> {
+    try {
+      const [t] = await this.prisma.$queryRawUnsafe<{ cerrada_at: Date | null; ivc_grado: string | null }[]>(
+        `SELECT cerrada_at, ivc_grado FROM ot_terreno WHERE ot_id = $1::uuid`, otId);
+      return t ? { cerrado: !!t.cerrada_at, ivcGrado: t.ivc_grado ?? null } : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** F083 · tabla de resultados del informe de una OT en terreno (lista de chequeo e IVC). */
+  private async bloqueTerreno(otId: string): Promise<string | null> {
+    try {
+      const [t] = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT id, lugar, ivc_numero, ivc_grado, ivc_conclusion FROM ot_terreno WHERE ot_id = $1::uuid`, otId);
+      if (!t) return null;
+      const pruebas = await this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT p.sistema, p.prueba, p.requisito, p.resultado, p.observacion,
+                NULLIF(concat_ws(' · ', u.descripcion, u.chasis, u.serie), '') AS unidad
+           FROM ot_terreno_prueba p LEFT JOIN ot_terreno_unidad u ON u.id = p.unidad_id
+          WHERE p.terreno_id = $1::uuid ORDER BY p.orden`, t.id);
+      return bloqueResultadosTerreno({ lugar: t.lugar, ivcNumero: t.ivc_numero, ivcGrado: t.ivc_grado, conclusion: t.ivc_conclusion, pruebas });
+    } catch {
+      return null;
+    }
   }
 
   /** Verificación pública: datos extra por tipo de documento (p. ej. vigencia del certificado por arma). */
@@ -468,6 +508,31 @@ export class PlantillaRenderService {
       const condicion = condicionFinal(muestras.map((m) => m.veredicto));
       const datos: Record<string, string> = {};
       for (const [k, v] of Object.entries(filas[0])) datos[k] = v === null || v === undefined ? "" : String(v);
+      // F014: los lotes de «Lotes de la inspección» (bpch_cabecera_lote) se imprimen todos,
+      // con su unidad y su vencimiento; sin ellos, los tamaños de la cabecera llevan su unidad.
+      const lotes = await this.prisma.$queryRawUnsafe<LoteImpreso[]>(
+        `SELECT identificacion, tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra",
+                unidad_muestra AS "unidadMuestra", to_char(vencimiento, 'YYYY-MM-DD') AS vencimiento
+           FROM bpch_cabecera_lote WHERE ot_id = $1::uuid ORDER BY orden`,
+        otId,
+      ).catch(() => [] as LoteImpreso[]);
+      const deLotes = camposLotesImpresos(lotes, datos.vencimiento_producto ?? "");
+      if (deLotes) Object.assign(datos, deLotes);
+      else {
+        const [c] = await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra", unidad_muestra AS "unidadMuestra"
+             FROM bpch_cabecera_ot WHERE ot_id = $1::uuid`,
+          otId,
+        ).catch(() => [] as any[]);
+        // F022: la reinspección guarda sus tamaños (con unidad) en su expediente.
+        const [rei] = c ? [] : await this.prisma.$queryRawUnsafe<any[]>(
+          `SELECT tamano_lote::text AS "tamanoLote", unidad_lote AS "unidadLote", tamano_muestra::text AS "tamanoMuestra", unidad_muestra AS "unidadMuestra"
+             FROM bpch_reinspeccion WHERE ot_id = $1::uuid LIMIT 1`,
+          otId,
+        ).catch(() => [] as any[]);
+        const t = c ? tamanoCabeceraImpreso(c) : rei ? tamanoCabeceraImpreso(rei) : null;
+        if (t) datos.tamano_lote_muestra = t;
+      }
       return {
         ...datos,
         condicion_final: TEXTO_CONDICION[condicion],
@@ -666,6 +731,9 @@ export class PlantillaRenderService {
     const unaMuestra = ctx.muestras.length === 1 ? ctx.muestras[0] : null;
     return {
       modalidad: modalidadInicial(cfg, ctx.paraInforme),
+      modalidadOrigen: origenModalidad(cfg),
+      /** La que corresponde a los requisitos, aunque la plantilla fije otra (F072). */
+      modalidadPorRequisitos: modalidadSugerida(ctx.paraInforme),
       conRequisito: ctx.paraInforme.filter(tieneRequisito).length,
       totalEnsayos: ctx.paraInforme.length,
       portada:
@@ -718,7 +786,7 @@ export class PlantillaRenderService {
     plantillaId: string,
     tenantId: string | undefined,
     cert: { numero: string; codigoVerificacion: string; fecha: Date },
-    opciones: { modalidad?: Modalidad; datos?: DatosInforme; filtro?: FiltroDocumento | null; version?: VersionPlantilla | null } = {},
+    opciones: { modalidad?: Modalidad; datos?: DatosInforme; filtro?: FiltroDocumento | null; version?: VersionPlantilla | null; leyenda?: string | null } = {},
   ) {
     const plantilla = await this.prisma.plantillaInforme.findUnique({ where: { id: plantillaId } });
     if (!plantilla) throw new NotFoundException(`Plantilla ${plantillaId} no encontrada`);
@@ -785,6 +853,9 @@ export class PlantillaRenderService {
       termograma_anexo: bloqueTermograma(termogramas, "Registros del instrumento"),
       identificacion_muestras: bloqueIdentificacion(ctx.identificacion),
     };
+    // F083: una OT en terreno no tiene captura normal; sus resultados son los del trabajo en terreno.
+    const terrenoHtml = ctx.resultados.length === 0 ? await this.bloqueTerreno(otId) : null;
+    if (terrenoHtml) bloques.tabla_resultados = terrenoHtml;
     // Contexto de otros módulos: nunca pisa una clave del motor.
     for (const [clave, proveedor] of this.proveedores) {
       const extra = await proveedor(
@@ -803,12 +874,18 @@ export class PlantillaRenderService {
       if (extra.datos && !(clave in datos)) datos[clave] = extra.datos;
       for (const [k, v] of Object.entries(extra.bloques ?? {})) if (!(k in bloques)) bloques[k] = v;
     }
-    const { html: cuerpoRenderizado, faltantes } = renderizar(cuerpo, datos, bloques);
+    const { html: cuerpoBase, faltantes } = renderizar(cuerpo, datos, bloques);
+    // Documento modificado o de reemplazo (R9): la leyenda va al inicio y entra en el sello.
+    const cuerpoRenderizado = opciones.leyenda
+      ? `<p class="reemplaza"><b>${escapeHtml(opciones.leyenda)}</b></p>\n${cuerpoBase}`
+      : cuerpoBase;
 
     if (faltantes.length)
       avisos.push(`Placeholders sin dato en el expediente (se emiten vacíos): ${faltantes.join(", ")}.`);
     if (ctx.resultados.length === 0)
-      avisos.push("La OT no tiene resultados registrados: la tabla de resultados sale vacía.");
+      avisos.push(terrenoHtml
+        ? "OT en terreno: la tabla de resultados sale del trabajo en terreno (lista de chequeo e IVC)."
+        : "La OT no tiene resultados registrados: la tabla de resultados sale vacía.");
     if (ctx.cobertura)
       avisos.push(`Documento de una parte de la OT: ${ctx.cobertura}. Imprime solo sus muestras y resultados.`);
     const sinNombre = ctx.paraInforme.filter((r) => !r.ensayo || !r.ensayo.trim()).length;
@@ -1194,7 +1271,10 @@ export class PlantillaRenderService {
     });
     const faltantes: string[] = [];
 
-    if (ot.estado === "anulada" || ot.estado === "cerrada")
+    // Una OT cerrada solo admite el REEMPLAZO de un documento oficial (R9: número nuevo,
+    // leyenda y anulación del anterior), p. ej. el certificado por arma al llegar IBIS (F039).
+    const reemplazoEnCerrada = ot.estado === "cerrada" && opts.reemision?.modalidad === "reemplazo" && !!opts.reemplazaId;
+    if (ot.estado === "anulada" || (ot.estado === "cerrada" && !reemplazoEnCerrada))
       faltantes.push(`La OT ${ot.codigo} está ${ot.estado}: no admite nuevos documentos.`);
     faltantes.push(...cober.errores);
     // Cobertura a medio elegir (p. ej. «Un laboratorio» sin laboratorio): solo se
@@ -1224,6 +1304,7 @@ export class PlantillaRenderService {
             analito: r.analito?.nombre ?? r.catAnalito?.nombre ?? null,
           })),
           plantilla.tipo,
+          resultados.length === 0 ? await this.terrenoDeOt(otId) : null,
         ),
       );
 
@@ -1361,6 +1442,25 @@ export class PlantillaRenderService {
     const formato = await this.configDePlantilla(plantilla.id, plantilla.tipo);
     const encargo = formato.portada === "ivc" ? await this.portadaEncargo(ctx.ot.id) : {};
     return { formato, ...this.sugerencias(ctx, formato, encargo), cobertura: await this.coberturaSugerida(ctx.ot.unidadPrincipal) };
+  }
+
+  /** Plantilla que se propone para el documento del laboratorio indicado (F063, plantilla-sugerida.ts). */
+  async plantillaSugerida(tenantId: string | undefined, unidadId: string | null) {
+    if (!unidadId) return null;
+    const [u] = await this.prisma.$queryRawUnsafe<{ codigo: string }[]>(`SELECT codigo FROM unidad WHERE id = $1::uuid`, unidadId);
+    const plantillas = await this.prisma.$queryRawUnsafe<{ id: string; repid: string; activo: boolean }[]>(
+      `SELECT id, repid, activo FROM plantilla_informe
+        WHERE deleted_at IS NULL AND tipo <> 'COTIZACION' AND ($1::uuid IS NULL OR tenant_id = $1::uuid)`,
+      tenantId ?? null,
+    );
+    const usadas = await this.prisma.$queryRawUnsafe<{ plantillaId: string; veces: number }[]>(
+      `SELECT c.plantilla_id AS "plantillaId", count(*)::int AS veces
+         FROM certificado c JOIN orden_trabajo o ON o.id = c.ot_id
+        WHERE c.plantilla_id IS NOT NULL AND c.deleted_at IS NULL AND COALESCE(c.unidad_id, o.unidad_principal) = $1::uuid
+        GROUP BY c.plantilla_id`,
+      unidadId,
+    );
+    return elegirPlantillaSugerida(u?.codigo ?? null, plantillas, usadas);
   }
 
   /**
@@ -1531,14 +1631,18 @@ export class PlantillaRenderService {
       plantillaId: string | null;
       otId: string;
       tipoDocumento: string | null;
+      fecha?: Date | null;
     } | null = null;
     if (opts.reemplazaId) {
       previo = await this.prisma.certificado.findFirst({
         where: { id: opts.reemplazaId, tenantId, deletedAt: null },
-        select: { id: true, numero: true, codigo: true, version: true, estado: true, plantillaId: true, otId: true, tipoDocumento: true },
+        select: { id: true, numero: true, codigo: true, version: true, estado: true, plantillaId: true, otId: true, tipoDocumento: true, fecha: true },
       });
       if (!previo) throw new NotFoundException(`Documento ${opts.reemplazaId} no encontrado`);
-      if (previo.estado !== "devuelto" && previo.estado !== "anulado")
+      // R9: un documento oficial se modifica o se reemplaza (opts.reemision); el resto, solo devuelto o anulado.
+      if (opts.reemision && !esOficial(previo.estado))
+        throw new ConflictException(`Solo se modifica o reemplaza un documento oficial; ${previo.numero ?? previo.codigo} está ${previo.estado}.`);
+      if (!opts.reemision && previo.estado !== "devuelto" && previo.estado !== "anulado")
         throw new ConflictException(
           `Solo se reemite un documento devuelto o anulado; ${previo.numero ?? previo.codigo} está ${previo.estado}.`,
         );
@@ -1586,9 +1690,19 @@ export class PlantillaRenderService {
     // La transacción cubre: reservar correlativo -> renderizar con ese número
     // -> insertar documento y pasos de firma. El render va dentro porque el
     // CUERPO IMPRIME el número, así que el hash depende de él.
-    const emitido = await this.prisma.$transaction(async (tx) => {
-      const version = anterior ? anterior.version + 1 : 1;
-      const oficial = anterior
+    // R9: el reemplazo toma número nuevo (versión 1); la modificación, la versión siguiente.
+    const reemplazo = opts.reemision?.modalidad === "reemplazo";
+    const leyenda = anterior && opts.reemision
+      ? leyendaReemision({
+          modalidad: opts.reemision.modalidad, tipo: "documento", numeroAnterior: anterior.numero ?? anterior.codigo,
+          fechaAnterior: anterior.fecha ? diaChile(anterior.fecha) : null, motivo: opts.reemision.motivo,
+        })
+      : null;
+    // F003: plazo amplio (el render va dentro) y un reintento ante errores transitorios
+    // (transacción vencida, bloqueo o choque de número); ver reintento-emision.ts.
+    const emitido = await conReintento(() => this.prisma.$transaction(async (tx) => {
+      const version = anterior && !reemplazo ? anterior.version + 1 : 1;
+      const oficial = anterior && !reemplazo
         ? null
         : await this.numeroOficial(tx, {
             tenantId,
@@ -1599,14 +1713,14 @@ export class PlantillaRenderService {
             otCodigo: cond.ot.codigo,
             muestraCodigo: cond.muestraCodigo,
           });
-      const numero = anterior ? numeroVersion(anterior.numero ?? anterior.codigo, version) : oficial!.numero;
+      const numero = anterior && !reemplazo ? numeroVersion(anterior.numero ?? anterior.codigo, version) : oficial!.numero;
 
       const { plantilla, ctx, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad, version: versionUsada } = await this.render(
         otId,
         plantillaId,
         tenantId,
         { numero, codigoVerificacion, fecha },
-        { modalidad: opts.modalidad, datos: opts.datosInforme, filtro: cober.filtro },
+        { modalidad: opts.modalidad, datos: opts.datosInforme, filtro: cober.filtro, leyenda },
       );
 
       const cert = await tx.certificado.create({
@@ -1667,6 +1781,19 @@ export class PlantillaRenderService {
 
       // Reemisión desde un documento devuelto: el devuelto queda anulado; la
       // nueva versión apunta a él por reemplaza_id.
+      // R9: el documento oficial modificado o reemplazado queda anulado con su motivo.
+      if (anterior && opts.reemision && esOficial(anterior.estado)) {
+        const que = opts.reemision.modalidad === "modificacion" ? "Modificado" : "Reemplazado";
+        await tx.certificado.update({
+          where: { id: anterior.id },
+          data: {
+            estado: "anulado",
+            anuladoAt: fecha,
+            anuladoPor: usuarioId ?? null,
+            anuladoMotivo: `${que} por ${numero}: ${opts.reemision.motivo}`.slice(0, 1000),
+          },
+        });
+      }
       if (anterior && anterior.estado === "devuelto") {
         await tx.certificado.update({
           where: { id: anterior.id },
@@ -1685,7 +1812,7 @@ export class PlantillaRenderService {
 
       if (oficial?.aviso) avisos.push(oficial.aviso);
       return { cert, plantilla, otCodigo: ctx.ot.codigo, cuerpoRenderizado, hash, avisos, usaDefecto, modalidad };
-    });
+    }, PLAZO_TX_EMISION));
 
     const sello = await this.selloDe(emitido.cert.id);
 
@@ -1811,8 +1938,14 @@ export class PlantillaRenderService {
    * guardó al emitir. No se re-renderiza: el PDF de hoy y el de dentro de un año
    * son el mismo documento aunque la OT haya cambiado.
    */
-  async pdf(certificadoId: string, tenantId?: string) {
+  async pdf(certificadoId: string, tenantId?: string, opciones: { sistema?: boolean } = {}) {
     const cert = await this.certificadoDelTenant(certificadoId, tenantId);
+    // FEA (frente F4): un documento oficial con versión firmada con firma electrónica avanzada se
+    // entrega, envía y descarga con ESA versión; `sistema` pide el PDF del LIMS (para firmarlo).
+    if (!opciones.sistema && esOficial(cert.estado)) {
+      const fea = await pdfFeaParaCliente(this.prisma, "informe", cert.id, cert.numero ?? cert.codigo);
+      if (fea) return { buffer: fea.buffer, nombre: fea.nombre };
+    }
     if (!cert.documentoHtml)
       throw new NotFoundException(
         `El certificado ${cert.numero ?? cert.codigo} se emitió antes de que se guardara el documento sellado y no puede regenerarse. Emita uno nuevo.`,
@@ -1895,7 +2028,10 @@ export class PlantillaRenderService {
     const extraFn = tipo ? this.verificaciones.get(tipo) : undefined;
     const extra = extraFn ? await extraFn(cert.id).catch(() => null) : null;
 
+    // FEA (frente F4): si hay versión firmada con firma electrónica avanzada, se informa quién y cuándo.
+    const fea = await feaPublica(this.prisma, "informe", cert.id);
     return {
+      ...fea,
       valido: integro,
       estado: cert.estado,
       numero: cert.numero ?? cert.codigo,

@@ -2,15 +2,13 @@
 
 /**
  * COM-05 · Mora y bloqueo del cliente. Facturas vencidas por tramo (30 días
- * aviso · 60 bloqueo · 90 derivar al CDE; tramos en Parámetros › mora_cliente),
- * bloqueo manual y excepción o desbloqueo, que autoriza el Jefe DCO o su
- * subrogante con motivo.
+ * aviso · 60 bloqueo · 90 derivar al CDE; tramos en Parámetros › mora_cliente)
+ * y las excepciones registradas. Bloquear o desbloquear se hace con
+ * «Bloquear / Desbloquear» (BloqueoCliente.tsx, Jefe DCO).
  */
 import { useCallback, useEffect, useState } from "react";
 import Modal from "@/components/documentos/Modal";
 import { api } from "@/lib/api";
-import { usePermisos } from "@/lib/permisos";
-import { toast } from "@/components/ui/feedback";
 import { fechaDia, fechaHora, monto } from "@/lib/format";
 
 const TRAMO: Record<string, [string, string]> = {
@@ -20,12 +18,9 @@ const TRAMO: Record<string, [string, string]> = {
   cde: ["Derivar al CDE", "red"],
 };
 
-export default function MoraCliente({ cliente, onCerrar, onCambio }: { cliente: { id: string; razonSocial: string }; onCerrar: () => void; onCambio: () => void }) {
-  const { puede } = usePermisos();
+export default function MoraCliente({ cliente, onCerrar }: { cliente: { id: string; razonSocial: string }; onCerrar: () => void }) {
   const [d, setD] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [motivo, setMotivo] = useState("");
-  const [ocupado, setOcupado] = useState(false);
 
   const cargar = useCallback(async () => {
     try {
@@ -35,23 +30,6 @@ export default function MoraCliente({ cliente, onCerrar, onCambio }: { cliente: 
     }
   }, [cliente.id]);
   useEffect(() => void cargar(), [cargar]);
-
-  const accion = async (ruta: "bloquear" | "desbloquear") => {
-    if (motivo.trim().length < 10) return setError("Indique el motivo (mínimo 10 caracteres).");
-    setOcupado(true);
-    setError(null);
-    try {
-      await api.post(`/clientes/${cliente.id}/${ruta}`, { motivo: motivo.trim() });
-      toast.ok(ruta === "bloquear" ? "Cliente bloqueado." : "Excepción registrada: el cliente queda desbloqueado.");
-      setMotivo("");
-      await cargar();
-      onCambio();
-    } catch (e: any) {
-      setError(e.message);
-    } finally {
-      setOcupado(false);
-    }
-  };
 
   const t = d ? TRAMO[d.tramo] ?? TRAMO.al_dia : null;
   return (
@@ -89,22 +67,9 @@ export default function MoraCliente({ cliente, onCerrar, onCambio }: { cliente: 
             <p style={{ color: "var(--muted)" }}>Sin facturas vencidas en los tramos de aviso, bloqueo o CDE.</p>
           )}
 
-          {(puede("cliente.editar") || puede("cliente.desbloquear")) && (
-            <div className="field" style={{ marginTop: 12 }}>
-              <label htmlFor="mora-motivo">Motivo <span className="req">*</span></label>
-              <textarea id="mora-motivo" rows={2} maxLength={1000} value={motivo} onChange={(e) => setMotivo(e.target.value)} />
-            </div>
-          )}
-          <div className="toolbar" style={{ gap: 8, marginTop: 8 }}>
-            <div className="spacer" />
-            {!d.bloqueado && puede("cliente.editar") && (
-              <button className="btn outline sm" disabled={ocupado} onClick={() => accion("bloquear")}>Bloquear a mano</button>
-            )}
-            {(d.bloqueado || d.bloquear) && puede("cliente.desbloquear") && (
-              <button className="btn primary sm" disabled={ocupado} onClick={() => accion("desbloquear")}>Autorizar excepción / desbloquear</button>
-            )}
-          </div>
-
+          <p className="subtitle" style={{ margin: "10px 0 0" }}>
+            Para bloquear a mano o autorizar la excepción (desbloqueo con motivo) use «Bloquear / Desbloquear» en la fila del cliente: es atribución del Jefe DCO o su subrogante.
+          </p>
           {d.desbloqueos.length > 0 && (
             <>
               <h3 style={{ fontSize: 13, margin: "14px 0 6px" }}>Excepciones y desbloqueos</h3>

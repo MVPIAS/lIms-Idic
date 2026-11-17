@@ -29,6 +29,9 @@ import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { OrdenInternaConsultaController, OrdenInternaController, OrdenInternaService } from "./orden-interna";
+import { OiPendientesController, OiPendientesService } from "./oi-pendientes";
+import { revisarBateria } from "../bpch/comun/bateria";
+import { otEsBpch } from "../bpch/cabecera/cabecera-ot";
 import { AlcanceService } from "../rbac/alcance.service";
 import { PlantillaRenderModule } from "../plantilla-render/plantilla-render.module";
 import { LaboratorioOtService } from "../ot/laboratorio-ot.service";
@@ -38,6 +41,7 @@ import { conNombres, recalcularVeredictoMuestra } from "../laboratorio/laborator
 import { traducirFormula } from "../laboratorio/formula-legado";
 import { EVALUACIONES, evaluacionDe, planEdicion, sinCondicion, tipoDatoDe, veredictoMuestra, type Especificacion, type TipoDato } from "../laboratorio/especificacion";
 import { calcularCaptura, CapturaError, variablesDeCaptura } from "../laboratorio/captura-estandar";
+import { condicionesSegunMetodo, explicacionFactor, leerReglasResultado } from "../laboratorio/reglas-resultado";
 import { evaluarReglas, leerReglas, modoReglas, textoRegla, type AvisoAceptacion, type ModoReglas } from "../laboratorio/reglas-aceptacion";
 import { leerCondicion2, leerPlanClases } from "../laboratorio/requisito-compuesto";
 import { aplicarEtAMuestra } from "../especificacion-tecnica/aplicar-et";
@@ -45,7 +49,8 @@ import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { descontarPorCaptura, faltantesDeCaptura, leerConfigConsumo } from "../consumibles/consumo-automatico";
 import { advertenciaDeCaptura, calidadDeResultados, cerrarReanalisisAutomatico, leerConfigResultados, reanalisisAbierto, trasCaptura } from "../calidad/reanalisis";
 import { criterioIndeterminado, leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado } from "../laboratorio/veredicto";
-import { erroresRegistro, proponerDesdeCotizacion, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
+import { erroresAgregarMetodos, erroresRegistro, muestrasPropuestas, proponerDesdeCotizacion, puedeAgregarMetodos, siguientesCodigos, type MetodoCatalogo } from "./registro-muestras";
+import { leerMuestraDeLineas, leerMuestras } from "../cotizacion/cotizacion-s1";
 import { enlaceOrdenesInternas, erroresRecepcion, normalizarRecepcion, recepcionIncompleta, selloRecepcion, type RecepcionNormalizada } from "./recepcion-muestra";
 import { aplicarFactor, erroresFactor, expresionConFactor, factorDe } from "../laboratorio/factor";
 import { planAjusteFactor } from "../laboratorio/ajuste-factor";
@@ -675,6 +680,16 @@ export class PuenteAnalisisService {
     return modoReglas(f[0]?.valor);
   }
 
+  /** Decimales del resultado y condiciones ambientales del método (R7, R8). */
+  private async reglasResultadoDe(catMetodoId: string | null) {
+    if (!catMetodoId) return leerReglasResultado(null);
+    const [m] = await this.prisma.$queryRawUnsafe<{ decimales_resultado: number | null; condiciones_ambientales: string | null }[]>(
+      `SELECT decimales_resultado, condiciones_ambientales FROM cat_metodo WHERE id = $1::uuid`,
+      catMetodoId,
+    );
+    return leerReglasResultado(m);
+  }
+
   /** Reglas de aceptación y valores por defecto de las lecturas del método (ALI-D4). */
   private async capturaDelMetodo(catMetodoId: string | null) {
     if (!catMetodoId) return { reglas: [], camposDefecto: null as Record<string, number> | null };
@@ -803,7 +818,7 @@ export class PuenteAnalisisService {
   ) {
     // La OT debe existir en el tenant y estar en el alcance del usuario.
     const ot = opts.sinAlcanceOt
-      ? await this.prisma.ordenTrabajo.findFirst({ where: { id: otId, tenantId } }).then((o) => {
+      ? await db.ordenTrabajo.findFirst({ where: { id: otId, tenantId } }).then((o) => {
           if (!o) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
           return o;
         })
@@ -979,7 +994,15 @@ export class PuenteAnalisisService {
    * cumple en los atributos. Lo revisado o aprobado no se sobrescribe. Deja al
    * usuario como analista (segregación) y recalcula el veredicto de la muestra.
    */
-  async capturarValor(id: string, entrada: z.infer<typeof CapturarValorBody>, tenantId: string, req?: any, variante?: OpcionesCapturaVariante) {
+  async capturarValor(
+    id: string,
+    entrada: z.infer<typeof CapturarValorBody>,
+    tenantId: string,
+    req?: any,
+    variante?: OpcionesCapturaVariante,
+    /** F045: captura que no es una determinación repetible (p. ej. IT05 del arma): sin re-análisis automático. */
+    opciones?: { sinReanalisis?: boolean },
+  ) {
     // El laboratorio de destino de una orden interna recibida captura sus ensayos derivados.
     const { resultado, otId, lab } = await this.resultadoEnAlcance(id, tenantId, req);
 
@@ -1028,8 +1051,14 @@ export class PuenteAnalisisService {
       // Bloqueo: calibración vencida, sin calibración, en calibración o fuera de servicio (409).
       await this.equipos.verificarApto(entrada.equipoId, tenantId);
     }
+    // Reglas del método (R7, R8): decimales del resultado y condiciones ambientales.
+    const reglasRes = await this.reglasResultadoDe(resultado.catMetodoId ?? null);
+    const ambiente = variante
+      ? { temperatura: entrada.temperatura, humedad: entrada.humedad, error: null }
+      : condicionesSegunMetodo(reglasRes.condiciones, { temperatura: entrada.temperatura ?? null, humedad: entrada.humedad ?? null });
+    if (ambiente.error) throw new BadRequestException(ambiente.error);
     const cond = condicionesEnsayo(
-      { fechaEnsayo: entrada.fechaEnsayo, temperatura: entrada.temperatura, humedad: entrada.humedad, incertidumbre: entrada.incertidumbre },
+      { fechaEnsayo: entrada.fechaEnsayo, temperatura: ambiente.temperatura ?? undefined, humedad: ambiente.humedad ?? undefined, incertidumbre: entrada.incertidumbre },
       new Date(),
     );
     if (cond.errores.length) throw new BadRequestException(cond.errores.join(" "));
@@ -1057,6 +1086,7 @@ export class PuenteAnalisisService {
           planClases: leerPlanClases(resultado.planClases),
           condicion2: leerCondicion2(resultado.condicion2),
           camposDefecto: metodoCaptura?.camposDefecto ?? null,
+          decimales: reglasRes.decimales,
         },
         entrada,
       );
@@ -1104,7 +1134,7 @@ export class PuenteAnalisisService {
     const consume = cfgConsumo.automatico && (!corrige || !!reanalisis);
     const determinaciones = Math.max(1, calc.replicas.length || (Array.isArray(calc.lecturas) ? calc.lecturas.length : 0));
     if (consume && cfgConsumo.sinStock === "impedir") {
-      const faltan = await faltantesDeCaptura(this.prisma as any, { tenantId, catMetodoId: resultado.catMetodoId ?? null, determinaciones });
+      const faltan = await faltantesDeCaptura(this.prisma as any, { tenantId, catMetodoId: resultado.catMetodoId ?? null, determinaciones, muestraId: resultado.muestraId ?? null });
       if (faltan.length)
         throw new ConflictException({
           statusCode: 409,
@@ -1173,6 +1203,7 @@ export class PuenteAnalisisService {
       advertencia,
       valor: { numerico: calc.resultadoFinal ?? calc.valorNumerico, texto: calc.valorTexto },
       abierto: reanalisis,
+      sinReanalisis: !!opciones?.sinReanalisis,
     });
     const consumos = consume
       ? await descontarPorCaptura(this.prisma as any, {
@@ -1436,13 +1467,13 @@ export class PuenteAnalisisService {
       });
     // Reglas de aceptación y nota de la captura del método (ALI-D4) y avisos aceptados al guardar.
     const metodosCaptura = metodoIds.length
-      ? await this.prisma.$queryRawUnsafe<{ id: string; reglas_captura: unknown; nota_captura: string | null }[]>(
-          `SELECT id, reglas_captura, nota_captura FROM cat_metodo WHERE id = ANY($1::uuid[])`,
+      ? await this.prisma.$queryRawUnsafe<{ id: string; reglas_captura: unknown; nota_captura: string | null; decimales_resultado: number | null; condiciones_ambientales: string | null }[]>(
+          `SELECT id, reglas_captura, nota_captura, decimales_resultado, condiciones_ambientales FROM cat_metodo WHERE id = ANY($1::uuid[])`,
           metodoIds,
         )
       : [];
     const capturaMetodo = new Map(
-      metodosCaptura.map((m) => [m.id, { reglas: leerReglas(m.reglas_captura), nota: m.nota_captura ?? null }]),
+      metodosCaptura.map((m) => [m.id, { reglas: leerReglas(m.reglas_captura), nota: m.nota_captura ?? null, resultado: leerReglasResultado(m) }]),
     );
     const idsResultado = resultados.map((r) => r.id);
     const avisosFilas = idsResultado.length
@@ -1522,6 +1553,10 @@ export class PuenteAnalisisService {
             ? (capturaMetodo.get(r.catMetodoId)?.reglas ?? []).map((g) => ({ ...g, texto: textoRegla(g) }))
             : [],
           notaCaptura: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.nota ?? null : null,
+          // R7/R8: decimales del resultado, condiciones ambientales y explicación del factor.
+          decimalesResultado: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.resultado.decimales ?? null : null,
+          condicionesAmbientales: r.catMetodoId ? capturaMetodo.get(r.catMetodoId)?.resultado.condiciones ?? "opcional" : "opcional",
+          explicacionFactor: explicacionFactor(factorDe(r.factorValor, r.factorOperacion, r.factorDescripcion), r.factorOrigen ?? null),
           avisosAceptacion: avisosDe.get(r.id) ?? null,
           // Por qué no se puede capturar ni aprobar este ensayo todavía (QC del método pendiente); null = nada.
           qcBloqueo: r.catMetodoId && qcBloqueos.has(r.catMetodoId)
@@ -1654,6 +1689,8 @@ export const RegistrarMuestrasBody = z.object({
         etId: z.string().uuid().nullable().optional(),
         /** Muestreo de la OT del que sale la muestra (sus sellos se verifican al recibirla). */
         muestreoId: z.string().uuid().nullable().optional(),
+        /** R4 (BPCH): motivo de la excepción si se quita un ensayo de la batería fija del elemento. */
+        excepcionBateria: z.string().trim().max(1000).nullable().optional(),
       }),
     )
     .min(1, "Indique al menos una muestra.")
@@ -1719,10 +1756,10 @@ export class RegistroMuestrasService {
     private readonly alcanceResultado: AlcanceResultadoService,
   ) {}
 
-  private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma) {
+  private async otEnAlcance(otId: string, tenantId: string, req: any, db: Db = this.prisma, alcanceVerificado = false) {
     const ot = await db.ordenTrabajo.findFirst({ where: { id: otId, tenantId } });
     if (!ot) throw new NotFoundException(`Orden de trabajo ${otId} no encontrada`);
-    await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
+    if (!alcanceVerificado) await this.alcance.exigirUnidad(req, ot.unidadPrincipal, `la OT ${ot.codigo}`);
     return ot;
   }
 
@@ -1927,13 +1964,42 @@ export class RegistroMuestrasService {
     const porEnsayo = new Map<string, MetodoCatalogo[]>();
     for (const m of metodos) if (m.ensayoId) (porEnsayo.get(m.ensayoId) ?? porEnsayo.set(m.ensayoId, []).get(m.ensayoId)!).push(m);
     const panelOt = cot ? null : await this.panelDeOt(tenantId, ot);
+    // F026/F062: cotización por muestra → cada línea con su muestra y las muestras con su producto.
+    const muestraDeLinea = cot ? await leerMuestraDeLineas(this.prisma as any, cot.id) : new Map<string, number | null>();
+    const muestrasCot = cot ? await leerMuestras(this.prisma as any, cot.id) : [];
+    const elementos = muestrasCot.some((m) => m.catElementoId)
+      ? await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
+          `SELECT id::text AS id, nombre FROM cat_elemento WHERE id = ANY($1::uuid[])`,
+          muestrasCot.map((m) => m.catElementoId).filter((x): x is string => !!x),
+        )
+      : [];
+    const lineasPropuestas = proponerDesdeCotizacion(
+      lineas.map((l) => ({
+        id: l.id,
+        descripcion: l.descripcion,
+        cantidad: l.cantidad,
+        catEnsayoId: l.catEnsayoId,
+        ensayoCodigo: l.ensayoCodigo,
+        ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
+        tipo: l.tipo ?? null,
+        muestraN: muestraDeLinea.get(l.id) ?? null,
+      })),
+      porEnsayo,
+    );
+    // F006: si la OT viene del programa de Producción Nacional y su producto no tiene
+    // elemento del catálogo, se dice dónde corregirlo (en vez de «no viene de una cotización»).
+    const prodPn = !cot && !ot.catElementoId ? await this.productoDeProgramaPn(ot.id) : null;
+    const pn = !panelOt && prodPn && !prodPn.catElementoId ? prodPn : null;
     return {
       // B-008: la OT que nace de un programa (producto), de un prototipo (panel
       // parametrizado) o de un registro con elemento trae su panel a la recepción.
       panelOt,
+      avisoPanel: pn
+        ? `El producto «${pn.producto}» de la O/C operativa ${pn.oc} no está asociado a un elemento del catálogo, así que la OT no trae su batería de ensayos: asócielo en Producción Nacional › O/C › Productos (las OT ya generadas lo toman al recargar).`
+        : null,
       ot: {
         id: ot.id, codigo: ot.codigo, estado: ot.estado, unidadPrincipal: ot.unidadPrincipal, clienteId: ot.clienteId,
-        clienteNombre: cliente?.razonSocial ?? null, catElementoId: ot.catElementoId ?? null,
+        clienteNombre: cliente?.razonSocial ?? null, catElementoId: ot.catElementoId ?? prodPn?.catElementoId ?? null,
       },
       configRecepcion: cfg,
       cotizacion: cot ? { id: cot.id, codigo: cot.codigo, estado: cot.estado, referencia: cot.referencia } : null,
@@ -1948,17 +2014,15 @@ export class RegistroMuestrasService {
         })),
       })),
       opcionesToma: await this.opcionesToma(tenantId),
-      lineas: proponerDesdeCotizacion(
-        lineas.map((l) => ({
-          id: l.id,
-          descripcion: l.descripcion,
-          cantidad: l.cantidad,
-          catEnsayoId: l.catEnsayoId,
-          ensayoCodigo: l.ensayoCodigo,
-          ensayoNombre: l.catEnsayoId ? nombreEnsayo.get(l.catEnsayoId) ?? null : null,
-          tipo: l.tipo ?? null,
-        })),
-        porEnsayo,
+      // R3: ubicaciones de almacenamiento de la lista (Catálogo › Parámetros · ubicacion_almacenamiento).
+      ubicaciones: await this.prisma.$queryRawUnsafe<{ codigo: string; etiqueta: string }[]>(
+        `SELECT codigo, etiqueta FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'ubicacion_almacenamiento' AND activo ORDER BY orden, etiqueta`,
+        tenantId,
+      ),
+      lineas: lineasPropuestas,
+      muestrasCotizacion: muestrasPropuestas(
+        muestrasCot.map((m) => ({ ...m, productoNombre: elementos.find((e) => e.id === m.catElementoId)?.nombre ?? null })),
+        lineasPropuestas,
       ),
     };
   }
@@ -1986,18 +2050,35 @@ export class RegistroMuestrasService {
         parametrizacion: proto[0].estado,
         metodos: await this.metodos(tenantId, { ids: proto[0].metodos }),
       };
-    if (!ot.catElementoId) return null;
+    // F006: la OT del programa de Producción Nacional toma el elemento del producto de
+    // la O/C aunque se haya asociado después de generar la OT.
+    const elementoId = ot.catElementoId ?? (await this.productoDeProgramaPn(ot.id))?.catElementoId ?? null;
+    if (!elementoId) return null;
     const el = await this.prisma.$queryRawUnsafe<{ nombre: string; metodos: string[] }[]>(
       `SELECT e.nombre, COALESCE(array_agg(p.metodo_id::text) FILTER (WHERE p.metodo_id IS NOT NULL), '{}') AS metodos
          FROM cat_elemento e
          LEFT JOIN cat_panel p ON p.elemento_id = e.id AND p.deleted_at IS NULL AND p.activo
         WHERE e.id = $1::uuid AND e.tenant_id = $2::uuid
         GROUP BY e.nombre`,
-      ot.catElementoId,
+      elementoId,
       tenantId,
     );
     if (!el[0]) return null;
     return { origen: "producto" as const, nombre: el[0].nombre, parametrizacion: null, metodos: await this.metodos(tenantId, { ids: el[0].metodos }) };
+  }
+
+  /** Producto de la O/C operativa de Producción Nacional del que nació la OT (o null si no es de ese programa). */
+  private async productoDeProgramaPn(otId: string): Promise<{ producto: string; oc: string; catElementoId: string | null } | null> {
+    const [f] = await this.prisma.$queryRawUnsafe<{ producto: string; oc: string; catElementoId: string | null }[]>(
+      `SELECT p.producto, o.numero AS oc, p.cat_elemento_id AS "catElementoId"
+         FROM bpch_pn_inspeccion i
+         JOIN bpch_oc_producto p ON p.id = i.oc_producto_id
+         JOIN bpch_oc_operativa o ON o.id = p.oc_id
+        WHERE i.ot_id = $1::uuid
+        LIMIT 1`,
+      otId,
+    );
+    return f ?? null;
   }
 
   /**
@@ -2051,13 +2132,28 @@ export class RegistroMuestrasService {
    * resultado). Todo o nada: dentro de `db` si viene de otra operación (lotes
    * BPCH) o en una transacción propia; si una muestra falla, no queda ninguna.
    */
-  async registrar(otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any, db?: Db) {
-    if (db) return this.registrarEn(db, otId, body, tenantId, req);
-    return this.prisma.$transaction((tx) => this.registrarEn(tx, otId, body, tenantId, req), { maxWait: 15_000, timeout: 120_000 });
+  async registrar(
+    otId: string,
+    body: z.infer<typeof RegistrarMuestrasBody>,
+    tenantId: string,
+    req: any,
+    db?: Db,
+    /**
+     * fx5-c · F002: el expediente BPCH que llama ya verificó el alcance con su
+     * regla (la SCC gestiona los expedientes de todas las sucursales), así que
+     * no se exige además la unidad de la OT.
+     * fx5-c · F013: «Registrar OT» crea las muestras dentro de su transacción y
+     * pide validar la batería fija igual que la recepción.
+     */
+    opciones?: { alcanceVerificado?: boolean; validarBateria?: boolean },
+  ) {
+    // Desde otra operación (lotes de la internación, reinspección…) la batería la revisa esa operación.
+    if (db) return this.registrarEn(db, otId, body, tenantId, req, !!opciones?.validarBateria, !!opciones?.alcanceVerificado);
+    return this.prisma.$transaction((tx) => this.registrarEn(tx, otId, body, tenantId, req, true), { maxWait: 15_000, timeout: 120_000 });
   }
 
-  private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any) {
-    const ot = await this.otEnAlcance(otId, tenantId, req, db);
+  private async registrarEn(db: Db, otId: string, body: z.infer<typeof RegistrarMuestrasBody>, tenantId: string, req: any, validarBateria: boolean, alcanceVerificado = false) {
+    const ot = await this.otEnAlcance(otId, tenantId, req, db, alcanceVerificado);
     const ids = [...new Set(body.muestras.flatMap((m) => m.metodoIds))];
     const catalogo = new Map((await this.metodos(tenantId, { ids })).map((m) => [m.id, m]));
     // Recepción de cada muestra (si se envía): toma de muestra, condición, sello,
@@ -2087,7 +2183,33 @@ export class RegistroMuestrasService {
     );
     // E.T. propia de la muestra y muestreo de origen (align_r2b_*.sql).
     errores.push(...(await erroresEtYMuestreo(db, tenantId, ot, body.muestras)));
+    // R4: en las OT del BPCH la batería de ensayos del elemento (cat_panel) es fija; quitar uno es una excepción controlada.
+    const excepcionesBateria: { muestra: string; faltan: string[]; motivo: string }[] = [];
+    if (validarBateria && (await otEsBpch(db, ot.unidadPrincipal))) {
+      const permitido = (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("bpch.bateria.excepcion");
+      for (const [i, m] of body.muestras.entries()) {
+        const elemento = m.catElementoId ?? ot.catElementoId ?? null;
+        if (!elemento || !m.metodoIds.length) continue;
+        const bateria = await db.$queryRawUnsafe<{ id: string; codigo: string; nombre: string }[]>(
+          `SELECT cm.id, cm.codigo, cm.nombre FROM cat_panel p JOIN cat_metodo cm ON cm.id = p.metodo_id AND cm.deleted_at IS NULL AND cm.activo
+            WHERE p.tenant_id = $1::uuid AND p.elemento_id = $2::uuid AND p.deleted_at IS NULL AND p.activo`,
+          tenantId,
+          elemento,
+        );
+        const r = revisarBateria(bateria, m.metodoIds, m.excepcionBateria ? { motivo: m.excepcionBateria, permitido } : null, `La muestra ${i + 1}`);
+        if (r.error) errores.push(r.error);
+        else if (r.excepcion) excepcionesBateria.push({ muestra: m.nombre, faltan: r.faltan.map((x) => x.codigo || x.nombre), motivo: m.excepcionBateria!.trim() });
+      }
+    }
     if (errores.length) throw new BadRequestException(errores.join(" "));
+    for (const x of excepcionesBateria)
+      await db.$executeRawUnsafe(
+        `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'bpch_bateria_excepcion', $3::jsonb, $4::uuid)`,
+        tenantId,
+        otId,
+        JSON.stringify(x),
+        req?.user?.sub ?? null,
+      );
 
     const existentes = await db.muestra.findMany({
       where: { tenantId, codigo: { startsWith: ot.codigo } },
@@ -2118,7 +2240,10 @@ export class RegistroMuestrasService {
           m.muestreoId ?? null,
         );
       const g = m.metodoIds.length
-        ? await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db)
+        ? await this.puente.generarAnalisis(otId, { muestraId: muestra.id, metodoIds: m.metodoIds }, tenantId, req, db, {
+            // F002: si quien llama ya verificó el alcance (expediente BPCH de la SCC), no se vuelve a exigir la unidad de la OT.
+            sinAlcanceOt: alcanceVerificado,
+          })
         : { creados: 0 };
       creadas.push({
         id: muestra.id,
@@ -2145,6 +2270,47 @@ export class RegistroMuestrasService {
       req?.user?.sub ?? null,
     );
     return { otId, muestras: creadas, ensayos: creadas.reduce((s, c) => s + c.ensayos, 0) };
+  }
+
+  /**
+   * F064 · Agrega métodos a una muestra ya recepcionada (p. ej. el segundo método
+   * de un ensayo cotizado que se omitió al recepcionar). Recepción o la jefatura,
+   * con motivo; queda en el historial de la OT.
+   */
+  async agregarMetodos(muestraId: string, body: { metodoIds: string[]; motivo: string }, tenantId: string, req: any) {
+    if (!puedeAgregarMetodos({ roles: req?.user?.roles, permisos: req?.user?.permisos }))
+      throw new ForbiddenException("Agregan métodos a una muestra recepcionada Recepción o la jefatura del laboratorio.");
+    const m = await this.prisma.muestra.findFirst({ where: { id: muestraId, tenantId, deletedAt: null } });
+    if (!m || !m.otId) throw new NotFoundException(`Muestra ${muestraId} no encontrada`);
+    const ot = await this.otEnAlcance(m.otId, tenantId, req);
+    const ids = [...new Set(body.metodoIds)];
+    const catalogo = new Map((await this.metodos(tenantId, { ids })).map((x) => [x.id, x]));
+    const ya = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT cat_metodo_id::text AS id FROM resultado WHERE muestra_id = $1::uuid AND deleted_at IS NULL AND cat_metodo_id IS NOT NULL`,
+      muestraId,
+    );
+    const errores = erroresAgregarMetodos(ot.estado, ids, ya.map((x) => x.id), catalogo, body.motivo);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    return this.prisma.$transaction(
+      async (tx) => {
+        const g = await this.puente.generarAnalisis(ot.id, { muestraId, metodoIds: ids }, tenantId, req, tx as any);
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id)
+           VALUES ($1::uuid, $2::uuid, 'metodos_agregados', $3::jsonb, $4::uuid)`,
+          tenantId,
+          ot.id,
+          JSON.stringify({
+            muestra: m.codigo,
+            ensayos: ids.map((id) => `${catalogo.get(id)?.codigo ?? id} · ${catalogo.get(id)?.nombre ?? ""}`.trim()),
+            motivo: body.motivo.trim(),
+            creados: g.creados,
+          }),
+          req?.user?.sub ?? null,
+        );
+        return { muestraId, creados: g.creados };
+      },
+      { maxWait: 15_000, timeout: 60_000 },
+    );
   }
 
   /**
@@ -2245,6 +2411,17 @@ export class RecepcionMuestraController {
   recepcion(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.actualizarRecepcion(id, RecepcionBody.parse(body ?? {}), tenantDe(req), req);
   }
+
+  @Post(":id/metodos")
+  @RequierePermiso("muestra.crear")
+  @ApiOperation({ summary: "Agrega métodos a una muestra ya recepcionada (Recepción o jefatura, con motivo; queda en el historial)" })
+  agregarMetodos(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const d = z
+      .object({ metodoIds: z.array(z.string().uuid()).min(1, "Elija al menos un método.").max(50), motivo: z.string().trim().min(5, "Indique el motivo.").max(500) })
+      .strict()
+      .parse(body ?? {});
+    return this.svc.agregarMetodos(id, d, tenantDe(req), req);
+  }
 }
 
 /* ============================ MÓDULO ============================ */
@@ -2256,6 +2433,8 @@ export class RecepcionMuestraController {
     SolicitudCosteoController,
     // Las rutas estáticas de órdenes internas (destinos, ot/:otId) van ANTES que el CRUD.
     OrdenInternaConsultaController,
+    // R3: lo que pasa a otro laboratorio sin orden interna (antes del CRUD).
+    OiPendientesController,
     OrdenInternaController,
     // El controlador de /sugerir va ANTES que el CRUD para ganar a `@Get(":id")`.
     FormatoInformeSugerirController,
@@ -2270,6 +2449,7 @@ export class RecepcionMuestraController {
   providers: [
     SolicitudCosteoService,
     OrdenInternaService,
+    OiPendientesService,
     FormatoInformeService,
     FlujoOtService,
     CosteoService,

@@ -22,9 +22,14 @@ import {
   transicionDocAdm,
   lineaBitacoraDocAdm,
 } from "../comun/reglas-bpch";
-import { numeroBorrador, totales } from "../../facturacion/reglas-factura";
+import { importesTasaInternacion, numeroBorrador } from "../../facturacion/reglas-factura";
 import { ListadoArmaBody, erroresListadoArmas, guardarListadoArmas, leerListadoArmas } from "../../saec/d11/listado-armas";
 import { diaChile } from "../../common/fecha-chile";
+import { revisarBateria } from "../comun/bateria";
+import { preMontoCl } from "../../common/monto-cl";
+
+/** Monto que la pantalla puede mandar como número o como texto chileno («184.500»): F001. */
+const montoCL = (t: z.ZodNumber) => z.preprocess(preMontoCl, t.optional().nullable());
 
 const fechaDia = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const texto = (max: number) => z.string().trim().max(max);
@@ -77,9 +82,9 @@ const DocumentacionBody = z.object({
   facturaComercial: opcional(60),
   documentoAduanero: opcional(60),
   // EP-06 6.8 (recorrido MP-06, D06-03): montos de la documentación recibida.
-  cifUsd: z.number().positive("El CIF debe ser mayor que 0.").max(1e12).optional().nullable(),
-  tipoCambio: z.number().positive("El tipo de cambio debe ser mayor que 0.").max(1e6).optional().nullable(),
-  ivaInternacion: z.number().min(0).max(1e13).optional().nullable(),
+  cifUsd: montoCL(z.number({ invalid_type_error: "Escriba el CIF con punto de miles y coma decimal (p. ej. 184.500,50)." }).positive("El CIF debe ser mayor que 0.").max(1e12)),
+  tipoCambio: montoCL(z.number({ invalid_type_error: "Escriba el tipo de cambio con coma decimal (p. ej. 950,25)." }).positive("El tipo de cambio debe ser mayor que 0.").max(1e6)),
+  ivaInternacion: montoCL(z.number({ invalid_type_error: "Escriba el IVA con punto de miles (p. ej. 1.250.000)." }).min(0).max(1e13)),
   otrosDocumentos: opcional(2000),
 });
 
@@ -105,13 +110,23 @@ const InspeccionBody = z.object({
 });
 
 const LotesBody = z.object({
-  items: z.array(z.object({ id: z.string().uuid(), metodoIds: z.array(z.string().uuid()).min(1, "Elija al menos un ensayo del lote").max(200) })).min(1).max(50),
+  items: z
+    .array(
+      z.object({
+        id: z.string().uuid(),
+        metodoIds: z.array(z.string().uuid()).min(1, "Elija al menos un ensayo del lote").max(200),
+        /** R4: quitar ensayos de la batería fija exige motivo y el permiso bpch.bateria.excepcion. */
+        excepcionMotivo: z.string().trim().max(1000).nullable().optional(),
+      }),
+    )
+    .min(1)
+    .max(50),
 });
 
 const TasaBody = z.object({
-  cifUsd: z.number(),
-  paridad: z.number(),
-  pctAfecto: z.number().default(100),
+  cifUsd: z.preprocess(preMontoCl, z.number({ invalid_type_error: "Escriba el CIF con punto de miles y coma decimal (p. ej. 184.500,50)." })),
+  paridad: z.preprocess(preMontoCl, z.number({ invalid_type_error: "Escriba la paridad con coma decimal (p. ej. 950,25)." })),
+  pctAfecto: z.preprocess(preMontoCl, z.number().default(100)),
   tasaPct: z.number().optional(),
   ivaPct: z.number().optional(),
 });
@@ -629,6 +644,7 @@ export class InternacionBpchService {
         origen: "INTERNACION",
         conCobro: i.sujeta_tasa,
         resolucion: i.resolucion_numero,
+        fechaResolucion: i.resolucion_fecha ?? null,
         descripcion: `Internación ${i.numero} · Resolución DGMN ${i.resolucion_numero} · ${elementos}`.slice(0, 4000),
         tipoTrabajo: "CERTIFICACION",
         elementoGenerico: unico?.elementoGenerico ?? null,
@@ -781,6 +797,17 @@ export class InternacionBpchService {
       else if (actual.muestraId) errores.push(`El lote ${actual.orden} ya está registrado como muestra ${actual.muestraCodigo}.`);
       else errores.push(...erroresLoteParaMuestra(actual, `Lote ${actual.orden}`));
     }
+    // R4: la batería de ensayos del elemento (panel del catálogo) es fija; quitar un ensayo es una excepción controlada.
+    const excepciones: { lote: number; faltan: string[]; motivo: string }[] = [];
+    const permitido = (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("bpch.bateria.excepcion");
+    for (const it of dto.items) {
+      const actual = porId.get(it.id);
+      if (!actual?.catElementoId) continue;
+      const bateria = (await this.comun.panel(tenantDe(req), actual.catElementoId)).map((m: any) => ({ id: m.id, codigo: m.codigo, nombre: m.nombre }));
+      const r = revisarBateria(bateria, it.metodoIds, it.excepcionMotivo ? { motivo: it.excepcionMotivo, permitido } : null, `El lote ${actual.orden}`);
+      if (r.error) errores.push(r.error);
+      else if (r.excepcion) excepciones.push({ lote: actual.orden, faltan: r.faltan.map((m) => m.codigo || m.nombre), motivo: it.excepcionMotivo!.trim() });
+    }
     if (errores.length) throw new BadRequestException(errores.join(" "));
     // Todos los lotes o ninguno, con la fila del expediente bloqueada: un doble
     // envío espera al primero y ve sus lotes ya registrados; si un lote falla,
@@ -813,6 +840,14 @@ export class InternacionBpchService {
           await tx.$executeRawUnsafe(`UPDATE bpch_internacion_item SET muestra_id = $2::uuid WHERE id = $1::uuid`, it.id, m.id);
           hechas.push({ lote: actual.orden, muestra: m.codigo, ensayos: m.ensayos });
         }
+        for (const x of excepciones)
+          await tx.$executeRawUnsafe(
+            `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'bpch_bateria_excepcion', $3::jsonb, $4::uuid)`,
+            tenantDe(req),
+            i.ot_id,
+            JSON.stringify(x),
+            usuarioDe(req),
+          );
         return hechas;
       },
       { maxWait: 15_000, timeout: 120_000 },
@@ -843,7 +878,8 @@ export class InternacionBpchService {
       paridad: dto.paridad,
       pctAfecto: dto.pctAfecto,
       tasaPct: dto.tasaPct ?? prm.tasaPct ?? NaN,
-      ivaPct: dto.ivaPct ?? prm.ivaPct ?? NaN,
+      // Exenta de IVA: calcularTasa no lo aplica (IDIC, 10-11-2026).
+      ivaPct: dto.ivaPct ?? prm.ivaPct ?? undefined,
     };
     const errores = erroresTasa(entrada);
     if (errores.length) throw new BadRequestException(errores.join(" "));
@@ -889,8 +925,6 @@ export class InternacionBpchService {
     });
     if (faltan.length) throw new ConflictException(`No se puede remitir la tasa de ${i.numero}. ${faltan.join(" ")}`);
     const usuario = usuarioDe(req);
-    const prm = await this.comun.parametros(tenantId);
-    const ivaPct = Number(tasa.ivaPct ?? prm.ivaPct ?? 19);
     const lineas = [
       {
         descripcion: `Tasa de internación ${Number(tasa.tasaPct).toLocaleString("es-CL")} % · ${i.numero} · Res. DGMN ${i.resolucion_numero} · CIF US$ ${Number(tasa.cifUsd).toLocaleString("es-CL")} × ${Number(tasa.paridad).toLocaleString("es-CL")}${Number(tasa.pctAfecto) !== 100 ? ` × ${tasa.pctAfecto} % afecto` : ""}`.slice(0, 500),
@@ -899,7 +933,10 @@ export class InternacionBpchService {
         subtotal: tasa.tasa,
       },
     ];
-    const t = totales(lineas, ivaPct, "CLP");
+    // La tasa de internación se factura EXENTA de IVA (DTE 34; IDIC, 10-11-2026),
+    // aunque el cálculo de la tasa muestre IVA: la factura nace con IVA 0 %.
+    const t = importesTasaInternacion(lineas);
+    const ivaPct = t.ivaPct;
     const obs = `Tasa de internación remitida por BPCH (${i.numero}). Documento final: ${final!.numero ?? ""}.`;
     const ot = await this.comun.ot(tenantId, i.ot_id);
     const facturaId = await this.prisma.$transaction(async (tx) => {
@@ -916,7 +953,7 @@ export class InternacionBpchService {
         await tx.lineaFactura.deleteMany({ where: { facturaId: vacia.id } });
         await tx.factura.update({
           where: { id: vacia.id },
-          data: { ivaPct, neto: t.neto, ivaMonto: t.ivaMonto, total: t.total, observaciones: obs, lineas: { create: lineas } },
+          data: { ivaPct, exentaIva: t.exentaIva, neto: t.neto, ivaMonto: t.ivaMonto, total: t.total, observaciones: obs, lineas: { create: lineas } },
         });
         fid = vacia.id;
       } else {
@@ -930,6 +967,7 @@ export class InternacionBpchService {
             otId: i.ot_id,
             moneda: "CLP",
             ivaPct,
+            exentaIva: t.exentaIva,
             neto: t.neto,
             ivaMonto: t.ivaMonto,
             total: t.total,

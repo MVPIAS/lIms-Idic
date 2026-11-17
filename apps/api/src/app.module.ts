@@ -17,6 +17,7 @@ import { FlujoModule } from "./flujo/flujo.module";
 import { HealthModule } from "./health/health.module";
 import { PrismaModule } from "./common/prisma.module";
 import { ComercialModule } from "./comercial/comercial.module";
+import { SesionesS1Module } from "./comercial/sesiones-s1.module";
 import { TarifasModule } from "./tarifas/tarifas.module";
 import { FacturacionModule } from "./facturacion/facturacion.module";
 import { AdquisicionesModule } from "./adquisiciones/adquisiciones.module";
@@ -32,6 +33,7 @@ import { AlcanceResultadoModule } from "./rbac/alcance-resultado.service";
 import { AlcanceCatalogoGuard } from "./rbac/alcance-catalogo.guard";
 import { AmbitoUnidadGuard } from "./rbac/ambito-unidad.guard";
 import { PlantillaRenderModule } from "./plantilla-render/plantilla-render.module";
+import { FeaModule } from "./fea/fea.module";
 import { CrmModule } from "./crm/crm.module";
 import { EncargoModule } from "./ot/encargo/encargo.module";
 import { SaecModule } from "./saec/saec.module";
@@ -43,9 +45,11 @@ import { QcModule } from "./qc/qc.module";
 import { ConsumiblesModule } from "./consumibles/consumibles.module";
 import { MensajeriaModule } from "./mensajeria/mensajeria.module";
 import { ReportesModule } from "./reportes/reportes.module";
+import { ZonaInformesModule } from "./zona-informes/zona-informes.module";
 import { AvisosModule } from "./avisos/avisos.module";
 import { SeguimientoModule } from "./seguimiento/seguimiento.module";
 import { OficioModule } from "./oficio/oficio.module";
+import { SolicitudAdquisicionModule } from "./solicitud-adquisicion/solicitud-adquisicion.module";
 import { PasoMetodoModule } from "./catalogo/paso-metodo.module";
 import { DocumentosModule } from "./documentos/documentos.module";
 import { AgendaModule } from "./agenda/agenda.module";
@@ -60,6 +64,7 @@ import { EncuestaModule } from "./encuesta/encuesta.module";
 import { RecepcionModule } from "./recepcion/recepcion.module";
 import { EspecificacionTecnicaModule } from "./especificacion-tecnica/et.module";
 import { MuestreoModule } from "./muestreo/muestreo.module";
+import { TerrenoModule } from "./terreno/terreno.module";
 import { FormulariosModule } from "./formularios/formularios.module";
 import { ReglasCapturaModule } from "./formularios/reglas-captura.service";
 import { IntegracionModule } from "./integracion/integracion.module";
@@ -114,6 +119,7 @@ function prettyTransport() {
     OtModule,
     FlujoModule,
     ComercialModule,
+    SesionesS1Module,
     TarifasModule,
     FacturacionModule,
     AdquisicionesModule,
@@ -130,11 +136,13 @@ function prettyTransport() {
     MensajeriaModule,
     EncuestaModule,
     ReportesModule,
+    ZonaInformesModule,
     // Brechas §4.8.4 y §4.7.5: respaldos programados (Administración › Respaldos) y enlace a Metabase.
     SistemaModule,
     AvisosModule,
     SeguimientoModule,
     OficioModule,
+    SolicitudAdquisicionModule,
     PasoMetodoModule,
     DocumentosModule,
     AgendaModule,
@@ -148,9 +156,11 @@ function prettyTransport() {
     RecepcionModule,
     EspecificacionTecnicaModule,
     MuestreoModule,
+    TerrenoModule,
     FormulariosModule,
     RbacModule,
     PlantillaRenderModule,
+    FeaModule,
     CrmModule,
     EncargoModule,
     SaecModule,

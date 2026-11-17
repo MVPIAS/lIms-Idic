@@ -2,6 +2,7 @@ import {
   porcentajesTasaCambiados,
   avanceInternacion,
   calcularTasa,
+  importesTasa,
   condicionFinal,
   errorCambioEstadoCodificacion,
   errorFormatoCnc,
@@ -117,19 +118,23 @@ describe("Internación · documentación administrativa", () => {
 });
 
 describe("Tasa de internación", () => {
-  it("CIF × paridad × % afecto × % tasa, IVA sobre la tasa", () => {
+  it("CIF × paridad × % afecto × % tasa, exenta de IVA: total a cancelar = tasa", () => {
+    // Aunque llegue un % de IVA (parámetro antiguo), la tasa es exenta (IDIC, 10-11-2026).
     const r = calcularTasa({ cifUsd: 184500, paridad: 945.2, pctAfecto: 100, tasaPct: 1.5, ivaPct: 19 });
     expect(r.cifClp).toBe(174389400);
     expect(r.tasa).toBe(2615841);
-    expect(r.iva).toBe(Math.round(2615841 * 0.19));
-    expect(r.total).toBe(r.tasa + r.iva);
+    expect(r.ivaPct).toBe(0);
+    expect(r.iva).toBe(0);
+    expect(r.total).toBe(2615841);
+    expect(importesTasa(1000.4)).toEqual({ ivaPct: 0, iva: 0, total: 1000 });
     const afecto = calcularTasa({ cifUsd: 184500, paridad: 945.2, pctAfecto: 99.9, tasaPct: 1.5, ivaPct: 0 });
     expect(afecto.tasa).toBe(Math.round(174389400 * 0.999 * 0.015));
     expect(afecto.iva).toBe(0);
   });
   it("valida los datos de entrada", () => {
     expect(erroresTasa({ cifUsd: 1, paridad: 1, pctAfecto: 100, tasaPct: 1.5, ivaPct: 19 })).toEqual([]);
-    expect(erroresTasa({ cifUsd: 0, paridad: -1, pctAfecto: 120, tasaPct: 0, ivaPct: -1 }).length).toBe(5);
+    expect(erroresTasa({ cifUsd: 0, paridad: -1, pctAfecto: 120, tasaPct: 0, ivaPct: -1 }).length).toBe(4);
+    expect(erroresTasa({ cifUsd: 1, paridad: 1, pctAfecto: 100, tasaPct: 1.5 })).toEqual([]);
   });
 });
 

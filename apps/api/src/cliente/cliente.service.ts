@@ -1,5 +1,8 @@
 import { estadoMora } from "./mora.service";
-import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ESTADOS_FACTURA_IMPAGA, evaluarMorosidad, puedeBloquearClientes } from "./bloqueo-cliente";
+import { entero, valoresCategoria } from "../common/parametros-r4d";
+import { hoyChile } from "../common/fecha-chile";
 import { contactoPrincipalDesdeFicha } from "./contacto-principal";
 import { PrismaClient } from "@prisma/client";
 import { DEV_TENANT } from "../common/base-crud.service";
@@ -144,40 +147,127 @@ export class ClienteService {
     return cliente;
   }
 
-  async bloquear(id: string, motivo: string, tenantId?: string) {
-    await this.detalle(id, tenantId); // valida pertenencia al tenant
-    return this.prisma.cliente.update({
-      where: { id },
-      data: { bloqueado: true, motivoBloqueo: motivo, bloqueoOrigen: "manual", bloqueadoAt: new Date() },
-    });
+  /**
+   * Reunión 2: bloquear es atribución del Jefe del Departamento Comercial
+   * (titular, subrogante o con el rol de jefatura en el DCO). SUPERADMIN pasa.
+   */
+  private async exigirJefeDco(req: any, tenantId: string) {
+    const roles: string[] = req?.user?.roles ?? [];
+    const permisos: string[] = req?.user?.permisos ?? [];
+    const yo = req?.user?.sub ?? null;
+    const f = yo
+      ? await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+          `SELECT count(*)::int AS n FROM unidad d
+            WHERE d.codigo = 'DCO' AND d.tenant_id = $1::uuid
+              AND (EXISTS (SELECT 1 FROM unidad_jefe j WHERE j.unidad_id = d.id AND j.usuario_id = $2::uuid)
+                   OR EXISTS (SELECT 1 FROM usuario_rol ur JOIN rol r ON r.id = ur.rol_id
+                               WHERE ur.usuario_id = $2::uuid AND ur.unidad_id = d.id AND COALESCE(r.alias_de, r.codigo) = 'JEFE_DEPTO'))`,
+          tenantId,
+          yo,
+        ).catch(() => [{ n: 0 }])
+      : [{ n: 0 }];
+    const ok = puedeBloquearClientes({ superadmin: roles.includes("SUPERADMIN"), tienePermiso: permisos.includes("cliente.bloquear"), esJefeDco: (f[0]?.n ?? 0) > 0 });
+    if (!ok) throw new ForbiddenException("Bloquear o desbloquear clientes es atribución del Jefe del Departamento Comercial.");
   }
 
-  /**
-   * COM-05 · Excepción / desbloqueo: lo autoriza el Jefe DCO (o su subrogante)
-   * con motivo. Queda en cliente_desbloqueo con quién lo autorizó y las
-   * facturas vencidas que cubre: esas ya no vuelven a bloquear al cliente (una
-   * factura distinta que llegue al tramo de bloqueo, sí).
-   */
-  async desbloquear(id: string, motivo: string, tenantId?: string, usuarioId?: string) {
-    const cli = await this.detalle(id, tenantId); // valida pertenencia al tenant
-    const texto = (motivo ?? "").trim();
-    if (texto.length < 10) throw new BadRequestException("Indique el motivo de la excepción o desbloqueo (mínimo 10 caracteres).");
-    const e = await estadoMora(this.prisma, cli.tenantId, id);
-    const facturas = e.facturas.map((f) => f.id);
+  async bloquear(id: string, motivo: string, tenantId?: string, req?: any) {
+    const c = await this.detalle(id, tenantId); // valida pertenencia al tenant
+    await this.exigirJefeDco(req, c.tenantId);
+    if (c.bloqueado) throw new BadRequestException(`El cliente ${c.razonSocial} ya está bloqueado.`);
+    const mora = await this.morosidadDe(c.tenantId, [id]);
+    // COM-05: bloqueo manual (el automático por mora lo aplica mora.service.ts).
+    const r = await this.prisma.cliente.update({ where: { id }, data: { bloqueado: true, motivoBloqueo: motivo, bloqueoOrigen: "manual", bloqueadoAt: new Date() } });
     await this.prisma.$executeRawUnsafe(
-      `INSERT INTO cliente_desbloqueo (tenant_id, cliente_id, motivo, tipo_doc, autorizado_por, facturas)
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid[])`,
-      cli.tenantId,
+      `INSERT INTO cliente_bloqueo (tenant_id, cliente_id, motivo, monto_pendiente, contador_no_pago, bloqueado_por, activo)
+       VALUES ($1::uuid, $2::uuid, $3, $4::numeric, $5::int, $6::uuid, TRUE)`,
+      c.tenantId,
       id,
-      texto,
-      cli.bloqueoOrigen === "mora" || facturas.length ? "mora" : "manual",
-      usuarioId ?? null,
+      motivo,
+      mora.get(id)?.montoVencido ?? 0,
+      mora.get(id)?.facturasVencidas ?? 0,
+      req?.user?.sub ?? null,
+    ).catch(() => undefined);
+    return r;
+  }
+
+  async desbloquear(id: string, motivo: string, tenantId?: string, req?: any) {
+    const c = await this.detalle(id, tenantId); // valida pertenencia al tenant
+    await this.exigirJefeDco(req, c.tenantId);
+    // COM-05: además del bloqueado, el Jefe DCO puede autorizar la excepción de un cliente
+    // que la mora bloquearía (tramo de bloqueo) aunque aún no esté marcado.
+    const e = await estadoMora(this.prisma, c.tenantId, id);
+    if (!c.bloqueado && !e.bloquear) throw new BadRequestException(`El cliente ${c.razonSocial} no está bloqueado.`);
+    if ((motivo ?? "").trim().length < 10) throw new BadRequestException("Indique el motivo de la excepción o desbloqueo (mínimo 10 caracteres).");
+    const facturas = e.facturas.map((f) => f.id);
+    const r = await this.prisma.cliente.update({ where: { id }, data: { bloqueado: false, motivoBloqueo: null, bloqueoOrigen: null, bloqueadoAt: null } });
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE cliente_bloqueo SET activo = FALSE, desbloqueado_at = now() WHERE cliente_id = $1::uuid AND activo`,
+      id,
+    ).catch(() => undefined);
+    await this.prisma.$executeRawUnsafe(
+      // COM-05: la excepción cubre las facturas vencidas de ese momento (no vuelven a bloquear).
+      `INSERT INTO cliente_desbloqueo (tenant_id, cliente_id, motivo, autorizado_por, tipo_doc, facturas)
+       VALUES ($1::uuid, $2::uuid, $3, $4::uuid, $5, $6::uuid[])`,
+      c.tenantId,
+      id,
+      motivo,
+      req?.user?.sub ?? null,
+      c.bloqueoOrigen === "mora" || facturas.length ? "mora" : "manual",
       facturas,
     );
-    return this.prisma.cliente.update({
-      where: { id },
-      data: { bloqueado: false, motivoBloqueo: null, bloqueoOrigen: null, bloqueadoAt: null },
+    return r;
+  }
+
+  /** Bloqueos y desbloqueos del cliente, del más reciente al más antiguo. */
+  async historialBloqueos(id: string, tenantId?: string) {
+    await this.detalle(id, tenantId);
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT 'bloqueo' AS accion, b.bloqueado_at AS fecha, b.motivo, u.nombre_completo AS usuario, b.monto_pendiente AS "montoPendiente"
+         FROM cliente_bloqueo b LEFT JOIN usuario u ON u.id = b.bloqueado_por WHERE b.cliente_id = $1::uuid
+       UNION ALL
+       SELECT 'desbloqueo', d.fecha, d.motivo, u.nombre_completo, NULL
+         FROM cliente_desbloqueo d LEFT JOIN usuario u ON u.id = d.autorizado_por WHERE d.cliente_id = $1::uuid
+       ORDER BY 2 DESC`,
+      id,
+    ).catch(() => []);
+  }
+
+  /** Facturas impagas vencidas por cliente (bloqueo-cliente.ts), con la gracia del parámetro cliente_moroso.dias_gracia. */
+  private async morosidadDe(tenantId: string, clienteIds: string[] | null) {
+    const gracia = entero((await valoresCategoria(this.prisma, tenantId, "cliente_moroso")).dias_gracia, 0, 0, 3650);
+    const filas = await this.prisma.$queryRawUnsafe<{ cliente_id: string; fv: string | null; saldo: number; estado: string }[]>(
+      `SELECT f.cliente_id::text AS cliente_id, to_char(f.fecha_vencimiento, 'YYYY-MM-DD') AS fv, COALESCE(f.saldo, f.total, 0)::float8 AS saldo, f.estado
+         FROM factura f
+        WHERE f.tenant_id = $1::uuid AND f.deleted_at IS NULL AND f.estado = ANY($2::text[])
+          AND ($3::uuid[] IS NULL OR f.cliente_id = ANY($3::uuid[]))`,
+      tenantId,
+      [...ESTADOS_FACTURA_IMPAGA],
+      clienteIds,
+    );
+    const hoy = hoyChile();
+    const por = new Map<string, { fechaVencimiento: string | null; saldo: number; estado: string }[]>();
+    for (const f of filas) {
+      const l = por.get(f.cliente_id) ?? [];
+      l.push({ fechaVencimiento: f.fv, saldo: Number(f.saldo), estado: f.estado });
+      por.set(f.cliente_id, l);
+    }
+    return new Map([...por].map(([k, v]) => [k, evaluarMorosidad(v, hoy, gracia)]));
+  }
+
+  /** Clientes con facturas impagas vencidas (propuesta de bloqueo) y los ya bloqueados. */
+  async morosos(tenantId?: string, todos = false) {
+    const t = tenantId ?? DEV_TENANT;
+    const mora = await this.morosidadDe(t, null);
+    const conMora = [...mora].filter(([, m]) => m.sugiereBloqueo).map(([id]) => id);
+    const clientes = await this.prisma.cliente.findMany({
+      where: { tenantId: t, deletedAt: null, ...(todos ? {} : { OR: [{ bloqueado: true }, { id: { in: conMora } }] }) },
+      select: { id: true, rut: true, razonSocial: true, tipo: true, bloqueado: true, motivoBloqueo: true },
+      orderBy: { razonSocial: "asc" },
+      take: 500,
     });
+    return clientes
+      .map((c) => ({ ...c, morosidad: mora.get(c.id) ?? { facturasVencidas: 0, montoVencido: 0, diasMoraMax: 0, sugiereBloqueo: false } }))
+      .sort((a, b) => b.morosidad.montoVencido - a.morosidad.montoVencido);
   }
 
   /** COM-05 · Mora del cliente (calculada ahora) y sus desbloqueos. */

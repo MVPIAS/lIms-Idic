@@ -15,7 +15,11 @@ import { usePermisos } from "@/lib/permisos";
 
 const FINALES = ["CERTIFICADO_CONFORMIDAD", "INFORME_INCUMPLIMIENTO", "INFORME_TECNICO"];
 
-export default function RemitirDco({ otId, onCambio }: { otId: string; onCambio?: () => void }) {
+/**
+ * F004: en Producción Nacional sin documento final (el informe técnico va en la
+ * correlación de la O/C) la ruta pide remitir el Informe de Inspección oficial.
+ */
+export default function RemitirDco({ otId, onCambio, conInspeccion = false }: { otId: string; onCambio?: () => void; conInspeccion?: boolean }) {
   const { puede } = usePermisos();
   const [docs, setDocs] = useState<any[] | null>(null);
   const [ocupado, setOcupado] = useState(false);
@@ -23,11 +27,13 @@ export default function RemitirDco({ otId, onCambio }: { otId: string; onCambio?
   const cargar = useCallback(async () => {
     try {
       const r = await llamar("GET", `/ot/${otId}/seguimiento`);
-      setDocs((r.documentos ?? []).filter((d: any) => FINALES.includes(d.tipoDocumento) && ["oficial", "emitido"].includes(d.estado)));
+      const oficiales = (r.documentos ?? []).filter((d: any) => ["oficial", "emitido"].includes(d.estado));
+      const finales = oficiales.filter((d: any) => FINALES.includes(d.tipoDocumento));
+      setDocs(finales.length || !conInspeccion ? finales : oficiales.filter((d: any) => d.tipoDocumento === "INFORME_INSPECCION"));
     } catch {
       setDocs([]);
     }
-  }, [otId]);
+  }, [otId, conInspeccion]);
   useEffect(() => {
     cargar();
   }, [cargar]);
