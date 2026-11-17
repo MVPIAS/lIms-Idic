@@ -73,14 +73,15 @@ describe("Producción Nacional · programa", () => {
     expect(validarLinea(oc, { mes: 13 }).join(" ")).toMatch(/entre 1 y 12/);
     expect(validarLinea({ ...oc, estado: "cerrada" }, { mes: 5 }).join(" ")).toMatch(/cerrada/);
   });
-  it("generar OT: errores por estado y avisos de RAF vencida y línea móvil (IT10)", () => {
+  it("generar OT: errores por estado y RAF vencida (BPCH-29); aviso de línea móvil (IT10)", () => {
     const raf = { numero: "RAF 1", estado: "vigente", tipoLinea: "FIJA" as const, vigenciaHasta: "2027-01-01" };
     expect(comprobarGeneracionOt(L({}), oc, raf, "2026-10-17")).toEqual({ errores: [], avisos: [] });
     expect(comprobarGeneracionOt(L({ otId: "a", otEstado: "en_analisis" }), oc, raf, "2026-10-17").errores.join(" ")).toMatch(/ya tiene una OT/);
     expect(comprobarGeneracionOt(L({ otId: "a", otEstado: "anulada" }), oc, raf, "2026-10-17").errores).toEqual([]);
     const r = comprobarGeneracionOt(L({}), { ...oc, estado: "anulada" }, { ...raf, tipoLinea: "MOVIL", vigenciaHasta: "2026-01-01" }, "2026-10-17");
     expect(r.errores.join(" ")).toMatch(/O\/C está anulada/);
-    expect(r.avisos.join(" ")).toMatch(/venció/);
+    expect(r.errores.join(" ")).toMatch(/venció.*no se puede generar la OT/);
+    expect(r.avisos.join(" ")).not.toMatch(/venció/);
     expect(r.avisos.join(" ")).toMatch(/IT10/);
   });
 });
