@@ -21,6 +21,9 @@ import {
   lineasDesdeCotizacion,
   lineasDesdeOt,
   numeroBorrador,
+  TIPOS_DOCUMENTO,
+  nombreDocumento,
+  type TipoDocumento,
   totales,
   validarNotaCredito,
   validarPago,
@@ -61,6 +64,7 @@ export class FacturaService extends BaseCrudService {
         total: neto + ivaMonto,
         estado: dto.estado ?? "emitida",
         origen: dto.origen ?? "sistema",
+        tipoDocumento: dto.tipoDocumento ?? "factura",
         lineas: { create: lineas },
       },
       include: { lineas: true },
@@ -74,10 +78,14 @@ export class FacturaService extends BaseCrudService {
     // Una factura anulada no se cobra: su saldo es cero (recorrido 30, fallo 50).
     return { total: Number(f.total), pagado, notasCredito: nc, saldo: f.estado === "anulada" ? 0 : Number(f.total) - pagado - nc, estado: f.estado };
   }
-  /** ¿Otra factura del tenant ya usa ese número? (UNIQUE(tenant_id, numero)). */
-  async numeroOcupado(numero: string, exceptoId: string, tenantId?: string) {
+  /**
+   * ¿Otro documento del tenant ya usa ese número? COM-30: la numeración es por
+   * tipo de documento (una boleta y una factura pueden tener el mismo folio).
+   */
+  async numeroOcupado(numero: string, exceptoId: string, tenantId?: string, tipoDocumento?: string) {
+    const tipo = tipoDocumento ?? (await this.prisma.factura.findFirst({ where: { id: exceptoId }, select: { tipoDocumento: true } }))?.tipoDocumento ?? "factura";
     const otra = await this.prisma.factura.findFirst({
-      where: { tenantId: tenantId ?? DEV_TENANT, numero, NOT: { id: exceptoId } },
+      where: { tenantId: tenantId ?? DEV_TENANT, numero, tipoDocumento: tipo, NOT: { id: exceptoId } },
       select: { id: true },
     });
     return !!otra;
@@ -289,20 +297,23 @@ export class FacturaService extends BaseCrudService {
   }
 
   /** Finanzas revisa el borrador y lo EMITE con el folio real. */
-  async emitir(id: string, dto: { numero: string; fechaEmision?: Date }, tenantId: string | undefined, usuarioId: string | null) {
+  async emitir(id: string, dto: { numero: string; fechaEmision?: Date; tipoDocumento?: TipoDocumento }, tenantId: string | undefined, usuarioId: string | null) {
     const f = await this.detalle(id, tenantId);
     if (f.estado !== "pendiente")
       throw new ConflictException(`La factura ${f.numero} no está pendiente de emitir (estado: ${f.estado}).`);
     if (esNumeroBorrador(dto.numero))
-      throw new BadRequestException("Indique el folio real de la factura (no el provisional PEND-).");
+      throw new BadRequestException(`Indique el folio real de la ${nombreDocumento(dto.tipoDocumento)} (no el provisional PEND-).`);
     if (!f.lineas.length || Number(f.total) <= 0)
       throw new ConflictException("La factura no tiene importes: complete las líneas antes de emitirla.");
-    if (await this.numeroOcupado(dto.numero, id, tenantId))
-      throw new ConflictException(`Ya existe otra factura con el número ${dto.numero}`);
+    // COM-30: el tipo de documento (factura o boleta) se elige al emitir; el folio es correlativo por tipo.
+    const tipo = dto.tipoDocumento ?? ((f as any).tipoDocumento as TipoDocumento) ?? "factura";
+    if (await this.numeroOcupado(dto.numero, id, tenantId, tipo))
+      throw new ConflictException(`Ya existe otra ${nombreDocumento(tipo)} con el número ${dto.numero}`);
     return this.prisma.factura.update({
       where: { id },
       data: {
         numero: dto.numero,
+        tipoDocumento: tipo,
         fechaEmision: dto.fechaEmision ?? hoyFechaChile(),
         estado: "emitida",
         emitidaPor: usuarioId,
@@ -371,11 +382,15 @@ const FacturaCreate = z.object({
   // parcial/pagada los fija el registro de pagos, no el alta.
   estado: z.enum(["pendiente", "emitida"]).default("emitida"),
   origen: z.string().max(20).optional(),
+  // COM-30: factura o boleta (asistencia técnica de la Delegación 11).
+  tipoDocumento: z.enum(TIPOS_DOCUMENTO).default("factura"),
   lineas: z.array(LineaFacturaDto).min(1),
 });
 const FacturaEmitir = z.object({
-  numero: z.string().trim().min(1, "Indique el folio de la factura").max(30),
+  numero: z.string().trim().min(1, "Indique el folio del documento").max(30),
   fechaEmision: z.coerce.date().optional(),
+  // COM-30: tipo de documento tributario elegible al emitir.
+  tipoDocumento: z.enum(TIPOS_DOCUMENTO).optional(),
 });
 /** Las líneas de ajuste (descuento) pueden ser negativas. */
 const FacturaLineas = z.object({
@@ -454,7 +469,7 @@ export class FacturaController extends BaseCrudController {
     if (dto.numero !== undefined) {
       // UNIQUE(tenant_id, numero): se responde 409 legible en vez de un 500 de Prisma.
       if (await this.svc.numeroOcupado(dto.numero, id, tenantId)) {
-        throw new ConflictException(`Ya existe otra factura con el número ${dto.numero}`);
+        throw new ConflictException(`Ya existe otro documento del mismo tipo con el número ${dto.numero}`);
       }
     }
     if (dto.estado === "anulada") {
