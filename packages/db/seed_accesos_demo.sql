@@ -18,8 +18,8 @@
 --                             unidad desde Administración → Usuarios). En los
 --                             laboratorios de Metrología el analista es metrólogo.
 --   · BPCH .................. Certificación de la Conformidad (jefe + 2
---                             inspectores), cada sucursal (jefe + inspector) y
---                             Delegación Nº 11 (jefe + 2 inspectores)
+--                             inspectores), cada sucursal (jefe + 2
+--                             inspectores) y Delegación Nº 11 (jefe + 2 inspectores)
 --
 -- Los nombres son genéricos («Analista 1 · LQC (prueba)»): no hay personas
 -- reales. Los usuarios NO llevan contraseña (ver align_accesos_demo.sql).
@@ -140,6 +140,16 @@ SELECT 'demo.' || lower(u.codigo) || '.' || x.sufijo,
    ('jefe',      'Jefe de sucursal', 'JEFE_LAB'),
    ('inspector', 'Inspector',        'INSPECTOR')
  ) AS x(sufijo, titulo, rol)
+ WHERE u.activa AND u.tipo = 'SUCURSAL'
+ON CONFLICT DO NOTHING;
+
+-- BPCH-48: en terreno la inspección exige DOS inspectores; cada sucursal tiene
+-- un segundo inspector de prueba (el primero conserva su usuario de siempre).
+INSERT INTO _demo (username, nombre, cargo, rol, unidad)
+SELECT 'demo.' || lower(u.codigo) || '.inspector2',
+       'Inspector 2 · ' || u.nombre || ' (prueba)',
+       'Inspector', 'INSPECTOR', u.codigo
+  FROM unidad u
  WHERE u.activa AND u.tipo = 'SUCURSAL'
 ON CONFLICT DO NOTHING;
 
