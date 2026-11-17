@@ -91,6 +91,8 @@ export const PESTANA_DE_ETAPA: Record<string, PestanaCot> = {
   firma: "documento",
   envio: "envio",
   aceptacion: "aceptacion",
+  // COM-02 · reapertura: las líneas se corrigen en «Datos» y ahí se registra el valor final.
+  valor_final: "datos",
 };
 
 export const PILL_SOLICITUD: Record<string, string> = {
