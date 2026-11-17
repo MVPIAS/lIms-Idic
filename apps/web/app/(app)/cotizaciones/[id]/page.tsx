@@ -244,7 +244,13 @@ function DocumentoYFirma({ c, onHecho, onError }: { c: Circuito; onHecho: (m: st
           <li><b>2 · Firma</b> (Jefe del Departamento Comercial): {pasoFirma}</li>
         </ol>
       )}
-      {k.firmaEstado === "devuelta" && <div className="alert warn">Devuelta por el Jefe DCO: {k.firmaDevueltaMotivo}. Corrija en «Datos» y vuelva a enviarla a firma.</div>}
+      {!historica && k.estado === "aceptada" && (k.firmaEstado === "pendiente" || k.firmaEstado === "devuelta") && (
+        <div className="alert info">
+          Nueva versión tras la reapertura (valor final): queda pendiente de firma del Jefe DCO y no se envía al cliente hasta firmarla.
+          La versión firmada anterior se conserva en el historial de la reapertura.
+        </div>
+      )}
+      {k.firmaEstado === "devuelta" && <div className="alert warn">Devuelta por el Jefe DCO: {k.firmaDevueltaMotivo}. {k.estado === "aceptada" ? "Si hay que corregir valores, pida una nueva reapertura; si no, vuelva a enviarla a firma." : "Corrija en «Datos» y vuelva a enviarla a firma."}</div>}
       {!historica && c.faltantesFirma.length > 0 && k.firmaEstado !== "pendiente" && k.firmaEstado !== "firmada" && (
         <div className="alert warn">
           Antes de enviar a firma:
@@ -262,7 +268,9 @@ function DocumentoYFirma({ c, onHecho, onError }: { c: Circuito; onHecho: (m: st
               // Firmar emite la cotización y fija su validez: no se deshace (D02-23).
               const ok = await confirmar({
                 titulo: `¿Firmar y emitir la cotización ${k.codigo}?`,
-                mensaje: "Su firma queda registrada con fecha y hora y la validez corre desde hoy. Revise antes la vista previa.",
+                mensaje: k.estado === "aceptada"
+                  ? "Nueva versión tras la reapertura: su firma queda registrada con fecha y hora; la fecha de emisión y la validez no cambian. Revise antes la vista previa."
+                  : "Su firma queda registrada con fecha y hora y la validez corre desde hoy. Revise antes la vista previa.",
                 confirmarTexto: "Firmar → emitir",
               });
               if (ok) await accion(`/cotizaciones/${k.id}/firmar`);

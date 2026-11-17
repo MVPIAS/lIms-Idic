@@ -429,7 +429,7 @@ export class BandejaService {
       cotizacionesPorFirmar: () =>
         this.contar(
           `SELECT count(*) AS n FROM cotizacion c
-            WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.estado = 'abierta' AND c.firma_estado = 'pendiente'`,
+            WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.estado IN ('abierta', 'aceptada') AND c.firma_estado = 'pendiente'`,
           tenant,
         ),
       // COM-02: reaperturas de cotización que esperan al Jefe DCO o su subrogante.

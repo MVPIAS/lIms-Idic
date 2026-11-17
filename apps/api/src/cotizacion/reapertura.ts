@@ -64,6 +64,16 @@ export function errorCerrarReapertura(cot: { estado: string; lineas?: number }, 
   return null;
 }
 
+/**
+ * Auditoría 17-11-2026: al registrar el valor final, una cotización del
+ * circuito de firma (r1) que estaba firmada vuelve a «pendiente de firma» del
+ * Jefe DCO (matriz COTIZACION): el documento no muestra la firma anterior sobre
+ * valores nuevos. La firma anterior queda en el historial de la reapertura.
+ */
+export function requiereNuevaFirma(circuito: string | null | undefined, firmaEstado: string | null | undefined): boolean {
+  return circuito === "r1" && firmaEstado === "firmada";
+}
+
 /** Siguiente versión de la cotización (la 1 es la aceptada originalmente). */
 export function siguienteVersion(versiones: number[]): number {
   return (versiones.length ? Math.max(...versiones) : 1) + 1;
