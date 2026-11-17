@@ -1,4 +1,4 @@
-import { evaluarRevision, tipoDefectoAnalito, type ItemRevision } from "./revision-documental";
+import { evaluarRevision, resultadoRevision, tipoDefectoAnalito, type ItemRevision } from "./revision-documental";
 
 const base: ItemRevision[] = [
   { clave: "raf_linea", aplica: true, estado: "conforme" },
@@ -27,6 +27,12 @@ describe("EP-07 7.3 · revisión documental IT08 (BL-177)", () => {
     expect(evaluarRevision(con("raf_linea", { estado: "no_conforme", defecto: "menor", observacion: "Dirección distinta" }))).toMatchObject({ menores: 1, resultado: "conforme" });
     expect(evaluarRevision(con("raf_linea", { estado: "pendiente" })).resultado).toBe("pendiente");
     expect(evaluarRevision(con("otro", { aplica: true, estado: "conforme" })).faltantes[0]).toMatch(/otro documento/);
+  });
+  it("BPCH-44 · con 6 menores aún cumple; desde el 7.º no cumple", () => {
+    expect(resultadoRevision(0, 6)).toBe("conforme");
+    expect(resultadoRevision(0, 7)).toBe("no_conforme");
+    expect(resultadoRevision(1, 0)).toBe("no_conforme");
+    expect(resultadoRevision(0, 9, true)).toBe("pendiente");
   });
   it("reconoce los analitos del ensayo «Rev. Doc. Legal»", () => {
     expect(tipoDefectoAnalito("Rev. Doc. Legal (Defecto crítico)")).toBe("critico");
