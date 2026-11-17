@@ -427,7 +427,7 @@ function InspectoresCabecera({ f, form, setForm }: { f: Ficha; form: Cabecera; s
     });
   return (
     <fieldset className="field span-2" style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "8px 10px", marginTop: 8 }}>
-      <legend style={{ fontSize: 12, fontWeight: 700 }}>Inspectores LCA <span className="req">*</span></legend>
+      <legend style={{ fontSize: 12, fontWeight: 700 }}>Inspectores (LCA) <span className="req">*</span></legend>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 6 }}>
         <label style={{ fontSize: 12.5 }}>
           <input type="radio" name="cab-modalidad" checked={form.modalidad === "TERRENO"} onChange={() => setForm((x) => ({ ...x, modalidad: "TERRENO" }))} /> Inspección en terreno (dos inspectores)
