@@ -1,6 +1,9 @@
 import {
   codsucdelDocumento,
   conSufijo,
+  faltaCodigoEmpresa,
+  mensajeSinCodigoEmpresa,
+  unicoPorTipo,
   elegirRegla,
   erroresFormato,
   formatearNumero,
@@ -59,6 +62,23 @@ describe("numeración BPCH · tercer envío IDIC (BPCH-19, BPCH-45)", () => {
     });
     expect(r.numero).toBe("3000/XXXX/00012/000003");
     expect(r.avisos.join(" ")).toMatch(/EMPRESA PRUEBA no tiene código de empresa/);
+  });
+
+  it("BPCH-19: la emisión oficial sin código de empresa se bloquea (la vista previa solo avisa)", () => {
+    const f = "{CODSUCDEL}/{EMPRESA}/{OT_N:5}/{MUESTRA_N:6}";
+    expect(faltaCodigoEmpresa(f, null)).toBe(true);
+    expect(faltaCodigoEmpresa(f, "  ")).toBe(true);
+    expect(faltaCodigoEmpresa(f, "5008")).toBe(false);
+    expect(faltaCodigoEmpresa("{LAB}-{N:4}/{AAAA}", null)).toBe(false);
+    expect(mensajeSinCodigoEmpresa("EMPRESA PRUEBA")).toMatch(/EMPRESA PRUEBA no tiene Código de empresa \(BPCH\); complételo en la ficha del cliente/);
+  });
+
+  it("unicidad por tipo solo en las reglas BPCH ({EMPRESA} o {NUM_INFORME})", () => {
+    expect(unicoPorTipo("{CODSUCDEL}/{EMPRESA}/{OT_N:5}/{MUESTRA_N:6}")).toBe(true);
+    expect(unicoPorTipo("{NUM_INFORME}")).toBe(true);
+    expect(unicoPorTipo("IDIC DSA SAM LRB Nº J.{OT_N}/{AAAA}")).toBe(false);
+    expect(unicoPorTipo("{LAB}-{N:4}/{AAAA}")).toBe(false);
+    expect(unicoPorTipo(null)).toBe(false);
   });
 
   it("BPCH-19: el certificado y el incumplimiento repiten el número del informe, sin sufijo", () => {

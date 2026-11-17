@@ -32,7 +32,7 @@ import {
 import { configEfectiva, configPorTipo, type ConfigInforme } from "./config-informe";
 import { NumeracionService } from "./numeracion.service";
 import { PLAZO_TX_EMISION, conReintento } from "./reintento-emision";
-import { numeroGeneral } from "./numeracion";
+import { numeroGeneral, unicoPorTipo } from "./numeracion";
 import {
   documentoEnConflicto,
   erroresCobertura,
@@ -1226,13 +1226,19 @@ export class PlantillaRenderService {
         numInforme,
         ...extra,
       },
-      // BPCH-19: el número es único POR TIPO de documento (el certificado y el
-      // informe de incumplimiento repiten el número del Informe de Inspección).
+      // BPCH-19: con las reglas BPCH ({EMPRESA} / {NUM_INFORME}) el número es
+      // único POR TIPO de documento (el certificado y el informe de
+      // incumplimiento repiten el número del Informe de Inspección). Con el resto
+      // de las reglas, único en todo el instituto (unicoPorTipo, numeracion.ts).
       // Un documento tampoco puede repetir el número de un oficio (B-003).
-      async (numero) =>
+      async (numero, regla) =>
         Boolean(
           await tx.certificado.findFirst({
-            where: { tenantId: d.tenantId, tipoDocumento: d.tipoDocumento, OR: [{ numero }, { codigo: numero }] },
+            where: {
+              tenantId: d.tenantId,
+              ...(unicoPorTipo(regla.formato) ? { tipoDocumento: d.tipoDocumento } : {}),
+              OR: [{ numero }, { codigo: numero }],
+            },
             select: { id: true },
           }),
         ) ||
