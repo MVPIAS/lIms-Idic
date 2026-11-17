@@ -172,3 +172,16 @@ SELECT r.id, p.id
   FROM rol r JOIN permiso p ON p.codigo = 'cliente.desbloquear'
  WHERE COALESCE(r.alias_de, r.codigo) IN ('JEFE_DEPTO')
 ON CONFLICT DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- COM-38 · Ensayo con precio en USD en una cotización en pesos: se convierte con
+-- el «dólar observado» del día de la cotización, ingresado a mano (el LIMS no
+-- tiene internet). La línea guarda el precio en USD y el tipo de cambio usado.
+-- -----------------------------------------------------------------------------
+ALTER TABLE cotizacion ADD COLUMN IF NOT EXISTS dolar_observado       NUMERIC(12, 4);
+ALTER TABLE cotizacion ADD COLUMN IF NOT EXISTS dolar_observado_fecha DATE;
+COMMENT ON COLUMN cotizacion.dolar_observado IS
+  'COM-38: dólar observado (CLP por USD) del día de la cotización en pesos, ingresado a mano; convierte los ensayos con precio en USD.';
+ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS precio_usd  NUMERIC(14, 2);
+ALTER TABLE linea_cotizacion ADD COLUMN IF NOT EXISTS tipo_cambio NUMERIC(12, 4);
+COMMENT ON COLUMN linea_cotizacion.precio_usd IS 'COM-38: precio en USD de la lista, convertido a pesos con tipo_cambio (dólar observado de la cotización).';

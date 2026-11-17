@@ -149,9 +149,10 @@ const nombreMoneda = (m: string) => (m === "USD" ? "USD (dólares)" : "CLP (peso
 
 /**
  * Frente f6 · precio de un ensayo en la moneda de la cotización, sin mezclar
- * monedas en silencio. CLP → USD con el dólar del día de la cotización;
- * USD → CLP se bloquea (no hay tipo de cambio de la operación: decisión del
- * IDIC). Redondeo: CLP sin decimales, USD a 2 decimales.
+ * monedas en silencio. CLP → USD con el dólar del día de la cotización.
+ * USD → CLP (COM-38, respuesta IDIC 17-11-2026): con el «dólar observado» del
+ * día de la cotización, que se ingresa a mano porque el LIMS no tiene internet;
+ * sin él, la línea se bloquea pidiéndolo. Redondeo: CLP sin decimales, USD a 2.
  */
 export function precioParaCotizacion(
   elegido: Pick<PrecioElegido, "precio" | "moneda" | "origen" | "lista">,
@@ -159,7 +160,9 @@ export function precioParaCotizacion(
   dolar: number | null | undefined,
   /** Código del ensayo, para el mensaje. */
   codigo = "",
-): { precio: number; error?: undefined } | { precio?: undefined; error: string } {
+  /** COM-38: dólar observado (CLP por USD) de la cotización en pesos. */
+  opts: { dolarObservado?: number | null } = {},
+): { precio: number; conversion?: { precioUsd: number; tipoCambio: number }; error?: undefined } | { precio?: undefined; error: string } {
   const mCot = monedaDe(monedaCotizacion);
   const mPre = monedaDe(elegido.moneda);
   if (mPre === mCot) return { precio: redondearMoneda(elegido.precio, mCot) };
@@ -169,9 +172,22 @@ export function precioParaCotizacion(
   }
   const delEnsayo = codigo ? `del ensayo ${codigo}` : "del ensayo";
   const donde = elegido.origen !== "ficha" && elegido.lista ? `la lista «${elegido.lista.nombre}» (${elegido.lista.itemCodigo})` : "su ficha de costos";
+  // COM-38: USD → CLP con el dólar observado del día de la cotización.
+  const tc = Number(opts.dolarObservado);
+  if (mPre === "USD" && mCot === "CLP" && tc > 0) {
+    const precioUsd = redondearMoneda(elegido.precio, "USD");
+    return { precio: redondearMoneda(precioUsd * tc, "CLP"), conversion: { precioUsd, tipoCambio: tc } };
+  }
   return {
-    error: `El precio ${delEnsayo} está en ${nombreMoneda(mPre)} en ${donde} y la cotización está en ${nombreMoneda(mCot)}: no se mezclan monedas ni se convierte sin un tipo de cambio de la operación. Emita la cotización en ${mPre}.`,
+    error: `El precio ${delEnsayo} está en ${nombreMoneda(mPre)} en ${donde} y la cotización está en ${nombreMoneda(mCot)}: indique el «dólar observado» del día de la cotización para convertirlo a pesos.`,
   };
+}
+
+/** COM-38 · texto que queda en la línea: precio en USD y tipo de cambio usado. */
+export function textoConversionUsd(c: { precioUsd: number; tipoCambio: number }, fecha?: string | null): string {
+  const n = (v: number, dec: number) => v.toLocaleString("es-CL", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+  const f = fecha && /^\d{4}-\d{2}-\d{2}/.test(fecha) ? ` del ${fecha.slice(0, 10).split("-").reverse().join("-")}` : "";
+  return `USD ${n(c.precioUsd, 2)} × dólar observado ${n(c.tipoCambio, 2)}${f}`;
 }
 
 export interface OpcionesListaVigente {
