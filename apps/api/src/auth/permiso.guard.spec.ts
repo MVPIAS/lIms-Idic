@@ -61,6 +61,14 @@ describe("PermisoGuard · SUPERADMIN", () => {
     );
     expect(guard.canActivate(ctx)).toBe(true);
   });
+
+  it("ADMIN no es todo-permiso: sin compra.ver, GET /ordenes-compra → 403 (COM-18: compra.* solo SUPERADMIN)", () => {
+    const crud: PermisosCrud = { ver: "compra.ver", crear: "compra.gestionar", editar: "compra.gestionar", eliminar: "compra.gestionar" };
+    const admin = armar({ [PERMISOS_CRUD_KEY]: crud }, { method: "GET", user: { roles: ["ADMIN"], permisos: ["cliente.ver", "admin.usuarios"] } });
+    expect(() => admin.guard.canActivate(admin.ctx)).toThrow(ForbiddenException);
+    const superadmin = armar({ [PERMISOS_CRUD_KEY]: crud }, { method: "GET", user: { roles: ["SUPERADMIN"], permisos: [] } });
+    expect(superadmin.guard.canActivate(superadmin.ctx)).toBe(true);
+  });
 });
 
 describe("PermisoGuard · @RequierePermiso explícito", () => {

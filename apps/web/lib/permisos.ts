@@ -9,7 +9,10 @@
  *   if (puede("factura.emitir")) …           // un permiso
  *   if (puede(["admin.roles", "admin.usuarios"])) …  // cualquiera de la lista
  *
- * SUPERADMIN y ADMIN ven todo (igual que el menú histórico).
+ * Solo SUPERADMIN ve todo, igual que en el backend (PermisoGuard: solo SUPERADMIN
+ * pasa sin permiso). ADMIN ve lo que le dan sus permisos en la BD: antes la UI lo
+ * trataba como todo-permiso y le mostraba, p. ej., «Órdenes de compra» (compra.*
+ * es solo de SUPERADMIN, COM-18) o SAEC, que la API le niega con 403.
  */
 
 import { useEffect, useState } from "react";
@@ -80,8 +83,10 @@ export interface Acceso {
   usuario: { id?: string; username?: string; nombre?: string };
   roles: string[];
   permisos: Set<string>;
-  /** SUPERADMIN o ADMIN: ve todo en la UI. */
+  /** SUPERADMIN o ADMIN (rol de sistema: p. ej. la página de BI). NO concede permisos. */
   admin: boolean;
+  /** SUPERADMIN: el único que pasa sin permiso (como PermisoGuard en la API). */
+  superadmin: boolean;
   /** ids de unidad (laboratorio) a los que está acotado; vacío + unidadGlobal = todo. */
   unidades: string[];
   unidadGlobal: boolean;
@@ -93,6 +98,7 @@ const VACIO: Acceso = {
   roles: [],
   permisos: new Set(),
   admin: false,
+  superadmin: false,
   unidades: [],
   unidadGlobal: false,
 };
@@ -132,6 +138,7 @@ export function leerAcceso(): Acceso {
     roles,
     permisos: new Set<string>(Array.isArray(p.permisos) ? p.permisos : []),
     admin: roles.includes("SUPERADMIN") || roles.includes("ADMIN"),
+    superadmin: roles.includes("SUPERADMIN"),
     unidades: Array.isArray(p.unidades) ? p.unidades : [],
     unidadGlobal: p.unidadGlobal !== false,
   };
@@ -140,7 +147,7 @@ export function leerAcceso(): Acceso {
 /** ¿El acceso cubre el permiso? Con array, basta con UNO (cualquiera de la lista). Sin permiso → true. */
 export function tienePermiso(acceso: Acceso, perm?: string | string[] | null): boolean {
   if (!perm || (Array.isArray(perm) && perm.length === 0)) return true;
-  if (acceso.admin) return true;
+  if (acceso.superadmin) return true;
   const lista = Array.isArray(perm) ? perm : [perm];
   return lista.some((p) => acceso.permisos.has(p));
 }
