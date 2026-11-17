@@ -48,11 +48,11 @@ describe("Muestreo · registrar → entregar al laboratorio", () => {
   it("toma en terreno (EP-01 1.1): responsable y cantidad", () => {
     expect(faltantesRegistro({ tipoFormulario: "it01_form06", ...base }, 0)).toEqual(["responsable de la toma", "cantidad y envase"]);
   });
-  it("planilla NCh 44: plan o línea móvil con su plan; n del plan = tamaño de muestra", () => {
+  it("planilla NCh 44: plan o línea móvil sin plan (BPCH-30); n del plan = tamaño de muestra", () => {
     const sinPlan = faltantesRegistro({ tipoFormulario: "planilla_nch44", ...base, identificacionLote: "L-1", tamanoLote: 70, tamanoMuestra: 13 }, 0);
     expect(sinPlan.join(" ")).toMatch(/plan de muestreo NCh 44/);
     const movil = faltantesRegistro({ tipoFormulario: "planilla_nch44", ...base, identificacionLote: "L-1", tamanoLote: 70, tamanoMuestra: 13, lineaMovil: true }, 0);
-    expect(movil.join(" ")).toMatch(/línea móvil/);
+    expect(movil).toEqual([]);
     const plan = normalizarPlan({ nivel: "II" }, 70).plan!;
     expect(faltantesRegistro({ tipoFormulario: "planilla_nch44", ...base, identificacionLote: "L-1", tamanoLote: 70, tamanoMuestra: 12, plan }, 0).join(" ")).toMatch(/coincida con el n del plan/);
   });

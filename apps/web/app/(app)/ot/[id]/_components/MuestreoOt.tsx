@@ -348,13 +348,13 @@ function FormularioMuestreo({ m, editable, onCambio }: { m: Muestreo; editable: 
       </div>
       <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12.5, marginTop: 8 }}>
         <input type="checkbox" checked={lineaMovil} disabled={!editable} onChange={(e) => setLineaMovil(e.target.checked)} />
-        Línea de fabricación móvil (camión fábrica): SAC-PG01-IT10 no aplica el muestreo NCh 44
+        Línea de fabricación móvil (camión fábrica): sin plan de muestreo (SAC-PG01-IT10)
       </label>
       {lineaMovil && (
         <div className={`field${editable ? "" : " readonly"}`} style={{ marginTop: 6 }}>
-          <label htmlFor={`mu-${m.id}-lmp`}>Plan aplicado en la línea móvil <span className="req">*</span></label>
+          <label htmlFor={`mu-${m.id}-lmp`}>Observaciones de la línea móvil</label>
           <textarea id={`mu-${m.id}-lmp`} rows={2} value={v.lineaMovilPlan} readOnly={!editable} maxLength={2000} onChange={(e) => setV((p) => ({ ...p, lineaMovilPlan: e.target.value }))} />
-          <span style={{ fontSize: 11, color: "var(--muted)" }}>Por confirmar con el IDIC: qué plan rige en la línea móvil.</span>
+          <span style={{ fontSize: 11, color: "var(--muted)" }}>En la línea móvil no se aplica ningún plan de muestreo (BPCH-30). Campo opcional.</span>
         </div>
       )}
       {editable && (
