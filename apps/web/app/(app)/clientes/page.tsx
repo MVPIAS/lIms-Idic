@@ -7,6 +7,7 @@ import { llamar } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
 import Plantas from "./_components/Plantas";
 import HistorialCliente from "./_components/HistorialCliente";
+import MoraCliente from "./_components/MoraCliente";
 import { BloqueoCliente, ClientesMorosos } from "./_components/BloqueoCliente";
 
 const badge = (v: any) => (
@@ -37,6 +38,8 @@ const pct = (v: any) => `${String(Number(v)).replace(".", ",")} %`;
 export default function ClientesPage() {
   const [plantasDe, setPlantasDe] = useState<{ id: string; razonSocial: string } | null>(null);
   const [historialDe, setHistorialDe] = useState<{ id: string; razonSocial: string } | null>(null);
+  // COM-05: mora del cliente por tramos (aviso 30 · bloqueo 60 · CDE 90).
+  const [moraDe, setMoraDe] = useState<{ id: string; razonSocial: string } | null>(null);
   // Reunión 2: bloqueo de clientes con facturas impagas (Jefe del Departamento Comercial).
   const [bloqueoDe, setBloqueoDe] = useState<any | null>(null);
   const [verMorosos, setVerMorosos] = useState(false);
@@ -73,6 +76,10 @@ export default function ClientesPage() {
           <button type="button" className="btn outline sm" onClick={() => setPlantasDe({ id: row.id, razonSocial: row.razonSocial })}
             title="Plantas o recintos del cliente">
             Plantas
+          </button>{" "}
+          <button type="button" className="btn outline sm" onClick={() => setMoraDe({ id: row.id, razonSocial: row.razonSocial })}
+            title="Facturas vencidas, bloqueo por mora y excepción del Jefe DCO">
+            Mora
           </button>
           {puedeBloquear && (
             <>
@@ -174,6 +181,7 @@ export default function ClientesPage() {
     />
     {plantasDe && <Plantas cliente={plantasDe} onCerrar={() => setPlantasDe(null)} />}
     {historialDe && <HistorialCliente cliente={historialDe} onCerrar={() => setHistorialDe(null)} />}
+    {moraDe && <MoraCliente cliente={moraDe} onCerrar={() => setMoraDe(null)} />}
     {verMorosos && <ClientesMorosos onCerrar={() => setVerMorosos(false)} onElegir={puedeBloquear ? (c) => { setVerMorosos(false); setBloqueoDe(c); } : undefined} />}
     {bloqueoDe && <BloqueoCliente cliente={bloqueoDe} onCerrar={() => setBloqueoDe(null)} onHecho={() => { setBloqueoDe(null); setVersion((v) => v + 1); }} />}
     </>

@@ -44,7 +44,7 @@ export type LineaForm = {
   /** Frente f6: el precio está en USD y la cotización en CLP (no se mezclan monedas). */
   bloqueo?: string | null;
   /** Línea ya guardada: conserva su precio (en la moneda en que se cotizó) aunque la lista o la ficha cambien. */
-  guardada?: { precio: number; moneda: Moneda };
+  guardada?: { precio: number; moneda: Moneda; tipoCambio?: number | null };
   /** De dónde salió el precio de una línea nueva. */
   origen?: { tipo: "lista" | "ficha"; texto: string };
   /** Contrato 4.1.3 · origen guardado de una línea ya cotizada (lista propia, lista vigente o ficha). */
@@ -164,6 +164,9 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   const [dolar, setDolar] = useState<string>(dolarInicial != null ? String(dolarInicial) : "");
   const [dolarFecha, setDolarFecha] = useState<string>(inicial?.dolarFecha ? String(inicial.dolarFecha).slice(0, 10) : hoyISO());
   const [dolarMotivo, setDolarMotivo] = useState("");
+  // COM-38: dólar observado del día (CLP por US$), ingresado a mano: convierte a pesos los ensayos con precio en USD.
+  const [dolarObs, setDolarObs] = useState<string>(inicial?.dolarObservado != null ? String(Number(inicial.dolarObservado)) : "");
+  const [dolarObsFecha, setDolarObsFecha] = useState<string>(inicial?.dolarObservadoFecha ? String(inicial.dolarObservadoFecha).slice(0, 10) : hoyISO());
   const [referencia, setReferencia] = useState<string>(inicial?.referencia ?? "");
   const [descripcionTecnica, setDescripcionTecnica] = useState<string>(inicial?.descripcionTecnica ?? "");
   const [condiciones, setCondiciones] = useState<string>(inicial?.condicionesAdicionales ?? "");
@@ -252,7 +255,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             descripcion: l.descripcion ?? "",
             cantidad: l.cantidad ?? 1,
             // El precio guardado está en la moneda de la cotización: se conserva mientras no cambie la moneda.
-            guardada: { precio: Number(l.precioUnitario), moneda: (inicial?.moneda === "USD" ? "USD" : "CLP") as Moneda },
+            // COM-38: una línea convertida desde USD guarda el dólar observado con que se convirtió.
+            guardada: { precio: Number(l.precioUnitario), moneda: (inicial?.moneda === "USD" ? "USD" : "CLP") as Moneda, tipoCambio: l.tipoCambio != null ? Number(l.tipoCambio) : null },
             origenGuardado: l.precioOrigen ?? null,
             inst: instDe(l),
           }
@@ -335,11 +339,13 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   // Frente f6: el precio depende también de la moneda (si el ensayo está en listas de varias monedas, manda la de la cotización).
   useEffect(() => { setPrecios({}); setReglaPrecio(""); }, [clienteId, moneda, tipoCliente]);
   // Una línea guardada conserva su precio solo en la moneda en que se cotizó; si cambia la moneda, se vuelve a valorizar.
-  const conserva = (l: LineaForm) => !!l.guardada && l.guardada.moneda === moneda;
+  // COM-38: si cambia el dólar observado, la línea convertida desde USD se vuelve a valorizar.
+  const conserva = (l: LineaForm) =>
+    !!l.guardada && l.guardada.moneda === moneda && !(l.guardada.tipoCambio != null && l.guardada.tipoCambio !== (Number(dolarObs) || 0));
   const idsPrecio = useMemo(
     () => [...new Set([...ensayos.map((e) => e.id), ...ensayosProducto.map((e) => e.id), ...lineas.filter((l) => l.catEnsayoId && !conserva(l)).map((l) => l.catEnsayoId!)])].sort().join(","),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [ensayos, ensayosProducto, lineas, moneda],
+    [ensayos, ensayosProducto, lineas, moneda, dolarObs],
   );
   useEffect(() => {
     if (!clienteId || !idsPrecio) return;
@@ -396,13 +402,14 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
 
   // --- Derivados -----------------------------------------------------------------
   const dolarNum = Number(dolar) || 0;
+  const dolarObsNum = moneda === "CLP" ? Number(String(dolarObs).replace(",", ".")) || 0 : 0;
   /**
    * Frente f6 · el precio conserva la moneda de su lista: misma moneda → tal cual;
    * CLP → USD con el dólar del día; USD → CLP no se convierte (bloqueo: no hay tipo de cambio de la operación).
    */
   const bloqueoDe = (l: LineaForm): string | null =>
-    !l.heredada && !l.gasto && !conserva(l) && l.monedaPrecio === "USD" && moneda === "CLP"
-      ? l.bloqueo || `El precio de ${l.codigo ?? "este ensayo"} está en USD en la lista de precios: emita la cotización en USD (no se mezclan monedas).`
+    !l.heredada && !l.gasto && !conserva(l) && l.monedaPrecio === "USD" && moneda === "CLP" && !(dolarObsNum > 0)
+      ? `El precio de ${l.codigo ?? "este ensayo"} está en USD en la lista de precios: indique el «dólar observado» del día de la cotización para convertirlo a pesos.`
       : null;
   /** Ensayo sin precio en lista ni ficha: se cotiza con precio manual y motivo. */
   const sinPrecio = (l: LineaForm) => !!l.catEnsayoId && !conserva(l) && !(Number(l.precioBase) > 0);
@@ -420,13 +427,15 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     const mp: Moneda = l.monedaPrecio ?? "CLP";
     if (mp === moneda) return redondear(base, moneda);
     if (mp === "CLP" && moneda === "USD") return dolarNum > 0 ? redondear(base / dolarNum, "USD") : 0;
+    // COM-38: USD → CLP con el dólar observado (misma cuenta que la API).
+    if (mp === "USD" && moneda === "CLP") return dolarObsNum > 0 ? redondear(redondear(base, "USD") * dolarObsNum, "CLP") : 0;
     return 0;
   };
   const tienePrecio = (l: LineaForm) => conserva(l) || Number(l.precioBase) > 0 || (sinPrecio(l) && manualCompleto(l));
   const total = useMemo(
     () => redondear(lineas.reduce((s, l) => s + redondear(precioEnMoneda(l) * (Number(l.cantidad) || 0), moneda), 0), moneda),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [lineas, moneda, dolarNum],
+    [lineas, moneda, dolarNum, dolarObsNum],
   );
   const cc = cfg?.centrosCosto.find((c) => c.id === centroCostoId);
   // EP-05 0.2: el lote del LRB se cotiza con unidades de reposición (parámetro cotizacion_lrb.reposicion).
@@ -572,6 +581,9 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       dolarValor: moneda === "USD" ? dolarNum : null,
       dolarFecha: moneda === "USD" ? dolarFecha : null,
       ...(cambiaDolar ? { dolarMotivo } : {}),
+      // COM-38: dólar observado (solo en pesos).
+      dolarObservado: moneda === "CLP" && dolarObsNum > 0 ? dolarObsNum : null,
+      dolarObservadoFecha: moneda === "CLP" && dolarObsNum > 0 ? dolarObsFecha : null,
       referencia: referencia.trim() || null,
       descripcionTecnica: descripcionTecnica.trim() || null,
       condicionesAdicionales: condiciones.trim() || null,
@@ -764,7 +776,15 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
               <small style={{ color: "var(--muted)" }}>Queda congelado al emitir; cambiarlo después exige motivo.</small>
             </div>
           ) : (
-            <div className="field" />
+            <div className="field">
+              {/* COM-38: el LIMS no tiene internet: el dólar observado del día se ingresa a mano. */}
+              <label>Dólar observado (CLP por US$)</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input type="number" inputMode="decimal" step="0.01" min={0} value={dolarObs} onChange={(e) => setDolarObs(e.target.value)} style={{ flex: 1 }} aria-label="Dólar observado" />
+                <input type="date" value={dolarObsFecha} onChange={(e) => setDolarObsFecha(e.target.value)} style={{ width: 140 }} aria-label="Fecha del dólar observado" />
+              </div>
+              <small style={{ color: "var(--muted)" }}>Solo si hay ensayos con precio en USD: se convierten a pesos con este valor y la fecha.</small>
+            </div>
           )}
           {cambiaDolar && (
             <div className="field" style={{ gridColumn: "1 / -1" }}>
@@ -1051,7 +1071,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
                     <small style={{ display: "block", color: "var(--muted)" }}>
                       {conserva(l)
                         ? `Precio cotizado (se conserva)${l.origenGuardado ? ` · ${l.origenGuardado}` : ""}`
-                        : `${l.origen?.texto ?? "Ficha de costos del catálogo"} · ${money(l.precioBase, l.monedaPrecio ?? "CLP")}${(l.monedaPrecio ?? "CLP") === "CLP" && moneda === "USD" ? " convertido con el dólar del día" : ""}`}
+                        : `${l.origen?.texto ?? "Ficha de costos del catálogo"} · ${money(l.precioBase, l.monedaPrecio ?? "CLP")}${(l.monedaPrecio ?? "CLP") === "CLP" && moneda === "USD" ? " convertido con el dólar del día" : ""}${l.monedaPrecio === "USD" && moneda === "CLP" && dolarObsNum > 0 ? ` × dólar observado ${dolarObsNum.toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} del ${dolarObsFecha.split("-").reverse().join("-")}` : ""}`}
                     </small>
                   )}
                   {bloqueoDe(l) && <small role="alert" style={{ display: "block", color: "var(--red)", fontWeight: 600 }}>{bloqueoDe(l)}</small>}

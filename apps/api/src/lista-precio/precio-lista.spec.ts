@@ -1,4 +1,4 @@
-import { elegirPrecio, precioPanel, precioParaCotizacion, type ItemListaVigente } from "./precio-lista";
+import { elegirPrecio, precioPanel, precioParaCotizacion, textoConversionUsd, type ItemListaVigente } from "./precio-lista";
 import { filtroDetalle } from "./lista-precio-detalle.controller";
 
 const item: ItemListaVigente = {
@@ -68,10 +68,17 @@ describe("Frente f6 · el precio conserva la moneda de su lista", () => {
     expect(precioParaCotizacion({ precio: 123_387, moneda: "CLP", origen: "ficha" }, "USD", null).error).toMatch(/dólar del día/);
   });
 
-  it("USD → CLP se bloquea con mensaje claro (sin tipo de cambio inventado)", () => {
+  it("USD → CLP sin dólar observado: pide el dólar observado del día (no inventa un tipo de cambio)", () => {
+    // El «dólar del día» de una cotización en USD no sirve para convertir a pesos.
     const r = precioParaCotizacion({ precio: 150, moneda: "USD", origen: "lista", lista: { codigo: "DEMO-USD-2026", nombre: "Lista de ejemplo en USD", itemCodigo: "EN1074" } }, "CLP", 950, "EN1074");
     expect(r.precio).toBeUndefined();
-    expect(r.error).toMatch(/del ensayo EN1074 está en USD .*Lista de ejemplo en USD.*cotización está en CLP.*Emita la cotización en USD/);
+    expect(r.error).toMatch(/del ensayo EN1074 está en USD .*Lista de ejemplo en USD.*cotización está en CLP.*dólar observado/);
+  });
+
+  it("COM-38: USD → CLP con el dólar observado de la cotización, y la línea guarda el USD y el tipo de cambio", () => {
+    const r = precioParaCotizacion({ precio: 150.456, moneda: "USD", origen: "lista" }, "CLP", null, "EN1074", { dolarObservado: 948.37 });
+    expect(r).toEqual({ precio: 142_692, conversion: { precioUsd: 150.46, tipoCambio: 948.37 } });
+    expect(textoConversionUsd({ precioUsd: 150.46, tipoCambio: 948.37 }, "2026-11-17")).toBe("USD 150,46 × dólar observado 948,37 del 17-11-2026");
   });
 });
 

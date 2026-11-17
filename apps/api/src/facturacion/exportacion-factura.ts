@@ -58,7 +58,22 @@ export interface FacturaEntrada {
   /** true/false = lo marcó Finanzas; null = se deduce (IVA 0 % = exenta). */
   exentaIva?: boolean | null;
   observaciones?: string | null;
+  /** COM-30: factura | boleta (asistencia técnica de la Delegación Nº 11). */
+  tipoDocumento?: string | null;
 }
+
+/** Tipos de DTE: factura 33/34; boleta (COM-30) 39 afecta / 41 exenta. */
+export type TipoDte = 33 | 34 | 39 | 41;
+export function tipoDteDe(exenta: boolean, tipoDocumento?: string | null): TipoDte {
+  if (tipoDocumento === "boleta") return exenta ? 41 : 39;
+  return exenta ? 34 : 33;
+}
+export const NOMBRE_DTE: Record<TipoDte, string> = {
+  33: "Factura electrónica",
+  34: "Factura no afecta o exenta electrónica",
+  39: "Boleta electrónica",
+  41: "Boleta exenta electrónica",
+};
 
 export interface LineaEntrada {
   descripcion: string;
@@ -119,7 +134,7 @@ export interface DocumentoExportV1 {
   generadoEn: string;
   origen: { sistema: "LIMS IDIC"; idFactura: string; estadoLims: string; origenLims: string | null };
   encabezado: {
-    tipoDte: 33 | 34;
+    tipoDte: TipoDte;
     tipoDteNombre: string;
     folioInterno: string;
     folioTributario: string | null;
@@ -264,7 +279,7 @@ const esPrueba = (v: unknown) => /prueba/i.test(t(v));
  * Cuadratura de los totales del documento: neto + IVA + exento = total, IVA =
  * round(neto × tasa) y, en una exenta, sin neto ni IVA. Devuelve los errores.
  */
-export function erroresCuadratura(tot: DocumentoExportV1["totales"], tipoDte: 33 | 34): string[] {
+export function erroresCuadratura(tot: DocumentoExportV1["totales"], tipoDte: TipoDte): string[] {
   const e: string[] = [];
   const vals = [tot.montoNeto, tot.montoExento, tot.iva, tot.montoTotal];
   if (vals.some((v) => !Number.isInteger(v))) e.push("Los montos deben ser enteros en pesos.");
@@ -273,9 +288,9 @@ export function erroresCuadratura(tot: DocumentoExportV1["totales"], tipoDte: 33
     e.push(
       `Los totales no cuadran: neto ${pesos(tot.montoNeto)} + IVA ${pesos(tot.iva)} + exento ${pesos(tot.montoExento)} no es igual al total ${pesos(tot.montoTotal)}.`,
     );
-  if (tipoDte === 33 && tot.iva !== Math.round((tot.montoNeto * (tot.tasaIva ?? 0)) / 100))
+  if ((tipoDte === 33 || tipoDte === 39) && tot.iva !== Math.round((tot.montoNeto * (tot.tasaIva ?? 0)) / 100))
     e.push(`El IVA (${pesos(tot.iva)}) no es el ${tot.tasaIva ?? 0} % del neto (${pesos(tot.montoNeto)}).`);
-  if (tipoDte === 34 && (tot.montoNeto !== 0 || tot.iva !== 0)) e.push("Una factura exenta no lleva neto afecto ni IVA.");
+  if ((tipoDte === 34 || tipoDte === 41) && (tot.montoNeto !== 0 || tot.iva !== 0)) e.push("Una factura exenta no lleva neto afecto ni IVA.");
   if (tot.montoTotal <= 0) e.push("El total de la factura debe ser mayor que cero.");
   return e;
 }
@@ -311,7 +326,7 @@ export function construirExportacion(d: DatosExportacion, generadoEn: string): R
     );
 
   const exenta = esExenta(f);
-  const tipoDte: 33 | 34 = exenta ? 34 : 33;
+  const tipoDte = tipoDteDe(exenta, f.tipoDocumento);
   const ivaPct = Number(f.ivaPct);
   if (exenta && entero(f.ivaMonto) !== 0)
     errores.push(
@@ -405,7 +420,7 @@ export function construirExportacion(d: DatosExportacion, generadoEn: string): R
     origen: { sistema: "LIMS IDIC", idFactura: f.id, estadoLims: f.estado, origenLims: f.origen ?? null },
     encabezado: {
       tipoDte,
-      tipoDteNombre: exenta ? "Factura no afecta o exenta electrónica" : "Factura electrónica",
+      tipoDteNombre: NOMBRE_DTE[tipoDte],
       folioInterno: f.numero,
       folioTributario: pendiente ? null : f.numero,
       fechaEmision,

@@ -193,6 +193,8 @@ export default function DatosEncargoOt({ otId, onCambio }: { otId: string; onCam
             <Dato l="Mandante" x={e.mandante} />
             <Dato l="Moneda · forma de pago" x={[e.moneda, e.formaPago ? etiqueta(v.listas.formaPago ?? [], e.formaPago) : null].filter(Boolean).join(" · ")} />
             <Dato l="Valor inicial (cotizado)" x={e.valorInicial != null ? monto(e.valorInicial, e.moneda ?? "CLP") : null} />
+            {/* COM-02: valor finalmente trabajado, tras la reapertura de la cotización autorizada por el Jefe DCO. */}
+            {e.valorFinal != null && <Dato l="Valor final" x={`${monto(e.valorFinal, e.moneda ?? "CLP")}${e.valorFinalMotivo ? ` · ${e.valorFinalMotivo}` : ""}`} />}
             <Dato l="Referencia" x={e.referencia} />
             {institucional && <Dato l="Oficio" x={e.oficioNumero ? `${e.oficioNumero}${e.oficioFecha ? ` · ${fechaDia(e.oficioFecha)}` : ""}` : null} />}
             {(e.laboratoriosDetalle ?? []).length > 0 && <Dato l="Laboratorios que intervienen" x={e.laboratoriosDetalle.map((u: any) => u.codigo).join(", ")} />}

@@ -235,6 +235,9 @@ model Cliente {
   condicionesEspeciales String?  @map("condiciones_especiales")
   bloqueado       Boolean   @default(false)
   motivoBloqueo   String?   @map("motivo_bloqueo")
+  /// COM-05: 'mora' (automático por facturas vencidas) | 'manual'. align_tercer_envio_comercial.sql.
+  bloqueoOrigen   String?   @map("bloqueo_origen") @db.VarChar(10)
+  bloqueadoAt     DateTime? @map("bloqueado_at") @db.Timestamptz
   saldoActual     Decimal   @default(0) @map("saldo_actual") @db.Decimal(14, 2)
   notas           String?
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
@@ -313,6 +316,9 @@ model Cotizacion {
   dolarValor             Decimal?       @map("dolar_valor") @db.Decimal(12, 4)
   dolarFecha             DateTime?      @map("dolar_fecha") @db.Date
   dolarMotivo            String?        @map("dolar_motivo")
+  /// COM-38: dólar observado (CLP por USD) del día de la cotización en pesos, ingresado a mano (sin internet).
+  dolarObservado         Decimal?       @map("dolar_observado") @db.Decimal(12, 4)
+  dolarObservadoFecha    DateTime?      @map("dolar_observado_fecha") @db.Date
   validaHasta            DateTime?      @map("valida_hasta") @db.Date
   tipoClienteCodigo      String?        @map("tipo_cliente_codigo") @db.VarChar(60)
   medioEnvio             String?        @map("medio_envio") @db.VarChar(40)
@@ -366,6 +372,9 @@ model LineaCotizacion {
   instrumentoSentido  String? @map("instrumento_sentido") @db.VarChar(5)
   /// De qué lista (o ficha) salió el precio de la línea (align_brechas_1.sql).
   precioOrigen        String? @map("precio_origen") @db.VarChar(300)
+  /// COM-38: precio en USD de la lista y tipo de cambio usado al convertirlo a pesos.
+  precioUsd           Decimal? @map("precio_usd") @db.Decimal(14, 2)
+  tipoCambio          Decimal? @map("tipo_cambio") @db.Decimal(12, 4)
 
   cotizacion      Cotizacion @relation(fields: [cotizacionId], references: [id], onDelete: Cascade)
 
@@ -789,12 +798,14 @@ model Factura {
   /// Exportación para facturación (align_nuevo_f2.sql): true = exenta de IVA (DTE 34),
   /// false = afecta (33), null = se deduce (IVA 0 % = exenta). docs/EXPORTACION_FACTURACION.md
   exentaIva     Boolean?  @map("exenta_iva")
+  /// COM-30: documento tributario: factura | boleta (asistencia técnica de la Delegación 11).
+  tipoDocumento String    @default("factura") @map("tipo_documento") @db.VarChar(10)
 
   lineas       LineaFactura[]
   pagos        Pago[]
   notasCredito NotaCredito[]
 
-  @@unique([tenantId, numero])
+  @@unique([tenantId, tipoDocumento, numero])
   @@index([clienteId, estado])
   @@map("factura")
 }

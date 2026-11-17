@@ -118,6 +118,7 @@ const COLS: Record<string, [string, string]> = {
 const SELECT_ENCARGO = `
   SELECT e.moneda, e.forma_pago AS "formaPago", e.referencia, e.descripcion_tecnica AS "descripcionTecnica",
          e.valor_inicial::float8 AS "valorInicial", e.paridad::float8 AS paridad,
+         e.valor_final::float8 AS "valorFinal", e.valor_final_at AS "valorFinalAt", e.valor_final_motivo AS "valorFinalMotivo",
          e.nivel_tecnologico AS "nivelTecnologico", e.requiere_muestreo AS "requiereMuestreo", e.mandante,
          e.oficio_numero AS "oficioNumero", to_char(e.oficio_fecha, 'YYYY-MM-DD') AS "oficioFecha", e.laboratorios,
          e.contrato, to_char(e.contrato_fecha, 'YYYY-MM-DD') AS "contratoFecha", e.proyecto, e.proveedor, e.fabricante,

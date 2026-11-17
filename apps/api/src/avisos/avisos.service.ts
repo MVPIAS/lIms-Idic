@@ -409,6 +409,8 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
     const ots = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT o.id FROM orden_trabajo o
         WHERE o.tenant_id = $1::uuid AND o.estado NOT IN ('cerrada', 'anulada') AND o.fecha_compromiso IS NOT NULL
+          -- COM-23: el plazo se mide con la recepción en el DCO; registrada, ya no se avisa.
+          AND o.fecha_recep_dco IS NULL
           AND ($2::uuid[] IS NULL OR o.id = ANY($2::uuid[]))`,
       tenantId,
       opts.otIds?.length ? opts.otIds : null,

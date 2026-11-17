@@ -66,6 +66,8 @@ CREATE TEMP TABLE _demo (
 INSERT INTO _demo (username, nombre, cargo, rol, unidad) VALUES
   ('demo.admin',          'Administrador del sistema (prueba)',     'Administrador del sistema', 'ADMIN',          NULL),
   ('demo.director',       'Director técnico (prueba)',              'Director técnico',          'DIRECTOR',       'DIR'),
+  -- COM-08: el oficio conductor de la cotización lleva el V°B° obligatorio del Subdirector.
+  ('demo.subdirector',    'Subdirector (prueba)',                   'Subdirector',               'SUBDIRECTOR',    'DIR'),
   ('demo.calidad',        'Gestión de calidad (prueba)',            'Gestión de calidad',        'CALIDAD',        'DGC'),
   ('demo.auditor',        'Auditor · solo lectura (prueba)',        'Auditor externo',           'LECTOR',         NULL),
   ('demo.recepcion',      'Recepción de muestras (prueba)',         'Recepción central',         'RECEPCION',      NULL),

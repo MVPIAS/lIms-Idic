@@ -26,6 +26,9 @@ import { PrismaService } from "../common/prisma.service";
 import { instanteFechaIngreso } from "../common/fecha-chile";
 import { LaboratorioOtService, UnidadResumen } from "./laboratorio-ot.service";
 import { filtroListaOt, paginacion, semaforoPedido } from "./lista-ot";
+import { semaforoPlazo } from "./plazos";
+import { diasPorVencerDe } from "./dias-por-vencer";
+import { exigirClienteHabilitado } from "../cliente/mora.service";
 import { OtCierreService } from "./ot-cierre.controller";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { FlujoService } from "../flujo/flujo.service";
@@ -296,6 +299,7 @@ export class OtController {
     const idsDerivadas =
       si(query.derivadas) && unidadesVisibles ? await this.alcanceResultado.otsConDerivadosA(unidadesVisibles, tenantId) : null;
 
+    const diasPorVencer = await diasPorVencerDe(this.prisma, tenantId);
     const where = filtroListaOt(
       {
         q: query.q,
@@ -311,7 +315,7 @@ export class OtController {
         idsListasCierre,
         idsSinFactura,
       },
-      { tenantId, unidadesVisibles, idsDerivadas, hoy: new Date() },
+      { tenantId, unidadesVisibles, idsDerivadas, hoy: new Date(), diasPorVencer },
     ) as Prisma.OrdenTrabajoWhereInput;
 
     const [ots, total] = await Promise.all([
@@ -342,6 +346,8 @@ export class OtController {
         situacion: ["cerrada", "anulada"].includes(o.estado) ? null : situaciones.get(o.id) ?? null,
         analistas: porOtAnalistas.get(o.id) ?? [],
         flujo: o.flujoInstanciaId ? porIdFlujo.get(o.flujoInstanciaId) ?? null : null,
+        // COM-23: semáforo con el umbral del parámetro y la recepción en el DCO.
+        plazo: semaforoPlazo(o.fechaCompromiso, o.estado, new Date(), { diasPorVencer, fechaRecepDco: o.fechaRecepDco }),
       })),
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
     };
@@ -579,6 +585,9 @@ export class OtController {
       select: { id: true },
     });
     if (!cliente) throw new BadRequestException("clienteId no existe o no pertenece al tenant");
+    // COM-05: un cliente bloqueado (mora ≥ tramo de bloqueo o bloqueo manual) no recibe OT nuevas.
+    // Las OT internas e interlaboratorio no son de un cliente externo: no se bloquean.
+    if (origen !== "INTERLABORATORIO" && origen !== "OT_INTERNA") await exigirClienteHabilitado(this.prisma, tenantId, clienteId);
 
     // Si viene cotización, debe ser del mismo tenant.
     if (dto.cotizacionId) {

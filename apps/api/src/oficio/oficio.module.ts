@@ -82,8 +82,10 @@ export class OficioController {
 
   @Post(":id/generar")
   @RequierePermiso("oficio.crear")
-  generar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    return this.svc.generar(id, req);
+  generar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    // COM-08: número de oficio asignado por Registratura (opcional; vacío = lo asigna el LIMS).
+    const d = z.object({ numeroRegistratura: z.string().trim().max(40, "Número de oficio: máximo 40 caracteres.").optional().nullable() }).parse(body ?? {});
+    return this.svc.generar(id, req, { numeroRegistratura: d.numeroRegistratura });
   }
 
   @Post(":id/firmar")

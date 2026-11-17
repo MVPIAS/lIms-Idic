@@ -20,6 +20,7 @@ import CotizacionForm from "../_components/CotizacionForm";
 import { DetalleCotizacion, EstadoChip, FirmaChip, accionesDe } from "../_components/Detalle";
 import { DialogoAceptacion, DialogoAnulacion } from "../_components/Dialogos";
 import LaboratorioCotizacion from "../_components/LaboratorioCotizacion";
+import Reapertura from "../_components/Reapertura";
 import Panel from "../_components/Panel";
 import { ACEPTACION_LABEL, descargarPdfCotizacion, pedir, pedirTexto, type Opcion } from "../_components/comercial";
 import { PESTANA_DE_ETAPA, TEXTO_EVENTO, type Circuito, type EstadoEtapa, type PestanaCot } from "../_components/circuito";
@@ -100,7 +101,7 @@ export default function FichaCotizacionPage() {
         <div className="id">💲 {k.codigo}</div>
         <div className="meta">
           Cliente: <b>{cot.cliente?.razonSocial ?? "—"}</b>{cot.cliente?.rut ? <> ({rut(cot.cliente.rut)})</> : null}
-          {" · "}Estado: <b>{cot.estado === "expirada" ? "Vencida" : cot.estado}</b>
+          {" · "}Estado: <b>{cot.estado === "expirada" ? "Vencida" : cot.estado === "reabierta" ? "Reabierta (ajuste del valor)" : cot.estado}</b>
           {etapaActual && <> · Etapa: <b>{etapaActual.titulo}</b></>}
           {" · "}Total: <b>{monto(cot.total, cot.moneda)}</b>
           {" · "}Válida hasta: <b>{fechaDia(cot.validaHasta ?? cot.expiraAt)}</b>
@@ -129,6 +130,9 @@ export default function FichaCotizacionPage() {
         )}
         {c.ruta.avisos.length > 0 && <ul className="sp-avisos">{c.ruta.avisos.map((a) => <li key={a}>{a}</li>)}</ul>}
       </section>
+
+      {/* COM-02: reabrir una cotización aceptada para registrar el valor final. */}
+      <Reapertura cot={cot} puede={puede} onHecho={hecho} onError={avisar} onEditar={() => { irA("datos"); setEditando(true); }} />
 
       <div className="expgrid">
         <nav className="stepper ruta-ot" aria-label="Ruta de la cotización">
