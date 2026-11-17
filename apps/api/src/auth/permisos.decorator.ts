@@ -2,6 +2,7 @@ import { SetMetadata } from "@nestjs/common";
 
 export const PERMISOS_KEY = "permisos_requeridos";
 export const PERMISOS_CRUD_KEY = "permisos_requeridos_crud";
+export const PERMISOS_ALGUNO_KEY = "permisos_requeridos_alguno";
 
 /**
  * Marca una ruta/controlador con los permisos requeridos (RBAC).
@@ -12,6 +13,15 @@ export const PERMISOS_CRUD_KEY = "permisos_requeridos_crud";
  * @RequierePermisoCrud declarados en la clase.
  */
 export const RequierePermiso = (...codigos: string[]) => SetMetadata(PERMISOS_KEY, codigos);
+
+/**
+ * Basta UNO de los permisos (en orden de preferencia). Solo en métodos; gana a
+ * @RequierePermiso de la clase. El alcance por asignación se calcula con el
+ * PRIMERO de la lista que el usuario tiene (queda en `req.__permisosRuta`), así
+ * quien ya tenía el primero conserva exactamente el alcance de antes.
+ * Uso: @RequiereAlgunPermiso("cotizacion.ver", "cotizacion.costear").
+ */
+export const RequiereAlgunPermiso = (...codigos: string[]) => SetMetadata(PERMISOS_ALGUNO_KEY, codigos);
 
 /** Permisos por verbo HTTP para los controladores que heredan de BaseCrudController. */
 export interface PermisosCrud {

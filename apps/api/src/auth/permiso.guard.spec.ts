@@ -10,7 +10,7 @@
 import { ExecutionContext, ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { PermisoGuard } from "./permiso.guard";
-import { PERMISOS_CRUD_KEY, PERMISOS_KEY, PermisosCrud } from "./permisos.decorator";
+import { PERMISOS_ALGUNO_KEY, PERMISOS_CRUD_KEY, PERMISOS_KEY, PermisosCrud } from "./permisos.decorator";
 import { PUBLIC_KEY } from "./public.decorator";
 
 /** Metadata que el Reflector "verá" en esta prueba, por clave. */
@@ -18,6 +18,7 @@ interface Meta {
   [PUBLIC_KEY]?: boolean;
   [PERMISOS_KEY]?: string[];
   [PERMISOS_CRUD_KEY]?: PermisosCrud;
+  [PERMISOS_ALGUNO_KEY]?: string[];
 }
 
 /**
@@ -168,5 +169,42 @@ describe("PermisoGuard · alcance por asignación", () => {
     } as unknown as ExecutionContext;
     expect(new PermisoGuard(reflector).canActivate(ctx)).toBe(true);
     expect(req.__permisosRuta).toEqual([]);
+  });
+});
+
+describe("PermisoGuard · @RequiereAlgunPermiso (COM-09)", () => {
+  function conReq(meta: Meta, user: any) {
+    const req: any = { method: "GET", user };
+    const reflector = { getAllAndOverride: jest.fn((key: string) => (meta as any)[key]) } as unknown as Reflector;
+    const ctx = {
+      getHandler: () => () => undefined,
+      getClass: () => class {},
+      switchToHttp: () => ({ getRequest: () => req }),
+    } as unknown as ExecutionContext;
+    return { guard: new PermisoGuard(reflector), ctx, req };
+  }
+  const meta = { [PERMISOS_ALGUNO_KEY]: ["cotizacion.ver", "cotizacion.costear"] };
+
+  it("el analista con solo cotizacion.costear pasa y el alcance se mide con ese permiso", () => {
+    const { guard, ctx, req } = conReq(meta, { roles: ["ANALISTA"], permisos: ["cotizacion.costear"] });
+    expect(guard.canActivate(ctx)).toBe(true);
+    expect(req.__permisosRuta).toEqual(["cotizacion.costear"]);
+  });
+
+  it("quien tiene los dos conserva el alcance del primero (cotizacion.ver)", () => {
+    const { guard, ctx, req } = conReq(meta, { roles: ["JEFE_LAB"], permisos: ["cotizacion.costear", "cotizacion.ver"] });
+    expect(guard.canActivate(ctx)).toBe(true);
+    expect(req.__permisosRuta).toEqual(["cotizacion.ver"]);
+  });
+
+  it("sin ninguno → 403; sin usuario → 401", () => {
+    expect(() => conReq(meta, { roles: ["ANALISTA"], permisos: ["resultado.crear"] }).guard.canActivate(conReq(meta, { roles: ["ANALISTA"], permisos: ["resultado.crear"] }).ctx)).toThrow(ForbiddenException);
+    const sin = conReq(meta, undefined);
+    expect(() => sin.guard.canActivate(sin.ctx)).toThrow(UnauthorizedException);
+  });
+
+  it("gana a @RequierePermiso de la clase", () => {
+    const { guard, ctx } = conReq({ ...meta, [PERMISOS_KEY]: ["cotizacion.crear"] }, { roles: ["ANALISTA"], permisos: ["cotizacion.costear"] });
+    expect(guard.canActivate(ctx)).toBe(true);
   });
 });

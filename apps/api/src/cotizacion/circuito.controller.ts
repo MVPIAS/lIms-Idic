@@ -6,7 +6,7 @@ import { zMoneda } from "../common/moneda";
 import { zMedioEnvio } from "../common/medios-envio";
 import { TIPOS_SERVICIO } from "./form05";
 import { PermisoGuard } from "../auth/permiso.guard";
-import { RequierePermiso } from "../auth/permisos.decorator";
+import { RequiereAlgunPermiso, RequierePermiso } from "../auth/permisos.decorator";
 import { CircuitoCotizacionService } from "./circuito.service";
 import { nombrePdfCotizacion } from "./cotizacion-documento";
 
@@ -112,12 +112,13 @@ export class CircuitoCotizacionController {
   constructor(private readonly svc: CircuitoCotizacionService) {}
 
   /**
-   * Bandeja del laboratorio. Basta ver cotizaciones: cada uno ve las solicitudes
-   * de los laboratorios de su alcance (el Jefe de Laboratorio, las suyas; los
-   * perfiles globales, todas). Responder exige `cotizacion.costear`.
+   * Bandeja del laboratorio. Basta ver cotizaciones o costearlas (COM-09: el
+   * analista estima): cada uno ve las solicitudes de los laboratorios de su
+   * alcance (el Jefe de Laboratorio y sus analistas, las suyas; los perfiles
+   * globales, todas). Responder exige `cotizacion.costear`; el V°B°, `cotizacion.vb`.
    */
   @Get("solicitudes-laboratorio")
-  @RequierePermiso("cotizacion.ver")
+  @RequiereAlgunPermiso("cotizacion.ver", "cotizacion.costear")
   @ApiOperation({ summary: "Bandeja del laboratorio: ?estado=por_responder|vb|todas" })
   bandeja(@Query("estado") estado: string | undefined, @Req() req: any) {
     return this.svc.bandejaLaboratorio(req, { estado });
@@ -158,7 +159,7 @@ export class CircuitoCotizacionController {
   }
 
   @Get(":id/circuito")
-  @RequierePermiso("cotizacion.ver")
+  @RequiereAlgunPermiso("cotizacion.ver", "cotizacion.costear")
   @ApiOperation({ summary: "Ruta de la cotización, solicitudes al laboratorio, V°B°, firma, envío y bitácora" })
   circuito(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.estado(req, id);

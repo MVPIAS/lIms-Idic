@@ -11,13 +11,13 @@ import { CONDICIONES_MAX, CotizacionService } from "./cotizacion.service";
 import { hoyEnChile } from "./validez";
 import { CosteoService } from "./costeo.service";
 import { PermisoGuard } from "../auth/permiso.guard";
-import { RequierePermiso } from "../auth/permisos.decorator";
+import { RequiereAlgunPermiso, RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos } from "../common/estados";
 import { TIPOS_ACEPTACION } from "../ot/reglas-ot";
 import { PERMISO_ACEPTAR, PERMISO_ANULAR } from "./permisos-cotizacion";
 import { PERMISO_REABRIR } from "./reapertura";
 import { CircuitoCotizacionService } from "./circuito.service";
-import { exigirCotizacionEnAlcance } from "./alcance-cotizacion";
+import { exigirCotizacionEnAlcance, exigirCotizacionPorCosteo, leeSoloPorCosteo } from "./alcance-cotizacion";
 import { AlcanceService } from "../rbac/alcance.service";
 import { PrismaService } from "../common/prisma.service";
 import { leerConfigCircuito } from "./circuito-config";
@@ -269,7 +269,8 @@ export class CotizacionController {
    * con su texto base y validez propia, y los parámetros de validez.
    */
   @Get("config")
-  @RequierePermiso("cotizacion.ver")
+  // COM-09: el analista que costea abre la ficha y necesita los combos.
+  @RequiereAlgunPermiso("cotizacion.ver", "cotizacion.costear")
   @ApiOperation({ summary: "Combos y centros de costo del formulario de cotización" })
   config(@Req() req: any) {
     return this.svc.config(req?.user?.tenantId);
@@ -353,8 +354,11 @@ export class CotizacionController {
   }
 
   @Get(":id")
-  @RequierePermiso("cotizacion.ver")
-  detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+  // COM-09: con solo cotizacion.costear, únicamente las cotizaciones con una
+  // solicitud de costeo a su laboratorio.
+  @RequiereAlgunPermiso("cotizacion.ver", "cotizacion.costear")
+  async detalle(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    if (leeSoloPorCosteo(req?.user)) await exigirCotizacionPorCosteo(this.prisma, this.alcance, req, id);
     return this.svc.detalle(id, req?.user?.tenantId);
   }
 

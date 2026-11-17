@@ -70,3 +70,45 @@ export async function exigirCotizacionEnAlcance(
   }
   return cot;
 }
+
+/**
+ * COM-09 (IDIC 17-11-2026): el analista estima el costo (cotizacion.costear) sin
+ * ver el resto de las cotizaciones. ¿Lee la cotización solo por costeo? Sí si no
+ * tiene cotizacion.ver (ni es SUPERADMIN).
+ */
+export function leeSoloPorCosteo(user: { roles?: string[]; permisos?: string[] } | undefined): boolean {
+  if ((user?.roles ?? []).includes("SUPERADMIN")) return false;
+  return !(user?.permisos ?? []).includes("cotizacion.ver");
+}
+
+/**
+ * Lectura de la ficha de una cotización (detalle, circuito, documento) por quien
+ * solo tiene cotizacion.costear: hace falta una solicitud de costeo de la
+ * cotización dirigida a un laboratorio de su alcance para ese permiso. 404 si la
+ * cotización no existe; 403 si no hay solicitud a su laboratorio. Quien tiene
+ * cotizacion.ver no pasa por aquí (sigue la regla de siempre).
+ */
+export async function exigirCotizacionPorCosteo(
+  prisma: any,
+  alcance: { filtroUnidades(req: any, permiso?: string | null): Promise<string[] | null> },
+  req: any,
+  id: string,
+): Promise<void> {
+  const tenantId: string | undefined = req?.user?.tenantId;
+  const cot = await prisma.cotizacion.findFirst({ where: { id, ...(tenantId ? { tenantId } : {}) }, select: { id: true, codigo: true } });
+  if (!cot) throw new NotFoundException("Cotización no encontrada");
+  const visibles = await alcance.filtroUnidades(req, "cotizacion.costear");
+  const filas: unknown[] = await prisma.$queryRawUnsafe(
+    `SELECT 1 FROM solicitud_costeo s
+      WHERE s.cotizacion_id = $1::uuid AND s.deleted_at IS NULL
+        AND ($2::uuid[] IS NULL OR s.unidad_id = ANY($2::uuid[]))
+      LIMIT 1`,
+    id,
+    visibles,
+  );
+  if (!filas.length) {
+    throw new ForbiddenException(
+      `Fuera de su alcance: la cotización ${cot.codigo ?? ""} no tiene solicitudes de costeo para su laboratorio.`.replace(/\s+/g, " "),
+    );
+  }
+}

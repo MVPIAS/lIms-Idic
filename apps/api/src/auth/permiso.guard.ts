@@ -6,7 +6,7 @@ import {
   UnauthorizedException,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { PERMISOS_CRUD_KEY, PERMISOS_KEY, PermisosCrud } from "./permisos.decorator";
+import { PERMISOS_ALGUNO_KEY, PERMISOS_CRUD_KEY, PERMISOS_KEY, PermisosCrud } from "./permisos.decorator";
 import { PUBLIC_KEY } from "./public.decorator";
 import { CODIGO_CAMBIO_CLAVE, PERMITE_CAMBIO_CLAVE_KEY } from "./cambio-clave.decorator";
 
@@ -65,8 +65,21 @@ export class PermisoGuard implements CanActivate {
       }
     }
 
-    const requeridos = this.resolverRequeridos(ctx);
     const req = ctx.switchToHttp().getRequest();
+    // @RequiereAlgunPermiso del método: basta uno; el alcance se mide con el
+    // primero de la lista que el usuario tiene.
+    const alguno = this.reflector.getAllAndOverride<string[] | undefined>(PERMISOS_ALGUNO_KEY, [ctx.getHandler()]);
+    if (alguno?.length) {
+      const u = req?.user;
+      if (!u) throw new UnauthorizedException("No autenticado");
+      const tiene: string[] = u.permisos ?? [];
+      const efectivo = (u.roles ?? []).includes("SUPERADMIN") ? alguno[0] : alguno.find((p) => tiene.includes(p));
+      if (!efectivo) throw new ForbiddenException(`Permiso insuficiente. Requiere uno de: ${alguno.join(", ")}`);
+      req.__permisosRuta = [efectivo];
+      return true;
+    }
+
+    const requeridos = this.resolverRequeridos(ctx);
     // Alcance por asignación: los servicios filtran con el alcance de las
     // asignaciones cuyo rol concede ESTOS permisos (AlcanceService).
     if (req) req.__permisosRuta = requeridos;

@@ -3,8 +3,8 @@
 /**
  * Cotizaciones por responder · bandeja del laboratorio (EP-00 2.4–2.6).
  * Comercial pide al laboratorio fechas (servicio estándar) o el Formulario de
- * costeo FORM05 (no estándar). Aquí el Jefe de Laboratorio ve las solicitudes de
- * sus laboratorios y las que esperan su V°B° (o el del Jefe de Departamento), y
+ * costeo FORM05 (no estándar). Aquí el Jefe de Laboratorio y sus analistas (COM-09)
+ * ven las solicitudes de sus laboratorios y las que esperan su V°B° (o el del Jefe de Departamento), y
  * entra a la ficha de la cotización a responder.
  * GET /cotizaciones/solicitudes-laboratorio?estado=por_responder|vb|todas
  * (filtrado en el servidor por el alcance del permiso cotizacion.costear).
@@ -62,7 +62,7 @@ export default function CotizacionesPorResponderPage() {
     <div>
       <h1 className="page">Cotizaciones por responder</h1>
       <p className="subtitle">
-        Comercial pide fechas y costo a su laboratorio. Responda con el programa de trabajo (FORM06) y, si el servicio no es estandarizado, el formulario de costeo (FORM05). Después la respuesta necesita el V°B° del Jefe de Laboratorio y del Jefe de Departamento.
+        Comercial pide fechas y costo a su laboratorio. Responda con el programa de trabajo (FORM06) y, si el servicio no es estandarizado, el formulario de costeo (FORM05). La estimación la puede preparar el analista del laboratorio; después la respuesta necesita el V°B° del Jefe de Laboratorio.
       </p>
       {error && <div className="alert warn" role="alert">{error}</div>}
       <div className="toolbar" style={{ gap: 6 }}>

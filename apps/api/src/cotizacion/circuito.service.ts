@@ -5,7 +5,7 @@ import { FirmasMatrizService } from "../rbac/firmas-matriz.controller";
 import type { ReglaFirma } from "../rbac/firmas-resolver";
 import { MensajeriaService } from "../mensajeria/mensajeria.module";
 import { CotizacionService } from "./cotizacion.service";
-import { exigirCotizacionEnAlcance } from "./alcance-cotizacion";
+import { exigirCotizacionEnAlcance, exigirCotizacionPorCosteo, leeSoloPorCosteo } from "./alcance-cotizacion";
 import { leerConfigCircuito } from "./circuito-config";
 import {
   ETIQUETA_SOLICITUD,
@@ -241,7 +241,9 @@ export class CircuitoCotizacionService {
   /** Todo lo que pinta la ficha de la cotización: ruta, solicitudes, V°B°, firma, envío y bitácora. */
   async estado(req: any, id: string) {
     const tenantId = this.tenant(req);
-    await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id, "cotizacion.ver");
+    // COM-09: quien solo costea (analista) abre la ficha de las cotizaciones con solicitud a su laboratorio.
+    if (leeSoloPorCosteo(req?.user)) await exigirCotizacionPorCosteo(this.prisma, this.alcance, req, id);
+    else await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id, "cotizacion.ver");
     await this.cotizaciones.vencerFueraDeValidez(tenantId, id);
     const [c, sols, cfg, firmantes] = await Promise.all([
       this.cot(id, tenantId),
