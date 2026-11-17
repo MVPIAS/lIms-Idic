@@ -339,6 +339,7 @@ export class PrototiposService implements OnModuleInit {
           unidadId: "-", // la unidad y el cobro se eligen al generar
           conCobro: true,
           parametrizacion: { exige: await this.exigeParametrizacion(tenantId), estado: p.param_estado },
+          clasificacionEstado: p.clas_estado ?? null,
         }),
         aprobar: faltantesDictamen({ ...base, dictamen: "aprobado" }),
         rechazar: faltantesDictamen({ ...base, dictamen: "rechazado", motivo: "x" }),
@@ -473,6 +474,7 @@ export class PrototiposService implements OnModuleInit {
       unidadId: d.unidadId,
       conCobro: d.conCobro,
       parametrizacion: { exige: await this.exigeParametrizacion(tenantId), estado: p.param_estado },
+      clasificacionEstado: p.clas_estado ?? null,
     });
     if (faltan.length) throw new ConflictException(`No se puede generar la OT. ${faltan.join(" ")}`);
     const unidad = await this.comun.unidadDeBpch(tenantId, d.unidadId);

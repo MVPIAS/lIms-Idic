@@ -46,6 +46,11 @@ describe("Codificación Única · CNC-DGMN", () => {
     expect(errorCambioEstadoCodificacion("VIGENTE", "EN_RECESO", "Baja temporal del fabricante")).toBeNull();
     expect(errorCambioEstadoCodificacion("VIGENTE", "VIGENTE", "xxxxx")).toMatch(/ya está vigente/);
     expect(errorCambioEstadoCodificacion("EN_RECESO", "VIGENTE", "")).toMatch(/motivo/);
+    // BPCH-40: reactivar exige un certificado nuevo, distinto del anterior.
+    expect(errorCambioEstadoCodificacion("EN_RECESO", "VIGENTE", "Reanuda la fabricación")).toMatch(/certificado nuevo/);
+    expect(errorCambioEstadoCodificacion("EN_RECESO", "VIGENTE", "Reanuda la fabricación", { nuevo: "cc-1", anterior: "CC-1" })).toMatch(/ya tenía/);
+    expect(errorCambioEstadoCodificacion("EN_RECESO", "VIGENTE", "Reanuda la fabricación", { nuevo: "CC-2", anterior: "CC-1" })).toBeNull();
+    expect(errorCambioEstadoCodificacion("VIGENTE", "EN_RECESO", "Baja temporal del fabricante", {})).toBeNull();
     expect(errorCambioEstadoCodificacion("VIGENTE", "BAJA", "xxxxxx")).toMatch(/inválido/);
   });
 });

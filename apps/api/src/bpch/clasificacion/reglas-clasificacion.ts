@@ -104,26 +104,40 @@ export interface EvaluacionIt21 {
   serie1: ResultadoPrueba | null;
   serie2: ResultadoPrueba | null;
   detalle: string;
+  /** Se registraron ensayos de la serie 2 con la serie 1 negativa (BPCH-37). */
+  serie2NoCorresponde?: boolean;
 }
 
 /**
- * IT21: cada serie se evalúa por separado. Positivo si alguna serie registrada
- * es positiva; negativo si todas las registradas son negativas concluyentes;
- * incompleto si falta algún ensayo o no hay ninguna serie.
+ * IT21 (BPCH-37, respuesta IDIC 17-11-2026): la serie 2 SOLO se hace si la
+ * serie 1 es positiva.
+ *   · Serie 1 negativa concluyente → la prueba es negativa; la serie 2 no
+ *     corresponde (si se registró, `serie2NoCorresponde` y validarRegistro lo
+ *     rechaza).
+ *   · Serie 1 positiva → la serie 2 se exige: la prueba queda incompleta hasta
+ *     que la serie 2 sea concluyente; entonces es positiva (como hasta ahora,
+ *     basta una serie positiva para el indicador).
+ *   · Serie 1 sin ensayos o incompleta → incompleta.
  */
 export function evaluarIt21(p: PruebaIt21 | null | undefined): EvaluacionIt21 {
   if (!p || !p.aplica) return { resultado: "no_aplica", serie1: null, serie2: null, detalle: "No aplica" };
-  const s1 = p.serie1 ? evaluarSerieIt21(p.serie1) : null;
-  const s2 = p.serie2 ? evaluarSerieIt21(p.serie2) : null;
-  const registradas = [s1, s2].filter((x): x is ResultadoPrueba => x !== null);
+  const s1 = p.serie1 && p.serie1.ensayos?.length ? evaluarSerieIt21(p.serie1) : null;
+  const s2 = p.serie2 && p.serie2.ensayos?.length ? evaluarSerieIt21(p.serie2) : null;
   let resultado: ResultadoPrueba;
-  if (!registradas.length) resultado = "incompleto";
-  else if (registradas.includes("positivo")) resultado = "positivo";
-  else if (registradas.every((r) => r === "negativo")) resultado = "negativo";
-  else resultado = "incompleto";
+  let serie2NoCorresponde = false;
+  if (s1 === null || s1 === "incompleto") resultado = "incompleto";
+  else if (s1 === "negativo") {
+    resultado = "negativo";
+    serie2NoCorresponde = s2 !== null;
+  } else resultado = s2 === null || s2 === "incompleto" ? "incompleto" : "positivo";
   const txt = (n: number, r: ResultadoPrueba | null) => (r ? `Serie ${n}: ${r}` : `Serie ${n}: sin ensayos`);
-  return { resultado, serie1: s1, serie2: s2, detalle: `${txt(1, s1)} · ${txt(2, s2)}` };
+  const det2 = s1 === "negativo" && s2 === null ? "Serie 2: no corresponde (serie 1 negativa)" : txt(2, s2);
+  return { resultado, serie1: s1, serie2: s2, detalle: `${txt(1, s1)} · ${det2}`, ...(serie2NoCorresponde ? { serie2NoCorresponde } : {}) };
 }
+
+/** ¿Se habilita la serie 2 de la IT21? Solo con la serie 1 positiva (BPCH-37). */
+export const habilitaSerie2It21 = (p: PruebaIt21 | null | undefined) =>
+  Boolean(p?.aplica && p.serie1?.ensayos?.length && evaluarSerieIt21(p.serie1) === "positivo");
 
 /* ------------------------------------------------------------------ IT22 --- */
 
@@ -275,6 +289,8 @@ export function validarRegistro(
   const onu = normalizarNumeroOnu(d.numeroOnu);
   const justificacion = d.justificacion?.trim() || "";
 
+  if (ev.it21.serie2NoCorresponde)
+    errores.push("IT21: la serie 2 solo se realiza si la serie 1 es positiva. Con la serie 1 negativa, quite los ensayos de la serie 2.");
   if (ev.incompletas.length)
     errores.push(
       `Pruebas sin concluir: ${ev.incompletas.map((k) => NOMBRE_PRUEBA[k]).join(", ")}. Complete los ensayos o márquelas «no aplica».`,
@@ -295,8 +311,10 @@ export function validarRegistro(
     errores.push(`El grupo de compatibilidad «${grupo}» no está en la lista vigente.`);
   if (onu !== null && !/^\d{4}$/.test(onu)) errores.push("El Nº ONU son cuatro dígitos (p. ej. 0456).");
 
-  if (!ev.aplicadas.length && !justificacion)
-    errores.push("No se registró ninguna prueba ONU: indique en «Justificación» el fundamento de la clasificación.");
+  // BPCH-35 (respuesta IDIC 17-11-2026): la clasificación siempre se hace con
+  // pruebas; ya no se admite clasificar solo por antecedentes con justificación.
+  if (!ev.aplicadas.length)
+    errores.push("Registre al menos una prueba ONU (IT21, IT22 o IT23): la clasificación de una sustancia siempre se hace con pruebas.");
   if (
     ev.indicaExplosiva !== null &&
     (d.explosiva === true || d.explosiva === false) &&

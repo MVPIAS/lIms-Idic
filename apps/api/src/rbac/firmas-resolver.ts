@@ -228,6 +228,16 @@ export function responsablesDe(
   return out;
 }
 
+/**
+ * Rótulo del cargo que firma (BPCH-46, respuesta IDIC 17-11-2026): el Jefe del
+ * Departamento BPCH es el «Subdirector BPCH» en los documentos del BPCH. El
+ * resto de los cargos conserva el nombre del rol.
+ */
+export function rotuloRolFirma(rolCodigo: string, rolNombre: string, unidadCodigo: string | null | undefined): string {
+  if ((rolCodigo === "JEFE_DEPTO" || rolCodigo === "JEFEDCO") && unidadCodigo === "BPCH") return "Subdirector BPCH";
+  return rolNombre;
+}
+
 export function resolverFirmas(p: {
   tipoDocumento: string;
   unidadId: string | null;
@@ -260,7 +270,10 @@ export function resolverFirmas(p: {
       // alternativo se busca desde esa unidad (MISMA = la unidad fija del paso).
       const baseAlt = r.nivelUnidad === "FIJA" && destino ? destino.id : unidad?.id ?? null;
       const destinoAlt = unidadParaNivel(p.arbol, baseAlt, r.nivelUnidadAlternativo ?? "MISMA", null);
-      alternativo = { rol: { id: r.rolAlternativo.id, codigo: r.rolAlternativo.codigo, nombre: r.rolAlternativo.nombre }, unidad: ref(destinoAlt) };
+      alternativo = {
+        rol: { id: r.rolAlternativo.id, codigo: r.rolAlternativo.codigo, nombre: rotuloRolFirma(r.rolAlternativo.codigo, r.rolAlternativo.nombre, destinoAlt?.codigo) },
+        unidad: ref(destinoAlt),
+      };
       if (destinoAlt) {
         const vistos = new Set(responsables.map((x) => x.usuarioId));
         for (const a of responsablesDe(r.rolAlternativo, destinoAlt, p.jefes, p.tenencias, ahora))
@@ -275,7 +288,7 @@ export function resolverFirmas(p: {
       obligatorio: r.obligatorio,
       descripcion: r.descripcion ?? null,
       nivelUnidad: r.nivelUnidad,
-      rol: { id: r.rol.id, codigo: r.rol.codigo, nombre: r.rol.nombre },
+      rol: { id: r.rol.id, codigo: r.rol.codigo, nombre: rotuloRolFirma(r.rol.codigo, r.rol.nombre, destino?.codigo) },
       unidad: ref(destino),
       responsables,
       advertencia,

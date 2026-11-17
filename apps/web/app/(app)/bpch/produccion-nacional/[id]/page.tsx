@@ -144,7 +144,7 @@ export default function OcPage() {
       {error && <div className="alert warn" role="alert">{error}</div>}
       {oc.raf.estado !== "vigente" && <div className="alert warn">La RAF {oc.raf.numero} está anulada.</div>}
       {oc.raf.vigenciaHasta && oc.raf.vigenciaHasta < hoyISO() && (
-        <div className="alert warn">La RAF venció el {dia(oc.raf.vigenciaHasta)}: según SAC-PG01-IT08 es un defecto crítico de la inspección.</div>
+        <div className="alert warn">La RAF venció el {dia(oc.raf.vigenciaHasta)}: no se puede generar la OT de las inspecciones hasta registrar la RAF renovada.</div>
       )}
       {oc.raf.tipoLinea === "MOVIL" && <div className="alert info">Línea móvil (camión fábrica): SAC-PG01-IT10 excluye estos productos del muestreo por atributos NCh 44.</div>}
 

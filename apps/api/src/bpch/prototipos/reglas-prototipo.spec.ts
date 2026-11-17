@@ -11,7 +11,7 @@ describe("Prototipos · veredicto del tipo", () => {
 });
 
 describe("Prototipos · generar la OT", () => {
-  const base = { estado: "ingresado" as const, otId: null, sacTamanoMuestra: 5, unidadId: "u", conCobro: false };
+  const base = { estado: "ingresado" as const, otId: null, sacTamanoMuestra: 5, unidadId: "u", conCobro: false, clasificacionEstado: "aprobada" };
   it("exige el pronunciamiento SAC (SAC-PG01-IT10), la unidad y la decisión de cobro", () => {
     expect(faltantesGenerarOt(base)).toEqual([]);
     expect(faltantesGenerarOt({ ...base, sacTamanoMuestra: null }).join(" ")).toMatch(/SAC/);
@@ -22,6 +22,10 @@ describe("Prototipos · generar la OT", () => {
     expect(faltantesGenerarOt({ ...base, otId: "o", otEstado: "recepcionada" }).join(" ")).toMatch(/ya tiene una OT/);
     expect(faltantesGenerarOt({ ...base, otId: "o", otEstado: "anulada" })).toEqual([]);
     expect(faltantesGenerarOt({ ...base, estado: "anulado" }).join(" ")).toMatch(/anulado/);
+  });
+  it("BPCH-32: sin clasificación aprobada no se ensaya (no se genera la OT)", () => {
+    expect(faltantesGenerarOt({ ...base, clasificacionEstado: null }).join(" ")).toMatch(/clasificación de sustancia APROBADA/);
+    expect(faltantesGenerarOt({ ...base, clasificacionEstado: "en_revision" }).join(" ")).toMatch(/APROBADA/);
   });
 });
 
@@ -153,7 +157,7 @@ describe("EP-08 8.11 · parametrizar el elemento (BL-060)", () => {
     expect(faltantesParametrizacion("validar", { ...base, estado: "en_validacion", usuario: "u1" })[0]).toMatch(/cuatro ojos/);
     expect(faltantesParametrizacion("devolver", { ...base, estado: "en_validacion", motivo: "no" })[0]).toMatch(/motivo/);
     expect(faltantesParametrizacion("editar", { ...base, estado: "validada", otViva: true })[0]).toMatch(/OT/);
-    expect(faltantesGenerarOt({ estado: "ingresado", otId: null, sacTamanoMuestra: 3, unidadId: "u", conCobro: false, parametrizacion: { exige: true, estado: "borrador" } })[0]).toMatch(/parametrización/);
-    expect(faltantesGenerarOt({ estado: "ingresado", otId: null, sacTamanoMuestra: 3, unidadId: "u", conCobro: false, parametrizacion: { exige: false, estado: "borrador" } })).toEqual([]);
+    expect(faltantesGenerarOt({ estado: "ingresado", otId: null, sacTamanoMuestra: 3, unidadId: "u", conCobro: false, clasificacionEstado: "aprobada", parametrizacion: { exige: true, estado: "borrador" } })[0]).toMatch(/parametrización/);
+    expect(faltantesGenerarOt({ estado: "ingresado", otId: null, sacTamanoMuestra: 3, unidadId: "u", conCobro: false, clasificacionEstado: "aprobada", parametrizacion: { exige: false, estado: "borrador" } })).toEqual([]);
   });
 });

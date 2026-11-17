@@ -18,13 +18,59 @@ export const PROCESOS_CON_EXPEDIENTE = ["INTERNACION", "REINSPECCION"] as const;
 /** Campos que se pueden registrar en la OT aunque la cabecera venga de un expediente. */
 export const CAMPOS_COMPLEMENTO = ["direccion", "comuna", "contacto"] as const;
 
+/**
+ * BPCH-48 (respuesta IDIC 17-11-2026): la inspección EN TERRENO exige dos
+ * inspectores (sin ellos no se avanza en la programación); el trabajo
+ * administrativo basta con uno. Los inspectores se eligen entre las personas
+ * con rol INSPECTOR de la unidad; el texto libre antiguo queda como lectura.
+ */
+export const MODALIDADES_INSPECCION = ["TERRENO", "ADMINISTRATIVO"] as const;
+export type ModalidadInspeccion = (typeof MODALIDADES_INSPECCION)[number];
+export const INSPECTORES_MINIMOS: Record<ModalidadInspeccion, number> = { TERRENO: 2, ADMINISTRATIVO: 1 };
+export const NOMBRE_MODALIDAD: Record<ModalidadInspeccion, string> = {
+  TERRENO: "Inspección en terreno",
+  ADMINISTRATIVO: "Trabajo administrativo",
+};
+
+/** Errores de modalidad e inspectores (BPCH-48). `disponibles`: ids de inspectores de la unidad, si se quiere comprobar. */
+export function erroresInspectores(
+  d: { modalidad?: string | null; inspectorIds?: readonly string[] | null },
+  disponibles?: ReadonlySet<string>,
+): string[] {
+  const e: string[] = [];
+  const ids = [...(d.inspectorIds ?? [])];
+  if (!d.modalidad || !(MODALIDADES_INSPECCION as readonly string[]).includes(d.modalidad)) {
+    e.push("Indique si la inspección es en terreno (dos inspectores) o un trabajo administrativo (un inspector).");
+    return e;
+  }
+  if (new Set(ids).size !== ids.length) e.push("Un mismo inspector está elegido dos veces.");
+  const min = INSPECTORES_MINIMOS[d.modalidad as ModalidadInspeccion];
+  const n = new Set(ids).size;
+  if (n < min)
+    e.push(
+      d.modalidad === "TERRENO"
+        ? `La inspección en terreno exige dos inspectores: elegido(s) ${n}. Sin los dos no se puede programar.`
+        : "El trabajo administrativo exige al menos un inspector.",
+    );
+  if (disponibles) {
+    const ajenos = ids.filter((i) => !disponibles.has(i));
+    if (ajenos.length) e.push("Alguno de los inspectores elegidos no tiene el rol Inspector en la unidad de la OT.");
+  }
+  return e;
+}
+
 export interface CabeceraDto {
   lugarInspeccion?: string | null;
   direccion?: string | null;
   comuna?: string | null;
   contacto?: string | null;
   fechaInspeccion?: string | null;
+  /** Texto con las iniciales de los inspectores: se deriva de `inspectorIds` (antes, texto libre). */
   inspectores?: string | null;
+  /** BPCH-48: en terreno (2 inspectores) o trabajo administrativo (1). */
+  modalidad?: ModalidadInspeccion | null;
+  /** BPCH-48: personas con rol INSPECTOR de la unidad. */
+  inspectorIds?: string[] | null;
   procedimiento?: string | null;
   documentoOrigen?: string | null;
   fechaDocumento?: string | null;
@@ -49,7 +95,8 @@ const vacio = (v: unknown) => v === null || v === undefined || String(v).trim() 
 
 /**
  * Errores al guardar la cabecera (lista vacía = válida). El procedimiento de
- * control es obligatorio (EP-10 10.3); lugar y fecha lo son antes de emitir
+ * control es obligatorio (EP-10 10.3), y también la modalidad con sus
+ * inspectores (BPCH-48: dos en terreno, uno en trabajo administrativo); lugar y fecha lo son antes de emitir
  * (ver faltantesParaEmitirInspeccion). La fecha de inspección futura se admite:
  * se programa la inspección (no futura · POR CONFIRMAR con el IDIC).
  */
@@ -62,6 +109,7 @@ export function erroresCabecera(d: CabeceraDto, opts: { soloComplemento?: boolea
     return e;
   }
   if (vacio(d.procedimiento)) e.push("Indique el procedimiento de control (p. ej. SAC-PG01-P01).");
+  e.push(...erroresInspectores(d));
   if (!vacio(d.cncDgmn)) {
     const f = errorFormatoCnc(String(d.cncDgmn));
     if (f) e.push(f);

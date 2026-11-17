@@ -71,7 +71,7 @@ export default function RevisionDocumental({ otId, onCambio }: { otId: string; o
         <span className="right">Inspector LCA · EP-07 7.3</span>
       </h2>
       <p className="subtitle" style={{ marginTop: 0 }}>
-        Defecto <b>crítico</b>: no presentar el documento, diferencias de nombre/RUT o de productos, documento no vigente. <b>Menor</b>: otras diferencias (6 o más menores equivalen a crítico).
+        Defecto <b>crítico</b>: no presentar el documento, diferencias de nombre/RUT o de productos, documento no vigente. <b>Menor</b>: otras diferencias (con más de 6 menores, es decir desde el 7.º, no cumple).
         {d.revision && <> Última revisión: {d.revision.registradoPor ?? "—"}, {fechaHora(d.revision.registradoAt)}{d.revision.trasladadoAt ? " · trasladada al ensayo" : ""}.</>}
       </p>
       {error && <div className="alert warn" role="alert">{error}</div>}

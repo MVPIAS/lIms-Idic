@@ -29,10 +29,12 @@ import { PermisoGuard } from "../../auth/permiso.guard";
 import { RequierePermiso } from "../../auth/permisos.decorator";
 import { AlcanceService } from "../../rbac/alcance.service";
 import {
+  MODALIDADES_INSPECCION,
   PROCEDIMIENTOS_CONTROL,
   PROCESOS_CON_EXPEDIENTE,
   diferencias,
   erroresCabecera,
+  erroresInspectores,
   erroresLotesCabecera,
   lugaresDisponibles,
   type LoteCabecera,
@@ -46,14 +48,16 @@ import {
 
 const tenantDe = (req: any): string => req?.user?.tenantId;
 
-/** Campo del DTO → columna y tipo (t texto, d fecha, i entero). */
-const COLUMNAS: [keyof CabeceraDto, string, "t" | "d" | "i"][] = [
+/** Campo del DTO → columna y tipo (t texto, d fecha, i entero, u lista de uuid). */
+const COLUMNAS: [keyof CabeceraDto, string, "t" | "d" | "i" | "u"][] = [
   ["lugarInspeccion", "lugar_inspeccion", "t"],
   ["direccion", "direccion", "t"],
   ["comuna", "comuna", "t"],
   ["contacto", "contacto", "t"],
   ["fechaInspeccion", "fecha_inspeccion", "d"],
   ["inspectores", "inspectores", "t"],
+  ["modalidad", "modalidad", "t"],
+  ["inspectorIds", "inspector_ids", "u"],
   ["procedimiento", "procedimiento", "t"],
   ["documentoOrigen", "documento_origen", "t"],
   ["fechaDocumento", "fecha_documento", "d"],
@@ -83,7 +87,10 @@ export const CabeceraSchema = z
     comuna: texto(120),
     contacto: texto(200),
     fechaInspeccion: fecha,
-    inspectores: texto(300),
+    // BPCH-48: los inspectores se eligen entre las personas con rol INSPECTOR de
+    // la unidad (ya no texto libre); el texto con sus iniciales lo arma el servidor.
+    modalidad: z.enum(MODALIDADES_INSPECCION).nullable().optional(),
+    inspectorIds: z.array(z.string().uuid()).max(10).nullable().optional(),
     procedimiento: texto(120),
     documentoOrigen: texto(200),
     fechaDocumento: fecha,
@@ -186,6 +193,33 @@ export class CabeceraOtService {
     return { proceso: p.proceso, enlace };
   }
 
+  /** BPCH-48: personas con rol INSPECTOR en la unidad de la OT (las que se pueden elegir). */
+  private async inspectoresDe(unidadId: string | null): Promise<{ id: string; nombre: string; iniciales: string }[]> {
+    if (!unidadId) return [];
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
+      `SELECT DISTINCT u.id, u.nombre_completo AS nombre
+         FROM usuario_rol ur
+         JOIN usuario u ON u.id = ur.usuario_id AND u.deleted_at IS NULL AND COALESCE(u.estado, 'activo') = 'activo'
+         JOIN rol r ON r.id = ur.rol_id
+        WHERE ur.unidad_id = $1::uuid AND r.codigo = 'INSPECTOR'
+          AND (ur.vigente_desde IS NULL OR ur.vigente_desde <= now())
+          AND (ur.vigente_hasta IS NULL OR ur.vigente_hasta > now())
+        ORDER BY 2`,
+      unidadId,
+    );
+    return filas.map((f) => ({ ...f, iniciales: iniciales(f.nombre) }));
+  }
+
+  /** Nombres de usuarios por id (para los ya elegidos, aunque hoy no tengan el rol). */
+  private async personas(ids: string[]): Promise<Map<string, string>> {
+    if (!ids.length) return new Map();
+    const f = await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
+      `SELECT id, nombre_completo AS nombre FROM usuario WHERE id = ANY($1::uuid[])`,
+      ids,
+    );
+    return new Map(f.map((x) => [x.id, x.nombre]));
+  }
+
   private async propia(otId: string): Promise<(CabeceraDto & { updatedAt?: string }) | null> {
     const f = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT ${COLUMNAS.map(([k, c, t]) => (t === "d" ? `to_char(${c}, 'YYYY-MM-DD') AS "${k}"` : `${c} AS "${k}"`)).join(", ")},
@@ -241,7 +275,7 @@ export class CabeceraOtService {
     const ot = await this.ot(otId, tenantId);
     const esBpch = await otEsBpch(this.prisma, ot.unidadPrincipal);
     if (!esBpch) return { ot, esBpch: false };
-    const [{ proceso, enlace }, cabecera, vista, asignados, historial] = await Promise.all([
+    const [{ proceso, enlace }, cabecera, vista, asignados, historial, disponibles] = await Promise.all([
       this.proceso(otId),
       this.propia(otId),
       vistaCabecera(this.prisma, otId),
@@ -258,7 +292,12 @@ export class CabeceraOtService {
           WHERE h.ot_id = $1::uuid ORDER BY h.created_at DESC LIMIT 50`,
         otId,
       ),
+      this.inspectoresDe(ot.unidadPrincipal),
     ]);
+    // Elegidos que ya no figuran como inspectores de la unidad: se muestran igual (lectura).
+    const elegidos = (cabecera?.inspectorIds ?? []) as string[];
+    const fuera = elegidos.filter((i) => !disponibles.some((d) => d.id === i));
+    const nombresFuera = await this.personas(fuera);
     const soloComplemento = (PROCESOS_CON_EXPEDIENTE as readonly string[]).includes(proceso);
     const abierta = !["cerrada", "anulada"].includes(ot.estado);
     const [opciones, lotes] = await Promise.all([this.opciones(otId, tenantId), this.lotes(otId)]);
@@ -275,6 +314,12 @@ export class CabeceraOtService {
       vista,
       faltantesEmision: faltantesParaEmitirInspeccion(vista),
       sugeridos: { inspectores: asignados.map((a) => iniciales(a.nombre)).join(" · "), procedimientos: PROCEDIMIENTOS_CONTROL },
+      // BPCH-48: personas elegibles y el texto libre de registros anteriores (solo lectura).
+      inspectoresDisponibles: [
+        ...disponibles.map((d) => ({ ...d, sinRol: false })),
+        ...fuera.map((id) => ({ id, nombre: nombresFuera.get(id) ?? "(usuario)", iniciales: iniciales(nombresFuera.get(id)), sinRol: true })),
+      ],
+      inspectoresTextoAnterior: !elegidos.length && cabecera?.inspectores ? cabecera.inspectores : null,
       // B-019: lo que se conoce del producto o del prototipo, para los campos aún vacíos.
       heredados: soloComplemento ? {} : heredarCabecera(await this.fuente(otId), cabecera),
       historial,
@@ -383,16 +428,31 @@ export class CabeceraOtService {
     const nueva: Record<string, unknown> = {};
     for (const [k] of COLUMNAS) nueva[k] = dto[k] !== undefined ? dto[k] : antes?.[k] ?? null;
     const errores = soloComplemento ? erroresCabecera(dto, { soloComplemento: true }) : erroresCabecera(nueva as CabeceraDto);
+    if (!soloComplemento && dto.inspectorIds !== undefined) {
+      // BPCH-48: los NUEVOS elegidos deben tener el rol Inspector en la unidad de la
+      // OT (los que ya estaban se conservan aunque hayan cambiado de unidad).
+      const ids = [...new Set((dto.inspectorIds ?? []) as string[])];
+      const previos = (antes?.inspectorIds ?? []) as string[];
+      const validos = new Set([...(await this.inspectoresDe(ot.unidadPrincipal)).map((i) => i.id), ...previos]);
+      if (ids.some((i) => !validos.has(i))) errores.push("Alguno de los inspectores elegidos no tiene el rol Inspector en la unidad de la OT.");
+      // El texto que imprimen los documentos: las iniciales de los elegidos, en orden.
+      const nombres = await this.personas(ids);
+      nueva.inspectorIds = ids.length ? ids : null;
+      nueva.inspectores = ids.length ? ids.map((i) => iniciales(nombres.get(i))).join(" · ") : null;
+    }
     if (errores.length) throw new BadRequestException(errores.join(" "));
     const cambios = diferencias(antes as any, nueva);
     if (!Object.keys(cambios).length) return this.ficha(otId, tenantId, true);
+    // En el historial basta el texto con las iniciales (los ids no le dicen nada al usuario).
+    if (cambios.inspectores && cambios.inspectorIds) delete cambios.inspectorIds;
     const valores = COLUMNAS.map(([k, , t]) => {
       const v = nueva[k];
       if (v === null || v === undefined || (typeof v === "string" && v.trim() === "")) return null;
+      if (t === "u") return Array.isArray(v) && v.length ? v : null;
       return t === "t" ? String(v).trim() : v;
     });
     const cols = COLUMNAS.map(([, c]) => c);
-    const casts = COLUMNAS.map(([, , t], i) => `$${i + 5}${t === "d" ? "::date" : t === "i" ? "::int" : ""}`);
+    const casts = COLUMNAS.map(([, , t], i) => `$${i + 5}${t === "d" ? "::date" : t === "i" ? "::int" : t === "u" ? "::uuid[]" : ""}`);
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `INSERT INTO bpch_cabecera_ot (tenant_id, ot_id, created_by, updated_by, ${cols.join(", ")})

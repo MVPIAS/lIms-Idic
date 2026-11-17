@@ -8,6 +8,7 @@ import {
   elegirReglas,
   esOtInterna,
   resolverFirmas,
+  rotuloRolFirma,
   unidadParaNivel,
 } from "./firmas-resolver";
 
@@ -307,5 +308,15 @@ describe("firmas · tercer envío IDIC (COM-32, COM-08)", () => {
       ahora: AHORA,
     });
     expect(r.pasos[0].responsables.map((x) => x.usuarioId)).toEqual(["u-sub"]);
+  });
+});
+
+describe("firmas · rótulo «Subdirector BPCH» (BPCH-46)", () => {
+  it("el Jefe del Departamento BPCH firma como Subdirector BPCH; el resto conserva su nombre", () => {
+    expect(rotuloRolFirma("JEFE_DEPTO", "Jefe de Departamento", "BPCH")).toBe("Subdirector BPCH");
+    expect(rotuloRolFirma("JEFEDCO", "Jefe de Departamento", "BPCH")).toBe("Subdirector BPCH");
+    expect(rotuloRolFirma("JEFE_DEPTO", "Jefe de Departamento", "DQO")).toBe("Jefe de Departamento");
+    expect(rotuloRolFirma("JEFE_SECCION", "Jefe de Sección", "SCC")).toBe("Jefe de Sección");
+    expect(rotuloRolFirma("JEFE_DEPTO", "Jefe de Departamento", null)).toBe("Jefe de Departamento");
   });
 });

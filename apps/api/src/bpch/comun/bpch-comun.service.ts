@@ -5,6 +5,7 @@ import { AlcanceService } from "../../rbac/alcance.service";
 import { descendientes } from "../../rbac/alcance";
 import { RegistroMuestrasService } from "../../flujo-real/flujo-real.module";
 import { condicionFinal, TEXTO_CONDICION } from "./reglas-bpch";
+import { erroresInspectores, iniciales } from "../cabecera/reglas-cabecera";
 
 /** Cliente con el que se escribe: el servicio o la transacción en curso. */
 export type Sql = Pick<PrismaService, "$queryRawUnsafe" | "$executeRawUnsafe">;
@@ -256,4 +257,67 @@ export class BpchComunService {
     if (!ot) throw new NotFoundException("La OT indicada no existe.");
     return ot;
   }
+  /* ------------------------------------------------ BPCH-48 · inspectores --- */
+
+  /** Personas con rol INSPECTOR vigente en la unidad (las que se pueden elegir). */
+  async inspectoresDeUnidad(unidadId: string | null): Promise<{ id: string; nombre: string; iniciales: string }[]> {
+    if (!unidadId) return [];
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
+      `SELECT DISTINCT u.id, u.nombre_completo AS nombre
+         FROM usuario_rol ur
+         JOIN usuario u ON u.id = ur.usuario_id AND u.deleted_at IS NULL AND COALESCE(u.estado, 'activo') = 'activo'
+         JOIN rol r ON r.id = ur.rol_id
+        WHERE ur.unidad_id = $1::uuid AND r.codigo = 'INSPECTOR'
+          AND (ur.vigente_desde IS NULL OR ur.vigente_desde <= now())
+          AND (ur.vigente_hasta IS NULL OR ur.vigente_hasta > now())
+        ORDER BY 2`,
+      unidadId,
+    );
+    return filas.map((f) => ({ ...f, iniciales: iniciales(f.nombre) }));
+  }
+
+  private async nombresUsuarios(ids: string[]): Promise<Map<string, string>> {
+    if (!ids.length) return new Map();
+    const f = await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
+      `SELECT id, nombre_completo AS nombre FROM usuario WHERE id = ANY($1::uuid[])`,
+      ids,
+    );
+    return new Map(f.map((x) => [x.id, x.nombre]));
+  }
+
+  /**
+   * BPCH-48 (respuesta IDIC 17-11-2026): valida modalidad e inspectores de una
+   * inspección (en terreno, dos; trabajo administrativo, uno) elegidos entre las
+   * personas con rol INSPECTOR de la unidad (se conservan los ya elegidos antes),
+   * y arma el texto con sus iniciales que imprimen los documentos.
+   */
+  async resolverInspectores(
+    unidadId: string | null,
+    d: { modalidad?: string | null; inspectorIds?: string[] | null },
+    previos: string[] = [],
+  ): Promise<{ errores: string[]; ids: string[] | null; texto: string | null }> {
+    const ids = [...new Set(d.inspectorIds ?? [])];
+    const validos = new Set([...(await this.inspectoresDeUnidad(unidadId)).map((i) => i.id), ...previos]);
+    const errores = erroresInspectores({ modalidad: d.modalidad, inspectorIds: d.inspectorIds ?? [] }, validos);
+    const nombres = await this.nombresUsuarios(ids);
+    return { errores, ids: ids.length ? ids : null, texto: ids.length ? ids.map((i) => iniciales(nombres.get(i))).join(" · ") : null };
+  }
+
+  /** Lo que la pantalla necesita para elegir inspectores (y el texto libre de registros anteriores). */
+  async fichaInspectores(unidadId: string | null, fila: { modalidad?: string | null; inspector_ids?: string[] | null; inspectores?: string | null }) {
+    const elegidos = (fila.inspector_ids ?? []) as string[];
+    const disponibles = await this.inspectoresDeUnidad(unidadId);
+    const fuera = elegidos.filter((i) => !disponibles.some((x) => x.id === i));
+    const nombres = await this.nombresUsuarios(fuera);
+    return {
+      modalidad: fila.modalidad ?? null,
+      inspectorIds: elegidos,
+      inspectoresDisponibles: [
+        ...disponibles.map((x) => ({ ...x, sinRol: false })),
+        ...fuera.map((id) => ({ id, nombre: nombres.get(id) ?? "(usuario)", iniciales: iniciales(nombres.get(id)), sinRol: true })),
+      ],
+      inspectoresTextoAnterior: !elegidos.length && fila.inspectores ? fila.inspectores : null,
+    };
+  }
 }
+

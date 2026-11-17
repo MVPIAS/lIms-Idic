@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { MODALIDADES_INSPECCION } from "../cabecera/reglas-cabecera";
 import { z } from "zod";
 import { PrismaService } from "../../common/prisma.service";
 import { BpchComunService, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
@@ -91,7 +92,11 @@ const DocumentacionBody = z.object({
 const InspeccionBody = z.object({
   lugarInspeccion: opcional(240),
   fechaInspeccion: fechaDia.optional().nullable(),
-  inspectores: opcional(240),
+  // BPCH-48: modalidad (en terreno: dos inspectores; administrativo: uno) e
+  // inspectores elegidos entre las personas con rol INSPECTOR de la unidad. El
+  // texto con sus iniciales lo arma el servidor (ya no se escribe a mano).
+  modalidad: z.enum(MODALIDADES_INSPECCION, { errorMap: () => ({ message: "Indique si la inspección es en terreno o un trabajo administrativo." }) }).nullable().optional(),
+  inspectorIds: z.array(z.string().uuid()).max(10).nullable().optional(),
   fechaVencimientoProducto: fechaDia.optional().nullable(),
   vigenciaInforme: fechaDia.optional().nullable(),
   observaciones: opcional(4000),
@@ -324,6 +329,7 @@ export class InternacionBpchService {
         lugar: i.lugar_inspeccion,
         fecha: i.fecha_inspeccion,
         inspectores: i.inspectores,
+        ...(await this.comun.fichaInspectores(i.unidad_inspeccion_id, i)),
         vencimientoProducto: i.fecha_vencimiento_producto,
         vigenciaInforme: i.vigencia_informe,
         observaciones: i.observaciones_inspeccion,
@@ -749,22 +755,26 @@ export class InternacionBpchService {
       if (!actual) errores.push(`El lote ${it.id} no es de esta internación.`);
       else errores.push(...erroresLote(it, `Lote ${actual.orden}`));
     }
+    const ins = await this.comun.resolverInspectores(i.unidad_inspeccion_id, dto, i.inspector_ids ?? []);
+    errores.push(...ins.errores);
     if (errores.length) throw new BadRequestException(errores.join(" "));
     await this.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `UPDATE bpch_internacion SET lugar_inspeccion = $2, fecha_inspeccion = $3::date, inspectores = $4, fecha_vencimiento_producto = $5::date,
                 vigencia_informe = $6::date, observaciones_inspeccion = $7, procedimiento = COALESCE($8, procedimiento),
-                updated_by = $9::uuid, updated_at = now()
+                updated_by = $9::uuid, updated_at = now(), modalidad = $10, inspector_ids = $11::uuid[]
           WHERE id = $1::uuid`,
         id,
         dto.lugarInspeccion?.trim() || null,
         dto.fechaInspeccion ?? null,
-        dto.inspectores?.trim() || null,
+        ins.texto,
         dto.fechaVencimientoProducto ?? null,
         dto.vigenciaInforme ?? null,
         dto.observaciones?.trim() || null,
         dto.procedimiento?.trim() || null,
         usuarioDe(req),
+        dto.modalidad ?? null,
+        ins.ids,
       );
       for (const it of dto.items ?? []) {
         await tx.$executeRawUnsafe(

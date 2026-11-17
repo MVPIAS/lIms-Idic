@@ -3,7 +3,7 @@
  * checklist de documentos legales por inspección de Producción Nacional.
  * Reglas IT08 §4.a: defecto CRÍTICO = no presentar documentos, diferencias de
  * nombre/RUT o de productos, documentos no vigentes; MENOR = otras diferencias;
- * 6 o más menores equivalen a crítico. El resultado se traslada a los defectos
+ * más de 6 menores (desde el 7.º) equivalen a crítico (BPCH-44). El resultado se traslada a los defectos
  * crítico/menor del ensayo «Rev. Doc. Legal» de la OT. Reglas PURAS, probadas
  * en revision-documental.spec.ts.
  */
@@ -18,8 +18,12 @@ export const DOCUMENTOS_IT08 = [
 ] as const;
 export type ClaveDocumento = (typeof DOCUMENTOS_IT08)[number]["clave"];
 
-/** 6 o más defectos menores equivalen a un crítico (IT08 §4.a). */
-export const MENORES_A_CRITICO = 6;
+/**
+ * Máximo de defectos menores que aún permite «Cumple»: con MÁS de 6 (desde el
+ * 7.º) la revisión no cumple. Respuesta IDIC BPCH-44 (17-11-2026), que sigue al
+ * formulario oficial («> 6») y no a la IT08 §4 («≥ 6»).
+ */
+export const MENORES_MAXIMOS = 6;
 
 export const ItemRevision = z.object({
   clave: z.enum(DOCUMENTOS_IT08.map((d) => d.clave) as [ClaveDocumento, ...ClaveDocumento[]]),
@@ -66,8 +70,13 @@ export function evaluarRevision(items: ItemRevision[]): EvaluacionRevision {
       if (i.defecto === "menor") menores++;
     }
   }
-  const resultado = pendiente ? "pendiente" : criticos > 0 || menores >= MENORES_A_CRITICO ? "no_conforme" : "conforme";
-  return { criticos, menores, resultado, faltantes };
+  return { criticos, menores, resultado: resultadoRevision(criticos, menores, pendiente), faltantes };
+}
+
+/** Veredicto de la revisión: un crítico o más de 6 menores → no conforme (BPCH-44). */
+export function resultadoRevision(criticos: number, menores: number, pendiente = false): EvaluacionRevision["resultado"] {
+  if (pendiente) return "pendiente";
+  return criticos > 0 || menores > MENORES_MAXIMOS ? "no_conforme" : "conforme";
 }
 
 /** ¿El analito del ensayo «Rev. Doc. Legal» es el de defectos críticos o el de menores? */

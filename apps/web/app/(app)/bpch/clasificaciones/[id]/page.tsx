@@ -257,8 +257,13 @@ export default function ClasificacionPage() {
   const setIt21 = (serie: "serie1" | "serie2", ensayos: EnsayoIt21[] | null) =>
     setPruebas((p) => ({ ...p, it21: { ...p.it21, [serie]: ensayos === null ? null : { ensayos } } }));
 
+  // BPCH-37: la serie 2 de la IT21 solo se hace (y entonces se exige) si la serie 1 es positiva.
+  const serie1Positiva = (pruebas.it21.serie1?.ensayos ?? []).some((e) => e.tuboFragmentado || e.placaPerforada);
+
   function serieIt21(serie: "serie1" | "serie2", titulo: string) {
     const s = pruebas.it21[serie];
+    if (!s && serie === "serie2" && !serie1Positiva)
+      return <p style={{ color: "var(--muted)", margin: 0, fontSize: 12.5 }}>{titulo}: solo se realiza si la serie 1 resulta positiva.</p>;
     if (!s)
       return editable ? (
         <button type="button" className="btn outline sm" onClick={() => setIt21(serie, [{ tuboFragmentado: false, placaPerforada: false }])}>＋ Registrar {titulo}</button>
@@ -268,6 +273,12 @@ export default function ClasificacionPage() {
     return (
       <fieldset style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "8px 10px" }}>
         <legend style={{ fontSize: 12, fontWeight: 700 }}>{titulo}</legend>
+        {serie === "serie2" && !serie1Positiva && (
+          <div className="alert warn" style={{ margin: "0 0 6px" }}>La serie 2 solo corresponde si la serie 1 es positiva: quite estos ensayos.</div>
+        )}
+        {serie === "serie2" && serie1Positiva && (
+          <small style={{ display: "block", color: "var(--muted)", marginBottom: 4 }}>Obligatoria: la serie 1 resultó positiva.</small>
+        )}
         {s.ensayos.map((e, i) => (
           <div key={i} style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
             <span style={{ fontSize: 12, minWidth: 70 }}>Ensayo {i + 1}</span>
@@ -391,7 +402,7 @@ export default function ClasificacionPage() {
             {ev && <PillResultado r={ev.it21.resultado} />}
             {ev?.it21?.resultado !== "no_aplica" && ev && <small style={{ color: "var(--muted)" }}>{ev.it21.detalle}</small>}
           </div>
-          <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "4px 0 8px" }}>Positivo si el tubo se fragmenta completamente o la placa testigo resulta perforada. Si el primer ensayo no detona, se efectúa un segundo.</p>
+          <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "4px 0 8px" }}>Positivo si el tubo se fragmenta completamente o la placa testigo resulta perforada. Si el primer ensayo no detona, se efectúa un segundo. La serie 2 solo se realiza si la serie 1 es positiva, y entonces es obligatoria.</p>
           {pruebas.it21.aplica && (
             <div style={{ display: "grid", gap: 8 }}>
               {serieIt21("serie1", "Serie 1 (sin barrera)")}
@@ -616,7 +627,7 @@ export default function ClasificacionPage() {
           <div className="field span-3">
             <label htmlFor="just">Justificación</label>
             <textarea id="just" rows={2} value={justificacion} onChange={(e) => setJustificacion(e.target.value)} disabled={!editable}
-              placeholder="Obligatoria si la decisión contradice las pruebas o si no se registró ninguna prueba" />
+              placeholder="Obligatoria si la decisión contradice las pruebas. Toda clasificación exige al menos una prueba ONU." />
           </div>
         </div>
         {c && (

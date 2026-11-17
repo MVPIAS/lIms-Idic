@@ -6,7 +6,7 @@ import { Sql, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
 import { codigoCuAjeno, faltantesInscripcionCu } from "../prototipos/reglas-prototipo";
 import { generarPdf } from "../../plantilla-render/pdf.renderer";
 import { hoyChile } from "../../common/fecha-chile";
-import { TIPOS_LISTADO, agruparListado, entraEnListado, htmlListado, xlsxListado, type TipoListado } from "./listado-oficial";
+import { FIRMA_LISTADO, TIPOS_LISTADO, agruparListado, entraEnListado, htmlListado, xlsxListado, type TipoListado } from "./listado-oficial";
 import {
   ESTADOS_CODIFICACION,
   LISTADOS_CODIFICACION,
@@ -39,7 +39,12 @@ export type Inscripcion = z.infer<typeof InscripcionBody>;
 
 export const EdicionBody = InscripcionBody.partial().extend({ motivo: texto(500).optional() });
 
-export const CambioEstadoBody = z.object({ estado: z.enum(ESTADOS_CODIFICACION), motivo: texto(500) });
+export const CambioEstadoBody = z.object({
+  estado: z.enum(ESTADOS_CODIFICACION),
+  motivo: texto(500),
+  /** BPCH-40: Nº del certificado nuevo que respalda la reactivación. */
+  certificadoNumero: texto(60).optional().nullable(),
+});
 
 export const CambioTitularBody = z.object({
   clienteId: z.string().uuid().optional().nullable(),
@@ -162,11 +167,9 @@ export class CodificacionService {
     let contenido: Buffer;
     if (formato === "xlsx") contenido = xlsxListado(secciones);
     else {
-      // Firmantes por cargo: quién firma y cómo llega la firma de la DGMN está por confirmar (EP-09 P4).
-      const cuerpo = htmlListado(secciones, d.listado, d.fechaEdicion, {
-        subdirector: "Subdirector del Banco de Pruebas de Chile",
-        dgmn: "Jefe Depto. Control de Armas y Explosivos · DGMN",
-      });
+      // BPCH-12 / BPCH-46 (respuesta IDIC 17-11-2026): firma solo el Subdirector
+      // BPCH (Jefe del Departamento); va a la DGMN por oficio del Director.
+      const cuerpo = htmlListado(secciones, d.listado, d.fechaEdicion, { subdirector: FIRMA_LISTADO });
       const hash = createHash("sha256").update(cuerpo, "utf8").digest("hex");
       contenido = await generarPdf(
         cuerpo,
@@ -490,11 +493,52 @@ export class CodificacionService {
     const tenantId = tenantDe(req);
     const dto = CambioEstadoBody.parse(body ?? {});
     const actual = await this.uno(tenantId, id);
-    const error = errorCambioEstadoCodificacion(actual.estado, dto.estado, dto.motivo);
+    const error = errorCambioEstadoCodificacion(actual.estado, dto.estado, dto.motivo, {
+      nuevo: dto.certificadoNumero,
+      anterior: actual.certificadoNumero,
+    });
     if (error) throw new ConflictException(error);
+    const reactiva = actual.estado === "EN_RECESO" && dto.estado === "VIGENTE";
+    // BPCH-40: si el certificado nuevo es un documento del LIMS, debe estar vigente y se enlaza.
+    let certificadoId: string | null = null;
+    const certNumero = dto.certificadoNumero?.trim() || null;
+    if (reactiva && certNumero) {
+      const c = await this.prisma.$queryRawUnsafe<{ id: string; estado: string }[]>(
+        // BPCH-19: el informe de inspección y el de incumplimiento pueden repetir el número del certificado.
+        `SELECT id, estado FROM certificado WHERE tenant_id = $1::uuid AND (numero = $2 OR codigo = $2) AND deleted_at IS NULL
+            AND COALESCE(tipo_documento, '') NOT IN ('INFORME_INSPECCION', 'INFORME_INCUMPLIMIENTO')
+          ORDER BY (estado IN ('oficial','emitido')) DESC, created_at DESC LIMIT 1`,
+        tenantId,
+        certNumero,
+      );
+      if (c[0] && !["oficial", "emitido"].includes(c[0].estado))
+        throw new ConflictException(`El certificado ${certNumero} está ${c[0].estado}: la reactivación exige un certificado vigente.`);
+      certificadoId = c[0]?.id ?? null;
+    }
     await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(`UPDATE bpch_codificacion SET estado = $2, updated_by = $3::uuid, updated_at = now() WHERE id = $1::uuid`, id, dto.estado, usuarioDe(req));
-      await this.anotar(tx, { tenantId, codificacionId: id, evento: dto.estado === "EN_RECESO" ? "receso" : "reactivacion", detalle: { desde: actual.estado, motivo: dto.motivo }, usuarioId: usuarioDe(req) });
+      if (reactiva)
+        await tx.$executeRawUnsafe(
+          `UPDATE bpch_codificacion SET estado = $2, certificado_id = $4::uuid, certificado_numero = $5, updated_by = $3::uuid, updated_at = now() WHERE id = $1::uuid`,
+          id,
+          dto.estado,
+          usuarioDe(req),
+          certificadoId,
+          certNumero,
+        );
+      else
+        await tx.$executeRawUnsafe(`UPDATE bpch_codificacion SET estado = $2, updated_by = $3::uuid, updated_at = now() WHERE id = $1::uuid`, id, dto.estado, usuarioDe(req));
+      await this.anotar(tx, {
+        tenantId,
+        codificacionId: id,
+        evento: dto.estado === "EN_RECESO" ? "receso" : "reactivacion",
+        detalle: {
+          desde: actual.estado,
+          motivo: dto.motivo,
+          ...(reactiva ? { certificadoNuevo: certNumero, certificadoAnterior: actual.certificadoNumero ?? null } : {}),
+        },
+        certificadoId,
+        usuarioId: usuarioDe(req),
+      });
     });
     return this.detalle(req, id);
   }

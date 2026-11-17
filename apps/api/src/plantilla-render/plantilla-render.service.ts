@@ -17,7 +17,7 @@ import { cuerpoPorDefecto, documentoCompleto, type FirmaEstampada, type Sello } 
 import { generarPdf } from "./pdf.renderer";
 import { QcService } from "../qc/qc.module";
 import { FirmasMatrizService } from "../rbac/firmas-matriz.controller";
-import { esOtInterna } from "../rbac/firmas-resolver";
+import { esOtInterna, rotuloRolFirma } from "../rbac/firmas-resolver";
 import { TIPOS_DOCUMENTO } from "../rbac/rbac.constants";
 import {
   esOficial,
@@ -1112,6 +1112,7 @@ export class PlantillaRenderService {
         ot: ot.codigo,
         muestra: cob ? cob.muestraCodigo : primera?.codigo ?? null,
         numInforme: await this.numeroInformeInspeccion(otId),
+        ...(await this.datosNumeroOt(otId)),
       });
       return p.numero ? `${p.numero} (BORRADOR)` : general;
     } catch {
@@ -1141,7 +1142,7 @@ export class PlantillaRenderService {
    *
    * Al ir en la misma transacción que el INSERT del certificado, un fallo
    * posterior revierte también el contador. Defensa en profundidad:
-   * UNIQUE(tenant_id, codigo) + ux_certificado_numero rechazan el duplicado
+   * ux_certificado_tipo_codigo + ux_certificado_tipo_numero (únicos por tipo de documento, BPCH-19) rechazan el duplicado
    * aunque alguien inserte por fuera de aquí.
    */
   private async siguienteNumero(tx: any, tenantId: string, anio: number): Promise<string> {
@@ -1157,6 +1158,33 @@ export class PlantillaRenderService {
     // padStart(4) da CERT-2026-0001; a partir de 10000 crece a 5 dígitos sin
     // romper nada (el contador es INTEGER, no hay orden lexicográfico).
     return numeroGeneral(anio, n);
+  }
+
+  /**
+   * Datos de la OT que el número puede imprimir además de los básicos:
+   * códigos CODSUCDEL de las familias del catálogo de la OT y de sus muestras
+   * (BPCH-45: la D11 numera 3008 en munición y 3009 en armas) y el código de
+   * empresa del cliente ({EMPRESA}, BPCH-19).
+   */
+  private async datosNumeroOt(otId: string, db: any = this.prisma): Promise<{ codsucdelCatalogo: string[]; empresa: string | null; empresaNombre: string | null }> {
+    try {
+      const [fam, cli] = await Promise.all([
+        db.$queryRawUnsafe(
+          `SELECT DISTINCT f.codsucdel
+             FROM cat_elemento e JOIN cat_familia f ON f.id = e.familia_id
+            WHERE e.id IN (SELECT cat_elemento_id FROM orden_trabajo WHERE id = $1::uuid AND cat_elemento_id IS NOT NULL
+                           UNION SELECT cat_elemento_id FROM muestra WHERE ot_id = $1::uuid AND deleted_at IS NULL AND cat_elemento_id IS NOT NULL)`,
+          otId,
+        ) as Promise<{ codsucdel: string }[]>,
+        db.$queryRawUnsafe(
+          `SELECT c.codigo_empresa AS empresa, c.razon_social AS nombre FROM orden_trabajo o JOIN cliente c ON c.id = o.cliente_id WHERE o.id = $1::uuid`,
+          otId,
+        ) as Promise<{ empresa: string | null; nombre: string | null }[]>,
+      ]);
+      return { codsucdelCatalogo: fam.map((f) => f.codsucdel), empresa: cli[0]?.empresa ?? null, empresaNombre: cli[0]?.nombre ?? null };
+    } catch {
+      return { codsucdelCatalogo: [], empresa: null, empresaNombre: null }; // BD sin align_tercer_envio_bpch.sql
+    }
   }
 
   /** Número del Informe de Inspección vigente de la OT (para {NUM_INFORME}). */
@@ -1180,6 +1208,7 @@ export class PlantillaRenderService {
     d: { tenantId: string; unidadId: string | null; tipoDocumento: string; fecha: Date; otId: string; otCodigo: string; muestraCodigo: string | null },
   ): Promise<{ numero: string; aviso: string | null; formato: string | null }> {
     const numInforme = await this.numeroInformeInspeccion(d.otId, tx);
+    const extra = await this.datosNumeroOt(d.otId, tx);
     const r = await this.numeracion.reservar(
       tx,
       {
@@ -1190,13 +1219,21 @@ export class PlantillaRenderService {
         ot: d.otCodigo,
         muestra: d.muestraCodigo,
         numInforme,
+        ...extra,
       },
+      // BPCH-19: el número es único POR TIPO de documento (el certificado y el
+      // informe de incumplimiento repiten el número del Informe de Inspección).
       // Un documento tampoco puede repetir el número de un oficio (B-003).
       async (numero) =>
-        Boolean(await tx.certificado.findFirst({ where: { tenantId: d.tenantId, OR: [{ numero }, { codigo: numero }] }, select: { id: true } })) ||
+        Boolean(
+          await tx.certificado.findFirst({
+            where: { tenantId: d.tenantId, tipoDocumento: d.tipoDocumento, OR: [{ numero }, { codigo: numero }] },
+            select: { id: true },
+          }),
+        ) ||
         (await tx.$queryRawUnsafe(`SELECT 1 FROM oficio WHERE tenant_id = $1::uuid AND numero = $2 LIMIT 1`, d.tenantId, numero) as unknown[]).length > 0,
     );
-    if (r.numero) return { numero: r.numero, aviso: null, formato: r.regla.formato };
+    if (r.numero) return { numero: r.numero, aviso: r.avisos?.length ? r.avisos.join(" ") : null, formato: r.regla.formato };
     const numero = await this.siguienteNumero(tx, d.tenantId, anioChile(d.fecha));
     const aviso = r.regla
       ? `Al formato de numeración «${r.regla.formato}» le faltan datos (${(r.faltan ?? []).join(", ")}): se usó la numeración general ${numero}.`
@@ -1399,6 +1436,7 @@ export class PlantillaRenderService {
       ot: ot.codigo,
       muestra: muestraCodigo,
       numInforme: await this.numeroInformeInspeccion(otId),
+      ...(await this.datosNumeroOt(otId)),
     });
     const numeracion = {
       numero: prox.numero,
@@ -1407,7 +1445,9 @@ export class PlantillaRenderService {
       general: !prox.numero,
       aviso: prox.formato && !prox.numero
         ? `Al formato «${prox.formato}» le faltan datos (${prox.faltan.join(", ")}): se usará la numeración general CERT-AAAA-NNNN.`
-        : null,
+        : prox.avisos.length
+          ? prox.avisos.join(" ")
+          : null,
     };
 
     return {
@@ -1867,7 +1907,8 @@ export class PlantillaRenderService {
       .filter((f) => f.estado === "firmado" || f.estado === "pendiente")
       .map((f) => ({
         accion: f.accion,
-        rol: f.rolNombre ?? f.rolCodigo,
+        // BPCH-46: documentos ya emitidos con «Jefe de Departamento» del BPCH.
+        rol: rotuloRolFirma(f.rolCodigo, f.rolNombre ?? f.rolCodigo, f.unidadCodigo),
         unidad: f.unidadCodigo,
         nombre:
           f.estado === "firmado"

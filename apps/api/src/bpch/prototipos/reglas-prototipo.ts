@@ -37,6 +37,11 @@ export function faltantesGenerarOt(p: {
   conCobro: boolean | null | undefined;
   /** EP-08 8.11: si la operación la exige, la parametrización debe estar validada. */
   parametrizacion?: { exige: boolean; estado: string } | null;
+  /**
+   * BPCH-32 (respuesta IDIC 17-11-2026, opción a): la clasificación de la
+   * sustancia debe estar APROBADA antes de ensayar el prototipo (generar su OT).
+   */
+  clasificacionEstado: string | null | undefined;
 }): string[] {
   const f: string[] = [];
   const otViva = p.otId && p.otEstado !== "anulada";
@@ -47,6 +52,8 @@ export function faltantesGenerarOt(p: {
   else if (otViva) f.push("El prototipo ya tiene una OT vigente.");
   if (!p.sacTamanoMuestra)
     f.push("Falta el pronunciamiento de la SAC con el tamaño de muestra (SAC-PG01-IT10, «Para prototipos»).");
+  if (p.clasificacionEstado !== "aprobada")
+    f.push("Para ensayar el prototipo, el elemento debe tener una clasificación de sustancia APROBADA (Clase/División y Nº ONU). Asóciela o apruébela en «Clasificación de sustancias».");
   if (!p.unidadId) f.push("Indique la sucursal o sección que inspeccionará el prototipo.");
   if (p.conCobro !== true && p.conCobro !== false) f.push("Indique si la OT es con cobro o sin cobro.");
   return f;
