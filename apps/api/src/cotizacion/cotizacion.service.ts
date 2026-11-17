@@ -1276,12 +1276,15 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
             continue;
           }
           const lineas = lineasDesdeCotizacion(cot as any);
-          const t = totalesFactura(lineas, Number(f.ivaPct), cot.moneda);
+          // Igual que el borrador del cierre: IVA de la cotización (crearBorradorDesdeOt).
+          const ivaPct = cot.ivaPct != null ? Number(cot.ivaPct) : Number(f.ivaPct);
+          const t = totalesFactura(lineas, ivaPct, cot.moneda);
           await tx.lineaFactura.deleteMany({ where: { facturaId: f.id } });
           await tx.factura.update({
             where: { id: f.id },
             data: {
               moneda: cot.moneda,
+              ivaPct,
               neto: t.neto,
               ivaMonto: t.ivaMonto,
               total: t.total,

@@ -198,26 +198,20 @@ BEGIN
   END IF;
 END $$;
 COMMENT ON COLUMN factura.tipo_documento IS 'COM-30: factura | boleta (asistencia técnica de la Delegación Nº 11). El folio (numero) es correlativo por tipo.';
--- El folio deja de ser único entre tipos: una boleta y una factura pueden tener el mismo número.
+-- El folio deja de ser único entre tipos: una boleta y una factura pueden tener
+-- el mismo número. `codigo` replica a `numero` (fn_factura_codigo,
+-- align_firma_cierre.sql) y su UNIQUE (tenant_id, codigo) pasa a ser por tipo.
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'factura_tenant_id_numero_key') THEN
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'factura_tenant_id_codigo_key' AND conrelid = 'factura'::regclass) THEN
+    ALTER TABLE factura DROP CONSTRAINT factura_tenant_id_codigo_key;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'factura_tenant_id_numero_key' AND conrelid = 'factura'::regclass) THEN
     ALTER TABLE factura DROP CONSTRAINT factura_tenant_id_numero_key;
   END IF;
 END $$;
 DROP INDEX IF EXISTS factura_tenant_id_numero_key;
--- Si hubiera folios repetidos heredados (datos migrados), el índice no se crea
--- y el LIMS sigue controlándolo al emitir (FacturaService.numeroOcupado).
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM factura WHERE numero IS NOT NULL AND deleted_at IS NULL
-                  GROUP BY tenant_id, tipo_documento, numero HAVING count(*) > 1) THEN
-    CREATE UNIQUE INDEX IF NOT EXISTS ux_factura_tipo_numero ON factura (tenant_id, tipo_documento, numero)
-      WHERE numero IS NOT NULL AND deleted_at IS NULL;
-  ELSE
-    RAISE NOTICE 'factura: hay folios repetidos por tipo; no se crea ux_factura_tipo_numero.';
-  END IF;
-END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_factura_tipo_codigo ON factura (tenant_id, tipo_documento, codigo);
 
 -- -----------------------------------------------------------------------------
 -- COM-08 · Oficio conductor de la cotización: firmantes Jefe DCO, Jefe de
