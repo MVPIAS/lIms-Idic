@@ -2,9 +2,9 @@
  * LMB · siembra, incubación con lecturas programadas, lectura y expresión, y
  * plan del RSA n, c, m, M (EP-02 3.3–3.5, §5) · reglas PURAS (micro.spec.ts).
  *
- * Variante que se activa por método (Parámetros de la operación); queda
- * inactiva hasta que el IDIC decida si quiere las etapas o solo el resultado
- * consolidado (EP-02 P1). Lo que no consta en las fuentes es configurable:
+ * Variante que se activa por método (Parámetros de la operación); activa para
+ * los métodos del LMB desde la respuesta del IDIC del 17-11-2026 (SAL-01:
+ * registrar los datos de cada etapa). Lo que no consta en las fuentes es configurable:
  * horas de lectura (P3) y los planes n, c, m, M por ensayo y producto (P2).
  *
  *   · Recuento en placa (ISO 7218): N = ΣC / (V · (n1 + 0,1·n2) · d), con las
@@ -16,6 +16,8 @@
  *   · Plan de 3 clases: no cumple si alguna unidad > M o más de c unidades
  *     están entre m y M; de 2 clases (sin M): no cumple si más de c > m. Sin
  *     plan: un solo máximo (el «Máx» del ensayo), como «según RSA vigente».
+ *   · Confirmación (SAL-01): si se registra un resultado confirmado, ese es el
+ *     resultado final; si no, el de la última lectura.
  */
 
 export type TipoMicro = "recuento" | "nmp" | "presencia";
@@ -50,11 +52,27 @@ export interface Lectura {
   observacion?: string | null;
 }
 
+/**
+ * Etapa de confirmación (SAL-01, respuesta IDIC 17-11-2026): tras la lectura
+ * presuntiva, el analista registra la confirmación (fecha, resultado
+ * confirmado y observación). Si hay resultado confirmado, el resultado final
+ * del ensayo es el confirmado; si no, el de la última lectura.
+ */
+export interface Confirmacion {
+  fecha: string | null;
+  /** Recuento o NMP confirmado (ufc/g, NMP/g o por 100 mL). */
+  valor?: number | null;
+  /** Presencia / ausencia confirmada. */
+  presencia?: "presencia" | "ausencia" | null;
+  observacion?: string | null;
+}
+
 export interface RegistroMicro {
   tipo: TipoMicro;
   siembra: Siembra;
   incubacion: Incubacion;
   lecturas: Lectura[];
+  confirmacion?: Confirmacion | null;
   /** Resultados de las n unidades (si el plan pide más de una), en ufc/g o NMP. */
   unidades?: (number | string)[];
   cantidadAnalizada?: string | null;
@@ -154,6 +172,33 @@ export function calcularMicro(r: RegistroMicro): CalculoMicro {
     return { valor: ultima.nmp, texto: ultima.nmp.toLocaleString("es-CL"), formula: ultima.combinacion ? `Tabla NMP · tubos ${ultima.combinacion}` : "Tabla NMP", errores: [] };
   }
   return recuento(ultima.colonias ?? {}, r.siembra.volumenMl ?? 0);
+}
+
+/** ¿La confirmación trae un resultado confirmado para este tipo de determinación? */
+export function tieneConfirmado(tipo: TipoMicro, c: Confirmacion | null | undefined): boolean {
+  if (!c) return false;
+  if (tipo === "presencia") return c.presencia === "presencia" || c.presencia === "ausencia";
+  return typeof c.valor === "number" && Number.isFinite(c.valor) && c.valor >= 0;
+}
+
+/**
+ * Resultado final de la determinación: el confirmado cuando existe (SAL-01);
+ * si no, el de la última lectura (presuntivo). La fórmula deja constancia del
+ * presuntivo para la trazabilidad.
+ */
+export function resultadoFinal(r: RegistroMicro): CalculoMicro & { confirmado: boolean } {
+  const presuntivo = calcularMicro(r);
+  const c = r.confirmacion;
+  if (!tieneConfirmado(r.tipo, c)) return { ...presuntivo, confirmado: false };
+  const errores: string[] = [];
+  if (!c!.fecha) errores.push("Indique la fecha de la confirmación.");
+  const antes = presuntivo.texto ? `presuntivo ${presuntivo.texto}` : "sin lectura presuntiva";
+  if (r.tipo === "presencia") {
+    const cant = r.cantidadAnalizada?.trim() || "25 g";
+    return { valor: null, texto: `${c!.presencia === "ausencia" ? "Ausencia" : "Presencia"} en ${cant}`, formula: `Confirmado (${antes})`, errores, confirmado: true };
+  }
+  const v = r.tipo === "recuento" ? dosCifras(c!.valor!) : c!.valor!;
+  return { valor: v, texto: r.tipo === "recuento" ? notacion(v) : v.toLocaleString("es-CL"), formula: `Confirmado (${antes})`, errores, confirmado: true };
 }
 
 /* ------------------------------------------------------------ plan RSA --- */
