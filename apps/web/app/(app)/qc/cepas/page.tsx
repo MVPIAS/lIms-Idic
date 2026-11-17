@@ -50,7 +50,7 @@ function Contenido() {
         migas={[{ label: "Configuración del laboratorio" }, { label: "Cepas de referencia" }]} />
       <div className="card" style={{ padding: 14 }}>
         <div className="table-wrap">
-          <table className="table">
+          <table className="data">
             <thead><tr><th>Nº</th><th>Organismo</th><th>Código</th><th>Estado</th>{edita && <th></th>}</tr></thead>
             <tbody>
               {cepas.map((c) => (

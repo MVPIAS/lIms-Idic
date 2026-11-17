@@ -146,7 +146,7 @@ function Reanalisis() {
         <p style={{ margin: 0, color: "var(--muted)" }}>No hay re-análisis {estado === "solicitado" ? "pendientes" : "en esta vista"}.</p>
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table className="table">
+          <table className="data">
             <thead>
               <tr><th>OT · muestra</th><th>Ensayo</th><th>Motivo</th><th>Valor anterior</th><th>Valor repetido</th><th>Estado</th><th></th></tr>
             </thead>
@@ -334,7 +334,7 @@ function Acreditaciones() {
               </div>
               {alcanceDe === a.id && <AgregarAlcance acreditacionId={a.id} onListo={() => { setAlcanceDe(null); cargar(); }} />}
               <div style={{ overflowX: "auto", marginTop: 8 }}>
-                <table className="table">
+                <table className="data">
                   <thead><tr><th>Método</th><th>Ensayo</th><th>Matriz</th><th>Rango</th>{gestiona && <th></th>}</tr></thead>
                   <tbody>
                     {a.alcance.length ? (
@@ -601,7 +601,7 @@ function ConsumiblesMetodo({ metodoId, gestiona }: { metodoId: string; gestiona:
         Al capturar un ensayo de este método se descuenta esta cantidad del stock (FIFO por caducidad, solo lotes vigentes) y queda en el kardex.
       </p>
       <div style={{ overflowX: "auto" }}>
-        <table className="table">
+        <table className="data">
           <thead><tr><th>Consumible</th><th>Cantidad</th><th>Por</th><th>Stock vigente</th>{gestiona && <th></th>}</tr></thead>
           <tbody>
             {lista.length ? (
@@ -734,7 +734,7 @@ function Formulas() {
             ))}
           </div>
           <div style={{ overflowX: "auto" }}>
-            <table className="table">
+            <table className="data">
               <thead><tr><th>Fila</th><th>Método · analito</th><th>En la planilla</th><th>Fórmula del LIMS</th><th>Actual</th><th>Estado</th></tr></thead>
               <tbody>
                 {vista.filas.map((f: any) => (
@@ -981,7 +981,7 @@ function Alicuotas() {
             </div>
           )}
           <div style={{ overflowX: "auto" }}>
-            <table className="table">
+            <table className="data">
               <thead><tr><th>Código</th><th>Cantidad</th><th>Queda</th><th>Propósito</th><th>Ubicación</th><th>Estado</th><th>Historial</th>{gestiona && <th></th>}</tr></thead>
               <tbody>
                 {datos.alicuotas.length ? (

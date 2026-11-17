@@ -87,9 +87,9 @@ export default function Reapertura({
         </p>
       )}
       {lista.length > 0 && (
-        <table className="table" style={{ marginTop: 8, fontSize: 12 }}>
+        <table className="data" style={{ marginTop: 8 }}>
           <thead>
-            <tr><th>Versión</th><th>Estado</th><th>Motivo</th><th>Autorización</th><th>Cotizado</th><th>Valor final</th></tr>
+            <tr><th>Versión</th><th>Estado</th><th>Motivo</th><th>Autorización</th><th className="num">Cotizado</th><th className="num">Valor final</th></tr>
           </thead>
           <tbody>
             {lista.map((r) => (
@@ -98,8 +98,8 @@ export default function Reapertura({
                 <td>{ESTADO_REAPERTURA[r.estado]?.[0] ?? r.estado}</td>
                 <td>{r.motivo}</td>
                 <td>{r.resueltaPor ? `${r.resueltaPor} · ${fechaHora(r.resueltaAt)}${r.comentarioResolucion ? ` · ${r.comentarioResolucion}` : ""}` : "—"}</td>
-                <td>{r.totalAnterior != null ? monto(r.totalAnterior, r.moneda ?? cot.moneda) : "—"}</td>
-                <td>{r.totalFinal != null ? monto(r.totalFinal, r.moneda ?? cot.moneda) : "—"}</td>
+                <td className="num">{r.totalAnterior != null ? monto(r.totalAnterior, r.moneda ?? cot.moneda) : "—"}</td>
+                <td className="num">{r.totalFinal != null ? monto(r.totalFinal, r.moneda ?? cot.moneda) : "—"}</td>
               </tr>
             ))}
           </tbody>

@@ -846,7 +846,7 @@ function ConsumosPendientes({ refresco, onCambio }: { refresco: unknown; onCambi
         <p style={{ margin: 0, color: "var(--muted)" }}>No hay consumos pendientes.</p>
       ) : (
         <div style={{ overflowX: "auto" }}>
-          <table className="table">
+          <table className="data">
             <thead>
               <tr><th>Fecha</th><th>Consumible</th><th>Cantidad</th><th>Stock vigente</th><th>Muestra · método</th><th>Registró</th><th>Estado</th><th></th></tr>
             </thead>
