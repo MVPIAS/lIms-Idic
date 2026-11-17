@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
 import { FirmasMatrizService } from "../rbac/firmas-matriz.controller";
+import { rotuloRolFirma } from "../rbac/firmas-resolver";
 import { NumeracionService } from "../plantilla-render/numeracion.service";
 import { AvisosService } from "../avisos/avisos.service";
 import { decidirFirma, idsResponsables, pasosActuales, quedaOficial } from "../plantilla-render/reglas-emision";
@@ -603,7 +604,7 @@ export class OficioService {
         motivoEstado: d.devueltoMotivo ?? d.anuladoMotivo ?? null,
         firmas: d.pasos.map((p: any) => ({
           accion: p.accion,
-          rol: p.rolNombre ?? p.rolCodigo,
+          rol: rotuloRolFirma(p.rolCodigo, p.rolNombre ?? p.rolCodigo, p.unidadCodigo), // BPCH-46
           unidad: p.unidadCodigo,
           nombre: p.estado === "firmado" ? p.firmanteNombre : (Array.isArray(p.responsables) ? p.responsables.map((r: any) => r.nombre).join(" o ") : null),
           cargo: p.estado === "firmado" ? p.firmanteCargo : null,

@@ -76,6 +76,9 @@ const ProductoDto = z
     clasificacionId: z.string().uuid().nullable().optional(),
   })
   .strict();
+/** BPCH-03: Producción Nacional siempre sin cobro (inspecciones no se cobran; tasa por ley). */
+export const PN_CON_COBRO = false;
+
 export const CrearOc = z
   .object({
     rafId: z.string().uuid(),
@@ -83,7 +86,12 @@ export const CrearOc = z
     anio: z.coerce.number().int().min(2000).max(2100),
     vigenciaDesde: fechaDia,
     vigenciaHasta: fechaDia,
-    conCobro: z.boolean({ required_error: "Indique si las inspecciones son con cobro o sin cobro.", invalid_type_error: "Indique si las inspecciones son con cobro o sin cobro." }),
+    /**
+     * BPCH-03 (respuesta IDIC 17-11-2026): las inspecciones de Producción
+     * Nacional no se cobran (la tasa va por ley). Ya no se elige: siempre sin
+     * cobro. Se admite `false` por compatibilidad; `true` se rechaza.
+     */
+    conCobro: z.literal(false, { errorMap: () => ({ message: "Las inspecciones de Producción Nacional no se cobran." }) }).optional(),
     observaciones: texto(4000),
     productos: z.array(ProductoDto).min(1, "La O/C lleva al menos un producto con su cantidad.").max(200),
   })
@@ -93,7 +101,7 @@ export const EditarOc = z
   .object({
     vigenciaDesde: fechaDia.optional(),
     vigenciaHasta: fechaDia.optional(),
-    conCobro: z.boolean().optional(),
+    conCobro: z.literal(false, { errorMap: () => ({ message: "Las inspecciones de Producción Nacional no se cobran." }) }).optional(),
     observaciones: texto(4000),
   })
   .strict();
@@ -622,7 +630,7 @@ export class ProduccionNacionalService {
         d.anio,
         d.vigenciaDesde,
         d.vigenciaHasta,
-        d.conCobro,
+        PN_CON_COBRO,
         d.observaciones ?? null,
         usuarioId,
       );
@@ -665,7 +673,7 @@ export class ProduccionNacionalService {
     const tipos: Record<string, string> = { vigencia_desde: "::date", vigencia_hasta: "::date" };
     if (d.vigenciaDesde) cols.vigencia_desde = d.vigenciaDesde;
     if (d.vigenciaHasta) cols.vigencia_hasta = d.vigenciaHasta;
-    if (d.conCobro !== undefined) cols.con_cobro = d.conCobro;
+    if (d.conCobro !== undefined) cols.con_cobro = PN_CON_COBRO;
     if (d.observaciones !== undefined) cols.observaciones = d.observaciones;
     if (Object.keys(cols).length) {
       const s = setDinamico(cols, 2, tipos);
@@ -988,7 +996,7 @@ export class ProduccionNacionalService {
         clienteId: o.cliente_id,
         unidad,
         origen: "PRODUCCION_NACIONAL",
-        conCobro: o.con_cobro,
+        conCobro: PN_CON_COBRO,
         resolucion: o.raf_numero,
         descripcion,
         elementoGenerico: producto?.producto ?? null,

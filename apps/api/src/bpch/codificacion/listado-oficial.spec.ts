@@ -44,25 +44,25 @@ describe("EP-09 9.16 · listado oficial de Codificación Única", () => {
     expect(f.grupos[2].familias[0].familia).toBe("Suelto");
   });
 
-  it("el documento lleva encabezado DGMN, título, fabricante, fecha de edición, columnas y las dos firmas", () => {
-    const html = htmlListado(agruparListado([p({})], "EXPLOSIVOS"), "EXPLOSIVOS", "2026-10-22", {
-      subdirector: "Subdirector del Banco de Pruebas de Chile",
-      dgmn: "Jefe Depto. Control de Armas y Explosivos",
-    });
+  it("el documento lleva encabezado DGMN, título, fabricante, fecha de edición, columnas y solo la firma del Subdirector BPCH (BPCH-12)", () => {
+    const html = htmlListado(agruparListado([p({})], "EXPLOSIVOS"), "EXPLOSIVOS", "2026-10-22");
     expect(html).toContain("REPÚBLICA DE CHILE · MINISTERIO DE DEFENSA NACIONAL");
     expect(html).toContain("LISTADO DE EXPLOSIVOS DE PRODUCCIÓN NACIONAL, CON CODIFICACIÓN ÚNICA");
     expect(html).toContain("Fecha de edición: 22-10-2026");
     expect(html).toContain("EQ.DIN 60 %");
     expect(html).toContain("0,53");
-    expect(html).toContain("Jefe Depto. Control de Armas y Explosivos");
+    expect(html).toContain("Subdirector BPCH");
+    expect(html).not.toContain("Control de Armas y Explosivos");
+    expect(html.match(/class="firma"/g)).toHaveLength(1);
+    expect(html).toContain("oficio firmado por el Director del IDIC");
     expect(html).toContain("Total de elementos de la familia: 1");
   });
 
   it("sustancias químicas usan SQN; listado vacío lo dice; escapa el HTML", () => {
-    const html = htmlListado(agruparListado([p({ listado: "SUSTANCIAS_QUIMICAS", producto: "<b>x</b>" })], "SUSTANCIAS_QUIMICAS"), "SUSTANCIAS_QUIMICAS", "2026-10-22", { subdirector: "S", dgmn: "D" });
+    const html = htmlListado(agruparListado([p({ listado: "SUSTANCIAS_QUIMICAS", producto: "<b>x</b>" })], "SUSTANCIAS_QUIMICAS"), "SUSTANCIAS_QUIMICAS", "2026-10-22", { subdirector: "S" });
     expect(html).toContain("SQN");
     expect(html).toContain("&lt;b&gt;x&lt;/b&gt;");
-    expect(htmlListado([], "EN_RECESO", "2026-10-22", { subdirector: "S", dgmn: "D" })).toContain("No hay productos");
+    expect(htmlListado([], "EN_RECESO", "2026-10-22", { subdirector: "S" })).toContain("No hay productos");
   });
 
   it("Excel: BOM, punto y coma, coma decimal y comillas cuando hace falta", () => {

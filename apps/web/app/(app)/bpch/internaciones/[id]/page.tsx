@@ -23,6 +23,7 @@ import { SelectorPanel } from "../../_components/Buscadores";
 import { AVANCE_INTERNACION, type ConfigBpch, DOC_ADM, ESTADO_COD, ESTADO_INTERNACION, LISTADOS, dia, hoy, pedir } from "../../_components/bpch";
 import { ESTADO_FACTURA } from "@/lib/documentos";
 import { textoTipo } from "@/lib/d11";
+import SelectorInspectores, { type ValorInspectores } from "@/components/bpch-procesos/SelectorInspectores";
 
 type Pestana = "registro" | "inspeccion" | "documentos" | "tasa" | "codificacion";
 
@@ -307,7 +308,6 @@ function Inspeccion({ d, puede, accion }: { d: any; puede: Puede; accion: Accion
   const [f, setF] = useState({
     lugarInspeccion: i.lugar ?? "",
     fechaInspeccion: dia(i.fecha),
-    inspectores: i.inspectores ?? "",
     fechaVencimientoProducto: dia(i.vencimientoProducto),
     vigenciaInforme: dia(i.vigenciaInforme),
     observaciones: i.observaciones ?? "",
@@ -316,6 +316,8 @@ function Inspeccion({ d, puede, accion }: { d: any; puede: Puede; accion: Accion
   const [lotes, setLotes] = useState<Record<string, { identificacionLote: string; tamanoLote: string; tamanoMuestra: string }>>(
     Object.fromEntries(d.items.map((it: any) => [it.id, { identificacionLote: it.identificacionLote ?? "", tamanoLote: it.tamanoLote != null ? String(it.tamanoLote) : "", tamanoMuestra: it.tamanoMuestra != null ? String(it.tamanoMuestra) : "" }])),
   );
+  // BPCH-48: modalidad e inspectores de la lista de la unidad de inspección.
+  const [insp, setInsp] = useState<ValorInspectores>({ modalidad: i.modalidad ?? "", inspectorIds: i.inspectorIds ?? [] });
   const [metodos, setMetodos] = useState<Record<string, string[]>>({});
   /** R4: motivo de la excepción si se quita algún ensayo de la batería fija (lo autoriza la jefatura de la SCC). */
   const [excepcion, setExcepcion] = useState<Record<string, string>>({});
@@ -333,6 +335,8 @@ function Inspeccion({ d, puede, accion }: { d: any; puede: Puede; accion: Accion
             e.preventDefault();
             accion("PATCH", "/inspeccion", {
               ...Object.fromEntries(Object.entries(f).map(([k, v]) => [k, v || null])),
+              modalidad: insp.modalidad || null,
+              inspectorIds: insp.inspectorIds,
               items: d.items.map((it: any) => ({
                 id: it.id,
                 identificacionLote: lotes[it.id].identificacionLote || null,
@@ -346,11 +350,11 @@ function Inspeccion({ d, puede, accion }: { d: any; puede: Puede; accion: Accion
             <div className="form-grid">
               <div className="field span-2"><label htmlFor="lu">Lugar de inspección</label><input id="lu" value={f.lugarInspeccion} onChange={set("lugarInspeccion")} /></div>
               <div className="field"><label htmlFor="fi">Fecha de inspección</label><input id="fi" type="date" value={f.fechaInspeccion} onChange={set("fechaInspeccion")} /></div>
-              <div className="field span-2"><label htmlFor="in">Inspectores (LCA)</label><input id="in" value={f.inspectores} onChange={set("inspectores")} placeholder="Iniciales de los dos inspectores" /></div>
               <div className="field"><label htmlFor="pr">Procedimiento de control</label><input id="pr" value={f.procedimiento} onChange={set("procedimiento")} /></div>
               <div className="field"><label htmlFor="ve">Vencimiento del producto</label><input id="ve" type="date" value={f.fechaVencimientoProducto} onChange={set("fechaVencimientoProducto")} /></div>
               <div className="field"><label htmlFor="vi">Vigencia del informe</label><input id="vi" type="date" value={f.vigenciaInforme} onChange={set("vigenciaInforme")} /></div>
               <div className="field"><label htmlFor="obs">Observaciones</label><input id="obs" value={f.observaciones} onChange={set("observaciones")} /></div>
+              <SelectorInspectores idBase="int" valor={insp} onCambio={setInsp} disponibles={i.inspectoresDisponibles ?? []} textoAnterior={i.inspectoresTextoAnterior} />
             </div>
             <table className="data" style={{ marginTop: 12 }}>
               <thead><tr><th>Elemento</th><th>Identificación del lote *</th><th>Tamaño lote (uu) *</th><th>Tamaño muestra (uu) *</th></tr></thead>

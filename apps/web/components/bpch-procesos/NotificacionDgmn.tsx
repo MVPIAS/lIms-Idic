@@ -3,7 +3,7 @@
 /**
  * EP-10 10.15 · Notificación a DGMN del Informe de Incumplimiento y copia al
  * internador. Destinatarios fijos (distribución del documento), medio, Nº de
- * oficio, fecha de envío y copia al internador (obligatoria). Sin ella la OT no
+ * oficio (siempre obligatorio, BPCH-02), fecha de envío y copia al internador (obligatoria). Sin ella la OT no
  * se cierra. La registra la Subdirección BPCH (bpch.dgmn.notificar). Si la OT no
  * tiene incumplimientos, no pinta nada. API: /bpch/notificacion-dgmn/ot/:otId.
  */
@@ -59,7 +59,7 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
   // El botón dice qué falta en vez de quedar desactivado sin explicación.
   const faltan = [
     !f.medio && "el medio",
-    f.medio === "oficina_partes" && !f.oficioNumero.trim() && "el Nº de oficio",
+    !f.oficioNumero.trim() && "el Nº de oficio",
     !f.fechaEnvio && "la fecha de envío",
     !f.copia && "si va con copia al internador",
   ].filter(Boolean) as string[];
@@ -119,7 +119,7 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
                   </select>
                 </div>
                 <div className="field">
-                  <label htmlFor="dg-oficio">Nº de oficio {f.medio === "oficina_partes" && <span className="req">*</span>}</label>
+                  <label htmlFor="dg-oficio">Nº de oficio <span className="req">*</span></label>
                   <input id="dg-oficio" value={f.oficioNumero} onChange={(x) => setF({ ...f, oficioNumero: x.target.value })} maxLength={60} />
                 </div>
                 <div className="field">
@@ -140,7 +140,7 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
                 <button type="button" className="btn primary" disabled={!listo || ocupado} onClick={registrar}
                   aria-describedby={faltan.length ? "dg-faltan" : undefined}>{ocupado ? "Registrando…" : "Registrar notificación → cierre"}</button>
                 {faltan.length > 0 && <small id="dg-faltan" role="status" style={{ color: "#7a4b00" }}>Falta indicar {faltan.join(", ")}.</small>}
-                <small style={{ color: "var(--muted)" }}>El oficio lo genera hoy la Subdirección fuera del LIMS (por confirmar con el IDIC si se emite con la matriz OFICIO).</small>
+                <small style={{ color: "var(--muted)" }}>El incumplimiento se informa a la DGMN por oficio firmado por el Director del IDIC: registre aquí su número.</small>
               </div>
             </>
           ) : (

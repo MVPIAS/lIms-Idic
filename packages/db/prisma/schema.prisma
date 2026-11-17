@@ -228,6 +228,9 @@ model Cliente {
   contactoCargo     String? @map("contacto_cargo") @db.VarChar(120)
   contactoEmail     String? @map("contacto_email") @db.VarChar(160)
   contactoTelefono  String? @map("contacto_telefono") @db.VarChar(40)
+  /// BPCH-19 (align_tercer_envio_bpch.sql): código de empresa, 2.º tramo del número
+  /// del Informe de Inspección BPCH (token {EMPRESA}).
+  codigoEmpresa     String? @map("codigo_empresa") @db.VarChar(20)
   /// Contrato 4.1.1/4.1.3 (align_brechas_1.sql): lista de precios propia (manda al cotizarle)
   /// y condiciones especiales que se precargan en su cotización.
   listaPrecioId         String?  @map("lista_precio_id") @db.Uuid
@@ -1274,7 +1277,12 @@ model Certificado {
   ot              OrdenTrabajo      @relation(fields: [otId], references: [id])
   firmas          DocumentoFirma[]
 
-  @@unique([tenantId, codigo])
+  // BPCH-19 (align_tercer_envio_bpch.sql): el número es único POR TIPO de
+  // documento (índices ux_certificado_tipo_codigo / ux_certificado_tipo_numero
+  // sobre tenant_id, COALESCE(tipo_documento, ''), codigo|numero). El
+  // certificado y el informe de incumplimiento BPCH repiten el número del
+  // Informe de Inspección.
+  @@index([tenantId, codigo])
   @@index([otId])
   @@index([codigoVerificacion])
   @@map("certificado")

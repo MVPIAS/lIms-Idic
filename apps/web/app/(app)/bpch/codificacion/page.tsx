@@ -5,7 +5,7 @@
  * CNC-DGMN por fabricante. Pestañas Explosivos / Sustancias químicas / En
  * receso; inscripción, corrección, receso, reactivación y cambio de titular,
  * todo con historial. Emisión del listado oficial por fabricante en PDF (para
- * la firma del Subdirector BPCH y de la DGMN) o Excel (EP-09 9.16, BL-021).
+ * la firma del Subdirector BPCH; sale a la DGMN por oficio del Director) o Excel (EP-09 9.16, BL-021).
  * API: /bpch/codificacion
  */
 import { useCallback, useEffect, useState } from "react";
@@ -157,6 +157,7 @@ function Ficha({ inicial, gestiona, onCerrar, onGuardado }: { inicial: any | nul
     motivo: "",
   });
   const [estadoMotivo, setEstadoMotivo] = useState("");
+  const [certNuevo, setCertNuevo] = useState("");
   const [errores, setErrores] = useState("");
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
 
@@ -197,9 +198,15 @@ function Ficha({ inicial, gestiona, onCerrar, onGuardado }: { inicial: any | nul
   async function cambiarEstado() {
     setErrores("");
     try {
-      const r = await pedir("POST", `/bpch/codificacion/${d.id}/estado`, { estado: d.estado === "VIGENTE" ? "EN_RECESO" : "VIGENTE", motivo: estadoMotivo });
+      const reactivar = d.estado !== "VIGENTE";
+      const r = await pedir("POST", `/bpch/codificacion/${d.id}/estado`, {
+        estado: reactivar ? "VIGENTE" : "EN_RECESO",
+        motivo: estadoMotivo,
+        ...(reactivar ? { certificadoNumero: certNuevo.trim() || null } : {}),
+      });
       setD(r);
       setEstadoMotivo("");
+      setCertNuevo("");
       toast.ok(r.estado === "VIGENTE" ? "Producto reactivado." : "Producto pasado a receso.");
       onGuardado();
     } catch (e: any) {
@@ -262,6 +269,10 @@ function Ficha({ inicial, gestiona, onCerrar, onGuardado }: { inicial: any | nul
           {gestiona && (
             <div className="toolbar" style={{ marginTop: 10 }}>
               <input aria-label="Motivo del cambio de estado" placeholder={d.estado === "VIGENTE" ? "Motivo del paso a receso" : "Motivo de la reactivación"} value={estadoMotivo} onChange={(e) => setEstadoMotivo(e.target.value)} style={{ flex: 1 }} />
+              {/* BPCH-40: reactivar un producto en receso exige un certificado nuevo. */}
+              {d.estado !== "VIGENTE" && (
+                <input aria-label="Nº del certificado nuevo" placeholder="Nº del certificado nuevo (obligatorio)" value={certNuevo} onChange={(e) => setCertNuevo(e.target.value)} maxLength={60} style={{ flex: 1 }} />
+              )}
               <button type="button" className={`btn ${d.estado === "VIGENTE" ? "ghost-danger" : "success"} sm`} onClick={cambiarEstado}>{d.estado === "VIGENTE" ? "↓ Pasar a receso" : "↑ Reactivar"}</button>
             </div>
           )}
@@ -311,8 +322,9 @@ function resumen(h: any): string {
   const x = h.detalle ?? {};
   switch (h.evento) {
     case "receso":
-    case "reactivacion":
       return x.motivo ?? "";
+    case "reactivacion":
+      return [x.motivo, x.certificadoNuevo ? `certificado nuevo ${x.certificadoNuevo}${x.certificadoAnterior ? ` (antes ${x.certificadoAnterior})` : ""}` : null].filter(Boolean).join(" · ");
     case "edicion":
       // Cada campo corregido con su valor anterior y el nuevo («antes → ahora»).
       return [
@@ -386,7 +398,7 @@ function EmitirListado({ gestiona, inicial, onCerrar }: { gestiona: boolean; ini
       </>}
     >
       <p style={{ marginTop: 0, color: "var(--muted)", fontSize: 12.5 }}>
-        Formato de los modelos DGMN: encabezado del Ministerio, fabricante y RUT, fecha de edición, productos por grupo y familia con totales, y las firmas del Subdirector del BPCH y del Jefe del Depto. Control de Armas y Explosivos de la DGMN. El PDF se firma fuera del LIMS; queda constancia de cada emisión.
+        Formato de los modelos DGMN: encabezado del Ministerio, fabricante y RUT, fecha de edición, productos por grupo y familia con totales, y la firma del Subdirector BPCH (Jefe del Departamento BPCH). El PDF se firma fuera del LIMS y se remite a la DGMN mediante oficio en papel firmado por el Director del IDIC; queda constancia de cada emisión.
       </p>
       {error && <div className="alert warn" role="alert">{error}</div>}
       <div className="form-grid">

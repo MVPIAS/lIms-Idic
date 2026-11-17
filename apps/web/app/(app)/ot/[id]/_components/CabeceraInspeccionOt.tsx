@@ -29,6 +29,10 @@ interface Ficha {
   vista?: Record<string, string | null> | null;
   faltantesEmision?: string[];
   sugeridos?: { inspectores: string; procedimientos: string[] };
+  /** BPCH-48: personas con rol Inspector en la unidad de la OT (y las ya elegidas que hoy no lo tienen). */
+  inspectoresDisponibles?: { id: string; nombre: string; iniciales: string; sinRol?: boolean }[];
+  /** Texto libre de inspectores de un registro anterior (solo lectura). */
+  inspectoresTextoAnterior?: string | null;
   /** B-019: datos conocidos del producto (Producción Nacional) o del prototipo para los campos vacíos. */
   heredados?: Cabecera;
   /** R3: listas de unidades y lugares de inspección (plantas del cliente y tabla del BPCH). */
@@ -55,7 +59,6 @@ const CAMPOS: { k: string; etiqueta: string; tipo?: "date" | "number" | "esquema
   { k: "comuna", etiqueta: "Comuna", max: 120, vista: "comuna" },
   { k: "contacto", etiqueta: "Contacto en el lugar", max: 200, ayuda: "Cargo o iniciales (si se sigue imprimiendo: por confirmar).", vista: "contacto" },
   { k: "fechaInspeccion", etiqueta: "Fecha de inspección", tipo: "date", ayuda: "Obligatoria para emitir el Informe de Inspección.", vista: "fecha_inspeccion" },
-  { k: "inspectores", etiqueta: "Inspectores LCA", max: 300, ayuda: "Por iniciales.", vista: "inspectores" },
   { k: "procedimiento", etiqueta: "Procedimiento de control", tipo: "procedimiento", max: 120, vista: "procedimiento" },
   { k: "documentoOrigen", etiqueta: "Documento de origen", max: 200, ayuda: "Resolución, RAF o solicitud.", vista: "documento" },
   { k: "fechaDocumento", etiqueta: "Fecha del documento", tipo: "date" },
@@ -124,6 +127,9 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
       if (!f?.soloComplemento) {
         cuerpo.unidadLote = form.unidadLote || null;
         cuerpo.unidadMuestra = form.unidadMuestra || null;
+        // BPCH-48: modalidad e inspectores elegidos de la lista de la unidad.
+        cuerpo.modalidad = form.modalidad || null;
+        cuerpo.inspectorIds = Array.isArray(form.inspectorIds) ? form.inspectorIds : [];
       }
       const r = await llamar<Ficha>("PUT", `/bpch/cabecera-ot/${otId}`, cuerpo);
       setF({ ...f, ...r });
@@ -217,10 +223,9 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
                   {f.heredados?.[c.k] !== undefined && f.heredados?.[c.k] === form[c.k] && (
                     <small style={{ color: "var(--accent)" }}>Precargado {f.proceso === "PRODUCCION_NACIONAL" ? "del producto y su clasificación" : "del prototipo"}: revíselo y guarde.</small>
                   )}
-                  {(her || c.ayuda || (c.k === "inspectores" && f.sugeridos?.inspectores)) && (
+                  {(her || c.ayuda) && (
                     <small style={{ color: "var(--muted)" }}>
                       {her ? `Si lo deja vacío se imprime: ${her}. ` : ""}
-                      {c.k === "inspectores" && f.sugeridos?.inspectores ? `${conPunto(`Asignados a la OT: ${f.sugeridos.inspectores}`)} ` : ""}
                       {c.ayuda ?? ""}
                     </small>
                   )}
@@ -228,6 +233,7 @@ export default function CabeceraInspeccionOt({ otId }: { otId: string }) {
               );
             })}
           </div>
+          {!f.soloComplemento && <InspectoresCabecera f={f} form={form} setForm={setForm} />}
           <datalist id="cab-procedimientos">{(f.sugeridos?.procedimientos ?? []).map((p) => <option key={p} value={p} />)}</datalist>
         </fieldset>
         <PlanNch44 tamanoLote={form.tamanoLote} unidadLote={form.unidadLote} tamanoMuestra={form.tamanoMuestra} editable={!!f.editable}
@@ -402,5 +408,59 @@ function PlanNch44({ tamanoLote, unidadLote, tamanoMuestra, editable, onUsar }: 
         <button type="button" className="btn outline sm" onClick={() => onUsar(n)}>Usar n = {n} como tamaño de la muestra</button>
       )}
     </div>
+  );
+}
+
+/**
+ * BPCH-48 (respuesta IDIC 17-11-2026): en terreno, dos inspectores obligatorios
+ * (sin ellos no se puede programar); en trabajo administrativo basta uno. Se
+ * eligen entre las personas con rol Inspector de la unidad de la OT.
+ */
+function InspectoresCabecera({ f, form, setForm }: { f: Ficha; form: Cabecera; setForm: (fn: (x: Cabecera) => Cabecera) => void }) {
+  const elegidos: string[] = Array.isArray(form.inspectorIds) ? form.inspectorIds : [];
+  const disponibles = f.inspectoresDisponibles ?? [];
+  const minimo = form.modalidad === "TERRENO" ? 2 : form.modalidad === "ADMINISTRATIVO" ? 1 : 0;
+  const alternar = (id: string, si: boolean) =>
+    setForm((x) => {
+      const actual: string[] = Array.isArray(x.inspectorIds) ? x.inspectorIds : [];
+      return { ...x, inspectorIds: si ? [...actual.filter((i) => i !== id), id] : actual.filter((i) => i !== id) };
+    });
+  return (
+    <fieldset className="field span-2" style={{ border: "1px solid var(--line)", borderRadius: 7, padding: "8px 10px", marginTop: 8 }}>
+      <legend style={{ fontSize: 12, fontWeight: 700 }}>Inspectores LCA <span className="req">*</span></legend>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginBottom: 6 }}>
+        <label style={{ fontSize: 12.5 }}>
+          <input type="radio" name="cab-modalidad" checked={form.modalidad === "TERRENO"} onChange={() => setForm((x) => ({ ...x, modalidad: "TERRENO" }))} /> Inspección en terreno (dos inspectores)
+        </label>
+        <label style={{ fontSize: 12.5 }}>
+          <input type="radio" name="cab-modalidad" checked={form.modalidad === "ADMINISTRATIVO"} onChange={() => setForm((x) => ({ ...x, modalidad: "ADMINISTRATIVO" }))} /> Trabajo administrativo (un inspector)
+        </label>
+      </div>
+      {disponibles.length ? (
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+          {disponibles.map((p) => (
+            <label key={p.id} style={{ fontSize: 12.5 }}>
+              <input type="checkbox" checked={elegidos.includes(p.id)} onChange={(e) => alternar(p.id, e.target.checked)} /> {p.nombre}
+              {p.sinRol && <small style={{ color: "var(--muted)" }}> (ya no es inspector de la unidad)</small>}
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p style={{ margin: 0, fontSize: 12.5, color: "var(--muted)" }}>
+          La unidad no tiene personas con rol Inspector: pida a Administración que lo asigne (Administración › Usuarios y roles).
+        </p>
+      )}
+      {minimo > 0 && elegidos.length < minimo && (
+        <small style={{ display: "block", color: "#7a4b00", marginTop: 4 }}>
+          {form.modalidad === "TERRENO" ? `Elija dos inspectores: sin ellos no se puede programar la inspección en terreno (elegidos: ${elegidos.length}).` : "Elija al menos un inspector."}
+        </small>
+      )}
+      {f.inspectoresTextoAnterior && (
+        <small style={{ display: "block", color: "var(--muted)", marginTop: 4 }}>
+          Registrado antes como texto: «{f.inspectoresTextoAnterior}». Elija ahora a las personas de la lista.
+        </small>
+      )}
+      {f.sugeridos?.inspectores && <small style={{ display: "block", color: "var(--muted)", marginTop: 2 }}>{conPunto(`Asignados a la OT: ${f.sugeridos.inspectores}`)}</small>}
+    </fieldset>
   );
 }

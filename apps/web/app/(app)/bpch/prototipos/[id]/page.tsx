@@ -3,7 +3,7 @@
 /**
  * Ficha del prototipo (BPCH). Pasos:
  *  1. Ingreso y antecedentes técnicos (fabricante, elemento, solicitud DGMN).
- *  2. Clasificación de la sustancia (una aprobada; obligatoria para aprobar el tipo).
+ *  2. Clasificación de la sustancia (una aprobada; obligatoria ANTES de ensayar, BPCH-32).
  *  3. Pronunciamiento SAC sobre el tamaño de muestra (SAC-PG01-IT10, «Para prototipos»).
  *  4. Parametrización del elemento (panel validado por la jefatura, EP-08 8.11).
  *  5. OT de evaluación: se ejecuta con el flujo general (muestras, captura,
@@ -316,7 +316,7 @@ export default function PrototipoPage() {
         <>
           <Paso n={2} titulo="Clasificación de la sustancia" hecho={p.clasificacion?.estado === "aprobada"}>
             <p style={{ margin: "0 0 8px", fontSize: 12, color: "var(--muted)" }}>
-              Un elemento nuevo debe tener su clasificación aprobada (series de prueba ONU) para aprobar el tipo.
+              Un elemento nuevo debe tener su clasificación aprobada (series de prueba ONU) antes de ensayarlo: sin ella no se genera la OT del prototipo.
             </p>
             {p.clasificacion && (
               <p style={{ margin: "0 0 8px", fontSize: 13 }}>

@@ -221,9 +221,10 @@ export function comprobarGeneracionOt(
   else if (!puedeGenerarOt(e)) errores.push("La inspección ya tiene una OT vigente.");
   if (oc.estado !== "vigente") errores.push(`La O/C está ${oc.estado}.`);
   if (raf.estado !== "vigente") errores.push(`La RAF ${raf.numero} está ${raf.estado}.`);
+  // BPCH-29 (respuesta IDIC 17-11-2026): la RAF vencida IMPIDE generar la OT.
   if (raf.vigenciaHasta && dia(raf.vigenciaHasta) < hoy)
-    avisos.push(
-      `La RAF ${raf.numero} venció el ${dia(raf.vigenciaHasta)}: según SAC-PG01-IT08 la vigencia de los documentos legales es un defecto crítico de la inspección.`,
+    errores.push(
+      `La RAF ${raf.numero} venció el ${dia(raf.vigenciaHasta)}: con la RAF vencida no se puede generar la OT. Pida a la empresa la RAF renovada.`,
     );
   if (raf.tipoLinea === "MOVIL")
     avisos.push("Línea de fabricación móvil (camión fábrica): SAC-PG01-IT10 excluye estos productos del muestreo por atributos NCh 44.");

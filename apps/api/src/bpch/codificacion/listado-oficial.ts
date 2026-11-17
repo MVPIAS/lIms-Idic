@@ -2,8 +2,10 @@
  * EP-09 9.16 · Listado oficial de Codificación Única por fabricante (modelos
  * DGMN «MODELO LISTADO EXPLOSIVOS / SUSTANCIAS QUÍMICAS / EN RECESO»): encabezado
  * República de Chile · Ministerio de Defensa Nacional · DGMN, título, fabricante
- * y RUT, fecha de edición, totales, agrupación por grupo y familia, y firmas del
- * Subdirector del BPCH y del Jefe Depto. Control de Armas y Explosivos (DGMN).
+ * y RUT, fecha de edición, totales, agrupación por grupo y familia, y la firma
+ * del Subdirector BPCH (el Jefe del Departamento BPCH, BPCH-46). Sin firma de
+ * la DGMN: el listado sale a la DGMN por oficio en papel firmado por el
+ * Director del IDIC (respuesta IDIC BPCH-12 del 17-11-2026).
  * Reglas y HTML PUROS, probados en listado-oficial.spec.ts. También la
  * exportación a Excel (CSV con BOM y punto y coma, como el resto del LIMS).
  */
@@ -95,7 +97,12 @@ const coma = (n: number | null) => (n == null ? "" : n.toFixed(2).replace(".", "
 const letraEstado = (e: string) => (e === "EN_RECESO" ? "R" : "V");
 
 /** Cuerpo HTML del listado (lo imprime el motor de PDF del LIMS: membrete, tablas y firmas). */
-export function htmlListado(secciones: SeccionFabricante[], tipo: TipoListado, fechaEdicion: string, firmas: { subdirector: string; dgmn: string }): string {
+/** Rótulo de la firma del listado: el Jefe del Departamento BPCH firma como «Subdirector BPCH» (BPCH-12 y BPCH-46). */
+export const FIRMA_LISTADO = "Subdirector BPCH";
+/** Nota de remisión del listado (BPCH-12). */
+export const NOTA_REMISION_LISTADO = "Se remite a la DGMN mediante oficio firmado por el Director del IDIC.";
+
+export function htmlListado(secciones: SeccionFabricante[], tipo: TipoListado, fechaEdicion: string, firmas: { subdirector: string } = { subdirector: FIRMA_LISTADO }): string {
   const fecha = fechaEdicion.split("-").reverse().join("-");
   const total = secciones.reduce((s, x) => s + x.total, 0);
   const col = tipo === "SUSTANCIAS_QUIMICAS" ? "SQN" : "PTN/PIN";
@@ -134,8 +141,8 @@ export function htmlListado(secciones: SeccionFabricante[], tipo: TipoListado, f
     }
     partes.push(`<div class="firmas">
   <div class="firma"><span class="linea"></span>${escapeHtml(firmas.subdirector)}</div>
-  <div class="firma"><span class="linea"></span>${escapeHtml(firmas.dgmn)}</div>
-</div>`);
+</div>
+<p class="nota">${escapeHtml(NOTA_REMISION_LISTADO)}</p>`);
   });
   if (!secciones.length) partes.push(`<h1>${escapeHtml(TITULO_LISTADO[tipo])}</h1><p>No hay productos en este listado para el fabricante indicado.</p>`);
   return partes.join("\n");
