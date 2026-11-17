@@ -22,7 +22,7 @@ BEGIN
      WHERE p.categoria = p_cat AND p.codigo = p_cod
        AND btrim(coalesce(p.valor, '')) IS DISTINCT FROM p_valor
   ), upd AS (
-    UPDATE parametro_sistema p SET valor = p_valor, activo = TRUE
+    UPDATE parametro_sistema p SET valor = p_valor, activo = TRUE, updated_at = now()
       FROM cambiados c WHERE p.id = c.id
     RETURNING p.id
   )

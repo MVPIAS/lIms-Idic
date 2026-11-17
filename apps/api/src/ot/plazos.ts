@@ -4,15 +4,45 @@
  *
  * Semáforo de la fecha de compromiso (OT no cerrada ni anulada):
  *   vencida    · la fecha de compromiso ya pasó;
- *   por_vencer · vence hoy o en los próximos UMBRAL_POR_VENCER_DIAS días;
+ *   por_vencer · vence hoy o en los próximos N días (parámetro
+ *                avisos.dias_por_vencer; UMBRAL_POR_VENCER_DIAS si no hay valor);
  *   en_plazo   · vence más adelante;
  *   sin_fecha  · la OT no tiene fecha de compromiso.
+ * COM-23 (IDIC, 17-11-2026): el cumplimiento se mide con la RECEPCIÓN EN EL DCO
+ * (orden_trabajo.fecha_recep_dco). Registrada esa fecha, el plazo deja de
+ * correr (semáforo «terminada»; diasRestantes = días a favor o, si es negativo,
+ * de atraso). Sin recepción en el DCO, el semáforo sigue corriendo como antes.
  * La bandeja («OT vencidas / por vencer») usa exactamente estos cortes.
  */
 import { estadosValidos, validarTransicion } from "../common/estados";
 import { ZONA_CHILE, hoyChile, diaChile } from "../common/fecha-chile";
 
+/** Valor por defecto de avisos.dias_por_vencer (COM-23: 3 días). */
 export const UMBRAL_POR_VENCER_DIAS = 3;
+
+/** Opciones del semáforo: umbral leído del parámetro y recepción en el DCO. */
+export interface OpcionesSemaforo {
+  /** avisos.dias_por_vencer (1–30). Sin valor: UMBRAL_POR_VENCER_DIAS. */
+  diasPorVencer?: number | null;
+  /** orden_trabajo.fecha_recep_dco: con ella el plazo ya se midió (COM-23). */
+  fechaRecepDco?: Date | string | null;
+}
+
+/**
+ * SQL (expresión entera) del umbral «por vencer» de la OT `o`: el parámetro
+ * avisos.dias_por_vencer de su tenant (1–30) o, si no hay, UMBRAL_POR_VENCER_DIAS.
+ * Lo usan las tarjetas de Mi bandeja (COM-23).
+ */
+export const SQL_DIAS_POR_VENCER = `COALESCE((SELECT CASE WHEN btrim(p.valor) ~ '^[0-9]{1,2}$' AND btrim(p.valor)::int BETWEEN 1 AND 30 THEN btrim(p.valor)::int END
+    FROM parametro_sistema p WHERE p.tenant_id = o.tenant_id AND p.categoria = 'avisos' AND p.codigo = 'dias_por_vencer' AND p.activo LIMIT 1), ${UMBRAL_POR_VENCER_DIAS})`;
+
+/** OT cuyo plazo sigue corriendo: sin recepción en el DCO (COM-23). */
+export const SQL_PLAZO_CORRE = `o.fecha_recep_dco IS NULL`;
+
+/** Umbral «por vencer» saneado (1–30 días; si no, el valor por defecto). */
+export function umbralPorVencer(dias?: number | null): number {
+  return Number.isInteger(dias) && (dias as number) >= 1 && (dias as number) <= 30 ? (dias as number) : UMBRAL_POR_VENCER_DIAS;
+}
 export const ZONA_HORARIA = ZONA_CHILE;
 export const OT_ESTADOS_TERMINADOS = ["cerrada", "anulada"] as const;
 
@@ -43,15 +73,19 @@ export function semaforoPlazo(
   fechaCompromiso: Date | string | null | undefined,
   estado: string | null | undefined,
   ahora: Date = new Date(),
-): { semaforo: Semaforo; diasRestantes: number | null } {
+  opts: OpcionesSemaforo = {},
+): { semaforo: Semaforo; diasRestantes: number | null; medidoEn?: string } {
   if (estado && (OT_ESTADOS_TERMINADOS as readonly string[]).includes(estado)) {
     return { semaforo: "terminada", diasRestantes: null };
   }
   const dia = diaDe(fechaCompromiso);
+  // COM-23: con la recepción en el DCO el plazo ya se midió y deja de correr.
+  const recepDco = diaDe(opts.fechaRecepDco ?? null);
+  if (recepDco) return { semaforo: "terminada", diasRestantes: dia ? diasEntre(recepDco, dia) : null, medidoEn: recepDco };
   if (!dia) return { semaforo: "sin_fecha", diasRestantes: null };
   const dias = diasEntre(hoyCl(ahora), dia);
   if (dias < 0) return { semaforo: "vencida", diasRestantes: dias };
-  if (dias <= UMBRAL_POR_VENCER_DIAS) return { semaforo: "por_vencer", diasRestantes: dias };
+  if (dias <= umbralPorVencer(opts.diasPorVencer)) return { semaforo: "por_vencer", diasRestantes: dias };
   return { semaforo: "en_plazo", diasRestantes: dias };
 }
 

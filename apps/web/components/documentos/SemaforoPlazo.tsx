@@ -4,8 +4,27 @@ import { fechaDia } from "@/lib/format";
 import { SEMAFORO, semaforoDe, textoDias } from "@/lib/documentos";
 
 /** Semáforo de la fecha de compromiso de una OT (en plazo / por vencer / vencida). */
-export default function SemaforoPlazo({ fechaCompromiso, estado, conFecha = true }: { fechaCompromiso: unknown; estado?: string | null; conFecha?: boolean }) {
-  const { semaforo, dias } = semaforoDe(fechaCompromiso, estado);
+export default function SemaforoPlazo({
+  fechaCompromiso,
+  estado,
+  conFecha = true,
+  plazo,
+}: {
+  fechaCompromiso: unknown;
+  estado?: string | null;
+  conFecha?: boolean;
+  /** Semáforo calculado por el servidor (umbral del parámetro y recepción en el DCO, COM-23). */
+  plazo?: { semaforo: string; diasRestantes: number | null; medidoEn?: string } | null;
+}) {
+  const calculado = semaforoDe(fechaCompromiso, estado);
+  const semaforo = plazo?.semaforo ?? calculado.semaforo;
+  const dias = plazo ? plazo.diasRestantes : calculado.dias;
+  if (plazo?.medidoEn)
+    return (
+      <span title={`Recepción en el DCO el ${fechaDia(plazo.medidoEn)}`} style={{ color: "var(--muted)", whiteSpace: "nowrap" }}>
+        {fechaCompromiso ? fechaDia(fechaCompromiso) : "—"} · recibida en DCO
+      </span>
+    );
   if (semaforo === "terminada") return <span style={{ color: "var(--muted)" }}>{fechaCompromiso ? fechaDia(fechaCompromiso) : "—"}</span>;
   const s = SEMAFORO[semaforo];
   return (
