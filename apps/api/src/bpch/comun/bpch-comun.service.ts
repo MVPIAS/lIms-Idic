@@ -5,7 +5,7 @@ import { AlcanceService } from "../../rbac/alcance.service";
 import { descendientes } from "../../rbac/alcance";
 import { RegistroMuestrasService } from "../../flujo-real/flujo-real.module";
 import { condicionFinal, TEXTO_CONDICION } from "./reglas-bpch";
-import { erroresInspectores, iniciales } from "../cabecera/reglas-cabecera";
+import { cambiaInspeccion, erroresInspectores, exigeInspectores, iniciales, SQL_INSPECTORES_UNIDAD, type PrevioInspeccion } from "../cabecera/reglas-cabecera";
 
 /** Cliente con el que se escribe: el servicio o la transacción en curso. */
 export type Sql = Pick<PrismaService, "$queryRawUnsafe" | "$executeRawUnsafe">;
@@ -259,20 +259,10 @@ export class BpchComunService {
   }
   /* ------------------------------------------------ BPCH-48 · inspectores --- */
 
-  /** Personas con rol INSPECTOR vigente en la unidad (las que se pueden elegir). */
+  /** Personas con rol INSPECTOR (o alias) vigente en la unidad o en sus ancestras (las que se pueden elegir). */
   async inspectoresDeUnidad(unidadId: string | null): Promise<{ id: string; nombre: string; iniciales: string }[]> {
     if (!unidadId) return [];
-    const filas = await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
-      `SELECT DISTINCT u.id, u.nombre_completo AS nombre
-         FROM usuario_rol ur
-         JOIN usuario u ON u.id = ur.usuario_id AND u.deleted_at IS NULL AND COALESCE(u.estado, 'activo') = 'activo'
-         JOIN rol r ON r.id = ur.rol_id
-        WHERE ur.unidad_id = $1::uuid AND r.codigo = 'INSPECTOR'
-          AND (ur.vigente_desde IS NULL OR ur.vigente_desde <= now())
-          AND (ur.vigente_hasta IS NULL OR ur.vigente_hasta > now())
-        ORDER BY 2`,
-      unidadId,
-    );
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(SQL_INSPECTORES_UNIDAD, unidadId);
     return filas.map((f) => ({ ...f, iniciales: iniciales(f.nombre) }));
   }
 
@@ -288,19 +278,29 @@ export class BpchComunService {
   /**
    * BPCH-48 (respuesta IDIC 17-11-2026): valida modalidad e inspectores de una
    * inspección (en terreno, dos; trabajo administrativo, uno) elegidos entre las
-   * personas con rol INSPECTOR de la unidad (se conservan los ya elegidos antes),
-   * y arma el texto con sus iniciales que imprimen los documentos.
+   * personas con rol INSPECTOR de la unidad o sus ancestras (se conservan los ya
+   * elegidos antes), y arma el texto con sus iniciales que imprimen los
+   * documentos. Lo que la petición no trae (undefined) se conserva. Un registro
+   * anterior a BPCH-48 (inspección registrada sin modalidad ni personas) se
+   * guarda sin exigirlos mientras no se toquen (exigeInspectores), y conserva su
+   * texto libre de inspectores.
    */
   async resolverInspectores(
     unidadId: string | null,
     d: { modalidad?: string | null; inspectorIds?: string[] | null },
-    previos: string[] = [],
-  ): Promise<{ errores: string[]; ids: string[] | null; texto: string | null }> {
-    const ids = [...new Set(d.inspectorIds ?? [])];
+    previo: PrevioInspeccion = {},
+  ): Promise<{ errores: string[]; modalidad: string | null; ids: string[] | null; texto: string | null }> {
+    const previos = [...(previo.inspectorIds ?? [])];
+    const modalidad = d.modalidad === undefined ? previo.modalidad ?? null : d.modalidad ?? null;
+    const tocaIds = d.inspectorIds !== undefined && cambiaInspeccion(previo, { inspectorIds: d.inspectorIds });
+    const ids = [...new Set(tocaIds ? d.inspectorIds ?? [] : previos)];
+    if (!exigeInspectores(previo, d))
+      return { errores: [], modalidad, ids: ids.length ? ids : null, texto: tocaIds ? null : previo.inspectores ?? null };
     const validos = new Set([...(await this.inspectoresDeUnidad(unidadId)).map((i) => i.id), ...previos]);
-    const errores = erroresInspectores({ modalidad: d.modalidad, inspectorIds: d.inspectorIds ?? [] }, validos);
+    const errores = erroresInspectores({ modalidad, inspectorIds: ids }, validos);
+    if (!tocaIds && previo.inspectores && ids.length) return { errores, modalidad, ids, texto: previo.inspectores };
     const nombres = await this.nombresUsuarios(ids);
-    return { errores, ids: ids.length ? ids : null, texto: ids.length ? ids.map((i) => iniciales(nombres.get(i))).join(" · ") : null };
+    return { errores, modalidad, ids: ids.length ? ids : null, texto: ids.length ? ids.map((i) => iniciales(nombres.get(i))).join(" · ") : null };
   }
 
   /** Lo que la pantalla necesita para elegir inspectores (y el texto libre de registros anteriores). */
