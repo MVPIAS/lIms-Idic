@@ -59,3 +59,25 @@ DELETE FROM encuesta_satisfaccion e
 COMMENT ON COLUMN encuesta_satisfaccion.estado IS
   'pendiente (nace al CERRAR la OT, COM-14/COM-39) → registrada (Comercial anota las respuestas del cliente) · sin_respuesta (con motivo). Heredados sin uso: enviada, respondida, vencida, anulada.';
 
+-- -----------------------------------------------------------------------------
+-- COM-11 · Cotización = año vigente + correlativo que reinicia cada año.
+-- El código ya corrige el defecto previo (numeracion-cotizacion.ts): «inicio»
+-- solo rige en el año «inicio_anio»; los demás años parten en 1.
+-- -----------------------------------------------------------------------------
+-- Para no repetir números del año en curso al pasar de «global» a «anual», la
+-- serie del año actual continúa desde donde iba el contador global.
+INSERT INTO cotizacion_correlativo (tenant_id, serie, ultimo)
+SELECT c.tenant_id, to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY'), c.ultimo
+  FROM cotizacion_correlativo c
+  JOIN parametro_sistema p ON p.tenant_id = c.tenant_id AND p.categoria = 'numeracion_cotizacion'
+                          AND p.codigo = 'reinicio' AND btrim(coalesce(p.valor, '')) <> 'anual'
+ WHERE c.serie = 'global'
+ON CONFLICT (tenant_id, serie) DO UPDATE SET ultimo = GREATEST(cotizacion_correlativo.ultimo, EXCLUDED.ultimo), updated_at = now();
+
+-- «inicio» (último número del Sistema Comercial) sigue rigiendo en el año actual.
+SELECT pg_temp.te_fijar_param('numeracion_cotizacion', 'inicio_anio',
+       to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY'),
+       'Año del último número usado (con reinicio anual, «inicio» solo rige ese año)', 'COM-11')
+ WHERE NOT EXISTS (SELECT 1 FROM parametro_sistema p WHERE p.categoria = 'numeracion_cotizacion' AND p.codigo = 'inicio_anio');
+SELECT pg_temp.te_fijar_param('numeracion_cotizacion', 'reinicio', 'anual',
+       'Reinicio del correlativo (global | anual)', 'COM-11');
