@@ -154,7 +154,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     categoria: "numeracion_cotizacion",
     titulo: "Numeración de la cotización",
     donde: "Comercial › Cotizaciones: el número se asigna al crear la cotización. Las ya numeradas no cambian.",
-    porConfirmar: "Formato y si el correlativo es global o anual (EP-00 §10 P6).",
+    porConfirmar: "Formato confirmado por el IDIC (17-11-2026, COM-11): año vigente + correlativo que reinicia cada año.",
     codigos: {
       formato: {
         tipo: "formato",
@@ -170,14 +170,24 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
           { valor: "global", etiqueta: "Nunca (correlativo continuo)" },
           { valor: "anual", etiqueta: "Cada año vuelve a 1" },
         ],
-        porDefecto: "global",
+        // COM-11 (IDIC, 17-11-2026): «Año vigente + correlativo (reinicia todos los años)».
+        porDefecto: "anual",
       },
       inicio: {
         tipo: "entero",
         nombre: "Último número ya usado",
         min: 0,
         max: 999_999_999,
-        ayuda: "El siguiente número será este + 1 (sirve para continuar la numeración del Sistema Comercial). Bajarlo no reutiliza números ya emitidos.",
+        ayuda: "El siguiente número será este + 1 (sirve para continuar la numeración del Sistema Comercial). Bajarlo no reutiliza números ya emitidos. Con reinicio anual solo rige en el «Año del último número usado».",
+        porDefecto: "0",
+      },
+      inicio_anio: {
+        tipo: "entero",
+        nombre: "Año del último número usado",
+        min: 0,
+        max: 2100,
+        unidad: "año",
+        ayuda: "Solo con reinicio anual: el «Último número ya usado» rige únicamente en este año; los demás años empiezan en 1. 0 = no se aplica.",
         porDefecto: "0",
       },
     },
