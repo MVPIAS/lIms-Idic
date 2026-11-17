@@ -51,6 +51,7 @@ import {
   filaInspeccion,
   filasMetodos,
   modalidadInicial,
+  modalidadEfectiva,
   modalidadSugerida,
   origenModalidad,
   tieneRequisito,
@@ -731,7 +732,7 @@ export class PlantillaRenderService {
     const unaMuestra = ctx.muestras.length === 1 ? ctx.muestras[0] : null;
     return {
       modalidad: modalidadInicial(cfg, ctx.paraInforme),
-      modalidadOrigen: origenModalidad(cfg),
+      modalidadOrigen: origenModalidad(cfg, ctx.paraInforme),
       /** La que corresponde a los requisitos, aunque la plantilla fije otra (F072). */
       modalidadPorRequisitos: modalidadSugerida(ctx.paraInforme),
       conRequisito: ctx.paraInforme.filter(tieneRequisito).length,
@@ -801,10 +802,14 @@ export class PlantillaRenderService {
     const version = opciones.version !== undefined ? opciones.version : await this.versionVigente(plantilla.id);
     const ctx = await this.contexto(otId, tenantId, opciones.filtro ?? null);
     const cfg = version ? configEfectiva(plantilla.tipo, version.configInforme) : await this.configDePlantilla(plantilla.id, plantilla.tipo);
-    const modalidad = opciones.modalidad ?? modalidadInicial(cfg, ctx.paraInforme);
+    const pedida = opciones.modalidad ?? modalidadInicial(cfg, ctx.paraInforme);
+    // Todos «solo resultado» (SAL-07): sin veredicto que informar.
+    const modalidad = modalidadEfectiva(pedida, ctx.paraInforme);
     const datosDoc = opciones.datos ?? {};
     const est = armarInforme(ctx.paraInforme, cfg, modalidad);
     const avisos: string[] = [];
+    if (pedida !== modalidad)
+      avisos.push("Todos los ensayos se informan «solo resultado»: el documento sale como informe de solo resultados, sin requisito ni Cumple / No cumple.");
 
     // 1. Cuerpo: el de la plantilla; si es una cáscara, el de su tipo + aviso.
     let cuerpo = (version ? version.cuerpoHtml : plantilla.cuerpoHtml)?.trim() ?? "";

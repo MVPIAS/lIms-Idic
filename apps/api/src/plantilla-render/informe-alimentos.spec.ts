@@ -1,5 +1,5 @@
 import { configEfectiva } from "./config-informe";
-import { armarInforme, modalidadInicial, modalidadSugerida, origenModalidad, type ResultadoParaInforme } from "./filas-informe";
+import { armarInforme, modalidadEfectiva, modalidadInicial, modalidadSugerida, origenModalidad, todosSoloResultado, type ResultadoParaInforme } from "./filas-informe";
 import { bloqueResultados } from "./bloques-informe";
 import { antecedentesInforme, datosRecepcionInforme, NO_APLICA } from "./antecedentes-informe";
 
@@ -54,6 +54,32 @@ describe("Reporte I.V.C. de Alimentos · Análisis · Mín. · Máx. · Otros ·
     const pa = [r({ id: "c", ensayo: "Salmonella", requisito: "Ausencia en 25 g", tipoDato: "atributo", valorTexto: "Ausencia", veredicto: "cumple" })];
     const h = bloqueResultados(armarInforme(pa, IVC_ALI, "cumplimiento"), IVC_ALI);
     expect(h).toMatch(/<td class="num">—<\/td><td class="num">—<\/td><td>Ausencia en 25 g<\/td>/);
+  });
+});
+
+describe("LQA · solo resultados, sin Cumple / No cumple (SAL-07)", () => {
+  const lqa = [
+    r({ id: "q1", ensayo: "Acidez", limiteSup: "1,5", valorNumerico: 0.8, unidad: "%", veredicto: "informativo", evaluacion: "solo_resultado" }),
+    r({ id: "q2", ensayo: "Índice de peróxido", limiteSup: "10", valorNumerico: 4, unidad: "meq/kg", veredicto: "informativo", evaluacion: "solo_resultado" }),
+  ];
+  it("aunque el I.V.C. fije cumplimiento, sale sin requisito ni veredicto", () => {
+    expect(todosSoloResultado(lqa)).toBe(true);
+    const m = modalidadInicial(IVC_ALI, lqa);
+    expect(m).toBe("solo_resultados");
+    const html = bloqueResultados(armarInforme(lqa, IVC_ALI, m), IVC_ALI);
+    expect(cabeceras(html)).toEqual(["Análisis", "Resultado"]);
+    expect(html).not.toMatch(/Cumple|Informativo/);
+  });
+  it("quien emite pide cumplimiento: igual sale solo resultados", () => {
+    expect(modalidadEfectiva("cumplimiento", lqa)).toBe("solo_resultados");
+    expect(origenModalidad(IVC_ALI, lqa)).toBe("sugerida");
+    expect(origenModalidad(IVC_ALI, filas)).toBe("plantilla");
+  });
+  it("si algún ensayo sí tiene condición, se respeta el cumplimiento", () => {
+    const mixto = [...lqa, r({ id: "q3", ensayo: "Humedad", limiteSup: "14", valorNumerico: 12, veredicto: "cumple" })];
+    expect(todosSoloResultado(mixto)).toBe(false);
+    expect(modalidadEfectiva("cumplimiento", mixto)).toBe("cumplimiento");
+    expect(todosSoloResultado([])).toBe(false);
   });
 });
 
