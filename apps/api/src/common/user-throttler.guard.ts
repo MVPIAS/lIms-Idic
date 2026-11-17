@@ -49,3 +49,12 @@ export function claveLimitador(req: Record<string, any>): string {
   if (sub) return `user:${sub}`;
   return `ip:${req?.ip ?? req?.ips?.[0] ?? "desconocida"}`;
 }
+
+/**
+ * Solo para recorridos y guiones de verificación en local: THROTTLE_DESACTIVADO=true
+ * apaga el rate limiting (los guiones inician decenas de sesiones por minuto y el
+ * login admite 5, o 30 con ACCESOS_DEMO). Nunca con NODE_ENV=production.
+ */
+export function throttleDesactivado(env: Record<string, string | undefined> = process.env): boolean {
+  return env.THROTTLE_DESACTIVADO === "true" && env.NODE_ENV !== "production";
+}

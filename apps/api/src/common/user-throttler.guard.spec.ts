@@ -26,3 +26,16 @@ describe("limitador de peticiones · clave (revisión de seguridad r3)", () => {
     expect(claveLimitador({ headers: {}, ip })).toBe(`ip:${ip}`);
   });
 });
+
+describe("throttleDesactivado (solo local)", () => {
+  const { throttleDesactivado } = require("./user-throttler.guard");
+  it("se apaga con THROTTLE_DESACTIVADO=true fuera de producción", () => {
+    expect(throttleDesactivado({ THROTTLE_DESACTIVADO: "true", NODE_ENV: "development" })).toBe(true);
+    expect(throttleDesactivado({ THROTTLE_DESACTIVADO: "true" })).toBe(true);
+  });
+  it("nunca en producción ni sin la variable", () => {
+    expect(throttleDesactivado({ THROTTLE_DESACTIVADO: "true", NODE_ENV: "production" })).toBe(false);
+    expect(throttleDesactivado({ NODE_ENV: "development" })).toBe(false);
+    expect(throttleDesactivado({ THROTTLE_DESACTIVADO: "1" })).toBe(false);
+  });
+});
