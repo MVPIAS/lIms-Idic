@@ -219,14 +219,16 @@ export function faltantesRegistro(d: DatosMuestreo, fotos: number, ahora = new D
     case "planilla_nch44":
       if (vacio(d.identificacionLote)) f.push("identificación del lote");
       loteYMuestra();
-      if (!d.plan && !d.lineaMovil) f.push("plan de muestreo NCh 44 (o marcar línea móvil con su plan)");
+      if (!d.plan && !d.lineaMovil) f.push("plan de muestreo NCh 44 (o marcar línea móvil, que no lleva plan)");
       break;
   }
   if (d.tamanoLote != null && d.tamanoMuestra != null && d.tamanoMuestra > d.tamanoLote)
     f.push(`un tamaño de muestra (${d.tamanoMuestra}) no mayor que el lote (${d.tamanoLote})`);
   if (d.plan && d.tamanoMuestra != null && d.tamanoMuestra !== d.plan.n)
     f.push(`que el tamaño de muestra (${d.tamanoMuestra}) coincida con el n del plan (${d.plan.n})`);
-  if (d.lineaMovil && vacio(d.lineaMovilPlan)) f.push("el plan aplicado en la línea móvil (SAC-PG01-IT10 no aplica)");
+  // BPCH-30 (respuesta IDIC 17-11-2026): en la línea móvil (camión fábrica) no
+  // se aplica ningún plan de muestreo; el texto «lineaMovilPlan» queda opcional
+  // como observación.
   return f;
 }
 
