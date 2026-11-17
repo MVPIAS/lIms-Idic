@@ -79,7 +79,7 @@ export const NAV: SeccionNav[] = [
       { href: "/facturas", label: "Facturas", icon: "📄", perm: "factura.ver" },
       { href: "/pagos", label: "Pagos", icon: "💵", perm: "factura.ver" },
       { href: "/notas-credito", label: "Notas de crédito", icon: "🧾", perm: "factura.ver" },
-      { href: "/proveedores", label: "Proveedores", icon: "🚚", perm: "compra.ver" },
+      { href: "/proveedores", label: "Proveedores", icon: "🚚", perm: "proveedor.ver" },
       { href: "/ordenes-compra", label: "Órdenes de compra", icon: "🛒", perm: "compra.ver", claves: "oc abastecimiento" },
       { href: "/viaticos", label: "Viáticos", icon: "✈", perm: "factura.ver" },
     ],

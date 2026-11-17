@@ -51,15 +51,16 @@ const ProveedorCreate = z.object({
   condicionPago: z.string().max(40).optional(),
   estado: z.enum(["habilitado", "en_evaluacion", "inhabilitado"]).default("habilitado"),
 });
-// Proveedores = compras (Abastecimiento): `compra.ver` / `compra.gestionar`
-// (align_correcciones_manuales.sql). Antes usaban `factura.*`, lo que obligaba a
-// dar a Abastecimiento el permiso de emitir facturas.
+// Maestro de proveedores: permisos propios `proveedor.ver` / `proveedor.gestionar`
+// (align_tercer_envio_comercial.sql). COM-18 quitó las órdenes de compra
+// (`compra.*`, solo SUPERADMIN), pero el maestro sigue en uso (insumos y
+// servicio externo de Metrología) para Administración y Abastecimiento.
 @ApiTags("proveedores") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("proveedores")
 @RequierePermisoCrud({
-  ver: "compra.ver",
-  crear: "compra.gestionar",
-  editar: "compra.gestionar",
-  eliminar: "compra.gestionar",
+  ver: "proveedor.ver",
+  crear: "proveedor.gestionar",
+  editar: "proveedor.gestionar",
+  eliminar: "proveedor.gestionar",
 })
 export class ProveedorController extends BaseCrudController {
   protected createSchema = ProveedorCreate;
