@@ -98,7 +98,7 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
         <Campo l="Formato" v={cot.formato} />
         <Campo l="Emisión" v={fechaDia(cot.fechaEmision)} />
         <Campo l="Válida hasta" v={fechaDia(cot.validaHasta ?? cot.expiraAt)} />
-        <Campo l="Moneda" v={mon === "USD" ? `US$ · dólar ${cot.dolarValor} (${fechaDia(cot.dolarFecha)})` : mon === "CLP" ? "CLP" : `${mon} · moneda histórica (dato migrado, sin convertir)`} />
+        <Campo l="Moneda" v={mon === "USD" ? `US$ · dólar ${cot.dolarValor} (${fechaDia(cot.dolarFecha)})` : mon === "CLP" ? (cot.dolarObservado != null ? `CLP · dólar observado ${Number(cot.dolarObservado).toLocaleString("es-CL", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${cot.dolarObservadoFecha ? ` (${fechaDia(cot.dolarObservadoFecha)})` : ""}` : "CLP") : `${mon} · moneda histórica (dato migrado, sin convertir)`} />
         {cot.dolarMotivo && <Campo l="Motivo cambio de dólar" v={cot.dolarMotivo} full />}
         <Campo l="Forma de pago" v={etiquetaDe(params.forma_pago, cot.formaPago)} />
         <Campo l="Medio de envío" v={etiquetaDe(params.medio_envio, cot.medioEnvio)} />

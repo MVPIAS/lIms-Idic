@@ -104,6 +104,9 @@ const Cabecera = {
   dolarValor: z.number().positive().nullable().optional(),
   dolarFecha: fecha.nullable().optional(),
   dolarMotivo: z.string().max(500).nullable().optional(),
+  // COM-38: dólar observado del día (CLP por USD) para convertir ensayos con precio en USD en una cotización en pesos.
+  dolarObservado: z.number().positive("El dólar observado debe ser mayor que 0.").max(100000).nullable().optional(),
+  dolarObservadoFecha: fecha.nullable().optional(),
   referencia: z.string().max(300).nullable().optional(),
   descripcionTecnica: z.string().max(20000).nullable().optional(),
   condicionesAdicionales: z.string().max(2000, "Condiciones adicionales: máximo 2000 caracteres.").nullable().optional(),
@@ -276,8 +279,12 @@ export class CotizacionController {
     @Query("fecha") fechaQ: string | undefined,
     @Req() req: any,
     @Query("moneda") monedaQ?: string,
+    @Query("dolarObservado") dolarObsQ?: string,
   ) {
     const uuid = z.string().uuid();
+    // COM-38: dólar observado (CLP por USD) para convertir los precios en USD en una cotización en pesos.
+    const dolarObs = dolarObsQ ? Number(String(dolarObsQ).replace(",", ".")) : null;
+    if (dolarObsQ && !(dolarObs! > 0)) throw new BadRequestException("dolarObservado debe ser un número mayor que 0.");
     // Frente f6: moneda de la cotización (CLP por defecto); el precio vuelve en la moneda de su lista.
     const moneda = monedaQ ? zMoneda.safeParse(monedaQ) : null;
     if (moneda && !moneda.success) throw new BadRequestException(moneda.error.issues[0].message);
@@ -286,7 +293,7 @@ export class CotizacionController {
     if (ids.length > 200) throw new BadRequestException("Máximo 200 ensayos por consulta.");
     if (ids.some((x) => !uuid.safeParse(x).success)) throw new BadRequestException("ids: lista de uuid separados por coma");
     if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
-    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined, moneda?.success ? moneda.data : "CLP");
+    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined, moneda?.success ? moneda.data : "CLP", dolarObs);
   }
 
   /**

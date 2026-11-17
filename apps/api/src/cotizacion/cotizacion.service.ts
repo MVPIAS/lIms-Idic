@@ -25,7 +25,7 @@ import {
   type ResultadoValidez,
   type ReglaValidez,
 } from "./validez";
-import { elegirPrecioCliente, itemsListaVigente, precioParaCotizacion, textoOrigenPrecio } from "../lista-precio/precio-lista";
+import { elegirPrecioCliente, itemsListaVigente, precioParaCotizacion, textoConversionUsd, textoOrigenPrecio } from "../lista-precio/precio-lista";
 import { leerCondicionesCliente } from "../lista-precio/condiciones-cliente";
 import { monedaDe, redondearMoneda } from "../common/moneda";
 import { calcularOpiPendiente, origenDesdeAceptacion, valorInicialOt } from "../ot/reglas-ot";
@@ -139,6 +139,9 @@ export interface CabeceraCotizacion {
   dolarValor?: number | null;
   dolarFecha?: string | Date | null;
   dolarMotivo?: string | null;
+  /** COM-38: dólar observado (CLP por USD) y su fecha, en una cotización en pesos. */
+  dolarObservado?: number | null;
+  dolarObservadoFecha?: string | Date | null;
   referencia?: string | null;
   descripcionTecnica?: string | null;
   condicionesAdicionales?: string | null;
@@ -477,7 +480,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     moneda: string,
     dolar: number | null,
     existentes: Existentes | undefined,
-    ctx: { regla: ReglaValidez; fecha: string; clienteId: string; origenes?: Map<string, string | null> },
+    ctx: { regla: ReglaValidez; fecha: string; clienteId: string; origenes?: Map<string, string | null>; dolarObservado?: number | null; dolarObservadoFecha?: string | null },
   ) {
     const ids = lineas.map((l) => l.catEnsayoId).filter((x): x is string => Boolean(x));
     const ensayos = ids.length
@@ -500,6 +503,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       let precioFicha: number | null = null;
       let fuente: string | undefined;
       let origen: string | null = null;
+      let conversion: { precioUsd: number; tipoCambio: number } | null = null;
       if (l.catEnsayoId) {
         const e = porId.get(l.catEnsayoId);
         if (!e) throw new BadRequestException(`Línea ${i + 1}: el ensayo ${l.catEnsayoId} no existe en el catálogo.`);
@@ -511,13 +515,20 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         if (elegido?.origen === "lista_cliente") fuente = `la lista propia del cliente (${elegido.lista!.nombre}, ${elegido.lista!.itemCodigo}, ${elegido.moneda})`;
         if (elegido?.descuentoPct) fuente = `${fuente ?? "su ficha de costos"} con el descuento especial del cliente`;
         if (elegido) {
-          const conv = precioParaCotizacion(elegido, moneda, dolar, e.codigo);
+          const conv = precioParaCotizacion(elegido, moneda, dolar, e.codigo, { dolarObservado: ctx.dolarObservado });
           if (conv.error !== undefined) {
             // Una línea ya cotizada que conserva su precio no se bloquea (precio-ficha.ts).
             const previo = existentes?.ensayos.get(e.id);
             const conserva = previo != null && (l.precioUnitario == null || Math.abs(Number(l.precioUnitario) - previo) < 0.005);
             if (!conserva) throw new BadRequestException(`Línea ${i + 1}: ${conv.error}`);
-          } else precioFicha = conv.precio > 0 ? conv.precio : null;
+          } else {
+            precioFicha = conv.precio > 0 ? conv.precio : null;
+            // COM-38: precio en USD convertido con el dólar observado: queda en la línea.
+            if (conv.conversion) {
+              conversion = conv.conversion;
+              origen = `${origen ?? "Precio en USD"} · ${textoConversionUsd(conv.conversion, ctx.dolarObservadoFecha)}`;
+            }
+          }
         }
       }
       // EP-00 2.2 (BL-149): el ensayo se valoriza con la lista vigente o su ficha; sin ensayo, solo gastos tipificados.
@@ -530,6 +541,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         origen = ctx.origenes?.get(l.catEnsayoId) ?? "Precio ya cotizado (se conserva)";
       // Ensayo sin precio en lista ni ficha: el precio manual guarda su motivo como origen (también al cambiarlo).
       if (r.manual) origen = `Precio manual (sin precio en lista ni ficha): ${l.motivoPrecioManual!.trim()}`;
+      // La conversión solo vale si la línea quedó con el precio convertido.
+      const usd = conversion && precioFicha != null && Math.abs(Number(r.precio) - precioFicha) < 0.005 ? conversion : null;
       return {
         tipo: l.catEnsayoId ? "producto" : l.tipo ?? "producto",
         descripcion: descripcion ?? null,
@@ -552,6 +565,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         instrumentoPuntos: l.instrumentoPuntos?.trim() || null,
         instrumentoSentido: l.instrumentoSentido ?? null,
         precioOrigen: l.catEnsayoId ? origen?.slice(0, 300) ?? null : null,
+        precioUsd: usd ? usd.precioUsd : null,
+        tipoCambio: usd ? usd.tipoCambio : null,
         manual: r.manual === true,
       };
     });
@@ -561,7 +576,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * Precio de cada ensayo para un cliente (vista previa del formulario de la
    * cotización; misma regla que al guardar). GET /cotizaciones/precios-ensayo.
    */
-  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string, monedaCot?: string) {
+  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string, monedaCot?: string, dolarObservado?: number | null) {
     const moneda = monedaDe(monedaCot);
     const fechaEmision = isoFecha(soloFecha(fecha ?? hoyEnChile()));
     const validez = await this.calcularValidezPara(tenantId, clienteId, null, fechaEmision);
@@ -584,12 +599,15 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         ensayos.map((e) => {
           const p = elegirPrecioCliente(listaCliente.get(e.id), lista.get(e.id), e.precio != null ? Number(e.precio) : null, validez.regla, cfg.precioEjercito, cond.descuentoPct);
           // Frente f6: el precio va en la moneda de su lista; `bloqueo` = no se puede cotizar en la moneda pedida.
-          const bloqueo = p && p.moneda === "USD" && moneda === "CLP" ? precioParaCotizacion(p, moneda, null, e.codigo).error ?? null : null;
+          // COM-38: con el dólar observado se convierte (conversion = precio en USD y tipo de cambio); sin él, se pide.
+          const conv = p && p.moneda === "USD" && moneda === "CLP" ? precioParaCotizacion(p, moneda, null, e.codigo, { dolarObservado }) : null;
+          const bloqueo = conv?.error ?? null;
+          const conversion = conv && conv.error === undefined ? { ...conv.conversion!, precioClp: conv.precio } : null;
           return [
             e.id,
             p
-              ? { precio: p.precio, moneda: p.moneda, origen: p.origen, columna: p.columna ?? null, lista: p.lista ?? null, bloqueo, texto: textoOrigenPrecio(p), descuentoPct: p.descuentoPct ?? null, precioSinDescuento: p.precioSinDescuento ?? null }
-              : { precio: null, moneda: null, origen: null, columna: null, lista: null, bloqueo: null, texto: null, descuentoPct: null, precioSinDescuento: null },
+              ? { precio: p.precio, moneda: p.moneda, origen: p.origen, columna: p.columna ?? null, lista: p.lista ?? null, bloqueo, conversion, texto: textoOrigenPrecio(p), descuentoPct: p.descuentoPct ?? null, precioSinDescuento: p.precioSinDescuento ?? null }
+              : { precio: null, moneda: null, origen: null, columna: null, lista: null, bloqueo: null, conversion: null, texto: null, descuentoPct: null, precioSinDescuento: null },
           ];
         }),
       ),
@@ -656,7 +674,18 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const fechaEmision = soloFecha(data.fechaEmision ?? hoyEnChile());
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision);
     if (data.oportunidadId) await validarOportunidad(this.prisma, tenantIdFromJWT, data.clienteId, data.oportunidadId);
-    const { lineas, manuales } = separarManuales(await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, { regla: validez.regla, fecha: isoFecha(fechaEmision), clienteId: data.clienteId }));
+    // COM-38: en pesos, el dólar observado del día convierte los ensayos con precio en USD.
+    const dolarObs = moneda === "CLP" && Number(data.dolarObservado) > 0 ? Number(data.dolarObservado) : null;
+    const dolarObsFecha = dolarObs ? isoFecha(soloFecha(data.dolarObservadoFecha ?? fechaEmision)) : null;
+    const { lineas, manuales } = separarManuales(
+      await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, {
+        regla: validez.regla,
+        fecha: isoFecha(fechaEmision),
+        clienteId: data.clienteId,
+        dolarObservado: dolarObs,
+        dolarObservadoFecha: dolarObsFecha,
+      }),
+    );
     const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0), moneda);
     // Número real (EP-00 2.1 · «2026-14324»), correlativo atómico por tenant.
     const codigo = await generarNumeroCotizacion(this.prisma, tenantIdFromJWT, fechaEmision);
@@ -678,6 +707,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         moneda,
         dolarValor: dolar,
         dolarFecha: moneda === "USD" ? soloFecha(data.dolarFecha ?? fechaEmision) : null,
+        dolarObservado: dolarObs,
+        dolarObservadoFecha: dolarObsFecha ? soloFecha(dolarObsFecha) : null,
         referencia: data.referencia ?? null,
         descripcionTecnica: data.descripcionTecnica ?? null,
         condicionesAdicionales: data.condicionesAdicionales ?? null,
@@ -751,6 +782,14 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (cambiaDolar && !resto.dolarMotivo?.trim())
       throw new BadRequestException("El valor del dólar quedó congelado al emitir: indique el motivo del cambio (dolarMotivo).");
     if (moneda === "CLP") dolar = null;
+    // COM-38: dólar observado (solo en pesos). Si cambia, las líneas en USD se vuelven a convertir.
+    const obsActual = (actual as any).dolarObservado != null ? Number((actual as any).dolarObservado) : null;
+    const dolarObs =
+      moneda !== "CLP" ? null : resto.dolarObservado !== undefined ? (Number(resto.dolarObservado) > 0 ? Number(resto.dolarObservado) : null) : obsActual;
+    const dolarObsFecha = dolarObs
+      ? isoFecha(soloFecha(resto.dolarObservadoFecha ?? (actual as any).dolarObservadoFecha ?? actual.fechaEmision ?? hoyEnChile()))
+      : null;
+    const cambiaObs = dolarObs !== obsActual;
 
     const centroCostoId = resto.centroCostoId !== undefined ? resto.centroCostoId : actual.centroCostoId;
     const validez = await this.calcularValidezPara(actual.tenantId, actual.clienteId, centroCostoId, actual.fechaEmision);
@@ -773,6 +812,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       moneda,
       dolarValor: dolar,
       dolarFecha: moneda === "USD" ? (resto.dolarFecha ? soloFecha(resto.dolarFecha) : actual.dolarFecha ?? actual.fechaEmision) : null,
+      dolarObservado: dolarObs,
+      dolarObservadoFecha: dolarObsFecha ? soloFecha(dolarObsFecha) : null,
       ...(cambiaDolar ? { dolarMotivo: resto.dolarMotivo } : {}),
       ...conservarValidez,
       ...(estado ? { estado } : {}),
@@ -785,7 +826,14 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       // Frente f6: si cambia la moneda, los precios guardados (en la moneda anterior) no se conservan: se recalculan.
       const mismaMoneda = monedaDe(actual.moneda) === moneda;
       const existentes: Existentes = {
-        ensayos: new Map(mismaMoneda ? actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, Number(x.precioUnitario)]) : []),
+        // COM-38: si cambia el dólar observado, las líneas convertidas desde USD no conservan su precio.
+        ensayos: new Map(
+          mismaMoneda
+            ? actual.lineas
+                .filter((x: any) => x.catEnsayoId && !(cambiaObs && x.precioUsd != null))
+                .map((x: any) => [x.catEnsayoId, Number(x.precioUnitario)])
+            : [],
+        ),
         libres: new Set(actual.lineas.filter((x: any) => !x.catEnsayoId).map((x: any) => claveLibre(x.tipo, x.descripcion, Number(x.precioUnitario)))),
       };
       const origenes = new Map<string, string | null>(actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, x.precioOrigen ?? null]));
@@ -795,6 +843,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
           fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
           clienteId: actual.clienteId,
           origenes,
+          dolarObservado: dolarObs,
+          dolarObservadoFecha: dolarObsFecha,
         }),
       );
       const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0), moneda);
@@ -835,6 +885,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         regla: validez.regla,
         fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
         clienteId: actual.clienteId,
+        // COM-38: el dólar observado de la cotización convierte los ensayos en USD.
+        dolarObservado: moneda === "CLP" && (actual as any).dolarObservado != null ? Number((actual as any).dolarObservado) : null,
+        dolarObservadoFecha: (actual as any).dolarObservadoFecha ? isoFecha(soloFecha((actual as any).dolarObservadoFecha)) : null,
       }),
     );
     const base = actual.lineas.length ? Math.max(...actual.lineas.map((l: any) => Number(l.orden ?? 0))) : 0;
