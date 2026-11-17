@@ -19,6 +19,7 @@
  */
 import { hoyCl } from "../ot/plazos";
 import { cantidadPorCaptura } from "./conversion";
+import { modoConsumo, ordenarLotesPorBodega, type ModoConsumo } from "./bodegas";
 
 type Db = { $queryRawUnsafe: <T = unknown>(q: string, ...p: unknown[]) => Promise<T>; $executeRawUnsafe: (q: string, ...p: unknown[]) => Promise<number> };
 type DbTx = Db & { $transaction: <T>(fn: (tx: Db) => Promise<T>) => Promise<T> };
@@ -79,16 +80,88 @@ async function necesidades(db: Db, tenantId: string, catMetodoId: string, determ
   }));
 }
 
-const SQL_DISPONIBLE = `SELECT COALESCE(SUM(cantidad_actual), 0)::float AS d FROM lote_consumible
-  WHERE consumible_id = $1::uuid AND tenant_id = $2::uuid AND cantidad_actual > 0 AND (fecha_vencimiento IS NULL OR fecha_vencimiento >= $3::date)`;
+/** Unidad del laboratorio de una cat_familia (mismo criterio que planillas-ot.ts). */
+const FAMILIA_DE_UNIDAD = `f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))`;
+
+/**
+ * Laboratorios a cuyas sub-bodegas puede cargarse un consumo (S4, bodegas): el
+ * del método en el catálogo y el responsable de la OT de la muestra (o de la OT
+ * indicada). Vacío si no se puede saber.
+ */
+export async function laboratoriosDelConsumo(
+  db: Db,
+  p: { tenantId: string; catMetodoId?: string | null; muestraId?: string | null; otId?: string | null },
+): Promise<string[]> {
+  if (!p.catMetodoId && !p.muestraId && !p.otId) return [];
+  const filas = await db
+    .$queryRawUnsafe<{ id: string }[]>(
+      `SELECT u.id FROM cat_metodo cm
+         JOIN cat_ensayo ce ON ce.id = cm.ensayo_id
+         JOIN cat_familia f ON f.id = ce.familia_id AND f.codsucdel IS NOT NULL
+         JOIN unidad u ON u.tenant_id = $1::uuid AND ${FAMILIA_DE_UNIDAD}
+        WHERE cm.id = $2::uuid
+       UNION
+       SELECT o.unidad_principal FROM orden_trabajo o
+        WHERE o.tenant_id = $1::uuid AND o.unidad_principal IS NOT NULL
+          AND o.id = COALESCE($4::uuid, (SELECT m.ot_id FROM muestra m WHERE m.id = $3::uuid))`,
+      p.tenantId,
+      p.catMetodoId ?? null,
+      p.muestraId ?? null,
+      p.otId ?? null,
+    )
+    .catch(() => [] as { id: string }[]);
+  return [...new Set(filas.map((f) => f.id).filter(Boolean))];
+}
+
+export async function leerModoConsumo(db: Db, tenantId: string): Promise<ModoConsumo> {
+  const [f] = await db
+    .$queryRawUnsafe<{ valor: string | null }[]>(
+      `SELECT valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'consumibles' AND codigo = 'bodega_consumo' AND activo`,
+      tenantId,
+    )
+    .catch(() => [] as { valor: string | null }[]);
+  return modoConsumo(f?.valor);
+}
+
+/**
+ * Lotes vigentes con stock de un consumible que puede usar un consumo, en el
+ * orden en que se descuentan: bodega (sub-bodega del laboratorio, central) y,
+ * dentro de cada una, FIFO de caducidad.
+ */
+export async function lotesParaConsumo(
+  db: Db,
+  p: { tenantId: string; consumibleId: string; labs: string[]; modo: ModoConsumo; bloquear?: boolean },
+): Promise<{ id: string; numero_lote: string; cantidad_actual: string }[]> {
+  const filas = await db.$queryRawUnsafe<{ id: string; numero_lote: string; cantidad_actual: string; bodega_tipo: string | null; bodega_unidad: string | null }[]>(
+    `SELECT l.id, l.numero_lote, l.cantidad_actual::text, b.tipo AS bodega_tipo, b.unidad_id AS bodega_unidad FROM lote_consumible l
+       LEFT JOIN bodega b ON b.id = l.bodega_id
+      WHERE l.consumible_id = $1::uuid AND l.tenant_id = $2::uuid AND l.cantidad_actual > 0 AND (l.fecha_vencimiento IS NULL OR l.fecha_vencimiento >= $3::date)
+      ORDER BY l.fecha_vencimiento ASC NULLS LAST, l.fecha_recepcion ASC NULLS LAST, l.numero_lote${p.bloquear ? `
+      FOR UPDATE OF l` : ""}`,
+    p.consumibleId,
+    p.tenantId,
+    hoyCl(),
+  );
+  return ordenarLotesPorBodega(
+    filas.map((f) => ({ ...f, tipo: (f.bodega_tipo as "central" | "laboratorio" | null) ?? null, unidadId: f.bodega_unidad ?? null })),
+    p.labs,
+    p.modo,
+  );
+}
 
 /** Faltantes de stock para capturar este ensayo (vacío = alcanza todo). */
-export async function faltantesDeCaptura(db: Db, p: { tenantId: string; catMetodoId: string | null; determinaciones: number }): Promise<Faltante[]> {
+export async function faltantesDeCaptura(
+  db: Db,
+  p: { tenantId: string; catMetodoId: string | null; determinaciones: number; muestraId?: string | null },
+): Promise<Faltante[]> {
   if (!p.catMetodoId) return [];
   const out: Faltante[] = [];
+  const labs = await laboratoriosDelConsumo(db, { tenantId: p.tenantId, catMetodoId: p.catMetodoId, muestraId: p.muestraId ?? null });
+  const modo = await leerModoConsumo(db, p.tenantId);
   for (const n of await necesidades(db, p.tenantId, p.catMetodoId, p.determinaciones)) {
-    const [d] = await db.$queryRawUnsafe<{ d: number }[]>(SQL_DISPONIBLE, n.consumibleId, p.tenantId, hoyCl());
-    if (Number(d?.d ?? 0) + 1e-9 < n.necesario) out.push({ consumible: `${n.codigo} · ${n.nombre}`, necesario: n.necesario, disponible: Number(d?.d ?? 0), unidad: n.unidad });
+    const lotes = await lotesParaConsumo(db, { tenantId: p.tenantId, consumibleId: n.consumibleId, labs, modo });
+    const d = lotes.reduce((a, l) => a + Math.max(0, Number(l.cantidad_actual) || 0), 0);
+    if (d + 1e-9 < n.necesario) out.push({ consumible: `${n.codigo} · ${n.nombre}`, necesario: n.necesario, disponible: d, unidad: n.unidad });
   }
   return out;
 }
@@ -145,18 +218,16 @@ export async function descontarFifo(
     automatico: boolean;
     motivo: string;
     usuarioId: string | null;
+    /** Laboratorios del consumo y modo de bodega (si no se dan, se leen). */
+    labs?: string[];
+    modo?: ModoConsumo;
   },
 ): Promise<{ lotes: string[] } | { disponible: number }> {
+  // S4 · bodegas: el consumo sale de la sub-bodega del laboratorio del ensayo (parámetro consumibles.bodega_consumo).
+  const labs = p.labs ?? (await laboratoriosDelConsumo(db, { tenantId: p.tenantId, catMetodoId: p.catMetodoId, muestraId: p.muestraId }));
+  const modo = p.modo ?? (await leerModoConsumo(db, p.tenantId));
   return db.$transaction(async (tx) => {
-    const filas = await tx.$queryRawUnsafe<{ id: string; numero_lote: string; cantidad_actual: string }[]>(
-      `SELECT id, numero_lote, cantidad_actual::text FROM lote_consumible
-        WHERE consumible_id = $1::uuid AND tenant_id = $2::uuid AND cantidad_actual > 0 AND (fecha_vencimiento IS NULL OR fecha_vencimiento >= $3::date)
-        ORDER BY fecha_vencimiento ASC NULLS LAST, fecha_recepcion ASC NULLS LAST, numero_lote
-        FOR UPDATE`,
-      p.consumibleId,
-      p.tenantId,
-      hoyCl(),
-    );
+    const filas = await lotesParaConsumo(tx, { tenantId: p.tenantId, consumibleId: p.consumibleId, labs, modo, bloquear: true });
     const lotes = filas.map((l) => ({ id: l.id, numero: l.numero_lote, cantidad: Number(l.cantidad_actual) }));
     const reparto = repartoFifo(lotes, p.cantidad);
     if (!reparto) return { disponible: lotes.reduce((a, l) => a + l.cantidad, 0) };
@@ -214,6 +285,8 @@ export async function descontarPorCaptura(
   );
   if (ya?.n && !p.repeticion) return { descontados: [], faltantes: [] };
   const lista = await necesidades(db, p.tenantId, p.catMetodoId, p.determinaciones);
+  const labs = await laboratoriosDelConsumo(db, { tenantId: p.tenantId, catMetodoId: p.catMetodoId, muestraId: p.muestraId });
+  const modo = await leerModoConsumo(db, p.tenantId);
   const descontados: Descontado[] = [];
   const faltantes: Faltante[] = [];
   for (const n of lista) {
@@ -228,6 +301,8 @@ export async function descontarPorCaptura(
       automatico: true,
       motivo: `Descuento automático al capturar · ${p.referencia}`,
       usuarioId: p.usuarioId,
+      labs,
+      modo,
     });
     if ("lotes" in r) {
       descontados.push({ consumible, cantidad: n.necesario, unidad: n.unidad, lotes: r.lotes });

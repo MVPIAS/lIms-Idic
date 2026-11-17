@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { fmtN, fmtG } from "@/lib/metrologia";
-import { numeroOVacio } from "@/lib/metrologiaFicha";
+import { fmtN, fmtG, LAB_NOMBRE } from "@/lib/metrologia";
+import { numeroOVacio, laboratoriosDe, LABS_METROLOGIA } from "@/lib/metrologiaFicha";
 import DataTable, { type DataColumn } from "@/components/DataTable";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { toast } from "@/components/ui/feedback";
@@ -75,6 +75,7 @@ export default function MetrologiaConfigPage() {
     },
     { key: "tipo", label: "Tipo", value: (p) => (p.tipo === "auxiliar" ? "Auxiliar" : "Patrón") },
     { key: "magnitud", label: "Magnitud" },
+    { key: "laboratorios", label: "Laboratorios", value: (p) => laboratoriosDe(p).join(", ") || "Todos" },
     { key: "serie", label: "N° de serie" },
     { key: "n_certificado", label: "Certificado" },
     { key: "emisor", label: "Emisor" },
@@ -126,6 +127,8 @@ export default function MetrologiaConfigPage() {
             acciones={editar ? (p) => <button className="btn sm" onClick={() => setEditPat({
               ...p, vence: p.vence?.slice(0, 10) ?? "", ultima_calibracion: p.ultima_calibracion?.slice(0, 10) ?? "",
               rango_min: p.rango_min == null ? "" : String(p.rango_min).replace(".", ","), rango_max: p.rango_max == null ? "" : String(p.rango_max).replace(".", ","),
+              labs: laboratoriosDe(p),
+              smp: Object.fromEntries((["a", "b", "c"] as const).map((k) => [k, p.coeficientes?.[k] == null ? "" : String(p.coeficientes[k]).replace(".", ",")])),
               corr: Object.fromEntries((["temp", "hum", "pres"] as const).map((k) => [k, {
                 error: p.correcciones?.[k]?.error == null ? "" : String(p.correcciones[k].error).replace(".", ","),
                 U: p.correcciones?.[k]?.U == null ? "" : String(p.correcciones[k].U).replace(".", ","),
@@ -168,6 +171,32 @@ export default function MetrologiaConfigPage() {
                       <small style={{ color: "var(--muted)" }}>Deje vacío lo que el equipo no mide. Las calibraciones informan la condición corregida con esta U.</small>
                     </fieldset>
                   )}
+                  <fieldset style={{ gridColumn: "1 / -1", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", margin: 0 }}>
+                    <legend style={{ fontSize: 12, color: "var(--muted)", padding: "0 4px" }}>Laboratorios que lo usan</legend>
+                    <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                      {LABS_METROLOGIA.map((l) => (
+                        <label key={l} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                          <input type="checkbox" checked={(editPat.labs ?? []).includes(l)}
+                            onChange={(e) => setEditPat({ ...editPat, labs: e.target.checked ? [...(editPat.labs ?? []), l] : (editPat.labs ?? []).filter((x: string) => x !== l) })} />
+                          {LAB_NOMBRE[l] ? `${LAB_NOMBRE[l]} (${l})` : l}
+                        </label>
+                      ))}
+                    </div>
+                    <small style={{ color: "var(--muted)" }}>Solo los laboratorios marcados lo ven en la hoja de control. Un termohigrómetro o barómetro compartido se marca en todos los que lo usan; sin ninguno marcado, es común a todos.</small>
+                  </fieldset>
+                  {editPat.tipo !== "auxiliar" && editPat.magnitud === "fuerza" && (
+                    <fieldset style={{ gridColumn: "1 / -1", border: "1px solid var(--line)", borderRadius: 8, padding: "8px 10px", margin: 0 }}>
+                      <legend style={{ fontSize: 12, color: "var(--muted)", padding: "0 4px" }}>Coeficientes del certificado · S = a·F + b·F² + c·F³ (F en kN)</legend>
+                      <div className="form-grid">
+                        {(["a", "b", "c"] as const).map((k) => (
+                          <div className="field" key={k}><label htmlFor={`p-smp-${k}`}>{k}</label>
+                            <input id={`p-smp-${k}`} inputMode="decimal" placeholder="p. ej. 7,72925E-04" value={editPat.smp?.[k] ?? ""}
+                              onChange={(e) => setEditPat({ ...editPat, smp: { ...editPat.smp, [k]: e.target.value } })} /></div>
+                        ))}
+                      </div>
+                      <small style={{ color: "var(--muted)" }}>Con ellos la hoja del LNF calcula la columna SMP del patrón de referencia. Deje los tres vacíos si el patrón no los tiene.</small>
+                    </fieldset>
+                  )}
                   {editPat.coeficientes && (
                     <p style={{ gridColumn: "1 / -1", fontSize: 12, margin: 0, color: "var(--muted)" }}>
                       Último certificado del LNF: clase {editPat.coeficientes.clase ?? "—"} · t = {fmtG(editPat.coeficientes.t)} · u = {fmtG(editPat.coeficientes.u)} · v = {fmtG(editPat.coeficientes.v)}
@@ -185,6 +214,9 @@ export default function MetrologiaConfigPage() {
                       n_certificado: editPat.n_certificado || null, emisor: editPat.emisor || null, ultima_calibracion: editPat.ultima_calibracion || "",
                       intervalo_meses: editPat.intervalo_meses === "" || editPat.intervalo_meses == null ? null : Number(editPat.intervalo_meses),
                       vence: editPat.vence || "", trazabilidad: editPat.trazabilidad || null, activo: editPat.activo !== false,
+                      laboratorios: editPat.labs ?? [],
+                      ...(editPat.tipo !== "auxiliar" && editPat.magnitud === "fuerza"
+                        ? { smp: Object.fromEntries((["a", "b", "c"] as const).map((k) => [k, numeroOVacio(editPat.smp?.[k] ?? "")])) } : {}),
                       ...(editPat.tipo !== "auxiliar"
                         ? { rango_min: numeroOVacio(editPat.rango_min ?? ""), rango_max: numeroOVacio(editPat.rango_max ?? ""), unidad_rango: String(editPat.unidad_rango ?? "").trim() || null }
                         : { correcciones: Object.fromEntries((["temp", "hum", "pres"] as const).map((k) => [k, { error: numeroOVacio(editPat.corr?.[k]?.error ?? ""), U: numeroOVacio(editPat.corr?.[k]?.U ?? "") }])) }),

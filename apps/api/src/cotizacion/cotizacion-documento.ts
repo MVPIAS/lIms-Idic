@@ -16,6 +16,32 @@ import { createHash } from "node:crypto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { documentoCompleto, type FirmaEstampada, type Sello } from "../plantilla-render/plantilla-defecto";
 import { fechaChile, fechaHoraChile } from "../common/fecha-chile";
+import { etiquetaMuestra, textoPlazo, type Muestra } from "./muestras-cotizacion";
+
+/**
+ * Nota final del documento (reuniones 1, 5 y 10): moneda, valores NETOS (el
+ * IVA se agrega al final), el plazo contado desde la llegada de la muestra y,
+ * en una pre-cotización, que los valores son referenciales. La usan el formato
+ * fijo y la plantilla (variable `cotizacion.moneda_texto`), que deben coincidir.
+ */
+export function notaValores(cot: any): string {
+  const moneda = cot.moneda === "USD" ? "dólares estadounidenses (US$)" : "pesos chilenos (CLP)";
+  const partes = [`${moneda}, netos: el IVA, cuando corresponde, se agrega al final`];
+  if (cot.tipoDocumento === "precotizacion")
+    partes.push("PRE-COTIZACIÓN: valores referenciales, sin ensayos ni muestras; no genera orden de trabajo");
+  const muestras: Muestra[] = Array.isArray(cot.muestras) ? cot.muestras : [];
+  const plazo = textoPlazo(cot.plazoEntregaDias, muestras).replace(/\.$/, "");
+  if (plazo) partes.push(`Plazo: ${plazo}`);
+  return partes.join(". ");
+}
+
+/** Descripción de la línea en el documento: con su muestra («Muestra 2 · … — EN… »), si la tiene. */
+export function descripcionLineaDoc(l: any, cot: any): string {
+  const d = String(l.descripcion ?? l.categoria ?? l.tipo ?? "—");
+  if (l.muestraN == null) return d;
+  const m = (Array.isArray(cot.muestras) ? cot.muestras : []).find((x: Muestra) => x.n === l.muestraN);
+  return `${m ? etiquetaMuestra(m) : `Muestra ${l.muestraN}`} — ${d}`;
+}
 
 /** Escapa texto para incrustarlo en HTML. */
 export function esc(v: unknown): string {
@@ -60,7 +86,7 @@ export function cuerpoCotizacionHtml(cot: any): string {
     .map(
       (l, i) => `<tr>
         <td class="num">${i + 1}</td>
-        <td>${esc(l.descripcion ?? l.categoria ?? l.tipo ?? "—")}</td>
+        <td>${esc(descripcionLineaDoc(l, cot))}</td>
         <td class="num">${esc(l.cantidad ?? 1)}</td>
         <td class="num">${monto(l.precioUnitario)}</td>
         <td class="num">${monto(l.subtotal)}</td>
@@ -125,7 +151,7 @@ ${cot.descripcionTecnica ? `<h2>Descripción técnica y alcance</h2>${parrafos(c
 
 ${cot.condicionesAdicionales ? `<h2>Condiciones adicionales</h2>${parrafos(cot.condicionesAdicionales)}` : ""}
 
-<p class="nota">Documento generado por el sistema LIMS IDIC. Los valores están expresados en ${usd ? "dólares estadounidenses (US$)" : "pesos chilenos (CLP)"}.</p>`;
+<p class="nota">Documento generado por el sistema LIMS IDIC. Los valores están expresados en ${esc(notaValores(cot))}.</p>`;
 }
 
 /** US$ con 2 decimales (convención es-CL). */

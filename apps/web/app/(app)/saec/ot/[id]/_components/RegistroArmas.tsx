@@ -58,7 +58,7 @@ function reemparejar(filas: Fila[], cat: Catalogos): Fila[] {
   });
 }
 
-export default function RegistroArmas({ d, accion, onEtiquetas }: { d: ExpedienteD11; accion: Accion; onEtiquetas: () => void }) {
+export default function RegistroArmas({ d, accion, onEtiquetas, onFichas }: { d: ExpedienteD11; accion: Accion; onEtiquetas: () => void; onFichas?: () => void }) {
   const [cat, setCat] = useState<Catalogos | null>(null);
   const [filas, setFilas] = useState<Fila[]>([]);
   const [ocupado, setOcupado] = useState(false);
@@ -305,7 +305,14 @@ export default function RegistroArmas({ d, accion, onEtiquetas }: { d: Expedient
       <div className="card">
         <h2>
           Armas registradas ({d.armas.length})
-          <span className="right">{d.armas.length > 0 && <button type="button" className="btn outline sm" onClick={onEtiquetas}>Imprimir etiquetas</button>}</span>
+          <span className="right" style={{ display: "flex", gap: 6 }}>
+            {d.armas.length > 0 && <button type="button" className="btn outline sm" onClick={onEtiquetas}>Imprimir etiquetas</button>}
+            {d.armas.length > 0 && onFichas && (
+              <button type="button" className="btn outline sm" onClick={onFichas} title="Fichas de las evidencias de prueba (vaina y proyectil) que llegan de IBIS">
+                Fichas de evidencias
+              </button>
+            )}
+          </span>
         </h2>
         {d.armas.length === 0 ? (
           <p className="subtitle" style={{ margin: 0 }}>Aún no hay armas registradas.</p>

@@ -212,6 +212,11 @@ log "4/6 · Copiando código, SQL y configuración al kit..."
 mkdir -p "$KIT_DIR/codigo/packages/db" "$KIT_DIR/codigo/scripts"
 cp "$REPO_DIR/docker-compose.onpremise.yml" "$KIT_DIR/codigo/"
 cp -r "$REPO_DIR/scripts/backup"            "$KIT_DIR/codigo/scripts/"
+# BI (Metabase): crear-usuario-lectura.sh lo ejecuta el instalador para habilitar
+# lims_lectura; configurar-metabase.py da de alta la base y los tableros (§5.7).
+cp -r "$REPO_DIR/scripts/metabase"          "$KIT_DIR/codigo/scripts/"
+[ -f "$KIT_DIR/codigo/scripts/metabase/crear-usuario-lectura.sh" ] \
+  || fatal "Falta scripts/metabase/crear-usuario-lectura.sh en el repositorio: el BI quedaría sin usuario de lectura."
 # Todos los .sql de schema/seeds/align + el manifiesto con el orden de
 # aplicación (ORDEN_SQL.txt) y el script que lo interpreta.
 cp "$REPO_DIR"/packages/db/*.sql            "$KIT_DIR/codigo/packages/db/"
@@ -231,6 +236,7 @@ cp "$AQUI/instalar-onpremise.sh"      "$KIT_DIR/"
 cp "$AQUI/GUIA_ONPREMISE.md"          "$KIT_DIR/"
 cp "$AQUI/PITR.md"                    "$KIT_DIR/"
 chmod +x "$KIT_DIR/instalar-onpremise.sh" "$KIT_DIR"/codigo/scripts/backup/*.sh \
+         "$KIT_DIR"/codigo/scripts/metabase/*.sh "$KIT_DIR"/codigo/scripts/metabase/*.py \
          "$KIT_DIR"/conf/monitorizacion/*.sh 2>/dev/null || true
 ok "configuración, guía e instalador"
 

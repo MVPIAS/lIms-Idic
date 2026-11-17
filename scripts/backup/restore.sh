@@ -16,7 +16,16 @@
 # Uso:
 #   ./restore.sh --desde /srv/lims-backup/diarios/20260717-021500 --a-bd-temporal prueba_restauracion
 #   ./restore.sh --desde /srv/lims-backup/mensuales/20260701-021500 --sobre-produccion
+#   ./restore.sh --desde /srv/lims-backup/pitr-recuperado/recuperado.dump --a-bd-temporal verificacion_pitr
 #   ./restore.sh --listar
+#
+# --desde acepta un DIRECTORIO de copia de backup.sh (se busca su
+# lims_idic-*.dump) o la ruta de CUALQUIER fichero .dump en formato personalizado
+# de pg_dump (-Fc), por ejemplo el extraído de una recuperación PITR (PITR.md §7).
+#
+# Al terminar ejecuta post-restauracion.sh sobre la base restaurada: reaplica
+# los SQL de ajuste que no viajan en el volcado (zona horaria de la base y
+# permisos del usuario de solo lectura del BI).
 #
 # Una copia de seguridad que nunca se ha restaurado no es una copia de
 # seguridad: es una suposición. Este script existe para poder probarlo sin
@@ -27,8 +36,12 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/opt/lims-idic}"
 [ -f "$APP_DIR/.env" ] || { echo "ERROR: no se encuentra $APP_DIR/.env"; exit 1; }
 set -a; . "$APP_DIR/.env"; set +a
+# La contraseña de PostgreSQL viaja a los contenedores como `-e PGPASSWORD` SIN
+# valor (docker la toma de este entorno): con `-e PGPASSWORD=<valor>` quedaba en
+# la línea de órdenes de docker, visible en `ps` y en `systemctl status`.
+export PGPASSWORD="${POSTGRES_PASSWORD:-}"
 
-COMPOSE="docker compose -f $APP_DIR/docker-compose.onpremise.yml --env-file $APP_DIR/.env"
+COMPOSE="${COMPOSE:-docker compose -f $APP_DIR/docker-compose.onpremise.yml --env-file $APP_DIR/.env}"
 BACKUP_DIR="${LIMS_BACKUP_DIR:-/srv/lims-backup}"
 DATA_DIR="${LIMS_DATA_DIR:-/srv/lims-idic}"
 
@@ -46,12 +59,12 @@ while [ $# -gt 0 ]; do
     --sobre-produccion) SOBRE_PROD="si"; shift ;;
     --con-minio)      CON_MINIO="si"; shift ;;
     --listar)         LISTAR="si"; shift ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,33p' "$0"; exit 0 ;;
     *) fatal "Argumento desconocido: $1" ;;
   esac
 done
 
-psql_adm() { $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d postgres "$@"; }
+psql_adm() { $COMPOSE exec -T -e PGPASSWORD postgres psql -U "$POSTGRES_USER" -d postgres "$@"; }
 
 # --- Listado de copias disponibles -------------------------------------------
 if [ "$LISTAR" = "si" ]; then
@@ -68,8 +81,8 @@ if [ "$LISTAR" = "si" ]; then
   exit 0
 fi
 
-[ -n "$DESDE" ] || fatal "Falta --desde <directorio de copia>. Use --listar para ver las disponibles."
-[ -d "$DESDE" ] || fatal "No existe el directorio de copia: $DESDE"
+[ -n "$DESDE" ] || fatal "Falta --desde <directorio de copia o fichero .dump>. Use --listar para ver las disponibles."
+[ -e "$DESDE" ] || fatal "No existe: $DESDE"
 
 if [ "$SOBRE_PROD" = "no" ] && [ -z "$BD_TEMPORAL" ]; then
   fatal "Indique el destino: --a-bd-temporal <nombre> (seguro) o --sobre-produccion (destructivo)."
@@ -78,25 +91,62 @@ if [ "$SOBRE_PROD" = "si" ] && [ -n "$BD_TEMPORAL" ]; then
   fatal "--a-bd-temporal y --sobre-produccion son excluyentes."
 fi
 
-DUMP="$(find "$DESDE" -maxdepth 1 -name 'lims_idic-*.dump' | head -1)"
-[ -n "$DUMP" ] || fatal "No hay ningún fichero lims_idic-*.dump en $DESDE"
+# --desde: directorio de copia de backup.sh o un fichero .dump explícito.
+if [ -d "$DESDE" ]; then
+  DIR_COPIA="$(cd "$DESDE" && pwd)"
+  DUMP="$(find "$DIR_COPIA" -maxdepth 1 -name 'lims_idic-*.dump' | sort | head -1)"
+  [ -n "$DUMP" ] || fatal "No hay ningún fichero lims_idic-*.dump en $DESDE.
+   Si el volcado tiene otro nombre, indique la ruta del fichero:  --desde <ruta>/<fichero>.dump"
+elif [ -f "$DESDE" ]; then
+  case "$DESDE" in
+    *.dump) : ;;
+    *) fatal "$DESDE no es un fichero .dump. Indique un directorio de copia o un volcado .dump (pg_dump -Fc)." ;;
+  esac
+  DIR_COPIA="$(cd "$(dirname "$DESDE")" && pwd)"
+  DUMP="$DIR_COPIA/$(basename "$DESDE")"
+else
+  fatal "$DESDE no es un directorio ni un fichero normal."
+fi
+# Formato personalizado de pg_dump (-Fc): los 5 primeros bytes son «PGDMP».
+# Un SQL plano (-Fp) o un fichero cualquiera renombrado a .dump no sirve aquí.
+[ "$(head -c 5 "$DUMP" 2>/dev/null)" = "PGDMP" ] || fatal "$DUMP no es un volcado de pg_dump en formato personalizado (-Fc).
+   Un volcado en SQL plano se restaura con psql (GUIA_ONPREMISE.md §7.8), no con este script."
 
 # --- 1. Integridad ------------------------------------------------------------
 log "1/4 · Verificando la integridad de la copia..."
-if [ -f "$DESDE/SHA256SUMS" ]; then
-  ( cd "$DESDE" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) \
-    || fatal "CHECKSUM INCORRECTO en $DESDE. La copia está corrupta: NO se restaura."
+if [ -f "$DIR_COPIA/SHA256SUMS" ]; then
+  ( cd "$DIR_COPIA" && sha256sum -c SHA256SUMS >/dev/null 2>&1 ) \
+    || fatal "CHECKSUM INCORRECTO en $DIR_COPIA. La copia está corrupta: NO se restaura."
   ok "Checksums correctos"
 else
-  warn "La copia no tiene SHA256SUMS (¿copia antigua?). Se continúa sin esa verificación."
+  warn "No hay SHA256SUMS junto al volcado (copia antigua o volcado extraído a mano). Se continúa sin esa verificación."
 fi
 
-# Ruta equivalente dentro del contenedor (BACKUP_DIR está montado en /backup).
-DUMP_CONT="/backup/${DUMP#"$BACKUP_DIR"/}"
+# Ruta del volcado DENTRO del contenedor. BACKUP_DIR está montado en /backup: si
+# el volcado está debajo se usa directamente; si no, se copia al contenedor y se
+# borra al terminar (pg_restore -j necesita un fichero, no una tubería).
+DUMP_TEMPORAL=""
+limpiar_dump_temporal() {
+  if [ -n "$DUMP_TEMPORAL" ]; then
+    $COMPOSE exec -T postgres rm -f "$DUMP_TEMPORAL" >/dev/null 2>&1 || true
+  fi
+}
+trap limpiar_dump_temporal EXIT
+case "$DUMP" in
+  "$BACKUP_DIR"/*) DUMP_CONT="/backup/${DUMP#"$BACKUP_DIR"/}" ;;
+  *)
+    DUMP_TEMPORAL="/tmp/lims-restauracion-$$.dump"
+    log "El volcado está fuera de $BACKUP_DIR: se copia al contenedor de PostgreSQL..."
+    $COMPOSE cp "$DUMP" "postgres:$DUMP_TEMPORAL" >/dev/null \
+      || fatal "No se pudo copiar $DUMP al contenedor de PostgreSQL."
+    DUMP_CONT="$DUMP_TEMPORAL"
+    ;;
+esac
+log "Volcado: $DUMP"
 OBJETOS="$($COMPOSE exec -T postgres pg_restore --list "$DUMP_CONT" 2>/dev/null | grep -cv '^;' || echo 0)"
 [ "$OBJETOS" -gt 100 ] || fatal "El dump no es legible o está incompleto ($OBJETOS objetos)."
 ok "Dump legible: $OBJETOS objetos"
-[ -f "$DESDE/MANIFIESTO.txt" ] && sed 's/^/    /' "$DESDE/MANIFIESTO.txt"
+if [ -f "$DIR_COPIA/MANIFIESTO.txt" ]; then sed 's/^/    /' "$DIR_COPIA/MANIFIESTO.txt"; fi
 
 # --- 2. Confirmación ----------------------------------------------------------
 if [ "$SOBRE_PROD" = "si" ]; then
@@ -111,7 +161,7 @@ if [ "$SOBRE_PROD" = "si" ]; then
   Va a REEMPLAZAR la base de datos PRODUCTIVA del LIMS del IDIC.
 
      Base destino     : $POSTGRES_DB  (contiene ahora $FILAS órdenes de trabajo)
-     Copia de origen  : $DESDE
+     Copia de origen  : $DUMP
      Servidor         : $(hostname)
 
   TODO lo que haya entrado en el LIMS después de esa copia SE PERDERÁ:
@@ -130,7 +180,7 @@ TXT
   # equivocada, este volcado es la única vuelta atrás.
   log "Respaldando el estado ACTUAL antes de sobrescribirlo..."
   PREV="/backup/pre-restauracion-$(date '+%Y%m%d-%H%M%S').dump"
-  $COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+  $COMPOSE exec -T -e PGPASSWORD postgres \
     pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc -Z6 --no-owner --no-privileges -f "$PREV" \
     || fatal "No se pudo respaldar el estado actual. Se aborta la restauración."
   ok "Estado previo guardado en $BACKUP_DIR/$(basename "$PREV")"
@@ -161,27 +211,36 @@ log "3/4 · Restaurando el volcado (puede tardar varios minutos)..."
 # --exit-on-error NO: el dump se generó con --no-owner y puede emitir avisos
 # benignos sobre extensiones o comentarios. Los errores reales se detectan
 # después con el recuento de tablas.
-$COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres \
+$COMPOSE exec -T -e PGPASSWORD postgres \
   pg_restore -U "$POSTGRES_USER" -d "$BD_DESTINO" --no-owner --no-privileges -j 4 "$DUMP_CONT" \
   2>&1 | grep -viE 'warning|already exists' | head -20 || true
 
 # --- 4. Verificación de lo restaurado ----------------------------------------
 log "4/4 · Verificando el resultado..."
-TABLAS="$($COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$BD_DESTINO" -tAq \
+TABLAS="$($COMPOSE exec -T -e PGPASSWORD postgres psql -U "$POSTGRES_USER" -d "$BD_DESTINO" -tAq \
   -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'" | tr -d '[:space:]')"
 [ "${TABLAS:-0}" -gt 20 ] || fatal "Solo se han restaurado ${TABLAS:-0} tablas. La restauración ha FALLADO."
 
 printf '\n    %-22s %s\n' "TABLA" "FILAS"
 for t in tenant usuario rol cliente metodo orden_trabajo muestra resultado; do
-  n="$($COMPOSE exec -T -e PGPASSWORD="$POSTGRES_PASSWORD" postgres psql -U "$POSTGRES_USER" -d "$BD_DESTINO" -tAq \
+  n="$($COMPOSE exec -T -e PGPASSWORD postgres psql -U "$POSTGRES_USER" -d "$BD_DESTINO" -tAq \
        -c "SELECT count(*) FROM $t" 2>/dev/null | tr -d '[:space:]' || echo 'n/d')"
   printf '    %-22s %s\n' "$t" "$n"
 done
 echo
 ok "$TABLAS tablas restauradas en '$BD_DESTINO'"
 
+# --- Ajustes post-restauración -----------------------------------------------
+# La zona horaria de la base y los permisos de lims_lectura no viajan en el
+# volcado (--no-owner --no-privileges). La lista explícita de SQL de ajuste está
+# en post-restauracion.sh.
+POST_SCRIPT="$(dirname "$0")/post-restauracion.sh"
+log "Reaplicando los ajustes post-restauración: $(bash "$POST_SCRIPT" --listar | tr '\n' ' ')"
+POST_OK="si"
+APP_DIR="$APP_DIR" COMPOSE="$COMPOSE" bash "$POST_SCRIPT" "$BD_DESTINO" || POST_OK="no"
+
 # --- MinIO --------------------------------------------------------------------
-MINIO_TAR="$(find "$DESDE" -maxdepth 1 -name 'minio-*.tar.gz' | head -1)"
+MINIO_TAR="$(find "$DIR_COPIA" -maxdepth 1 -name 'minio-*.tar.gz' | head -1)"
 if [ -n "$MINIO_TAR" ] && [ "$SOBRE_PROD" = "si" ] && [ "$CON_MINIO" = "si" ]; then
   log "Restaurando los objetos de MinIO..."
   $COMPOSE stop minio >/dev/null 2>&1 || true
@@ -197,6 +256,14 @@ elif [ -n "$MINIO_TAR" ] && [ "$SOBRE_PROD" = "si" ]; then
 fi
 
 # --- Cierre -------------------------------------------------------------------
+AVISO_POST=""
+if [ "$POST_OK" != "si" ]; then
+  AVISO_POST="
+    · ATENCIÓN: los ajustes post-restauración NO se aplicaron completos (ver
+      arriba). Corrija la causa y repita:
+        $POST_SCRIPT $BD_DESTINO
+"
+fi
 if [ "$SOBRE_PROD" = "si" ]; then
   log "Rearrancando api y web..."
   $COMPOSE start api web >/dev/null 2>&1 || true
@@ -209,13 +276,13 @@ if [ "$SOBRE_PROD" = "si" ]; then
         $BACKUP_DIR/$(basename "$PREV")
     · Registre la incidencia y el motivo de la restauración en el
       libro de operación del IDIC.
-
+$AVISO_POST
 TXT
 else
   cat <<TXT
 
   SIMULACRO DE RESTAURACIÓN CORRECTO
-    La copia $(basename "$DESDE") es restaurable: se ha reconstruido en la
+    La copia $(basename "$DUMP") es restaurable: se ha reconstruido en la
     base temporal '$BD_TEMPORAL' sin tocar la productiva.
 
     Puede inspeccionarla con:
@@ -225,6 +292,6 @@ else
     ELIMINE la base temporal cuando termine (ocupa espacio en el mismo disco):
       docker compose -f $APP_DIR/docker-compose.onpremise.yml exec -T postgres \\
         psql -U $POSTGRES_USER -d postgres -c 'DROP DATABASE "$BD_TEMPORAL";'
-
+$AVISO_POST
 TXT
 fi

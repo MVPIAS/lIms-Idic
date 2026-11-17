@@ -1,6 +1,8 @@
+import { motivoNoReemite, type ModalidadReemision } from "../common/leyenda-reemision";
 import { emitirEvento } from "../common/eventos";
 import { textoErrorCorreo } from "../metrologia/ficha.datos";
-import { faltaOficio, seguimientoDocumento } from "../seguimiento/datos-seguimiento";
+import { faltaOficio, receptorDe, seguimientoDocumento } from "../seguimiento/datos-seguimiento";
+import { puedeRecibirDespacho } from "../seguimiento/recibir-despacho";
 import {
   BadRequestException,
   ConflictException,
@@ -25,7 +27,10 @@ import {
 } from "./reglas-emision";
 import { escapeHtml, fmtFecha, fmtFechaHora } from "./html.util";
 import { exigirMedioEnvioActivo } from "../common/medios-envio";
+import { errorEntregaBpch, FINALES_BPCH } from "../bpch/comun/entrega-bpch";
+import { otEsBpch } from "../bpch/cabecera/cabecera-ot";
 import { estadoCorreo } from "../avisos/reglas-avisos";
+import { errorEntregaSinFea } from "../fea/fea.datos";
 
 // Medios de entrega: «Parámetros del sistema › medio_envio» (common/medios-envio.ts, frente f5).
 
@@ -177,8 +182,14 @@ export class FirmaDocumentoService {
         ...v.puedo,
         // Ya sustituido por una versión nueva: no se reemite otra vez (la API lo rechaza).
         reemitir: v.puedo.reemitir && !reemplazo,
+        // R9: un documento oficial se modifica (OT abierta, mismo número con versión) o se reemplaza (número nuevo).
+        modificar: tienePermiso(req, "certificado.emitir") && esOficial(cert.estado) && !reemplazo && !["cerrada", "anulada"].includes(String(cert.ot?.estado ?? "")),
+        reemplazar: tienePermiso(req, "certificado.emitir") && esOficial(cert.estado) && !reemplazo,
         despachar: tienePermiso(req, "certificado.despachar") && esOficial(cert.estado) && !seguimiento.despacho,
-        recibirDespacho: tienePermiso(req, "certificado.entregar") && !!seguimiento.despacho && !seguimiento.despacho.recibidoAt,
+        // F015: lo da por recibido el destino (DCO = Comercial), no quien remitió.
+        recibirDespacho:
+          tienePermiso(req, "certificado.entregar") && !!seguimiento.despacho && !seguimiento.despacho.recibidoAt &&
+          puedeRecibirDespacho(seguimiento.despacho.destino, await receptorDe(this.prisma, req), seguimiento.despacho.unidadDestino),
         oficio: tienePermiso(req, "oficio.crear") && esOficial(cert.estado),
       },
     };
@@ -432,6 +443,19 @@ export class FirmaDocumentoService {
     return this.circuito(id, req);
   }
 
+  /** Modificación o reemplazo de un documento OFICIAL (R9): la emisión anula el anterior y lo cita. */
+  async reemitirOficial(id: string, modalidad: ModalidadReemision, motivo: string, req: any) {
+    const cert = await this.cargar(id, req);
+    await this.alcance.exigirUnidad(req, cert.unidadId ?? cert.ot?.unidadPrincipal, `el documento ${cert.numero ?? cert.codigo}`);
+    const noPuede = motivoNoReemite({
+      modalidad, tipo: "documento", estadoDocumento: cert.estado, otCerrada: ["cerrada", "anulada"].includes(String(cert.ot?.estado ?? "")),
+    });
+    if (noPuede) throw new ConflictException(noPuede);
+    return this.render.emitir(cert.otId, cert.plantillaId ?? "", cert.tenantId, usuarioDe(req), {
+      reemplazaId: cert.id, reemision: { modalidad, motivo: motivo.trim() },
+    });
+  }
+
   async reemitir(id: string, req: any) {
     const cert = await this.cargar(id, req);
     await this.alcance.exigirUnidad(req, cert.unidadId ?? cert.ot?.unidadPrincipal, `el documento ${cert.numero ?? cert.codigo}`);
@@ -441,6 +465,18 @@ export class FirmaDocumentoService {
   /* ---------------------------------------------------------------------- */
   /* Entrega                                                                 */
   /* ---------------------------------------------------------------------- */
+
+  /** FEA (frente F4): si el parámetro la exige para el tipo, no se entrega ni envía sin la versión firmada. */
+  private async exigirFea(cert: { id: string; tenantId: string; tipoDocumento: string | null; numero: string | null; codigo: string }) {
+    const motivo = await errorEntregaSinFea(this.prisma, {
+      tenantId: cert.tenantId,
+      origen: "informe",
+      documentoId: cert.id,
+      tipoDocumento: cert.tipoDocumento,
+      numero: cert.numero ?? cert.codigo,
+    });
+    if (motivo) throw new ConflictException(motivo);
+  }
 
   async entregar(
     id: string,
@@ -486,6 +522,24 @@ export class FirmaDocumentoService {
       );
     if (cert.entregadoAt)
       throw new ConflictException(`La entrega de ${cert.numero ?? cert.codigo} ya está registrada (${fmtFecha(cert.entregadoAt)}).`);
+    await this.exigirFea(cert);
+    // R4 (BPCH · 17065): el documento final del BPCH lo entrega Comercial tras recibirlo de la sucursal.
+    if (cert.otId && (FINALES_BPCH as readonly string[]).includes(cert.tipoDocumento ?? "")) {
+      const [h] = await this.prisma.$queryRawUnsafe<{ origen: string | null; destino: string | null; recibido_at: Date | null }[]>(
+        `SELECT o.origen_trabajo AS origen, d.destino, d.recibido_at
+           FROM orden_trabajo o LEFT JOIN documento_despacho d ON d.certificado_id = $2::uuid
+          WHERE o.id = $1::uuid ORDER BY d.created_at DESC NULLS LAST LIMIT 1`,
+        cert.otId,
+        cert.id,
+      );
+      const motivo = errorEntregaBpch({
+        tipoDocumento: cert.tipoDocumento,
+        esBpch: await otEsBpch(this.prisma, cert.ot?.unidadPrincipal ?? null),
+        origen: h?.origen ?? null,
+        despacho: h?.destino ? { destino: h.destino, recibidoAt: h.recibido_at } : null,
+      });
+      if (motivo) throw new ConflictException(motivo);
+    }
     const fecha = dto.fecha ?? new Date();
     if (fecha.getTime() > Date.now() + 60_000) throw new BadRequestException("La fecha de entrega no puede ser futura.");
     await this.prisma.certificado.update({
@@ -527,6 +581,7 @@ export class FirmaDocumentoService {
       throw new ConflictException(`Solo se envía un documento oficial. ${cert.numero ?? cert.codigo} está ${cert.estado}.`);
     const destinatarios = [...new Set(dto.destinatarios.map((d) => d.trim()).filter(Boolean))];
     if (!destinatarios.length) throw new BadRequestException("Indique al menos un correo de destino.");
+    await this.exigirFea(cert);
 
     const { buffer, nombre } = await this.render.pdf(cert.id, cert.tenantId);
     const numero = cert.numero ?? cert.codigo;

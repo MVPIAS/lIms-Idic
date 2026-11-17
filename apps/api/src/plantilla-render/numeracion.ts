@@ -38,6 +38,7 @@ export const TIPOS_NUMERABLES = [
   "RESPUESTA_OI",
   "CERTIFICADO_ARMA",
   "OFICIO",
+  "SOLICITUD_ADQUISICION",
 ] as const;
 
 export const NOMBRE_TIPO_NUMERABLE: Record<string, string> = {
@@ -45,7 +46,7 @@ export const NOMBRE_TIPO_NUMERABLE: Record<string, string> = {
   IVC: "Informe de verificación de calidad (IVC)",
   INFORME_TECNICO: "Informe técnico",
   CERTIFICADO_CALIBRACION: "Certificado de calibración",
-  INFORME_INSPECCION: "Informe de inspección",
+  INFORME_INSPECCION: "Certificado de control (informe de inspección)",
   CERTIFICADO_CONFORMIDAD: "Certificado de conformidad",
   INFORME_INCUMPLIMIENTO: "Informe de incumplimiento",
   CERTIFICADO_RESISTENCIA_BALISTICA: "Certificado de Resistencia Balística (CRB)",
@@ -53,6 +54,7 @@ export const NOMBRE_TIPO_NUMERABLE: Record<string, string> = {
   RESPUESTA_OI: "Respuesta a una orden interna",
   CERTIFICADO_ARMA: "Certificado por arma (D11)",
   OFICIO: "Oficio conductor",
+  SOLICITUD_ADQUISICION: "Solicitud de adquisición (IDIC-PG06-IT02-FORM01)",
 };
 
 /**
@@ -60,7 +62,7 @@ export const NOMBRE_TIPO_NUMERABLE: Record<string, string> = {
  * unidad, de un ancestro o general), nunca con la regla «todos los tipos» de
  * un laboratorio, que es la de sus informes.
  */
-export const TIPOS_SERIE_PROPIA: ReadonlySet<string> = new Set(["OFICIO"]);
+export const TIPOS_SERIE_PROPIA: ReadonlySet<string> = new Set(["OFICIO", "SOLICITUD_ADQUISICION"]);
 
 /** Tokens admitidos (nombre → descripción), para validar y para la ayuda de la pantalla. */
 export const TOKENS: Record<string, string> = {

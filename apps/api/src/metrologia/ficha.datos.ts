@@ -5,6 +5,7 @@
  * (P7.2, P8.1). SQL crudo con parámetros (las tablas met_* no están en Prisma); las reglas
  * puras están en ficha.reglas.ts.
  */
+import { pdfFeaParaCliente } from "../fea/fea.datos";
 import { createHash } from "node:crypto";
 import type { Sello } from "../plantilla-render/plantilla-defecto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
@@ -199,7 +200,9 @@ export async function enviarCertificado(
       WHERE c.id = $1::uuid`, calId);
   const c = f[0];
   if (!c || c.estado !== "emitida" || !c.documento_html) return { ok: false, error: "Solo se envía un certificado emitido.", destinatarios };
-  const { buffer, nombre } = await pdfEmitido(c);
+  // FEA (frente F4): si hay versión firmada con firma electrónica avanzada, se adjunta esa.
+  const fea = await pdfFeaParaCliente(db as any, "metrologia", calId, c.numero_certificado);
+  const { buffer, nombre } = fea ?? (await pdfEmitido(c));
   const asunto = `IDIC · Certificado de calibración ${c.numero_certificado}${c.ot ? ` · OT ${c.ot}` : ""}`.slice(0, 300);
   const html =
     `<p>Estimado(a) ${escHtml(c.cliente ?? "cliente")}:</p>` +

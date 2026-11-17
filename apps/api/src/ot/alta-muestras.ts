@@ -32,12 +32,15 @@ export interface LineaAlta {
   nombre?: string | null;
   catElementoId?: string | null;
   metodoIds: string[];
+  /** F013: motivo de la excepción a la batería fija del BPCH (se valida al registrar). */
+  excepcionBateria?: string | null;
 }
 
 export interface MuestraAlta {
   nombre: string;
   catElementoId?: string;
   metodoIds: string[];
+  excepcionBateria?: string;
 }
 
 /**
@@ -64,6 +67,7 @@ export function muestrasDeAlta(
       nombre,
       ...(el && !el.generico ? { catElementoId: el.id } : {}),
       metodoIds: [...new Set(l.metodoIds)],
+      ...((l.excepcionBateria ?? "").trim() ? { excepcionBateria: l.excepcionBateria!.trim() } : {}),
     };
   });
   return { muestras, errores };
