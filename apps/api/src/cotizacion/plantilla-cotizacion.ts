@@ -22,7 +22,7 @@
  */
 import { Logger } from "@nestjs/common";
 import { renderizar } from "../plantilla-render/template.engine";
-import { clp, cuerpoCotizacionHtml, esc, etiquetaFormaPago, fechaCorta, fechaHoraCl, fechaUtc, usdFmt, type FirmasCotizacion } from "./cotizacion-documento";
+import { clp, cuerpoCotizacionHtml, descripcionLineaDoc, esc, etiquetaFormaPago, fechaCorta, fechaHoraCl, fechaUtc, notaValores, usdFmt, type FirmasCotizacion } from "./cotizacion-documento";
 
 const logger = new Logger("PlantillaCotizacion");
 
@@ -105,7 +105,7 @@ export const VARIABLES_COTIZACION: VariableCotizacion[] = [
   { clave: "cotizacion.descripcion_tecnica", descripcion: "Descripción técnica y alcance (texto plano)" },
   { clave: "cotizacion.condiciones_adicionales", descripcion: "Condiciones adicionales (texto plano)" },
   { clave: "cotizacion.moneda", descripcion: "Moneda: CLP o USD" },
-  { clave: "cotizacion.moneda_texto", descripcion: "«pesos chilenos (CLP)» o «dólares estadounidenses (US$)»" },
+  { clave: "cotizacion.moneda_texto", descripcion: "Moneda y nota de los valores: «pesos chilenos (CLP), netos: el IVA…», con el plazo desde la llegada de la muestra y el aviso de pre-cotización" },
   { clave: "cotizacion.es_usd", descripcion: "Verdadero si la cotización es en dólares (para {{#si}})" },
   { clave: "cotizacion.dolar_valor", descripcion: "Dólar del día congelado al emitir (en pesos)" },
   { clave: "cotizacion.dolar_fecha", descripcion: "Fecha del dólar del día" },
@@ -171,7 +171,7 @@ export function contextoCotizacion(cot: any, firmas?: FirmasCotizacion | null) {
     .map(
       (l, i) => `<tr>
         <td class="num">${i + 1}</td>
-        <td>${esc(l.descripcion ?? l.categoria ?? l.tipo ?? "—")}</td>
+        <td>${esc(descripcionLineaDoc(l, cot))}</td>
         <td class="num">${esc(l.cantidad ?? 1)}</td>
         <td class="num">${monto(l.precioUnitario)}</td>
         <td class="num">${monto(l.subtotal)}</td>
@@ -194,7 +194,8 @@ export function contextoCotizacion(cot: any, firmas?: FirmasCotizacion | null) {
       descripcion_tecnica: txt(cot.descripcionTecnica),
       condiciones_adicionales: txt(cot.condicionesAdicionales),
       moneda: usd ? "USD" : "CLP",
-      moneda_texto: usd ? "dólares estadounidenses (US$)" : "pesos chilenos (CLP)",
+      // Reuniones 1, 5 y 10: valores netos, plazo desde la llegada de la muestra y aviso de pre-cotización.
+      moneda_texto: notaValores(cot),
       es_usd: usd,
       dolar_valor: cot.dolarValor != null ? clp(cot.dolarValor) : "",
       dolar_fecha: cot.dolarFecha ? fechaCorta(fechaUtc(cot.dolarFecha)) : "",

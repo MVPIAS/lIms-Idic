@@ -26,6 +26,7 @@ import { traducirFormula } from "./formula-legado";
 import { esNumeroTexto, sinCondicion, type TipoDato } from "./especificacion";
 import { leerCensurado, veredictoCensurado, veredictoNumerico, type CriterioIndeterminado, type Veredicto } from "./veredicto";
 import { aplicarFactor, expresionConFactor, type Factor } from "./factor";
+import { redondear, textoRedondeado } from "./reglas-resultado";
 import {
   combinarVeredictos,
   veredictoCondicion2,
@@ -56,6 +57,8 @@ export interface EspecCaptura {
    * «C1».. «Cn»: se usa cuando la celda llega vacía (p. ej. factor de proteína 6,25).
    */
   camposDefecto?: Record<string, number> | null;
+  /** Decimales del resultado final (cat_metodo.decimales_resultado; 0 = entero). null = sin redondeo (R7). */
+  decimales?: number | null;
 }
 
 export interface EntradaCaptura {
@@ -272,11 +275,14 @@ function calcularCapturaSimple(espec: EspecCaptura, e: EntradaCaptura): CalculoC
     throw new CapturaError("Ingrese el valor, las réplicas o las lecturas del ensayo.");
   }
 
+  // Regla de redondeo del ensayo (R7): se informa y se evalúa el valor redondeado.
+  const final = espec.decimales != null && valor != null ? redondear(valor, espec.decimales) : valor;
   return {
     ...out,
-    valorNumerico: valor,
-    valorTexto: valor != null ? String(valor) : null,
-    veredicto: veredictoNumerico(valor!, inf, sup),
+    resultadoFinal: out.resultadoFinal != null && final != null ? final : out.resultadoFinal,
+    valorNumerico: final,
+    valorTexto: final != null ? (espec.decimales != null ? textoRedondeado(final, espec.decimales) : String(final)) : null,
+    veredicto: veredictoNumerico(final!, inf, sup),
   };
 }
 

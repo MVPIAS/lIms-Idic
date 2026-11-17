@@ -11,6 +11,7 @@
  * Un documento devuelto o anulado se corrige REEMITIENDO una nueva versión.
  */
 import type { ResolucionFirmas } from "../rbac/firmas-resolver";
+import { faltantesInformeTerreno, type TerrenoParaInforme } from "../terreno/reglas-terreno";
 
 /* ========================================================================== */
 /* Tipo de documento de la matriz según la plantilla                          */
@@ -51,7 +52,7 @@ export const NOMBRE_TIPO_DOCUMENTO: Record<string, string> = {
   IVC: "Informe de verificación (IVC)",
   INFORME_TECNICO: "Informe técnico",
   CERTIFICADO_CALIBRACION: "Certificado de calibración",
-  INFORME_INSPECCION: "Informe de inspección",
+  INFORME_INSPECCION: "Certificado de control (informe de inspección)",
   CERTIFICADO_CONFORMIDAD: "Certificado de conformidad",
   INFORME_INCUMPLIMIENTO: "Informe de incumplimiento",
   CERTIFICADO_RESISTENCIA_BALISTICA: "Certificado de Resistencia Balística (CRB)",
@@ -124,8 +125,15 @@ const PLANTILLAS_SIN_RESULTADOS = new Set(["I.TECNICO"]);
  * Regla: todos los resultados (no borrados) de la OT deben estar `aprobado`;
  * y debe haber al menos uno, salvo en plantillas descriptivas (informe técnico).
  */
-export function faltantesParaEmitir(resultados: ResultadoEmision[], tipoPlantilla?: string | null): string[] {
+export function faltantesParaEmitir(
+  resultados: ResultadoEmision[],
+  tipoPlantilla?: string | null,
+  /** F083: OT en terreno (SVM, LAM, SEO): sin captura normal, emite con el trabajo en terreno cerrado. */
+  terreno?: TerrenoParaInforme | null,
+): string[] {
   if (resultados.length === 0) {
+    const deTerreno = faltantesInformeTerreno(terreno);
+    if (deTerreno) return deTerreno;
     return PLANTILLAS_SIN_RESULTADOS.has((tipoPlantilla ?? "").toUpperCase())
       ? []
       : ["La OT no tiene resultados registrados. Capture y apruebe los resultados antes de emitir."];

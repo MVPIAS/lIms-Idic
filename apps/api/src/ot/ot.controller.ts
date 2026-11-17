@@ -14,6 +14,7 @@ import {
   NotFoundException,
   BadRequestException,
 } from "@nestjs/common";
+import { ensayosConLaboratorio, ensayosDeOtrosLaboratorios, esDelResponsable } from "./laboratorio-ensayo";
 import { emitirEvento } from "../common/eventos";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
@@ -40,6 +41,8 @@ import { RegistroMuestrasService } from "../flujo-real/flujo-real.module";
 import { erroresAsignacion } from "../especificacion-tecnica/reglas-et";
 import { esElementoGenerico, muestrasDeAlta, type ElementoAlta } from "./alta-muestras";
 import { fijarPlazoPorDefecto } from "./plazo-defecto";
+import { aplicarVigenciaResolucion, errorCambioPlazo } from "./plazo-resolucion";
+import { ramaDeUnidad } from "../bpch/cabecera/cabecera-ot";
 
 const PrioridadEnum = z.enum(["baja", "normal", "alta", "urgente"]);
 
@@ -128,6 +131,8 @@ const OtCreate = z
           nombre: z.string().trim().max(200).optional(),
           catElementoId: z.string().uuid().optional(),
           metodoIds: z.array(z.string().uuid()).max(200),
+          /** F013 (R4): en el BPCH, quitar ensayos de la batería exige motivo y bpch.bateria.excepcion. */
+          excepcionBateria: z.string().trim().max(1000).nullable().optional(),
         }),
       )
       .max(50)
@@ -675,6 +680,8 @@ export class OtController {
       });
       // B-010: sin fecha indicada, el plazo por defecto (laboratorio > origen > defecto).
       await fijarPlazoPorDefecto(tx, tenantId, creada.id);
+      // R3: en las sucursales del BPCH y la D11 ninguna OT queda sin plazo ni pasa la vigencia de la resolución.
+      if (await ramaDeUnidad(tx, unidad.id)) await aplicarVigenciaResolucion(tx, tenantId, creada.id, null);
       if (alta.et) {
         await tx.$executeRawUnsafe(
           `UPDATE orden_trabajo SET et_id = $2::uuid, et_asignada_por = $3::uuid, et_asignada_at = now() WHERE id = $1::uuid`,
@@ -693,7 +700,8 @@ export class OtController {
       // Muestras y ensayos por analizar en la MISMA transacción (todo o nada).
       if (alta.muestras.length) {
         if (!this.registroMuestras) throw new BadRequestException("El registro de muestras no está disponible.");
-        await this.registroMuestras.registrar(creada.id, { muestras: alta.muestras }, tenantId, req, tx);
+        // F013: la batería fija del BPCH también rige al registrar la OT (no solo en la recepción).
+        await this.registroMuestras.registrar(creada.id, { muestras: alta.muestras }, tenantId, req, tx, { validarBateria: true });
       }
       return creada;
     }, { maxWait: 15_000, timeout: 120_000 });
@@ -716,7 +724,7 @@ export class OtController {
    */
   private async validarMuestrasDeAlta(
     tenantId: string,
-    dto: { etId?: string; muestras?: { nombre?: string; catElementoId?: string; metodoIds: string[] }[] },
+    dto: { etId?: string; muestras?: { nombre?: string; catElementoId?: string; metodoIds: string[]; excepcionBateria?: string | null }[] },
     clienteId: string,
     unidadId: string,
   ) {
@@ -843,7 +851,7 @@ export class OtController {
   @RequierePermiso("ot.ver")
   async asignacion(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     const ot = await this.otEnAlcance(id, req);
-    const [analistas, personal, muestras, resultados] = await Promise.all([
+    const [analistas, personal, muestras, resultadosTodos, conLab] = await Promise.all([
       this.analistasDe([id]),
       ot.unidadPrincipal ? this.labs.personalDeUnidad(ot.unidadPrincipal) : Promise.resolve([]),
       this.prisma.muestra.findMany({
@@ -864,7 +872,11 @@ export class OtController {
         },
         orderBy: { fecha: "asc" },
       }),
+      ensayosConLaboratorio(this.prisma, id),
     ]);
+    // F071: el responsable reparte solo sus ensayos; los de otros laboratorios los asigna el destino.
+    const ajenos = new Set((conLab ?? []).filter((e) => !esDelResponsable(e, ot.unidadPrincipal)).map((e) => e.id));
+    const resultados = resultadosTodos.filter((r) => !ajenos.has(r.id));
     const asignados = analistas.get(id) ?? [];
     const nombres = new Map<string, string>([
       ...personal.map((p) => [p.id, p.nombre] as [string, string]),
@@ -877,6 +889,7 @@ export class OtController {
       puedeAsignar: roles.includes("SUPERADMIN") || permisos.includes("ot.asignar"),
       analistas: asignados,
       personal,
+      otrosLaboratorios: ensayosDeOtrosLaboratorios(conLab ?? [], ot.unidadPrincipal),
       muestras: muestras.map((m) => ({
         ...m,
         ensayos: resultados
@@ -960,12 +973,17 @@ export class OtController {
         throw new BadRequestException("La persona elegida no tiene rol vigente en el laboratorio responsable de la OT.");
     }
     const yo = req.user?.sub ?? null;
+    // F071: los ensayos de otro laboratorio (por catálogo u orden interna) no se asignan aquí.
+    const ajenos = ((await ensayosConLaboratorio(this.prisma, id)) ?? []).filter((e) => !esDelResponsable(e, ot.unidadPrincipal)).map((e) => e.id);
+    if ((dto.resultadoIds ?? []).some((r) => ajenos.includes(r)))
+      throw new BadRequestException("Hay ensayos de otro laboratorio: los asigna el laboratorio de destino con su orden interna.");
     const actualizados = await this.prisma.$transaction(async (tx) => {
       const n = await tx.$executeRawUnsafe(
         `UPDATE resultado SET asignado_a = $2::uuid
           WHERE ot_id = $1::uuid AND deleted_at IS NULL AND estado <> 'aprobado'
-            AND (muestra_id = ANY($3::uuid[]) OR id = ANY($4::uuid[]))`,
-        id, dto.usuarioId, dto.muestraIds ?? [], dto.resultadoIds ?? [],
+            AND (muestra_id = ANY($3::uuid[]) OR id = ANY($4::uuid[]))
+            AND NOT (id = ANY($5::uuid[]))`,
+        id, dto.usuarioId, dto.muestraIds ?? [], dto.resultadoIds ?? [], ajenos,
       );
       if (dto.usuarioId)
         await tx.$executeRawUnsafe(
@@ -1085,6 +1103,16 @@ export class OtController {
     });
     if (!actual) throw new NotFoundException(`OT ${id} no encontrada`);
     await this.alcance.exigirUnidad(req, actual.unidadPrincipal, `la OT ${id}`);
+    if (dto.fechaCompromiso !== undefined) {
+      // R3: la fecha de compromiso de una OT del BPCH o la D11 no pasa la vigencia de la resolución ni queda vacía.
+      const rama = await ramaDeUnidad(this.prisma, actual.unidadPrincipal);
+      const [v] = await this.prisma.$queryRawUnsafe<{ vigencia: string | null }[]>(
+        `SELECT to_char(vigencia_resolucion_hasta, 'YYYY-MM-DD') AS vigencia FROM orden_trabajo WHERE id = $1::uuid`,
+        id,
+      );
+      const error = errorCambioPlazo(dto.fechaCompromiso ?? null, v?.vigencia ?? null, Boolean(rama));
+      if (error) throw new BadRequestException(error);
+    }
 
     if (dto.estado !== undefined) {
       if (dto.estado === "cerrada") {

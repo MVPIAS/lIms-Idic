@@ -1,5 +1,5 @@
 import { configEfectiva } from "./config-informe";
-import { armarInforme, modalidadEfectiva, modalidadInicial, todosSoloResultado, type ResultadoParaInforme } from "./filas-informe";
+import { armarInforme, modalidadEfectiva, modalidadInicial, modalidadSugerida, origenModalidad, todosSoloResultado, type ResultadoParaInforme } from "./filas-informe";
 import { bloqueResultados } from "./bloques-informe";
 import { antecedentesInforme, datosRecepcionInforme, NO_APLICA } from "./antecedentes-informe";
 
@@ -72,6 +72,8 @@ describe("LQA · solo resultados, sin Cumple / No cumple (SAL-07)", () => {
   });
   it("quien emite pide cumplimiento: igual sale solo resultados", () => {
     expect(modalidadEfectiva("cumplimiento", lqa)).toBe("solo_resultados");
+    expect(origenModalidad(IVC_ALI, lqa)).toBe("sugerida");
+    expect(origenModalidad(IVC_ALI, filas)).toBe("plantilla");
   });
   it("si algún ensayo sí tiene condición, se respeta el cumplimiento", () => {
     const mixto = [...lqa, r({ id: "q3", ensayo: "Humedad", limiteSup: "14", valorNumerico: 12, veredicto: "cumple" })];
@@ -87,6 +89,11 @@ describe("Informe de Ensayos de Alimentos · solo resultados por defecto", () =>
     const html = bloqueResultados(armarInforme(filas, IE_ALI, "solo_resultados"), IE_ALI);
     expect(cabeceras(html)).toEqual(["Ensayos", "Unidad", "Resultado"]);
     expect(html).not.toContain("Cumple");
+  });
+  it("dice que la modalidad es la de la plantilla, no la sugerida por los requisitos (F072)", () => {
+    expect(origenModalidad(IE_ALI)).toBe("plantilla");
+    expect(modalidadSugerida(filas)).toBe("cumplimiento");
+    expect(origenModalidad(configEfectiva("I.ENSAYO", {}))).toBe("sugerida");
   });
   it("sin modalidad fija sigue la sugerida", () => {
     expect(modalidadInicial(configEfectiva("I.ENSAYO", {}), filas)).toBe("cumplimiento");

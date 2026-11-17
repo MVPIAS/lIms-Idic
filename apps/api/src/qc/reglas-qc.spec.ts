@@ -74,3 +74,33 @@ describe("QC microbiológico (ALI-D6)", () => {
     expect(erroresConfigQc({ qcTipos: ["positivo", "negativo", "blanco"], qcCriterios: { positivo: "+", negativo: "-" } })).toEqual([]);
   });
 });
+
+describe("QC de una OT recibida por orden interna (F070)", () => {
+  const { metodosQcDelAlcance, recortarEstadoQc } = require("./reglas-qc") as typeof import("./reglas-qc");
+  const ensayos = [
+    { metodoId: "m-lqa", unidadId: "LQA" },
+    { metodoId: "m-lmb", unidadId: "LMB" },
+    { metodoId: "m-les", unidadId: "LES" },
+  ];
+  it("con alcance sobre el laboratorio responsable ve todos los métodos", () => {
+    expect(metodosQcDelAlcance({ todo: true, labs: new Set() }, ensayos)).toBeNull();
+  });
+  it("el destino de la orden interna ve los métodos derivados a su laboratorio", () => {
+    expect([...(metodosQcDelAlcance({ todo: false, labs: new Set(["LMB"]) }, ensayos) ?? [])]).toEqual(["m-lmb"]);
+  });
+  it("recorta el estado a esos métodos y recalcula lo pendiente", () => {
+    const e = {
+      metodos: [
+        { id: "m-lqa", codigo: "1", nombre: "a", aprobado: false },
+        { id: "m-lmb", codigo: "2", nombre: "b", aprobado: true },
+      ],
+      controles: [{ catMetodoId: "m-lqa" }, { catMetodoId: "m-lmb" }],
+      estado: { aprobado: false, faltantes: [{ id: "m-lqa", codigo: "1", nombre: "a" }] },
+    };
+    const r = recortarEstadoQc(e, new Set(["m-lmb"]));
+    expect(r.metodos.map((m) => m.id)).toEqual(["m-lmb"]);
+    expect(r.controles).toHaveLength(1);
+    expect(r.estado).toEqual({ aprobado: true, faltantes: [] });
+    expect(recortarEstadoQc(e, null)).toBe(e);
+  });
+});

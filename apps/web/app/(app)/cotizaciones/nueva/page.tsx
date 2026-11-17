@@ -29,18 +29,27 @@ function NuevaCotizacion() {
   const sp = useSearchParams();
   const oportunidadId = sp.get("oportunidad") ?? undefined;
   const clienteInicialId = sp.get("cliente") ?? undefined;
+  // Reunión 10: pre-cotización (valores referenciales, sin ensayos ni muestras; no genera OT).
+  const precot = sp.get("tipo") === "precotizacion";
   return (
     <div>
       <Link href={"/cotizaciones" as any} className="subtitle" style={{ display: "inline-block", color: "var(--accent)", textDecoration: "none" }}>
         ← Cotizaciones
       </Link>
-      <h1 className="page">Nueva Cotización</h1>
-      <p className="subtitle">
-        Nace <b>Abierta</b>, con su número correlativo. Después, en su ficha: consulta al laboratorio (fechas y costo), V°B°, firma del Jefe DCO, envío al cliente y aceptación, que genera la OT.
-      </p>
+      <h1 className="page">{precot ? "Nueva pre-cotización" : "Nueva Cotización"}</h1>
+      {precot ? (
+        <p className="subtitle">
+          Entrega <b>valores referenciales</b> (por ejemplo, para un proyecto del Ejército): sin ensayos ni muestras, y <b>no genera OT</b>. Lleva su propio número (PC-AAAA-NNNN); puede reemplazarse por una nueva versión y, cuando el cliente avance, se emite desde ella la cotización formal.
+        </p>
+      ) : (
+        <p className="subtitle">
+          Nace <b>Abierta</b>, con su número correlativo. Después, en su ficha: consulta al laboratorio (fechas y costo), V°B°, firma del Jefe DCO, envío al cliente y aceptación, que genera la OT.
+        </p>
+      )}
       {oportunidadId && <div className="alert info">Cotización desde una oportunidad del CRM: al guardarla queda enlazada y la oportunidad pasa a «Propuesta».</div>}
       <CotizacionForm
         modo="crear"
+        precotizacion={precot}
         oportunidadId={oportunidadId}
         clienteInicialId={clienteInicialId}
         onGuardado={(c) => router.push(`/cotizaciones/${c?.id ?? ""}` as any)}

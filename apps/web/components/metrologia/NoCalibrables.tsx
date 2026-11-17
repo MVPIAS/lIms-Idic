@@ -128,7 +128,15 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
                 ) : <p>No se ha solicitado.</p>}
                 <div className={css.acciones}>
                   {ae.includes("SOLICITAR") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "solicitar", fila: f })}>Solicitar servicio externo → Jefe de Departamento</button>}
-                  {ae.includes("APROBAR") && <button className="btn primary sm" disabled={ocupado} onClick={() => hacer("POST", `${base(f)}/servicio-externo/aprobar`, undefined, "Contratación aprobada: pasa a Abastecimiento y envío.")}>Aprobar contratación → envío</button>}
+                  {ae.includes("APROBAR") && <button className="btn primary sm" disabled={ocupado} onClick={async () => {
+                    // F059: aprobar la contratación externa compromete un gasto: pide confirmación.
+                    if (await confirmar({
+                      titulo: "¿Aprobar la contratación del servicio externo?",
+                      mensaje: `Proveedor: ${ext?.proveedor ?? "—"}${ext?.costo != null ? ` · costo estimado $ ${Math.round(ext.costo).toLocaleString("es-CL")}` : ""}. Pasa a Abastecimiento para el envío del ítem ${f.instrumento.numero}.`,
+                      confirmarTexto: "Aprobar contratación",
+                    }))
+                      hacer("POST", `${base(f)}/servicio-externo/aprobar`, undefined, "Contratación aprobada: pasa a Abastecimiento y envío.");
+                  }}>Aprobar contratación → envío</button>}
                   {ae.includes("RECHAZAR") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "rechazar", fila: f })}>Rechazar…</button>}
                   {ae.includes("ENVIO") && <button className="btn primary sm" onClick={() => setDlg({ tipo: "envio", fila: f })}>Registrar envío al proveedor →</button>}
                   {ae.includes("CERTIFICADO") && <button className="btn outline sm" onClick={() => setDlg({ tipo: "certificado", fila: f })}>{ext?.tiene_certificado ? "Reemplazar el certificado externo" : "Adjuntar el certificado externo"}</button>}
@@ -148,9 +156,9 @@ export default function NoCalibrables({ otId, onCambio }: { otId: string; onCamb
         onGuardar={(motivo) => hacer("POST", `${base(dlg.fila)}/informe-tecnico/devolver`, { motivo }, "Informe técnico devuelto al metrólogo.")} />}
       {dlg?.tipo === "rechazar" && <DialogoTexto titulo="Rechazar la contratación del servicio externo" etiqueta="Motivo" boton="Rechazar" min={5} ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(motivo) => hacer("POST", `${base(dlg.fila)}/servicio-externo/rechazar`, { motivo }, "Solicitud rechazada.")} />}
-      {dlg?.tipo === "entregarInforme" && <DialogoEntrega ocupado={ocupado} onCerrar={() => setDlg(null)}
+      {dlg?.tipo === "entregarInforme" && <DialogoEntrega documento="informe técnico" ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/informe-tecnico/entregar`, b, "Entrega del informe técnico registrada.")} />}
-      {dlg?.tipo === "entregarExterno" && <DialogoEntrega ocupado={ocupado} onCerrar={() => setDlg(null)}
+      {dlg?.tipo === "entregarExterno" && <DialogoEntrega documento={`certificado externo${dlg.fila.externo?.certificado_numero ? ` N° ${dlg.fila.externo.certificado_numero}` : ""}`} ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/servicio-externo/entregar`, b, "Entrega del certificado externo registrada.")} />}
       {dlg?.tipo === "solicitar" && <DialogoSolicitud otId={otId} ocupado={ocupado} onCerrar={() => setDlg(null)}
         onGuardar={(b) => hacer("POST", `${base(dlg.fila)}/servicio-externo`, b, "Servicio externo solicitado: espera la aprobación del Jefe de Departamento.")} />}
@@ -195,12 +203,12 @@ function DialogoTexto({ titulo, etiqueta, boton, min, ocupado, onCerrar, onGuard
   );
 }
 
-function DialogoEntrega({ ocupado, onCerrar, onGuardar }: { ocupado: boolean; onCerrar: () => void; onGuardar: (b: any) => void }) {
+function DialogoEntrega({ documento, ocupado, onCerrar, onGuardar }: { documento: string; ocupado: boolean; onCerrar: () => void; onGuardar: (b: any) => void }) {
   const medios = useMediosEnvio(); // frente f5: «Parámetros del sistema › medio_envio»
   const id = useId();
   const [f, setF] = useState({ fecha: hoy(), medio: "", destinatario: "", observacion: "" });
   return (
-    <Modal titulo="Registrar la entrega del informe técnico" onCerrar={onCerrar}
+    <Modal titulo={`Registrar la entrega del ${documento}`} onCerrar={onCerrar}
       acciones={acciones(ocupado, onCerrar, "Registrar entrega", !!f.fecha && !!f.medio && f.destinatario.trim().length >= 2,
         () => onGuardar({ fecha: f.fecha, medio: f.medio, destinatario: f.destinatario.trim(), observacion: f.observacion.trim() || null }))}>
       <div className="form-grid cols-2">

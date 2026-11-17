@@ -60,6 +60,9 @@ export const NAV: SeccionNav[] = [
       { href: "/crm", label: "Oportunidades (CRM)", icon: "🎯", perm: "cotizacion.ver", claves: "crm pipeline" },
       { href: "/cotizaciones", label: "Cotizaciones", icon: "💲", perm: "cotizacion.ver" },
       { href: "/cotizaciones/nueva", label: "Nueva cotización", icon: "＋", perm: "cotizacion.crear", claves: "costeo" },
+      // Sesiones de preproducción (frente S1): avisos de Comercial y validez por tipo de cliente y laboratorio.
+      { href: "/cotizaciones/avisos", label: "Avisos comerciales", icon: "🔔", perm: "cotizacion.ver", claves: "facturar opi pendiente aceptadas sin ot" },
+      { href: "/cotizaciones/validez", label: "Validez de cotizaciones", icon: "📅", perm: "cotizacion.ver", claves: "validez dias tipo de cliente laboratorio" },
       { href: "/seguimiento", label: "Seguimiento y envío", icon: "📮", perm: ["ot.seguimiento", "certificado.despachar", "certificado.entregar"], claves: "despacho recepcion dco plazo cliente envio guia entrega atraso" },
       { href: "/encuestas", label: "Encuestas de satisfacción", icon: "☺", perm: "encuesta.ver", claves: "postventa satisfaccion cliente" },
       // EP-00 9.2 (frente r4d): reclamos de clientes.
@@ -98,12 +101,16 @@ export const NAV: SeccionNav[] = [
       { href: "/preparacion-trabajo", label: "Preparación del trabajo por aprobar", icon: "📝", perm: "ot.preparacion.aprobar", claves: "planilla de trabajo paquete tecnico proyecto de parrafo plan de inspeccion aprobar dsa" },
       { href: "/informes", label: "Emitir informe", icon: "🖨", perm: "certificado.emitir" },
       { href: "/informes/por-firmar", label: "Documentos por firmar", icon: "✒", perm: "documento.firmar", claves: "firma firmar oficializar revisar informe" },
+      { href: "/informes/firma-fea", label: "Pendientes de firma FEA", icon: "🔏", perm: ["documento.firmar", "documento.fea.gestionar"], claves: "fea firmagob firma electronica avanzada pdf firmado certificado token" },
       { href: "/certificados", label: "Informes y certificados", icon: "📜", perm: "ot.ver", claves: "entrega anular reemitir" },
       { href: "/oficios", label: "Oficios conductores", icon: "✉", perm: "oficio.ver", claves: "oficio conductor vb despacho oficina de partes ivc informe tecnico rechazo ffaa" },
       { href: "/custodia", label: "Cadena de custodia", icon: "🔗", perm: "muestra.ver" },
       { href: "/equipos", label: "Equipos y calibración", icon: "⚙", perm: "equipo.ver" },
       { href: "/mantencion", label: "Mantención y gestión de equipos", icon: "🛠", perm: "equipo.ver", claves: "mantenimiento preventivo plan frecuencia calendario reporte cumplimiento correctiva costos" },
       { href: "/consumibles", label: "Consumibles · kardex", icon: "🧴", perm: "consumible.gestionar", claves: "stock reactivos lotes" },
+      { href: "/consumibles/bodegas", label: "Bodegas e inventario valorizado", icon: "🏬", perm: "consumible.gestionar", claves: "bodega central sub-bodega traspaso inventario valorizado lote abastecimiento" },
+      // Frente f1 · IDIC-PG06-IT02-FORM01: laboratorio crea, jefatura da V°B°, Abastecimiento (SAB) recibe y anota la O/C.
+      { href: "/solicitudes-adquisicion", label: "Solicitudes de adquisición", icon: "🛒", perm: "adquisicion.ver", claves: "compra pedido sab abastecimiento orden de compra oc vb jefatura form01 pg06 reactivos insumos" },
       { href: "/municion", label: "Munición de prueba", icon: "🎯", perm: "municion.solicitar", ambito: "DSA", claves: "lrb lam d11 cartuchos orden interna balistica" },
       { href: "/qc", label: "Control de calidad (QC)", icon: "✔", perm: "resultado.ver" },
       // Recepción y Muestreo (alicuota.gestionar, sin resultado.ver) entran solo a la pestaña Alícuotas.
@@ -149,6 +156,7 @@ export const NAV: SeccionNav[] = [
       { href: "/saec/ot", label: "Certificación de armas", icon: "🎯", perm: "arma.ver", ambito: "D11", claves: "d11 internacion resolucion acta acunacion certificado por arma entrega" },
       { href: "/saec/catalogos", label: "Catálogo de armas", icon: "🗂", perm: "arma.ver", ambito: "D11", claves: "marca modelo calibre cip pais" },
       { href: "/saec", label: "Evidencias", icon: "🧷", perm: "evidencia.ver", ambito: "D11" },
+      { href: "/saec/donde-esta", label: "¿Dónde está la evidencia?", icon: "📍", perm: "evidencia.ver", ambito: "D11", claves: "buscar ubicacion estante caja serie hit ibis vaina proyectil prestamo fiscalia" },
       { href: "/saec/casos", label: "Casos", icon: "🗂", perm: "caso.ver", ambito: "D11", claves: "causa fiscalia ruc" },
       { href: "/saec/municion", label: "Munición de prueba", icon: "🧰", perm: "arma.ver", ambito: "D11", claves: "lotes inventario cartuchos lrb lam entrega" },
       { href: "/saec/armas", label: "Armas", icon: "🔫", perm: "arma.ver", ambito: "D11" },
@@ -161,6 +169,8 @@ export const NAV: SeccionNav[] = [
     title: "Reportes y comunicación",
     icon: "📊",
     items: [
+      // Zona de informes: reportes fijos (reemplazan a los Crystal Reports del sistema anterior) + documentos por OT.
+      { href: "/zona-informes", label: "Zona de informes", icon: "🗂", perm: ["reporte.ver", "reporte.comercial.ver", "encuesta.ver"], claves: "informes crystal infgest listado gestion facturacion deudores tasa ot sin facturar tiempos certificados boletines encuestas satisfaccion trimestral" },
       { href: "/reportes", label: "Reportes · exportar", icon: "📊", perm: ["reporte.ver", "reporte.comercial.ver"], claves: "csv excel xlsx tabla dinamica grafico plantilla" },
       // Brecha §4.7.5: enlace a Metabase (bi.<dominio>), que se abre en otra pestaña.
       { href: "/bi", label: "Análisis e inteligencia de negocio (Metabase)", icon: "📈", perm: "reporte.ver", claves: "metabase bi tableros dashboard analisis inteligencia de negocio graficos" },
@@ -242,6 +252,8 @@ export const NAV: SeccionNav[] = [
 export interface AlcanceMenu {
   ambitos?: Record<string, boolean>;
   permisosPorAmbito?: Record<string, string[]>;
+  /** Rutas ocultas por el parámetro «menu · ocultos» (módulos heredados que el IDIC no usa; R1, R10). */
+  menuOculto?: string[];
 }
 
 /**
@@ -253,6 +265,7 @@ export interface AlcanceMenu {
  * responde 403 igualmente). Es la misma regla que aplica @AmbitoUnidad.
  */
 export function itemEnAmbito(i: ItemNav, alcance: AlcanceMenu | null | undefined): boolean {
+  if (alcance?.menuOculto?.includes(i.href.toLowerCase())) return false;
   if (!i.ambito || !alcance?.ambitos) return true;
   const porAmbito = alcance.permisosPorAmbito;
   const perms = i.perm ? ([] as string[]).concat(i.perm) : [];

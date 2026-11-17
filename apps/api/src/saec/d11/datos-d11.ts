@@ -38,13 +38,28 @@ export interface FilaArma {
   ensayos: number;
   pendientes: number;
   aprobados: number;
-  certificado: { id: string; numero: string; estado: string; entregadoAt: string | null; vigenteHasta: string | null; vigenteDesde: string | null } | null;
+  certificado: {
+    id: string;
+    numero: string;
+    estado: string;
+    entregadoAt: string | null;
+    vigenteHasta: string | null;
+    vigenteDesde: string | null;
+    /** F039: debe reemitirse para incorporar el registro de IBIS. */
+    pendienteIbis?: boolean;
+  } | null;
+  pendiente_motivo: string | null;
+  pendiente_detalle: string | null;
+  pendiente_at: Date | null;
+  liberada_resolucion: string | null;
+  liberada_at: Date | null;
 }
 
 export const SELECT_ARMAS = `
   SELECT a.id, a.orden, a.tipo, a.serie_normalizada, a.sin_serie, a.accesorios, a.lote, a.ubicacion,
          a.clase, a.permisibilidad, a.camino, a.acunacion_numero, a.acunacion_anio, a.acunada_at,
          a.entrega_id, a.resolucion_arma_id,
+         a.pendiente_motivo, a.pendiente_detalle, a.pendiente_at, a.liberada_resolucion, a.liberada_at,
          ar.id AS arma_id, ar.serie, ar.marca, ar.modelo, ar.calibre, ar.pais_origen,
          m.id AS muestra_id, m.codigo AS muestra, m.codigo_barras, m.veredicto,
          (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL)::int AS ensayos,
@@ -52,7 +67,10 @@ export const SELECT_ARMAS = `
                                               AND r.estado IN ('pendiente', 'devuelto'))::int AS pendientes,
          (SELECT count(*) FROM resultado r WHERE r.muestra_id = m.id AND r.deleted_at IS NULL AND r.estado = 'aprobado')::int AS aprobados,
          (SELECT json_build_object('id', c.id, 'numero', COALESCE(c.numero, c.codigo), 'estado', c.estado,
-                                   'entregadoAt', c.entregado_at, 'vigenteHasta', ca.vigente_hasta, 'vigenteDesde', ca.vigente_desde)
+                                   'entregadoAt', c.entregado_at, 'vigenteHasta', ca.vigente_hasta, 'vigenteDesde', ca.vigente_desde,
+                                   -- F039: emitido «Pendiente de IBIS» y el registro del arma ya llegó: hay que reemitirlo.
+                                   'pendienteIbis', (c.documento_html LIKE '%Pendiente de IBIS%'
+                                     AND EXISTS (SELECT 1 FROM ibis_resultado ir WHERE ir.arma_id = ar.id AND ir.estado = 'asignado' AND ir.deleted_at IS NULL)))
             FROM certificado c
             LEFT JOIN d11_certificado_arma ca ON ca.certificado_id = c.id
            WHERE c.ot_id = a.ot_id AND c.deleted_at IS NULL AND c.tipo_documento = 'CERTIFICADO_ARMA'
@@ -74,6 +92,7 @@ export function estadoDe(a: FilaArma): EstadoArma {
     acunada: Boolean(a.acunada_at),
     certificado: a.certificado ? { estado: a.certificado.estado } : null,
     entregada: Boolean(a.entrega_id),
+    pendiente: Boolean(a.pendiente_motivo),
   };
 }
 

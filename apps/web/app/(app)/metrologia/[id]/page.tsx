@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { fechaDia, fechaHora, num } from "@/lib/format";
-import { fmtG } from "@/lib/metrologia";
+import { fmtG, textoReemision } from "@/lib/metrologia";
 import { llamar } from "@/lib/laboratorio";
 import { usePermisos } from "@/lib/permisos";
 import { textoMedio } from "@/lib/documentos";
@@ -19,6 +19,7 @@ import { useMediosEnvio } from "@/lib/lista-parametro";
 import { ORIGEN_OT } from "@/lib/metrologiaOt";
 import { confirmar, toast } from "@/components/ui/feedback";
 import Modal from "@/components/documentos/Modal";
+import PanelFea from "@/components/documentos/PanelFea";
 import PresentacionCertificado from "@/components/metrologia/PresentacionCertificado";
 import BalanceIncertidumbre from "@/components/metrologia/BalanceIncertidumbre";
 import s from "@/components/metrologia/ficha.module.css";
@@ -61,7 +62,7 @@ export default function FichaCalibracionPage() {
   const [tab, setTab] = useState<Pestana | null>(null);
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
-  const [dialogo, setDialogo] = useState<null | "devolver" | "reemitir" | "entregar" | "correo">(null);
+  const [dialogo, setDialogo] = useState<null | "devolver" | "reemitir" | "modificar" | "entregar" | "correo">(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -172,7 +173,7 @@ export default function FichaCalibracionPage() {
       </ol>
 
       {devuelta && <div className="alert warn"><b>Devuelta al metrólogo:</b> {c.devuelto_motivo}. La calibración vuelve a «Toma de datos».</div>}
-      {c.reemplaza_numero && <div className="alert info">Reemisión: este certificado reemplaza al N° <b>{c.reemplaza_numero}</b> al emitirse.</div>}
+      {c.reemplaza_numero && <div className="alert info">{c.estado === "emitida" || c.estado === "reemplazada" ? textoReemision(c.reemplaza_numero, c.reemision_modalidad).presentacion : textoReemision(c.reemplaza_numero, c.reemision_modalidad).aviso}</div>}
       {c.estado === "reemplazada" && <div className="alert warn">Este certificado fue reemplazado por el N° <b>{c.reemplazada_por ?? "(en emisión)"}</b>.</div>}
       {(c.avisos ?? []).map((t: string) => <div key={t} className="alert info">{t}</div>)}
 
@@ -330,7 +331,11 @@ export default function FichaCalibracionPage() {
               {c.estado === "emitida" && c.ot_id && puede(["certificado.entregar", "metrologia.crear"]) && (
                 <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("correo")}>Enviar por correo…</button>
               )}
-              {a.includes("REEMITIR") && <button className="btn outline" disabled={ocupado} onClick={() => setDialogo("reemitir")}>Reemitir…</button>}
+              {a.includes("REEMITIR") && !["cerrada", "anulada"].includes(String(c.ot_estado ?? "")) && (
+                <button className="btn outline" disabled={ocupado} title="Corregir el certificado sin cerrar la OT: conserva el número con la versión siguiente y dice «modificado»"
+                  onClick={() => setDialogo("modificar")}>Modificar…</button>
+              )}
+              {a.includes("REEMITIR") && <button className="btn outline" disabled={ocupado} title="Certificado de reemplazo con número nuevo: dice «reemplaza al certificado N°»" onClick={() => setDialogo("reemitir")}>Reemplazar…</button>}
               {/* B-082: la reemisión sigue disponible tras la entrega, pero solo para quien firma y emite. */}
               {c.estado === "emitida" && !a.includes("REEMITIR") && (
                 <span className={s.espera}>La reemisión de un certificado emitido (también después de entregarlo) la hace quien puede firmar y emitir: el Jefe del laboratorio.</span>
@@ -353,6 +358,8 @@ export default function FichaCalibracionPage() {
                   : <>Certificado emitido: fecha congelada y solo lectura. Falta registrar su entrega{c.ot_id ? "" : " (calibración sin OT ligada: se entrega fuera del LIMS)"}.</>}
               </div>
             )}
+            {/* Firma electrónica avanzada del Estado sobre el PDF final (frente F4). */}
+            {c.estado === "emitida" && <PanelFea origen="metrologia" documentoId={id} onCambio={cargar} />}
           </section>
           {!["emitida", "reemplazada"].includes(c.estado) && (
             <section className={s.bloque}>
@@ -420,15 +427,19 @@ export default function FichaCalibracionPage() {
         {c.ot_id && <p style={{ fontSize: 11.5, color: "var(--muted)", margin: "8px 0 0" }}>Origen de la OT: {ORIGEN_OT[c.origen] ?? "—"}.</p>}
       </section>
 
-      {(dialogo === "devolver" || dialogo === "reemitir") && (
+      {(dialogo === "devolver" || dialogo === "reemitir" || dialogo === "modificar") && (
         <MotivoDialogo
-          titulo={dialogo === "devolver" ? `Devolver ${c.codigo} al metrólogo` : `Reemitir el certificado ${c.numero_certificado}`}
+          titulo={dialogo === "devolver" ? `Devolver ${c.codigo} al metrólogo` : dialogo === "modificar" ? `Modificar el certificado ${c.numero_certificado}` : `Reemplazar el certificado ${c.numero_certificado}`}
           texto={dialogo === "devolver"
             ? "Indique qué debe corregir. El motivo queda en la bitácora; la calibración vuelve a «Toma de datos» y las firmas hechas se anulan."
-            : "Se crea un borrador con los mismos datos. Al emitirse, dirá que reemplaza a este certificado, que quedará «reemplazado»."}
-          boton={dialogo === "devolver" ? "Devolver al metrólogo" : "Crear reemisión"}
+            : dialogo === "modificar"
+              ? "Se crea un borrador con los mismos datos para corregirlo. Al emitirse conserva el número con la versión siguiente (por ejemplo, …-V2) e imprime «Certificado modificado» con el motivo. Solo con la OT abierta."
+              : "Se crea un borrador con los mismos datos. Al emitirse lleva un número nuevo e imprime «Este certificado reemplaza al certificado N°…»; este quedará «reemplazado»."}
+          boton={dialogo === "devolver" ? "Devolver al metrólogo" : dialogo === "modificar" ? "Crear la modificación" : "Crear el reemplazo"}
           ocupado={ocupado} onCerrar={() => setDialogo(null)}
-          onGuardar={(motivo) => accion(dialogo, { motivo }, dialogo === "devolver" ? `${c.codigo} devuelta al metrólogo.` : "Reemisión creada.")} />
+          onGuardar={(motivo) => dialogo === "devolver"
+            ? accion("devolver", { motivo }, `${c.codigo} devuelta al metrólogo.`)
+            : accion("reemitir", { motivo, modalidad: dialogo === "modificar" ? "modificacion" : "reemplazo" }, dialogo === "modificar" ? "Modificación creada." : "Reemplazo creado.")} />
       )}
       {dialogo === "correo" && (
         <CorreoDialogo numero={nombre} entregado={!!c.entregado_at} propuesto={c.correo_propuesto ?? null} ocupado={ocupado} onCerrar={() => setDialogo(null)} onEnviar={async (b) => {

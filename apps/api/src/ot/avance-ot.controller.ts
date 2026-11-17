@@ -7,7 +7,10 @@ import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { AlcanceService } from "../rbac/alcance.service";
 import { pasosActuales } from "../plantilla-render/reglas-emision";
-import { calcularAvance, puedeActuar, type DocumentoAvance, type HechosOt } from "./avance-ot";
+import { calcularAvance, pestanasParaPerfil, puedeActuar, type DocumentoAvance, type HechosOt } from "./avance-ot";
+import { hechosTerreno } from "../terreno/terreno.module";
+import { laboratorioDeTerreno, pasosTerreno } from "../terreno/reglas-terreno";
+import { perfilMuestreo } from "../muestreo/formulario-completo";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { ramaDeUnidad, vistaCabecera } from "../bpch/cabecera/cabecera-ot";
 import { faltantesParaEmitirInspeccion } from "../bpch/cabecera/reglas-cabecera";
@@ -15,6 +18,7 @@ import { SQL_LOTE_BPCH } from "../recepcion/reglas-recepcion";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
 import { trabajoDsaDe } from "../formularios/trabajo-avance";
 import { avanceArmasDeOt } from "../saec/d11/datos-d11";
+import { ensayosConLaboratorio, esDelResponsable } from "./laboratorio-ensayo";
 
 /** Laboratorios de la Sección Metrología (los mismos que usa el módulo de Metrología). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -44,7 +48,7 @@ export class AvanceOtService {
     await this.alcanceResultado.alcanceEnOt(req, ot, "ot.ver");
 
     const rama = await ramaDeUnidad(this.prisma, ot.unidadPrincipal).catch(() => null);
-    const [cotizacion, muestras, analistas, resultados, docs, factura, calibraciones, internacion, reinspeccion, ordenesInternas] = await Promise.all([
+    const [cotizacion, muestras, analistas, resultados, docs, factura, calibraciones, internacion, reinspeccion, ordenesInternas, aprobadosSinRevision] = await Promise.all([
       ot.cotizacionId
         ? this.prisma.cotizacion.findFirst({ where: { id: ot.cotizacionId }, select: { codigo: true, estado: true } })
         : null,
@@ -123,9 +127,14 @@ export class AvanceOtService {
           ORDER BY oi.created_at`,
         id,
       ).catch(() => []),
+      // Aprobados sin revisión previa (revisión opcional): la Ruta no los da por revisados (F067).
+      this.prisma.resultado.count({ where: { otId: id, deletedAt: null, estado: "aprobado", revisadoPor: null } }),
     ]);
 
     const cuenta = (...estados: string[]) => resultados.filter((r) => estados.includes(r.estado ?? "")).reduce((s, r) => s + r._count._all, 0);
+    // F071: lo que captura otro laboratorio no se le pide a los analistas del responsable.
+    const ajenos = ((await ensayosConLaboratorio(this.prisma, id)) ?? []).filter((e) => !esDelResponsable(e, ot.unidadPrincipal));
+    const cuentaAjenos = (...estados: string[]) => ajenos.filter((e) => estados.includes(e.estado ?? "")).length;
     const totalRes = resultados.reduce((s, r) => s + r._count._all, 0);
     // Despacho de cada documento (frente r4c · documento_despacho): «Remitir a DCO» del BPCH.
     const despachos = new Map(
@@ -175,7 +184,9 @@ export class AvanceOtService {
         revisados: cuenta("revisado_n1"),
         aprobados: cuenta("aprobado"),
         devueltos: cuenta("devuelto", "rechazado"),
+        aprobadosSinRevision,
       },
+      resultadosOtrosLabs: { pendientes: cuentaAjenos("pendiente"), devueltos: cuentaAjenos("devuelto", "rechazado") },
       documentos,
       factura: factura ? { numero: factura.numero ?? "(sin número)", estado: factura.estado } : null,
       calibraciones: (calibraciones?.cals ?? []).map((c) => ({
@@ -236,7 +247,20 @@ export class AvanceOtService {
         : null,
       // DSA: documentación del trabajo que se aprueba antes de ejecutar (frente r2a).
       trabajoDsa: await trabajoDsaDe(this.prisma as any, { id: ot.id, tenantId: ot.tenantId, laboratorio: ot.unidad?.codigo ?? null }),
+      // R10: trabajo en terreno sin recepción (SVM, LAM, SEO).
+      ...(await this.terreno(ot.id, ot.tenantId, ot.unidad?.codigo ?? null)),
     };
+  }
+
+  private async terreno(otId: string, tenantId: string, laboratorio: string | null) {
+    const h = await hechosTerreno(this.prisma as any, otId);
+    const [p] = await this.prisma
+      .$queryRawUnsafe<{ valor: string | null }[]>(
+        `SELECT valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'terreno' AND codigo = 'laboratorios' AND activo`,
+        tenantId,
+      )
+      .catch(() => [] as { valor: string | null }[]);
+    return { terreno: h ? { pasos: pasosTerreno(h).pasos } : null, terrenoAplica: laboratorioDeTerreno(p?.valor ?? null, laboratorio) };
   }
 
   /** Ruta de la OT + si el usuario puede hacer el siguiente paso. */
@@ -245,6 +269,7 @@ export class AvanceOtService {
     const u = req?.user ?? {};
     return {
       ...a,
+      pestanas: pestanasParaPerfil(a.pestanas, perfilMuestreo(u.roles ?? [], u.permisos ?? [])),
       siguiente: a.siguiente
         ? { ...a.siguiente, puedoActuar: puedeActuar(a.siguiente.accion, { id: u.sub, permisos: u.permisos, roles: u.roles }) }
         : null,

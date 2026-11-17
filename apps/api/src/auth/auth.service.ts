@@ -1,3 +1,5 @@
+import { hayVariosPerfiles, opcionesPerfil } from "../rbac/perfil-activo";
+import { esVigente } from "../rbac/alcance";
 import { LOCK_MS, MAX_INTENTOS_FALLIDOS } from "./bloqueo";
 import { Injectable, UnauthorizedException, BadRequestException, Inject } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
@@ -185,9 +187,14 @@ export class AuthService {
     cargo: string | null;
     tokenVersion?: number | null;
     debeCambiarPassword?: boolean | null;
-  }) {
-    // Cargar roles y permisos efectivos del usuario para el RBAC
-    const { roles, permisos, unidades, unidadGlobal, perfil } = await this.rolesYPermisos(usuario.id, usuario.tenantId);
+  }, perfilUnidad: string | null = null) {
+    // Cargar roles y permisos efectivos del usuario para el RBAC (del perfil de
+    // esta sesión, si eligió uno: F028, el perfil viaja en el token y no en la BD).
+    const { roles, permisos, unidades, unidadGlobal, perfil, perfilActivo } = await this.rolesYPermisos(
+      usuario.id,
+      usuario.tenantId,
+      perfilUnidad,
+    );
     const cambioClave = usuario.debeCambiarPassword === true;
 
     const payload = {
@@ -202,6 +209,9 @@ export class AuthService {
       unidadGlobal,
       // Perfil de bandeja (DIRECTOR, JEFE_DEPTO, ..., ANALISTA, ADMIN, LECTOR).
       perfil,
+      // Perfil activo de esta sesión (jefaturas duales). Solo existe en el token:
+      // otro ingreso del mismo usuario no lo ve y vuelve a preguntar.
+      ...(perfilActivo ? { pu: perfilActivo } : {}),
       // Contraseña temporal: hasta cambiarla, PermisoGuard solo deja usar las
       // rutas de cambio de contraseña (@PermiteCambioClavePendiente).
       ...(cambioClave ? { cambioClave: true } : {}),
@@ -242,7 +252,7 @@ export class AuthService {
    * marca de cambio obligatorio, invalida los refresh tokens anteriores
    * (tokenVersion++) y devuelve una sesión nueva.
    */
-  async cambiarPassword(usuarioId: string, actual: string, nueva: string) {
+  async cambiarPassword(usuarioId: string, actual: string, nueva: string, perfilUnidad: string | null = null) {
     const usuario = await this.prisma.usuario.findFirst({ where: { id: usuarioId, deletedAt: null, estado: "activo" } });
     if (!usuario) throw new UnauthorizedException();
     if (!usuario.passwordHash) {
@@ -274,7 +284,38 @@ export class AuthService {
         updatedAt: new Date(),
       },
     });
-    return { ok: true, mensaje: "Contraseña actualizada.", ...(await this.emitirSesion(actualizado)) };
+    return { ok: true, mensaje: "Contraseña actualizada.", ...(await this.emitirSesion(actualizado, perfilUnidad)) };
+  }
+
+  /**
+   * Perfiles que puede elegir una persona con varias jefaturas o roles en unidades
+   * distintas (R1), y el que tiene activo. Con menos de dos, no se ofrece selector.
+   */
+  async perfiles(usuarioId: string, tenantId?: string, activo: string | null = null) {
+    const [arbol, asignaciones, jefaturas] = await Promise.all([
+      this.alcance.arbol(tenantId),
+      this.alcance.asignacionesDe(usuarioId),
+      this.alcance.jefaturasDe(usuarioId),
+    ]);
+    const ahora = new Date();
+    const opciones = opcionesPerfil(
+      asignaciones.filter((a) => esVigente(a, ahora)).map((a) => ({ unidadId: a.unidadId, rolCodigo: a.rolCodigo, rolNombre: a.rolNombre })),
+      jefaturas,
+      (id) => arbol.porId.get(id) ?? null,
+    );
+    return { opciones: hayVariosPerfiles(opciones) ? opciones : [], activo: opciones.some((o) => o.unidadId === activo) ? activo : null };
+  }
+
+  /** Elige el perfil activo de esta sesión (o null = todos) y devuelve una sesión nueva con sus permisos. */
+  async elegirPerfil(usuarioId: string, tenantId: string | undefined, unidadId: string | null) {
+    const { opciones } = await this.perfiles(usuarioId, tenantId);
+    if (unidadId && !opciones.some((o) => o.unidadId === unidadId))
+      throw new BadRequestException("Ese perfil no corresponde a sus jefaturas o roles vigentes.");
+    // F028: el perfil se guarda solo en el token de esta sesión (claim `pu`), no por
+    // usuario: elegirlo aquí no cambia el de otros ingresos del mismo usuario.
+    const usuario = await this.prisma.usuario.findFirst({ where: { id: usuarioId, deletedAt: null, estado: "activo" } });
+    if (!usuario) throw new UnauthorizedException();
+    return { ok: true, perfil: unidadId, ...(await this.emitirSesion(usuario, unidadId)) };
   }
 
   /** ¿Es un usuario de prueba? Tolera bases sin align_accesos_demo.sql. */
@@ -348,22 +389,24 @@ export class AuthService {
   async rolesYPermisos(
     usuarioId: string,
     tenantId?: string,
-  ): Promise<{ roles: string[]; permisos: string[]; unidades: string[]; unidadGlobal: boolean; perfil: string }> {
-    const ctx = await this.alcance.contexto(usuarioId, tenantId);
+    perfilUnidad: string | null = null,
+  ): Promise<{ roles: string[]; permisos: string[]; unidades: string[]; unidadGlobal: boolean; perfil: string; perfilActivo: string | null }> {
+    const ctx = await this.alcance.contexto(usuarioId, tenantId, [], perfilUnidad);
+    const perfilActivo = ctx.perfilActivo ?? null;
     const vigentes = ctx.asignacionesVigentes;
     const roles = [...new Set(vigentes.map((a) => a.rolCodigo))];
     const rolIds = [...new Set(vigentes.map((a) => a.rolId))];
     if (rolIds.length === 0) {
       // Sin roles: sin permisos. Se mantiene unidadGlobal=true como antes para
       // no alterar el comportamiento de tokens sin RBAC (no tiene permisos igual).
-      return { roles, permisos: [], unidades: ctx.unidadIds, unidadGlobal: ctx.esGlobal || ctx.unidadIds.length === 0, perfil: ctx.perfil };
+      return { roles, permisos: [], unidades: ctx.unidadIds, unidadGlobal: ctx.esGlobal || ctx.unidadIds.length === 0, perfil: ctx.perfil, perfilActivo };
     }
     const rp = await this.prisma.rolPermiso.findMany({
       where: { rolId: { in: rolIds } },
       include: { permiso: true },
     });
     const permisos = [...new Set(rp.map((x) => x.permiso.codigo))];
-    return { roles, permisos, unidades: ctx.esGlobal ? [] : ctx.unidadIds, unidadGlobal: ctx.esGlobal, perfil: ctx.perfil };
+    return { roles, permisos, unidades: ctx.esGlobal ? [] : ctx.unidadIds, unidadGlobal: ctx.esGlobal, perfil: ctx.perfil, perfilActivo };
   }
 
   async refresh(refreshToken: string) {
@@ -383,7 +426,12 @@ export class AuthService {
       if (!usuario || (usuario.tokenVersion ?? 0) !== (payload.tv ?? 0)) {
         throw new UnauthorizedException("Refresh token inválido");
       }
-      const { roles, permisos, unidades, unidadGlobal, perfil } = await this.rolesYPermisos(payload.sub, payload.tenantId);
+      // F028: el perfil activo de la sesión se conserva al renovar (claim `pu`).
+      const { roles, permisos, unidades, unidadGlobal, perfil, perfilActivo } = await this.rolesYPermisos(
+        payload.sub,
+        payload.tenantId,
+        typeof payload.pu === "string" ? payload.pu : null,
+      );
       const accessToken = this.jwt.sign({
         sub: payload.sub,
         username: payload.username,
@@ -393,6 +441,7 @@ export class AuthService {
         unidades,
         unidadGlobal,
         perfil,
+        ...(perfilActivo ? { pu: perfilActivo } : {}),
         ...(usuario.debeCambiarPassword ? { cambioClave: true } : {}),
         tv: usuario.tokenVersion ?? 0,
       });

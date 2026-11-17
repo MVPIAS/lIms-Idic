@@ -1010,7 +1010,11 @@ export class ProduccionNacionalService {
       );
       return creada;
     });
-    return { ot, avisos, oc: await this.ocDetalle(tenantId, l.oc_id) };
+    // F006: sin elemento del catálogo la OT no trae la batería de ensayos a la recepción.
+    const avisosPantalla = producto && !producto.cat_elemento_id
+      ? [...avisos, `El producto «${producto.producto}» no está asociado a un elemento del catálogo: asócielo en la tabla de productos de la O/C para que la OT traiga su batería de ensayos.`]
+      : avisos;
+    return { ot, avisos: avisosPantalla, oc: await this.ocDetalle(tenantId, l.oc_id) };
   }
 
   /* ----------------------------------------------------- correlación de ventas --- */
