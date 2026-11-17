@@ -233,6 +233,9 @@ model Cliente {
   condicionesEspeciales String?  @map("condiciones_especiales")
   bloqueado       Boolean   @default(false)
   motivoBloqueo   String?   @map("motivo_bloqueo")
+  /// COM-05: 'mora' (automático por facturas vencidas) | 'manual'. align_tercer_envio_comercial.sql.
+  bloqueoOrigen   String?   @map("bloqueo_origen") @db.VarChar(10)
+  bloqueadoAt     DateTime? @map("bloqueado_at") @db.Timestamptz
   saldoActual     Decimal   @default(0) @map("saldo_actual") @db.Decimal(14, 2)
   notas           String?
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz

@@ -582,9 +582,17 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     titulo: "Avisos internos y por correo",
     donde:
       "Mi bandeja › Avisos y correo: OT vencidas y por vencer, resultados No cumple o Contaminado, documentos oficiales, despachos y oficios. Sin correo configurado el aviso queda en la bandeja y en la bitácora de Mensajería.",
-    porConfirmar: "Umbral de «por vencer» (Sistema Comercial: 4 días) y aviso al cliente de un No cumple (EP-00 P9, EP-02 P7 / DQO-07).",
+    porConfirmar: "Aviso al cliente de un No cumple (EP-00 P9, EP-02 P7 / DQO-07). «Por vencer»: 3 días, confirmado por el IDIC (COM-23, 17-11-2026).",
     codigos: {
-      dias_por_vencer: { tipo: "entero", nombre: "Días antes del compromiso en que se avisa «por vencer»", min: 1, max: 30, unidad: "días", porDefecto: "3" },
+      dias_por_vencer: {
+        tipo: "entero",
+        nombre: "Días antes del compromiso en que se avisa «por vencer»",
+        min: 1,
+        max: 30,
+        unidad: "días",
+        ayuda: "Rige el semáforo de la OT, Mi bandeja y los avisos. El plazo se mide con la recepción en el DCO (COM-23).",
+        porDefecto: "3",
+      },
       revision_automatica: { tipo: "sino", nombre: "Revisar los plazos cada hora y avisar al laboratorio y al ejecutivo", opciones: SI_NO, porDefecto: "si" },
       enviar_correo: { tipo: "sino", nombre: "Enviar también por correo los avisos", opciones: SI_NO, porDefecto: "si" },
       no_cumple_al_cliente: {
@@ -595,6 +603,19 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         porDefecto: "no",
       },
       documento_listo: { tipo: "sino", nombre: "Avisar a Comercial cuando un documento queda oficial", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
+  // --- COM-05 · Mora de clientes (respuesta IDIC 17-11-2026) ---
+  {
+    categoria: "mora_cliente",
+    titulo: "Bloqueo de clientes por mora",
+    donde:
+      "Revisión diaria y al cotizar o abrir una OT: días desde el vencimiento de la factura (su fecha de vencimiento o la emisión + los días de crédito del cliente). Aviso a Comercial y Finanzas, bloqueo del cliente (sin cotizaciones ni OT nuevas) y alerta para derivar al Consejo de Defensa del Estado. La excepción la autoriza el Jefe DCO en la ficha del cliente.",
+    codigos: {
+      activo: { tipo: "sino", nombre: "Aplicar el bloqueo automático por mora", opciones: SI_NO, porDefecto: "si" },
+      dias_aviso: { tipo: "entero", nombre: "Días de mora para avisar", min: 1, max: 3650, unidad: "días", porDefecto: "30" },
+      dias_bloqueo: { tipo: "entero", nombre: "Días de mora para bloquear al cliente", min: 1, max: 3650, unidad: "días", porDefecto: "60" },
+      dias_cde: { tipo: "entero", nombre: "Días de mora para alertar «derivar al CDE»", min: 1, max: 3650, unidad: "días", porDefecto: "90" },
     },
   },
   // --- Sesión (contrato §4.7.6) ---

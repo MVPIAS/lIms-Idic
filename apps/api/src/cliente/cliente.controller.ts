@@ -6,6 +6,8 @@ import { ApiTags, ApiBearerAuth } from "@nestjs/swagger";
 import { z } from "zod";
 
 import { ClienteService } from "./cliente.service";
+import { PrismaService } from "../common/prisma.service";
+import { exigirJefeDco } from "./mora.service";
 import { validaRut } from "../common/rut.validator";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
@@ -73,7 +75,10 @@ const ActualizarClienteSchema = CrearClienteSchema.partial().extend({
 @UseGuards(AuthGuard("jwt"), PermisoGuard)
 @Controller("clientes")
 export class ClienteController {
-  constructor(private readonly svc: ClienteService) {}
+  constructor(
+    private readonly svc: ClienteService,
+    private readonly prisma: PrismaService,
+  ) {}
 
   @Get()
   @RequierePermiso("cliente.ver")
@@ -137,14 +142,26 @@ export class ClienteController {
     return this.svc.bloquear(id, body.motivo, req?.user?.tenantId);
   }
 
+  /**
+   * COM-05 · Excepción / desbloqueo: lo autoriza el Jefe DCO o su subrogante
+   * (permiso cliente.desbloquear) y queda registrado con su motivo.
+   */
   @Post(":id/desbloquear")
-  @RequierePermiso("cliente.editar")
+  @RequierePermiso("cliente.desbloquear")
   async desbloquear(
     @Param("id", ParseUUIDPipe) id: string,
     @Body() body: { motivo: string },
     @Req() req: any,
   ) {
-    return this.svc.desbloquear(id, body.motivo, req?.user?.tenantId);
+    await exigirJefeDco(this.prisma, req);
+    return this.svc.desbloquear(id, body?.motivo, req?.user?.tenantId, req?.user?.sub);
+  }
+
+  /** COM-05 · Mora del cliente: facturas vencidas por tramo (30 aviso · 60 bloqueo · 90 CDE) y desbloqueos. */
+  @Get(":id/mora")
+  @RequierePermiso("cliente.ver")
+  async mora(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.mora(id, req?.user?.tenantId);
   }
 
   @Get(":id/contactos")

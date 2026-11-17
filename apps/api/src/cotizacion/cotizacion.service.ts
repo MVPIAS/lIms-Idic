@@ -43,6 +43,7 @@ import { heredarDeCotizacion } from "../ot/encargo/encargo.module";
 import { entero, valoresCategoria } from "../common/parametros-r4d";
 import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 import { lineasDesdeCotizacion, totales as totalesFactura } from "../facturacion/reglas-factura";
+import { exigirClienteHabilitado } from "../cliente/mora.service";
 import {
   ESTADO_REABIERTA,
   REAPERTURA_VIVA,
@@ -642,6 +643,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    */
   async crear(data: CabeceraCotizacion & { clienteId: string; lineas: LineaEntrada[] }, tenantId?: string, usuarioId?: string) {
     const tenantIdFromJWT = tenantId ?? DEV_TENANT;
+    // COM-05: a un cliente bloqueado (mora o bloqueo manual) no se le cotiza.
+    await exigirClienteHabilitado(this.prisma, tenantIdFromJWT, data.clienteId);
     this.validarCondiciones(data.condicionesAdicionales);
     if (data.medioEnvio) await exigirMedioEnvioActivo(this.prisma, tenantIdFromJWT, data.medioEnvio);
     const moneda = data.moneda ?? "CLP";
@@ -945,6 +948,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       where: { cotizacionId: id, tenantId: tenantIdOt },
       select: { id: true, unidadPrincipal: true },
     });
+    // COM-05: aceptar genera la OT; un cliente bloqueado no recibe OT nuevas.
+    if (!otPrevia) await exigirClienteHabilitado(this.prisma, tenantIdOt, cot.clienteId);
     const unidad =
       otPrevia?.unidadPrincipal && !doc.unidadPrincipalId
         ? null
