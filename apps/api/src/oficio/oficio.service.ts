@@ -371,12 +371,20 @@ export class OficioService {
    */
   private async resolverMatriz(o: any) {
     if (o.cotizacion_id) {
+      // Laboratorio: el del centro de costo de la cotización o, si no, el de su OT.
       const [lab] = await this.prisma.$queryRawUnsafe<{ unidad_id: string | null }[]>(
-        `SELECT cc.unidad_id FROM cotizacion c LEFT JOIN centro_costo cc ON cc.id = c.centro_costo_id WHERE c.id = $1::uuid`,
+        `SELECT COALESCE(cc.unidad_id, (SELECT o.unidad_principal FROM orden_trabajo o WHERE o.cotizacion_id = c.id ORDER BY o.created_at LIMIT 1)) AS unidad_id
+           FROM cotizacion c LEFT JOIN centro_costo cc ON cc.id = c.centro_costo_id WHERE c.id = $1::uuid`,
         o.cotizacion_id,
       );
       const res = await this.matriz.resolver("OFICIO_COTIZACION", lab?.unidad_id ?? o.unidad_id, o.tenant_id);
-      if (res.pasos.length) return res;
+      if (res.pasos.length) {
+        if (!lab?.unidad_id && res.pasos.some((p) => p.rol.codigo === "JEFE_LAB"))
+          throw new ConflictException(
+            "El oficio conductor lo visa el Jefe del laboratorio de la cotización: indique en la cotización el centro de costo (laboratorio).",
+          );
+        return res;
+      }
     }
     return this.matriz.resolver("OFICIO", o.unidad_id, o.tenant_id);
   }
