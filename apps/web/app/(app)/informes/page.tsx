@@ -11,7 +11,7 @@
  * por firmar»; con la última firma pasa a oficial.
  * Reglas: docs/FLUJO_FIRMA_CIERRE.md y docs/FLUJO_INFORME_ENSAYO.md.
  */
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { otActiva } from "@/lib/ot-activa";
@@ -60,7 +60,7 @@ const TIPOS_DOCUMENTO: { valor: string; texto: string }[] = [
   { valor: "IVC", texto: "Informe de verificación (IVC)" },
   { valor: "INFORME_TECNICO", texto: "Informe técnico" },
   { valor: "CERTIFICADO_CALIBRACION", texto: "Certificado de calibración" },
-  { valor: "INFORME_INSPECCION", texto: "Informe de inspección" },
+  { valor: "INFORME_INSPECCION", texto: "Certificado de control (Informe de Inspección)" },
   { valor: "CERTIFICADO_CONFORMIDAD", texto: "Certificado de conformidad" },
   { valor: "INFORME_INCUMPLIMIENTO", texto: "Informe de incumplimiento" },
   { valor: "CERTIFICADO_RESISTENCIA_BALISTICA", texto: "Certificado de Resistencia Balística (CRB)" },
@@ -152,6 +152,23 @@ function InformesContenido() {
   useEffect(() => {
     if (plantillaId && !plantillasVisibles.some((p) => p.id === plantillaId)) setPlantillaId("");
   }, [plantillasVisibles, plantillaId]);
+
+  // F063: con la OT elegida y sin plantilla, se propone la del laboratorio (una vez por OT; se puede cambiar).
+  const sugeridaPara = useRef<string>("");
+  useEffect(() => {
+    if (!otId || plantillaId || cargando || !plantillas.length || sugeridaPara.current === otId) return;
+    sugeridaPara.current = otId;
+    api
+      .getRaw<{ sugerida: { plantillaId: string } | null }>(`informes/ot/${otId}/plantilla-sugerida`)
+      .then((r) => {
+        const id = r?.sugerida?.plantillaId;
+        if (id && plantillas.some((p) => p.id === id)) {
+          setFiltroTipo("");
+          setPlantillaId((actual) => actual || id);
+        }
+      })
+      .catch(() => undefined);
+  }, [otId, plantillaId, cargando, plantillas]);
 
   const listo = !!otId && !!plantillaId;
   const datosInforme = () => ({
@@ -362,7 +379,8 @@ function InformesContenido() {
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12.5, lineHeight: 1.6 }}>
                 {cond.faltantes.map((f, i) => <li key={i}>{f}</li>)}
               </ul>
-              {otId && <p className="subtitle" style={{ marginBottom: 0 }}>Revise y apruebe los resultados en <Link href={"/captura-ot" as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>.</p>}
+              {/* F019: solo si falta aprobar resultados (no cuando todo está aprobado y falta otra cosa). */}
+              {otId && cond.resultados.aprobados < cond.resultados.total && <p className="subtitle" style={{ marginBottom: 0 }}>Revise y apruebe los resultados en <Link href={"/captura-ot" as any} style={{ color: "var(--accent)" }}>Captura y revisión por OT</Link>.</p>}
             </>
           )}
           {cond?.puedeEmitir && <p style={{ margin: "0 0 6px" }}>Todo en orden: resultados aprobados y firmantes definidos.</p>}
@@ -413,12 +431,20 @@ function InformesContenido() {
                   <input type="radio" name="modalidad" value={m} checked={modalidad === m} onChange={() => { setModalidad(m); setPreview(null); }} style={{ marginTop: 3 }} />
                   <span>
                     <b style={{ fontSize: 13 }}>{MODALIDAD[m].texto}</b>
-                    {propuesta.modalidad === m && <span className="pill teal" style={{ marginLeft: 6 }}>Sugerido</span>}
+                    {propuesta.modalidad === m && (
+                      <span className="pill teal" style={{ marginLeft: 6 }}>{propuesta.modalidadOrigen === "plantilla" ? "Por defecto de la plantilla" : "Sugerido"}</span>
+                    )}
                     <small style={{ display: "block", color: "var(--muted)", marginTop: 2 }}>{MODALIDAD[m].ayuda}</small>
                   </span>
                 </label>
               ))}
             </div>
+            {propuesta.modalidadOrigen === "plantilla" && propuesta.modalidadPorRequisitos && propuesta.modalidadPorRequisitos !== modalidad && (
+              <p className="subtitle" style={{ margin: "6px 0 0" }}>
+                Esta plantilla emite por defecto el «{MODALIDAD[propuesta.modalidad].texto}». Según los requisitos de los ensayos
+                ({propuesta.conRequisito} de {propuesta.totalEnsayos}) corresponde el «{MODALIDAD[propuesta.modalidadPorRequisitos].texto}»: elíjalo arriba si el informe debe llevar el veredicto.
+              </p>
+            )}
             {modalidad === "cumplimiento" && propuesta.conRequisito < propuesta.totalEnsayos && (
               <p className="subtitle" style={{ margin: "6px 0 0" }}>
                 {propuesta.totalEnsayos - propuesta.conRequisito} ensayo(s) sin requisito saldrán como «No especificado» (informativo).

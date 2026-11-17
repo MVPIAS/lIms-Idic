@@ -1,4 +1,11 @@
-import { calcularAvance, puedeActuar, tipoRuta, type CalibracionAvance, type DocumentoAvance, type HechosOt, type InstrumentoAvance } from "./avance-ot";
+import { NOMBRE_ORIGEN_OT, calcularAvance, puedeActuar, tipoRuta, type CalibracionAvance, type DocumentoAvance, type HechosOt, type InstrumentoAvance } from "./avance-ot";
+
+describe("F008 · el origen de la OT se lee con su nombre", () => {
+  it("Requerimiento BPCH y no REQUERIMIENTO_BPCH", () => {
+    expect(NOMBRE_ORIGEN_OT.REQUERIMIENTO_BPCH).toBe("Requerimiento BPCH");
+    expect(Object.values(NOMBRE_ORIGEN_OT).some((v) => /_/.test(v))).toBe(false);
+  });
+});
 
 /** OT de laboratorio recién nacida de una cotización aceptada (estado «recepcionada»). */
 function base(p: Partial<HechosOt> = {}): HechosOt {
@@ -92,6 +99,14 @@ describe("Ruta de la OT · laboratorio (recorrido estándar)", () => {
     expect(a.siguiente?.texto).toBe("Capturar resultados de 3 ensayos");
     expect(a.siguiente?.leToca).toEqual({ rol: "Analista", unidad: "LQC", personas: ["J. P."] });
     expect(a.siguiente?.accion).toMatchObject({ ruta: "/captura-ot?otId=ot-1", permisos: ["resultado.crear"] });
+  });
+
+  it("no le pide a los analistas del responsable los ensayos de otros laboratorios (F071)", () => {
+    const a = calcularAvance(base({ ...conMuestra, resultados: res({ pendientes: 6 }), resultadosOtrosLabs: { pendientes: 3, devueltos: 0 } }));
+    expect(a.siguiente?.texto).toBe("Capturar resultados de 3 ensayos · 3 ensayos de otros laboratorios por orden interna");
+    const solo = calcularAvance(base({ ...conMuestra, resultados: res({ pendientes: 2, aprobados: 4 }), resultadosOtrosLabs: { pendientes: 2, devueltos: 0 } }));
+    expect(solo.siguiente?.texto).toMatch(/^Faltan 2 ensayos de otros laboratorios/);
+    expect(solo.siguiente?.accion?.pestana).toBe("ordenes");
   });
 
   it("con resultados a medias: sigue en Análisis y cuenta lo capturado y lo devuelto", () => {
@@ -619,11 +634,11 @@ describe("Ruta de la OT · armas de la Delegación Nº 11 (EP-11)", () => {
 
 describe("Pestañas «Muestreo» y «Preparación» según la especificación", () => {
   it("se ven en una OT de laboratorio fuera del BPCH", () => {
-    expect(calcularAvance(base()).pestanas).toEqual({ muestreo: true, preparacion: true });
+    expect(calcularAvance(base()).pestanas).toMatchObject({ muestreo: true, preparacion: true });
   });
   it("no se ven en OT del BPCH (el muestreo NCh 44 es del expediente) ni de la D11", () => {
-    expect(calcularAvance(base({ rama: "bpch" })).pestanas).toEqual({ muestreo: false, preparacion: false });
-    expect(calcularAvance(base({ rama: "d11" })).pestanas).toEqual({ muestreo: false, preparacion: false });
+    expect(calcularAvance(base({ rama: "bpch" })).pestanas).toMatchObject({ muestreo: false, preparacion: false });
+    expect(calcularAvance(base({ rama: "d11" })).pestanas).toMatchObject({ muestreo: false, preparacion: false });
   });
   it("no se ven en Metrología ni en la ruta de armas", () => {
     expect(calcularAvance(base({ unidad: { codigo: "LMT", esMetrologia: true } })).pestanas.muestreo).toBe(false);

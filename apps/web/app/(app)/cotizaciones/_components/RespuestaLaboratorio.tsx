@@ -266,8 +266,10 @@ function TablaSeccion({ sec, filas, onCambio, refs }: { sec: (typeof SECCIONES)[
  * y el laboratorio agrega aquí los ensayos que realizará, con su cantidad. El
  * precio sale de la lista vigente o de la ficha, como en Comercial.
  */
-function EnsayosDelLaboratorio({ solId }: { solId: string }) {
+function EnsayosDelLaboratorio({ solId, muestras = [] }: { solId: string; muestras?: { n: number; descripcion: string }[] }) {
   const [q, setQ] = useState("");
+  // F030: en una cotización por muestra, los ensayos agregados van a la muestra elegida.
+  const [muestraN, setMuestraN] = useState("");
   const [opciones, setOpciones] = useState<{ id: string; codigo?: string; nombre: string }[]>([]);
   const [elegidos, setElegidos] = useState<{ id: string; nombre: string; cantidad: string }[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
@@ -287,7 +289,7 @@ function EnsayosDelLaboratorio({ solId }: { solId: string }) {
     setGuardando(true);
     try {
       const r = await pedir<any>("POST", `/cotizaciones/solicitudes-laboratorio/${solId}/ensayos`, {
-        lineas: elegidos.map((e) => ({ catEnsayoId: e.id, cantidad: Math.max(1, Number(e.cantidad) || 1) })),
+        lineas: elegidos.map((e) => ({ catEnsayoId: e.id, cantidad: Math.max(1, Number(e.cantidad) || 1), muestraN: muestraN ? Number(muestraN) : null })),
       });
       setMsg({ ok: true, texto: r?.mensaje ?? "Ensayos agregados." });
       setElegidos([]);
@@ -305,6 +307,15 @@ function EnsayosDelLaboratorio({ solId }: { solId: string }) {
       </p>
       {msg && <div className={`alert ${msg.ok ? "ok" : "warn"}`} role="status">{msg.texto}</div>}
       <div className="form-grid cols-3">
+        {muestras.length > 0 && (
+          <div className="field">
+            <label htmlFor={`ens-m-${solId}`}>Muestra de la cotización</label>
+            <select id={`ens-m-${solId}`} value={muestraN} onChange={(e) => setMuestraN(e.target.value)}>
+              <option value="">Toda la cotización</option>
+              {muestras.map((m) => <option key={m.n} value={m.n}>Muestra {m.n}{m.descripcion ? ` · ${m.descripcion}` : ""}</option>)}
+            </select>
+          </div>
+        )}
         <div className="field span-2">
           <label htmlFor={`ens-q-${solId}`}>Buscar en el catálogo</label>
           <input id={`ens-q-${solId}`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Código o nombre del ensayo" />
@@ -348,12 +359,14 @@ function EnsayosDelLaboratorio({ solId }: { solId: string }) {
 export default function RespuestaLaboratorio({
   sol,
   cotCodigo,
+  muestras = [],
   cfg,
   onCerrar,
   onHecho,
 }: {
   sol: Solicitud;
   cotCodigo: string;
+  muestras?: { n: number; descripcion: string }[];
   cfg: { cfaPct: number; margenParticularPct: number; ivaPct?: number; precioEjercito?: string };
   onCerrar: () => void;
   onHecho: (msg: string) => void;
@@ -493,7 +506,7 @@ export default function RespuestaLaboratorio({
         )}
       </fieldset>
 
-      {!rechaza && <EnsayosDelLaboratorio solId={sol.id} />}
+      {!rechaza && <EnsayosDelLaboratorio solId={sol.id} muestras={muestras} />}
 
       {!rechaza && (
         <>

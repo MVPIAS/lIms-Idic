@@ -1,4 +1,5 @@
 import { erroresFactorMetodo } from "../laboratorio/factor";
+import { erroresReglasResultado, leerReglasResultado } from "../laboratorio/reglas-resultado";
 import { hoyEnChile, isoFecha, soloFecha } from "../cotizacion/validez";
 import { itemsListaVigente, precioPanel } from "../lista-precio/precio-lista";
 import {
@@ -9,6 +10,8 @@ import {
   Param,
   ParseUUIDPipe,
   Patch,
+  Put,
+  BadRequestException,
   Post,
   Query,
   Req,
@@ -25,6 +28,8 @@ import { BaseCrudController } from "../common/base-crud.controller";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso, RequierePermisoCrud } from "../auth/permisos.decorator";
 import { RecursoDeLaboratorio } from "../rbac/alcance-catalogo.guard";
+import { AlcanceService } from "../rbac/alcance.service";
+import { marcarEnAlcance } from "./en-alcance";
 
 /**
  * =============================================================================
@@ -306,6 +311,11 @@ const factorCompleto = (d: { factorValor?: number | null; factorOperacion?: stri
   const e = erroresFactorMetodo(d);
   if (e) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["factorOperacion"], message: e });
 };
+/** Reglas del resultado del método (R7, R8). */
+const ReglasResultadoBody = z.object({
+  decimales: z.number().int().min(0).max(6).nullable().optional(),
+  condiciones: z.enum(["no_aplica", "opcional", "obligatoria"]).default("opcional"),
+});
 export const CatMetodoCreate = CatMetodoBase.superRefine(factorCompleto);
 export const CatMetodoUpdate = CatMetodoBase.partial().superRefine(factorCompleto);
 @ApiTags("cat-metodos") @ApiBearerAuth() @UseGuards(AuthGuard("jwt"), PermisoGuard) @Controller("cat/metodos")
@@ -314,7 +324,30 @@ export const CatMetodoUpdate = CatMetodoBase.partial().superRefine(factorComplet
 export class CatMetodoController extends BaseCrudController {
   protected createSchema = CatMetodoCreate;
   protected updateSchema = CatMetodoUpdate;
-  constructor(protected svc: CatMetodoService, private readonly prisma: PrismaService) { super(); }
+  constructor(protected svc: CatMetodoService, private readonly prisma: PrismaService, private readonly alcance: AlcanceService) { super(); }
+
+  /**
+   * Métodos (de esta página) que el usuario puede modificar: con catalogo.gestionar
+   * global, todos; acotado, los de un ensayo de su laboratorio (misma regla que
+   * AlcanceCatalogoGuard). null = todos.
+   */
+  private async idsEnAlcance(req: any, ids: string[]): Promise<Set<string> | null> {
+    const a = await this.alcance.alcancePermisos(req, ["catalogo.gestionar"]);
+    if (a.esGlobal) return null;
+    if (!ids.length || !a.unidadIds.length) return new Set();
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string }[]>(
+      `SELECT DISTINCT m.id::text AS id
+         FROM cat_metodo m
+         JOIN cat_ensayo e ON e.id = m.ensayo_id
+         JOIN cat_familia f ON f.id = e.familia_id
+         JOIN unidad u ON u.tenant_id = f.tenant_id
+                      AND f.codsucdel = ANY(string_to_array(regexp_replace(COALESCE(u.codsucdel, ''), '[\\s,;]', '/', 'g'), '/'))
+        WHERE m.id = ANY($1::uuid[]) AND u.id = ANY($2::uuid[])`,
+      ids,
+      a.unidadIds,
+    );
+    return new Set(filas.map((f) => f.id));
+  }
 
   /** Listado con la revisión vigente de cada método (columna «Rev.», contrato §4.3.3). */
   @Get()
@@ -326,7 +359,10 @@ export class CatMetodoController extends BaseCrudController {
   ) {
     const r: any = await super.listar(page, limit, search, req);
     const revs = await revisionesActuales(this.prisma as any, (r?.data ?? []).map((m: any) => m.id));
-    return { ...r, data: (r?.data ?? []).map((m: any) => ({ ...m, revision: revs.get(m.id) ?? null })) };
+    // F061: cada fila dice si el usuario puede modificarla (la pantalla no ofrece Editar en los ajenos).
+    const enAlcance = req?.user?.sub ? await this.idsEnAlcance(req, (r?.data ?? []).map((m: any) => m.id)).catch(() => null) : null;
+    const data = marcarEnAlcance((r?.data ?? []).map((m: any) => ({ ...m, revision: revs.get(m.id) ?? null })), enAlcance);
+    return { ...r, data };
   }
 
   /** Alta: nace la revisión 1 del método (quién y cuándo). */
@@ -364,6 +400,32 @@ export class CatMetodoController extends BaseCrudController {
       (tx) => tx.catMetodo.update({ where: { id }, data: rest }),
     );
     return { ...(r.valor as any), revision: r.revision, cambios: r.cambios };
+  }
+
+  /**
+   * Reglas del resultado del método (R7 LPN, R8 LME): decimales del resultado final
+   * (redondeo; 0 = entero) y si las condiciones ambientales no aplican, son opcionales
+   * u obligatorias en la captura. Columnas fuera de Prisma (align_sesiones_s2.sql).
+   */
+  @Get(":id/reglas-resultado")
+  async reglasResultado(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.svc.detalle(id, req?.user?.tenantId);
+    const [m] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT decimales_resultado, condiciones_ambientales FROM cat_metodo WHERE id = $1::uuid`, id);
+    return { data: leerReglasResultado(m) };
+  }
+
+  @Put(":id/reglas-resultado")
+  @RequierePermiso("catalogo.gestionar")
+  async guardarReglasResultado(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    const d = ReglasResultadoBody.parse(body ?? {});
+    const errores = erroresReglasResultado(d);
+    if (errores.length) throw new BadRequestException(errores.join(" "));
+    await this.svc.detalle(id, req?.user?.tenantId);
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE cat_metodo SET decimales_resultado = $2, condiciones_ambientales = $3 WHERE id = $1::uuid`,
+      id, d.decimales ?? null, d.condiciones);
+    return { data: leerReglasResultado({ decimales_resultado: d.decimales ?? null, condiciones_ambientales: d.condiciones }) };
   }
 
   /** «Historial de versiones» del método: revisiones con fecha, responsable, motivo y cambios. */

@@ -302,6 +302,22 @@ export function modalidadEfectiva(pedida: Modalidad, resultados: { evaluacion?: 
   return todosSoloResultado(resultados) ? "solo_resultados" : pedida;
 }
 
+/**
+ * De dónde sale la modalidad propuesta (F072): «plantilla» si la plantilla la
+ * fija (p. ej. el Informe de Ensayos de Alimentos: solo resultados) y
+ * «sugerida» si se deduce de los requisitos. La pantalla no rotula «Sugerido»
+ * una modalidad que contradice los requisitos: dice que es la de la plantilla.
+ */
+export function origenModalidad(
+  cfg: { modalidadPorDefecto?: "sugerida" | "cumplimiento" | "solo_resultados" },
+  resultados: { evaluacion?: string | null }[] = [],
+): "plantilla" | "sugerida" {
+  const fija = cfg.modalidadPorDefecto;
+  // Todos «solo resultado» (SAL-07): manda la evaluación de los ensayos, no la plantilla.
+  if (fija === "cumplimiento" && todosSoloResultado(resultados)) return "sugerida";
+  return fija === "cumplimiento" || fija === "solo_resultados" ? "plantilla" : "sugerida";
+}
+
 /* ========================================================================== */
 /* Estructura: secciones, componentes y numeración                            */
 /* ========================================================================== */

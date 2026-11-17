@@ -24,7 +24,7 @@ export const MODALIDAD: Record<Modalidad, { texto: string; corto: string; ayuda:
  * «Cumplimiento»; recorrido MP-06, D06-18).
  */
 const NATURALEZA_DOC: Record<string, string> = {
-  INFORME_INSPECCION: "Inspección",
+  INFORME_INSPECCION: "Certificado de control",
   CERTIFICADO_CONFORMIDAD: "Conformidad",
   INFORME_INCUMPLIMIENTO: "Incumplimiento",
   CERTIFICADO_RESISTENCIA_BALISTICA: "CRB",
@@ -102,6 +102,10 @@ export interface ItemDefectuoso { items: string; descripcion: string; numeracion
 export interface Propuesta {
   formato: FormatoInforme;
   modalidad: Modalidad;
+  /** «plantilla»: la fija la plantilla; «sugerida»: según los requisitos (F072). */
+  modalidadOrigen?: "plantilla" | "sugerida";
+  /** Modalidad que corresponde a los requisitos de los ensayos. */
+  modalidadPorRequisitos?: Modalidad;
   conRequisito: number;
   totalEnsayos: number;
   portada: Portada | null;

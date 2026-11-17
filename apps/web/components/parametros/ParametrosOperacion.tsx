@@ -23,14 +23,14 @@ import { toast } from "@/components/ui/feedback";
 import EditorTabla, { type ColumnaTabla } from "./EditorTabla";
 import { anioChile } from "@/lib/fecha-chile";
 
-type Tipo = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep";
+type Tipo = "entero" | "porcentaje" | "sino" | "opcion" | "multiple" | "formato" | "obligatorio" | "campo" | "variante" | "tabla" | "campo_prep" | "texto";
 interface Opcion { valor: string; etiqueta: string }
-interface Def { tipo: Tipo; ayuda: string | null; min: number | null; max: number | null; unidad: string | null; opciones: Opcion[] | null; porDefecto: string | null; columnas?: ColumnaTabla[] | null; maxFilas?: number | null }
+interface Def { tipo: Tipo; ayuda: string | null; min: number | null; max: number | null; unidad: string | null; opciones: Opcion[] | null; porDefecto: string | null; columnas?: ColumnaTabla[] | null; maxFilas?: number | null; largo?: number | null }
 interface DefCampo { tipo: string; obligatorio: boolean; opciones: Opcion[]; ayuda: string; activo: boolean; bloquea?: boolean; unidad?: string }
 interface Variante { variante: string; activo: boolean }
 type Alta = "laboratorio" | "campo" | "metodo" | "plantilla";
 interface Parametro {
-  id?: string; categoria?: string; codigo: string; nombre: string; def?: Def; valor?: any; texto?: string;
+  id?: string | null; categoria?: string; codigo: string; nombre: string; def?: Def; valor?: any; texto?: string;
   activo?: boolean; laboratorio?: string | null; updatedAt?: string | null; falta?: boolean;
 }
 interface Grupo {
@@ -54,8 +54,11 @@ const TIPOS_CAMPO_PREP: Opcion[] = [...TIPOS_CAMPO, { valor: "fechahora", etique
 /** Lo que se edita: un valor simple, la definición de un campo, una variante o las filas de una tabla. */
 type Borrador = string | boolean | string[] | DefCampo | Variante | Record<string, unknown>[];
 
+/** Identidad de una fila en pantalla: categoría + código (las que faltan en la base no traen id, F076). */
+const claveDe = (g: Grupo, p: Parametro) => `${p.categoria ?? g.categoria}.${p.codigo}`;
+
 function borradorDe(p: Parametro): Borrador {
-  const t = p.def!.tipo;
+  const t = p.def?.tipo;
   if (t === "entero") return p.valor == null ? "" : String(p.valor);
   if (t === "porcentaje") return p.valor == null ? "" : Number(p.valor).toLocaleString("es-CL", { maximumFractionDigits: 4, useGrouping: false });
   if (t === "sino" || t === "obligatorio") return Boolean(p.valor);
@@ -83,7 +86,8 @@ function nombreFila(g: Grupo, p: Parametro): string {
 export default function ParametrosOperacion() {
   const [datos, setDatos] = useState<Datos | null>(null);
   const [error, setError] = useState("");
-  const [editando, setEditando] = useState<Parametro | null>(null);
+  // Clave (categoría.código) de la fila abierta: comparar por id abría todas las que no tienen fila (F076).
+  const [editando, setEditando] = useState<string | null>(null);
   const [alta, setAlta] = useState<Grupo | null>(null);
   const [verHistorial, setVerHistorial] = useState(false);
   const [labCampos, setLabCampos] = useState("");
@@ -183,7 +187,10 @@ export default function ParametrosOperacion() {
                           {g.alta === "campo" && <div style={{ fontSize: 11, color: "var(--muted)" }}><code>{p.codigo}</code></div>}
                         </td>
                         <td style={{ fontWeight: 600 }}>
-                          {p.falta ? <span className="pill amber">Falta en esta instalación</span> : p.texto}
+                          {p.texto ?? "—"}
+                          {p.falta && (
+                            <div style={{ fontSize: 11.5, fontWeight: 400, color: "var(--muted)" }}>Valor por defecto: aún no se ha configurado en esta instalación.</div>
+                          )}
                           {g.categoria === "numeracion_cotizacion" && p.codigo === "formato" && typeof p.valor === "string" && ejemplo(p.valor, digitos) && (
                             <div style={{ fontSize: 11.5, fontWeight: 400, color: "var(--muted)" }}>Ejemplo: {ejemplo(p.valor, digitos)}</div>
                           )}
@@ -192,17 +199,17 @@ export default function ParametrosOperacion() {
                         <td style={{ fontSize: 12 }}>{p.updatedAt ? fechaHora(p.updatedAt) : "—"}</td>
                         {editable && (
                           <td style={{ textAlign: "right" }}>
-                            {!p.falta && (
-                              <button type="button" className="btn outline sm" aria-expanded={editando?.id === p.id}
+                            {p.def && (
+                              <button type="button" className="btn outline sm" aria-expanded={editando === claveDe(g, p)}
                                 aria-label={`Cambiar ${g.alta === "laboratorio" ? `${p.laboratorio}: ${nombreFila(g, p)}` : g.alta === "metodo" || g.alta === "plantilla" ? `${p.codigo}: ${p.nombre}` : p.nombre}`}
-                                onClick={() => { setEditando(editando?.id === p.id ? null : p); setAlta(null); }}>
-                                {editando?.id === p.id ? "Cerrar" : "Cambiar"}
+                                onClick={() => { setEditando(editando === claveDe(g, p) ? null : claveDe(g, p)); setAlta(null); }}>
+                                {editando === claveDe(g, p) ? "Cerrar" : "Cambiar"}
                               </button>
                             )}
                           </td>
                         )}
                       </tr>
-                      {editable && editando?.id === p.id && (
+                      {editable && p.def && editando === claveDe(g, p) && (
                         <tr>
                           <td colSpan={6} style={{ background: "var(--panel-2, #f8fbfc)" }}>
                             <FormCambio p={p} digitos={digitos} onCancelar={() => setEditando(null)} onListo={listo} />
@@ -473,6 +480,14 @@ function EditorValor({ id, def, b, setB, digitos, codigo }: {
         </div>
       );
     }
+    case "texto":
+      return (
+        <div className="field" style={{ maxWidth: 520 }}>
+          <label htmlFor={`${id}-v`}>Nuevo valor</label>
+          <input id={`${id}-v`} value={String(b)} maxLength={def.largo ?? 200} onChange={(e) => setB(e.target.value)} aria-describedby={`${id}-v-ayuda`} autoFocus />
+          <small id={`${id}-v-ayuda`} style={{ color: "var(--muted)" }}>{def.ayuda ?? `Hasta ${def.largo ?? 200} caracteres.`}</small>
+        </div>
+      );
     case "campo":
       return <EditorCampo id={id} c={b as DefCampo} setC={setB} esDestino={codigo.endsWith(".clase_custodia")} />;
     case "campo_prep":

@@ -77,6 +77,40 @@ export function estadoTrasVb(nivel: NivelVb, niveles: NivelesVb, accion: "dar" |
   return "aprobado";
 }
 
+/**
+ * F025 · Comercial cambia las líneas después del V°B° del costeo: el V°B° dado
+ * ya no vale y se vuelve a pedir antes de la firma. Devuelve el estado al que
+ * vuelve la solicitud (null = no cambia).
+ */
+export function estadoTrasCambioLineas(estado: string, niveles: NivelesVb): EstadoSolicitud | null {
+  if (niveles === "ninguno") return null;
+  return estado === "vb_lab" || estado === "aprobado" ? "respondido" : null;
+}
+
+/** Huella de las líneas para saber si cambió lo cotizado (ensayo o texto, muestra, cantidad y precio). */
+export interface LineaHuella {
+  catEnsayoId?: string | null;
+  descripcion?: string | null;
+  tipo?: string | null;
+  muestraN?: number | null;
+  cantidad?: number | string | null;
+  precioUnitario?: number | string | null;
+}
+export function lineasCambiaron(antes: LineaHuella[], despues: LineaHuella[]): boolean {
+  const n = (v: unknown) => (v === null || v === undefined || v === "" ? "" : String(Number(v)));
+  const h = (l: LineaHuella) =>
+    [l.catEnsayoId ?? `libre:${l.tipo ?? ""}:${String(l.descripcion ?? "").trim()}`, l.muestraN ?? "", n(l.cantidad ?? 1), n(l.precioUnitario)].join("|");
+  const a = antes.map(h).sort();
+  const d = despues.map(h).sort();
+  return a.length !== d.length || a.some((x, i) => x !== d[i]);
+}
+
+/** Una fila por id, en el orden en que llegan (bandeja del laboratorio, F029). */
+export function unicasPorId<T extends { id: string }>(filas: T[]): T[] {
+  const vistos = new Set<string>();
+  return filas.filter((f) => (vistos.has(f.id) ? false : (vistos.add(f.id), true)));
+}
+
 /** Solicitudes que forman parte del circuito (con laboratorio; las heredadas D2 no cuentan). */
 export interface SolicitudCircuito {
   id: string;
@@ -175,6 +209,8 @@ export interface HechosCotizacion extends CotizacionCircuito {
   /** Texto del medio en «Parámetros del sistema › medio_envio» (frente f5). */
   enviadaMedioTexto?: string | null;
   ot?: { codigo: string } | null;
+  /** Pre-cotización: no se acepta ni genera OT, así que su ruta no tiene esa etapa (F037). */
+  precotizacion?: boolean;
   solicitudes: SolicitudRuta[];
   /** Responsables del paso FIRMA de la matriz COTIZACION. */
   firmantes: { id: string; nombre: string }[];
@@ -258,7 +294,7 @@ export function calcularRutaCotizacion(h: HechosCotizacion, cfg: ConfigCircuito)
     cerrar(vb),
     cerrar(firma),
     envio,
-    aceptacion,
+    ...(h.precotizacion ? [] : [aceptacion]),
   ];
 
   if (h.estado === "anulada") avisos.push("La cotización está anulada.");

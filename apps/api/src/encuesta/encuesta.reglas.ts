@@ -14,6 +14,8 @@ export interface Pregunta {
   texto: string;
   escala: number[];
   obligatoria: boolean;
+  /** Si la nota es menor que este valor, el comentario es obligatorio (FORM01 criterio 4: menor que 4,0). */
+  comentarioSiMenor?: number | null;
 }
 
 export interface RespuestaEntrada {
@@ -43,6 +45,7 @@ export const MEDIOS = ["telefono", "correo", "presencial", "formulario_fisico"] 
 export function validarRespuestas(
   preguntas: Pregunta[],
   respuestas: RespuestaEntrada[],
+  comentario?: string | null,
 ): { errores: string[]; guardadas: RespuestaGuardada[]; promedio: number | null } {
   const errores: string[] = [];
   const porCodigo = new Map(respuestas.map((r) => [r.codigo, r.valor]));
@@ -55,6 +58,8 @@ export function validarRespuestas(
       if (p.obligatoria) errores.push(`Falta la respuesta de «${p.texto}».`);
     } else if (!p.escala.includes(valor)) {
       errores.push(`«${p.texto}»: la respuesta debe ser una de ${p.escala.join(", ")}.`);
+    } else if (comentario !== undefined && p.comentarioSiMenor != null && valor < Number(p.comentarioSiMenor) && !comentario?.trim()) {
+      errores.push(`«${p.texto}» tiene nota ${valor}, menor que ${Number(p.comentarioSiMenor)}: pregunte al cliente el motivo y anótelo en el comentario.`);
     }
     return { codigo: p.codigo, texto: p.texto, valor, escala: p.escala };
   });

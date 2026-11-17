@@ -120,3 +120,65 @@ export function clavesDeLaHoja(datos: Record<string, any>, c: CondicionesHoja): 
   };
   return Object.keys(fuente).filter((k) => k in datos && hay(fuente[k]));
 }
+
+/* ---- F051/F053 · laboratorios de un patrón o equipo auxiliar del maestro ---- */
+/** Laboratorios de la Sección Metrología a los que se puede asignar un patrón o auxiliar. */
+export const LABS_METROLOGIA = ["LMT", "LMTE", "LNF"] as const;
+
+/** Laboratorios del equipo: la lista `laboratorios` o, en datos antiguos, el `laboratorio` único. */
+export function laboratoriosDe(p: { laboratorios?: unknown; laboratorio?: unknown } | null | undefined): string[] {
+  const lista = Array.isArray(p?.laboratorios) ? (p!.laboratorios as unknown[]) : [];
+  const xs = lista.length ? lista : p?.laboratorio ? [p.laboratorio] : [];
+  return [...new Set(xs.map((x) => String(x ?? "").trim().toUpperCase()).filter(Boolean))];
+}
+
+/**
+ * ¿El laboratorio de la calibración puede usar el equipo? Sin laboratorio en el equipo es
+ * común a todos; un auxiliar compartido (termohigrómetro, barómetro) lista varios.
+ */
+export function patronDelLaboratorio(p: { laboratorios?: unknown; laboratorio?: unknown }, lab: string | null | undefined): boolean {
+  if (!lab) return true;
+  const labs = laboratoriosDe(p);
+  return !labs.length || labs.includes(lab.trim().toUpperCase());
+}
+
+/* ---- Hoja de control del LNF (R9) · ESPEJO de apps/api/src/metrologia/hoja-lnf.reglas.ts ---- */
+export interface CoefSmp { a: number; b: number; c: number }
+
+/** Coeficientes S = a·F + b·F² + c·F³ del certificado del patrón (maestro); null si no están completos. */
+export function coeficientesSmp(coef: unknown): CoefSmp | null {
+  const k = coef && typeof coef === "object" ? (coef as Record<string, unknown>) : null;
+  if (!k) return null;
+  const [a, b, c] = [Number(k.a), Number(k.b), Number(k.c)];
+  return [a, b, c].every(Number.isFinite) && (a !== 0 || b !== 0 || c !== 0) ? { a, b, c } : null;
+}
+
+/** Señal del sistema de medición patrón (SMP) para una fuerza en kN. */
+export function smpPorFuerza(k: CoefSmp | null, F: unknown): number | null {
+  if (!k || typeof F !== "number" || !Number.isFinite(F)) return null;
+  return Number((k.a * F + k.b * F ** 2 + k.c * F ** 3).toPrecision(10));
+}
+
+/** Unidad de la resolución del indicador: la escrita en la hoja o mV/V. */
+export function unidadIndicador(datos: { uRes?: unknown } | null | undefined): string {
+  const u = String(datos?.uRes ?? "").trim();
+  return u ? u.slice(0, 20) : "mV/V";
+}
+
+/**
+ * F052: la hoja del LNF siempre muestra «Unidad de la resolución y de las lecturas»,
+ * también al cargar un ejemplo o reabrir un borrador que no la traía (mV/V por defecto).
+ */
+export function conUnidadIndicador<T>(datos: T, esLnf: boolean): T {
+  if (!esLnf || !datos || typeof datos !== "object" || Array.isArray(datos)) return datos;
+  const d = datos as Record<string, unknown>;
+  return ("uRes" in d && d.uRes != null ? datos : { ...d, uRes: unidadIndicador(d) }) as T;
+}
+
+/** Grupos de datos de la hoja del LNF: qué se está llenando (instrumento, patrón, condiciones). */
+export const GRUPOS_LNF: { titulo: string; ayuda: string; claves: string[] }[] = [
+  { titulo: "Instrumento a calibrar", ayuda: "Datos del transductor del cliente y de su indicador.", claves: ["sentido", "resInd", "uRes", "div", "decRes", "conv", "fmin", "fmax"] },
+  { titulo: "Sistema de medición patrón (SMP)", ayuda: "Datos del patrón de referencia: vienen de su certificado.", claves: ["urelSmp"] },
+  { titulo: "Cálculo", ayuda: "Opciones de la interpolación y del redondeo.", claves: ["grado", "interp", "dec"] },
+  { titulo: "Condiciones ambientales", ayuda: "Temperatura en °C y humedad en %HR.", claves: ["tIni", "hr", "hrU"] },
+];

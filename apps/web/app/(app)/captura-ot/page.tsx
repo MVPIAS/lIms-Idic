@@ -144,6 +144,8 @@ function normalizar(r: any, ot?: { id: string; codigo: string } | null): Fila {
     ordenInterna: r.ordenInterna ?? null,
     puedo: r.puedo ?? null,
     bloqueoAprobar: r.bloqueoAprobar,
+    // Revisión previa opcional en su laboratorio (F065): sin copiarlo, «Aprobar» no aparecía.
+    apruebaSinRevision: !!r.apruebaSinRevision,
     qcBloqueo: r.qcBloqueo ?? null,
     tipoDato: r.tipoDato === "atributo" ? "atributo" : "numerico",
     requisito: r.requisito ?? null,
@@ -554,12 +556,18 @@ export default function CapturaOtPage() {
   async function accionOt(que: "revisar" | "aprobar") {
     if (!ot) return;
     const n = que === "revisar" ? porRevisarAjenos : porAprobarAjenos;
+    // F011: un No cumple abre un re-análisis; hasta repetir la determinación no se revisa ni se aprueba.
+    const etapa = que === "revisar" ? ["capturado"] : ["revisado_n1", "capturado"];
+    const conReanalisis = filas.filter((f) => etapa.includes(f.estado) && f.reanalisis?.estado === "solicitado").length;
+    const avisoReanalisis = conReanalisis
+      ? ` ${conReanalisis} ensayo(s) con re-análisis pendiente (un No cumple abre uno) quedan fuera: repita la determinación y capture el nuevo valor, o que la jefatura descarte el re-análisis con su motivo; después se ${que === "revisar" ? "revisan" : "aprueban"}.`
+      : "";
     const ok = await confirmar({
       titulo: que === "revisar" ? `¿Revisar ${n} resultado(s) de la OT ${ot.codigo}?` : `¿Aprobar ${n} resultado(s) de la OT ${ot.codigo}?`,
       mensaje:
-        que === "revisar"
+        (que === "revisar"
           ? "Quedan revisados con su nombre, fecha y hora. Lo revisado ya no se corrige sin devolverlo."
-          : "Quedan aprobados con su nombre, fecha y hora. Lo aprobado solo se corrige reabriéndolo con motivo (anula los informes emitidos).",
+          : "Quedan aprobados con su nombre, fecha y hora. Lo aprobado solo se corrige reabriéndolo con motivo (anula los informes emitidos).") + avisoReanalisis,
       confirmarTexto: que === "revisar" ? "Revisar" : "Aprobar",
     });
     if (!ok) return;
@@ -568,7 +576,10 @@ export default function CapturaOtPage() {
     try {
       const r = await llamar<{ hechos: number; omitidos: { id: string; motivo: string }[]; deOtrosLaboratorios?: number }>("POST", `/resultados/ot/${ot.id}/${que}`);
       setOmitidos(r.omitidos ?? []);
-      toast.ok(`${r.hechos} resultado${r.hechos === 1 ? "" : "s"} ${que === "revisar" ? "revisado" : "aprobado"}${r.hechos === 1 ? "" : "s"}.${r.omitidos?.length ? ` ${r.omitidos.length} omitido(s).` : ""}`);
+      toast.ok(`${r.hechos} resultado${r.hechos === 1 ? "" : "s"} ${que === "revisar" ? "revisado" : "aprobado"}${r.hechos === 1 ? "" : "s"}.`);
+      // F011: lo que quedó fuera se explica (p. ej. el No cumple con re-análisis pendiente), no solo se cuenta.
+      if (r.omitidos?.length)
+        toast.error(`${r.omitidos.length} sin ${que === "revisar" ? "revisar" : "aprobar"}: ${[...new Set(r.omitidos.map((o) => o.motivo))].join(" ")}`);
       await cargar();
     } catch (e: any) {
       toast.error(e.message);
@@ -604,6 +615,8 @@ export default function CapturaOtPage() {
   // Revisión previa opcional en el laboratorio: lo capturado también se aprueba (sesiones oct-nov 2026).
   const enAprobacion = (f: Fila) => f.estado === "revisado_n1" || (f.estado === "capturado" && !!f.apruebaSinRevision);
   const aprobablesEnBloque = filas.filter((f) => enAprobacion(f) && puede(f, "aprobar") && !sinVeredicto(f));
+  // Hay capturados que se aprueban sin revisión previa: «Aprobar todo» no es solo «lo revisado».
+  const conSinRevision = aprobablesEnBloque.some((f) => f.estado === "capturado");
   const porAprobarAjenos = aprobablesEnBloque.filter((f) => f.analistaId !== yo && !revisadoPorMi(f)).length;
   // Los que «Aprobar todo» deja fuera por la segregación de funciones (D06-20).
   const omitidosCaptura = aprobablesEnBloque.filter((f) => f.analistaId === yo).length;
@@ -739,10 +752,12 @@ export default function CapturaOtPage() {
                 <button className="btn success sm" disabled={!porAprobarAjenos || ocupado === "__ot"} onClick={() => accionOt("aprobar")}
                   aria-describedby={omitidosCaptura + omitidosRevision ? "aprobar-todo-omitidos" : undefined}
                   title={
-                    "Aprueba todos los resultados revisados de la OT, salvo los que capturó usted y los que revisó usted: " +
-                    "la revisión y la aprobación las hacen personas distintas."
+                    (conSinRevision
+                      ? "Aprueba todos los resultados revisados de la OT y los capturados de los laboratorios con revisión previa opcional, "
+                      : "Aprueba todos los resultados revisados de la OT, ") +
+                    "salvo los que capturó usted y los que revisó usted: la revisión y la aprobación las hacen personas distintas."
                   }>
-                  Aprobar todo lo revisado ({porAprobarAjenos})
+                  {conSinRevision ? "Aprobar todo" : "Aprobar todo lo revisado"} ({porAprobarAjenos})
                 </button>
               )}
               <Link href={`/ot/${ot.id}/calculos` as any} className="btn outline sm" title="Lecturas, fórmula aplicada, factor e historial de cambios de cada ensayo (solo lectura, exportable)">
@@ -1031,11 +1046,13 @@ export default function CapturaOtPage() {
                                   <button className="btn outline sm" disabled={busy} title="Corregir un resultado ya aprobado (anula el informe en firma u oficial)"
                                     onClick={() => { setReabriendo(reabriendo === f.id ? null : f.id); setMotivoReabrir(""); }}>Reabrir</button>
                                 )}
-                                {/* EP-01/03 4.2, EP-05 6.2 (frente r4d): producto o trabajo no conforme con la OT y el ensayo precargados. */}
+                                {/* EP-01/03 4.2, EP-05 6.2 (frente r4d) y Químico R5: la acción abre el registro de TRABAJO no conforme
+                                    (IDIC-PG12) con la OT y el ensayo precargados. No es el veredicto del resultado (Cumple / No cumple). */}
                                 {tiene("nc.crear") && (f.otId ?? ot?.id) && ["capturado", "revisado_n1", "aprobado", "devuelto"].includes(f.estado) && (
-                                  <Link className="btn outline sm" title="Registrar un producto o trabajo no conforme (IDIC-PG12) con este ensayo"
-                                    href={`/no-conformidades?nueva=1&clase=PNC&otId=${f.otId ?? ot?.id}&resultadoId=${f.id}&titulo=${encodeURIComponent(`PNC · ${f.analito ?? "ensayo"}`)}` as any}>
-                                    No conforme → PNC
+                                  <Link className="btn outline sm"
+                                    title="Abre el registro de trabajo no conforme (IDIC-PG12) con este ensayo: un desvío en la ejecución del trabajo. No cambia el veredicto del resultado (Cumple / No cumple)."
+                                    href={`/no-conformidades?nueva=1&clase=TNC&otId=${f.otId ?? ot?.id}&resultadoId=${f.id}&titulo=${encodeURIComponent(`TNC · ${f.analito ?? "ensayo"}`)}` as any}>
+                                    Trabajo no conforme (PG-12)
                                   </Link>
                                 )}
                               </div>

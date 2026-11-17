@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { recordarOtActiva } from "@/lib/ot-activa";
 import { PageHeader, Skeleton } from "@/components/ui/PageHeader";
 import RequierePermiso from "@/components/RequierePermiso";
 import { toast } from "@/components/ui/feedback";
@@ -22,6 +23,7 @@ import Clasificacion from "./_components/Clasificacion";
 import EnsayosArma from "./_components/EnsayosArma";
 import { Acunacion, Certificados, Revision } from "./_components/Certificados";
 import Entrega from "./_components/Entrega";
+import EsperaDevoluciones from "./_components/EsperaDevoluciones";
 
 export default function ExpedienteD11Page() {
   return (
@@ -33,6 +35,10 @@ export default function ExpedienteD11Page() {
 
 function Expediente() {
   const { id } = useParams<{ id: string }>();
+  // F049: «Emitir informe» (también desde el menú) propone la OT cuya ficha se está viendo.
+  useEffect(() => {
+    if (typeof id === "string") recordarOtActiva(id);
+  }, [id]);
   const [d, setD] = useState<ExpedienteD11 | null>(null);
   const [error, setError] = useState("");
   const [paso, setPaso] = useState<string | null>(null);
@@ -77,6 +83,7 @@ function Expediente() {
   const elegido = paso ?? actual.clave;
   const abierta = d.ot.abierta;
   const verEtiquetas = () => abrirDocumento(`/d11/ot/${d.ot.id}/etiquetas`).catch((e) => toast.error(e.message));
+  const verFichas = () => abrirDocumento(`/evidencias/fichas?otId=${d.ot.id}`).catch((e) => toast.error(e.message));
 
   return (
     <div>
@@ -146,13 +153,14 @@ function Expediente() {
           {elegido === "programacion" && <Programacion d={d} accion={accion} />}
           {elegido === "llegada" && <Llegada d={d} accion={accion} />}
           {elegido === "acta" && <Acta d={d} accion={accion} />}
-          {elegido === "registro" && <RegistroArmas d={d} accion={accion} onEtiquetas={verEtiquetas} />}
+          {elegido === "registro" && <RegistroArmas d={d} accion={accion} onEtiquetas={verEtiquetas} onFichas={verFichas} />}
           {elegido === "clasificacion" && <Clasificacion d={d} accion={accion} />}
           {elegido === "ensayos" && <EnsayosArma d={d} onCambio={cargar} />}
           {elegido === "revision" && <Revision d={d} />}
           {elegido === "acunacion" && <Acunacion d={d} accion={accion} />}
           {elegido === "certificados" && <Certificados d={d} accion={accion} />}
           {elegido === "entrega" && <Entrega d={d} accion={accion} />}
+          <EsperaDevoluciones d={d} accion={accion} />
         </div>
       </div>
     </div>

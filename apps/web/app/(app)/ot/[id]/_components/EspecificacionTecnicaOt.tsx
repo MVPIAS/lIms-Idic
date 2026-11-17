@@ -171,7 +171,10 @@ export default function EspecificacionTecnicaOt({ otId, onCambio }: { otId: stri
 
 /* ------------------------------------------------------------- desglose --- */
 
-interface PuntoPlan { id: string; punto: string; componente: string | null; caracteristica: string; tipo: keyof typeof TIPO_PUNTO; metodoCodigo: string | null; metodoNombre: string | null; laboratorioCodigo: string | null; limiteInf: string | null; limiteSup: string | null; nominal: string | null; unidad: string | null; requisito: string | null }
+interface PuntoPlan { id: string; punto: string; componente: string | null; caracteristica: string; tipo: keyof typeof TIPO_PUNTO; metodoCodigo: string | null; metodoNombre: string | null; laboratorioCodigo: string | null; limiteInf: string | null; limiteSup: string | null; nominal: string | null; unidad: string | null; requisito: string | null;
+  /** F090: segunda condición y plan de clases: el plan muestra el requisito completo. */
+  cond2Etiqueta?: string | null; cond2Inf?: number | null; cond2Sup?: number | null; cond2Unidad?: string | null;
+  planN?: number | null; planC?: number | null; planM?: number | null; planMM?: number | null }
 interface Desglose {
   muestra: { id: string; codigo: string; nombre: string | null };
   et: { codigo: string; version: number } | null;

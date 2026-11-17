@@ -81,7 +81,9 @@ export default function MetrologiaCalibracionesPage() {
       if (!r.ok) throw new Error(Array.isArray(j.message) ? j.message.join(", ") : j.message ?? `Error ${r.status}`);
       toast.ok(que === "enviar" ? `${row.codigo} firmada y enviada al jefe del laboratorio`
         : que === "firmar" ? (j.data?.numero ? `Certificado ${j.data.numero} emitido` : `${row.codigo} firmada; pasa al jefe del departamento`)
-        : que === "reemitir" ? `Borrador ${j.data?.codigo} creado: al emitirse reemplazará al ${row.numero_certificado}`
+        : que === "reemitir" ? (j.data?.modalidad === "modificacion"
+          ? `Borrador ${j.data?.codigo} creado: modifica el certificado N° ${row.numero_certificado}`
+          : `Borrador ${j.data?.codigo} creado: al emitirse reemplazará al N° ${row.numero_certificado}`)
         : `${row.codigo} devuelta al metrólogo`);
       setDevolver(null);
       await cargar();

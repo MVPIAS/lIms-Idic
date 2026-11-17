@@ -97,3 +97,56 @@ describe("recepción · los gastos de la cotización no son líneas de ensayo (B
     expect(r.map((x: any) => x.lineaId)).toEqual(["3"]);
   });
 });
+
+describe("recepción de una cotización por muestra (F026, F062)", () => {
+  const { muestrasPropuestas, metodosDeLaMuestra } = require("./registro-muestras") as typeof import("./registro-muestras");
+  const porEnsayo = new Map([
+    ["e-ph", [met("m-ph", "e-ph")]],
+    ["e-hum", [met("m-hum-a", "e-hum"), met("m-hum-b", "e-hum")]],
+    ["e-no3", [met("m-no3", "e-no3")]],
+  ]);
+  const lineas = proponerDesdeCotizacion(
+    [
+      { id: "l1", descripcion: null, cantidad: 1, catEnsayoId: "e-ph", ensayoCodigo: "PH", muestraN: 1 },
+      { id: "l2", descripcion: null, cantidad: 1, catEnsayoId: "e-hum", ensayoCodigo: "HUM", muestraN: 2 },
+      { id: "l3", descripcion: null, cantidad: 1, catEnsayoId: "e-no3", ensayoCodigo: "NO3", muestraN: null },
+    ],
+    porEnsayo,
+  );
+  it("propone cada muestra de la cotización con su descripción, su producto y sus ensayos", () => {
+    const p = muestrasPropuestas(
+      [
+        { n: 1, descripcion: "Agua de consumo PRUEBA", catElementoId: "el-74", productoNombre: "Agua potable" },
+        { n: 2, descripcion: "Harina PRUEBA", catElementoId: null, productoTexto: "Harina de trigo" },
+      ],
+      lineas,
+    );
+    expect(p[0]).toMatchObject({ n: 1, descripcion: "Agua de consumo PRUEBA", catElementoId: "el-74", productoNombre: "Agua potable", lineaIds: ["l1"] });
+    expect(p[0].sugeridos.sort()).toEqual(["m-no3", "m-ph"]);
+    expect(p[1]).toMatchObject({ productoNombre: "Harina de trigo", lineaIds: ["l2"], sugeridos: ["m-no3"] });
+  });
+  it("cada muestra recibida lleva los métodos de sus ensayos, los de toda la cotización y los agregados a mano", () => {
+    const marcados = ["m-ph", "m-hum-a", "m-no3", "m-extra"];
+    expect(metodosDeLaMuestra(1, marcados, lineas)).toEqual(["m-ph", "m-no3", "m-extra"]);
+    expect(metodosDeLaMuestra(2, marcados, lineas)).toEqual(["m-hum-a", "m-no3", "m-extra"]);
+    expect(metodosDeLaMuestra(null, marcados, lineas)).toEqual(marcados);
+  });
+});
+
+describe("agregar métodos a una muestra ya recepcionada (F064)", () => {
+  const { puedeAgregarMetodos, erroresAgregarMetodos } = require("./registro-muestras") as typeof import("./registro-muestras");
+  it("lo hace Recepción o la jefatura (con permiso de recepción), no el analista", () => {
+    expect(puedeAgregarMetodos({ roles: ["RECEPCION"], permisos: ["muestra.crear"] })).toBe(true);
+    expect(puedeAgregarMetodos({ roles: ["JEFE_LAB"], permisos: ["muestra.crear", "ot.asignar"] })).toBe(true);
+    expect(puedeAgregarMetodos({ roles: ["ANALISTA"], permisos: ["muestra.crear"] })).toBe(false);
+    expect(puedeAgregarMetodos({ roles: ["DIRECTOR"], permisos: ["ot.asignar"] })).toBe(false);
+    expect(puedeAgregarMetodos({ roles: ["SUPERADMIN"], permisos: [] })).toBe(true);
+  });
+  it("exige motivo, métodos con analitos y que no estén ya en la muestra", () => {
+    const cat = new Map([["m-hum", met("m-hum", "e-hum")], ["m-sin", met("m-sin", "e-x", 0)]]);
+    expect(erroresAgregarMetodos("en_proceso", ["m-hum"], [], cat, "Se omitió al recepcionar")).toEqual([]);
+    expect(erroresAgregarMetodos("en_proceso", ["m-hum"], ["m-hum"], cat, "Se omitió al recepcionar")[0]).toMatch(/ya está en la muestra/);
+    expect(erroresAgregarMetodos("en_proceso", ["m-sin"], [], cat, "Se omitió al recepcionar")[0]).toMatch(/no tiene analitos/);
+    expect(erroresAgregarMetodos("cerrada", [], [], cat, "")).toHaveLength(3);
+  });
+});
