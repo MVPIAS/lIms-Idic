@@ -151,6 +151,10 @@ function CampoLab({ c, valor, onCambio, idBase }: { c: CampoRecepcion; valor: Va
         <select id={id} value={String(valor ?? "")} onChange={(e) => onCambio(e.target.value)}>
           <option value="">Elija…</option>
           {c.opciones.map((o) => <option key={o.valor} value={o.valor}>{o.etiqueta}</option>)}
+          {/* Valor ya guardado que hoy no se ofrece (p. ej. destino que el laboratorio dejó de usar): se conserva si no se cambia. */}
+          {valor !== null && valor !== undefined && String(valor) !== "" && !c.opciones.some((o) => o.valor === String(valor)) && (
+            <option value={String(valor)}>{String(valor)} (ya registrado)</option>
+          )}
         </select>
         {ayuda}
       </div>

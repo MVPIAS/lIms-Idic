@@ -184,6 +184,8 @@ export function validarCamposLaboratorio(
   laboratorio: string,
   prefijo = "",
   noUsados: readonly ClaseCustodia[] = [],
+  /** Destino ya guardado en la muestra (corrección): se acepta aunque hoy el laboratorio no lo use, si no cambia. */
+  destinoGuardado: string | null = null,
 ): { errores: string[]; valor: RecepcionLabNormalizada } {
   const errores: string[] = [];
   const porCodigo = new Map(campos.map((c) => [c.codigo, c]));
@@ -223,7 +225,8 @@ export function validarCamposLaboratorio(
       if (norm === null) errores.push(`${prefijo}${nombre} debe ser una fecha válida (AAAA-MM-DD).`);
     } else if (c.tipo === "lista") {
       const s = texto(v);
-      if (!c.opciones.some((o) => o.valor === s)) errores.push(`${prefijo}${nombre}: «${s}» no es una de las opciones.`);
+      const sinCambio = c.codigo === "clase_custodia" && !!destinoGuardado && s === destinoGuardado;
+      if (!c.opciones.some((o) => o.valor === s) && !sinCambio) errores.push(`${prefijo}${nombre}: «${s}» no es una de las opciones.`);
       else norm = s;
     } else {
       const s = texto(v);
@@ -244,7 +247,9 @@ export function validarCamposLaboratorio(
     else claseCustodia = s as ClaseCustodia;
   }
   if (!porCodigo.has("ubicacion") && !vacio(entrada.ubicacion)) ubicacion = texto(entrada.ubicacion).slice(0, 120);
-  if (claseCustodia && noUsados.includes(claseCustodia)) {
+  // Un destino que ya estaba guardado y no cambia se acepta (muestras recibidas
+  // antes de SAL-09): corregir otros datos de la recepción no obliga a cambiarlo.
+  if (claseCustodia && noUsados.includes(claseCustodia) && claseCustodia !== destinoGuardado) {
     errores.push(`${prefijo}el ${laboratorio} no usa el destino «${NOMBRE_CLASE[claseCustodia]}»: elija otro destino.`);
     claseCustodia = null;
   }

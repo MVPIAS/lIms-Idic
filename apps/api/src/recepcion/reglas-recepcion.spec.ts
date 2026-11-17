@@ -109,6 +109,16 @@ describe("Recepción · destinos que no usa el laboratorio (SAL-09)", () => {
     expect(validarCamposLaboratorio([], { claseCustodia: "contramuestra" }, "LCC").errores).toEqual([]);
     expect(validarCamposLaboratorio([], { claseCustodia: "analisis" }, "LMB", "", ["contramuestra"]).valor.claseCustodia).toBe("analisis");
   });
+  it("auditoría: al corregir la recepción, el destino ya guardado se acepta si no cambia", () => {
+    const campo: FilaParametro = { codigo: "LMB.clase_custodia", etiqueta: "Destino", valor: '{"tipo":"lista","opciones":[{"valor":"analisis","etiqueta":"Análisis"},{"valor":"contramuestra","etiqueta":"Contramuestra"}]}' };
+    const campos = camposDeLaboratorio([campo], "LMB", ["contramuestra"]);
+    const ok = validarCamposLaboratorio(campos, { claseCustodia: "contramuestra" }, "LMB", "", ["contramuestra"], "contramuestra");
+    expect(ok.errores).toEqual([]);
+    expect(ok.valor.claseCustodia).toBe("contramuestra");
+    expect(validarCamposLaboratorio([], { claseCustodia: "contramuestra" }, "LMB", "", ["contramuestra"], "contramuestra").errores).toEqual([]);
+    // Cambiarlo a otro destino no usado sigue rechazándose.
+    expect(validarCamposLaboratorio([], { claseCustodia: "testigo" }, "LMB", "", ["testigo", "contramuestra"], "contramuestra").errores.join(" ")).toMatch(/no usa el destino «Testigo»/);
+  });
   it("la lista del campo «destino» del laboratorio pierde las opciones no usadas", () => {
     const campo: FilaParametro = { codigo: "LCC.clase_custodia", etiqueta: "Destino final", valor: '{"tipo":"lista","opciones":[{"valor":"analisis","etiqueta":"Destrucción"},{"valor":"contramuestra","etiqueta":"Contramuestra"}]}' };
     expect(camposDeLaboratorio([campo], "LCC", ["contramuestra"])[0].opciones.map((o) => o.valor)).toEqual(["analisis"]);
