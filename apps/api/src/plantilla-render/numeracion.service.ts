@@ -32,6 +32,7 @@ import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import {
+  codsucdelDocumento,
   conSufijo,
   elegirRegla,
   erroresFormato,
@@ -67,11 +68,18 @@ export interface DatosNumero {
   muestra?: string | null;
   ni?: string | null;
   numInforme?: string | null;
+  /** Códigos CODSUCDEL de las familias del catálogo de la OT (BPCH-45: 3008 munición / 3009 armas en la D11). */
+  codsucdelCatalogo?: string[];
+  /** Código de empresa del cliente de la OT ({EMPRESA}, BPCH-19) y su nombre para el aviso. */
+  empresa?: string | null;
+  empresaNombre?: string | null;
 }
 
 export interface NumeroReservado {
   numero: string;
   regla: ReglaDb;
+  /** Avisos del número (p. ej. cliente sin código de empresa). */
+  avisos?: string[];
 }
 
 @Injectable()
@@ -116,7 +124,18 @@ export class NumeracionService {
   }
 
   private variables(d: DatosNumero, u: { codigo: string | null; codsucdel: string | null }, n: number | null): VariablesNumero {
-    return { fecha: d.fecha, n, ot: d.ot, lab: u.codigo, codsucdel: u.codsucdel, muestra: d.muestra, ni: d.ni, numInforme: d.numInforme };
+    return {
+      fecha: d.fecha,
+      n,
+      ot: d.ot,
+      lab: u.codigo,
+      codsucdel: codsucdelDocumento(u.codsucdel, d.codsucdelCatalogo ?? []),
+      muestra: d.muestra,
+      ni: d.ni,
+      numInforme: d.numInforme,
+      empresa: d.empresa,
+      empresaNombre: d.empresaNombre,
+    };
   }
 
   /**
@@ -160,7 +179,7 @@ export class NumeracionService {
       const r = formatearNumero(regla.formato, this.variables(d, unidad, n));
       if (!r.numero) return { numero: null, regla, faltan: r.faltan };
       const numero = conN ? r.numero : conSufijo(r.numero, intento);
-      if (!(await existe(numero))) return { numero, regla };
+      if (!(await existe(numero))) return { numero, regla, avisos: r.avisos };
     }
     throw new ConflictException(`No se encontró un número libre con el formato ${regla.formato}: revise la numeración del laboratorio.`);
   }
@@ -169,9 +188,9 @@ export class NumeracionService {
    * Número que tendrá el próximo documento, SIN reservar nada (para la pantalla
    * de emisión). Es orientativo: otra emisión simultánea puede tomarlo antes.
    */
-  async proximo(d: DatosNumero): Promise<{ numero: string | null; formato: string | null; porConfirmar: boolean; faltan: string[]; unidad: string | null }> {
+  async proximo(d: DatosNumero): Promise<{ numero: string | null; formato: string | null; porConfirmar: boolean; faltan: string[]; avisos: string[]; unidad: string | null }> {
     const { regla, unidad } = await this.resolver(d.tenantId, d.unidadId, d.tipo);
-    if (!regla) return { numero: null, formato: null, porConfirmar: false, faltan: [], unidad: unidad.codigo };
+    if (!regla) return { numero: null, formato: null, porConfirmar: false, faltan: [], avisos: [], unidad: unidad.codigo };
     let n: number | null = null;
     if (usaCorrelativo(regla.formato)) {
       const f = await this.prisma.$queryRawUnsafe<{ ultimo: number }[]>(
@@ -185,7 +204,7 @@ export class NumeracionService {
       n = Number(f[0]?.ultimo ?? 0) + 1;
     }
     const r = formatearNumero(regla.formato, this.variables(d, unidad, n));
-    return { numero: r.numero, formato: regla.formato, porConfirmar: regla.porConfirmar, faltan: r.faltan, unidad: unidad.codigo };
+    return { numero: r.numero, formato: regla.formato, porConfirmar: regla.porConfirmar, faltan: r.faltan, avisos: r.avisos, unidad: unidad.codigo };
   }
 
   /* ----------------------------------------------------------- administración --- */
@@ -280,7 +299,8 @@ export class NumeracionService {
       codsucdel: u.codsucdel ?? "7000",
       muestra: "M-2026-0003",
       ni: "OI-2026-0004",
-      numInforme: "3000/0001/00012/000003",
+      numInforme: "3000/5008/00012/000003",
+      empresa: "5008",
     });
     return { numero: r.numero, errores: r.faltan.length ? [`Faltan datos: ${r.faltan.join(", ")}`] : [] };
   }

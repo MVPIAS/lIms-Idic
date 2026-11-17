@@ -1,4 +1,5 @@
 import {
+  codsucdelDocumento,
   conSufijo,
   elegirRegla,
   erroresFormato,
@@ -21,6 +22,48 @@ const regla = (p: Partial<Regla>): Regla => ({
   reinicio: p.reinicio ?? "anual",
   correlativoPorUnidad: p.correlativoPorUnidad ?? false,
   activo: p.activo,
+});
+
+describe("numeración BPCH · tercer envío IDIC (BPCH-19, BPCH-45)", () => {
+  it("BPCH-45: la D11 numera 3008 en munición y 3009 en armas según la familia del catálogo de la OT", () => {
+    expect(codsucdelDocumento("3009/3008", ["3008"])).toBe("3008");
+    expect(codsucdelDocumento("3009/3008", ["3009"])).toBe("3009");
+    // Sin pista, o con ambas familias en la misma OT: el primero de la unidad (como antes).
+    expect(codsucdelDocumento("3009/3008", [])).toBe("3009");
+    expect(codsucdelDocumento("3009/3008", ["3008", "3009"])).toBe("3009");
+    // Una familia ajena a la unidad no cuenta; una unidad con un solo código lo usa siempre.
+    expect(codsucdelDocumento("3009/3008", ["7004"])).toBe("3009");
+    expect(codsucdelDocumento("3000", ["3008"])).toBe("3000");
+    expect(codsucdelDocumento(null, ["3008"])).toBeNull();
+  });
+
+  it("BPCH-19: 3000/empresa/OT/muestra con el código de empresa del cliente", () => {
+    const r = formatearNumero("{CODSUCDEL}/{EMPRESA}/{OT_N:5}/{MUESTRA_N:6}", {
+      fecha,
+      ot: "OT-2026-0012",
+      codsucdel: "3000",
+      muestra: "M-2026-0003",
+      empresa: "5008",
+    });
+    expect(r).toEqual({ numero: "3000/5008/00012/000003", faltan: [], avisos: [] });
+    expect(erroresFormato("{CODSUCDEL}/{EMPRESA}/{OT_N:5}/{MUESTRA_N:6}")).toEqual([]);
+  });
+
+  it("BPCH-19: sin código de empresa usa el marcador XXXX y avisa", () => {
+    const r = formatearNumero("{CODSUCDEL}/{EMPRESA}/{OT_N:5}/{MUESTRA_N:6}", {
+      fecha,
+      ot: "OT-2026-0012",
+      codsucdel: "3000",
+      muestra: "M-2026-0003",
+      empresaNombre: "EMPRESA PRUEBA",
+    });
+    expect(r.numero).toBe("3000/XXXX/00012/000003");
+    expect(r.avisos.join(" ")).toMatch(/EMPRESA PRUEBA no tiene código de empresa/);
+  });
+
+  it("BPCH-19: el certificado y el incumplimiento repiten el número del informe, sin sufijo", () => {
+    expect(formatearNumero("{NUM_INFORME}", { fecha, numInforme: "3000/5008/00012/000003" }).numero).toBe("3000/5008/00012/000003");
+  });
 });
 
 describe("numeración oficial · formato", () => {

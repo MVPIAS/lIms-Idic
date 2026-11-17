@@ -9,6 +9,10 @@
  *   {N} correlativo de la regla (atómico) · {N:3} con ceros a la izquierda
  *   {OT} código de la OT · {OT_N} su parte numérica (OT-2026-0012 → 12) · {OT_N:5}
  *   {LAB} código de la unidad del documento · {CODSUCDEL} su código StarLIMS
+ *     (si la unidad tiene varios, «3009/3008», el de la familia del catálogo de
+ *     la OT: Delegación 11 · 3008 munición y 3009 armas, BPCH-45)
+ *   {EMPRESA} código de empresa del cliente de la OT (ficha del cliente,
+ *     BPCH-19); si el cliente no lo tiene, el número lleva «XXXX» y se avisa
  *   {MUESTRA} código de la primera muestra del documento · {MUESTRA_N} su parte numérica
  *   {NI} número de la orden interna · {NI_N} su parte numérica (respuesta a una orden interna)
  *   {NUM_INFORME} número del Informe de Inspección de la OT (certificado e incumplimiento BPCH)
@@ -72,7 +76,11 @@ export const TOKENS: Record<string, string> = {
   NI: "Número de la orden interna (solo respuesta a una orden interna)",
   NI_N: "Número de la orden interna sin prefijo (OI-2026-0003 → 3)",
   NUM_INFORME: "Número del Informe de Inspección de la OT (certificado e incumplimiento BPCH)",
+  EMPRESA: "Código de empresa del cliente (ficha del cliente); sin código, «XXXX» y un aviso",
 };
+
+/** Marcador del {EMPRESA} cuando el cliente aún no tiene código de empresa (BPCH-19). */
+export const MARCADOR_SIN_EMPRESA = "XXXX";
 
 /** Tokens que cambian de un documento a otro (sin ninguno, todos los números serían iguales). */
 const TOKENS_VARIABLES = new Set(["N", "OT", "OT_N", "MUESTRA", "MUESTRA_N", "NI", "NI_N", "NUM_INFORME"]);
@@ -99,6 +107,10 @@ export interface VariablesNumero {
   muestra?: string | null;
   ni?: string | null;
   numInforme?: string | null;
+  /** Código de empresa del cliente de la OT ({EMPRESA}). */
+  empresa?: string | null;
+  /** Nombre del cliente, solo para el aviso cuando le falta el código de empresa. */
+  empresaNombre?: string | null;
 }
 
 /** Tokens que usa un formato (sin repetir). */
@@ -131,10 +143,28 @@ export function parteNumerica(codigo: string | null | undefined): number | null 
   return m ? Number(m[1]) : null;
 }
 
+/** Códigos CODSUCDEL de la unidad («3009/3008» → [3009, 3008]). */
+export function codigosCodsucdel(codsucdel: string | null | undefined): string[] {
+  return String(codsucdel ?? "").split(/[\s,;/]+/).map((x) => x.trim()).filter(Boolean);
+}
+
 /** Primer código CODSUCDEL de la unidad («3009/3008» → 3009). */
 export function primerCodsucdel(codsucdel: string | null | undefined): string | null {
-  const p = String(codsucdel ?? "").split(/[\s,;/]+/).map((x) => x.trim()).filter(Boolean);
-  return p[0] ?? null;
+  return codigosCodsucdel(codsucdel)[0] ?? null;
+}
+
+/**
+ * CODSUCDEL del documento cuando la unidad tiene varios (BPCH-45, respuesta IDIC
+ * 17-11-2026: en la Delegación 11, 3008 = municiones y 3009 = armas). Se toma el
+ * código de la familia del catálogo de la OT (elemento de la OT o de sus
+ * muestras) que pertenezca a la unidad. Si no hay pista o la OT mezcla ambas
+ * familias, el primero de la unidad (como antes).
+ */
+export function codsucdelDocumento(codsucdelUnidad: string | null | undefined, codigosCatalogoOt: readonly (string | null | undefined)[] = []): string | null {
+  const propios = codigosCodsucdel(codsucdelUnidad);
+  if (propios.length <= 1) return propios[0] ?? null;
+  const coinciden = [...new Set(codigosCatalogoOt.map((c) => String(c ?? "").trim()).filter((c) => propios.includes(c)))];
+  return coinciden.length === 1 ? coinciden[0] : propios[0];
 }
 
 const relleno = (n: number, ancho?: string) => (ancho ? String(n).padStart(Number(ancho), "0") : String(n));
@@ -143,8 +173,9 @@ const relleno = (n: number, ancho?: string) => (ancho ? String(n).padStart(Numbe
  * Aplica el formato. Devuelve el número o, si falta un dato que el formato
  * pide (p. ej. {NUM_INFORME} sin Informe de Inspección), la lista de faltantes.
  */
-export function formatearNumero(formato: string, v: VariablesNumero): { numero: string | null; faltan: string[] } {
+export function formatearNumero(formato: string, v: VariablesNumero): { numero: string | null; faltan: string[]; avisos: string[] } {
   const faltan: string[] = [];
+  const avisos: string[] = [];
   const anio = anioChile(v.fecha);
   const numero = String(formato).replace(RE_TOKEN, (_m, token: string, ancho?: string) => {
     const texto = (x: string | null | undefined, nombre: string) => {
@@ -174,13 +205,21 @@ export function formatearNumero(formato: string, v: VariablesNumero): { numero: 
       case "NI": return texto(v.ni, "{NI}");
       case "NI_N": return numerico(parteNumerica(v.ni), "{NI_N}");
       case "NUM_INFORME": return texto(v.numInforme, "{NUM_INFORME}");
+      case "EMPRESA": {
+        const e = String(v.empresa ?? "").trim();
+        if (e) return e;
+        avisos.push(
+          `El cliente${v.empresaNombre ? ` ${v.empresaNombre}` : ""} no tiene código de empresa: el número lleva «${MARCADOR_SIN_EMPRESA}». Regístrelo en la ficha del cliente (Comercial › Clientes).`,
+        );
+        return MARCADOR_SIN_EMPRESA;
+      }
       default:
         faltan.push(`{${token}}`);
         return "";
     }
   });
-  if (faltan.length) return { numero: null, faltan: [...new Set(faltan)] };
-  return { numero: numero.trim(), faltan: [] };
+  if (faltan.length) return { numero: null, faltan: [...new Set(faltan)], avisos };
+  return { numero: numero.trim(), faltan: [], avisos };
 }
 
 /**

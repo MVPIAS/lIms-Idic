@@ -39,6 +39,12 @@ const CrearClienteSchema = z.object({
   contactoCargo: opcional(120),
   contactoEmail: z.preprocess((v) => (v === "" ? undefined : v), z.string().email("Correo del contacto no válido").max(160).optional()),
   contactoTelefono: opcional(40),
+  // BPCH-19 (respuesta IDIC 17-11-2026): código de empresa que va en el 2.º tramo
+  // del número del Informe de Inspección BPCH (3000/<empresa>/OT/muestra). "" = quitarlo.
+  codigoEmpresa: z.preprocess(
+    (v) => (typeof v === "string" ? (v.trim() === "" ? null : v.trim()) : v),
+    z.string().max(20, "Código de empresa: máximo 20 caracteres.").regex(/^[A-Za-z0-9-]+$/, "El código de empresa solo admite letras, dígitos y guion (sin «/»).").nullable().optional(),
+  ),
   // Contrato 4.1.1/4.1.3: condiciones especiales. "" (campo vacío) = quitarlas.
   listaPrecioId: z.preprocess((v) => (v === "" ? null : v), z.string().uuid("Elija una lista de precios de la lista.").nullable().optional()),
   descuentoEspecialPct: z.preprocess(
