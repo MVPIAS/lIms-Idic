@@ -163,11 +163,11 @@ export class MoraClienteService implements OnModuleInit, OnModuleDestroy {
         `INSERT INTO sql_paso_aplicado (codigo, descripcion) VALUES ($1, 'Primera revisión del bloqueo por mora (COM-05): las facturas ya vencidas solo generan avisos internos') ON CONFLICT (codigo) DO NOTHING`,
         codigo,
       );
-      const [r] = await this.prisma.$queryRawUnsafe<{ dia: string }[]>(
-        `SELECT to_char(aplicado_at AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS dia FROM sql_paso_aplicado WHERE codigo = $1`,
+      const [r] = await this.prisma.$queryRawUnsafe<{ aplicadoAt: Date }[]>(
+        `SELECT aplicado_at AS "aplicadoAt" FROM sql_paso_aplicado WHERE codigo = $1`,
         codigo,
       );
-      return r?.dia ?? null;
+      return r?.aplicadoAt ? hoyChile(new Date(r.aplicadoAt)) : null;
     } catch {
       return null;
     }
