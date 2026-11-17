@@ -5,7 +5,7 @@
  * CNC-DGMN por fabricante. Pestañas Explosivos / Sustancias químicas / En
  * receso; inscripción, corrección, receso, reactivación y cambio de titular,
  * todo con historial. Emisión del listado oficial por fabricante en PDF (para
- * la firma del Subdirector BPCH y de la DGMN) o Excel (EP-09 9.16, BL-021).
+ * la firma del Subdirector BPCH; sale a la DGMN por oficio del Director) o Excel (EP-09 9.16, BL-021).
  * API: /bpch/codificacion
  */
 import { useCallback, useEffect, useState } from "react";
@@ -386,7 +386,7 @@ function EmitirListado({ gestiona, inicial, onCerrar }: { gestiona: boolean; ini
       </>}
     >
       <p style={{ marginTop: 0, color: "var(--muted)", fontSize: 12.5 }}>
-        Formato de los modelos DGMN: encabezado del Ministerio, fabricante y RUT, fecha de edición, productos por grupo y familia con totales, y las firmas del Subdirector del BPCH y del Jefe del Depto. Control de Armas y Explosivos de la DGMN. El PDF se firma fuera del LIMS; queda constancia de cada emisión.
+        Formato de los modelos DGMN: encabezado del Ministerio, fabricante y RUT, fecha de edición, productos por grupo y familia con totales, y la firma del Subdirector BPCH (Jefe del Departamento BPCH). El PDF se firma fuera del LIMS y se remite a la DGMN mediante oficio en papel firmado por el Director del IDIC; queda constancia de cada emisión.
       </p>
       {error && <div className="alert warn" role="alert">{error}</div>}
       <div className="form-grid">

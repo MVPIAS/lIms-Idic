@@ -51,7 +51,7 @@ export class CodificacionController {
   @Post("listado-oficial/pdf")
   @RequierePermiso("bpch.codificacion.gestionar")
   @AmbitoUnidad("BPCH_CERT")
-  @ApiOperation({ summary: "Genera el listado oficial en PDF para la firma (Subdirector BPCH y Jefe Depto. Control de Armas y Explosivos)" })
+  @ApiOperation({ summary: "Genera el listado oficial en PDF para la firma del Subdirector BPCH (sale a la DGMN por oficio del Director)" })
   async listadoPdf(@Body() body: unknown, @Req() req: any, @Res() res: any) {
     const r = await this.svc.listadoOficial(req, body, "pdf");
     res.set({ "Content-Type": r.tipo, "Content-Disposition": `attachment; filename="${r.nombre}"`, "Cache-Control": "private, no-store" });

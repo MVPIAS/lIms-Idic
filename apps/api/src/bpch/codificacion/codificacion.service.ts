@@ -6,7 +6,7 @@ import { Sql, tenantDe, usuarioDe } from "../comun/bpch-comun.service";
 import { codigoCuAjeno, faltantesInscripcionCu } from "../prototipos/reglas-prototipo";
 import { generarPdf } from "../../plantilla-render/pdf.renderer";
 import { hoyChile } from "../../common/fecha-chile";
-import { TIPOS_LISTADO, agruparListado, entraEnListado, htmlListado, xlsxListado, type TipoListado } from "./listado-oficial";
+import { FIRMA_LISTADO, TIPOS_LISTADO, agruparListado, entraEnListado, htmlListado, xlsxListado, type TipoListado } from "./listado-oficial";
 import {
   ESTADOS_CODIFICACION,
   LISTADOS_CODIFICACION,
@@ -162,11 +162,9 @@ export class CodificacionService {
     let contenido: Buffer;
     if (formato === "xlsx") contenido = xlsxListado(secciones);
     else {
-      // Firmantes por cargo: quién firma y cómo llega la firma de la DGMN está por confirmar (EP-09 P4).
-      const cuerpo = htmlListado(secciones, d.listado, d.fechaEdicion, {
-        subdirector: "Subdirector del Banco de Pruebas de Chile",
-        dgmn: "Jefe Depto. Control de Armas y Explosivos · DGMN",
-      });
+      // BPCH-12 / BPCH-46 (respuesta IDIC 17-11-2026): firma solo el Subdirector
+      // BPCH (Jefe del Departamento); va a la DGMN por oficio del Director.
+      const cuerpo = htmlListado(secciones, d.listado, d.fechaEdicion, { subdirector: FIRMA_LISTADO });
       const hash = createHash("sha256").update(cuerpo, "utf8").digest("hex");
       contenido = await generarPdf(
         cuerpo,
