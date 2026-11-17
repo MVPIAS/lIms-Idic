@@ -12,6 +12,7 @@ import {
   calcularRutaCotizacion,
   estadoTrasRespuesta,
   estadoTrasVb,
+  esRefirmaReapertura,
   faltantesParaFirma,
   motivoNoEditable,
   motivoNoEnviable,
@@ -323,7 +324,7 @@ export class CircuitoCotizacionService {
       puedo: {
         solicitar: editable && this.tienePermiso(req, ["cotizacion.crear"]),
         enviarAFirma: faltanFirma.length === 0 && c.circuito === "r1" && this.tienePermiso(req, ["cotizacion.crear"]),
-        firmar: c.firmaEstado === "pendiente" && c.estado === "abierta" && this.tienePermiso(req, ["cotizacion.firmar"]) && !!yo && firmantes.some((f) => f.id === yo),
+        firmar: c.firmaEstado === "pendiente" && (c.estado === "abierta" || esRefirmaReapertura(c)) && this.tienePermiso(req, ["cotizacion.firmar"]) && !!yo && firmantes.some((f) => f.id === yo),
         enviarCliente: !motivoNoEnviable(c) && this.tienePermiso(req, ["cotizacion.crear"]),
       },
     };
@@ -668,6 +669,19 @@ export class CircuitoCotizacionService {
     const cfg = await leerConfigCircuito(this.prisma, tenantId);
     const f = faltantesParaFirma(c, sols.map((s) => ({ id: s.id, estado: s.estado, unidad: s.unidadCodigo, numero: s.numero })), cfg, "firmar");
     if (f.length) throw new ConflictException(`No se puede firmar: ${f.join(" ")}`);
+    if (esRefirmaReapertura(c)) {
+      // Nueva firma de la versión reabierta (COM-02): la cotización ya fue
+      // aceptada; su fecha de emisión y su validez no cambian.
+      const f2 = (await this.prisma.$queryRawUnsafe(
+        `UPDATE cotizacion SET firma_estado = 'firmada', firmada_por = $2::uuid, firmada_at = now(), updated_at = now()
+          WHERE id = $1::uuid AND firma_estado = 'pendiente' RETURNING id`,
+        id,
+        this.yo(req),
+      )) as unknown[];
+      if (!f2.length) throw new ConflictException("La cotización ya no está en firma: recárguela.");
+      await this.evento(tenantId, id, "firmada", this.yo(req), null, { reapertura: true });
+      return { ok: true, mensaje: `Nueva versión de la cotización ${c.codigo} firmada. Ya puede enviarla al cliente.` };
+    }
     // Al emitir, la validez corre desde hoy (IT DCO-PG01-P01-IT02).
     const hoy = hoyEnChile();
     const validez = await this.cotizaciones.calcularValidezPara(tenantId, c.clienteId, c.centroCostoId, hoy);

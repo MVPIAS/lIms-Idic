@@ -2,6 +2,7 @@ import {
   calcularRutaCotizacion,
   estadoTrasRespuesta,
   estadoTrasVb,
+  esRefirmaReapertura,
   faltantesParaFirma,
   motivoNoAceptable,
   motivoNoEditable,
@@ -73,6 +74,15 @@ describe("Firma del Jefe DCO y aceptación (EP-00 2.6–2.8, 4.1)", () => {
     expect(faltantesParaFirma({ ...cot, firmaEstado: "pendiente" }, [], cfg, "firmar")).toEqual([]);
     expect(faltantesParaFirma({ ...cot, firmaEstado: "pendiente" }, [], cfg, "enviar").join(" ")).toMatch(/Ya está enviada/);
     expect(faltantesParaFirma({ ...cot, firmaEstado: "devuelta" }, [], cfg, "enviar")).toEqual([]);
+  });
+
+  it("COM-02: la versión reabierta (Aceptada) vuelve a firma del Jefe DCO sin repetir el V°B° del laboratorio", () => {
+    const acep = { ...cot, estado: "aceptada", firmaEstado: "pendiente" } as const;
+    expect(esRefirmaReapertura(acep)).toBe(true);
+    expect(faltantesParaFirma(acep, [sol("respondido")], { ...cfg, exigirConsulta: true }, "firmar")).toEqual([]);
+    expect(esRefirmaReapertura({ ...acep, firmaEstado: "firmada" })).toBe(false);
+    expect(faltantesParaFirma({ ...acep, firmaEstado: "firmada" }, [], cfg, "firmar").join(" ")).toMatch(/no está Abierta/);
+    expect(esRefirmaReapertura({ ...acep, circuito: "historico" })).toBe(false);
   });
 
   it("en firma o firmada no se edita el contenido", () => {

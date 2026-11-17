@@ -53,6 +53,7 @@ import {
   errorSolicitarReapertura,
   facturaTomaValorFinal,
   fotoCotizacion,
+  requiereNuevaFirma,
   siguienteVersion as siguienteVersionReapertura,
 } from "./reapertura";
 import { validarOportunidad, enlazarOportunidad, ganarOportunidadDeCotizacion, guardarDatosSolicitud, leerDatosSolicitud, type DatosSolicitud } from "./cotizacion-extra";
@@ -357,7 +358,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const where: Prisma.CotizacionWhereInput = { AND: and };
     // Chip «En firma» (recorrido 30, fallo 47): abiertas con la firma del Jefe DCO pendiente.
     const enFirma: { id: string }[] = await this.prisma.$queryRawUnsafe(
-      `SELECT id FROM cotizacion WHERE ($1::uuid IS NULL OR tenant_id = $1::uuid) AND estado = 'abierta' AND firma_estado = 'pendiente'`,
+      `SELECT id FROM cotizacion WHERE ($1::uuid IS NULL OR tenant_id = $1::uuid) AND estado IN ('abierta', 'aceptada') AND firma_estado = 'pendiente'`,
       tenantId ?? null,
     );
 
@@ -1432,31 +1433,40 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const err = errorResolverReapertura(viva, autorizar, comentario);
     if (err) throw new ConflictException(err);
     const obs = comentario?.trim() || null;
+    // Autorizar y rechazar a la vez (dos jefaturas, doble clic): solo gana la
+    // primera; la fila se cambia con WHERE estado = 'solicitada' … RETURNING.
+    const yaResuelta = () =>
+      new ConflictException("La solicitud de reapertura ya fue resuelta por otra persona: recargue la cotización.");
     if (!autorizar) {
-      await this.prisma.$executeRawUnsafe(
-        `UPDATE cotizacion_reapertura SET estado = 'rechazada', resuelta_por = $2::uuid, resuelta_at = now(), comentario_resolucion = $3
-          WHERE id = $1::uuid`,
-        viva!.id,
-        usuarioId ?? null,
-        obs,
-      );
+      await this.prisma.$transaction(async (tx) => {
+        const f = (await tx.$queryRawUnsafe(
+          `UPDATE cotizacion_reapertura SET estado = 'rechazada', resuelta_por = $2::uuid, resuelta_at = now(), comentario_resolucion = $3
+            WHERE id = $1::uuid AND estado = 'solicitada' RETURNING id`,
+          viva!.id,
+          usuarioId ?? null,
+          obs,
+        )) as unknown[];
+        if (!f.length) throw yaResuelta();
+      });
       await this.hito(cot.tenantId, id, "reapertura_rechazada", usuarioId, obs, { version: viva!.version });
       return { ok: true, mensaje: `Reapertura rechazada: la cotización ${cot.codigo} sigue Aceptada.` };
     }
     // Se guarda la versión vigente (cotizado) antes de permitir cambios.
     const foto = fotoCotizacion(cot);
     await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(
+      const f = (await tx.$queryRawUnsafe(
         `UPDATE cotizacion_reapertura SET estado = 'autorizada', resuelta_por = $2::uuid, resuelta_at = now(),
                 comentario_resolucion = $3, version_anterior = $4::jsonb
-          WHERE id = $1::uuid`,
+          WHERE id = $1::uuid AND estado = 'solicitada' RETURNING id`,
         viva!.id,
         usuarioId ?? null,
         obs,
         JSON.stringify(foto),
-      );
+      )) as unknown[];
+      if (!f.length) throw yaResuelta();
       validarTransicion("cotizacion", cot.estado, ESTADO_REABIERTA);
-      await tx.cotizacion.update({ where: { id }, data: { estado: ESTADO_REABIERTA, updatedAt: new Date() } });
+      const c = await tx.cotizacion.updateMany({ where: { id, estado: cot.estado }, data: { estado: ESTADO_REABIERTA, updatedAt: new Date() } });
+      if (c.count !== 1) throw new ConflictException(`La cotización ${cot.codigo} cambió de estado mientras se autorizaba: recárguela.`);
     });
     await this.hito(cot.tenantId, id, "reapertura_autorizada", usuarioId, obs, { version: viva!.version, totalAnterior: foto.total });
     return { ok: true, mensaje: `Cotización ${cot.codigo} reabierta: corrija sus líneas y registre el valor final.` };
@@ -1475,8 +1485,33 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const total = Number(cot.total ?? 0);
     const ot = cot.ot;
     const r = await this.prisma.$transaction(async (tx) => {
+      // Dos «registrar valor final» simultáneos: solo el primero cierra la versión.
+      const cerrada = (await tx.$queryRawUnsafe(
+        `UPDATE cotizacion_reapertura SET estado = 'cerrada', cerrada_por = $2::uuid, cerrada_at = now()
+          WHERE id = $1::uuid AND estado = 'autorizada' RETURNING id`,
+        viva!.id,
+        usuarioId ?? null,
+      )) as unknown[];
+      if (!cerrada.length) throw new ConflictException("El valor final de esta reapertura ya fue registrado: recargue la cotización.");
       validarTransicion("cotizacion", cot.estado, "aceptada");
-      await tx.cotizacion.update({ where: { id }, data: { estado: "aceptada", updatedAt: new Date() } });
+      const c = await tx.cotizacion.updateMany({ where: { id, estado: ESTADO_REABIERTA }, data: { estado: "aceptada", updatedAt: new Date() } });
+      if (c.count !== 1) throw new ConflictException(`La cotización ${cot.codigo} ya no está reabierta: recárguela.`);
+      // La versión firmada anterior queda en el historial; la nueva vuelve a firma
+      // del Jefe DCO (matriz COTIZACION) antes de enviarse al cliente.
+      const [fa] = (await tx.$queryRawUnsafe(
+        `SELECT c.circuito, c.firma_estado AS "firmaEstado", c.firmada_at AS "firmadaAt", u.nombre_completo AS "firmadaPor"
+           FROM cotizacion c LEFT JOIN usuario u ON u.id = c.firmada_por WHERE c.id = $1::uuid`,
+        id,
+      )) as { circuito: string | null; firmaEstado: string | null; firmadaAt: Date | null; firmadaPor: string | null }[];
+      const refirmar = requiereNuevaFirma(fa?.circuito ?? null, fa?.firmaEstado ?? null);
+      const firmaAnterior = fa?.firmaEstado === "firmada" ? { firmadaPor: fa.firmadaPor, firmadaAt: fa.firmadaAt } : null;
+      if (refirmar)
+        await tx.$executeRawUnsafe(
+          `UPDATE cotizacion SET firma_estado = 'pendiente', firma_solicitada_por = $2::uuid, firma_solicitada_at = now(),
+                  firma_devuelta_motivo = NULL, updated_at = now() WHERE id = $1::uuid`,
+          id,
+          usuarioId ?? null,
+        );
       let facturaNumero: string | null = null;
       let facturaEmitida: string | null = null;
       if (ot) {
@@ -1485,7 +1520,10 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
           `INSERT INTO ot_encargo (ot_id, tenant_id, moneda, valor_final, valor_final_at, valor_final_motivo)
            VALUES ($1::uuid, $2::uuid, $3, $4::numeric, now(), $5)
            ON CONFLICT (ot_id) DO UPDATE SET valor_final = EXCLUDED.valor_final, valor_final_at = now(),
-             valor_final_motivo = EXCLUDED.valor_final_motivo, moneda = COALESCE(ot_encargo.moneda, EXCLUDED.moneda)`,
+             valor_final_motivo = CASE WHEN ot_encargo.moneda IS NOT NULL AND ot_encargo.moneda <> EXCLUDED.moneda
+                                       THEN left(EXCLUDED.valor_final_motivo || ' (moneda ' || ot_encargo.moneda || ' → ' || EXCLUDED.moneda || ')', 300)
+                                       ELSE EXCLUDED.valor_final_motivo END,
+             moneda = EXCLUDED.moneda`,
           ot.id,
           cot.tenantId,
           cot.moneda,
@@ -1529,25 +1567,31 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         });
       }
       await tx.$executeRawUnsafe(
-        `UPDATE cotizacion_reapertura SET estado = 'cerrada', cerrada_por = $2::uuid, cerrada_at = now(), total_final = $3::numeric,
-                version_final = $4::jsonb, ot_codigo = $5, factura_numero = $6
+        `UPDATE cotizacion_reapertura SET total_final = $2::numeric,
+                version_final = $3::jsonb, ot_codigo = $4, factura_numero = $5,
+                version_anterior = CASE WHEN $6::jsonb IS NULL THEN version_anterior
+                                        ELSE COALESCE(version_anterior, '{}'::jsonb) || jsonb_build_object('firma', $6::jsonb) END
           WHERE id = $1::uuid`,
         viva!.id,
-        usuarioId ?? null,
         total,
         JSON.stringify(fotoCotizacion(cot)),
         ot?.codigo ?? null,
         facturaNumero,
+        firmaAnterior ? JSON.stringify(firmaAnterior) : null,
       );
-      return { facturaNumero, facturaEmitida };
+      return { facturaNumero, facturaEmitida, refirmar, firmaAnterior };
     });
     await this.hito(cot.tenantId, id, "reapertura_cerrada", usuarioId, null, {
       version: viva!.version,
       totalFinal: total,
       otCodigo: ot?.codigo ?? null,
       facturaNumero: r.facturaNumero,
+      firmaAnterior: r.firmaAnterior,
+      nuevaFirma: r.refirmar,
     });
     const partes = [`Valor final registrado: la cotización ${cot.codigo} vuelve a Aceptada (versión ${viva!.version}).`];
+    if (r.refirmar)
+      partes.push(`La versión ${viva!.version} queda pendiente de firma del Jefe DCO (la firma anterior se conserva en el historial); no se envía al cliente hasta firmarla.`);
     if (ot) partes.push(`La OT ${ot.codigo} conserva su número y toma el valor final.`);
     if (r.facturaNumero) partes.push(`La factura pendiente ${r.facturaNumero} se actualizó con el valor final.`);
     if (r.facturaEmitida) partes.push(`La factura ${r.facturaEmitida} ya estaba emitida: corrija la diferencia con una nota de crédito o débito.`);

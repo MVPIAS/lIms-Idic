@@ -4,11 +4,19 @@ import {
   errorSolicitarReapertura,
   facturaTomaValorFinal,
   fotoCotizacion,
+  requiereNuevaFirma,
   siguienteVersion,
 } from "./reapertura";
 import { validarTransicion } from "../common/estados";
 
 describe("COM-02 · Reabrir cotización", () => {
+  it("auditoría: tras el valor final, una cotización firmada vuelve a firma (la firma anterior va al historial)", () => {
+    expect(requiereNuevaFirma("r1", "firmada")).toBe(true);
+    expect(requiereNuevaFirma("r1", null)).toBe(false);
+    expect(requiereNuevaFirma("r1", "pendiente")).toBe(false);
+    expect(requiereNuevaFirma("historico", "firmada")).toBe(false);
+  });
+
   it("solo se pide sobre una Aceptada, sin otra en curso y con motivo", () => {
     expect(errorSolicitarReapertura({ codigo: "2026-00001", estado: "abierta" }, null, "Se trabajó menos de lo cotizado")).toMatch(/Solo se reabre una cotización Aceptada/);
     expect(errorSolicitarReapertura({ estado: "aceptada" }, { id: "r", estado: "solicitada" }, "Se trabajó menos de lo cotizado")).toMatch(/esperando la autorización/);

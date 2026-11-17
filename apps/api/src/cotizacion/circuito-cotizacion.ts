@@ -154,13 +154,23 @@ export function motivoNoEditable(firmaEstado: FirmaEstado): string | null {
  * Lo que falta para enviar a firma (y para firmar): Abierta, en elaboración o
  * devuelta, con líneas, y cada consulta al laboratorio con su V°B° completo.
  */
+/**
+ * Nueva firma de una versión reabierta (COM-02 · auditoría 17-11-2026): la
+ * cotización Aceptada cuyo valor final se registró vuelve a firma del Jefe DCO.
+ * No repite las consultas al laboratorio (el V°B° es de la versión aceptada).
+ */
+export const esRefirmaReapertura = (c: Pick<CotizacionCircuito, "estado" | "circuito" | "firmaEstado">) =>
+  c.estado === "aceptada" && c.circuito === "r1" && (c.firmaEstado === "pendiente" || c.firmaEstado === "devuelta");
+
 export function faltantesParaFirma(c: CotizacionCircuito, solicitudes: SolicitudCircuito[], cfg: ConfigCircuito, etapa: "enviar" | "firmar"): string[] {
   const f: string[] = [];
-  if (c.estado !== "abierta") f.push(`La cotización ${c.codigo} no está Abierta (está «${c.estado}»).`);
+  const refirma = esRefirmaReapertura(c);
+  if (c.estado !== "abierta" && !refirma) f.push(`La cotización ${c.codigo} no está Abierta (está «${c.estado}»).`);
   if (etapa === "enviar" && c.firmaEstado === "pendiente") f.push("Ya está enviada a firma del Jefe DCO.");
   if (etapa === "enviar" && c.firmaEstado === "firmada") f.push("Ya está firmada.");
   if (etapa === "firmar" && c.firmaEstado !== "pendiente") f.push("La cotización no está enviada a firma: el ejecutivo debe enviarla primero.");
   if (c.lineas < 1) f.push("La cotización no tiene líneas.");
+  if (refirma) return f;
   const sol = delCircuito(solicitudes);
   for (const s of sol) {
     if (s.estado === "rechazado") f.push(`El laboratorio ${s.unidad} indicó que no realiza el servicio (${nombreSol(s)}): retire la solicitud o anule la cotización.`);
