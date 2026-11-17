@@ -157,6 +157,7 @@ function Ficha({ inicial, gestiona, onCerrar, onGuardado }: { inicial: any | nul
     motivo: "",
   });
   const [estadoMotivo, setEstadoMotivo] = useState("");
+  const [certNuevo, setCertNuevo] = useState("");
   const [errores, setErrores] = useState("");
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setF((x) => ({ ...x, [k]: e.target.value }));
 
@@ -197,9 +198,15 @@ function Ficha({ inicial, gestiona, onCerrar, onGuardado }: { inicial: any | nul
   async function cambiarEstado() {
     setErrores("");
     try {
-      const r = await pedir("POST", `/bpch/codificacion/${d.id}/estado`, { estado: d.estado === "VIGENTE" ? "EN_RECESO" : "VIGENTE", motivo: estadoMotivo });
+      const reactivar = d.estado !== "VIGENTE";
+      const r = await pedir("POST", `/bpch/codificacion/${d.id}/estado`, {
+        estado: reactivar ? "VIGENTE" : "EN_RECESO",
+        motivo: estadoMotivo,
+        ...(reactivar ? { certificadoNumero: certNuevo.trim() || null } : {}),
+      });
       setD(r);
       setEstadoMotivo("");
+      setCertNuevo("");
       toast.ok(r.estado === "VIGENTE" ? "Producto reactivado." : "Producto pasado a receso.");
       onGuardado();
     } catch (e: any) {
@@ -262,6 +269,10 @@ function Ficha({ inicial, gestiona, onCerrar, onGuardado }: { inicial: any | nul
           {gestiona && (
             <div className="toolbar" style={{ marginTop: 10 }}>
               <input aria-label="Motivo del cambio de estado" placeholder={d.estado === "VIGENTE" ? "Motivo del paso a receso" : "Motivo de la reactivación"} value={estadoMotivo} onChange={(e) => setEstadoMotivo(e.target.value)} style={{ flex: 1 }} />
+              {/* BPCH-40: reactivar un producto en receso exige un certificado nuevo. */}
+              {d.estado !== "VIGENTE" && (
+                <input aria-label="Nº del certificado nuevo" placeholder="Nº del certificado nuevo (obligatorio)" value={certNuevo} onChange={(e) => setCertNuevo(e.target.value)} maxLength={60} style={{ flex: 1 }} />
+              )}
               <button type="button" className={`btn ${d.estado === "VIGENTE" ? "ghost-danger" : "success"} sm`} onClick={cambiarEstado}>{d.estado === "VIGENTE" ? "↓ Pasar a receso" : "↑ Reactivar"}</button>
             </div>
           )}
@@ -311,8 +322,9 @@ function resumen(h: any): string {
   const x = h.detalle ?? {};
   switch (h.evento) {
     case "receso":
-    case "reactivacion":
       return x.motivo ?? "";
+    case "reactivacion":
+      return [x.motivo, x.certificadoNuevo ? `certificado nuevo ${x.certificadoNuevo}${x.certificadoAnterior ? ` (antes ${x.certificadoAnterior})` : ""}` : null].filter(Boolean).join(" · ");
     case "edicion":
       // Cada campo corregido con su valor anterior y el nuevo («antes → ahora»).
       return [
