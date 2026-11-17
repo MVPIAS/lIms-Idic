@@ -357,6 +357,23 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     },
   },
   {
+    categoria: "recepcion_destino_no_usado",
+    titulo: "Recepción · destinos de la muestra que no usa el laboratorio",
+    donde: "OT › Muestras › Recepción: el destino marcado no se ofrece ni se acepta en la recepción de ese laboratorio (p. ej. la Sección Alimentos no usa contramuestras).",
+    patron: {
+      tipo: "multiple",
+      nombre: "Destinos que no usa",
+      opciones: [
+        { valor: "TESTIGO", etiqueta: "Testigo" },
+        { valor: "CUSTODIA", etiqueta: "En custodia" },
+        { valor: "CONTRAMUESTRA", etiqueta: "Contramuestra" },
+      ],
+      alta: "laboratorio",
+      ayuda: "«Análisis» siempre se ofrece. Sin ninguno marcado, el laboratorio puede usar todos los destinos.",
+      porDefecto: "",
+    },
+  },
+  {
     categoria: "recepcion_campo",
     titulo: "Recepción · campos propios de cada laboratorio",
     donde: "OT › Muestras › Recepción: campos adicionales que pide cada laboratorio (lote, fabricante, verificaciones…).",

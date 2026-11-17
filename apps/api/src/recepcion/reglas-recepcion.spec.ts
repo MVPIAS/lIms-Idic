@@ -1,5 +1,6 @@
 import {
   camposDeLaboratorio,
+  destinosNoUsados,
   estadoRetencion,
   inicioNumeracion,
   leerCampo,
@@ -85,6 +86,33 @@ describe("Recepción · campos propios del laboratorio (Catálogo › Parámetro
   it("sin configuración, el destino de la muestra igual se valida contra el vocabulario", () => {
     expect(validarCamposLaboratorio([], { claseCustodia: "otra" }, "LQC").errores).toHaveLength(1);
     expect(validarCamposLaboratorio([], { claseCustodia: "contramuestra" }, "LQC").valor.claseCustodia).toBe("contramuestra");
+  });
+});
+
+describe("Recepción · destinos que no usa el laboratorio (SAL-09)", () => {
+  const filas: FilaParametro[] = [
+    { codigo: "LMB", etiqueta: "LMB", valor: "CONTRAMUESTRA,TESTIGO" },
+    { codigo: "LQA", etiqueta: "LQA", valor: "contramuestra; analisis" },
+    { codigo: "LES", etiqueta: "LES", valor: "CONTRAMUESTRA", activo: false },
+  ];
+  it("lee la lista por laboratorio; «Análisis» nunca se excluye; la fila inactiva no cuenta", () => {
+    expect(destinosNoUsados(filas, "lmb")).toEqual(["testigo", "contramuestra"]);
+    expect(destinosNoUsados(filas, "LQA")).toEqual(["contramuestra"]);
+    expect(destinosNoUsados(filas, "LES")).toEqual([]);
+    expect(destinosNoUsados(filas, "LCC")).toEqual([]);
+    expect(destinosNoUsados(filas, null)).toEqual([]);
+  });
+  it("el destino no usado se rechaza con un mensaje claro; en otro laboratorio se acepta", () => {
+    const r = validarCamposLaboratorio([], { claseCustodia: "contramuestra" }, "LMB", "Muestra 1: ", ["testigo", "contramuestra"]);
+    expect(r.errores).toEqual(["Muestra 1: el LMB no usa el destino «Contramuestra»: elija otro destino."]);
+    expect(r.valor.claseCustodia).toBeNull();
+    expect(validarCamposLaboratorio([], { claseCustodia: "contramuestra" }, "LCC").errores).toEqual([]);
+    expect(validarCamposLaboratorio([], { claseCustodia: "analisis" }, "LMB", "", ["contramuestra"]).valor.claseCustodia).toBe("analisis");
+  });
+  it("la lista del campo «destino» del laboratorio pierde las opciones no usadas", () => {
+    const campo: FilaParametro = { codigo: "LCC.clase_custodia", etiqueta: "Destino final", valor: '{"tipo":"lista","opciones":[{"valor":"analisis","etiqueta":"Destrucción"},{"valor":"contramuestra","etiqueta":"Contramuestra"}]}' };
+    expect(camposDeLaboratorio([campo], "LCC", ["contramuestra"])[0].opciones.map((o) => o.valor)).toEqual(["analisis"]);
+    expect(camposDeLaboratorio([campo], "LCC")[0].opciones).toHaveLength(2);
   });
 });
 

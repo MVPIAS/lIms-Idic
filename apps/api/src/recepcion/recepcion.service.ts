@@ -14,6 +14,7 @@ import {
   semaforoPlazo,
   SQL_LOTE_BPCH,
   validarCamposLaboratorio,
+  destinosNoUsados,
   type CampoRecepcion,
   type ClaseCustodia,
   type EntradaRecepcionLab,
@@ -37,6 +38,8 @@ export interface ConfigRecepcionLab {
   productoObligatorio: boolean;
   campos: CampoRecepcion[];
   clases: { valor: ClaseCustodia; etiqueta: string }[];
+  /** Destinos que el laboratorio no usa (SAL-09): ni se ofrecen ni se aceptan. */
+  destinosNoUsados: ClaseCustodia[];
   plazos: Partial<Record<ClaseCustodia, number>>;
 }
 
@@ -97,24 +100,27 @@ export class RecepcionService {
           tenantId,
         ))[0] ?? null
       : null;
-    const [campos, obligatorio, retencion] = await Promise.all([
+    const [campos, obligatorio, retencion, noUsadosFilas] = await Promise.all([
       this.parametros(tenantId, "recepcion_campo", db),
       this.parametros(tenantId, "recepcion_producto_obligatorio", db),
       this.parametros(tenantId, "retencion_muestra", db),
+      this.parametros(tenantId, "recepcion_destino_no_usado", db),
     ]);
     const codigo = unidad?.codigo ?? null;
+    const noUsados = destinosNoUsados(noUsadosFilas, codigo);
     return {
       laboratorio: unidad,
       productoObligatorio: !!codigo && obligatorio.some((p) => p.activo && p.codigo.toUpperCase() === codigo.toUpperCase()),
-      campos: camposDeLaboratorio(campos, codigo),
-      clases: CLASES_CUSTODIA.map((c) => ({ valor: c, etiqueta: NOMBRE_CLASE[c] })),
+      campos: camposDeLaboratorio(campos, codigo, noUsados),
+      clases: CLASES_CUSTODIA.filter((c) => !noUsados.includes(c)).map((c) => ({ valor: c, etiqueta: NOMBRE_CLASE[c] })),
+      destinosNoUsados: noUsados,
       plazos: plazosRetencion(retencion),
     };
   }
 
   /** Valida los campos propios del laboratorio (lista de errores + valor normalizado). */
   validarCampos(config: ConfigRecepcionLab, entrada: EntradaRecepcionLab, prefijo = "") {
-    return validarCamposLaboratorio(config.campos, entrada, config.laboratorio?.codigo ?? "laboratorio", prefijo);
+    return validarCamposLaboratorio(config.campos, entrada, config.laboratorio?.codigo ?? "laboratorio", prefijo, config.destinosNoUsados ?? []);
   }
 
   /** El producto (cat_elemento) existe y está vigente en el tenant. */
