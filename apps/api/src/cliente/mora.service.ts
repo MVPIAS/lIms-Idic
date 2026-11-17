@@ -77,6 +77,17 @@ export async function aplicarMora(db: any, tenantId: string, clienteId: string, 
       clienteId,
       motivo,
     );
+    // Historial de bloqueos del cliente (el mismo del bloqueo manual del Jefe DCO).
+    const vencido = est.facturas.filter((f) => !f.exceptuada).reduce((a, f) => a + f.saldo, 0);
+    await db.$executeRawUnsafe(
+      `INSERT INTO cliente_bloqueo (tenant_id, cliente_id, motivo, monto_pendiente, contador_no_pago, bloqueado_por, activo)
+       VALUES ($1::uuid, $2::uuid, $3, $4::numeric, $5::int, NULL, TRUE)`,
+      tenantId,
+      clienteId,
+      motivo,
+      Math.round(vencido * 100) / 100,
+      est.facturas.length,
+    ).catch(() => undefined);
     return { ...c, bloqueado: true, bloqueo_origen: "mora", motivo_bloqueo: motivo, recienBloqueado: true };
   }
   if (!est.bloquear && c.bloqueado && c.bloqueo_origen === "mora") {
@@ -84,6 +95,7 @@ export async function aplicarMora(db: any, tenantId: string, clienteId: string, 
       `UPDATE cliente SET bloqueado = FALSE, bloqueo_origen = NULL, motivo_bloqueo = NULL, bloqueado_at = NULL, updated_at = now() WHERE id = $1::uuid`,
       clienteId,
     );
+    await db.$executeRawUnsafe(`UPDATE cliente_bloqueo SET activo = FALSE, desbloqueado_at = now() WHERE cliente_id = $1::uuid AND activo`, clienteId).catch(() => undefined);
     return { ...c, bloqueado: false, bloqueo_origen: null, motivo_bloqueo: null };
   }
   return c;
