@@ -25,6 +25,8 @@ export default function OficioPage() {
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [editar, setEditar] = useState(false);
+  // COM-08: número asignado por Registratura (opcional; vacío = lo asigna el LIMS).
+  const [numeroReg, setNumeroReg] = useState("");
   const [f, setF] = useState({ destinatario: "", materia: "", cuerpo: "", distribucion: "" });
   const [dialogo, setDialogo] = useState<null | "devolver" | "anular" | "despachar">(null);
   const [motivo, setMotivo] = useState("");
@@ -186,17 +188,22 @@ export default function OficioPage() {
         )}
         <div className="toolbar" style={{ marginTop: 12, marginBottom: 0, flexWrap: "wrap" }}>
           {p.generar && !editar && (
-            <button type="button" className="btn primary" disabled={ocupado} onClick={() => hacer(() => llamar("POST", `/oficios/${id}/generar`), "Oficio enviado a firmas.")}>
-              Generar oficio → firmas
-            </button>
+            <>
+              <input aria-label="Nº de oficio asignado por Registratura" placeholder="Nº de oficio de Registratura (opcional)" value={numeroReg} maxLength={40}
+                onChange={(e) => setNumeroReg(e.target.value)} style={{ width: 260 }} title="Si lo deja vacío, el LIMS asigna el número." />
+              <button type="button" className="btn primary" disabled={ocupado}
+                onClick={() => hacer(() => llamar("POST", `/oficios/${id}/generar`, numeroReg.trim() ? { numeroRegistratura: numeroReg.trim() } : {}), "Oficio enviado a firmas.")}>
+                Generar oficio → firmas
+              </button>
+            </>
           )}
           {p.firmar && (
             <>
               <button type="button" className="btn success" disabled={ocupado} onClick={async () => {
                 if (await confirmar({ titulo: miPaso?.accion === "VB" ? "¿Dar V°B° al oficio?" : "¿Firmar el oficio?", mensaje: "Queda registrado con fecha y hora.", confirmarTexto: miPaso?.accion === "VB" ? "Dar V°B°" : "Firmar" }))
-                  hacer(() => llamar("POST", `/oficios/${id}/firmar`, {}), miPaso?.accion === "VB" ? "V°B° registrado: pasa a la Dirección." : "Oficio firmado.");
+                  hacer(() => llamar("POST", `/oficios/${id}/firmar`, {}), miPaso?.accion === "VB" ? "V°B° registrado: pasa al siguiente firmante." : "Oficio firmado.");
               }}>
-                {miPaso?.accion === "VB" ? "Dar V°B° → Dirección" : "Firmar →"}
+                {miPaso?.accion === "VB" ? "Dar V°B° →" : "Firmar →"}
               </button>
               <button type="button" className="btn outline" disabled={ocupado} onClick={() => { setMotivo(""); setDialogo("devolver"); }}>Devolver</button>
             </>

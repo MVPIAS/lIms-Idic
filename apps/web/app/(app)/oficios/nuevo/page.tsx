@@ -32,7 +32,7 @@ function NuevoOficio() {
   const [origen, setOrigen] = useState<{ titulo: string; documentos: any[] } | null>(null);
   const [error, setError] = useState("");
   const [elegidos, setElegidos] = useState<string[]>(documento ? [documento] : []);
-  const [f, setF] = useState({ destinatario: "", materia: "", fecha: hoyISO(), cuerpo: "", distribucion: "" });
+  const [f, setF] = useState({ destinatario: "", materia: "", fecha: hoyISO(), cuerpo: "", distribucion: "", numeroReg: "" });
   const [ocupado, setOcupado] = useState(false);
 
   useEffect(() => {
@@ -66,7 +66,8 @@ function NuevoOficio() {
         distribucion: leerDistribucion(f.distribucion),
       });
       if (generar) {
-        const g = await llamar<any>("POST", `/oficios/${o.id}/generar`);
+        // COM-08: número de Registratura ingresado a mano; vacío = lo asigna el LIMS.
+        const g = await llamar<any>("POST", `/oficios/${o.id}/generar`, f.numeroReg.trim() ? { numeroRegistratura: f.numeroReg.trim() } : {});
         toast.ok(`Oficio ${g.numero} enviado a firmas.`);
       } else toast.ok("Oficio guardado en borrador.");
       router.push(`/oficios/${o.id}` as any);
@@ -112,6 +113,7 @@ function NuevoOficio() {
           <div className="form-grid cols-2">
             <div className="field span-2"><label htmlFor="ofn-1">Destinatario (unidad o autoridad) <span className="req">*</span></label><input id="ofn-1" value={f.destinatario} maxLength={300} onChange={(e) => setF({ ...f, destinatario: e.target.value })} /></div>
             <div className="field span-2"><label htmlFor="ofn-2">Materia (OBJ.) <span className="req">*</span></label><input id="ofn-2" value={f.materia} maxLength={500} onChange={(e) => setF({ ...f, materia: e.target.value })} /></div>
+            <div className="field"><label htmlFor="ofn-reg">Nº de oficio (Registratura)</label><input id="ofn-reg" value={f.numeroReg} maxLength={40} placeholder="Vacío = lo asigna el LIMS" onChange={(e) => setF({ ...f, numeroReg: e.target.value })} /></div>
             <div className="field"><label htmlFor="ofn-3">Fecha</label><input id="ofn-3" type="date" value={f.fecha} max={hoyISO()} onChange={(e) => setF({ ...f, fecha: e.target.value })} /></div>
             <div className="field"><label htmlFor="ofn-4">Nº de oficio</label><input id="ofn-4" value="Se asigna al enviarlo a firmas (correlativo de la unidad)" readOnly /></div>
             <div className="field span-2"><label htmlFor="ofn-5">Texto del oficio (un párrafo por bloque; vacío = texto de remisión)</label><textarea id="ofn-5" rows={5} maxLength={8000} value={f.cuerpo} onChange={(e) => setF({ ...f, cuerpo: e.target.value })} /></div>

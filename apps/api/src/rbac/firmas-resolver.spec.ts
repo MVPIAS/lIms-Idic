@@ -255,3 +255,57 @@ describe("firmas · OT interna (sin oficialización del Jefe de Departamento)", 
     expect(lme.pasos.map((p) => `${p.accion}:${p.rol.codigo}`)).toEqual(["FIRMA:JEFE_LAB", "FIRMA:CALIDAD"]);
   });
 });
+
+describe("firmas · tercer envío IDIC (COM-32, COM-08)", () => {
+  const arbolV = construirArbol([
+    N("DIR", null, "DIRECCION"),
+    N("DCO", "DIR", "DEPARTAMENTO"),
+    N("SVT", "DCO", "SECCION"),
+    N("DQO", "DIR", "DEPARTAMENTO"),
+    N("SQU", "DQO", "SECCION"),
+    N("LQC", "SQU", "LABORATORIO"),
+  ]);
+  const COMERCIAL = { id: "r-com", codigo: "COMERCIAL", nombre: "Ejecutivo de Ventas", nivel: "OPERATIVO", alcance: "GLOBAL" };
+  const SUBDIRECTOR = { id: "r-sub", codigo: "SUBDIRECTOR", nombre: "Subdirector", nivel: "DIRECCION", alcance: "GLOBAL" };
+
+  it("COM-32: «Elabora» de la cotización en la Sección Ventas: el ejecutivo y, como alternativo, la Jefa de Ventas", () => {
+    const reglas: ReglaFirma[] = [
+      {
+        ...regla("COTIZACION", null, 1, "ELABORA", "REVISOR", "FIJA", { unidadDestinoId: "SVT" }),
+        rol: COMERCIAL,
+        rolId: COMERCIAL.id,
+        rolAlternativo: ROLES.JEFE_SECCION,
+        nivelUnidadAlternativo: "MISMA",
+      },
+    ];
+    const r = resolverFirmas({
+      tipoDocumento: "COTIZACION",
+      unidadId: "DCO",
+      reglas,
+      arbol: arbolV,
+      jefes: [{ unidadId: "SVT", usuarioId: "u-jventas", nombre: "Jefa de Ventas PRUEBA", rol: "titular" }],
+      tenencias: [{ usuarioId: "u-ejec", nombre: "Ejecutivo PRUEBA", rolCodigo: "COMERCIAL", unidadId: "SVT" }],
+      ahora: AHORA,
+    });
+    expect(r.pasos[0].unidad?.codigo).toBe("SVT");
+    expect(r.pasos[0].responsables.map((x) => x.usuarioId)).toEqual(["u-ejec", "u-jventas"]);
+    expect(r.pasos[0].advertencia).toBeNull();
+  });
+
+  it("COM-08: el paso del Subdirector no lo toma el Director titular de la Dirección", () => {
+    const reglas: ReglaFirma[] = [{ ...regla("OFICIO", null, 1, "VB", "DIRECTOR", "DIRECCION"), rol: SUBDIRECTOR, rolId: SUBDIRECTOR.id }];
+    const r = resolverFirmas({
+      tipoDocumento: "OFICIO",
+      unidadId: "LQC",
+      reglas,
+      arbol: arbolV,
+      jefes: [
+        { unidadId: "DIR", usuarioId: "u-dir", nombre: "Director", rol: "titular" },
+        { unidadId: "DIR", usuarioId: "u-sub", nombre: "Subdirector PRUEBA", rol: "subrogante" },
+      ],
+      tenencias: [],
+      ahora: AHORA,
+    });
+    expect(r.pasos[0].responsables.map((x) => x.usuarioId)).toEqual(["u-sub"]);
+  });
+});

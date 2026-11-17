@@ -218,3 +218,110 @@ BEGIN
     RAISE NOTICE 'factura: hay folios repetidos por tipo; no se crea ux_factura_tipo_numero.';
   END IF;
 END $$;
+
+-- -----------------------------------------------------------------------------
+-- COM-08 · Oficio conductor de la cotización: firmantes Jefe DCO, Jefe de
+-- Laboratorio, Subdirector y Director (matriz OFICIO_COTIZACION; la API la
+-- resuelve con el laboratorio del centro de costo de la cotización). El número
+-- lo asigna Registratura y se ingresa a mano al generar (vacío = lo asigna el
+-- LIMS, como antes). Los demás oficios siguen con la matriz OFICIO.
+-- -----------------------------------------------------------------------------
+-- Tipo nuevo en la restricción, conservando los que ya tenga (otros align_* la recrean).
+DO $$
+DECLARE
+  tipos TEXT[];
+BEGIN
+  SELECT array_agg(DISTINCT m[1] ORDER BY m[1]) INTO tipos
+    FROM pg_constraint c, regexp_matches(pg_get_constraintdef(c.oid), '''([A-Z0-9_]+)''', 'g') AS m
+   WHERE c.conname = 'flujo_firma_tipo_documento_check' AND c.conrelid = 'flujo_firma'::regclass;
+  IF tipos IS NOT NULL AND NOT ('OFICIO_COTIZACION' = ANY (tipos)) THEN
+    tipos := array_append(tipos, 'OFICIO_COTIZACION'::text);
+    ALTER TABLE flujo_firma DROP CONSTRAINT flujo_firma_tipo_documento_check;
+    EXECUTE format('ALTER TABLE flujo_firma ADD CONSTRAINT flujo_firma_tipo_documento_check CHECK (tipo_documento IN (%s))',
+                   (SELECT string_agg(quote_literal(x), ',') FROM unnest(tipos) x));
+  END IF;
+END $$;
+
+INSERT INTO flujo_firma (id, tenant_id, tipo_documento, unidad_id, orden, accion, rol_id, nivel_unidad, unidad_destino_id, obligatorio, activo, descripcion)
+SELECT gen_random_uuid(), t.id, 'OFICIO_COTIZACION', NULL, v.orden, v.accion, r.id, v.nivel, NULL, TRUE, TRUE, v.descripcion
+  FROM tenant t
+ CROSS JOIN (VALUES
+   (1, 'VB',    'JEFE_DEPTO',  'COMERCIAL', 'V°B° del Jefe del Departamento Comercial'),
+   (2, 'VB',    'JEFE_LAB',    'MISMA',     'V°B° del Jefe del Laboratorio de la cotización'),
+   (3, 'VB',    'SUBDIRECTOR', 'DIRECCION', 'V°B° del Subdirector'),
+   (4, 'FIRMA', 'DIRECTOR',    'DIRECCION', 'Firma el Director')
+ ) AS v(orden, accion, rol, nivel, descripcion)
+  JOIN rol r ON r.tenant_id = t.id AND r.codigo = v.rol
+ WHERE NOT EXISTS (SELECT 1 FROM flujo_firma x WHERE x.tenant_id = t.id AND x.tipo_documento = 'OFICIO_COTIZACION'
+                      AND x.unidad_id IS NULL AND x.orden = v.orden);
+
+-- -----------------------------------------------------------------------------
+-- COM-32 · Matriz COTIZACION, paso 1 «Elabora»: el Ejecutivo de Ventas y la
+-- Jefa de Ventas, en la Sección Ventas (SVT). Antes buscaba al ejecutivo en el
+-- DCO con unidad exacta (firmas-resolver.ts) y el paso quedaba sin responsable,
+-- porque los ejecutivos están asignados a la Sección Ventas. La Jefa de Ventas
+-- es el responsable alternativo (Jefe de Sección en la misma unidad fija).
+-- -----------------------------------------------------------------------------
+UPDATE flujo_firma f
+   SET nivel_unidad = 'FIJA',
+       unidad_destino_id = svt.id,
+       rol_alternativo_id = js.id,
+       nivel_unidad_alternativo = 'MISMA',
+       alternativo_configurado_at = COALESCE(f.alternativo_configurado_at, now()),
+       descripcion = 'Elabora el Ejecutivo de Ventas o la Jefa de Ventas (Sección Ventas)',
+       updated_at = now()
+  FROM unidad svt, rol js, rol rc
+ WHERE f.tipo_documento = 'COTIZACION' AND f.orden = 1 AND f.accion = 'ELABORA' AND f.unidad_id IS NULL
+   AND svt.tenant_id = f.tenant_id AND svt.codigo = 'SVT'
+   AND js.tenant_id = f.tenant_id AND js.codigo = 'JEFE_SECCION'
+   AND rc.id = f.rol_id AND COALESCE(rc.alias_de, rc.codigo) = 'COMERCIAL'
+   AND (f.nivel_unidad IS DISTINCT FROM 'FIJA' OR f.unidad_destino_id IS DISTINCT FROM svt.id OR f.rol_alternativo_id IS DISTINCT FROM js.id);
+
+-- -----------------------------------------------------------------------------
+-- COM-18 · No hay adquisiciones en el LIMS (solo ingreso y consumo): se quitan
+-- compra.ver y compra.gestionar a los roles (solo los conserva SUPERADMIN) y se
+-- desactiva la regla SOLICITUD_ADQUISICION. El módulo no se borra.
+-- align_cierre_permisos.sql ya no los vuelve a repartir.
+-- -----------------------------------------------------------------------------
+DELETE FROM rol_permiso rp
+ USING permiso p, rol r
+ WHERE rp.permiso_id = p.id AND rp.rol_id = r.id
+   AND p.codigo IN ('compra.ver', 'compra.gestionar')
+   AND COALESCE(r.alias_de, r.codigo) <> 'SUPERADMIN';
+UPDATE flujo_firma SET activo = FALSE, updated_at = now()
+ WHERE tipo_documento = 'SOLICITUD_ADQUISICION' AND activo;
+
+-- -----------------------------------------------------------------------------
+-- COM-09 · V°B° de la cotización solo del Jefe de Laboratorio; es requisito para
+-- emitir; el analista hace la estimación (permiso cotizacion.costear).
+-- -----------------------------------------------------------------------------
+SELECT pg_temp.te_fijar_param('circuito_cotizacion', 'vb_niveles', 'lab',
+       'V°B° que exige la respuesta del laboratorio (lab_depto | lab | ninguno)', 'COM-09');
+SELECT pg_temp.te_fijar_param('circuito_cotizacion', 'exigir_consulta_laboratorio', 'si',
+       'Exigir al menos una consulta al laboratorio antes de firmar (si | no)', 'COM-09');
+INSERT INTO rol_permiso (rol_id, permiso_id)
+SELECT r.id, p.id
+  FROM rol r JOIN permiso p ON p.codigo = 'cotizacion.costear'
+ WHERE COALESCE(r.alias_de, r.codigo) = 'ANALISTA'
+ON CONFLICT DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- COM-16 · OT sin OPI: la dispone el Director y, eventualmente, el Jefe de
+-- Departamento (la matriz OT_DISPOSICION ya admite a cualquiera de los dos).
+-- -----------------------------------------------------------------------------
+UPDATE parametro_sistema SET etiqueta = 'Disposición del Director o del Jefe de Departamento', updated_at = now()
+ WHERE categoria = 'origen_trabajo' AND codigo = 'DISPOSICION'
+   AND etiqueta IS DISTINCT FROM 'Disposición del Director o del Jefe de Departamento';
+UPDATE parametro_sistema SET etiqueta = 'Disposición del Director o del Jefe de Departamento (sin OPI previa)', updated_at = now()
+ WHERE categoria = 'aceptacion_tipo' AND codigo = 'DISPOSICION_DIRECTOR'
+   AND etiqueta IS DISTINCT FROM 'Disposición del Director o del Jefe de Departamento (sin OPI previa)';
+
+-- -----------------------------------------------------------------------------
+-- COM-36 · Precio para las FF.AA. y de Orden: costo directo de la lista vigente.
+-- (El IVA incluido por tipo de cliente no se cambia aquí: ver informe.)
+-- -----------------------------------------------------------------------------
+SELECT pg_temp.te_fijar_param('circuito_cotizacion', 'precio_ejercito', 'costo_directo',
+       'Precio de la lista que toma un cliente Ejército (ficha | costo_directo | costo_total | neto)', 'COM-36');
+UPDATE parametro_sistema SET etiqueta = 'Precio de la lista que toma un cliente Ejército (ficha | costo_directo | costo_total | neto)'
+ WHERE categoria = 'circuito_cotizacion' AND codigo = 'precio_ejercito'
+   AND etiqueta IS DISTINCT FROM 'Precio de la lista que toma un cliente Ejército (ficha | costo_directo | costo_total | neto)';
