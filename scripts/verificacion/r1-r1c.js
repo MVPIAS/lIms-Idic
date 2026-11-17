@@ -540,7 +540,9 @@ async function main() {
     const lqc = rep.laboratorios.find((l) => l.unidad === "LQC");
     afirmar(lqc && lqc.registradas >= 1 && lqc.promedio !== null && lqc.porPregunta.length >= 1, `reporte ${JSON.stringify(lqc)}`);
     const ps = await ok(U.ventas, "GET", "/encuestas/preguntas");
-    const cuerpo = { preguntas: ps.map(({ codigo, texto, escala, orden, obligatoria, activo }) => ({ codigo, texto, escala, orden, obligatoria, activo })) };
+    // Se reenvía tal cual, con su formulario (tipoCodigo) y su umbral de comentario: sin ellos el
+    // guardado dejaba todas las preguntas sin formulario y las encuestas FORM01…FORM05 sin preguntas.
+    const cuerpo = { preguntas: ps.map(({ codigo, texto, escala, orden, obligatoria, activo, tipoCodigo, comentarioSiMenor }) => ({ codigo, texto, escala, orden, obligatoria, activo, tipoCodigo: tipoCodigo ?? null, comentarioSiMenor: comentarioSiMenor ?? null })) };
     await exigir(403, U.ventas, "PUT", "/encuestas/preguntas", cuerpo);
     await exigir(400, U.admin, "PUT", "/encuestas/preguntas", { preguntas: [{ ...cuerpo.preguntas[0], escala: [5] }] });
     await ok(U.admin, "PUT", "/encuestas/preguntas", cuerpo);
