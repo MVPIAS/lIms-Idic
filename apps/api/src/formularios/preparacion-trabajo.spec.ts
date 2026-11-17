@@ -2,7 +2,7 @@ import { camposDefecto, evaluarPreparacion, leerCampoPrep, motivoBloqueoPreparac
 import {
   erroresComision, erroresDocumentacion, erroresReserva, exigeAprobacion, FORMULARIOS_TRABAJO, leerConfigTrabajo, motivoBloqueoTrabajo, pasosAprobacion, transicion,
 } from "./trabajo";
-import { mapaActivacion, motivoCapturaEnVariante, varianteDe } from "./variantes";
+import { mapaActivacion, motivoCapturaEnVariante, varianteDe, varianteEfectiva } from "./variantes";
 
 const ctx = (equipos: [string, boolean][] = []) => ({
   hoy: "2026-10-22",
@@ -27,6 +27,13 @@ describe("variantes · activación por método o laboratorio", () => {
     expect(motivoCapturaEnVariante("lrb_disparos", null)).toMatch(/Registro de disparos/);
     expect(motivoCapturaEnVariante("lrb_disparos", "lrb_disparos")).toBeNull();
     expect(motivoCapturaEnVariante("estandar", null)).toBeNull();
+  });
+  it("un ensayo ya capturado en la captura estándar sigue ahí aunque luego se active una variante (auditoría SAL-01)", () => {
+    expect(varianteEfectiva("lmb_micro", true)).toBe("estandar");
+    expect(motivoCapturaEnVariante(varianteEfectiva("lmb_micro", true), null)).toBeNull();
+    expect(varianteEfectiva("lmb_micro", false)).toBe("lmb_micro");
+    expect(varianteEfectiva("les_panel", undefined)).toBe("les_panel");
+    expect(varianteEfectiva("estandar", true)).toBe("estandar");
   });
 });
 
