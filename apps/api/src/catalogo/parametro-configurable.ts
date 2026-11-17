@@ -827,8 +827,9 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
   {
     categoria: "cliente_moroso",
     titulo: "Clientes morosos · propuesta de bloqueo",
-    donde: "Comercial › Clientes › Morosos: facturas impagas vencidas que proponen el bloqueo al Jefe DCO (reunión 2).",
-    porConfirmar: "Días de gracia tras el vencimiento antes de proponer el bloqueo.",
+    donde:
+      "Solo la lista Comercial › Clientes › Morosos (facturas impagas vencidas que proponen el bloqueo al Jefe DCO, reunión 2). NO cambia el bloqueo automático por mora (COM-05): ese usa los días de «Bloqueo de clientes por mora».",
+    porConfirmar: "Días de gracia tras el vencimiento antes de proponer el bloqueo en la lista de morosos.",
     codigos: {
       dias_gracia: { tipo: "entero", nombre: "Días de gracia tras el vencimiento de la factura", min: 0, max: 3650, unidad: "días", porDefecto: "0" },
     },

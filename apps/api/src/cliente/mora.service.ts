@@ -13,7 +13,7 @@ import { ConflictException, Injectable, Logger, OnModuleDestroy, OnModuleInit } 
 import { PrismaService } from "../common/prisma.service";
 import { AvisosService } from "../avisos/avisos.service";
 import { hoyChile } from "../common/fecha-chile";
-import { configMora, estadoMoraCliente, mensajeClienteBloqueado, motivoBloqueoMora, type EstadoMora, type FacturaMora } from "./mora";
+import { avisoMoraPorCorreo, configMora, estadoMoraCliente, mensajeClienteBloqueado, motivoBloqueoMora, type EstadoMora, type FacturaMora } from "./mora";
 
 const UN_DIA = 24 * 60 * 60 * 1000;
 
@@ -72,22 +72,33 @@ export async function aplicarMora(db: any, tenantId: string, clienteId: string, 
   if (!c) return null;
   if (est.bloquear && !c.bloqueado) {
     const motivo = motivoBloqueoMora(est);
-    await db.$executeRawUnsafe(
-      `UPDATE cliente SET bloqueado = TRUE, bloqueo_origen = 'mora', motivo_bloqueo = $2, bloqueado_at = now(), updated_at = now() WHERE id = $1::uuid`,
-      clienteId,
-      motivo,
-    );
-    // Historial de bloqueos del cliente (el mismo del bloqueo manual del Jefe DCO).
     const vencido = est.facturas.filter((f) => !f.exceptuada).reduce((a, f) => a + f.saldo, 0);
-    await db.$executeRawUnsafe(
-      `INSERT INTO cliente_bloqueo (tenant_id, cliente_id, motivo, monto_pendiente, contador_no_pago, bloqueado_por, activo)
-       VALUES ($1::uuid, $2::uuid, $3, $4::numeric, $5::int, NULL, TRUE)`,
+    // Atómico (auditoría 17-11-2026): dos verificaciones simultáneas (revisión
+    // diaria y una cotización) no duplican el bloqueo. Solo la sentencia que
+    // cambia la ficha (WHERE NOT bloqueado) escribe la fila del historial.
+    const f: unknown[] = await db.$queryRawUnsafe(
+      `WITH b AS (
+         UPDATE cliente SET bloqueado = TRUE, bloqueo_origen = 'mora', motivo_bloqueo = $3, bloqueado_at = now(), updated_at = now()
+          WHERE id = $2::uuid AND NOT COALESCE(bloqueado, FALSE)
+         RETURNING id
+       ), h AS (
+         INSERT INTO cliente_bloqueo (tenant_id, cliente_id, motivo, monto_pendiente, contador_no_pago, bloqueado_por, activo)
+         SELECT $1::uuid, b.id, $3, $4::numeric, $5::int, NULL, TRUE FROM b
+          WHERE NOT EXISTS (SELECT 1 FROM cliente_bloqueo x WHERE x.cliente_id = b.id AND x.activo)
+         RETURNING cliente_id
+       )
+       SELECT id FROM b`,
       tenantId,
       clienteId,
       motivo,
       Math.round(vencido * 100) / 100,
       est.facturas.length,
-    ).catch(() => undefined);
+    );
+    if (!f.length) {
+      // Otra verificación simultánea lo bloqueó primero.
+      const [y]: any[] = await db.$queryRawUnsafe(`SELECT bloqueado, bloqueo_origen, motivo_bloqueo, razon_social FROM cliente WHERE id = $1::uuid`, clienteId);
+      return y ?? c;
+    }
     return { ...c, bloqueado: true, bloqueo_origen: "mora", motivo_bloqueo: motivo, recienBloqueado: true };
   }
   if (!est.bloquear && c.bloqueado && c.bloqueo_origen === "mora") {
@@ -140,6 +151,28 @@ export class MoraClienteService implements OnModuleInit, OnModuleDestroy {
     for (const t of tenants) await this.revisar(t.id).catch((e) => this.log.warn(`revisión de mora omitida: ${e?.message ?? e}`));
   }
 
+  /**
+   * Día (AAAA-MM-DD, Chile) de la primera revisión de mora de esta base: queda
+   * marcada en sql_paso_aplicado («mora.primera_revision.<tenant>») la primera
+   * vez. Sin la tabla, null (no se envían correos, solo avisos internos).
+   */
+  private async primeraRevision(tenantId: string): Promise<string | null> {
+    const codigo = `mora.primera_revision.${tenantId}`.slice(0, 80);
+    try {
+      await this.prisma.$executeRawUnsafe(
+        `INSERT INTO sql_paso_aplicado (codigo, descripcion) VALUES ($1, 'Primera revisión del bloqueo por mora (COM-05): las facturas ya vencidas solo generan avisos internos') ON CONFLICT (codigo) DO NOTHING`,
+        codigo,
+      );
+      const [r] = await this.prisma.$queryRawUnsafe<{ dia: string }[]>(
+        `SELECT to_char(aplicado_at AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS dia FROM sql_paso_aplicado WHERE codigo = $1`,
+        codigo,
+      );
+      return r?.dia ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Revisión de un tenant: bloqueos, desbloqueos automáticos y avisos por tramo. */
   async revisar(tenantId: string) {
     const hoy = hoyChile();
@@ -154,6 +187,7 @@ export class MoraClienteService implements OnModuleInit, OnModuleDestroy {
     );
     for (const b of bloqueados) if (!porCliente.has(b.id)) porCliente.set(b.id, []);
     const [dco] = await this.prisma.$queryRawUnsafe<{ id: string }[]>(`SELECT id FROM unidad WHERE tenant_id = $1::uuid AND codigo = 'DCO' LIMIT 1`, tenantId);
+    const primeraRevision = await this.primeraRevision(tenantId);
     let bloqueos = 0;
     let avisos = 0;
     for (const [clienteId, facturas] of porCliente) {
@@ -183,6 +217,8 @@ export class MoraClienteService implements OnModuleInit, OnModuleDestroy {
               clave: `mora_${f.tramo}:${f.id}`,
             },
             destinatarios,
+            // Solo las facturas que cambian de tramo después de la primera revisión van por correo.
+            { correo: avisoMoraPorCorreo(f, cfg, primeraRevision) },
           )
           .catch(() => ({ nuevos: 0 }));
         avisos += r.nuevos;

@@ -1,4 +1,4 @@
-import { CONFIG_MORA_DEFECTO, configMora, diasMora, estadoMoraCliente, mensajeClienteBloqueado, motivoBloqueoMora, tramoDe, vencimientoFactura } from "./mora";
+import { CONFIG_MORA_DEFECTO, avisoMoraPorCorreo, configMora, entradaEnTramo, diasMora, estadoMoraCliente, mensajeClienteBloqueado, motivoBloqueoMora, tramoDe, vencimientoFactura } from "./mora";
 
 const cfg = CONFIG_MORA_DEFECTO;
 const f = (id: string, venc: string, saldo = 1000, estado = "emitida") => ({ id, numero: `F-${id}`, estado, saldo, fechaVencimiento: venc });
@@ -52,5 +52,17 @@ describe("COM-05 · Bloqueo por mora (30 aviso · 60 bloqueo · 90 CDE)", () => 
 
   it("mensaje claro al cotizar o abrir una OT", () => {
     expect(mensajeClienteBloqueado("PRUEBA S.A.", "Bloqueo automático por mora")).toMatch(/no se le pueden crear cotizaciones ni OT/);
+  });
+
+  it("auditoría: en la primera revisión las facturas ya vencidas solo dan aviso interno; las que cambian de tramo después, también correo", () => {
+    expect(entradaEnTramo("2026-09-01", "aviso", cfg)).toBe("2026-10-01");
+    expect(entradaEnTramo("2026-09-01", "bloqueo", cfg)).toBe("2026-10-31");
+    expect(entradaEnTramo(null, "aviso", cfg)).toBeNull();
+    // Primera revisión el 17-11-2026: la factura que llegó a 30 días el 01-10 no va por correo.
+    expect(avisoMoraPorCorreo({ vencimiento: "2026-09-01", tramo: "aviso" }, cfg, "2026-11-17")).toBe(false);
+    // La que llega al tramo después de la primera revisión, sí.
+    expect(avisoMoraPorCorreo({ vencimiento: "2026-10-20", tramo: "aviso" }, cfg, "2026-11-17")).toBe(true);
+    // Sin marca de primera revisión (tabla ausente): nunca correo.
+    expect(avisoMoraPorCorreo({ vencimiento: "2026-10-20", tramo: "aviso" }, cfg, null)).toBe(false);
   });
 });
