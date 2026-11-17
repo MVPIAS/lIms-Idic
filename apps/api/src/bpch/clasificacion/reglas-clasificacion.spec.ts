@@ -2,6 +2,7 @@ import {
   erroresAnulacion,
   lecturasMasa,
   evaluarIt21,
+  habilitaSerie2It21,
   evaluarIt22,
   evaluarIt23,
   evaluarPruebas,
@@ -13,17 +14,27 @@ import {
 const neg = { tuboFragmentado: false, placaPerforada: false };
 
 describe("Clasificación · IT21 barrera interpuesta", () => {
-  it("positivo si el tubo se fragmenta o la placa testigo se perfora", () => {
-    expect(evaluarIt21({ aplica: true, serie1: { ensayos: [{ tuboFragmentado: true, placaPerforada: false }] } }).resultado).toBe("positivo");
-    expect(evaluarIt21({ aplica: true, serie1: { ensayos: [{ tuboFragmentado: false, placaPerforada: true }] } }).resultado).toBe("positivo");
+  const pos = { tuboFragmentado: true, placaPerforada: false };
+  it("serie positiva si el tubo se fragmenta o la placa testigo se perfora; con la serie 1 positiva se exige la serie 2 (BPCH-37)", () => {
+    expect(evaluarIt21({ aplica: true, serie1: { ensayos: [pos] } })).toMatchObject({ resultado: "incompleto", serie1: "positivo", serie2: null });
+    expect(evaluarIt21({ aplica: true, serie1: { ensayos: [{ tuboFragmentado: false, placaPerforada: true }] }, serie2: { ensayos: [pos] } }).resultado).toBe("positivo");
+    expect(evaluarIt21({ aplica: true, serie1: { ensayos: [pos] }, serie2: { ensayos: [neg] } }).resultado).toBe("incompleto");
+    expect(evaluarIt21({ aplica: true, serie1: { ensayos: [pos] }, serie2: { ensayos: [neg, neg] } })).toMatchObject({ resultado: "positivo", serie2: "negativo" });
+    expect(habilitaSerie2It21({ aplica: true, serie1: { ensayos: [pos] } })).toBe(true);
+    expect(habilitaSerie2It21({ aplica: true, serie1: { ensayos: [neg, neg] } })).toBe(false);
+    expect(habilitaSerie2It21({ aplica: true })).toBe(false);
   });
   it("un solo ensayo negativo no concluye: la IT exige un segundo", () => {
     expect(evaluarIt21({ aplica: true, serie1: { ensayos: [neg] } }).resultado).toBe("incompleto");
     expect(evaluarIt21({ aplica: true, serie1: { ensayos: [neg, neg] } }).resultado).toBe("negativo");
   });
-  it("evalúa cada serie y concluye positivo si alguna lo es", () => {
-    const r = evaluarIt21({ aplica: true, serie1: { ensayos: [neg, neg] }, serie2: { ensayos: [{ tuboFragmentado: true, placaPerforada: false }] } });
-    expect(r).toMatchObject({ resultado: "positivo", serie1: "negativo", serie2: "positivo" });
+  it("con la serie 1 negativa la prueba es negativa y la serie 2 no corresponde (BPCH-37)", () => {
+    expect(evaluarIt21({ aplica: true, serie1: { ensayos: [neg, neg] } })).toMatchObject({ resultado: "negativo", serie2: null });
+    const r = evaluarIt21({ aplica: true, serie1: { ensayos: [neg, neg] }, serie2: { ensayos: [pos] } });
+    expect(r).toMatchObject({ resultado: "negativo", serie1: "negativo", serie2: "positivo", serie2NoCorresponde: true });
+    expect(validarRegistro({ explosiva: false }, evaluarPruebas({ it21: { aplica: true, serie1: { ensayos: [neg, neg] }, serie2: { ensayos: [pos] } } })).join(" ")).toMatch(
+      /serie 2 solo se realiza si la serie 1 es positiva/,
+    );
   });
   it("sin series o no aplica", () => {
     expect(evaluarIt21({ aplica: true }).resultado).toBe("incompleto");
@@ -72,7 +83,7 @@ describe("Clasificación · IT23 TPT", () => {
 });
 
 describe("Clasificación · conjunto y registro", () => {
-  const positivas = { it21: { aplica: true, serie1: { ensayos: [{ tuboFragmentado: true, placaPerforada: false }] } } };
+  const positivas = { it21: { aplica: true, serie1: { ensayos: [{ tuboFragmentado: true, placaPerforada: false }] }, serie2: { ensayos: [{ tuboFragmentado: true, placaPerforada: false }] } } };
   const negativas = { it23: { aplica: true, ensayos: [{ presionMaxKpa: 100 }, { presionMaxKpa: 100 }, { presionMaxKpa: 100 }] } };
 
   it("indicador: positivo si alguna aplicada lo es; null si falta alguna", () => {
@@ -101,7 +112,9 @@ describe("Clasificación · conjunto y registro", () => {
     expect(validarRegistro({ explosiva: false }, evaluarPruebas(positivas)).join(" ")).toMatch(/justifique/);
     expect(validarRegistro({ explosiva: false, justificacion: "Fundamento técnico" }, evaluarPruebas(positivas))).toEqual([]);
     expect(validarRegistro({ explosiva: true, claseDivision: "1.4" }, evaluarPruebas(negativas)).join(" ")).toMatch(/justifique/);
-    expect(validarRegistro({ explosiva: false }, evaluarPruebas({})).join(" ")).toMatch(/ninguna prueba/);
+    // BPCH-35: sin pruebas no se clasifica, ni siquiera con justificación.
+    expect(validarRegistro({ explosiva: false }, evaluarPruebas({})).join(" ")).toMatch(/al menos una prueba/);
+    expect(validarRegistro({ explosiva: false, justificacion: "Por antecedentes" }, evaluarPruebas({})).join(" ")).toMatch(/al menos una prueba/);
   });
   it("pruebas incompletas, decisión ausente, Nº ONU y listas vigentes", () => {
     const ev = evaluarPruebas({ it21: { aplica: true, serie1: { ensayos: [neg] } } });
