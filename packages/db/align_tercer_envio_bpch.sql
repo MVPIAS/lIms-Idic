@@ -11,8 +11,9 @@
 --     · el número es único POR TIPO de documento (antes, en todo el tenant).
 --     Solo se cambian las reglas que conservan el formato sembrado: una regla
 --     que el IDIC ya editó en Administración › Numeración no se pisa.
---   BPCH-48 · bpch_cabecera_ot.modalidad (TERRENO / ADMINISTRATIVO) y
---     bpch_cabecera_ot.inspector_ids (personas con rol INSPECTOR de la unidad).
+--   BPCH-48 · modalidad (TERRENO / ADMINISTRATIVO) e inspector_ids (personas
+--     con rol INSPECTOR de la unidad) en bpch_cabecera_ot, bpch_internacion y
+--     bpch_reinspeccion.
 --     El texto libre «inspectores» se conserva para los registros anteriores.
 --   BPCH-43 · Matriz de firmas: sin V°B° del Director en el Informe de
 --     Incumplimiento (que también usa el informe de rechazo de prototipo).
@@ -123,6 +124,22 @@ BEGIN
 END $$;
 COMMENT ON COLUMN bpch_cabecera_ot.modalidad IS
   'BPCH-48: TERRENO (exige dos inspectores para programar) o ADMINISTRATIVO (basta uno).';
+-- Mismo dato en la inspección de Internación y de Reinspección (su cabecera vive en el expediente).
+ALTER TABLE bpch_internacion  ADD COLUMN IF NOT EXISTS modalidad VARCHAR(20);
+ALTER TABLE bpch_internacion  ADD COLUMN IF NOT EXISTS inspector_ids UUID[];
+ALTER TABLE bpch_reinspeccion ADD COLUMN IF NOT EXISTS modalidad VARCHAR(20);
+ALTER TABLE bpch_reinspeccion ADD COLUMN IF NOT EXISTS inspector_ids UUID[];
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_bpch_internacion_modalidad') THEN
+    ALTER TABLE bpch_internacion ADD CONSTRAINT ck_bpch_internacion_modalidad
+      CHECK (modalidad IS NULL OR modalidad IN ('TERRENO', 'ADMINISTRATIVO'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_bpch_reinspeccion_modalidad') THEN
+    ALTER TABLE bpch_reinspeccion ADD CONSTRAINT ck_bpch_reinspeccion_modalidad
+      CHECK (modalidad IS NULL OR modalidad IN ('TERRENO', 'ADMINISTRATIVO'));
+  END IF;
+END $$;
 COMMENT ON COLUMN bpch_cabecera_ot.inspector_ids IS
   'BPCH-48: personas (usuario.id) con rol INSPECTOR de la unidad. La columna «inspectores» guarda sus iniciales (lo que imprimen los documentos); en registros anteriores, el texto libre de entonces.';
 
