@@ -58,13 +58,14 @@ export default function ClientesPage() {
   }, []);
   return (
     <>
-    <div className="toolbar" style={{ justifyContent: "flex-end", marginBottom: -6 }}>
-      <button type="button" className="btn outline sm" onClick={() => setVerMorosos(true)} title="Clientes con facturas impagas vencidas y clientes bloqueados">
-        Morosos y bloqueados
-      </button>
-    </div>
     <CrudTable
       key={version}
+      // Junto a «＋ Nuevo», en la cabecera (flex con separación y salto de línea en pantallas estrechas).
+      accionesCabecera={
+        <button type="button" className="btn outline sm" onClick={() => setVerMorosos(true)} title="Clientes con facturas impagas vencidas y clientes bloqueados">
+          Morosos y bloqueados
+        </button>
+      }
       prepararCrear={conDiasCredito}
       prepararActualizar={alActualizar}
       accionesFila={(row) => (
