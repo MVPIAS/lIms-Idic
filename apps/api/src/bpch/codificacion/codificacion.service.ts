@@ -39,7 +39,12 @@ export type Inscripcion = z.infer<typeof InscripcionBody>;
 
 export const EdicionBody = InscripcionBody.partial().extend({ motivo: texto(500).optional() });
 
-export const CambioEstadoBody = z.object({ estado: z.enum(ESTADOS_CODIFICACION), motivo: texto(500) });
+export const CambioEstadoBody = z.object({
+  estado: z.enum(ESTADOS_CODIFICACION),
+  motivo: texto(500),
+  /** BPCH-40: Nº del certificado nuevo que respalda la reactivación. */
+  certificadoNumero: texto(60).optional().nullable(),
+});
 
 export const CambioTitularBody = z.object({
   clienteId: z.string().uuid().optional().nullable(),
@@ -488,11 +493,50 @@ export class CodificacionService {
     const tenantId = tenantDe(req);
     const dto = CambioEstadoBody.parse(body ?? {});
     const actual = await this.uno(tenantId, id);
-    const error = errorCambioEstadoCodificacion(actual.estado, dto.estado, dto.motivo);
+    const error = errorCambioEstadoCodificacion(actual.estado, dto.estado, dto.motivo, {
+      nuevo: dto.certificadoNumero,
+      anterior: actual.certificadoNumero,
+    });
     if (error) throw new ConflictException(error);
+    const reactiva = actual.estado === "EN_RECESO" && dto.estado === "VIGENTE";
+    // BPCH-40: si el certificado nuevo es un documento del LIMS, debe estar vigente y se enlaza.
+    let certificadoId: string | null = null;
+    const certNumero = dto.certificadoNumero?.trim() || null;
+    if (reactiva && certNumero) {
+      const c = await this.prisma.$queryRawUnsafe<{ id: string; estado: string }[]>(
+        `SELECT id, estado FROM certificado WHERE tenant_id = $1::uuid AND (numero = $2 OR codigo = $2) AND deleted_at IS NULL
+          ORDER BY (estado IN ('oficial','emitido')) DESC, created_at DESC LIMIT 1`,
+        tenantId,
+        certNumero,
+      );
+      if (c[0] && !["oficial", "emitido"].includes(c[0].estado))
+        throw new ConflictException(`El certificado ${certNumero} está ${c[0].estado}: la reactivación exige un certificado vigente.`);
+      certificadoId = c[0]?.id ?? null;
+    }
     await this.prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(`UPDATE bpch_codificacion SET estado = $2, updated_by = $3::uuid, updated_at = now() WHERE id = $1::uuid`, id, dto.estado, usuarioDe(req));
-      await this.anotar(tx, { tenantId, codificacionId: id, evento: dto.estado === "EN_RECESO" ? "receso" : "reactivacion", detalle: { desde: actual.estado, motivo: dto.motivo }, usuarioId: usuarioDe(req) });
+      if (reactiva)
+        await tx.$executeRawUnsafe(
+          `UPDATE bpch_codificacion SET estado = $2, certificado_id = $4::uuid, certificado_numero = $5, updated_by = $3::uuid, updated_at = now() WHERE id = $1::uuid`,
+          id,
+          dto.estado,
+          usuarioDe(req),
+          certificadoId,
+          certNumero,
+        );
+      else
+        await tx.$executeRawUnsafe(`UPDATE bpch_codificacion SET estado = $2, updated_by = $3::uuid, updated_at = now() WHERE id = $1::uuid`, id, dto.estado, usuarioDe(req));
+      await this.anotar(tx, {
+        tenantId,
+        codificacionId: id,
+        evento: dto.estado === "EN_RECESO" ? "receso" : "reactivacion",
+        detalle: {
+          desde: actual.estado,
+          motivo: dto.motivo,
+          ...(reactiva ? { certificadoNuevo: certNumero, certificadoAnterior: actual.certificadoNumero ?? null } : {}),
+        },
+        certificadoId,
+        usuarioId: usuarioDe(req),
+      });
     });
     return this.detalle(req, id);
   }

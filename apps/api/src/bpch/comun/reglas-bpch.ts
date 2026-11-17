@@ -41,11 +41,26 @@ export function errorFormatoCnc(cnc: string): string | null {
   return null;
 }
 
-/** Transición de estado en la Codificación Única (solo Vigente ↔ En receso, con motivo). */
-export function errorCambioEstadoCodificacion(actual: string, nuevo: string, motivo?: string | null): string | null {
+/**
+ * Transición de estado en la Codificación Única (solo Vigente ↔ En receso, con
+ * motivo). Reactivar un producto en receso exige un CERTIFICADO NUEVO, distinto
+ * del que tenía (respuesta IDIC BPCH-40 del 17-11-2026).
+ */
+export function errorCambioEstadoCodificacion(
+  actual: string,
+  nuevo: string,
+  motivo?: string | null,
+  certificado?: { nuevo?: string | null; anterior?: string | null },
+): string | null {
   if (!(ESTADOS_CODIFICACION as readonly string[]).includes(nuevo)) return `Estado inválido: ${nuevo}.`;
   if (actual === nuevo) return nuevo === "VIGENTE" ? "El producto ya está vigente." : "El producto ya está en receso.";
   if (!motivo || motivo.trim().length < 5) return "Indique el motivo del cambio de estado (mínimo 5 caracteres).";
+  if (actual === "EN_RECESO" && nuevo === "VIGENTE") {
+    const n = certificado?.nuevo?.trim() ?? "";
+    if (!n) return "Para reactivar un producto en receso indique el Nº del certificado nuevo que lo respalda.";
+    if (certificado?.anterior && n.toUpperCase() === certificado.anterior.trim().toUpperCase())
+      return `El certificado ${n} es el que el producto ya tenía: la reactivación exige un certificado nuevo.`;
+  }
   return null;
 }
 
