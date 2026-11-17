@@ -43,7 +43,8 @@ export const ETIQUETA_SOLICITUD: Record<string, string> = {
 
 export function nivelesVb(valor: string | null | undefined): NivelesVb {
   const v = String(valor ?? "").trim().toLowerCase();
-  return v === "lab" || v === "ninguno" ? v : "lab_depto";
+  // COM-09 (IDIC 17-11-2026): el V°B° lo da solo el Jefe de Laboratorio.
+  return v === "lab_depto" || v === "ninguno" ? v : "lab";
 }
 
 export const siNo = (valor: string | null | undefined, def: boolean): boolean => {
