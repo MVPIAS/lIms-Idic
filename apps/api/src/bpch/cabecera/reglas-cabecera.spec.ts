@@ -1,4 +1,4 @@
-import { diferencias, erroresCabecera, erroresInspectores, heredarCabecera, faltantesParaEmitirInspeccion, iniciales, loteEnUnidades, camposLotesImpresos, tamanoCabeceraImpreso } from "./reglas-cabecera";
+import { cambiaInspeccion, diferencias, erroresCabecera, erroresInspectores, exigeInspectores, heredarCabecera, faltantesParaEmitirInspeccion, iniciales, loteEnUnidades, camposLotesImpresos, tamanoCabeceraImpreso } from "./reglas-cabecera";
 import { muestraSuperaLote } from "../comun/reglas-bpch";
 
 describe("BPCH · cabecera de inspección de la OT (EP-10 10.3)", () => {
@@ -19,6 +19,8 @@ describe("BPCH · cabecera de inspección de la OT (EP-10 10.3)", () => {
     expect(erroresCabecera({ ...ok, modalidad: null }).join(" ")).toMatch(/en terreno .* o un trabajo administrativo/);
     expect(erroresInspectores({ modalidad: "TERRENO", inspectorIds: [I1, I2] }, new Set([I1])).join(" ")).toMatch(/rol Inspector/);
     expect(erroresInspectores({ modalidad: "TERRENO", inspectorIds: [I1, I2] }, new Set([I1, I2]))).toEqual([]);
+    // Auditoría: una cabecera anterior (sin modalidad) se guarda sin exigirlos.
+    expect(erroresCabecera({ ...ok, modalidad: null, inspectorIds: null }, { exigirInspectores: false })).toEqual([]);
   });
 
   it("valida el CNC-DGMN, los tamaños NCh 44 y las fechas", () => {
@@ -108,5 +110,23 @@ describe("F005 · lote y muestra en la misma escala", () => {
     expect(loteEnUnidades("pares")).toBe(true);
     expect(loteEnUnidades(null)).toBe(true);
     expect(loteEnUnidades("t")).toBe(false);
+  });
+});
+
+describe("BPCH-48 · cuándo se exigen modalidad e inspectores (auditoría 17-11-2026)", () => {
+  const I = "00000000-0000-4000-8000-000000000001";
+  it("nuevo, ya informado o cambiado: se exigen; anterior sin tocar: no", () => {
+    expect(exigeInspectores(null, {})).toBe(true);
+    expect(exigeInspectores({ registrada: false }, {})).toBe(true);
+    expect(exigeInspectores({ registrada: true, modalidad: "TERRENO", inspectorIds: [I] }, {})).toBe(true);
+    expect(exigeInspectores({ registrada: true, modalidad: null, inspectorIds: null }, {})).toBe(false);
+    expect(exigeInspectores({ registrada: true, modalidad: null, inspectorIds: null }, { modalidad: null, inspectorIds: [] })).toBe(false);
+    expect(exigeInspectores({ registrada: true, modalidad: null, inspectorIds: null }, { modalidad: "ADMINISTRATIVO" })).toBe(true);
+    expect(exigeInspectores({ registrada: true, modalidad: null, inspectorIds: null }, { inspectorIds: [I] })).toBe(true);
+  });
+  it("cambiaInspeccion compara sin orden y trata null como vacío", () => {
+    expect(cambiaInspeccion({ modalidad: "TERRENO", inspectorIds: ["a", "b"] }, { inspectorIds: ["b", "a"] })).toBe(false);
+    expect(cambiaInspeccion({ modalidad: "TERRENO", inspectorIds: ["a"] }, { modalidad: "ADMINISTRATIVO" })).toBe(true);
+    expect(cambiaInspeccion(null, { modalidad: null, inspectorIds: null })).toBe(false);
   });
 });

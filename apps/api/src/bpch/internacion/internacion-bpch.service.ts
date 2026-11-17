@@ -755,7 +755,13 @@ export class InternacionBpchService {
       if (!actual) errores.push(`El lote ${it.id} no es de esta internación.`);
       else errores.push(...erroresLote(it, `Lote ${actual.orden}`));
     }
-    const ins = await this.comun.resolverInspectores(i.unidad_inspeccion_id, dto, i.inspector_ids ?? []);
+    const ins = await this.comun.resolverInspectores(i.unidad_inspeccion_id, dto, {
+      // BPCH-48: un registro anterior (inspección ya registrada sin modalidad ni personas) se guarda sin exigirlas.
+      registrada: Boolean(String(i.lugar_inspeccion ?? "").trim() || i.fecha_inspeccion || String(i.inspectores ?? "").trim()),
+      modalidad: i.modalidad ?? null,
+      inspectorIds: i.inspector_ids ?? null,
+      inspectores: i.inspectores ?? null,
+    });
     errores.push(...ins.errores);
     if (errores.length) throw new BadRequestException(errores.join(" "));
     await this.prisma.$transaction(async (tx) => {
@@ -773,7 +779,7 @@ export class InternacionBpchService {
         dto.observaciones?.trim() || null,
         dto.procedimiento?.trim() || null,
         usuarioDe(req),
-        dto.modalidad ?? null,
+        ins.modalidad,
         ins.ids,
       );
       for (const it of dto.items ?? []) {

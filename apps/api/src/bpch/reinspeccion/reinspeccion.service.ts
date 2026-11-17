@@ -458,7 +458,13 @@ export class ReinspeccionService {
       unidadMuestra: dto.unidadMuestra === undefined ? r.unidad_muestra ?? null : dto.unidadMuestra?.trim() || null,
     };
     const errores = erroresLote(lote, "Lote", ETIQUETA_UNIDAD);
-    const ins = await this.comun.resolverInspectores(r.unidad_inspeccion_id, dto, r.inspector_ids ?? []);
+    const ins = await this.comun.resolverInspectores(r.unidad_inspeccion_id, dto, {
+      // BPCH-48: un registro anterior (inspección ya registrada sin modalidad ni personas) se guarda sin exigirlas.
+      registrada: Boolean(String(r.lugar_inspeccion ?? "").trim() || r.fecha_inspeccion || String(r.inspectores ?? "").trim()),
+      modalidad: r.modalidad ?? null,
+      inspectorIds: r.inspector_ids ?? null,
+      inspectores: r.inspectores ?? null,
+    });
     errores.push(...ins.errores);
     if (errores.length) throw new BadRequestException(errores.join(" "));
     await this.prisma.$executeRawUnsafe(
@@ -479,7 +485,7 @@ export class ReinspeccionService {
       lote.tamanoLote ?? null,
       lote.tamanoMuestra ?? null,
       usuarioDe(req),
-      dto.modalidad ?? null,
+      ins.modalidad,
       ins.ids,
     );
     if (r.muestra_id && lote.identificacionLote?.trim())

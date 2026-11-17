@@ -59,6 +59,63 @@ export function erroresInspectores(
   return e;
 }
 
+/**
+ * Personas que se pueden elegir como inspector de una unidad ($1): rol INSPECTOR
+ * (o un rol alias de él, COALESCE(alias_de, codigo)) vigente en la unidad o en
+ * cualquiera de sus unidades ancestras (p. ej. un inspector asignado al BPCH
+ * sirve a sus sucursales). Columnas: id, nombre.
+ */
+export const SQL_INSPECTORES_UNIDAD = `
+  WITH RECURSIVE linaje AS (
+    SELECT id, padre_id, 0 AS nivel FROM unidad WHERE id = $1::uuid
+    UNION ALL
+    SELECT u.id, u.padre_id, l.nivel + 1 FROM unidad u JOIN linaje l ON u.id = l.padre_id WHERE l.nivel < 12
+  )
+  SELECT DISTINCT u.id, u.nombre_completo AS nombre
+    FROM usuario_rol ur
+    JOIN linaje l ON l.id = ur.unidad_id
+    JOIN usuario u ON u.id = ur.usuario_id AND u.deleted_at IS NULL AND COALESCE(u.estado, 'activo') = 'activo'
+    JOIN rol r ON r.id = ur.rol_id
+   WHERE COALESCE(r.alias_de, r.codigo) = 'INSPECTOR'
+     AND (ur.vigente_desde IS NULL OR ur.vigente_desde <= now())
+     AND (ur.vigente_hasta IS NULL OR ur.vigente_hasta > now())
+   ORDER BY 2`;
+
+/** Lo guardado antes de la inspección (para decidir si se exigen modalidad e inspectores). */
+export interface PrevioInspeccion {
+  /** El registro ya tenía datos de inspección (lugar, fecha o el texto libre de inspectores). */
+  registrada?: boolean;
+  modalidad?: string | null;
+  inspectorIds?: readonly string[] | null;
+  inspectores?: string | null;
+}
+
+const mismosIds = (a: readonly string[] | null | undefined, b: readonly string[] | null | undefined) => {
+  const x = [...new Set(a ?? [])].sort();
+  const y = [...new Set(b ?? [])].sort();
+  return x.length === y.length && x.every((v, i) => v === y[i]);
+};
+
+/** ¿La petición cambia la modalidad o los inspectores respecto de lo guardado? (undefined = no los toca). */
+export function cambiaInspeccion(previo: PrevioInspeccion | null, nuevo: { modalidad?: string | null; inspectorIds?: readonly string[] | null }): boolean {
+  const cambiaModalidad = nuevo.modalidad !== undefined && (nuevo.modalidad || null) !== (previo?.modalidad || null);
+  const cambiaIds = nuevo.inspectorIds !== undefined && !mismosIds(nuevo.inspectorIds, previo?.inspectorIds);
+  return cambiaModalidad || cambiaIds;
+}
+
+/**
+ * BPCH-48 · auditoría 17-11-2026: modalidad e inspectores se exigen en un
+ * registro nuevo (sin inspección registrada), en uno que ya los tenía o cuando
+ * la petición los cambia. Un registro ANTERIOR a BPCH-48 (con inspección
+ * registrada pero sin modalidad ni personas) se puede seguir guardando sin
+ * tocarlos, p. ej. para actualizar los lotes de una internación.
+ */
+export function exigeInspectores(previo: PrevioInspeccion | null, nuevo: { modalidad?: string | null; inspectorIds?: readonly string[] | null }): boolean {
+  if (!previo || !previo.registrada) return true;
+  if (previo.modalidad || (previo.inspectorIds?.length ?? 0) > 0) return true;
+  return cambiaInspeccion(previo, nuevo);
+}
+
 export interface CabeceraDto {
   lugarInspeccion?: string | null;
   direccion?: string | null;
@@ -100,7 +157,7 @@ const vacio = (v: unknown) => v === null || v === undefined || String(v).trim() 
  * (ver faltantesParaEmitirInspeccion). La fecha de inspección futura se admite:
  * se programa la inspección (no futura · POR CONFIRMAR con el IDIC).
  */
-export function erroresCabecera(d: CabeceraDto, opts: { soloComplemento?: boolean } = {}): string[] {
+export function erroresCabecera(d: CabeceraDto, opts: { soloComplemento?: boolean; exigirInspectores?: boolean } = {}): string[] {
   const e: string[] = [];
   if (opts.soloComplemento) {
     const otros = Object.entries(d).filter(([k, v]) => v !== undefined && !(CAMPOS_COMPLEMENTO as readonly string[]).includes(k));
@@ -109,7 +166,7 @@ export function erroresCabecera(d: CabeceraDto, opts: { soloComplemento?: boolea
     return e;
   }
   if (vacio(d.procedimiento)) e.push("Indique el procedimiento de control (p. ej. SAC-PG01-P01).");
-  e.push(...erroresInspectores(d));
+  if (opts.exigirInspectores !== false) e.push(...erroresInspectores(d));
   if (!vacio(d.cncDgmn)) {
     const f = errorFormatoCnc(String(d.cncDgmn));
     if (f) e.push(f);

@@ -33,8 +33,10 @@ import {
   PROCEDIMIENTOS_CONTROL,
   PROCESOS_CON_EXPEDIENTE,
   diferencias,
+  cambiaInspeccion,
   erroresCabecera,
-  erroresInspectores,
+  exigeInspectores,
+  SQL_INSPECTORES_UNIDAD,
   erroresLotesCabecera,
   lugaresDisponibles,
   type LoteCabecera,
@@ -193,20 +195,11 @@ export class CabeceraOtService {
     return { proceso: p.proceso, enlace };
   }
 
-  /** BPCH-48: personas con rol INSPECTOR en la unidad de la OT (las que se pueden elegir). */
+  /** BPCH-48: personas con rol INSPECTOR en la unidad de la OT o sus ancestras (las que se pueden elegir). */
   private async inspectoresDe(unidadId: string | null): Promise<{ id: string; nombre: string; iniciales: string }[]> {
     if (!unidadId) return [];
-    const filas = await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(
-      `SELECT DISTINCT u.id, u.nombre_completo AS nombre
-         FROM usuario_rol ur
-         JOIN usuario u ON u.id = ur.usuario_id AND u.deleted_at IS NULL AND COALESCE(u.estado, 'activo') = 'activo'
-         JOIN rol r ON r.id = ur.rol_id
-        WHERE ur.unidad_id = $1::uuid AND r.codigo = 'INSPECTOR'
-          AND (ur.vigente_desde IS NULL OR ur.vigente_desde <= now())
-          AND (ur.vigente_hasta IS NULL OR ur.vigente_hasta > now())
-        ORDER BY 2`,
-      unidadId,
-    );
+    // Rol INSPECTOR (o alias) en la unidad de la OT o en sus ancestras.
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string; nombre: string }[]>(SQL_INSPECTORES_UNIDAD, unidadId);
     return filas.map((f) => ({ ...f, iniciales: iniciales(f.nombre) }));
   }
 
@@ -427,8 +420,14 @@ export class CabeceraOtService {
     const antes = await this.propia(otId);
     const nueva: Record<string, unknown> = {};
     for (const [k] of COLUMNAS) nueva[k] = dto[k] !== undefined ? dto[k] : antes?.[k] ?? null;
-    const errores = soloComplemento ? erroresCabecera(dto, { soloComplemento: true }) : erroresCabecera(nueva as CabeceraDto);
-    if (!soloComplemento && dto.inspectorIds !== undefined) {
+    // BPCH-48: una cabecera anterior (sin modalidad ni personas) se guarda sin
+    // exigirlas mientras no se toquen (exigeInspectores).
+    const exigirInspectores = exigeInspectores(
+      antes ? { registrada: true, modalidad: antes.modalidad ?? null, inspectorIds: (antes.inspectorIds ?? null) as string[] | null } : null,
+      { modalidad: dto.modalidad, inspectorIds: dto.inspectorIds as string[] | null | undefined },
+    );
+    const errores = soloComplemento ? erroresCabecera(dto, { soloComplemento: true }) : erroresCabecera(nueva as CabeceraDto, { exigirInspectores });
+    if (!soloComplemento && dto.inspectorIds !== undefined && cambiaInspeccion(antes ? { modalidad: antes.modalidad ?? null, inspectorIds: (antes.inspectorIds ?? null) as string[] | null } : null, { inspectorIds: dto.inspectorIds as string[] | null })) {
       // BPCH-48: los NUEVOS elegidos deben tener el rol Inspector en la unidad de la
       // OT (los que ya estaban se conservan aunque hayan cambiado de unidad).
       const ids = [...new Set((dto.inspectorIds ?? []) as string[])];
