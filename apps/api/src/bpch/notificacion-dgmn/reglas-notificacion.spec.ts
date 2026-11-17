@@ -21,12 +21,13 @@ describe("EP-10 10.15 · notificación a DGMN", () => {
     fechaEnvio: "2026-10-20",
     hoy: "2026-10-22",
     copiaInternador: true,
+    oficioNumero: "Of. PRUEBA 1",
   };
   it("acepta una notificación completa", () => {
     expect(erroresNotificacion(base)).toEqual([]);
     expect(erroresNotificacion({ ...base, medio: "oficina_partes", oficioNumero: "Of. 123" })).toEqual([]);
   });
-  it("exige incumplimiento oficial, no repetido, medio, fecha no futura, copia y oficio en oficina de partes", () => {
+  it("exige incumplimiento oficial, no repetido, medio, fecha no futura, copia y siempre el Nº de oficio (BPCH-02)", () => {
     expect(erroresNotificacion({ ...base, documento: { estado: "oficial", tipo: "CERTIFICADO_CONFORMIDAD" } })[0]).toMatch(/no es un Informe/);
     expect(erroresNotificacion({ ...base, documento: null })).toHaveLength(1);
     expect(erroresNotificacion({ ...base, documento: { estado: "en_firma", tipo: "INFORME_INCUMPLIMIENTO" } })[0]).toMatch(/aún no es oficial/);
@@ -34,6 +35,7 @@ describe("EP-10 10.15 · notificación a DGMN", () => {
     expect(erroresNotificacion({ ...base, medio: "fax" })[0]).toMatch(/medio/);
     expect(erroresNotificacion({ ...base, fechaEnvio: "2026-10-23" })[0]).toMatch(/futura/);
     expect(erroresNotificacion({ ...base, copiaInternador: undefined })[0]).toMatch(/copia al internador/);
-    expect(erroresNotificacion({ ...base, medio: "oficina_partes" })[0]).toMatch(/oficio/);
+    expect(erroresNotificacion({ ...base, medio: "oficina_partes", oficioNumero: null })[0]).toMatch(/oficio/);
+    expect(erroresNotificacion({ ...base, medio: "correo", oficioNumero: "  " })[0]).toMatch(/oficio/);
   });
 });

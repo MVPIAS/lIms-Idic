@@ -6,7 +6,9 @@
  *   · Toda OT con un Informe de Incumplimiento OFICIAL exige su notificación
  *     registrada (sin ella la OT no se cierra).
  *   · Destinatarios fijos según la distribución del documento (no se teclean).
- *   · Medio, fecha de envío (no futura), Nº de oficio (texto) y copia al
+ *   · Medio, fecha de envío (no futura), Nº de oficio (texto, SIEMPRE
+ *     obligatorio: el NO CUMPLE llega a la DGMN por oficio firmado por el
+ *     Director del IDIC, respuesta IDIC BPCH-02 del 17-11-2026) y copia al
  *     internador (sí/no, obligatorio).
  */
 
@@ -63,6 +65,6 @@ export function erroresNotificacion(n: NotificacionPedida): string[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(n.fechaEnvio)) e.push("Indique la fecha de envío.");
   else if (n.fechaEnvio > n.hoy) e.push("La fecha de envío no puede ser futura.");
   if (typeof n.copiaInternador !== "boolean") e.push("Indique si se envió copia al internador.");
-  if (n.medio === "oficina_partes" && !n.oficioNumero?.trim()) e.push("Por oficina de partes indique el Nº de oficio.");
+  if (!n.oficioNumero?.trim()) e.push("Indique el Nº del oficio firmado por el Director con que se informó el incumplimiento a la DGMN.");
   return e;
 }
