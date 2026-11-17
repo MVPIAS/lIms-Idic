@@ -164,4 +164,5 @@ align_f028_saec.sql
 align_drop_perfil_activo.sql
 align_tercer_envio_comercial.sql
 align_tercer_envio_bpch.sql
+align_tercer_envio_alimentos.sql
 align_cierre_permisos.sql

@@ -279,10 +279,27 @@ export function modalidadSugerida(resultados: Pick<ResultadoParaInforme, "limite
  */
 export function modalidadInicial(
   cfg: { modalidadPorDefecto?: "sugerida" | "cumplimiento" | "solo_resultados" },
-  resultados: Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito">[],
+  resultados: (Pick<ResultadoParaInforme, "limiteInf" | "nominal" | "limiteSup" | "requisito"> & { evaluacion?: string | null })[],
 ): Modalidad {
   const fija = cfg.modalidadPorDefecto;
-  return fija === "cumplimiento" || fija === "solo_resultados" ? fija : modalidadSugerida(resultados);
+  return modalidadEfectiva(fija === "cumplimiento" || fija === "solo_resultados" ? fija : modalidadSugerida(resultados), resultados);
+}
+
+/** ¿Todos los ensayos del documento se informan «solo resultado» (sin requisito ni condición)? */
+export function todosSoloResultado(resultados: { evaluacion?: string | null }[]): boolean {
+  return resultados.length > 0 && resultados.every((r) => r.evaluacion === "solo_resultado");
+}
+
+/**
+ * Modalidad con la que se arma el documento: si TODOS sus ensayos son «solo
+ * resultado» (p. ej. el LQA entrega resultados, no condición de cumplimiento:
+ * respuesta IDIC 17-11-2026, SAL-07), no hay veredicto que informar y el
+ * documento sale como «solo resultados» aunque la plantilla o quien emite pida
+ * cumplimiento (sin columnas de requisito ni Cumple / No cumple ni veredicto
+ * global).
+ */
+export function modalidadEfectiva(pedida: Modalidad, resultados: { evaluacion?: string | null }[]): Modalidad {
+  return todosSoloResultado(resultados) ? "solo_resultados" : pedida;
 }
 
 /**
@@ -291,8 +308,13 @@ export function modalidadInicial(
  * «sugerida» si se deduce de los requisitos. La pantalla no rotula «Sugerido»
  * una modalidad que contradice los requisitos: dice que es la de la plantilla.
  */
-export function origenModalidad(cfg: { modalidadPorDefecto?: "sugerida" | "cumplimiento" | "solo_resultados" }): "plantilla" | "sugerida" {
+export function origenModalidad(
+  cfg: { modalidadPorDefecto?: "sugerida" | "cumplimiento" | "solo_resultados" },
+  resultados: { evaluacion?: string | null }[] = [],
+): "plantilla" | "sugerida" {
   const fija = cfg.modalidadPorDefecto;
+  // Todos «solo resultado» (SAL-07): manda la evaluación de los ensayos, no la plantilla.
+  if (fija === "cumplimiento" && todosSoloResultado(resultados)) return "sugerida";
   return fija === "cumplimiento" || fija === "solo_resultados" ? "plantilla" : "sugerida";
 }
 
