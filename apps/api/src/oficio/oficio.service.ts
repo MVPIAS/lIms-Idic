@@ -276,8 +276,15 @@ export class OficioService {
 
   /* ---------------------------------------------------------- circuito --- */
 
-  /** «Generar oficio → firmas»: número de la unidad y pasos de la matriz OFICIO. */
-  async generar(id: string, req: any) {
+  /**
+   * «Generar oficio → firmas»: número de la unidad y pasos de la matriz OFICIO.
+   * COM-08 (IDIC 17-11-2026): el número del oficio lo asigna Registratura; si se
+   * ingresa a mano (`numeroRegistratura`) se usa ese; si queda vacío, el LIMS lo
+   * asigna como hasta ahora. El oficio conductor de una COTIZACIÓN usa la matriz
+   * OFICIO_COTIZACION (Jefe DCO, Jefe del laboratorio, Subdirector y Director),
+   * resuelta con el laboratorio de la cotización; sin esas reglas, la OFICIO.
+   */
+  async generar(id: string, req: any, opts: { numeroRegistratura?: string | null } = {}) {
     const o = await this.fila(id, req);
     await this.alcance.exigirUnidad(req, o.unidad_id, "el oficio");
     const err = errorTransicionOficio(o.estado, "en_firma");
@@ -291,8 +298,9 @@ export class OficioService {
       cotizacionId: o.cotizacion_id,
     });
     if (errores.length) throw new BadRequestException(errores.join(" "));
-    const res = await this.matriz.resolver("OFICIO", o.unidad_id, o.tenant_id);
+    const res = await this.resolverMatriz(o);
     if (!res.pasos.length) throw new ConflictException("La matriz de firmas no tiene pasos para el tipo OFICIO: configúrelos en Administración › Matriz de firmas.");
+    const numeroManual = (opts.numeroRegistratura ?? "").trim() || null;
     const sinResponsable = res.pasos.find((p) => p.obligatorio && !p.responsables.length);
     if (sinResponsable) throw new ConflictException(`No se puede enviar a firmas: ${sinResponsable.advertencia ?? `nadie firma el paso ${sinResponsable.orden}`}.`);
 
@@ -300,7 +308,18 @@ export class OficioService {
       const [b] = await tx.$queryRawUnsafe<{ estado: string; numero: string | null }[]>(`SELECT estado, numero FROM oficio WHERE id = $1::uuid FOR UPDATE`, id);
       if (errorTransicionOficio(b.estado, "en_firma")) throw new ConflictException("El oficio cambió de estado. Actualice la pantalla.");
       let numero = b.numero;
-      if (!numero) {
+      if (numeroManual) {
+        // COM-08: número asignado por Registratura, ingresado a mano. No puede repetir otro oficio ni un documento emitido.
+        const usado = await tx.$queryRawUnsafe<any[]>(
+          `SELECT 1 FROM oficio WHERE tenant_id = $1::uuid AND numero = $2 AND id <> $3::uuid
+           UNION ALL SELECT 1 FROM certificado WHERE tenant_id = $1::uuid AND (numero = $2 OR codigo = $2) LIMIT 1`,
+          o.tenant_id,
+          numeroManual,
+          id,
+        );
+        if (usado.length) throw new ConflictException(`El número ${numeroManual} ya lo tiene otro oficio o un documento emitido.`);
+        numero = numeroManual;
+      } else if (!numero) {
         const r = await this.numeracion.reservar(
           tx,
           { tenantId: o.tenant_id, unidadId: o.unidad_id, tipo: "OFICIO", fecha: new Date(), ot: o.ot_codigo ?? null },
@@ -343,6 +362,23 @@ export class OficioService {
     await this.historial(id, "enviado a firmas", req);
     await this.avisarPasoActual(id, req);
     return this.detalle(id, req);
+  }
+
+  /**
+   * COM-08: matriz del oficio. El oficio conductor de una cotización usa
+   * OFICIO_COTIZACION resuelta con el laboratorio de la cotización (su centro de
+   * costo), para que firme su Jefe de Laboratorio; si no hay reglas, OFICIO.
+   */
+  private async resolverMatriz(o: any) {
+    if (o.cotizacion_id) {
+      const [lab] = await this.prisma.$queryRawUnsafe<{ unidad_id: string | null }[]>(
+        `SELECT cc.unidad_id FROM cotizacion c LEFT JOIN centro_costo cc ON cc.id = c.centro_costo_id WHERE c.id = $1::uuid`,
+        o.cotizacion_id,
+      );
+      const res = await this.matriz.resolver("OFICIO_COTIZACION", lab?.unidad_id ?? o.unidad_id, o.tenant_id);
+      if (res.pasos.length) return res;
+    }
+    return this.matriz.resolver("OFICIO", o.unidad_id, o.tenant_id);
   }
 
   private async avisarPasoActual(id: string, req: any) {

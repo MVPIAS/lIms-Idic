@@ -25,7 +25,7 @@ export type AlcanceRol = "UNIDAD" | "DESCENDENCIA" | "GLOBAL";
 export type TipoDocumento =
   | "INFORME_ENSAYO" | "IVC" | "INFORME_TECNICO" | "CERTIFICADO_CALIBRACION" | "INFORME_INSPECCION"
   | "CERTIFICADO_CONFORMIDAD" | "INFORME_INCUMPLIMIENTO" | "COTIZACION" | "OT_DISPOSICION"
-  | "SOLICITUD_ADQUISICION" | "OFICIO" | "CERTIFICADO_RESISTENCIA_BALISTICA" | "INFORME_RECHAZO"
+  | "SOLICITUD_ADQUISICION" | "OFICIO" | "OFICIO_COTIZACION" | "CERTIFICADO_RESISTENCIA_BALISTICA" | "INFORME_RECHAZO"
   | "CERTIFICADO_ARMA" | "INFORME_INCUMPLIMIENTO_ARMA" | "CERTIFICADO_EVIDENCIA" | "INFORME_PERICIAL" | "NOTA_NO_CONFORMIDAD";
 export type AccionFirma = "REVISA" | "APRUEBA" | "FIRMA" | "OFICIALIZA" | "VB";
 export type NivelUnidad = "MISMA" | "SECCION" | "DEPARTAMENTO" | "DIRECCION" | "CALIDAD" | "COMERCIAL";
@@ -365,6 +365,7 @@ export const TIPOS_DOCUMENTO: { value: TipoDocumento; label: string; corto: stri
   { value: "OT_DISPOSICION", label: "OT · disposición", corto: "OT disposición" },
   { value: "SOLICITUD_ADQUISICION", label: "Solicitud de adquisición", corto: "Sol. adquisición" },
   { value: "OFICIO", label: "Oficio", corto: "Oficio" },
+  { value: "OFICIO_COTIZACION", label: "Oficio conductor de la cotización", corto: "Oficio cotización" },
   { value: "CERTIFICADO_RESISTENCIA_BALISTICA", label: "Certificado de Resistencia Balística (CRB)", corto: "CRB" },
   { value: "INFORME_RECHAZO", label: "Informe de Ensayo de Rechazo", corto: "Inf. rechazo" },
   // Delegación Nº 11 (EP-11 11.42)
