@@ -243,6 +243,11 @@ export function calcularRutaCotizacion(h: HechosCotizacion, cfg: ConfigCircuito)
   const cerrada = ["anulada", "expirada", "rechazada"].includes(h.estado);
   const aceptada = h.estado === "aceptada";
   const historica = h.circuito !== "r1";
+  // COM-02 · reapertura: «Reabierta» se corrige y se registra el valor final;
+  // al registrarlo vuelve a Aceptada y (circuito r1) a firma del Jefe DCO.
+  const reabierta = h.estado === "reabierta";
+  const refirma = esRefirmaReapertura(h);
+  const yaAceptada = aceptada || reabierta;
 
   // 2 · Costeo
   const respondidas = sol.filter((s) => !["solicitado", "devuelto"].includes(s.estado));
@@ -284,12 +289,12 @@ export function calcularRutaCotizacion(h: HechosCotizacion, cfg: ConfigCircuito)
   // 5 · Envío
   const envio: Etapa = h.enviadaAt
     ? et("envio", "Envío al cliente", "hecho", h.enviadaMedio ? `Por ${h.enviadaMedioTexto ? textoEnFrase(h.enviadaMedioTexto) : h.enviadaMedio}` : "Enviada")
-    : aceptada || cerrada
+    : yaAceptada || cerrada
       ? et("envio", "Envío al cliente", "no_aplica", "Sin registro de envío")
       : et("envio", "Envío al cliente", "pendiente", null);
 
   // 6 · Aceptación
-  const aceptacion: Etapa = aceptada
+  const aceptacion: Etapa = yaAceptada
     ? et("aceptacion", "Aceptación y OT", "hecho", h.ot ? `OT ${h.ot.codigo}` : "Aceptada")
     : h.estado === "anulada"
       ? et("aceptacion", "Aceptación y OT", "no_aplica", "Anulada")
@@ -297,8 +302,10 @@ export function calcularRutaCotizacion(h: HechosCotizacion, cfg: ConfigCircuito)
         ? et("aceptacion", "Aceptación y OT", "bloqueado", "Vencida: ya no se puede aceptar")
         : et("aceptacion", "Aceptación y OT", "pendiente", null);
 
-  // Una cotización aceptada o cerrada no deja pasos atrás «pendientes».
-  const cerrar = (e: Etapa): Etapa => ((aceptada || cerrada) && e.estado !== "hecho" && e.estado !== "no_aplica" ? { ...e, estado: "no_aplica" } : e);
+  // Una cotización aceptada o cerrada no deja pasos atrás «pendientes» (salvo
+  // la nueva firma de la versión reabierta, que sí está pendiente).
+  const cerrar = (e: Etapa): Etapa =>
+    (yaAceptada || cerrada) && e.estado !== "hecho" && e.estado !== "no_aplica" && !(refirma && e.clave === "firma") ? { ...e, estado: "no_aplica" } : e;
   const etapas: Etapa[] = [
     et("elaboracion", "Elaboración", h.lineas > 0 ? "hecho" : "en_curso", `${h.lineas} ${h.lineas === 1 ? "línea" : "líneas"}`),
     cerrar(costeo),
@@ -306,6 +313,11 @@ export function calcularRutaCotizacion(h: HechosCotizacion, cfg: ConfigCircuito)
     cerrar(firma),
     envio,
     ...(h.precotizacion ? [] : [aceptacion]),
+    ...(reabierta
+      ? [et("valor_final", "Valor final (reapertura)", "en_curso", "Corregir las líneas y registrar el valor final")]
+      : refirma
+        ? [et("valor_final", "Valor final (reapertura)", "hecho", "Valor final registrado · vuelve a firma del Jefe DCO")]
+        : []),
   ];
 
   if (h.estado === "anulada") avisos.push("La cotización está anulada.");
@@ -364,17 +376,29 @@ function siguiente(clave: string, h: HechosCotizacion, sol: SolicitudRuta[], cfg
     // Aún falta la respuesta de algún laboratorio: el paso es el del costeo.
     return siguiente("costeo", h, sol, cfg);
   }
+  if (clave === "valor_final")
+    return {
+      etapa: clave,
+      texto: "Corregir las líneas de la cotización reabierta y pulsar «Registrar valor final»",
+      leToca: EJECUTIVO,
+      accion: { texto: "Ir a Datos", pestana: "datos", permisos: ["cotizacion.crear"] },
+    };
   if (clave === "firma") {
+    const refirma = esRefirmaReapertura(h);
     if (h.firmaEstado === "pendiente")
       return {
         etapa: clave,
-        texto: `Revisar y firmar la cotización ${h.codigo}`,
+        texto: refirma
+          ? `Revisar y firmar la nueva versión (valor final) de la cotización ${h.codigo}: «Firmar → emitir»`
+          : `Revisar y firmar la cotización ${h.codigo}`,
         leToca: { rol: "Jefe del Departamento Comercial", unidad: "DCO", personas: h.firmantes.map((p) => p.nombre) },
         accion: { texto: "Ir a Documento y firma", pestana: "documento", permisos: ["cotizacion.firmar"], usuarios: h.firmantes.map((p) => p.id) },
       };
     return {
       etapa: clave,
-      texto: h.firmaEstado === "devuelta" ? "Corregir lo observado y volver a enviar a firma del Jefe DCO" : "Revisar la vista previa y enviar a firma del Jefe DCO",
+      texto: refirma
+        ? "El Jefe DCO devolvió la nueva versión: revise lo observado y vuelva a enviarla a firma"
+        : h.firmaEstado === "devuelta" ? "Corregir lo observado y volver a enviar a firma del Jefe DCO" : "Revisar la vista previa y enviar a firma del Jefe DCO",
       leToca: EJECUTIVO,
       accion: { texto: "Ir a Documento y firma", pestana: "documento", permisos: ["cotizacion.crear"] },
     };

@@ -183,6 +183,27 @@ describe("Ruta de la cotización (barra de 6 etapas y siguiente paso)", () => {
     expect(r.etapas.find((e) => e.clave === "firma")?.estado).toBe("no_aplica");
     expect(r.etapaActual).toBe("envio");
   });
+
+  it("Reabierta (COM-02): el siguiente paso es corregir líneas y registrar el valor final, no el envío", () => {
+    const r = calcularRutaCotizacion({ ...base, estado: "reabierta", firmaEstado: "firmada", ot: { codigo: "OT-2026-0001" } }, cfg);
+    expect(r.etapaActual).toBe("valor_final");
+    expect(r.etapas.find((e) => e.clave === "envio")?.estado).toBe("no_aplica");
+    expect(r.etapas.find((e) => e.clave === "aceptacion")?.estado).toBe("hecho");
+    expect(r.siguiente?.texto).toMatch(/Registrar valor final/);
+    expect(r.siguiente?.accion).toMatchObject({ pestana: "datos", permisos: ["cotizacion.crear"] });
+  });
+
+  it("tras registrar el valor final queda en firma del Jefe DCO («Firmar → emitir»); si la devuelve, la reenvía el ejecutivo", () => {
+    const r = calcularRutaCotizacion({ ...base, estado: "aceptada", firmaEstado: "pendiente", enviadaAt: "2026-10-20", ot: { codigo: "OT-2026-0001" } }, cfg);
+    expect(r.etapaActual).toBe("firma");
+    expect(r.etapas.find((e) => e.clave === "valor_final")?.estado).toBe("hecho");
+    expect(r.siguiente?.texto).toMatch(/Firmar → emitir/);
+    expect(r.siguiente?.accion).toMatchObject({ pestana: "documento", permisos: ["cotizacion.firmar"], usuarios: ["j"] });
+    const d = calcularRutaCotizacion({ ...base, estado: "aceptada", firmaEstado: "devuelta", ot: { codigo: "OT-2026-0001" } }, cfg);
+    expect(d.etapaActual).toBe("firma");
+    expect(d.siguiente?.texto).toMatch(/nueva versión/);
+    expect(d.siguiente?.leToca?.rol).toBe("Ejecutivo de Ventas");
+  });
 });
 
 describe("cambiar las líneas después del V°B° del costeo (F025)", () => {
