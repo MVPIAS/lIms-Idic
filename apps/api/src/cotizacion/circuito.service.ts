@@ -635,6 +635,21 @@ export class CircuitoCotizacionService {
     return { ok: true, mensaje: `Cotización ${c.codigo} enviada a firma de ${firmantes.map((x) => x.nombre).join(", ")}.` };
   }
 
+  /**
+   * COM-02: la reapertura la autoriza el Jefe DCO o su subrogante, los mismos
+   * que firman la cotización según la matriz COTIZACION. SUPERADMIN pasa.
+   */
+  async exigirJefeDco(req: any) {
+    if ((req?.user?.roles ?? []).includes("SUPERADMIN")) return;
+    const tenantId = this.tenant(req);
+    const firmantes = await this.firmantes(tenantId);
+    const yo = this.yo(req);
+    if (!yo || !firmantes.some((f) => f.id === yo))
+      throw new ForbiddenException(
+        `La reapertura la autoriza el Jefe del Departamento Comercial o su subrogante${firmantes.length ? ` (${firmantes.map((f) => f.nombre).join(", ")})` : ""}.`,
+      );
+  }
+
   private async exigirFirmante(req: any, tenantId: string) {
     const firmantes = await this.firmantes(tenantId);
     const yo = this.yo(req);

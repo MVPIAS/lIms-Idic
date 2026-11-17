@@ -7,6 +7,7 @@
 
 import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
 import { SQL_ZONA } from "../common/fecha-chile";
+import { SQL_DIAS_POR_VENCER, SQL_PLAZO_CORRE } from "../ot/plazos";
 
 const OT_TERMINADA = `('cerrada','anulada','finalizada','informada')`;
 const OT_CERRADA = `('cerrada','anulada')`;
@@ -58,8 +59,8 @@ const docCert = (where: string) => `
  * desde $3 que usa esa consulta (el conteo usa los mismos).
  */
 export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estados" | "ninguno"; estados?: string[] }> = {
-  ot_vencidas: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso < ${HOY_CL}`), extra: "ninguno" },
-  ot_por_vencer: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso BETWEEN ${HOY_CL} AND ${HOY_CL} + 3`), extra: "ninguno" },
+  ot_vencidas: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso < ${HOY_CL}`), extra: "ninguno" },
+  ot_por_vencer: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso BETWEEN ${HOY_CL} AND ${HOY_CL} + ${SQL_DIAS_POR_VENCER}`), extra: "ninguno" },
   ot_sin_plazo: { sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso IS NULL`, "o.created_at", "'/ot/' || o.id || '?tab=informe'"), extra: "ninguno" },
   ot_listas_cerrar: {
     sql: filaOt(
@@ -115,6 +116,14 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
   cotizaciones_por_firmar: { sql: filaCotFirma(`c.firma_estado = 'pendiente'`), extra: "ninguno" },
   cotizaciones_devueltas_firma: { sql: filaCotFirma(`c.firma_estado = 'devuelta'`), extra: "ninguno" },
   cotizaciones_firmadas_sin_enviar: { sql: filaCotFirma(`c.firma_estado = 'firmada' AND c.enviada_at IS NULL`), extra: "ninguno" },
+  reaperturas_por_autorizar: {
+    sql: `SELECT c.id::text AS id, c.codigo AS texto, concat_ws(' · ', cl.razon_social, left(r.motivo, 80)) AS detalle, '/cotizaciones/' || c.id AS ruta,
+                 to_char(r.solicitada_at, 'YYYY-MM-DD') AS fecha
+            FROM cotizacion_reapertura r JOIN cotizacion c ON c.id = r.cotizacion_id LEFT JOIN cliente cl ON cl.id = c.cliente_id
+           WHERE r.tenant_id = COALESCE($1::uuid, r.tenant_id) AND r.estado = 'solicitada' AND ($2::uuid[] IS NULL OR TRUE)
+           ORDER BY r.solicitada_at`,
+    extra: "ninguno",
+  },
   cotizaciones_aceptadas_sin_ot: {
     sql: `SELECT c.id::text AS id, c.codigo AS texto, cl.razon_social AS detalle, '/cotizaciones/' || c.id AS ruta, NULL::text AS fecha
             FROM cotizacion c LEFT JOIN cliente cl ON cl.id = c.cliente_id
@@ -176,6 +185,6 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
 };
 
 /** Las vencidas de un laboratorio (tarjetas «OT vencidas · LAB»). */
-export const LISTA_VENCIDAS_LAB = filaOt(`o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso < ${HOY_CL} AND u.codigo = $3`);
+export const LISTA_VENCIDAS_LAB = filaOt(`o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso < ${HOY_CL} AND u.codigo = $3`);
 
 export const MAX_ELEMENTOS = 5;

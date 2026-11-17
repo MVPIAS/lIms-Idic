@@ -112,6 +112,13 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
           <b style={{ fontSize: 14 }}>{d.plazo.fechaCompromiso ? fechaDia(d.plazo.fechaCompromiso) : "Sin fecha"}</b>
           {d.plazo.semaforo !== "terminada" && <span className={`pill ${s.pill}`}>{s.texto}</span>}
           {d.plazo.diasRestantes !== null && d.plazo.semaforo !== "terminada" && <span style={{ color: "var(--muted)" }}>{textoDias(d.plazo.diasRestantes)}</span>}
+          {/* COM-23: el plazo se mide con la recepción en el DCO. */}
+          {d.plazo.medidoEn && (
+            <span className={`pill ${d.plazo.diasRestantes !== null && d.plazo.diasRestantes < 0 ? "red" : "green"}`}>
+              Recepción en el DCO el {fechaDia(d.plazo.medidoEn)}
+              {d.plazo.diasRestantes === null ? "" : d.plazo.diasRestantes < 0 ? ` · ${-d.plazo.diasRestantes} día(s) de atraso` : d.plazo.diasRestantes > 0 ? ` · ${d.plazo.diasRestantes} día(s) a favor` : " · justo en el plazo"}
+            </span>
+          )}
           {d.plazo.origen && (
             <span style={{ color: "var(--muted)" }}>
               {/* D10-12: la fecha que la OT toma por defecto (ot_plazo) no es «fijada a mano». */}

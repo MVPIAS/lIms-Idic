@@ -31,6 +31,10 @@ export const TIPOS_AVISO = {
   agenda_anulado: "warn",
   // Respaldo de la base de datos fallido o atrasado (§4.8.4) → administradores.
   respaldo: "alta",
+  // COM-05 · Mora de clientes: aviso (30 días), bloqueo (60) y derivación al CDE (90).
+  mora_aviso: "warn",
+  mora_bloqueo: "alta",
+  mora_cde: "alta",
 } as const satisfies Record<string, Severidad>;
 export type TipoAviso = keyof typeof TIPOS_AVISO;
 

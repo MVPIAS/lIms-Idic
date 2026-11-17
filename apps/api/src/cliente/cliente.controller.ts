@@ -154,6 +154,10 @@ export class ClienteController {
     return this.svc.bloquear(id, motivo, req?.user?.tenantId, req);
   }
 
+  /**
+   * Desbloqueo / excepción (reunión 2 y COM-05): lo autoriza el Jefe DCO o su
+   * subrogante con motivo; la excepción cubre las facturas vencidas de ese momento.
+   */
   @Post(":id/desbloquear")
   @RequierePermiso("cliente.bloquear")
   async desbloquear(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
@@ -166,6 +170,13 @@ export class ClienteController {
   @RequierePermiso("cliente.ver")
   bloqueos(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.historialBloqueos(id, req?.user?.tenantId);
+  }
+
+  /** COM-05 · Mora del cliente: facturas vencidas por tramo (30 aviso · 60 bloqueo · 90 CDE) y excepciones. */
+  @Get(":id/mora")
+  @RequierePermiso("cliente.ver")
+  async mora(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    return this.svc.mora(id, req?.user?.tenantId);
   }
 
   @Get(":id/contactos")

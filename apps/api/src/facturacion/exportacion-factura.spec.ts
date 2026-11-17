@@ -228,3 +228,14 @@ describe("construirExportacion · lims-idic.factura.v1", () => {
     expect(Number.isInteger(r.documento!.totales.iva)).toBe(true);
   });
 });
+
+describe("COM-30 · boleta en la exportación y el documento de cobro", () => {
+  it("la boleta usa los tipos 39 (afecta) y 41 (exenta); la factura 33 y 34", () => {
+    const { tipoDteDe, NOMBRE_DTE } = require("./exportacion-factura");
+    expect(tipoDteDe(false, "boleta")).toBe(39);
+    expect(tipoDteDe(true, "boleta")).toBe(41);
+    expect(tipoDteDe(false, "factura")).toBe(33);
+    expect(tipoDteDe(true, null)).toBe(34);
+    expect(NOMBRE_DTE[39]).toBe("Boleta electrónica");
+  });
+});

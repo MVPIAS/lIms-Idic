@@ -148,6 +148,15 @@ describe("borrador de la OT sin cotización (B-040)", () => {
   });
 });
 
+describe("COM-30 · boleta además de la factura", () => {
+  it("los tipos de documento y su nombre en los mensajes", () => {
+    const { TIPOS_DOCUMENTO, nombreDocumento } = require("./reglas-factura");
+    expect(TIPOS_DOCUMENTO).toEqual(["factura", "boleta"]);
+    expect(nombreDocumento("boleta")).toBe("boleta");
+    expect(nombreDocumento(null)).toBe("factura");
+  });
+});
+
 describe("factura de la tasa de internación (BPCH)", () => {
   it("nace exenta de IVA: IVA 0 %, sin monto de IVA y total = neto (DTE 34)", () => {
     const r = importesTasaInternacion([{ subtotal: 2615841 }]);

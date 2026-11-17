@@ -90,7 +90,7 @@ export class ExportacionFacturaService {
     const [f] = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT f.id::text, f.numero, f.estado, f.origen, f.moneda, to_char(f.fecha_emision, 'YYYY-MM-DD') AS "fechaEmision",
               f.neto::float8 AS neto, f.iva_pct::float8 AS "ivaPct", f.iva_monto::float8 AS "ivaMonto", f.total::float8 AS total,
-              f.exenta_iva AS "exentaIva", f.observaciones,
+              f.exenta_iva AS "exentaIva", f.observaciones, f.tipo_documento AS "tipoDocumento",
               f.cliente_id::text AS "clienteId", f.ot_id::text AS "otId", f.cotizacion_id::text AS "cotizacionId", f.centro_costo_id::text AS "centroCostoId",
               COALESCE((SELECT SUM(p.monto) FROM pago p WHERE p.factura_id = f.id), 0)::float8 AS pagado,
               COALESCE((SELECT SUM(n.monto) FROM nota_credito n WHERE n.factura_id = f.id), 0)::float8 AS "notasCredito"
@@ -182,6 +182,7 @@ export class ExportacionFacturaService {
         total: f.total,
         exentaIva: f.exentaIva,
         observaciones: f.observaciones,
+        tipoDocumento: f.tipoDocumento ?? "factura",
       },
       lineas,
       emisor: emisor ?? (await this.emisor(tenantId)),

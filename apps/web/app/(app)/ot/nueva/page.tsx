@@ -24,7 +24,7 @@ import { usePermisos } from "@/lib/permisos";
 const ORIGENES = [
   { v: "", l: "Alta directa" },
   { v: "INSTITUCIONAL", l: "Institucional sin cobro (oficio)" },
-  { v: "DISPOSICION", l: "Disposición del Director (sin OPI previa)" },
+  { v: "DISPOSICION", l: "Disposición del Director o del Jefe de Departamento (sin OPI previa)" },
   { v: "INTERLABORATORIO", l: "Interlaboratorio (sin cobro)" },
   { v: "OT_INTERNA", l: "OT interna" },
 ];

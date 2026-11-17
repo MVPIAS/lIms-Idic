@@ -123,7 +123,7 @@ const SI_NO: Opcion[] = [
 /** Orígenes de OT (reglas-ot.ts ORIGENES_OT + los de BPCH). */
 export const ORIGENES_OT_ENCUESTA: Opcion[] = [
   { valor: "COTIZACION", etiqueta: "Cotización" },
-  { valor: "DISPOSICION", etiqueta: "Disposición del Director" },
+  { valor: "DISPOSICION", etiqueta: "Disposición del Director o del Jefe de Departamento" },
   { valor: "INTERLABORATORIO", etiqueta: "Interlaboratorio" },
   { valor: "OT_INTERNA", etiqueta: "OT interna" },
   { valor: "INTERNACION", etiqueta: "Internación (BPCH)" },
@@ -164,7 +164,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     categoria: "numeracion_cotizacion",
     titulo: "Numeración de la cotización",
     donde: "Comercial › Cotizaciones: el número se asigna al crear la cotización. Las ya numeradas no cambian.",
-    porConfirmar: "Formato y si el correlativo es global o anual (EP-00 §10 P6).",
+    porConfirmar: "Formato confirmado por el IDIC (17-11-2026, COM-11): año vigente + correlativo que reinicia cada año.",
     codigos: {
       formato: {
         tipo: "formato",
@@ -180,14 +180,24 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
           { valor: "global", etiqueta: "Nunca (correlativo continuo)" },
           { valor: "anual", etiqueta: "Cada año vuelve a 1" },
         ],
-        porDefecto: "global",
+        // COM-11 (IDIC, 17-11-2026): «Año vigente + correlativo (reinicia todos los años)».
+        porDefecto: "anual",
       },
       inicio: {
         tipo: "entero",
         nombre: "Último número ya usado",
         min: 0,
         max: 999_999_999,
-        ayuda: "El siguiente número será este + 1 (sirve para continuar la numeración del Sistema Comercial). Bajarlo no reutiliza números ya emitidos.",
+        ayuda: "El siguiente número será este + 1 (sirve para continuar la numeración del Sistema Comercial). Bajarlo no reutiliza números ya emitidos. Con reinicio anual solo rige en el «Año del último número usado».",
+        porDefecto: "0",
+      },
+      inicio_anio: {
+        tipo: "entero",
+        nombre: "Año del último número usado",
+        min: 0,
+        max: 2100,
+        unidad: "año",
+        ayuda: "Solo con reinicio anual: el «Último número ya usado» rige únicamente en este año; los demás años empiezan en 1. 0 = no se aplica.",
         porDefecto: "0",
       },
     },
@@ -206,13 +216,15 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
           { valor: "lab", etiqueta: "Solo el laboratorio" },
           { valor: "ninguno", etiqueta: "Ninguno" },
         ],
-        porDefecto: "lab_depto",
+        // COM-09 (IDIC 17-11-2026): V°B° del Jefe de Laboratorio.
+        porDefecto: "lab",
       },
       exigir_consulta_laboratorio: {
         tipo: "sino",
         nombre: "Exigir al menos una consulta al laboratorio antes de firmar",
         opciones: SI_NO,
-        porDefecto: "no",
+        // COM-09: el V°B° del laboratorio es requisito para emitir; el analista estima.
+        porDefecto: "si",
       },
       exigir_firma_para_aceptar: {
         tipo: "sino",
@@ -248,7 +260,8 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
           { valor: "neto", etiqueta: "Neto de la lista vigente (igual que un particular)" },
         ],
         ayuda: "Un cliente particular toma siempre el neto de la lista de precios vigente. La política de precios (DCO-PG01-P05-IT05) fija para el Ejército y las FF.AA. el costo directo, sin las horas hombre militares; en el formulario de costeo esas horas no se suman al precio Ejército.",
-        porDefecto: "ficha",
+        // COM-36 (IDIC 17-11-2026): costo directo para todas las FF.AA. y de Orden.
+        porDefecto: "costo_directo",
       },
     },
   },
@@ -605,9 +618,17 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     titulo: "Avisos internos y por correo",
     donde:
       "Mi bandeja › Avisos y correo: OT vencidas y por vencer, resultados No cumple o Contaminado, documentos oficiales, despachos y oficios. Sin correo configurado el aviso queda en la bandeja y en la bitácora de Mensajería.",
-    porConfirmar: "Umbral de «por vencer» (Sistema Comercial: 4 días) y aviso al cliente de un No cumple (EP-00 P9, EP-02 P7 / DQO-07).",
+    porConfirmar: "Aviso al cliente de un No cumple (EP-00 P9, EP-02 P7 / DQO-07). «Por vencer»: 3 días, confirmado por el IDIC (COM-23, 17-11-2026).",
     codigos: {
-      dias_por_vencer: { tipo: "entero", nombre: "Días antes del compromiso en que se avisa «por vencer»", min: 1, max: 30, unidad: "días", porDefecto: "3" },
+      dias_por_vencer: {
+        tipo: "entero",
+        nombre: "Días antes del compromiso en que se avisa «por vencer»",
+        min: 1,
+        max: 30,
+        unidad: "días",
+        ayuda: "Rige el semáforo de la OT, Mi bandeja y los avisos. El plazo se mide con la recepción en el DCO (COM-23).",
+        porDefecto: "3",
+      },
       revision_automatica: { tipo: "sino", nombre: "Revisar los plazos cada hora y avisar al laboratorio y al ejecutivo", opciones: SI_NO, porDefecto: "si" },
       enviar_correo: { tipo: "sino", nombre: "Enviar también por correo los avisos", opciones: SI_NO, porDefecto: "si" },
       no_cumple_al_cliente: {
@@ -618,6 +639,19 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         porDefecto: "no",
       },
       documento_listo: { tipo: "sino", nombre: "Avisar a Comercial cuando un documento queda oficial", opciones: SI_NO, porDefecto: "si" },
+    },
+  },
+  // --- COM-05 · Mora de clientes (respuesta IDIC 17-11-2026) ---
+  {
+    categoria: "mora_cliente",
+    titulo: "Bloqueo de clientes por mora",
+    donde:
+      "Revisión diaria y al cotizar o abrir una OT: días desde el vencimiento de la factura (su fecha de vencimiento o la emisión + los días de crédito del cliente). Aviso a Comercial y Finanzas, bloqueo del cliente (sin cotizaciones ni OT nuevas) y alerta para derivar al Consejo de Defensa del Estado. La excepción la autoriza el Jefe DCO en la ficha del cliente.",
+    codigos: {
+      activo: { tipo: "sino", nombre: "Aplicar el bloqueo automático por mora", opciones: SI_NO, porDefecto: "si" },
+      dias_aviso: { tipo: "entero", nombre: "Días de mora para avisar", min: 1, max: 3650, unidad: "días", porDefecto: "30" },
+      dias_bloqueo: { tipo: "entero", nombre: "Días de mora para bloquear al cliente", min: 1, max: 3650, unidad: "días", porDefecto: "60" },
+      dias_cde: { tipo: "entero", nombre: "Días de mora para alertar «derivar al CDE»", min: 1, max: 3650, unidad: "días", porDefecto: "90" },
     },
   },
   // --- Sesión (contrato §4.7.6) ---

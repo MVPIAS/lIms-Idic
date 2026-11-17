@@ -37,7 +37,7 @@ describe("lista de OT · filtroListaOt", () => {
 
   it("semáforo de plazo con los cortes de la bandeja: no cerradas ni anuladas, «hoy» en Chile", () => {
     const hoy0 = new Date("2026-10-14T00:00:00Z");
-    const abiertas = { estado: { notIn: ["cerrada", "anulada"] } };
+    const abiertas = { estado: { notIn: ["cerrada", "anulada"] }, fechaRecepDco: null };
     expect(and(filtroListaOt({ semaforo: "vencida" }, ctx))).toContainEqual({ ...abiertas, fechaCompromiso: { lt: hoy0 } });
     expect(and(filtroListaOt({ semaforo: "por_vencer" }, ctx))).toContainEqual({
       ...abiertas,
@@ -45,6 +45,15 @@ describe("lista de OT · filtroListaOt", () => {
     });
     expect(and(filtroListaOt({ semaforo: "en_plazo" }, ctx))).toContainEqual({ ...abiertas, fechaCompromiso: { gt: new Date("2026-10-17T00:00:00Z") } });
     expect(and(filtroListaOt({ semaforo: "sin_fecha" }, ctx))).toContainEqual({ ...abiertas, fechaCompromiso: null });
+  });
+
+  it("COM-23: el umbral «por vencer» sale del parámetro avisos.dias_por_vencer", () => {
+    const hoy0 = new Date("2026-10-14T00:00:00Z");
+    expect(and(filtroListaOt({ semaforo: "por_vencer" }, { ...ctx, diasPorVencer: 5 }))).toContainEqual({
+      estado: { notIn: ["cerrada", "anulada"] },
+      fechaRecepDco: null,
+      fechaCompromiso: { gte: hoy0, lte: new Date("2026-10-19T00:00:00Z") },
+    });
   });
 
   it("«vencidas» y «porVencer» son alias del semáforo; el día es el de Chile, no el UTC", () => {
@@ -55,6 +64,7 @@ describe("lista de OT · filtroListaOt", () => {
     const noche = { ...ctx, hoy: new Date("2026-10-15T02:00:00Z") };
     expect(and(filtroListaOt({ semaforo: "vencida" }, noche))).toContainEqual({
       estado: { notIn: ["cerrada", "anulada"] },
+      fechaRecepDco: null,
       fechaCompromiso: { lt: new Date("2026-10-14T00:00:00Z") },
     });
   });

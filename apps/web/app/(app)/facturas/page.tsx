@@ -52,7 +52,8 @@ function FacturasContenido() {
   const [revisar, setRevisar] = useState<any | null>(null);
   const [lineas, setLineas] = useState<Linea[]>([]);
   const [ivaPct, setIvaPct] = useState("19");
-  const [folio, setFolio] = useState({ numero: "", fecha: hoy() });
+  // COM-30: el tipo de documento (factura o boleta de asistencia técnica D11) se elige al emitir.
+  const [folio, setFolio] = useState<{ numero: string; fecha: string; tipo: "factura" | "boleta" }>({ numero: "", fecha: hoy(), tipo: "factura" });
   const [pagar, setPagar] = useState<any | null>(null);
   const [pago, setPago] = useState({ monto: "", medio: "", referencia: "", numeroBoletin: "", fecha: hoy() });
   // Medios de pago de la lista (Catálogo › Parámetros · medio_pago; EP-00 8.4).
@@ -92,7 +93,7 @@ function FacturasContenido() {
     setLineas((f.lineas ?? []).map((l: any) => ({ descripcion: l.descripcion, cantidad: String(Number(l.cantidad)), precioUnitario: String(Number(l.precioUnitario)) })));
     setIvaPct(String(Number(f.ivaPct ?? 19)));
     setExenta(f.exentaIva ?? Number(f.ivaPct) === 0);
-    setFolio({ numero: "", fecha: hoy() });
+    setFolio({ numero: "", fecha: hoy(), tipo: f.tipoDocumento === "boleta" ? "boleta" : "factura" });
   }
 
   /** PDF «documento de cobro» de la factura (no es un documento tributario electrónico). */
@@ -149,9 +150,9 @@ function FacturasContenido() {
     // Emitir no se deshace (D02-23): se confirma con el folio y el total.
     if (!soloGuardar) {
       const ok = await confirmar({
-        titulo: `¿Emitir la factura ${folio.numero.trim()}?`,
+        titulo: `¿Emitir la ${folio.tipo} ${folio.numero.trim()}?`,
         mensaje: `Queda emitida por ${monto(netoEditado * (1 + ivaEfectivo / 100), revisar.moneda)} y pasa a cobranza. Para corregirla después se usa una nota de crédito.`,
-        confirmarTexto: "Emitir factura",
+        confirmarTexto: folio.tipo === "boleta" ? "Emitir boleta" : "Emitir factura",
       });
       if (!ok) return;
     }
@@ -167,8 +168,8 @@ function FacturasContenido() {
         toast.ok("Líneas guardadas.");
         setRevisar({ ...revisar, ...r });
       } else {
-        await api.post(`/facturas/${revisar.id}/emitir`, { numero: folio.numero.trim(), fechaEmision: folio.fecha });
-        toast.ok(`Factura ${folio.numero.trim()} emitida.`);
+        await api.post(`/facturas/${revisar.id}/emitir`, { numero: folio.numero.trim(), fechaEmision: folio.fecha, tipoDocumento: folio.tipo });
+        toast.ok(`${folio.tipo === "boleta" ? "Boleta" : "Factura"} ${folio.numero.trim()} emitida.`);
         setRevisar(null);
       }
       await cargar();
@@ -267,8 +268,10 @@ function FacturasContenido() {
 
   const columnas: DataColumn[] = [
     {
-      key: "numero", label: "N° factura",
-      render: (f) => f.estado === "pendiente" ? <span className="tag" title="Número provisional hasta que Finanzas la emita">{f.numero}</span> : <span className="codigo">{f.numero}</span>,
+      key: "numero", label: "N° documento",
+      render: (f) => f.estado === "pendiente"
+        ? <span className="tag" title="Número provisional hasta que Finanzas la emita">{f.numero}</span>
+        : <><span className="codigo">{f.numero}</span>{f.tipoDocumento === "boleta" && <span className="pill blue" style={{ marginLeft: 4 }} title="Boleta (asistencia técnica de la Delegación Nº 11)">boleta</span>}</>,
     },
     { key: "cliente", label: "Cliente", value: (f) => f.cliente?.razonSocial ?? "" },
     {
@@ -399,7 +402,7 @@ function FacturasContenido() {
             <>
               <button className="btn outline" onClick={() => setRevisar(null)}>Cerrar</button>
               <button className="btn outline" disabled={ocupado || !lineasValidas} onClick={() => guardarYEmitir(true)}>Guardar líneas</button>
-              <button className="btn primary" disabled={ocupado || !lineasValidas || !folio.numero.trim() || netoEditado <= 0} onClick={() => guardarYEmitir(false)}>Emitir factura</button>
+              <button className="btn primary" disabled={ocupado || !lineasValidas || !folio.numero.trim() || netoEditado <= 0} onClick={() => guardarYEmitir(false)}>{folio.tipo === "boleta" ? "Emitir boleta" : "Emitir factura"}</button>
             </>
           }>
           <p style={{ marginTop: 0 }}>
@@ -434,7 +437,14 @@ function FacturasContenido() {
               · Total <b>{monto(netoEditado * (1 + ivaEfectivo / 100), revisar.moneda)}</b></span>
           </div>
           <div className="form-grid" style={{ marginTop: 10 }}>
-            <div className="field"><label>Folio de la factura <span className="req">*</span></label><input value={folio.numero} maxLength={30} onChange={(e) => setFolio({ ...folio, numero: e.target.value })} /></div>
+            <div className="field">
+              <label>Documento tributario</label>
+              <select value={folio.tipo} onChange={(e) => setFolio({ ...folio, tipo: e.target.value as "factura" | "boleta" })}>
+                <option value="factura">Factura</option>
+                <option value="boleta">Boleta (asistencia técnica de la Delegación Nº 11)</option>
+              </select>
+            </div>
+            <div className="field"><label>Folio de la {folio.tipo} <span className="req">*</span></label><input value={folio.numero} maxLength={30} onChange={(e) => setFolio({ ...folio, numero: e.target.value })} /></div>
             <div className="field"><label>Fecha de emisión</label><input type="date" value={folio.fecha} onChange={(e) => setFolio({ ...folio, fecha: e.target.value })} /></div>
           </div>
         </Modal>

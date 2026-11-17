@@ -25,7 +25,7 @@ import {
   type ResultadoValidez,
   type ReglaValidez,
 } from "./validez";
-import { elegirPrecioCliente, itemsListaVigente, precioParaCotizacion, textoOrigenPrecio } from "../lista-precio/precio-lista";
+import { elegirPrecioCliente, itemsListaVigente, precioParaCotizacion, textoConversionUsd, textoOrigenPrecio } from "../lista-precio/precio-lista";
 import { leerCondicionesCliente } from "../lista-precio/condiciones-cliente";
 import { monedaDe, redondearMoneda } from "../common/moneda";
 import { calcularOpiPendiente, origenDesdeAceptacion, valorInicialOt } from "../ot/reglas-ot";
@@ -42,6 +42,19 @@ import { revisarOc } from "./aceptacion-oc";
 import { heredarDeCotizacion } from "../ot/encargo/encargo.module";
 import { entero, sino, valoresCategoria } from "../common/parametros-r4d";
 import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
+import { lineasDesdeCotizacion, totales as totalesFactura } from "../facturacion/reglas-factura";
+import { aplicarMora } from "../cliente/mora.service";
+import { mensajeClienteBloqueado } from "../cliente/mora";
+import {
+  ESTADO_REABIERTA,
+  REAPERTURA_VIVA,
+  errorCerrarReapertura,
+  errorResolverReapertura,
+  errorSolicitarReapertura,
+  facturaTomaValorFinal,
+  fotoCotizacion,
+  siguienteVersion as siguienteVersionReapertura,
+} from "./reapertura";
 import { validarOportunidad, enlazarOportunidad, ganarOportunidadDeCotizacion, guardarDatosSolicitud, leerDatosSolicitud, type DatosSolicitud } from "./cotizacion-extra";
 import { claveEnsayoMuestra, normalizarMuestras, validarLineasMuestras, type MuestraEntrada } from "./muestras-cotizacion";
 import { MOTIVO_PRECOT_NO_ACEPTA, TIPO_PRECOTIZACION, codigoPrecotizacion, erroresLineasPrecot, esPrecotizacion, motivoNoConvertir, motivoNoNuevaVersion, siguienteVersion } from "./precotizacion";
@@ -58,7 +71,7 @@ const INTERVALO_VENCIMIENTO_MS = Number(process.env.COTIZACION_VENCIMIENTO_MIN ?
  * Estados del flujo comercial vigente; el resto es histórico de solo lectura.
  * 'expirada' («Vencida») es vigente: una Abierta fuera de validez pasa sola a ella.
  */
-const ESTADOS_VIGENTES = ["abierta", "aceptada", "anulada", "expirada"] as const;
+const ESTADOS_VIGENTES = ["abierta", "aceptada", "reabierta", "anulada", "expirada"] as const;
 
 /** Condiciones adicionales: hasta 5.000 caracteres (reuniones 1 y 2; antes 2.000). */
 export const CONDICIONES_MAX = 5000;
@@ -139,6 +152,9 @@ export interface CabeceraCotizacion {
   dolarValor?: number | null;
   dolarFecha?: string | Date | null;
   dolarMotivo?: string | null;
+  /** COM-38: dólar observado (CLP por USD) y su fecha, en una cotización en pesos. */
+  dolarObservado?: number | null;
+  dolarObservadoFecha?: string | Date | null;
   referencia?: string | null;
   descripcionTecnica?: string | null;
   condicionesAdicionales?: string | null;
@@ -409,7 +425,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const muestras = await leerMuestras(this.prisma, id);
     const muestraDe = await leerMuestraDeLineas(this.prisma, id);
     const lineas = cot.lineas.map((l) => ({ ...l, muestraN: muestraDe.get(l.id) ?? null }));
-    return { ...cot, lineas, ...(circuito ?? {}), ...extras, muestras, ot, solicitud, adjuntos };
+    // COM-02: reaperturas (versiones) de la cotización, la última primero.
+    const reaperturas = await this.reaperturas(id).catch(() => []);
+    return { ...cot, lineas, ...(circuito ?? {}), ...extras, muestras, ot, solicitud, adjuntos, reaperturas };
   }
 
   // --------------------------------------------------------------------------
@@ -548,7 +566,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     moneda: string,
     dolar: number | null,
     existentes: Existentes | undefined,
-    ctx: { regla: ReglaValidez; fecha: string; clienteId: string; origenes?: Map<string, string | null> },
+    ctx: { regla: ReglaValidez; fecha: string; clienteId: string; origenes?: Map<string, string | null>; dolarObservado?: number | null; dolarObservadoFecha?: string | null },
   ) {
     const ids = lineas.map((l) => l.catEnsayoId).filter((x): x is string => Boolean(x));
     const ensayos = ids.length
@@ -571,6 +589,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       let precioFicha: number | null = null;
       let fuente: string | undefined;
       let origen: string | null = null;
+      let conversion: { precioUsd: number; tipoCambio: number } | null = null;
       if (l.catEnsayoId) {
         const e = porId.get(l.catEnsayoId);
         if (!e) throw new BadRequestException(`Línea ${i + 1}: el ensayo ${l.catEnsayoId} no existe en el catálogo.`);
@@ -582,13 +601,20 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         if (elegido?.origen === "lista_cliente") fuente = `la lista propia del cliente (${elegido.lista!.nombre}, ${elegido.lista!.itemCodigo}, ${elegido.moneda})`;
         if (elegido?.descuentoPct) fuente = `${fuente ?? "su ficha de costos"} con el descuento especial del cliente`;
         if (elegido) {
-          const conv = precioParaCotizacion(elegido, moneda, dolar, e.codigo);
+          const conv = precioParaCotizacion(elegido, moneda, dolar, e.codigo, { dolarObservado: ctx.dolarObservado });
           if (conv.error !== undefined) {
             // Una línea ya cotizada que conserva su precio no se bloquea (precio-ficha.ts).
             const previo = existentes?.ensayos.get(e.id);
             const conserva = previo != null && (l.precioUnitario == null || Math.abs(Number(l.precioUnitario) - previo) < 0.005);
             if (!conserva) throw new BadRequestException(`Línea ${i + 1}: ${conv.error}`);
-          } else precioFicha = conv.precio > 0 ? conv.precio : null;
+          } else {
+            precioFicha = conv.precio > 0 ? conv.precio : null;
+            // COM-38: precio en USD convertido con el dólar observado: queda en la línea.
+            if (conv.conversion) {
+              conversion = conv.conversion;
+              origen = `${origen ?? "Precio en USD"} · ${textoConversionUsd(conv.conversion, ctx.dolarObservadoFecha)}`;
+            }
+          }
         }
       }
       // EP-00 2.2 (BL-149): el ensayo se valoriza con la lista vigente o su ficha; sin ensayo, solo gastos tipificados.
@@ -601,6 +627,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         origen = ctx.origenes?.get(l.catEnsayoId) ?? "Precio ya cotizado (se conserva)";
       // Ensayo sin precio en lista ni ficha: el precio manual guarda su motivo como origen (también al cambiarlo).
       if (r.manual) origen = `Precio manual (sin precio en lista ni ficha): ${l.motivoPrecioManual!.trim()}`;
+      // La conversión solo vale si la línea quedó con el precio convertido.
+      const usd = conversion && precioFicha != null && Math.abs(Number(r.precio) - precioFicha) < 0.005 ? conversion : null;
       return {
         tipo: l.catEnsayoId ? "producto" : l.tipo ?? "producto",
         descripcion: descripcion ?? null,
@@ -623,6 +651,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         instrumentoPuntos: l.instrumentoPuntos?.trim() || null,
         instrumentoSentido: l.instrumentoSentido ?? null,
         precioOrigen: l.catEnsayoId ? origen?.slice(0, 300) ?? null : null,
+        precioUsd: usd ? usd.precioUsd : null,
+        tipoCambio: usd ? usd.tipoCambio : null,
         manual: r.manual === true,
       };
     });
@@ -632,7 +662,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * Precio de cada ensayo para un cliente (vista previa del formulario de la
    * cotización; misma regla que al guardar). GET /cotizaciones/precios-ensayo.
    */
-  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string, monedaCot?: string, tipoCliente?: string | null) {
+  async preciosEnsayo(tenantId: string, clienteId: string, catEnsayoIds: string[], fecha?: string, monedaCot?: string, tipoCliente?: string | null, dolarObservado?: number | null) {
     const moneda = monedaDe(monedaCot);
     const fechaEmision = isoFecha(soloFecha(fecha ?? hoyEnChile()));
     const validez = await this.calcularValidezPara(tenantId, clienteId, null, fechaEmision, tipoCliente || null);
@@ -656,12 +686,15 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         ensayos.map((e) => {
           const p = elegirPrecioCliente(listaCliente.get(e.id), lista.get(e.id), e.precio != null ? Number(e.precio) : null, validez.reglaPrecio, cfg.precioEjercito, cond.descuentoPct);
           // Frente f6: el precio va en la moneda de su lista; `bloqueo` = no se puede cotizar en la moneda pedida.
-          const bloqueo = p && p.moneda === "USD" && moneda === "CLP" ? precioParaCotizacion(p, moneda, null, e.codigo).error ?? null : null;
+          // COM-38: con el dólar observado se convierte (conversion = precio en USD y tipo de cambio); sin él, se pide.
+          const conv = p && p.moneda === "USD" && moneda === "CLP" ? precioParaCotizacion(p, moneda, null, e.codigo, { dolarObservado }) : null;
+          const bloqueo = conv?.error ?? null;
+          const conversion = conv && conv.error === undefined ? { ...conv.conversion!, precioClp: conv.precio } : null;
           return [
             e.id,
             p
-              ? { precio: p.precio, moneda: p.moneda, origen: p.origen, columna: p.columna ?? null, lista: p.lista ?? null, bloqueo, texto: textoOrigenPrecio(p), descuentoPct: p.descuentoPct ?? null, precioSinDescuento: p.precioSinDescuento ?? null }
-              : { precio: null, moneda: null, origen: null, columna: null, lista: null, bloqueo: null, texto: null, descuentoPct: null, precioSinDescuento: null },
+              ? { precio: p.precio, moneda: p.moneda, origen: p.origen, columna: p.columna ?? null, lista: p.lista ?? null, bloqueo, conversion, texto: textoOrigenPrecio(p), descuentoPct: p.descuentoPct ?? null, precioSinDescuento: p.precioSinDescuento ?? null }
+              : { precio: null, moneda: null, origen: null, columna: null, lista: null, bloqueo: null, conversion: null, texto: null, descuentoPct: null, precioSinDescuento: null },
           ];
         }),
       ),
@@ -711,6 +744,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
 
   /** Reunión 2: el Jefe DCO bloquea a los clientes con facturas impagas; no se les cotiza ni se acepta. */
   private async exigirClienteNoBloqueado(tenantId: string, clienteId: string, accion: "cotizar" | "aceptar") {
+    // COM-05: la mora se calcula al consultar (aviso 30 · bloqueo 60 · CDE 90): bloquea o levanta el bloqueo automático.
+    const m = await aplicarMora(this.prisma, tenantId, clienteId);
+    if (m?.bloqueado && m.bloqueo_origen === "mora") throw new ConflictException(mensajeClienteBloqueado(m.razon_social, m.motivo_bloqueo));
     const c = await this.prisma.cliente.findFirst({ where: { id: clienteId, tenantId }, select: { razonSocial: true, bloqueado: true, motivoBloqueo: true } });
     const motivo = motivoClienteBloqueado(c, accion);
     if (motivo) throw new ConflictException(motivo);
@@ -788,6 +824,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const tipoElegido = await this.tipoClienteElegido(tenantIdFromJWT, data.clienteId, data.tipoClienteCodigo);
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision, tipoElegido);
     if (data.oportunidadId) await validarOportunidad(this.prisma, tenantIdFromJWT, data.clienteId, data.oportunidadId);
+    // COM-38: en pesos, el dólar observado del día convierte los ensayos con precio en USD.
+    const dolarObs = moneda === "CLP" && Number(data.dolarObservado) > 0 ? Number(data.dolarObservado) : null;
+    const dolarObsFecha = dolarObs ? isoFecha(soloFecha(data.dolarObservadoFecha ?? fechaEmision)) : null;
 
     // Reunión 5: muestras de la cotización (la pre-cotización no lleva muestras).
     if (precot && data.muestras?.length) throw new BadRequestException("La pre-cotización no lleva muestras: solo valores referenciales.");
@@ -799,7 +838,15 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     else {
       const em = validarLineasMuestras(data.lineas, nm.muestras.length);
       if (em) throw new BadRequestException(em);
-      ({ lineas, manuales } = separarManuales(await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, { regla: validez.reglaPrecio, fecha: isoFecha(fechaEmision), clienteId: data.clienteId })));
+      ({ lineas, manuales } = separarManuales(
+        await this.resolverLineas(tenantIdFromJWT, data.lineas, moneda, dolar, undefined, {
+          regla: validez.reglaPrecio,
+          fecha: isoFecha(fechaEmision),
+          clienteId: data.clienteId,
+          dolarObservado: dolarObs,
+          dolarObservadoFecha: dolarObsFecha,
+        }),
+      ));
     }
     const tot = this.totales(lineas, Number(data.gastosAdminPct ?? 0), Number(data.ivaPct ?? 0), moneda);
     // Ejecutivo = usuario autenticado, solo si existe (FK a usuario).
@@ -821,6 +868,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
           moneda,
           dolarValor: dolar,
           dolarFecha: moneda === "USD" ? soloFecha(data.dolarFecha ?? fechaEmision) : null,
+          dolarObservado: dolarObs,
+          dolarObservadoFecha: dolarObsFecha ? soloFecha(dolarObsFecha) : null,
           referencia: data.referencia ?? null,
           descripcionTecnica: data.descripcionTecnica ?? null,
           condicionesAdicionales: data.condicionesAdicionales ?? null,
@@ -880,6 +929,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (estado !== undefined) {
       if (estado === "aceptada") throw new BadRequestException("Use POST /cotizaciones/:id/aceptar (exige documento de aceptación).");
       if (estado === "anulada") throw new BadRequestException("Use POST /cotizaciones/:id/anular (exige motivo).");
+      if (estado === ESTADO_REABIERTA || actual.estado === ESTADO_REABIERTA)
+        throw new BadRequestException("La reapertura la autoriza el Jefe DCO y se cierra registrando el valor final (POST /cotizaciones/:id/reapertura…).");
       validarTransicion("cotizacion", actual.estado, estado);
     }
     if (solicitud) {
@@ -891,7 +942,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     }
     const noEditable = motivoNoEditable((actual as any).firmaEstado ?? null);
     if (noEditable && actual.estado === ESTADO_ABIERTA) throw new ConflictException(noEditable);
-    if (actual.estado !== ESTADO_ABIERTA) {
+    // COM-02: una cotización Reabierta (autorizada por el Jefe DCO) se corrige hasta registrar el valor final.
+    const reabierta = actual.estado === ESTADO_REABIERTA;
+    if (actual.estado !== ESTADO_ABIERTA && !reabierta) {
       throw new ConflictException(
         `Solo se puede editar una cotización Abierta (esta está '${actual.estado}'${["borrador", "enviada", "rechazada", "expirada"].includes(actual.estado) ? ", histórica de solo lectura" : ""}).`,
       );
@@ -910,6 +963,14 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (cambiaDolar && !resto.dolarMotivo?.trim())
       throw new BadRequestException("El valor del dólar quedó congelado al emitir: indique el motivo del cambio (dolarMotivo).");
     if (moneda === "CLP") dolar = null;
+    // COM-38: dólar observado (solo en pesos). Si cambia, las líneas en USD se vuelven a convertir.
+    const obsActual = (actual as any).dolarObservado != null ? Number((actual as any).dolarObservado) : null;
+    const dolarObs =
+      moneda !== "CLP" ? null : resto.dolarObservado !== undefined ? (Number(resto.dolarObservado) > 0 ? Number(resto.dolarObservado) : null) : obsActual;
+    const dolarObsFecha = dolarObs
+      ? isoFecha(soloFecha(resto.dolarObservadoFecha ?? (actual as any).dolarObservadoFecha ?? actual.fechaEmision ?? hoyEnChile()))
+      : null;
+    const cambiaObs = dolarObs !== obsActual;
 
     const centroCostoId = resto.centroCostoId !== undefined ? resto.centroCostoId : actual.centroCostoId;
     // Reunión 2: el tipo de cliente se elige en cada cotización (cambiarlo recalcula validez y precios).
@@ -930,6 +991,10 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         await this.prisma.$executeRawUnsafe(`UPDATE linea_cotizacion SET muestra_n = NULL WHERE cotizacion_id = $1::uuid AND muestra_n > $2::int`, id, nm.muestras.length);
       }
     };
+    // COM-02 · Reabierta: ya fue aceptada; su validez no se vuelve a calcular.
+    const conservarValidez = reabierta
+      ? {}
+      : { validaHasta: soloFecha(validez.validaHasta), expiraAt: soloFecha(validez.validaHasta), validezDias: validez.dias, tipoClienteCodigo: validez.tipoClienteCodigo };
 
     const upd: Record<string, any> = {
       centroCostoId,
@@ -945,11 +1010,10 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       moneda,
       dolarValor: dolar,
       dolarFecha: moneda === "USD" ? (resto.dolarFecha ? soloFecha(resto.dolarFecha) : actual.dolarFecha ?? actual.fechaEmision) : null,
+      dolarObservado: dolarObs,
+      dolarObservadoFecha: dolarObsFecha ? soloFecha(dolarObsFecha) : null,
       ...(cambiaDolar ? { dolarMotivo: resto.dolarMotivo } : {}),
-      validaHasta: soloFecha(validez.validaHasta),
-      expiraAt: soloFecha(validez.validaHasta),
-      validezDias: validez.dias,
-      tipoClienteCodigo: validez.tipoClienteCodigo,
+      ...conservarValidez,
       ...(estado ? { estado } : {}),
       updatedAt: new Date(),
     };
@@ -972,7 +1036,14 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       // Frente f6: si cambia la moneda, los precios guardados (en la moneda anterior) no se conservan: se recalculan.
       const mismaMoneda = monedaDe(actual.moneda) === moneda;
       const existentes: Existentes = {
-        ensayos: new Map(mismaMoneda ? actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, Number(x.precioUnitario)]) : []),
+        // COM-38: si cambia el dólar observado, las líneas convertidas desde USD no conservan su precio.
+        ensayos: new Map(
+          mismaMoneda
+            ? actual.lineas
+                .filter((x: any) => x.catEnsayoId && !(cambiaObs && x.precioUsd != null))
+                .map((x: any) => [x.catEnsayoId, Number(x.precioUnitario)])
+            : [],
+        ),
         libres: new Set(actual.lineas.filter((x: any) => !x.catEnsayoId).map((x: any) => claveLibre(x.tipo, x.descripcion, Number(x.precioUnitario)))),
       };
       const origenes = new Map<string, string | null>(actual.lineas.filter((x: any) => x.catEnsayoId).map((x: any) => [x.catEnsayoId, x.precioOrigen ?? null]));
@@ -982,6 +1053,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
           fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
           clienteId: actual.clienteId,
           origenes,
+          dolarObservado: dolarObs,
+          dolarObservadoFecha: dolarObsFecha,
         }),
       );
       const tot = this.totales(lineas, Number(resto.gastosAdminPct ?? actual.gastosAdminPct ?? 0), Number(resto.ivaPct ?? actual.ivaPct ?? 0), moneda);
@@ -1032,6 +1105,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
         regla: validez.reglaPrecio,
         fecha: isoFecha(soloFecha(actual.fechaEmision ?? hoyEnChile())),
         clienteId: actual.clienteId,
+        // COM-38: el dólar observado de la cotización convierte los ensayos en USD.
+        dolarObservado: moneda === "CLP" && (actual as any).dolarObservado != null ? Number((actual as any).dolarObservado) : null,
+        dolarObservadoFecha: (actual as any).dolarObservadoFecha ? isoFecha(soloFecha((actual as any).dolarObservadoFecha)) : null,
       }),
     );
     const base = actual.lineas.length ? Math.max(...actual.lineas.map((l: any) => Number(l.orden ?? 0))) : 0;
@@ -1290,6 +1366,192 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       ot: otFinal ?? ot,
       mensaje: `Cotización aceptada. Orden de trabajo ${ot.codigo} creada.${lab}${extra}`,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // COM-02 · Reabrir cotización (reapertura.ts)
+  // --------------------------------------------------------------------------
+
+  /** Reaperturas de la cotización (versiones), la última primero. */
+  async reaperturas(cotizacionId: string) {
+    return this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT r.id, r.version, r.estado, r.motivo, r.solicitada_at AS "solicitadaAt", us.nombre_completo AS "solicitadaPor",
+              r.resuelta_at AS "resueltaAt", ur.nombre_completo AS "resueltaPor", r.comentario_resolucion AS "comentarioResolucion",
+              r.moneda, r.total_anterior::float8 AS "totalAnterior", r.total_final::float8 AS "totalFinal",
+              r.cerrada_at AS "cerradaAt", uc.nombre_completo AS "cerradaPor", r.ot_codigo AS "otCodigo", r.factura_numero AS "facturaNumero"
+         FROM cotizacion_reapertura r
+         LEFT JOIN usuario us ON us.id = r.solicitada_por
+         LEFT JOIN usuario ur ON ur.id = r.resuelta_por
+         LEFT JOIN usuario uc ON uc.id = r.cerrada_por
+        WHERE r.cotizacion_id = $1::uuid
+        ORDER BY r.version DESC`,
+      cotizacionId,
+    );
+  }
+
+  private async reaperturaViva(cotizacionId: string): Promise<{ id: string; estado: string; version: number } | null> {
+    const f = await this.prisma.$queryRawUnsafe<{ id: string; estado: string; version: number }[]>(
+      `SELECT id, estado, version FROM cotizacion_reapertura
+        WHERE cotizacion_id = $1::uuid AND estado = ANY($2::text[]) ORDER BY version DESC LIMIT 1`,
+      cotizacionId,
+      REAPERTURA_VIVA,
+    );
+    return f[0] ?? null;
+  }
+
+  /** 1 · El Ejecutivo pide reabrir una cotización Aceptada, con motivo obligatorio. */
+  async solicitarReapertura(id: string, motivo: string, tenantId?: string, usuarioId?: string) {
+    const cot = await this.detalle(id, tenantId);
+    const viva = await this.reaperturaViva(id);
+    const err = errorSolicitarReapertura(cot, viva, motivo);
+    if (err) throw new ConflictException(err);
+    const versiones = await this.prisma.$queryRawUnsafe<{ version: number }[]>(
+      `SELECT version FROM cotizacion_reapertura WHERE cotizacion_id = $1::uuid`,
+      id,
+    );
+    const version = siguienteVersionReapertura(versiones.map((v) => Number(v.version)));
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO cotizacion_reapertura (tenant_id, cotizacion_id, version, estado, motivo, solicitada_por, moneda, total_anterior)
+       VALUES ($1::uuid, $2::uuid, $3::int, 'solicitada', $4, $5::uuid, $6, $7::numeric)`,
+      cot.tenantId,
+      id,
+      version,
+      motivo.trim(),
+      usuarioId ?? null,
+      cot.moneda,
+      Number(cot.total ?? 0),
+    );
+    await this.hito(cot.tenantId, id, "reapertura_solicitada", usuarioId, motivo.trim(), { version });
+    return { ok: true, mensaje: `Reapertura de la cotización ${cot.codigo} solicitada: espera la autorización del Jefe DCO (o su subrogante).` };
+  }
+
+  /** 2 · El Jefe DCO (o su subrogante) autoriza o rechaza la reapertura. */
+  async resolverReapertura(id: string, autorizar: boolean, comentario: string | null | undefined, tenantId?: string, usuarioId?: string) {
+    const cot = await this.detalle(id, tenantId);
+    const viva = await this.reaperturaViva(id);
+    const err = errorResolverReapertura(viva, autorizar, comentario);
+    if (err) throw new ConflictException(err);
+    const obs = comentario?.trim() || null;
+    if (!autorizar) {
+      await this.prisma.$executeRawUnsafe(
+        `UPDATE cotizacion_reapertura SET estado = 'rechazada', resuelta_por = $2::uuid, resuelta_at = now(), comentario_resolucion = $3
+          WHERE id = $1::uuid`,
+        viva!.id,
+        usuarioId ?? null,
+        obs,
+      );
+      await this.hito(cot.tenantId, id, "reapertura_rechazada", usuarioId, obs, { version: viva!.version });
+      return { ok: true, mensaje: `Reapertura rechazada: la cotización ${cot.codigo} sigue Aceptada.` };
+    }
+    // Se guarda la versión vigente (cotizado) antes de permitir cambios.
+    const foto = fotoCotizacion(cot);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(
+        `UPDATE cotizacion_reapertura SET estado = 'autorizada', resuelta_por = $2::uuid, resuelta_at = now(),
+                comentario_resolucion = $3, version_anterior = $4::jsonb
+          WHERE id = $1::uuid`,
+        viva!.id,
+        usuarioId ?? null,
+        obs,
+        JSON.stringify(foto),
+      );
+      validarTransicion("cotizacion", cot.estado, ESTADO_REABIERTA);
+      await tx.cotizacion.update({ where: { id }, data: { estado: ESTADO_REABIERTA, updatedAt: new Date() } });
+    });
+    await this.hito(cot.tenantId, id, "reapertura_autorizada", usuarioId, obs, { version: viva!.version, totalAnterior: foto.total });
+    return { ok: true, mensaje: `Cotización ${cot.codigo} reabierta: corrija sus líneas y registre el valor final.` };
+  }
+
+  /**
+   * 3 · Valor final: la cotización vuelve a Aceptada con el valor corregido; la
+   * OT conserva su número y toma el valor final; la factura pendiente (borrador)
+   * se rehace con las líneas finales. Una factura ya emitida no se toca: se avisa.
+   */
+  async cerrarReapertura(id: string, tenantId?: string, usuarioId?: string) {
+    const cot = await this.detalle(id, tenantId);
+    const viva = await this.reaperturaViva(id);
+    const err = errorCerrarReapertura({ estado: cot.estado, lineas: cot.lineas.length }, viva);
+    if (err) throw new ConflictException(err);
+    const total = Number(cot.total ?? 0);
+    const ot = cot.ot;
+    const r = await this.prisma.$transaction(async (tx) => {
+      validarTransicion("cotizacion", cot.estado, "aceptada");
+      await tx.cotizacion.update({ where: { id }, data: { estado: "aceptada", updatedAt: new Date() } });
+      let facturaNumero: string | null = null;
+      let facturaEmitida: string | null = null;
+      if (ot) {
+        // La OT conserva su número y toma el valor final (EP-00 4.2: valor inicial → valor final).
+        await tx.$executeRawUnsafe(
+          `INSERT INTO ot_encargo (ot_id, tenant_id, moneda, valor_final, valor_final_at, valor_final_motivo)
+           VALUES ($1::uuid, $2::uuid, $3, $4::numeric, now(), $5)
+           ON CONFLICT (ot_id) DO UPDATE SET valor_final = EXCLUDED.valor_final, valor_final_at = now(),
+             valor_final_motivo = EXCLUDED.valor_final_motivo, moneda = COALESCE(ot_encargo.moneda, EXCLUDED.moneda)`,
+          ot.id,
+          cot.tenantId,
+          cot.moneda,
+          total,
+          `Reapertura v${viva!.version} de la cotización ${cot.codigo}`,
+        );
+        const facturas = await tx.factura.findMany({
+          where: { otId: ot.id, deletedAt: null, NOT: { estado: "anulada" } },
+          select: { id: true, numero: true, estado: true, ivaPct: true },
+        });
+        for (const f of facturas) {
+          if (!facturaTomaValorFinal(f.estado)) {
+            facturaEmitida = f.numero;
+            continue;
+          }
+          const lineas = lineasDesdeCotizacion(cot as any);
+          // Igual que el borrador del cierre: IVA de la cotización (crearBorradorDesdeOt).
+          const ivaPct = cot.ivaPct != null ? Number(cot.ivaPct) : Number(f.ivaPct);
+          const t = totalesFactura(lineas, ivaPct, cot.moneda);
+          await tx.lineaFactura.deleteMany({ where: { facturaId: f.id } });
+          await tx.factura.update({
+            where: { id: f.id },
+            data: {
+              moneda: cot.moneda,
+              ivaPct,
+              neto: t.neto,
+              ivaMonto: t.ivaMonto,
+              total: t.total,
+              lineas: { create: lineas },
+              observaciones: `Valor final de la cotización ${cot.codigo} (reapertura v${viva!.version}).`,
+            },
+          });
+          facturaNumero = f.numero;
+        }
+        await this.labs.anotar(tx, {
+          tenantId: cot.tenantId,
+          otId: ot.id,
+          tipo: "valor_final",
+          usuarioId: usuarioId ?? null,
+          detalle: { cotizacion: cot.codigo, version: viva!.version, moneda: cot.moneda, valorFinal: total },
+        });
+      }
+      await tx.$executeRawUnsafe(
+        `UPDATE cotizacion_reapertura SET estado = 'cerrada', cerrada_por = $2::uuid, cerrada_at = now(), total_final = $3::numeric,
+                version_final = $4::jsonb, ot_codigo = $5, factura_numero = $6
+          WHERE id = $1::uuid`,
+        viva!.id,
+        usuarioId ?? null,
+        total,
+        JSON.stringify(fotoCotizacion(cot)),
+        ot?.codigo ?? null,
+        facturaNumero,
+      );
+      return { facturaNumero, facturaEmitida };
+    });
+    await this.hito(cot.tenantId, id, "reapertura_cerrada", usuarioId, null, {
+      version: viva!.version,
+      totalFinal: total,
+      otCodigo: ot?.codigo ?? null,
+      facturaNumero: r.facturaNumero,
+    });
+    const partes = [`Valor final registrado: la cotización ${cot.codigo} vuelve a Aceptada (versión ${viva!.version}).`];
+    if (ot) partes.push(`La OT ${ot.codigo} conserva su número y toma el valor final.`);
+    if (r.facturaNumero) partes.push(`La factura pendiente ${r.facturaNumero} se actualizó con el valor final.`);
+    if (r.facturaEmitida) partes.push(`La factura ${r.facturaEmitida} ya estaba emitida: corrija la diferencia con una nota de crédito o débito.`);
+    return { ok: true, mensaje: partes.join(" ") };
   }
 
   /** Hito de la cotización (bitácora `cotizacion_evento`). */

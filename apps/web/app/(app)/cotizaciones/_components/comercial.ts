@@ -66,16 +66,18 @@ export const GRUPOS_CC = ["Laboratorios", "Sucursales y Delegación BPCH"] as co
  * 'expirada' (Vencida) la pone el SISTEMA cuando una Abierta supera su validez
  * (ya no se puede aceptar; sí anular).
  */
-export const ESTADOS_VIGENTES = ["abierta", "aceptada", "anulada", "expirada"] as const;
+export const ESTADOS_VIGENTES = ["abierta", "aceptada", "reabierta", "anulada", "expirada"] as const;
 export const ESTADO_PILL: Record<string, string> = {
   abierta: "blue",
   aceptada: "green",
+  reabierta: "amber",
   anulada: "red",
   expirada: "amber",
 };
 export const ESTADO_LABEL: Record<string, string> = {
   abierta: "Abierta",
   aceptada: "Aceptada",
+  reabierta: "Reabierta",
   anulada: "Anulada",
   borrador: "Borrador (histórico)",
   enviada: "Enviada (histórico)",
@@ -90,13 +92,13 @@ export const ACEPTACION_LABEL: Record<string, string> = {
   OC: "Orden de compra",
   CORREO: "Aprobación por correo (particular)",
   PAGO_ADELANTADO: "Comprobante de pago por adelantado",
-  DISPOSICION_DIRECTOR: "Disposición del Director (sin OPI previa)",
+  DISPOSICION_DIRECTOR: "Disposición del Director o del Jefe de Departamento (sin OPI previa)",
 };
 
 export const ORIGEN_LABEL: Record<string, string> = {
   COTIZACION: "Cotización",
   INTERNACION: "Internación",
-  DISPOSICION: "Disposición del Director",
+  DISPOSICION: "Disposición del Director o del Jefe de Departamento",
   INTERLABORATORIO: "Interlaboratorio",
   OT_INTERNA: "OT interna",
   REINSPECCION: "Reinspección (BPCH)",

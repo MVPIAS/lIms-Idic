@@ -27,6 +27,26 @@ describe("plazos · semáforo de la fecha de compromiso", () => {
     expect(semaforoPlazo(null, "recepcionada", AHORA).semaforo).toBe("sin_fecha");
   });
 
+  it("COM-23: el umbral «por vencer» se lee del parámetro (por defecto 3 días)", () => {
+    expect(semaforoPlazo("2026-10-19", "recepcionada", AHORA, { diasPorVencer: 5 })).toEqual({ semaforo: "por_vencer", diasRestantes: 5 });
+    expect(semaforoPlazo("2026-10-17", "recepcionada", AHORA, { diasPorVencer: 2 })).toEqual({ semaforo: "en_plazo", diasRestantes: 3 });
+    // Valor inválido → 3 días.
+    expect(semaforoPlazo("2026-10-17", "recepcionada", AHORA, { diasPorVencer: 0 }).semaforo).toBe("por_vencer");
+  });
+
+  it("COM-23: con la recepción en el DCO el plazo se mide en esa fecha y deja de correr", () => {
+    // Recibida en el DCO el 10-10 con compromiso el 12-10: 2 días a favor, aunque hoy (14-10) ya pasó.
+    expect(semaforoPlazo("2026-10-12", "finalizada", AHORA, { fechaRecepDco: "2026-10-10" })).toEqual({
+      semaforo: "terminada",
+      diasRestantes: 2,
+      medidoEn: "2026-10-10",
+    });
+    // Recibida con atraso: días negativos.
+    expect(semaforoPlazo("2026-10-08", "finalizada", AHORA, { fechaRecepDco: new Date("2026-10-10T00:00:00Z") }).diasRestantes).toBe(-2);
+    // Sin recepción en el DCO: como hasta ahora.
+    expect(semaforoPlazo("2026-10-12", "finalizada", AHORA, { fechaRecepDco: null }).semaforo).toBe("vencida");
+  });
+
   it("una OT cerrada o anulada no tiene semáforo", () => {
     expect(semaforoPlazo("2026-01-01", "cerrada", AHORA).semaforo).toBe("terminada");
     expect(semaforoPlazo("2026-01-01", "anulada", AHORA).semaforo).toBe("terminada");

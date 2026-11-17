@@ -1,4 +1,4 @@
-import { NUMERACION_DEF, configNumeracion, formatearNumeroCotizacion, generarNumeroCotizacion, numeroFormulario, serieDe } from "./numeracion-cotizacion";
+import { NUMERACION_DEF, configNumeracion, formatearNumeroCotizacion, generarNumeroCotizacion, inicioDeSerie, numeroFormulario, serieDe } from "./numeracion-cotizacion";
 
 describe("Numeración real de la cotización (EP-00 2.1)", () => {
   it("por defecto da el formato del Sistema Comercial: 2026-14324", () => {
@@ -12,13 +12,31 @@ describe("Numeración real de la cotización (EP-00 2.1)", () => {
       digitos: 4,
       reinicio: "anual",
       inicio: 14599,
+      inicioAnio: null,
     });
     // Sin {N} no hay correlativo: se ignora el formato.
     expect(configNumeracion({ formato: "{AAAA}", digitos: "x", reinicio: "otro", inicio: "-3" })).toEqual(NUMERACION_DEF);
   });
 
+  it("COM-11: por defecto el correlativo reinicia cada año", () => {
+    expect(NUMERACION_DEF.reinicio).toBe("anual");
+    expect(configNumeracion({}).reinicio).toBe("anual");
+    expect(configNumeracion({ reinicio: "global" }).reinicio).toBe("global");
+  });
+
+  it("COM-11: con reinicio anual «inicio» rige solo en su año; los demás años parten en 1", () => {
+    const cfg = configNumeracion({ reinicio: "anual", inicio: "14599", inicio_anio: "2026" });
+    expect(cfg.inicioAnio).toBe(2026);
+    expect(inicioDeSerie(cfg, 2026)).toBe(14599);
+    expect(inicioDeSerie(cfg, 2027)).toBe(0);
+    // Sin año (o 0) no se aplica a ningún año: así 2027 no arranca en inicio + 1.
+    expect(inicioDeSerie(configNumeracion({ reinicio: "anual", inicio: "14599", inicio_anio: "0" }), 2027)).toBe(0);
+    // Correlativo global: «inicio» de siempre.
+    expect(inicioDeSerie(configNumeracion({ reinicio: "global", inicio: "14599" }), 2027)).toBe(14599);
+  });
+
   it("la serie es única (global) o una por año", () => {
-    expect(serieDe(NUMERACION_DEF, 2026)).toBe("global");
+    expect(serieDe({ ...NUMERACION_DEF, reinicio: "global" }, 2026)).toBe("global");
     expect(serieDe({ ...NUMERACION_DEF, reinicio: "anual" }, 2027)).toBe("2027");
   });
 
@@ -33,7 +51,7 @@ describe("Numeración real de la cotización (EP-00 2.1)", () => {
     const db = {
       $queryRawUnsafe: async (sql: string, ...args: any[]) => {
         llamadas.push(sql.trim().split(/\s+/)[0]);
-        if (sql.includes("FROM parametro_sistema")) return [{ codigo: "inicio", valor: "40" }];
+        if (sql.includes("FROM parametro_sistema")) return [{ codigo: "inicio", valor: "40" }, { codigo: "reinicio", valor: "global" }];
         if (sql.includes("INSERT INTO cotizacion_correlativo")) {
           expect(args[1]).toBe("global");
           ultimo = Math.max(ultimo, Number(args[2])) + 1;
@@ -46,5 +64,27 @@ describe("Numeración real de la cotización (EP-00 2.1)", () => {
     };
     await expect(generarNumeroCotizacion(db, "t", new Date(2026, 9, 20))).resolves.toBe("2026-00043");
     expect(llamadas.filter((x) => x === "INSERT")).toHaveLength(2);
+  });
+
+  it("COM-11: con reinicio anual el contador del año siguiente parte en 1 aunque haya «inicio»", async () => {
+    const vistos: any[] = [];
+    const db = {
+      $queryRawUnsafe: async (sql: string, ...args: any[]) => {
+        if (sql.includes("FROM parametro_sistema"))
+          return [
+            { codigo: "reinicio", valor: "anual" },
+            { codigo: "inicio", valor: "14599" },
+            { codigo: "inicio_anio", valor: "2026" },
+          ];
+        if (sql.includes("INSERT INTO cotizacion_correlativo")) {
+          vistos.push(args);
+          return [{ ultimo: Number(args[2]) + 1 }];
+        }
+        return [];
+      },
+    };
+    await expect(generarNumeroCotizacion(db, "t", new Date(2027, 1, 10))).resolves.toBe("2027-00001");
+    expect(vistos[0][1]).toBe("2027");
+    await expect(generarNumeroCotizacion(db, "t", new Date(2026, 10, 10))).resolves.toBe("2026-14600");
   });
 });

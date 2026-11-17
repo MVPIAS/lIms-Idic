@@ -11,6 +11,8 @@
 -- Mantiene las mismas exclusiones que align_admin_roles.sql:
 --   · costo_real.* es solo del Jefe de Laboratorio;
 --   · Administración no consulta SAEC (evidencias, armas, casos, IBIS).
+--   · compra.* no se reparte: no hay adquisiciones en el LIMS (COM-18, respuesta
+--     del IDIC 17-11-2026; align_tercer_envio_comercial.sql). Solo SUPERADMIN.
 -- Aditivo e idempotente (ON CONFLICT DO NOTHING).
 -- =============================================================================
 
@@ -21,6 +23,7 @@ jefe_lab AS (
    WHERE COALESCE(r.alias_de, r.codigo) = 'JEFE_LAB'
      AND r.tenant_id = (SELECT id FROM t)
      AND p.codigo NOT LIKE 'costo\_real.%'
+     AND p.codigo NOT LIKE 'compra.%'
 ),
 jefe_seccion AS (
   SELECT codigo FROM jefe_lab
@@ -29,6 +32,7 @@ jefe_seccion AS (
     FROM rol r JOIN rol_permiso rp ON rp.rol_id = r.id JOIN permiso p ON p.id = rp.permiso_id
    WHERE COALESCE(r.alias_de, r.codigo) = 'JEFE_SECCION'
      AND r.tenant_id = (SELECT id FROM t)
+     AND p.codigo NOT LIKE 'compra.%'
 ),
 reparto(rol, perm) AS (
   SELECT 'JEFE_SECCION', codigo FROM jefe_lab
@@ -36,6 +40,7 @@ reparto(rol, perm) AS (
   UNION SELECT r, p.codigo FROM unnest(ARRAY['DIRECTOR','SUBDIRECTOR','ADMIN','LECTOR']) r
         CROSS JOIN permiso p
         WHERE p.accion = 'ver' AND NOT (r = 'ADMIN' AND p.codigo ~ '^(evidencia|arma|caso|ibis)\.')
+          AND p.codigo NOT LIKE 'compra.%'
   UNION SELECT 'SUPERADMIN', p.codigo FROM permiso p
 )
 INSERT INTO rol_permiso (rol_id, permiso_id)

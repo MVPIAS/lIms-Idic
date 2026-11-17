@@ -10,6 +10,17 @@ import { redondearMoneda } from "../common/moneda";
 
 export const ESTADOS_FACTURA = ["pendiente", "emitida", "parcial", "pagada", "anulada"] as const;
 
+/**
+ * COM-30 (respuesta IDIC 17-11-2026): documento tributario «boleta» además de
+ * la factura, para la asistencia técnica de la Delegación Nº 11. Se elige al
+ * emitir; el folio (lo da el SII fuera del LIMS) es correlativo por tipo.
+ */
+export const TIPOS_DOCUMENTO = ["factura", "boleta"] as const;
+export type TipoDocumento = (typeof TIPOS_DOCUMENTO)[number];
+export function nombreDocumento(tipo: string | null | undefined): string {
+  return tipo === "boleta" ? "boleta" : "factura";
+}
+
 export interface LineaBorrador {
   descripcion: string;
   cantidad: number;

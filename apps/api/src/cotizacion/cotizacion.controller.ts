@@ -15,6 +15,8 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { estadosValidos } from "../common/estados";
 import { TIPOS_ACEPTACION } from "../ot/reglas-ot";
 import { PERMISO_ACEPTAR, PERMISO_ANULAR } from "./permisos-cotizacion";
+import { PERMISO_REABRIR } from "./reapertura";
+import { CircuitoCotizacionService } from "./circuito.service";
 import { exigirCotizacionEnAlcance } from "./alcance-cotizacion";
 import { AlcanceService } from "../rbac/alcance.service";
 import { PrismaService } from "../common/prisma.service";
@@ -104,6 +106,9 @@ const Cabecera = {
   dolarValor: z.number().positive().nullable().optional(),
   dolarFecha: fecha.nullable().optional(),
   dolarMotivo: z.string().max(500).nullable().optional(),
+  // COM-38: dólar observado del día (CLP por USD) para convertir ensayos con precio en USD en una cotización en pesos.
+  dolarObservado: z.number().positive("El dólar observado debe ser mayor que 0.").max(100000).nullable().optional(),
+  dolarObservadoFecha: fecha.nullable().optional(),
   referencia: z.string().max(300).nullable().optional(),
   descripcionTecnica: z.string().max(20000).nullable().optional(),
   // Reuniones 1 y 2: hasta 5.000 caracteres (antes 2.000).
@@ -223,6 +228,7 @@ export class CotizacionController {
     private readonly costeo: CosteoService,
     private readonly alcance: AlcanceService,
     private readonly prisma: PrismaService,
+    private readonly circuito: CircuitoCotizacionService,
   ) {}
 
   /**
@@ -303,9 +309,13 @@ export class CotizacionController {
     @Query("fecha") fechaQ: string | undefined,
     @Req() req: any,
     @Query("moneda") monedaQ?: string,
+    @Query("dolarObservado") dolarObsQ?: string,
     @Query("tipoCliente") tipoQ?: string,
   ) {
     const uuid = z.string().uuid();
+    // COM-38: dólar observado (CLP por USD) para convertir los precios en USD en una cotización en pesos.
+    const dolarObs = dolarObsQ ? Number(String(dolarObsQ).replace(",", ".")) : null;
+    if (dolarObsQ && !(dolarObs! > 0)) throw new BadRequestException("dolarObservado debe ser un número mayor que 0.");
     // Frente f6: moneda de la cotización (CLP por defecto); el precio vuelve en la moneda de su lista.
     const moneda = monedaQ ? zMoneda.safeParse(monedaQ) : null;
     if (moneda && !moneda.success) throw new BadRequestException(moneda.error.issues[0].message);
@@ -315,7 +325,7 @@ export class CotizacionController {
     if (ids.some((x) => !uuid.safeParse(x).success)) throw new BadRequestException("ids: lista de uuid separados por coma");
     if (fechaQ && !/^\d{4}-\d{2}-\d{2}$/.test(fechaQ)) throw new BadRequestException("fecha debe ser AAAA-MM-DD");
     if (tipoQ && !/^[a-z0-9_]{1,60}$/i.test(tipoQ)) throw new BadRequestException("tipoCliente inválido");
-    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined, moneda?.success ? moneda.data : "CLP", tipoQ || null);
+    return this.svc.preciosEnsayo(req?.user?.tenantId, clienteId, ids, fechaQ || undefined, moneda?.success ? moneda.data : "CLP", tipoQ || null, dolarObs);
   }
 
   /**
@@ -411,6 +421,39 @@ export class CotizacionController {
     await this.exigirCotizacion(req, id);
     const doc = AceptarSchema.parse(body ?? {});
     return this.svc.aceptar(id, req?.user?.tenantId, doc, req?.user?.sub);
+  }
+
+  /**
+   * COM-02 · Reabrir cotización. 1) El Ejecutivo (cotizacion.crear) la pide con
+   * motivo obligatorio; 2) el Jefe DCO o su subrogante (cotizacion.reabrir) la
+   * autoriza o la rechaza; 3) el Ejecutivo corrige y registra el valor final.
+   */
+  @Post(":id/reapertura")
+  @RequierePermiso("cotizacion.crear")
+  @ApiOperation({ summary: "Pedir la reapertura de una cotización Aceptada (motivo obligatorio)" })
+  async solicitarReapertura(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    const { motivo } = z.object({ motivo: z.string().trim().max(2000) }).parse(body ?? {});
+    return this.svc.solicitarReapertura(id, motivo, req?.user?.tenantId, req?.user?.sub);
+  }
+
+  @Post(":id/reapertura/resolver")
+  @RequierePermiso(PERMISO_REABRIR)
+  @ApiOperation({ summary: "Autorizar o rechazar la reapertura (Jefe DCO o subrogante)" })
+  async resolverReapertura(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    const d = z.object({ autorizar: z.boolean(), comentario: z.string().trim().max(2000).optional().nullable() }).parse(body ?? {});
+    // Además del permiso: debe ser el Jefe DCO o su subrogante (matriz de firmas COTIZACION).
+    await this.circuito.exigirJefeDco(req);
+    return this.svc.resolverReapertura(id, d.autorizar, d.comentario, req?.user?.tenantId, req?.user?.sub);
+  }
+
+  @Post(":id/reapertura/cerrar")
+  @RequierePermiso("cotizacion.crear")
+  @ApiOperation({ summary: "Registrar el valor final de la cotización reabierta (vuelve a Aceptada)" })
+  async cerrarReapertura(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
+    await this.exigirCotizacion(req, id);
+    return this.svc.cerrarReapertura(id, req?.user?.tenantId, req?.user?.sub);
   }
 
   /** Reunión 10 · nueva versión de una pre-cotización (la anterior queda reemplazada). */

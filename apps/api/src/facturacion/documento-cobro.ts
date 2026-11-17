@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import { generarPdf } from "../plantilla-render/pdf.renderer";
 import type { Sello } from "../plantilla-render/plantilla-defecto";
 import { clp, esc, fechaCorta } from "../cotizacion/cotizacion-documento";
-import { esExenta, rutSii, separarCodigo, type EmisorEntrada, type FacturaEntrada, type LineaEntrada, type ReceptorEntrada, type ReferenciaEntrada } from "./exportacion-factura";
+import { esExenta, rutSii, tipoDteDe, separarCodigo, type EmisorEntrada, type FacturaEntrada, type LineaEntrada, type ReceptorEntrada, type ReferenciaEntrada } from "./exportacion-factura";
 
 export const LEYENDA_NO_DTE = "Documento de cobro · no es un documento tributario electrónico";
 
@@ -49,6 +49,9 @@ const ETQ_REF: Record<string, string> = {
 const dia = (f: string | null | undefined) => (f ? fechaCorta(new Date(`${String(f).slice(0, 10)}T00:00:00.000Z`)) : "—");
 
 /** «Transferencia · 30 días»; sin repetir los días si la forma de pago ya los dice («Contado 30 días»). */
+/** Tipo de DTE sugerido en el documento de cobro (COM-30: boleta 39/41 además de la factura 33/34). */
+const TIPO_SUGERIDO: Record<number, string> = { 33: "Factura afecta (33)", 34: "Factura exenta (34)", 39: "Boleta afecta (39)", 41: "Boleta exenta (41)" };
+
 export function textoFormaPago(fp: DatosDocumentoCobro["formaPago"], dias: number | null | undefined): string {
   const t = String(fp?.etiqueta ?? fp?.codigo ?? "").trim();
   const conDias = dias && !/d[ií]as?/i.test(t) ? `${dias} días` : "";
@@ -94,7 +97,7 @@ export function cuerpoDocumentoCobroHtml(d: DatosDocumentoCobro): string {
 <table class="meta">
   <tr><th>N° interno</th><td>${esc(f.numero)}</td><th>Estado</th><td>${esc(ESTADO[f.estado] ?? f.estado)}</td></tr>
   <tr><th>Fecha</th><td>${pendiente ? "—" : dia(f.fechaEmision)}</td><th>Forma de pago</th><td>${esc(textoFormaPago(d.formaPago, r.diasCredito))}</td></tr>
-  <tr><th>Tipo sugerido</th><td>${exenta ? "Factura exenta (34)" : "Factura afecta (33)"}</td><th>Centro de costo</th><td>${esc(d.centroCosto ? `${d.centroCosto.codigo} · ${d.centroCosto.nombre}` : "—")}</td></tr>
+  <tr><th>Tipo sugerido</th><td>${esc(TIPO_SUGERIDO[tipoDteDe(exenta, f.tipoDocumento)])}</td><th>Centro de costo</th><td>${esc(d.centroCosto ? `${d.centroCosto.codigo} · ${d.centroCosto.nombre}` : "—")}</td></tr>
 </table>
 
 <h2>Emisor</h2>

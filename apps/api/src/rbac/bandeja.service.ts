@@ -7,6 +7,7 @@ import { Perfil, codigoCanonico } from "./rbac.constants";
 import { MAX_INTENTOS_FALLIDOS } from "../auth/bloqueo";
 import { LISTAS_BANDEJA, LISTA_VENCIDAS_LAB, MAX_ELEMENTOS } from "./bandeja-listas";
 import { SQL_ZONA } from "../common/fecha-chile";
+import { SQL_DIAS_POR_VENCER, SQL_PLAZO_CORRE } from "../ot/plazos";
 import { SQL_PASO_ACTUAL } from "../plantilla-render/reglas-emision";
 import { SQL_LOTE_BPCH } from "../recepcion/reglas-recepcion";
 
@@ -183,13 +184,13 @@ export class BandejaService {
         this.contar(`SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_TERMINADA}`, tenant, unidades),
       otVencidas: () =>
         this.contar(
-          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso < ${HOY_CL}`,
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso < ${HOY_CL}`,
           tenant,
           unidades,
         ),
       otPorVencer: () =>
         this.contar(
-          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso BETWEEN ${HOY_CL} AND ${HOY_CL} + 3`,
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso BETWEEN ${HOY_CL} AND ${HOY_CL} + ${SQL_DIAS_POR_VENCER}`,
           tenant,
           unidades,
         ),
@@ -431,6 +432,12 @@ export class BandejaService {
             WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.estado = 'abierta' AND c.firma_estado = 'pendiente'`,
           tenant,
         ),
+      // COM-02: reaperturas de cotización que esperan al Jefe DCO o su subrogante.
+      reaperturasPorAutorizar: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM cotizacion_reapertura r WHERE r.tenant_id = COALESCE($1::uuid, r.tenant_id) AND r.estado = 'solicitada'`,
+          tenant,
+        ),
       cotizacionesFirma: (estado: string, sinEnviar = false) =>
         this.contar(
           `SELECT count(*) AS n FROM cotizacion c WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id)
@@ -561,7 +568,7 @@ export class BandejaService {
     const vencidasPorLab = async (): Promise<ItemBandeja[]> => {
       const filas = await this.filas<{ codigo: string; nombre: string; n: bigint | number }>(
         `SELECT u.codigo, u.nombre, count(*) AS n FROM orden_trabajo o JOIN unidad u ON u.id = o.unidad_principal
-          WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND o.fecha_compromiso < ${HOY_CL}
+          WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND ${SQL_PLAZO_CORRE} AND o.fecha_compromiso < ${HOY_CL}
           GROUP BY u.codigo, u.nombre ORDER BY n DESC LIMIT 10`,
         tenant,
         unidades,
@@ -583,7 +590,7 @@ export class BandejaService {
     const vencidas = async () =>
       item("ot_vencidas", "OT vencidas", "OT abiertas con fecha compromiso vencida", await q.otVencidas(), "/ot?semaforo=vencida", "alta");
     const porVencer = async () =>
-      item("ot_por_vencer", "OT por vencer", "OT que vencen hoy o en los próximos 3 días", await q.otPorVencer(), "/ot?semaforo=por_vencer", "warn");
+      item("ot_por_vencer", "OT por vencer", "OT que vencen hoy o dentro de los días de aviso «por vencer» y aún sin recepción en el DCO", await q.otPorVencer(), "/ot?semaforo=por_vencer", "warn");
     const listasCerrar = async () =>
       item("ot_listas_cerrar", "OT listas para cerrar", "Documentos oficiales y entregados: falta cerrar la OT", await q.otListasParaCerrar(), "/ot?listasCierre=1", "warn");
     const porEntregar = async () =>
@@ -705,9 +712,14 @@ export class BandejaService {
       item("cotizaciones_vb_depto", "Costeos por dar V°B° del departamento", "Respuestas de costeo con V°B° del laboratorio que esperan el del Jefe de Departamento", await q.solicitudesLab(["vb_lab"]), "/cotizaciones/por-responder?estado=vb", "warn");
     // Solo para quien firma según la matriz COTIZACION por defecto (Jefe del Depto. Comercial).
     const porFirmarCot = async (): Promise<ItemBandeja[]> =>
-      (await q.firmaCotizaciones()) === 0 ? [] : [item("cotizaciones_por_firmar", "Cotizaciones por firmar", "Cotizaciones enviadas a su firma (Jefe del Departamento Comercial)", await q.cotizacionesPorFirmar(), "/cotizaciones?estado=abierta&firma=pendiente", "warn")];
+      (await q.firmaCotizaciones()) === 0
+        ? []
+        : [
+            item("cotizaciones_por_firmar", "Cotizaciones por firmar", "Cotizaciones enviadas a su firma (Jefe del Departamento Comercial)", await q.cotizacionesPorFirmar(), "/cotizaciones?estado=abierta&firma=pendiente", "warn"),
+            item("reaperturas_por_autorizar", "Reaperturas por autorizar", "Cotizaciones aceptadas que el ejecutivo pide reabrir para ajustar el valor (autoriza el Jefe DCO o su subrogante)", await q.reaperturasPorAutorizar(), "/cotizaciones?estado=aceptada", "warn"),
+          ];
     const encuestas = async () =>
-      item("encuestas_pendientes", "Encuestas por registrar", "OT finalizadas o cerradas cuya encuesta de satisfacción aún no se registra", await q.encuestasPendientes(), "/encuestas?estado=pendiente", "info");
+      item("encuestas_pendientes", "Encuestas por registrar", "OT cerradas cuya encuesta de satisfacción aún no se registra", await q.encuestasPendientes(), "/encuestas?estado=pendiente", "info");
 
     // Documentación del trabajo del DSA que espera la decisión de esta jefatura (EP-05 2.3, frente r2a):
     // Jefe de Lab aprueba (LRB, SVM…); en el LEM en terreno valida la Sección y aprueba el Departamento.

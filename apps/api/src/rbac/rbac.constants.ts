@@ -33,6 +33,8 @@ export const TIPOS_DOCUMENTO = [
   "OT_DISPOSICION",
   "SOLICITUD_ADQUISICION",
   "OFICIO",
+  // COM-08: oficio conductor de la cotización (Jefe DCO, Jefe de Laboratorio, Subdirector y Director).
+  "OFICIO_COTIZACION",
   "CERTIFICADO_RESISTENCIA_BALISTICA",
   "INFORME_RECHAZO",
   // Delegación Nº 11 (EP-11 11.42, align_r4b_d11.sql)

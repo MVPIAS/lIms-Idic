@@ -206,8 +206,11 @@ export function responsablesDe(
   };
   const canon = codigoCanonico(rol.codigo, rol.aliasDe);
   const esJefatura = rol.nivel === "JEFATURA" || rol.nivel === "DIRECCION" || canon.startsWith("JEFE_");
+  // COM-08: el Subdirector subroga al Director: en la Dirección no se toma al
+  // titular (el Director), solo al subrogante y a quien tenga el rol asignado.
+  const esSubdirector = canon === "SUBDIRECTOR";
   if (esJefatura) {
-    const delaUnidad = jefes.filter((j) => j.unidadId === unidad.id);
+    const delaUnidad = jefes.filter((j) => j.unidadId === unidad.id && !(esSubdirector && j.rol === "titular"));
     // titular primero, luego subrogante
     for (const j of delaUnidad.filter((x) => x.rol === "titular"))
       add({ usuarioId: j.usuarioId, nombre: j.nombre, via: "titular" });
@@ -253,7 +256,10 @@ export function resolverFirmas(p: {
     }
     let alternativo: PasoResuelto["alternativo"] = null;
     if (r.rolAlternativo) {
-      const destinoAlt = unidadParaNivel(p.arbol, unidad?.id ?? null, r.nivelUnidadAlternativo ?? "MISMA", null);
+      // COM-32: si el paso apunta a una unidad FIJA (p. ej. Sección Ventas), el
+      // alternativo se busca desde esa unidad (MISMA = la unidad fija del paso).
+      const baseAlt = r.nivelUnidad === "FIJA" && destino ? destino.id : unidad?.id ?? null;
+      const destinoAlt = unidadParaNivel(p.arbol, baseAlt, r.nivelUnidadAlternativo ?? "MISMA", null);
       alternativo = { rol: { id: r.rolAlternativo.id, codigo: r.rolAlternativo.codigo, nombre: r.rolAlternativo.nombre }, unidad: ref(destinoAlt) };
       if (destinoAlt) {
         const vistos = new Set(responsables.map((x) => x.usuarioId));
