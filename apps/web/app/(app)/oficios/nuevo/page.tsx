@@ -91,9 +91,19 @@ function NuevoOficio() {
         <div className="card">
           <ol className="pasos-proc" style={{ display: "flex", gap: 12, listStyle: "none", padding: 0, margin: "0 0 12px", fontSize: 12, color: "var(--muted)", flexWrap: "wrap" }}>
             <li><b style={{ color: "var(--ink)" }}>1 · Elaborar</b></li>
-            <li>2 · V°B° Jefe de Departamento</li>
-            <li>3 · Firma de la Dirección</li>
+            {cotizacionId ? (
+              <>
+                <li>2 · V°B° Jefe DCO → Jefe de Laboratorio → Subdirector</li>
+                <li>3 · Firma del Director</li>
+              </>
+            ) : (
+              <>
+                <li>2 · V°B° Jefe de Departamento</li>
+                <li>3 · Firma de la Dirección</li>
+              </>
+            )}
             <li>4 · Despacho por Oficina de partes</li>
+            <li style={{ flexBasis: "100%" }}>Los pasos exactos los fija la matriz de firmas ({cotizacionId ? "OFICIO_COTIZACION" : "OFICIO"}); la ficha del oficio muestra el circuito real.</li>
           </ol>
           {otId && (
             <fieldset style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 10, marginBottom: 12 }}>

@@ -22,7 +22,7 @@ import { generarPdf } from "../plantilla-render/pdf.renderer";
 import { fechaChile, fechaHoraChile } from "../common/fecha-chile";
 import { nuevoCodigoVerificacion } from "../common/codigo-verificacion";
 import { hoyCl } from "../ot/plazos";
-import { clavesAvisoFirmaOficio, editable, errorTransicionOficio, erroresDespachoOficio, erroresOficio, htmlOficio, type EstadoOficio } from "./reglas-oficio";
+import { clavesAvisoFirmaOficio, editable, errorTransicionOficio, erroresDespachoOficio, erroresOficio, etapasOficio, htmlOficio, type EstadoOficio, type PasoBarra } from "./reglas-oficio";
 
 const tienePermiso = (req: any, p: string) => (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes(p);
 const usuarioDe = (req: any): string => req?.user?.sub;
@@ -107,6 +107,13 @@ export class OficioService {
     const decision = o.estado === "en_firma" ? decidirFirma(pasos, yo) : { paso: null, motivo: null };
     const actuales = o.estado === "en_firma" ? pasosActuales(pasos) : [];
     const esAutor = o.creado_por === yo;
+    // Barra de etapas: los pasos reales del circuito; antes de enviarlo a firmas,
+    // los que resolvería la matriz (OFICIO_COTIZACION u OFICIO).
+    let previstos: PasoBarra[] | null = null;
+    if (editable(o.estado))
+      previstos = await this.resolverMatriz(o)
+        .then((r) => r.pasos.map((p) => ({ orden: p.orden, accion: p.accion, rolNombre: p.rol.nombre, rolCodigo: p.rol.codigo, unidadCodigo: p.unidad?.codigo ?? null })))
+        .catch(() => null);
     return {
       id: o.id,
       numero: o.numero,
@@ -127,6 +134,7 @@ export class OficioService {
       createdAt: o.created_at,
       pasos,
       pasoActual: actuales.map((p) => p.id),
+      etapas: etapasOficio({ estado: o.estado, pasos, pasoActual: actuales.map((p) => p.id), previstos }),
       puedo: {
         editar: editable(o.estado) && (esAutor || tienePermiso(req, "oficio.crear")),
         generar: editable(o.estado) && tienePermiso(req, "oficio.crear"),

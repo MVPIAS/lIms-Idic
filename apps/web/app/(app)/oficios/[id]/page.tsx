@@ -1,13 +1,13 @@
 "use client";
 
 /**
- * Ficha del oficio conductor: pasos 1 Elaborar · 2 V°B° · 3 Firma · 4 Despacho,
+ * Ficha del oficio conductor: Elaborar · V°B° y firmas del circuito real · Despacho,
  * datos (editables en borrador o devuelto), documentos que conduce, circuito de
  * la matriz OFICIO con quién firmó y cuándo, y la bitácora en la OT.
  * Botones: «Generar oficio → firmas», «Dar V°B° → Dirección» / «Firmar», «Devolver»,
  * «Firmar y despachar» (Oficina de partes: Nº y fecha), «Anular», PDF.
  */
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { PageHeader } from "@/components/ui/PageHeader";
@@ -77,16 +77,12 @@ export default function OficioPage() {
   if (!o) return <p className="subtitle">Cargando oficio…</p>;
   const e = ESTADO_OFICIO[o.estado] ?? { texto: o.estado, pill: "gray" };
   const p = o.puedo ?? {};
-  const vb = o.pasos.find((x: any) => x.accion === "VB");
-  const firma = o.pasos.filter((x: any) => x.accion !== "VB").slice(-1)[0];
   const paso = (n: number, t: string, hecho: boolean, ahora: boolean) => (
     <div className={`step ${hecho ? "done" : ahora ? "now" : "locked"}`} aria-current={ahora ? "step" : undefined} style={{ cursor: "default" }}>
       <div className="dot" aria-hidden>{hecho ? "✓" : n}</div>
       <div className="txt">{t}</div>
     </div>
   );
-  const vigentes = o.pasos.filter((x: any) => x.estado !== "anulado");
-  const firmado = (x: any) => x?.estado === "firmado";
   const miPaso = o.pasos.find((x: any) => o.pasoActual.includes(x.id));
 
   return (
@@ -98,10 +94,10 @@ export default function OficioPage() {
         acciones={<button type="button" className="btn outline sm" onClick={pdf}>PDF</button>}
       />
       <nav className="stepper" aria-label="Avance del oficio">
-        {paso(1, "Elaborar", o.estado !== "borrador", o.estado === "borrador" || o.estado === "devuelto")}
-        {paso(2, "V°B° Jefe de Departamento", vb ? firmado(vigentes.find((x: any) => x.accion === "VB")) : o.estado === "firmado" || o.estado === "despachado", o.estado === "en_firma" && miPaso?.accion === "VB")}
-        {paso(3, "Firma de la Dirección", o.estado === "firmado" || o.estado === "despachado", o.estado === "en_firma" && firma && miPaso?.id === firma.id)}
-        {paso(4, "Despacho por Oficina de partes", o.estado === "despachado", o.estado === "firmado")}
+        {/* El circuito real del oficio (matriz OFICIO u OFICIO_COTIZACION): lo da la API. */}
+        {(o.etapas ?? []).map((x: { clave: string; titulo: string; estado: string }, i: number) => (
+          <Fragment key={x.clave}>{paso(i + 1, x.titulo, x.estado === "hecho", x.estado === "actual")}</Fragment>
+        ))}
       </nav>
 
       {o.estado === "devuelto" && <div className="alert warn">Devuelto: <b>{o.devueltoMotivo}</b>. Corríjalo y vuelva a enviarlo a firmas.</div>}
