@@ -121,6 +121,12 @@ export default function ClientesPage() {
         { campo: "contactoCargo", label: "Contacto principal · cargo" },
         { campo: "contactoEmail", label: "Contacto principal · correo", tipo: "email" },
         { campo: "contactoTelefono", label: "Contacto principal · teléfono", tipo: "telefono" },
+        // BPCH-19: 2.º tramo del número del Informe de Inspección BPCH (3000/<empresa>/OT/muestra).
+        {
+          campo: "codigoEmpresa",
+          label: "Código de empresa (BPCH)",
+          ayuda: "Opcional. Va en el número del Informe de Inspección del BPCH (3000/código de empresa/OT/muestra). Solo letras, dígitos y guion. Si falta, el número sale con «XXXX» y el LIMS avisa.",
+        },
         // Contrato 4.1.1 / 4.1.3: condiciones comerciales especiales del cliente.
         {
           campo: "listaPrecioId",
