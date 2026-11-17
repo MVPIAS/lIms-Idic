@@ -1785,6 +1785,8 @@ export class RegistroMuestrasService {
     productoPrevio: string | null = null,
     /** Cuándo se recibió la muestra (corrección) o ahora (registro). */
     recepcionAt: Date = new Date(),
+    /** Destino ya guardado en la muestra (corrección): si no cambia, se acepta. */
+    destinoGuardado: string | null = null,
   ) {
     const n = normalizarRecepcion(r);
     const errores = erroresRecepcion(n, opciones, labPrincipal, prefijo, recepcionAt);
@@ -1796,7 +1798,7 @@ export class RegistroMuestrasService {
       }
     }
     // Campos propios del laboratorio (Catálogo › Parámetros · recepcion_campo).
-    const lab = this.recepcion.validarCampos(cfg, { claseCustodia: n.claseCustodia, ubicacion: n.ubicacion, datos: n.datos }, prefijo);
+    const lab = this.recepcion.validarCampos(cfg, { claseCustodia: n.claseCustodia, ubicacion: n.ubicacion, datos: n.datos }, prefijo, destinoGuardado);
     errores.push(...lab.errores);
     // Producto (matriz): obligatorio donde el laboratorio lo exige; si se indica, debe existir.
     const producto = n.catElementoId ?? productoPrevio;
@@ -2329,6 +2331,7 @@ export class RegistroMuestrasService {
     const { n, errores, lab } = await this.validarRecepcion(
       tenantId, body, ot.unidadPrincipal, "", opciones, cfg, m.catElementoId ?? ot.catElementoId ?? null,
       m.recepcionadaAt ?? new Date(),
+      m.claseCustodia ?? null,
     );
     if (errores.length) throw new BadRequestException(errores.join(" "));
     // El historial guarda la recepción anterior COMPLETA, con quién y cuándo se

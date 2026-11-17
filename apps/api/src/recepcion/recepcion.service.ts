@@ -119,8 +119,8 @@ export class RecepcionService {
   }
 
   /** Valida los campos propios del laboratorio (lista de errores + valor normalizado). */
-  validarCampos(config: ConfigRecepcionLab, entrada: EntradaRecepcionLab, prefijo = "") {
-    return validarCamposLaboratorio(config.campos, entrada, config.laboratorio?.codigo ?? "laboratorio", prefijo, config.destinosNoUsados ?? []);
+  validarCampos(config: ConfigRecepcionLab, entrada: EntradaRecepcionLab, prefijo = "", destinoGuardado: string | null = null) {
+    return validarCamposLaboratorio(config.campos, entrada, config.laboratorio?.codigo ?? "laboratorio", prefijo, config.destinosNoUsados ?? [], destinoGuardado);
   }
 
   /** El producto (cat_elemento) existe y está vigente en el tenant. */
