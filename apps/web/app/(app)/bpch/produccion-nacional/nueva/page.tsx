@@ -2,7 +2,8 @@
 
 /**
  * Alta de la O/C operativa anual de Producción Nacional (la elabora la
- * Subdirección BPCH a partir de la RAF del fabricante): vigencia, cobro,
+ * Subdirección BPCH a partir de la RAF del fabricante): vigencia (siempre
+ * sin cobro, BPCH-03),
  * productos y cantidades autorizadas. API: POST /bpch/pn/oc.
  */
 import { useEffect, useState } from "react";
@@ -33,7 +34,6 @@ export default function NuevaOcPage() {
   const [anio, setAnio] = useState(String(anioActual));
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
-  const [cobro, setCobro] = useState<"" | "si" | "no">("");
   const [observaciones, setObservaciones] = useState("");
   const [productos, setProductos] = useState<FilaProducto[]>([filaVacia()]);
   const [error, setError] = useState("");
@@ -50,8 +50,8 @@ export default function NuevaOcPage() {
   async function guardar() {
     setError("");
     const filas = productos.filter((p) => p.producto.trim() || p.cantidadAutorizada);
-    if (!rafId || !numero.trim() || !anio || !desde || !hasta || !cobro || !filas.length) {
-      setError("Complete RAF, Nº de O/C, año, vigencia, cobro y al menos un producto con su cantidad.");
+    if (!rafId || !numero.trim() || !anio || !desde || !hasta || !filas.length) {
+      setError("Complete RAF, Nº de O/C, año, vigencia y al menos un producto con su cantidad.");
       return;
     }
     setBusy(true);
@@ -62,7 +62,6 @@ export default function NuevaOcPage() {
         anio: Number(anio),
         vigenciaDesde: desde,
         vigenciaHasta: hasta,
-        conCobro: cobro === "si",
         observaciones,
         productos: filas.map((p) => ({
           producto: p.producto,
@@ -107,7 +106,7 @@ export default function NuevaOcPage() {
             {raf && (
               <small style={{ color: raf.vencida ? "var(--red)" : "var(--muted)" }}>
                 {raf.planta ? `${raf.planta} · ` : ""}{raf.vigenciaHasta ? `vigente hasta ${dia(raf.vigenciaHasta)}` : "sin fecha de vigencia"}
-                {raf.vencida ? " · vencida: la inspección la registrará como defecto crítico (SAC-PG01-IT08)" : ""}
+                {raf.vencida ? " · vencida: no se podrá generar la OT de inspección hasta registrar la RAF renovada" : ""}
                 {raf.tipoLinea === "MOVIL" ? " · línea móvil: SAC-PG01-IT10 no aplica el muestreo NCh 44" : ""}
               </small>
             )}
@@ -117,10 +116,9 @@ export default function NuevaOcPage() {
           <div className="field"><label htmlFor="desde">Vigente desde <span className="req">*</span></label><input id="desde" type="date" value={desde} onChange={(e) => setDesde(e.target.value)} /></div>
           <div className="field"><label htmlFor="hasta">Vigente hasta <span className="req">*</span></label><input id="hasta" type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} /></div>
           <fieldset className="field" style={{ border: "none", padding: 0, margin: 0 }}>
-            <legend style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>Inspecciones <span className="req">*</span></legend>
-            <div style={{ display: "flex", gap: 12, paddingTop: 4 }}>
-              <label><input type="radio" name="cobro" checked={cobro === "si"} onChange={() => setCobro("si")} /> Con cobro</label>
-              <label><input type="radio" name="cobro" checked={cobro === "no"} onChange={() => setCobro("no")} /> Sin cobro</label>
+            <legend style={{ fontSize: 10, color: "var(--muted)", textTransform: "uppercase", fontWeight: 600 }}>Inspecciones</legend>
+            <div style={{ paddingTop: 4 }}>
+              <b>Sin cobro</b> <small style={{ color: "var(--muted)" }}>· las inspecciones de Producción Nacional no se cobran; la tasa va por ley.</small>
             </div>
           </fieldset>
           <div className="field span-2"><label htmlFor="obs">Observaciones</label><input id="obs" value={observaciones} onChange={(e) => setObservaciones(e.target.value)} /></div>
