@@ -255,9 +255,11 @@ export class BandejaService {
         ),
       documentosPorEntregar: () =>
         this.contar(
+          // Misma regla y alcance que GET /informes/documentos?estado=por_entregar (lista que abre la tarjeta).
           `SELECT count(*) AS n FROM certificado c JOIN orden_trabajo o ON o.id = c.ot_id
-            WHERE ${otScope} AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL
-              AND o.estado NOT IN ${OT_CERRADA}`,
+            WHERE c.tenant_id = COALESCE($1::uuid, c.tenant_id) AND c.deleted_at IS NULL AND c.estado IN ('oficial','emitido') AND c.entregado_at IS NULL
+              AND o.estado NOT IN ${OT_CERRADA}
+              AND ($2::uuid[] IS NULL OR c.unidad_id = ANY($2::uuid[]) OR (c.unidad_id IS NULL AND o.unidad_principal = ANY($2::uuid[])))`,
           tenant,
           unidades,
         ),
