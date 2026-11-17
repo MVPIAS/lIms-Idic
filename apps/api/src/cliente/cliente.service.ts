@@ -1,3 +1,4 @@
+import { estadoMora } from "./mora.service";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { contactoPrincipalDesdeFicha } from "./contacto-principal";
 import { PrismaClient } from "@prisma/client";
@@ -147,17 +148,51 @@ export class ClienteService {
     await this.detalle(id, tenantId); // valida pertenencia al tenant
     return this.prisma.cliente.update({
       where: { id },
-      data: { bloqueado: true, motivoBloqueo: motivo },
+      data: { bloqueado: true, motivoBloqueo: motivo, bloqueoOrigen: "manual", bloqueadoAt: new Date() },
     });
   }
 
-  async desbloquear(id: string, motivo: string, tenantId?: string) {
-    await this.detalle(id, tenantId); // valida pertenencia al tenant
-    // TODO: registrar en cliente_desbloqueo con autorización
+  /**
+   * COM-05 · Excepción / desbloqueo: lo autoriza el Jefe DCO (o su subrogante)
+   * con motivo. Queda en cliente_desbloqueo con quién lo autorizó y las
+   * facturas vencidas que cubre: esas ya no vuelven a bloquear al cliente (una
+   * factura distinta que llegue al tramo de bloqueo, sí).
+   */
+  async desbloquear(id: string, motivo: string, tenantId?: string, usuarioId?: string) {
+    const cli = await this.detalle(id, tenantId); // valida pertenencia al tenant
+    const texto = (motivo ?? "").trim();
+    if (texto.length < 10) throw new BadRequestException("Indique el motivo de la excepción o desbloqueo (mínimo 10 caracteres).");
+    const e = await estadoMora(this.prisma, cli.tenantId, id);
+    const facturas = e.facturas.map((f) => f.id);
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO cliente_desbloqueo (tenant_id, cliente_id, motivo, tipo_doc, autorizado_por, facturas)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6::uuid[])`,
+      cli.tenantId,
+      id,
+      texto,
+      cli.bloqueoOrigen === "mora" || facturas.length ? "mora" : "manual",
+      usuarioId ?? null,
+      facturas,
+    );
     return this.prisma.cliente.update({
       where: { id },
-      data: { bloqueado: false, motivoBloqueo: null },
+      data: { bloqueado: false, motivoBloqueo: null, bloqueoOrigen: null, bloqueadoAt: null },
     });
+  }
+
+  /** COM-05 · Mora del cliente (calculada ahora) y sus desbloqueos. */
+  async mora(id: string, tenantId?: string) {
+    const cli = await this.detalle(id, tenantId);
+    const [estado, desbloqueos] = await Promise.all([
+      estadoMora(this.prisma, cli.tenantId, id),
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT d.id, d.motivo, d.fecha, d.tipo_doc AS tipo, u.nombre_completo AS "autorizadoPor", COALESCE(array_length(d.facturas, 1), 0) AS facturas
+           FROM cliente_desbloqueo d LEFT JOIN usuario u ON u.id = d.autorizado_por
+          WHERE d.cliente_id = $1::uuid ORDER BY d.fecha DESC LIMIT 20`,
+        id,
+      ),
+    ]);
+    return { bloqueado: cli.bloqueado, bloqueoOrigen: cli.bloqueoOrigen ?? null, motivoBloqueo: cli.motivoBloqueo ?? null, ...estado, desbloqueos };
   }
 
   /** Contactos vigentes del cliente (solicitante de la cotización, EP-01 0.1). */

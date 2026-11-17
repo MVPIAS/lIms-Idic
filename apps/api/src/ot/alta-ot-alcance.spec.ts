@@ -17,7 +17,8 @@ describe("POST /ot · alcance del laboratorio responsable", () => {
         if (unidad !== LQC.id) throw new ForbiddenException("Fuera de su alcance");
       }),
     };
-    const prisma = { cliente: { findFirst: jest.fn(async () => ({ id: CLIENTE })) } };
+    // $queryRawUnsafe: COM-05 revisa la mora del cliente (sin facturas → habilitado).
+    const prisma = { cliente: { findFirst: jest.fn(async () => ({ id: CLIENTE })) }, $queryRawUnsafe: jest.fn(async () => []) };
     const ctl = new OtController(prisma as any, {} as any, alcance as any, labs as any, {} as any);
     return { ctl, alcance };
   };

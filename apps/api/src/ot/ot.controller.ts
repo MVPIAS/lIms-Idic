@@ -27,6 +27,7 @@ import { LaboratorioOtService, UnidadResumen } from "./laboratorio-ot.service";
 import { filtroListaOt, paginacion, semaforoPedido } from "./lista-ot";
 import { semaforoPlazo } from "./plazos";
 import { diasPorVencerDe } from "./dias-por-vencer";
+import { exigirClienteHabilitado } from "../cliente/mora.service";
 import { OtCierreService } from "./ot-cierre.controller";
 import { DEV_TENANT } from "../common/base-crud.service";
 import { FlujoService } from "../flujo/flujo.service";
@@ -579,6 +580,9 @@ export class OtController {
       select: { id: true },
     });
     if (!cliente) throw new BadRequestException("clienteId no existe o no pertenece al tenant");
+    // COM-05: un cliente bloqueado (mora ≥ tramo de bloqueo o bloqueo manual) no recibe OT nuevas.
+    // Las OT internas e interlaboratorio no son de un cliente externo: no se bloquean.
+    if (origen !== "INTERLABORATORIO" && origen !== "OT_INTERNA") await exigirClienteHabilitado(this.prisma, tenantId, clienteId);
 
     // Si viene cotización, debe ser del mismo tenant.
     if (dto.cotizacionId) {

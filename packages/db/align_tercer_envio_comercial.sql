@@ -135,3 +135,40 @@ SELECT r.id, p.id
   FROM rol r JOIN permiso p ON p.codigo = 'cotizacion.reabrir'
  WHERE COALESCE(r.alias_de, r.codigo) IN ('JEFE_DEPTO')
 ON CONFLICT DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- COM-05 · Bloqueo por mora: 30 días aviso, 60 bloqueo, 90 alerta CDE. La
+-- excepción la autoriza el Jefe DCO (o su subrogante) con motivo.
+-- -----------------------------------------------------------------------------
+ALTER TABLE cliente ADD COLUMN IF NOT EXISTS bloqueo_origen VARCHAR(10);
+ALTER TABLE cliente ADD COLUMN IF NOT EXISTS bloqueado_at   TIMESTAMPTZ;
+COMMENT ON COLUMN cliente.bloqueo_origen IS
+  'COM-05: mora (automático por facturas vencidas; se levanta solo al pagar) | manual (ficha del cliente). NULL = sin bloqueo o anterior a COM-05.';
+UPDATE cliente SET bloqueo_origen = 'manual' WHERE bloqueado AND bloqueo_origen IS NULL;
+
+ALTER TABLE cliente_desbloqueo ADD COLUMN IF NOT EXISTS tenant_id UUID REFERENCES tenant(id);
+ALTER TABLE cliente_desbloqueo ADD COLUMN IF NOT EXISTS facturas  UUID[];
+COMMENT ON COLUMN cliente_desbloqueo.facturas IS
+  'COM-05: facturas vencidas que cubre la excepción del Jefe DCO (ya no bloquean al cliente; una factura distinta que llegue al tramo de bloqueo, sí).';
+
+INSERT INTO parametro_sistema (tenant_id, categoria, codigo, etiqueta, valor, orden, activo)
+SELECT t.id, 'mora_cliente', v.codigo, v.etiqueta, v.valor, v.orden, TRUE
+  FROM tenant t
+ CROSS JOIN (VALUES
+   ('activo',       'Aplicar el bloqueo automático por mora (si | no)', 'si', 1),
+   ('dias_aviso',   'Días de mora para avisar a Comercial y Finanzas', '30', 2),
+   ('dias_bloqueo', 'Días de mora para bloquear al cliente (sin cotizaciones ni OT nuevas)', '60', 3),
+   ('dias_cde',     'Días de mora para alertar «derivar al Consejo de Defensa del Estado»', '90', 4)
+ ) AS v(codigo, etiqueta, valor, orden)
+ON CONFLICT (tenant_id, categoria, codigo) DO NOTHING;
+
+INSERT INTO permiso (id, codigo, modulo, accion, descripcion) VALUES
+  (gen_random_uuid(), 'cliente.desbloquear', 'cliente', 'desbloquear',
+   'Autorizar la excepción o el desbloqueo de un cliente bloqueado (Jefe DCO o su subrogante), con motivo.')
+ON CONFLICT (codigo) DO NOTHING;
+
+INSERT INTO rol_permiso (rol_id, permiso_id)
+SELECT r.id, p.id
+  FROM rol r JOIN permiso p ON p.codigo = 'cliente.desbloquear'
+ WHERE COALESCE(r.alias_de, r.codigo) IN ('JEFE_DEPTO')
+ON CONFLICT DO NOTHING;
