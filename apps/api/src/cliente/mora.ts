@@ -129,3 +129,23 @@ export function mensajeClienteBloqueado(razonSocial: string, motivo: string | nu
   const m = String(motivo ?? "").trim().replace(/[\s.]+$/, "");
   return `El cliente ${razonSocial} está bloqueado${m ? ` (${m})` : ""}: no se le pueden crear cotizaciones ni OT. Para una excepción, el Jefe DCO debe desbloquearlo registrando el motivo.`;
 }
+
+/** Día (AAAA-MM-DD) en que la factura entró en su tramo: vencimiento + días del tramo. */
+export function entradaEnTramo(vencimiento: string | null, tramo: TramoMora, cfg: ConfigMora): string | null {
+  if (!vencimiento || tramo === "al_dia") return null;
+  const d = tramo === "cde" ? cfg.diasCde : tramo === "bloqueo" ? cfg.diasBloqueo : cfg.diasAviso;
+  return new Date(diaUtc(vencimiento) + d * 86_400_000).toISOString().slice(0, 10);
+}
+
+/**
+ * Auditoría 17-11-2026: ¿el aviso de mora de esta factura va también por
+ * correo? Solo si entró en su tramo DESPUÉS de la primera revisión de mora
+ * (`primeraRevision`, AAAA-MM-DD). Así el primer día tras desplegar las facturas
+ * que ya estaban vencidas generan solo avisos internos (bandeja), no una ola de
+ * correos; las que cambien de tramo de ahí en adelante sí avisan por correo.
+ */
+export function avisoMoraPorCorreo(f: { vencimiento: string | null; tramo: TramoMora }, cfg: ConfigMora, primeraRevision: string | null): boolean {
+  if (!primeraRevision) return false;
+  const entrada = entradaEnTramo(f.vencimiento, f.tramo, cfg);
+  return !!entrada && entrada > primeraRevision;
+}
