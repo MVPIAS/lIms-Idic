@@ -1,11 +1,23 @@
-import { diferencias, erroresCabecera, heredarCabecera, faltantesParaEmitirInspeccion, iniciales } from "./reglas-cabecera";
+import { diferencias, erroresCabecera, erroresInspectores, heredarCabecera, faltantesParaEmitirInspeccion, iniciales } from "./reglas-cabecera";
 
 describe("BPCH · cabecera de inspección de la OT (EP-10 10.3)", () => {
-  const ok = { procedimiento: "SAC-PG01-P01", lugarInspeccion: "Polvorín de prueba", fechaInspeccion: "2026-10-20" };
+  const I1 = "00000000-0000-4000-8000-000000000001";
+  const I2 = "00000000-0000-4000-8000-000000000002";
+  const ok = { procedimiento: "SAC-PG01-P01", lugarInspeccion: "Polvorín de prueba", fechaInspeccion: "2026-10-20", modalidad: "TERRENO" as const, inspectorIds: [I1, I2] };
 
   it("guardar exige el procedimiento de control", () => {
     expect(erroresCabecera(ok)).toEqual([]);
-    expect(erroresCabecera({ lugarInspeccion: "X" }).join(" ")).toMatch(/procedimiento de control/);
+    expect(erroresCabecera({ ...ok, procedimiento: null }).join(" ")).toMatch(/procedimiento de control/);
+  });
+
+  it("BPCH-48: en terreno exige dos inspectores; el trabajo administrativo, uno", () => {
+    expect(erroresCabecera({ ...ok, inspectorIds: [I1] }).join(" ")).toMatch(/en terreno exige dos inspectores/);
+    expect(erroresCabecera({ ...ok, inspectorIds: [I1, I1] }).join(" ")).toMatch(/dos veces/);
+    expect(erroresCabecera({ ...ok, modalidad: "ADMINISTRATIVO", inspectorIds: [I1] })).toEqual([]);
+    expect(erroresCabecera({ ...ok, modalidad: "ADMINISTRATIVO", inspectorIds: [] }).join(" ")).toMatch(/al menos un inspector/);
+    expect(erroresCabecera({ ...ok, modalidad: null }).join(" ")).toMatch(/en terreno .* o un trabajo administrativo/);
+    expect(erroresInspectores({ modalidad: "TERRENO", inspectorIds: [I1, I2] }, new Set([I1])).join(" ")).toMatch(/rol Inspector/);
+    expect(erroresInspectores({ modalidad: "TERRENO", inspectorIds: [I1, I2] }, new Set([I1, I2]))).toEqual([]);
   });
 
   it("valida el CNC-DGMN, los tamaños NCh 44 y las fechas", () => {
