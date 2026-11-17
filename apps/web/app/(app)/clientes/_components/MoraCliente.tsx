@@ -49,15 +49,15 @@ export default function MoraCliente({ cliente, onCerrar }: { cliente: { id: stri
             Un cliente bloqueado no recibe cotizaciones ni OT nuevas. El bloqueo por mora se aplica solo y se levanta al pagar; la excepción la autoriza el Jefe DCO.
           </p>
           {d.facturas.length > 0 ? (
-            <table className="table" style={{ fontSize: 12.5 }}>
-              <thead><tr><th>Factura</th><th>Vencimiento</th><th>Días de mora</th><th>Saldo</th><th>Tramo</th></tr></thead>
+            <table className="data">
+              <thead><tr><th>Factura</th><th>Vencimiento</th><th className="num">Días de mora</th><th className="num">Saldo</th><th>Tramo</th></tr></thead>
               <tbody>
                 {d.facturas.map((f: any) => (
                   <tr key={f.id}>
                     <td className="codigo">{f.numero}</td>
                     <td>{f.vencimiento ? fechaDia(f.vencimiento) : "—"}</td>
-                    <td>{f.dias}</td>
-                    <td>{monto(f.saldo, "CLP")}</td>
+                    <td className="num">{f.dias}</td>
+                    <td className="num">{monto(f.saldo, "CLP")}</td>
                     <td>{TRAMO[f.tramo]?.[0] ?? f.tramo}{f.exceptuada ? " · con excepción" : ""}</td>
                   </tr>
                 ))}
@@ -73,11 +73,11 @@ export default function MoraCliente({ cliente, onCerrar }: { cliente: { id: stri
           {d.desbloqueos.length > 0 && (
             <>
               <h3 style={{ fontSize: 13, margin: "14px 0 6px" }}>Excepciones y desbloqueos</h3>
-              <table className="table" style={{ fontSize: 12.5 }}>
-                <thead><tr><th>Fecha</th><th>Autorizó</th><th>Motivo</th><th>Facturas cubiertas</th></tr></thead>
+              <table className="data">
+                <thead><tr><th>Fecha</th><th>Autorizó</th><th>Motivo</th><th className="num">Facturas cubiertas</th></tr></thead>
                 <tbody>
                   {d.desbloqueos.map((x: any) => (
-                    <tr key={x.id}><td>{fechaHora(x.fecha)}</td><td>{x.autorizadoPor ?? "—"}</td><td>{x.motivo}</td><td>{x.facturas}</td></tr>
+                    <tr key={x.id}><td>{fechaHora(x.fecha)}</td><td>{x.autorizadoPor ?? "—"}</td><td>{x.motivo}</td><td className="num">{x.facturas}</td></tr>
                   ))}
                 </tbody>
               </table>

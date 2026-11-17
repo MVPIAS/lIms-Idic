@@ -380,7 +380,7 @@ export default function DisenadorFlujos() {
                 defecto. Condiciones: «variable == valor» (también !=, &gt;, &lt;, &gt;=, &lt;=, &amp;&amp; y ||), p. ej. «cumple == true».
               </p>
               <div className="table-wrap">
-                <table className="table">
+                <table className="data">
                   <thead><tr><th>Desde</th><th>Hacia</th><th>Etiqueta</th><th>Condición</th><th></th></tr></thead>
                   <tbody>
                     {trans.map((t, i) => (
@@ -413,7 +413,7 @@ export default function DisenadorFlujos() {
                 <>
                   <h3 style={{ fontSize: 13, margin: "14px 0 4px" }}>Versiones</h3>
                   <div className="table-wrap">
-                    <table className="table">
+                    <table className="data">
                       <thead><tr><th>Versión</th><th>Estado</th><th>Etapas</th><th>Publicada</th><th>Notas</th><th></th></tr></thead>
                       <tbody>
                         {versiones.map((v) => (

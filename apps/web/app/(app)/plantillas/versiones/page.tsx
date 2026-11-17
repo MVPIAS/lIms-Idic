@@ -349,7 +349,7 @@ function Detalle({ hist, gestiona, aprueba, recargar, alDuplicar }: { hist: Hist
           </select>
         </div>
         <div className="table-wrap">
-          <table className="table">
+          <table className="data">
             <thead>
               <tr><th>Versión</th><th>Estado</th><th>Origen</th><th>Motivo</th><th>Redactó</th><th>Aprobó</th><th>Documentos</th><th></th></tr>
             </thead>
