@@ -504,7 +504,9 @@ export class CodificacionService {
     const certNumero = dto.certificadoNumero?.trim() || null;
     if (reactiva && certNumero) {
       const c = await this.prisma.$queryRawUnsafe<{ id: string; estado: string }[]>(
+        // BPCH-19: el informe de inspección y el de incumplimiento pueden repetir el número del certificado.
         `SELECT id, estado FROM certificado WHERE tenant_id = $1::uuid AND (numero = $2 OR codigo = $2) AND deleted_at IS NULL
+            AND COALESCE(tipo_documento, '') NOT IN ('INFORME_INSPECCION', 'INFORME_INCUMPLIMIENTO')
           ORDER BY (estado IN ('oficial','emitido')) DESC, created_at DESC LIMIT 1`,
         tenantId,
         certNumero,
