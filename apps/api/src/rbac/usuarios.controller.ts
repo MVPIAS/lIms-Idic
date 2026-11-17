@@ -24,6 +24,7 @@ import { PrismaService } from "../common/prisma.service";
 import { PermisoGuard } from "../auth/permiso.guard";
 import { RequierePermiso } from "../auth/permisos.decorator";
 import { alcanceDe } from "./alcance";
+import { erroresNuevaClave, CLAVE_MAX } from "../auth/clave";
 
 /**
  * Alta de usuario. Lo usan las dos pantallas:
@@ -45,7 +46,9 @@ const UsuarioCreate = z
     /** Alias de nombreCompleto (pantalla de Administración). */
     nombre: z.string().trim().min(2).max(200).optional(),
     email: z.string().email("Correo no válido").optional().nullable().or(z.literal("")),
-    password: z.string().min(4).max(200).optional().or(z.literal("")),
+    // Las reglas (mínimo, letra y número, sin el usuario) se aplican con
+    // erroresNuevaClave, las mismas del cambio de contraseña: ver validarClaveInicial.
+    password: z.string().max(CLAVE_MAX).optional().or(z.literal("")),
     grado: z.string().max(80).optional().nullable(),
     cargo: z.string().max(200).optional().nullable(),
     rolId: z.string().uuid().optional().or(z.literal("")),
@@ -136,12 +139,29 @@ function tenantDe(req: any): string | undefined {
   return req?.user?.tenantId;
 }
 
-/** Contraseña temporal legible (sin 0/O/1/l/I), 12 caracteres. */
-function passwordTemporal(): string {
-  const alfabeto = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
-  let s = "";
-  for (let i = 0; i < 12; i++) s += alfabeto[randomInt(alfabeto.length)];
-  return s;
+/**
+ * La contraseña inicial que elige el administrador cumple las mismas reglas que
+ * el cambio de contraseña (auth/clave.ts). Lanza 400 con el detalle en español.
+ */
+export function validarClaveInicial(password: string, username: string): void {
+  const errores = erroresNuevaClave(password, { username });
+  if (errores.length) {
+    throw new BadRequestException(`Contraseña inicial no válida: ${errores.join(" ")}`);
+  }
+}
+
+/**
+ * Contraseña temporal legible (sin 0/O/1/l/I), 12 caracteres. Siempre cumple
+ * las reglas de auth/clave.ts: lleva letra y número y no contiene el usuario.
+ */
+export function passwordTemporal(username = ""): string {
+  const letras = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz";
+  const alfabeto = letras + "23456789";
+  for (;;) {
+    let s = "";
+    for (let i = 0; i < 12; i++) s += alfabeto[randomInt(alfabeto.length)];
+    if (erroresNuevaClave(s, { username }).length === 0) return s;
+  }
 }
 
 async function hashArgon2(password: string): Promise<string> {
@@ -242,9 +262,10 @@ export class UsuariosController {
       const dupMail = await this.prisma.usuario.findFirst({ where: { tenantId, email: dto.email } });
       if (dupMail) throw new ConflictException(`El correo ${dto.email} ya está registrado para ${dupMail.username}`);
     }
+    if (dto.password) validarClaveInicial(dto.password, dto.username);
     if (dto.rolId) await this.validarAsignacion(dto.rolId, dto.unidadId || null, tenantId, false);
     // Sin contraseña elegida → temporal generada, que se devuelve UNA sola vez.
-    const temporal = dto.password ? null : passwordTemporal();
+    const temporal = dto.password ? null : passwordTemporal(dto.username);
     const passwordHash = await hashArgon2(dto.password || (temporal as string));
     const u = await this.prisma.usuario.create({
       data: {
@@ -387,8 +408,9 @@ export class UsuariosController {
   /** Genera una contraseña temporal (se devuelve UNA vez) e invalida sesiones. */
   @Post(":id/reset-password")
   async resetPassword(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
-    await this.cargar(id, tenantDe(req));
-    const passwordTemporal_ = passwordTemporal();
+    const actual = await this.cargar(id, tenantDe(req));
+    // Reset del administrador: la temporal también cumple las reglas de clave.ts.
+    const passwordTemporal_ = passwordTemporal(actual?.username ?? "");
     const passwordHash = await hashArgon2(passwordTemporal_);
     await this.prisma.usuario.update({
       where: { id },
