@@ -292,11 +292,42 @@ export interface EntradaTasa {
    * Se acepta por compatibilidad y se ignora (el resultado lleva ivaPct 0).
    */
   ivaPct?: number;
+  /*
+   * Conceptos adicionales de la base (planilla «Cálculo tasa internación» del
+   * DCO, letras del procedimiento SDBPCH). Todos opcionales y 0 por defecto:
+   * un cálculo anterior (solo CIF) da lo mismo que antes.
+   */
+  /** B · Ad valorem (código 223 de la DIN), en US$: se convierte con la misma paridad (planilla: C11 × tipo de cambio). */
+  adValoremUsd?: number | null;
+  /** D · Flete nacional, IVA incluido ($), factura del transportista. */
+  fleteNacional?: number | null;
+  /**
+   * C · Total de la factura de la agencia de aduana ($, «monto de la
+   * operación»): honorarios con IVA, aporte portuario y gastos pagados por
+   * cuenta del cliente (desaduanamiento, bodega).
+   */
+  agenciaTotalFactura?: number | null;
+  /** IVA de internación que la agencia pagó por cuenta del cliente y viene DENTRO de esa factura: NO entra en la base. */
+  agenciaIvaInternacion?: number | null;
+  /** C · Otros gastos por cuenta del cliente que NO vienen en la factura de la agencia ($). */
+  otrosGastosCliente?: number | null;
 }
 
 export interface ResultadoTasa extends EntradaTasa {
   ivaPct: number;
+  /** A · CIF en pesos (CIF US$ × paridad), redondeado al peso. */
   cifClp: number;
+  /** B · Ad valorem en pesos, redondeado al peso. */
+  adValoremClp: number;
+  fleteNacional: number;
+  agenciaTotalFactura: number;
+  agenciaIvaInternacion: number;
+  /** C · Factura de la agencia sin el IVA de internación. */
+  agenciaNeto: number;
+  otrosGastosCliente: number;
+  /** A + B + C + D (en pesos). */
+  baseCalculo: number;
+  /** Base × % afecto. */
   baseAfecta: number;
   tasa: number;
   iva: number;
@@ -311,26 +342,148 @@ export function importesTasa(tasa: number): { ivaPct: number; iva: number; total
   return { ivaPct: IVA_TASA_INTERNACION_PCT, iva: 0, total: Math.round(Number(tasa) || 0) };
 }
 
+const pesos = (v: number | null | undefined) => Math.round(Number(v) || 0);
+/** Porcentaje (hasta 4 decimales) en diezmilésimas, como entero exacto: 1,5 → 15000n. */
+const diezmilesimas = (pct: number) => BigInt(Math.round((Number(pct) || 0) * 10000));
+/** n / d redondeado al entero (mitad hacia arriba; n ≥ 0). */
+const redondeoEntero = (n: bigint, d: bigint) => Number((n * 2n + d) / (2n * d));
+
 /**
- * Tasa = CIF US$ × paridad × % afecto × % tasa (Comunicación Breve del DCO:
- * «Base = CIF US$ × tipo de cambio × % afecto × 1,5 %»). Exenta de IVA: total a
- * cancelar = tasa (IDIC, 10-11-2026). Montos en pesos, redondeados al entero.
+ * Tasa de internación con la fórmula del IDIC (planilla «CÁLCULO TASA 1.5» y
+ * Comunicación Breve del DCO, cuarto envío 17-11-2026 · COM-03):
+ *
+ *   A  CIF en pesos           = CIF US$ × tipo de cambio
+ *   B  Ad valorem en pesos    = ad valorem US$ × tipo de cambio (si corresponde, cód. 223)
+ *   D  Flete nacional (IVA incluido)
+ *   C  Factura de la agencia de aduana (honorarios con IVA + aporte portuario +
+ *      gastos por cuenta del cliente) MENOS el IVA de internación que la
+ *      agencia pagó por cuenta del cliente
+ *   C  Otros gastos por cuenta del cliente fuera de esa factura
+ *   Base = A + B + C + D · Base afecta = Base × % afecto · Tasa = Base afecta × % tasa
+ *
+ * Cada concepto en pesos se redondea al peso antes de sumar (así el documento
+ * cuadra a la vista) y la tasa se redondea al peso. EXENTA de IVA: total a
+ * cancelar = tasa (IDIC, 10-11-2026).
+ *
+ * Se cuadró con una Comunicación Breve real del DCO (junio de 2026, datos que
+ * no van al repositorio): CIF en pesos + (factura de la agencia − IVA de
+ * internación) + flete, al 100 % afecto y 1,5 %, da EXACTAMENTE el «TOTAL A
+ * CANCELAR» del documento; con la fórmula anterior (solo CIF) faltaba ~1,5 %.
  */
 export function calcularTasa(e: EntradaTasa): ResultadoTasa {
-  const cifClp = e.cifUsd * e.paridad;
-  const baseAfecta = cifClp * (e.pctAfecto / 100);
-  const tasa = Math.round(baseAfecta * (e.tasaPct / 100));
-  return { ...e, cifClp: Math.round(cifClp), baseAfecta: Math.round(baseAfecta), tasa, ...importesTasa(tasa) };
+  const cifClp = pesos(e.cifUsd * e.paridad);
+  const adValoremClp = pesos((Number(e.adValoremUsd) || 0) * e.paridad);
+  const fleteNacional = pesos(e.fleteNacional);
+  const agenciaTotalFactura = pesos(e.agenciaTotalFactura);
+  const agenciaIvaInternacion = pesos(e.agenciaIvaInternacion);
+  const agenciaNeto = agenciaTotalFactura - agenciaIvaInternacion;
+  const otrosGastosCliente = pesos(e.otrosGastosCliente);
+  const baseCalculo = cifClp + adValoremClp + fleteNacional + agenciaNeto + otrosGastosCliente;
+  // Aritmética entera (BigInt; % con hasta 4 decimales) para redondear sin error de coma flotante.
+  const afecto = diezmilesimas(e.pctAfecto);
+  const baseAfecta = redondeoEntero(BigInt(baseCalculo) * afecto, 1_000_000n);
+  const tasa = redondeoEntero(BigInt(baseCalculo) * afecto * diezmilesimas(e.tasaPct), 1_000_000_000_000n);
+  return {
+    ...e,
+    adValoremUsd: Number(e.adValoremUsd) || 0,
+    cifClp,
+    adValoremClp,
+    fleteNacional,
+    agenciaTotalFactura,
+    agenciaIvaInternacion,
+    agenciaNeto,
+    otrosGastosCliente,
+    baseCalculo,
+    baseAfecta,
+    tasa,
+    ...importesTasa(tasa),
+  };
 }
 
 export function erroresTasa(e: Partial<EntradaTasa>): string[] {
   const err: string[] = [];
   const pos = (v: unknown) => typeof v === "number" && Number.isFinite(v) && v > 0;
+  const opcional = (v: unknown) => v == null || (typeof v === "number" && Number.isFinite(v) && v >= 0);
   if (!pos(e.cifUsd)) err.push("Indique el valor CIF en US$ (mayor que cero).");
   if (!pos(e.paridad)) err.push("Indique la paridad US$ → $ (mayor que cero).");
   if (!(typeof e.pctAfecto === "number" && e.pctAfecto > 0 && e.pctAfecto <= 100)) err.push("El % afecto debe estar entre 0 y 100.");
   if (!(typeof e.tasaPct === "number" && e.tasaPct > 0 && e.tasaPct <= 100)) err.push("El % de la tasa debe estar entre 0 y 100 (parámetro bpch_tasa.tasa_pct).");
+  const negativos = (
+    [
+      ["el ad valorem", e.adValoremUsd],
+      ["el flete nacional", e.fleteNacional],
+      ["el total de la factura de la agencia", e.agenciaTotalFactura],
+      ["el IVA de internación de la factura de la agencia", e.agenciaIvaInternacion],
+      ["los otros gastos por cuenta del cliente", e.otrosGastosCliente],
+    ] as const
+  ).filter(([, v]) => !opcional(v));
+  if (negativos.length) err.push(`Revise ${negativos.map(([n]) => n).join(", ")}: deben ser montos de 0 o más.`);
+  if ((Number(e.agenciaIvaInternacion) || 0) > 0 && !(Number(e.agenciaTotalFactura) > 0))
+    err.push("Indique el total de la factura de la agencia de aduana: el IVA de internación se descuenta de esa factura.");
+  else if ((Number(e.agenciaIvaInternacion) || 0) > (Number(e.agenciaTotalFactura) || 0))
+    err.push("El IVA de internación no puede ser mayor que el total de la factura de la agencia de aduana.");
   return err;
+}
+
+/* -------------------------------------------- reparto por centro de costo --- */
+
+/** Centros de costo a los que se carga la tasa (Comunicación Breve: «Cargar a Centro de Costo»). */
+export const CENTROS_REPARTO_TASA = [
+  { codigo: "sucursal", parametro: "reparto_sucursal_pct", etiqueta: "Sucursal" },
+  { codigo: "dtcg", parametro: "reparto_dtcg_pct", etiqueta: "DTCG" },
+  { codigo: "sdbpch", parametro: "reparto_sdbpch_pct", etiqueta: "SDBPCH" },
+] as const;
+export type CentroRepartoTasa = (typeof CENTROS_REPARTO_TASA)[number]["codigo"];
+
+/** Reparto vigente por omisión (IDIC, cuarto envío 17-11-2026, COM-03): 85 / 10 / 5. */
+export const REPARTO_TASA_POR_DEFECTO: Record<CentroRepartoTasa, number> = { sucursal: 85, dtcg: 10, sdbpch: 5 };
+
+export interface PartidaReparto {
+  codigo: CentroRepartoTasa;
+  etiqueta: string;
+  pct: number;
+  monto: number;
+}
+
+/** Errores del reparto: cada % entre 0 y 100 y la suma exactamente 100. */
+export function erroresReparto(pcts: Partial<Record<CentroRepartoTasa, number | null>>): string[] {
+  const err: string[] = [];
+  for (const c of CENTROS_REPARTO_TASA) {
+    const v = pcts[c.codigo];
+    if (!(typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= 100)) err.push(`Falta el % de reparto de ${c.etiqueta} (entre 0 y 100).`);
+  }
+  if (!err.length) {
+    const suma = CENTROS_REPARTO_TASA.reduce((s, c) => s + Math.round((pcts[c.codigo] as number) * 10000), 0) / 10000;
+    if (suma !== 100)
+      err.push(
+        `El reparto por centro de costo debe sumar 100 % (hoy suma ${porcentajeChile(suma)}). Corríjalo en Administración › Parámetros del sistema › Porcentajes de la tasa de internación.`,
+      );
+  }
+  return err;
+}
+
+/**
+ * Reparte la tasa entre los centros de costo. Cada parte se trunca al peso y la
+ * diferencia que deja el truncado la absorbe el DTCG, para que las tres partes
+ * sumen EXACTAMENTE la tasa. Es lo que muestra la Comunicación Breve real del
+ * DCO (junio de 2026): con 85 / 10 / 5 % la sucursal y la SDBPCH llevan su
+ * parte sin decimales y el DTCG el peso que sobra.
+ * Supuesto (preguntado al IDIC, cuarto envío): la parte «Sucursal» va al centro
+ * de costo de la sucursal o unidad que atendió la internación.
+ */
+export function repartirTasa(tasa: number, pcts: Record<CentroRepartoTasa, number>, absorbe: CentroRepartoTasa = "dtcg"): PartidaReparto[] {
+  const total = Math.round(Number(tasa) || 0);
+  const partes: PartidaReparto[] = CENTROS_REPARTO_TASA.map((c) => ({
+    codigo: c.codigo,
+    etiqueta: c.etiqueta,
+    pct: pcts[c.codigo],
+    // Truncado al peso en aritmética entera (pct con hasta 4 decimales).
+    monto: Number((BigInt(total) * diezmilesimas(pcts[c.codigo])) / 1_000_000n),
+  }));
+  const resto = total - partes.reduce((s, p) => s + p.monto, 0);
+  const destino = partes.find((p) => p.codigo === absorbe)!;
+  destino.monto += resto;
+  return partes;
 }
 
 /* ========================================================================== */
