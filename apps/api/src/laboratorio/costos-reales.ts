@@ -95,9 +95,11 @@ export function erroresLineas(lineas: LineaCostoReal[], cargosValidos: Set<strin
 export function lineasSugeridas(
   ordenes: { id: string; numero: string | null; destino: string | null; costoDirecto: number | null }[],
   costeo: {
-    viaticos?: { zona: string; dias: number; montoDiario: number; porcentaje: number }[];
-    pasajes?: { tramo: string; cantidad: number; valorUnitario: number }[];
+    viaticos?: { zona: string; dias: number; montoDiario: number; porcentaje: number; moneda?: string | null }[];
+    pasajes?: { tramo: string; cantidad: number; valorUnitario: number; moneda?: string | null }[];
     otros?: { descripcion: string; monto: number; moneda: string }[];
+    /** Tipo de cambio del formulario: los viáticos y pasajes en US$ se sugieren en pesos con él (sin dólar, no se sugieren). */
+    dolar?: number | null;
     insumos?: { consumibleId?: string | null; descripcion: string; unidad?: string | null; cantidad: number; costoUnitario: number }[];
   } | null,
   yaCargadas: LineaCostoReal[],
@@ -109,10 +111,15 @@ export function lineasSugeridas(
     out.push({ categoria: "ot_interna", ordenInternaId: o.id, descripcion: `Orden interna ${o.numero ?? ""}${o.destino ? ` · ${o.destino}` : ""}`.trim(), cantidad: 1, costoUnitario: r2(Number(o.costoDirecto)) });
   }
   if (!yaCargadas.some((l) => l.categoria === "comision") && costeo) {
+    // Cuarto envío del IDIC: viáticos y pasajes al extranjero en US$ → pesos con el dólar del formulario.
+    const dolar = Number(costeo.dolar) > 0 ? Number(costeo.dolar) : 0;
+    const factor = (moneda?: string | null) => (moneda === "USD" ? dolar : 1);
     for (const v of costeo.viaticos ?? [])
-      out.push({ categoria: "comision", tipoGasto: "viatico", descripcion: `Viático ${v.zona}`, cantidad: Number(v.dias) || 0, unidad: "días", costoUnitario: r2((Number(v.montoDiario) || 0) * ((Number(v.porcentaje) || 0) / 100)) });
+      if (factor(v.moneda))
+        out.push({ categoria: "comision", tipoGasto: "viatico", descripcion: `Viático ${v.zona}${v.moneda === "USD" ? " (US$ al dólar del costeo)" : ""}`, cantidad: Number(v.dias) || 0, unidad: "días", costoUnitario: r2((Number(v.montoDiario) || 0) * ((Number(v.porcentaje) || 0) / 100) * factor(v.moneda)) });
     for (const p of costeo.pasajes ?? [])
-      out.push({ categoria: "comision", tipoGasto: "pasaje", descripcion: `Pasaje ${p.tramo}`, cantidad: Number(p.cantidad) || 0, costoUnitario: r2(Number(p.valorUnitario) || 0) });
+      if (factor(p.moneda))
+        out.push({ categoria: "comision", tipoGasto: "pasaje", descripcion: `Pasaje ${p.tramo}${p.moneda === "USD" ? " (US$ al dólar del costeo)" : ""}`, cantidad: Number(p.cantidad) || 0, costoUnitario: r2((Number(p.valorUnitario) || 0) * factor(p.moneda)) });
     for (const o of costeo.otros ?? [])
       if (o.moneda !== "USD") out.push({ categoria: "comision", tipoGasto: "otro", descripcion: o.descripcion, cantidad: 1, costoUnitario: r2(Number(o.monto) || 0) });
   }

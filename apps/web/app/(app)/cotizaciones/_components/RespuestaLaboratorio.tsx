@@ -57,7 +57,7 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
   {
     k: "viaticos",
     titulo: "1 · Viáticos",
-    ayuda: "Viático = monto diario × % del grado × días. Elija el tramo de grado de la escala vigente (Tablas maestras › Viáticos) y el monto diario se completa solo; ponga el % (100, 60, 40 o 20).",
+    ayuda: "Viático = monto diario × % del grado × días. Elija el tramo de grado de la escala vigente (Tablas maestras › Viáticos) y el monto diario se completa solo; ponga el % (100, 60, 40 o 20). Los viáticos al extranjero pueden ir en US$: se convierten con el tipo de cambio del formulario.",
     cols: [
       { k: "ambito", l: "Ámbito", tipo: "opcion", ops: [["nacional", "Nacional"], ["extranjero", "Extranjero"]], ancho: 110 },
       { k: "zona", l: "País o zona", tipo: "texto" },
@@ -65,8 +65,9 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
       { k: "dias", l: "Días", tipo: "numero", ancho: 70 },
       { k: "montoDiario", l: "Monto diario", tipo: "numero", ancho: 110 },
       { k: "porcentaje", l: "% del grado", tipo: "numero", ancho: 90 },
+      { k: "moneda", l: "Moneda", tipo: "opcion", ops: [["CLP", "$"], ["USD", "US$"]], ancho: 80 },
     ],
-    nueva: { ambito: "nacional", zona: "", grado: "", dias: "", montoDiario: "", porcentaje: "" },
+    nueva: { ambito: "nacional", zona: "", grado: "", dias: "", montoDiario: "", porcentaje: "", moneda: "CLP" },
   },
   {
     k: "horasHombre",
@@ -106,13 +107,15 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
   {
     k: "pasajes",
     titulo: "5 · Pasajes",
+    ayuda: "Los pasajes al extranjero pueden ir en US$: se convierten con el tipo de cambio del formulario.",
     cols: [
       { k: "ambito", l: "Ámbito", tipo: "opcion", ops: [["nacional", "Nacional"], ["extranjero", "Extranjero"]], ancho: 110 },
       { k: "tramo", l: "Tramo", tipo: "texto" },
       { k: "cantidad", l: "Cantidad", tipo: "numero", ancho: 80 },
       { k: "valorUnitario", l: "Valor unitario", tipo: "numero", ancho: 110 },
+      { k: "moneda", l: "Moneda", tipo: "opcion", ops: [["CLP", "$"], ["USD", "US$"]], ancho: 80 },
     ],
-    nueva: { ambito: "nacional", tramo: "", cantidad: "1", valorUnitario: "" },
+    nueva: { ambito: "nacional", tramo: "", cantidad: "1", valorUnitario: "", moneda: "CLP" },
   },
   {
     k: "otros",
@@ -166,12 +169,22 @@ function aApi(sec: (typeof SECCIONES)[number], filas: Fila[]) {
  */
 function completar(sec: (typeof SECCIONES)[number], f: Fila, k: string, v: string, refs: Referencias | null): Fila {
   const nueva = { ...f, [k]: v };
+  // Cuarto envío IDIC: solo los viáticos y pasajes al extranjero van en US$.
+  if (k === "ambito" && v === "nacional" && "moneda" in f) nueva.moneda = "CLP";
   const col = sec.cols.find((c) => c.k === k);
   if (col?.sugerencias) {
     const t = sugerenciasDe(col, refs).find((x) => iguales(x.texto, v));
     const campo = campoValor(col);
     const automatico = !String(f[campo] ?? "").trim() || f[campo] === f._valorTarifa;
-    if (t && automatico) return { ...nueva, [campo]: String(t.valor), _valorTarifa: String(t.valor), ...(col.sugerencias === "viatico" && !String(f.porcentaje ?? "").trim() ? { porcentaje: "100" } : {}) };
+    if (t && automatico)
+      return {
+        ...nueva,
+        [campo]: String(t.valor),
+        _valorTarifa: String(t.valor),
+        ...(col.sugerencias === "viatico" && !String(f.porcentaje ?? "").trim() ? { porcentaje: "100" } : {}),
+        // Escala en US$ (viático al extranjero): la fila pasa a US$ y a ámbito extranjero.
+        ...(col.sugerencias === "viatico" && t.detalle === "USD" ? { moneda: "USD", ambito: "extranjero" } : {}),
+      };
   }
   if (col?.tipo === "insumo") {
     const x = refs?.insumos.find((i) => i.id === v);
@@ -356,6 +369,63 @@ function EnsayosDelLaboratorio({ solId, muestras = [] }: { solId: string; muestr
   );
 }
 
+/** Una línea de «Montos finales» del FORM05. `nota` = llamada al pie (1 a 4) del formulario real. */
+export type FilaMonto = { l: string; v: number; nota?: number; fuerte?: boolean; aplicado?: boolean };
+
+/** US$ con 3 decimales, como el formulario real. */
+export const usd3 = (v: number) => `US$ ${v.toLocaleString("es-CL", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}`;
+
+/** Notas al pie de los montos finales, como el formulario real del IDIC. */
+export const NOTAS_MONTOS: Record<number, string> = {
+  1: "Incluye el costo de la H.H. militar.",
+  2: "Corresponde a la suma del CDT y el CFA.",
+  3: "No considera el costo de la H.H. militar, pero sí incluye el CFA asociado a ésta.",
+  4: "No considera el CFA asociado (ni la H.H. militar, según la política de precios).",
+};
+
+/**
+ * Montos finales del Formulario de costeo en dos columnas, $ y US$ (US$ = $ /
+ * dólar), con las notas al pie del formulario real. El precio Ejército que se
+ * aplica a la cotización (parámetro «precio_ejercito») va marcado «aplicado».
+ */
+export function MontosFinales({ filas, dolar, dolarFecha }: { filas: FilaMonto[]; dolar: number; dolarFecha?: string | null }) {
+  const notas = [...new Set(filas.map((f) => f.nota).filter((x): x is number => !!x))];
+  return (
+    <>
+      <table className="data">
+        <thead>
+          <tr>
+            <th>Montos finales</th>
+            <th className="num">Costos en $</th>
+            {dolar > 0 && <th className="num">Costos en US$</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {filas.map((f) => (
+            <tr key={f.l}>
+              <td>
+                {f.fuerte ? <b>{f.l}</b> : f.l}
+                {f.nota ? <sup>{f.nota}</sup> : null}
+                {f.aplicado ? <> <span className="pill green" title="Precio que se aplica a la cotización (Administración › Parámetros · precio_ejercito)">aplicado</span></> : null}
+              </td>
+              <td className="num">{f.fuerte ? <b>{money(f.v)}</b> : money(f.v)}</td>
+              {dolar > 0 && <td className="num">{usd3(Math.round((f.v / dolar) * 1000) / 1000)}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>
+        {dolar > 0 ? <>Tipo de cambio: $ {dolar.toLocaleString("es-CL", { maximumFractionDigits: 3 })}{dolarFecha ? ` del ${dolarFecha.split("-").reverse().join("-")}` : " (sin fecha)"}. </> : null}
+        {notas.map((k) => (
+          <span key={k} style={{ display: "block" }}>
+            <sup>{k}</sup> {NOTAS_MONTOS[k]}
+          </span>
+        ))}
+      </p>
+    </>
+  );
+}
+
 export default function RespuestaLaboratorio({
   sol,
   cotCodigo,
@@ -388,10 +458,18 @@ export default function RespuestaLaboratorio({
   );
   const [secciones, setSecciones] = useState<Record<string, Fila[]>>(() => {
     const c = previo?.costeo ?? {};
-    return Object.fromEntries(SECCIONES.map((s) => [s.k, (c[s.k] ?? []).map((f: any) => Object.fromEntries(Object.entries(f).map(([k, v]) => [k, String(v ?? "")])))]));
+    return Object.fromEntries(
+      SECCIONES.map((s) => [
+        s.k,
+        // Sin moneda = CLP (costeos guardados antes del cuarto envío).
+        (c[s.k] ?? []).map((f: any) => ({ ...(s.nueva.moneda ? { moneda: "CLP" } : {}), ...Object.fromEntries(Object.entries(f).filter(([, v]) => v != null).map(([k, v]) => [k, String(v)])) })),
+      ]),
+    );
   });
   const [condiciones, setCondiciones] = useState<string>(previo?.costeo?.condiciones ?? "");
   const [dolar, setDolar] = useState<string>(previo?.costeo?.dolar ? String(previo.costeo.dolar) : "");
+  // Cuarto envío IDIC: el tipo de cambio lleva su fecha («del dd-mm-aaaa»).
+  const [dolarFecha, setDolarFecha] = useState<string>(previo?.costeo?.dolarFecha ?? "");
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
   const rechaza = respuesta === "rechazar";
@@ -408,16 +486,34 @@ export default function RespuestaLaboratorio({
     const d = n(dolar);
     const s = secciones;
     const sum = (k: string, f: (x: Fila) => number) => Math.round((s[k] ?? []).reduce((a, x) => a + f(x), 0));
+    const pesos = (monto: number, moneda?: string) => (moneda === "USD" ? monto * d : monto);
+    const viatico = (x: Fila) => pesos(n(x.montoDiario) * (n(x.porcentaje) / 100) * n(x.dias), x.moneda);
+    const pasaje = (x: Fila) => pesos(n(x.cantidad) * n(x.valorUnitario), x.moneda);
     const sec = {
-      viaticos: sum("viaticos", (x) => n(x.montoDiario) * (n(x.porcentaje) / 100) * n(x.dias)),
+      viaticos: sum("viaticos", viatico),
       horasHombre: sum("horasHombre", (x) => n(x.horas) * n(x.valorHora)),
       servicios: sum("servicios", (x) => n(x.cantidad) * n(x.valorUnitario)),
       horasMaquina: sum("horasMaquina", (x) => n(x.horas) * n(x.valorHora)),
-      pasajes: sum("pasajes", (x) => n(x.cantidad) * n(x.valorUnitario)),
-      otros: sum("otros", (x) => (x.moneda === "USD" ? n(x.monto) * d : n(x.monto))),
+      pasajes: sum("pasajes", pasaje),
+      otros: sum("otros", (x) => pesos(n(x.monto), x.moneda)),
       insumos: sum("insumos", (x) => n(x.cantidad) * n(x.costoUnitario)),
     };
     const cdt = Object.values(sec).reduce((a, b) => a + b, 0);
+    // Montos finales por concepto, como el formulario real (form05.ts · detalle).
+    const de = (k: string, ambito: string, f: (x: Fila) => number) => sum(k, (x) => (x.ambito === ambito ? f(x) : 0));
+    const detalle: [string, number][] = [
+      ["Viáticos nacionales", de("viaticos", "nacional", viatico)],
+      ["Viáticos al extranjero", de("viaticos", "extranjero", viatico)],
+      ["Horas hombre civil", sum("horasHombre", (x) => (x.tipo === "militar" ? 0 : n(x.horas) * n(x.valorHora)))],
+      ["Horas hombre militar", sum("horasHombre", (x) => (x.tipo === "militar" ? n(x.horas) * n(x.valorHora) : 0))],
+      ["Servicios estándar", sec.servicios],
+      ["Horas máquina", sec.horasMaquina],
+      ["Pasajes nacionales", de("pasajes", "nacional", pasaje)],
+      ["Pasajes al extranjero", de("pasajes", "extranjero", pasaje)],
+      ["Otros gastos en pesos", sum("otros", (x) => (x.moneda === "USD" ? 0 : n(x.monto)))],
+      ["Otros gastos en dólar", sum("otros", (x) => (x.moneda === "USD" ? n(x.monto) * d : 0))],
+      ["Insumos y reactivos", sec.insumos],
+    ];
     // Estructura oficial (estructura-precio.ts): se calcula sin redondear la cadena y se redondea al mostrar.
     const r = (x: number) => Math.round(Math.round(x * 1e6) / 1e6);
     const ci = cdt * (cfg.cfaPct / 100);
@@ -427,9 +523,27 @@ export default function RespuestaLaboratorio({
     const iva = neto * ((cfg.ivaPct ?? 19) / 100);
     // Política de precios (DCO-PG01-P05-IT05): con «costo_directo», el Ejército paga el CDT sin las horas hombre militares.
     const hhMilitar = sum("horasHombre", (x) => (x.tipo === "militar" ? n(x.horas) * n(x.valorHora) : 0));
-    const ejercito = cfg.precioEjercito === "costo_directo" ? cdt - hhMilitar : ct;
-    return { cdt, insumos: sec.insumos, cfa: r(ci), ct: r(ct), ejercito: r(ejercito), recargo: r(recargo), particular: r(neto), iva: r(iva), conIva: r(neto + iva) };
+    const ejercitoCd = cdt - hhMilitar;
+    const ejercitoCt = r(ct) - hhMilitar;
+    const aplicado = cfg.precioEjercito === "costo_directo" ? "costo_directo" : "costo_total";
+    const ejercito = aplicado === "costo_directo" ? ejercitoCd : ct;
+    return {
+      detalle,
+      cdt,
+      cfa: r(ci),
+      ct: r(ct),
+      ejercito: r(ejercito),
+      ejercitoCt: r(ejercitoCt),
+      ejercitoCd: r(ejercitoCd),
+      aplicado,
+      recargo: r(recargo),
+      particular: r(neto),
+      iva: r(iva),
+      conIva: r(neto + iva),
+      dolar: d > 0 ? d : 0,
+    };
   }, [secciones, dolar, cfg]);
+  const hayUsd = ["viaticos", "pasajes", "otros"].some((k) => (secciones[k] ?? []).some((x) => x.moneda === "USD"));
 
   const conCosteo = noEstandar || SECCIONES.some((s) => aApi(s, secciones[s.k] ?? []).length > 0);
 
@@ -439,6 +553,8 @@ export default function RespuestaLaboratorio({
       if (!comentario.trim()) return setError(rechaza ? "Indique por qué el laboratorio no realiza el servicio." : "Escriba el comentario para Comercial.");
     }
     if (!rechaza && !numerica(plazo)) return setError("Indique el plazo de entrega propuesto (días corridos).");
+    if (!rechaza && conCosteo && hayUsd && !(n(dolar) > 0)) return setError("Hay montos en US$: indique el tipo de cambio del dólar.");
+    if (!rechaza && conCosteo && hayUsd && !dolarFecha) return setError("Indique la fecha del tipo de cambio del dólar.");
     setEnviando(true);
     try {
       const costeo = conCosteo && !rechaza
@@ -446,6 +562,7 @@ export default function RespuestaLaboratorio({
             ...Object.fromEntries(SECCIONES.map((s) => [s.k, aApi(s, secciones[s.k] ?? [])])),
             condiciones: condiciones.trim() || null,
             dolar: n(dolar) > 0 ? n(dolar) : null,
+            dolarFecha: n(dolar) > 0 && dolarFecha ? dolarFecha : null,
           }
         : null;
       const r = await pedir<any>("POST", `/cotizaciones/solicitudes-laboratorio/${sol.id}/responder`, {
@@ -551,7 +668,7 @@ export default function RespuestaLaboratorio({
           <button type="button" className="btn outline sm" onClick={() => setEtapas([...etapas, { actividad: "", inicio: "", termino: "", recursos: "" }])}>＋ Agregar etapa</button>
 
           <h3 style={{ fontSize: 14, margin: "16px 0 6px" }}>
-            Formulario de costeo <span className="tag">FORM05</span> <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>montos en CLP (los otros gastos en US$ se convierten con el dólar indicado)</span>{" "}
+            Formulario de costeo <span className="tag">FORM05</span> <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>montos en CLP; los viáticos y pasajes al extranjero y los otros gastos pueden ir en US$ (se convierten con el tipo de cambio)</span>{" "}
             {noEstandar ? <span className="req" style={{ fontSize: 12 }}>obligatorio · {esComision ? "costeo de la comisión" : "servicio no estandarizado"}</span> : <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 400 }}>opcional · servicio estandarizado</span>}
           </h3>
           {SECCIONES.map((s) => (
@@ -562,24 +679,37 @@ export default function RespuestaLaboratorio({
               <label htmlFor="r-cond">8 · Condiciones técnicas y restricciones</label>
               <textarea id="r-cond" rows={2} maxLength={4000} value={condiciones} onChange={(e) => setCondiciones(e.target.value)} />
             </div>
-            {(secciones.otros ?? []).some((o) => o.moneda === "USD") && (
-              <div className="field">
-                <label htmlFor="r-dolar">Valor del dólar (para otros gastos en US$) <span className="req">*</span></label>
-                <input id="r-dolar" inputMode="decimal" value={dolar} onChange={(e) => setDolar(e.target.value)} maxLength={10} />
-              </div>
-            )}
+            <div className="field">
+              <label htmlFor="r-dolar">Tipo de cambio: valor del dólar ($) {hayUsd && <span className="req">*</span>}</label>
+              <input id="r-dolar" inputMode="decimal" value={dolar} onChange={(e) => setDolar(e.target.value)} maxLength={10} placeholder="p. ej. 950,25" />
+            </div>
+            <div className="field">
+              <label htmlFor="r-dolar-fecha">Fecha del tipo de cambio {hayUsd && <span className="req">*</span>}</label>
+              <input id="r-dolar-fecha" type="date" value={dolarFecha} onChange={(e) => setDolarFecha(e.target.value)} />
+            </div>
+            <p className="subtitle" style={{ gridColumn: "1 / -1", margin: 0, fontSize: 11.5 }}>
+              Obligatorio si hay montos en US$. Con el tipo de cambio, los montos finales se muestran también en US$ (US$ = $ / dólar). Para cambiar el valor, edítelo aquí.
+            </p>
           </div>
           {conCosteo && (
-            <div className="totals-box" style={{ maxWidth: 420, marginLeft: "auto" }} aria-live="polite">
-              {prev.insumos > 0 && <div className="row"><span>de ello, insumos y reactivos (sección 7)</span><b>{money(prev.insumos)}</b></div>}
-              <div className="row"><span>Costo directo total (CDT)</span><b>{money(prev.cdt)}</b></div>
-              <div className="row"><span>Costo indirecto (CI {String(cfg.cfaPct).replace(".", ",")} % del CDT)</span><b>{money(prev.cfa)}</b></div>
-              <div className="row"><span>Costo total (CT)</span><b>{money(prev.ct)}</b></div>
-              <div className="row"><span>Precio Ejército{cfg.precioEjercito === "costo_directo" ? " (costo directo sin HH militares)" : " (CT)"}</span><b>{money(prev.ejercito)}</b></div>
-              <div className="row"><span>Recargo ({String(cfg.margenParticularPct).replace(".", ",")} % del CT)</span><b>{money(prev.recargo)}</b></div>
-              <div className="row total"><span>Neto · precio particular sin IVA</span><span>{money(prev.particular)}</span></div>
-              <div className="row"><span>IVA ({String(cfg.ivaPct ?? 19).replace(".", ",")} %)</span><b>{money(prev.iva)}</b></div>
-              <div className="row"><span>Precio particular IVA incluido</span><b>{money(prev.conIva)}</b></div>
+            <div style={{ maxWidth: 620, marginLeft: "auto" }} aria-live="polite">
+              <MontosFinales
+                filas={[
+                  ...prev.detalle.filter(([, v]) => v).map(([l, v]) => ({ l, v })),
+                  { l: "Costo directo total (CDT)", v: prev.cdt, nota: 1, fuerte: true },
+                  { l: `Costo indirecto · CFA (${String(cfg.cfaPct).replace(".", ",")} % del CDT)`, v: prev.cfa },
+                  { l: "Costo total (CT)", v: prev.ct, nota: 2, fuerte: true },
+                  { l: "Precio Ejército (CT sin H.H. militar, con su CFA)", v: prev.ejercitoCt, nota: 3, aplicado: prev.aplicado === "costo_total" && prev.ejercito === prev.ejercitoCt },
+                  { l: "Precio Ejército (costo directo, sin CFA)", v: prev.ejercitoCd, nota: 4, aplicado: prev.aplicado === "costo_directo" },
+                  ...(prev.aplicado === "costo_total" && prev.ejercito !== prev.ejercitoCt ? [{ l: "Precio Ejército aplicado: costo total (CT)", v: prev.ejercito, aplicado: true }] : []),
+                  { l: `Recargo (${String(cfg.margenParticularPct).replace(".", ",")} % del CT)`, v: prev.recargo },
+                  { l: "Neto · precio particular sin IVA", v: prev.particular, fuerte: true },
+                  { l: `IVA (${String(cfg.ivaPct ?? 19).replace(".", ",")} %)`, v: prev.iva },
+                  { l: "Precio particular IVA incluido", v: prev.conIva },
+                ]}
+                dolar={prev.dolar}
+                dolarFecha={dolarFecha}
+              />
               <p style={{ fontSize: 11, color: "var(--muted)", margin: "4px 0 0" }}>Vista previa: el sistema recalcula al enviar. Fórmula de la lista de precios oficial 2026; porcentajes en Administración › Parámetros.</p>
             </div>
           )}

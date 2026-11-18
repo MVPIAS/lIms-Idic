@@ -10,6 +10,12 @@
  *    que con el motor de plantillas da EXACTAMENTE el mismo HTML que el formato
  *    fijo `cuerpoCotizacionHtml` (probado en plantilla-cotizacion.spec.ts): el
  *    PDF no cambia mientras no se apruebe otra versión.
+ *  · La versión 2 (packages/db/align_cuarto_envio_cotizacion.sql, cuarto envío
+ *    del IDIC, 18-11-2026) es CUERPO_COTIZACION_FORM04_V2: la 1 más los textos
+ *    estándar de la cotización particular (notas, Ley 21.420 si lleva IVA, Nº
+ *    de la cotización en la OC, confidencialidad, horario y reclamos). Es la
+ *    que da el formato fijo `cuerpoCotizacionHtml` desde entonces. El SQL solo
+ *    la aplica si la plantilla guardada sigue siendo la versión 1 sin editar.
  *  · Si la versión vigente falla (marca mal escrita, variable inexistente,
  *    condicional anidado que el motor no resuelve, error al rendir), se usa la
  *    vigente anterior (la RETIRADA más reciente) y, en último caso, el formato
@@ -22,7 +28,24 @@
  */
 import { Logger } from "@nestjs/common";
 import { renderizar } from "../plantilla-render/template.engine";
-import { clp, cuerpoCotizacionHtml, descripcionLineaDoc, esc, etiquetaFormaPago, fechaCorta, fechaHoraCl, fechaUtc, notaValores, usdFmt, type FirmasCotizacion } from "./cotizacion-documento";
+import {
+  CLAUSULA_CONFIDENCIALIDAD,
+  NOTAS_COTIZACION,
+  NOTA_LEY_21420,
+  clp,
+  cotizacionConIva,
+  cuerpoCotizacionHtml,
+  descripcionLineaDoc,
+  esc,
+  etiquetaFormaPago,
+  fechaCorta,
+  fechaHoraCl,
+  fechaUtc,
+  notaValores,
+  usdFmt,
+  type FirmasCotizacion,
+  type TextosDocumentoCotizacion,
+} from "./cotizacion-documento";
 
 const logger = new Logger("PlantillaCotizacion");
 
@@ -80,6 +103,31 @@ export const CUERPO_COTIZACION_FORM04 = `
 
 <p class="nota">Documento generado por el sistema LIMS IDIC. Los valores están expresados en {{cotizacion.moneda_texto}}.</p>`;
 
+/**
+ * Versión 2 (cuarto envío del IDIC, 18-11-2026): la 1 con el bloque de textos
+ * estándar antes de la nota final y el pie con el horario de atención y el
+ * teléfono de reclamos. Debe coincidir con la que aplica
+ * align_cuarto_envio_cotizacion.sql y, rendida, con `cuerpoCotizacionHtml`.
+ */
+const NOTA_FINAL_V1 = `<p class="nota">Documento generado por el sistema LIMS IDIC. Los valores están expresados en {{cotizacion.moneda_texto}}.</p>`;
+export const CUERPO_COTIZACION_FORM04_V2 = CUERPO_COTIZACION_FORM04.replace(
+  NOTA_FINAL_V1,
+  `<h2>Notas</h2>
+<ul>
+${NOTAS_COTIZACION.map((n) => `  <li>${n}</li>`).join("\n")}
+  {{#si cotizacion.con_iva}}<li>${NOTA_LEY_21420}</li>{{/si}}
+</ul>
+
+<p><b>IMPORTANTE: SEÑALAR EN LA ORDEN DE COMPRA EL Nº DE ESTA COTIZACIÓN ({{cotizacion.codigo}}).</b></p>
+
+<h2>Confidencialidad</h2>
+<p>${CLAUSULA_CONFIDENCIALIDAD}</p>
+
+${NOTA_FINAL_V1}
+{{#si idic.horario_atencion}}<p class="nota">Horario de atención a clientes: {{idic.horario_atencion}}</p>{{/si}}
+{{#si idic.telefono_reclamos}}<p class="nota">Reclamos y sugerencias: {{idic.telefono_reclamos}}</p>{{/si}}`,
+);
+
 /* --------------------------------------------------------------- variables --- */
 
 export interface VariableCotizacion {
@@ -113,6 +161,9 @@ export const VARIABLES_COTIZACION: VariableCotizacion[] = [
   { clave: "cotizacion.estado", descripcion: "Estado de la cotización" },
   { clave: "cotizacion.ejecutivo", descripcion: "Ejecutivo de ventas que la elabora" },
   { clave: "cotizacion.numero_lineas", descripcion: "Cantidad de líneas del detalle" },
+  { clave: "cotizacion.con_iva", descripcion: "Verdadero si la cotización lleva IVA (para {{#si}}: nota de la Ley 21.420)" },
+  { clave: "idic.horario_atencion", descripcion: "Horario de atención a clientes (Administración › Parámetros · Documento de la cotización; vacío = no se imprime)" },
+  { clave: "idic.telefono_reclamos", descripcion: "Teléfono de reclamos y sugerencias (Administración › Parámetros · Documento de la cotización; vacío = no se imprime)" },
   { clave: "cliente.razon_social", descripcion: "Razón social del cliente («—» si falta)" },
   { clave: "cliente.rut", descripcion: "RUT del cliente («—» si falta)" },
   { clave: "cliente.nombre_fantasia", descripcion: "Nombre de fantasía" },
@@ -181,6 +232,7 @@ export function contextoCotizacion(cot: any, firmas?: FirmasCotizacion | null) {
   const filasDetalle = filas || '<tr><td class="vacio" colspan="5">Sin líneas de detalle.</td></tr>';
   const cli = cot.cliente ?? {};
   const firmada = firmas?.firma ?? null;
+  const textos: TextosDocumentoCotizacion = cot.textosDocumento ?? {};
   const datos = {
     cotizacion: {
       codigo: txt(cot.codigo),
@@ -203,6 +255,11 @@ export function contextoCotizacion(cot: any, firmas?: FirmasCotizacion | null) {
       estado: txt(cot.estado),
       ejecutivo: txt(firmas?.elabora?.nombre ?? cot.ejecutivo?.nombreCompleto),
       numero_lineas: String(lineas.length),
+      con_iva: cotizacionConIva(cot),
+    },
+    idic: {
+      horario_atencion: String(textos.horarioAtencion ?? "").trim(),
+      telefono_reclamos: String(textos.telefonoReclamos ?? "").trim(),
     },
     cliente: {
       razon_social: txt(cli.razonSocial ?? cli.razon_social ?? "—"),
@@ -365,9 +422,38 @@ export async function versionesCotizacion(db: any, tenantId: string | null | und
  * una versión. Lo usan el circuito (vista previa, PDF, envío) y Mensajería.
  */
 export async function cuerpoCotizacionVigente(db: any, tenantId: string | null | undefined, cot: any, firmas: FirmasCotizacion | null | undefined): Promise<string> {
+  cot = { ...cot, textosDocumento: await leerTextosDocumentoCotizacion(db, tenantId) };
   const r = elegirCuerpoCotizacion(cot, firmas, await versionesCotizacion(db, tenantId));
   for (const a of r.avisos) logger.warn(`Cotización ${cot?.codigo ?? ""}: ${a}`);
   return r.cuerpo;
+}
+
+/** Categoría de Administración › Parámetros con los textos del pie de la cotización. */
+export const CATEGORIA_DOCUMENTO_COTIZACION = "cotizacion_documento";
+
+/**
+ * Horario de atención y teléfono de reclamos del pie de la cotización
+ * (parámetros `cotizacion_documento.horario_atencion` y `.telefono_reclamos`).
+ * Sin fila, vacía o inactiva → texto vacío (no se imprime la línea).
+ */
+export async function leerTextosDocumentoCotizacion(db: any, tenantId: string | null | undefined): Promise<TextosDocumentoCotizacion> {
+  if (!tenantId) return {};
+  try {
+    const filas: { codigo: string; valor: string | null }[] = await db.$queryRawUnsafe(
+      `SELECT codigo, valor FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = $2 AND activo`,
+      tenantId,
+      CATEGORIA_DOCUMENTO_COTIZACION,
+    );
+    return textosDocumentoDesdeFilas(filas);
+  } catch {
+    return {};
+  }
+}
+
+/** Filas de `parametro_sistema` → textos del pie (recortados). */
+export function textosDocumentoDesdeFilas(filas: { codigo: string; valor: string | null }[]): TextosDocumentoCotizacion {
+  const v = Object.fromEntries((filas ?? []).map((f) => [f.codigo, String(f.valor ?? "").trim()]));
+  return { horarioAtencion: v.horario_atencion ?? "", telefonoReclamos: v.telefono_reclamos ?? "" };
 }
 
 /** Cotización de ejemplo para comprobar una plantilla antes de aprobarla (datos PRUEBA). */
@@ -393,4 +479,5 @@ export const COTIZACION_EJEMPLO = {
   total: 119,
   cliente: { razonSocial: "Cliente PRUEBA", rut: "11.111.111-1" },
   lineas: [{ descripcion: "Ensayo PRUEBA", cantidad: 1, precioUnitario: 100, subtotal: 100 }],
+  textosDocumento: { horarioAtencion: "Horario PRUEBA: lunes a viernes de 09:00 a 13:00", telefonoReclamos: "Teléfono PRUEBA (00) 0000 0000" },
 };

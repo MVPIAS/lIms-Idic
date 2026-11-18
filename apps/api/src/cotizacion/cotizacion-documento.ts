@@ -35,6 +35,61 @@ export function notaValores(cot: any): string {
   return partes.join(". ");
 }
 
+/**
+ * Cuarto envío del IDIC (18-11-2026) · textos estándar de la cotización
+ * particular del sistema comercial: notas, Ley 21.420 (solo si la cotización
+ * lleva IVA), el Nº de la cotización en la orden de compra, la cláusula de
+ * confidencialidad y el pie con el horario de atención y el teléfono de
+ * reclamos (parámetros `cotizacion_documento.*` de Administración; vacíos =
+ * no se imprime la línea). El formato fijo y la plantilla (versión 2 de
+ * DCO-FORM04) deben dar el mismo HTML (plantilla-cotizacion.spec.ts).
+ */
+export const NOTAS_COTIZACION = [
+  "Los tiempos de ensayo y disponibilidad para efectuar el trabajo solicitado son estimados.",
+  "El plazo definitivo para la entrega de los informes se establecerá una vez que se reciba la orden de compra.",
+  "Las muestras podrán ser recepcionadas solo cuando sea emitida la Orden de Trabajo por el Departamento Comercial del IDIC, previa coordinación con el laboratorio para el inicio de los ensayos.",
+  "Una vez finalizado el ensayo, las muestras deben ser retiradas antes de 1 mes; de lo contrario, serán eliminadas.",
+  "La identificación de las muestras debe ser entregada por el cliente por correo electrónico.",
+] as const;
+export const NOTA_LEY_21420 = "El total a pagar por el servicio incluye IVA, en atención a la entrada en vigencia desde el 01 de enero de 2023 de la Ley 21.420.";
+export const CLAUSULA_CONFIDENCIALIDAD =
+  "El Instituto de Investigaciones y Control (IDIC) mantiene la confidencialidad de toda la información que obtiene y genera durante la realización de sus actividades. Esa información no está disponible para el público. Si la ley obliga al IDIC a revelar información confidencial, se notificará al cliente la información entregada, salvo que la ley lo prohíba.";
+
+/** Horario de atención y teléfono de reclamos del pie (Administración › Parámetros · Documento de la cotización). */
+export interface TextosDocumentoCotizacion {
+  horarioAtencion?: string | null;
+  telefonoReclamos?: string | null;
+}
+
+/** ¿La cotización lleva IVA? (no en las exentas ni en las del Ejército sin IVA). Decide la nota de la Ley 21.420. */
+export function cotizacionConIva(cot: any): boolean {
+  if (cot?.ivaPct != null && cot.ivaPct !== "") return Number(cot.ivaPct) > 0;
+  return Number(cot?.ivaMonto ?? 0) > 0;
+}
+
+/** Bloque de notas, Nº en la OC, confidencialidad (formato fijo; mismo HTML que la plantilla versión 2). */
+export function notasCotizacionHtml(cot: any): string {
+  return `<h2>Notas</h2>
+<ul>
+${NOTAS_COTIZACION.map((n) => `  <li>${n}</li>`).join("\n")}
+  ${cotizacionConIva(cot) ? `<li>${NOTA_LEY_21420}</li>` : ""}
+</ul>
+
+<p><b>IMPORTANTE: SEÑALAR EN LA ORDEN DE COMPRA EL Nº DE ESTA COTIZACIÓN (${esc(cot?.codigo ?? "")}).</b></p>
+
+<h2>Confidencialidad</h2>
+<p>${CLAUSULA_CONFIDENCIALIDAD}</p>`;
+}
+
+/** Pie del documento: horario de atención y teléfono de reclamos (líneas vacías si no hay dato). */
+export function pieCotizacionHtml(cot: any): string {
+  const textos: TextosDocumentoCotizacion = cot?.textosDocumento ?? {};
+  const horario = String(textos.horarioAtencion ?? "").trim();
+  const reclamos = String(textos.telefonoReclamos ?? "").trim();
+  return `${horario ? `<p class="nota">Horario de atención a clientes: ${esc(horario)}</p>` : ""}
+${reclamos ? `<p class="nota">Reclamos y sugerencias: ${esc(reclamos)}</p>` : ""}`;
+}
+
 /** Descripción de la línea en el documento: con su muestra («Muestra 2 · … — EN… »), si la tiene. */
 export function descripcionLineaDoc(l: any, cot: any): string {
   const d = String(l.descripcion ?? l.categoria ?? l.tipo ?? "—");
@@ -151,7 +206,10 @@ ${cot.descripcionTecnica ? `<h2>Descripción técnica y alcance</h2>${parrafos(c
 
 ${cot.condicionesAdicionales ? `<h2>Condiciones adicionales</h2>${parrafos(cot.condicionesAdicionales)}` : ""}
 
-<p class="nota">Documento generado por el sistema LIMS IDIC. Los valores están expresados en ${esc(notaValores(cot))}.</p>`;
+${notasCotizacionHtml(cot)}
+
+<p class="nota">Documento generado por el sistema LIMS IDIC. Los valores están expresados en ${esc(notaValores(cot))}.</p>
+${pieCotizacionHtml(cot)}`;
 }
 
 /** US$ con 2 decimales (convención es-CL). */
