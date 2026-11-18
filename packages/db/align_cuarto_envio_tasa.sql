@@ -52,7 +52,9 @@ ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS agencia_iva_intern
 ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS otros_gastos_cliente      NUMERIC(18,2);
 ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS base_calculo              NUMERIC(18,2);
 ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS base_afecta               NUMERIC(18,2);
-ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS din_numero                VARCHAR(40);
+ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS din_numero                VARCHAR(60);
+-- Mismo largo que bpch_internacion.documento_aduanero (VARCHAR(60)), del que se toma por defecto.
+ALTER TABLE calculo_tasa_internacion ALTER COLUMN din_numero TYPE VARCHAR(60);
 ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS factura_agencia_numero    VARCHAR(40);
 ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS factura_agencia_emisor    VARCHAR(200);
 ALTER TABLE calculo_tasa_internacion ADD COLUMN IF NOT EXISTS factura_transporte_numero VARCHAR(40);

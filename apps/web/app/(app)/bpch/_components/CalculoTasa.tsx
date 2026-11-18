@@ -54,7 +54,8 @@ export default function CalculoTasa({ d, config, puede, accion }: { d: any; conf
     adValoremUsd: t0?.adValoremUsd ? montoAInput(t0.adValoremUsd) : "",
     fleteNacional: t0?.fleteNacional ? montoAInput(t0.fleteNacional) : "",
     agenciaTotalFactura: t0?.agenciaTotalFactura ? montoAInput(t0.agenciaTotalFactura) : "",
-    agenciaIvaInternacion: montoAInput(t0?.agenciaIvaInternacion || d.documentacion?.ivaInternacion || ""),
+    // No se propone el IVA de la documentación: solo se resta si viene en la factura de la agencia (auditoría 18-11).
+    agenciaIvaInternacion: montoAInput(t0?.agenciaIvaInternacion || ""),
     otrosGastosCliente: t0?.otrosGastosCliente ? montoAInput(t0.otrosGastosCliente) : "",
     dinNumero: t0?.dinNumero ?? d.documentoAduanero ?? "",
     fechaRecepcionSdbpch: dia(t0?.fechaRecepcionSdbpch ?? d.documentacion?.recibidaAt),

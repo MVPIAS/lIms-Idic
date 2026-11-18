@@ -134,6 +134,17 @@ const LotesBody = z.object({
     .max(50),
 });
 
+/**
+ * Reparto de un cálculo antiguo (sin reparto guardado) con los % vigentes: solo
+ * si suman 100 %. Mientras Administración los está cambiando (cada % se guarda
+ * por separado) se rechaza en vez de inventar un reparto descuadrado.
+ */
+function repartoConParametros(tasa: number, pcts: Parameters<typeof repartirTasa>[1]) {
+  const err = erroresReparto(pcts);
+  if (err.length) throw new ConflictException(`No se puede repartir la tasa por centro de costo: ${err.join(" ")} Corríjalo en Administración › Parámetros del sistema.`);
+  return repartirTasa(tasa, pcts);
+}
+
 /** Monto opcional en pesos o US$ (0 o más; vacío = 0) con el mensaje del concepto. */
 const montoOpcional = (concepto: string) =>
   montoCL(z.number({ invalid_type_error: `${concepto}: escriba un monto con punto de miles y coma decimal (p. ej. 1.250.000).` }).min(0, `${concepto} no puede ser negativo.`).max(1e13));
@@ -151,7 +162,7 @@ const TasaBody = z.object({
   agenciaIvaInternacion: montoOpcional("El IVA de internación de la factura de la agencia"),
   otrosGastosCliente: montoOpcional("Los otros gastos por cuenta del cliente"),
   // Datos del expediente para la Comunicación Breve.
-  dinNumero: opcional(40),
+  dinNumero: opcional(60),
   facturaAgenciaNumero: opcional(40),
   facturaAgenciaEmisor: opcional(200),
   facturaTransporteNumero: opcional(40),
@@ -939,7 +950,8 @@ export class InternacionBpchService {
       tasaPct: dto.tasaPct ?? prm.tasaPct ?? NaN,
       // Exenta de IVA: calcularTasa no lo aplica (IDIC, 10-11-2026).
       ivaPct: dto.ivaPct ?? prm.ivaPct ?? undefined,
-      adValoremUsd: dto.adValoremUsd ?? 0,
+      // Se guarda con 2 decimales (NUMERIC(16,2)): se calcula con el mismo valor para que la CB cuadre.
+      adValoremUsd: Math.round((dto.adValoremUsd ?? 0) * 100) / 100,
       fleteNacional: dto.fleteNacional ?? 0,
       agenciaTotalFactura: dto.agenciaTotalFactura ?? 0,
       agenciaIvaInternacion: dto.agenciaIvaInternacion ?? 0,
@@ -1046,7 +1058,7 @@ export class InternacionBpchService {
     const ivaPct = t.ivaPct;
     // La factura tiene UN centro de costo (no por línea): el reparto de la tasa (COM-03) se informa en la observación y en la CB.
     const unidad = { codigo: i.unidad_codigo, nombre: i.unidad_nombre };
-    const reparto = tasa.reparto ?? repartirTasa(tasa.tasa, (await this.comun.parametros(tenantId)).reparto);
+    const reparto = tasa.reparto ?? repartoConParametros(tasa.tasa, (await this.comun.parametros(tenantId)).reparto);
     const obs = `Tasa de internación remitida por BPCH (${i.numero}). Documento final: ${final!.numero ?? ""}. ${textoReparto(reparto, unidad)}`;
     const ot = await this.comun.ot(tenantId, i.ot_id);
     const facturaId = await this.prisma.$transaction(async (tx) => {
@@ -1144,7 +1156,7 @@ export class InternacionBpchService {
       cliente: cl ?? { razonSocial: i.empresa, rut: i.empresa_rut },
       unidad: { codigo: i.unidad_codigo, nombre: i.unidad_nombre },
       calculo: tasa,
-      reparto: tasa.reparto ?? repartirTasa(tasa.tasa, prm.reparto),
+      reparto: tasa.reparto ?? repartoConParametros(tasa.tasa, prm.reparto),
       certificados: certificados.map((c) => ({ numero: c.numero, condicion: c.tipo === "INFORME_INCUMPLIMIENTO" ? "NO CUMPLE" : "CUMPLE" })),
       textos: {
         referencia: t("referencia"),

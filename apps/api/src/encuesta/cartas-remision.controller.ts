@@ -59,7 +59,7 @@ export class CartasRemisionService {
     const unidades = await this.unidades(req);
     const crudas = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT e.id, e.tipo_codigo AS tipo, et.formulario, e.estado,
-              to_char(COALESCE(e.fecha_envio, e.created_at::date), 'YYYY-MM-DD') AS "fechaEnvio",
+              to_char(COALESCE(e.fecha_envio, (e.created_at AT TIME ZONE ${SQL_ZONA})::date), 'YYYY-MM-DD') AS "fechaEnvio",
               to_char(COALESCE(e.fecha_respuesta, (e.registrada_at AT TIME ZONE ${SQL_ZONA})::date), 'YYYY-MM-DD') AS "fechaRespuesta",
               COALESCE(o.codigo, c.codigo, e.referencia, e.codigo) AS referencia,
               COALESCE(cl.razon_social, e.cliente_texto) AS cliente,
@@ -72,7 +72,7 @@ export class CartasRemisionService {
         WHERE e.tenant_id = $1::uuid
           AND ($2::uuid[] IS NULL OR e.unidad_id = ANY($2::uuid[]))
           AND ($5::text IS NULL OR e.tipo_codigo = $5)
-          AND (   (COALESCE(e.fecha_envio, e.created_at::date) >= $3::date AND COALESCE(e.fecha_envio, e.created_at::date) < $4::date)
+          AND (   (COALESCE(e.fecha_envio, (e.created_at AT TIME ZONE ${SQL_ZONA})::date) >= $3::date AND COALESCE(e.fecha_envio, (e.created_at AT TIME ZONE ${SQL_ZONA})::date) < $4::date)
                OR (COALESCE(e.fecha_respuesta, (e.registrada_at AT TIME ZONE ${SQL_ZONA})::date) >= $3::date
                    AND COALESCE(e.fecha_respuesta, (e.registrada_at AT TIME ZONE ${SQL_ZONA})::date) < $4::date))`,
       tenantId,
