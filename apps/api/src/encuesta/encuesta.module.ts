@@ -26,9 +26,12 @@ import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
 import { paginacion } from "../ot/lista-ot";
 import { EncuestaInformeController, EncuestaInformeService, leerTiposEncuesta } from "./encuesta-informe.controller";
+import { CartasRemisionController, CartasRemisionService } from "./cartas-remision.controller";
 import {
   ETIQUETA_ESTADO,
+  MAX_RESPUESTA_TEXTO,
   MEDIOS,
+  TIPOS_RESPUESTA,
   erroresPregunta,
   motivoNoRegistrable,
   reportePorLaboratorio,
@@ -49,7 +52,16 @@ const fecha = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD");
 const codigoTipo = z.string().trim().toUpperCase().regex(/^[A-Z0-9_]{1,20}$/, "Formulario de encuesta no válido.");
 const RegistrarSchema = z.object({
   tipo: codigoTipo.optional(),
-  respuestas: z.array(z.object({ codigo: z.string().max(20), valor: z.number().int().nullable().optional() })).max(30),
+  respuestas: z
+    .array(
+      z.object({
+        codigo: z.string().max(20),
+        valor: z.number().int().nullable().optional(),
+        // Pregunta abierta (p. ej. FORM02: razón por la que no contrató).
+        respuesta: z.string().max(MAX_RESPUESTA_TEXTO + 100).nullable().optional(),
+      }),
+    )
+    .max(30),
   comentario: z.string().trim().max(4000).nullable().optional(),
   // EP-00 9.1 pide el CARGO de quien responde; el nombre es un dato personal y queda
   // opcional (recorrido MP-02, D02-14).
@@ -71,6 +83,7 @@ const PreguntasSchema = z.object({
         activo: z.boolean().default(true),
         tipoCodigo: codigoTipo.nullable().optional(),
         comentarioSiMenor: z.number().min(0).max(100).nullable().optional(),
+        tipoRespuesta: z.enum(TIPOS_RESPUESTA).default("nota"),
       }),
     )
     .min(1)
@@ -103,6 +116,7 @@ const TiposSchema = z.object({
         tiposCliente: z.string().trim().max(500).nullable().optional(),
         reglaCliente: z.enum(["EJERCITO", "PARTICULAR"]).nullable().optional(),
         porDefecto: z.boolean().default(false),
+        medioDefecto: z.enum(MEDIOS).nullable().optional(),
         distribucion: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
         orden: z.number().int().min(0).max(999).default(0),
         activo: z.boolean().default(true),
@@ -120,6 +134,7 @@ const SQL_BASE = `
   LEFT JOIN cotizacion c ON c.id = e.cotizacion_id
   LEFT JOIN usuario ur ON ur.id = e.registrada_por
   LEFT JOIN encuesta_tipo et ON et.tenant_id = e.tenant_id AND et.codigo = e.tipo_codigo
+  LEFT JOIN ot_encargo oe ON oe.ot_id = e.ot_id
  WHERE e.tenant_id = $1::uuid AND ($2::uuid[] IS NULL OR e.unidad_id = ANY($2::uuid[]))`;
 
 const COLUMNAS = `
@@ -130,7 +145,9 @@ const COLUMNAS = `
   o.id AS "otId", o.codigo AS "otCodigo", o.fecha_cierre AS "otFechaCierre", o.origen_trabajo AS "origen",
   cl.id AS "clienteId", cl.razon_social AS cliente, u.id AS "unidadId", u.codigo AS "unidadCodigo", u.nombre AS "unidadNombre",
   c.codigo AS "cotizacionCodigo", e.tipo_codigo AS tipo, et.nombre AS "tipoNombre", et.formulario,
-  e.referencia, e.cliente_texto AS "clienteTexto"`;
+  e.referencia, e.cliente_texto AS "clienteTexto", et.medio_defecto AS "medioDefecto",
+  o.opi_numero AS opi, oe.proyecto,
+  COALESCE(NULLIF(btrim(oe.descripcion_tecnica), ''), NULLIF(btrim(o.descripcion_trabajo), ''), NULLIF(btrim(c.descripcion_tecnica), '')) AS "descripcionServicio"`;
 
 @Injectable()
 export class EncuestaService {
@@ -160,7 +177,7 @@ export class EncuestaService {
     tipo?: string | null,
   ): Promise<(Pregunta & { id: string; orden: number; activo: boolean; tipoCodigo: string | null })[]> {
     return this.prisma.$queryRawUnsafe(
-      `SELECT id, codigo, texto, escala, orden, obligatoria, activo, tipo_codigo AS "tipoCodigo",
+      `SELECT id, codigo, texto, escala, orden, obligatoria, activo, tipo_codigo AS "tipoCodigo", tipo_respuesta AS "tipoRespuesta",
               comentario_si_menor::float8 AS "comentarioSiMenor"
          FROM encuesta_pregunta
         WHERE tenant_id = $1::uuid AND ($2::boolean = FALSE OR activo)
@@ -183,7 +200,7 @@ export class EncuestaService {
       `SELECT codigo, nombre, formulario, formulario_revision AS "formularioRevision", anexo_numero AS "anexoNumero",
               anexo_revision AS "anexoRevision", anexo_emision AS "anexoEmision", titulo_informe AS "tituloInforme",
               objeto_informe AS "objetoInforme", agrupar_por AS "agruparPor", umbral_pct::float8 AS "umbralPct", origenes,
-              tipos_cliente AS "tiposCliente", regla_cliente AS "reglaCliente", por_defecto AS "porDefecto",
+              tipos_cliente AS "tiposCliente", regla_cliente AS "reglaCliente", por_defecto AS "porDefecto", medio_defecto AS "medioDefecto",
               string_to_array(COALESCE(distribucion, ''), '|') AS distribucion, orden, activo
          FROM encuesta_tipo WHERE tenant_id = $1::uuid ORDER BY orden, codigo`,
       tenantId,
@@ -200,15 +217,15 @@ export class EncuestaService {
         this.prisma.$executeRawUnsafe(
           `INSERT INTO encuesta_tipo (tenant_id, codigo, nombre, formulario, formulario_revision, anexo_numero, anexo_revision, anexo_emision,
                                       titulo_informe, objeto_informe, agrupar_por, umbral_pct, origenes, tipos_cliente, regla_cliente,
-                                      por_defecto, distribucion, orden, activo)
-           VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                                      por_defecto, distribucion, orden, activo, medio_defecto)
+           VALUES ($1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
            ON CONFLICT (tenant_id, codigo) DO UPDATE
              SET nombre = EXCLUDED.nombre, formulario = EXCLUDED.formulario, formulario_revision = EXCLUDED.formulario_revision,
                  anexo_numero = EXCLUDED.anexo_numero, anexo_revision = EXCLUDED.anexo_revision, anexo_emision = EXCLUDED.anexo_emision,
                  titulo_informe = EXCLUDED.titulo_informe, objeto_informe = EXCLUDED.objeto_informe, agrupar_por = EXCLUDED.agrupar_por,
                  umbral_pct = EXCLUDED.umbral_pct, origenes = EXCLUDED.origenes, tipos_cliente = EXCLUDED.tipos_cliente,
                  regla_cliente = EXCLUDED.regla_cliente, por_defecto = EXCLUDED.por_defecto, distribucion = EXCLUDED.distribucion,
-                 orden = EXCLUDED.orden, activo = EXCLUDED.activo, updated_at = now()`,
+                 orden = EXCLUDED.orden, activo = EXCLUDED.activo, medio_defecto = EXCLUDED.medio_defecto, updated_at = now()`,
           tenantId,
           t.codigo,
           t.nombre,
@@ -228,6 +245,7 @@ export class EncuestaService {
           t.distribucion.join("|") || null,
           t.orden,
           t.activo,
+          t.medioDefecto ?? null,
         ),
       ),
     );
@@ -327,7 +345,7 @@ export class EncuestaService {
       ...f[0],
       etiquetaEstado: ETIQUETA_ESTADO[f[0].estado] ?? f[0].estado,
       preguntas: await this.preguntas(tenantId, true, f[0].tipo ?? null),
-      tipos: (await this.tipos(tenantId)).map((t) => ({ codigo: t.codigo, nombre: t.nombre, formulario: t.formulario })),
+      tipos: (await this.tipos(tenantId)).map((t) => ({ codigo: t.codigo, nombre: t.nombre, formulario: t.formulario, medioDefecto: t.medioDefecto ?? null })),
     };
   }
 
@@ -405,21 +423,22 @@ export class EncuestaService {
     await this.prisma.$transaction(
       b.preguntas.map((p) =>
         this.prisma.$executeRawUnsafe(
-          `INSERT INTO encuesta_pregunta (tenant_id, codigo, texto, escala, orden, obligatoria, activo, tipo_codigo, comentario_si_menor)
-           VALUES ($1::uuid, $2, $3, $4::int[], $5, $6, $7, $8, $9)
+          `INSERT INTO encuesta_pregunta (tenant_id, codigo, texto, escala, orden, obligatoria, activo, tipo_codigo, comentario_si_menor, tipo_respuesta)
+           VALUES ($1::uuid, $2, $3, $4::int[], $5, $6, $7, $8, $9, $10)
            ON CONFLICT (tenant_id, codigo) DO UPDATE
              SET texto = EXCLUDED.texto, escala = EXCLUDED.escala, orden = EXCLUDED.orden,
                  obligatoria = EXCLUDED.obligatoria, activo = EXCLUDED.activo, tipo_codigo = EXCLUDED.tipo_codigo,
-                 comentario_si_menor = EXCLUDED.comentario_si_menor, updated_at = now()`,
+                 comentario_si_menor = EXCLUDED.comentario_si_menor, tipo_respuesta = EXCLUDED.tipo_respuesta, updated_at = now()`,
           tenantId,
           p.codigo,
           p.texto,
-          p.escala,
+          p.tipoRespuesta === "texto" ? [] : p.escala,
           p.orden,
           p.obligatoria,
           p.activo,
           p.tipoCodigo ?? null,
-          p.comentarioSiMenor ?? null,
+          p.tipoRespuesta === "texto" ? null : (p.comentarioSiMenor ?? null),
+          p.tipoRespuesta,
         ),
       ),
     );
@@ -499,8 +518,8 @@ export class EncuestaController {
 }
 
 @Module({
-  // El informe va primero: «informe-trimestral» no debe caer en la ruta «:id».
-  controllers: [EncuestaInformeController, EncuestaController],
-  providers: [EncuestaService, EncuestaInformeService],
+  // El informe y las cartas van primero: «informe-trimestral» y «cartas-remision» no deben caer en la ruta «:id».
+  controllers: [EncuestaInformeController, CartasRemisionController, EncuestaController],
+  providers: [EncuestaService, EncuestaInformeService, CartasRemisionService],
 })
 export class EncuestaModule {}
