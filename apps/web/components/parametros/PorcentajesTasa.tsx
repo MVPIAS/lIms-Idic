@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * Porcentajes de la tasa de internación y del IVA aplicado a la tasa
+ * Porcentajes de la tasa de internación, del IVA aplicado a la tasa y del
+ * reparto de la tasa por centro de costo (Sucursal / DTCG / SDBPCH, COM-03)
  * (parámetros `bpch_tasa`, IDIC-PG 24 Anexo 03). Se ven con coma decimal; los
  * cambia quien tiene «catalogo.gestionar», con motivo, y cada cambio queda en el
  * historial (quién, cuándo, de qué valor a cuál y por qué). El resto, solo
@@ -83,12 +84,15 @@ export default function PorcentajesTasa({ compacto = false }: { compacto?: boole
   if (compacto) {
     return (
       <span style={{ fontSize: 12, color: "var(--muted)" }}>
-        Vigentes: {datos.valores.map((v) => `${v.codigo === "tasa_pct" ? "tasa" : "IVA"} ${porcentajeCl(v.valor)}`).join(" · ")}
+        Vigentes: {datos.valores.filter((v) => v.codigo === "tasa_pct" || v.codigo === "iva_pct").map((v) => `${v.codigo === "tasa_pct" ? "tasa" : "IVA"} ${porcentajeCl(v.valor)}`).join(" · ")}
       </span>
     );
   }
 
   const etiquetaDe = (codigo: string) => datos.valores.find((v) => v.codigo === codigo)?.etiqueta ?? codigo;
+  // El reparto por centro de costo (COM-03) debe sumar 100 %: el cálculo de la tasa lo exige.
+  const reparto = datos.valores.filter((v) => v.codigo.startsWith("reparto_"));
+  const sumaReparto = reparto.reduce((s, v) => s + Math.round((v.numero ?? 0) * 10000), 0) / 10000;
   return (
     <section className="card" style={{ padding: 14 }} aria-labelledby="pct-titulo" id="porcentajes-tasa">
       <h2 id="pct-titulo" style={{ fontSize: 14, margin: "0 0 4px" }}>Porcentajes de la tasa de internación</h2>
@@ -112,6 +116,12 @@ export default function PorcentajesTasa({ compacto = false }: { compacto?: boole
             ))}
           </tbody>
         </table>
+      )}
+
+      {reparto.length > 0 && sumaReparto !== 100 && (
+        <p className="alert warn" role="alert" style={{ margin: "8px 0 0" }}>
+          El reparto de la tasa por centro de costo suma {porcentajeCl(sumaReparto)} y debe sumar 100 %: mientras no se corrija, la tasa de internación no se puede calcular.
+        </p>
       )}
 
       {editando && (
