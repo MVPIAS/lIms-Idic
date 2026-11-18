@@ -266,6 +266,28 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     },
   },
   {
+    // Cuarto envío del IDIC (18-11-2026): pie de la cotización particular del sistema comercial.
+    categoria: "cotizacion_documento",
+    titulo: "Documento de la cotización",
+    donde:
+      "Pie del documento de la cotización (vista previa, PDF y envío al cliente), en la plantilla «Cotización» (variables {{idic.horario_atencion}} e {{idic.telefono_reclamos}}). Si un texto queda vacío, su línea no se imprime.",
+    porConfirmar: "Horario de atención a clientes y teléfono de reclamos y sugerencias vigentes del Departamento Comercial.",
+    codigos: {
+      horario_atencion: {
+        tipo: "texto",
+        nombre: "Horario de atención a clientes",
+        largo: 200,
+        ayuda: "Se imprime como «Horario de atención a clientes: …». Ej.: «Lunes a jueves de 09:00 a 13:00 y de 14:30 a 16:30 h; viernes de 09:00 a 13:00 h».",
+      },
+      telefono_reclamos: {
+        tipo: "texto",
+        nombre: "Teléfono de reclamos y sugerencias",
+        largo: 120,
+        ayuda: "Se imprime como «Reclamos y sugerencias: …». Puede llevar más de un número.",
+      },
+    },
+  },
+  {
     categoria: "encuesta",
     titulo: "Encuestas de satisfacción",
     donde: "Al cerrar o finalizar una OT nace su encuesta pendiente (Comercial › Encuestas), salvo para estos orígenes.",

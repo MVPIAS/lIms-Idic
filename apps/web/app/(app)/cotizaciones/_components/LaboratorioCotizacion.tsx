@@ -13,7 +13,7 @@ import SelectorLaboratorio from "@/components/SelectorLaboratorio";
 import { fechaDia, fechaHora, money } from "@/lib/format";
 import { confirmar } from "@/components/ui/feedback";
 import Panel from "./Panel";
-import RespuestaLaboratorio from "./RespuestaLaboratorio";
+import RespuestaLaboratorio, { MontosFinales, type FilaMonto } from "./RespuestaLaboratorio";
 import { pedir } from "./comercial";
 import { PILL_SOLICITUD, type Circuito, type Solicitud } from "./circuito";
 
@@ -22,6 +22,38 @@ const TEXTO_RESPUESTA: Record<string, string> = {
   aceptar_con_comentario: "Realiza el servicio, con comentario",
   rechazar: "No realiza el servicio",
 };
+/** Montos finales de un costeo guardado con el cálculo del cuarto envío (form05.ts · detalle, notas 1 a 4). */
+const DETALLE: [string, string][] = [
+  ["viaticosNacionales", "Viáticos nacionales"],
+  ["viaticosExtranjero", "Viáticos al extranjero"],
+  ["horasHombreCivil", "Horas hombre civil"],
+  ["horasHombreMilitar", "Horas hombre militar"],
+  ["servicios", "Servicios estándar"],
+  ["horasMaquina", "Horas máquina"],
+  ["pasajesNacionales", "Pasajes nacionales"],
+  ["pasajesExtranjero", "Pasajes al extranjero"],
+  ["otrosPesos", "Otros gastos en pesos"],
+  ["otrosDolar", "Otros gastos en dólar"],
+  ["insumos", "Insumos y reactivos"],
+];
+function filasMontos(r: any): FilaMonto[] {
+  const pct = (v: unknown) => String(v).replace(".", ",");
+  const aplicadoCt = r.precioEjercitoAplicado === "costo_total";
+  return [
+    ...DETALLE.filter(([k]) => r.detalle?.[k]).map(([k, l]) => ({ l, v: r.detalle[k] })),
+    { l: "Costo directo total (CDT)", v: r.cdt, nota: 1, fuerte: true },
+    { l: `Costo indirecto · CFA (${pct(r.cfaPct)} % del CDT)`, v: r.cfa },
+    { l: "Costo total (CT)", v: r.ct, nota: 2, fuerte: true },
+    { l: "Precio Ejército (CT sin H.H. militar, con su CFA)", v: r.precioEjercitoCt, nota: 3, aplicado: aplicadoCt && r.precioEjercito === r.precioEjercitoCt },
+    { l: "Precio Ejército (costo directo, sin CFA)", v: r.precioEjercitoCostoDirecto, nota: 4, aplicado: !aplicadoCt },
+    ...(aplicadoCt && r.precioEjercito !== r.precioEjercitoCt ? [{ l: "Precio Ejército aplicado: costo total (CT)", v: r.precioEjercito, aplicado: true }] : []),
+    { l: `Recargo (${pct(r.margenParticularPct)} % del CT)`, v: r.recargo },
+    { l: "Neto · precio particular sin IVA", v: r.precioParticular, fuerte: true },
+    { l: `IVA (${pct(r.ivaPct)} %)`, v: r.iva },
+    { l: "Precio particular IVA incluido", v: r.precioParticularIvaIncluido },
+  ];
+}
+
 const SECCION: Record<string, string> = {
   viaticos: "1 · Viáticos",
   horasHombre: "2 · Horas hombre",
@@ -201,7 +233,11 @@ function TarjetaSolicitud({ sol, c, puedeRetirar, onResponder, onVb, onRetirar }
           )}
           {r && (
             <div>
-              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>Formulario de costeo (FORM05) · montos en CLP · interno, no se imprime</div>
+              <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>Formulario de costeo (FORM05) · interno, no se imprime</div>
+              {r.detalle ? (
+                // Cuarto envío IDIC: montos finales en $ y US$, con los dos precios Ejército del formulario real.
+                <MontosFinales filas={filasMontos(r)} dolar={Number(r.dolar) > 0 ? Number(r.dolar) : 0} dolarFecha={r.dolarFecha} />
+              ) : (
               <table className="data">
                 <tbody>
                   {Object.entries(SECCION).map(([k, l]) => (r.secciones?.[k] ? <tr key={k}><td>{l}</td><td className="num">{money(r.secciones[k])}</td></tr> : null))}
@@ -214,6 +250,7 @@ function TarjetaSolicitud({ sol, c, puedeRetirar, onResponder, onVb, onRetirar }
                   {r.precioParticularIvaIncluido != null && <tr><td>Precio particular IVA incluido (IVA {String(r.ivaPct).replace(".", ",")} %: {money(r.iva)})</td><td className="num">{money(r.precioParticularIvaIncluido)}</td></tr>}
                 </tbody>
               </table>
+              )}
               {sol.costeo?.condiciones && <p style={{ fontSize: 12.5, margin: "6px 0 0" }}>{sol.costeo.insumos ? "8" : "7"} · Condiciones técnicas y restricciones: {sol.costeo.condiciones}</p>}
             </div>
           )}

@@ -35,7 +35,7 @@ const ProgramaSchema = z.object({
 
 const Form05Schema = z.object({
   viaticos: z
-    .array(z.object({ ambito: z.enum(["nacional", "extranjero"]), zona: texto(120).min(1), grado: texto(120).min(1), dias: z.number().positive().max(365), montoDiario: monto, porcentaje: z.number().min(0).max(100) }))
+    .array(z.object({ ambito: z.enum(["nacional", "extranjero"]), zona: texto(120).min(1), grado: texto(120).min(1), dias: z.number().positive().max(365), montoDiario: monto, porcentaje: z.number().min(0).max(100), moneda: zMoneda.nullable().optional() }))
     .max(50)
     .optional(),
   horasHombre: z
@@ -44,7 +44,7 @@ const Form05Schema = z.object({
     .optional(),
   servicios: z.array(z.object({ codigo: texto(40).min(1), descripcion: texto(300).optional(), cantidad: z.number().positive().max(100000), valorUnitario: monto })).max(100).optional(),
   horasMaquina: z.array(z.object({ equipo: texto(200).min(1), horas: z.number().positive().max(100000), valorHora: monto })).max(50).optional(),
-  pasajes: z.array(z.object({ ambito: z.enum(["nacional", "extranjero"]), tramo: texto(200).min(1), cantidad: z.number().positive().max(1000), valorUnitario: monto })).max(50).optional(),
+  pasajes: z.array(z.object({ ambito: z.enum(["nacional", "extranjero"]), tramo: texto(200).min(1), cantidad: z.number().positive().max(1000), valorUnitario: monto, moneda: zMoneda.nullable().optional() })).max(50).optional(),
   otros: z.array(z.object({ descripcion: texto(300).min(1), monto, moneda: zMoneda.default("CLP") })).max(50).optional(),
   // Contrato 4.1.4 · sección 7: insumos y reactivos del inventario (consumibleId) o escritos a mano; costo en CLP.
   insumos: z
@@ -62,6 +62,8 @@ const Form05Schema = z.object({
     .optional(),
   condiciones: texto(4000).nullable().optional(),
   dolar: z.number().positive().max(100000).nullable().optional(),
+  // Cuarto envío del IDIC: fecha del tipo de cambio («del dd-mm-aaaa»), exigida si hay montos en US$.
+  dolarFecha: fecha.nullable().optional(),
 });
 
 /** Cotización compartida: ensayos que agrega el laboratorio. */

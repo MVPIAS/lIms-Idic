@@ -166,4 +166,5 @@ seed_tercer_envio_demo.sql           demo
 align_cuarto_envio_tasa.sql
 seed_cuarto_envio_tasa_demo.sql      demo
 align_cuarto_envio_encuestas.sql
+align_cuarto_envio_cotizacion.sql
 align_cierre_permisos.sql
