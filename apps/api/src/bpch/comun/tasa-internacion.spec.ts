@@ -1,4 +1,5 @@
-import { calcularTasa, erroresReparto, erroresTasa, repartirTasa, REPARTO_TASA_POR_DEFECTO } from "./reglas-bpch";
+import { calcularTasa, CENTROS_REPARTO_TASA, erroresReparto, erroresTasa, repartirTasa, REPARTO_TASA_POR_DEFECTO } from "./reglas-bpch";
+import { defPorcentaje, erroresPorcentaje } from "../../catalogo/parametro-porcentaje";
 
 /**
  * Tasa de internación con la fórmula del IDIC (cuarto envío 17-11-2026, COM-03).
@@ -76,5 +77,15 @@ describe("Tasa de internación · reparto por centro de costo", () => {
     expect(erroresReparto({ sucursal: 100, dtcg: 0, sdbpch: 0 })).toEqual([]);
     expect(erroresReparto({ sucursal: 85, dtcg: 10, sdbpch: 4 })[0]).toMatch(/sumar 100 %.*99 %/);
     expect(erroresReparto({ sucursal: 85, dtcg: null, sdbpch: 5 })[0]).toMatch(/DTCG/);
+  });
+});
+
+describe("Tasa de internación · parámetros del reparto", () => {
+  it("cada % del reparto es un porcentaje con historial (bpch_tasa) que admite 0", () => {
+    for (const c of CENTROS_REPARTO_TASA) {
+      const def = defPorcentaje("bpch_tasa", c.parametro);
+      expect(def).not.toBeNull();
+      expect(erroresPorcentaje(def!, 0, "Sin reparto a este centro")).toEqual([]);
+    }
   });
 });

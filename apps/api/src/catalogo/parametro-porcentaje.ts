@@ -3,7 +3,11 @@
  * (sin BD), probadas en parametro-porcentaje.spec.ts.
  *
  * Hoy: tasa de internación (`bpch_tasa.tasa_pct`, IDIC-PG 24 Anexo 03; 1,5 %
- * según lo levantado) e IVA aplicado a la tasa (`bpch_tasa.iva_pct`, 19 %).
+ * según lo levantado), IVA aplicado a la tasa (`bpch_tasa.iva_pct`; la tasa es
+ * exenta desde el 10-11-2026) y el reparto de la tasa por centro de costo
+ * (`bpch_tasa.reparto_*_pct`: Sucursal 85, DTCG 10, SDBPCH 5; IDIC, cuarto
+ * envío 17-11-2026, COM-03). El reparto debe sumar 100: lo exige el cálculo de
+ * la tasa (reglas-bpch.ts · erroresReparto) y la pantalla avisa si no suma.
  * Se guardan en `parametro_sistema.valor` como texto con punto decimal («1.5»),
  * que es lo que lee BpchComunService; en pantalla se muestran con coma.
  */
@@ -18,6 +22,9 @@ export interface DefPorcentaje {
 export const PORCENTAJES: DefPorcentaje[] = [
   { categoria: "bpch_tasa", codigo: "tasa_pct", admiteCero: false },
   { categoria: "bpch_tasa", codigo: "iva_pct", admiteCero: true },
+  { categoria: "bpch_tasa", codigo: "reparto_sucursal_pct", admiteCero: true },
+  { categoria: "bpch_tasa", codigo: "reparto_dtcg_pct", admiteCero: true },
+  { categoria: "bpch_tasa", codigo: "reparto_sdbpch_pct", admiteCero: true },
 ];
 
 /** Categorías cuyo `valor` solo cambia por la acción con motivo e historial. */
