@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cuerpoCotizacionHtml, type FirmasCotizacion } from "./cotizacion-documento";
 import {
   COTIZACION_EJEMPLO,
   CUERPO_COTIZACION_FORM04,
+  CUERPO_COTIZACION_FORM04_V2,
   VARIABLES_COTIZACION,
+  textosDocumentoDesdeFilas,
   contextoCotizacion,
   elegirCuerpoCotizacion,
   renderCuerpoCotizacion,
@@ -41,11 +44,61 @@ const CASOS: Record<string, any> = {
     total: 45264,
   },
   usd_sin_fecha_dolar: { ...COTIZACION_EJEMPLO, dolarFecha: null, plazoEntregaDias: 0, referencia: null, descripcionTecnica: null },
+  exenta_solo_horario: { ...COTIZACION_EJEMPLO, ivaPct: 0, ivaMonto: 0, textosDocumento: { horarioAtencion: "  Horario <PRUEBA> & Cía  ", telefonoReclamos: "" } },
+  sin_textos_documento: { ...COTIZACION_EJEMPLO, textosDocumento: undefined },
 };
 
 describe("plantilla de cotización (4.6.8)", () => {
-  it.each(Object.keys(CASOS))("la versión 1 (FORM04) rinde EXACTAMENTE el formato fijo · %s", (k) => {
-    expect(renderCuerpoCotizacion(CUERPO_COTIZACION_FORM04, CASOS[k], firmas)).toBe(cuerpoCotizacionHtml(CASOS[k]));
+  it.each(Object.keys(CASOS))("la versión 2 (FORM04 con textos estándar) rinde EXACTAMENTE el formato fijo · %s", (k) => {
+    expect(renderCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V2, CASOS[k], firmas)).toBe(cuerpoCotizacionHtml(CASOS[k]));
+  });
+
+  it("la versión 1 (FORM04) sigue siendo válida y la 2 la contiene sin cambios salvo el bloque de textos", () => {
+    expect(validarCuerpoCotizacion(CUERPO_COTIZACION_FORM04)).toEqual([]);
+    expect(validarCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V2)).toEqual([]);
+    const fin = CUERPO_COTIZACION_FORM04.indexOf('<p class="nota">');
+    expect(CUERPO_COTIZACION_FORM04_V2.startsWith(CUERPO_COTIZACION_FORM04.slice(0, fin))).toBe(true);
+  });
+
+  describe("textos estándar del cuarto envío (18-11-2026)", () => {
+    const html = (cot: any) => renderCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V2, cot, firmas);
+    it("notas, Nº de la cotización en la OC y confidencialidad", () => {
+      const h = html(COTIZACION_EJEMPLO);
+      expect(h).toContain("<h2>Notas</h2>");
+      expect(h).toContain("Los tiempos de ensayo y disponibilidad para efectuar el trabajo solicitado son estimados.");
+      expect(h).toContain("las muestras deben ser retiradas antes de 1 mes");
+      expect(h).toContain("La identificación de las muestras debe ser entregada por el cliente por correo electrónico.");
+      expect(h).toContain("IMPORTANTE: SEÑALAR EN LA ORDEN DE COMPRA EL Nº DE ESTA COTIZACIÓN (COT-PRUEBA-0001).");
+      expect(h).toContain("<h2>Confidencialidad</h2>");
+    });
+    it("Ley 21.420 solo si la cotización lleva IVA", () => {
+      expect(html(COTIZACION_EJEMPLO)).toContain("Ley 21.420");
+      expect(html({ ...COTIZACION_EJEMPLO, ivaPct: 0, ivaMonto: 0 })).not.toContain("Ley 21.420");
+      expect(html(CASOS.minima_clp)).not.toContain("Ley 21.420");
+      expect(html(CASOS.clp_con_lineas)).toContain("Ley 21.420");
+    });
+    it("horario y reclamos: se imprimen escapados; vacíos, no se imprime la línea", () => {
+      const h = html(COTIZACION_EJEMPLO);
+      expect(h).toContain("Horario de atención a clientes: Horario PRUEBA");
+      expect(h).toContain("Reclamos y sugerencias: Teléfono PRUEBA");
+      const e = html(CASOS.exenta_solo_horario);
+      expect(e).toContain("Horario de atención a clientes: Horario &lt;PRUEBA&gt; &amp; Cía</p>");
+      expect(e).not.toContain("Reclamos y sugerencias");
+      expect(html(CASOS.sin_textos_documento)).not.toContain("Horario de atención");
+    });
+    it("los parámetros se leen recortados; sin filas, vacíos", () => {
+      expect(textosDocumentoDesdeFilas([{ codigo: "horario_atencion", valor: " L-V " }, { codigo: "telefono_reclamos", valor: null }])).toEqual({ horarioAtencion: "L-V", telefonoReclamos: "" });
+      expect(textosDocumentoDesdeFilas([])).toEqual({ horarioAtencion: "", telefonoReclamos: "" });
+    });
+  });
+
+  it("align_cuarto_envio_cotizacion.sql aplica la versión 2 solo sobre la versión 1 sin editar (md5)", () => {
+    const sql = readFileSync(join(__dirname, "../../../../packages/db/align_cuarto_envio_cotizacion.sql"), "utf8");
+    const m = /\$form04v2\$([\s\S]*?)\$form04v2\$/.exec(sql);
+    expect(m).not.toBeNull();
+    expect(m![1].replace(/\r\n/g, "\n")).toBe(CUERPO_COTIZACION_FORM04_V2);
+    const md5v1 = createHash("md5").update(CUERPO_COTIZACION_FORM04, "utf8").digest("hex");
+    expect(sql).toContain(`v_v1    CONSTANT TEXT := '${md5v1}'`);
   });
 
   it("el SQL siembra el mismo cuerpo que el código", () => {

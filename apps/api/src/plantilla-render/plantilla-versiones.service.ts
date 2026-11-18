@@ -38,6 +38,7 @@ import {
   TIPO_PLANTILLA_COTIZACION,
   VARIABLES_COTIZACION,
   contextoCotizacion,
+  leerTextosDocumentoCotizacion,
   renderCuerpoCotizacion,
   validarCuerpoCotizacion,
 } from "../cotizacion/plantilla-cotizacion";
@@ -472,7 +473,7 @@ export class PlantillaVersionesService {
     });
     if (!cot) throw new NotFoundException("Cotización no encontrada");
     const firma = await datosFirmaCotizacion(this.prisma, cot.id);
-    const doc = { ...cot, ...firma };
+    const doc = { ...cot, ...firma, textosDocumento: await leerTextosDocumentoCotizacion(this.prisma, tenantId) };
     const avisos = v.cuerpoHtml?.trim() ? validarCuerpoCotizacion(v.cuerpoHtml) : [];
     let cuerpo: string;
     if (!v.cuerpoHtml?.trim()) cuerpo = cuerpoCotizacionHtml(doc);
