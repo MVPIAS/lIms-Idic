@@ -118,12 +118,12 @@ function firma(cargo: string): string {
 export function cuerpoComunicacionBreve(d: DatosDocumentosTasa): string {
   const c = d.calculo;
   const filas: string[] = [
-    `<tr><td>A</td><td>CIF declarado</td><td>${esc(usd(c.cifUsd))} &times; tipo de cambio ${esc(tc(c.paridad))}</td><td class="num">${clp(c.cifClp)}</td></tr>`,
+    `<tr><td>A</td><td>CIF declarado</td><td>${esc(usd(c.cifUsd))} × tipo de cambio ${esc(tc(c.paridad))}</td><td class="num">${clp(c.cifClp)}</td></tr>`,
   ];
-  if (c.adValoremClp) filas.push(`<tr><td>B</td><td>Ad valorem (código 223)</td><td>${esc(usd(c.adValoremUsd))} &times; ${esc(tc(c.paridad))}</td><td class="num">${clp(c.adValoremClp)}</td></tr>`);
+  if (c.adValoremClp) filas.push(`<tr><td>B</td><td>Ad valorem (código 223)</td><td>${esc(usd(c.adValoremUsd))} × ${esc(tc(c.paridad))}</td><td class="num">${clp(c.adValoremClp)}</td></tr>`);
   if (c.agenciaTotalFactura || c.agenciaIvaInternacion) {
     filas.push(`<tr><td>C</td><td>Agencia de aduana · monto de la operación</td><td>${esc(factura(c.facturaAgenciaNumero, c.facturaAgenciaEmisor))}</td><td class="num">${clp(c.agenciaTotalFactura)}</td></tr>`);
-    filas.push(`<tr><td></td><td>Menos IVA de internación (pagado por cuenta del cliente)</td><td>Declaración de Ingreso Nº ${txt(c.dinNumero)}</td><td class="num">${c.agenciaIvaInternacion ? `&minus; ${clp(c.agenciaIvaInternacion)}` : clp(0)}</td></tr>`);
+    filas.push(`<tr><td></td><td>Menos IVA de internación (pagado por cuenta del cliente)</td><td>Declaración de Ingreso Nº ${txt(c.dinNumero)}</td><td class="num">${c.agenciaIvaInternacion ? `- ${clp(c.agenciaIvaInternacion)}` : clp(0)}</td></tr>`);
   }
   if (c.otrosGastosCliente) filas.push(`<tr><td>C</td><td>Otros gastos por cuenta del cliente</td><td>Desaduanamiento, bodega</td><td class="num">${clp(c.otrosGastosCliente)}</td></tr>`);
   if (c.fleteNacional) filas.push(`<tr><td>D</td><td>Flete nacional (IVA incluido)</td><td>${esc(factura(c.facturaTransporteNumero, c.facturaTransporteEmisor))}</td><td class="num">${clp(c.fleteNacional)}</td></tr>`);
