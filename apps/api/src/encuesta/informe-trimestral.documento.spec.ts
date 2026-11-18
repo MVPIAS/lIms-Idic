@@ -63,3 +63,31 @@ describe("Documento del informe trimestral", () => {
     expect(plan.find((f) => f[0] === "Índice satisfacción del cliente (%)")).toEqual(["Índice satisfacción del cliente (%)", 98, 100]);
   });
 });
+
+describe("Documento del informe trimestral · preguntas abiertas (FORM02)", () => {
+  const t02: TipoEncuesta = { ...tipo, codigo: "FORM02", nombre: "PRUEBA cotizaciones", agruparPor: "laboratorio" };
+  const f: FilaEncuesta = {
+    ...fila([6, 6]),
+    tipo: "FORM02",
+    referencia: "COT-PRUEBA-9",
+    grupo: "Lab PRUEBA",
+    respuestas: [
+      { codigo: "F02_01", texto: "Tiempo PRUEBA", valor: 6, escala: [1, 2, 3, 4, 5, 6, 7] },
+      { codigo: "F02_RAZON", texto: "Razón PRUEBA", valor: null, escala: [], tipo: "texto", respuesta: "Precio <alto> PRUEBA" },
+    ],
+  };
+  const inf = calcularInforme([t02], [f], 2026, 3);
+
+  it("el PDF lista las razones (escapadas) y la pregunta de texto no es un ítem del cuadro 2", () => {
+    const h = cuerpoInformeHtml(inf);
+    expect(h).toContain("<h2>Razón PRUEBA</h2>");
+    expect(h).toContain("Precio &lt;alto&gt; PRUEBA");
+    expect(inf.secciones[0].items.map((i) => i.codigo)).toEqual(["F02_01"]);
+  });
+
+  it("el Excel agrega el listado de razones en la planilla del formulario", () => {
+    const plan = hojasInforme(inf)[1].filas;
+    expect(plan).toContainEqual(["RAZÓN PRUEBA"]);
+    expect(plan).toContainEqual(["Lab PRUEBA / COT-PRUEBA-9: Precio <alto> PRUEBA"]);
+  });
+});

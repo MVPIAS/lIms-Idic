@@ -182,3 +182,34 @@ describe("Comentario obligatorio con nota baja (FORM01 criterio 4: menor que 4,0
     expect(validarRespuestas(ps, [{ codigo: "F01_04", valor: 4 }], "").errores).toEqual([]);
   });
 });
+
+describe("Informe trimestral con preguntas abiertas (FORM02, cuarto envío COM-14)", () => {
+  const t02 = tipo("FORM02");
+  const conRazon = (a: number, b: number, razon: string | null, referencia: string): FilaEncuesta => ({
+    id: `r-${referencia}`,
+    tipo: "FORM02",
+    estado: "registrada",
+    fecha: "2026-08-10",
+    grupo: "Laboratorio PRUEBA",
+    referencia,
+    promedio: null,
+    respuestas: [
+      { codigo: "F02_01", texto: "Tiempo de respuesta", valor: a, escala: [1, 2, 3, 4, 5, 6, 7] },
+      { codigo: "F02_05", texto: "El precio cotizado", valor: b, escala: [1, 2, 3, 4, 5, 6, 7] },
+      { codigo: "F02_RAZON", texto: "Razón PRUEBA", valor: null, escala: [], tipo: "texto", respuesta: razon },
+    ],
+    comentario: null,
+  });
+
+  it("los promedios, el índice y los ítemes ignoran la pregunta de texto; sus respuestas se listan aparte", () => {
+    const s = calcularSeccion(t02, [conRazon(7, 7, "Precio PRUEBA", "COT-PRUEBA-1"), conRazon(5, 3, null, "COT-PRUEBA-2")]);
+    expect(s.items.map((i) => i.codigo)).toEqual(["F02_01", "F02_05"]);
+    expect(s.resumen.promedio).toBeCloseTo(5.5, 10);
+    expect(s.detalle[0].valores).toEqual({ F02_01: 7, F02_05: 7 });
+    expect(s.detalle[0].suma).toBe(14);
+    expect(s.abiertas).toEqual([
+      { codigo: "F02_RAZON", pregunta: "Razón PRUEBA", respuestas: [{ referencia: "COT-PRUEBA-1", grupo: "Laboratorio PRUEBA", texto: "Precio PRUEBA" }] },
+    ]);
+    expect(promedioEncuesta(conRazon(6, 4, "x", "C"))).toBe(5);
+  });
+});

@@ -39,7 +39,8 @@ import { cuerpoInformeHtml, hojasInforme } from "./informe-trimestral.documento"
 export async function leerTiposEncuesta(prisma: PrismaService, tenantId: string, soloActivos = true): Promise<(TipoEncuesta & { activo: boolean })[]> {
   const filas = await prisma.$queryRawUnsafe<any[]>(
     `SELECT codigo, nombre, formulario, formulario_revision, instruccion, anexo_numero, anexo_revision, anexo_emision,
-            titulo_informe, objeto_informe, agrupar_por, nota_maxima, umbral_pct::float8 AS umbral_pct, distribucion, orden, activo
+            titulo_informe, objeto_informe, agrupar_por, nota_maxima, umbral_pct::float8 AS umbral_pct, distribucion, orden, activo,
+            medio_defecto, regla_cliente
        FROM encuesta_tipo WHERE tenant_id = $1::uuid AND ($2::boolean = FALSE OR activo) ORDER BY orden, codigo`,
     tenantId,
     soloActivos,
@@ -64,6 +65,8 @@ export async function leerTiposEncuesta(prisma: PrismaService, tenantId: string,
       .filter(Boolean),
     orden: Number(f.orden) || 0,
     activo: !!f.activo,
+    medioDefecto: f.medio_defecto ?? null,
+    reglaCliente: f.regla_cliente ?? null,
   }));
 }
 

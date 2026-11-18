@@ -18,14 +18,14 @@ import Link from "next/link";
 import { fechaDia, fechaHora, num } from "@/lib/format";
 import { usePermisos } from "@/lib/permisos";
 import Panel from "../cotizaciones/_components/Panel";
-import { hoyISO, pedir } from "../cotizaciones/_components/comercial";
+import { API, hoyISO, pedir } from "../cotizaciones/_components/comercial";
 
 type Tab = "pendiente" | "registradas" | "reporte" | "preguntas" | "formularios";
-interface Pregunta { id?: string; codigo: string; texto: string; escala: number[]; orden: number; obligatoria: boolean; activo: boolean; tipoCodigo?: string | null; comentarioSiMenor?: number | null }
+interface Pregunta { id?: string; codigo: string; texto: string; escala: number[]; orden: number; obligatoria: boolean; activo: boolean; tipoCodigo?: string | null; comentarioSiMenor?: number | null; tipoRespuesta?: "nota" | "texto" }
 interface TipoEnc {
   codigo: string; nombre: string; formulario: string; formularioRevision: string | null; anexoNumero: string | null; anexoRevision: string | null;
   anexoEmision: string | null; tituloInforme: string; objetoInforme: string; agruparPor: "laboratorio" | "sucursal"; umbralPct: number;
-  origenes: string | null; tiposCliente: string | null; reglaCliente: string | null; porDefecto: boolean; distribucion: string[]; orden: number; activo: boolean;
+  origenes: string | null; tiposCliente: string | null; reglaCliente: string | null; porDefecto: boolean; distribucion: string[]; orden: number; activo: boolean; medioDefecto?: string | null;
 }
 
 function useTipos(): TipoEnc[] {
@@ -40,6 +40,8 @@ const MEDIOS: [string, string][] = [
   ["presencial", "En persona"],
   ["formulario_fisico", "Formulario en papel"],
 ];
+const etiquetaMedio = (m: string | null | undefined) => (m ? MEDIOS.find(([k]) => k === m)?.[1] ?? m : "—");
+const esTexto = (p: { tipoRespuesta?: string | null; tipo?: string | null }) => p.tipoRespuesta === "texto" || p.tipo === "texto";
 const PILL: Record<string, string> = { pendiente: "amber", registrada: "green", sin_respuesta: "gray" };
 
 export default function EncuestasPage() {
@@ -49,6 +51,7 @@ export default function EncuestasPage() {
   const [registrando, setRegistrando] = useState<any | null>(null);
   const [cerrando, setCerrando] = useState<any | null>(null);
   const [creando, setCreando] = useState(false);
+  const [cartas, setCartas] = useState(false);
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
@@ -73,6 +76,7 @@ export default function EncuestasPage() {
       <div className="toolbar" style={{ gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
         {puede("encuesta.registrar") && <button className="btn primary sm" onClick={() => setCreando(true)}>＋ Nueva encuesta</button>}
         <div className="spacer" />
+        <button className="btn outline sm" onClick={() => setCartas(true)}>Cartas de remisión (FORM06 a FORM08)</button>
         <Link className="btn outline sm" href={"/zona-informes/encuestas-trimestral" as any}>Informe trimestral (Anexos 01 a 06) →</Link>
       </div>
       {msg && <div className="alert info" role="status">{msg}</div>}
@@ -99,6 +103,7 @@ export default function EncuestasPage() {
           onHecho={(m) => { setCreando(false); setMsg(m); setTab("pendiente"); setVersion((v) => v + 1); }}
         />
       )}
+      {cartas && <CartasRemision onCerrar={() => setCartas(false)} />}
       {registrando && (
         <FormularioEncuesta
           encuestaId={registrando.id}
@@ -176,7 +181,7 @@ function Lista({ modo, puedeRegistrar, onRegistrar, onCerrar }: { modo: "pendien
               <th>Laboratorio</th>
               <th>Abierta</th>
               <th>Estado</th>
-              {modo === "registradas" && <><th className="num">Promedio</th><th>Registrada</th></>}
+              {modo === "registradas" && <><th className="num">Promedio</th><th>Medio</th><th>Registrada</th></>}
               <th><span className="sr-only">Acciones</span></th>
             </tr>
           </thead>
@@ -192,6 +197,7 @@ function Lista({ modo, puedeRegistrar, onRegistrar, onCerrar }: { modo: "pendien
                 {modo === "registradas" && (
                   <>
                     <td className="num">{f.promedio !== null && f.promedio !== undefined ? `${num(f.promedio, 1)} / 7` : "—"}</td>
+                    <td style={{ fontSize: 12 }}>{etiquetaMedio(f.medio)}</td>
                     <td style={{ fontSize: 12 }}>{fechaHora(f.registradaAt)} · {f.registradaPorNombre ?? "—"}{f.motivoSinRespuesta ? <div style={{ color: "var(--muted)" }}>{f.motivoSinRespuesta}</div> : null}</td>
                   </>
                 )}
@@ -208,9 +214,9 @@ function Lista({ modo, puedeRegistrar, onRegistrar, onCerrar }: { modo: "pendien
               </tr>
             ))}
             {!cargando && filas.length === 0 && (
-              <tr><td colSpan={9} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>{modo === "pendiente" ? "No hay encuestas pendientes de registrar." : "Sin encuestas en este estado."}</td></tr>
+              <tr><td colSpan={10} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>{modo === "pendiente" ? "No hay encuestas pendientes de registrar." : "Sin encuestas en este estado."}</td></tr>
             )}
-            {cargando && <tr><td colSpan={9} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Cargando…</td></tr>}
+            {cargando && <tr><td colSpan={10} style={{ textAlign: "center", padding: 24, color: "var(--muted)" }}>Cargando…</td></tr>}
           </tbody>
         </table>
       </div>
@@ -224,7 +230,8 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
   const [comentario, setComentario] = useState("");
   const [nombre, setNombre] = useState("");
   const [cargo, setCargo] = useState("");
-  const [medio, setMedio] = useState("telefono");
+  const [medio, setMedio] = useState("");
+  const [textos, setTextos] = useState<Record<string, string>>({});
   const [fecha, setFecha] = useState(hoyISO());
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
@@ -232,7 +239,7 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
   const [todas, setTodas] = useState<Pregunta[]>([]);
 
   useEffect(() => {
-    pedir<any>("GET", `/encuestas/${encuestaId}`).then((x) => { setE(x); setTipoSel(x?.tipo ?? ""); }).catch((x) => setError(x.message));
+    pedir<any>("GET", `/encuestas/${encuestaId}`).then((x) => { setE(x); setTipoSel(x?.tipo ?? ""); setMedio(x?.medioDefecto ?? ""); }).catch((x) => setError(x.message));
     pedir<Pregunta[]>("GET", "/encuestas/preguntas").then((x) => setTodas(x ?? [])).catch(() => setTodas([]));
   }, [encuestaId]);
 
@@ -240,24 +247,29 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
 
   const soloLectura = e.estado !== "pendiente";
   const preguntas: Pregunta[] = soloLectura
-    ? (e.respuestas ?? []).map((r: any) => ({ ...r, obligatoria: false, activo: true, orden: 0 }))
+    ? (e.respuestas ?? []).map((r: any) => ({ ...r, tipoRespuesta: r.tipo === "texto" ? "texto" : "nota", obligatoria: false, activo: true, orden: 0 }))
     : tipoSel === (e.tipo ?? "")
       ? e.preguntas
       : todas.filter((p) => p.activo && (p.tipoCodigo ?? "") === tipoSel);
+  const textoDe = (codigo: string) => (soloLectura ? (e.respuestas ?? []).find((r: any) => r.codigo === codigo)?.respuesta ?? "" : textos[codigo] ?? "");
+  const conNota = preguntas.some((p) => !esTexto(p));
+  const tipoActual = tipoSel || e.tipo || "";
+  const cabeceraServicio = tipoActual === "FORM03" || !!(e.opi || e.proyecto || e.descripcionServicio);
   const valorDe = (codigo: string) => (soloLectura ? (e.respuestas ?? []).find((r: any) => r.codigo === codigo)?.valor ?? null : valores[codigo] ?? null);
 
   async function guardar() {
     setError("");
-    const faltan = preguntas.filter((p) => p.obligatoria && valorDe(p.codigo) === null);
+    const faltan = preguntas.filter((p) => p.obligatoria && (esTexto(p) ? !textoDe(p.codigo).trim() : valorDe(p.codigo) === null));
     if (faltan.length) return setError(`Falta la respuesta de: ${faltan.map((p) => p.texto).join(" · ")}.`);
     const bajas = preguntas.filter((p) => p.comentarioSiMenor != null && (valorDe(p.codigo) ?? 99) < Number(p.comentarioSiMenor));
     if (bajas.length && !comentario.trim()) return setError(`«${bajas[0].texto}» tiene nota menor que ${bajas[0].comentarioSiMenor}: pregunte al cliente el motivo y anótelo en el comentario.`);
     if (cargo.trim().length < 2) return setError("Indique el cargo de quien respondió.");
+    if (!medio) return setError("Elija el medio de la encuesta (teléfono, correo, en persona o papel).");
     setEnviando(true);
     try {
       const r = await pedir<any>("POST", `/encuestas/${encuestaId}/registrar`, {
         ...(tipoSel ? { tipo: tipoSel } : {}),
-        respuestas: preguntas.map((p) => ({ codigo: p.codigo, valor: valores[p.codigo] ?? null })),
+        respuestas: preguntas.map((p) => (esTexto(p) ? { codigo: p.codigo, respuesta: textoDe(p.codigo).trim() || null } : { codigo: p.codigo, valor: valores[p.codigo] ?? null })),
         comentario: comentario.trim() || null,
         nombreRespondente: nombre.trim() || null,
         cargoRespondente: cargo.trim(),
@@ -280,12 +292,20 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
       </p>
       {error && <div className="alert warn" role="alert">{error}</div>}
       {soloLectura && e.estado === "sin_respuesta" && <div className="alert info">Cerrada sin respuesta: {e.motivoSinRespuesta}</div>}
+      {cabeceraServicio && (
+        <div className="form-grid cols-2" style={{ marginBottom: 8 }} aria-label="Datos del servicio (uso exclusivo IDIC)">
+          <div className="field readonly"><label>N° Orden de Trabajo · Laboratorio</label><div>{e.otCodigo ?? e.referencia ?? "—"} · {e.unidadNombre ?? e.unidadCodigo ?? "—"}</div></div>
+          <div className="field readonly"><label>OPI</label><div>{e.opi ?? "—"}</div></div>
+          <div className="field readonly"><label>Proyecto</label><div>{e.proyecto ?? "—"}</div></div>
+          <div className="field readonly"><label>Descripción del servicio</label><div style={{ whiteSpace: "pre-wrap" }}>{e.descripcionServicio ?? "—"}</div></div>
+        </div>
+      )}
       {soloLectura ? (
         <p style={{ fontSize: 12.5, margin: "0 0 8px" }}>Formulario: {e.formulario ?? "—"} · {e.tipoNombre ?? "sin formulario"}</p>
       ) : (
         <div className="field" style={{ marginBottom: 10 }}>
           <label htmlFor="enc-tipo">Formulario de la encuesta</label>
-          <select id="enc-tipo" value={tipoSel} onChange={(x) => { setTipoSel(x.target.value); setValores({}); }}>
+          <select id="enc-tipo" value={tipoSel} onChange={(x) => { const v = x.target.value; setTipoSel(v); setValores({}); setTextos({}); setMedio((e.tipos ?? []).find((t: any) => t.codigo === v)?.medioDefecto ?? ""); }}>
             {!e.tipo && <option value="">Sin formulario (preguntas generales)</option>}
             {(e.tipos ?? []).map((t: any) => <option key={t.codigo} value={t.codigo}>{t.formulario} · {t.nombre}</option>)}
           </select>
@@ -293,7 +313,16 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
         </div>
       )}
       {!soloLectura && !preguntas.length && <div className="alert warn">Este formulario no tiene preguntas activas: configúrelas en la pestaña «Preguntas».</div>}
-      {preguntas.map((p) => (
+      {preguntas.map((p) => esTexto(p) ? (
+        <div key={p.codigo} className="field" style={{ margin: "0 0 8px" }}>
+          <label htmlFor={`p-${p.codigo}`}>{p.texto} {p.obligatoria && !soloLectura && <span className="req">*</span>}</label>
+          {soloLectura ? (
+            <div style={{ whiteSpace: "pre-wrap" }}>{textoDe(p.codigo) || "—"}</div>
+          ) : (
+            <textarea id={`p-${p.codigo}`} rows={3} maxLength={2000} value={textoDe(p.codigo)} onChange={(x) => setTextos({ ...textos, [p.codigo]: x.target.value })} />
+          )}
+        </div>
+      ) : (
         <fieldset key={p.codigo} style={{ border: "1px solid var(--line)", borderRadius: 8, padding: "8px 12px", margin: "0 0 8px" }}>
           <legend style={{ fontSize: 13, fontWeight: 600, padding: "0 4px" }}>
             {p.codigo} · {p.texto} {p.obligatoria && !soloLectura && <span className="req">*</span>}
@@ -309,11 +338,11 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
           </div>
         </fieldset>
       ))}
-      {!soloLectura && <p className="subtitle" style={{ fontSize: 11.5, margin: "0 0 8px" }}>Escala: 1 = muy malo · 7 = excelente (formulario Ejército: 1 muy malo, 3 malo, 5 bueno, 7 muy bueno).</p>}
+      {!soloLectura && conNota && <p className="subtitle" style={{ fontSize: 11.5, margin: "0 0 8px" }}>Escala: 1 = muy malo · 7 = excelente (formulario Ejército: 1 muy malo, 3 malo, 5 bueno, 7 muy bueno).</p>}
       {soloLectura ? (
         <div className="form-grid cols-2">
           <div className="field readonly"><label>Respondió</label><div>{e.nombreRespondente ?? "—"}{e.cargoRespondente ? ` · ${e.cargoRespondente}` : ""}</div></div>
-          <div className="field readonly"><label>Medio y fecha</label><div>{MEDIOS.find(([k]) => k === e.medio)?.[1] ?? e.medio ?? "—"} · {fechaDia(e.fechaRespuesta)}</div></div>
+          <div className="field readonly"><label>Medio y fecha</label><div>{etiquetaMedio(e.medio)} · {fechaDia(e.fechaRespuesta)}</div></div>
           <div className="field readonly" style={{ gridColumn: "1 / -1" }}><label>Comentario</label><div>{e.comentario ?? "—"}</div></div>
           <div className="field readonly"><label>Registrada por</label><div>{e.registradaPorNombre ?? "—"} · {fechaHora(e.registradaAt)}</div></div>
         </div>
@@ -335,6 +364,7 @@ function FormularioEncuesta({ encuestaId, onCerrar, onHecho }: { encuestaId: str
             <div className="field">
               <label htmlFor="enc-medio">Medio <span className="req">*</span></label>
               <select id="enc-medio" value={medio} onChange={(x) => setMedio(x.target.value)}>
+                {!medio && <option value="">Elija…</option>}
                 {MEDIOS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
               </select>
             </div>
@@ -473,7 +503,10 @@ function Preguntas({ onMensaje }: { onMensaje: (m: string) => void }) {
     setGuardando(true);
     try {
       const r = await pedir<any>("PUT", "/encuestas/preguntas", {
-        preguntas: ps.map(({ codigo, texto, escala, orden, obligatoria, activo, tipoCodigo, comentarioSiMenor }) => ({ codigo, texto, escala, orden, obligatoria, activo, tipoCodigo: tipoCodigo || null, comentarioSiMenor: comentarioSiMenor ?? null })),
+        preguntas: ps.map(({ codigo, texto, escala, orden, obligatoria, activo, tipoCodigo, comentarioSiMenor, tipoRespuesta }) => ({
+          codigo, texto, escala: tipoRespuesta === "texto" ? [] : escala, orden, obligatoria, activo, tipoCodigo: tipoCodigo || null,
+          comentarioSiMenor: tipoRespuesta === "texto" ? null : comentarioSiMenor ?? null, tipoRespuesta: tipoRespuesta === "texto" ? "texto" : "nota",
+        })),
       });
       setPs(r?.preguntas ?? ps);
       onMensaje(r?.mensaje ?? "Preguntas guardadas.");
@@ -488,12 +521,13 @@ function Preguntas({ onMensaje }: { onMensaje: (m: string) => void }) {
     let k = visibles.length + 1;
     while (ps.some((p) => p.codigo === `${pref}_${String(k).padStart(2, "0")}`)) k++;
     const escala = tipo === "FORM03" ? [1, 3, 5, 7] : [1, 2, 3, 4, 5, 6, 7];
-    setPs([...ps, { codigo: `${pref}_${String(k).padStart(2, "0")}`, texto: "", escala, orden: visibles.length + 1, obligatoria: true, activo: true, tipoCodigo: tipo || null, comentarioSiMenor: null }]);
+    setPs([...ps, { codigo: `${pref}_${String(k).padStart(2, "0")}`, texto: "", escala, orden: visibles.length + 1, obligatoria: true, activo: true, tipoCodigo: tipo || null, comentarioSiMenor: null, tipoRespuesta: "nota" }]);
   }
   return (
     <div>
       <p className="subtitle" style={{ marginTop: 0 }}>
-        Preguntas de cada formulario de la instrucción DCO-PG01-P04-IT05 (FORM01 a FORM05) y del formulario de cliente interno IDIC-PG03-FORM01. Una pregunta no se borra: se desactiva. Las encuestas ya registradas conservan las preguntas con que se respondieron.
+        Preguntas de cada formulario de la instrucción DCO-PG01-P04-IT05 (FORM01 a FORM05) y del formulario de cliente interno IDIC-PG03-FORM01. Una pregunta no se borra: se desactiva.
+        Las preguntas de tipo «Texto» son abiertas (p. ej. la razón de no contratar del FORM02): no llevan escala ni entran en los promedios; el informe trimestral las lista aparte. Las encuestas ya registradas conservan las preguntas con que se respondieron.
       </p>
       {error && <div className="alert warn" role="alert">{error}</div>}
       <div className="toolbar" style={{ gap: 6 }}>
@@ -504,20 +538,26 @@ function Preguntas({ onMensaje }: { onMensaje: (m: string) => void }) {
         </select>
       </div>
       <table className="data">
-        <thead><tr><th style={{ width: 90 }}>Código</th><th>Pregunta</th><th style={{ width: 130 }}>Escala</th><th style={{ width: 110 }} title="Si la nota es menor, el comentario es obligatorio">Comentario si nota menor que</th><th style={{ width: 70 }}>Orden</th><th style={{ width: 90 }}>Obligatoria</th><th style={{ width: 70 }}>Activa</th></tr></thead>
+        <thead><tr><th style={{ width: 90 }}>Código</th><th>Pregunta</th><th style={{ width: 120 }} title="Nota: el cliente pone una nota de la escala. Texto: pregunta abierta, no entra en los promedios.">Respuesta</th><th style={{ width: 130 }}>Escala</th><th style={{ width: 110 }} title="Si la nota es menor, el comentario es obligatorio">Comentario si nota menor que</th><th style={{ width: 70 }}>Orden</th><th style={{ width: 90 }}>Obligatoria</th><th style={{ width: 70 }}>Activa</th></tr></thead>
         <tbody>
           {visibles.map(({ p, i }) => (
             <tr key={p.id ?? `n${i}`}>
               <td><input className="celda" aria-label={`Código ${i + 1}`} value={p.codigo} disabled={!!p.id} maxLength={20} onChange={(e) => set(i, { codigo: e.target.value.toUpperCase() })} /></td>
               <td><input className="celda" aria-label={`Texto ${i + 1}`} value={p.texto} maxLength={300} onChange={(e) => set(i, { texto: e.target.value })} /></td>
-              <td><input className="celda" aria-label={`Escala ${i + 1}`} value={p.escala.join(",")} onChange={(e) => set(i, { escala: e.target.value.split(/[,;\s]+/).filter(Boolean).map(Number).filter((x) => Number.isInteger(x)) })} /></td>
-              <td><input className="celda" aria-label={`Comentario obligatorio si la nota es menor que ${i + 1}`} inputMode="decimal" value={p.comentarioSiMenor ?? ""} placeholder="—" onChange={(e) => { const v = e.target.value.replace(",", ".").replace(/[^\d.]/g, ""); set(i, { comentarioSiMenor: v === "" ? null : Number(v) }); }} /></td>
+              <td>
+                <select className="celda" aria-label={`Tipo de respuesta ${i + 1}`} value={p.tipoRespuesta === "texto" ? "texto" : "nota"} onChange={(e) => set(i, { tipoRespuesta: e.target.value as "nota" | "texto" })}>
+                  <option value="nota">Nota</option>
+                  <option value="texto">Texto (abierta)</option>
+                </select>
+              </td>
+              <td><input className="celda" aria-label={`Escala ${i + 1}`} disabled={p.tipoRespuesta === "texto"} placeholder={p.tipoRespuesta === "texto" ? "sin escala" : undefined} value={p.tipoRespuesta === "texto" ? "" : p.escala.join(",")} onChange={(e) => set(i, { escala: e.target.value.split(/[,;\s]+/).filter(Boolean).map(Number).filter((x) => Number.isInteger(x)) })} /></td>
+              <td><input className="celda" aria-label={`Comentario obligatorio si la nota es menor que ${i + 1}`} disabled={p.tipoRespuesta === "texto"} inputMode="decimal" value={p.comentarioSiMenor ?? ""} placeholder="—" onChange={(e) => { const v = e.target.value.replace(",", ".").replace(/[^\d.]/g, ""); set(i, { comentarioSiMenor: v === "" ? null : Number(v) }); }} /></td>
               <td><input className="celda" aria-label={`Orden ${i + 1}`} inputMode="numeric" value={p.orden} onChange={(e) => set(i, { orden: Number(e.target.value.replace(/\D/g, "")) || 0 })} /></td>
               <td><input className="celda" aria-label={`Obligatoria ${i + 1}`} type="checkbox" style={{ width: "auto" }} checked={p.obligatoria} onChange={(e) => set(i, { obligatoria: e.target.checked })} /></td>
               <td><input className="celda" aria-label={`Activa ${i + 1}`} type="checkbox" style={{ width: "auto" }} checked={p.activo} onChange={(e) => set(i, { activo: e.target.checked })} /></td>
             </tr>
           ))}
-          {!visibles.length && <tr><td colSpan={7} style={{ textAlign: "center", padding: 18, color: "var(--muted)" }}>Este formulario no tiene preguntas.</td></tr>}
+          {!visibles.length && <tr><td colSpan={8} style={{ textAlign: "center", padding: 18, color: "var(--muted)" }}>Este formulario no tiene preguntas.</td></tr>}
         </tbody>
       </table>
       {tipoActual && <p style={{ fontSize: 11.5, color: "var(--muted)" }}>Informe: {tipoActual.tituloInforme} · índice sobre el {Math.round(tipoActual.umbralPct)} % · agrupa por {tipoActual.agruparPor}.</p>}
@@ -575,6 +615,7 @@ function Formularios({ onMensaje }: { onMensaje: (m: string) => void }) {
             <div className="field"><label htmlFor={`ft-reg-${i}`}>Regla del tipo de cliente</label><select id={`ft-reg-${i}`} value={t.reglaCliente ?? ""} onChange={(e) => set(i, { reglaCliente: e.target.value || null })}><option value="">—</option><option value="EJERCITO">Ejército</option><option value="PARTICULAR">Particular</option></select></div>
             <div className="field"><label htmlFor={`ft-ori-${i}`}>Orígenes de OT (separados por coma)</label><input id={`ft-ori-${i}`} maxLength={500} value={t.origenes ?? ""} placeholder="p. ej. PRODUCCION_NACIONAL" onChange={(e) => set(i, { origenes: e.target.value })} /></div>
             <div className="field"><label htmlFor={`ft-tc-${i}`}>Tipos de cliente (códigos, por coma)</label><input id={`ft-tc-${i}`} maxLength={500} value={t.tiposCliente ?? ""} placeholder="p. ej. ejercito" onChange={(e) => set(i, { tiposCliente: e.target.value })} /></div>
+            <div className="field"><label htmlFor={`ft-medio-${i}`}>Medio por defecto</label><select id={`ft-medio-${i}`} value={t.medioDefecto ?? ""} onChange={(e) => set(i, { medioDefecto: e.target.value || null })}><option value="">— (se elige cada vez)</option>{MEDIOS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
             <div className="field"><label htmlFor={`ft-dis-${i}`}>Distribución (una por línea)</label><textarea id={`ft-dis-${i}`} rows={3} value={(t.distribucion ?? []).join("\n")} onChange={(e) => set(i, { distribucion: e.target.value.split("\n") })} /></div>
             <div className="field"><label><input type="checkbox" style={{ width: "auto" }} checked={t.porDefecto} onChange={(e) => set(i, { porDefecto: e.target.checked })} /> Por defecto</label></div>
             <div className="field"><label><input type="checkbox" style={{ width: "auto" }} checked={t.activo} onChange={(e) => set(i, { activo: e.target.checked })} /> Activo</label></div>
@@ -666,6 +707,182 @@ function NuevaEncuesta({ onCerrar, onHecho }: { onCerrar: () => void; onHecho: (
         <button className="btn outline sm" onClick={onCerrar}>Cancelar</button>
         <div className="spacer" />
         <button className="btn primary sm" disabled={enviando} onClick={guardar}>{enviando ? "Creando…" : "Crear encuesta pendiente"}</button>
+      </div>
+    </Panel>
+  );
+}
+
+const MESES_CARTA = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+const CARTAS_REMISION: [string, string, string][] = [
+  ["FORM06", "FORM06 · Encuestas remitidas", "Encuestas abiertas para el cliente en el período (pendientes, registradas o cerradas sin respuesta), por su fecha de envío."],
+  ["FORM07", "FORM07 · Encuestas realizadas", "Encuestas con respuesta registrada en el período, por la fecha de la respuesta."],
+  ["FORM08", "FORM08 · Encuestas remitidas al Ejército (trimestral)", "Encuestas del formulario Ejército abiertas en el trimestre."],
+];
+
+/**
+ * Cartas de remisión a la Sección Planificación, Estudios y Control Comercial
+ * (DCO-PG01-P04-IT05 FORM06, FORM07 y FORM08 Rev00). Vista previa y PDF.
+ * «Fecha de envío» = fecha en que se abrió la encuesta (cierre de la OT o fecha
+ * del servicio, en las altas manuales): el LIMS no registra otra fecha de envío.
+ */
+function CartasRemision({ onCerrar }: { onCerrar: () => void }) {
+  const hoy = hoyISO();
+  const anioActual = Number(hoy.slice(0, 4));
+  const mesActual = Number(hoy.slice(5, 7));
+  const tipos = useTipos();
+  const [carta, setCarta] = useState("FORM06");
+  const [porTrimestre, setPorTrimestre] = useState(false);
+  const [anio, setAnio] = useState(anioActual);
+  const [mes, setMes] = useState(mesActual);
+  const [trimestre, setTrimestre] = useState(Math.floor((mesActual - 1) / 3) + 1);
+  const [tipo, setTipo] = useState("");
+  const [fecha, setFecha] = useState(hoy);
+  const [r, setR] = useState<any | null>(null);
+  const [error, setError] = useState("");
+  const [descargando, setDescargando] = useState(false);
+  const trimestral = carta === "FORM08" || porTrimestre;
+
+  const query = useCallback(() => {
+    const p = new URLSearchParams({ carta, anio: String(anio), fecha });
+    if (trimestral) p.set("trimestre", String(trimestre));
+    else p.set("mes", String(mes));
+    if (tipo && carta !== "FORM08") p.set("tipo", tipo);
+    return p.toString();
+  }, [carta, anio, mes, trimestre, trimestral, tipo, fecha]);
+
+  useEffect(() => {
+    let vivo = true;
+    pedir<any>("GET", `/encuestas/cartas-remision?${query()}`)
+      .then((x) => { if (vivo) { setR(x); setError(""); } })
+      .catch((x) => { if (vivo) { setR(null); setError(x.message); } });
+    return () => { vivo = false; };
+  }, [query]);
+
+  async function descargar() {
+    setError("");
+    setDescargando(true);
+    try {
+      const t = localStorage.getItem("lims_token");
+      const res = await fetch(`${API}/encuestas/cartas-remision/pdf?${query()}`, { headers: t ? { Authorization: `Bearer ${t}` } : {} });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({})))?.message ?? `Error ${res.status}`);
+      const url = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `carta_remision_encuestas_${carta}_${trimestral ? `${anio}_T${trimestre}` : `${anio}-${String(mes).padStart(2, "0")}`}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (x: any) {
+      setError(x?.message ?? "No se pudo generar el PDF. Intente de nuevo.");
+    } finally {
+      setDescargando(false);
+    }
+  }
+
+  const realizadas = carta === "FORM07";
+  return (
+    <Panel modo="drawer" ancho={760} onCerrar={onCerrar} titulo="Cartas de remisión de encuestas">
+      <p className="subtitle" style={{ marginTop: 0 }}>
+        Carta a la Sección Planificación, Estudios y Control Comercial con el detalle de las encuestas del período. Firma quien remite (usted): imprima el PDF y fírmelo.
+      </p>
+      {error && <div className="alert warn" role="alert">{error}</div>}
+      <div className="form-grid cols-3">
+        <div className="field" style={{ gridColumn: "1 / -1" }}>
+          <label htmlFor="cr-carta">Carta</label>
+          <select id="cr-carta" value={carta} onChange={(e) => setCarta(e.target.value)}>
+            {CARTAS_REMISION.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          <small style={{ color: "var(--muted)" }}>{CARTAS_REMISION.find(([k]) => k === carta)?.[2]}</small>
+        </div>
+        {carta !== "FORM08" && (
+          <div className="field">
+            <label htmlFor="cr-por">Período</label>
+            <select id="cr-por" value={porTrimestre ? "t" : "m"} onChange={(e) => setPorTrimestre(e.target.value === "t")}>
+              <option value="m">Mes y año</option>
+              <option value="t">Trimestre</option>
+            </select>
+          </div>
+        )}
+        <div className="field">
+          <label htmlFor="cr-anio">Año</label>
+          <select id="cr-anio" value={anio} onChange={(e) => setAnio(Number(e.target.value))}>
+            {Array.from({ length: 6 }, (_, i) => anioActual - i).map((a) => <option key={a} value={a}>{a}</option>)}
+          </select>
+        </div>
+        {trimestral ? (
+          <div className="field">
+            <label htmlFor="cr-trim">Trimestre</label>
+            <select id="cr-trim" value={trimestre} onChange={(e) => setTrimestre(Number(e.target.value))}>
+              <option value={1}>1er trimestre (enero a marzo)</option>
+              <option value={2}>2do trimestre (abril a junio)</option>
+              <option value={3}>3er trimestre (julio a septiembre)</option>
+              <option value={4}>4to trimestre (octubre a diciembre)</option>
+            </select>
+          </div>
+        ) : (
+          <div className="field">
+            <label htmlFor="cr-mes">Mes</label>
+            <select id="cr-mes" value={mes} onChange={(e) => setMes(Number(e.target.value))}>
+              {MESES_CARTA.map((m, i) => <option key={m} value={i + 1}>{m}</option>)}
+            </select>
+          </div>
+        )}
+        {carta !== "FORM08" && (
+          <div className="field">
+            <label htmlFor="cr-tipo">Formulario</label>
+            <select id="cr-tipo" value={tipo} onChange={(e) => setTipo(e.target.value)}>
+              <option value="">Todos</option>
+              {tipos.filter((t) => t.activo).map((t) => <option key={t.codigo} value={t.codigo}>{t.formulario} · {t.nombre}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="field">
+          <label htmlFor="cr-fecha">Fecha de la carta</label>
+          <input id="cr-fecha" type="date" value={fecha} max={hoy} onChange={(e) => setFecha(e.target.value || hoy)} />
+        </div>
+      </div>
+      {r && (
+        <>
+          <p style={{ fontSize: 13, margin: "10px 0 6px" }}><b>Sres.</b> {r.texto}</p>
+          <div className="card card--table">
+            <table className="data">
+              <caption className="sr-only">Encuestas que van en la carta</caption>
+              <thead>
+                <tr>
+                  <th className="num">Nº</th><th>Nº OT / PIA</th><th>{realizadas ? "Empresa o persona natural" : "Empresa o persona"}</th>
+                  {carta !== "FORM08" && <th>Formulario</th>}
+                  <th>{realizadas ? "Fecha de la respuesta" : "Fecha de envío"}</th>
+                  {realizadas && <th className="num">Nota promedio</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {(r.lineas ?? []).map((l: any, i: number) => (
+                  <tr key={l.id}>
+                    <td className="num">{i + 1}</td>
+                    <td className="codigo">{l.referencia}</td>
+                    <td>{l.cliente ?? "—"}</td>
+                    {carta !== "FORM08" && <td style={{ fontSize: 12 }}>{l.formulario ?? l.tipo ?? "—"}</td>}
+                    <td>{fechaDia(l.fecha)}</td>
+                    {realizadas && <td className="num">{l.promedio === null || l.promedio === undefined ? "—" : num(l.promedio, 1)}</td>}
+                  </tr>
+                ))}
+                {!(r.lineas ?? []).length && (
+                  <tr><td colSpan={6} style={{ textAlign: "center", padding: 18, color: "var(--muted)" }}>Sin encuestas {realizadas ? "realizadas" : "remitidas"} en el período.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--muted)", margin: "6px 0" }}>
+            Remite: {r.remitente?.nombre ?? "—"}{r.remitente?.cargo ? ` · ${r.remitente.cargo}` : " · (sin cargo en su ficha de usuario)"}.
+            {!realizadas && " La fecha de envío es la fecha en que se abrió la encuesta (cierre de la OT o fecha del servicio)."}
+          </p>
+        </>
+      )}
+      <div className="toolbar" style={{ marginTop: 12 }}>
+        <button className="btn outline sm" onClick={onCerrar}>Cerrar</button>
+        <div className="spacer" />
+        <button className="btn primary sm" disabled={!r || descargando} onClick={descargar}>{descargando ? "Preparando PDF…" : "Descargar PDF"}</button>
       </div>
     </Panel>
   );

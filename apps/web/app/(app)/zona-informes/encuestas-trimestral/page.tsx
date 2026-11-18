@@ -44,6 +44,7 @@ interface Seccion {
   grupos: { grupo: string; contestadas: number; promedio: number | null; indice: number | null }[];
   detalle: { id: string; referencia: string; grupo: string; valores: Record<string, number | null>; suma: number; promedio: number | null; indice: number | null; sobreUmbral: boolean }[];
   observaciones: { referencia: string; grupo: string; texto: string }[];
+  abiertas?: { codigo: string; pregunta: string; respuestas: { referencia: string; grupo: string; texto: string }[] }[];
   anterior: Resumen | null;
 }
 interface Informe {
@@ -293,6 +294,23 @@ function SeccionAnexo({ s, inf }: { s: Seccion; inf: Informe }) {
           </tbody>
         </table>
       </div>
+
+      {(s.abiertas ?? []).map((p) => (
+        <div key={p.codigo} style={{ marginBottom: 10 }}>
+          <h3 style={{ fontSize: 13.5, margin: "6px 0" }}>{p.pregunta}</h3>
+          {p.respuestas.length ? (
+            <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13 }}>
+              {p.respuestas.map((r, i) => (
+                <li key={i}>
+                  <b>{r.referencia}</b> ({r.grupo}): {r.texto}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p style={{ fontSize: 12.5, color: "var(--muted)", margin: 0 }}>Sin respuestas en el trimestre.</p>
+          )}
+        </div>
+      ))}
 
       {s.observaciones.length ? (
         <div style={{ marginBottom: 10 }}>
