@@ -57,3 +57,38 @@ describe("Encuesta de satisfacción (EP-00 9.1, registro manual por Comercial)",
     expect(promedioDe([])).toBeNull();
   });
 });
+
+describe("Preguntas abiertas (texto) · FORM02 razón de no contratar (cuarto envío, COM-14)", () => {
+  const form02: Pregunta[] = [
+    { codigo: "F02_01", texto: "Tiempo de respuesta", escala: [1, 2, 3, 4, 5, 6, 7], obligatoria: true },
+    { codigo: "F02_05", texto: "El precio cotizado", escala: [1, 2, 3, 4, 5, 6, 7], obligatoria: true },
+    { codigo: "F02_RAZON", texto: "Razón PRUEBA", escala: [], obligatoria: false, tipoRespuesta: "texto" },
+  ];
+
+  it("guarda el texto de la respuesta abierta y el promedio ignora la pregunta de texto", () => {
+    const r = validarRespuestas(form02, [
+      { codigo: "F02_01", valor: 6 },
+      { codigo: "F02_05", valor: 3 },
+      { codigo: "F02_RAZON", respuesta: "  Precio alto PRUEBA  " },
+    ]);
+    expect(r.errores).toEqual([]);
+    expect(r.promedio).toBe(4.5);
+    expect(r.guardadas[2]).toEqual({ codigo: "F02_RAZON", texto: "Razón PRUEBA", valor: null, escala: [], tipo: "texto", respuesta: "Precio alto PRUEBA" });
+  });
+
+  it("una pregunta abierta obligatoria en blanco se rechaza; opcional, se guarda vacía", () => {
+    expect(validarRespuestas(form02, [{ codigo: "F02_01", valor: 6 }, { codigo: "F02_05", valor: 3 }]).errores).toEqual([]);
+    const obligatoria = form02.map((p) => (p.codigo === "F02_RAZON" ? { ...p, obligatoria: true } : p));
+    const r = validarRespuestas(obligatoria, [{ codigo: "F02_01", valor: 6 }, { codigo: "F02_05", valor: 3 }, { codigo: "F02_RAZON", respuesta: "  " }]);
+    expect(r.errores.join(" ")).toMatch(/Falta la respuesta de «Razón PRUEBA»/);
+    expect(validarRespuestas(form02, [{ codigo: "F02_RAZON", respuesta: "x".repeat(2001) }]).errores.join(" ")).toMatch(/hasta 2000 caracteres/);
+  });
+
+  it("una pregunta de texto no necesita escala y no aparece en el reporte por pregunta", () => {
+    expect(erroresPregunta({ codigo: "F02_RAZON", texto: "Razón", escala: [], tipoRespuesta: "texto" })).toEqual([]);
+    expect(erroresPregunta({ codigo: "F02_06", texto: "Nota", escala: [] })).toHaveLength(1);
+    const g = validarRespuestas(form02, [{ codigo: "F02_01", valor: 7 }, { codigo: "F02_05", valor: 5 }, { codigo: "F02_RAZON", respuesta: "PRUEBA" }]).guardadas;
+    const r = reportePorLaboratorio([{ unidad: "LQC", estado: "registrada", promedio: 6, respuestas: g }]);
+    expect(r.total.porPregunta.map((p) => p.codigo)).toEqual(["F02_01", "F02_05"]);
+  });
+});

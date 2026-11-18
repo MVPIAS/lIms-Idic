@@ -1,7 +1,5 @@
-# =============================================================================
-# LIMS IDIC · ORDEN DE APLICACIÓN DEL SQL · fuente única · Aiuken
-# =============================================================================
-# Lo leen los DOS despliegues, para que no vuelvan a divergir:
+# ======================================================================# LIMS IDIC · ORDEN DE APLICACIÓN DEL SQL · fuente única · Aiuken
+# ======================================================================# Lo leen los DOS despliegues, para que no vuelvan a divergir:
 #   · provision.sh                         (preproducción, nube, datos sintéticos)
 #   · deploy/onpremise/instalar-onpremise.sh   (producción, servidor del IDIC)
 #
@@ -16,8 +14,7 @@
 # EL ORDEN ES CRÍTICO: cada alineación depende de las anteriores.
 # Al añadir un .sql nuevo a packages/db hay que añadirlo AQUÍ (normalmente al
 # final). scripts/verificar-orden-sql.sh lo comprueba y la CI falla si falta.
-# =============================================================================
-schema.sql
+# ======================================================================schema.sql
 seed_normas_ejemplo_demo.sql         demo
 seed_rbac.sql
 seed_gran_grupo_grupo.sql
@@ -168,4 +165,5 @@ align_tercer_envio_alimentos.sql
 seed_tercer_envio_demo.sql           demo
 align_cuarto_envio_tasa.sql
 seed_cuarto_envio_tasa_demo.sql      demo
+align_cuarto_envio_encuestas.sql
 align_cierre_permisos.sql

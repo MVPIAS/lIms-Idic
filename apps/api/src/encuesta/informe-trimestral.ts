@@ -19,7 +19,7 @@
  * respuesta, laboratorios sin ninguna encuesta contestada) y la referencia del
  * trimestre anterior.
  */
-import type { RespuestaGuardada } from "./encuesta.reglas";
+import { esPreguntaTexto, type RespuestaGuardada } from "./encuesta.reglas";
 
 export type AgruparPor = "laboratorio" | "sucursal";
 
@@ -39,6 +39,10 @@ export interface TipoEncuesta {
   umbralPct: number;
   distribucion: string[];
   orden: number;
+  /** Medio que se propone al registrar (telefono | correo | presencial | formulario_fisico). */
+  medioDefecto?: string | null;
+  /** EJERCITO | PARTICULAR: regla del tipo de cliente que asigna el formulario. */
+  reglaCliente?: string | null;
 }
 
 export interface FilaEncuesta {
@@ -97,8 +101,9 @@ export function textoTrimestre(anio: number, trimestre: number): string {
 }
 
 const media = (v: number[]): number | null => (v.length ? v.reduce((a, b) => a + b, 0) / v.length : null);
+/** Notas de una encuesta: las preguntas abiertas (texto) no cuentan. */
 const notas = (r: RespuestaGuardada[] | null | undefined): number[] =>
-  (r ?? []).map((x) => x.valor).filter((x): x is number => typeof x === "number" && Number.isFinite(x));
+  (r ?? []).filter((x) => !esPreguntaTexto(x)).map((x) => x.valor).filter((x): x is number => typeof x === "number" && Number.isFinite(x));
 
 /** Índice de satisfacción (%) = promedio / nota máxima × 100 (planilla del Depto. Comercial). */
 export function indice(promedio: number | null, notaMaxima: number): number | null {
@@ -146,6 +151,12 @@ export interface Observacion {
   grupo: string;
   texto: string;
 }
+/** Respuestas de una pregunta abierta (p. ej. FORM02: razón de no contratar). */
+export interface PreguntaAbierta {
+  codigo: string;
+  pregunta: string;
+  respuestas: { referencia: string; grupo: string; texto: string }[];
+}
 export interface Resumen {
   contestadas: number;
   sobreUmbral: number;
@@ -175,6 +186,8 @@ export interface SeccionInforme {
   /** Planilla de análisis: una columna por encuesta. */
   detalle: DetalleEncuesta[];
   observaciones: Observacion[];
+  /** Preguntas abiertas del formulario con lo que contestó cada encuestado (no entran en los cuadros). */
+  abiertas: PreguntaAbierta[];
   anterior: Resumen | null;
 }
 
@@ -200,8 +213,16 @@ export function calcularSeccion(tipo: TipoEncuesta, filas: FilaEncuesta[], anter
 
   // Ítemes en el orden en que aparecen en las respuestas (orden del formulario).
   const items = new Map<string, { texto: string; valores: number[] }>();
+  const abiertas = new Map<string, PreguntaAbierta>();
   for (const f of contestadas)
     for (const r of f.respuestas ?? []) {
+      if (esPreguntaTexto(r)) {
+        const a = abiertas.get(r.codigo) ?? { codigo: r.codigo, pregunta: r.texto, respuestas: [] };
+        const t = String(r.respuesta ?? "").trim();
+        if (t) a.respuestas.push({ referencia: f.referencia?.trim() || "—", grupo: f.grupo?.trim() || sinGrupo, texto: t });
+        abiertas.set(r.codigo, a);
+        continue;
+      }
       const it = items.get(r.codigo) ?? { texto: r.texto, valores: [] };
       if (typeof r.valor === "number" && Number.isFinite(r.valor)) it.valores.push(r.valor);
       items.set(r.codigo, it);
@@ -248,7 +269,7 @@ export function calcularSeccion(tipo: TipoEncuesta, filas: FilaEncuesta[], anter
         id: f.id,
         referencia: f.referencia?.trim() || "—",
         grupo: f.grupo?.trim() || sinGrupo,
-        valores: Object.fromEntries((f.respuestas ?? []).map((r) => [r.codigo, typeof r.valor === "number" ? r.valor : null])),
+        valores: Object.fromEntries((f.respuestas ?? []).filter((r) => !esPreguntaTexto(r)).map((r) => [r.codigo, typeof r.valor === "number" ? r.valor : null])),
         suma: notas(f.respuestas).reduce((a, b) => a + b, 0),
         promedio,
         indice: ind,
@@ -258,6 +279,7 @@ export function calcularSeccion(tipo: TipoEncuesta, filas: FilaEncuesta[], anter
     observaciones: contestadas
       .filter((f) => f.comentario?.trim())
       .map((f) => ({ referencia: f.referencia?.trim() || "—", grupo: f.grupo?.trim() || sinGrupo, texto: f.comentario!.trim() })),
+    abiertas: [...abiertas.values()],
     anterior: anteriores ? resumir(anteriores.filter((f) => f.estado === "registrada"), tipo) : null,
   };
 }
