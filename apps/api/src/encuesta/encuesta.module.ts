@@ -83,7 +83,8 @@ const PreguntasSchema = z.object({
         activo: z.boolean().default(true),
         tipoCodigo: codigoTipo.nullable().optional(),
         comentarioSiMenor: z.number().min(0).max(100).nullable().optional(),
-        tipoRespuesta: z.enum(TIPOS_RESPUESTA).default("nota"),
+        // Sin tipo: se conserva el guardado (una pregunta abierta no se vuelve «nota»); nueva = «nota».
+        tipoRespuesta: z.enum(TIPOS_RESPUESTA).optional(),
       }),
     )
     .min(1)
@@ -413,6 +414,13 @@ export class EncuestaService {
 
   async guardarPreguntas(req: any, b: z.infer<typeof PreguntasSchema>) {
     const tenantId = this.tenant(req);
+    const guardados = new Map(
+      (await this.prisma.$queryRawUnsafe<{ codigo: string; tipo: string | null }[]>(
+        `SELECT codigo, tipo_respuesta AS tipo FROM encuesta_pregunta WHERE tenant_id = $1::uuid`,
+        tenantId,
+      )).map((r) => [r.codigo, r.tipo]),
+    );
+    b = { ...b, preguntas: b.preguntas.map((p) => ({ ...p, tipoRespuesta: p.tipoRespuesta ?? ((guardados.get(p.codigo) as any) || "nota") })) };
     const errores = b.preguntas.flatMap((p) => erroresPregunta(p));
     const codigos = b.preguntas.map((p) => p.codigo);
     if (new Set(codigos).size !== codigos.length) errores.push("Hay códigos de pregunta repetidos.");
