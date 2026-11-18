@@ -166,4 +166,6 @@ align_tercer_envio_comercial.sql
 align_tercer_envio_bpch.sql
 align_tercer_envio_alimentos.sql
 seed_tercer_envio_demo.sql           demo
+align_cuarto_envio_tasa.sql
+seed_cuarto_envio_tasa_demo.sql      demo
 align_cierre_permisos.sql

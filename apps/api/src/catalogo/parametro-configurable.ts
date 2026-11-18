@@ -852,6 +852,46 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       difusion: { tipo: "multiple", nombre: "Destinatarios de la difusión", opciones: DIFUSION_TASA, porDefecto: "DIRECCION,SUBDIRECCION,BPCH,CONTRALORIA,DFZ" },
     },
   },
+  // --- Cuarto envío IDIC (17-11-2026, COM-03): carta al cliente de la tasa 1,5 % ---
+  {
+    categoria: "tasa_carta",
+    titulo: "Carta al cliente de la tasa 1,5 % (internaciones)",
+    donde:
+      "Internaciones › ficha › Tasa de internación › «Carta al cliente (PDF)»: textos de la carta con que el Departamento Comercial avisa que los certificados están disponibles y cómo pagar. Un párrafo vacío no se imprime.",
+    porConfirmar: "Datos de pago del IDIC (cuenta corriente, correo y teléfono para informar transferencias y depósitos): los completa el IDIC en los párrafos 2 y 3.",
+    codigos: {
+      referencia: { tipo: "texto", nombre: "Referencia legal", largo: 120, porDefecto: "Ley 17.798 «Control de armas»" },
+      parrafo_1: {
+        tipo: "texto",
+        nombre: "Párrafo 1 · certificados disponibles",
+        largo: 1000,
+        porDefecto:
+          "En conformidad a lo dispuesto en el cuerpo legal citado en «Referencia» y efectuada la inspección al producto individualizado en la Resolución que se señala, se informa a usted que el (los) certificado(s) correspondiente(s) se encuentra(n) a su disposición para ser retirado(s) en nuestras oficinas.",
+      },
+      parrafo_2: {
+        tipo: "texto",
+        nombre: "Párrafo 2 · formas de pago",
+        largo: 1000,
+        ayuda: "Agregue aquí los datos de la cuenta para transferencias y el correo donde se informa el pago. Hasta 1.000 caracteres.",
+        porDefecto: "El pago puede ser realizado en efectivo o con cheque nominativo y cruzado a nombre del «Instituto de Investigaciones y Control del Ejército».",
+      },
+      parrafo_3: {
+        tipo: "texto",
+        nombre: "Párrafo 3 · depósitos directos",
+        largo: 1000,
+        ayuda: "P. ej. a qué correo remitir el comprobante de depósito y a qué teléfono confirmar su recepción. Vacío = no se imprime.",
+        porDefecto: "",
+      },
+      parrafo_4: {
+        tipo: "texto",
+        nombre: "Párrafo 4 · plazo de retiro",
+        largo: 1000,
+        porDefecto:
+          "En caso que los certificados no sean pagados y retirados en el plazo de 15 días, contados a partir de la fecha de la presente carta, estos serán remitidos a vuestra empresa mediante correo certificado, junto con la factura correspondiente para su pago.",
+      },
+      firma_cargo: { tipo: "texto", nombre: "Cargo de quien firma la carta y la Comunicación Breve", largo: 120, requerido: true, porDefecto: "Jefe Departamento Comercial" },
+    },
+  },
   // --- Muestreo y veredicto del lote (frente r2b, T13 y T11) ---
   {
     categoria: "muestreo_plan",
@@ -1285,6 +1325,8 @@ export const LISTAS_PARAMETROS: ListaParametro[] = [
   { categoria: "clasificacion_vehiculo", nombre: "Clasificación del vehículo" },
   { categoria: "producto_lab", nombre: "Producto por laboratorio" },
   { categoria: "bpch_motivo_reinspeccion", nombre: "Motivo de reinspección (BPCH)" },
+  // COM-03 (cuarto envío IDIC): la agencia de aduana del cálculo de la tasa 1,5 % se elige de esta lista (o se escribe).
+  { categoria: "agencia_aduana", nombre: "Agencia de aduana (tasa de internación)" },
   { categoria: "clase_division_onu", nombre: "Clase / división ONU" },
   { categoria: "grupo_compatibilidad_onu", nombre: "Grupo de compatibilidad ONU" },
   { categoria: "certificado_calibracion", nombre: "Certificado de calibración (Metrología)", alta: false },

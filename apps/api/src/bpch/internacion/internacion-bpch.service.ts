@@ -17,17 +17,23 @@ import {
   erroresItems,
   erroresLote,
   erroresLoteParaMuestra,
+  erroresReparto,
   erroresTasa,
   faltantesRemision,
+  repartirTasa,
   normalizarCnc,
   transicionDocAdm,
   lineaBitacoraDocAdm,
 } from "../comun/reglas-bpch";
 import { importesTasaInternacion, numeroBorrador } from "../../facturacion/reglas-factura";
 import { ListadoArmaBody, erroresListadoArmas, guardarListadoArmas, leerListadoArmas } from "../../saec/d11/listado-armas";
-import { diaChile } from "../../common/fecha-chile";
+import { diaChile, hoyChile } from "../../common/fecha-chile";
 import { revisarBateria } from "../comun/bateria";
 import { preMontoCl } from "../../common/monto-cl";
+import { valoresCategoria } from "../../common/parametros-r4d";
+import { defConfigurable } from "../../catalogo/parametro-configurable";
+import { documentoTasa, pdfDocumentoTasa, textoReparto, type DatosDocumentosTasa, type TipoDocumentoTasa } from "./documentos-tasa";
+import { documentoCompleto } from "../../plantilla-render/plantilla-defecto";
 
 /** Monto que la pantalla puede mandar como número o como texto chileno («184.500»): F001. */
 const montoCL = (t: z.ZodNumber) => z.preprocess(preMontoCl, t.optional().nullable());
@@ -128,12 +134,33 @@ const LotesBody = z.object({
     .max(50),
 });
 
+/** Monto opcional en pesos o US$ (0 o más; vacío = 0) con el mensaje del concepto. */
+const montoOpcional = (concepto: string) =>
+  montoCL(z.number({ invalid_type_error: `${concepto}: escriba un monto con punto de miles y coma decimal (p. ej. 1.250.000).` }).min(0, `${concepto} no puede ser negativo.`).max(1e13));
+
 const TasaBody = z.object({
   cifUsd: z.preprocess(preMontoCl, z.number({ invalid_type_error: "Escriba el CIF con punto de miles y coma decimal (p. ej. 184.500,50)." })),
   paridad: z.preprocess(preMontoCl, z.number({ invalid_type_error: "Escriba la paridad con coma decimal (p. ej. 950,25)." })),
   pctAfecto: z.preprocess(preMontoCl, z.number().default(100)),
   tasaPct: z.number().optional(),
   ivaPct: z.number().optional(),
+  // COM-03 (cuarto envío IDIC): conceptos adicionales de la base, todos opcionales (vacío = 0).
+  adValoremUsd: montoOpcional("El ad valorem (US$)"),
+  fleteNacional: montoOpcional("El flete nacional"),
+  agenciaTotalFactura: montoOpcional("El total de la factura de la agencia"),
+  agenciaIvaInternacion: montoOpcional("El IVA de internación de la factura de la agencia"),
+  otrosGastosCliente: montoOpcional("Los otros gastos por cuenta del cliente"),
+  // Datos del expediente para la Comunicación Breve.
+  dinNumero: opcional(40),
+  facturaAgenciaNumero: opcional(40),
+  facturaAgenciaEmisor: opcional(200),
+  facturaTransporteNumero: opcional(40),
+  facturaTransporteEmisor: opcional(200),
+  fechaRecepcionSdbpch: fechaDia.optional().nullable(),
+  /** Código de la agencia en la lista «Agencia de aduana» (Administración › Parámetros del sistema)… */
+  agenciaAduanaCodigo: opcional(60),
+  /** …o su nombre escrito, si no está en la lista. */
+  agenciaAduana: opcional(200),
 });
 
 const CodificacionBody = z.object({
@@ -274,12 +301,28 @@ export class InternacionBpchService {
       `SELECT t.id, t.monto_cif_usd::float8 AS "cifUsd", t.paridad_usd::float8 AS paridad, t.monto_cif_clp::float8 AS "cifClp",
               t.pct_afecto::float8 AS "pctAfecto", t.tasa_pct::float8 AS "tasaPct", t.iva_pct::float8 AS "ivaPct",
               t.monto_operacion::float8 AS tasa, t.iva_internacion::float8 AS iva, t.total_a_cancelar::float8 AS total,
-              t.calculado_at AS "calculadoAt", u.nombre_completo AS "calculadoPorNombre", t.factura_id AS "facturaId"
+              t.calculado_at AS "calculadoAt", u.nombre_completo AS "calculadoPorNombre", t.factura_id AS "facturaId",
+              COALESCE(t.ad_valorem_usd, 0)::float8 AS "adValoremUsd", COALESCE(t.ad_valorem_clp, 0)::float8 AS "adValoremClp",
+              COALESCE(t.flete_nacional, 0)::float8 AS "fleteNacional",
+              COALESCE(t.agencia_total_factura, 0)::float8 AS "agenciaTotalFactura",
+              COALESCE(t.agencia_iva_internacion, 0)::float8 AS "agenciaIvaInternacion",
+              COALESCE(t.otros_gastos_cliente, 0)::float8 AS "otrosGastosCliente",
+              COALESCE(t.base_calculo, t.monto_cif_clp)::float8 AS "baseCalculo",
+              COALESCE(t.base_afecta, round(t.monto_cif_clp * t.pct_afecto / 100))::float8 AS "baseAfecta",
+              t.din_numero AS "dinNumero", t.factura_agencia_numero AS "facturaAgenciaNumero", t.factura_agencia_emisor AS "facturaAgenciaEmisor",
+              t.factura_transporte_numero AS "facturaTransporteNumero", t.factura_transporte_emisor AS "facturaTransporteEmisor",
+              t.fecha_recepcion_sdbpch AS "fechaRecepcionSdbpch", t.agencia_aduana_codigo AS "agenciaAduanaCodigo", t.agencia_aduana AS "agenciaAduana",
+              t.distribucion_cc AS reparto
          FROM calculo_tasa_internacion t LEFT JOIN usuario u ON u.id = t.calculado_por
         WHERE t.internacion_id = $1::uuid ORDER BY t.calculado_at DESC LIMIT 1`,
       id,
     );
-    return t ?? null;
+    if (!t) return null;
+    t.agenciaNeto = t.agenciaTotalFactura - t.agenciaIvaInternacion;
+    t.fechaRecepcionSdbpch = diaChile(t.fechaRecepcionSdbpch);
+    // Un cálculo anterior a COM-03 no guardó el reparto: se muestra vacío (la CB lo calcula con los % vigentes).
+    t.reparto = Array.isArray(t.reparto) ? t.reparto : null;
+    return t;
   }
 
   async detalle(req: any, id: string) {
@@ -896,14 +939,27 @@ export class InternacionBpchService {
       tasaPct: dto.tasaPct ?? prm.tasaPct ?? NaN,
       // Exenta de IVA: calcularTasa no lo aplica (IDIC, 10-11-2026).
       ivaPct: dto.ivaPct ?? prm.ivaPct ?? undefined,
+      adValoremUsd: dto.adValoremUsd ?? 0,
+      fleteNacional: dto.fleteNacional ?? 0,
+      agenciaTotalFactura: dto.agenciaTotalFactura ?? 0,
+      agenciaIvaInternacion: dto.agenciaIvaInternacion ?? 0,
+      otrosGastosCliente: dto.otrosGastosCliente ?? 0,
     };
-    const errores = erroresTasa(entrada);
+    const errores = [...erroresTasa(entrada), ...erroresReparto(prm.reparto)];
     if (errores.length) throw new BadRequestException(errores.join(" "));
     const r = calcularTasa(entrada);
+    // Reparto por centro de costo con los % vigentes (bpch_tasa.reparto_*_pct); queda guardado con el cálculo.
+    const reparto = repartirTasa(r.tasa, prm.reparto);
+    const agencia = await this.agenciaAduana(tenantId, dto.agenciaAduanaCodigo, dto.agenciaAduana);
+    const texto = (v: string | null | undefined) => v?.trim() || null;
     await this.prisma.$executeRawUnsafe(
       `INSERT INTO calculo_tasa_internacion (tenant_id, ot_id, cliente_id, internacion_id, monto_cif_usd, paridad_usd, monto_cif_clp, pct_afecto,
-              tasa_pct, iva_pct, monto_operacion, iva_internacion, total_a_cancelar, calculado_por)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::uuid)`,
+              tasa_pct, iva_pct, monto_operacion, iva_internacion, total_a_cancelar, calculado_por,
+              ad_valorem_usd, ad_valorem_clp, flete_nacional, agencia_total_factura, agencia_iva_internacion, otros_gastos_cliente,
+              base_calculo, base_afecta, din_numero, factura_agencia_numero, factura_agencia_emisor, factura_transporte_numero,
+              factura_transporte_emisor, fecha_recepcion_sdbpch, agencia_aduana_codigo, agencia_aduana, distribucion_cc)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::uuid,
+               $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28::date, $29, $30, $31::jsonb)`,
       tenantId,
       i.ot_id,
       i.cliente_id,
@@ -918,8 +974,43 @@ export class InternacionBpchService {
       r.iva,
       r.total,
       usuarioDe(req),
+      r.adValoremUsd,
+      r.adValoremClp,
+      r.fleteNacional,
+      r.agenciaTotalFactura,
+      r.agenciaIvaInternacion,
+      r.otrosGastosCliente,
+      r.baseCalculo,
+      r.baseAfecta,
+      texto(dto.dinNumero) ?? texto(i.documento_aduanero),
+      texto(dto.facturaAgenciaNumero),
+      texto(dto.facturaAgenciaEmisor) ?? agencia.nombre,
+      texto(dto.facturaTransporteNumero),
+      texto(dto.facturaTransporteEmisor),
+      dto.fechaRecepcionSdbpch ?? diaChile(i.doc_adm_recibida_at) ?? null,
+      agencia.codigo,
+      agencia.nombre,
+      JSON.stringify(reparto),
     );
     return this.detalle(req, id);
+  }
+
+  /**
+   * Agencia de aduana del cálculo: un código de la lista «Agencia de aduana»
+   * (Administración › Parámetros del sistema; activa) o un nombre escrito a
+   * mano si no está en la lista.
+   */
+  private async agenciaAduana(tenantId: string, codigo: string | null | undefined, nombre: string | null | undefined) {
+    if (codigo?.trim()) {
+      const [f] = await this.prisma.$queryRawUnsafe<{ codigo: string; etiqueta: string }[]>(
+        `SELECT codigo, etiqueta FROM parametro_sistema WHERE tenant_id = $1::uuid AND categoria = 'agencia_aduana' AND codigo = $2 AND activo`,
+        tenantId,
+        codigo.trim(),
+      );
+      if (!f) throw new BadRequestException("La agencia de aduana elegida no está en la lista vigente: elíjala de nuevo o escriba su nombre.");
+      return { codigo: f.codigo, nombre: f.etiqueta };
+    }
+    return { codigo: null, nombre: nombre?.trim() || null };
   }
 
   /**
@@ -943,7 +1034,7 @@ export class InternacionBpchService {
     const usuario = usuarioDe(req);
     const lineas = [
       {
-        descripcion: `Tasa de internación ${Number(tasa.tasaPct).toLocaleString("es-CL")} % · ${i.numero} · Res. DGMN ${i.resolucion_numero} · CIF US$ ${Number(tasa.cifUsd).toLocaleString("es-CL")} × ${Number(tasa.paridad).toLocaleString("es-CL")}${Number(tasa.pctAfecto) !== 100 ? ` × ${tasa.pctAfecto} % afecto` : ""}`.slice(0, 500),
+        descripcion: `Tasa de internación ${Number(tasa.tasaPct).toLocaleString("es-CL")} % · ${i.numero} · Res. DGMN ${i.resolucion_numero} · base $ ${Math.round(Number(tasa.baseCalculo)).toLocaleString("es-CL")} (CIF US$ ${Number(tasa.cifUsd).toLocaleString("es-CL")} × ${Number(tasa.paridad).toLocaleString("es-CL")}${Number(tasa.baseCalculo) !== Number(tasa.cifClp) ? " + gastos de internación" : ""})${Number(tasa.pctAfecto) !== 100 ? ` × ${tasa.pctAfecto} % afecto` : ""}`.slice(0, 500),
         cantidad: 1,
         precioUnitario: tasa.tasa,
         subtotal: tasa.tasa,
@@ -953,7 +1044,10 @@ export class InternacionBpchService {
     // aunque el cálculo de la tasa muestre IVA: la factura nace con IVA 0 %.
     const t = importesTasaInternacion(lineas);
     const ivaPct = t.ivaPct;
-    const obs = `Tasa de internación remitida por BPCH (${i.numero}). Documento final: ${final!.numero ?? ""}.`;
+    // La factura tiene UN centro de costo (no por línea): el reparto de la tasa (COM-03) se informa en la observación y en la CB.
+    const unidad = { codigo: i.unidad_codigo, nombre: i.unidad_nombre };
+    const reparto = tasa.reparto ?? repartirTasa(tasa.tasa, (await this.comun.parametros(tenantId)).reparto);
+    const obs = `Tasa de internación remitida por BPCH (${i.numero}). Documento final: ${final!.numero ?? ""}. ${textoReparto(reparto, unidad)}`;
     const ot = await this.comun.ot(tenantId, i.ot_id);
     const facturaId = await this.prisma.$transaction(async (tx) => {
       const [bloq] = await tx.$queryRawUnsafe<{ remitida_dco_at: Date | null }[]>(`SELECT remitida_dco_at FROM bpch_internacion WHERE id = $1::uuid FOR UPDATE`, id);
@@ -1008,6 +1102,64 @@ export class InternacionBpchService {
     });
     const detalle = await this.detalle(req, id);
     return { ...detalle, facturaId };
+  }
+
+  /* ------------------------------ Comunicación Breve y carta al cliente --- */
+
+  /**
+   * Datos de la Comunicación Breve y de la carta al cliente (COM-03): último
+   * cálculo de la tasa, cliente, certificados oficiales de la OT y textos de
+   * la carta (Administración › Parámetros del sistema › tasa_carta).
+   */
+  private async datosDocumentosTasa(req: any, id: string): Promise<DatosDocumentosTasa> {
+    const tenantId = tenantDe(req);
+    const i = await this.cargar(req, id);
+    if (!i.sujeta_tasa) throw new ConflictException(`La internación ${i.numero} no está sujeta a la tasa.`);
+    const tasa = await this.tasa(id);
+    if (!tasa) throw new ConflictException("Calcule la tasa antes de emitir la Comunicación Breve o la carta al cliente.");
+    const [[cl], [ot], certificados, valores, prm] = await Promise.all([
+      this.prisma.$queryRawUnsafe<any[]>(
+        `SELECT razon_social AS "razonSocial", rut, direccion, comuna, telefono, email::text AS email FROM cliente WHERE id = $1::uuid`,
+        i.cliente_id,
+      ),
+      this.prisma.$queryRawUnsafe<any[]>(`SELECT codigo FROM orden_trabajo WHERE id = $1::uuid`, i.ot_id),
+      this.prisma.$queryRawUnsafe<{ numero: string; tipo: string }[]>(
+        `SELECT c.numero, c.tipo_documento AS tipo FROM certificado c
+          WHERE c.ot_id = $1::uuid AND c.deleted_at IS NULL AND c.estado IN ('oficial', 'emitido')
+            AND c.tipo_documento IN ('CERTIFICADO_CONFORMIDAD', 'INFORME_INCUMPLIMIENTO') AND c.numero IS NOT NULL
+          ORDER BY c.numero`,
+        i.ot_id,
+      ),
+      valoresCategoria(this.prisma, tenantId, "tasa_carta"),
+      this.comun.parametros(tenantId),
+    ]);
+    // Textos de la carta: lo guardado en Administración o, si falta la fila, el texto por defecto.
+    const t = (codigo: string) => valores[codigo] ?? defConfigurable("tasa_carta", codigo)?.porDefecto ?? "";
+    return {
+      otCodigo: ot?.codigo ?? i.numero,
+      internacionNumero: i.numero,
+      resolucionNumero: i.resolucion_numero,
+      resolucionFecha: diaChile(i.resolucion_fecha),
+      fecha: hoyChile(),
+      cliente: cl ?? { razonSocial: i.empresa, rut: i.empresa_rut },
+      unidad: { codigo: i.unidad_codigo, nombre: i.unidad_nombre },
+      calculo: tasa,
+      reparto: tasa.reparto ?? repartirTasa(tasa.tasa, prm.reparto),
+      certificados: certificados.map((c) => ({ numero: c.numero, condicion: c.tipo === "INFORME_INCUMPLIMIENTO" ? "NO CUMPLE" : "CUMPLE" })),
+      textos: {
+        referencia: t("referencia"),
+        parrafos: ["parrafo_1", "parrafo_2", "parrafo_3", "parrafo_4"].map(t),
+        firmaCargo: t("firma_cargo") || "Jefe Departamento Comercial",
+      },
+    };
+  }
+
+  /** Comunicación Breve o carta al cliente de la tasa, en HTML o PDF. */
+  async documentoTasa(req: any, id: string, tipo: TipoDocumentoTasa, formato: "html" | "pdf") {
+    const d = await this.datosDocumentosTasa(req, id);
+    if (formato === "pdf") return pdfDocumentoTasa(tipo, d);
+    const x = documentoTasa(tipo, d);
+    return { html: documentoCompleto(x.cuerpo, x.sello, x.titulo) };
   }
 
   /* --------------------------------------------------- Codificación Única --- */

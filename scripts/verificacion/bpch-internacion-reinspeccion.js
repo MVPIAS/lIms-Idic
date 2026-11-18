@@ -511,12 +511,34 @@ async function main() {
     afirmar(C.A.tasa.tasa === 2615841, `tasa ${C.A.tasa.tasa} (esperado 2.615.841)`);
     // La tasa de internación está exenta de IVA (IDIC, 10-11-2026): el total es la tasa.
     afirmar(C.A.tasa.total === 2615841, `total ${C.A.tasa.total} (exenta de IVA)`);
+    // COM-03 (cuarto envío IDIC): base = CIF $ + ad valorem $ + flete + (factura de la agencia − IVA de
+    // internación) + otros gastos; reparto 85/10/5 que suma la tasa; agencia de la lista (PRUEBA, seed demo).
+    await exigir(400, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, agenciaTotalFactura: 100, agenciaIvaInternacion: 200 });
+    await exigir(400, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 184500, paridad: 945.2, agenciaAduanaCodigo: "NO_EXISTE" });
+    C.A = await ok(U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, {
+      cifUsd: 184500, paridad: 945.2, pctAfecto: 100, adValoremUsd: 100, fleteNacional: "1.190.000",
+      agenciaTotalFactura: 5000000, agenciaIvaInternacion: 3500000, otrosGastosCliente: 10000,
+      dinNumero: "DIN-PRUEBA-1", facturaAgenciaNumero: "A-PRUEBA-1", facturaTransporteNumero: "T-PRUEBA-1",
+      facturaTransporteEmisor: "Transportes PRUEBA", fechaRecepcionSdbpch: hoy(), agenciaAduanaCodigo: "PRUEBA_1",
+    });
+    afirmar(C.A.tasa.baseCalculo === 177183920, `base ${C.A.tasa.baseCalculo} (esperado 177.183.920)`);
+    afirmar(C.A.tasa.tasa === 2657759 && C.A.tasa.total === 2657759, `tasa ${C.A.tasa.tasa} (esperado 2.657.759)`);
+    afirmar(C.A.tasa.agenciaAduana === "Agencia de aduana PRUEBA 1" && C.A.tasa.facturaAgenciaEmisor === "Agencia de aduana PRUEBA 1", `agencia ${C.A.tasa.agenciaAduana}`);
+    afirmar(JSON.stringify(C.A.tasa.reparto.map((p) => p.monto)) === "[2259095,265777,132887]", `reparto ${JSON.stringify(C.A.tasa.reparto)}`);
+    await exigir(403, U.inspector, "GET", `/bpch/internaciones/${C.A.id}/tasa/comunicacion-breve?formato=pdf`);
+    for (const doc of ["comunicacion-breve", "carta-cliente"]) {
+      const pdf = await exigir(200, U.ventas, "GET", `/bpch/internaciones/${C.A.id}/tasa/${doc}?formato=pdf`);
+      afirmar(String(pdf).startsWith("%PDF"), `${doc}: no es un PDF`);
+    }
+    const cb = await exigir(200, U.ventas, "GET", `/bpch/internaciones/${C.A.id}/tasa/comunicacion-breve?formato=html`);
+    afirmar(String(cb).includes("COMUNICACIÓN BREVE") && String(cb).includes("$ 2.657.759") && String(cb).includes("DIN-PRUEBA-1"), "la CB no trae el cálculo");
     const r = await ok(U.ventas, "POST", `/bpch/internaciones/${C.A.id}/remitir-facturacion`);
     C.facturaA = r.facturaId;
     await exigir(409, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/remitir-facturacion`);
     await exigir(409, U.ventas, "POST", `/bpch/internaciones/${C.A.id}/tasa`, { cifUsd: 1, paridad: 1 });
     const f = await ok(U.finanzas, "GET", `/facturas/${C.facturaA}`);
     afirmar(f.estado === "pendiente" && Number(f.total) === C.A.tasa.total && f.lineas.length === 1, `factura ${f.estado} ${f.total}`);
+    afirmar(/Cargar a centro de costo: Sucursal .* DTCG 10 % \$ 265\.777/.test(f.observaciones ?? ""), `observación de la factura: ${f.observaciones}`);
     afirmar((await avanceEnListado(U.ventas, C.A.id)) === "tasa_remitida", "el listado no muestra la tasa remitida");
     return `tasa $${C.A.tasa.tasa} + IVA = $${C.A.tasa.total} · factura ${f.numero} pendiente`;
   });
