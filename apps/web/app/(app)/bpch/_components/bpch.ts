@@ -12,7 +12,13 @@ export type Unidad = { id: string; codigo: string; nombre: string; tipo: string 
 export type PlantillaBpch = { id: string; repid: string; nombre: string };
 export type ConfigBpch = {
   unidades: Unidad[];
-  parametros: { tasaPct: number | null; ivaPct: number | null; motivosReinspeccion: { codigo: string; etiqueta: string }[] };
+  parametros: {
+    tasaPct: number | null;
+    ivaPct: number | null;
+    /** Reparto de la tasa por centro de costo en % (COM-03): sucursal, dtcg, sdbpch. */
+    reparto?: Record<string, number>;
+    motivosReinspeccion: { codigo: string; etiqueta: string }[];
+  };
   plantillas: Record<"INFORME_INSPECCION" | "CERTIFICADO_CONFORMIDAD" | "INFORME_INCUMPLIMIENTO", PlantillaBpch[]>;
 };
 
