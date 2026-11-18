@@ -53,7 +53,7 @@ describe("Comunicación Breve de la tasa (COM-03)", () => {
   it("desglosa el cálculo: CIF, factura de la agencia menos IVA de internación, flete, % afecto y TOTAL A CANCELAR", () => {
     expect(html).toContain("$ 9.500.000");
     expect(html).toContain("Fact. Nº A-1 de Agencia de aduana PRUEBA 1");
-    expect(html).toContain("&minus; $ 1.805.000");
+    expect(html).toContain("- $ 1.805.000");
     expect(html).toContain("Fact. Nº T-9 de Transportes PRUEBA");
     expect(html).toContain("$ 11.885.000"); // base
     expect(html).toContain("TOTAL A CANCELAR");
