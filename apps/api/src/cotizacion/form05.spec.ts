@@ -98,6 +98,83 @@ describe("Formulario de costeo FORM05 (EP-00 2.5)", () => {
   });
 });
 
+describe("FORM05 · cuarto envío del IDIC (US$ al extranjero, tipo de cambio con fecha, dos precios Ejército)", () => {
+  const oficial = { cfaPct: 20, margenParticularPct: 30, ivaPct: 19 };
+  // Comisión PRUEBA al extranjero con la estructura del formulario real FORM-…/003 (montos inventados).
+  const comision = {
+    viaticos: [
+      { ambito: "extranjero" as const, zona: "País PRUEBA", grado: "14 al 16", dias: 10, montoDiario: 200, porcentaje: 100, moneda: "USD" as const },
+      { ambito: "extranjero" as const, zona: "País PRUEBA", grado: "14 al 16", dias: 1, montoDiario: 200, porcentaje: 40, moneda: "USD" as const },
+    ],
+    pasajes: [{ ambito: "extranjero" as const, tramo: "Santiago - PRUEBA - Santiago", cantidad: 2, valorUnitario: 1500, moneda: "USD" as const }],
+    otros: [
+      { descripcion: "Gasto en pesos PRUEBA", monto: 100000, moneda: "CLP" as const },
+      { descripcion: "Fondo global PRUEBA", monto: 500, moneda: "USD" as const },
+    ],
+    dolar: 900,
+    dolarFecha: "2026-11-02",
+  };
+
+  it("convierte viáticos y pasajes en US$ con el dólar del formulario y separa nacionales / extranjero / pesos / dólar", () => {
+    const r = calcularForm05(comision, oficial);
+    // Viáticos: US$ 2.000 + US$ 80 = US$ 2.080 × 900; pasajes: US$ 3.000 × 900; otros: 100.000 + US$ 500 × 900.
+    expect(r.secciones).toMatchObject({ viaticos: 1872000, pasajes: 2700000, otros: 550000 });
+    expect(r.detalle).toMatchObject({ viaticosNacionales: 0, viaticosExtranjero: 1872000, pasajesNacionales: 0, pasajesExtranjero: 2700000, otrosPesos: 100000, otrosDolar: 450000 });
+    expect(r.cdt).toBe(5122000);
+    expect(r.dolar).toBe(900);
+    expect(r.dolarFecha).toBe("2026-11-02");
+  });
+
+  it("montos finales en US$ = $ / dólar (3 decimales)", () => {
+    const r = calcularForm05(comision, oficial);
+    expect(r.usd!.detalle.viaticosExtranjero).toBe(2080);
+    expect(r.usd!.detalle.pasajesExtranjero).toBe(3000);
+    expect(r.usd!.detalle.otrosPesos).toBe(111.111);
+    expect(r.usd!.cdt).toBe(5691.111);
+    expect(r.usd!.ct).toBe(Math.round((r.ct / 900) * 1000) / 1000);
+    expect(r.usd!.precioParticular).toBe(Math.round((r.precioParticular / 900) * 1000) / 1000);
+    // Sin dólar no hay columna en US$.
+    expect(calcularForm05({ servicios: [{ codigo: "EN1", cantidad: 1, valorUnitario: 1000 }] }, oficial).usd).toBeNull();
+  });
+
+  it("sin moneda la fila es en pesos (costeos guardados antes): mismo resultado que antes", () => {
+    const antes = calcularForm05({ viaticos: [{ ambito: "nacional", zona: "Arica", grado: "X", dias: 2, montoDiario: 50000, porcentaje: 40 }], pasajes: [{ ambito: "nacional", tramo: "SCL-ARI", cantidad: 1, valorUnitario: 90000 }] }, oficial);
+    expect(antes.secciones).toMatchObject({ viaticos: 40000, pasajes: 90000 });
+    expect(antes.detalle).toMatchObject({ viaticosNacionales: 40000, pasajesNacionales: 90000 });
+  });
+
+  it("los dos precios Ejército del formulario real (notas 3 y 4); el parámetro decide cuál se aplica, sin cambiar el precio de hoy", () => {
+    const f = {
+      horasHombre: [
+        { tipo: "civil" as const, categoria: "Civil PRUEBA", horas: 10, valorHora: 10000 },
+        { tipo: "militar" as const, categoria: "Militar PRUEBA", horas: 5, valorHora: 8000 },
+      ],
+    };
+    const cd = calcularForm05(f, { ...oficial, precioEjercito: "costo_directo" });
+    expect(cd.cdt).toBe(140000);
+    expect(cd.ct).toBe(168000);
+    expect(cd.horasHombreMilitar).toBe(40000);
+    // Nota 3: CT sin la H.H. militar, con su CFA: 168.000 − 40.000.
+    expect(cd.precioEjercitoCt).toBe(128000);
+    // Nota 4: costo directo sin CFA ni H.H. militar: 140.000 − 40.000 (el «costo_directo» de siempre).
+    expect(cd.precioEjercitoCostoDirecto).toBe(100000);
+    expect(cd.precioEjercitoAplicado).toBe("costo_directo");
+    expect(cd.precioEjercito).toBe(100000);
+    const ct = calcularForm05(f, { ...oficial, precioEjercito: "costo_total" });
+    expect(ct.precioEjercitoAplicado).toBe("costo_total");
+    expect(ct.precioEjercito).toBe(168000);
+    expect([ct.precioEjercitoCt, ct.precioEjercitoCostoDirecto]).toEqual([128000, 100000]);
+  });
+
+  it("exige dólar y fecha si hay montos en US$; los nacionales no van en US$", () => {
+    expect(erroresForm05(comision)).toEqual([]);
+    expect(erroresForm05({ ...comision, dolar: null })[0]).toMatch(/dólar/);
+    expect(erroresForm05({ ...comision, dolarFecha: null })).toEqual(["Indique la fecha del tipo de cambio del dólar."]);
+    expect(erroresForm05({ pasajes: [{ ambito: "nacional", tramo: "SCL-ARI", cantidad: 1, valorUnitario: 100, moneda: "USD" }], dolar: 900, dolarFecha: "2026-11-02" })[0]).toMatch(/nacionales van en pesos/);
+    expect(erroresForm05({ pasajes: [{ ambito: "nacional", tramo: "SCL-ARI", cantidad: 1, valorUnitario: 100 }] })).toEqual([]);
+  });
+});
+
 describe("Cotización del DSA · comisión, Programa de Trabajo LEM y reposición LRB (EP-05 0.2, BL-151)", () => {
   const { exigeCosteo, cantidadConReposicion, erroresPrograma } = require("./form05") as typeof import("./form05");
   it("la comisión, como el servicio no estandarizado, exige el formulario de costeo", () => {
