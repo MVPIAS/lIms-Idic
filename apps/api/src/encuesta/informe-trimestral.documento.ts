@@ -32,6 +32,15 @@ function seccionHtml(inf: InformeTrimestral, s: SeccionInforme): string {
   const obs = s.observaciones.length
     ? `<h2>Observaciones señaladas por los encuestados</h2><ul>${s.observaciones.map((o) => `<li><b>${esc(o.referencia)}</b> (${esc(o.grupo)}): ${esc(o.texto)}</li>`).join("")}</ul>`
     : "";
+  const abiertas = s.abiertas
+    .map(
+      (p) =>
+        `<h2>${esc(p.pregunta)}</h2>` +
+        (p.respuestas.length
+          ? `<ul>${p.respuestas.map((r) => `<li><b>${esc(r.referencia)}</b> (${esc(r.grupo)}): ${esc(r.texto)}</li>`).join("")}</ul>`
+          : `<p class="nota">Sin respuestas en el trimestre.</p>`),
+    )
+    .join("");
   const a = s.aplicacion;
   const dist = t.distribucion.length ? `<p><b>DISTRIBUCIÓN:</b></p><ol>${t.distribucion.map((d) => `<li>${esc(d)}</li>`).join("")}</ol>` : "";
   return `
@@ -63,6 +72,7 @@ function seccionHtml(inf: InformeTrimestral, s: SeccionInforme): string {
   <thead><tr><th>${g}</th><th class="num">EVALUACIÓN PROMEDIO</th><th class="num">ÍNDICE SATISFACCIÓN PROMEDIO</th></tr></thead>
   <tbody>${grupos}</tbody>
 </table>
+${abiertas}
 ${obs}
 <h2>Control de aplicación de las encuestas</h2>
 <table class="rep compacta">
@@ -123,6 +133,12 @@ export function hojasInforme(inf: InformeTrimestral): Hoja[] {
     filas.push([]);
     filas.push([g, "Contestadas", "Evaluación promedio", "Índice promedio (%)"]);
     for (const x of s.grupos) filas.push([x.grupo, x.contestadas, r1(x.promedio), r0(x.indice)]);
+    for (const p of s.abiertas) {
+      filas.push([]);
+      filas.push([p.pregunta.toUpperCase()]);
+      if (p.respuestas.length) for (const r of p.respuestas) filas.push([`${r.grupo} / ${r.referencia}: ${r.texto}`]);
+      else filas.push(["Sin respuestas."]);
+    }
     filas.push([]);
     filas.push(["OBSERVACIONES SEÑALADAS POR ENCUESTADOS"]);
     if (s.observaciones.length) for (const o of s.observaciones) filas.push([`${o.grupo} / ${o.referencia}: ${o.texto}`]);
