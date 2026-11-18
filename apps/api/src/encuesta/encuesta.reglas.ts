@@ -9,11 +9,17 @@
  * (criterios 01–04, escala 1/3/5/7). Son editables (encuesta_pregunta).
  */
 
+/** nota = el cliente pone una nota de la escala · texto = pregunta abierta (no entra en promedios). */
+export const TIPOS_RESPUESTA = ["nota", "texto"] as const;
+export type TipoRespuesta = (typeof TIPOS_RESPUESTA)[number];
+
 export interface Pregunta {
   codigo: string;
   texto: string;
   escala: number[];
   obligatoria: boolean;
+  /** Por defecto «nota». */
+  tipoRespuesta?: TipoRespuesta | null;
   /** Si la nota es menor que este valor, el comentario es obligatorio (FORM01 criterio 4: menor que 4,0). */
   comentarioSiMenor?: number | null;
 }
@@ -21,13 +27,27 @@ export interface Pregunta {
 export interface RespuestaEntrada {
   codigo: string;
   valor?: number | null;
+  /** Respuesta de una pregunta abierta. */
+  respuesta?: string | null;
 }
 
 export interface RespuestaGuardada {
   codigo: string;
+  /** Texto de la pregunta. */
   texto: string;
   valor: number | null;
   escala: number[];
+  /** Solo en las preguntas abiertas. */
+  tipo?: "texto";
+  respuesta?: string | null;
+}
+
+/** Largo máximo de la respuesta de una pregunta abierta. */
+export const MAX_RESPUESTA_TEXTO = 2000;
+
+/** ¿Es una pregunta (o respuesta guardada) abierta, de texto? No entra en promedios ni índices. */
+export function esPreguntaTexto(p: { tipoRespuesta?: string | null; tipo?: string | null } | null | undefined): boolean {
+  return p?.tipoRespuesta === "texto" || p?.tipo === "texto";
 }
 
 export const ESTADOS_ENCUESTA = ["pendiente", "registrada", "sin_respuesta"] as const;
@@ -37,6 +57,13 @@ export const ETIQUETA_ESTADO: Record<string, string> = {
   sin_respuesta: "Cerrada sin respuesta",
 };
 export const MEDIOS = ["telefono", "correo", "presencial", "formulario_fisico"] as const;
+export type Medio = (typeof MEDIOS)[number];
+export const ETIQUETA_MEDIO: Record<Medio, string> = {
+  telefono: "Teléfono",
+  correo: "Correo electrónico",
+  presencial: "En persona",
+  formulario_fisico: "Formulario en papel",
+};
 
 /**
  * Valida las respuestas contra las preguntas activas y devuelve la copia que se
@@ -49,9 +76,16 @@ export function validarRespuestas(
 ): { errores: string[]; guardadas: RespuestaGuardada[]; promedio: number | null } {
   const errores: string[] = [];
   const porCodigo = new Map(respuestas.map((r) => [r.codigo, r.valor]));
+  const textoDe = new Map(respuestas.map((r) => [r.codigo, r.respuesta]));
   for (const r of respuestas)
     if (!preguntas.some((p) => p.codigo === r.codigo)) errores.push(`La pregunta ${r.codigo} no existe o está desactivada.`);
   const guardadas: RespuestaGuardada[] = preguntas.map((p) => {
+    if (esPreguntaTexto(p)) {
+      const t = String(textoDe.get(p.codigo) ?? "").trim();
+      if (!t && p.obligatoria) errores.push(`Falta la respuesta de «${p.texto}».`);
+      if (t.length > MAX_RESPUESTA_TEXTO) errores.push(`«${p.texto}»: la respuesta admite hasta ${MAX_RESPUESTA_TEXTO} caracteres.`);
+      return { codigo: p.codigo, texto: p.texto, valor: null, escala: [], tipo: "texto", respuesta: t || null };
+    }
     const v = porCodigo.get(p.codigo);
     const valor = v === null || v === undefined ? null : Number(v);
     if (valor === null) {
@@ -80,10 +114,11 @@ export function motivoNoRegistrable(estado: string): string | null {
 }
 
 /** Valida la configuración de una pregunta (pantalla de preguntas). */
-export function erroresPregunta(p: { codigo: string; texto: string; escala: number[] }): string[] {
+export function erroresPregunta(p: { codigo: string; texto: string; escala: number[]; tipoRespuesta?: string | null }): string[] {
   const e: string[] = [];
   if (!/^[A-Z0-9_]{1,20}$/.test(p.codigo)) e.push(`Código «${p.codigo}»: solo mayúsculas, números y _ (máx. 20).`);
   if (!p.texto.trim()) e.push(`La pregunta ${p.codigo} no tiene texto.`);
+  if (esPreguntaTexto(p)) return e; // pregunta abierta: sin escala
   if (p.escala.length < 2) e.push(`La pregunta ${p.codigo} necesita al menos dos valores en la escala.`);
   if (new Set(p.escala).size !== p.escala.length) e.push(`La escala de ${p.codigo} tiene valores repetidos.`);
   return e;
@@ -103,6 +138,7 @@ export function reportePorLaboratorio(
     const porPregunta = new Map<string, { texto: string; valores: (number | null)[] }>();
     for (const f of reg)
       for (const r of f.respuestas ?? []) {
+        if (esPreguntaTexto(r)) continue; // las preguntas abiertas no tienen promedio
         const x = porPregunta.get(r.codigo) ?? { texto: r.texto, valores: [] };
         x.valores.push(r.valor);
         porPregunta.set(r.codigo, x);
