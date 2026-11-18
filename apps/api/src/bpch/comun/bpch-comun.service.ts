@@ -4,7 +4,7 @@ import { DEV_TENANT } from "../../common/base-crud.service";
 import { AlcanceService } from "../../rbac/alcance.service";
 import { descendientes } from "../../rbac/alcance";
 import { RegistroMuestrasService } from "../../flujo-real/flujo-real.module";
-import { condicionFinal, TEXTO_CONDICION } from "./reglas-bpch";
+import { CENTROS_REPARTO_TASA, condicionFinal, REPARTO_TASA_POR_DEFECTO, TEXTO_CONDICION, type CentroRepartoTasa } from "./reglas-bpch";
 import { cambiaInspeccion, erroresInspectores, exigeInspectores, iniciales, SQL_INSPECTORES_UNIDAD, type PrevioInspeccion } from "../cabecera/reglas-cabecera";
 
 /** Cliente con el que se escribe: el servicio o la transacción en curso. */
@@ -63,6 +63,10 @@ export class BpchComunService {
     return {
       tasaPct: num("tasa_pct", null),
       ivaPct: num("iva_pct", null),
+      // Reparto de la tasa por centro de costo (COM-03): si falta la fila, rige el 85 / 10 / 5 del IDIC.
+      reparto: Object.fromEntries(
+        CENTROS_REPARTO_TASA.map((c) => [c.codigo, num(c.parametro, REPARTO_TASA_POR_DEFECTO[c.codigo])]),
+      ) as Record<CentroRepartoTasa, number>,
       motivosReinspeccion: filas.filter((f) => f.categoria === "bpch_motivo_reinspeccion").map((f) => ({ codigo: f.codigo, etiqueta: f.etiqueta })),
     };
   }

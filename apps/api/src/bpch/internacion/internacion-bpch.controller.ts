@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UseGuards } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, Res, UseGuards } from "@nestjs/common";
+import type { Response } from "express";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiBearerAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import { PermisoGuard } from "../../auth/permiso.guard";
@@ -100,9 +101,38 @@ export class InternacionBpchController {
 
   @Post(":id/tasa")
   @RequierePermiso("bpch.tasa.gestionar")
-  @ApiOperation({ summary: "Calcula la tasa: CIF US$ × paridad × % afecto × % tasa (+ IVA)" })
+  @ApiOperation({
+    summary:
+      "Calcula la tasa: (CIF US$ × paridad + ad valorem + flete + factura de la agencia − IVA de internación + otros gastos) × % afecto × % tasa · exenta de IVA",
+  })
   tasa(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.calcularTasa(req, id, body);
+  }
+
+  /**
+   * Comunicación Breve del cálculo (tipo=comunicacion-breve) o carta al cliente
+   * (tipo=carta-cliente) · ?formato=pdf|html (COM-03, cuarto envío IDIC).
+   */
+  @Get(":id/tasa/:tipo")
+  @RequierePermiso("bpch.tasa.gestionar")
+  @ApiOperation({ summary: "Comunicación Breve de la tasa o carta al cliente (PDF o HTML)" })
+  async documentoTasa(
+    @Param("id", ParseUUIDPipe) id: string,
+    @Param("tipo") tipo: string,
+    @Query("formato") formato: string | undefined,
+    @Req() req: any,
+    @Res() res: Response,
+  ) {
+    if (tipo !== "comunicacion-breve" && tipo !== "carta-cliente") throw new BadRequestException("Documento desconocido: comunicacion-breve o carta-cliente.");
+    if (formato === "html") {
+      const { html } = (await this.svc.documentoTasa(req, id, tipo, "html")) as { html: string };
+      res.set({ "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:" });
+      res.send(html);
+      return;
+    }
+    const { buffer, nombre } = (await this.svc.documentoTasa(req, id, tipo, "pdf")) as { buffer: Buffer; nombre: string };
+    res.set({ "Content-Type": "application/pdf", "Content-Disposition": `inline; filename="${nombre}"`, "Content-Length": String(buffer.length) });
+    res.end(buffer);
   }
 
   @Post(":id/remitir-facturacion")
