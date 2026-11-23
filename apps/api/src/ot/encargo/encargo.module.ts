@@ -22,6 +22,7 @@ import {
   revisarValidacionLab,
   type DatosEncargo,
 } from "./reglas-encargo";
+import { heredarProyectoOt } from "../../proyecto/proyecto-cotizacion";
 
 /**
  * Datos del encargo de la OT (tabla ot_encargo, align_r4d_comercial.sql) y
@@ -136,9 +137,12 @@ const SELECT_ENCARGO = `
          to_char(e.fecha_informe_interna, 'YYYY-MM-DD') AS "fechaInforme", e.escalar_jefe_seccion AS "escalarJefeSeccion",
          e.validada_at AS "validadaAt", uv.nombre_completo AS "validadaPor",
          e.devuelta_ventas_at AS "devueltaVentasAt", ud.nombre_completo AS "devueltaVentasPor", e.devuelta_ventas_motivo AS "devueltaVentasMotivo",
-         e.actualizado_at AS "actualizadoAt", ua.nombre_completo AS "actualizadoPor"
+         e.actualizado_at AS "actualizadoAt", ua.nombre_completo AS "actualizadoPor",
+         po.id::text AS "proyectoId", po.codigo AS "proyectoCodigo", po.nombre AS "proyectoNombre"
     FROM ot_encargo e
     LEFT JOIN orden_trabajo oo ON oo.id = e.ot_origen_id
+    LEFT JOIN orden_trabajo ow ON ow.id = e.ot_id
+    LEFT JOIN proyecto po ON po.id = ow.proyecto_id
     LEFT JOIN usuario uv ON uv.id = e.validada_por
     LEFT JOIN usuario ud ON ud.id = e.devuelta_ventas_por
     LEFT JOIN usuario ua ON ua.id = e.actualizado_por
@@ -317,7 +321,8 @@ function stripUndefined<T extends object>(o: T): Partial<T> {
 /**
  * Herencia de la cotización al aceptarla (EP-00 5.1, BL-159): moneda, forma de
  * pago, referencia, descripción técnica, valor inicial (total) y paridad. Lo
- * llama cotizacion.service al crear la OT. Idempotente.
+ * llama cotizacion.service al crear la OT. Idempotente. También el proyecto
+ * (enlace por id y «PROY/001/2026 · Nombre» en ot_encargo.proyecto si está vacío).
  */
 export async function heredarDeCotizacion(db: any, tenantId: string, otId: string, cotizacionId: string) {
   await db.$executeRawUnsafe(
@@ -340,6 +345,8 @@ export async function heredarDeCotizacion(db: any, tenantId: string, otId: strin
     otId,
     cotizacionId,
   );
+  // Quinto envío IDIC (lote 3): la OT toma el proyecto de la cotización y el encargo su texto (IVC).
+  await heredarProyectoOt(db, otId, cotizacionId);
 }
 
 @ApiTags("ot")

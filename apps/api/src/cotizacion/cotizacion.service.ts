@@ -58,6 +58,14 @@ import {
 } from "./reapertura";
 import { validarOportunidad, enlazarOportunidad, ganarOportunidadDeCotizacion, guardarDatosSolicitud, leerDatosSolicitud, type DatosSolicitud } from "./cotizacion-extra";
 import { claveEnsayoMuestra, normalizarMuestras, validarLineasMuestras, type MuestraEntrada } from "./muestras-cotizacion";
+import {
+  copiarProyectoCotizacion,
+  cotizacionesDelProyecto,
+  exigirProyectoDelCliente,
+  fijarProyectoCotizacion,
+  leerProyectosDeCotizaciones,
+  proyectoDeCotizacion,
+} from "../proyecto/proyecto-cotizacion";
 import { MOTIVO_PRECOT_NO_ACEPTA, TIPO_PRECOTIZACION, codigoPrecotizacion, erroresLineasPrecot, esPrecotizacion, motivoNoConvertir, motivoNoNuevaVersion, siguienteVersion } from "./precotizacion";
 import { resolverReglaValidez, textoOrigenRegla } from "./validez-config";
 import { EXTRAS_VACIOS, guardarExtras, guardarMuestraDeLineas, guardarMuestras, leerExtras, leerMuestraDeLineas, leerMuestras, leerReglasValidez, siguienteSeriePrecot } from "./cotizacion-s1";
@@ -182,6 +190,8 @@ export interface CabeceraCotizacion {
   muestras?: MuestraEntrada[];
   /** cotizacion | precotizacion (reunión 10). Solo al crear. */
   tipoDocumento?: "cotizacion" | "precotizacion";
+  /** Proyecto del cliente (quinto envío IDIC, lote 3). `undefined` = no se toca; null = sin proyecto. */
+  proyectoId?: string | null;
 }
 
 export interface AceptacionEntrada {
@@ -310,7 +320,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    *   sinOt    · 1 = aceptadas a las que aún no se les generó OT
    *   porVencer· 1 = abiertas que vencen en los próximos 7 días (fecha de Chile)
    */
-  async listar(tenantId?: string, f: { q?: string; search?: string; estado?: string; sinOt?: string; porVencer?: string; firma?: string; enviada?: string; tipoDocumento?: string; page?: string; limit?: string } = {}) {
+  async listar(tenantId?: string, f: { q?: string; search?: string; estado?: string; sinOt?: string; porVencer?: string; firma?: string; enviada?: string; tipoDocumento?: string; proyectoId?: string; page?: string; limit?: string } = {}) {
     await this.vencerFueraDeValidez(tenantId ?? null);
     const { page, limit, skip } = paginacion(f.page, f.limit);
     const base: Prisma.CotizacionWhereInput = tenantId ? { tenantId } : {};
@@ -342,6 +352,11 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (f.tipoDocumento === "precotizacion") and.push({ id: { in: precots.map((x) => x.id) } });
     else if (f.tipoDocumento === "cotizacion" && precots.length) and.push({ id: { notIn: precots.map((x) => x.id) } });
     if (f.porVencer === "1") and.push(filtroPorVencer());
+    // Lote 3: cotizaciones de un proyecto (enlace «Ver cotizaciones» del mantenedor de proyectos).
+    if (f.proyectoId) {
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(f.proyectoId)) throw new BadRequestException("proyectoId no es válido.");
+      and.push({ id: { in: await cotizacionesDelProyecto(this.prisma, tenantId ?? null, f.proyectoId) } });
+    }
     // Circuito de firma y envío (columnas fuera del modelo Prisma): ?firma=pendiente|firmada|devuelta|sin_firma, ?enviada=0|1.
     if (f.firma || f.enviada) {
       const ids: { id: string }[] = await this.prisma.$queryRawUnsafe(
@@ -389,6 +404,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const porCot = new Map(ots.map((o) => [o.cotizacionId, o]));
     const circuito = await estadoCircuitoDe(this.prisma, ids);
     const extras = await leerExtras(this.prisma, ids);
+    const proyectos = await leerProyectosDeCotizaciones(this.prisma, ids);
     const conteos: Record<string, number> = {};
     for (const g of porEstado) conteos[g.estado] = g._count._all;
     // No es un estado: el chip «Por vencer (7 días)» de la lista.
@@ -396,7 +412,14 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     conteos.enFirma = nEnFirma;
     conteos.precotizaciones = precots.length ? await this.prisma.cotizacion.count({ where: { AND: [conBusqueda, { id: { in: precots.map((x) => x.id) } }] } }) : 0;
     return {
-      data: cots.map((c) => ({ ...c, ...(circuito.get(c.id) ?? {}), ...(extras.get(c.id) ?? EXTRAS_VACIOS), ot: porCot.get(c.id) ?? null })),
+      data: cots.map((c) => ({
+        ...c,
+        ...(circuito.get(c.id) ?? {}),
+        ...(extras.get(c.id) ?? EXTRAS_VACIOS),
+        proyectoId: proyectos.get(c.id)?.proyectoId ?? null,
+        proyecto: proyectos.get(c.id)?.proyecto ?? null,
+        ot: porCot.get(c.id) ?? null,
+      })),
       meta: { page, limit, total, totalPages: Math.max(1, Math.ceil(total / limit)) },
       conteos,
     };
@@ -428,7 +451,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const lineas = cot.lineas.map((l) => ({ ...l, muestraN: muestraDe.get(l.id) ?? null }));
     // COM-02: reaperturas (versiones) de la cotización, la última primero.
     const reaperturas = await this.reaperturas(id).catch(() => []);
-    return { ...cot, lineas, ...(circuito ?? {}), ...extras, muestras, ot, solicitud, adjuntos, reaperturas };
+    // Lote 3: proyecto del cliente.
+    const proy = (await leerProyectosDeCotizaciones(this.prisma, [id])).get(id);
+    return { ...cot, lineas, ...(circuito ?? {}), ...extras, muestras, ot, solicitud, adjuntos, reaperturas, proyectoId: proy?.proyectoId ?? null, proyecto: proy?.proyecto ?? null };
   }
 
   // --------------------------------------------------------------------------
@@ -825,6 +850,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     const tipoElegido = await this.tipoClienteElegido(tenantIdFromJWT, data.clienteId, data.tipoClienteCodigo);
     const validez = await this.calcularValidezPara(tenantIdFromJWT, data.clienteId, data.centroCostoId, fechaEmision, tipoElegido);
     if (data.oportunidadId) await validarOportunidad(this.prisma, tenantIdFromJWT, data.clienteId, data.oportunidadId);
+    // Lote 3: el proyecto tiene que ser del mismo cliente y estar activo.
+    if (data.proyectoId) await exigirProyectoDelCliente(this.prisma, tenantIdFromJWT, data.clienteId, data.proyectoId);
     // COM-38: en pesos, el dólar observado del día convierte los ensayos con precio en USD.
     const dolarObs = moneda === "CLP" && Number(data.dolarObservado) > 0 ? Number(data.dolarObservado) : null;
     const dolarObsFecha = dolarObs ? isoFecha(soloFecha(data.dolarObservadoFecha ?? fechaEmision)) : null;
@@ -911,8 +938,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     }
     if (data.solicitud) await guardarDatosSolicitud(this.prisma, creada.id, data.solicitud);
     if (data.oportunidadId) await enlazarOportunidad(this.prisma, tenantIdFromJWT, creada.id, data.clienteId, data.oportunidadId);
+    if (data.proyectoId) await fijarProyectoCotizacion(this.prisma, tenantIdFromJWT, creada.id, data.proyectoId);
     await this.hitoPrecioManual(tenantIdFromJWT, creada.id, usuarioId, manuales, moneda);
-    return { ...creada, tipoDocumento: precot ? TIPO_PRECOTIZACION : "cotizacion" };
+    return { ...creada, proyectoId: data.proyectoId ?? null, tipoDocumento: precot ? TIPO_PRECOTIZACION : "cotizacion" };
   }
 
   /**
@@ -924,7 +952,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
   async actualizar(id: string, data: CabeceraCotizacion & { estado?: string }, tenantId?: string, usuarioId?: string) {
     const actual = await this.detalle(id, tenantId); // existencia + tenant
     const { estado, ...resto } = data;
-    const { solicitud, oportunidadId: _o, ...restoCab } = resto;
+    const { solicitud, oportunidadId: _o, proyectoId, ...restoCab } = resto;
     const tocaContenido = Object.values(restoCab).some((v) => v !== undefined);
 
     if (estado !== undefined) {
@@ -937,6 +965,17 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     if (solicitud) {
       if (actual.estado !== ESTADO_ABIERTA) throw new ConflictException("Solo se corrigen los datos de la solicitud de una cotización Abierta.");
       await guardarDatosSolicitud(this.prisma, id, solicitud);
+    }
+    // Lote 3: el proyecto se cambia mientras la cotización está Abierta o Reabierta (no invalida la firma:
+    // no se imprime en la cotización). Si ya tiene OT (Reabierta), la OT lo sigue.
+    if (proyectoId !== undefined) {
+      const proyActual = await proyectoDeCotizacion(this.prisma, id);
+      if ((proyectoId ?? null) !== proyActual) {
+        if (actual.estado !== ESTADO_ABIERTA && actual.estado !== ESTADO_REABIERTA)
+          throw new ConflictException("Solo se cambia el proyecto de una cotización Abierta o Reabierta.");
+        if (proyectoId) await exigirProyectoDelCliente(this.prisma, actual.tenantId, actual.clienteId, proyectoId, proyActual);
+        await fijarProyectoCotizacion(this.prisma, actual.tenantId, id, proyectoId);
+      }
     }
     if (!tocaContenido) {
       return this.prisma.cotizacion.update({ where: { id }, data: { ...(estado ? { estado } : {}) } });
@@ -1739,6 +1778,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       );
       return n;
     });
+    await copiarProyectoCotizacion(this.prisma, id, nueva.id);
     await this.hito(actual.tenantId, id, "precot_reemplazada", usuarioId, null, { nuevaId: nueva.id, nuevaCodigo: nueva.codigo });
     await this.hito(actual.tenantId, nueva.id, "precot_version", usuarioId, null, { anteriorId: id, anteriorCodigo: actual.codigo, version });
     return { ok: true, id: nueva.id, codigo: nueva.codigo, mensaje: `Versión ${version} emitida: ${nueva.codigo}. La ${actual.codigo} queda reemplazada.` };
@@ -1781,6 +1821,7 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       usuarioId,
     );
     await guardarExtras(this.prisma, c.id, { precotizacionId: id });
+    await copiarProyectoCotizacion(this.prisma, id, c.id);
     await this.hito(p.tenantId, id, "precot_convertida", usuarioId, null, { cotizacionId: c.id, cotizacionCodigo: c.codigo });
     await this.hito(p.tenantId, c.id, "desde_precotizacion", usuarioId, null, { precotizacionId: id, precotizacionCodigo: p.codigo });
     return { ok: true, id: c.id, codigo: c.codigo, mensaje: `Cotización ${c.codigo} emitida desde ${p.codigo}. El laboratorio agrega los ensayos al responder.` };

@@ -26,7 +26,7 @@ export interface Columna {
   total?: boolean;
 }
 
-export type FiltroClave = "fecha" | "laboratorio" | "centroCosto" | "estado" | "texto";
+export type FiltroClave = "fecha" | "laboratorio" | "centroCosto" | "estado" | "texto" | "proyecto";
 
 export const AREAS = [
   "Órdenes de trabajo",
@@ -50,6 +50,12 @@ export interface Base {
   estado?: string;
   /** Expresiones donde busca el filtro de texto. */
   texto?: string[];
+  /**
+   * Proyecto del cliente (quinto envío IDIC, lote 3): expresión con el
+   * `proyecto_id` de la fila. Si la base lo tiene, el informe admite el filtro
+   * «Proyecto» (filtrosDe).
+   */
+  proyecto?: string;
   /** Alcance por laboratorio para un arreglo (`k` = `$n::uuid[]`); null = datos comunes. */
   alcance: ((k: string) => string) | null;
 }
@@ -57,6 +63,12 @@ export interface Base {
 const CC = `COALESCE(NULLIF(TRIM(COALESCE(cc.codigo, '') || ' · ' || COALESCE(cc.nombre, cc.descripcion, '')), '·'), cc.sigla)`;
 const LAB = `COALESCE(u.sigla, u.nombre)`;
 const MONTO_OT = `COALESCE(cot.total, o.costo_estimado)`;
+/** Neto de la cotización en pesos (una en USD, con su dólar del día). */
+const NETO_CLP = `(CASE WHEN cot.moneda = 'USD' THEN cot.neto * COALESCE(cot.dolar_valor, 0) ELSE cot.neto END)`;
+
+/** Alcance de una cotización: laboratorio de su OT o de su centro de costo. */
+const ALCANCE_COT = (k: string) =>
+  `(EXISTS (SELECT 1 FROM orden_trabajo ox WHERE ox.cotizacion_id = cot.id AND ox.unidad_principal = ANY(${k}))` + ` OR cc.unidad_id = ANY(${k}))`;
 
 const BASE_OT: Base = {
   from: `orden_trabajo o
@@ -70,6 +82,7 @@ const BASE_OT: Base = {
   centroCosto: `o.centro_costo_id`,
   estado: `o.estado`,
   texto: [`o.codigo`, `c.razon_social`, `c.rut`],
+  proyecto: `o.proyecto_id`,
   alcance: (k) => `o.unidad_principal = ANY(${k})`,
 };
 
@@ -85,6 +98,7 @@ const BASE_FACTURA: Base = {
   centroCosto: `COALESCE(f.centro_costo_id, o.centro_costo_id)`,
   estado: `f.estado`,
   texto: [`f.numero`, `f.codigo`, `o.codigo`, `c.razon_social`, `c.rut`],
+  proyecto: `o.proyecto_id`,
   alcance: (k) => `o.unidad_principal = ANY(${k})`,
 };
 
@@ -103,6 +117,7 @@ const BASES = {
     unidad: BASE_FACTURA.unidad,
     centroCosto: BASE_FACTURA.centroCosto,
     texto: [`nc.numero`, `nc.codigo`, `f.numero`, `c.razon_social`],
+    proyecto: BASE_FACTURA.proyecto,
     alcance: BASE_FACTURA.alcance,
   },
   pago: {
@@ -117,6 +132,7 @@ const BASES = {
     unidad: BASE_FACTURA.unidad,
     centroCosto: BASE_FACTURA.centroCosto,
     texto: [`f.numero`, `p.referencia`, `o.codigo`, `c.razon_social`],
+    proyecto: BASE_FACTURA.proyecto,
     alcance: BASE_FACTURA.alcance,
   },
   cotizacion: {
@@ -130,9 +146,33 @@ const BASES = {
     centroCosto: `cot.centro_costo_id`,
     estado: `cot.estado`,
     texto: [`cot.codigo`, `c.razon_social`, `c.rut`],
-    alcance: (k) =>
-      `(EXISTS (SELECT 1 FROM orden_trabajo ox WHERE ox.cotizacion_id = cot.id AND ox.unidad_principal = ANY(${k}))` +
-      ` OR cc.unidad_id = ANY(${k}))`,
+    proyecto: `cot.proyecto_id`,
+    alcance: ALCANCE_COT,
+  },
+  /** Cotizaciones con proyecto (informe «Consolidado por proyecto»): sin anuladas ni pre-cotizaciones. */
+  cotizacion_proyecto: {
+    from: `cotizacion cot
+      JOIN proyecto p ON p.id = cot.proyecto_id
+      LEFT JOIN cliente c ON c.id = cot.cliente_id
+      LEFT JOIN centro_costo cc ON cc.id = cot.centro_costo_id
+      LEFT JOIN unidad u ON u.id = cc.unidad_id
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*) AS n, COUNT(*) FILTER (WHERE ox.estado = 'cerrada') AS cerradas
+          FROM orden_trabajo ox WHERE ox.cotizacion_id = cot.id AND ox.tenant_id = cot.tenant_id AND ox.estado <> 'anulada'
+      ) otz ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT SUM(fz.total) AS total FROM factura fz
+         WHERE fz.deleted_at IS NULL AND fz.estado <> 'anulada'
+           AND (fz.cotizacion_id = cot.id OR fz.ot_id IN (SELECT ox.id FROM orden_trabajo ox WHERE ox.cotizacion_id = cot.id))
+      ) fac ON TRUE`,
+    donde: `cot.tenant_id = $1::uuid AND cot.estado <> 'anulada' AND COALESCE(cot.tipo_documento, 'cotizacion') <> 'precotizacion'`,
+    fecha: `COALESCE(cot.fecha_emision, cot.created_at::date)`,
+    unidad: (p) => `cc.unidad_id = ${p}`,
+    centroCosto: `cot.centro_costo_id`,
+    estado: `CASE WHEN COALESCE(p.activo, TRUE) THEN 'activo' ELSE 'inactivo' END`,
+    texto: [`p.codigo`, `p.nombre`, `cot.codigo`, `c.razon_social`, `c.rut`],
+    proyecto: `cot.proyecto_id`,
+    alcance: ALCANCE_COT,
   },
   orden_interna: {
     from: `orden_interna oi
@@ -145,6 +185,7 @@ const BASES = {
     unidad: (p) => `(oi.origen_lab = ${p} OR oi.destino_lab = ${p})`,
     estado: `oi.estado`,
     texto: [`oi.numero`, `o.codigo`, `c.razon_social`],
+    proyecto: `o.proyecto_id`,
     alcance: (k) => `(oi.origen_lab = ANY(${k}) OR oi.destino_lab = ANY(${k}))`,
   },
   tasa: {
@@ -159,6 +200,7 @@ const BASES = {
     unidad: BASE_OT.unidad,
     centroCosto: `o.centro_costo_id`,
     texto: [`o.codigo`, `c.razon_social`, `f.numero`],
+    proyecto: `o.proyecto_id`,
     alcance: BASE_OT.alcance,
   },
   no_conformidad: {
@@ -183,6 +225,7 @@ const BASES = {
     unidad: (p) => `COALESCE(ce.unidad_id, o.unidad_principal) = ${p}`,
     estado: `ce.estado`,
     texto: [`ce.numero`, `ce.codigo`, `o.codigo`, `c.razon_social`],
+    proyecto: `o.proyecto_id`,
     alcance: (k) => `COALESCE(ce.unidad_id, o.unidad_principal) = ANY(${k})`,
   },
   ensayo: {
@@ -556,6 +599,39 @@ export const INFORMES: InformeFijo[] = [
     orden: "cot.fecha_emision DESC NULLS LAST, cot.codigo",
   },
   {
+    // Quinto envío IDIC (lote 3): campo «Proyecto» en la cotización, filtrable y consolidado.
+    clave: "proyecto-consolidado",
+    titulo: "Consolidado por proyecto",
+    area: "Comercial y facturación",
+    descripcion:
+      "Por cada proyecto de cliente: cotizaciones (sin anuladas ni pre-cotizaciones), aceptadas, montos cotizado y aceptado en pesos, OT generadas y cerradas, y monto facturado. Las cotizaciones en USD se pasan a pesos con su dólar del día.",
+    legado: [],
+    pedido: "Correo del IDIC del 20-11-2026 (quinto envío): campo «Proyecto» en la cotización (PROY/correlativo/año + nombre)",
+    permiso: "reporte.comercial.ver",
+    base: "cotizacion_proyecto",
+    filtros: TODOS,
+    columnas: [
+      { clave: "proyecto", titulo: "Proyecto", tipo: "texto" },
+      { clave: "nombre", titulo: "Nombre del proyecto", tipo: "texto" },
+      { clave: "cliente", titulo: "Cliente", tipo: "texto" },
+      { clave: "estado", titulo: "Estado del proyecto", tipo: "estado" },
+      { clave: "cotizaciones", titulo: "Cotizaciones", tipo: "numero", total: true },
+      { clave: "aceptadas", titulo: "Aceptadas", tipo: "numero", total: true },
+      { clave: "monto_cotizado", titulo: "Monto cotizado neto (CLP)", tipo: "monto", total: true },
+      { clave: "monto_aceptado", titulo: "Monto aceptado neto (CLP)", tipo: "monto", total: true },
+      { clave: "ots", titulo: "OT", tipo: "numero", total: true },
+      { clave: "ots_cerradas", titulo: "OT cerradas", tipo: "numero", total: true },
+      { clave: "facturado", titulo: "Facturado (total)", tipo: "monto", total: true },
+    ],
+    select: `p.codigo AS proyecto, p.nombre AS nombre, c.razon_social AS cliente,
+      CASE WHEN COALESCE(p.activo, TRUE) THEN 'activo' ELSE 'inactivo' END AS estado,
+      COUNT(*)::int AS cotizaciones, COUNT(*) FILTER (WHERE cot.estado IN ('aceptada', 'reabierta'))::int AS aceptadas,
+      SUM(${NETO_CLP}) AS monto_cotizado, SUM(${NETO_CLP}) FILTER (WHERE cot.estado IN ('aceptada', 'reabierta')) AS monto_aceptado,
+      SUM(otz.n)::int AS ots, SUM(otz.cerradas)::int AS ots_cerradas, SUM(fac.total) AS facturado`,
+    agrupar: "1, 2, 3, 4",
+    orden: "1",
+  },
+  {
     clave: "facturas",
     titulo: "Libro de facturas",
     area: "Comercial y facturación",
@@ -842,6 +918,16 @@ export interface FiltrosZona {
   centroCosto?: string;
   estado?: string;
   texto?: string;
+  proyecto?: string;
+}
+
+/**
+ * Filtros que admite el informe: los declarados más «Proyecto» si su base
+ * conoce el proyecto de la fila (OT, cotizaciones, facturas…: lote 3).
+ */
+export function filtrosDe(def: InformeFijo): FiltroClave[] {
+  const base: Base = BASES[def.base];
+  return base.proyecto && !def.filtros.includes("proyecto") ? [...def.filtros, "proyecto"] : def.filtros;
 }
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
@@ -855,7 +941,7 @@ export function validarFiltros(def: InformeFijo, q: Record<string, unknown>): { 
     return typeof v === "string" && v.trim() ? v.trim() : undefined;
   };
   const f: FiltrosZona = {};
-  const admite = new Set(def.filtros);
+  const admite = new Set(filtrosDe(def));
   for (const k of ["desde", "hasta"] as const) {
     const v = s(k);
     if (!v) continue;
@@ -864,11 +950,12 @@ export function validarFiltros(def: InformeFijo, q: Record<string, unknown>): { 
     f[k] = v;
   }
   if (f.desde && f.hasta && f.desde > f.hasta) return { error: "«Desde» no puede ser posterior a «Hasta»." };
-  for (const [k, filtro] of [["laboratorio", "laboratorio"], ["centroCosto", "centroCosto"]] as const) {
+  const nombre = { laboratorio: "laboratorio", centroCosto: "centro de costo", proyecto: "proyecto" } as const;
+  for (const k of ["laboratorio", "centroCosto", "proyecto"] as const) {
     const v = s(k);
     if (!v) continue;
-    if (!admite.has(filtro)) return { error: `Este informe no se filtra por ${k === "laboratorio" ? "laboratorio" : "centro de costo"}.` };
-    if (!UUID.test(v)) return { error: `El ${k === "laboratorio" ? "laboratorio" : "centro de costo"} elegido no es válido.` };
+    if (!admite.has(k)) return { error: `Este informe no se filtra por ${nombre[k]}.` };
+    if (!UUID.test(v)) return { error: `El ${nombre[k]} elegido no es válido.` };
     f[k] = v;
   }
   const estado = s("estado");
@@ -904,6 +991,7 @@ export function armarConsulta(def: InformeFijo, filtros: FiltrosZona, tenantId: 
   if (filtros.laboratorio && base.unidad) conds.push(base.unidad(`${p(filtros.laboratorio)}::uuid`));
   if (filtros.centroCosto && base.centroCosto) conds.push(`${base.centroCosto} = ${p(filtros.centroCosto)}::uuid`);
   if (filtros.estado && base.estado) conds.push(`${base.estado} = ${p(filtros.estado)}`);
+  if (filtros.proyecto && base.proyecto) conds.push(`${base.proyecto} = ${p(filtros.proyecto)}::uuid`);
   if (filtros.texto && base.texto?.length) {
     const k = p(`%${filtros.texto.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
     conds.push(`(${base.texto.map((e) => `${e} ILIKE ${k}`).join(" OR ")})`);

@@ -119,6 +119,8 @@ const Cabecera = {
   centroCostoEmisorId: z.string().uuid().nullable().optional(),
   // Reunión 1: OT con costo (factura) o sin costo (valorización estadística) desde el inicio.
   conCobro: z.boolean().optional(),
+  // Quinto envío IDIC (lote 3): proyecto del cliente (opcional; null = sin proyecto).
+  proyectoId: z.preprocess((v) => (v === "" ? null : v), z.string().uuid("El proyecto elegido no es válido.").nullable().optional()),
   // Reunión 5: muestras de la cotización (producto elegido antes que los ensayos, reunión 3).
   muestras: z
     .array(

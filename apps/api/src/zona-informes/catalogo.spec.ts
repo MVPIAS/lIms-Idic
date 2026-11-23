@@ -1,4 +1,4 @@
-import { AREAS, INFORMES, armarConsulta, informePorClave, totales, validarFiltros, LIMITE_FILAS } from "./catalogo";
+import { AREAS, INFORMES, armarConsulta, filtrosDe, informePorClave, totales, validarFiltros, LIMITE_FILAS } from "./catalogo";
 import { DOCUMENTOS_LEGADO } from "./legado-documentos";
 import { INFORMES_ESPECIALES } from "./especiales";
 
@@ -65,6 +65,7 @@ describe("Zona de informes · consulta", () => {
         ...(def.filtros.includes("laboratorio") ? { laboratorio: LAB } : {}),
         ...(def.filtros.includes("estado") ? { estado: "cerrada" } : {}),
         ...(def.filtros.includes("texto") ? { texto: "a" } : {}),
+        ...(filtrosDe(def).includes("proyecto") ? { proyecto: LAB } : {}),
       });
       expect(f).toHaveProperty("filtros");
       const { sql } = armarConsulta(def, (f as any).filtros, T, [LAB]);
@@ -102,6 +103,38 @@ describe("Zona de informes · bases del documento Z26 (frente S4)", () => {
   it("la bodega central se ve desde cualquier laboratorio; las sub-bodegas, solo desde el suyo", () => {
     const { sql } = armarConsulta(informePorClave("inventario-bodega")!, {}, T, [LAB]);
     expect(sql).toContain("b.unidad_id = ANY($2::uuid[]) OR b.tipo = 'central'");
+  });
+});
+
+describe("Zona de informes · proyecto (quinto envío IDIC, lote 3)", () => {
+  const PROY = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  it("las OT, cotizaciones y facturas se filtran por proyecto; el catálogo de ensayos no", () => {
+    for (const c of ["ot-listado", "cotizaciones", "facturas", "z26-cotizaciones", "z26-ot-externas", "proyecto-consolidado"])
+      expect(filtrosDe(informePorClave(c)!)).toContain("proyecto");
+    expect(filtrosDe(informePorClave("catalogo-ensayos")!)).not.toContain("proyecto");
+    expect(validarFiltros(informePorClave("catalogo-ensayos")!, { proyecto: PROY })).toHaveProperty("error");
+  });
+  it("el proyecto va como parámetro y se valida como uuid", () => {
+    const def = informePorClave("z26-ot-externas")!;
+    expect(validarFiltros(def, { proyecto: "1 OR 1=1" })).toHaveProperty("error");
+    const { sql, args } = armarConsulta(def, (validarFiltros(def, { proyecto: PROY }) as any).filtros, T, null);
+    expect(sql).toContain("o.proyecto_id = $2::uuid");
+    expect(args).toEqual([T, PROY]);
+    expect(armarConsulta(informePorClave("cotizaciones")!, { proyecto: PROY }, T, null).sql).toContain("cot.proyecto_id = $2::uuid");
+  });
+  it("las bases Z26 de cotizaciones y OT externas traen la columna Proyecto", () => {
+    for (const c of ["z26-cotizaciones", "z26-ot-externas"]) expect(informePorClave(c)!.columnas.map((x) => x.titulo)).toContain("Proyecto");
+  });
+  it("el consolidado agrupa por proyecto, sin anuladas ni pre-cotizaciones, y respeta el alcance", () => {
+    const def = informePorClave("proyecto-consolidado")!;
+    expect(def.area).toBe("Comercial y facturación");
+    expect(def.permiso).toBe("reporte.comercial.ver");
+    const { sql } = armarConsulta(def, {}, T, [LAB]);
+    expect(sql).toContain("JOIN proyecto p ON p.id = cot.proyecto_id");
+    expect(sql).toContain("cot.estado <> 'anulada'");
+    expect(sql).toContain("'precotizacion'");
+    expect(sql).toContain("GROUP BY 1, 2, 3, 4");
+    expect(sql).toContain("cc.unidad_id = ANY($2::uuid[])");
   });
 });
 
