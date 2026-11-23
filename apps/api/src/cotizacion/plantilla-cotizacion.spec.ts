@@ -6,6 +6,7 @@ import {
   COTIZACION_EJEMPLO,
   CUERPO_COTIZACION_FORM04,
   CUERPO_COTIZACION_FORM04_V2,
+  CUERPO_COTIZACION_FORM04_V3,
   VARIABLES_COTIZACION,
   textosDocumentoDesdeFilas,
   contextoCotizacion,
@@ -49,8 +50,27 @@ const CASOS: Record<string, any> = {
 };
 
 describe("plantilla de cotización (4.6.8)", () => {
-  it.each(Object.keys(CASOS))("la versión 2 (FORM04 con textos estándar) rinde EXACTAMENTE el formato fijo · %s", (k) => {
-    expect(renderCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V2, CASOS[k], firmas)).toBe(cuerpoCotizacionHtml(CASOS[k]));
+  it.each(Object.keys(CASOS))("la versión 3 (días hábiles + pie en cada hoja) rinde EXACTAMENTE el formato fijo · %s", (k) => {
+    expect(renderCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V3, CASOS[k], firmas)).toBe(cuerpoCotizacionHtml(CASOS[k]));
+  });
+
+  it("la versión 3 cambia solo el plazo (hábiles) y el pie (pie-cada-hoja)", () => {
+    expect(validarCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V3)).toEqual([]);
+    expect(CUERPO_COTIZACION_FORM04_V3).toContain("días hábiles desde la recepción");
+    expect(CUERPO_COTIZACION_FORM04_V3).not.toContain("días corridos");
+    expect(CUERPO_COTIZACION_FORM04_V3).toContain('<div class="pie-cada-hoja">');
+    const h = renderCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V3, COTIZACION_EJEMPLO, firmas);
+    expect(h).toContain("15 días hábiles desde la recepción de las muestras o ítems");
+    expect(h).toContain('<div class="pie-cada-hoja"><p class="nota">Horario de Atención a Clientes: Horario PRUEBA');
+  });
+
+  it("align_q1_cotizacion.sql aplica la versión 3 solo sobre la versión 2 sin editar (md5)", () => {
+    const sql = readFileSync(join(__dirname, "../../../../packages/db/align_q1_cotizacion.sql"), "utf8");
+    const m = /\$form04v3\$([\s\S]*?)\$form04v3\$/.exec(sql);
+    expect(m).not.toBeNull();
+    expect(m![1].replace(/\r\n/g, "\n")).toBe(CUERPO_COTIZACION_FORM04_V3);
+    const md5v2 = createHash("md5").update(CUERPO_COTIZACION_FORM04_V2, "utf8").digest("hex");
+    expect(sql).toContain(`v_v2    CONSTANT TEXT := '${md5v2}'`);
   });
 
   it("la versión 1 (FORM04) sigue siendo válida y la 2 la contiene sin cambios salvo el bloque de textos", () => {
@@ -61,7 +81,7 @@ describe("plantilla de cotización (4.6.8)", () => {
   });
 
   describe("textos estándar del cuarto envío (18-11-2026)", () => {
-    const html = (cot: any) => renderCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V2, cot, firmas);
+    const html = (cot: any) => renderCuerpoCotizacion(CUERPO_COTIZACION_FORM04_V3, cot, firmas);
     it("notas, Nº de la cotización en la OC y confidencialidad", () => {
       const h = html(COTIZACION_EJEMPLO);
       expect(h).toContain("<h2>Notas</h2>");
@@ -79,12 +99,12 @@ describe("plantilla de cotización (4.6.8)", () => {
     });
     it("horario y reclamos: se imprimen escapados; vacíos, no se imprime la línea", () => {
       const h = html(COTIZACION_EJEMPLO);
-      expect(h).toContain("Horario de atención a clientes: Horario PRUEBA");
+      expect(h).toContain("Horario de Atención a Clientes: Horario PRUEBA");
       expect(h).toContain("Reclamos y sugerencias: Teléfono PRUEBA");
       const e = html(CASOS.exenta_solo_horario);
-      expect(e).toContain("Horario de atención a clientes: Horario &lt;PRUEBA&gt; &amp; Cía</p>");
+      expect(e).toContain("Horario de Atención a Clientes: Horario &lt;PRUEBA&gt; &amp; Cía</p>");
       expect(e).not.toContain("Reclamos y sugerencias");
-      expect(html(CASOS.sin_textos_documento)).not.toContain("Horario de atención");
+      expect(html(CASOS.sin_textos_documento)).not.toContain("Horario de Atención");
     });
     it("los parámetros se leen recortados; sin filas, vacíos", () => {
       expect(textosDocumentoDesdeFilas([{ codigo: "horario_atencion", valor: " L-V " }, { codigo: "telefono_reclamos", valor: null }])).toEqual({ horarioAtencion: "L-V", telefonoReclamos: "" });

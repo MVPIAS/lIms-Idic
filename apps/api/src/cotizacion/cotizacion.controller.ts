@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Req, Res, UploadedFile, UseGuards, UseInterceptors, ParseUUIDPipe, BadRequestException } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
 import type { Response } from "express";
-import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, type ArchivoAdjunto } from "../common/adjuntos";
+import { MAX_BYTES_ADJUNTO_AMPLIADO, cabecerasAdjunto, type ArchivoAdjunto } from "../common/adjuntos";
 import { AuthGuard } from "@nestjs/passport";
 import { ApiTags, ApiBearerAuth, ApiOperation } from "@nestjs/swagger";
 import { z } from "zod";
@@ -131,7 +131,7 @@ const Cabecera = {
     )
     .max(200)
     .optional(),
-  // Plazo de entrega comprometido (días corridos desde la recepción): fija la
+  // Plazo de entrega comprometido (días hábiles desde la recepción, PG03 Rev18): fija la
   // fecha de compromiso de la OT que nace al aceptar (docs/FLUJO_FIRMA_CIERRE.md §4).
   plazoEntregaDias: z.number().int().min(1, "Plazo de entrega: mínimo 1 día.").max(730, "Plazo de entrega: máximo 730 días.").nullable().optional(),
   observacionesInternas: z.string().max(20000).nullable().optional(),
@@ -185,6 +185,8 @@ const ActualizarCotSchema = z.object({
   gastosAdminPct: z.number().min(0).max(100).optional(),
   ivaPct: z.number().min(0).max(100).optional(),
   lineas: z.array(LineaSchema).optional(),
+  // Quinto envío (21-11-2026): motivo obligatorio al modificar una cotización en firma o firmada.
+  motivoModificacion: z.string().trim().max(2000).nullable().optional(),
 });
 
 /** SVT6 · documento de aceptación (IDIC-PG03 6.3 n / 6.4 g). */
@@ -369,7 +371,11 @@ export class CotizacionController {
     return this.svc.crear(data as any, req?.user?.tenantId, req?.user?.sub);
   }
 
-  /** Editar: el contenido solo mientras la cotización está Abierta. */
+  /**
+   * Editar: el contenido mientras la cotización está Abierta (también en firma
+   * o firmada y no aceptada: con `motivoModificacion`, vuelve a Autorización
+   * pendiente con traza) o Reabierta (COM-02).
+   */
   @Patch(":id")
   @RequierePermiso("cotizacion.crear")
   async actualizar(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
@@ -497,19 +503,22 @@ export class CotizacionController {
   }
 
   /**
-   * Adjunto de la cotización (PDF, PNG o JPEG, máx. 5 MB): «solicitud» (oficio o
-   * correo del cliente) exige cotizacion.crear; «aceptacion» (OPI, O/C, correo…)
-   * exige cotizacion.aceptar. Multipart: archivo + clase.
+   * Adjunto de la cotización (PDF, imagen, correo .msg/.eml u Office; tope en
+   * el parámetro cotizacion_adjuntos.max_mb, def. 15 MB): «solicitud» (oficio o
+   * correo del cliente) y «antecedente» (correos, fotos, E.T.: desde la creación
+   * y en la edición, en cualquier estado) exigen cotizacion.crear; «aceptacion»
+   * (OPI, O/C, correo…) exige cotizacion.aceptar. Multipart: archivo + clase.
    */
   @Post(":id/adjuntos")
   @RequierePermiso("cotizacion.ver")
-  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ADJUNTO, files: 1, fields: 2 } }))
+  @UseInterceptors(FileInterceptor("archivo", { limits: { fileSize: MAX_BYTES_ADJUNTO_AMPLIADO, files: 1, fields: 2 } }))
   async adjuntar(@Param("id", ParseUUIDPipe) id: string, @UploadedFile() archivo: ArchivoAdjunto | undefined, @Body() body: any, @Req() req: any) {
     const clase = String(body?.clase ?? "");
     const permiso = clase === "aceptacion" ? PERMISO_ACEPTAR : "cotizacion.crear";
     const permisos: string[] = req?.user?.permisos ?? [];
+    const queDoc = clase === "aceptacion" ? "el documento de aceptación" : clase === "antecedente" ? "antecedentes" : "el documento de solicitud";
     if (!(req?.user?.roles ?? []).includes("SUPERADMIN") && !permisos.includes(permiso))
-      throw new ForbiddenException(`Adjuntar el documento de ${clase === "aceptacion" ? "aceptación" : "solicitud"} exige el permiso «${permiso}».`);
+      throw new ForbiddenException(`Adjuntar ${queDoc} exige el permiso «${permiso}».`);
     await exigirCotizacionEnAlcance(this.prisma, this.alcance, req, id, permiso);
     return this.svc.adjuntar(id, req?.user?.tenantId, clase, archivo, req?.user?.sub);
   }

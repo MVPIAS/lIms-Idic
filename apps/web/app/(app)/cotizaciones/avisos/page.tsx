@@ -74,7 +74,7 @@ export default function AvisosComercialesPage() {
 
       {d && vista === "opi" && (
         <>
-          <p className="hint">La OPI de una OT por disposición del Director se regulariza en {d.mesesOpi} {d.mesesOpi === 1 ? "mes" : "meses"} (Administración › Parámetros › OT por disposición). Si el cliente desiste, anule la OT desde su ficha.</p>
+          <p className="hint">La OC/OPI de una OT sin OC/OPI —la dispone el Director (por su intermedio, el Jefe del Departamento productivo)— se regulariza en {d.mesesOpi} {d.mesesOpi === 1 ? "mes" : "meses"} (Administración › Parámetros › OT sin OC/OPI). Si el cliente desiste, anule la OT desde su ficha.</p>
           <div className="card card--table">
             <table className="data">
               <thead><tr><th>OT</th><th>Cliente</th><th>Disposición</th><th>Desde</th><th>Plazo OPI</th><th>Estado</th></tr></thead>

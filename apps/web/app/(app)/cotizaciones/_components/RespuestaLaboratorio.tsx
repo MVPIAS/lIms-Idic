@@ -120,6 +120,7 @@ const SECCIONES: { k: string; titulo: string; ayuda?: string; cols: Col[]; nueva
   {
     k: "otros",
     titulo: "6 · Otros gastos",
+    ayuda: "Los equipos (con su valor por hora, día o unidad) van aquí, como en el formulario real. No escriba la línea «IVA 19 %»: la calcula el sistema si marca la casilla de abajo.",
     cols: [
       { k: "descripcion", l: "Descripción", tipo: "texto" },
       { k: "monto", l: "Monto", tipo: "numero", ancho: 110 },
@@ -470,6 +471,9 @@ export default function RespuestaLaboratorio({
   const [dolar, setDolar] = useState<string>(previo?.costeo?.dolar ? String(previo.costeo.dolar) : "");
   // Cuarto envío IDIC: el tipo de cambio lleva su fecha («del dd-mm-aaaa»).
   const [dolarFecha, setDolarFecha] = useState<string>(previo?.costeo?.dolarFecha ?? "");
+  // Quinto envío: línea «IVA 19 %» de otros gastos = IVA × (viáticos + H.H. civil + otros gastos en $).
+  // Nuevo costeo: marcada; uno devuelto conserva lo que tenía (los guardados antes no la llevan).
+  const [ivaGastos, setIvaGastos] = useState<boolean>(previo?.costeo ? Boolean(previo.costeo.ivaGastos) : true);
   const [error, setError] = useState("");
   const [enviando, setEnviando] = useState(false);
   const rechaza = respuesta === "rechazar";
@@ -498,19 +502,24 @@ export default function RespuestaLaboratorio({
       otros: sum("otros", (x) => pesos(n(x.monto), x.moneda)),
       insumos: sum("insumos", (x) => n(x.cantidad) * n(x.costoUnitario)),
     };
+    // Línea «IVA %» de otros gastos (form05.ts · lineaIvaGastos).
+    const otrosPesosFilas = sum("otros", (x) => (x.moneda === "USD" ? 0 : n(x.monto)));
+    const hhCivil = sum("horasHombre", (x) => (x.tipo === "militar" ? 0 : n(x.horas) * n(x.valorHora)));
+    const ivaLinea = ivaGastos ? Math.round(((sec.viaticos + hhCivil + otrosPesosFilas) * (cfg.ivaPct ?? 19)) / 100) : 0;
+    sec.otros += ivaLinea;
     const cdt = Object.values(sec).reduce((a, b) => a + b, 0);
     // Montos finales por concepto, como el formulario real (form05.ts · detalle).
     const de = (k: string, ambito: string, f: (x: Fila) => number) => sum(k, (x) => (x.ambito === ambito ? f(x) : 0));
     const detalle: [string, number][] = [
       ["Viáticos nacionales", de("viaticos", "nacional", viatico)],
       ["Viáticos al extranjero", de("viaticos", "extranjero", viatico)],
-      ["Horas hombre civil", sum("horasHombre", (x) => (x.tipo === "militar" ? 0 : n(x.horas) * n(x.valorHora)))],
+      ["Horas hombre civil", hhCivil],
       ["Horas hombre militar", sum("horasHombre", (x) => (x.tipo === "militar" ? n(x.horas) * n(x.valorHora) : 0))],
       ["Servicios estándar", sec.servicios],
       ["Horas máquina", sec.horasMaquina],
       ["Pasajes nacionales", de("pasajes", "nacional", pasaje)],
       ["Pasajes al extranjero", de("pasajes", "extranjero", pasaje)],
-      ["Otros gastos en pesos", sum("otros", (x) => (x.moneda === "USD" ? 0 : n(x.monto)))],
+      ["Otros gastos en pesos", otrosPesosFilas + ivaLinea],
       ["Otros gastos en dólar", sum("otros", (x) => (x.moneda === "USD" ? n(x.monto) * d : 0))],
       ["Insumos y reactivos", sec.insumos],
     ];
@@ -541,8 +550,9 @@ export default function RespuestaLaboratorio({
       iva: r(iva),
       conIva: r(neto + iva),
       dolar: d > 0 ? d : 0,
+      ivaLinea,
     };
-  }, [secciones, dolar, cfg]);
+  }, [secciones, dolar, cfg, ivaGastos]);
   const hayUsd = ["viaticos", "pasajes", "otros"].some((k) => (secciones[k] ?? []).some((x) => x.moneda === "USD"));
 
   const conCosteo = noEstandar || SECCIONES.some((s) => aApi(s, secciones[s.k] ?? []).length > 0);
@@ -552,7 +562,7 @@ export default function RespuestaLaboratorio({
     if (rechaza || respuesta === "aceptar_con_comentario") {
       if (!comentario.trim()) return setError(rechaza ? "Indique por qué el laboratorio no realiza el servicio." : "Escriba el comentario para Comercial.");
     }
-    if (!rechaza && !numerica(plazo)) return setError("Indique el plazo de entrega propuesto (días corridos).");
+    if (!rechaza && !numerica(plazo)) return setError("Indique el plazo de entrega propuesto (días hábiles).");
     if (!rechaza && conCosteo && hayUsd && !(n(dolar) > 0)) return setError("Hay montos en US$: indique el tipo de cambio del dólar.");
     if (!rechaza && conCosteo && hayUsd && !dolarFecha) return setError("Indique la fecha del tipo de cambio del dólar.");
     setEnviando(true);
@@ -563,6 +573,7 @@ export default function RespuestaLaboratorio({
             condiciones: condiciones.trim() || null,
             dolar: n(dolar) > 0 ? n(dolar) : null,
             dolarFecha: n(dolar) > 0 && dolarFecha ? dolarFecha : null,
+            ivaGastos,
           }
         : null;
       const r = await pedir<any>("POST", `/cotizaciones/solicitudes-laboratorio/${sol.id}/responder`, {
@@ -630,7 +641,7 @@ export default function RespuestaLaboratorio({
           <h3 style={{ fontSize: 14, margin: "6px 0" }}>Programa de trabajo <span className="tag">FORM06</span></h3>
           <div className="form-grid cols-3">
             <div className="field">
-              <label htmlFor="r-plazo">Plazo de entrega propuesto (días corridos) <span className="req">*</span></label>
+              <label htmlFor="r-plazo">Plazo de entrega propuesto (días hábiles) <span className="req">*</span></label>
               <input id="r-plazo" inputMode="numeric" value={plazo} onChange={(e) => setPlazo(e.target.value.replace(/\D/g, ""))} maxLength={3} />
             </div>
             <div className="field">
@@ -690,6 +701,10 @@ export default function RespuestaLaboratorio({
             <p className="subtitle" style={{ gridColumn: "1 / -1", margin: 0, fontSize: 11.5 }}>
               Obligatorio si hay montos en US$. Con el tipo de cambio, los montos finales se muestran también en US$ (US$ = $ / dólar). Para cambiar el valor, edítelo aquí.
             </p>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 400, gridColumn: "1 / -1" }}>
+              <input type="checkbox" style={{ width: "auto" }} checked={ivaGastos} onChange={(e) => setIvaGastos(e.target.checked)} />
+              Agregar a otros gastos la línea «IVA {String(cfg.ivaPct ?? 19).replace(".", ",")} %» = IVA × (viáticos + H.H. civil + otros gastos en $){prev.ivaLinea ? `: $ ${prev.ivaLinea.toLocaleString("es-CL")}` : ""}. No la llevan los servicios estándar (ya tienen IVA) ni la H.H. militar.
+            </label>
           </div>
           {conCosteo && (
             <div style={{ maxWidth: 620, marginLeft: "auto" }} aria-live="polite">

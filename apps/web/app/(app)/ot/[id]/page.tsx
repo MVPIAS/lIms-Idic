@@ -427,7 +427,7 @@ export default function ExpedientePage() {
                 <div className="field readonly"><label>Origen</label><input value={ot?.origenTrabajo ? ORIGEN_LABEL[ot.origenTrabajo] ?? ot.origenTrabajo : "—"} readOnly /></div>
                 <div className="field readonly"><label>Cobro</label><input value={ot ? (ot.conCobro === false ? "Sin cobro" : "Con cobro") : "—"} readOnly /></div>
                 <div className="field readonly"><label>OPI</label><input value={ot?.opiNumero ? `${ot.opiNumero} · ${fechaDia(ot.opiFecha)}` : opiVigente ? "Pendiente" : "—"} readOnly /></div>
-                {ot?.disposicionRef && <div className="field readonly"><label>Disposición del Director o del Jefe de Departamento</label><input value={`${ot.disposicionRef}${ot.disposicionFecha ? ` · ${fechaDia(ot.disposicionFecha)}` : ""}`} readOnly /></div>}
+                {ot?.disposicionRef && <div className="field readonly"><label>Disposición del Director (por su intermedio, el Jefe del Departamento productivo)</label><input value={`${ot.disposicionRef}${ot.disposicionFecha ? ` · ${fechaDia(ot.disposicionFecha)}` : ""}`} readOnly /></div>}
                 {ot?.numeroLey && <div className="field readonly"><label>Resolución DGMN</label><input value={ot.numeroLey} readOnly /></div>}
                 <div className="field readonly"><label>Horas hombre</label><input value={num(ot?.horasHombre, 1)} readOnly /></div>
                 <div className="field readonly"><label>Costo estimado</label><input value={clp(ot?.costoEstimado)} readOnly /></div>

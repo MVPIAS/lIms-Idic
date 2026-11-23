@@ -28,6 +28,14 @@
  * DFZ). CI, recargo e IVA son parámetros (`circuito_cotizacion.cfa_pct`,
  * `.margen_particular_pct` e `.iva_pct`): 20 %, 30 % y 19 % según la lista de
  * precios oficial 2026 del IDIC (22-10-2026), que respondió EP-00 §10 P1.
+ *
+ * Quinto envío (21-11-2026, Formularios Ejército 1–4): la línea «IVA 19 %» de
+ * Otros gastos = IVA % × (viáticos + H.H. civil + otros gastos en $). No la
+ * llevan los servicios estándar (ya tienen IVA), la H.H. militar, los pasajes,
+ * las horas máquina ni los insumos; los equipos se ingresan como «otros gastos»
+ * (así entran en la base). Con `ivaGastos` el sistema la calcula y la suma a
+ * «Otros gastos en pesos» (y al CDT), como en el formulario real
+ * FORM-2026-14620/001: 19 % × (3.321.220 + 1.448.160 + 2.455.494) = 1.372.726.
  */
 import { alPeso, desdeCostoDirecto } from "./estructura-precio";
 
@@ -57,6 +65,8 @@ export interface Form05Entrada {
   dolar?: number | null;
   /** Fecha del tipo de cambio (AAAA-MM-DD). Exigida si hay montos en US$. */
   dolarFecha?: string | null;
+  /** Agregar la línea «IVA 19 %» de otros gastos (quinto envío). Sin indicar = no (costeos guardados antes). */
+  ivaGastos?: boolean | null;
 }
 
 /** Montos del formulario por concepto, en pesos (líneas de «Montos finales» del formulario real). */
@@ -120,6 +130,15 @@ export interface Form05Resultado {
   dolarFecha: string | null;
   /** Montos finales en US$ (null sin dólar). */
   usd: MontosUsd | null;
+  /** Línea «IVA 19 %» de otros gastos (0 si no se pidió) y su base (viáticos + H.H. civil + otros gastos en $). */
+  ivaGastos: number;
+  baseIvaGastos: number;
+}
+
+/** Línea «IVA %» de otros gastos: IVA % × (viáticos + H.H. civil + otros gastos en $), en pesos y redondeada. */
+export function lineaIvaGastos(base: { viaticos: number; horasHombreCivil: number; otrosPesos: number }, ivaPct: number): { base: number; iva: number } {
+  const b = Math.round(base.viaticos) + Math.round(base.horasHombreCivil) + Math.round(base.otrosPesos);
+  return { base: b, iva: Math.round((b * ivaPct) / 100) };
 }
 
 const r0 = (n: number) => Math.round(n);
@@ -180,30 +199,35 @@ export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenPart
   const viatico = (v: Viatico) => aPesos(montoViatico(v), v.moneda, dolar);
   const pasaje = (x: Pasaje) => aPesos(x.cantidad * x.valorUnitario, x.moneda, dolar);
   const hh = (h: HoraHombre) => h.horas * h.valorHora;
+  const ivaPct = p.ivaPct ?? 19;
+  const hhCivil = r0(suma(f.horasHombre, (h) => (h.tipo === "militar" ? 0 : hh(h))));
+  const otrosPesosFilas = r0(suma(f.otros, (o) => (enUsd(o) ? 0 : o.monto)));
+  const lineaIva = f.ivaGastos
+    ? lineaIvaGastos({ viaticos: r0(suma(f.viaticos, viatico)), horasHombreCivil: hhCivil, otrosPesos: otrosPesosFilas }, ivaPct)
+    : { base: 0, iva: 0 };
   const secciones = {
     viaticos: r0(suma(f.viaticos, viatico)),
     horasHombre: r0(suma(f.horasHombre, hh)),
     servicios: r0(suma(f.servicios, (s) => s.cantidad * s.valorUnitario)),
     horasMaquina: r0(suma(f.horasMaquina, (h) => h.horas * h.valorHora)),
     pasajes: r0(suma(f.pasajes, pasaje)),
-    otros: r0(suma(f.otros, (o) => aPesos(o.monto, o.moneda, dolar))),
+    otros: r0(suma(f.otros, (o) => aPesos(o.monto, o.moneda, dolar))) + lineaIva.iva,
     insumos: r0(suma(f.insumos, montoInsumo)),
   };
   const cdt = Object.values(secciones).reduce((a, b) => a + b, 0);
-  const ivaPct = p.ivaPct ?? 19;
   const e = desdeCostoDirecto(cdt, { ciPct: p.cfaPct, recargoPct: p.margenParticularPct, ivaPct });
   const de = <T extends { ambito: string }>(xs: T[] | undefined, ambito: string, f: (x: T) => number) => r0(suma((xs ?? []).filter((x) => x.ambito === ambito), f));
   const hhMilitar = suma(f.horasHombre, (h) => (h.tipo === "militar" ? hh(h) : 0));
   const detalle: DetalleForm05 = {
     viaticosNacionales: de(f.viaticos, "nacional", viatico),
     viaticosExtranjero: de(f.viaticos, "extranjero", viatico),
-    horasHombreCivil: r0(suma(f.horasHombre, (h) => (h.tipo === "militar" ? 0 : hh(h)))),
+    horasHombreCivil: hhCivil,
     horasHombreMilitar: r0(hhMilitar),
     servicios: secciones.servicios,
     horasMaquina: secciones.horasMaquina,
     pasajesNacionales: de(f.pasajes, "nacional", pasaje),
     pasajesExtranjero: de(f.pasajes, "extranjero", pasaje),
-    otrosPesos: r0(suma(f.otros, (o) => (enUsd(o) ? 0 : o.monto))),
+    otrosPesos: otrosPesosFilas + lineaIva.iva,
     otrosDolar: r0(suma(f.otros, (o) => (enUsd(o) ? o.monto * dolar : 0))),
     insumos: secciones.insumos,
   };
@@ -249,6 +273,8 @@ export function calcularForm05(f: Form05Entrada, p: { cfaPct: number; margenPart
     dolar: dolar || null,
     dolarFecha: dolar && f.dolarFecha ? f.dolarFecha : null,
     usd,
+    ivaGastos: lineaIva.iva,
+    baseIvaGastos: lineaIva.base,
   };
 }
 
@@ -259,7 +285,7 @@ export interface ProgramaTrabajo {
   etapas: EtapaPrograma[];
   fechaInicio?: string | null;
   fechaTermino?: string | null;
-  /** Plazo de entrega propuesto (días corridos). Obligatorio. */
+  /** Plazo de entrega propuesto (días hábiles, IDIC-PG03 Rev18). Obligatorio. */
   plazoEntregaDias: number;
   /** Programa de Trabajo del LEM (EP-05 0.2): puntos de la E.T. que se ensayan y nº de ítems. */
   puntosEt?: string | null;
@@ -269,7 +295,7 @@ export interface ProgramaTrabajo {
 export function erroresPrograma(p: ProgramaTrabajo): string[] {
   const e: string[] = [];
   if (!(Number.isInteger(p.plazoEntregaDias) && p.plazoEntregaDias >= 1 && p.plazoEntregaDias <= 730))
-    e.push("Plazo de entrega propuesto: entre 1 y 730 días corridos.");
+    e.push("Plazo de entrega propuesto: entre 1 y 730 días hábiles.");
   if (p.fechaInicio && p.fechaTermino && p.fechaTermino < p.fechaInicio)
     e.push("Programa de trabajo: la fecha de término es anterior a la de inicio.");
   if (p.numItems != null && !(Number.isInteger(p.numItems) && p.numItems >= 1))

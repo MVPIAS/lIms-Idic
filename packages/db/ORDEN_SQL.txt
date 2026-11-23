@@ -171,4 +171,5 @@ seed_cuarto_envio_tasa_demo.sql      demo
 align_cuarto_envio_encuestas.sql
 align_cuarto_envio_cotizacion.sql
 align_q1_labs.sql
+align_q1_cotizacion.sql
 align_cierre_permisos.sql

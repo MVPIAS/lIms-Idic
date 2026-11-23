@@ -81,13 +81,16 @@ ${NOTAS_COTIZACION.map((n) => `  <li>${n}</li>`).join("\n")}
 <p>${CLAUSULA_CONFIDENCIALIDAD}</p>`;
 }
 
-/** Pie del documento: horario de atención y teléfono de reclamos (líneas vacías si no hay dato). */
+/**
+ * Pie INN del documento: horario de atención y teléfono de reclamos (sin dato, no
+ * se imprime la línea). Va en `div.pie-cada-hoja`: el PDF lo repite al pie de
+ * CADA hoja (pdf.renderer.ts), no solo al final (análisis quinto envío §4.1).
+ */
 export function pieCotizacionHtml(cot: any): string {
   const textos: TextosDocumentoCotizacion = cot?.textosDocumento ?? {};
   const horario = String(textos.horarioAtencion ?? "").trim();
   const reclamos = String(textos.telefonoReclamos ?? "").trim();
-  return `${horario ? `<p class="nota">Horario de atención a clientes: ${esc(horario)}</p>` : ""}
-${reclamos ? `<p class="nota">Reclamos y sugerencias: ${esc(reclamos)}</p>` : ""}`;
+  return `<div class="pie-cada-hoja">${horario ? `<p class="nota">Horario de Atención a Clientes: ${esc(horario)}</p>` : ""}${reclamos ? `<p class="nota">Reclamos y sugerencias: ${esc(reclamos)}</p>` : ""}</div>`;
 }
 
 /** Descripción de la línea en el documento: con su muestra («Muestra 2 · … — EN… »), si la tiene. */
@@ -182,7 +185,7 @@ export function cuerpoCotizacionHtml(cot: any): string {
   <tr><th>Código</th><td>${esc(cot.codigo)}</td><th>Fecha</th><td>${fechaCorta(cot.fechaEmision ? fechaUtc(cot.fechaEmision) : new Date(cot.createdAt ?? Date.now()))}</td></tr>
   <tr><th>Forma de pago</th><td>${esc(etiquetaFormaPago(cot.formaPago))}</td><th>Validez</th><td>${validez}</td></tr>
   ${cot.referencia ? `<tr><th>Referencia</th><td colspan="3">${esc(cot.referencia)}</td></tr>` : ""}
-  ${cot.plazoEntregaDias ? `<tr><th>Plazo de entrega</th><td colspan="3">${esc(cot.plazoEntregaDias)} días corridos desde la recepción de las muestras o ítems</td></tr>` : ""}
+  ${cot.plazoEntregaDias ? `<tr><th>Plazo de entrega</th><td colspan="3">${esc(cot.plazoEntregaDias)} días hábiles desde la recepción de las muestras o ítems</td></tr>` : ""}
   ${usd ? `<tr><th>Moneda</th><td>US$</td><th>Dólar del día</th><td>${clp(cot.dolarValor)}${cot.dolarFecha ? ` (${fechaCorta(fechaUtc(cot.dolarFecha))})` : ""}</td></tr>` : ""}
 </table>
 

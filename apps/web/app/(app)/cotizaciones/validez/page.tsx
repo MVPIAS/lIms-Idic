@@ -3,8 +3,8 @@
 /**
  * Validez de las cotizaciones por tipo de cliente y laboratorio (reunión 2 · 28-10-2026)
  * -----------------------------------------------------------------------------
- * Respuestas del IDIC: particulares 45 días (60 en Metrología y Resistencia
- * Balística); Ejército, Fuerzas Armadas y de Orden hasta el 31-12 (las emitidas
+ * Respuestas del IDIC: particulares 60 días (21-11-2026; antes 45), con validez propia en Metrología y Resistencia
+ * Balística; Ejército, Fuerzas Armadas y de Orden hasta el 31-12 (las emitidas
  * desde octubre, 6 meses). Cada regla indica un tipo de cliente, un laboratorio
  * o ambos. Prioridad: tipo + laboratorio › tipo › laboratorio (solo para
  * particulares) › regla general (Parámetros › validez_cotizacion).
@@ -16,7 +16,7 @@ import { usePermisos } from "@/lib/permisos";
 import { pedir, type ConfigCotizacion } from "../_components/comercial";
 
 type Regla = { id: string; tipoCliente: string | null; centroCostoId: string | null; centroCosto: string | null; regla: "DIAS" | "FIN_ANIO"; dias: number | null; mesesOctDic: number | null; activo: boolean; nota: string | null };
-const VACIA = { tipoCliente: "", centroCostoId: "", regla: "DIAS" as "DIAS" | "FIN_ANIO", dias: "45", mesesOctDic: "", nota: "" };
+const VACIA = { tipoCliente: "", centroCostoId: "", regla: "DIAS" as "DIAS" | "FIN_ANIO", dias: "60", mesesOctDic: "", nota: "" };
 
 export default function ValidezCotizacionesPage() {
   const { puede } = usePermisos();
@@ -61,7 +61,7 @@ export default function ValidezCotizacionesPage() {
       <h1 className="page">Validez de las cotizaciones</h1>
       <p className="subtitle">
         La validez se calcula sola al emitir la cotización, según el tipo de cliente elegido en ella y su laboratorio. Manda la regla más específica: tipo y laboratorio, luego el tipo y, para particulares, el laboratorio. Sin regla rige la general:
-        particulares {cfg?.validez?.particularDias ?? 45} días; Ejército hasta el 31-12.
+        particulares {cfg?.validez?.particularDias ?? 60} días; Ejército hasta el 31-12.
       </p>
       {error && <div className="alert warn" role="alert">{error}</div>}
       {msg && <div className="alert info" role="status">{msg}</div>}

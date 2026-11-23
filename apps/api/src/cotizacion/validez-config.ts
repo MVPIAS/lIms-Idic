@@ -1,6 +1,6 @@
 /**
  * Validez configurable por TIPO DE CLIENTE y LABORATORIO (Comercial, reunión 2 ·
- * 28-10-2026). Respuestas del IDIC: particulares 45 días (60 en Metrología y
+ * 28-10-2026). Respuestas del IDIC: particulares 60 días (antes 45; propia en Metrología y
  * Resistencia Balística); Ejército, Fuerzas Armadas y de Orden hasta el 31-12
  * (las emitidas desde octubre, 6 meses).
  *

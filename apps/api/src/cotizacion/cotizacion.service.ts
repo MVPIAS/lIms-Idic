@@ -35,13 +35,13 @@ import { paginacion } from "../ot/lista-ot";
 import { hoyCl, sumarDias } from "../ot/plazos";
 import { Prisma } from "@prisma/client";
 import { generarNumeroCotizacion } from "./numeracion-cotizacion";
-import { estadoTrasCambioLineas, lineasCambiaron, motivoNoAceptable, motivoNoEditable } from "./circuito-cotizacion";
+import { estadoTrasCambioLineas, lineasCambiaron, motivoNoAceptable, motivoNoEditable, reglaModificacion } from "./circuito-cotizacion";
 import { estadoCircuitoDe, leerConfigCircuito } from "./circuito-config";
 import { claveLibre, precioDeLinea, type Existentes } from "./precio-ficha";
 import { revisarOc } from "./aceptacion-oc";
 import { heredarDeCotizacion } from "../ot/encargo/encargo.module";
 import { entero, sino, valoresCategoria } from "../common/parametros-r4d";
-import { guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
+import { EXTENSIONES_AMPLIADAS, MAX_BYTES_ADJUNTO_AMPLIADO, guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 import { lineasDesdeCotizacion, totales as totalesFactura } from "../facturacion/reglas-factura";
 import { aplicarMora } from "../cliente/mora.service";
 import { mensajeClienteBloqueado } from "../cliente/mora";
@@ -95,6 +95,10 @@ export function filtroPorVencer(ahora: Date = new Date()): Prisma.CotizacionWher
 
 /** Estado inicial de toda cotización nueva (R1: Abierta / Aceptada / Anulada). */
 export const ESTADO_ABIERTA = "abierta";
+/** Clases de adjunto de la cotización. */
+export const CLASES_ADJUNTO_COTIZACION = ["solicitud", "antecedente", "aceptacion"] as const;
+/** Tope por defecto de un adjunto de la cotización (MB). */
+export const MAX_MB_ADJUNTO_DEF = 15;
 
 /** Grupo visible del combo de centros de costo (SVT2). */
 export function grupoCentroCosto(tipo?: string | null): string {
@@ -484,6 +488,8 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       condicionesMax: CONDICIONES_MAX,
       // Reunión 2/3: el comprobante de aceptación es obligatorio (parámetro aceptacion_comprobante.exige).
       aceptacion: { exigeComprobante: sino((await valoresCategoria(this.prisma, t, "aceptacion_comprobante")).exige, true) },
+      // Quinto envío: adjuntos de la cotización (correos, fotos, E.T.) y su tope (parámetro cotizacion_adjuntos.max_mb).
+      adjuntos: { maxMb: await this.maxMbAdjuntos(t), extensiones: EXTENSIONES_AMPLIADAS, clases: [...CLASES_ADJUNTO_COTIZACION] },
       // Circuito de la cotización (V°B°, firma): la UI decide qué botones ofrece.
       circuito: await leerConfigCircuito(this.prisma, t),
     };
@@ -921,8 +927,91 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
    * `estado` se admite por compatibilidad, validado como transición; la
    * aceptación y la anulación tienen sus propios endpoints con datos obligatorios.
    */
-  async actualizar(id: string, data: CabeceraCotizacion & { estado?: string }, tenantId?: string, usuarioId?: string) {
+  async actualizar(
+    id: string,
+    data: CabeceraCotizacion & { estado?: string; motivoModificacion?: string | null },
+    tenantId?: string,
+    usuarioId?: string,
+  ) {
     const actual = await this.detalle(id, tenantId); // existencia + tenant
+    const { motivoModificacion, ...sinMotivo } = data;
+    const { estado: _e, solicitud: _s, oportunidadId: _o2, ...cab } = sinMotivo;
+    // Quinto envío (21-11-2026): una cotización en firma o firmada (no aceptada)
+    // se modifica con motivo; vuelve a «Autorización pendiente» con traza.
+    const modif = Object.values(cab).some((v) => v !== undefined)
+      ? reglaModificacion(actual as any, motivoModificacion)
+      : { requiere: false, error: null };
+    if (modif.error) throw new BadRequestException(modif.error);
+    const r = await this.actualizarContenido(actual, id, sinMotivo, usuarioId, modif.requiere);
+    if (modif.requiere) await this.registrarModificacion(actual, String(motivoModificacion).trim(), usuarioId);
+    return r;
+  }
+
+  /**
+   * Traza de la modificación de una cotización en firma o firmada: evento
+   * «modificacion» (usuario, fecha, motivo, nº de versión y la versión anterior
+   * completa) y vuelta a «Autorización pendiente» (firma del Jefe DCO pendiente;
+   * la firma anterior deja de valer). No cuenta como nula ni crea otra cotización.
+   */
+  private async registrarModificacion(actual: any, motivo: string, usuarioId: string | undefined) {
+    const previas = await this.prisma.$queryRawUnsafe<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM cotizacion_evento WHERE cotizacion_id = $1::uuid AND accion = 'modificacion'`,
+      actual.id,
+    );
+    const version = (previas[0]?.n ?? 0) + 1;
+    const anterior = {
+      estado: actual.estado,
+      firmaEstado: actual.firmaEstado ?? null,
+      firmadaPor: actual.firmadaPorNombre ?? actual.firmadaPor ?? null,
+      firmadaAt: actual.firmadaAt ?? null,
+      enviadaAt: actual.enviadaAt ?? null,
+      enviadaMedio: actual.enviadaMedio ?? null,
+      fechaEmision: actual.fechaEmision ?? null,
+      validaHasta: actual.validaHasta ?? null,
+      moneda: actual.moneda,
+      subtotal: actual.subtotal,
+      neto: actual.neto,
+      ivaMonto: actual.ivaMonto,
+      total: actual.total,
+      referencia: actual.referencia ?? null,
+      descripcionTecnica: actual.descripcionTecnica ?? null,
+      condicionesAdicionales: actual.condicionesAdicionales ?? null,
+      plazoEntregaDias: actual.plazoEntregaDias ?? null,
+      formaPago: actual.formaPago ?? null,
+      lineas: (actual.lineas ?? []).map((l: any) => ({
+        catEnsayoId: l.catEnsayoId ?? null,
+        tipo: l.tipo ?? null,
+        descripcion: l.descripcion ?? null,
+        cantidad: l.cantidad,
+        precioUnitario: l.precioUnitario,
+        subtotal: l.subtotal,
+        muestraN: l.muestraN ?? null,
+      })),
+    };
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE cotizacion SET firma_estado = 'pendiente', firma_solicitada_por = $2::uuid, firma_solicitada_at = now(),
+              firmada_por = NULL, firmada_at = NULL, firma_devuelta_motivo = NULL,
+              enviada_at = NULL, enviada_medio = NULL, enviada_destinatarios = NULL, updated_at = now()
+        WHERE id = $1::uuid`,
+      actual.id,
+      usuarioId ?? null,
+    );
+    await this.hito(actual.tenantId, actual.id, "modificacion", usuarioId, motivo.slice(0, 2000), {
+      version,
+      versionAnterior: version - 1,
+      estadoAnterior: actual.estado,
+      firmaEstadoAnterior: actual.firmaEstado ?? null,
+      anterior,
+    });
+  }
+
+  private async actualizarContenido(
+    actual: Awaited<ReturnType<CotizacionService["detalle"]>>,
+    id: string,
+    data: CabeceraCotizacion & { estado?: string },
+    usuarioId: string | undefined,
+    modificacionConTraza: boolean,
+  ) {
     const { estado, ...resto } = data;
     const { solicitud, oportunidadId: _o, ...restoCab } = resto;
     const tocaContenido = Object.values(restoCab).some((v) => v !== undefined);
@@ -942,9 +1031,13 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       return this.prisma.cotizacion.update({ where: { id }, data: { ...(estado ? { estado } : {}) } });
     }
     const noEditable = motivoNoEditable((actual as any).firmaEstado ?? null);
-    if (noEditable && actual.estado === ESTADO_ABIERTA) throw new ConflictException(noEditable);
+    if (noEditable && actual.estado === ESTADO_ABIERTA && !modificacionConTraza) throw new ConflictException(noEditable);
     // COM-02: una cotización Reabierta (autorizada por el Jefe DCO) se corrige hasta registrar el valor final.
     const reabierta = actual.estado === ESTADO_REABIERTA;
+    if (actual.estado === "aceptada")
+      throw new ConflictException(
+        `La cotización ${actual.codigo} ya está Aceptada: para cambiarla, solicite la reapertura al Jefe DCO (COM-02) desde su ficha.`,
+      );
     if (actual.estado !== ESTADO_ABIERTA && !reabierta) {
       throw new ConflictException(
         `Solo se puede editar una cotización Abierta (esta está '${actual.estado}'${["borrador", "enviada", "rechazada", "expirada"].includes(actual.estado) ? ", histórica de solo lectura" : ""}).`,
@@ -1663,11 +1756,32 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
     return { ok: true, mensaje: `Orden del cliente ${d.numero.trim()} anulada. La cotización ${cot.codigo} sigue Abierta.` };
   }
 
-  /** Adjunto de la cotización: documento de solicitud o de aceptación (EP-00 1.1 y 4.1). */
+  /** Tope de un adjunto de la cotización en MB (parámetro cotizacion_adjuntos.max_mb; def. 15, máx. 25). */
+  async maxMbAdjuntos(tenantId: string): Promise<number> {
+    const techo = MAX_BYTES_ADJUNTO_AMPLIADO / (1024 * 1024);
+    return entero((await valoresCategoria(this.prisma, tenantId, "cotizacion_adjuntos")).max_mb, MAX_MB_ADJUNTO_DEF, 1, techo);
+  }
+
+  /**
+   * Adjunto de la cotización (EP-00 1.1 y 4.1; quinto envío 21-11-2026):
+   * «solicitud» (oficio o correo del cliente), «antecedente» (correos, fotos,
+   * E.T. y otros respaldos, desde la creación y en la edición, en cualquier
+   * estado) o «aceptacion» (OPI, O/C…). Acepta PDF, imágenes, correos y Office.
+   */
   async adjuntar(id: string, tenantId: string | undefined, clase: string, archivo: ArchivoAdjunto | undefined, usuarioId?: string) {
     const cot = await this.detalle(id, tenantId);
-    if (!["solicitud", "aceptacion"].includes(clase)) throw new BadRequestException("Clase de adjunto: «solicitud» o «aceptacion».");
-    return guardarAdjunto(this.prisma, { tenantId: cot.tenantId, entidad: "cotizacion", entidadId: id, clase, archivo, usuarioId: usuarioId ?? null });
+    if (!(CLASES_ADJUNTO_COTIZACION as readonly string[]).includes(clase))
+      throw new BadRequestException("Clase de adjunto: «solicitud», «antecedente» o «aceptacion».");
+    const maxBytes = (await this.maxMbAdjuntos(cot.tenantId)) * 1024 * 1024;
+    return guardarAdjunto(this.prisma, {
+      tenantId: cot.tenantId,
+      entidad: "cotizacion",
+      entidadId: id,
+      clase,
+      archivo,
+      usuarioId: usuarioId ?? null,
+      opciones: { ampliado: true, maxBytes },
+    });
   }
 
   async adjuntos(id: string, tenantId: string) {

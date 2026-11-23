@@ -212,7 +212,8 @@ const MARGEN = 42; // ~15 mm
 type Doc = PDFKit.PDFDocument;
 
 const anchoUtil = (doc: Doc) => doc.page.width - MARGEN * 2;
-const fondo = (doc: Doc) => doc.page.height - MARGEN - 26; // hueco para el pie
+/** Hueco para el pie técnico y, si lo hay, para el pie que se repite en cada hoja. */
+const fondo = (doc: Doc) => doc.page.height - MARGEN - 26 - ((doc as DocConFirmas)._altoPieCadaHoja ?? 0);
 
 /** Salta de página si no caben `alto` puntos. */
 function asegurar(doc: Doc, alto: number): void {
@@ -287,7 +288,64 @@ type DocConFirmas = Doc & {
   _firmasDibujadas?: boolean;
   /** Celdas «N.º de páginas» pendientes de rellenar (portada del IVC). */
   _nPaginas?: { pagina: number; x: number; y: number; w: number }[];
+  /** Pie que se repite en cada hoja (`div.pie-cada-hoja`): líneas y alto reservado. */
+  _pieCadaHoja?: string[];
+  _altoPieCadaHoja?: number;
 };
+
+/** Clase del bloque que se imprime al pie de CADA hoja (p. ej. horario y reclamos de la cotización). */
+export const CLASE_PIE_CADA_HOJA = "pie-cada-hoja";
+const ES_PIE_CADA_HOJA = /\bpie-cada-hoja\b/;
+const CUERPO_PIE_CADA_HOJA = 6.5;
+
+/**
+ * Saca del árbol los bloques `div.pie-cada-hoja` y devuelve sus líneas de texto
+ * (un párrafo por línea). No se dibujan en el flujo: los repite `dibujarPies`
+ * en todas las hojas, encima del pie técnico. Vacíos → ninguna línea.
+ */
+export function extraerPieCadaHoja(raiz: Nodo): string[] {
+  const lineas: string[] = [];
+  const visitar = (n: Nodo) => {
+    n.hijos = n.hijos.filter((h) => {
+      if (h.tag !== "#text" && ES_PIE_CADA_HOJA.test(h.clase)) {
+        const bloques = h.hijos.filter((x) => x.tag !== "#text");
+        const textos = (bloques.length ? bloques : [h]).map((x) => textoDe(x)).filter(Boolean);
+        lineas.push(...textos);
+        return false;
+      }
+      visitar(h);
+      return true;
+    });
+  };
+  visitar(raiz);
+  return lineas;
+}
+
+/** Reserva el alto del pie por hoja en el documento (todas las páginas, también las que pdfkit abra solo). */
+function reservarPieCadaHoja(doc: Doc, lineas: string[]): void {
+  if (!lineas.length) return;
+  doc.font(CURSIVA).fontSize(CUERPO_PIE_CADA_HOJA);
+  const alto = lineas.reduce((a, t) => a + doc.heightOfString(t, { width: anchoUtil(doc) }), 0) + 6;
+  const d = doc as DocConFirmas;
+  d._pieCadaHoja = lineas;
+  d._altoPieCadaHoja = Math.ceil(alto);
+  const inferior = MARGEN + d._altoPieCadaHoja;
+  doc.page.margins.bottom = inferior;
+  const opciones = (doc as unknown as { options: { margins?: Record<string, number> } }).options;
+  opciones.margins = { ...(opciones.margins ?? {}), bottom: inferior };
+}
+
+/** Dibuja el pie por hoja de la página actual, justo encima de la raya del pie técnico. */
+function dibujarPieCadaHoja(doc: Doc): void {
+  const d = doc as DocConFirmas;
+  if (!d._pieCadaHoja?.length || !d._altoPieCadaHoja) return;
+  let y = doc.page.height - MARGEN - 6 - d._altoPieCadaHoja + 2;
+  doc.font(CURSIVA).fontSize(CUERPO_PIE_CADA_HOJA).fillColor(SUAVE);
+  for (const t of d._pieCadaHoja) {
+    doc.text(t, MARGEN, y, { width: anchoUtil(doc), align: "center" });
+    y = doc.y;
+  }
+}
 
 /** Rellena las celdas «N.º de páginas» con el total, ya conocido. */
 function rellenarNumeroPaginas(doc: Doc): void {
@@ -867,6 +925,7 @@ function dibujarPies(doc: Doc, sello: Sello, paginacionPropia = false): void {
     // se dibuja el pie y se restaura después.
     const margenInferior = doc.page.margins.bottom;
     doc.page.margins.bottom = 0;
+    dibujarPieCadaHoja(doc);
     const y = doc.page.height - MARGEN + 2;
     doc.moveTo(MARGEN, y - 6).lineTo(doc.page.width - MARGEN, y - 6).lineWidth(0.5).stroke(LINEA);
 
@@ -1005,7 +1064,9 @@ export async function generarPdf(cuerpoHtml: string, sello: Sello, titulo: strin
   doc.fillColor(TINTA);
   const conFirmas = doc as DocConFirmas;
   conFirmas._firmasCircuito = sello.firmas;
-  dibujarNodo(doc, parsearHtml(cuerpoHtml));
+  const raiz = parsearHtml(cuerpoHtml);
+  reservarPieCadaHoja(doc, extraerPieCadaHoja(raiz));
+  dibujarNodo(doc, raiz);
   // Plantilla sin bloque de firmas: las del circuito van al final del cuerpo.
   if (sello.firmas?.length && !conFirmas._firmasDibujadas) dibujarFirmasCircuito(doc, sello.firmas);
   rellenarNumeroPaginas(doc);

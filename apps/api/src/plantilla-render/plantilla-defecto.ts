@@ -242,6 +242,8 @@ export const ESTILOS_DOCUMENTO = `
   .paginacion { text-align:right; font-weight:600; font-size:10.5px; margin:6px 0 0; color:var(--tinta); }
   .membrete .doc img.logo-acred { height:36px; max-width:150px; object-fit:contain; align-self:flex-end; margin-bottom:3px; }
   .pie-hoja { margin-top:22px; }
+  .pie-cada-hoja { margin-top:14px; border-top:1px solid var(--linea); padding-top:6px; text-align:center; }
+  .pie-cada-hoja p { margin:2px 0; }
   p.linea-acred, p.reemplaza { text-align:center; margin:4px 0; }
   p.legal { margin:3px 0; }
   p.fin { text-align:center; margin-top:12px; }

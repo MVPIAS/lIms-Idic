@@ -123,7 +123,7 @@ const SI_NO: Opcion[] = [
 /** Orígenes de OT (reglas-ot.ts ORIGENES_OT + los de BPCH). */
 export const ORIGENES_OT_ENCUESTA: Opcion[] = [
   { valor: "COTIZACION", etiqueta: "Cotización" },
-  { valor: "DISPOSICION", etiqueta: "Disposición del Director o del Jefe de Departamento" },
+  { valor: "DISPOSICION", etiqueta: "Disposición del Director (por su intermedio, el Jefe del Departamento productivo)" },
   { valor: "INTERLABORATORIO", etiqueta: "Interlaboratorio" },
   { valor: "OT_INTERNA", etiqueta: "OT interna" },
   { valor: "INTERNACION", etiqueta: "Internación (BPCH)" },
@@ -831,10 +831,18 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
   },
   {
     categoria: "ot_disposicion",
-    titulo: "OT por disposición sin OPI · plazo",
-    donde: "OT por disposición del Director con cobro: la OPI se regulariza en este plazo; después aparece como «OPI vencida» en Mi bandeja (reunión 2).",
+    titulo: "OT sin OC/OPI · plazo para regularizar",
+    donde: "OT sin OC/OPI con cobro: la dispone el Director (por su intermedio, el Jefe del Departamento productivo). La OC/OPI se regulariza en este plazo; después aparece como «OPI vencida» en Mi bandeja (reunión 2; respuesta SVT del 21-11-2026).",
     codigos: {
-      meses_opi: { tipo: "entero", nombre: "Meses para regularizar la OPI", min: 1, max: 24, unidad: "meses", porDefecto: "2" },
+      meses_opi: { tipo: "entero", nombre: "Meses para regularizar la OC/OPI", min: 1, max: 24, unidad: "meses", porDefecto: "2" },
+    },
+  },
+  {
+    categoria: "cotizacion_adjuntos",
+    titulo: "Adjuntos de la cotización · tamaño",
+    donde: "Correos (.msg, .eml), fotos, PDF de la E.T. y documentos Office que se adjuntan a la cotización desde su creación y en la edición (quinto envío, 21-11-2026).",
+    codigos: {
+      max_mb: { tipo: "entero", nombre: "Tamaño máximo de cada adjunto", min: 1, max: 25, unidad: "MB", porDefecto: "15" },
     },
   },
   {

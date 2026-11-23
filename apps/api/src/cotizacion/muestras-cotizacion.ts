@@ -24,7 +24,7 @@ export interface MuestraEntrada {
   catElementoId?: string | null;
   /** Nombre del producto tal como se mostró al elegirlo (o escrito si no está en el catálogo). */
   productoTexto?: string | null;
-  /** Plazo propio de esta muestra, en días corridos desde su llegada. */
+  /** Plazo propio de esta muestra, en días hábiles desde su llegada (IDIC-PG03 Rev18). */
   plazoDias?: number | null;
 }
 
@@ -128,7 +128,7 @@ export function textoPlazo(plazoDias: number | null | undefined, muestras: Pick<
   const propios = muestras.filter((m) => m.plazoDias);
   if (!plazoDias && !propios.length) return "";
   const partes: string[] = [];
-  if (plazoDias) partes.push(`${plazoDias} días corridos desde la llegada de la muestra al laboratorio`);
+  if (plazoDias) partes.push(`${plazoDias} días hábiles desde la llegada de la muestra al laboratorio`);
   for (const m of propios) partes.push(`muestra ${m.n}: ${m.plazoDias} días`);
   return `${partes.join("; ")}. Las fechas comprometidas quedan condicionadas a la entrega oportuna de las muestras.`;
 }

@@ -50,7 +50,7 @@ producto real (API + web + BD).
 
 Función pura `apps/api/src/cotizacion/validez.ts` (tests en `validez.spec.ts`):
 
-- **Particulares:** 45 días corridos desde la emisión. Si el centro de costo tiene
+- **Particulares:** 60 días corridos (45 hasta el 21-11-2026) desde la emisión. Si el centro de costo tiene
   `validez_particular_dias` (p. ej. LRB, LMT), se usa ese valor.
 - **Ejército:** hasta el **31 de diciembre** del año de emisión. Si se emite en
   **octubre, noviembre o diciembre**, la validez es de **6 meses** desde la emisión
@@ -59,7 +59,7 @@ Función pura `apps/api/src/cotizacion/validez.ts` (tests en `validez.spec.ts`):
   categoría `tipo_cliente` (`EJERCITO` | `PARTICULAR`). Sembrado: solo `ejercito`
   (y el antiguo `institucional`) siguen la regla Ejército; el resto, Particular.
   El IDIC puede cambiarlo desde Parámetros sin tocar código.
-- Los números (45 días / 6 meses) están en la categoría `validez_cotizacion`
+- Los números (60 días / 6 meses) están en la categoría `validez_cotizacion`
   (`particular_dias`, `ejercito_meses_oct_dic`).
 - La validez se calcula al emitir (y se recalcula al editar una Abierta con la
   misma fecha de emisión); se guarda en `valida_hasta` y, por compatibilidad,

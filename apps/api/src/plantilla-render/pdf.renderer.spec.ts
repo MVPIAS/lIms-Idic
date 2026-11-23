@@ -1,6 +1,6 @@
 import { certificadoHtml } from "../metrologia/metrologia.certificado";
 import { documentoCompleto, type Sello } from "./plantilla-defecto";
-import { generarPdf } from "./pdf.renderer";
+import { extraerPieCadaHoja, generarPdf, parsearHtml } from "./pdf.renderer";
 
 /**
  * Regresión: el pie se dibuja dentro del margen inferior y, si pdfkit lo
@@ -48,5 +48,23 @@ describe("generarPdf · número de páginas", () => {
     const cuerpo = certificadoHtml(cal, ctx);
     expect(paginas(await generarPdf(cuerpo, SELLO, "Prueba"))).toBe(2);
     expect(paginas(await generarPdf(cuerpo, { ...SELLO, borrador: true }, "Prueba"))).toBe(2);
+  });
+});
+
+describe("generarPdf · pie que se repite en cada hoja (div.pie-cada-hoja, cotización)", () => {
+  const PIE = `<div class="pie-cada-hoja"><p class="nota">Horario de Atención a Clientes: PRUEBA</p><p class="nota">Reclamos y sugerencias: PRUEBA</p></div>`;
+
+  it("se saca del flujo: sus párrafos son las líneas del pie; vacío, sin líneas", () => {
+    const raiz = parsearHtml(`<h1>Cotización</h1><p>Cuerpo</p>${PIE}`);
+    expect(extraerPieCadaHoja(raiz)).toEqual(["Horario de Atención a Clientes: PRUEBA", "Reclamos y sugerencias: PRUEBA"]);
+    expect(JSON.stringify(raiz)).not.toContain("Horario de Atención");
+    expect(extraerPieCadaHoja(parsearHtml(`<p>x</p><div class="pie-cada-hoja"></div>`))).toEqual([]);
+  });
+
+  it("no abre páginas de más: corto en 1 hoja; largo en las mismas hojas que sin pie o una más", async () => {
+    expect(paginas(await generarPdf(`<h1>Cotización</h1>${parrafos(5)}${PIE}`, SELLO, "Prueba"))).toBe(1);
+    const sin = paginas(await generarPdf(`<h1>Cotización</h1>${parrafos(140)}`, SELLO, "Prueba"));
+    const con = paginas(await generarPdf(`<h1>Cotización</h1>${parrafos(140)}${PIE}`, SELLO, "Prueba"));
+    expect(con === sin || con === sin + 1).toBe(true);
   });
 });
