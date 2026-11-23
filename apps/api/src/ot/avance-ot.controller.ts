@@ -135,7 +135,8 @@ export class AvanceOtService {
     // F071: lo que captura otro laboratorio no se le pide a los analistas del responsable.
     const ajenos = ((await ensayosConLaboratorio(this.prisma, id)) ?? []).filter((e) => !esDelResponsable(e, ot.unidadPrincipal));
     const cuentaAjenos = (...estados: string[]) => ajenos.filter((e) => estados.includes(e.estado ?? "")).length;
-    const totalRes = resultados.reduce((s, r) => s + r._count._all, 0);
+    // Lote 4: los «No ejecutado» (cierre por incumplimiento) no son ensayos por hacer.
+    const totalRes = resultados.reduce((s, r) => s + r._count._all, 0) - cuenta("no_ejecutado");
     // Despacho de cada documento (frente r4c · documento_despacho): «Remitir a DCO» del BPCH.
     const despachos = new Map(
       (

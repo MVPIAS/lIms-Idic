@@ -71,7 +71,8 @@ const FAMILIA_DE_UNIDAD = `f.codsucdel = ANY(string_to_array(regexp_replace(COAL
 /** Ensayos del laboratorio que aún no están aprobados. */
 function contarSinAprobar(labs: Map<string, { unidadId: string | null; estado: string }>, unidadId: string): number {
   let n = 0;
-  for (const r of labs.values()) if (r.unidadId === unidadId && r.estado !== "aprobado") n++;
+  // Lote 4: lo «No ejecutado» (cierre por incumplimiento) no queda pendiente.
+  for (const r of labs.values()) if (r.unidadId === unidadId && r.estado !== "aprobado" && r.estado !== "no_ejecutado") n++;
   return n;
 }
 

@@ -9,6 +9,7 @@ import {
   Body,
   ConflictException,
   Controller,
+  ForbiddenException,
   Get,
   Injectable,
   NotFoundException,
@@ -46,12 +47,29 @@ import { diasPorVencerDe } from "./dias-por-vencer";
 import { hechosCobertura } from "../plantilla-render/cobertura-ot";
 import { metrologiaParaCierre } from "../metrologia/metrologia-ot.datos";
 import { documentosDeMetrologia, documentosDeNoCalibrables, esEntregableNoCalibrable, faltantesMetrologia } from "../metrologia/metrologia-ot.reglas";
+import { conTraza } from "../laboratorio/traza";
+import { configCierreDe, cuentasResultados, exigePlanilla, hechasDe, hechosCierreQ4 } from "./cierre-q4.datos";
+import {
+  ESTADOS_A_NO_EJECUTADO,
+  ETAPAS_CIERRE,
+  NOMBRE_ETAPA,
+  PERMISO_ETAPA,
+  esEtapaCierre,
+  faltantesCierreIncumplimiento,
+  faltantesEtapaCierre,
+  faltantesPlanillaCostos,
+  faltantesTresCierres,
+  laboratorioEn,
+  plazoCierre,
+  type EtapaCierre,
+} from "./reglas-cierre-q4";
 
 const FechaCompromiso = z.object({
   fecha: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha AAAA-MM-DD"),
   motivo: z.string().max(500).optional(),
 });
 const SEMAFOROS = ["vencida", "por_vencer", "en_plazo", "sin_fecha"] as const;
+const CierreIncumplimiento = z.object({ motivo: z.string().trim().min(10, "Indique el motivo (mínimo 10 caracteres).").max(1000) });
 
 function tienePermiso(req: any, codigo: string): boolean {
   const u = req?.user ?? {};
@@ -168,6 +186,9 @@ export class OtCierreService {
     ]);
     const totalRes = resultados.reduce((a, r) => a + r._count._all, 0);
     const aprobados = resultados.find((r) => r.estado === "aprobado")?._count._all ?? 0;
+    // Lote 4: «No ejecutado» (cierre por incumplimiento) no deja nada pendiente.
+    const noEjecutados = resultados.find((r) => r.estado === "no_ejecutado")?._count._all ?? 0;
+    const q4 = await this.cierreQ4(ot, req);
     const faltantes = [
       ...faltantesParaCerrar({
         estado: ot.estado,
@@ -175,7 +196,7 @@ export class OtCierreService {
           ...documentos.map((d) => ({ numero: d.numero, estado: d.estado, entregadoAt: d.entregadoAt, pendienteDe: d.pendienteDe })),
           ...documentosDeMetrologia(metro.cals, metro.docsNoCalibrables),
         ],
-        resultadosNoAprobados: totalRes - aprobados,
+        resultadosNoAprobados: totalRes - aprobados - noEjecutados,
         coberturaPendiente: await this.coberturaPendiente(id, ot.tenantId),
       }),
       // D04-31: las mismas reglas de Metrología que el cierre técnico (devolución, servicio externo, no calibrable).
@@ -187,6 +208,8 @@ export class OtCierreService {
       ...(ot.estado === "cerrada" ? [] : faltantesOrdenInterna(await pendientesOrdenInterna(this.prisma, id))),
       // IDIC-PG 24 Anexo 03: internación sujeta a la tasa con la tasa remitida a facturación.
       ...(ot.estado === "cerrada" ? [] : await faltantesTasaInternacion(this.prisma, id)),
+      // Lote 4: planilla de costos cerrada (por laboratorio) y, si se exige, los tres cierres (COORD-02).
+      ...(ot.estado === "cerrada" ? [] : q4.faltantesCierre),
     ];
     const camino = caminoEstadosOt(ot.estado);
     if (!faltantes.length && camino === null)
@@ -222,7 +245,7 @@ export class OtCierreService {
         }),
         fechaRecepDco: diaDe((ot as any).fechaRecepDco ?? null),
       },
-      resultados: { total: totalRes, aprobados },
+      resultados: { total: totalRes, aprobados, noEjecutados },
       documentos,
       calibraciones: metro.cals
         .filter((c) => c.estado !== "reemplazada")
@@ -239,15 +262,162 @@ export class OtCierreService {
       factura: factura ? { ...factura, total: Number(factura.total) } : null,
       faltantes,
       avisos,
+      // Lote 4: cierre por incumplimiento, tres cierres, planilla de costos y plazo de cierre.
+      incumplimiento: q4.incumplimiento,
+      cierres: q4.cierres,
+      planillaCostos: q4.planillaCostos,
+      plazoCierre: ot.estado === "cerrada" || ot.estado === "anulada" ? null : q4.plazoCierre,
       puedeCerrar: faltantes.length === 0,
       caminoEstados: camino ?? [],
       puedo: {
         planificar: tienePermiso(req, "ot.planificar") && !(OT_ESTADOS_TERMINADOS as readonly string[]).includes(ot.estado),
         cerrar: tienePermiso(req, "ot.cerrar"),
+        cerrarIncumplimiento: tienePermiso(req, "ot.cerrar_incumplimiento"),
         emitir: tienePermiso(req, "certificado.emitir"),
         entregar: tienePermiso(req, "certificado.entregar"),
       },
     };
+  }
+
+  /**
+   * Lote 4 (quinto envío): lo que el cierre necesita saber del cierre por
+   * incumplimiento, los tres cierres (COORD-02), la planilla de costos y el
+   * plazo de cierre (IDIC-PG03). Con la BD sin align_q4_cierre_ot.sql no bloquea.
+   */
+  private async cierreQ4(ot: { id: string; estado: string; tenantId: string }, req: any) {
+    const [cfg, h] = await Promise.all([configCierreDe(this.prisma, ot.tenantId), hechosCierreQ4(this.prisma, ot.id)]);
+    const n = cuentasResultados(h.porEstado);
+    const hechas = hechasDe(h);
+    const exige = exigePlanilla(cfg, h.laboratorio);
+    const habilitado = laboratorioEn(cfg.incumplimientoLabs, h.laboratorio);
+    const faltantesCierre = [
+      ...faltantesPlanillaCostos({ exige, laboratorio: h.laboratorio, estadoPlanilla: h.estadoPlanilla }),
+      ...faltantesTresCierres(cfg.exigeTresCierres, hechas),
+    ];
+    const terminada = !!h.terminadaEl;
+    return {
+      faltantesCierre,
+      incumplimiento: {
+        habilitado,
+        registrado: h.incumplimiento,
+        noCumpleAprobados: h.noCumpleAprobados,
+        pendientes: n.sinTerminar,
+        noEjecutados: n.noEjecutados,
+        puede: tienePermiso(req, "ot.cerrar_incumplimiento"),
+        // Lo que impide la acción, sin el motivo (lo pide la pantalla).
+        faltantes: faltantesCierreIncumplimiento({
+          estadoOt: ot.estado,
+          laboratorio: h.laboratorio,
+          habilitado,
+          noCumpleAprobados: h.noCumpleAprobados,
+          pendientes: n.sinTerminar,
+        }),
+      },
+      cierres: {
+        exigeTres: cfg.exigeTresCierres,
+        etapas: ETAPAS_CIERRE.map((e) => ({
+          etapa: e,
+          nombre: NOMBRE_ETAPA[e],
+          registro: h.etapas[e],
+          puedo: tienePermiso(req, PERMISO_ETAPA[e]),
+          faltantes: faltantesEtapaCierre(e, { estadoOt: ot.estado, hechas, sinCapturar: n.sinCapturar, sinTerminar: n.sinTerminar }),
+        })),
+      },
+      planillaCostos: { exige, laboratorio: h.laboratorio, estado: h.estadoPlanilla },
+      plazoCierre: terminada ? { ...plazoCierre(h.terminadaEl, hoyCl(), cfg.diasCierre)!, dias: cfg.diasCierre, habiles: true } : null,
+    };
+  }
+
+  /**
+   * Lote 4 · «Cerrar por incumplimiento» (BPCH): un ensayo aprobado dio No
+   * cumple y el Jefe de Laboratorio cierra el flujo de TODA la OT (todas sus
+   * muestras y lotes): los ensayos aún no aprobados pasan a «No ejecutado» con
+   * el motivo, quién y cuándo (no se borran; traza en resultado_historial,
+   * ot_historial y la bitácora). Después la OT se emite (Informe de
+   * Incumplimiento con esos ensayos «No ejecutado») y se cierra normalmente;
+   * los «No ejecutado» no se cobran.
+   */
+  async cerrarPorIncumplimiento(id: string, dto: { motivo: string }, req: any) {
+    const ot = await this.cargarOt(id, req);
+    const usuarioId: string | null = req?.user?.sub ?? null;
+    const cfg = await configCierreDe(this.prisma, ot.tenantId);
+    const r = await conTraza(this.prisma, { usuarioId, motivo: dto.motivo.trim(), origen: "cierre_incumplimiento" }, async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT id FROM orden_trabajo WHERE id = $1::uuid FOR UPDATE`, id);
+      const h = await hechosCierreQ4(tx as any, id);
+      const n = cuentasResultados(h.porEstado);
+      const f = faltantesCierreIncumplimiento({
+        estadoOt: ot.estado,
+        laboratorio: h.laboratorio,
+        habilitado: laboratorioEn(cfg.incumplimientoLabs, h.laboratorio),
+        noCumpleAprobados: h.noCumpleAprobados,
+        pendientes: n.sinTerminar,
+        motivo: dto.motivo,
+      });
+      if (f.length) throw new ConflictException(`No se puede cerrar la OT ${ot.codigo} por incumplimiento. ${f.join(" ")}`);
+      const motivo = dto.motivo.trim();
+      const filas = await tx.$queryRawUnsafe<{ id: string; estado: string }[]>(
+        `UPDATE resultado r
+            SET estado_previo_no_ejecutado = r.estado, estado = 'no_ejecutado',
+                no_ejecutado_motivo = $2, no_ejecutado_por = $3::uuid, no_ejecutado_at = now()
+          WHERE r.ot_id = $1::uuid AND r.deleted_at IS NULL AND r.estado = ANY($4::text[])
+          RETURNING r.id, r.estado_previo_no_ejecutado AS estado`,
+        id,
+        motivo,
+        usuarioId,
+        [...ESTADOS_A_NO_EJECUTADO],
+      );
+      // La traza por ensayo (estado anterior → no_ejecutado, con quién, motivo y origen) la
+      // escribe el disparador de resultado_historial con el contexto de conTraza.
+      await tx.$executeRawUnsafe(
+        `UPDATE orden_trabajo
+            SET incumplimiento_cerrado_at = now(), incumplimiento_cerrado_por = $2::uuid, incumplimiento_cerrado_motivo = $3, updated_at = now()
+          WHERE id = $1::uuid`,
+        id,
+        usuarioId,
+        motivo,
+      );
+      await tx.$executeRawUnsafe(
+        `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'cierre_incumplimiento', $3::jsonb, $4::uuid)`,
+        ot.tenantId,
+        id,
+        JSON.stringify({ motivo, noEjecutados: filas.length, noCumpleAprobados: h.noCumpleAprobados }),
+        usuarioId,
+      );
+      return filas.length;
+    });
+    // `codigo` y `motivo`: la bitácora (AuditInterceptor) registra la acción con el código de la OT.
+    return { id: ot.id, codigo: ot.codigo, noEjecutados: r, ...(await this.estadoCierre(id, req)) };
+  }
+
+  /**
+   * COORD-02 · Registra el cierre de una etapa (analista, jefe de laboratorio o
+   * jefe de departamento) con la fecha real y el usuario. Cada etapa pide su
+   * permiso (ot.cierre_analista, ot.cierre_jefe_lab, ot.cierre_jefe_depto) y la
+   * anterior registrada. `fecha_cierre` sigue siendo el cierre final de la OT.
+   */
+  async registrarEtapa(id: string, etapa: EtapaCierre, req: any) {
+    if (!tienePermiso(req, PERMISO_ETAPA[etapa]))
+      throw new ForbiddenException(`Permiso insuficiente. Requiere: ${PERMISO_ETAPA[etapa]}`);
+    const ot = await this.cargarOt(id, req);
+    const usuarioId: string | null = req?.user?.sub ?? null;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(`SELECT id FROM orden_trabajo WHERE id = $1::uuid FOR UPDATE`, id);
+      const h = await hechosCierreQ4(tx as any, id);
+      const n = cuentasResultados(h.porEstado);
+      const f = faltantesEtapaCierre(etapa, { estadoOt: ot.estado, hechas: hechasDe(h), sinCapturar: n.sinCapturar, sinTerminar: n.sinTerminar });
+      if (f.length) throw new ConflictException(`No se puede registrar el cierre del ${NOMBRE_ETAPA[etapa]} de la OT ${ot.codigo}. ${f.join(" ")}`);
+      // Columnas fijas por etapa (nunca texto del usuario en el SQL).
+      const col = { analista: "cierre_analista", jefe_lab: "cierre_jefe_lab", jefe_depto: "cierre_jefe_depto" }[etapa];
+      await tx.$executeRawUnsafe(`UPDATE orden_trabajo SET ${col}_at = now(), ${col}_por = $2::uuid, updated_at = now() WHERE id = $1::uuid`, id, usuarioId);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'cierre_etapa', $3::jsonb, $4::uuid)`,
+        ot.tenantId,
+        id,
+        JSON.stringify({ etapa, nombre: NOMBRE_ETAPA[etapa] }),
+        usuarioId,
+      );
+    });
+    return { id: ot.id, codigo: ot.codigo, etapa, ...(await this.estadoCierre(id, req)) };
   }
 
   /**
@@ -323,6 +493,9 @@ export class OtCierreService {
   async cerrar(id: string, req: any) {
     const ot = await this.cargarOt(id, req);
     const usuarioId: string | null = req?.user?.sub ?? null;
+    // Lote 4: planilla de costos cerrada y tres cierres (se leen fuera de la transacción:
+    // con la BD sin align_q4_cierre_ot.sql la lectura falla sin abortarla).
+    const q4 = await this.cierreQ4(ot, req);
     const resultado = await this.prisma.$transaction(async (tx) => {
       // Bloqueo de la fila: dos cierres simultáneos no generan dos facturas.
       const filas = await tx.$queryRawUnsafe<{ estado: string }[]>(
@@ -334,7 +507,8 @@ export class OtCierreService {
         where: { otId: id, deletedAt: null },
         select: { numero: true, codigo: true, estado: true, entregadoAt: true },
       });
-      const noAprobados = await tx.resultado.count({ where: { otId: id, deletedAt: null, NOT: { estado: "aprobado" } } });
+      // Lote 4: «No ejecutado» (cierre por incumplimiento) tampoco deja nada pendiente.
+      const noAprobados = await tx.resultado.count({ where: { otId: id, deletedAt: null, estado: { notIn: ["aprobado", "no_ejecutado"] } } });
       const metro = await metrologiaParaCierre(tx, id, ot.tenantId);
       const faltantes = [
         ...faltantesParaCerrar({
@@ -351,6 +525,7 @@ export class OtCierreService {
         ...(estado === "cerrada" ? [] : await faltantesCierreArmas(tx, id)),
         ...(estado === "cerrada" ? [] : faltantesOrdenInterna(await pendientesOrdenInterna(tx as any, id))),
         ...(estado === "cerrada" ? [] : await faltantesTasaInternacion(tx, id)),
+        ...(estado === "cerrada" ? [] : q4.faltantesCierre),
       ];
       const camino = caminoEstadosOt(estado);
       if (!faltantes.length && camino === null)
@@ -503,5 +678,20 @@ export class OtCierreController {
   @RequierePermiso("ot.cerrar")
   cerrar(@Param("id", ParseUUIDPipe) id: string, @Req() req: any) {
     return this.svc.cerrar(id, req);
+  }
+
+  /** Lote 4 · BPCH: ensayos pendientes → «No ejecutado» con motivo (un ensayo aprobado dio No cumple). */
+  @Post(":id/cerrar-incumplimiento")
+  @RequierePermiso("ot.cerrar_incumplimiento")
+  cerrarIncumplimiento(@Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.cerrarPorIncumplimiento(id, CierreIncumplimiento.parse(body ?? {}), req);
+  }
+
+  /** COORD-02 · Cierre del analista, del jefe de laboratorio o del jefe de departamento (permiso propio de cada etapa). */
+  @Post(":id/cierre-etapa/:etapa")
+  @RequierePermiso("ot.ver")
+  registrarEtapa(@Param("id", ParseUUIDPipe) id: string, @Param("etapa") etapa: string, @Req() req: any) {
+    if (!esEtapaCierre(etapa)) throw new BadRequestException(`Etapa de cierre desconocida. Valores: ${ETAPAS_CIERRE.join(", ")}`);
+    return this.svc.registrarEtapa(id, etapa, req);
   }
 }

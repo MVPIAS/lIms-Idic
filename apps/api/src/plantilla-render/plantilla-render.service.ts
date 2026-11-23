@@ -329,6 +329,8 @@ export class PlantillaRenderService {
     );
     const txt = (v: unknown) => (v === null || v === undefined ? null : String(v));
     const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(String(v)));
+    // Lote 4: motivo de los ensayos «No ejecutado» (columna fuera del modelo Prisma).
+    const motivoNoEjecutado = await this.motivosNoEjecutado(resultados.filter((r) => r.estado === "no_ejecutado").map((r) => r.id));
     const paraInforme: ResultadoParaInforme[] = resultados.map((r) => {
       const legado = !r.catAnalitoId && !tieneRequisito(r) && r.analitoId ? limitePorAnalito.get(r.analitoId) : undefined;
       const u = ubicaciones.get(r.id);
@@ -361,6 +363,8 @@ export class PlantillaRenderService {
         nReplicas: replicas,
         observacion: observacionConDecision(r.observacion, r.veredictoMotivo, r.veredictoDecididoPor ? nombreDecisor.get(r.veredictoDecididoPor) : null),
         veredicto: r.veredicto,
+        estado: r.estado,
+        noEjecutadoMotivo: motivoNoEjecutado.get(r.id) ?? null,
         fechaEnsayo: r.fechaEnsayo ?? null,
         selloNumero: (r.muestra as any)?.selloNumero ?? null,
         seccion: u?.seccion ?? null,
@@ -384,6 +388,20 @@ export class PlantillaRenderService {
     // Punto 1 del Informe de Ensayos (Alimentos, Anexo 02-02): muestreo, recepción, análisis, temperatura.
     const antecedentes = antecedentesInforme(muestras, resultados.map((r) => r.fechaEnsayo), ot, ot.cliente);
     return { ot, cliente: ot.cliente, muestras, resultados, limitePorAnalito, paraInforme, bpch, identificacion, cobertura: filtro?.etiqueta ?? null, atencion, organigrama, antecedentes };
+  }
+
+  /** Motivo de los ensayos «No ejecutado» (align_q4_cierre_ot.sql). */
+  private async motivosNoEjecutado(ids: string[]): Promise<Map<string, string | null>> {
+    if (!ids.length) return new Map();
+    try {
+      const f = await this.prisma.$queryRawUnsafe<{ id: string; motivo: string | null }[]>(
+        `SELECT id, no_ejecutado_motivo AS motivo FROM resultado WHERE id = ANY($1::uuid[])`,
+        ids,
+      );
+      return new Map(f.map((x) => [x.id, x.motivo]));
+    } catch {
+      return new Map(); // BD sin align_q4_cierre_ot.sql
+    }
   }
 
   /** Ensayos de la OT derivados a otro laboratorio por orden interna (lims_lab_de_resultado). */

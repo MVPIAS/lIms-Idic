@@ -17,6 +17,10 @@
  *   aprueba lo suyo.
  */
 
+/** Lote 4: el ensayo «No ejecutado» (cierre por incumplimiento) ya no se captura ni se edita. */
+export const NO_EJECUTADO_BLOQUEA =
+  "El ensayo quedó «No ejecutado» al cerrar la OT por incumplimiento: no se captura ni se modifica.";
+
 export const ESTADOS_CAPTURABLES = ["pendiente", "capturado", "devuelto", "rechazado"] as const;
 
 /** Motivo por el que no se puede capturar sobre ese estado (null = se puede). */
@@ -26,6 +30,7 @@ export function motivoNoCapturable(estado: string | null | undefined): string | 
   if (e === "revisado_n1")
     return "El resultado ya fue revisado. Para corregirlo, el revisor o la jefatura debe devolverlo primero.";
   if (e === "aprobado") return "El resultado está aprobado y no se puede modificar.";
+  if (e === "no_ejecutado") return NO_EJECUTADO_BLOQUEA;
   return `El resultado está en un estado no reconocido ('${e}').`;
 }
 
@@ -34,6 +39,8 @@ export function motivoNoCapturable(estado: string | null | undefined): string | 
  * informe posible: se reabre antes (queda trazado) y luego se quita.
  */
 export function motivoNoQuitable(estado: string | null | undefined): string | null {
+  if (estado === "no_ejecutado")
+    return "El ensayo quedó «No ejecutado» al cerrar la OT por incumplimiento: se conserva para la traza y no se quita.";
   if (estado === "aprobado")
     return "El ensayo está aprobado: reábralo antes de quitarlo (los informes en firma u oficiales se anularán).";
   return null;
@@ -169,6 +176,7 @@ export function motivoEdicionManual(
     return { status: 400, motivo: "El analista de un ensayo no se cambia a mano: es quien lo capturó (segregación de funciones)." };
   if (r.estado === "aprobado")
     return { status: 409, motivo: "El resultado está aprobado: para corregirlo, reábralo con motivo." };
+  if (r.estado === "no_ejecutado") return { status: 409, motivo: NO_EJECUTADO_BLOQUEA };
   if (cuerpo.veredicto !== undefined && usuarioId && r.analistaId === usuarioId)
     return { status: 409, motivo: "Quien capturó el ensayo no decide su veredicto: lo hace otra persona (segregación de funciones)." };
   return null;

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { MESES_OPI_DEF, SQL_ACEPTADA_SIN_OT, SQL_OT_LISTA_PARA_FACTURAR } from "../comercial/avisos-comercial";
-import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
+import { SQL_OT_CIERRE_ATRASADO, SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
 import { PrismaService } from "../common/prisma.service";
 import { ContextoAlcance } from "./alcance.service";
 import { Perfil, codigoCanonico } from "./rbac.constants";
@@ -243,6 +243,13 @@ export class BandejaService {
              FROM ot_muestreo m JOIN orden_trabajo o ON o.id = m.ot_id
             WHERE ${otScope} AND m.estado IN ('borrador', 'registrado') AND o.estado NOT IN ${OT_CERRADA}
             ORDER BY m.created_at`,
+          tenant,
+          unidades,
+        ),
+      // Lote 4 · IDIC-PG03: terminadas sin cerrar pasado el plazo (mismo criterio que el aviso).
+      otCierreAtrasado: () =>
+        this.contar(
+          `SELECT count(*) AS n FROM orden_trabajo o WHERE ${otScope} AND o.estado NOT IN ${OT_CERRADA} AND ${SQL_OT_CIERRE_ATRASADO}`,
           tenant,
           unidades,
         ),
@@ -595,6 +602,15 @@ export class BandejaService {
       item("ot_por_vencer", "OT por vencer", "OT que vencen hoy o dentro de los días de aviso «por vencer» y aún sin recepción en el DCO", await q.otPorVencer(), "/ot?semaforo=por_vencer", "warn");
     const listasCerrar = async () =>
       item("ot_listas_cerrar", "OT listas para cerrar", "Documentos oficiales y entregados: falta cerrar la OT", await q.otListasParaCerrar(), "/ot?listasCierre=1", "warn");
+    const cierreAtrasado = async () =>
+      item(
+        "ot_cierre_atrasado",
+        "OT sin cerrar fuera de plazo",
+        "OT terminadas (documentos entregados) que pasaron los días hábiles de cierre de IDIC-PG03 sin cerrarse",
+        await q.otCierreAtrasado(),
+        "/ot?listasCierre=1",
+        "alta",
+      );
     const porEntregar = async () =>
       item("documentos_por_entregar", "Documentos por entregar", "Informes oficiales sin entrega registrada", await q.documentosPorEntregar(), "/certificados?estado=por_entregar", "warn");
     const abiertas = async () =>
@@ -774,7 +790,7 @@ export class BandejaService {
       case "REVISOR":
         return all([porRevisar, asignadas, derivados, devueltos, porVencer, firmas]);
       case "JEFE_LAB":
-        return all([internacionesPorAnalizar, lotesPorInspeccionar, informesBpch, requerimientos, sinPlazo, sinAsignar, trabajoPorAprobar("en_aprobacion", false, "Documentación del trabajo por aprobar"), porRevisar, porAprobar, oiPorAtender, derivados, oiPorIntegrar, firmas, porEntregar, listasCerrar, vencidas, porVencer, porOficializar, porResponder, vbLab]);
+        return all([internacionesPorAnalizar, lotesPorInspeccionar, informesBpch, requerimientos, sinPlazo, sinAsignar, trabajoPorAprobar("en_aprobacion", false, "Documentación del trabajo por aprobar"), porRevisar, porAprobar, oiPorAtender, derivados, oiPorIntegrar, firmas, porEntregar, listasCerrar, cierreAtrasado, vencidas, porVencer, porOficializar, porResponder, vbLab]);
       case "JEFE_SECCION":
         return all([internacionesPorAnalizar, informesBpch, sinPlazo, soloConLem(trabajoPorAprobar("en_aprobacion", true, "Proyectos de Párrafo por validar")), firmas, porOficializar, porAprobar, vencidas, vencidasPorLab, abiertas, porResponder]);
       case "JEFE_DEPTO":
@@ -797,7 +813,7 @@ export class BandejaService {
           muestreos,
         ]);
       case "PLANIFICACION":
-        return all([vencidas, vencidasPorLab, porVencer, sinPlazo, listasCerrar, porEntregar, abiertas, sinOt, porFacturar, opiVencida, encuestas]);
+        return all([vencidas, vencidasPorLab, porVencer, sinPlazo, listasCerrar, cierreAtrasado, porEntregar, abiertas, sinOt, porFacturar, opiVencida, encuestas]);
       case "FINANZAS":
         return all([
           async () => item("facturas_pendientes", "Pendientes de facturar", "Facturas en borrador generadas al cerrar OT con cobro: revíselas y emítalas", await q.facturasPendientes(), "/facturas?estado=pendiente", "alta"),

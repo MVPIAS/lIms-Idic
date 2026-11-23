@@ -29,6 +29,18 @@ import { BadRequestException } from "@nestjs/common";
  *                 'vigente, revocado' y contradice al resto: DERIVA DOCUMENTADA,
  *                 se sigue el vocabulario que la aplicación escribe de verdad.
  */
+/**
+ * Estados FINALES del resultado que no dejan nada pendiente para emitir ni
+ * cerrar la OT: `aprobado` y `no_ejecutado` (cierre por incumplimiento, lote 4).
+ */
+export const RESULTADO_TERMINADO = ["aprobado", "no_ejecutado"] as const;
+/** SQL: lista de RESULTADO_TERMINADO para `estado NOT IN (...)`. */
+export const SQL_RESULTADO_TERMINADO = `('aprobado','no_ejecutado')`;
+/** ¿El resultado ya no deja nada pendiente (aprobado o no ejecutado)? */
+export function resultadoTerminado(estado: string | null | undefined): boolean {
+  return (RESULTADO_TERMINADO as readonly string[]).includes(estado ?? "");
+}
+
 export type DominioEstado = "cotizacion" | "ot" | "resultado" | "certificado";
 
 /** estado actual → estados a los que puede transitar. */
@@ -67,15 +79,19 @@ const TRANSICIONES: Record<DominioEstado, Record<string, readonly string[]>> = {
   // vocabulario de schema.sql:873, y no inventa ningún estado nuevo.
   // `pendiente` (align_flujo_laboratorio.sql): ensayo pedido al registrar la
   // OT, aún sin valor. La captura lo lleva a `capturado`; no se revisa vacío.
+  // `no_ejecutado` (lote 4, quinto envío): «Cerrar por incumplimiento» de la OT
+  // (ot/ot-cierre.controller.ts) deja así los ensayos aún no aprobados, con
+  // motivo; es final, no se captura ni se cobra y no impide emitir ni cerrar.
   resultado: {
-    pendiente: ["capturado"],
+    pendiente: ["capturado", "no_ejecutado"],
     // capturado → aprobado: solo donde la revisión previa es opcional
     // (parámetro segregacion_resultado.revision; lo comprueba el servicio).
-    capturado: ["revisado_n1", "aprobado", "rechazado", "devuelto"],
-    revisado_n1: ["aprobado", "rechazado", "devuelto"],
+    capturado: ["revisado_n1", "aprobado", "rechazado", "devuelto", "no_ejecutado"],
+    revisado_n1: ["aprobado", "rechazado", "devuelto", "no_ejecutado"],
     aprobado: [],
-    rechazado: ["capturado"],
-    devuelto: ["capturado"],
+    rechazado: ["capturado", "no_ejecutado"],
+    devuelto: ["capturado", "no_ejecutado"],
+    no_ejecutado: [],
   },
   certificado: {
     emitido: ["anulado"],

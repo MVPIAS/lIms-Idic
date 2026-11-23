@@ -5,7 +5,7 @@
  * o NULL, $3 usuario). Cada consulta devuelve id, texto, detalle, ruta y fecha.
  */
 
-import { SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
+import { SQL_OT_CIERRE_ATRASADO, SQL_OT_CON_ANALISTA, SQL_OT_LISTA_PARA_CERRAR } from "../ot/lista-cierre";
 import { SQL_ZONA } from "../common/fecha-chile";
 import { SQL_DIAS_POR_VENCER, SQL_PLAZO_CORRE } from "../ot/plazos";
 
@@ -69,6 +69,11 @@ export const LISTAS_BANDEJA: Record<string, { sql: string; extra: "yo" | "estado
       "o.fecha_compromiso NULLS LAST",
       "'/ot/' || o.id || '?tab=informe'",
     ),
+    extra: "ninguno",
+  },
+  // Lote 4 · IDIC-PG03: terminada y sin cerrar pasado el plazo (días hábiles).
+  ot_cierre_atrasado: {
+    sql: filaOt(`o.estado NOT IN ${OT_CERRADA} AND ${SQL_OT_CIERRE_ATRASADO}`, "o.fecha_compromiso NULLS LAST", "'/ot/' || o.id || '?tab=informe'"),
     extra: "ninguno",
   },
   ot_asignadas: {

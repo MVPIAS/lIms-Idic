@@ -68,6 +68,8 @@ export const ESTADO_RESULTADO: Record<string, { texto: string; pill: string }> =
   aprobado: { texto: "Aprobado", pill: "green" },
   devuelto: { texto: "Devuelto", pill: "amber" },
   rechazado: { texto: "Rechazado", pill: "red" },
+  // Lote 4: cierre de la OT por incumplimiento (no se captura ni se cobra).
+  no_ejecutado: { texto: "No ejecutado", pill: "gray" },
 };
 
 /** Veredicto único (apps/api/src/laboratorio/veredicto.ts). */
