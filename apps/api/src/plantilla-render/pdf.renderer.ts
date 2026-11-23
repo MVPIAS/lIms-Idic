@@ -768,7 +768,7 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
     case "#text":
       return;
     case "h1": {
-      const compacta = /compacta/.test(n.clase);
+      const compacta = /\bcompacta\b/.test(n.clase);
       asegurar(doc, 30);
       doc.moveDown(compacta ? 0.2 : 0.5);
       doc.font(NEGRITA).fontSize(compacta ? 12 : 13).fillColor(TINTA);
@@ -788,7 +788,7 @@ function dibujarNodo(doc: Doc, n: Nodo, listaIdx?: number): void {
     case "h2":
     case "h3": {
       // «compacta»: hoja 1 del certificado de calibración (todo debe caber en una página).
-      const compacta = /compacta/.test(n.clase);
+      const compacta = /\bcompacta\b/.test(n.clase);
       asegurar(doc, 26);
       doc.moveDown(compacta ? 0.1 : 0.55);
       doc.font(NEGRITA).fontSize(compacta ? 7.6 : 8.6).fillColor(AZUL);
