@@ -122,8 +122,9 @@ const PLANTILLAS_SIN_RESULTADOS = new Set(["I.TECNICO"]);
 
 /**
  * Qué falta para poder emitir. Lista vacía = se puede emitir.
- * Regla: todos los resultados (no borrados) de la OT deben estar `aprobado`;
- * y debe haber al menos uno, salvo en plantillas descriptivas (informe técnico).
+ * Regla: todos los resultados (no borrados) de la OT deben estar `aprobado` o
+ * `no_ejecutado` (cierre por incumplimiento, lote 4) y debe haber al menos uno
+ * ejecutado, salvo en plantillas descriptivas (informe técnico).
  */
 export function faltantesParaEmitir(
   resultados: ResultadoEmision[],
@@ -138,11 +139,16 @@ export function faltantesParaEmitir(
       ? []
       : ["La OT no tiene resultados registrados. Capture y apruebe los resultados antes de emitir."];
   }
-  const pendientes = resultados.filter((r) => r.estado !== "aprobado");
+  // Lote 4: los «No ejecutado» (cierre por incumplimiento) no dejan nada pendiente;
+  // el documento los informa así, pero tiene que haber algo ejecutado que informar.
+  const ejecutados = resultados.filter((r) => r.estado !== "no_ejecutado");
+  if (!ejecutados.length)
+    return ["Todos los ensayos que cubre el documento quedaron «No ejecutado» (cierre por incumplimiento): no hay resultados que informar."];
+  const pendientes = ejecutados.filter((r) => r.estado !== "aprobado");
   if (!pendientes.length) {
     // Aprobados pero sin veredicto (datos anteriores a la regla de revisión): no
     // sale un informe con la condición «Pendiente» (recorrido MP-02, D02-03).
-    const sinVeredicto = resultados.filter((r) => r.veredicto !== undefined && (r.veredicto == null || String(r.veredicto).toLowerCase() === "pendiente"));
+    const sinVeredicto = ejecutados.filter((r) => r.veredicto !== undefined && (r.veredicto == null || String(r.veredicto).toLowerCase() === "pendiente"));
     if (!sinVeredicto.length) return [];
     return [
       `Hay ${sinVeredicto.length} resultado(s) sin veredicto (Pendiente): ` +
@@ -164,7 +170,7 @@ export function faltantesParaEmitir(
     .map((r) => `${r.muestra ?? "muestra"} · ${r.analito ?? "ensayo"}: ${NOMBRE_ESTADO[r.estado ?? "capturado"] ?? r.estado}`);
   const resto = pendientes.length > 8 ? ` (y ${pendientes.length - 8} más)` : "";
   return [
-    `Faltan resultados por aprobar: ${pendientes.length} de ${resultados.length} (${resumen}).`,
+    `Faltan resultados por aprobar: ${pendientes.length} de ${ejecutados.length} (${resumen}).`,
     `Pendientes: ${detalle.join("; ")}${resto}.`,
   ];
 }

@@ -10,6 +10,8 @@ export type EstadoCorreo = "no_aplica" | "enviado" | "error" | "sin_correo" | "s
 export const TIPOS_AVISO = {
   ot_vencida: "alta",
   ot_por_vencer: "warn",
+  /** Lote 4 · IDIC-PG03: OT terminada sin cerrar pasado el plazo (ot_cierre.dias_cierre, días hábiles). */
+  ot_sin_cerrar: "warn",
   no_cumple: "alta",
   contaminado: "alta",
   documento_listo: "info",

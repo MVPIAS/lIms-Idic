@@ -9,6 +9,7 @@ import { RequierePermiso } from "../auth/permisos.decorator";
 import { PrismaService } from "../common/prisma.service";
 import { AlcanceService } from "../rbac/alcance.service";
 import { anioChile } from "../common/fecha-chile";
+import { sumarDiasHabiles } from "../common/dias-habiles";
 import { entero, valoresCategoria } from "../common/parametros-r4d";
 import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, guardarAdjunto, leerAdjunto, listarAdjuntos, type ArchivoAdjunto } from "../common/adjuntos";
 
@@ -26,17 +27,8 @@ import { MAX_BYTES_ADJUNTO, cabecerasAdjunto, guardarAdjunto, leerAdjunto, lista
  * Feriados: POR CONFIRMAR (no se descuentan).
  */
 
-/** Suma días hábiles (lunes a viernes) a una fecha AAAA-MM-DD. */
-export function sumarDiasHabiles(desde: string, dias: number): string {
-  const d = new Date(`${desde}T12:00:00Z`);
-  let n = 0;
-  while (n < dias) {
-    d.setUTCDate(d.getUTCDate() + 1);
-    const dow = d.getUTCDay();
-    if (dow !== 0 && dow !== 6) n++;
-  }
-  return d.toISOString().slice(0, 10);
-}
+/** Suma días hábiles (lunes a viernes): common/dias-habiles.ts (también lo usa el cierre de la OT). */
+export { sumarDiasHabiles };
 
 /** Plazo de la apelación y si el ingreso quedó fuera (regla pura). */
 export function plazoApelacion(fechaRecepcion: string, fechaIngreso: string, dias: number): { venceEl: string; fueraDePlazo: boolean } {

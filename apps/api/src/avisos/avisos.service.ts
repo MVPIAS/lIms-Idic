@@ -12,6 +12,7 @@
  *   · resultado aprobado No cumple / Contaminado (evento «resultado.aprobado»);
  *   · documento oficial (evento «documento.oficial») → Comercial;
  *   · plazos de las OT (revisión cada hora y botón «Avisar →»);
+ *   · OT terminada sin cerrar pasado el plazo de IDIC-PG03 (revisión cada hora, lote 4);
  *   · «Próxima acción» del historial del cliente al llegar su fecha (revisión cada hora);
  *   · despacho, plazo asignado y oficios (los llaman sus servicios).
  */
@@ -23,6 +24,9 @@ import { escapeHtml } from "../plantilla-render/html.util";
 import { componerCorreo } from "../mensajeria/correo-plantillas";
 import { fechaChile } from "../common/fecha-chile";
 import { hoyCl } from "../ot/plazos";
+import { SQL_OT_CIERRE_ATRASADO } from "../ot/lista-cierre";
+import { configCierreDe, hechosCierreQ4 } from "../ot/cierre-q4.datos";
+import { plazoCierre } from "../ot/reglas-cierre-q4";
 import {
   TIPOS_AVISO,
   alertaDeResultado,
@@ -453,6 +457,45 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Lote 4 · IDIC-PG03: la OT terminada (documentos oficiales y entregados) se
+   * cierra en N días HÁBILES (ot_cierre.dias_cierre, 10; lunes a viernes, sin
+   * descontar feriados) con la Hoja de Costos Reales. Pasado el plazo se avisa
+   * una vez al día a la jefatura del laboratorio responsable.
+   */
+  async revisarCierres(tenantId: string) {
+    const hoy = hoyCl();
+    const cfg = await configCierreDe(this.prisma, tenantId);
+    const ots = await this.prisma
+      .$queryRawUnsafe<{ id: string }[]>(`SELECT o.id FROM orden_trabajo o WHERE o.tenant_id = $1::uuid AND ${SQL_OT_CIERRE_ATRASADO}`, tenantId)
+      .catch(() => [] as { id: string }[]);
+    let personas = 0;
+    for (const { id } of ots) {
+      const ot = await this.datosOt(id);
+      if (!ot) continue;
+      const h = await hechosCierreQ4(this.prisma, id);
+      const plazo = plazoCierre(h.terminadaEl, hoy, cfg.diasCierre);
+      if (!plazo?.atrasada) continue;
+      const fmt = (d: string) => d.split("-").reverse().join("-");
+      const r = await this.emitir(
+        tenantId,
+        {
+          tipo: "ot_sin_cerrar",
+          titulo: `OT sin cerrar · ${ot.codigo}`,
+          mensaje:
+            `La OT ${ot.codigo}${ot.cliente ? ` (${ot.cliente})` : ""} quedó terminada el ${fmt(plazo.terminadaEl)} y debía cerrarse ` +
+            `con la Hoja de Costos Reales a más tardar el ${fmt(plazo.limite)} (${cfg.diasCierre} días hábiles, IDIC-PG03).`,
+          ruta: `/ot/${ot.id}?tab=informe`,
+          otId: ot.id,
+          clave: `ot_sin_cerrar:${ot.id}:${hoy}`,
+        },
+        { jefesDe: [ot.unidad_principal] },
+      );
+      personas += r.nuevos;
+    }
+    return { ots: ots.length, personas };
+  }
+
+  /**
    * CRM (§4.1.2): la «Próxima acción» con fecha de una interacción con el
    * cliente avisa a su responsable (o a quien la registró) cuando llega el día
    * (hoy en Chile), una vez por fecha; si se cambia la fecha, vuelve a avisar.
@@ -501,6 +544,7 @@ export class AvisosService implements OnModuleInit, OnModuleDestroy {
       const cfg = await this.config(t.id);
       if (!cfg.revisionAutomatica) continue;
       await this.revisarPlazos(t.id).catch((e) => this.log.warn(`revisión de plazos omitida: ${e?.message ?? e}`));
+      await this.revisarCierres(t.id).catch((e) => this.log.warn(`revisión de cierres omitida: ${e?.message ?? e}`));
     }
   }
 

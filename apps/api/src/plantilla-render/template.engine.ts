@@ -230,7 +230,8 @@ export function tablaInspeccion(filas: FilaInspeccion[]): string {
   const cuerpo = filas
     .map((f) => {
       const v = (f.condicion ?? "").toLowerCase();
-      const clase = v.startsWith("cumple") ? "ok" : v ? "no" : "";
+      // «No ejecutado» (cierre por incumplimiento, lote 4) no es un incumplimiento: sin color.
+      const clase = v.startsWith("cumple") ? "ok" : v && v !== "no ejecutado" ? "no" : "";
       return (
         "<tr>" +
         celda(f.inspeccion) +

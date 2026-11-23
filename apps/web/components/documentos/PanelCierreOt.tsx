@@ -5,7 +5,10 @@
  *   · fecha de compromiso (origen, semáforo; Planificación/jefatura la fija);
  *   · documentos emitidos con su estado de firma y entrega;
  *   · qué falta para cerrar y el botón «Cerrar OT» (crea la factura en borrador
- *     si la OT es con cobro).
+ *     si la OT es con cobro);
+ *   · lote 4 (quinto envío): «Cerrar por incumplimiento» (BPCH: los ensayos
+ *     pendientes quedan «No ejecutado» con motivo), los tres cierres con fecha
+ *     real (COORD-02), la planilla de costos y el plazo de cierre (IDIC-PG03).
  * Reglas: docs/FLUJO_FIRMA_CIERRE.md.
  */
 import { avisarCambioOt, useCambiosOt } from "@/lib/refresco";
@@ -38,6 +41,8 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
   const [editFecha, setEditFecha] = useState(false);
   const [nuevaFecha, setNuevaFecha] = useState("");
   const [motivo, setMotivo] = useState("");
+  const [incOpen, setIncOpen] = useState(false);
+  const [incMotivo, setIncMotivo] = useState("");
 
   const cargar = useCallback(async () => {
     try {
@@ -92,6 +97,43 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
     } catch (e: any) {
       toast.error(e.message);
       cargar();
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function cerrarIncumplimiento() {
+    setOcupado(true);
+    try {
+      const r = await pedir(`/ot/${otId}/cerrar-incumplimiento`, "POST", { motivo: incMotivo.trim() });
+      setD(r);
+      toast.ok(`${r.noEjecutados} ensayo(s) quedaron «No ejecutado». Emita el Informe de Incumplimiento y cierre la OT.`);
+      setIncOpen(false);
+      setIncMotivo("");
+      onCambio?.();
+      avisarCambioOt(otId);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setOcupado(false);
+    }
+  }
+
+  async function registrarEtapa(etapa: string, nombre: string) {
+    const ok = await confirmar({
+      titulo: `¿Registrar el cierre del ${nombre}?`,
+      mensaje: "Queda registrado con su nombre y la fecha y hora de hoy. No se deshace.",
+      confirmarTexto: "Registrar cierre",
+    });
+    if (!ok) return;
+    setOcupado(true);
+    try {
+      setD(await pedir(`/ot/${otId}/cierre-etapa/${etapa}`, "POST"));
+      toast.ok(`Cierre del ${nombre} registrado.`);
+      onCambio?.();
+      avisarCambioOt(otId);
+    } catch (e: any) {
+      toast.error(e.message);
     } finally {
       setOcupado(false);
     }
@@ -157,7 +199,10 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
       <div>
         <h2 style={{ fontSize: 13, margin: "0 0 6px", display: "flex", alignItems: "center", gap: 8 }}>
           Informes y certificados
-          <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 12 }}>· resultados aprobados {d.resultados.aprobados} de {d.resultados.total}</span>
+          <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 12 }}>
+            · resultados aprobados {d.resultados.aprobados} de {d.resultados.total - (d.resultados.noEjecutados ?? 0)}
+            {d.resultados.noEjecutados ? ` · ${d.resultados.noEjecutados} no ejecutado(s)` : ""}
+          </span>
           <span style={{ flex: 1 }} />
           {d.puedo.emitir && !cerrada && <Link href={`/informes?otId=${otId}` as any} className="btn outline sm" aria-label="Emitir informe de esta OT">Emitir informe</Link>}
         </h2>
@@ -217,6 +262,98 @@ export default function PanelCierreOt({ otId, onCambio }: { otId: string; onCamb
           </table>
         )}
       </div>
+
+      {/* Lote 4 · Cerrar por incumplimiento (BPCH): ensayos pendientes → «No ejecutado» con motivo. */}
+      {d.incumplimiento?.registrado ? (
+        <div className="alert warn" style={{ margin: 0 }}>
+          <b>Cerrada por incumplimiento</b> el {fechaHora(d.incumplimiento.registrado.at)}
+          {d.incumplimiento.registrado.por ? ` por ${d.incumplimiento.registrado.por}` : ""}: {d.incumplimiento.noEjecutados} ensayo(s) «No ejecutado».
+          {d.incumplimiento.registrado.motivo && <div style={{ marginTop: 4 }}>Motivo: {d.incumplimiento.registrado.motivo}</div>}
+        </div>
+      ) : (
+        !cerrada && d.incumplimiento?.habilitado && d.incumplimiento?.puede && d.incumplimiento.noCumpleAprobados > 0 && d.incumplimiento.pendientes > 0 && (
+          <div>
+            <h2 style={{ fontSize: 13, margin: "0 0 6px" }}>Cierre por incumplimiento</h2>
+            <p className="subtitle" style={{ margin: "0 0 6px" }}>
+              Hay {d.incumplimiento.noCumpleAprobados} resultado(s) aprobado(s) «No cumple» y {d.incumplimiento.pendientes} ensayo(s) sin aprobar en toda la OT.
+              Al cerrar por incumplimiento, esos ensayos quedan «No ejecutado» con el motivo (no se borran ni se cobran) y el Informe de Incumplimiento los muestra así.
+            </p>
+            {!incOpen ? (
+              <button className="btn outline sm" disabled={ocupado} onClick={() => setIncOpen(true)}>Cerrar por incumplimiento…</button>
+            ) : (
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div className="field" style={{ minWidth: 360, flex: 1 }}>
+                  <label>Motivo <span className="req">*</span></label>
+                  <input value={incMotivo} maxLength={1000} placeholder="Mínimo 10 caracteres" onChange={(e) => setIncMotivo(e.target.value)} />
+                </div>
+                <button className="btn primary sm" disabled={ocupado || incMotivo.trim().length < 10} onClick={cerrarIncumplimiento}>Confirmar</button>
+                <button className="btn outline sm" onClick={() => setIncOpen(false)}>Cancelar</button>
+              </div>
+            )}
+          </div>
+        )
+      )}
+
+      {/* Lote 4 · Tres cierres con fecha real (COORD-02); fecha_cierre es el cierre final. */}
+      {d.cierres && (
+        <div>
+          <h2 style={{ fontSize: 13, margin: "0 0 6px" }}>
+            Cierres de la OT
+            <span style={{ fontWeight: 400, color: "var(--muted)", fontSize: 12 }}>
+              {d.cierres.exigeTres ? " · el cierre final los exige" : " · informativos (el cierre final no los exige)"}
+            </span>
+          </h2>
+          <table className="data" aria-label="Cierres de la OT con fecha real">
+            <thead><tr><th>Cierre</th><th>Fecha</th><th>Usuario</th><th /></tr></thead>
+            <tbody>
+              {d.cierres.etapas.map((e: any) => (
+                <tr key={e.etapa}>
+                  <td>Cierre del {e.nombre}</td>
+                  <td>{e.registro ? fechaHora(e.registro.at) : "—"}</td>
+                  <td>{e.registro?.por ?? "—"}</td>
+                  <td style={{ textAlign: "right" }}>
+                    {!e.registro && e.puedo && d.ot.estado !== "anulada" && (
+                      <button
+                        className="btn outline sm"
+                        disabled={ocupado || e.faltantes.length > 0}
+                        title={e.faltantes.join(" ")}
+                        onClick={() => registrarEtapa(e.etapa, e.nombre)}
+                      >
+                        Registrar cierre
+                      </button>
+                    )}
+                    {!e.registro && e.faltantes.length > 0 && (
+                      <small style={{ display: "block", color: "var(--muted)" }}>{e.faltantes.join(" ")}</small>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              <tr>
+                <td><b>Cierre final de la OT</b></td>
+                <td>{cerrada ? fechaHora(d.ot.fechaCierre) : "—"}</td>
+                <td colSpan={2} />
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Lote 4 · Planilla de costos y plazo de cierre (IDIC-PG03). */}
+      {!cerrada && (d.planillaCostos?.exige || d.plazoCierre) && (
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 12.5 }}>
+          {d.planillaCostos?.exige && (
+            <span className={`pill ${d.planillaCostos.estado === "cerrada" ? "green" : "amber"}`}>
+              Planilla de costos de {d.planillaCostos.laboratorio}: {d.planillaCostos.estado === "cerrada" ? "cerrada" : d.planillaCostos.estado ? "en borrador" : "sin completar"}
+            </span>
+          )}
+          {d.plazoCierre && (
+            <span className={`pill ${d.plazoCierre.atrasada ? "red" : "blue"}`}>
+              Terminada el {fechaDia(d.plazoCierre.terminadaEl)} · cerrar a más tardar el {fechaDia(d.plazoCierre.limite)} ({d.plazoCierre.dias} días hábiles)
+              {d.plazoCierre.atrasada ? ` · ${-d.plazoCierre.diasRestantes} día(s) hábil(es) de atraso` : ` · quedan ${d.plazoCierre.diasRestantes}`}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Cierre */}
       <div className={`alert ${cerrada ? "success" : d.puedeCerrar ? "success" : "warn"}`} style={{ margin: 0 }}>

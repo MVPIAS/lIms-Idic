@@ -193,7 +193,9 @@ export class BpchComunService {
     if (!ot) return null;
     const muestras = await this.prisma.$queryRawUnsafe<any[]>(
       `SELECT m.id, m.codigo, m.nombre, m.numero_lote AS lote, m.veredicto,
-              count(r.id)::int AS ensayos,
+              -- Lote 4: los «No ejecutado» (cierre por incumplimiento) no cuentan como ensayos por hacer.
+              count(r.id) FILTER (WHERE r.estado <> 'no_ejecutado')::int AS ensayos,
+              count(r.id) FILTER (WHERE r.estado = 'no_ejecutado')::int AS "noEjecutados",
               count(r.id) FILTER (WHERE r.estado = 'aprobado')::int AS aprobados,
               count(r.id) FILTER (WHERE r.estado IN ('capturado','revisado_n1','aprobado'))::int AS capturados
          FROM muestra m LEFT JOIN resultado r ON r.muestra_id = m.id AND r.deleted_at IS NULL
@@ -227,6 +229,7 @@ export class BpchComunService {
         total: muestras.reduce((s, m) => s + m.ensayos, 0),
         aprobados: muestras.reduce((s, m) => s + m.aprobados, 0),
         capturados: muestras.reduce((s, m) => s + m.capturados, 0),
+        noEjecutados: muestras.reduce((s, m) => s + (m.noEjecutados ?? 0), 0),
       },
       documentos,
       informeInspeccion: vigente("INFORME_INSPECCION"),

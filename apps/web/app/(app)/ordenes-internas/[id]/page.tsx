@@ -34,6 +34,7 @@ const ESTADO_RESULTADO: Record<string, string> = {
   aprobado: "Aprobado",
   devuelto: "Devuelto",
   rechazado: "Devuelto",
+  no_ejecutado: "No ejecutado",
 };
 
 /**

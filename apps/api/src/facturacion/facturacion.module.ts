@@ -20,6 +20,8 @@ import {
   estadoPorPagos,
   lineasDesdeCotizacion,
   lineasDesdeOt,
+  lineasNoEjecutados,
+  type EnsayoNoEjecutado,
   numeroBorrador,
   TIPOS_DOCUMENTO,
   nombreDocumento,
@@ -155,7 +157,10 @@ export class FacturaService extends BaseCrudService {
     const aceptada = cot && cot.estado === "aceptada" ? cot : null;
     const moneda = aceptada?.moneda ?? "CLP";
     const ivaPct = aceptada ? Number(aceptada.ivaPct) : 19;
-    const lineas = aceptada ? lineasDesdeCotizacion(aceptada) : await this.lineasSinCotizacion(tx, ot);
+    // Lote 4: los ensayos «No ejecutado» (cierre por incumplimiento) no se cobran.
+    const noEjecutados = aceptada ? await this.ensayosNoEjecutados(tx, ot.id) : [];
+    const descuentos = aceptada ? lineasNoEjecutados(aceptada, noEjecutados) : [];
+    const lineas = aceptada ? [...lineasDesdeCotizacion(aceptada), ...descuentos] : await this.lineasSinCotizacion(tx, ot);
     const t = totales(lineas, ivaPct, moneda);
     const conLineas = !lineas.length
       ? "complete las líneas antes de emitir"
@@ -163,7 +168,12 @@ export class FacturaService extends BaseCrudService {
         ? "sus ensayos no tienen precio en la lista de precios vigente ni en la ficha: valorice las líneas antes de emitir"
         : "revise las líneas (ensayos de la OT valorizados con la lista de precios vigente o la ficha) antes de emitir";
     const obs = aceptada
-      ? `Generada al cerrar la OT ${ot.codigo} con los importes de la cotización ${aceptada.codigo}.`
+      ? `Generada al cerrar la OT ${ot.codigo} con los importes de la cotización ${aceptada.codigo}.` +
+        (descuentos.length
+          ? ` Se descuentan ${descuentos.length} ensayo(s) «No ejecutado» por el cierre por incumplimiento.`
+          : noEjecutados.length
+            ? " La OT tiene ensayos «No ejecutado» sin línea propia en la cotización: revise el importe antes de emitir."
+            : "")
       : cot
         ? `Generada al cerrar la OT ${ot.codigo}. La cotización ${cot.codigo} no está aceptada (${cot.estado}): ${conLineas}.`
         : `Generada al cerrar la OT ${ot.codigo}, que no tiene cotización: ${conLineas}.`;
@@ -195,6 +205,26 @@ export class FacturaService extends BaseCrudService {
   }
 
   /**
+   * Lote 4 · Ensayos del catálogo que quedaron «No ejecutado» en TODAS sus filas
+   * de una muestra (cierre por incumplimiento), con el Nº de muestras.
+   */
+  async ensayosNoEjecutados(tx: any, otId: string): Promise<EnsayoNoEjecutado[]> {
+    return tx.$queryRawUnsafe(
+      `SELECT x.codigo, x.nombre, COUNT(*)::int AS muestras
+         FROM (SELECT ce.codigo, ce.nombre, r.muestra_id
+                 FROM resultado r
+                 JOIN cat_metodo m ON m.id = r.cat_metodo_id
+                 JOIN cat_ensayo ce ON ce.id = m.ensayo_id
+                WHERE r.ot_id = $1::uuid AND r.deleted_at IS NULL
+                GROUP BY ce.codigo, ce.nombre, r.muestra_id
+               HAVING bool_and(r.estado = 'no_ejecutado')) x
+        GROUP BY x.codigo, x.nombre
+        ORDER BY x.codigo`,
+      otId,
+    );
+  }
+
+  /**
    * B-040 · Líneas de una OT sin cotización aceptada: los ensayos del catálogo
    * hechos en la OT, valorizados como en la cotización (lista de precios
    * vigente a la fecha de la OT según el tipo de cliente, o la ficha), o el
@@ -207,6 +237,8 @@ export class FacturaService extends BaseCrudService {
          JOIN cat_metodo m ON m.id = r.cat_metodo_id
          JOIN cat_ensayo ce ON ce.id = m.ensayo_id
         WHERE r.ot_id = $1::uuid AND r.deleted_at IS NULL
+          -- Lote 4: lo «No ejecutado» (cierre por incumplimiento) no se cobra.
+          AND r.estado <> 'no_ejecutado'
         GROUP BY ce.id, ce.codigo, ce.nombre, ce.precio
         ORDER BY ce.codigo`,
       ot.id,

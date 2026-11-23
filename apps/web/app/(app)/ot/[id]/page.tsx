@@ -100,6 +100,10 @@ function textoHistorial(h: any): string {
   if (h.tipo === "bpch_internacion") return `Internación ${d.internacion ?? ""} · resolución ${d.resolucion ?? "—"}`;
   if (h.tipo === "bpch_reinspeccion") return `Reinspección ${d.reinspeccion ?? ""} desde la OT ${d.origenOt ?? ""}`;
   if (h.tipo === "origen_bpch") return `Origen BPCH registrado${d.ocNumero ? ` · OC ${d.ocNumero}` : ""}${d.rafNumero ? ` · RAF ${d.rafNumero}` : ""}`;
+  // Lote 4 (quinto envío): cierre por incumplimiento y tres cierres con fecha real (COORD-02).
+  if (h.tipo === "cierre_incumplimiento")
+    return `Cerrada por incumplimiento: ${d.noEjecutados ?? 0} ensayo(s) quedaron «No ejecutado»${d.motivo ? ` · motivo: ${d.motivo}` : ""}`;
+  if (h.tipo === "cierre_etapa") return `Cierre del ${d.nombre ?? d.etapa ?? ""} registrado`;
   if (h.tipo === "costos_reales")
     return d.accion === "reabrir" ? `Planilla de costos reales reabierta · motivo: ${d.motivo ?? ""}` : `Planilla de costos reales cerrada · total $${Math.round(Number(d.total ?? 0)).toLocaleString("es-CL")}`;
   // Hitos del seguimiento (frente r4c): avisos, plazo, recepción DCO, despacho, envío y carpeta.

@@ -108,6 +108,47 @@ export function lineasDesdeCotizacion(cot: CotizacionFactura): LineaBorrador[] {
   return lineas;
 }
 
+/** Ensayo de la OT que quedó «No ejecutado» en todas sus filas de una muestra (lote 4). */
+export interface EnsayoNoEjecutado {
+  codigo: string;
+  nombre: string;
+  /** Nº de muestras en que el ensayo no se ejecutó. */
+  muestras: number;
+}
+
+/**
+ * Lote 4 · Cierre por incumplimiento: los ensayos «No ejecutado» no se cobran.
+ * Con cotización aceptada, una línea negativa por ensayo no ejecutado con el
+ * precio unitario de su línea de la cotización (mismo código de ensayo), por
+ * las muestras en que no se hizo (como mucho la cantidad cotizada). Un ensayo
+ * sin línea propia en la cotización (p. ej. un panel cotizado en bloque) no se
+ * descuenta: lo ajusta Finanzas. El descuento y los gastos globales de la
+ * cotización no se recalculan. La tasa de internación (BPCH) es otra factura y
+ * no se toca.
+ */
+export function lineasNoEjecutados(cot: CotizacionFactura, noEjecutados: EnsayoNoEjecutado[]): LineaBorrador[] {
+  const moneda = cot.moneda ?? "CLP";
+  const clave = (c: string | null | undefined) => String(c ?? "").trim().toUpperCase();
+  const salida: LineaBorrador[] = [];
+  for (const e of noEjecutados) {
+    if (!e.muestras || e.muestras <= 0) continue;
+    const linea = cot.lineas.find((l) => clave(l.ensayoCodigo) && clave(l.ensayoCodigo) === clave(e.codigo));
+    if (!linea) continue;
+    const cantidad = Math.max(1, Number(linea.cantidad) || 1);
+    const k = Math.min(e.muestras, cantidad);
+    const unitario = redondear(n(linea.subtotal) / cantidad, moneda);
+    if (!unitario) continue;
+    const subtotal = -redondear(unitario * k, moneda);
+    salida.push({
+      descripcion: `No ejecutado (cierre por incumplimiento): ${descripcionLineaFactura(e.codigo, e.nombre)}`,
+      cantidad: k,
+      precioUnitario: -unitario,
+      subtotal,
+    });
+  }
+  return salida;
+}
+
 /** Ensayo realizado en la OT (por el catálogo), con su precio ya elegido. */
 export interface EnsayoOtFactura {
   codigo: string;

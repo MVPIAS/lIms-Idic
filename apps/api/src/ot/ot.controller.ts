@@ -989,7 +989,7 @@ export class OtController {
     const actualizados = await this.prisma.$transaction(async (tx) => {
       const n = await tx.$executeRawUnsafe(
         `UPDATE resultado SET asignado_a = $2::uuid
-          WHERE ot_id = $1::uuid AND deleted_at IS NULL AND estado <> 'aprobado'
+          WHERE ot_id = $1::uuid AND deleted_at IS NULL AND estado NOT IN ('aprobado', 'no_ejecutado')
             AND (muestra_id = ANY($3::uuid[]) OR id = ANY($4::uuid[]))
             AND NOT (id = ANY($5::uuid[]))`,
         id, dto.usuarioId, dto.muestraIds ?? [], dto.resultadoIds ?? [], ajenos,

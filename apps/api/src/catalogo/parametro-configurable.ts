@@ -676,6 +676,46 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     porConfirmar: "Plazo estándar por laboratorio (MET-09).",
     patron: { tipo: "entero", nombre: "Plazo de la OT del laboratorio", min: 1, max: 365, unidad: "días corridos", alta: "laboratorio", porDefecto: "10" },
   },
+  // --- Cierre de la OT (lote 4 del quinto envío, 21-11-2026) ---
+  {
+    categoria: "ot_cierre",
+    titulo: "Cierre de la OT",
+    donde:
+      "OT › Informe y cierre: «Cerrar por incumplimiento» (los ensayos pendientes quedan «No ejecutado» con motivo y no se cobran), planilla de costos cerrada para cerrar, los tres cierres con fecha real (analista, jefe de laboratorio y jefe de departamento) y el aviso de OT terminada sin cerrar (Mi bandeja).",
+    porConfirmar:
+      "Valores provisionales: laboratorios con cierre por incumplimiento (BPCH, §2 del análisis del 21-11), laboratorios que exigen la planilla de costos cerrada (LQC) y si el cierre final exige los tres cierres (COORD-02). Plazo de cierre: 10 días de IDIC-PG03, contados como hábiles de lunes a viernes sin feriados.",
+    codigos: {
+      incumplimiento_labs: {
+        tipo: "texto",
+        nombre: "Laboratorios con «Cerrar por incumplimiento» (códigos separados por coma; TODOS = todos)",
+        largo: 400,
+        ayuda: "Código de la unidad responsable de la OT (BPCH, SCC, sucursales…). La autoriza el Jefe de Laboratorio (permiso ot.cerrar_incumplimiento).",
+        porDefecto: "BPCH,SCC,SSTGO,SANTOF,SSEREN,SCALAM,SCOPIAP,SIQUIQU",
+      },
+      planilla_costos_labs: {
+        tipo: "multiple",
+        nombre: "Laboratorios cuyo cierre exige la planilla de costos reales cerrada",
+        opcionesDe: "laboratorios",
+        ayuda: "La planilla del laboratorio responsable de la OT (pestaña «Costos»).",
+        porDefecto: "LQC",
+      },
+      exige_tres_cierres: {
+        tipo: "sino",
+        nombre: "El cierre final exige los cierres del analista, del jefe de laboratorio y del jefe de departamento",
+        opciones: SI_NO,
+        porDefecto: "no",
+      },
+      dias_cierre: {
+        tipo: "entero",
+        nombre: "Plazo para cerrar la OT terminada (aviso en Mi bandeja)",
+        min: 1,
+        max: 60,
+        unidad: "días hábiles",
+        ayuda: "Desde la entrega del último documento oficial o la recepción en el DCO. Lunes a viernes; los feriados no se descuentan.",
+        porDefecto: "10",
+      },
+    },
+  },
   // --- Avisos y oficio conductor (frente r4c, T20 y T03) ---
   {
     categoria: "avisos",

@@ -60,6 +60,10 @@ export interface ResultadoParaInforme {
   nReplicas?: number;
   observacion?: string | null;
   veredicto?: string | null;
+  /** Estado del resultado: «no_ejecutado» (cierre por incumplimiento, lote 4) se informa como «No ejecutado». */
+  estado?: string | null;
+  /** Motivo del «No ejecutado». */
+  noEjecutadoMotivo?: string | null;
   /** Fecha y hora en que se ejecutó el ensayo (captura con equipo). */
   fechaEnsayo?: Date | string | null;
   /** Nº de sello de la muestra (columna «Sello Nº» de Dimensiones, EP-03 3.4). */
@@ -325,7 +329,27 @@ export function origenModalidad(
 const etiquetaMuestra = (r: ResultadoParaInforme) =>
   `Muestra ${r.muestraCodigo}${vacio(r.muestraNombre) ? "" : ` · ${String(r.muestraNombre).trim()}`}`;
 
+/** Lote 4 · Texto del ensayo que quedó sin ejecutar al cerrar la OT por incumplimiento. */
+export const TEXTO_NO_EJECUTADO = "No ejecutado";
+
 function fila(r: ResultadoParaInforme, modalidad: Modalidad): FilaInforme {
+  if (r.estado === "no_ejecutado") {
+    const base = filaBase(r, modalidad);
+    const motivo = vacio(r.noEjecutadoMotivo) ? "" : String(r.noEjecutadoMotivo).trim();
+    return {
+      ...base,
+      resultado: TEXTO_NO_EJECUTADO,
+      observacion: motivo ? `${TEXTO_NO_EJECUTADO}: ${motivo}` : base.observacion,
+      veredicto: null,
+      veredictoTexto: modalidad === "cumplimiento" ? TEXTO_NO_EJECUTADO : "",
+      desviacion: "",
+      cv: "",
+    };
+  }
+  return filaBase(r, modalidad);
+}
+
+function filaBase(r: ResultadoParaInforme, modalidad: Modalidad): FilaInforme {
   const soloResultado = r.evaluacion === "solo_resultado";
   // Sin condición o solo resultado: no se imprime Cumple / No cumple (guion).
   const sinCondicion = soloResultado || r.evaluacion === "sin_condicion";
@@ -525,6 +549,8 @@ export interface ResultadoInspeccion {
   resultadoFinal?: unknown;
   valorNumerico?: unknown;
   promedio?: unknown;
+  /** «no_ejecutado» (cierre por incumplimiento, lote 4): resultado y condición «No ejecutado». */
+  estado?: string | null;
 }
 
 /**
@@ -535,6 +561,16 @@ export interface ResultadoInspeccion {
 export function filaInspeccion(r: ResultadoInspeccion, lim?: { limiteInf?: unknown; limiteSup?: unknown; unidad?: string | null } | null): FilaInspeccion {
   const num = (v: unknown) => (v === null || v === undefined || v === "" ? "" : fmtNum(String(v)));
   const valor = valorInformado(r);
+  if (r.estado === "no_ejecutado")
+    return {
+      inspeccion: r.catAnalito?.nombre ?? r.analito?.nombre ?? "",
+      muestra: r.muestra?.codigo ?? "",
+      minimo: num(r.limiteInf ?? lim?.limiteInf),
+      maximo: num(r.limiteSup ?? lim?.limiteSup),
+      resultado: TEXTO_NO_EJECUTADO,
+      unidad: r.unidad ?? lim?.unidad ?? "",
+      condicion: TEXTO_NO_EJECUTADO,
+    };
   return {
     inspeccion: r.catAnalito?.nombre ?? r.analito?.nombre ?? "",
     muestra: r.muestra?.codigo ?? "",

@@ -472,6 +472,10 @@ model OrdenTrabajo {
   // (historial completo en ot_historial). DDL: packages/db/align_flujo_laboratorio.sql
   unidadAsignadaPor     String?   @map("unidad_asignada_por") @db.Uuid
   unidadAsignadaAt      DateTime? @map("unidad_asignada_at") @db.Timestamptz
+  // Lote 4 (align_q4_cierre_ot.sql), fuera del modelo y leídas con SQL como
+  // cerrada_por: cierre_analista_at/_por, cierre_jefe_lab_at/_por,
+  // cierre_jefe_depto_at/_por (COORD-02) e incumplimiento_cerrado_at/_por/_motivo.
+  // En `resultado`: estado «no_ejecutado» con no_ejecutado_motivo/_por/_at.
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz
 
