@@ -33,7 +33,8 @@ const TEXTO_FIRMA: Record<string, string> = {
   sin_firma: "en elaboración (sin enviar a firma)",
 };
 
-interface Extra { sinOt?: boolean; firma?: string; enviada?: string }
+/** Filtros de la dirección (Mi bandeja) y, desde Comercial › Proyectos, `?proyecto=<id>` (lote 3). */
+interface Extra { sinOt?: boolean; firma?: string; enviada?: string; proyectoId?: string; proyectoTexto?: string }
 
 const esHistorico = (e: string) => !(ESTADOS_VIGENTES as readonly string[]).includes(e);
 
@@ -75,6 +76,7 @@ export default function CotizacionesPage() {
       if (extra.sinOt) p.set("sinOt", "1");
       if (extra.firma) p.set("firma", extra.firma);
       if (extra.enviada) p.set("enviada", extra.enviada);
+      if (extra.proyectoId) p.set("proyectoId", extra.proyectoId);
       p.set("page", String(page));
       p.set("limit", "50");
       const d = await pedir<any>("GET", `/cotizaciones?${p.toString()}`);
@@ -102,10 +104,13 @@ export default function CotizacionesPage() {
     else if (e && FILTROS_URL.includes(e)) setFiltro(e);
     const firma = u.get("firma");
     const enviada = u.get("enviada");
+    const proyecto = u.get("proyecto");
     setExtra({
       sinOt: u.get("sinOt") === "1",
       firma: firma && FIRMAS.includes(firma) ? firma : undefined,
       enviada: enviada === "0" || enviada === "1" ? enviada : undefined,
+      proyectoId: proyecto && /^[0-9a-f-]{36}$/i.test(proyecto) ? proyecto : undefined,
+      proyectoTexto: u.get("proyectoTexto") ?? undefined,
     });
     setListo(true);
   }, [router]);
@@ -140,8 +145,9 @@ export default function CotizacionesPage() {
     { f: "historico", l: "Histórico" },
     { f: "precot", l: "Pre-cotizaciones" },
   ];
-  const hayExtra = extra.sinOt || extra.firma || extra.enviada;
+  const hayExtra = extra.sinOt || extra.firma || extra.enviada || extra.proyectoId;
   const textoExtra = [
+    extra.proyectoId && `proyecto ${extra.proyectoTexto ?? ""}`.trim(),
     extra.sinOt && "aceptadas sin OT",
     extra.firma && TEXTO_FIRMA[extra.firma],
     extra.enviada === "0" && "sin enviar al cliente",
@@ -174,7 +180,7 @@ export default function CotizacionesPage() {
       </div>
       {hayExtra && (
         <div className="alert info" style={{ marginBottom: 10 }}>
-          Filtro de la bandeja: {textoExtra}.{" "}
+          {extra.proyectoId && !extra.sinOt && !extra.firma && !extra.enviada ? "Filtro" : "Filtro de la bandeja"}: {textoExtra}.{" "}
           <button className="btn outline sm" onClick={() => setExtra({})}>Quitar filtro</button>
         </div>
       )}
@@ -200,6 +206,7 @@ export default function CotizacionesPage() {
                 <td style={{ whiteSpace: "nowrap" }}>
                   <Link href={`/cotizaciones/${c.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{c.codigo}</Link>
                   {c.tipoDocumento === "precotizacion" && <span className="pill gray" style={{ marginLeft: 6 }} title="Valores referenciales: no genera OT">pre-cotización</span>}
+                  {c.proyecto && <div style={{ fontSize: 11, color: "var(--muted)" }} title={c.proyecto.nombre}>{c.proyecto.codigo}</div>}
                 </td>
                 <td>{c.cliente?.razonSocial ?? "—"}</td>
                 <td><EstadoChip estado={c.estado} /></td>

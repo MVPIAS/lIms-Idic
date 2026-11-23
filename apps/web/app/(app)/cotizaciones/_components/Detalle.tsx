@@ -164,6 +164,8 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
         <Campo l="Forma de pago" v={etiquetaDe(params.forma_pago, cot.formaPago)} />
         <Campo l="Medio de envío" v={etiquetaDe(params.medio_envio, cot.medioEnvio)} />
         <Campo l="Referencia" v={cot.referencia} />
+        {/* Quinto envío IDIC (lote 3): proyecto del cliente; la OT lo hereda. */}
+        <Campo l="Proyecto" v={cot.proyecto ? `${cot.proyecto.codigo} · ${cot.proyecto.nombre}${cot.proyecto.activo === false ? " (inactivo)" : ""}` : "Sin proyecto"} />
         <Campo l="Plazo de entrega" v={cot.plazoEntregaDias ? `${cot.plazoEntregaDias} días corridos desde la llegada de la muestra` : "Sin plazo"} />
         <Campo l="Ejecutivo" v={cot.ejecutivo?.nombreCompleto ?? "—"} />
         <Campo l="Descripción técnica y alcance" v={cot.descripcionTecnica} full />

@@ -19,13 +19,16 @@
  *    muestras con su producto antes de los ensayos (reuniones 3 y 5), condiciones
  *    hasta 5.000 caracteres, valores netos (IVA al final) y pre-cotización con
  *    valores referenciales (reunión 10).
+ *  · Proyecto del cliente, opcional (quinto envío IDIC, lote 3): SelectorProyecto.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { money, fechaDia, rut as fmtRut } from "@/lib/format";
 import { pedir, GRUPOS_CC, hoyISO, type ConfigCotizacion, type Opcion } from "./comercial";
 import { toast } from "@/components/ui/feedback";
 import { montoCl } from "@/lib/monto-cl";
+import { usePermisos } from "@/lib/permisos";
+import SelectorProyecto from "./SelectorProyecto";
 
 type Cliente = { id: string; razonSocial?: string; rut?: string; tipo?: string | null; bloqueado?: boolean | null; motivoBloqueo?: string | null };
 /** Muestra de la cotización (reunión 5): producto del catálogo elegido antes que los ensayos (reunión 3). */
@@ -168,6 +171,10 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   const [dolarObs, setDolarObs] = useState<string>(inicial?.dolarObservado != null ? String(Number(inicial.dolarObservado)) : "");
   const [dolarObsFecha, setDolarObsFecha] = useState<string>(inicial?.dolarObservadoFecha ? String(inicial.dolarObservadoFecha).slice(0, 10) : hoyISO());
   const [referencia, setReferencia] = useState<string>(inicial?.referencia ?? "");
+  // Lote 3: proyecto del cliente (opcional). Si cambia el cliente, se quita.
+  const [proyectoId, setProyectoId] = useState<string>(inicial?.proyectoId ?? "");
+  const { puede } = usePermisos();
+  const clienteAnterior = useRef<string | null>(inicial?.clienteId ?? inicial?.cliente?.id ?? null);
   const [descripcionTecnica, setDescripcionTecnica] = useState<string>(inicial?.descripcionTecnica ?? "");
   const [condiciones, setCondiciones] = useState<string>(inicial?.condicionesAdicionales ?? "");
   // Plazo de entrega comprometido (días corridos desde la recepción): fija la fecha de compromiso de la OT.
@@ -223,6 +230,13 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       })
       .catch(() => setContactos([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cliente?.id]);
+
+  // Lote 3: un proyecto es de un solo cliente; al cambiar de cliente se quita el elegido.
+  useEffect(() => {
+    const id = cliente?.id ?? null;
+    if (clienteAnterior.current !== null && id !== clienteAnterior.current) setProyectoId("");
+    clienteAnterior.current = id;
   }, [cliente?.id]);
 
   /** Referencia sugerida por el documento de solicitud (EP-00 1.1): «OF Nº …» o «Correo de fecha …». */
@@ -585,6 +599,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
       dolarObservado: moneda === "CLP" && dolarObsNum > 0 ? dolarObsNum : null,
       dolarObservadoFecha: moneda === "CLP" && dolarObsNum > 0 ? dolarObsFecha : null,
       referencia: referencia.trim() || null,
+      proyectoId: proyectoId || null,
       descripcionTecnica: descripcionTecnica.trim() || null,
       condicionesAdicionales: condiciones.trim() || null,
       plazoEntregaDias: plazo,
@@ -849,6 +864,13 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
               <small style={{ color: "var(--muted)" }}>Se mantienen en la ficha del cliente (Comercial › Clientes › Editar).</small>
             </div>
           )}
+          <SelectorProyecto
+            clienteId={cliente?.id ?? ""}
+            value={proyectoId}
+            onChange={setProyectoId}
+            inicial={inicial?.proyecto ?? null}
+            puedeCrear={puede("proyecto.gestionar")}
+          />
           <div className="field" style={{ gridColumn: "1 / -1" }}>
             <label>Referencia</label>
             <input value={referencia} onChange={(e) => setReferencia(e.target.value)} maxLength={300} placeholder="Referencia del cliente / solicitud" />
