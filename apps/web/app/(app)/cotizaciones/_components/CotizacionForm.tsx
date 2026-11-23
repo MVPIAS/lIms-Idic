@@ -25,6 +25,7 @@ import { useEffect, useMemo, useState } from "react";
 import { money, fechaDia, rut as fmtRut } from "@/lib/format";
 import { pedir, GRUPOS_CC, hoyISO, type ConfigCotizacion, type Opcion } from "./comercial";
 import { toast } from "@/components/ui/feedback";
+import { SelectorAdjuntos, subirAdjuntosCotizacion } from "./AdjuntosCotizacion";
 import { montoCl } from "@/lib/monto-cl";
 
 type Cliente = { id: string; razonSocial?: string; rut?: string; tipo?: string | null; bloqueado?: boolean | null; motivoBloqueo?: string | null };
@@ -170,7 +171,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   const [referencia, setReferencia] = useState<string>(inicial?.referencia ?? "");
   const [descripcionTecnica, setDescripcionTecnica] = useState<string>(inicial?.descripcionTecnica ?? "");
   const [condiciones, setCondiciones] = useState<string>(inicial?.condicionesAdicionales ?? "");
-  // Plazo de entrega comprometido (días corridos desde la recepción): fija la fecha de compromiso de la OT.
+  // Plazo de entrega comprometido (días hábiles desde la recepción, IDIC-PG03 Rev18): fija la fecha de compromiso de la OT.
   const [plazoDias, setPlazoDias] = useState<string>(inicial?.plazoEntregaDias != null ? String(inicial.plazoEntregaDias) : "");
   const [obsInternas, setObsInternas] = useState<string>(inicial?.observacionesInternas ?? "");
   // Reunión 2: centro de costo de la sucursal que emite (vacío = Casa Matriz, Depto. Comercial).
@@ -197,6 +198,10 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
   const [solMedio, setSolMedio] = useState<string>(sol0.solicitudMedio ?? "");
   const [solNumero, setSolNumero] = useState<string>(sol0.solicitudNumero ?? "");
   const [solFecha, setSolFecha] = useState<string>(sol0.solicitudFecha ?? "");
+  // Quinto envío: adjuntos nuevos (se suben al guardar) y motivo si se modifica una cotización en firma o firmada.
+  const [adjuntosNuevos, setAdjuntosNuevos] = useState<File[]>([]);
+  const conMotivo = modo === "editar" && inicial?.estado === "abierta" && (inicial?.firmaEstado === "pendiente" || inicial?.firmaEstado === "firmada");
+  const [motivoModif, setMotivoModif] = useState("");
   // Gasto tipificado por agregar.
   const [gTipo, setGTipo] = useState("viatico");
   const [gDesc, setGDesc] = useState("");
@@ -571,6 +576,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
     const plazo = plazoDias.trim() ? Number(plazoDias) : null;
     if (plazo !== null && !(Number.isInteger(plazo) && plazo >= 1 && plazo <= 730))
       return setError("Plazo de entrega: indique un número entero de días entre 1 y 730.");
+    if (conMotivo && motivoModif.trim().length < 5)
+      return setError("Indique el motivo de la modificación (mínimo 5 caracteres): la cotización vuelve a Autorización pendiente del Jefe DCO.");
 
     const body: any = {
       centroCostoId: centroCostoId || null,
@@ -611,6 +618,7 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
         solicitudFecha: solFecha || null,
       },
       ...(modo === "crear" && oportunidadId ? { oportunidadId } : {}),
+      ...(conMotivo ? { motivoModificacion: motivoModif.trim() } : {}),
       lineas: lineas.map((l) =>
         l.ref
           ? { descripcion: l.descripcion, cantidad: Number(l.cantidad) || 1, precioUnitario: l.ref.precio }
@@ -637,6 +645,13 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
         modo === "crear"
           ? await pedir("POST", "/cotizaciones", { clienteId: cliente.id, ...body })
           : await pedir("PATCH", `/cotizaciones/${inicial.id}`, body);
+      // Adjuntos elegidos en el formulario: se suben ya con la cotización guardada.
+      const idCot = modo === "crear" ? (r as any)?.id : inicial.id;
+      if (adjuntosNuevos.length && idCot) {
+        const errores = await subirAdjuntosCotizacion(idCot, adjuntosNuevos);
+        if (errores.length) toast.error(`La cotización se guardó, pero no se adjuntaron: ${errores.join(" · ")}`);
+        setAdjuntosNuevos([]);
+      }
       onGuardado(r);
     } catch (e: any) {
       setError(e.message);
@@ -1147,10 +1162,10 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             </small>
           </div>
           <div className="field">
-            <label>Plazo de entrega (días corridos desde la llegada de la muestra)</label>
+            <label>Plazo de entrega (días hábiles desde la llegada de la muestra)</label>
             <input type="number" min={1} max={730} step={1} value={plazoDias} onChange={(e) => setPlazoDias(e.target.value)} />
             <small style={{ color: "var(--muted)" }}>
-              Días corridos que tarda el servicio, contados desde que la muestra llega al laboratorio (no desde la emisión). Las fechas quedan condicionadas a la entrega oportuna de las muestras. Si lo deja vacío, la fecha la fija Planificación.
+              Días hábiles que tarda el servicio, contados desde que la muestra llega al laboratorio (no desde la emisión). Las fechas quedan condicionadas a la entrega oportuna de las muestras. Si lo deja vacío, la fecha la fija Planificación.
             </small>
           </div>
           <div className="field" style={{ gridColumn: "1 / -1" }}>
@@ -1165,10 +1180,29 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
             <label>Regla aplicada</label>
             <small style={{ color: "var(--muted)", paddingTop: 6 }}>
               {validez?.explicacion ||
-                "IT DCO-PG01-P01-IT02: particulares 45 días (o la validez propia del laboratorio); Ejército hasta el 31-dic del año de emisión, o 6 meses si se emite entre octubre y diciembre."}
+                "IT DCO-PG01-P01-IT02: particulares 60 días (o la validez propia del laboratorio); Ejército hasta el 31-dic del año de emisión, o 6 meses si se emite entre octubre y diciembre."}
             </small>
           </div>
         </div>
+        {/* Quinto envío: adjuntos desde la creación y en la edición (se suben al guardar). */}
+        <div className="form-grid cols-2" style={{ marginTop: 8 }}>
+          <SelectorAdjuntos id="cot-adjuntos" archivos={adjuntosNuevos} onCambio={setAdjuntosNuevos} maxMb={cfg?.adjuntos?.maxMb} />
+          {modo === "editar" && (inicial?.adjuntos ?? []).length > 0 && (
+            <small style={{ gridColumn: "1 / -1", color: "var(--muted)" }}>
+              Ya adjuntos: {(inicial.adjuntos as any[]).map((a) => a.nombre).join(" · ")}
+            </small>
+          )}
+        </div>
+        {conMotivo && (
+          <div className="field" style={{ marginTop: 8 }}>
+            <label htmlFor="cot-motivo-modif">Motivo de la modificación <span className="req">*</span></label>
+            <textarea id="cot-motivo-modif" rows={2} maxLength={2000} value={motivoModif} onChange={(e) => setMotivoModif(e.target.value)}
+              placeholder="p. ej. el cliente pide agregar un ensayo; corrección del plazo…" />
+            <small style={{ color: "var(--muted)" }}>
+              La cotización {inicial?.firmaEstado === "firmada" ? "ya está firmada por el Jefe DCO" : "está en firma del Jefe DCO"}: al guardar vuelve a Autorización pendiente y queda registrada la versión anterior con su motivo, usuario y fecha. No se anula ni se crea otra.
+            </small>
+          </div>
+        )}
         <div className="toolbar" style={{ marginTop: 12 }}>
           {onCancelar && <button className="btn outline sm" onClick={onCancelar}>Cancelar</button>}
           <div className="spacer" />

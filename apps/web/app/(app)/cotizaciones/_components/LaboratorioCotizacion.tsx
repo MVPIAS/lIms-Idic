@@ -40,7 +40,11 @@ function filasMontos(r: any): FilaMonto[] {
   const pct = (v: unknown) => String(v).replace(".", ",");
   const aplicadoCt = r.precioEjercitoAplicado === "costo_total";
   return [
-    ...DETALLE.filter(([k]) => r.detalle?.[k]).map(([k, l]) => ({ l, v: r.detalle[k] })),
+    ...DETALLE.filter(([k]) => r.detalle?.[k]).flatMap(([k, l]) => [
+      { l, v: r.detalle[k] },
+      // Quinto envío: la línea «IVA %» va dentro de «Otros gastos en pesos».
+      ...(k === "otrosPesos" && r.ivaGastos ? [{ l: `  de ellos, IVA ${pct(r.ivaPct)} % (viáticos + H.H. civil + otros gastos en $)`, v: r.ivaGastos }] : []),
+    ]),
     { l: "Costo directo total (CDT)", v: r.cdt, nota: 1, fuerte: true },
     { l: `Costo indirecto · CFA (${pct(r.cfaPct)} % del CDT)`, v: r.cfa },
     { l: "Costo total (CT)", v: r.ct, nota: 2, fuerte: true },
@@ -213,7 +217,7 @@ function TarjetaSolicitud({ sol, c, puedeRetirar, onResponder, onVb, onRetirar }
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2 }}>Programa de trabajo (FORM06)</div>
               <div style={{ fontSize: 12.5 }}>
-                Plazo de entrega propuesto: <b>{sol.programa.plazoEntregaDias} días corridos</b>
+                Plazo de entrega propuesto: <b>{sol.programa.plazoEntregaDias} días hábiles</b>
                 {sol.programa.fechaInicio ? <> · inicio {fechaDia(sol.programa.fechaInicio)}</> : null}
                 {sol.programa.fechaTermino ? <> · término {fechaDia(sol.programa.fechaTermino)}</> : null}
                 {sol.programa.puntosEt ? <> · puntos de la E.T.: <b>{sol.programa.puntosEt}</b></> : null}

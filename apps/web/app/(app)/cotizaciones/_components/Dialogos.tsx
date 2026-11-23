@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import Panel from "./Panel";
 import SelectorLaboratorio from "@/components/SelectorLaboratorio";
-import { pedir, hoyISO, ACEPTACION_LABEL } from "./comercial";
+import { pedir, hoyISO, ACEPTACION_LABEL, ACCEPT_ADJUNTO_COT, TIPOS_ADJUNTO_COT } from "./comercial";
 import { subirFormulario } from "@/lib/d11";
 import { money } from "@/lib/format";
 
@@ -44,7 +44,7 @@ export function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerr
   async function confirmar() {
     setError("");
     if (requiereNumero && !numero.trim()) return setError("Indique el número del documento.");
-    if (requiereComprobante && !archivo) return setError("Adjunte el comprobante de la aceptación (PDF o imagen).");
+    if (requiereComprobante && !archivo) return setError("Adjunte el comprobante de la aceptación (PDF, imagen, correo u Office).");
     if (!labId) return setError("Elija el laboratorio responsable de la OT que se generará.");
     if (difiere && discrepancia.trim().length < 5) return setError("La O/C difiere del total cotizado: registre la discrepancia (o anule la orden del cliente).");
     setEnviando(true);
@@ -135,8 +135,8 @@ export function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerr
           </div>
         )}
         <div className="field" style={{ gridColumn: "1 / -1" }}>
-          <label htmlFor="acep-arch">Comprobante de la aceptación (PDF o imagen, máx. 5 MB) {requiereComprobante && <span className="req">*</span>}</label>
-          <input id="acep-arch" type="file" accept="application/pdf,image/png,image/jpeg" onChange={(e) => setArchivo(e.target.files?.[0] ?? null)} />
+          <label htmlFor="acep-arch">Comprobante de la aceptación ({TIPOS_ADJUNTO_COT}) {requiereComprobante && <span className="req">*</span>}</label>
+          <input id="acep-arch" type="file" accept={ACCEPT_ADJUNTO_COT} onChange={(e) => setArchivo(e.target.files?.[0] ?? null)} />
           <small style={{ color: "var(--muted)" }}>
             OPI, resolución, oficio, O/C, correo o comprobante de pago. Queda adjunto en la cotización; la OT lo registra en su «Historial» junto con la discrepancia.
             {yaTieneComprobante ? " La cotización ya tiene un comprobante adjunto." : ""}
@@ -152,7 +152,7 @@ export function DialogoAceptacion({ cot, onCerrar, onHecho }: { cot: any; onCerr
       </div>
       {tipo === "DISPOSICION_DIRECTOR" && (
         <div className="alert warn" style={{ marginTop: 10 }}>
-          OT por disposición del Director (IDIC-PG03 6.4 g): {conCobro
+          OT sin OC/OPI que dispone el Director, por su intermedio el Jefe del Departamento productivo (IDIC-PG03 6.4 g): {conCobro
             ? <>la OT quedará con <b>OPI pendiente</b> hasta que se registre la OPI en la OT.</>
             : <>sin cobro: no espera OPI, pero igual registra horas y costo.</>}
         </div>

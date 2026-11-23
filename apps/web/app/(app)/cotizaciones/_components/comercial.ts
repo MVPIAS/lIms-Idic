@@ -54,6 +54,17 @@ export type ConfigCotizacion = {
   condicionesMax: number;
   /** Reuniones 2 y 3: el comprobante de la aceptación es obligatorio (parámetro aceptacion_comprobante.exige). */
   aceptacion?: { exigeComprobante: boolean };
+  /** Quinto envío: adjuntos de la cotización (tope del parámetro cotizacion_adjuntos.max_mb). */
+  adjuntos?: { maxMb: number; extensiones: string[]; clases: string[] };
+};
+
+/** Tipos que acepta un adjunto de la cotización (el servidor comprueba el contenido). */
+export const ACCEPT_ADJUNTO_COT = ".pdf,.png,.jpg,.jpeg,.docx,.xlsx,.doc,.xls,.msg,.eml";
+export const TIPOS_ADJUNTO_COT = "PDF, imagen, correo (.msg, .eml) u Office (.docx, .xlsx, .doc, .xls)";
+export const CLASE_ADJUNTO_LABEL: Record<string, string> = {
+  solicitud: "solicitud del cliente",
+  antecedente: "antecedente (correo, foto, E.T.)",
+  aceptacion: "aceptación",
 };
 
 /** Tipo de documento (reunión 10): la pre-cotización entrega valores referenciales, sin ensayos ni OT. */
@@ -92,13 +103,13 @@ export const ACEPTACION_LABEL: Record<string, string> = {
   OC: "Orden de compra",
   CORREO: "Aprobación por correo (particular)",
   PAGO_ADELANTADO: "Comprobante de pago por adelantado",
-  DISPOSICION_DIRECTOR: "Disposición del Director o del Jefe de Departamento (sin OPI previa)",
+  DISPOSICION_DIRECTOR: "Disposición del Director (por su intermedio, el Jefe del Departamento productivo), sin OC/OPI previa",
 };
 
 export const ORIGEN_LABEL: Record<string, string> = {
   COTIZACION: "Cotización",
   INTERNACION: "Internación",
-  DISPOSICION: "Disposición del Director o del Jefe de Departamento",
+  DISPOSICION: "Disposición del Director (por su intermedio, el Jefe del Departamento productivo)",
   INTERLABORATORIO: "Interlaboratorio",
   OT_INTERNA: "OT interna",
   REINSPECCION: "Reinspección (BPCH)",

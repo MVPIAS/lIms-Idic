@@ -10,14 +10,15 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { monto, fecha, fechaDia, rut as fmtRut } from "@/lib/format";
 import { ESTADO_PILL, ESTADO_LABEL, ACEPTACION_LABEL, ORIGEN_LABEL, ESTADOS_VIGENTES, etiquetaDe, fueraDeValidez, esPrecot, pedir, type Opcion } from "./comercial";
-import { descargarAdjunto } from "@/lib/d11";
+import { AdjuntosCotizacion } from "./AdjuntosCotizacion";
 import { toast } from "@/components/ui/feedback";
 
-export interface Acciones { editar: boolean; aceptar: boolean; anular: boolean; motivoNoAceptar?: string; motivoNoEditar?: string }
+export interface Acciones { editar: boolean; aceptar: boolean; anular: boolean; motivoNoAceptar?: string; motivoNoEditar?: string; editarConMotivo?: boolean }
 
 /**
  * Qué puede hacer el usuario (permiso + estado + validez + circuito de firma).
- * Circuito r1c: en firma o firmada no se edita; sin la firma del Jefe DCO no se
+ * Quinto envío (21-11-2026): en firma o firmada (no aceptada) también se edita,
+ * con motivo; vuelve a Autorización pendiente. Sin la firma del Jefe DCO no se
  * registra la aceptación (si `exigirFirma`, valor por defecto de la EP).
  */
 export function accionesDe(c: any, puede: (p: string) => boolean, exigirFirma = true): Acciones {
@@ -26,7 +27,8 @@ export function accionesDe(c: any, puede: (p: string) => boolean, exigirFirma = 
   const sinFirma = exigirFirma && c.circuito === "r1" && c.firmaEstado !== "firmada";
   return {
     // COM-02: una Reabierta (autorizada por el Jefe DCO) se corrige hasta registrar el valor final.
-    editar: ((c.estado === "abierta" && !vencida && !enFirma) || c.estado === "reabierta") && puede("cotizacion.crear"),
+    editar: ((c.estado === "abierta" && !vencida) || c.estado === "reabierta") && puede("cotizacion.crear"),
+    editarConMotivo: c.estado === "abierta" && enFirma,
     // Reunión 10: la pre-cotización no se acepta ni genera OT.
     aceptar: !esPrecot(c) && (c.estado === "abierta" || c.estado === "enviada") && !vencida && !sinFirma && puede("cotizacion.aceptar"),
     anular: (c.estado === "abierta" || c.estado === "expirada") && puede("cotizacion.anular"),
@@ -37,7 +39,9 @@ export function accionesDe(c: any, puede: (p: string) => boolean, exigirFirma = 
       : sinFirma && c.estado === "abierta"
         ? "Aún no está firmada por el Jefe DCO: envíela a firma y, una vez firmada, al cliente."
         : undefined,
-    motivoNoEditar: c.firmaEstado === "pendiente" ? "Está en firma del Jefe DCO." : c.firmaEstado === "firmada" ? "Ya está firmada (emitida)." : undefined,
+    motivoNoEditar: !enFirma
+      ? undefined
+      : `${c.firmaEstado === "pendiente" ? "Está en firma del Jefe DCO" : "Ya está firmada (emitida)"}: si la edita, indique el motivo; vuelve a Autorización pendiente del Jefe DCO y queda la traza (no se anula ni se crea otra).`,
   };
 }
 
@@ -69,7 +73,7 @@ export function EstadoChip({ estado }: { estado: string }) {
 /* --------------------------------------------------------------------------
  * Detalle de solo lectura (aceptadas, anuladas, históricas o Abierta sin editar)
  * ------------------------------------------------------------------------ */
-export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, onAnular, puede, onCambio }: { cot: any; params: Record<string, Opcion[]>; acciones: Acciones; onEditar: () => void; onAceptar: () => void; onAnular: () => void; puede?: (p: string) => boolean; onCambio?: (msg: string) => void }) {
+export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, onAnular, puede, onCambio, maxMbAdjuntos }: { cot: any; params: Record<string, Opcion[]>; acciones: Acciones; onEditar: () => void; onAceptar: () => void; onAnular: () => void; puede?: (p: string) => boolean; onCambio?: (msg: string) => void; maxMbAdjuntos?: number }) {
   // Frente f5: la moneda guardada se muestra tal cual (una histórica, p. ej. UF, sin convertir).
   const mon: string = cot.moneda || "CLP";
   const router = useRouter();
@@ -164,7 +168,7 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
         <Campo l="Forma de pago" v={etiquetaDe(params.forma_pago, cot.formaPago)} />
         <Campo l="Medio de envío" v={etiquetaDe(params.medio_envio, cot.medioEnvio)} />
         <Campo l="Referencia" v={cot.referencia} />
-        <Campo l="Plazo de entrega" v={cot.plazoEntregaDias ? `${cot.plazoEntregaDias} días corridos desde la llegada de la muestra` : "Sin plazo"} />
+        <Campo l="Plazo de entrega" v={cot.plazoEntregaDias ? `${cot.plazoEntregaDias} días hábiles desde la llegada de la muestra` : "Sin plazo"} />
         <Campo l="Ejecutivo" v={cot.ejecutivo?.nombreCompleto ?? "—"} />
         <Campo l="Descripción técnica y alcance" v={cot.descripcionTecnica} full />
       </div>
@@ -233,21 +237,14 @@ export function DetalleCotizacion({ cot, params, acciones, onEditar, onAceptar, 
           ].filter(Boolean).join(" · ")} />
         )}
         {cot.solicitud?.oportunidadCodigo && <Campo l="Oportunidad (CRM)" v={cot.solicitud.oportunidadCodigo} />}
-        {(cot.adjuntos ?? []).length > 0 && (
-          <Campo l="Documentos adjuntos" full v={
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {cot.adjuntos.map((a: any) => (
-                <li key={a.id}>
-                  <button type="button" className="btn-link" style={{ background: "none", border: 0, padding: 0, color: "var(--accent)", textDecoration: "underline", cursor: "pointer" }}
-                    onClick={() => descargarAdjunto(`/cotizaciones/${cot.id}/adjuntos/${a.id}`, a.nombre).catch((e) => toast.error(e.message))}>
-                    {a.nombre}
-                  </button>{" "}
-                  <small style={{ color: "var(--muted)" }}>{a.clase === "aceptacion" ? "aceptación" : "solicitud"} · {fecha(a.createdAt)}</small>
-                </li>
-              ))}
-            </ul>
-          } />
-        )}
+        {/* Quinto envío: adjuntos (correos, fotos, E.T.) en cualquier estado; se listan y descargan aquí. */}
+        <AdjuntosCotizacion
+          cotId={cot.id}
+          adjuntos={cot.adjuntos ?? []}
+          puedeAdjuntar={!!puede?.("cotizacion.crear") && !esHistorico(cot.estado)}
+          maxMb={maxMbAdjuntos}
+          onCambio={() => onCambio?.("Adjuntos actualizados.")}
+        />
         {cot.ot && <Campo l="OT generada" v={<><Link href={`/ot/${cot.ot.id}` as any} className="codigo" style={{ textDecoration: "underline" }}>{cot.ot.codigo}</Link> · {ORIGEN_LABEL[cot.ot.origenTrabajo] ?? cot.ot.origenTrabajo ?? "—"}</>} />}
         {cot.estado === "anulada" && (
           <Campo l="Anulación" v={`${cot.anulacionMotivo ?? "Sin motivo registrado"}${cot.anuladaAt ? ` · ${fecha(cot.anuladaAt)}` : ""}`} full />

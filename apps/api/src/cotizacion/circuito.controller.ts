@@ -64,6 +64,8 @@ const Form05Schema = z.object({
   dolar: z.number().positive().max(100000).nullable().optional(),
   // Cuarto envío del IDIC: fecha del tipo de cambio («del dd-mm-aaaa»), exigida si hay montos en US$.
   dolarFecha: fecha.nullable().optional(),
+  // Quinto envío: línea «IVA 19 %» de otros gastos (viáticos + H.H. civil + otros gastos en $).
+  ivaGastos: z.boolean().nullable().optional(),
 });
 
 /** Cotización compartida: ensayos que agrega el laboratorio. */

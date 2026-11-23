@@ -2,15 +2,15 @@ import { calcularValidez, reglaDeTipoCliente, sumarMeses, soloFecha } from "./va
 
 describe("Validez de cotización · IT DCO-PG01-P01-IT02", () => {
   describe("Particulares", () => {
-    it("45 días por defecto", () => {
+    it("60 días por defecto", () => {
       const r = calcularValidez({ fechaEmision: "2026-03-10", regla: "PARTICULAR" });
-      expect(r.validaHasta).toBe("2026-04-24");
-      expect(r.dias).toBe(45);
+      expect(r.validaHasta).toBe("2026-05-09");
+      expect(r.dias).toBe(60);
       expect(r.regla).toBe("PARTICULAR");
     });
 
     it("cruza de año sin problemas", () => {
-      expect(calcularValidez({ fechaEmision: "2026-12-20", regla: "PARTICULAR" }).validaHasta).toBe("2027-02-03");
+      expect(calcularValidez({ fechaEmision: "2026-12-20", regla: "PARTICULAR" }).validaHasta).toBe("2027-02-18");
     });
 
     it("usa el parámetro general si se configura", () => {
@@ -25,7 +25,7 @@ describe("Validez de cotización · IT DCO-PG01-P01-IT02", () => {
     });
 
     it("ignora valores no positivos del laboratorio", () => {
-      expect(calcularValidez({ fechaEmision: "2026-03-10", regla: "PARTICULAR", diasParticularLab: 0 }).dias).toBe(45);
+      expect(calcularValidez({ fechaEmision: "2026-03-10", regla: "PARTICULAR", diasParticularLab: 0 }).dias).toBe(60);
     });
   });
 

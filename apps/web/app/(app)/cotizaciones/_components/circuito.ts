@@ -130,6 +130,7 @@ export const TEXTO_EVENTO: Record<string, string> = {
   reapertura_autorizada: "Autorizó la reapertura (Jefe DCO)",
   reapertura_rechazada: "Rechazó la reapertura (Jefe DCO)",
   reapertura_cerrada: "Registró el valor final (la OT y la factura pendiente lo toman)",
+  modificacion: "Modificó la cotización en firma o firmada: vuelve a Autorización pendiente",
 };
 
 // Textos de los medios de envío: «Parámetros del sistema › medio_envio» (useMediosEnvio, frente f5).

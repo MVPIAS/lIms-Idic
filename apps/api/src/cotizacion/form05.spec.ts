@@ -191,3 +191,49 @@ describe("Cotización del DSA · comisión, Programa de Trabajo LEM y reposició
     expect(erroresPrograma({ etapas: [], plazoEntregaDias: 10, numItems: 12, puntosEt: "4.1.1" })).toEqual([]);
   });
 });
+
+describe("FORM05 · quinto envío: línea «IVA 19 %» de otros gastos (Formulario Ejército 4)", () => {
+  // Montos del formulario FORM-2026-14620/001 (descripciones PRUEBA). El IVA no la llevan
+  // los servicios estándar (ya tienen IVA) ni la H.H. militar; los equipos van en otros gastos.
+  const v = (montoDiario: number) => ({ ambito: "nacional" as const, zona: "Zona PRUEBA", grado: "Grado PRUEBA", dias: 5, montoDiario, porcentaje: 100 });
+  const form = {
+    viaticos: [...Array(5).fill(v(66751)), ...Array(5).fill(v(49648)), v(82249)],
+    horasHombre: [
+      ...Array(4).fill({ tipo: "civil" as const, categoria: "Técnico PRUEBA", horas: 40, valorHora: 9051 }),
+      { tipo: "militar" as const, categoria: "Ingeniero PRUEBA", horas: 40, valorHora: 21324 },
+      ...Array(6).fill({ tipo: "militar" as const, categoria: "Técnico militar PRUEBA", horas: 40, valorHora: 8316 }),
+    ],
+    servicios: Array(3).fill({ codigo: "KM-PRUEBA", cantidad: 545, valorUnitario: 528 }),
+    otros: [{ descripcion: "Equipos y materiales PRUEBA", monto: 2455494, moneda: "CLP" as const }],
+    ivaGastos: true,
+  };
+  const cfg = { cfaPct: 20, margenParticularPct: 30, ivaPct: 19 };
+
+  it("IVA 19 % × (viáticos + H.H. civil + otros gastos en $) y cuadra con los montos finales del formulario real", () => {
+    const r = calcularForm05(form, cfg);
+    expect(r.baseIvaGastos).toBe(3321220 + 1448160 + 2455494);
+    expect(r.ivaGastos).toBe(1372726);
+    expect(r.detalle.otrosPesos).toBe(3828220);
+    expect(r.cdt).toBe(12309680);
+    expect(r.cfa).toBe(2461936);
+    expect(r.ct).toBe(14771616);
+    expect(r.precioEjercitoCt).toBe(11922816);
+    expect(r.precioEjercitoCostoDirecto).toBe(9460880);
+    expect(r.precioParticular).toBe(19203101);
+  });
+
+  it("sin pedir la línea (costeos guardados antes) no cambia nada", () => {
+    const r = calcularForm05({ ...form, ivaGastos: undefined }, cfg);
+    expect(r.ivaGastos).toBe(0);
+    expect(r.detalle.otrosPesos).toBe(2455494);
+    expect(r.cdt).toBe(12309680 - 1372726);
+  });
+
+  it("los otros gastos en US$ no entran en la base", () => {
+    const r = calcularForm05(
+      { ...form, otros: [...form.otros, { descripcion: "Gasto US$ PRUEBA", monto: 100, moneda: "USD" as const }], dolar: 950, dolarFecha: "2026-09-15" },
+      cfg,
+    );
+    expect(r.ivaGastos).toBe(1372726);
+  });
+});

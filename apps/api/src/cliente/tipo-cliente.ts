@@ -37,6 +37,7 @@ export const TIPOS_CLIENTE_RESPALDO: readonly string[] = [
   "prov_fuerza_aerea",
   "prov_armada",
   "interlaboratorio",
+  "interno",
 ];
 
 export type ResultadoTipo = { ok: true } | { ok: false; mensaje: string };

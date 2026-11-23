@@ -16,6 +16,10 @@
  *    de la cotización en la OC, confidencialidad, horario y reclamos). Es la
  *    que da el formato fijo `cuerpoCotizacionHtml` desde entonces. El SQL solo
  *    la aplica si la plantilla guardada sigue siendo la versión 1 sin editar.
+ *  · La versión 3 (packages/db/align_q1_cotizacion.sql, quinto envío, 21-11-2026)
+ *    es CUERPO_COTIZACION_FORM04_V3: plazo en días hábiles y el pie INN en
+ *    `div.pie-cada-hoja` (el PDF lo repite en cada hoja). Es la que da hoy el
+ *    formato fijo; el SQL solo la aplica sobre la versión 2 sin editar.
  *  · Si la versión vigente falla (marca mal escrita, variable inexistente,
  *    condicional anidado que el motor no resuelve, error al rendir), se usa la
  *    vigente anterior (la RETIRADA más reciente) y, en último caso, el formato
@@ -128,6 +132,22 @@ ${NOTA_FINAL_V1}
 {{#si idic.telefono_reclamos}}<p class="nota">Reclamos y sugerencias: {{idic.telefono_reclamos}}</p>{{/si}}`,
 );
 
+/**
+ * Versión 3 (quinto envío del IDIC, 21-11-2026 · IDIC-PG03 Rev18): plazo de
+ * entrega en días HÁBILES y el pie INN (horario y reclamos) en
+ * `div.pie-cada-hoja`, que el PDF repite en cada hoja. Debe coincidir con la
+ * que aplica align_q1_cotizacion.sql y, rendida, con `cuerpoCotizacionHtml`.
+ */
+const PIE_V2 = `{{#si idic.horario_atencion}}<p class="nota">Horario de atención a clientes: {{idic.horario_atencion}}</p>{{/si}}
+{{#si idic.telefono_reclamos}}<p class="nota">Reclamos y sugerencias: {{idic.telefono_reclamos}}</p>{{/si}}`;
+export const CUERPO_COTIZACION_FORM04_V3 = CUERPO_COTIZACION_FORM04_V2.replace(
+  "{{cotizacion.plazo_entrega_dias}} días corridos desde la recepción",
+  "{{cotizacion.plazo_entrega_dias}} días hábiles desde la recepción",
+).replace(
+  PIE_V2,
+  `<div class="pie-cada-hoja">{{#si idic.horario_atencion}}<p class="nota">Horario de Atención a Clientes: {{idic.horario_atencion}}</p>{{/si}}{{#si idic.telefono_reclamos}}<p class="nota">Reclamos y sugerencias: {{idic.telefono_reclamos}}</p>{{/si}}</div>`,
+);
+
 /* --------------------------------------------------------------- variables --- */
 
 export interface VariableCotizacion {
@@ -149,7 +169,7 @@ export const VARIABLES_COTIZACION: VariableCotizacion[] = [
   { clave: "cotizacion.validez_dias", descripcion: "Días de validez" },
   { clave: "cotizacion.forma_pago", descripcion: "Forma de pago (Contado 30 días, Por adelantado…)" },
   { clave: "cotizacion.referencia", descripcion: "Referencia del cliente" },
-  { clave: "cotizacion.plazo_entrega_dias", descripcion: "Plazo de entrega en días corridos (vacío si no se indicó)" },
+  { clave: "cotizacion.plazo_entrega_dias", descripcion: "Plazo de entrega en días hábiles (vacío si no se indicó)" },
   { clave: "cotizacion.descripcion_tecnica", descripcion: "Descripción técnica y alcance (texto plano)" },
   { clave: "cotizacion.condiciones_adicionales", descripcion: "Condiciones adicionales (texto plano)" },
   { clave: "cotizacion.moneda", descripcion: "Moneda: CLP o USD" },

@@ -146,8 +146,38 @@ export function motivoNoEditable(firmaEstado: FirmaEstado): string | null {
   if (firmaEstado === "pendiente")
     return "La cotización está en firma del Jefe DCO: no se puede editar. Pida que se la devuelvan si necesita corregirla.";
   if (firmaEstado === "firmada")
-    return "La cotización ya está firmada (emitida): no se puede editar. Si el cliente pide cambios, anúlela y emita otra.";
+    return "La cotización ya está firmada (emitida): no se puede editar aquí. Para cambiarla, edítela indicando el motivo: vuelve a Autorización pendiente del Jefe DCO.";
   return null;
+}
+
+/** Motivo mínimo de una modificación de una cotización en firma o firmada. */
+export const MIN_MOTIVO_MODIFICACION = 5;
+
+/**
+ * Modificación de una cotización ya enviada a firma o firmada por el Jefe DCO y
+ * no aceptada (quinto envío del IDIC, 21-11-2026 · §4.1): se permite editar,
+ * con motivo; la cotización vuelve a «Autorización pendiente» (en firma del
+ * Jefe DCO) y queda la traza (usuario, fecha, versión anterior). NO se anula
+ * ni se crea otra, para no inflar las estadísticas de nulas.
+ *
+ *  · `requiere` = la edición es una modificación con traza (Abierta del
+ *    circuito r1, en firma o firmada).
+ *  · `error`    = falta el motivo.
+ * Aceptada → reapertura COM-02 (otro flujo); el resto, la regla general.
+ */
+export function reglaModificacion(
+  c: Pick<CotizacionCircuito, "estado" | "circuito" | "firmaEstado">,
+  motivo: string | null | undefined,
+): { requiere: boolean; error: string | null } {
+  const requiere = c.estado === "abierta" && (c.firmaEstado === "pendiente" || c.firmaEstado === "firmada");
+  if (!requiere) return { requiere: false, error: null };
+  const m = String(motivo ?? "").trim();
+  if (m.length < MIN_MOTIVO_MODIFICACION)
+    return {
+      requiere,
+      error: `La cotización ${c.firmaEstado === "firmada" ? "ya está firmada por el Jefe DCO" : "está en firma del Jefe DCO"}: indique el motivo de la modificación (mínimo ${MIN_MOTIVO_MODIFICACION} caracteres). Al guardar vuelve a Autorización pendiente.`,
+    };
+  return { requiere, error: null };
 }
 
 /**

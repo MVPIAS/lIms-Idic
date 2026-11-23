@@ -6,6 +6,7 @@ import {
   faltantesParaFirma,
   motivoNoAceptable,
   motivoNoEditable,
+  reglaModificacion,
   motivoNoEnviable,
   nivelVbPendiente,
   nivelesVb,
@@ -89,7 +90,18 @@ describe("Firma del Jefe DCO y aceptación (EP-00 2.6–2.8, 4.1)", () => {
     expect(motivoNoEditable(null)).toBeNull();
     expect(motivoNoEditable("devuelta")).toBeNull();
     expect(motivoNoEditable("pendiente")).toMatch(/en firma/);
-    expect(motivoNoEditable("firmada")).toMatch(/anúlela/);
+    expect(motivoNoEditable("firmada")).toMatch(/motivo/);
+  });
+
+  it("modificar una cotización en firma o firmada exige motivo y vuelve a Autorización pendiente (quinto envío)", () => {
+    const base = { estado: "abierta", circuito: "r1" };
+    expect(reglaModificacion({ ...base, firmaEstado: null }, undefined)).toEqual({ requiere: false, error: null });
+    expect(reglaModificacion({ ...base, firmaEstado: "devuelta" }, "")).toEqual({ requiere: false, error: null });
+    expect(reglaModificacion({ ...base, firmaEstado: "firmada" }, "  ").error).toMatch(/ya está firmada.*motivo/);
+    expect(reglaModificacion({ ...base, firmaEstado: "pendiente" }, "abc").error).toMatch(/en firma/);
+    expect(reglaModificacion({ ...base, firmaEstado: "firmada" }, "El cliente pide PRUEBA")).toEqual({ requiere: true, error: null });
+    // Aceptada: sigue la reapertura COM-02, no esta regla.
+    expect(reglaModificacion({ estado: "aceptada", circuito: "r1", firmaEstado: "firmada" }, "x").requiere).toBe(false);
   });
 
   it("la aceptación exige la firma en el circuito nuevo; las históricas y la configuración «no» no", () => {

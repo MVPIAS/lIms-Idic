@@ -3,7 +3,7 @@ import { ZONA_CHILE, hoyChile, diaChile } from "../common/fecha-chile";
  * Validez automática de la cotización · IT DCO-PG01-P01-IT02 (Depto. Comercial).
  *
  * Reglas acordadas con SVT (ronda 1, oct-2026):
- *   · PARTICULARES → 45 días corridos desde la emisión. Un laboratorio puede
+ *   · PARTICULARES → 60 días corridos desde la emisión (45 hasta nov-2026). Un laboratorio puede
  *     tener una validez propia mayor (p. ej. LRB, LMT): se configura en
  *     `centro_costo.validez_particular_dias`.
  *   · EJÉRCITO     → hasta el 31 de diciembre del año de emisión (año
@@ -12,7 +12,7 @@ import { ZONA_CHILE, hoyChile, diaChile } from "../common/fecha-chile";
  *
  * La regla de cada tipo de cliente es un PARÁMETRO (`parametro_sistema`,
  * categoría tipo_cliente, columna `valor` = EJERCITO | PARTICULAR); los números
- * (45 días, 6 meses) también (categoría validez_cotizacion). Aquí solo se fijan
+ * (60 días, 6 meses) también (categoría validez_cotizacion). Aquí solo se fijan
  * los valores por defecto.
  *
  * Función PURA (sin BD ni reloj): todo se calcula en fechas de calendario UTC
@@ -25,7 +25,7 @@ export interface EntradaValidez {
   /** Fecha de emisión (se toma solo la parte de calendario). */
   fechaEmision: Date | string;
   regla: ReglaValidez;
-  /** Días para particulares (parámetro general). Def. 45. */
+  /** Días para particulares (parámetro general). Def. 60 (respuesta SVT del 21-11-2026). */
   diasParticular?: number;
   /** Días propios del laboratorio para particulares (centro de costo). Tiene prioridad. */
   diasParticularLab?: number | null;
@@ -43,7 +43,7 @@ export interface ResultadoValidez {
   explicacion: string;
 }
 
-export const DIAS_PARTICULAR_DEF = 45;
+export const DIAS_PARTICULAR_DEF = 60;
 export const MESES_EJERCITO_OCT_DIC_DEF = 6;
 
 /** Normaliza a fecha UTC a medianoche. Acepta Date o 'YYYY-MM-DD[...]'. */

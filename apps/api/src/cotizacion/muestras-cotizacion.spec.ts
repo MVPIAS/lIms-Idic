@@ -50,7 +50,7 @@ describe("cotización por muestra (reunión 5, Químico)", () => {
 
   it("el plazo se cuenta desde la llegada de la muestra y queda condicionado a su entrega", () => {
     expect(textoPlazo(null, [])).toBe("");
-    expect(textoPlazo(15)).toMatch(/^15 días corridos desde la llegada de la muestra al laboratorio\. Las fechas comprometidas quedan condicionadas/);
+    expect(textoPlazo(15)).toMatch(/^15 días hábiles desde la llegada de la muestra al laboratorio\. Las fechas comprometidas quedan condicionadas/);
     expect(textoPlazo(null, [{ n: 2, plazoDias: 20 }])).toMatch(/^muestra 2: 20 días\./);
   });
 });

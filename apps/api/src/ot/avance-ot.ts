@@ -298,7 +298,7 @@ function detalleApertura(h: HechosOt): string {
         : h.origen === "INTERLABORATORIO"
           ? "OT interlaboratorio"
           : h.origen === "DISPOSICION"
-            ? "Disposición del Director o del Jefe de Departamento"
+            ? "Disposición del Director (por su intermedio, el Jefe del Departamento productivo)"
             : h.origen
               ? NOMBRE_ORIGEN_OT[h.origen] ?? h.origen.toLowerCase().replace(/_/g, " ")
               : "Registro directo";

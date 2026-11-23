@@ -46,6 +46,7 @@ export default function FichaCotizacionPage() {
   const [c, setC] = useState<Circuito | null>(null);
   const [cot, setCot] = useState<any | null>(null);
   const [params, setParams] = useState<Record<string, Opcion[]>>({});
+  const [maxMbAdjuntos, setMaxMbAdjuntos] = useState<number | undefined>(undefined);
   const [error, setError] = useState("");
   const [msg, setMsg] = useState("");
   const [tab, setTab] = useState<PestanaCot>((sp.get("tab") as PestanaCot) || "datos");
@@ -67,7 +68,7 @@ export default function FichaCotizacionPage() {
 
   useEffect(() => {
     cargar();
-    pedir<any>("GET", "/cotizaciones/config").then((x) => setParams(x?.parametros ?? {})).catch(() => {});
+    pedir<any>("GET", "/cotizaciones/config").then((x) => { setParams(x?.parametros ?? {}); setMaxMbAdjuntos(x?.adjuntos?.maxMb); }).catch(() => {});
   }, [cargar]);
 
   // Al abrir, la pestaña es la de la etapa actual (salvo que se pida otra).
@@ -173,8 +174,8 @@ export default function FichaCotizacionPage() {
                 <CotizacionForm modo="editar" inicial={cot} onCancelar={() => setEditando(false)} onGuardado={async () => { setEditando(false); await hecho(`Cotización ${k.codigo} actualizada.`); }} />
               ) : (
                 <>
-                  {acc.motivoNoEditar && cot.estado === "abierta" && <div className="alert info">No se edita: {acc.motivoNoEditar}</div>}
-                  <DetalleCotizacion cot={cot} params={params} acciones={{ ...acc, aceptar: false, motivoNoAceptar: undefined }} onEditar={() => setEditando(true)} onAceptar={() => irA("aceptacion")} onAnular={() => setAnulando(true)} puede={puede} onCambio={(m) => hecho(m)} />
+                  {acc.motivoNoEditar && cot.estado === "abierta" && <div className="alert info">{acc.motivoNoEditar}</div>}
+                  <DetalleCotizacion cot={cot} params={params} acciones={{ ...acc, aceptar: false, motivoNoAceptar: undefined }} onEditar={() => setEditando(true)} onAceptar={() => irA("aceptacion")} onAnular={() => setAnulando(true)} puede={puede} onCambio={(m) => hecho(m)} maxMbAdjuntos={maxMbAdjuntos} />
                   {c.puedo.solicitar && (
                     <div className="toolbar" style={{ marginTop: 8 }}>
                       <div className="spacer" />
@@ -464,6 +465,7 @@ function Bitacora({ c }: { c: Circuito }) {
             <td>{e.usuarioNombre ?? "—"}</td>
             <td>{TEXTO_EVENTO[e.accion] ?? e.accion}{e.unidadCodigo ? ` · ${e.unidadCodigo}` : ""}{e.solicitudNumero ? ` (${e.solicitudNumero})` : ""}</td>
             <td>
+              {e.accion === "modificacion" && e.detalle?.version ? `Versión ${e.detalle.version} (antes ${e.detalle.firmaEstadoAnterior === "firmada" ? "firmada" : "en firma"}) · ` : ""}
               {e.comentario ?? (e.detalle?.medio ? medios.texto(e.detalle.medio) : "")}
               {e.detalle?.otId ? (
                 <>{e.detalle?.numero ? `${e.detalle.numero} · ` : ""}OT <Link href={`/ot/${e.detalle.otId}` as any} className="codigo" style={{ textDecoration: "underline" }}>{e.detalle.otCodigo}</Link></>
