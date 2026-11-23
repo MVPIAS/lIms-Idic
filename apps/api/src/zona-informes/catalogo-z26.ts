@@ -66,6 +66,7 @@ const BASE_OT_Z26: Base = {
   centroCosto: `o.centro_costo_id`,
   estado: `o.estado`,
   texto: [`o.codigo`, `c.razon_social`, `c.rut`, `cot.codigo`],
+  proyecto: `o.proyecto_id`,
   alcance: ALCANCE_OT,
 };
 
@@ -107,6 +108,7 @@ export const BASES_Z26 = {
     unidad: (p) => `(oi.origen_lab = ${p} OR oi.destino_lab = ${p})`,
     estado: `oi.estado`,
     texto: [`oi.numero`, `o.codigo`, `c.razon_social`, `oi.detalle`],
+    proyecto: `o.proyecto_id`,
     alcance: (k) => `(oi.origen_lab = ANY(${k}) OR oi.destino_lab = ANY(${k}))`,
   },
   /** Ensayos (resultados) de cada OT. */
@@ -128,6 +130,7 @@ export const BASES_Z26 = {
     centroCosto: `o.centro_costo_id`,
     estado: `r.estado`,
     texto: [`o.codigo`, `m.codigo`, `ce.codigo`, `ce.nombre`, `cm.codigo`, `c.razon_social`],
+    proyecto: `o.proyecto_id`,
     alcance: ALCANCE_OT,
   },
   /** Líneas de las planillas de costos reales (recursos usados por OT). */
@@ -145,6 +148,7 @@ export const BASES_Z26 = {
     centroCosto: `o.centro_costo_id`,
     estado: `cr.estado`,
     texto: [`o.codigo`, `l.descripcion`, `l.cargo`, `eq.codigo`, `eq.nombre`],
+    proyecto: `o.proyecto_id`,
     alcance: (k) => `cr.unidad_id = ANY(${k})`,
   },
   /** Catálogo de ensayos con su laboratorio, método y recursos del método. */
@@ -233,6 +237,7 @@ export const BASES_Z26 = {
     unidad: (p) => `(b.unidad_id = ${p} OR o.unidad_principal = ${p})`,
     centroCosto: `o.centro_costo_id`,
     texto: [`o.codigo`, `m.codigo`, `co.codigo`, `co.nombre`, `l.numero_lote`, `ce.codigo`, `ce.nombre`],
+    proyecto: `o.proyecto_id`,
     alcance: (k) => `(b.unidad_id = ANY(${k}) OR o.unidad_principal = ANY(${k}))`,
   },
 } satisfies Record<string, Base>;
@@ -243,6 +248,8 @@ export type InformeZ26 = Omit<InformeFijo, "base"> & { base: ClaveZ26 };
 const TODOS = ["fecha", "laboratorio", "centroCosto", "estado", "texto"] as InformeFijo["filtros"];
 const ANALISTA_SVT = `(SELECT us.nombre_completo FROM usuario us WHERE us.id = COALESCE(cot.ejecutivo_id, cot.created_by))`;
 const DETALLE_COT = `(SELECT string_agg(COALESCE(lc.ensayo_codigo || ' ', '') || COALESCE(lc.descripcion, ''), '; ' ORDER BY lc.orden) FROM linea_cotizacion lc WHERE lc.cotizacion_id = cot.id)`;
+/** Proyecto del cliente (lote 3): «PROY/001/2026 · Nombre». */
+const PROYECTO = (id: string) => `(SELECT pz.codigo || ' · ' || pz.nombre FROM proyecto pz WHERE pz.id = ${id})`;
 const OI_DE_OT = (ot: string) => `(SELECT string_agg(oiz.numero, ', ' ORDER BY oiz.numero) FROM orden_interna oiz WHERE oiz.ot_id = ${ot} AND oiz.deleted_at IS NULL)`;
 const CARGO = `COALESCE((SELECT ps.etiqueta FROM parametro_sistema ps WHERE ps.tenant_id = cr.tenant_id AND ps.categoria = 'cargo_costo' AND ps.codigo = l.cargo),
   (SELECT 'Tarifa HH · ' || COALESCE(h.descripcion, h.categoria) FROM hora_hombre_catalogo h WHERE h.tenant_id = cr.tenant_id AND 'HH:' || h.categoria = l.cargo ORDER BY h.vigente_desde DESC LIMIT 1),
@@ -257,7 +264,7 @@ export const INFORMES_Z26: InformeZ26[] = [
     titulo: "Base de cotizaciones",
     area: AREA_Z26,
     descripcion:
-      "Z26 · 01: cotizaciones con requirente y tipo, laboratorio o sucursal, fechas, plazo, estado, detalle del trabajo, precio, analista SVT, OT asociada y su estado, OT internas y factura.",
+      "Z26 · 01: cotizaciones con su proyecto, requirente y tipo, laboratorio o sucursal, fechas, plazo, estado, detalle del trabajo, precio, analista SVT, OT asociada y su estado, OT internas y factura.",
     legado: [],
     pedido: `${PEDIDO} (01)`,
     permiso: "reporte.comercial.ver",
@@ -265,6 +272,7 @@ export const INFORMES_Z26: InformeZ26[] = [
     filtros: TODOS,
     columnas: [
       { clave: "cotizacion", titulo: "N° cotización", tipo: "texto" },
+      { clave: "proyecto", titulo: "Proyecto", tipo: "texto" },
       { clave: "requirente", titulo: "Requirente", tipo: "texto" },
       { clave: "tipo_requirente", titulo: "Tipo de requirente", tipo: "estado" },
       { clave: "laboratorio", titulo: "Laboratorio o sucursal", tipo: "texto" },
@@ -283,7 +291,7 @@ export const INFORMES_Z26: InformeZ26[] = [
       { clave: "fecha_factura", titulo: "Fecha factura", tipo: "fecha" },
       { clave: "monto_factura", titulo: "Monto factura", tipo: "monto", total: true },
     ],
-    select: `cot.codigo AS cotizacion, c.razon_social AS requirente, COALESCE(cot.tipo_cliente_codigo, c.tipo) AS tipo_requirente,
+    select: `cot.codigo AS cotizacion, ${PROYECTO("cot.proyecto_id")} AS proyecto, c.razon_social AS requirente, COALESCE(cot.tipo_cliente_codigo, c.tipo) AS tipo_requirente,
       COALESCE(${LAB}, ${CC}) AS laboratorio, cot.created_at AS creacion, COALESCE(cot.solicitud_fecha, cot.fecha_emision) AS solicitud,
       COALESCE(cot.aceptacion_fecha, cot.aceptada_at::date) AS aceptacion, cot.plazo_entrega_dias AS plazo, cot.estado AS estado,
       ${DETALLE_COT} AS detalle, cot.neto AS precio, ${ANALISTA_SVT} AS analista,
@@ -298,7 +306,7 @@ export const INFORMES_Z26: InformeZ26[] = [
     titulo: "Base de OT externas e interlaboratorio",
     area: AREA_Z26,
     descripcion:
-      "Z26 · 02: cada OT con requirente y tipo, laboratorio, fechas, plazo, clasificación, estado, detalle, precio y estado de la cotización, analista SVT, OT internas asociadas, costo real y factura.",
+      "Z26 · 02: cada OT con su proyecto, requirente y tipo, laboratorio, fechas, plazo, clasificación, estado, detalle, precio y estado de la cotización, analista SVT, OT internas asociadas, costo real y factura.",
     legado: [],
     pedido: `${PEDIDO} (02)`,
     permiso: "reporte.comercial.ver",
@@ -306,6 +314,7 @@ export const INFORMES_Z26: InformeZ26[] = [
     filtros: TODOS,
     columnas: [
       { clave: "ot", titulo: "N° OT", tipo: "texto" },
+      { clave: "proyecto", titulo: "Proyecto", tipo: "texto" },
       { clave: "requirente", titulo: "Requirente", tipo: "texto" },
       { clave: "tipo_requirente", titulo: "Tipo de requirente", tipo: "estado" },
       { clave: "laboratorio", titulo: "Laboratorio o sucursal", tipo: "texto" },
@@ -327,7 +336,7 @@ export const INFORMES_Z26: InformeZ26[] = [
       { clave: "fecha_factura", titulo: "Fecha factura", tipo: "fecha" },
       { clave: "monto_factura", titulo: "Monto factura", tipo: "monto", total: true },
     ],
-    select: `o.codigo AS ot, c.razon_social AS requirente, COALESCE(cot.tipo_cliente_codigo, c.tipo) AS tipo_requirente, ${LAB} AS laboratorio,
+    select: `o.codigo AS ot, ${PROYECTO("o.proyecto_id")} AS proyecto, c.razon_social AS requirente, COALESCE(cot.tipo_cliente_codigo, c.tipo) AS tipo_requirente, ${LAB} AS laboratorio,
       o.origen_trabajo AS origen, o.created_at AS creacion, COALESCE(cot.solicitud_fecha, cot.fecha_emision) AS solicitud,
       COALESCE(cot.aceptacion_fecha, cot.aceptada_at::date) AS aceptacion, o.fecha_compromiso AS plazo, o.tipo_trabajo AS clasificacion,
       o.estado AS estado, COALESCE(NULLIF(o.descripcion_trabajo, ''), ${DETALLE_COT}) AS detalle, cot.codigo AS cotizacion,

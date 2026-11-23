@@ -20,7 +20,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { libroXlsx, type Celda } from "../common/xlsx-escritura";
 import { fechaHoraChile } from "../common/fecha-chile";
 import { textoEstadoOt } from "../reportes/gestion";
-import { AREAS, INFORMES, LIMITE_FILAS, armarConsulta, consultaEstados, informePorClave, textoCodigo, totales, validarFiltros, type InformeFijo } from "./catalogo";
+import { AREAS, INFORMES, LIMITE_FILAS, armarConsulta, consultaEstados, filtrosDe, informePorClave, textoCodigo, totales, validarFiltros, type InformeFijo } from "./catalogo";
 import { DOCUMENTOS_LEGADO } from "./legado-documentos";
 import { INFORMES_ESPECIALES } from "./especiales";
 
@@ -67,7 +67,7 @@ export class ZonaInformesController {
       descripcion: i.descripcion,
       legado: i.legado,
       pedido: i.pedido ?? null,
-      filtros: i.filtros,
+      filtros: filtrosDe(i) as string[],
       ruta: null as string | null,
     }));
     // Informes con formato propio (p. ej. el trimestral de encuestas): se abren en su pantalla.
@@ -119,7 +119,7 @@ export class ZonaInformesController {
       descripcion: r.def.descripcion,
       legado: r.def.legado,
       pedido: r.def.pedido ?? null,
-      filtros: r.def.filtros,
+      filtros: filtrosDe(r.def),
       columnas: r.def.columnas,
       filas: r.filas,
       totales: r.totales,
@@ -140,10 +140,32 @@ export class ZonaInformesController {
     return filas.map((f) => ({ valor: f.estado, texto: conOt ? textoEstadoOt(f.estado) : textoCodigo(f.estado) }));
   }
 
+  /** Opciones del filtro «Proyecto» (lote 3): proyectos del tenant, activos primero. Solo códigos y nombres. */
+  @Get(":clave/proyectos")
+  async proyectos(@Req() req: any, @Param("clave") clave: string) {
+    const def = informePorClave(clave);
+    if (!def) throw new NotFoundException("Informe no encontrado");
+    if (!tienePermiso(req, def.permiso)) throw new ForbiddenException(`Permiso insuficiente. Requiere: ${def.permiso}`);
+    if (!filtrosDe(def).includes("proyecto")) return [];
+    const filas = await this.prisma.$queryRawUnsafe<{ id: string; codigo: string; nombre: string; activo: boolean; cliente: string | null }[]>(
+      `SELECT p.id::text AS id, p.codigo, p.nombre, COALESCE(p.activo, TRUE) AS activo, c.razon_social AS cliente
+         FROM proyecto p LEFT JOIN cliente c ON c.id = p.cliente_id
+        WHERE p.tenant_id = $1::uuid ORDER BY COALESCE(p.activo, TRUE) DESC, p.created_at DESC LIMIT 1000`,
+      req?.user?.tenantId,
+    );
+    return filas.map((f) => ({ valor: f.id, texto: `${f.codigo} · ${f.nombre}${f.cliente ? ` (${f.cliente})` : ""}${f.activo ? "" : " · inactivo"}` }));
+  }
+
   @Get(":clave/excel")
   async excel(@Req() req: any, @Res() res: Response, @Param("clave") clave: string, @Query() q: Record<string, unknown>) {
     const r = await this.ejecutar(req, clave, q);
-    const b = libroXlsx([hojaInforme(r.def, r.filas, r.totales, r.filtros, r.truncado)]);
+    // El filtro «Proyecto» se anota con su código, no con el id.
+    const filtros: Record<string, unknown> = { ...r.filtros };
+    if (r.filtros.proyecto) {
+      const p = await this.prisma.$queryRawUnsafe<{ t: string }[]>(`SELECT codigo || ' · ' || nombre AS t FROM proyecto WHERE id = $1::uuid`, r.filtros.proyecto);
+      if (p[0]) filtros.proyecto = p[0].t;
+    }
+    const b = libroXlsx([hojaInforme(r.def, r.filas, r.totales, filtros, r.truncado)]);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${r.def.clave}_${r.filtros.desde ?? "inicio"}_${r.filtros.hasta ?? "hoy"}.xlsx"`);
     res.send(b);

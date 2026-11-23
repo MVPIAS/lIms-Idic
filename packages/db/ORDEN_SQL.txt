@@ -172,4 +172,5 @@ align_cuarto_envio_encuestas.sql
 align_cuarto_envio_cotizacion.sql
 align_q1_labs.sql
 align_q1_cotizacion.sql
+align_q3_proyecto.sql
 align_cierre_permisos.sql

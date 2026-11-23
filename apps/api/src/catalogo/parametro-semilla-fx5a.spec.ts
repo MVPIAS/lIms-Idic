@@ -10,7 +10,7 @@ const DB = join(__dirname, "../../../../packages/db");
 // align_fx5_a.sql y las siembras de los frentes nuevos (align_nuevo_fN.sql: p. ej. «fea» del F4;
 // align_fNNN_*.sql de las correcciones: p. ej. «fea» del certificado SAEC en align_f028_saec.sql;
 // align_cuarto_envio_*.sql del cuarto envío IDIC: p. ej. «tasa_carta» en align_cuarto_envio_tasa.sql;
-// align_qN_*.sql del quinto envío: p. ej. «cotizacion_adjuntos» en align_q1_cotizacion.sql).
+// align_qN_*.sql del quinto envío: p. ej. «cotizacion_adjuntos» en align_q1_cotizacion.sql y «numeracion_proyecto» en align_q3_proyecto.sql).
 const SQL = [
   readFileSync(join(DB, "align_fx5_a.sql"), "utf8"),
   ...readdirSync(DB)

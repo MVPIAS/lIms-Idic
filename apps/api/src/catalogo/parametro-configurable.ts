@@ -203,6 +203,31 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     },
   },
   {
+    // Quinto envío IDIC (lote 3): código del proyecto de cliente (proyecto/numeracion-proyecto.ts).
+    categoria: "numeracion_proyecto",
+    titulo: "Numeración de proyectos",
+    donde: "Comercial › Proyectos: el código se asigna al crear el proyecto. Los ya numerados no cambian.",
+    porConfirmar: "Valores provisionales (correo del IDIC del 20-11-2026: «PROY/correlativo/año»): cantidad de dígitos y si el correlativo reinicia cada año.",
+    codigos: {
+      formato: {
+        tipo: "formato",
+        nombre: "Formato del código de proyecto",
+        ayuda: "{N} = correlativo, {AAAA} = año de creación. Ejemplo: PROY/{N}/{AAAA} → PROY/001/2026.",
+        porDefecto: "PROY/{N}/{AAAA}",
+      },
+      digitos: { tipo: "entero", nombre: "Dígitos mínimos del correlativo del proyecto", min: 1, max: 10, unidad: "dígitos", ayuda: "Se rellena con ceros a la izquierda (3 → 001).", porDefecto: "3" },
+      reinicio: {
+        tipo: "opcion",
+        nombre: "Reinicio del correlativo del proyecto",
+        opciones: [
+          { valor: "global", etiqueta: "Nunca (correlativo continuo)" },
+          { valor: "anual", etiqueta: "Cada año vuelve a 1" },
+        ],
+        porDefecto: "anual",
+      },
+    },
+  },
+  {
     categoria: "circuito_cotizacion",
     titulo: "Circuito de la cotización",
     donde: "Comercial › Cotización: costeo con el laboratorio, V°B°, firma del Jefe DCO y registro de la aceptación.",

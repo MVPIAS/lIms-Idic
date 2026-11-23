@@ -68,6 +68,7 @@ const ETIQUETAS: Record<string, string> = {
   usuario: "Usuario",
   accion: "Acción",
   entidad: "Entidad",
+  proyecto: "Proyecto",
 };
 
 /** Excepciones por entidad cuando el mismo nombre técnico significa otra cosa. */

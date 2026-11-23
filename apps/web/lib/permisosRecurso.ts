@@ -33,6 +33,8 @@ export const PERMISOS_RECURSO: Record<string, PermisosCrud> = {
   clientes: { ver: "cliente.ver", crear: "cliente.crear", editar: "cliente.editar", eliminar: "cliente.editar" },
   contactos: todos("cliente.ver", "cliente.editar"),
   proveedores: todos("proveedor.ver", "proveedor.gestionar"),
+  // Quinto envío IDIC (lote 3): se ven con cotizacion.ver; no se borran (se desactivan).
+  proyectos: { ver: "cotizacion.ver", crear: "proyecto.gestionar", editar: "proyecto.gestionar" },
   "centros-costo": todos("factura.ver", "catalogo.gestionar"),
   "listas-precio": todos("lista_precio.ver", "catalogo.gestionar"),
   "lista-precio-items": todos("lista_precio.ver", "catalogo.gestionar"),

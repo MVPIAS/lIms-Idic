@@ -98,6 +98,8 @@ const ENTIDADES: Record<string, EntidadDef> = {
       fecha_cierre: "fecha_cierre",
       dias_atraso: "dias_atraso",
       estado_envio: "estado_envio",
+      // Lote 3 (quinto envío IDIC): proyecto heredado de la cotización.
+      proyecto: "(SELECT p.codigo || ' · ' || p.nombre FROM proyecto p WHERE p.id = orden_trabajo.proyecto_id)",
       created_at: "created_at",
     },
   },
@@ -146,6 +148,7 @@ const ENTIDADES: Record<string, EntidadDef> = {
       iva_monto: "iva_monto",
       total: "total",
       forma_pago: "forma_pago",
+      proyecto: "(SELECT p.codigo || ' · ' || p.nombre FROM proyecto p WHERE p.id = cotizacion.proyecto_id)",
       created_at: "created_at",
     },
   },
@@ -168,6 +171,9 @@ const ENTIDADES: Record<string, EntidadDef> = {
       iva_monto: "iva_monto",
       total: "total",
       saldo: "saldo",
+      // Proyecto de su OT o, sin OT, de su cotización.
+      proyecto:
+        "(SELECT p.codigo || ' · ' || p.nombre FROM proyecto p WHERE p.id = COALESCE((SELECT o.proyecto_id FROM orden_trabajo o WHERE o.id = factura.ot_id), (SELECT c.proyecto_id FROM cotizacion c WHERE c.id = factura.cotizacion_id)))",
       created_at: "created_at",
     },
   },

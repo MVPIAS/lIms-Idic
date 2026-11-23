@@ -26,7 +26,7 @@ interface Informe {
   descripcion: string;
   legado: string[];
   pedido?: string | null;
-  filtros: ("fecha" | "laboratorio" | "centroCosto" | "estado" | "texto")[];
+  filtros: ("fecha" | "laboratorio" | "centroCosto" | "estado" | "texto" | "proyecto")[];
   columnas: Columna[];
   filas: Record<string, string | number | null>[];
   totales: Record<string, number>;
@@ -61,6 +61,9 @@ export default function InformeFijoPage() {
   const [centroCosto, setCentroCosto] = useState("");
   const [estado, setEstado] = useState("");
   const [texto, setTexto] = useState("");
+  // Quinto envío IDIC (lote 3): proyecto del cliente.
+  const [proyecto, setProyecto] = useState("");
+  const [proyectos, setProyectos] = useState<Opcion[]>([]);
   const [labs, setLabs] = useState<Opcion[]>([]);
   const [ccs, setCcs] = useState<Opcion[]>([]);
   const [estados, setEstados] = useState<Opcion[]>([]);
@@ -77,8 +80,9 @@ export default function InformeFijoPage() {
     if (f.includes("centroCosto") && centroCosto) p.set("centroCosto", centroCosto);
     if (f.includes("estado") && estado) p.set("estado", estado);
     if (f.includes("texto") && texto.trim()) p.set("texto", texto.trim());
+    if (f.includes("proyecto") && proyecto) p.set("proyecto", proyecto);
     return p.toString();
-  }, [filtros, desde, hasta, laboratorio, centroCosto, estado, texto]);
+  }, [filtros, desde, hasta, laboratorio, centroCosto, estado, texto, proyecto]);
 
   const consultar = useCallback(
     async (primera = false) => {
@@ -137,6 +141,10 @@ export default function InformeFijoPage() {
       llamar<Opcion[]>("GET", `/zona-informes/${clave}/estados`)
         .then(setEstados)
         .catch(() => setEstados([]));
+    if (filtros.includes("proyecto"))
+      llamar<Opcion[]>("GET", `/zona-informes/${clave}/proyectos`)
+        .then(setProyectos)
+        .catch(() => setProyectos([]));
   }, [filtros, clave]);
 
   async function excel() {
@@ -219,6 +227,16 @@ export default function InformeFijoPage() {
           <select value={estado} onChange={(e) => setEstado(e.target.value)} aria-label="Estado">
             <option value="">Todos los estados</option>
             {estados.map((o) => (
+              <option key={o.valor} value={o.valor}>
+                {o.texto}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {f.includes("proyecto") ? (
+          <select value={proyecto} onChange={(e) => setProyecto(e.target.value)} aria-label="Proyecto" style={{ maxWidth: 280 }}>
+            <option value="">Todos los proyectos</option>
+            {proyectos.map((o) => (
               <option key={o.valor} value={o.valor}>
                 {o.texto}
               </option>

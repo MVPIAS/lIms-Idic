@@ -336,6 +336,8 @@ model Cotizacion {
   anuladaAt              DateTime?      @map("anulada_at") @db.Timestamptz
   // align_comercial_usuarios.sql · momento en que pasó a «Vencida» (estado expirada)
   vencidaAt              DateTime?      @map("vencida_at") @db.Timestamptz
+  /// Quinto envío IDIC (lote 3): proyecto del cliente (align_q3_proyecto.sql). Se lee y escribe con SQL (proyecto/proyecto-cotizacion.ts).
+  proyectoId             String?        @map("proyecto_id") @db.Uuid
   createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz
   updatedAt         DateTime            @default(now()) @map("updated_at") @db.Timestamptz
   createdBy         String?             @map("created_by") @db.Uuid
@@ -348,6 +350,32 @@ model Cotizacion {
   @@unique([tenantId, codigo])
   @@index([clienteId, estado])
   @@map("cotizacion")
+}
+
+/// Proyecto de cliente (quinto envío IDIC, lote 3 · align_q3_proyecto.sql): código
+/// PROY/correlativo/año + nombre, de UN cliente. Lo elige la cotización y lo hereda
+/// la OT. Mantenedor y lecturas con SQL parametrizado (apps/api/src/proyecto).
+model Proyecto {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  codigo         String    @db.VarChar(40)
+  nombre         String    @db.VarChar(300)
+  descripcion    String?
+  clienteId      String?   @map("cliente_id") @db.Uuid
+  fechaInicio    DateTime? @map("fecha_inicio") @db.Date
+  fechaFin       DateTime? @map("fecha_fin") @db.Date
+  presupuestoClp Decimal?  @map("presupuesto_clp") @db.Decimal(14, 2)
+  activo         Boolean?  @default(true)
+  anio           Int?
+  correlativo    Int?
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedAt      DateTime  @default(now()) @map("updated_at") @db.Timestamptz
+  updatedBy      String?   @map("updated_by") @db.Uuid
+
+  @@unique([tenantId, codigo])
+  @@index([tenantId, clienteId])
+  @@map("proyecto")
 }
 
 model LineaCotizacion {
@@ -435,6 +463,8 @@ model OrdenTrabajo {
   opiFecha              DateTime? @map("opi_fecha") @db.Date
   opiRegistradaAt       DateTime? @map("opi_registrada_at") @db.Timestamptz
   centroCostoId         String?   @map("centro_costo_id") @db.Uuid
+  /// Proyecto heredado de la cotización (align_q3_proyecto.sql · lote 3).
+  proyectoId            String?   @map("proyecto_id") @db.Uuid
   labSolicitanteCcId    String?   @map("lab_solicitante_cc_id") @db.Uuid
   horasHombre           Decimal   @default(0) @map("horas_hombre") @db.Decimal(10, 2)
   costoEstimado         Decimal   @default(0) @map("costo_estimado") @db.Decimal(14, 2)
