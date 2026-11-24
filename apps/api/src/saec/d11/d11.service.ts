@@ -16,6 +16,7 @@ import { SELECT_ARMAS, estadoDe, type FilaArma } from "./datos-d11";
 import { MunicionService } from "./municion.service";
 import { cerrarReanalisisAutomatico } from "../../calidad/reanalisis";
 import { UsoFuegoBody } from "./municion";
+import { MOTIVO_SIN_CERTIFICADO_D11, otEnSistemaArmas } from "../../integracion/armas/bloqueo-d11";
 import {
   CLASES,
   NOMBRE_CAMINO,
@@ -414,7 +415,10 @@ export class D11Service implements OnModuleInit {
       cfg,
     );
     const nombre = (id: string | null) => personal.find((p) => p.id === id)?.nombre ?? null;
+    const enSistemaArmas = await otEnSistemaArmas(this.prisma, otId);
     return {
+      // Paso 9: con la OT en el software de armas del BPCH, los certificados los emite ese sistema.
+      sistemaArmas: enSistemaArmas ? { certificadosBloqueados: true, motivo: MOTIVO_SIN_CERTIFICADO_D11 } : null,
       ot: {
         id: ot.id,
         codigo: ot.codigo,
@@ -1166,12 +1170,15 @@ export class D11Service implements OnModuleInit {
     const d = CertificadosBody.parse(body ?? {});
     const cfg = await this.config(tenantDe(req));
     const armas = await this.armas(otId, this.prisma, d.armaOtIds);
-    return armas.map((a) => ({ id: a.id, muestra: a.muestra, faltantes: erroresCertificado(estadoDe(a), cfg) }));
+    // OT en el software de armas del BPCH: los certificados los emite ese sistema (sin doble numeración).
+    const bloqueo = (await otEnSistemaArmas(this.prisma, otId)) ? [MOTIVO_SIN_CERTIFICADO_D11] : [];
+    return armas.map((a) => ({ id: a.id, muestra: a.muestra, faltantes: [...bloqueo, ...erroresCertificado(estadoDe(a), cfg)] }));
   }
 
   async emitirCertificados(req: any, otId: string, body: unknown) {
     const ot = await this.otD11(req, otId);
     this.otAbierta(ot);
+    if (await otEnSistemaArmas(this.prisma, otId)) throw new ConflictException(MOTIVO_SIN_CERTIFICADO_D11);
     const tenantId = tenantDe(req);
     const d = CertificadosBody.parse(body ?? {});
     const cfg = await this.config(tenantId);

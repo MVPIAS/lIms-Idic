@@ -876,7 +876,25 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         largo: 200,
         porDefecto: "D11,BPCH",
       },
-      max_intentos: { tipo: "entero", nombre: "Intentos de envío antes de dejarlo en error", min: 1, max: 30, unidad: "intentos", porDefecto: "8" },
+      max_intentos: {
+        tipo: "entero",
+        nombre: "Intentos de envío antes de dejarlo en error",
+        min: 1,
+        max: 30,
+        unidad: "intentos",
+        ayuda: "Esperas entre intentos: 1 min, 5 min, 15 min, 1 h y luego cada 6 h; nunca más de 48 h desde el primer intento. 12 intentos cubren las 48 h.",
+        porDefecto: "12",
+      },
+      modo_adjunto: {
+        tipo: "opcion",
+        nombre: "Cómo viaja la resolución en el envío de la OT",
+        opciones: [
+          { valor: "base64", etiqueta: "Dentro del mensaje (PDF en base64)" },
+          { valor: "url", etiqueta: "Enlace firmado para que el BPCH la descargue" },
+        ],
+        ayuda: "Acordado con el BPCH el 24-11-2026: la resolución va dentro del mensaje.",
+        porDefecto: "base64",
+      },
       intervalo_pull_min: { tipo: "entero", nombre: "Minutos entre consultas de estado (modo consulta)", min: 1, max: 1440, unidad: "min", porDefecto: "15" },
       rut_con_dv: {
         tipo: "sino",

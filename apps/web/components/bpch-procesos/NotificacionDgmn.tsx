@@ -35,6 +35,8 @@ interface Estado {
       registradaPor: string | null;
     };
   }[];
+  /** Rechazo total o certificado de rechazo informados por el software de armas del BPCH. */
+  integracionArmas?: { id: string; estado: "pendiente" | "registrada"; motivo: string | null; url: string | null; oficioNumero: string | null; fechaEnvio: string | null }[];
 }
 
 const hoyCl = () => hoyChile();
@@ -54,7 +56,9 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
   useCambiosOt(otId, cargar);
 
   if (!e?.aplica) return null;
-  const pendiente = e.incumplimientos.find((x) => x.oficial && !x.notificacion) ?? null;
+  const pendienteInforme = e.incumplimientos.find((x) => x.oficial && !x.notificacion) ?? null;
+  const pendienteArmas = pendienteInforme ? null : (e.integracionArmas ?? []).find((x) => x.estado === "pendiente") ?? null;
+  const pendiente = pendienteInforme ?? (pendienteArmas ? { certificadoId: "", numero: "", estado: "pendiente", oficial: true, notificacion: null } : null);
   const enFirma = e.incumplimientos.find((x) => !x.oficial && ["en_firma"].includes(x.estado));
   // El botón dice qué falta en vez de quedar desactivado sin explicación.
   const faltan = [
@@ -69,8 +73,9 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
     if (!pendiente) return;
     setOcupado(true);
     try {
-      const r = await llamar<Estado>("POST", `/bpch/notificacion-dgmn/ot/${otId}`, {
-        certificadoId: pendiente.certificadoId,
+      const ruta = pendienteArmas ? `/bpch/notificacion-dgmn/ot/${otId}/integracion/${pendienteArmas.id}` : `/bpch/notificacion-dgmn/ot/${otId}`;
+      const r = await llamar<Estado>("POST", ruta, {
+        ...(pendienteArmas ? {} : { certificadoId: pendiente.certificadoId }),
         medio: f.medio,
         oficioNumero: f.oficioNumero.trim() || null,
         fechaEnvio: f.fechaEnvio,
@@ -99,11 +104,28 @@ export default function NotificacionDgmn({ otId, onCambio }: { otId: string; onC
           registró {x.notificacion!.registradaPor ?? "—"} el {fechaHora(x.notificacion!.registradaAt)}.
         </div>
       ))}
+      {(e.integracionArmas ?? []).filter((x) => x.estado === "registrada").map((x) => (
+        <div key={x.id} className="alert success" style={{ marginBottom: 8 }}>
+          {x.motivo} Notificado el {fecha(x.fechaEnvio)}{x.oficioNumero ? ` (oficio ${x.oficioNumero})` : ""}.
+        </div>
+      ))}
       {enFirma && !pendiente && <div className="alert info">El Informe de Incumplimiento {enFirma.numero} está en firma: se notifica a DGMN cuando quede oficial.</div>}
       {pendiente && (
         <>
           <div className="alert warn" role="status">
-            El Informe de Incumplimiento <b>{pendiente.numero}</b> es oficial: falta informarlo a DGMN. <b>Sin esta notificación la OT no se cierra.</b>
+            {pendienteArmas ? (
+              <>
+                {pendienteArmas.motivo}{" "}
+                {pendienteArmas.url && /^https?:\/\//i.test(pendienteArmas.url) && (
+                  <a href={pendienteArmas.url} target="_blank" rel="noopener noreferrer">Ver en el sistema de armas</a>
+                )}{" "}
+                Falta informarlo a DGMN. <b>Sin esta notificación la OT no se cierra.</b>
+              </>
+            ) : (
+              <>
+                El Informe de Incumplimiento <b>{pendiente.numero}</b> es oficial: falta informarlo a DGMN. <b>Sin esta notificación la OT no se cierra.</b>
+              </>
+            )}
           </div>
           <p style={{ fontSize: 12.5, margin: "6px 0" }}>
             Distribución (destinatarios fijos): {e.destinatarios.map((d, i) => <span key={d}>{i + 1}. {d}{i < e.destinatarios.length - 1 ? " · " : ""}</span>)}

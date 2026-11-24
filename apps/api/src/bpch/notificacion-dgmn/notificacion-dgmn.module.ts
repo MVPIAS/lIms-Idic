@@ -14,6 +14,8 @@ import {
   NOMBRE_MEDIO,
   TIPOS_INCUMPLIMIENTO,
   erroresNotificacion,
+  erroresRegistroIntegracion,
+  faltantesIntegracion,
   faltantesNotificacion,
 } from "./reglas-notificacion";
 
@@ -27,6 +29,8 @@ const NotificarBody = z.object({
   copiaInternador: z.boolean().optional().nullable(),
   observaciones: z.string().trim().max(2000).optional().nullable(),
 });
+
+const RegistrarIntegracionBody = NotificarBody.omit({ certificadoId: true });
 
 /** Incumplimientos de la OT con su notificación (si la hay). */
 async function incumplimientos(db: Sql, otId: string) {
@@ -51,12 +55,27 @@ async function incumplimientos(db: Sql, otId: string) {
  * transacción. Una base sin align_r4b_d11.sql no tiene faltantes.
  */
 export async function faltantesNotificacionDgmn(db: Sql, otId: string): Promise<string[]> {
+  let faltan: string[] = [];
   try {
     const docs = await incumplimientos(db, otId);
-    return faltantesNotificacion(docs.map((d) => ({ numero: d.numero, estado: d.estado, notificado: Boolean(d.notificacionId) })));
+    faltan = faltantesNotificacion(docs.map((d) => ({ numero: d.numero, estado: d.estado, notificado: Boolean(d.notificacionId) })));
   } catch {
-    return [];
+    faltan = [];
   }
+  // Rechazo total o certificado de rechazo informados por el software de armas del BPCH.
+  return [...faltan, ...faltantesIntegracion(await pendientesIntegracion(db, otId))];
+}
+
+/** Notificaciones a la DGMN que dejó la integración con el software de armas (align_integracion_armas.sql). */
+async function pendientesIntegracion(db: Sql, otId: string) {
+  return db
+    .$queryRawUnsafe<any[]>(
+      `SELECT id, estado, referencia, motivo, url_documento AS "url", medio, oficio_numero AS "oficioNumero", fecha_envio AS "fechaEnvio",
+              copia_internador AS "copiaInternador", created_at AS "creada"
+         FROM bpch_notificacion_dgmn WHERE ot_id = $1::uuid AND origen = 'integracion_armas' ORDER BY created_at`,
+      otId,
+    )
+    .catch(() => [] as any[]);
 }
 
 @Injectable()
@@ -79,9 +98,10 @@ export class NotificacionDgmnService {
   async estado(req: any, otId: string) {
     await this.ot(req, otId);
     const docs = await incumplimientos(this.prisma, otId);
+    const integ = await pendientesIntegracion(this.prisma, otId);
     const puede = (req?.user?.roles ?? []).includes("SUPERADMIN") || (req?.user?.permisos ?? []).includes("bpch.dgmn.notificar");
     return {
-      aplica: docs.length > 0,
+      aplica: docs.length > 0 || integ.length > 0,
       destinatarios: DESTINATARIOS_DGMN,
       medios: MEDIOS_NOTIFICACION.map((m) => ({ valor: m, texto: NOMBRE_MEDIO[m] })),
       incumplimientos: docs.map((d) => ({
@@ -104,7 +124,45 @@ export class NotificacionDgmnService {
           : null,
       })),
       puedeNotificar: puede,
+      // Rechazo total o certificado de rechazo del software de armas del BPCH: pendientes de registrar.
+      integracionArmas: integ,
     };
+  }
+
+  /** Registra el envío a la DGMN de una notificación que dejó pendiente la integración con el software de armas. */
+  async registrarIntegracion(req: any, otId: string, notificacionId: string, body: unknown) {
+    await this.ot(req, otId);
+    const d = RegistrarIntegracionBody.parse(body ?? {});
+    const [n] = await this.prisma.$queryRawUnsafe<any[]>(
+      `SELECT id, estado FROM bpch_notificacion_dgmn WHERE id = $1::uuid AND ot_id = $2::uuid AND origen = 'integracion_armas'`,
+      notificacionId,
+      otId,
+    );
+    const errores = erroresRegistroIntegracion({ existe: !!n, yaRegistrada: n?.estado === "registrada", medio: d.medio, fechaEnvio: d.fechaEnvio, hoy: hoyChile(), copiaInternador: d.copiaInternador, oficioNumero: d.oficioNumero });
+    if (errores.length) {
+      if (n?.estado === "registrada") throw new ConflictException(errores.join(" "));
+      throw new BadRequestException(errores.join(" "));
+    }
+    await this.prisma.$executeRawUnsafe(
+      `UPDATE bpch_notificacion_dgmn SET estado = 'registrada', medio = $2, oficio_numero = $3, fecha_envio = $4::date, copia_internador = $5,
+              observaciones = $6, created_by = COALESCE(created_by, $7::uuid)
+        WHERE id = $1::uuid AND estado = 'pendiente'`,
+      notificacionId,
+      d.medio,
+      d.oficioNumero?.trim() || null,
+      d.fechaEnvio,
+      d.copiaInternador,
+      d.observaciones?.trim() || null,
+      req?.user?.sub ?? null,
+    );
+    await this.prisma.$executeRawUnsafe(
+      `INSERT INTO ot_historial (tenant_id, ot_id, tipo, detalle, usuario_id) VALUES ($1::uuid, $2::uuid, 'notificacion_dgmn', $3::jsonb, $4::uuid)`,
+      req.user.tenantId,
+      otId,
+      JSON.stringify({ origen: "integracion_armas", notificacion: notificacionId, medio: d.medio, oficio: d.oficioNumero ?? null }),
+      req?.user?.sub ?? null,
+    );
+    return this.estado(req, otId);
   }
 
   async notificar(req: any, otId: string, body: unknown) {
@@ -178,6 +236,16 @@ export class NotificacionDgmnController {
   @ApiOperation({ summary: "Registrar la notificación a DGMN y al internador { certificadoId, medio, oficioNumero, fechaEnvio, copiaInternador }" })
   notificar(@Param("otId", ParseUUIDPipe) otId: string, @Body() body: unknown, @Req() req: any) {
     return this.svc.notificar(req, otId, body);
+  }
+
+  @Post("ot/:otId/integracion/:id")
+  @RequierePermiso("bpch.dgmn.notificar")
+  @AmbitoUnidad("BPCH")
+  @ApiOperation({
+    summary: "Registrar el envío a la DGMN de un rechazo informado por el software de armas del BPCH { medio, oficioNumero, fechaEnvio, copiaInternador }",
+  })
+  registrarIntegracion(@Param("otId", ParseUUIDPipe) otId: string, @Param("id", ParseUUIDPipe) id: string, @Body() body: unknown, @Req() req: any) {
+    return this.svc.registrarIntegracion(req, otId, id, body);
   }
 }
 

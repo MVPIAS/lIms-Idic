@@ -29,8 +29,9 @@ async function pedir(path: string, method = "GET", body?: unknown) {
   return j;
 }
 
-const TIPO_ENLACE: Record<string, string> = { ot: "OT", acta: "Acta", certificado: "Certificado", otro: "Documento" };
-const COLOR_ESTADO: Record<number, string> = { 1: "amber", 6: "blue", 7: "blue", 5: "teal", 2: "green", 8: "green", 3: "red" };
+const TIPO_ENLACE: Record<string, string> = { ot: "OT", acta: "Acta", certificado: "Certificado", certificado_rechazo: "Certificado de rechazo", otro: "Documento" };
+/** Color por tipo de estado (el mapa de códigos lo define el BPCH). */
+const COLOR_TIPO: Record<string, string> = { en_curso: "blue", rechazo: "amber", rechazo_total: "red", firmada: "green", finalizada: "green", anulada: "red", desconocido: "gray" };
 
 /** Solo http/https: el servidor ya filtró por servidores permitidos; esto es defensa en profundidad. */
 const seguro = (u: string) => /^https?:\/\//i.test(u);
@@ -133,12 +134,25 @@ export default function SistemaArmasBpchOt({ otId }: { otId: string }) {
         <>
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
             <div>
-              Estado: <span className={`pill ${COLOR_ESTADO[e.estado] ?? "gray"}`}>{e.descripcion ?? "Enviada, sin respuesta aún"}</span>
+              Estado: <span className={`pill ${COLOR_TIPO[e.tipo] ?? "gray"}`}>{e.descripcion ?? "Enviada, sin respuesta aún"}</span>
             </div>
             {e.bpchId && <div>N.º en el BPCH: <b>{e.bpchId}</b></div>}
-            {e.fechaEstado && <div className="muted">Desde {fechaHora(e.fechaEstado)}</div>}
+            {e.fechaEstado && <div className="muted" title={e.fechaEstadoTexto ? `Hora informada por el BPCH: ${e.fechaEstadoTexto}` : undefined}>Desde {fechaHora(e.fechaEstado)}</div>}
             {e.totalCertificados != null && <div>{e.totalCertificados} certificados</div>}
+            {e.totalDisparos != null && <div>{e.totalDisparos} disparos de prueba</div>}
           </div>
+          {e.tipo === "desconocido" && (
+            <div className="alert warn" style={{ marginTop: 8 }}>El BPCH informó un estado que el LIMS no tiene en su mapa de estados: se guardó igual.</div>
+          )}
+          {(d.notificacionesDgmn ?? []).some((n: any) => n.estado === "pendiente") && (
+            <div className="alert warn" style={{ marginTop: 8 }}>
+              Pendiente notificar a la DGMN: {(d.notificacionesDgmn as any[]).filter((n) => n.estado === "pendiente").map((n) => n.motivo).join(" ")} Lo registra la
+              Subdirección BPCH en «Notificación a DGMN» de esta OT.
+            </div>
+          )}
+          {e.totalDisparos != null && (
+            <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>El descuento del lote de munición en el inventario lo registra la D11 a mano.</p>
+          )}
           {e.motivo && <div className="alert warn" style={{ marginTop: 8 }}>Motivo: {e.motivo}</div>}
           {e.ultimoError && <div className="alert warn" style={{ marginTop: 8 }}>Último error de envío: {e.ultimoError}</div>}
 
@@ -153,6 +167,7 @@ export default function SistemaArmasBpchOt({ otId }: { otId: string }) {
                       {l.etiqueta}
                     </a>
                     {l.idExterno && <span className="muted"> · {l.idExterno}</span>}
+                    {l.totalDisparos != null && <span className="muted"> · {l.totalDisparos} disparos</span>}
                   </li>
                 ))}
               </ul>
@@ -174,8 +189,12 @@ export default function SistemaArmasBpchOt({ otId }: { otId: string }) {
                 <tbody>
                   {d.historial.map((h: any, i: number) => (
                     <tr key={i}>
-                      <td>{fechaHora(h.fecha ?? h.recibido)}</td>
-                      <td>{h.descripcion}</td>
+                      <td title={h.fechaTexto ? `Hora informada por el BPCH: ${h.fechaTexto}` : undefined}>{fechaHora(h.fecha ?? h.recibido)}</td>
+                      <td>
+                        {h.descripcion}
+                        {h.fueraDeOrden && <span className="pill gray" style={{ marginLeft: 6 }}>fuera de orden</span>}
+                        {h.desconocido && <span className="pill gray" style={{ marginLeft: 6 }}>código desconocido</span>}
+                      </td>
                       <td>{h.motivo ?? "—"}</td>
                       <td>{h.operadorRut ?? "—"}</td>
                     </tr>

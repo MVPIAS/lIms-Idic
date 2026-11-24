@@ -107,6 +107,8 @@ export interface ArmaOt {
 }
 
 export interface ExpedienteD11 {
+  /** OT enviada al software de armas del BPCH: los certificados por arma los emite ese sistema. */
+  sistemaArmas?: { certificadosBloqueados: boolean; motivo: string } | null;
   ot: { id: string; codigo: string; estado: string; cliente: string | null; clienteRut: string | null; resolucion: string | null; origen: string | null; abierta: boolean };
   internacion: { id: string; numero: string; resolucion: string; resolucionFecha: string } | null;
   listado: { id: string; orden: number; tipo: string; marca: string; modelo: string | null; calibre: string | null; serie: string | null; accesorios: string | null; cantidad: number }[];

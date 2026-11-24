@@ -45,6 +45,38 @@ export function faltantesNotificacion(docs: DocIncumplimiento[]): string[] {
     .map((d) => `Falta registrar la notificación a DGMN del Informe de Incumplimiento ${d.numero} (EP-10 10.15): la registra la Subdirección BPCH.`);
 }
 
+/**
+ * Integración con el software de armas del BPCH (docs/INTEGRACION_ARMAS_BPCH.md):
+ * el rechazo total y cada certificado de rechazo dejan una notificación a la
+ * DGMN PENDIENTE (hoy nadie avisa a la DGMN; lo hace el IDIC). Igual que el
+ * Informe de Incumplimiento, sin registrarla la OT no se cierra.
+ */
+export function faltantesIntegracion(pendientes: { estado: string; motivo: string | null }[]): string[] {
+  return pendientes
+    .filter((p) => p.estado === "pendiente")
+    .map((p) => `Falta registrar la notificación a DGMN: ${p.motivo ?? "rechazo informado por el software de armas del BPCH"} (la registra la Subdirección BPCH).`);
+}
+
+export function erroresRegistroIntegracion(n: {
+  existe: boolean;
+  yaRegistrada: boolean;
+  medio: string;
+  fechaEnvio: string;
+  hoy: string;
+  copiaInternador: boolean | null | undefined;
+  oficioNumero?: string | null;
+}): string[] {
+  if (!n.existe) return ["La notificación pendiente no es de esta OT."];
+  const e: string[] = [];
+  if (n.yaRegistrada) e.push("Esta notificación a DGMN ya está registrada.");
+  if (!(MEDIOS_NOTIFICACION as readonly string[]).includes(n.medio)) e.push("Indique el medio de envío.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(n.fechaEnvio)) e.push("Indique la fecha de envío.");
+  else if (n.fechaEnvio > n.hoy) e.push("La fecha de envío no puede ser futura.");
+  if (typeof n.copiaInternador !== "boolean") e.push("Indique si se envió copia al internador.");
+  if (!n.oficioNumero?.trim()) e.push("Indique el Nº del oficio firmado por el Director con que se informó a la DGMN.");
+  return e;
+}
+
 export interface NotificacionPedida {
   documento: { estado: string; tipo: string | null } | null;
   yaNotificado: boolean;

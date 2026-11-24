@@ -3,43 +3,79 @@
  * probadas en reglas-armas.spec.ts. Guía: docs/INTEGRACION_ARMAS_BPCH.md.
  *
  * Fuente: «Fases o etapas proceso de certificaciones armamento BPCH Apis.pdf»
- * (IDIC, 24-11-2026). Ciclo de la OT en el BPCH:
+ * (IDIC, 24-11-2026) y la reunión con el BPCH del 24-11-2026. Ciclo de la OT:
  *   1 Pendiente → 6 Visado Delegación → (7 Visado Internación) → 5 En firma FEA
- *   → 2 Firmada y en Comercial → 8 Finalizada; 3 Anulada. Un rechazo vuelve a 1
- *   con `motivo`.
+ *   → 2 Firmada y en Comercial → 8 Finalizada; 3 Anulada; 4 Rechazado total.
+ * El rechazo ya no vuelve a 1: el BPCH tendrá un estado «Pendiente rechazado»
+ * (código por confirmar). El mapa de estados es configurable (tabla
+ * integracion_armas_estado); un código desconocido se guarda y avisa.
  */
 import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { diaChile } from "../../common/fecha-chile";
 
 /* ------------------------------------------------------------- estados --- */
 
-export const ESTADOS_BPCH: Record<number, string> = {
-  1: "Pendiente",
-  6: "Visado Delegación",
-  7: "Visado Internación",
-  5: "En firma digital",
-  2: "Firmada y en Comercial",
-  8: "OT Finalizada",
-  3: "Anulada",
-};
-export const ESTADOS_FINALES = [3, 8];
+export type TipoEstado = "en_curso" | "rechazo" | "rechazo_total" | "firmada" | "finalizada" | "anulada";
+export const TIPOS_ESTADO: TipoEstado[] = ["en_curso", "rechazo", "rechazo_total", "firmada", "finalizada", "anulada"];
 
-export type EfectoEstado = "rechazo" | "avance" | "firmada" | "finalizada" | "anulada";
-
-/** Qué significa para el LIMS un estado del BPCH. */
-export function efectoEstado(estado: number, motivo: string | null | undefined): EfectoEstado {
-  if (estado === 1 && motivo && motivo.trim()) return "rechazo";
-  if (estado === 2) return "firmada";
-  if (estado === 8) return "finalizada";
-  if (estado === 3) return "anulada";
-  return "avance";
+export interface EstadoConfig {
+  codigo: number;
+  descripcion: string;
+  tipo: TipoEstado;
+  terminal: boolean;
+  porConfirmar?: boolean;
 }
 
-/** Descripción del estado: la que manda el BPCH o la del catálogo. */
-export function descripcionEstado(estado: number, motivo?: string | null, enviada?: string | null): string {
+/** Valores conocidos (los mismos que siembra align_integracion_armas.sql). */
+export const ESTADOS_POR_DEFECTO: EstadoConfig[] = [
+  { codigo: 1, descripcion: "Pendiente", tipo: "en_curso", terminal: false },
+  { codigo: 6, descripcion: "Visado Delegación", tipo: "en_curso", terminal: false },
+  { codigo: 7, descripcion: "Visado Internación", tipo: "en_curso", terminal: false },
+  { codigo: 5, descripcion: "En firma digital", tipo: "en_curso", terminal: false },
+  { codigo: 2, descripcion: "Firmada y en Comercial", tipo: "firmada", terminal: false },
+  { codigo: 8, descripcion: "OT Finalizada", tipo: "finalizada", terminal: true },
+  { codigo: 3, descripcion: "Anulada", tipo: "anulada", terminal: true },
+  { codigo: 4, descripcion: "Rechazado total", tipo: "rechazo_total", terminal: true },
+  { codigo: 9, descripcion: "Pendiente rechazado (código por confirmar con el BPCH)", tipo: "rechazo", terminal: false, porConfirmar: true },
+];
+
+/** Mapa código → estado; sin filas usa los valores por defecto. */
+export function mapaEstados(filas: EstadoConfig[] | null | undefined): Map<number, EstadoConfig> {
+  const lista = filas?.length ? filas : ESTADOS_POR_DEFECTO;
+  return new Map(lista.map((e) => [Number(e.codigo), e]));
+}
+
+export type EfectoEstado = "rechazo" | "rechazo_total" | "avance" | "firmada" | "finalizada" | "anulada" | "desconocido";
+
+/**
+ * Qué significa para el LIMS un estado del BPCH. Compatibilidad con el primer
+ * documento del BPCH: un 1 con motivo se trata como devolución.
+ */
+export function efectoEstado(estado: number, motivo: string | null | undefined, mapa: Map<number, EstadoConfig> = mapaEstados(null)): EfectoEstado {
+  const e = mapa.get(estado);
+  if (!e) return "desconocido";
+  if (e.tipo === "en_curso") return estado === 1 && motivo && motivo.trim() ? "rechazo" : "avance";
+  return e.tipo;
+}
+
+/** ¿El estado cierra el ciclo en el BPCH? (los desconocidos no). */
+export function esTerminal(estado: number, mapa: Map<number, EstadoConfig> = mapaEstados(null)): boolean {
+  return mapa.get(estado)?.terminal === true;
+}
+
+/** Descripción del estado: la que manda el BPCH o la del mapa. */
+export function descripcionEstado(estado: number, motivo?: string | null, enviada?: string | null, mapa: Map<number, EstadoConfig> = mapaEstados(null)): string {
   if (enviada && enviada.trim()) return enviada.trim().slice(0, 120);
   if (estado === 1 && motivo && motivo.trim()) return "Rechazada";
-  return ESTADOS_BPCH[estado] ?? `Estado ${estado}`;
+  return mapa.get(estado)?.descripcion ?? `Estado ${estado} (desconocido)`;
+}
+
+/**
+ * ¿El aviso llega fuera de orden? Sí si su fecha es anterior a la del último
+ * estado aplicado: se registra en el historial pero no retrocede el estado.
+ */
+export function fueraDeOrden(fechaAviso: Date, ultimaAplicada: Date | null | undefined): boolean {
+  return !!ultimaAplicada && fechaAviso.getTime() < new Date(ultimaAplicada).getTime();
 }
 
 /* ----------------------------------------------------------------- RUT --- */
@@ -91,18 +127,40 @@ export interface DatosOtArmas {
   creadorRut: string | null;
   cantidadArmas: number | null;
   observaciones: string | null;
-  adjuntos: { nombre: string; url: string }[];
+  /** Resolución y antecedentes: en base64 (por defecto) o con enlace firmado. */
+  adjuntos: { nombre: string; url?: string; base64?: string }[];
+  /** PROPUESTA: datos de la persona natural (los mantiene la Delegación Nº 11). */
+  persona?: DatosPersona | null;
 }
+
+export interface DatosPersona {
+  rut: string | null;
+  nombres: string | null;
+  apellidos: string | null;
+  email: string | null;
+  telefono: string | null;
+  domicilio: string | null;
+  comuna: string | null;
+}
+
+export type AdjuntoPayload =
+  | { nombre: string; tipo: "resolucion"; contenido_base64: string }
+  | { nombre: string; tipo: "resolucion"; url_descarga: string };
 
 export interface PayloadCrearOt {
   lims_ot_id: string;
   tipo_orden: 1 | 2;
   resolucion: { numero: string; fecha: string };
-  solicitante: { rut: string; email: string | null };
+  solicitante: {
+    rut: string;
+    email: string | null;
+    /** PROPUESTA (por confirmar con el BPCH): ficha de la persona natural para su catálogo armas_propietarios. */
+    persona?: { rut: string; dv: string; nombres: string | null; apellidos: string | null; email: string | null; telefono: string | null; domicilio: string | null; comuna: string | null };
+  };
   creador: { rut: string | null };
   cantidad_armas: number;
   observaciones: string;
-  documentos_adjuntos: { nombre: string; url_descarga: string }[];
+  documentos_adjuntos: AdjuntoPayload[];
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -130,18 +188,39 @@ export function construirPayload(d: DatosOtArmas, conDv: boolean): { payload: Pa
   if (email && !EMAIL.test(email)) errores.push("El correo del solicitante no es válido.");
   if (!Number.isInteger(d.cantidadArmas) || (d.cantidadArmas ?? 0) <= 0) errores.push("La cantidad de armas debe ser un entero mayor que 0.");
   if (errores.length) return { payload: null, errores };
+  const persona = d.tipoOrden === 1 && d.persona ? bloquePersona(d.persona) : null;
   return {
     payload: {
       lims_ot_id: d.limsOtId.trim(),
       tipo_orden: d.tipoOrden,
       resolucion: { numero: d.resolucionNumero!.trim(), fecha: fecha! },
-      solicitante: { rut: rut!, email },
+      solicitante: { rut: rut!, email, ...(persona ? { persona } : {}) },
       creador: { rut: rutParaBpch(d.creadorRut, conDv) },
       cantidad_armas: d.cantidadArmas!,
       observaciones: (d.observaciones ?? "").slice(0, 4000),
-      documentos_adjuntos: d.adjuntos.map((a) => ({ nombre: a.nombre, url_descarga: a.url })),
+      documentos_adjuntos: d.adjuntos.map((a): AdjuntoPayload =>
+        a.base64 ? { nombre: a.nombre, tipo: "resolucion", contenido_base64: a.base64 } : { nombre: a.nombre, tipo: "resolucion", url_descarga: a.url ?? "" },
+      ),
     },
     errores,
+  };
+}
+
+/** Ficha de la persona natural: RUT (cuerpo) y DV por separado, como armas_propietarios del BPCH. */
+export function bloquePersona(p: DatosPersona): NonNullable<PayloadCrearOt["solicitante"]["persona"]> | null {
+  const cuerpo = rutParaBpch(p.rut, false);
+  if (!cuerpo) return null;
+  const conDv = rutParaBpch(p.rut, true)!;
+  const t = (v: string | null | undefined, max: number) => (v && v.trim() ? v.trim().slice(0, max) : null);
+  return {
+    rut: cuerpo,
+    dv: conDv.slice(-1),
+    nombres: t(p.nombres, 120),
+    apellidos: t(p.apellidos, 120),
+    email: t(p.email, 160),
+    telefono: t(p.telefono, 40),
+    domicilio: t(p.domicilio, 300),
+    comuna: t(p.comuna, 80),
   };
 }
 
@@ -164,10 +243,23 @@ export function bpchIdDe(respuesta: any): number | null {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
-/** Espera antes del reintento n (1, 2, …): 1, 2, 4, 8… min, tope 6 h, con ±10 % de variación. */
+/**
+ * Calendario de reintentos acordado con el BPCH (vale para los dos lados): tras
+ * el intento n se espera 1 min, 5 min, 15 min, 1 h y luego cada 6 h; ±5 % de
+ * variación para no coincidir. Nunca más allá de 48 h desde el primer intento.
+ */
+export const ESPERAS_REINTENTO_MS = [60_000, 5 * 60_000, 15 * 60_000, 3_600_000];
+export const ESPERA_LARGA_MS = 6 * 3_600_000;
+export const VENTANA_REINTENTOS_MS = 48 * 3_600_000;
+
 export function esperaReintentoMs(intento: number, azar: number = Math.random()): number {
-  const base = Math.min(60_000 * 2 ** Math.max(0, intento - 1), 6 * 3_600_000);
-  return Math.round(base * (0.9 + 0.2 * Math.min(1, Math.max(0, azar))));
+  const base = ESPERAS_REINTENTO_MS[Math.max(0, intento - 1)] ?? ESPERA_LARGA_MS;
+  return Math.round(base * (0.95 + 0.1 * Math.min(1, Math.max(0, azar))));
+}
+
+/** ¿Se agotaron los reintentos? (máximo de intentos o 48 h desde el primero). */
+export function reintentosAgotados(intentos: number, max: number, primerIntento: Date | string, ahora: Date = new Date()): boolean {
+  return intentos >= max || ahora.getTime() - new Date(primerIntento).getTime() >= VENTANA_REINTENTOS_MS;
 }
 
 /* ------------------------------------------------------------ firma HMAC --- */
@@ -198,8 +290,8 @@ export interface DocumentoRecibido {
   url: string | null;
 }
 
-export type TipoEnlace = "ot" | "certificado" | "acta" | "otro";
-export const TIPOS_ENLACE: TipoEnlace[] = ["ot", "certificado", "acta", "otro"];
+export type TipoEnlace = "ot" | "certificado" | "certificado_rechazo" | "acta" | "otro";
+export const TIPOS_ENLACE: TipoEnlace[] = ["ot", "certificado", "certificado_rechazo", "acta", "otro"];
 
 /** Enlace al software de armas (sin validar todavía el servidor). */
 export interface EnlaceRecibido {
@@ -208,6 +300,8 @@ export interface EnlaceRecibido {
   numeroSerie: string | null;
   idExterno: string | null;
   url: string;
+  /** Disparos de prueba del arma (solo informativo). */
+  totalDisparos?: number | null;
 }
 
 export interface EventoEstado {
@@ -215,11 +309,14 @@ export interface EventoEstado {
   ot: string;
   bpchId: number | null;
   estado: number;
-  descripcion: string;
+  /** Descripción que mandó el BPCH (si la mandó); si no, la del mapa al procesar. */
+  descripcionEnviada: string | null;
   motivo: string | null;
   operadorRut: string | null;
+  /** Fecha del cambio TAL CUAL la envió el BPCH (texto con desfase, para auditoría). */
   fecha: string | null;
   totalCertificados: number | null;
+  totalDisparos: number | null;
   documento: DocumentoRecibido | null;
   enlaces: EnlaceRecibido[];
 }
@@ -230,27 +327,37 @@ const txt = (v: unknown, max: number): string | null => {
   return s ? s.slice(0, max) : null;
 };
 
+/** Entero ≥ 0 opcional; `undefined` = no vino, NaN = inválido. */
+const enteroOpcional = (v: unknown): number | null | typeof NaN => {
+  if (v === undefined || v === null || v === "") return null;
+  const n = Number(v);
+  return Number.isInteger(n) && n >= 0 ? n : NaN;
+};
+
 /**
  * Lee un aviso de estado del BPCH en cualquiera de sus tres formas:
  *   · opción 1 (POST directo): {ot, nuevo_estado, estado_descripcion, fecha_actualizacion, operador_rut, motivo, …}
  *   · opción 2 (webhook):      {evento_id, ot, estado, estado_descripcion, usuario_rut, fecha_cambio, motivo, …}
  *   · opción 3 (GET estado):   {bpch_id, ot, estado, estado_descripcion, motivo, fecha_actualizacion}
- * Opcionales: total_certificados, documento_cierre {nombre, tipo, descripcion, base64 | url}
- * y los enlaces (ver leerEnlaces): url_ot, enlaces[], certificados[] con solo serie + url + idFed.
+ * El estado puede ser cualquier código entero (el mapa es configurable: un
+ * código desconocido se guarda y avisa, no falla).
+ * Opcionales: total_certificados, total_disparos, documento_cierre {nombre, tipo,
+ * descripcion, base64 | url} y los enlaces (ver leerEnlaces).
  */
 export function leerEvento(body: any): { evento: EventoEstado | null; errores: string[] } {
   const errores: string[] = [];
   if (!body || typeof body !== "object" || Array.isArray(body)) return { evento: null, errores: ["El cuerpo debe ser un objeto JSON."] };
   const ot = txt(body.ot, 60);
-  const estadoRaw = body.nuevo_estado ?? body.estado;
-  const estado = Number(estadoRaw);
+  const estado = Number(body.nuevo_estado ?? body.estado);
   if (!ot) errores.push("Falta «ot».");
-  if (!Number.isInteger(estado) || !(estado in ESTADOS_BPCH)) errores.push("«estado» debe ser 1, 2, 3, 5, 6, 7 u 8.");
+  if (!Number.isInteger(estado) || estado < 0 || estado > 32767) errores.push("«estado» debe ser un código entero (0 a 32767).");
   const motivo = txt(body.motivo, 2000);
   const fecha = txt(body.fecha_cambio ?? body.fecha_actualizacion, 40);
   if (fecha && Number.isNaN(Date.parse(fecha))) errores.push("La fecha del cambio no es válida (ISO 8601).");
-  const total = body.total_certificados === undefined || body.total_certificados === null ? null : Number(body.total_certificados);
-  if (total !== null && (!Number.isInteger(total) || total < 0)) errores.push("«total_certificados» debe ser un entero ≥ 0.");
+  const total = enteroOpcional(body.total_certificados);
+  if (Number.isNaN(total)) errores.push("«total_certificados» debe ser un entero ≥ 0.");
+  const disparos = enteroOpcional(body.total_disparos);
+  if (Number.isNaN(disparos)) errores.push("«total_disparos» debe ser un entero ≥ 0.");
 
   let documento: DocumentoRecibido | null = null;
   const dc = body.documento_cierre;
@@ -271,11 +378,12 @@ export function leerEvento(body: any): { evento: EventoEstado | null; errores: s
       ot: ot!,
       bpchId: Number.isSafeInteger(bpchId) && bpchId > 0 ? bpchId : null,
       estado,
-      descripcion: descripcionEstado(estado, motivo, txt(body.estado_descripcion, 120)),
+      descripcionEnviada: txt(body.estado_descripcion, 120),
       motivo,
       operadorRut: txt(body.usuario_rut ?? body.operador_rut, 20),
       fecha,
-      totalCertificados: total,
+      totalCertificados: total as number | null,
+      totalDisparos: disparos as number | null,
       documento,
       enlaces: r.enlaces,
     },
@@ -287,9 +395,9 @@ export function leerEvento(body: any): { evento: EventoEstado | null; errores: s
  * Enlaces que trae un aviso o la respuesta de la ruta de enlaces del BPCH
  * (formato POR CONFIRMAR con el BPCH; se aceptan las tres formas):
  *   · `url_ot`: la OT en el BPCH;
- *   · `enlaces[]`: {tipo: ot|certificado|acta|otro, etiqueta, url, numero_serie?, idFed?/id_externo?};
- *   · `certificados[]`: {numero_serie, url, idFed?} — SOLO el enlace: un `base64`
- *     que venga en un certificado se ignora (los certificados quedan en el BPCH).
+ *   · `enlaces[]`: {tipo: ot|certificado|certificado_rechazo|acta|otro, etiqueta, url, numero_serie?, idFed?/id_externo?, total_disparos?};
+ *   · `certificados[]`: {numero_serie, url, idFed?, total_disparos?, tipo?: certificado|certificado_rechazo}
+ *     — SOLO el enlace: un `base64` que venga en un certificado se ignora (quedan en el BPCH).
  * Un arreglo en la raíz se lee como `enlaces[]`.
  */
 export function leerEnlaces(body: any): { enlaces: EnlaceRecibido[]; errores: string[] } {
@@ -312,26 +420,45 @@ export function leerEnlaces(body: any): { enlaces: EnlaceRecibido[]; errores: st
     }
     return v;
   };
+  const disparosDe = (v: unknown, donde: string) => {
+    const n = enteroOpcional(v);
+    if (Number.isNaN(n)) {
+      errores.push(`${donde}: «total_disparos» debe ser un entero ≥ 0.`);
+      return null;
+    }
+    return n as number | null;
+  };
+  const etiquetaPorDefecto = (tipo: TipoEnlace, serie: string | null) =>
+    tipo === "certificado" && serie
+      ? `Certificado serie ${serie}`
+      : tipo === "certificado_rechazo"
+        ? `Certificado de rechazo${serie ? ` serie ${serie}` : ""}`
+        : tipo === "acta"
+          ? "Acta de cierre"
+          : "Documento del BPCH";
   (lista("enlaces") ?? []).forEach((e: any, i: number) => {
     const url = txt(e?.url, 1000);
     const tipo = String(e?.tipo ?? "otro").toLowerCase() as TipoEnlace;
     if (!url) return errores.push(`enlaces[${i}]: falta «url».`);
-    if (!TIPOS_ENLACE.includes(tipo)) return errores.push(`enlaces[${i}]: «tipo» debe ser ot, certificado, acta u otro.`);
+    if (!TIPOS_ENLACE.includes(tipo)) return errores.push(`enlaces[${i}]: «tipo» debe ser ot, certificado, certificado_rechazo, acta u otro.`);
     const serie = txt(e.numero_serie, 80);
     enlaces.push({
       tipo,
-      etiqueta: txt(e.etiqueta ?? e.nombre, 200) ?? (tipo === "certificado" && serie ? `Certificado serie ${serie}` : tipo === "acta" ? "Acta de cierre" : "Documento del BPCH"),
+      etiqueta: txt(e.etiqueta ?? e.nombre, 200) ?? etiquetaPorDefecto(tipo, serie),
       numeroSerie: serie,
       idExterno: txt(e.idFed ?? e.id_fed ?? e.id_externo, 80),
       url,
+      totalDisparos: disparosDe(e.total_disparos, `enlaces[${i}]`),
     });
   });
   (lista("certificados") ?? []).forEach((c: any, i: number) => {
     const serie = txt(c?.numero_serie, 80);
     const url = txt(c?.url, 1000);
     if (!serie) return errores.push(`certificados[${i}]: falta «numero_serie».`);
+    const tipo: TipoEnlace = String(c?.tipo ?? "").toLowerCase() === "certificado_rechazo" ? "certificado_rechazo" : "certificado";
+    const disparos = disparosDe(c.total_disparos, `certificados[${i}]`);
     if (!url) return; // sin enlace no hay nada que guardar (el PDF no se guarda)
-    enlaces.push({ tipo: "certificado", etiqueta: `Certificado serie ${serie}`, numeroSerie: serie, idExterno: txt(c.idFed ?? c.id_fed, 80), url });
+    enlaces.push({ tipo, etiqueta: etiquetaPorDefecto(tipo, serie), numeroSerie: serie, idExterno: txt(c.idFed ?? c.id_fed, 80), url, totalDisparos: disparos });
   });
   return { enlaces, errores };
 }
@@ -471,6 +598,7 @@ export interface ConfigArmas {
   hostsPermitidos: string[];
   rutaEnlacesOt: string;
   guardarActaPdf: boolean;
+  modoAdjunto: "base64" | "url";
 }
 
 const entero = (v: string | undefined, def: number, min: number, max: number) => {
@@ -492,7 +620,7 @@ export function configArmas(filas: { codigo: string; valor: string | null; activ
       .split(",")
       .map((s) => s.trim().toUpperCase())
       .filter(Boolean),
-    maxIntentos: entero(m.get("max_intentos"), 8, 1, 30),
+    maxIntentos: entero(m.get("max_intentos"), 12, 1, 30),
     intervaloPullMin: entero(m.get("intervalo_pull_min"), 15, 1, 1440),
     rutConDv: m.get("rut_con_dv") === "si",
     vigenciaEnlaceHoras: entero(m.get("vigencia_enlace_horas"), 72, 1, 720),
@@ -503,6 +631,7 @@ export function configArmas(filas: { codigo: string; valor: string | null; activ
       .filter(Boolean),
     rutaEnlacesOt: m.get("ruta_enlaces_ot") ?? "",
     guardarActaPdf: m.get("guardar_acta_pdf") !== "no",
+    modoAdjunto: m.get("modo_adjunto") === "url" ? "url" : "base64",
   };
 }
 
@@ -539,3 +668,32 @@ export const rutaDescargaAdjunto = (token: string) => `/api/v1/integracion/bpch/
 
 export const RUTA_CREAR_OT = "/api/v1/integracion/lims/ordenes-trabajo";
 export const rutaEstadoOt = (ot: string) => `${RUTA_CREAR_OT}/${encodeURIComponent(ot)}/estado`;
+
+/* ------------------------------------------------------------- DGMN --- */
+
+/**
+ * Notificaciones a la DGMN que deja pendientes un aviso del BPCH (hoy nadie
+ * avisa a la DGMN; lo hace el IDIC): una por el rechazo total (estado tipo
+ * rechazo_total) y una por cada certificado de rechazo recibido como enlace.
+ * La referencia evita duplicarlas si el aviso se repite.
+ */
+export function notificacionesDgmn(
+  efecto: EfectoEstado,
+  enlaces: Pick<EnlaceRecibido, "tipo" | "numeroSerie" | "url">[],
+): { referencia: string; motivo: string; url: string | null }[] {
+  const out: { referencia: string; motivo: string; url: string | null }[] = [];
+  if (efecto === "rechazo_total") out.push({ referencia: "rechazo_total", motivo: "Rechazo total informado por el software de armas del BPCH.", url: null });
+  for (const e of enlaces) {
+    if (e.tipo !== "certificado_rechazo") continue;
+    const ref = (e.numeroSerie ? `certificado_rechazo:${e.numeroSerie}` : `certificado_rechazo:${createHash("sha256").update(e.url).digest("hex").slice(0, 16)}`).slice(0, 120);
+    if (!out.some((x) => x.referencia === ref))
+      out.push({ referencia: ref, motivo: `Certificado de rechazo${e.numeroSerie ? ` del arma serie ${e.numeroSerie}` : ""} emitido en el software de armas del BPCH.`, url: e.url });
+  }
+  return out;
+}
+
+/* ------------------------------------------- certificados D11 (paso 9) --- */
+
+/** Por qué el LIMS no emite certificados por arma en una OT enviada al software de armas. */
+export const MOTIVO_SIN_CERTIFICADO_D11 =
+  "Esta OT se envió al software de armas del BPCH: los certificados por arma los emite y firma ese sistema (misma vigencia, cuño y numeración) y el LIMS solo guarda sus enlaces. Emitirlos también aquí duplicaría la numeración.";

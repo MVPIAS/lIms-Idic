@@ -7,7 +7,13 @@ import {
   descripcionEstado,
   dvRut,
   efectoEstado,
+  esTerminal,
   esperaReintentoMs,
+  fueraDeOrden,
+  mapaEstados,
+  MOTIVO_SIN_CERTIFICADO_D11,
+  notificacionesDgmn,
+  reintentosAgotados,
   fechaIso,
   firmaHmac,
   firmarEnlace,
@@ -80,8 +86,21 @@ describe("payload de creación de OT", () => {
       creador: { rut: null },
       cantidad_armas: 3,
       observaciones: "PRUEBA",
-      documentos_adjuntos: [{ nombre: "resolucion.pdf", url_descarga: "https://lims.prueba/api/v1/integracion/bpch/adjuntos/x" }],
+      documentos_adjuntos: [{ nombre: "resolucion.pdf", tipo: "resolucion", url_descarga: "https://lims.prueba/api/v1/integracion/bpch/adjuntos/x" }],
     });
+  });
+
+  it("resolución dentro del mensaje (base64, por defecto acordado con el BPCH)", () => {
+    const { payload } = construirPayload(datos({ adjuntos: [{ nombre: "resolucion.pdf", base64: PDF }] }), false);
+    expect(payload?.documentos_adjuntos).toEqual([{ nombre: "resolucion.pdf", tipo: "resolucion", contenido_base64: PDF }]);
+  });
+
+  it("persona natural: bloque opcional con RUT y DV aparte (propuesta)", () => {
+    const persona = { rut: "11.111.111-1", nombres: "Persona", apellidos: "Prueba", email: "p@ejemplo.cl", telefono: "", domicilio: "Calle PRUEBA 1", comuna: "Santiago" };
+    const { payload } = construirPayload(datos({ tipoOrden: 1, persona }), false);
+    expect(payload?.solicitante.persona).toEqual({ rut: "11111111", dv: "1", nombres: "Persona", apellidos: "Prueba", email: "p@ejemplo.cl", telefono: null, domicilio: "Calle PRUEBA 1", comuna: "Santiago" });
+    // Empresa (2): no va el bloque.
+    expect(construirPayload(datos({ tipoOrden: 2, persona }), false).payload?.solicitante.persona).toBeUndefined();
   });
 
   it("lista lo que falta", () => {
@@ -117,10 +136,15 @@ describe("respuesta del BPCH al crear", () => {
     expect(bpchIdDe({ data: {} })).toBeNull();
   });
 
-  it("espera exponencial con tope", () => {
-    expect(esperaReintentoMs(1, 0.5)).toBe(60_000);
-    expect(esperaReintentoMs(3, 0.5)).toBe(240_000);
-    expect(esperaReintentoMs(30, 0.5)).toBe(6 * 3_600_000);
+  it("calendario acordado: 1 min, 5 min, 15 min, 1 h y luego cada 6 h", () => {
+    expect([1, 2, 3, 4, 5, 9].map((n) => esperaReintentoMs(n, 0.5))).toEqual([60_000, 300_000, 900_000, 3_600_000, 6 * 3_600_000, 6 * 3_600_000]);
+  });
+
+  it("se agota a los N intentos o a las 48 h", () => {
+    const t0 = new Date("2026-11-24T10:00:00Z");
+    expect(reintentosAgotados(3, 12, t0, new Date("2026-11-24T11:00:00Z"))).toBe(false);
+    expect(reintentosAgotados(12, 12, t0, new Date("2026-11-24T11:00:00Z"))).toBe(true);
+    expect(reintentosAgotados(5, 12, t0, new Date("2026-11-26T10:00:00Z"))).toBe(true);
   });
 });
 
@@ -141,19 +165,52 @@ describe("firma HMAC del webhook", () => {
   });
 });
 
-describe("estados", () => {
-  it("efecto en el LIMS", () => {
-    expect(efectoEstado(1, "Falta poder notarial")).toBe("rechazo");
+describe("estados (mapa configurable)", () => {
+  it("efecto en el LIMS con el mapa por defecto", () => {
+    expect(efectoEstado(1, "Falta poder notarial")).toBe("rechazo"); // compatibilidad con el primer documento
     expect(efectoEstado(1, null)).toBe("avance");
     expect(efectoEstado(6, null)).toBe("avance");
     expect(efectoEstado(2, null)).toBe("firmada");
     expect(efectoEstado(8, null)).toBe("finalizada");
     expect(efectoEstado(3, null)).toBe("anulada");
+    expect(efectoEstado(4, null)).toBe("rechazo_total");
+    expect(efectoEstado(9, "observación")).toBe("rechazo");
+    expect(efectoEstado(77, null)).toBe("desconocido");
+  });
+  it("terminales: 8, 3 y 4", () => {
+    expect([8, 3, 4, 2, 9, 77].map((c) => esTerminal(c))).toEqual([true, true, true, false, false, false]);
+  });
+  it("un mapa propio manda (el BPCH fija el código del rechazo parcial)", () => {
+    const m = mapaEstados([{ codigo: 10, descripcion: "Pendiente rechazado", tipo: "rechazo", terminal: false }]);
+    expect(efectoEstado(10, null, m)).toBe("rechazo");
+    expect(efectoEstado(9, null, m)).toBe("desconocido");
+    expect(descripcionEstado(10, null, null, m)).toBe("Pendiente rechazado");
+    expect(descripcionEstado(55, null, null, m)).toBe("Estado 55 (desconocido)");
   });
   it("descripción", () => {
     expect(descripcionEstado(7)).toBe("Visado Internación");
     expect(descripcionEstado(1, "motivo")).toBe("Rechazada");
     expect(descripcionEstado(2, null, "Firmada y en Comercial")).toBe("Firmada y en Comercial");
+  });
+  it("fuera de orden: fecha anterior al último aplicado", () => {
+    expect(fueraDeOrden(new Date("2026-11-23T10:00:00-03:00"), new Date("2026-11-23T11:00:00-03:00"))).toBe(true);
+    expect(fueraDeOrden(new Date("2026-11-23T12:00:00-03:00"), new Date("2026-11-23T11:00:00-03:00"))).toBe(false);
+    expect(fueraDeOrden(new Date(), null)).toBe(false);
+  });
+});
+
+describe("DGMN y certificados D11", () => {
+  it("rechazo total y certificados de rechazo dejan notificación pendiente (sin repetir)", () => {
+    const n = notificacionesDgmn("rechazo_total", [
+      { tipo: "certificado_rechazo", numeroSerie: "PRUEBA-1", url: "https://a/1" },
+      { tipo: "certificado_rechazo", numeroSerie: "PRUEBA-1", url: "https://a/1" },
+      { tipo: "certificado", numeroSerie: "PRUEBA-2", url: "https://a/2" },
+    ]);
+    expect(n.map((x) => x.referencia)).toEqual(["rechazo_total", "certificado_rechazo:PRUEBA-1"]);
+    expect(notificacionesDgmn("avance", [])).toEqual([]);
+  });
+  it("motivo del bloqueo del paso 9", () => {
+    expect(MOTIVO_SIN_CERTIFICADO_D11).toMatch(/numeración/);
   });
 });
 
@@ -179,8 +236,11 @@ describe("lectura de avisos de estado", () => {
   it("opción 3 (GET estado) con bpch_id", () => {
     expect(leerEvento({ bpch_id: 1289, ot: "PRUEBA-1", estado: 6 }).evento?.bpchId).toBe(1289);
   });
-  it("errores de validación", () => {
-    expect(leerEvento({ estado: 4 }).errores).toHaveLength(2);
+  it("errores de validación (cualquier código entero es válido: el mapa decide)", () => {
+    expect(leerEvento({ estado: 4 }).errores).toHaveLength(1);
+    expect(leerEvento({ ot: "x", estado: 77 }).errores).toHaveLength(0);
+    expect(leerEvento({ ot: "x", estado: "a" }).errores).toHaveLength(1);
+    expect(leerEvento({ ot: "x", estado: 2, total_disparos: -1 }).errores).toHaveLength(1);
     expect(leerEvento([]).errores).toHaveLength(1);
     expect(leerEvento({ ot: "x", estado: 2, fecha_cambio: "ayer" }).errores).toHaveLength(1);
     expect(leerEvento({ ot: "x", estado: 8, documento_cierre: { nombre: "a" } }).errores).toHaveLength(1);
@@ -205,15 +265,17 @@ describe("enlaces del BPCH (los certificados quedan en su aplicativo)", () => {
       url_ot: "https://armas.prueba/ot/1289",
       enlaces: [{ tipo: "acta", url: "https://armas.prueba/acta/1" }],
       certificados: [
-        { numero_serie: "PRUEBA-001", url: "https://armas.prueba/cert/1", idFed: "FED-1", base64: PDF },
+        { numero_serie: "PRUEBA-001", url: "https://armas.prueba/cert/1", idFed: "FED-1", base64: PDF, total_disparos: 3 },
         { numero_serie: "PRUEBA-002" },
+        { numero_serie: "PRUEBA-003", url: "https://armas.prueba/cert/3", tipo: "certificado_rechazo" },
       ],
     });
     expect(errores).toEqual([]);
     expect(enlaces).toEqual([
       { tipo: "ot", etiqueta: "OT en el sistema de armas del BPCH", numeroSerie: null, idExterno: null, url: "https://armas.prueba/ot/1289" },
-      { tipo: "acta", etiqueta: "Acta de cierre", numeroSerie: null, idExterno: null, url: "https://armas.prueba/acta/1" },
-      { tipo: "certificado", etiqueta: "Certificado serie PRUEBA-001", numeroSerie: "PRUEBA-001", idExterno: "FED-1", url: "https://armas.prueba/cert/1" },
+      { tipo: "acta", etiqueta: "Acta de cierre", numeroSerie: null, idExterno: null, url: "https://armas.prueba/acta/1", totalDisparos: null },
+      { tipo: "certificado", etiqueta: "Certificado serie PRUEBA-001", numeroSerie: "PRUEBA-001", idExterno: "FED-1", url: "https://armas.prueba/cert/1", totalDisparos: 3 },
+      { tipo: "certificado_rechazo", etiqueta: "Certificado de rechazo serie PRUEBA-003", numeroSerie: "PRUEBA-003", idExterno: null, url: "https://armas.prueba/cert/3", totalDisparos: null },
     ]);
     expect(JSON.stringify(enlaces)).not.toContain(PDF);
   });
@@ -297,7 +359,7 @@ describe("parámetros y direcciones", () => {
       modoRetorno: "webhook",
       enviarAutomatico: false,
       unidades: ["D11", "BPCH"],
-      maxIntentos: 8,
+      maxIntentos: 12,
       intervaloPullMin: 15,
       rutConDv: false,
       vigenciaEnlaceHoras: 72,
@@ -305,6 +367,7 @@ describe("parámetros y direcciones", () => {
       hostsPermitidos: [],
       rutaEnlacesOt: "",
       guardarActaPdf: true,
+      modoAdjunto: "base64",
     });
   });
   it("lee los valores y descarta los inválidos", () => {
@@ -317,7 +380,7 @@ describe("parámetros y direcciones", () => {
       { codigo: "guardar_acta_pdf", valor: "no" },
       { codigo: "rut_con_dv", valor: "si", activo: false },
     ]);
-    expect(c).toMatchObject({ activa: true, urlBase: "https://armas.prueba", modoRetorno: "pull", maxIntentos: 8, hostsPermitidos: ["armas.prueba", "otro.prueba"], guardarActaPdf: false, rutConDv: false });
+    expect(c).toMatchObject({ activa: true, urlBase: "https://armas.prueba", modoRetorno: "pull", maxIntentos: 12, hostsPermitidos: ["armas.prueba", "otro.prueba"], guardarActaPdf: false, rutConDv: false });
   });
   it("URL base válida", () => {
     expect(urlBaseValida("https://armas.prueba")).toBe(true);

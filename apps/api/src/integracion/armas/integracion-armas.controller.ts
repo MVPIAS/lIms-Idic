@@ -48,6 +48,7 @@ const ManualSchema = z
 /**
  * Pantallas del LIMS (D11, BPCH y Comercial):
  *   GET  /integracion/armas/bandeja                    envíos y avisos recientes
+ *   GET  /integracion/armas/estadisticas               OT por estado, fases, rechazos (desde, hasta, tipo_orden)
  *   GET  /integracion/armas/ot/:otId                   estado externo, historial, enlaces y adjuntos de la OT
  *   POST /integracion/armas/ot/:otId/previsualizar     JSON que se enviaría (sin enviar)
  *   POST /integracion/armas/ot/:otId/enviar            encola el envío al BPCH
@@ -75,9 +76,19 @@ export class IntegracionArmasController {
     return this.svc.bandeja(req.user.tenantId, { estado, limite: Number(limite) || undefined });
   }
 
+  @Get("estadisticas")
+  @RequierePermiso(PERMISO_ARMAS_GESTIONAR)
+  @ApiOperation({
+    summary: "Estadísticas de la integración: OT por estado, tiempo por fase, rechazos por etapa y motivo, rechazos totales",
+    description: "Filtros opcionales: desde y hasta (AAAA-MM-DD, fecha de envío de la OT al BPCH) y tipo_orden (1 persona natural, 2 empresa).",
+  })
+  estadisticas(@Query("desde") desde: string | undefined, @Query("hasta") hasta: string | undefined, @Query("tipo_orden") tipo: string | undefined, @Req() req: any) {
+    return this.svc.estadisticas(req.user.tenantId, { desde, hasta, tipoOrden: tipo ? Number(tipo) : null });
+  }
+
   @Get("ot/:otId")
   @RequierePermiso(PERMISO_ARMAS_GESTIONAR)
-  @ApiOperation({ summary: "Estado de la OT en el software de armas: estado externo, historial, envíos, enlaces y adjuntos" })
+  @ApiOperation({ summary: "Estado de la OT en el software de armas: estado externo, historial, envíos, enlaces, adjuntos y notificaciones a la DGMN" })
   estado(@Param("otId", ParseUUIDPipe) otId: string, @Req() req: any) {
     return this.svc.estadoOt(req.user.tenantId, otId);
   }

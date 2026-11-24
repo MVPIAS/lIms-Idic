@@ -145,7 +145,9 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
   const [ocupado, setOcupado] = useState(false);
   // F041: las armas que no se pudieron emitir quedan explicadas en pantalla (no solo en un aviso que se borra).
   const [fallos, setFallos] = useState<string[]>([]);
-  const puede = d.puedo.emitir && d.ot.abierta;
+  // OT enviada al software de armas del BPCH: los certificados los emite ese sistema (sin doble numeración).
+  const bloqueadoPorArmas = !!d.sistemaArmas?.certificadosBloqueados;
+  const puede = d.puedo.emitir && d.ot.abierta && !bloqueadoPorArmas;
 
   async function emitir() {
     setOcupado(true);
@@ -173,6 +175,11 @@ export function Certificados({ d, accion }: { d: ExpedienteD11; accion: Accion }
           Un certificado por arma, con vigencia de <b>{d.config.vigenciaAnios} años</b> desde la emisión, código de verificación con QR y huella SHA-256.
           Se emiten en bloque: el sistema reserva un rango de números y los deja en firma según la matriz de firmas de la D11.
         </p>
+        {bloqueadoPorArmas && (
+          <div className="alert info" role="status">
+            {d.sistemaArmas!.motivo} Los enlaces a los certificados aparecen en la ficha de la OT, panel «Sistema de armas BPCH».
+          </div>
+        )}
         {/* F039: llegó el XML de IBIS de un arma ya certificada «Pendiente de IBIS». */}
         {conCert.some((a) => a.certificado?.pendienteIbis) && (
           <div className="alert warn" role="alert">
