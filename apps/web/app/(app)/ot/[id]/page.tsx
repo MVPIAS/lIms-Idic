@@ -36,6 +36,7 @@ import { EtapasOt, SiguientePasoOt, type AvanceOt } from "@/components/ot/RutaOt
 import InstrumentosOt from "@/components/metrologia/InstrumentosOt";
 import PreparacionOt from "@/components/formularios/PreparacionOt";
 import RemitirDco from "@/components/bpch-procesos/RemitirDco";
+import SistemaArmasBpchOt from "@/components/bpch-procesos/SistemaArmasBpchOt";
 import ConsumosOt from "@/components/consumibles/ConsumosOt";
 
 /** Laboratorios de la Sección Metrología: sus OT trabajan con instrumentos, no con muestras (EP-04). */
@@ -324,6 +325,9 @@ export default function ExpedientePage() {
           <Link href={`/saec/ot/${ot.id}` as any} className="btn outline sm">Ir a Certificación de armas</Link>
         </div>
       )}
+
+      {/* Software de certificación de armas del BPCH: estado externo, historial y enlaces (docs/INTEGRACION_ARMAS_BPCH.md). */}
+      {ot && ["D11", "BPCH"].includes(ot?.unidad?.codigo) && puede("integracion.armas.gestionar") && <SistemaArmasBpchOt otId={ot.id} />}
 
       {ot && !ot.unidadPrincipal && (
         <div className="alert warn">

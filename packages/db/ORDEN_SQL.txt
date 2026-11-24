@@ -174,4 +174,5 @@ align_q1_labs.sql
 align_q1_cotizacion.sql
 align_q3_proyecto.sql
 align_q4_cierre_ot.sql
+align_integracion_armas.sql
 align_cierre_permisos.sql

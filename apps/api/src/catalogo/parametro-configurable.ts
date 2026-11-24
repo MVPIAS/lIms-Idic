@@ -836,6 +836,93 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
       },
     },
   },
+  // --- Integración con el software de armas del BPCH (24-11-2026) ---
+  {
+    categoria: "integracion_armas",
+    titulo: "Integración con el software de armas del BPCH",
+    donde:
+      "Envío de la OT al software de certificación de armas del BPCH y recepción de sus estados (visación, firma FEA, finalización). El token y la clave de firma NO se guardan aquí: van en las variables BPCH_ARMAS_TOKEN y BPCH_ARMAS_HMAC_SECRET del servidor. Guía: docs/INTEGRACION_ARMAS_BPCH.md.",
+    porConfirmar:
+      "Dirección del servidor del BPCH, modo de retorno de estados, RUT con o sin dígito verificador, qué OT se envían y si el LIMS cierra la OT al finalizar en el BPCH (reunión con el BPCH, 24-11-2026).",
+    codigos: {
+      activa: { tipo: "sino", nombre: "Integración activa", opciones: SI_NO, ayuda: "Con «No» no se envía nada ni se consulta; los avisos que lleguen se rechazan.", porDefecto: "no" },
+      url_base: {
+        tipo: "texto",
+        nombre: "Dirección base del software de armas (p. ej. https://armas.idic.local)",
+        largo: 300,
+        ayuda: "Sin barra final. El LIMS añade /api/v1/integracion/lims/ordenes-trabajo.",
+        porDefecto: "",
+      },
+      modo_retorno: {
+        tipo: "opcion",
+        nombre: "Cómo llegan los estados del BPCH",
+        opciones: [
+          { valor: "webhook", etiqueta: "Aviso firmado del BPCH (webhook con HMAC)" },
+          { valor: "post", etiqueta: "El BPCH llama al LIMS con un token de integración" },
+          { valor: "pull", etiqueta: "El LIMS consulta el estado cada cierto tiempo" },
+        ],
+        porDefecto: "webhook",
+      },
+      enviar_automatico: {
+        tipo: "sino",
+        nombre: "Enviar la OT al BPCH automáticamente",
+        opciones: SI_NO,
+        ayuda: "Con «No» se envía desde la ficha de la OT (botón «Enviar al software de armas»).",
+        porDefecto: "no",
+      },
+      unidades: {
+        tipo: "texto",
+        nombre: "Unidades responsables cuyas OT se envían (códigos separados por coma)",
+        largo: 200,
+        porDefecto: "D11,BPCH",
+      },
+      max_intentos: { tipo: "entero", nombre: "Intentos de envío antes de dejarlo en error", min: 1, max: 30, unidad: "intentos", porDefecto: "8" },
+      intervalo_pull_min: { tipo: "entero", nombre: "Minutos entre consultas de estado (modo consulta)", min: 1, max: 1440, unidad: "min", porDefecto: "15" },
+      rut_con_dv: {
+        tipo: "sino",
+        nombre: "Enviar el RUT con dígito verificador",
+        opciones: SI_NO,
+        ayuda: "El documento del BPCH pide el RUT «sin puntos ni guión» y su ejemplo va sin dígito verificador. Por confirmar.",
+        porDefecto: "no",
+      },
+      vigencia_enlace_horas: {
+        tipo: "entero",
+        nombre: "Horas de validez del enlace con que el BPCH descarga los adjuntos",
+        min: 1,
+        max: 720,
+        unidad: "horas",
+        porDefecto: "72",
+      },
+      cerrar_ot_al_finalizar: {
+        tipo: "sino",
+        nombre: "Cerrar la OT del LIMS cuando el BPCH la finaliza (estado 8)",
+        opciones: SI_NO,
+        ayuda: "Por confirmar con el IDIC. Con «No» solo se avisa a la D11 y a Comercial.",
+        porDefecto: "no",
+      },
+      hosts_permitidos: {
+        tipo: "texto",
+        nombre: "Servidores permitidos en los enlaces que manda el BPCH (separados por coma)",
+        largo: 400,
+        ayuda: "Solo se guardan y se abren enlaces http/https a estos servidores (p. ej. armas.idic.local). Vacío = el servidor de la dirección base.",
+        porDefecto: "",
+      },
+      ruta_enlaces_ot: {
+        tipo: "texto",
+        nombre: "Ruta del BPCH que entrega los enlaces de una OT (con {ot} o {bpch_id})",
+        largo: 300,
+        ayuda: "Por confirmar con el BPCH. Ej.: /api/v1/integracion/lims/ordenes-trabajo/{ot}/enlaces. Vacío = no se piden; solo se guardan los que lleguen en los avisos.",
+        porDefecto: "",
+      },
+      guardar_acta_pdf: {
+        tipo: "sino",
+        nombre: "Guardar el acta de cierre en PDF cuando el aviso de finalización la trae en base64",
+        opciones: SI_NO,
+        ayuda: "Los certificados por arma NO se guardan nunca: quedan en el BPCH y la OT muestra su enlace.",
+        porDefecto: "si",
+      },
+    },
+  },
   {
     categoria: "oficio_conductor",
     titulo: "Oficio conductor exigido para entregar",

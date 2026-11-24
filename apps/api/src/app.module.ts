@@ -69,6 +69,7 @@ import { TerrenoModule } from "./terreno/terreno.module";
 import { FormulariosModule } from "./formularios/formularios.module";
 import { ReglasCapturaModule } from "./formularios/reglas-captura.service";
 import { IntegracionModule } from "./integracion/integracion.module";
+import { IntegracionArmasModule } from "./integracion/armas/integracion-armas.module";
 import { SistemaModule } from "./sistema/sistema.module";
 
 /**
@@ -175,6 +176,7 @@ function prettyTransport() {
     AuditoriaModule,
     // API documentada y tokens de integración (contrato §4.7.4).
     IntegracionModule,
+    IntegracionArmasModule,
     HealthModule,
   ],
   providers: [

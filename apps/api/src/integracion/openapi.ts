@@ -108,7 +108,16 @@ export const MODULOS_API: Record<string, ModuloApi> = {
   grupos: { titulo: "Grupos (catálogo anterior)", descripcion: "Grupos del catálogo anterior; el vigente está en Catálogo técnico." },
   "tipos-muestra": { titulo: "Tipos de muestra", descripcion: "Tipos de muestra que se reciben." },
   personas: { titulo: "Personas", descripcion: "Búsqueda de personas para asignaciones." },
-  integracion: { titulo: "Integración", descripcion: "Documentación de esta API y tokens de integración (cuentas de servicio)." },
+  integracion: {
+    titulo: "Integración",
+    descripcion:
+      "Documentación de esta API, tokens de integración (cuentas de servicio) y, en /integracion/armas, la bandeja del envío de OT al software de armas del BPCH, su estado externo y los enlaces a sus certificados.",
+  },
+  v1: {
+    titulo: "Software de armas del BPCH (rutas que llama el BPCH)",
+    descripcion:
+      "Avisos de cambio de estado de una OT (webhook firmado con HMAC en X-BPCH-Signature, o POST directo con token de integración y permiso integracion.armas.estado) y descarga de los PDF que acompañan a la OT por enlace firmado. Guía: docs/INTEGRACION_ARMAS_BPCH.md. La ruta del BPCH que entrega los enlaces de los certificados está POR CONFIRMAR con el BPCH (parámetro ruta_enlaces_ot).",
+  },
   auditoria: { titulo: "Auditoría", descripcion: "Bitácora de cambios del sistema (audit_log)." },
   config: { titulo: "Configuración", descripcion: "Configuración general (IBIS, correo y otros)." },
   health: { titulo: "Estado del servicio", descripcion: "Comprobación de que la API está en línea." },

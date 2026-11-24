@@ -10,6 +10,7 @@ import { ZodExceptionFilter } from "./common/zod-exception.filter";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import { instalarSerializacionBigInt } from "./common/bigint-json";
 import { construirDocumentoApi, fijarDocumentoApi } from "./integracion/openapi-doc";
+import { PREFIJO_BPCH, cuerpoCrudoBpch } from "./integracion/armas/cuerpo-crudo";
 
 // Las columnas bigint de Prisma (Nº interno de la muestra, correlativos, count(*))
 // se responden como texto: sin esto, JSON.stringify lanza y la API da 500.
@@ -64,6 +65,10 @@ async function bootstrap() {
     );
     next();
   });
+
+  // Software de armas del BPCH: cuerpo crudo para la firma HMAC y tope propio
+  // (acta en base64). Antes de los lectores de Nest y solo para ese prefijo.
+  app.use(PREFIJO_BPCH, cuerpoCrudoBpch());
 
   // --- CORS ---
   // En producción exige CORS_ORIGINS explícito (lista separada por comas).

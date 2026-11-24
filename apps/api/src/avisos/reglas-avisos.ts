@@ -37,6 +37,9 @@ export const TIPOS_AVISO = {
   mora_aviso: "warn",
   mora_bloqueo: "alta",
   mora_cde: "alta",
+  // Integración con el software de armas del BPCH: firmada / finalizada (info) y devolución, anulación o envío rechazado (alta).
+  armas_bpch: "info",
+  armas_bpch_rechazo: "alta",
 } as const satisfies Record<string, Severidad>;
 export type TipoAviso = keyof typeof TIPOS_AVISO;
 

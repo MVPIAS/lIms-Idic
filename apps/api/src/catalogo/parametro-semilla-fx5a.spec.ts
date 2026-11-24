@@ -14,7 +14,7 @@ const DB = join(__dirname, "../../../../packages/db");
 const SQL = [
   readFileSync(join(DB, "align_fx5_a.sql"), "utf8"),
   ...readdirSync(DB)
-    .filter((f) => /^align_(nuevo_f\d+|f\d{3}_[a-z0-9_]+|cuarto_envio_[a-z0-9_]+|q\d+_[a-z0-9_]+)\.sql$/.test(f))
+    .filter((f) => /^align_(nuevo_f\d+|f\d{3}_[a-z0-9_]+|cuarto_envio_[a-z0-9_]+|q\d+_[a-z0-9_]+|integracion_[a-z0-9_]+)\.sql$/.test(f))
     .map((f) => readFileSync(join(DB, f), "utf8")),
 ].join(" ");
 const sqlTexto = (s: string) => `'${s.replace(/'/g, "''")}'`;
