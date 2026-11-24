@@ -5,6 +5,10 @@ describe("documentación OpenAPI · reglas", () => {
   it("toma el módulo del primer segmento tras /api", () => {
     expect(segmentoDe("/api/ot/{id}/muestras")).toBe("ot");
     expect(segmentoDe("/cotizaciones")).toBe("cotizaciones");
+    expect(segmentoDe("/api/integracion/armas/bandeja")).toBe("integracion-armas-bpch");
+    expect(segmentoDe("/api/v1/integracion/bpch/webhook")).toBe("integracion-armas-bpch");
+    expect(segmentoDe("/api/integracion/tokens")).toBe("integracion");
+    expect(tituloModulo("integracion-armas-bpch")).toBe("Integración · Sistema de certificación de armas BPCH");
     expect(tituloModulo("ot")).toBe("Órdenes de trabajo (OT)");
     expect(tituloModulo("algo-nuevo")).toBe("Algo nuevo");
   });

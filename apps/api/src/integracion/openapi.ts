@@ -108,15 +108,14 @@ export const MODULOS_API: Record<string, ModuloApi> = {
   grupos: { titulo: "Grupos (catálogo anterior)", descripcion: "Grupos del catálogo anterior; el vigente está en Catálogo técnico." },
   "tipos-muestra": { titulo: "Tipos de muestra", descripcion: "Tipos de muestra que se reciben." },
   personas: { titulo: "Personas", descripcion: "Búsqueda de personas para asignaciones." },
+  "integracion-armas-bpch": {
+    titulo: "Integración · Sistema de certificación de armas BPCH",
+    descripcion:
+      "Integración asíncrona con el sistema de certificación de armas del BPCH: rutas que llama ese sistema (avisos de estado por webhook firmado con HMAC o POST directo con token, y descarga de adjuntos) y gestión interna (envío de OT, bandeja, estado externo, enlaces a sus certificados y estadísticas por fase). Documentación adjunta (funcional, técnica, Postman y guía) en Administración › API e integración › Documentación.",
+  },
   integracion: {
     titulo: "Integración",
-    descripcion:
-      "Documentación de esta API, tokens de integración (cuentas de servicio) y, en /integracion/armas, la bandeja del envío de OT al software de armas del BPCH, su estado externo y los enlaces a sus certificados.",
-  },
-  v1: {
-    titulo: "Software de armas del BPCH (rutas que llama el BPCH)",
-    descripcion:
-      "Avisos de cambio de estado de una OT (webhook firmado con HMAC en X-BPCH-Signature, o POST directo con token de integración y permiso integracion.armas.estado) y descarga de los PDF que acompañan a la OT por enlace firmado. Guía: docs/INTEGRACION_ARMAS_BPCH.md. La ruta del BPCH que entrega los enlaces de los certificados está POR CONFIRMAR con el BPCH (parámetro ruta_enlaces_ot).",
+    descripcion: "Documentación de esta API, documentos adjuntos de cada integración y tokens de integración (cuentas de servicio).",
   },
   auditoria: { titulo: "Auditoría", descripcion: "Bitácora de cambios del sistema (audit_log)." },
   config: { titulo: "Configuración", descripcion: "Configuración general (IBIS, correo y otros)." },
@@ -131,11 +130,20 @@ export function tituloModulo(segmento: string): string {
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : "Otros";
 }
 
-/** Primer segmento de la ruta tras el prefijo /api. */
+/** Rutas que forman su propio módulo aunque no compartan el primer segmento. */
+const MODULOS_POR_PREFIJO: Array<[string[], string]> = [
+  [["integracion", "armas"], "integracion-armas-bpch"],
+  [["v1", "integracion", "bpch"], "integracion-armas-bpch"],
+];
+
+/** Módulo de una ruta: el primer segmento tras /api, salvo los prefijos de MODULOS_POR_PREFIJO. */
 export function segmentoDe(ruta: string): string {
   const partes = ruta.split("/").filter(Boolean);
-  const i = partes[0] === "api" ? 1 : 0;
-  return partes[i] ?? "";
+  const resto = partes[0] === "api" ? partes.slice(1) : partes;
+  for (const [prefijo, modulo] of MODULOS_POR_PREFIJO) {
+    if (prefijo.every((p, k) => resto[k] === p)) return modulo;
+  }
+  return resto[0] ?? "";
 }
 
 const VERBO_CRUD: Record<string, "ver" | "crear" | "editar" | "eliminar"> = {

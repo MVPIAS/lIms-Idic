@@ -282,6 +282,19 @@ previo que calcula `X-BPCH-Signature` (HMAC-SHA256 del cuerpo exacto) y un `X-Ev
 nuevo; «Reenvío con el mismo X-Event-ID» comprueba el `duplicado: true`. Ejemplos PRUEBA de
 todos los estados, enlaces, certificado de rechazo, rechazo total y acta.
 
+## 9 bis. Catálogo de APIs y documentación adjunta
+
+- En **Administración › API e integración › Documentación de la API**, todas las rutas de esta
+  integración (las que llama el BPCH y las internas) forman el módulo
+  **«Integración · Sistema de certificación de armas BPCH»** (`segmentoDe` en
+  `apps/api/src/integracion/openapi.ts`).
+- En la pestaña **«Documentos de integraciones»** se descargan el documento funcional, la
+  especificación técnica, la colección Postman y esta guía (`GET /api/integracion/documentacion`
+  y `GET /api/integracion/documentacion/:grupo/:archivo`, permiso `integracion.documentacion`;
+  lista cerrada en `apps/api/src/integracion/documentacion-integracion.ts`, archivos en
+  `apps/api/documentacion/integracion-armas-bpch/`). Al cambiar un documento, reemplace el
+  archivo en esa carpeta con el mismo nombre.
+
 ## 10. Rutas internas del LIMS
 
 Permiso `integracion.armas.gestionar`, ámbito BPCH (incluye la D11) o DCO.

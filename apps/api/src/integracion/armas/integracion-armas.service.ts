@@ -706,7 +706,33 @@ export class IntegracionArmasService implements OnModuleInit, OnModuleDestroy {
       if (en.tipo === "ot") {
         await this.prisma.$executeRawUnsafe(`UPDATE integracion_armas_ot SET url_ot_externa = $2, updated_at = now() WHERE ot_id = $1::uuid`, otId, v.url);
       }
-      if (en.tipo !== "otro") {
+      if (en.tipo !== "otro" && en.numeroSerie) {
+        // Un enlace vigente por arma (tipo + serie): el que llega reemplaza al anterior. Si llega
+        // sin id del gestor documental y ya está el mismo enlace con id, se conserva ese.
+        if (!en.idExterno) {
+          const n = await this.prisma.$executeRawUnsafe(
+            `UPDATE integracion_armas_enlace
+                SET total_disparos = COALESCE($4::int, total_disparos), recibido_at = now()
+              WHERE ot_id = $1::uuid AND vigente AND tipo = $2 AND numero_serie = $3 AND url = $5 AND id_externo IS NOT NULL`,
+            otId,
+            en.tipo,
+            en.numeroSerie,
+            en.totalDisparos ?? null,
+            v.url,
+          );
+          if (n > 0) continue;
+        }
+        await this.prisma.$executeRawUnsafe(
+          `UPDATE integracion_armas_enlace SET vigente = FALSE
+            WHERE ot_id = $1::uuid AND vigente AND tipo = $2 AND numero_serie = $3
+              AND NOT (url = $5 AND COALESCE(id_externo, '') = COALESCE($4, ''))`,
+          otId,
+          en.tipo,
+          en.numeroSerie,
+          en.idExterno,
+          v.url,
+        );
+      } else if (en.tipo !== "otro") {
         await this.prisma.$executeRawUnsafe(
           `UPDATE integracion_armas_enlace SET vigente = FALSE
             WHERE ot_id = $1::uuid AND vigente AND tipo = $2 AND COALESCE(numero_serie, '') = COALESCE($3, '')

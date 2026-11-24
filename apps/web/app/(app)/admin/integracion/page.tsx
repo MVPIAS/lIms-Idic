@@ -8,11 +8,14 @@
  *     muestra una sola vez; el servidor guarda solo su hash.
  *   · «Documentación de la API»: la especificación OpenAPI agrupada por módulo,
  *     con el permiso que exige cada operación, y su descarga en JSON.
+ *   · «Documentos de integraciones»: documento funcional, especificación técnica,
+ *     colección Postman y guía de cada integración (hoy: sistema de armas del BPCH).
  * API: /integracion/tokens (integracion.tokens) y /integracion/openapi.json
  * (integracion.documentacion).
  */
 import { useMemo, useState } from "react";
 import { llamar } from "@/lib/laboratorio";
+import { descargarAdjunto } from "@/lib/d11";
 import { usePermisos } from "@/lib/permisos";
 import { fechaDia, fechaHora, hoyChile, sumarDiasCalendario } from "@/lib/format";
 import {
@@ -65,8 +68,8 @@ function Integracion() {
   const { puede } = usePermisos();
   const gestiona = puede("integracion.tokens");
   // Sin elección del usuario se abre «Tokens» a quien los gestiona (los permisos llegan tras el primer render).
-  const [pestana, setPestana] = useState<"tokens" | "docs" | null>(null);
-  const tab = gestiona ? pestana ?? "tokens" : "docs";
+  const [pestana, setPestana] = useState<"tokens" | "docs" | "adjuntos" | null>(null);
+  const tab = pestana ?? (gestiona ? "tokens" : "docs");
 
   return (
     <div>
@@ -86,8 +89,11 @@ function Integracion() {
         <button role="tab" aria-selected={tab === "docs"} className={`tab${tab === "docs" ? " active" : ""}`} onClick={() => setPestana("docs")}>
           Documentación de la API
         </button>
+        <button role="tab" aria-selected={tab === "adjuntos"} className={`tab${tab === "adjuntos" ? " active" : ""}`} onClick={() => setPestana("adjuntos")}>
+          Documentos de integraciones
+        </button>
       </div>
-      {tab === "tokens" ? <Tokens /> : <Documentacion />}
+      {tab === "tokens" && gestiona ? <Tokens /> : tab === "adjuntos" ? <DocumentosIntegraciones /> : <Documentacion />}
     </div>
   );
 }
@@ -467,6 +473,70 @@ function Documentacion() {
             </table>
           </div>
         </details>
+      ))}
+    </>
+  );
+}
+
+// ───────────────────── Documentos de integraciones ─────────────────────
+
+interface DocumentoAdjunto { grupo: string; archivo: string; titulo: string; descripcion: string; bytes: number }
+
+const NOMBRE_GRUPO: Record<string, { titulo: string; texto: string }> = {
+  "integracion-armas-bpch": {
+    titulo: "Integración · Sistema de certificación de armas BPCH",
+    texto: "El LIMS envía las OT de armas al sistema del BPCH y recibe sus cambios de estado y los enlaces a sus certificados. Sus rutas están en el módulo del mismo nombre de la pestaña «Documentación de la API».",
+  },
+};
+
+function tamano(b: number): string {
+  return b >= 1024 * 1024 ? `${(b / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`;
+}
+
+function DocumentosIntegraciones() {
+  const lista = useCarga(() => llamar<DocumentoAdjunto[]>("GET", "/integracion/documentacion"));
+  const toast = useToast();
+  const [bajando, setBajando] = useState<string | null>(null);
+
+  async function bajar(d: DocumentoAdjunto) {
+    setBajando(d.archivo);
+    try {
+      await descargarAdjunto(`/integracion/documentacion/${encodeURIComponent(d.grupo)}/${encodeURIComponent(d.archivo)}`, d.archivo);
+    } catch (e: any) {
+      toast.error(e?.message ?? "No se pudo descargar el documento.");
+    } finally {
+      setBajando(null);
+    }
+  }
+
+  if (lista.error) return <EstadoError error={lista.error} onReintentar={() => lista.recargar()} recurso="los documentos de integraciones" />;
+  if (lista.cargando && !lista.data) return <div className="card"><SkeletonLineas n={4} /></div>;
+  const docs = lista.data ?? [];
+  if (docs.length === 0) return <div className="card"><EstadoVacio icono="📄" titulo="Sin documentos" texto="Aún no hay documentos de integraciones." /></div>;
+  const grupos = Array.from(new Set(docs.map((d) => d.grupo)));
+
+  return (
+    <>
+      {grupos.map((g) => (
+        <div key={g} className="card">
+          <h2>{NOMBRE_GRUPO[g]?.titulo ?? g}</h2>
+          {NOMBRE_GRUPO[g] && <p style={{ marginTop: 0, fontSize: 12.5, color: "var(--muted)" }}>{NOMBRE_GRUPO[g].texto}</p>}
+          <div style={{ overflowX: "auto" }}>
+            <table className="data">
+              <thead><tr><th>Documento</th><th>Contenido</th><th style={{ width: 80 }}>Tamaño</th><th style={{ width: 120 }}></th></tr></thead>
+              <tbody>
+                {docs.filter((d) => d.grupo === g).map((d) => (
+                  <tr key={d.archivo}>
+                    <td><b>{d.titulo}</b><small style={{ display: "block", color: "var(--muted)", wordBreak: "break-all" }}>{d.archivo}</small></td>
+                    <td style={{ fontSize: 12.5 }}>{d.descripcion}</td>
+                    <td>{tamano(d.bytes)}</td>
+                    <td><button className="btn outline" disabled={bajando === d.archivo} onClick={() => bajar(d)}>{bajando === d.archivo ? "Descargando…" : "⬇ Descargar"}</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ))}
     </>
   );

@@ -17,7 +17,7 @@ function bd(param: Record<string, string>, extra: { sql: RegExp; filas: any[] }[
   const responder = (sql: string, args: any[]) => {
     llamadas.push({ sql, args });
     if (/FROM parametro_sistema WHERE tenant_id/.test(sql)) return Object.entries(param).map(([codigo, valor]) => ({ codigo, valor, activo: true }));
-    for (const e of extra) if (e.sql.test(sql)) return e.filas;
+    for (const e of extra) if (e.sql.test(sql)) return e.filas as any;
     // Evento guardado y luego aplicado (acuse antes de aplicar).
     if (/INSERT INTO integracion_armas_evento/.test(sql)) {
       evento = { tenantId: args[0], otId: args[3], datos: JSON.parse(args[8]), actaId: args[9] };
@@ -29,7 +29,12 @@ function bd(param: Record<string, string>, extra: { sql: RegExp; filas: any[] }[
   return {
     llamadas,
     $queryRawUnsafe: jest.fn(async (sql: string, ...args: any[]) => responder(sql, args)),
-    $executeRawUnsafe: jest.fn(async (sql: string, ...args: any[]) => (responder(sql, args), 1)),
+    // Filas afectadas: un número de `extra` si lo hay; si no, 0 para «ya está con id del gestor» y 1 para lo demás.
+    $executeRawUnsafe: jest.fn(async (sql: string, ...args: any[]) => {
+      const r: any = responder(sql, args);
+      if (typeof r === "number") return r;
+      return /id_externo IS NOT NULL/.test(sql) ? 0 : 1;
+    }),
   };
 }
 
@@ -173,6 +178,19 @@ describe("avisos de estado del BPCH", () => {
     await s.recibirEstado({ ot: "PRUEBA-1", estado: 6, enlaces: [{ tipo: "certificado_rechazo", numero_serie: "S9", url: "https://armas.prueba/r/9" }] }, "post", opts);
     const n = db.llamadas.find((l) => /INSERT INTO bpch_notificacion_dgmn/.test(l.sql))!;
     expect(n.args[3]).toBe("certificado_rechazo:S9");
+  });
+
+  it("enlaces: el mismo certificado sin id del gestor no duplica al que ya lo tiene", async () => {
+    const { s, db } = servicio(ACTIVA, [OT_ENVIADA, ULTIMO(null), { sql: /id_externo IS NOT NULL/, filas: 1 as any }]);
+    await s.recibirEstado({ ot: "PRUEBA-1", estado: 6, certificados: [{ numero_serie: "S1", url: "https://armas.prueba/c/1" }] }, "post", opts);
+    expect(db.llamadas.some((l) => /INSERT INTO integracion_armas_enlace/.test(l.sql) && l.args[4] === "S1")).toBe(false);
+  });
+
+  it("enlaces: un certificado nuevo de la misma serie desactiva el anterior", async () => {
+    const { s, db } = servicio(ACTIVA, [OT_ENVIADA, ULTIMO(null)]);
+    await s.recibirEstado({ ot: "PRUEBA-1", estado: 6, certificados: [{ numero_serie: "S1", url: "https://armas.prueba/c/1", idFed: "FED-1" }] }, "post", opts);
+    const baja = db.llamadas.find((l) => /SET vigente = FALSE/.test(l.sql) && /numero_serie = \$3/.test(l.sql));
+    expect(baja?.args.slice(1, 4)).toEqual(["certificado", "S1", "FED-1"]);
   });
 
   it("enlaces: guarda los permitidos y descarta los de otro servidor; nunca PDF de certificados; disparos", async () => {
