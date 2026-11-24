@@ -5,7 +5,7 @@
  * Requiere el schema aplicado y los roles sembrados (seed_rbac.sql).
  */
 import { PrismaClient } from "@prisma/client";
-import * as argon2 from "argon2";
+import { hash as argon2Hash } from "@node-rs/argon2";
 import { randomBytes } from "crypto";
 
 function arg(name: string, def?: string): string | undefined {
@@ -32,7 +32,7 @@ async function main() {
   });
   if (!rol) throw new Error(`Rol ${rolCodigo} no existe. Aplica seed_rbac.sql primero.`);
 
-  const passwordHash = await argon2.hash(password);
+  const passwordHash = await argon2Hash(password);
 
   const usuario = await prisma.usuario.upsert({
     where: { tenantId_username: { tenantId: tenant.id, username } },

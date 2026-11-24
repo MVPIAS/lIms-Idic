@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, Inject } from "@nestjs/common";
 import { JwtService } from "@nestjs/jwt";
 import { PrismaClient } from "@prisma/client";
-import * as argon2 from "argon2";
+import { verify as argon2Verify } from "@node-rs/argon2";
 
 @Injectable()
 export class AuthService {
@@ -30,7 +30,15 @@ export class AuthService {
     //  - Solo en desarrollo sin hash se admite el atajo password="demo".
     const ldapEnabled = process.env.LDAP_ENABLED === "true";
     if (usuario.passwordHash) {
-      const valid = await argon2.verify(usuario.passwordHash, password);
+      // argon2Verify devuelve false con contraseña incorrecta; solo lanza si el
+      // hash almacenado está corrupto/malformado. En ese caso tratamos la
+      // credencial como inválida (401) en lugar de propagar un 500.
+      let valid = false;
+      try {
+        valid = await argon2Verify(usuario.passwordHash, password);
+      } catch {
+        valid = false;
+      }
       if (!valid) {
         await this.prisma.usuario.update({
           where: { id: usuario.id },
