@@ -13,7 +13,7 @@
 --
 -- Los secretos (token que entrega el BPCH y clave HMAC compartida) van SOLO en
 -- variables de entorno: BPCH_ARMAS_TOKEN y BPCH_ARMAS_HMAC_SECRET.
--- Guía: docs/INTEGRACION_ARMAS_BPCH.md.
+-- Guía: apps/api/documentacion/integracion-armas-bpch.
 -- Idempotente. Va antes de align_cierre_permisos.sql en ORDEN_SQL.txt.
 -- =============================================================================
 BEGIN;

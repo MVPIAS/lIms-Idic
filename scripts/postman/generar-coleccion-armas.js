@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Genera la colección Postman v2.1 de las rutas de ENTRADA del LIMS para el
- * software de armas del BPCH: docs/postman/LIMS_IDIC_integracion_armas.postman_collection.json
- * (docs/INTEGRACION_ARMAS_BPCH.md). Datos PRUEBA; variables vacías.
+ * software de armas del BPCH: apps/api/documentacion/integracion-armas-bpch/03_Coleccion_Postman_LIMS_IDIC_integracion_armas.json
+ * (apps/api/documentacion/integracion-armas-bpch). Datos PRUEBA; variables vacías.
  *
  *   node scripts/postman/generar-coleccion-armas.js
  */
@@ -10,7 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 
-const SALIDA = path.resolve(__dirname, "..", "..", "docs", "postman", "LIMS_IDIC_integracion_armas.postman_collection.json");
+const SALIDA = path.resolve(__dirname, "..", "..", "apps", "api", "documentacion", "integracion-armas-bpch", "03_Coleccion_Postman_LIMS_IDIC_integracion_armas.json");
 // PDF mínimo PRUEBA (acta de cierre de ejemplo).
 const PDF_PRUEBA = Buffer.from("%PDF-1.4\n% Acta PRUEBA\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n").toString("base64");
 
@@ -66,7 +66,7 @@ const coleccion = {
   info: {
     name: "LIMS IDIC · Integración software de armas BPCH (entrada al LIMS)",
     description:
-      "Rutas que el software de armas del BPCH llama en el LIMS. Guía: docs/INTEGRACION_ARMAS_BPCH.md.\n\n" +
+      "Rutas que el software de armas del BPCH llama en el LIMS. Guía: apps/api/documentacion/integracion-armas-bpch.\n\n" +
       "Variables (vacías a propósito; se completan por canal seguro, nunca en el repositorio):\n" +
       "- lims_url: dirección del LIMS en la red del IDIC (sin barra final).\n" +
       "- token: token de integración del LIMS (opción 1, POST directo).\n" +

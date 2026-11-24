@@ -46,7 +46,7 @@ export function faltantesNotificacion(docs: DocIncumplimiento[]): string[] {
 }
 
 /**
- * Integración con el software de armas del BPCH (docs/INTEGRACION_ARMAS_BPCH.md):
+ * Integración con el software de armas del BPCH (apps/api/documentacion/integracion-armas-bpch):
  * el rechazo total y cada certificado de rechazo dejan una notificación a la
  * DGMN PENDIENTE (hoy nadie avisa a la DGMN; lo hace el IDIC). Igual que el
  * Informe de Incumplimiento, sin registrarla la OT no se cierra.

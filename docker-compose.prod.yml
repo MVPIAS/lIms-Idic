@@ -54,7 +54,7 @@ services:
       # LIMS (bi.reglas.ts). Valores solo en el .env del servidor; vacíos = no se muestra.
       BI_ACCESO_USUARIO: ${BI_ACCESO_USUARIO:-}
       BI_ACCESO_CLAVE: ${BI_ACCESO_CLAVE:-}
-      # Software de armas del BPCH (docs/INTEGRACION_ARMAS_BPCH.md). Secretos solo en el .env.
+      # Software de armas del BPCH (apps/api/documentacion/integracion-armas-bpch). Secretos solo en el .env.
       BPCH_ARMAS_TOKEN: ${BPCH_ARMAS_TOKEN:-}
       BPCH_ARMAS_HMAC_SECRET: ${BPCH_ARMAS_HMAC_SECRET:-}
       LIMS_URL_INTEGRACION: ${LIMS_URL_INTEGRACION:-}

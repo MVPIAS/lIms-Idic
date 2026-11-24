@@ -8,7 +8,7 @@
  * cliente.persona_natural.gestionar con ámbito D11). Se guardan en `cliente`
  * con es_persona_natural = true, nombres y apellidos aparte (la razón social es
  * «nombres apellidos») y tipo de cliente «persona_natural». Son los datos que el
- * software de armas del BPCH guarda en armas_propietarios (docs/INTEGRACION_ARMAS_BPCH.md).
+ * software de armas del BPCH guarda en armas_propietarios (apps/api/documentacion/integracion-armas-bpch).
  */
 import { z } from "zod";
 import { validaRut } from "../common/rut.validator";

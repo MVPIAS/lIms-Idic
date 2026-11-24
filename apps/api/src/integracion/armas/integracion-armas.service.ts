@@ -1,5 +1,5 @@
 /**
- * Integración asíncrona con el software de armas del BPCH (docs/INTEGRACION_ARMAS_BPCH.md).
+ * Integración asíncrona con el software de armas del BPCH (apps/api/documentacion/integracion-armas-bpch).
  *
  *   · Salida: la OT se encola (integracion_armas_envio) y un trabajador la envía
  *     a POST {url_base}/api/v1/integracion/lims/ordenes-trabajo con el token del

@@ -2,7 +2,7 @@
  * Documentación adjunta de las integraciones (se descarga desde Administración ›
  * API e integración). Lista cerrada: solo se sirven estos archivos, por nombre
  * exacto, desde `apps/api/documentacion/<grupo>/`. No contienen secretos ni datos
- * reales (ejemplos con datos PRUEBA).
+ * reales (ejemplos con datos de prueba). Solo Word y la colección Postman.
  */
 import { existsSync, statSync } from "fs";
 import { join, resolve } from "path";
@@ -22,29 +22,29 @@ export const DOCUMENTOS_INTEGRACION: DocumentoIntegracion[] = [
     grupo: GRUPO_ARMAS,
     archivo: "01_Documento_Funcional_Integracion_Armas_BPCH.docx",
     titulo: "Documento funcional",
-    descripcion: "Qué hace cada sistema, recorrido de la OT, estados, acuerdos y puntos a confirmar, con hoja de validación.",
+    descripcion: "Qué hace cada sistema, cómo recorre una OT, los estados y lo que falta definir, con hoja de revisión.",
     tipo: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   },
   {
     grupo: GRUPO_ARMAS,
     archivo: "02_Especificacion_Tecnica_Integracion_Armas_BPCH.docx",
     titulo: "Especificación técnica",
-    descripcion: "Mensajes, seguridad (token y firma HMAC), reintentos, estados, enlaces, configuración, pasos para integrar y pruebas de aceptación.",
+    descripcion: "Mensajes de ida y vuelta, seguridad, reintentos, pasos para integrar y pruebas de aceptación.",
     tipo: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   },
   {
     grupo: GRUPO_ARMAS,
     archivo: "03_Coleccion_Postman_LIMS_IDIC_integracion_armas.json",
     titulo: "Colección Postman",
-    descripcion: "Rutas de entrada del LIMS con ejemplos PRUEBA y cálculo automático de la firma. Variables vacías: se completan por canal seguro.",
+    descripcion: "Rutas del LIMS que llama el sistema de armas, con ejemplos de prueba y la firma calculada automáticamente.",
     tipo: "application/json",
   },
   {
     grupo: GRUPO_ARMAS,
-    archivo: "04_Guia_Tecnica_INTEGRACION_ARMAS_BPCH.md",
-    titulo: "Guía técnica (Markdown)",
-    descripcion: "Guía de desarrollo y operación de la integración.",
-    tipo: "text/markdown; charset=utf-8",
+    archivo: "04_Guia_Tecnica_Operacion_Integracion_Armas_BPCH.docx",
+    titulo: "Guía técnica de operación",
+    descripcion: "Configuración, puesta en marcha, uso diario, errores frecuentes y pruebas.",
+    tipo: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   },
 ];
 

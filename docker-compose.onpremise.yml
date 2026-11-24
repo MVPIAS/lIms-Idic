@@ -135,7 +135,7 @@ services:
       # Menú «Análisis e inteligencia de negocio (Metabase)» (§4.7.5). Vacía si el
       # certificado no cubre bi.<dominio> (Caddyfile.onpremise): la pantalla lo dice.
       URL_BI: ${URL_BI:-}
-      # Software de armas del BPCH (docs/INTEGRACION_ARMAS_BPCH.md). Secretos solo en el .env.
+      # Software de armas del BPCH (apps/api/documentacion/integracion-armas-bpch). Secretos solo en el .env.
       BPCH_ARMAS_TOKEN: ${BPCH_ARMAS_TOKEN:-}
       BPCH_ARMAS_HMAC_SECRET: ${BPCH_ARMAS_HMAC_SECRET:-}
       LIMS_URL_INTEGRACION: ${LIMS_URL_INTEGRACION:-}

@@ -3,7 +3,7 @@ import { AvisosModule } from "../../avisos/avisos.module";
 import { BpchEntradaController, IntegracionArmasController } from "./integracion-armas.controller";
 import { IntegracionArmasService } from "./integracion-armas.service";
 
-/** Integración asíncrona con el software de armas del BPCH (docs/INTEGRACION_ARMAS_BPCH.md). */
+/** Integración asíncrona con el software de armas del BPCH (apps/api/documentacion/integracion-armas-bpch). */
 @Module({
   imports: [AvisosModule],
   controllers: [IntegracionArmasController, BpchEntradaController],

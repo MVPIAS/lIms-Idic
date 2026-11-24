@@ -841,7 +841,7 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     categoria: "integracion_armas",
     titulo: "Integración con el software de armas del BPCH",
     donde:
-      "Envío de la OT al software de certificación de armas del BPCH y recepción de sus estados (visación, firma FEA, finalización). El token y la clave de firma NO se guardan aquí: van en las variables BPCH_ARMAS_TOKEN y BPCH_ARMAS_HMAC_SECRET del servidor. Guía: docs/INTEGRACION_ARMAS_BPCH.md.",
+      "Envío de la OT al software de certificación de armas del BPCH y recepción de sus estados (visación, firma FEA, finalización). El token y la clave de firma NO se guardan aquí: van en las variables BPCH_ARMAS_TOKEN y BPCH_ARMAS_HMAC_SECRET del servidor. Guía: apps/api/documentacion/integracion-armas-bpch.",
     porConfirmar:
       "Dirección del servidor del BPCH, modo de retorno de estados, RUT con o sin dígito verificador, qué OT se envían y si el LIMS cierra la OT al finalizar en el BPCH (reunión con el BPCH, 24-11-2026).",
     codigos: {

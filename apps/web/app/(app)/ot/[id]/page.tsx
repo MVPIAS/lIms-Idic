@@ -326,7 +326,7 @@ export default function ExpedientePage() {
         </div>
       )}
 
-      {/* Software de certificación de armas del BPCH: estado externo, historial y enlaces (docs/INTEGRACION_ARMAS_BPCH.md). */}
+      {/* Software de certificación de armas del BPCH: estado externo, historial y enlaces (apps/api/documentacion/integracion-armas-bpch). */}
       {ot && ["D11", "BPCH"].includes(ot?.unidad?.codigo) && puede("integracion.armas.gestionar") && <SistemaArmasBpchOt otId={ot.id} />}
 
       {ot && !ot.unidadPrincipal && (

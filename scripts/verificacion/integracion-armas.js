@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Integración con el software de armas del BPCH · ida y vuelta contra la API real
- * y un BPCH SIMULADO (servidor HTTP local). docs/INTEGRACION_ARMAS_BPCH.md
+ * y un BPCH SIMULADO (servidor HTTP local). apps/api/documentacion/integracion-armas-bpch
  *
  *    1. Parámetros: integración activa, url_base = el BPCH simulado, ruta de enlaces, modo_adjunto base64.
  *    2. Persona natural mantenida por la D11 (ámbito estricto: fuera de la D11 → 403).

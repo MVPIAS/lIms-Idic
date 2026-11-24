@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "LIMS IDIC · Integración software de armas BPCH (entrada al LIMS)",
-    "description": "Rutas que el software de armas del BPCH llama en el LIMS. Guía: docs/INTEGRACION_ARMAS_BPCH.md.\n\nVariables (vacías a propósito; se completan por canal seguro, nunca en el repositorio):\n- lims_url: dirección del LIMS en la red del IDIC (sin barra final).\n- token: token de integración del LIMS (opción 1, POST directo).\n- hmac_secret: clave compartida de la firma del webhook (opción 2).\n- token_adjunto: parte final del enlace firmado de descarga (solo si modo_adjunto = url).\n\nAcuse: el LIMS responde en menos de 2 s. Si no hay 2xx en 10 s, reintentar con espera 1 min, 5 min, 15 min, 1 h y luego cada 6 h hasta 48 h, SIEMPRE con el mismo X-Event-ID.\nDatos de ejemplo: PRUEBA (RUT y series ficticios).",
+    "description": "Rutas que el software de armas del BPCH llama en el LIMS. Guía: apps/api/documentacion/integracion-armas-bpch.\n\nVariables (vacías a propósito; se completan por canal seguro, nunca en el repositorio):\n- lims_url: dirección del LIMS en la red del IDIC (sin barra final).\n- token: token de integración del LIMS (opción 1, POST directo).\n- hmac_secret: clave compartida de la firma del webhook (opción 2).\n- token_adjunto: parte final del enlace firmado de descarga (solo si modo_adjunto = url).\n\nAcuse: el LIMS responde en menos de 2 s. Si no hay 2xx en 10 s, reintentar con espera 1 min, 5 min, 15 min, 1 h y luego cada 6 h hasta 48 h, SIEMPRE con el mismo X-Event-ID.\nDatos de ejemplo: PRUEBA (RUT y series ficticios).",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

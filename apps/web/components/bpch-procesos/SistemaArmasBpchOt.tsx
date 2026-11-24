@@ -5,7 +5,7 @@
  * software de certificación de armas del BPCH, su historial y los enlaces a la
  * OT, a los certificados por arma y al acta (abren en una pestaña nueva; los
  * documentos viven en el BPCH). Si la OT no se ha enviado, permite revisar lo
- * que se enviaría y encolar el envío. Guía: docs/INTEGRACION_ARMAS_BPCH.md.
+ * que se enviaría y encolar el envío. Guía: apps/api/documentacion/integracion-armas-bpch.
  */
 import { useCallback, useEffect, useState } from "react";
 import { fechaHora } from "@/lib/format";

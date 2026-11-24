@@ -1,6 +1,6 @@
 /**
  * Integración con el software de armas del BPCH · reglas PURAS (sin BD),
- * probadas en reglas-armas.spec.ts. Guía: docs/INTEGRACION_ARMAS_BPCH.md.
+ * probadas en reglas-armas.spec.ts. Guía: apps/api/documentacion/integracion-armas-bpch.
  *
  * Fuente: «Fases o etapas proceso de certificaciones armamento BPCH Apis.pdf»
  * (IDIC, 24-11-2026) y la reunión con el BPCH del 24-11-2026. Ciclo de la OT:
