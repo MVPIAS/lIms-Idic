@@ -663,7 +663,7 @@ function Exportador({ desde, hasta, setDesde, setHasta }: { desde: string; hasta
             </div>
           </div>
           <p className="subtitle" style={{ margin: "6px 0 0", fontSize: 11.5 }}>
-            El Excel trae la hoja «Resumen» con la tabla cruzada y sus totales, el gráfico nativo de Excel, la hoja «Datos» con filtros por columna y la hoja «Filtros» con lo exportado.
+            El Excel trae la hoja «Resumen» con la tabla cruzada y sus totales y el gráfico nativo de Excel, la hoja «Tabla dinámica» con una tabla dinámica de Excel que puede reorganizar arrastrando campos, la hoja «Datos» con filtros por columna y la hoja «Filtros» con lo exportado.
           </p>
         </fieldset>
 

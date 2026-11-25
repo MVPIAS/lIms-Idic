@@ -882,8 +882,10 @@ export class ReportesController extends ReportesBase {
 
   /**
    * §4.6.6/§4.6.7 · Libro Excel: hoja «Datos» con autofiltro y, si se pide un
-   * resumen, hoja «Resumen» con la tabla dinámica y su gráfico nativo, más una
-   * hoja «Filtros» con lo que se exportó y cuándo.
+   * resumen, hoja «Resumen» con la tabla cruzada calculada y su gráfico nativo,
+   * hoja «Tabla dinámica» con una tabla dinámica nativa de Excel sobre «Datos»
+   * (misma definición, reorganizable en Excel), más una hoja «Filtros» con lo
+   * que se exportó y cuándo.
    */
   private libro(
     entidad: string,
@@ -919,6 +921,22 @@ export class ReportesController extends ReportesBase {
                 series: resumen.grafico === "torta" ? [conCols ? t.series + 1 : 1] : conCols ? Array.from({ length: t.series }, (_x, i) => i + 1) : [1],
               }
             : undefined,
+      });
+    }
+    if (resumen && filas.length) {
+      // Tabla dinámica nativa de Excel sobre «Datos», con la misma definición del resumen.
+      const col = (c?: string | null) => (c ? claves.indexOf(c) : -1);
+      hojas.push({
+        nombre: "Tabla dinámica",
+        filas: [["Tabla dinámica de Excel sobre la hoja «Datos»: arrastre los campos para reorganizarla (se actualiza al abrir el libro)."]],
+        anchos: [34, ...Array.from({ length: 15 }, () => 16)],
+        tablaDinamica: {
+          origen: "Datos",
+          filas: col(resumen.filas),
+          columnas: resumen.columnas ? col(resumen.columnas) : null,
+          valor: resumen.valor ? col(resumen.valor) : null,
+          agregado: resumen.agregado ?? "conteo",
+        },
       });
     }
     hojas.push({ nombre: "Datos", filas: datos, autoFiltro: true, anchos });
