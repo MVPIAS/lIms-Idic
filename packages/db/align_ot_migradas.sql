@@ -15,14 +15,19 @@
 -- La marca es solo de pantalla (listas, bandejas, detalle, Zona de informes):
 -- no aparece en informes, certificados ni PDF oficiales.
 --
--- Una OT ya cargada sin la marca se corrige con (ver sql/40_operativo.sql del ETL):
+-- El ETL (07_migracion/sql/40_operativo.sql) nunca sobrescribe una OT con
+-- origen_registro = 'LIMS': si el código OT-<FOLDERNO> ya existe como OT del
+-- LIMS, el folio queda en mig.ot_conflicto_lims y se avisa en la carga.
+-- Una OT migrada en una carga anterior que quedó sin la marca se corrige con
+-- (solo antes de la puesta en producción; ver 40_operativo.sql):
 --   UPDATE orden_trabajo o
 --      SET origen_registro = 'MIGRACION',
---          migrada_desde   = btrim(f."FOLDERNO"),
+--          migrada_desde   = m.folio,
 --          migrada_en      = COALESCE(o.migrada_en, now())
---     FROM stg_lims.folders f
---    WHERE o.codigo = 'OT-' || btrim(f."FOLDERNO")
---      AND o.origen_registro <> 'MIGRACION';
+--     FROM mig.ot_migrable m
+--    WHERE o.codigo = 'OT-' || m.folio
+--      AND o.origen_registro <> 'MIGRACION'
+--      AND o.created_at < '<fecha de puesta en producción>';
 --
 -- Aditivo e idempotente. Va en ORDEN_SQL.txt ANTES de align_cierre_permisos.sql.
 -- =============================================================================
