@@ -185,6 +185,12 @@ export const FiltroInternaciones = z.object({
   /** Tarjetas de Mi bandeja (EP-06 6.1 y 6.6): «analisis» = por analizar (SCC); «inspeccion» = lotes por inspeccionar. */
   pendiente: z.enum(["analisis", "inspeccion"]).optional(),
   q: z.string().trim().max(120).optional(),
+  /**
+   * Estado de la OT de la internación (buscador de OT de internación, checklist
+   * Comercial SVT 3 del 24-11-2026: el IDIC no tiene buscador propio):
+   * «abierta» = no cerrada ni anulada; «sin_ot» = expediente aún sin OT.
+   */
+  estadoOt: z.enum(["abierta", "cerrada", "anulada", "sin_ot"]).optional(),
   page: z.coerce.number().int().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
@@ -216,6 +222,9 @@ export class InternacionBpchService {
     const filtro = await this.comun.filtroExpedientes(req);
     if (filtro !== null) where.push(`i.unidad_inspeccion_id = ANY(${p(filtro)}::uuid[])`);
     if (f.estado) where.push(`i.estado = ${p(f.estado)}`);
+    if (f.estadoOt === "sin_ot") where.push(`o.id IS NULL`);
+    else if (f.estadoOt === "abierta") where.push(`o.id IS NOT NULL AND o.estado NOT IN ('cerrada', 'anulada')`);
+    else if (f.estadoOt) where.push(`o.estado = ${p(f.estadoOt)}`);
     if (f.pendiente === "analisis") where.push(`i.estado IN ('registrada', 'antecedentes_pendientes')`);
     if (f.pendiente === "inspeccion")
       where.push(`i.estado = 'ot_generada' AND o.estado NOT IN ('cerrada', 'anulada')

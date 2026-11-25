@@ -10,6 +10,9 @@
  *  · la Sección Certificación y las sucursales tramitan el expediente.
  * Con «ot.ver» se suman la tasa calculada y el estado de cobro de cada OT, y
  * las OT de internación anteriores que no tienen expediente BPCH.
+ * Buscador de OT de internación (checklist Comercial SVT 3, 24-11-2026: el
+ * IDIC no tiene uno): resolución, empresa u OT en el texto, estado del
+ * expediente, estado de la OT y, con permiso, estado del cobro.
  * API: GET /bpch/internaciones · GET /internaciones/ot (tasa y cobro).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -43,6 +46,9 @@ function Lista() {
   const { puede } = usePermisos();
   const [q, setQ] = useState("");
   const [estado, setEstado] = useState("");
+  const [estadoOt, setEstadoOt] = useState("");
+  /** Filtro de cobro: se aplica sobre la tasa y el cobro de cada OT (requiere verlos). */
+  const [cobro, setCobro] = useState("");
   // Vista que abren las tarjetas de Mi bandeja: «analisis» (SCC) o «inspeccion» (unidad que inspecciona).
   const [pendiente, setPendiente] = useState<"" | "analisis" | "inspeccion">("");
   useEffect(() => {
@@ -59,9 +65,10 @@ function Lista() {
     setFilas(null);
     setError("");
     try {
-      const qs = new URLSearchParams({ limit: "100" });
+      const qs = new URLSearchParams({ limit: "200" });
       if (q.trim()) qs.set("q", q.trim());
       if (estado) qs.set("estado", estado);
+      if (estadoOt) qs.set("estadoOt", estadoOt);
       if (pendiente) qs.set("pendiente", pendiente);
       const r = await pedir<any>("GET", `/bpch/internaciones?${qs}`);
       setFilas(r.data);
@@ -70,12 +77,12 @@ function Lista() {
       setError(e.message);
       setFilas([]);
     }
-  }, [q, estado, pendiente]);
+  }, [q, estado, estadoOt, pendiente]);
 
   useEffect(() => {
     buscar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estado, pendiente]);
+  }, [estado, estadoOt, pendiente]);
 
   // Tasa y cobro: Comercial, Finanzas y quien gestiona la tasa (como la antigua pantalla comercial).
   const verCobro = puede("ot.ver") && puede(["cotizacion.ver", "factura.ver", "bpch.tasa.gestionar"]);
@@ -85,12 +92,21 @@ function Lista() {
   }, [verCobro]);
 
   const cobroPorOt = useMemo(() => new Map((cobros ?? []).map((c) => [c.id, c])), [cobros]);
+  /** Filas que pasan el filtro de cobro (sin filtro, todas). */
+  const visibles = useMemo(() => {
+    if (filas === null || !cobro || !verCobro) return filas;
+    return filas.filter((f) => (f.otId ? cobroPorOt.get(f.otId)?.cobro : null) === cobro);
+  }, [filas, cobro, verCobro, cobroPorOt]);
   /** OT de internación sin expediente BPCH (anteriores a la puerta única o creadas a mano). */
   const sinExpediente = useMemo(() => {
     if (!cobros || filas === null || q.trim() || estado || pendiente) return [];
     const conExpediente = new Set(filas.map((f) => f.otId).filter(Boolean));
-    return cobros.filter((c) => !conExpediente.has(c.id));
-  }, [cobros, filas, q, estado, pendiente]);
+    const abierta = (e: string) => e !== "cerrada" && e !== "anulada";
+    return cobros
+      .filter((c) => !conExpediente.has(c.id))
+      .filter((c) => !estadoOt || (estadoOt === "abierta" ? abierta(c.estado) : estadoOt !== "sin_ot" && c.estado === estadoOt))
+      .filter((c) => !cobro || c.cobro === cobro);
+  }, [cobros, filas, q, estado, estadoOt, cobro, pendiente]);
 
   return (
     <div>
@@ -112,6 +128,19 @@ function Lista() {
           <option value="">Todos los estados</option>
           {Object.entries(ESTADO_INTERNACION).map(([k, v]) => <option key={k} value={k}>{v.l}</option>)}
         </select>
+        <select value={estadoOt} onChange={(e) => setEstadoOt(e.target.value)} aria-label="Estado de la OT">
+          <option value="">OT: todas</option>
+          <option value="abierta">OT abierta</option>
+          <option value="cerrada">OT cerrada</option>
+          <option value="anulada">OT anulada</option>
+          <option value="sin_ot">Sin OT aún</option>
+        </select>
+        {verCobro && (
+          <select value={cobro} onChange={(e) => setCobro(e.target.value)} aria-label="Estado del cobro">
+            <option value="">Cobro: todos</option>
+            {Object.entries(COBRO_PILL).map(([k, v]) => <option key={k} value={k}>{v.l}</option>)}
+          </select>
+        )}
         <button className="btn primary sm" type="submit">Buscar</button>
         {pendiente && (
           <span className="pill blue" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -121,7 +150,7 @@ function Lista() {
           </span>
         )}
         <span className="spacer" />
-        <small style={{ color: "var(--muted)" }}>{total} expediente(s)</small>
+        <small style={{ color: "var(--muted)" }}>{cobro && verCobro && visibles ? `${visibles.length} de ${total}` : total} expediente(s)</small>
       </form>
       <div className="card card--table">
         <table className="data">
@@ -134,7 +163,7 @@ function Lista() {
           </thead>
           <tbody>
             {filas === null && <SkeletonRows cols={verCobro ? 10 : 8} />}
-            {filas?.map((f) => {
+            {visibles?.map((f) => {
               const c = f.otId ? cobroPorOt.get(f.otId) : null;
               return (
                 <tr key={f.id} className="row-action" onClick={() => router.push(`/bpch/internaciones/${f.id}` as any)}>
@@ -151,7 +180,7 @@ function Lista() {
                 </tr>
               );
             })}
-            {filas?.length === 0 && (
+            {visibles?.length === 0 && (
               <tr><td colSpan={verCobro ? 10 : 8}><EmptyState icono="🛃" titulo="No hay internaciones con estos filtros" texto="Registre la resolución DGMN para abrir el expediente: la OT se genera al completar el análisis técnico." /></td></tr>
             )}
           </tbody>

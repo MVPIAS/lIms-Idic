@@ -21,7 +21,7 @@ export class InternacionBpchController {
 
   @Get()
   @RequierePermiso("bpch.internacion.ver")
-  @ApiOperation({ summary: "Expedientes de internación (?estado=&q=&page=&limit=)" })
+  @ApiOperation({ summary: "Expedientes de internación (?estado=&estadoOt=&q=&page=&limit=)" })
   listar(@Query() q: Record<string, string>, @Req() req: any) {
     return this.svc.listar(req, FiltroInternaciones.parse(q ?? {}));
   }

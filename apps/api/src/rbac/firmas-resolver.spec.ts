@@ -320,3 +320,39 @@ describe("firmas · rótulo «Subdirector BPCH» (BPCH-46)", () => {
     expect(rotuloRolFirma("JEFE_DEPTO", "Jefe de Departamento", null)).toBe("Jefe de Departamento");
   });
 });
+
+/**
+ * Respuestas del IDIC del 24-11-2026 (align_q5_bpch.sql y align_q5_lrb.sql):
+ * el Jefe de Sucursal firma los certificados de su sucursal, y el Informe de
+ * Ensayo del LRB lo elabora el analista, lo firma el Jefe LRB y lo oficializa
+ * el Jefe del Departamento (sin revisor).
+ */
+describe("firmas · reglas del 24-11-2026", () => {
+  const ANALISTA = { id: "r-an", codigo: "ANALISTA", nombre: "Analista", nivel: "OPERATIVO", alcance: "UNIDAD" };
+  const reglas: ReglaFirma[] = [
+    ...REGLAS,
+    regla("CERTIFICADO_CONFORMIDAD", "SANTOF", 1, "FIRMA", "JEFE_LAB", "MISMA"),
+    { ...regla("INFORME_ENSAYO", "LRB", 1, "ELABORA", "REVISOR", "MISMA"), rolId: ANALISTA.id, rol: ANALISTA },
+    regla("INFORME_ENSAYO", "LRB", 2, "FIRMA", "JEFE_LAB", "MISMA"),
+    regla("INFORME_ENSAYO", "LRB", 3, "OFICIALIZA", "JEFE_DEPTO", "DEPARTAMENTO"),
+  ];
+  const jefes: JefeUnidad[] = [...JEFES, { unidadId: "SANTOF", usuarioId: "u-jant", nombre: "Jefe Sucursal Antofagasta", rol: "titular" }, { unidadId: "LRB", usuarioId: "u-jlrb", nombre: "Jefe LRB", rol: "titular" }];
+  const tenencias: TenenciaRol[] = [...TENENCIAS, { usuarioId: "u-alrb", nombre: "Analista LRB", rolCodigo: "ANALISTA", unidadId: "LRB" }];
+  const r = (tipo: string, unidad: string) => resolverFirmas({ tipoDocumento: tipo, unidadId: unidad, reglas, arbol, jefes, tenencias, ahora: AHORA });
+
+  it("certificado de conformidad de una sucursal de provincia: firma su Jefe de Sucursal", () => {
+    const x = r("CERTIFICADO_CONFORMIDAD", "SANTOF");
+    expect(x.origen).toBe("UNIDAD");
+    expect(x.pasos.map((p) => p.responsables.map((y) => y.usuarioId))).toEqual([["u-jant"]]);
+  });
+
+  it("la Sección Certificación sigue con el Jefe SCC", () => {
+    expect(r("CERTIFICADO_CONFORMIDAD", "SCC").pasos[0].responsables[0].usuarioId).toBe("u-jscc");
+  });
+
+  it("informe de ensayo del LRB: analista → Jefe LRB → Jefe del Departamento, sin revisor", () => {
+    const x = r("INFORME_ENSAYO", "LRB");
+    expect(x.pasos.map((p) => p.accion)).toEqual(["ELABORA", "FIRMA", "OFICIALIZA"]);
+    expect(x.pasos.map((p) => p.responsables.map((y) => y.usuarioId))).toEqual([["u-alrb"], ["u-jlrb"], ["u-jdsa"]]);
+  });
+});
