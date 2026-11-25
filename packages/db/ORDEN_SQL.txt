@@ -177,4 +177,5 @@ align_q4_cierre_ot.sql
 align_integracion_armas.sql
 align_ot_migradas.sql
 align_q5_comercial.sql
+align_q5_quimicos.sql
 align_cierre_permisos.sql
