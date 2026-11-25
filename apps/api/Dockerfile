@@ -22,4 +22,9 @@ WORKDIR /repo
 COPY --from=build /repo ./
 WORKDIR /repo/apps/api
 EXPOSE 3001
+# Sin privilegios de administrador dentro del contenedor (usuario node, uid
+# 1000, que trae la imagen oficial). El código queda de root y solo lectura
+# para este usuario; las carpetas que la API escribe (IBIS e instrumentos) son
+# volúmenes que el instalador entrega al uid 1000.
+USER node
 CMD ["node", "dist/main"]

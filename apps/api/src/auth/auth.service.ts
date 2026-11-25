@@ -67,6 +67,14 @@ export interface AccesoDemo {
   grupoNombre: string | null;
 }
 
+/**
+ * Único mensaje para cualquier ingreso rechazado antes de validar la
+ * contraseña: usuario inexistente, contraseña errónea, cuenta bloqueada por
+ * intentos o sin contraseña. Así la respuesta no revela si el usuario existe.
+ */
+export const MENSAJE_INGRESO_FALLIDO =
+  "Usuario o contraseña incorrectos. Tras varios intentos fallidos la cuenta se bloquea unos minutos.";
+
 @Injectable()
 export class AuthService {
   // En módulo real se inyecta PrismaService; aquí instanciamos para simplicidad
@@ -93,7 +101,7 @@ export class AuthService {
       // al de una cuenta real con contraseña incorrecta (evita enumeración por
       // temporización). El resultado se descarta.
       await argon2.verify(DUMMY_ARGON2_HASH, password).catch(() => false);
-      throw new UnauthorizedException("Credenciales inválidas");
+      throw new UnauthorizedException(MENSAJE_INGRESO_FALLIDO);
     }
 
     // Bloqueo temporal por fuerza bruta: si se superó el umbral de intentos
@@ -102,9 +110,11 @@ export class AuthService {
     if (usuario.intentosFallidos >= MAX_INTENTOS_FALLIDOS) {
       const ultimoIntento = usuario.updatedAt?.getTime() ?? 0;
       if (Date.now() - ultimoIntento < LOCK_MS) {
-        throw new UnauthorizedException(
-          "Cuenta bloqueada temporalmente por múltiples intentos fallidos. Intente nuevamente más tarde.",
-        );
+        // Mismo mensaje y mismo tiempo que una contraseña incorrecta: un aviso
+        // propio de «cuenta bloqueada» confirmaba a un atacante que el usuario
+        // existe (hallazgo S8 de las pruebas de seguridad del 24-11-2026).
+        await argon2.verify(DUMMY_ARGON2_HASH, password).catch(() => false);
+        throw new UnauthorizedException(MENSAJE_INGRESO_FALLIDO);
       }
     }
 
@@ -123,7 +133,7 @@ export class AuthService {
           where: { id: usuario.id },
           data: { intentosFallidos: { increment: 1 }, updatedAt: new Date() },
         });
-        throw new UnauthorizedException("Credenciales inválidas");
+        throw new UnauthorizedException(MENSAJE_INGRESO_FALLIDO);
       }
     } else if (usuario.passwordHash) {
       const valid = await argon2.verify(usuario.passwordHash, password);
@@ -134,14 +144,14 @@ export class AuthService {
           // la ventana de bloqueo temporal en el siguiente intento.
           data: { intentosFallidos: { increment: 1 }, updatedAt: new Date() },
         });
-        throw new UnauthorizedException("Credenciales inválidas");
+        throw new UnauthorizedException(MENSAJE_INGRESO_FALLIDO);
       }
     } else if (ldapEnabled) {
       throw new UnauthorizedException("Usuario sin credenciales locales; use el ingreso LDAP");
     } else if (process.env.NODE_ENV !== "production") {
       if (password !== "demo") throw new UnauthorizedException('En desarrollo: use la contraseña "demo"');
     } else {
-      throw new UnauthorizedException("Usuario sin contraseña configurada");
+      throw new UnauthorizedException(MENSAJE_INGRESO_FALLIDO);
     }
 
     // Segundo factor (TOTP). Solo se exige a usuarios con 2FA activo, por lo que

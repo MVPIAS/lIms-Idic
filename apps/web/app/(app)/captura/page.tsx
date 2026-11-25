@@ -10,9 +10,10 @@ import { redirect } from "next/navigation";
  * especificación de la orden) se retiró de la interfaz: los ensayos nacen con la
  * OT y se capturan en ella.
  */
-export default function CapturaPage({ searchParams }: { searchParams?: { corregir?: string | string[] } }) {
-  const id = typeof searchParams?.corregir === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(searchParams.corregir)
-    ? searchParams.corregir
+export default async function CapturaPage({ searchParams }: { searchParams: Promise<{ corregir?: string | string[] }> }) {
+  const { corregir } = await searchParams;
+  const id = typeof corregir === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(corregir)
+    ? corregir
     : null;
   redirect(id ? `/captura-ot?corregir=${id}` : "/captura-ot");
 }

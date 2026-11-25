@@ -198,6 +198,14 @@ if ! grep -qE '^METABASE_LECTURA_PASSWORD=.{16,}' "$APP_DIR/.env" \
   fijar_env METABASE_LECTURA_PASSWORD "$(generar_secreto)"
   ok "Generada la contraseña del usuario de solo lectura del BI (METABASE_LECTURA_PASSWORD, en el .env)"
 fi
+# Administrador de Metabase (lo crea el instalador en el paso 9). Un .env de
+# una versión anterior no trae estas líneas.
+if ! grep -qE '^METABASE_ADMIN_PASSWORD=.{16,}' "$APP_DIR/.env"    || grep -qE '^METABASE_ADMIN_PASSWORD=<<GENERAR>>' "$APP_DIR/.env"; then
+  # Metabase exige al menos una cifra: se asegura con el sufijo.
+  fijar_env METABASE_ADMIN_PASSWORD "$(generar_secreto)7"
+  ok "Generada la contraseña del administrador de Metabase (METABASE_ADMIN_PASSWORD, en el .env)"
+fi
+grep -qE '^METABASE_ADMIN_EMAIL=.+@' "$APP_DIR/.env" || fijar_env METABASE_ADMIN_EMAIL "bi-admin@idic.local"
 
 set -a; . "$APP_DIR/.env"; set +a
 
@@ -272,8 +280,11 @@ mkdir -p "$INSTR_HOST_DIR"
 # (paso 7), desde dentro del contenedor, para acertar con el uid sea cual sea la
 # imagen. Aquí solo se fijan permisos 700 (datos sensibles). Ver PITR.md.
 chmod 700 "${LIMS_BACKUP_DIR:-/srv/lims-backup}"/wal "${LIMS_BACKUP_DIR:-/srv/lims-backup}"/basebackups
-# MinIO y Metabase no corren como root dentro del contenedor.
+# MinIO, Metabase y la API no corren como root dentro del contenedor. La API
+# (usuario node, uid 1000) mueve los XML de IBIS y los archivos de los
+# instrumentos ya leídos: sus carpetas deben ser suyas.
 chown -R 1000:1000 "$LIMS_DATA_DIR/minio" 2>/dev/null || true
+chown -R 1000:1000 "$IBIS_HOST_DIR" "$INSTR_HOST_DIR" 2>/dev/null || true
 chown -R 2000:2000 "$LIMS_DATA_DIR/metabase" 2>/dev/null || true
 ok "Árbol de datos en $LIMS_DATA_DIR"
 
@@ -356,6 +367,11 @@ paso "7/9 · Arranque del stack"
 # =============================================================================
 log "Levantando contenedores (sin build, sin pull: todo es local)..."
 $COMPOSE up -d --remove-orphans 2>&1 | tee -a "$LOG_FILE"
+# BI no activado: Metabase no debe quedar en marcha. Un Metabase sin
+# configurar ofrece su asistente inicial a quien llegue primero.
+if [ "$BI_ON" != "si" ]; then
+  $COMPOSE rm -sf metabase >>"$LOG_FILE" 2>&1     && ok "BI no activado: Metabase detenido y retirado"     || warn "No se pudo detener Metabase: $COMPOSE rm -sf metabase"
+fi
 
 # Certificado sustituido (p. ej. el autofirmado por el de la CA del Ejército):
 # `up -d` no recrea Caddy porque su configuración no cambia, y Caddy seguiría
@@ -646,10 +662,39 @@ else
   ok "Metabase (BI) operativo"
 fi
 
+# --- Administrador de Metabase y alta de la base del LIMS --------------------
+# Se hace aquí, por la red interna de Docker (IP del contenedor), y no por
+# https://bi.<DOMAIN>: Caddy cierra hacia fuera la ruta del asistente inicial.
+# Si no se puede completar, Metabase se detiene: nunca queda en marcha sin
+# administrador. configurar-metabase.py es idempotente.
+MB_CONFIGURADO="no"
+if [ "$BI_ON" = "si" ] && [ -z "$PEND_BI" ]; then
+  MB_IP="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' lims-metabase 2>/dev/null | awk '{print $1}')"
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn "No hay python3 en el servidor: no se puede configurar Metabase automáticamente."
+  elif [ -z "$MB_IP" ]; then
+    warn "No se pudo obtener la dirección interna de Metabase."
+  elif [ "$BI_LECTURA_OK" != "si" ]; then
+    warn "El usuario de solo lectura lims_lectura no está habilitado: Metabase no se configura."
+  elif ( set -a; . "$APP_DIR/.env"; set +a
+         MB_ADMIN_EMAIL="$METABASE_ADMIN_EMAIL" MB_ADMIN_PASSWORD="$METABASE_ADMIN_PASSWORD"          python3 "$APP_DIR/scripts/metabase/configurar-metabase.py" --env "$APP_DIR/.env" --url "http://$MB_IP:3000" ) >>"$LOG_FILE" 2>&1; then
+    MB_CONFIGURADO="si"
+    ok "Metabase configurado: administrador ${METABASE_ADMIN_EMAIL:-bi-admin@idic.local} (contraseña en el .env), base del LIMS y tableros"
+  else
+    warn "No se pudo configurar Metabase (detalle en $LOG_FILE)."
+  fi
+fi
+if [ "$BI_ON" = "si" ] && [ "$MB_CONFIGURADO" != "si" ]; then
+  $COMPOSE stop metabase >>"$LOG_FILE" 2>&1 || true
+  warn "Metabase queda DETENIDO hasta configurarlo (no se deja sin administrador).
+   Corrija la causa y vuelva a ejecutar este instalador."
+  LINEA_BI_EXTRA="  (detenido: falta configurarlo, ver avisos)"
+fi
+
 if [ "$BI_ON" = "si" ]; then
-  LINEA_BI="$URL_BI"
+  LINEA_BI="$URL_BI${LINEA_BI_EXTRA:-}"
   [ "$BI_LECTURA_OK" = "si" ] || LINEA_BI="$URL_BI  (falta habilitar lims_lectura: ver avisos)"
-  PASO_BI="    5. BI: alta de la base y tableros en Metabase (GUIA_ONPREMISE.md §5.7)"
+  PASO_BI="    5. BI: ingrese a $URL_BI con ${METABASE_ADMIN_EMAIL:-bi-admin@idic.local} (contraseña en METABASE_ADMIN_PASSWORD del .env)"
 else
   LINEA_BI="no activado (GUIA_ONPREMISE.md §5.7)"
   PASO_BI=""

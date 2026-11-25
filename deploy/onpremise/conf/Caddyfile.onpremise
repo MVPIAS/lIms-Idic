@@ -37,6 +37,13 @@
 
 	# /api/* -> backend NestJS (se PRESERVA el prefijo /api; Nest usa
 	# setGlobalPrefix('api'), igual que en preproducción).
+	# El LIMS no usa el optimizador de imágenes de Next.js (next.config.js lo
+	# apaga). Se cierra además su ruta aquí, para que ninguna petición llegue a
+	# ese código aunque una versión futura lo reactive por defecto.
+	handle /_next/image* {
+		respond 404
+	}
+
 	handle /api/* {
 		reverse_proxy api:3001
 	}
@@ -51,9 +58,13 @@
 	# Cabeceras de seguridad para TODO el sitio (front Next + API).
 	header {
 		-Server
+		# Next.js ya no envía X-Powered-By (next.config.js); se quita también aquí
+		# por si una imagen anterior la emitiera.
+		-X-Powered-By
 		Strict-Transport-Security "max-age=15552000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "SAMEORIGIN"
+		Permissions-Policy "geolocation=(), camera=(), microphone=(), payment=(), usb=(), magnetometer=(), gyroscope=(), accelerometer=()"
 		Referrer-Policy "no-referrer"
 		X-XSS-Protection "0"
 		# NO se define Content-Security-Policy aquí. A propósito, igual que en
@@ -81,10 +92,17 @@
 # comente este bloque completo: Metabase quedará accesible solo por túnel SSH.
 bi.{$DOMAIN} {
 	tls /etc/caddy/certs/lims.crt /etc/caddy/certs/lims.key
+	# El asistente inicial de Metabase (crear el primer administrador) no se
+	# expone nunca a la red: lo ejecuta el instalador por la red interna de
+	# Docker. Sin este cierre, un Metabase recién arrancado y aún sin
+	# configurar permitía que cualquiera en la red creara su administrador.
+	@asistente path /api/setup /api/setup/*
+	respond @asistente 404
 	reverse_proxy metabase:3000
 	encode gzip zstd
 	header {
 		-Server
+		-X-Powered-By
 		Strict-Transport-Security "max-age=15552000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		Referrer-Policy "no-referrer"

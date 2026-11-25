@@ -120,7 +120,10 @@ echo "── LIMS IDIC · chequeo de salud · $(date '+%Y-%m-%d %H:%M:%S')"
 # =============================================================================
 # 1 · Contenedores
 # =============================================================================
-ESPERADOS="lims-caddy lims-web lims-api lims-postgres lims-redis lims-minio lims-metabase"
+ESPERADOS="lims-caddy lims-web lims-api lims-postgres lims-redis lims-minio"
+# Metabase solo se vigila si el BI está activado (URL_BI con valor): sin BI el
+# instalador lo deja retirado a propósito.
+[ -n "${URL_BI:-}" ] && ESPERADOS="$ESPERADOS lims-metabase"
 for c in $ESPERADOS; do
   estado="$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo ausente)"
   salud="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}sin-sonda{{end}}' "$c" 2>/dev/null || echo ausente)"
