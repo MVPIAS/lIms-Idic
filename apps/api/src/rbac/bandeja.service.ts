@@ -21,6 +21,30 @@ export interface ElementoBandeja {
   ruta: string;
   /** Fecha relevante (AAAA-MM-DD): compromiso, emisión, despacho… */
   fecha?: string | null;
+  /** OT migrada del sistema anterior (align_ot_migradas.sql): la pantalla la sombrea. */
+  migrada?: { desde: string | null; en: string | null };
+}
+
+/** Fila cruda de bandeja-listas.ts (las de OT traen además la marca de migración). */
+export interface FilaBandeja {
+  id: string;
+  texto: string;
+  detalle: string | null;
+  ruta: string;
+  fecha: string | null;
+  migrada?: boolean | null;
+  migrada_desde?: string | null;
+  migrada_en?: Date | string | null;
+}
+
+/** Fila → elemento de la tarjeta. La marca de migración solo viaja si la OT es migrada. */
+export function elementoBandeja(f: FilaBandeja): ElementoBandeja {
+  const e: ElementoBandeja = { id: f.id, texto: f.texto, detalle: f.detalle || null, ruta: f.ruta, fecha: f.fecha };
+  if (f.migrada) {
+    const en = f.migrada_en instanceof Date ? f.migrada_en.toISOString() : f.migrada_en ?? null;
+    e.migrada = { desde: f.migrada_desde ?? null, en };
+  }
+  return e;
 }
 
 export interface ItemBandeja {
@@ -163,11 +187,8 @@ export class BandejaService {
         const params: unknown[] = [tenant, unidades];
         if (def.extra === "yo") params.push(ctx.usuarioId);
         if (def.extra === "lab") params.push(lab);
-        const filas = await this.filas<{ id: string; texto: string; detalle: string | null; ruta: string; fecha: string | null }>(
-          `${def.sql} LIMIT ${MAX_ELEMENTOS}`,
-          ...params,
-        );
-        return filas.length ? { ...it, elementos: filas.map((f) => ({ id: f.id, texto: f.texto, detalle: f.detalle || null, ruta: f.ruta, fecha: f.fecha })) } : it;
+        const filas = await this.filas<FilaBandeja>(`${def.sql} LIMIT ${MAX_ELEMENTOS}`, ...params);
+        return filas.length ? { ...it, elementos: filas.map(elementoBandeja) } : it;
       }),
     );
   }

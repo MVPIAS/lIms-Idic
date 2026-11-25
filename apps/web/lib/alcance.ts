@@ -43,7 +43,15 @@ export interface ItemBandeja {
   ruta?: string;
   severidad: Severidad;
   /** Las primeras filas de la lista («lo que le toca»): cada una lleva a su OT, documento u oficio. */
-  elementos?: { id: string; texto: string; detalle?: string | null; ruta: string; fecha?: string | null }[];
+  elementos?: {
+    id: string;
+    texto: string;
+    detalle?: string | null;
+    ruta: string;
+    fecha?: string | null;
+    /** OT migrada del sistema anterior (folio original y fecha de carga). */
+    migrada?: { desde: string | null; en: string | null } | null;
+  }[];
 }
 
 export interface EstadoAlcance {
@@ -117,7 +125,14 @@ function normalizarBandeja(raw: any): ItemBandeja[] | null {
         ? x.elementos
             .filter((e: any) => e && typeof e.texto === "string" && typeof e.ruta === "string" && e.ruta.startsWith("/"))
             .slice(0, 5)
-            .map((e: any) => ({ id: String(e.id ?? e.ruta), texto: e.texto, detalle: e.detalle ?? null, ruta: e.ruta, fecha: e.fecha ?? null }))
+            .map((e: any) => ({
+              id: String(e.id ?? e.ruta),
+              texto: e.texto,
+              detalle: e.detalle ?? null,
+              ruta: e.ruta,
+              fecha: e.fecha ?? null,
+              migrada: e.migrada && typeof e.migrada === "object" ? { desde: e.migrada.desde ?? null, en: e.migrada.en ?? null } : null,
+            }))
         : undefined,
     }));
 }

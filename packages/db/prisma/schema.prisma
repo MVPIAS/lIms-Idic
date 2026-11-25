@@ -476,6 +476,12 @@ model OrdenTrabajo {
   // cerrada_por: cierre_analista_at/_por, cierre_jefe_lab_at/_por,
   // cierre_jefe_depto_at/_por (COORD-02) e incumplimiento_cerrado_at/_por/_motivo.
   // En `resultado`: estado «no_ejecutado» con no_ejecutado_motivo/_por/_at.
+  /// LIMS (creada en el sistema) | MIGRACION (cargada del sistema anterior).
+  /// Solo se marca en pantalla. DDL: packages/db/align_ot_migradas.sql
+  origenRegistro        String    @default("LIMS") @map("origen_registro") @db.VarChar(12)
+  /// Folio original en el sistema anterior (FOLDERNO).
+  migradaDesde          String?   @map("migrada_desde")
+  migradaEn             DateTime? @map("migrada_en") @db.Timestamptz
   createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt             DateTime  @default(now()) @map("updated_at") @db.Timestamptz
 

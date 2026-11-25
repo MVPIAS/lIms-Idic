@@ -37,6 +37,23 @@ export interface QueryListaOt {
   idsMias?: string[] | null;
   /** ids de OT que YA tienen analista (filtro «sin analista»), ya calculados */
   idsConAnalista?: string[] | null;
+  /** Origen del registro: OT creadas en el LIMS o migradas del sistema anterior. */
+  origen?: OrigenRegistro | null;
+}
+
+/** Origen del registro de la OT (align_ot_migradas.sql). */
+export const ORIGENES_REGISTRO = ["LIMS", "MIGRACION"] as const;
+export type OrigenRegistro = (typeof ORIGENES_REGISTRO)[number];
+
+/**
+ * Valor del parámetro `origen` de la lista: LIMS | MIGRACION, o los alias de
+ * la pantalla «nuevas» | «migradas». Cualquier otro valor = sin filtro.
+ */
+export function origenPedido(v?: string | null): OrigenRegistro | null {
+  const t = (v ?? "").trim().toLowerCase();
+  if (t === "lims" || t === "nuevas") return "LIMS";
+  if (t === "migracion" || t === "migradas") return "MIGRACION";
+  return null;
 }
 
 export interface ContextoListaOt {
@@ -86,6 +103,8 @@ export function filtroListaOt(q: QueryListaOt, ctx: ContextoListaOt): Record<str
         { ocNumero: c },
         { cliente: { razonSocial: c } },
         { unidad: { codigo: c } },
+        // Folio de la OT en el sistema anterior (OT migradas).
+        { migradaDesde: c },
       ],
     });
   }
@@ -112,6 +131,7 @@ export function filtroListaOt(q: QueryListaOt, ctx: ContextoListaOt): Record<str
   if (q.idsConAnalista) and.push({ id: { notIn: q.idsConAnalista } });
   if (q.idsListasCierre) and.push({ id: { in: q.idsListasCierre } });
   if (q.idsSinFactura) and.push({ id: { in: q.idsSinFactura } });
+  if (q.origen) and.push({ origenRegistro: q.origen });
 
   return and.length ? { AND: and } : {};
 }

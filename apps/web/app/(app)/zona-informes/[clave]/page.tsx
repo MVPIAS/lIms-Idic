@@ -10,6 +10,7 @@ import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { llamar } from "@/lib/laboratorio";
 import { hoyChile } from "@/lib/fecha-chile";
+import { CLASE_FILA_MIGRADA, EtiquetaMigrada, ORIGENES_REGISTRO, migracionDe, textoMigrada } from "@/components/ot/MarcaMigrada";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "/api";
 
@@ -26,9 +27,10 @@ interface Informe {
   descripcion: string;
   legado: string[];
   pedido?: string | null;
-  filtros: ("fecha" | "laboratorio" | "centroCosto" | "estado" | "texto" | "proyecto")[];
+  filtros: ("fecha" | "laboratorio" | "centroCosto" | "estado" | "texto" | "proyecto" | "origen")[];
   columnas: Columna[];
-  filas: Record<string, string | number | null>[];
+  /** Las filas de OT migradas traen además `_migrada` ({ desde, en }): solo para la pantalla. */
+  filas: Record<string, any>[];
   totales: Record<string, number>;
   truncado: boolean;
   limite: number;
@@ -64,6 +66,8 @@ export default function InformeFijoPage() {
   // Quinto envío IDIC (lote 3): proyecto del cliente.
   const [proyecto, setProyecto] = useState("");
   const [proyectos, setProyectos] = useState<Opcion[]>([]);
+  // OT nuevas o migradas del sistema anterior (informes de OT).
+  const [origen, setOrigen] = useState("");
   const [labs, setLabs] = useState<Opcion[]>([]);
   const [ccs, setCcs] = useState<Opcion[]>([]);
   const [estados, setEstados] = useState<Opcion[]>([]);
@@ -81,8 +85,9 @@ export default function InformeFijoPage() {
     if (f.includes("estado") && estado) p.set("estado", estado);
     if (f.includes("texto") && texto.trim()) p.set("texto", texto.trim());
     if (f.includes("proyecto") && proyecto) p.set("proyecto", proyecto);
+    if (f.includes("origen") && origen) p.set("origen", origen);
     return p.toString();
-  }, [filtros, desde, hasta, laboratorio, centroCosto, estado, texto, proyecto]);
+  }, [filtros, desde, hasta, laboratorio, centroCosto, estado, texto, proyecto, origen]);
 
   const consultar = useCallback(
     async (primera = false) => {
@@ -243,6 +248,20 @@ export default function InformeFijoPage() {
             ))}
           </select>
         ) : null}
+        {f.includes("origen") ? (
+          <label style={{ fontSize: 12 }}>
+            Origen{" "}
+            <select value={origen} onChange={(e) => setOrigen(e.target.value)}
+              aria-label="Origen de la OT: nuevas o migradas del sistema anterior"
+              title="Nuevas: creadas en este LIMS. Migradas: traídas del sistema anterior.">
+              {ORIGENES_REGISTRO.map((o) => (
+                <option key={o.valor} value={o.valor}>
+                  {o.texto}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         {f.includes("texto") ? (
           <input type="search" placeholder="Buscar (código, cliente, RUT…)" value={texto} onChange={(e) => setTexto(e.target.value)} />
         ) : null}
@@ -280,15 +299,20 @@ export default function InformeFijoPage() {
                   </td>
                 </tr>
               ) : (
-                inf.filas.map((fila, i) => (
-                  <tr key={i}>
-                    {inf.columnas.map((c) => (
-                      <td key={c.clave} className={NUM.has(c.tipo) ? "num" : undefined}>
-                        {fmt(c, fila[c.clave])}
-                      </td>
-                    ))}
-                  </tr>
-                ))
+                inf.filas.map((fila, i) => {
+                  // OT migrada del sistema anterior: fila sombreada y etiqueta junto a la primera columna (no sale en el Excel).
+                  const m = migracionDe(fila);
+                  return (
+                    <tr key={i} className={m ? CLASE_FILA_MIGRADA : undefined} title={m ? textoMigrada(m) : undefined}>
+                      {inf.columnas.map((c, j) => (
+                        <td key={c.clave} className={NUM.has(c.tipo) ? "num" : undefined}>
+                          {fmt(c, fila[c.clave])}
+                          {j === 0 && m ? <EtiquetaMigrada ot={fila} style={{ marginLeft: 6 }} /> : null}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
             {inf.filas.length ? (

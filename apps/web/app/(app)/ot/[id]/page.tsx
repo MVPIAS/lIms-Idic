@@ -38,6 +38,7 @@ import PreparacionOt from "@/components/formularios/PreparacionOt";
 import RemitirDco from "@/components/bpch-procesos/RemitirDco";
 import SistemaArmasBpchOt from "@/components/bpch-procesos/SistemaArmasBpchOt";
 import ConsumosOt from "@/components/consumibles/ConsumosOt";
+import { AvisoMigrada, EtiquetaMigrada } from "@/components/ot/MarcaMigrada";
 
 /** Laboratorios de la Sección Metrología: sus OT trabajan con instrumentos, no con muestras (EP-04). */
 const LABS_METROLOGIA = ["LMT", "LMTE", "LNF", "LCAD"];
@@ -304,8 +305,12 @@ export default function ExpedientePage() {
           {ot?.fechaCompromiso ? <> · Compromiso: <b>{fechaDia(ot.fechaCompromiso)}</b></> : null}
           {opiVigente && <span className="pill amber" style={{ marginLeft: 8 }}>OPI pendiente</span>}
           {ot?.conCobro === false && <span className="pill gray" style={{ marginLeft: 8 }}>Sin cobro</span>}
+          <EtiquetaMigrada ot={ot} style={{ marginLeft: 8 }} />
         </div>
       </div>
+
+      {/* OT traída del sistema anterior: aviso solo en pantalla (no sale en informes ni certificados). */}
+      <AvisoMigrada ot={ot} />
 
       {/* B-002: un laboratorio que participa en la OT de otro (orden interna) ve el expediente con sus ensayos. */}
       {ot?.participacion?.laboratorios?.length > 0 && (

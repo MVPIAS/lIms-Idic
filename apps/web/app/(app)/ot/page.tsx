@@ -9,6 +9,7 @@ import { ORIGEN_LABEL } from "../cotizaciones/_components/comercial";
 import { llamar, qs, type Paginado, type Unidad } from "@/lib/laboratorio";
 import SemaforoPlazo from "@/components/documentos/SemaforoPlazo";
 import { SEMAFORO, semaforoDe } from "@/lib/documentos";
+import { CLASE_FILA_MIGRADA, EtiquetaMigrada, ORIGENES_REGISTRO, migracionDe } from "@/components/ot/MarcaMigrada";
 
 /**
  * Lista de OT con búsqueda, filtros y paginación EN EL SERVIDOR (antes: las 50
@@ -92,9 +93,13 @@ interface Extra {
   sinFactura?: boolean;
 }
 
+/** Origen del registro: OT nuevas (creadas en el LIMS) o migradas del sistema anterior. */
+type OrigenRegistro = "" | "LIMS" | "MIGRACION";
+
 interface Filtros {
   atajo: Atajo;
   unidad: string;
+  origen: OrigenRegistro;
   q: string;
   page: number;
   extra: Extra;
@@ -122,7 +127,12 @@ function filtrosDesdeUrl(): Filtros {
     estado: estado && estado !== "abiertas" ? estado : undefined,
     sinFactura: p.get("sinFactura") === "1" || undefined,
   };
-  return { atajo, unidad: p.get("unidad") ?? "", q: p.get("q") ?? "", page: Number(p.get("page")) || 1, extra };
+  const origen = (p.get("origen") ?? "").toUpperCase();
+  return {
+    atajo,
+    unidad: p.get("unidad") ?? "",
+    origen: origen === "LIMS" || origen === "MIGRACION" ? origen : "",
+    q: p.get("q") ?? "", page: Number(p.get("page")) || 1, extra };
 }
 
 function parametros(f: Filtros, limit: number) {
@@ -130,6 +140,7 @@ function parametros(f: Filtros, limit: number) {
   return {
     q: f.q.trim(),
     unidad: f.unidad,
+    origen: f.origen,
     page: f.page,
     limit,
     mias: f.atajo === "mias",
@@ -214,6 +225,12 @@ export default function OtPage() {
       ),
     },
     {
+      // OT nueva o migrada del sistema anterior (la fila migrada además va sombreada).
+      key: "registro", label: "Registro",
+      value: (r) => (migracionDe(r) ? "Migrada" : "Nueva"),
+      render: (r) => <EtiquetaMigrada ot={r} />,
+    },
+    {
       key: "laboratorio", label: "Laboratorio",
       value: (r) => r.unidad?.codigo ?? "",
       render: (r) => r.unidad
@@ -274,6 +291,14 @@ export default function OtPage() {
           <option value="">Todos los laboratorios</option>
           {labs.map((u) => <option key={u.id} value={u.codigo}>{u.codigo} · {u.nombre}</option>)}
         </select>
+        <label style={{ fontSize: 12, display: "inline-flex", gap: 6, alignItems: "center" }}>
+          Origen:
+          <select value={filtros?.origen ?? ""} onChange={(e) => cambiar({ origen: e.target.value as OrigenRegistro })}
+            aria-label="Origen de la OT: nuevas o migradas del sistema anterior"
+            title="Nuevas: creadas en este LIMS. Migradas: traídas del sistema anterior.">
+            {ORIGENES_REGISTRO.map((o) => <option key={o.valor} value={o.valor}>{o.texto}</option>)}
+          </select>
+        </label>
       </div>
 
       {avisoExtra && (
@@ -290,6 +315,7 @@ export default function OtPage() {
         headerSearch={false}
         paginate={false}
         onRowClick={(r) => router.push(`/ot/${r.id}` as any)}
+        rowClassName={(r) => (migracionDe(r) ? CLASE_FILA_MIGRADA : undefined)}
         vacio="No hay órdenes de trabajo para este filtro."
       />
 

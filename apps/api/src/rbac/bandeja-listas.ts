@@ -14,11 +14,15 @@ const OT_CERRADA = `('cerrada','anulada')`;
 const HOY_CL = `(now() AT TIME ZONE ${SQL_ZONA})::date`;
 const OT_SCOPE = `o.tenant_id = COALESCE($1::uuid, o.tenant_id) AND ($2::uuid[] IS NULL OR o.unidad_principal = ANY($2::uuid[]))`;
 
-/** Fila de OT con cliente y laboratorio, para las tarjetas de OT. */
+/**
+ * Fila de OT con cliente y laboratorio, para las tarjetas de OT. Lleva la marca
+ * de OT migrada del sistema anterior (align_ot_migradas.sql) para sombrearla.
+ */
 const filaOt = (where: string, orden = "o.fecha_compromiso NULLS LAST, o.created_at", ruta = "'/ot/' || o.id") => `
   SELECT o.id::text AS id, o.codigo AS texto,
          concat_ws(' · ', u.codigo, cl.razon_social) AS detalle,
-         ${ruta} AS ruta, o.fecha_compromiso::text AS fecha
+         ${ruta} AS ruta, o.fecha_compromiso::text AS fecha,
+         (o.origen_registro = 'MIGRACION') AS migrada, o.migrada_desde, o.migrada_en
     FROM orden_trabajo o
     LEFT JOIN unidad u ON u.id = o.unidad_principal
     LEFT JOIN cliente cl ON cl.id = o.cliente_id

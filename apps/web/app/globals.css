@@ -16,6 +16,8 @@
   --primary:#12343f;--primary-2:#1d4856;--accent:#008c9e;
   --green:#1f8a5b;--amber:#b87300;--red:#c43d3d;--blue:#2b65d9;--violet:#7057c8;
   --shadow:0 4px 14px rgba(24,33,47,.06);
+  /* OT migradas del sistema anterior (solo pantalla): fondo de fila, etiqueta y aviso. */
+  --migrada-bg:#f3f0fb;--migrada-bg-hover:#e9e3f8;--migrada-ink:#4b3a8f;
 }
 
 @layer base {
@@ -74,6 +76,10 @@ table.data tr.row-action{cursor:pointer}table.data tr.row-action:hover td{backgr
 .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:600}
 .pill.green{background:#dcf5e6;color:#155e3d}.pill.amber{background:#fff0d4;color:#7a4b00}.pill.red{background:#fdecec;color:#7d1f1f}
 .pill.blue{background:#e3edff;color:#1c4ba6}.pill.gray{background:#eef3f7;color:#516071}.pill.teal{background:#dcf0f3;color:#006879}
+.pill.migrada{background:var(--migrada-bg-hover);color:var(--migrada-ink);border:1px dashed var(--violet)}
+table.data tr.fila-migrada td{background:var(--migrada-bg)}table.data tr.fila-migrada td:first-child{box-shadow:inset 3px 0 0 var(--violet)}
+table.data tr.fila-migrada.row-action:hover td{background:var(--migrada-bg-hover)}
+.bandeja-lista li.fila-migrada a{background:var(--migrada-bg)}
 
 /* ---- Botones ---- */
 .btn{display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border-radius:6px;font-weight:600;font-size:12.5px;border:0;cursor:pointer;text-decoration:none}
@@ -97,7 +103,7 @@ table.data tr.row-action{cursor:pointer}table.data tr.row-action:hover td{backgr
 
 /* ---- Alertas ---- */
 .alert{padding:9px 13px;border-radius:6px;font-size:12px;border-left:4px solid;margin-bottom:11px}
-.alert.info{background:#eff5ff;border-color:var(--blue);color:#1c4ba6}.alert.warn{background:#fff6e8;border-color:var(--amber);color:#7a4b00}.alert.success{background:#e9f6ee;border-color:var(--green);color:#155e3d}
+.alert.migrada{background:var(--migrada-bg);border-color:var(--violet);color:var(--migrada-ink)}.alert.info{background:#eff5ff;border-color:var(--blue);color:#1c4ba6}.alert.warn{background:#fff6e8;border-color:var(--amber);color:#7a4b00}.alert.success{background:#e9f6ee;border-color:var(--green);color:#155e3d}
 
 /* ---- Etiquetas legacy ---- */
 .legacy-note{display:inline-block;background:#eef0ff;color:#4a3ea1;font-family:'JetBrains Mono',monospace;font-size:10px;padding:1px 6px;border-radius:3px}

@@ -35,6 +35,8 @@ export interface DataTableProps {
   rowKey?: (row: any) => string;
   /** click en fila (opcional). */
   onRowClick?: (row: any) => void;
+  /** clase extra de la fila (p. ej. «fila-migrada» para sombrear una OT migrada). */
+  rowClassName?: (row: any) => string | undefined;
   /** columna(s) extra al final (acciones), no ordenable ni filtrable. */
   acciones?: (row: any) => ReactNode;
   accionesLabel?: string;
@@ -58,7 +60,7 @@ const asText = (v: unknown) =>
   v == null ? "" : String(v).toLowerCase();
 
 export default function DataTable({
-  columns, rows, rowKey, onRowClick, acciones, accionesLabel = "Acciones",
+  columns, rows, rowKey, onRowClick, rowClassName, acciones, accionesLabel = "Acciones",
   headerSearch = true, searchKeys, pageSize = 20, paginate = true, loading = false, vacio,
 }: DataTableProps) {
   const uid = useId();
@@ -237,7 +239,7 @@ export default function DataTable({
           <tbody>
             {visibles.map((row) => (
               <tr key={rowKey ? rowKey(row) : row.id}
-                className={onRowClick ? "row-action" : undefined}
+                className={[onRowClick ? "row-action" : "", rowClassName?.(row) ?? ""].filter(Boolean).join(" ") || undefined}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
                 style={onRowClick ? { cursor: "pointer" } : undefined}>
                 {columns.map((c) => (

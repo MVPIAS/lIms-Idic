@@ -54,6 +54,9 @@ const LATERAL_UMBRALES = `LEFT JOIN LATERAL (
                 FROM parametro_sistema ps WHERE ps.tenant_id = o.tenant_id AND ps.categoria = 'costo_real' AND ps.activo) x
     ) um ON TRUE`;
 
+/** Misma marca que ORIGEN_OT de catalogo.ts (no se importa: catalogo.ts importa este fichero). */
+const ORIGEN_OT_Z26 = { columna: `o.origen_registro`, desde: `o.migrada_desde`, en: `o.migrada_en` };
+
 const BASE_OT_Z26: Base = {
   from: `orden_trabajo o
     LEFT JOIN cliente c ON c.id = o.cliente_id
@@ -67,6 +70,7 @@ const BASE_OT_Z26: Base = {
   estado: `o.estado`,
   texto: [`o.codigo`, `c.razon_social`, `c.rut`, `cot.codigo`],
   proyecto: `o.proyecto_id`,
+  origen: ORIGEN_OT_Z26,
   alcance: ALCANCE_OT,
 };
 

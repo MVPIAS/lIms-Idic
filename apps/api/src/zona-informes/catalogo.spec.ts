@@ -1,4 +1,4 @@
-import { AREAS, INFORMES, armarConsulta, filtrosDe, informePorClave, totales, validarFiltros, LIMITE_FILAS } from "./catalogo";
+import { AREAS, COL_MIGRADA, INFORMES, armarConsulta, filtrosDe, informePorClave, totales, validarFiltros, LIMITE_FILAS } from "./catalogo";
 import { DOCUMENTOS_LEGADO } from "./legado-documentos";
 import { INFORMES_ESPECIALES } from "./especiales";
 
@@ -66,6 +66,7 @@ describe("Zona de informes · consulta", () => {
         ...(def.filtros.includes("estado") ? { estado: "cerrada" } : {}),
         ...(def.filtros.includes("texto") ? { texto: "a" } : {}),
         ...(filtrosDe(def).includes("proyecto") ? { proyecto: LAB } : {}),
+        ...(filtrosDe(def).includes("origen") ? { origen: "MIGRACION" } : {}),
       });
       expect(f).toHaveProperty("filtros");
       const { sql } = armarConsulta(def, (f as any).filtros, T, [LAB]);
@@ -142,6 +143,31 @@ describe("Zona de informes · totales", () => {
   it("suma solo las columnas con total", () => {
     const def = informePorClave("ot-cc-estado")!;
     expect(totales(def, [{ cantidad: 2, monto: "1000.5" }, { cantidad: 3, monto: null }])).toEqual({ cantidad: 5, monto: 1000.5 });
+  });
+});
+
+describe("Zona de informes · OT migradas del sistema anterior", () => {
+  it("los informes de OT admiten el filtro «Origen»; los demás no", () => {
+    expect(filtrosDe(informePorClave("ot-listado")!)).toContain("origen");
+    expect(filtrosDe(informePorClave("z26-ot-externas")!)).toContain("origen");
+    expect(filtrosDe(informePorClave("facturas")!)).not.toContain("origen");
+    expect(validarFiltros(informePorClave("facturas")!, { origen: "MIGRACION" })).toHaveProperty("error");
+  });
+  it("valida el origen y lo pasa como parámetro", () => {
+    const def = informePorClave("ot-listado")!;
+    expect(validarFiltros(def, { origen: "migracion" })).toEqual({ filtros: { origen: "MIGRACION" } });
+    expect(validarFiltros(def, { origen: "LIMS" })).toEqual({ filtros: { origen: "LIMS" } });
+    expect(validarFiltros(def, { origen: "otro' OR 1=1" })).toHaveProperty("error");
+    const { sql, args } = armarConsulta(def, { origen: "MIGRACION" }, T, null);
+    expect(sql).toContain("o.origen_registro = $2");
+    expect(args).toEqual([T, "MIGRACION"]);
+  });
+  it("las filas de detalle de OT traen la marca oculta; las agrupadas y las de otras bases, no", () => {
+    expect(armarConsulta(informePorClave("ot-listado")!, {}, T, null).sql).toContain(`AS ${COL_MIGRADA.migrada}`);
+    expect(armarConsulta(informePorClave("ot-cc-estado")!, {}, T, null).sql).not.toContain(COL_MIGRADA.migrada);
+    expect(armarConsulta(informePorClave("facturas")!, {}, T, null).sql).not.toContain(COL_MIGRADA.migrada);
+    // La marca no es una columna del informe: no puede salir en el Excel.
+    for (const i of INFORMES) expect(i.columnas.some((c) => c.clave.startsWith("_migrada"))).toBe(false);
   });
 });
 

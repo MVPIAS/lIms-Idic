@@ -25,7 +25,7 @@ import { sino, valoresCategoria } from "../common/parametros-r4d";
 import { PrismaService } from "../common/prisma.service";
 import { instanteFechaIngreso } from "../common/fecha-chile";
 import { LaboratorioOtService, UnidadResumen } from "./laboratorio-ot.service";
-import { filtroListaOt, paginacion, semaforoPedido } from "./lista-ot";
+import { filtroListaOt, origenPedido, paginacion, semaforoPedido } from "./lista-ot";
 import { semaforoPlazo } from "./plazos";
 import { diasPorVencerDe } from "./dias-por-vencer";
 import { exigirClienteHabilitado } from "../cliente/mora.service";
@@ -254,6 +254,8 @@ export class OtController {
    *                     cortes que Mi bandeja). `vencidas=1` / `porVencer=1` son alias.
    *   listasCierre    · 1 = documentos oficiales y entregados, resultados aprobados: falta cerrar
    *   sinFactura      · 1 = OT cerradas con cobro sin factura viva (Finanzas)
+   *   origen          · LIMS | MIGRACION (alias nuevas | migradas): OT creadas en el
+   *                     sistema o migradas del anterior (align_ot_migradas.sql)
    *   derivadas       · 1 = suma las OT de otros laboratorios con ensayos derivados por orden
    *                     interna a los suyos (buscador de «Captura y revisión por OT», D02-25)
    *   page / limit    · paginación (limit máx. 200, por defecto 20)
@@ -314,6 +316,7 @@ export class OtController {
         idsConAnalista,
         idsListasCierre,
         idsSinFactura,
+        origen: origenPedido(query.origen),
       },
       { tenantId, unidadesVisibles, idsDerivadas, hoy: new Date(), diasPorVencer },
     ) as Prisma.OrdenTrabajoWhereInput;

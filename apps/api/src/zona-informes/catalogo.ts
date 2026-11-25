@@ -26,7 +26,7 @@ export interface Columna {
   total?: boolean;
 }
 
-export type FiltroClave = "fecha" | "laboratorio" | "centroCosto" | "estado" | "texto" | "proyecto";
+export type FiltroClave = "fecha" | "laboratorio" | "centroCosto" | "estado" | "texto" | "proyecto" | "origen";
 
 export const AREAS = [
   "Órdenes de trabajo",
@@ -56,6 +56,13 @@ export interface Base {
    * «Proyecto» (filtrosDe).
    */
   proyecto?: string;
+  /**
+   * Origen del registro de la OT de la fila (align_ot_migradas.sql): LIMS o
+   * MIGRACION. Si la base lo tiene, el informe admite el filtro «Origen» y las
+   * filas de detalle (sin GROUP BY) llevan la marca de OT migrada para la
+   * pantalla. La marca no sale en el Excel.
+   */
+  origen?: { columna: string; desde: string; en: string };
   /** Alcance por laboratorio para un arreglo (`k` = `$n::uuid[]`); null = datos comunes. */
   alcance: ((k: string) => string) | null;
 }
@@ -70,6 +77,9 @@ const NETO_CLP = `(CASE WHEN cot.moneda = 'USD' THEN cot.neto * COALESCE(cot.dol
 const ALCANCE_COT = (k: string) =>
   `(EXISTS (SELECT 1 FROM orden_trabajo ox WHERE ox.cotizacion_id = cot.id AND ox.unidad_principal = ANY(${k}))` + ` OR cc.unidad_id = ANY(${k}))`;
 
+/** Marca de OT migrada sobre el alias `o` de orden_trabajo. */
+export const ORIGEN_OT = { columna: `o.origen_registro`, desde: `o.migrada_desde`, en: `o.migrada_en` };
+
 const BASE_OT: Base = {
   from: `orden_trabajo o
     LEFT JOIN cliente c ON c.id = o.cliente_id
@@ -83,6 +93,7 @@ const BASE_OT: Base = {
   estado: `o.estado`,
   texto: [`o.codigo`, `c.razon_social`, `c.rut`],
   proyecto: `o.proyecto_id`,
+  origen: ORIGEN_OT,
   alcance: (k) => `o.unidad_principal = ANY(${k})`,
 };
 
@@ -919,16 +930,23 @@ export interface FiltrosZona {
   estado?: string;
   texto?: string;
   proyecto?: string;
+  /** LIMS | MIGRACION */
+  origen?: "LIMS" | "MIGRACION";
 }
 
 /**
  * Filtros que admite el informe: los declarados más «Proyecto» si su base
- * conoce el proyecto de la fila (OT, cotizaciones, facturas…: lote 3).
+ * conoce el proyecto de la fila (OT, cotizaciones, facturas…: lote 3) y
+ * «Origen» (OT nuevas o migradas) si conoce el origen de la OT.
  */
 export function filtrosDe(def: InformeFijo): FiltroClave[] {
   const base: Base = BASES[def.base];
-  return base.proyecto && !def.filtros.includes("proyecto") ? [...def.filtros, "proyecto"] : def.filtros;
+  const f = base.proyecto && !def.filtros.includes("proyecto") ? [...def.filtros, "proyecto" as const] : def.filtros;
+  return base.origen && !f.includes("origen") ? [...f, "origen"] : f;
 }
+
+/** Alias de las columnas ocultas con la marca de OT migrada (no son columnas del informe). */
+export const COL_MIGRADA = { migrada: "_migrada", desde: "_migrada_desde", en: "_migrada_en" } as const;
 
 const FECHA = /^\d{4}-\d{2}-\d{2}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -964,6 +982,13 @@ export function validarFiltros(def: InformeFijo, q: Record<string, unknown>): { 
     if (!ESTADO.test(estado)) return { error: "El estado elegido no es válido." };
     f.estado = estado;
   }
+  const origen = s("origen");
+  if (origen) {
+    if (!admite.has("origen")) return { error: "Este informe no se filtra por origen de la OT." };
+    const o = origen.toUpperCase();
+    if (o !== "LIMS" && o !== "MIGRACION") return { error: "El origen elegido no es válido (LIMS o MIGRACION)." };
+    f.origen = o;
+  }
   const texto = s("texto");
   if (texto) {
     if (!admite.has("texto")) return { error: "Este informe no admite búsqueda por texto." };
@@ -992,13 +1017,19 @@ export function armarConsulta(def: InformeFijo, filtros: FiltrosZona, tenantId: 
   if (filtros.centroCosto && base.centroCosto) conds.push(`${base.centroCosto} = ${p(filtros.centroCosto)}::uuid`);
   if (filtros.estado && base.estado) conds.push(`${base.estado} = ${p(filtros.estado)}`);
   if (filtros.proyecto && base.proyecto) conds.push(`${base.proyecto} = ${p(filtros.proyecto)}::uuid`);
+  if (filtros.origen && base.origen) conds.push(`${base.origen.columna} = ${p(filtros.origen)}`);
   if (filtros.texto && base.texto?.length) {
     const k = p(`%${filtros.texto.replace(/[\\%_]/g, (m) => `\\${m}`)}%`);
     conds.push(`(${base.texto.map((e) => `${e} ILIKE ${k}`).join(" OR ")})`);
   }
   if (unidades && base.alcance) conds.push(base.alcance(`${p(unidades)}::uuid[]`));
+  // Filas de detalle de OT: marca de OT migrada para sombrearla en pantalla.
+  const marca =
+    base.origen && !def.agrupar
+      ? `, (${base.origen.columna} = 'MIGRACION') AS ${COL_MIGRADA.migrada}, ${base.origen.desde} AS ${COL_MIGRADA.desde}, ${base.origen.en} AS ${COL_MIGRADA.en}`
+      : "";
   const sql =
-    `SELECT ${def.select} FROM ${base.from} WHERE ${conds.join(" AND ")}` +
+    `SELECT ${def.select}${marca} FROM ${base.from} WHERE ${conds.join(" AND ")}` +
     (def.agrupar ? ` GROUP BY ${def.agrupar}` : "") +
     ` ORDER BY ${def.orden} LIMIT ${LIMITE_FILAS + 1}`;
   return { sql, args };

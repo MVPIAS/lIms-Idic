@@ -22,6 +22,7 @@ import { EmptyState, SkeletonCards } from "@/components/ui/PageHeader";
 import AvisosBandeja from "@/components/avisos/AvisosBandeja";
 import { fechaDia } from "@/lib/format";
 import { horaChile } from "@/lib/fecha-chile";
+import { CLASE_FILA_MIGRADA, EtiquetaMigrada, textoMigrada } from "@/components/ot/MarcaMigrada";
 
 interface Accion { href: string; titulo: string; desc: string; icono: string; perm?: string | string[] }
 
@@ -204,9 +205,10 @@ function TarjetaPendiente({ it, puedeAvisar }: { it: ItemBandeja; puedeAvisar?: 
         {it.descripcion && <div className="bandeja-desc">{it.descripcion}</div>}
         <ul className="bandeja-lista" aria-label={`Lo que le toca: ${it.titulo}`}>
           {it.elementos.map((e) => (
-            <li key={e.id}>
-              <Link href={e.ruta as any}>
+            <li key={e.id} className={e.migrada ? CLASE_FILA_MIGRADA : undefined}>
+              <Link href={e.ruta as any} title={e.migrada ? textoMigrada(e.migrada) : undefined}>
                 <b>{e.texto}</b>
+                <EtiquetaMigrada ot={e} />
                 {e.detalle ? <span>{e.detalle}</span> : <span />}
                 {e.fecha ? <time dateTime={e.fecha}>{fechaDia(e.fecha)}</time> : null}
               </Link>

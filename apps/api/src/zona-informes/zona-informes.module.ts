@@ -20,7 +20,7 @@ import { AlcanceService } from "../rbac/alcance.service";
 import { libroXlsx, type Celda } from "../common/xlsx-escritura";
 import { fechaHoraChile } from "../common/fecha-chile";
 import { textoEstadoOt } from "../reportes/gestion";
-import { AREAS, INFORMES, LIMITE_FILAS, armarConsulta, consultaEstados, filtrosDe, informePorClave, textoCodigo, totales, validarFiltros, type InformeFijo } from "./catalogo";
+import { AREAS, COL_MIGRADA, INFORMES, LIMITE_FILAS, armarConsulta, consultaEstados, filtrosDe, informePorClave, textoCodigo, totales, validarFiltros, type InformeFijo } from "./catalogo";
 import { DOCUMENTOS_LEGADO } from "./legado-documentos";
 import { INFORMES_ESPECIALES } from "./especiales";
 
@@ -165,6 +165,7 @@ export class ZonaInformesController {
       const p = await this.prisma.$queryRawUnsafe<{ t: string }[]>(`SELECT codigo || ' · ' || nombre AS t FROM proyecto WHERE id = $1::uuid`, r.filtros.proyecto);
       if (p[0]) filtros.proyecto = p[0].t;
     }
+    if (r.filtros.origen) filtros.origen = r.filtros.origen === "MIGRACION" ? "OT migradas" : "OT nuevas";
     const b = libroXlsx([hojaInforme(r.def, r.filas, r.totales, filtros, r.truncado)]);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
     res.setHeader("Content-Disposition", `attachment; filename="${r.def.clave}_${r.filtros.desde ?? "inicio"}_${r.filtros.hasta ?? "hoy"}.xlsx"`);
@@ -202,6 +203,15 @@ export function normalizar(def: InformeFijo, f: Record<string, unknown>): Record
       default:
         o[c.clave] = String(v);
     }
+  }
+  // OT migrada del sistema anterior: solo para sombrear la fila en pantalla
+  // (hojaInforme recorre def.columnas, así que no llega al Excel).
+  if (f[COL_MIGRADA.migrada] === true) {
+    const en = f[COL_MIGRADA.en];
+    o._migrada = {
+      desde: f[COL_MIGRADA.desde] == null ? null : String(f[COL_MIGRADA.desde]),
+      en: en == null ? null : en instanceof Date ? en.toISOString() : String(en),
+    };
   }
   return o;
 }

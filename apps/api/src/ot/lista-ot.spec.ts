@@ -1,4 +1,4 @@
-import { OT_TERMINADAS, filtroListaOt, paginacion, semaforoPedido } from "./lista-ot";
+import { OT_TERMINADAS, filtroListaOt, origenPedido, paginacion, semaforoPedido } from "./lista-ot";
 
 const hoy = new Date("2026-10-14T15:00:00Z");
 const ctx = { tenantId: "T", unidadesVisibles: null as string[] | null, hoy };
@@ -78,6 +78,30 @@ describe("lista de OT · filtroListaOt", () => {
     expect(and(filtroListaOt({ idsMias: ["a", "b"] }, ctx))).toContainEqual({ id: { in: ["a", "b"] } });
     expect(and(filtroListaOt({ idsMias: [] }, ctx))).toContainEqual({ id: { in: [] } });
     expect(and(filtroListaOt({ idsConAnalista: ["a"] }, ctx))).toContainEqual({ id: { notIn: ["a"] } });
+  });
+});
+
+describe("lista de OT · origen (OT nuevas o migradas del sistema anterior)", () => {
+  it("?origen acepta LIMS / MIGRACION y los alias de la pantalla; lo demás no filtra", () => {
+    expect(origenPedido("MIGRACION")).toBe("MIGRACION");
+    expect(origenPedido("migradas")).toBe("MIGRACION");
+    expect(origenPedido("lims")).toBe("LIMS");
+    expect(origenPedido("nuevas")).toBe("LIMS");
+    expect(origenPedido("")).toBeNull();
+    expect(origenPedido(undefined)).toBeNull();
+    expect(origenPedido("todas")).toBeNull();
+    expect(origenPedido("x' OR 1=1")).toBeNull();
+  });
+
+  it("filtra por origen_registro y, sin filtro, no lo toca", () => {
+    expect(and(filtroListaOt({ origen: "MIGRACION" }, ctx))).toContainEqual({ origenRegistro: "MIGRACION" });
+    expect(and(filtroListaOt({ origen: "LIMS" }, ctx))).toContainEqual({ origenRegistro: "LIMS" });
+    expect(and(filtroListaOt({}, ctx)).some((c) => "origenRegistro" in c)).toBe(false);
+  });
+
+  it("la búsqueda encuentra la OT por su folio en el sistema anterior", () => {
+    const or = and(filtroListaOt({ q: "PRUEBA-24001" }, ctx)).find((c) => c.OR)?.OR;
+    expect(or).toContainEqual({ migradaDesde: { contains: "PRUEBA-24001", mode: "insensitive" } });
   });
 });
 
