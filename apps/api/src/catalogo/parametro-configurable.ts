@@ -288,6 +288,31 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
         // COM-36 (IDIC 17-11-2026): costo directo para todas las FF.AA. y de Orden.
         porDefecto: "costo_directo",
       },
+      tipos_precio_institucional: {
+        tipo: "multiple",
+        nombre: "Tipos de cliente con precio institucional",
+        opciones: [
+          { valor: "ley_17798", etiqueta: "Ley 17.798" },
+          { valor: "ejercito", etiqueta: "Ejército" },
+          { valor: "carabineros", etiqueta: "Carabineros" },
+          { valor: "fuerza_aerea", etiqueta: "Fuerza Aérea" },
+          { valor: "armada", etiqueta: "Armada" },
+          { valor: "pdi", etiqueta: "PDI" },
+          { valor: "gendarmeria", etiqueta: "Gendarmería" },
+          { valor: "dgmn", etiqueta: "DGMN" },
+          { valor: "particulares", etiqueta: "Particulares" },
+          { valor: "prov_ejercito", etiqueta: "Particular proveedor Ejército" },
+          { valor: "prov_carabineros", etiqueta: "Particular proveedor Carabineros" },
+          { valor: "prov_fuerza_aerea", etiqueta: "Particular proveedor Fuerza Aérea" },
+          { valor: "prov_armada", etiqueta: "Particular proveedor Armada" },
+          { valor: "interlaboratorio", etiqueta: "Interlaboratorio" },
+          { valor: "interno", etiqueta: "Interno" },
+        ],
+        ayuda:
+          "El tipo de cliente se elige en cada cotización. Los tipos marcados toman el precio del parámetro anterior (costo directo) en vez del neto particular; la validez se configura aparte. Los tipos cuya regla es «Ejército» lo toman siempre.",
+        // Checklist Comercial SVT 30 (IDIC 24-11-2026).
+        porDefecto: "ejercito,carabineros,fuerza_aerea,armada,pdi,gendarmeria",
+      },
     },
   },
   {

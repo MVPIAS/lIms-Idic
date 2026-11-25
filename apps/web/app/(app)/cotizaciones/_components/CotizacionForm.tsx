@@ -1048,8 +1048,8 @@ export default function CotizacionForm({ modo, inicial, onGuardado, onCancelar, 
           {reglaPrecio === "PARTICULAR"
             ? "Cliente particular: cada ensayo toma el neto (sin IVA) de la lista de precios vigente; si no está en la lista, su ficha de costos."
             : reglaPrecio === "EJERCITO"
-              ? "Cliente Ejército: el precio sale según el parámetro «Precio de la lista que toma un cliente Ejército» (política de precios: costo directo)."
-              : "Elija el cliente: el precio de cada ensayo depende de su tipo (particular o Ejército)."}{" "}
+              ? "Cliente institucional (Ejército, Carabineros, Fuerza Aérea, Armada, PDI o Gendarmería, según el parámetro «Tipos de cliente con precio institucional»): el precio sale según el parámetro «Precio de la lista que toma un cliente Ejército» (política de precios: costo directo)."
+              : "Elija el cliente: el precio de cada ensayo depende del tipo de cliente de la cotización (particular o institucional)."}{" "}
           {condCli?.lista?.vigente ? `Este cliente tiene lista de precios propia («${condCli.lista.nombre}»): manda sobre la lista general. ` : ""}
           {condCli && condCli.descuentoPct > 0 ? `Se aplica su descuento especial de ${String(condCli.descuentoPct).replace(".", ",")} %. ` : ""}
           El precio no se escribe a mano, salvo en un ensayo que no tiene precio en ninguna lista ni en su ficha: ahí se indica el precio y el motivo, y queda en la bitácora.

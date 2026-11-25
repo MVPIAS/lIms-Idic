@@ -36,7 +36,7 @@ import { hoyCl, sumarDias } from "../ot/plazos";
 import { Prisma } from "@prisma/client";
 import { generarNumeroCotizacion } from "./numeracion-cotizacion";
 import { estadoTrasCambioLineas, lineasCambiaron, motivoNoAceptable, motivoNoEditable, reglaModificacion } from "./circuito-cotizacion";
-import { estadoCircuitoDe, leerConfigCircuito } from "./circuito-config";
+import { estadoCircuitoDe, leerConfigCircuito, reglaPrecioDe } from "./circuito-config";
 import { claveLibre, precioDeLinea, type Existentes } from "./precio-ficha";
 import { revisarOc } from "./aceptacion-oc";
 import { heredarDeCotizacion } from "../ot/encargo/encargo.module";
@@ -571,7 +571,9 @@ export class CotizacionService implements OnModuleInit, OnModuleDestroy {
       const texto = r.explicacion.replace(/^(Ejército|Particular):/, `${etiqueta}:`).replace(" (validez propia del laboratorio)", "").replace(/\.$/, "");
       r.explicacion = `${texto} (${origen}).`;
     }
-    return { ...r, tipoClienteCodigo: tipo, reglaPrecio: base };
+    // Checklist Comercial SVT 30 (IDIC 24-11-2026): FF.AA., de Orden y Gendarmería pagan el precio institucional.
+    const cfgPrecio = await leerConfigCircuito(this.prisma, tenantId);
+    return { ...r, tipoClienteCodigo: tipo, reglaPrecio: reglaPrecioDe(tipo, base, cfgPrecio.tiposPrecioInstitucional) };
   }
 
   // --------------------------------------------------------------------------

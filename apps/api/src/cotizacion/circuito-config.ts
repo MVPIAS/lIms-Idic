@@ -18,6 +18,12 @@ export interface ConfigCircuitoCompleta extends ConfigCircuito {
   ivaPct: number;
   /** Qué precio de la lista vigente toma un cliente Ejército (POR CONFIRMAR): ficha = no usa la lista. */
   precioEjercito: PrecioEjercito;
+  /**
+   * Tipos de cliente que pagan el precio institucional (el de `precioEjercito`) y no el
+   * neto particular. Respuesta del IDIC del 24-11-2026 (checklist Comercial SVT 30):
+   * Ejército, Carabineros, Fuerza Aérea, Armada, PDI y Gendarmería.
+   */
+  tiposPrecioInstitucional: string[];
 }
 
 /** Valores por defecto de la fórmula oficial (lista de precios IDIC 2026). */
@@ -27,6 +33,29 @@ export const IVA_PCT_DEF = 19;
 /** COM-36 (IDIC 17-11-2026): «en general costo directo (para todas las FF.AA. y de Orden)». */
 export const precioEjercitoDe = (v: string | null | undefined): PrecioEjercito =>
   v === "ficha" || v === "costo_total" || v === "neto" ? v : "costo_directo";
+
+/** Checklist Comercial SVT 30 (IDIC 24-11-2026): «solo se cobra el Costo Directo» a estas instituciones. */
+export const TIPOS_PRECIO_INSTITUCIONAL_DEF = ["ejercito", "carabineros", "fuerza_aerea", "armada", "pdi", "gendarmeria"];
+
+/** Lista de códigos separada por comas; vacía o ausente = la lista por defecto. */
+export function tiposPrecioInstitucionalDe(v: string | null | undefined): string[] {
+  if (v == null || !String(v).trim()) return [...TIPOS_PRECIO_INSTITUCIONAL_DEF];
+  return [...new Set(String(v).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean))];
+}
+
+/**
+ * Regla de PRECIO de una cotización. La validez sigue su propia configuración
+ * (validez-config.ts); el precio institucional se decide por el tipo de cliente
+ * elegido en la cotización: si está en la lista, toma la columna del parámetro
+ * `precio_ejercito`; si no, la regla del tipo de cliente (`tipo_cliente.valor`).
+ * El código legado «institucional» se trata como Ejército.
+ */
+export function reglaPrecioDe(tipoCliente: string | null | undefined, base: "EJERCITO" | "PARTICULAR", tipos: string[]): "EJERCITO" | "PARTICULAR" {
+  const t = (tipoCliente ?? "").trim().toLowerCase();
+  if (!t) return base;
+  if (tipos.includes(t) || (t === "institucional" && tipos.includes("ejercito"))) return "EJERCITO";
+  return base;
+}
 
 const pct = (v: string | null | undefined, def: number) => {
   const n = Number(String(v ?? "").replace(",", "."));
@@ -43,6 +72,7 @@ export function configDesdeValores(v: Record<string, string | null | undefined>)
     margenParticularPct: pct(v.margen_particular_pct, RECARGO_PCT_DEF),
     ivaPct: pct(v.iva_pct, IVA_PCT_DEF),
     precioEjercito: precioEjercitoDe(v.precio_ejercito),
+    tiposPrecioInstitucional: tiposPrecioInstitucionalDe(v.tipos_precio_institucional),
   };
 }
 
