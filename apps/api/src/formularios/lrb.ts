@@ -8,16 +8,24 @@
  *   · Un disparo no cumple con penetración completa, trauma sobre el máximo o
  *     daño en el testigo (UL 752). Con un disparo que no cumple **se detiene
  *     el panel**: los disparos restantes se imprimen «-.-».
- *   · Velocidad fuera de la ventana de la amenaza: aviso en la fila (la regla
- *     de qué hacer es del IDIC, EP-05 P4; manda V1, V2 o el promedio según el
- *     parámetro `lrb.velocidad_manda`).
+ *   · El resultado del disparo es la señal de impacto (trauma) y la
+ *     penetración. La velocidad es un REQUISITO del ensayo, no un resultado
+ *     (IDIC 24-11-2026, checklist LRB 4): se registran e informan V1 y V2, sin
+ *     que ninguna mande sobre la otra (LRB 5). Si V1 o V2 quedan fuera de la
+ *     ventana de la amenaza, el disparo se marca «tiro fuera de rango»
+ *     (columna de la planilla LRB-PG01-P01-IT01-FORM02) y no cambia su
+ *     condición; qué hacer con él lo decide el Jefe LRB.
  *   · Regla de lote: una penetración completa (o cualquier panel que no
- *     cumple) rechaza el lote ⇒ Informe de Ensayo de Rechazo; si cumple y es
- *     certificación de lote ⇒ Informe de Ensayos + CRB.
+ *     cumple) rechaza el lote. El Informe de Ensayo de Rechazo existe solo
+ *     para chalecos (LRB 1); un casco o una probeta que no cumple se informa
+ *     en el Informe de Ensayo. Si cumple y es certificación de lote ⇒ Informe
+ *     de Ensayos + CRB.
  *
  * La tabla de amenazas (norma, nivel, munición, masa, ventana, disparos,
- * trauma) es configuración (Parámetros de la operación, `lrb_amenazas`),
- * con los valores de los informes reales a la espera de la tabla oficial (P3).
+ * trauma) es configuración (Parámetros de la operación, `lrb_amenazas`). Los
+ * chalecos (NIJ 0101.04) siguen la tabla oficial del LRB del 24-11-2026; cascos
+ * y probetas, los valores de los informes reales mientras el IDIC no entregue
+ * su propia tabla (la que llegó repite la de chalecos).
  */
 
 export type Veredicto = "cumple" | "no_cumple" | "pendiente";
@@ -45,10 +53,29 @@ export interface Amenaza {
   criterio: string;
 }
 
-/** Valores por defecto: informes reales del LRB y EP-05 §5.2 (POR CONFIRMAR, P3–P6). */
+/**
+ * Valores por defecto. Chalecos: tabla oficial del LRB (ficha del método
+ * LRB-PG01-P01-IT01, bloque 3, NIJ 0101.04, 24-11-2026): ventana mín.–máx. y
+ * trauma ≤ 44 mm; la masa de la bala se conserva donde venía de los informes
+ * reales y el plan de disparos por panel sigue la NIJ 0101.04 (6; 1 en el
+ * nivel IV). Cascos y probetas: informes reales (POR CONFIRMAR, EP-05 P3).
+ */
+const chaleco = (clave: string, nivel: string, municion: string, v_min: number, v_max: number, masa_g: number | null = null, disparos = 6): Amenaza => ({
+  clave, norma: "NIJ 0101.04", nivel, elemento: "chaleco", municion, masa_g, v_min, v_max, disparos,
+  trauma_max: 44, disparos_trauma: Math.min(3, disparos), testigo: false, criterio: "Sin penetración completa y trauma ≤ 44 mm",
+});
+
 export const AMENAZAS_DEFECTO: Amenaza[] = [
-  { clave: "NIJ0101-IIIA-9MM", norma: "NIJ 0101.04", nivel: "IIIA", elemento: "chaleco", municion: "9×19 mm FMJ RN", masa_g: 8.03, v_min: 427, v_max: 445, disparos: 6, trauma_max: 44, disparos_trauma: 3, testigo: false, criterio: "Sin penetración completa y trauma ≤ 44 mm" },
-  { clave: "NIJ0101-IIIA-44MAG", norma: "NIJ 0101.04", nivel: "IIIA", elemento: "chaleco", municion: ".44 Magnum SJHP", masa_g: 15.6, v_min: 427, v_max: 445, disparos: 6, trauma_max: 44, disparos_trauma: 3, testigo: false, criterio: "Sin penetración completa y trauma ≤ 44 mm" },
+  chaleco("NIJ0101-I-22LR", "I", ".22 LR LRN", 320, 338),
+  chaleco("NIJ0101-I-380", "I", ".380 ACP FMJ RN", 313, 331),
+  chaleco("NIJ0101-IIA-9MM", "II-A", "9×19 mm FMJ", 332, 350),
+  chaleco("NIJ0101-IIA-40SW", "II-A", ".40 S&W FMJ", 313, 331),
+  chaleco("NIJ0101-II-9MM", "II", "9×19 mm FMJ", 358, 376),
+  chaleco("NIJ0101-II-357", "II", ".357 Magnum JSP", 427, 445),
+  chaleco("NIJ0101-IIIA-9MM", "III-A", "9×19 mm FMJ RN", 427, 445, 8.03),
+  chaleco("NIJ0101-IIIA-44MAG", "III-A", ".44 Magnum SJHP", 427, 445, 15.6),
+  chaleco("NIJ0101-III-762", "III", "7,62×51 mm NATO FMJ (M80)", 838, 856),
+  chaleco("NIJ0101-IV-30AP", "IV", ".30 M2 AP", 869, 887, null, 1),
   { clave: "NIJ0106-IIA-9MM", norma: "NIJ 0106.01", nivel: "II-A", elemento: "casco", municion: "9 mm FMJ", masa_g: 8.0, v_min: 317, v_max: 347, disparos: 4, trauma_max: null, disparos_trauma: 0, testigo: true, criterio: "Sin penetración del casco ni de la placa testigo" },
   { clave: "NIJ0106-IIA-357", norma: "NIJ 0106.01", nivel: "II-A", elemento: "casco", municion: ".357 Magnum JSP", masa_g: 10.2, v_min: 366, v_max: 396, disparos: 4, trauma_max: null, disparos_trauma: 0, testigo: true, criterio: "Sin penetración del casco ni de la placa testigo" },
   { clave: "NIJ0108-IIIA", norma: "NIJ 0108.01", nivel: "IIIA", elemento: "probeta", municion: ".44 Magnum", masa_g: 15.55, v_min: 411, v_max: 441, disparos: 5, trauma_max: null, disparos_trauma: 0, testigo: false, criterio: "Sin penetración" },
@@ -57,8 +84,6 @@ export const AMENAZAS_DEFECTO: Amenaza[] = [
   { clave: "UL752-3", norma: "UL 752", nivel: "3", elemento: "probeta", municion: ".44 Magnum", masa_g: 15.6, v_min: 411, v_max: 452, disparos: 3, trauma_max: null, disparos_trauma: 0, testigo: true, criterio: "Sin penetración ni daño en el testigo" },
   { clave: "UL752-5", norma: "UL 752", nivel: "5", elemento: "probeta", municion: "7,62 mm FMJ", masa_g: 9.7, v_min: 838, v_max: 922, disparos: 3, trauma_max: null, disparos_trauma: 0, testigo: true, criterio: "Sin penetración ni daño en el testigo" },
 ];
-
-export type VelocidadManda = "v1" | "v2" | "promedio";
 
 export interface Disparo {
   n: number;
@@ -105,18 +130,26 @@ export interface RegistroDisparos {
 /* ---------------------------------------------------------------- disparo --- */
 
 export interface DisparoEvaluado extends Disparo {
-  velocidad: number | null;
+  /** V1 o V2 fuera de la ventana de la amenaza: «tiro fuera de rango». */
   fueraVentana: boolean;
+  /** Qué velocidades quedaron fuera («V1», «V2»). */
+  fueraDeRango: ("V1" | "V2")[];
   condicion: Veredicto;
   motivos: string[];
 }
 
-export function velocidadDe(d: Pick<Disparo, "v1" | "v2">, manda: VelocidadManda): number | null {
-  const v1 = typeof d.v1 === "number" && Number.isFinite(d.v1) ? d.v1 : null;
-  const v2 = typeof d.v2 === "number" && Number.isFinite(d.v2) ? d.v2 : null;
-  if (manda === "v2") return v2 ?? v1;
-  if (manda === "promedio") return v1 != null && v2 != null ? (v1 + v2) / 2 : v1 ?? v2;
-  return v1 ?? v2;
+const numero = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/**
+ * Velocidades fuera de la ventana: V1 y V2 se comparan cada una con la ventana
+ * (ninguna manda sobre la otra, IDIC 24-11-2026). Sin V2, solo cuenta V1.
+ */
+export function velocidadesFueraDeRango(d: Pick<Disparo, "v1" | "v2">, a: Pick<Amenaza, "v_min" | "v_max">): ("V1" | "V2")[] {
+  const fuera = (v: number | null) => v != null && (v < a.v_min || v > a.v_max);
+  const out: ("V1" | "V2")[] = [];
+  if (fuera(numero(d.v1))) out.push("V1");
+  if (fuera(numero(d.v2 ?? null))) out.push("V2");
+  return out;
 }
 
 /** Errores de captura de un disparo (lo que falta o no tiene sentido). */
@@ -135,17 +168,17 @@ export function erroresDisparo(d: Disparo, a: Amenaza): string[] {
   return e;
 }
 
-export function evaluarDisparo(d: Disparo, a: Amenaza, manda: VelocidadManda): DisparoEvaluado {
+export function evaluarDisparo(d: Disparo, a: Amenaza): DisparoEvaluado {
   const motivos: string[] = [];
-  const velocidad = velocidadDe(d, manda);
-  const fueraVentana = velocidad != null && (velocidad < a.v_min || velocidad > a.v_max);
+  const fueraDeRango = velocidadesFueraDeRango(d, a);
+  const fueraVentana = fueraDeRango.length > 0;
   let condicion: Veredicto = "pendiente";
   if (d.penetracion === true) motivos.push("Penetración completa");
   if (a.trauma_max != null && d.trauma != null && d.trauma > a.trauma_max) motivos.push(`Trauma ${fmt(d.trauma)} mm > ${fmt(a.trauma_max)} mm`);
   if (a.testigo && d.danoTestigo === true) motivos.push("Daño en el testigo");
   if (motivos.length) condicion = "no_cumple";
   else if (d.penetracion === false && erroresDisparo(d, a).length === 0) condicion = "cumple";
-  return { ...d, velocidad, fueraVentana, condicion, motivos };
+  return { ...d, fueraVentana, fueraDeRango, condicion, motivos };
 }
 
 /* ------------------------------------------------------------------ panel --- */
@@ -160,14 +193,16 @@ export interface PanelEvaluado extends Omit<Panel, "disparos"> {
   avisos: string[];
 }
 
-export function evaluarPanel(p: Panel, amenazas: Amenaza[], manda: VelocidadManda): PanelEvaluado {
+export function evaluarPanel(p: Panel, amenazas: Amenaza[]): PanelEvaluado {
   const a = amenazas.find((x) => x.clave === p.amenaza) ?? null;
   if (!a) return { ...p, amenazaFila: null, disparos: [], detenido: false, completo: false, veredicto: "pendiente", avisos: [`La munición «${p.amenaza}» no está en la tabla de amenazas.`] };
   const ordenados = [...p.disparos].sort((x, y) => x.n - y.n);
-  const evaluados = ordenados.map((d) => evaluarDisparo(d, a, manda));
+  const evaluados = ordenados.map((d) => evaluarDisparo(d, a));
   const primeraFalla = evaluados.findIndex((d) => d.condicion === "no_cumple");
   const detenido = primeraFalla >= 0;
-  const avisos = evaluados.filter((d) => d.fueraVentana).map((d) => `Disparo ${d.n}: velocidad ${fmt(d.velocidad!)} m/s fuera de la ventana ${fmt(a.v_min)}–${fmt(a.v_max)} m/s (EP-05 4.2: decide el Jefe LRB).`);
+  const avisos = evaluados
+    .filter((d) => d.fueraVentana)
+    .map((d) => `Disparo ${d.n}: tiro fuera de rango (${d.fueraDeRango.map((k) => `${k} ${fmt((k === "V1" ? d.v1 : d.v2) as number)} m/s`).join(", ")}; ventana ${fmt(a.v_min)}–${fmt(a.v_max)} m/s). La velocidad es requisito del ensayo: decide el Jefe LRB.`);
   const completo = detenido || (evaluados.length >= a.disparos && evaluados.every((d) => d.condicion !== "pendiente"));
   const veredicto: Veredicto = detenido ? "no_cumple" : completo ? "cumple" : "pendiente";
   return { ...p, amenazaFila: a, disparos: evaluados, detenido, completo, veredicto, avisos };
@@ -177,7 +212,7 @@ export function evaluarPanel(p: Panel, amenazas: Amenaza[], manda: VelocidadMand
  * Valida agregar o corregir un disparo en un panel: correlativo (sin saltos ni
  * repetidos), no supera el plan y no se dispara en un panel detenido.
  */
-export function erroresNuevoDisparo(p: Panel, d: Disparo, amenazas: Amenaza[], manda: VelocidadManda): string[] {
+export function erroresNuevoDisparo(p: Panel, d: Disparo, amenazas: Amenaza[]): string[] {
   const a = amenazas.find((x) => x.clave === p.amenaza);
   if (!a) return [`La munición «${p.amenaza}» no está en la tabla de amenazas.`];
   const e = erroresDisparo(d, a);
@@ -187,7 +222,7 @@ export function erroresNuevoDisparo(p: Panel, d: Disparo, amenazas: Amenaza[], m
   else if (!esCorreccion && d.n !== otros.length + 1) e.push(`El siguiente disparo de este panel es el Nº ${otros.length + 1}.`);
   if (d.n > a.disparos) e.push(`El plan de ${a.norma} ${a.nivel} es de ${a.disparos} disparos por ${a.elemento === "chaleco" ? "panel" : a.elemento}.`);
   if (!esCorreccion) {
-    const previo = evaluarPanel({ ...p, disparos: otros }, amenazas, manda);
+    const previo = evaluarPanel({ ...p, disparos: otros }, amenazas);
     if (previo.detenido) e.push("El panel está detenido (un disparo no cumplió): no se registran más disparos.");
   }
   if (p.cerrado && !esCorreccion) e.push("El panel está cerrado.");
@@ -210,15 +245,17 @@ export interface LoteEvaluado {
   falla: string | null;
   /** Documento que corresponde emitir (5.3). */
   documentos: ("INFORME_ENSAYO" | "CERTIFICADO_RESISTENCIA_BALISTICA" | "INFORME_RECHAZO")[];
+  /** El lote es de chalecos (alguna munición de la tabla de chalecos): solo ellos tienen Informe de Rechazo. */
+  chalecos: boolean;
   disparos: number;
   avisos: string[];
 }
 
 const peor = (vs: Veredicto[]): Veredicto => (vs.includes("no_cumple") ? "no_cumple" : vs.length && vs.every((v) => v === "cumple") ? "cumple" : "pendiente");
 
-export function evaluarLote(r: RegistroDisparos, amenazas: Amenaza[], manda: VelocidadManda): LoteEvaluado {
+export function evaluarLote(r: RegistroDisparos, amenazas: Amenaza[]): LoteEvaluado {
   const unidades: UnidadEvaluada[] = r.unidades.map((u) => {
-    const paneles = u.paneles.map((p) => evaluarPanel(p, amenazas, manda));
+    const paneles = u.paneles.map((p) => evaluarPanel(p, amenazas));
     return { ...u, paneles, veredicto: peor(paneles.map((p) => p.veredicto)) };
   });
   const paneles = unidades.flatMap((u) => u.paneles.map((p) => ({ u, p })));
@@ -230,14 +267,24 @@ export function evaluarLote(r: RegistroDisparos, amenazas: Amenaza[], manda: Vel
     falla = `Panel ${primeraFalla.p.zona}${primeraFalla.u.talla ? ` ${primeraFalla.u.talla}` : ""} (${primeraFalla.u.serie}) · disparo ${d.n} · ${primeraFalla.p.amenazaFila?.municion ?? ""} · ${d.motivos.join(", ")}`;
   }
   const veredicto = unidades.length ? peor(unidades.map((u) => u.veredicto)) : "pendiente";
+  const chalecos = paneles.some(({ p }) => p.amenazaFila?.elemento === "chaleco");
   const documentos: LoteEvaluado["documentos"] =
-    veredicto === "no_cumple" ? ["INFORME_RECHAZO"] : veredicto === "cumple" ? (r.certificacionLote ? ["INFORME_ENSAYO", "CERTIFICADO_RESISTENCIA_BALISTICA"] : ["INFORME_ENSAYO"]) : [];
+    veredicto === "no_cumple"
+      ? chalecos
+        ? ["INFORME_RECHAZO"]
+        : ["INFORME_ENSAYO"]
+      : veredicto === "cumple"
+        ? r.certificacionLote
+          ? ["INFORME_ENSAYO", "CERTIFICADO_RESISTENCIA_BALISTICA"]
+          : ["INFORME_ENSAYO"]
+        : [];
   return {
     unidades,
     veredicto,
     penetracion: Boolean(conPenetracion),
     falla,
     documentos,
+    chalecos,
     disparos: paneles.reduce((s, { p }) => s + p.disparos.length, 0),
     avisos: paneles.flatMap(({ p }) => p.avisos),
   };
@@ -314,7 +361,10 @@ export function faltantesDocumentoLrb(tipo: string, l: LoteEvaluado, r: Registro
     if (!seriesPorTalla(r.composicion).total) f.push("Indique la nómina de series del lote por talla (el CRB la imprime).");
     const sinReemplazo = r.unidades.filter((u) => !u.reemplazo);
     if (sinReemplazo.length) f.push(`Indique la serie de reposición de ${sinReemplazo.map((u) => u.serie).join(", ")} (el CRB lista los reemplazos).`);
-  } else if (l.veredicto !== "no_cumple") f.push("El Informe de Ensayo de Rechazo solo se emite si el lote no cumple.");
+  } else {
+    if (l.veredicto !== "no_cumple") f.push("El Informe de Ensayo de Rechazo solo se emite si el lote no cumple.");
+    if (!l.chalecos) f.push("El Informe de Ensayo de Rechazo existe solo para chalecos antibalas: un casco o una probeta que no cumple se informa en el Informe de Ensayo.");
+  }
   return f;
 }
 
@@ -354,6 +404,3 @@ export function leerAmenazas(json: string | null | undefined): Amenaza[] {
   }
 }
 
-export function leerVelocidadManda(v: string | null | undefined): VelocidadManda {
-  return v === "v2" || v === "promedio" ? v : "v1";
-}

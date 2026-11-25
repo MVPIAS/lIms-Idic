@@ -39,7 +39,7 @@ export function tablaDisparos(l: LoteEvaluado): string {
             `<td class="num">${d ? n(d.trauma ?? null) : GUION}</td>` +
             td(lam, "num") +
             td(d ? (d.penetracion ? "Sí" : "No") : null) +
-            (d ? `<td class="${claseCond(d.condicion)}">${escapeHtml(condicion(d.condicion))}${d.fueraVentana ? " · velocidad fuera de ventana" : ""}</td>` : `<td>${p.detenido ? "Panel detenido" : GUION}</td>`) +
+            (d ? `<td class="${claseCond(d.condicion)}">${escapeHtml(condicion(d.condicion))}${d.fueraVentana ? ` · tiro fuera de rango (${d.fueraDeRango.join(" y ")})` : ""}</td>` : `<td>${p.detenido ? "Panel detenido" : GUION}</td>`) +
             "</tr>",
         );
       }

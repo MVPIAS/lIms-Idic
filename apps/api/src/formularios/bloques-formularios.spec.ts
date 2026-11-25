@@ -12,15 +12,15 @@ describe("bloques de los formularios en los documentos", () => {
     ],
   };
   it("disparos: escapa los datos, marca fuera de ventana y los no disparados «-.-»", () => {
-    const html = tablaDisparos(evaluarLote(registro, AMENAZAS_DEFECTO, "v1"));
+    const html = tablaDisparos(evaluarLote(registro, AMENAZAS_DEFECTO));
     expect(html).not.toContain("<b>");
     expect(html).toContain("&lt;b&gt;");
-    expect(html).toContain("velocidad fuera de ventana");
+    expect(html).toContain("tiro fuera de rango (V1)");
     expect(html).toContain("Panel detenido");
     expect(html).toContain("445,8");
   });
   it("exigencia y reemplazos", () => {
-    expect(tablaExigencia(AMENAZAS_DEFECTO.slice(0, 1))).toContain("427–445");
+    expect(tablaExigencia(AMENAZAS_DEFECTO.filter((a) => a.clave === "NIJ0101-IIIA-9MM"))).toContain("427–445");
     expect(tablaReemplazos(registro)).toContain("M-011");
   });
   it("AQL del IVC", () => {

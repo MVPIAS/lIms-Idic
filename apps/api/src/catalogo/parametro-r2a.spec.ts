@@ -8,7 +8,7 @@ const guardar = (cat: string, cod: string, v: unknown, fila = { codigo: cod, eti
 describe("parámetros r2a · registro", () => {
   it("variantes por método y laboratorio, tablas y reglas del frente r2a", () => {
     for (const [cat, cod] of [
-      ["captura_variante_metodo", "3376"], ["captura_variante_laboratorio", "LMB"], ["lrb", "amenazas"], ["lrb", "velocidad_manda"], ["lrb", "plazo_apelacion"],
+      ["captura_variante_metodo", "3376"], ["captura_variante_laboratorio", "LMB"], ["lrb", "amenazas"], ["lrb", "plazo_apelacion"],
       ["inspeccion_aql", "nivel"], ["inspeccion_aql", "aql_clase_b"], ["hcp_plantilla", "VLCB"], ["preparacion_campo", "LME.vigencia_soluciones"],
       ["preparacion_obligatoria", "LME"], ["preparacion_trabajo", "exige_aprobacion"], ["preparacion_trabajo", "bloquea_captura"],
       ["micro", "lecturas_h"], ["rsa_criterios", "tabla"], ["sensorial", "alfa"], ["sensorial", "rangos"],

@@ -24,7 +24,7 @@ import { fechaHora } from "@/lib/format";
 import { aNum, Bitacora, Campo, conComa, Pasos, Veredicto, type PasoFormulario } from "@/components/formularios/comun";
 
 interface Amenaza { clave: string; norma: string; nivel: string; elemento: string; municion: string; masa_g: number | null; v_min: number; v_max: number; disparos: number; trauma_max: number | null; disparos_trauma: number; testigo: boolean; criterio: string }
-interface Disparo { n: number; zonaImpacto?: string | null; v1: number | null; v2?: number | null; trauma?: number | null; laminasPerforadas?: number | null; laminasTotal?: number | null; penetracion: boolean | null; danoTestigo?: boolean | null; observacion?: string | null; velocidad?: number | null; fueraVentana?: boolean; condicion?: string; motivos?: string[] }
+interface Disparo { n: number; zonaImpacto?: string | null; v1: number | null; v2?: number | null; trauma?: number | null; laminasPerforadas?: number | null; laminasTotal?: number | null; penetracion: boolean | null; danoTestigo?: boolean | null; observacion?: string | null; fueraVentana?: boolean; fueraDeRango?: string[]; condicion?: string; motivos?: string[] }
 interface Panel { id: string; zona: string; amenaza: string; disparos: Disparo[]; cerrado?: boolean }
 interface Unidad { id: string; serie: string; talla?: string | null; muestraId?: string | null; reemplazo?: string | null; paneles: Panel[] }
 interface PanelEv extends Panel { amenazaFila: Amenaza | null; detenido: boolean; completo: boolean; veredicto: string; avisos: string[] }
@@ -34,7 +34,6 @@ interface Vista {
   datos: { certificacionLote: boolean; material: string; tipoCertificacion: string; fechaEnsayo: string; lote: any; composicion: { talla: string; cantidad: number }[]; unidades: Unidad[] };
   evaluacion: { unidades: (Omit<Unidad, "paneles"> & { paneles: PanelEv[]; veredicto: string })[]; veredicto: string; penetracion: boolean; falla: string | null; documentos: string[]; disparos: number; avisos: string[] };
   amenazas: Amenaza[];
-  velocidadManda: string;
   muestras: { id: string; codigo: string; nombre: string | null }[];
   ensayos: any[];
   eventos: any[];
@@ -89,7 +88,7 @@ function Contenido() {
   const pasos: PasoFormulario[] = [
     { clave: "lote", titulo: "Lote y muestreo", estado: v.datos.unidades.length ? "hecho" : "actual", detalle: v.datos.unidades.length ? `${v.datos.unidades.length} unidad(es) · lote ${v.datos.lote?.tamano ?? "—"}` : "Pendiente" },
     { clave: "disparos", titulo: "Registro de disparos", estado: paneles.length && paneles.every((p) => p.completo) ? "hecho" : v.datos.unidades.length ? "actual" : "pendiente", detalle: `${v.evaluacion.disparos} disparo(s) · ${paneles.filter((p) => p.completo).length}/${paneles.length} paneles` },
-    { clave: "requisitos", titulo: "Requisitos por norma", estado: "hecho", detalle: `${v.amenazas.length} amenazas · manda ${v.velocidadManda.toUpperCase()}` },
+    { clave: "requisitos", titulo: "Requisitos por norma", estado: "hecho", detalle: `${v.amenazas.length} amenazas · V1 y V2 son requisito` },
     { clave: "conclusion", titulo: "Conclusión y documento", estado: cerrado ? "hecho" : "pendiente", detalle: cerrado ? "Lote concluido" : "Por concluir" },
   ];
 
@@ -347,8 +346,8 @@ function PasoDisparos({ v, editable, onCambio, onFin }: { v: Vista; editable: bo
               <tr key={i} style={d.fueraVentana ? { background: "#fff6e8" } : undefined}>
                 <td className="num">{d.n}</td>
                 <td>{d.zonaImpacto ?? "—"}</td>
-                <td className="num">{conComa(d.v1, 1)}{d.fueraVentana ? <span className="pill amber" style={{ marginLeft: 4 }} title="Velocidad fuera de la ventana de la norma">fuera de ventana</span> : null}</td>
-                <td className="num">{conComa(d.v2 ?? null, 1) || "—"}</td>
+                <td className="num">{conComa(d.v1, 1)}{d.fueraDeRango?.includes("V1") ? <span className="pill amber" style={{ marginLeft: 4 }} title="V1 fuera de la ventana de la norma: tiro fuera de rango">fuera de rango</span> : null}</td>
+                <td className="num">{conComa(d.v2 ?? null, 1) || "—"}{d.fueraDeRango?.includes("V2") ? <span className="pill amber" style={{ marginLeft: 4 }} title="V2 fuera de la ventana de la norma: tiro fuera de rango">fuera de rango</span> : null}</td>
                 <td className="num">{conComa(d.trauma ?? null, 1) || "—"}</td>
                 <td className="num">{d.laminasPerforadas != null ? `${d.laminasPerforadas}${d.laminasTotal != null ? `/${d.laminasTotal}` : ""}` : "—"}</td>
                 <td>{d.penetracion ? <b style={{ color: "var(--red)" }}>Sí</b> : "No"}</td>
@@ -365,7 +364,7 @@ function PasoDisparos({ v, editable, onCambio, onFin }: { v: Vista; editable: bo
           )}
         </tbody>
       </table></div>
-      {p.avisos.length > 0 && <div className="alert warn" style={{ marginTop: 8 }}>{p.avisos.join(" ")} Regla por confirmar con el IDIC (EP-05 P4).</div>}
+      {p.avisos.length > 0 && <div className="alert warn" style={{ marginTop: 8 }}>{p.avisos.join(" ")} El disparo conserva su condición: el resultado es la señal de impacto y la penetración.</div>}
 
       {puedeDisparar && (
         <form onSubmit={guardar} style={{ marginTop: 12, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
@@ -415,7 +414,7 @@ function PasoRequisitos({ v }: { v: Vista }) {
   return (
     <div className="card">
       <h2>3 · Requisitos por norma <span className="right">Administración › Parámetros del sistema › LRB</span></h2>
-      <p className="subtitle">Tabla de amenazas vigente. Son los valores de los informes reales del LRB, a la espera de la tabla oficial del IDIC (EP-05 P3). Se compara la velocidad {v.velocidadManda === "promedio" ? "promedio de V1 y V2" : v.velocidadManda.toUpperCase()} (P4).</p>
+      <p className="subtitle">Tabla de amenazas vigente. Chalecos: tabla oficial del LRB (NIJ 0101.04). Cascos y probetas: valores de los informes reales, a la espera de su tabla (EP-05 P3). La velocidad es requisito del ensayo, no resultado: V1 y V2 se comparan cada una con la ventana y se informan las dos; si alguna queda fuera, el disparo se marca «tiro fuera de rango».</p>
       <div style={{ overflowX: "auto", maxWidth: "100%" }}><table className="data">
         <thead><tr><th>Norma · nivel</th><th>Elemento</th><th>Munición</th><th className="num">Masa (g)</th><th>Ventana (m/s)</th><th className="num">Disparos</th><th>Trauma</th><th>Criterio</th></tr></thead>
         <tbody>

@@ -1188,12 +1188,12 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
     categoria: "lrb",
     titulo: "LRB · registro de disparos",
     donde: "Registro de disparos, CRB e Informe de Ensayo de Rechazo del Laboratorio de Resistencia Balística (EP-05 4.1, 5.3, 7.1).",
-    porConfirmar: "Tabla oficial de amenazas (EP-05 P3), si manda V1, V2 o el promedio (P4), disparos con trauma (P5).",
+    porConfirmar: "Tabla de amenazas de cascos y probetas (la que entregó el IDIC el 24-11-2026 repite la de chalecos) y disparos con trauma (P5). Chalecos: tabla oficial NIJ 0101.04 del LRB. La velocidad es requisito del ensayo: se informan V1 y V2 y ninguna manda.",
     codigos: {
       amenazas: {
         tipo: "tabla",
         nombre: "Tabla de amenazas por norma y nivel",
-        ayuda: "Valores de los informes reales a la espera de la tabla oficial. La «clave» identifica la fila en los registros: no la cambie si ya se usó.",
+        ayuda: "Chalecos: tabla oficial del LRB (NIJ 0101.04, 24-11-2026). Cascos y probetas: valores de los informes reales a la espera de su tabla. La «clave» identifica la fila en los registros: no la cambie si ya se usó.",
         maxFilas: 60,
         columnas: [
           { clave: "clave", etiqueta: "Clave", tipo: "texto", obligatoria: true, largo: 40 },
@@ -1210,16 +1210,6 @@ export const GRUPOS_CONFIG: GrupoConfig[] = [
           { clave: "testigo", etiqueta: "Testigo", tipo: "sino" },
           { clave: "criterio", etiqueta: "Criterio", tipo: "texto", largo: 160 },
         ],
-      },
-      velocidad_manda: {
-        tipo: "opcion",
-        nombre: "Velocidad que se compara con la ventana",
-        opciones: [
-          { valor: "v1", etiqueta: "V1" },
-          { valor: "v2", etiqueta: "V2" },
-          { valor: "promedio", etiqueta: "Promedio de V1 y V2" },
-        ],
-        porDefecto: "v1",
       },
       plazo_apelacion: { tipo: "entero", nombre: "Plazo de apelación del Informe de Rechazo", min: 1, max: 60, unidad: "días hábiles", porDefecto: "5" },
     },

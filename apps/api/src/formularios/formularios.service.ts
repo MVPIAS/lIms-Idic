@@ -14,7 +14,7 @@ import { escapeHtml } from "../plantilla-render/html.util";
 import { FormulariosDatos, tenantDe, usuarioDe, type OtFormulario, type Registro } from "./formularios.datos";
 import { ReglasCapturaService } from "./reglas-captura.service";
 import {
-  cantidadEnPalabras, erroresNuevoDisparo, evaluarLote, evaluarPanel, faltantesDocumentoLrb, leerAmenazas, leerVelocidadManda, seriesPorTalla, veredictoParaMuestra,
+  cantidadEnPalabras, erroresNuevoDisparo, evaluarLote, evaluarPanel, faltantesDocumentoLrb, leerAmenazas, seriesPorTalla, veredictoParaMuestra,
   type Disparo, type RegistroDisparos, type UnidadMuestreada,
 } from "./lrb";
 import { cabeceraDesdeRecepcion, evaluarLoteSvm, evaluarVehiculo, leerPlantilla, novedades, veredictoMetodo, type InspeccionVehiculo } from "./hcp";
@@ -51,9 +51,9 @@ export class FormulariosService implements OnModuleInit {
       const reg = await this.d.registro(otId, "lrb_disparos", "lote");
       const ot = await this.d.prisma.ordenTrabajo.findFirst({ where: { id: otId }, select: { tenantId: true } });
       if (!ot) return [];
-      const { amenazas, manda } = await this.configLrb(ot.tenantId);
+      const { amenazas } = await this.configLrb(ot.tenantId);
       const datos = this.datosLrb(reg);
-      return faltantesDocumentoLrb(tipoDocumento, evaluarLote(datos, amenazas, manda), datos, reg?.estado === CERRADO);
+      return faltantesDocumentoLrb(tipoDocumento, evaluarLote(datos, amenazas), datos, reg?.estado === CERRADO);
     });
   }
 
@@ -130,12 +130,13 @@ export class FormulariosService implements OnModuleInit {
   /* =================================================================== LRB === */
 
   private async configLrb(tenantId: string) {
-    const [tabla, manda, plazo] = await Promise.all([
+    // IDIC 24-11-2026 (checklist LRB 4 y 5): la velocidad es requisito, no resultado; se
+    // informan V1 y V2 y ninguna manda. El antiguo parámetro lrb.velocidad_manda ya no se usa.
+    const [tabla, plazo] = await Promise.all([
       this.d.param(tenantId, "lrb", "amenazas", ""),
-      this.d.param(tenantId, "lrb", "velocidad_manda", "v1"),
       this.d.param(tenantId, "lrb", "plazo_apelacion", "5"),
     ]);
-    return { amenazas: leerAmenazas(tabla), manda: leerVelocidadManda(manda), plazoApelacion: Number(plazo) || 5 };
+    return { amenazas: leerAmenazas(tabla), plazoApelacion: Number(plazo) || 5 };
   }
 
   private datosLrb(reg: Registro | null): RegistroDisparos & { material?: string; fechaEnsayo?: string; tipoCertificacion?: string } {
@@ -162,14 +163,13 @@ export class FormulariosService implements OnModuleInit {
       this.ensayosDe(otId, tenantId, "lrb_disparos"),
     ]);
     const datos = this.datosLrb(reg);
-    const evaluacion = evaluarLote(datos, cfg.amenazas, cfg.manda);
+    const evaluacion = evaluarLote(datos, cfg.amenazas);
     return {
       ot: { id: ot.id, codigo: ot.codigo, estado: ot.estado, laboratorio: ot.laboratorio, cliente: ot.cliente },
       registro: reg ? { id: reg.id, estado: reg.estado, version: reg.version, actualizadoPorNombre: reg.actualizadoPorNombre, updatedAt: reg.updatedAt } : null,
       datos,
       evaluacion,
       amenazas: cfg.amenazas,
-      velocidadManda: cfg.manda,
       muestras,
       ensayos,
       eventos: reg ? await this.d.eventos(reg.id) : [],
@@ -242,8 +242,7 @@ export class FormulariosService implements OnModuleInit {
       composicion,
       unidades,
     };
-    const { manda } = await this.configLrb(tenantId);
-    const ev = evaluarLote(datos, amenazas, manda);
+    const ev = evaluarLote(datos, amenazas);
     await this.d.guardar(
       { tenantId, otId, variante: "lrb_disparos", clave: "lote", datos, estado: "borrador", veredicto: ev.veredicto, resumen: ev.falla, unidadId: ot.unidadPrincipal },
       { accion: reg ? "cabecera" : "crear", motivo, usuarioId: usuarioDe(req) },
@@ -266,7 +265,7 @@ export class FormulariosService implements OnModuleInit {
     if (!u || !p) throw new NotFoundException("Unidad o panel no encontrado en el registro de disparos.");
     const muestrasOt = await this.d.muestras(otId);
     await this.exigirEjecutable(tenantId, ot, u.muestraId ? muestrasOt.filter((m) => m.id === u.muestraId) : muestrasOt);
-    const { amenazas, manda } = await this.configLrb(tenantId);
+    const { amenazas } = await this.configLrb(tenantId);
     const e = body?.disparo ?? {};
     const num = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(String(v).replace(",", ".")));
     const disparo: Disparo = {
@@ -283,13 +282,13 @@ export class FormulariosService implements OnModuleInit {
     };
     for (const k of ["v1", "v2", "trauma", "laminasPerforadas", "laminasTotal"] as const)
       if (disparo[k] != null && !Number.isFinite(disparo[k] as number)) throw new BadRequestException(`El valor de ${k} no es un número.`);
-    const errores = erroresNuevoDisparo(p, disparo, amenazas, manda);
+    const errores = erroresNuevoDisparo(p, disparo, amenazas);
     if (errores.length) throw new BadRequestException(errores.join(" "));
     const corrige = p.disparos.some((x) => x.n === disparo.n);
     const motivo = corrige ? exigirMotivo(body?.motivo, `corrección del disparo ${disparo.n} del panel ${p.zona} de ${u.serie}`) : null;
     p.disparos = [...p.disparos.filter((x) => x.n !== disparo.n), disparo].sort((a, b) => a.n - b.n);
-    const panel = evaluarPanel(p, amenazas, manda);
-    const ev = evaluarLote(datos, amenazas, manda);
+    const panel = evaluarPanel(p, amenazas);
+    const ev = evaluarLote(datos, amenazas);
     await this.d.guardar(
       { tenantId, otId, variante: "lrb_disparos", clave: "lote", datos: { ...reg.datos, unidades: datos.unidades }, estado: "borrador", veredicto: ev.veredicto, resumen: ev.falla },
       { accion: corrige ? "corregir_disparo" : "disparo", motivo, usuarioId: usuarioDe(req) },
@@ -308,8 +307,8 @@ export class FormulariosService implements OnModuleInit {
     const datos = this.datosLrb(reg);
     const p = datos.unidades.find((x) => x.id === body?.unidadId)?.paneles.find((x) => x.id === body?.panelId);
     if (!p) throw new NotFoundException("Panel no encontrado.");
-    const { amenazas, manda } = await this.configLrb(tenantId);
-    const e = evaluarPanel(p, amenazas, manda);
+    const { amenazas } = await this.configLrb(tenantId);
+    const e = evaluarPanel(p, amenazas);
     if (!e.completo) throw new BadRequestException(`El panel aún no está completo: lleva ${p.disparos.length} de ${e.amenazaFila?.disparos ?? "?"} disparos y ninguno detuvo el panel.`);
     p.cerrado = true;
     await this.d.guardar(
@@ -329,8 +328,8 @@ export class FormulariosService implements OnModuleInit {
     if (!reg) throw new BadRequestException("No hay registro de disparos.");
     if (reg.estado === CERRADO) throw new ConflictException("El registro ya está concluido.");
     const datos = this.datosLrb(reg);
-    const { amenazas, manda } = await this.configLrb(tenantId);
-    const ev = evaluarLote(datos, amenazas, manda);
+    const { amenazas } = await this.configLrb(tenantId);
+    const ev = evaluarLote(datos, amenazas);
     const incompletos = ev.unidades.flatMap((u) => u.paneles.filter((p) => !p.completo).map((p) => `${u.serie} · ${p.zona}`));
     if (!ev.unidades.length || !ev.unidades.some((u) => u.paneles.length)) throw new BadRequestException("Registre al menos una unidad con su panel y sus disparos.");
     if (incompletos.length) throw new BadRequestException(`Hay paneles sin completar: ${incompletos.join(", ")}.`);
@@ -377,7 +376,7 @@ export class FormulariosService implements OnModuleInit {
     if (propia && ot.laboratorio !== "LRB") throw new BadRequestException(`La plantilla ${plantilla.repid} es del Laboratorio de Resistencia Balística: no se usa en una OT de ${ot.laboratorio ?? "otro laboratorio"}.`);
     const cfg = await this.configLrb(t);
     const datos = this.datosLrb(reg);
-    const ev = evaluarLote(datos, cfg.amenazas, cfg.manda);
+    const ev = evaluarLote(datos, cfg.amenazas);
     const usadas = cfg.amenazas.filter((a) => datos.unidades.some((u) => u.paneles.some((p) => p.amenaza === a.clave)));
     const series = seriesPorTalla(datos.composicion);
     const tamano = datos.lote?.tamano ?? series.total;

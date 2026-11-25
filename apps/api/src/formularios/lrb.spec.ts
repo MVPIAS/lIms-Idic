@@ -1,6 +1,6 @@
 import {
   AMENAZAS_DEFECTO, cantidadEnPalabras, erroresNuevoDisparo, evaluarDisparo, evaluarLote, evaluarPanel, faltantesDocumentoLrb,
-  leerAmenazas, numeroEnPalabras, seriesPorTalla, velocidadDe, veredictoParaMuestra, type Panel, type RegistroDisparos,
+  leerAmenazas, numeroEnPalabras, seriesPorTalla, velocidadesFueraDeRango, veredictoParaMuestra, type Panel, type RegistroDisparos,
 } from "./lrb";
 
 const A = AMENAZAS_DEFECTO;
@@ -8,56 +8,56 @@ const chaleco9 = A.find((a) => a.clave === "NIJ0101-IIIA-9MM")!;
 const ok = (n: number, extra: Partial<{ v1: number; trauma: number | null }> = {}) => ({ n, v1: extra.v1 ?? 436, trauma: extra.trauma === undefined ? (n <= 3 ? 30 : null) : extra.trauma, penetracion: false });
 
 describe("LRB · disparo", () => {
-  it("cumple sin penetración y con trauma ≤ 44", () => expect(evaluarDisparo(ok(1), chaleco9, "v1").condicion).toBe("cumple"));
+  it("cumple sin penetración y con trauma ≤ 44", () => expect(evaluarDisparo(ok(1), chaleco9).condicion).toBe("cumple"));
   it("penetración completa no cumple", () => {
-    const d = evaluarDisparo({ n: 1, v1: 436, penetracion: true }, chaleco9, "v1");
+    const d = evaluarDisparo({ n: 1, v1: 436, penetracion: true }, chaleco9);
     expect(d.condicion).toBe("no_cumple");
     expect(d.motivos).toContain("Penetración completa");
   });
-  it("trauma > 44 mm no cumple", () => expect(evaluarDisparo(ok(2, { trauma: 44.5 }), chaleco9, "v1").condicion).toBe("no_cumple"));
+  it("trauma > 44 mm no cumple", () => expect(evaluarDisparo(ok(2, { trauma: 44.5 }), chaleco9).condicion).toBe("no_cumple"));
   it("trauma obligatorio en los disparos 1 a 3: sin trauma queda pendiente", () => {
-    expect(evaluarDisparo({ n: 2, v1: 436, penetracion: false }, chaleco9, "v1").condicion).toBe("pendiente");
-    expect(evaluarDisparo({ n: 4, v1: 436, penetracion: false }, chaleco9, "v1").condicion).toBe("cumple");
+    expect(evaluarDisparo({ n: 2, v1: 436, penetracion: false }, chaleco9).condicion).toBe("pendiente");
+    expect(evaluarDisparo({ n: 4, v1: 436, penetracion: false }, chaleco9).condicion).toBe("cumple");
   });
-  it("velocidad fuera de ventana: aviso, sin cambiar la condición (P4)", () => {
-    const d = evaluarDisparo(ok(1, { v1: 445.8 }), chaleco9, "v1");
-    expect(d.fueraVentana).toBe(true);
-    expect(d.condicion).toBe("cumple");
+  it("la velocidad es requisito, no resultado: fuera de ventana es «tiro fuera de rango» y no cambia la condición", () => {
+    const d = evaluarDisparo(ok(1, { v1: 445.8 }), chaleco9);
+    expect(d).toMatchObject({ fueraVentana: true, fueraDeRango: ["V1"], condicion: "cumple" });
   });
-  it("manda V1, V2 o el promedio según el parámetro", () => {
-    expect(velocidadDe({ v1: 430, v2: 440 }, "v1")).toBe(430);
-    expect(velocidadDe({ v1: 430, v2: 440 }, "v2")).toBe(440);
-    expect(velocidadDe({ v1: 430, v2: 440 }, "promedio")).toBe(435);
-    expect(velocidadDe({ v1: 430, v2: null }, "v2")).toBe(430);
+  it("V1 y V2 se comparan cada una con la ventana: ninguna manda", () => {
+    expect(velocidadesFueraDeRango({ v1: 430, v2: 446 }, chaleco9)).toEqual(["V2"]);
+    expect(velocidadesFueraDeRango({ v1: 420, v2: 450 }, chaleco9)).toEqual(["V1", "V2"]);
+    expect(velocidadesFueraDeRango({ v1: 430, v2: null }, chaleco9)).toEqual([]);
+    const p: Panel = { id: "p1", zona: "anterior", amenaza: chaleco9.clave, disparos: [{ ...ok(1), v2: 446 }] };
+    expect(evaluarPanel(p, A).avisos[0]).toMatch(/tiro fuera de rango \(V2 446 m\/s; ventana 427–445 m\/s\)/);
   });
   it("daño en el testigo (UL 752) no cumple", () => {
     const ul = A.find((a) => a.clave === "UL752-2")!;
-    expect(evaluarDisparo({ n: 1, v1: 400, penetracion: false, danoTestigo: true }, ul, "v1").condicion).toBe("no_cumple");
+    expect(evaluarDisparo({ n: 1, v1: 400, penetracion: false, danoTestigo: true }, ul).condicion).toBe("no_cumple");
   });
 });
 
 describe("LRB · panel", () => {
   it("6 disparos que cumplen → panel cumple", () => {
     const p: Panel = { id: "p1", zona: "anterior", amenaza: chaleco9.clave, disparos: [1, 2, 3, 4, 5, 6].map((n) => ok(n)) };
-    const e = evaluarPanel(p, A, "v1");
+    const e = evaluarPanel(p, A);
     expect(e).toMatchObject({ completo: true, detenido: false, veredicto: "cumple" });
   });
   it("una penetración detiene el panel y no admite más disparos", () => {
     const p: Panel = { id: "p1", zona: "anterior", amenaza: chaleco9.clave, disparos: [ok(1), { n: 2, v1: 436, penetracion: true }] };
-    const e = evaluarPanel(p, A, "v1");
+    const e = evaluarPanel(p, A);
     expect(e).toMatchObject({ detenido: true, completo: true, veredicto: "no_cumple" });
-    expect(erroresNuevoDisparo(p, ok(3), A, "v1").join(" ")).toMatch(/detenido/);
+    expect(erroresNuevoDisparo(p, ok(3), A).join(" ")).toMatch(/detenido/);
   });
   it("correlativo y plan", () => {
     const p: Panel = { id: "p1", zona: "anterior", amenaza: chaleco9.clave, disparos: [ok(1)] };
-    expect(erroresNuevoDisparo(p, ok(3), A, "v1").join(" ")).toMatch(/Nº 2/);
+    expect(erroresNuevoDisparo(p, ok(3), A).join(" ")).toMatch(/Nº 2/);
     const lleno: Panel = { ...p, disparos: [1, 2, 3, 4, 5, 6].map((n) => ok(n)) };
-    expect(erroresNuevoDisparo(lleno, ok(7), A, "v1").join(" ")).toMatch(/6 disparos/);
+    expect(erroresNuevoDisparo(lleno, ok(7), A).join(" ")).toMatch(/6 disparos/);
     // Corregir uno ya registrado sí se puede.
-    expect(erroresNuevoDisparo(lleno, ok(2, { trauma: 31 }), A, "v1")).toEqual([]);
+    expect(erroresNuevoDisparo(lleno, ok(2, { trauma: 31 }), A)).toEqual([]);
   });
   it("munición fuera de la tabla", () => {
-    expect(evaluarPanel({ id: "x", zona: "anterior", amenaza: "NO", disparos: [] }, A, "v1").avisos[0]).toMatch(/no está en la tabla/);
+    expect(evaluarPanel({ id: "x", zona: "anterior", amenaza: "NO", disparos: [] }, A).avisos[0]).toMatch(/no está en la tabla/);
   });
 });
 
@@ -73,7 +73,7 @@ const registro = (penetra: boolean): RegistroDisparos => ({
 
 describe("LRB · lote y documento", () => {
   it("lote que cumple con certificación ⇒ IE + CRB", () => {
-    const l = evaluarLote(registro(false), A, "v1");
+    const l = evaluarLote(registro(false), A);
     expect(l.veredicto).toBe("cumple");
     expect(l.documentos).toEqual(["INFORME_ENSAYO", "CERTIFICADO_RESISTENCIA_BALISTICA"]);
     expect(faltantesDocumentoLrb("CERTIFICADO_RESISTENCIA_BALISTICA", l, registro(false), true)).toEqual([]);
@@ -81,14 +81,22 @@ describe("LRB · lote y documento", () => {
   });
   it("una penetración rechaza el lote ⇒ Informe de Rechazo", () => {
     const r = registro(true);
-    const l = evaluarLote(r, A, "v1");
+    const l = evaluarLote(r, A);
     expect(l).toMatchObject({ veredicto: "no_cumple", penetracion: true, documentos: ["INFORME_RECHAZO"] });
     expect(l.falla).toMatch(/M-030.*disparo 1/);
     expect(faltantesDocumentoLrb("CERTIFICADO_RESISTENCIA_BALISTICA", l, r, true).join(" ")).toMatch(/solo se emite si el lote cumple/);
     expect(faltantesDocumentoLrb("INFORME_RECHAZO", l, r, false).join(" ")).toMatch(/Cierre el registro/);
   });
+  it("el Informe de Rechazo existe solo para chalecos: un casco que no cumple va al Informe de Ensayo", () => {
+    const casco = A.find((a) => a.clave === "NIJ0106-IIA-9MM")!;
+    const r: RegistroDisparos = { unidades: [{ id: "c1", serie: "C-1", paneles: [{ id: "c", zona: "casco", amenaza: casco.clave, disparos: [{ n: 1, v1: 330, penetracion: true }] }] }] };
+    const l = evaluarLote(r, A);
+    expect(l).toMatchObject({ veredicto: "no_cumple", chalecos: false, documentos: ["INFORME_ENSAYO"] });
+    expect(faltantesDocumentoLrb("INFORME_RECHAZO", l, r, true).join(" ")).toMatch(/solo para chalecos/);
+    expect(evaluarLote(registro(true), A).chalecos).toBe(true);
+  });
   it("veredicto por muestra: el de sus unidades o el del lote", () => {
-    const l = evaluarLote(registro(true), A, "v1");
+    const l = evaluarLote(registro(true), A);
     expect(veredictoParaMuestra(l, "m1").veredicto).toBe("cumple");
     expect(veredictoParaMuestra(l, "m2").veredicto).toBe("no_cumple");
     expect(veredictoParaMuestra(l, "otra").veredicto).toBe("no_cumple");
@@ -98,7 +106,7 @@ describe("LRB · lote y documento", () => {
     const r = registro(false);
     r.unidades[0].reemplazo = null;
     r.composicion = [];
-    const f = faltantesDocumentoLrb("CERTIFICADO_RESISTENCIA_BALISTICA", evaluarLote(r, A, "v1"), r, true).join(" ");
+    const f = faltantesDocumentoLrb("CERTIFICADO_RESISTENCIA_BALISTICA", evaluarLote(r, A), r, true).join(" ");
     expect(f).toMatch(/nómina/);
     expect(f).toMatch(/S-008/);
   });
@@ -118,6 +126,15 @@ describe("CRB · cantidades y series", () => {
 });
 
 describe("tabla de amenazas configurada", () => {
+  it("chalecos: tabla oficial NIJ 0101.04 del LRB (24-11-2026), trauma ≤ 44 mm", () => {
+    const ch = A.filter((a) => a.elemento === "chaleco");
+    expect(ch.map((a) => `${a.nivel} ${a.v_min}-${a.v_max}`)).toEqual([
+      "I 320-338", "I 313-331", "II-A 332-350", "II-A 313-331", "II 358-376", "II 427-445", "III-A 427-445", "III-A 427-445", "III 838-856", "IV 869-887",
+    ]);
+    expect(ch.every((a) => a.trauma_max === 44 && a.norma === "NIJ 0101.04")).toBe(true);
+    // Las claves ya usadas en registros se conservan.
+    expect(ch.map((a) => a.clave)).toEqual(expect.arrayContaining(["NIJ0101-IIIA-9MM", "NIJ0101-IIIA-44MAG"]));
+  });
   it("lee el JSON y descarta filas inválidas", () => {
     const t = leerAmenazas(JSON.stringify([{ clave: "X", norma: "N", nivel: "1", elemento: "Chaleco", municion: "9 mm", masa_g: "8,0", v_min: 400, v_max: 420, disparos: 6, trauma_max: 44, disparos_trauma: 3 }, { clave: "", v_min: 1 }]));
     expect(t).toHaveLength(1);
