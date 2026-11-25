@@ -380,9 +380,12 @@ fi
 CADDY_INICIO="$(docker inspect -f '{{.State.StartedAt}}' lims-caddy 2>/dev/null || true)"
 if [ -n "$CADDY_INICIO" ]; then
   CADDY_INICIO_S="$(date -d "$CADDY_INICIO" +%s 2>/dev/null || echo 0)"
-  CERT_MOD_S="$(stat -c %Y "$CERT" "$KEY" | sort -n | tail -1)"
+  # También cuenta el Caddyfile: una versión nueva del kit puede traer reglas
+  # nuevas (p. ej. rutas cerradas) y Caddy no las lee hasta reiniciarse
+  # (la API de administración está apagada, no admite recarga en caliente).
+  CERT_MOD_S="$(stat -c %Y "$CERT" "$KEY" "$APP_DIR/Caddyfile.onpremise" | sort -n | tail -1)"
   if [ "$CERT_MOD_S" -gt "$CADDY_INICIO_S" ]; then
-    $COMPOSE restart caddy >>"$LOG_FILE" 2>&1       && ok "Certificado nuevo: Caddy reiniciado para servirlo"       || warn "No se pudo reiniciar Caddy tras cambiar el certificado: $COMPOSE restart caddy"
+    $COMPOSE restart caddy >>"$LOG_FILE" 2>&1       && ok "Certificado o configuración del proxy nuevos: Caddy reiniciado"       || warn "No se pudo reiniciar Caddy tras cambiar el certificado o el Caddyfile: $COMPOSE restart caddy"
   fi
 fi
 
